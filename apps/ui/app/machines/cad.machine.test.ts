@@ -2,13 +2,13 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { assign, createActor, setup, waitFor } from 'xstate';
-import { RenderTimeoutError } from '@taucad/runtime';
+import { RenderTimeoutError } from '@taucad/runtime/client';
 import type { CapabilitiesManifest, KernelIssue, TelemetryEntry } from '@taucad/runtime';
 import { createMockRuntimeClient } from '@taucad/runtime-testing';
 import type { Geometry } from '@taucad/types';
 import { defaultRenderTimeout } from '#constants/editor.constants.js';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
-import { cadMachine } from '#machines/cad.machine.js';
+import { cadMachine, selectCadFailureIssues } from '#machines/cad.machine.js';
 import type { CadContext } from '#machines/cad.machine.js';
 import { logMachine } from '#machines/logs.machine.js';
 import type { runtime } from '#runtime/ui-runtime.definition.js';
@@ -137,7 +137,6 @@ function createParentActor() {
   }).createMachine({
     context: { events: [] },
     on: {
-      // eslint-disable-next-line @typescript-eslint/naming-convention -- XState event name
       'geometryUnit.exportAvailabilityChanged': {
         actions: 'recordAvailability',
       },
@@ -164,6 +163,65 @@ function createExportableRuntimeClient(): AppRuntimeClient {
 // ---------------------------------------------------------------------------
 
 describe('cadMachine', () => {
+  describe('filesystem binding replacement', () => {
+    it('disposes the settled client and reconnects for a replacement binding', async () => {
+      const firstClient = createMockAppRuntimeClient();
+      const secondClient = createMockAppRuntimeClient();
+      const firstCleanup = vi.fn();
+      let attempt = 0;
+      const { actor } = createTestActor({
+        connectResult: async () => {
+          attempt++;
+          return attempt === 1
+            ? { type: 'kernelConnected', client: firstClient, cleanups: [firstCleanup] }
+            : { type: 'kernelConnected', client: secondClient, cleanups: [] };
+        },
+      });
+      actor.start();
+      await waitFor(actor, (snapshot) => snapshot.value === 'idle');
+
+      actor.send({ type: 'filesystemBindingChanged' });
+
+      expect(actor.getSnapshot().value).toBe('connecting');
+      expect(firstCleanup).toHaveBeenCalledOnce();
+      expect(firstClient.terminate).toHaveBeenCalledOnce();
+      await waitFor(actor, (snapshot) => snapshot.value === 'idle');
+      expect(actor.getSnapshot().context.kernelClient).toBe(secondClient);
+      actor.stop();
+    });
+
+    it('cancels and replaces an in-flight connection for a replacement binding', async () => {
+      const secondClient = createMockAppRuntimeClient();
+      let attempt = 0;
+      let firstConnectStarted!: () => void;
+      const started = new Promise<void>((resolve) => {
+        firstConnectStarted = resolve;
+      });
+      const never = new Promise<never>(() => {
+        // The first connection remains pending until replacement aborts it.
+      });
+      const { actor } = createTestActor({
+        connectResult: async () => {
+          attempt++;
+          if (attempt === 1) {
+            firstConnectStarted();
+            return never;
+          }
+          return { type: 'kernelConnected', client: secondClient, cleanups: [] };
+        },
+      });
+      actor.start();
+      await started;
+
+      actor.send({ type: 'filesystemBindingChanged' });
+
+      await waitFor(actor, (snapshot) => snapshot.value === 'idle');
+      expect(attempt).toBe(2);
+      expect(actor.getSnapshot().context.kernelClient).toBe(secondClient);
+      actor.stop();
+    });
+  });
+
   afterEach(() => {
     vi.restoreAllMocks();
   });
@@ -1457,6 +1515,93 @@ describe('cadMachine', () => {
         parameters: {},
         content: { includeEdges: true },
       });
+      actor.stop();
+    });
+  });
+
+  describe('semantic tags and failure selection', () => {
+    it('tags every active lifecycle state without tagging idle', async () => {
+      const { actor } = createTestActor({
+        connectResult: async () => new Promise<never>(noop),
+      });
+      actor.start();
+      expect(actor.getSnapshot().hasTag('cad-loading')).toBe(true);
+      actor.stop();
+
+      const connected = await startAndConnect();
+      expect(connected.actor.getSnapshot().hasTag('cad-loading')).toBe(false);
+
+      connected.actor.send({ type: 'stateChanged', state: 'buffering' });
+      expect(connected.actor.getSnapshot().hasTag('cad-loading')).toBe(true);
+
+      connected.actor.send({ type: 'stateChanged', state: 'rendering' });
+      expect(connected.actor.getSnapshot().hasTag('cad-loading')).toBe(true);
+
+      connected.actor.send({ type: 'stateChanged', state: 'error' });
+      expect(connected.actor.getSnapshot().hasTag('cad-loading')).toBe(false);
+      expect(connected.actor.getSnapshot().hasTag('cad-runtime-error')).toBe(true);
+      connected.actor.stop();
+    });
+
+    it('returns no failure for a successful render with diagnostics', async () => {
+      const { actor } = await startAndConnect();
+      actor.send({ type: 'setEntryPath', entryPath: stubEntryPath });
+      actor.send({ type: 'geometryComputed', geometry: stubGeometry, issues: stubIssues });
+
+      expect(selectCadFailureIssues(actor.getSnapshot())).toBeUndefined();
+      actor.stop();
+    });
+
+    it('returns the active entry issue array by identity regardless of insertion order', async () => {
+      const { actor } = await startAndConnect();
+      actor.send({ type: 'setEntryPath', entryPath: 'unrelated.ts' });
+      actor.send({ type: 'kernelIssue', errors: stubIssues });
+      actor.send({ type: 'setEntryPath', entryPath: stubEntryPath });
+      actor.send({ type: 'geometryFailed', issues: stubFailureIssues });
+
+      const selected = selectCadFailureIssues(actor.getSnapshot());
+      expect(selected).toBe(stubFailureIssues);
+      expect(selectCadFailureIssues(actor.getSnapshot())).toBe(selected);
+      actor.stop();
+    });
+
+    it('prefers connection issues for a runtime-error snapshot', async () => {
+      const { actor } = await startAndConnect({ connectError: new Error('connection sentinel') });
+      const connectionIssues = actor.getSnapshot().context.kernelIssues.get('__connection__');
+
+      expect(actor.getSnapshot().hasTag('cad-runtime-error')).toBe(true);
+      expect(selectCadFailureIssues(actor.getSnapshot())).toBe(connectionIssues);
+      actor.stop();
+    });
+
+    it('falls back to the render issue key for a failed geometry outcome', async () => {
+      const { actor } = await startAndConnect();
+      const snapshot = actor.getSnapshot();
+      const renderIssues: KernelIssue[] = [
+        { message: 'render sentinel', code: 'RUNTIME', type: 'runtime', severity: 'error' },
+      ];
+      const failedSnapshot = cadMachine.resolveState({
+        value: 'idle',
+        context: {
+          ...snapshot.context,
+          entryPath: undefined,
+          latestGeometryOutcome: 'failure',
+          kernelIssues: new Map([['__render__', renderIssues]]),
+        },
+      });
+
+      expect(selectCadFailureIssues(failedSnapshot)).toBe(renderIssues);
+      actor.stop();
+    });
+
+    it('returns one stable fallback when a failure has no usable issues', async () => {
+      const { actor } = await startAndConnect();
+      actor.send({ type: 'setEntryPath', entryPath: stubEntryPath });
+      actor.send({ type: 'geometryFailed', issues: [] });
+
+      const selected = selectCadFailureIssues(actor.getSnapshot());
+      expect(selected?.[0]?.message).toBe('The selected CAD render failed');
+      expect(selectCadFailureIssues(actor.getSnapshot())).toBe(selected);
       actor.stop();
     });
   });

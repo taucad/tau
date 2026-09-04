@@ -3,6 +3,8 @@ import { useSelector } from '@xstate/react';
 import type { IDockviewPanelHeaderProps } from 'dockview-react';
 import { FileX, FolderOpen, PlayCircle } from 'lucide-react';
 import { CadViewer } from '#components/geometry/cad/cad-viewer.js';
+import { SceneTimelineControl } from '#components/geometry/cad/scene-timeline-control.js';
+import { RuntimeErrorOverlay } from '#components/model-viewer.js';
 import type { ModelComponentActionMenuData } from '#components/geometry/cad/model-component-action-menu.js';
 import { ViewerModelComponentActionMenu } from '#components/geometry/cad/viewer-model-component-action-menu.js';
 import type { ModelComponentSecondaryPointerTarget } from '#components/geometry/graphics/three/react/gltf-mesh.js';
@@ -30,6 +32,17 @@ import { useResizeObserver } from '#hooks/use-resize-observer.js';
 import { cn } from '@taucad/ui/utils/cn';
 import { ArButton } from '#components/cad/ar-button.js';
 import { deriveModelInteractionUnitId, getModelInteractionUnitState } from '#machines/model-interaction.machine.js';
+import {
+  selectCanSaveSelectedSceneStage,
+  selectCadFailureIssues,
+  selectProgressiveSceneCapability,
+  selectSceneTimelineArtifactSave,
+  selectSceneTimelineEntries,
+  selectSceneTimelineFollowLive,
+  selectSceneTimelineSelection,
+  selectSceneTimelineStreamState,
+} from '#machines/cad.machine.js';
+import { selectProgressiveSceneSnapshot } from '#machines/graphics.machine.js';
 import {
   attachViewerSecondaryGestureTarget,
   beginViewerSecondaryGesture,
@@ -296,8 +309,20 @@ const ViewerContent = memo(function ({
   const { editorRef, projectRef } = useProject();
   const cadRef = useCad();
   const geometry = useCadSelector((state) => state.context.geometry, undefined);
+  const failureIssues = useCadSelector(selectCadFailureIssues, undefined);
+  const isCadLoading = useCadSelector((state) => state.hasTag('cad-loading'), false);
   const units = useCadSelector((state) => state.context.units, undefined);
   const kernelClient = useCadSelector((state) => state.context.kernelClient, undefined);
+  const timelineEntries = useCadSelector(selectSceneTimelineEntries, []);
+  const selectedSceneSequence = useCadSelector(selectSceneTimelineSelection, undefined);
+  const followLiveScene = useCadSelector(selectSceneTimelineFollowLive, true);
+  const sceneTimelineStreamState = useCadSelector(selectSceneTimelineStreamState, 'idle');
+  const sceneTimelineArtifactSave = useCadSelector(selectSceneTimelineArtifactSave, { status: 'idle' });
+  const canSaveSelectedSceneStage = useCadSelector(selectCanSaveSelectedSceneStage, false);
+  const progressiveSceneCapability = useCadSelector(selectProgressiveSceneCapability, undefined);
+  const failureMessage =
+    failureIssues?.find((issue) => issue.severity === 'error')?.message ?? failureIssues?.[0]?.message;
+  const overlayFailureMessage = profile === 'shared' ? failureMessage : undefined;
 
   // The geometry unit can be closed via the parameters panel context menu.
   // When that happens cadRef goes undefined, geometry clears, but the panel
@@ -320,6 +345,24 @@ const ViewerContent = memo(function ({
       });
     }
   }, [entryPath, graphicsActor, geometry, units]);
+
+  useEffect(() => {
+    if (timelineEntries.length === 0) {
+      graphicsActor.send({ type: 'clearProgressiveScene' });
+      return;
+    }
+    graphicsActor.send({
+      type: 'syncProgressiveScene',
+      updates: timelineEntries.flatMap((entry) => (entry.update ? [entry.update] : [])),
+      selectedSequence: selectedSceneSequence,
+    });
+  }, [graphicsActor, selectedSceneSequence, timelineEntries]);
+
+  useEffect(() => {
+    if (sceneTimelineStreamState === 'failed' || sceneTimelineStreamState === 'cancelled') {
+      graphicsActor.send({ type: 'clearProgressiveScene' });
+    }
+  }, [graphicsActor, sceneTimelineStreamState]);
 
   // Sync graphics + render timeout settings back to editor state for persistence
   useViewSettingsSync({
@@ -354,6 +397,13 @@ const ViewerContent = memo(function ({
   const enableAxes = useGraphicsSelector((state) => state.context.enableAxes);
   const enableMatcap = useGraphicsSelector((state) => state.context.enableMatcap);
   const upDirection = useGraphicsSelector((state) => state.context.upDirection);
+  const progressiveSceneSnapshot = useGraphicsSelector(selectProgressiveSceneSnapshot);
+  const displayedProgressiveScene =
+    sceneTimelineStreamState !== 'failed' &&
+    sceneTimelineStreamState !== 'cancelled' &&
+    !(sceneTimelineStreamState === 'complete' && followLiveScene)
+      ? progressiveSceneSnapshot
+      : undefined;
 
   const viewerLayoutRef = useRef<HTMLDivElement>(null);
   const canvasRegionRef = useRef<HTMLDivElement>(null);
@@ -496,8 +546,10 @@ const ViewerContent = memo(function ({
 
   useEffect(() => {
     if (isGeometryUnitClosed) {
-      setViewerPointerPosition(undefined);
-      setViewerActionMenu(undefined);
+      queueMicrotask(() => {
+        setViewerPointerPosition(undefined);
+        setViewerActionMenu(undefined);
+      });
       secondaryGestureRef.current = idleViewerSecondaryGestureState;
     }
   }, [isGeometryUnitClosed]);
@@ -526,7 +578,7 @@ const ViewerContent = memo(function ({
         onPointerLeave={clearViewerPointerPosition}
         onPointerCancel={clearViewerPointerPosition}
       >
-        {geometry ? (
+        {(geometry ?? displayedProgressiveScene) ? (
           <CadViewer
             enableZoom
             enablePan
@@ -539,6 +591,7 @@ const ViewerContent = memo(function ({
             enableMatcap={enableMatcap}
             upDirection={upDirection}
             geometry={geometry}
+            progressiveSceneSnapshot={displayedProgressiveScene}
             sourceFile={entryPath}
             // Keep R3F on default offsetX/Y compute; eventPrefix='client'
             // is window-relative and mis-rays docked panels.
@@ -546,9 +599,25 @@ const ViewerContent = memo(function ({
             gizmoContainer={`#viewport-gizmo-container-${viewId}`}
             onModelComponentSecondaryPointerCandidate={handleModelComponentSecondaryPointerCandidate}
           />
+        ) : overlayFailureMessage ? (
+          <RuntimeErrorOverlay
+            message={overlayFailureMessage}
+            className='size-full flex-col justify-center gap-3 bg-background text-center [&>svg]:size-10'
+          />
         ) : (
-          <div role='status' aria-label='Waiting for geometry' className='size-full bg-background' />
+          <div
+            role='status'
+            aria-label={isCadLoading ? 'Loading geometry' : 'Waiting for geometry'}
+            aria-busy={isCadLoading || undefined}
+            className='size-full bg-background'
+          />
         )}
+        {geometry && overlayFailureMessage ? (
+          <RuntimeErrorOverlay
+            message={overlayFailureMessage}
+            className='absolute top-4 right-4 left-4 z-10 mx-auto w-fit max-w-[calc(100%-2rem)] rounded-md border border-destructive/40 bg-background/90 p-2 shadow-sm backdrop-blur-sm'
+          />
+        ) : null}
       </div>
       <ViewerModelComponentActionMenu
         isOpen={viewerActionMenu !== undefined}
@@ -585,6 +654,21 @@ const ViewerContent = memo(function ({
         data-testid='chat-viewer-bottom-controls-overlay'
         className='pointer-events-none absolute bottom-2 left-2 z-10 flex max-w-[calc(100%-1rem)] shrink-0 flex-col items-start gap-2 [&>*]:pointer-events-auto'
       >
+        {progressiveSceneCapability?.type === 'supported' ? (
+          <SceneTimelineControl
+            entries={timelineEntries}
+            selectedSequence={selectedSceneSequence}
+            isFollowingLive={followLiveScene}
+            streamState={sceneTimelineStreamState}
+            artifactSave={sceneTimelineArtifactSave}
+            isSaveSelectedStageEnabled={canSaveSelectedSceneStage}
+            onSelectSequence={(sequence) => cadRef?.send({ type: 'selectSceneSequence', sequence })}
+            onLive={() => cadRef?.send({ type: 'followLiveScene' })}
+            onSaveSelectedStage={
+              profile === 'editor' ? () => cadRef?.send({ type: 'saveSelectedSceneStage' }) : undefined
+            }
+          />
+        ) : null}
         <ChatInterfaceGraphics />
         {profile === 'editor' ? <ChatStackTrace entryPath={entryPath} side='bottom' /> : null}
         <ChatViewerControls

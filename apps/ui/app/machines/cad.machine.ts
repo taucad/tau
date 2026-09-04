@@ -1,11 +1,17 @@
-import { assign, assertEvent, setup, enqueueActions, waitFor } from 'xstate';
-import type { ActorRefFrom, AnyActorRef } from 'xstate';
+import { assign, assertEvent, setup, enqueueActions, waitFor, fromCallback } from 'xstate';
+import type { ActorRefFrom, AnyActorRef, SnapshotFrom } from 'xstate';
 import type { CodeIssue, Geometry, LogLevel, LogOrigin } from '@taucad/types';
 import type {
   GetParametersResult,
   HashedGeometryResult,
   KernelIssue,
+  ProgressiveSceneCapability,
+  ProgressiveSceneUpdate,
+  ResolvedSceneSnapshot,
   RenderPhase,
+  SceneAssetReference,
+  TauSceneManifest,
+  TauSceneNode,
   TelemetryEntry,
   WorkerState,
 } from '@taucad/runtime';
@@ -19,14 +25,33 @@ import { fromSafeAsync } from '#lib/xstate.lib.js';
 import type { logMachine } from '#machines/logs.machine.js';
 import type { fileManagerMachine } from '#machines/file-manager.machine.js';
 import type { FileContentService } from '@taucad/fs-client/file-content-service';
+import { workspaceMutationErrorCopy } from '#filesystem/workspace-errors.js';
 import { deriveAvailableFormats } from '#utils/export-formats.utils.js';
 import type {
   AppCapabilitiesManifest,
   AppRuntimeClient,
   LazyKernelOptionsFactory,
 } from '#types/runtime-client.alias.js';
+import {
+  appendSceneTimelineUpdate,
+  clearSceneTimeline,
+  createSceneTimeline,
+  rehydrateSceneTimelineEntry,
+  selectSceneTimelineSequence,
+  settleSceneTimeline,
+} from '#machines/scene-timeline.js';
+import {
+  applyProgressiveSceneUpdate,
+  createProgressiveSceneProjection,
+} from '#machines/progressive-scene-projection.js';
 
 export type LatestGeometryOutcome = 'success' | 'failure' | undefined;
+type SceneDigest = Extract<ProgressiveSceneUpdate, { readonly type: 'reset' }>['sceneDigest'];
+type SceneTimeline = ReturnType<typeof createSceneTimeline>;
+type SceneTimelineEntry = SceneTimeline['entries'][number];
+type SceneTimelineIssue = NonNullable<SceneTimeline['issue']>;
+
+type CadTag = 'cad-loading' | 'cad-runtime-error';
 
 export type CadContext = {
   entryPath: string | undefined;
@@ -68,6 +93,8 @@ export type CadContext = {
    * `lastRequestedRenderId`.
    */
   lastSettledRenderId: number;
+  /** Bounded, render-scoped progressive scene history. Terminal geometry remains authoritative. */
+  sceneTimeline: SceneTimeline;
 };
 
 type KernelConnectedEvent = {
@@ -79,6 +106,56 @@ type KernelConnectedEvent = {
 type FileSystemBindingChangedEvent = {
   type: 'filesystemBindingChanged';
 };
+
+type SceneSnapshotReaderEvent =
+  | {
+      type: 'readSceneSnapshot';
+      client: AppRuntimeClient;
+      renderId: string;
+      sequence: number;
+      revision: number;
+      sceneDigest: SceneDigest;
+      bookmarkId: string;
+    }
+  | {
+      type: 'sceneSnapshotLoaded';
+      renderId: string;
+      sequence: number;
+      revision: number;
+      sceneDigest: SceneDigest;
+      snapshot: ResolvedSceneSnapshot;
+    }
+  | { type: 'sceneSnapshotFailed'; renderId: string; sequence: number; message: string };
+
+type PortableSceneFile = {
+  readonly bytes: Uint8Array<ArrayBuffer>;
+  readonly extension: 'glb' | 'svg';
+};
+type PortableSceneStage =
+  | PortableSceneFile
+  | {
+      readonly manifest: TauSceneManifest;
+      readonly assets: ReadonlyMap<string, PortableSceneFile>;
+    };
+type SceneStageSource = PortableSceneStage | { readonly bookmarkId: string; readonly client: AppRuntimeClient };
+
+type SceneStageWriterEvent =
+  | {
+      readonly type: 'writeSceneStage';
+      readonly renderId: string;
+      readonly fileManagerRef: NonNullable<CadContext['fileManagerRef']>;
+      readonly sequence: number;
+      readonly entryPath: string;
+      readonly label?: string;
+      readonly stage: SceneStageSource;
+    }
+  | { readonly type: 'sceneStageSaved'; readonly renderId: string; readonly sequence: number; readonly path: string }
+  | {
+      readonly type: 'sceneStageSaveFailed';
+      readonly renderId: string;
+      readonly sequence: number;
+      readonly message: string;
+    };
 
 type CadEvent =
   | { type: 'initializeModel'; entryPath: string; parameters?: Record<string, unknown> }
@@ -96,6 +173,13 @@ type CadEvent =
   | { type: 'setRenderTimeout'; renderTimeout: number }
   | { type: 'capabilitiesUpdated'; capabilities: AppCapabilitiesManifest }
   | { type: 'activeKernelChanged'; kernelId: string | undefined }
+  | { type: 'sceneUpdate'; update: ProgressiveSceneUpdate }
+  | { type: 'selectSceneSequence'; sequence: number }
+  | { type: 'followLiveScene' }
+  | { type: 'saveSelectedSceneStage' }
+  | { type: 'progressiveSceneCancelled' }
+  | Extract<SceneSnapshotReaderEvent, { type: 'sceneSnapshotLoaded' | 'sceneSnapshotFailed' }>
+  | Extract<SceneStageWriterEvent, { type: 'sceneStageSaved' | 'sceneStageSaveFailed' }>
   | KernelConnectedEvent
   | FileSystemBindingChangedEvent;
 
@@ -121,6 +205,288 @@ type RenderModelInput = {
   client: AppRuntimeClient | undefined;
   entryPath: string | undefined;
   parameters: Record<string, unknown>;
+};
+
+const sceneSnapshotReaderActor = fromCallback<SceneSnapshotReaderEvent>(({ sendBack, receive }) => {
+  let controller: AbortController | undefined;
+  let inFlight: Promise<void> | undefined;
+  const readSnapshot = async (
+    event: Extract<SceneSnapshotReaderEvent, { type: 'readSceneSnapshot' }>,
+    signal: AbortSignal,
+  ): Promise<void> => {
+    try {
+      const result = await event.client.readSceneSnapshot({ bookmarkId: event.bookmarkId, signal });
+      if (signal.aborted) {
+        return;
+      }
+      if (result.type === 'missing') {
+        sendBack({
+          type: 'sceneSnapshotFailed',
+          renderId: event.renderId,
+          sequence: event.sequence,
+          message: 'The retained scene snapshot is no longer available',
+        });
+        return;
+      }
+      sendBack({
+        type: 'sceneSnapshotLoaded',
+        renderId: event.renderId,
+        sequence: event.sequence,
+        revision: event.revision,
+        sceneDigest: event.sceneDigest,
+        snapshot: result.snapshot,
+      });
+    } catch (error) {
+      if (signal.aborted) {
+        return;
+      }
+      sendBack({
+        type: 'sceneSnapshotFailed',
+        renderId: event.renderId,
+        sequence: event.sequence,
+        message: error instanceof Error ? error.message : 'Failed to restore the retained scene snapshot',
+      });
+    }
+  };
+  receive((event) => {
+    if (event.type !== 'readSceneSnapshot') {
+      return;
+    }
+    controller?.abort();
+    controller = new AbortController();
+    const { signal } = controller;
+    inFlight = readSnapshot(event, signal);
+  });
+  return () => {
+    if (inFlight) {
+      controller?.abort();
+    }
+    inFlight = undefined;
+  };
+});
+
+const identitySceneTransform = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1] as const;
+
+type PortableSceneRoot = TauSceneNode & { readonly geometry: SceneAssetReference };
+
+const isPortableSceneRoot = (root: TauSceneNode | undefined, manifest: TauSceneManifest): root is PortableSceneRoot =>
+  root?.geometry !== undefined &&
+  root.parentId === undefined &&
+  root.childIds.length === 0 &&
+  root.visible &&
+  manifest.rootNodeIds.length === 1 &&
+  Object.keys(manifest.nodes).length === 1 &&
+  Object.keys(manifest.presentation).length === 0 &&
+  root.name === undefined &&
+  root.transform.every((value, index) => value === identitySceneTransform[index]);
+
+const selectedPortableSceneStage = (
+  timeline: SceneTimeline,
+  client?: AppRuntimeClient,
+): SceneStageSource | undefined => {
+  let projection = createProgressiveSceneProjection();
+  for (const entry of timeline.entries) {
+    if (entry.sequence > (timeline.selectedSequence ?? -1)) {
+      break;
+    }
+    if (entry.update) {
+      projection = applyProgressiveSceneUpdate(projection, entry.update, { maxFrames: 1, maxBytes: 0 });
+    }
+  }
+  const selected = projection.frames.find((frame) => frame.sequence === timeline.selectedSequence);
+  if (!selected || projection.status !== 'ready') {
+    const entry = timeline.entries.find((candidate) => candidate.sequence === timeline.selectedSequence);
+    return entry?.bookmark?.retained && client ? { bookmarkId: entry.bookmark.id, client } : undefined;
+  }
+  return portableSceneStage(selected.snapshot);
+};
+
+const portableSceneStage = ({ manifest, assets }: ResolvedSceneSnapshot): PortableSceneStage | undefined => {
+  const files = new Map<string, PortableSceneFile>();
+  for (const node of Object.values(manifest.nodes)) {
+    if (!node.geometry) {
+      continue;
+    }
+    const reference = node.geometry;
+    const asset = assets.find((candidate) => candidate.contentDigest === reference.contentDigest);
+    if (!asset || asset.mediaType !== reference.mediaType || asset.byteLength !== reference.byteLength) {
+      return;
+    }
+    let file: PortableSceneFile;
+    if (asset.mediaType === 'model/gltf-binary' && asset.geometry.format === 'gltf') {
+      file = { bytes: asset.geometry.content, extension: 'glb' };
+    } else if (asset.mediaType === 'image/svg+xml' && asset.geometry.format === 'svg') {
+      file = { bytes: new TextEncoder().encode(asset.geometry.content), extension: 'svg' };
+    } else {
+      return;
+    }
+    if (file.bytes.byteLength !== asset.byteLength) {
+      return;
+    }
+    files.set(asset.contentDigest, file);
+  }
+  const root = manifest.nodes[manifest.rootNodeIds[0] ?? ''];
+  if (isPortableSceneRoot(root, manifest)) {
+    return files.get(root.geometry.contentDigest);
+  }
+  return { manifest, assets: files };
+};
+
+const sceneStageSlug = (value: string): string =>
+  value
+    .normalize('NFKD')
+    .replaceAll(/[\u0300-\u036F]/gu, '')
+    .toLowerCase()
+    .replaceAll(/[^a-z0-9]+/gu, '-')
+    .replaceAll(/^-+|-+$/gu, '')
+    .slice(0, 64);
+
+const sceneStageBasePath = (event: Extract<SceneStageWriterEvent, { type: 'writeSceneStage' }>): string => {
+  const sourceFilename = event.entryPath.split('/').at(-1) ?? event.entryPath;
+  const extensionIndex = sourceFilename.lastIndexOf('.');
+  const sourceStem = extensionIndex > 0 ? sourceFilename.slice(0, extensionIndex) : sourceFilename;
+  const sourceName = sceneStageSlug(sourceStem) || 'model';
+  const stageName = sceneStageSlug(event.label ?? '') || `stage-${String(event.sequence + 1)}`;
+  return `stages/${sourceName}-${stageName}`;
+};
+
+const errorMessage = (error: unknown, fallback: string): string => {
+  if (typeof error === 'object' && error !== null && 'message' in error && typeof error.message === 'string') {
+    return error.message;
+  }
+  return error instanceof Error ? error.message : fallback;
+};
+
+const sceneStageWriterActor = fromCallback<SceneStageWriterEvent>(({ sendBack, receive }) => {
+  let isActive = true;
+  let isWriting = false;
+
+  const writeStage = async (event: Extract<SceneStageWriterEvent, { type: 'writeSceneStage' }>): Promise<void> => {
+    try {
+      const fileManagerSnapshot = event.fileManagerRef.getSnapshot();
+      if (!fileManagerSnapshot.matches('ready') || !fileManagerSnapshot.context.contentService) {
+        throw new Error('The project filesystem is not ready');
+      }
+      const { contentService } = fileManagerSnapshot.context;
+      let stage: PortableSceneStage | undefined;
+      if ('bookmarkId' in event.stage) {
+        const result = await event.stage.client.readSceneSnapshot({ bookmarkId: event.stage.bookmarkId });
+        if (result.type === 'found') {
+          stage = portableSceneStage(result.snapshot);
+        }
+      } else {
+        stage = event.stage;
+      }
+      if (!stage) {
+        throw new Error('The retained scene snapshot is no longer available as a complete scene reference');
+      }
+      const resolvedStage = stage;
+      const basePath = sceneStageBasePath(event);
+      const findAvailablePath = async (collisionIndex: number): Promise<string | undefined> => {
+        if (!isActive) {
+          return;
+        }
+        const suffix = collisionIndex === 1 ? '' : `-${String(collisionIndex)}`;
+        const path = `${basePath}${suffix}`;
+        const preflight = await contentService.canCreate(path, 'directory');
+        if (preflight === true) {
+          return path;
+        }
+        if (preflight.code !== 'NAME_EXISTS') {
+          throw new Error(
+            workspaceMutationErrorCopy[preflight.code]({ path: preflight.path, target: preflight.target }),
+          );
+        }
+        return findAvailablePath(collisionIndex + 1);
+      };
+      const path = await findAvailablePath(1);
+      if (!path) {
+        return;
+      }
+      await contentService.createDirectory('stages', { recursive: true });
+      await contentService.createDirectory(path);
+      if ('manifest' in resolvedStage) {
+        await Promise.all(
+          [...resolvedStage.assets].map(async ([digest, file]) =>
+            contentService.write(`${path}/${encodeURIComponent(digest)}.${file.extension}`, file.bytes, 'user'),
+          ),
+        );
+        // The manifest is the commit marker: a failed asset write never publishes a complete stage reference.
+        await contentService.write(
+          `${path}/scene.json`,
+          new TextEncoder().encode(JSON.stringify(resolvedStage.manifest)),
+          'user',
+        );
+      } else {
+        await contentService.write(`${path}/model.${resolvedStage.extension}`, resolvedStage.bytes, 'user');
+      }
+      if (isActive) {
+        sendBack({
+          type: 'sceneStageSaved',
+          renderId: event.renderId,
+          sequence: event.sequence,
+          path: 'manifest' in resolvedStage ? `${path}/scene.json` : `${path}/model.${resolvedStage.extension}`,
+        });
+      }
+    } catch (error) {
+      if (isActive) {
+        sendBack({
+          type: 'sceneStageSaveFailed',
+          renderId: event.renderId,
+          sequence: event.sequence,
+          message: errorMessage(error, 'Failed to save the selected preview stage'),
+        });
+      }
+    } finally {
+      isWriting = false;
+    }
+  };
+
+  receive((event) => {
+    if (event.type !== 'writeSceneStage') {
+      return;
+    }
+    if (isWriting) {
+      sendBack({
+        type: 'sceneStageSaveFailed',
+        renderId: event.renderId,
+        sequence: event.sequence,
+        message: 'Another preview stage is still being saved. Try again when it finishes.',
+      });
+      return;
+    }
+    isWriting = true;
+    void writeStage(event);
+  });
+
+  return () => {
+    isActive = false;
+  };
+});
+
+const fallbackCadFailureIssues: readonly KernelIssue[] = Object.freeze([
+  Object.freeze({
+    message: 'The selected CAD render failed',
+    code: 'RUNTIME',
+    type: 'runtime',
+    severity: 'error',
+  }),
+]);
+
+const selectIssuesByPrecedence = (
+  context: CadContext,
+  keys: ReadonlyArray<string | undefined>,
+): readonly KernelIssue[] => {
+  for (const key of keys) {
+    if (!key) {
+      continue;
+    }
+    const issues = context.kernelIssues.get(key);
+    if (issues && issues.length > 0) {
+      return issues;
+    }
+  }
+  return fallbackCadFailureIssues;
 };
 
 const connectKernelActor = fromSafeAsync<KernelConnectedEvent, ConnectKernelInput>(async ({ input, signal }) => {
@@ -199,6 +565,9 @@ const connectKernelActor = fromSafeAsync<KernelConnectedEvent, ConnectKernelInpu
       } else {
         machineRef.send({ type: 'geometryFailed', issues: result.issues });
       }
+    }),
+    client.on('sceneUpdate', (update: ProgressiveSceneUpdate) => {
+      machineRef.send({ type: 'sceneUpdate', update });
     }),
     client.on('state', (state: WorkerState) => {
       machineRef.send({ type: 'stateChanged', state });
@@ -307,10 +676,14 @@ export const cadMachine = setup({
     input: {} as CadInput,
     // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
     emitted: {} as CadEmitted,
+    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
+    tags: {} as CadTag,
   },
   actors: {
     connectKernelActor,
     renderModelActor,
+    sceneSnapshotReaderActor,
+    sceneStageWriterActor,
   },
   actions: {
     sendKernelLogs: enqueueActions(({ enqueue, context, event }) => {
@@ -389,11 +762,13 @@ export const cadMachine = setup({
           }
           return newIssues;
         },
+        sceneTimeline: settleSceneTimeline(context.sceneTimeline, 'complete'),
       });
       enqueue.emit({ type: 'geometryEvaluated', geometry: event.geometry });
     }),
     setGeometryFailure: assign({
       latestGeometryOutcome: () => 'failure',
+      sceneTimeline: ({ context }) => settleSceneTimeline(context.sceneTimeline, 'failed'),
       kernelIssues({ context, event }) {
         assertEvent(event, 'geometryFailed');
         const currentEntryPath = context.entryPath;
@@ -460,6 +835,144 @@ export const cadMachine = setup({
       lastRequestedRenderId({ context }) {
         return context.lastRequestedRenderId + 1;
       },
+      sceneTimeline: ({ context }) => clearSceneTimeline(context.sceneTimeline),
+    }),
+    appendSceneUpdate: assign({
+      sceneTimeline({ context, event }) {
+        assertEvent(event, 'sceneUpdate');
+        return appendSceneTimelineUpdate(context.sceneTimeline, event.update);
+      },
+    }),
+    selectSceneSequence: enqueueActions(({ enqueue, context, event }) => {
+      assertEvent(event, 'selectSceneSequence');
+      const entry = context.sceneTimeline.entries.find((candidate) => candidate.sequence === event.sequence);
+      enqueue.assign({
+        sceneTimeline: selectSceneTimelineSequence(context.sceneTimeline, event.sequence),
+      });
+      if (!entry?.update && entry?.bookmark && entry.availability !== 'rehydrating' && context.kernelClient) {
+        enqueue.sendTo('sceneSnapshotReaderActor', {
+          type: 'readSceneSnapshot',
+          client: context.kernelClient,
+          renderId: entry.renderId,
+          sequence: entry.sequence,
+          revision: entry.revision,
+          sceneDigest: entry.sceneDigest,
+          bookmarkId: entry.bookmark.id,
+        });
+      }
+    }),
+    followLiveScene: assign({
+      sceneTimeline: ({ context }) => selectSceneTimelineSequence(context.sceneTimeline, 'live'),
+    }),
+    saveSelectedSceneStage: enqueueActions(({ enqueue, context }) => {
+      const { sceneTimeline, fileManagerRef, entryPath } = context;
+      if (sceneTimeline.artifactSave.status === 'saving') {
+        return;
+      }
+      const selected = sceneTimeline.entries.find((entry) => entry.sequence === sceneTimeline.selectedSequence);
+      if (!selected) {
+        return;
+      }
+      const stage = selectedPortableSceneStage(sceneTimeline, context.kernelClient);
+      if (!stage || !fileManagerRef || !entryPath) {
+        enqueue.assign({
+          sceneTimeline: {
+            ...sceneTimeline,
+            artifactSave: {
+              status: 'failed',
+              sequence: selected.sequence,
+              message: stage
+                ? 'The project filesystem is not ready'
+                : 'The selected preview stage is not available as a complete scene reference',
+            },
+          },
+        });
+        return;
+      }
+      enqueue.assign({
+        sceneTimeline: {
+          ...sceneTimeline,
+          artifactSave: { status: 'saving', sequence: selected.sequence },
+        },
+      });
+      enqueue.sendTo('sceneStageWriterActor', {
+        type: 'writeSceneStage',
+        renderId: selected.renderId,
+        fileManagerRef,
+        sequence: selected.sequence,
+        entryPath,
+        label: selected.label,
+        stage,
+      });
+    }),
+    storeSceneStageSaved: assign({
+      sceneTimeline({ context, event }) {
+        assertEvent(event, 'sceneStageSaved');
+        const save = context.sceneTimeline.artifactSave;
+        if (
+          save.status !== 'saving' ||
+          save.sequence !== event.sequence ||
+          context.sceneTimeline.renderId !== event.renderId
+        ) {
+          return context.sceneTimeline;
+        }
+        return {
+          ...context.sceneTimeline,
+          artifactSave: { status: 'saved', sequence: event.sequence, path: event.path },
+        };
+      },
+    }),
+    storeSceneStageSaveFailure: assign({
+      sceneTimeline({ context, event }) {
+        assertEvent(event, 'sceneStageSaveFailed');
+        const save = context.sceneTimeline.artifactSave;
+        if (
+          save.status !== 'saving' ||
+          save.sequence !== event.sequence ||
+          context.sceneTimeline.renderId !== event.renderId
+        ) {
+          return context.sceneTimeline;
+        }
+        return {
+          ...context.sceneTimeline,
+          artifactSave: { status: 'failed', sequence: event.sequence, message: event.message },
+        };
+      },
+    }),
+    failSceneTimeline: assign({
+      sceneTimeline: ({ context }) => settleSceneTimeline(context.sceneTimeline, 'failed'),
+    }),
+    cancelSceneTimeline: assign({
+      sceneTimeline: ({ context }) => settleSceneTimeline(context.sceneTimeline, 'cancelled'),
+    }),
+    storeRehydratedSceneSnapshot: assign({
+      sceneTimeline({ context, event }) {
+        assertEvent(event, 'sceneSnapshotLoaded');
+        return rehydrateSceneTimelineEntry(context.sceneTimeline, {
+          renderId: event.renderId,
+          sequence: event.sequence,
+          revision: event.revision,
+          sceneDigest: event.sceneDigest,
+          snapshot: event.snapshot,
+        });
+      },
+    }),
+    storeSceneSnapshotFailure: assign({
+      sceneTimeline({ context, event }) {
+        assertEvent(event, 'sceneSnapshotFailed');
+        if (context.sceneTimeline.renderId !== event.renderId) {
+          return context.sceneTimeline;
+        }
+        const issue: SceneTimelineIssue = { type: 'snapshot-read-failed', message: event.message };
+        const entries = context.sceneTimeline.entries.map((entry): SceneTimelineEntry => {
+          return entry.sequence === event.sequence ? { ...entry, availability: 'unavailable' } : entry;
+        });
+        return {
+          ...context.sceneTimeline,
+          issue,
+          entries,
+        };
+      },
     }),
     setSettledRenderId: assign({
       lastSettledRenderId({ context }) {
@@ -523,7 +1036,18 @@ export const cadMachine = setup({
     eventCleanups: [],
     lastRequestedRenderId: 0,
     lastSettledRenderId: 0,
+    sceneTimeline: createSceneTimeline(),
   }),
+  invoke: [
+    {
+      id: 'sceneSnapshotReaderActor',
+      src: 'sceneSnapshotReaderActor',
+    },
+    {
+      id: 'sceneStageWriterActor',
+      src: 'sceneStageWriterActor',
+    },
+  ],
   exit: ['destroyKernel'],
   on: {
     filesystemBindingChanged: {
@@ -534,10 +1058,38 @@ export const cadMachine = setup({
     setRenderTimeout: {
       actions: ['applyRenderTimeout'],
     },
+    sceneUpdate: {
+      actions: ['appendSceneUpdate'],
+    },
+    selectSceneSequence: {
+      actions: ['selectSceneSequence'],
+    },
+    followLiveScene: {
+      actions: ['followLiveScene'],
+    },
+    saveSelectedSceneStage: {
+      actions: ['saveSelectedSceneStage'],
+    },
+    sceneStageSaved: {
+      actions: ['storeSceneStageSaved'],
+    },
+    sceneStageSaveFailed: {
+      actions: ['storeSceneStageSaveFailure'],
+    },
+    sceneSnapshotLoaded: {
+      actions: ['storeRehydratedSceneSnapshot'],
+    },
+    sceneSnapshotFailed: {
+      actions: ['storeSceneSnapshotFailure'],
+    },
+    progressiveSceneCancelled: {
+      actions: ['cancelSceneTimeline'],
+    },
   },
   initial: 'connecting',
   states: {
     connecting: {
+      tags: 'cad-loading',
       invoke: {
         id: 'connectKernelActor',
         src: 'connectKernelActor',
@@ -624,6 +1176,7 @@ export const cadMachine = setup({
     },
 
     buffering: {
+      tags: 'cad-loading',
       on: {
         initializeModel: {
           target: '#cad.rendering.submitting',
@@ -655,6 +1208,8 @@ export const cadMachine = setup({
     },
 
     rendering: {
+      tags: 'cad-loading',
+      entry: assign({ sceneTimeline: ({ context }) => clearSceneTimeline(context.sceneTimeline) }),
       initial: 'active',
       exit: assign({ renderPhase: () => undefined }),
       states: {
@@ -739,6 +1294,8 @@ export const cadMachine = setup({
     },
 
     error: {
+      tags: 'cad-runtime-error',
+      entry: 'failSceneTimeline',
       on: {
         initializeModel: {
           target: 'connecting',
@@ -770,3 +1327,42 @@ export const cadMachine = setup({
     },
   },
 });
+
+type CadSnapshot = SnapshotFrom<typeof cadMachine>;
+
+/** Select the canonical issues for the latest failed CAD result without allocating a derived view model. */
+export const selectCadFailureIssues = (snapshot: CadSnapshot): readonly KernelIssue[] | undefined => {
+  if (snapshot.context.latestGeometryOutcome === 'failure') {
+    return selectIssuesByPrecedence(snapshot.context, [snapshot.context.entryPath, '__render__', '__connection__']);
+  }
+  if (!snapshot.hasTag('cad-runtime-error')) {
+    return undefined;
+  }
+  return selectIssuesByPrecedence(snapshot.context, ['__connection__', snapshot.context.entryPath, '__render__']);
+};
+
+export const selectSceneTimeline = (snapshot: CadSnapshot): SceneTimeline => snapshot.context.sceneTimeline;
+export const selectSceneTimelineEntries = (snapshot: CadSnapshot): SceneTimeline['entries'] =>
+  selectSceneTimeline(snapshot).entries;
+export const selectSceneTimelineSelection = (snapshot: CadSnapshot): number | undefined =>
+  selectSceneTimeline(snapshot).selectedSequence;
+export const selectSceneTimelineFollowLive = (snapshot: CadSnapshot): boolean =>
+  selectSceneTimeline(snapshot).followLive;
+export const selectSceneTimelineStreamState = (snapshot: CadSnapshot): SceneTimeline['streamState'] =>
+  selectSceneTimeline(snapshot).streamState;
+export const selectSceneTimelineArtifactSave = (snapshot: CadSnapshot): SceneTimeline['artifactSave'] =>
+  selectSceneTimeline(snapshot).artifactSave;
+export const selectCanSaveSelectedSceneStage = (snapshot: CadSnapshot): boolean =>
+  snapshot.context.sceneTimeline.artifactSave.status !== 'saving' &&
+  Boolean(snapshot.context.entryPath) &&
+  Boolean(snapshot.context.fileManagerRef) &&
+  Boolean(selectedPortableSceneStage(snapshot.context.sceneTimeline, snapshot.context.kernelClient));
+
+export const selectProgressiveSceneCapability = (snapshot: CadSnapshot): ProgressiveSceneCapability | undefined => {
+  const { activeKernelId, capabilities } = snapshot.context;
+  if (!activeKernelId || !capabilities) {
+    return undefined;
+  }
+  return Object.entries(capabilities.renderCapabilities).find(([kernelId]) => kernelId === activeKernelId)?.[1]
+    .progressiveScene;
+};

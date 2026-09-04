@@ -1,6 +1,7 @@
 import { assign, assertEvent, setup, emit, enqueueActions, fromPromise, sendTo } from 'xstate';
-import type { ActorRefFrom } from 'xstate';
+import type { ActorRefFrom, SnapshotFrom } from 'xstate';
 import type { GeometryComponentManifest, GridSizes, Geometry } from '@taucad/types';
+import type { ProgressiveSceneUpdate, ResolvedSceneSnapshot } from '@taucad/runtime';
 import { idPrefix } from '@taucad/types/constants';
 import type { LengthSymbol, UnitSystem } from '@taucad/units';
 import { standardInternationalBaseUnits } from '@taucad/units/constants';
@@ -18,6 +19,13 @@ import {
 import { deriveModelInteractionUnitId, modelInteractionMachine } from '#machines/model-interaction.machine.js';
 import type { ModelInteractionSource, ViewerHoverSuppressionReason } from '#machines/model-interaction.machine.js';
 import { buildGltfComponentManifest } from '#components/geometry/graphics/metadata/gltf-component-manifest.js';
+import {
+  applyProgressiveSceneUpdate,
+  clearProgressiveSceneProjection,
+  createProgressiveSceneProjection,
+  selectProgressiveSceneSequence,
+} from '#machines/progressive-scene-projection.js';
+import type { ProgressiveSceneProjection } from '#machines/progressive-scene-projection.js';
 
 export type ModelInteractionRef = ActorRefFrom<typeof modelInteractionMachine>;
 
@@ -140,6 +148,8 @@ export type GraphicsContext = {
   geometry: Geometry | undefined;
   /** Deterministic key derived from the geometry content hash. Used for skip-when-unchanged optimizations. */
   geometryKey: string;
+  /** Resolved transient scenes keyed by timeline sequence; final geometry remains separate. */
+  progressiveScene: ProgressiveSceneProjection;
 };
 
 // Event types
@@ -215,6 +225,12 @@ export type GraphicsEvent =
       units: { length: LengthSymbol };
       sourceFile?: string;
     }
+  | {
+      type: 'syncProgressiveScene';
+      updates: readonly ProgressiveSceneUpdate[];
+      selectedSequence?: number;
+    }
+  | { type: 'clearProgressiveScene' }
   // Model/component interaction events
   | {
       type: 'loadModelComponentManifest';
@@ -275,6 +291,8 @@ export type GraphicsInput = {
   graphicsBackendPreference?: GraphicsBackendPreference;
   modelInteractionRef?: ModelInteractionRef;
 };
+
+type GraphicsSnapshot = SnapshotFrom<typeof graphicsMachine>;
 
 type LengthUnitData = {
   unit: string;
@@ -762,6 +780,25 @@ export const graphicsMachine = setup({
           source: 'viewer',
         });
       }
+    }),
+
+    syncProgressiveScene: assign({
+      progressiveScene({ context, event }) {
+        assertEvent(event, 'syncProgressiveScene');
+        let projection = context.progressiveScene;
+        for (const update of event.updates) {
+          projection = applyProgressiveSceneUpdate(projection, update);
+        }
+        return event.selectedSequence === undefined
+          ? projection
+          : selectProgressiveSceneSequence(projection, event.selectedSequence);
+      },
+      pickableMeshesVersion: ({ context }) => context.pickableMeshesVersion + 1,
+    }),
+
+    clearProgressiveScene: assign({
+      progressiveScene: () => clearProgressiveSceneProjection(),
+      pickableMeshesVersion: ({ context }) => context.pickableMeshesVersion + 1,
     }),
 
     updateSceneRadius: enqueueActions(({ enqueue, event }) => {
@@ -1393,6 +1430,7 @@ export const graphicsMachine = setup({
       // Shapes
       geometry: undefined,
       geometryKey: '',
+      progressiveScene: createProgressiveSceneProjection(),
     };
   },
   exit: 'stopOwnedModelInteraction',
@@ -1486,6 +1524,12 @@ export const graphicsMachine = setup({
         // Geometry updates
         updateGeometry: {
           actions: 'updateGeometry',
+        },
+        syncProgressiveScene: {
+          actions: 'syncProgressiveScene',
+        },
+        clearProgressiveScene: {
+          actions: 'clearProgressiveScene',
         },
         sceneRadiusUpdated: {
           actions: 'updateSceneRadius',
@@ -1752,3 +1796,11 @@ export const graphicsMachine = setup({
     },
   },
 });
+
+export const selectProgressiveSceneSnapshot = (snapshot: GraphicsSnapshot): ResolvedSceneSnapshot | undefined => {
+  const projection = snapshot.context.progressiveScene;
+  return projection.frames.find((frame) => frame.sequence === projection.selectedSequence)?.snapshot;
+};
+
+export const selectProgressiveSceneStatus = (snapshot: GraphicsSnapshot): ProgressiveSceneProjection['status'] =>
+  snapshot.context.progressiveScene.status;

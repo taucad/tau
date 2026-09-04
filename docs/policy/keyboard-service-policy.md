@@ -3,7 +3,9 @@ title: 'Keyboard Service Policy'
 description: 'Unified keyboard service (use-keyboard.tsx): event.key vs event.code, mod abstraction, scope model, consume/priority rules, and IME policy.'
 status: active
 created: '2026-02-15'
-updated: '2026-03-05'
+updated: '2026-09-04'
+related:
+  - apps/ui/app/hooks/use-keyboard.tsx
 ---
 
 # Keyboard Service Policy
@@ -43,7 +45,7 @@ metaKey    →    Cmd (meta)      Meta/Win (unusable)
 
 ### `ctrlKey` Conflict Limitation (Known Issue)
 
-The 11 `ctrlKey` panel toggles (Ctrl+C, Ctrl+A, Ctrl+X, Ctrl+F, Ctrl+N, Ctrl+D, Ctrl+G, Ctrl+E, Ctrl+L, Ctrl+I, Ctrl+Shift+C) conflict with system/browser shortcuts on Windows/Linux. These were designed for macOS where Ctrl is a secondary modifier that doesn't conflict with system shortcuts (Cmd handles those).
+Panel toggles using literal Ctrl plus a character can conflict with system/browser shortcuts on Windows/Linux. Ctrl is a secondary modifier on macOS, where Cmd handles primary system shortcuts; do not assume those assignments are portable.
 
 **Follow-up**: Audit and reassign these keybindings for cross-platform safety. Options:
 
@@ -74,7 +76,7 @@ Detected via `event.target.closest()`:
 
 ## Editable Target Definition
 
-An element is considered "editable" (and suppresses shortcuts with `ignoreInputs: false` default) if:
+An element is considered "editable" (and suppresses shortcuts when `ignoreInputs: true`) if:
 
 - `tagName` is `INPUT` (except `type="button"`, `type="submit"`, `type="reset"`, `type="checkbox"`, `type="radio"`)
 - `tagName` is `TEXTAREA`
@@ -82,7 +84,7 @@ An element is considered "editable" (and suppresses shortcuts with `ignoreInputs
 - `element.isContentEditable === true`
 - `element.closest('[role="textbox"]')` is truthy
 
-Shortcuts with `ignoreInputs: true` fire even in editable targets.
+`ignoreInputs` defaults to `false`, so editable targets alone do not suppress a registration. Set `ignoreInputs: true` for shortcuts that must not fire while typing. The dialog scope guard still applies independently.
 
 ## Registration Contract
 

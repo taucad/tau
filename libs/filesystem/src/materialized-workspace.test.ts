@@ -304,6 +304,24 @@ describe('MaterializedWorkspaceAuthority', () => {
     expect(captured.entries().map(({ path }) => path)).toEqual(['main.ts']);
   });
 
+  it('excludes the directories the caller reserves without walking into them', async () => {
+    const filesystem = vanishingFileSystem(
+      {
+        '': ['main.ts', '.tau'],
+        'main.ts': 'kept',
+        '.tau': ['cache'],
+        '.tau/cache': ['blob.bin'],
+        '.tau/cache/blob.bin': 'cached',
+      },
+      new Set(),
+    );
+    /* eslint-enable @typescript-eslint/naming-convention -- Re-enable after the path-keyed fixtures */
+
+    const captured = await captureRevisionTree(filesystem, { exclude: (path) => path === '.tau/cache' });
+
+    expect(captured.entries().map(({ path }) => path)).toEqual(['main.ts']);
+  });
+
   it('rejects duplicate identities, traversal, and use after destruction', async () => {
     const { authority } = harness();
     const workspaceId = materializedWorkspaceId('lifecycle');

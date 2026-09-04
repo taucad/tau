@@ -548,6 +548,12 @@ export class MaterializedWorkspaceAuthority {
   }
 }
 
+/** Options for {@link captureRevisionTree}. @public */
+export type CaptureRevisionTreeOptions = Readonly<{
+  /** Rooted paths the walk must not descend into or record. */
+  exclude?: (path: string) => boolean;
+}>;
+
 /**
  * Capture a rooted filesystem as an immutable file-only revision tree.
  *
@@ -559,8 +565,12 @@ export class MaterializedWorkspaceAuthority {
  *
  * @public
  */
-export const captureRevisionTree = async (filesystem: RootedFileSystem): Promise<ImmutableRevisionTree> => {
+export const captureRevisionTree = async (
+  filesystem: RootedFileSystem,
+  options?: CaptureRevisionTreeOptions,
+): Promise<ImmutableRevisionTree> => {
   const entries: Array<readonly [string, Uint8Array<ArrayBuffer>]> = [];
+  const excluded = options?.exclude;
   const skipIfVanished = async <T>(operation: () => Promise<T>): Promise<T | undefined> => {
     try {
       return await operation();
@@ -576,6 +586,9 @@ export const captureRevisionTree = async (filesystem: RootedFileSystem): Promise
     await Promise.all(
       (children ?? []).map(async (child) => {
         const childPath = joinRelativePath(path, child);
+        if (excluded?.(childPath) === true) {
+          return;
+        }
         const stat = await skipIfVanished(async () => filesystem.stat(childPath));
         if (stat === undefined) {
           return;

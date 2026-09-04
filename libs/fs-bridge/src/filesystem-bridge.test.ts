@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/naming-convention -- test data uses virtual paths as object keys */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { wrapMessagePort } from '@taucad/rpc';
 import type { Port } from '@taucad/rpc';

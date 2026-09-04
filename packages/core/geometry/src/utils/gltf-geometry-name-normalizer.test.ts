@@ -107,6 +107,28 @@ const readGlbJson = (bytes: Uint8Array<ArrayBuffer>): JSONDocument['json'] => {
   return JSON.parse(new TextDecoder().decode(bytes.subarray(20, 20 + length))) as JSONDocument['json'];
 };
 
+const withExternalImage = (bytes: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> => {
+  const inputView = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const inputJsonLength = inputView.getUint32(12, true);
+  const json = readGlbJson(bytes);
+  json.images = [{ uri: 'missing-texture.png' }];
+  json.textures = [{ source: 0 }];
+  json.materials![0]!.pbrMetallicRoughness!.baseColorTexture = { index: 0 };
+  const jsonBytes = new TextEncoder().encode(JSON.stringify(json));
+  const paddedJsonLength = Math.ceil(jsonBytes.byteLength / 4) * 4;
+  const remainder = bytes.subarray(20 + inputJsonLength);
+  const output = new Uint8Array(20 + paddedJsonLength + remainder.byteLength);
+  output.fill(0x20, 20, 20 + paddedJsonLength);
+  output.set(bytes.subarray(0, 12));
+  const outputView = new DataView(output.buffer);
+  outputView.setUint32(8, output.byteLength, true);
+  outputView.setUint32(12, paddedJsonLength, true);
+  outputView.setUint32(16, 0x4e_4f_53_4a, true);
+  output.set(jsonBytes, 20);
+  output.set(remainder, 20 + paddedJsonLength);
+  return output;
+};
+
 describe('normalizeGltfGeometryNames', () => {
   it('should enforce node and mesh parity for semantic mesh-bearing nodes', async () => {
     const input: GlbInput = {
@@ -163,6 +185,19 @@ describe('normalizeGltfGeometryNames', () => {
 
     expect(names.materialNames).toEqual(['powder coat']);
     expect(names.sceneNames).toEqual(['Exploded View']);
+  });
+
+  it('should normalize names without resolving external GLB images', async () => {
+    const normalized = await normalizeGltfGeometryNames(
+      withExternalImage(writeGlb({ nodes: [{ primitives: [createTrianglePrimitive('Material')] }] })),
+      { format: 'glb', rewriteLegacyGeneratedShapeNames: true },
+    );
+    const json = readGlbJson(normalized);
+
+    expect(json.nodes?.[0]?.name).toBe('Shape 1');
+    expect(json.meshes?.[0]?.name).toBe('Shape 1');
+    expect(json.images?.[0]?.uri).toBe('missing-texture.png');
+    expect(json.materials?.[0]?.pbrMetallicRoughness?.baseColorTexture?.index).toBe(0);
   });
 
   it('should clear all material names when the caller knows they are generated', async () => {

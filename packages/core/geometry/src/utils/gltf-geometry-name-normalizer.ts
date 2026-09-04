@@ -1,4 +1,4 @@
-import { NodeIO, Primitive } from '@gltf-transform/core';
+import { BufferUtils, NodeIO, Primitive } from '@gltf-transform/core';
 import type { Document, JSONDocument, Mesh, Node, PlatformIO } from '@gltf-transform/core';
 
 import { KHRMaterialsUnlit } from '@gltf-transform/extensions';
@@ -103,6 +103,78 @@ const normalizeSceneNames = (
   }
 };
 
+const readGlbJson = (bytes: Uint8Array<ArrayBuffer>): JSONDocument['json'] => {
+  if (bytes.byteLength < 20) {
+    throw new Error('Invalid glTF 2.0 binary');
+  }
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const jsonLength = view.getUint32(12, true);
+  if (
+    view.getUint32(0, true) !== 0x46_54_6c_67 ||
+    view.getUint32(4, true) !== 2 ||
+    view.getUint32(8, true) !== bytes.byteLength ||
+    view.getUint32(16, true) !== 0x4e_4f_53_4a ||
+    20 + jsonLength > bytes.byteLength
+  ) {
+    throw new Error('Invalid glTF 2.0 binary');
+  }
+  return JSON.parse(new TextDecoder().decode(bytes.subarray(20, 20 + jsonLength)).trim()) as JSONDocument['json'];
+};
+
+const writeGlbJson = (source: Uint8Array<ArrayBuffer>, json: JSONDocument['json']): Uint8Array<ArrayBuffer> => {
+  const sourceView = new DataView(source.buffer, source.byteOffset, source.byteLength);
+  const sourceJsonLength = sourceView.getUint32(12, true);
+  const remainder = source.subarray(20 + sourceJsonLength);
+  const jsonBytes = BufferUtils.pad(new TextEncoder().encode(JSON.stringify(json)), 0x20);
+  const output = new Uint8Array(20 + jsonBytes.byteLength + remainder.byteLength);
+  output.set(source.subarray(0, 12));
+  const outputView = new DataView(output.buffer);
+  outputView.setUint32(8, output.byteLength, true);
+  outputView.setUint32(12, jsonBytes.byteLength, true);
+  outputView.setUint32(16, 0x4e_4f_53_4a, true);
+  output.set(jsonBytes, 20);
+  output.set(remainder, 20 + jsonBytes.byteLength);
+  return output;
+};
+
+const normalizeGlbGeometryNames = (
+  bytes: Uint8Array<ArrayBuffer>,
+  options: Omit<NormalizeGltfGeometryNamesOptions, 'format' | 'io'>,
+): Uint8Array<ArrayBuffer> => {
+  const json = readGlbJson(bytes);
+  let shapeIndex = 0;
+  for (const node of json.nodes ?? []) {
+    const mesh = node.mesh === undefined ? undefined : json.meshes?.[node.mesh];
+    if (
+      !mesh?.primitives.some((primitive) => (primitive.mode ?? Primitive.Mode['TRIANGLES']) !== Primitive.Mode['LINES'])
+    ) {
+      continue;
+    }
+    const nodeName = usableShapeName(node.name, options.rewriteLegacyGeneratedShapeNames ?? false);
+    const meshName = usableShapeName(mesh.name, options.rewriteLegacyGeneratedShapeNames ?? false);
+    const name = nodeName ?? meshName ?? formatShapeName(shapeIndex);
+    node.name = name;
+    mesh.name = name;
+    shapeIndex++;
+  }
+  for (const material of json.materials ?? []) {
+    if (options.materialNamePolicy === 'clear-all') {
+      material.name = '';
+    } else if (options.materialNamePolicy === 'clear-generated') {
+      material.name =
+        resolveMaterialName({ name: material.name, source: options.materialNameSource ?? 'authored' }) ?? '';
+    }
+  }
+  for (const scene of json.scenes ?? []) {
+    if (options.sceneNamePolicy === 'clear-all') {
+      scene.name = '';
+    } else if (options.sceneNamePolicy === 'clear-generated') {
+      scene.name = resolveSceneName({ name: scene.name, source: options.sceneNameSource ?? 'authored' }) ?? '';
+    }
+  }
+  return writeGlbJson(bytes, json);
+};
+
 /**
  * Normalize Tau geometry names inside serialized glTF or GLB content.
  *
@@ -123,14 +195,20 @@ export async function normalizeGltfGeometryNames(
     sceneNamePolicy = 'preserve',
   }: NormalizeGltfGeometryNamesOptions,
 ): Promise<Uint8Array<ArrayBuffer>> {
+  if (format === 'glb') {
+    return normalizeGlbGeometryNames(bytes, {
+      rewriteLegacyGeneratedShapeNames,
+      materialNameSource,
+      sceneNameSource,
+      materialNamePolicy,
+      sceneNamePolicy,
+    });
+  }
   const io = configuredIo ?? registerTauGltfExtensions(new NodeIO()).registerExtensions([KHRMaterialsUnlit]);
-  const document =
-    format === 'glb'
-      ? await io.readBinary(bytes)
-      : await io.readJSON({
-          json: JSON.parse(new TextDecoder().decode(bytes)) as JSONDocument['json'],
-          resources: {},
-        });
+  const document = await io.readJSON({
+    json: JSON.parse(new TextDecoder().decode(bytes)) as JSONDocument['json'],
+    resources: {},
+  });
 
   let shapeIndex = 0;
   for (const node of document.getRoot().listNodes()) {
@@ -145,10 +223,6 @@ export async function normalizeGltfGeometryNames(
 
   normalizeMaterialNames(document, materialNamePolicy, materialNameSource);
   normalizeSceneNames(document, sceneNamePolicy, sceneNameSource);
-
-  if (format === 'glb') {
-    return io.writeBinary(document);
-  }
 
   const result = await io.writeJSON(document);
   const json = embedGltfResources(result.json as unknown as Record<string, unknown>, result.resources);

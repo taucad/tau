@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/naming-convention -- wire envelopes and file-system path keys are not camelCase identifiers. */
 import { describe, expect, it } from 'vitest';
 import { isWireMessage } from '#wire.js';
 import { msgpackCodec } from '#codec/msgpack.js';

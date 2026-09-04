@@ -344,11 +344,80 @@ export const readIndexedDbProjectEvidence = async (
     }
   }, providerBasePath);
 
-/** Snapshot names and file text below an OPFS fixture for no-write assertions. */
+/** Snapshot file text below one direct IndexedDB project root. */
+export const readIndexedDbTree = async (providerBasePath: string): Promise<Readonly<Record<string, string>>> =>
+  target.evaluate(async (basePath) => {
+    const databases = await indexedDB.databases();
+    const database = databases.find(({ name }) => name?.endsWith('-fs-direct'));
+    if (!database?.name) {
+      return {};
+    }
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open(database.name!);
+      request.addEventListener(
+        'success',
+        () => {
+          resolve(request.result);
+        },
+        { once: true },
+      );
+      request.addEventListener(
+        'error',
+        () => {
+          reject(request.error ?? new Error('Failed to open IndexedDB Home'));
+        },
+        { once: true },
+      );
+    });
+    const result = async <T>(request: IDBRequest<T>): Promise<T> =>
+      new Promise<T>((resolve, reject) => {
+        request.addEventListener(
+          'success',
+          () => {
+            resolve(request.result);
+          },
+          { once: true },
+        );
+        request.addEventListener(
+          'error',
+          () => {
+            reject(request.error ?? new Error('Failed to read IndexedDB tree'));
+          },
+          { once: true },
+        );
+      });
+    try {
+      const store = db.transaction('files').objectStore('files');
+      const allKeys = await result(store.getAllKeys());
+      const keys = allKeys.map(String);
+      const root = basePath.replaceAll(/^\/+|\/$/gu, '');
+      const prefixes = [`/${root}/`, `${root}/`];
+      const entries: Array<readonly [string, string]> = [];
+      for (const key of keys.sort()) {
+        const prefix = prefixes.find((candidate) => key.startsWith(candidate));
+        if (!prefix) {
+          continue;
+        }
+        const value = await result(store.get(key) as IDBRequest<Uint8Array<ArrayBuffer> | ArrayBuffer | undefined>);
+        if (value) {
+          const bytes = value instanceof Uint8Array ? value : new Uint8Array(value);
+          entries.push([`/${key.slice(prefix.length)}`, new TextDecoder().decode(bytes)]);
+        }
+      }
+      return Object.fromEntries(entries);
+    } finally {
+      db.close();
+    }
+  }, providerBasePath);
+
+/** Snapshot names and file text below an OPFS directory path for no-write assertions. */
 export const readOpfsTree = async (fixture: string): Promise<Readonly<Record<string, string>>> =>
   target.evaluate(async (fixtureName) => {
     const root = await navigator.storage.getDirectory();
-    const fixtureRoot = await root.getDirectoryHandle(fixtureName);
+    let fixtureRoot = root;
+    for (const segment of fixtureName.split('/').filter(Boolean)) {
+      fixtureRoot = await fixtureRoot.getDirectoryHandle(segment);
+    }
     const entries: Array<readonly [string, string]> = [];
     const visit = async (directory: FileSystemDirectoryHandle, prefix: string): Promise<void> => {
       for await (const [name, handle] of directory.entries()) {
@@ -364,3 +433,14 @@ export const readOpfsTree = async (fixture: string): Promise<Readonly<Record<str
     await visit(fixtureRoot, '');
     return Object.fromEntries(entries.sort(([left], [right]) => left.localeCompare(right)));
   }, fixture);
+
+/** Read a project's physical tree through the backend selected by its durable config. */
+export const readProjectTree = async (config: StoredProjectConfig): Promise<Readonly<Record<string, string>>> => {
+  if (config.backend === 'opfs') {
+    return readOpfsTree(config.providerBasePath);
+  }
+  if (config.backend === 'indexeddb') {
+    return readIndexedDbTree(config.providerBasePath);
+  }
+  throw new Error('Webaccess tree evidence requires the directory-picker fixture handle.');
+};

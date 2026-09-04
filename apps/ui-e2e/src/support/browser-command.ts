@@ -1,37 +1,83 @@
-/* oxlint-disable max-params, no-await-in-loop, no-restricted-imports, tau-lint/no-bare-time-identifier, typescript/no-restricted-types -- Vitest command callbacks add their context parameter to the explicit external-target contract, and config-time modules cannot use test aliases. */
-import { mkdir, writeFile } from 'node:fs/promises';
+/* oxlint-disable max-params, no-await-in-loop, no-eval, no-restricted-imports, tau-lint/no-bare-time-identifier, typescript/no-restricted-types -- Vitest command callbacks add their context parameter to the explicit external-target contract, and config-time modules cannot use test aliases. `no-eval` is the external-target contract itself: `evaluateTarget`, `evaluateTargetLocator` and `waitForTarget` take a function SOURCE across the browser↔node command boundary — nothing else survives that serialization — and the page reconstitutes it. The sources are spec literals, never page-derived input. */
+import { execFile, spawn } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { createServer } from 'node:http';
+import type { Server } from 'node:http';
 import { release } from 'node:os';
 import { resolve } from 'node:path';
+import { promisify } from 'node:util';
 import type { BrowserCommand, BrowserCommandContext } from 'vitest/node';
 import type {
   TargetClickOptions,
   TargetCookie,
   TargetDiagnostics,
   TargetMouseOptions,
+  TargetPaseoConnection,
+  TargetPaseoRestFixture,
   TargetReadOptions,
   TargetState,
   TargetSurface,
+  TargetTauTestAccount,
   TargetViewport,
   TargetWebGpuProfile,
   TargetWebGpuQualificationReport,
 } from './external-target.ts';
 import { testBaseURL } from './base-url.ts';
+import { startPaseoFakeDaemon as startFakePaseoDaemon } from './paseo-fake-daemon.ts';
 import { classifyWebGpuAdapter, webGpuLaunchArguments } from './webgpu-profile.ts';
+import { listTauServeChats, readTauServeFile, startTauServeFixture } from './tau-serve-fixture.ts';
+import type { TauServeFixture, TauServeFixtureOptions } from './tau-serve-fixture.ts';
+import { browserHostScript } from './agent-host-gateway-script.ts';
+import type { GatewayScriptTurn } from './agent-host-gateway-script.ts';
 
 type ProviderContext = BrowserCommandContext['context'];
 type TargetPage = Awaited<ReturnType<ProviderContext['newPage']>>;
 
+/** Refusal the agent-host gateway fixture answers with while it is armed. */
+type AgentHostGatewayFailure = { readonly status: number; readonly message: string };
+
 type Session = {
+  readonly agentHostApiRequests: string[];
+  readonly agentHostGatewayRequests: unknown[];
   readonly consoleMessages: Array<{ readonly text: string; readonly type: string }>;
   readonly context: ProviderContext;
   readonly pageErrors: string[];
   readonly primary: TargetPage;
+  agentHostGatewayFailure?: AgentHostGatewayFailure | undefined;
+  agentHostGatewayRelease?: (() => void) | undefined;
+  agentHostGatewayServer?: Server;
   secondary?: TargetPage;
+  testUserEmail?: string;
   tracing: boolean;
 };
 
 const sessions = new Map<string, Session>();
+const hostFixtureProcesses = new Map<string, ChildProcess>();
 const outputRoot = resolve('out/test-results/vitest-browser/apps/ui-e2e/test-output');
+
+const paseoApiPath = '/v1/connectors/paseo';
+const tauApiUrl = process.env['TAU_E2E_API_URL'] ?? 'http://localhost:4000';
+const execFileAsync = promisify(execFile);
+
+const assertTauTestEmail = (email: string): void => {
+  if (!/^[a-z0-9._@-]+$/u.test(email)) {
+    throw new Error('UI E2E test-account email contains unsupported characters.');
+  }
+};
+
+const executeTauDatabase = async (statement: string): Promise<void> => {
+  await execFileAsync(
+    'docker',
+    ['exec', 'tau-postgres', 'psql', '-v', 'ON_ERROR_STOP=1', '-U', 'dev_user', '-d', 'tau_dev', '-c', statement],
+    { encoding: 'utf8' },
+  );
+};
+
+const deleteTauTestUser = async (email: string): Promise<void> => {
+  assertTauTestEmail(email);
+  await executeTauDatabase(`DELETE FROM "user" WHERE email = '${email}';`);
+};
 
 const sessionFor = (commandContext: BrowserCommandContext): Session => {
   const session = sessions.get(commandContext.sessionId);
@@ -58,6 +104,33 @@ const observePage = (session: Session, page: TargetPage): void => {
 
 const disposeSession = async (session: Session): Promise<void> => {
   const errors: unknown[] = [];
+  session.agentHostGatewayRelease?.();
+  session.agentHostGatewayRelease = undefined;
+  if (session.agentHostGatewayServer) {
+    const server = session.agentHostGatewayServer;
+    session.agentHostGatewayServer = undefined;
+    try {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => {
+          if (error) {
+            reject(error);
+          } else {
+            resolve();
+          }
+        });
+        server.closeAllConnections();
+      });
+    } catch (error) {
+      errors.push(error);
+    }
+  }
+  if (session.testUserEmail) {
+    try {
+      await deleteTauTestUser(session.testUserEmail);
+    } catch (error) {
+      errors.push(error);
+    }
+  }
   if (session.tracing) {
     try {
       await session.context.tracing.stop();
@@ -73,6 +146,47 @@ const disposeSession = async (session: Session): Promise<void> => {
   }
   if (errors.length > 0) {
     throw new AggregateError(errors, 'UI E2E target cleanup failed.');
+  }
+};
+
+export const uiAuthenticateTauTestUser: BrowserCommand<[account: TargetTauTestAccount]> = async (
+  commandContext,
+  account,
+) => {
+  assertTauTestEmail(account.email);
+  const session = sessionFor(commandContext);
+  session.testUserEmail = account.email;
+  const headers = { origin: testBaseURL };
+  const signUp = await session.context.request.post(`${tauApiUrl}/v1/auth/sign-up/email`, {
+    data: account,
+    headers,
+  });
+  if (!signUp.ok()) {
+    throw new Error(`Tau test-account sign-up failed with HTTP ${signUp.status()}.`);
+  }
+
+  await executeTauDatabase(`
+    WITH target_user AS (
+      UPDATE "user"
+      SET email_verified = true
+      WHERE email = '${account.email}'
+      RETURNING id
+    ), inserted_account AS (
+      INSERT INTO credit_account (user_id, topup_balance_micro)
+      SELECT id, 5000000 FROM target_user
+      ON CONFLICT (user_id) DO NOTHING
+      RETURNING user_id
+    )
+    INSERT INTO credit_transaction (id, user_id, delta_micro, balance_after_micro, reason)
+    SELECT 'ctx_e2e_' || user_id, user_id, 5000000, 5000000, 'topup'
+    FROM inserted_account;
+  `);
+  const signIn = await session.context.request.post(`${tauApiUrl}/v1/auth/sign-in/email`, {
+    data: { email: account.email, password: account.password },
+    headers,
+  });
+  if (!signIn.ok()) {
+    throw new Error(`Tau test-account sign-in failed with HTTP ${signIn.status()}.`);
   }
 };
 
@@ -93,6 +207,8 @@ export const uiOpenTarget: BrowserCommand = async (commandContext) => {
   context.setDefaultTimeout(10_000);
   const primary = await context.newPage();
   const session: Session = {
+    agentHostApiRequests: [],
+    agentHostGatewayRequests: [],
     consoleMessages: [],
     context,
     pageErrors: [],
@@ -112,6 +228,507 @@ export const uiCloseTarget: BrowserCommand = async (commandContext) => {
   }
   sessions.delete(commandContext.sessionId);
   await disposeSession(session);
+  /* A spec that fails mid-vertical must not leak a daemon, its two stub
+   * servers and a temp workspace onto the machine. */
+  const daemon = tauServeFixtures.get(commandContext.sessionId);
+  if (daemon) {
+    tauServeFixtures.delete(commandContext.sessionId);
+    await daemon.dispose();
+  }
+  const fixture = hostFixtureProcesses.get(commandContext.sessionId);
+  if (fixture) {
+    hostFixtureProcesses.delete(commandContext.sessionId);
+    fixture.kill('SIGTERM');
+    await Promise.race([
+      new Promise<void>((resolve) => {
+        fixture.once('exit', () => {
+          resolve();
+        });
+      }),
+      new Promise<void>((resolve) => {
+        setTimeout(resolve, 5000);
+      }),
+    ]);
+  }
+};
+
+export const uiStartHostFixture: BrowserCommand<[], string> = async (commandContext) => {
+  const fixture = spawn(process.execPath, ['--import', 'tsx', resolve('apps/ui-e2e/src/support/host-fixture.ts')], {
+    cwd: resolve('.'),
+    stdio: ['ignore', 'inherit', 'inherit', 'ipc'],
+  });
+  hostFixtureProcesses.set(commandContext.sessionId, fixture);
+  const started = new Promise<string>((resolve, reject) => {
+    fixture.once('message', (message: unknown) => {
+      if (typeof message === 'object' && message !== null && 'url' in message && typeof message.url === 'string') {
+        resolve(message.url);
+      } else {
+        reject(new Error('Host browser fixture reported an invalid address.'));
+      }
+    });
+    fixture.once('exit', (code, signal) => {
+      reject(new Error(`Host browser fixture exited before ready (${String(code)}, ${String(signal)}).`));
+    });
+  });
+  return started;
+};
+
+/**
+ * Intercepts only Paseo's sanitized REST boundary while every UI and
+ * persistence transition continues through production code.
+ */
+let fakeDaemon: Awaited<ReturnType<typeof startFakePaseoDaemon>> | undefined;
+
+/**
+ * Start the fake Paseo daemon for one spec.
+ *
+ * It runs in this Node process and the *browser* dials it with the real
+ * `@getpaseo/client`, so the relay handshake, the ECDH E2EE negotiation and
+ * the protocol-v2 session vocabulary are all real. Only the daemon behind the
+ * socket is scripted.
+ */
+export const uiStartPaseoFakeDaemon: BrowserCommand<[options: Parameters<typeof startFakePaseoDaemon>[0]]> = async (
+  _commandContext,
+  options,
+) => {
+  await fakeDaemon?.close();
+  fakeDaemon = await startFakePaseoDaemon(options);
+  return {
+    endpoint: fakeDaemon.endpoint,
+    serverId: fakeDaemon.serverId,
+    daemonPublicKeyB64: fakeDaemon.daemonPublicKeyB64,
+  };
+};
+
+/** Stop it and report every session message it saw, for assertions. */
+export const uiStopPaseoFakeDaemon: BrowserCommand = async () => {
+  const seen = fakeDaemon?.received().map(({ type }) => type) ?? [];
+  await fakeDaemon?.close();
+  fakeDaemon = undefined;
+  return seen;
+};
+
+export const uiInstallPaseoRestFixture: BrowserCommand<[fixture: TargetPaseoRestFixture]> = async (
+  commandContext,
+  fixture,
+) => {
+  const session = sessionFor(commandContext);
+  let connections: TargetPaseoConnection[] = [];
+  const headers = {
+    'access-control-allow-credentials': 'true',
+    'access-control-allow-headers': 'accept,anthropic-version,content-type',
+    'access-control-allow-methods': 'DELETE,GET,OPTIONS,POST',
+    'access-control-allow-origin': new URL(testBaseURL).origin,
+    'content-type': 'application/json',
+  };
+  const fulfillJson = async (
+    route: Parameters<Parameters<ProviderContext['route']>[1]>[0],
+    body: unknown,
+    status = 200,
+  ) => {
+    await route.fulfill({ body: JSON.stringify(body), headers, status });
+  };
+
+  await session.context.route(new RegExp(`${paseoApiPath}(?:/|$)`, 'u'), async (route) => {
+    const request = route.request();
+    if (request.method() === 'OPTIONS') {
+      await route.fulfill({ headers, status: 204 });
+      return;
+    }
+
+    const path = new URL(request.url()).pathname.slice(paseoApiPath.length);
+    if (request.method() === 'GET' && path === '') {
+      await fulfillJson(route, { connections });
+      return;
+    }
+    if (request.method() === 'POST' && path === '/pair') {
+      connections = [fixture.pairedConnection];
+      await fulfillJson(route, fixture.pairedConnection, 201);
+      return;
+    }
+
+    const connectionPath = `/${encodeURIComponent(fixture.pairedConnection.id)}`;
+    if (request.method() === 'POST' && path === `${connectionPath}/offer`) {
+      /* The one directory operation that releases pairing material. The page
+       * dials whatever relay endpoint this names — here, the fake daemon. */
+      await fulfillJson(route, {
+        offer: {
+          v: 2,
+          serverId: fixture.offer.serverId,
+          daemonPublicKeyB64: fixture.offer.daemonPublicKeyB64,
+          relay: { endpoint: fixture.offer.relayEndpoint, useTls: false },
+        },
+      });
+      return;
+    }
+    if (request.method() === 'DELETE' && path === connectionPath) {
+      connections = [];
+      await route.fulfill({ headers, status: 204 });
+      return;
+    }
+
+    await route.abort('failed');
+  });
+};
+
+/* eslint-disable @typescript-eslint/naming-convention -- Anthropic's provider wire uses snake_case. */
+/**
+ * Write one scripted assistant turn onto Anthropic's streaming wire: an
+ * optional `thinking` block, an optional `text` block, then a `tool_use` block
+ * per scripted call. A gated turn parks after the text and before the tools,
+ * where the run is on screen and provably unfinished.
+ */
+const writeScriptedTurn = async (options: {
+  readonly currentRequest: number;
+  readonly session: Session;
+  readonly turn: GatewayScriptTurn;
+  readonly writeEvent: (event: string, data: unknown) => void;
+}): Promise<void> => {
+  const { currentRequest, session, turn, writeEvent } = options;
+  const pause = async (): Promise<void> => {
+    if (!turn.gated) {
+      return;
+    }
+    const gate = Promise.withResolvers<void>();
+    session.agentHostGatewayRelease = gate.resolve;
+    await gate.promise;
+    if (session.agentHostGatewayRelease === gate.resolve) {
+      session.agentHostGatewayRelease = undefined;
+    }
+  };
+  let index = 0;
+  writeEvent('message_start', {
+    type: 'message_start',
+    message: {
+      id: `browser-host-e2e-message-${String(currentRequest)}`,
+      type: 'message',
+      role: 'assistant',
+      content: [],
+      model: 'anthropic-claude-opus-4.8',
+      stop_reason: null,
+      stop_sequence: null,
+      usage: { input_tokens: turn.usage.inputTokens, output_tokens: 0 },
+    },
+  });
+  if (turn.reasoning !== undefined) {
+    writeEvent('content_block_start', {
+      type: 'content_block_start',
+      index,
+      content_block: { type: 'thinking', thinking: '' },
+    });
+    writeEvent('content_block_delta', {
+      type: 'content_block_delta',
+      index,
+      delta: { type: 'thinking_delta', thinking: turn.reasoning },
+    });
+    writeEvent('content_block_delta', {
+      type: 'content_block_delta',
+      index,
+      delta: { type: 'signature_delta', signature: `browser-host-e2e-signature-${String(currentRequest)}` },
+    });
+    writeEvent('content_block_stop', { type: 'content_block_stop', index });
+    index += 1;
+  }
+  if (turn.text === undefined) {
+    await pause();
+  } else {
+    writeEvent('content_block_start', {
+      type: 'content_block_start',
+      index,
+      content_block: { type: 'text', text: '' },
+    });
+    writeEvent('content_block_delta', {
+      type: 'content_block_delta',
+      index,
+      delta: { type: 'text_delta', text: turn.text },
+    });
+    await pause();
+    writeEvent('content_block_stop', { type: 'content_block_stop', index });
+    index += 1;
+  }
+  for (const [callIndex, call] of (turn.toolCalls ?? []).entries()) {
+    writeEvent('content_block_start', {
+      type: 'content_block_start',
+      index,
+      content_block: {
+        type: 'tool_use',
+        id: `browser-host-e2e-call-${String(currentRequest)}-${String(callIndex)}`,
+        name: call.name,
+        input: {},
+      },
+    });
+    writeEvent('content_block_delta', {
+      type: 'content_block_delta',
+      index,
+      delta: { type: 'input_json_delta', partial_json: JSON.stringify(call.args) },
+    });
+    writeEvent('content_block_stop', { type: 'content_block_stop', index });
+    index += 1;
+  }
+  writeEvent('message_delta', {
+    type: 'message_delta',
+    delta: { stop_reason: (turn.toolCalls?.length ?? 0) > 0 ? 'tool_use' : 'end_turn', stop_sequence: null },
+    usage: { output_tokens: turn.usage.outputTokens },
+  });
+  writeEvent('message_stop', { type: 'message_stop' });
+};
+/* eslint-enable @typescript-eslint/naming-convention -- The Anthropic wire fixture ends here. */
+
+export const uiInstallAgentHostGatewayFixture: BrowserCommand<[script?: readonly GatewayScriptTurn[]]> = async (
+  commandContext,
+  script = browserHostScript,
+) => {
+  const session = sessionFor(commandContext);
+  session.agentHostGatewayRequests.length = 0;
+  session.agentHostApiRequests.length = 0;
+  session.agentHostGatewayRelease = undefined;
+  session.agentHostGatewayFailure = undefined;
+  let requestIndex = 0;
+  const headers = {
+    'access-control-allow-credentials': 'true',
+    'access-control-allow-headers': 'accept,content-type',
+    'access-control-allow-methods': 'OPTIONS,POST',
+    'access-control-allow-origin': new URL(testBaseURL).origin,
+    'content-type': 'text/event-stream',
+  };
+  const server = createServer((request, response) => {
+    // async-iife: bootstrap
+    // Node owns request-listener settlement; failures become connection errors.
+    void (async () => {
+      try {
+        if (request.method === 'OPTIONS') {
+          response.writeHead(204, {
+            ...headers,
+            'access-control-allow-headers':
+              request.headers['access-control-request-headers'] ?? headers['access-control-allow-headers'],
+          });
+          response.end();
+          return;
+        }
+
+        const requestPath = new URL(request.url ?? '/', 'http://agent-host-gateway.invalid').pathname;
+        if (request.method !== 'POST' || requestPath !== '/v1/llm/anthropic/v1/messages') {
+          throw new Error(`Unexpected browser-host gateway request: ${request.method ?? 'unknown'} ${requestPath}`);
+        }
+        if (request.headers['anthropic-version'] !== '2023-06-01') {
+          throw new Error('Browser-host Anthropic gateway request omitted anthropic-version: 2023-06-01.');
+        }
+
+        const body: string[] = [];
+        request.setEncoding('utf8');
+        for await (const chunk of request) {
+          body.push(String(chunk));
+        }
+        session.agentHostGatewayRequests.push(JSON.parse(body.join('')));
+        const { agentHostGatewayFailure } = session;
+        if (agentHostGatewayFailure) {
+          // A coded provider refusal, not a dropped socket: the browser host
+          // records it as the run's typed `RunFailureDetail`, which is what a
+          // reattached terminal log has to render back.
+          response.writeHead(agentHostGatewayFailure.status, { ...headers, 'content-type': 'application/json' });
+          response.end(
+            JSON.stringify({
+              type: 'error',
+              error: { type: 'api_error', message: agentHostGatewayFailure.message },
+            }),
+          );
+          return;
+        }
+        const currentRequest = requestIndex++;
+        const writeEvent = (event: string, data: unknown): void => {
+          response.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+        };
+        response.writeHead(200, { ...headers, 'cache-control': 'no-cache' });
+        response.flushHeaders();
+        // The walk wraps: a retried turn replays the script from the top, which
+        // is what the rewind vertical in `browser-agent-host.spec.ts` asserts on.
+        await writeScriptedTurn({
+          currentRequest,
+          session,
+          turn: script[currentRequest % script.length]!,
+          writeEvent,
+        });
+        response.end();
+      } catch (error) {
+        // Destroying the socket makes a rejected request invisible to the spec:
+        // the gateway-request count simply never advances and the poll dies at
+        // its timeout with no cause. Name the fault before dropping the wire.
+        console.error('[agent-host-gateway] rejected request', error);
+        response.destroy(error instanceof Error ? error : new Error(String(error)));
+      }
+    })();
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      server.off('error', reject);
+      resolve();
+    });
+  });
+  // The browser-host vertical proves the API absent from the DATA path; the
+  // models catalog is control-plane and is stubbed with the real catalog rows
+  // so provider-aware wire gating sees genuine provider ids without a live API.
+  const { isModelListEntryEnabled, modelList, modelListEntryToModel } =
+    await import('../../../api/app/api/models/model.constants.js');
+  const catalog = Object.values(modelList)
+    .flatMap((entries) => Object.values(entries))
+    .filter((entry) => isModelListEntryEnabled(entry))
+    .map((entry) => modelListEntryToModel(entry));
+  await session.context.route(/\/v1\/models(?:\?|$)/u, async (route) => {
+    await route.fulfill({
+      status: 200,
+      headers: {
+        'access-control-allow-credentials': 'true',
+        'access-control-allow-origin': new URL(testBaseURL).origin,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(catalog),
+    });
+  });
+  session.agentHostGatewayServer = server;
+  const address = server.address();
+  if (!address || typeof address === 'string') {
+    throw new Error('Agent-host gateway fixture did not bind a TCP address.');
+  }
+  await session.context.route(/\/v1\/llm\//u, async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    url.hostname = '127.0.0.1';
+    url.port = String(address.port);
+    await route.continue({ url: url.href });
+  });
+  // A browser-placed chat's runs live in its durable log; the API never held
+  // them. Record every chat-run call so a vertical can prove the reattach did
+  // not ask (the API is absent from this stack, so the call would 503 anyway).
+  await session.context.route(/\/v1\/chat\//u, async (route) => {
+    session.agentHostApiRequests.push(new URL(route.request().url()).pathname);
+    // Recorded, never redirected: the call still reaches the (absent) API
+    // exactly as it did before, so this observation changes no behaviour.
+    await route.continue();
+  });
+};
+
+export const uiSetAgentHostGatewayFailure: BrowserCommand<[failure?: AgentHostGatewayFailure]> = (
+  commandContext,
+  failure,
+) => {
+  sessionFor(commandContext).agentHostGatewayFailure = failure;
+};
+
+export const uiReadAgentHostApiRequests: BrowserCommand<[], string[]> = (commandContext) => [
+  ...sessionFor(commandContext).agentHostApiRequests,
+];
+
+export const uiReleaseAgentHostGatewayFixture: BrowserCommand = (commandContext) => {
+  const session = sessionFor(commandContext);
+  if (!session.agentHostGatewayRelease) {
+    throw new Error('Agent-host gateway completion is not waiting at its deterministic gate.');
+  }
+  session.agentHostGatewayRelease();
+};
+
+export const uiReadAgentHostGatewayRequests: BrowserCommand<[], unknown[]> = (commandContext) => [
+  ...sessionFor(commandContext).agentHostGatewayRequests,
+];
+
+/* ---------------------------------------------------------------------------
+ * AV-4: a real `tau serve` daemon, serving the real serve-mode SPA (rung 1).
+ * ------------------------------------------------------------------------- */
+
+type RunningTauServe = Awaited<ReturnType<typeof startTauServeFixture>>;
+const tauServeFixtures = new Map<string, RunningTauServe>();
+
+const tauServeFor = (commandContext: BrowserCommandContext): RunningTauServe => {
+  const fixture = tauServeFixtures.get(commandContext.sessionId);
+  if (!fixture) {
+    throw new Error('The tau serve fixture is not running for this session.');
+  }
+  return fixture;
+};
+
+export const uiStartTauServeFixture: BrowserCommand<[options?: TauServeFixtureOptions], TauServeFixture> = async (
+  commandContext,
+  options = {},
+) => {
+  const session = sessionFor(commandContext);
+  session.agentHostApiRequests.length = 0;
+  /* The API is absent from this stack by construction: a rung-1 turn goes
+   * daemon-direct. Record any `/v1/chat/*` the page still tries so the vertical
+   * can assert on the absence rather than on a silent 503. */
+  await session.context.route(/\/v1\/chat\//u, async (route) => {
+    session.agentHostApiRequests.push(new URL(route.request().url()).pathname);
+    await route.fulfill({ status: 503, body: '{}', headers: { 'content-type': 'application/json' } });
+  });
+  /* The model *catalog* is metadata, not the chat data path: the daemon needs a
+   * resolved provider wire on the admission it is handed, and no API runs in
+   * this stack. Stubbing it leaves the AV-4 assertion — that no `/v1/chat/*`
+   * request is ever made — untouched. */
+  await session.context.route(/\/v1\/models(?:\?|$)/u, async (route) => {
+    const request = route.request();
+    /* `getModels` fetches with `credentials: 'include'`, and a credentialed
+     * response may not answer `*` — it must echo the requesting origin and
+     * allow credentials, or the browser drops it before the page sees it. */
+    const origin = request.headers()['origin'] ?? '*';
+    const headers = {
+      'content-type': 'application/json',
+      'access-control-allow-origin': origin,
+      'access-control-allow-credentials': 'true',
+      'access-control-allow-headers': 'accept,content-type',
+      'access-control-allow-methods': 'GET,OPTIONS',
+    };
+    if (request.method() === 'OPTIONS') {
+      await route.fulfill({ status: 204, headers });
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      headers,
+      body: JSON.stringify([
+        {
+          id: 'anthropic-claude-opus-4.8',
+          providerKind: 'tau-hosted',
+          name: 'Claude Opus 4.8',
+          slug: 'claude-opus-4-8',
+          recommended: true,
+          model: 'claude-opus-4-8',
+          provider: { id: 'anthropic', name: 'Anthropic' },
+          details: {
+            family: 'claude',
+            families: ['claude'],
+            contextWindow: 200_000,
+            maxTokens: 64_000,
+            cost: { inputTokens: 5, outputTokens: 25, cacheReadTokens: 0.5, cacheWriteTokens: 6.25 },
+          },
+          configuration: { streaming: true },
+          support: { tools: true, toolChoice: true, modalities: { input: ['text', 'image'], output: ['text'] } },
+        },
+      ]),
+    });
+  });
+  const fixture = await startTauServeFixture(options);
+  tauServeFixtures.set(commandContext.sessionId, fixture);
+  return { origin: fixture.origin, workspace: fixture.workspace };
+};
+
+export const uiReleaseTauServeGateway: BrowserCommand = (commandContext) => {
+  tauServeFor(commandContext).release();
+};
+
+export const uiReadTauServeFile: BrowserCommand<[relativePath: string], string | undefined> = async (
+  commandContext,
+  relativePath,
+) => readTauServeFile(tauServeFor(commandContext).workspace, relativePath);
+
+export const uiListTauServeChats: BrowserCommand<[], readonly string[]> = async (commandContext) =>
+  listTauServeChats(tauServeFor(commandContext).workspace);
+
+export const uiStopTauServeFixture: BrowserCommand = async (commandContext) => {
+  const fixture = tauServeFixtures.get(commandContext.sessionId);
+  if (!fixture) {
+    return;
+  }
+  tauServeFixtures.delete(commandContext.sessionId);
+  await fixture.dispose();
 };
 
 export const uiCaptureTargetDiagnostics: BrowserCommand<[], TargetDiagnostics> = async (commandContext) => {
@@ -154,6 +771,7 @@ export const uiNavigateTarget: BrowserCommand<
 export const uiReloadTarget: BrowserCommand<[surface?: TargetSurface]> = async (commandContext, surface) => {
   await pageFor(sessionFor(commandContext), surface).reload();
 };
+
 export const uiQualifyWebGpu: BrowserCommand<[profile: TargetWebGpuProfile], TargetWebGpuQualificationReport> = async (
   commandContext,
   profile,
@@ -448,6 +1066,15 @@ export const uiFillTarget: BrowserCommand<[selector: string, value: string, surf
   await pageFor(sessionFor(commandContext), surface).locator(selector).fill(value);
 };
 
+export const uiTypeTarget: BrowserCommand<[selector: string, value: string, surface?: TargetSurface]> = async (
+  commandContext,
+  selector,
+  value,
+  surface,
+) => {
+  await pageFor(sessionFor(commandContext), surface).locator(selector).pressSequentially(value);
+};
+
 export const uiPressTarget: BrowserCommand<[selector: string, key: string, surface?: TargetSurface]> = async (
   commandContext,
   selector,
@@ -624,6 +1251,11 @@ export const uiSampleCameraDuringClick: BrowserCommand<[selector: string, frameC
   frameCount,
 ) => {
   const page = sessionFor(commandContext).primary;
+  const box = await page.locator(selector).boundingBox();
+  if (!box) {
+    throw new Error('Viewport gizmo bounding box is unavailable.');
+  }
+
   const samples = page.evaluate(async (count) => {
     const bridge = (
       globalThis as unknown as {
@@ -644,10 +1276,6 @@ export const uiSampleCameraDuringClick: BrowserCommand<[selector: string, frameC
     }
     return frames;
   }, frameCount);
-  const box = await page.locator(selector).boundingBox();
-  if (!box) {
-    throw new Error('Viewport gizmo bounding box is unavailable.');
-  }
   await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
   return samples;
 };
@@ -675,6 +1303,13 @@ export const uiAddCookies: BrowserCommand<[cookies: readonly TargetCookie[]]> = 
   await sessionFor(commandContext).context.addCookies([...cookies]);
 };
 
+export const uiGrantPermissions: BrowserCommand<[permissions: readonly string[]]> = async (
+  commandContext,
+  permissions,
+) => {
+  await sessionFor(commandContext).context.grantPermissions([...permissions], { origin: testBaseURL });
+};
+
 export const uiChooseTargetFile: BrowserCommand<
   [triggerSelector: string, file: { readonly base64: string; readonly mimeType: string; readonly name: string }]
 > = async (commandContext, triggerSelector, file) => {
@@ -683,6 +1318,25 @@ export const uiChooseTargetFile: BrowserCommand<
   await page.locator(triggerSelector).click();
   const fileChooser = await chooser;
   await fileChooser.setFiles({ buffer: Buffer.from(file.base64, 'base64'), mimeType: file.mimeType, name: file.name });
+};
+
+export const uiDownloadTarget: BrowserCommand<
+  [triggerSelector: string],
+  { readonly base64: string; readonly suggestedFilename: string }
+> = async (commandContext, triggerSelector) => {
+  const page = sessionFor(commandContext).primary;
+  const pendingDownload = page.waitForEvent('download', { timeout: 120_000 });
+  await page.locator(triggerSelector).click();
+  const download = await pendingDownload;
+  const path = await download.path();
+  if (!path) {
+    throw new Error('UI E2E download did not expose a readable artifact path.');
+  }
+  const bytes = await readFile(path);
+  return {
+    base64: bytes.toString('base64'),
+    suggestedFilename: download.suggestedFilename(),
+  };
 };
 
 export const uiReadTargetEvents: BrowserCommand<
@@ -699,6 +1353,7 @@ export const uiReadTargetEvents: BrowserCommand<
 export const uiBrowserCommands = {
   uiAddCookies,
   uiAddInitScript,
+  uiAuthenticateTauTestUser,
   uiCaptureTargetDiagnostics,
   uiChooseTargetFile,
   uiClickTarget,
@@ -706,6 +1361,7 @@ export const uiBrowserCommands = {
   uiCloseTarget,
   uiCookies,
   uiDragTarget,
+  uiDownloadTarget,
   uiEmulateColorScheme,
   uiEmulateContrast,
   uiEmulateForcedColors,
@@ -713,7 +1369,14 @@ export const uiBrowserCommands = {
   uiEvaluateTargetLocator,
   uiFillTarget,
   uiFocusTarget,
+  uiGrantPermissions,
   uiHoverTarget,
+  uiInstallPaseoRestFixture,
+  uiStartPaseoFakeDaemon,
+  uiStopPaseoFakeDaemon,
+  uiInstallAgentHostGatewayFixture,
+  uiReadAgentHostApiRequests,
+  uiSetAgentHostGatewayFailure,
   uiKeyboardPress,
   uiMouseClick,
   uiMouseDown,
@@ -722,14 +1385,23 @@ export const uiBrowserCommands = {
   uiNavigateTarget,
   uiOpenSecondaryTarget,
   uiOpenTarget,
-  uiQualifyWebGpu,
   uiPressTarget,
+  uiQualifyWebGpu,
   uiReadTarget,
+  uiReadAgentHostGatewayRequests,
+  uiReleaseAgentHostGatewayFixture,
   uiReadTargetEvents,
   uiReloadTarget,
   uiScreenshotTarget,
   uiSampleCameraDuringClick,
   uiScrollTarget,
   uiSetViewport,
+  uiStartHostFixture,
+  uiStartTauServeFixture,
+  uiStopTauServeFixture,
+  uiReleaseTauServeGateway,
+  uiReadTauServeFile,
+  uiListTauServeChats,
+  uiTypeTarget,
   uiWaitForTarget,
 };

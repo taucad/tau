@@ -2,6 +2,7 @@
 import { expect, inject } from 'vitest';
 import type { Locator } from 'vitest/browser';
 import { locators, server } from 'vitest/browser';
+import type { GatewayScriptTurn } from '#support/agent-host-gateway-script.js';
 
 export type TargetSurface = 'primary' | 'secondary';
 export type TargetSelector = Locator | string;
@@ -42,7 +43,68 @@ export type TargetDiagnostics = {
   readonly tracePath?: string;
   readonly url: string;
 };
+export type TargetDownload = { readonly base64: string; readonly suggestedFilename: string };
+/** What {@link startPaseoFakeDaemon} is scripted with. @public */
+export type FakePaseoDaemonScript = {
+  readonly agents?: ReadonlyArray<{
+    readonly id: string;
+    readonly title: string;
+    readonly provider: string;
+    readonly model: string;
+  }>;
+  readonly turn?: { readonly items: readonly unknown[] };
+};
+
+/** Where the page dials the fake daemon, and the identity it pins. @public */
+export type FakePaseoDaemonHandle = {
+  readonly endpoint: string;
+  readonly serverId: string;
+  readonly daemonPublicKeyB64: string;
+};
+
+export type TargetPaseoConnection = {
+  readonly id: string;
+  readonly label: string;
+  readonly serverId: string;
+  readonly relayEndpoint: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+};
+export type TargetPaseoAgent = {
+  readonly id: string;
+  readonly label: string;
+  readonly provider: string;
+  readonly status: string;
+};
+export type TargetPaseoProvider = {
+  readonly provider: string;
+  readonly label: string;
+  readonly status: string;
+  readonly enabled: boolean;
+  readonly modelCount: number;
+};
+export type TargetPaseoRestFixture = {
+  readonly pairedConnection: TargetPaseoConnection;
+  /**
+   * The pairing material `POST /:id/offer` releases.
+   *
+   * The page opens the real E2EE session against whatever this names, so
+   * the fake daemon supplies it — nothing about the SDK path is stubbed.
+   */
+  readonly offer: {
+    readonly serverId: string;
+    readonly daemonPublicKeyB64: string;
+    readonly relayEndpoint: string;
+  };
+};
+export type TargetTauTestAccount = {
+  readonly email: string;
+  readonly name: string;
+  readonly password: string;
+};
 export type TargetWebGpuProfile = 'disabled' | 'hardware' | 'software';
+/** The AV-4 daemon fixture: an origin to navigate to, and a directory to read. */
+export type TargetTauServeFixture = { readonly origin: string; readonly workspace: string };
 export type TargetWebGpuQualificationReport = Readonly<{
   profile: TargetWebGpuProfile;
   secureContext: boolean;
@@ -84,6 +146,7 @@ declare module 'vitest/browser' {
   }
 
   interface BrowserCommands {
+    uiAuthenticateTauTestUser(account: TargetTauTestAccount): Promise<void>;
     uiAddCookies(cookies: readonly TargetCookie[]): Promise<void>;
     uiAddInitScript(source: string, argument?: unknown): Promise<void>;
     uiCaptureTargetDiagnostics(): Promise<TargetDiagnostics>;
@@ -96,6 +159,7 @@ declare module 'vitest/browser' {
     uiCloseTarget(): Promise<void>;
     uiCookies(): Promise<TargetCookie[]>;
     uiDragTarget(source: string, target: string, surface?: TargetSurface): Promise<void>;
+    uiDownloadTarget(triggerSelector: string): Promise<TargetDownload>;
     uiEmulateColorScheme(colorScheme: 'dark' | 'light' | 'no-preference', surface?: TargetSurface): Promise<void>;
     uiEmulateContrast(contrast: 'more' | 'no-preference', surface?: TargetSurface): Promise<void>;
     uiEmulateForcedColors(forcedColors: 'active' | 'none', surface?: TargetSurface): Promise<void>;
@@ -108,7 +172,12 @@ declare module 'vitest/browser' {
     ): Promise<unknown>;
     uiFillTarget(selector: string, value: string, surface?: TargetSurface): Promise<void>;
     uiFocusTarget(selector: string, surface?: TargetSurface): Promise<void>;
+    uiGrantPermissions(permissions: readonly string[]): Promise<void>;
     uiHoverTarget(selector: string, surface?: TargetSurface): Promise<void>;
+    uiInstallPaseoRestFixture(fixture: TargetPaseoRestFixture): Promise<void>;
+    uiStartPaseoFakeDaemon(options: FakePaseoDaemonScript): Promise<FakePaseoDaemonHandle>;
+    uiStopPaseoFakeDaemon(): Promise<readonly string[]>;
+    uiInstallAgentHostGatewayFixture(script?: readonly GatewayScriptTurn[]): Promise<void>;
     uiKeyboardPress(key: string, surface?: TargetSurface): Promise<void>;
     uiMouseClick(x: number, y: number, options?: TargetClickOptions, surface?: TargetSurface): Promise<void>;
     uiMouseDown(options?: { readonly button?: 'left' | 'middle' | 'right' }, surface?: TargetSurface): Promise<void>;
@@ -120,6 +189,10 @@ declare module 'vitest/browser' {
     uiPressTarget(selector: string, key: string, surface?: TargetSurface): Promise<void>;
     uiQualifyWebGpu(profile: TargetWebGpuProfile): Promise<TargetWebGpuQualificationReport>;
     uiReadTarget(selector: string, options?: TargetReadOptions, surface?: TargetSurface): Promise<TargetState>;
+    uiReadAgentHostApiRequests(): Promise<string[]>;
+    uiReadAgentHostGatewayRequests(): Promise<unknown[]>;
+    uiReleaseAgentHostGatewayFixture(): Promise<void>;
+    uiSetAgentHostGatewayFailure(failure?: { readonly status: number; readonly message: string }): Promise<void>;
     uiReadTargetEvents(): Promise<{
       readonly consoleMessages: ReadonlyArray<{ readonly text: string; readonly type: string }>;
       readonly pageErrors: readonly string[];
@@ -129,6 +202,13 @@ declare module 'vitest/browser' {
     uiSampleCameraDuringClick(selector: string, frameCount: number): Promise<unknown[]>;
     uiScrollTarget(selector: string, surface?: TargetSurface): Promise<void>;
     uiSetViewport(viewport: TargetViewport, surface?: TargetSurface): Promise<void>;
+    uiStartHostFixture(): Promise<string>;
+    uiStartTauServeFixture(options?: { readonly externalAgents?: boolean }): Promise<TargetTauServeFixture>;
+    uiStopTauServeFixture(): Promise<void>;
+    uiReleaseTauServeGateway(): Promise<void>;
+    uiReadTauServeFile(relativePath: string): Promise<string | undefined>;
+    uiListTauServeChats(): Promise<readonly string[]>;
+    uiTypeTarget(selector: string, value: string, surface?: TargetSurface): Promise<void>;
     uiWaitForTarget(source: string, argument?: unknown, timeout?: number, surface?: TargetSurface): Promise<void>;
   }
 }
@@ -158,16 +238,22 @@ export const click = (selector: TargetSelector, options?: TargetClickOptions, su
   server.commands.uiClickTarget(selectorFor(selector), options ?? {}, surface);
 export const fill = (selector: TargetSelector, value: string, surface?: TargetSurface): Promise<void> =>
   server.commands.uiFillTarget(selectorFor(selector), value, surface);
+export const type = (selector: TargetSelector, value: string, surface?: TargetSurface): Promise<void> =>
+  server.commands.uiTypeTarget(selectorFor(selector), value, surface);
 export const press = (selector: TargetSelector, key: string, surface?: TargetSurface): Promise<void> =>
   server.commands.uiPressTarget(selectorFor(selector), key, surface);
 export const hover = (selector: TargetSelector, surface?: TargetSurface): Promise<void> =>
   server.commands.uiHoverTarget(selectorFor(selector), surface);
 export const focus = (selector: TargetSelector, surface?: TargetSurface): Promise<void> =>
   server.commands.uiFocusTarget(selectorFor(selector), surface);
+export const grantPermissions = (permissions: readonly string[]): Promise<void> =>
+  server.commands.uiGrantPermissions(permissions);
 export const scrollIntoView = (selector: TargetSelector, surface?: TargetSurface): Promise<void> =>
   server.commands.uiScrollTarget(selectorFor(selector), surface);
 export const drag = (source: TargetSelector, destination: TargetSelector, surface?: TargetSurface): Promise<void> =>
   server.commands.uiDragTarget(selectorFor(source), selectorFor(destination), surface);
+export const download = (trigger: TargetSelector): Promise<TargetDownload> =>
+  server.commands.uiDownloadTarget(selectorFor(trigger));
 export const read = (
   selector: TargetSelector,
   options?: TargetReadOptions,
@@ -251,6 +337,8 @@ export const openSecondary = (path: string): Promise<void> => server.commands.ui
 export const closeSecondary = (): Promise<void> => server.commands.uiCloseSecondaryTarget();
 export const cookies = (): Promise<TargetCookie[]> => server.commands.uiCookies();
 export const addCookies = (values: readonly TargetCookie[]): Promise<void> => server.commands.uiAddCookies(values);
+export const authenticateTauTestUser = (account: TargetTauTestAccount): Promise<void> =>
+  server.commands.uiAuthenticateTauTestUser(account);
 export const chooseFile = (
   trigger: TargetSelector,
   file: { readonly base64: string; readonly mimeType: string; readonly name: string },
@@ -322,6 +410,38 @@ export const expectGeometryFramed = async (): Promise<void> => {
     });
   }
 };
+export const startHostFixture = (): Promise<string> => server.commands.uiStartHostFixture();
+
+/** AV-4 (rung 1): a real `tau serve` daemon serving the real serve-mode SPA. */
+export const startTauServeFixture = (
+  options: { readonly externalAgents?: boolean } = {},
+): Promise<TargetTauServeFixture> => server.commands.uiStartTauServeFixture(options);
+export const stopTauServeFixture = (): Promise<void> => server.commands.uiStopTauServeFixture();
+export const releaseTauServeGateway = (): Promise<void> => server.commands.uiReleaseTauServeGateway();
+export const readTauServeFile = (relativePath: string): Promise<string | undefined> =>
+  server.commands.uiReadTauServeFile(relativePath);
+export const listTauServeChats = (): Promise<readonly string[]> => server.commands.uiListTauServeChats();
+export const installPaseoRestFixture = (fixture: TargetPaseoRestFixture): Promise<void> =>
+  server.commands.uiInstallPaseoRestFixture(fixture);
+
+/** Start the fake Paseo daemon the page opens its real E2EE session against. */
+export const startPaseoFakeDaemon = (options: FakePaseoDaemonScript): Promise<FakePaseoDaemonHandle> =>
+  server.commands.uiStartPaseoFakeDaemon(options);
+
+/** Stop it, and report every session message it received. */
+export const stopPaseoFakeDaemon = (): Promise<readonly string[]> => server.commands.uiStopPaseoFakeDaemon();
+/** Installs the Anthropic-wire gateway fixture; omit `script` for the default browser-host script. */
+export const installAgentHostGatewayFixture = (script?: readonly GatewayScriptTurn[]): Promise<void> =>
+  server.commands.uiInstallAgentHostGatewayFixture(script);
+export const readAgentHostGatewayRequests = (): Promise<unknown[]> => server.commands.uiReadAgentHostGatewayRequests();
+export const releaseAgentHostGatewayFixture = (): Promise<void> => server.commands.uiReleaseAgentHostGatewayFixture();
+/** Every `/v1/chat/...` path the page asked the (absent) API for since the fixture was installed. */
+export const readAgentHostApiRequests = (): Promise<string[]> => server.commands.uiReadAgentHostApiRequests();
+/** Arms (or disarms, with no argument) a coded provider refusal on the gateway fixture. */
+export const setAgentHostGatewayFailure = (failure?: {
+  readonly status: number;
+  readonly message: string;
+}): Promise<void> => server.commands.uiSetAgentHostGatewayFailure(failure);
 
 export const expectVisible = async (
   selector: TargetSelector,

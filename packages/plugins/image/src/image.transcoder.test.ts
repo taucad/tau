@@ -28,7 +28,7 @@ vi.mock('nanoraster', async (importOriginal) => ({
   renderImages: vi.fn(),
 }));
 vi.mock('#image-backend.js', () => ({ loadImageBackend: backendMock.load }));
-vi.mock('@taucad/geometry-core', () => ({ readGltfSceneBounds: sceneBoundsMock.read }));
+vi.mock('#gltf-scene-bounds.js', () => ({ readGltfSceneBounds: sceneBoundsMock.read }));
 
 const createRuntime = (): TranscoderRuntime =>
   mock<TranscoderRuntime>({
@@ -92,7 +92,7 @@ describe('image transcoder', () => {
 
   describe('initialize', () => {
     it('should version renderer output for export cache invalidation', () => {
-      expect(imageDefinition.version).toBe('9.0.0');
+      expect(imageDefinition.version).toBe('10.0.0');
     });
 
     it('should load the renderer and describe its adapter once during initialize', () => {
@@ -186,7 +186,7 @@ describe('image transcoder', () => {
           from: 'glb',
           to: 'webp',
           files: [glbFile()],
-          options: {
+          options: imageEdgeSchemas.webp.parse({
             width: 768,
             height: 576,
             camera: {
@@ -196,7 +196,7 @@ describe('image transcoder', () => {
               margin: 0.1,
               projection: { kind: 'perspective', verticalFieldOfView: 45 },
             },
-          },
+          }),
         },
         runtime,
         context,
@@ -248,14 +248,14 @@ describe('image transcoder', () => {
           from: 'glb',
           to: 'webp',
           files: [glbFile()],
-          options: {
+          options: imageEdgeSchemas.webp.parse({
             mode: 'batch',
             views: [
               { id: 'front', camera: boundsCamera },
               { id: 'top', camera: { ...boundsCamera, direction: [0, 0, 1], up: [0, 1, 0] } },
               { id: 'native', camera: { framing: 'fit', direction: [1, -1, 1], up: [0, 0, 1] } },
             ],
-          },
+          }),
         },
         runtime,
         context,
@@ -280,7 +280,11 @@ describe('image transcoder', () => {
       } as const;
       renderImages.mockResolvedValue(timedImages([{ id: 'single', file }]));
 
-      await imageDefinition.transcode({ from: 'glb', to: 'webp', files: [glbFile()], options: {} }, runtime, context);
+      await imageDefinition.transcode(
+        { from: 'glb', to: 'webp', files: [glbFile()], options: imageEdgeSchemas.webp.parse({}) },
+        runtime,
+        context,
+      );
 
       expect(sceneBoundsMock.read).not.toHaveBeenCalled();
     });
@@ -295,8 +299,9 @@ describe('image transcoder', () => {
       } as const;
       renderImages.mockResolvedValue(timedImages([{ id: 'single', file }]));
 
-      await imageDefinition.transcode({ from: 'glb', to: 'webp', files: [glbFile()], options: {} }, runtime, context);
-      await imageDefinition.transcode({ from: 'glb', to: 'webp', files: [glbFile()], options: {} }, runtime, context);
+      const options = imageEdgeSchemas.webp.parse({});
+      await imageDefinition.transcode({ from: 'glb', to: 'webp', files: [glbFile()], options }, runtime, context);
+      await imageDefinition.transcode({ from: 'glb', to: 'webp', files: [glbFile()], options }, runtime, context);
 
       expect(backendMock.load).toHaveBeenCalledOnce();
       expect(renderImages).toHaveBeenCalledTimes(2);
@@ -313,7 +318,7 @@ describe('image transcoder', () => {
       renderImages.mockResolvedValue(timedImages([{ id: 'single', file: thumbnail }]));
 
       const result = await imageDefinition.transcode(
-        { from: 'glb', to: 'webp', files: [glbFile()], options: {} },
+        { from: 'glb', to: 'webp', files: [glbFile()], options: imageEdgeSchemas.webp.parse({}) },
         runtime,
         context,
       );
@@ -366,11 +371,28 @@ describe('image transcoder', () => {
           ]),
         );
 
-        const result = await imageDefinition.transcode(
-          { from: 'glb', to: format, files: [glbFile()], options: { width: 32, height: 24 } },
-          runtime,
-          context,
-        );
+        const request =
+          format === 'png'
+            ? {
+                from: 'glb' as const,
+                to: format,
+                files: [glbFile()],
+                options: imageEdgeSchemas.png.parse({ width: 32, height: 24 }),
+              }
+            : format === 'webp'
+              ? {
+                  from: 'glb' as const,
+                  to: format,
+                  files: [glbFile()],
+                  options: imageEdgeSchemas.webp.parse({ width: 32, height: 24 }),
+                }
+              : {
+                  from: 'glb' as const,
+                  to: format,
+                  files: [glbFile()],
+                  options: imageEdgeSchemas.jpeg.parse({ width: 32, height: 24 }),
+                };
+        const result = await imageDefinition.transcode(request, runtime, context);
 
         expect(result).toEqual({
           success: true,
@@ -396,7 +418,7 @@ describe('image transcoder', () => {
       const bytes = new Uint8Array([0x67, 0x6c, 0x54, 0x46]);
 
       await imageDefinition.transcode(
-        { from: 'glb', to: 'png', files: [glbFile(bytes)], options: {} },
+        { from: 'glb', to: 'png', files: [glbFile(bytes)], options: imageEdgeSchemas.png.parse({}) },
         runtime,
         context,
       );
@@ -440,7 +462,11 @@ describe('image transcoder', () => {
       } as const;
       renderImages.mockResolvedValue(timedImages([{ id: 'single', file }]));
 
-      await imageDefinition.transcode({ from: 'glb', to: 'jpeg', files: [glbFile()], options: {} }, runtime, context);
+      await imageDefinition.transcode(
+        { from: 'glb', to: 'jpeg', files: [glbFile()], options: imageEdgeSchemas.jpeg.parse({}) },
+        runtime,
+        context,
+      );
 
       expect(renderImages).toHaveBeenCalledWith(
         expect.any(Uint8Array),
@@ -463,7 +489,7 @@ describe('image transcoder', () => {
           from: 'glb',
           to: 'png',
           files: [glbFile()],
-          options: {
+          options: imageEdgeSchemas.png.parse({
             width: 1920,
             height: 1080,
             camera: {
@@ -477,6 +503,11 @@ describe('image transcoder', () => {
             label: 'Housing datum A',
             surfaces: false,
             lines: true,
+            lighting: {
+              lights: [{ direction: [0, 1, 0], color: [2, 2, 2] }],
+              space: 'world',
+              exposure: 1.5,
+            },
             visiblePrimitives: [{ nodeIndex: 2, meshIndex: 1, primitiveIndex: 0 }],
             sections: {
               planes: [
@@ -486,7 +517,7 @@ describe('image transcoder', () => {
               clipSurfaces: true,
               clipLines: false,
             },
-          },
+          }),
         },
         runtime,
         context,
@@ -499,6 +530,11 @@ describe('image transcoder', () => {
           height: 1080,
           surfaces: false,
           lines: true,
+          lighting: {
+            lights: [{ direction: [0, 1, 0], color: [2, 2, 2] }],
+            space: 'world',
+            exposure: 1.5,
+          },
           visiblePrimitives: [{ nodeIndex: 2, meshIndex: 1, primitiveIndex: 0 }],
           sections: {
             planes: [
@@ -577,7 +613,7 @@ describe('image transcoder', () => {
           from: 'glb',
           to: 'webp',
           files: [glbFile()],
-          options: {
+          options: imageEdgeSchemas.webp.parse({
             mode: 'batch',
             views,
             axes: true,
@@ -588,7 +624,7 @@ describe('image transcoder', () => {
               clipSurfaces: true,
               clipLines: true,
             },
-          },
+          }),
         },
         runtime,
         context,
@@ -636,7 +672,7 @@ describe('image transcoder', () => {
       renderImages.mockRejectedValue(new Error('adapter-unavailable: no gpu adapter'));
 
       const result = await imageDefinition.transcode(
-        { from: 'glb', to: 'webp', files: [glbFile()], options: {} },
+        { from: 'glb', to: 'webp', files: [glbFile()], options: imageEdgeSchemas.webp.parse({}) },
         runtime,
         context,
       );
@@ -654,7 +690,7 @@ describe('image transcoder', () => {
       'should reject a non-singular GLB source set',
       async ({ files }) => {
         const result = await imageDefinition.transcode(
-          { from: 'glb', to: 'webp', files, options: {} },
+          { from: 'glb', to: 'webp', files, options: imageEdgeSchemas.webp.parse({}) },
           runtime,
           context,
         );
@@ -667,16 +703,21 @@ describe('image transcoder', () => {
       },
     );
 
-    it('should reject options that violate the edge schema', async () => {
-      const result = await imageDefinition.transcode(
-        { from: 'glb', to: 'png', files: [glbFile()], options: { width: 99_999 } },
-        runtime,
-        context,
-      );
+    it('should trust the options already validated by the runtime boundary', async () => {
+      const options = imageEdgeSchemas.png.parse({});
+      const parse = vi.spyOn(imageEdgeSchemas.png, 'parse');
+      const file = {
+        name: 'render.png',
+        bytes: new Uint8Array([1]),
+        mimeType: 'image/png',
+        width: 768,
+        height: 432,
+      } as const;
+      renderImages.mockResolvedValue(timedImages([{ id: 'single', file }]));
 
-      expect(result.success).toBe(false);
-      expect(result.issues[0]?.message).toContain('Too big');
-      expect(renderImages).not.toHaveBeenCalled();
+      await imageDefinition.transcode({ from: 'glb', to: 'png', files: [glbFile()], options }, runtime, context);
+
+      expect(parse).not.toHaveBeenCalled();
     });
   });
 

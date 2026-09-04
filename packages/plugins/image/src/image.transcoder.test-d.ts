@@ -92,6 +92,11 @@ describe('image export option types', () => {
         axes: true,
         scaleBar: true,
         surfaces: false,
+        lighting: {
+          lights: [{ direction: [0, 1, 0], color: [2, 2, 2] }],
+          space: 'world',
+          exposure: 1.5,
+        },
         visiblePrimitives: [{ nodeIndex: 0, meshIndex: 0, primitiveIndex: 0 }],
         sections: {
           planes: [

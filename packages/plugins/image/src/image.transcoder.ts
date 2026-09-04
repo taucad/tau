@@ -17,11 +17,12 @@
  */
 
 import type * as Nanoraster from 'nanoraster';
+import type { z } from 'zod';
 import { createCameraView, frameCameraBounds, resolveCameraState } from '@taucad/camera';
 import type { CameraBounds, CameraVector } from '@taucad/camera';
-import { readGltfSceneBounds } from '@taucad/geometry-core';
 import { defineTranscoder } from '@taucad/runtime/transcoder';
 import type { ExportFile } from '@taucad/runtime/types';
+import { readGltfSceneBounds } from '#gltf-scene-bounds.js';
 import { loadImageBackend } from '#image-backend.js';
 import { imageEdgeSchemas } from '#image-export-options.js';
 import { toNanorasterCamera } from '#nanoraster-camera.js';
@@ -55,6 +56,8 @@ const edges = [
     content: ['includeEdges'],
   },
 ] as const;
+
+type ImageExportOptions = z.output<(typeof imageEdgeSchemas)[keyof typeof imageEdgeSchemas]>;
 
 const toExportFile = ({ name, bytes, mimeType }: Nanoraster.RenderedImageFile, outputName = name): ExportFile => ({
   name: outputName,
@@ -112,7 +115,7 @@ const resolveBoundsCamera = ({
   );
   const view = frameCameraBounds({
     view: createCameraView({
-      frameId: 'image:caller-world',
+      frameId: 'tau:root',
       requestedVerticalFieldOfView:
         camera.projection.kind === 'perspective' ? camera.projection.verticalFieldOfView : 0,
       perspectiveZoom: 1,
@@ -140,7 +143,7 @@ export const imageTranscoder = defineTranscoder({
   // Bump whenever the renderer's output bytes change for identical input, or
   // persisted export caches keep serving images from the previous renderer.
   // 9.0.0 = caller-declared world coordinates over canonical glTF input.
-  version: '9.0.0',
+  version: '10.0.0',
   edges,
 
   async initialize() {
@@ -170,7 +173,8 @@ export const imageTranscoder = defineTranscoder({
     const glb = input.files[0]!.bytes;
     let renderSpan: ReturnType<typeof runtime.tracer.startSpan> | undefined;
     try {
-      const options = imageEdgeSchemas[input.to].parse(input.options);
+      // The runtime validates each edge payload before invoking its transcoder.
+      const options = input.options as ImageExportOptions;
       const { renderImages } = context.renderer;
       renderSpan = runtime.tracer.startSpan('image.render', {
         mode: options.mode,

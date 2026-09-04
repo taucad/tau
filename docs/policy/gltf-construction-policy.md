@@ -3,7 +3,7 @@ title: 'glTF Construction Policy'
 description: 'Rules for constructing glTF/GLB binaries in the runtime, governing the direct writer, buffer layout, material encoding, and kernel integration patterns'
 status: active
 created: '2026-03-24'
-updated: '2026-08-17'
+updated: '2026-08-31'
 related:
   - docs/policy/geometry-naming-policy.md
   - docs/policy/rendering-pipeline-policy.md
@@ -75,13 +75,12 @@ const glb = await new NodeIO().writeBinary(document);
 
 `@gltf-transform/core` remains a dependency for use cases that require **reading** or **mutating** existing GLB documents:
 
-| Use case                        | File                                      | Why direct writer is insufficient                                                    |
-| ------------------------------- | ----------------------------------------- | ------------------------------------------------------------------------------------ |
-| Edge detection middleware       | `gltf-edge-detection.middleware.ts`       | Reads GLB, adds LINES primitives, writes back — requires document model for mutation |
-| Coordinate transform middleware | `gltf-coordinate-transform.middleware.ts` | Reads GLB, applies transforms, writes back                                           |
-| Manifold kernel                 | `manifold.kernel.ts`                      | Uses `manifold-3d`'s own `GLTFNodesToGLTFDoc` which returns a `Document`             |
-| OpenRSCAD kernel                | `openrscad.kernel.ts`                     | Uses `openrscad-engine`'s native GLB output                                          |
-| Test assertions                 | `*.test.ts`                               | `NodeIO().readBinary()` to parse and verify output structure                         |
+| Use case                  | File                                | Why direct writer is insufficient                                                    |
+| ------------------------- | ----------------------------------- | ------------------------------------------------------------------------------------ |
+| Edge detection middleware | `gltf-edge-detection.middleware.ts` | Reads GLB, adds LINES primitives, writes back — requires document model for mutation |
+| Manifold kernel           | `manifold.kernel.ts`                | Uses `manifold-3d`'s own `GLTFNodesToGLTFDoc` which returns a `Document`             |
+| OpenRSCAD kernel          | `openrscad.kernel.ts`               | Uses `openrscad-engine`'s native GLB output                                          |
+| Test assertions           | `*.test.ts`                         | `NodeIO().readBinary()` to parse and verify output structure                         |
 
 Do not add new `@gltf-transform/core` `Document` + `NodeIO().writeBinary()` calls to kernel render paths. If a new kernel produces mesh data (positions, normals, indices), map it to `GlbInput` and call `writeGlb()`.
 
@@ -101,7 +100,7 @@ The direct writer uses **non-interleaved** (Structure of Arrays) buffer layout: 
 
 The GPU benefit is negligible for two reasons: (1) we have only two vertex attributes (POSITION + NORMAL), where modern GPU prefetchers handle dual-stream access efficiently, and (2) OCCT's Delaunay-based tessellation produces spatially coherent index sequences with good cache locality regardless of buffer layout.
 
-Additionally, the edge detection and coordinate transform middleware re-serialize through `@gltf-transform/core` (which interleaves by default), so the Three.js viewer receives interleaved data whenever middleware is active.
+Additionally, edge detection middleware re-serializes through `@gltf-transform/core` (which interleaves by default), so the Three.js viewer receives interleaved data when that middleware is active.
 
 Three.js `GLTFLoader` handles both layouts. The UI code (`gltf-edges.ts`) has explicit `InterleavedBufferAttribute` handling for the middleware-interleaved path, and regular `BufferAttribute` handling for the direct-writer non-interleaved path.
 

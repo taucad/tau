@@ -1,0 +1,18 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "allowImportingTsExtensions": true,
+    "composite": false,
+    "declaration": false,
+    "declarationMap": false,
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "noEmit": true,
+    "types": ["node", "vitest"],
+    "paths": {
+      "#support/*.js": ["./src/support/*.ts"],
+      "@taucad/runtime-testing": ["../../packages/runtime-testing/src/index.ts"]
+    }
+  },
+  "include": ["vitest.config.ts", "global-setup.ts", "src/**/*.ts"]
+}

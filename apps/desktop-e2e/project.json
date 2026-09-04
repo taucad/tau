@@ -1,0 +1,71 @@
+{
+  "name": "desktop-e2e",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "projectType": "application",
+  "sourceRoot": "apps/desktop-e2e/src",
+  "tags": ["scope:ui", "type:e2e"],
+  "implicitDependencies": ["desktop", "api"],
+  "targets": {
+    "test": {
+      "executor": "nx:noop"
+    },
+    "typecheck": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "{workspaceRoot}",
+        "command": "tsgo -p apps/desktop-e2e/tsconfig.json --noEmit"
+      }
+    },
+    "test:e2e:desktop": {
+      "executor": "nx:run-commands",
+      "dependsOn": [
+        {
+          "projects": ["desktop"],
+          "target": "package-macos"
+        },
+        {
+          "projects": ["api"],
+          "target": "build"
+        }
+      ],
+      "options": {
+        "cwd": "{workspaceRoot}/apps/desktop-e2e",
+        "parallel": false,
+        "commands": [
+          "docker-compose -f ../../infra/docker-compose.yml up -d postgres redis minio minio-bootstrap",
+          "pnpm --dir ../.. exec nx run api:db-migrate",
+          "../../node_modules/.bin/vitest run --config vitest.config.ts src/desktop-chat-in-project.spec.ts src/desktop-chat-replay.spec.ts src/desktop-build123d.spec.ts src/desktop-assimp.spec.ts"
+        ],
+        "env": {
+          "TAU_E2E_API_URL": "http://localhost:4014"
+        }
+      }
+    },
+    "test:e2e:desktop:live": {
+      "executor": "nx:run-commands",
+      "dependsOn": [
+        {
+          "projects": ["desktop"],
+          "target": "build"
+        },
+        {
+          "projects": ["api"],
+          "target": "build"
+        }
+      ],
+      "options": {
+        "cwd": "{workspaceRoot}/apps/desktop-e2e",
+        "parallel": false,
+        "commands": [
+          "docker-compose -f ../../infra/docker-compose.yml up -d postgres redis minio minio-bootstrap",
+          "pnpm --dir ../.. exec nx run api:db-migrate",
+          "../../node_modules/.bin/vitest run --config vitest.config.ts src/desktop-chat-live.spec.ts"
+        ],
+        "env": {
+          "TAU_E2E_API_URL": "http://localhost:4014",
+          "TAU_E2E_LIVE_LLM": "true"
+        }
+      }
+    }
+  }
+}

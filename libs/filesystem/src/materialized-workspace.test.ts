@@ -17,7 +17,10 @@ type Harness = {
   dispose: () => void;
 };
 
-const createHarness = (options?: { legacyAppend?: boolean }): Harness => {
+const createHarness = (options?: {
+  legacyAppend?: boolean;
+  wrap?: (filesystem: RootedFileSystem) => RootedFileSystem;
+}): Harness => {
   const provider = new MemoryProvider();
   const mountTable = new MountTable();
   mountTable.mount('/project', provider, {
@@ -40,7 +43,7 @@ const createHarness = (options?: { legacyAppend?: boolean }): Harness => {
   }
   return {
     authority: new MaterializedWorkspaceAuthority({
-      filesystem,
+      filesystem: options?.wrap ? options.wrap(filesystem) : filesystem,
       resourceQueue,
     }),
     dispose: () => {
@@ -335,6 +338,39 @@ describe('MaterializedWorkspaceAuthority', () => {
     await expect(authority.destroy(workspaceId)).resolves.toBe(true);
     await expect(workspace.filesystem.readFile('main.ts')).rejects.toMatchObject({ code: 'WORKSPACE_DISPOSED' });
     await expect(authority.destroy(workspaceId)).resolves.toBe(false);
+  });
+
+  it('destroys a workspace whose tree gains a late child between listing and removal', async () => {
+    const cacheDirectory = '.tau/workspaces/late-writer/tree/.tau/cache/geometry';
+    let lateWrites = 0;
+    const { authority } = harness({
+      wrap: (filesystem) => ({
+        ...filesystem,
+        readdir: async (path) => {
+          const children = await filesystem.readdir(path);
+          if (path === cacheDirectory && lateWrites < 2) {
+            lateWrites += 1;
+            // The kernel is still writing geometry cache entries into the tree
+            // that is being torn down, so this listing is stale before it returns.
+            await filesystem.writeFile(`${cacheDirectory}/late-${String(lateWrites)}.bin`, 'late');
+          }
+          return children;
+        },
+      }),
+    });
+    const workspaceId = materializedWorkspaceId('late-writer');
+    const workspace = await authority.materialize({
+      workspaceId,
+      baseRevisionId: revisionId('rev-late-writer'),
+      tree: new ImmutableRevisionTree([['main.ts', 'base']]),
+    });
+    await workspace.filesystem.mkdir('.tau/cache/geometry', { recursive: true });
+    await workspace.filesystem.writeFile('.tau/cache/geometry/warm.bin', 'warm');
+
+    await expect(authority.destroy(workspaceId)).resolves.toBe(true);
+
+    expect(lateWrites).toBe(2);
+    await expect(authority.reopen(workspaceId)).rejects.toMatchObject({ code: 'WORKSPACE_DISPOSED' });
   });
 
   it('reopens the exact mutable tree and private metadata after authority replacement', async () => {

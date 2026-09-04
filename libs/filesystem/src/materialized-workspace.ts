@@ -270,6 +270,15 @@ const mapConcurrent = async <T>(
   await Promise.all(Array.from({ length: Math.min(concurrency, values.length) }, worker));
 };
 
+/**
+ * A workspace directory can gain children between its listing and its removal:
+ * the kernel keeps writing geometry cache entries into a workspace tree while
+ * the tree is being torn down, so `rmdir` fails `ENOTEMPTY` against a listing
+ * that was already stale. Re-list and retry a bounded number of passes before
+ * surfacing the failure.
+ */
+const removeTreePasses = 3;
+
 const removeTree = async (filesystem: RootedFileSystem, path: string): Promise<void> => {
   let stat: FileStat;
   try {
@@ -284,13 +293,28 @@ const removeTree = async (filesystem: RootedFileSystem, path: string): Promise<v
     await filesystem.unlink(path);
     return;
   }
-  const children = await filesystem.readdir(path);
-  await Promise.all(
-    children.map(async (child) => {
-      await removeTree(filesystem, joinRelativePath(path, child));
-    }),
-  );
-  await filesystem.rmdir(path);
+  for (let pass = 1; ; pass++) {
+    // oxlint-disable-next-line eslint/no-await-in-loop -- each pass must observe the previous pass's result.
+    const children = await filesystem.readdir(path);
+    // oxlint-disable-next-line eslint/no-await-in-loop -- late arrivals are only visible after the prior pass drains.
+    await Promise.all(
+      children.map(async (child) => {
+        await removeTree(filesystem, joinRelativePath(path, child));
+      }),
+    );
+    try {
+      // oxlint-disable-next-line eslint/no-await-in-loop -- the retry exists precisely to re-attempt this call.
+      await filesystem.rmdir(path);
+      return;
+    } catch (error) {
+      if (isNotFoundError(error)) {
+        return;
+      }
+      if (pass >= removeTreePasses) {
+        throw error;
+      }
+    }
+  }
 };
 
 /**

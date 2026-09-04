@@ -27,6 +27,8 @@ export type MockRootHandleOptions = {
    * Set `false` to model a browser/test environment without it. Default `true`.
    */
   syncAccess?: boolean;
+  /** Maximum bytes one sync-handle write accepts, for short-write tests. */
+  syncWriteLimit?: number;
   /** Called on every write-API acquisition *attempt*, including ones that throw. */
   onAcquireWriteApi?: (api: 'sync' | 'writable') => void;
 };
@@ -60,9 +62,11 @@ class MockWritableStream {
 
 class MockSyncAccessHandle {
   private readonly _entry: FileEntry;
+  private readonly _writeLimit: number;
 
-  public constructor(entry: FileEntry) {
+  public constructor(entry: FileEntry, writeLimit: number) {
     this._entry = entry;
+    this._writeLimit = writeLimit;
     entry.syncHandleOpen = true;
   }
 
@@ -80,15 +84,18 @@ class MockSyncAccessHandle {
     const view = ArrayBuffer.isView(data)
       ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
       : new Uint8Array(data);
+    const written = Math.min(view.byteLength, this._writeLimit);
     const at = options?.at ?? 0;
-    if (at + view.byteLength > this._entry.content.byteLength) {
-      const grown = new Uint8Array(at + view.byteLength);
+    if (at + written > this._entry.content.byteLength) {
+      const grown = new Uint8Array(at + written);
       grown.set(this._entry.content);
       this._entry.content = grown;
     }
-    this._entry.content.set(view, at);
-    this._entry.lastModified = Date.now();
-    return view.byteLength;
+    this._entry.content.set(view.subarray(0, written), at);
+    if (written > 0) {
+      this._entry.lastModified = Date.now();
+    }
+    return written;
   }
 
   // oxlint-disable-next-line no-empty-function -- Mock storage is already coherent; flush has nothing to push.
@@ -125,7 +132,7 @@ class MockFileHandle {
         if (entry.syncHandleOpen === true) {
           throw new DOMException(`Sync access handle already open: ${name}`, 'NoModificationAllowedError');
         }
-        return new MockSyncAccessHandle(entry);
+        return new MockSyncAccessHandle(entry, options.syncWriteLimit ?? Number.POSITIVE_INFINITY);
       };
     }
   }

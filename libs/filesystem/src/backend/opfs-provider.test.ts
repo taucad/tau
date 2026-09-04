@@ -95,6 +95,24 @@ describe('OPFS writes via sync access handles', () => {
     await expect(provider.readFile('data.bin')).resolves.toEqual(new Uint8Array([1, 2]));
   });
 
+  it('completes a short sync overwrite before truncating', async () => {
+    mountRoot({ syncWriteLimit: 2 });
+    const provider = new OPFSProvider();
+    await provider.initialize();
+
+    await provider.writeFile('data.bin', bytes);
+
+    await expect(provider.readFile('data.bin')).resolves.toEqual(bytes);
+  });
+
+  it('rejects a zero-progress sync write', async () => {
+    mountRoot({ syncWriteLimit: 0 });
+    const provider = new OPFSProvider();
+    await provider.initialize();
+
+    await expect(provider.writeFile('data.bin', bytes)).rejects.toThrow(/0 of 6 bytes/);
+  });
+
   it('falls back to createWritable when the environment lacks the API', async () => {
     const { acquired } = mountRoot({ syncAccess: false });
     const provider = new OPFSProvider();

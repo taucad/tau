@@ -23,6 +23,18 @@ type SyncAccessCapableFileHandle = FileSystemFileHandle & {
   createSyncAccessHandle?: () => Promise<SyncAccessHandle>;
 };
 
+const writeAll = (handle: SyncAccessHandle, bytes: Uint8Array<ArrayBuffer>, offset: number): void => {
+  let written = 0;
+  while (written < bytes.byteLength) {
+    const remaining = bytes.byteLength - written;
+    const count = handle.write(bytes.subarray(written), { at: offset + written });
+    if (!Number.isSafeInteger(count) || count <= 0 || count > remaining) {
+      throw new Error(`OPFS sync write made invalid progress after ${written} of ${bytes.byteLength} bytes.`);
+    }
+    written += count;
+  }
+};
+
 /** Filesystem provider backed by the origin-private filesystem. @public */
 export class OPFSProvider extends FileSystemAccessProvider {
   /**
@@ -106,7 +118,7 @@ export class OPFSProvider extends FileSystemAccessProvider {
     try {
       // Write before truncate: a crash in between leaves the new content plus a
       // stale tail rather than an empty file.
-      handle.write(bytes, { at: 0 });
+      writeAll(handle, bytes, 0);
       handle.truncate(bytes.byteLength);
       handle.flush();
     } finally {

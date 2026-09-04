@@ -5,6 +5,13 @@
   "projectType": "library",
   "tags": ["scope:shared", "type:tool"],
   "targets": {
+    "populate-ui-env": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "node --import @oxc-node/core/register scripts/src/populate-env.ts apps/ui/.env.example apps/ui/.env"
+      }
+    },
     "validate-frontmatter": {
       "executor": "nx:run-commands",
       "options": {

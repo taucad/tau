@@ -820,7 +820,17 @@ export const createChannelClient = <P extends RpcProtocol = EmptyRpcProtocol>(
     closeHandshakeTimeout: closeTimeout,
   });
 
-  off = port.onMessage(onWire);
+  const offWire = port.onMessage(onWire);
+  /* A port that can report its own death is the only thing standing between a
+   * killed peer and permanently pending calls: treat the death as the bye
+   * frame the peer never got to send. */
+  const offPortClose = port.onClose?.(() => {
+    closeController.acceptRemote('port-closed');
+  });
+  off = (): void => {
+    offWire();
+    offPortClose?.();
+  };
   if (port.start) {
     port.start();
   }
@@ -1212,7 +1222,16 @@ export const createChannelServer = <P extends RpcProtocol = EmptyRpcProtocol>(
     closeHandshakeTimeout: closeTimeout,
   });
 
-  off = port.onMessage(onWire);
+  const offWire = port.onMessage(onWire);
+  /* Symmetric with the client: a dead port aborts every in-flight call rather
+   * than leaving the server dispatching into a disentangled wire. */
+  const offPortClose = port.onClose?.(() => {
+    closeController.acceptRemote('port-closed');
+  });
+  off = (): void => {
+    offWire();
+    offPortClose?.();
+  };
   if (port.start) {
     port.start();
   }

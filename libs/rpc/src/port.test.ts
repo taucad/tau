@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { MessageChannel } from 'node:worker_threads';
-import type { Codec, Port, WebSocketLike } from '#port.js';
-import { wrapMessagePort, wrapWebSocket } from '#port.js';
+import type { Codec, MessagePortMainLike, Port, WebSocketLike } from '#port.js';
+import { wrapMessagePort, wrapMessagePortMain, wrapWebSocket } from '#port.js';
 import { createChannelClient, createChannelServer } from '#channel.js';
 
 describe('wrapMessagePort', () => {
@@ -220,6 +220,55 @@ describe('wrapWebSocket', () => {
     expect(socket.close).not.toHaveBeenCalled();
   });
 
+  it('reports a remote close through onClose exactly once', () => {
+    const socket = new FakeWebSocket();
+    const port = wrapWebSocket<string>(socket, jsonCodec);
+    socket.didOpen();
+    const deaths: number[] = [];
+    port.onClose?.(() => deaths.push(1));
+
+    socket.close();
+    port.close();
+
+    expect(deaths).toEqual([1]);
+  });
+
+  it('does not report a local close as a death', () => {
+    const socket = new FakeWebSocket();
+    const port = wrapWebSocket<string>(socket, jsonCodec);
+    socket.didOpen();
+    const deaths: number[] = [];
+    port.onClose?.(() => deaths.push(1));
+
+    port.close();
+
+    expect(socket.close).toHaveBeenCalledOnce();
+    expect(deaths).toEqual([]);
+  });
+
+  it('fires onClose immediately for a socket already closed at wrap time', () => {
+    const socket = new FakeWebSocket();
+    socket.readyState = closedState;
+    const port = wrapWebSocket<string>(socket, jsonCodec);
+    const deaths: number[] = [];
+
+    port.onClose?.(() => deaths.push(1));
+
+    expect(deaths).toEqual([1]);
+  });
+
+  it('reports the 1003 close for an undecodable frame as a death', () => {
+    const socket = new FakeWebSocket();
+    const port = wrapWebSocket<string>(socket, jsonCodec);
+    socket.didOpen();
+    const deaths: number[] = [];
+    port.onClose?.(() => deaths.push(1));
+
+    socket.deliver(new TextEncoder().encode('not json'));
+
+    expect(deaths).toEqual([1]);
+  });
+
   it('closes with 1003 instead of throwing when a frame cannot be decoded', () => {
     const socket = new FakeWebSocket();
     const port = wrapWebSocket<string>(socket, jsonCodec);
@@ -292,5 +341,171 @@ describe('wrapWebSocket', () => {
     } finally {
       server.dispose();
     }
+  });
+});
+
+/**
+ * Electron's `MessagePortMain`, faithfully: payloads arrive wrapped in
+ * `{ data }`, the transfer list accepts ports and **nothing** else, and the
+ * far end disentangling is reported as a `close` event. The throw on a
+ * non-port transfer entry is what makes the adapter's filter load-bearing —
+ * without it every framed `ArrayBuffer` would take the channel down.
+ */
+class FakeMessagePortMain implements MessagePortMainLike {
+  public peer: FakeMessagePortMain | undefined;
+  public started = false;
+  public readonly closed = vi.fn((): void => undefined);
+  private readonly listeners = new Map<string, Array<(payload?: unknown) => void>>();
+
+  public postMessage(value: unknown, transfer?: readonly unknown[]): void {
+    for (const [index, entry] of (transfer ?? []).entries()) {
+      if (!(entry instanceof FakeMessagePortMain)) {
+        throw new Error(`Port at index ${index} is not a valid port`);
+      }
+    }
+    this.peer?.emit('message', { data: value });
+  }
+
+  public on(event: 'close' | 'message', listener: (payload?: unknown) => void): this {
+    this.listeners.set(event, [...(this.listeners.get(event) ?? []), listener]);
+    return this;
+  }
+
+  public start(): void {
+    this.started = true;
+  }
+
+  public close(): void {
+    this.closed();
+    this.peer?.emit('close');
+  }
+
+  /** Deliver one event to every listener, the way an `EventEmitter` does. */
+  public emit(event: 'close' | 'message', payload?: unknown): void {
+    for (const listener of this.listeners.get(event) ?? []) {
+      listener(payload);
+    }
+  }
+}
+
+const linkedFakePorts = (): readonly [FakeMessagePortMain, FakeMessagePortMain] => {
+  const a = new FakeMessagePortMain();
+  const b = new FakeMessagePortMain();
+  a.peer = b;
+  b.peer = a;
+  return [a, b];
+};
+
+describe('wrapMessagePortMain', () => {
+  it('carries frames over a node:worker_threads channel driven as an emitter', async () => {
+    const { port1, port2 } = new MessageChannel();
+    const server = createChannelServer({
+      port: wrapMessagePortMain(port1, { label: 'emitter.server' }),
+      sessionKey: 'emitter',
+      impl: {
+        call: async (_context, _name, args) => (args as { n: number }).n * 2,
+        async *listen() {
+          yield 0;
+        },
+      },
+    });
+    try {
+      const client = createChannelClient({
+        port: wrapMessagePortMain(port2, { label: 'emitter.client' }),
+        sessionKey: 'emitter',
+      });
+      await client.ready;
+      await expect(client.call('double', { n: 21 })).resolves.toBe(42);
+    } finally {
+      server.dispose();
+      port1.close();
+      port2.close();
+    }
+  });
+
+  it('unwraps the Electron { data } envelope and starts the port lazily', () => {
+    const [near, far] = linkedFakePorts();
+    const wrapped = wrapMessagePortMain<string>(near);
+    expect(far.started).toBe(false);
+
+    const received: string[] = [];
+    const off = wrapped.onMessage((data) => received.push(data));
+    expect(near.started).toBe(true);
+
+    far.postMessage('hello');
+    off();
+    far.postMessage('ignored');
+
+    expect(received).toEqual(['hello']);
+  });
+
+  it('drops non-port transfer entries Electron would reject, and still posts the value', () => {
+    const [near, far] = linkedFakePorts();
+    const [handoff] = linkedFakePorts();
+    const received: unknown[] = [];
+    wrapMessagePortMain<unknown>(far).onMessage((data) => received.push(data));
+    const wrapped = wrapMessagePortMain<unknown>(near);
+
+    const bytes = new Uint8Array([1, 2, 3]);
+    expect(() => {
+      wrapped.postMessage({ bytes }, [bytes.buffer as unknown as Transferable]);
+    }).not.toThrow();
+    wrapped.postMessage({ handoff }, [handoff as unknown as Transferable]);
+
+    expect(received).toEqual([{ bytes }, { handoff }]);
+  });
+
+  it('goes silent and reports the death exactly once when the far end disentangles', () => {
+    const [near, far] = linkedFakePorts();
+    const wrapped = wrapMessagePortMain<string>(near);
+    let deaths = 0;
+    wrapped.onClose?.(() => {
+      deaths += 1;
+    });
+
+    far.close();
+    far.emit('close');
+
+    expect(deaths).toBe(1);
+    /* A bye frame racing teardown must not throw through a dead port. */
+    expect(() => {
+      wrapped.postMessage('after-death');
+    }).not.toThrow();
+    /* A handler registered after the death still learns about it, once. */
+    let late = 0;
+    wrapped.onClose?.(() => {
+      late += 1;
+    });
+    expect(late).toBe(1);
+  });
+
+  it('wraps close errors with the label and closes at most once', () => {
+    const [near] = linkedFakePorts();
+    vi.spyOn(near, 'close').mockImplementation(() => {
+      throw new Error('fail');
+    });
+    const wrapped = wrapMessagePortMain(near, { label: 'PM' });
+
+    expect(() => {
+      wrapped.close();
+    }).toThrow('PM close failed');
+    expect(() => {
+      wrapped.close();
+    }).not.toThrow();
+    expect(near.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects a pending call when the underlying port dies', async () => {
+    const [near] = linkedFakePorts();
+    const port = wrapMessagePortMain<unknown>(near, { label: 'dying' });
+    const client = createChannelClient({ port, sessionKey: 'dying' });
+    const closes: Array<{ origin: string; reason?: string }> = [];
+    client.onClose((info) => closes.push(info));
+
+    const pending = client.call('never', {});
+    near.emit('close');
+
+    await expect(pending).rejects.toThrow('Channel closed');
+    expect(closes).toEqual([{ origin: 'remote', reason: 'port-closed' }]);
   });
 });

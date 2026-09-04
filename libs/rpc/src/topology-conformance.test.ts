@@ -13,12 +13,14 @@
  *   T3  Real `worker_threads.Worker` exercising `createChannelServer` end-to-end
  *   T4  One `ChannelServer` impl fan-served across two independent port pairs
  *       (shared-worker style: two windows, one server)
+ *   T5  `EventEmitter`-shaped port (Electron `MessagePortMain` family) through
+ *       `wrapMessagePortMain`, on a copy-only transfer list
  */
 
 import { afterEach, describe, expect, it } from 'vitest';
 import { MessageChannel as NodeMessageChannel, Worker } from 'node:worker_threads';
 
-import { createChannelClient, createChannelServer, wrapMessagePort } from '#index.js';
+import { createChannelClient, createChannelServer, wrapMessagePort, wrapMessagePortMain } from '#index.js';
 import type { Channel, ChannelServer, ChannelServerHandle, Port, RpcProtocol, WithTransferables } from '#index.js';
 
 type EchoProtocol = {
@@ -280,5 +282,28 @@ describe('Channel<P> topology conformance', () => {
     expect(await clientB.call('bump', { by: 4 })).toBe(7);
     expect(await clientA.call('bump', { by: 1 })).toBe(8);
     expect(state.tally).toBe(8);
+  });
+
+  it('T5 — EventEmitter-shaped port through wrapMessagePortMain', async () => {
+    // The Electron arm: a `worker_threads` channel driven through its emitter
+    // API is the same shape as `MessagePortMain`, so the adapter is exercised
+    // without an Electron binary. `bytes` proves the copy-only transfer list —
+    // the `ArrayBuffer` is filtered out and the payload still arrives whole.
+    const channel = new NodeMessageChannel();
+    const serverPort = wrapMessagePortMain<unknown>(channel.port1, { label: 'T5.server' });
+    const clientPort = wrapMessagePortMain<unknown>(channel.port2, { label: 'T5.client' });
+    const notifyLog: Array<{ name: string; args: unknown }> = [];
+    const { client, server } = await startBoundChannel(serverPort, clientPort, notifyLog);
+    cleanups.push(() => {
+      server.dispose('test');
+    });
+    const result = await exerciseProtocol(client);
+    expect(result.echo).toBe('hi');
+    expect(result.bytesLength).toBe(8);
+    expect(result.ticks).toEqual([0, 1, 2]);
+    await new Promise<void>((resolve) => {
+      setImmediate(resolve);
+    });
+    expect(notifyLog).toEqual([{ name: 'ping', args: { n: 7 } }]);
   });
 });

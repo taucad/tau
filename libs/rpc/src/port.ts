@@ -2,7 +2,11 @@ import { Topic } from '@taucad/events';
 
 /**
  * Minimal bidirectional postMessage port, generic over the message payload shape.
- * Adapters map DOM `MessagePort`, Electron `MessagePortMain`, and similar APIs to this type.
+ *
+ * Three adapters map a concrete substrate onto this type: {@link wrapMessagePort}
+ * for WHATWG-shaped ports (DOM `MessagePort`, `node:worker_threads`),
+ * {@link wrapMessagePortMain} for the `EventEmitter`-shaped Electron
+ * `MessagePortMain`, and {@link wrapWebSocket} for a byte wire plus a codec.
  *
  * The adapter surface is deliberately narrow: every transport now declares
  * its delivery tier through the runtime transport plugin's fat shape
@@ -21,6 +25,21 @@ export type Port<T> = {
    * Optional: DOM `MessagePort` requires `start()` on the receiving side before events flow.
    */
   start?(): void;
+  /**
+   * Optional: report the underlying port's own death — the far end
+   * disentangled, which is what a killed peer looks like from here. Fires at
+   * most once, and a handler registered after the fact fires immediately. The
+   * returned unsubscribe is safe to call multiple times.
+   *
+   * A channel bound to a port that implements this closes with
+   * `origin: 'remote'` when the port dies, so pending calls reject instead of
+   * hanging forever. Absent on wires that cannot observe it.
+   *
+   * There is deliberately no `onError` companion: nothing in the tree treats
+   * `messageerror` as distinct from death, so it would be a member with no
+   * implementation and no caller.
+   */
+  onClose?(handler: () => void): () => void;
   close(): void;
 };
 
@@ -37,9 +56,9 @@ export type MessagePortLike = {
   // oxlint-disable-next-line typescript/no-explicit-any, typescript/explicit-module-boundary-types -- intentionally accept DOM MessagePort and node:worker_threads MessagePort
   postMessage(data: any, transfer?: any): void;
   // oxlint-disable-next-line typescript/no-explicit-any, typescript/explicit-module-boundary-types -- DOM uses EventListener, node uses (msg) => void
-  addEventListener(type: 'message', listener: any, options?: any): void;
+  addEventListener(type: 'close' | 'message', listener: any, options?: any): void;
   // oxlint-disable-next-line typescript/no-explicit-any, typescript/explicit-module-boundary-types -- mirror of addEventListener
-  removeEventListener(type: 'message', listener: any, options?: any): void;
+  removeEventListener(type: 'close' | 'message', listener: any, options?: any): void;
   start?(): void;
   close(): void;
 };
@@ -70,7 +89,148 @@ export const wrapMessagePort = <T>(port: MessagePortLike, options?: { label?: st
     start(): void {
       port.start?.();
     },
+    onClose(handler: () => void): () => void {
+      /* Both flavours fire `close` when the far end disentangles (DOM since
+       * the `close` event shipped, `worker_threads` ports as EventTargets); a
+       * port whose implementation never fires it simply never notifies. */
+      let fired = false;
+      const listener = (): void => {
+        if (fired) {
+          return;
+        }
+        fired = true;
+        handler();
+      };
+      port.addEventListener('close', listener);
+      return () => {
+        port.removeEventListener('close', listener);
+      };
+    },
     close(): void {
+      try {
+        port.close();
+      } catch (error) {
+        throw new Error(`${label} close failed`, { cause: error });
+      }
+    },
+  };
+};
+
+/**
+ * `EventEmitter`-shaped message port: the structural form of Electron's
+ * `MessagePortMain`, or of a `node:worker_threads` `MessagePort` driven
+ * through its emitter API. Listener and transfer *parameters* are deliberately
+ * `any`, exactly as {@link MessagePortLike}'s are — assert on member presence,
+ * never on parameter types.
+ *
+ * @public
+ */
+export type MessagePortMainLike = {
+  // oxlint-disable-next-line typescript/no-explicit-any, typescript/explicit-module-boundary-types -- Electron types the transfer list as MessagePortMain[]
+  postMessage(value: any, transfer?: any): void;
+  // oxlint-disable-next-line typescript/no-explicit-any, typescript/explicit-module-boundary-types -- one signature spanning Electron's and worker_threads' per-event overloads
+  on(event: 'close' | 'message', listener: any): unknown;
+  // oxlint-disable-next-line typescript/no-explicit-any, typescript/explicit-module-boundary-types -- mirror of `on`; absent on some emitter ports
+  off?(event: 'close' | 'message', listener: any): unknown;
+  start(): void;
+  close(): void;
+};
+
+/**
+ * Structural probe for an Electron-transferable port. `MessagePortMain` is not
+ * exposed as a constructor to renderer or utility code, so membership is
+ * decided on shape — `postMessage` plus `start`, which no `ArrayBuffer` or
+ * typed array has.
+ */
+const isTransferablePort = (entry: unknown): boolean =>
+  entry !== null &&
+  typeof entry === 'object' &&
+  typeof (entry as { postMessage?: unknown }).postMessage === 'function' &&
+  typeof (entry as { start?: unknown }).start === 'function';
+
+/**
+ * Adapts an `EventEmitter`-shaped {@link MessagePortMainLike} to {@link Port}.
+ *
+ * Four behaviours Electron's `MessagePortMain` makes mandatory, all measured:
+ * - its transfer list is `MessagePortMain[]` and nothing else — an
+ *   `ArrayBuffer` in it throws `Port at index N is not a valid port`, so
+ *   non-port entries are dropped and the value is still posted. This wire
+ *   copies by construction;
+ * - `postMessage` after the far end disentangles is a no-op, so the channel's
+ *   own bye frame cannot throw through a dead port;
+ * - inbound payloads arrive as `{ data }` on Electron and bare on
+ *   `worker_threads`; both are accepted, so one adapter spans the family;
+ * - `start()` is deferred to the first `onMessage`, so no frame is delivered
+ *   before a handler exists.
+ *
+ * @param port - The emitter-shaped port to wrap. This adapter owns its listeners and its close.
+ * @param options - `label` is only used for `close` error messages.
+ * @returns A {@link Port} bound to the given port.
+ * @public
+ */
+export const wrapMessagePortMain = <T>(port: MessagePortMainLike, options?: { label?: string }): Port<T> => {
+  const label = options?.label ?? 'MessagePortMain';
+  const messages = new Topic<T>({ name: label });
+  const deaths = new Topic<undefined>({ name: `${label}:close` });
+  let started = false;
+  let closed = false;
+
+  /** The far end disentangled: go silent, then report it once. */
+  const onDeath = (): void => {
+    if (closed) {
+      return;
+    }
+    closed = true;
+    messages.dispose();
+    deaths.emit(undefined);
+    deaths.dispose();
+  };
+
+  port.on('close', onDeath);
+
+  return {
+    postMessage(data: T, transfer?: readonly Transferable[]): void {
+      if (closed) {
+        return;
+      }
+      const ports = transfer?.filter((entry) => isTransferablePort(entry));
+      if (ports && ports.length > 0) {
+        port.postMessage(data, ports);
+      } else {
+        port.postMessage(data);
+      }
+    },
+    onMessage(handler: (data: T) => void): () => void {
+      const unsubscribe = messages.subscribe(handler);
+      if (!started) {
+        started = true;
+        port.on('message', (message: unknown) => {
+          /* Electron wraps the payload in `{ data }`; `worker_threads` does
+           * not. A payload that is not an object carrying `data` is the
+           * message itself. */
+          const envelope = message as { data?: unknown } | undefined;
+          messages.emit((envelope?.data ?? message) as T);
+        });
+        port.start();
+      }
+      return unsubscribe;
+    },
+    onClose(handler: () => void): () => void {
+      if (closed) {
+        handler();
+        return (): void => undefined;
+      }
+      return deaths.subscribe(handler);
+    },
+    close(): void {
+      if (closed) {
+        return;
+      }
+      /* A local close is not a death report: `closed` silences the wire, but
+       * the death handlers stay unfired — this side already knows. */
+      closed = true;
+      messages.dispose();
+      deaths.dispose();
       try {
         port.close();
       } catch (error) {
@@ -143,6 +303,8 @@ export const wrapWebSocket = <T>(socket: WebSocketLike, codec: Codec): Port<T> =
   socket.binaryType = 'arraybuffer';
 
   const messages = new Topic<T>({ name: 'websocket' });
+  const deaths = new Topic<void>({ name: 'websocket.close' });
+  let deathReported = false;
   /** Inbound frames received before the first `onMessage`; `undefined` once flushed. */
   let inbound: T[] | undefined = [];
   /** Outbound frames encoded before `open`. */
@@ -157,8 +319,10 @@ export const wrapWebSocket = <T>(socket: WebSocketLike, codec: Codec): Port<T> =
       data = codec.decode(event.data) as T;
     } catch {
       // A text or malformed frame from a peer must not throw out of a socket
-      // listener (uncaught in Node); 1003 = unsupported data.
+      // listener (uncaught in Node); 1003 = unsupported data. The peer caused
+      // it, so from here it is a death, not a local close.
       closeSocket(webSocketUnsupportedData, 'undecodable frame');
+      reportDeath();
       return;
     }
     if (inbound) {
@@ -175,9 +339,19 @@ export const wrapWebSocket = <T>(socket: WebSocketLike, codec: Codec): Port<T> =
     outbound.length = 0;
   };
 
+  /** Fire the death handlers at most once, however the wire died. */
+  const reportDeath = (): void => {
+    if (deathReported) {
+      return;
+    }
+    deathReported = true;
+    deaths.emit();
+  };
+
   const onSocketClose = (): void => {
     closed = true;
     detach();
+    reportDeath();
   };
 
   const detach = (): void => {
@@ -228,6 +402,16 @@ export const wrapWebSocket = <T>(socket: WebSocketLike, codec: Codec): Port<T> =
         }
       }
       return unsubscribe;
+    },
+    onClose(handler: () => void): () => void {
+      /* Same contract as `wrapMessagePortMain`: the socket's own `close` is
+       * the death report (a local `close()` detaches first, so it is not
+       * one), and a socket already closed at wrap time reports immediately. */
+      if (closed) {
+        handler();
+        return (): void => undefined;
+      }
+      return deaths.subscribe(handler);
     },
     close(): void {
       closeSocket();

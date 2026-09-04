@@ -3,7 +3,7 @@ title: 'Platform Compatibility Policy'
 description: 'Canonical capability matrix for Tau browsers, runtime hosts, WebAssembly artifacts, filesystems, workers, and graphics.'
 status: active
 created: '2026-07-21'
-updated: '2026-08-21'
+updated: '2026-09-02'
 related:
   - docs/policy/filesystem-policy.md
   - docs/policy/filesystem-authority-policy.md
@@ -173,7 +173,7 @@ This Tau-owned table records product support rather than MDN browser support.
 | Surface                    | Source of truth                                                        | Support contract                                                                         | Proof                                                                                     | Failure/fallback                                                                                     | Verified             |
 | -------------------------- | ---------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- | -------------------- |
 | Node                       | Root and package `engines.node`                                        | `>=24.0.0`; universal output must not require hidden V8 flags                            | Package tests at the minimum Node line                                                    | Reject unsupported Node before relying on a newer engine feature                                     | 2026-07-21           |
-| Electron                   | Runtime peer range and first-party example                             | `@taucad/runtime` peer `>=30.0.0`; current examples use `^36.9.5`                        | Package and example smoke tests on supported Electron                                     | Report the unsupported peer/host; do not assume Chrome-stable parity                                 | 2026-07-21           |
+| Electron                   | Runtime peer range and first-party applications                        | `@taucad/runtime` peer `>=37.0.0`; `apps/desktop` and both examples pin `^43.5.0`        | Package, example, and desktop-shell smoke tests on the pinned Electron                    | Report the unsupported peer/host; do not assume Chrome-stable parity                                 | 2026-09-02           |
 | Browser ESM                | Package exports and npm policy                                         | Import is side-effect-safe before optional browser globals are probed                    | Import smoke tests with optional globals absent                                           | Typed capability failure after import                                                                | 2026-07-21           |
 | Workers                    | Literal `new URL(..., import.meta.url)` or explicit consumer-owned URL | Bundlers must see the worker entry; no opaque runtime URL guessing                       | Production bundle plus worker handshake                                                   | Framework adapter or explicit consumer URL                                                           | 2026-07-21           |
 | Wasm assets                | External emitted assets                                                | Correct URL, MIME, CORS/CORP, CSP, and caching; no large base64 JS literals              | Inspect the production bundle and response                                                | Correct asset delivery; do not hide a parse/load failure                                             | 2026-07-21           |
@@ -184,6 +184,12 @@ This Tau-owned table records product support rather than MDN browser support.
 | Other third-party bundlers | Published integration contract                                         | Supported only through a documented/tested adapter with app-owned worker and asset paths | Published-package consumer smoke tests                                                    | Documented explicit configuration or unsupported integration                                         | 2026-08-04           |
 
 Published subpaths that target different runtimes must continue to satisfy the environment-matrix rule in `docs/policy/npm-policy.md`.
+
+#### Client Support Window
+
+A browser tab reloads into the current build; an installed desktop application does not. Tau's API therefore has to stay compatible with clients a user has not upgraded, and it has to be able to _see_ which client is calling. Every non-browser first-party client sends a `tau-client: <product>/<version>` request header — `tau-desktop/<version>` from the Electron shell, injected in the main process alongside the bearer credential so it also rides WebSocket upgrades. Servers ignore an unknown or absent value, so the header is purely additive and safe to deploy ahead of any server-side use.
+
+The support contract it enables: **the API supports first-party desktop clients released within the last six months**, matching the Electron upgrade obligation above (six to eight majors a year). Older clients are not actively broken, but a breaking API change may leave them behind, and the header is what makes that both measurable and, when needed, refusable with a specific "please update" response rather than an opaque failure. A change that would break a client inside the window is a breaking change under `docs/policy/version-policy.md` and needs the same additive-first treatment as any other.
 
 ### Known Engine Deviations
 

@@ -3,7 +3,7 @@ title: 'Version Policy'
 description: 'Versioning, stability tiers, breaking change management, and developer experience for @taucad/* packages. SemVer, experimental/future-flag/stable tiers, deprecation protocol, codemods.'
 status: active
 created: '2026-03-10'
-updated: '2026-08-23'
+updated: '2026-09-02'
 related:
   - docs/policy/release-policy.md
   - docs/policy/library-api-policy.md
@@ -62,6 +62,17 @@ Follows the **Simple Majors** policy from [semver-ts](https://www.semver-ts.org/
 Tau supports **Active LTS** and the **latest minor of Maintenance LTS** at any given time. Dropped support for End of Life Node versions is done in a **minor** release with a call-out in the release notes. Minimum Node version is specified in `engines` in `package.json`.
 
 When a major release aligns with an upcoming Node EOL date (within 3 months), the major release drops that Node version proactively rather than requiring a follow-up minor.
+
+### Electron Version Support
+
+Electron is the one host whose release cadence Tau does not get to choose. Upstream ships a major roughly every eight weeks and supports only the **latest three stable majors**; a fourth-oldest major receives no security patches at all, and its Chromium is by then carrying published CVEs. Tau therefore accepts a **standing upgrade obligation of six to eight cycles per year** on its Electron-hosting surfaces.
+
+- **First-party Electron applications** (`apps/desktop`) and the **example applications** pin the latest stable major. Falling more than one major behind is a release blocker, not a backlog item.
+- **`@taucad/runtime`'s optional `electron` peer** declares the oldest major Tau tests against. It is widened rarely and narrowed only in a major release, because narrowing it is a breaking change for consumers by the Simple Majors rule above.
+- **Upgrading the apps is not a breaking change**; raising the published peer floor is. The two move independently.
+- Every Electron bump re-runs both example applications' end-to-end suites plus the desktop shell's, because the failure modes that matter — a removed renderer API, a changed `MessagePortMain` transferable rule, a scheme-privilege regression — are invisible to type checking.
+
+Current floors: applications on Electron 43.x; `@taucad/runtime` peer `electron: >=37.0.0` (the version that carries the permission-check backport the desktop shell depends on).
 
 ## Stability Tiers
 

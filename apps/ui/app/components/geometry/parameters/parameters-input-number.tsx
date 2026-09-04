@@ -75,12 +75,18 @@ export const ParametersInputNumber = React.forwardRef<HTMLInputElement, Paramete
 
     // Sync UI when external value changes, but avoid clobbering while user is typing
     React.useEffect(() => {
-      if (!isFocused || !hasUserEdit) {
-        setText(displayValue);
-        if (!isFocused) {
-          setHasUserEdit(false);
+      const timer = globalThis.setTimeout(() => {
+        if (!isFocused || !hasUserEdit) {
+          setText(displayValue);
+          if (!isFocused) {
+            setHasUserEdit(false);
+          }
         }
-      }
+      });
+
+      return () => {
+        globalThis.clearTimeout(timer);
+      };
     }, [displayValue, isFocused, hasUserEdit]);
 
     function commitIfValid(current: string, source: 'change' | 'blur' = 'change'): void {

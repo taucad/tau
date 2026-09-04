@@ -1,5 +1,4 @@
 import type { IChangeEvent } from '@rjsf/core';
-import { customizeValidator } from '@rjsf/validator-ajv8';
 import { Info } from 'lucide-react';
 import React, { useCallback, useMemo, useState } from 'react';
 import Form from '@rjsf/core';
@@ -17,6 +16,7 @@ import {
 } from '#components/geometry/parameters/rjsf-utils.js';
 import { deleteValueAtPath, extractModifiedProperties, getValueAtPath, setValueAtPath } from '#utils/object.utils.js';
 import { PanelEmptyState } from '#components/ui/panel-empty-state.js';
+import { rjsfValidator } from '#lib/rjsf-validator.js';
 
 type ParametersProperties = {
   readonly parameters: Record<string, unknown>;
@@ -34,8 +34,7 @@ type ParametersProperties = {
   readonly isAllExpanded?: boolean;
 };
 
-const validator = customizeValidator<Record<string, unknown>, RJSFSchema, RJSFContext>();
-
+/* oxlint-disable react/set-state-in-effect -- The `use no memo` boundary preserves the existing controlled search reset and focus timing. */
 export function Parameters({
   parameters,
   defaultParameters,
@@ -51,6 +50,8 @@ export function Parameters({
   isInitialExpanded = true,
   isAllExpanded,
 }: ParametersProperties): React.JSX.Element {
+  'use no memo';
+
   // Use controlled state if provided, otherwise use initial value
   const allExpanded = isAllExpanded ?? isInitialExpanded;
   const [localFilterTerm, setLocalFilterTerm] = useState('');
@@ -189,7 +190,7 @@ export function Parameters({
             </div>
           ) : null}
           <Form<Record<string, unknown>, RJSFSchema, RJSFContext>
-            validator={validator}
+            validator={rjsfValidator}
             templates={templates}
             schema={jsonSchema}
             uiSchema={uiSchema}
@@ -214,3 +215,4 @@ export function Parameters({
     </div>
   );
 }
+/* oxlint-enable react/set-state-in-effect */

@@ -84,6 +84,8 @@ function CompositeFieldTemplate({
   readonly formContext: RJSFContext;
   readonly action?: RjsfLayoutContextValue['arrayItemAction'];
 }): React.ReactNode {
+  'use no memo';
+
   const union = getDiscriminatedUnionInfo(schema);
   const [isOpen, setIsOpen] = useState<boolean | undefined>(() => formContext.allExpanded);
   const selectedBranchContext = useMemo(
@@ -92,11 +94,13 @@ function CompositeFieldTemplate({
   );
 
   useEffect(() => {
+    // oxlint-disable-next-line react/set-state-in-effect -- The `use no memo` boundary preserves synchronous RJSF expansion updates.
     setIsOpen(formContext.allExpanded);
   }, [formContext.allExpanded]);
 
   useEffect(() => {
     if (formContext.searchTerm.trim().length > 0) {
+      // oxlint-disable-next-line react/set-state-in-effect -- The `use no memo` boundary preserves synchronous RJSF search expansion.
       setIsOpen(true);
     }
   }, [formContext.searchTerm]);
@@ -297,6 +301,8 @@ function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSc
 function ObjectFieldTemplate(
   props: ObjectFieldTemplateProps<Record<string, unknown>, RJSFSchema, RJSFContext>,
 ): React.ReactNode {
+  'use no memo';
+
   const { title, description, properties, idSchema, registry, schema } = props;
 
   const { formContext } = registry;
@@ -306,6 +312,7 @@ function ObjectFieldTemplate(
   const isRoot = idSchema.$id === formContext.idPrefix;
 
   useEffect(() => {
+    // oxlint-disable-next-line react/set-state-in-effect -- The `use no memo` boundary preserves synchronous RJSF expansion updates.
     setIsOpen(formContext.allExpanded);
   }, [formContext.allExpanded]);
 
@@ -325,6 +332,7 @@ function ObjectFieldTemplate(
   useEffect(() => {
     const hasActiveSearch = formContext.searchTerm.trim().length > 0;
     if (hasActiveSearch && shouldShowGroup) {
+      // oxlint-disable-next-line react/set-state-in-effect -- The `use no memo` boundary preserves synchronous RJSF search expansion.
       setIsOpen(true);
     }
   }, [formContext.searchTerm, shouldShowGroup]);
@@ -440,12 +448,15 @@ function ObjectFieldTemplate(
 function ArrayFieldTemplate(
   props: ArrayFieldTemplateProps<Record<string, unknown>, RJSFSchema, RJSFContext>,
 ): React.ReactNode {
+  'use no memo';
+
   const { title, items, canAdd, onAddClick, registry, schema } = props;
   const { formContext } = registry;
 
   const [isOpen, setIsOpen] = useState<boolean | undefined>(() => formContext.allExpanded);
 
   useEffect(() => {
+    // oxlint-disable-next-line react/set-state-in-effect -- The `use no memo` boundary preserves synchronous RJSF expansion updates.
     setIsOpen(formContext.allExpanded);
   }, [formContext.allExpanded]);
 
@@ -461,6 +472,7 @@ function ArrayFieldTemplate(
   useEffect(() => {
     const hasActiveSearch = formContext.searchTerm.trim().length > 0;
     if (hasActiveSearch && shouldShowArray) {
+      // oxlint-disable-next-line react/set-state-in-effect -- The `use no memo` boundary preserves synchronous RJSF search expansion.
       setIsOpen(true);
     }
   }, [formContext.searchTerm, shouldShowArray]);

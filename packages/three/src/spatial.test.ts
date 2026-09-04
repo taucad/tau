@@ -1,13 +1,8 @@
-import { Matrix4, Ray, Vector3 } from 'three';
+import { Matrix4, Vector3 } from 'three';
 import { describe, expect, it } from 'vitest';
 import type { RenderFrame } from '@taucad/spatial';
-import {
-  createThreeRenderMatrix,
-  fromThreeRenderPoint,
-  fromThreeRenderRay,
-  toThreeRenderPoint,
-  toThreeRenderRay,
-} from '#spatial.js';
+import * as spatialModule from '#spatial.js';
+import { createThreeRenderMatrix, fromThreeRenderPoint, toThreeRenderPoint } from '#spatial.js';
 
 const renderFrame: RenderFrame = {
   anchorFrameId: 'test-root',
@@ -16,6 +11,17 @@ const renderFrame: RenderFrame = {
 };
 
 describe('Three spatial adapter', () => {
+  it('publishes only consumed adapter functions', () => {
+    expect(Object.keys(spatialModule).sort()).toEqual([
+      'createThreeRenderMatrix',
+      'fromThreeRenderBounds',
+      'fromThreeRenderPoint',
+      'toThreeRenderBounds',
+      'toThreeRenderPlane',
+      'toThreeRenderPoint',
+    ]);
+  });
+
   it('maps points through the same outer scene matrix and inverse', () => {
     const physicalPoint = [1.002, -1.997, 2.996] as const;
     const direct = toThreeRenderPoint({ renderFrame, pointMeters: physicalPoint });
@@ -29,13 +35,5 @@ describe('Three spatial adapter', () => {
       .clone()
       .multiply(new Matrix4().copy(createThreeRenderMatrix(renderFrame)).invert());
     expect(identity.elements).toEqual(new Matrix4().elements.map((value): unknown => expect.closeTo(value, 12)));
-  });
-
-  it('round-trips rays without scaling their normalized direction', () => {
-    const physical = new Ray(new Vector3(1.002, -2, 3), new Vector3(1, 2, 3).normalize());
-    const native = toThreeRenderRay({ renderFrame, ray: physical });
-    const restored = fromThreeRenderRay({ renderFrame, ray: native });
-    expect(restored.origin.distanceTo(physical.origin)).toBe(0);
-    expect(restored.direction.distanceTo(physical.direction)).toBeLessThan(1e-15);
   });
 });

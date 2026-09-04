@@ -1,19 +1,12 @@
-import { Box3, Matrix4, Plane, Ray, Vector3 } from 'three';
+import { Box3, Matrix4, Plane, Vector3 } from 'three';
 import type { RenderFrame, SpatialBounds, SpatialPlane, SpatialVector } from '@taucad/spatial';
-import {
-  fromRenderBounds,
-  fromRenderPlane,
-  fromRenderPoint,
-  toRenderBounds,
-  toRenderPlane,
-  toRenderPoint,
-} from '@taucad/spatial';
+import { fromRenderBounds, fromRenderPoint, toRenderBounds, toRenderPlane, toRenderPoint } from '@taucad/spatial';
 
-/** Options for mapping a physical point into a Three render frame. @public */
-export type ToThreeRenderPointOptions = Readonly<{ renderFrame: RenderFrame; pointMeters: SpatialVector }>;
+/** Options for mapping a physical point into a Three render frame. */
+type ToThreeRenderPointOptions = Readonly<{ renderFrame: RenderFrame; pointMeters: SpatialVector }>;
 
-/** Options for mapping a Three render-local point into physical metres. @public */
-export type FromThreeRenderPointOptions = Readonly<{ renderFrame: RenderFrame; point: Vector3 }>;
+/** Options for mapping a Three render-local point into physical metres. */
+type FromThreeRenderPointOptions = Readonly<{ renderFrame: RenderFrame; point: Vector3 }>;
 
 /**
  * Builds the uniform outer transform mapping anchor-frame metres into render-local Three coordinates.
@@ -69,29 +62,6 @@ export const fromThreeRenderPoint = ({ renderFrame, point }: FromThreeRenderPoin
   fromRenderPoint({ renderFrame, point: [point.x, point.y, point.z] });
 
 /**
- * Maps a physical ray into render-local coordinates; uniform scaling leaves its direction unchanged.
- *
- * @param options - Render frame and physical Three ray.
- * @returns A new render-local ray.
- * @public
- */
-export const toThreeRenderRay = ({ renderFrame, ray }: Readonly<{ renderFrame: RenderFrame; ray: Ray }>): Ray =>
-  new Ray(
-    toThreeRenderPoint({ renderFrame, pointMeters: [ray.origin.x, ray.origin.y, ray.origin.z] }),
-    ray.direction.clone(),
-  );
-
-/**
- * Maps a render-local ray into physical coordinates; uniform scaling leaves its direction unchanged.
- *
- * @param options - Render frame and render-local Three ray.
- * @returns A new physical ray whose origin is measured in metres.
- * @public
- */
-export const fromThreeRenderRay = ({ renderFrame, ray }: Readonly<{ renderFrame: RenderFrame; ray: Ray }>): Ray =>
-  new Ray(new Vector3(...fromThreeRenderPoint({ renderFrame, point: ray.origin })), ray.direction.clone());
-
-/**
  * Maps physical axis-aligned bounds into a native Three box.
  *
  * @param options - Render frame and physical bounds.
@@ -138,22 +108,4 @@ export const toThreeRenderPlane = ({
     new Vector3(...renderPlane.normal).normalize(),
     new Vector3(...renderPlane.point),
   );
-};
-
-/**
- * Maps a native render-local Three plane into a physical point-normal plane.
- *
- * @param options - Render frame and native plane.
- * @returns Serializable physical plane in metres.
- * @public
- */
-export const fromThreeRenderPlane = ({
-  renderFrame,
-  plane,
-}: Readonly<{ renderFrame: RenderFrame; plane: Plane }>): SpatialPlane => {
-  const point = plane.coplanarPoint(new Vector3());
-  return fromRenderPlane({
-    renderFrame,
-    plane: { point: [point.x, point.y, point.z], normal: [plane.normal.x, plane.normal.y, plane.normal.z] },
-  });
 };

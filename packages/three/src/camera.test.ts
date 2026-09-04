@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { createCameraView, frameCameraBounds, maximumProjectedPixelDelta } from '@taucad/camera';
 import type { RenderFrame } from '@taucad/spatial';
 import { selectCameraDriverSnapshot, selectCameraProjection } from '@taucad/camera/machine';
+import * as threeModule from '#index.js';
 import { createThreeCameraRig, readThreeCameraState } from '#camera.js';
 
 const initialView = createCameraView({
@@ -127,6 +128,10 @@ const expectedPresentationNear = ({
 };
 
 describe('createThreeCameraRig', () => {
+  it('publishes only the consumed root runtime surface', () => {
+    expect(Object.keys(threeModule).sort()).toEqual(['createThreeCameraRig', 'readThreeCameraState']);
+  });
+
   it('preserves physical camera state and projection across render-frame changes', () => {
     const firstFrame: RenderFrame = {
       anchorFrameId: initialView.frameId,

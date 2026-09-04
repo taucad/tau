@@ -16,8 +16,8 @@ import { fromThreeRenderPoint, toThreeRenderPoint } from '#spatial.js';
 /** A native Three.js camera accepted by the portable camera capability. @public */
 export type ThreeCamera = PerspectiveCamera | OrthographicCamera;
 
-/** Options for {@link readThreeCameraState}. @public */
-export type ReadThreeCameraStateOptions = Readonly<{
+/** Options for {@link readThreeCameraState}. */
+type ReadThreeCameraStateOptions = Readonly<{
   camera: ThreeCamera;
   target: Vector3;
   renderFrame: RenderFrame;
@@ -64,28 +64,25 @@ export const readThreeCameraState = ({ camera, target, renderFrame }: ReadThreeC
   });
 };
 
-/** Options for the low-level Three.js camera driver. @public */
-export type ThreeCameraDriverOptions = Readonly<{
+/** Values used to synchronize the retained native cameras. */
+type ThreeCameraDriverOptions = Readonly<{
   perspectiveCamera: PerspectiveCamera;
   orthographicCamera: OrthographicCamera;
-  renderFrame?: RenderFrame;
-  getRenderFrame?: (snapshot: CameraDriverSnapshot) => RenderFrame;
+  getRenderFrame: () => RenderFrame;
   getClipPlanes?: () => ThreeCameraClipPlanePolicy | undefined;
   onUpdate?: (camera: ThreeCamera, snapshot: CameraDriverSnapshot) => void;
 }>;
 
-/** Options for {@link createThreeCameraRig}. @public */
-export type ThreeCameraRigOptions = CameraMachineInput &
+/** Options for {@link createThreeCameraRig}. */
+type ThreeCameraRigOptions = CameraMachineInput &
   Readonly<{
-    perspectiveCamera?: PerspectiveCamera;
-    orthographicCamera?: OrthographicCamera;
     clipPlanes?: ThreeCameraClipPlanePolicy;
     renderFrame?: RenderFrame;
     onUpdate?: (camera: ThreeCamera, snapshot: CameraDriverSnapshot) => void;
   }>;
 
-/** Host clipping policy applied after each bounds-derived endpoint synchronization. @public */
-export type ThreeCameraClipPlanePolicy = Readonly<{
+/** Host clipping policy applied after each bounds-derived endpoint synchronization. */
+type ThreeCameraClipPlanePolicy = Readonly<{
   farPaddingVerticalSpans: number;
   presentationPlaneOffsetMeters?: number;
 }>;
@@ -344,10 +341,7 @@ const synchronizeCameras = ({
   options: ThreeCameraDriverOptions;
   snapshot: CameraDriverSnapshot;
 }): ThreeCamera => {
-  const renderFrame = validateRenderFrameForView(
-    options.getRenderFrame?.(snapshot) ?? options.renderFrame ?? identityRenderFrame(snapshot.view.frameId),
-    snapshot.view.frameId,
-  );
+  const renderFrame = validateRenderFrameForView(options.getRenderFrame(), snapshot.view.frameId);
   const clipPlanes = options.getClipPlanes?.();
   configurePerspectiveCamera({ camera: options.perspectiveCamera, clipPlanes, snapshot, renderFrame });
   configureOrthographicCamera({ camera: options.orthographicCamera, clipPlanes, snapshot, renderFrame });
@@ -357,14 +351,7 @@ const synchronizeCameras = ({
   return activeCamera;
 };
 
-/**
- * Creates the concrete XState callback driver that synchronizes native Three.js cameras.
- *
- * @param options - Persistent native cameras and optional update observer.
- * @returns XState callback actor logic for `cameraMachine.provide()`.
- * @public
- */
-export const createThreeCameraDriver = (
+const createThreeCameraDriver = (
   options: ThreeCameraDriverOptions,
 ): CallbackActorLogic<CameraDriverEvent, CameraDriverInput> =>
   fromCallback<CameraDriverEvent, CameraDriverInput>(({ input, receive }) => {
@@ -378,7 +365,7 @@ export const createThreeCameraDriver = (
 /**
  * Creates two persistent native endpoint cameras driven by one canonical actor.
  *
- * @param options - Initial canonical view, error budget, optional cameras, and update observer.
+ * @param options - Initial canonical view, error budget, clip/render-frame policy, and update observer.
  * @returns An opaque disposable Three.js camera rig.
  * @public
  * @example <caption>Create and start a portable Three.js camera rig.</caption>
@@ -403,8 +390,8 @@ export const createThreeCameraDriver = (
  * ```
  */
 export const createThreeCameraRig = (options: ThreeCameraRigOptions): ThreeCameraRig => {
-  const perspectiveCamera = options.perspectiveCamera ?? new PerspectiveCamera();
-  const orthographicCamera = options.orthographicCamera ?? new OrthographicCamera();
+  const perspectiveCamera = new PerspectiveCamera();
+  const orthographicCamera = new OrthographicCamera();
   const initialView = createCameraView(options.initialView);
   let renderFrame = validateRenderFrameForView(
     options.renderFrame ?? identityRenderFrame(initialView.frameId),
@@ -424,10 +411,12 @@ export const createThreeCameraRig = (options: ThreeCameraRigOptions): ThreeCamer
       options.onUpdate?.(camera, snapshot);
     },
   };
-  const driver = createThreeCameraDriver(driverOptions);
-  const actorRef = createActor(cameraMachine.provide({ actors: { cameraDriver: driver } }), {
-    input: { initialView, pixelBudget: options.pixelBudget },
-  });
+  const actorRef = createActor(
+    cameraMachine.provide({ actors: { cameraDriver: createThreeCameraDriver(driverOptions) } }),
+    {
+      input: { initialView, pixelBudget: options.pixelBudget },
+    },
+  );
   synchronizeCameras({
     options: { ...driverOptions, onUpdate: undefined },
     snapshot: selectCameraDriverSnapshot(actorRef.getSnapshot()),

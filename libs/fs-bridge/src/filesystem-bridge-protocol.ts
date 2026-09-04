@@ -223,6 +223,7 @@ const storageRootConfigSchema: z.ZodType<StorageRootConfig> = z.discriminatedUni
   z.looseObject({ backend: z.literal('webaccess'), directoryHandle: directoryHandleSchema, workspaceId: z.string() }),
   z.looseObject({ backend: z.literal('indexeddb') }),
   z.looseObject({ backend: z.literal('opfs') }),
+  z.looseObject({ backend: z.literal('node'), path: z.string() }),
 ]);
 const projectRootConfigSchema: z.ZodType<ProjectRootConfig> = z.discriminatedUnion('backend', [
   z.looseObject({
@@ -248,6 +249,12 @@ const projectRootConfigSchema: z.ZodType<ProjectRootConfig> = z.discriminatedUni
     storageRootKey: z.string(),
     providerBasePath: projectDirectoryPathSchema,
   }),
+  z.looseObject({
+    projectId: projectIdSchema,
+    backend: z.literal('node'),
+    path: z.string(),
+    providerBasePath: projectDirectoryPathSchema,
+  }),
 ]);
 const projectLocatorSchema: z.ZodType<ProjectLocator> = z.discriminatedUnion('backend', [
   z.looseObject({
@@ -266,12 +273,19 @@ const projectLocatorSchema: z.ZodType<ProjectLocator> = z.discriminatedUnion('ba
     storageRootKey: z.string(),
     relativeDirectory: projectDirectoryPathSchema,
   }),
+  z.looseObject({
+    backend: z.literal('node'),
+    storageRootKey: z.string(),
+    relativeDirectory: projectDirectoryPathSchema,
+    path: z.string(),
+  }),
 ]);
 const workspaceScopeSchema: z.ZodType<WorkspaceScope> = z.discriminatedUnion('backend', [
   z.looseObject({ backend: z.literal('webaccess'), directoryHandle: directoryHandleSchema, workspaceId: z.string() }),
   z.looseObject({ backend: z.literal('indexeddb') }),
   z.looseObject({ backend: z.literal('opfs') }),
   z.looseObject({ backend: z.literal('memory'), storageRootKey: z.string() }),
+  z.looseObject({ backend: z.literal('node'), path: z.string() }),
 ]);
 
 const manifestIssueSchema = z.discriminatedUnion('code', [

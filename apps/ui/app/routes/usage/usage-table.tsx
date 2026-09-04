@@ -11,6 +11,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@tauc
 import type { UsageRecord } from '@taucad/billing/usage';
 import { usageColumns } from '#routes/usage/columns.js';
 
+const tableHooks = { useReactTable };
+
 type UsageTableProps = {
   readonly records: UsageRecord[];
   readonly title?: string;
@@ -30,7 +32,7 @@ export function UsageTable({
 
   const columns = useMemo(() => usageColumns, []);
 
-  const table = useReactTable({
+  const table = tableHooks.useReactTable({
     data: records,
     columns,
     getCoreRowModel: getCoreRowModel(),

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { entitlementsFromTier } from '@taucad/billing';
 import { ChatErrorCredits } from '#routes/w.$workspace.$project/chat-error-credits.js';
 import { openSettingsDialog } from '#hooks/use-settings-dialog.js';
 
@@ -15,9 +16,23 @@ vi.mock('#hooks/use-settings-dialog.js', () => ({
   openSettingsDialog: vi.fn(),
 }));
 
+const useEntitlementsMock = vi.hoisted(() => vi.fn());
+vi.mock('@taucad/billing/hooks/use-entitlements', () => ({
+  useEntitlements: useEntitlementsMock,
+}));
+
+const topupModalMock = vi.hoisted(() => vi.fn((_props: { isOpen: boolean }) => undefined));
+vi.mock('#components/billing/topup-modal.js', () => ({
+  TopupModal: (props: { readonly isOpen: boolean }) => {
+    topupModalMock(props);
+    return <div data-testid='topup-modal' data-open={props.isOpen} />;
+  },
+}));
+
 describe('ChatErrorCredits', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    useEntitlementsMock.mockReturnValue(entitlementsFromTier('free'));
   });
 
   it('should render warning chrome with provider billing copy and resume controls', () => {
@@ -62,5 +77,28 @@ describe('ChatErrorCredits', () => {
 
     expect(openSettingsDialog).toHaveBeenCalledTimes(1);
     expect(openSettingsDialog).toHaveBeenCalledWith('billing');
+  });
+
+  it('should offer the in-place top-up when a payment method is on file (flow A)', async () => {
+    useEntitlementsMock.mockReturnValue({ ...entitlementsFromTier('pro'), hasPaymentMethod: true });
+    const user = userEvent.setup();
+    render(<ChatErrorCredits />);
+
+    expect(screen.queryByRole('button', { name: /plans & billing/i })).not.toBeInTheDocument();
+    expect(screen.getByTestId('topup-modal')).toHaveAttribute('data-open', 'false');
+
+    await user.click(screen.getByRole('button', { name: /add credits/i }));
+
+    expect(screen.getByTestId('topup-modal')).toHaveAttribute('data-open', 'true');
+    expect(openSettingsDialog).not.toHaveBeenCalled();
+    expect(topupModalMock).toHaveBeenCalledWith(expect.objectContaining({ defaultAmountCents: 2500 }));
+  });
+
+  it('should keep flow B (settings route) without a payment method and never mount the modal', () => {
+    render(<ChatErrorCredits />);
+
+    expect(screen.getByRole('button', { name: /plans & billing/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /add credits/i })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('topup-modal')).not.toBeInTheDocument();
   });
 });

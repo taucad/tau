@@ -1,7 +1,7 @@
 import { redirect } from 'react-router';
 import type { Route } from './+types/route.js';
 
-const validSections = new Set(['general', 'account', 'security', 'api-keys', 'billing']);
+const validSections = new Set(['general', 'account', 'security', 'api-keys', 'billing', 'compute']);
 
 /**
  * Splat route for /settings/* — redirects to /?settings=<section>

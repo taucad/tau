@@ -1,7 +1,7 @@
 import { useState, useMemo, useCallback } from 'react';
 import type { DateRange } from 'react-day-picker';
 import { subDays, isWithinInterval, startOfDay, endOfDay } from 'date-fns';
-import type { UsageRecord } from '#hooks/use-all-usage.js';
+import type { UsageRecord } from '@taucad/billing/usage';
 
 export type UsageFilters = {
   dateRange: DateRange | undefined;

@@ -5,8 +5,9 @@ import { Link } from 'react-router';
 import { DataTableColumnHeader } from '#components/ui/data-table.js';
 import { formatCurrency } from '#utils/currency.utils.js';
 import { formatNumberAbbreviation } from '#utils/number.utils.js';
-import type { UsageRecord } from '#hooks/use-all-usage.js';
+import type { UsageRecord } from '@taucad/billing/usage';
 import { getProviderColor } from '#routes/usage/provider-colors.js';
+import { useProjectUrl } from '#hooks/use-project-slug-route.js';
 
 /**
  * Provider badge component with consistent hash-based coloring.
@@ -21,6 +22,21 @@ function ProviderBadge({ provider }: { readonly provider: string }): ReactNode {
     >
       {provider}
     </span>
+  );
+}
+
+/** Usage rows carry only a project id, so the canonical URL is looked up here. */
+function UsageProjectLink({
+  projectId,
+  projectName,
+}: {
+  readonly projectId: string;
+  readonly projectName: string;
+}): ReactNode {
+  return (
+    <Link to={useProjectUrl(projectId)} className='max-w-[200px] truncate hover:underline'>
+      {projectName}
+    </Link>
   );
 }
 
@@ -39,11 +55,7 @@ export const usageColumns: Array<ColumnDef<UsageRecord>> = [
     accessorKey: 'projectName',
     header: ({ column }) => <DataTableColumnHeader column={column} title='Project' />,
     cell({ row }: { readonly row: Row<UsageRecord> }): ReactNode {
-      return (
-        <Link to={`/projects/${row.original.projectId}`} className='max-w-[200px] truncate hover:underline'>
-          {row.original.projectName}
-        </Link>
-      );
+      return <UsageProjectLink projectId={row.original.projectId} projectName={row.original.projectName} />;
     },
     enableSorting: true,
     enableHiding: true,

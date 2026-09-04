@@ -189,6 +189,9 @@ export const draftMachine = setup({
   guards: {
     isValidChatId: ({ context }) => Boolean(context.chatId?.startsWith('chat_')),
     canPersist: ({ context }) => Boolean(context.chatId?.startsWith('chat_')),
+    draftTextChanged: ({ context, event }) => event.type === 'setDraftText' && event.text !== context.draftText,
+    editDraftTextChanged: ({ context, event }) =>
+      event.type === 'setEditDraftText' && event.text !== context.editDraftText,
     hasQueuedImage: ({ context }) => context.imageQueue.length > 0,
   },
   delays: {
@@ -430,7 +433,10 @@ export const draftMachine = setup({
       states: {
         idle: {
           on: {
-            setDraftText: 'pending',
+            setDraftText: {
+              target: 'pending',
+              guard: 'draftTextChanged',
+            },
             // Persist after the resize completes (when draftImages actually changes).
             // `addDraftImage` no longer mutates visible state; it only enqueues.
             imageResized: 'pending',
@@ -458,6 +464,7 @@ export const draftMachine = setup({
             setDraftText: {
               target: 'pending',
               reenter: true,
+              guard: 'draftTextChanged',
             },
             imageResized: {
               target: 'pending',
@@ -491,7 +498,10 @@ export const draftMachine = setup({
           },
           on: {
             // Queue new changes while persisting
-            setDraftText: 'pending',
+            setDraftText: {
+              target: 'pending',
+              guard: 'draftTextChanged',
+            },
             imageResized: 'pending',
             removeDraftImage: 'pending',
             // Cancel stale in-flight persist and re-persist with empty draft
@@ -509,7 +519,10 @@ export const draftMachine = setup({
       states: {
         idle: {
           on: {
-            setEditDraftText: 'pending',
+            setEditDraftText: {
+              target: 'pending',
+              guard: 'editDraftTextChanged',
+            },
             // Persist after the resize completes; addEditDraftImage only enqueues.
             imageResized: 'pending',
             removeEditDraftImage: 'pending',
@@ -531,6 +544,7 @@ export const draftMachine = setup({
             setEditDraftText: {
               target: 'pending',
               reenter: true,
+              guard: 'editDraftTextChanged',
             },
             imageResized: {
               target: 'pending',
@@ -560,7 +574,10 @@ export const draftMachine = setup({
           },
           on: {
             // Queue new changes while persisting
-            setEditDraftText: 'pending',
+            setEditDraftText: {
+              target: 'pending',
+              guard: 'editDraftTextChanged',
+            },
             imageResized: 'pending',
             removeEditDraftImage: 'pending',
           },

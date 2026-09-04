@@ -218,6 +218,16 @@ describe('draftMachine', () => {
       actor.stop();
     });
 
+    it('should keep unchanged draft text idle', () => {
+      const actor = createTestActor({ chatId: 'chat_abc' });
+      actor.start();
+
+      actor.send({ type: 'setDraftText', text: '' });
+
+      expect(actor.getSnapshot().matches({ inputSaving: 'idle' })).toBe(true);
+      actor.stop();
+    });
+
     it('should persist after debounce (200ms) when chatId is valid', async () => {
       vi.useFakeTimers();
       try {

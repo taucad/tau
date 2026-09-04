@@ -30,7 +30,7 @@ export function NewProjectChatComposer({
   const presentLocationError = useProjectCreationLocationError();
   const textareaRef = useRef<ChatTextareaHandle>(null);
   const {
-    model: { modelId },
+    execution: { execution },
     draftActorRef,
   } = useChatComposer();
   const { clearDraft } = useDraftActions();
@@ -75,7 +75,13 @@ export function NewProjectChatComposer({
       try {
         const created = await projectManager.createProject({
           kernel,
-          activeModel: modelId,
+          /* The chip's value verbatim — not a Tau execution rebuilt from the
+           * model. Rebuilding dropped `hostId` (and any `acp`/`paseo` choice),
+           * so a project started from a "Tau Host · …" chip ran its first turn
+           * in this browser instead, against a chip that still named the
+           * daemon. Both providers keep this execution's Tau model in step with
+           * the model chip, so there is nothing left to override here. */
+          activeExecution: execution,
           initialMessage: { content, imageUrls },
           editorState: {
             panelState: { desktopLayout: { chatOpen: true, compactAuxiliary: 'chat' }, mobileActiveTab: 'chat' },
@@ -96,7 +102,7 @@ export function NewProjectChatComposer({
         toast.error('Failed to create project');
       }
     },
-    [clearDraft, draftActorRef, kernel, location, modelId, navigate, presentLocationError, projectManager],
+    [clearDraft, draftActorRef, execution, kernel, location, navigate, presentLocationError, projectManager],
   );
 
   return (

@@ -120,6 +120,7 @@ const parseFileDragPaths = (raw: string): string[] => {
 
 export type ChatTextareaHandle = {
   focus: () => void;
+  closeOptions?: () => void;
 };
 
 export type ChatTextareaProperties = {
@@ -131,6 +132,12 @@ export type ChatTextareaProperties = {
   readonly className?: string;
   readonly enableContextActions?: boolean;
   readonly enableKernelSelector?: boolean;
+  readonly creationLocationControls?: {
+    readonly toolbar: React.ReactNode;
+    readonly field: React.ReactNode;
+  };
+  /** Blocks every submit path while external prerequisites are unresolved. */
+  readonly isSubmitDisabled?: boolean;
   readonly mode?: 'main' | 'edit';
 };
 
@@ -148,7 +155,7 @@ export const cancelChatStreamKeyCombination = {
  */
 export type ChatTextareaLogicOptions = Pick<
   ChatTextareaProperties,
-  'ref' | 'onSubmit' | 'enableAutoFocus' | 'onEscapePressed' | 'onBlur' | 'mode'
+  'ref' | 'onSubmit' | 'enableAutoFocus' | 'onEscapePressed' | 'onBlur' | 'mode' | 'isSubmitDisabled'
 > & {
   /** Called when a viewer panel tab is dropped — the host should screenshot the matching pane. */
   readonly onViewerScreenshotDrop?: (entryPath: string) => void;
@@ -167,6 +174,7 @@ export function useChatTextareaLogic({
   onEscapePressed,
   onBlur,
   mode = 'main',
+  isSubmitDisabled = false,
   onViewerScreenshotDrop,
   onAddContextChips,
 }: ChatTextareaLogicOptions): {
@@ -306,16 +314,24 @@ export function useChatTextareaLogic({
 
   // Refs for stable handleSubmit — prevents re-render cascades through memo'd children
   const inputTextRef = useRef(inputText);
-  inputTextRef.current = inputText;
   const imagesRef = useRef(images);
-  imagesRef.current = images;
   const isSubmittingRef = useRef(isSubmitting);
-  isSubmittingRef.current = isSubmitting;
+  const isSubmitDisabledRef = useRef(isSubmitDisabled);
   const onSubmitRef = useRef(onSubmit);
-  onSubmitRef.current = onSubmit;
+  useEffect(() => {
+    inputTextRef.current = inputText;
+    imagesRef.current = images;
+    isSubmittingRef.current = isSubmitting;
+    isSubmitDisabledRef.current = isSubmitDisabled;
+    onSubmitRef.current = onSubmit;
+  }, [images, inputText, isSubmitDisabled, isSubmitting, onSubmit]);
 
   const handleSubmit = useCallback(async (): Promise<void> => {
-    if ((inputTextRef.current.trim().length === 0 && imagesRef.current.length === 0) || isSubmittingRef.current) {
+    if (
+      (inputTextRef.current.trim().length === 0 && imagesRef.current.length === 0) ||
+      isSubmittingRef.current ||
+      isSubmitDisabledRef.current
+    ) {
       return;
     }
 
@@ -345,9 +361,11 @@ export function useChatTextareaLogic({
   );
 
   const showContextMenuRef = useRef(showContextMenu);
-  showContextMenuRef.current = showContextMenu;
   const onEscapePressedRef = useRef(onEscapePressed);
-  onEscapePressedRef.current = onEscapePressed;
+  useEffect(() => {
+    showContextMenuRef.current = showContextMenu;
+    onEscapePressedRef.current = onEscapePressed;
+  }, [onEscapePressed, showContextMenu]);
 
   const handleTextareaKeyDown = useCallback(
     (event: React.KeyboardEvent): void => {

@@ -14,7 +14,7 @@ export type ContextSuggestionItem = {
   group: string;
   /** When true, the item action is handled externally (e.g. screenshot trigger) rather than inserting a chip. */
   isAction?: boolean;
-  /** Numeric key for temporal sorting (e.g. `Chat.updatedAt`). Higher values sort first. */
+  /** Numeric key for temporal sorting (e.g. chat user activity). Higher values sort first. */
   sortKey?: number;
   /** Structured action metadata for screenshot items. Present when `chipType` is `'screenshot'`. */
   screenshotAction?: ScreenshotActionData;

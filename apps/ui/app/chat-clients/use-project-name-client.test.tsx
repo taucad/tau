@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
-import { chatTurnRequestSchema } from '@taucad/chat/schemas';
+import { parseChatTurnRequest } from '@taucad/chat/schemas';
 import { useProjectNameClient } from '#chat-clients/use-project-name-client.js';
 import type { NameGeneratorRequestError } from '#chat-clients/_internal/name-generator-client.js';
 
@@ -46,7 +46,7 @@ const mountStreamingResponse = (events: readonly SseEvent[]): void => {
 };
 
 describe('useProjectNameClient', () => {
-  it('should POST to /v1/chat with a body that parses through chatTurnRequestSchema and carries agent.profile = project_name', async () => {
+  it('should POST to /v1/chat with a body that parses through parseChatTurnRequest and carries agent.profile = project_name', async () => {
     mountStreamingResponse([
       { type: 'start' },
       { type: 'text-start', id: 't0' },
@@ -59,7 +59,7 @@ describe('useProjectNameClient', () => {
     const { result } = renderHook(() => useProjectNameClient());
 
     await act(async () => {
-      await result.current.generate({ text: 'Design a desk lamp' });
+      await result.current.generate({ projectId: 'proj_test', text: 'Design a desk lamp' });
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -69,7 +69,7 @@ describe('useProjectNameClient', () => {
     expect(init.credentials).toBe('include');
 
     const sentBody: unknown = JSON.parse(init.body as string);
-    const parsed = chatTurnRequestSchema.parse(sentBody);
+    const parsed = await parseChatTurnRequest(sentBody);
     expect(parsed.agent).toEqual({ profile: 'project_name' });
     expect(parsed.messages).toHaveLength(1);
     expect(parsed.messages[0]!.role).toBe('user');
@@ -93,7 +93,7 @@ describe('useProjectNameClient', () => {
 
     let resolved: string | undefined;
     await act(async () => {
-      resolved = await result.current.generate({ text: 'Hi' });
+      resolved = await result.current.generate({ projectId: 'proj_test', text: 'Hi' });
     });
 
     expect(resolved).toBe('Hello, world');
@@ -115,7 +115,7 @@ describe('useProjectNameClient', () => {
 
     let resolved: string | undefined;
     await act(async () => {
-      resolved = await result.current.generate({ text: 'Hi' });
+      resolved = await result.current.generate({ projectId: 'proj_test', text: 'Hi' });
     });
 
     expect(resolved).toBe('Final');
@@ -128,7 +128,7 @@ describe('useProjectNameClient', () => {
 
     try {
       await act(async () => {
-        await result.current.generate({ text: 'Hi' });
+        await result.current.generate({ projectId: 'proj_test', text: 'Hi' });
       });
       expect.fail('should have thrown');
     } catch (error) {
@@ -146,7 +146,7 @@ describe('useProjectNameClient', () => {
 
     try {
       await act(async () => {
-        await result.current.generate({ text: 'Hi' });
+        await result.current.generate({ projectId: 'proj_test', text: 'Hi' });
       });
       expect.fail('should have thrown');
     } catch (error) {
@@ -162,11 +162,11 @@ describe('useProjectNameClient', () => {
     const second = 'data:image/webp;base64,UklGRgQAAABXRUJQ';
 
     await act(async () => {
-      await result.current.generate({ text: '', imageUrls: [first, second] });
+      await result.current.generate({ projectId: 'proj_test', text: '', imageUrls: [first, second] });
     });
 
     const [, init] = fetchMock.mock.calls[0]! as [string, RequestInit];
-    const parsed = chatTurnRequestSchema.parse(JSON.parse(init.body as string));
+    const parsed = await parseChatTurnRequest(JSON.parse(init.body as string));
     expect(parsed.messages[0]?.parts).toEqual([
       { type: 'file', url: first, mediaType: 'image/png' },
       { type: 'file', url: second, mediaType: 'image/webp' },

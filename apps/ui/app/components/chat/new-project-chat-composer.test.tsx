@@ -1,5 +1,6 @@
 import { act, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { CadAgentExecution } from '@taucad/chat';
 import type { ChatTextareaProperties } from '#components/chat/chat-textarea-types.js';
 import type { ProjectCreationLocationState } from '#hooks/use-project-creation-location.js';
 
@@ -11,6 +12,7 @@ const mockPresentLocationError = vi.fn(() => false);
 const mockRefresh = vi.fn(async () => undefined);
 let capturedTextarea: ChatTextareaProperties | undefined;
 let locationState: ProjectCreationLocationState;
+let composerExecution: CadAgentExecution;
 
 vi.mock('react-router', () => ({ useNavigate: () => mockNavigate }));
 vi.mock('#components/chat/chat-textarea.js', () => ({
@@ -58,7 +60,11 @@ vi.mock('#hooks/use-project-creation-location-error.js', () => ({
   useProjectCreationLocationError: () => mockPresentLocationError,
 }));
 vi.mock('#hooks/active-chat-provider.js', () => ({
-  useChatComposer: () => ({ model: { modelId: 'gpt-test' }, draftActorRef: { send: mockFlush } }),
+  useChatComposer: () => ({
+    model: { modelId: 'gpt-test' },
+    execution: { execution: composerExecution },
+    draftActorRef: { send: mockFlush },
+  }),
 }));
 vi.mock('#hooks/use-chat.js', () => ({ useDraftActions: () => ({ clearDraft: mockClearDraft }) }));
 vi.mock('#components/ui/sonner.js', () => ({ toast: { error: vi.fn() } }));
@@ -89,8 +95,33 @@ describe('NewProjectChatComposer', () => {
     vi.clearAllMocks();
     capturedTextarea = undefined;
     locationState = readyLocation();
+    composerExecution = { kind: 'tau', model: 'gpt-test' };
     mockCreateProject.mockResolvedValue({ slugs: { workspaceSlug: 'workshop', projectSlug: 'bracket' } });
   });
+
+  /*
+   * The chip is the promise; the seed is the delivery. Rebuilding the seed from
+   * the model alone is what placed a "Tau Host · root" turn on the browser host
+   * (G4 live proof, 2026-09-03): the project was created, the chip read the
+   * daemon, and the whole run happened in the page.
+   */
+  it.each([
+    ['a paired Tau Host daemon', { kind: 'tau', model: 'gpt-test', hostId: 'device-av4' }],
+    ['an external ACP agent on a daemon', { kind: 'acp', hostId: 'device-av4', agentId: 'codex' }],
+    ['a Paseo agent', { kind: 'paseo', connectionId: 'conn-1', agentId: 'agent-1' }],
+  ] as ReadonlyArray<readonly [string, CadAgentExecution]>)(
+    'seeds the created chat with %s exactly as the chip shows it',
+    async (_name, execution) => {
+      composerExecution = execution;
+      render(<NewProjectChatComposer />);
+
+      await act(async () => {
+        await capturedTextarea?.onSubmit({ content: 'Build a bracket', imageUrls: [] });
+      });
+
+      expect(mockCreateProject).toHaveBeenCalledWith(expect.objectContaining({ activeExecution: execution }));
+    },
+  );
 
   it('passes exact product selection and chat context, then clears only after navigation succeeds', async () => {
     render(<NewProjectChatComposer />);
@@ -108,7 +139,7 @@ describe('NewProjectChatComposer', () => {
 
     expect(mockCreateProject).toHaveBeenCalledWith({
       kernel: 'openscad',
-      activeModel: 'gpt-test',
+      activeExecution: { kind: 'tau', model: 'gpt-test' },
       initialMessage: { content: 'Build a bracket', imageUrls: ['data:image/png;base64,a'] },
       editorState: {
         panelState: { desktopLayout: { chatOpen: true, compactAuxiliary: 'chat' }, mobileActiveTab: 'chat' },

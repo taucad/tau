@@ -19,6 +19,8 @@ import type { ContextSuggestionItem } from '#components/chat/tiptap/suggestion-t
 import { takeScreenshotGroup } from '#components/chat/tiptap/context-suggestion.utils.js';
 import { useChatContextInsertion } from '#components/chat/chat-context-insertion.js';
 import type { ChatContextReference } from '#components/chat/chat-context-insertion.js';
+import { ChatApprovalBanner } from '#components/chat/chat-approval-banner.js';
+import { useChatComposer } from '#hooks/active-chat-provider.js';
 import { useHeadlessImageService } from '#providers/headless-image-provider.js';
 import { captureCadImages, captureFilesToDataUrls } from '#services/headless-capture.js';
 
@@ -91,6 +93,7 @@ export const ChatTextarea = memo(function ({
   const { treeService } = useFileManager();
   const imageService = useHeadlessImageService();
   const { chats } = useChats(projectContext?.projectId ?? '');
+  const { session } = useChatComposer();
   const { setDraftText: setMainDraftText, setEditDraftText } = useDraftActions();
 
   const setDraftText = useCallback(
@@ -186,13 +189,26 @@ export const ChatTextarea = memo(function ({
 
   // Refs for stable callback — avoids recreating handleScreenshotAction on every render
   const projectContextRef = useRef(projectContext);
-  projectContextRef.current = projectContext;
   const handleAddImageRef = useRef(logic.handleAddImage);
-  handleAddImageRef.current = logic.handleAddImage;
   const imageInputSupportedRef = useRef(logic.imageInputSupported);
-  imageInputSupportedRef.current = logic.imageInputSupported;
   const rejectUnsupportedImageInputRef = useRef(logic.rejectUnsupportedImageInput);
-  rejectUnsupportedImageInputRef.current = logic.rejectUnsupportedImageInput;
+  const handleAddTextRef = useRef(logic.handleAddText);
+  const inputTextRefForChips = useRef(logic.inputText);
+  useEffect(() => {
+    projectContextRef.current = projectContext;
+    handleAddImageRef.current = logic.handleAddImage;
+    imageInputSupportedRef.current = logic.imageInputSupported;
+    rejectUnsupportedImageInputRef.current = logic.rejectUnsupportedImageInput;
+    handleAddTextRef.current = logic.handleAddText;
+    inputTextRefForChips.current = logic.inputText;
+  }, [
+    logic.handleAddImage,
+    logic.handleAddText,
+    logic.imageInputSupported,
+    logic.inputText,
+    logic.rejectUnsupportedImageInput,
+    projectContext,
+  ]);
 
   /**
    * Resolve the per-view graphics actor whose pane currently shows `entryPath`.
@@ -307,8 +323,6 @@ export const ChatTextarea = memo(function ({
 
   // Mobile drag-drop chip insertion: append `@<path>` segments and lean on the
   // existing draft-text rehydration to render them as chips.
-  const handleAddTextRef = useRef(logic.handleAddText);
-  handleAddTextRef.current = logic.handleAddText;
   useEffect(() => {
     if (!isMobile) {
       return;
@@ -337,16 +351,16 @@ export const ChatTextarea = memo(function ({
     };
   }, [isMobile]);
 
-  // Track the current input text for the mobile chip-insertion leading-space
-  // heuristic without re-running the registration effect on every keystroke.
-  const inputTextRefForChips = useRef(logic.inputText);
-  inputTextRefForChips.current = logic.inputText;
-
   const skeleton = <ChatTextareaSkeleton className={className} />;
+  /* A paused run is answered from the composer, not the transcript. Only the
+   * main composer, and only under a real session: the new-project composer runs
+   * on `ChatComposerProvider`, which has no chat to be paused. */
+  const approvalBanner = mode === 'main' && projectContext && session ? <ChatApprovalBanner /> : undefined;
 
   if (isMobile) {
     return (
       <ClientOnly fallback={skeleton}>
+        {approvalBanner}
         <ChatTextareaMobile
           className={className}
           enableAutoFocus={enableAutoFocus}
@@ -403,6 +417,7 @@ export const ChatTextarea = memo(function ({
 
   return (
     <ClientOnly fallback={skeleton}>
+      {approvalBanner}
       <ChatTextareaDesktop
         className={className}
         enableAutoFocus={enableAutoFocus}

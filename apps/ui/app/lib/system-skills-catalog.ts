@@ -1,9 +1,21 @@
+import jscadSkillMarkdown from '@taucad/jscad/agent?raw';
+import build123dSkillMarkdown from '@taucad/build123d/agent?raw';
+import picogkSkillMarkdown from '@taucad/picogk/agent?raw';
+import manifoldSkillMarkdown from '@taucad/manifold/agent?raw';
+import geospecAuthoringSkillMarkdown from '@taucad/middleware/agent/geospec-authoring?raw';
+import opencascadejsSkillMarkdown from '@taucad/opencascade/agent?raw';
+import openscadSkillMarkdown from '@taucad/openrscad/agent?raw';
+import replicadSkillMarkdown from '@taucad/replicad/agent?raw';
+import zooSkillMarkdown from '@taucad/zoo/agent?raw';
+import { createModelSkillMarkdown } from '#lib/create-model-skill.js';
+
 export type BuiltInSystemSkill = {
   readonly slug: string;
   readonly name: string;
   readonly description: string;
   readonly version: string;
   readonly source: 'system';
+  readonly priority: 60;
   readonly whenToUse: string;
   readonly skillMarkdown: string;
 };
@@ -15,6 +27,7 @@ export const builtInSystemSkills: readonly BuiltInSystemSkill[] = [
     description: 'Create or update Tau agent skills',
     version: '1.0.0',
     source: 'system',
+    priority: 60,
     whenToUse: 'Use when creating, updating, reviewing, or explaining Tau agent skills or SKILL.md structure.',
     skillMarkdown: `---
 name: create-skill

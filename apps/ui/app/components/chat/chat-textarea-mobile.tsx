@@ -9,6 +9,7 @@ import { menuContentVariants, menuItemVariants } from '@taucad/ui/components/men
 import { ChatModelSelector } from '#components/chat/chat-model-selector.js';
 import { ChatExecutionSelector, formatChatAgentActivity } from '#components/chat/chat-execution-selector.js';
 import { ChatKernelSelector } from '#components/chat/chat-kernel-selector.js';
+import { ChatRevisionSelector } from '#components/chat/chat-revision-selector.js';
 import { ChatToolSelector } from '#components/chat/chat-tool-selector.js';
 import { ChatContextActions } from '#components/chat/chat-context-actions.js';
 import { ChatTextareaBorderBeam } from '#components/chat/chat-textarea-border-beam.js';
@@ -322,6 +323,34 @@ export const ChatTextareaMobile = memo(function ({
                   ) : null}
 
                   {creationLocationControl}
+
+                  {/* Revision Selector */}
+                  {execution.kind === 'tau' ? (
+                    <ChatRevisionSelector
+                      isNested
+                      data-chat-textarea-focustrap={focusTrapAttribute}
+                      popoverProperties={{ align: 'start' }}
+                      onSelect={() => {
+                        setIsDrawerOpen(false);
+                        focusInput();
+                      }}
+                    >
+                      {({ currentConfig }) => (
+                        <div className={menuItemClassName} data-slot='chat-revision-selector'>
+                          <span className='flex w-full items-center justify-between'>
+                            <div className='flex items-center gap-2'>
+                              <currentConfig.icon className='size-4' />
+                              <div className='flex flex-col items-start'>
+                                <span>{currentConfig.label}</span>
+                                <span className='text-xs text-muted-foreground'>{currentConfig.description}</span>
+                              </div>
+                            </div>
+                            <ChevronRight className='size-4 text-muted-foreground' />
+                          </span>
+                        </div>
+                      )}
+                    </ChatRevisionSelector>
+                  ) : null}
 
                   {/* Kernel Selector */}
                   {enableKernelSelector ? (

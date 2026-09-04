@@ -52,10 +52,10 @@ describe('extractContent', () => {
             {
               type: 'contextChip',
               attrs: {
-                id: '/main.scad',
+                id: 'main.scad',
                 label: 'main.scad',
                 chipType: 'file',
-                path: '/main.scad',
+                path: 'main.scad',
               },
             },
           ],
@@ -65,10 +65,8 @@ describe('extractContent', () => {
 
     const result = extractContent(editor);
 
-    expect(result.text).toBe('@/main.scad');
-    expect(result.contextChips).toEqual([
-      { id: '/main.scad', label: 'main.scad', chipType: 'file', path: '/main.scad' },
-    ]);
+    expect(result.text).toBe('@main.scad');
+    expect(result.contextChips).toEqual([{ id: 'main.scad', label: 'main.scad', chipType: 'file', path: 'main.scad' }]);
 
     editor.destroy();
   });
@@ -84,7 +82,7 @@ describe('extractContent', () => {
             { type: 'text', text: 'Fix the bug in ' },
             {
               type: 'contextChip',
-              attrs: { id: '/src/app.ts', label: 'app.ts', chipType: 'file', path: '/src/app.ts' },
+              attrs: { id: 'src/app.ts', label: 'app.ts', chipType: 'file', path: 'src/app.ts' },
             },
             { type: 'text', text: ' please' },
           ],
@@ -94,13 +92,13 @@ describe('extractContent', () => {
 
     const result = extractContent(editor);
 
-    expect(result.text).toBe('Fix the bug in @/src/app.ts please');
+    expect(result.text).toBe('Fix the bug in @src/app.ts please');
     expect(result.contextChips).toHaveLength(1);
     expect(result.contextChips[0]).toEqual({
-      id: '/src/app.ts',
+      id: 'src/app.ts',
       label: 'app.ts',
       chipType: 'file',
-      path: '/src/app.ts',
+      path: 'src/app.ts',
     });
 
     editor.destroy();
@@ -122,7 +120,7 @@ describe('extractContent', () => {
             { type: 'text', text: ' and ' },
             {
               type: 'contextChip',
-              attrs: { id: '/src', label: 'src', chipType: 'folder', path: '/src' },
+              attrs: { id: 'src', label: 'src', chipType: 'folder', path: 'src' },
             },
           ],
         },
@@ -131,7 +129,7 @@ describe('extractContent', () => {
 
     const result = extractContent(editor);
 
-    expect(result.text).toBe('Look at Previous chat and @/src');
+    expect(result.text).toBe('Look at Previous chat and @src');
     expect(result.contextChips).toHaveLength(2);
     expect(result.contextChips[0]?.chipType).toBe('chat');
     expect(result.contextChips[1]?.chipType).toBe('folder');
@@ -202,10 +200,10 @@ describe('ContextChipNode serialization', () => {
             {
               type: 'contextChip',
               attrs: {
-                id: '/src/utils.ts',
+                id: 'src/utils.ts',
                 label: 'utils.ts',
                 chipType: 'file',
-                path: '/src/utils.ts',
+                path: 'src/utils.ts',
               },
             },
           ],
@@ -216,7 +214,7 @@ describe('ContextChipNode serialization', () => {
     const html = editor.getHTML();
     expect(html).toContain('data-type="context-chip"');
     expect(html).toContain('data-label="utils.ts"');
-    expect(html).toContain('data-id="/src/utils.ts"');
+    expect(html).toContain('data-id="src/utils.ts"');
 
     const editor2 = createTestEditor();
     editor2.commands.setContent(html);
@@ -224,10 +222,10 @@ describe('ContextChipNode serialization', () => {
     const result = extractContent(editor2);
     expect(result.contextChips).toHaveLength(1);
     expect(result.contextChips[0]).toEqual({
-      id: '/src/utils.ts',
+      id: 'src/utils.ts',
       label: 'utils.ts',
       chipType: 'file',
-      path: '/src/utils.ts',
+      path: 'src/utils.ts',
     });
 
     editor.destroy();

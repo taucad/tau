@@ -55,7 +55,7 @@ describe('name clients wire integration', () => {
     const { result } = renderHook(() => useProjectNameClient());
 
     await act(async () => {
-      await result.current.generate({ text: 'Design a coat rack' });
+      await result.current.generate({ projectId: 'proj_test', text: 'Design a coat rack' });
     });
 
     const wireBody = captureWireBody();
@@ -67,7 +67,7 @@ describe('name clients wire integration', () => {
     const { result } = renderHook(() => useCommitNameClient());
 
     await act(async () => {
-      await result.current.generate('Summarise this diff');
+      await result.current.generate('Summarise this diff', 'proj_test');
     });
 
     const wireBody = captureWireBody();
@@ -87,7 +87,7 @@ describe('name clients wire integration', () => {
     const { result } = renderHook(() => useProjectNameClient());
 
     await act(async () => {
-      await result.current.generate({ text: 'Design a coat rack' });
+      await result.current.generate({ projectId: 'proj_test', text: 'Design a coat rack' });
     });
 
     const wireBody = captureWireBody() as { trigger?: unknown; agent?: unknown };

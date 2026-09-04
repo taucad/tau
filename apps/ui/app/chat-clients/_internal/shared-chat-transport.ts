@@ -1,9 +1,9 @@
 import { Chat } from '@ai-sdk/react';
-import { DefaultChatTransport } from 'ai';
+import { lastAssistantMessageIsCompleteWithApprovalResponses } from 'ai';
 import type { MyUIMessage } from '@taucad/chat';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { idPrefix } from '@taucad/types/constants';
-import { ENV } from '#environment.config.js';
+import { BrowserPlacementChatTransport } from '#chat-clients/_internal/browser-agent-host-transport.js';
 
 /**
  * Single shared transport. Constructed once at module load so N concurrent
@@ -18,10 +18,16 @@ import { ENV } from '#environment.config.js';
  * @internal
  */
 // oxlint-disable-next-line tau-lint/require-public-export-jsdoc -- @internal, scoped to chat-clients & chat-session-store
-export const sharedChatTransport = new DefaultChatTransport({
-  api: `${ENV.TAU_API_URL}/v1/chat`,
-  credentials: 'include',
-});
+export const sharedChatTransport = new BrowserPlacementChatTransport<MyUIMessage>();
+
+/** Seeds the exact durable run selected by project-scoped reload discovery. */
+export const bindDurableChatRun = (chatId: string, runId: string): void => {
+  sharedChatTransport.bindRun(chatId, runId);
+};
+
+/** Reads the exact run captured by admission before the AI SDK finish callback. */
+export const getBoundDurableChatRunId = (chatId: string): string | undefined =>
+  sharedChatTransport.getBoundRunId(chatId);
 
 type CreateChatInstanceOptions = {
   readonly chatId: string;
@@ -47,4 +53,5 @@ export const createChatInstance = ({ chatId, onFinish, onError }: CreateChatInst
     generateId: () => generatePrefixedId(idPrefix.message),
     onFinish,
     onError,
+    sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithApprovalResponses,
   });

@@ -182,6 +182,7 @@ export type UseChatEditorReturn = {
   clearEditor: () => void;
 };
 
+/* oxlint-disable react/refs -- The `use no memo` boundary preserves Tiptap's long-lived editor callbacks while refs expose the latest React inputs. */
 export function useChatEditor({
   onSubmit,
   onEscape,
@@ -195,6 +196,8 @@ export function useChatEditor({
   onContextAction,
   placeholder = 'Ask Tau to build anything...',
 }: UseChatEditorOptions): UseChatEditorReturn {
+  'use no memo';
+
   const [contextSuggestionState, setContextSuggestionState] = useState<
     SuggestionPopupState<ContextSuggestionItem> | undefined
   >(undefined);
@@ -387,3 +390,4 @@ export function useChatEditor({
     clearEditor,
   };
 }
+/* oxlint-enable react/refs */

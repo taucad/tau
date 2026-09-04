@@ -1,3 +1,5 @@
+import { contextMemoryMaxBytes, contextMemoryMaxLines } from '@taucad/chat/schemas';
+import { truncateMemoryHead } from '#hooks/use-context-payload.js';
 import { renderHook, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { FileEntry } from '@taucad/types';
@@ -303,5 +305,27 @@ describe('useContextPayload', () => {
         }),
       ]),
     );
+  });
+});
+
+describe('CH-10 memory head truncation', () => {
+  it('keeps the head and appends a notice past the line cap', () => {
+    const text = Array.from({ length: contextMemoryMaxLines + 50 }, (_, index) => `line ${String(index)}`).join('\n');
+    const out = truncateMemoryHead(text);
+    expect(out.startsWith('line 0\n')).toBe(true);
+    expect(out).toContain(`line ${String(contextMemoryMaxLines - 1)}`);
+    expect(out).not.toContain(`line ${String(contextMemoryMaxLines)}\n`);
+    expect(out).toContain('[AGENTS.md truncated');
+  });
+
+  it('enforces the byte ceiling', () => {
+    const text = 'y'.repeat(contextMemoryMaxBytes + 4096);
+    const out = truncateMemoryHead(text);
+    expect(out.length).toBeLessThanOrEqual(contextMemoryMaxBytes + 256);
+    expect(out).toContain('[AGENTS.md truncated');
+  });
+
+  it('returns short content unchanged', () => {
+    expect(truncateMemoryHead('short')).toBe('short');
   });
 });

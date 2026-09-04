@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { SkillMetadata } from '@taucad/chat';
 import { useFileManager } from '#hooks/use-file-manager.js';
-import { createSkillResolver } from '#lib/skill-resolver.js';
+import { createSkillResolver, titleFromSkillName } from '#lib/skill-resolver.js';
 
 export function skillMetadataToSlashCommand(skill: SkillMetadata): {
   id: string;
@@ -26,13 +26,6 @@ export function skillMetadataToSlashCommand(skill: SkillMetadata): {
   };
 }
 
-export function titleFromSkillName(skillName: string): string {
-  return skillName
-    .split('-')
-    .map((part) => part.slice(0, 1).toUpperCase() + part.slice(1))
-    .join(' ');
-}
-
 /**
  * Builds the merged, user-priority skills catalog from the workspace.
  *
@@ -44,19 +37,16 @@ export function useSkillsCatalog(): SkillMetadata[] {
   const [skills, setSkills] = useState<SkillMetadata[]>([]);
   const [treeRevision, setTreeRevision] = useState(0);
 
-  const readFileRef = useRef(readFile);
-  readFileRef.current = readFile;
-
   const resolver = useMemo(() => {
     if (!treeService) {
       return undefined;
     }
 
     return createSkillResolver({
-      readFile: async (path) => readFileRef.current(path),
+      readFile,
       listDirectory: async (path) => treeService.listDirectory(path),
     });
-  }, [treeService]);
+  }, [readFile, treeService]);
 
   useEffect(() => {
     if (!treeService) {
@@ -97,19 +87,16 @@ export function usePromptSkillsCatalog(): SkillMetadata[] {
   const { readFile, treeService } = useFileManager();
   const [skills, setSkills] = useState<SkillMetadata[]>([]);
   const [treeRevision, setTreeRevision] = useState(0);
-  const readFileRef = useRef(readFile);
-  readFileRef.current = readFile;
-
   const resolver = useMemo(() => {
     if (!treeService) {
       return undefined;
     }
 
     return createSkillResolver({
-      readFile: async (path) => readFileRef.current(path),
+      readFile,
       listDirectory: async (path) => treeService.listDirectory(path),
     });
-  }, [treeService]);
+  }, [readFile, treeService]);
 
   useEffect(() => {
     if (!treeService) {

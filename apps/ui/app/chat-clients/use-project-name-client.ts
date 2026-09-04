@@ -4,6 +4,7 @@ import { extractMimeTypeFromDataUrl } from '#utils/chat.utils.js';
 import { useNameGeneratorPartsClient } from '#chat-clients/_internal/name-generator-client.js';
 
 export type ProjectNameInput = {
+  readonly projectId: string;
   readonly text: string;
   readonly imageUrls?: readonly string[];
 };
@@ -24,7 +25,7 @@ export const useProjectNameClient = (): ProjectNameClient => {
       }));
       const text = input.text.trim();
       const textParts: MyUIMessage['parts'] = text ? [{ type: 'text', text }] : [];
-      return generateFromParts([...files, ...textParts]);
+      return generateFromParts([...files, ...textParts], input.projectId);
     },
     [generateFromParts],
   );

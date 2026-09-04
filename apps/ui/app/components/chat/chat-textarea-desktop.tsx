@@ -6,6 +6,7 @@ import type { FileTreeService } from '@taucad/fs-client/file-tree-service';
 import { ChatModelSelector, openModelSelectorKeyCombination } from '#components/chat/chat-model-selector.js';
 import { ChatExecutionSelector, formatChatAgentActivity } from '#components/chat/chat-execution-selector.js';
 import { ChatKernelSelector } from '#components/chat/chat-kernel-selector.js';
+import { ChatRevisionSelector } from '#components/chat/chat-revision-selector.js';
 import { ChatToolSelector } from '#components/chat/chat-tool-selector.js';
 import { ChatAgentSelector, toggleModeKeyCombination } from '#components/chat/chat-mode-selector.js';
 import { Button } from '@taucad/ui/components/button';
@@ -189,7 +190,9 @@ export const ChatTextareaDesktop = memo(function ({
   // This breaks the re-render cascade: editor changes (null→Editor) won't
   // recreate focusEditor/handleAtButtonClick, so Tooltip children stay memo'd.
   const editorRef = useRef(editor);
-  editorRef.current = editor;
+  useEffect(() => {
+    editorRef.current = editor;
+  }, [editor]);
 
   useEffect(() => {
     if (!editor) {
@@ -490,6 +493,33 @@ export const ChatTextareaLeftControls = memo(function ({
         </Tooltip>
       ) : null}
       {creationLocationControl}
+      {/* Revision selector */}
+      {execution.kind === 'tau' ? (
+        <Tooltip>
+          <ChatRevisionSelector
+            data-chat-textarea-focustrap
+            popoverProperties={{ align: 'start' }}
+            onSelect={focusEditor}
+            onClose={focusEditor}
+          >
+            {({ currentConfig }) => (
+              <TooltipTrigger asChild>
+                <Button
+                  data-slot='chat-revision-selector'
+                  variant='outline'
+                  size='sm'
+                  aria-label={`Work in: ${currentConfig.label}`}
+                  className='h-7 cursor-pointer! rounded-full text-muted-foreground hover:text-foreground @max-[22rem]:w-7 @xs:max-w-fit @[22rem]:pr-2'
+                >
+                  <span className='hidden truncate text-xs @[22rem]:block'>{currentConfig.label}</span>
+                  <currentConfig.icon className='size-4' aria-hidden='true' />
+                </Button>
+              </TooltipTrigger>
+            )}
+          </ChatRevisionSelector>
+          <TooltipContent>Select where this chat writes</TooltipContent>
+        </Tooltip>
+      ) : null}
       {/* Kernel selector */}
       {enableKernelSelector ? (
         <Tooltip>

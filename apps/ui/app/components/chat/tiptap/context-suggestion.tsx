@@ -150,6 +150,7 @@ export const ContextSuggestionDropdown = memo(function ContextSuggestionDropdown
 }): React.JSX.Element | undefined {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [drilledCategory, setDrilledCategory] = useState<string | undefined>(undefined);
+  const [previousInput, setPreviousInput] = useState({ items: state.items, query: state.query });
   // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- React ref requires null init
   const containerReference = useRef<HTMLDivElement>(null);
   const itemReferences = useRef<Map<number, HTMLButtonElement>>(new Map());
@@ -160,11 +161,11 @@ export const ContextSuggestionDropdown = memo(function ContextSuggestionDropdown
 
   const hasQuery = query.length > 0;
 
-  // Reset drill state and selection when items or query change
-  useEffect(() => {
+  if (previousInput.items !== items || previousInput.query !== query) {
+    setPreviousInput({ items, query });
     setSelectedIndex(0);
     setDrilledCategory(undefined);
-  }, [items, query]);
+  }
 
   useEffect(() => {
     if (virtuosoRef.current) {

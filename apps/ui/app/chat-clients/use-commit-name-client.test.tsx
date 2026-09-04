@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
-import { chatTurnRequestSchema } from '@taucad/chat/schemas';
+import { parseChatTurnRequest } from '@taucad/chat/schemas';
 import { useCommitNameClient } from '#chat-clients/use-commit-name-client.js';
 import type { NameGeneratorRequestError } from '#chat-clients/_internal/name-generator-client.js';
 
@@ -37,7 +37,7 @@ afterEach(() => {
 });
 
 describe('useCommitNameClient', () => {
-  it('should POST to /v1/chat with a body that parses through chatTurnRequestSchema and carries agent.profile = commit_name', async () => {
+  it('should POST to /v1/chat with a body that parses through parseChatTurnRequest and carries agent.profile = commit_name', async () => {
     fetchMock.mockResolvedValue(
       new Response(
         sseStreamFromEvents([
@@ -55,7 +55,7 @@ describe('useCommitNameClient', () => {
 
     let resolved: string | undefined;
     await act(async () => {
-      resolved = await result.current.generate('Summarise this diff');
+      resolved = await result.current.generate('Summarise this diff', 'proj_test');
     });
 
     expect(resolved).toBe('fix: trim trailing whitespace');
@@ -65,7 +65,7 @@ describe('useCommitNameClient', () => {
     expect(init.method).toBe('POST');
 
     const sentBody: unknown = JSON.parse(init.body as string);
-    const parsed = chatTurnRequestSchema.parse(sentBody);
+    const parsed = await parseChatTurnRequest(sentBody);
     expect(parsed.agent).toEqual({ profile: 'commit_name' });
     expect(parsed.messages).toHaveLength(1);
     const textPart = parsed.messages[0]!.parts.find((part) => part.type === 'text');
@@ -79,7 +79,7 @@ describe('useCommitNameClient', () => {
 
     try {
       await act(async () => {
-        await result.current.generate('Summarise this diff');
+        await result.current.generate('Summarise this diff', 'proj_test');
       });
       expect.fail('should have thrown');
     } catch (error) {

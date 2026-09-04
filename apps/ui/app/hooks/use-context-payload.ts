@@ -1,10 +1,29 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import type { ContextPayload } from '@taucad/chat';
+import { contextMemoryMaxBytes, contextMemoryMaxLines } from '@taucad/chat/schemas';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { usePromptSkillsCatalog } from '#hooks/use-skills-catalog.js';
 
 const agentsMdPath = '.tau/AGENTS.md';
 const decoder = new TextDecoder();
+
+/**
+ * CH-10 head truncation: memory content is capped at the first
+ * `contextMemoryMaxLines` lines and `contextMemoryMaxBytes` bytes so an
+ * oversized AGENTS.md cannot flood the uncached dynamic prompt block. The head
+ * is kept (never the tail) and a one-line notice marks the cut.
+ */
+export function truncateMemoryHead(text: string): string {
+  const lines = text.split('\n');
+  let out = lines.length > contextMemoryMaxLines ? lines.slice(0, contextMemoryMaxLines).join('\n') : text;
+  if (out.length > contextMemoryMaxBytes) {
+    out = out.slice(0, contextMemoryMaxBytes);
+  }
+  if (out.length === text.length) {
+    return text;
+  }
+  return `${out}\n[AGENTS.md truncated: first ${String(contextMemoryMaxLines)} lines / ${String(contextMemoryMaxBytes)} bytes retained]`;
+}
 
 /**
  * Hook that assembles a context payload from workspace agent metadata.
@@ -44,7 +63,9 @@ export function useContextPayload(): ContextPayload | undefined {
   }, [treeService]);
 
   const readFileRef = useRef(readFile);
-  readFileRef.current = readFile;
+  useEffect(() => {
+    readFileRef.current = readFile;
+  }, [readFile]);
 
   useEffect(() => {
     let cancelled = false;
@@ -59,7 +80,7 @@ export function useContextPayload(): ContextPayload | undefined {
         const bytes = await readFileRef.current(agentsMdPath);
         const text = decoder.decode(bytes);
         if (!cancelled) {
-          setMemory({ [agentsMdPath]: text });
+          setMemory({ [agentsMdPath]: truncateMemoryHead(text) });
         }
       } catch {
         if (!cancelled) {

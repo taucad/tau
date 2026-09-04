@@ -225,13 +225,15 @@ export const SlashCommandDropdown = memo(function SlashCommandDropdown({
   readonly keydownHandlerRef: React.RefObject<((event: KeyboardEvent) => boolean) | undefined>;
 }): React.JSX.Element | undefined {
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [previousItems, setPreviousItems] = useState(state.items);
   const itemReferences = useRef<Map<number, HTMLButtonElement>>(new Map());
 
   const { items, command, clientRect } = state;
 
-  useEffect(() => {
+  if (previousItems !== items) {
+    setPreviousItems(items);
     setSelectedIndex(0);
-  }, [items]);
+  }
 
   useEffect(() => {
     const element = itemReferences.current.get(selectedIndex);

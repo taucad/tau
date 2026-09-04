@@ -1,0 +1,7 @@
+[
+  {
+    "name": "@taucad/spatial runtime",
+    "path": "dist/**/*.mjs",
+    "limit": "10 kB"
+  }
+]

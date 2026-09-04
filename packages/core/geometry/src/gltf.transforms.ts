@@ -1,5 +1,5 @@
-import { transformMesh } from '@gltf-transform/functions';
-import type { mat4, vec4, Document } from '@gltf-transform/core';
+import { transformMesh, transformPrimitive } from '@gltf-transform/functions';
+import type { Accessor, mat4, vec4, Document, Mesh, Primitive, PrimitiveTarget } from '@gltf-transform/core';
 import { resolveCoordinateTransform } from '@taucad/spatial';
 
 /**
@@ -78,6 +78,36 @@ const gltfScalingMatrix: mat4 = [1000, 0, 0, 0, 0, 1000, 0, 0, 0, 0, 1000, 0, 0,
 const gltfReverseCoordinateTransformMatrix: mat4 = [...coordinateTransform.inverse];
 const reverseCoordinateQuat: Quat = [...coordinateTransform.inverseRotation];
 
+const transformMeshPreservingManifoldTopology = (mesh: Mesh, matrix: mat4): void => {
+  if (!mesh.getExtension('EXT_mesh_manifold')) {
+    transformMesh(mesh, matrix);
+    return;
+  }
+
+  const transformed = new Set<Accessor>();
+  for (const primitive of mesh.listPrimitives()) {
+    const detached: Array<{ owner: Primitive | PrimitiveTarget; semantic: string; accessor: Accessor }> = [];
+    for (const owner of [primitive, ...primitive.listTargets()]) {
+      for (const semantic of ['POSITION', 'NORMAL', 'TANGENT']) {
+        const accessor = owner.getAttribute(semantic);
+        if (!accessor) {
+          continue;
+        }
+        if (transformed.has(accessor)) {
+          owner.setAttribute(semantic, null);
+          detached.push({ owner, semantic, accessor });
+        } else {
+          transformed.add(accessor);
+        }
+      }
+    }
+    transformPrimitive(primitive, matrix);
+    for (const { owner, semantic, accessor } of detached) {
+      owner.setAttribute(semantic, accessor);
+    }
+  }
+};
+
 // ---------------------------------------------------------------------------
 // Document-level rotation / scaling helpers
 // ---------------------------------------------------------------------------
@@ -96,7 +126,7 @@ const reverseCoordinateQuat: Quat = [...coordinateTransform.inverseRotation];
  */
 function applyRotationToDocument(document: Document, matrix: mat4, quaternion: Quat): void {
   for (const mesh of document.getRoot().listMeshes()) {
-    transformMesh(mesh, matrix);
+    transformMeshPreservingManifoldTopology(mesh, matrix);
   }
 
   for (const node of document.getRoot().listNodes()) {
@@ -119,7 +149,7 @@ function applyRotationToDocument(document: Document, matrix: mat4, quaternion: Q
  */
 function applyUniformScaleToDocument(document: Document, matrix: mat4, factor: number): void {
   for (const mesh of document.getRoot().listMeshes()) {
-    transformMesh(mesh, matrix);
+    transformMeshPreservingManifoldTopology(mesh, matrix);
   }
 
   for (const node of document.getRoot().listNodes()) {

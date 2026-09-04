@@ -54,7 +54,7 @@ export {
   writeGlb,
   writeGltfJson,
 } from '#utils/glb-writer.js';
-export type { GlbInput, GlbMaterial, GlbNode, GlbPrimitive } from '#utils/glb-writer.js';
+export type { GlbInput, GlbManifoldTopology, GlbMaterial, GlbNode, GlbPrimitive } from '#utils/glb-writer.js';
 
 // Names
 export {

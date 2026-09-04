@@ -22,6 +22,11 @@ export type ProviderCapabilities = {
   readonly persistent: boolean;
   readonly writable: boolean;
   readonly quotaBased: boolean;
+  /**
+   * Append durability reported by current providers. Optional only so older
+   * bridge peers and third-party providers remain wire-compatible.
+   */
+  readonly durability?: 'exclusive-append' | 'stream-append' | 'transactional-rewrite' | 'ephemeral';
 };
 
 /**
@@ -45,6 +50,8 @@ export type FileSystemProvider = {
   readFile(path: string, encoding: 'utf8'): Promise<string>;
   /** Persist a file, creating any missing parent directories. */
   writeFile(path: string, data: Uint8Array<ArrayBuffer> | string): Promise<void>;
+  /** Append bytes in enqueue order, creating the file and missing parent directories when absent. */
+  appendFile?(path: string, data: Uint8Array<ArrayBuffer> | string): Promise<void>;
   readdir(path: string): Promise<string[]>;
   stat(path: string): Promise<FileStat>;
   mkdir(path: string, options?: { recursive?: boolean }): Promise<void>;

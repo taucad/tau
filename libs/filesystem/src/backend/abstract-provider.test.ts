@@ -18,7 +18,7 @@ class TestProvider extends AbstractFileSystemProvider {
   }
 
   public get capabilities(): ProviderCapabilities {
-    return { persistent: false, writable: true, quotaBased: false };
+    return { persistent: false, writable: true, quotaBased: false, durability: 'ephemeral' };
   }
 
   public async writeFile(path: string, data: Uint8Array<ArrayBuffer> | string): Promise<void> {

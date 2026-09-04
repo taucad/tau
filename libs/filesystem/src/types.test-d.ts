@@ -13,4 +13,10 @@ describe('FileSystemProvider wire types', () => {
       Array<{ name: string } & FileStat>
     >();
   });
+
+  it('keeps appendFile optional on third-party providers', () => {
+    expectTypeOf<FileSystemProvider['appendFile']>().toEqualTypeOf<
+      ((path: string, data: Uint8Array<ArrayBuffer> | string) => Promise<void>) | undefined
+    >();
+  });
 });

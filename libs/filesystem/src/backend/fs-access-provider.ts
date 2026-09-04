@@ -25,6 +25,12 @@ type FileSystemDirectoryEntryHandle = FileSystemDirectoryHandle | FileSystemFile
 type IterableFileSystemDirectoryHandle = FileSystemDirectoryHandle & {
   entries(): AsyncIterableIterator<[string, FileSystemDirectoryEntryHandle]>;
 };
+type ExclusiveWritableFileHandle = FileSystemFileHandle & {
+  createWritable(options?: {
+    keepExistingData?: boolean;
+    mode?: 'exclusive' | 'siloed';
+  }): Promise<FileSystemWritableFileStream>;
+};
 
 /**
  * Test whether a basename is Chromium's private File System Access swap artifact.
@@ -66,11 +72,13 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
     persistent: true,
     writable: true,
     quotaBased: false,
+    durability: 'stream-append',
   };
 
   protected _rootHandle: FileSystemDirectoryHandle;
   private readonly _handleCache = new Map<string, FileSystemDirectoryHandle>();
   private readonly _handleCacheMax = handleCacheMaxEntries;
+  private _exclusiveWritableSupported: boolean | undefined;
 
   public constructor(rootHandle: FileSystemDirectoryHandle) {
     super();
@@ -98,6 +106,22 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
       await this._cleanupFailedFileCreation(path, created);
       throw error;
     }
+  }
+
+  /** Append with an exclusive positional writable when the browser proves support. */
+  public override async appendFile(path: string, data: Uint8Array<ArrayBuffer> | string): Promise<void> {
+    this._assertReady();
+    this._assertRootedPath(path);
+    const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : new Uint8Array(data);
+    return this._enqueueAppend(path, async () => {
+      const created = await this._createFileHandle(path);
+      try {
+        await this._appendBytes(path, created.fileHandle, bytes);
+      } catch (error) {
+        await this._cleanupFailedFileCreation(path, created);
+        throw error;
+      }
+    });
   }
 
   /**
@@ -458,6 +482,35 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
     }
   }
 
+  /**
+   * Exclusive mode writes the tail in place and can expose a torn tail after a
+   * crash. The rewrite fallback uses Chromium's swap file and atomic rename.
+   */
+  protected async _appendBytes(
+    path: string,
+    fileHandle: FileSystemFileHandle,
+    bytes: Uint8Array<ArrayBuffer>,
+  ): Promise<void> {
+    const writable = await this._openExclusiveWritable(fileHandle);
+    if (writable === undefined) {
+      await this._appendFileByRewrite(path, bytes);
+      return;
+    }
+    try {
+      const file = await fileHandle.getFile();
+      const position = file.size;
+      await writable.write({ type: 'write', position, data: bytes });
+      await writable.close();
+    } catch (error) {
+      try {
+        await writable.abort(error);
+      } catch {
+        // Preserve the append/close failure that caused the abort.
+      }
+      throw error;
+    }
+  }
+
   protected async readFileRaw(path: string): Promise<Uint8Array<ArrayBuffer>> {
     this._assertReady();
     this._assertRootedPath(path);
@@ -573,7 +626,7 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
   // Private instance methods
   // ---------------------------------------------------------------------------
 
-  private async _createFileHandle(path: string): Promise<{
+  protected async _createFileHandle(path: string): Promise<{
     fileHandle: FileSystemFileHandle;
     createdFile: boolean;
     createdDirectories: string[];
@@ -631,7 +684,7 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
     }
   }
 
-  private async _cleanupFailedFileCreation(
+  protected async _cleanupFailedFileCreation(
     path: string,
     created: { createdFile: boolean; createdDirectories: readonly string[] },
   ): Promise<void> {
@@ -643,6 +696,50 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
       }
     }
     await this._cleanupCreatedDirectories(created.createdDirectories);
+  }
+
+  private async _openExclusiveWritable(
+    fileHandle: FileSystemFileHandle,
+  ): Promise<FileSystemWritableFileStream | undefined> {
+    if (this._exclusiveWritableSupported === false) {
+      return undefined;
+    }
+    const capableHandle = fileHandle as ExclusiveWritableFileHandle;
+    let writable: FileSystemWritableFileStream;
+    try {
+      writable = await capableHandle.createWritable({ keepExistingData: true, mode: 'exclusive' });
+    } catch (error) {
+      if (error instanceof TypeError) {
+        this._exclusiveWritableSupported = false;
+        return undefined;
+      }
+      throw error;
+    }
+    if (this._exclusiveWritableSupported === true) {
+      return writable;
+    }
+
+    let competing: FileSystemWritableFileStream | undefined;
+    try {
+      competing = await fileHandle.createWritable();
+    } catch (error) {
+      if (hasDomName(error, 'NoModificationAllowedError')) {
+        this._exclusiveWritableSupported = true;
+        return writable;
+      }
+      try {
+        await writable.abort(error);
+      } catch {
+        // Preserve the competing-writer probe failure.
+      }
+      throw error;
+    }
+
+    // Older Chromium ignores unknown Web IDL dictionary members, so a
+    // successful competing writer proves `mode: 'exclusive'` was ignored.
+    this._exclusiveWritableSupported = false;
+    await Promise.allSettled([writable.abort(), competing.abort()]);
+    return undefined;
   }
 
   private async _cleanupCreatedDirectories(paths: readonly string[]): Promise<void> {

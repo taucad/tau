@@ -20,6 +20,7 @@ import { assertRootedPath } from '@taucad/utils/path';
 export abstract class AbstractFileSystemProvider implements FileSystemProvider {
   public abstract readonly id: string;
   public abstract readonly capabilities: ProviderCapabilities;
+  private readonly _appendTails = new Map<string, Promise<void>>();
 
   // -- Public instance methods (readFile, mkdir, exists, lstat, dispose) -------
 
@@ -52,6 +53,17 @@ export abstract class AbstractFileSystemProvider implements FileSystemProvider {
     this._assertRootedPath(path);
     const raw = await this.readFileRaw(path);
     return encoding === 'utf8' ? new TextDecoder().decode(raw) : raw;
+  }
+
+  /**
+   * Append bytes to `path`, creating the file and its parents when absent.
+   * Concrete providers inherit this read-concat-write fallback unless they
+   * can append more efficiently.
+   */
+  public async appendFile(path: string, data: Uint8Array<ArrayBuffer> | string): Promise<void> {
+    this._assertRootedPath(path);
+    const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : new Uint8Array(data);
+    return this._enqueueAppend(path, async () => this._appendFileByRewrite(path, bytes));
   }
 
   /**
@@ -177,6 +189,44 @@ export abstract class AbstractFileSystemProvider implements FileSystemProvider {
 
   protected _assertRootedPath(path: string): void {
     assertRootedPath(path);
+  }
+
+  /** Serialize appends to one path in call order, without poisoning the queue after a failure. */
+  protected async _enqueueAppend(path: string, operation: () => Promise<void>): Promise<void> {
+    const previous = this._appendTails.get(path) ?? Promise.resolve();
+    const current = (async () => {
+      try {
+        await previous;
+      } catch {
+        // A failed append must not poison later appends to the same path.
+      }
+      await operation();
+    })();
+    this._appendTails.set(path, current);
+    try {
+      await current;
+    } finally {
+      if (this._appendTails.get(path) === current) {
+        this._appendTails.delete(path);
+      }
+    }
+  }
+
+  /** Default append used by providers whose native fast path is unavailable. */
+  protected async _appendFileByRewrite(path: string, bytes: Uint8Array<ArrayBuffer>): Promise<void> {
+    let existing: Uint8Array<ArrayBuffer>;
+    try {
+      existing = await this.readFile(path);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        throw error;
+      }
+      existing = new Uint8Array();
+    }
+    const combined = new Uint8Array(existing.byteLength + bytes.byteLength);
+    combined.set(existing);
+    combined.set(bytes, existing.byteLength);
+    await this.writeFile(path, combined);
   }
 
   // -- Protected abstract methods (internal primitives) -----------------------

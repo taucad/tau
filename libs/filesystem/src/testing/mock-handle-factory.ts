@@ -13,6 +13,8 @@ type FileEntry = {
   lastModified: number;
   /** OPFS allows one sync access handle per file at a time. */
   syncHandleOpen?: boolean;
+  /** Modern File System Access allows one exclusive writable at a time. */
+  exclusiveWritableOpen?: boolean;
 };
 type Entry = DirectoryEntry | FileEntry;
 
@@ -29,34 +31,83 @@ export type MockRootHandleOptions = {
   syncAccess?: boolean;
   /** Maximum bytes one sync-handle write accepts, for short-write tests. */
   syncWriteLimit?: number;
+  /** Model support for `createWritable({ mode: 'exclusive' })`. Default `true`. */
+  exclusiveWritable?: boolean;
   /** Called on every write-API acquisition *attempt*, including ones that throw. */
   onAcquireWriteApi?: (api: 'sync' | 'writable') => void;
 };
 
 class MockWritableStream {
-  private readonly _chunks: Array<Uint8Array<ArrayBuffer>> = [];
+  private _content: Uint8Array<ArrayBuffer>;
+  private _position = 0;
   private readonly _onClose: (data: Uint8Array<ArrayBuffer>) => void;
+  private readonly _onRelease: () => void;
 
-  public constructor(onClose: (data: Uint8Array<ArrayBuffer>) => void) {
+  public constructor(
+    initial: Uint8Array<ArrayBuffer>,
+    onClose: (data: Uint8Array<ArrayBuffer>) => void,
+    onRelease: () => void,
+  ) {
+    this._content = new Uint8Array(initial);
     this._onClose = onClose;
+    this._onRelease = onRelease;
   }
 
-  public async write(data: Uint8Array<ArrayBuffer> | BufferSource): Promise<void> {
-    const view = ArrayBuffer.isView(data)
-      ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
-      : new Uint8Array(data);
-    this._chunks.push(view);
+  public async write(data: FileSystemWriteChunkType): Promise<void> {
+    const command =
+      typeof data === 'object' &&
+      'type' in data &&
+      (data.type === 'write' || data.type === 'seek' || data.type === 'truncate')
+        ? (data as WriteParams)
+        : undefined;
+    if (command?.type === 'seek') {
+      if (typeof command.position !== 'number') {
+        throw new TypeError('seek requires a position');
+      }
+      this._position = command.position;
+      return;
+    }
+    if (command?.type === 'truncate') {
+      if (typeof command.size !== 'number') {
+        throw new TypeError('truncate requires a size');
+      }
+      this._resize(command.size);
+      return;
+    }
+    const payload = command?.type === 'write' ? command.data : data;
+    const view = ArrayBuffer.isView(payload)
+      ? new Uint8Array(payload.buffer, payload.byteOffset, payload.byteLength)
+      : payload instanceof Blob
+        ? new Uint8Array(await payload.arrayBuffer())
+        : typeof payload === 'string'
+          ? new TextEncoder().encode(payload)
+          : payload instanceof ArrayBuffer
+            ? new Uint8Array(payload)
+            : (() => {
+                throw new TypeError('write requires data');
+              })();
+    const position =
+      command?.type === 'write' && typeof command.position === 'number' ? command.position : this._position;
+    if (position + view.byteLength > this._content.byteLength) {
+      this._resize(position + view.byteLength);
+    }
+    this._content.set(view, position);
+    this._position = position + view.byteLength;
   }
 
   public async close(): Promise<void> {
-    const totalLength = this._chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0);
-    const merged = new Uint8Array(totalLength);
-    let offset = 0;
-    for (const chunk of this._chunks) {
-      merged.set(chunk, offset);
-      offset += chunk.byteLength;
-    }
-    this._onClose(merged);
+    this._onClose(this._content);
+    this._onRelease();
+  }
+
+  public async abort(): Promise<void> {
+    this._onRelease();
+  }
+
+  private _resize(size: number): void {
+    const next = new Uint8Array(size);
+    next.set(this._content.subarray(0, Math.min(size, this._content.byteLength)));
+    this._content = next;
   }
 }
 
@@ -129,7 +180,7 @@ class MockFileHandle {
     if (options.syncAccess !== false) {
       this.createSyncAccessHandle = async (): Promise<MockSyncAccessHandle> => {
         options.onAcquireWriteApi?.('sync');
-        if (entry.syncHandleOpen === true) {
+        if (entry.syncHandleOpen === true || entry.exclusiveWritableOpen === true) {
           throw new DOMException(`Sync access handle already open: ${name}`, 'NoModificationAllowedError');
         }
         return new MockSyncAccessHandle(entry, options.syncWriteLimit ?? Number.POSITIVE_INFINITY);
@@ -143,12 +194,30 @@ class MockFileHandle {
     });
   }
 
-  public async createWritable(): Promise<MockWritableStream> {
+  public async createWritable(options?: {
+    keepExistingData?: boolean;
+    mode?: 'exclusive' | 'siloed';
+  }): Promise<MockWritableStream> {
     this._options.onAcquireWriteApi?.('writable');
-    return new MockWritableStream((data) => {
-      this._entry.content = data;
-      this._entry.lastModified = Date.now();
-    });
+    if (this._entry.syncHandleOpen === true || this._entry.exclusiveWritableOpen === true) {
+      throw new DOMException(`Exclusive writable already open: ${this.name}`, 'NoModificationAllowedError');
+    }
+    const exclusive = options?.mode === 'exclusive' && this._options.exclusiveWritable !== false;
+    if (exclusive) {
+      this._entry.exclusiveWritableOpen = true;
+    }
+    return new MockWritableStream(
+      options?.keepExistingData ? this._entry.content : new Uint8Array(),
+      (data) => {
+        this._entry.content = data;
+        this._entry.lastModified = Date.now();
+      },
+      () => {
+        if (exclusive) {
+          this._entry.exclusiveWritableOpen = false;
+        }
+      },
+    );
   }
 
   public async isSameEntry(other: FileSystemHandle): Promise<boolean> {

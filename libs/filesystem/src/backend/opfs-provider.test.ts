@@ -19,6 +19,7 @@ describe('OPFSProvider lifecycle', () => {
     run: (provider: OPFSProvider) => Promise<unknown>;
   }> = [
     { name: 'writeFile', run: async (provider) => provider.writeFile('file', 'x') },
+    { name: 'appendFile', run: async (provider) => provider.appendFile('file', 'x') },
     { name: 'readFile', run: async (provider) => provider.readFile('file') },
     { name: 'readdir', run: async (provider) => provider.readdir('') },
     { name: 'readdirWithStats', run: async (provider) => provider.readdirWithStats('') },
@@ -77,6 +78,7 @@ describe('OPFS writes via sync access handles', () => {
     const { acquired } = mountRoot({});
     const provider = new OPFSProvider();
     await provider.initialize();
+    acquired.length = 0;
 
     await provider.writeFile('nested/data.bin', bytes);
 
@@ -105,6 +107,20 @@ describe('OPFS writes via sync access handles', () => {
     await expect(provider.readFile('data.bin')).resolves.toEqual(bytes);
   });
 
+  it('completes a short sync append without truncating the tail', async () => {
+    const { root } = mountRoot({ syncWriteLimit: 2 });
+    const provider = new OPFSProvider();
+    await provider.initialize();
+    const fileHandle = await root.getFileHandle('events.log', { create: true });
+    const writable = await fileHandle.createWritable();
+    await writable.write('head');
+    await writable.close();
+
+    await provider.appendFile('events.log', '-tail');
+
+    await expect(provider.readFile('events.log', 'utf8')).resolves.toBe('head-tail');
+  });
+
   it('rejects a zero-progress sync write', async () => {
     mountRoot({ syncWriteLimit: 0 });
     const provider = new OPFSProvider();
@@ -118,13 +134,14 @@ describe('OPFS writes via sync access handles', () => {
     const provider = new OPFSProvider();
     await provider.initialize();
 
+    expect(provider.capabilities.durability).toBe('stream-append');
     await provider.writeFile('data.bin', bytes);
 
     expect(acquired).toEqual(['writable']);
     await expect(provider.readFile('data.bin')).resolves.toEqual(bytes);
   });
 
-  it('retries once then falls back to createWritable while another sync handle is open', async () => {
+  it('cannot open a writable stream while another sync handle is open', async () => {
     const { root, acquired } = mountRoot({});
     const provider = new OPFSProvider();
     await provider.initialize();
@@ -134,13 +151,15 @@ describe('OPFS writes via sync access handles', () => {
     const contender = await contendedHandle.createSyncAccessHandle!();
     acquired.length = 0;
     try {
-      await provider.writeFile('data.bin', bytes);
+      await expect(provider.writeFile('data.bin', bytes)).rejects.toMatchObject({
+        name: 'NoModificationAllowedError',
+      });
     } finally {
       contender.close();
     }
 
     expect(acquired).toEqual(['sync', 'sync', 'writable']);
-    await expect(provider.readFile('data.bin')).resolves.toEqual(bytes);
+    await expect(provider.readFile('data.bin')).resolves.toEqual(new Uint8Array([7]));
   });
 
   it('keeps the user-picked webaccess provider on createWritable', async () => {
@@ -152,5 +171,38 @@ describe('OPFS writes via sync access handles', () => {
 
     expect(acquired).toEqual(['writable']);
     await expect(provider.readFile('data.bin')).resolves.toEqual(bytes);
+  });
+
+  it('appends at getSize through one sync access handle', async () => {
+    const { acquired } = mountRoot({});
+    const provider = new OPFSProvider();
+    await provider.initialize();
+    await provider.writeFile('events.log', 'head');
+    acquired.length = 0;
+
+    await provider.appendFile('events.log', '-tail');
+
+    expect(acquired).toEqual(['sync']);
+    await expect(provider.readFile('events.log', 'utf8')).resolves.toBe('head-tail');
+  });
+
+  it('cannot append through a writable stream while another sync handle is open', async () => {
+    const { root, acquired } = mountRoot({});
+    const provider = new OPFSProvider();
+    await provider.initialize();
+    await provider.writeFile('events.log', 'head');
+    const fileHandle = await root.getFileHandle('events.log');
+    const contender = await fileHandle.createSyncAccessHandle!();
+    acquired.length = 0;
+    try {
+      await expect(provider.appendFile('events.log', '-tail')).rejects.toMatchObject({
+        name: 'NoModificationAllowedError',
+      });
+    } finally {
+      contender.close();
+    }
+
+    expect(acquired).toEqual(['sync', 'sync', 'writable']);
+    await expect(provider.readFile('events.log', 'utf8')).resolves.toBe('head');
   });
 });

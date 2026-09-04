@@ -23,7 +23,12 @@ const webaccessScope = (workspaceId: string, handleName = 'mount-dir'): Workspac
 vi.mock('#backend/direct-idb-provider.js', () => {
   class MockDirectIdbProvider {
     public id = 'indexeddb';
-    public capabilities = { persistent: true, writable: true, quotaBased: true };
+    public capabilities = {
+      persistent: true,
+      writable: true,
+      quotaBased: true,
+      durability: 'transactional-rewrite',
+    };
     public readFile = vi.fn() as FileSystemProvider['readFile'];
     public writeFile = vi.fn();
     public readdir = vi.fn();
@@ -44,7 +49,7 @@ vi.mock('#backend/direct-idb-provider.js', () => {
 vi.mock('#backend/memory-provider.js', () => {
   class MockMemoryProvider {
     public id = 'memory';
-    public capabilities = { persistent: false, writable: true, quotaBased: false };
+    public capabilities = { persistent: false, writable: true, quotaBased: false, durability: 'ephemeral' };
     public readFile = vi.fn() as FileSystemProvider['readFile'];
     public writeFile = vi.fn();
     public readdir = vi.fn();
@@ -64,7 +69,12 @@ vi.mock('#backend/memory-provider.js', () => {
 vi.mock('#backend/fs-access-provider.js', () => {
   class MockFileSystemAccessProvider {
     public id = 'webaccess';
-    public capabilities = { persistent: true, writable: true, quotaBased: false };
+    public capabilities = {
+      persistent: true,
+      writable: true,
+      quotaBased: false,
+      durability: 'stream-append',
+    };
     public readFile = vi.fn() as FileSystemProvider['readFile'];
     public writeFile = vi.fn();
     public readdir = vi.fn();
@@ -84,7 +94,12 @@ vi.mock('#backend/fs-access-provider.js', () => {
 vi.mock('#backend/opfs-provider.js', () => {
   class MockOPFSProvider {
     public id = 'opfs';
-    public capabilities = { persistent: true, writable: true, quotaBased: true };
+    public capabilities = {
+      persistent: true,
+      writable: true,
+      quotaBased: true,
+      durability: 'exclusive-append',
+    };
     public readFile = vi.fn() as FileSystemProvider['readFile'];
     public writeFile = vi.fn();
     public readdir = vi.fn();
@@ -269,19 +284,34 @@ describe('ProviderRegistry', () => {
     it('should create DirectIdbProvider for indexeddb backend', async () => {
       const provider = await registry.getProvider(indexeddbScope);
       expect(provider.id).toBe('indexeddb');
-      expect(provider.capabilities).toEqual({ persistent: true, writable: true, quotaBased: true });
+      expect(provider.capabilities).toEqual({
+        persistent: true,
+        writable: true,
+        quotaBased: true,
+        durability: 'transactional-rewrite',
+      });
     });
 
     it('should create OPFSProvider for opfs backend', async () => {
       const provider = await registry.getProvider(opfsScope);
       expect(provider.id).toBe('opfs');
-      expect(provider.capabilities).toEqual({ persistent: true, writable: true, quotaBased: true });
+      expect(provider.capabilities).toEqual({
+        persistent: true,
+        writable: true,
+        quotaBased: true,
+        durability: 'exclusive-append',
+      });
     });
 
     it('should create FileSystemAccessProvider for webaccess backend with handle', async () => {
       const provider = await registry.getProvider(webaccessScope('wsp_local', 'local-dir'));
       expect(provider.id).toBe('webaccess');
-      expect(provider.capabilities).toEqual({ persistent: true, writable: true, quotaBased: false });
+      expect(provider.capabilities).toEqual({
+        persistent: true,
+        writable: true,
+        quotaBased: false,
+        durability: 'stream-append',
+      });
     });
   });
 });

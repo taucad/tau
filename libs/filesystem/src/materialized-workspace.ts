@@ -109,6 +109,7 @@ type CreateWorkspaceFileSystemOptions = Readonly<{
 
 const createWorkspaceFileSystem = (options: CreateWorkspaceFileSystemOptions): RootedFileSystem => {
   const { source, prefix, identity, state } = options;
+  const fallbackAppendQueue = new ResourceQueue();
   const assertActive = (): void => {
     if (!state.active) {
       throw new MaterializedWorkspaceError(
@@ -200,6 +201,31 @@ const createWorkspaceFileSystem = (options: CreateWorkspaceFileSystemOptions): R
     },
     readFile,
     writeFile: async (path, data) => run(async () => source.writeFile(resolve(path), data)),
+    appendFile: async (path, data) => {
+      const resolved = resolve(path);
+      return run(async () =>
+        fallbackAppendQueue.queueFor(resolved, async () => {
+          if (source.appendFile !== undefined) {
+            await source.appendFile(resolved, data);
+            return;
+          }
+          let existing: Uint8Array<ArrayBuffer>;
+          try {
+            existing = await source.readFile(resolved);
+          } catch (error) {
+            if (!isNotFoundError(error)) {
+              throw error;
+            }
+            existing = new Uint8Array();
+          }
+          const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : new Uint8Array(data);
+          const combined = new Uint8Array(existing.byteLength + bytes.byteLength);
+          combined.set(existing);
+          combined.set(bytes, existing.byteLength);
+          await source.writeFile(resolved, combined);
+        }),
+      );
+    },
     readdir: async (path) => run(async () => source.readdir(resolve(path))),
     stat: async (path) => run(async () => source.stat(resolve(path))),
     mkdir: async (path, options) => run(async () => source.mkdir(resolve(path), options)),

@@ -80,6 +80,8 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
       persistent: true,
       writable: true,
       quotaBased: true,
+      // The inherited append rewrite commits as one IndexedDB transaction, so a crash cannot expose a torn tail.
+      durability: 'transactional-rewrite',
     };
   }
 

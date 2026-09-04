@@ -84,6 +84,9 @@ describe('WorkspaceFileService explicit-workspace contract', () => {
   });
 
   it('keeps rooted filesystems to transported provider primitives plus watch', () => {
+    expectTypeOf<NonNullable<RootedFileSystem['appendFile']>>().parameters.toEqualTypeOf<
+      [path: string, data: Uint8Array<ArrayBuffer> | string]
+    >();
     expectTypeOf<RootedFileSystem>().not.toHaveProperty('readFiles');
     expectTypeOf<RootedFileSystem>().not.toHaveProperty('readdirContents');
     expectTypeOf<RootedFileSystem>().not.toHaveProperty('readdirStat');

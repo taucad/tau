@@ -7,12 +7,14 @@
 
 import type { ProviderCapabilities } from '#types.js';
 import { FileSystemAccessProvider } from '#backend/fs-access-provider.js';
+import { randomUuid } from '@taucad/utils/id';
 
 /**
  * Subset of `FileSystemSyncAccessHandle` this provider uses. Declared locally
  * because the type ships in TypeScript's `webworker` lib, not `dom`.
  */
 type SyncAccessHandle = {
+  getSize(): number;
   write(data: Uint8Array<ArrayBuffer>, options?: { at?: number }): number;
   truncate(size: number): void;
   flush(): void;
@@ -21,6 +23,10 @@ type SyncAccessHandle = {
 
 type SyncAccessCapableFileHandle = FileSystemFileHandle & {
   createSyncAccessHandle?: () => Promise<SyncAccessHandle>;
+};
+
+type OPFSCapabilities = Omit<ProviderCapabilities, 'durability'> & {
+  durability: NonNullable<ProviderCapabilities['durability']>;
 };
 
 const writeAll = (handle: SyncAccessHandle, bytes: Uint8Array<ArrayBuffer>, offset: number): void => {
@@ -46,10 +52,11 @@ export class OPFSProvider extends FileSystemAccessProvider {
     return 'opfs';
   }
 
-  public override readonly capabilities: ProviderCapabilities = {
+  public override readonly capabilities: OPFSCapabilities = {
     persistent: true,
     writable: true,
     quotaBased: true,
+    durability: 'exclusive-append',
   };
 
   private _initialized = false;
@@ -64,6 +71,7 @@ export class OPFSProvider extends FileSystemAccessProvider {
   public async initialize(): Promise<void> {
     this._initialized = false;
     this._rootHandle = await navigator.storage.getDirectory();
+    this.capabilities.durability = (await this._supportsSyncAccess()) ? 'exclusive-append' : 'stream-append';
     this._initialized = true;
     await super.refresh();
   }
@@ -82,10 +90,6 @@ export class OPFSProvider extends FileSystemAccessProvider {
    * `NoModificationAllowedError`. One microtask retry covers the common
    * back-to-back-write case; anything still failing falls back to the
    * writable stream so no write that used to succeed starts failing.
-   *
-   * ponytail: whole-file replacement only. `appendFile` is a read + concat +
-   * `writeFile` at the RPC layer, so it inherits this path already; there is
-   * no positional-write provider API to route.
    *
    * @param fileHandle - Handle for the already-created target file.
    * @param bytes - Full new contents.
@@ -126,9 +130,65 @@ export class OPFSProvider extends FileSystemAccessProvider {
     }
   }
 
+  /** Append at the sync handle's current size and flush before releasing exclusivity. */
+  protected override async _appendBytes(
+    path: string,
+    fileHandle: FileSystemFileHandle,
+    bytes: Uint8Array<ArrayBuffer>,
+  ): Promise<void> {
+    const acquire = (fileHandle as SyncAccessCapableFileHandle).createSyncAccessHandle;
+    if (typeof acquire !== 'function') {
+      await super._appendBytes(path, fileHandle, bytes);
+      return;
+    }
+
+    let handle: SyncAccessHandle | undefined;
+    for (let attempt = 0; attempt < 2 && handle === undefined; attempt++) {
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- The retry only exists to await a second attempt.
+        handle = await acquire.call(fileHandle);
+      } catch {
+        // oxlint-disable-next-line no-await-in-loop -- Yield once so a same-tick holder can close.
+        await Promise.resolve();
+      }
+    }
+    if (handle === undefined) {
+      await super._appendBytes(path, fileHandle, bytes);
+      return;
+    }
+
+    try {
+      writeAll(handle, bytes, handle.getSize());
+      handle.flush();
+    } finally {
+      handle.close();
+    }
+  }
+
   protected override _assertReady(): void {
     if (!this._initialized) {
       throw new Error('OPFSProvider is not initialized. Call initialize() first.');
+    }
+  }
+
+  private async _supportsSyncAccess(): Promise<boolean> {
+    const probeName = `.tau-opfs-sync-probe-${randomUuid()}`;
+    const fileHandle = await this._rootHandle.getFileHandle(probeName, { create: true });
+    try {
+      const acquire = (fileHandle as SyncAccessCapableFileHandle).createSyncAccessHandle;
+      if (typeof acquire !== 'function') {
+        return false;
+      }
+      let handle: SyncAccessHandle;
+      try {
+        handle = await acquire.call(fileHandle);
+      } catch {
+        return false;
+      }
+      handle.close();
+      return true;
+    } finally {
+      await this._rootHandle.removeEntry(probeName);
     }
   }
 }

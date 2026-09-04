@@ -31,6 +31,7 @@ describe('DirectIdbProvider', () => {
         persistent: true,
         writable: true,
         quotaBased: true,
+        durability: 'transactional-rewrite',
       });
     });
   });

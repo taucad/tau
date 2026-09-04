@@ -6,6 +6,7 @@ import { MountTable } from '#mount-table.js';
 import { ProviderRegistry } from '#provider-registry.js';
 import { ResourceQueue } from '#resource-queue.js';
 import { WorkspaceFileService } from '#workspace-file-service.js';
+import type { RootedFileSystem } from '#workspace-file-service.js';
 import { ImmutableRevisionTree, revisionId } from '#revision-tree.js';
 import { captureRevisionTree, MaterializedWorkspaceAuthority } from '#materialized-workspace.js';
 import { materializedWorkspaceId } from '#workspace-identity.js';
@@ -16,7 +17,7 @@ type Harness = {
   dispose: () => void;
 };
 
-const createHarness = (): Harness => {
+const createHarness = (options?: { legacyAppend?: boolean }): Harness => {
   const provider = new MemoryProvider();
   const mountTable = new MountTable();
   mountTable.mount('/project', provider, {
@@ -33,9 +34,13 @@ const createHarness = (): Harness => {
     crossTabCoordinator,
     mountTable,
   });
+  const filesystem = service.createRootedFileSystem('/project');
+  if (options?.legacyAppend === true) {
+    Object.defineProperty(filesystem, 'appendFile', { value: undefined });
+  }
   return {
     authority: new MaterializedWorkspaceAuthority({
-      filesystem: service.createRootedFileSystem('/project'),
+      filesystem,
       resourceQueue,
     }),
     dispose: () => {
@@ -55,8 +60,8 @@ afterEach(() => {
   live.length = 0;
 });
 
-const harness = (): Harness => {
-  const created = createHarness();
+const harness = (options?: Parameters<typeof createHarness>[0]): Harness => {
+  const created = createHarness(options);
   live.push(created);
   return created;
 };
@@ -94,6 +99,22 @@ describe('MaterializedWorkspaceAuthority', () => {
     await expect(second.filesystem.readFile('nested/renamed.txt', 'utf8')).resolves.toBe('rename base');
     expect(new TextDecoder().decode(tree.get('main.ts'))).toBe('base');
     expect(new TextDecoder().decode(tree.get('delete-me.txt'))).toBe('delete base');
+  });
+
+  it('serializes fallback appends when the source lacks appendFile', async () => {
+    const { authority } = harness({ legacyAppend: true });
+    const workspace = await authority.materialize({
+      workspaceId: materializedWorkspaceId('legacy-append'),
+      baseRevisionId: revisionId('rev-legacy-append'),
+      tree: new ImmutableRevisionTree([['events.log', 'head']]),
+    });
+
+    await Promise.all([
+      workspace.filesystem.appendFile!('events.log', '-one'),
+      workspace.filesystem.appendFile!('events.log', '-two'),
+    ]);
+
+    await expect(workspace.filesystem.readFile('events.log', 'utf8')).resolves.toBe('head-one-two');
   });
 
   it('keeps rooted watcher streams branch-local', async () => {

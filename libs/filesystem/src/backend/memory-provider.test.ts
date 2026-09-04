@@ -13,6 +13,7 @@ describe('createMemoryProvider', () => {
       persistent: false,
       writable: true,
       quotaBased: false,
+      durability: 'ephemeral',
     });
   });
 

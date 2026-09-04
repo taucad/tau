@@ -450,6 +450,10 @@ export class WorkspaceFileService {
       const { authorityPath, resolution } = resolveLocal(path);
       await this._writeFileResolved({ path: authorityPath, resolution, data, context: mutationContext });
     };
+    const appendFile = async (path: string, data: Uint8Array<ArrayBuffer> | string): Promise<void> => {
+      const { authorityPath, resolution } = resolveLocal(path);
+      await this._appendFileResolved({ path: authorityPath, resolution, data, context: mutationContext });
+    };
     const mkdir = async (path: string, options?: MkdirOptions): Promise<void> => {
       const { authorityPath, resolution } = resolveLocal(path);
       await this._mkdirResolved({ path: authorityPath, resolution, options, context: mutationContext });
@@ -560,6 +564,7 @@ export class WorkspaceFileService {
       },
       readFile,
       writeFile,
+      appendFile,
       readdir,
       stat,
       mkdir,
@@ -708,6 +713,22 @@ export class WorkspaceFileService {
     const resolution = this._resolveProvider(canonicalPath);
     const ownedData = typeof data === 'string' ? data : new Uint8Array(data);
     return this._writeFileResolved({ path: canonicalPath, resolution, data: ownedData, context });
+  }
+
+  /**
+   * Append data to a file through the selected provider, creating the file and
+   * missing parents when absent. Mutations share the canonical write locks.
+   */
+  public async appendFile(
+    path: string,
+    data: Uint8Array<ArrayBuffer> | string,
+    context?: WorkspaceMutationContext,
+  ): Promise<void> {
+    const canonicalPath = resolveAuthorityPath(path);
+    this._assertGenericMutationPath(canonicalPath);
+    const resolution = this._resolveProvider(canonicalPath);
+    const ownedData = typeof data === 'string' ? data : new Uint8Array(data);
+    return this._appendFileResolved({ path: canonicalPath, resolution, data: ownedData, context });
   }
 
   /**
@@ -3314,6 +3335,69 @@ export class WorkspaceFileService {
           await this._writeFileUnlocked({ path, resolution, data, context });
         }),
     );
+  }
+
+  private async _appendFileResolved({
+    path,
+    resolution,
+    data,
+    context,
+  }: {
+    path: string;
+    resolution: MountResolution;
+    data: Uint8Array<ArrayBuffer> | string;
+    context?: WorkspaceMutationContext;
+  }): Promise<void> {
+    const locks = this._mutationLockPaths([{ path, resolution }]);
+    return this._crossTabCoordinator.withMutationLocks(
+      locks,
+      { type: 'write', path, authority: this._physicalAuthority(resolution) },
+      async () =>
+        this._resourceQueue.queueForMany(locks, async () => {
+          await this._refreshMutationProviders([resolution]);
+          await this._appendFileUnlocked({ path, resolution, data, context });
+        }),
+    );
+  }
+
+  private async _appendFileUnlocked({
+    path,
+    resolution,
+    data,
+    context,
+  }: {
+    path: string;
+    resolution: MountResolution;
+    data: Uint8Array<ArrayBuffer> | string;
+    context?: WorkspaceMutationContext;
+  }): Promise<void> {
+    const { provider, path: resolvedPath, backend } = resolution;
+    const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : data;
+    if (provider.appendFile === undefined) {
+      let existing: Uint8Array<ArrayBuffer>;
+      try {
+        existing = await provider.readFile(resolvedPath);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+          throw error;
+        }
+        existing = new Uint8Array();
+      }
+      const combined = new Uint8Array(existing.byteLength + bytes.byteLength);
+      combined.set(existing);
+      combined.set(bytes, existing.byteLength);
+      await provider.writeFile(resolvedPath, combined);
+    } else {
+      await provider.appendFile(resolvedPath, bytes);
+    }
+
+    if (this._isCurrentResolution(path, resolution)) {
+      this._filePool?.invalidate(path);
+      this._inMemoryTreeRemoveFile(path);
+    }
+    if (resolution.entry !== undefined) {
+      this._emitChangeEvent({ type: 'fileWritten', path, backend }, context, { operations: [{ path, resolution }] });
+    }
   }
 
   private async _writeFileUnlocked({

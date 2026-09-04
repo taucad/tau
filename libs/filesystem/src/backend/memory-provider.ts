@@ -28,6 +28,7 @@ export class MemoryProvider extends AbstractFileSystemProvider {
     persistent: false,
     writable: true,
     quotaBased: false,
+    durability: 'ephemeral',
   };
 
   private readonly _files = new Map<string, Uint8Array<ArrayBuffer>>();

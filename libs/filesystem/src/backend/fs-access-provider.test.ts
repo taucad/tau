@@ -25,6 +25,7 @@ describe('FileSystemAccessProvider', () => {
         persistent: true,
         writable: true,
         quotaBased: false,
+        durability: 'stream-append',
       });
     });
   });
@@ -64,6 +65,40 @@ describe('FileSystemAccessProvider', () => {
       await provider.writeFile('a/b/c/file.txt', 'nested');
       const result = await provider.readFile('a/b/c/file.txt', 'utf8');
       expect(result).toBe('nested');
+    });
+  });
+
+  describe('appendFile', () => {
+    it('proves exclusive mode before using positional append and caches the result', async () => {
+      const acquired: string[] = [];
+      rootHandle = createMockRootHandle({ onAcquireWriteApi: (api) => acquired.push(api) });
+      provider = new FileSystemAccessProvider(rootHandle as unknown as FileSystemDirectoryHandle);
+      await provider.writeFile('events.log', 'head');
+      acquired.length = 0;
+
+      await provider.appendFile('events.log', '-one');
+      expect(acquired).toEqual(['writable', 'writable']);
+      acquired.length = 0;
+      await provider.appendFile('events.log', '-two');
+
+      expect(acquired).toEqual(['writable']);
+      await expect(provider.readFile('events.log', 'utf8')).resolves.toBe('head-one-two');
+    });
+
+    it('falls back to the base rewrite when an older browser ignores exclusive mode', async () => {
+      const acquired: string[] = [];
+      rootHandle = createMockRootHandle({
+        exclusiveWritable: false,
+        onAcquireWriteApi: (api) => acquired.push(api),
+      });
+      provider = new FileSystemAccessProvider(rootHandle as unknown as FileSystemDirectoryHandle);
+      await provider.writeFile('events.log', 'head');
+      acquired.length = 0;
+
+      await provider.appendFile('events.log', '-tail');
+
+      expect(acquired).toEqual(['writable', 'writable', 'writable']);
+      await expect(provider.readFile('events.log', 'utf8')).resolves.toBe('head-tail');
     });
   });
 

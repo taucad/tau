@@ -55,7 +55,73 @@ const expectCode = async (operation: Promise<unknown>, code: string): Promise<vo
   }
 };
 
+const appendFile = async (
+  provider: FileSystemProvider,
+  path: string,
+  data: Uint8Array<ArrayBuffer> | string,
+): Promise<void> => {
+  const append = (
+    provider as FileSystemProvider & {
+      appendFile?: (path: string, data: Uint8Array<ArrayBuffer> | string) => Promise<void>;
+    }
+  ).appendFile;
+  if (append === undefined) {
+    throw new Error('appendFile is not implemented');
+  }
+  await append.call(provider, path, data);
+};
+
 describe.each(providers)('$name provider path-tree conformance', ({ create }) => {
+  it('creates a missing file and its parents when appending', async () => {
+    const provider = await create();
+    try {
+      await appendFile(provider, 'one/two/log.bin', new Uint8Array([1, 2, 3]));
+
+      await expect(provider.stat('one/two')).resolves.toMatchObject({ type: 'dir' });
+      await expect(provider.readFile('one/two/log.bin')).resolves.toEqual(new Uint8Array([1, 2, 3]));
+    } finally {
+      provider.dispose();
+    }
+  });
+
+  it('round-trips appended bytes through readFile', async () => {
+    const provider = await create();
+    try {
+      await appendFile(provider, 'events.log', new Uint8Array([0, 255, 10]));
+
+      await expect(provider.readFile('events.log')).resolves.toEqual(new Uint8Array([0, 255, 10]));
+    } finally {
+      provider.dispose();
+    }
+  });
+
+  it('preserves prior bytes when appending', async () => {
+    const provider = await create();
+    try {
+      await provider.writeFile('events.log', new Uint8Array([1, 2]));
+      await appendFile(provider, 'events.log', new Uint8Array([3, 4]));
+
+      await expect(provider.readFile('events.log')).resolves.toEqual(new Uint8Array([1, 2, 3, 4]));
+    } finally {
+      provider.dispose();
+    }
+  });
+
+  it('preserves append enqueue order under concurrency', async () => {
+    const provider = await create();
+    try {
+      await Promise.all([
+        appendFile(provider, 'events.log', 'first\n'),
+        appendFile(provider, 'events.log', 'second\n'),
+        appendFile(provider, 'events.log', 'third\n'),
+      ]);
+
+      await expect(provider.readFile('events.log', 'utf8')).resolves.toBe('first\nsecond\nthird\n');
+    } finally {
+      provider.dispose();
+    }
+  });
+
   it('creates missing parent directories when writing a nested file', async () => {
     const provider = await create();
     try {

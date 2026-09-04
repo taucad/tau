@@ -3,6 +3,7 @@ import { FileSystemAccessProvider } from '#backend/fs-access-provider.js';
 import { OPFSProvider } from '#backend/opfs-provider.js';
 import { createMockRootHandle } from '#testing/mock-handle-factory.js';
 import type { MockRootHandleOptions } from '#testing/mock-handle-factory.js';
+import { RootedFileSystemError } from '#workspace-errors.js';
 
 describe('OPFSProvider lifecycle', () => {
   beforeEach(() => {
@@ -45,6 +46,24 @@ describe('OPFSProvider lifecycle', () => {
       // oxlint-disable-next-line no-await-in-loop -- Table assertions intentionally execute in a deterministic order.
       await expect(operation.run(provider), operation.name).rejects.toThrow('not initialized');
     }
+  });
+
+  it('reports an origin-private filesystem that will not open as ROOT_UNAVAILABLE', async () => {
+    // `getDirectory` is a function in every WebKit session and only the call
+    // itself separates a persistent profile from an ephemeral (private-browsing)
+    // one, where it rejects with a bare `UnknownError: ... (e.g. out of memory)`.
+    // A caller must get the typed root failure the bridge already carries.
+    const failure = new DOMException('The operation failed for an unknown transient reason.', 'UnknownError');
+    vi.stubGlobal('navigator', { storage: { getDirectory: vi.fn().mockRejectedValue(failure) } });
+    const provider = new OPFSProvider();
+
+    const thrown = await provider.initialize().then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+
+    expect(thrown).toBeInstanceOf(RootedFileSystemError);
+    expect(thrown).toMatchObject({ code: 'ROOT_UNAVAILABLE', cause: failure });
   });
 
   it('allows operations after initialization and revokes them on dispose', async () => {

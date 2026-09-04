@@ -7,6 +7,7 @@
 
 import type { ProviderCapabilities } from '#types.js';
 import { FileSystemAccessProvider } from '#backend/fs-access-provider.js';
+import { RootedFileSystemError } from '#workspace-errors.js';
 import { randomUuid } from '@taucad/utils/id';
 
 /**
@@ -67,10 +68,23 @@ export class OPFSProvider extends FileSystemAccessProvider {
     super(undefined as unknown as FileSystemDirectoryHandle);
   }
 
-  /** Obtain the OPFS root directory handle. */
+  /**
+   * Obtain the OPFS root directory handle.
+   *
+   * `navigator.storage.getDirectory` is a function in every WebKit session and
+   * only the call separates a persistent profile from an ephemeral
+   * (private-browsing) one, where it rejects with a bare
+   * `UnknownError: The operation failed for an unknown transient reason (e.g.
+   * out of memory).` — a message that is neither true nor actionable. Callers
+   * get the typed root failure the filesystem bridge already carries instead.
+   */
   public async initialize(): Promise<void> {
     this._initialized = false;
-    this._rootHandle = await navigator.storage.getDirectory();
+    try {
+      this._rootHandle = await navigator.storage.getDirectory();
+    } catch (error) {
+      throw Object.assign(new RootedFileSystemError('ROOT_UNAVAILABLE'), { cause: error });
+    }
     this.capabilities.durability = (await this._supportsSyncAccess()) ? 'exclusive-append' : 'stream-append';
     this._initialized = true;
     await super.refresh();

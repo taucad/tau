@@ -82,7 +82,27 @@ vi.mock('#filesystem/handle-store.js', () => ({
   subscribeProjectRootConfigurationChanges: vi.fn(() => vi.fn()),
 }));
 
-vi.mock('#constants/browser.constants.js', () => ({ isFileSystemAccessSupported: true }));
+vi.mock('#constants/browser.constants.js', () => ({
+  isFileSystemAccessSupported: true,
+  directoryPicker: () => ({
+    available: true,
+    backend: 'webaccess' as const,
+    pick: async (options?: { id?: string; mode?: 'read' | 'readwrite' }) => {
+      const handle = await globalThis.window.showDirectoryPicker({
+        id: options?.id,
+        mode: options?.mode ?? 'readwrite',
+      });
+      return { backend: 'webaccess' as const, handle };
+    },
+  }),
+  webAccessDirectoryPicker: () =>
+    true
+      ? {
+          pick: async (options?: { id?: string; mode?: 'read' | 'readwrite' }) =>
+            globalThis.window.showDirectoryPicker({ id: options?.id, mode: options?.mode ?? 'readwrite' }),
+        }
+      : undefined,
+}));
 vi.mock('#hooks/use-cookie.js', () => ({
   useCookie: (_name: string, defaultValue: string) => [defaultValue, vi.fn()],
 }));

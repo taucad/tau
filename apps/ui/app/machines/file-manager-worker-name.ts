@@ -26,5 +26,6 @@ export function fileManagerWorkerName(backend: HomeStorageBackend): string {
  * instead of failing to boot.
  */
 export function homeBackendFromWorkerName(name: string): HomeStorageBackend {
-  return name.slice(name.lastIndexOf(':') + 1) === 'opfs' ? 'opfs' : 'indexeddb';
+  const suffix = name.slice(name.lastIndexOf(':') + 1);
+  return suffix === 'opfs' || suffix === 'node' ? suffix : 'indexeddb';
 }

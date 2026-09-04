@@ -11,11 +11,18 @@ export type PreparedWorkspaceCatalog = {
   publish(): Promise<void>;
 };
 
-export type RegisteredWorkspace = WorkspaceEntry & { readonly minted: boolean };
+/**
+ * A workspace row plus whether this connection minted its identity.
+ *
+ * Deliberately carries no handle: a node selection is an absolute host path,
+ * and every consumer that still needs the picked directory reads it from the
+ * machine's `selection` instead.
+ */
+export type RegisteredWorkspace = { readonly workspace: Workspace; readonly minted: boolean };
 
 export type WorkspaceConnectionServices = {
-  registerWorkspace(handle: FileSystemDirectoryHandle, signal: AbortSignal): Promise<RegisteredWorkspace>;
-  mountWorkspace(workspace: RegisteredWorkspace, signal: AbortSignal): Promise<void>;
+  registerWorkspace(selection: DirectoryPick, signal: AbortSignal): Promise<RegisteredWorkspace>;
+  mountWorkspace(workspace: RegisteredWorkspace, selection: DirectoryPick, signal: AbortSignal): Promise<void>;
   prepareWorkspaceCatalog(workspace: RegisteredWorkspace, signal: AbortSignal): Promise<PreparedWorkspaceCatalog>;
 };
 
@@ -23,7 +30,7 @@ type WorkspaceConnectionContext = {
   readonly services: WorkspaceConnectionServices;
   operationId: string | undefined;
   workspaceName: string | undefined;
-  handle: FileSystemDirectoryHandle | undefined;
+  selection: DirectoryPick | undefined;
   workspace: RegisteredWorkspace | undefined;
   catalog: PreparedWorkspaceCatalog | undefined;
   error: unknown;
@@ -38,7 +45,7 @@ type WorkspaceConnectionEvent =
   | {
       readonly type: 'workspaceSelected';
       readonly operationId: string;
-      readonly handle: FileSystemDirectoryHandle;
+      readonly selection: DirectoryPick;
     }
   | { readonly type: 'retry' }
   | WorkspaceRegisteredEvent
@@ -86,20 +93,20 @@ export type WorkspaceConnectionState =
 
 const registerWorkspaceActor = fromSafeAsync<WorkspaceRegisteredEvent, { context: WorkspaceConnectionContext }>(
   async ({ input, signal }) => {
-    const { handle, services } = input.context;
-    if (handle === undefined) {
+    const { selection, services } = input.context;
+    if (selection === undefined) {
       throw new Error('No workspace folder was selected.');
     }
-    return { type: 'workspaceRegistered', workspace: await services.registerWorkspace(handle, signal) };
+    return { type: 'workspaceRegistered', workspace: await services.registerWorkspace(selection, signal) };
   },
 );
 
 const mountWorkspaceActor = fromSafeAsync<void, { context: WorkspaceConnectionContext }>(async ({ input, signal }) => {
-  const { workspace, services } = input.context;
-  if (workspace === undefined) {
+  const { selection, workspace, services } = input.context;
+  if (workspace === undefined || selection === undefined) {
     throw new Error('The workspace was not registered.');
   }
-  await services.mountWorkspace(workspace, signal);
+  await services.mountWorkspace(workspace, selection, signal);
 });
 
 const yieldToBrowserActor = fromSafeAsync<void, undefined>(async ({ signal }) => {
@@ -166,7 +173,7 @@ export const workspaceConnectionMachine = setup({
         return event.operationId;
       },
       workspaceName: undefined,
-      handle: undefined,
+      selection: undefined,
       workspace: undefined,
       catalog: undefined,
       error: undefined,
@@ -212,7 +219,7 @@ export const workspaceConnectionMachine = setup({
     services: input,
     operationId: undefined,
     workspaceName: undefined,
-    handle: undefined,
+    selection: undefined,
     workspace: undefined,
     catalog: undefined,
     error: undefined,

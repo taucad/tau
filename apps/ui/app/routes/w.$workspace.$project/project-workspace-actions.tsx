@@ -1,5 +1,5 @@
 import type { IDockviewHeaderActionsProps } from 'dockview-react';
-import { History, MessageCircle, PanelLeftOpen, PanelRightOpen } from 'lucide-react';
+import { History, MessageCircle, PanelLeft, PanelRight } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useSelector } from '@xstate/react';
 import { Button } from '@taucad/ui/components/button';
@@ -36,14 +36,14 @@ const WorkspacePaneToggle = ({
       <Button
         variant='ghost'
         size='icon-sm'
-        className='!size-7 rounded-sm bg-transparent hover:!bg-muted-foreground/15 aria-pressed:bg-muted-foreground/15 aria-pressed:hover:!bg-muted-foreground/20'
+        className='!size-7 rounded-sm bg-transparent text-muted-foreground hover:!bg-accent hover:text-foreground aria-pressed:bg-accent aria-pressed:text-foreground'
         aria-label={label}
         aria-pressed={isOpen}
         onClick={() => {
           onOpenChange(!isOpen);
         }}
       >
-        <Icon aria-hidden className='size-3.5' />
+        <Icon aria-hidden className='size-4' />
       </Button>
     </TooltipTrigger>
     <TooltipContent>{tooltip}</TooltipContent>
@@ -51,7 +51,7 @@ const WorkspacePaneToggle = ({
 );
 
 export const WorkbenchToggle = (properties: WorkbenchToggleProperties): React.JSX.Element => (
-  <WorkspacePaneToggle {...properties} icon={PanelRightOpen} label='Toggle Workbench lane' tooltip='Toggle Workbench' />
+  <WorkspacePaneToggle {...properties} icon={PanelRight} label='Toggle Workbench lane' tooltip='Toggle Workbench' />
 );
 
 export const WorkbenchToggleSlot = (): React.JSX.Element => (
@@ -62,7 +62,7 @@ export function ProjectWorkspaceActions(properties: IDockviewHeaderActionsProps)
   const isTopRight = useIsTopRightGroup(properties.group, properties.containerApi);
   const { editorRef, projectRef } = useProject();
   const { setChatOpen, openPanel } = useProjectWorkspace();
-  const { state: sidebarState, isMobile, openMobile } = useSidebar();
+  const { isMobile, openMobile } = useSidebar();
   const desktopLayout = useSelector(editorRef, (snapshot) => snapshot.context.panelState.desktopLayout);
   const projectName = useSelector(projectRef, (snapshot) => snapshot.context.project?.name) ?? 'Project';
   const { canReturnToLatest, headRevision, isDirty } = useVisibleRevisions();
@@ -71,7 +71,6 @@ export function ProjectWorkspaceActions(properties: IDockviewHeaderActionsProps)
     return undefined;
   }
 
-  const sidebarClosed = isMobile ? !openMobile : sidebarState === 'collapsed';
   const getLaneVisibility = (lane: 'chat' | 'workbench'): boolean => {
     const workspace = properties.group.element.closest<HTMLElement>('[data-project-workspace]');
     const compact = workspace?.dataset['compact'] === 'true';
@@ -84,9 +83,9 @@ export function ProjectWorkspaceActions(properties: IDockviewHeaderActionsProps)
 
   return (
     <div className='flex h-full items-center gap-1'>
-      {sidebarClosed ? (
+      {isMobile && !openMobile ? (
         <SidebarTrigger className='h-7 w-auto max-w-44 gap-1.5 px-2'>
-          <PanelLeftOpen aria-hidden className='size-3.5 shrink-0' />
+          <PanelLeft aria-hidden className='size-3.5 shrink-0' />
           <span className='hidden truncate @xl/viewer:inline'>{projectName}</span>
         </SidebarTrigger>
       ) : null}

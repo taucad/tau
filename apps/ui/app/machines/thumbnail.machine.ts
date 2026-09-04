@@ -1,6 +1,12 @@
 import { assign, fromPromise, setup } from 'xstate';
 
 export type ThumbnailKind = 'automatic-thumbnail' | 'manual-thumbnail';
+export type ThumbnailSkipReason = 'svg-source' | 'superseded' | 'locator-changed';
+
+export type ThumbnailResult =
+  | Readonly<{ status: 'stored'; kind: ThumbnailKind; identity: string }>
+  | Readonly<{ status: 'skipped'; kind: ThumbnailKind; identity: string; reason: ThumbnailSkipReason }>
+  | Readonly<{ status: 'failed'; kind: ThumbnailKind; error: unknown }>;
 
 export type ThumbnailRenderRequest = {
   readonly kind: ThumbnailKind;
@@ -11,9 +17,17 @@ export type ThumbnailRenderRequest = {
 /** Injected side effects + tuning for {@link thumbnailMachine}. */
 export type ThumbnailInput = {
   /** Render the requested automatic or manual thumbnail to encoded bytes. */
-  render: (request: ThumbnailRenderRequest) => Promise<ThumbnailArtifact>;
+  render: (
+    request: ThumbnailRenderRequest,
+  ) => Promise<ThumbnailArtifact | Readonly<{ status: 'skipped'; identity: string; reason: 'svg-source' }>>;
   /** Persist the bytes. */
-  store: (artifact: ThumbnailArtifact) => Promise<void>;
+  store: (
+    artifact: ThumbnailArtifact,
+  ) => Promise<
+    Readonly<{ status: 'stored' }> | Readonly<{ status: 'skipped'; reason: 'superseded' | 'locator-changed' }>
+  >;
+  /** Reports the terminal result of each explicitly requested regeneration. */
+  onManualResult?: (result: ThumbnailResult) => void;
   /** Debounce window after the latest automatic settle. Milliseconds (default 1000). */
   debounceDelay?: number;
 };
@@ -52,18 +66,23 @@ export const thumbnailMachine = setup({
   },
   actors: {
     renderAndStore: fromPromise<
-      ThumbnailArtifact,
+      Exclude<ThumbnailResult, { readonly status: 'failed' }>,
       Pick<ThumbnailContext, 'render' | 'store' | 'activeKind' | 'activeHash'>
     >(async ({ input }) => {
       if (!input.activeKind) {
         throw new Error('Thumbnail render started without an active kind');
       }
-      const artifact = await input.render({
+      const rendered = await input.render({
         kind: input.activeKind,
         ...(input.activeKind === 'automatic-thumbnail' && input.activeHash ? { identity: input.activeHash } : {}),
       });
-      await input.store(artifact);
-      return artifact;
+      if ('status' in rendered) {
+        return { ...rendered, kind: input.activeKind };
+      }
+      const stored = await input.store(rendered);
+      return stored.status === 'stored'
+        ? { status: 'stored', kind: input.activeKind, identity: rendered.identity }
+        : { status: 'skipped', kind: input.activeKind, identity: rendered.identity, reason: stored.reason };
     }),
   },
   actions: {
@@ -95,6 +114,11 @@ export const thumbnailMachine = setup({
       lastRenderedHash: params.identity,
     })),
     clearActive: assign({ activeHash: undefined, activeKind: undefined }),
+    reportManualResult: ({ context }, params: { readonly result: ThumbnailResult }) => {
+      if (params.result.kind === 'manual-thumbnail') {
+        context.onManualResult(params.result);
+      }
+    },
   },
   guards: {
     isNewAutomatic: ({ context, event }) => event.type === 'settled' && event.hash !== context.lastRenderedHash,
@@ -111,6 +135,7 @@ export const thumbnailMachine = setup({
   context: ({ input }) => ({
     render: input.render,
     store: input.store,
+    onManualResult: input.onManualResult ?? (() => undefined),
     debounceDelay: input.debounceDelay ?? defaultDebounceDelay,
     pendingAutomaticHash: undefined,
     activeHash: undefined,
@@ -163,14 +188,43 @@ export const thumbnailMachine = setup({
           activeKind: context.activeKind,
           activeHash: context.activeHash,
         }),
-        onDone: {
-          target: 'routing',
-          actions: {
-            type: 'commitRendered',
-            params: ({ event }) => ({ identity: event.output.identity }),
+        onDone: [
+          {
+            guard: ({ event }) => event.output.status === 'stored',
+            target: 'routing',
+            actions: [
+              {
+                type: 'reportManualResult',
+                params: ({ event }) => ({ result: event.output }),
+              },
+              {
+                type: 'commitRendered',
+                params: ({ event }) => ({ identity: event.output.identity }),
+              },
+            ],
           },
+          {
+            target: 'routing',
+            actions: [
+              {
+                type: 'reportManualResult',
+                params: ({ event }) => ({ result: event.output }),
+              },
+              'clearActive',
+            ],
+          },
+        ],
+        onError: {
+          target: 'routing',
+          actions: [
+            ({ context, event }) => {
+              if (context.activeKind === 'manual-thumbnail') {
+                context.onManualResult({ status: 'failed', kind: 'manual-thumbnail', error: event.error });
+              }
+            },
+            'clearActive',
+          ],
         },
-        onError: { target: 'routing', actions: 'clearActive' },
       },
     },
     routing: {

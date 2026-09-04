@@ -52,6 +52,24 @@ vi.mock('#constants/browser.constants.js', () => ({
   get isFileSystemAccessSupported() {
     return supported;
   },
+  directoryPicker: () => ({
+    available: supported,
+    backend: pickerBackend,
+    pick: async (options?: { id?: string; mode?: 'read' | 'readwrite' }) => {
+      const handle = await globalThis.window.showDirectoryPicker({
+        id: options?.id,
+        mode: options?.mode ?? 'readwrite',
+      });
+      return { backend: 'webaccess' as const, handle };
+    },
+  }),
+  webAccessDirectoryPicker: () =>
+    supported && pickerBackend === 'webaccess'
+      ? {
+          pick: async (options?: { id?: string; mode?: 'read' | 'readwrite' }) =>
+            globalThis.window.showDirectoryPicker({ id: options?.id, mode: options?.mode ?? 'readwrite' }),
+        }
+      : undefined,
 }));
 
 vi.mock('#filesystem/handle-store.js', () => ({
@@ -61,6 +79,7 @@ vi.mock('#filesystem/handle-store.js', () => ({
   requestHandlePermission: mockRequestPermission,
   createWorkspace: mockCreateWorkspace,
   getProjectCreationLocation: mockGetPreference,
+  isNodeWorkspace: (workspace: { path?: string }) => workspace.path !== undefined,
 }));
 
 vi.mock('#hooks/use-file-manager.js', () => {
@@ -111,6 +130,7 @@ const waitForReady = async (result: { readonly current: ProjectCreationLocationS
 describe('useProjectCreationLocation', () => {
   beforeEach(() => {
     supported = true;
+    pickerBackend = 'webaccess';
     vi.clearAllMocks();
     mockListWorkspaces.mockResolvedValue([]);
     mockGetWorkspace.mockResolvedValue(undefined);
@@ -187,6 +207,54 @@ describe('useProjectCreationLocation', () => {
     expect(result.current.value).toEqual({ kind: 'workspace', workspaceId: 'wsp_locked' });
     expect(result.current.canCreate).toBe(false);
     expect(result.current.selectedWorkspaceRecovery?.kind).toBe('grant');
+  });
+
+  it('reports an unreconnectable host as unsupported, never as a user cancel', async () => {
+    pickerBackend = 'node';
+    const stale = workspace('wsp_stale', 'Stale', 1);
+    mockListWorkspaces.mockResolvedValue([stale]);
+    mockGetWorkspace.mockResolvedValue(undefined);
+
+    const { result } = renderHook(() => useProjectCreationLocation());
+    await waitForReady(result);
+    act(() => {
+      capableReady(result.current).select({ kind: 'workspace', workspaceId: 'wsp_stale' });
+    });
+    const recovery = capableReady(result.current).selectedWorkspaceRecovery;
+    expect(recovery?.kind).toBe('reconnect');
+
+    await act(async () => {
+      await recovery?.run();
+    });
+
+    // This host has no handle-producing picker, so nothing was ever shown —
+    // calling that an abort would blame the user for a silent no-op.
+    expect(mockWorkspaceOpenFailed).toHaveBeenCalledWith({ workspaceId: 'wsp_stale', reason: 'unsupported' });
+    expect(mockWorkspaceOpenFailed).not.toHaveBeenCalledWith({ workspaceId: 'wsp_stale', reason: 'aborted' });
+    expect(mockToastError).toHaveBeenCalledOnce();
+  });
+
+  it('offers a picked node folder as a connected location without probing a handle', async () => {
+    mockListWorkspaces.mockResolvedValue([{ ...workspace('wsp_node', 'Workshop', 5), path: '/Users/tester/Workshop' }]);
+
+    const { result } = renderHook(() => useProjectCreationLocation());
+    await waitForReady(result);
+    if (result.current.phase !== 'ready' || !result.current.hasWebAccessCapability) {
+      throw new Error('Expected capable ready state');
+    }
+
+    expect(result.current.options.map((option) => [option.label, option.status])).toEqual([
+      ['Home', 'ready'],
+      ['Workshop', 'connected'],
+    ]);
+    // No handle is retained for a node root, so neither lookup should be reached.
+    expect(mockGetWorkspace).not.toHaveBeenCalled();
+    expect(mockCheckPermission).not.toHaveBeenCalled();
+
+    act(() => {
+      capableReady(result.current).select({ kind: 'workspace', workspaceId: 'wsp_node' });
+    });
+    expect(result.current.canCreate).toBe(true);
   });
 
   it('selects an unavailable row before granting it and refreshes after the gesture', async () => {

@@ -27,6 +27,9 @@ import type { ObjectStoreWorker, InitialEditorState } from '#hooks/object-store.
 import { useFileManager } from '#hooks/use-file-manager.js';
 import {
   createWorkspace,
+  createNodeWorkspace,
+  getWorkspaceMetadata,
+  isNodeWorkspace,
   setProjectFileSystemConfig,
   getProjectFileSystemConfig,
   getHomeStorageBackend,
@@ -77,7 +80,11 @@ import type { ProjectCreationLocation } from '#types/project-creation-location.t
 import { selectWorkspaceConnectionState, workspaceConnectionMachine } from '#hooks/workspace-connection.machine.js';
 import { useWorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
 import { getChatRecencyAt } from '#utils/chat-recency.utils.js';
-import type { PreparedWorkspaceCatalog, WorkspaceConnectionState } from '#hooks/workspace-connection.machine.js';
+import type {
+  PreparedWorkspaceCatalog,
+  RegisteredWorkspace,
+  WorkspaceConnectionState,
+} from '#hooks/workspace-connection.machine.js';
 
 /**
  * Shared options for initial chat configuration.
@@ -101,12 +108,12 @@ type CreateProjectChatOptions = {
   /** Explicit product location. Omission resolves the last successful location. */
   location?: ProjectCreationLocation;
   /**
-   * Seed `Chat.activeModel` so the chat owns its model choice independent
+   * Seed `Chat.activeExecution` so the chat owns its execution choice independent
    * of the cookie default. Required when `initialMessage` is supplied so the
    * one-shot startup request runs with the caller's intended model rather
    * than whatever the cookie happens to hold at hydration time.
    */
-  activeModel?: string;
+  activeExecution?: CadAgentExecution;
   /**
    * Seed `Chat.activeKernel`. Defaults to the project's `kernel` field when
    * the project is created from a kernel template, otherwise undefined.
@@ -425,17 +432,22 @@ const pendingStorageLocatorKey = (storage: PendingProjectStorage): string =>
 const quarantinedLocatorsOf = (recoveries: Iterable<PendingProjectRecovery>): ReadonlyMap<string, string> =>
   new Map([...recoveries].map((recovery) => [pendingStorageLocatorKey(recovery.storage), recovery.projectId]));
 
-const locatorToPendingStorage = (locator: ProjectLocator): PendingProjectStorage =>
-  locator.backend === 'webaccess'
-    ? {
-        backend: locator.backend,
-        workspaceId: locator.workspaceId,
-        providerBasePath: locator.relativeDirectory,
-      }
-    : {
-        backend: locator.backend,
-        providerBasePath: locator.relativeDirectory,
-      };
+const locatorToPendingStorage = (locator: ProjectLocator): PendingProjectStorage => {
+  if (locator.backend === 'webaccess') {
+    return {
+      backend: locator.backend,
+      workspaceId: locator.workspaceId,
+      providerBasePath: locator.relativeDirectory,
+    };
+  }
+  if (locator.backend === 'node') {
+    return { backend: 'node', ...nodeRootPath(locator.path), providerBasePath: locator.relativeDirectory };
+  }
+  return {
+    backend: locator.backend,
+    providerBasePath: locator.relativeDirectory,
+  };
+};
 
 const projectOccurrences = (discovery: ProjectDiscoveryResult, projectId: string) =>
   discovery.entries.filter(
@@ -449,7 +461,7 @@ const projectOccurrences = (discovery: ProjectDiscoveryResult, projectId: string
  * re-picking the folder, not connecting a first one (DF4).
  */
 const resolveWorkspaceForWrite = async (workspaceId: string): Promise<WorkspaceEntry> => {
-  if (!isFileSystemAccessSupported) {
+  if (directoryPicker().backend !== 'webaccess' || !directoryPicker().available) {
     throw new WorkspaceDirectoryRequiredError('unsupported', { workspaceId });
   }
   const rows = await listWorkspaces();
@@ -713,27 +725,35 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       let location = explicitLocation;
       if (!location) {
         const { location: preferredLocation } = await getProjectCreationLocation({
-          webAccessSupported: isFileSystemAccessSupported,
+          webAccessSupported: directoryPicker().available,
         });
         location = preferredLocation;
       }
-      let storageRoot:
-        | { readonly backend: 'indexeddb' | 'opfs' }
-        | { readonly backend: 'webaccess'; readonly workspaceId: string };
+      let storageRoot: PersistentStorageRoot;
       // The workspace is resolved here, so the result can carry the canonical
       // URL its caller navigates to instead of riding an id-addressed redirect.
       let workspaceSlug: string;
       if (location.kind === 'workspace') {
-        const entry = await resolveWorkspaceForWrite(location.workspaceId);
-        storageRoot = {
-          backend: 'webaccess',
-          workspaceId: entry.workspace.workspaceId,
-        };
-        workspaceSlug = entry.workspace.slug;
+        const picked = await getWorkspaceMetadata(location.workspaceId);
+        if (picked && isNodeWorkspace(picked)) {
+          // A node workspace is a directory on disk: nothing to grant, nothing
+          // to reconnect. Its row existing is the whole admission check.
+          storageRoot = { backend: 'node', path: picked.path };
+          workspaceSlug = picked.slug;
+        } else {
+          const entry = await resolveWorkspaceForWrite(location.workspaceId);
+          storageRoot = {
+            backend: 'webaccess',
+            workspaceId: entry.workspace.workspaceId,
+          };
+          workspaceSlug = entry.workspace.slug;
+        }
       } else {
         storageRoot = { backend: await getHomeStorageBackend() };
         workspaceSlug = homeWorkspaceSlug;
       }
+
+      const projectId = generatePrefixedId(idPrefix.project);
 
       // Determine project data and files based on pattern
       let projectData: Omit<ProjectManifest, '$schema' | 'id'>;
@@ -774,7 +794,6 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
         files = options.files;
       }
 
-      const projectId = generatePrefixedId(idPrefix.project);
       const manifest = projectToManifest({ ...projectData, id: projectId });
       const providerBasePath = await allocateProjectBasePath(fileManager.client, storageRoot, manifest.name);
       const pendingStorage: PendingProjectStorage = { ...storageRoot, providerBasePath };
@@ -809,7 +828,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       // cookie change in another tab does not mutate the active selection
       // for this freshly-created chat. Defaults to the kernel chosen by
       // the creation flow when not explicitly supplied.
-      const seededActiveModel = options.activeModel;
+      const seededActiveExecution = options.activeExecution;
       const seededActiveKernel = options.activeKernel ?? kernel;
 
       // Single atomic call to create project + chat + Editor state
@@ -818,7 +837,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
         chat: {
           name: chatName,
           messages: chatMessages,
-          activeModel: seededActiveModel,
+          activeExecution: seededActiveExecution,
           activeKernel: seededActiveKernel,
           ...(startupRequest ? { startupRequest } : {}),
         },
@@ -905,15 +924,25 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
                 workspaceId: entry.locator.workspaceId,
                 providerBasePath: entry.locator.relativeDirectory,
               }
-            : {
-                projectId: entry.manifest.id,
-                backend: entry.locator.backend,
-                providerBasePath: entry.locator.relativeDirectory,
-              };
+            : entry.locator.backend === 'node'
+              ? {
+                  projectId: entry.manifest.id,
+                  backend: 'node',
+                  ...nodeRootPath(entry.locator.path),
+                  providerBasePath: entry.locator.relativeDirectory,
+                }
+              : {
+                  projectId: entry.manifest.id,
+                  backend: entry.locator.backend,
+                  providerBasePath: entry.locator.relativeDirectory,
+                };
         if (existing) {
+          // Which physical root the row names: the workspace for webaccess, the
+          // absolute path for node. Every other backend has exactly one root.
           const sameWorkspace =
-            existing.backend !== 'webaccess' ||
-            (next.backend === 'webaccess' && existing.workspaceId === next.workspaceId);
+            existing.backend === 'webaccess'
+              ? next.backend === 'webaccess' && existing.workspaceId === next.workspaceId
+              : existing.backend !== 'node' || (next.backend === 'node' && existing.path === next.path);
           if (
             existing.backend === next.backend &&
             existing.providerBasePath === next.providerBasePath &&
@@ -1483,7 +1512,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
   );
 
   const prepareCurrentWorkspaceCatalog = useCallback(
-    async (workspaceId?: string, signal?: AbortSignal): Promise<PreparedWorkspaceCatalog> => {
+    async (selected?: Workspace, signal?: AbortSignal): Promise<PreparedWorkspaceCatalog> => {
       const previous = discoveryPassRef.current;
       if (previous) {
         await previous.catch(() => undefined);
@@ -1496,8 +1525,17 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
         ...listing,
         projects: listing.projects.filter((project) => project.library.deletedAt === undefined),
       };
-      const isSelectedWorkspace = (locator: ProjectLocator): boolean =>
-        locator.backend === 'webaccess' && locator.workspaceId === workspaceId;
+      // A node workspace is addressed by its absolute host path — the same
+      // physical identity `resolveStorageRootKey` derives — where a webaccess
+      // one is addressed by its retained-handle id.
+      const isSelectedWorkspace = (locator: ProjectLocator): boolean => {
+        if (selected === undefined) {
+          return false;
+        }
+        return isNodeWorkspace(selected)
+          ? locator.backend === 'node' && locator.path === selected.path
+          : locator.backend === 'webaccess' && locator.workspaceId === selected.workspaceId;
+      };
       const selectedProjects = listing.projects.filter(({ locator }) => isSelectedWorkspace(locator));
       const selectedConflicts = listing.conflicts.filter(({ locator }) => isSelectedWorkspace(locator));
       return {
@@ -1546,27 +1584,32 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
 
   const workspaceConnectionServices = useMemo(
     () => ({
-      registerWorkspace: async (handle: FileSystemDirectoryHandle, signal: AbortSignal) => {
+      registerWorkspace: async (selection: DirectoryPick, signal: AbortSignal) => {
         const startedAt = performance.now();
         signal.throwIfAborted();
         try {
-          const connection = await createWorkspace(handle);
+          const connection =
+            selection.backend === 'webaccess'
+              ? await createWorkspace(selection.handle)
+              : await createNodeWorkspace(selection.path);
           signal.throwIfAborted();
           if (connectionTraceRef.current) {
             connectionTraceRef.current.workspaceId = connection.workspaceId;
           }
-          return { workspace: connection, handle, minted: connection.minted };
+          return { workspace: connection, minted: connection.minted };
         } finally {
           if (connectionTraceRef.current) {
             connectionTraceRef.current.registeringDuration += performance.now() - startedAt;
           }
         }
       },
-      mountWorkspace: async (workspace: WorkspaceEntry, signal: AbortSignal) => {
+      mountWorkspace: async (_workspace: RegisteredWorkspace, selection: DirectoryPick, signal: AbortSignal) => {
         const startedAt = performance.now();
         signal.throwIfAborted();
         try {
-          if ((await checkHandlePermission(workspace.handle)) !== 'granted') {
+          // A node folder was chosen in a native dialog: the shell already holds
+          // it, so the probe short-circuits to granted.
+          if (selection.backend === 'webaccess' && (await checkHandlePermission(selection.handle)) !== 'granted') {
             throw new DOMException('Tau needs access to this workspace folder.', 'NotAllowedError');
           }
           await fileManager.workspace.syncProjectRoots();
@@ -1578,12 +1621,12 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
         }
       },
       prepareWorkspaceCatalog: async (
-        workspace: WorkspaceEntry,
+        workspace: RegisteredWorkspace,
         signal: AbortSignal,
       ): Promise<PreparedWorkspaceCatalog> => {
         const startedAt = performance.now();
         try {
-          const catalog = await prepareCurrentWorkspaceCatalog(workspace.workspace.workspaceId, signal);
+          const catalog = await prepareCurrentWorkspaceCatalog(workspace.workspace, signal);
           const trace = connectionTraceRef.current;
           if (trace) {
             trace.candidateCount = catalog.candidateCount;
@@ -1643,7 +1686,8 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
 
   const connectWorkspace = useCallback(
     async (selectedHandle?: FileSystemDirectoryHandle): Promise<ConnectedWorkspace | undefined> => {
-      if (!isFileSystemAccessSupported) {
+      const picker = directoryPicker();
+      if (!picker.available) {
         return undefined;
       }
       if (connectionPromiseRef.current) {
@@ -1652,14 +1696,16 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       const connection = (async (): Promise<ConnectedWorkspace | undefined> => {
         const operationId = generatePrefixedId(idPrefix.request);
         workspaceConnectionRef.send({ type: 'beginSelection', operationId });
-        let handle = selectedHandle;
+        let selection: DirectoryPick | undefined =
+          selectedHandle === undefined ? undefined : { backend: 'webaccess', handle: selectedHandle };
         try {
-          handle ??= await globalThis.window.showDirectoryPicker({ id: 'tau-workspace', mode: 'readwrite' });
-        } catch (error) {
-          workspaceConnectionRef.send({ type: 'selectionCancelled' });
-          if (error instanceof DOMException && error.name === 'AbortError') {
+          selection ??= await picker.pick({ id: 'tau-workspace', mode: 'readwrite' });
+          if (selection === undefined) {
+            workspaceConnectionRef.send({ type: 'selectionCancelled' });
             return undefined;
           }
+        } catch (error) {
+          workspaceConnectionRef.send({ type: 'selectionCancelled' });
           throw error;
         }
         connectionTraceRef.current = {
@@ -1675,7 +1721,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
           conflictCount: 0,
         };
         const completion = waitForWorkspaceConnection(operationId);
-        workspaceConnectionRef.send({ type: 'workspaceSelected', operationId, handle });
+        workspaceConnectionRef.send({ type: 'workspaceSelected', operationId, selection });
         try {
           const connected = await completion;
           const trace = connectionTraceRef.current;
@@ -1722,8 +1768,8 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       return connectWorkspace();
     }
     if (current.retry === 'grant-access') {
-      const handle = workspaceConnectionRef.getSnapshot().context.workspace?.handle;
-      if (handle === undefined || !(await requestHandlePermission(handle))) {
+      const { selection } = workspaceConnectionRef.getSnapshot().context;
+      if (selection?.backend !== 'webaccess' || !(await requestHandlePermission(selection.handle))) {
         return undefined;
       }
     }

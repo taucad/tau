@@ -105,6 +105,7 @@ describe('ProjectWorkspaceActions', () => {
     expect(screen.queryByRole('button', { name: 'Toggle Workbench lane' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Share' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Export' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Rotor housing/ })).not.toBeInTheDocument();
     const slot = screen.getByTestId('workbench-toggle-slot');
     expect(slot).toHaveClass('size-7');
     expect(screen.queryByRole('button', { name: /Split/ })).not.toBeInTheDocument();

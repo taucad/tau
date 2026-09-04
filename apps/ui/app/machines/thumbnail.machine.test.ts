@@ -18,7 +18,8 @@ const createDeps = (overrides: Partial<ThumbnailInput> = {}): Required<Thumbnail
     generation: 1,
     locatorIdentity: 'locator-1',
   }),
-  store: vi.fn().mockResolvedValue(undefined),
+  store: vi.fn().mockResolvedValue({ status: 'stored' }),
+  onManualResult: vi.fn(),
   debounceDelay: 2000,
   ...overrides,
 });
@@ -124,7 +125,7 @@ describe('thumbnailMachine', () => {
     const store = vi
       .fn()
       .mockRejectedValueOnce(new TypeError('project storage is unavailable'))
-      .mockResolvedValueOnce(undefined);
+      .mockResolvedValueOnce({ status: 'stored' });
     const deps = createDeps({ store });
     const actor = createActor(thumbnailMachine, { input: deps }).start();
     try {
@@ -181,6 +182,44 @@ describe('thumbnailMachine', () => {
         expect(render).toHaveBeenCalledTimes(2);
       });
       expect(render).toHaveBeenNthCalledWith(2, { kind: 'automatic-thumbnail', identity: 'h2' });
+    } finally {
+      actor.stop();
+    }
+  });
+
+  it('should retry an automatic identity when storage skips after a locator change', async () => {
+    vi.useFakeTimers();
+    const store = vi
+      .fn()
+      .mockResolvedValueOnce({ status: 'skipped', reason: 'locator-changed' })
+      .mockResolvedValueOnce({ status: 'stored' });
+    const deps = createDeps({ store });
+    const actor = createActor(thumbnailMachine, { input: deps }).start();
+    try {
+      actor.send({ type: 'settled', hash: 'h1' });
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(deps.render).toHaveBeenCalledOnce();
+
+      actor.send({ type: 'settled', hash: 'h1' });
+      await vi.advanceTimersByTimeAsync(2000);
+
+      expect(deps.render).toHaveBeenCalledTimes(2);
+      expect(store).toHaveBeenCalledTimes(2);
+    } finally {
+      actor.stop();
+    }
+  });
+
+  it('should report the actual terminal result of a manual regeneration', async () => {
+    vi.useFakeTimers();
+    const onManualResult = vi.fn();
+    const deps = createDeps({ onManualResult });
+    const actor = createActor(thumbnailMachine, { input: deps }).start();
+    try {
+      actor.send({ type: 'regenerate' });
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(onManualResult).toHaveBeenCalledWith({ status: 'stored', kind: 'manual-thumbnail', identity: 'h1' });
     } finally {
       actor.stop();
     }

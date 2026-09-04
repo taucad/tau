@@ -625,13 +625,13 @@ export default function FilesRoute(): React.JSX.Element {
 
   // Load Home on mount; load each connected disk workspace as it appears.
   useEffect(() => {
-    void loadColumnTree(homeBackend);
+    void Promise.resolve().then(() => loadColumnTree(homeBackend));
   }, [homeBackend, loadColumnTree]);
 
   useEffect(() => {
     for (const column of workspaceColumns) {
       if (column.status === 'connected') {
-        void loadColumnTree('webaccess', column.workspace.workspaceId);
+        void Promise.resolve().then(() => loadColumnTree('webaccess', column.workspace.workspaceId));
       }
     }
   }, [workspaceColumns, loadColumnTree]);
@@ -803,7 +803,7 @@ export default function FilesRoute(): React.JSX.Element {
 
   useEffect(() => {
     if (connectionWorkspace && connectionCanBrowse) {
-      void loadColumnTree('webaccess', connectionWorkspace.workspaceId);
+      void Promise.resolve().then(() => loadColumnTree('webaccess', connectionWorkspace.workspaceId));
     }
   }, [connectionCanBrowse, connectionWorkspace, loadColumnTree]);
 

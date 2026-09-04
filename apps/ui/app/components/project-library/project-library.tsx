@@ -511,6 +511,8 @@ const gridPageSizes = [12, 24, 36, 48, 60];
 const tablePageSizes = [10, 20, 30, 40, 50];
 
 function UnifiedProjectList({ projects, viewMode, actions }: UnifiedProjectListProps) {
+  'use no memo';
+
   const [sorting, setSorting] = useState<SortingState>([{ id: 'lastActivityAt', desc: true }]);
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({});
   const [rowSelection, setRowSelection] = useState({});
@@ -535,6 +537,7 @@ function UnifiedProjectList({ projects, viewMode, actions }: UnifiedProjectListP
     return pageSizes.at(-1);
   }, []);
 
+  // oxlint-disable-next-line react/incompatible-library -- This component is explicitly opted out because TanStack Table returns mutable functions that cannot be compiler-memoized safely.
   const table = useReactTable({
     data: projects,
     columns: createColumns(actions),

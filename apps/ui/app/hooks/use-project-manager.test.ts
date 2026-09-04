@@ -179,9 +179,9 @@ const mockSubscribeProjectRootConfigurationChanges = vi.fn((listener: () => void
   return vi.fn();
 });
 const mockGetAllProjectFileSystemConfigs = vi.fn<() => Promise<ProjectFileSystemConfig[]>>(async () => []);
-const mockListWorkspaces = vi.fn<() => Promise<Array<{ workspaceId: string; name?: string; slug?: string }>>>(
-  async () => [],
-);
+const mockListWorkspaces = vi.fn<
+  () => Promise<Array<{ workspaceId: string; name?: string; slug?: string; path?: string }>>
+>(async () => []);
 const mockPinHomeStorageBackend = vi.fn(async (backend: 'indexeddb' | 'opfs') => backend);
 const mockCreateWorkspaceConnection = vi.fn(async (handle: FileSystemDirectoryHandle) => ({
   workspaceId: 'wsp_live',
@@ -190,6 +190,16 @@ const mockCreateWorkspaceConnection = vi.fn(async (handle: FileSystemDirectoryHa
   lastConnectedAt: 1,
   minted: true,
 }));
+const nodeWorkspacePath = '/Users/tester/Projects/Workshop';
+const mockCreateNodeWorkspace = vi.fn(async (path: string) => ({
+  workspaceId: 'wsp_node',
+  name: 'Workshop',
+  slug: 'workshop',
+  lastConnectedAt: 1,
+  path,
+  minted: true,
+}));
+const mockGetWorkspaceMetadata = vi.fn(async (_workspaceId: string) => undefined as unknown);
 const mockRepairWorkspaceBindings = vi.fn(async () => ({
   repairedProjectCount: 1,
   removedWorkspaceIds: ['wsp_disconnected'],
@@ -198,6 +208,9 @@ const mockRepairWorkspaceBindings = vi.fn(async () => ({
 
 vi.mock('#filesystem/handle-store.js', () => ({
   createWorkspace: mockCreateWorkspaceConnection,
+  createNodeWorkspace: mockCreateNodeWorkspace,
+  getWorkspaceMetadata: mockGetWorkspaceMetadata,
+  isNodeWorkspace: (workspace: { path?: string }) => workspace.path !== undefined,
   listWorkspaces: mockListWorkspaces,
   setProjectFileSystemConfig: mockSetProjectFileSystemConfig,
   getProjectFileSystemConfig: mockGetProjectFileSystemConfig,
@@ -471,6 +484,8 @@ describe('useProjectManager.createProject', () => {
     phaseOrder.length = 0;
     manifestBytes = serializeProjectManifest(projectToManifest(fakeProject));
     mockIsFileSystemAccessSupported = false;
+    mockPickerBackend = 'webaccess';
+    mockGetWorkspaceMetadata.mockResolvedValue(undefined);
     mockBuildSuperseded = false;
     mockGetProjectFileSystemConfig.mockResolvedValue(undefined);
     mockGetPendingProjectOperations.mockResolvedValue([]);
@@ -560,6 +575,53 @@ describe('useProjectManager.createProject', () => {
     ]);
     expect(queryClient.getQueryData<ProjectListing>(['projects', { includeDeleted: true }])?.projects).toHaveLength(1);
     expect(result.current.workspaceConnection).toMatchObject({ phase: 'ready', projectCount: 1 });
+  });
+
+  it('connects a folder picked as an absolute host path', async () => {
+    mockIsFileSystemAccessSupported = true;
+    mockPickerBackend = 'node';
+    const nodeLocator: ProjectLocator = {
+      backend: 'node',
+      storageRootKey: `node:${nodeWorkspacePath}`,
+      relativeDirectory: 'test-project',
+      path: nodeWorkspacePath,
+    };
+    mockListProjectManifests.mockResolvedValue({
+      roots: [{ status: 'complete', root: { backend: 'node', path: nodeWorkspacePath } }],
+      entries: [{ status: 'valid', manifest: fakeProject, locator: nodeLocator }],
+    });
+    mockListWorkspaces.mockResolvedValue([
+      { workspaceId: 'wsp_node', name: 'Workshop', slug: 'workshop', path: nodeWorkspacePath },
+    ]);
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+    let connected: ConnectedWorkspace | undefined;
+    await act(async () => {
+      connected = await result.current.connectWorkspace();
+    });
+
+    expect(mockCreateNodeWorkspace).toHaveBeenCalledWith(nodeWorkspacePath);
+    // A folder handed over by the native dialog has no permission to probe.
+    expect(mockCheckHandlePermission).not.toHaveBeenCalled();
+    expect(connected).toMatchObject({
+      workspace: { workspaceId: 'wsp_node', name: 'Workshop', path: nodeWorkspacePath },
+      projectCount: 1,
+      minted: true,
+    });
+    expect(result.current.workspaceConnection).toMatchObject({ phase: 'ready', projectCount: 1 });
+    // The discovered project is routed at the picked root, not at Home.
+    expect(mockApplyProjectFileSystemConfigChanges).toHaveBeenCalledWith(
+      expect.objectContaining({
+        upserts: [
+          {
+            projectId: fakeProject.id,
+            backend: 'node',
+            path: nodeWorkspacePath,
+            providerBasePath: 'test-project',
+          },
+        ],
+      }),
+    );
   });
 
   it('reports catalog counts for the selected workspace instead of Home', async () => {
@@ -1515,7 +1577,11 @@ describe('useProjectManager.createProject', () => {
       }),
     );
 
-    expect(mockGenerateProjectName).toHaveBeenCalledWith({ text: '', imageUrls: [imageUrl] });
+    expect(mockGenerateProjectName).toHaveBeenCalledWith({
+      projectId: expect.any(String),
+      text: '',
+      imageUrls: [imageUrl],
+    });
     const prepared = mockPrepareProjectCreation.mock.calls.at(-1)?.[0];
     expect(prepared?.manifest.name).toBe('Tall Birdhouse');
     expect(phaseOrder.indexOf('name')).toBeLessThan(phaseOrder.indexOf('pending'));
@@ -1696,6 +1762,54 @@ describe('useProjectManager.createProject', () => {
       kind: 'workspace',
       workspaceId: 'wsp_default',
     });
+  });
+
+  it('roots a project created in a picked node folder at that folder', async () => {
+    mockIsFileSystemAccessSupported = true;
+    mockPickerBackend = 'node';
+    mockListWorkspaces.mockResolvedValue([
+      { workspaceId: 'wsp_node', name: 'Workshop', slug: 'workshop', path: nodeWorkspacePath },
+    ]);
+    mockGetWorkspaceMetadata.mockResolvedValue({
+      workspaceId: 'wsp_node',
+      name: 'Workshop',
+      slug: 'workshop',
+      lastConnectedAt: 1,
+      path: nodeWorkspacePath,
+    });
+    mockPrepareProjectCreation.mockResolvedValueOnce({
+      ...pendingCreate,
+      backend: 'node',
+      path: nodeWorkspacePath,
+    });
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+    const created = await act(async () =>
+      result.current.createProject({
+        project: {
+          name: fakeProject.name,
+          description: '',
+          tags: [],
+          assets: { main: { entryPath: 'main.ts' } },
+        },
+        files: {},
+        location: { kind: 'workspace', workspaceId: 'wsp_node' },
+      }),
+    );
+
+    expect(mockPrepareProjectCreation.mock.calls.at(-1)?.[0]?.storage).toMatchObject({
+      backend: 'node',
+      path: nodeWorkspacePath,
+    });
+    // The commit writes into the picked folder, never into `userData/home`.
+    expect(mockCommitPendingProjectDirectory.mock.calls.at(-1)?.[0]?.scope).toEqual({
+      backend: 'node',
+      path: nodeWorkspacePath,
+    });
+    expect(created.slugs).toMatchObject({ workspaceSlug: 'workshop' });
+    expect(mockSetProjectFileSystemConfig).toHaveBeenCalledWith(
+      expect.objectContaining({ backend: 'node', path: nodeWorkspacePath }),
+    );
   });
 
   it('journals permanent deletion before deleting the exact observed directory and local records', async () => {

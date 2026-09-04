@@ -3,6 +3,7 @@ import { useActorRef } from '@xstate/react';
 import { useProject } from '#hooks/use-project.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { thumbnailMachine } from '#machines/thumbnail.machine.js';
+import type { ThumbnailResult } from '#machines/thumbnail.machine.js';
 import { useHeadlessImageService } from '#providers/headless-image-provider.js';
 import { getProjectFileSystemConfig } from '#filesystem/handle-store.js';
 import type { ProjectFileSystemConfig } from '#filesystem/handle-store.js';
@@ -10,6 +11,30 @@ import type { ProjectFileSystemConfig } from '#filesystem/handle-store.js';
 /** Project-relative path for the generated thumbnail. */
 const thumbnailPath = 'thumbnail.webp';
 const thumbnailLineWidth = 3;
+
+const validateThumbnailWebp = async (bytes: Uint8Array<ArrayBuffer>): Promise<void> => {
+  if (
+    bytes.length < 12 ||
+    bytes[0] !== 0x52 ||
+    bytes[1] !== 0x49 ||
+    bytes[2] !== 0x46 ||
+    bytes[3] !== 0x46 ||
+    bytes[8] !== 0x57 ||
+    bytes[9] !== 0x45 ||
+    bytes[10] !== 0x42 ||
+    bytes[11] !== 0x50
+  ) {
+    throw new Error('Thumbnail export returned bytes without a WebP signature');
+  }
+  const bitmap = await createImageBitmap(new Blob([bytes], { type: 'image/webp' }));
+  try {
+    if (bitmap.width !== 768 || bitmap.height !== 576) {
+      throw new Error(`Thumbnail export expected 768×576 pixels, received ${bitmap.width}×${bitmap.height}`);
+    }
+  } finally {
+    bitmap.close();
+  }
+};
 
 const locatorIdentity = (config: ProjectFileSystemConfig | undefined): string =>
   config
@@ -31,7 +56,7 @@ const locatorIdentity = (config: ProjectFileSystemConfig | undefined): string =>
  * @returns `regenerate` — force a thumbnail render now (manual command),
  *   bypassing the geometry-hash dedupe.
  */
-export function useThumbnailGenerator(): { regenerate: () => void } {
+export function useThumbnailGenerator(): { regenerate: () => Promise<ThumbnailResult> } {
   const { geometryUnits, mainEntryPath, projectId } = useProject();
   const { writeFile } = useFileManager();
   const imageService = useHeadlessImageService();
@@ -41,21 +66,28 @@ export function useThumbnailGenerator(): { regenerate: () => void } {
   // Read the live collaborators through refs so the machine's injected effects
   // stay current without re-instantiating the actor when they change.
   const cadActorRef = useRef(mainCadActor);
-  cadActorRef.current = mainCadActor;
   const writeFileRef = useRef(writeFile);
-  writeFileRef.current = writeFile;
+
+  useEffect(() => {
+    cadActorRef.current = mainCadActor;
+    writeFileRef.current = writeFile;
+  }, [mainCadActor, writeFile]);
   const generationRef = useRef(0);
   const identityRef = useRef(`${projectId}:unsettled`);
+  const manualResultResolversRef = useRef<Array<(result: ThumbnailResult) => void>>([]);
   const thumbnailActor = useActorRef(thumbnailMachine, {
     input: {
       render: async (request) => {
         const snapshot = cadActorRef.current?.getSnapshot();
         const geometry = snapshot?.context.geometry;
+        const identity = request.identity ?? identityRef.current;
+        if (snapshot?.context.entryPath && geometry?.format === 'svg' && request.kind === 'automatic-thumbnail') {
+          return { status: 'skipped', identity, reason: 'svg-source' };
+        }
         if (!snapshot?.context.entryPath || geometry?.format !== 'gltf') {
           throw new Error('source-unavailable: settled canonical GLB not ready');
         }
         const generation = generationRef.current;
-        const identity = request.identity ?? identityRef.current;
         const renderedLocatorIdentity = locatorIdentity(await getProjectFileSystemConfig(projectId));
         const files = await imageService.export({
           kind: request.kind,
@@ -90,15 +122,16 @@ export function useThumbnailGenerator(): { regenerate: () => void } {
             `Thumbnail export expected exactly one non-empty image/webp artifact, received ${files.length}: ${files.map((candidate) => `${candidate.mimeType} ${candidate.bytes.length}B`).join(', ')}`,
           );
         }
+        await validateThumbnailWebp(file.bytes);
         return { bytes: file.bytes, identity, generation, locatorIdentity: renderedLocatorIdentity };
       },
       store: async (artifact) => {
         if (artifact.generation !== generationRef.current || artifact.identity !== identityRef.current) {
-          return;
+          return { status: 'skipped', reason: 'superseded' };
         }
         const currentLocatorIdentity = locatorIdentity(await getProjectFileSystemConfig(projectId));
         if (artifact.locatorIdentity !== currentLocatorIdentity) {
-          return;
+          return { status: 'skipped', reason: 'locator-changed' };
         }
         try {
           await writeFileRef.current(thumbnailPath, artifact.bytes, { source: 'machine' });
@@ -111,6 +144,10 @@ export function useThumbnailGenerator(): { regenerate: () => void } {
           });
           throw error;
         }
+        return { status: 'stored' };
+      },
+      onManualResult: (result) => {
+        manualResultResolversRef.current.shift()?.(result);
       },
     },
   });
@@ -129,8 +166,12 @@ export function useThumbnailGenerator(): { regenerate: () => void } {
     };
   }, [mainCadActor, mainEntryPath, projectId, thumbnailActor]);
 
-  const regenerate = useCallback(() => {
-    thumbnailActor.send({ type: 'regenerate' });
+  const regenerate = useCallback(async (): Promise<ThumbnailResult> => {
+    const result = await new Promise<ThumbnailResult>((resolve) => {
+      manualResultResolversRef.current.push(resolve);
+      thumbnailActor.send({ type: 'regenerate' });
+    });
+    return result;
   }, [thumbnailActor]);
 
   return { regenerate };

@@ -32,8 +32,17 @@ describe('file-manager.worker api-extractor import boundary', () => {
   // instead of the IndexedDB literal it used to carry.
   it('roots / on the Home engine the host handed over', () => {
     expect(workerSource).toContain('homeBackendFromWorkerName(self.name)');
-    expect(workerSource).toContain('const rootScope = { backend: homeStorageBackend }');
+    expect(workerSource).toContain('return { backend: homeStorageBackend };');
     expect(workerSource).not.toContain("rootScope = { backend: 'indexeddb' }");
+  });
+
+  // Batch Q: the provider client crosses the port; the `node:fs` half never
+  // enters this bundle. The host lives behind `@taucad/filesystem/backend/node`.
+  it('reaches the node backend only through the injected port, never the host subpath', () => {
+    expect(workerSource).toContain("data.type === 'nodeFsPort'");
+    expect(workerSource).toContain('createNodeFsPort');
+    expect(workerSource).not.toContain('@taucad/filesystem/backend/node');
+    expect(workerSource).not.toMatch(/from ['"]node:/u);
   });
 });
 
@@ -42,6 +51,8 @@ describe('file-manager worker name handoff', () => {
     expect(fileManagerWorkerName('opfs')).toBe('fm-root:opfs');
     expect(homeBackendFromWorkerName(fileManagerWorkerName('opfs'))).toBe('opfs');
     expect(homeBackendFromWorkerName(fileManagerWorkerName('indexeddb'))).toBe('indexeddb');
+    expect(fileManagerWorkerName('node')).toBe('fm-root:node');
+    expect(homeBackendFromWorkerName(fileManagerWorkerName('node'))).toBe('node');
   });
 
   it('falls back to IndexedDB for a worker whose name carries no engine', () => {

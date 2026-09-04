@@ -4,11 +4,10 @@ import { useFileManager } from '#hooks/use-file-manager.js';
 /** Resolve the canonical local project thumbnail through the File Manager. */
 export function useProjectThumbnail(projectId: string | undefined): string | undefined {
   const { client, workerChangeChannel } = useFileManager();
-  const [url, setUrl] = useState<string>();
+  const [thumbnail, setThumbnail] = useState<{ projectId: string; url: string }>();
 
   useEffect(() => {
     if (!projectId) {
-      setUrl(undefined);
       return;
     }
 
@@ -27,10 +26,10 @@ export function useProjectThumbnail(projectId: string | undefined): string | und
           URL.revokeObjectURL(currentUrl);
         }
         currentUrl = next;
-        setUrl(next);
+        setThumbnail({ projectId, url: next });
       } catch {
         if (!cancelled) {
-          setUrl(undefined);
+          setThumbnail(undefined);
         }
       }
     };
@@ -45,7 +44,7 @@ export function useProjectThumbnail(projectId: string | undefined): string | und
           URL.revokeObjectURL(currentUrl);
           currentUrl = undefined;
         }
-        setUrl(undefined);
+        setThumbnail(undefined);
       },
     });
 
@@ -59,5 +58,5 @@ export function useProjectThumbnail(projectId: string | undefined): string | und
     };
   }, [client, projectId, workerChangeChannel]);
 
-  return url;
+  return thumbnail !== undefined && thumbnail.projectId === projectId ? thumbnail.url : undefined;
 }

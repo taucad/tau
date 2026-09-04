@@ -44,7 +44,8 @@ type ImportDiskEventInternal =
   | { type: 'selectMainFile'; file: string }
   | { type: 'confirmImport' }
   | { type: 'retry' }
-  | { type: 'reset' };
+  | { type: 'reset' }
+  | { type: 'externalError'; error: Error };
 
 /**
  * Import Disk Machine Emitted Events
@@ -272,6 +273,10 @@ export const importDiskMachine = setup({
   states: {
     idle: {
       on: {
+        externalError: {
+          target: 'error',
+          actions: ['setError', 'emitError'],
+        },
         processFiles: {
           target: 'reading',
         },

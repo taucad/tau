@@ -7,7 +7,17 @@ export type PendingProjectBackend = Exclude<FileSystemBackend, 'memory'>;
 
 export type PendingProjectStorage =
   | {
-      readonly backend: Exclude<PendingProjectBackend, 'webaccess'>;
+      readonly backend: Exclude<PendingProjectBackend, 'webaccess' | 'node'>;
+      readonly providerBasePath: string;
+    }
+  | {
+      /**
+       * Absolute host directory of the node root, absent for Home — the same
+       * optional discriminator the durable `ProjectFileSystemConfig` node arm
+       * carries, so `pendingStorageToConfig` stays a spread.
+       */
+      readonly backend: 'node';
+      readonly path?: string;
       readonly providerBasePath: string;
     }
   | {

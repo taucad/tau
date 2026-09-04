@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { isFileSystemAccessSupported } from '#constants/browser.constants.js';
+import { directoryPicker, webAccessDirectoryPicker } from '#constants/browser.constants.js';
 import {
   checkHandlePermission,
   getProjectCreationLocation,
   getWorkspace,
+  isNodeWorkspace,
   listWorkspaces,
   requestHandlePermission,
 } from '#filesystem/handle-store.js';
@@ -100,6 +101,15 @@ const isAbortError = (error: unknown): boolean =>
   typeof error === 'object' && error !== null && 'name' in error && error.name === 'AbortError';
 
 const probeWorkspaceOption = async (workspace: Workspace): Promise<WorkspaceLocationOption> => {
+  // A node workspace is a folder on disk the shell already opened: there is no
+  // handle to retain and no permission to revoke, so its probe is its row.
+  if (isNodeWorkspace(workspace)) {
+    return {
+      location: { kind: 'workspace', workspaceId: workspace.workspaceId },
+      status: 'connected',
+      ...projectLocationDescriptor({ kind: 'workspace', workspaceName: workspace.name }),
+    };
+  }
   const entry = await getWorkspace(workspace.workspaceId);
   const status = entry
     ? (await checkHandlePermission(entry.handle)) === 'granted'
@@ -119,7 +129,7 @@ export const useProjectCreationLocation = (): ProjectCreationLocationState => {
   const projectManager = useProjectManager();
   const telemetry = useWorkspaceTelemetry();
   const [state, setState] = useState<ProjectCreationLocationState>(
-    isFileSystemAccessSupported ? loadingState : homeOnlyState,
+    directoryPicker().available ? loadingState : homeOnlyState,
   );
   const mountedRef = useRef(true);
   const generationRef = useRef(0);
@@ -145,11 +155,24 @@ export const useProjectCreationLocation = (): ProjectCreationLocationState => {
 
   const reconnectWorkspace = useCallback(
     async (workspaceId: string): Promise<void> => {
+      const picker = webAccessDirectoryPicker();
+      if (!picker) {
+        // Reconnecting rebinds a retained handle, which this host cannot
+        // produce. Silently reporting an abort would blame the user for a
+        // no-op they never triggered.
+        telemetry.workspaceOpenFailed({ workspaceId, reason: 'unsupported' });
+        toast.error('This folder cannot be reconnected here.');
+        return;
+      }
       try {
-        const handle = await globalThis.window.showDirectoryPicker({
+        const handle = await picker.pick({
           id: `tau-workspace-${workspaceId}`,
           mode: 'readwrite',
         });
+        if (handle === undefined) {
+          telemetry.workspaceOpenFailed({ workspaceId, reason: 'aborted' });
+          return;
+        }
         await fileManager.workspace.replaceWorkspaceHandle(workspaceId, handle);
         await projectManager.refreshWorkspaceCatalog();
         telemetry.workspaceConnected({ workspaceId });
@@ -256,7 +279,9 @@ export const useProjectCreationLocation = (): ProjectCreationLocationState => {
     },
     [getSelectedWorkspaceRecovery, select],
   );
-  loadRef.current = load;
+  useEffect(() => {
+    loadRef.current = load;
+  }, [load]);
 
   const connectWorkspace = useCallback(async (): Promise<void> => {
     try {
@@ -282,7 +307,7 @@ export const useProjectCreationLocation = (): ProjectCreationLocationState => {
 
   useEffect(() => {
     mountedRef.current = true;
-    if (isFileSystemAccessSupported) {
+    if (directoryPicker().available) {
       void loadRef.current(true);
     } else {
       void getProjectCreationLocation({ webAccessSupported: false });

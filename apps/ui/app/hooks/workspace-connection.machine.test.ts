@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createActor, waitFor } from 'xstate';
+import type { DirectoryPick } from '#constants/browser.constants.js';
 import type { Workspace } from '#filesystem/handle-store.js';
 import { selectWorkspaceConnectionState, workspaceConnectionMachine } from '#hooks/workspace-connection.machine.js';
 
@@ -14,6 +15,7 @@ Object.defineProperties(handle, {
   kind: { value: 'directory' },
   name: { value: 'Workshop' },
 });
+const selection: DirectoryPick = { backend: 'webaccess', handle };
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -39,7 +41,6 @@ describe('workspaceConnectionMachine', () => {
   it('publishes each truthful connection phase and resolves at catalog-ready', async () => {
     const registration = Promise.withResolvers<{
       workspace: Workspace;
-      handle: FileSystemDirectoryHandle;
       minted: boolean;
     }>();
     const mounting = Promise.withResolvers<void>();
@@ -69,13 +70,13 @@ describe('workspaceConnectionMachine', () => {
       operationId: 'req_1',
     });
 
-    actor.send({ type: 'workspaceSelected', operationId: 'req_1', handle });
+    actor.send({ type: 'workspaceSelected', operationId: 'req_1', selection });
     expect(selectWorkspaceConnectionState(actor.getSnapshot())).toMatchObject({
       phase: 'registering',
       workspaceName: 'Workshop',
     });
 
-    registration.resolve({ workspace, handle, minted: true });
+    registration.resolve({ workspace, minted: true });
     await waitFor(actor, (snapshot) => snapshot.matches('mounting'));
     expect(selectWorkspaceConnectionState(actor.getSnapshot())).toMatchObject({ phase: 'mounting', workspace });
 
@@ -122,7 +123,7 @@ describe('workspaceConnectionMachine', () => {
       .mockResolvedValueOnce(undefined);
     const actor = createActor(workspaceConnectionMachine, {
       input: {
-        registerWorkspace: async () => ({ workspace, handle, minted: true }),
+        registerWorkspace: async () => ({ workspace, minted: true }),
         mountWorkspace,
         prepareWorkspaceCatalog: async () => ({
           projectCount: 1,
@@ -134,7 +135,7 @@ describe('workspaceConnectionMachine', () => {
     });
     actor.start();
     actor.send({ type: 'beginSelection', operationId: 'req_retry' });
-    actor.send({ type: 'workspaceSelected', operationId: 'req_retry', handle });
+    actor.send({ type: 'workspaceSelected', operationId: 'req_retry', selection });
     await waitFor(actor, (snapshot) => snapshot.matches('failed'));
 
     expect(selectWorkspaceConnectionState(actor.getSnapshot())).toMatchObject({
@@ -148,6 +149,52 @@ describe('workspaceConnectionMachine', () => {
     await waitFor(actor, (snapshot) => snapshot.matches('ready'));
     expect(mountWorkspace).toHaveBeenCalledTimes(2);
     expect(selectWorkspaceConnectionState(actor.getSnapshot())).toMatchObject({ phase: 'ready', workspace });
+    actor.stop();
+  });
+
+  it('carries a picked node folder through registration and mounting', async () => {
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+      callback(0);
+      return 1;
+    });
+    const nodeSelection: DirectoryPick = { backend: 'node', path: '/Users/tester/Projects/Workshop/' };
+    const nodeWorkspace: Workspace = { ...workspace, path: '/Users/tester/Projects/Workshop' };
+    const registerWorkspace = vi.fn(async () => ({ workspace: nodeWorkspace, minted: true }));
+    const mountWorkspace = vi.fn(async () => undefined);
+    const actor = createActor(workspaceConnectionMachine, {
+      input: {
+        registerWorkspace,
+        mountWorkspace,
+        prepareWorkspaceCatalog: async () => ({
+          projectCount: 2,
+          candidateCount: 2,
+          conflictCount: 0,
+          publish: async () => undefined,
+        }),
+      },
+    });
+    actor.start();
+    actor.send({ type: 'beginSelection', operationId: 'req_node' });
+    actor.send({ type: 'workspaceSelected', operationId: 'req_node', selection: nodeSelection });
+
+    // The absolute path is the only name a node pick has.
+    expect(selectWorkspaceConnectionState(actor.getSnapshot())).toMatchObject({
+      phase: 'registering',
+      workspaceName: 'Workshop',
+    });
+
+    await waitFor(actor, (snapshot) => snapshot.matches('ready'));
+    expect(registerWorkspace).toHaveBeenCalledWith(nodeSelection, expect.any(AbortSignal));
+    expect(mountWorkspace).toHaveBeenCalledWith(
+      { workspace: nodeWorkspace, minted: true },
+      nodeSelection,
+      expect.any(AbortSignal),
+    );
+    expect(selectWorkspaceConnectionState(actor.getSnapshot())).toMatchObject({
+      phase: 'ready',
+      workspace: nodeWorkspace,
+      projectCount: 2,
+    });
     actor.stop();
   });
 });

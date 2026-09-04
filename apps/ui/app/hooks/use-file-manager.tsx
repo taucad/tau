@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { createContext, useContext, useMemo, useCallback, useEffect, useRef, useState } from 'react';
+import { createContext, useContext, useMemo, useCallback, useEffect, useState } from 'react';
 import { useActorRef, useSelector } from '@xstate/react';
 import { waitFor } from 'xstate';
 import type { SnapshotFrom } from 'xstate';
@@ -388,7 +388,7 @@ export type FileManagerProviderProps = FileManagerProviderCommonProps &
   (
     | { readonly initialBackend: 'webaccess'; readonly projectId: string }
     | {
-        readonly initialBackend: 'indexeddb' | 'opfs' | 'memory';
+        readonly initialBackend: 'indexeddb' | 'opfs' | 'memory' | 'node';
         readonly projectId?: string;
       }
   );
@@ -471,9 +471,6 @@ export function FileManagerProvider({
       onRootSkipped: workspaceTelemetry.workspaceRootSkipped,
     },
   });
-
-  const rootDirectoryRef = useRef(rootDirectory);
-  rootDirectoryRef.current = rootDirectory;
 
   useEffect(() => {
     fileManagerRef.send({ type: 'setRoot', path: rootDirectory, projectId });

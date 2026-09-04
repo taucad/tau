@@ -1,0 +1,165 @@
+{
+  "name": "desktop",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "apps/desktop/src",
+  "projectType": "application",
+  "tags": ["scope:ui", "type:app"],
+  "targets": {
+    "prepare-build123d-python": {
+      "executor": "nx:run-commands",
+      "outputs": ["{projectRoot}/resources/python/{platform}-{arch}"],
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/prepare-build123d-python.mts"
+      }
+    },
+    "prepare-build123d-python-macos": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["prepare-build123d-python"],
+      "outputs": ["{projectRoot}/resources/python/darwin-arm64"],
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/prepare-build123d-python.mts --target darwin-arm64"
+      }
+    },
+    "prepare-picogk-dotnet": {
+      "executor": "nx:run-commands",
+      "outputs": ["{projectRoot}/resources/picogk/{platform}-{arch}"],
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/prepare-picogk-dotnet.mts"
+      }
+    },
+    "prepare-picogk-dotnet-macos": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["prepare-picogk-dotnet"],
+      "outputs": ["{projectRoot}/resources/picogk/darwin-arm64"],
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/prepare-picogk-dotnet.mts --target darwin-arm64"
+      }
+    },
+    "build": {
+      "executor": "nx:run-commands",
+      "outputs": ["{projectRoot}/dist"],
+      "inputs": ["production", "^production"],
+      "dependsOn": [
+        "prepare-build123d-python",
+        "prepare-picogk-dotnet",
+        { "projects": ["ui"], "target": "build:desktop" }
+      ],
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "electron-vite build"
+      }
+    },
+    "dev": {
+      "executor": "nx:run-commands",
+      "continuous": true,
+      "dependsOn": [
+        "prepare-build123d-python",
+        "prepare-picogk-dotnet",
+        { "projects": ["scripts"], "target": "populate-ui-env" },
+        { "projects": ["ui"], "target": "dev:desktop" }
+      ],
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "node --import @oxc-node/core/register ../../scripts/src/wait-for-url.ts http://localhost:3001 && node --env-file=../ui/.env scripts/run-electron-vite.mts dev",
+        "env": {
+          "ELECTRON_RENDERER_URL": "http://localhost:3001"
+        }
+      }
+    },
+    "serve": {
+      "executor": "nx:run-commands",
+      "continuous": true,
+      "dependsOn": ["build", { "projects": ["scripts"], "target": "populate-ui-env" }],
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "node --env-file=../ui/.env scripts/run-electron-vite.mts preview --skipBuild",
+        "env": {
+          "NODE_ENV": "production"
+        }
+      }
+    },
+    "generate-quick-look": {
+      "executor": "nx:run-commands",
+      "outputs": ["{projectRoot}/macos/generated"],
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/generate-quick-look-metadata.mts --write"
+      }
+    },
+    "check-quick-look": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/generate-quick-look-metadata.mts --check"
+      }
+    },
+    "build-quick-look-runtime": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["check-quick-look"],
+      "outputs": ["{projectRoot}/macos/generated/runtime"],
+      "options": {
+        "cwd": ".",
+        "commands": [
+          "tsgo -p apps/desktop/macos/runtime/tsconfig.json --noEmit",
+          "vite build --config apps/desktop/macos/runtime/vite.config.ts"
+        ],
+        "parallel": false
+      }
+    },
+    "build-quick-look-extensions": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["build-quick-look-runtime"],
+      "outputs": ["{projectRoot}/macos/dist/extensions"],
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/build-quick-look-extensions.mts"
+      }
+    },
+    "package-macos": {
+      "executor": "nx:run-commands",
+      "dependsOn": [
+        "build",
+        "build-quick-look-extensions",
+        "prepare-build123d-python-macos",
+        "prepare-picogk-dotnet-macos"
+      ],
+      "outputs": ["{projectRoot}/package-out"],
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/package-macos.mts"
+      }
+    },
+    "package-macos-release": {
+      "executor": "nx:run-commands",
+      "dependsOn": [
+        "build",
+        "build-quick-look-extensions",
+        "prepare-build123d-python-macos",
+        "prepare-picogk-dotnet-macos"
+      ],
+      "outputs": ["{projectRoot}/package-out"],
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/package-macos.mts --release"
+      }
+    },
+    "verify-macos-package": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/verify-macos-package.mts"
+      }
+    },
+    "verify-macos-release": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/verify-macos-package.mts --release"
+      }
+    }
+  }
+}

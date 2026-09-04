@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "pythonVersion": "3.13.15",
+  "pythonBuildStandaloneRelease": "20260901",
+  "build123dVersion": "0.11.1",
+  "ocpVersion": "7.9.3.1.1",
+  "protocolVersion": 1,
+  "targets": {
+    "darwin-arm64": {
+      "archive": "cpython-3.13.15+20260901-aarch64-apple-darwin-install_only.tar.gz",
+      "sha256": "b9054a9d3d54f4cb5573d44907fddb29874b08909bde73f29f2868cf872223ee",
+      "pythonRelativePath": "bin/python3"
+    },
+    "darwin-x64": {
+      "archive": "cpython-3.13.15+20260901-x86_64-apple-darwin-install_only.tar.gz",
+      "sha256": "49f0d97f506b855eed60b74a8ac138595c5b39799a6aa5e0d7ca8abe1019a4d4",
+      "pythonRelativePath": "bin/python3"
+    },
+    "linux-arm64": {
+      "archive": "cpython-3.13.15+20260901-aarch64-unknown-linux-gnu-install_only.tar.gz",
+      "sha256": "76ed18125286d7dc96ce24023d1e319dbd55a89a767102411b1ea23846113f69",
+      "pythonRelativePath": "bin/python3"
+    },
+    "linux-x64": {
+      "archive": "cpython-3.13.15+20260901-x86_64-unknown-linux-gnu-install_only.tar.gz",
+      "sha256": "0651dd7157d3debf769e15a52c1de9de7fbcdc36ba72faf79fde3c44f14d9461",
+      "pythonRelativePath": "bin/python3"
+    },
+    "win32-x64": {
+      "archive": "cpython-3.13.15+20260901-x86_64-pc-windows-msvc-install_only.tar.gz",
+      "sha256": "9bcc038a0bf180612ed56dec93d4977d035e80b8d9320ef51a38c287baf134b7",
+      "pythonRelativePath": "python.exe"
+    }
+  }
+}

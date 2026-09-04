@@ -1,0 +1,14 @@
+{
+  "extends": "../../../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": false,
+    "declaration": false,
+    "declarationMap": false,
+    "incremental": false,
+    "noEmit": true,
+    "paths": {
+      "#quick-look-manifest": ["../quick-look-formats.json"]
+    }
+  },
+  "include": ["src/**/*.ts", "vite.config.ts"]
+}

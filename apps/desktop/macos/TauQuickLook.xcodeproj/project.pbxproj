@@ -1,0 +1,227 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		100000000000000000000001 /* FormatManifest.generated.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000001 /* FormatManifest.generated.swift */; };
+		100000000000000000000002 /* TauConverter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000002 /* TauConverter.swift */; };
+		100000000000000000000003 /* ModelCanvas.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000003 /* ModelCanvas.swift */; };
+		100000000000000000000004 /* PreviewViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000004 /* PreviewViewController.swift */; };
+		100000000000000000000005 /* runtime in Resources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000005 /* runtime */; };
+		100000000000000000000006 /* FormatManifest.generated.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000001 /* FormatManifest.generated.swift */; };
+		100000000000000000000007 /* TauConverter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000002 /* TauConverter.swift */; };
+		100000000000000000000008 /* ModelCanvas.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000003 /* ModelCanvas.swift */; };
+		100000000000000000000009 /* ThumbnailProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000006 /* ThumbnailProvider.swift */; };
+		10000000000000000000000A /* runtime in Resources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000005 /* runtime */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		200000000000000000000001 /* FormatManifest.generated.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = generated/FormatManifest.generated.swift; sourceTree = "<group>"; };
+		200000000000000000000002 /* TauConverter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TauQuickLookCore/TauConverter.swift; sourceTree = "<group>"; };
+		200000000000000000000003 /* ModelCanvas.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TauQuickLookCore/ModelCanvas.swift; sourceTree = "<group>"; };
+		200000000000000000000004 /* PreviewViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TauQuickLookPreview/PreviewViewController.swift; sourceTree = "<group>"; };
+		200000000000000000000005 /* runtime */ = {isa = PBXFileReference; lastKnownFileType = folder; path = generated/runtime; sourceTree = "<group>"; };
+		200000000000000000000006 /* ThumbnailProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TauQuickLookThumbnail/ThumbnailProvider.swift; sourceTree = "<group>"; };
+		200000000000000000000007 /* TauQuickLookPreview.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = TauQuickLookPreview.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		200000000000000000000008 /* TauQuickLookThumbnail.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = TauQuickLookThumbnail.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		200000000000000000000009 /* TauQuickLookPreview-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = generated/TauQuickLookPreview-Info.plist; sourceTree = "<group>"; };
+		20000000000000000000000A /* TauQuickLookThumbnail-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = generated/TauQuickLookThumbnail-Info.plist; sourceTree = "<group>"; };
+		20000000000000000000000B /* TauQuickLook.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Config/TauQuickLook.entitlements; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		300000000000000000000001 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		300000000000000000000002 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		400000000000000000000001 = {
+			isa = PBXGroup;
+			children = (
+				200000000000000000000001 /* FormatManifest.generated.swift */,
+				200000000000000000000002 /* TauConverter.swift */,
+				200000000000000000000003 /* ModelCanvas.swift */,
+				200000000000000000000004 /* PreviewViewController.swift */,
+				200000000000000000000006 /* ThumbnailProvider.swift */,
+				200000000000000000000005 /* runtime */,
+				200000000000000000000009 /* TauQuickLookPreview-Info.plist */,
+				20000000000000000000000A /* TauQuickLookThumbnail-Info.plist */,
+				20000000000000000000000B /* TauQuickLook.entitlements */,
+				400000000000000000000002 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		400000000000000000000002 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				200000000000000000000007 /* TauQuickLookPreview.appex */,
+				200000000000000000000008 /* TauQuickLookThumbnail.appex */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		500000000000000000000001 /* TauQuickLookPreview */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 900000000000000000000002 /* Build configuration list for PBXNativeTarget "TauQuickLookPreview" */;
+			buildPhases = (
+				700000000000000000000001 /* Sources */,
+				300000000000000000000001 /* Frameworks */,
+				800000000000000000000001 /* Resources */,
+			);
+			buildRules = ();
+			dependencies = ();
+			name = TauQuickLookPreview;
+			productName = TauQuickLookPreview;
+			productReference = 200000000000000000000007 /* TauQuickLookPreview.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		500000000000000000000002 /* TauQuickLookThumbnail */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 900000000000000000000003 /* Build configuration list for PBXNativeTarget "TauQuickLookThumbnail" */;
+			buildPhases = (
+				700000000000000000000002 /* Sources */,
+				300000000000000000000002 /* Frameworks */,
+				800000000000000000000002 /* Resources */,
+			);
+			buildRules = ();
+			dependencies = ();
+			name = TauQuickLookThumbnail;
+			productName = TauQuickLookThumbnail;
+			productReference = 200000000000000000000008 /* TauQuickLookThumbnail.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		600000000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2660;
+				LastUpgradeCheck = 2660;
+				TargetAttributes = {
+					500000000000000000000001 = { CreatedOnToolsVersion = 26.6; };
+					500000000000000000000002 = { CreatedOnToolsVersion = 26.6; };
+				};
+			};
+			buildConfigurationList = 900000000000000000000001 /* Build configuration list for PBXProject "TauQuickLook" */;
+			compatibilityVersion = "Xcode 16.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (en, Base);
+			mainGroup = 400000000000000000000001;
+			productRefGroup = 400000000000000000000002 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				500000000000000000000001 /* TauQuickLookPreview */,
+				500000000000000000000002 /* TauQuickLookThumbnail */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		800000000000000000000001 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (100000000000000000000005 /* runtime in Resources */); runOnlyForDeploymentPostprocessing = 0; };
+		800000000000000000000002 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (10000000000000000000000A /* runtime in Resources */); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		700000000000000000000001 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (
+			100000000000000000000001 /* FormatManifest.generated.swift in Sources */,
+			100000000000000000000002 /* TauConverter.swift in Sources */,
+			100000000000000000000003 /* ModelCanvas.swift in Sources */,
+			100000000000000000000004 /* PreviewViewController.swift in Sources */,
+		); runOnlyForDeploymentPostprocessing = 0; };
+		700000000000000000000002 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (
+			100000000000000000000006 /* FormatManifest.generated.swift in Sources */,
+			100000000000000000000007 /* TauConverter.swift in Sources */,
+			100000000000000000000008 /* ModelCanvas.swift in Sources */,
+			100000000000000000000009 /* ThumbnailProvider.swift in Sources */,
+		); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		A00000000000000000000001 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {
+			CLANG_ENABLE_MODULES = YES;
+			MACOSX_DEPLOYMENT_TARGET = 13.0;
+			ONLY_ACTIVE_ARCH = YES;
+			SDKROOT = macosx;
+			SWIFT_VERSION = 5.0;
+		}; name = Debug; };
+		A00000000000000000000002 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {
+			CLANG_ENABLE_MODULES = YES;
+			MACOSX_DEPLOYMENT_TARGET = 13.0;
+			ONLY_ACTIVE_ARCH = NO;
+			SDKROOT = macosx;
+			SWIFT_COMPILATION_MODE = wholemodule;
+			SWIFT_OPTIMIZATION_LEVEL = "-O";
+			SWIFT_VERSION = 5.0;
+		}; name = Release; };
+		A00000000000000000000003 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {
+			APPLICATION_EXTENSION_API_ONLY = YES;
+			CODE_SIGN_ENTITLEMENTS = Config/TauQuickLook.entitlements;
+			CODE_SIGN_STYLE = Automatic;
+			CURRENT_PROJECT_VERSION = 1;
+			GENERATE_INFOPLIST_FILE = NO;
+			INFOPLIST_FILE = generated/TauQuickLookPreview-Info.plist;
+			LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/../Frameworks", "@executable_path/../../../../Frameworks");
+			MARKETING_VERSION = 0.0.1;
+			PRODUCT_BUNDLE_IDENTIFIER = "com.taucad.tau.desktop.quicklook-preview";
+			PRODUCT_NAME = "$(TARGET_NAME)";
+			SKIP_INSTALL = NO;
+		}; name = Debug; };
+		A00000000000000000000004 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {
+			APPLICATION_EXTENSION_API_ONLY = YES;
+			CODE_SIGN_ENTITLEMENTS = Config/TauQuickLook.entitlements;
+			CODE_SIGN_STYLE = Automatic;
+			CURRENT_PROJECT_VERSION = 1;
+			GENERATE_INFOPLIST_FILE = NO;
+			INFOPLIST_FILE = generated/TauQuickLookPreview-Info.plist;
+			LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/../Frameworks", "@executable_path/../../../../Frameworks");
+			MARKETING_VERSION = 0.0.1;
+			PRODUCT_BUNDLE_IDENTIFIER = "com.taucad.tau.desktop.quicklook-preview";
+			PRODUCT_NAME = "$(TARGET_NAME)";
+			SKIP_INSTALL = NO;
+		}; name = Release; };
+		A00000000000000000000005 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {
+			APPLICATION_EXTENSION_API_ONLY = YES;
+			CODE_SIGN_ENTITLEMENTS = Config/TauQuickLook.entitlements;
+			CODE_SIGN_STYLE = Automatic;
+			CURRENT_PROJECT_VERSION = 1;
+			GENERATE_INFOPLIST_FILE = NO;
+			INFOPLIST_FILE = generated/TauQuickLookThumbnail-Info.plist;
+			LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/../Frameworks", "@executable_path/../../../../Frameworks");
+			MARKETING_VERSION = 0.0.1;
+			PRODUCT_BUNDLE_IDENTIFIER = "com.taucad.tau.desktop.quicklook-thumbnail";
+			PRODUCT_NAME = "$(TARGET_NAME)";
+			SKIP_INSTALL = NO;
+		}; name = Debug; };
+		A00000000000000000000006 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {
+			APPLICATION_EXTENSION_API_ONLY = YES;
+			CODE_SIGN_ENTITLEMENTS = Config/TauQuickLook.entitlements;
+			CODE_SIGN_STYLE = Automatic;
+			CURRENT_PROJECT_VERSION = 1;
+			GENERATE_INFOPLIST_FILE = NO;
+			INFOPLIST_FILE = generated/TauQuickLookThumbnail-Info.plist;
+			LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/../Frameworks", "@executable_path/../../../../Frameworks");
+			MARKETING_VERSION = 0.0.1;
+			PRODUCT_BUNDLE_IDENTIFIER = "com.taucad.tau.desktop.quicklook-thumbnail";
+			PRODUCT_NAME = "$(TARGET_NAME)";
+			SKIP_INSTALL = NO;
+		}; name = Release; };
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		900000000000000000000001 /* Build configuration list for PBXProject "TauQuickLook" */ = {isa = XCConfigurationList; buildConfigurations = (A00000000000000000000001 /* Debug */, A00000000000000000000002 /* Release */); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		900000000000000000000002 /* Build configuration list for PBXNativeTarget "TauQuickLookPreview" */ = {isa = XCConfigurationList; buildConfigurations = (A00000000000000000000003 /* Debug */, A00000000000000000000004 /* Release */); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		900000000000000000000003 /* Build configuration list for PBXNativeTarget "TauQuickLookThumbnail" */ = {isa = XCConfigurationList; buildConfigurations = (A00000000000000000000005 /* Debug */, A00000000000000000000006 /* Release */); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+/* End XCConfigurationList section */
+	};
+	rootObject = 600000000000000000000001 /* Project object */;
+}

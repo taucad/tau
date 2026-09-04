@@ -1,0 +1,577 @@
+{
+  "schemaVersion": 1,
+  "bundleIdentifier": "com.taucad.tau.desktop",
+  "previewInterchange": "usdz",
+  "directElectronPreviewExtensions": ["usda", "usdz"],
+  "limits": {
+    "maxSourceBytes": 268435456,
+    "maxSidecarBytes": 134217728,
+    "maxTotalBytes": 536870912,
+    "maxFiles": 128,
+    "maxDepth": 4,
+    "maxOutputBytes": 268435456,
+    "timeoutMilliseconds": 30000
+  },
+  "formats": [
+    {
+      "extensions": ["glb"],
+      "identifier": "org.khronos.glb",
+      "declaration": "imported",
+      "description": "glTF binary model",
+      "mimeTypes": ["model/gltf-binary"],
+      "sidecars": false,
+      "systemPreview": true,
+      "utiOwner": "Khronos Group",
+      "utiSource": "Khronos glTF 2.0 specification",
+      "fixture": {
+        "entry": "packages/plugins/gltf/src/fixtures/cube.glb",
+        "files": ["packages/plugins/gltf/src/fixtures/cube.glb"],
+        "expectedGeometry": { "minimumTriangles": 12, "bounds": "finite-nonzero" }
+      }
+    },
+    {
+      "extensions": ["gltf"],
+      "identifier": "org.khronos.gltf",
+      "declaration": "imported",
+      "description": "glTF model",
+      "mimeTypes": ["model/gltf+json"],
+      "sidecars": true,
+      "systemPreview": true,
+      "utiOwner": "Khronos Group",
+      "utiSource": "Khronos glTF 2.0 specification",
+      "fixture": {
+        "entry": "packages/plugins/gltf/src/fixtures/cube-bin.gltf",
+        "files": [
+          "packages/plugins/gltf/src/fixtures/cube-bin.gltf",
+          "packages/plugins/gltf/src/fixtures/cube-bin.bin"
+        ],
+        "expectedGeometry": { "minimumTriangles": 12, "bounds": "finite-nonzero" }
+      }
+    },
+    {
+      "extensions": ["step", "stp"],
+      "identifier": "com.taucad.step",
+      "declaration": "exported",
+      "aliases": ["com.shapr3d.step", "com.shapr3d.stp"],
+      "description": "STEP CAD model",
+      "mimeTypes": ["model/step", "application/step"],
+      "sidecars": false,
+      "systemPreview": false,
+      "utiOwner": "TAUCAD LIMITED",
+      "utiSource": "Tau fallback registration; no standards-owner UTI is available",
+      "fixture": {
+        "entry": "packages/plugins/brep/src/fixtures/cube.step",
+        "files": ["packages/plugins/brep/src/fixtures/cube.step"],
+        "expectedGeometry": { "minimumTriangles": 12, "bounds": "finite-nonzero" }
+      }
+    },
+    {
+      "extensions": ["iges", "igs"],
+      "identifier": "com.taucad.iges",
+      "declaration": "exported",
+      "aliases": ["com.shapr3d.iges", "com.shapr3d.igs"],
+      "description": "IGES CAD model",
+      "mimeTypes": ["model/iges"],
+      "sidecars": false,
+      "systemPreview": false,
+      "utiOwner": "TAUCAD LIMITED",
+      "utiSource": "Tau fallback registration; no standards-owner UTI is available",
+      "fixture": {
+        "entry": "packages/plugins/brep/src/fixtures/cube-brep.iges",
+        "files": ["packages/plugins/brep/src/fixtures/cube-brep.iges"],
+        "expectedGeometry": { "minimumTriangles": 12, "bounds": "finite-nonzero" }
+      }
+    },
+    {
+      "extensions": ["brep"],
+      "identifier": "com.taucad.brep",
+      "declaration": "exported",
+      "description": "Open CASCADE BRep model",
+      "mimeTypes": ["model/vnd.opencascade.brep"],
+      "sidecars": false,
+      "systemPreview": false,
+      "utiOwner": "TAUCAD LIMITED",
+      "utiSource": "Tau fallback registration; no standards-owner UTI is available",
+      "fixture": {
+        "entry": "packages/plugins/brep/src/fixtures/cube.brep",
+        "files": ["packages/plugins/brep/src/fixtures/cube.brep"],
+        "expectedGeometry": { "minimumTriangles": 12, "bounds": "finite-nonzero" }
+      }
+    },
+    {
+      "extensions": ["3dm"],
+      "identifier": "com.mcneel.rhinoceros.3dm",
+      "declaration": "imported",
+      "aliases": ["com.shapr3d.rhino.3dm"],
+      "description": "Rhino 3D model",
+      "mimeTypes": ["model/vnd.rhino.3dm"],
+      "sidecars": false,
+      "systemPreview": false,
+      "utiOwner": "Robert McNeel & Associates",
+      "utiSource": "McNeel Rhino 3DM application registration",
+      "fixture": {
+        "entry": "packages/plugins/rhino/src/fixtures/cube-mesh.3dm",
+        "files": ["packages/plugins/rhino/src/fixtures/cube-mesh.3dm"],
+        "expectedGeometry": { "minimumTriangles": 12, "bounds": "finite-nonzero" }
+      }
+    },
+    {
+      "extensions": ["3ds"],
+      "identifier": "com.taucad.3d-studio",
+      "declaration": "exported",
+      "aliases": ["com.shapr3d.3d-studio.3ds"],
+      "description": "3D Studio model",
+      "mimeTypes": ["model/3ds", "application/x-3ds"],
+      "sidecars": true,
+      "systemPreview": false,
+      "utiOwner": "TAUCAD LIMITED",
+      "utiSource": "Tau fallback registration; no standards-owner UTI is available",
+      "fixture": {
+        "entry": "apps/desktop/macos/fixtures/3ds/rotating-cube.3ds",
+        "files": ["apps/desktop/macos/fixtures/3ds/rotating-cube.3ds"],
+        "expectedGeometry": { "minimumTriangles": 12, "bounds": "finite-nonzero" }
+      }
+    },
+    {
+      "extensions": ["3mf"],
+      "identifier": "com.taucad.3mf",
+      "declaration": "exported",
+      "aliases": ["com.shapr3d.3d-manufacturing.3mf"],
+      "description": "3D Manufacturing Format model",
+      "mimeTypes": ["model/3mf", "application/vnd.ms-package.3dmanufacturing-3dmodel+xml"],
+      "sidecars": false,
+      "systemPreview": false,
+      "utiOwner": "TAUCAD LIMITED",
+      "utiSource": "Tau fallback registration; no standards-owner UTI is available",
+      "fixture": {
+        "entry": "apps/desktop/macos/fixtures/3mf/box.3mf",
+        "files": ["apps/desktop/macos/fixtures/3mf/box.3mf"],
+        "expectedGeometry": { "minimumTriangles": 12, "bounds": "finite-nonzero" }
+      }
+    },
+    {
+      "extensions": ["ac"],
+      "identifier": "com.taucad.ac3d",
+      "declaration": "exported",
+      "description": "AC3D model",
+      "mimeTypes": ["model/vnd.ac3d"],
+      "sidecars": true,
+      "systemPreview": false,
+      "utiOwner": "TAUCAD LIMITED",
+      "utiSource": "Tau fallback registration; no standards-owner UTI is available",
+      "fixture": {
+        "entry": "apps/desktop/macos/fixtures/ac/sphere.ac",
+        "files": ["apps/desktop/macos/fixtures/ac/sphere.ac"],
+        "expectedGeometry": { "minimumTriangles": 1, "bounds": "finite-nonzero" }
+      }
+    },
+    {
+      "extensions": ["amf"],
+      "identifier": "com.taucad.amf",
+      "declaration": "exported",
+      "description": "Additive Manufacturing Format model",
+      "mimeTypes": ["application/x-amf"],
+      "sidecars": false,
+      "systemPreview": false,
+      "utiOwner": "TAUCAD LIMITED",
+      "utiSource": "Tau fallback registration; no standards-owner UTI is available",
+      "fixture": {
+        "entry": "apps/desktop/macos/fixtures/amf/test.amf",
+        "files": ["apps/desktop/macos/fixtures/amf/test.amf"],
+        "expectedGeometry": { "minimumTriangles": 1, "bounds": "finite-nonzero" }
+      }
+    },
+    {
+      "extensions": ["ase"],
+      "identifier": "com.taucad.ase",
+      "declaration": "exported",
+      "description": "3ds Max ASCII scene",
+      "mimeTypes": ["model/vnd.3ds-ase"],
+      "sidecars": true,
+      "systemPreview": false,
+      "utiOwner": "TAUCAD LIMITED",
+      "utiSource": "Tau fallback registration; no standards-owner UTI is available",
+      "fixture": {
+        "entry": "apps/desktop/macos/fixtures/ase/three-cubes.ase",
+        "files": ["apps/desktop/macos/fixtures/ase/three-cubes.ase"],
+        "expectedGeometry": { "minimumTriangles": 1, "bounds": "finite-nonzero" }
+      }
+    },
+    {
+      "extensions": ["bvh"],
+      "identifier": "com.taucad.bvh",
+      "declaration": "exported",
+      "description": "Biovision hierarchy animation",
+      "mimeTypes": ["application/x-bvh"],
+      "sidecars": false,
+      "systemPreview": false,
+      "utiOwner": "TAUCAD LIMITED",
+      "utiSource": "Tau fallback registration; no standards-owner UTI is available",
+      "fixture": {
+        "entry": "apps/desktop/macos/fixtures/bvh/boxing.bvh",
+        "files": ["apps/desktop/macos/fixtures/bvh/boxing.bvh"],
+        "expectedGeometry": { "minimumTriangles": 1, "bounds": "finite-nonzero" }
+      }
+    },
+    {
+      "extensions": ["cob"],
+      "identifier": "com.taucad.truespace-cob",
+      "declaration": "exported",
+      "description": "Caligari trueSpace model",
+      "mimeTypes": ["model/vnd.truespace.cob"],
+      "sidecars": true,
+      "systemPreview": false,
+      "utiOwner": "TAUCAD LIMITED",
+      "utiSource": "Tau fallback registration; no standards-owner UTI is available",
+      "fixture": {
+        "entry": "apps/desktop/macos/fixtures/cob/molecule.cob",
+        "files": ["apps/desktop/macos/fixtures/cob/molecule.cob"],
+        "expectedGeometry": { "minimumTriangles": 1, "bounds": "finite-nonzero" }
+      }
+    },
+    {
+      "extensions": ["dae"],
+      "identifier": "org.khronos.collada.digital-asset-exchange",
+      "declaration": "imported",
+      "description": "COLLADA digital asset",
+      "mimeTypes": ["model/vnd.collada+xml"],
+      "sidecars": true,
+      "systemPreview": true,
+      "utiOwner": "Khronos Group",
+      "utiSource": "Khronos COLLADA specification",
+      "fixture": {
+        "entry": "packages/plugins/assimp/src/fixtures/cube.dae",
+        "files": ["packages/plugins/assimp/src/fixtures/cube.dae"],
+        "expectedGeometry": { "minimumTriangles": 12, "bounds": "finite-nonzero" }
+      }
+    },
+    {
+      "extensions": ["dxf"],
+      "identifier": "com.taucad.dxf",
+      "declaration": "exported",
+      "aliases": ["com.shapr3d.dxf"],
+      "description": "Drawing Exchange Format model",
+      "mimeTypes": ["image/vnd.dxf", "application/dxf"],
+      "sidecars": true,
+      "systemPreview": false,
+      "utiOwner": "TAUCAD LIMITED",
+      "utiSource": "Tau fallback registration; no standards-owner UTI is available",
+      "fixture": {
+        "entry": "apps/desktop/macos/fixtures/dxf/pink-egg.dxf",
+        "files": ["apps/desktop/macos/fixtures/dxf/pink-egg.dxf"],
+        "expectedGeometry": { "minimumTriangles": 1, "bounds": "finite-nonzero" }
+      }
+    },
+    {
+      "extensions": ["fbx"],
+      "identifier": "com.autodesk.mac.fbx",
+      "declaration": "imported",
+      "description": "Autodesk FBX model",
+      "mimeTypes": ["application/vnd.autodesk.fbx"],
+      "sidecars": true,
+      "systemPreview": true,
+      "utiOwner": "Autodesk",
+      "utiSource": "Autodesk FBX application registration",
+      "fixture": {
+        "entry": "packages/plugins/assimp/src/fixtures/cube-ascii.fbx",
+        "files": ["packages/plugins/assimp/src/fixtures/cube-ascii.fbx"],
+        "expectedGeometry": { "minimumTriangles": 12, "bounds": "finite-nonzero" }
+      }
+    },
+    {
+      "extensions": ["ifc"],
+      "identifier": "com.taucad.ifc",
+      "declaration": "exported",
+      "description": "Industry Foundation Classes model",
+      "mimeTypes": ["application/x-step"],
+      "sidecars": false,
+      "systemPreview": false,
+      "utiOwner": "TAUCAD LIMITED",
+      "utiSource": "Tau fallback registration; no standards-owner UTI is available",
+      "fixture": {
+        "entry": "apps/desktop/macos/fixtures/ifc/cube.ifc",
+        "files": ["apps/desktop/macos/fixtures/ifc/cube.ifc"],
+        "expectedGeometry": { "minimumTriangles": 1, "bounds": "finite-nonzero" }
+      }
+    },
+    {
+      "extensions": ["lwo"],
+      "identifier": "com.taucad.lightwave-object",
+      "declaration": "exported",
+      "description": "LightWave object",
+      "mimeTypes": ["model/vnd.lightwave-object"],
+      "sidecars": true,
+      "systemPreview": false,
+      "utiOwner": "TAUCAD LIMITED",
+      "utiSource": "Tau fallback registration; no standards-owner UTI is available",
+      "fixture": {
+        "entry": "apps/desktop/macos/fixtures/lwo/sphere.lwo",
+        "files": ["apps/desktop/macos/fixtures/lwo/sphere.lwo"],
+        "expectedGeometry": { "minimumTriangles": 1, "bounds": "finite-nonzero" }
+      }
+    },
+    {
+      "extensions": ["md2"],
+      "identifier": "com.taucad.quake2-md2",
+      "declaration": "exported",
+      "description": "Quake II model",
+      "mimeTypes": ["model/vnd.idsoftware.md2"],
+      "sidecars": true,
+      "systemPreview": false,
+      "utiOwner": "TAUCAD LIMITED",
+      "utiSource": "Tau fallback registration; no standards-owner UTI is available",
+      "fixture": {
+        "entry": "apps/desktop/macos/fixtures/md2/faerie.md2",
+        "files": ["apps/desktop/macos/fixtures/md2/faerie.md2"],
+        "expectedGeometry": { "minimumTriangles": 1, "bounds": "finite-nonzero" }
+      }
+    },
+    {
+      "extensions": ["md5mesh"],
+      "identifier": "com.taucad.doom3-md5mesh",
+      "declaration": "exported",
+      "description": "Doom 3 mesh",
+      "mimeTypes": ["model/vnd.idsoftware.md5mesh"],
+      "sidecars": true,
+      "systemPreview": false,
+      "utiOwner": "TAUCAD LIMITED",
+      "utiSource": "Tau fallback registration; no standards-owner UTI is available",
+      "fixture": {
+        "entry": "apps/desktop/macos/fixtures/md5mesh/cube.md5mesh",
+        "files": ["apps/desktop/macos/fixtures/md5mesh/cube.md5mesh"],
+        "expectedGeometry": { "minimumTriangles": 1, "bounds": "finite-nonzero" }
+      }
+    },
+    {
+      "extensions": ["mesh.xml"],
+      "identifier": "com.taucad.ogre-mesh-xml",
+      "declaration": "exported",
+      "description": "OGRE XML mesh",
+      "mimeTypes": ["application/vnd.ogre.mesh+xml"],
+      "sidecars": true,
+      "systemPreview": false,
+      "utiOwner": "TAUCAD LIMITED",
+      "utiSource": "Tau fallback registration; no standards-owner UTI is available",
+      "fixture": {
+        "entry": "apps/desktop/macos/fixtures/mesh-xml/Mesh.mesh.xml",
+        "files": [
+          "apps/desktop/macos/fixtures/mesh-xml/Mesh.mesh.xml",
+          "apps/desktop/macos/fixtures/mesh-xml/BlockMat.material",
+          "apps/desktop/macos/fixtures/mesh-xml/Reference.JPG",
+          "apps/desktop/macos/fixtures/mesh-xml/Wrinkles.jpg"
+        ],
+        "expectedGeometry": { "minimumTriangles": 1, "bounds": "finite-nonzero" }
+      }
+    },
+    {
+      "extensions": ["nff"],
+      "identifier": "com.taucad.nff",
+      "declaration": "exported",
+      "description": "Neutral File Format model",
+      "mimeTypes": ["model/vnd.nff"],
+      "sidecars": false,
+      "systemPreview": false,
+      "utiOwner": "TAUCAD LIMITED",
+      "utiSource": "Tau fallback registration; no standards-owner UTI is available",
+      "fixture": {
+        "entry": "apps/desktop/macos/fixtures/nff/hexahedron.nff",
+        "files": ["apps/desktop/macos/fixtures/nff/hexahedron.nff"],
+        "expectedGeometry": { "minimumTriangles": 1, "bounds": "finite-nonzero" }
+      }
+    },
+    {
+      "extensions": ["obj"],
+      "identifier": "public.geometry-definition-format",
+      "declaration": "imported",
+      "description": "Wavefront OBJ model",
+      "mimeTypes": ["model/obj"],
+      "sidecars": true,
+      "systemPreview": true,
+      "utiOwner": "Apple",
+      "utiSource": "Apple Uniform Type Identifiers registry",
+      "fixture": {
+        "entry": "packages/plugins/assimp/src/fixtures/cube.obj",
+        "files": ["packages/plugins/assimp/src/fixtures/cube.obj"],
+        "expectedGeometry": { "minimumTriangles": 12, "bounds": "finite-nonzero" }
+      }
+    },
+    {
+      "extensions": ["off"],
+      "identifier": "com.taucad.off",
+      "declaration": "exported",
+      "description": "Object File Format model",
+      "mimeTypes": ["model/vnd.off"],
+      "sidecars": false,
+      "systemPreview": false,
+      "utiOwner": "TAUCAD LIMITED",
+      "utiSource": "Tau fallback registration; no standards-owner UTI is available",
+      "fixture": {
+        "entry": "packages/plugins/assimp/src/fixtures/cube.off",
+        "files": ["packages/plugins/assimp/src/fixtures/cube.off"],
+        "expectedGeometry": { "minimumTriangles": 12, "bounds": "finite-nonzero" }
+      }
+    },
+    {
+      "extensions": ["ogex"],
+      "identifier": "com.taucad.open-game-engine-exchange",
+      "declaration": "exported",
+      "description": "Open Game Engine Exchange scene",
+      "mimeTypes": ["model/vnd.opengex"],
+      "sidecars": true,
+      "systemPreview": false,
+      "utiOwner": "TAUCAD LIMITED",
+      "utiSource": "Tau fallback registration; no standards-owner UTI is available",
+      "fixture": {
+        "entry": "apps/desktop/macos/fixtures/ogex/Example.ogex",
+        "files": ["apps/desktop/macos/fixtures/ogex/Example.ogex", "apps/desktop/macos/fixtures/ogex/Concrete.tga"],
+        "expectedGeometry": { "minimumTriangles": 1, "bounds": "finite-nonzero" }
+      }
+    },
+    {
+      "extensions": ["ply"],
+      "identifier": "public.polygon-file-format",
+      "declaration": "imported",
+      "description": "Polygon model",
+      "mimeTypes": ["application/vnd.ply"],
+      "sidecars": false,
+      "systemPreview": true,
+      "utiOwner": "Apple",
+      "utiSource": "Apple Uniform Type Identifiers registry",
+      "fixture": {
+        "entry": "packages/plugins/assimp/src/fixtures/cube-ascii.ply",
+        "files": ["packages/plugins/assimp/src/fixtures/cube-ascii.ply"],
+        "expectedGeometry": { "minimumTriangles": 12, "bounds": "finite-nonzero" }
+      }
+    },
+    {
+      "extensions": ["smd"],
+      "identifier": "com.taucad.source-smd",
+      "declaration": "exported",
+      "description": "Valve StudioModel data",
+      "mimeTypes": ["model/vnd.valve.smd"],
+      "sidecars": true,
+      "systemPreview": false,
+      "utiOwner": "TAUCAD LIMITED",
+      "utiSource": "Tau fallback registration; no standards-owner UTI is available",
+      "fixture": {
+        "entry": "apps/desktop/macos/fixtures/smd/triangle.smd",
+        "files": ["apps/desktop/macos/fixtures/smd/triangle.smd"],
+        "expectedGeometry": { "minimumTriangles": 1, "bounds": "finite-nonzero" }
+      }
+    },
+    {
+      "extensions": ["stl"],
+      "identifier": "public.standard-tesselated-geometry-format",
+      "declaration": "imported",
+      "description": "STL model",
+      "mimeTypes": ["model/stl"],
+      "sidecars": false,
+      "systemPreview": true,
+      "utiOwner": "Apple",
+      "utiSource": "Apple Uniform Type Identifiers registry",
+      "fixture": {
+        "entry": "packages/plugins/assimp/src/fixtures/cube-ascii.stl",
+        "files": ["packages/plugins/assimp/src/fixtures/cube-ascii.stl"],
+        "expectedGeometry": { "minimumTriangles": 12, "bounds": "finite-nonzero" }
+      }
+    },
+    {
+      "extensions": ["usda"],
+      "identifier": "com.pixar.universal-scene-description-utf8",
+      "declaration": "imported",
+      "description": "Universal Scene Description text",
+      "mimeTypes": ["model/vnd.usda"],
+      "sidecars": true,
+      "systemPreview": true,
+      "utiOwner": "Pixar",
+      "utiSource": "Pixar Universal Scene Description specification",
+      "fixture": {
+        "entry": "apps/desktop/macos/fixtures/usda/cube.usda",
+        "files": ["apps/desktop/macos/fixtures/usda/cube.usda"],
+        "expectedGeometry": { "minimumTriangles": 12, "bounds": "finite-nonzero" }
+      }
+    },
+    {
+      "extensions": ["usdz"],
+      "identifier": "com.pixar.universal-scene-description-mobile",
+      "declaration": "imported",
+      "description": "Universal Scene Description package",
+      "mimeTypes": ["model/vnd.usdz+zip"],
+      "sidecars": false,
+      "systemPreview": true,
+      "utiOwner": "Pixar",
+      "utiSource": "Pixar Universal Scene Description specification",
+      "fixture": {
+        "entry": "apps/desktop/macos/fixtures/usdz/cube.usdz",
+        "files": ["apps/desktop/macos/fixtures/usdz/cube.usdz"],
+        "expectedGeometry": { "minimumTriangles": 12, "bounds": "finite-nonzero" }
+      }
+    },
+    {
+      "extensions": ["wrl"],
+      "identifier": "com.taucad.vrml",
+      "declaration": "exported",
+      "aliases": ["com.shapr3d.vrml.wrl"],
+      "description": "VRML world",
+      "mimeTypes": ["model/vrml", "x-world/x-vrml"],
+      "sidecars": true,
+      "systemPreview": false,
+      "utiOwner": "TAUCAD LIMITED",
+      "utiSource": "Tau fallback registration; no standards-owner UTI is available",
+      "fixture": {
+        "entry": "apps/desktop/macos/fixtures/wrl/hello.wrl",
+        "files": ["apps/desktop/macos/fixtures/wrl/hello.wrl"],
+        "expectedGeometry": { "minimumTriangles": 1, "bounds": "finite-nonzero" }
+      }
+    },
+    {
+      "extensions": ["x"],
+      "identifier": "com.taucad.directx-model",
+      "declaration": "exported",
+      "description": "DirectX model",
+      "mimeTypes": ["model/vnd.directx"],
+      "sidecars": true,
+      "systemPreview": false,
+      "utiOwner": "TAUCAD LIMITED",
+      "utiSource": "Tau fallback registration; no standards-owner UTI is available",
+      "fixture": {
+        "entry": "apps/desktop/macos/fixtures/x/cube.x",
+        "files": ["apps/desktop/macos/fixtures/x/cube.x"],
+        "expectedGeometry": { "minimumTriangles": 12, "bounds": "finite-nonzero" }
+      }
+    },
+    {
+      "extensions": ["x3d", "x3db", "x3dv"],
+      "identifier": "com.taucad.x3d",
+      "declaration": "exported",
+      "aliases": ["com.shapr3d.x3d.x3d", "com.shapr3d.x3d.x3db", "com.shapr3d.x3d.x3dv"],
+      "description": "Extensible 3D model",
+      "mimeTypes": ["model/x3d+xml", "model/x3d+binary", "model/x3d+vrml"],
+      "sidecars": true,
+      "systemPreview": false,
+      "utiOwner": "TAUCAD LIMITED",
+      "utiSource": "Tau fallback registration; no standards-owner UTI is available",
+      "fixture": {
+        "entry": "apps/desktop/macos/fixtures/x3d/HelloWorld.x3d",
+        "files": ["apps/desktop/macos/fixtures/x3d/HelloWorld.x3d", "apps/desktop/macos/fixtures/x3d/earth-topo.png"],
+        "expectedGeometry": { "minimumTriangles": 1, "bounds": "finite-nonzero" }
+      }
+    },
+    {
+      "extensions": ["xgl"],
+      "identifier": "com.taucad.xgl",
+      "declaration": "exported",
+      "description": "XGL model",
+      "mimeTypes": ["model/vnd.xgl"],
+      "sidecars": true,
+      "systemPreview": false,
+      "utiOwner": "TAUCAD LIMITED",
+      "utiSource": "Tau fallback registration; no standards-owner UTI is available",
+      "fixture": {
+        "entry": "apps/desktop/macos/fixtures/xgl/sample.xgl",
+        "files": ["apps/desktop/macos/fixtures/xgl/sample.xgl"],
+        "expectedGeometry": { "minimumTriangles": 1, "bounds": "finite-nonzero" }
+      }
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "./out-tsc/spec",
+    "types": ["node", "electron", "electron-vite/node", "vitest/importMeta", "vitest"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["DOM", "DOM.Iterable", "ES2024"],
+    "target": "ES2024",
+    "paths": {
+      "#*": ["./src/*"]
+    }
+  },
+  "include": ["vitest.config.ts", "src/**/*.ts", "src/**/*.d.ts"]
+}

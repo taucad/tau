@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <path
+      id="tile-squircle"
+      d="M 364 100 H 660 C 846.91 100 924 177.09 924 364 V 660 C 924 846.91 846.91 924 660 924 H 364 C 177.09 924 100 846.91 100 660 V 364 C 100 177.09 177.09 100 364 100 Z"
+    />
+    <clipPath id="tile-clip">
+      <use href="#tile-squircle" />
+    </clipPath>
+    <filter id="tile-shadow" x="-15%" y="-15%" width="130%" height="140%">
+      <feDropShadow dx="0" dy="12" stdDeviation="8" flood-color="#000000" flood-opacity="0.34" />
+    </filter>
+    <filter id="mark-shadow" x="-10%" y="-10%" width="120%" height="125%">
+      <feDropShadow dx="0" dy="8" stdDeviation="8" flood-color="#004d40" flood-opacity="0.2" />
+    </filter>
+  </defs>
+  <g filter="url(#tile-shadow)">
+    <g clip-path="url(#tile-clip)">
+      <use href="#tile-squircle" fill="#aab8b4" />
+      <use
+        href="#tile-squircle"
+        transform="translate(106 96) scale(0.9854368932 0.9805825243) translate(-100 -100)"
+        fill="#f5f7f6"
+        stroke="#dce4e1"
+        stroke-width="8"
+        vector-effect="non-scaling-stroke"
+      />
+      <use
+        href="#tile-squircle"
+        transform="translate(118 108) scale(0.9563106796 0.9514563107) translate(-100 -100)"
+        fill="none"
+        stroke="#ffffff"
+        stroke-opacity="0.78"
+        stroke-width="6"
+        vector-effect="non-scaling-stroke"
+      />
+    </g>
+  </g>
+  <path
+    fill="#00987c"
+    filter="url(#mark-shadow)"
+    transform="translate(236 236) scale(1.078125)"
+    d="M 512 59.906 L 318.06705 109.97908 A 60 60 0 0 0 273.067 168.07384 L 273.067 509.378 L 279.2651 507.77787 A 60 60 0 0 0 324.267 449.68263 L 324.267 179.85117 A 24 24 0 0 1 342.26682 156.61332 L 467.00045 124.40621 A 60 60 0 0 0 512 66.31157 L 512 59.906 Z M 250.00027 36.32395 A 24 24 0 0 0 261.99973 36.32395 L 377.5329 6.49482 A 60 60 0 0 1 407.533 6.49519 L 494.933 29.063 L 270.99972 86.88117 A 60 60 0 0 1 241.00028 86.88117 L 17.067 29.063 L 104.467 6.49519 A 60 60 0 0 1 134.4671 6.49482 L 250.00027 36.32395 Z M 0 59.906 L 193.93295 109.97908 A 60 60 0 0 1 238.933 168.07384 L 238.933 509.378 L 232.7349 507.77787 A 60 60 0 0 1 187.733 449.68263 L 187.733 179.85165 A 24 24 0 0 0 169.7326 156.61365 L 45.001 124.41038 A 60 60 0 0 1 0 66.31537 L 0 59.906 Z"
+  />
+</svg>

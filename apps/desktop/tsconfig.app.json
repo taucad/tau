@@ -1,0 +1,24 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.d.ts",
+    "macos/quick-look-formats.json",
+    "scripts/**/*.mts",
+    "electron.vite.config.ts",
+    "package.json"
+  ],
+  "exclude": ["src/**/*.test.ts", "src/**/*.spec.ts"],
+  "compilerOptions": {
+    "outDir": "./out-tsc/app",
+    "lib": ["DOM", "DOM.Iterable", "ES2024"],
+    "types": ["node", "electron", "electron-vite/node", "vite/client"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "target": "ES2024",
+    "paths": {
+      "#*": ["./src/*"],
+      "#macos/*": ["./macos/*"]
+    }
+  }
+}

@@ -36,7 +36,7 @@ Score relevance, source authority, evidence quality, and accessibility/rights in
 
 Sort descending by `H`, then canonical URL lexicographically for a deterministic tie. Select in score order while allowing at most four records whose only provenance is the same collector; merged multi-collector records do not consume that single-collector cap. Stop at eight.
 
-Rights affect ingestion separately from reporting. Unknown or restricted candidates may remain visible leads with an accessibility score, but can never pass the full-text persistence gate. `permitted` requires an official evidence URL and one of `CC0-1.0`, `CC-BY-4.0`, or `CC-BY-SA-4.0`.
+Rights affect ingestion separately from reporting. Unknown or restricted candidates may remain visible leads with an accessibility score, but can never pass the full-text persistence gate. Follow Create Reference's canonical gate: `permitted` needs either official evidence for `CC0-1.0`, `CC-BY-4.0`, or `CC-BY-SA-4.0`, or explicit user authorization covering the selected public artifacts. Record the basis in `rights.evidence`; include the official license/evidence URL when applicable. Do not invent a license for user-authorized ingestion or infer public redistribution permission. Mere interest in a subject or a request to search does not authorize full-text persistence.
 
 ## Handoff
 

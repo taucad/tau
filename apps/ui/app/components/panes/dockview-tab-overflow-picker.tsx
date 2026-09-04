@@ -60,7 +60,6 @@ const useTabsOverflow = ({
   useEffect(() => {
     const tabs = group.element.querySelector<HTMLElement>('.dv-tabs-container');
     if (!tabs) {
-      setIsOverflowing(false);
       return;
     }
 

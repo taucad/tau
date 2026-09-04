@@ -10,6 +10,7 @@ import type { FeatureFlags } from '#flags/flag.constants.js';
 
 const mockState = vi.hoisted(() => ({
   flags: undefined as FeatureFlags | undefined,
+  open: true,
 }));
 
 vi.mock('#flags/use-feature.js', () => ({
@@ -17,7 +18,7 @@ vi.mock('#flags/use-feature.js', () => ({
 }));
 
 vi.mock('#hooks/use-cookie.js', () => ({
-  useCookie: <T,>(_name: string, defaultValue: T) => [defaultValue, vi.fn()] as const,
+  useCookie: () => [mockState.open, vi.fn()] as const,
 }));
 
 vi.mock('@taucad/ui/hooks/use-mobile', () => ({
@@ -40,12 +41,8 @@ vi.mock('#components/nav/nav-user.js', () => ({
   NavUser: () => <button type='button'>Account</button>,
 }));
 
-vi.mock('#components/release-badge.js', () => ({
-  ReleaseBadge: () => <span>Alpha</span>,
-}));
-
 vi.mock('#components/icons/tau-wordmark.js', () => ({
-  TauWordmark: ({ className }: { readonly className?: string }) => <span className={className}>Tau</span>,
+  TauWordmark: ({ className }: { readonly className?: string }) => <svg aria-hidden className={className} />,
 }));
 
 function renderSidebar(): ReturnType<typeof render> {
@@ -69,6 +66,12 @@ function getNavLink(name: string): HTMLElement | undefined {
 describe('AppSidebar', () => {
   beforeEach(() => {
     mockState.flags = featureFlagDefaults;
+    mockState.open = true;
+    vi.unstubAllEnvs();
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   it('should hide the Plugins nav item when the Plugins Store flag is disabled', () => {

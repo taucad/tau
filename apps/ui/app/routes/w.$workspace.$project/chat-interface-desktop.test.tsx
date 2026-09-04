@@ -6,6 +6,7 @@ import type * as ProjectWorkspaceContext from '#routes/w.$workspace.$project/pro
 
 const send = vi.fn();
 const setWorkbenchOpen = vi.hoisted(() => vi.fn());
+const sidebar = vi.hoisted(() => ({ open: true }));
 const desktopLayout = {
   chatOpen: true,
   workbenchOpen: true,
@@ -27,7 +28,9 @@ vi.mock('#routes/w.$workspace.$project/project-workspace-context.js', async (imp
   useProjectWorkspace: () => ({ setChatOpen: vi.fn(), setWorkbenchOpen }),
 }));
 vi.mock('#routes/w.$workspace.$project/chat-history.js', () => ({
-  ChatHistory: () => <div data-testid='chat-lane' />,
+  ChatHistory: ({ className }: { readonly className?: string }) => (
+    <div className={className} data-testid='chat-lane' />
+  ),
 }));
 vi.mock('#routes/w.$workspace.$project/focused-chat-gate.js', () => ({
   ChatHistoryGate: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
@@ -42,9 +45,7 @@ vi.mock('#routes/w.$workspace.$project/chat-workbench-dockview.js', () => ({
 vi.mock('#routes/w.$workspace.$project/project-unavailable-overlay.js', () => ({
   ProjectUnavailableOverlay: () => null,
 }));
-vi.mock('#components/layout/sidebar-offset.js', () => ({
-  SidebarOffset: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
-}));
+vi.mock('#components/ui/sidebar.js', () => ({ useSidebar: () => sidebar }));
 vi.mock('#components/chat/chat-context-insertion.js', () => ({
   ChatContextInsertionProvider: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
 }));
@@ -98,10 +99,10 @@ const renderDesktop = () =>
 const resizeTo = (width: number): void => {
   act(() => {
     const entry: ResizeObserverEntry = {
-      borderBoxSize: [],
-      contentBoxSize: [],
+      borderBoxSize: [{ inlineSize: width, blockSize: 800 }],
+      contentBoxSize: [{ inlineSize: width, blockSize: 800 }],
       contentRect: DOMRect.fromRect({ width, height: 800 }),
-      devicePixelContentBoxSize: [],
+      devicePixelContentBoxSize: [{ inlineSize: width, blockSize: 800 }],
       target: document.body,
     };
     for (const callback of resizeCallbacks) {
@@ -112,9 +113,11 @@ const resizeTo = (width: number): void => {
 
 describe('ChatInterfaceDesktop', () => {
   beforeEach(() => {
+    resizeCallbacks.clear();
     desktopLayout.chatOpen = true;
     desktopLayout.workbenchOpen = true;
     desktopLayout.compactAuxiliary = 'chat';
+    sidebar.open = true;
     vi.clearAllMocks();
     vi.stubGlobal('ResizeObserver', ResizeObserverMock);
   });
@@ -175,12 +178,7 @@ describe('ChatInterfaceDesktop', () => {
     const toggle = await screen.findByRole('button', { name: 'Toggle Workbench lane' });
 
     expect(toggle).toHaveAttribute('aria-pressed', 'true');
-    expect(toggle).toHaveClass(
-      '!size-7',
-      'rounded-sm',
-      'hover:!bg-muted-foreground/15',
-      'aria-pressed:bg-muted-foreground/15',
-    );
+    expect(toggle).toHaveClass('!size-7', 'rounded-sm', 'hover:!bg-accent', 'aria-pressed:bg-accent');
     expect(toggle.parentElement).toHaveClass('absolute', 'top-1', 'right-1', 'z-10');
     expect(document.querySelector('[data-project-workspace]')).toHaveClass('relative');
 

@@ -16,11 +16,13 @@ import {
   useProjectWorkspace,
 } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { panelMinSizeChat, panelMinSizeViewer, panelMinSizeWorkbench } from '#constants/editor.constants.js';
+import { cn } from '@taucad/ui/utils/cn';
 
 export const compactWorkspaceWidth = 1120;
 
 export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
   const { editorRef } = useProject();
+  const { open: sidebarOpen } = useSidebar();
   const { setChatOpen, setWorkbenchOpen } = useProjectWorkspace();
   const containerRef = useRef<HTMLDivElement>(null);
   const { width } = useResizeObserver({ ref: containerRef });
@@ -33,7 +35,9 @@ export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
   const workbenchVisible = desktopLayout.workbenchOpen && (!isCompact || compactAuxiliary === 'workbench');
 
   useEffect(() => {
-    setIsClient(true);
+    queueMicrotask(() => {
+      setIsClient(true);
+    });
   }, []);
 
   const persistWidths = useCallback(

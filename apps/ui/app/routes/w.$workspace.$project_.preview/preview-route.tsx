@@ -31,20 +31,19 @@ export function DynamicPreviewProvider({
   readonly projectId: string;
 }): React.JSX.Element {
   const projectManager = useProjectManager();
-  const [project, setProject] = useState<ProjectManifest | undefined>();
-  const [isLoaded, setIsLoaded] = useState(false);
+  const [loadedProject, setLoadedProject] = useState<{
+    readonly projectId: string;
+    readonly project: ProjectManifest | undefined;
+  }>();
 
   useEffect(() => {
     let cancelled = false;
-    setIsLoaded(false);
-
     async function loadProjectMetadata(): Promise<void> {
       const loaded = await projectManager.getProject(projectId);
       if (cancelled) {
         return;
       }
-      setProject(loaded);
-      setIsLoaded(true);
+      setLoadedProject({ projectId, project: loaded });
     }
 
     void loadProjectMetadata();
@@ -54,13 +53,20 @@ export function DynamicPreviewProvider({
     };
   }, [projectId, projectManager]);
 
+  const isLoaded = loadedProject?.projectId === projectId;
+  const project = isLoaded ? loadedProject.project : undefined;
+
   const updateName = useCallback(
     (name: string) => {
       if (!project) {
         return;
       }
 
-      setProject((previous) => (previous ? { ...previous, name } : previous));
+      setLoadedProject((previous) =>
+        previous?.projectId === projectId && previous.project
+          ? { projectId, project: { ...previous.project, name } }
+          : previous,
+      );
       void projectManager.updateProject(project.id, { ...project, name });
     },
     [project, projectManager],
@@ -72,7 +78,11 @@ export function DynamicPreviewProvider({
         return;
       }
 
-      setProject((previous) => (previous ? { ...previous, description } : previous));
+      setLoadedProject((previous) =>
+        previous?.projectId === projectId && previous.project
+          ? { projectId, project: { ...previous.project, description } }
+          : previous,
+      );
       void projectManager.updateProject(project.id, { ...project, description });
     },
     [project, projectManager],

@@ -69,6 +69,7 @@ function RouteProvider({ children }: { readonly children?: React.ReactNode }): R
     </ProjectRouteProviders>
   );
 }
+/* oxlint-enable react/refs */
 
 export const handle: Handle = {
   ...projectRouteHandle,

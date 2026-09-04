@@ -21,7 +21,6 @@ export function useTypedMatches<Selected>(
       commandPalette: [],
       enablePageWrapper: [],
       enablePageHeader: [],
-      enableFloatingSidebar: [],
       enableOverflowY: [],
       providers: [],
       enablePageFooter: [],

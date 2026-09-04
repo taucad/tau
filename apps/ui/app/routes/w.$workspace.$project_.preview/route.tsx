@@ -1,6 +1,6 @@
 /** `/w/{workspaceSlug}/{projectSlug}/preview` — preview for an owned project. */
 import { useParams } from 'react-router';
-import { useRef } from 'react';
+import { useState } from 'react';
 import type { Handle } from '#types/matches.types.js';
 import { Loader } from '#components/ui/loader.js';
 import { ProjectNotFound } from '#routes/w.$workspace.$project/project-not-found.js';
@@ -14,11 +14,11 @@ import { projectPreviewUrl } from '#utils/project-url.utils.js';
 function RouteProvider({ children }: { readonly children?: React.ReactNode }): React.JSX.Element {
   const { workspace = '', project = '' } = useParams();
   const resolution = useProjectIdBySlugs(workspace, project);
-  const openProjectIdRef = useRef<string>(undefined);
-  if (resolution.status === 'resolved') {
-    openProjectIdRef.current = resolution.value;
+  const [openProjectId, setOpenProjectId] = useState<string>();
+  if (resolution.status === 'resolved' && resolution.value !== openProjectId) {
+    setOpenProjectId(resolution.value);
   }
-  const projectId = resolution.status === 'resolved' ? resolution.value : openProjectIdRef.current;
+  const projectId = resolution.status === 'resolved' ? resolution.value : openProjectId;
   useCanonicalProjectUrlCorrection(projectId, '/preview');
 
   if (projectId === undefined) {

@@ -3,6 +3,7 @@ import * as DesignSystemSidebar from '@taucad/ui/components/sidebar';
 import { Button } from '@taucad/ui/components/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { cn } from '@taucad/ui/utils/cn';
+import { PanelLeft } from 'lucide-react';
 import { useLocation } from 'react-router';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
 import { cookieName } from '#constants/cookie.constants.js';
@@ -94,10 +95,15 @@ const SidebarProvider = ({
 const SidebarTrigger = ({
   className,
   onClick,
+  onKeyDown,
+  onSidebarResize,
   children,
   ...properties
-}: React.ComponentProps<typeof Button>): React.JSX.Element => {
-  const { toggleSidebar, open } = useSidebar();
+}: React.ComponentProps<typeof Button> & {
+  readonly onSidebarResize?: (direction: 'narrower' | 'wider') => void;
+}): React.JSX.Element => {
+  const { isMobile, open, openMobile, toggleSidebar } = useSidebar();
+  const isOpen = isMobile ? openMobile : open;
 
   return (
     <Tooltip>
@@ -105,25 +111,50 @@ const SidebarTrigger = ({
         <Button
           data-sidebar='trigger'
           data-slot='sidebar-trigger'
-          data-open={open}
+          data-open={isOpen}
+          type='button'
           variant='ghost'
-          size='icon'
-          className={cn('size-7', open ? 'cursor-w-resize' : 'cursor-e-resize', className)}
+          size='icon-sm'
+          className={cn(
+            'size-7 shrink-0 rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground aria-expanded:bg-accent aria-expanded:text-foreground',
+            className,
+          )}
+          aria-controls={isMobile ? undefined : 'app-sidebar'}
+          aria-expanded={isOpen}
+          aria-keyshortcuts={onSidebarResize ? 'ArrowLeft ArrowRight' : undefined}
           onClick={(event) => {
             onClick?.(event);
             toggleSidebar();
           }}
+          onKeyDown={(event) => {
+            onKeyDown?.(event);
+            if (event.defaultPrevented || !isOpen || !onSidebarResize) {
+              return;
+            }
+
+            if (event.key === 'ArrowLeft') {
+              event.preventDefault();
+              onSidebarResize('narrower');
+              return;
+            }
+
+            if (event.key === 'ArrowRight') {
+              event.preventDefault();
+              onSidebarResize('wider');
+            }
+          }}
           {...properties}
         >
-          {children}
+          {children ?? <PanelLeft aria-hidden data-slot='sidebar-panel-icon' className='size-4' />}
           <span className='sr-only'>Toggle Sidebar</span>
         </Button>
       </TooltipTrigger>
       <TooltipContent>
-        {open ? 'Close Sidebar' : 'Open Sidebar'}{' '}
+        Toggle Sidebar{' '}
         <KeyShortcut className='ml-1' variant='tooltip'>
           {formatKeyCombination(sidebarToggleKeyCombo)}
         </KeyShortcut>
+        {onSidebarResize && !isMobile ? <span className='ml-1 text-muted-foreground'>· ←/→ Resize</span> : null}
       </TooltipContent>
     </Tooltip>
   );

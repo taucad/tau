@@ -1,4 +1,4 @@
-import { createContext, memo, useCallback, useContext, useEffect, useId, useRef, useState } from 'react';
+import { createContext, Fragment, memo, useCallback, useContext, useEffect, useId, useRef, useState } from 'react';
 import type { ComponentProps, ReactNode } from 'react';
 import { useMonaco } from '@monaco-editor/react';
 import { useSelector } from '@xstate/react';
@@ -94,9 +94,12 @@ import { KeyShortcut } from '#components/ui/key-shortcut.js';
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@taucad/ui/components/dropdown-menu';
+import { Separator } from '@taucad/ui/components/separator';
 import { formatKeyCombination } from '#utils/keys.utils.js';
 import type {
   FileViewerPaneContent,
@@ -141,7 +144,7 @@ export type FilePaneState = {
   viewId?: string;
 };
 
-type EditorPanelParameters = FilePaneState & {
+export type EditorPanelParameters = FilePaneState & {
   filePath: string;
   paneId?: string;
   readOnly?: boolean;
@@ -290,80 +293,114 @@ type WorkbenchSurface = {
   readonly panel?: { readonly id: string; readonly component: string; readonly title: string };
 };
 
-export const workbenchSurfaces: readonly WorkbenchSurface[] = [
+type WorkbenchSurfaceGroup = {
+  readonly id: 'design' | 'activity' | 'project' | 'diagnostics';
+  readonly label: string;
+  readonly surfaces: readonly WorkbenchSurface[];
+};
+
+const workbenchSurfaceGroups: readonly WorkbenchSurfaceGroup[] = [
   {
-    id: 'parameters',
-    label: 'Parameters',
-    icon: SlidersHorizontal,
-    shortcut: projectWorkspaceKeyCombinations.parameters,
-    panel: { id: 'workbench:parameters', component: 'parameters', title: 'Parameters' },
+    id: 'design',
+    label: 'Design',
+    surfaces: [
+      {
+        id: 'parameters',
+        label: 'Parameters',
+        icon: SlidersHorizontal,
+        shortcut: projectWorkspaceKeyCombinations.parameters,
+        panel: { id: 'workbench:parameters', component: 'parameters', title: 'Parameters' },
+      },
+      {
+        id: 'model',
+        label: 'Model',
+        icon: Box,
+        shortcut: projectWorkspaceKeyCombinations.model,
+        panel: { id: 'workbench:model', component: 'model', title: 'Model' },
+      },
+    ],
   },
   {
-    id: 'model',
-    label: 'Model',
-    icon: Box,
-    shortcut: projectWorkspaceKeyCombinations.model,
-    panel: { id: 'workbench:model', component: 'model', title: 'Model' },
+    id: 'activity',
+    label: 'Activity',
+    surfaces: [
+      {
+        id: 'revisions',
+        label: 'Revisions',
+        icon: History,
+        panel: { id: 'workbench:revisions', component: 'revisions', title: 'Revisions' },
+      },
+      {
+        id: 'agents',
+        label: 'Agents',
+        icon: Bot,
+        panel: { id: 'workbench:agents', component: 'agents', title: 'Agents' },
+      },
+      {
+        id: 'jobs',
+        label: 'Jobs',
+        icon: BriefcaseBusiness,
+        panel: { id: 'workbench:jobs', component: 'jobs', title: 'Jobs' },
+      },
+    ],
   },
   {
-    id: 'revisions',
-    label: 'Revisions',
-    icon: History,
-    panel: { id: 'workbench:revisions', component: 'revisions', title: 'Revisions' },
+    id: 'project',
+    label: 'Project',
+    surfaces: [
+      {
+        id: 'export',
+        label: 'Export',
+        icon: Download,
+        shortcut: projectWorkspaceKeyCombinations.export,
+        panel: { id: 'workbench:export', component: 'export', title: 'Export' },
+      },
+      {
+        id: 'share',
+        label: 'Share',
+        icon: Share2,
+        panel: { id: 'workbench:share', component: 'share', title: 'Share' },
+      },
+      {
+        id: 'details',
+        label: 'Details',
+        icon: Info,
+        shortcut: projectWorkspaceKeyCombinations.details,
+        panel: { id: 'workbench:details', component: 'details', title: 'Details' },
+      },
+      {
+        id: 'files',
+        label: 'Files',
+        icon: FolderOpen,
+        shortcut: projectWorkspaceKeyCombinations.files,
+      },
+    ],
   },
   {
-    id: 'agents',
-    label: 'Agents',
-    icon: Bot,
-    panel: { id: 'workbench:agents', component: 'agents', title: 'Agents' },
-  },
-  {
-    id: 'jobs',
-    label: 'Jobs',
-    icon: BriefcaseBusiness,
-    panel: { id: 'workbench:jobs', component: 'jobs', title: 'Jobs' },
-  },
-  {
-    id: 'export',
-    label: 'Export',
-    icon: Download,
-    shortcut: projectWorkspaceKeyCombinations.export,
-    panel: { id: 'workbench:export', component: 'export', title: 'Export' },
-  },
-  {
-    id: 'share',
-    label: 'Share',
-    icon: Share2,
-    panel: { id: 'workbench:share', component: 'share', title: 'Share' },
-  },
-  {
-    id: 'details',
-    label: 'Details',
-    icon: Info,
-    shortcut: projectWorkspaceKeyCombinations.details,
-    panel: { id: 'workbench:details', component: 'details', title: 'Details' },
-  },
-  {
-    id: 'files',
-    label: 'Files',
-    icon: FolderOpen,
-    shortcut: projectWorkspaceKeyCombinations.files,
-  },
-  {
-    id: 'kernel',
-    label: 'Telemetry',
-    icon: Activity,
-    debugOnly: true,
-    panel: { id: 'workbench:kernel', component: 'kernel', title: 'Telemetry' },
-  },
-  {
-    id: 'console',
-    label: 'Console',
-    icon: Terminal,
-    debugOnly: true,
-    panel: { id: 'workbench:console', component: 'console', title: 'Console' },
+    id: 'diagnostics',
+    label: 'Diagnostics',
+    surfaces: [
+      {
+        id: 'kernel',
+        label: 'Telemetry',
+        icon: Activity,
+        debugOnly: true,
+        panel: { id: 'workbench:kernel', component: 'kernel', title: 'Telemetry' },
+      },
+      {
+        id: 'console',
+        label: 'Console',
+        icon: Terminal,
+        debugOnly: true,
+        panel: { id: 'workbench:console', component: 'console', title: 'Console' },
+      },
+    ],
   },
 ];
+
+export const workbenchSurfaces: readonly WorkbenchSurface[] = workbenchSurfaceGroups.flatMap(
+  ({ surfaces }) => surfaces,
+);
 
 const getWorkbenchSurface = (id: WorkbenchPanelId): WorkbenchSurface =>
   workbenchSurfaces.find((surface) => surface.id === id)!;
@@ -373,13 +410,16 @@ const sharedWorkbenchSurfaceIds = new Set<WorkbenchPanelId>(['parameters', 'mode
 export const isWorkbenchSurfaceAllowed = (id: WorkbenchPanelId, profile: WorkbenchProfile): boolean =>
   profile === 'editor' || sharedWorkbenchSurfaceIds.has(id);
 
-const visibleWorkbenchSurfaces = (
+const visibleWorkbenchSurfaceGroups = (
   isTauDebugEnabled: boolean,
   profile: WorkbenchProfile = 'editor',
-): readonly WorkbenchSurface[] =>
-  workbenchSurfaces.filter(
-    (surface) => isWorkbenchSurfaceAllowed(surface.id, profile) && (!surface.debugOnly || isTauDebugEnabled),
-  );
+): readonly WorkbenchSurfaceGroup[] =>
+  workbenchSurfaceGroups.flatMap((group) => {
+    const surfaces = group.surfaces.filter(
+      (surface) => isWorkbenchSurfaceAllowed(surface.id, profile) && (!surface.debugOnly || isTauDebugEnabled),
+    );
+    return surfaces.length === 0 ? [] : [{ ...group, surfaces }];
+  });
 
 export function createWorkbenchNewTab({
   api,
@@ -485,27 +525,38 @@ function WorkbenchSurfaceSelector({
 }): React.JSX.Element {
   const isTauDebugEnabled = useFeature('tauDebug');
   const profile = useContext(WorkbenchProfileContext);
+  const groups = visibleWorkbenchSurfaceGroups(isTauDebugEnabled, profile);
 
   return (
     <div className='size-full scroll-shadows-y overflow-y-auto px-4 [--scroll-fade-end:transparent] [--scroll-fade-size:28px]'>
       <div className='mx-auto flex w-full max-w-lg flex-col gap-2 py-6'>
-        {visibleWorkbenchSurfaces(isTauDebugEnabled, profile).map((surface) => {
-          const Icon = surface.icon;
-          return (
-            <DockviewEmptyAction
-              key={surface.id}
-              onClick={() => {
-                onSelect(surface);
-              }}
-            >
-              <Icon aria-hidden className='size-3.5 shrink-0' />
-              <span>{surface.label}</span>
-              <WorkbenchSurfaceShortcut surface={surface} />
-            </DockviewEmptyAction>
-          );
-        })}
+        {groups.map((group, index) => (
+          <Fragment key={group.id}>
+            {index === 0 ? null : <Separator decorative={false} />}
+            <div role='group' aria-label={group.label} className='flex flex-col gap-2'>
+              {group.surfaces.map((surface) => {
+                const Icon = surface.icon;
+                return (
+                  <DockviewEmptyAction
+                    key={surface.id}
+                    onClick={() => {
+                      onSelect(surface);
+                    }}
+                  >
+                    <Icon aria-hidden className='size-3.5 shrink-0' />
+                    <span>{surface.label}</span>
+                    <WorkbenchSurfaceShortcut surface={surface} />
+                  </DockviewEmptyAction>
+                );
+              })}
+            </div>
+          </Fragment>
+        ))}
         {terminal ? (
-          <DockviewEmptyCloseAction onClick={terminal.onSelect}>{terminal.label}</DockviewEmptyCloseAction>
+          <>
+            <Separator decorative={false} />
+            <DockviewEmptyCloseAction onClick={terminal.onSelect}>{terminal.label}</DockviewEmptyCloseAction>
+          </>
         ) : null}
       </div>
     </div>
@@ -591,6 +642,7 @@ export function WorkbenchPlaceholderPanel(
 export function WorkbenchLeftActions(properties: IDockviewHeaderActionsProps): React.JSX.Element {
   const isTauDebugEnabled = useFeature('tauDebug');
   const profile = useContext(WorkbenchProfileContext);
+  const groups = visibleWorkbenchSurfaceGroups(isTauDebugEnabled, profile);
 
   return (
     <div className='flex h-full items-center gap-1'>
@@ -601,25 +653,32 @@ export function WorkbenchLeftActions(properties: IDockviewHeaderActionsProps): R
           </DockviewPaneAction>
         </DropdownMenuTrigger>
         <DropdownMenuContent align='start' side='bottom' sideOffset={4} className='w-64'>
-          {visibleWorkbenchSurfaces(isTauDebugEnabled, profile).map((surface) => {
-            const Icon = surface.icon;
-            return (
-              <DropdownMenuItem
-                key={surface.id}
-                onSelect={() => {
-                  if (surface.id === 'files') {
-                    openWorkbenchFiles({ api: properties.containerApi, group: properties.group });
-                    return;
-                  }
-                  openWorkbenchUtility(properties.containerApi, surface.id, properties.group);
-                }}
-              >
-                <Icon aria-hidden />
-                <span>{surface.label}</span>
-                <WorkbenchSurfaceShortcut surface={surface} />
-              </DropdownMenuItem>
-            );
-          })}
+          {groups.map((group, index) => (
+            <Fragment key={group.id}>
+              {index === 0 ? null : <DropdownMenuSeparator />}
+              <DropdownMenuGroup aria-label={group.label}>
+                {group.surfaces.map((surface) => {
+                  const Icon = surface.icon;
+                  return (
+                    <DropdownMenuItem
+                      key={surface.id}
+                      onSelect={() => {
+                        if (surface.id === 'files') {
+                          openWorkbenchFiles({ api: properties.containerApi, group: properties.group });
+                          return;
+                        }
+                        openWorkbenchUtility(properties.containerApi, surface.id, properties.group);
+                      }}
+                    >
+                      <Icon aria-hidden />
+                      <span>{surface.label}</span>
+                      <WorkbenchSurfaceShortcut surface={surface} />
+                    </DropdownMenuItem>
+                  );
+                })}
+              </DropdownMenuGroup>
+            </Fragment>
+          ))}
         </DropdownMenuContent>
       </DropdownMenu>
       <DockviewSplitAction
@@ -933,7 +992,9 @@ function FileWorkbenchPane({
   const filesAction = paneState.filesOpen ? `Hide files for ${title}` : `Show files for ${title}`;
 
   useEffect(() => {
-    setFilesWidth(paneState.filesWidth);
+    queueMicrotask(() => {
+      setFilesWidth(paneState.filesWidth);
+    });
   }, [paneState.filesWidth]);
 
   const actions = (
@@ -1280,12 +1341,30 @@ export const FileEditor = memo(function ({
     </FileWorkbenchPane>
   );
 
-  if (resolvedViewer && viewerRequest) {
-    return resolvedViewer.render({ ...viewerRequest, renderPane });
+  if (result.kind === 'binary' || result.kind === 'text') {
+    return (
+      <RoutedFileViewer
+        viewer={resolvedViewer as ResolvedFileViewer}
+        request={viewerRequest as Omit<FileViewerRenderRequest, 'renderPane'>}
+        renderPane={renderPane}
+      />
+    );
   }
 
   return renderPane({ body });
 });
+
+function RoutedFileViewer({
+  viewer,
+  request,
+  renderPane,
+}: {
+  readonly viewer: ResolvedFileViewer;
+  readonly request: Omit<FileViewerRenderRequest, 'renderPane'>;
+  readonly renderPane: FileViewerRenderRequest['renderPane'];
+}): ReactNode {
+  return viewer.render({ ...request, renderPane });
+}
 
 const clampFilesWidth = (width: number): number => Math.min(maximumFilesWidth, Math.max(minimumFilesWidth, width));
 

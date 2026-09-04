@@ -123,9 +123,24 @@ export function ProjectCommandPaletteItems({ match }: { readonly match: UIMatch 
   const handleUpdateThumbnail = useCallback(() => {
     // Force a regeneration through the thumbnail machine (off the main thread
     // via the runtime image transcoder); the render writes `thumbnail.webp` and
-    // repoints the project record when it settles.
-    regenerateThumbnail();
-    toast.success('Regenerating thumbnail…');
+    // repoints the project record when it settles. The toast reflects the
+    // machine's terminal result instead of assuming success.
+    toast.promise(
+      async () => {
+        const result = await regenerateThumbnail();
+        if (result.status === 'skipped') {
+          throw new Error(`Thumbnail skipped: ${result.reason}`);
+        }
+        if (result.status === 'failed') {
+          throw result.error;
+        }
+      },
+      {
+        loading: 'Regenerating thumbnail…',
+        success: 'Thumbnail updated',
+        error: (error: unknown) => (error instanceof Error ? error.message : 'Thumbnail regeneration failed'),
+      },
+    );
   }, [regenerateThumbnail]);
 
   const handleCopyPngToClipboard = useCallback(async () => {

@@ -201,7 +201,6 @@ describe('ProjectCommandPaletteItems', () => {
       graphicsRef: graphicsActor,
       cameraState: state,
       imageService,
-      fileSystem: runtimeFileSystem,
       recipe: { purpose: 'utility', mode: 'current' },
     });
     const [blob, filename] = downloadBlob.mock.calls[0]!;

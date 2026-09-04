@@ -21,7 +21,8 @@ import type { PendingFilePlacement } from '#routes/w.$workspace.$project/chat-wo
 import type * as ProjectWorkspaceContext from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 
-const { mobileState, mockOpenPanel, mockProjectSend, mockToastError } = vi.hoisted(() => ({
+const { featureState, mobileState, mockOpenPanel, mockProjectSend, mockToastError } = vi.hoisted(() => ({
+  featureState: { value: false },
   mobileState: { value: false },
   mockOpenPanel: vi.fn(),
   mockProjectSend: vi.fn(),
@@ -148,7 +149,7 @@ vi.mock('#hooks/use-kernel-diagnostics.js', () => ({
 }));
 
 vi.mock('#flags/use-feature.js', () => ({
-  useFeature: () => false,
+  useFeature: () => featureState.value,
 }));
 
 vi.mock('@monaco-editor/react', () => ({
@@ -991,6 +992,10 @@ describe('normalizeFilePaneState', () => {
 });
 
 describe('Workbench file reconciliation', () => {
+  beforeEach(() => {
+    featureState.value = false;
+  });
+
   it('creates a real New tab panel in the invoking group', () => {
     const dockview = createTestDockview();
 
@@ -1107,8 +1112,35 @@ describe('Workbench file reconciliation', () => {
 
     const parametersButton = screen.getByRole('button', { name: /Parameters/ });
     expect(parametersButton).toHaveClass('h-7', 'text-[13px]');
-    expect(parametersButton.parentElement).toHaveClass('mx-auto', 'py-6');
-    expect(parametersButton.parentElement?.parentElement).toHaveClass('scroll-shadows-y', 'overflow-y-auto');
+    expect(parametersButton.parentElement).toHaveAttribute('aria-label', 'Design');
+    expect(parametersButton.parentElement?.parentElement).toHaveClass('mx-auto', 'py-6');
+    expect(parametersButton.parentElement?.parentElement?.parentElement).toHaveClass(
+      'scroll-shadows-y',
+      'overflow-y-auto',
+    );
+    expect(screen.getAllByRole('group').map((group) => group.getAttribute('aria-label'))).toEqual([
+      'Design',
+      'Activity',
+      'Project',
+    ]);
+    expect(within(screen.getByRole('group', { name: 'Design' })).getByRole('button', { name: /Model/ })).toBeVisible();
+    expect(
+      within(screen.getByRole('group', { name: 'Activity' })).getByRole('button', { name: /Revisions/ }),
+    ).toBeVisible();
+    expect(
+      within(screen.getByRole('group', { name: 'Activity' })).getByRole('button', { name: /Agents/ }),
+    ).toBeVisible();
+    expect(within(screen.getByRole('group', { name: 'Activity' })).getByRole('button', { name: /Jobs/ })).toBeVisible();
+    expect(
+      within(screen.getByRole('group', { name: 'Project' })).getByRole('button', { name: /Export/ }),
+    ).toBeVisible();
+    expect(within(screen.getByRole('group', { name: 'Project' })).getByRole('button', { name: /Share/ })).toBeVisible();
+    expect(
+      within(screen.getByRole('group', { name: 'Project' })).getByRole('button', { name: /Details/ }),
+    ).toBeVisible();
+    expect(within(screen.getByRole('group', { name: 'Project' })).getByRole('button', { name: /Files/ })).toBeVisible();
+    expect(screen.queryByRole('group', { name: 'Diagnostics' })).not.toBeInTheDocument();
+    expect(screen.getAllByRole('separator')).toHaveLength(3);
     expect(screen.getByRole('button', { name: 'Close tab' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Telemetry' })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: /Parameters/ }));
@@ -1148,6 +1180,37 @@ describe('Workbench file reconciliation', () => {
     render(<WorkbenchLeftActions {...properties} />);
     await user.click(screen.getByRole('button', { name: 'Open workbench tab' }));
 
+    expect(screen.getAllByRole('group').map((group) => group.getAttribute('aria-label'))).toEqual([
+      'Design',
+      'Activity',
+      'Project',
+    ]);
+    expect(
+      within(screen.getByRole('group', { name: 'Design' })).getByRole('menuitem', { name: /Model/ }),
+    ).toBeVisible();
+    expect(
+      within(screen.getByRole('group', { name: 'Activity' })).getByRole('menuitem', { name: /Revisions/ }),
+    ).toBeVisible();
+    expect(
+      within(screen.getByRole('group', { name: 'Activity' })).getByRole('menuitem', { name: /Agents/ }),
+    ).toBeVisible();
+    expect(
+      within(screen.getByRole('group', { name: 'Activity' })).getByRole('menuitem', { name: /Jobs/ }),
+    ).toBeVisible();
+    expect(
+      within(screen.getByRole('group', { name: 'Project' })).getByRole('menuitem', { name: /Export/ }),
+    ).toBeVisible();
+    expect(
+      within(screen.getByRole('group', { name: 'Project' })).getByRole('menuitem', { name: /Share/ }),
+    ).toBeVisible();
+    expect(
+      within(screen.getByRole('group', { name: 'Project' })).getByRole('menuitem', { name: /Details/ }),
+    ).toBeVisible();
+    expect(
+      within(screen.getByRole('group', { name: 'Project' })).getByRole('menuitem', { name: /Files/ }),
+    ).toBeVisible();
+    expect(screen.queryByRole('group', { name: 'Diagnostics' })).not.toBeInTheDocument();
+    expect(screen.getAllByRole('separator')).toHaveLength(2);
     expect(screen.getByRole('menuitem', { name: /Parameters/ })).toHaveClass('py-1', 'text-[13px]');
     expect(screen.queryByRole('menuitem', { name: /Close tab/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('menuitem', { name: /Telemetry/ })).not.toBeInTheDocument();
@@ -1159,6 +1222,27 @@ describe('Workbench file reconciliation', () => {
       }),
     );
     expect(dockview.addPanel).not.toHaveBeenCalledWith(expect.objectContaining({ component: 'newTab' }));
+  });
+
+  it('adds one Diagnostics group when debug surfaces are enabled', async () => {
+    const user = userEvent.setup();
+    const dockview = createTestDockview([panel(workbenchPanels.model.id)]);
+    const properties = { group: dockview.group, containerApi: dockview.api } as IDockviewHeaderActionsProps;
+    featureState.value = true;
+
+    render(<WorkbenchLeftActions {...properties} />);
+    await user.click(screen.getByRole('button', { name: 'Open workbench tab' }));
+
+    expect(screen.getAllByRole('group').map((group) => group.getAttribute('aria-label'))).toEqual([
+      'Design',
+      'Activity',
+      'Project',
+      'Diagnostics',
+    ]);
+    const diagnostics = screen.getByRole('group', { name: 'Diagnostics' });
+    expect(within(diagnostics).getByRole('menuitem', { name: 'Telemetry' })).toBeVisible();
+    expect(within(diagnostics).getByRole('menuitem', { name: 'Console' })).toBeVisible();
+    expect(screen.getAllByRole('separator')).toHaveLength(3);
   });
 
   it('opens a closable New tab launcher in a newly split group', async () => {

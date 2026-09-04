@@ -55,17 +55,17 @@ type CanvasSampleRegion = Readonly<{
   height: number;
 }>;
 
-const previewCanvasSelector = '[role="img"][aria-label*="3D model preview" i] canvas';
+const previewCanvasSelector = 'canvas[data-engine]';
 const sectionControlFixtureRoute = (backend: 'webgl' | 'webgpu'): string =>
-  `/examples/jscad_cube_cylinder_section_fixture?graphicsBackend=${backend}`;
+  `/__e2e/example-fixture?locator=jscad.cube-cylinder-section-fixture&graphicsBackend=${backend}`;
 const expectedFaceSelectorLabels = ['Back', 'Bottom', 'Front', 'Left', 'Right', 'Top'];
 
 async function openSectionControlFixture(backend: 'webgl' | 'webgpu' = 'webgl'): Promise<void> {
   await target.setViewport({ width: 960, height: 720 });
   await target.navigate(sectionControlFixtureRoute(backend));
-  await target.expectVisible(selectors.getByRole('img', { name: /3d model preview/i }), 60_000);
-  await target.expectVisible(selectors.getByTestId('bbox-viewer'), 60_000);
-  await target.waitFor(() => Boolean((globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__));
+  await target.expectVisible(selectors.getByCss(previewCanvasSelector), 60_000);
+  await target.expectGraphicsBackend(backend);
+  await target.expectGeometryFramed();
 }
 
 async function driveObliqueTransformControls(): Promise<void> {
@@ -76,8 +76,8 @@ async function driveObliqueTransformControls(): Promise<void> {
     }
 
     bridge.setCamera({
-      position: [72, -88, 54],
-      target: [0, 0, 8],
+      position: [0.072, -0.088, 0.054],
+      target: [0, 0, 0.008],
       fov: 42,
       zoom: 1.15,
     });
@@ -85,14 +85,14 @@ async function driveObliqueTransformControls(): Promise<void> {
       plane: 'yz',
       direction: 1,
       rotationRadians: [0, 0.44, 0],
-      pivot: [0, 0, 8],
+      pivot: [0, 0, 0.008],
       translation: 0,
     });
   });
 }
 
 async function driveStackedPlaneSelectors(side: 'front' | 'reverse' = 'front'): Promise<void> {
-  const position = side === 'front' ? ([5.2, -6.8, 4.8] as const) : ([-5.2, 6.8, -4.8] as const);
+  const position = side === 'front' ? ([0.052, -0.068, 0.048] as const) : ([-0.052, 0.068, -0.048] as const);
 
   await target.evaluate((nextPosition) => {
     const bridge = (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__;
@@ -100,13 +100,14 @@ async function driveStackedPlaneSelectors(side: 'front' | 'reverse' = 'front'): 
       throw new Error('Section view e2e bridge is not installed.');
     }
 
+    bridge.showPlaneSelectors();
+    const pivot = bridge.getPresentation().sectionViewPivot;
     bridge.setCamera({
-      position: nextPosition,
-      target: [0, 0, 0],
+      position: [pivot[0] + nextPosition[0], pivot[1] + nextPosition[1], pivot[2] + nextPosition[2]],
+      target: pivot,
       fov: 38,
       zoom: 1.4,
     });
-    bridge.showPlaneSelectors();
   }, position);
 }
 
@@ -123,6 +124,19 @@ async function expectAllFaceSelectorLabelsMounted(): Promise<void> {
       }),
     )
     .toEqual(expectedFaceSelectorLabels);
+}
+
+async function waitForTwoAnimationFrames(): Promise<void> {
+  await target.evaluate(
+    async () =>
+      new Promise<void>((resolve) => {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            resolve();
+          });
+        });
+      }),
+  );
 }
 
 async function captureSectionCanvas(fileName: string): Promise<string> {
@@ -185,10 +199,10 @@ async function samplePng(pngBase64: string, region: CanvasSampleRegion): Promise
         const bucket = Math.floor(r / 8) * 1024 + Math.floor(g / 8) * 32 + Math.floor(b / 8);
         histogram.set(bucket, (histogram.get(bucket) ?? 0) + 1);
 
-        whiteish += Number(r > 222 && g > 222 && b > 222);
-        reddish += Number(r > 145 && g < 135 && b < 135);
-        greenish += Number(g > 135 && r < 135 && b < 145);
-        blueish += Number(b > 145 && r < 155 && g < 190);
+        whiteish += Number(r > 180 && g > 180 && b > 180 && maxChannelDelta < 18);
+        reddish += Number(r > 145 && r > g + 25 && r > b + 25);
+        greenish += Number(g > 135 && g > r + 20 && g > b + 10);
+        blueish += Number(b > 145 && b > r + 25 && b > g + 20);
         darkTextish += Number(r < 65 && g < 65 && b < 65);
         softTextEdge += Number(
           r >= 65 && r <= 190 && g >= 65 && g <= 190 && b >= 65 && b <= 190 && maxChannelDelta < 18,
@@ -233,7 +247,7 @@ test.describe('Section view control restyle regressions', () => {
         translation: 0,
       });
     });
-    await target.delay(300);
+    await waitForTwoAnimationFrames();
 
     const before = await target.evaluate(() => {
       const bridge = (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__!;
@@ -286,13 +300,101 @@ test.describe('Section view control restyle regressions', () => {
     ).toBe(true);
     await target.expectVisible(selectors.getByCss(previewCanvasSelector));
   });
+
+  for (const backend of ['webgl', 'webgpu'] as const) {
+    test(`keeps real section-arrow drags physical across render-frame retargeting in ${backend}`, async () => {
+      await openSectionControlFixture(backend);
+      await driveObliqueTransformControls();
+      await waitForTwoAnimationFrames();
+      const before = await target.evaluate(() => {
+        const bridge = (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__!;
+        return {
+          handle: bridge.projectSectionTransformHandle('X'),
+          pivot: bridge.getPresentation().sectionViewPivot,
+          axisPoint: bridge.projectWorldPoint([0.01, 0, 0.008]),
+        };
+      });
+      expect(before.handle?.visible).toBe(true);
+      const directionX = before.axisPoint.x - before.handle!.x;
+      const directionY = before.axisPoint.y - before.handle!.y;
+      const directionLength = Math.hypot(directionX, directionY);
+      expect(directionLength).toBeGreaterThan(0);
+      const dragPixels = 36;
+
+      await target.mouseMove(before.handle!.x, before.handle!.y);
+      await target.mouseDown();
+      await target.mouseMove(
+        before.handle!.x + (directionX / directionLength) * dragPixels,
+        before.handle!.y + (directionY / directionLength) * dragPixels,
+        { steps: 8 },
+      );
+      await target.mouseUp();
+
+      await expect
+        .poll(async () =>
+          target.evaluate(
+            (startX) =>
+              Math.abs(
+                (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__!.getPresentation()
+                  .sectionViewPivot[0] - startX,
+              ),
+            before.pivot[0],
+          ),
+        )
+        .toBeGreaterThan(1e-6);
+
+      const dragged = await target.evaluate(() => {
+        const bridge = (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__!;
+        return {
+          frame: bridge.getRenderFrame(),
+          handle: bridge.projectSectionTransformHandle('X'),
+          pivot: bridge.getPresentation().sectionViewPivot,
+        };
+      });
+      expect(Math.abs(dragged.pivot[0] - before.pivot[0])).toBeLessThan(0.05);
+      expect(dragged.handle?.visible).toBe(true);
+
+      await target.evaluate(
+        ({ frame, pivot }) => {
+          const bridge = (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__!;
+          bridge.setRenderFrame({
+            anchorFrameId: frame.anchorFrameId,
+            originMeters: [pivot[0] - 0.002, pivot[1] + 0.001, pivot[2]],
+            metersPerRenderUnit: frame.metersPerRenderUnit / 1000,
+          });
+        },
+        { frame: dragged.frame, pivot: dragged.pivot },
+      );
+      await waitForTwoAnimationFrames();
+
+      await expect
+        .poll(async () =>
+          target.evaluate((expectedPivot) => {
+            const bridge = (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__!;
+            const handle = bridge.projectSectionTransformHandle('X');
+            const pivot = bridge.getPresentation().sectionViewPivot;
+            return Boolean(handle?.visible && pivot.every((value, index) => value === expectedPivot[index]));
+          }, dragged.pivot),
+        )
+        .toBe(true);
+      const retargeted = await target.evaluate(() =>
+        (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__!.projectSectionTransformHandle(
+          'X',
+        ),
+      );
+      expect(Math.hypot(retargeted!.x - dragged.handle!.x, retargeted!.y - dragged.handle!.y)).toBeLessThanOrEqual(
+        0.25,
+      );
+    });
+  }
+
   test('renders solid bordered transform arrows without interior seam walls', async () => {
     await openSectionControlFixture();
     await driveObliqueTransformControls();
     await target.delay(900);
 
     const png = await captureSectionCanvas('section-control-transform-arrows-webgl.png');
-    const stats = await samplePng(png, { x: 0.2, y: 0.2, width: 0.62, height: 0.65 });
+    const stats = await samplePng(png, { x: 0.43, y: 0.44, width: 0.24, height: 0.2 });
     const borderPixels = stats.reddish + stats.greenish + stats.blueish;
 
     expect(stats.distinctBuckets, 'transform arrow view should contain varied rendered pixels').toBeGreaterThan(18);
@@ -310,21 +412,14 @@ test.describe('Section view control restyle regressions', () => {
   });
 
   for (const backend of ['webgl', 'webgpu'] as const) {
-    test(`renders half-width bordered selector bodies with labels occluded by nearer selector bodies in ${backend}`, async ({
-      skip,
-    }) => {
-      if (backend === 'webgpu') {
-        const hasWebGpu = await target.evaluate(() => 'gpu' in navigator);
-        skip(!hasWebGpu, 'WebGPU is not available in this browser runtime.');
-      }
-
+    test(`renders half-width bordered selector bodies with labels occluded by nearer selector bodies in ${backend}`, async () => {
       await openSectionControlFixture(backend);
       await driveStackedPlaneSelectors();
       await target.delay(900);
       await expectAllFaceSelectorLabelsMounted();
 
       const png = await captureSectionCanvas(`section-control-plane-selectors-${backend}.png`);
-      const stats = await samplePng(png, { x: 0.32, y: 0.26, width: 0.38, height: 0.44 });
+      const stats = await samplePng(png, { x: 0.34, y: 0.38, width: 0.32, height: 0.28 });
       const borderPixels = stats.reddish + stats.greenish + stats.blueish;
 
       expect(stats.distinctBuckets, 'selector stack view should contain varied rendered pixels').toBeGreaterThan(20);
@@ -352,7 +447,7 @@ test.describe('Section view control restyle regressions', () => {
       await expectAllFaceSelectorLabelsMounted();
 
       const reversePng = await captureSectionCanvas(`section-control-plane-selectors-reverse-${backend}.png`);
-      const reverseStats = await samplePng(reversePng, { x: 0.32, y: 0.26, width: 0.38, height: 0.44 });
+      const reverseStats = await samplePng(reversePng, { x: 0.34, y: 0.38, width: 0.32, height: 0.28 });
       expect(
         reverseStats.darkTextish,
         `reverse selector labels should be visible on the opposite selector caps: ${JSON.stringify(reverseStats)}`,

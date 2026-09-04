@@ -46,6 +46,7 @@ type SectionViewBridgeWindow = Window & {
       zoom?: number;
     }): void;
     getSectionCapPerformanceDiagnostics(): SectionCapPerformanceDiagnostics | undefined;
+    getRenderFrame(): { metersPerRenderUnit: number };
   };
 };
 
@@ -71,10 +72,10 @@ type SectionCapDiagnosticsFixture = Readonly<{
 const diagnosticsFixtures: readonly SectionCapDiagnosticsFixture[] = [
   {
     id: 'baseline',
-    projectId: 'jscad_section_overlap_fixture',
+    projectId: 'jscad.section-overlap-fixture',
     camera: {
-      position: [76, -70, 48],
-      target: [32, 0, 0],
+      position: [0.076, -0.07, 0.048],
+      target: [0.032, 0, 0],
       fov: 38,
       zoom: 1.2,
     },
@@ -84,14 +85,14 @@ const diagnosticsFixtures: readonly SectionCapDiagnosticsFixture[] = [
       rotationRadians: [0, 0, 0],
       pivot: [0, 0, 0],
     },
-    overlapTranslations: [-0.25, 0, 0.25],
-    noOverlapTranslations: [14, 14.5, 15],
+    overlapTranslations: [-0.000_25, 0, 0.000_25],
+    noOverlapTranslations: [0.014, 0.0145, 0.015],
   },
   {
     id: 'heavy-planetary',
-    projectId: 'jscad_section_overlap_heavy_planetary_fixture',
+    projectId: 'jscad.section-overlap-heavy-planetary-fixture',
     camera: {
-      position: [96, -110, 78],
+      position: [0.096, -0.11, 0.078],
       target: [0, 0, 0],
       fov: 36,
       zoom: 1.05,
@@ -102,15 +103,15 @@ const diagnosticsFixtures: readonly SectionCapDiagnosticsFixture[] = [
       rotationRadians: [0, 0, 0],
       pivot: [0, 0, 0],
     },
-    overlapTranslations: [-2, -1, 0, 1, 2],
-    noOverlapTranslations: [34, 36, 38],
+    overlapTranslations: [-0.002, -0.001, 0, 0.001, 0.002],
+    noOverlapTranslations: [0.034, 0.036, 0.038],
   },
   {
     id: 'heavy-v8',
-    projectId: 'jscad_section_overlap_heavy_v8_fixture',
+    projectId: 'jscad.section-overlap-heavy-v8-fixture',
     camera: {
-      position: [122, -116, 72],
-      target: [0, 0, 4],
+      position: [0.122, -0.116, 0.072],
+      target: [0, 0, 0.004],
       fov: 38,
       zoom: 1,
     },
@@ -120,8 +121,8 @@ const diagnosticsFixtures: readonly SectionCapDiagnosticsFixture[] = [
       rotationRadians: [0, 0, 0],
       pivot: [0, 0, 0],
     },
-    overlapTranslations: [-4, -2, 0, 2, 4],
-    noOverlapTranslations: [64, 68, 72],
+    overlapTranslations: [-0.004, -0.002, 0, 0.002, 0.004],
+    noOverlapTranslations: [0.064, 0.068, 0.072],
   },
 ];
 
@@ -280,15 +281,15 @@ const collectPerformanceSweep = async ({
 };
 
 type FixtureDiagnosticsOptions = Readonly<{
-  backend: string;
+  backend: 'webgl' | 'webgpu';
   fixture: SectionCapDiagnosticsFixture;
 }>;
 
 const collectFixtureDiagnostics = async ({ backend, fixture }: FixtureDiagnosticsOptions): Promise<void> => {
-  await target.navigate(`/examples/${fixture.projectId}?graphicsBackend=${backend}`);
-  await target.expectVisible(selectors.getByRole('img', { name: /3d model preview/i }), 60_000);
-  await target.expectVisible(selectors.getByTestId('bbox-viewer'), 60_000);
-  await target.waitFor(() => Boolean((globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__));
+  await target.navigate(`/s/builtin~${fixture.projectId}?graphicsBackend=${backend}`);
+  await target.expectVisible(selectors.getByCss('canvas[data-engine]'), 60_000);
+  await target.expectGraphicsBackend(backend);
+  await target.expectGeometryFramed();
 
   const overlap = await collectPerformanceSweep({
     fixture,
@@ -335,7 +336,7 @@ const collectFixtureDiagnostics = async ({ backend, fixture }: FixtureDiagnostic
 };
 
 type FixturesDiagnosticsOptions = Readonly<{
-  backend: string;
+  backend: 'webgl' | 'webgpu';
   index?: number;
 }>;
 
@@ -351,12 +352,7 @@ const collectFixturesDiagnostics = async ({ backend, index = 0 }: FixturesDiagno
 
 test.describe('Section view overlap performance diagnostics', () => {
   for (const backend of ['webgl', 'webgpu'] as const) {
-    test(`captures overlap and no-overlap diagnostics in ${backend}`, async ({ skip }) => {
-      if (backend === 'webgpu') {
-        const hasWebGpu = await target.evaluate(() => 'gpu' in navigator);
-        skip(!hasWebGpu, 'WebGPU is not available in this browser runtime.');
-      }
-
+    test(`captures overlap and no-overlap diagnostics in ${backend}`, async () => {
       const messageStart = await consoleMessageCount();
       await collectFixturesDiagnostics({ backend });
       const failures = backend === 'webgpu' ? await webGpuValidationFailures(messageStart) : [];

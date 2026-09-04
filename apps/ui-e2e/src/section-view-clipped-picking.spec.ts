@@ -19,28 +19,29 @@ type SectionViewBridgeWindow = Window & {
     }): void;
     projectWorldPoint(point: readonly [number, number, number]): { x: number; y: number; visible: boolean };
     getModelHoverState(): { activeUnitId: string | undefined; hoveredComponentId: string | undefined };
+    getRenderFrame(): { metersPerRenderUnit: number };
   };
 };
 
-const previewCanvasSelector = '[role="img"][aria-label*="3D model preview" i] canvas';
-const sectionPickingFixtureRoute = '/examples/jscad_section_picking_fixture?graphicsBackend=webgl';
+const previewCanvasSelector = 'canvas[data-engine]';
+const sectionPickingFixtureRoute = '/__e2e/example-fixture?locator=jscad.section-picking-fixture&graphicsBackend=webgl';
 
 async function openSectionPickingFixture(): Promise<void> {
-  await target.setViewport({ width: 960, height: 720 });
+  await target.setViewport({ width: 1440, height: 900 });
   await target.navigate(sectionPickingFixtureRoute);
-  await target.expectVisible(selectors.getByRole('img', { name: /3d model preview/i }), 60_000);
-  await target.expectVisible(selectors.getByTestId('bbox-viewer'), 60_000);
+  await target.expectVisible(selectors.getByCss(previewCanvasSelector), 60_000);
   const declineCookies = selectors.getByRole('button', { name: /^decline$/i });
   if (await target.isVisible(declineCookies).catch(() => false)) {
     await target.click(declineCookies);
   }
 
-  const parametersToggle = selectors.getByRole('button', { name: /^parameters$/i });
-  if (await target.isVisible(parametersToggle).catch(() => false)) {
-    await target.click(parametersToggle);
+  const closeParameters = selectors.getByRole('button', { name: /^close parameters$/i });
+  const closeParametersResult = await target.read(closeParameters).catch(() => ({ count: 0 }));
+  if (closeParametersResult.count > 0) {
+    await target.click(closeParameters, { force: true });
   }
 
-  await target.waitFor(() => Boolean((globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__));
+  await target.expectGeometryFramed();
 }
 
 async function driveClippedPickingView(): Promise<void> {
@@ -51,7 +52,7 @@ async function driveClippedPickingView(): Promise<void> {
     }
 
     bridge.setCamera({
-      position: [0, -130, 46],
+      position: [0, -0.13, 0.046],
       target: [0, 0, 0],
       fov: 38,
       zoom: 1.2,
@@ -101,7 +102,7 @@ test.describe('Section view clipping-aware model picking', () => {
     await driveClippedPickingView();
     await target.delay(900);
 
-    const visiblePoint = await projectWorldPoint([-24, 0, 0]);
+    const visiblePoint = await projectWorldPoint([-0.024, 0, 0.005]);
     expect(visiblePoint.visible, 'visible cuboid test point should be inside the camera frustum').toBe(true);
     await target.mouseMove(visiblePoint.x, visiblePoint.y);
     await expect
@@ -110,7 +111,7 @@ test.describe('Section view clipping-aware model picking', () => {
       })
       .toBeDefined();
 
-    const clippedPoint = await projectWorldPoint([24, 0, 0]);
+    const clippedPoint = await projectWorldPoint([0.024, 0, 0.005]);
     expect(clippedPoint.visible, 'clipped cuboid test point should be inside the camera frustum').toBe(true);
     await target.mouseMove(clippedPoint.x, clippedPoint.y);
     await expect

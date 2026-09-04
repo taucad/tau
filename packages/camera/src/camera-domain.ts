@@ -9,7 +9,7 @@ export type CameraBounds = Readonly<{
   max: CameraVector;
 }>;
 
-/** Physical viewport inputs used by camera projection calculations. @public */
+/** Logical viewport size plus physical-pixel ratio used by camera projection calculations. @public */
 export type CameraViewport = Readonly<{
   width: number;
   height: number;

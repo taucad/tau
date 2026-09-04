@@ -6,7 +6,7 @@ The package root contains data types and math. Importing `@taucad/camera` does n
 
 ## Camera view or camera state
 
-Use `CameraView` while a viewer frames bounds and moves between perspective and orthographic projections. It stores target, target-to-camera direction, screen-up, visible vertical span, perspective zoom, viewport, and bounds. `resolveCameraFrame` applies the same two-stage bounds fit used by Tau's thumbnails: an AABB-safe distance followed by a projected-corner zoom. The resulting visible span remains the projection-independent handoff invariant at 0° FOV.
+Use `CameraView` while a viewer frames bounds and moves between perspective and orthographic projections. It stores target, target-to-camera direction, screen-up, visible vertical span, perspective zoom, viewport, and bounds. `frameCameraBounds` applies the same two-stage bounds fit used by Tau's thumbnails: an AABB-safe distance followed by a projected-corner zoom. The resulting visible span remains the projection-independent handoff invariant at 0° FOV.
 
 Use `CameraState` when another process must reproduce one frame. It stores position, target, screen-up, projection, zoom, clipping, and aspect as serializable values. `resolveCameraState({ view })` resolves a framed `CameraView` into that complete state; `createCameraState` validates and copies already resolved values before asynchronous work:
 
@@ -56,6 +56,6 @@ camera.send({ type: 'setVerticalFieldOfView', verticalFieldOfView: 0 });
 camera.stop();
 ```
 
-Projection changes are immediate. Hosts may animate their input values before sending them and inject renderer behavior with XState's `.provide()`. Snapshots contain only serializable camera data.
+Projection changes are immediate. Hosts may animate their input values before sending them and subscribe a renderer adapter to the actor. Snapshots contain only serializable camera data.
 
 Runtime support: Node.js 24 or newer and modern browsers. `xstate` 5 is a peer dependency. This package is Apache-2.0 licensed; its implementation was authored for Tau and does not include copied Three.js source.

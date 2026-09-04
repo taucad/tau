@@ -1,5 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { canonicalJson, hashBytes, hashString, sha256Bytes, sha256String } from '@taucad/utils/hash';
+import {
+  canonicalJson,
+  hashBytes,
+  hashString,
+  sha256Bytes,
+  sha256BytesSync,
+  sha256String,
+  sha256StringSync,
+} from '@taucad/utils/hash';
 
 const hex8 = /^[0-9a-f]{8}$/u;
 
@@ -85,6 +93,13 @@ describe('canonical hashing', () => {
     const expected = '9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08';
     await expect(sha256String('test')).resolves.toBe(expected);
     await expect(sha256Bytes(new TextEncoder().encode('test'))).resolves.toBe(expected);
+  });
+
+  it('keeps synchronous and asynchronous SHA-256 byte-identical', async () => {
+    const value = 'tau synchronous action identity';
+    const bytes = new TextEncoder().encode(value);
+    expect(sha256BytesSync(bytes)).toBe(await sha256Bytes(bytes));
+    expect(sha256StringSync(value)).toBe(await sha256String(value));
   });
 
   describe('without crypto.subtle (insecure browser context)', () => {

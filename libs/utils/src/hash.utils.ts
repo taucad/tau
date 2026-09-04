@@ -92,3 +92,13 @@ export async function sha256Bytes(data: Uint8Array<ArrayBuffer>): Promise<string
 export async function sha256String(input: string): Promise<string> {
   return sha256Bytes(new TextEncoder().encode(input));
 }
+
+/** Compute lowercase hexadecimal SHA-256 synchronously with Tau's portable implementation. @public */
+export function sha256BytesSync(data: Uint8Array<ArrayBuffer>): string {
+  return Array.from(sha256(data), (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+/** Compute lowercase hexadecimal SHA-256 synchronously for UTF-8 text. @public */
+export function sha256StringSync(input: string): string {
+  return sha256BytesSync(new TextEncoder().encode(input));
+}

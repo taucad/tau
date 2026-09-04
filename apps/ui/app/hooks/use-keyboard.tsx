@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { formatKeyCombination, setPlatform, getPlatform } from '#utils/keys.utils.js';
 import type { KeyCombination } from '#utils/keys.utils.js';
@@ -244,7 +244,7 @@ export function KeyboardProvider({ children }: { readonly children: ReactNode })
   const registryRef = useRef(new Map<string, Set<KeybindingRegistration>>());
 
   // Stable register/unregister functions
-  const register = useRef((combo: string, registration: KeybindingRegistration): void => {
+  const register = useCallback((combo: string, registration: KeybindingRegistration): void => {
     const map = registryRef.current;
     let set = map.get(combo);
 
@@ -254,9 +254,9 @@ export function KeyboardProvider({ children }: { readonly children: ReactNode })
     }
 
     set.add(registration);
-  }).current;
+  }, []);
 
-  const unregister = useRef((combo: string, id: symbol): void => {
+  const unregister = useCallback((combo: string, id: symbol): void => {
     const set = registryRef.current.get(combo);
 
     if (!set) {
@@ -273,7 +273,7 @@ export function KeyboardProvider({ children }: { readonly children: ReactNode })
     if (set.size === 0) {
       registryRef.current.delete(combo);
     }
-  }).current;
+  }, []);
 
   useEffect(() => {
     // Detect and set platform on mount

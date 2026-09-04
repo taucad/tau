@@ -1,4 +1,4 @@
-import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { cn } from '@taucad/ui/utils/cn';
 
 const HeroCanvasLazy = lazy(async () => {
@@ -35,21 +35,17 @@ function HeroPoster({ className }: { readonly className?: string }): React.JSX.E
 }
 
 function usePrefersReducedMotion(): boolean {
-  const [reduced, setReduced] = useState(false);
-
-  useEffect(() => {
-    const query = globalThis.matchMedia('(prefers-reduced-motion: reduce)');
-    setReduced(query.matches);
-    const onChange = (event: MediaQueryListEvent): void => {
-      setReduced(event.matches);
-    };
-    query.addEventListener('change', onChange);
-    return () => {
-      query.removeEventListener('change', onChange);
-    };
-  }, []);
-
-  return reduced;
+  return useSyncExternalStore(
+    (onChange) => {
+      const query = globalThis.matchMedia('(prefers-reduced-motion: reduce)');
+      query.addEventListener('change', onChange);
+      return () => {
+        query.removeEventListener('change', onChange);
+      };
+    },
+    () => globalThis.matchMedia('(prefers-reduced-motion: reduce)').matches,
+    () => false,
+  );
 }
 
 /**

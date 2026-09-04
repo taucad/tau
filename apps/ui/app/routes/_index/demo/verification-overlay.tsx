@@ -67,8 +67,10 @@ function CheckChip({ state, label }: { readonly state: CheckState; readonly labe
  * through the GeoSpec worker (`apps/ui/app/workers/geospec-runner.worker.ts`).
  */
 export function VerificationOverlay({ geometry }: { readonly geometry: Geometry | undefined }): React.JSX.Element {
-  const [measured, setMeasured] = useState<Measured | undefined>();
-  const [measuring, setMeasuring] = useState(false);
+  const [measurement, setMeasurement] = useState<{
+    readonly geometry: Geometry;
+    readonly measured: Measured | undefined;
+  }>();
 
   useEffect(() => {
     if (!geometry) {
@@ -76,22 +78,16 @@ export function VerificationOverlay({ geometry }: { readonly geometry: Geometry 
     }
 
     let cancelled = false;
-    setMeasuring(true);
-
     async function measure(target: Geometry): Promise<void> {
       try {
         const result = await measureGeometry(target);
         if (!cancelled) {
-          setMeasured(result);
+          setMeasurement({ geometry: target, measured: result });
         }
       } catch (error) {
         console.error('[VerificationOverlay] measure failed:', error);
         if (!cancelled) {
-          setMeasured(undefined);
-        }
-      } finally {
-        if (!cancelled) {
-          setMeasuring(false);
+          setMeasurement({ geometry: target, measured: undefined });
         }
       }
     }
@@ -102,6 +98,9 @@ export function VerificationOverlay({ geometry }: { readonly geometry: Geometry 
       cancelled = true;
     };
   }, [geometry]);
+
+  const measured = measurement && measurement.geometry === geometry ? measurement.measured : undefined;
+  const measuring = geometry !== undefined && measurement?.geometry !== geometry;
 
   const validState: CheckState = geometry ? 'pass' : 'pending';
   const fitState: CheckState = measured ? (measured.maxDimensionMm <= printBedMm ? 'pass' : 'fail') : 'pending';

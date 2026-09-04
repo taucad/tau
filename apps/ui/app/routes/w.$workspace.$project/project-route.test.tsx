@@ -83,6 +83,13 @@ vi.mock('#hooks/use-file-manager.js', () => ({
       </div>
     );
   },
+  useFileManager: () => ({
+    fileManagerRef: {
+      getSnapshot: () => ({ context: {} }),
+      subscribe: () => ({ unsubscribe: () => undefined }),
+    },
+  }),
+  useOptionalFileManager: () => undefined,
 }));
 
 vi.mock('#hooks/use-project.js', () => ({
@@ -93,9 +100,6 @@ vi.mock('#hooks/use-project.js', () => ({
   useProject: () => ({ projectRef, editorRef }),
 }));
 vi.mock('#hooks/use-flush-on-close.js', () => ({ useFlushOnClose: () => undefined }));
-vi.mock('#hooks/use-chat-rpc-socket.js', () => ({
-  ChatRpcSocketProvider: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
-}));
 vi.mock('#hooks/use-monaco-model-service.js', () => ({
   MonacoModelServiceProvider: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
 }));
@@ -105,7 +109,9 @@ vi.mock('#hooks/use-webgl-context-tracker.js', () => ({
 vi.mock('#routes/w.$workspace.$project/revision-provider.js', () => ({
   RevisionProvider: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
 }));
-vi.mock('#routes/w.$workspace.$project/project-chat-rpc-bindings.js', () => ({ ProjectChatRpcBindings: () => null }));
+vi.mock('#routes/w.$workspace.$project/project-chat-run-settlement.js', () => ({
+  ProjectChatRunSettlement: () => null,
+}));
 vi.mock('#routes/w.$workspace.$project/project-command-items.js', () => ({ ProjectCommandPaletteItems: () => null }));
 vi.mock('#routes/w.$workspace.$project/project-export-action.js', () => ({ ProjectExportAction: () => null }));
 vi.mock('#routes/w.$workspace.$project/project-share-action.js', () => ({

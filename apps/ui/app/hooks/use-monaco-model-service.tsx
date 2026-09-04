@@ -47,6 +47,8 @@ const defaultContextValue: MonacoServicesContextType = { modelService: undefined
 const MonacoServicesContext = createContext<MonacoServicesContextType>(defaultContextValue);
 
 export function MonacoModelServiceProvider({ children }: { readonly children: ReactNode }): React.JSX.Element {
+  'use no memo';
+
   const monaco = useMonaco();
   const { projectId, editorRef, geometryUnits } = useProject();
   const { fileManagerRef, contentService, treeService, readFile, exists, readdir, getDirectoryStat } = useFileManager();
@@ -135,6 +137,7 @@ export function MonacoModelServiceProvider({ children }: { readonly children: Re
       workspaceFs,
     });
 
+    // oxlint-disable-next-line react/set-state-in-effect -- The imperative Monaco service lifecycle can only publish after Monaco and filesystem services initialize.
     setServices({ modelService, markerService });
 
     return () => {

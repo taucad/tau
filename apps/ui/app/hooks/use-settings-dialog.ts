@@ -1,5 +1,6 @@
 import { useSearchParams } from 'react-router';
 import type { SetURLSearchParams } from 'react-router';
+import { useEffect } from 'react';
 import { z } from 'zod';
 
 const settingsSectionSchema = z.enum([
@@ -9,6 +10,8 @@ const settingsSectionSchema = z.enum([
   'security',
   'api-keys',
   'billing',
+  'connections',
+  'compute',
   'models',
   'agents',
   'experimental',
@@ -99,8 +102,14 @@ export function setSettingsSection(section: SettingsSection): void {
 export function useSettingsDialog(): SettingsDialogState {
   const [searchParameters, setSearchParameters] = useSearchParams();
 
-  // Keep the module-level ref in sync so imperative callers work
-  setSearchParametersRef = setSearchParameters;
+  useEffect(() => {
+    setSearchParametersRef = setSearchParameters;
+    return () => {
+      if (setSearchParametersRef === setSearchParameters) {
+        setSearchParametersRef = undefined;
+      }
+    };
+  }, [setSearchParameters]);
 
   const rawSection = searchParameters.get('settings');
 

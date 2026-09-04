@@ -1,7 +1,7 @@
 import { useEffect, useId, useMemo, useState } from 'react';
 import { useSelector } from '@xstate/react';
 import { Allotment, LayoutPriority } from 'allotment';
-import { PanelRightOpen } from 'lucide-react';
+import { PanelBottom } from 'lucide-react';
 import { getActiveGroupValues } from '@taucad/types';
 import { Button } from '@taucad/ui/components/button';
 import { Loader } from '#components/ui/loader.js';
@@ -149,7 +149,7 @@ const SharedProjectLayout = ({
             <Drawer modal>
               <DrawerTrigger asChild>
                 <Button type='button' className='absolute right-3 bottom-3 z-30' size='sm' variant='secondary'>
-                  <PanelRightOpen className='mr-1.5 size-4' aria-hidden />
+                  <PanelBottom className='mr-1.5 size-4' aria-hidden />
                   Workbench
                 </Button>
               </DrawerTrigger>

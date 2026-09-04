@@ -590,7 +590,6 @@ export function FileSelector({
 
   useEffect(() => {
     if (!searchAdapter || !searchQuery) {
-      setSearchResults([]);
       return;
     }
     let cancelled = false;

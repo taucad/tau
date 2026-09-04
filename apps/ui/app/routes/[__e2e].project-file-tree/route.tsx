@@ -1,11 +1,18 @@
 import * as React from 'react';
-import { useNavigate } from 'react-router';
+import { useNavigate, useSearchParams } from 'react-router';
 import type { ProjectManifest } from '@taucad/types';
 import { Loader } from '#components/ui/loader.js';
 import { getEnvironment } from '#environment.config.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { projectUrl } from '#utils/project-url.utils.js';
 import { homeProjectCreationLocation } from '#types/project-creation-location.types.js';
+import type { ProjectCreationLocation } from '#types/project-creation-location.types.js';
+
+/** Same shape the project-creation-location fixture accepts: one OPFS directory name. */
+const validWorkspaceFixture = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/u;
+
+/** The Anthropic-wire model the agent-host gateway fixture answers for. */
+const seededModel = 'anthropic-claude-haiku-4.5';
 
 const encoder = new TextEncoder();
 
@@ -76,8 +83,19 @@ export const loader = async (): Promise<Response> => {
 };
 
 const ProjectFileTreeDebugRoute = (): React.JSX.Element => {
-  const { createProject } = useProjectManager();
+  const { connectWorkspace, createProject } = useProjectManager();
   const navigate = useNavigate();
+  const [searchParameters] = useSearchParams();
+  const workspaceFixture = searchParameters.get('workspace') ?? undefined;
+  /**
+   * Seeds the project the way the home composer does: a pending first message
+   * plus the one-shot `startupRequest` that hydration replays. That dispatch is
+   * the only one that never runs `withWorkspace`, so it is the only way to
+   * exercise the seeded-turn admission path end to end. Browser-host placement
+   * is seeded with it because the e2e stack has no API runner (and the agent
+   * picker cannot offer browser-host from the homepage, where no project exists).
+   */
+  const seededPrompt = searchParameters.get('prompt') ?? undefined;
   const [error, setError] = React.useState<string | undefined>(undefined);
   const seedStarted = React.useRef(false);
 
@@ -87,17 +105,40 @@ const ProjectFileTreeDebugRoute = (): React.JSX.Element => {
     }
     seedStarted.current = true;
 
+    // An OPFS subdirectory handle *is* a FileSystemDirectoryHandle, so it seeds
+    // a genuine webaccess workspace through production APIs without a picker.
+    const resolveLocation = async (): Promise<ProjectCreationLocation> => {
+      if (!workspaceFixture) {
+        return homeProjectCreationLocation;
+      }
+      if (!validWorkspaceFixture.test(workspaceFixture)) {
+        throw new Error(`Invalid workspace fixture: ${workspaceFixture}`);
+      }
+      const root = await navigator.storage.getDirectory();
+      const connected = await connectWorkspace(await root.getDirectoryHandle(workspaceFixture, { create: true }));
+      if (!connected) {
+        throw new Error(`Workspace fixture ${workspaceFixture} did not connect`);
+      }
+      return { kind: 'workspace', workspaceId: connected.workspace.workspaceId };
+    };
+
     const seed = async (): Promise<void> => {
       try {
         const project = await createProject({
-          location: homeProjectCreationLocation,
+          location: await resolveLocation(),
           project: createSeedProject(),
           activeKernel: 'replicad',
           files: seedFiles,
+          ...(seededPrompt === undefined
+            ? {}
+            : {
+                initialMessage: { content: seededPrompt },
+                activeExecution: { kind: 'tau', model: seededModel },
+              }),
           editorState: {
             panelState: {
               desktopLayout: {
-                chatOpen: false,
+                chatOpen: seededPrompt !== undefined,
                 workbenchOpen: true,
                 workbenchWidth: 460,
                 compactAuxiliary: 'workbench',
@@ -113,7 +154,7 @@ const ProjectFileTreeDebugRoute = (): React.JSX.Element => {
     };
 
     void seed();
-  }, [createProject, navigate]);
+  }, [connectWorkspace, createProject, navigate, workspaceFixture]);
 
   if (error) {
     return (

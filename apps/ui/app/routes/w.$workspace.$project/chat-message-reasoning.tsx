@@ -55,6 +55,8 @@ export function ChatMessageReasoning({
   hasContent,
   isMessageActive,
 }: ChatMessageReasoningProperties): React.JSX.Element {
+  'use no memo';
+
   const [userToggleState, setUserToggleState] = useState<'expanded' | 'collapsed' | undefined>(undefined);
   const [scrollContainer, setScrollContainerState] = useState<HTMLDivElement | undefined>(undefined);
   const [content, setContentState] = useState<HTMLDivElement | undefined>(undefined);
@@ -160,6 +162,7 @@ export function ChatMessageReasoning({
       if (!stickToBottomRef.current) {
         return;
       }
+      // oxlint-disable-next-line react/immutability -- The `use no memo` boundary preserves synchronous DOM scroll pinning for the imperative preview viewport.
       scrollContainer.scrollTop = scrollContainer.scrollHeight;
     };
 

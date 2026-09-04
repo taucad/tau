@@ -7,6 +7,9 @@ import { cn } from '@taucad/ui/utils/cn';
 export function ChatViewerStatus({ className, ...props }: React.HTMLAttributes<HTMLDivElement>): React.ReactNode {
   const { projectRef } = useProject();
   const loadingState = useCadSelector((state) => {
+    if (!state.hasTag('cad-loading')) {
+      return undefined;
+    }
     if (state.matches('connecting')) {
       return 'connecting';
     }

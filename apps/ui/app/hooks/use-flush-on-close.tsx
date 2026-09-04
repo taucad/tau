@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useRef } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef } from 'react';
 import type { ReactNode } from 'react';
 
 // ---------------------------------------------------------------------------
@@ -39,18 +39,18 @@ export function UnloadProvider({ children }: { readonly children: ReactNode }): 
   const registryRef = useRef(new Set<FlushRegistration>());
 
   // Stable register/unregister functions
-  const register = useRef((registration: FlushRegistration): void => {
+  const register = useCallback((registration: FlushRegistration): void => {
     registryRef.current.add(registration);
-  }).current;
+  }, []);
 
-  const unregister = useRef((id: symbol): void => {
+  const unregister = useCallback((id: symbol): void => {
     for (const reg of registryRef.current) {
       if (reg.id === id) {
         registryRef.current.delete(reg);
         break;
       }
     }
-  }).current;
+  }, []);
 
   useEffect(() => {
     const flush = (): void => {
@@ -115,7 +115,10 @@ export function useFlushOnClose(callback: () => void): void {
 
   // Stable callback ref -- updated every render, read in handler
   const callbackRef = useRef(callback);
-  callbackRef.current = callback;
+
+  useEffect(() => {
+    callbackRef.current = callback;
+  }, [callback]);
 
   useEffect(() => {
     const id = Symbol('flush-on-close');

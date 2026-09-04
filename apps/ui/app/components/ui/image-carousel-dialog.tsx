@@ -73,6 +73,7 @@ function ImageCarouselDialog({
   const [carouselApi, setCarouselApi] = React.useState<CarouselApi>();
   const clampedInitialIndex = clampImageIndex(initialIndex, items.length);
   const [activeIndex, setActiveIndex] = React.useState(clampedInitialIndex);
+  const [previousState, setPreviousState] = React.useState({ isOpen, clampedInitialIndex, itemCount: items.length });
   const carouselReference = React.useRef<HTMLDivElement>(null);
   const hasMultipleItems = items.length > 1;
   const clampedActiveIndex = clampImageIndex(activeIndex, items.length);
@@ -84,26 +85,29 @@ function ImageCarouselDialog({
   );
   const canUseDocument = isOpen && typeof document !== 'undefined';
 
-  React.useEffect(() => {
-    if (items.length === 0) {
-      if (isOpen) {
-        onOpenChange(false);
-      }
-
-      return;
-    }
-
-    setActiveIndex((currentIndex) => clampImageIndex(currentIndex, items.length));
-  }, [isOpen, items.length, onOpenChange]);
-
-  React.useEffect(() => {
-    if (isOpen) {
+  if (
+    previousState.isOpen !== isOpen ||
+    previousState.clampedInitialIndex !== clampedInitialIndex ||
+    previousState.itemCount !== items.length
+  ) {
+    setPreviousState({ isOpen, clampedInitialIndex, itemCount: items.length });
+    if (previousState.isOpen !== isOpen || previousState.clampedInitialIndex !== clampedInitialIndex) {
       setActiveIndex(clampedInitialIndex);
     } else {
-      setCarouselApi(undefined);
-      setActiveIndex(clampedInitialIndex);
+      setActiveIndex((currentIndex) => clampImageIndex(currentIndex, items.length));
     }
-  }, [clampedInitialIndex, isOpen]);
+    if (!isOpen) {
+      setCarouselApi(undefined);
+    }
+  }
+
+  React.useEffect(() => {
+    if (isOpen && items.length === 0) {
+      queueMicrotask(() => {
+        onOpenChange(false);
+      });
+    }
+  }, [isOpen, items.length, onOpenChange]);
 
   React.useEffect(() => {
     if (!isOpen) {

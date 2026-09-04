@@ -21,6 +21,7 @@ import { createMessage } from '#utils/chat.utils.js';
 import { decodeTextFile } from '#utils/filesystem.utils.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
+import { selectCadFailureIssues } from '#machines/cad.machine.js';
 
 const shiftKey = formatKeyCombination({ key: 'Shift' });
 
@@ -362,7 +363,7 @@ type IssueCounts = {
 /**
  * Counts issues by severity.
  */
-function getIssueCounts(issues: KernelIssue[]): IssueCounts {
+function getIssueCounts(issues: readonly KernelIssue[]): IssueCounts {
   const counts: IssueCounts = {
     error: 0,
     warning: 0,
@@ -450,9 +451,9 @@ export function ChatStackTrace({ entryPath, className, side, ...props }: ChatSta
   const cadRef = useCad();
   const isCadActorStale = cadRef ? !cadRef.id.includes(projectId) : true;
 
-  // Get all kernel issues for this viewer's geometry unit via CadProvider context
-  const rawErrors = useCadSelector((state) => state.context.kernelIssues.get(entryPath), undefined);
-  const errors = isCadActorStale ? undefined : rawErrors;
+  const failureIssues = useCadSelector(selectCadFailureIssues, undefined);
+  const entryIssues = useCadSelector((state) => state.context.kernelIssues.get(entryPath), undefined);
+  const errors = isCadActorStale ? undefined : (failureIssues ?? entryIssues);
 
   // The chat-client composes the per-request `agent` payload (model, kernel,
   // mode, toolChoice, testingEnabled, snapshot, contextPayload) from the

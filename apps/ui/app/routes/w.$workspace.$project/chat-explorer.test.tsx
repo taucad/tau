@@ -242,9 +242,12 @@ function createGraphicsRefForUnit(
     modelRef.send({ type: 'selectComponent', unitId: modelUnitId, componentId });
   }
 
+  // The graphics machine owns its model-interaction actor as a context ref
+  // (`context.modelInteractionRef`), not as a named child — chat-explorer
+  // selects it straight off the snapshot context.
   return createStaticActor({
-    children: {
-      modelInteraction: modelRef,
+    context: {
+      modelInteractionRef: modelRef,
     },
   }) as unknown as ActorRefFrom<typeof graphicsMachine>;
 }

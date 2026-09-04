@@ -92,12 +92,16 @@ function useTreeNavigation({
 
   useEffect(() => {
     if (rows.length === 0) {
-      setActiveId(undefined);
+      queueMicrotask(() => {
+        setActiveId(undefined);
+      });
       return;
     }
 
     if (!activeId || !rows.some(({ node }) => getSpanKey(node.entry) === activeId)) {
-      setActiveId(getSpanKey(rows[0]!.node.entry));
+      queueMicrotask(() => {
+        setActiveId(getSpanKey(rows[0]!.node.entry));
+      });
     }
   }, [activeId, rows]);
 
@@ -398,7 +402,7 @@ export function TraceTreeView(properties: ExplorerProperties): React.JSX.Element
     () => flattenSpanRows(properties.spanTree, properties.collapsedSet),
     [properties.collapsedSet, properties.spanTree],
   );
-  const navigation = useTreeNavigation({
+  const { containerRef, virtuosoRef, ...navigation } = useTreeNavigation({
     rows: flatRows,
     collapsedSet: properties.collapsedSet,
     onSelect: properties.onSelect,
@@ -414,9 +418,9 @@ export function TraceTreeView(properties: ExplorerProperties): React.JSX.Element
   );
 
   return (
-    <div ref={navigation.containerRef} className='min-h-0 flex-1' data-slot='trace-tree'>
+    <div ref={containerRef} className='min-h-0 flex-1' data-slot='trace-tree'>
       <Virtuoso
-        ref={navigation.virtuosoRef}
+        ref={virtuosoRef}
         role='tree'
         aria-label='Telemetry trace operations'
         className='size-full scroll-shadows-y [--scroll-fade-end:transparent] [--scroll-fade-size:28px]'
@@ -577,7 +581,7 @@ export function TimelineView({
     () => flattenSpanRows(properties.spanTree, properties.collapsedSet),
     [properties.collapsedSet, properties.spanTree],
   );
-  const navigation = useTreeNavigation({
+  const { containerRef, virtuosoRef, ...navigation } = useTreeNavigation({
     rows: flatRows,
     collapsedSet: properties.collapsedSet,
     onSelect: properties.onSelect,
@@ -599,10 +603,10 @@ export function TimelineView({
   );
 
   return (
-    <div ref={navigation.containerRef} className='flex min-h-0 flex-1 flex-col' data-slot='trace-timeline'>
+    <div ref={containerRef} className='flex min-h-0 flex-1 flex-col' data-slot='trace-timeline'>
       <TimelineAxis duration={traceDuration} />
       <Virtuoso
-        ref={navigation.virtuosoRef}
+        ref={virtuosoRef}
         role='tree'
         aria-label='Telemetry trace timeline'
         className='min-h-0 flex-1 scroll-shadows-y [--scroll-fade-end:transparent] [--scroll-fade-size:28px]'

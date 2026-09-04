@@ -122,64 +122,55 @@ function MotionHighlight<T extends string>({ ref, ...props }: MotionHighlightPro
   const [boundsState, setBoundsState] = React.useState<Bounds | undefined>(undefined);
   const [activeClassNameState, setActiveClassNameState] = React.useState<string>('');
 
-  const safeSetActiveValue = React.useCallback(
-    (id: T | undefined) => {
-      setActiveValue((previous) => (previous === id ? previous : id));
-      if (id !== activeValue) {
-        onValueChange?.(id);
-      }
-    },
-    [activeValue, onValueChange],
-  );
-
-  const safeSetBounds = React.useCallback(
-    (bounds: DOMRect) => {
-      if (!localRef.current) {
-        return;
-      }
-
-      const boundsOffset = (props as ParentModeMotionHighlightProps).boundsOffset ?? {
-        top: 0,
-        left: 0,
-        width: 0,
-        height: 0,
-      };
-
-      const containerRect = localRef.current.getBoundingClientRect();
-      const newBounds: Bounds = {
-        top: bounds.top - containerRect.top + (boundsOffset.top ?? 0),
-        left: bounds.left - containerRect.left + (boundsOffset.left ?? 0),
-        width: bounds.width + (boundsOffset.width ?? 0),
-        height: bounds.height + (boundsOffset.height ?? 0),
-      };
-
-      setBoundsState((previous) => {
-        if (
-          previous?.top === newBounds.top &&
-          previous.left === newBounds.left &&
-          previous.width === newBounds.width &&
-          previous.height === newBounds.height
-        ) {
-          return previous;
-        }
-
-        return newBounds;
-      });
-    },
-    [props],
-  );
-
-  const clearBounds = React.useCallback(() => {
-    setBoundsState((previous) => (previous === undefined ? previous : undefined));
-  }, []);
-
-  React.useEffect(() => {
-    if (value !== undefined) {
-      setActiveValue(value);
-    } else if (defaultValue !== undefined) {
-      setActiveValue(defaultValue);
+  const safeSetActiveValue = (id: T | undefined): void => {
+    setActiveValue((previous) => (previous === id ? previous : id));
+    if (id !== activeValue) {
+      onValueChange?.(id);
     }
-  }, [value, defaultValue]);
+  };
+
+  const safeSetBounds = (bounds: DOMRect): void => {
+    if (!localRef.current) {
+      return;
+    }
+
+    const boundsOffset = (props as ParentModeMotionHighlightProps).boundsOffset ?? {
+      top: 0,
+      left: 0,
+      width: 0,
+      height: 0,
+    };
+
+    const containerRect = localRef.current.getBoundingClientRect();
+    const newBounds: Bounds = {
+      top: bounds.top - containerRect.top + (boundsOffset.top ?? 0),
+      left: bounds.left - containerRect.left + (boundsOffset.left ?? 0),
+      width: bounds.width + (boundsOffset.width ?? 0),
+      height: bounds.height + (boundsOffset.height ?? 0),
+    };
+
+    setBoundsState((previous) => {
+      if (
+        previous?.top === newBounds.top &&
+        previous.left === newBounds.left &&
+        previous.width === newBounds.width &&
+        previous.height === newBounds.height
+      ) {
+        return previous;
+      }
+
+      return newBounds;
+    });
+  };
+
+  const clearBounds = (): void => {
+    setBoundsState((previous) => (previous === undefined ? previous : undefined));
+  };
+
+  const requestedActiveValue = value ?? defaultValue;
+  if (requestedActiveValue !== undefined && requestedActiveValue !== activeValue) {
+    setActiveValue(requestedActiveValue);
+  }
 
   const id = React.useId();
 
@@ -212,91 +203,69 @@ function MotionHighlight<T extends string>({ ref, ...props }: MotionHighlightPro
     };
   }, [mode, activeValue, safeSetBounds]);
 
-  const render = React.useCallback(
-    // oxlint-disable-next-line @typescript-eslint/promise-function-async -- this is a callback function
-    (children: React.ReactNode) => {
-      if (mode === 'parent') {
-        return (
-          <div
-            ref={localRef}
-            data-slot='motion-highlight-container'
-            className={cn('relative', (props as ParentModeMotionHighlightProps).containerClassName)}
-          >
-            <AnimatePresence initial={false}>
-              {boundsState ? (
-                <motion.div
-                  data-slot='motion-highlight'
-                  animate={{
-                    top: boundsState.top,
-                    left: boundsState.left,
-                    width: boundsState.width,
-                    height: boundsState.height,
-                    opacity: 1,
-                  }}
-                  initial={{
-                    top: boundsState.top,
-                    left: boundsState.left,
-                    width: boundsState.width,
-                    height: boundsState.height,
-                    opacity: 0,
-                  }}
-                  exit={{
-                    opacity: 0,
-                    transition: {
-                      ...transition,
-                      delay: (transition.delay ?? 0) + exitDelay,
-                    },
-                  }}
-                  transition={transition}
-                  className={cn('absolute z-0 bg-muted', className, activeClassNameState)}
-                />
-              ) : null}
-            </AnimatePresence>
-            {children}
-          </div>
-        );
-      }
+  const render = (children: React.ReactNode): React.ReactNode => {
+    if (mode === 'parent') {
+      return (
+        <div
+          ref={localRef}
+          data-slot='motion-highlight-container'
+          className={cn('relative', (props as ParentModeMotionHighlightProps).containerClassName)}
+        >
+          <AnimatePresence initial={false}>
+            {boundsState ? (
+              <motion.div
+                data-slot='motion-highlight'
+                animate={{
+                  top: boundsState.top,
+                  left: boundsState.left,
+                  width: boundsState.width,
+                  height: boundsState.height,
+                  opacity: 1,
+                }}
+                initial={{
+                  top: boundsState.top,
+                  left: boundsState.left,
+                  width: boundsState.width,
+                  height: boundsState.height,
+                  opacity: 0,
+                }}
+                exit={{
+                  opacity: 0,
+                  transition: {
+                    ...transition,
+                    delay: (transition.delay ?? 0) + exitDelay,
+                  },
+                }}
+                transition={transition}
+                className={cn('absolute z-0 bg-muted', className, activeClassNameState)}
+              />
+            ) : null}
+          </AnimatePresence>
+          {children}
+        </div>
+      );
+    }
 
-      return children;
-    },
-    [mode, props, boundsState, transition, exitDelay, className, activeClassNameState],
-  );
+    return children;
+  };
 
-  const contextValue = React.useMemo(
-    () => ({
-      mode,
-      activeValue,
-      setActiveValue: safeSetActiveValue,
-      id,
-      hover,
-      className,
-      transition,
-      disabled,
-      enabled,
-      exitDelay,
-      setBounds: safeSetBounds,
-      clearBounds,
-      activeClassName: activeClassNameState,
-      setActiveClassName: setActiveClassNameState,
-      forceUpdateBounds: (props as ParentModeMotionHighlightProps).forceUpdateBounds,
-    }),
-    [
-      mode,
-      activeValue,
-      safeSetActiveValue,
-      id,
-      hover,
-      className,
-      transition,
-      disabled,
-      enabled,
-      exitDelay,
-      safeSetBounds,
-      clearBounds,
-      activeClassNameState,
-      props,
-    ],
-  );
+  const contextValue = {
+    mode,
+    activeValue,
+    setActiveValue: safeSetActiveValue,
+    id,
+    hover,
+    className,
+    transition,
+    disabled,
+    enabled,
+    exitDelay,
+    setBounds: safeSetBounds,
+    clearBounds,
+    activeClassName: activeClassNameState,
+    setActiveClassName: setActiveClassNameState,
+    forceUpdateBounds: (props as ParentModeMotionHighlightProps).forceUpdateBounds,
+  };
 
   return (
     <MotionHighlightContext.Provider value={contextValue}>

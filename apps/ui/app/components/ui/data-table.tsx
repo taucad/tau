@@ -119,9 +119,12 @@ export function DataTableVirtualized<Data>({
   overscan = 10,
   onRowClick,
 }: DataTableVirtualizedProps<Data>): ReactNode {
+  'use no memo';
+
   const tableContainerRef = useRef<HTMLDivElement>(null);
   const { rows } = table.getRowModel();
 
+  // oxlint-disable-next-line react/incompatible-library -- This component is explicitly opted out because TanStack Virtual returns mutable functions that cannot be compiler-memoized safely.
   const rowVirtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => tableContainerRef.current,

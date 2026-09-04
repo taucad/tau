@@ -286,8 +286,10 @@ export function DiffViewer({
             "[&_.diff.add]:before:content-['']!",
             // Diff remove styles
             '[&_.diff.remove]:bg-destructive/20 [&_.diff.remove]:opacity-70',
-            '[&_.diff.remove]:border-l-destructive',
             "[&_.diff.remove]:before:content-['']!",
+            // Override Fumadocs' inset diff-marker position to paint in the reserved border.
+            '[&_.diff.remove]:before:absolute [&_.diff.remove]:before:inset-y-0 [&_.diff.remove]:before:-left-0.5! [&_.diff.remove]:before:w-0.5',
+            '[&_.diff.remove]:before:bg-[repeating-linear-gradient(to_bottom,var(--destructive)_0_1px,transparent_1px_2px)]',
           )}
         />
       );

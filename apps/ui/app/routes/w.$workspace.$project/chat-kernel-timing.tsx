@@ -194,9 +194,11 @@ export const GeometryUnitTiming = memo(function GeometryUnitTiming({
   const [displaySettings, setDisplaySettings] = useState<DisplaySettings>(defaultDisplaySettings);
 
   useEffect(() => {
-    setSelectedTraceId('latest');
-    setSelectedSpanId(undefined);
-    setCollapsedSpans(new Set());
+    queueMicrotask(() => {
+      setSelectedTraceId('latest');
+      setSelectedSpanId(undefined);
+      setCollapsedSpans(new Set());
+    });
   }, [cadRef]);
 
   const selectedTrace =
@@ -222,7 +224,9 @@ export const GeometryUnitTiming = memo(function GeometryUnitTiming({
       selectedSpanId &&
       !flattenSpanTree(processedTree, new Set()).some(({ entry }) => getSpanKey(entry) === selectedSpanId)
     ) {
-      setSelectedSpanId(undefined);
+      queueMicrotask(() => {
+        setSelectedSpanId(undefined);
+      });
     }
   }, [processedTree, selectedSpanId]);
 

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useSyncExternalStore } from 'react';
 import type { ReactNode } from 'react';
 
 type ClientOnlyProps = {
@@ -20,11 +20,11 @@ type ClientOnlyProps = {
  * @returns The children if the component has mounted, otherwise the fallback (or null).
  */
 export function ClientOnly({ children, fallback }: ClientOnlyProps): ReactNode {
-  const [hasMounted, setHasMounted] = useState(false);
-
-  useEffect(() => {
-    setHasMounted(true);
-  }, []);
+  const hasMounted = useSyncExternalStore(
+    () => () => undefined,
+    () => true,
+    () => false,
+  );
 
   if (!hasMounted) {
     return fallback ?? null;

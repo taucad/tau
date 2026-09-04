@@ -40,8 +40,6 @@ export function ChatTitleBar({
     isChatsLoading,
     applyGeneratedChatName,
   });
-  const { status, error } = useChatRpcStatus();
-  const isDisconnected = status === 'disconnected' || status === 'error';
 
   const createAndOpenChat = useCallback(async (): Promise<void> => {
     if (slugs.status !== 'resolved') {

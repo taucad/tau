@@ -31,6 +31,8 @@ export type ChatInterfaceState = {
  * Extracted from chat-interface.tsx to improve maintainability
  */
 export function useChatInterfaceState(): ChatInterfaceState {
+  'use no memo';
+
   const { editorRef } = useProject();
   const isMobile = useIsMobile();
 
@@ -59,6 +61,7 @@ export function useChatInterfaceState(): ChatInterfaceState {
       return;
     }
 
+    // oxlint-disable-next-line react/set-state-in-effect -- The `use no memo` boundary preserves immediate external-tab drawer synchronization.
     setDrawerOpen(true);
   }, [isMobile, activeTab, drawerOpen]);
 

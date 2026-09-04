@@ -28,6 +28,7 @@ import { Loader } from '#components/ui/loader.js';
 import { Button } from '@taucad/ui/components/button';
 import { ProjectNotFound } from '#routes/w.$workspace.$project/project-not-found.js';
 import { ProjectLoadError } from '#routes/w.$workspace.$project/project-load-error.js';
+import { isKernelAvailable, nativeKernelRequirementForEntryPath } from '#constants/available-kernel-configurations.js';
 
 type ResolvedProjectRouteAccess = {
   readonly projectId: string;
@@ -136,11 +137,13 @@ export function ProjectRouteGate({
   const [resolved, setResolved] = useState<ResolvedProjectRouteAccess>();
   const [routeError, setRouteError] = useState<ProjectRouteError>();
   const [loadAttempt, setLoadAttempt] = useState(0);
-  latestRequestedProjectIdRef.current = requestedProjectId;
-  latestRequestedChatIdRef.current = requestedChatId;
-  const registerSessionFlush = useRef((registration: ProjectSessionFlushRegistration | undefined): void => {
+  useEffect(() => {
+    latestRequestedProjectIdRef.current = requestedProjectId;
+    latestRequestedChatIdRef.current = requestedChatId;
+  }, [requestedChatId, requestedProjectId]);
+  const registerSessionFlush = useCallback((registration: ProjectSessionFlushRegistration | undefined): void => {
     activeSessionFlushRef.current = registration;
-  }).current;
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -388,14 +391,13 @@ export const projectRouteHandle: Omit<Handle, 'providers'> = {
   commandPalette(match) {
     return <ProjectCommandPaletteItems match={match} />;
   },
-  enableFloatingSidebar: true,
   enablePageHeader: false,
 };
 
-// Chat component - handles keyboard shortcuts. The Socket.IO RPC connection
-// is wired up by `<ProjectChatRpcBindings>` once per chatId from the
-// app-shell `ChatSessionStore` (RPC join/leave is per-session, not
-// per-route — see `apps/ui/app/routes/w.$workspace.$project/project-chat-rpc-bindings.tsx`).
+// Chat component - handles keyboard shortcuts. Terminal-run settlement is
+// wired up by `<ProjectChatRunSettlement>` once per chatId from the app-shell
+// `ChatSessionStore` (settlement is per-session, not per-route — see
+// `apps/ui/app/routes/w.$workspace.$project/project-chat-run-settlement.tsx`).
 function Chat(): React.JSX.Element {
   useKeybinding(
     {
@@ -418,11 +420,10 @@ function Chat(): React.JSX.Element {
  *   `<ActiveChatProvider>` boundary so both the chat history and its
  *   composer share the focused chat. `<ChatHistoryGate>` remains the
  *   focused-chat skeleton/error boundary inside that session.
- * - `<ProjectChatRpcBindings>` reads chat ids from the app-shell
+ * - `<ProjectChatRunSettlement>` reads chat ids from the app-shell
  *   `ChatSessionStore` directly (no `<ActiveChatProvider>` dependency),
- *   so RPC bindings persist across `focusedChatId` changes and across
- *   `ensureFocusedChatActor` retries — no socket churn on editor-machine
- *   transitions.
+ *   so settlement persists across `focusedChatId` changes and across
+ *   `ensureFocusedChatActor` retries.
  *
  * Persistence + draft `flushNow` is dispatched centrally by
  * `<GlobalChatFlushGuard>` (mounted in `apps/ui/app/root.tsx`) — every
@@ -440,7 +441,7 @@ function ChatWithProvider(): React.JSX.Element {
     <>
       {name ? <title>{name}</title> : null}
       {description ? <meta name='description' content={description} /> : null}
-      <ProjectChatRpcBindings />
+      <ProjectChatRunSettlement />
       <Chat />
     </>
   );
@@ -487,7 +488,5 @@ function ProjectPersistenceGuard({
 }
 
 export function ProjectChatRoute(): React.JSX.Element {
-  useBlockBrowserNavigation();
-
   return <ChatWithProvider />;
 }

@@ -7,7 +7,6 @@ const projectRef = { kind: 'project' };
 const createChat = vi.fn();
 const navigate = vi.fn();
 let keybindingHandler: (() => Promise<void>) | undefined;
-let connectionStatus = 'connected';
 
 vi.mock('#hooks/use-project.js', () => ({
   useProject: () => ({ editorRef, projectRef, projectId: 'proj_one' }),
@@ -45,9 +44,6 @@ vi.mock('#hooks/use-keyboard.js', () => ({
     return { formattedKeyCombination: 'Ctrl+Shift+C' };
   },
 }));
-vi.mock('#hooks/use-chat-rpc-socket.js', () => ({
-  useChatRpcStatus: () => ({ status: connectionStatus, error: connectionStatus === 'error' ? 'Offline' : undefined }),
-}));
 vi.mock('react-router', () => ({ useNavigate: () => navigate }));
 vi.mock('#routes/w.$workspace.$project/chat-history-settings.js', () => ({
   ChatHistorySettings: () => <button type='button'>Chat settings</button>,
@@ -67,7 +63,6 @@ const { ChatTitleBar } = await import('#routes/w.$workspace.$project/chat-title-
 describe('ChatTitleBar', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    connectionStatus = 'connected';
     createChat.mockResolvedValue({ id: 'chat_new' });
     navigate.mockResolvedValue(undefined);
   });

@@ -1,10 +1,17 @@
-// @vitest-environment node
+// @vitest-environment jsdom
+import { createElement } from 'react';
+import { cleanup, render } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { LoaderFunctionArgs } from 'react-router';
 import { publicationApiCode } from '@taucad/types/constants';
-import { loadPublication as loader, publicationMeta as meta } from '#components/share/tau-publication.js';
+import {
+  loadPublication as loader,
+  PublicationInteractiveSurface,
+  publicationMeta as meta,
+} from '#components/share/tau-publication.js';
 import type { PublicationRouteLoaderData } from '#components/share/tau-publication.js';
 import type { PublicationLockReason } from '#components/share/publication-lock-screen.js';
+import { parsePublicationRecord } from '#components/share/parsed-publication.js';
 import { getEnvironment } from '#environment.config.js';
 import type { Environment } from '#environment.config.js';
 import type * as EnvironmentConfigModule from '#environment.config.js';
@@ -36,7 +43,13 @@ vi.mock('#environment.config.js', async (importOriginal) => {
   };
 });
 
+const useViewPingMock = vi.hoisted(() => vi.fn());
+vi.mock('#components/share/use-view-ping.js', () => ({ useViewPing: useViewPingMock }));
+// eslint-disable-next-line @typescript-eslint/naming-convention -- mock mirrors the module's exported component.
+vi.mock('#components/ui/utils/client-only.js', () => ({ ClientOnly: () => null }));
+
 const mockedGetEnvironment = vi.mocked(getEnvironment);
+const originalClientEnvironment = globalThis.window.ENV;
 const thumbnailPath = 'thumbnail.webp';
 
 const sampleLoaderData: PublicationRouteLoaderData = {
@@ -96,6 +109,7 @@ const expectThrowsPublicationLock = async (
 
 describe('Tau publication loader', () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     mockedGetEnvironment.mockResolvedValue(
       // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variable keys are UPPER_SNAKE_CASE
       { TAU_API_URL: 'http://api.test/' } as Environment,
@@ -109,6 +123,8 @@ describe('Tau publication loader', () => {
   });
 
   afterEach(() => {
+    cleanup();
+    globalThis.window.ENV = originalClientEnvironment;
     vi.restoreAllMocks();
   });
 
@@ -335,6 +351,39 @@ describe('Tau publication loader', () => {
       503,
       'service-unavailable',
     );
+  });
+});
+
+describe('Tau publication client environment', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variable key is uppercase by contract.
+    globalThis.window.ENV = { ...originalClientEnvironment, TAU_API_URL: 'https://client-api.tau.test' };
+  });
+
+  afterEach(() => {
+    cleanup();
+    globalThis.window.ENV = originalClientEnvironment;
+  });
+
+  it('mounts the view ping without reading the server environment', () => {
+    const publication = parsePublicationRecord(sampleLoaderData.publication, 'public');
+    if (!publication) {
+      throw new Error('Expected the publication fixture to parse.');
+    }
+    render(
+      createElement(PublicationInteractiveSurface, {
+        data: sampleLoaderData,
+        publication,
+        hydratedFiles: {},
+      }),
+    );
+
+    expect(mockedGetEnvironment).not.toHaveBeenCalled();
+    expect(useViewPingMock).toHaveBeenCalledWith({
+      publicationId: 'pub_1',
+      apiBaseUrl: 'https://client-api.tau.test',
+    });
   });
 });
 

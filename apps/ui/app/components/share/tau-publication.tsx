@@ -3,7 +3,7 @@ import type { LoaderFunctionArgs, MetaFunction } from 'react-router';
 import { data, isRouteErrorResponse, useLoaderData, useRouteError } from 'react-router';
 import { useSession } from '@better-auth-ui/react';
 import { authClient } from '#lib/auth-client.js';
-import { getEnvironment } from '#environment.config.js';
+import { ENV, getEnvironment } from '#environment.config.js';
 import { cacheTag, cdnBackedSsrRouteHeaders } from '#lib/react-router.lib.js';
 import { SharedWorkerGate } from '#hooks/use-file-manager.js';
 import { Loader } from '#components/ui/loader.js';
@@ -151,24 +151,7 @@ export const publicationMeta: MetaFunction<typeof loadPublication> = ({ loaderDa
 };
 
 const PublicationViewPingMount = ({ publicationId }: { readonly publicationId: string }): React.ReactNode => {
-  const [apiBase, setApiBase] = useState<string | undefined>();
-
-  useEffect(() => {
-    let cancelled = false;
-    const load = async (): Promise<void> => {
-      const env = await getEnvironment();
-      if (!cancelled) {
-        setApiBase(env.TAU_API_URL);
-      }
-    };
-    // async-iife: bootstrap
-    void load();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  return apiBase === undefined ? null : <PublicationViewPingInner publicationId={publicationId} apiBase={apiBase} />;
+  return <PublicationViewPingInner publicationId={publicationId} apiBase={ENV.TAU_API_URL} />;
 };
 
 const PublicationViewPingInner = ({

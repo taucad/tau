@@ -450,11 +450,7 @@ function PortableShareBody({
   }, []);
   useEffect(() => {
     let cancelled = false;
-    setShareUrl(undefined);
-    setError(undefined);
-    setWarnings([]);
     if (method === 'github-gist') {
-      setGithubStatus(undefined);
       const loadConnection = async (): Promise<void> => {
         try {
           const status = await getGithubGistConnectionStatus();
@@ -714,7 +710,7 @@ function PortableShareBody({
   );
 }
 
-export function ProjectSharePanel(properties: ProjectSharePanelProps): React.JSX.Element {
+function ProjectSharePanelBody(properties: ProjectSharePanelProps): React.JSX.Element {
   const {
     projectId,
     projectName,
@@ -805,19 +801,9 @@ export function ProjectSharePanel(properties: ProjectSharePanelProps): React.JSX
 
   useEffect(() => {
     if (shareMethod === 'tau') {
-      void loadEnvelope();
+      queueMicrotask(() => void loadEnvelope());
     }
   }, [loadEnvelope, shareMethod]);
-
-  useEffect(() => {
-    publishRef.send({ type: 'reset' });
-    setTitle(projectName);
-    setDescription(projectDescription);
-    setVisibility('private');
-    setSharedEmails([]);
-    setVisibilityMutating(false);
-    lastHandledShareUrlRef.current = undefined;
-  }, [projectId, projectName, projectDescription, publishRef]);
 
   useEffect(() => {
     if (!publishShareUrl || lastHandledShareUrlRef.current === publishShareUrl) {
@@ -875,6 +861,7 @@ export function ProjectSharePanel(properties: ProjectSharePanelProps): React.JSX
         }
       >
         <PortableShareBody
+          key={shareMethod}
           method={shareMethod}
           collectSnapshot={collectSnapshot}
           signIn={signIn}
@@ -1157,6 +1144,15 @@ export function ProjectSharePanel(properties: ProjectSharePanelProps): React.JSX
         </div>
       </div>
     </SharePanelFrame>
+  );
+}
+
+export function ProjectSharePanel(properties: ProjectSharePanelProps): React.JSX.Element {
+  return (
+    <ProjectSharePanelBody
+      key={`${properties.projectId}\0${properties.projectName}\0${properties.projectDescription ?? ''}`}
+      {...properties}
+    />
   );
 }
 

@@ -3,19 +3,24 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 
 // Chat-history-status must render the model badge from the chat-scoped
-// `Chat.activeModel` (via `useChatSelector(state => state.activeModel)`) —
+// `Chat.activeExecution` (via `useChatSelector(state => state.activeExecution)`) —
 // never by reverse-scanning message metadata.
 // These tests pin that contract and guard against the regression where
 // a fresh chat (no messages yet) silently dropped the model badge.
 
-const chatSelectorState: { activeModel: string | undefined; messages: unknown[] } = {
-  activeModel: 'manifold-model',
+const chatSelectorState: {
+  activeExecution:
+    | { kind: 'tau'; model: string }
+    | { kind: 'paseo'; connectionId: string; agentId: string }
+    | undefined;
+  messages: unknown[];
+} = {
+  activeExecution: { kind: 'tau', model: 'manifold-model' },
   messages: [],
 };
 
 vi.mock('#hooks/use-chat.js', () => ({
-  useChatSelector: <T,>(selector: (state: { activeModel?: string; messages: unknown[] }) => T): T =>
-    selector(chatSelectorState),
+  useChatSelector: <T,>(selector: (state: typeof chatSelectorState) => T): T => selector(chatSelectorState),
 }));
 
 vi.mock('#hooks/use-cookie.js', () => ({
@@ -66,24 +71,24 @@ const { ChatHistoryStatus } = await import('#routes/w.$workspace.$project/chat-h
 
 describe('ChatHistoryStatus — chat-scoped model badge', () => {
   beforeEach(() => {
-    chatSelectorState.activeModel = 'manifold-model';
+    chatSelectorState.activeExecution = { kind: 'tau', model: 'manifold-model' };
     chatSelectorState.messages = [];
   });
 
-  it('renders the model badge from chat.activeModel even when there are no messages yet', () => {
-    chatSelectorState.activeModel = 'pinned-model';
+  it('renders the model badge from a Tau execution even when there are no messages yet', () => {
+    chatSelectorState.activeExecution = { kind: 'tau', model: 'pinned-model' };
     chatSelectorState.messages = [];
 
     render(<ChatHistoryStatus />);
     expect(screen.getByText('PINNED-MODEL')).toBeTruthy();
   });
 
-  it('omits the model badge when chat.activeModel is undefined', () => {
-    chatSelectorState.activeModel = undefined;
+  it('omits the Tau model badge for a Paseo execution', () => {
+    chatSelectorState.activeExecution = { kind: 'paseo', connectionId: 'connection-1', agentId: 'claude' };
     chatSelectorState.messages = [
       // Even with stamped messages present, the deleted message-scan loop
       // must not be reintroduced — the badge is driven exclusively by the
-      // chat-scoped activeModel.
+      // chat-scoped execution target.
       { metadata: { model: 'should-not-be-displayed' }, parts: [] },
     ];
 

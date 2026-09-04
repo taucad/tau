@@ -26,6 +26,19 @@ const maximumZoom = 800;
 const zoomStep = 25;
 
 export function NativeImageViewer({ name, format, revision, readAll, renderPane }: NativeImageViewerProps): ReactNode {
+  return (
+    <NativeImageViewerContent
+      key={`${name}:${format.id}:${revision}`}
+      name={name}
+      format={format}
+      revision={revision}
+      readAll={readAll}
+      renderPane={renderPane}
+    />
+  );
+}
+
+function NativeImageViewerContent({ name, format, revision, readAll, renderPane }: NativeImageViewerProps): ReactNode {
   const [resource, setResource] = useState<ImageResource>({ kind: 'loading' });
   const [dimensions, setDimensions] = useState<Dimensions>();
   const [zoom, setZoom] = useState<Zoom>('fit');
@@ -33,10 +46,6 @@ export function NativeImageViewer({ name, format, revision, readAll, renderPane 
   useEffect(() => {
     let active = true;
     let url: string | undefined;
-    setResource({ kind: 'loading' });
-    setDimensions(undefined);
-    setZoom('fit');
-
     const loadImage = async (): Promise<void> => {
       try {
         const bytes = await readAll();

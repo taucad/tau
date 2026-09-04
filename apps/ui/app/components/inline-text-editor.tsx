@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import type { ReactNode } from 'react';
 import { cva } from 'class-variance-authority';
 import type { VariantProps } from 'class-variance-authority';
@@ -46,12 +46,6 @@ export function InlineTextEditor({
 }: InlineTextEditorProps): React.JSX.Element {
   const [isEditing, setIsEditing] = useState(shouldStartEditing);
   const [editValue, setEditValue] = useState<string>(value);
-
-  useEffect(() => {
-    if (!isEditing) {
-      setEditValue(value);
-    }
-  }, [value, isEditing]);
 
   const startEditing = (): void => {
     if (isDisabled) {

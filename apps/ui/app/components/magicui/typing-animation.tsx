@@ -1,6 +1,6 @@
 import type { MotionProps } from 'motion/react';
 import { motion } from 'motion/react';
-import { useEffect, useRef, useState } from 'react';
+import { createElement, useEffect, useState } from 'react';
 import { cn } from '@taucad/ui/utils/cn';
 
 type TypingAnimationProps = {
@@ -12,6 +12,19 @@ type TypingAnimationProps = {
   readonly shouldStartOnView?: boolean;
 } & MotionProps;
 
+const motionComponentCache = new Map<React.ElementType, ReturnType<typeof motion.create>>();
+
+const getMotionComponent = (component: React.ElementType): ReturnType<typeof motion.create> => {
+  const cached = motionComponentCache.get(component);
+  if (cached) {
+    return cached;
+  }
+
+  const created = motion.create(component, { forwardMotionProps: true });
+  motionComponentCache.set(component, created);
+  return created;
+};
+
 export function TypingAnimation({
   children,
   className,
@@ -21,13 +34,11 @@ export function TypingAnimation({
   shouldStartOnView = false,
   ...props
 }: TypingAnimationProps): React.JSX.Element {
-  const MotionComponent = motion.create(Component, {
-    forwardMotionProps: true,
-  });
+  const MotionComponent = getMotionComponent(Component);
 
   const [displayedText, setDisplayedText] = useState<string>('');
   const [started, setStarted] = useState(false);
-  const elementRef = useRef<HTMLElement | undefined>(null);
+  const [element, setElement] = useState<HTMLElement | null>(null);
 
   useEffect(() => {
     if (!shouldStartOnView) {
@@ -51,14 +62,14 @@ export function TypingAnimation({
       { threshold: 0.1 },
     );
 
-    if (elementRef.current) {
-      observer.observe(elementRef.current);
+    if (element) {
+      observer.observe(element);
     }
 
     return () => {
       observer.disconnect();
     };
-  }, [startDelay, shouldStartOnView]);
+  }, [element, startDelay, shouldStartOnView]);
 
   useEffect(() => {
     if (!started) {
@@ -80,13 +91,13 @@ export function TypingAnimation({
     };
   }, [children, duration, started]);
 
-  return (
-    <MotionComponent
-      ref={elementRef}
-      className={cn('text-4xl leading-[5rem] font-bold tracking-[-0.02em]', className)}
-      {...props}
-    >
-      {displayedText}
-    </MotionComponent>
+  return createElement(
+    MotionComponent as React.ElementType,
+    {
+      ref: setElement,
+      className: cn('text-4xl leading-[5rem] font-bold tracking-[-0.02em]', className),
+      ...props,
+    },
+    displayedText,
   );
 }

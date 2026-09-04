@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback } from 'react';
 import { RgbColorPicker } from 'react-colorful';
 import type { RgbColor } from 'react-colorful';
 import { parse, converter } from 'culori';
@@ -131,11 +131,12 @@ export function StringColorPicker({
 }: StringColorPickerProperties): React.JSX.Element {
   const [open, setOpen] = useState(false);
   const [temporaryColor, setTemporaryColor] = useState(value);
+  const [previousValue, setPreviousValue] = useState(value);
 
-  // Sync internal state with external value changes (e.g., when parameter is reset)
-  useEffect(() => {
+  if (previousValue !== value) {
+    setPreviousValue(value);
     setTemporaryColor(value);
-  }, [value]);
+  }
 
   const isValid = isValidColor(value);
   const rgbValue = isValid ? convertToRgb(value) : { r: 0, g: 0, b: 0 };

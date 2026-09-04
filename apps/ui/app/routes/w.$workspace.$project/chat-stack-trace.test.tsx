@@ -17,6 +17,8 @@ const { mockCreateChat, mockSubmit, mockSetFocusedChatId, mockEditorSend, mockRe
 );
 
 let mockKernelIssues = new Map<string, KernelIssue[]>();
+let mockLatestGeometryOutcome: 'success' | 'failure' | undefined;
+let mockCadTags = new Set<string>();
 let mockAgent: CadAgentConfigInput = {
   profile: 'cad',
   execution: { kind: 'tau', model: 'cookie-model' },
@@ -37,8 +39,15 @@ vi.mock('#hooks/use-project.js', () => ({
 
 vi.mock('#hooks/use-cad.js', () => ({
   useCad: () => ({ id: 'cad-project_test-main.scad' }),
-  useCadSelector: <S,>(selector: (state: { context: { kernelIssues: Map<string, KernelIssue[]> } }) => S): S =>
-    selector({ context: { kernelIssues: mockKernelIssues } }),
+  useCadSelector: <S,>(selector: (state: unknown) => S): S =>
+    selector({
+      context: {
+        entryPath: 'main.scad',
+        kernelIssues: mockKernelIssues,
+        latestGeometryOutcome: mockLatestGeometryOutcome,
+      },
+      hasTag: (tag: string) => mockCadTags.has(tag),
+    }),
 }));
 
 vi.mock('#hooks/use-chats.js', () => ({
@@ -140,6 +149,33 @@ const issue: KernelIssue = {
   location: { fileName: 'main.scad', startLineNumber: 1, startColumn: 1 },
   stackFrames: [],
 };
+
+beforeEach(() => {
+  mockLatestGeometryOutcome = undefined;
+  mockCadTags = new Set();
+});
+
+describe('ChatStackTrace — canonical issue selection', () => {
+  it('shows connection failures selected by the CAD machine', () => {
+    const connectionIssue = { ...issue, message: 'Desktop runtime connection failed' };
+    mockKernelIssues = new Map([['__connection__', [connectionIssue]]]);
+    mockCadTags = new Set(['cad-runtime-error']);
+
+    render(<ChatStackTrace entryPath='main.scad' side='bottom' />);
+
+    expect(screen.getByText(connectionIssue.message)).toBeInTheDocument();
+  });
+
+  it('keeps non-fatal entry diagnostics visible after a successful render', () => {
+    const warning: KernelIssue = { ...issue, message: 'Parameter is unused', severity: 'warning' };
+    mockKernelIssues = new Map([['main.scad', [warning]]]);
+    mockLatestGeometryOutcome = 'success';
+
+    render(<ChatStackTrace entryPath='main.scad' side='bottom' />);
+
+    expect(screen.getByText(warning.message)).toBeInTheDocument();
+  });
+});
 
 describe('ChatStackTrace — new-chat (shift held) path', () => {
   beforeEach(() => {
@@ -270,8 +306,11 @@ describe('ChatStackTrace — in-place (shift not held) path', () => {
     };
     const wireBody = {
       id: 'chat_test',
+      projectId: 'project_test',
       messages: [userMessage],
       agent: mockAgent,
+      admission: { version: 1, idempotencyKey: 'request_0000000001' },
+      execution: { workspaceId: 'workspace_test', baseRevisionId: 'rev_test', hostId: 'host_test' },
     };
 
     const parsed = chatTurnRequestSchema.parse(wireBody);

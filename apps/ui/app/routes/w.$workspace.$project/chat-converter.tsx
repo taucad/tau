@@ -7,8 +7,6 @@ import type { RuntimeContentInput } from '@taucad/runtime';
 import type { JSONSchema7 } from '@taucad/json-schema';
 import type { ExportFile, FileExtension } from '@taucad/types';
 import Form from '@rjsf/core';
-import validator, { customizeValidator } from '@rjsf/validator-ajv8';
-import type { RJSFSchema } from '@rjsf/utils';
 import type { IChangeEvent } from '@rjsf/core';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
 import {
@@ -57,9 +55,7 @@ import type { AppRuntimeClient } from '#types/runtime-client.alias.js';
 import { createExportArtifactZip, downloadExportArtifactSet } from '#utils/export-artifact-set.utils.js';
 import { downloadBlob } from '@taucad/utils/file';
 import { projectWorkspaceKeyCombinations } from '#routes/w.$workspace.$project/project-workspace-context.js';
-
-// The default validator stays for leaf-value checks; the Form needs one typed to its own generics.
-const formValidator = customizeValidator<Record<string, unknown>, RJSFSchema, RJSFContext>();
+import { isJsonSchemaValid, rjsfValidator } from '#lib/rjsf-validator.js';
 
 const toggleConverterKeyCombination = projectWorkspaceKeyCombinations.export;
 
@@ -230,7 +226,7 @@ function sanitizeFormDelta(schema: JSONSchema7, input: Record<string, unknown>):
       if (!propertySchema) {
         return false;
       }
-      return validator.isValid(propertySchema, value, activeSchema);
+      return isJsonSchemaValid(propertySchema, value, activeSchema);
     }),
   );
 }
@@ -563,7 +559,7 @@ export function ExportSchemaForm({
       <Form
         schema={activeResolved.schema}
         formData={activeFormData}
-        validator={formValidator}
+        validator={rjsfValidator}
         widgets={widgets}
         templates={rjsfTemplates}
         idPrefix={idPrefix}
@@ -804,12 +800,16 @@ export const ConverterPanelBody = function ({
   const [selectedEntryPath, setSelectedEntryPath] = useState(mainEntryPath);
 
   useEffect(() => {
-    setSelectedEntryPath(mainEntryPath);
+    queueMicrotask(() => {
+      setSelectedEntryPath(mainEntryPath);
+    });
   }, [mainEntryPath]);
 
   useEffect(() => {
     if (!geometryUnits.has(selectedEntryPath)) {
-      setSelectedEntryPath(mainEntryPath);
+      queueMicrotask(() => {
+        setSelectedEntryPath(mainEntryPath);
+      });
     }
   }, [geometryUnits, selectedEntryPath, mainEntryPath]);
 

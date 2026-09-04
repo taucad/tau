@@ -147,6 +147,24 @@ describe('GeneralSettings', () => {
     mockCodeInlayHintsValue = false;
   });
 
+  it('replaces the consent toggle with the no-train guarantee on paid tiers (T15/AD15)', () => {
+    useEntitlementsMock.mockReturnValue(entitlementsFromTier('pro'));
+
+    render(<GeneralSettings />);
+
+    expect(screen.getByText(/no-train guarantee/i)).toBeDefined();
+    expect(screen.getByText(/never trains on your data/i)).toBeDefined();
+    expect(screen.queryByText(/privacy mode enabled/i)).toBeNull();
+    expect(screen.queryByText(/data sharing enabled/i)).toBeNull();
+  });
+
+  it('keeps the consent selector for free-tier users', () => {
+    render(<GeneralSettings />);
+
+    expect(screen.getByText(/privacy mode enabled/i)).toBeDefined();
+    expect(screen.queryByText(/no-train guarantee/i)).toBeNull();
+  });
+
   it('should render code inlay hints disabled by default', () => {
     render(<GeneralSettings />);
 

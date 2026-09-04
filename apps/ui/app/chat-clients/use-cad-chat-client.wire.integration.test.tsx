@@ -14,6 +14,9 @@ import { useChatSnapshot } from '#hooks/use-chat-snapshot.js';
 import { useContextPayload } from '#hooks/use-context-payload.js';
 import { useActiveChatInstance } from '#chat-clients/_internal/use-active-chat-instance.js';
 import { useCadChatClient } from '#chat-clients/use-cad-chat-client.js';
+import type * as CadAgentConfigModuleShape from '#hooks/use-cad-agent-config.js';
+
+type CadAgentConfigModule = typeof CadAgentConfigModuleShape;
 
 vi.mock('#hooks/use-chat.js', () => ({
   useChatSelector: vi.fn(),
@@ -22,6 +25,22 @@ vi.mock('#hooks/use-chat.js', () => ({
 vi.mock('#hooks/use-cookie.js', () => ({ useCookie: vi.fn() }));
 vi.mock('#hooks/use-chat-snapshot.js', () => ({ useChatSnapshot: vi.fn() }));
 vi.mock('#hooks/use-context-payload.js', () => ({ useContextPayload: vi.fn() }));
+vi.mock('#hooks/use-models.js', () => ({
+  useModels: () => ({
+    resolveModel: () => ({
+      id: 'openai-gpt-5.5',
+      isResolved: true,
+      provider: { id: 'openai', name: 'OpenAI' },
+      model: { id: 'openai-gpt-5.5', provider: { id: 'openai' }, details: { contextWindow: 128_000 } },
+    }),
+  }),
+}));
+// The assembler itself stays real — only the asynchronous capability probe,
+// which needs a mounted project filesystem this scope does not have, is stubbed.
+vi.mock('#hooks/use-cad-agent-config.js', async (importOriginal) => ({
+  ...(await importOriginal<CadAgentConfigModule>()),
+  awaitAgentHostAvailability: async () => ({ status: 'available', durability: 'exclusive-append' }),
+}));
 vi.mock('#chat-clients/_internal/use-active-chat-instance.js', () => ({
   useActiveChatInstance: vi.fn(),
 }));
@@ -35,6 +54,29 @@ vi.mock('#hooks/active-chat-provider.js', () => ({
 }));
 vi.mock('#hooks/chat-session-store-provider.js', () => ({
   useChatSessionStore: () => ({ setLatestAgentBody: vi.fn() }),
+}));
+vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ projectId: 'proj_integration' }) }));
+vi.mock('#providers/chat-workspace-authority-provider.js', () => ({
+  useOptionalChatWorkspaceAuthority: () => ({
+    get: () => ({
+      execution: {
+        workspaceId: 'workspace_integration',
+        baseRevisionId: 'rev_integration',
+        hostId: 'host_integration',
+      },
+    }),
+    prepare: async () => ({
+      execution: {
+        workspaceId: 'workspace_integration',
+        baseRevisionId: 'rev_integration',
+        hostId: 'host_integration',
+      },
+    }),
+    finalize: async () => undefined,
+    discard: async () => undefined,
+    markAdmitted: async () => undefined,
+    markCancelled: async () => undefined,
+  }),
 }));
 
 const noop = (): void => undefined;
@@ -94,9 +136,18 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(useChatComposer).mockReturnValue({
     draftActorRef: { send: vi.fn() },
-    model: { modelId: 'openai-gpt-5.5', model: undefined, setActiveModel: noop },
+    model: {
+      modelId: 'openai-gpt-5.5',
+      model: { id: 'openai-gpt-5.5', provider: { id: 'openai', name: 'OpenAI' } },
+      setActiveModel: noop,
+    },
+    execution: {
+      execution: { kind: 'tau', model: 'openai-gpt-5.5' },
+      setActiveExecution: noop,
+    },
     kernel: { kernelId: 'replicad', kernel: resolveKernel('replicad'), setActiveKernel: noop },
     status: 'ready',
+    agentActivity: 'ready',
     stop: noop,
     contextUsage: undefined,
     session: undefined,
@@ -112,7 +163,7 @@ beforeEach(() => {
 });
 
 describe('useCadChatClient wire integration', () => {
-  it('should produce a body the API schema accepts when submit fires with minimal producer-hook state', () => {
+  it('should produce a body the API schema accepts when submit fires with minimal producer-hook state', async () => {
     const chat = mock<Chat<MyUIMessage>>();
     vi.mocked(useActiveChatInstance).mockReturnValue(chat);
     const actions = buildActions();
@@ -120,7 +171,7 @@ describe('useCadChatClient wire integration', () => {
 
     const { result } = renderHook(() => useCadChatClient());
 
-    act(() => {
+    await act(async () => {
       result.current.submit({ text: 'design a vase' });
     });
 
@@ -131,7 +182,7 @@ describe('useCadChatClient wire integration', () => {
     const parsed = chatTurnRequestSchema.parse(wireBody);
     expect(parsed.agent).toMatchObject({
       profile: 'cad',
-      model: 'openai-gpt-5.5',
+      execution: { kind: 'tau', model: 'openai-gpt-5.5' },
       kernel: 'replicad',
       mode: 'agent',
       toolChoice: 'auto',
@@ -139,9 +190,8 @@ describe('useCadChatClient wire integration', () => {
     });
   });
 
-  it('should produce a body the API schema accepts when snapshot and contextPayload are present', () => {
+  it('should produce a body the API schema accepts when snapshot and contextPayload are present', async () => {
     const snapshot: ChatSnapshot = { activeFile: { path: 'src/main.ts', name: 'main.ts' } };
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- `AGENTS.md` is a filesystem key, not a JS identifier
     const contextPayload: ContextPayload = { memory: { 'AGENTS.md': 'shared rules' } };
     vi.mocked(useChatSnapshot).mockReturnValue(snapshot);
     vi.mocked(useContextPayload).mockReturnValue(contextPayload);
@@ -153,7 +203,7 @@ describe('useCadChatClient wire integration', () => {
 
     const { result } = renderHook(() => useCadChatClient());
 
-    act(() => {
+    await act(async () => {
       result.current.submit({ text: 'iterate' });
     });
 
@@ -164,7 +214,7 @@ describe('useCadChatClient wire integration', () => {
     expect(parsed.agent).toMatchObject({ snapshot, contextPayload });
   });
 
-  it('should produce a body the API schema accepts when retry fires for a specific message id', () => {
+  it('should produce a body the API schema accepts when retry fires for a specific message id', async () => {
     const chat = mock<Chat<MyUIMessage>>();
     vi.mocked(useActiveChatInstance).mockReturnValue(chat);
     const actions = buildActions();
@@ -172,7 +222,7 @@ describe('useCadChatClient wire integration', () => {
 
     const { result } = renderHook(() => useCadChatClient());
 
-    act(() => {
+    await act(async () => {
       result.current.retry('msg_target');
     });
 
@@ -186,7 +236,7 @@ describe('useCadChatClient wire integration', () => {
     expect(messageId).toBe('msg_target');
   });
 
-  it('should produce a body the API schema accepts when regenerateTail fires', () => {
+  it('should produce a body the API schema accepts when regenerateTail fires', async () => {
     const chat = mock<Chat<MyUIMessage>>();
     vi.mocked(useActiveChatInstance).mockReturnValue(chat);
     const actions = buildActions();
@@ -194,7 +244,7 @@ describe('useCadChatClient wire integration', () => {
 
     const { result } = renderHook(() => useCadChatClient());
 
-    act(() => {
+    await act(async () => {
       result.current.regenerateTail();
     });
 
@@ -204,7 +254,7 @@ describe('useCadChatClient wire integration', () => {
     expect(() => chatTurnRequestSchema.parse(wireBody)).not.toThrow();
   });
 
-  it('should produce a body the API schema rejects with a missing-agent path when the agent block is removed', () => {
+  it('should produce a body the API schema rejects with a missing-agent path when the agent block is removed', async () => {
     const chat = mock<Chat<MyUIMessage>>();
     vi.mocked(useActiveChatInstance).mockReturnValue(chat);
     const actions = buildActions();
@@ -212,7 +262,7 @@ describe('useCadChatClient wire integration', () => {
 
     const { result } = renderHook(() => useCadChatClient());
 
-    act(() => {
+    await act(async () => {
       result.current.submit({ text: 'guard rail' });
     });
 

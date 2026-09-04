@@ -104,12 +104,15 @@ export function ChatInterfaceSessionGate({
   readonly children: React.ReactNode;
   readonly fallback: React.ReactNode;
 }): React.JSX.Element {
+  'use no memo';
+
   const { editorRef } = useProject();
   const focusedChatId = useSelector(editorRef, (state) => state.context.focusedChatId);
   const [lastValidChatId, setLastValidChatId] = useState<string | undefined>(focusedChatId);
 
   useEffect(() => {
     if (focusedChatId !== undefined && focusedChatId !== lastValidChatId) {
+      // oxlint-disable-next-line react/set-state-in-effect -- The `use no memo` boundary preserves the provider's same-commit chat handoff.
       setLastValidChatId(focusedChatId);
     }
   }, [focusedChatId, lastValidChatId]);

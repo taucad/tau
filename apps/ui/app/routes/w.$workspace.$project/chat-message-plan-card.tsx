@@ -62,7 +62,7 @@ export function ChatMessagePlanCard({ targetFile, content, status }: ChatMessage
 
   if (status === 'loading') {
     return (
-      <ChatToolCard variant='minimal' status='loading' isDefaultOpen={false}>
+      <ChatToolCard variant='minimal' status='loading' isCollapsible={false}>
         <ChatToolCardHeader>
           <ChatToolCardIcon icon={FileText} />
           <ChatToolCardTitle>

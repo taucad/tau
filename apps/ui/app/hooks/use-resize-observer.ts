@@ -28,7 +28,9 @@ export function useResizeObserver<T extends HTMLElement = HTMLElement>(options: 
   const isMounted = useIsMounted();
   const previousSize = useRef<Size>({ ...initialSize });
   const onResize = useRef<((size: Size) => void) | undefined>(undefined);
-  onResize.current = options.onResize;
+  useEffect(() => {
+    onResize.current = options.onResize;
+  }, [options.onResize]);
 
   useEffect(() => {
     if (!('ResizeObserver' in globalThis)) {

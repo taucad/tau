@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { Check, ChevronDown } from 'lucide-react';
 import type { FileExtension } from '@taucad/types';
 import { useSelector } from '@xstate/react';
@@ -301,11 +301,9 @@ export function ExportSelector({
   const initialEntryPath = defaultEntryPath ?? mainEntryPath ?? entries[0]?.entryPath ?? '';
   const [selectedEntryPath, setSelectedEntryPath] = useState(initialEntryPath);
 
-  useEffect(() => {
-    if (!entries.some((entry) => entry.entryPath === selectedEntryPath)) {
-      setSelectedEntryPath(entries[0]?.entryPath ?? initialEntryPath);
-    }
-  }, [entries, selectedEntryPath, initialEntryPath]);
+  if (!entries.some((entry) => entry.entryPath === selectedEntryPath)) {
+    setSelectedEntryPath(entries[0]?.entryPath ?? initialEntryPath);
+  }
 
   const selectedActor = entries.find((entry) => entry.entryPath === selectedEntryPath)?.actor ?? entries[0]?.actor;
 

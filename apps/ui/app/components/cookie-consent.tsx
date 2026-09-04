@@ -44,15 +44,14 @@ export function CookiePreferencesDialog({
   const [, setConsentStatus] = useCookieConsent();
   // Default to false for GDPR compliance - optional cookies must not be pre-selected
   const [analyticsEnabled, setAnalyticsEnabled] = useState(analytics.get_explicit_consent_status() === 'granted');
+  const [wasOpen, setWasOpen] = useState(isOpen);
 
-  // Reset local state to match actual consent status when dialog opens
-  // Uses PostHog's get_explicit_consent_status() as the source of truth
-  // This ensures Cancel truly discards changes by syncing on each open
-  useEffect(() => {
+  if (isOpen !== wasOpen) {
+    setWasOpen(isOpen);
     if (isOpen) {
       setAnalyticsEnabled(analytics.get_explicit_consent_status() === 'granted');
     }
-  }, [isOpen, analytics]);
+  }
 
   const handleSaveSettings = (): void => {
     if (analyticsEnabled) {

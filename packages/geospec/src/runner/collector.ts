@@ -24,6 +24,7 @@ import type { GeoSpecClaimResult, GeoSpecExecutionOptions } from '#engine/protoc
 import type { JSONValue } from '@taucad/runtime/types';
 import { geoSpecEngineUnavailableDiagnostic, getGeoSpecEngineProtocol } from '#engine/registry.js';
 import type { GeometryDiagnostic } from '#mesh/types.js';
+import { diagnosticForTransport, geometryDiagnosticSchema } from '#model/errors.js';
 import { matchesGeoSpecTestName } from '#runner/filter.js';
 import type { GeoSpecTestNamePattern } from '#runner/filter.js';
 import {
@@ -93,7 +94,24 @@ const createErrorDiagnostics = (error: unknown): GeometryDiagnostic[] => {
     return [...error.diagnostics];
   }
 
-  const message = error instanceof Error ? error.message : String(error);
+  // VM modules and worker transports do not share Error constructors. Validate
+  // the named error's data instead of relying on instanceof across realms.
+  if (typeof error === 'object' && error !== null && Reflect.get(error, 'name') === 'GeoSpecModelLoadError') {
+    const diagnostics: unknown = Reflect.get(error, 'diagnostics');
+    if (Array.isArray(diagnostics) && diagnostics.length > 0) {
+      try {
+        return diagnostics.map((diagnostic) => diagnosticForTransport(diagnosticFromWire(diagnostic)));
+      } catch {
+        // Malformed diagnostic arrays remain a failed test, never an empty pass.
+      }
+    }
+  }
+
+  const message =
+    typeof error === 'object' && error !== null && typeof Reflect.get(error, 'message') === 'string'
+      ? String(Reflect.get(error, 'message'))
+      : String(error);
+  const { details } = diagnosticForTransport({ code: 'TEST_FAILED', severity: 'error', message, details: error });
   if (message.includes('model.volume is not a function')) {
     return [
       {
@@ -101,7 +119,7 @@ const createErrorDiagnostics = (error: unknown): GeometryDiagnostic[] => {
         severity: 'error',
         message: 'GeoSpec GeometrySubject does not expose model.volume().',
         suggestion: 'Use expectGeo(model).toHaveVolume({ value, tolerance }) instead of reading model.volume().',
-        details: error,
+        details,
       },
     ];
   }
@@ -113,7 +131,7 @@ const createErrorDiagnostics = (error: unknown): GeometryDiagnostic[] => {
         message: 'GeoSpec GeometrySubject does not expose model.boundingBox.bounds.',
         suggestion:
           'Use expectGeo(model).toHaveBoundingBox({ min, max, size, center, tolerance }) instead of reading model.boundingBox.',
-        details: error,
+        details,
       },
     ];
   }
@@ -122,7 +140,7 @@ const createErrorDiagnostics = (error: unknown): GeometryDiagnostic[] => {
       code: 'TEST_FAILED',
       severity: 'error',
       message,
-      details: error,
+      details,
     },
   ];
 };
@@ -134,18 +152,7 @@ const isSettledDiagnostics = (
 let nextClaim = 0;
 
 const diagnosticFromWire = (value: unknown): GeometryDiagnostic => {
-  if (typeof value !== 'object' || value === null) {
-    throw new TypeError('GeoSpec engine returned a non-object diagnostic.');
-  }
-  const diagnostic = value as Record<string, unknown>;
-  if (
-    typeof diagnostic['code'] !== 'string' ||
-    !['error', 'warning', 'info'].includes(String(diagnostic['severity'])) ||
-    typeof diagnostic['message'] !== 'string'
-  ) {
-    throw new TypeError('GeoSpec engine returned an invalid diagnostic shape.');
-  }
-  return diagnostic as GeometryDiagnostic;
+  return geometryDiagnosticSchema.parse(value);
 };
 
 const diagnosticsFromClaimResult = (result: GeoSpecClaimResult): readonly GeometryDiagnostic[] => {

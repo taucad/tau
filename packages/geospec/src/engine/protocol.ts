@@ -14,7 +14,7 @@ import type { JSONValue } from '@taucad/runtime/types';
 export const geoSpecEngineProtocolVersion = 2;
 
 /** Registry version consumed by the Wave-1 matcher vocabulary. @public */
-export const geoSpecMatcherRegistryVersion = 2;
+export const geoSpecMatcherRegistryVersion = 3;
 
 /** Opaque request identifier. @public */
 export type GeoSpecRequestId = string;

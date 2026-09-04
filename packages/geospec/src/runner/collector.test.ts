@@ -6,6 +6,8 @@ import { clearGeoSpecEngine, registerGeoSpecEngine } from '#engine/seam.js';
 import { createTestGeoSpecEngineProtocol } from '#engine/protocol.test-support.js';
 import type { GeoSpecSubmitClaimsRequest, GeoSpecSubmitClaimsResult } from '#engine/protocol.js';
 import type { GeometryDiagnostic } from '#mesh/types.js';
+import { GeoSpecModelLoadError } from '#model/errors.js';
+
 import {
   clearCollectorGlobals,
   collectorGlobalKey,
@@ -82,6 +84,74 @@ describe('collector globals', () => {
 });
 
 describe('suite and test tree', () => {
+  it.each([
+    { name: 'GeoSpecModelLoadError', message: 'empty', diagnostics: [] },
+    { name: 'GeoSpecModelLoadError', message: 'malformed', diagnostics: [{ code: 'BAD' }] },
+    {
+      name: 'GeoSpecModelLoadError',
+      message: 'invalid spatial',
+      diagnostics: [{ code: 'BAD', severity: 'error', message: 'bad', spatial: { center: [Number.NaN, 0, 0] } }],
+    },
+    {
+      name: 'GeoSpecModelLoadError',
+      message: 'invalid suggestion',
+      diagnostics: [{ code: 'BAD', severity: 'error', message: 'bad', suggestion: 4 }],
+    },
+    new Error('ordinary failure'),
+    'string failure',
+  ])('keeps invalid or ordinary thrown values as serializable failures %#', async (error) => {
+    const collector = createCollector();
+    collector.it('failure', () => {
+      // oxlint-disable-next-line typescript/only-throw-error -- Deliberately test arbitrary thrown values at the runner boundary.
+      throw error;
+    });
+    await collector.waitForCompletion();
+    expect(collector.tests[0]?.status).toBe('failed');
+    expect(collector.tests[0]?.diagnostics).toHaveLength(1);
+    expect(collector.tests[0]?.diagnostics[0]?.code).toBe('TEST_FAILED');
+    // oxlint-disable-next-line unicorn/prefer-structured-clone -- Verify JSON transport, not cloning.
+    expect(JSON.parse(JSON.stringify(collector.tests[0]?.diagnostics))).toStrictEqual(collector.tests[0]?.diagnostics);
+  });
+
+  it('unwraps a transported model error and normalizes opaque details', async () => {
+    const collector = createCollector();
+    collector.it('failure', () => {
+      // oxlint-disable-next-line typescript/only-throw-error -- Worker errors can arrive as plain structured data.
+      throw {
+        name: 'GeoSpecModelLoadError',
+        diagnostics: [
+          { code: 'FIRST', severity: 'warning', message: 'warning', details: new Error('native failure') },
+          { code: 'SECOND', severity: 'error', message: 'error', details: { callback: () => undefined } },
+        ],
+      };
+    });
+    await collector.waitForCompletion();
+    expect(collector.tests[0]?.diagnostics).toEqual([
+      { code: 'FIRST', severity: 'warning', message: 'warning', details: { name: 'Error', message: 'native failure' } },
+      { code: 'SECOND', severity: 'error', message: 'error', details: '{}' },
+    ]);
+  });
+  it('preserves every diagnostic from a real failing model loader', async () => {
+    const diagnostics: GeometryDiagnostic[] = [
+      {
+        code: 'EXPORT_FAILED',
+        severity: 'error',
+        message: 'export failed',
+        suggestion: 'Repair the model',
+        spatial: { center: [1, 2, 3] },
+        details: { file: 'gear.ts' },
+      },
+      { code: 'KERNEL_FAILED', severity: 'error', message: 'kernel failed' },
+    ];
+    const collector = createCollector();
+    collector.it('load', async () => {
+      throw new GeoSpecModelLoadError(diagnostics);
+    });
+    await collector.waitForCompletion();
+    expect(collector.tests[0]?.diagnostics).toStrictEqual(diagnostics);
+    // oxlint-disable-next-line unicorn/prefer-structured-clone -- Verify JSON transport, not cloning.
+    expect(JSON.parse(JSON.stringify(collector.tests[0]?.diagnostics))).toStrictEqual(diagnostics);
+  });
   it('should record nested suites, skips, and passing tests', async () => {
     const collector = createCollector();
     collector.describe('outer', () => {

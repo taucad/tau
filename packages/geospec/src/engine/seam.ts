@@ -23,7 +23,7 @@
 import type { VmFileSystem } from '@taucad/esbuild/vm';
 import type { AnalyzeMeshResult, LoadMeshOptions, LoadMeshResult } from '#mesh/load-mesh.js';
 import type { GeometryDiagnostic, GeometrySubject } from '#mesh/types.js';
-import type { LoadModelOptions } from '#model/types.js';
+import type { CreateModelLoaderOptions, LoadModelOptions, ManagedGeoSpecModelLoader } from '#model/types.js';
 import type { GeoSpecNodePoolRunnerOptions } from '#runner/node/node-pool-runner.js';
 import type { GeoSpecNodeRunnerOptions } from '#runner/node/node-runner.js';
 import type { GeoSpecPoolWorkerHostOptions } from '#runner/worker/pool-worker-host.js';
@@ -52,15 +52,12 @@ export const geoSpecEngineGlobalKey = '__GEOSPEC_ENGINE__';
 /** @public */
 export const geoSpecEngineUnavailableDiagnostic = (capability: string): GeometryDiagnostic =>
   registeredGeoSpecEngineUnavailableDiagnostic(capability);
-/** @public */
-// eslint-disable-next-line @typescript-eslint/naming-convention -- Preserve the registry error's constructor identity.
-export const GeoSpecEngineUnavailableError = RegisteredGeoSpecEngineUnavailableError;
-/**
- *
- */
+/* oxlint-disable no-redeclare -- The public type/value pair preserves the registry constructor identity. */
+/** Registry error constructor, re-exported without changing its identity. @public */
+export const GeoSpecEngineUnavailableError = RegisteredGeoSpecEngineUnavailableError; // eslint-disable-line @typescript-eslint/naming-convention -- Preserve the registry error's constructor identity.
+/* oxlint-enable no-redeclare -- Resume normal declaration checks after the intentional type/value pair. */
 /** @public */
 export type GeoSpecEngineUnavailableError = RegisteredGeoSpecEngineUnavailableError;
-
 /**
  * Diagnostic code answered by every engine-backed entry point while no engine
  * is registered.
@@ -81,6 +78,7 @@ export type GeoSpecEngineHostBindings = {
   loadModel<Code extends Record<string, string> = Record<string, string>>(
     options: LoadModelOptions<Code>,
   ): Promise<GeometrySubject>;
+  createModelLoader(options: CreateModelLoaderOptions): ManagedGeoSpecModelLoader;
   createGeoSpecNodeRunner(options: GeoSpecNodeRunnerOptions): GeoSpecRunner;
   createGeoSpecNodePoolRunner(options: GeoSpecNodePoolRunnerOptions): GeoSpecRunner;
   createGeoSpecWebRunner(options: GeoSpecWebRunnerOptions): GeoSpecRunner;

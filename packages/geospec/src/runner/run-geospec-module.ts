@@ -1,13 +1,17 @@
 import { createEsbuildModuleVm } from '@taucad/esbuild/vm';
 import { createCollector } from '#runner/collector.js';
 import { compileGeoSpecTestNamePattern, filterGeoSpecTests } from '#runner/filter.js';
-import { getRegisteredGeoSpecHostBinding } from '#engine/registry.js';
+import { getGeoSpecEngineProtocol, getRegisteredGeoSpecHostBinding } from '#engine/registry.js';
+import { analyzeMesh } from '#mesh/load-mesh.js';
+import { GeoSpecModelLoadError } from '#model/errors.js';
 import type { GeoSpecRunResult, GeoSpecTestCase, RunGeoSpecModuleOptions } from '#runner/types.js';
 
 const geospecRunBindingsGlobalKey = '__GEOSPEC_RUN_BINDINGS__';
 
 type GeoSpecRunBinding = {
   collector: ReturnType<typeof createCollector>;
+  analyzeMesh: typeof analyzeMesh;
+  geoSpecModelLoadError: typeof GeoSpecModelLoadError;
   modelLoader?: RunGeoSpecModuleOptions['modelLoader'];
   stepLoader?: RunGeoSpecModuleOptions['stepLoader'];
 };
@@ -113,23 +117,7 @@ export const expectGeo = (subject) => getCollector().expectGeo(subject);
 
 const createGeospecModelBuiltinCode = (runToken: string): string => `
 ${createBindingAccessorCode(runToken)}
-export class GeoSpecModelLoadError extends Error {
-  constructor(diagnostics) {
-    const snapshot = diagnostics.map((diagnostic) => {
-      try {
-        return structuredClone(diagnostic);
-      } catch {
-        return {
-          ...diagnostic,
-          details: diagnostic?.details === undefined ? undefined : String(diagnostic.details),
-        };
-      }
-    });
-    super(snapshot.map((diagnostic) => diagnostic.message).join('\\n') || 'GeoSpec model load failed.');
-    this.name = 'GeoSpecModelLoadError';
-    this.diagnostics = Object.freeze(snapshot);
-  }
-}
+export const GeoSpecModelLoadError = getRunBinding().geoSpecModelLoadError;
 
 export const loadModel = async (options) => {
   const loader = getRunBinding().modelLoader;
@@ -218,8 +206,25 @@ export async function runGeoSpecModule(options: RunGeoSpecModuleOptions): Promis
   // construction (caching, affinity, resource-scope tracking); this module
   // compiles and executes the spec against whatever it is handed.
   const { modelLoader } = options;
+  const meshSubjects = new Set<string>();
+  const meshProtocol = getGeoSpecEngineProtocol();
+  let meshAnalysisClosed = false;
+  const releaseMeshSubject = async (subjectId: string) =>
+    meshProtocol?.releaseSubject({ requestId: `${runToken}:release:${subjectId}`, subjectId });
   bindings.set(runToken, {
     collector,
+    geoSpecModelLoadError: GeoSpecModelLoadError,
+    analyzeMesh: async (input) => {
+      const result = await analyzeMesh(input);
+      if (result.success && 'source' in input) {
+        if (meshAnalysisClosed) {
+          await Promise.allSettled([releaseMeshSubject(result.subject.subjectId)]);
+        } else {
+          meshSubjects.add(result.subject.subjectId);
+        }
+      }
+      return result;
+    },
     ...(modelLoader ? { modelLoader } : {}),
     ...(options.stepLoader ? { stepLoader: options.stepLoader } : {}),
   });
@@ -235,6 +240,10 @@ export async function runGeoSpecModule(options: RunGeoSpecModuleOptions): Promis
   vm.registerModule('geospec/step', {
     version: '0.0.0-poc',
     code: createGeospecStepBuiltinCode(runToken),
+  });
+  vm.registerModule('geospec/mesh', {
+    version: '0.0.0-poc',
+    code: `${createBindingAccessorCode(runToken)}\nexport const analyzeMesh = (options) => getRunBinding().analyzeMesh(options);`,
   });
   vm.registerModule('geospec/brep', {
     version: '0.0.0-poc',
@@ -287,11 +296,14 @@ export async function runGeoSpecModule(options: RunGeoSpecModuleOptions): Promis
       bundle,
     };
   } finally {
+    meshAnalysisClosed = true;
     bindings.delete(runToken);
     if (bindings.size === 0) {
       Reflect.deleteProperty(runBindingsGlobal, geospecRunBindingsGlobalKey);
     }
     vm.dispose();
+    // Complete every release even if a host throws during cleanup.
+    await Promise.allSettled([...meshSubjects].map(async (subjectId) => releaseMeshSubject(subjectId)));
     // R9: land write-behind evidence at every module/shard boundary so
     // pending entries become durable (and visible to sibling workers) off the
     // matcher path. No-op when no engine or store is installed.

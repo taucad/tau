@@ -171,6 +171,12 @@ export type MeshEvidence = {
   stats: GeometryStats;
 };
 
+/** Wire-safe mesh summary carried by an opaque geometry subject. @public */
+export type GeometrySubjectMeshEvidence = {
+  format: MeshFileFormat;
+  stats: Pick<GeometryStats, 'vertexCount' | 'meshCount' | 'triangleCount'>;
+};
+
 /**
  * One triangle from mesh evidence, in geometry document coordinates.
  *
@@ -324,7 +330,7 @@ export type GeometrySubject = {
   kind: 'geometry-subject';
   /** Opaque engine-owned identifier used by every protocol claim. */
   subjectId: string;
-  mesh: MeshEvidence;
+  mesh: GeometrySubjectMeshEvidence;
   brep?: BrepEvidence;
   step?: StepEvidence;
   provenance: GeometryProvenance;
@@ -540,7 +546,7 @@ export type MeshQualityStats = {
 };
 
 /**
- * Scene bounding box with per-primitive contributors (meters, glTF space).
+ * Scene bounding box with per-primitive contributors in the subject's unit and frame.
  * @public
  */
 export type BoundingBoxStats = {

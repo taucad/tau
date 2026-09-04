@@ -1,4 +1,17 @@
 import type { GeometryDiagnostic } from '#mesh/types.js';
+import { isGeoSpecJsonValue } from '#engine/protocol.js';
+import { z } from 'zod';
+
+const vector = z.tuple([z.number(), z.number(), z.number()]);
+/** Diagnostic shape shared by engine responses and cross-realm load errors. */
+export const geometryDiagnosticSchema = z.strictObject({
+  code: z.string(),
+  severity: z.enum(['error', 'warning', 'info']),
+  message: z.string(),
+  suggestion: z.string().optional(),
+  spatial: z.strictObject({ min: vector.optional(), max: vector.optional(), center: vector.optional() }).optional(),
+  details: z.unknown().optional(),
+});
 
 const stringifyDetails = (details: unknown): string => {
   if (typeof details === 'string') {
@@ -10,6 +23,22 @@ const stringifyDetails = (details: unknown): string => {
   } catch {
     return '[unserializable diagnostic details]';
   }
+};
+
+/**
+ * Normalize opaque diagnostic details before worker/JSON transport.
+ * @param diagnostic - Collected failure with potentially non-serializable details.
+ * @returns A detached transport-safe diagnostic.
+ */
+export const diagnosticForTransport = (diagnostic: GeometryDiagnostic): GeometryDiagnostic => {
+  const details =
+    diagnostic.details instanceof Error
+      ? { name: diagnostic.details.name, message: diagnostic.details.message }
+      : diagnostic.details;
+  return structuredClone({
+    ...diagnostic,
+    ...(details === undefined ? {} : { details: isGeoSpecJsonValue(details) ? details : stringifyDetails(details) }),
+  });
 };
 
 const cloneDiagnostic = (diagnostic: GeometryDiagnostic): GeometryDiagnostic => {

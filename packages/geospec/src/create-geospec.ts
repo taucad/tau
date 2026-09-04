@@ -5,7 +5,7 @@
  */
 
 import { createCollector, getCollector } from '#runner/collector.js';
-import type { AnalyzeMeshResult, LoadMeshOptions, LoadMeshResult } from '#mesh/load-mesh.js';
+import type { AnalyzeMeshOptions, AnalyzeMeshResult, LoadMeshOptions, LoadMeshResult } from '#mesh/load-mesh.js';
 import type { GeoSpecMatcher } from '#runner/types.js';
 
 /**
@@ -15,7 +15,7 @@ import type { GeoSpecMatcher } from '#runner/types.js';
  */
 export type GeoSpec = {
   loadMesh(options: LoadMeshOptions): Promise<LoadMeshResult>;
-  analyzeMesh(options: LoadMeshOptions): Promise<AnalyzeMeshResult>;
+  analyzeMesh(options: AnalyzeMeshOptions): Promise<AnalyzeMeshResult>;
 };
 
 /**

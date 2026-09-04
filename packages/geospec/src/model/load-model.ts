@@ -9,7 +9,7 @@
 import { getRegisteredGeoSpecHostBinding, geoSpecEngineUnavailableDiagnostic } from '#engine/registry.js';
 import type { GeometrySubject } from '#mesh/types.js';
 import { GeoSpecModelLoadError } from '#model/errors.js';
-import type { CreateModelLoaderOptions, GeoSpecModelLoader, LoadModelOptions } from '#model/types.js';
+import type { CreateModelLoaderOptions, ManagedGeoSpecModelLoader, LoadModelOptions } from '#model/types.js';
 
 /**
  * Load a CAD model into GeoSpec evidence.
@@ -40,6 +40,15 @@ export async function loadModel<Code extends Record<string, string> = Record<str
  * @returns A configured model loader.
  * @public
  */
-export const createModelLoader = (defaults: CreateModelLoaderOptions = {}): GeoSpecModelLoader => {
-  return async (options) => loadModel({ ...defaults, ...options });
+export const createModelLoader = (defaults: CreateModelLoaderOptions = {}): ManagedGeoSpecModelLoader => {
+  const engine =
+    getRegisteredGeoSpecHostBinding<(options: CreateModelLoaderOptions) => ManagedGeoSpecModelLoader>(
+      'createModelLoader',
+    );
+  if (engine) {
+    return engine(defaults);
+  }
+  return Object.assign(async (options: LoadModelOptions) => loadModel({ ...defaults, ...options }), {
+    dispose: async () => undefined,
+  });
 };

@@ -6,6 +6,7 @@ import type {
   GeoSpecRuntimeSourceAdapter,
   LoadModelCodeOptions,
   LoadModelFileOptions,
+  ManagedGeoSpecModelLoader,
 } from '#model/types.js';
 import { createModelLoader, loadModel } from '#model/index.js';
 import type { RuntimeClient } from '@taucad/runtime/client';
@@ -78,5 +79,6 @@ describe('geospec/model public types', () => {
       },
     };
     createModelLoader({ sourceAdapters: [adapter] });
+    expectTypeOf(createModelLoader()).toEqualTypeOf<ManagedGeoSpecModelLoader>();
   });
 });

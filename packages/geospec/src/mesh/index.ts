@@ -14,6 +14,7 @@ export type {
 } from '#mesh/overlap.js';
 export { analyzeMesh, loadMesh } from '#mesh/load-mesh.js';
 export type {
+  AnalyzeMeshOptions,
   AnalyzeMeshResult,
   LoadMeshFailure,
   LoadMeshOptions,
@@ -42,6 +43,7 @@ export type {
   GeometrySource,
   GeometryStats,
   GeometrySubject,
+  GeometrySubjectMeshEvidence,
   MeshEvidence,
   MeshFileFormat,
   MeshQualityStats,

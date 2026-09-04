@@ -57,7 +57,7 @@ export type GeoSpecMatcherDescriptor = {
 };
 
 /**
- * The 23-entry matcher registry. Insertion order is contract: it fixes
+ * The 24-entry matcher registry. Insertion order is contract: it fixes
  * `geoSpecMatcherNames`, which `libs/api-extractor` and the LLM prompt
  * pipeline consume.
  *
@@ -71,6 +71,7 @@ export const geoSpecMatcherDescriptors: Readonly<Record<GeoSpecMatcherName, GeoS
   toHaveAssemblyOccurrences: { kind: 'assemblyOccurrences', expected: 'first', mode: 'sync' },
   toHaveSpatialRelationships: { kind: 'spatialRelationships', expected: 'first', mode: 'async' },
   toHaveMeshIntegrity: { kind: 'meshIntegrity', expected: 'first', mode: 'sync' },
+  toHaveNoDiagnostics: { kind: 'noDiagnostics', expected: 'first-or-empty', mode: 'sync' },
   toHaveSurfaceArea: { kind: 'surfaceArea', expected: 'first', mode: 'sync' },
   toHaveVolume: { kind: 'volume', expected: 'first', mode: 'sync' },
   toHaveMass: { kind: 'mass', expected: 'first', mode: 'sync' },

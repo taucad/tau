@@ -314,13 +314,45 @@ describe('host-backed facades', () => {
   it('delegates model, STEP, runner, filesystem, and worker-host calls', async () => {
     const runner = mock<GeoSpecRunner>();
     const filesystem = mock<VmFileSystem>();
-    const stats = mock<GeometryStats>();
+    const stats: GeometryStats = {
+      vertexCount: 0,
+      meshCount: 0,
+      triangleCount: 0,
+      watertight: false,
+      meshQuality: {
+        triangleCount: 0,
+        nonFiniteVertices: [],
+        degenerateTriangles: [],
+        duplicateFaces: [],
+        triangles: [],
+        surfaceArea: 0,
+        signedVolume: 0,
+      },
+    };
+    const analyzedSubject: GeometrySubject = {
+      kind: 'geometry-subject',
+      subjectId: 'subject-1',
+      mesh: { format: 'glb', stats: { vertexCount: 0, meshCount: 0, triangleCount: 0 } },
+      provenance: { source: { kind: 'bytes', format: 'glb' }, unit: 'm', loader: 'gltf-transform' },
+      capabilities: [],
+      diagnostics: [],
+    };
     const loadStepHost = vi.fn<GeoSpecEngineHostBindings['loadStep']>(async () => subject);
+    const disposeModelLoader = vi.fn(async () => undefined);
+    const managedModelLoader = Object.assign(
+      vi.fn(async () => subject),
+      { dispose: disposeModelLoader },
+    );
     const host: Partial<GeoSpecEngineHostBindings> = {
       loadModel: vi.fn(async () => subject),
+      createModelLoader: vi.fn(() => managedModelLoader),
       loadStep: loadStepHost,
       loadMesh: vi.fn<GeoSpecEngineHostBindings['loadMesh']>(async () => ({ success: true, subject })),
-      analyzeMesh: vi.fn<GeoSpecEngineHostBindings['analyzeMesh']>(async () => ({ success: true, subject, stats })),
+      analyzeMesh: vi.fn<GeoSpecEngineHostBindings['analyzeMesh']>(async () => ({
+        success: true,
+        subject: analyzedSubject,
+        stats,
+      })),
       createGeoSpecNodeRunner: vi.fn(() => runner),
       createGeoSpecNodePoolRunner: vi.fn(() => runner),
       createGeoSpecWebRunner: vi.fn(() => runner),
@@ -333,7 +365,10 @@ describe('host-backed facades', () => {
     expect(await loadModel({ source: new Uint8Array(), format: 'glb' })).toBe(subject);
     const configuredModelLoader = createModelLoader({ projectPath: '/project' });
     expect(await configuredModelLoader({ file: 'main.ts' })).toBe(subject);
-    expect(host.loadModel).toHaveBeenLastCalledWith({ projectPath: '/project', file: 'main.ts' });
+    expect(host.createModelLoader).toHaveBeenCalledWith({ projectPath: '/project' });
+    expect(managedModelLoader).toHaveBeenCalledWith({ file: 'main.ts' });
+    await configuredModelLoader.dispose();
+    expect(disposeModelLoader).toHaveBeenCalledOnce();
 
     expect(await loadStep({ source: new Uint8Array() })).toBe(subject);
     const configuredStepLoader = createStepLoader({ unit: 'mm' });

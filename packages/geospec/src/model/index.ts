@@ -18,6 +18,7 @@ export type {
   CreateModelLoaderOptions,
   GeoSpecModelFormat,
   GeoSpecModelLoader,
+  ManagedGeoSpecModelLoader,
   GeoSpecRuntimeClient,
   GeoSpecRuntimeClientFactory,
   GeoSpecRuntimeSourceAdapter,

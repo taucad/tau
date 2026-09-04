@@ -23,6 +23,13 @@ export type GeoSpecNodePoolRunnerOptions = {
   cache?: boolean;
   /** Absolute out-of-tree evidence-cache directory used by every worker. */
   cacheDirectory?: string;
+  /** Node module exporting the runtime factory every worker should use. */
+  runtimeFactoryModule?: {
+    /** Absolute URL or resolvable Node module specifier. */
+    specifier: string;
+    /** Named export with signature `(projectPath: string) => Promise<GeoSpecRuntimeClient>`. */
+    exportName: string;
+  };
 };
 
 /**

@@ -5,7 +5,18 @@
  * @module
  */
 
-import { getRegisteredGeoSpecHostBinding, geoSpecEngineUnavailableDiagnostic } from '#engine/registry.js';
+import {
+  describeGeoSpecEngine,
+  getRegisteredGeoSpecHostBinding,
+  geoSpecEngineUnavailableDiagnostic,
+} from '#engine/registry.js';
+import {
+  geoSpecClaimDiagnostics,
+  geoSpecProtocolViolation,
+  geoSpecSubjectId,
+  submitGeoSpecClaim,
+} from '#engine/client.js';
+import { parseMeshAnalysisResult } from '#mesh/analysis-result.js';
 import type { GeoSpecUnit } from '#geometry-unit.js';
 import type { GeometryDiagnostic, GeometryStats, GeometrySubject, MeshFileFormat } from '#mesh/types.js';
 
@@ -86,6 +97,11 @@ export type LoadMeshResult = LoadMeshSuccess | LoadMeshFailure;
  */
 export type AnalyzeMeshResult = { success: true; stats: GeometryStats; subject: GeometrySubject } | LoadMeshFailure;
 
+/** Analyze source bytes or an already retained subject, never both. @public */
+export type AnalyzeMeshOptions =
+  | (LoadMeshOptions & { subject?: never })
+  | ({ subject: GeometrySubject } & { [Key in keyof LoadMeshOptions]?: never });
+
 /**
  * Load mesh evidence into a GeoSpec geometry subject.
  *
@@ -99,16 +115,71 @@ export const loadMesh = async (options: LoadMeshOptions): Promise<LoadMeshResult
 };
 
 /**
- * Load mesh evidence and return its geometry statistics.
+ * Return a detached full-statistics snapshot. Source input loads once; subject
+ * input reuses retained evidence in its original unit/frame without reloading.
+ * Repeated calls reuse engine analysis but return independently mutable data.
+ * A subject must still be retained by the active engine; returned snapshots
+ * remain readable after release. Ordinary subject summaries stay counts-only.
  *
  * @param options - Mesh source, format, and unit handling.
  * @returns The subject with its statistics, or a structured failure.
  * @public
  */
-export const analyzeMesh = async (options: LoadMeshOptions): Promise<AnalyzeMeshResult> => {
-  const engine =
-    getRegisteredGeoSpecHostBinding<(options: LoadMeshOptions) => Promise<AnalyzeMeshResult>>('analyzeMesh');
-  return engine
-    ? engine(options)
-    : { success: false, diagnostics: [geoSpecEngineUnavailableDiagnostic('analyzeMesh')] };
+export const analyzeMesh = async (options: AnalyzeMeshOptions): Promise<AnalyzeMeshResult> => {
+  try {
+    const input: unknown = options;
+    if (typeof input !== 'object' || input === null || 'subject' in input === 'source' in input) {
+      throw new TypeError('analyzeMesh requires exactly one of source or subject.');
+    }
+    if (!('subject' in options)) {
+      const engine =
+        getRegisteredGeoSpecHostBinding<(options: LoadMeshOptions) => Promise<AnalyzeMeshResult>>('analyzeMesh');
+      return engine
+        ? parseMeshAnalysisResult(await engine(options))
+        : { success: false, diagnostics: [geoSpecEngineUnavailableDiagnostic('analyzeMesh')] };
+    }
+    if (Object.keys(options).some((key) => key !== 'subject')) {
+      throw new TypeError(
+        'Retained-subject analysis does not accept source, format, path, name, unit, sourceUnit, or parameters.',
+      );
+    }
+    const descriptor = describeGeoSpecEngine();
+    if (!descriptor) {
+      return { success: false, diagnostics: [geoSpecEngineUnavailableDiagnostic('analyzeMesh')] };
+    }
+    if (!descriptor.capabilities.includes('analyzeMesh')) {
+      throw new TypeError('The registered engine does not advertise analyzeMesh.');
+    }
+    const result = await submitGeoSpecClaim({
+      capability: 'analyzeMesh',
+      subjectIds: [geoSpecSubjectId(options.subject)],
+    });
+    if (!result) {
+      throw new TypeError('The engine returned no mesh analysis result.');
+    }
+    const diagnostics = geoSpecClaimDiagnostics(result);
+    if (result.status !== 'passed') {
+      return parseMeshAnalysisResult({
+        success: false,
+        diagnostics:
+          diagnostics.length > 0
+            ? diagnostics
+            : [geoSpecProtocolViolation('Mesh analysis failed without diagnostics.')],
+      });
+    }
+    if (diagnostics.length > 0) {
+      throw new TypeError('The engine returned a passed mesh analysis with failure diagnostics.');
+    }
+    const { evidence } = result;
+    const parsed = parseMeshAnalysisResult(evidence);
+    if (!parsed.success || parsed.subject.subjectId !== options.subject?.subjectId) {
+      throw new TypeError('The engine returned invalid mesh statistics or subject identity.');
+    }
+    return parsed;
+  } catch (error) {
+    return {
+      success: false,
+      diagnostics: [geoSpecProtocolViolation(error instanceof Error ? error.message : String(error))],
+    };
+  }
 };

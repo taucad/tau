@@ -177,6 +177,11 @@ export type GeoSpecModelLoader = <Code extends Record<string, string> = Record<s
   options: LoadModelOptions<Code>,
 ) => Promise<GeometrySubject>;
 
+/** A configured loader whose shared runtime can be released with its owner. @public */
+export type ManagedGeoSpecModelLoader = GeoSpecModelLoader & {
+  dispose(): Promise<void>;
+};
+
 /**
  * Defaults accepted by {@link import('./load-model.js').createModelLoader}.
  *

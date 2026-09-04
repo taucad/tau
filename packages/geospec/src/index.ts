@@ -26,6 +26,7 @@ export type {
   GeoSpecMatcher,
   GeoSpecMassExpectation,
   GeoSpecMeshIntegrityExpectation,
+  GeoSpecNoDiagnosticsExpectation,
   GeoSpecMinimumWallThicknessExpectation,
   GeoSpecCircularHolePatternExpectation,
   GeoSpecFilletFeatureExpectation,
@@ -51,6 +52,7 @@ export type {
   GeometryProvenance,
   GeometrySource,
   GeometrySubject,
+  GeometrySubjectMeshEvidence,
   MeshEvidence,
   MeshFileFormat,
   MeshQualityStats,
@@ -59,5 +61,5 @@ export type {
   Vec3,
 } from '#mesh/types.js';
 
-export type { AnalyzeMeshResult, LoadMeshOptions, LoadMeshResult } from '#mesh/load-mesh.js';
+export type { AnalyzeMeshOptions, AnalyzeMeshResult, LoadMeshOptions, LoadMeshResult } from '#mesh/load-mesh.js';
 export type { Vec3 as GeoSpecVec3 } from '#mesh/types.js';

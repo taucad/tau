@@ -39,6 +39,46 @@ describe('bracket', () => {
 
 ## Running specs
 
+### Lightweight subjects and explicit measurements
+
+Loaded subjects expose only mesh counts (`vertexCount`, `meshCount`, `triangleCount`),
+provenance, capabilities, and diagnostics. Matchers resolve the retained engine
+evidence and compute only the facets they need. For programmatic measurements,
+use the existing `analyzeMesh()` operation:
+
+```ts
+import { loadModel } from 'geospec/model';
+import { analyzeMesh } from 'geospec/mesh';
+
+const subject = await loadModel({ file: 'main.ts' });
+const analysis = await analyzeMesh({ subject });
+if (!analysis.success) {
+  throw new Error(analysis.diagnostics.map(({ message }) => message).join('\n'));
+}
+const { boundingBox, meshQuality, watertight } = analysis.stats;
+```
+
+This replaces removed reads such as `subject.mesh.stats.boundingBox`: the
+counts-only summary is a **breaking public API change**. Source input
+`analyzeMesh({ source, ... })` remains supported. Source and subject inputs are
+mutually exclusive; a retained subject cannot receive unit or format overrides.
+
+Subject analysis does not export or parse again. It uses the original subject
+unit/frame and requires that subject to remain alive in the same engine.
+Repeated requests reuse computations but return independent, JSON-safe snapshots;
+mutating a snapshot cannot change matcher verdicts. A snapshot remains readable
+after release, but further operations on its released handle fail. Non-finite
+full measurements produce structured failures, never successful NaN-to-null data.
+The engine must advertise the `analyzeMesh` capability; unsupported hosts do not
+silently reload source. Authored specs can import it from `geospec/mesh` too.
+
+`test_model` still reports matcher failures, not every explicit analysis result.
+All diagnostics emitted by executed assertions and structured load failures are
+preserved, including spatial details. Assertion fail-fast behavior is unchanged.
+Runtime warnings remain on the subject; use `toHaveNoDiagnostics()` to reject them.
+
+### Runner configuration
+
 Execution lives in the engine. Install
 [`@taucad/geospec-engine`](../geospec-engine) and either run its `geospec` CLI
 or embed one of its runners — **both take the same path**, so a verdict never

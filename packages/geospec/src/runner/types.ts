@@ -456,6 +456,18 @@ export type GeoSpecMeshIntegrityExpectation = {
 };
 
 /**
+ * Diagnostic severities rejected by
+ * `expectGeo(...).toHaveNoDiagnostics(...)`.
+ *
+ * Defaults to `error` and `warning` when omitted.
+ *
+ * @public
+ */
+export type GeoSpecNoDiagnosticsExpectation = {
+  severities?: Array<GeometryDiagnostic['severity']>;
+};
+
+/**
  * Exact BRep validity expectation accepted by `expectGeo(...).toBeValidBrep(...)`.
  *
  * @public
@@ -503,6 +515,10 @@ export type GeoSpecMatcher = {
    * Assert rendered mesh evidence is internally trustworthy for downstream checks.
    */
   toHaveMeshIntegrity(expected: GeoSpecMeshIntegrityExpectation): GeoSpecAssertion;
+  /**
+   * Assert that the subject carries no diagnostics at the rejected severities.
+   */
+  toHaveNoDiagnostics(expected?: GeoSpecNoDiagnosticsExpectation): GeoSpecAssertion;
   /**
    * Assert total surface area, preferring exact BRep mass properties when available.
    */
@@ -585,6 +601,7 @@ export type GeoSpecAssertion = {
     | 'assemblyOccurrences'
     | 'spatialRelationships'
     | 'meshIntegrity'
+    | 'noDiagnostics'
     | 'surfaceArea'
     | 'volume'
     | 'mass'

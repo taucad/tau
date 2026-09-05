@@ -21,6 +21,7 @@ const corsAllowedMethods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'];
  */
 export const corsBaseConfiguration = {
   allowedHeaders: corsAllowedHeaders,
+  exposedHeaders: ['x-tau-chat-run-id', 'set-auth-token'],
   methods: corsAllowedMethods,
   credentials: true,
   maxAge: corsMaxAge,

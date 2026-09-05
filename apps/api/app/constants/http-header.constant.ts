@@ -16,6 +16,10 @@ export const httpHeader = {
   authorization: 'authorization',
   userAgent: 'user-agent',
   contentType: 'content-type',
+  // Gateway pass-through headers for the Anthropic-compatible LLM surface
+  // (allowlisted and validated in apps/api/app/api/llm/llm-gateway.headers.ts).
+  anthropicVersion: 'anthropic-version',
+  anthropicBeta: 'anthropic-beta',
 } as const;
 
 /**

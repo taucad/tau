@@ -129,3 +129,55 @@ export const createCorsOriginValidatorFromList = (origins: string[]): CorsOrigin
   const { exactOrigins, globPatterns } = separateOriginsAndPatterns(origins);
   return createCorsOriginValidator(exactOrigins, globPatterns);
 };
+
+/**
+ * The Electron renderer's document origin (rulings D4/C5).
+ *
+ * A fixed product constant, not a deployment value: the desktop app serves its
+ * own SPA over `app://tau`, so this can never be derived from
+ * `TAU_FRONTEND_URL`. Admitted for **CORS only** — better-auth's
+ * `trustedOrigins` is a separate list, and ruling D7 leaves it untouched.
+ *
+ * Kept out of `ADDITIONAL_CORS_ORIGINS` deliberately: an ops-level env var is
+ * the wrong home for a first-party origin every deployment needs, and B7 was
+ * exactly the failure of expecting one to be configured.
+ */
+export const desktopAppOrigin = 'app://tau';
+
+/**
+ * Origins admitted only outside production.
+ *
+ * `nx dev:desktop ui` serves the desktop renderer from port 3001
+ * (`apps/ui/desktop/vite.config.ts:61`) — the web dev server keeps 3000, which
+ * is already `TAU_FRONTEND_URL` in a dev setup. Exact strings, and a deployed
+ * API must never answer a loopback origin.
+ */
+const developmentOnlyOrigins = ['http://localhost:3001'];
+
+/**
+ * Builds the API's CORS origin validator from the deployment's frontend URL and
+ * any extra configured origins, always including {@link desktopAppOrigin}.
+ *
+ * Every origin allowlist in the API goes through here so a new caller cannot
+ * reintroduce B7 by rebuilding the list and forgetting the desktop.
+ *
+ * @param frontendUrl - The deployment's `TAU_FRONTEND_URL`.
+ * @param additionalOrigins - `ADDITIONAL_CORS_ORIGINS`; exact origins or globs.
+ * @param nodeEnvironment - The deployment's `NODE_ENV`. Required rather than
+ *   optional so a new caller cannot leak {@link developmentOnlyOrigins} into a
+ *   production deployment by omitting it.
+ * @returns CORS origin validation function.
+ */
+export const createTauCorsOriginValidator = (
+  frontendUrl: string,
+  additionalOrigins: readonly string[],
+  nodeEnvironment: string,
+): CorsOriginValidatorFunction =>
+  // `desktopAppOrigin` carries no glob characters, so it is matched exactly —
+  // load-bearing, since `new URL()` accepts `app://<anything>`.
+  createCorsOriginValidatorFromList([
+    frontendUrl,
+    desktopAppOrigin,
+    ...(nodeEnvironment === 'production' ? [] : developmentOnlyOrigins),
+    ...additionalOrigins,
+  ]);

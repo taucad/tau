@@ -1,0 +1,88 @@
+{
+  "schemaVersion": 1,
+  "repository": "https://github.com/leap71/LEAP71_RoverWheel",
+  "revision": "6cfe3cdc522b9f666d57a8c96ab0b73e9672f2d8",
+  "license": "Apache-2.0",
+  "licenseFile": "LICENSE",
+  "entryPoint": "Program.cs",
+  "voxelSizeMm": 1,
+  "dependency": {
+    "fixture": "../helix-heat-exchanger/ShapeKernel",
+    "repository": "https://github.com/leap71/LEAP71_ShapeKernel",
+    "revision": "7b9097842446a28bb5d49203724622e594ce7510"
+  },
+  "files": [
+    {
+      "path": "Examples/Ex_WheelShowCase.cs",
+      "sha256": "27effaac96e4b20aae4541efcee93f7216964d7195ce90a92a90dc8cfc8f111e"
+    },
+    {
+      "path": "LICENSE",
+      "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+    },
+    {
+      "path": "RoverWheel/RoverWheel.cs",
+      "sha256": "5a6455cd6810625c29f6993e295e01434c9199f82cae1e5f3f1ccb6b8a1e5e63"
+    },
+    {
+      "path": "RoverWheel/TreadPatterns/TreadPattern_01.cs",
+      "sha256": "3ef15e3e11ecf5e1f4141d03d012d1779932dbece440d6df0a3f0ce86598471b"
+    },
+    {
+      "path": "RoverWheel/TreadPatterns/TreadPattern_02.cs",
+      "sha256": "beb804dc37f9ab7943d90ef038b12f1334d46aeef84f5cefbcfaed9cf3091d77"
+    },
+    {
+      "path": "RoverWheel/TreadPatterns/TreadPattern_03.cs",
+      "sha256": "ddf53964915231da2ed9f8faff18cde0e8f95ac4ce0d032a757ee81559e50a92"
+    },
+    {
+      "path": "RoverWheel/WheelElements/EgyptianStruts.cs",
+      "sha256": "08e9c129b5682e411ff20766068a199edcc045afa4d72cfcd71dcfdb0c76ffee"
+    },
+    {
+      "path": "RoverWheel/WheelElements/RectHoles.cs",
+      "sha256": "f3f121afb8d4a4fe56f3d1d74d4cd022c4ff48f52a2be9aec423c3272cd1a81b"
+    },
+    {
+      "path": "RoverWheel/WheelElements/RosettaStruts.cs",
+      "sha256": "686eaa77ef654dab49f8b00d1732bc2d959d09f2f91741f08774873d0ceeba79"
+    },
+    {
+      "path": "RoverWheel/WheelElements/SpiralStruts.cs",
+      "sha256": "6f38da719e38abd2c067b0170f8b8950111ade9fc5b06015a35b7ba691f6d02b"
+    },
+    {
+      "path": "RoverWheel/WheelElements/TubeStruts.cs",
+      "sha256": "a5e80f67c27c96e0af613c1a1f1123946cdca878f17866bd175063fc9472d5cb"
+    },
+    {
+      "path": "RoverWheel/WheelLayer.cs",
+      "sha256": "b5a2a3dc1018643210391332928a4664472d9fdc214f142652385d1210041ca1"
+    },
+    {
+      "path": "RoverWheel/WheelTread.cs",
+      "sha256": "3435237a1e286e89ba1482d69b1877a416f040c6cc1af3371d04ec85ade77a3d"
+    },
+    {
+      "path": "RoverWheel/Wheels/RandomWheel.cs",
+      "sha256": "c0591f45e1e78dc031834bd424f8a464c32d27c32bde679e4750a51f5d086024"
+    },
+    {
+      "path": "RoverWheel/Wheels/Wheel_01.cs",
+      "sha256": "9d08297366157b9b2c9e6389b902184bd5f5b72e909a430c9b283c2ac0ca0d0c"
+    },
+    {
+      "path": "RoverWheel/Wheels/Wheel_02.cs",
+      "sha256": "0c18b9726a0dca1b3b66939945eb33451201fdbd5ee790ea75e12761d748f939"
+    },
+    {
+      "path": "RoverWheel/Wheels/Wheel_03.cs",
+      "sha256": "3d4003e1aa95ffdb5fd44dddc369f3d15450402979b435aaeb7a284b7d6cf3b5"
+    },
+    {
+      "path": "RoverWheel/Wheels/Wheel_04.cs",
+      "sha256": "6d30612123a0bf7c24e9431d0e7eb2008b4b405a2558b06359a498c6a75e0bcb"
+    }
+  ]
+}

@@ -1,0 +1,604 @@
+//
+// SPDX-License-Identifier: Apache-2.0
+//
+// The LEAP 71 ShapeKernel is an open source geometry engine
+// specifically for use in Computational Engineering Models (CEM).
+//
+// For more information, please visit https://leap71.com/shapekernel
+// 
+// This project is developed and maintained by LEAP 71 - © 2024 by LEAP 71
+// https://leap71.com
+//
+// Computational Engineering will profoundly change our physical world in the
+// years ahead. Thank you for being part of the journey.
+//
+// We have developed this library to be used widely, for both commercial and
+// non-commercial projects alike. Therefore, have released it under a permissive
+// open-source license.
+// 
+// The LEAP 71 ShapeKernel is based on the PicoGK compact computational geometry 
+// framework. See https://picogk.org for more information.
+//
+// LEAP 71 licenses this file to you under the Apache License, Version 2.0
+// (the "License"); you may not use this file except in compliance with the
+// License. You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, THE SOFTWARE IS
+// PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED.
+//
+// See the License for the specific language governing permissions and
+// limitations under the License.   
+//
+
+
+using System.Numerics;
+using PicoGK;
+using PicoGK.Numerics;
+
+
+namespace Leap71
+{
+    namespace ShapeKernel
+    {
+        public static class VecOperations
+        {
+            /// <summary>
+            /// Returns the planar radius (XY) of the point with respect to the Z axis on origin.
+            /// </summary>
+            public static float R(this Vector3 vecPt)
+            {
+                return fGetRadius(vecPt);
+            }
+
+            [Obsolete("Use vec.vecSafeNormalized or vec.vecNormalized (throws when length is 0) instead")]
+            /// <summary>
+            /// Sets the vector's length to 1.
+            /// </summary>
+            public static Vector3 Normalize(this Vector3 vecA)
+            {
+                return vecA.vecSafeNormalized();
+            }
+
+            [Obsolete("Use vec.vecAsVector3 instead")]
+            /// <summary>
+            /// Adds z-dimension the flat vector.
+            /// </summary>
+            public static Vector3 ConvertTo3D(this Vector2 vecFlat, float fZ = 0)
+            {
+                return vecFlat.vecAsVector3(fZ);
+            }
+
+            [Obsolete("Use vec.vecStripZ instead")]
+            /// <summary>
+            /// Removes z-dimension from vector.
+            /// The information about the z-value will be lost.
+            /// </summary>
+            public static Vector2 ConvertTo2D(this Vector3 vecA)
+            {
+                return vecA.vecStripZ();
+            }
+
+            /// <summary>
+            /// Returns the carthesian coordinates of a point specified in cylindrical coordinates.
+            /// The angle is measured in radian.
+            /// </summary>
+            public static Vector3 vecGetCylPoint(float fRadius, float fPhi, float fZ)
+            {
+                float fX        = fRadius * MathF.Cos(fPhi);
+                float fY        = fRadius * MathF.Sin(fPhi);
+                Vector3 vecPt   = new Vector3(fX, fY, fZ);
+                return vecPt;
+            }
+
+            /// <summary>
+            /// Returns the carthesian coordinates of a point specified in spherical coordinates.
+            /// All angles are measured in radian.
+            /// </summary>
+            public static Vector3 vecGetSphPoint(float fRadius, float fPhi, float fTheta)
+            {
+                float fX        = fRadius * MathF.Cos(fPhi) * MathF.Cos(fTheta);
+                float fY        = fRadius * MathF.Sin(fPhi) * MathF.Cos(fTheta);
+                float fZ        = fRadius * MathF.Sin(fTheta);
+                Vector3 vecPt   = new Vector3(fX, fY, fZ);
+                return vecPt;
+            }
+
+            /// <summary>
+            /// Returns the 2D planar radius of a point with respect to the absolute z-axis.
+            /// </summary>
+            public static float fGetRadius(Vector2 vecPt)
+            {
+                float fRadius = MathF.Sqrt(vecPt.X * vecPt.X + vecPt.Y * vecPt.Y);
+                return fRadius;
+            }
+
+            /// <summary>
+            /// Returns the 2D planar radius of a point with respect to the absolute z-axis.
+            /// </summary>
+            public static float fGetRadius(Vector3 vecPt)
+            {
+                float fRadius = MathF.Sqrt(vecPt.X * vecPt.X + vecPt.Y * vecPt.Y);
+                return fRadius;
+            }
+
+            /// <summary>
+            /// Returns the 2D planar polar angle of a point with respect to the absolute z-axis.
+            /// Cylindrical coordinate system.
+            /// The angle is measured in radian.
+            /// </summary>
+            public static float fGetPhi(Vector2 vecPt)
+            {
+                float fPhi = MathF.Atan2(vecPt.Y, vecPt.X);
+                return fPhi;
+            }
+
+            /// <summary>
+            /// Returns the 2D planar polar angle of a point with respect to the absolute z-axis.
+            /// Cylindrical coordinate system.
+            /// The angle is measured in radian.
+            /// </summary>
+            public static float fGetPhi(Vector3 vecPt)
+            {
+                float fPhi = MathF.Atan2(vecPt.Y, vecPt.X);
+                return fPhi;
+            }
+
+            /// <summary>
+            /// Returns the azimuthal angle of a point with respect to the absolute z-axis.
+            /// Spherical coordinate system.
+            /// The angle is measured in radian.
+            /// </summary>
+            public static float fGetTheta(Vector3 vecPt)
+            {
+                float fRadius   = fGetRadius(vecPt);
+                float fTheta    = MathF.Atan2(vecPt.Z, fRadius);
+                return fTheta;
+            }
+
+            /// <summary>
+            /// Returns a point with the same cylindrical coordinates (z and phi), but with a new radial position.
+            /// </summary>
+            public static Vector3 vecSetRadius(Vector3 vecPt, float fNewRadius)
+            {
+                float fZ            = vecPt.Z;
+                float fPhi          = fGetPhi(vecPt);
+                Vector3 vecNewPt    = vecGetCylPoint(fNewRadius, fPhi, fZ);
+                return vecNewPt;
+            }
+
+            /// <summary>
+            /// Returns a point with the same cylindrical coordinates (z and radius), but with a new polar position.
+            /// The angle is measured in radian.
+            /// </summary>
+            public static Vector2 vecSetPhi(Vector2 vecPt, float fNewPhi)
+            {
+                float fRadius       = fGetRadius(vecPt);
+                Vector2 vecNewPt    = vecGetCylPoint(fRadius, fNewPhi, 0f).vecStripZ();
+                return vecNewPt;
+            }
+
+            /// <summary>
+            /// Returns a point with the same cylindrical coordinates (z and radius), but with a new polar position.
+            /// The angle is measured in radian.
+            /// </summary>
+            public static Vector3 vecSetPhi(Vector3 vecPt, float fNewPhi)
+            {
+                float fZ            = vecPt.Z;
+                float fRadius       = fGetRadius(vecPt);
+                Vector3 vecNewPt    = vecGetCylPoint(fRadius, fNewPhi, fZ);
+                return vecNewPt;
+            }
+
+            /// <summary>
+            /// Returns a point with the same coordinates, but with a new height position.
+            /// </summary>
+            public static Vector3 vecSetZ(Vector3 vecPt, float fNewZ)
+            {
+                float fRadius       = fGetRadius(vecPt);
+                float fPhi          = fGetPhi(vecPt);
+                Vector3 vecNewPt    = vecGetCylPoint(fRadius, fPhi, fNewZ);
+                return vecNewPt;
+            }
+
+            /// <summary>
+            /// Returns a point that is radially shifted by dRadius.
+            /// </summary>
+            public static Vector3 vecUpdateRadius(Vector3 vecPt, float dRadius)
+            {
+                float fZ            = vecPt.Z;
+                float fNewRadius    = fGetRadius(vecPt) + dRadius;
+                float fPhi          = fGetPhi(vecPt);
+                Vector3 vecNewPt    = vecGetCylPoint(fNewRadius, fPhi, fZ);
+                return vecNewPt;
+            }
+
+            /// <summary>
+            /// Returns a point that is turned around the absolute z-axis by an angle dPhi.
+            /// The angle increment is measured in radian.
+            /// </summary>
+            public static Vector3 vecUpdatePhi(Vector3 vecPt, float dPhi)
+            {
+                float fZ            = vecPt.Z;
+                float fRadius       = fGetRadius(vecPt);
+                float fNewPhi       = fGetPhi(vecPt) + dPhi;
+                Vector3 vecNewPt    = vecGetCylPoint(fRadius, fNewPhi, fZ);
+                return vecNewPt;
+            }
+
+            /// <summary>
+            /// Returns a point that is vertically shifted by dZ.
+            /// </summary>
+            public static Vector3 vecUpdateZ(Vector3 vecPt, float dZ)
+            {
+                float fRadius       = fGetRadius(vecPt);
+                float fPhi          = fGetPhi(vecPt);
+                float fNewZ         = vecPt.Z + dZ;
+                Vector3 vecNewPt    = vecGetCylPoint(fRadius, fPhi, fNewZ);
+                return vecNewPt;
+            }
+
+            /// <summary>
+            /// Returns the normalized, 2D planar radial direction from the absolute z-axis to the specified point.
+            /// </summary>
+            public static Vector3 vecGetPlanarDir(Vector3 vecPt)
+            {
+                Vector3 vecDir  = new Vector3(vecPt.X, vecPt.Y, 0);
+                vecDir          = vecDir.vecSafeNormalized();
+                return vecDir;
+            }
+
+            /// <summary>
+            /// Returns the same or the flipped vector depending on which option is more aligned with the target direction.
+            /// Two vectors are aligned when they point in the same direction.
+            /// Two vectors can either be aligned, orthogonal to each other or not aligned.
+            /// </summary>
+            public static Vector3 vecFlipForAlignment(Vector3 vecDir, Vector3 vecTargetDir)
+            {
+                if (Vector3.Dot(vecTargetDir, vecDir) >= Vector3.Dot(vecTargetDir, -vecDir))
+                {
+                    return vecDir;
+                }
+                else
+                {
+                    return -vecDir;
+                }
+            }
+
+            /// <summary>
+            /// Returns true if the specified direction is aligned with the target direction.
+            /// Two vectors are aligned when they point in the same direction.
+            /// Two vectors can either be aligned, orthogonal to each other or not aligned.
+            /// </summary>
+            public static bool bCheckAlignment(Vector3 vecDir, Vector3 vecTargetDir)
+            {
+                if (Vector3.Dot(vecTargetDir, vecDir) >= Vector3.Dot(vecTargetDir, -vecDir))
+                {
+                    return true;
+                }
+                else
+                {
+                    return false;
+                }
+            }
+
+            /// <summary>
+            /// Rotates a point around the absolute z-axis.
+            /// The axis origin can be customised.
+            /// The angle increment is measured in radian.
+            /// </summary>
+            public static Vector2 vecRotateAroundZ(Vector2 vecPt, float dPhi, Vector2 vecAxisOrigin = new Vector2())
+            {
+                Vector2 vecDiff     = vecPt - vecAxisOrigin;
+                float fPhi          = fGetPhi(vecDiff);
+                Vector2 vecRotDiff  = vecSetPhi(vecDiff, fPhi + dPhi);
+                Vector2 vecRotPt    = vecAxisOrigin + vecRotDiff;
+                return vecRotPt;
+            }
+
+            /// <summary>
+            /// Rotates a point around the absolute z-axis.
+            /// The axis origin can be customised.
+            /// The angle increment is measured in radian.
+            /// </summary>
+            public static Vector3 vecRotateAroundZ(Vector3 vecPt, float dPhi, Vector3 vecAxisOrigin = new Vector3())
+            {
+                Vector3 vecDiff     = vecPt - vecAxisOrigin;
+                float fPhi          = fGetPhi(vecDiff);
+                Vector3 vecRotDiff  = vecSetPhi(vecDiff, fPhi + dPhi);
+                Vector3 vecRotPt    = vecAxisOrigin + vecRotDiff;
+                return vecRotPt;
+            }
+
+            /// <summary>
+            /// Returns a arbitary vector that is orthogonal to the specified direction.
+            /// </summary>
+            public static Vector3 vecGetOrthogonalDir(Vector3 vecDir)
+            {
+                Vector3 vecNonParallel = Vector3.UnitX;
+                if (MathF.Abs(Vector3.Dot(vecDir, vecNonParallel)) > 0.95f)
+                {
+                    vecNonParallel  = Vector3.UnitY;
+                }
+                Vector3 vecNormal   = Vector3.Cross(vecDir, vecNonParallel);
+                vecNormal           = vecNormal.vecSafeNormalized();
+                return vecNormal;
+            }
+
+            /// <summary>
+            /// Returns the minimum angle between to 3D vectors.
+            /// The angle is measured in radian.
+            /// </summary>
+            public static float fGetAngleBetween(Vector3 vecA, Vector3 vecB)
+            {
+                vecA         = vecA.vecSafeNormalized();
+                vecB         = vecB.vecSafeNormalized();
+                float fDot   = float.Clamp(Vector3.Dot(vecA, vecB), -1, 1);
+                float fTheta = MathF.Acos(fDot);
+
+                if (float.IsNaN(fTheta) &&
+                    (MathF.Abs(fDot) == 1))
+                {
+                    return MathF.PI;
+                }
+                return fTheta;
+            }
+
+            /// <summary>
+            /// Returns the minimum angle between to 2D vectors.
+            /// The angle is measured in radian.
+            /// </summary>
+            public static float fGetAngleBetween(Vector2 vecA, Vector2 vecB)
+            {
+                vecA         = vecA.vecSafeNormalized();
+                vecB         = vecB.vecSafeNormalized();
+                float fDot   = float.Clamp(Vector2.Dot(vecA, vecB), -1, 1);
+                float fTheta = MathF.Acos(fDot);
+
+                if (float.IsNaN(fTheta) &&
+                    (MathF.Abs(fDot) == 1))
+                {
+                    return MathF.PI;
+                }
+                return fTheta;
+            }
+
+            /// <summary>
+            /// Returns the minimum, signed angle between to 3D vectors.
+            /// The angle is measured in radian.
+            /// The order in which the vectors are specified will influence the rotation sense indicated by the sign.
+            /// </summary>
+            public static float fGetSignedAngleBetween(Vector3 vecA, Vector3 vecB, Vector3 vecRefNormal)
+            {
+                const float fError = 1e-20f;
+
+                if (vecA.LengthSquared() < fError || 
+                    vecB.LengthSquared() < fError || 
+                    vecRefNormal.LengthSquared() < fError)
+                {
+                    throw new Exception("Vector3 with zero length.");
+                }
+
+                vecA                = vecA.vecSafeNormalized();
+                vecB                = vecB.vecSafeNormalized();
+                vecRefNormal        = vecRefNormal.vecSafeNormalized();
+                Vector3 vecNormal   = Vector3.Cross(vecA, vecB);
+                vecNormal           = vecFlipForAlignment(vecNormal, vecRefNormal);
+                float fTheta        = MathF.Abs(fGetAngleBetween(vecA, vecB));
+                float fPosDot       = Vector3.Dot(vecA, vecRotateAroundAxis(vecB, fTheta, vecNormal));
+                float fNegDot       = Vector3.Dot(vecA, vecRotateAroundAxis(vecB, -fTheta, vecNormal));
+
+                if (fNegDot > fPosDot)
+                {
+                    return -fTheta;
+                }
+                else
+                {
+                    return fTheta;
+                }
+            }
+
+            /// <summary>
+            /// Rotates a point around a custom axis.
+            /// The axis origin can be customised.
+            /// The angle increment is measured in radian.
+            /// </summary>
+            public static Vector3 vecRotateAroundAxis(Vector3 vecPt, float dPhi, Vector3 vecAxis, Vector3? vecAxisOrigin = null)
+            {
+                Vector3 vecOrigin   = new Vector3();
+                if (vecAxisOrigin  != null)
+                {
+                    vecOrigin = (Vector3)vecAxisOrigin;
+                }
+                Vector3 vecRel      = vecPt - vecOrigin;
+                Quaternion mat      = Quaternion.CreateFromAxisAngle(vecAxis, dPhi);
+                Vector3 vecNewRel   = Vector3.Transform(vecRel, mat);
+                Vector3 vecNewPt    = vecNewRel + vecOrigin;
+                return vecNewPt;
+            }
+
+            [Obsolete("Use vec.vecPtWorld(oFrame)instead")]
+            /// <summary>
+            /// Rotates and translates a point in absolute carthesian coordinates onto the specified local reference frame.
+            /// The relative coordinates of the result with respect to the local frame will mach those of the input point in absolute reference.
+            /// The absolute coordinated of the result will update depending on the position and orientation of the local frame.
+            /// "How would this point look like when it was referenced to a this local frame?".
+            /// </summary> 
+            public static Vector3 vecTranslatePointOntoFrame(LocalFrame oFrame, Vector3 vecPt)
+            {
+                Vector3 vecOrigin = oFrame.vecGetPosition();
+                Vector3 vecNewPt =
+                        vecOrigin +
+                        vecPt.X * oFrame.vecGetLocalX() +
+                        vecPt.Y * oFrame.vecGetLocalY() +
+                        vecPt.Z * oFrame.vecGetLocalZ();
+                return vecNewPt;
+            }
+
+            [Obsolete("Use vec.vecDirWorld(oFrame)instead")]
+            /// <summary>
+            /// Rotates and translates a direction in absolute carthesian coordinates onto the specified local reference frame.
+            /// The relative coordinates of the result with respect to the local frame will mach those of the input point in absolute reference.
+            /// The absolute coordinated of the result will update depending on the position and orientation of the local frame.
+            /// "How would this direction look like when it was referenced to a this local frame?".
+            /// </summary>
+            public static  Vector3 vecTranslateDirectionOntoFrame(LocalFrame oFrame, Vector3 vecDir)
+            {
+                Vector3 vecPt1      = new Vector3();
+                Vector3 vecPt2      = vecPt1 + vecDir;
+                vecPt1              = VecOperations.vecTranslatePointOntoFrame(oFrame, vecPt1);
+                vecPt2              = VecOperations.vecTranslatePointOntoFrame(oFrame, vecPt2);
+                Vector3 vecNewDir   = vecPt2 - vecPt1;
+                return vecNewDir;
+            }
+
+            [Obsolete("Use vec.vecPtLocal(oFrame)instead")]
+            /// <summary>
+            /// Returns the relative coordinates expression of an absolute, carthesian point with respect to a given local reference frame.
+            /// "How would this point look like when viewed from this local frame?".
+            /// </summary>
+            public static Vector3 vecExpressPointInFrame(LocalFrame oFrame, Vector3 vecPt)
+            {
+                vecPt   -= oFrame.vecGetPosition();
+                float fX = Vector3.Dot(vecPt, oFrame.vecGetLocalX());
+                float fY = Vector3.Dot(vecPt, oFrame.vecGetLocalY());
+                float fZ = Vector3.Dot(vecPt, oFrame.vecGetLocalZ());
+                Vector3 vecNewPt = new Vector3(fX, fY, fZ);
+                return vecNewPt;
+            }
+
+            [Obsolete("Use vec.vecDirLocal(oFrame)instead")]
+            /// <summary>
+            /// Returns the direction of a direct connection between the local frame's z-axis and the specified point.
+            /// Similar to the function vecGetPlanarDir, but in an arbitary, 3D reference frame.
+            /// </summary>
+            public static Vector3 vecGetDirectionToAxis(LocalFrame oFrame, Vector3 vecPt)
+            {
+                Vector3 vecLocalX = oFrame.vecGetLocalX();
+                Vector3 vecLocalY = oFrame.vecGetLocalY();
+                Vector3 vecLocalZ = oFrame.vecGetLocalZ();
+
+                vecPt   -= oFrame.vecGetPosition();
+                float fX = Vector3.Dot(vecPt, vecLocalX);
+                float fY = Vector3.Dot(vecPt, vecLocalY);
+
+                Vector3 vecNewPt =
+                    fX * vecLocalX +
+                    fY * vecLocalY;
+
+                vecNewPt = vecNewPt.vecSafeNormalized();
+                return vecNewPt;
+            }
+
+            /// <summary>
+            /// Returns the radius between the local frame's z-axis and the specified point.
+            /// Similar to the function fGetRadius, but in an arbitary, 3D reference frame.
+            /// </summary>
+            public static float fGetRadiusToAxis(LocalFrame oFrame, Vector3 vecPt)
+            {
+                Vector3 vecLocalX = oFrame.vecGetLocalX();
+                Vector3 vecLocalY = oFrame.vecGetLocalY();
+                Vector3 vecLocalZ = oFrame.vecGetLocalZ();
+
+                vecPt   -= oFrame.vecGetPosition();
+                float fX = Vector3.Dot(vecPt, vecLocalX);
+                float fY = Vector3.Dot(vecPt, vecLocalY);
+
+                float fRadius = MathF.Sqrt(fX * fX + fY * fY);
+                return fRadius;
+            }
+
+            /// <summary>
+            /// Returns the polar angle between the local frame's z-axis and the specified point.
+            /// Similar to the function fGetPhi, but in an arbitary, 3D reference frame.
+            /// The angle is measured in radian.
+            /// </summary>
+            public static float fGetPhiToAxis(LocalFrame oFrame, Vector3 vecPt)
+            {
+                Vector3 vecLocalX = oFrame.vecGetLocalX();
+                Vector3 vecLocalY = oFrame.vecGetLocalY();
+                Vector3 vecLocalZ = oFrame.vecGetLocalZ();
+
+                vecPt   -= oFrame.vecGetPosition();
+                float fX = Vector3.Dot(vecPt, vecLocalX);
+                float fY = Vector3.Dot(vecPt, vecLocalY);
+
+                float fPhi = MathF.Atan2(fY, fX);
+                return fPhi;
+            }
+
+            [Obsolete("Use Vector3.Lerp(vecPt1, vecPt2, fRatio) instead")]
+            /// <summary>
+            /// Returns a linearly interpolated point between the two specified points.
+            /// </summary>
+            public static Vector3 vecLinearInterpolation(Vector3 vecPt1, Vector3 vecPt2, float fRatio)
+            {
+                Vector3 vecInter = vecPt1 + fRatio * (vecPt2 - vecPt1);
+                return vecInter;
+            }
+
+            /// <summary>
+            /// Returns a cylidrically interpolated point between the two specified points.
+            /// </summary>
+            public static Vector3 vecCylindricalInterpolation(Vector3 vecPt1, Vector3 vecPt2, float fRatio, Vector3 vecAxisOrigin = new Vector3())
+            {
+                vecAxisOrigin       = vecSetZ(vecAxisOrigin, 0f);
+                float dMinAngle     = fGetAngleBetween(vecPt1, vecPt2);
+
+                Vector3 vecSide1    = (vecPt1 - vecAxisOrigin).vecSafeNormalized();
+                Vector3 vecSide2    = (vecPt2 - vecAxisOrigin).vecSafeNormalized();
+                Vector3 vecNormal   = Vector3.Cross(vecSide1, vecSide2);
+
+                //figure out rotation sense
+                float fDistPos      = (vecPt2 - vecRotateAroundZ(vecPt1, dMinAngle)).Length();
+                float fDistNeg      = (vecPt2 - vecRotateAroundZ(vecPt1, -dMinAngle)).Length();
+
+                int iSense = 1;
+                if (fDistNeg < fDistPos)
+                {
+                    iSense = -1;
+                }
+
+                float fRadius1      = fGetRadius(vecPt1 - vecAxisOrigin);
+                float fRadius2      = fGetRadius(vecPt2 - vecAxisOrigin);
+                float fInterRadius  = fRadius1 + fRatio * (fRadius2 - fRadius1);
+
+                float fInterZ       = vecPt1.Z + fRatio * (vecPt2.Z - vecPt1.Z);
+
+                Vector3 vecInter    = vecRotateAroundZ(fInterRadius * vecSide1, iSense * fRatio * dMinAngle);
+                vecInter            = vecSetZ(vecInter, fInterZ);
+                return vecInter + vecAxisOrigin;
+            }
+
+            /// <summary>
+            /// Returns a spherically interpolated point between the two specified points.
+            /// </summary>
+            public static Vector3 vecSphericalInterpolation(Vector3 vecPt1, Vector3 vecPt2, float fRatio, Vector3 vecAxisOrigin = new Vector3())
+            {
+                float dMinAngle     = fGetAngleBetween(vecPt1, vecPt2);
+
+                Vector3 vecSide1    = (vecPt1 - vecAxisOrigin).vecSafeNormalized();
+                Vector3 vecSide2    = (vecPt2 - vecAxisOrigin).vecSafeNormalized();
+                Vector3 vecNormal   = Vector3.Cross(vecSide1, vecSide2);
+
+                //figure out rotation sense
+                float fDistPos      = (vecPt2 - vecRotateAroundAxis(vecPt1, dMinAngle, vecNormal)).Length();
+                float fDistNeg      = (vecPt2 - vecRotateAroundAxis(vecPt1, -dMinAngle, vecNormal)).Length();
+
+                int iSense = 1;
+                if (fDistNeg < fDistPos)
+                {
+                    iSense = -1;
+                }
+
+                float fRadius1      = (vecPt1 - vecAxisOrigin).Length();
+                float fRadius2      = (vecPt2 - vecAxisOrigin).Length();
+                float fInterRadius  = fRadius1 + fRatio * (fRadius2 - fRadius1);
+
+                Vector3 vecInter    = vecRotateAroundAxis(fInterRadius * vecSide1, iSense * fRatio * dMinAngle, vecNormal);
+                return vecInter + vecAxisOrigin;
+            }
+        }
+    }
+}

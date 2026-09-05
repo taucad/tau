@@ -1,0 +1,280 @@
+{
+  "schemaVersion": 1,
+  "fixture": "LEAP 71 Helix Heat Exchanger",
+  "entryPoint": "Program.cs",
+  "voxelSizeMm": 1,
+  "sources": [
+    {
+      "name": "LEAP71 ShapeKernel",
+      "repository": "https://github.com/leap71/LEAP71_ShapeKernel",
+      "revision": "7b9097842446a28bb5d49203724622e594ce7510",
+      "license": "Apache-2.0",
+      "licenseFile": "LICENSE.ShapeKernel",
+      "sourceRoot": "ShapeKernel",
+      "files": [
+        {
+          "path": "BaseShapes/BaseBox.cs",
+          "sha256": "cfe7c28ced3a9ea55a90c8d2189720ec0c4857bd9f71b6a5138968267029345a"
+        },
+        {
+          "path": "BaseShapes/BaseCone.cs",
+          "sha256": "64067ff9b403678faf559ed3fd13327e51af9f8360e7c3ddef2da6ab744808c3"
+        },
+        {
+          "path": "BaseShapes/BaseCylinder.cs",
+          "sha256": "dd82c752e01cf8158068e0c469307053275e11a9e160b62f09818b631cd8fbb0"
+        },
+        {
+          "path": "BaseShapes/BaseLens.cs",
+          "sha256": "11c89bae50da4347c647e3d7e71d01337318169380c8184cb7cd06f0003a9659"
+        },
+        {
+          "path": "BaseShapes/BaseLogoBox.cs",
+          "sha256": "e88638b6fb9bb92a5dce50c01e89998928098dd838e4e7bcd36c7bfc148586f2"
+        },
+        {
+          "path": "BaseShapes/BasePipe.cs",
+          "sha256": "397d1343bb139f94b696494ed658b05276712c7ede674b954e22839ec1fb558c"
+        },
+        {
+          "path": "BaseShapes/BasePipeSegment.cs",
+          "sha256": "9e79db329943f50b07f34e8ade3e57020baf21a71ede29bc6b31450ef4fb792d"
+        },
+        {
+          "path": "BaseShapes/BaseRevolve.cs",
+          "sha256": "23fdc6ac1d7adc7f8b1ac818f8a481c2d25bdf75ca6e92cf6cdb9484deab47ab"
+        },
+        {
+          "path": "BaseShapes/BaseRing.cs",
+          "sha256": "5938322eafe8a6183450f95a86336411645bf36318a99c5ba48859370d04d1cb"
+        },
+        {
+          "path": "BaseShapes/BaseShape.cs",
+          "sha256": "de42e3d72032224c3713476e2ab96d53b6b0c23d7b128fa69b9c18084d399f5b"
+        },
+        {
+          "path": "BaseShapes/BaseSphere.cs",
+          "sha256": "4256dff0f30b535c44a8cb72089e046a8a01558bba7a7454c6ea563325261c9b"
+        },
+        {
+          "path": "BaseShapes/LatticeManifold.cs",
+          "sha256": "1d483b5fc3e60f0362ba5de75062171564b15c2458acf78021706231f357710f"
+        },
+        {
+          "path": "BaseShapes/LatticePipe.cs",
+          "sha256": "a542c5fbd0a85a14c8956d3addc204b21a732cd88ac9443e55ebca571f0c61f9"
+        },
+        {
+          "path": "Frames/Frames.cs",
+          "sha256": "70aa2b6d5795344842cc6356434c9135943f887e7cdc1984875816dd9142b002"
+        },
+        {
+          "path": "Frames/LocalFrame.cs",
+          "sha256": "4e481feba1b55713c0eb082c9e32794d88c5055765197a731bb8e91aacfa0305"
+        },
+        {
+          "path": "Functions/ShBasicFunctions.cs",
+          "sha256": "f958da797b3ce026080b97f020b376991159bbb0ec84ffb36cf9b62e1f19917a"
+        },
+        {
+          "path": "Functions/ShCombinedFunctions.cs",
+          "sha256": "f9ab80e779d33fe0cc8add89f7c2c3f27a5ec356ae0cb0578d32692ac7236bb0"
+        },
+        {
+          "path": "Functions/ShExportFunctions.cs",
+          "sha256": "1aba8f2658d5d4e4a09f6e08d4780fb1a5a90203d707963d14f119e4fb69b81e"
+        },
+        {
+          "path": "Functions/ShLatticeFunctions.cs",
+          "sha256": "6c4d65fec76a5937440d2f9e9aa3f929d2f16ca7190c16c112cb084dbcbb7ea6"
+        },
+        {
+          "path": "Functions/ShVoxelFunctions.cs",
+          "sha256": "b9b4e033c6f4d75a6d95f5c67727348ce59f5406ec36b5e78b21966842943113"
+        },
+        {
+          "path": "Modulations/LineModulation(1D).cs",
+          "sha256": "ac91fecabce2cac8aef400bad3c8db3f0c62a56546f28f2851e3d1e0b6909b14"
+        },
+        {
+          "path": "Modulations/SurfaceModulation(2D).cs",
+          "sha256": "05e1c7fb7aaeb2a908ed4516b8237f7bfb60da44377bb385bba56b134b60cf3c"
+        },
+        {
+          "path": "Splines/ControlPointSpline.cs",
+          "sha256": "7b00837c9ad6ef8f924145ff28d37d8e54d34fd8ad560fe3d8547d2f07ebc376"
+        },
+        {
+          "path": "Splines/ControlPointSurface.cs",
+          "sha256": "68baa8018984324a745dd898b7e19025b1dc0aa7c5899ff16b3012ba367e6b34"
+        },
+        {
+          "path": "Splines/CylindricalControlSpline.cs",
+          "sha256": "fb8820ee847c721345eaa3bd2d1c3d6f7dbf23ae174d73b2c39802dcb897d206"
+        },
+        {
+          "path": "Splines/TangentialControlSpline.cs",
+          "sha256": "fb65a1de2899dc77d34830118f80d93129b4f9b50d12feac71d9e38e4bf07fe2"
+        },
+        {
+          "path": "Utilities/Bisection.cs",
+          "sha256": "696ad1bc02fb34734c9880b522a357ca8a521957064d6427fd2af6b147293a30"
+        },
+        {
+          "path": "Utilities/CSVWriter.cs",
+          "sha256": "edce91fd4b2dc0b38cf8bafd58371a3eafdab0240c805830dde951011b6c659b"
+        },
+        {
+          "path": "Utilities/CylUtility.cs",
+          "sha256": "fa00cf797f4088407b226a6f237209776346a31327d3a5bb6b8f9b9b525818ff"
+        },
+        {
+          "path": "Utilities/GridOperations.cs",
+          "sha256": "d7281e7e4a7f5e1b3e2110f8240104a940d6d13bd129c726067b6f4b53ffd867"
+        },
+        {
+          "path": "Utilities/ImplicitUtility.cs",
+          "sha256": "32e6e6bcf32b2434b6724b9e05e6d58be425116692b059157a691ed1000c8a63"
+        },
+        {
+          "path": "Utilities/LineDecimation.cs",
+          "sha256": "92e3bf1ab46cd9ee87acb7f19694d8567cbf82e1c3df62b382f526d98bd937e5"
+        },
+        {
+          "path": "Utilities/ListOperations.cs",
+          "sha256": "0e9df9765d85bb2471e50d5cd3156a977dcd0063f2d5c55137957ccf4614997a"
+        },
+        {
+          "path": "Utilities/Measure.cs",
+          "sha256": "c81a7953a81282e730217a2444ec399893f5cd9e190ca8a4d9640c1a83b7e5af"
+        },
+        {
+          "path": "Utilities/MeshUtility.cs",
+          "sha256": "2cd8ebafa7fed4ef8b48d1d5eca71a5480811aec88a2387e740c9205d53a8ea6"
+        },
+        {
+          "path": "Utilities/PolygonalShapes.cs",
+          "sha256": "08855523af9b91aab6661451b2848f526ecf58d7f5b6ac75d7b5f68a5aecea00"
+        },
+        {
+          "path": "Utilities/RectUtility.cs",
+          "sha256": "ce102eba1339e3aecd567bdf51542fd19d2a4ffeb46260fb0b21029a7a589186"
+        },
+        {
+          "path": "Utilities/SplineOperations.cs",
+          "sha256": "a3a0d9a19b914a6502af8c6627b1810de8d56cc2658b3aada462ef588a1ca0aa"
+        },
+        {
+          "path": "Utilities/SuperShapes.cs",
+          "sha256": "48dd475d7ed89987b8a6696b973041610133b40fbf3883a13e288e2a628c414c"
+        },
+        {
+          "path": "Utilities/UsefulFormulas.cs",
+          "sha256": "642f7664e96c60063d5d9c2e9d0c4e5a5006fa4df5cd1a99d99241a52786fb9a"
+        },
+        {
+          "path": "Utilities/VecOperations.cs",
+          "sha256": "816f1220e5d35d84b1f7f2694a2f26b7ab2b50b0901862d2fd3616d09c3ebb1e"
+        },
+        {
+          "path": "Visualizations/ColorPalette.cs",
+          "sha256": "74fb2573fa488bb460903be14bd307cfef5ccc65d8535edbb36131559cc88db5"
+        },
+        {
+          "path": "Visualizations/ColorScale2D.cs",
+          "sha256": "6ae6bf8afa363730024f31f6d078674091a173f3aa7df8252c79b05eff510ade"
+        },
+        {
+          "path": "Visualizations/ColorScale3D.cs",
+          "sha256": "421846942c8f2389e131682aee95cbcc6bef90b5030ca1b18feeed5e71f4b86f"
+        },
+        {
+          "path": "Visualizations/MeshPainter.cs",
+          "sha256": "f8f964131b6d2f0f23ccc78f13752a6351ce0eb45119cd760e24ccf8ec034f4e"
+        },
+        {
+          "path": "Visualizations/RainboxSpectrum.cs",
+          "sha256": "c873635552befec1a1bf4a83dd57dc356bd6412a54ceaa3392c9b26715acd99c"
+        },
+        {
+          "path": "Visualizations/RotationAnimator.cs",
+          "sha256": "5c2835a5aa687c4e99e8772504eea883e97e21547997779531a26a197254071c"
+        },
+        {
+          "path": "Visualizations/ShPreviewFunctions_I.cs",
+          "sha256": "dadc873249046d6d71da919132de00229fa117ea2bdf8c8187a11045b57c8569"
+        },
+        {
+          "path": "Visualizations/ShPreviewFunctions_II.cs",
+          "sha256": "a486df1d5a273a8285cba41f34b1af7f994c5753ca18d7d5b9dfb2ead777262d"
+        }
+      ]
+    },
+    {
+      "name": "LEAP71 HelixHeatX",
+      "repository": "https://github.com/leap71/LEAP71_HelixHeatX",
+      "revision": "a0a0234eb048b6963fb5787fce8315c7b0110b5c",
+      "license": "Apache-2.0",
+      "licenseFile": "LICENSE.HeatX",
+      "sourceRoot": "HeatX",
+      "files": [
+        {
+          "path": "HelixHeatX/Flange.cs",
+          "sha256": "105f15a7327c23bd928a75cfb771ae15d059f956376c95935c43f173d002aa26"
+        },
+        {
+          "path": "HelixHeatX/HelicalVoids.cs",
+          "sha256": "9a191a18ea2761c9eb149b554a3bf0a0bb513835abd100ce2557dbd483ffcd43"
+        },
+        {
+          "path": "HelixHeatX/HelixHeatX.cs",
+          "sha256": "755b6c4bdf796187f110b08cb4689d4686c32f250dff1e2669907c775ee1f94e"
+        },
+        {
+          "path": "HelixHeatX/IOCuts.cs",
+          "sha256": "25455ac664f71a54274ed1b067581bf61eff71d601295bd270986aa819d69b84"
+        },
+        {
+          "path": "HelixHeatX/IOPipes.cs",
+          "sha256": "3ec0c2658ed67de619ebfec48a9142e9177dfc71831517fb541e77676eaab65a"
+        },
+        {
+          "path": "HelixHeatX/IOSupports.cs",
+          "sha256": "1fe84de6dcc23c8bf39dce7cca1c3123ba5960bfdb748a55b9840c7a06031972"
+        },
+        {
+          "path": "HelixHeatX/IOThreads.cs",
+          "sha256": "fac1aabcd44a96f037526b673cec8ce635b16aedc2e66769a5cb46936e307b8e"
+        },
+        {
+          "path": "HelixHeatX/InternalFins.cs",
+          "sha256": "769e7ee44e062e089010ac6af9a5543cf9f80a22a6cac603ac67f83d6b31a984"
+        },
+        {
+          "path": "HelixHeatX/Misc.cs",
+          "sha256": "93a1f23c44486196017eae01134a7145b9cf23f51774237f1ba29ccb6234ec70"
+        },
+        {
+          "path": "HelixHeatX/OuterStructure.cs",
+          "sha256": "f91482ccb821323cce5ccf0b26474b2cd08cb9db4cb8c6ee39900943816be7ca"
+        },
+        {
+          "path": "HelixHeatX/PrintWeb.cs",
+          "sha256": "1da6dd38737af45a3ed98d5b873015cf83202ac34fa45ea4b2787bc46d3e71f1"
+        },
+        {
+          "path": "ScrewHole.cs",
+          "sha256": "aa5b937d0619de85b8c73ceb62408cb3dae366338252d7525dbd87f08a0a795d"
+        },
+        {
+          "path": "ThreadCutter.cs",
+          "sha256": "67266dcb493489d71fdb8513333cc500a1b6ae6cf216cedd1f2edec46dce2a0d"
+        },
+        {
+          "path": "ThreadReinforcement.cs",
+          "sha256": "97d45e92ac736d6c23296cf2412171846d490dfb44c1a61f32c029815f665c52"
+        }
+      ]
+    }
+  ]
+}

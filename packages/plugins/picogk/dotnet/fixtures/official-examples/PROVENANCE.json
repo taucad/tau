@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "repository": "https://github.com/leap71/PicoGK_Examples",
+  "revision": "60cdddac92f9e9aa7ee6f5e262e03367827f9307",
+  "license": "CC0-1.0",
+  "licenseFile": "LICENSE.md",
+  "entryPoint": "Program.cs",
+  "files": [
+    {
+      "path": "01_GettingStarted/BooleanShowCase.cs",
+      "sha256": "2e65ca0cf8f985c07f8822b0b69cce4c838bbf223561a44f21bb1bacad8d78c9"
+    },
+    {
+      "path": "01_GettingStarted/HelloWorld.cs",
+      "sha256": "f1eb7ef1d26d3d8f082b6b8c6bcc39f7e1e4372cf74c63169ce69e1a5aa365e8"
+    },
+    {
+      "path": "LICENSE.md",
+      "sha256": "6d392392ee326963594846a077405a4bd7488589a17d450e4aedd3f3429a9c6e"
+    },
+    {
+      "path": "Program.cs",
+      "sha256": "1870571ef73bd239520118deea95cfcac66e3fd9e3969463fcce25218e49c7aa"
+    }
+  ]
+}

@@ -57,7 +57,7 @@ const providerSchemaFor = (name: string): { properties?: Record<string, { type?:
 };
 
 describe('provider-facing tool schema compatibility', () => {
-  it('should resolve the active CAD toolbelt without internal transfer tools', () => {
+  it('should resolve the complete active CAD toolbelt', () => {
     const entries = serializeProviderFacingSchemas();
 
     expect(entries.map((entry) => entry.toolName)).toEqual([

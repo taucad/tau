@@ -8,7 +8,7 @@ import { modelSupportsInput, modelSupportsTools } from '#types/model.types.js';
 /**
  * CAD agent tools that are exposed to model providers through LangChain.
  *
- * Internal browser RPC schemas and supervisor transfer tools are intentionally
+ * Internal browser RPC schemas are intentionally
  * excluded: they are not serialized into provider function declarations.
  *
  * @public
@@ -100,7 +100,7 @@ export const getProviderFacingToolInputSchemas = ({
       return [];
     }
 
-    const toolPartType = `tool-${name}` as ToolPartType;
+    const toolPartType = `tool-${name}` as const;
     return [{ toolName: name, toolPartType, schema: toolInputSchemas[toolPartType] }];
   });
 };

@@ -3,6 +3,7 @@ export * from '#schemas/chat-turn-request.schema.js';
 export * from '#schemas/context-payload.schema.js';
 export * from '#schemas/file-metadata.schema.js';
 export * from '#schemas/metadata.schema.js';
+export * from '#schemas/provider.schema.js';
 export * from '#schemas/message.schema.js';
 export * from '#schemas/message-data.schema.js';
 export * from '#schemas/common-reasoning-metadata.schema.js';

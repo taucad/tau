@@ -1,34 +1,7 @@
-/**
- * AI model providers.
- * @public
- */
-export const modelProviders = [
-  //
-  'openai',
-  'anthropic',
-  'ollama',
-  'vertexai',
-  'cerebras',
-  'together',
-  'morph',
-  'xai',
-  'moonshot',
-] as const;
+import { modelFamilySchema, providerIdSchema } from '#schemas/provider.schema.js';
 
-/**
- * AI model families.
- * @public
- */
-export const modelFamilies = [
-  //
-  'gpt',
-  'claude',
-  'gemini',
-  'deepseek',
-  'glm',
-  'qwen',
-  'llama',
-  'minimax',
-  'grok',
-  'kimi',
-] as const;
+/** AI model providers, derived from the canonical schema. @public */
+export const modelProviders = providerIdSchema.options;
+
+/** AI model families, derived from the canonical schema. @public */
+export const modelFamilies = modelFamilySchema.options;

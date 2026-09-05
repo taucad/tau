@@ -21,6 +21,7 @@ export * from '#schemas/context-payload.schema.js';
 export * from '#schemas/file-metadata.schema.js';
 export * from '#schemas/rooted-path.schema.js';
 export * from '#schemas/metadata.schema.js';
+export * from '#schemas/provider.schema.js';
 export * from '#schemas/message.schema.js';
 export * from '#schemas/tool-input.registry.js';
 export * from '#schemas/message-data.schema.js';

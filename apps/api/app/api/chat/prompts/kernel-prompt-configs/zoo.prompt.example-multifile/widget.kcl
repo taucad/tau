@@ -1,9 +1,0 @@
-@settings(defaultLengthUnit = mm)
-
-export fn widget() {
-  return startSketchOn(XY)
-    |> circle(center = [0, 0], radius = 5)
-    |> extrude(length = 10)
-}
-
-widget()

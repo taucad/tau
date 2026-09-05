@@ -108,6 +108,30 @@ pnpm nx deploy api
 pnpm nx launch api
 ```
 
+### Tau Host relay spike
+
+The `/v1/agents` module pairs outbound `tau serve` daemons and relays opaque WebSocket frames for `/runtime` and `/fs`. Device identity and credential hashes are durable in Postgres; pairing codes, sessions, and one-use route grants use Redis TTLs. Raw device credentials are returned only once.
+
+Route pairing is currently process-local. Before enabling remote compute in an environment:
+
+```bash
+fly scale count 1 -a tau-api-staging
+fly scale count 1 -a tau-api
+```
+
+Keep `WEB_CONCURRENCY=1`, verify exactly one Machine is allocated, and re-run that check after any scaling or regional change. Startup rejects any other worker count. A second API process or region requires moving the relay pair map to a connection-owning service such as a dedicated relay or Durable Object; Redis session records alone do not make live sockets horizontally routable.
+
+Operational checks:
+
+- `GET /health/ready` must remain healthy before accepting pairings.
+- Revoking a device must close its control socket and all pending/live session sockets.
+- API shutdown closes control/data sockets with code `1001`.
+- Browser data upgrades require a Better Auth session and session ownership.
+- Host upgrades require their route-bound one-use bearer grant.
+- Do not log authorization headers, pairing device codes, raw credentials, or host grants.
+
+Public promotion remains disabled until the runtime child has a qualified OS/container sandbox. Node permission mode does not contain arbitrary network access.
+
 ## Project Structure
 
 ```

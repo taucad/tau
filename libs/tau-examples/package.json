@@ -27,6 +27,7 @@
     "@taucad/openrscad": "workspace:*",
     "@taucad/replicad": "workspace:*",
     "@taucad/runtime": "workspace:*",
+    "@taucad/picogk": "workspace:*",
     "@taucad/types": "workspace:*"
   },
   "devDependencies": {

@@ -1,7 +1,6 @@
 ---
 name: add-monaco-language
 description: Adds a new TextMate-based language to the Monaco editor and Shiki highlighter in apps/ui, including precompiling grammars from repos/shiki, wiring codeLanguages and the contribution registry, and keeping artefacts traceable. Use when adding Monaco or Shiki support for a new file extension, creating a custom language pack, or copying the SysML v2 integration pattern.
-disable-model-invocation: true
 ---
 
 # Add a Monaco + Shiki language

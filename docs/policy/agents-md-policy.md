@@ -1,223 +1,124 @@
 ---
 title: 'AGENTS.md Policy'
-description: 'Internal reference for maintaining AGENTS.md and the agent context hierarchy. Covers file location, context tiers, size budget, required sections, and continual learning integration.'
+description: 'Canonical root and nested instructions, shared skills, native discovery, autonomous composition, learning and verification for Codex and Claude.'
 status: active
 created: '2026-03-09'
-updated: '2026-05-13'
+updated: '2026-09-05'
 related:
-  - docs/research/cursor-context-budget-audit.md
+  - docs/policy/context-engineering-policy.md
+  - docs/policy/mcp-tool-budget-policy.md
+  - docs/policy/documentation-policy.md
+  - docs/policy/tool-output-location-policy.md
 ---
 
 # AGENTS.md Policy
 
-Internal reference for maintaining `AGENTS.md` and the agent context hierarchy.
+Internal reference for Tau's shared development-agent instructions and native Codex/Claude adapters.
 
 ## Rationale
 
-`AGENTS.md` is the universal standard for AI coding agent instructions, adopted by 60,000+ open-source projects and supported natively by Cursor, Codex, Copilot, Windsurf, Amp, and others. Using a single canonical file avoids drift between tool-specific variants (`CLAUDE.md`, `.cursorrules`).
+Agents need current owners, applicable invariants and meaningful checks close to the work. One canonical instruction hierarchy and shared procedure tree prevent host-specific copies from drifting. Detailed policies and evidence stay with their owners and are retrieved when the task requires them.
 
-**Sources**: [AGENTS.md specification](https://agents.md/), [Codex guide](https://developers.openai.com/codex/guides/agents-md/), [Blake Crosley patterns analysis](https://blakecrosley.com/blog/agents-md-patterns), [GitHub lessons from 2,500 repos](https://github.blog/ai-and-ml/github-copilot/how-to-write-a-great-agents-md-lessons-from-over-2500-repositories/), [Cursor dynamic context discovery](https://cursor.com/blog/dynamic-context-discovery)
+## Rules
 
-## File Location
+### 1. Keep one authority per kind of content
 
-- Single file: `AGENTS.md` at the repository root
-- No `CLAUDE.md`, `.cursorrules`, or other tool-specific duplicates
+System, developer and current user instructions take precedence over repository material. `DESIGN.md` governs user-facing design. Applicable normative policies cannot be weakened by operational AGENTS files or skill procedures. Local AGENTS narrow ancestor operation within their directory, consistently with those policies; skills implement the resulting task contract. Resolve contradictions at the owning source.
 
-## Context Hierarchy
+- Root `AGENTS.md` owns repository operation, the current architecture map and conditional policy router.
+- Nearest justified nested `AGENTS.md` owns local entrypoints, checks and operational invariants.
+- Existing `docs/policy/*.md` owns cross-cutting standards and full normative detail.
+- `.agents/skills/<name>/SKILL.md` and linked resources own repeatable procedures.
+- Existing architecture/research owners and package READMEs retain rationale, incidents and superseded architecture.
+- The existing program's coordinator-owned execution record holds selection, checkpoints and acceptance.
+- Thin supported native adapters configure host discovery and permissions.
 
-The agent context system has three artifact types with different discovery mechanics and token costs:
+Do not maintain another active IDE rule hierarchy or duplicate instruction bodies. Product support for agents, skills or MCP is separate from the development harness.
 
-| Artifact                    | Purpose                       | Discovery                                      | Token Cost           |
-| --------------------------- | ----------------------------- | ---------------------------------------------- | -------------------- |
-| `AGENTS.md`                 | Project-wide conventions      | Always loaded at session start                 | Fixed per session    |
-| `.cursor/rules/*.mdc`       | Passive reference for editing | `alwaysApply`, `globs`, or description-matched | Varies by activation |
-| `.agents/skills/*/SKILL.md` | Active multi-step workflows   | Description-matched on demand                  | Only when invoked    |
+### 2. Read the complete applicable chain
 
-### Rules: what/when (passive)
+Before editing a path, read every `AGENTS.md` from repository root through that path's parent, in order. For multiple targets, read the union of their chains and the root's conditional policy routes. Delegated briefs identify those paths and their owned targets.
 
-Rules tell the agent what to know. They are loaded automatically and inform decisions without requiring action.
+Start bounded tasks in their narrowest suitable working directory when supported. Codex startup discovery follows its ancestor chain; a root-launched task explicitly reads target descendants. This protocol supplements the native loader rather than assuming dynamic child discovery.
 
-- **`alwaysApply: true`**: Loaded in every conversation. Reserve for universal conventions only (build commands, package manager). Each always-on rule consumes tokens before the user types anything.
-- **`globs`**: Loaded when matching files are open. Use for policies that govern specific file types during editing (e.g., `*.test.ts` → testing patterns).
-- **Description-matched** (no globs, `alwaysApply: false`): "Agent Decides" mode. The agent sees the description and loads the rule only when it judges it relevant. Near-zero cost when not needed.
+Every canonical AGENTS has an adjacent `CLAUDE.md` containing exactly `@AGENTS.md` plus a newline. Claude imports the shared body through native memory discovery. Keep `.claude/skills` as a verified alias of `.agents/skills`; use a byte-checked generated mirror only for an observed native limitation. Never maintain two authored skill trees.
 
-### Skills: how (active)
+### 3. Route conditions explicitly
 
-Skills tell the agent what to do. They are invoked on demand via description matching or `/skill-name`. Use for multi-step workflows, file creation procedures, and complex operations.
+Root AGENTS links exact policies for TypeScript/JavaScript/public declarations; tests and React harnesses; XState; UI/design/accessibility; prompts/tools/filesystem context; application-library placement; GeoSpec; documentation; native instructions/configuration; publication; and generated output.
 
-### Separation principle
+Directory inheritance cannot express every file type or overlapping concern. Keep one canonical cross-project policy and a route from every affected branch. Event fan-out routes through libraries, filesystem, fs-client, runtime clients and the UI chat-session store; a geometry leaf does not govern a sibling graphics machine.
 
-Rules = reference material (schemas, standards, constraints). Skills = procedures (step-by-step workflows that produce output). If it has step-by-step instructions, it's a skill. If it's reference, it's a rule.
+Use `create-policy` to maintain policy and routes together. Add concise pointers instead of summary copies. Verify current source before asserting that an old path, framework or export still owns a concern.
 
-## Policy Discoverability
+### 4. Keep operational context bounded
 
-Policy docs in `docs/policy/` are discoverable through a tiered system. Use the cheapest tier that provides adequate discoverability.
+Root holds commands, owners, authority, routing, shared workflows and repository/evidence boundaries. Nested files hold local responsibility, non-obvious entrypoints, invariants, checks and links. A project map is a router, not an inventory of every symbol or skill.
 
-### Tier 1: AGENTS.md pointer (zero extra cost)
+Engineering limits are root ≤8 KiB, each nested file ≤4 KiB, and each repository root-to-leaf chain ≤16 KiB. These are Tau budgets, not vendor limits. Promote detail to its canonical policy/procedure before shortening an instruction; never truncate a qualification to meet a budget.
 
-`AGENTS.md` states that policy docs live in `docs/policy/`. The agent can `Read` or `Grep` this directory on demand when working on a relevant task. This is progressive disclosure — context is pulled, not pushed.
+Optional `Learned User Preferences` and `Learned Workspace Facts` buffers contain at most 12 bullets each, with at most 200 characters per bullet. Split independent claims and route them by ownership. Long rationale belongs elsewhere. Do not grandfather oversized paragraphs or copy ancestor preferences into each descendant.
 
-Most policies (17 of 21) are adequately discoverable through this pointer alone.
+### 5. Enable relevant skills and composition by default
 
-### Tier 2: Description-matched rules (near-zero cost)
+Models may discover, select and compose relevant shared skills during authorized work without a command-name prerequisite. Descriptions state the actual task, inputs, prerequisites and non-trigger cases. Loading a procedure does not authorize publication, external messages, destructive actions or expanded scope. A review-only request stays review-only.
 
-For policies that actively govern code patterns, create a `.cursor/rules/*.mdc` with a `description` field but no `globs` and `alwaysApply: false`. The agent loads the rule only when it judges it relevant based on the description.
+Normal skills omit `disable-model-invocation` or set it to `false`. Codex's `policy.allow_implicit_invocation` defaults to `true`; do not add `agents/openai.yaml` merely to restate that default. Preserve other useful metadata.
 
-### Tier 3: Glob-scoped rules (file-triggered cost)
+A manual-only exception requires a deliberate user requirement. Record its requirement, workflow, trigger and native metadata in the existing skill inventory, and state the requirement with its evidence reference under `## Manual initiation` in the skill. A legacy sentence, matching test or possible side effect alone is insufficient. Required helpers of autonomous workflows cannot remain manual-only.
 
-For policies that must be enforced whenever certain file types are being edited, use `globs` to trigger loading. Good for: testing patterns (`*.test.ts`), React conventions (`*.tsx`), documentation (`*.mdx`).
+Claude's `disable-model-invocation: true` blocks model invocation, hides its description from the model catalog and prevents native subagent preloading. Codex's `policy.allow_implicit_invocation: false` disables implicit selection while explicit user invocation remains available. Do not claim identical hard-denial mechanics or work around a native denial by reading/copying the body through another mechanism.
 
-### Tier 4: Always-apply rules (constant cost)
+Change frontmatter, trigger prose, helper calls, authoring templates, native metadata and relevant tests together. Verify natural-language selection, explicit invocation, parent/helper composition, delegated availability and unrelated-task behavior. Preserve independent input bounds, provenance, rights, read-only duties and actual action authorization.
 
-`alwaysApply: true` loads in every conversation. Reserve for the 1-2 most critical universal rules (e.g., package manager, build commands). Every always-on rule taxes the 200K context budget before the user types anything.
+### 6. Use native delegation and one execution owner
 
-### When NOT to create a companion rule
+Use available native tasks/subagents; a shared worker brief normally suffices. Register a native role only for a real workflow need. Keep model selection and native syntax in its adapter rather than inventing a universally discovered agent directory.
 
-Do not create a `.cursor/rules/*.mdc` companion for a policy when:
+Compose `work-charter` for authorized charter/blueprint execution. The coordinator owns claims, shared indexes and acceptance. Worker briefs specify task/attempt identity, prerequisites, exclusive paths, applicable instructions, source fingerprints, checks and the permitted evidence writer/return channel.
 
-- The policy is reference/architecture documentation (kernel-architecture, rpc, rendering-pipeline)
-- The agent can find it via `docs/policy/` search when relevant
-- The rule would just be a lossy summary that duplicates the policy content
-- The policy doesn't govern patterns during active code editing
+Snapshot relevant tracked and untracked bytes before dispatch; status alone misses edits to already dirty files. Inspect recorded native jobs before recovery/redispatch. Quiet live work retains ownership; fence stale attempts and reconcile unexpected edits without rolling back another writer.
 
-## Size Budget
+Preserve approved plans and selected scope. Persist checkpoints as useful work is produced. Native UI status is an observation, not another acceptance authority. A worker completion or successful tool exit still requires semantic verification.
 
-- **Total file**: under 150 lines
-- **Per section**: under 50 lines
-- Agents read this file at the start of every session; brevity preserves attention budget
+### 7. Promote learning through its shared owner
 
-## Required Sections
+`update-agent-memory` owns promotion into shared instructions. Introspection, research, reviews and execution supply provenance-bearing candidates; they do not concurrently edit a learned sink or share its completion cursor.
 
-Organize content in this order (most critical first):
+Verify current source, filter credentials/private data/transient state, deduplicate semantics and update existing statements in place. Choose the narrowest instruction owner using actual project roots. Cross-project detail goes to an existing policy/procedure with all affected routes. Canonical updates require current authorization and exclusive path ownership.
 
-### 1. Commands
+Use explicit host-supplied history/candidate artifacts and repository-safe fingerprints. Private native memory supplements shared instructions but cannot be the sole owner of a Tau rule. No session-end hook is required. Keep deferred candidates with the existing durable owner; do not commit private transcript indexes or replace an available collector with another parser.
 
-Exact command invocations with file-scoped variants. Commands are unambiguous and verifiable by exit code.
+### 8. Preserve repository and optional-checkout boundaries
 
-### 2. Architecture Overview
+Tau owns `docs/AGENTS.md` and its Claude import. `docs/research` and `docs/reference` may resolve into Tau Brain; do not create Tau instructions inside their symlink targets. Standalone Brain instructions belong to that repository.
 
-Terse description of the project structure. Pointers, not prose.
+Follow `.agents/skills/create-research/artifacts.md` for durable program evidence. A worker without Brain uses the permitted parent-save path; it does not create a second checkout. Ordinary public install/build/test/runtime remains independent of Brain and optional dependencies.
 
-### 3. Skills
+Required dependency-maintenance guidance stays reachable through Tau-side skills/references. Optional checkouts contribute their own local instructions when present. Never copy credentials, personal configuration or native session stores into the repository to manufacture parity.
 
-Table of project skills in `.agents/skills/` so the agent knows what guided workflows are available and when to use them. Keep the table updated when skills are added or removed.
+### 9. Scaffold useful instructions at project creation
 
-### 4. Code Conventions
+All supported Nx project creators use one shared instruction-template pair to create local AGENTS and its Claude import by default. Package, core and plugin creation—including kernels—share this contract. File-addition generators do not create extra instruction boundaries.
 
-Specific do's and don'ts with version-locked library references. Write like rules, not documentation.
+Resolve actual package/project identity, directory, entrypoints, description, capabilities and targets from the scaffold. Link root/ancestors, README and applicable policy/skill owners with correct relative paths. Commands run from workspace root using actual Nx identity; include build only when supported. A short project-notes section invites verified local invariants, not fabricated facts or task progress.
 
-### 5. Learned Preferences (auto-maintained, fallback buffer only)
+Render instruction templates separately from code templates using native Nx `KeepExisting`. Full creators reject project/path collisions before changing instructions. Repeated writer calls preserve authored bytes and fill only missing pair members. A conflicting authored Claude body is a review finding. Do not synchronize template updates over existing projects or make the default starter opt-in.
 
-`AGENTS.md` keeps `## Learned User Preferences` and `## Learned Workspace Facts` as **fallback buffers** for truly cross-cutting bullets the `agents-memory-updater` subagent cannot route to a project. Plain bullet points only, capped at 12 bullets / 200 chars each.
+### 10. Verify behavior and retire obsolete producers
 
-Project-scoped learnings route into per-domain `.cursor/rules/learned-<project>.mdc` files (see Per-Project Learned Rules below). The buffer in `AGENTS.md` is for items with no project anchor — process/workflow notes, repo-wide reference lists, etc.
+Use `pnpm nx run scripts:validate-agent-config` for authored boundaries, imports, paths, skills, invocation contracts and budgets. Keep focused tests in existing scripts/generator projects. Observe real root/nested discovery, overlapping policy routes, composition and delegation on each supported host; configuration existence is not runtime evidence.
 
-## Per-Project Learned Rules
+Use disposable fixtures and documented native isolation without changing global permissions, trust or credentials. Preserve commands, versions, output and actual file/native events. Mark unavailable cases unverified and do not declare parity without evidence.
 
-Long-tail learned facts and preferences live in glob-scoped per-Nx-project rule files at `.cursor/rules/learned-<project>.mdc`. Each file:
+Tau owns instruction text/templates. Nx remains its workspace/task/code-generation tool; agent provisioning is retired from supported setup. Supported install/discovery/generator commands must not recreate the retired harness. Historical research, negative fixtures, product cursor vocabulary and optional dependency repositories remain legitimate content.
 
-- Is `alwaysApply: false` and globs to its project root (e.g. `apps/ui/**`, `packages/runtime/**`)
-- Has only two H2 sections: `## Learned User Preferences`, `## Learned Workspace Facts`
-- Is auto-maintained by the `agents-memory-updater` subagent — do not hand-edit
-- Loads only when the agent is touching files matching the glob, so token cost is paid per-task, not per-session
+Before legacy deletion, account for every physical row and independent claim with its source fingerprint and accepted destination or supported supersession; recheck current source bytes. One-time migration archives are historical evidence, not another active rule owner.
 
-Rationale: a single always-on `AGENTS.md` containing every learning grew to 147KB / ~37K tokens before the May 2026 cleanup, dominating the context budget. Splitting by project keeps the always-on layer minimal while preserving every learning where it is most relevant.
+## References
 
-## Writing Principles
-
-### Command-first, not prose
-
-Every instruction should answer: "What command proves this was done correctly?" Prose paragraphs without actionable commands are ignored by agents.
-
-```markdown
-<!-- INCORRECT -->
-
-We value clean, well-tested code with comprehensive coverage.
-
-<!-- CORRECT -->
-
-Run `pnpm nx test <project> --watch=false` after changes. All tests must pass.
-```
-
-### Specific over vague
-
-```markdown
-<!-- INCORRECT -->
-
-Be careful with database migrations.
-
-<!-- CORRECT -->
-
-Run `pnpm db:generate` after schema changes. Never hand-edit migration files.
-```
-
-### No duplication across tiers
-
-`AGENTS.md` holds project-wide conventions. `.cursor/rules/*.mdc` holds file-pattern-scoped enforcement. `docs/policy/` holds full policy detail. Never repeat the same content across tiers — reference, don't copy.
-
-### No defensive repetition
-
-State instructions once. Avoid `CRITICAL`, `MUST`, `NEVER`, `IMPORTANT` emphasis markers — they waste tokens and agents already follow clear instructions.
-
-### No secrets or transient details
-
-Never store tokens, credentials, branch names, commit hashes, or temporary errors.
-
-## Doc Frontmatter
-
-All policy (`docs/policy/`) and research (`docs/research/`) docs require YAML frontmatter validated by `pnpm docs:validate` in CI.
-
-| Field           | Policy   | Research | Purpose                                                    |
-| --------------- | -------- | -------- | ---------------------------------------------------------- |
-| `title`         | Required | Required | Agent display name; must match H1                          |
-| `description`   | Required | Required | Agent discoverability without reading full content         |
-| `status`        | Required | Required | `active`, `draft`, `deprecated`, `superseded`              |
-| `created`       | Required | Required | ISO 8601 date                                              |
-| `updated`       | Required | Required | ISO 8601 date; CI warns if >180 days stale                 |
-| `category`      | —        | Required | Research type: audit, investigation, comparison, etc.      |
-| `related`       | Optional | Optional | Machine-parseable cross-references (paths validated by CI) |
-| `superseded_by` | Optional | Optional | Path to successor doc                                      |
-
-The `related` field is the source of truth for cross-references. A `## References` section in the body may still exist for external links.
-
-## Continual Learning Integration
-
-The `continual-learning` plugin's `agents-memory-updater` subagent maintains the learned sections by mining agent transcripts. The Tau workspace overrides the upstream subagent at `.cursor/agents/agents-memory-updater.md` with project-aware routing.
-
-- Plain bullet points only
-- **Per-bullet length cap: 200 chars.** Split long learnings into multiple short bullets rather than emitting one long one. This cap is policy — the absence of it is what allowed the prior 138KB regression.
-- At most 12 bullets per section per file
-- Include only items that are actionable, stable across sessions, repeated in multiple transcripts or explicitly stated as broad rules, and non-sensitive
-- Update in place (merge, don't append-only)
-- Index file at `.cursor/hooks/state/continual-learning-index.json` tracks processed transcripts
-
-### Routing rules (single source of truth at `.cursor/agents/agents-memory-updater.md`)
-
-Each new bullet routes to the most-specific match:
-
-- **Project-scoped** (mentions a single project's directory, file path, or unambiguous component): write to `.cursor/rules/learned-<project>.mdc` (create with standard frontmatter if missing).
-- **Cross-project domain cluster** (e.g. graphics stack spanning ui+runtime+react): write to `.cursor/rules/learned-<topic>.mdc` (e.g. `learned-graphics-stack.mdc`).
-- **Truly cross-cutting** (no project anchor): write to the `AGENTS.md` fallback buffer.
-
-The full routing table — Nx project name, target file, glob root, trigger keywords — lives at the bottom of `.cursor/agents/agents-memory-updater.md`. That file is the single source of truth for the routing logic; this policy describes the architecture, not the table.
-
-## Audit Checklist
-
-When editing `AGENTS.md`:
-
-- [ ] Total file under 150 lines (excluding the auto-managed Nx block)
-- [ ] Every instruction is verifiable by a command or concrete example
-- [ ] No duplication across tiers (AGENTS.md, rules, policies)
-- [ ] No prose paragraphs without actionable commands
-- [ ] No secrets, tokens, or transient details
-- [ ] Learned sections maintained only by `agents-memory-updater` (not hand-edited)
-- [ ] Buffer sections respect the 12-bullet / 200-char-per-bullet cap
-- [ ] Skills table reflects current `.agents/skills/` contents
-
-When editing `.cursor/rules/learned-<project>.mdc`:
-
-- [ ] File is `alwaysApply: false` with project-scoped globs
-- [ ] Only H2 sections present: `## Learned User Preferences`, `## Learned Workspace Facts`
-- [ ] Each section ≤12 bullets
-- [ ] New bullets ≤200 chars
-- [ ] No process/workflow notes (those belong in the AGENTS.md fallback buffer)
+- [Codex instruction discovery](https://learn.chatgpt.com/docs/agent-configuration/agents-md)
+- [Codex skill metadata](https://learn.chatgpt.com/docs/build-skills)
+- [Claude memory and imports](https://code.claude.com/docs/en/memory)
+- [Claude skill invocation](https://code.claude.com/docs/en/slash-commands#control-who-invokes-a-skill)
+- [Claude subagent skills](https://code.claude.com/docs/en/sub-agents#preload-skills-into-subagents)

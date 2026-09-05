@@ -1,6 +1,6 @@
 ---
 name: find-research
-description: Finds, evaluates, ingests, and synthesizes research for a bounded subject using Tau's anonymous discovery and durable reference workflows. Use only when invoked as /find-research.
+description: Finds, evaluates, ingests, and synthesizes research for a bounded subject using Tau's anonymous discovery and durable reference workflows. Use when a task needs external research discovery and evidence synthesis, or compose within an authorized investigation.
 argument-hint: '[subject]'
 ---
 

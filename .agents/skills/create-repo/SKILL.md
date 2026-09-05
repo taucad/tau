@@ -1,7 +1,6 @@
 ---
 name: create-repo
-description: Bootstraps, retrofits, or audits standalone taucad repositories with release, CI, quality, documentation, governance, and agent-maintenance conventions. Use only when a maintainer invokes /create-repo.
-disable-model-invocation: true
+description: Bootstraps, retrofits, or audits standalone taucad repositories with release, CI, quality, documentation, governance, and agent-maintenance conventions. Use when the current task asks to create, retrofit, or audit a repository.
 argument-hint: '[bootstrap <name> | retrofit <name> | audit <name>]'
 ---
 
@@ -75,7 +74,7 @@ dead-code, docs, format, lint, prose, and workflow gate.
 
 ### Template destinations
 
-Copy files without rewriting their bodies except placeholder substitution:
+Copy files without rewriting their bodies except placeholder substitution. The release skill template deliberately uses `SKILL.md__tmpl__` so native recursive discovery cannot advertise its unbound placeholders; copy it to the mapped `SKILL.md` destination only after binding:
 
 | Template path                                                                                         | Repository destination                                                     |
 | ----------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
@@ -87,7 +86,7 @@ Copy files without rewriting their bodies except placeholder substitution:
 | `scripts/*`                                                                                           | `scripts/`                                                                 |
 | `tests/ci-release.test.mjs`, `tests/release-attestations.test.mjs`                                    | `tests/ci/`                                                                |
 | `tests/packaging.test.mjs`                                                                            | `tests/`                                                                   |
-| `release-skill/SKILL.md`                                                                              | `.agents/skills/release-<slug>/SKILL.md`                                   |
+| `release-skill/SKILL.md__tmpl__`                                                                      | `.agents/skills/release-<slug>/SKILL.md`                                   |
 | `prose-rules.js`, `jsdoc-quality.js`, `eslint-plugin.js`                                              | `tools/eslint-plugin/` as `prose-rules.js`, `jsdoc-quality.js`, `index.js` |
 | `vale/<pack>/*`                                                                                       | `.vale/styles/<pack>/`                                                     |
 | `prose-quality.test.ts`, `readme-shape.test.ts`                                                       | Repository root                                                            |
@@ -221,10 +220,10 @@ From the assembled candidate set, verify in clean temporary projects:
 
 ## 7. Self-Driving Maintenance
 
-1. Copy root `AGENTS.md`; keep it under 150 lines and do not add `CLAUDE.md`.
+1. Copy the root `AGENTS.md` starter and adjacent `CLAUDE.md` import. Keep canonical root instructions within 8 KiB; each justified nested scope gets an authored body within 4 KiB and its own exact `@AGENTS.md` import. Every effective chain stays within 16 KiB. Preserve existing authored instructions during retrofit; reconcile their meaning before changing them.
 2. Store repo-local skills under `.agents/skills/` and make
    `.claude/skills` a symlink. Copy `.claude/launch.json`.
-3. Copy the three-job trusted/untrusted `claude.yml`; every untrusted checkout
+3. Verify root and nested instruction discovery in the supported Codex/Claude hosts, including the shared skill alias, natural selection and a relevant helper composition. Preserve native trust/approval settings; metadata alone is not parity evidence. Copy the three-job trusted/untrusted `claude.yml`; every untrusted checkout
    uses `persist-credentials: false`.
 4. Copy cron, Dependabot, OSV, cache-cleanup, and native dependency checks.
    Create or verify the `claude` repository label and confirm the workflow can
@@ -251,7 +250,7 @@ link to `https://tau.new`. Never add postinstall messages or telemetry.
 ## 9. Registration and Governance
 
 1. Add or verify the `repos.yaml` entry and explicit non-default `branch:`.
-2. Register repo-local skills in the repository `AGENTS.md`.
+2. Route relevant workflows to `.agents/skills/` from `AGENTS.md`; let the native catalog discover skills instead of duplicating a complete registry. Keep model selection/composition enabled by default.
 3. Verify npm Trusted Publishing binds every package in the fixed release group
    to `taucad/@@CREATE_REPO_slug@@` and `ci.yml`; register only when the operator
    says a binding is absent.
@@ -275,9 +274,7 @@ npm pack --dry-run --json
 git status --short
 ```
 
-Then push the branch, open a reviewable pull request with exact validation
-evidence, wait for `ci-gate`, and merge only when the required end state calls
-for it. Report external settings and publication evidence separately from code
+When the current task authorizes submission, push the branch and open a reviewable pull request with exact validation evidence. Wait for `ci-gate`; merge only when the authorized end state calls for it. Discovery of this skill alone does not authorize external settings, visibility changes, publication, scheduling or messages. Report external settings and publication evidence separately from code
 checks.
 
 ## Boundaries

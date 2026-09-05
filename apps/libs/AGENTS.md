@@ -10,6 +10,7 @@ Projects here are private application capabilities consumed from source. Their p
 - In `fs-client`, keep `FileContentService`, `FileTreeService`, and `WorkerChangeChannel` as UI facades over `@taucad/filesystem`. Filesystem authority events drive state; polling is a bounded fallback.
 - In `lsp-fs`, keep the shared Tier 0 pool, Tier 1 JSON-RPC protocol, and the TypeScript-only Tier 2 synchronous channel. In `lsp`, keep URI normalization and Monaco worker composition. Follow [Language Contribution Policy](../../docs/policy/language-contribution-policy.md) and [Filesystem Policy](../../docs/policy/filesystem-policy.md).
 - Follow [Workspace Project Policy](../../docs/policy/workspace-project-policy.md) and [Library API Policy](../../docs/policy/library-api-policy.md) when adding or changing an entrypoint.
+- Metadata-only format consumers import `mimeTypes` and `fileExtensions` from `@taucad/types/constants` and `FileExtension` from `@taucad/types`. Do not import `@taucad/converter` solely to enumerate formats because its root entrypoint loads conversion engines.
 
 ## Checks
 

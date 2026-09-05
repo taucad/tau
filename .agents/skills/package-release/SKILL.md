@@ -1,7 +1,6 @@
 ---
 name: package-release
 description: Manage versioning, building, and publishing of @taucad npm packages using Nx Release. Use when releasing packages, bumping versions, creating version plans, publishing to npm, setting up CI publishing workflows, or when the user mentions releasing, publishing, versioning, or changelogs.
-disable-model-invocation: true
 ---
 
 # Package Release Management

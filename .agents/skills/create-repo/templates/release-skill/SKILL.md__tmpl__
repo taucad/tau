@@ -1,7 +1,6 @@
 ---
 name: release-@@CREATE_REPO_slug@@
-description: Audits or prepares reviewed @@CREATE_REPO_npm-name@@ releases. Use only when a maintainer explicitly invokes /release-@@CREATE_REPO_slug@@.
-disable-model-invocation: true
+description: Audits or prepares reviewed @@CREATE_REPO_npm-name@@ releases. Use when the current task asks to audit or prepare this package release.
 argument-hint: '[status | prepare <version> | submit <version>]'
 ---
 
@@ -19,7 +18,7 @@ Releases, and Vercel deployment.
 - `submit <version>`: prepare on `release/@@CREATE_REPO_slug@@-v<version>`, validate, commit,
   push, and open one pull request.
 
-Reject other arguments.
+Map natural requests to the matching mode; reject unsupported modes. Preparation is local. Use submit only when the current task authorizes committing, pushing and opening the release pull request; skill selection alone does not authorize these effects.
 
 ## Prepare or submit
 

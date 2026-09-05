@@ -1,6 +1,6 @@
 ---
 name: scientific-critical-thinking
-description: Evaluates engineering and computational research evidence, limitations, and claim strength with calibrated confidence. Use only when explicitly invoked or composed by find-research.
+description: Evaluates engineering and computational research evidence, limitations, and claim strength with calibrated confidence. Use when assessing research claims or comparing evidence, including composition by find-research.
 ---
 
 # Scientific Critical Thinking

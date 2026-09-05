@@ -6,6 +6,8 @@ How `apps/ui` is built, hosted, and promoted across staging and production, plus
 
 Both staging and production UIs deploy on Netlify against Fly.io staging and production APIs. **Production promotions** are GitOps-style: a bot-managed trail PR merges `release/main-to-production` into `production`; that merge triggers native Netlify Git builds (`taucad-prod-us`) and pushes the Fly API via [`prod-deploy-on-merge.yml`](../../.github/workflows/prod-deploy-on-merge.yml).
 
+The staging label `taucad` below is historical operator shorthand, not verified current hosted identity. The current optional staging stack pins a site ID and retains `taucad-staging` as its bootstrap lookup name. Use that selected stack's site ID and verify the authorized hosted state before changing site wiring; do not infer that the two labels identify different live sites. See [Tau Cloud maintenance](dependency-maintenance/tau-cloud.md).
+
 **DNS authority** is **Cloudflare** (zones `taucad.dev` + `tau.new`) declared under `repos/tau-cloud` HCP workspaces `tau-cloud-staging` / `tau-cloud-prod-us`. Registrar cutover sequencing lives in **`repos/tau-cloud/docs/dns-migration-plan.md`**.
 
 ### Operator sequencing

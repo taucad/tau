@@ -7,6 +7,8 @@ description: Create or update research documents in docs/research/. Use when inv
 
 Guide for authoring research documents in `docs/research/`. Research docs are investigative artifacts that capture analysis, evidence, and recommendations. They inform decisions and often feed into policy docs (`docs/policy/`).
 
+For delegated, long-running, or evidence-producing work, read [Durable research artifacts](artifacts.md) before starting. Resolve the owning document and permitted artifact writer, and preserve intermediate findings, raw results and restart state as they are produced.
+
 ## Research vs Policy
 
 | Dimension     | Research (`docs/research/`)        | Policy (`docs/policy/`)      |
@@ -46,6 +48,19 @@ Identify the type of research before writing. Each type emphasizes different sec
 | **Migration/Upgrade**        | Moving to a new version or system                       | Current vs target, Breaking changes, Migration steps         |
 | **Optimization**             | Improving performance, size, or resource usage          | Baseline metrics, Experiment data, Recommendations           |
 | **Technical Reference**      | Documenting an external API, spec, or system            | Architecture overview, Feature catalog, Integration strategy |
+
+### Bug reports and root-cause investigations
+
+Use this existing mode for bug hunting, creating a bug report, or diagnosing a reported failure. It owns the durable report; a diagnosis lane returns evidence to this owner instead of creating a competing report format.
+
+1. Record expected versus observed behavior, impact, affected environment/revision, and the smallest reproducible trigger. Distinguish a reported symptom from a reproduced failure.
+2. Trace the actual flow through the shared owner, affected callers, dependencies and relevant invariants. Test competing explanations using source or an experiment; label unverified hypotheses explicitly.
+3. Determine whether the cause is an implementation defect or an architectural ownership problem. Apply Ponytail after understanding the flow: fix at the shared source, reuse existing/native behavior, retain complexity required for correctness. Do not patch each symptom or post-process incorrect output.
+4. Preserve evidence, failed hypotheses, relevant measurements and a continuation checkpoint through the artifact contract. A failed reproduction is a result to retain, not a confirmed diagnosis.
+5. Report the root cause with source locators, affected callers, proposed fix boundary, alternatives that matter, and the smallest semantic acceptance check. State exactly what remains unverified when the cause is unknown.
+6. Stop at the report when investigation alone was requested. If implementation is already authorized, hand the scoped diagnosis and acceptance evidence to that execution owner without asking again or silently widening its write budget.
+
+Keep the report as small as the failure permits. Broad bug hunts may delegate independent failure domains; each lane needs a falsifiable question and an evidence owner, not a generic mandate to find more issues. Exploration has no artificial deadline, and ends when further evidence cannot change the relevant diagnosis or decision.
 
 ## Structure Template
 
@@ -236,6 +251,8 @@ Never use Comlink for hot-path operations.
 ### Evidence Over Opinion
 
 Support findings with data: benchmarks, traces, code references, experiment results, or upstream documentation.
+
+Treat the research, the user's refining questions and rulings, its plan and resumed implementation as one evidence chain. Preserve the supplied plan and record execution separately. During an authorized consolidation/cleanup, remove superseded research authorities only after their useful evidence and links reach the selected successor. Honor a user's request to preserve long research/blueprint lines rather than imposing a prose line-length limit.
 
 ```markdown
 <!-- Weak -->

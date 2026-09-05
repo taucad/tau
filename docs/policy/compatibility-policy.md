@@ -3,7 +3,7 @@ title: 'Platform Compatibility Policy'
 description: 'Canonical capability matrix for Tau browsers, runtime hosts, WebAssembly artifacts, filesystems, workers, and graphics.'
 status: active
 created: '2026-07-21'
-updated: '2026-09-02'
+updated: '2026-09-05'
 related:
   - docs/policy/filesystem-policy.md
   - docs/policy/filesystem-authority-policy.md
@@ -33,7 +33,7 @@ This policy does not:
 - authorize user-agent dispatch where a capability or artifact probe is possible;
 - add a runtime probe, fallback, build variant, or compatibility shim by itself;
 - make experimental support universal because one current or beta engine implements it;
-- require a generated MDN Browser Compatibility Data dependency or companion `.cursor/rules` file.
+- require a generated MDN Browser Compatibility Data dependency or provider-specific instruction mirror.
 
 ## Capability Tiers
 

@@ -3,7 +3,7 @@ title: 'TypeScript Policy'
 description: 'Type assertion rules, mock typing patterns, generic inference, and common gotchas for safe TypeScript usage across the Tau monorepo.'
 status: active
 created: '2026-03-09'
-updated: '2026-07-14'
+updated: '2026-09-05'
 related:
   - docs/policy/testing-policy.md
   - docs/research/typescript-overloads.md
@@ -340,6 +340,26 @@ INCORRECT:
 ```typescript
 return { done: true, value: undefined as never };
 ```
+
+### 12. Preserve Consumer Input and Project Boundaries
+
+Use `z.input<typeof schema>` for caller-supplied values when defaults, coercions or transforms make the accepted input differ from parsed output. Use the schema's output type only after parsing. Keep the runtime schema and public consumer type under one owner.
+
+Keep one path-alias convention within a project; migrate its consumers instead of layering another parallel scheme. Resolve module/declaration errors at the owning source export, tsconfig inclusion or package boundary. Verify public isolated-declaration output with the package's actual type/build checks rather than patching emitted files or masking missing type information downstream.
+
+Runtime app/lib/spec configurations checked by tsgo must not reference another workspace project or its emitted `out-tsc` declarations. Same-project app/spec references remain valid; separate declaration build configurations retain their own purpose. Use source exports across project boundaries and verify with `pnpm nx run scripts:validate-tsgo-runtime-references`.
+
+Browser-delivered syntax must work in the supported browsers after the actual production transform. Verify lowering, required helpers and disposal behavior before introducing `using` or `await using`; use explicit `try/finally` disposal when that pipeline cannot provide them. Do not turn a historical bundler limitation into a permanent syntax ban: the current UI targets ES2022, and installed Rolldown can lower both forms, while end-to-end browser acceptance remains required for a changed use site.
+
+Declaration emit can reveal TS90xx diagnostics hidden behind earlier semantic errors in a standalone typecheck. If isolated declaration emit reports TS9010 on an inline `as const satisfies` expression, separate the declaration and compatibility check or give the declaration an explicit type. This diagnostic is conditional on the actual emit configuration, not a blanket syntax prohibition.
+
+### 13. Implementation and Diagnostic Conventions
+
+Describe source comments, JSDoc and consumer-facing documentation through the behavior and rationale readers need. Do not use private Tau research row identifiers or plan shorthand as their explanation. Internal research, charters and execution records retain stable decision/work IDs under their own workflow contract; that is distinct from publishing opaque internal references in product code or prose.
+
+Prefer early returns to reduce nesting, composition over inheritance, functional patterns, and const-bound functions over function declarations. Keep functions to at most three parameters; group additional related data in an options object and follow the public API policy's operation-envelope rules.
+
+When removing temporary investigation logs, retain structured error reporting at the owning boundaries. WASM parse failures (including relaxed SIMD), OpenCascade.js initialization, render/network failures and FileManager worker errors must expose named, useful error fields instead of opaque or `undefined` messages. Preserve the concrete failure information needed to diagnose the affected layer.
 
 ## Anti-Patterns
 

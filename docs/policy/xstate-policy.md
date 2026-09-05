@@ -3,7 +3,7 @@ title: 'XState Policy'
 description: 'State machine design, actor lifecycle, and React integration using XState v5. setup(), context rules, assign, invoke/spawn, useActorRef, cleanup patterns.'
 status: active
 created: '2026-03-04'
-updated: '2026-03-09'
+updated: '2026-09-05'
 related:
   - docs/research/xstate-patterns.md
   - docs/policy/typescript-policy.md
@@ -19,6 +19,10 @@ Internal reference for state machine design in the Tau application. Standard pat
 XState v5 provides structured state management with automatic actor lifecycle and cleanup. Consistent patterns for context updates, async operations, and React integration prevent common pitfalls: direct mutation, fire-and-forget async, and orphaned actors. Machines that own lifecycle logic keep UI components simple and testable.
 
 ## Machine Definition
+
+Keep each machine in its owning `.machine.ts` file, with its context, internal event, input and emitted types declared before the machine. Export the machine; expose an `ActorRefFrom<typeof machine>` reference type when consumers need it. A logic alias using `typeof machine` is not an actor reference.
+
+Keep named actor logic in `setup().actors`. Preserve literal event discriminators through the declared emitted union, an explicit return type or `satisfies`; use a const assertion only when inference needs it. Do not add an unused error field or a redundant actors-map assertion to an otherwise lean machine.
 
 ### Use `setup()` for all machine definitions
 
@@ -59,6 +63,8 @@ export const myMachine = setup({
 - **Events**: `camelCase` verbs (e.g., `createGeometry`, `loadProject`, `setParameters`)
 - **Actions**: `camelCase` verb phrases (e.g., `registerParentRef`, `destroyWorkers`, `emitProjectLoaded`)
 - **Guards**: `camelCase` predicates (e.g., `isLoggedIn`, `hasValidData`, `isProjectIdChanging`)
+
+Emitted events describe completed outcomes (`fileCreated`, `buildCompleted`). Active state names describe ongoing work; stable states name their outcome. Existing application actors use `Actor` for one-shot work and `Listener` for callbacks; preserve a domain's established driver naming where it conveys the actual role.
 
 > **Note on `dot.case`**: XState v5 recommends `dot.case` for event names to enable wildcard transitions (`'kernel.*'`). The current codebase uses `camelCase`. New machines may adopt `dot.case` if wildcard matching provides clear value, but consistency within a machine is more important than convention.
 
@@ -115,7 +121,7 @@ states: {
 
 ### `assign` for context updates
 
-Use `assign` for all context updates. Prefer the property-based form for targeted updates:
+Use `assign` for all context updates. Prefer the property-based form for targeted updates. For complex nested updates, use the existing Immer `produce` helper inside `assign` to preserve immutability:
 
 ```typescript
 // Property-based (preferred)
@@ -219,6 +225,10 @@ registerParentRef: assign({
 ### Prefer `invoke` over `spawn` when possible
 
 `invoke` provides automatic lifecycle management — the actor starts when the state is entered and stops when the state is exited. Prefer `invoke` unless the actor needs to persist across multiple states.
+
+When a dynamic child must exist with a retained reference at parent startup, create it in the owning context initializer. Stop the existing child before replacing it. Use `ActorRefFrom<typeof childMachine>` for stored refs and pass a required parent ref through input/context for child-to-parent `sendTo`.
+
+When a transition must reset the current state's timer or debounce, use `reenter: true` so exit and entry lifecycle actually run.
 
 ### Always stop spawned actors
 

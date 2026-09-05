@@ -1,6 +1,6 @@
 ---
 name: paper-lookup
-description: Finds research-paper metadata through anonymous arXiv and Crossref searches and returns bounded, provenance-rich candidates. Use only when explicitly invoked or composed by find-research.
+description: Finds research-paper metadata through anonymous arXiv and Crossref searches and returns bounded, provenance-rich candidates. Use when an investigation needs scholarly metadata, including composition by find-research.
 ---
 
 # Paper Lookup

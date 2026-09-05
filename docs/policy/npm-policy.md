@@ -3,7 +3,7 @@ title: 'npm Publishing Policy'
 description: 'Per-package rules for preparing @taucad/* libraries for npm publication: tsdown shape, dependency hygiene, exports map discipline, validation gates, README requirements.'
 status: active
 created: '2026-05-22'
-updated: '2026-08-31'
+updated: '2026-09-05'
 related:
   - docs/policy/compatibility-policy.md
   - docs/policy/release-policy.md
@@ -50,6 +50,8 @@ Internal workspace libraries under `libs/*` and `apps/libs/*` are `"private": tr
 ### 1. Dependency Classification
 
 Every dependency declared in a publishable package must be classified into exactly one of these buckets. Bucket selection is non-negotiable.
+
+Use pnpm to change workspace dependencies. Add a general root dependency with `pnpm add -w <dependency>` and root development tooling with `pnpm add -Dw <dependency>`. A package-owned production dependency belongs in that package's manifest: use `pnpm --filter <package-name> add <dependency>` and apply the classification below. Do not rely on a root installation to hide an undeclared consumer runtime requirement.
 
 | Bucket                      | Field                                                             | Treatment                                                    |
 | --------------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------ |

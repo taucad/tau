@@ -1,7 +1,6 @@
 ---
 name: rebuild-kcl-wasm-lib
 description: Rebuild and republish @taucad/kcl-wasm-lib from the taucad/modeling-app fork. Use when bumping KCL, syncing modeling-app upstream, fixing KCL parser/sketch errors, wasm-pack rebuilds, or republishing the kcl-wasm-lib npm package.
-disable-model-invocation: true
 ---
 
 # Rebuild `@taucad/kcl-wasm-lib`

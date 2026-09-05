@@ -1,6 +1,6 @@
 ---
 name: database-lookup
-description: Finds Tau-relevant scientific and engineering records from a narrow set of anonymous official databases with reproducible provenance. Use only when explicitly invoked or composed by find-research.
+description: Finds Tau-relevant scientific and engineering records from a narrow set of anonymous official databases with reproducible provenance. Use when an investigation needs official engineering records, including composition by find-research.
 ---
 
 # Database Lookup

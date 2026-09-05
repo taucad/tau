@@ -52,14 +52,14 @@ const filesBelow = (path: string): string[] => {
 };
 
 describe('clean-room research skills', () => {
-  it('should remain explicit, bounded, directly linked, and non-executable', () => {
+  it('should allow relevant composition while remaining bounded, linked, and non-executable', () => {
     for (const skill of cleanRoomSkills) {
       const path = skillPath(skill);
       const text = readFileSync(path, 'utf8');
       const frontmatter = metadata(text);
       expect(frontmatter.name).toBe(skill);
-      expect(frontmatter.description).toMatch(/Use only when/u);
-      expect(frontmatter['disable-model-invocation']).toBe(true);
+      expect(frontmatter.description).toContain('Use when');
+      expect(frontmatter['disable-model-invocation']).toBeUndefined();
       expect(text.split('\n').length).toBeLessThan(500);
 
       for (const file of filesBelow(dirname(path))) {
@@ -145,14 +145,11 @@ describe('clean-room WebGPU optimization skill', () => {
     expect(text).toContain('It has no runtime dependency on that repository.');
   });
 
-  it('should remain explicit, concise, locally grounded, and registered', () => {
+  it('should remain discoverable, concise and locally grounded', () => {
     const text = skillText();
-    expect(metadata(text)).toEqual({
-      name: 'optimize-for-gpu',
-      description:
-        'Designs and verifies WebGPU/WGSL compute acceleration for profiled Tau CAD, simulation, and analysis workloads. Use only when explicitly invoked for non-rendering GPU compute.',
-      'disable-model-invocation': true,
-    });
+    expect(metadata(text).name).toBe('optimize-for-gpu');
+    expect(metadata(text).description).toContain('non-rendering GPU compute');
+    expect(metadata(text)['disable-model-invocation']).toBeUndefined();
     expect(text.split('\n').length).toBeLessThan(250);
     for (const link of [
       '../../../docs/policy/vision-policy.md',
@@ -164,7 +161,8 @@ describe('clean-room WebGPU optimization skill', () => {
     ]) {
       expect(text).toContain(`](${link})`);
     }
-    expect(readFileSync(resolve(repoRoot, 'AGENTS.md'), 'utf8')).toContain('| `optimize-for-gpu`');
+    expect(readFileSync(resolve(repoRoot, 'AGENTS.md'), 'utf8')).toContain('.agents/skills/');
+    expect(readdirSync(skillsRoot)).toContain('optimize-for-gpu');
   });
 
   it('should require profiling before GPU work', () => {

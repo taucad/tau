@@ -1,7 +1,6 @@
 ---
 name: add-logo
-description: Adds a color LLM or provider brand logo from the tracked Lobe Icons repository to the UI icon sprite. Use only when invoked as /add-logo with a brand name.
-disable-model-invocation: true
+description: Adds a color LLM or provider brand logo from the tracked Lobe Icons repository to the UI icon sprite. Use when adding a known brand icon, including as part of a model-catalog task.
 argument-hint: '[brand]'
 ---
 

@@ -1,7 +1,6 @@
 ---
 name: codex-continued
-description: Continues a Codex thread inside Claude — recovers the thread's recent history from the local Codex rollout segments, grounds it against the repository, then executes the follow-up prompt as that thread's next turn. Use only when invoked as /codex-continued with a codex://threads/<id> deeplink followed by --- and the continuation prompt.
-disable-model-invocation: true
+description: Continues a Codex thread inside Claude by recovering local rollout history and grounding the continuation against the repository. Use when the user supplies a Codex thread identity and a continuation request; /codex-continued also accepts a deeplink followed by --- and the prompt.
 argument-hint: '<codex-deeplink> --- <prompt>'
 ---
 
@@ -27,12 +26,14 @@ Accept `codex://threads/<uuid>` or a bare UUID; ignore any query or fragment. On
 ## 2. Extract the recent history
 
 ```bash
-node <skill-dir>/scripts/codex-thread.mjs <thread-id> --messages 40 --out <scratchpad>/codex-thread.md
+node <skill-dir>/scripts/codex-thread.mjs <thread-id> --messages 40 --out <staging-dir>/codex-thread.md
 ```
 
-`<skill-dir>` is announced as "Base directory for this skill". Write to the session scratchpad, never into the repository. Read the extract in full, then widen with `--messages` if the tail starts mid-topic — a thread spanning several days is normal, and only the last stretch usually matters.
+`<skill-dir>` is announced as "Base directory for this skill". The extractor does not redact credentials: use permitted staging, inspect/redact the complete extract, then save it and its source locators into the owning document's [durable artifact run](../create-research/artifacts.md) before relying on it as a handoff. Native staging is not the durable copy. Read the extract in full, then widen with `--messages` if the tail starts mid-topic — a thread spanning several days is normal, and only the last stretch usually matters.
 
 The extract carries a segment inventory (start time, message count, whether the segment continues an earlier one) and the trailing messages in chronological order.
+
+This tail extractor is for continuation, not whole-corpus introspection. Its limited history is not evidence that earlier messages were analyzed. Preserve source gaps and redact credentials before retaining or sharing an extract.
 
 ## 3. Ground the history in the repository
 

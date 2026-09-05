@@ -3,7 +3,7 @@ title: 'Runtime Architecture Policy'
 description: 'CAD runtime worker architecture from editor to geometry computation. Covers runtime engine boundaries, plugin toolkits, transport, and lifecycle.'
 status: active
 created: '2026-02-18'
-updated: '2026-09-03'
+updated: '2026-09-05'
 related:
   - docs/policy/compatibility-policy.md
   - docs/policy/worker-policy.md
@@ -199,6 +199,10 @@ Runtime itself must not import these concrete backends from its root or engine s
 
 ## RuntimeClient Lifecycle
 
+### Capability Manifest
+
+The resolved `CapabilitiesManifest` has one ordered `routes` array; routes carry kernel fidelity and have no parallel `routeId` array. Consumers use `RuntimeClient.routesFor` and `bestRouteFor` so route selection stays framework-owned. A late `capabilities` subscriber receives the current manifest immediately after subscribing.
+
 ```text
 1. createRuntimeClient(options)                          → RuntimeClient created, no Worker yet
 2. client.on('geometry', handler)                       → Subscribe to render results (any time)
@@ -220,6 +224,10 @@ The `render()` method accepts two input shapes via generic overloads:
 ### Geometry Event
 
 When the selected preview completes (success or failure), the `geometry` event fires with the full `HashedGeometryResult`. This is the authoritative output stream for both public commands and autonomous watched-filesystem rerenders. Stale previews never publish.
+
+Runtime-client production fan-out composes `Topic<E>` from `@taucad/events`; do not maintain parallel handler sets or manual dispatch loops. Keep the unified typed client event map exhaustive as geometry, progress, `parametersResolved`, diagnostics, and `activeKernelChanged` evolve. `activeKernelChanged` carries `string | undefined`, not a closed kernel-id union. Apply `docs/policy/event-fanout-policy.md` across the filesystem, runtime-client, fs-client, and UI session-store route.
+
+An intentionally geometry-free render is successful and returns the canonical zero-mesh GLB produced by `@taucad/geometry-core`. `NO_RENDER_GEOMETRY` means an adapter failed to produce any public geometry artifact; do not use it to represent a valid empty model.
 
 ### Auto-Cancellation (Latest-Wins)
 
@@ -284,7 +292,7 @@ Every wire is carried by `@taucad/rpc`'s callback-shaped `Port<T>` (`postMessage
    │  ├─ Related path → invalidate affected caches and schedule one preview
    │  └─ Unrelated path → no render work
    │
-4. CadMachine reflects the worker-owned render lifecycle
+4. CadMachine reflects the authoritative worker lifecycle, including idle → buffering → rendering for a watched-preview debounce window
    │
 5. KernelMachine pipeline:
    │  ├─ Lazily creates RuntimeClient (ensureRuntimeClient)
@@ -414,7 +422,7 @@ Kernel modules define geometry computation logic. Each kernel is an ES module lo
 
 ### `defineTranscoder`
 
-Transcoders convert framework-produced artifacts after a source route materializes. They do not select or initialize kernels, and they consume artifact `files` rather than unresolved model `source` or an evaluation `entryPath`.
+Transcoders convert framework-produced artifacts after a source route materializes. They do not select or initialize kernels, and they consume artifact `files` rather than unresolved model `source` or an evaluation `entryPath`. Each `TranscoderEdge` declares one conversion capability through required `from`, `to`, and `fidelity` fields, with optional edge-specific options and content declarations; runtime route selection derives supported conversions from those edges.
 
 Image routes are the canonical example: a kernel exports glTF, then the selected image transcoder converts that artifact to PNG, JPEG, or WebP. Heavy transcoder backends such as Assimp, browser canvas renderers, native encoders, or WASM codecs belong to plugin packages. Load them inside the capability's `initialize(options, runtime)` and carry them in the returned context — the framework guarantees once-per-worker initialization — never per request, and never through module-level promise caches inside capability code (those are reserved for code outside a capability lifecycle).
 
@@ -445,7 +453,7 @@ During detection, bare specifiers appear as external imports in `metafile.output
 
 ## Package Exports
 
-Target runtime exports are engine and authoring surfaces only:
+Target runtime exports are engine and authoring surfaces only. The manifest also exposes `@taucad/runtime/metadata` for package version and build metadata used by external consumers:
 
 ```text
 @taucad/runtime             → createRuntimeClient, filesystem constructors, public engine types

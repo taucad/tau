@@ -3,7 +3,7 @@ title: 'Testing Policy'
 description: 'Writing high-quality tests across the Tau monorepo. Assert observable behavior, error assertions, resource cleanup, mock factories, and async patterns. Covers Vitest, kernel tests, and API tests.'
 status: active
 created: '2026-03-09'
-updated: '2026-08-24'
+updated: '2026-09-05'
 related:
   - docs/policy/react-testing-policy.md
   - docs/policy/typescript-policy.md
@@ -400,6 +400,18 @@ A change that crosses a public operation, plugin authoring contract, worker RPC,
 - browser/renderer tests when the result depends on workers, WebGPU, codecs, or pixels.
 
 Omitting a layer requires an explicit reason tied to the change's observable boundary. `bytes.length > 0` is insufficient when semantic, round-trip, byte-equality, or pixel evidence is available.
+
+## 14. Preserve Meaningful Regression Evidence
+
+For a non-trivial behavior fix, establish the smallest failing semantic check before its correction. Preserve applicable existing regression tests; remove tests only when their behavior is deliberately retired, not to hide a failure. Tests for a non-shipping feature are deleted or completed with that feature rather than permanently skipped. A reversible prose-only change does not need a new test.
+
+Run the affected project typecheck for TypeScript changes. Verify changed UI behavior visually and changed runtime behavior through execution before claiming success; report unavailable checks as unverified. For an exact cross-pipeline byte contract, make the parity regression fail before changing the pipeline. Converter round trips compare the re-imported geometry to the declared reference model and investigate deviations instead of accepting format-specific drift.
+
+Streaming tests assert provider-neutral state and lifecycle outcomes. Do not lock shared tests to one provider's usage counts or incidental preamble ordering. Public typing changes need positive consumer fixtures and negative `@ts-expect-error` cases whose unexpected acceptance fails the typecheck. Upstream regression tests use parsed/structural assertions instead of regexes over source text.
+
+Byte-locked file snapshots stay formatter-exempt. A serializer is appropriate only if its representation remains stable at the configured formatter width. Geometry export checks verify the declared exact-byte contract or export/re-import/re-mesh semantics; non-empty output alone does not establish correctness.
+
+Run coverage explicitly when validating coverage thresholds. A normal passing test target does not exercise them. Investigate denominator exclusions or generated-code distortion before changing a threshold, and keep dated measurements in evidence rather than permanent policy.
 
 ## Summary Checklist
 

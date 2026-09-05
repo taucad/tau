@@ -1,7 +1,6 @@
 ---
 name: audit-ui
 description: Programmatic and empirical UI audit of a deployed Tau environment (taucad.dev staging or tau.new production) covering Core Web Vitals, accessibility (WCAG 2.2 AA), security headers, SEO crawlability, bundle/network profile, and console errors. Use when the user asks for a UI audit, performance audit, accessibility audit, Lighthouse audit, axe-core audit, taucad.dev / tau.new audit, or wants to systematically validate a deployed environment against the vision/UI/accessibility/UX policies.
-disable-model-invocation: true
 ---
 
 # Audit UI
@@ -11,7 +10,8 @@ End-to-end audit recipe for a deployed Tau environment. Produces machine-readabl
 ## Reference
 
 - Vision constraints: `docs/policy/vision-policy.md`, `docs/policy/ui-policy.md`, `docs/policy/accessibility-policy.md`, `docs/policy/ux-policy.md`
-- Companion research template: `docs/research/taucad-dev-ui-audit-may-2026.md` (most recent run — use as the format reference)
+- Companion research template: `docs/research/taucad-dev-ui-audit-may-2026.md` (historical format reference)
+- Evidence persistence: [Durable research artifacts](../create-research/artifacts.md); resolve the audit's research owner before capturing results.
 
 ## Scope and Targets
 
@@ -68,11 +68,13 @@ Task Progress:
 
 ### Step 1: Header + cache + security capture
 
-Create `tmp/audit-<YYYY-MM-DD>/headers.txt` and capture every target URL plus one asset response per host. Compare staging vs production line-by-line.
+Create `headers.txt` under the audit's durable artifact run and capture every target URL plus one asset response per host. Compare staging vs production line-by-line. Resolve the absolute skill directory before changing the working directory.
 
 ```bash
-mkdir -p tmp/audit-$(date +%F)
-cd tmp/audit-$(date +%F)
+AUDIT_SKILL="<absolute skill directory>"
+AUDIT_RUN="<absolute research artifact run directory>"
+mkdir -p "$AUDIT_RUN"
+cd "$AUDIT_RUN"
 
 for url in \
   https://taucad.dev/ \
@@ -130,7 +132,7 @@ Lighthouse will emit `lh-<route>-<viewport>.report.json` and `.report.html`. Ext
 Run after Lighthouse completes:
 
 ```bash
-node ../../.agents/skills/audit-ui/scripts/lh-summary.mjs lh-*.report.json
+node "$AUDIT_SKILL/scripts/lh-summary.mjs" lh-*.report.json
 ```
 
 Outputs a markdown-ready table of `perf | a11y | bp | seo | FCP | LCP | TBT | CLS | TTI` per report.
@@ -140,48 +142,18 @@ Outputs a markdown-ready table of `perf | a11y | bp | seo | FCP | LCP | TBT | CL
 Drive axe through Playwright across routes × viewports with WCAG 2.2 AA + best-practice tags. Use `scripts/axe-audit.mjs` (template provided in this skill).
 
 ```bash
-node ../../.agents/skills/audit-ui/scripts/axe-audit.mjs
+node "$AUDIT_SKILL/scripts/axe-audit.mjs"
 ```
 
 The script emits `axe-violations.json` (full node list per rule, per URL, per viewport) and `axe-summary.json` (counts). Cite **all critical** + **serious** rule IDs in the research doc; mention moderate but do not list every node.
 
-### Step 4: Browser MCP capture
+### Step 4: Browser capture
 
-Use the `cursor-ide-browser` MCP server for what curl + Lighthouse can't see: live console errors at first paint, viewport-specific layout regressions, and `web-vitals` field metrics from a real page session.
+Use the host's available browser tools or the existing Playwright audit helpers for live console errors, viewport-specific layout, screenshots and page-session performance. Inspect the actual tool documentation before calling it; no provider-specific browser server is mandatory.
 
-For each target route × viewport:
+For each target route and viewport, open the page, collect console/page errors and network failures, set mobile (`375 × 667`) or desktop (`1440 × 900`) dimensions, and save a full-page screenshot. Capture performance entries with the installed browser/testing stack and exercise relevant interactions for INP when the surface supports it. Label lab/session measurements accurately; unavailable field data is a gap, not zero.
 
-1. `browser_navigate` to the URL.
-2. `browser_lock { action: "lock" }`.
-3. `browser_resize` to mobile (`375 × 667`) or desktop (`1440 × 900`).
-4. `browser_console_messages` immediately after first idle.
-5. `browser_take_screenshot` (full page).
-6. Inject the `web-vitals` capture snippet via `browser_evaluate`:
-
-```javascript
-import('https://unpkg.com/web-vitals@4?module').then(({ onINP, onLCP, onCLS, onFCP, onTTFB }) => {
-  globalThis.__vitals = {};
-  onINP((v) => {
-    globalThis.__vitals.INP = v.value;
-  });
-  onLCP((v) => {
-    globalThis.__vitals.LCP = v.value;
-  });
-  onCLS((v) => {
-    globalThis.__vitals.CLS = v.value;
-  });
-  onFCP((v) => {
-    globalThis.__vitals.FCP = v.value;
-  });
-  onTTFB((v) => {
-    globalThis.__vitals.TTFB = v.value;
-  });
-});
-```
-
-7. Interact with the page to surface INP (click primary CTA, type into a field), then `browser_evaluate { script: "globalThis.__vitals" }` and capture the result.
-8. `browser_network_requests` to confirm asset inventory matches Lighthouse.
-9. `browser_lock { action: "unlock" }` before moving to the next route.
+Use real page state and the tool's permitted evaluation API; do not inject remote code from a CDN merely to collect metrics. Preserve routes, dimensions, browser version, commands and raw output under the audit owner. Release tool-owned resources through its documented API before moving on.
 
 ### Step 5: Network & bundle inventory
 
@@ -219,7 +191,7 @@ Author the research doc using the `create-research` skill. Required sections:
 | Bundle & Network         | modulepreload count, top-5 unused JS items, asset count      |
 | Console & Runtime Errors | Browser MCP console capture                                  |
 | Recommendations          | Numbered `R1..Rn` table with Priority/Effort/Impact          |
-| Appendix                 | Raw artifact paths (relative to `tmp/audit-<date>/`)         |
+| Appendix                 | Raw artifact paths relative to the audit's durable run       |
 
 Cross-reference policies in `related:`:
 
@@ -259,7 +231,7 @@ Use these as P0/P1 cut-offs when recommending priorities. Anything failing P0 mu
 ## Output Layout
 
 ```
-tmp/audit-<YYYY-MM-DD>/
+docs/research/artifacts/<audit-subject>/runs/<run-id>/
 ├── headers.txt
 ├── lh-<route>-<viewport>.report.json
 ├── lh-<route>-<viewport>.report.html
@@ -283,7 +255,7 @@ The skill ships two ready-to-run helpers in `scripts/`:
 - `lh-summary.mjs` — parses one or more Lighthouse JSON files and emits a markdown table.
 - `axe-audit.mjs` — drives Chromium + `axe-core` across the four target routes × two viewports with WCAG 2.2 AA + best-practice tags.
 
-Execute both from inside `tmp/audit-<date>/` so artifacts colocate.
+Execute both from inside `AUDIT_RUN` so artifacts colocate. Add the run to the owning research document's artifact index; validate from the Tau root and check the separate Tau Brain Git status.
 
 ## Anti-Patterns
 

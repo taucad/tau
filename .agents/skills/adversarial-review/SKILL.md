@@ -1,12 +1,11 @@
 ---
 name: adversarial-review
-description: Reviews selected Tau research recommendations against current evidence and Ponytail's minimum-correct-change discipline before Superplan. Use only when explicitly invoked to challenge or apply corrections to docs/research blueprints.
-disable-model-invocation: true
+description: Reviews selected Tau research recommendations against current evidence and Ponytail's minimum-correct-change discipline before planning or charter execution. Use when research needs a pre-implementation evidence review, including composition by charter creation; apply only authorized research corrections.
 ---
 
 # Adversarial Review
 
-Use this repository-development skill as a concise evidence gate between `create-research` and `/superplan`. Review is read-only. Apply changes only explicitly named research documents.
+Use this repository-development skill as a concise evidence gate between research and planning or selected charter execution. Review is read-only. Apply changes only to explicitly named research documents.
 
 ## Required context
 
@@ -32,7 +31,7 @@ Understand the current flow before simplifying it. Fix a demonstrated root cause
 
 ## Boundaries
 
-This skill may revise research prose in apply mode. It never implements product code, edits or invokes a plan, performs post-implementation review, creates a persistent review report, or adds product skill surfaces.
+This skill may revise research prose in apply mode. It never implements product code, edits or invokes a plan, performs post-implementation review, creates a separate report system, or adds product skill surfaces. When composed into research or charter work, return material findings and dispositions to that owner for prompt persistence under [the artifact contract](../create-research/artifacts.md); review remains read-only.
 
 The canonical research blueprint is the durable design source. Review-local references exist only to select amendments in the current review or an unambiguous supplied transcript.
 
@@ -72,7 +71,7 @@ Every document path is an exact write target. Every `AR#` must be a confirmed am
 7. **Group by root cause.** Related counterexamples sharing one owner become one finding and one minimum revision.
 8. **Stop.** When the minimum correct direction survives and remaining plausible attacks cannot change it, declare the selected scope ready.
 
-Do not record failed attacks, N/A modules, speculative hardening, ordinary Superplan exploration, or P3 polish. A short `Skipped` line is allowed only when it names a concrete revisit trigger that prevents an easy regression.
+Keep failed-attack inventories, N/A modules, speculative hardening, ordinary implementation exploration and P3 polish out of the concise verdict. Preserve substantive experiment outputs through the composing owner's artifact channel, including failed experiments that would otherwise be lost. A short `Skipped` line is allowed only when it names a concrete revisit trigger that prevents an easy regression.
 
 ## Readiness
 
@@ -98,7 +97,7 @@ Use only the sections that contain information:
 
 Do not emit manifests, hashes, lineage, lifecycle fields, severity legends, failed-attack inventories, recommendation-coverage bureaucracy, or an audit appendix.
 
-When ready, the next action is the exact `/superplan` command. When amendments are clear, it is the exact apply command. When evidence is missing, it is the exact evidence step and decision rule.
+When ready, name the exact next action for the active workflow: `/superplan` for a requested implementation plan, or the approved charter and selected IDs for `work-charter`. Readiness does not grant implementation authority. When amendments are clear, return the exact apply command. When evidence is missing, return the exact evidence step and decision rule.
 
 End review mode with: `No files were changed.`
 

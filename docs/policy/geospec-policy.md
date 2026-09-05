@@ -3,7 +3,7 @@ title: 'GeoSpec Policy'
 description: 'Rules for GeoSpec matcher API design, evidence naming, diagnostics, failure messages, C++/WASM implementation, and high-assurance geometry test authoring.'
 status: active
 created: '2026-06-23'
-updated: '2026-08-17'
+updated: '2026-09-05'
 related:
   - docs/policy/library-api-policy.md
   - docs/policy/testing-policy.md
@@ -316,6 +316,20 @@ INCORRECT:
 const open = voxelFloodFill(region, resolution); // resolution-dependent; unfalsifiable at tight passages
 ```
 
+### Deterministic verdict and evidence rules
+
+- Charge verdict-bearing work in deterministic work units. A wall-clock watchdog reports infrastructure failure and never selects a geometry verdict or fallback engine.
+- Engine selection and retry order are pure functions of the claim and evidence. They must not depend on remaining shared budget, cache history, or machine timing. Shared budget exhaustion reports `MATCHER_TIMEOUT`.
+- Keep persistent evidence outside the project under test. Cache keys include content identity, every read argument, and an engine-family version. Different byte-producing engines use different family versions. Never cache failures, unsupported results, or exhausted-budget outcomes; a tolerance-free key may store only a payload identical at every claim tolerance.
+- Treat native OpenCascade as a process-local shared resource. Dispose run resources idempotently, make lazy facade `delete` and `isDeleted` independent of materialization, and copy borrowed `HEAPF64` data before any `await`.
+- Approximate winding membership near a surface requires true point-to-triangle distance or an equivalent separation certificate. Closedness prefilters require exact-weld edge counts, use winding magnitude for orientation-independent membership, and fall through to the canonical proof on uncertainty.
+- Persist eagerly consumed STEP/XDE structure by artifact identity while keeping the native read handle lazy. Resolve the derived structure during load so parse failures remain load-fatal. Install optional capabilities from the materialized native handle, and keep cache-hit reads unmaterialized until a geometry operation actually needs them.
+- Link shared globals emitted into every native wrapper translation unit with weak linkage; strong linkage duplicates symbols and translation-unit-local state silently forks ownership.
+- Compute selector face boxes with `BRepBndLib::Add(..., useTriangulation=false)` so prior tessellation of a shared TShape cannot change exact evidence. Select ambiguous STEP occurrences by exact `path:`.
+- Require exact bit-level output for parity-sensitive floating-point accumulation. Keep a spawned CLI or browser end-to-end gate for the real package wire instead of accepting only in-process tests.
+
+The removed `GEOSPEC_*` engine, cache, native-singleton, and forensic controls are historical evidence only. Do not restore environment-dependent verdict paths. Compare deterministic work counters before attributing a timing change to the implementation; a machine-load threshold alone is not evidence.
+
 ## 17. Prefer Exact Geometry Over Discretized Sampling
 
 Answer a geometric or topological question with geometry operations — boolean, connected-component decomposition, generalized winding-number classification, planar section, or exact point classification — not with voxel grids, uniform lattices, or image processing over a discretized field. Voxel evidence must never participate in a final GeoSpec verdict. A correctness-preserving broad phase may prune work, but uncertainty must fall through to the canonical proof rather than becoming a sampled verdict.
@@ -421,3 +435,11 @@ INCORRECT:
 // A kernel-native BRep format is faster but certifies the kernel, not the AP242 interchange.
 const subject = await loadModel({ file, format: 'brep' });
 ```
+
+## 22. Discover Complete Suites And Schedule Deterministically
+
+The GeoSpec runner owns recursive model and specification discovery from the rooted filesystem. Do not infer a suite from a UI or chat file-tree snapshot, because lazy trees may omit unopened descendants. Run multi-file suites serially unless a worker-pool design explicitly proves deterministic isolation, ordering, resource ownership, and equivalent diagnostics.
+
+**Why**: Complete discovery is a correctness requirement, and uncoordinated native workers can introduce nondeterministic contention or shared-runtime ownership failures.
+
+**Enforced by**: `packages/geospec/src/runner/discovery.ts` and the runner worker contract.

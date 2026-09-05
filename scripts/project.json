@@ -5,6 +5,13 @@
   "projectType": "library",
   "tags": ["scope:shared", "type:tool"],
   "targets": {
+    "validate-agent-config": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "node scripts/src/validate-agent-config.ts"
+      }
+    },
     "populate-ui-env": {
       "executor": "nx:run-commands",
       "cache": false,
@@ -100,7 +107,11 @@
       "options": {
         "command": "true"
       },
-      "dependsOn": [{ "target": "validate-*" }],
+      "dependsOn": [
+        {
+          "target": "validate-*"
+        }
+      ],
       "cache": false
     },
     "check-registry-dependencies": {
@@ -120,7 +131,12 @@
       "options": {
         "command": "node scripts/src/check-pack-install.ts"
       },
-      "dependsOn": [{ "target": "build", "projects": ["tag:type:package"] }]
+      "dependsOn": [
+        {
+          "target": "build",
+          "projects": ["tag:type:package"]
+        }
+      ]
     },
     "release-gate": {
       "executor": "nx:run-commands",
@@ -128,14 +144,36 @@
         "command": "true"
       },
       "dependsOn": [
-        { "target": "validate" },
-        { "target": "check-*" },
-        { "target": "pkgcheck", "projects": ["tag:type:package"] },
-        { "target": "test", "projects": ["tag:type:package", "tag:type:lib"] },
-        { "target": "typecheck", "projects": ["tag:type:package", "tag:type:lib"] },
-        { "target": "lint", "projects": ["tag:type:package", "tag:type:lib"] },
-        { "target": "audit-public-surface", "projects": ["*"] },
-        { "target": "readme-quickstart", "projects": ["*"] }
+        {
+          "target": "validate"
+        },
+        {
+          "target": "check-*"
+        },
+        {
+          "target": "pkgcheck",
+          "projects": ["tag:type:package"]
+        },
+        {
+          "target": "test",
+          "projects": ["tag:type:package", "tag:type:lib"]
+        },
+        {
+          "target": "typecheck",
+          "projects": ["tag:type:package", "tag:type:lib"]
+        },
+        {
+          "target": "lint",
+          "projects": ["tag:type:package", "tag:type:lib"]
+        },
+        {
+          "target": "audit-public-surface",
+          "projects": ["*"]
+        },
+        {
+          "target": "readme-quickstart",
+          "projects": ["*"]
+        }
       ],
       "cache": false
     },
@@ -167,6 +205,13 @@
       "executor": "nx:run-commands",
       "options": {
         "command": "node --import tsx scripts/src/bake-hero-glb.mts"
+      }
+    },
+    "validate-agent-lanes": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "node --test .agents/skills/codex-lanes/scripts/lanes.test.mjs"
       }
     }
   }

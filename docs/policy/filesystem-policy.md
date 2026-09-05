@@ -3,7 +3,7 @@ title: 'Filesystem Policy'
 description: 'Standards for filesystem access, data transfer, caching, concurrency, and watcher architecture in the Tau application. Covers read/write semantics, bridge RPC, and kernel/UI watch planes.'
 status: active
 created: '2026-03-05'
-updated: '2026-08-28'
+updated: '2026-09-05'
 related:
   - docs/policy/compatibility-policy.md
   - docs/policy/filesystem-authority-policy.md
@@ -130,6 +130,14 @@ Source files are typically <100 KB. Binary CAD files (STL, STEP, glTF) can be 10
 - Main thread reads should avoid storing large binaries in `openFiles`
 - Future: streaming reads for files > 1 MB
 
+### Rule 4a: Content resolution and metadata stay truthful
+
+Content-facing UI facades resolve files to an explicit discriminated state such as loading, text, binary, too-large, orphaned, or error. Detect binary content from a bounded byte prefix with BOM and NUL handling rather than from a filename extension. Byte-only consumers use the typed byte-resolution path and receive typed failures instead of an unresolved loading state.
+
+A bounded content cache reports whether `set` admitted the value, keys entries by canonical path, and exposes entries for targeted prefix eviction. It must not silently discard an oversized value. File-tree rows carry provider-derived size and time metadata; consumers must not invent zero sizes or current timestamps.
+
+Normalize `''` and `/` to the same selected workspace root at the RPC tool-input boundary. Never delete an entire browser database as error recovery when it may contain user work; repair or remove the affected authority record under the provider's transaction rules.
+
 ## Write Rules
 
 ### Rule 5: Write serialization scope
@@ -163,6 +171,8 @@ Providers that maintain in-memory path, directory, size, mtime, or content-metad
 Every provider must independently enforce one entry kind per canonical path. A file cannot be an ancestor or directory, `mkdir` cannot replace a file, `writeFile` cannot replace a directory, and `unlink`/`rmdir` must reject the wrong kind. Exact self-rename is a no-op; moving a directory beneath itself fails before mutation. A persistent provider must preserve explicit empty directories across reopen.
 
 All fallible validation and serialization for a destructive multi-path ingress completes before the first provider mutation. Use an inline `Set` parent walk for small payload preflights; do not add a trie or second metadata authority.
+
+Provider-native transactional artifacts are not virtual filesystem entries. Filter browser artifacts such as Chromium `.crswap` files inside `FileSystemAccessProvider` before directory snapshots, indexes, watches, RPC, or UI consumers observe them. Do not duplicate this filtering in generic consumers.
 
 ### Rule 6: Transfer only bytes owned by the sending boundary
 

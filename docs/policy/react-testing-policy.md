@@ -3,7 +3,7 @@ title: 'React Testing Policy'
 description: 'Patterns for testing React hooks and components in apps/ui: renderHook, harness components, fake timers, mocks, cleanup.'
 status: active
 created: '2026-03-09'
-updated: '2026-03-09'
+updated: '2026-09-05'
 related:
   - docs/policy/testing-policy.md
 ---
@@ -133,6 +133,8 @@ beforeEach(() => {
 ```
 
 For complex dependencies, extract a `createMock*` factory (see Testing Policy § 5).
+
+Keep real Radix collapsible and portal behavior when diagnosing an initial-state failure. Inspect the rendered state and correct the owning state/lifecycle contract; do not mock away that behavior to make a failing assertion pass.
 
 ## 5. Testing `useEffect` Cleanup
 

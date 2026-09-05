@@ -66,7 +66,7 @@ Stop after creating the plan. Do not begin implementation until the user approve
  * Generates the CAD system prompt for the specified kernel and mode.
  * Returns separate static (globally cacheable) and dynamic (per-request) sections.
  *
- * Follows context-engineering.mdc guidelines: tool descriptions document HOW,
+ * Follows docs/policy/context-engineering-policy.md: tool descriptions document HOW,
  * this prompt documents WHEN and workflow sequencing.
  *
  * @public

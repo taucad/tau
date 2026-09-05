@@ -3,7 +3,7 @@ title: 'Lint Policy'
 description: 'Hybrid oxlint + ESLint architecture, performance principles, rule-specific decisions, and caching for the Tau monorepo.'
 status: active
 created: '2026-03-04'
-updated: '2026-09-04'
+updated: '2026-09-05'
 related:
   - nx.json
   - .oxlintrc.json
@@ -25,7 +25,7 @@ This project uses a **hybrid linting** setup where **oxlint** runs first as a fa
 
 ### How it works
 
-1. `pnpm nx lint <project>` chains oxlint and ESLint through `nx.json` `targetDefaults`. `--files=<path>` passes the same file selection to both tools; oxlint receives the workspace-root `.oxlintrc.json` explicitly.
+1. `pnpm nx lint <project>` chains oxlint and ESLint through `nx.json` `targetDefaults`. `--files=<path>` is relative to the selected project root and passes the same selection to both tools; oxlint receives the workspace-root `.oxlintrc.json` explicitly.
 2. `.oxlintrc.json` owns native and JavaScript-plugin rules. `eslint.config.mjs` explicitly configures the remaining ESLint rules; it does not load `eslint-plugin-oxlint` or automatically disable overlapping rules.
 3. In VS Code, the Oxc extension provides real-time oxlint diagnostics, formatting via oxfmt, and the ESLint extension handles residual rules. Both support fix-on-save.
 4. CI (`pnpm nx affected -t lint`) chains both tools transparently via the Nx lint target.
@@ -117,8 +117,15 @@ The `.js` extension rule lives in `.oxlintrc.json`. Reassess redundant checks on
 ## Typed linting
 
 - Oxlint enables `options.typeAware: true`; ESLint configures `parserOptions.projectService` with a scoped default-project allowlist.
+- Before trusting a type-aware verdict, confirm the file belongs to its intended TypeScript project. Repair the owning tsconfig membership or source boundary; an excluded file is not evidence that its types are correct.
 - Keep tsconfig `include` patterns narrow. Broad globs like `**/*` cause TypeScript to pre-parse build artifacts.
 - If linting is memory-constrained, increase the semi-space: `NODE_OPTIONS=--max-semi-space-size=256`.
+
+## Disable directives and rule fixtures
+
+Use the owning engine's directive and exact rule name: `oxlint-disable` for oxlint rules, and plugin-prefixed names for ESLint plugin rules. For multi-line oxlint exceptions, bracket the affected block with disable/enable directives; `disable-next-line` covers one line. Keep the reason and scope explicit instead of leaving an ineffective or unused suppression.
+
+JSDoc rule fixtures passed to tsgolint need absolute workspace virtual paths, including when RuleTester supplies `<input>`; `libs/oxlint/src/rules/validate-jsdoc-codeblocks.js` owns normalization. Import the MDX parser through `@taucad/oxlint/mdx-parser`, not the ESLint plugin object. Preserve the separate internal-link and cached external-link rule contracts.
 
 ## Caching
 

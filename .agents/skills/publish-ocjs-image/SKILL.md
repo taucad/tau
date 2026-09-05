@@ -1,12 +1,13 @@
 ---
 name: publish-ocjs-image
 description: Publish the @taucad/opencascade.js Docker image to GitHub Container Registry (ghcr.io/taucad/opencascade.js) by cutting an annotated git tag on the taucad fork; GitHub Actions builds linux/amd64 + linux/arm64 natively and pushes a multi-arch manifest list. Use when releasing a new ocjs container image, cutting an ocjs beta tag, refreshing the published opencascade.js image on GHCR, or when the user mentions publishing, releasing, or sharing the opencascade.js Docker image.
-disable-model-invocation: true
 ---
 
 # Publish opencascade.js Docker image to GHCR
 
 Release flow for the `@taucad/opencascade.js` Docker image. The taucad fork at `repos/opencascade.js` is the source of truth; tagged releases publish multi-arch images to `ghcr.io/taucad/opencascade.js` via GitHub Actions.
+
+Read the [OpenCascade.js maintenance owner](../../../docs/architecture/dependency-maintenance/opencascade-js.md) and the checkout's current release/build instructions first. Recheck its current variants, image workflow and selected revision before using a historical release example.
 
 ## Quick Reference
 
@@ -34,7 +35,7 @@ gh api /users/taucad/packages/container/opencascade.js/versions --jq '.[].metada
 
 ## Release flow
 
-1. **Pick the version.** Read the current `version` in [repos/opencascade.js/package.json](../../repos/opencascade.js/package.json) and bump if needed. Prerelease tags follow `v3.0.0-beta.<short-sha>`.
+1. **Pick the version.** Read the current `version` in [repos/opencascade.js/package.json](../../../repos/opencascade.js/package.json) and bump if needed. Prerelease tags follow `v3.0.0-beta.<short-sha>`.
 
 2. **Commit any pending changes** on `occt-v8-emscripten-5` (or set `OCJS_RELEASE_BRANCH`). The script refuses to tag a dirty tree.
 
@@ -44,7 +45,7 @@ gh api /users/taucad/packages/container/opencascade.js/versions --jq '.[].metada
    ./scripts/release-ocjs-image.sh v3.0.0-beta.d3056ef
    ```
 
-   The script (see [scripts/release-ocjs-image.sh](../../scripts/release-ocjs-image.sh)) validates inputs, cuts an annotated tag, pushes it to `origin`, locates the triggered `docker.yml` workflow run, and watches it to completion via `gh run watch --exit-status`.
+   The script (see [scripts/release-ocjs-image.sh](../../../scripts/release-ocjs-image.sh)) validates inputs, cuts an annotated tag, pushes it to `origin`, locates the triggered `docker.yml` workflow run, and watches it to completion via `gh run watch --exit-status`.
 
 4. **Verify the published image:**
 
@@ -54,19 +55,7 @@ gh api /users/taucad/packages/container/opencascade.js/versions --jq '.[].metada
    # → should list two manifests: linux/amd64 + linux/arm64
    ```
 
-5. **Optional smoke run** against the published image (no local build needed). Use a folder under your home directory for `-v` — `/tmp` is not shared into the Docker VM on macOS/Windows under Colima or Docker Desktop, so outputs would silently land inside the VM:
-
-   ```bash
-   mkdir -p "$PWD/ocjs-smoke"
-   docker run --rm \
-     -e OCJS_CONFIG=O0-debug \
-     -v "$PWD/repos/opencascade.js/build-configs/link-filter-poc.yml:/src/config.yml:ro" \
-     -v "$PWD/ocjs-smoke:/output" \
-     ghcr.io/taucad/opencascade.js:${TAG#v} full /src/config.yml
-   ls "$PWD/ocjs-smoke"/opencascade_linkfilter_poc.{wasm,js,d.ts}
-   ```
-
-   The entrypoint prints an `[output] /output -> <path>  (your computer, files will be saved)` line at the top of every build, so you can sanity-check the bind-mount before the long-running steps start.
+5. **Optional smoke run** against the published image. Use the checkout's current reduced fixture and named build configuration from its maintenance instructions; old `O0-debug` and `link-filter-poc.yml` examples are not current interfaces. Verify a harmless host-visible output before a long build. Docker/Colima mount visibility depends on the actual VM configuration; a known shared home-directory path is a useful fallback, not a universal claim that `/tmp` is unavailable. Inspect the image's reported output path and retain the resulting artifacts.
 
 ## First-time setup (one-shot)
 
@@ -92,7 +81,7 @@ gh api -X PUT /user/packages/container/opencascade.js/repository \
 
 ## Tag strategy
 
-`docker/metadata-action` in [repos/opencascade.js/.github/workflows/docker.yml](../../repos/opencascade.js/.github/workflows/docker.yml) derives the published tags from the git tag:
+`docker/metadata-action` in [repos/opencascade.js/.github/workflows/docker.yml](../../../repos/opencascade.js/.github/workflows/docker.yml) derives the published tags from the git tag:
 
 | Tag                | Source rule                                              | Example                    |
 | ------------------ | -------------------------------------------------------- | -------------------------- |
@@ -116,8 +105,8 @@ gh api -X PUT /user/packages/container/opencascade.js/repository \
 
 ## Additional Resources
 
-- [Dockerfile (with OCI labels)](../../repos/opencascade.js/Dockerfile)
-- [GitHub Actions workflow](../../repos/opencascade.js/.github/workflows/docker.yml)
-- [Release helper script](../../scripts/release-ocjs-image.sh)
+- [Dockerfile (with OCI labels)](../../../repos/opencascade.js/Dockerfile)
+- [GitHub Actions workflow](../../../repos/opencascade.js/.github/workflows/docker.yml)
+- [Release helper script](../../../scripts/release-ocjs-image.sh)
 - [GHCR docs — publishing images](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry)
 - [docker/metadata-action tag patterns](https://github.com/docker/metadata-action#tags-input)

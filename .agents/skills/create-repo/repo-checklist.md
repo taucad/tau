@@ -37,16 +37,16 @@ Applicability:
 
 ## C. Nx and releases
 
-| Kind | Check                                                                                                            |
-| ---- | ---------------------------------------------------------------------------------------------------------------- |
-| R    | One root Nx project uses `nx:run-commands`; `quality` fans into every gate.                                      |
-| R    | `namedInputs` include runtime and native toolchain fingerprints.                                                 |
-| R    | Nx Release uses Version Plans, standard pre-1.0 SemVer bumps, and git-inert settings.                            |
-| R    | Version-plan checks ignore only tests, docs, and governance paths that cannot change the package.                |
-| R    | `prepare-release.mjs` validates requested versus planned version.                                                |
-| R    | Release policy is a pure module with unit tests for PR, main, manual, and malformed release commits.             |
-| R    | Repo-local `release-<slug>` skill is operator-only and says CI owns publication, refs, releases, and deployment. |
-| R    | Only `chore(release): <slug> v<version>` can request stable publication.                                         |
+| Kind | Check                                                                                                                                                                        |
+| ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| R    | One root Nx project uses `nx:run-commands`; `quality` fans into every gate.                                                                                                  |
+| R    | `namedInputs` include runtime and native toolchain fingerprints.                                                                                                             |
+| R    | Nx Release uses Version Plans, standard pre-1.0 SemVer bumps, and git-inert settings.                                                                                        |
+| R    | Version-plan checks ignore only tests, docs, and governance paths that cannot change the package.                                                                            |
+| R    | `prepare-release.mjs` validates requested versus planned version.                                                                                                            |
+| R    | Release policy is a pure module with unit tests for PR, main, manual, and malformed release commits.                                                                         |
+| R    | Repo-local `release-<slug>` skill is model-selectable, with submit effects gated by current-task authorization and says CI owns publication, refs, releases, and deployment. |
+| R    | Only `chore(release): <slug> v<version>` can request stable publication.                                                                                                     |
 
 ## D. CI and exact-candidate testing
 
@@ -102,24 +102,24 @@ Applicability:
 
 ## G. Hygiene and maintenance loop
 
-| Kind | Check                                                                                                                                           |
-| ---- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| R    | README has badges, one-line description, persona table, install, runnable quickstart, compatibility, stability, provenance, license, and links. |
-| R    | CONTRIBUTING has numbered PR steps, Version Plans, admission gestures, test commands, and release boundaries.                                   |
-| R    | SECURITY.md is concise and names private reporting.                                                                                             |
-| R    | MAINTAINER.md owns release, registry, Vercel, and governance operations.                                                                        |
-| R    | `license` is verbatim and NOTICE covers fonts plus vendored/forked code.                                                                        |
-| R    | Issue forms disable blank issues; pull-request template requests tests, plan, compatibility, and AI disclosure.                                 |
-| R    | Root `AGENTS.md` is under 150 lines; no `CLAUDE.md` exists.                                                                                     |
-| R    | `.agents/skills` is canonical; `.claude/skills` is a symlink; `.claude/launch.json` exists.                                                     |
-| R    | Three-job `claude.yml` separates untrusted notification, approved execution, and trusted execution.                                             |
-| R    | Untrusted code checkouts use `persist-credentials: false`.                                                                                      |
-| R    | The `claude` label exists and `ANTHROPIC_API_KEY` is available through repository or organization secrets.                                      |
-| R    | Dependabot covers npm, native dependencies, and Actions with 7/14-day cooldowns.                                                                |
-| R    | Repository auto-merge is enabled and the protected `ci-gate` check is active before Dependabot auto-merge runs.                                 |
-| R    | Only grouped patch and action-digest Dependabot updates auto-merge.                                                                             |
-| R    | OSV is report-only on PRs and fail-closed on main; suppressions contain `reason` and `ignoreUntil`.                                             |
-| R    | Rust repositories run `cargo deny`; cache cleanup is scheduled.                                                                                 |
+| Kind | Check                                                                                                                                                                                                                               |
+| ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| R    | README has badges, one-line description, persona table, install, runnable quickstart, compatibility, stability, provenance, license, and links.                                                                                     |
+| R    | CONTRIBUTING has numbered PR steps, Version Plans, admission gestures, test commands, and release boundaries.                                                                                                                       |
+| R    | SECURITY.md is concise and names private reporting.                                                                                                                                                                                 |
+| R    | MAINTAINER.md owns release, registry, Vercel, and governance operations.                                                                                                                                                            |
+| R    | `license` is verbatim and NOTICE covers fonts plus vendored/forked code.                                                                                                                                                            |
+| R    | Issue forms disable blank issues; pull-request template requests tests, plan, compatibility, and AI disclosure.                                                                                                                     |
+| R    | Root AGENTS is ≤8 KiB, nested bodies ≤4 KiB, chains ≤16 KiB; every boundary has an exact `@AGENTS.md` Claude import.                                                                                                                |
+| R    | Unbound skill templates are not named `SKILL.md`; `.agents/skills` is canonical; `.claude/skills` resolves to it; native root/nested discovery and autonomous selection/composition pass; preserve applicable launch configuration. |
+| R    | Three-job `claude.yml` separates untrusted notification, approved execution, and trusted execution.                                                                                                                                 |
+| R    | Untrusted code checkouts use `persist-credentials: false`.                                                                                                                                                                          |
+| R    | The `claude` label exists and `ANTHROPIC_API_KEY` is available through repository or organization secrets.                                                                                                                          |
+| R    | Dependabot covers npm, native dependencies, and Actions with 7/14-day cooldowns.                                                                                                                                                    |
+| R    | Repository auto-merge is enabled and the protected `ci-gate` check is active before Dependabot auto-merge runs.                                                                                                                     |
+| R    | Only grouped patch and action-digest Dependabot updates auto-merge.                                                                                                                                                                 |
+| R    | OSV is report-only on PRs and fail-closed on main; suppressions contain `reason` and `ignoreUntil`.                                                                                                                                 |
+| R    | Rust repositories run `cargo deny`; cache cleanup is scheduled.                                                                                                                                                                     |
 
 ## H. Documentation and attribution
 

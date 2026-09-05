@@ -21,8 +21,11 @@ const environmentSchemaBase = z.object({
 
   // Chat & LLMs
   OPENAI_API_KEY: z.string(),
-  ANTHROPIC_API_KEY: z.string(),
+  // Serves the morph inference-provider catalog rows and the gateway's morph wire only.
+  // Optional by design: fast-apply and /v1/compact are deleted (PH17/PH18), so booting
+  // and editing never require it (V6).
   MORPH_API_KEY: z.string().optional(),
+  ANTHROPIC_API_KEY: z.string(),
   GOOGLE_VERTEX_AI_CREDENTIALS: jsonCodec(
     z.object({
       type: z.string(),
@@ -62,6 +65,7 @@ const environmentSchemaBase = z.object({
   AUTH_URL: z.string(),
   GITHUB_CLIENT_ID: z.string(),
   GITHUB_CLIENT_SECRET: z.string(),
+  GITHUB_API_TOKEN: z.string().optional(),
   GOOGLE_CLIENT_ID: z.string().optional(),
   GOOGLE_CLIENT_SECRET: z.string().optional(),
 
@@ -72,18 +76,57 @@ const environmentSchemaBase = z.object({
 
   // Local Model Providers
   OLLAMA_ENABLED: z.coerce.boolean().default(false).describe('Enable Ollama local model provider'),
-  TAU_TEST_MODE: z.coerce
-    .boolean()
-    .default(false)
-    .describe(
-      'Enable the "tau" replay provider + model for deterministic chat/billing testing (dev/test only; forbidden in production)',
-    ),
   // Kernel Integrations
   ZOO_API_KEY: z.string().describe('Zoo.dev API key for KCL kernel proxy'),
   ZOO_WEBSOCKET_URL: z.string().describe('Zoo.dev API URL for KCL kernel proxy').default('wss://api.zoo.dev'),
 
   // Redis Configuration
+  // Billing (Stripe + credit ledger). STRIPE_* default to '' (the RESEND_API_KEY pattern) so local
+  // dev works without keys; billing endpoints fail closed on the empty value, and production
+  // requires all four to be non-empty (see superRefine below).
+  STRIPE_SECRET_KEY: z
+    .string()
+    .default('')
+    .describe('Stripe API secret key (sk_test_... in staging, sk_live_... in prod); empty = billing disabled'),
+  STRIPE_WEBHOOK_SECRET: z.string().default('').describe('Signing secret for the /v1/auth/stripe/webhook endpoint'),
+  STRIPE_PRICE_ID_PRO_MONTHLY: z
+    .string()
+    .default('')
+    .describe('Terraform-provisioned Stripe price id for the Pro monthly plan'),
+  STRIPE_PRODUCT_ID_CREDIT_PACK: z
+    .string()
+    .default('')
+    .describe('Terraform-provisioned Stripe product id for one-time credit packs'),
+  FREE_TIER_AI_ENABLED: z.coerce
+    .boolean()
+    .default(true)
+    .describe(
+      'AD19 kill switch: false zeroes the Free-tier AI allotment via the entitlements projection, no deploy needed',
+    ),
+  TAU_CREDIT_MARKUP_FRACTION: z.coerce
+    .number()
+    .min(0)
+    .max(1)
+    .default(0.3)
+    .describe('Markup applied to provider cost for user-facing credit charges (0.3 = 30%)'),
+  TAU_CREDIT_LEDGER_PG_FALLBACK: z.coerce
+    .boolean()
+    .default(false)
+    .describe('Serve credit reservations from Postgres row locks instead of Redis (degraded-mode escape hatch)'),
+  ZOO_ENGINE_RATE_MICRO_PER_MINUTE: z.coerce
+    .number()
+    .int()
+    .min(0)
+    .default(650_000)
+    .describe(
+      'User-charged Zoo engine rate in µ$ per started minute (Q35: list × 1.3). Default is a $0.50/min-list placeholder — ops sets the real list rate at cutover (see stripe-iac-runbook). 0 disables metering.',
+    ),
+
   REDIS_URL: z.string().describe('Redis connection URL (e.g., redis://localhost:6379 or rediss://... for TLS)'),
+
+  // Durable job orchestration. Empty token keeps job dispatch unavailable without affecting chat/CAD startup.
+  HATCHET_CLIENT_TOKEN: z.string().default(''),
+  HATCHET_CLIENT_NAMESPACE: z.string().trim().min(1).default('tau-local'),
 
   // Object storage (MinIO via infra/docker-compose in dev; Cloudflare R2 in staging/production — overrides defaults via Fly secrets + env)
   TAU_S3_ENDPOINT: z
@@ -121,17 +164,6 @@ const environmentSchemaBase = z.object({
 export const environmentSchema = environmentSchemaBase.superRefine((data, context) => {
   if (data.NODE_ENV !== 'production') {
     return;
-  }
-
-  // The replay provider fakes the LLM and never settles a real provider bill,
-  // but it must never exist in production — it exposes a deterministic model and
-  // (deliberately) meters real credits. Fail the boot rather than risk exposure.
-  if (data.TAU_TEST_MODE) {
-    context.addIssue({
-      code: 'custom',
-      message: 'TAU_TEST_MODE must not be enabled in production',
-      path: ['TAU_TEST_MODE'],
-    });
   }
 
   try {
@@ -208,6 +240,24 @@ export const environmentSchema = environmentSchemaBase.superRefine((data, contex
       message: 'TAU_S3_SECRET_ACCESS_KEY must not use the default dev credential in production',
       path: ['TAU_S3_SECRET_ACCESS_KEY'],
     });
+  }
+
+  // Billing cannot run half-configured in production: a missing webhook secret silently drops every
+  // credit grant, and a missing price id breaks upgrade checkout.
+  const stripeKeys = [
+    'STRIPE_SECRET_KEY',
+    'STRIPE_WEBHOOK_SECRET',
+    'STRIPE_PRICE_ID_PRO_MONTHLY',
+    'STRIPE_PRODUCT_ID_CREDIT_PACK',
+  ] as const;
+  for (const key of stripeKeys) {
+    if (!data[key]) {
+      context.addIssue({
+        code: 'custom',
+        message: `${key} is required in production`,
+        path: [key],
+      });
+    }
   }
 });
 

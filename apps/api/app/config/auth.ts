@@ -2,9 +2,20 @@ import { betterAuth } from 'better-auth';
 import type { BetterAuthOptions } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { apiKey } from '@better-auth/api-key';
-import { magicLink } from 'better-auth/plugins';
+import { stripe } from '@better-auth/stripe';
+import { bearer, magicLink, oneTimeToken } from 'better-auth/plugins';
 import postgres from 'postgres';
 import { drizzle } from 'drizzle-orm/postgres-js';
+import Stripe from 'stripe';
+
+const accountOptions: NonNullable<BetterAuthOptions['account']> = {
+  accountLinking: {
+    enabled: true,
+    trustedProviders: ['github', 'google', 'email-password'],
+    allowDifferentEmails: false,
+  },
+};
+accountOptions.encryptOAuthTokens = true;
 
 /**
  * Static Better Auth configuration.
@@ -23,6 +34,34 @@ export const staticAuthConfig = {
         // No-op for mock configuration
       },
     }),
+    stripe({
+      // CLI only needs the config structure for schema generation — never called.
+      stripeClient: new Stripe('sk_test_dummy_for_cli'),
+      stripeWebhookSecret: 'whsec_dummy_for_cli',
+      // Customers are created lazily at first billing action (checkout/top-up), so
+      // signup never depends on Stripe availability and dev works without keys.
+      createCustomerOnSignUp: false,
+      subscription: {
+        enabled: true,
+        plans: [
+          { name: 'pro', priceId: 'price_dummy_for_cli', limits: {} },
+          // Enterprise archetype (AD18/E4): per-customer prices are attached
+          // manually in the Stripe dashboard; limits come from subscription_extension.
+          {
+            name: 'enterprise',
+            priceId: 'price_enterprise_manual',
+            limits: {},
+          },
+        ],
+      },
+    }),
+    // Desktop sign-in handoff (ruling D7): mints a short-lived, single-use token
+    // the Electron main process exchanges for a bearer session over loopback.
+    // Reuses the existing `verification` table — no schema change.
+    oneTimeToken({ storeToken: 'hashed' }),
+    // `bearer()` stays LAST: its after-hook reads the `set-cookie` every earlier
+    // plugin may have written and re-emits it as `set-auth-token`.
+    bearer(),
   ],
   emailAndPassword: {
     enabled: true,
@@ -45,13 +84,7 @@ export const staticAuthConfig = {
     expiresIn: 60 * 60 * 24 * 7, // 7 days
     updateAge: 60 * 60 * 24, // 24 hours
   },
-  account: {
-    accountLinking: {
-      enabled: true,
-      trustedProviders: ['github', 'google', 'email-password'],
-      allowDifferentEmails: false,
-    },
-  },
+  account: accountOptions,
   rateLimit: {
     enabled: true,
     window: 10,

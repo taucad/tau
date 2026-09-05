@@ -1,7 +1,9 @@
 import type { BetterAuthOptions, LogLevel as BetterAuthLogLevel, ModelNames } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { apiKey } from '@better-auth/api-key';
-import { magicLink } from 'better-auth/plugins';
+import { stripe } from '@better-auth/stripe';
+import { bearer, magicLink, oneTimeToken } from 'better-auth/plugins';
+import type Stripe from 'stripe';
 import type { ConfigService } from '@nestjs/config';
 import type { LogLevel } from '@nestjs/common';
 import { Logger } from '@nestjs/common';
@@ -13,6 +15,9 @@ import type { AuthService } from '#auth/auth.service.js';
 import type { Environment } from '#config/environment.config.js';
 import { staticAuthConfig } from '#config/auth.js';
 import type { EmailService } from '#email/email.service.js';
+import type { BillingService } from '#api/billing/billing.service.js';
+import type { StripeEventRouter } from '#api/billing/stripe-event-router.service.js';
+import { proMonthlyGrantMicro, proRolloverCeilingMicro } from '#api/billing/billing.constants.js';
 import {
   buildFrontendMagicLinkVerifyUrl,
   buildFrontendResetPasswordUrl,
@@ -22,7 +27,7 @@ import {
 /**
  * Mapping between BetterAuth models and ID prefixes.
  */
-const prefixFromModel: Record<Exclude<ModelNames, ''>, IdPrefix> = {
+const prefixFromModel: Record<Exclude<ModelNames, ''> | 'subscription', IdPrefix> = {
   account: idPrefix.account,
   organization: idPrefix.organization,
   user: idPrefix.user,
@@ -35,6 +40,9 @@ const prefixFromModel: Record<Exclude<ModelNames, ''>, IdPrefix> = {
   jwks: idPrefix.jwks,
   passkey: idPrefix.passkey,
   apikey: idPrefix.secretKey,
+  // Added by @better-auth/stripe — without this entry generateId throws on the
+  // first mirrored Stripe subscription row.
+  subscription: idPrefix.subscription,
 };
 
 /**
@@ -53,6 +61,10 @@ type BetterAuthConfigOptions = {
   configService: ConfigService<Environment, true>;
   authService: AuthService;
   emailService: EmailService;
+  billingService: BillingService;
+  stripeEventRouter: StripeEventRouter;
+  /** The DI-shared Stripe client (BA6) — one instance across plugin + services. */
+  stripeClient: Stripe;
 };
 
 /**
@@ -62,13 +74,22 @@ type BetterAuthConfigOptions = {
  */
 export function getBetterAuthConfig(options: BetterAuthConfigOptions): BetterAuthOptions {
   const logger = new Logger('BetterAuth');
-  const { databaseService, configService, emailService } = options;
+  const { databaseService, configService, emailService, billingService, stripeEventRouter, stripeClient } = options;
+  const baseURL = configService.get('AUTH_URL', { infer: true });
+  const secureCookies = new URL(baseURL).protocol === 'https:';
 
   /**
    * Runtime plugin configuration with custom options.
    * IMPORTANT: This array must have the same number of plugins as staticAuthConfig.plugins
    * in auth.ts. Add/remove plugins in both places to maintain sync.
    */
+  const stripeWebhookSecret = configService.get('STRIPE_WEBHOOK_SECRET', {
+    infer: true,
+  });
+  const stripeProPriceId = configService.get('STRIPE_PRICE_ID_PRO_MONTHLY', {
+    infer: true,
+  });
+
   const runtimePlugins = [
     apiKey({
       requireName: true,
@@ -88,6 +109,56 @@ export function getBetterAuthConfig(options: BetterAuthConfigOptions): BetterAut
         });
       },
     }),
+    stripe({
+      stripeClient,
+      stripeWebhookSecret: stripeWebhookSecret === '' ? 'whsec_dummy_dev_only' : stripeWebhookSecret,
+      // Lazy customer creation (blueprint deviation 8): the plugin creates the
+      // Stripe customer at first checkout, so signup never touches Stripe.
+      createCustomerOnSignUp: false,
+      subscription: {
+        enabled: true,
+        plans: [
+          {
+            name: 'pro',
+            priceId: stripeProPriceId === '' ? 'price_dev_dummy' : stripeProPriceId,
+            limits: {
+              // Microdollars (AD16): $20 post-markup monthly grant, 2x rollover
+              // ceiling (AD10). One home: billing.constants.ts.
+              monthlyGrantMicro: Number(proMonthlyGrantMicro),
+              rolloverCeilingMicro: Number(proRolloverCeilingMicro),
+            },
+          },
+          // Enterprise archetype (AD18/E4): subscriptions are attached manually by
+          // ops with per-customer prices; limits come from subscription_extension.
+          {
+            name: 'enterprise',
+            priceId: 'price_enterprise_manual',
+            limits: {},
+          },
+        ],
+        // Lifecycle hooks only invalidate the entitlements projection — every
+        // credit grant flows through the single invoice.paid pathway in the
+        // StripeEventRouter (AD17; the S2 exactly-once rule).
+        async onSubscriptionComplete({ subscription }) {
+          await billingService.invalidateEntitlements(subscription.referenceId);
+        },
+        async onSubscriptionUpdate({ subscription }) {
+          await billingService.invalidateEntitlements(subscription.referenceId);
+        },
+        async onSubscriptionCancel({ subscription }) {
+          await billingService.invalidateEntitlements(subscription.referenceId);
+        },
+      },
+      // Non-subscription events (grants, top-ups, refunds, dunning) fan out to
+      // the first-party router; signature verification already happened upstream.
+      async onEvent(event) {
+        await stripeEventRouter.dispatch(event);
+      },
+    }),
+    // Desktop sign-in handoff (ruling D7) — must mirror auth.ts at this index.
+    oneTimeToken({ storeToken: 'hashed' }),
+    // `bearer()` stays LAST (see auth.ts).
+    bearer(),
   ];
 
   // Validation: Ensure plugin arrays are in sync
@@ -120,7 +191,7 @@ export function getBetterAuthConfig(options: BetterAuthConfigOptions): BetterAut
     },
 
     secret: configService.get('AUTH_SECRET', { infer: true }),
-    baseURL: configService.get('AUTH_URL', { infer: true }),
+    baseURL,
     trustedOrigins: [configService.get('TAU_FRONTEND_URL', { infer: true })],
 
     emailAndPassword: {
@@ -162,19 +233,28 @@ export function getBetterAuthConfig(options: BetterAuthConfigOptions): BetterAut
     socialProviders: {
       github: {
         clientId: configService.get('GITHUB_CLIENT_ID', { infer: true }),
-        clientSecret: configService.get('GITHUB_CLIENT_SECRET', { infer: true }),
+        clientSecret: configService.get('GITHUB_CLIENT_SECRET', {
+          infer: true,
+        }),
         // Default scopes for initial sign-in (basic profile info)
         scope: ['read:user', 'user:email'],
       },
       google: {
         clientId: configService.get('GOOGLE_CLIENT_ID', { infer: true }),
-        clientSecret: configService.get('GOOGLE_CLIENT_SECRET', { infer: true }),
+        clientSecret: configService.get('GOOGLE_CLIENT_SECRET', {
+          infer: true,
+        }),
       },
     },
 
     // Advanced configuration
     advanced: {
       ...staticAuthConfig.advanced,
+      useSecureCookies: secureCookies,
+      defaultCookieAttributes: {
+        ...staticAuthConfig.advanced.defaultCookieAttributes,
+        secure: secureCookies,
+      },
       crossSubDomainCookies: {
         enabled: true,
         domain: undefined, // Will be set based on request

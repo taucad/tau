@@ -34,6 +34,20 @@ describe('environmentSchema', () => {
     }
   });
 
+  it('should accept an optional GitHub API token', () => {
+    const environment = withRequiredCookieSecret(process.env);
+    const absent = environmentSchema.safeParse(
+      Object.fromEntries(Object.entries(environment).filter(([key]) => key !== 'GITHUB_API_TOKEN')),
+    );
+    const configured = environmentSchema.safeParse({ ...environment, GITHUB_API_TOKEN: 'github-token' });
+
+    expect(absent.success).toBe(true);
+    expect(configured.success).toBe(true);
+    if (configured.success) {
+      expect(configured.data.GITHUB_API_TOKEN).toBe('github-token');
+    }
+  });
+
   it('should reject localhost TAU_S3_ENDPOINT while in production mode', () => {
     const result = environmentSchema.safeParse({
       ...withRequiredCookieSecret(process.env),
@@ -127,7 +141,10 @@ describe('environmentSchema', () => {
       TAU_S3_SECRET_ACCESS_KEY: 'secret',
       TAU_S3_FORCE_PATH_STYLE: false,
       TAU_API_URL: 'https://api.tau.new',
-      TAU_TEST_MODE: false,
+      STRIPE_SECRET_KEY: 'sk_live_test',
+      STRIPE_WEBHOOK_SECRET: 'whsec_test',
+      STRIPE_PRICE_ID_PRO_MONTHLY: 'price_test',
+      STRIPE_PRODUCT_ID_CREDIT_PACK: 'prod_test',
     });
 
     expect(result.success).toBe(true);

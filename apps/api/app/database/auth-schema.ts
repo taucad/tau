@@ -12,6 +12,7 @@ export const user = pgTable('user', {
     .defaultNow()
     .$onUpdate(() => /* @__PURE__ */ new Date())
     .notNull(),
+  stripeCustomerId: text('stripe_customer_id'),
 });
 
 export const session = pgTable(
@@ -105,6 +106,26 @@ export const apikey = pgTable(
     index('apikey_key_idx').on(table.key),
   ],
 );
+
+export const subscription = pgTable('subscription', {
+  id: text('id').primaryKey(),
+  plan: text('plan').notNull(),
+  referenceId: text('reference_id').notNull(),
+  stripeCustomerId: text('stripe_customer_id'),
+  stripeSubscriptionId: text('stripe_subscription_id'),
+  status: text('status').default('incomplete').notNull(),
+  periodStart: timestamp('period_start'),
+  periodEnd: timestamp('period_end'),
+  trialStart: timestamp('trial_start'),
+  trialEnd: timestamp('trial_end'),
+  cancelAtPeriodEnd: boolean('cancel_at_period_end').default(false),
+  cancelAt: timestamp('cancel_at'),
+  canceledAt: timestamp('canceled_at'),
+  endedAt: timestamp('ended_at'),
+  seats: integer('seats'),
+  billingInterval: text('billing_interval'),
+  stripeScheduleId: text('stripe_schedule_id'),
+});
 
 export const userRelations = relations(user, ({ many }) => ({
   sessions: many(session),

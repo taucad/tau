@@ -1,0 +1,2 @@
+DROP INDEX "chat_workspace_lease_workspace_idx";--> statement-breakpoint
+CREATE UNIQUE INDEX "chat_workspace_lease_workspace_idx" ON "chat_workspace_lease" USING btree ("owner_id","workspace_id") WHERE "chat_workspace_lease"."released_at" is null;

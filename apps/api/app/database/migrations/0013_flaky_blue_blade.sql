@@ -1,0 +1,2 @@
+ALTER TABLE "chat_rpc_exchange" DROP CONSTRAINT "chat_rpc_exchange_epoch_check";--> statement-breakpoint
+ALTER TABLE "chat_rpc_exchange" ADD CONSTRAINT "chat_rpc_exchange_epoch_check" CHECK ("chat_rpc_exchange"."lease_epoch" >= 0);

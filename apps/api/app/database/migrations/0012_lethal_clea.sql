@@ -1,0 +1,1 @@
+ALTER TABLE "paseo_run_execution" ADD COLUMN "lifecycle_keys" jsonb DEFAULT '[]'::jsonb NOT NULL;

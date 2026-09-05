@@ -206,7 +206,13 @@ const validateStaticToolLifecycleInputs = (messages: MyUIMessage[]): z.ZodError 
       }
       const inputSchema = getToolInputSchema(part.type);
       if (!inputSchema) {
-        continue;
+        return new z.ZodError([
+          {
+            code: 'custom',
+            path: ['messages', messageIndex, 'parts', partIndex, 'type'],
+            message: `Unsupported static tool: ${part.type}`,
+          },
+        ]);
       }
       const schema =
         part.state === 'input-streaming' && inputSchema instanceof z.ZodObject ? inputSchema.partial() : inputSchema;

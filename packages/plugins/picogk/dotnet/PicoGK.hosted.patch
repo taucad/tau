@@ -1,0 +1,654 @@
+diff --git a/Internals/Interop.cs b/Internals/Interop.cs
+index 254cedb..ef6740a 100644
+--- a/Internals/Interop.cs
++++ b/Internals/Interop.cs
+@@ -793,7 +793,10 @@ namespace PicoGK
+                 // Nothing to do in this class
+             }
+ 
+-            _Destroy(hThis);
++            if (m_xBackend is not null)
++                m_xBackend.Dispose();
++            else
++                _Destroy(hThis);
+             m_bDisposed = true;
+         }
+ 
+@@ -1391,4 +1394,4 @@ namespace PicoGK
+         internal readonly VdbMetaHandle hThis;
+         public readonly Library lib;
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/Library/LibraryGlobal.cs b/Library/LibraryGlobal.cs
+index 5fbe983..870e4a6 100644
+--- a/Library/LibraryGlobal.cs
++++ b/Library/LibraryGlobal.cs
+@@ -373,11 +373,32 @@ namespace PicoGK
+             if (fVoxelSizeMM <= 0.0f)
+                 throw new Exception("Voxel size needs to be larger than 0mm");
+ 
++            ILibraryHost? xHost = xLibraryHost();
++
+             if (strLogFilePath == "")
+-                strLogFilePath = Path.Combine(Utils.strDocumentsFolder(), "PicoGK.log");
++                strLogFilePath = xHost?.DefaultLogFilePath
++                                ?? Path.Combine(Utils.strDocumentsFolder(), "PicoGK.log");
+ 
+             m_strLogPath = Path.GetDirectoryName(strLogFilePath) ?? Utils.strDocumentsFolder();
+ 
++            if (xHost is not null)
++            {
++                try
++                {
++                    xHost.Run( fVoxelSizeMM,
++                               fnTask,
++                               strLogFilePath,
++                               bEndAppWithTask,
++                               strWindowTitle,
++                               strLightsFile);
++                }
++                finally
++                {
++                    m_bAppExit = true;
++                }
++                return;
++            }
++
+             using (GlobalInstance oInstance = new(fVoxelSizeMM, strLogFilePath, strWindowTitle, strLightsFile))
+             {
+                 Thread oThread = new Thread(fnTask);
+@@ -496,4 +517,4 @@ namespace PicoGK
+ 
+         #pragma warning restore CS1591 // Missing XML comment for publicly visible type or member
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/Library/LibraryHost.cs b/Library/LibraryHost.cs
+new file mode 100644
+index 0000000..6c0ed94
+--- /dev/null
++++ b/Library/LibraryHost.cs
+@@ -0,0 +1,68 @@
++//
++// SPDX-License-Identifier: Apache-2.0
++//
++
++namespace PicoGK
++{
++    /// <summary>
++    /// Host for the process-global lifecycle established by <see cref="Library.Go"/>.
++    /// The default PicoGK host remains the native viewer implementation.
++    /// </summary>
++    public interface ILibraryHost
++    {
++        /// <summary>Log path used when callers keep <see cref="Library.Go"/>'s default.</summary>
++        string DefaultLogFilePath { get; }
++
++        /// <summary>Run one PicoGK task with the arguments supplied to <see cref="Library.Go"/>.</summary>
++        void Run( float       fVoxelSizeMM,
++                  ThreadStart fnTask,
++                  string      strLogFilePath,
++                  bool        bEndAppWithTask,
++                  string      strWindowTitle,
++                  string      strLightsFile);
++    }
++
++    public partial class Library
++    {
++        /// <summary>
++        /// Temporarily route <see cref="Go"/> through a host supplied by an embedding application.
++        /// PicoGK supports one global library configuration, so host scopes cannot be nested.
++        /// </summary>
++        public static IDisposable UseHost(ILibraryHost xHost)
++        {
++            ArgumentNullException.ThrowIfNull(xHost);
++            lock (m_mtxLibraryHost)
++            {
++                if (m_xLibraryHost is not null)
++                    throw new InvalidOperationException("Cannot register more than one PicoGK library host");
++                m_xLibraryHost = xHost;
++            }
++            return new LibraryHostScope(xHost);
++        }
++
++        static ILibraryHost? xLibraryHost()
++        {
++            lock (m_mtxLibraryHost)
++                return m_xLibraryHost;
++        }
++
++        sealed class LibraryHostScope : IDisposable
++        {
++            public LibraryHostScope(ILibraryHost xHost) => m_xHost = xHost;
++
++            public void Dispose()
++            {
++                lock (m_mtxLibraryHost)
++                {
++                    if (ReferenceEquals(m_xLibraryHost, m_xHost))
++                        m_xLibraryHost = null;
++                }
++            }
++
++            readonly ILibraryHost m_xHost;
++        }
++
++        static readonly object m_mtxLibraryHost = new();
++        static ILibraryHost? m_xLibraryHost;
++    }
++}
+diff --git a/Viewer/Viewer.cs b/Viewer/Viewer.cs
+index fe3d87d..98e35eb 100644
+--- a/Viewer/Viewer.cs
++++ b/Viewer/Viewer.cs
+@@ -45,6 +45,45 @@ namespace PicoGK
+     /// </summary>
+     public partial class Viewer
+     {
++        /// <summary>
++        /// Initialize a hosted Viewer that delegates display operations without creating a native window.
++        /// </summary>
++        public Viewer(IViewerBackend xBackend,
++                      ILog           xLog)
++        {
++            ArgumentNullException.ThrowIfNull(xBackend);
++            ArgumentNullException.ThrowIfNull(xLog);
++            m_xBackend = xBackend;
++            m_xLog = xLog;
++            m_iMainThreadID = Environment.CurrentManagedThreadId;
++
++            float f45   = float.Pi/4;
++            float f90   = f45 * 2;
++            float f180  = f90 * 2;
++            qOrientationTop      = Quaternion.Identity;
++            qOrientationBottom   = Quaternion.CreateFromAxisAngle(Vector3.UnitY, f180) * qOrientationTop;
++            qOrientationFront    = Quaternion.CreateFromAxisAngle(Vector3.UnitX, f90) * qOrientationTop;
++            qOrientationRight    = Quaternion.CreateFromAxisAngle(Vector3.UnitZ, f90) * qOrientationFront;
++            qOrientationBack     = Quaternion.CreateFromAxisAngle(Vector3.UnitZ, f90) * qOrientationRight;
++            qOrientationLeft     = Quaternion.CreateFromAxisAngle(Vector3.UnitZ, f90) * qOrientationBack;
++            qOrientationHome     = qOrientationTop
++                                    * Quaternion.CreateFromAxisAngle(Vector3.UnitZ, f45)
++                                    * Quaternion.CreateFromAxisAngle(Vector3.UnitX, f45);
++            m_oCamera.qOrientation = qOrientationHome;
++
++            m_fnInfoCB = null!;
++            m_fnUpdateCB = null!;
++            m_fnKeyPressedCB = null!;
++            m_fnMouseMovedCB = null!;
++            m_fnMouseButtonCB = null!;
++            m_fnScrollWheelCB = null!;
++            m_fnWindowSizeCB = null!;
++            hThis = IntPtr.Zero;
++        }
++
++        /// <summary>True when viewer operations are delegated to an embedding backend.</summary>
++        public bool bIsHosted => m_xBackend is not null;
++
+         /// <summary>
+         /// Initialize a new Viewer
+         /// </summary>
+@@ -195,6 +234,22 @@ namespace PicoGK
+         /// </summary>
+         public bool bPoll()
+         {
++            if (m_xBackend is not null)
++            {
++                bool bAnimated;
++                lock (m_oAnims)
++                    bAnimated = m_oAnims.bPulse();
++                if (bAnimated)
++                    m_xBackend.RequestUpdate();
++                lock (m_oTLLock)
++                {
++                    if (m_oTimeLapse?.bDue(out string strScreenShotPath) == true)
++                        m_xBackend.RequestScreenShot(strScreenShotPath);
++                }
++                m_xBackend.Poll();
++                return bAnimated;
++            }
++
+             Debug.Assert(m_iMainThreadID == Environment.CurrentManagedThreadId);
+             // Call this function only from the main() thread of the application
+ 
+@@ -247,6 +302,11 @@ namespace PicoGK
+         /// </summary>
+         public void RequestUpdate()
+         {
++            if (m_xBackend is not null)
++            {
++                m_xBackend.RequestUpdate();
++                return;
++            }
+             lock (m_oActions)
+             {
+                 m_oActions.Enqueue(new RequestUpdateAction());
+@@ -307,6 +367,11 @@ namespace PicoGK
+ 
+                     lock (m_oActions)
+                     {
++                        if (m_xBackend is not null)
++                        {
++                            m_xBackend.LoadLightSetup(abyDiffuseData, abySpecularData);
++                            return;
++                        }
+                         m_oActions.Enqueue(new LoadLightSetupAction(    m_xLog,
+                                                                         abyDiffuseData,
+                                                                         abySpecularData));
+@@ -316,5 +381,5 @@ namespace PicoGK
+ 
+-                catch
++                catch when (m_xBackend is null)
+                 {
+                     Console.WriteLine("Unable to load lights");
+                 }
+@@ -326,6 +391,11 @@ namespace PicoGK
+         public void Add(    in Voxels vox,
+                             int nGroupID = 0)
+         {
++            if (m_xBackend is not null)
++            {
++                m_xBackend.Add(vox, nGroupID);
++                return;
++            }
+             lock (m_oActions)
+             {
+                 m_oActions.Enqueue(new AddVoxelsAction(vox, nGroupID));
+@@ -337,6 +407,11 @@ namespace PicoGK
+         /// </summary>
+         public void Remove(Voxels vox)
+         {
++            if (m_xBackend is not null)
++            {
++                m_xBackend.Remove(vox);
++                return;
++            }
+             lock (m_oActions)
+             {
+                 m_oActions.Enqueue(new RemoveVoxelsAction(vox));
+@@ -349,6 +424,11 @@ namespace PicoGK
+         public void SetObjectMatrix(    Voxels vox,
+                                         in Matrix4x4 mat)
+         {
++            if (m_xBackend is not null)
++            {
++                m_xBackend.SetObjectMatrix(vox, mat);
++                return;
++            }
+             lock (m_oActions)
+             {
+                 m_oActions.Enqueue(new SetVoxelsMatrixAction(vox, mat));
+@@ -361,6 +441,11 @@ namespace PicoGK
+         public void Add(    Mesh msh,
+                             int nGroupID = 0)
+         {
++            if (m_xBackend is not null)
++            {
++                m_xBackend.Add(msh, nGroupID);
++                return;
++            }
+             lock (m_oActions)
+             {
+                 m_oActions.Enqueue(new AddMeshAction(msh, nGroupID));
+@@ -372,6 +457,11 @@ namespace PicoGK
+         /// </summary>
+         public void Remove(Mesh msh)
+         {
++            if (m_xBackend is not null)
++            {
++                m_xBackend.Remove(msh);
++                return;
++            }
+             lock (m_oActions)
+             {
+                 m_oActions.Enqueue(new RemoveMeshAction(msh));
+@@ -384,6 +474,11 @@ namespace PicoGK
+         public void SetObjectMatrix(    Mesh msh,
+                                         in Matrix4x4 mat)
+         {
++            if (m_xBackend is not null)
++            {
++                m_xBackend.SetObjectMatrix(msh, mat);
++                return;
++            }
+             lock (m_oActions)
+             {
+                 m_oActions.Enqueue(new SetMeshMatrixAction(msh, mat));
+@@ -396,6 +491,11 @@ namespace PicoGK
+         public void Add(    PolyLine oPoly,
+                             int nGroupID = 0)
+         {
++            if (m_xBackend is not null)
++            {
++                m_xBackend.Add(oPoly, nGroupID);
++                return;
++            }
+             lock (m_oActions)
+             {
+                 m_oActions.Enqueue(new AddPolyLineAction(oPoly, nGroupID));
+@@ -407,6 +507,11 @@ namespace PicoGK
+         /// </summary>
+         public void Remove(PolyLine oPoly)
+         {
++            if (m_xBackend is not null)
++            {
++                m_xBackend.Remove(oPoly);
++                return;
++            }
+             lock (m_oActions)
+             {
+                 m_oActions.Enqueue(new RemovePolyLineAction(oPoly));
+@@ -419,6 +524,11 @@ namespace PicoGK
+         public void SetObjectMatrix(    PolyLine poly,
+                                         in Matrix4x4 mat)
+         {
++            if (m_xBackend is not null)
++            {
++                m_xBackend.SetObjectMatrix(poly, mat);
++                return;
++            }
+             lock (m_oActions)
+             {
+                 m_oActions.Enqueue(new SetPolyLineMatrixAction(poly, mat));
+@@ -430,6 +540,11 @@ namespace PicoGK
+         /// </summary>
+         public void RemoveAllObjects()
+         {
++            if (m_xBackend is not null)
++            {
++                m_xBackend.RemoveAllObjects();
++                return;
++            }
+             lock (m_oActions)
+             {
+                 m_oActions.Enqueue(new RemoveAllObjectsAction());
+@@ -442,6 +557,11 @@ namespace PicoGK
+         /// </summary>
+         public void RequestScreenShot(string strScreenShotPath)
+         {
++            if (m_xBackend is not null)
++            {
++                m_xBackend.RequestScreenShot(strScreenShotPath);
++                return;
++            }
+             lock (m_oActions)
+             {
+                 m_oActions.Enqueue(new RequestScreenShotAction(strScreenShotPath));
+@@ -453,6 +573,11 @@ namespace PicoGK
+         /// </summary>
+         public void EnableExperimental(bool bEnable)
+         {
++            if (m_xBackend is not null)
++            {
++                m_xBackend.EnableExperimental(bEnable);
++                return;
++            }
+             _EnableExperimental(hThis, bEnable);
+         }
+ 
+@@ -462,6 +587,11 @@ namespace PicoGK
+         public void SetGroupVisible(int nGroupID,
+                                         bool bVisible)
+         {
++            if (m_xBackend is not null)
++            {
++                m_xBackend.SetGroupVisible(nGroupID, bVisible);
++                return;
++            }
+             lock (m_oActions)
+             {
+                 m_oActions.Enqueue(new SetGroupVisibleAction(nGroupID, bVisible));
+@@ -480,6 +610,11 @@ namespace PicoGK
+                                         float       fMetallic,
+                                         float       fRoughness)
+         {
++            if (m_xBackend is not null)
++            {
++                m_xBackend.SetGroupMaterial(nGroupID, clr, fMetallic, fRoughness);
++                return;
++            }
+             lock (m_oActions)
+             {
+                 m_oActions.Enqueue(new SetGroupMaterialAction(  nGroupID,
+@@ -495,6 +630,11 @@ namespace PicoGK
+         public void SetGroupMatrix( int nGroupID,
+                                     Matrix4x4 mat)
+         {
++            if (m_xBackend is not null)
++            {
++                m_xBackend.SetGroupMatrix(nGroupID, mat);
++                return;
++            }
+             lock (m_oActions)
+             {
+                 m_oActions.Enqueue(new SetGroupMatrixAction(    nGroupID,
+@@ -512,6 +652,11 @@ namespace PicoGK
+                                             Overhang uWarning,
+                                             Overhang uError)
+         {
++            if (m_xBackend is not null)
++            {
++                m_xBackend.EnableOverhangWarning(nGroupID, uWarning, uError);
++                return;
++            }
+             lock (m_oActions)
+             {
+                 m_oActions.Enqueue(new EnableGroupOverhangWarningAction(    nGroupID, 
+@@ -542,6 +687,11 @@ namespace PicoGK
+         /// </summary>
+         public void DisableOverhangWarning(int nGroupID)
+         {
++            if (m_xBackend is not null)
++            {
++                m_xBackend.DisableOverhangWarning(nGroupID);
++                return;
++            }
+             lock (m_oActions)
+             {
+                 m_oActions.Enqueue(new DisableGroupOverhangWarningAction(nGroupID));
+@@ -553,6 +703,8 @@ namespace PicoGK
+         /// </summary>
+         public BBox3 oBBox()
+         {
++            if (m_xBackend is not null)
++                return m_xBackend.GetBoundingBox();
+             BBox3 oBBox = new();
+             _GetBoundingBox(hThis, ref oBBox);
+             return oBBox;
+@@ -563,6 +715,11 @@ namespace PicoGK
+         /// </summary>
+         public void SetBackgroundColor(ColorFloat clr)
+         {
++            if (m_xBackend is not null)
++            {
++                m_xBackend.SetBackgroundColor(clr);
++                return;
++            }
+             m_clrBackground = clr;
+             RequestUpdate();
+         }
+@@ -572,6 +729,11 @@ namespace PicoGK
+         /// </summary>
+         public void ZoomToFit()
+         {
++            if (m_xBackend is not null)
++            {
++                m_xBackend.ZoomToFit();
++                return;
++            }
+             m_bForceZoomToFit = true;
+             RequestUpdate();
+         }
+@@ -581,6 +743,11 @@ namespace PicoGK
+         /// </summary>
+         public void SetFov(float fAngle)
+         {
++            if (m_xBackend is not null)
++            {
++                m_xBackend.SetFieldOfView(fAngle);
++                return;
++            }
+             m_oCamera.SetVerticalFov(fAngle);
+             RequestUpdate();
+         }
+@@ -590,9 +757,14 @@ namespace PicoGK
+         /// </summary>
+         public Quaternion qOrientation
+         {
+-            get => m_oCamera.qOrientation;
++            get => m_xBackend?.Orientation ?? m_oCamera.qOrientation;
+             set
+             {
++                if (m_xBackend is not null)
++                {
++                    m_xBackend.Orientation = value;
++                    return;
++                }
+                 m_oCamera.qOrientation = value; 
+                 RequestUpdate();
+             }
+@@ -614,6 +786,8 @@ namespace PicoGK
+         /// false: Viewer actions still pending (busy)</returns>
+         public bool bIsIdle()
+         {
++            if (m_xBackend is not null)
++                return m_xBackend.IsIdle;
+             lock (m_oActions)
+             {
+                 if (m_oActions.Count() > 0)
+@@ -625,11 +799,13 @@ namespace PicoGK
+ 
+         bool m_bIdle = false;
+ 
++        IViewerBackend? m_xBackend;
++
+         int m_iMainThreadID = -1;
+ 
+         ColorFloat m_clrBackground = new(0.3f);
+ 
+-    
++
+                void DoRemove(Mesh msh)
+         {
+             _RemoveMesh(    msh.lib.hThis,
+@@ -822,4 +998,3 @@ namespace PicoGK
+         }
+     }
+ }
+-    
+\ No newline at end of file
+diff --git a/Viewer/ViewerBackend.cs b/Viewer/ViewerBackend.cs
+new file mode 100644
+index 0000000..08e158e
+--- /dev/null
++++ b/Viewer/ViewerBackend.cs
+@@ -0,0 +1,42 @@
++//
++// SPDX-License-Identifier: Apache-2.0
++//
++
++using System.Numerics;
++using PicoGK.Numerics;
++
++namespace PicoGK
++{
++    /// <summary>
++    /// Backend for embedding PicoGK's concrete <see cref="Viewer"/> API without a native window.
++    /// </summary>
++    public interface IViewerBackend : IDisposable
++    {
++        bool Poll();
++        bool IsIdle { get; }
++        void RequestUpdate();
++        void LoadLightSetup(byte[] abyDiffuseDds, byte[] abySpecularDds);
++        void SetBackgroundColor(ColorFloat color);
++        void SetFieldOfView(float radians);
++        void ZoomToFit();
++        Quaternion Orientation { get; set; }
++        void Add(Voxels vox, int nGroupID);
++        void Remove(Voxels vox);
++        void SetObjectMatrix(Voxels vox, Matrix4x4 mat);
++        void Add(Mesh msh, int nGroupID);
++        void Remove(Mesh msh);
++        void SetObjectMatrix(Mesh msh, Matrix4x4 mat);
++        void Add(PolyLine poly, int nGroupID);
++        void Remove(PolyLine poly);
++        void SetObjectMatrix(PolyLine poly, Matrix4x4 mat);
++        void RemoveAllObjects();
++        void RequestScreenShot(string strScreenShotPath);
++        void EnableExperimental(bool bEnable);
++        void SetGroupVisible(int nGroupID, bool bVisible);
++        void SetGroupMaterial(int nGroupID, ColorFloat clr, float fMetallic, float fRoughness);
++        void SetGroupMatrix(int nGroupID, Matrix4x4 mat);
++        void EnableOverhangWarning(int nGroupID, Overhang uWarning, Overhang uError);
++        void DisableOverhangWarning(int nGroupID);
++        BBox3 GetBoundingBox();
++    }
++}
+diff --git a/Viewer/ViewerGpuTex.cs b/Viewer/ViewerGpuTex.cs
+index 9b4213b..6fee77a 100644
+--- a/Viewer/ViewerGpuTex.cs
++++ b/Viewer/ViewerGpuTex.cs
+@@ -47,6 +47,8 @@ namespace PicoGK
+             public GpuTex(  Viewer oSetViewer,
+                             ImageRgba32 img)
+             {
++                if (oSetViewer.bIsHosted)
++                    throw new NotSupportedException("GPU textures require the native PicoGK viewer backend");
+                 oViewer = oSetViewer;
+ 
+                 GCHandle handle = GCHandle.Alloc(img.m_aclrValues, GCHandleType.Pinned);
+@@ -89,4 +91,3 @@ namespace PicoGK
+         } 
+     }
+ }
+-    
+\ No newline at end of file
+diff --git a/Viewer/ViewerImageQuad.cs b/Viewer/ViewerImageQuad.cs
+index 6bcf599..9b7336d 100644
+--- a/Viewer/ViewerImageQuad.cs
++++ b/Viewer/ViewerImageQuad.cs
+@@ -53,6 +53,8 @@ namespace PicoGK
+                                 bool bFlipY,
+                                 bool bDoubleSided)
+             {
++                if (oSetViewer.bIsHosted)
++                    throw new NotSupportedException("Image quads require the native PicoGK viewer backend");
+                 oViewer = oSetViewer;
+                 m_oTex = new(oSetViewer, img);
+ 
+@@ -79,4 +81,3 @@ namespace PicoGK
+         } 
+     }
+ }
+-    
+\ No newline at end of file
+diff --git a/Viewer/Viewer_Gui.cs b/Viewer/Viewer_Gui.cs
+index b9692ac..8386afa 100644
+--- a/Viewer/Viewer_Gui.cs
++++ b/Viewer/Viewer_Gui.cs
+@@ -45,6 +45,8 @@ namespace PicoGK
+                                             ColorFloat clrNormal,
+                                             ColorFloat clrHovered)
+         {
++            if (bIsHosted)
++                throw new NotSupportedException("Sidebars require the native PicoGK viewer backend");
+             if (m_oSideBarLeft is not null)
+                 m_oSideBarLeft.Dispose();
+ 
+@@ -58,6 +60,8 @@ namespace PicoGK
+                                             ColorFloat clrNormal,
+                                             ColorFloat clrHovered)
+         {
++            if (bIsHosted)
++                throw new NotSupportedException("Sidebars require the native PicoGK viewer backend");
+             if (m_oSideBarRight is not null)
+                 m_oSideBarRight.Dispose();
+ 
+@@ -91,4 +95,3 @@ namespace PicoGK
+         }
+     }
+ }
+-

@@ -2,22 +2,29 @@ using System.Buffers.Binary;
 using System.Collections.Immutable;
 using System.ComponentModel.DataAnnotations;
 using System.Diagnostics;
-using System.Reflection;
-using System.Runtime.Loader;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
-using Tau.PicoGK;
 
 namespace Tau.PicoGK.Worker;
 
+internal enum ParameterKind
+{
+    Boolean,
+    Integer,
+    Single,
+    Double,
+    String,
+    Enum,
+}
+
 internal sealed record ParameterDefinition(
     string Name,
-    ITypeSymbol Type,
-    object Value,
+    ParameterKind Kind,
+    object DefaultValue,
     double? Minimum,
     double? Maximum,
     string? Title,
@@ -25,15 +32,10 @@ internal sealed record ParameterDefinition(
     int? Order,
     IReadOnlyList<string>? EnumValues);
 
-internal sealed record ModelContract(
-    INamedTypeSymbol ParamsType,
-    IMethodSymbol BuildMethod,
-    IReadOnlyList<ParameterDefinition> Parameters);
-
 internal sealed record CompiledModel(
     byte[] Assembly,
     byte[] Pdb,
-    ModelContract Contract,
+    IReadOnlyList<ParameterDefinition> Parameters,
     IReadOnlyDictionary<string, object?> Defaults,
     IReadOnlyDictionary<string, object?> JsonSchema,
     CompilationTimings Timings);
@@ -47,6 +49,7 @@ internal sealed record CompilationTimings(
 
 internal static class CompilationService
 {
+    private const string CompilerContractVersion = "3";
     private const int MaximumSourceFiles = 256;
     private const int MaximumSourceBytes = 8 * 1024 * 1024;
     private const int MaximumSingleSourceBytes = 1024 * 1024;
@@ -55,6 +58,7 @@ internal static class CompilationService
     private static readonly object CacheLock = new();
     private static readonly ImmutableArray<MetadataReference> References = CreateReferences(
         AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES") as string);
+    private static readonly byte[] PicoGkAssemblyHash = SHA256.HashData(File.ReadAllBytes(typeof(global::PicoGK.Library).Assembly.Location));
     private static (string Key, CompiledModel Model)? cachedCompilation;
 
     internal static CompiledModel Compile(string workspace)
@@ -65,32 +69,29 @@ internal static class CompilationService
             .ToArray();
         if (paths.Length == 0)
         {
-            throw ContractError("The PicoGK project contains no C# source files.");
+            throw CompilationError("The PicoGK project contains no C# source files.");
         }
         if (paths.Length > MaximumSourceFiles)
         {
-            throw ContractError($"The PicoGK project exceeds {MaximumSourceFiles} C# source files.");
+            throw CompilationError($"The PicoGK project exceeds {MaximumSourceFiles} C# source files.");
         }
+
         var totalBytes = 0L;
         using var digest = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        digest.AppendData(Encoding.UTF8.GetBytes(CompilerContractVersion));
+        digest.AppendData(PicoGkAssemblyHash);
         var sources = paths.Select(path =>
         {
             var fileBytes = new FileInfo(path).Length;
             totalBytes = checked(totalBytes + fileBytes);
             if (fileBytes > MaximumSingleSourceBytes || totalBytes > MaximumSourceBytes)
             {
-                throw ContractError("The PicoGK project exceeds its C# source byte limit.");
+                throw CompilationError("The PicoGK project exceeds its C# source byte limit.");
             }
             var relativePath = Path.GetRelativePath(workspace, path).Replace('\\', '/');
             var content = File.ReadAllBytes(path);
-            var relativePathBytes = Encoding.UTF8.GetBytes(relativePath);
-            Span<byte> length = stackalloc byte[sizeof(int)];
-            BinaryPrimitives.WriteInt32LittleEndian(length, relativePathBytes.Length);
-            digest.AppendData(length);
-            digest.AppendData(relativePathBytes);
-            BinaryPrimitives.WriteInt32LittleEndian(length, content.Length);
-            digest.AppendData(length);
-            digest.AppendData(content);
+            AppendDigest(digest, Encoding.UTF8.GetBytes(relativePath));
+            AppendDigest(digest, content);
             return (relativePath, content);
         }).ToArray();
         var cacheKey = Convert.ToHexString(digest.GetHashAndReset());
@@ -107,48 +108,46 @@ internal static class CompilationService
         }
 
         var parse = Stopwatch.StartNew();
-        var trees = sources.Select(source =>
-        {
-            var tree = CSharpSyntaxTree.ParseText(
-                Encoding.UTF8.GetString(source.content),
-                new CSharpParseOptions(LanguageVersion.Latest),
-                source.relativePath,
-                Encoding.UTF8);
-            if (tree.GetRoot().DescendantNodes(descendIntoTrivia: true).Max(node => node.Ancestors().Count()) > MaximumSyntaxDepth)
-            {
-                throw ContractError($"C# syntax exceeds the maximum depth of {MaximumSyntaxDepth}.", tree.GetRoot());
-            }
-            return tree;
-        }).ToArray();
+        var trees = sources.Select(source => ParseSource(source.relativePath, source.content)).Prepend(ParseImplicitUsings()).ToArray();
         parse.Stop();
+
         var analyze = Stopwatch.StartNew();
         var compilation = CSharpCompilation.Create(
             "TauUserModel",
             trees,
             References,
             new CSharpCompilationOptions(
-                OutputKind.DynamicallyLinkedLibrary,
+                OutputKind.ConsoleApplication,
                 optimizationLevel: OptimizationLevel.Release,
                 deterministic: true,
                 allowUnsafe: false));
         ThrowDiagnostics(compilation.GetDiagnostics());
-        var contract = AnalyzeContract(compilation);
-        var defaults = contract.Parameters.ToDictionary(parameter => parameter.Name, parameter => JsonValue(parameter), StringComparer.Ordinal);
-        var properties = contract.Parameters
+        var parameters = AnalyzeParameters(compilation)
             .OrderBy(parameter => parameter.Order ?? int.MaxValue)
             .ThenBy(parameter => parameter.Name, StringComparer.Ordinal)
-            .ToDictionary(parameter => parameter.Name, JsonSchemaFor, StringComparer.Ordinal);
+            .ToArray();
+        var defaults = parameters.ToDictionary(
+            parameter => parameter.Name,
+            parameter => (object?)parameter.DefaultValue,
+            StringComparer.Ordinal);
+        var properties = new Dictionary<string, object?>(StringComparer.Ordinal);
+        foreach (var parameter in parameters)
+        {
+            properties.Add(parameter.Name, JsonSchemaFor(parameter));
+        }
         analyze.Stop();
+
         var emit = Stopwatch.StartNew();
         using var assembly = new MemoryStream();
         using var pdb = new MemoryStream();
         var emitted = compilation.Emit(assembly, pdbStream: pdb);
         ThrowDiagnostics(emitted.Diagnostics);
         emit.Stop();
+
         var model = new CompiledModel(
             assembly.ToArray(),
             pdb.ToArray(),
-            contract,
+            parameters,
             defaults,
             new Dictionary<string, object?>
             {
@@ -169,78 +168,90 @@ internal static class CompilationService
         return model;
     }
 
-    private static ModelContract AnalyzeContract(CSharpCompilation compilation)
+    internal static IReadOnlyDictionary<string, object?> BindParameters(CompiledModel compiled, JsonElement supplied)
     {
-        var parameterDeclarations = compilation.SyntaxTrees
-            .SelectMany(tree => tree.GetRoot().DescendantNodes().OfType<RecordDeclarationSyntax>())
-            .Where(declaration => declaration.Identifier.ValueText == "Params" && declaration.Parent is CompilationUnitSyntax)
-            .ToArray();
-        if (parameterDeclarations.Length != 1)
+        if (supplied.ValueKind != JsonValueKind.Object)
         {
-            throw ContractError("Define exactly one top-level public sealed non-positional record named Params.");
+            throw ParameterError("PicoGK parameters must be an object.");
         }
-        var declaration = parameterDeclarations[0];
-        var model = compilation.GetSemanticModel(declaration.SyntaxTree);
-        var parameterType = model.GetDeclaredSymbol(declaration)!;
-        if (!parameterType.IsRecord || !parameterType.IsSealed || parameterType.DeclaredAccessibility != Accessibility.Public || declaration.ParameterList is not null)
+        var definitions = compiled.Parameters.ToDictionary(parameter => parameter.Name, StringComparer.Ordinal);
+        var values = compiled.Parameters.ToDictionary(
+            parameter => parameter.Name,
+            parameter => (object?)parameter.DefaultValue,
+            StringComparer.Ordinal);
+        foreach (var property in supplied.EnumerateObject())
         {
-            throw ContractError("Params must be a top-level public sealed non-positional record.", declaration);
+            if (!definitions.TryGetValue(property.Name, out var definition))
+            {
+                throw ParameterError($"Unknown PicoGK parameter '{property.Name}'.");
+            }
+            var value = ReadJsonValue(property.Value, definition);
+            if (definition.Minimum is not null && Convert.ToDouble(value) < definition.Minimum ||
+                definition.Maximum is not null && Convert.ToDouble(value) > definition.Maximum)
+            {
+                throw ParameterError($"PicoGK parameter '{property.Name}' is outside its Range.");
+            }
+            values[property.Name] = value;
         }
-        if (!parameterType.InstanceConstructors.Any(constructor => constructor.Parameters.Length == 0 && constructor.DeclaredAccessibility == Accessibility.Public))
-        {
-            throw ContractError("Params must expose a public parameterless constructor.", declaration);
-        }
+        return values;
+    }
 
-        var properties = parameterType.GetMembers().OfType<IPropertySymbol>()
-            .Where(property => !property.IsStatic && property.DeclaringSyntaxReferences.Length > 0)
-            .ToArray();
-        var definitions = properties.Select(property => AnalyzeParameter(property, compilation)).ToArray();
-        var voxel = definitions.SingleOrDefault(parameter => parameter.Name == "VoxelSizeMm");
-        if (voxel is null || voxel.Type.SpecialType != SpecialType.System_Single || Convert.ToSingle(voxel.Value) <= 0 || !float.IsFinite(Convert.ToSingle(voxel.Value)))
+    private static IReadOnlyList<ParameterDefinition> AnalyzeParameters(CSharpCompilation compilation)
+    {
+        var parameterType = compilation.GetTypeByMetadataName("Params");
+        if (parameterType is null || !parameterType.IsStatic || parameterType.DeclaredAccessibility != Accessibility.Public)
         {
-            throw ContractError("Params must define a positive finite float VoxelSizeMm default.", declaration);
+            return [];
         }
-
-        var modelTypes = compilation.SyntaxTrees
-            .SelectMany(tree => tree.GetRoot().DescendantNodes().OfType<ClassDeclarationSyntax>())
-            .Where(type => type.Identifier.ValueText == "Model" && type.Parent is CompilationUnitSyntax)
-            .Select(type => compilation.GetSemanticModel(type.SyntaxTree).GetDeclaredSymbol(type))
-            .OfType<INamedTypeSymbol>()
-            .ToArray();
-        if (modelTypes.Length != 1 || !modelTypes[0].IsStatic || modelTypes[0].DeclaredAccessibility != Accessibility.Public)
+        var constructor = parameterType.StaticConstructors.FirstOrDefault(value => !value.IsImplicitlyDeclared);
+        if (constructor is not null)
         {
-            throw ContractError("Define exactly one top-level public static class Model.");
+            throw ParameterError(
+                "The PicoGK Params class cannot define an explicit static constructor.",
+                constructor.DeclaringSyntaxReferences[0].GetSyntax());
         }
-        var authoringModel = compilation.GetTypeByMetadataName(typeof(TauModel).FullName!);
-        var methods = modelTypes[0].GetMembers("Build").OfType<IMethodSymbol>()
-            .Where(method => method.DeclaredAccessibility == Accessibility.Public)
-            .Where(method => method.Parameters.Length == 1 && SymbolEqualityComparer.Default.Equals(method.Parameters[0].Type, parameterType))
-            .Where(method => SymbolEqualityComparer.Default.Equals(method.ReturnType, authoringModel))
+        return parameterType.GetMembers()
+            .OfType<IPropertySymbol>()
+            .Where(property => property.DeclaredAccessibility == Accessibility.Public)
+            .Select(property => AnalyzeParameter(property, compilation))
             .ToArray();
-        if (methods.Length != 1)
-        {
-            throw ContractError("Model must define exactly one public static TauModel Build(Params) method.");
-        }
-        return new ModelContract(parameterType, methods[0], definitions);
     }
 
     private static ParameterDefinition AnalyzeParameter(IPropertySymbol property, CSharpCompilation compilation)
     {
         var declaration = (PropertyDeclarationSyntax)property.DeclaringSyntaxReferences[0].GetSyntax();
-        if (property.DeclaredAccessibility != Accessibility.Public || property.SetMethod?.IsInitOnly != true || declaration.Initializer is null)
+        var isAutoProperty = declaration.AccessorList?.Accessors.All(
+            accessor => accessor.Body is null && accessor.ExpressionBody is null) == true;
+        if (property.GetMethod?.DeclaredAccessibility != Accessibility.Public ||
+            property.SetMethod?.DeclaredAccessibility != Accessibility.Public || !isAutoProperty)
         {
-            throw ContractError($"Parameter '{property.Name}' must be a public init property with a compile-time default.", declaration);
+            throw ParameterError($"Parameter '{property.Name}' must be a public static readable and writable auto-property.", declaration);
         }
-        var allowed = property.Type.SpecialType is SpecialType.System_Boolean or SpecialType.System_Int32 or SpecialType.System_Single or SpecialType.System_Double or SpecialType.System_String;
-        var projectEnum = property.Type.TypeKind == TypeKind.Enum && SymbolEqualityComparer.Default.Equals(property.Type.ContainingAssembly, compilation.Assembly);
-        if (!allowed && !projectEnum)
+        if (declaration.Initializer is null)
         {
-            throw ContractError($"Parameter '{property.Name}' uses unsupported type '{property.Type.ToDisplayString()}'.", declaration.Type);
+            throw ParameterError($"Parameter '{property.Name}' requires a non-null compile-time constant default.", declaration);
+        }
+
+        var projectEnum = property.Type.TypeKind == TypeKind.Enum &&
+            SymbolEqualityComparer.Default.Equals(property.Type.ContainingAssembly, compilation.Assembly);
+        var kind = property.Type.SpecialType switch
+        {
+            SpecialType.System_Boolean => ParameterKind.Boolean,
+            SpecialType.System_Int32 => ParameterKind.Integer,
+            SpecialType.System_Single => ParameterKind.Single,
+            SpecialType.System_Double => ParameterKind.Double,
+            SpecialType.System_String => ParameterKind.String,
+            _ when projectEnum => ParameterKind.Enum,
+            _ => (ParameterKind?)null,
+        };
+        if (kind is null)
+        {
+            throw ParameterError($"Parameter '{property.Name}' uses unsupported type '{property.Type.ToDisplayString()}'.", declaration.Type);
         }
         var constant = compilation.GetSemanticModel(declaration.SyntaxTree).GetConstantValue(declaration.Initializer.Value);
         if (!constant.HasValue || constant.Value is null)
         {
-            throw ContractError($"Parameter '{property.Name}' requires a non-null compile-time constant default.", declaration.Initializer);
+            throw ParameterError($"Parameter '{property.Name}' requires a non-null compile-time constant default.", declaration.Initializer);
         }
 
         double? minimum = null;
@@ -250,11 +261,15 @@ internal static class CompilationService
         int? order = null;
         foreach (var attribute in property.GetAttributes())
         {
-            if (attribute.AttributeClass!.ToDisplayString() == typeof(RangeAttribute).FullName && attribute.ConstructorArguments.Length == 2)
+            if (attribute.AttributeClass!.ToDisplayString() == typeof(RangeAttribute).FullName)
             {
-                if (property.Type.SpecialType is not (SpecialType.System_Int32 or SpecialType.System_Single or SpecialType.System_Double))
+                if (kind is not (ParameterKind.Integer or ParameterKind.Single or ParameterKind.Double))
                 {
-                    throw ContractError($"Range on '{property.Name}' requires a numeric parameter.", declaration);
+                    throw ParameterError($"Range on '{property.Name}' requires a numeric parameter.", declaration);
+                }
+                if (attribute.ConstructorArguments.Length != 2)
+                {
+                    throw ParameterError($"Range on '{property.Name}' is invalid.", declaration);
                 }
                 minimum = Convert.ToDouble(attribute.ConstructorArguments[0].Value);
                 maximum = Convert.ToDouble(attribute.ConstructorArguments[1].Value);
@@ -271,47 +286,61 @@ internal static class CompilationService
                 }
             }
         }
-        var value = constant.Value;
-        var numeric = property.Type.SpecialType is SpecialType.System_Int32 or SpecialType.System_Single or SpecialType.System_Double;
         if (minimum is not null && maximum is not null &&
             (!double.IsFinite(minimum.Value) || !double.IsFinite(maximum.Value) || minimum > maximum))
         {
-            throw ContractError($"Range on '{property.Name}' is invalid.", declaration);
+            throw ParameterError($"Range on '{property.Name}' is invalid.", declaration);
         }
-        if (numeric && (!double.IsFinite(Convert.ToDouble(value)) ||
-            minimum is not null && Convert.ToDouble(value) < minimum ||
-            maximum is not null && Convert.ToDouble(value) > maximum))
+        if (kind is ParameterKind.Integer or ParameterKind.Single or ParameterKind.Double)
         {
-            throw ContractError($"Default for '{property.Name}' violates its numeric range.", declaration.Initializer);
+            var numericDefault = Convert.ToDouble(constant.Value);
+            if (!double.IsFinite(numericDefault) || minimum is not null && numericDefault < minimum ||
+                maximum is not null && numericDefault > maximum)
+            {
+                throw ParameterError($"Default for '{property.Name}' violates its numeric range.", declaration.Initializer);
+            }
         }
-        var enumValues = projectEnum
-            ? ((INamedTypeSymbol)property.Type).GetMembers().OfType<IFieldSymbol>().Where(field => field.HasConstantValue).Select(field => field.Name).ToArray()
-            : null;
-        return new ParameterDefinition(property.Name, property.Type, value, minimum, maximum, title, description, order, enumValues);
+
+        IReadOnlyList<string>? enumValues = null;
+        object defaultValue = constant.Value;
+        if (kind == ParameterKind.Enum)
+        {
+            var members = ((INamedTypeSymbol)property.Type).GetMembers()
+                .OfType<IFieldSymbol>()
+                .Where(field => field.HasConstantValue)
+                .ToArray();
+            enumValues = members.Select(field => field.Name).ToArray();
+            var defaultMember = members.FirstOrDefault(field => Equals(field.ConstantValue, constant.Value));
+            if (defaultMember is null)
+            {
+                throw ParameterError($"Default for '{property.Name}' must name a declared enum member.", declaration.Initializer);
+            }
+            defaultValue = defaultMember.Name;
+        }
+        return new ParameterDefinition(
+            property.Name,
+            kind.Value,
+            defaultValue,
+            minimum,
+            maximum,
+            title,
+            description,
+            order,
+            enumValues);
     }
 
-    private static object? JsonValue(ParameterDefinition parameter)
-    {
-        if (parameter.EnumValues is null)
-        {
-            return parameter.Value;
-        }
-        return ((INamedTypeSymbol)parameter.Type).GetMembers().OfType<IFieldSymbol>()
-            .Single(field => Equals(field.ConstantValue, parameter.Value)).Name;
-    }
-
-    private static object JsonSchemaFor(ParameterDefinition parameter)
+    private static IReadOnlyDictionary<string, object?> JsonSchemaFor(ParameterDefinition parameter)
     {
         var schema = new Dictionary<string, object?>
         {
-            ["type"] = parameter.EnumValues is null ? parameter.Type.SpecialType switch
+            ["type"] = parameter.Kind switch
             {
-                SpecialType.System_Boolean => "boolean",
-                SpecialType.System_Int32 => "integer",
-                SpecialType.System_Single or SpecialType.System_Double => "number",
+                ParameterKind.Boolean => "boolean",
+                ParameterKind.Integer => "integer",
+                ParameterKind.Single or ParameterKind.Double => "number",
                 _ => "string",
-            } : "string",
-            ["default"] = JsonValue(parameter),
+            },
+            ["default"] = parameter.DefaultValue,
         };
         if (parameter.Minimum is not null) schema["minimum"] = parameter.Minimum;
         if (parameter.Maximum is not null) schema["maximum"] = parameter.Maximum;
@@ -321,28 +350,92 @@ internal static class CompilationService
         return schema;
     }
 
+    private static object ReadJsonValue(JsonElement value, ParameterDefinition definition)
+    {
+        if (definition.Kind == ParameterKind.Enum)
+        {
+            var name = value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+            if (name is null || !definition.EnumValues!.Contains(name, StringComparer.Ordinal))
+            {
+                throw ParameterError($"Invalid enum value for PicoGK parameter '{definition.Name}'.");
+            }
+            return name;
+        }
+        return definition.Kind switch
+        {
+            ParameterKind.Boolean when value.ValueKind is JsonValueKind.True or JsonValueKind.False => value.GetBoolean(),
+            ParameterKind.Integer when value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var integer) => integer,
+            ParameterKind.Single when value.ValueKind == JsonValueKind.Number && value.TryGetSingle(out var single) && float.IsFinite(single) => single,
+            ParameterKind.Double when value.ValueKind == JsonValueKind.Number && value.TryGetDouble(out var number) && double.IsFinite(number) => number,
+            ParameterKind.String when value.ValueKind == JsonValueKind.String => value.GetString()!,
+            _ => throw ParameterError($"Invalid value for PicoGK parameter '{definition.Name}'."),
+        };
+    }
+
     internal static ImmutableArray<MetadataReference> CreateReferences(string? trusted)
     {
-        if (trusted is null) throw new InvalidOperationException("CoreCLR did not expose trusted platform assemblies.");
+        if (trusted is null)
+        {
+            throw new InvalidOperationException("CoreCLR did not expose trusted platform assemblies.");
+        }
         return trusted.Split(Path.PathSeparator)
             .Append(typeof(global::PicoGK.Library).Assembly.Location)
-            .Append(typeof(TauModel).Assembly.Location)
             .Distinct(StringComparer.Ordinal)
             .Select(path => (MetadataReference)MetadataReference.CreateFromFile(path))
             .ToImmutableArray();
     }
 
+    private static void AppendDigest(IncrementalHash digest, byte[] value)
+    {
+        Span<byte> length = stackalloc byte[sizeof(int)];
+        BinaryPrimitives.WriteInt32LittleEndian(length, value.Length);
+        digest.AppendData(length);
+        digest.AppendData(value);
+    }
+
+    private static SyntaxTree ParseSource(string path, byte[] content)
+    {
+        var tree = CSharpSyntaxTree.ParseText(
+            Encoding.UTF8.GetString(content),
+            new CSharpParseOptions(LanguageVersion.Latest),
+            path,
+            Encoding.UTF8);
+        var maximumDepth = tree.GetRoot().DescendantNodes(descendIntoTrivia: true)
+            .Select(node => node.Ancestors().Count())
+            .DefaultIfEmpty(0)
+            .Max();
+        if (maximumDepth > MaximumSyntaxDepth)
+        {
+            throw CompilationError($"C# syntax exceeds the maximum depth of {MaximumSyntaxDepth}.", tree.GetRoot());
+        }
+        return tree;
+    }
+
+    private static SyntaxTree ParseImplicitUsings() => CSharpSyntaxTree.ParseText(
+        """
+        global using global::System;
+        global using global::System.Collections.Generic;
+        global using global::System.IO;
+        global using global::System.Linq;
+        global using global::System.Net.Http;
+        global using global::System.Threading;
+        global using global::System.Threading.Tasks;
+        """,
+        new CSharpParseOptions(LanguageVersion.Latest),
+        "<TauImplicitUsings>.g.cs",
+        Encoding.UTF8);
+
     private static void ThrowDiagnostics(IEnumerable<Diagnostic> diagnostics)
     {
-        var issues = diagnostics.Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
-            .Take(MaximumDiagnostics + 1)
+        var issues = diagnostics
+            .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
+            .Take(MaximumDiagnostics)
             .Select(ToIssue)
             .ToArray();
-        if (issues.Length > MaximumDiagnostics)
+        if (issues.Length > 0)
         {
-            throw ContractError($"C# diagnostics exceed the maximum count of {MaximumDiagnostics}.");
+            throw new WorkerException(issues);
         }
-        if (issues.Length > 0) throw new WorkerException(issues);
     }
 
     private static Issue ToIssue(Diagnostic diagnostic)
@@ -356,7 +449,7 @@ internal static class CompilationService
         return new Issue(diagnostic.GetMessage(), diagnostic.Id, "syntax", "error", location);
     }
 
-    private static WorkerException ContractError(string message, SyntaxNode? node = null)
+    private static WorkerException CompilationError(string message, SyntaxNode? node = null)
     {
         Location? location = null;
         if (node is not null)
@@ -364,6 +457,17 @@ internal static class CompilationService
             var span = node.GetLocation().GetLineSpan();
             location = new Location(span.Path, span.StartLinePosition.Line + 1, span.StartLinePosition.Character + 1);
         }
-        return new WorkerException(new Issue(message, "CS_TAU_CONTRACT", "validation", "error", location));
+        return new WorkerException(new Issue(message, "CS_TAU_COMPILATION", "validation", "error", location));
+    }
+
+    private static WorkerException ParameterError(string message, SyntaxNode? node = null)
+    {
+        Location? location = null;
+        if (node is not null)
+        {
+            var span = node.GetLocation().GetLineSpan();
+            location = new Location(span.Path, span.StartLinePosition.Line + 1, span.StartLinePosition.Character + 1);
+        }
+        return new WorkerException(new Issue(message, "CS_TAU_PARAMETERS", "validation", "error", location));
     }
 }

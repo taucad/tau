@@ -1,34 +1,59 @@
-using System.Reflection;
 using System.Diagnostics;
-using System.Diagnostics.CodeAnalysis;
+using System.Reflection;
 using System.Runtime.CompilerServices;
-using System.Runtime.ExceptionServices;
 using System.Runtime.Loader;
 using System.Text.Json;
 using PicoGK;
-using Tau.PicoGK;
 
 namespace Tau.PicoGK.Worker;
 
-internal sealed record ExtractedComponent(string Name, string Color, float[] Positions, float[] Normals, uint[] Indices);
+internal sealed record ExtractedComponent(
+    string Id,
+    string Kind,
+    string Name,
+    float[] Color,
+    float Metallic,
+    float Roughness,
+    float[] Positions,
+    float[] Normals,
+    uint[] Indices);
+
 internal sealed record ModelTimings(
-    double ModelInvoke,
+    double EntryPointInvoke,
+    double LibraryInitialize,
     double MeshConstruction,
     double MeshExtraction,
     double NormalGeneration,
     double Unload);
+
 internal sealed record ModelExecutionResult(
     IReadOnlyList<ExtractedComponent> Components,
+    IReadOnlyList<SceneCheckpoint> Checkpoints,
+    long PicoGkNativeBytes,
     bool RecycleAfterResponse,
-    ModelTimings Timings);
+    ModelTimings Timings,
+    IReadOnlyList<ComputeSnapshotPublication>? ComputePublications = null);
 
 internal static class ModelRunner
 {
     internal static ModelExecutionResult Execute(
         CompiledModel compiled,
-        IReadOnlyDictionary<string, object?> values)
+        string artifactRoot,
+        JsonElement? parameters = null,
+        SceneCaptureOptions? capture = null,
+        Action<SceneProgress>? onProgress = null,
+        ComputeMaterializationCache? compute = null)
     {
-        var (components, context, modelInvoke, meshConstruction, meshExtraction, normalGeneration) = LoadBuildAndExtract(compiled, values);
+        var values = CompilationService.BindParameters(
+            compiled,
+            parameters ?? JsonSerializer.SerializeToElement(new Dictionary<string, object?>()));
+        var (execution, context, entryPointInvoke) = LoadRunAndExtract(
+            compiled,
+            artifactRoot,
+            values,
+            capture,
+            onProgress,
+            compute);
         var unload = Stopwatch.StartNew();
         for (var attempt = 0; attempt < 8 && context.IsAlive; attempt++)
         {
@@ -37,118 +62,100 @@ internal static class ModelRunner
             GC.Collect();
         }
         unload.Stop();
-        return new ModelExecutionResult(
-            components,
-            context.IsAlive,
-            new ModelTimings(
-                modelInvoke,
-                meshConstruction,
-                meshExtraction,
-                normalGeneration,
-                unload.Elapsed.TotalMilliseconds));
+        return execution with
+        {
+            RecycleAfterResponse = context.IsAlive,
+            Timings = execution.Timings with
+            {
+                EntryPointInvoke = entryPointInvoke,
+                Unload = unload.Elapsed.TotalMilliseconds,
+            },
+        };
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static (IReadOnlyList<ExtractedComponent>, WeakReference, double, double, double, double) LoadBuildAndExtract(
+    private static (ModelExecutionResult, WeakReference, double) LoadRunAndExtract(
         CompiledModel compiled,
-        IReadOnlyDictionary<string, object?> values)
+        string artifactRoot,
+        IReadOnlyDictionary<string, object?> values,
+        SceneCaptureOptions? capture,
+        Action<SceneProgress>? onProgress,
+        ComputeMaterializationCache? compute)
     {
-        var context = new AssemblyLoadContext($"TauModel_{Guid.NewGuid():N}", isCollectible: true);
-        IReadOnlyList<ExtractedComponent> components;
-        var modelInvoke = 0d;
-        var meshConstruction = 0d;
-        var meshExtraction = 0d;
-        var normalGeneration = 0d;
+        var context = new AssemblyLoadContext($"PicoGkProgram_{Guid.NewGuid():N}", isCollectible: true);
+        ModelExecutionResult execution;
+        var invoke = Stopwatch.StartNew();
         try
         {
             using var assemblyStream = new MemoryStream(compiled.Assembly, writable: false);
             using var pdbStream = new MemoryStream(compiled.Pdb, writable: false);
             var assembly = context.LoadFromStream(assemblyStream, pdbStream);
-            var parameterType = assembly.GetType("Params", throwOnError: true)!;
-            var parameterObject = Activator.CreateInstance(parameterType)!;
-            foreach (var (name, value) in values)
+            var entryPoint = assembly.EntryPoint!;
+            using var host = new HostedLibraryHost(artifactRoot, capture, onProgress, compute);
+            using (Library.UseHost(host))
             {
-                var property = parameterType.GetProperty(name, BindingFlags.Public | BindingFlags.Instance)
-                    ?? throw RuntimeError($"Compiled parameter '{name}' was not found.");
-                property.SetValue(parameterObject, ConvertValue(value, property.PropertyType));
+                ApplyParameters(assembly, values);
+                InvokeEntryPoint(entryPoint);
             }
-            var modelType = assembly.GetType("Model", throwOnError: true)!;
-            var build = modelType.GetMethod("Build", BindingFlags.Public | BindingFlags.Static, [parameterType])!;
-            TauModel model = null!;
-            var invoke = Stopwatch.StartNew();
-            try
-            {
-                model = (TauModel?)build.Invoke(null, [parameterObject])
-                    ?? throw RuntimeError("Model.Build returned null.");
-            }
-            catch (TargetInvocationException error) when (error.InnerException is not null) { Rethrow(error.InnerException); }
-            finally
-            {
-                invoke.Stop();
-                modelInvoke = invoke.Elapsed.TotalMilliseconds;
-            }
-            using (model)
-            {
-                var extracted = new List<ExtractedComponent>(model.Components.Count);
-                foreach (var component in model.Components)
-                {
-                    var result = Extract(component);
-                    extracted.Add(result.Component);
-                    meshConstruction += result.MeshConstruction;
-                    meshExtraction += result.MeshExtraction;
-                    normalGeneration += result.NormalGeneration;
-                }
-                components = extracted;
-            }
+            execution = host.TakeResult();
         }
         finally
         {
+            invoke.Stop();
             context.Unload();
         }
-        return (components, new WeakReference(context), modelInvoke, meshConstruction, meshExtraction, normalGeneration);
+        return (execution, new WeakReference(context), invoke.Elapsed.TotalMilliseconds);
     }
 
-    private static (ExtractedComponent Component, double MeshConstruction, double MeshExtraction, double NormalGeneration) Extract(TauComponent component)
+    private static void ApplyParameters(Assembly assembly, IReadOnlyDictionary<string, object?> values)
     {
-        if (component.Kind == TauGeometryKind.Voxels)
+        if (values.Count == 0) return;
+        var parameterType = assembly.GetType("Params", throwOnError: true)!;
+        foreach (var (name, value) in values)
         {
-            var construction = Stopwatch.StartNew();
-            using var mesh = new Mesh((Voxels)component.Geometry);
-            construction.Stop();
-            var extracted = ExtractMesh(component.Name, component.Color, mesh);
-            return (extracted.Component, construction.Elapsed.TotalMilliseconds, extracted.MeshExtraction, extracted.NormalGeneration);
+            var property = parameterType.GetProperty(name, BindingFlags.Public | BindingFlags.Static)!;
+            var converted = property.PropertyType.IsEnum
+                ? Enum.Parse(property.PropertyType, (string)value!, ignoreCase: false)
+                : Convert.ChangeType(value, property.PropertyType, System.Globalization.CultureInfo.InvariantCulture);
+            property.SetValue(null, converted);
         }
-        var direct = ExtractMesh(component.Name, component.Color, (Mesh)component.Geometry);
-        return (direct.Component, 0, direct.MeshExtraction, direct.NormalGeneration);
     }
 
-    private static (ExtractedComponent Component, double MeshExtraction, double NormalGeneration) ExtractMesh(string name, string color, Mesh mesh)
+    internal static void InvokeEntryPoint(MethodInfo entryPoint)
     {
-        var extraction = Stopwatch.StartNew();
-        var positions = new float[checked(mesh.nVertexCount() * 3)];
-        for (var index = 0; index < mesh.nVertexCount(); index++)
+        var parameters = entryPoint.GetParameters();
+        if (parameters.Length > 1 ||
+            parameters.Length == 1 && parameters[0].ParameterType != typeof(string[]))
         {
-            var vertex = mesh.vecVertexAt(index);
-            positions[index * 3] = vertex.X;
-            positions[index * 3 + 1] = vertex.Y;
-            positions[index * 3 + 2] = vertex.Z;
+            throw RuntimeError("C# entry point must accept no arguments or one string[] argument.");
         }
-        var indices = new uint[checked(mesh.nTriangleCount() * 3)];
-        for (var index = 0; index < mesh.nTriangleCount(); index++)
+
+        try
         {
-            var triangle = mesh.oTriangleAt(index);
-            indices[index * 3] = checked((uint)triangle.A);
-            indices[index * 3 + 1] = checked((uint)triangle.B);
-            indices[index * 3 + 2] = checked((uint)triangle.C);
+            var arguments = parameters.Length == 0 ? null : new object?[] { Array.Empty<string>() };
+            var result = entryPoint.Invoke(null, arguments);
+            var exitCode = result is int code ? code : 0;
+            if (result is Task<int> exitTask)
+            {
+                exitCode = exitTask.GetAwaiter().GetResult();
+            }
+            else if (result is Task task)
+            {
+                task.GetAwaiter().GetResult();
+            }
+            if (exitCode != 0)
+            {
+                throw new WorkerException(new Issue(
+                    $"C# program exited with code {exitCode}.",
+                    "CS_TAU_EXIT_CODE",
+                    "runtime",
+                    "error"));
+            }
         }
-        extraction.Stop();
-        var normals = Stopwatch.StartNew();
-        var values = VertexNormals(positions, indices);
-        normals.Stop();
-        return (
-            new ExtractedComponent(name, color, positions, values, indices),
-            extraction.Elapsed.TotalMilliseconds,
-            normals.Elapsed.TotalMilliseconds);
+        catch (TargetInvocationException error)
+        {
+            throw error.InnerException!;
+        }
     }
 
     internal static float[] VertexNormals(float[] positions, uint[] indices)
@@ -172,7 +179,10 @@ internal static class ModelRunner
         for (var index = 0; index < normals.Length; index += 3)
         {
             var normal = System.Numerics.Vector3.Normalize(new(normals[index], normals[index + 1], normals[index + 2]));
-            if (!float.IsFinite(normal.X)) normal = System.Numerics.Vector3.UnitZ;
+            if (!float.IsFinite(normal.X))
+            {
+                normal = System.Numerics.Vector3.UnitZ;
+            }
             normals[index] = normal.X;
             normals[index + 1] = normal.Y;
             normals[index + 2] = normal.Z;
@@ -180,69 +190,7 @@ internal static class ModelRunner
         return normals;
     }
 
-    internal static IReadOnlyDictionary<string, object?> BindParameters(
-        IReadOnlyList<ParameterDefinition> definitions,
-        JsonElement supplied)
-    {
-        if (supplied.ValueKind != JsonValueKind.Object) throw RuntimeError("PicoGK parameters must be an object.");
-        var definitionsByName = definitions.ToDictionary(definition => definition.Name, StringComparer.Ordinal);
-        var values = definitions.ToDictionary(definition => definition.Name, DefaultValue, StringComparer.Ordinal);
-        foreach (var property in supplied.EnumerateObject())
-        {
-            if (!definitionsByName.TryGetValue(property.Name, out var definition))
-            {
-                throw RuntimeError($"Unknown PicoGK parameter '{property.Name}'.");
-            }
-            var value = ReadJsonValue(property.Value, definition);
-            if (definition.Minimum is not null && Convert.ToDouble(value) < definition.Minimum ||
-                definition.Maximum is not null && Convert.ToDouble(value) > definition.Maximum)
-            {
-                throw RuntimeError($"PicoGK parameter '{property.Name}' is outside its Range.");
-            }
-            values[property.Name] = value;
-        }
-        var voxelSize = Convert.ToSingle(values["VoxelSizeMm"], System.Globalization.CultureInfo.InvariantCulture);
-        if (!float.IsFinite(voxelSize) || voxelSize <= 0)
-        {
-            throw RuntimeError("PicoGK parameter 'VoxelSizeMm' must be positive and finite.");
-        }
-        return values;
-    }
-
-    private static object? DefaultValue(ParameterDefinition definition)
-    {
-        if (definition.EnumValues is null) return definition.Value;
-        return ((Microsoft.CodeAnalysis.INamedTypeSymbol)definition.Type).GetMembers()
-            .OfType<Microsoft.CodeAnalysis.IFieldSymbol>()
-            .Single(field => Equals(field.ConstantValue, definition.Value)).Name;
-    }
-
-    private static object ReadJsonValue(JsonElement value, ParameterDefinition definition)
-    {
-        if (definition.EnumValues is not null)
-        {
-            var name = value.ValueKind == JsonValueKind.String ? value.GetString() : null;
-            if (name is null || !definition.EnumValues.Contains(name, StringComparer.Ordinal)) throw RuntimeError($"Invalid enum value for '{definition.Name}'.");
-            return name;
-        }
-        return definition.Type.SpecialType switch
-        {
-            Microsoft.CodeAnalysis.SpecialType.System_Boolean when value.ValueKind is JsonValueKind.True or JsonValueKind.False => value.GetBoolean(),
-            Microsoft.CodeAnalysis.SpecialType.System_Int32 when value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var integer) => integer,
-            Microsoft.CodeAnalysis.SpecialType.System_Single when value.ValueKind == JsonValueKind.Number && value.TryGetSingle(out var single) && float.IsFinite(single) => single,
-            Microsoft.CodeAnalysis.SpecialType.System_Double when value.ValueKind == JsonValueKind.Number && value.TryGetDouble(out var number) && double.IsFinite(number) => number,
-            Microsoft.CodeAnalysis.SpecialType.System_String when value.ValueKind == JsonValueKind.String => value.GetString()!,
-            _ => throw RuntimeError($"Invalid value for PicoGK parameter '{definition.Name}'."),
-        };
-    }
-
-    private static object? ConvertValue(object? value, Type target) => target.IsEnum
-        ? Enum.Parse(target, (string)value!, ignoreCase: false)
-        : Convert.ChangeType(value, target, System.Globalization.CultureInfo.InvariantCulture);
-
     private static WorkerException RuntimeError(string message) =>
         new(new Issue(message, "CS_TAU_RUNTIME", "runtime", "error"));
 
-    [DoesNotReturn]
-    private static void Rethrow(Exception error) => ExceptionDispatchInfo.Capture(error).Throw();
 }

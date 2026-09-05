@@ -20,8 +20,16 @@ export const picogkOptionsSchema = z.object({
     .default(512 * 1024 * 1024),
 });
 
-/** Render options accepted by PicoGK models. @public */
-export const picogkRenderSchema = z.object({});
+/** Progressive hosted-viewer capture options accepted by PicoGK models. @public */
+export const picogkRenderSchema = z.object({
+  capture: z
+    .object({
+      mode: z.enum(['explicit', 'update', 'operation']).default('update'),
+      minimumIntervalMilliseconds: z.number().int().min(0).max(10_000).default(16),
+      maximumPendingCommands: z.number().int().min(1).max(4096).default(256),
+    })
+    .default({ mode: 'update', minimumIntervalMilliseconds: 16, maximumPendingCommands: 256 }),
+});
 
 /** Direct export formats implemented by the PicoGK kernel. @public */
 export const picogkExportSchemas = {

@@ -74,7 +74,7 @@ const collectCoverage = (
 };
 
 const assertCompleteCoverage = (coverage: Coverage): void => {
-  const expectedModules = ['Tau.PicoGK.Authoring.dll', 'Tau.PicoGK.Worker.dll'];
+  const expectedModules = ['Tau.PicoGK.Worker.dll'];
   const uncovered: string[] = [];
   let lineCount = 0;
   let branchCount = 0;
@@ -112,6 +112,18 @@ const main = async (): Promise<void> => {
   environment['DOTNET_ROOT'] = dotnetRoot;
   environment['DYLD_LIBRARY_PATH'] = resolve(picoGkRoot, 'native/osx-arm64');
   environment['NUGET_PACKAGES'] = resolve(cacheRoot, 'nuget-packages');
+  environment['TAU_PICOGK_COMPATIBILITY_FIXTURE'] = resolve(
+    workspaceRoot,
+    'packages/plugins/picogk/dotnet/fixtures/helix-heat-exchanger',
+  );
+  environment['TAU_PICOGK_OFFICIAL_EXAMPLES_FIXTURE'] = resolve(
+    workspaceRoot,
+    'packages/plugins/picogk/dotnet/fixtures/official-examples',
+  );
+  environment['TAU_PICOGK_ROVER_FIXTURE'] = resolve(
+    workspaceRoot,
+    'packages/plugins/picogk/dotnet/fixtures/rover-wheel',
+  );
   console.log('→ Restoring locked PicoGK test dependencies');
   execFileSync(dotnet, ['restore', project, '--runtime', 'osx-arm64', '--locked-mode', projectProperty], {
     env: environment,

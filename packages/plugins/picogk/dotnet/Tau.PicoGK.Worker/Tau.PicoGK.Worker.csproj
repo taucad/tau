@@ -9,7 +9,7 @@
     <PublishReadyToRun>false</PublishReadyToRun>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="../Tau.PicoGK.Authoring/Tau.PicoGK.Authoring.csproj" AdditionalProperties="PicoGKProject=$(PicoGKProject)" />
+    <ProjectReference Include="$(PicoGKProject)" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.9.0" />
   </ItemGroup>
 </Project>

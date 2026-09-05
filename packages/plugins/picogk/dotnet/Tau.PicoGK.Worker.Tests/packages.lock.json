@@ -146,17 +146,11 @@
           "SkiaSharp": "[3.119.0, )"
         }
       },
-      "tau.picogk.authoring": {
-        "type": "Project",
-        "dependencies": {
-          "PicoGK": "[2.3.0, )"
-        }
-      },
       "tau.picogk.worker": {
         "type": "Project",
         "dependencies": {
           "Microsoft.CodeAnalysis.CSharp": "[5.9.0, )",
-          "Tau.PicoGK.Authoring": "[1.0.0, )"
+          "PicoGK": "[2.3.0, )"
         }
       }
     },

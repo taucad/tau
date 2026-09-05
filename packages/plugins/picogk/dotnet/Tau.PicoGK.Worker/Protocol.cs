@@ -15,6 +15,17 @@ internal sealed record Issue(
 
 internal sealed record Location(string FileName, int StartLineNumber, int StartColumn);
 
+internal sealed record ComputeArtifact(
+    string CacheKey,
+    string Kind,
+    string ArtifactPath,
+    long ByteLength,
+    string Sha256,
+    int PositionCount,
+    int IndexCount);
+
+internal sealed record ComputeRequest(string ModelDigest, IReadOnlyList<ComputeArtifact> Prepared);
+
 internal sealed class WorkerException : Exception
 {
     internal WorkerException(Issue issue) : this([issue]) { }

@@ -1,10 +1,8 @@
 import { createHash } from 'node:crypto';
 
 import {
-  formatComponentId,
-  formatNamedComponentId,
   formatPrimitiveSelector,
-  srgbHexToLinearTuple,
+  srgbTupleToLinear,
   transformNormalArray,
   transformVertexArray,
   writeGlb,
@@ -15,6 +13,15 @@ import { tauCadTopologyExtension } from '@taucad/runtime/types';
 import type { PicogkBuild } from '#picogk.protocol.js';
 
 const scalarBytes = 4;
+type PicogkComponent = PicogkBuild['components'][number];
+type PicogkMeshArtifact = Pick<PicogkBuild, 'artifactPath' | 'byteLength' | 'sha256' | 'components'>;
+
+/** One stable PicoGK component encoded as an independently transferable GLB asset. */
+export type PicogkComponentGlb = {
+  readonly id: string;
+  readonly name: string;
+  readonly content: Uint8Array<ArrayBuffer>;
+};
 
 const viewFloat32 = (bytes: Uint8Array<ArrayBuffer>, offset: number, count: number): Float32Array<ArrayBuffer> => {
   if (offset % scalarBytes !== 0 || offset + count * scalarBytes > bytes.byteLength) {
@@ -30,18 +37,35 @@ const viewUint32 = (bytes: Uint8Array<ArrayBuffer>, offset: number, count: numbe
   return new Uint32Array(bytes.buffer, bytes.byteOffset + offset, count);
 };
 
-const displayColor = (value: string): [number, number, number, number] => {
-  const alpha = Number.parseInt(value.slice(7, 9), 16) / 255;
-  return srgbHexToLinearTuple(value.slice(0, 7), alpha);
+const assertValidShape = (component: PicogkComponent): void => {
+  const invalidShape =
+    component.positionCount % 3 !== 0 ||
+    (component.kind === 'triangles'
+      ? component.normalCount !== component.positionCount || component.indexCount % 3 !== 0
+      : component.indexCount % 2 !== 0 || component.positionCount < 6);
+  if (invalidShape) {
+    throw new Error(`PicoGK component "${component.name}" has an invalid ${component.kind} shape.`);
+  }
 };
 
-/**
- * Validate and adapt one worker mesh artifact into Tau's canonical GLB topology substrate.
- * @param bytes Confined artifact bytes read from the worker.
- * @param result Validated artifact descriptor returned by the worker.
- * @returns A canonical inline GLB with mesh-only Tau topology.
- */
-export const picogkArtifactToGlb = (bytes: Uint8Array<ArrayBuffer>, result: PicogkBuild): Uint8Array<ArrayBuffer> => {
+const recordRanges = (component: PicogkComponent, occupied: Array<readonly [number, number]>): void => {
+  const ranges: ReadonlyArray<readonly [number, number]> = [
+    [component.positionOffset, component.positionOffset + component.positionCount * scalarBytes],
+    [component.normalOffset, component.normalOffset + component.normalCount * scalarBytes],
+    [component.indexOffset, component.indexOffset + component.indexCount * scalarBytes],
+  ];
+  for (const range of ranges) {
+    if (range[0] === range[1]) {
+      continue;
+    }
+    if (occupied.some(([start, end]) => range[0] < end && start < range[1])) {
+      throw new Error(`PicoGK component "${component.name}" has overlapping artifact ranges.`);
+    }
+    occupied.push(range);
+  }
+};
+
+const assertArtifactIntegrity = (bytes: Uint8Array<ArrayBuffer>, result: PicogkMeshArtifact): void => {
   if (bytes.byteLength !== result.byteLength) {
     throw new Error('PicoGK worker mesh byte length does not match its descriptor.');
   }
@@ -49,68 +73,56 @@ export const picogkArtifactToGlb = (bytes: Uint8Array<ArrayBuffer>, result: Pico
   if (digest !== result.sha256.toLowerCase()) {
     throw new Error('PicoGK worker mesh failed its SHA-256 integrity check.');
   }
+};
 
+const componentsToGlb = (
+  bytes: Uint8Array<ArrayBuffer>,
+  components: readonly PicogkComponent[],
+): Uint8Array<ArrayBuffer> => {
   const nodes: GlbNode[] = [];
   const topologyComponents: TauCadTopologyComponent[] = [];
   const occupiedRanges: Array<readonly [number, number]> = [];
-  for (const [nodeIndex, component] of result.components.entries()) {
-    if (
-      component.positionCount === 0 ||
-      component.positionCount % 3 !== 0 ||
-      component.normalCount !== component.positionCount ||
-      component.indexCount === 0 ||
-      component.indexCount % 3 !== 0
-    ) {
-      throw new Error(`PicoGK component "${component.name}" has an invalid mesh shape.`);
-    }
-    const ranges = [
-      [component.positionOffset, component.positionOffset + component.positionCount * scalarBytes],
-      [component.normalOffset, component.normalOffset + component.normalCount * scalarBytes],
-      [component.indexOffset, component.indexOffset + component.indexCount * scalarBytes],
-    ] as const;
-    for (const range of ranges) {
-      if (occupiedRanges.some(([start, end]) => range[0] < end && start < range[1])) {
-        throw new Error(`PicoGK component "${component.name}" has overlapping artifact ranges.`);
-      }
-      occupiedRanges.push(range);
-    }
+  for (const [nodeIndex, component] of components.entries()) {
+    const isTriangle = component.kind === 'triangles';
+    assertValidShape(component);
+    recordRanges(component, occupiedRanges);
     const sourcePositions = viewFloat32(bytes, component.positionOffset, component.positionCount);
-    const sourceNormals = viewFloat32(bytes, component.normalOffset, component.normalCount);
+    const sourceNormals = isTriangle ? viewFloat32(bytes, component.normalOffset, component.normalCount) : undefined;
     const sourceIndices = viewUint32(bytes, component.indexOffset, component.indexCount);
     if (
       sourcePositions.some((value) => !Number.isFinite(value)) ||
-      sourceNormals.some((value) => !Number.isFinite(value)) ||
+      (sourceNormals?.some((value) => !Number.isFinite(value)) ?? false) ||
       sourceIndices.some((index) => index >= sourcePositions.length / 3)
     ) {
       throw new Error(`PicoGK component "${component.name}" contains invalid mesh values.`);
     }
-    const color = displayColor(component.color);
+    const displayColor = component.color;
+    const materialColor = srgbTupleToLinear(displayColor);
     nodes.push({
       name: component.name,
       primitives: [
         {
-          mode: 4,
+          mode: isTriangle ? 4 : 1,
           positions: transformVertexArray(sourcePositions),
-          normals: transformNormalArray(sourceNormals),
+          ...(sourceNormals ? { normals: transformNormalArray(sourceNormals) } : {}),
           indices: new Uint32Array(sourceIndices),
           material: {
             name: component.name,
-            baseColorFactor: color,
-            metallicFactor: 0,
-            roughnessFactor: 0.7,
+            baseColorFactor: materialColor,
+            metallicFactor: component.metallic,
+            roughnessFactor: component.roughness,
             doubleSided: false,
-            alphaMode: color[3] < 1 ? 'BLEND' : 'OPAQUE',
+            alphaMode: materialColor[3] < 1 ? 'BLEND' : 'OPAQUE',
           },
         },
       ],
     });
-    const id = formatNamedComponentId(component.name, nodeIndex) ?? formatComponentId(nodeIndex);
     topologyComponents.push({
-      id,
+      id: component.id,
       name: component.name,
-      kind: 'mesh',
-      selector: formatPrimitiveSelector(nodeIndex, 'surface'),
-      color,
+      kind: isTriangle ? 'mesh' : 'polyline',
+      selector: formatPrimitiveSelector(nodeIndex, isTriangle ? 'surface' : 'edges'),
+      color: displayColor,
       nodeIndex,
       meshIndex: nodeIndex,
       primitiveIndices: [0],
@@ -138,4 +150,36 @@ export const picogkArtifactToGlb = (bytes: Uint8Array<ArrayBuffer>, result: Pico
       };
     },
   });
+};
+
+/**
+ * Validate and adapt one worker scene artifact into Tau's canonical GLB topology substrate.
+ * @param bytes Confined artifact bytes read from the worker.
+ * @param result Validated artifact descriptor returned by the worker.
+ * @returns A canonical inline GLB with mesh-only Tau topology.
+ */
+export const picogkArtifactToGlb = (
+  bytes: Uint8Array<ArrayBuffer>,
+  result: PicogkMeshArtifact,
+): Uint8Array<ArrayBuffer> => {
+  assertArtifactIntegrity(bytes, result);
+  return componentsToGlb(bytes, result.components);
+};
+
+/**
+ * Split one dirty-component artifact batch into independently transferable immutable GLBs.
+ * @param bytes Confined artifact bytes read from the worker.
+ * @param result Validated artifact descriptor containing only dirty components.
+ * @returns One GLB asset for each stable component id in worker order.
+ */
+export const picogkArtifactToComponentGlbs = (
+  bytes: Uint8Array<ArrayBuffer>,
+  result: PicogkMeshArtifact,
+): readonly PicogkComponentGlb[] => {
+  assertArtifactIntegrity(bytes, result);
+  return result.components.map((component) => ({
+    id: component.id,
+    name: component.name,
+    content: componentsToGlb(bytes, [component]),
+  }));
 };

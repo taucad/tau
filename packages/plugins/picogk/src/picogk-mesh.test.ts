@@ -5,7 +5,7 @@ import { validateTauCadTopology } from '@taucad/geometry-core';
 import type { TauCadTopologyPayload } from '@taucad/geometry-core';
 import { describe, expect, it } from 'vitest';
 
-import { picogkArtifactToGlb } from '#picogk-mesh.js';
+import { picogkArtifactToComponentGlbs, picogkArtifactToGlb } from '#picogk-mesh.js';
 import type { PicogkBuild } from '#picogk.protocol.js';
 
 const artifact = (
@@ -13,7 +13,8 @@ const artifact = (
     readonly positions?: readonly number[];
     readonly normals?: readonly number[];
     readonly indices?: readonly number[];
-    readonly color?: string;
+    readonly color?: [number, number, number, number];
+    readonly kind?: 'triangles' | 'lines';
   } = {},
 ) => {
   const positions = options.positions ?? [1000, 2000, 3000, 2000, 2000, 3000, 1000, 3000, 3000];
@@ -30,22 +31,28 @@ const artifact = (
   for (const [index, value] of indices.entries()) {
     view.setUint32((positions.length + normals.length + index) * 4, value, true);
   }
+  const componentBase = {
+    id: 'component:picogk-1',
+    name: 'Asymmetric',
+    color: options.color ?? [1, 0, 0, 128 / 255],
+    metallic: 0.25,
+    roughness: 0.75,
+    positionOffset: 0,
+    positionCount: positions.length,
+    normalOffset: positions.length * 4,
+    indexOffset: (positions.length + normals.length) * 4,
+    indexCount: indices.length,
+  };
+  const component: PicogkBuild['components'][number] =
+    options.kind === 'lines'
+      ? { ...componentBase, kind: 'lines', normalCount: 0 }
+      : { ...componentBase, kind: 'triangles', normalCount: normals.length };
   const result: PicogkBuild = {
     artifactPath: '/private/model.tau-mesh',
     byteLength: bytes.byteLength,
     sha256: createHash('sha256').update(bytes).digest('hex'),
-    components: [
-      {
-        name: 'Asymmetric',
-        color: options.color ?? '#ff000080',
-        positionOffset: 0,
-        positionCount: positions.length,
-        normalOffset: positions.length * 4,
-        normalCount: normals.length,
-        indexOffset: (positions.length + normals.length) * 4,
-        indexCount: indices.length,
-      },
-    ],
+    components: [component],
+    checkpoints: [],
     recycleAfterResponse: false,
     timings: {
       compileCacheHit: true,
@@ -54,7 +61,7 @@ const artifact = (
       analyze: 0,
       emit: 0,
       libraryInitialize: 0,
-      modelInvoke: 0,
+      entryPointInvoke: 0,
       meshConstruction: 0,
       meshExtraction: 0,
       normalGeneration: 0,
@@ -95,7 +102,7 @@ describe('PicoGK mesh artifact adapter', () => {
       new TextDecoder().decode(glb.subarray(start, start + topologyView.byteLength)),
     ) as unknown as TauCadTopologyPayload;
     expect(topology.components[0]).toMatchObject({
-      id: 'component:asymmetric',
+      id: 'component:picogk-1',
       name: 'Asymmetric',
       kind: 'mesh',
       color: [1, 0, 0, expect.closeTo(128 / 255)],
@@ -111,14 +118,39 @@ describe('PicoGK mesh artifact adapter', () => {
     ).toEqual([]);
   });
 
-  it('uses a generated component id and an opaque material for generated names', () => {
-    const { bytes, result } = artifact({ color: '#00ff00ff' });
+  it('keeps the worker component id stable when its display name changes', () => {
+    const { bytes, result } = artifact({ color: [0, 1, 0, 1] });
     const glb = picogkArtifactToGlb(bytes, {
       ...result,
       components: [{ ...result.components[0]!, name: 'Shape 1' }],
     });
-    expect(new TextDecoder().decode(glb)).toContain('component:node-0');
+    expect(new TextDecoder().decode(glb)).toContain('component:picogk-1');
     expect(new TextDecoder().decode(glb)).not.toContain('"alphaMode":"BLEND"');
+  });
+
+  it('encodes dirty components as independently transferable stable-id assets', () => {
+    const { bytes, result } = artifact();
+
+    const component = picogkArtifactToComponentGlbs(bytes, result);
+
+    expect(component).toEqual([
+      { id: 'component:picogk-1', name: 'Asymmetric', content: picogkArtifactToGlb(bytes, result) },
+    ]);
+  });
+
+  it('preserves captured polylines as GLB line primitives and edge topology', () => {
+    const { bytes, result } = artifact({
+      kind: 'lines',
+      positions: [0, 0, 0, 10, 0, 0],
+      normals: [],
+      indices: [0, 1],
+      color: [0, 0, 1, 1],
+    });
+    const glb = picogkArtifactToGlb(bytes, result);
+    const json = glbJson(glb);
+    expect(json.meshes[0]?.primitives[0]?.mode).toBe(1);
+    expect(new TextDecoder().decode(glb)).toContain('node/0/edges');
+    expect(new TextDecoder().decode(glb)).toContain('polyline');
   });
 
   it.each([
@@ -132,9 +164,9 @@ describe('PicoGK mesh artifact adapter', () => {
       ({ bytes, result }: ReturnType<typeof artifact>) => ({ bytes, result: { ...result, sha256: '0'.repeat(64) } }),
       /integrity/,
     ],
-    ['empty positions', () => artifact({ positions: [] }), /mesh shape/],
-    ['normal count', () => artifact({ normals: [0, 0, 1] }), /mesh shape/],
-    ['triangle count', () => artifact({ indices: [0, 1] }), /mesh shape/],
+    ['empty positions', () => artifact({ positions: [] }), /triangles shape/],
+    ['normal count', () => artifact({ normals: [0, 0, 1] }), /triangles shape/],
+    ['triangle count', () => artifact({ indices: [0, 1] }), /triangles shape/],
     [
       'unaligned range',
       ({ bytes, result }: ReturnType<typeof artifact>) => ({

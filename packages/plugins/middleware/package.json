@@ -59,6 +59,7 @@
     "@gltf-transform/core": "catalog:",
     "@gltf-transform/extensions": "catalog:",
     "@msgpack/msgpack": "catalog:",
+    "@taucad/cache-core": "workspace:*",
     "@taucad/geometry-core": "workspace:*",
     "deepmerge": "catalog:"
   },
@@ -69,6 +70,7 @@
   "devDependencies": {
     "@taucad/runtime": "workspace:*",
     "@taucad/runtime-testing": "workspace:*",
+    "manifold-3d": "catalog:",
     "zod": "catalog:"
   },
   "taucad": {

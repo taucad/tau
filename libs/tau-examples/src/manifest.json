@@ -1,119 +1,183 @@
 [
   {
+    "kind": "reference",
+    "geometry": "3d",
     "kernel": "build123d",
     "name": "v8-engine-brep",
     "mainFile": "main.py",
     "files": ["main.py"]
   },
   {
+    "kind": "model",
+    "geometry": "3d",
     "kernel": "jscad",
     "name": "cube",
     "mainFile": "main.ts",
     "files": ["main.ts", "tau.json"]
   },
   {
+    "kind": "test-fixture",
+    "geometry": "3d",
     "kernel": "jscad",
     "name": "cube-cylinder-section-fixture",
     "mainFile": "main.ts",
     "files": ["main.ts", "tau.json"]
   },
   {
+    "kind": "model",
+    "geometry": "3d",
     "kernel": "jscad",
     "name": "cylinder",
     "mainFile": "main.ts",
     "files": ["main.ts", "tau.json"]
   },
   {
+    "kind": "test-fixture",
+    "geometry": "3d",
     "kernel": "jscad",
     "name": "edge-occlusion-fixture",
     "mainFile": "main.ts",
     "files": ["main.ts", "tau.json"]
   },
   {
+    "kind": "model",
+    "geometry": "3d",
     "kernel": "jscad",
     "name": "gear",
     "mainFile": "main.ts",
     "files": ["main.ts", "tau.json"]
   },
   {
+    "kind": "test-fixture",
+    "geometry": "3d",
     "kernel": "jscad",
     "name": "non-manifold-section-fixture",
     "mainFile": "main.ts",
     "files": ["main.ts", "tau.json"]
   },
   {
+    "kind": "test-fixture",
+    "geometry": "3d",
     "kernel": "jscad",
     "name": "section-cap-fixture",
     "mainFile": "main.ts",
     "files": ["main.ts", "tau.json"]
   },
   {
+    "kind": "test-fixture",
+    "geometry": "3d",
     "kernel": "jscad",
     "name": "section-overlap-fixture",
     "mainFile": "main.ts",
     "files": ["main.ts", "tau.json"]
   },
   {
+    "kind": "test-fixture",
+    "geometry": "3d",
     "kernel": "jscad",
     "name": "section-overlap-heavy-planetary-fixture",
     "mainFile": "main.ts",
     "files": ["main.ts", "tau.json"]
   },
   {
+    "kind": "test-fixture",
+    "geometry": "3d",
     "kernel": "jscad",
     "name": "section-overlap-heavy-v8-fixture",
     "mainFile": "main.ts",
     "files": ["main.ts", "tau.json"]
   },
   {
+    "kind": "test-fixture",
+    "geometry": "3d",
     "kernel": "jscad",
     "name": "section-picking-fixture",
     "mainFile": "main.ts",
     "files": ["main.ts", "tau.json"]
   },
   {
+    "kind": "model",
+    "geometry": "3d",
     "kernel": "manifold",
     "name": "manifold-logo",
     "mainFile": "main.ts",
     "files": ["README.md", "generate-logo.ts", "main.ts", "manifold.svg"]
   },
   {
+    "kind": "reference",
+    "geometry": "3d",
     "kernel": "occt",
     "name": "v8-engine-brep",
     "mainFile": "main.cpp",
     "files": ["Makefile", "main.cpp", "v8-engine-brep-native"]
   },
   {
+    "kind": "model",
+    "geometry": "3d",
     "kernel": "opencascade",
     "name": "v8-engine-brep",
     "mainFile": "main.ts",
     "files": ["main.ts"]
   },
   {
+    "kind": "model",
+    "geometry": "3d",
     "kernel": "openscad",
     "name": "kitchen-sink",
     "mainFile": "main.scad",
     "files": ["main.scad", "tau.json"]
   },
   {
+    "kind": "model",
+    "geometry": "3d",
+    "kernel": "picogk",
+    "name": "boolean-shell",
+    "mainFile": "main.cs",
+    "files": ["main.cs"]
+  },
+  {
+    "kind": "model",
+    "geometry": "3d",
+    "kernel": "picogk",
+    "name": "multifile-asset",
+    "mainFile": "main.cs",
+    "files": ["ShapeFactory.cs", "main.cs", "radius-scale.txt"]
+  },
+  {
+    "kind": "model",
+    "geometry": "3d",
+    "kernel": "picogk",
+    "name": "parameterized-sphere",
+    "mainFile": "main.cs",
+    "files": ["main.cs"]
+  },
+  {
+    "kind": "model",
+    "geometry": "3d",
     "kernel": "replicad",
     "name": "bambu-plate",
     "mainFile": "main.ts",
     "files": ["main.ts"]
   },
   {
+    "kind": "model",
+    "geometry": "3d",
     "kernel": "replicad",
     "name": "birdhouse",
     "mainFile": "main.ts",
     "files": ["main.ts", "tau.json"]
   },
   {
+    "kind": "model",
+    "geometry": "3d",
     "kernel": "replicad",
     "name": "bottle",
     "mainFile": "main.ts",
     "files": ["main.ts", "tau.json"]
   },
   {
+    "kind": "model",
+    "geometry": "3d",
     "kernel": "replicad",
     "name": "bundler-feature-matrix",
     "mainFile": "main.ts",
@@ -131,84 +195,112 @@
     ]
   },
   {
+    "kind": "model",
+    "geometry": "3d",
     "kernel": "replicad",
     "name": "card-holder",
     "mainFile": "main.ts",
     "files": ["main.ts", "tau.json"]
   },
   {
+    "kind": "model",
+    "geometry": "3d",
     "kernel": "replicad",
     "name": "chair",
     "mainFile": "main.ts",
     "files": ["main.ts", "tau.json"]
   },
   {
+    "kind": "model",
+    "geometry": "3d",
     "kernel": "replicad",
     "name": "cycloidal-gear",
     "mainFile": "main.ts",
     "files": ["main.ts", "tau.json"]
   },
   {
+    "kind": "model",
+    "geometry": "3d",
     "kernel": "replicad",
     "name": "decorated-box",
     "mainFile": "main.ts",
     "files": ["main.ts", "tau.json"]
   },
   {
+    "kind": "model",
+    "geometry": "3d",
     "kernel": "replicad",
     "name": "drinking-glass",
     "mainFile": "main.ts",
     "files": ["main.ts", "tau.json"]
   },
   {
+    "kind": "test-fixture",
+    "geometry": "3d",
     "kernel": "replicad",
     "name": "flower-attachment-section-outline-fixture",
     "mainFile": "main.ts",
     "files": ["main.ts", "tau.json"]
   },
   {
+    "kind": "model",
+    "geometry": "3d",
     "kernel": "replicad",
     "name": "gridfinity-box",
     "mainFile": "main.ts",
     "files": ["main.ts", "tau.json"]
   },
   {
+    "kind": "model",
+    "geometry": "3d",
     "kernel": "replicad",
     "name": "helical-gear",
     "mainFile": "main.ts",
-    "files": ["main.ts"]
+    "files": ["main.ts", "main.usdz"]
   },
   {
+    "kind": "model",
+    "geometry": "3d",
     "kernel": "replicad",
     "name": "hex-screwdriver",
     "mainFile": "main.ts",
     "files": ["main.ts", "tau.json"]
   },
   {
+    "kind": "model",
+    "geometry": "3d",
     "kernel": "replicad",
     "name": "hollow-box",
     "mainFile": "main.ts",
     "files": ["main.ts", "tau.json"]
   },
   {
+    "kind": "model",
+    "geometry": "3d",
     "kernel": "replicad",
     "name": "ibeam",
     "mainFile": "main.ts",
     "files": ["main.ts", "tau.json"]
   },
   {
+    "kind": "model",
+    "geometry": "3d",
     "kernel": "replicad",
     "name": "jscad-logo",
     "mainFile": "main.ts",
     "files": ["README.md", "generate-logo.ts", "jscad.svg", "main.ts"]
   },
   {
+    "kind": "model",
+    "geometry": "3d",
     "kernel": "replicad",
     "name": "lego",
     "mainFile": "main.ts",
     "files": ["main.ts", "tau.json"]
   },
   {
+    "kind": "model",
+    "geometry": "2d",
     "kernel": "replicad",
     "name": "libassimp-format-prism",
     "mainFile": "main.ts",
@@ -229,96 +321,128 @@
     ]
   },
   {
+    "kind": "model",
+    "geometry": "2d",
     "kernel": "replicad",
     "name": "logo",
     "mainFile": "main.ts",
     "files": ["README.md", "generate-logo.ts", "logo.svg", "main.ts"]
   },
   {
+    "kind": "model",
+    "geometry": "3d",
     "kernel": "replicad",
     "name": "logo-keychain",
     "mainFile": "main.ts",
     "files": ["assets/logo.svg", "logo-keychain.geospec.ts", "main.ts", "params.ts"]
   },
   {
+    "kind": "model",
+    "geometry": "2d",
     "kernel": "replicad",
     "name": "nanoraster-logo",
     "mainFile": "main.ts",
     "files": ["README.md", "banner.svg", "generate-logo.ts", "main.ts", "nanoraster.svg", "wordmark.ts"]
   },
   {
+    "kind": "model",
+    "geometry": "2d",
     "kernel": "replicad",
     "name": "picovoxel-logo",
     "mainFile": "main.ts",
     "files": ["README.md", "generate-logo.ts", "main.ts", "picovoxel.svg"]
   },
   {
+    "kind": "model",
+    "geometry": "3d",
     "kernel": "replicad",
     "name": "pot-plant",
     "mainFile": "main.ts",
     "files": ["main.ts", "tau.json"]
   },
   {
+    "kind": "model",
+    "geometry": "3d",
     "kernel": "replicad",
     "name": "projection-test",
     "mainFile": "main.ts",
     "files": ["main.ts"]
   },
   {
+    "kind": "model",
+    "geometry": "3d",
     "kernel": "replicad",
     "name": "rao-nozzle",
     "mainFile": "main.ts",
     "files": ["main.ts"]
   },
   {
+    "kind": "model",
+    "geometry": "3d",
     "kernel": "replicad",
     "name": "replicad-logo",
     "mainFile": "main.ts",
     "files": ["README.md", "generate-logo.ts", "main.ts", "replicad.svg"]
   },
   {
+    "kind": "model",
+    "geometry": "3d",
     "kernel": "replicad",
     "name": "simple-tray",
     "mainFile": "main.ts",
     "files": ["main.ts", "tau.json"]
   },
   {
+    "kind": "model",
+    "geometry": "3d",
     "kernel": "replicad",
     "name": "staircase",
     "mainFile": "main.ts",
     "files": ["main.ts", "tau.json"]
   },
   {
+    "kind": "model",
+    "geometry": "3d",
     "kernel": "replicad",
     "name": "stress-test",
     "mainFile": "main.ts",
     "files": ["main.ts"]
   },
   {
+    "kind": "model",
+    "geometry": "3d",
     "kernel": "replicad",
     "name": "t-slot-rail",
     "mainFile": "main.ts",
     "files": ["main.ts", "tau.json"]
   },
   {
+    "kind": "model",
+    "geometry": "3d",
     "kernel": "replicad",
     "name": "table",
     "mainFile": "main.ts",
     "files": ["main.ts", "tau.json"]
   },
   {
+    "kind": "model",
+    "geometry": "2d",
     "kernel": "replicad",
     "name": "tau-wordmark",
     "mainFile": "main.ts",
     "files": ["README.md", "generate-wordmark.ts", "main.ts", "wordmark.svg"]
   },
   {
+    "kind": "model",
+    "geometry": "3d",
     "kernel": "replicad",
     "name": "tray",
     "mainFile": "main.ts",
     "files": ["main.ts", "tau.json"]
   },
   {
+    "kind": "spec-fixture",
+    "geometry": "3d",
     "kernel": "replicad",
     "name": "v8-engine-rev2",
     "files": [
@@ -370,18 +494,24 @@
     ]
   },
   {
+    "kind": "model",
+    "geometry": "3d",
     "kernel": "replicad",
     "name": "vase",
     "mainFile": "main.ts",
     "files": ["main.ts", "tau.json"]
   },
   {
+    "kind": "model",
+    "geometry": "3d",
     "kernel": "replicad",
     "name": "wavy-vase",
     "mainFile": "main.ts",
     "files": ["main.ts", "tau.json"]
   },
   {
+    "kind": "model",
+    "geometry": "3d",
     "kernel": "replicad",
     "name": "wedge-door-stopper",
     "mainFile": "main.ts",

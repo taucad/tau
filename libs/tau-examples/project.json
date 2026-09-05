@@ -16,11 +16,17 @@
         "!{projectRoot}/src/manifest.json",
         "!{projectRoot}/src/manifest.ts",
         "!{projectRoot}/src/builtin.ts",
+        "!{projectRoot}/src/test-fixtures.ts",
         "!{projectRoot}/src/thumbnail.assets.ts",
         "!{projectRoot}/src/kernels/**/thumbnail.webp",
         "sharedGlobals"
       ],
-      "outputs": ["{projectRoot}/src/manifest.json", "{projectRoot}/src/manifest.ts", "{projectRoot}/src/builtin.ts"]
+      "outputs": [
+        "{projectRoot}/src/manifest.json",
+        "{projectRoot}/src/manifest.ts",
+        "{projectRoot}/src/builtin.ts",
+        "{projectRoot}/src/test-fixtures.ts"
+      ]
     },
     "check-manifest": {
       "command": "tsx scripts/generate-manifest.mts --check",
@@ -33,6 +39,7 @@
         "!{projectRoot}/src/manifest.json",
         "!{projectRoot}/src/manifest.ts",
         "!{projectRoot}/src/builtin.ts",
+        "!{projectRoot}/src/test-fixtures.ts",
         "!{projectRoot}/src/thumbnail.assets.ts",
         "!{projectRoot}/src/kernels/**/thumbnail.webp",
         "sharedGlobals"

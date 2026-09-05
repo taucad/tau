@@ -2,13 +2,14 @@ import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createNodeClient } from '@taucad/runtime/node';
 import { projectManifestSchema } from '@taucad/types';
 import { describe, expect, it } from 'vitest';
 import sharp from 'sharp';
-import { exampleKernelIds, exampleRuntime } from '#scripts/runtime.js';
+import { createExampleRuntimeClient, exampleKernelIds } from '#scripts/runtime.js';
 
 type ManifestEntry = {
+  readonly kind: 'model' | 'test-fixture' | 'spec-fixture' | 'reference';
+  readonly geometry: '2d' | '3d';
   readonly kernel: string;
   readonly name: string;
   readonly mainFile?: string;
@@ -19,6 +20,7 @@ const rootDirectory = join(dirname(fileURLToPath(import.meta.url)), '..');
 const sourceDirectory = join(rootDirectory, 'src');
 const manifest = JSON.parse(readFileSync(join(sourceDirectory, 'manifest.json'), 'utf8')) as ManifestEntry[];
 const builtinSource = readFileSync(join(sourceDirectory, 'builtin.ts'), 'utf8');
+const testFixtureSource = readFileSync(join(sourceDirectory, 'test-fixtures.ts'), 'utf8');
 
 describe('generated example artifacts', () => {
   it('strictly validates unique manifest-backed builtins and excludes runtime caches', () => {
@@ -26,6 +28,9 @@ describe('generated example artifacts', () => {
     const locators = new Set<string>();
     let count = 0;
     for (const entry of manifest) {
+      if (entry.kind !== 'model') {
+        continue;
+      }
       const path = join(sourceDirectory, 'kernels', entry.kernel, entry.name, 'tau.json');
       if (!existsSync(path)) {
         continue;
@@ -46,16 +51,28 @@ describe('generated example artifacts', () => {
       locators.add(locator);
       count++;
     }
-    expect(count).toBeGreaterThanOrEqual(34);
+    expect(count).toBe(manifest.filter((entry) => entry.kind === 'model' && entry.files.includes('tau.json')).length);
     expect(builtinSource).toContain('replicad.birdhouse');
+    for (const fixture of manifest.filter((entry) => entry.kind === 'test-fixture')) {
+      const locator = `${fixture.kernel}.${fixture.name}`;
+      expect(builtinSource).not.toContain(locator);
+      expect(testFixtureSource).toContain(locator);
+    }
     expect(builtinSource).not.toContain('/.tau/cache/');
+    expect(testFixtureSource).not.toContain('/.tau/cache/');
   });
 
   it('discovers only real entrypoints and excludes generated/cache files', () => {
     expect(manifest.find((entry) => entry.kernel === 'openscad')?.mainFile).toBe('main.scad');
     expect(manifest.find((entry) => entry.kernel === 'occt')?.mainFile).toBe('main.cpp');
     expect(manifest.find((entry) => entry.kernel === 'build123d')?.mainFile).toBe('main.py');
+    expect(manifest.find((entry) => entry.kernel === 'picogk')?.mainFile).toBe('main.cs');
     expect(manifest.find((entry) => entry.name === 'v8-engine-rev2')?.mainFile).toBeUndefined();
+
+    expect(manifest.filter((entry) => entry.kind === 'model')).toHaveLength(44);
+    expect(manifest.filter((entry) => entry.kind === 'test-fixture')).toHaveLength(9);
+    expect(manifest.filter((entry) => entry.kind === 'spec-fixture')).toHaveLength(1);
+    expect(manifest.filter((entry) => entry.kind === 'reference')).toHaveLength(2);
 
     for (const entry of manifest) {
       expect(entry.files.some((path) => path === 'thumbnail.webp')).toBe(false);
@@ -100,7 +117,7 @@ describe('generated example artifacts', () => {
   // See docs/research/tau-examples-thumbnail-nondeterminism.md.
   it('exports a shell+fillet fixture byte-identically on fresh kernel instances', { timeout: 120_000 }, async () => {
     const exportOnFreshClient = async (): Promise<string> => {
-      const client = await createNodeClient({ runtime: exampleRuntime, projectPath: join(sourceDirectory, 'kernels') });
+      const client = await createExampleRuntimeClient(join(sourceDirectory, 'kernels'));
       try {
         const result = await client.export('glb', {
           source: { path: 'replicad/vase/main.ts' },

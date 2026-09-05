@@ -3,64 +3,39 @@
 // Run `pnpm nx generate-manifest tau-examples` to regenerate.
 import type { ProjectManifest } from '@taucad/types';
 import thumbnail0 from './kernels/jscad/cube/thumbnail.webp?url';
-import thumbnail1 from './kernels/jscad/cube-cylinder-section-fixture/thumbnail.webp?url';
-import thumbnail2 from './kernels/jscad/cylinder/thumbnail.webp?url';
-import thumbnail3 from './kernels/jscad/edge-occlusion-fixture/thumbnail.webp?url';
-import thumbnail4 from './kernels/jscad/gear/thumbnail.webp?url';
-import thumbnail5 from './kernels/jscad/non-manifold-section-fixture/thumbnail.webp?url';
-import thumbnail6 from './kernels/jscad/section-cap-fixture/thumbnail.webp?url';
-import thumbnail7 from './kernels/jscad/section-overlap-fixture/thumbnail.webp?url';
-import thumbnail8 from './kernels/jscad/section-overlap-heavy-planetary-fixture/thumbnail.webp?url';
-import thumbnail9 from './kernels/jscad/section-overlap-heavy-v8-fixture/thumbnail.webp?url';
-import thumbnail10 from './kernels/jscad/section-picking-fixture/thumbnail.webp?url';
-import thumbnail11 from './kernels/openscad/kitchen-sink/thumbnail.webp?url';
-import thumbnail12 from './kernels/replicad/birdhouse/thumbnail.webp?url';
-import thumbnail13 from './kernels/replicad/bottle/thumbnail.webp?url';
-import thumbnail14 from './kernels/replicad/card-holder/thumbnail.webp?url';
-import thumbnail15 from './kernels/replicad/chair/thumbnail.webp?url';
-import thumbnail16 from './kernels/replicad/cycloidal-gear/thumbnail.webp?url';
-import thumbnail17 from './kernels/replicad/decorated-box/thumbnail.webp?url';
-import thumbnail18 from './kernels/replicad/drinking-glass/thumbnail.webp?url';
-import thumbnail19 from './kernels/replicad/flower-attachment-section-outline-fixture/thumbnail.webp?url';
-import thumbnail20 from './kernels/replicad/gridfinity-box/thumbnail.webp?url';
-import thumbnail21 from './kernels/replicad/hex-screwdriver/thumbnail.webp?url';
-import thumbnail22 from './kernels/replicad/hollow-box/thumbnail.webp?url';
-import thumbnail23 from './kernels/replicad/ibeam/thumbnail.webp?url';
-import thumbnail24 from './kernels/replicad/lego/thumbnail.webp?url';
-import thumbnail25 from './kernels/replicad/pot-plant/thumbnail.webp?url';
-import thumbnail26 from './kernels/replicad/simple-tray/thumbnail.webp?url';
-import thumbnail27 from './kernels/replicad/staircase/thumbnail.webp?url';
-import thumbnail28 from './kernels/replicad/t-slot-rail/thumbnail.webp?url';
-import thumbnail29 from './kernels/replicad/table/thumbnail.webp?url';
-import thumbnail30 from './kernels/replicad/tray/thumbnail.webp?url';
-import thumbnail31 from './kernels/replicad/vase/thumbnail.webp?url';
-import thumbnail32 from './kernels/replicad/wavy-vase/thumbnail.webp?url';
-import thumbnail33 from './kernels/replicad/wedge-door-stopper/thumbnail.webp?url';
+import thumbnail1 from './kernels/jscad/cylinder/thumbnail.webp?url';
+import thumbnail2 from './kernels/jscad/gear/thumbnail.webp?url';
+import thumbnail3 from './kernels/openscad/kitchen-sink/thumbnail.webp?url';
+import thumbnail4 from './kernels/replicad/birdhouse/thumbnail.webp?url';
+import thumbnail5 from './kernels/replicad/bottle/thumbnail.webp?url';
+import thumbnail6 from './kernels/replicad/card-holder/thumbnail.webp?url';
+import thumbnail7 from './kernels/replicad/chair/thumbnail.webp?url';
+import thumbnail8 from './kernels/replicad/cycloidal-gear/thumbnail.webp?url';
+import thumbnail9 from './kernels/replicad/decorated-box/thumbnail.webp?url';
+import thumbnail10 from './kernels/replicad/drinking-glass/thumbnail.webp?url';
+import thumbnail11 from './kernels/replicad/gridfinity-box/thumbnail.webp?url';
+import thumbnail12 from './kernels/replicad/hex-screwdriver/thumbnail.webp?url';
+import thumbnail13 from './kernels/replicad/hollow-box/thumbnail.webp?url';
+import thumbnail14 from './kernels/replicad/ibeam/thumbnail.webp?url';
+import thumbnail15 from './kernels/replicad/lego/thumbnail.webp?url';
+import thumbnail16 from './kernels/replicad/pot-plant/thumbnail.webp?url';
+import thumbnail17 from './kernels/replicad/simple-tray/thumbnail.webp?url';
+import thumbnail18 from './kernels/replicad/staircase/thumbnail.webp?url';
+import thumbnail19 from './kernels/replicad/t-slot-rail/thumbnail.webp?url';
+import thumbnail20 from './kernels/replicad/table/thumbnail.webp?url';
+import thumbnail21 from './kernels/replicad/tray/thumbnail.webp?url';
+import thumbnail22 from './kernels/replicad/vase/thumbnail.webp?url';
+import thumbnail23 from './kernels/replicad/wavy-vase/thumbnail.webp?url';
+import thumbnail24 from './kernels/replicad/wedge-door-stopper/thumbnail.webp?url';
 
 const textAssetLoaders = import.meta.glob<string>(
   [
     './kernels/jscad/cube/main.ts',
     './kernels/jscad/cube/tau.json',
-    './kernels/jscad/cube-cylinder-section-fixture/main.ts',
-    './kernels/jscad/cube-cylinder-section-fixture/tau.json',
     './kernels/jscad/cylinder/main.ts',
     './kernels/jscad/cylinder/tau.json',
-    './kernels/jscad/edge-occlusion-fixture/main.ts',
-    './kernels/jscad/edge-occlusion-fixture/tau.json',
     './kernels/jscad/gear/main.ts',
     './kernels/jscad/gear/tau.json',
-    './kernels/jscad/non-manifold-section-fixture/main.ts',
-    './kernels/jscad/non-manifold-section-fixture/tau.json',
-    './kernels/jscad/section-cap-fixture/main.ts',
-    './kernels/jscad/section-cap-fixture/tau.json',
-    './kernels/jscad/section-overlap-fixture/main.ts',
-    './kernels/jscad/section-overlap-fixture/tau.json',
-    './kernels/jscad/section-overlap-heavy-planetary-fixture/main.ts',
-    './kernels/jscad/section-overlap-heavy-planetary-fixture/tau.json',
-    './kernels/jscad/section-overlap-heavy-v8-fixture/main.ts',
-    './kernels/jscad/section-overlap-heavy-v8-fixture/tau.json',
-    './kernels/jscad/section-picking-fixture/main.ts',
-    './kernels/jscad/section-picking-fixture/tau.json',
     './kernels/openscad/kitchen-sink/main.scad',
     './kernels/openscad/kitchen-sink/tau.json',
     './kernels/replicad/birdhouse/main.ts',
@@ -77,8 +52,6 @@ const textAssetLoaders = import.meta.glob<string>(
     './kernels/replicad/decorated-box/tau.json',
     './kernels/replicad/drinking-glass/main.ts',
     './kernels/replicad/drinking-glass/tau.json',
-    './kernels/replicad/flower-attachment-section-outline-fixture/main.ts',
-    './kernels/replicad/flower-attachment-section-outline-fixture/tau.json',
     './kernels/replicad/gridfinity-box/main.ts',
     './kernels/replicad/gridfinity-box/tau.json',
     './kernels/replicad/hex-screwdriver/main.ts',
@@ -113,16 +86,8 @@ const textAssetLoaders = import.meta.glob<string>(
 const binaryAssetLoaders = import.meta.glob<string>(
   [
     './kernels/jscad/cube/thumbnail.webp',
-    './kernels/jscad/cube-cylinder-section-fixture/thumbnail.webp',
     './kernels/jscad/cylinder/thumbnail.webp',
-    './kernels/jscad/edge-occlusion-fixture/thumbnail.webp',
     './kernels/jscad/gear/thumbnail.webp',
-    './kernels/jscad/non-manifold-section-fixture/thumbnail.webp',
-    './kernels/jscad/section-cap-fixture/thumbnail.webp',
-    './kernels/jscad/section-overlap-fixture/thumbnail.webp',
-    './kernels/jscad/section-overlap-heavy-planetary-fixture/thumbnail.webp',
-    './kernels/jscad/section-overlap-heavy-v8-fixture/thumbnail.webp',
-    './kernels/jscad/section-picking-fixture/thumbnail.webp',
     './kernels/openscad/kitchen-sink/thumbnail.webp',
     './kernels/replicad/birdhouse/thumbnail.webp',
     './kernels/replicad/bottle/thumbnail.webp',
@@ -131,7 +96,6 @@ const binaryAssetLoaders = import.meta.glob<string>(
     './kernels/replicad/cycloidal-gear/thumbnail.webp',
     './kernels/replicad/decorated-box/thumbnail.webp',
     './kernels/replicad/drinking-glass/thumbnail.webp',
-    './kernels/replicad/flower-attachment-section-outline-fixture/thumbnail.webp',
     './kernels/replicad/gridfinity-box/thumbnail.webp',
     './kernels/replicad/hex-screwdriver/thumbnail.webp',
     './kernels/replicad/hollow-box/thumbnail.webp',
@@ -213,31 +177,6 @@ export const builtinExamples = [
     ],
   },
   {
-    locator: 'jscad.cube-cylinder-section-fixture',
-    kernel: 'jscad',
-    manifest: {
-      $schema: 'https://tau.new/schemas/tau-schema-v1.json',
-      id: 'proj_qIWjERe3Mu8SIuO82tkqb',
-      name: 'Cube Cylinder Section Fixture',
-      description:
-        'A deterministic cube with a cylindrical through-cut for WebGL section-view overlay depth regression testing.',
-      tags: ['3d-printing', 'parametric', 'jscad'],
-      assets: { main: { entryPath: 'main.ts', thumbnail: 'thumbnail.webp' } },
-    },
-    thumbnailUrl: thumbnail1,
-    assets: [
-      { path: 'main.ts', load: loadTextAsset.bind(undefined, './kernels/jscad/cube-cylinder-section-fixture/main.ts') },
-      {
-        path: 'tau.json',
-        load: loadTextAsset.bind(undefined, './kernels/jscad/cube-cylinder-section-fixture/tau.json'),
-      },
-      {
-        path: 'thumbnail.webp',
-        load: loadBinaryAsset.bind(undefined, './kernels/jscad/cube-cylinder-section-fixture/thumbnail.webp'),
-      },
-    ],
-  },
-  {
     locator: 'jscad.cylinder',
     kernel: 'jscad',
     manifest: {
@@ -249,33 +188,11 @@ export const builtinExamples = [
       tags: ['3d-printing', 'parametric', 'jscad'],
       assets: { main: { entryPath: 'main.ts', thumbnail: 'thumbnail.webp' } },
     },
-    thumbnailUrl: thumbnail2,
+    thumbnailUrl: thumbnail1,
     assets: [
       { path: 'main.ts', load: loadTextAsset.bind(undefined, './kernels/jscad/cylinder/main.ts') },
       { path: 'tau.json', load: loadTextAsset.bind(undefined, './kernels/jscad/cylinder/tau.json') },
       { path: 'thumbnail.webp', load: loadBinaryAsset.bind(undefined, './kernels/jscad/cylinder/thumbnail.webp') },
-    ],
-  },
-  {
-    locator: 'jscad.edge-occlusion-fixture',
-    kernel: 'jscad',
-    manifest: {
-      $schema: 'https://tau.new/schemas/tau-schema-v1.json',
-      id: 'proj_gr20SlrHcQcug04OlzVox',
-      name: 'Edge Occlusion Fixture',
-      description:
-        'A deterministic front-slab and rear-cuboid scene for low-FOV GLTF edge occlusion regression testing.',
-      tags: ['3d-printing', 'parametric', 'jscad'],
-      assets: { main: { entryPath: 'main.ts', thumbnail: 'thumbnail.webp' } },
-    },
-    thumbnailUrl: thumbnail3,
-    assets: [
-      { path: 'main.ts', load: loadTextAsset.bind(undefined, './kernels/jscad/edge-occlusion-fixture/main.ts') },
-      { path: 'tau.json', load: loadTextAsset.bind(undefined, './kernels/jscad/edge-occlusion-fixture/tau.json') },
-      {
-        path: 'thumbnail.webp',
-        load: loadBinaryAsset.bind(undefined, './kernels/jscad/edge-occlusion-fixture/thumbnail.webp'),
-      },
     ],
   },
   {
@@ -290,156 +207,11 @@ export const builtinExamples = [
       tags: ['3d-printing', 'parametric', 'jscad'],
       assets: { main: { entryPath: 'main.ts', thumbnail: 'thumbnail.webp' } },
     },
-    thumbnailUrl: thumbnail4,
+    thumbnailUrl: thumbnail2,
     assets: [
       { path: 'main.ts', load: loadTextAsset.bind(undefined, './kernels/jscad/gear/main.ts') },
       { path: 'tau.json', load: loadTextAsset.bind(undefined, './kernels/jscad/gear/tau.json') },
       { path: 'thumbnail.webp', load: loadBinaryAsset.bind(undefined, './kernels/jscad/gear/thumbnail.webp') },
-    ],
-  },
-  {
-    locator: 'jscad.non-manifold-section-fixture',
-    kernel: 'jscad',
-    manifest: {
-      $schema: 'https://tau.new/schemas/tau-schema-v1.json',
-      id: 'proj_fxgUGmBaByeuYKLLnCAi4',
-      name: 'Non-Manifold Section Fixture',
-      description:
-        'A deterministic one-mesh, non-booleaned pair of touching solids for section-view cap recovery regression testing.',
-      tags: ['3d-printing', 'parametric', 'jscad'],
-      assets: { main: { entryPath: 'main.ts', thumbnail: 'thumbnail.webp' } },
-    },
-    thumbnailUrl: thumbnail5,
-    assets: [
-      { path: 'main.ts', load: loadTextAsset.bind(undefined, './kernels/jscad/non-manifold-section-fixture/main.ts') },
-      {
-        path: 'tau.json',
-        load: loadTextAsset.bind(undefined, './kernels/jscad/non-manifold-section-fixture/tau.json'),
-      },
-      {
-        path: 'thumbnail.webp',
-        load: loadBinaryAsset.bind(undefined, './kernels/jscad/non-manifold-section-fixture/thumbnail.webp'),
-      },
-    ],
-  },
-  {
-    locator: 'jscad.section-cap-fixture',
-    kernel: 'jscad',
-    manifest: {
-      $schema: 'https://tau.new/schemas/tau-schema-v1.json',
-      id: 'proj_6d7yN2GPDnBHNp5tDKj4k',
-      name: 'Section Cap Fixture',
-      description:
-        'A deterministic holed housing with colored internal solids for section-view cap and contour-fill regression testing.',
-      tags: ['3d-printing', 'parametric', 'jscad'],
-      assets: { main: { entryPath: 'main.ts', thumbnail: 'thumbnail.webp' } },
-    },
-    thumbnailUrl: thumbnail6,
-    assets: [
-      { path: 'main.ts', load: loadTextAsset.bind(undefined, './kernels/jscad/section-cap-fixture/main.ts') },
-      { path: 'tau.json', load: loadTextAsset.bind(undefined, './kernels/jscad/section-cap-fixture/tau.json') },
-      {
-        path: 'thumbnail.webp',
-        load: loadBinaryAsset.bind(undefined, './kernels/jscad/section-cap-fixture/thumbnail.webp'),
-      },
-    ],
-  },
-  {
-    locator: 'jscad.section-overlap-fixture',
-    kernel: 'jscad',
-    manifest: {
-      $schema: 'https://tau.new/schemas/tau-schema-v1.json',
-      id: 'proj_ZTFWxDD8N8ukkYmDCraiL',
-      name: 'Section Overlap Fixture',
-      description:
-        'A deterministic set of overlapping and tangent cuboids for section-plane overlap cap-shading regression testing.',
-      tags: ['3d-printing', 'parametric', 'jscad'],
-      assets: { main: { entryPath: 'main.ts', thumbnail: 'thumbnail.webp' } },
-    },
-    thumbnailUrl: thumbnail7,
-    assets: [
-      { path: 'main.ts', load: loadTextAsset.bind(undefined, './kernels/jscad/section-overlap-fixture/main.ts') },
-      { path: 'tau.json', load: loadTextAsset.bind(undefined, './kernels/jscad/section-overlap-fixture/tau.json') },
-      {
-        path: 'thumbnail.webp',
-        load: loadBinaryAsset.bind(undefined, './kernels/jscad/section-overlap-fixture/thumbnail.webp'),
-      },
-    ],
-  },
-  {
-    locator: 'jscad.section-overlap-heavy-planetary-fixture',
-    kernel: 'jscad',
-    manifest: {
-      $schema: 'https://tau.new/schemas/tau-schema-v1.json',
-      id: 'proj_IgqN2fxzG85CsgApKjCfT',
-      name: 'Heavy Planetary Section Overlap Fixture',
-      description:
-        'A deterministic dense planetary-style assembly for section-view overlap drag performance diagnostics.',
-      tags: ['3d-printing', 'parametric', 'jscad'],
-      assets: { main: { entryPath: 'main.ts', thumbnail: 'thumbnail.webp' } },
-    },
-    thumbnailUrl: thumbnail8,
-    assets: [
-      {
-        path: 'main.ts',
-        load: loadTextAsset.bind(undefined, './kernels/jscad/section-overlap-heavy-planetary-fixture/main.ts'),
-      },
-      {
-        path: 'tau.json',
-        load: loadTextAsset.bind(undefined, './kernels/jscad/section-overlap-heavy-planetary-fixture/tau.json'),
-      },
-      {
-        path: 'thumbnail.webp',
-        load: loadBinaryAsset.bind(undefined, './kernels/jscad/section-overlap-heavy-planetary-fixture/thumbnail.webp'),
-      },
-    ],
-  },
-  {
-    locator: 'jscad.section-overlap-heavy-v8-fixture',
-    kernel: 'jscad',
-    manifest: {
-      $schema: 'https://tau.new/schemas/tau-schema-v1.json',
-      id: 'proj_WhNvy0j3FSsZgo5Z6x5vu',
-      name: 'Heavy V8 Section Overlap Fixture',
-      description: 'A deterministic engine-style assembly for section-view overlap drag performance diagnostics.',
-      tags: ['3d-printing', 'parametric', 'jscad'],
-      assets: { main: { entryPath: 'main.ts', thumbnail: 'thumbnail.webp' } },
-    },
-    thumbnailUrl: thumbnail9,
-    assets: [
-      {
-        path: 'main.ts',
-        load: loadTextAsset.bind(undefined, './kernels/jscad/section-overlap-heavy-v8-fixture/main.ts'),
-      },
-      {
-        path: 'tau.json',
-        load: loadTextAsset.bind(undefined, './kernels/jscad/section-overlap-heavy-v8-fixture/tau.json'),
-      },
-      {
-        path: 'thumbnail.webp',
-        load: loadBinaryAsset.bind(undefined, './kernels/jscad/section-overlap-heavy-v8-fixture/thumbnail.webp'),
-      },
-    ],
-  },
-  {
-    locator: 'jscad.section-picking-fixture',
-    kernel: 'jscad',
-    manifest: {
-      $schema: 'https://tau.new/schemas/tau-schema-v1.json',
-      id: 'proj_D2xfPM58AjAVHbdJM5uAV',
-      name: 'Section Picking Fixture',
-      description: 'A deterministic two-cuboid scene for section-view clipping-aware model picking regression testing.',
-      tags: ['3d-printing', 'parametric', 'jscad'],
-      assets: { main: { entryPath: 'main.ts', thumbnail: 'thumbnail.webp' } },
-    },
-    thumbnailUrl: thumbnail10,
-    assets: [
-      { path: 'main.ts', load: loadTextAsset.bind(undefined, './kernels/jscad/section-picking-fixture/main.ts') },
-      { path: 'tau.json', load: loadTextAsset.bind(undefined, './kernels/jscad/section-picking-fixture/tau.json') },
-      {
-        path: 'thumbnail.webp',
-        load: loadBinaryAsset.bind(undefined, './kernels/jscad/section-picking-fixture/thumbnail.webp'),
-      },
     ],
   },
   {
@@ -454,7 +226,7 @@ export const builtinExamples = [
       tags: ['3d-printing', 'parametric', 'openscad'],
       assets: { main: { entryPath: 'main.scad', thumbnail: 'thumbnail.webp' } },
     },
-    thumbnailUrl: thumbnail11,
+    thumbnailUrl: thumbnail3,
     assets: [
       { path: 'main.scad', load: loadTextAsset.bind(undefined, './kernels/openscad/kitchen-sink/main.scad') },
       { path: 'tau.json', load: loadTextAsset.bind(undefined, './kernels/openscad/kitchen-sink/tau.json') },
@@ -476,7 +248,7 @@ export const builtinExamples = [
       tags: ['3d-printing', 'parametric', 'replicad'],
       assets: { main: { entryPath: 'main.ts', thumbnail: 'thumbnail.webp' } },
     },
-    thumbnailUrl: thumbnail12,
+    thumbnailUrl: thumbnail4,
     assets: [
       { path: 'main.ts', load: loadTextAsset.bind(undefined, './kernels/replicad/birdhouse/main.ts') },
       { path: 'tau.json', load: loadTextAsset.bind(undefined, './kernels/replicad/birdhouse/tau.json') },
@@ -495,7 +267,7 @@ export const builtinExamples = [
       tags: ['3d-printing', 'parametric', 'replicad'],
       assets: { main: { entryPath: 'main.ts', thumbnail: 'thumbnail.webp' } },
     },
-    thumbnailUrl: thumbnail13,
+    thumbnailUrl: thumbnail5,
     assets: [
       { path: 'main.ts', load: loadTextAsset.bind(undefined, './kernels/replicad/bottle/main.ts') },
       { path: 'tau.json', load: loadTextAsset.bind(undefined, './kernels/replicad/bottle/tau.json') },
@@ -514,7 +286,7 @@ export const builtinExamples = [
       tags: ['3d-printing', 'parametric', 'replicad'],
       assets: { main: { entryPath: 'main.ts', thumbnail: 'thumbnail.webp' } },
     },
-    thumbnailUrl: thumbnail14,
+    thumbnailUrl: thumbnail6,
     assets: [
       { path: 'main.ts', load: loadTextAsset.bind(undefined, './kernels/replicad/card-holder/main.ts') },
       { path: 'tau.json', load: loadTextAsset.bind(undefined, './kernels/replicad/card-holder/tau.json') },
@@ -536,7 +308,7 @@ export const builtinExamples = [
       tags: ['3d-printing', 'parametric', 'replicad'],
       assets: { main: { entryPath: 'main.ts', thumbnail: 'thumbnail.webp' } },
     },
-    thumbnailUrl: thumbnail15,
+    thumbnailUrl: thumbnail7,
     assets: [
       { path: 'main.ts', load: loadTextAsset.bind(undefined, './kernels/replicad/chair/main.ts') },
       { path: 'tau.json', load: loadTextAsset.bind(undefined, './kernels/replicad/chair/tau.json') },
@@ -555,7 +327,7 @@ export const builtinExamples = [
       tags: ['3d-printing', 'parametric', 'replicad'],
       assets: { main: { entryPath: 'main.ts', thumbnail: 'thumbnail.webp' } },
     },
-    thumbnailUrl: thumbnail16,
+    thumbnailUrl: thumbnail8,
     assets: [
       { path: 'main.ts', load: loadTextAsset.bind(undefined, './kernels/replicad/cycloidal-gear/main.ts') },
       { path: 'tau.json', load: loadTextAsset.bind(undefined, './kernels/replicad/cycloidal-gear/tau.json') },
@@ -577,7 +349,7 @@ export const builtinExamples = [
       tags: ['3d-printing', 'parametric', 'replicad'],
       assets: { main: { entryPath: 'main.ts', thumbnail: 'thumbnail.webp' } },
     },
-    thumbnailUrl: thumbnail17,
+    thumbnailUrl: thumbnail9,
     assets: [
       { path: 'main.ts', load: loadTextAsset.bind(undefined, './kernels/replicad/decorated-box/main.ts') },
       { path: 'tau.json', load: loadTextAsset.bind(undefined, './kernels/replicad/decorated-box/tau.json') },
@@ -599,44 +371,13 @@ export const builtinExamples = [
       tags: ['3d-printing', 'parametric', 'replicad'],
       assets: { main: { entryPath: 'main.ts', thumbnail: 'thumbnail.webp' } },
     },
-    thumbnailUrl: thumbnail18,
+    thumbnailUrl: thumbnail10,
     assets: [
       { path: 'main.ts', load: loadTextAsset.bind(undefined, './kernels/replicad/drinking-glass/main.ts') },
       { path: 'tau.json', load: loadTextAsset.bind(undefined, './kernels/replicad/drinking-glass/tau.json') },
       {
         path: 'thumbnail.webp',
         load: loadBinaryAsset.bind(undefined, './kernels/replicad/drinking-glass/thumbnail.webp'),
-      },
-    ],
-  },
-  {
-    locator: 'replicad.flower-attachment-section-outline-fixture',
-    kernel: 'replicad',
-    manifest: {
-      $schema: 'https://tau.new/schemas/tau-schema-v1.json',
-      id: 'proj_2RXCvaH02ICXmgr557YOY',
-      name: 'Flower Attachment Section Outline Fixture',
-      description:
-        'A real exported Replicad flower attachment source fixture for section-view contour outline visual regression testing.',
-      tags: ['3d-printing', 'parametric', 'replicad'],
-      assets: { main: { entryPath: 'main.ts', thumbnail: 'thumbnail.webp' } },
-    },
-    thumbnailUrl: thumbnail19,
-    assets: [
-      {
-        path: 'main.ts',
-        load: loadTextAsset.bind(undefined, './kernels/replicad/flower-attachment-section-outline-fixture/main.ts'),
-      },
-      {
-        path: 'tau.json',
-        load: loadTextAsset.bind(undefined, './kernels/replicad/flower-attachment-section-outline-fixture/tau.json'),
-      },
-      {
-        path: 'thumbnail.webp',
-        load: loadBinaryAsset.bind(
-          undefined,
-          './kernels/replicad/flower-attachment-section-outline-fixture/thumbnail.webp',
-        ),
       },
     ],
   },
@@ -652,7 +393,7 @@ export const builtinExamples = [
       tags: ['3d-printing', 'parametric', 'replicad'],
       assets: { main: { entryPath: 'main.ts', thumbnail: 'thumbnail.webp' } },
     },
-    thumbnailUrl: thumbnail20,
+    thumbnailUrl: thumbnail11,
     assets: [
       { path: 'main.ts', load: loadTextAsset.bind(undefined, './kernels/replicad/gridfinity-box/main.ts') },
       { path: 'tau.json', load: loadTextAsset.bind(undefined, './kernels/replicad/gridfinity-box/tau.json') },
@@ -674,7 +415,7 @@ export const builtinExamples = [
       tags: ['3d-printing', 'parametric', 'replicad'],
       assets: { main: { entryPath: 'main.ts', thumbnail: 'thumbnail.webp' } },
     },
-    thumbnailUrl: thumbnail21,
+    thumbnailUrl: thumbnail12,
     assets: [
       { path: 'main.ts', load: loadTextAsset.bind(undefined, './kernels/replicad/hex-screwdriver/main.ts') },
       { path: 'tau.json', load: loadTextAsset.bind(undefined, './kernels/replicad/hex-screwdriver/tau.json') },
@@ -696,7 +437,7 @@ export const builtinExamples = [
       tags: ['3d-printing', 'parametric', 'replicad'],
       assets: { main: { entryPath: 'main.ts', thumbnail: 'thumbnail.webp' } },
     },
-    thumbnailUrl: thumbnail22,
+    thumbnailUrl: thumbnail13,
     assets: [
       { path: 'main.ts', load: loadTextAsset.bind(undefined, './kernels/replicad/hollow-box/main.ts') },
       { path: 'tau.json', load: loadTextAsset.bind(undefined, './kernels/replicad/hollow-box/tau.json') },
@@ -715,7 +456,7 @@ export const builtinExamples = [
       tags: ['3d-printing', 'parametric', 'replicad'],
       assets: { main: { entryPath: 'main.ts', thumbnail: 'thumbnail.webp' } },
     },
-    thumbnailUrl: thumbnail23,
+    thumbnailUrl: thumbnail14,
     assets: [
       { path: 'main.ts', load: loadTextAsset.bind(undefined, './kernels/replicad/ibeam/main.ts') },
       { path: 'tau.json', load: loadTextAsset.bind(undefined, './kernels/replicad/ibeam/tau.json') },
@@ -734,7 +475,7 @@ export const builtinExamples = [
       tags: ['3d-printing', 'parametric', 'replicad'],
       assets: { main: { entryPath: 'main.ts', thumbnail: 'thumbnail.webp' } },
     },
-    thumbnailUrl: thumbnail24,
+    thumbnailUrl: thumbnail15,
     assets: [
       { path: 'main.ts', load: loadTextAsset.bind(undefined, './kernels/replicad/lego/main.ts') },
       { path: 'tau.json', load: loadTextAsset.bind(undefined, './kernels/replicad/lego/tau.json') },
@@ -753,7 +494,7 @@ export const builtinExamples = [
       tags: ['3d-printing', 'parametric', 'replicad'],
       assets: { main: { entryPath: 'main.ts', thumbnail: 'thumbnail.webp' } },
     },
-    thumbnailUrl: thumbnail25,
+    thumbnailUrl: thumbnail16,
     assets: [
       { path: 'main.ts', load: loadTextAsset.bind(undefined, './kernels/replicad/pot-plant/main.ts') },
       { path: 'tau.json', load: loadTextAsset.bind(undefined, './kernels/replicad/pot-plant/tau.json') },
@@ -772,7 +513,7 @@ export const builtinExamples = [
       tags: ['3d-printing', 'parametric', 'replicad'],
       assets: { main: { entryPath: 'main.ts', thumbnail: 'thumbnail.webp' } },
     },
-    thumbnailUrl: thumbnail26,
+    thumbnailUrl: thumbnail17,
     assets: [
       { path: 'main.ts', load: loadTextAsset.bind(undefined, './kernels/replicad/simple-tray/main.ts') },
       { path: 'tau.json', load: loadTextAsset.bind(undefined, './kernels/replicad/simple-tray/tau.json') },
@@ -794,7 +535,7 @@ export const builtinExamples = [
       tags: ['3d-printing', 'parametric', 'replicad'],
       assets: { main: { entryPath: 'main.ts', thumbnail: 'thumbnail.webp' } },
     },
-    thumbnailUrl: thumbnail27,
+    thumbnailUrl: thumbnail18,
     assets: [
       { path: 'main.ts', load: loadTextAsset.bind(undefined, './kernels/replicad/staircase/main.ts') },
       { path: 'tau.json', load: loadTextAsset.bind(undefined, './kernels/replicad/staircase/tau.json') },
@@ -813,7 +554,7 @@ export const builtinExamples = [
       tags: ['3d-printing', 'parametric', 'replicad'],
       assets: { main: { entryPath: 'main.ts', thumbnail: 'thumbnail.webp' } },
     },
-    thumbnailUrl: thumbnail28,
+    thumbnailUrl: thumbnail19,
     assets: [
       { path: 'main.ts', load: loadTextAsset.bind(undefined, './kernels/replicad/t-slot-rail/main.ts') },
       { path: 'tau.json', load: loadTextAsset.bind(undefined, './kernels/replicad/t-slot-rail/tau.json') },
@@ -835,7 +576,7 @@ export const builtinExamples = [
       tags: ['3d-printing', 'parametric', 'replicad'],
       assets: { main: { entryPath: 'main.ts', thumbnail: 'thumbnail.webp' } },
     },
-    thumbnailUrl: thumbnail29,
+    thumbnailUrl: thumbnail20,
     assets: [
       { path: 'main.ts', load: loadTextAsset.bind(undefined, './kernels/replicad/table/main.ts') },
       { path: 'tau.json', load: loadTextAsset.bind(undefined, './kernels/replicad/table/tau.json') },
@@ -854,7 +595,7 @@ export const builtinExamples = [
       tags: ['3d-printing', 'parametric', 'replicad'],
       assets: { main: { entryPath: 'main.ts', thumbnail: 'thumbnail.webp' } },
     },
-    thumbnailUrl: thumbnail30,
+    thumbnailUrl: thumbnail21,
     assets: [
       { path: 'main.ts', load: loadTextAsset.bind(undefined, './kernels/replicad/tray/main.ts') },
       { path: 'tau.json', load: loadTextAsset.bind(undefined, './kernels/replicad/tray/tau.json') },
@@ -873,7 +614,7 @@ export const builtinExamples = [
       tags: ['3d-printing', 'parametric', 'replicad'],
       assets: { main: { entryPath: 'main.ts', thumbnail: 'thumbnail.webp' } },
     },
-    thumbnailUrl: thumbnail31,
+    thumbnailUrl: thumbnail22,
     assets: [
       { path: 'main.ts', load: loadTextAsset.bind(undefined, './kernels/replicad/vase/main.ts') },
       { path: 'tau.json', load: loadTextAsset.bind(undefined, './kernels/replicad/vase/tau.json') },
@@ -892,7 +633,7 @@ export const builtinExamples = [
       tags: ['3d-printing', 'parametric', 'replicad'],
       assets: { main: { entryPath: 'main.ts', thumbnail: 'thumbnail.webp' } },
     },
-    thumbnailUrl: thumbnail32,
+    thumbnailUrl: thumbnail23,
     assets: [
       { path: 'main.ts', load: loadTextAsset.bind(undefined, './kernels/replicad/wavy-vase/main.ts') },
       { path: 'tau.json', load: loadTextAsset.bind(undefined, './kernels/replicad/wavy-vase/tau.json') },
@@ -911,7 +652,7 @@ export const builtinExamples = [
       tags: ['3d-printing', 'parametric', 'replicad'],
       assets: { main: { entryPath: 'main.ts', thumbnail: 'thumbnail.webp' } },
     },
-    thumbnailUrl: thumbnail33,
+    thumbnailUrl: thumbnail24,
     assets: [
       { path: 'main.ts', load: loadTextAsset.bind(undefined, './kernels/replicad/wedge-door-stopper/main.ts') },
       { path: 'tau.json', load: loadTextAsset.bind(undefined, './kernels/replicad/wedge-door-stopper/tau.json') },

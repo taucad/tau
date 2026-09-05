@@ -10,6 +10,8 @@
     "./builtin": "./src/builtin.ts",
     "./fixtures": "./src/fixture-loader.ts",
     "./manifest": "./src/manifest.ts",
+    "./runtime": "./scripts/runtime.ts",
+    "./test-fixtures": "./src/test-fixtures.ts",
     "./thumbnails": "./src/thumbnail.assets.ts"
   },
   "imports": {
@@ -25,9 +27,9 @@
     "@taucad/middleware": "workspace:*",
     "@taucad/opencascade": "workspace:*",
     "@taucad/openrscad": "workspace:*",
+    "@taucad/picogk": "workspace:*",
     "@taucad/replicad": "workspace:*",
     "@taucad/runtime": "workspace:*",
-    "@taucad/picogk": "workspace:*",
     "@taucad/types": "workspace:*"
   },
   "devDependencies": {

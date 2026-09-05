@@ -78,6 +78,14 @@ export class EmailService {
     });
   }
 
+  public async sendPaymentFailed(args: { readonly email: string; readonly billingUrl: string }): Promise<void> {
+    await this.send({
+      to: args.email,
+      subject: 'Action needed: your Tau payment failed',
+      template: { kind: 'payment-failed', ...args },
+    });
+  }
+
   public async sendPublicationInvite(args: {
     readonly recipientEmail: string;
     readonly ownerName: string;

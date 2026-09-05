@@ -5,21 +5,28 @@ import { bodyText, fallbackLink, mutedText, primaryAction, tauEmailLayout } from
 
 export const subjectForEmailTemplate = (template: EmailTemplate): string => {
   switch (template.kind) {
-    case 'magic-link':
+    case 'magic-link': {
       return 'Sign in to Tau';
-    case 'reset-password':
+    }
+    case 'reset-password': {
       return 'Reset your Tau password';
-    case 'verify-email':
+    }
+    case 'verify-email': {
       return 'Verify your Tau email';
-    case 'publication-invite':
+    }
+    case 'publication-invite': {
       return `${template.ownerName} shared a Tau design with you`;
+    }
+    case 'payment-failed': {
+      return 'Action needed: your Tau payment failed';
+    }
   }
 };
 
 export const renderEmailTemplate = async (template: EmailTemplate): Promise<RenderedEmail> => {
   const element = (() => {
     switch (template.kind) {
-      case 'magic-link':
+      case 'magic-link': {
         return createElement(
           tauEmailLayout,
           {
@@ -32,7 +39,8 @@ export const renderEmailTemplate = async (template: EmailTemplate): Promise<Rend
           createElement(fallbackLink, { href: template.url }),
           createElement(mutedText, null, "If you didn't request this, you can safely ignore this email."),
         );
-      case 'reset-password':
+      }
+      case 'reset-password': {
         return createElement(
           tauEmailLayout,
           {
@@ -44,7 +52,8 @@ export const renderEmailTemplate = async (template: EmailTemplate): Promise<Rend
           createElement(fallbackLink, { href: template.url }),
           createElement(mutedText, null, "If you didn't request this, no changes were made."),
         );
-      case 'verify-email':
+      }
+      case 'verify-email': {
         return createElement(
           tauEmailLayout,
           {
@@ -55,7 +64,8 @@ export const renderEmailTemplate = async (template: EmailTemplate): Promise<Rend
           createElement(primaryAction, { href: template.url }, 'Verify email'),
           createElement(fallbackLink, { href: template.url }),
         );
-      case 'publication-invite':
+      }
+      case 'publication-invite': {
         return createElement(
           tauEmailLayout,
           {
@@ -71,6 +81,28 @@ export const renderEmailTemplate = async (template: EmailTemplate): Promise<Rend
           createElement(primaryAction, { href: template.url }, 'Open design'),
           createElement(fallbackLink, { href: template.url }),
         );
+      }
+      case 'payment-failed': {
+        return createElement(
+          tauEmailLayout,
+          {
+            preview: 'Your Tau renewal payment failed — update your card to keep Pro.',
+            heading: 'Your payment failed',
+          },
+          createElement(
+            bodyText,
+            null,
+            `We couldn't process the renewal for ${template.email}. We'll retry automatically over the next few days.`,
+          ),
+          createElement(
+            bodyText,
+            null,
+            'Update your payment method to keep Pro without interruption. Your credits and projects are safe either way.',
+          ),
+          createElement(primaryAction, { href: template.billingUrl }, 'Update payment method'),
+          createElement(fallbackLink, { href: template.billingUrl }),
+        );
+      }
     }
   })();
 

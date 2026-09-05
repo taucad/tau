@@ -97,7 +97,7 @@ export const buildPublicationViewUrl = ({
 }: {
   readonly frontendURL: string;
   readonly publicationId: string;
-}): string => new URL(`/v/${publicationId}`, frontendURL).toString();
+}): string => new URL(`/s/tau~${publicationId}`, frontendURL).toString();
 
 export const assertEmailTemplateUrlAllowed = ({
   template,
@@ -106,9 +106,10 @@ export const assertEmailTemplateUrlAllowed = ({
   readonly template: EmailTemplate;
   readonly frontendURL: string;
 }): void => {
+  const rawUrl = template.kind === 'payment-failed' ? template.billingUrl : template.url;
   let url: URL;
   try {
-    url = new URL(template.url);
+    url = new URL(rawUrl);
   } catch {
     throw new Error(`Invalid ${template.kind} email URL`);
   }
@@ -119,8 +120,16 @@ export const assertEmailTemplateUrlAllowed = ({
   }
 
   if (template.kind === 'publication-invite') {
-    if (!url.pathname.startsWith('/v/') || url.pathname.length <= '/v/'.length) {
+    if (!url.pathname.startsWith('/s/') || url.pathname.length <= '/s/'.length) {
       throw new Error('Invalid publication-invite email URL path');
+    }
+
+    return;
+  }
+
+  if (template.kind === 'payment-failed') {
+    if (url.pathname !== '/' || url.searchParams.get('settings') !== 'billing') {
+      throw new Error('Invalid payment-failed email URL path');
     }
 
     return;

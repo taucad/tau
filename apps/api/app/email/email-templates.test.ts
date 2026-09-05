@@ -11,7 +11,7 @@ const templates: EmailTemplate[] = [
     recipientEmail: 'friend@example.com',
     ownerName: 'Ada',
     publicationTitle: 'Bracket',
-    url: 'https://tau.new/v/pub_123',
+    url: 'https://tau.new/s/tau~pub_123',
   },
 ];
 
@@ -32,7 +32,7 @@ describe('renderEmailTemplate', () => {
       recipientEmail: 'friend@example.com',
       ownerName: 'Ada',
       publicationTitle: 'Bracket',
-      url: 'https://tau.new/v/pub_123',
+      url: 'https://tau.new/s/tau~pub_123',
     });
 
     expect(rendered.text).toContain('Bracket');

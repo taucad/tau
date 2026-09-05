@@ -13,10 +13,10 @@ describe('email link builder', () => {
     expect(
       buildFrontendVerificationUrl({
         frontendURL: 'http://localhost:3000',
-        generatedUrl: 'http://localhost:4000/v1/auth/verify-email?token=secret&callbackURL=%2Fv%2Fpub_123',
+        generatedUrl: 'http://localhost:4000/v1/auth/verify-email?token=secret&callbackURL=%2Fs%2Ftau%7Epub_123',
         token: 'secret',
       }),
-    ).toBe('http://localhost:3000/auth/verify-email?token=secret&redirectTo=%2Fv%2Fpub_123');
+    ).toBe('http://localhost:3000/auth/verify-email?token=secret&redirectTo=%2Fs%2Ftau%7Epub_123');
   });
 
   it('rewrites Better Auth reset links to the frontend reset route', () => {
@@ -32,15 +32,15 @@ describe('email link builder', () => {
     expect(
       buildFrontendMagicLinkVerifyUrl({
         frontendURL: 'http://localhost:3000',
-        generatedUrl: 'http://localhost:4000/v1/auth/magic-link/verify?token=secret&callbackURL=%2Fv%2Fpub_123',
+        generatedUrl: 'http://localhost:4000/v1/auth/magic-link/verify?token=secret&callbackURL=%2Fs%2Ftau%7Epub_123',
         token: 'secret',
       }),
-    ).toBe('http://localhost:3000/auth/magic-link/verify?token=secret&redirectTo=%2Fv%2Fpub_123');
+    ).toBe('http://localhost:3000/auth/magic-link/verify?token=secret&redirectTo=%2Fs%2Ftau%7Epub_123');
   });
 
   it('builds publication viewer links from the frontend origin', () => {
     expect(buildPublicationViewUrl({ frontendURL: 'https://tau.new/', publicationId: 'pub_123' })).toBe(
-      'https://tau.new/v/pub_123',
+      'https://tau.new/s/tau~pub_123',
     );
   });
 
@@ -50,10 +50,10 @@ describe('email link builder', () => {
     ).toBe('/projects/abc?tab=share');
     expect(
       sanitizeFrontendRedirectPath({
-        callbackURL: 'https://tau.new/v/pub_123',
+        callbackURL: 'https://tau.new/s/tau~pub_123',
         frontendURL: 'https://tau.new',
       }),
-    ).toBe('/v/pub_123');
+    ).toBe('/s/tau~pub_123');
     expect(
       sanitizeFrontendRedirectPath({
         callbackURL: 'https://evil.example/steal',
@@ -63,7 +63,7 @@ describe('email link builder', () => {
   });
 
   it('rejects outbound auth email URLs that point at the API origin', () => {
-    expect(() =>
+    expect(() => {
       assertEmailTemplateUrlAllowed({
         frontendURL: 'http://localhost:3000',
         template: {
@@ -71,12 +71,12 @@ describe('email link builder', () => {
           email: 'user@example.com',
           url: 'http://localhost:4000/v1/auth/reset-password/token',
         },
-      }),
-    ).toThrow(/origin/u);
+      });
+    }).toThrow(/origin/u);
   });
 
   it('rejects outbound auth email URLs on the wrong frontend path', () => {
-    expect(() =>
+    expect(() => {
       assertEmailTemplateUrlAllowed({
         frontendURL: 'https://tau.new',
         template: {
@@ -84,12 +84,12 @@ describe('email link builder', () => {
           email: 'user@example.com',
           url: 'https://tau.new/auth/reset-password?token=secret',
         },
-      }),
-    ).toThrow(/path/u);
+      });
+    }).toThrow(/path/u);
   });
 
   it('accepts frontend auth and publication email URLs', () => {
-    expect(() =>
+    expect(() => {
       assertEmailTemplateUrlAllowed({
         frontendURL: 'https://tau.new',
         template: {
@@ -97,9 +97,9 @@ describe('email link builder', () => {
           email: 'user@example.com',
           url: 'https://tau.new/auth/magic-link/verify?token=secret&redirectTo=%2F',
         },
-      }),
-    ).not.toThrow();
-    expect(() =>
+      });
+    }).not.toThrow();
+    expect(() => {
       assertEmailTemplateUrlAllowed({
         frontendURL: 'https://tau.new',
         template: {
@@ -107,9 +107,9 @@ describe('email link builder', () => {
           recipientEmail: 'friend@example.com',
           ownerName: 'Ada',
           publicationTitle: 'Bracket',
-          url: 'https://tau.new/v/pub_123',
+          url: 'https://tau.new/s/tau~pub_123',
         },
-      }),
-    ).not.toThrow();
+      });
+    }).not.toThrow();
   });
 });

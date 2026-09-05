@@ -11,9 +11,12 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createNodeClient } from '@taucad/runtime/node';
 import sharp from 'sharp';
-import { exampleKernelIds, exampleRuntime } from '#scripts/runtime.js';
+import { createExampleRuntimeClient, exampleKernelIds } from '#scripts/runtime.js';
+
+// Nx sets FORCE_COLOR while some shells set NO_COLOR; runtime workers would
+// otherwise emit the same Node warning once for every plugin and example.
+delete process.env['NO_COLOR'];
 
 type ManifestEntry = {
   readonly kernel: string;
@@ -44,7 +47,6 @@ const only = new Set(
 const thumbnailOptions = { width: 768, height: 576 } as const;
 const thumbnailMargin = 0.1;
 
-const runtime = exampleRuntime;
 const supportedKernels: ReadonlySet<string> = exampleKernelIds;
 const engineIdForFixtureFamily = (kernel: string): string => (kernel === 'openscad' ? 'openrscad' : kernel);
 
@@ -176,7 +178,7 @@ for (const entry of renderable) {
   // instance is bit-reproducible. See
   // docs/research/tau-examples-thumbnail-nondeterminism.md (costs ~1s/fixture).
   // oxlint-disable-next-line eslint/no-await-in-loop -- Serial by design; see above.
-  const client = await createNodeClient(kernelsDirectory, { runtime });
+  const client = await createExampleRuntimeClient(kernelsDirectory);
   client.on('log', (logEntry) => {
     if (logEntry.level === 'error' || logEntry.level === 'warn') {
       console.warn(`[runtime:${logEntry.level}] ${logEntry.message}`);
@@ -213,7 +215,7 @@ for (const entry of renderable) {
         lineWidth: 3,
         camera: {
           framing: 'bounds',
-          direction: [0.612_372_435_7, -0.612_372_435_7, 0.5],
+          direction: [0.6123724357, -0.6123724357, 0.5],
           up: [0, 0, 1],
           margin: thumbnailMargin,
           projection: { kind: 'perspective', verticalFieldOfView: 45 },

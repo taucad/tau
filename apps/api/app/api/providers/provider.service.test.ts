@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { convertMessagesToResponsesInput } from '@langchain/openai';
 import { AIMessage, HumanMessage } from '@langchain/core/messages';
+import { modelFamilySchema, providerIdSchema } from '#api/providers/provider.schema.js';
 
 /**
  * Regression test for @langchain/openai Responses API converter.
@@ -28,5 +29,19 @@ describe('OpenAI Responses API converter', () => {
         expect.objectContaining({ type: 'message', role: 'assistant' }),
       ]),
     );
+  });
+});
+
+/**
+ * The `tau` provider existed only for the TAU_TEST_MODE replay model, which
+ * left with the API agent plane (W3-CUT-2). An enum member no catalog row can
+ * satisfy is a trap: it type-checks in every `Exclude<ProviderId, …>` alias and
+ * resolves at runtime to a factory that throws.
+ */
+describe('provider identity catalog', () => {
+  it('has no replay provider or model family', () => {
+    expect(providerIdSchema.safeParse('tau').success).toBe(false);
+    expect(modelFamilySchema.safeParse('tau').success).toBe(false);
+    expect(providerIdSchema.safeParse('openai').success).toBe(true);
   });
 });

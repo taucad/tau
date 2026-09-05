@@ -1,4 +1,4 @@
-import { Inject, Injectable, Optional } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 // oxlint-disable-next-line typescript/consistent-type-imports -- Nest DI needs runtime constructor metadata.
 import { ConfigService } from '@nestjs/config';
 import { ChatOpenAI } from '@langchain/openai';
@@ -20,8 +20,6 @@ import { TauChatXaiResponses } from '#api/providers/xai-responses.adapter.js';
 import type { TauChatXaiResponsesInput } from '#api/providers/xai-responses.adapter.js';
 import { TauChatKimiCompletions } from '#api/providers/kimi-completions.adapter.js';
 import type { TauChatKimiCompletionsInput } from '#api/providers/kimi-completions.adapter.js';
-import { TAU_REPLAY_MODEL_PROVIDER } from '#api/tau-replay/tau-replay.contract.js';
-import type { TauReplayModelProvider } from '#api/tau-replay/tau-replay.contract.js';
 
 // Type for mapping provider IDs to their option types
 type ProviderOptionsMap = {
@@ -57,12 +55,7 @@ type ProviderType<T extends ProviderId> = Provider & {
 // oxlint-disable-next-line new-cap -- NestJS decorators are invoked by decorator syntax.
 @Injectable()
 export class ProviderService {
-  public constructor(
-    private readonly configService: ConfigService<Environment, true>,
-    // Present only when TauReplayModule is loaded (TAU_TEST_MODE); undefined in prod.
-    // oxlint-disable-next-line new-cap -- NestJS param decorators are invoked by decorator syntax.
-    @Optional() @Inject(TAU_REPLAY_MODEL_PROVIDER) private readonly tauReplay?: TauReplayModelProvider,
-  ) {}
+  public constructor(private readonly configService: ConfigService<Environment, true>) {}
 
   public getProvider(providerId: ProviderId): Provider {
     const providers = this.getProviders();
@@ -260,20 +253,6 @@ export class ProviderService {
             promptCacheKey: runtimeOptions?.diagnosticsContext?.chatId,
             outputVersion: 'v1',
           }),
-      },
-      tau: {
-        provider: 'tau',
-        otelProviderName: 'tau',
-        configuration: {},
-        inputTokensIncludesCacheReadTokens: false,
-        inputTokensIncludesCacheWriteTokens: false,
-        // Delegates to the replay module; only reachable when TAU_TEST_MODE loaded it.
-        createClass: (options) => {
-          if (this.tauReplay === undefined) {
-            throw new Error('The "tau" replay provider is unavailable (requires TAU_TEST_MODE).');
-          }
-          return this.tauReplay.createModel(options.model);
-        },
       },
     };
   }

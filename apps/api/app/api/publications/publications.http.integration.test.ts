@@ -190,8 +190,8 @@ describe('Publications HTTP integration', () => {
     publicationService.publishFromUpload.mockResolvedValue({
       id: 'pub_integration',
       urls: {
-        view: 'https://app.example/v/pub_integration',
-        share: 'https://app.example/v/pub_integration',
+        view: 'https://app.example/s/tau~pub_integration',
+        share: 'https://app.example/s/tau~pub_integration',
         og: 'https://cdn.example/og.png',
         thumbnail: 'https://cdn.example/thumb.webp',
       },
@@ -288,8 +288,8 @@ describe('Publications HTTP integration', () => {
       },
       viewerRole: 'public',
       urls: {
-        view: 'https://app.example/v/pub_view',
-        share: 'https://app.example/v/pub_view',
+        view: 'https://app.example/s/tau~pub_view',
+        share: 'https://app.example/s/tau~pub_view',
         og: 'https://cdn.example/og.png',
         thumbnail: 'https://cdn.example/thumb.webp',
         manifest: 'https://cdn.example/manifest.json',
@@ -359,8 +359,8 @@ describe('Publications HTTP integration', () => {
       },
       viewerRole: 'owner',
       urls: {
-        view: 'https://app.example/v/pub_auth',
-        share: 'https://app.example/v/pub_auth',
+        view: 'https://app.example/s/tau~pub_auth',
+        share: 'https://app.example/s/tau~pub_auth',
         og: 'https://cdn.example/og.png',
         thumbnail: 'https://cdn.example/thumb.webp',
       },
@@ -427,7 +427,7 @@ describe('Publications HTTP integration', () => {
         description: null,
         visibility: 'private',
         createdAt: '2026-01-02T00:00:00.000Z',
-        urls: { share: 'https://app.example/v/pub_share' },
+        urls: { share: 'https://app.example/s/tau~pub_share' },
         access: {
           grants: [
             {
@@ -709,7 +709,7 @@ type BarePublicationsServiceDeps = ConstructorParameters<typeof PublicationsServ
           {} as BarePublicationsServiceDeps[6],
           {
             getEntitlements: async () => ({ canCreatePrivateShares: true }),
-          } as BarePublicationsServiceDeps[7],
+          } as unknown as BarePublicationsServiceDeps[7],
         ),
     },
     {

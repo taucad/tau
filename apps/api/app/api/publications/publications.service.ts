@@ -994,7 +994,7 @@ export class PublicationsService {
     await Promise.all(
       Object.entries(manifest.files).map(async ([relativePath, shaRef]) => {
         const key = blobKeyFromSha256Hex(this.sha256HexFromManifestRef(relativePath, shaRef));
-        const contentType = publicationContentType(relativePath);
+        const contentType = relativePath === 'thumbnail.webp' ? 'image/webp' : 'application/octet-stream';
         const existing = await this.storage.headBlob({ namespace: 'blobs', key, tier: targetTier });
         if (existing && existing.contentType === contentType) {
           return;

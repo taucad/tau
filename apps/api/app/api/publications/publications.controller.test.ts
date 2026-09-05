@@ -98,8 +98,8 @@ describe('PublicationsController', () => {
     vi.mocked(service.publishFromUpload).mockResolvedValue({
       id: 'pub_test',
       urls: {
-        view: 'https://example/v/pub_test',
-        share: 'https://example/v/pub_test',
+        view: 'https://example/s/tau~pub_test',
+        share: 'https://example/s/tau~pub_test',
         og: 'https://cdn.example/og.png',
         thumbnail: 'https://cdn.example/thumb.webp',
       },
@@ -152,8 +152,8 @@ describe('PublicationsController', () => {
       publication: publicationWire,
       viewerRole: 'owner',
       urls: {
-        view: 'https://example/v/pub_x',
-        share: 'https://example/v/pub_x',
+        view: 'https://example/s/tau~pub_x',
+        share: 'https://example/s/tau~pub_x',
         og: 'https://cdn.example/og.png',
         thumbnail: 'https://cdn.example/thumb.webp',
       },
@@ -201,8 +201,8 @@ describe('PublicationsController', () => {
       },
       viewerRole: 'public',
       urls: {
-        view: 'https://example/v/pub_x',
-        share: 'https://example/v/pub_x',
+        view: 'https://example/s/tau~pub_x',
+        share: 'https://example/s/tau~pub_x',
         og: 'https://cdn.example/og.png',
         thumbnail: 'https://cdn.example/thumb.webp',
       },

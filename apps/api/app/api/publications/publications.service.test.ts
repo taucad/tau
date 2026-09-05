@@ -133,6 +133,10 @@ function createStorageStub(): PublicationsServiceDeps[1] {
     deleteBlob: vi.fn(async () => undefined),
     presignGet: vi.fn(async () => 'https://example.invalid/get'),
     presignPut: vi.fn(async () => 'https://example.invalid/put'),
+    createMultipartUpload: vi.fn(async () => 'upload-id'),
+    presignUploadPart: vi.fn(async () => 'https://example.invalid/part'),
+    completeMultipartUpload: vi.fn(async () => undefined),
+    abortMultipartUpload: vi.fn(async () => undefined),
     publicUrl: vi.fn(() => 'https://example.invalid/public'),
     headProbeObject: vi.fn(async () => undefined),
     headPrivateBucket: vi.fn(async () => true),
@@ -514,7 +518,7 @@ describe('PublicationsService.publishFromUpload validation', () => {
       'team@example.com',
     ]);
     expect(accessPayloads.every((payload) => payload['status'] === 'active')).toBe(true);
-    expect(result.urls.view).toBe(`http://app/v/${result.id}`);
+    expect(result.urls.view).toBe(`http://app/s/tau~${result.id}`);
     expect(result.urls.share).toBe(result.urls.view);
     expect(email.sendPublicationInvite).toHaveBeenCalledTimes(2);
     expect(email.sendPublicationInvite).toHaveBeenCalledWith(
@@ -599,7 +603,7 @@ describe('PublicationsService.publishFromUpload validation', () => {
     });
 
     // Publish completes and returns a coherent result; only the over-cap emails are dropped.
-    expect(result.urls.view).toBe(`http://app/v/${result.id}`);
+    expect(result.urls.view).toBe(`http://app/s/tau~${result.id}`);
     expect(email.sendPublicationInvite).not.toHaveBeenCalled();
     expect(metrics.publicationInviteEmailsSuppressedTotal.add).toHaveBeenCalledWith(2, {
       trigger: 'publish',
@@ -733,7 +737,7 @@ describe('PublicationsService.getProjectShareEnvelope', () => {
         description: 'Shared description',
         visibility: 'private',
         createdAt: createdAt.toISOString(),
-        urls: { share: 'http://app/v/pub_current' },
+        urls: { share: 'http://app/s/tau~pub_current' },
         access: {
           grants: [
             {
@@ -1353,6 +1357,7 @@ describe('PublicationsService access grants', () => {
       createRateLimiterStub(),
       createMetricsStub(),
       email,
+      createBillingStub(),
     );
 
     const result = await service.inviteAccess({
@@ -1390,6 +1395,7 @@ describe('PublicationsService access grants', () => {
       createRateLimiterStub(),
       createMetricsStub(),
       email,
+      createBillingStub(),
     );
 
     const result = await service.inviteAccess({
@@ -1404,7 +1410,7 @@ describe('PublicationsService access grants', () => {
       recipientEmail: 'friend@example.com',
       ownerName: 'Owner',
       publicationTitle: 'T',
-      url: 'http://app/v/pub_access',
+      url: 'http://app/s/tau~pub_access',
     });
   });
 
@@ -1433,6 +1439,7 @@ describe('PublicationsService access grants', () => {
       createRateLimiterStub({ inviteAllowed: false }),
       metrics,
       email,
+      createBillingStub(),
     );
 
     const result = await service.inviteAccess({
@@ -1476,6 +1483,7 @@ describe('PublicationsService access grants', () => {
       createRateLimiterStub({ inviteThrows: true }),
       metrics,
       email,
+      createBillingStub(),
     );
 
     const result = await service.inviteAccess({

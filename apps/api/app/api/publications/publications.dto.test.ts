@@ -279,8 +279,8 @@ describe('publicationUrlsSchema', () => {
 
   it('accepts URL fields', () => {
     const urls = {
-      view: 'https://app.example/v/1',
-      share: 'https://app.example/v/1',
+      view: 'https://app.example/s/1',
+      share: 'https://app.example/s/1',
       og: 'https://cdn.example/og.png',
       thumbnail: 'https://cdn.example/t.webp',
       manifest: 'https://cdn.example/m.json',
@@ -294,8 +294,8 @@ describe('publishResponseSchema', () => {
     const payload = {
       id: 'pub',
       urls: {
-        view: 'https://app.example/v/pub',
-        share: 'https://app.example/v/pub',
+        view: 'https://app.example/s/tau~pub',
+        share: 'https://app.example/s/tau~pub',
         og: 'https://cdn.example/og.png',
         thumbnail: 'https://cdn.example/t.webp',
         manifest: 'https://cdn.example/m.json',
@@ -344,8 +344,8 @@ describe('publicationViewResponseSchema', () => {
       },
       viewerRole: 'public',
       urls: {
-        view: 'https://app.example/v/pub',
-        share: 'https://app.example/v/pub',
+        view: 'https://app.example/s/tau~pub',
+        share: 'https://app.example/s/tau~pub',
         og: 'https://cdn.example/og.png',
         thumbnail: 'https://cdn.example/t.webp',
         manifest: 'https://cdn.example/m.json',
@@ -379,7 +379,7 @@ describe('projectShareEnvelopeSchema', () => {
         description: null,
         visibility: 'private',
         createdAt: '2026-01-02T00:00:00.000Z',
-        urls: { share: 'https://app.example/v/pub_share' },
+        urls: { share: 'https://app.example/s/tau~pub_share' },
         access: {
           grants: [
             {

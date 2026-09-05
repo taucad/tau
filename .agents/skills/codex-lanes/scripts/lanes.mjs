@@ -12,7 +12,7 @@
 // lanes-file: "<lane-name> <job-id> [cwd]" per line; blank lines and # comments ignored.
 //
 // Dispatch flags: --review [--scope auto|working-tree|branch] [--base REF] (brief = focus text),
-//   --read-only (task without --write), --model M (default gpt-5.6-sol),
+//   --read-only (task without --write), --model M (default: inherit native configuration),
 //   --effort E (default: inherit ~/.codex/config.toml), --ledger FILE (append "name id cwd"),
 //   --section NAME|ID (Codex sidebar section for the lane's chat; defaults to
 //   $CODEX_LANES_SECTION or DEFAULT_SECTION), --no-section to leave it with the project.
@@ -26,16 +26,18 @@
 // Exit codes: 0 completed · 1 dead · 2 usage · 3 alive (stalled or time-boxed)
 
 import { execFile, spawn } from 'node:child_process';
-import { appendFileSync, existsSync, readFileSync, statSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { appendFileSync, existsSync, lstatSync, readFileSync, readlinkSync, statSync, writeFileSync } from 'node:fs';
 import { globSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline';
 import { promisify } from 'node:util';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const run = promisify(execFile);
 const TERMINAL = new Set(['completed', 'failed', 'cancelled']);
-const SELF = path.resolve(process.argv[1]);
+const SELF = fileURLToPath(import.meta.url);
 const JOB_ID_RE = /(task|review)-[a-z0-9]+-[a-z0-9]+/;
 // Codex sidebar section for lane threads, so they don't bury the project's own
 // chats. Override per call with --section <name|id>, or --no-section to opt out.
@@ -63,13 +65,61 @@ async function companion(CC, args, cwd, maxBuffer = 64 * 1024 * 1024) {
 
 // A worker that died mid-turn leaves status "running" behind a dead pid forever.
 function pidAlive(pid) {
-  if (!Number.isFinite(pid)) return null; // unknown, not proof of death
+  if (!Number.isInteger(pid) || pid <= 0) return null; // unknown, not proof of death
   try {
     process.kill(pid, 0);
     return true;
   } catch (err) {
-    return err.code === 'EPERM'; // alive but not ours
+    if (err.code === 'EPERM') return true; // alive but not ours
+    return err.code === 'ESRCH' ? false : null;
   }
+}
+
+export function assertRedispatchable(job) {
+  // Companion 1.0.6 clears pid explicitly on settled failure/cancellation.
+  // A missing pid on an active or unreadable record still proves nothing.
+  if (job?.pid === null && ['failed', 'cancelled'].includes(job.status)) return;
+  const unfinished = new Set(['failed', 'cancelled', 'running', 'queued', 'starting']);
+  if (!job || !unfinished.has(job.status) || pidAlive(job.pid) !== false) {
+    throw new Error(
+      'Redispatch refused: require a known-dead unfinished job; completed, live or unknown-liveness jobs retain their owner.',
+    );
+  }
+}
+
+// Hash current bytes, including already-dirty and untracked files, without changing
+// HEAD or either Git index. Symlinks are recorded, never followed into other repos.
+export async function snapshot(cwd) {
+  const { stdout } = await run('git', ['ls-files', '-co', '--exclude-standard', '-z'], {
+    cwd,
+    maxBuffer: 32 * 1024 * 1024,
+  });
+  const files = {};
+  for (const local of [...new Set(stdout.split('\0').filter(Boolean))].sort()) {
+    const file = path.resolve(cwd, local);
+    let stats;
+    try {
+      stats = lstatSync(file);
+    } catch (error) {
+      if (error.code === 'ENOENT') continue;
+      throw error;
+    }
+    if (!stats.isFile() && !stats.isSymbolicLink()) continue;
+    const bytes = stats.isSymbolicLink() ? Buffer.from(readlinkSync(file)) : readFileSync(file);
+    files[local] = {
+      kind: stats.isSymbolicLink() ? 'symlink' : 'file',
+      mode: stats.mode & 0o777,
+      sha256: createHash('sha256').update(bytes).digest('hex'),
+    };
+  }
+  return { cwd: path.resolve(cwd), files };
+}
+
+export function changedPaths(before, after) {
+  if (before.cwd !== after.cwd) throw new Error('Snapshots belong to different checkouts');
+  return [...new Set([...Object.keys(before.files), ...Object.keys(after.files)])]
+    .sort()
+    .filter((file) => JSON.stringify(before.files[file]) !== JSON.stringify(after.files[file]));
 }
 
 async function getJob(CC, jobId, cwd) {
@@ -78,10 +128,12 @@ async function getJob(CC, jobId, cwd) {
 }
 
 // terminal state name, 'zombie', or the live status ('running', 'queued', ...)
-function classify(job) {
-  if (TERMINAL.has(job.status)) return job.status;
-  if (pidAlive(job.pid) === false) return 'zombie';
-  return job.status;
+export function classify(job) {
+  if (TERMINAL.has(job.status) && (job.status === 'completed' || job.pid === null)) return job.status;
+  const alive = pidAlive(job.pid);
+  if (alive === false) return TERMINAL.has(job.status) ? job.status : 'zombie';
+  if (TERMINAL.has(job.status)) return alive ? 'running' : 'unknown';
+  return job.status ?? 'unknown';
 }
 
 // Newest evidence of forward progress: state-record heartbeat or log growth.
@@ -225,7 +277,7 @@ async function dispatch(CC, { name, cwd, brief, review, readOnly, model, effort,
   const args = review
     ? ['adversarial-review', '--background', ...(scope ? ['--scope', scope] : []), ...(base ? ['--base', base] : [])]
     : ['task', '--background', ...(readOnly ? [] : ['--write'])];
-  args.push('--model', model ?? 'gpt-5.6-sol');
+  if (model) args.push('--model', model);
   if (effort) args.push('--effort', effort);
   args.push(brief);
   const { stdout } = await companion(CC, args, cwd);
@@ -271,7 +323,9 @@ function observedEffort(threadId) {
 }
 
 function printAliveExit(CC, lane, { reason, quietMs, job }) {
-  console.log(`\n--- ${reason} — worker ${job.pid} ALIVE, phase ${job.phase ?? '?'}; nothing was killed`);
+  console.log(
+    `\n--- ${reason} — worker ${job.pid ?? 'unknown'} alive or liveness unconfirmed, phase ${job.phase ?? '?'}; nothing was killed`,
+  );
   if (job.logFile) console.log(`--- Peek:    tail -40 '${job.logFile}'`);
   console.log(
     `--- Re-arm:  node '${SELF}' lane --attach ${lane.jobId} --cwd '${lane.cwd}' --name ${lane.name} --stall-min 30`,
@@ -309,9 +363,9 @@ async function superviseLane(CC, lane, sup) {
       // With no deadline, an unresolvable job must not spin forever.
       if (++strikes >= 6) {
         console.log(
-          `\n--- DEAD: job ${lane.jobId} unreadable ${strikes} times — wrong id, wrong --cwd, or erased record`,
+          `\n--- UNKNOWN: job ${lane.jobId} unreadable ${strikes} times — inspect identity/cwd and liveness; do not redispatch`,
         );
-        return 1;
+        return 3;
       }
       await new Promise((r) => setTimeout(r, sup.intervalSec * 1000));
       continue;
@@ -386,20 +440,20 @@ async function cmdLane(rest) {
   process.exit(await superviseLane(CC, lane, sup));
 }
 
-async function cmdRedispatch(rest) {
-  const CC = resolveCompanion();
+export async function cmdRedispatch(rest, CC = resolveCompanion()) {
   const { opts, positionals } = parseFlags(rest);
   const [oldId] = positionals;
   if (!oldId) throw new UsageError('redispatch needs a job id');
   if (oldId.startsWith('review-')) throw new UsageError('redispatch supports task jobs; re-run reviews directly');
   const probeCwd = path.resolve(opts.cwd ?? process.cwd());
   const old = await getJob(CC, oldId, probeCwd);
+  assertRedispatchable(old);
   const req = old?.request;
   if (!req?.prompt) throw new Error(`job ${oldId} has no stored prompt (probed from ${probeCwd})`);
   const name = opts.name ?? `${oldId}-redo`;
   const cwd = path.resolve(opts.cwd ?? req.cwd ?? process.cwd());
   console.log(
-    `redispatching ${oldId}: model=${req.model ?? 'gpt-5.6-sol'} effort=${req.effort ?? '(config)'} write=${!!req.write}`,
+    `redispatching ${oldId}: model=${opts.model ?? req.model ?? '(config)'} effort=${opts.effort ?? req.effort ?? '(config)'} write=${!!req.write}`,
   );
   const jobId = await dispatch(CC, {
     name,
@@ -502,11 +556,11 @@ async function cmdWait(file, rest) {
   console.log('\n--- summary ---');
   for (const lane of lanes) console.log(`${String(seen.get(lane.name) ?? '?').padEnd(11)} ${lane.name}`);
   const states = [...seen.values()];
-  const dead = states.filter((s) => ['failed', 'cancelled', 'zombie', 'unreadable'].includes(s)).length;
-  const aliveQuiet = states.filter((s) => s === 'stalled' || s === 'time-boxed').length;
+  const dead = states.filter((s) => ['failed', 'cancelled', 'zombie'].includes(s)).length;
+  const aliveQuiet = states.filter((s) => ['stalled', 'time-boxed', 'unreadable'].includes(s)).length;
   if (dead) console.log(`\n${dead} lane(s) dead — see Re-dispatch lines above`);
   else if (aliveQuiet)
-    console.log(`\n${aliveQuiet} lane(s) alive but quiet — re-arm to keep waiting; do NOT re-dispatch`);
+    console.log(`\n${aliveQuiet} lane(s) quiet or liveness unknown — inspect and re-arm; do NOT re-dispatch`);
   else console.log('\nall lanes completed');
   process.exit(dead ? 1 : aliveQuiet ? 3 : 0);
 }
@@ -546,17 +600,31 @@ const USAGE = [
   '       lanes.mjs redispatch <job-id> [--cwd DIR] [--name NAME]',
   '       lanes.mjs wait <lanes-file>',
   '       lanes.mjs collect <lanes-file>',
+  '       lanes.mjs snapshot <cwd> <output.json>    (refuses to overwrite evidence)',
+  '       lanes.mjs changes <before.json> <after.json>',
   '       supervision flags: [--stall-min 15] [--deadline-min N] [--interval-sec 10]',
 ].join('\n');
 
 const [, , cmd, ...rest] = process.argv;
-try {
-  if (cmd === 'lane') await cmdLane(rest);
-  else if (cmd === 'redispatch') await cmdRedispatch(rest);
-  else if (cmd === 'wait' && rest[0]) await cmdWait(rest[0], rest.slice(1));
-  else if (cmd === 'collect' && rest[0]) await cmdCollect(rest[0]);
-  else throw new UsageError(USAGE);
-} catch (err) {
-  console.error(err instanceof UsageError ? err.message : `error: ${err.message}`);
-  process.exit(2);
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+  try {
+    if (cmd === 'lane') await cmdLane(rest);
+    else if (cmd === 'redispatch') await cmdRedispatch(rest);
+    else if (cmd === 'wait' && rest[0]) await cmdWait(rest[0], rest.slice(1));
+    else if (cmd === 'collect' && rest[0]) await cmdCollect(rest[0]);
+    else if (cmd === 'snapshot' && rest.length === 2)
+      writeFileSync(rest[1], `${JSON.stringify(await snapshot(path.resolve(rest[0])), null, 2)}\n`, { flag: 'wx' });
+    else if (cmd === 'changes' && rest.length === 2)
+      console.log(
+        JSON.stringify(
+          changedPaths(JSON.parse(readFileSync(rest[0], 'utf8')), JSON.parse(readFileSync(rest[1], 'utf8'))),
+          null,
+          2,
+        ),
+      );
+    else throw new UsageError(USAGE);
+  } catch (err) {
+    console.error(err instanceof UsageError ? err.message : `error: ${err.message}`);
+    process.exit(2);
+  }
 }

@@ -122,12 +122,6 @@ describe('toolInputSchemas registry', () => {
 
     expect(result.success).toBe(false);
   });
-
-  it('should accept the literal empty object for empty-input tools', () => {
-    const result = requireSchema(`tool-${toolName.transferToCadExpert}`).safeParse({});
-
-    expect(result.success).toBe(true);
-  });
 });
 
 describe('getToolInputSchema', () => {

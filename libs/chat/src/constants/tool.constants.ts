@@ -14,9 +14,6 @@ export const toolName = {
   getKernelResult: 'get_kernel_result',
   exportGeometry: 'export_geometry',
   screenshot: 'screenshot',
-  transferToCadExpert: 'transfer_to_cad_expert',
-  transferToResearchExpert: 'transfer_to_research_expert',
-  transferBackToSupervisor: 'transfer_back_to_supervisor',
 } as const satisfies Record<string, string>;
 
 /** @public */

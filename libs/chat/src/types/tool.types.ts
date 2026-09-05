@@ -15,18 +15,6 @@ import type { GlobSearchInput, GlobSearchOutput } from '#schemas/tools/glob-sear
 import type { GetKernelResultInput, GetKernelResultOutput } from '#schemas/tools/get-kernel-result.tool.schema.js';
 import type { ExportGeometryInput, ExportGeometryOutput } from '#schemas/tools/export-geometry.tool.schema.js';
 import type { ScreenshotInput, ScreenshotOutput } from '#schemas/tools/screenshot.tool.schema.js';
-import type {
-  TransferToCadExpertInput,
-  TransferToCadExpertOutput,
-} from '#schemas/tools/transfer-to-cad-expert.tool.schema.js';
-import type {
-  TransferToResearchExpertInput,
-  TransferToResearchExpertOutput,
-} from '#schemas/tools/transfer-to-research-expert.tool.schema.js';
-import type {
-  TransferBackToSupervisorInput,
-  TransferBackToSupervisorOutput,
-} from '#schemas/tools/transfer-back-to-supervisor.tool.schema.js';
 
 // =============================================================================
 // Tool Error Types
@@ -215,9 +203,6 @@ export type MyTools = InferUITools<{
   [toolName.getKernelResult]: AiTool<GetKernelResultInput, GetKernelResultOutput>;
   [toolName.exportGeometry]: AiTool<ExportGeometryInput, ExportGeometryOutput>;
   [toolName.screenshot]: AiTool<ScreenshotInput, ScreenshotOutput>;
-  [toolName.transferToCadExpert]: AiTool<TransferToCadExpertInput, TransferToCadExpertOutput>;
-  [toolName.transferToResearchExpert]: AiTool<TransferToResearchExpertInput, TransferToResearchExpertOutput>;
-  [toolName.transferBackToSupervisor]: AiTool<TransferBackToSupervisorInput, TransferBackToSupervisorOutput>;
 }>;
 
 /**

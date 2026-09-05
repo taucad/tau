@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { createMockFileSystem } from '@taucad/runtime-testing';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { createWorkspaceMirror } from '#workspace-mirror.js';
+import { createWorkspaceMirror } from '#build123d-workspace-mirror.js';
 
 const mirrors: Array<Awaited<ReturnType<typeof createWorkspaceMirror>>> = [];
 
@@ -32,7 +32,11 @@ describe('Build123d workspace mirror', () => {
     ]);
     const filesystem = createMockFileSystem({
       readdirResult: (directory) =>
-        directory === '' ? ['skip.pyc', '.git', 'main.py', 'lib'] : directory === 'lib' ? ['model.py'] : [],
+        directory === ''
+          ? ['skip.pyc', '.git', 'main.py', 'lib', 'thumbnail.webp']
+          : directory === 'lib'
+            ? ['model.py']
+            : [],
       readFileResult: (path) => files.get(path)!,
     });
     filesystem.mocks.lstat.mockImplementation(async (path: string) => {

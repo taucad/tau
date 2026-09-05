@@ -177,6 +177,12 @@ describe('Page application shell', () => {
     expect(controlRegion.children[0]).toBe(within(controlRegion).getByRole('link', { name: 'Home' }));
     expect(controlRegion.children[1]).toBe(within(controlRegion).getByRole('button', { name: 'Toggle Sidebar' }));
     expect(controlRegion.children).toHaveLength(2);
+    expect(controlRegion).toHaveClass('gap-2');
+    expect(
+      container
+        .querySelector<HTMLElement>('[data-slot=application-shell]')
+        ?.style.getPropertyValue('--titlebar-controls-width'),
+    ).toBe('calc(var(--spacing) * 28)');
   });
 
   it('resizes the sidebar by 16px and clamps to the pane bounds', () => {
@@ -236,6 +242,11 @@ describe('Page header contract', () => {
     expect(container.querySelector('[data-slot=web-titlebar-controls]')).not.toBeInTheDocument();
     expect(container.querySelector('main')).toHaveClass('[--header-height:calc(var(--spacing)*9)]');
     expect(container.querySelector('header')).toHaveClass('h-(--header-height)', 'border-b', 'bg-sidebar');
+    expect(
+      container
+        .querySelector<HTMLElement>('[data-slot=application-shell]')
+        ?.style.getPropertyValue('--titlebar-controls-width'),
+    ).toBe('calc(var(--spacing) * 47)');
     expect(container.querySelector('header > div')).toHaveClass(
       'md:group-data-[sidebar-open=false]/app-shell:ml-(--titlebar-controls-width)',
     );

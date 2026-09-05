@@ -28,7 +28,9 @@ import { TauWordmark } from '#components/icons/tau-wordmark.js';
 
 export const headerHeight = 'calc(var(--spacing) * 12)';
 export const desktopHeaderHeight = 'calc(var(--spacing) * 9)';
-export const titlebarControlsWidth = 'calc(var(--spacing) * 46)';
+
+const desktopTitlebarControlsWidth = 'calc(var(--spacing) * 47)';
+const webTitlebarControlsWidth = 'calc(var(--spacing) * 28)';
 
 const sidebarMinimumWidth = 192;
 const sidebarPreferredWidth = 224;
@@ -74,7 +76,7 @@ const WebTitlebarControls = ({
 }): React.JSX.Element => (
   <div
     data-slot='web-titlebar-controls'
-    className='fixed top-0 left-0 z-50 hidden h-9 w-(--titlebar-controls-width) items-center gap-1 bg-transparent px-2 md:flex'
+    className='fixed top-0 left-0 z-50 hidden h-9 w-(--titlebar-controls-width) items-center gap-2 bg-transparent px-2 md:flex'
   >
     <Link
       to='/'
@@ -127,7 +129,11 @@ const ApplicationShell = ({
       data-slot='application-shell'
       data-sidebar-open={!isMobile && open}
       className='group/app-shell relative size-full min-h-0 overflow-hidden'
-      style={{ '--titlebar-controls-width': titlebarControlsWidth } as CSSProperties}
+      style={
+        {
+          '--titlebar-controls-width': isDesktopTarget ? desktopTitlebarControlsWidth : webTitlebarControlsWidth,
+        } as CSSProperties
+      }
     >
       {isDesktopTarget ? (
         <DesktopTitlebarControls onSidebarResize={resizeSidebar} />

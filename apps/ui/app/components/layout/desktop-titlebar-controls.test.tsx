@@ -44,9 +44,9 @@ describe('DesktopTitlebarControls', () => {
     const backButton = screen.getByRole('button', { name: 'Back' });
     const forwardButton = screen.getByRole('button', { name: 'Forward' });
 
-    expect(titlebar).toHaveClass('h-9', 'bg-transparent');
+    expect(titlebar).toHaveClass('h-9', 'w-(--titlebar-controls-width)', 'bg-transparent');
     expect(titlebar).not.toHaveClass('border-b');
-    expect(controls).toHaveClass('h-9', 'bg-transparent', '[app-region:no-drag]');
+    expect(controls).toHaveClass('h-9', 'bg-transparent', 'pl-22', '[app-region:no-drag]');
     expect(controls).not.toHaveClass('border-b', '[app-region:drag]');
     expect(dragRegion).toHaveClass('w-[84px]', '[app-region:drag]');
     expect(sidebar).toHaveAttribute('data-has-resize', 'true');

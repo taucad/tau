@@ -71,10 +71,13 @@ export const DesktopTitlebarControls = ({
   }, []);
 
   return (
-    <div data-slot='desktop-titlebar' className='fixed top-0 left-0 z-50 h-9 w-[11.5rem] bg-transparent'>
+    <div
+      data-slot='desktop-titlebar'
+      className='fixed top-0 left-0 z-50 h-9 w-(--titlebar-controls-width) bg-transparent'
+    >
       <div
         data-slot='desktop-titlebar-controls'
-        className='flex h-9 items-center gap-1 bg-transparent pr-2 pl-[84px] [app-region:no-drag] [&_button]:[app-region:no-drag]'
+        className='flex h-9 items-center gap-1 bg-transparent pr-2 pl-22 [app-region:no-drag] [&_button]:[app-region:no-drag]'
       >
         <span
           aria-hidden

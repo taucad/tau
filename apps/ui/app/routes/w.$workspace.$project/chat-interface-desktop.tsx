@@ -89,7 +89,7 @@ export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
                   <ChatHistory
                     className={cn(
                       !sidebarOpen &&
-                        '[&>[data-slot=floating-panel-content]>[data-slot=floating-panel-content-header]]:pl-48 [&>[data-slot=floating-panel-content]>[data-slot=floating-panel-content-header]]:[app-region:no-drag]',
+                        '[&>[data-slot=floating-panel-content]>[data-slot=floating-panel-content-header]]:pl-(--titlebar-controls-width) [&>[data-slot=floating-panel-content]>[data-slot=floating-panel-content-header]]:[app-region:no-drag]',
                     )}
                     isExpanded={desktopLayout.chatOpen}
                     setIsExpanded={(value) => {
@@ -103,7 +103,7 @@ export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
                 <div
                   className={cn(
                     '@container/viewer relative size-full overflow-hidden',
-                    !sidebarOpen && !chatVisible && '[&_.dv-tabs-and-actions-container]:pl-46',
+                    !sidebarOpen && !chatVisible && '[&_.dv-tabs-and-actions-container]:pl-(--titlebar-controls-width)',
                   )}
                 >
                   <ViewerDockview />

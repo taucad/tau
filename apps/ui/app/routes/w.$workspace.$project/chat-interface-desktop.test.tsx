@@ -146,7 +146,7 @@ describe('ChatInterfaceDesktop', () => {
     sidebar.open = false;
     renderDesktop();
     expect(await screen.findByTestId('chat-lane')).toHaveClass(
-      '[&>[data-slot=floating-panel-content]>[data-slot=floating-panel-content-header]]:pl-48',
+      '[&>[data-slot=floating-panel-content]>[data-slot=floating-panel-content-header]]:pl-(--titlebar-controls-width)',
       '[&>[data-slot=floating-panel-content]>[data-slot=floating-panel-content-header]]:[app-region:no-drag]',
     );
   });
@@ -156,7 +156,7 @@ describe('ChatInterfaceDesktop', () => {
     sidebar.open = false;
     renderDesktop();
     const viewer = await screen.findByTestId('viewer-lane');
-    expect(viewer.parentElement).toHaveClass('[&_.dv-tabs-and-actions-container]:pl-46');
+    expect(viewer.parentElement).toHaveClass('[&_.dv-tabs-and-actions-container]:pl-(--titlebar-controls-width)');
   });
 
   it('keeps the Viewer mounted when both auxiliary lanes are closed', async () => {

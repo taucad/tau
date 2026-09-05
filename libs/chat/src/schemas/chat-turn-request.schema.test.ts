@@ -36,3 +36,25 @@ describe('parseChatTurnRequest', () => {
     await expect(parseChatTurnRequest(request([message]))).resolves.toMatchObject({ messages: [message] });
   });
 });
+
+it('rejects an unregistered static tool at the request boundary', async () => {
+  await expect(
+    parseChatTurnRequest(
+      request([
+        {
+          id: 'unknown-tool-message',
+          role: 'assistant',
+          parts: [
+            {
+              type: 'tool-unregistered_operation',
+              toolCallId: 'unknown',
+              state: 'output-available',
+              input: {},
+              output: 'Old result',
+            },
+          ],
+        },
+      ]),
+    ),
+  ).rejects.toMatchObject({ issues: [expect.objectContaining({ path: ['messages'] })] });
+});

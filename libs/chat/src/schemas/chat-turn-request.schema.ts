@@ -5,6 +5,34 @@ import type { MyUIMessage } from '#types/message.types.js';
 import type { AgentConfig } from '#schemas/agent-config.schema.js';
 
 /**
+ * Admission metadata for one logical chat run.
+ *
+ * The idempotency key is minted once by the client for a logical run and is
+ * reused only when that same run is retried after a transport interruption.
+ * `version` makes the admission protocol independently evolvable from the
+ * agent configuration and message schemas.
+ *
+ * @public
+ */
+export const chatRunAdmissionSchema = z
+  .object({
+    version: z.literal(1),
+    idempotencyKey: z.string().min(16).max(128),
+  })
+  .strict()
+  .meta({ id: 'ChatRunAdmission' });
+
+/** Immutable browser execution target for one detached CAD turn. @public */
+export const chatExecutionTargetSchema = z
+  .object({
+    workspaceId: z.string().min(1).max(128),
+    baseRevisionId: z.string().min(1).max(256),
+    hostId: z.string().min(1).max(128),
+  })
+  .strict()
+  .meta({ id: 'ChatExecutionTarget' });
+
+/**
  * Wire contract for a single chat-turn request: a chat id, the message
  * history the client has, and the per-turn agent configuration. Transport
  * is incidental — today this rides as the HTTP body of `POST /v1/chat`,
@@ -32,10 +60,30 @@ import type { AgentConfig } from '#schemas/agent-config.schema.js';
 export const chatTurnRequestSchema = z
   .object({
     id: z.string(),
+    projectId: z.string().min(1),
     messages: uiMessagesSchema,
     agent: agentConfigSchema,
+    admission: chatRunAdmissionSchema,
+    execution: chatExecutionTargetSchema.optional(),
+  })
+  .superRefine((request, context) => {
+    if (request.agent.profile === 'cad' && request.execution === undefined) {
+      context.addIssue({ code: 'custom', path: ['execution'], message: 'CAD turns require an execution target.' });
+    }
+    if (request.agent.profile !== 'cad' && request.execution !== undefined) {
+      context.addIssue({ code: 'custom', path: ['execution'], message: 'Only CAD turns accept an execution target.' });
+    }
   })
   .meta({ id: 'ChatTurnRequest' });
+
+/** Admission metadata for one parsed chat run. @public */
+export type ChatRunAdmission = z.infer<typeof chatRunAdmissionSchema>;
+
+/** Wire-shape admission metadata. @public */
+export type ChatRunAdmissionInput = z.input<typeof chatRunAdmissionSchema>;
+
+/** Immutable browser execution target for one detached CAD turn. @public */
+export type ChatExecutionTarget = z.infer<typeof chatExecutionTargetSchema>;
 
 /** Wire-shape (input) of a chat-turn request. @public */
 export type ChatTurnRequestInput = z.input<typeof chatTurnRequestSchema>;

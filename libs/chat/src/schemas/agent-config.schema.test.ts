@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import {
   agentConfigSchema,
+  cadAgentExecutionSchema,
   cadAgentConfigSchema,
   commitNameAgentConfigSchema,
   projectNameAgentConfigSchema,
@@ -10,7 +11,7 @@ import type { CadAgentConfigInput } from '#schemas/agent-config.schema.js';
 
 const validCadAgent: CadAgentConfigInput = {
   profile: 'cad',
-  model: 'anthropic/claude-sonnet-4-5',
+  execution: { kind: 'tau', model: 'anthropic/claude-sonnet-4-5' },
   kernel: 'replicad',
   mode: 'agent',
   toolChoice: 'auto',
@@ -24,7 +25,7 @@ describe('agentConfigSchema', () => {
 
       expect(result.profile).toBe('cad');
       if (result.profile === 'cad') {
-        expect(result.model).toBe('anthropic/claude-sonnet-4-5');
+        expect(result.execution).toEqual({ kind: 'tau', model: 'anthropic/claude-sonnet-4-5' });
         expect(result.kernel).toBe('replicad');
       }
     });
@@ -63,14 +64,24 @@ describe('agentConfigSchema', () => {
   });
 
   describe('cad variant required fields', () => {
-    it('should reject a cad agent missing model with path agent.model', () => {
-      const { model: _model, ...withoutModel } = validCadAgent;
-      const result = agentConfigSchema.safeParse(withoutModel);
+    it('should reject a cad agent missing execution with path agent.execution', () => {
+      const { execution: _execution, ...withoutExecution } = validCadAgent;
+      const result = agentConfigSchema.safeParse(withoutExecution);
 
       expect(result.success).toBe(false);
       if (!result.success) {
-        expect(result.error.issues.some((issue) => issue.path.join('.') === 'model')).toBe(true);
+        expect(result.error.issues.some((issue) => issue.path.join('.') === 'execution')).toBe(true);
       }
+    });
+
+    it('should reject the removed top-level model field', () => {
+      const { execution: _execution, ...base } = validCadAgent;
+      const result = cadAgentConfigSchema.safeParse({
+        ...base,
+        model: 'anthropic/claude-sonnet-4-5',
+      });
+
+      expect(result.success).toBe(false);
     });
 
     it('should reject a cad agent missing kernel with path agent.kernel', () => {
@@ -114,6 +125,69 @@ describe('agentConfigSchema', () => {
     });
   });
 
+  describe('execution substrate', () => {
+    it('should parse Tau execution without widening it into a model provider', () => {
+      expect(cadAgentExecutionSchema.parse({ kind: 'tau', model: 'openai/gpt-5.5' })).toEqual({
+        kind: 'tau',
+        model: 'openai/gpt-5.5',
+      });
+    });
+
+    it('should carry an optional daemon hostId and stay wire-compatible without one', () => {
+      expect(cadAgentExecutionSchema.parse({ kind: 'tau', model: 'openai/gpt-5.5', hostId: 'origin' })).toEqual({
+        kind: 'tau',
+        model: 'openai/gpt-5.5',
+        hostId: 'origin',
+      });
+      expect(cadAgentExecutionSchema.parse({ kind: 'tau', model: 'openai/gpt-5.5' })).not.toHaveProperty('hostId');
+      expect(cadAgentExecutionSchema.safeParse({ kind: 'tau', model: 'openai/gpt-5.5', hostId: '' }).success).toBe(
+        false,
+      );
+    });
+
+    it('should parse Paseo execution without requiring a Tau model', () => {
+      expect(
+        cadAgentConfigSchema.parse({
+          ...validCadAgent,
+          execution: { kind: 'paseo', connectionId: 'conn_local', agentId: 'agent_claude' },
+        }).execution,
+      ).toEqual({ kind: 'paseo', connectionId: 'conn_local', agentId: 'agent_claude' });
+    });
+
+    it('should parse an external ACP execution and require the host that spawns it', () => {
+      expect(
+        cadAgentConfigSchema.parse({
+          ...validCadAgent,
+          execution: { kind: 'acp', hostId: 'origin', agentId: 'codex' },
+        }).execution,
+      ).toEqual({ kind: 'acp', hostId: 'origin', agentId: 'codex' });
+      // No browser placement exists for an external agent: the adapter is a
+      // local process, so a turn naming no host has nowhere to run.
+      expect(cadAgentExecutionSchema.safeParse({ kind: 'acp', agentId: 'codex' }).success).toBe(false);
+      expect(cadAgentExecutionSchema.safeParse({ kind: 'acp', hostId: 'origin' }).success).toBe(false);
+      // A Tau model is not part of an external execution.
+      expect(
+        cadAgentExecutionSchema.safeParse({
+          kind: 'acp',
+          hostId: 'origin',
+          agentId: 'codex',
+          model: 'openai/gpt-5.5',
+        }).success,
+      ).toBe(false);
+    });
+
+    it('should reject mixed Tau and Paseo fields', () => {
+      expect(
+        cadAgentExecutionSchema.safeParse({
+          kind: 'paseo',
+          connectionId: 'conn_local',
+          agentId: 'agent_claude',
+          model: 'openai/gpt-5.5',
+        }).success,
+      ).toBe(false);
+    });
+  });
+
   describe('snapshot / contextPayload optionality', () => {
     it('should leave snapshot undefined when omitted from the wire — no sentinel default, no controller-side collapse', () => {
       const result = cadAgentConfigSchema.parse(validCadAgent);
@@ -137,7 +211,6 @@ describe('agentConfigSchema', () => {
     });
 
     it('should preserve a provided contextPayload verbatim', () => {
-      // eslint-disable-next-line @typescript-eslint/naming-convention -- `AGENTS.md` is a filesystem key, not a JS identifier
       const memory = { 'AGENTS.md': 'guidelines' };
       const result = cadAgentConfigSchema.parse({
         ...validCadAgent,

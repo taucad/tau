@@ -1,6 +1,7 @@
 import type { ConstantRecord, ChatError } from '@taucad/types';
 import type { KernelId } from '@taucad/types/constants';
 import type { messageRole, messageStatus } from '#constants/message.constants.js';
+import type { CadAgentExecution } from '#schemas/agent-config.schema.js';
 import type { MyUIMessage } from '#types/message.types.js';
 
 /** @public */
@@ -31,6 +32,8 @@ export type ChatUsageTokens = {
 /** @public */
 export type ChatUsageCost = {
   inputTokensCost: number;
+  /** Chat-scoped execution target. Paseo targets contain opaque ids only. */
+  activeExecution?: CadAgentExecution;
   outputTokensCost: number;
   cacheReadTokensCost: number;
   cacheWriteTokensCost: number;
@@ -57,13 +60,7 @@ export type Chat = {
   error?: ChatError; // Persisted error for display after page reload
   startupRequest?: ChatStartupRequest;
   /**
-   * Chat-scoped active model id. When present, chat-scoped consumers prefer
-   * this over the cookie-derived default so cookie changes elsewhere never
-   * mutate the model in use within this chat.
-   */
-  activeModel?: string;
-  /**
-   * Chat-scoped active CAD kernel. Same semantics as {@link Chat.activeModel}
+   * Chat-scoped active CAD kernel. Same semantics as {@link Chat.activeExecution}
    * — present means this chat owns its kernel choice, absent means consumers
    * fall back to the cookie default.
    */

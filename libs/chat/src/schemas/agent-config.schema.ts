@@ -14,10 +14,75 @@ import { snapshotSchema } from '#schemas/metadata.schema.js';
 export const toolChoiceSchema = z.union([z.enum(toolModes), z.array(z.enum(toolNames))]);
 
 /**
+ * Which host runs a Tau turn.
+ *
+ * Absent means the page's own dedicated worker — the browser host, and the
+ * wire-compatible default every pre-W4 execution parses as. Two literals are
+ * reserved: `origin` is the daemon that *served this page* (rung 1, discovered
+ * same-origin at `/.well-known/tau-host`), and `desktop` is the Electron
+ * services utility's in-process launcher. Anything else is a paired device id
+ * from `GET /v1/agents` (rung 2).
+ *
+ * @public
+ */
+export type TauAgentHostId = 'origin' | 'desktop' | (string & {});
+
+/** Tau-owned LangGraph/model execution for one CAD turn. @public */
+export const tauAgentExecutionSchema = z
+  .object({
+    kind: z.literal('tau'),
+    model: z.string().min(1),
+    /** See {@link TauAgentHostId}; absent = this browser's own worker. */
+    hostId: z.string().min(1).optional(),
+  })
+  .strict()
+  .meta({ id: 'TauAgentExecution' });
+
+/**
+ * An external ACP agent (Claude Code, Codex) running on a Tau Host.
+ *
+ * `hostId` is **required**, unlike Tau's own execution: there is no browser
+ * placement for an external agent — the adapter is a local process spawned by a
+ * daemon, so a turn that names no host has nowhere to run.
+ *
+ * The agent always works in a materialized branch, never the workspace root:
+ * SP-4 proved ACP session modes are advisory against a CLI whose own config
+ * disables approvals, so confinement is the host's filesystem placement and the
+ * revision mode is not a user choice for this execution.
+ *
+ * @public
+ */
+export const acpAgentExecutionSchema = z
+  .object({
+    kind: z.literal('acp'),
+    /** See {@link TauAgentHostId}; `origin`, `desktop`, or a paired device id. */
+    hostId: z.string().min(1),
+    /** Registry agent id the daemon advertised, e.g. `claude` or `codex`. */
+    agentId: z.string().min(1).max(64),
+  })
+  .strict()
+  .meta({ id: 'AcpAgentExecution' });
+
+/** Paseo-owned coding-agent execution selected through a paired connection. @public */
+export const paseoAgentExecutionSchema = z
+  .object({
+    kind: z.literal('paseo'),
+    connectionId: z.string().min(1).max(128),
+    agentId: z.string().min(1).max(256),
+  })
+  .strict()
+  .meta({ id: 'PaseoAgentExecution' });
+
+/** Execution substrate for a CAD turn. This is deliberately separate from Tau's model-provider catalog. @public */
+export const cadAgentExecutionSchema = z
+  .discriminatedUnion('kind', [tauAgentExecutionSchema, acpAgentExecutionSchema, paseoAgentExecutionSchema])
+  .meta({ id: 'CadAgentExecution' });
+
+/**
  * Per-request configuration for the CAD agent profile.
  *
  * This is the single source of truth for "what does the CAD agent need to know
- * about this turn" — model selection, kernel target, mode, tool whitelist, the
+ * about this turn" — execution substrate, kernel target, mode, tool whitelist, the
  * testing-tools flag, and the editor snapshot / client-assembled context payload.
  *
  * `snapshot` and `contextPayload` are truly optional: callers that omit them
@@ -32,7 +97,7 @@ export const toolChoiceSchema = z.union([z.enum(toolModes), z.array(z.enum(toolN
 export const cadAgentConfigSchema = z
   .object({
     profile: z.literal('cad'),
-    model: z.string(),
+    execution: cadAgentExecutionSchema,
     kernel: z.enum(kernelProviders),
     mode: z.enum(chatModes),
     toolChoice: toolChoiceSchema,
@@ -40,6 +105,7 @@ export const cadAgentConfigSchema = z
     snapshot: snapshotSchema.optional(),
     contextPayload: contextPayloadSchema.optional(),
   })
+  .strict()
   .meta({ id: 'CadAgentConfig' });
 
 /**
@@ -90,6 +156,18 @@ export type CadAgentConfig = z.infer<typeof cadAgentConfigSchema>;
  * @public
  */
 export type CadAgentConfigInput = z.input<typeof cadAgentConfigSchema>;
+
+/** Parsed execution-substrate selection for a CAD turn. @public */
+export type CadAgentExecution = z.infer<typeof cadAgentExecutionSchema>;
+
+/** Tau-owned execution selection. @public */
+export type TauAgentExecution = z.infer<typeof tauAgentExecutionSchema>;
+
+/** External ACP agent execution selection. @public */
+export type AcpAgentExecution = z.infer<typeof acpAgentExecutionSchema>;
+
+/** Paseo-owned execution selection. @public */
+export type PaseoAgentExecution = z.infer<typeof paseoAgentExecutionSchema>;
 
 /** Parsed shape of the project-name agent config. @public */
 export type ProjectNameAgentConfig = z.infer<typeof projectNameAgentConfigSchema>;

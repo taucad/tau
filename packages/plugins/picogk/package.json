@@ -61,11 +61,13 @@
     "zod": "^4.0.0"
   },
   "dependencies": {
+    "@taucad/cache-core": "workspace:*",
     "@taucad/geometry-core": "workspace:*",
     "@taucad/native-process-core": "workspace:*"
   },
   "devDependencies": {
     "@taucad/assimp": "workspace:*",
+    "@taucad/middleware": "workspace:*",
     "@taucad/runtime": "workspace:*",
     "@taucad/runtime-testing": "workspace:*",
     "zod": "catalog:"

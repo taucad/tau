@@ -2,7 +2,7 @@ import { NodeIO } from '@gltf-transform/core';
 import type { Document, JSONDocument, Mesh as GltfTransformMesh } from '@gltf-transform/core';
 
 import { embedGltfResources, registerTauGltfExtensions, TauCadTopology } from '@taucad/geometry-core';
-import type { KittyCadBrepNode, KittyCadBrepRoot } from '@taucad/geometry-core';
+import type { KittyCadBrepNode, KittyCadBrepRoot, TauCadTopologyComponent } from '@taucad/geometry-core';
 import { kittyCadBoundaryRepresentationExtension, tauCadTopologyExtension } from '@taucad/runtime/types';
 import type { JSONObject } from '@taucad/runtime/types';
 
@@ -46,23 +46,12 @@ type KittyCadBrepPayload = {
   curves3D?: unknown[];
 };
 
-type PrimitiveRef = {
-  nodeIndex: number;
-  meshIndex: number;
-  primitiveIndex: number;
-};
-
-type TauTopologyComponent = {
-  id: string;
-  name: string;
+type TauTopologyComponent = TauCadTopologyComponent & {
   kind: 'body' | 'face';
-  selector: string;
-  parentId?: string;
-  childIds?: string[];
   nodeIndex: number;
   meshIndex: number;
   primitiveIndices: number[];
-  primitiveRefs: PrimitiveRef[];
+  primitiveRefs: NonNullable<TauCadTopologyComponent['primitiveRefs']>;
   capabilities: JSONObject;
   sourceRefs: JSONObject;
 };
@@ -81,8 +70,8 @@ const defaultCapabilities = {
   hasDrawings: false,
   hasPreciseTopology: true,
   exports: [
-    { fidelity: 'mesh', formats: ['glb', 'stl'], available: true },
-    { fidelity: 'brep', formats: ['step', 'stp', 'iges', 'igs', 'brep', 'dxf'], available: true },
+    { fidelity: 'mesh' as const, formats: ['glb', 'stl'], available: true },
+    { fidelity: 'brep' as const, formats: ['step', 'stp', 'iges', 'igs', 'brep', 'dxf'], available: true },
   ],
 } satisfies JSONObject;
 

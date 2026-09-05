@@ -18,6 +18,7 @@
   "types": "./dist/index.d.mts",
   "files": [
     "dist",
+    "agent",
     "LICENSE",
     "README.md",
     "CHANGELOG.md"
@@ -34,6 +35,7 @@
   },
   "exports": {
     ".": "./src/index.ts",
+    "./agent": "./agent/SKILL.md",
     "./annotations": "./src/annotations/index.ts",
     "./package.json": "./package.json"
   },
@@ -45,6 +47,7 @@
         "import": "./dist/index.mjs",
         "default": "./dist/index.mjs"
       },
+      "./agent": "./agent/SKILL.md",
       "./annotations": {
         "types": "./dist/annotations/index.d.mts",
         "import": "./dist/annotations/index.mjs",

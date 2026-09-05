@@ -149,7 +149,7 @@ const SharedProjectLayout = ({
             <Drawer modal>
               <DrawerTrigger asChild>
                 <Button type='button' className='absolute right-3 bottom-3 z-30' size='sm' variant='secondary'>
-                  <PanelBottom className='mr-1.5 size-4' aria-hidden />
+                  <PanelBottom className='mr-1.5 size-3.5' aria-hidden />
                   Workbench
                 </Button>
               </DrawerTrigger>

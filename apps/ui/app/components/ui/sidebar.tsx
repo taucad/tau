@@ -145,7 +145,7 @@ const SidebarTrigger = ({
           }}
           {...properties}
         >
-          {children ?? <PanelLeft aria-hidden data-slot='sidebar-panel-icon' className='size-4' />}
+          {children ?? <PanelLeft aria-hidden data-slot='sidebar-panel-icon' className='size-3.5' />}
           <span className='sr-only'>Toggle Sidebar</span>
         </Button>
       </TooltipTrigger>

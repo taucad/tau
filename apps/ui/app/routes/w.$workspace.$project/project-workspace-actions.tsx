@@ -43,7 +43,7 @@ const WorkspacePaneToggle = ({
           onOpenChange(!isOpen);
         }}
       >
-        <Icon aria-hidden className='size-4' />
+        <Icon aria-hidden className='size-3.5' />
       </Button>
     </TooltipTrigger>
     <TooltipContent>{tooltip}</TooltipContent>

@@ -1,0 +1,7 @@
+{
+  "name": "agent-tools",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "libs/agent-tools",
+  "projectType": "library",
+  "tags": ["scope:shared", "type:lib"]
+}

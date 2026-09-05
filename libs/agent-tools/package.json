@@ -1,0 +1,48 @@
+{
+  "name": "@taucad/agent-tools",
+  "version": "0.1.0",
+  "description": "Host-neutral chat tool environment: registry, skills, GeoSpec adapter, capture recipe",
+  "type": "module",
+  "private": true,
+  "sideEffects": false,
+  "license": "Apache-2.0",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./registry": {
+      "types": "./src/registry/index.ts",
+      "import": "./src/registry/index.ts",
+      "default": "./src/registry/index.ts"
+    },
+    "./skills": {
+      "types": "./src/skills/index.ts",
+      "import": "./src/skills/index.ts",
+      "default": "./src/skills/index.ts"
+    },
+    "./geospec": {
+      "types": "./src/geospec/index.ts",
+      "import": "./src/geospec/index.ts",
+      "default": "./src/geospec/index.ts"
+    },
+    "./capture": {
+      "types": "./src/capture/index.ts",
+      "import": "./src/capture/index.ts",
+      "default": "./src/capture/index.ts"
+    }
+  },
+  "dependencies": {
+    "@taucad/agent-host": "workspace:*",
+    "@taucad/chat": "workspace:*",
+    "@taucad/filesystem": "workspace:*",
+    "@taucad/utils": "workspace:*",
+    "geospec": "workspace:*",
+    "zod": "catalog:"
+  },
+  "imports": {
+    "#*.js": "./src/*.ts",
+    "#*": "./src/*"
+  }
+}

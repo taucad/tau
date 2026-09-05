@@ -21,6 +21,11 @@
       "import": "./src/utils/index.ts",
       "default": "./src/utils/index.ts"
     },
+    "./prompts": {
+      "types": "./src/prompts/index.ts",
+      "import": "./src/prompts/index.ts",
+      "default": "./src/prompts/index.ts"
+    },
     "./rpc": {
       "types": "./src/rpc/index.ts",
       "import": "./src/rpc/index.ts",

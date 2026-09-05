@@ -1,7 +1,15 @@
 // @vitest-environment node
 /**
- * The repo's first gated timing benchmark: the native OpenRSCAD engine against
- * the WebAssembly one, through the runtime client, on the same source.
+ * The repo's first gated timing benchmark: the OpenRSCAD engine's N-API addon
+ * against its WebAssembly build, through the runtime client, on the same source.
+ *
+ * Both payloads ship in one package (`@taulabs/openrscad-engine`) and one Tau
+ * kernel binds whichever the export map picks, so the two rows are built here
+ * rather than imported: `native` is the kernel's default (the bare import,
+ * which the `node` condition resolves to the addon) and `wasm` is the same
+ * kernel over a facade rebuilt from the engine's own `./core` + `./node`. The
+ * fingerprint gate below would pass vacuously if the addon were missing, so the
+ * suite asserts the default really bound `native` first.
  *
  * Shape copied from `repos/nanoraster/bench/gated.mjs` and
  * `repos/nanoraster/scripts/compare-benchmark.mjs`:
@@ -35,9 +43,23 @@ import { createRuntimeClient } from '@taucad/runtime/client';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import { defineRuntime } from '@taucad/runtime/worker';
-import { openrscadKernel } from '@taucad/openrscad';
-import { openrscadNativeKernel } from '@taucad/openrscad-native';
+import type * as OpenRscadModule from '@taulabs/openrscad-engine';
+import type { RawEngine } from '@taulabs/openrscad-engine/core';
+import { makeApi } from '@taulabs/openrscad-engine/core';
+import * as wasmGlue from '@taulabs/openrscad-engine/node';
+import { createOpenrscadKernel, openrscadKernel } from '@taucad/openrscad';
 import { loadFixture } from '@taucad/tau-examples/fixtures';
+
+/** The WebAssembly backend, assembled from the engine's own facade and glue. */
+const openrscadWasmKernel = createOpenrscadKernel({
+  loadBackend: async () =>
+    ({
+      ...makeApi(wasmGlue as unknown as RawEngine, async () => undefined),
+      ensureReady: async () => undefined,
+      backend: 'wasm',
+      backendCause: undefined,
+    }) as unknown as typeof OpenRscadModule,
+});
 
 /**
  * Gated cases. Only models whose measured run-to-run spread is small enough for
@@ -108,12 +130,17 @@ const exportGlb = async (client: ReturnType<typeof createClient>, mainFile: stri
 };
 
 describe('native OpenRSCAD speedup (gated)', () => {
+  it('binds the addon for the default kernel, so the comparison is not wasm against itself', async () => {
+    const engine = await import('@taulabs/openrscad-engine');
+    expect(engine.backend).toBe('native');
+  });
+
   for (const { name, fixture, cold } of cases) {
     it(
       name,
       async () => {
         // Fingerprints first, each from a fresh client's first call.
-        const engines = { wasm: openrscadKernel, native: openrscadNativeKernel };
+        const engines = { wasm: openrscadWasmKernel, native: openrscadKernel };
         const fingerprints: Record<string, { bytes: number; sha256: string }> = {};
         for (const [engine, kernel] of Object.entries(engines)) {
           const client = createClient(kernel, fixture.files);
@@ -128,8 +155,8 @@ describe('native OpenRSCAD speedup (gated)', () => {
         const shared = cold
           ? undefined
           : {
-              wasm: createClient(openrscadKernel, fixture.files),
-              native: createClient(openrscadNativeKernel, fixture.files),
+              wasm: createClient(openrscadWasmKernel, fixture.files),
+              native: createClient(openrscadKernel, fixture.files),
             };
         const timings: Record<string, number[]> = { wasm: [], native: [] };
         try {

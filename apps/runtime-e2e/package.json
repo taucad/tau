@@ -24,12 +24,12 @@
     "@taucad/middleware": "workspace:*",
     "@taucad/opencascade": "workspace:*",
     "@taucad/openrscad": "workspace:*",
-    "@taucad/openrscad-native": "workspace:*",
     "@taucad/rolldown": "workspace:*",
     "@taucad/replicad": "workspace:*",
     "@taucad/runtime": "workspace:*",
     "@taucad/runtime-testing": "workspace:*",
     "@taucad/tau-examples": "workspace:*",
+    "@taulabs/openrscad-engine": "catalog:",
     "@types/ws": "^8.18.1",
     "geospec": "workspace:*",
     "ws": "catalog:"

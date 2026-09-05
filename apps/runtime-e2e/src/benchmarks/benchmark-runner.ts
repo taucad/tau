@@ -17,7 +17,6 @@ import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import { replicadKernel } from '@taucad/replicad';
 import { openrscadKernel } from '@taucad/openrscad';
-import { openrscadNativeKernel } from '@taucad/openrscad-native';
 import { esbuild } from '@taucad/esbuild';
 import { defineRuntime } from '@taucad/runtime/worker';
 import { getGeometryStatsFromInspect, getInspectReport } from '@taucad/runtime-testing';
@@ -273,18 +272,11 @@ const runnerFingerprint = sha256(
  * @returns Aggregated results with per-case statistics and optional OC tracing summaries
  */
 // oxlint-disable-next-line complexity -- intentional sequential loop
-/**
- * The kernel a case is authored for. Exactly one is registered per case:
- * `openrscad` and `openrscad-native` declare the same capability id, so
- * registering both would be a collision, not a fallback pair.
- */
+/** The kernel a case is authored for. Exactly one is registered per case. */
 function kernelForCase(kernel: BenchmarkKernel | undefined, replicadOptions: Record<string, unknown>) {
   switch (kernel) {
     case 'openrscad': {
       return openrscadKernel();
-    }
-    case 'openrscad-native': {
-      return openrscadNativeKernel();
     }
     default: {
       return replicadKernel(replicadOptions);

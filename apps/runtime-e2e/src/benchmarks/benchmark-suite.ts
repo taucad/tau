@@ -10,7 +10,7 @@ import { loadFixture } from '@taucad/tau-examples/fixtures';
 
 /** Which kernel a case is written for. Cases are authored in one kernel's
  *  language, so this is part of the case, not a run-time flag. @public */
-export type BenchmarkKernel = 'replicad' | 'openrscad' | 'openrscad-native';
+export type BenchmarkKernel = 'replicad' | 'openrscad';
 
 /** A single benchmark case with its files and metadata. */
 export type BenchmarkCase = {
@@ -290,15 +290,18 @@ const examples: BenchmarkCase[] = [
 
 /**
  * OpenSCAD-language cases. The fixture directory is `openscad` (the language),
- * not `openrscad` (the engine); `openrscad-native` runs the identical source
- * through the N-API engine, which is what makes the two rows comparable.
+ * not `openrscad` (the engine). One row: there is one OpenRSCAD kernel, and
+ * whether it bound the addon or the WebAssembly build is the engine's own
+ * choice — `native-speedup.bench.test.ts` is where the two are compared.
  */
-const openscad: BenchmarkCase[] = (['openrscad', 'openrscad-native'] as const).map((kernel) => ({
-  name: `kitchen-sink-${kernel}`,
-  category: 'openscad',
-  kernel,
-  ...loadFixture('openscad', 'kitchen-sink'),
-}));
+const openscad: BenchmarkCase[] = [
+  {
+    name: 'kitchen-sink-openrscad',
+    category: 'openscad',
+    kernel: 'openrscad',
+    ...loadFixture('openscad', 'kitchen-sink'),
+  },
+];
 
 const stress: BenchmarkCase[] = [
   inlineCase(

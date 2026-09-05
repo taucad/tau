@@ -1,9 +1,21 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { cerebras } from '@ai-sdk/cerebras';
 import { generateText } from 'ai';
+import type { LanguageModelUsage } from 'ai';
 import { CompletionCopilot } from 'monacopilot';
 import type { CompletionRequestBody, CompletionMetadata } from 'monacopilot';
 import { Span } from '#telemetry/tracer.service.js';
+import type { Environment } from '#config/environment.config.js';
+import { MetricsService } from '#telemetry/metrics.js';
+import { ModelService } from '#api/models/model.service.js';
+import { BillingService } from '#api/billing/billing.service.js';
+import { CreditLedgerService } from '#api/billing/credit-ledger.service.js';
+import { computeUserChargedCostMicro } from '#api/billing/credit-estimator.js';
+import { FreeTierAiDisabledError, InsufficientCreditsError } from '#api/billing/billing.errors.js';
+
+/** Nominal per-completion cost shown when a debt-blocked user is rejected. */
+const nominalCompletionCostMicro = 2000n;
 
 const cursorMarker = '{{CURSOR}}';
 
@@ -104,12 +116,37 @@ function buildFileContent(metadata: CompletionMetadata): string {
 
 @Injectable()
 export class CodeCompletionService {
-  private readonly copilot: CompletionCopilot;
+  private readonly logger = new Logger(this.constructor.name);
 
-  public constructor() {
-    this.copilot = new CompletionCopilot(undefined, {
-      async model(prompt) {
-        const { text } = await generateText({
+  public constructor(
+    private readonly billingService: BillingService,
+    private readonly creditLedgerService: CreditLedgerService,
+    private readonly modelService: ModelService,
+    private readonly metricsService: MetricsService,
+    private readonly configService: ConfigService<Environment, true>,
+  ) {}
+
+  @Span()
+  public async complete(body: CompletionRequestBody, userId: string): Promise<unknown> {
+    // AD14: completions run on Tau's Cerebras key — the same entitlement rules
+    // as chat AI apply, and debt hard-blocks (Monaco degrades silently).
+    const entitlements = await this.billingService.getEntitlements(userId);
+    if (!entitlements.aiEnabled) {
+      throw new FreeTierAiDisabledError();
+    }
+    const account = await this.creditLedgerService.getAccount(userId);
+    if (account.balanceMicro <= 0n) {
+      throw new InsufficientCreditsError({
+        balanceMicro: account.balanceMicro,
+        requiredMicro: nominalCompletionCostMicro,
+      });
+    }
+
+    // The copilot is a lightweight prompt builder; constructing per request
+    // lets the model callback close over the billing identity.
+    const copilot = new CompletionCopilot(undefined, {
+      model: async (prompt) => {
+        const { text, usage } = await generateText({
           // Llama 3.3 70b via Cerebras — fast inference with strong code understanding
           model: cerebras('llama-3.3-70b'),
           system: prompt.context,
@@ -125,14 +162,12 @@ export class CodeCompletionService {
           maxOutputTokens: 256,
         });
 
+        void this.debitCompletionUsage(userId, usage);
         return { text };
       },
     });
-  }
 
-  @Span()
-  public async complete(body: CompletionRequestBody): Promise<unknown> {
-    return this.copilot.complete({
+    return copilot.complete({
       options: {
         customPrompt: (metadata) => ({
           context: buildContext(metadata),
@@ -142,5 +177,45 @@ export class CodeCompletionService {
       },
       body: { completionMetadata: { ...body.completionMetadata, technologies: [] } },
     });
+  }
+
+  /**
+   * Reservation-less post-fact debit (AD14): a completion is a single bounded
+   * ~300-token call, orders of magnitude below one chat model call.
+   */
+  private async debitCompletionUsage(userId: string, usage: LanguageModelUsage): Promise<void> {
+    const model = this.modelService.models.find((entry) => entry.id === 'cerebras-llama-3.3-70b');
+    if (!model) {
+      this.logger.warn('Completion metering entry cerebras-llama-3.3-70b missing from the catalog');
+      return;
+    }
+    const cachedInputTokens = usage.inputTokenDetails.cacheReadTokens ?? 0;
+    const amountMicro = computeUserChargedCostMicro({
+      model,
+      usage: {
+        inputTokens: Math.max((usage.inputTokens ?? 0) - cachedInputTokens, 0),
+        outputTokens: usage.outputTokens ?? 0,
+        reasoningTokens: 0,
+        cacheReadTokens: cachedInputTokens,
+        cacheWriteTokens: 0,
+      },
+      markupFraction: this.configService.get('TAU_CREDIT_MARKUP_FRACTION', { infer: true }),
+    });
+    if (amountMicro <= 0n) {
+      return;
+    }
+    try {
+      await this.creditLedgerService.debit({
+        userId,
+        amountMicro,
+        category: 'llm',
+        modelId: model.id,
+        note: 'code-completion',
+      });
+      this.metricsService.billingCreditCommitted.add(Number(amountMicro), { 'tau.billing.category': 'llm' });
+    } catch (error) {
+      this.metricsService.billingCommitFailures.add(1, { 'tau.billing.category': 'llm' });
+      this.logger.error(`Completion usage debit failed for ${userId}: ${String(error)}`);
+    }
   }
 }

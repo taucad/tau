@@ -7,6 +7,7 @@
 import { describe, it, expect, vi, beforeAll } from 'vitest';
 import { Document, NodeIO, Accessor } from '@gltf-transform/core';
 import { KHRMaterialsUnlit } from '@gltf-transform/extensions';
+import { EXTManifold } from 'manifold-3d/manifold-gltf';
 import type { GeometryGltf, GeometrySvg, ExportGeometryResult } from '@taucad/runtime/types';
 import type { KernelMiddlewareRuntime } from '@taucad/runtime/middleware';
 
@@ -38,8 +39,8 @@ const removedEdgeBundleNodeName = ['tau', 'merged', 'edges'].join('-');
  *
  * @returns The binary GLTF data
  */
-async function createCubeGltfWithoutLines(): Promise<Uint8Array<ArrayBuffer>> {
-  const io = new NodeIO();
+async function createCubeGltfWithoutLines(manifold = false): Promise<Uint8Array<ArrayBuffer>> {
+  const io = manifold ? new NodeIO().registerExtensions([EXTManifold]) : new NodeIO();
   const document = new Document();
   const buffer = document.createBuffer();
 
@@ -74,7 +75,7 @@ async function createCubeGltfWithoutLines(): Promise<Uint8Array<ArrayBuffer>> {
 
   // 12 triangles for 6 faces
   // prettier-ignore -- preserve triangle index grouping
-  const indices = new Uint16Array([
+  const indices = new Uint32Array([
     0,
     1,
     2,
@@ -135,7 +136,15 @@ async function createCubeGltfWithoutLines(): Promise<Uint8Array<ArrayBuffer>> {
     .setIndices(indexAccessor);
 
   const mesh = document.createMesh().addPrimitive(primitive);
-  const node = document.createNode().setMesh(mesh);
+  if (manifold) {
+    const topology = document
+      .createExtension(EXTManifold)
+      .createManifoldPrimitive()
+      .setIndices(indexAccessor)
+      .setRunIndex([0, indices.length]);
+    mesh.setExtension(EXTManifold.EXTENSION_NAME, topology);
+  }
+  const node = document.createNode().setMesh(mesh).setExtras({ tauComponentId: 'cube' });
   document.createScene().addChild(node);
 
   return io.writeBinary(document);
@@ -285,6 +294,73 @@ async function createMixedMeshGltf(): Promise<Uint8Array<ArrayBuffer>> {
   scene.addChild(node1);
   scene.addChild(node2);
 
+  return io.writeBinary(document);
+}
+
+async function createIgnoredTriangleInputsGltf(): Promise<Uint8Array<ArrayBuffer>> {
+  const io = new NodeIO();
+  const document = new Document();
+  const buffer = document.createBuffer();
+  const mesh = document.createMesh();
+  mesh.addPrimitive(document.createPrimitive().setMode(primitiveModeTriangles));
+  mesh.addPrimitive(
+    document
+      .createPrimitive()
+      .setMode(primitiveModeTriangles)
+      .setAttribute(
+        'POSITION',
+        document
+          .createAccessor()
+          .setBuffer(buffer)
+          .setType(Accessor.Type['VEC3']!)
+          .setArray(new Uint16Array([0, 0, 0, 1, 0, 0, 0, 1, 0])),
+      ),
+  );
+  mesh.addPrimitive(
+    document
+      .createPrimitive()
+      .setMode(primitiveModeTriangles)
+      .setAttribute(
+        'POSITION',
+        document.createAccessor().setBuffer(buffer).setType(Accessor.Type['VEC3']!).setArray(new Float32Array()),
+      ),
+  );
+  document.createScene().addChild(document.createNode().setMesh(mesh));
+  return io.writeBinary(document);
+}
+
+async function createImplicitIndexInputsGltf(): Promise<Uint8Array<ArrayBuffer>> {
+  const io = new NodeIO();
+  const document = new Document();
+  const buffer = document.createBuffer();
+  const positions = new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]);
+  const mesh = document.createMesh();
+  mesh.addPrimitive(
+    document
+      .createPrimitive()
+      .setMode(primitiveModeTriangles)
+      .setAttribute(
+        'POSITION',
+        document.createAccessor().setBuffer(buffer).setType(Accessor.Type['VEC3']!).setArray(positions),
+      ),
+  );
+  mesh.addPrimitive(
+    document
+      .createPrimitive()
+      .setMode(primitiveModeTriangles)
+      .setAttribute(
+        'POSITION',
+        document.createAccessor().setBuffer(buffer).setType(Accessor.Type['VEC3']!).setArray(positions),
+      )
+      .setIndices(
+        document
+          .createAccessor()
+          .setBuffer(buffer)
+          .setType(Accessor.Type['SCALAR']!)
+          .setArray(new Uint8Array([0, 1, 2])),
+      ),
+  );
+  document.createScene().addChild(document.createNode().setMesh(mesh));
   return io.writeBinary(document);
 }
 
@@ -487,6 +563,36 @@ describe('gltfEdgeDetection', () => {
           // The content should be different from the original (re-serialized with generated edges).
           expect(geometry.content).not.toBe(gltfData);
           expect(geometry.content.byteLength).toBeGreaterThan(gltfData.byteLength);
+        }
+      });
+
+      it('should preserve manifold surfaces and attach generated lines as an identity child', async () => {
+        const gltfData = await createCubeGltfWithoutLines(true);
+        const handlerResult = createSuccessResult({ format: 'gltf', content: gltfData });
+        const { input, runtime } = createEdgeDetectionContext();
+        const result = await gltfEdgeDetectionDefinition.wrapCreateGeometry!(
+          input,
+          createMockCreateGeometryHandler(handlerResult),
+          runtime,
+        );
+
+        expect(result.success).toBe(true);
+        if (result.success) {
+          const io = new NodeIO().registerExtensions([KHRMaterialsUnlit, EXTManifold]);
+          const document = await io.readBinary((result.data as GeometryGltf).content);
+          const [surface, edges] = document.getRoot().listMeshes();
+          const surfaceNode = document
+            .getRoot()
+            .listNodes()
+            .find((node) => node.getMesh() === surface)!;
+          const edgeNode = surfaceNode.listChildren().find((node) => node.getMesh() === edges)!;
+
+          expect(surface!.listPrimitives().map((primitive) => primitive.getMode())).toEqual([primitiveModeTriangles]);
+          expect(surface!.getExtension(EXTManifold.EXTENSION_NAME)).not.toBeNull();
+          expect(edges!.listPrimitives().map((primitive) => primitive.getMode())).toEqual([primitiveModeLines]);
+          expect(edges!.getExtension(EXTManifold.EXTENSION_NAME)).toBeNull();
+          expect(edgeNode.getMatrix()).toEqual([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
+          expect(edgeNode.getExtras()).toMatchObject({ tauComponentId: 'cube' });
         }
       });
     });
@@ -799,6 +905,51 @@ describe('gltfEdgeDetection', () => {
       const primitives = await analyzeGltfPrimitives((result.data as GeometryGltf).content);
       expect(primitives[0]!.lineCount).toBe(1);
     }
+  });
+
+  it('returns the original GLTF when triangle inputs cannot produce edges', async () => {
+    const content = await createIgnoredTriangleInputsGltf();
+    const result = createSuccessResult({ format: 'gltf', content });
+    const { input, runtime } = createEdgeDetectionContext();
+
+    const rendered = await gltfEdgeDetectionDefinition.wrapCreateGeometry!(
+      input,
+      createMockCreateGeometryHandler(result),
+      runtime,
+    );
+
+    expect(rendered.success && rendered.data).toBe(result.data);
+  });
+
+  it('supports unindexed triangles and ignores unsupported index widths', async () => {
+    const content = await createImplicitIndexInputsGltf();
+    const { input, runtime } = createEdgeDetectionContext();
+
+    const result = await gltfEdgeDetectionDefinition.wrapCreateGeometry!(
+      input,
+      createMockCreateGeometryHandler(createSuccessResult({ format: 'gltf', content })),
+      runtime,
+    );
+
+    expect(result.success).toBe(true);
+    if (result.success && result.data?.format === 'gltf') {
+      const primitives = await analyzeGltfPrimitives(result.data.content);
+      expect(primitives[0]).toMatchObject({ triangleCount: 2, lineCount: 2 });
+    }
+  });
+
+  it('leaves mesh results unchanged when edge content is not requested', async () => {
+    const content = await createCubeGltfWithoutLines();
+    const result = createSuccessResult({ format: 'gltf', content });
+    const { runtime } = createEdgeDetectionContext();
+
+    const rendered = await gltfEdgeDetectionDefinition.wrapMeshGeometry!(
+      { options: {}, content: { includeEdges: false } },
+      vi.fn(async () => result),
+      runtime,
+    );
+
+    expect(rendered).toBe(result);
   });
 
   it('adds requested edges to GLB export files and leaves other files untouched', async () => {

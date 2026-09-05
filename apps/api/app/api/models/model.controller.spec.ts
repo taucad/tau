@@ -9,6 +9,7 @@ import type { Model } from '#api/models/model.schema.js';
 const mockModels: Model[] = [
   {
     id: 'anthropic-claude-4-sonnet',
+    providerKind: 'tau-hosted',
     name: 'Claude 4 Sonnet',
     provider: {
       id: 'anthropic',
@@ -36,6 +37,7 @@ const mockModels: Model[] = [
   },
   {
     id: 'openai-gpt-4o',
+    providerKind: 'tau-hosted',
     name: 'GPT-4o',
     provider: {
       id: 'openai',
@@ -118,6 +120,7 @@ describe('ModelController', () => {
 
       for (const model of result) {
         expect(model).toHaveProperty('id');
+        expect(model).toHaveProperty('providerKind', 'tau-hosted');
         expect(model).toHaveProperty('name');
         expect(model).toHaveProperty('provider');
         expect(model).toHaveProperty('model');

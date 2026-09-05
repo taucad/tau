@@ -101,11 +101,15 @@ describe('LangChain Google dependency resolution', () => {
     const googleCommonPackageJsonPath = vertexRequire.resolve('@langchain/google-common/package.json');
     const googleCommonPackageJson = vertexRequire('@langchain/google-common/package.json') as PackageJson;
 
+    // The fork ships as the published npm alias (pnpm-workspace override
+    // `npm:@taulabs/langchain-google-common@2.2.0-beta.0`), superseding the
+    // earlier in-repo tarball; the invariant is fork-not-upstream at the
+    // pinned version.
     expect(googleCommonPackageJson).toMatchObject({
-      name: '@langchain/google-common',
+      name: '@taulabs/langchain-google-common',
       version: '2.2.0-beta.0',
     });
-    expect(googleCommonPackageJsonPath).toContain('file+tarballs+langchain-fork');
+    expect(googleCommonPackageJsonPath).toContain('@taulabs+langchain-google-common');
   });
 
   it('loads installed Google common with reasoning thoughts requested for symbolic levels', async () => {

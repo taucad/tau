@@ -4,18 +4,18 @@ import { toolName } from '@taucad/chat/constants';
 import type { ConfigService } from '@nestjs/config';
 import { modelList } from '#api/models/model.constants.js';
 import { ModelService } from '#api/models/model.service.js';
-import type { Model } from '#api/models/model.schema.js';
 import { ProviderService } from '#api/providers/provider.service.js';
-import type { TauReplayModelProvider } from '#api/tau-replay/tau-replay.contract.js';
 import type { Environment } from '#config/environment.config.ts';
 
 const maxEffectiveContextWindow = 200_000;
 
 const cappedModelIds = [
+  'anthropic-claude-fable-5.1',
   'anthropic-claude-fable-5',
   'anthropic-claude-opus-5',
   'anthropic-claude-opus-4.8',
   'anthropic-claude-sonnet-5',
+  'openai-gpt-6-astra',
   'openai-gpt-5.6-sol',
   'openai-gpt-5.6-terra',
   'openai-gpt-5.6-luna',
@@ -50,6 +50,12 @@ const createModelService = () => {
 };
 
 describe('modelList', () => {
+  it('marks every cloud catalog entry as explicitly Tau-hosted', () => {
+    for (const model of getCloudCatalogEntries()) {
+      expect(model.providerKind, model.id).toBe('tau-hosted');
+    }
+  });
+
   it('caps every cloud catalog effective context window at 200K tokens', () => {
     for (const model of getCloudCatalogEntries()) {
       expect(model.details.contextWindow, model.id).toBeLessThanOrEqual(maxEffectiveContextWindow);
@@ -105,6 +111,37 @@ describe('ModelService', () => {
     expect(modelList.anthropic['claude-4.8-opus']?.recommended).toBe(false);
   });
 
+  it('recommends Fable 5.1 while retaining Fable 5', async () => {
+    const service = createModelService();
+    const listedModels = await service.getModels();
+    const fable51 = listedModels.find((model) => model.id === 'anthropic-claude-fable-5.1');
+
+    expect(fable51).toMatchObject({
+      recommended: true,
+      model: 'claude-fable-5-1',
+      provider: { id: 'anthropic', name: 'Anthropic' },
+      support: {
+        toolChoice: false,
+        modalities: { input: ['text', 'image'], output: ['text'] },
+      },
+      details: {
+        family: 'claude',
+        contextWindow: maxEffectiveContextWindow,
+        maxTokens: 128_000,
+        knowledgeCutoff: '2026-06',
+        cost: { inputTokens: 10, outputTokens: 50, cacheReadTokens: 0.25, cacheWriteTokens: 12.5 },
+      },
+      configuration: {
+        streaming: true,
+        maxTokens: 120_000,
+        thinking: { type: 'adaptive', display: 'summarized' },
+        outputConfig: { effort: 'high' },
+      },
+    });
+    expect(fable51?.configuration).toHaveProperty('max_tokens', 120_000);
+    expect(modelList.anthropic['claude-fable-5']?.recommended).toBe(false);
+  });
+
   it('lists every GPT-5.6 tier and keeps GPT-5.5 non-recommended', async () => {
     const service = createModelService();
     const listedModels = await service.getModels();
@@ -114,6 +151,15 @@ describe('ModelService', () => {
     expect(service.models.map((model) => model.id)).toEqual(expect.arrayContaining(gpt56ModelIds));
     expect(listedModelIds).toEqual(expect.arrayContaining([...gpt56ModelIds, 'openai-gpt-5.5']));
     expect(modelList.openai['gpt-5.5']?.recommended).toBe(false);
+  });
+
+  it('lists GPT-6 Astra as a recommended OpenAI model', async () => {
+    const service = createModelService();
+    const listedModels = await service.getModels();
+    const listedModelIds = listedModels.map((model) => model.id);
+
+    expect(listedModelIds).toContain('openai-gpt-6-astra');
+    expect(modelList.openai['gpt-6-astra']?.recommended).toBe(true);
   });
 
   it('recommends Gemini 3.7 Flash instead of the Gemini 3.5 models', async () => {
@@ -244,79 +290,5 @@ describe('ModelService', () => {
         toolNames: [toolName.screenshot, toolName.testModel, toolName.getKernelResult, toolName.exportGeometry],
       }),
     ).toEqual([toolName.testModel, toolName.getKernelResult, toolName.exportGeometry]);
-  });
-});
-
-/**
- * The replay seam is optional DI: `TauReplayModule` binds it only under
- * TAU_TEST_MODE, and it is absent in production. These exercise the real
- * ModelService — the integration suites stub ModelService wholesale, so nothing
- * else would notice if this wiring went missing.
- */
-describe('ModelService tau replay seam', () => {
-  const replayModel: Model = {
-    id: 'tau-replay',
-    name: 'Tau Replay (test)',
-    slug: 'tau-replay',
-    model: 'tau-replay',
-    provider: { id: 'tau', name: 'Tau' },
-    details: {
-      family: 'tau',
-      families: ['tau'],
-      contextWindow: 200_000,
-      maxTokens: 64_000,
-      cost: { inputTokens: 1.5, outputTokens: 9, cacheReadTokens: 0.15, cacheWriteTokens: 0 },
-    },
-    configuration: { streaming: true },
-  };
-
-  const createServiceWithReplay = (tauReplay?: TauReplayModelProvider) => {
-    const configService = {
-      get: vi.fn().mockReturnValue(false),
-    } satisfies Pick<ConfigService<Environment>, 'get'>;
-
-    return new ModelService(
-      {} as unknown as ProviderService,
-      configService as unknown as ConfigService<Environment>,
-      tauReplay,
-    );
-  };
-
-  it('appends replay models to the listed catalog when the seam is bound', async () => {
-    const service = createServiceWithReplay({
-      listModels: () => [replayModel],
-      createModel: () => {
-        throw new Error('not used');
-      },
-    });
-
-    const listed = await service.getModels();
-
-    expect(listed.map((model) => model.id)).toContain('tau-replay');
-  });
-
-  it('registers the replay model for buildModel lookups', async () => {
-    const service = createServiceWithReplay({
-      listModels: () => [replayModel],
-      createModel: () => {
-        throw new Error('not used');
-      },
-    });
-
-    await service.getModels();
-
-    // `buildModel` resolves against `models`, so a replay model missing here is
-    // unreachable even when the provider factory exists.
-    expect(service.models.map((model) => model.id)).toContain('tau-replay');
-    expect(service.getProviderId('tau-replay')).toBe('tau');
-  });
-
-  it('omits replay models entirely when the seam is unbound', async () => {
-    const service = createServiceWithReplay();
-
-    const listed = await service.getModels();
-
-    expect(listed.map((model) => model.id)).not.toContain('tau-replay');
-    expect(service.models.map((model) => model.id)).not.toContain('tau-replay');
   });
 });

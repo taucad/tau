@@ -85,8 +85,11 @@ const modelProviderSchema = z.object({
   name: z.string().describe('The name of the provider'),
 });
 
+export const modelProviderKindSchema = z.enum(['tau-hosted', 'local', 'in-browser']);
+
 export const modelSchema = z.object({
   id: z.string().describe('The unique identifier of the model'),
+  providerKind: modelProviderKindSchema.describe('Where the model provider runs and whether Tau meters it'),
   name: z.string().describe('The human readable name of the model'),
   slug: z.string().describe('The slug of the model'),
   description: z.string().describe('A human-readable description of the model').optional(),
@@ -105,6 +108,7 @@ export const modelSchema = z.object({
 });
 
 export type Model = z.infer<typeof modelSchema>;
+export type ModelProviderKind = z.infer<typeof modelProviderKindSchema>;
 export type ModelDetails = z.infer<typeof modelDetailsSchema>;
 export type ModelSupport = z.infer<typeof modelSupportSchema>;
 export type ModelModalities = NonNullable<ModelSupport['modalities']>;

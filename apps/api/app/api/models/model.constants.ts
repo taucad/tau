@@ -1,9 +1,8 @@
 import type { Model, ModelModalities } from '#api/models/model.schema.js';
 import type { ProviderId } from '#api/providers/provider.schema.js';
 
-// 'ollama' (runtime-discovered) and 'tau' (TAU_TEST_MODE replay, runtime-appended)
-// are never part of the static cloud catalog.
-type CloudCatalogProviderId = Exclude<ProviderId, 'ollama' | 'tau'>;
+// 'ollama' is runtime-discovered and never part of the static cloud catalog.
+type CloudCatalogProviderId = Exclude<ProviderId, 'ollama'>;
 
 const textOnlyModalities = { input: ['text'], output: ['text'] } satisfies ModelModalities;
 const imageInputModalities = { input: ['text', 'image'], output: ['text'] } satisfies ModelModalities;
@@ -22,12 +21,58 @@ export function isModelListEntryEnabled(entry: ModelListEntry): boolean {
 
 export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListEntry>> = {
   anthropic: {
+    'claude-fable-5.1': {
+      enabled: true,
+      id: 'anthropic-claude-fable-5.1',
+      providerKind: 'tau-hosted',
+      name: 'Fable 5.1',
+      slug: 'claude-fable-5.1',
+      recommended: true,
+      description: "Anthropic's strongest model for demanding reasoning and long-horizon agentic CAD work.",
+      provider: {
+        id: 'anthropic',
+        name: 'Anthropic',
+      },
+      model: 'claude-fable-5-1',
+      support: {
+        toolChoice: false,
+        modalities: imageInputModalities,
+      },
+      details: {
+        family: 'claude',
+        families: ['claude'],
+        contextWindow: 200_000, // Provider supports 1M tokens; Tau caps effective chat budget for cost and compaction reliability.
+        maxTokens: 128_000,
+        knowledgeCutoff: '2026-06',
+        cost: {
+          inputTokens: 10,
+          outputTokens: 50,
+          cacheReadTokens: 0.25,
+          cacheWriteTokens: 12.5,
+        },
+      },
+      configuration: {
+        streaming: true,
+        maxTokens: 120_000,
+        // @ts-expect-error: FIXME - some models use camelCase
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- some models use snake_case
+        max_tokens: 120_000,
+        thinking: {
+          type: 'adaptive',
+          display: 'summarized',
+        },
+        outputConfig: {
+          effort: 'high',
+        },
+      },
+    },
     'claude-fable-5': {
       enabled: true,
       id: 'anthropic-claude-fable-5',
+      providerKind: 'tau-hosted',
       name: 'Fable 5',
       slug: 'claude-fable-5',
-      recommended: true,
+      recommended: false,
       description:
         "Anthropic's most capable widely released model for the hardest long-horizon agentic CAD design work.",
       provider: {
@@ -69,6 +114,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
     },
     'claude-opus-5': {
       id: 'anthropic-claude-opus-5',
+      providerKind: 'tau-hosted',
       name: 'Opus 5',
       slug: 'claude-opus-5',
       recommended: true,
@@ -113,6 +159,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
     },
     'claude-4.8-opus': {
       id: 'anthropic-claude-opus-4.8',
+      providerKind: 'tau-hosted',
       name: 'Opus 4.8',
       slug: 'claude-opus-4.8',
       recommended: false,
@@ -157,6 +204,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
     },
     'claude-sonnet-5': {
       id: 'anthropic-claude-sonnet-5',
+      providerKind: 'tau-hosted',
       name: 'Sonnet 5',
       slug: 'claude-sonnet-5',
       recommended: true,
@@ -200,6 +248,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
     },
     'claude-sonnet-4.6': {
       id: 'anthropic-claude-sonnet-4.6',
+      providerKind: 'tau-hosted',
       name: 'Sonnet 4.6',
       slug: 'claude-sonnet-4.6',
       recommended: false,
@@ -242,6 +291,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
     },
     'claude-haiku-4.5': {
       id: 'anthropic-claude-haiku-4.5',
+      providerKind: 'tau-hosted',
       name: 'Haiku 4.5',
       slug: 'claude-haiku-4.5',
       recommended: true,
@@ -283,9 +333,49 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
     },
   },
   openai: {
+    'gpt-6-astra': {
+      enabled: true,
+      id: 'openai-gpt-6-astra',
+      providerKind: 'tau-hosted',
+      name: 'GPT-6 Astra',
+      slug: 'gpt-6-astra',
+      recommended: true,
+      description:
+        "OpenAI's most capable model for the hardest CAD work: whole-assembly design, deep geometry debugging, and long multi-file refactors.",
+      provider: {
+        id: 'openai',
+        name: 'OpenAI',
+      },
+      model: 'gpt-6-astra',
+      support: {
+        modalities: imageInputModalities,
+      },
+      details: {
+        family: 'gpt',
+        families: ['GPT-6'],
+        contextWindow: 200_000, // Provider supports 1.05M tokens; Tau caps effective chat budget for cost and compaction reliability.
+        maxTokens: 128_000,
+        knowledgeCutoff: '2026-04',
+        cost: {
+          inputTokens: 10,
+          outputTokens: 50,
+          cacheReadTokens: 1,
+          cacheWriteTokens: 12.5,
+        },
+      },
+      configuration: {
+        streaming: true,
+        temperature: 1,
+        reasoning: {
+          effort: 'high',
+          summary: 'auto',
+        },
+      },
+    },
     'gpt-5.6-sol': {
       enabled: true,
       id: 'openai-gpt-5.6-sol',
+      providerKind: 'tau-hosted',
       name: 'GPT-5.6 Sol',
       slug: 'gpt-5.6-sol',
       recommended: true,
@@ -324,6 +414,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
     'gpt-5.6-terra': {
       enabled: true,
       id: 'openai-gpt-5.6-terra',
+      providerKind: 'tau-hosted',
       name: 'GPT-5.6 Terra',
       slug: 'gpt-5.6-terra',
       recommended: true,
@@ -361,6 +452,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
     'gpt-5.6-luna': {
       enabled: true,
       id: 'openai-gpt-5.6-luna',
+      providerKind: 'tau-hosted',
       name: 'GPT-5.6 Luna',
       slug: 'gpt-5.6-luna',
       recommended: true,
@@ -398,6 +490,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
     'gpt-5.5': {
       enabled: true,
       id: 'openai-gpt-5.5',
+      providerKind: 'tau-hosted',
       name: 'GPT-5.5',
       slug: 'gpt-5.5',
       recommended: false,
@@ -438,6 +531,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
     'gpt-4o-mini': {
       enabled: false,
       id: 'openai-gpt-4o-mini',
+      providerKind: 'tau-hosted',
       name: 'GPT-4o mini (generator metering)',
       slug: 'openai-gpt-4o-mini',
       description: 'Internal cost-metering entry for the project-name and commit-message generators.',
@@ -470,6 +564,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
   vertexai: {
     'gemini-3.1-pro': {
       id: 'google-gemini-3.1-pro',
+      providerKind: 'tau-hosted',
       name: 'Gemini 3.1 Pro',
       slug: 'gemini-3.1-pro',
       recommended: true,
@@ -504,6 +599,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
     },
     'gemini-3.7-flash': {
       id: 'google-gemini-3.7-flash',
+      providerKind: 'tau-hosted',
       name: 'Gemini 3.7 Flash',
       slug: 'gemini-3.7-flash',
       recommended: true,
@@ -537,6 +633,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
     },
     'gemini-3.5-flash-lite': {
       id: 'google-gemini-3.5-flash-lite',
+      providerKind: 'tau-hosted',
       name: 'Gemini 3.5 Flash-Lite',
       slug: 'gemini-3.5-flash-lite',
       recommended: false,
@@ -569,6 +666,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
     },
     'gemini-3.5-flash': {
       id: 'google-gemini-3.5-flash',
+      providerKind: 'tau-hosted',
       name: 'Gemini 3.5 Flash',
       slug: 'gemini-3.5-flash',
       recommended: false,
@@ -606,6 +704,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
     'kimi-k3': {
       enabled: true,
       id: 'together-kimi-k3',
+      providerKind: 'tau-hosted',
       name: 'Kimi K3',
       slug: 'kimi-k3',
       recommended: true,
@@ -639,6 +738,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
     'deepseek-v3.1': {
       enabled: false,
       id: 'together-deepseek-v3.1',
+      providerKind: 'tau-hosted',
       name: 'DeepSeek V3.1',
       slug: 'deepseek-v3.1',
       description: 'Best open-source coder with native thinking-in-tool-use, great for complex CAD code generation.',
@@ -671,6 +771,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
     'deepseek-r1': {
       enabled: false,
       id: 'together-deepseek-r1',
+      providerKind: 'tau-hosted',
       name: 'DeepSeek R1',
       slug: 'deepseek-r1',
       description: 'Best open-source reasoning model for complex geometry and multi-step assembly design.',
@@ -703,6 +804,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
     'glm-5.1': {
       enabled: false,
       id: 'together-glm-5.1',
+      providerKind: 'tau-hosted',
       name: 'GLM-5.1',
       slug: 'glm-5.1',
       description: 'Flagship open-source model for long-horizon agentic coding and complex engineering tasks.',
@@ -733,6 +835,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
     },
     'glm-5.2': {
       id: 'together-glm-5.2',
+      providerKind: 'tau-hosted',
       name: 'GLM-5.2',
       slug: 'glm-5.2',
       description:
@@ -766,6 +869,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
     'qwen-3.5-397b': {
       enabled: false,
       id: 'together-qwen-3.5-397b',
+      providerKind: 'tau-hosted',
       name: 'Qwen 3.5 397B',
       slug: 'qwen-3.5-397b',
       description: 'Long-context capable native multimodal model, strong for large CAD projects.',
@@ -797,6 +901,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
     'llama-4-maverick': {
       enabled: false,
       id: 'together-llama-4-maverick',
+      providerKind: 'tau-hosted',
       name: 'Llama 4 Maverick',
       slug: 'llama-4-maverick',
       description: 'Strong long-context capable general-purpose and coding model with massive ecosystem support.',
@@ -832,6 +937,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
     'qwen-3.5-397b': {
       enabled: false,
       id: 'morph-qwen-3.5-397b',
+      providerKind: 'tau-hosted',
       name: 'Qwen 3.5 397B',
       slug: 'qwen-3.5-397b',
       recommended: true,
@@ -866,6 +972,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
     },
     'minimax-m2.7': {
       id: 'morph-minimax-m2.7',
+      providerKind: 'tau-hosted',
       name: 'MiniMax M2.7',
       slug: 'minimax-m2.7',
       recommended: false,
@@ -901,6 +1008,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
     'deepseek-v4-flash': {
       enabled: false,
       id: 'morph-deepseek-v4-flash',
+      providerKind: 'tau-hosted',
       name: 'DeepSeek V4 Flash',
       slug: 'deepseek-v4-flash',
       description: 'Long-context capable open coder (beta), capped by Tau for cost and compaction reliability.',
@@ -938,6 +1046,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
     'grok-4.6': {
       enabled: true,
       id: 'xai-grok-4.6',
+      providerKind: 'tau-hosted',
       name: 'Grok 4.6',
       slug: 'grok-4.6',
       recommended: true,
@@ -981,6 +1090,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
     'kimi-k3': {
       enabled: false,
       id: 'moonshot-kimi-k3',
+      providerKind: 'tau-hosted',
       name: 'Kimi K3',
       slug: 'kimi-k3',
       recommended: false,
@@ -1020,6 +1130,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
     'qwen-3-235b': {
       enabled: false,
       id: 'cerebras-qwen-3-235b',
+      providerKind: 'tau-hosted',
       name: 'Qwen 3 235B',
       slug: 'cerebras-qwen-3-235b',
       description: 'Strong reasoning model running at ~1,400 tok/s, great for iterative CAD design.',
@@ -1053,6 +1164,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
     'llama-3.3-70b': {
       enabled: false,
       id: 'cerebras-llama-3.3-70b',
+      providerKind: 'tau-hosted',
       name: 'Llama 3.3 70B (completion metering)',
       slug: 'cerebras-llama-3.3-70b',
       description: 'Internal cost-metering entry for the inline code-completion service.',

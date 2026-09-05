@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import type { OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import ollama from 'ollama';
@@ -9,10 +9,8 @@ import type { ChatUsageCost, ChatUsageTokens } from '#api/chat/chat.schema.js';
 import type { Environment } from '#config/environment.config.ts';
 import type { ModelFamily, ProviderId } from '#api/providers/provider.schema.js';
 import { ProviderService } from '#api/providers/provider.service.js';
-import type { Model, ModelSupport } from '#api/models/model.schema.js';
+import type { Model, ModelProviderKind, ModelSupport } from '#api/models/model.schema.js';
 import { isModelListEntryEnabled, modelList, modelListEntryToModel } from '#api/models/model.constants.js';
-import { TAU_REPLAY_MODEL_PROVIDER } from '#api/tau-replay/tau-replay.contract.js';
-import type { TauReplayModelProvider } from '#api/tau-replay/tau-replay.contract.js';
 import { Span } from '#telemetry/tracer.service.js';
 import type { ProviderDiagnosticsContext, ProviderDiagnosticsLogger } from '#api/chat/utils/provider-diagnostics.js';
 import { createProviderDiagnosticsContext } from '#api/chat/utils/provider-diagnostics.js';
@@ -27,9 +25,6 @@ export class ModelService implements OnModuleInit {
   public constructor(
     private readonly providerService: ProviderService,
     private readonly configService: ConfigService<Environment>,
-    // Present only when TauReplayModule is loaded (TAU_TEST_MODE); undefined in prod.
-    // oxlint-disable-next-line new-cap -- NestJS param decorators are invoked by decorator syntax.
-    @Optional() @Inject(TAU_REPLAY_MODEL_PROVIDER) private readonly tauReplay?: TauReplayModelProvider,
   ) {}
 
   @Span()
@@ -85,14 +80,11 @@ export class ModelService implements OnModuleInit {
     const ollamaModels = ollamaEnabled ? await this.getOllamaModels() : [];
     const cloudEntries = Object.values(modelList).flatMap((modelsBySlug) => Object.values(modelsBySlug));
     const cloudModels = cloudEntries.map((entry) => modelListEntryToModel(entry));
-    // The replay model is appended at runtime (like Ollama) only when TAU_TEST_MODE
-    // loaded the module; it is absent from the static catalog and from prod.
-    const tauModels = this.tauReplay?.listModels() ?? [];
-    this.models = [...cloudModels, ...ollamaModels, ...tauModels];
+    this.models = [...cloudModels, ...ollamaModels];
     const listedCloud = cloudEntries
       .filter((entry) => isModelListEntryEnabled(entry))
       .map((entry) => modelListEntryToModel(entry));
-    return [...listedCloud, ...ollamaModels, ...tauModels];
+    return [...listedCloud, ...ollamaModels];
   }
 
   public getOtelProviderName(modelId: string): string | undefined {
@@ -133,6 +125,11 @@ export class ModelService implements OnModuleInit {
   public getProviderId(modelId: string): ProviderId | undefined {
     const modelConfig = this.models.find((model) => model.id === modelId);
     return modelConfig?.provider.id;
+  }
+
+  public getProviderKind(modelId: string): ModelProviderKind | undefined {
+    const modelConfig = this.models.find((model) => model.id === modelId);
+    return modelConfig?.providerKind;
   }
 
   public getKnowledgeCutoff(modelId: string): string | undefined {
@@ -196,6 +193,7 @@ export class ModelService implements OnModuleInit {
           const fullModel = await ollama.show({ model: model.model });
           return {
             id: model.name,
+            providerKind: 'local',
             name: model.name,
             slug: model.name,
             recommended: true,

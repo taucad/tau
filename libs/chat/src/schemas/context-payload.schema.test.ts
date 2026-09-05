@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { contextPayloadSchema, skillMetadataSchema } from '#schemas/context-payload.schema.js';
+import {
+  contextPayloadSchema,
+  skillMetadataSchema,
+  contextMemoryMaxBytes,
+  contextSkillsMaxEntries,
+} from '#schemas/context-payload.schema.js';
 
 describe('skillMetadataSchema', () => {
   it('should accept a valid skill entry', () => {
@@ -133,6 +138,29 @@ describe('contextPayloadSchema', () => {
       skills: [{ name: 'valid', description: 'ok', path: 'p' }, { description: 'missing name' }],
     });
 
+    expect(result.success).toBe(false);
+  });
+});
+
+describe('CH-10 payload caps', () => {
+  it('rejects a memory entry beyond the byte ceiling', () => {
+    const oversized = 'x'.repeat(contextMemoryMaxBytes + 512);
+    const result = contextPayloadSchema.safeParse({ memory: { '.tau/AGENTS.md': oversized } });
+    expect(result.success).toBe(false);
+  });
+
+  it('accepts a memory entry at the truncated size including the notice', () => {
+    const truncated = 'x'.repeat(contextMemoryMaxBytes) + '\n[AGENTS.md truncated]';
+    const result = contextPayloadSchema.safeParse({ memory: { '.tau/AGENTS.md': truncated } });
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects a skills catalog beyond the entry cap', () => {
+    const skills = Array.from({ length: contextSkillsMaxEntries + 1 }, (_, index) => ({
+      name: `skill-${String(index)}`,
+      description: 'x',
+    }));
+    const result = contextPayloadSchema.safeParse({ skills });
     expect(result.success).toBe(false);
   });
 });

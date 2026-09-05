@@ -30,6 +30,10 @@ yarn add @taucad/runtime @taucad/replicad @taucad/esbuild zod
 
 Add other plugins the same way when you need them — see [Choose a Kernel](../guides/choosing-a-kernel).
 
+### Native Build123d
+
+`@taucad/build123d` is not a browser plugin and is not made usable by installing a global Python. A native host must package the pinned CPython and wheel tree outside its application archive, pass the exact executable and worker hashes to the plugin, and provide a separately revocable trusted-project marker. Tau Desktop owns that complete integration. See [Build123d](../reference/build123d) before adding it to another Electron or Node host.
+
 ## Framework Configuration
 
 ### Vite and React Router

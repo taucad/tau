@@ -138,6 +138,8 @@ One Node process owns everything: the in-process transport bridges to a same-iso
 
 Electron runs one utility process per materialized client. Main owns each utility lease and relays a `MessagePort`; preload exposes a narrow request/release bridge; the utility calls `serveElectronRuntime`; the renderer awaits `createElectronClientOptions({ renderTimeout: 60_000 }){:ts}` and hands the result to `createRuntimeClient`. No kernel, filesystem, or bundler code enters the renderer graph.
 
+For Build123d, that utility supervises one additional warm Python child owned by the kernel context. The child is not a security sandbox: desktop main first requires a native-code trust grant bound to the physical project directory. The child receives only a private mirrored workspace and writes bounded private artifacts; cancellation, timeout, trust revocation, utility exit, or protocol failure terminates its complete descendant process tree.
+
 Process helpers and electron-vite configuration are in [Framework Integrations API](../api/frameworks#electron-process-boundaries). Each renderer client holds an independent host lease, so timeout recovery terminates a blocked utility without touching sibling clients.
 
 ### Why two planes

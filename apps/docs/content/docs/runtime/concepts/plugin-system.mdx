@@ -53,6 +53,8 @@ Executable definitions stay worker-owned. Heavy backends load in `defineKernel` 
 
 Root-importing a toolkit exposes descriptors without fetching its WASM payload. Kernels and transcoders initialize when their selected route first executes, once per worker.
 
+Native-language kernels keep the same public lifecycle. `@taucad/build123d` starts its private, integrity-checked Python child from `initialize()`, retains generation-scoped shape handles in that process, and terminates the descendant tree from `cleanup()`. This is not a public runner plugin role: the language protocol, process supervision, and artifact channel remain package-owned until a second native language proves a reusable seam.
+
 ## Capability-derived formats
 
 Static runtime definitions expose their actual import/export matrix without a separate registry. The derivation helpers preserve the concrete extension and target literals in their return types:

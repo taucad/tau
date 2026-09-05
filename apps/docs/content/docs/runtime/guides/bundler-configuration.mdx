@@ -7,6 +7,8 @@ icon: lucide:package
 
 Give JS/TS kernels (Replicad, OpenCASCADE, Manifold, JSCAD) the bundler they require: it resolves imports, bundles model code, and executes it inside the worker.
 
+Python Build123d models do not pass through this bundler. The Build123d kernel uses bounded Python AST analysis for parameters and dependency discovery, then executes the mirrored project in its supervised native process.
+
 This is the **model-source bundler** inside the runtime. To configure the application bundler — Vite, React Router, Next.js, electron-vite — use [Bundling](./bundling) and the [Framework Integrations API](../api/frameworks).
 
 ## Steps

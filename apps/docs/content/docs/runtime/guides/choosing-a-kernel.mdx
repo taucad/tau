@@ -19,6 +19,7 @@ Pick kernels by source language or import format, and install only the packages 
 | `@taucad/brep`        | STEP/STP/IGES/IGS/BREP                    | BRep-family file import                      |
 | `@taucad/rhino`       | 3DM                                       | Rhino file import                            |
 | `@taucad/assimp`      | Mesh and scene formats                    | OBJ, FBX, STL, PLY, DAE, and related imports |
+| `@taucad/build123d`   | Python using Build123d                    | Native desktop BRep, topology, and STEP      |
 
 There is no catch-all Tau kernel. Every first-party import extension has one explicit owner.
 
@@ -49,6 +50,12 @@ export const runtime = defineRuntime({
 ```
 
 Use a direct role factory instead for app-local capabilities, isolated tests, or when a whole role must interleave outside plugin expansion.
+
+## Choose Build123d only in a native host
+
+Build123d runs the real Python and OCP libraries in a supervised child process. Tau Desktop packages the pinned interpreter and wheels, checks their hashes, and requires an explicit project trust grant before it starts Python. The browser runtime does not advertise the kernel and does not contain its native payload.
+
+Build123d `.py` files do not use the JavaScript bundler. Tau statically parses `Params`, local imports, and `__tau__.dependencies`, mirrors the rooted project into a private workspace, and watches that dependency set through the ordinary runtime filesystem loop. See [Build123d](../reference/build123d) for the authoring contract.
 
 Registration order is deterministic. When two kernels deliberately claim the same extension, the first matching registration wins. Duplicate capability IDs fail with a diagnostic naming both origins.
 

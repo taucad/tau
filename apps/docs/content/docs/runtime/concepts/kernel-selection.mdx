@@ -9,7 +9,7 @@ When you call `render({ source: { path } })` or `export(format, { source: { path
 
 ## Context and Motivation
 
-Different kernels own different file types: OpenRSCAD for `.scad`, Zoo for `.kcl`, and Replicad, OpenCASCADE, and JSCAD all for `.ts`/`.js`. For JS/TS the decision hangs on which library the file imports -- possibly transitively, through a local module. Selection must stay cheap for the common case (extension match) and correct for the ambiguous one (import analysis), and consumer `source.path` is already a canonical [runtime path](./path-namespaces) by the time it arrives.
+Different kernels own different file types: OpenRSCAD for `.scad`, Zoo for `.kcl`, Build123d for `.py`, and Replicad, OpenCASCADE, and JSCAD all for `.ts`/`.js`. For JS/TS the decision hangs on which library the file imports -- possibly transitively, through a local module. Selection must stay cheap for the common case (extension match) and correct for the ambiguous one (import analysis), and consumer `source.path` is already a canonical [runtime path](./path-namespaces) by the time it arrives.
 
 ## How It Works
 
@@ -44,7 +44,7 @@ For each kernel plugin in registration order:
 
 1. Skip unless the file extension is in the plugin's `extensions`.
 2. A `'*'` catch-all is deferred to pass 3 when any registered kernel declares `builtinModuleNames`, so import analysis gets first chance; with no such kernels registered, the catch-all matches here directly.
-3. No `detectImport` regex: select this kernel immediately. Examples: `.scad` selects OpenRSCAD, `.kcl` selects Zoo.
+3. No `detectImport` regex: select this kernel immediately. Examples: `.scad` selects OpenRSCAD, `.kcl` selects Zoo, and a desktop runtime advertising Build123d selects `.py`.
 4. With `detectImport`: read the entry file and test the regex. A match selects the kernel -- `.ts` containing `import ... from 'replicad'` selects Replicad.
 
 Cost: at most one file read. No bundling.

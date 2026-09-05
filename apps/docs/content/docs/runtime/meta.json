@@ -50,6 +50,7 @@
     "api/testing",
 
     "---Reference---",
-    "reference/replicad"
+    "reference/replicad",
+    "reference/build123d"
   ]
 }

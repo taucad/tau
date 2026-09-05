@@ -34,11 +34,11 @@ Concrete kernels ship in their own packages. Each package declares a package-nam
 | `@taucad/rhino`              | `rhino`              | `3dm`                                | `rhinoKernel`             |
 | `@taucad/assimp`             | `assimp`             | Explicit mesh/scene formats          | `assimpKernel`            |
 | `@taucad/opencascade-native` | `opencascade-native` | `ts`, `js`                           | `opencascadeNativeKernel` |
-| `@taucad/openrscad-native`   | `openrscad`          | `scad`                               | `openrscadNativeKernel`   |
+| `@taucad/build123d`          | `build123d`          | `py`                                 | `build123dKernel`         |
 
 No first-party kernel uses `'*'`. Import formats are owned by explicit backend kernels.
 
-The two native packages target Node hosts and remain outside the first release until their platform artifacts are publishable. Register either OpenRSCAD implementation, not both: they intentionally share the `openrscad` capability ID.
+`@taucad/opencascade-native` targets Node hosts. `@taucad/openrscad` needs no twin: its engine binds the N-API addon or WebAssembly build by export condition, and `backend` says which. Build123d additionally requires an explicit packaged interpreter/resource manifest and a host-owned project trust marker; it never falls back to system Python.
 
 ## Toolkit composition
 

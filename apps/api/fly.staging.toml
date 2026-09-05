@@ -13,6 +13,7 @@ dockerfile = 'Dockerfile'
 
 [env]
 NODE_ENV = 'production'
+WEB_CONCURRENCY = '1'
 TAU_FRONTEND_URL = 'https://taucad.dev'
 LANGSMITH_TRACING = true
 LANGSMITH_ENDPOINT = 'https://api.smith.langchain.com'
@@ -60,4 +61,3 @@ path = "/metrics"
 memory = '1gb'
 cpu_kind = 'shared'
 cpus = 1
-

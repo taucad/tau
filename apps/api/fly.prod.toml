@@ -13,6 +13,7 @@ dockerfile = 'Dockerfile'
 
 [env]
 NODE_ENV = 'production'
+WEB_CONCURRENCY = '1'
 TAU_FRONTEND_URL = 'https://tau.new'
 LANGSMITH_TRACING = true
 LANGSMITH_ENDPOINT = 'https://api.smith.langchain.com'

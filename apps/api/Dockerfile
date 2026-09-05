@@ -43,11 +43,11 @@ COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
 COPY patches/ ./patches/
 # `--parents` (BuildKit syntax 1.20+) preserves directory tree so each
 # workspace package.json lands at its real path. Matches pnpm-workspace.yaml
-# globs apps/*, libs/*, packages/*, packages/kernels/*, tools/*. The nested
-# `apps/libs/*` and `packages/kernels/*` workspaces need their own patterns
-# because `*/*/package.json` is only two levels deep. (`scripts/` is one
-# level deep and intentionally dockerignored — pnpm tolerates it.)
-COPY --parents */*/package.json apps/libs/*/package.json packages/kernels/*/package.json ./
+# globs apps/*, libs/*, packages/*, packages/plugins/*, packages/core/*, and
+# tools/*. Nested workspace placements need explicit patterns because
+# `*/*/package.json` is only two levels deep. (`scripts/` is one level deep
+# and intentionally dockerignored — pnpm tolerates it.)
+COPY --parents */*/package.json apps/libs/*/package.json apps/react-e2e/apps/*/package.json packages/plugins/*/package.json packages/core/*/package.json ./
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
     pnpm install --frozen-lockfile --prefer-offline
 

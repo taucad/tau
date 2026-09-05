@@ -6,7 +6,6 @@ import { nxViteTsPaths } from '@nx/vite/plugins/nx-tsconfig-paths.plugin';
 import { viteStaticCopy } from 'vite-plugin-static-copy';
 import { VitePluginNode as vitePluginNode } from 'vite-plugin-node';
 import { oxcRuntimeEsm } from '@taucad/vite/oxc-runtime-esm';
-import { corsBaseConfiguration } from '#constants/cors.constant.js';
 import { createApiDevViteNodeLifecycle } from '#api-dev-vite-node-lifecycle.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -50,10 +49,9 @@ export default defineConfig(({ command, mode }) => {
     server: {
       // Vite server configs, for details see [vite doc](https://vitejs.dev/config/#server-host)
       port: Number(process.env.PORT),
-      cors: {
-        origin: [process.env.TAU_FRONTEND_URL],
-        ...corsBaseConfiguration,
-      },
+      // Nest owns the canonical API CORS policy. Vite otherwise intercepts
+      // desktop preflights before they reach the application.
+      cors: false,
     },
     plugins: [
       oxcRuntimeEsm(),

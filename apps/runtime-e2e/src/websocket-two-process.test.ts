@@ -363,7 +363,7 @@ describe('WebSocket transport across two processes', { concurrent: false }, () =
       await client.connect();
       const ready = await captured.handle().open();
       await ready.channel.ready;
-      expect(ready.channel.hello.payload).toMatchObject({ server: 'kernel-runtime-worker', protocolVersion: 1 });
+      expect(ready.channel.hello.payload).toMatchObject({ server: 'kernel-runtime-worker', protocolVersion: 2 });
       expect(client.transport.id).toBe('web-socket');
       expect(client.transport.descriptor).toEqual(hostLocalDescriptor);
 
@@ -704,7 +704,7 @@ describe('WebSocket transport across two processes', { concurrent: false }, () =
     expect(decode(frame)).toMatchObject({
       v: 1,
       k: 'lh',
-      d: { server: 'kernel-runtime-worker', protocolVersion: 1 },
+      d: { server: 'kernel-runtime-worker', protocolVersion: 2 },
     });
     allowed.close();
 

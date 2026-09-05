@@ -29,7 +29,7 @@ import {
   finalizeRenderOutput,
 } from '@taucad/runtime/kernel';
 import type { KernelRuntime, RuntimeLogger } from '@taucad/runtime/kernel';
-import { detectMultiThreadSupport } from '@taucad/runtime/cross-origin-isolation';
+import { detectMultiThreadSupport } from '@taucad/occt-core';
 
 import { opencascadeOptionsSchema, opencascadeRenderSchema, opencascadeExportSchemas } from '#opencascade.schemas.js';
 

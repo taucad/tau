@@ -1,20 +1,21 @@
 # Adversarial Review Rubric
 
-Use the core gates for every selected recommendation. Use a triggered check only when its trigger is present in the selected recommendation, current caller graph, governing policy, or demonstrated failure.
+Use the core gates for every selected recommendation. Derive the relevant scope before selecting triggered checks; the absence of a known failure does not make an affected path irrelevant.
 
 ## Core gates
 
 ### 1. Outcome, invariant, and owner
 
-- Restate the user outcome and explicit non-goals.
-- Re-derive the invariant and the current layer that should own it.
-- Reject inherited framing when one shared owner can remove multiple symptoms.
+- Establish the outcome, invariants, explicit non-goals and governing rulings from the review brief.
+- Trace the current layer that owns the invariant; challenge an inherited mechanism when one shared owner can remove multiple symptoms.
+- Preserve settled objectives, accepted risks and revisit conditions while testing their factual premises. Use the skill's continuation rules before reopening a decision.
 
 ### 2. Current evidence
 
 - Verify load-bearing claims against current source, runtime evidence, active policy, or authoritative upstream behavior.
-- Read current callers of the owner and siblings sharing the demonstrated failure mode.
+- Inspect materially distinct affected callers/consumers and decision-bearing companions, including a path revealed by a changed shared contract before a failure is demonstrated.
 - Treat research and tests as evidence, not automatic authority; either can be stale or encode a defect.
+- Reuse prior results only while their question, premises, method and dependencies remain applicable. New counterevidence can invalidate unchanged source.
 
 ### 3. Ponytail selection
 
@@ -31,30 +32,37 @@ Reject any candidate that weakens trust-boundary validation, authorization, secu
 
 ### 5. Scope and materiality
 
-A candidate finding enters the review only when all are true:
+A material issue has relevant evidence of a defect, contradiction or acceptance gap inside the selected scope, and changes necessity, ownership, behavior, dependency order, deletion or semantic acceptance—or prevents a concrete correctness-floor failure. An unresolved experiment is an evidence gap, not a confirmed defect. Group counterexamples with the same owner and correction.
 
-1. direct evidence or an exact unresolved experiment supports it;
-2. it lies inside the selected recommendation's scope cone or correctness floor;
-3. it changes the plan or prevents concrete harm;
-4. Superplan cannot resolve it through ordinary implementation exploration without making a new design decision.
+Then classify its effect separately:
 
-Group all qualifying counterexamples with the same owner and correction into one finding.
+| Disposition                                                                         | Effect on readiness                                                                                                      |
+| ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| Selected-design contradiction or unresolved correctness-floor failure               | Block until the design is corrected or the concern disproved, even when an existing helper makes the fix straightforward |
+| Material evidence/coverage gap                                                      | Block until the exact evidence step and decision rule resolve it                                                         |
+| Correct behavior already required; only ordinary implementation exploration remains | Hand a concrete acceptance obligation to the planning/execution owner; no invented architectural blocker                 |
+| Explicit accepted exception with applicable premises/bounds                         | Preserve it; reopen only under the continuation rules                                                                    |
+
+The need for a new architecture decision is not a prerequisite for reporting a concrete defect. Conversely, ordinary implementation detail and speculative hardening do not become review findings merely because they can be described.
 
 ### 6. Stop
 
-Stop when the minimum correct direction survives every triggered check and remaining plausible attacks cannot change the plan. Omit failed attacks and irrelevant dimensions.
+Before readiness, account for every relevant obligation with supported acceptance, a reported issue, an explicit evidence gap or a justified exclusion. Verify affected interactions as well as individual paths. Material issues/gaps prevent readiness; fix or resolve them and recheck their dependents. A no-findings result is valid when this coverage is supported.
 
-## Scope cone
+Keep the coverage account in the source trace or existing artifact notes, proportional to the selected breadth. Preserve useful negative evidence and revisit conditions, without a universal failed-attack catalogue or N/A display. Stop answered branches; neither elapsed time nor another worker's inability to find more issues establishes completeness.
 
-Review may expand only to:
+## Finite relevant scope
 
-- current callers of the changed owner;
-- sibling callers sharing the same evidenced failure mode;
-- active policies directly governing the selected behavior;
-- companion research with a load-bearing contradiction;
-- external evidence needed to choose the minimum architecture.
+Derive the review obligations from:
 
-Repository size, generic production readiness, or the existence of another platform is not itself a trigger.
+- Every selected recommendation, load-bearing claim and governing invariant.
+- Current affected owners and materially distinct consumers/execution paths.
+- Introduced or changed transitions, failure conditions and interactions.
+- Directly governing policies/dependencies and decision-bearing companion documents.
+
+Expand when source inspection reveals another affected boundary. One caller represents others only with evidence of equivalent relevant behavior. Explicit future compatibility or difficult-to-reverse boundaries belong in scope when the operator makes them objectives. Generic production certification, unrelated dirty files and merely imaginable future platforms do not.
+
+Record a concrete reason for a material exclusion. An arbitrary time/model/worker budget cannot shrink the operator's selected scope.
 
 ## Triggered checks
 
@@ -65,7 +73,7 @@ Repository size, generic production readiness, or the existence of another platf
 | User-visible UI or editor behavior                             | Keyboard/screen-reader access, stable identity, interaction states, responsive layout, and visual/runtime verification affected by the recommendation   |
 | CAD, numerical, conversion, or grading behavior                | Exactness/tolerance, degenerate inputs, provider parity, geometry-only evidence, and required round trips                                               |
 | External dependency, package, build, WASM, or release boundary | Authoritative upstream capability, licensing, ABI/API compatibility, generated artifacts, supported platforms, and rollback only when changed           |
-| Agent, prompt, tool, memory, or context behavior               | Canonical schema, tool ambiguity, context cost, compaction, trust, provider parity, and weaker-model handoff only when architecture-changing            |
+| Agent, prompt, tool, memory, or context behavior               | Canonical schema, tool ambiguity, context sufficiency/cost, decision continuity, compaction, trust, and relevant host/model handoff behavior            |
 | Measured hot path or explicit performance/cost claim           | A direct measurement and threshold capable of selecting a different design                                                                              |
 | Durable data or current consumer migration                     | Compatibility and migration steps necessary to avoid corrupting or stranding current data/consumers                                                     |
 
@@ -98,6 +106,6 @@ One material finding contains:
 - concrete consequence;
 - the smallest coherent blueprint revision.
 
-Architecture-changing uncertainty contains the exact evidence step and outcome-to-decision rule. A human choice is allowed only when evidence cannot decide an irreversible architecture-changing preference.
+Material uncertainty contains the exact evidence step and outcome-to-decision rule. Ask for a missing governing objective, invariant or material trade-off only when evidence cannot decide it. Explain the consequences and recommendation; do not ask the operator to establish technical facts or silently select missing intent because it is reversible.
 
-Everything else is omitted. A failed attack is worth one optional `Skipped` line only when it protects a tempting rejected direction and names a concrete revisit trigger.
+Omit non-material observations from the verdict. A useful rejected direction may merit a short preserved-decision note with its revisit condition; retain substantive experiment results through the existing artifact owner.

@@ -1,18 +1,16 @@
 /**
- * WebSocket Transport Types
+ * Tool-RPC wire vocabulary.
  *
- * This file contains types for WebSocket message transport only.
- * Tool-specific types are in tool.types.ts.
- * RPC protocol types are in rpc.types.ts.
+ * Mode-neutral by construction (durability T0 ruling §4): a tool executes
+ * against the workspace in every placement, so these shapes describe the
+ * request/response pair itself and name no transport. The Socket.IO chat-RPC
+ * protocol and its lease-fencing envelopes that used to live here left with the
+ * API's chat plane (W4-PASEO).
+ *
+ * Tool-specific types are in tool.types.ts; RPC method names in rpc.types.ts.
  */
 import type { RpcName } from '#types/rpc.types.js';
 import type { RpcInput, RpcResult } from '#schemas/rpc.schema.js';
-import type { ChatRpcProtocolErrorCode } from '#schemas/rpc-wire-protocol.schema.js';
-import type { wsCloseCode } from '#constants/websocket.constants.js';
-
-/** @public */
-export type WsCloseCode = (typeof wsCloseCode)[keyof typeof wsCloseCode];
-
 /**
  * Server → client RPC request, discriminated by `rpcName` so `args` narrows with the method
  * (mirrors `RpcCall` plus transport metadata).
@@ -76,70 +74,7 @@ export type RpcResponseError<T extends RpcName> = {
 export type RpcResponseFor<T extends RpcName> = RpcResponseSuccess<T> | RpcResponseError<T>;
 
 /**
- * Builds a correlated success ack for the wire after handler execution.
- *
- * @public
- */
-export function rpcWireSuccessResponse<K extends RpcName>(request: RpcRequest<K>, result: RpcResult<K>): RpcResponse {
-  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- widen RpcResponseFor<K> to wire union for Socket.IO ack typing
-  return {
-    type: 'rpc_response',
-    rpcName: request.rpcName,
-    requestId: request.requestId,
-    toolCallId: request.toolCallId,
-    result,
-    ...(request.traceContext === undefined ? {} : { traceContext: request.traceContext }),
-  } as RpcResponse;
-}
-
-/**
  * Client -> Server: Result of an RPC operation execution (all methods).
  * @public
  */
 export type RpcResponse = { [K in RpcName]: RpcResponseFor<K> }[RpcName];
-
-/** @public */
-export type ChatRpcJoinMessage = {
-  /** The chat ID to associate with this connection. */
-  chatId: string;
-  /** Shared browser/API wire-protocol version. */
-  rpcProtocolVersion: string;
-};
-
-/** @public */
-export type ChatRpcJoinAck =
-  | {
-      success: true;
-      rpcProtocolVersion: string;
-    }
-  | {
-      success: false;
-      code?: ChatRpcProtocolErrorCode | string;
-      message?: string;
-      expectedProtocolVersion?: string;
-      receivedProtocolVersion?: string;
-    };
-
-/**
- * Server -> Client: Error message.
- * @public
- */
-export type WsErrorMessage = {
-  type: 'error';
-  /** Error code */
-  code: string;
-  /** Human-readable error message */
-  message: string;
-};
-
-/**
- * All possible messages from server to client.
- * @public
- */
-export type ServerToClientMessage = RpcRequest | WsErrorMessage;
-
-/**
- * All possible messages from client to server.
- * @public
- */
-export type ClientToServerMessage = RpcResponse | ChatRpcJoinMessage;

@@ -11,4 +11,3 @@ export * from '#schemas/provider-tool-schemas.js';
 export * from '#schemas/tools/use-skill.tool.schema.js';
 export type * from '#schemas/tool-schemas-registry.js';
 export * from '#schemas/rpc.schema.js';
-export * from '#schemas/rpc-wire-protocol.schema.js';

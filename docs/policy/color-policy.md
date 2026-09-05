@@ -3,7 +3,7 @@ title: 'Color Policy'
 description: 'OKLCH color system rules: hue architecture, lightness levels, chroma ranges, semantic tokens, contrast requirements, colorblind safety, dark mode, and anti-patterns for all Tau UI surfaces.'
 status: active
 created: '2026-03-14'
-updated: '2026-08-24'
+updated: '2026-09-05'
 related:
   - docs/policy/ui-policy.md
   - docs/policy/diagram-policy.md
@@ -20,7 +20,7 @@ OKLCH provides perceptual uniformity — equal numeric changes in lightness prod
 
 ## 1. OKLCH Is the Canonical Color Space
 
-All design tokens are defined as `oklch(L C H)` in `global.css`. No hex, HSL, or RGB in token definitions. Components consume semantic tokens via Tailwind utilities, never raw oklch values.
+Color tokens are defined as `oklch(L C H)`. Shared tokens live in `packages/ui/src/styles/tokens.css`, exported as `@taucad/ui/styles/tokens.css`. The app imports that stylesheet in `apps/ui/app/styles/global.css` and extends it with app-specific diagram and scrollbar tokens. No hex, HSL, or RGB in color token definitions. Components consume semantic tokens via Tailwind utilities, never raw oklch values.
 
 **Why**: OKLCH is perceptually uniform (unlike HSL where blue at L=0.5 appears much darker than yellow at L=0.5), supports P3 gamut natively, and makes palette generation trivial by adjusting L independently of H and C.
 
@@ -29,7 +29,7 @@ All design tokens are defined as `oklch(L C H)` in `global.css`. No hex, HSL, or
 CORRECT:
 
 ```css
-/* In global.css */
+/* In packages/ui/src/styles/tokens.css */
 --primary: oklch(var(--l-primary) var(--c-primary) var(--hue-primary));
 ```
 
@@ -119,7 +119,7 @@ Chroma peaks at mid-lightness and drops at extremes. Very light and very dark co
 
 ## 5. Semantic Token Usage
 
-Components always use semantic Tailwind classes. The mapping from CSS variable to utility class happens in `@theme inline` in `global.css`.
+Components always use semantic Tailwind classes. Shared CSS-variable mappings live in `@theme inline` in `packages/ui/src/styles/tokens.css`; app-specific mappings extend them in `apps/ui/app/styles/global.css`.
 
 | Need                 | Token                | Tailwind Class                        |
 | -------------------- | -------------------- | ------------------------------------- |
@@ -242,7 +242,7 @@ CORRECT:
 
 ### Inline OKLCH in Components
 
-Only `global.css` should contain raw `oklch()`. Components that need dynamic colors (e.g., Monaco editor peek highlights) should reference CSS variables within the `oklch()` call: `oklch(0.75 0.15 var(--hue-primary) / 0.3)`.
+Define raw `oklch()` color tokens in the owning shared or app-specific stylesheet described in Section 1. Components that need dynamic colors (e.g., Monaco editor peek highlights) should reference CSS variables within the `oklch()` call: `oklch(0.75 0.15 var(--hue-primary) / 0.3)`.
 
 ### Separate Dark Mode Authoring
 
@@ -256,7 +256,7 @@ Never derive structural surface, foreground, input, border, card, popover, or si
 
 ## Summary Checklist
 
-- [ ] All new tokens use `oklch(L C H)` format in `global.css`
+- [ ] All new color tokens use `oklch(L C H)` in their owning shared or app-specific stylesheet (Section 1)
 - [ ] Chroma value falls within the range for the token's purpose (see Section 4)
 - [ ] Every structural neutral has chroma exactly `0` and is independent of `--hue-primary`
 - [ ] Both light and dark mode values defined (or derived via `--l-*` inversion)

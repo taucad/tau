@@ -3,7 +3,7 @@ title: 'UI Policy'
 description: 'Design system entry point: principles, token architecture, typography, spacing, motion, and component composition for all Tau UI surfaces.'
 status: active
 created: '2026-03-14'
-updated: '2026-03-14'
+updated: '2026-09-05'
 related:
   - docs/policy/color-policy.md
   - docs/policy/diagram-policy.md
@@ -33,7 +33,7 @@ Every visual element earns its presence. No gratuitous chrome, shadows, or borde
 
 ### 1.2 Consistency Through Tokens
 
-Use semantic design tokens for all visual properties. Components never contain raw color values, hardcoded sizes, or magic numbers. The only place raw `oklch()` values appear is `global.css`.
+Use semantic design tokens for all visual properties. Components never contain raw color values, hardcoded sizes, or magic numbers. Define raw `oklch()` color tokens in their owning stylesheet (Section 2).
 
 **Why**: Tokens create a single source of truth. When the primary hue changes, every surface updates automatically.
 
@@ -55,22 +55,24 @@ Both light and dark modes are first-class. Dark mode uses lightness inversion of
 
 Three-tier model. Components reference semantic tokens, semantics reference primitives. Never skip tiers.
 
-| Tier          | Location             | Example                                            | Purpose                                             |
-| ------------- | -------------------- | -------------------------------------------------- | --------------------------------------------------- |
-| **Primitive** | `global.css` `:root` | `--l-base`, `--hue-primary`, `--c-primary`         | Raw values: lightness levels, hue angles, chroma    |
-| **Semantic**  | `global.css` `:root` | `--primary`, `--muted-foreground`, `--border`      | Purpose-named tokens consumed by Tailwind utilities |
-| **Component** | `global.css` `:root` | `--diagram-node`, `--chart-1`, `--scrollbar-thumb` | Scoped tokens for specific UI features              |
+Shared tokens live in `packages/ui/src/styles/tokens.css`, exported as `@taucad/ui/styles/tokens.css`. The app imports that stylesheet in `apps/ui/app/styles/global.css` and adds app-specific tokens there.
 
-Tailwind v4 `@theme inline` in `global.css` maps semantic tokens to utility classes (`bg-primary`, `text-muted-foreground`). Components use these classes via `cn()`.
+| Tier          | Location                                                                          | Example                                                       | Purpose                                             |
+| ------------- | --------------------------------------------------------------------------------- | ------------------------------------------------------------- | --------------------------------------------------- |
+| **Primitive** | Shared `tokens.css` `:root`                                                       | `--l-base`, `--hue-primary`, `--c-primary`                    | Raw values: lightness levels, hue angles, chroma    |
+| **Semantic**  | Shared `tokens.css` `:root`                                                       | `--primary`, `--muted-foreground`, `--border`                 | Purpose-named tokens consumed by Tailwind utilities |
+| **Component** | Shared `tokens.css` for reusable tokens; app `global.css` for app-specific tokens | Shared `--chart-1`; app `--diagram-node`, `--scrollbar-thumb` | Scoped tokens for specific UI features              |
+
+Tailwind v4 `@theme inline` in the shared stylesheet maps semantic tokens to utility classes (`bg-primary`, `text-muted-foreground`); the app stylesheet adds mappings for its own tokens. Components use these classes via `cn()`.
 
 ### When to Create a New Token
 
-| Situation                                           | Action                                                    |
-| --------------------------------------------------- | --------------------------------------------------------- |
-| New semantic purpose not covered by existing tokens | Add to `global.css` with light + dark values              |
-| New component with unique color needs               | Create component-scoped `--component-*` tokens            |
-| One-off color for a single element                  | Use an existing semantic token with an opacity modifier   |
-| Three.js scene colors, WebGL materials              | Use constants in a `*.constants.ts` file — not CSS tokens |
+| Situation                                           | Action                                                                                                        |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| New semantic purpose not covered by existing tokens | Add to the shared stylesheet with light + dark values                                                         |
+| New component with unique color needs               | Create `--component-*` tokens in the shared stylesheet when reusable, or the app stylesheet when app-specific |
+| One-off color for a single element                  | Use an existing semantic token with an opacity modifier                                                       |
+| Three.js scene colors, WebGL materials              | Use constants in a `*.constants.ts` file — not CSS tokens                                                     |
 
 ## 3. Typography
 
@@ -95,7 +97,7 @@ Geist Sans for UI text. Geist Mono for code, terminals, and numeric data.
 
 4px base unit. All spacing values are multiples of 4: 4, 8, 12, 16, 24, 32, 48, 64. Use Tailwind spacing utilities (`p-2` = 8px, `p-4` = 16px, `gap-6` = 24px).
 
-The radius scale in `global.css` (`--radius-xs` through `--radius-4xl`) governs border radii. Use `rounded-*` Tailwind utilities.
+The radius scale in `packages/ui/src/styles/tokens.css` (`--radius-xs` through `--radius-4xl`) governs border radii. Use `rounded-*` Tailwind utilities.
 
 ## 5. Component Composition
 
@@ -111,7 +113,8 @@ All components follow the `cn()` + `cva` + `data-slot` pattern:
 
 - No inline `style=` for color, typography, or spacing. Exceptions: Three.js scene properties, dynamic values from user input (color pickers, sliders), and third-party library requirements.
 - Variant composition over conditional class strings. If a component has 3+ conditional styles, extract a `cva` definition.
-- Use Tailwind opacity modifiers (`bg-neutral/30`, `border-border/50`) for transparent variants. Valid range: 5-90 in steps of 10.
+- Keep `bg-*` and `scroll-shadows-*` on separate elements. The scroll mask fades the entire masked element, including its background; put the background on an unmasked parent and the mask on the scrolling content.
+- Use Tailwind opacity modifiers (`bg-neutral/30`, `border-border/50`) for transparent variants; allowed values follow [Color Policy](color-policy.md#opacity-modifiers).
 
 ## 6. Motion
 
@@ -146,7 +149,7 @@ Use `0.01ms` rather than `0s` to preserve `transitionend` and `animationend` eve
 
 - Hardcoded hex values in `.tsx` files (use semantic tokens; see [Color Policy](color-policy.md))
 - Inline `style=` for colors, spacing, or typography (use Tailwind classes)
-- Raw `oklch()` in components (define tokens in `global.css`)
+- Raw `oklch()` in components (define tokens in their owning shared or app-specific stylesheet)
 - Animation durations exceeding 500ms
 - Shadows for elevation in dark mode (use tonal elevation via surface token lightness)
 - `text-[11px]` or any arbitrary size below 12px without accessibility justification

@@ -1,6 +1,6 @@
 # Tau Design Language
 
-This document governs every user-facing surface Tau ships: the CAD workspace (`apps/ui`), the documentation site (`apps/docs`), the published component library (`packages/ui`, `@taucad/ui`), and terminal surfaces (`packages/cli`, the `repos` TUI, and anything after them). It is the constitution; the `docs/policy/` documents are its statutes; `.cursor/rules/*.mdc` are case law. When they disagree, this document wins, and the disagreement is a bug to fix in the lower document.
+This document governs every user-facing surface Tau ships: the CAD workspace (`apps/ui`), the documentation site (`apps/docs`), the published component library (`packages/ui`, `@taucad/ui`), and terminal surfaces (`packages/cli`, the `repos` TUI, and anything after them). It is the constitution; the `docs/policy/` documents are its statutes; nearest `AGENTS.md` files route their current operational application. When they disagree, this document wins, and the disagreement is a bug to fix in the lower document.
 
 Two research documents ground the normative choices here: `docs/research/design-language-accessibility-standards.md` (standards synthesis: DTCG, WCAG 2.2, APCA, ARIA APG, terminal conventions) and `docs/research/docs-anti-slop-quality-gates.md` (documentation quality gates).
 
@@ -105,4 +105,4 @@ Engineering seriousness with personality confined to copy. Metrics are honest an
 
 - Changes to this document are reviewed diffs with rationale, like any code change. Rules only get stricter by default; loosening one names the cost that justifies it.
 - The enforcement inventory (what makes each rule real): `tau-lint/no-hardcoded-color`, `boolean-prop-naming`, the MDX rule suite, role-based selector tests, axe smoke tests, contract tests on variant modules, word-budget and API-coverage tests, Vale, and the release-gate umbrella. When a new rule lands here, its gate lands with it or the rule is marked "default, unenforced" until it does.
-- New durable design law discovered in practice gets promoted: from `learned-ui.mdc` case law into a policy doc or this document, with its gate. `learned-ui.mdc` is a holding pen, not an authority.
+- Promote new durable design law through [the shared learning owner](.agents/skills/update-agent-memory/SKILL.md) into its policy or this document, with its gate. Keep unaccepted candidates in the existing task evidence; they do not become a competing authority.

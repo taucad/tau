@@ -1,35 +1,54 @@
-/* eslint-disable @typescript-eslint/naming-convention -- fixture keys are virtual file paths. */
 // @vitest-environment node
 /**
  * Native/WebAssembly parity gate.
  *
- * `@taucad/openrscad` and `@taucad/openrscad-native` are the same Rust pipeline
- * behind two marshalling layers, so this asserts **equality, not tolerance**:
- * byte-identical GLB and 3MF, and identical triangle/vertex counts, volume and
- * area. That is stronger than `apps/runtime-e2e/src/cross-kernel-mesh-parity.test.ts`,
- * which compares two genuinely different kernels and therefore has to match
- * normals spatially.
+ * `@taulabs/openrscad-engine` is one Rust pipeline behind two marshalling
+ * layers, so this asserts **equality, not tolerance**: byte-identical GLB and
+ * 3MF, and identical triangle/vertex counts, volume and area. That is stronger
+ * than `apps/runtime-e2e/src/cross-kernel-mesh-parity.test.ts`, which compares
+ * two genuinely different kernels and therefore has to match normals spatially.
+ *
+ * Both backends are loaded in *this* process, and both run through the Tau
+ * kernel path, because that path is what a cache entry is produced by:
+ *
+ * * the addon comes from the bare `@taulabs/openrscad-engine` import, exactly
+ *   as `openrscadKernel` loads it — the `node` condition binds the addon. The
+ *   suite asserts `backend === 'native'` first, so a host without the addon
+ *   fails loudly instead of silently comparing WebAssembly against itself.
+ * * the WebAssembly side is rebuilt here from the engine's own parts:
+ *   `makeApi()` (`./core`) over the wasm Node glue (`./node`). Same facade the
+ *   package's entries use, so only the marshalling layer differs.
  *
  * 3MF is not optional here. It is the only artifact OpenRSCAD emits that
  * carries full f64: GLB and STL are f32 by format, and OBJ/OFF/AMF serialize an
  * f32-quantized mesh. A gate over GLB alone is compatible with an f64 geometry
  * divergence of arbitrary sub-f32 size, so it certifies the encoder, not the
  * solid.
- *
- * Requires a local build of `repos/openrscad/packages/npm-native` (and of
- * `packages/npm`, which it links against). Comparing against the published
- * engine would compare two different Rust revisions.
  */
 import { describe, expect, it } from 'vitest';
-import { openrscadKernel } from '@taucad/openrscad';
+import type * as OpenRscadModule from '@taulabs/openrscad-engine';
+import type { RawEngine } from '@taulabs/openrscad-engine/core';
+import { makeApi } from '@taulabs/openrscad-engine/core';
+import * as wasmGlue from '@taulabs/openrscad-engine/node';
 import type { AnyKernelDefinition } from '@taucad/runtime/kernel';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 import { createMockKernelRuntime } from '@taucad/runtime-testing';
 
-import { openrscadNativeKernel } from '#openrscad-native.kernel.js';
+import { createOpenrscadKernel, openrscadKernel } from '#openrscad.kernel.js';
 
 const entryPath = 'project/model.scad';
 const options = { tessellation: { segments: 32, minimumAngle: 12, minimumSize: 2 } } as const;
+
+/** The WebAssembly backend, assembled from the engine's own facade and glue. */
+const wasmKernel = createOpenrscadKernel({
+  loadBackend: async () =>
+    ({
+      ...makeApi(wasmGlue as unknown as RawEngine, async () => undefined),
+      ensureReady: async () => undefined,
+      backend: 'wasm',
+      backendCause: undefined,
+    }) as unknown as typeof OpenRscadModule,
+});
 
 /**
  * One case per divergence class the spike found, so a regression names its own
@@ -80,32 +99,25 @@ const buildAndExport = async (kernel: typeof openrscadKernel, source: string, fo
   return { file: exported.data[0]!, stats: created.nativeHandle.stats };
 };
 
-describe('@taucad/openrscad-native parity with @taucad/openrscad', () => {
-  it('carries a distinct version, because the build cache is keyed on it', async () => {
-    // The shared capability id is asserted in `openrscad-native.plugin.test.ts`
-    // (it is on the plugin capability, not on the resolved kernel definition).
-    // The versions must differ: the runtime's native-build cache key covers
-    // kernel version, so two engines sharing one key could serve each other's
-    // artifacts — invisibly, and only on whichever host warmed the cache.
-    const native = await resolveRuntimePluginDefinition('kernel', openrscadNativeKernel());
-    const wasm = await resolveRuntimePluginDefinition('kernel', openrscadKernel());
-    expect(native.version).not.toBe(wasm.version);
-    expect(native.version).toContain('+native');
+describe('@taulabs/openrscad-engine native/WebAssembly parity', () => {
+  it('binds the addon for the default kernel, so the comparison is not wasm against itself', async () => {
+    const engine = await import('@taulabs/openrscad-engine');
+    expect([engine.backend, engine.backendCause]).toEqual(['native', undefined]);
   });
 
   for (const [name, source] of Object.entries(fixtures)) {
     for (const format of ['glb', '3mf'] as const) {
       it(`emits a byte-identical ${format} for ${name}`, async () => {
-        const wasm = await buildAndExport(openrscadKernel, source, format);
-        const native = await buildAndExport(openrscadNativeKernel, source, format);
+        const wasm = await buildAndExport(wasmKernel, source, format);
+        const native = await buildAndExport(openrscadKernel, source, format);
         expect(native.file.bytes.byteLength).toBe(wasm.file.bytes.byteLength);
         expect(Buffer.from(native.file.bytes).equals(Buffer.from(wasm.file.bytes))).toBe(true);
       });
     }
 
     it(`reports identical geometry statistics for ${name}`, async () => {
-      const wasm = await buildAndExport(openrscadKernel, source, 'glb');
-      const native = await buildAndExport(openrscadNativeKernel, source, 'glb');
+      const wasm = await buildAndExport(wasmKernel, source, 'glb');
+      const native = await buildAndExport(openrscadKernel, source, 'glb');
       // Byte equality already implies these, but they survive a future
       // `tolerant(ε)` verdict on the bytes and they name the failure better.
       expect(native.stats.triangleCount).toBe(wasm.stats.triangleCount);

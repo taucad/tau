@@ -1,7 +1,0 @@
-[
-  {
-    "name": "total (ESM JS) \u2014 one factory call over @taucad/openrscad",
-    "path": "dist/**/*.mjs",
-    "limit": "2 kB"
-  }
-]

@@ -402,23 +402,30 @@ const assertExport = (result: ExportShape3DOutput): ExportShape3DOutput => {
 };
 
 /** Engine version this kernel is authored against. @public */
-const engineVersion = '0.11.0-beta.1';
+const engineVersion = '0.11.0-beta.3';
 
 /** Options for {@link createOpenrscadKernel}. @public */
 export type CreateOpenrscadKernelOptions = {
   /**
-   * Loads the engine module. Defaults to the WebAssembly build, which is the
-   * reference semantics and the only build a browser can run. A Node host may
-   * pass a different build of the *same* engine — the artifacts are held
-   * byte-identical by a parity gate — but it must be a host recipe's choice,
-   * never a probe inside this package: this is a `hostTarget: browser` package
-   * and its payload-isolation test forbids naming a Node-only implementation.
+   * Loads the engine module. The default is the bare
+   * `@taulabs/openrscad-engine` specifier, and the *engine's* export map picks
+   * the payload: browsers and bundlers get the WebAssembly build, a Node host
+   * gets the N-API addon when a platform package matches it and the same
+   * WebAssembly build when none does. That choice is invisible here, which is
+   * what keeps this a `hostTarget: browser` package — no Node-only name is
+   * ever spelled in this source.
+   *
+   * Override it only to bind a *different build of the same engine* (the
+   * parity test rebuilds the wasm facade over `./node` this way). The artifacts
+   * are held byte-identical by a per-release parity gate.
    */
   loadBackend?: () => Promise<OpenRscadBackend>;
   /**
-   * Kernel version. A host registering a non-default backend must vary this,
-   * because the runtime's build cache is keyed on kernel version and two
-   * backends sharing one key would let one host reuse the other's artifacts.
+   * Kernel version, and with it the runtime's build-cache namespace. It is the
+   * *engine release*, not the backend: one release's addon and WebAssembly
+   * build are byte-identical artifacts, gated per release, so they share one
+   * cache key deliberately. Override this only for an engine build that is not
+   * that release.
    */
   version?: string;
 };
@@ -447,11 +454,22 @@ export const createOpenrscadKernel = ({
       '3mf': { optionsSchema: openrscadExportSchemas['3mf'] },
     },
 
-    async initialize() {
-      const context: OpenRscadContext = {
-        backend: await loadBackend(),
-        entryPath: undefined,
-      };
+    async initialize(_options, { logger }) {
+      const backend = await loadBackend();
+      // Which payload the engine's export map actually bound. A Node host that
+      // no platform package covers still renders — through the WebAssembly
+      // build — and this is the only place that says so, so it is logged once
+      // per kernel context rather than left to be inferred from timings.
+      logger.log(`OpenRSCAD engine backend: ${backend.backend}`);
+      if (backend.backendCause !== undefined) {
+        // The addon loader's failure chain, never flattened: it names every
+        // candidate it tried. Debug level, and never thrown — the fallback is a
+        // supported outcome, not an error.
+        logger.debug('OpenRSCAD bound the WebAssembly build; the native addon did not load', {
+          data: backend.backendCause,
+        });
+      }
+      const context: OpenRscadContext = { backend, entryPath: undefined };
       return context;
     },
 

@@ -19,7 +19,12 @@ import {
   validateGlbData,
 } from '@taucad/runtime-testing';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
-import { openrscadExportSchemas, openrscadKernel, openrscadRenderSchema } from '#openrscad.kernel.js';
+import {
+  createOpenrscadKernel,
+  openrscadExportSchemas,
+  openrscadKernel,
+  openrscadRenderSchema,
+} from '#openrscad.kernel.js';
 
 const renderOptions = {
   tessellation: { segments: 0, minimumAngle: 12, minimumSize: 2 },
@@ -254,8 +259,47 @@ describe('OpenRSCADKernel', () => {
     // Geometry caches key on this string, so it has to move whenever the engine
     // build does. It used to be a hand-counted `-native-parts.N` suffix because
     // the fork was consumed as a local tarball; now it is the published version
-    // of @taulabs/openrscad-engine, which cannot silently fall behind.
-    expect(definition.version).toBe('0.11.0-beta.1');
+    // of @taulabs/openrscad-engine, which cannot silently fall behind. It names
+    // the engine *release*, not the backend: the addon and the WebAssembly
+    // build of one release are byte-identical (`native-wasm-parity.test.ts`),
+    // so they deliberately share this cache namespace.
+    expect(definition.version).toBe('0.11.0-beta.3');
+  });
+
+  it('logs the backend the engine bound', async () => {
+    const engine = await import('@taulabs/openrscad-engine');
+    const definition = await resolveRuntimePluginDefinition('kernel', openrscadKernel());
+    const runtime = createRuntime({});
+    await definition.initialize({}, runtime);
+
+    expect(runtime.logger.log).toHaveBeenCalledWith(`OpenRSCAD engine backend: ${engine.backend}`);
+    expect(runtime.logger.debug).not.toHaveBeenCalledWith(expect.stringContaining('native addon'), expect.anything());
+  });
+
+  it('still renders when no platform package matched and the engine fell back to WebAssembly', async () => {
+    // The uncovered-platform path (charter gate G9), driven through the engine's
+    // own contract rather than by uninstalling a package: `backend: 'wasm'` plus
+    // the loader's `cause` chain is exactly what `dist/node.js` reports there.
+    // The fallback must be loud in the log and invisible in the geometry.
+    const engine = await import('@taulabs/openrscad-engine');
+    const backendCause = new Error('no platform package matched this host');
+    const definition = await resolveRuntimePluginDefinition(
+      'kernel',
+      createOpenrscadKernel({
+        loadBackend: async () => ({ ...engine, backend: 'wasm', backendCause }),
+      })(),
+    );
+    const runtime = createRuntime({ 'project/model.scad': 'cube(10);' });
+    const context = await definition.initialize({}, runtime);
+
+    expect(runtime.logger.log).toHaveBeenCalledWith('OpenRSCAD engine backend: wasm');
+    expect(runtime.logger.debug).toHaveBeenCalledWith(
+      'OpenRSCAD bound the WebAssembly build; the native addon did not load',
+      { data: backendCause },
+    );
+
+    const result = await renderModel({ definition, runtime, context, entryPath: 'project/model.scad' });
+    expect(result.nativeHandle.stats).toMatchObject({ triangleCount: 12, vertexCount: 8, volume: 1000 });
   });
 
   it('handles SCAD through the environment-neutral OpenRSCAD API', async () => {

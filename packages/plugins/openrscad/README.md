@@ -55,11 +55,13 @@ One preset, `default`, selecting `kernels.default`.
 | Host           | Supported | Notes                                                                |
 | -------------- | --------- | -------------------------------------------------------------------- |
 | Browser worker | Yes       | single-threaded WebAssembly engine; no cross-origin isolation needed |
-| Node.js        | Yes       | `>=24`; the same WASM build, selected by export condition            |
+| Node.js        | Yes       | `>=24`; the N-API addon when a platform package matches, else WASM   |
 
-A Node host that wants the native engine composes
-[`@taucad/openrscad-native`](https://www.npmjs.com/package/@taucad/openrscad-native) instead — same
-artifacts, no WASM startup cost.
+There is one kernel and one package. `@taulabs/openrscad-engine` chooses its own payload through its
+export map: a browser or bundler gets the WebAssembly build, and a Node host gets the N-API addon
+when one of the engine's platform packages matches it — same artifacts, no WASM startup cost — or
+that same WebAssembly build when none does. The fallback is never silent: the engine exports
+`backend` (`'native' | 'wasm'`) and the kernel logs it on initialization.
 
 ## Versioning and stability
 

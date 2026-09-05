@@ -3,9 +3,11 @@
  * Converts various error formats into a structured JSON format for the UI.
  */
 
+import process from 'node:process';
 import { errorCategory } from '@taucad/types/constants';
 import type { ErrorCategory, ChatError } from '@taucad/types';
 import { httpStatusToCategory, errorCategoryTitles } from '@taucad/chat/utils';
+import { isAbortError as isProviderAbortError } from '@ai-sdk/provider-utils';
 import { z } from 'zod';
 import { decodeProviderErrorBody } from '#api/chat/utils/provider-error-decoder.js';
 import { isCompactionPipelineError } from '#api/chat/utils/compaction-errors.js';
@@ -174,20 +176,7 @@ function parseJsonFromMessage(message: string): {
  * Checks if an error is an abort error (from AbortController).
  */
 function isAbortError(error: unknown): boolean {
-  if (error instanceof Error) {
-    // Standard AbortError name used by AbortController
-    if (error.name === 'AbortError') {
-      return true;
-    }
-
-    // LangGraph/LangChain may wrap abort errors with specific messages
-    const lowerMessage = error.message.toLowerCase();
-    if (lowerMessage.includes('aborted') || lowerMessage.includes('abort')) {
-      return true;
-    }
-  }
-
-  return false;
+  return isProviderAbortError(error) || (error instanceof Error && error.message.toLowerCase().includes('abort'));
 }
 
 function extractRegexGroup(message: string, pattern: RegExp): string | undefined {
@@ -486,12 +475,18 @@ export function normalizeError(error: unknown): string {
     category = patternCategory;
   }
 
-  // Build the normalized error
+  // Build the normalized error. `rawMessage` is uncurated driver/library text
+  // (a DrizzleQueryError embeds the failed SQL plus bound parameter values), so it
+  // never crosses to the client in production - neither as `raw`, nor as `message`
+  // when no branch above replaced it with curated provider copy.
+  // ponytail: `message !== rawMessage` is the curation test; swap it for an explicit
+  // flag if a curated branch ever legitimately reproduces the raw message verbatim.
+  const disclosesInternals = process.env.NODE_ENV !== 'production';
   const normalizedError: ChatError = {
     category,
     title: errorCategoryTitles[category],
-    message,
-    raw: rawMessage,
+    message: disclosesInternals || message !== rawMessage ? message : errorCategoryTitles[category],
+    ...(disclosesInternals ? { raw: rawMessage } : {}),
   };
 
   if (code) {

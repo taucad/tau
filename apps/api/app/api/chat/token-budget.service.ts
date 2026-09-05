@@ -4,13 +4,17 @@ import type { BaseMessage, UsageMetadata } from '@langchain/core/messages';
 import { AIMessage, SystemMessage } from '@langchain/core/messages';
 import { IMAGE_TOKEN_ESTIMATE, isImageBlock } from '#api/chat/utils/image-block.utils.js';
 
-/** Default fraction of max input tokens that triggers compaction. */
-// eslint-disable-next-line @typescript-eslint/naming-convention -- Domain constant
-export const DEFAULT_CONTEXT_COMPACTION_TRIGGER_FRACTION = 0.85;
-
 /** Conservative fallback used when the selected model does not declare a context window. */
 // eslint-disable-next-line @typescript-eslint/naming-convention -- Domain constant
 export const FALLBACK_CONTEXT_WINDOW = 200_000;
+
+/** Maximum generation budget reserved before provider dispatch. */
+// eslint-disable-next-line @typescript-eslint/naming-convention -- Domain constant
+export const MAX_COMPACTION_OUTPUT_RESERVE_TOKENS = 20_000;
+
+/** Fixed provider/tokenizer variance buffer retained alongside the output reserve. */
+// eslint-disable-next-line @typescript-eslint/naming-convention -- Domain constant
+export const COMPACTION_CONTEXT_BUFFER_TOKENS = 8000;
 
 // eslint-disable-next-line @typescript-eslint/naming-convention -- Domain constant
 const CHARS_PER_TOKEN = 4;
@@ -67,6 +71,8 @@ export type TokenBudgetDecision = {
   rawEstimatedInputTokens: number;
   contextWindow: number;
   triggerThreshold: number;
+  reservedOutputTokens: number;
+  reservedBufferTokens: number;
   calibrationMultiplier: number;
   components: TokenBudgetComponent[];
   previousUsageInputTokens?: number;
@@ -77,8 +83,47 @@ export type EvaluateModelRequestBudgetInput = {
   modelId: string;
   providerId?: string | undefined;
   contextWindow?: number | undefined;
+  maxOutputTokens?: number | undefined;
   previousUsageInputTokens?: number | undefined;
 };
+
+type ModelOutputLimitSource = {
+  readonly models?: ReadonlyArray<{
+    readonly id: string;
+    readonly details?: { readonly maxTokens?: number };
+    readonly configuration?: { readonly maxTokens?: number; readonly maxOutputTokens?: number };
+  }>;
+};
+
+/** Resolve the configured output ceiling without adding another model-catalog API. */
+export function maxOutputTokensForModel(source: ModelOutputLimitSource, modelId: string): number | undefined {
+  const model = source.models?.find((entry) => entry.id === modelId);
+  return firstPositiveFinite(
+    model?.configuration?.maxOutputTokens,
+    model?.configuration?.maxTokens,
+    model?.details?.maxTokens,
+  );
+}
+
+/**
+ * Reserve generation headroom and a fixed safety buffer before compaction.
+ * Large output ceilings are capped at 20K because compaction itself targets
+ * bounded summaries; unknown ceilings conservatively reserve the same cap.
+ */
+export function contextCompactionBudget(input: { contextWindow: number; maxOutputTokens?: number | undefined }): {
+  triggerThreshold: number;
+  reservedOutputTokens: number;
+  reservedBufferTokens: number;
+} {
+  const declaredOutputTokens = input.maxOutputTokens ?? MAX_COMPACTION_OUTPUT_RESERVE_TOKENS;
+  const reservedOutputTokens = Math.min(MAX_COMPACTION_OUTPUT_RESERVE_TOKENS, Math.max(0, declaredOutputTokens));
+  const reservedBufferTokens = COMPACTION_CONTEXT_BUFFER_TOKENS;
+  return {
+    triggerThreshold: Math.max(1, Math.floor(input.contextWindow - reservedOutputTokens - reservedBufferTokens)),
+    reservedOutputTokens,
+    reservedBufferTokens,
+  };
+}
 
 /** @public */
 export type RecordObservedUsageInput = {
@@ -102,7 +147,10 @@ export class TokenBudgetService {
 
   public evaluateModelRequest(input: EvaluateModelRequestBudgetInput): TokenBudgetDecision {
     const contextWindow = input.contextWindow ?? FALLBACK_CONTEXT_WINDOW;
-    const triggerThreshold = Math.floor(contextWindow * DEFAULT_CONTEXT_COMPACTION_TRIGGER_FRACTION);
+    const { triggerThreshold, reservedOutputTokens, reservedBufferTokens } = contextCompactionBudget({
+      contextWindow,
+      maxOutputTokens: input.maxOutputTokens,
+    });
     const rawComponents = this.estimateRawComponents(input);
     const rawEstimatedInputTokens = sumComponents(rawComponents);
     const calibrationMultiplier = this.getCalibrationMultiplier(input);
@@ -127,9 +175,11 @@ export class TokenBudgetService {
       rawEstimatedInputTokens,
       contextWindow,
       triggerThreshold,
+      reservedOutputTokens,
+      reservedBufferTokens,
       calibrationMultiplier,
       components: [...rawComponents, { name: 'total', tokens: estimatedInputTokens }],
-      ...(previousUsageInputTokens !== undefined ? { previousUsageInputTokens } : {}),
+      ...(previousUsageInputTokens === undefined ? {} : { previousUsageInputTokens }),
     };
   }
 
@@ -182,14 +232,14 @@ export class TokenBudgetService {
       // Anthropic responses carry tool-call args both as native tool_use content
       // blocks and in the normalized tool_calls array; skip the blocks so their
       // args are counted once, via tool_calls below.
-      const hasToolCalls = message instanceof AIMessage && (message.tool_calls?.length ?? 0) > 0;
+      const hasToolCalls = AIMessage.isInstance(message) && (message.tool_calls?.length ?? 0) > 0;
       const estimate = estimateContent(message.content, hasToolCalls);
       totals.message_content += estimate.textTokens;
       totals.media += estimate.mediaTokens;
       totals.tool_call_args += estimate.structuredTokens;
       totals.provider_overhead += MESSAGE_OVERHEAD_TOKENS + estimate.blockCount * CONTENT_BLOCK_OVERHEAD_TOKENS;
 
-      if (message instanceof AIMessage && message.tool_calls?.length) {
+      if (AIMessage.isInstance(message) && message.tool_calls?.length) {
         for (const call of message.tool_calls) {
           totals.tool_call_args += estimateStringTokens(stableStringify(call.args));
           totals.provider_overhead += CONTENT_BLOCK_OVERHEAD_TOKENS;
@@ -206,7 +256,7 @@ export class TokenBudgetService {
       totals.provider_overhead += estimate.cacheControlledBlockCount * PROMPT_CACHE_BLOCK_OVERHEAD_TOKENS;
     }
 
-    for (const tool of input.request.tools ?? []) {
+    for (const tool of input.request.tools) {
       totals.tool_schemas += estimateToolTokens(tool);
       totals.provider_overhead += TOOL_SCHEMA_OVERHEAD_TOKENS;
     }
@@ -248,8 +298,8 @@ const componentOrder: readonly TokenBudgetComponentName[] = [
 export function findMostRecentUsageMetadata(messages: readonly BaseMessage[]): UsageMetadata | undefined {
   for (let i = messages.length - 1; i >= 0; i--) {
     const message = messages[i]!;
-    if (message instanceof AIMessage) {
-      const usage = message.usage_metadata as UsageMetadata | undefined;
+    if (AIMessage.isInstance(message)) {
+      const usage = message.usage_metadata;
       if (usage) {
         return usage;
       }
@@ -367,7 +417,7 @@ function estimateStringTokens(value: string): number {
 }
 
 function stableStringify(value: unknown): string {
-  const seen = new WeakSet<object>();
+  const seen = new WeakSet();
 
   const normalize = (input: unknown, depth: number): unknown => {
     if (input === null || typeof input !== 'object') {
@@ -381,7 +431,7 @@ function stableStringify(value: unknown): string {
       return '[Circular]';
     }
     if (depth > 6) {
-      return `[${input.constructor?.name ?? 'Object'}]`;
+      return `[${input.constructor.name}]`;
     }
 
     seen.add(input);
@@ -423,4 +473,8 @@ function clampMultiplier(value: number): number {
     return 1;
   }
   return Math.min(MAX_CALIBRATION_MULTIPLIER, Math.max(1, value));
+}
+
+function firstPositiveFinite(...values: Array<number | undefined>): number | undefined {
+  return values.find((value): value is number => value !== undefined && Number.isFinite(value) && value > 0);
 }

@@ -14,6 +14,12 @@ The auth module follows the pattern from the [Ultimate NestJS Boilerplate](https
 - **AuthGuard**: Global guard for protecting routes (REST, GraphQL, WebSocket)
 - **Public Decorator**: Marks routes as publicly accessible
 
+## Authentication Transports
+
+Browser user agents continue to use Better Auth's HTTP-only session cookies. Non-browser user agents may sign in at `POST /v1/auth/sign-in/email`, read the `set-auth-token` response header, and send that session token as `Authorization: Bearer <token>` to guarded HTTP endpoints and Socket.IO handshakes.
+
+Bearer session tokens are not a browser authentication mechanism; browser code stays on cookies. They are also not machine identity. Agents and host daemons obtain device credentials through `/v1/agents` pairing and use those credentials for machine-authenticated connections.
+
 ## Key Components
 
 ### 1. Authentication Guard

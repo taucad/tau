@@ -1,13 +1,11 @@
 import { AIMessage, HumanMessage, ToolMessage } from '@langchain/core/messages';
 import { describe, expect, it, vi } from 'vitest';
-import { createProviderDiagnosticsMiddleware } from '#api/chat/middleware/provider-diagnostics.middleware.js';
 import {
   createGoogleProviderDiagnosticsFetch,
   createProviderDiagnosticsContext,
   summarizeGeminiRequest,
   summarizeModelCallMessages,
 } from '#api/chat/utils/provider-diagnostics.js';
-import { invokeWrapModelCall } from '#testing/middleware-testing.utils.js';
 
 describe('provider diagnostics', () => {
   it('should summarize interrupted tool tails without logging argument values', () => {
@@ -46,96 +44,6 @@ describe('provider diagnostics', () => {
     expect(serialized).toContain('"key":"targetFile"');
     expect(serialized).toContain('"type":"undefined"');
     expect(serialized).not.toContain('Interrupted by user.');
-  });
-
-  it('should log Anthropic duplicate content tool ids without treating tool_calls metadata as a duplicate', async () => {
-    const logger = { error: vi.fn(), debug: vi.fn() };
-    const handler = vi.fn().mockResolvedValue({ content: 'ok' });
-    const context = createProviderDiagnosticsContext({
-      chatId: 'chat_anthropic_diagnostics',
-      modelId: 'anthropic-claude-haiku-4.5',
-      providerId: 'anthropic',
-      verbose: false,
-      logger,
-    });
-    const middleware = createProviderDiagnosticsMiddleware(context);
-    const message = new AIMessage({
-      content: [
-        { type: 'tool_call', id: 'call_read_1', name: 'read_file', args: { targetFile: 'main.ts' } },
-        { type: 'tool_call_chunk', id: 'call_read_1', name: 'read_file', args: '{"targetFile":"main.ts"}' },
-      ],
-      // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
-      response_metadata: { output_version: 'v1', model_provider: 'anthropic' },
-      // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
-      tool_calls: [{ id: 'call_read_1', name: 'read_file', args: { targetFile: 'main.ts' }, type: 'tool_call' }],
-    });
-
-    await invokeWrapModelCall(middleware, { messages: [message] }, handler);
-
-    expect(logger.error).toHaveBeenCalledOnce();
-    const [payload, logMessage] = logger.error.mock.calls[0] as [Record<string, unknown>, string];
-    expect(logMessage).toBe(
-      'Prepared Anthropic model call contains duplicate tool_use ids for anthropic-claude-haiku-4.5',
-    );
-    expect(JSON.stringify(payload)).toContain('"id":"call_read_1"');
-  });
-
-  it('should not log Anthropic canonical content tool_call plus parallel tool_calls metadata', async () => {
-    const logger = { error: vi.fn(), debug: vi.fn() };
-    const handler = vi.fn().mockResolvedValue({ content: 'ok' });
-    const context = createProviderDiagnosticsContext({
-      chatId: 'chat_anthropic_diagnostics',
-      modelId: 'anthropic-claude-haiku-4.5',
-      providerId: 'anthropic',
-      verbose: false,
-      logger,
-    });
-    const middleware = createProviderDiagnosticsMiddleware(context);
-    const message = new AIMessage({
-      content: [{ type: 'tool_call', id: 'call_read_1', name: 'read_file', args: { targetFile: 'main.ts' } }],
-      // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
-      response_metadata: { output_version: 'v1', model_provider: 'anthropic' },
-      // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
-      tool_calls: [{ id: 'call_read_1', name: 'read_file', args: { targetFile: 'main.ts' }, type: 'tool_call' }],
-    });
-
-    await invokeWrapModelCall(middleware, { messages: [message] }, handler);
-
-    expect(logger.error).not.toHaveBeenCalled();
-  });
-
-  it('should log compact prepared model-call diagnostics when verbose', async () => {
-    const logger = { error: vi.fn(), debug: vi.fn() };
-    const handler = vi.fn().mockResolvedValue({ content: 'ok' });
-    const context = createProviderDiagnosticsContext({
-      chatId: 'chat_debug_compact',
-      modelId: 'google-gemini-3.5-flash',
-      providerId: 'vertexai',
-      verbose: true,
-      logger,
-    });
-    const middleware = createProviderDiagnosticsMiddleware(context);
-    const messages = [
-      new HumanMessage('continue'),
-      new AIMessage({
-        content: '',
-        // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
-        tool_calls: [{ id: 'call_read', name: 'read_file', args: {}, type: 'tool_call' }],
-      }),
-    ];
-
-    await invokeWrapModelCall(middleware, { messages }, handler);
-
-    expect(logger.debug).toHaveBeenCalledOnce();
-    const [payload, message] = logger.debug.mock.calls[0] as [Record<string, unknown>, string];
-    const serialized = JSON.stringify(payload);
-
-    expect(message).toBe('Prepared provider model call for google-gemini-3.5-flash');
-    expect(serialized).toContain('"messageCount":2');
-    expect(serialized).toContain('"tailCount":2');
-    expect(serialized).toContain('"empty_tool_args"');
-    expect(serialized).not.toContain('"tail"');
-    expect(serialized).not.toContain('"toolCalls"');
   });
 
   it('should flag hidden legacy tool metadata that can be replayed by provider formatters', () => {

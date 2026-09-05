@@ -135,6 +135,7 @@ describe('chatTurnRequestSchema JSON Schema contract (R13)', () => {
               "properties": {
                 "memory": {
                   "additionalProperties": {
+                    "maxLength": 25256,
                     "type": "string",
                   },
                   "propertyNames": {
@@ -210,13 +211,19 @@ describe('chatTurnRequestSchema JSON Schema contract (R13)', () => {
                     ],
                     "type": "object",
                   },
+                  "maxItems": 64,
                   "type": "array",
                 },
               },
               "type": "object",
             },
+            "execution": {
+              "$ref": "#/$defs/CadAgentExecution",
+            },
             "kernel": {
               "enum": [
+                "picogk",
+                "build123d",
                 "openscad",
                 "replicad",
                 "manifold",
@@ -231,9 +238,6 @@ describe('chatTurnRequestSchema JSON Schema contract (R13)', () => {
                 "agent",
                 "plan",
               ],
-              "type": "string",
-            },
-            "model": {
               "type": "string",
             },
             "profile": {
@@ -544,9 +548,6 @@ describe('chatTurnRequestSchema JSON Schema contract (R13)', () => {
                       "get_kernel_result",
                       "export_geometry",
                       "screenshot",
-                      "transfer_to_cad_expert",
-                      "transfer_to_research_expert",
-                      "transfer_back_to_supervisor",
                     ],
                     "type": "string",
                   },
@@ -557,7 +558,7 @@ describe('chatTurnRequestSchema JSON Schema contract (R13)', () => {
           },
           "required": [
             "profile",
-            "model",
+            "execution",
             "kernel",
             "mode",
             "toolChoice",

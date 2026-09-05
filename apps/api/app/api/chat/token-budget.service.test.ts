@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { AIMessage, HumanMessage, SystemMessage } from '@langchain/core/messages';
+import { AIMessage, AIMessageChunk, HumanMessage, SystemMessage } from '@langchain/core/messages';
 import type { EvaluateModelRequestBudgetInput } from '#api/chat/token-budget.service.js';
-import { TokenBudgetService, estimateMessageContentTokens } from '#api/chat/token-budget.service.js';
+import {
+  TokenBudgetService,
+  contextCompactionBudget,
+  estimateMessageContentTokens,
+} from '#api/chat/token-budget.service.js';
 
 describe('estimateMessageContentTokens', () => {
   it('should count string content as chars/4', () => {
@@ -34,6 +38,19 @@ describe('estimateMessageContentTokens', () => {
 });
 
 describe('TokenBudgetService', () => {
+  it('reserves the declared output ceiling up to 20k plus the fixed 8k buffer', () => {
+    expect(contextCompactionBudget({ contextWindow: 200_000, maxOutputTokens: 16_000 })).toEqual({
+      triggerThreshold: 176_000,
+      reservedOutputTokens: 16_000,
+      reservedBufferTokens: 8000,
+    });
+    expect(contextCompactionBudget({ contextWindow: 200_000, maxOutputTokens: 65_536 })).toEqual({
+      triggerThreshold: 172_000,
+      reservedOutputTokens: 20_000,
+      reservedBufferTokens: 8000,
+    });
+  });
+
   it('should evaluate the full LangChain model request components', () => {
     const service = new TokenBudgetService();
     const decision = service.evaluateModelRequest({
@@ -152,6 +169,56 @@ describe('TokenBudgetService', () => {
     expect(decision.shouldCompact).toBe(true);
     expect(decision.triggerReason).toBe('previous_usage');
     expect(decision.previousUsageInputTokens).toBe(850);
+  });
+
+  it('CH-17 red-first: recovers previous provider usage from a streamed chunk', () => {
+    const service = new TokenBudgetService();
+    const decision = service.evaluateModelRequest({
+      modelId: 'anthropic-claude-haiku-4.5',
+      providerId: 'anthropic',
+      contextWindow: 200_000,
+      maxOutputTokens: 20_000,
+      request: createModelRequest({
+        messages: [
+          new HumanMessage('small'),
+          new AIMessageChunk({
+            content: 'done',
+            usage_metadata: { input_tokens: 175_000, output_tokens: 10, total_tokens: 175_010 },
+          }),
+        ],
+      }),
+    });
+
+    expect(decision).toMatchObject({
+      shouldCompact: true,
+      triggerReason: 'previous_usage',
+      previousUsageInputTokens: 175_000,
+    });
+  });
+
+  it('CH-17 red-first: counts streamed tool-call args once, including native tool_use content', () => {
+    const service = new TokenBudgetService();
+    const args = { path: '/tmp/a.ts', detail: 'A'.repeat(500) };
+    const tool_calls = [{ id: 'tc1', name: 'read_file', args }];
+    const decision = service.evaluateModelRequest({
+      modelId: 'anthropic-claude-haiku-4.5',
+      providerId: 'anthropic',
+      contextWindow: 200_000,
+      request: createModelRequest({
+        messages: [
+          new AIMessageChunk({
+            content: [
+              { type: 'text', text: 'I will call a tool' },
+              { type: 'tool_use', id: 'tc1', name: 'read_file', input: args },
+            ],
+            tool_calls,
+          }),
+        ],
+      }),
+    });
+
+    expect(componentTokens(decision, 'tool_call_args')).toBeGreaterThan(100);
+    expect(componentTokens(decision, 'tool_call_args')).toBeLessThan(200);
   });
 
   it('should trigger from a large system message when chat messages are small', () => {

@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/naming-convention -- Test file uses external API shapes with snake_case properties */
 import type { ChatError } from '@taucad/types';
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { normalizeError } from '#api/chat/utils/error-normalizer.js';
 import { CompactionPipelineError } from '#api/chat/utils/compaction-errors.js';
 
@@ -57,7 +57,7 @@ describe('normalizeError', () => {
 
   describe('implementation bug errors', () => {
     it('should preserve compaction failure metadata from the error object', () => {
-      const error = new CompactionPipelineError('Required compaction failed', 'morph_contract_error', {
+      const error = new CompactionPipelineError('Required compaction failed', 'unexpected_error', {
         debugId: 'dat_debug',
       });
 
@@ -65,7 +65,7 @@ describe('normalizeError', () => {
 
       expect(result.category).toBe('tool_error');
       expect(result.code).toBe('CONTEXT_COMPACTION_FAILED');
-      expect(result.message).toContain('Failure kind: morph_contract_error');
+      expect(result.message).toContain('Failure kind: unexpected_error');
       expect(result.message).toContain('Debug ID: dat_debug');
       expect(result.raw).toContain('CONTEXT_COMPACTION_FAILED');
     });
@@ -123,6 +123,13 @@ describe('normalizeError', () => {
 
       expect(result.category).toBe('cancelled');
       expect(result.raw).toBe('Operation aborted due to timeout');
+    });
+
+    it('should classify provider TimeoutError DOMExceptions as cancellation', () => {
+      const result = parseNormalizedError(normalizeError(new DOMException('The request timed out', 'TimeoutError')));
+
+      expect(result.category).toBe('cancelled');
+      expect(result.title).toBe('Request Cancelled');
     });
   });
 
@@ -641,5 +648,46 @@ describe('first-party billing errors (B2)', () => {
 
     expect(result.category).toBe('credits');
     expect(result.httpStatus).toBe(402);
+  });
+});
+
+describe('production disclosure guard', () => {
+  /** Mirrors drizzle-orm's DrizzleQueryError, whose message embeds the failed SQL and bound params. */
+  const leakySql =
+    'Failed query: insert into "chat_workspace_lease" ("owner_id", "project_id", "workspace_id") values ($1, $2, $3)\nparams: user_01H,proj_42,ws_7';
+  const drizzleError = (): Error => Object.assign(new Error(leakySql), { name: 'DrizzleQueryError' });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('should not leak driver internals through the stream path in production', () => {
+    vi.stubEnv('NODE_ENV', 'production');
+
+    const result = parseNormalizedError(normalizeError(drizzleError()));
+
+    expect(result.raw).toBeUndefined();
+    expect(JSON.stringify(result)).not.toContain('chat_workspace_lease');
+    expect(JSON.stringify(result)).not.toContain('proj_42');
+    expect(result.title).toBe('Error');
+  });
+
+  it('should keep curated provider copy in production', () => {
+    vi.stubEnv('NODE_ENV', 'production');
+
+    const result = parseNormalizedError(normalizeError(new Error(statusPrefixedAnthropicCreditErrorText)));
+
+    expect(result.category).toBe('credits');
+    expect(result.message).toBe(anthropicCreditMessage);
+    expect(result.raw).toBeUndefined();
+  });
+
+  it('should keep raw for debugging outside production', () => {
+    vi.stubEnv('NODE_ENV', 'development');
+
+    const result = parseNormalizedError(normalizeError(drizzleError()));
+
+    expect(result.raw).toBe(leakySql);
+    expect(result.message).toBe(leakySql);
   });
 });

@@ -1,0 +1,3 @@
+// outside “left” — sentinel 
+material = “wood”;﻿
+// outside ‘right’ – sentinel	 

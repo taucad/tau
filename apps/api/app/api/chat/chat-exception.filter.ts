@@ -6,6 +6,7 @@
  * stream errors (handled by error-transform.ts).
  */
 
+import process from 'node:process';
 import { Catch, HttpException, HttpStatus, Logger } from '@nestjs/common';
 import type { ArgumentsHost, ExceptionFilter } from '@nestjs/common';
 import type { FastifyReply, FastifyRequest } from 'fastify';
@@ -99,7 +100,9 @@ export class ChatExceptionFilter implements ExceptionFilter {
         requestId,
       };
     } else if (exception instanceof Error) {
-      // Handle unknown errors
+      // Handle unknown errors. `exception.message` is uncurated driver/library text
+      // (e.g. DrizzleQueryError embeds the failed SQL plus bound parameter values), so
+      // it is only ever handed to the client outside production.
       statusCode = HttpStatus.INTERNAL_SERVER_ERROR;
       chatError = {
         category: errorCategory.server,
@@ -108,7 +111,7 @@ export class ChatExceptionFilter implements ExceptionFilter {
         code: 'INTERNAL_SERVER_ERROR',
         httpStatus: statusCode,
         requestId,
-        raw: exception.message,
+        ...(process.env.NODE_ENV === 'production' ? {} : { raw: exception.message }),
       };
     } else {
       // Handle completely unknown error types

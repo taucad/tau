@@ -1,19 +1,31 @@
-export type CompactionFailureKind =
-  | 'morph_transport_error'
-  | 'morph_http_error'
-  | 'morph_contract_error'
-  | 'transcript_commit_failed'
-  | 'context_overflow_retry_failed'
-  | 'unexpected_error';
+import { z } from 'zod';
+
+export const compactionFailureKindSchema = z.enum([
+  'transcript_commit_failed',
+  'context_overflow_retry_failed',
+  'circuit_breaker_open',
+  'summarization_failed',
+  'state_update_failed',
+  'unexpected_error',
+]);
+
+export type CompactionFailureKind = z.infer<typeof compactionFailureKindSchema>;
 
 export type CompactionFailureDisposition = 'blocked_before_provider';
 
-export const compactionFailureDisposition: Record<
-  Uppercase<CompactionFailureDisposition>,
-  CompactionFailureDisposition
-> = {
-  BLOCKED_BEFORE_PROVIDER: 'blocked_before_provider',
+export const compactionFailureDisposition: Record<'blockedBeforeProvider', CompactionFailureDisposition> = {
+  blockedBeforeProvider: 'blocked_before_provider',
 };
+
+const compactionFailureKindCarrierSchema = z.looseObject({
+  failureKind: compactionFailureKindSchema,
+});
+
+const compactionPipelineErrorRecordSchema = z.looseObject({
+  code: z.literal('CONTEXT_COMPACTION_FAILED'),
+  failureKind: compactionFailureKindSchema,
+  failureDisposition: z.literal(compactionFailureDisposition.blockedBeforeProvider),
+});
 
 type CompactionErrorOptions = {
   readonly cause?: unknown;
@@ -21,8 +33,12 @@ type CompactionErrorOptions = {
 };
 
 export class CompactionPipelineError extends Error {
-  public readonly code = 'CONTEXT_COMPACTION_FAILED';
-  public readonly failureDisposition = compactionFailureDisposition.BLOCKED_BEFORE_PROVIDER;
+  public readonly debugId?: string;
+
+  public get code(): 'CONTEXT_COMPACTION_FAILED' {
+    return 'CONTEXT_COMPACTION_FAILED';
+  }
+  public readonly failureDisposition = compactionFailureDisposition.blockedBeforeProvider;
   public override readonly cause?: unknown;
 
   public constructor(
@@ -34,7 +50,7 @@ export class CompactionPipelineError extends Error {
       [
         `CONTEXT_COMPACTION_FAILED: ${message}`,
         `failureKind=${failureKind}`,
-        `failureDisposition=${compactionFailureDisposition.BLOCKED_BEFORE_PROVIDER}`,
+        `failureDisposition=${compactionFailureDisposition.blockedBeforeProvider}`,
         options.debugId ? `debugId=${options.debugId}` : undefined,
       ]
         .filter((entry): entry is string => entry !== undefined)
@@ -43,40 +59,6 @@ export class CompactionPipelineError extends Error {
     this.name = 'CompactionPipelineError';
     this.cause = options.cause;
     this.debugId = options.debugId;
-  }
-
-  public readonly debugId?: string;
-}
-
-export class MorphCompactionTransportError extends Error {
-  public readonly failureKind = 'morph_transport_error' satisfies CompactionFailureKind;
-  public override readonly cause?: unknown;
-
-  public constructor(message: string, options: { readonly cause?: unknown } = {}) {
-    super(message);
-    this.name = 'MorphCompactionTransportError';
-    this.cause = options.cause;
-  }
-}
-
-export class MorphCompactionHttpError extends Error {
-  public readonly failureKind = 'morph_http_error' satisfies CompactionFailureKind;
-
-  public constructor(
-    public readonly status: number,
-    public readonly responseBody: string,
-  ) {
-    super(`Morph compaction failed with HTTP ${status}`);
-    this.name = 'MorphCompactionHttpError';
-  }
-}
-
-export class MorphCompactionContractError extends Error {
-  public readonly failureKind = 'morph_contract_error' satisfies CompactionFailureKind;
-
-  public constructor(message: string) {
-    super(message);
-    this.name = 'MorphCompactionContractError';
   }
 }
 
@@ -92,10 +74,7 @@ export function isCompactionPipelineError(error: unknown): error is CompactionPi
 }
 
 function isCompactionFailureKindCarrier(error: unknown): error is { failureKind: CompactionFailureKind } {
-  if (!isRecord(error)) {
-    return false;
-  }
-  return isCompactionFailureKind(error['failureKind']);
+  return compactionFailureKindCarrierSchema.safeParse(error).success;
 }
 
 function isCompactionPipelineErrorRecord(error: unknown): error is {
@@ -104,27 +83,5 @@ function isCompactionPipelineErrorRecord(error: unknown): error is {
   failureDisposition: CompactionFailureDisposition;
   debugId?: string;
 } {
-  if (!isRecord(error)) {
-    return false;
-  }
-  return (
-    error['code'] === 'CONTEXT_COMPACTION_FAILED' &&
-    isCompactionFailureKind(error['failureKind']) &&
-    error['failureDisposition'] === compactionFailureDisposition.BLOCKED_BEFORE_PROVIDER
-  );
-}
-
-function isCompactionFailureKind(value: unknown): value is CompactionFailureKind {
-  return (
-    value === 'morph_transport_error' ||
-    value === 'morph_http_error' ||
-    value === 'morph_contract_error' ||
-    value === 'transcript_commit_failed' ||
-    value === 'context_overflow_retry_failed' ||
-    value === 'unexpected_error'
-  );
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
+  return compactionPipelineErrorRecordSchema.safeParse(error).success;
 }

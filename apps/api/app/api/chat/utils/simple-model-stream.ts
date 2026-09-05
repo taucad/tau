@@ -1,4 +1,6 @@
 import { JsonToSseTransformStream } from 'ai';
+import { Readable } from 'node:stream';
+import type { ReadableStream as NodeReadableStream } from 'node:stream/web';
 import type { StreamTextResult } from 'ai';
 import type { FastifyReply } from 'fastify';
 
@@ -23,5 +25,6 @@ export async function sendSimpleModelStream(
 
   const sseStream = streamResult.toUIMessageStream().pipeThrough(new JsonToSseTransformStream());
 
-  return response.send(sseStream.pipeThrough(new TextEncoderStream()));
+  const byteStream = sseStream.pipeThrough(new TextEncoderStream());
+  return response.send(Readable.fromWeb(byteStream as NodeReadableStream<Uint8Array<ArrayBuffer>>));
 }

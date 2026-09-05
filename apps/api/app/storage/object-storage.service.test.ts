@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import type { Readable as NodeReadable } from 'node:stream';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { CreateBucketCommand, S3Client } from '@aws-sdk/client-s3';
@@ -11,6 +11,8 @@ import { StorageModule } from '#storage/storage.module.js';
 import { blobKeyFromSha256Hex, sha256HexFromBytes } from '#storage/sha256.utils.js';
 import { ObjectStorageService, isPreconditionFailed } from '#storage/object-storage.service.js';
 import { STORAGE_HEALTH_PROBE_KEY } from '#storage/storage.constants.js';
+
+const scaleIt = process.env['TAU_SCALE_TESTS'] === '1' ? it : it.skip;
 
 describe('ObjectStorageService', () => {
   let moduleRef: TestingModule;
@@ -255,6 +257,165 @@ describe('ObjectStorageService', () => {
         expect(bytes).toStrictEqual(payload);
         expect(fetched.contentLength).toBe(payload.byteLength);
       } finally {
+        await service.deleteBlob({ namespace: 'blobs', key, tier: 'private' });
+      }
+    });
+
+    it('should enforce SHA-256 on a private presigned artifact upload', async () => {
+      const payload = randomPayload(37);
+      const key = `jobs/test/sha256/${sha256HexFromBytes(payload)}`;
+      const checksum = createHash('sha256').update(payload).digest('base64');
+      const uploadUrl = await service.presignPut({
+        namespace: 'blobs',
+        key,
+        contentType: 'application/octet-stream',
+        contentLength: payload.byteLength,
+        checksumSha256: checksum,
+        expiresInSeconds: 60,
+        tier: 'private',
+      });
+
+      try {
+        const response = await fetch(uploadUrl, {
+          method: 'PUT',
+          headers: {
+            'content-type': 'application/octet-stream',
+            'x-amz-checksum-sha256': checksum,
+          },
+          body: payload,
+        });
+        expect(response.ok).toBe(true);
+        const stored = await service.getBlob({ namespace: 'blobs', key, tier: 'private' });
+        await expect(collectReadable(stored.body)).resolves.toStrictEqual(payload);
+      } finally {
+        await service.deleteBlob({ namespace: 'blobs', key, tier: 'private' });
+      }
+    });
+
+    it('should round-trip a retryable private multipart upload', async () => {
+      const payload = randomPayload(8 * 1024 * 1024);
+      const key = `jobs/test/sha256/${sha256HexFromBytes(payload)}`;
+      const uploadId = await service.createMultipartUpload({
+        namespace: 'blobs',
+        key,
+        contentType: 'application/octet-stream',
+        tier: 'private',
+      });
+      let completed = false;
+      try {
+        const parts = [];
+        for (const [index, bytes] of [payload.slice(0, 6 * 1024 * 1024), payload.slice(6 * 1024 * 1024)].entries()) {
+          const partNumber = index + 1;
+          const checksumSha256 = createHash('sha256').update(bytes).digest('base64');
+          // oxlint-disable-next-line eslint/no-await-in-loop -- multipart order is part of this storage check.
+          const uploadUrl = await service.presignUploadPart({
+            namespace: 'blobs',
+            key,
+            uploadId,
+            partNumber,
+            checksumSha256,
+            expiresInSeconds: 60,
+            tier: 'private',
+          });
+          // oxlint-disable-next-line eslint/no-await-in-loop -- multipart order is part of this storage check.
+          const response = await fetch(uploadUrl, {
+            method: 'PUT',
+            headers: { 'x-amz-checksum-sha256': checksumSha256 },
+            body: bytes,
+          });
+          expect(response.ok).toBe(true);
+          const etag = response.headers.get('etag');
+          expect(etag).toBeTruthy();
+          parts.push({ partNumber, etag: etag ?? '', checksumSha256 });
+        }
+        await service.completeMultipartUpload({
+          namespace: 'blobs',
+          key,
+          uploadId,
+          parts,
+          tier: 'private',
+        });
+        completed = true;
+
+        const stored = await service.getBlob({ namespace: 'blobs', key, tier: 'private' });
+        await expect(collectReadable(stored.body)).resolves.toStrictEqual(payload);
+      } finally {
+        if (!completed) {
+          await service.abortMultipartUpload({ namespace: 'blobs', key, uploadId, tier: 'private' });
+        }
+        await service.deleteBlob({ namespace: 'blobs', key, tier: 'private' });
+      }
+    });
+
+    scaleIt('should resume and verify a 250 MiB private artifact transfer', async () => {
+      const payload = new Uint8Array(250 * 1024 * 1024).fill(11);
+      const digest = sha256HexFromBytes(payload);
+      const key = `jobs/scale/sha256/${digest}`;
+      const uploadId = await service.createMultipartUpload({
+        namespace: 'blobs',
+        key,
+        contentType: 'application/octet-stream',
+        tier: 'private',
+      });
+      let completed = false;
+      try {
+        const partSize = 16 * 1024 * 1024;
+        const parts = [];
+        for (let start = 0, partNumber = 1; start < payload.byteLength; start += partSize, partNumber += 1) {
+          const bytes = payload.slice(start, Math.min(start + partSize, payload.byteLength));
+          const checksumSha256 = createHash('sha256').update(bytes).digest('base64');
+          // oxlint-disable-next-line eslint/no-await-in-loop -- each part is the durable resume boundary under test.
+          const uploadUrl = await service.presignUploadPart({
+            namespace: 'blobs',
+            key,
+            uploadId,
+            partNumber,
+            checksumSha256,
+            expiresInSeconds: 300,
+            tier: 'private',
+          });
+          if (partNumber === 2) {
+            const interrupted = new AbortController();
+            interrupted.abort();
+            // oxlint-disable-next-line eslint/no-await-in-loop -- inject an interruption before retrying the same part.
+            await expect(
+              fetch(uploadUrl, { method: 'PUT', body: bytes, signal: interrupted.signal }),
+            ).rejects.toThrow();
+          }
+          // oxlint-disable-next-line eslint/no-await-in-loop -- each part is the durable resume boundary under test.
+          const response = await fetch(uploadUrl, {
+            method: 'PUT',
+            headers: { 'x-amz-checksum-sha256': checksumSha256 },
+            body: bytes,
+          });
+          expect(response.ok).toBe(true);
+          const etag = response.headers.get('etag');
+          expect(etag).toBeTruthy();
+          parts.push({ partNumber, etag: etag ?? '', checksumSha256 });
+        }
+        await service.completeMultipartUpload({
+          namespace: 'blobs',
+          key,
+          uploadId,
+          parts,
+          tier: 'private',
+        });
+        completed = true;
+
+        const stored = await service.getBlob({ namespace: 'blobs', key, tier: 'private' });
+        const storedDigest = createHash('sha256');
+        let storedSize = 0;
+        for await (const chunk of stored.body) {
+          expect(chunk).toBeInstanceOf(Uint8Array);
+          storedDigest.update(chunk as Uint8Array<ArrayBuffer>);
+          storedSize += (chunk as Uint8Array<ArrayBuffer>).byteLength;
+        }
+        expect(storedSize).toBe(payload.byteLength);
+        expect(storedDigest.digest('hex')).toBe(digest);
+      } finally {
+        if (!completed) {
+          await service.abortMultipartUpload({ namespace: 'blobs', key, uploadId, tier: 'private' });
+        }
         await service.deleteBlob({ namespace: 'blobs', key, tier: 'private' });
       }
     });

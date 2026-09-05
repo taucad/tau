@@ -62,7 +62,7 @@ export class RedisIoAdapter extends IoAdapter {
       pingTimeout: 30_000,
       connectionStateRecovery: {
         maxDisconnectionDuration: 2 * 60 * 1000, // 2 minutes
-        skipMiddlewares: true, // Skip auth middleware on recovery (already authenticated)
+        skipMiddlewares: false,
       },
     }) as Server;
 

@@ -44,6 +44,22 @@ export class MetricsService {
     advice: { explicitBucketBoundaries: [...TauMetrics.wsMessageSize.buckets] },
   });
 
+  public readonly rpcDeliveryEvents = this.apiMeter.createCounter(TauMetrics.rpcDeliveryEvents.name, {
+    description: TauMetrics.rpcDeliveryEvents.description,
+    unit: TauMetrics.rpcDeliveryEvents.unit,
+  });
+
+  public readonly rpcDeliveryWakeDuration = this.apiMeter.createHistogram(TauMetrics.rpcDeliveryWakeDuration.name, {
+    description: TauMetrics.rpcDeliveryWakeDuration.description,
+    unit: TauMetrics.rpcDeliveryWakeDuration.unit,
+    advice: { explicitBucketBoundaries: [...TauMetrics.rpcDeliveryWakeDuration.buckets] },
+  });
+
+  public readonly rpcActiveRunRooms = this.apiMeter.createUpDownCounter(TauMetrics.rpcActiveRunRooms.name, {
+    description: TauMetrics.rpcActiveRunRooms.description,
+    unit: TauMetrics.rpcActiveRunRooms.unit,
+  });
+
   // AI / LLM (GenAI semantic conventions)
   public readonly genAiTokenUsage = this.apiMeter.createHistogram(TauMetrics.genAiTokenUsage.name, {
     description: TauMetrics.genAiTokenUsage.description,
@@ -236,4 +252,49 @@ export class MetricsService {
       advice: { explicitBucketBoundaries: [...TauMetrics.indexeddbOperationDuration.buckets] },
     },
   );
+
+  // --- Billing / credit ledger (C11/C12) ---
+
+  public readonly billingReservationFailures = this.apiMeter.createCounter(TauMetrics.billingReservationFailures.name, {
+    description: TauMetrics.billingReservationFailures.description,
+    unit: TauMetrics.billingReservationFailures.unit,
+  });
+
+  public readonly billingCreditCommitted = this.apiMeter.createCounter(TauMetrics.billingCreditCommitted.name, {
+    description: TauMetrics.billingCreditCommitted.description,
+    unit: TauMetrics.billingCreditCommitted.unit,
+  });
+
+  public readonly billingCommitFailures = this.apiMeter.createCounter(TauMetrics.billingCommitFailures.name, {
+    description: TauMetrics.billingCommitFailures.description,
+    unit: TauMetrics.billingCommitFailures.unit,
+  });
+
+  public readonly billingReservationSweeps = this.apiMeter.createCounter(TauMetrics.billingReservationSweeps.name, {
+    description: TauMetrics.billingReservationSweeps.description,
+    unit: TauMetrics.billingReservationSweeps.unit,
+  });
+
+  public readonly billingLedgerDrift = this.apiMeter.createGauge(TauMetrics.billingLedgerDrift.name, {
+    description: TauMetrics.billingLedgerDrift.description,
+    unit: TauMetrics.billingLedgerDrift.unit,
+  });
+
+  public readonly billingDriftedAccounts = this.apiMeter.createGauge(TauMetrics.billingDriftedAccounts.name, {
+    description: TauMetrics.billingDriftedAccounts.description,
+    unit: TauMetrics.billingDriftedAccounts.unit,
+  });
+
+  public readonly billingNegativeBalanceAccounts = this.apiMeter.createGauge(
+    TauMetrics.billingNegativeBalanceAccounts.name,
+    {
+      description: TauMetrics.billingNegativeBalanceAccounts.description,
+      unit: TauMetrics.billingNegativeBalanceAccounts.unit,
+    },
+  );
+
+  public readonly billingAccountsFlagged = this.apiMeter.createCounter(TauMetrics.billingAccountsFlagged.name, {
+    description: TauMetrics.billingAccountsFlagged.description,
+    unit: TauMetrics.billingAccountsFlagged.unit,
+  });
 }

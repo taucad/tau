@@ -1,11 +1,15 @@
 import type { Readable } from 'node:stream';
 import {
+  AbortMultipartUploadCommand,
+  CompleteMultipartUploadCommand,
+  CreateMultipartUploadCommand,
   DeleteObjectCommand,
   GetObjectCommand,
   HeadBucketCommand,
   HeadObjectCommand,
   PutObjectCommand,
   S3Client,
+  UploadPartCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { Injectable } from '@nestjs/common';
@@ -54,13 +58,49 @@ export type ObjectStorageServiceContract = {
     | undefined
   >;
   deleteBlob(args: { namespace: StorageNamespace; key: string; tier?: StorageTier }): Promise<void>;
-  presignGet(args: { namespace: StorageNamespace; key: string; expiresInSeconds: number }): Promise<string>;
+  presignGet(args: {
+    namespace: StorageNamespace;
+    key: string;
+    expiresInSeconds: number;
+    tier?: StorageTier;
+  }): Promise<string>;
   presignPut(args: {
     namespace: StorageNamespace;
     key: string;
     contentType: string;
     expiresInSeconds: number;
+    contentLength?: number;
+    checksumSha256?: string;
+    tier?: StorageTier;
   }): Promise<string>;
+  createMultipartUpload(args: {
+    namespace: StorageNamespace;
+    key: string;
+    contentType: string;
+    tier?: StorageTier;
+  }): Promise<string>;
+  presignUploadPart(args: {
+    namespace: StorageNamespace;
+    key: string;
+    uploadId: string;
+    partNumber: number;
+    checksumSha256: string;
+    expiresInSeconds: number;
+    tier?: StorageTier;
+  }): Promise<string>;
+  completeMultipartUpload(args: {
+    namespace: StorageNamespace;
+    key: string;
+    uploadId: string;
+    parts: ReadonlyArray<{ partNumber: number; etag: string; checksumSha256: string }>;
+    tier?: StorageTier;
+  }): Promise<void>;
+  abortMultipartUpload(args: {
+    namespace: StorageNamespace;
+    key: string;
+    uploadId: string;
+    tier?: StorageTier;
+  }): Promise<void>;
   publicUrl(args: { namespace: StorageNamespace; key: string }): string;
   headProbeObject(): Promise<
     | {
@@ -99,6 +139,11 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
 
   private readonly publicBaseUrl: string;
 
+  // Pnpm currently resolves the presigner and S3 client through two compatible
+  // @smithy/types patch versions. Keep that package-manager detail at this
+  // boundary instead of leaking casts into every caller.
+  private readonly signingClient: Parameters<typeof getSignedUrl>[0];
+
   public constructor(private readonly configService: ConfigService<Environment, true>) {
     const endpoint = this.configService.get('TAU_S3_ENDPOINT', { infer: true });
     const region = this.configService.get('TAU_S3_REGION', { infer: true });
@@ -119,6 +164,7 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
         secretAccessKey,
       },
     });
+    this.signingClient = this.client as unknown as Parameters<typeof getSignedUrl>[0];
   }
 
   public async putBlob(args: PutBlobArgs): Promise<PutBlobResult> {
@@ -225,12 +271,14 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
     namespace: StorageNamespace;
     key: string;
     expiresInSeconds: number;
+    tier?: StorageTier;
   }): Promise<string> {
     const { resolvedKey } = this.resolveKey(args.namespace, args.key);
 
-    return getSignedUrl(this.client, new GetObjectCommand({ Bucket: this.bucket, Key: resolvedKey }), {
-      expiresIn: args.expiresInSeconds,
-    });
+    return this.presign(
+      new GetObjectCommand({ Bucket: this.resolveBucket(args.tier), Key: resolvedKey }),
+      args.expiresInSeconds,
+    );
   }
 
   public async presignPut(args: {
@@ -238,17 +286,104 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
     key: string;
     contentType: string;
     expiresInSeconds: number;
+    contentLength?: number;
+    checksumSha256?: string;
+    tier?: StorageTier;
   }): Promise<string> {
     const { resolvedKey } = this.resolveKey(args.namespace, args.key);
 
-    return getSignedUrl(
-      this.client,
+    return this.presign(
       new PutObjectCommand({
-        Bucket: this.bucket,
+        Bucket: this.resolveBucket(args.tier),
         Key: resolvedKey,
         ContentType: args.contentType,
+        ...(args.contentLength === undefined ? {} : { ContentLength: args.contentLength }),
+        ...(args.checksumSha256 === undefined ? {} : { ChecksumSHA256: args.checksumSha256 }),
       }),
-      { expiresIn: args.expiresInSeconds },
+      args.expiresInSeconds,
+    );
+  }
+
+  public async createMultipartUpload(args: {
+    namespace: StorageNamespace;
+    key: string;
+    contentType: string;
+    tier?: StorageTier;
+  }): Promise<string> {
+    const { resolvedKey } = this.resolveKey(args.namespace, args.key);
+    const response = await this.client.send(
+      new CreateMultipartUploadCommand({
+        Bucket: this.resolveBucket(args.tier),
+        Key: resolvedKey,
+        ContentType: args.contentType,
+        ChecksumAlgorithm: 'SHA256',
+      }),
+    );
+    if (!response.UploadId) {
+      throw new Error('S3 CreateMultipartUpload returned no upload ID');
+    }
+    return response.UploadId;
+  }
+
+  public async presignUploadPart(args: {
+    namespace: StorageNamespace;
+    key: string;
+    uploadId: string;
+    partNumber: number;
+    checksumSha256: string;
+    expiresInSeconds: number;
+    tier?: StorageTier;
+  }): Promise<string> {
+    const { resolvedKey } = this.resolveKey(args.namespace, args.key);
+    return this.presign(
+      new UploadPartCommand({
+        Bucket: this.resolveBucket(args.tier),
+        Key: resolvedKey,
+        UploadId: args.uploadId,
+        PartNumber: args.partNumber,
+        ChecksumSHA256: args.checksumSha256,
+      }),
+      args.expiresInSeconds,
+    );
+  }
+
+  public async completeMultipartUpload(args: {
+    namespace: StorageNamespace;
+    key: string;
+    uploadId: string;
+    parts: ReadonlyArray<{ partNumber: number; etag: string; checksumSha256: string }>;
+    tier?: StorageTier;
+  }): Promise<void> {
+    const { resolvedKey } = this.resolveKey(args.namespace, args.key);
+    await this.client.send(
+      new CompleteMultipartUploadCommand({
+        Bucket: this.resolveBucket(args.tier),
+        Key: resolvedKey,
+        UploadId: args.uploadId,
+        MultipartUpload: {
+          Parts: args.parts.map((part) => ({
+            PartNumber: part.partNumber,
+            ETag: part.etag,
+            ChecksumSHA256: part.checksumSha256,
+          })),
+        },
+      }),
+    );
+  }
+
+  public async abortMultipartUpload(args: {
+    namespace: StorageNamespace;
+    key: string;
+    uploadId: string;
+    tier?: StorageTier;
+  }): Promise<void> {
+    const { resolvedKey } = this.resolveKey(args.namespace, args.key);
+    await this.client.send(
+      new AbortMultipartUploadCommand({
+        Bucket: this.resolveBucket(args.tier),
+        Key: resolvedKey,
+        UploadId: args.uploadId,
+      }),
     );
   }
 
@@ -316,6 +451,10 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
 
       throw error;
     }
+  }
+
+  private async presign(command: unknown, expiresIn: number): Promise<string> {
+    return getSignedUrl(this.signingClient, command as Parameters<typeof getSignedUrl>[1], { expiresIn });
   }
 
   /**

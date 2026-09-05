@@ -7,6 +7,7 @@ import { ZodError } from 'zod';
 import { trace, SpanStatusCode, context as otelContext } from '@opentelemetry/api';
 import type { HttpErrorResponse } from '@taucad/types';
 import { httpHeader } from '#constants/http-header.constant.js';
+import { LlmGatewayError } from '#api/llm/llm-gateway.error.js';
 
 @Catch()
 export class HttpExceptionFilter implements ExceptionFilter {
@@ -23,6 +24,20 @@ export class HttpExceptionFilter implements ExceptionFilter {
 
     let statusCode: number;
     let errorResponse: HttpErrorResponse;
+
+    // The model gateway already speaks a typed envelope its clients parse
+    // (`{ type: 'error', error: { type, message } }`). Flattening it here into the
+    // shared shape deleted the refusal reason — the browser agent host could only
+    // report the HTTP status back to the user.
+    if (exception instanceof LlmGatewayError) {
+      const gatewayStatus = exception.getStatus();
+      this.logger.warn(`Model gateway refusal: ${JSON.stringify(exception.getResponse())}`);
+      if (requestId) {
+        void response.header(httpHeader.requestId, requestId);
+      }
+      void response.status(gatewayStatus).send(exception.getResponse());
+      return;
+    }
 
     if (exception instanceof ZodValidationException || exception instanceof ZodSerializationException) {
       const zodError = exception.getZodError();
@@ -51,40 +66,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
       }
     } else if (exception instanceof HttpException) {
       statusCode = exception.getStatus();
-      const exceptionResponse = exception.getResponse();
-
-      if (typeof exceptionResponse === 'string') {
-        errorResponse = {
-          error: exceptionResponse,
-          statusCode,
-          code: this.getErrorCode(exception),
-          path: request.url,
-          requestId,
-        };
-      } else if (typeof exceptionResponse === 'object') {
-        // Handle structured error responses (e.g., { code: 'UNAUTHORIZED', message: '...' })
-        const { message, code } = exceptionResponse as Record<string, unknown>;
-        const baseResponse: HttpErrorResponse = {
-          error: typeof message === 'string' ? message : exception.message || 'An error occurred',
-          code: typeof code === 'string' ? code : this.getErrorCode(exception),
-          statusCode,
-          path: request.url,
-          requestId,
-        };
-        if (Array.isArray(message)) {
-          baseResponse.message = message;
-        }
-
-        errorResponse = baseResponse;
-      } else {
-        errorResponse = {
-          error: exception.message || 'An error occurred',
-          statusCode,
-          code: this.getErrorCode(exception),
-          path: request.url,
-          requestId,
-        };
-      }
+      errorResponse = this.fromHttpException(exception, statusCode, request.url, requestId);
     } else if (exception instanceof Error) {
       // Handle unknown errors
       statusCode = HttpStatus.INTERNAL_SERVER_ERROR;
@@ -128,6 +110,41 @@ export class HttpExceptionFilter implements ExceptionFilter {
     }
 
     void response.status(statusCode).send(errorResponse);
+  }
+
+  private fromHttpException(
+    exception: HttpException,
+    statusCode: number,
+    path: string,
+    requestId: string | undefined,
+  ): HttpErrorResponse {
+    const exceptionResponse = exception.getResponse();
+
+    if (typeof exceptionResponse === 'string') {
+      return { error: exceptionResponse, statusCode, code: this.getErrorCode(exception), path, requestId };
+    }
+    if (typeof exceptionResponse !== 'object') {
+      return {
+        error: exception.message || 'An error occurred',
+        statusCode,
+        code: this.getErrorCode(exception),
+        path,
+        requestId,
+      };
+    }
+    // Handle structured error responses (e.g., { code: 'UNAUTHORIZED', message: '...' })
+    const { message, code } = exceptionResponse as Record<string, unknown>;
+    const baseResponse: HttpErrorResponse = {
+      error: typeof message === 'string' ? message : exception.message || 'An error occurred',
+      code: typeof code === 'string' ? code : this.getErrorCode(exception),
+      statusCode,
+      path,
+      requestId,
+    };
+    if (Array.isArray(message)) {
+      baseResponse.message = message;
+    }
+    return baseResponse;
   }
 
   private getErrorCode(exception: HttpException): string {

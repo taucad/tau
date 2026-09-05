@@ -27,6 +27,12 @@ describe('MetricsService', () => {
     it('should create rpcActiveCalls up-down counter', () => {
       expect(service.rpcActiveCalls).toBeDefined();
     });
+
+    it('should create durable delivery plane metrics', () => {
+      expect(service.rpcDeliveryEvents).toBeDefined();
+      expect(service.rpcDeliveryWakeDuration).toBeDefined();
+      expect(service.rpcActiveRunRooms).toBeDefined();
+    });
   });
 
   describe('WebSocket metrics', () => {

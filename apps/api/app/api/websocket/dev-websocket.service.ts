@@ -37,6 +37,7 @@ export class DevWebSocketService implements OnModuleInit, OnModuleDestroy {
   private io: SocketIoServer | undefined;
   private readonly wsPort: number;
   private readonly pathHandlers = new Map<string, WebSocketConnectionHandler>();
+  private readonly prefixHandlers = new Map<string, WebSocketConnectionHandler>();
   private started = false;
   private startPromise: Promise<void> | undefined;
   private stopPromise: Promise<void> | undefined;
@@ -149,6 +150,16 @@ export class DevWebSocketService implements OnModuleInit, OnModuleDestroy {
     this.logger.debug(`Unregistered WebSocket handler for path: ${path}`);
   }
 
+  /** Register a handler for dynamic routes below one exact path prefix. */
+  public registerPrefixHandler(prefix: string, handler: WebSocketConnectionHandler): void {
+    this.prefixHandlers.set(prefix, handler);
+  }
+
+  /** Remove a dynamic-route prefix handler. */
+  public unregisterPrefixHandler(prefix: string): void {
+    this.prefixHandlers.delete(prefix);
+  }
+
   /**
    * Stop the servers when the module is destroyed.
    */
@@ -239,7 +250,7 @@ export class DevWebSocketService implements OnModuleInit, OnModuleDestroy {
       pingTimeout: 30_000,
       connectionStateRecovery: {
         maxDisconnectionDuration: 2 * 60 * 1000,
-        skipMiddlewares: true,
+        skipMiddlewares: false,
       },
     });
 
@@ -262,7 +273,11 @@ export class DevWebSocketService implements OnModuleInit, OnModuleDestroy {
       }
 
       // Check for registered raw WebSocket paths
-      const handler = this.pathHandlers.get(pathname);
+      const handler =
+        this.pathHandlers.get(pathname) ??
+        [...this.prefixHandlers.entries()]
+          .sort(([left], [right]) => right.length - left.length)
+          .find(([prefix]) => pathname.startsWith(prefix))?.[1];
       if (handler) {
         this.wss!.handleUpgrade(request, socket, head, (ws) => {
           this.wss!.emit('connection', ws, request);

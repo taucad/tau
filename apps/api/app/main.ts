@@ -17,7 +17,7 @@ import { AppModule } from '#app.module.js';
 import type { Environment } from '#config/environment.config.js';
 import { getFastifyLoggingConfig } from '#logger/fastify.logger.js';
 import { corsBaseConfiguration } from '#constants/cors.constant.js';
-import { createCorsOriginValidatorFromList } from '#utils/cors.utils.js';
+import { createTauCorsOriginValidator } from '#utils/cors.utils.js';
 import { httpBodyLimit } from '#constants/http-body.constant.js';
 import { RedisService } from '#redis/redis.service.js';
 import { RedisIoAdapter } from '#api/websocket/redis-io.adapter.js';
@@ -44,7 +44,11 @@ async function createApiApp() {
   const additionalCorsOrigins = appConfig.get('ADDITIONAL_CORS_ORIGINS', { infer: true });
 
   app.enableCors({
-    origin: createCorsOriginValidatorFromList([frontendUrl, ...additionalCorsOrigins]),
+    origin: createTauCorsOriginValidator(
+      frontendUrl,
+      additionalCorsOrigins,
+      appConfig.get('NODE_ENV', { infer: true }),
+    ),
     ...corsBaseConfiguration,
   });
   app.enableVersioning({

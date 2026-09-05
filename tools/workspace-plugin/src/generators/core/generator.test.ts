@@ -14,6 +14,9 @@ const readText = (tree: ReturnType<typeof createTreeWithEmptyWorkspace>, path: s
 const readJson = <T>(tree: ReturnType<typeof createTreeWithEmptyWorkspace>, path: string): T =>
   JSON.parse(readText(tree, path)) as T;
 
+const snapshotChanges = (tree: ReturnType<typeof createTreeWithEmptyWorkspace>): unknown =>
+  tree.listChanges().map(({ path, type, content }) => ({ path, type, content: content?.toString('utf8') }));
+
 describe('core generator', () => {
   it('creates a lightweight published core package without plugin exports', async () => {
     const tree = createTreeWithEmptyWorkspace();
@@ -70,6 +73,20 @@ describe('core generator', () => {
     expect(readme).toContain("from '@taucad/occt-core';");
     expect(readme).not.toContain('import { plugin }');
     expect(readme).toContain('Apache-2.0 — see [LICENSE](./LICENSE)');
+
+    const instructions = readText(tree, `${root}/AGENTS.md`);
+    expect(instructions).toContain('# @taucad/occt-core');
+    expect(instructions).toContain('Nx project: `occt-core`');
+    expect(instructions).toContain('Project root: `packages/core/occt`');
+    expect(instructions).toContain('pnpm nx build occt-core');
+    expect(instructions).not.toContain('pnpm nx build occt\n');
+    expect(instructions).toContain('[root AGENTS](../../../AGENTS.md)');
+    expect(instructions).toContain('[packages AGENTS](../../AGENTS.md)');
+    expect(instructions).not.toContain('packages/core AGENTS');
+    expect(instructions).toContain('../../../.agents/skills/create-core/SKILL.md');
+    expect(instructions).toContain('../../../docs/policy/workspace-project-policy.md');
+    expect(instructions).not.toMatch(/<%|__tmpl__/);
+    expect(readText(tree, `${root}/CLAUDE.md`)).toBe('@AGENTS.md\n');
   });
 
   it('requires a scoped package name and published placement', async () => {
@@ -79,5 +96,17 @@ describe('core generator', () => {
     await expect(
       coreGenerator(tree, { name: 'private', packageName: '@taucad/private-core', publishable: false }),
     ).rejects.toThrow('publishable by placement');
+  });
+
+  it('fails a full creation collision before changing existing bytes', async () => {
+    const tree = createTreeWithEmptyWorkspace();
+    await coreGenerator(tree, { name: 'occt', packageName: '@taucad/occt-core' });
+    tree.write('packages/core/occt/AGENTS.md', '# Authored core notes\n');
+    const before = snapshotChanges(tree);
+
+    await expect(coreGenerator(tree, { name: 'occt', packageName: '@taucad/occt-core' })).rejects.toThrow(
+      'already exists',
+    );
+    expect(snapshotChanges(tree)).toEqual(before);
   });
 });

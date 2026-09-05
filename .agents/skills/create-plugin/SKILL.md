@@ -1,6 +1,6 @@
 ---
 name: create-plugin
-description: Create or update a publishable Tau runtime plugin toolkit with the workspace plugin generator. Use when adding kernel, transcoder, middleware, or bundler capabilities under packages/plugins or completing their package and host integration.
+description: Create or update a publishable Tau runtime plugin toolkit with the workspace plugin generator. Use when adding kernel, transcoder, middleware, or bundler capabilities under packages/plugins or completing their package and host integration. Agents should select this skill autonomously when the request clearly creates or changes that toolkit boundary.
 ---
 
 # Create Plugin
@@ -33,6 +33,12 @@ pnpm nx g @taucad/workspace-plugin:plugin <name> \
 ```
 
 If the package exists, update it in place instead of rerunning the generator.
+
+New plugin projects receive a local `AGENTS.md` naming only the selected
+capabilities, host target, generated entrypoints and real Nx commands, plus an
+adjacent `CLAUDE.md` containing exactly `@AGENTS.md`. The shared writer preserves
+authored instruction bytes and fills only a missing pair member. Maintain these
+instructions in place after creation.
 
 ## Complete
 

@@ -5,7 +5,8 @@ description: >-
   including publishable packages under packages/ and internal libraries under
   libs/. Use when creating a package or library, adding a new @taucad/*
   workspace project, choosing generator options, or updating package templates
-  and conventions.
+  and conventions. Agents should select this skill autonomously when a request
+  clearly needs a new Tau workspace project or changes its scaffold contract.
 ---
 
 # Create Package Skill
@@ -14,13 +15,13 @@ Create a new `@taucad/*` workspace project using the custom package generator.
 
 ## Placement Router
 
-| Code                                                             | Placement          | Tags                        | Build |
-| ---------------------------------------------------------------- | ------------------ | --------------------------- | ----- | -------------------------------- | --- |
-| Published npm package                                            | `packages`         | `scope:shared type:package` | yes   |
-| Runtime plugin toolkit (kernel, transcoder, middleware, bundler) | `packages/plugins` | `scope:shared type:package` | yes   |
-| Shared Apache capability                                         | `libs`             | `scope:shared type:lib`     | yes   |
-| Private application capability                                   | `apps/libs`        | `scope:<shared              | ui    | api> type:app-lib layer:<layer>` | no  |
-| Dev-time tooling                                                 | `tools`            | `scope:shared type:tool`    | yes   |
+| Code                                                             | Placement          | Tags                                                       | Build |
+| ---------------------------------------------------------------- | ------------------ | ---------------------------------------------------------- | ----- |
+| Published npm package                                            | `packages`         | `scope:shared type:package`                                | yes   |
+| Runtime plugin toolkit (kernel, transcoder, middleware, bundler) | `packages/plugins` | `scope:shared type:package`                                | yes   |
+| Shared Apache capability                                         | `libs`             | `scope:shared type:lib`                                    | yes   |
+| Private application capability                                   | `apps/libs`        | `scope:shared` or `scope:ui`, `type:app-lib layer:<layer>` | no    |
+| Dev-time tooling                                                 | `tools`            | `scope:shared type:tool`                                   | yes   |
 
 Use `scope:ui` for UI-only app-libs. Use `scope:shared` only with named UI and API consumers. See `docs/policy/workspace-project-policy.md`.
 
@@ -42,10 +43,10 @@ integration requirements; this skill does not duplicate them.
 | `name`        | Yes          | (argv[0])  | Package name without `@taucad/` prefix (e.g. `react` → `@taucad/react`) |
 | `description` | No           | `""`       | Package description for `package.json` and `README.md`                  |
 | `scope`       | No           | `packages` | Placement: `packages`, `libs`, `apps/libs`, or `tools`                  |
-| `scopeTag`    | No           | `shared`   | Audience tag: `shared`, `ui`, or `api`                                  |
+| `scopeTag`    | No           | `shared`   | `shared` outside app-libs; `shared` or `ui` for `apps/libs`             |
 | `layer`       | For app-libs | —          | `feature`, `ui`, `data-access`, or `util`                               |
-| `react`       | No           | `false`    | Add React peers, DOM/JSX config, jsdom, and Testing Library setup       |
-| `build`       | No           | By scope   | Defaults off for `apps/libs`, on for other placements                   |
+| `react`       | No           | `false`    | App-libs only: add React peers, DOM/JSX, jsdom, and Testing Library     |
+| `build`       | No           | By scope   | Fixed off for `apps/libs` and on for other placements                   |
 
 ### Example
 
@@ -69,9 +70,16 @@ All files are created in a single command with zero cleanup needed:
 | `tsconfig.spec.json`  | Vitest types, test globs, config file includes                                              |
 | `tsconfig.build.json` | Built placements only: extends the library config                                           |
 | `vitest.config.ts`    | Node by default; jsdom plus `vitest.setup.ts` when `--react`                                |
-| `project.json`        | `projectType: library`, `tags: ["scope:shared", "type:lib"]`                                |
+| `project.json`        | Library identity with placement-derived scope, type, and app-layer tags                     |
 | `src/index.ts`        | Empty barrel export                                                                         |
 | `README.md`           | Package name and description                                                                |
+| `AGENTS.md`           | Project identity, selected modes, entrypoints, available Nx commands and owner links        |
+| `CLAUDE.md`           | Exact native import of the adjacent `AGENTS.md`                                             |
+
+The instruction pair is created by the shared KeepExisting writer. A full
+project-generator collision fails before mutation. Subsequent instruction
+maintenance edits `AGENTS.md` as ordinary authored content; rerunning the
+instruction writer preserves both files and creates only a missing pair member.
 
 ## How it works
 
@@ -110,6 +118,7 @@ To change conventions for future packages, edit the template files in:
 
 ```
 tools/workspace-plugin/src/generators/package/files/
+tools/workspace-plugin/src/generators/instruction-files/
 ```
 
 Changes to templates affect only future generations — existing packages are not retroactively updated.

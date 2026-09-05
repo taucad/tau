@@ -1,0 +1,37 @@
+# <%= packageName %>
+
+## Responsibility
+
+<%= description %>
+
+- Nx project: `<%= projectName %>`
+- Project root: `<%= projectRoot %>`
+<% for (const fact of facts) { %>- <%= fact %>
+<% } %>
+## Entrypoints
+
+<% for (const entrypoint of entrypoints) { %>- `<%= entrypoint %>`
+<% } %>
+## Commands
+
+Run from the workspace root. These are available project targets; generation does not claim they have passed.
+
+```bash
+<% for (const command of commands) { %><%= command %>
+<% } %>```
+
+## Local maintenance
+
+Read every applicable ancestor before editing this project:
+
+<% for (const ancestor of ancestorInstructions) { %>- [<%= ancestor.label %>](<%= ancestor.path %>)
+<% } %>
+Then follow the [AGENTS policy](<%= rootOffset %>docs/policy/agents-md-policy.md), the [project README](./README.md), and these owners:
+
+<% for (const owner of owners) { %>- [<%= owner.label %>](<%= rootOffset %><%= owner.path %>)
+<% } %>
+Keep this file limited to verified local entrypoints, invariants and checks. Put cross-project standards in their policy owner and repeatable procedures in a shared skill.
+
+## Project notes
+
+Record durable project-specific facts here after verifying them in current source. Keep task progress in its existing execution record. Route learning candidates through the learning-maintenance owner above, promoting broader rules to their narrowest canonical owner.

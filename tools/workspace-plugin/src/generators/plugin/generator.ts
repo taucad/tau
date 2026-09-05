@@ -17,6 +17,7 @@ import {
   canonicalLicenseText,
   placementMetadata,
 } from '#generators/package/generator.js';
+import { assertProjectCreationAvailable, writeProjectInstructions } from '#generators/write-project-instructions.js';
 
 const capabilityRoles = ['kernel', 'middleware', 'bundler', 'transcoder'] as const;
 type CapabilityRole = (typeof capabilityRoles)[number];
@@ -88,6 +89,8 @@ export const pluginGenerator = async (tree: Tree, schema: PluginGeneratorSchema)
   const { private: isPrivate } = placementMetadata.packages;
   const tags = ['scope:shared', 'type:package'];
 
+  assertProjectCreationAvailable(tree, schema.name, projectRoot);
+
   addProjectConfiguration(tree, schema.name, {
     root: projectRoot,
     sourceRoot: projectRoot,
@@ -95,6 +98,7 @@ export const pluginGenerator = async (tree: Tree, schema: PluginGeneratorSchema)
     tags,
   });
 
+  const hostTarget = schema.hostTarget ?? 'browser';
   const substitutions = {
     name: schema.name,
     importPath,
@@ -102,7 +106,7 @@ export const pluginGenerator = async (tree: Tree, schema: PluginGeneratorSchema)
     scope,
     sourceName,
     alias: propertyName,
-    hostTarget: schema.hostTarget ?? 'browser',
+    hostTarget,
     capabilities,
     tags: JSON.stringify(tags),
     private: String(isPrivate),
@@ -123,6 +127,45 @@ export const pluginGenerator = async (tree: Tree, schema: PluginGeneratorSchema)
   }
 
   tree.write(join(projectRoot, 'LICENSE'), canonicalLicenseText(tree, canonicalApacheLicensePath));
+  writeProjectInstructions(tree, {
+    projectName: schema.name,
+    projectRoot,
+    packageName: importPath,
+    description,
+    rootOffset: offsetFromRoot(projectRoot),
+    facts: [
+      'Placement: `packages/plugins`',
+      `Capabilities: \`${capabilities.map(({ role }) => role).join(', ')}\``,
+      `Host target: \`${hostTarget}\``,
+      'Build mode: tsdown ESM build enabled',
+    ],
+    entrypoints: [
+      'src/index.ts',
+      `src/${sourceName}.plugin.ts`,
+      ...capabilities.map(({ fileName }) => `src/${fileName}.ts`),
+      'package.json',
+      'project.json',
+    ],
+    commands: [
+      `pnpm nx lint ${schema.name}`,
+      `pnpm nx test ${schema.name} --watch=false`,
+      `pnpm nx typecheck ${schema.name}`,
+      `pnpm nx build ${schema.name}`,
+      `pnpm nx pkgcheck ${schema.name}`,
+      `pnpm nx size ${schema.name}`,
+    ],
+    owners: [
+      { label: 'Create Plugin workflow', path: '.agents/skills/create-plugin/SKILL.md' },
+      ...(selectedRoles.has('kernel')
+        ? [{ label: 'Create Kernel workflow', path: '.agents/skills/create-kernel/SKILL.md' }]
+        : []),
+      { label: 'Learning maintenance', path: '.agents/skills/update-agent-memory/SKILL.md' },
+      { label: 'Workspace project policy', path: 'docs/policy/workspace-project-policy.md' },
+      { label: 'Runtime architecture policy', path: 'docs/policy/runtime-architecture-policy.md' },
+      { label: 'Library API policy', path: 'docs/policy/library-api-policy.md' },
+      { label: 'Testing policy', path: 'docs/policy/testing-policy.md' },
+    ],
+  });
   const project = readProjectConfiguration(tree, schema.name);
   updateProjectConfiguration(tree, schema.name, { ...project, tags });
   await formatFiles(tree);

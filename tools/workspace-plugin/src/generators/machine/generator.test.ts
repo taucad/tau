@@ -23,8 +23,14 @@ describe('machine generator', () => {
   it('adds one public machine subpath to an explicit package owner', async () => {
     const tree = createTreeWithEmptyWorkspace();
     await packageGenerator(tree, { name: 'camera' });
+    tree.write('packages/camera/AGENTS.md', '# Authored camera instructions\n');
+    tree.write('packages/camera/CLAUDE.md', '@AGENTS.md\n');
 
     await machineGenerator(tree, { name: 'camera', project: 'camera', subpath: 'machine' });
+
+    expect(readText(tree, 'packages/camera/AGENTS.md')).toBe('# Authored camera instructions\n');
+    expect(readText(tree, 'packages/camera/CLAUDE.md')).toBe('@AGENTS.md\n');
+    expect(tree.exists('packages/camera/src/machines/AGENTS.md')).toBe(false);
 
     expect(tree.exists('packages/camera/src/camera.machine.ts')).toBe(true);
     expect(tree.exists('packages/camera/src/camera.machine.test.ts')).toBe(true);

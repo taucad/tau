@@ -15,8 +15,14 @@ const readText = (tree: ReturnType<typeof createTreeWithEmptyWorkspace>, path: s
 describe('lint-rule generator', () => {
   it('scaffolds a rule and a matching RuleTester test under libs/oxlint/src/rules', async () => {
     const tree = createTreeWithEmptyWorkspace();
+    tree.write('libs/oxlint/AGENTS.md', '# Authored lint instructions\n');
+    tree.write('libs/oxlint/CLAUDE.md', '@AGENTS.md\n');
 
     await lintRuleGenerator(tree, { name: 'no-foo-bar', description: 'Disallow foo bar.' });
+
+    expect(readText(tree, 'libs/oxlint/AGENTS.md')).toBe('# Authored lint instructions\n');
+    expect(readText(tree, 'libs/oxlint/CLAUDE.md')).toBe('@AGENTS.md\n');
+    expect(tree.exists('libs/oxlint/src/rules/AGENTS.md')).toBe(false);
 
     const rule = readText(tree, 'libs/oxlint/src/rules/no-foo-bar.js');
     expect(rule).toContain('export const noFooBarRule');

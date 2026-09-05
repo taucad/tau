@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/schema",
   "$id": "TauPackage",
-  "title": "Create a @taucad/* package",
-  "description": "Scaffolds a publishable @taucad/* package with an ESM-only build, vitest, and all Tau conventions.",
+  "title": "Create a @taucad/* workspace project",
+  "description": "Scaffolds a policy-routed @taucad/* project with placement-owned tags, build mode, tests, and Tau conventions.",
   "type": "object",
   "properties": {
     "name": {
@@ -25,9 +25,9 @@
     },
     "scopeTag": {
       "type": "string",
-      "enum": ["shared", "ui", "api"],
+      "enum": ["shared", "ui"],
       "default": "shared",
-      "description": "Application scope tag"
+      "description": "Audience tag; packages, libs, and tools require shared, while apps/libs supports shared or ui"
     },
     "layer": {
       "type": "string",
@@ -37,11 +37,11 @@
     "react": {
       "type": "boolean",
       "default": false,
-      "description": "Configure React peers, JSX, jsdom, and Testing Library"
+      "description": "Configure React peers, JSX, jsdom, and Testing Library for an apps/libs project"
     },
     "build": {
       "type": "boolean",
-      "description": "Emit tsdown build configuration (defaults to false for apps/libs and true otherwise)"
+      "description": "Placement-owned build mode: false for apps/libs and true for packages, libs, and tools; a supplied value must match"
     }
   },
   "required": ["name"]

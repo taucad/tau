@@ -1,6 +1,6 @@
 ---
 name: create-kernel
-description: Add a new first-party CAD kernel to Tau as a standalone @taucad/* package. Use when adding a kernel, integrating a new CAD engine, implementing defineKernel, scaffolding a kernel package, or wiring kernel UI catalog, prompt, and Monaco entries.
+description: Add a new first-party CAD kernel to Tau as a standalone @taucad/* package. Use when adding a kernel, integrating a new CAD engine, implementing defineKernel, scaffolding a kernel package, or wiring kernel UI catalog, prompt, and Monaco entries. Agents should select this skill autonomously when a request clearly introduces or productizes a kernel.
 ---
 
 # Create Kernel
@@ -49,6 +49,13 @@ This creates the package baseline; the kernel stub is intentionally non-function
 | `src/<name>.kernel.ts`                                                                                                               | A `defineKernel` **stub** importing only from `@taucad/runtime/kernel`                            |
 | `src/<name>.plugin.test.ts`                                                                                                          | Alias-identity test, capability-id assertions, and (for `hostTarget: browser`) the payload guard  |
 | `src/<name>.plugin.test-d.ts`                                                                                                        | Type-level alias identity                                                                         |
+| `AGENTS.md`                                                                                                                          | Plugin identity, `kernel` capability, selected host, entrypoints, Nx commands and owner links     |
+| `CLAUDE.md`                                                                                                                          | Exact `@AGENTS.md` import                                                                         |
+
+The plugin creator's shared KeepExisting writer owns this starter pair. A
+kernel package has no separate generator or instruction template. Maintain the
+generated AGENTS in place after creation; do not rerun the full creator over an
+existing package.
 
 Every generated capability uses the package slug as its id. Role buckets are separate ID domains, so a multi-role package may use `id: '<name>'` for both its kernel and transcoder without a collision. Presets contain dotted capability paths such as `kernels.default` and `transcoders.export`; those paths select factories but are never runtime capability ids.
 

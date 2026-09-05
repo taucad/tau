@@ -1,7 +1,9 @@
+import { addProjectConfiguration } from '@nx/devkit';
 import { createTreeWithEmptyWorkspace } from '@nx/devkit/testing.js';
 import { describe, expect, it } from 'vitest';
 
 import { packageGenerator } from '#generators/package/generator.js';
+import { writeProjectInstructions } from '#generators/write-project-instructions.js';
 
 const readText = (tree: ReturnType<typeof createTreeWithEmptyWorkspace>, path: string): string => {
   const content = tree.read(path, 'utf8');
@@ -14,6 +16,9 @@ const readText = (tree: ReturnType<typeof createTreeWithEmptyWorkspace>, path: s
 
 const readJson = <T>(tree: ReturnType<typeof createTreeWithEmptyWorkspace>, path: string): T =>
   JSON.parse(readText(tree, path)) as T;
+
+const snapshotChanges = (tree: ReturnType<typeof createTreeWithEmptyWorkspace>): unknown =>
+  tree.listChanges().map(({ path, type, content }) => ({ path, type, content: content?.toString('utf8') }));
 
 describe('package generator', () => {
   it('scaffolds ESM-only publish metadata and tsdown config', async () => {
@@ -87,6 +92,24 @@ describe('package generator', () => {
     const vitestConfig = readText(tree, 'packages/example/vitest.config.ts');
     expect(vitestConfig).toContain("exclude: ['src/**/*.{test,spec,test-d}.ts']");
     expect(vitestConfig).not.toContain('thresholds:');
+
+    const instructions = readText(tree, 'packages/example/AGENTS.md');
+    expect(instructions).toContain('# @taucad/example');
+    expect(instructions).toContain('Nx project: `example`');
+    expect(instructions).toContain('Build mode: tsdown ESM build enabled');
+    expect(instructions).toContain('React mode: disabled with Node test environment');
+    expect(instructions).toContain('`src/index.ts`');
+    expect(instructions).toContain('pnpm nx build example');
+    expect(instructions).toContain('pnpm nx pkgcheck example');
+    expect(instructions).toContain('pnpm nx size example');
+    expect(instructions).toContain('[project README](./README.md)');
+    expect(instructions).toContain('[root AGENTS](../../AGENTS.md)');
+    expect(instructions).toContain('[packages AGENTS](../AGENTS.md)');
+    expect(instructions).toContain('../../.agents/skills/create-package/SKILL.md');
+    expect(instructions).toContain('../../.agents/skills/update-agent-memory/SKILL.md');
+    expect(instructions).toContain('../../docs/policy/workspace-project-policy.md');
+    expect(instructions).not.toMatch(/<%|__tmpl__/);
+    expect(readText(tree, 'packages/example/CLAUDE.md')).toBe('@AGENTS.md\n');
   });
 
   it.each([
@@ -95,24 +118,32 @@ describe('package generator', () => {
       layer: undefined,
       isPrivate: false,
       tags: ['scope:shared', 'type:package'],
+      ancestorLinks: ['[root AGENTS](../../AGENTS.md)', '[packages AGENTS](../AGENTS.md)'],
     },
     {
       scope: 'libs',
       layer: undefined,
       isPrivate: true,
       tags: ['scope:shared', 'type:lib'],
+      ancestorLinks: ['[root AGENTS](../../AGENTS.md)', '[libs AGENTS](../AGENTS.md)'],
     },
     {
       scope: 'apps/libs',
       layer: 'feature',
       isPrivate: true,
       tags: ['scope:shared', 'type:app-lib', 'layer:feature'],
+      ancestorLinks: [
+        '[root AGENTS](../../../AGENTS.md)',
+        '[apps AGENTS](../../AGENTS.md)',
+        '[apps/libs AGENTS](../AGENTS.md)',
+      ],
     },
     {
       scope: 'tools',
       layer: undefined,
       isPrivate: true,
       tags: ['scope:shared', 'type:tool'],
+      ancestorLinks: ['[root AGENTS](../../AGENTS.md)', '[tools AGENTS](../AGENTS.md)'],
     },
   ] as const)('derives architecture from $scope and always uses Apache-2.0', async (placement) => {
     const tree = createTreeWithEmptyWorkspace();
@@ -127,6 +158,13 @@ describe('package generator', () => {
     expect(packageJson.license).toBe('Apache-2.0');
     expect(projectJson.tags).toStrictEqual(placement.tags);
     expect(readText(tree, `${root}/LICENSE`)).toContain('Apache License');
+    expect(tree.exists(`${root}/AGENTS.md`)).toBe(true);
+    expect(readText(tree, `${root}/CLAUDE.md`)).toBe('@AGENTS.md\n');
+    const instructions = readText(tree, `${root}/AGENTS.md`);
+    expect(instructions).toContain(`Project root: \`${root}\``);
+    for (const link of placement.ancestorLinks) {
+      expect(instructions).toContain(link);
+    }
   });
 
   it('scaffolds a source-consumed React app-lib', async () => {
@@ -178,24 +216,118 @@ describe('package generator', () => {
       lib: ['ES2024', 'DOM', 'DOM.Iterable'],
     });
     expect(tsconfig.include).toContain('src/**/*.tsx');
+    const instructions = readText(tree, `${root}/AGENTS.md`);
+    expect(instructions).toContain('Build mode: source-consumed; no build target');
+    expect(instructions).toContain('React mode: enabled with jsdom test setup');
+    expect(instructions).toContain('../../../.agents/skills/create-package/SKILL.md');
+    expect(instructions).not.toContain('pnpm nx build example');
+    expect(instructions).not.toContain('pnpm nx pkgcheck example');
+    expect(instructions).not.toContain('pnpm nx size example');
   });
 
-  it('supports overriding the placement build default', async () => {
+  it.each([
+    {
+      label: 'a missing app-lib layer',
+      schema: { name: 'example', scope: 'apps/libs' } as const,
+      message: '--layer is required when --scope=apps/libs',
+    },
+    {
+      label: 'a layer outside app-libs',
+      schema: { name: 'example', scope: 'packages', layer: 'feature' } as const,
+      message: '--layer is only supported when --scope=apps/libs',
+    },
+    {
+      label: 'a built app-lib',
+      schema: { name: 'example', scope: 'apps/libs', layer: 'util', build: true } as const,
+      message: '--build=true conflicts with the fixed apps/libs build mode (false)',
+    },
+    {
+      label: 'an unbuilt public package',
+      schema: { name: 'example', scope: 'packages', build: false } as const,
+      message: '--build=false conflicts with the fixed packages build mode (true)',
+    },
+    {
+      label: 'React outside app-libs',
+      schema: { name: 'example', scope: 'libs', react: true } as const,
+      message: '--react is only supported when --scope=apps/libs',
+    },
+    {
+      label: 'a non-shared published scope',
+      schema: { name: 'example', scope: 'packages', scopeTag: 'ui' } as const,
+      message: '--scopeTag=ui is not supported when --scope=packages',
+    },
+    {
+      label: 'an unsupported API-only app-lib scope',
+      schema: { name: 'example', scope: 'apps/libs', layer: 'util', scopeTag: 'api' } as const,
+      message: '--scopeTag=api is not supported when --scope=apps/libs',
+    },
+  ])('rejects $label before changing the Tree', async ({ schema, message }) => {
     const tree = createTreeWithEmptyWorkspace();
+    tree.write('sentinel.txt', 'unchanged\n');
+    const before = snapshotChanges(tree);
 
-    await packageGenerator(tree, { name: 'example', scope: 'apps/libs', layer: 'util', build: true });
-
-    expect(tree.exists('apps/libs/example/tsdown.config.ts')).toBe(true);
-    expect(tree.exists('apps/libs/example/.size-limit.json')).toBe(true);
-    expect(readJson<{ publishConfig?: unknown }>(tree, 'apps/libs/example/package.json').publishConfig).toBeDefined();
+    await expect(packageGenerator(tree, schema)).rejects.toThrow(message);
+    expect(snapshotChanges(tree)).toEqual(before);
   });
 
-  it('validates layer placement', async () => {
-    await expect(
-      packageGenerator(createTreeWithEmptyWorkspace(), { name: 'example', scope: 'apps/libs' }),
-    ).rejects.toThrow('--layer is required when --scope=apps/libs');
-    await expect(
-      packageGenerator(createTreeWithEmptyWorkspace(), { name: 'example', scope: 'packages', layer: 'feature' }),
-    ).rejects.toThrow('--layer is only supported when --scope=apps/libs');
+  it.each([
+    {
+      label: 'Nx project name',
+      prepare: (tree: ReturnType<typeof createTreeWithEmptyWorkspace>) => {
+        addProjectConfiguration(tree, 'example', { root: 'packages/different-root' });
+      },
+      message: 'Nx project already exists: example',
+    },
+    {
+      label: 'nonempty project root',
+      prepare: (tree: ReturnType<typeof createTreeWithEmptyWorkspace>) => {
+        tree.write('packages/example/sentinel.txt', 'owned root\n');
+      },
+      message: 'Project root already exists: packages/example',
+    },
+    {
+      label: 'regular file at the exact project root',
+      prepare: (tree: ReturnType<typeof createTreeWithEmptyWorkspace>) => {
+        tree.write('packages/example', 'owned file\n');
+      },
+      message: 'Project root already exists: packages/example',
+    },
+  ])('rejects an existing $label before changing existing bytes', async ({ prepare, message }) => {
+    const tree = createTreeWithEmptyWorkspace();
+    prepare(tree);
+    const before = snapshotChanges(tree);
+
+    await expect(packageGenerator(tree, { name: 'example' })).rejects.toThrow(message);
+    expect(snapshotChanges(tree)).toEqual(before);
+  });
+
+  it('keeps authored instruction bytes and fills only a missing pair member', async () => {
+    const tree = createTreeWithEmptyWorkspace();
+    const options = {
+      projectName: 'example',
+      projectRoot: 'packages/example',
+      packageName: '@taucad/example',
+      description: 'Example package',
+      rootOffset: '../../',
+      facts: ['Placement: `packages`'],
+      entrypoints: ['src/index.ts'],
+      commands: ['pnpm nx lint example'],
+      owners: [{ label: 'Testing policy', path: 'docs/policy/testing-policy.md' }],
+    };
+    tree.write('packages/example/AGENTS.md', '# Authored\nKeep this byte-for-byte.\n');
+    tree.write('packages/example/CLAUDE.md', 'custom adapter\n');
+
+    writeProjectInstructions(tree, options);
+    expect(readText(tree, 'packages/example/AGENTS.md')).toBe('# Authored\nKeep this byte-for-byte.\n');
+    expect(readText(tree, 'packages/example/CLAUDE.md')).toBe('custom adapter\n');
+
+    tree.delete('packages/example/CLAUDE.md');
+    writeProjectInstructions(tree, options);
+    expect(readText(tree, 'packages/example/AGENTS.md')).toBe('# Authored\nKeep this byte-for-byte.\n');
+    expect(readText(tree, 'packages/example/CLAUDE.md')).toBe('@AGENTS.md\n');
+
+    const afterMissingFill = snapshotChanges(tree);
+    writeProjectInstructions(tree, options);
+    expect(snapshotChanges(tree)).toEqual(afterMissingFill);
   });
 });

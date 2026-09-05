@@ -1,6 +1,6 @@
 ---
 name: create-core
-description: Create or update a small publishable @taucad/*-core support package under packages/core. Use when multiple public packages need dependency-light implementation helpers that do not belong to a domain package or runtime plugin.
+description: Create or update a small publishable @taucad/*-core support package under packages/core. Use when multiple public packages need dependency-light implementation helpers that do not belong to a domain package or runtime plugin. Agents should select this skill autonomously when that ownership boundary is clear.
 ---
 
 # Create Core Package
@@ -21,6 +21,12 @@ pnpm nx g @taucad/workspace-plugin:core <name> \
 ```
 
 Update an existing package in place. Do not rerun the generator.
+
+New core projects also receive `AGENTS.md` and exact `CLAUDE.md` import files
+from the shared instruction template. The starter uses `packageName` without
+`@taucad/` as the Nx identity, even when the directory `name` differs, and lists
+the core entrypoint and inferred Nx checks. Maintain the local AGENTS after
+creation; never rerun the full creator over an existing project.
 
 ## Complete and Verify
 

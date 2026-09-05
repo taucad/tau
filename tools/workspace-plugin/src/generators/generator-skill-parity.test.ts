@@ -22,4 +22,17 @@ describe('workspace generator skill parity', () => {
       expect(skill).toContain(`pnpm nx g @taucad/workspace-plugin:${name}`);
     },
   );
+
+  it('keeps the Create Package placement router as a four-column Markdown table', () => {
+    const skill = readFileSync(resolve(repositoryRoot, '.agents/skills/create-package/SKILL.md'), 'utf8');
+    const router = skill.split('## Placement Router\n')[1]?.split('\n## Usage')[0];
+    const rows = router?.split('\n').filter((line) => line.startsWith('|')) ?? [];
+
+    expect(rows).toHaveLength(7);
+    for (const row of rows) {
+      expect(row.split('|')).toHaveLength(6);
+    }
+    expect(router).toContain('| Code');
+    expect(router).toContain('`scope:shared` or `scope:ui`, `type:app-lib layer:<layer>`');
+  });
 });

@@ -12,22 +12,24 @@
  * utility itself, which writes a structured line into the shell's diagnostics
  * log (`userData/logs/desktop.log`) that the e2e reads from disk. That is a
  * strictly *better* witness than a string on the wire, because it is produced
- * inside the process that loaded the engine.
+ * inside the process that loaded the engine — and since the colocation closeout
+ * it reports the engine's own `backend` export rather than a version suffix,
+ * which is the only thing left that differs between the two payloads.
  */
-
-/** Build metadata that distinguishes the native kernel from its WebAssembly twin. */
-export const nativeVersionMarker = '+native';
 
 /** Log event name the e2e greps for. */
 export const kernelEngineEvent = 'kernel.engine';
 
 /** The detail object logged under {@link kernelEngineEvent}. */
 export type KernelEngineRecord = {
-  /** Capability id — the same `openrscad` both engines answer to. */
+  /** Capability id — `openrscad`, whichever payload bound. */
   readonly kernelId: string;
-  /** Resolved kernel version, e.g. `0.11.0-beta.1+native`. */
+  /** Resolved kernel version, e.g. `0.11.0-beta.3` — the engine release, which
+   *  is the same string for both backends. */
   readonly version: string;
-  /** Whether the resolved version is the native build. */
+  /** The payload `@taulabs/openrscad-engine` bound in the utility process. */
+  readonly backend: string;
+  /** Whether that payload is the N-API addon. */
   readonly native: boolean;
   /** Electron version, absent when the utility runs under plain Node. */
   readonly electron: string | undefined;
@@ -47,21 +49,25 @@ export type KernelEngineRecord = {
 /**
  * Build the engine-identity record.
  *
- * `native` is derived from the version rather than hard-coded, which is the
- * whole point: swap the definition back to the WebAssembly kernel and the
- * assertion flips, instead of a constant that would read `true` either way.
+ * The kernel version no longer distinguishes the backends — one engine release
+ * ships both, byte-identical — so `native` is derived from the engine's own
+ * `backend` export, read in the process that loaded it. That is the only honest
+ * witness left: a platform package that failed to match leaves the version
+ * untouched and flips this field.
  *
- * @param input - Resolved kernel identity and the process's version table.
+ * @param input - Resolved kernel identity, the bound backend, and the process's version table.
  * @returns The record to log.
  */
 export const kernelEngineRecord = (input: {
   readonly kernelId: string;
   readonly version: string;
+  readonly backend: string;
   readonly versions: { readonly electron?: string | undefined; readonly node: string };
 }): KernelEngineRecord => ({
   kernelId: input.kernelId,
   version: input.version,
-  native: input.version.includes(nativeVersionMarker),
+  backend: input.backend,
+  native: input.backend === 'native',
   electron: input.versions.electron,
   node: input.versions.node,
   napiExternalBuffersAssumedCopied: input.versions.electron !== undefined,

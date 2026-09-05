@@ -17,7 +17,6 @@ const bundledWorkspaceDependencies = [
   '@taucad/middleware',
   '@taucad/opencascade',
   '@taucad/openrscad',
-  '@taucad/openrscad-native',
   '@taucad/picogk',
   '@taucad/replicad',
   '@taucad/rhino',
@@ -33,9 +32,10 @@ const bundledWorkspaceDependencies = [
  * the shell consumes that build output as an artifact and nothing else.
  *
  * `electronRuntimeConfig` re-applies Tau's electron-vite invariants. Workspace
- * packages are bundled into the distributable ASAR. Only the runtime-loaded
- * N-API package stays external so its adjacent `.node` binary remains
- * discoverable.
+ * packages are bundled into the distributable ASAR. The runtime-loaded engines
+ * stay external: `@taulabs/openrscad-engine` resolves its own `node` entry and
+ * its optional platform package from `node_modules` at runtime, and `libassimp`
+ * likewise, so their `.node` binaries remain discoverable.
  */
 export default defineConfig(
   electronRuntimeConfig({
@@ -43,7 +43,7 @@ export default defineConfig(
       build: {
         externalizeDeps: {
           exclude: [...bundledWorkspaceDependencies],
-          include: ['@taulabs/openrscad-engine-native', 'libassimp'],
+          include: ['@taulabs/openrscad-engine', 'libassimp'],
         },
         outDir: 'dist/main',
       },

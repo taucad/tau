@@ -13,6 +13,7 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { closeSync, openSync, readSync } from 'node:fs';
 import { cp, mkdir, readFile, readdir, realpath, rename, rm, writeFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -48,7 +49,7 @@ const extensionRoot = resolve(desktopRoot, 'macos/dist/extensions');
 const hostInfo = resolve(desktopRoot, 'macos/generated/TauHost-Info.plist');
 const extensionEntitlements = resolve(desktopRoot, 'macos/Config/TauQuickLook.entitlements');
 const uiClientRoot = resolve(workspaceRoot, 'apps/ui/desktop/build/client');
-const openrscadPluginModules = resolve(workspaceRoot, 'packages/plugins/openrscad-native/node_modules');
+const openrscadPluginModules = resolve(workspaceRoot, 'packages/plugins/openrscad/node_modules');
 const assimpPluginModules = resolve(workspaceRoot, 'packages/plugins/assimp/node_modules');
 const pythonResourceRoot = resolve(desktopRoot, 'resources/python');
 const picoGkResourceRoot = resolve(desktopRoot, 'resources/picogk');
@@ -161,9 +162,20 @@ const copyRuntimePackage = async (name: string, source: string): Promise<void> =
 };
 
 const openrscadEngine = await realpath(resolve(openrscadPluginModules, '@taulabs/openrscad-engine'));
-const openrscadNative = await realpath(resolve(openrscadPluginModules, '@taulabs/openrscad-engine-native'));
+/* One engine package, two payloads: the addon ships in the platform package its
+ * `node` entry loads, exactly as libassimp does. Staging the engine without it
+ * would still run — through the WebAssembly fallback — which is precisely the
+ * silent downgrade `verify-macos-package.mts` refuses. */
+const openrscadEngineDarwinArm64 = dirname(
+  createRequire(resolve(openrscadEngine, 'package.json')).resolve(
+    '@taulabs/openrscad-engine-darwin-arm64/package.json',
+  ),
+);
+const openrscadMetadata = await readJson<{ readonly version: string }>(resolve(openrscadEngine, 'package.json'));
 const libassimp = await realpath(resolve(assimpPluginModules, 'libassimp'));
-const libassimpDarwinArm64 = await realpath(resolve(assimpPluginModules, 'libassimp-darwin-arm64'));
+const libassimpDarwinArm64 = dirname(
+  createRequire(resolve(libassimp, 'package.json')).resolve('libassimp-darwin-arm64/package.json'),
+);
 const libassimpMetadata = await readJson<{ readonly version: string }>(resolve(libassimp, 'package.json'));
 
 await rm(outputRoot, { recursive: true, force: true });
@@ -186,7 +198,7 @@ await Promise.all([
     filter: excludesSourceMaps,
   }),
   copyRuntimePackage('@taulabs/openrscad-engine', openrscadEngine),
-  copyRuntimePackage('@taulabs/openrscad-engine-native', openrscadNative),
+  copyRuntimePackage('@taulabs/openrscad-engine-darwin-arm64', openrscadEngineDarwinArm64),
   copyRuntimePackage('libassimp', libassimp),
   copyRuntimePackage('libassimp-darwin-arm64', libassimpDarwinArm64),
   writeFile(
@@ -199,8 +211,8 @@ await Promise.all([
         main: metadata.main,
         type: metadata.type,
         dependencies: {
-          '@taulabs/openrscad-engine': '0.11.0-beta.2',
-          '@taulabs/openrscad-engine-native': '0.11.0-beta.2',
+          '@taulabs/openrscad-engine': openrscadMetadata.version,
+          '@taulabs/openrscad-engine-darwin-arm64': openrscadMetadata.version,
           libassimp: libassimpMetadata.version,
           'libassimp-darwin-arm64': libassimpMetadata.version,
         },
@@ -285,7 +297,7 @@ await sign({
       ? {
           entitlements: [
             'com.apple.security.cs.allow-jit',
-            ...(!release ? ['com.apple.security.cs.disable-library-validation'] : []),
+            ...(release ? [] : ['com.apple.security.cs.disable-library-validation']),
           ],
         }
       : {}),

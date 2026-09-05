@@ -39,12 +39,14 @@ serveElectronRuntime({
  * Resolution goes through `@taucad/runtime/plugin`'s public
  * `resolveRuntimePluginDefinition`, so nothing about the runtime's surface is
  * widened to make the version observable — the shell asks the same question the
- * worker does. Critically it resolves **`desktopOpenrscadKernel`**, the very
- * binding the served recipe registers, not a fresh `openrscadNativeKernel()`:
- * a second instantiation would report `+native` even after the recipe was
- * swapped back to WebAssembly, which is a witness that cannot fail. The two
- * engines' resolved versions genuinely differ (`…-beta.1+native` vs
- * `…-beta.1`), so with one shared binding the assertion flips with the recipe.
+ * worker does. It resolves **`desktopOpenrscadKernel`**, the very binding the
+ * served recipe registers, so the logged identity cannot describe a kernel this
+ * process does not serve.
+ *
+ * *Which* payload bound is a separate question, and only the engine can answer
+ * it: one release ships the addon and the WebAssembly build under one version.
+ * The `backend` export is read from the same module instance the kernel loaded
+ * (Node's module cache), so this is an observation, not a second probe.
  *
  * @returns Nothing. Diagnostics must never take the kernel down with them.
  */
@@ -55,12 +57,14 @@ const recordEngineIdentity = async (): Promise<void> => {
   }
   try {
     const definition = await resolveRuntimePluginDefinition('kernel', desktopOpenrscadKernel);
+    const { backend } = await import('@taulabs/openrscad-engine');
     createDiagnosticsLog({ directory }).log(
       'info',
       kernelEngineEvent,
       kernelEngineRecord({
         kernelId: desktopOpenrscadKernel.id,
         version: definition.version,
+        backend,
         versions: process.versions,
       }),
     );

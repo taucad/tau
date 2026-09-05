@@ -369,18 +369,37 @@ if (nativeIdentity !== '["darwin-arm64-napi8",8,"0.2.0"]') {
   throw new Error(`The packaged Electron runtime loaded an unexpected libassimp addon: ${nativeIdentity}`);
 }
 
-const openrscadNativeEntry = resolve(
+/* One package, two payloads. The engine always renders, so the version alone
+ * cannot tell the packaged app apart from one that quietly fell back to the
+ * WebAssembly build; `backend` is what says which payload the platform package
+ * gave it, and it is read from the engine itself inside the packaged runtime. */
+const openrscadAddon = resolve(
   appPath,
-  'Contents/Resources/app.asar/node_modules/@taulabs/openrscad-engine-native/dist/node.js',
+  'Contents/Resources/app.asar.unpacked/node_modules/@taulabs/openrscad-engine-darwin-arm64/openrscad.darwin-arm64.node',
 );
-const openrscadVersion = run('env', [
+if (!existsSync(openrscadAddon)) {
+  throw new Error('The packaged app does not contain the adjacent @taulabs/openrscad-engine-darwin-arm64 addon.');
+}
+const openrscadEntry = resolve(
+  appPath,
+  'Contents/Resources/app.asar/node_modules/@taulabs/openrscad-engine/dist/node.js',
+);
+const openrscadEngineVersion = JSON.parse(
+  readFileSync(
+    resolve(appPath, 'Contents/Resources/app.asar/node_modules/@taulabs/openrscad-engine/package.json'),
+    'utf8',
+  ),
+) as { readonly version: string };
+const openrscadIdentity = run('env', [
   'ELECTRON_RUN_AS_NODE=1',
   appExecutable,
   '-e',
-  `import(${JSON.stringify(openrscadNativeEntry)}).then(async ({version})=>process.stdout.write(await version())).catch((error)=>{console.error(error);process.exitCode=1})`,
+  `import(${JSON.stringify(openrscadEntry)}).then(async ({version,backend})=>process.stdout.write(JSON.stringify([await version(),backend]))).catch((error)=>{console.error(error);process.exitCode=1})`,
 ]);
-if (openrscadVersion !== '0.11.0-beta.2') {
-  throw new Error(`The packaged Electron runtime loaded an unexpected OpenRSCAD engine: ${openrscadVersion}`);
+if (openrscadIdentity !== JSON.stringify([openrscadEngineVersion.version, 'native'])) {
+  throw new Error(
+    `The packaged Electron runtime loaded an unexpected OpenRSCAD engine: ${openrscadIdentity} (expected ${JSON.stringify([openrscadEngineVersion.version, 'native'])})`,
+  );
 }
 
 let arm64MachObjectCount = 0;

@@ -65,7 +65,7 @@ afterEach(async () => {
   }
 });
 
-test('builds an openrscad-native model on disk from the desktop composer', async () => {
+test('builds an openrscad model on disk from the desktop composer', async () => {
   const account = tauTestAccount('replay');
   seededEmail = account.email;
   const token = await seedTauTestUser(account);
@@ -173,7 +173,7 @@ test('signs in and creates a project on real disk from the composer', async () =
  *
  * Writes a real OpenSCAD source into the project from **outside the app** and
  * asserts the shell renders it: the kernel utility's own `fromNodeFs`
- * watcher → re-parse → `openrscadNative()` re-render → framed geometry in the
+ * watcher → re-parse → `openrscadKernel()` re-render → framed geometry in the
  * viewport. That is the *second* of the two authorities over this directory
  * (the renderer's node filesystem provider is the first), which is exactly
  * what "two authorities, one disk" claims.

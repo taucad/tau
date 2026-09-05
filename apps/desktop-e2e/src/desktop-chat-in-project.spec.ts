@@ -57,7 +57,7 @@ afterEach(async () => {
   }
 });
 
-test('builds an openrscad-native model on disk from the project chat', async () => {
+test('builds an openrscad model on disk from the project chat', async () => {
   const account = tauTestAccount('in-project');
   seededEmail = account.email;
   const token = await seedTauTestUser(account);

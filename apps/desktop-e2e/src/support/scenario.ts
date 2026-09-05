@@ -173,19 +173,22 @@ export const cancelRun = async (page: Page): Promise<void> => {
 };
 
 /**
- * N6 — assert the kernel utility loaded the **native** engine.
+ * N6 — assert the kernel utility bound the **N-API addon**, not the fallback.
  *
- * The engine version never crosses the runtime wire, so the witness is the
- * `kernel.engine` line the utility appends to the shell's rotating log at
- * startup (main names the directory through `TAU_DESKTOP_LOG_DIR`). Produced
- * inside the process that loaded the engine, and `native` is derived from the
- * resolved version rather than hard-coded.
+ * The engine version never crosses the runtime wire — and since one engine
+ * release ships both payloads under one version, it would not distinguish them
+ * anyway. The witness is the `kernel.engine` line the utility appends to the
+ * shell's rotating log at startup (main names the directory through
+ * `TAU_DESKTOP_LOG_DIR`), produced inside the process that loaded the engine,
+ * with `native` derived from the engine's own `backend` export. A packaged app
+ * whose platform package went missing renders through WebAssembly and fails
+ * here rather than passing quietly.
  *
  * @param logPath - `<userData>/logs/desktop.log`.
- * @returns The resolved engine version, e.g. `0.11.0-beta.1+native`.
+ * @returns The resolved engine version, e.g. `0.11.0-beta.3`.
  */
 export const expectNativeKernelEngine = async (logPath: string): Promise<string> => {
-  let engine: { readonly native?: boolean; readonly version?: string } | undefined;
+  let engine: { readonly native?: boolean; readonly backend?: string; readonly version?: string } | undefined;
   await expect
     .poll(
       () => {
@@ -198,7 +201,7 @@ export const expectNativeKernelEngine = async (logPath: string): Promise<string>
       { timeout: 180_000 },
     )
     .toBe(true);
-  expect(engine?.version).toContain('+native');
+  expect(engine?.backend).toBe('native');
   return engine!.version!;
 };
 

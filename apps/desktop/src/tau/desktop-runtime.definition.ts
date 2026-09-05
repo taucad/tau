@@ -1,12 +1,13 @@
 /**
  * The desktop runtime definition (work item E5, residual of batch R).
  *
- * This is `apps/ui/app/runtime/ui-runtime.definition.ts`'s recipe with exactly
- * one substitution: `openrscad()` becomes `openrscadNative()`. Same kernel id,
- * same artifacts, byte-parity gated by the plugin's own suite — only the engine
- * changes, and the version string gains its `+native` suffix so a cache can
- * never cross-serve between the two. Every other kernel keeps its WebAssembly
- * build; they run unmodified under Node.
+ * This is `apps/ui/app/runtime/ui-runtime.definition.ts`'s recipe, unmodified
+ * for OpenRSCAD: there is one `openrscadKernel`, and `@taulabs/openrscad-engine`
+ * picks its own payload through the `node` export condition — the N-API addon
+ * when a platform package matches this host, its WebAssembly build when none
+ * does. Same kernel id, same version, byte-identical artifacts (gated per
+ * engine release), so the geometry cache is shared on purpose. Every other
+ * kernel keeps its WebAssembly build; they run unmodified under Node.
  *
  * The recipe is duplicated rather than imported: ruling D3 forbids the shell
  * from source-importing `apps/ui`, and the shell consumes only that project's
@@ -28,7 +29,6 @@ import { manifold } from '@taucad/manifold';
 import { geometryCache, gltfEdgeDetection, parameterCache, parameterFileResolver } from '@taucad/middleware';
 import { opencascade } from '@taucad/opencascade';
 import { openrscadKernel } from '@taucad/openrscad';
-import { openrscadNativeKernel } from '@taucad/openrscad-native';
 import { picogk } from '@taucad/picogk';
 import { replicad } from '@taucad/replicad';
 import { rhino } from '@taucad/rhino';
@@ -38,13 +38,11 @@ import { picogkKernelOptions } from '#tau/picogk-resources.js';
 /**
  * The single OpenRSCAD kernel-plugin instance this recipe serves.
  *
- * Exported because it is also the shell's `+native` witness: the kernel utility
- * resolves *this* binding to log which engine it actually serves. One object,
- * one truth — swap it to `openrscadKernel()` and the served kernel and the
- * logged version change together, which is the property that makes the smoke
- * test's assertion mean something.
+ * Exported because the kernel utility resolves *this* binding to log the engine
+ * it actually serves. One object, one truth: the served kernel and the logged
+ * identity cannot disagree.
  */
-export const desktopOpenrscadKernel = process.arch === 'arm64' ? openrscadNativeKernel() : openrscadKernel();
+export const desktopOpenrscadKernel = openrscadKernel();
 
 /** Native in the Apple Silicon release; Wasm remains the development fallback on other hosts. */
 export const desktopAssimpBackend = process.arch === 'arm64' ? 'native' : 'wasm';

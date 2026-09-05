@@ -1,7 +1,9 @@
 /**
  * The packaged app contains one self-sufficient ASAR. Workspace sources are
- * bundled; Electron, Node built-ins, and the runtime-loaded N-API package stay
- * external so the native loader can resolve its adjacent `.node` binary.
+ * bundled; Electron, Node built-ins, and the runtime-loaded engines stay
+ * external so each native loader can resolve its adjacent `.node` binary — for
+ * `@taulabs/openrscad-engine` that is the whole point of its `node` export
+ * condition, which a bundler would otherwise resolve away.
  */
 
 import { readFileSync } from 'node:fs';
@@ -85,17 +87,11 @@ const resolveMainExternals = async (): Promise<(id: string) => Promise<boolean>>
 describe('electron-vite main externalization', () => {
   it('bundles workspace sources and keeps host/runtime imports external', async () => {
     const isExternal = await resolveMainExternals();
-    for (const id of [
-      '@taucad/openrscad-native',
-      '@taucad/openrscad',
-      '@taucad/middleware',
-      '@taucad/filesystem',
-      '@taucad/agent-host',
-    ]) {
+    for (const id of ['@taucad/openrscad', '@taucad/middleware', '@taucad/filesystem', '@taucad/agent-host']) {
       // oxlint-disable-next-line eslint/no-await-in-loop -- one resolved config, cheap predicate
       expect([id, await isExternal(id)]).toEqual([id, false]);
     }
-    for (const id of ['@taulabs/openrscad-engine-native', 'libassimp', 'electron', 'node:fs']) {
+    for (const id of ['@taulabs/openrscad-engine', 'libassimp', 'electron', 'node:fs']) {
       // oxlint-disable-next-line eslint/no-await-in-loop -- one resolved config, cheap predicate
       expect([id, await isExternal(id)]).toEqual([id, true]);
     }
@@ -107,7 +103,7 @@ describe('electron-vite main externalization', () => {
     };
 
     expect(Object.keys(manifest.dependencies ?? {})).toEqual(
-      expect.arrayContaining(['@taulabs/openrscad-engine-native', 'libassimp']),
+      expect.arrayContaining(['@taulabs/openrscad-engine', 'libassimp']),
     );
   });
 
@@ -115,7 +111,8 @@ describe('electron-vite main externalization', () => {
     'loads the local libassimp addon through the desktop dependency boundary',
     () => {
       const require = createRequire(join(appRoot, 'package.json'));
-      const addon = require('libassimp-darwin-arm64') as {
+      const assimpRequire = createRequire(require.resolve('libassimp/package.json'));
+      const addon = assimpRequire('libassimp-darwin-arm64') as {
         readonly buildIdentity: string;
         readonly napiVersion: number;
         readonly packageVersion: string;
@@ -126,7 +123,7 @@ describe('electron-vite main externalization', () => {
         napiVersion: 8,
         packageVersion: '0.2.0',
       });
-      expect(require.resolve('libassimp/package.json')).toBeTruthy();
+      expect(assimpRequire.resolve('libassimp-darwin-arm64/package.json')).toBeTruthy();
     },
   );
 });

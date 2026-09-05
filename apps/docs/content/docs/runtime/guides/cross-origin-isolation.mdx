@@ -125,7 +125,8 @@ Check each response class — HTML document, worker script, WASM binary — for 
 ```bash
 curl -sI http://localhost:3000/ | grep -i cross-origin
 curl -sI http://localhost:3000/assets/file-manager.worker-XXXXX.js | grep -i cross-origin
-curl -sI http://localhost:3000/draco_decoder_gltf.wasm | grep -i cross-origin
+find apps/ui/build/client/assets -name '*.wasm' -print
+curl -sI http://localhost:3000/assets/EMITTED-ASSET.wasm | grep -Ei 'content-type|cross-origin'
 ```
 
 Then confirm `crossOriginIsolated === true` in the browser DevTools console.

@@ -71,7 +71,27 @@ export class HostsGateway implements OnModuleInit, OnModuleDestroy {
     await new Promise<void>((resolve) => this.socketServer?.close(() => resolve()) ?? resolve());
   }
 
+  /**
+   * `ws` buffers nothing: a frame that arrives before a `message` listener is
+   * attached is dropped on the floor. Every route below attaches its listener
+   * only after an await — a device lookup, a Redis subscribe, a one-use grant
+   * read — while both callers hand the socket over synchronously from the
+   * upgrade callback, and a daemon sends on open (the control `ready` frame goes
+   * out in the same turn the socket opens). So the socket stays paused until the
+   * route that owns it is listening; the kernel holds those frames meanwhile,
+   * and a socket that fails admission is resumed only to finish its close
+   * handshake, with nothing listening to what it sent.
+   */
   private async handle(socket: WebSocket, request: IncomingMessage): Promise<void> {
+    socket.pause();
+    try {
+      await this.route(socket, request);
+    } finally {
+      socket.resume();
+    }
+  }
+
+  private async route(socket: WebSocket, request: IncomingMessage): Promise<void> {
     const pathname = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`).pathname;
     if (pathname === controlPath) {
       const device = await this.hostsService.authenticateDevice(request.headers.authorization);
@@ -94,7 +114,7 @@ export class HostsGateway implements OnModuleInit, OnModuleDestroy {
       rest.length > 0 ||
       !sessionId ||
       (side !== 'browser' && side !== 'host') ||
-      (route !== 'runtime' && route !== 'fs')
+      (route !== 'runtime' && route !== 'fs' && route !== 'agent')
     ) {
       socket.close(1008, 'unknown host route');
       return;

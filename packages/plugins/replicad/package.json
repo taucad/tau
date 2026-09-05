@@ -64,6 +64,7 @@
   "dependencies": {
     "@gltf-transform/core": "catalog:",
     "@gltf-transform/extensions": "catalog:",
+    "@taucad/cache-core": "workspace:*",
     "@taucad/geometry-core": "workspace:*",
     "@taucad/occt-core": "workspace:*",
     "culori": "catalog:",

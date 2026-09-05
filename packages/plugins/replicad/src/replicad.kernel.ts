@@ -11,6 +11,7 @@
 import type { OpenCascadeInstance } from 'replicad-opencascadejs';
 import type { AnyShape } from 'replicad';
 import type * as ReplicadModule from 'replicad';
+import { digestContent } from '@taucad/cache-core';
 import { createExportFile } from '@taucad/runtime/types';
 import type {
   GeometryGltf,
@@ -43,8 +44,8 @@ import {
   preserveExportNames,
   demangleStackFrames,
   classifyLibraryFrames,
+  named,
 } from '@taucad/runtime/kernel';
-import { detectMultiThreadSupport } from '@taucad/runtime/cross-origin-isolation';
 import type {
   KernelRuntime,
   RuntimeLogger,
@@ -55,6 +56,7 @@ import type {
 import { replicadOptionsSchema, replicadRenderSchema, replicadExportSchemas } from '#replicad.schemas.js';
 
 import {
+  detectMultiThreadSupport,
   initOcct,
   activateOccParallelism,
   formatOcRuntimeError,
@@ -72,6 +74,8 @@ import { resolveEntryInterfaces, rotateNativeEntryToYup } from '#interface-resol
 import type { NativeHandleEntry } from '#interface-resolution.js';
 
 import { convertReplicadGeometriesToGltf } from '#utils/replicad-to-gltf.js';
+import { createReplicadComputeReuse, replicadComputeNamespace } from '#replicad-compute-reuse.js';
+import type { ReplicadComputeReuseAdapter } from '#replicad-compute-reuse.js';
 
 import type { GeometryReplicad } from '#replicad.types.js';
 import { replicadDetectPattern } from '#replicad.constants.js';
@@ -204,6 +208,7 @@ type ReplicadContext = {
   libraryExportNames: Set<string>;
   tracingSummary?: OcTracingSummary;
   libraryTrace: KernelLibraryTraceHandle<ReplicadLibrary>;
+  computeReuse: ReplicadComputeReuseAdapter;
 };
 
 type ReplicadLibrary = typeof ReplicadModule;
@@ -457,20 +462,49 @@ export const replicadKernel = defineKernel({
 
     try {
       const fontSpan = tracer.startSpan('replicad.font-load');
-      logger.debug('Loading default font for text rendering');
-      const fontData = await loadBinaryFile(geistRegularUrl);
-      if (fontData) {
+      if (!(replicadLibrary.getFont as (fontFamily?: string) => unknown)('default')) {
+        logger.debug('Loading default font for text rendering');
+        const fontData = await loadBinaryFile(geistRegularUrl);
+        if (!fontData) {
+          throw new Error('Default font file not found');
+        }
         await replicadLibrary.loadFont(fontData, 'default');
-      } else {
-        logger.warn('Default font file not found');
       }
       fontSpan.end();
     } catch (error) {
       logger.warn('Failed to load default font', { data: error });
     }
 
-    const libraryTrace = createKernelLibraryTracer({
+    const implementationUrls = [
+      ...(resolved.wasmUrl ? [resolved.wasmUrl] : []),
+      ...(typeof wasm === 'string' ? [] : [wasm.wasmBindingsUrl]),
+    ];
+    const implementationBytes = await Promise.all(implementationUrls.map(async (url) => loadBinaryFile(url)));
+    const resolvedImplementationBytes = implementationBytes.filter(
+      (bytes): bytes is ArrayBuffer => bytes !== undefined,
+    );
+    const computeReuseEnabled =
+      implementationUrls.length > 0 && resolvedImplementationBytes.length === implementationBytes.length;
+    const implementationAssets = computeReuseEnabled
+      ? await Promise.all(
+          resolvedImplementationBytes.map(async (bytes) => digestContent({ bytes: new Uint8Array(bytes) })),
+        )
+      : [];
+    if (!computeReuseEnabled) {
+      logger.warn('Replicad semantic compute reuse disabled because implementation assets could not be identified.');
+    }
+    const computeReuse = createReplicadComputeReuse({
       library: replicadLibrary,
+      enabled: computeReuseEnabled,
+      producer: {
+        id: '@taucad/replicad',
+        version: 'replicad@0.23.4-beta.2|replicad-opencascadejs@0.23.0-beta.0|adapter@1',
+        implementationAssets,
+      },
+      environment: { wasmVariant: resolved.variant, lengthUnit: 'millimeter' },
+    });
+    const libraryTrace = createKernelLibraryTracer({
+      library: computeReuse.library as unknown as ReplicadLibrary,
       tracer,
       mode: libraryTracing,
       policy: replicadLibraryTracePolicy,
@@ -506,6 +540,7 @@ export const replicadKernel = defineKernel({
       libraryExportNames,
       tracingSummary,
       libraryTrace,
+      computeReuse,
     };
   },
 
@@ -557,70 +592,83 @@ export const replicadKernel = defineKernel({
       }
       bundleSourceMap = bundleResult.sourceMap;
 
-      const executeResult = await runtime.execute(bundleResult.code);
-      if (!executeResult.success) {
-        throw new ReplicadBuildError(convertRawIssuesToKernelIssues(executeResult.issues, relativeFilePath));
-      }
-      entryUrl = executeResult.entryUrl;
+      const computeSession = await runtime.compute.openSession({
+        namespace: replicadComputeNamespace,
+        scope: { entryPath },
+        policy: 'best-effort',
+      });
+      return await context.computeReuse.run(
+        computeSession,
+        named('Object.createGeometry', async () => {
+          const executeResult = await runtime.execute(bundleResult.code);
+          if (!executeResult.success) {
+            throw new ReplicadBuildError(convertRawIssuesToKernelIssues(executeResult.issues, relativeFilePath));
+          }
+          entryUrl = executeResult.entryUrl;
 
-      const mainResult = await tracedPhase(tracer, 'create.runOcMain', async () => {
-        const mainSpan = tracer.startSpan('replicad.run-main', {
-          phase: 'computingGeometry',
-          stage: 'brep',
-        });
-        try {
-          return await context.libraryTrace.runInScope({
-            scope: 'user-main',
-            operation: async () =>
-              runOcMain({
-                module: executeResult.value,
-                parameters,
-                ocInstance: context.openCascade,
-                errorContext: buildErrorContext(context, { bundleSourceMap, entryUrl }),
-                firstArg: getReplicadFirstArgument(),
-              }),
+          const mainResult = await tracedPhase(tracer, 'create.runOcMain', async () => {
+            const mainSpan = tracer.startSpan('replicad.run-main', {
+              phase: 'computingGeometry',
+              stage: 'brep',
+            });
+            try {
+              return await context.libraryTrace.runInScope({
+                scope: 'user-main',
+                operation: async () =>
+                  runOcMain({
+                    module: executeResult.value,
+                    parameters,
+                    ocInstance: context.openCascade,
+                    errorContext: buildErrorContext(context, { bundleSourceMap, entryUrl }),
+                    firstArg: getReplicadFirstArgument(),
+                  }),
+              });
+            } finally {
+              context.libraryTrace.emitSummary();
+              context.tracingSummary?.flush();
+              mainSpan.end();
+            }
           });
-        } finally {
-          context.libraryTrace.emitSummary();
-          context.tracingSummary?.flush();
-          mainSpan.end();
-        }
-      });
 
-      if (!mainResult.success) {
-        throw new ReplicadBuildError(mainResult.issues);
-      }
+          if (!mainResult.success) {
+            throw new ReplicadBuildError(mainResult.issues);
+          }
 
-      const shapes = context.libraryTrace.unwrap(mainResult.value);
+          const shapes = context.computeReuse.unwrap(context.libraryTrace.unwrap(mainResult.value));
 
-      if (shapes === undefined) {
-        runtime.logger.warn('createGeometry returning empty: main-returned-undefined', {
-          data: { filePath: relativeFilePath },
-        });
-        return finalizeRenderOutput({ artifacts: [createEmptyGltfGeometry()], nativeHandle: [] });
-      }
+          if (shapes === undefined) {
+            runtime.logger.warn('createGeometry returning empty: main-returned-undefined', {
+              data: { filePath: relativeFilePath },
+            });
+            await computeSession.flush();
+            return finalizeRenderOutput({ artifacts: [createEmptyGltfGeometry()], nativeHandle: [] });
+          }
 
-      const defaultName = extractDefaultName(executeResult.value);
+          const defaultName = extractDefaultName(executeResult.value);
 
-      // Build phase ends here: normalize main() output and resolve GeoSpec
-      // interfaces (pure BRep queries) onto the nativeHandle. The handle carries
-      // all export-facing evidence — tessellation is deferred to meshGeometry
-      // and never runs on a BRep-only export path.
-      const nativeHandle: NativeHandleEntry[] = await tracedPhase(tracer, 'create.resolveInterfaces', () => {
-        const interfaceSpan = tracer.startSpan('replicad.resolve-interfaces', {
-          phase: 'computingGeometry',
-          stage: 'brep',
-        });
-        try {
-          return normalizeRenderShapes(shapes, defaultName).map((entry) =>
-            resolveEntryInterfaces(entry, context.replicadLibrary),
-          );
-        } finally {
-          interfaceSpan.end();
-        }
-      });
+          // Build phase ends here: normalize main() output and resolve GeoSpec
+          // interfaces (pure BRep queries) onto the nativeHandle. The handle carries
+          // all export-facing evidence — tessellation is deferred to meshGeometry
+          // and never runs on a BRep-only export path.
+          const nativeHandle: NativeHandleEntry[] = await tracedPhase(tracer, 'create.resolveInterfaces', () => {
+            const interfaceSpan = tracer.startSpan('replicad.resolve-interfaces', {
+              phase: 'computingGeometry',
+              stage: 'brep',
+            });
+            try {
+              return normalizeRenderShapes(shapes, defaultName).map((entry) =>
+                resolveEntryInterfaces(entry, context.replicadLibrary),
+              );
+            } finally {
+              interfaceSpan.end();
+            }
+          });
 
-      return { nativeHandle };
+          runtime.signal.throwIfAborted();
+          await computeSession.flush();
+          return { nativeHandle };
+        }),
+      );
     } catch (error) {
       if (error instanceof ReplicadBuildError || error instanceof RenderArtifactFinalizationError) {
         throw error;

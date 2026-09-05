@@ -41,6 +41,26 @@
       "import": "./src/schemas/tools/test-model.tool.schema.ts",
       "default": "./src/schemas/tools/test-model.tool.schema.ts"
     },
+    "./schemas/tools/get-kernel-result": {
+      "types": "./src/schemas/tools/get-kernel-result.tool.schema.ts",
+      "import": "./src/schemas/tools/get-kernel-result.tool.schema.ts",
+      "default": "./src/schemas/tools/get-kernel-result.tool.schema.ts"
+    },
+    "./schemas/tools/screenshot": {
+      "types": "./src/schemas/tools/screenshot.tool.schema.ts",
+      "import": "./src/schemas/tools/screenshot.tool.schema.ts",
+      "default": "./src/schemas/tools/screenshot.tool.schema.ts"
+    },
+    "./schemas/tools/export-geometry": {
+      "types": "./src/schemas/tools/export-geometry.tool.schema.ts",
+      "import": "./src/schemas/tools/export-geometry.tool.schema.ts",
+      "default": "./src/schemas/tools/export-geometry.tool.schema.ts"
+    },
+    "./schemas/rpc": {
+      "types": "./src/schemas/rpc.schema.ts",
+      "import": "./src/schemas/rpc.schema.ts",
+      "default": "./src/schemas/rpc.schema.ts"
+    },
     "./schemas/tools/test-model-input-normalizer": {
       "types": "./src/schemas/tools/test-model-input-normalizer.ts",
       "import": "./src/schemas/tools/test-model-input-normalizer.ts",

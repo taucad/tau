@@ -147,7 +147,7 @@ describe('read_file RPC schema — metadata envelope fields', () => {
 
 describe('capture_images RPC schema', () => {
   const captureImages = rpcSchemasRegistry[rpcName.captureImages];
-  const canonicalViews = ['isometric', 'front', 'back', 'right', 'left', 'top', 'bottom'] as const;
+  const canonicalViews = ['isometric', 'front', 'back', 'right', 'left', 'top', 'bottom', 'drawing'] as const;
 
   it('should accept every canonical screenshot view', () => {
     const parsed = captureImages.resultSchema.parse({

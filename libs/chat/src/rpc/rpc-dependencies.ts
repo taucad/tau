@@ -17,6 +17,7 @@ import type {
   RunGeoSpecTestsRpcResult,
   ResolveSkillRpcResult,
 } from '#schemas/rpc.schema.js';
+import type { DiffStatsWithContent } from '#schemas/tools/diff.schema.js';
 import type { ExportFile, FileContentMetadata } from '@taucad/types';
 /**
  * One direct child returned by {@link RpcFileSystem.readdir}.
@@ -68,7 +69,16 @@ export type RpcFileSystem = {
   readdir(path: string): Promise<RpcDirectoryEntry[]>;
   exists(path: string): Promise<boolean>;
   appendFile(path: string, content: string): Promise<void>;
-  editFile(path: string, oldString: string, newString: string, replaceAll?: boolean): Promise<{ occurrences: number }>;
+  editFile(
+    path: string,
+    oldString: string,
+    newString: string,
+    replaceAll?: boolean,
+  ): Promise<{
+    occurrences: number;
+    staleRecovered?: true;
+    diffStats: DiffStatsWithContent;
+  }>;
   stat(path: string): Promise<RpcFileStat>;
 };
 
@@ -187,4 +197,5 @@ export type RpcHandlerError = {
   errorCode: RpcClientErrorCode;
   message: string;
   fileMetadata?: RpcFileMetadata;
+  retryable?: true;
 };

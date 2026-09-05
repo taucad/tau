@@ -77,6 +77,12 @@ export const rpcClientErrorCodeSchema = zod.enum([
   'UNKNOWN',
   'UNKNOWN_GEOMETRY_UNIT',
   'VALIDATION_ERROR',
+  'CONTEXT_NOT_FOUND',
+  'AMBIGUOUS_MATCH',
+  'EDIT_CONFLICT',
+  'UNSUPPORTED_TEXT_ENCODING',
+  'INVALID_TEXT_ENCODING',
+  'WRITE_VERIFICATION_FAILED',
 ]);
 
 /**
@@ -89,6 +95,7 @@ export const rpcClientErrorSchema = zod.object({
   errorCode: rpcClientErrorCodeSchema,
   message: zod.string(),
   fileMetadata: fileMetadataObjectSchema.optional(),
+  retryable: zod.literal(true).optional(),
 });
 
 // =============================================================================
@@ -225,7 +232,8 @@ const editFileRpc = defineRpc({
   input: editFileInputSchema,
   success: editFileOutputSchema.extend({
     message: zod.string().optional(),
-    occurrences: zod.number(),
+    occurrences: zod.number().int().positive(),
+    staleRecovered: zod.literal(true).optional(),
   }),
 });
 
@@ -405,6 +413,12 @@ export const rpcClientErrorCode = {
   unknown: 'UNKNOWN',
   unknownGeometryUnit: 'UNKNOWN_GEOMETRY_UNIT',
   validationError: 'VALIDATION_ERROR',
+  contextNotFound: 'CONTEXT_NOT_FOUND',
+  ambiguousMatch: 'AMBIGUOUS_MATCH',
+  editConflict: 'EDIT_CONFLICT',
+  unsupportedTextEncoding: 'UNSUPPORTED_TEXT_ENCODING',
+  invalidTextEncoding: 'INVALID_TEXT_ENCODING',
+  writeVerificationFailed: 'WRITE_VERIFICATION_FAILED',
 } as const satisfies Record<string, RpcClientErrorCode>;
 
 /** @public */

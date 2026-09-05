@@ -293,6 +293,24 @@ describe('parameterFileResolverMiddleware', () => {
     expect(handler).toHaveBeenCalledOnce();
   });
 
+  it('should support a root-level parameter directory', () => {
+    const runtime = createDependencyRuntime({ parametersDir: '', watchDebounce: 0 });
+    const dependencies = parameterFileResolverMiddleware.getDependencies!({ entryPath: 'main.ts' }, runtime);
+
+    expect(dependencies).toEqual([{ path: 'main.ts.json', watchDebounce: 0 }]);
+  });
+
+  it('should propagate non-syntax JSON parser failures', async () => {
+    const { input, handler, runtime } = createTestContext({ readFileResult: '{}' });
+    const failure = new TypeError('parser unavailable');
+    vi.spyOn(JSON, 'parse').mockImplementationOnce(() => {
+      throw failure;
+    });
+
+    await expect(parameterFileResolverMiddleware.wrapCreateGeometry!(input, handler, runtime)).rejects.toBe(failure);
+    expect(handler).not.toHaveBeenCalled();
+  });
+
   describe('getDependencies', () => {
     it('should return the per-geometry-unit parameter file path', () => {
       const result = parameterFileResolverMiddleware.getDependencies!(

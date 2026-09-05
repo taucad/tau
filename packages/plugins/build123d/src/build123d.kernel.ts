@@ -1,11 +1,20 @@
 import { asBuffer, createKernelError, createKernelSuccess, defineKernel } from '@taucad/runtime/kernel';
 import type { KernelIssue } from '@taucad/runtime/kernel';
 import { createExportFile } from '@taucad/runtime/types';
+import { contentDigest } from '@taucad/cache-core';
 
 import { build123dAnalysisSchema, build123dArtifactSchema, build123dBuildSchema } from '#build123d.protocol.js';
 import { build123dExportSchemas, build123dOptionsSchema, build123dRenderSchema } from '#build123d.schemas.js';
 import { Build123dWorkerError, PythonSession } from '#python-session.js';
-import { createWorkspaceMirror } from '#workspace-mirror.js';
+import { createWorkspaceMirror } from '#build123d-workspace-mirror.js';
+
+const computeNamespace = 'build123d.operation.v1';
+const computeProducerVersion = 'build123d@0.11.1|python@3.13|ocp@7.9.3.1.1|occt@7.9.3|worker-protocol@1|adapter@1';
+const computeEnvironment = {
+  platform: process.platform,
+  architecture: process.arch,
+  lengthUnit: 'millimeter',
+} as const;
 
 /** Opaque identity for shapes retained in one Python process generation. @public */
 export type Build123dNativeHandle = {
@@ -59,7 +68,20 @@ export const build123dKernel = defineKernel({
   async initialize(options, runtime) {
     const mirror = await createWorkspaceMirror();
     const session = new PythonSession({ ...options, ...mirror, logger: runtime.logger });
-    return { mirror, session, observedDependencies: [] as string[] };
+    return {
+      mirror,
+      session,
+      observedDependencies: [] as string[],
+      computeProducer: {
+        id: '@taucad/build123d',
+        version: computeProducerVersion,
+        implementationAssets: [
+          options.pythonSha256,
+          options.workerSha256,
+          ...options.supportFiles.map(({ sha256 }) => sha256),
+        ].map((sha256) => contentDigest({ value: `sha256:${sha256}` })),
+      },
+    };
   },
 
   async getDependencies({ entryPath }, runtime, context) {
@@ -97,14 +119,37 @@ export const build123dKernel = defineKernel({
 
   async createGeometry({ entryPath, parameters }, runtime, context) {
     await context.mirror.sync(runtime.filesystem);
+    const computeSession = await runtime.compute.openSession({
+      namespace: computeNamespace,
+      scope: { entryPath },
+      policy: 'best-effort',
+    });
+    const preload = await context.session.stageComputePreload(computeSession);
     try {
       const result = await context.session.request({
         method: 'build',
-        params: { entryPath, parameters },
+        params: {
+          entryPath,
+          parameters,
+          compute: {
+            namespace: computeNamespace,
+            producer: context.computeProducer,
+            environment: computeEnvironment,
+            preload,
+          },
+        },
         schema: build123dBuildSchema,
         signal: runtime.signal,
       });
       context.observedDependencies = result.observedDependencies;
+      if (result.computeArtifact) {
+        const publications = await context.session.readComputePublications(result.computeArtifact);
+        runtime.signal.throwIfAborted();
+        for (const publication of publications) {
+          computeSession.record(publication);
+        }
+      }
+      await computeSession.flush();
       return {
         nativeHandle: {
           sessionGeneration: context.session.generation,
@@ -113,6 +158,8 @@ export const build123dKernel = defineKernel({
       };
     } catch (error) {
       throw new Build123dKernelError(issuesFrom(error, entryPath));
+    } finally {
+      await context.session.removeComputePreload(preload);
     }
   },
 

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import hashlib
+import inspect
 import io
 import json
 import os
@@ -9,6 +12,7 @@ import sys
 import tempfile
 import types
 import unittest
+import uuid
 from pathlib import Path
 from unittest.mock import MagicMock, PropertyMock, patch
 
@@ -28,6 +32,35 @@ class Params:
 def main(params: Params):
     return Box(params.width, 3, 4)
 """
+
+
+def compute_config(artifacts: Path, entries: list[dict[str, object]] | None = None) -> dict[str, object]:
+    preload = artifacts / f"{len(list(artifacts.glob('*.preload.json')))}.preload.json"
+    payload = json.dumps({"schemaVersion": 1, "entries": entries or []}, separators=(",", ":")).encode()
+    preload.write_bytes(payload)
+    return {
+        "namespace": "build123d.operation.v1",
+        "producer": {
+            "id": "@taucad/build123d-test",
+            "version": "test@1",
+            "implementationAssets": [f"sha256:{'a' * 64}"],
+        },
+        "environment": {"platform": "test", "lengthUnit": "millimeter"},
+        "preload": {"artifactPath": str(preload), "byteLength": len(payload)},
+    }
+
+
+def prepared_entry(publication: dict[str, object]) -> dict[str, object]:
+    encoded = publication["bytes"]
+    assert isinstance(encoded, str)
+    data = base64.b64decode(encoded)
+    action = publication["action"]
+    return {
+        "canonicalAction": json.dumps(action, sort_keys=True, separators=(",", ":")),
+        "actionDigest": f"sha256:{'b' * 64}",
+        "contentDigest": f"sha256:{hashlib.sha256(data).hexdigest()}",
+        "bytes": encoded,
+    }
 
 
 class WorkerTest(unittest.TestCase):
@@ -297,7 +330,9 @@ class WorkerTest(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
-            retained = runtime.dispatch("build", {"entryPath": "main.py", "parameters": {}})["handleId"]
+            retained = runtime.dispatch(
+                "build", {"entryPath": "main.py", "parameters": {}, "compute": compute_config(artifacts)}
+            )["handleId"]
             runtime.dispatch("mesh", {"handleId": retained, "linearTolerance": 0.05, "angularTolerance": 0.1})
             runtime.dispatch("export", {"handleId": retained, "format": "step"})
             self.assertEqual(counter.read_text(encoding="utf-8"), "1")
@@ -313,7 +348,146 @@ class WorkerTest(unittest.TestCase):
                 runtime.dispatch("other", {})
             runtime.handles = {str(index): () for index in range(worker.MAX_HANDLES)}
             with self.assertRaisesRegex(RuntimeError, "limit"):
-                runtime.dispatch("build", {"entryPath": "main.py", "parameters": {}})
+                runtime.dispatch(
+                    "build", {"entryPath": "main.py", "parameters": {}, "compute": compute_config(artifacts)}
+                )
+
+    def test_semantic_compute_adapter_reuses_fresh_breps_with_exact_geometry(self) -> None:
+        from build123d import Box, Cylinder, Solid
+
+        with tempfile.TemporaryDirectory() as directory:
+            artifacts = Path(directory)
+            cold = worker._ComputeAdapter(artifacts, compute_config(artifacts))
+            with cold:
+                first = Solid.make_box(10, 11, 12)
+                same_run = Solid.make_box(10.0, 11.0, 12.0)
+                cut = Box(10, 10, 10) - Cylinder(2, 12)
+            self.assertIsNot(first, same_run)
+            self.assertEqual(first.volume, same_run.volume)
+            self.assertEqual(tuple(first.bounding_box().size), tuple(same_run.bounding_box().size))
+            self.assertGreaterEqual(len(cold.publications), 4)
+            cut_publication = cold.publications[-1]
+
+            warm_entries = [prepared_entry(publication) for publication in cold.publications]
+            warm = worker._ComputeAdapter(artifacts, compute_config(artifacts, warm_entries))
+            with warm:
+                restored = Solid.make_box(10, 11, 12)
+                restored_cut = Box(10, 10, 10) - Cylinder(2, 12)
+            self.assertEqual(warm.publications, [])
+            self.assertIsNot(restored, first)
+            self.assertEqual(worker._brep_bytes(restored), base64.b64decode(cold.publications[0]["bytes"]))
+            self.assertAlmostEqual(restored_cut.volume, cut.volume)
+            self.assertEqual(tuple(restored_cut.bounding_box().size), tuple(cut.bounding_box().size))
+            self.assertEqual(cut_publication["action"]["operation"], "Shape.cut")
+
+    def test_semantic_compute_adapter_bypasses_unsafe_values_and_failed_serialization(self) -> None:
+        from build123d import Solid
+        import build123d.persistence
+
+        with tempfile.TemporaryDirectory() as directory:
+            artifacts = Path(directory)
+            adapter = worker._ComputeAdapter(artifacts, compute_config(artifacts))
+            with adapter, patch.object(build123d.persistence, "serialize_shape", side_effect=RuntimeError("no codec")):
+                uncached = Solid.make_box(1, 2, 3)
+            self.assertAlmostEqual(uncached.volume, 6)
+            self.assertEqual(adapter.publications, [])
+
+            original = MagicMock(return_value="original-result")
+            signature = inspect.signature(lambda value: value)
+            self.assertEqual(adapter._primitive("unsafe", original, signature, (object(),), {}), "original-result")
+            original.assert_called_once()
+
+    def test_semantic_compute_adapter_rejects_untrusted_preloads_and_never_requires_publication(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            artifacts = root / "artifacts"
+            artifacts.mkdir()
+
+            with self.assertRaises(worker._ComputeBypass):
+                worker._compute_value(float("nan"))
+            with self.assertRaisesRegex(TypeError, "configuration"):
+                worker._ComputeAdapter(artifacts, None)
+            with self.assertRaisesRegex(TypeError, "identity"):
+                worker._ComputeAdapter(artifacts, {"producer": {}})
+            with self.assertRaisesRegex(TypeError, "descriptor"):
+                worker._ComputeAdapter(
+                    artifacts,
+                    {"namespace": "x", "producer": {}, "environment": {}, "preload": None},
+                )
+
+            def adapter_for(payload: object, descriptor: dict[str, object] | None = None) -> worker._ComputeAdapter:
+                path = artifacts / f"{uuid.uuid4().hex}.preload.json"
+                encoded = json.dumps(payload, separators=(",", ":")).encode()
+                path.write_bytes(encoded)
+                config = {
+                    "namespace": "x",
+                    "producer": {},
+                    "environment": {},
+                    "preload": descriptor or {"artifactPath": str(path), "byteLength": len(encoded)},
+                }
+                return worker._ComputeAdapter(artifacts, config)
+
+            invalid_descriptor = {"artifactPath": 1, "byteLength": -1}
+            with self.assertRaisesRegex(TypeError, "descriptor"):
+                adapter_for({}, invalid_descriptor)
+
+            outside = root / "outside.json"
+            outside.write_text('{"schemaVersion":1,"entries":[]}', encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "escaped"):
+                worker._ComputeAdapter(
+                    artifacts,
+                    {
+                        "namespace": "x",
+                        "producer": {},
+                        "environment": {},
+                        "preload": {"artifactPath": str(outside), "byteLength": outside.stat().st_size},
+                    },
+                )
+            self.assertTrue(outside.exists())
+
+            with self.assertRaisesRegex(ValueError, "invalid size"):
+                config = compute_config(artifacts)
+                config["preload"]["byteLength"] += 1
+                worker._ComputeAdapter(artifacts, config)
+            with self.assertRaisesRegex(ValueError, "preload is invalid"):
+                adapter_for({"schemaVersion": 2, "entries": []})
+            with self.assertRaisesRegex(ValueError, "entry is invalid"):
+                adapter_for({"schemaVersion": 1, "entries": [None]})
+            with self.assertRaisesRegex(ValueError, "identity"):
+                adapter_for({"schemaVersion": 1, "entries": [{}]})
+
+            valid_data = b"brep"
+            entry = {
+                "canonicalAction": "not-json",
+                "actionDigest": f"sha256:{'a' * 64}",
+                "contentDigest": f"sha256:{hashlib.sha256(valid_data).hexdigest()}",
+                "bytes": base64.b64encode(valid_data).decode(),
+            }
+            with self.assertRaisesRegex(ValueError, "payload"):
+                adapter_for({"schemaVersion": 1, "entries": [entry]})
+            entry["canonicalAction"] = "{}"
+            entry["contentDigest"] = f"sha256:{'c' * 64}"
+            with self.assertRaisesRegex(ValueError, "content digest"):
+                adapter_for({"schemaVersion": 1, "entries": [entry]})
+
+            first = {**entry, "contentDigest": f"sha256:{hashlib.sha256(valid_data).hexdigest()}"}
+            other_data = b"other"
+            second = {
+                **first,
+                "contentDigest": f"sha256:{hashlib.sha256(other_data).hexdigest()}",
+                "bytes": base64.b64encode(other_data).decode(),
+            }
+            with self.assertRaisesRegex(ValueError, "conflicting"):
+                adapter_for({"schemaVersion": 1, "entries": [first, second]})
+
+            adapter = adapter_for({"schemaVersion": 1, "entries": []})
+            original = MagicMock(return_value="uncached")
+            self.assertEqual(adapter._boolean("cut", original, object(), (), {}), "uncached")
+            worker_instance = worker.Worker(root, artifacts)
+            self.assertIsNone(worker_instance._write_compute_publications(adapter))
+            adapter.publications.append({"action": {}})
+            with patch.object(Path, "write_bytes", side_effect=OSError("disk full")):
+                self.assertIsNone(worker_instance._write_compute_publications(adapter))
 
     def test_run_protocol_errors_and_shutdown(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

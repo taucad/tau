@@ -1,12 +1,15 @@
 /* oxlint-disable typescript/no-unsafe-assignment -- public test definitions intentionally erase private kernel context. */
 // @vitest-environment node
 import type { AnyKernelDefinition } from '@taucad/runtime/kernel';
+import { contentDigest } from '@taucad/cache-core';
+import type { ComputeAction } from '@taucad/cache-core';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 import { createMockKernelRuntime } from '@taucad/runtime-testing';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { build123dKernel } from '#build123d.kernel.js';
 import { Build123dWorkerError } from '#python-session.js';
+import type { Build123dComputePublication } from '#python-session.js';
 
 const runtime = createMockKernelRuntime();
 const renderOptions = { tessellation: { linearTolerance: 0.05, angularTolerance: 0.1 } } as const;
@@ -28,11 +31,19 @@ const createContext = () => ({
     generation: 2,
     request: vi.fn(),
     readArtifact: vi.fn().mockResolvedValue(new Uint8Array([1, 2, 3])),
+    stageComputePreload: vi.fn().mockResolvedValue({ artifactPath: '/private/preload.json', byteLength: 2 }),
+    removeComputePreload: vi.fn().mockResolvedValue(undefined),
+    readComputePublications: vi.fn().mockResolvedValue([]),
     isHandleGenerationValid: vi.fn().mockReturnValue(true),
     release: vi.fn(),
     cleanup: vi.fn().mockResolvedValue(undefined),
   },
   observedDependencies: [] as string[],
+  computeProducer: {
+    id: '@taucad/build123d',
+    version: 'test',
+    implementationAssets: [contentDigest({ value: `sha256:${'a'.repeat(64)}` })],
+  },
 });
 
 const workerError = (type: 'syntax' | 'validation' | 'runtime' | 'kernel' = 'syntax') =>
@@ -137,6 +148,61 @@ describe('Build123d kernel lifecycle errors', () => {
     await expect(
       definition.exportGeometry({ format: 'step', nativeHandle: handle, options: {} }, runtime, context),
     ).resolves.toMatchObject({ success: false, issues: [expect.objectContaining({ message: 'export failed' })] });
+  });
+
+  it('preloads and transactionally publishes completed worker operations', async () => {
+    const context = createContext();
+    const action = {
+      schemaVersion: 1,
+      namespace: 'build123d.operation.v1',
+      producer: context.computeProducer,
+      operation: 'Solid.make_box',
+      inputs: [],
+      arguments: { length: 1, width: 2, height: 3 },
+      environment: { platform: 'test' },
+      codec: { id: 'build123d.bintools-brep', version: '1' },
+    } satisfies ComputeAction;
+    const publication = {
+      action,
+      bytes: new Uint8Array([1, 2, 3]),
+      mediaType: 'application/vnd.opencascade.brep',
+    } satisfies Build123dComputePublication;
+    context.session.request.mockResolvedValueOnce({
+      handleId: 'shape',
+      observedDependencies: ['main.py'],
+      computeArtifact: { artifactPath: '/private/compute.json', byteLength: 3 },
+    });
+    context.session.readComputePublications.mockResolvedValueOnce([publication]);
+    const computeSession = await runtime.compute.openSession({
+      namespace: 'build123d.operation.v1',
+      scope: { entryPath: 'seed.py' },
+    });
+    const record = vi.spyOn(computeSession, 'record');
+    const flush = vi.spyOn(computeSession, 'flush');
+    const openSession = vi.spyOn(runtime.compute, 'openSession').mockResolvedValueOnce(computeSession);
+
+    await expect(
+      definition.createGeometry({ entryPath: 'main.py', parameters: {}, options: renderOptions }, runtime, context),
+    ).resolves.toEqual({ nativeHandle: { sessionGeneration: 2, handleId: 'shape' } });
+    expect(context.session.stageComputePreload).toHaveBeenCalledWith(computeSession);
+    expect(context.session.request).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: 'build',
+        params: expect.objectContaining({
+          compute: expect.objectContaining({ namespace: 'build123d.operation.v1' }),
+        }),
+      }),
+    );
+    expect(record).toHaveBeenCalledWith(publication);
+    expect(flush).toHaveBeenCalledOnce();
+    expect(context.session.removeComputePreload).toHaveBeenCalledOnce();
+
+    openSession.mockRestore();
+    context.session.request.mockResolvedValueOnce({ handleId: 'plain', observedDependencies: [] });
+    await expect(
+      definition.createGeometry({ entryPath: 'main.py', parameters: {}, options: renderOptions }, runtime, context),
+    ).resolves.toEqual({ nativeHandle: { sessionGeneration: 2, handleId: 'plain' } });
+    expect(context.session.readComputePublications).toHaveBeenCalledOnce();
   });
 
   it('delegates handle validity/disposal and always removes the mirror', async () => {

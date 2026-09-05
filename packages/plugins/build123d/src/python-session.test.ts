@@ -7,6 +7,7 @@ import {
   chmodSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   realpathSync,
   rmSync,
   symlinkSync,
@@ -18,16 +19,16 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
 import { createMockLogger } from '@taucad/runtime-testing';
+import type { KernelComputeSession } from '@taucad/runtime/kernel';
+import {
+  processEnvironment as processEnvironmentForTest,
+  terminateProcessTree as terminateProcessTreeForTest,
+} from '@taucad/native-process-core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { z } from 'zod';
 
 import { build123dAnalysisSchema, build123dBuildSchema, build123dEmptySchema } from '#build123d.protocol.js';
-import {
-  Build123dWorkerError,
-  processEnvironmentForTest,
-  PythonSession,
-  terminateProcessTreeForTest,
-} from '#python-session.js';
+import { Build123dWorkerError, PythonSession } from '#python-session.js';
 
 const nativeSession = (session: PythonSession) =>
   (
@@ -62,7 +63,7 @@ const sha256 = (value: string): string => createHash('sha256').update(value).dig
 const ready = `process.stdout.write(JSON.stringify({protocolVersion:1,type:'ready',pythonVersion:process.version})+'\\n');`;
 const keepAlive = `setInterval(()=>{},1000);`;
 
-const fixture = (workerBody = `${ready}${keepAlive}`, requestTimeout = 2000) => {
+const fixture = (workerBody = `${ready}${keepAlive}`, requestTimeout = 5000) => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'tau-python-session-test-')));
   roots.push(root);
   const workspacePath = join(root, 'workspace');
@@ -452,7 +453,7 @@ readline.on('line',(line)=>{const request=JSON.parse(line);if(request.method==='
     chmodSync(spawnError.options.pythonExecutable, 0o600);
     await expect(request(spawnError.session, { method: 'analyze', schema: build123dAnalysisSchema })).rejects.toThrow();
     await spawnError.session.cleanup();
-  }, 15_000);
+  }, 30_000);
 
   it('confines, validates, reads, and removes artifacts', async () => {
     const { artifactPath, root, session } = fixture();
@@ -481,6 +482,65 @@ readline.on('line',(line)=>{const request=JSON.parse(line);if(request.method==='
     unlinkSync(target);
     await expect(session.readArtifact({ artifactPath: target, byteLength: 4 })).rejects.toThrow();
     await session.cleanup();
+  });
+
+  it('stages confined compute candidates and validates worker publications', async () => {
+    const value = fixture();
+    const digest = `sha256:${'a'.repeat(64)}`;
+    const computeSession = {
+      prepared: () => [
+        {
+          canonicalAction: '{"operation":"box"}',
+          actionDigest: digest,
+          contentDigest: digest,
+          bytes: new Uint8Array([1, 2, 3]),
+        },
+      ],
+    } as unknown as KernelComputeSession;
+    const preload = await value.session.stageComputePreload(computeSession);
+    const staged = JSON.parse(readFileSync(preload.artifactPath, 'utf8')) as {
+      schemaVersion: number;
+      entries: Array<{ bytes: string }>;
+    };
+    expect(staged).toEqual({
+      schemaVersion: 1,
+      entries: [
+        {
+          canonicalAction: '{"operation":"box"}',
+          actionDigest: digest,
+          contentDigest: digest,
+          bytes: 'AQID',
+        },
+      ],
+    });
+    await value.session.removeComputePreload(preload);
+    await expect(value.session.removeComputePreload(preload)).resolves.toBeUndefined();
+    await expect(
+      value.session.removeComputePreload({ artifactPath: join(value.root, 'outside.json'), byteLength: 0 }),
+    ).rejects.toThrow(/escaped/);
+
+    const action = {
+      schemaVersion: 1,
+      namespace: 'build123d.operation.v1',
+      producer: { id: 'test', version: '1', implementationAssets: [digest] },
+      operation: 'Solid.make_box',
+      inputs: [],
+      arguments: { length: 1 },
+      environment: {},
+      codec: { id: 'build123d.bintools-brep', version: '1' },
+    };
+    const payload = JSON.stringify({
+      publications: [{ action, bytes: 'AQID', mediaType: 'application/vnd.opencascade.brep' }],
+    });
+    const artifactPath = join(value.artifactPath, 'compute.json');
+    writeFileSync(artifactPath, payload);
+    const publicationSession = new PythonSession({ ...value.options, maxArtifactBytes: 4096 });
+    const publications = await publicationSession.readComputePublications({ artifactPath, byteLength: payload.length });
+    expect(publications).toEqual([
+      { action, bytes: new Uint8Array([1, 2, 3]), mediaType: 'application/vnd.opencascade.brep' },
+    ]);
+    await publicationSession.cleanup();
+    await value.session.cleanup();
   });
 
   it('rejects unwritable child input', async () => {

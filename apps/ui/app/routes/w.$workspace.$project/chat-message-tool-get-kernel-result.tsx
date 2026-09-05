@@ -154,7 +154,6 @@ export function ChatMessageToolGetKernelResult({
 
       // Without diagnostics there is nothing to disclose, regardless of compile status.
       if (!hasIssues) {
-        const verb = { ready: 'Compiled', error: 'Failed to compile', pending: 'Compile pending' }[status];
         return (
           <ChatToolCard variant='minimal' status={status === 'error' ? 'error' : 'ready'} isCollapsible={false}>
             <ChatToolCardHeader>

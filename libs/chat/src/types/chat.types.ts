@@ -14,33 +14,6 @@ export type MessageStatus = ConstantRecord<typeof messageStatus>;
 export type MessagePart = MyUIMessage['parts'][number];
 
 /** @public */
-export type MessageAnnotation = {
-  type: 'usage';
-  usageTokens: ChatUsageTokens;
-  usageCost: ChatUsageCost;
-  model: string;
-};
-
-/** @public */
-export type ChatUsageTokens = {
-  inputTokens: number;
-  outputTokens: number;
-  cacheReadTokens: number;
-  cacheWriteTokens: number;
-};
-
-/** @public */
-export type ChatUsageCost = {
-  inputTokensCost: number;
-  /** Chat-scoped execution target. Paseo targets contain opaque ids only. */
-  activeExecution?: CadAgentExecution;
-  outputTokensCost: number;
-  cacheReadTokensCost: number;
-  cacheWriteTokensCost: number;
-  totalCost: number;
-};
-
-/** @public */
 export type ChatStartupRequest = {
   id: string;
   kind: 'regenerate-tail';
@@ -59,6 +32,8 @@ export type Chat = {
   messageEdits?: Record<string, MyUIMessage>; // Edit drafts by messageId
   error?: ChatError; // Persisted error for display after page reload
   startupRequest?: ChatStartupRequest;
+  /** Chat-scoped execution target. Paseo targets contain opaque ids only. */
+  activeExecution?: CadAgentExecution;
   /**
    * Chat-scoped active CAD kernel. Same semantics as {@link Chat.activeExecution}
    * — present means this chat owns its kernel choice, absent means consumers

@@ -1,0 +1,7 @@
+[
+  {
+    "name": "browser worker payload (agent-host.impl chunk, gzip) — measured 318 kB on 2026-09-01 (CL10); pi-ai codecs split into lazy chunks (anthropic 26 kB, openai 38 kB gzip) loaded on first model call; @aws-sdk never enters the graph",
+    "path": "dist/**/*.mjs",
+    "limit": "400 kB"
+  }
+]

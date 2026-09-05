@@ -1,0 +1,87 @@
+{
+  "name": "@taucad/agent-host",
+  "version": "0.0.1",
+  "description": "Portable browser-safe agent host and durable session log core",
+  "type": "module",
+  "sideEffects": false,
+  "private": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taucad/tau.git",
+    "directory": "packages/agent-host"
+  },
+  "homepage": "https://github.com/taucad/tau/tree/main/packages/agent-host#readme",
+  "bugs": {
+    "url": "https://github.com/taucad/tau/issues"
+  },
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "keywords": [
+    "cad",
+    "typescript"
+  ],
+  "author": "Richard Fontein",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./browser": "./src/browser.ts",
+    "./node": "./src/node.ts",
+    "./node-launcher": "./src/launchers/node/index.ts",
+    "./channel-client": "./src/channel/index.ts",
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs",
+        "default": "./dist/index.mjs"
+      },
+      "./browser": {
+        "types": "./dist/browser.d.mts",
+        "import": "./dist/browser.mjs",
+        "default": "./dist/browser.mjs"
+      },
+      "./node": {
+        "types": "./dist/node.d.mts",
+        "import": "./dist/node.mjs",
+        "default": "./dist/node.mjs"
+      },
+      "./node-launcher": {
+        "types": "./dist/launchers/node/index.d.mts",
+        "import": "./dist/launchers/node/index.mjs",
+        "default": "./dist/launchers/node/index.mjs"
+      },
+      "./channel-client": {
+        "types": "./dist/channel/index.d.mts",
+        "import": "./dist/channel/index.mjs",
+        "default": "./dist/channel/index.mjs"
+      },
+      "./package.json": "./package.json"
+    },
+    "imports": {}
+  },
+  "imports": {
+    "#*.js": "./src/*.ts",
+    "#*": "./src/*"
+  },
+  "dependencies": {
+    "@earendil-works/pi-agent-core": "0.84.4",
+    "@earendil-works/pi-ai": "0.84.4",
+    "@taucad/rpc": "workspace:*",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@vitest/browser-playwright": "catalog:",
+    "vitest": "catalog:"
+  }
+}

@@ -2,8 +2,14 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { HttpAdapterHost } from '@nestjs/core';
 import type { FastifyInstance } from 'fastify';
+import type { IncomingMessage } from 'node:http';
+import type { Auth } from 'better-auth';
+import { fromNodeHeaders } from 'better-auth/node';
 import { WebSocketServer, WebSocket } from 'ws';
+import { authInstanceKey } from '#constants/auth.constant.js';
 import { KernelsService } from '#api/kernels/kernels.service.js';
+import { BillingService } from '#api/billing/billing.service.js';
+import { zooCloseCodes } from '#api/billing/billing.constants.js';
 import { DevWebSocketService } from '#api/websocket/dev-websocket.service.js';
 import { Span } from '#telemetry/tracer.service.js';
 
@@ -18,6 +24,10 @@ const zooWebSocketPath = '/v1/kernels/zoo';
  * In production: Uses the ws library with manual upgrade handling on the
  * main HTTP server. This approach avoids conflicts with Socket.IO which
  * also needs to handle WebSocket upgrades for other paths.
+ *
+ * Every connection is session-authenticated and entitlement-gated before any
+ * proxy frame flows (B4/T2/AD9): Zoo runs on Tau's upstream API key, so an
+ * ungated socket is unmetered spend.
  */
 @Injectable()
 export class KernelsGateway implements OnModuleInit, OnModuleDestroy {
@@ -26,6 +36,8 @@ export class KernelsGateway implements OnModuleInit, OnModuleDestroy {
   public constructor(
     private readonly kernelsService: KernelsService,
     private readonly devWebSocketService: DevWebSocketService,
+    private readonly billingService: BillingService,
+    @Inject(authInstanceKey) private readonly auth: Auth,
     @Inject(HttpAdapterHost) private readonly httpAdapterHost: HttpAdapterHost,
   ) {}
 
@@ -52,16 +64,53 @@ export class KernelsGateway implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * Handle Zoo API proxy connections.
+   * Handle Zoo API proxy connections: authenticate + authorize, then splice
+   * the upstream proxy. Rejections close with the typed codes the runtime's
+   * Zoo transport understands — before any proxy frames (S48/S49).
    */
   @Span()
-  private handleZooProxy(socket: WebSocket, queryParameters: URLSearchParams): void {
-    this.logger.debug('Client connected to Zoo proxy');
-    this.kernelsService.createZooProxy(socket, queryParameters);
+  public async handleZooProxy(
+    socket: WebSocket,
+    queryParameters: URLSearchParams,
+    request: IncomingMessage,
+  ): Promise<void> {
+    const verdict = await this.authorizeZooConnection(request);
+    if (!verdict.ok) {
+      this.logger.warn(`Zoo proxy connection rejected (${verdict.code}): ${verdict.reason}`);
+      socket.close(verdict.code, verdict.reason);
+      return;
+    }
+
+    this.logger.debug(`Client connected to Zoo proxy (user: ${verdict.userId})`);
+    this.kernelsService.createZooProxy(socket, queryParameters, verdict.userId);
 
     socket.on('close', () => {
       this.logger.debug('Client disconnected from Zoo proxy');
     });
+  }
+
+  /**
+   * Session + entitlement gate (T2): `canUseProKernels` sources the single
+   * kernel-tier table in `@taucad/billing` via the entitlements projection.
+   */
+  private async authorizeZooConnection(
+    request: IncomingMessage,
+  ): Promise<{ ok: true; userId: string } | { ok: false; code: number; reason: string }> {
+    try {
+      const session = await this.auth.api.getSession({ headers: fromNodeHeaders(request.headers) });
+      if (!session) {
+        return { ok: false, code: zooCloseCodes.unauthenticated, reason: 'UNAUTHENTICATED' };
+      }
+      const entitlements = await this.billingService.getEntitlements(session.user.id);
+      if (!entitlements.canUseProKernels) {
+        return { ok: false, code: zooCloseCodes.entitlementRequired, reason: 'PRO_KERNELS_REQUIRED' };
+      }
+      return { ok: true, userId: session.user.id };
+    } catch (error) {
+      // Fail closed: an auth outage must not open an unmetered proxy.
+      this.logger.error(`Zoo proxy authorization failed: ${String(error)}`);
+      return { ok: false, code: zooCloseCodes.unauthenticated, reason: 'AUTH_ERROR' };
+    }
   }
 
   /**
@@ -71,7 +120,7 @@ export class KernelsGateway implements OnModuleInit, OnModuleDestroy {
   private async initDevWebSocket(): Promise<void> {
     this.devWebSocketService.registerPathHandler(zooWebSocketPath, (socket, request) => {
       const url = new URL(request.url ?? '/', `http://localhost:${this.devWebSocketService.getPort()}`);
-      this.handleZooProxy(socket, url.searchParams);
+      void this.handleZooProxy(socket, url.searchParams, request);
     });
 
     await this.devWebSocketService.ensureStarted();
@@ -98,7 +147,7 @@ export class KernelsGateway implements OnModuleInit, OnModuleDestroy {
       if (pathname === zooWebSocketPath) {
         wss.handleUpgrade(request, socket, head, (ws) => {
           const url = new URL(request.url ?? '/', `http://${request.headers.host}`);
-          this.handleZooProxy(ws, url.searchParams);
+          void this.handleZooProxy(ws, url.searchParams, request);
         });
       }
       // Don't call socket.destroy() for other paths - let Socket.IO handle them

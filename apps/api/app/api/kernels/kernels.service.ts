@@ -3,11 +3,12 @@ import { Buffer } from 'node:buffer';
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { WebSocket } from 'ws';
+import { z } from 'zod';
 import type { Models } from '@kittycad/lib';
 import type { Environment } from '#config/environment.config.js';
-
-type WebSocketResponse = Models['WebSocketResponse_type'];
-type WebSocketRequest = Models['WebSocketRequest_type'];
+import { CreditLedgerService } from '#api/billing/credit-ledger.service.js';
+import { MetricsService } from '#telemetry/metrics.js';
+import { ZooSessionMeter } from '#api/kernels/zoo-session-meter.js';
 
 /** Connection timeout — how long to wait for Zoo WebSocket to open. Milliseconds. */
 const zooConnectionTimeout = 30_000;
@@ -15,44 +16,34 @@ const zooConnectionTimeout = 30_000;
 /** Maximum number of connection attempts before giving up */
 const zooMaxRetries = 3;
 
-/**
- * Type guard to check if the parsed message is a valid WebSocket response.
- * Validates the discriminated union structure.
- */
-function isWebSocketResponse(data: unknown): data is WebSocketResponse {
-  if (typeof data !== 'object' || data === null) {
-    return false;
-  }
+type ZooSuccessResponse = Extract<Models['WebSocketResponse_type'], { success: true }>;
+type ModelingSessionResponse = Omit<ZooSuccessResponse, 'resp'> & {
+  resp: Extract<ZooSuccessResponse['resp'], { type: 'modeling_session_data' }>;
+};
+type HeadersRequest = Extract<Models['WebSocketRequest_type'], { type: 'headers' }>;
 
-  const response = data as Record<string, unknown>;
+/* eslint-disable @typescript-eslint/naming-convention -- Zoo schemas mirror third-party WebSocket wire keys. */
+const modelingSessionResponseSchema: z.ZodType<ModelingSessionResponse> = z.looseObject({
+  success: z.literal(true),
+  resp: z.looseObject({
+    type: z.literal('modeling_session_data'),
+    data: z.looseObject({
+      session: z.looseObject({ api_call_id: z.string().min(1) }),
+    }),
+  }),
+});
 
-  // Check for success response
-  if (response['success'] === true) {
-    const { resp } = response;
-
-    return (
-      typeof resp === 'object' &&
-      resp !== null &&
-      'type' in resp &&
-      typeof (resp as Record<string, unknown>)['type'] === 'string'
-    );
-  }
-
-  // Check for failure response
-  if (response['success'] === false) {
-    return Array.isArray(response['errors']);
-  }
-
-  return false;
-}
+const headersRequestSchema: z.ZodType<HeadersRequest> = z.looseObject({
+  type: z.literal('headers'),
+  headers: z.record(z.string(), z.string()),
+});
+/* eslint-enable @typescript-eslint/naming-convention -- end Zoo wire schemas. */
 
 /**
  * Type guard to check if the parsed message is a WebSocket request with headers type.
  * Used to intercept client authentication attempts.
  */
-function isHeadersRequest(data: unknown): data is Extract<WebSocketRequest, { type: 'headers' }> {
-  return typeof data === 'object' && (data as Record<string, unknown>)['type'] === 'headers';
-}
+const isHeadersRequest = (data: unknown): boolean => headersRequestSchema.safeParse(data).success;
 
 /**
  * RFC 6455 close codes that are reserved and must not be sent in a close frame.
@@ -90,18 +81,24 @@ export class KernelsService {
   private readonly zooApiKey: string;
   private readonly zooWebsocketUrl: string;
 
-  public constructor(private readonly configService: ConfigService<Environment, true>) {
+  public constructor(
+    private readonly configService: ConfigService<Environment, true>,
+    private readonly creditLedgerService: CreditLedgerService,
+    private readonly metricsService: MetricsService,
+  ) {
     this.zooApiKey = this.configService.get('ZOO_API_KEY', { infer: true });
     this.zooWebsocketUrl = this.configService.get('ZOO_WEBSOCKET_URL', { infer: true });
   }
 
   /**
    * Create a WebSocket connection to the Zoo API and handle bidirectional proxying.
-   * Includes connection timeout and retry logic.
+   * Includes connection timeout and retry logic. Engine time is metered per
+   * started minute against the caller's credit account (B8/Q35/AD14).
    * @param clientSocket - The client's WebSocket connection
    * @param queryParameters - Query parameters to forward to Zoo API
+   * @param userId - Billing identity from the gateway's session gate
    */
-  public createZooProxy(clientSocket: WebSocket, queryParameters: URLSearchParams): void {
+  public createZooProxy(clientSocket: WebSocket, queryParameters: URLSearchParams, userId: string): void {
     // Build the Zoo API WebSocket URL with query parameters
     let zooUrl: URL;
     try {
@@ -118,7 +115,19 @@ export class KernelsService {
       return;
     }
 
-    this.connectToZoo(clientSocket, zooUrl, 1);
+    const meter = new ZooSessionMeter({
+      creditLedgerService: this.creditLedgerService,
+      metricsService: this.metricsService,
+      userId,
+      ratePerMinuteMicro: BigInt(this.configService.get('ZOO_ENGINE_RATE_MICRO_PER_MINUTE', { infer: true })),
+      close: (code, reason) => {
+        if (clientSocket.readyState === WebSocket.OPEN) {
+          clientSocket.close(code, reason);
+        }
+      },
+    });
+
+    this.connectToZoo(clientSocket, zooUrl, 1, meter);
   }
 
   /**
@@ -126,8 +135,10 @@ export class KernelsService {
    * @param clientSocket - The client's WebSocket connection
    * @param zooUrl - The Zoo API URL to connect to
    * @param attempt - Current attempt number (1-based)
+   * @param meter - Engine-minute meter for the authenticated session
    */
-  private connectToZoo(clientSocket: WebSocket, zooUrl: URL, attempt: number): void {
+  // eslint-disable-next-line max-params-no-constructor/max-params-no-constructor -- existing Zoo retry callback contract.
+  private connectToZoo(clientSocket: WebSocket, zooUrl: URL, attempt: number, meter: ZooSessionMeter): void {
     // Check if client is still connected before attempting
     if (clientSocket.readyState !== WebSocket.OPEN) {
       this.logger.debug('Client already disconnected, skipping Zoo connection attempt');
@@ -168,7 +179,7 @@ export class KernelsService {
         // Retry if we haven't exceeded max attempts and client is still connected
         if (attempt < zooMaxRetries && clientSocket.readyState === WebSocket.OPEN) {
           this.logger.debug(`Retrying Zoo connection (attempt ${attempt + 1}/${zooMaxRetries})`);
-          this.connectToZoo(clientSocket, zooUrl, attempt + 1);
+          this.connectToZoo(clientSocket, zooUrl, attempt + 1, meter);
         } else if (clientSocket.readyState === WebSocket.OPEN) {
           clientSocket.close(1011, 'Upstream connection timeout');
         }
@@ -231,9 +242,11 @@ export class KernelsService {
       if (!connectionState.isZooAuthenticated && typeof event.data === 'string') {
         try {
           const parsed: unknown = JSON.parse(event.data);
-          if (isWebSocketResponse(parsed) && parsed.success && parsed.resp.type === 'modeling_session_data') {
+          if (modelingSessionResponseSchema.safeParse(parsed).success) {
             connectionState.isZooAuthenticated = true;
             this.logger.debug('Zoo authentication successful');
+            // Engine time starts at the auth marker (B8/Q35).
+            meter.onAuthenticated();
           }
         } catch (error) {
           // Not JSON, continue forwarding - this is expected for non-JSON messages
@@ -257,6 +270,8 @@ export class KernelsService {
 
     // Handle messages from client -> forward to Zoo
     clientSocket.addEventListener('message', (event) => {
+      // Client frames prove liveness for the Q35 idle window.
+      meter.onClientActivity();
       if (connectionState.zooClosed) {
         return;
       }
@@ -296,6 +311,8 @@ export class KernelsService {
         return;
       }
 
+      meter.stop();
+
       if (tryClaimCleanup() && clientSocket.readyState === WebSocket.OPEN) {
         // Forward the close code if valid per RFC 6455, otherwise use 1011 (Internal Error)
         const closeCode = getSafeCloseCode(event.code);
@@ -323,6 +340,8 @@ export class KernelsService {
       clearConnectionTimeout();
       connectionState.clientClosed = true;
       this.logger.debug('Client WebSocket closed');
+      // Abrupt drops settle here — every started minute is already charged (S53).
+      meter.stop();
 
       // Close Zoo socket if it's open OR still connecting (prevents orphaned connections)
       if (

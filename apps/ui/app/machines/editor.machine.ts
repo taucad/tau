@@ -268,6 +268,7 @@ type EditorStateEvent =
   | { type: 'closeAll' }
   // Chat operations
   | { type: 'setRequestedChatId'; chatId: string | undefined }
+  | { type: 'focusCreatedChat'; chatId: string }
   | { type: 'setFocusedChatId'; chatId: string | undefined }
   // Panel operations
   | { type: 'setPanelState'; panelState: PartialDeep<PanelState> }
@@ -749,6 +750,15 @@ export const editorMachine = setup({
       return { requestedChatId: event.chatId };
     }),
 
+    focusCreatedChatInContext: assign(({ event }) => {
+      assertEvent(event, 'focusCreatedChat');
+      return {
+        requestedChatId: event.chatId,
+        focusedChatId: event.chatId,
+        focusedChatError: undefined,
+      };
+    }),
+
     /**
      * Assign the validated/created focused chat id emitted by
      * `ensureFocusedChatActor` via the `focusedChatEnsured` event to
@@ -1039,6 +1049,10 @@ export const editorMachine = setup({
             },
           },
           on: {
+            focusCreatedChat: {
+              target: '.idle',
+              actions: ['focusCreatedChatInContext', 'raiseSetFocusedChatId'],
+            },
             setRequestedChatId: {
               target: '.ensuringFocusedChat',
               actions: 'setRequestedChatIdInContext',

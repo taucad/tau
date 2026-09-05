@@ -77,6 +77,7 @@ function ProjectSession({
   projectId,
   nativeKernelId,
   requestedChatId,
+  createdChatId,
   onFocusedChatResolved,
   onFlushRegistration,
 }: {
@@ -84,6 +85,7 @@ function ProjectSession({
   readonly projectId: string;
   readonly nativeKernelId?: string;
   readonly requestedChatId?: string;
+  readonly createdChatId?: string;
   readonly onFocusedChatResolved?: (chatId: string) => void;
   readonly onFlushRegistration: (registration: ProjectSessionFlushRegistration | undefined) => void;
 }): React.ReactNode {
@@ -98,6 +100,7 @@ function ProjectSession({
           key={kernelSelection.key}
           projectId={projectId}
           requestedChatId={requestedChatId}
+          createdChatId={createdChatId}
           onFocusedChatResolved={onFocusedChatResolved}
           kernelOptionsFactory={kernelSelection.kernelOptionsFactory}
         >
@@ -124,11 +127,13 @@ export function ProjectRouteGate({
   onFocusedChatResolved,
   requestedProjectId,
   requestedChatId,
+  createdChatId,
 }: {
   readonly children?: React.ReactNode;
   readonly onFocusedChatResolved?: (chatId: string) => void;
   readonly requestedProjectId: string;
   readonly requestedChatId?: string;
+  readonly createdChatId?: string;
 }): React.ReactNode {
   const projectManager = useProjectManager();
   const latestRequestedProjectIdRef = useRef(requestedProjectId);
@@ -269,6 +274,7 @@ export function ProjectRouteGate({
           projectId={projectId}
           nativeKernelId={nativeRequirement?.runtimeKernelId}
           requestedChatId={pending ? resolved.requestedChatId : requestedChatId}
+          createdChatId={pending ? undefined : createdChatId}
           onFocusedChatResolved={pending ? undefined : onFocusedChatResolved}
           onFlushRegistration={registerSessionFlush}
         >
@@ -367,17 +373,20 @@ export function ProjectRouteProviders({
   onFocusedChatResolved,
   projectId,
   requestedChatId,
+  createdChatId,
 }: {
   readonly children?: React.ReactNode;
   readonly onFocusedChatResolved?: (chatId: string) => void;
   readonly projectId: string;
   readonly requestedChatId?: string;
+  readonly createdChatId?: string;
 }): React.JSX.Element {
   return (
     <SharedWorkerGate>
       <ProjectRouteGate
         requestedProjectId={projectId}
         requestedChatId={requestedChatId}
+        createdChatId={createdChatId}
         onFocusedChatResolved={onFocusedChatResolved}
       >
         {children}

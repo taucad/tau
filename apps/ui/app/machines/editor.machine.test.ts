@@ -1084,6 +1084,29 @@ describe('loading.ensuringFocusedChat', () => {
 // State: ready.operation.ensuringFocusedChat (runtime invariant)
 // ===========================================================================
 describe('ready.operation.ensuringFocusedChat', () => {
+  it('focuses a newly created chat without revalidating the chat list', async () => {
+    let ensureInvocationCount = 0;
+    const actor = await startAndLoad({
+      loadResult: stubEditorState,
+      ensureResult: async (input) => {
+        ensureInvocationCount += 1;
+        return {
+          type: 'focusedChatEnsured',
+          focusedChatId: input.requestedChatId ?? input.persistedChatId ?? 'chat-recovered',
+        };
+      },
+    });
+    expect(ensureInvocationCount).toBe(1);
+
+    actor.send({ type: 'focusCreatedChat', chatId: 'chat-created' });
+
+    expect(actor.getSnapshot().context.requestedChatId).toBe('chat-created');
+    expect(actor.getSnapshot().context.focusedChatId).toBe('chat-created');
+    expect(actor.getSnapshot().matches({ ready: { operation: 'idle' } })).toBe(true);
+    expect(ensureInvocationCount).toBe(1);
+    actor.stop();
+  });
+
   it('re-enters ensuringFocusedChat from idle when focusedChatId becomes undefined', async () => {
     let ensureInvocationCount = 0;
     const actor = await startAndLoad({

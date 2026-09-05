@@ -1,6 +1,7 @@
 import { forwardRef, memo, useCallback, useEffect, useRef, useState } from 'react';
 import { Virtuoso } from 'react-virtuoso';
 import type { ScrollerProps, VirtuosoHandle } from 'react-virtuoso';
+import { useLocation } from 'react-router';
 import { XIcon } from 'lucide-react';
 import { messageRole } from '@taucad/chat/constants';
 import { ChatMessage } from '#routes/w.$workspace.$project/chat-message.js';
@@ -125,25 +126,24 @@ export const ChatHistory = memo(function (props: {
   const { persistenceActorRef } = useChatContext();
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const chatTextareaRef = useRef<ChatTextareaHandle>(null);
+  const location = useLocation();
   const toggleChatHistory = useCallback(() => {
     setIsExpanded?.((current) => !current);
   }, [setIsExpanded]);
 
   const { formattedKeyCombination } = useKeybinding(toggleChatHistoryKeyCombination, toggleChatHistory);
 
-  // Callback for when a new chat is created — focuses the textarea after render
-  const handleNewChat = useCallback(() => {
-    requestAnimationFrame(() => {
+  useEffect(() => {
+    if (location.state?.focusChatComposer === true) {
       chatTextareaRef.current?.focus();
-    });
-  }, []);
+    }
+  }, [location.state]);
 
   // Empty-cancel: the persistence machine has lifted the cancelled user
   // message back into the composer draft (via the store's
   // `restoreCancelledDraft` listener), so refocus the composer in the next
-  // animation frame. The frame deferral mirrors `handleNewChat` above and
-  // lets Tiptap/HTMLTextArea finish reflowing for the restored draft text
-  // before the cursor lands.
+  // animation frame so Tiptap/HTMLTextArea can finish reflowing the restored
+  // draft text before the cursor lands.
   useEffect(() => {
     if (!persistenceActorRef) {
       return;
@@ -268,7 +268,6 @@ export const ChatHistory = memo(function (props: {
                 )}
               />
             }
-            onNewChat={handleNewChat}
           />
         </FloatingPanelContentHeader>
 

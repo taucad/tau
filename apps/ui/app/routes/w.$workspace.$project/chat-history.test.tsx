@@ -20,6 +20,8 @@ const chatStateRef: { current: { messages: readonly MyUIMessage[] } } = { curren
 const setMockMessages = (messages: readonly MyUIMessage[]): void => {
   chatStateRef.current = { messages };
 };
+let locationState: { readonly focusChatComposer?: boolean } | undefined;
+vi.mock('react-router', () => ({ useLocation: () => ({ state: locationState }) }));
 // Fake persistence actor — `chat-history.tsx` subscribes to
 // `restoreCancelledDraft` emits to refocus the composer after the
 // persistence machine lifts a cancelled user message back into the draft.
@@ -363,13 +365,21 @@ describe('ChatHistory — turn group rendering', () => {
   });
 });
 
-describe('ChatHistory — empty-cancel composer refocus', () => {
+describe('ChatHistory — composer refocus', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     capturedTextarea.onSubmit = undefined;
     capturedTextarea.focus = vi.fn<() => void>();
     persistenceListeners.clear();
+    locationState = undefined;
     setMockMessages([]);
+  });
+
+  it('focuses the composer when a new-chat surface requests it', () => {
+    locationState = { focusChatComposer: true };
+    render(<ChatHistory />);
+
+    expect(capturedTextarea.focus).toHaveBeenCalledTimes(1);
   });
 
   it('refocuses the composer on the next animation frame when persistence emits restoreCancelledDraft', async () => {

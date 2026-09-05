@@ -34,6 +34,7 @@ function RouteProvider({ children }: { readonly children?: React.ReactNode }): R
   const projectId = resolution.status === 'resolved' ? resolution.value : openProjectIdRef.current;
   const canonicalSlugs = useCanonicalProjectUrlCorrection(projectId);
   const requestedChatId = projectChatIdFromSearch(location.search);
+  const createdChatId = location.state?.focusChatComposer === true ? requestedChatId : undefined;
   const currentUrlRef = useRef(`${location.pathname}${location.search}`);
   currentUrlRef.current = `${location.pathname}${location.search}`;
   const handleFocusedChatResolved = useCallback(
@@ -63,13 +64,13 @@ function RouteProvider({ children }: { readonly children?: React.ReactNode }): R
     <ProjectRouteProviders
       projectId={projectId}
       requestedChatId={requestedChatId}
+      createdChatId={createdChatId}
       onFocusedChatResolved={handleFocusedChatResolved}
     >
       {children}
     </ProjectRouteProviders>
   );
 }
-/* oxlint-enable react/refs */
 
 export const handle: Handle = {
   ...projectRouteHandle,

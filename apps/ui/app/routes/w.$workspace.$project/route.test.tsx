@@ -49,14 +49,21 @@ vi.mock('#routes/w.$workspace.$project/project-route.js', () => ({
     onFocusedChatResolved,
     projectId,
     requestedChatId,
+    createdChatId,
   }: React.PropsWithChildren<{
     onFocusedChatResolved?: (chatId: string) => void;
     projectId: string;
     requestedChatId?: string;
+    createdChatId?: string;
   }>) => {
     focusedChatResolvedCallbacks.push(onFocusedChatResolved);
     return (
-      <div data-testid='project-route' data-project-id={projectId} data-requested-chat-id={requestedChatId}>
+      <div
+        data-testid='project-route'
+        data-project-id={projectId}
+        data-requested-chat-id={requestedChatId}
+        data-created-chat-id={createdChatId}
+      >
         {children}
         <button type='button' onClick={() => onFocusedChatResolved?.('chat_resolved')}>
           Resolve chat
@@ -88,6 +95,14 @@ function LocationProbe(): React.JSX.Element {
     <div>
       <div data-testid='location'>{`${location.pathname}${location.search}`}</div>
       <Link to={`${location.pathname}?chat=chat_two`}>Open chat two</Link>
+      <button
+        type='button'
+        onClick={() => {
+          void navigate(`${location.pathname}?chat=chat_created`, { state: { focusChatComposer: true } });
+        }}
+      >
+        Create chat
+      </button>
       <button
         type='button'
         onClick={() => {
@@ -164,6 +179,25 @@ describe('/w/{workspace}/{project}', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Back' }));
     await waitFor(() => {
       expect(route).toHaveAttribute('data-requested-chat-id', 'chat/one');
+    });
+  });
+
+  it('marks only a create navigation as a trusted created chat', async () => {
+    renderAt('/w/tau-workspace/cube-design?chat=chat_one');
+
+    const route = await screen.findByTestId('project-route');
+    expect(route).not.toHaveAttribute('data-created-chat-id');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create chat' }));
+    await waitFor(() => {
+      expect(route).toHaveAttribute('data-requested-chat-id', 'chat_created');
+      expect(route).toHaveAttribute('data-created-chat-id', 'chat_created');
+    });
+
+    fireEvent.click(screen.getByRole('link', { name: 'Open chat two' }));
+    await waitFor(() => {
+      expect(route).toHaveAttribute('data-requested-chat-id', 'chat_two');
+      expect(route).not.toHaveAttribute('data-created-chat-id');
     });
   });
 

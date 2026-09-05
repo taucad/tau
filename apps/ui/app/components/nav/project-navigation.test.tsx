@@ -216,7 +216,9 @@ describe('ProjectNavigation', () => {
     fireEvent.click(screen.getByRole('button', { name: 'New chat in Two' }));
     await vi.waitFor(() => {
       expect(mockCreateChat).toHaveBeenCalledWith('proj_two', { name: 'New chat', messages: [] });
-      expect(mockNavigate).toHaveBeenCalledWith('/w/home/Two%20space?chat=chat%2Ftwo');
+      expect(mockNavigate).toHaveBeenCalledWith('/w/home/Two%20space?chat=chat%2Ftwo', {
+        state: { focusChatComposer: true },
+      });
     });
   });
 

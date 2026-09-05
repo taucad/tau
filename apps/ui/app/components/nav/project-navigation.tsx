@@ -55,7 +55,7 @@ export function ProjectNavigation(): React.JSX.Element {
     }
     const chat = await createChat(project.id, { name: 'New chat', messages: [] });
     void queryClient.invalidateQueries({ queryKey: ['chats', project.id] });
-    await navigate(projectChatUrl(project.slugs, chat.id));
+    await navigate(projectChatUrl(project.slugs, chat.id), { state: { focusChatComposer: true } });
   };
 
   const handleDuplicate = async (project: ProjectListItem): Promise<void> => {

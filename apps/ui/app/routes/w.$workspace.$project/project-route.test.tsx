@@ -19,6 +19,10 @@ const mounts: string[] = [];
 const unmounts: string[] = [];
 const fileManagerInputs: Array<{ projectId: string; rootDirectory: string }> = [];
 const projectProviderInputs: string[] = [];
+const projectProviderChatInputs: Array<{
+  requestedChatId: string | undefined;
+  createdChatId: string | undefined;
+}> = [];
 const editorSend = vi.fn();
 const projectSend = vi.fn();
 let editorIsIdle = true;
@@ -93,8 +97,14 @@ vi.mock('#hooks/use-file-manager.js', () => ({
 }));
 
 vi.mock('#hooks/use-project.js', () => ({
-  ProjectProvider: ({ children, projectId }: React.PropsWithChildren<{ projectId: string }>) => {
+  ProjectProvider: ({
+    children,
+    projectId,
+    requestedChatId,
+    createdChatId,
+  }: React.PropsWithChildren<{ projectId: string; requestedChatId?: string; createdChatId?: string }>) => {
     projectProviderInputs.push(projectId);
+    projectProviderChatInputs.push({ requestedChatId, createdChatId });
     return <div>{children}</div>;
   },
   useProject: () => ({ projectRef, editorRef }),
@@ -170,12 +180,21 @@ const deferred = <T,>(): { promise: Promise<T>; resolve: (value: T) => void } =>
  * after slug resolution and the legacy id resolver after its redirect. The gate
  * is therefore exercised through the shared component, parameterised by id.
  */
-const renderRouteProvider = (): {
+const renderRouteProvider = ({
+  requestedChatId,
+  createdChatId,
+}: { readonly requestedChatId?: string; readonly createdChatId?: string } = {}): {
   Provider: React.JSXElementConstructor<React.PropsWithChildren>;
   view: ReturnType<typeof render>;
 } => {
   const Provider = ({ children }: React.PropsWithChildren): React.JSX.Element => (
-    <routeModule.ProjectRouteProviders projectId={currentProjectId}>{children}</routeModule.ProjectRouteProviders>
+    <routeModule.ProjectRouteProviders
+      projectId={currentProjectId}
+      requestedChatId={requestedChatId}
+      createdChatId={createdChatId}
+    >
+      {children}
+    </routeModule.ProjectRouteProviders>
   );
   return {
     Provider,
@@ -195,6 +214,7 @@ beforeEach(() => {
   unmounts.length = 0;
   fileManagerInputs.length = 0;
   projectProviderInputs.length = 0;
+  projectProviderChatInputs.length = 0;
   editorSend.mockReset();
   projectSend.mockReset();
   editorObservers.clear();
@@ -202,6 +222,17 @@ beforeEach(() => {
 });
 
 describe('project route session identity', () => {
+  it('forwards a trusted created chat to the active project session', async () => {
+    getProjectRouteAccess.mockResolvedValue(ready(projectA));
+    renderRouteProvider({ requestedChatId: 'chat-created', createdChatId: 'chat-created' });
+
+    await screen.findByTestId('project-session');
+    expect(projectProviderChatInputs.at(-1)).toEqual({
+      requestedChatId: 'chat-created',
+      createdChatId: 'chat-created',
+    });
+  });
+
   it('should render only the route status while initial access is unresolved', async () => {
     const pendingA = deferred<ProjectRouteAccess>();
     getProjectRouteAccess.mockReturnValue(pendingA.promise);

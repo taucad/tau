@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ReactNode } from 'react';
 
@@ -6,6 +6,7 @@ const editorRef = { kind: 'editor' };
 const projectRef = { kind: 'project' };
 const createChat = vi.fn();
 const navigate = vi.fn();
+const sidebar = vi.hoisted(() => ({ isMobile: false, open: true }));
 let keybindingHandler: (() => Promise<void>) | undefined;
 
 vi.mock('#hooks/use-project.js', () => ({
@@ -44,6 +45,7 @@ vi.mock('#hooks/use-keyboard.js', () => ({
     return { formattedKeyCombination: 'Ctrl+Shift+C' };
   },
 }));
+vi.mock('#components/ui/sidebar.js', () => ({ useSidebar: () => sidebar }));
 vi.mock('react-router', () => ({ useNavigate: () => navigate }));
 vi.mock('#routes/w.$workspace.$project/chat-history-settings.js', () => ({
   ChatHistorySettings: () => <button type='button'>Chat settings</button>,
@@ -63,6 +65,8 @@ const { ChatTitleBar } = await import('#routes/w.$workspace.$project/chat-title-
 describe('ChatTitleBar', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    sidebar.isMobile = false;
+    sidebar.open = true;
     createChat.mockResolvedValue({ id: 'chat_new' });
     navigate.mockResolvedValue(undefined);
   });
@@ -77,12 +81,34 @@ describe('ChatTitleBar', () => {
   });
 
   it('keeps Ctrl-Shift-C as a direct create-then-navigate action', async () => {
-    const onNewChat = vi.fn();
-    render(<ChatTitleBar onNewChat={onNewChat} />);
+    render(<ChatTitleBar />);
 
     await keybindingHandler?.();
     expect(createChat).toHaveBeenCalledWith({ name: 'New chat', messages: [] });
-    expect(navigate).toHaveBeenCalledWith('/w/home/bracket?chat=chat_new');
-    expect(onNewChat).toHaveBeenCalledOnce();
+    expect(navigate).toHaveBeenCalledWith('/w/home/bracket?chat=chat_new', {
+      state: { focusChatComposer: true },
+    });
+  });
+
+  it('shows a working new-chat button only with the desktop sidebar collapsed', async () => {
+    sidebar.open = false;
+    const { rerender } = render(<ChatTitleBar />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'New chat' }));
+    await waitFor(() => {
+      expect(navigate).toHaveBeenCalledWith('/w/home/bracket?chat=chat_new', {
+        state: { focusChatComposer: true },
+      });
+    });
+    expect(createChat).toHaveBeenCalledWith({ name: 'New chat', messages: [] });
+
+    sidebar.open = true;
+    rerender(<ChatTitleBar />);
+    expect(screen.queryByRole('button', { name: 'New chat' })).not.toBeInTheDocument();
+
+    sidebar.open = false;
+    sidebar.isMobile = true;
+    rerender(<ChatTitleBar />);
+    expect(screen.queryByRole('button', { name: 'New chat' })).not.toBeInTheDocument();
   });
 });

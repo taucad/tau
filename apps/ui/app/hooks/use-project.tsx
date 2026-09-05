@@ -169,6 +169,7 @@ export function ProjectProvider({
   children,
   projectId,
   requestedChatId,
+  createdChatId,
   onFocusedChatResolved,
   provide,
   input,
@@ -178,6 +179,7 @@ export function ProjectProvider({
   readonly children: ReactNode;
   readonly projectId: string;
   readonly requestedChatId?: string;
+  readonly createdChatId?: string;
   readonly onFocusedChatResolved?: (chatId: string) => void;
   readonly provide?: Parameters<typeof projectMachine.provide>[0];
   readonly input?: Omit<
@@ -341,8 +343,12 @@ export function ProjectProvider({
   );
 
   useEffect(() => {
-    editorRef.send({ type: 'setRequestedChatId', chatId: requestedChatId });
-  }, [editorRef, requestedChatId]);
+    editorRef.send(
+      createdChatId === requestedChatId && createdChatId !== undefined
+        ? { type: 'focusCreatedChat', chatId: createdChatId }
+        : { type: 'setRequestedChatId', chatId: requestedChatId },
+    );
+  }, [createdChatId, editorRef, requestedChatId]);
 
   // Select state from the machine
   const viewGraphics = useSelector(actorRef, (state) => state.context.viewGraphics);

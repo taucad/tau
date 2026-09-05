@@ -1,0 +1,7 @@
+{
+  "name": "cache-core",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "packages/core/cache",
+  "projectType": "library",
+  "tags": ["scope:shared", "type:package"]
+}

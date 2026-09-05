@@ -1,0 +1,7 @@
+[
+  {
+    "name": "all cache-core ESM entries",
+    "path": "dist/**/*.mjs",
+    "limit": "9 kB"
+  }
+]

@@ -221,7 +221,7 @@ describe('handleGrep', () => {
       expect(result.success && result.matches.at(-1)?.content).toBe('match line 14');
     });
 
-    it('should truncate match lines longer than 500 chars with `[line truncated: N chars]` while preserving file/line', async () => {
+    it('should keep the first 500 characters of long matching lines while preserving file/line', async () => {
       const fileSystem = mock<RpcFileSystem>();
       fileSystem.stat.mockResolvedValue(textStat(5000, 3));
       const longLine = `${'a'.repeat(2000)}foo${'b'.repeat(3000)}`;
@@ -232,7 +232,8 @@ describe('handleGrep', () => {
       expect(result.success && result.matches[0]).toEqual({
         file: 'big.ts',
         line: 2,
-        content: `[line truncated: ${longLine.length} chars]`,
+        // CL6 adopts head truncation so the model retains useful match context.
+        content: longLine.slice(0, 500),
       });
     });
   });

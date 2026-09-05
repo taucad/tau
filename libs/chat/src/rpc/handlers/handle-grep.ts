@@ -13,8 +13,8 @@ import { joinRelativePath } from '@taucad/utils/path';
 const defaultGrepHeadLimit = 50;
 
 /**
- * Per-match-line character cap. Lines exceeding this are replaced with
- * `[line truncated: N chars]`, preserving `file`/`line` metadata.
+ * Per-match-line character cap. Lines exceeding this retain their first 500
+ * characters, preserving useful match context and `file`/`line` metadata.
  * Equivalent to ripgrep's `--max-columns 500` (claude-code uses the same).
  */
 const maxGrepLineChars = 500;
@@ -40,7 +40,7 @@ async function collectFilePaths(fileSystem: RpcFileSystem, basePath: string): Pr
 type GrepMatch = { file: string; line: number; content: string };
 
 function truncateMatchLine(line: string): string {
-  return line.length > maxGrepLineChars ? `[line truncated: ${line.length} chars]` : line;
+  return line.slice(0, maxGrepLineChars);
 }
 
 async function resolveSearchPaths(fileSystem: RpcFileSystem, basePath: string): Promise<string[]> {

@@ -15,7 +15,7 @@ export const defaultParams = {
   ridgeSpacing: 2, // Pitch of the side concentric ridges in mm
   ridgeWidth: 1, // Width of each side groove in mm
   ridgeDepth: 1, // Depth of each side groove in mm
-  ridgeFilletRadius: 0.4, // Fillet radius for the concentric ridges in mm
+  ridgeFilletRadius: 0.2, // Fillet radius for the concentric ridges in mm
 };
 
 export default function main(p = defaultParams): Shape3D {
@@ -40,18 +40,16 @@ export default function main(p = defaultParams): Shape3D {
   // Compensate the sharp profile so the rounded peak lands at the requested height.
   const sharpHeight = height + 4.28;
 
-  const sharpWedge = draw()
+  const sharpWedge = draw([rBack, 0])
     .lineTo([length, 0])
     .lineTo([length, tipHeight])
     .lineTo([0, sharpHeight])
+    .lineTo([0, rBack])
+    .tangentArcTo([rBack, 0])
     .close();
 
-  const step1Outer = sharpWedge.fillet(rFront, (cornerFinder) =>
+  const outerProfile = sharpWedge.fillet(rFront, (cornerFinder) =>
     cornerFinder.inBox([length - 5, -1], [length + 1, tipHeight + 1]),
-  );
-
-  const outerProfile = step1Outer.fillet(rBack, (cornerFinder) =>
-    cornerFinder.inBox([-1, -1], [5, sharpHeight + 1]),
   );
 
   const outerWedge = outerProfile
@@ -80,24 +78,25 @@ export default function main(p = defaultParams): Shape3D {
   const activeSlotFrontRadius = Math.max(0.1, slotHeightAtEnd / 2);
   const activeSlotBackRadius = Math.max(0.1, rBack - wallThickness);
 
-  const sharpInner = draw([wallThickness, zInnerBottom])
+  const innerStart: [number, number] = [
+    wallThickness + activeSlotBackRadius,
+    zInnerBottom,
+  ];
+  const sharpInner = draw(innerStart)
     .lineTo([xSlotEnd, zInnerBottom])
     .lineTo([xSlotEnd, zInnerTopAtSlotEnd])
     .lineTo([wallThickness, zInnerTop(wallThickness)])
+    .lineTo([wallThickness, zInnerBottom + activeSlotBackRadius])
+    .tangentArcTo(innerStart)
     .close();
 
-  const step1Inner = sharpInner.fillet(activeSlotFrontRadius, (cornerFinder) =>
-    cornerFinder.inBox(
-      [xSlotEnd - 5, zInnerBottom - 1],
-      [xSlotEnd + 1, zInnerTopAtSlotEnd + 1],
-    ),
-  );
-
-  const innerProfile = step1Inner.fillet(activeSlotBackRadius, (cornerFinder) =>
-    cornerFinder.inBox(
-      [wallThickness - 1, zInnerBottom - 1],
-      [wallThickness + 5, sharpHeight + 1],
-    ),
+  const innerProfile = sharpInner.fillet(
+    activeSlotFrontRadius,
+    (cornerFinder) =>
+      cornerFinder.inBox(
+        [xSlotEnd - 5, zInnerBottom - 1],
+        [xSlotEnd + 1, zInnerTopAtSlotEnd + 1],
+      ),
   );
 
   const innerSlot = innerProfile

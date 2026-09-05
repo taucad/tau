@@ -17,7 +17,7 @@ import type { Shape3D, Point2D } from 'replicad';
 export const defaultParams = {
   height: 100,
   baseWidth: 20,
-  wallThickness: 5,
+  wallThickness: 2,
   lowerCircleRadius: 1.5,
   lowerCirclePosition: 0.25,
   higherCircleRadius: 0.75,

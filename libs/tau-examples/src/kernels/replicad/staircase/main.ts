@@ -2,7 +2,7 @@
  * Parametric Staircase Model
  * A customizable staircase with adjustable dimensions, stringers, handrails, and balusters.
  */
-import type { Point2D, Shape3D } from 'replicad';
+import type { Point2D, Shape3D, ShapeConfig } from 'replicad';
 import { draw, drawRoundedRectangle, drawCircle } from 'replicad';
 
 export const defaultParams = {
@@ -125,17 +125,20 @@ function createStringers(
   const leftStringerProfile: Point2D[] = [];
 
   leftStringerProfile.push(
-    [-p.stepNosing, 0],
+    [0, 0],
     [p.staircaseRun, 0],
     [p.staircaseRun, p.staircaseHeight],
     [p.staircaseRun - stepRun, p.staircaseHeight],
   );
 
   for (let index = p.stepCount - 1; index >= 0; index--) {
-    leftStringerProfile.push(
-      [index * stepRun, index * stepRise + p.stepThickness],
-      [index * stepRun, index * stepRise],
-    );
+    leftStringerProfile.push([
+      index * stepRun,
+      index * stepRise + p.stepThickness,
+    ]);
+    if (index > 0) {
+      leftStringerProfile.push([index * stepRun, index * stepRise]);
+    }
   }
 
   let leftStringerPen = draw(leftStringerProfile[0]);
@@ -295,7 +298,9 @@ function createHandrails(staircase: Shape3D, p = defaultParams): Shape3D {
   return result;
 }
 
-export default function main(p = defaultParams): Shape3D | null {
+export default function main(
+  p = defaultParams,
+): Shape3D | ShapeConfig[] | null {
   const stepRise = p.staircaseHeight / p.stepCount;
   const stepRun = p.staircaseRun / p.stepCount;
 
@@ -319,15 +324,20 @@ export default function main(p = defaultParams): Shape3D | null {
   }
 
   let staircase = createSteps(stepRun, stepRise, p);
+  let stringers: Shape3D | undefined;
 
   if (p.includeStringer && staircase) {
-    const stringers = createStringers(stepRun, stepRise, p);
-    staircase = staircase.fuse(stringers);
+    stringers = createStringers(stepRun, stepRise, p);
   }
 
   if (p.includeHandrail && staircase) {
     staircase = createHandrails(staircase, p);
   }
 
-  return staircase;
+  return staircase && stringers
+    ? [
+        { shape: staircase, name: 'Steps and handrails' },
+        { shape: stringers, name: 'Stringers' },
+      ]
+    : staircase;
 }

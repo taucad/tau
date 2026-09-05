@@ -12,7 +12,7 @@ export const defaultParams = {
   wallThickness: 1, // Thickness of the glass walls and base in mm
 
   filletRim: true, // Whether to add a fillet to the rim
-  rimFilletRadius: 1, // Radius for the rim fillet
+  rimFilletRadius: 0.4, // Radius for the rim fillet
   filletBase: true, // Whether to add a fillet to the outer base edge
   baseFilletRadius: 40, // Radius for the base fillet
 };

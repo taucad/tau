@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from math import atan2, cos, hypot, pi, sin, sqrt
 from typing import Literal
 
-from build123d import Axis, Edge, Face, Plane, Shape, Solid, Vector, Wire
+from build123d import Axis, Color, Edge, Face, Plane, Shape, Solid, Vector, Wire
 
 
 Point2 = tuple[float, float]
@@ -111,14 +111,6 @@ class BankLayout:
     x_shift: float
 
 
-@dataclass(frozen=True)
-class PartSpec:
-    name: str
-    shape: Shape
-    color: str
-    alpha: float = 1.0
-
-
 default_params = Params()
 PIN_PHASE = (0.0, 90.0, 270.0, 180.0)
 
@@ -180,9 +172,10 @@ def crank_stations(p: Params) -> CrankStations:
     )
 
 
-def make_part(name: str, shape: Shape, color: str, alpha: float = 1.0) -> PartSpec:
+def make_part(name: str, shape: Shape, color: str, alpha: float = 1.0) -> Shape:
     shape.label = name
-    return PartSpec(name=name, shape=shape, color=color, alpha=alpha)
+    shape.color = Color(color, alpha)
+    return shape
 
 
 def box(minimum: Point3, maximum: Point3) -> Solid:
@@ -708,7 +701,7 @@ def make_flywheel(p: Params = default_params) -> Shape:
     return flywheel.cut(*cut_tools)
 
 
-def make_intake_parts(p: Params = default_params) -> list[PartSpec]:
+def make_intake_parts(p: Params = default_params) -> list[Shape]:
     st = crank_stations(p)
     plenum_r = p.plenum_dia / 2.0
     x0 = st.main_start[0]
@@ -848,10 +841,10 @@ def make_wrist_pin(p: Params = default_params) -> Shape:
     )
 
 
-def make_engine(p: Params = default_params) -> list[PartSpec]:
+def make_engine(p: Params = default_params) -> list[Shape]:
     st = crank_stations(p)
     banks = bank_layouts(p)
-    parts: list[PartSpec] = [
+    parts: list[Shape] = [
         make_part("Crankshaft", make_crankshaft(p), "#c3c3cc"),
         make_part("Block", make_block(p), "#5f6168", 0.55),
         make_part("Harmonic Damper", make_damper(p).translate((st.snout_start - p.damper_thk, 0, 0)), "#2b2b2e"),
@@ -946,7 +939,7 @@ def make_engine(p: Params = default_params) -> list[PartSpec]:
     return parts
 
 
-def main(p: Params = default_params) -> list[PartSpec]:
+def main(p: Params) -> list[Shape]:
     return make_engine(p)
 
 

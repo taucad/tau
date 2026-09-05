@@ -1,0 +1,7 @@
+{
+  "name": "host",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "packages/host",
+  "projectType": "library",
+  "tags": ["scope:shared", "type:package"]
+}

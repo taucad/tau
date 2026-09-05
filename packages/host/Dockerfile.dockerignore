@@ -1,0 +1,97 @@
+# =============================================================================
+# .dockerignore — used by apps/api/Dockerfile (the only Dockerfile in the repo).
+#
+# Build context is the repo root. The API Docker build uses COPY . . to ingest
+# the full Nx monorepo, so only exclude items that the build doesn't need.
+# =============================================================================
+
+# -- Version control ----------------------------------------------------------
+.git
+.gitignore
+.gitattributes
+
+# -- External dependency repos (86 GB locally, gitignored but not dockerignored) --
+repos
+
+# -- Generated reports and artifacts ------------------------------------------
+/out
+
+# -- E2E test projects (not needed in the API production image) ---------------
+apps/ui-e2e
+apps/api-e2e
+
+# -- Documentation (not needed at build time) ---------------------------------
+docs
+
+# -- CI / tooling / editor config ---------------------------------------------
+.github
+scripts
+.claude/worktrees
+.cursor
+.vscode
+.idea
+.editorconfig
+.eslintcache
+.oxlintcache
+.prettierrc*
+.lintstagedrc*
+.husky
+
+# -- Nx caches and workspace data --------------------------------------------
+**/.nx/cache
+**/.nx/workspace-data
+
+# -- Build artifacts (produced locally, not needed in fresh Docker build) ------
+**/build
+**/dist
+!packages/geospec-engine/native/opencascade/dist
+!packages/geospec-engine/native/opencascade/dist/**
+**/out-tsc
+**/*.tsbuildinfo
+
+# -- Dependencies (installed fresh inside Docker) -----------------------------
+**/node_modules
+
+# -- Environment variables (secrets, never ship) ------------------------------
+**/.env
+**/.env.*
+
+# -- Test files (not needed in production images) -----------------------------
+**/*.test.ts
+**/*.test.tsx
+**/*.spec.ts
+**/*.spec.tsx
+**/*.test-d.ts
+**/__tests__
+**/__mocks__
+# -- Vite timestamp files ----------------------------------------------------
+**/vite.config.*.timestamp*
+
+# -- Fly.io config (injected via --config flag, not COPY) ---------------------
+fly.*.toml
+
+# -- Miscellaneous ------------------------------------------------------------
+**/.cache
+**/pruned
+**/.next
+**/.netlify
+**/stats.html
+*.md
+LICENSE
+CODEOWNERS
+docker-compose.yml
+infra
+
+# =============================================================================
+# packages/host/Dockerfile additions (BuildKit reads <dockerfile>.dockerignore
+# in preference to the root file, so this is a copy of the root rules plus the
+# workspace's local `file:`/`link:` dependencies, which live under `repos/` and
+# are therefore excluded above — `pnpm install --frozen-lockfile` cannot resolve
+# the lockfile without them).
+# =============================================================================
+!repos/nanoraster/tests/out/candidate-0df0c5d/*.tgz
+!repos/openrscad/packages/npm-native/package.json
+!repos/openrscad/packages/npm-native/dist
+!repos/openrscad/packages/npm-native/dist/**
+!repos/openrscad/packages/npm-native/src
+!repos/openrscad/packages/npm-native/src/**

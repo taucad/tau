@@ -1,0 +1,95 @@
+{
+  "name": "@taucad/host",
+  "version": "0.0.1",
+  "description": "Tau Host daemon for pairing browsers with supervised remote CAD runtimes",
+  "type": "module",
+  "sideEffects": false,
+  "private": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taucad/tau.git",
+    "directory": "packages/host"
+  },
+  "homepage": "https://github.com/taucad/tau/tree/main/packages/host#readme",
+  "bugs": {
+    "url": "https://github.com/taucad/tau/issues"
+  },
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "keywords": [
+    "cad",
+    "typescript"
+  ],
+  "author": "Richard Fontein",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./runtime-host": "./src/runtime-host.ts",
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs",
+        "default": "./dist/index.mjs"
+      },
+      "./runtime-host": {
+        "types": "./dist/runtime-host.d.mts",
+        "import": "./dist/runtime-host.mjs",
+        "default": "./dist/runtime-host.mjs"
+      },
+      "./package.json": "./package.json"
+    },
+    "imports": {}
+  },
+  "imports": {
+    "#*.js": "./src/*.ts",
+    "#*": "./src/*"
+  },
+  "dependencies": {
+    "@agentclientprotocol/sdk": "catalog:",
+    "@hatchet-dev/typescript-sdk": "catalog:",
+    "@taucad/agent-host": "workspace:*",
+    "@taucad/jobs": "workspace:*",
+    "@taucad/jobs-hatchet": "workspace:*",
+    "@taucad/jobs-solvers": "workspace:*",
+    "@taucad/mcp": "workspace:*",
+    "ws": "catalog:"
+  },
+  "peerDependencies": {
+    "@taucad/geospec-engine": "^0.1.0-beta.0",
+    "@taucad/runtime": "^0.1.0-beta.0",
+    "geospec": "^0.1.0-beta.0",
+    "zod": "^4.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@taucad/geospec-engine": {
+      "optional": true
+    },
+    "geospec": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@taucad/agent-tools": "workspace:*",
+    "@taucad/chat": "workspace:*",
+    "@taucad/filesystem": "workspace:*",
+    "@taucad/geospec-engine": "workspace:*",
+    "@taucad/runtime": "workspace:*",
+    "@taucad/types": "workspace:*",
+    "@taucad/utils": "workspace:*",
+    "@types/ws": "^8.18.1",
+    "geospec": "workspace:*",
+    "zod": "catalog:"
+  }
+}

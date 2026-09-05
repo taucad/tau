@@ -43,6 +43,12 @@ export const contextCompactionTriggerReasonSchema = z.enum(['none', 'estimate', 
 export type ContextCompactionTriggerReason = z.infer<typeof contextCompactionTriggerReasonSchema>;
 
 /** @public */
+export const contextCompactionTierSchema = z.enum(['tool_result_clearing', 'summarization']);
+
+/** @public */
+export type ContextCompactionTier = z.infer<typeof contextCompactionTierSchema>;
+
+/** @public */
 export const contextCompactionScheduleStatusSchema = z.enum(['none', 'scheduled_next_turn']);
 
 /** @public */
@@ -55,6 +61,8 @@ export const contextCompactionFailureKindSchema = z.enum([
   'morph_contract_error',
   'transcript_commit_failed',
   'context_overflow_retry_failed',
+  'circuit_breaker_open',
+  'summarization_failed',
   'unexpected_error',
 ]);
 
@@ -81,6 +89,9 @@ export const contextCompactionDataSchema = z.object({
   estimatedInputTokens: z.number().optional(),
   contextWindow: z.number().optional(),
   triggerThreshold: z.number().optional(),
+  tier: contextCompactionTierSchema.optional(),
+  reservedOutputTokens: z.number().optional(),
+  reservedBufferTokens: z.number().optional(),
   compactionId: z.string().optional(),
   tokensBeforeCompaction: z.number(),
   tokensAfterCompaction: z.number(),

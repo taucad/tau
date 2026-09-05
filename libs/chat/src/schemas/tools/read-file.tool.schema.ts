@@ -29,7 +29,7 @@ export const readFileOutputSchema = z.object({
   truncated: z
     .boolean()
     .optional()
-    .describe('True when the returned slice was capped at MAX_READ_LINES (2000); use offset to paginate.'),
+    .describe('True when the returned slice was capped by the line or byte ceiling; use offset to paginate.'),
   modifiedAt: z
     .string()
     .optional()

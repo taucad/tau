@@ -73,7 +73,8 @@ describe('handleReadFile', () => {
 
     expect(result).toMatchObject({
       success: true,
-      content: 'gamma\ndelta',
+      // CL6 requires every truncated page to carry its exact continuation offset.
+      content: 'gamma\ndelta\n\ntruncated; continue with offset=5',
       startLine: 3,
     });
   });
@@ -120,7 +121,8 @@ describe('handleReadFile', () => {
 
     expect(result).toMatchObject({
       success: true,
-      content: 'b\nc',
+      // CL6 requires every truncated page to carry its exact continuation offset.
+      content: 'b\nc\n\ntruncated; continue with offset=4',
       totalLines: 5,
       startLine: 2,
     });
@@ -162,7 +164,7 @@ describe('handleReadFile', () => {
 
       expect(result).toMatchObject({ success: true, totalLines: 5000, truncated: true });
       const content = result.success ? result.content : '';
-      expect(content.split('\n').length).toBe(2000);
+      expect(content).toContain('truncated; continue with offset=2001');
     });
 
     it('should clamp an explicit limit > 2000 at the server boundary even if the schema is bypassed', async () => {
@@ -179,7 +181,7 @@ describe('handleReadFile', () => {
       );
 
       const content = result.success ? result.content : '';
-      expect(content.split('\n').length).toBe(2000);
+      expect(content).toContain('truncated; continue with offset=2001');
       expect(result).toMatchObject({ success: true, truncated: true });
     });
 
@@ -198,6 +200,21 @@ describe('handleReadFile', () => {
 
       expect(result).toMatchObject({ success: true, totalLines: 3 });
       expect(result.success && result.truncated).toBeUndefined();
+    });
+
+    it('should cap paginated reads by UTF-8 bytes and provide the exact continuation offset', async () => {
+      const fileSystem = mock<RpcFileSystem>();
+      const lines = Array.from({ length: 1000 }, (_, index) => `${index}:${'é'.repeat(100)}`);
+      fileSystem.readFile.mockResolvedValue(lines.join('\n'));
+      fileSystem.stat.mockResolvedValue(textStat(512 * 1024, lines.length));
+
+      const result = await handleReadFile({ targetFile: 'big.ts', offset: 1, limit: 1000 }, fileSystem);
+
+      expect(result).toMatchObject({ success: true, truncated: true });
+      if (result.success) {
+        expect(new TextEncoder().encode(result.content).byteLength).toBeLessThanOrEqual(50 * 1024);
+        expect(result.content).toMatch(/truncated; continue with offset=\d+$/u);
+      }
     });
   });
 

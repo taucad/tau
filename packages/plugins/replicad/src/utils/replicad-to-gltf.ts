@@ -2,6 +2,7 @@ import { Primitive } from '@gltf-transform/core';
 import { KHRMaterialsUnlit } from '@gltf-transform/extensions';
 import { cadEdgeOverlayMaterialDefaults, cadMaterialDefaults, tauCadTopologyExtension } from '@taucad/runtime/types';
 import {
+  compactTriangleIndices,
   transformNormalArray,
   transformVertexArray,
   srgbHexToLinearTuple,
@@ -9,14 +10,19 @@ import {
   writeGltfJson,
   resolveShapeName,
   uniqueShapeName,
-} from '@taucad/geometry-core';
-import type { GeometryOutputTransformOptions, GlbInput, GlbNode, GlbPrimitive } from '@taucad/geometry-core';
-import {
   formatComponentId,
   formatNamedComponentId,
   formatNodeSelector,
   formatPrimitiveSelector,
-} from '#utils/component-names.utils.js';
+} from '@taucad/geometry-core';
+import type {
+  GeometryOutputTransformOptions,
+  GlbInput,
+  GlbNode,
+  GlbPrimitive,
+  TauCadTopologyComponent,
+  TauCadTopologyPayload,
+} from '@taucad/geometry-core';
 import { normalizeColor } from '#utils/normalize-color.js';
 
 import type { GeometryReplicad } from '#replicad.types.js';
@@ -24,18 +30,11 @@ import type { RuntimeLogger } from '@taucad/runtime/kernel';
 
 import type { JSONObject } from '@taucad/runtime/types';
 
-type ReplicadTopologyComponent = {
-  id: string;
-  name: string;
+type ReplicadTopologyComponent = TauCadTopologyComponent & {
   kind: 'part';
-  selector: string;
   nodeIndex: number;
   faceGroups: GeometryReplicad['faces']['faceGroups'];
   edgeGroups: GeometryReplicad['edges']['edgeGroups'];
-  capabilities: {
-    exports: Array<{ fidelity: 'mesh' | 'brep'; formats: string[]; available: boolean }>;
-    hasPreciseTopology: boolean;
-  };
 };
 
 type ReplicadNodeBuildResult = {
@@ -82,10 +81,19 @@ function buildNodeFromReplicadGeometry({
   const componentId = formatNamedComponentId(nodeName, nodeIndex) ?? formatComponentId(nodeIndex);
   const selector = formatNodeSelector(nodeIndex);
 
-  if (faces.vertices.length > 0 && faces.triangles.length > 0) {
+  const compactedFaces =
+    faces.vertices.length > 0 && faces.triangles.length > 0
+      ? compactTriangleIndices({
+          positions: faces.vertices,
+          indices: faces.triangles,
+          groups: faces.faceGroups,
+        })
+      : undefined;
+
+  if (compactedFaces && compactedFaces.indices.length > 0) {
     const positions = transformVertexArray(faces.vertices, transformOptions);
     const normals = transformNormalArray(faces.normals, transformOptions);
-    const indices = new Uint32Array(faces.triangles);
+    const { indices } = compactedFaces;
 
     let baseColor: [number, number, number, number] = [
       cadMaterialDefaults.baseColorFactor[0],
@@ -115,7 +123,7 @@ function buildNodeFromReplicadGeometry({
               tauComponentId: componentId,
               tauComponentKind: 'body',
               tauComponentSelector: formatPrimitiveSelector(nodeIndex, 'surface'),
-              faceGroups: geometry.faces.faceGroups,
+              faceGroups: compactedFaces.groups,
             },
           }
         : {}),
@@ -183,7 +191,7 @@ function buildNodeFromReplicadGeometry({
       name: nodeName,
       kind: 'part',
       selector,
-      faceGroups: geometry.faces.faceGroups,
+      faceGroups: compactedFaces?.groups ?? [],
       edgeGroups: geometry.edges.edgeGroups,
       capabilities: {
         exports: [
@@ -243,7 +251,7 @@ export function convertReplicadGeometriesToGltf(options: ReplicadGltfOptions): U
     }
   }
 
-  const topologyPayload = {
+  const topologyPayload: TauCadTopologyPayload = {
     schemaVersion: 1,
     components: topologyComponents,
   };

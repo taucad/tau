@@ -113,6 +113,25 @@ describe('convertReplicadGeometriesToGltf', () => {
     expect(primitive.getAttribute('NORMAL')!.getCount()).toBe(4);
   });
 
+  it('should omit zero-area triangles and preserve the remaining face group', async () => {
+    const geometry = createSimpleGeometry({
+      faces: {
+        vertices: [0, 0, 0, 1, 0, 0, 0, 1, 0, 2, 0, 0],
+        triangles: [0, 1, 2, 0, 1, 3],
+        normals: [0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1],
+        faceGroups: [
+          { start: 0, count: 3, faceId: 1 },
+          { start: 3, count: 3, faceId: 2 },
+        ],
+      },
+    });
+
+    const glb = convertReplicadGeometriesToGltf({ geometries: [geometry], format: 'glb' });
+    const document = await new NodeIO().readBinary(glb);
+    expect(document.getRoot().listMeshes()[0]!.listPrimitives()[0]!.getIndices()!.getCount()).toBe(3);
+    expect(readTopologyPayload(glb).payload.components[0]!.faceGroups).toEqual([{ start: 0, count: 3, faceId: 1 }]);
+  });
+
   it('should set node name from geometry name', async () => {
     const geometry = createSimpleGeometry({ name: 'MyCube' });
     const glb = convertReplicadGeometriesToGltf({ geometries: [geometry], format: 'glb' });
@@ -181,9 +200,9 @@ describe('convertReplicadGeometriesToGltf', () => {
     const material = document.getRoot().listMaterials()[0]!;
 
     const color = material.getBaseColorFactor();
-    expect(color[0]).toBeCloseTo(0.215_861, 3);
-    expect(color[1]).toBeCloseTo(0.215_861, 3);
-    expect(color[2]).toBeCloseTo(0.215_861, 3);
+    expect(color[0]).toBeCloseTo(0.215861, 3);
+    expect(color[1]).toBeCloseTo(0.215861, 3);
+    expect(color[2]).toBeCloseTo(0.215861, 3);
     expect(color[3]).toBeCloseTo(1, 2);
     expect(material.getName()).toBe('');
   });

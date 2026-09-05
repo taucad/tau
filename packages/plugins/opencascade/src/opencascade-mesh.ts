@@ -6,8 +6,8 @@
  * directly, eliminating manual vertex extraction and the gltf-transform dependency.
  */
 
-import { NodeIO } from '@gltf-transform/core';
-import { normalizeGltfGeometryNames, srgbHexToLinearTuple } from '@taucad/geometry-core';
+import { Accessor, NodeIO, Primitive } from '@gltf-transform/core';
+import { compactTriangleIndices, normalizeGltfGeometryNames, srgbHexToLinearTuple } from '@taucad/geometry-core';
 import { cadMaterialDefaults } from '@taucad/runtime/types';
 import type { OpenCascadeInstance } from 'libcascade/init';
 import type { ShapeEntry } from '#opencascade.types.js';
@@ -37,12 +37,32 @@ const tagGlbMeshAndNodesFromShapeEntries = async (
   glb: Uint8Array<ArrayBuffer>,
   entries: ShapeEntry[],
 ): Promise<Uint8Array<ArrayBuffer>> => {
-  if (entries.length === 0) {
-    return glb;
-  }
   const io = new NodeIO();
   const document = await io.readBinary(glb);
   const meshes = document.getRoot().listMeshes();
+  for (const mesh of meshes) {
+    for (const primitive of mesh.listPrimitives()) {
+      const positions = primitive.getAttribute('POSITION');
+      if (primitive.getMode() !== Primitive.Mode['TRIANGLES'] || !positions?.getArray()) {
+        continue;
+      }
+      const indices = primitive.getIndices();
+      const sourceIndices =
+        indices?.getArray() ?? Uint32Array.from({ length: positions.getCount() }, (_, index) => index);
+      const compacted = compactTriangleIndices({ positions: positions.getArray()!, indices: sourceIndices });
+      if (compacted.removed === 0) {
+        continue;
+      }
+      if (indices) {
+        indices.setArray(compacted.indices);
+      } else {
+        const buffer = positions.getBuffer() ?? document.getRoot().listBuffers()[0] ?? document.createBuffer();
+        primitive.setIndices(
+          document.createAccessor().setType(Accessor.Type['SCALAR']!).setBuffer(buffer).setArray(compacted.indices),
+        );
+      }
+    }
+  }
   const limit = Math.min(meshes.length, entries.length);
   for (let i = 0; i < limit; i++) {
     const label = entries[i]?.name;

@@ -1,7 +1,6 @@
 ---
 name: commit
-description: Previews, stages, and commits requested changes as policy-compliant atomic commits, or explicitly pushes committed work. Use only when invoked as /commit, /commit dry, /commit stage, /commit push, /commit unsafe, /commit unsafe continue, or /commit unsafe proceed.
-disable-model-invocation: true
+description: Previews, stages, and commits requested changes as policy-compliant atomic commits, or pushes committed work when authorized. Use when the current task asks for a commit preview, staging, committing, or pushing; command modes remain available for precise scope.
 argument-hint: '[dry|stage|push|unsafe [continue|proceed]]'
 ---
 
@@ -42,6 +41,8 @@ For `/commit` and `/commit push`, process one group at a time: stage explicit pa
 For `/commit push`, finish every local commit first. Before the first push, verify every committed repository's current branch has a configured upstream. If all do, run plain `git push` in each repository; otherwise push none and report the missing upstream.
 
 ## Boundaries
+
+For an interrupted lint-staged hook, first inspect its logged backup commit and current index without restoring anything. A backup can survive after its stash reference is dropped. Verify its index parent's relationship to the intended current HEAD and compare the affected paths before proposing recovery; never apply an unrelated surviving backup or restore the whole worktree. This inspection does not authorize a reset, stash operation or overwrite.
 
 - Never push unless invoked as `/commit push`; never force-push, push tags, or create an upstream.
 - Never stage or commit in `/commit dry` or bare `/commit unsafe` mode.

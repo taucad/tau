@@ -69,7 +69,6 @@ Every skill needs YAML frontmatter and a markdown body:
 ---
 name: your-skill-name
 description: Specific third-person description of what the skill does and when to use it.
-disable-model-invocation: true
 ---
 
 # Your Skill Name
@@ -83,7 +82,9 @@ Clear, step-by-step guidance for the agent.
 Concrete examples when they improve output quality.
 ```
 
-Use `disable-model-invocation: true` when the skill should load only when named explicitly. Omit it when ambient context should trigger the skill automatically.
+Skills are model-selectable and composable by default. Omit `disable-model-invocation` and the optional Codex `policy.allow_implicit_invocation` field. Write natural task triggers; a slash-command alias is a convenience, not the only entry point. Loading a procedure does not authorize its side effects: commits, publication, deployments and external messages still follow the current task's authorization.
+
+An explicit user requirement for manual initiation is an exception. Record its evidence under `## Manual initiation` and in the existing skill inventory before setting Claude's `disable-model-invocation: true` and Codex's `policy.allow_implicit_invocation: false` in `agents/openai.yaml`. These controls differ: Claude blocks model Skill invocation and subagent preloading; Codex suppresses implicit selection while retaining explicit user invocation. A model-enabled parent cannot require a disabled helper. Do not use manual-only metadata to reduce context or as a security boundary. Follow [AGENTS policy](../../../docs/policy/agents-md-policy.md#5-enable-relevant-skills-and-composition-by-default).
 
 ### Required Metadata
 
@@ -158,6 +159,12 @@ Put essential workflow instructions in `SKILL.md`. Move detailed API notes, exam
 | High          | Many valid approaches exist               | Code review guidelines  |
 | Medium        | A preferred pattern has room for judgment | Research doc templates  |
 | Low           | Consistency and safety are critical       | Migration/runbook steps |
+
+Keep generic workflows model-neutral. Use subagent workers when requested, leave worker model/class selection to the agent and harness defaults, and honor explicit operator overrides. Transport helpers inherit native defaults when no model is specified.
+
+### 4. Give Expensive Work a Durable Owner
+
+For a Tau project skill that produces research, charter, investigation, or implementation-lane evidence, compose the shared [durable research artifact contract](../create-research/artifacts.md). Name the canonical owner, each lane's permitted writer and path, checkpoint delivery, recovery, and the promotion step for valuable scratch output. Link the contract instead of copying it, and do not create a second root document for the same investigation.
 
 ---
 
@@ -310,6 +317,9 @@ Gather:
 3. Check terminology is consistent.
 4. Verify file references are one level deep.
 5. Search for forbidden or obsolete path references.
+6. Inspect the target harness's discovered catalog and aliases; confirm they resolve to the intended canonical file rather than duplicated bytes.
+7. Exercise a natural positive trigger, an explicit user invocation, a composed helper when applicable, and an unrelated prompt. For a deliberate manual-only exception, verify each host's documented behavior separately.
+8. Record the harness/version and observed result. Metadata presence alone does not prove routing, write access, approval behavior, or isolation.
 
 ---
 
@@ -365,3 +375,5 @@ When reviewing code:
 - [ ] Workflows have clear steps.
 - [ ] Scripts, when present, solve the repeatable problem directly.
 - [ ] Required packages and validation commands are documented.
+- [ ] Natural selection, explicit invocation, composition and unrelated-prompt behavior have evidence from each supported host; any manual-only exception has a deliberate user requirement.
+- [ ] Expensive multi-lane outputs use a durable owner, disjoint write paths, checkpoints, and recovery.

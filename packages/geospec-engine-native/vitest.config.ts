@@ -5,6 +5,11 @@ export default defineConfig({
   plugins: [nxViteTsPaths()],
   test: {
     environment: 'node',
+    include: [
+      'src/**/*.{test,spec}.{ts,mts,js,mjs}',
+      'bindings/node/conformance.vitest.mjs',
+      'bindings/wasm/conformance.vitest.mjs',
+    ],
     typecheck: {
       enabled: true,
       include: ['**/*.test-d.ts'],

@@ -2,7 +2,8 @@
 
 Experimental portable Rust core for GeoSpec's canonical control protocol and
 whole-subject mesh bounding-box assertions. The existing TypeScript/WASM engine
-remains the reference implementation. This package has no JavaScript binding yet.
+remains the reference implementation. Node, WASM and Python expose the same
+experimental byte interface; public matcher-framework integration remains separate.
 
 ## Rust interface
 
@@ -12,12 +13,28 @@ against retained content. These methods and `canonicalize` return canonical JSON
 bytes or a typed `ProtocolError` with a stable `code()`. The free `process_request`
 function delegates to a fresh `Engine` and therefore has no retained subjects.
 
+`Engine::canonical_plan` validates a complete `submitClaims` request and returns
+a neutral plan without `method` or `requestId`. It materializes the bounding-box
+tolerance, lowers min/max triples to axis objects, removes redundant arguments
+and empty axis objects, and records `numericProfile: "mesh-f32-bounds-v1"`.
+Logical IDs, subject/claim order, polarity and budgets remain significant.
+This route supports bounding-box plans and the unavailable `analyzeMesh` claim;
+other recognized capabilities return `unsupported-normalization`.
+
+`Engine::evaluate_plan` accepts that neutral envelope and returns canonical
+`{"results":[...]}` bytes. Both execution routes validate the complete batch
+before computing any geometry. Raw requests preserve authored expectations in
+evidence; neutral plans use normalized expectations through the same evaluator.
+The free `canonicalize` function only encodes JSON and does not normalize plans.
+
 The selected control profile is protocol **3**, registry **4**,
 `geospec-jcs-v1`, with **experimental** qualification. Initialization advertises
 `toHaveBoundingBox` only for `mesh-buffer-whole-subject`. The registry catalog
 records recognized capability identities separately. `analyzeMesh` remains
 unavailable until its full statistics contract is implemented. Selectors,
-occurrence resolution, BRep evidence and file loaders are not supported here.
+occurrence resolution, BRep evidence and file loaders are not supported by this
+portable matcher interface. The separate native OCCT/CSG adapters supply entry
+operations without promoting additional matcher capabilities.
 
 ## Mesh input and assertions
 
@@ -61,7 +78,42 @@ pnpm nx run geospec-engine-native:format-rust
 pnpm nx run geospec-engine-native:clippy-rust
 ```
 
-The portable check targets `wasm32-unknown-unknown`; it verifies compilation,
-not browser execution or release qualification. Language bindings, broader
-geometry evaluation, complete matcher parity and release qualification remain
-pending.
+The portable compile check targets `wasm32-unknown-unknown`. Runtime conformance
+uses the frozen package-local corpus through actual built artifacts.
+
+## Host packages
+
+The default JavaScript entrypoint and `./wasm` expose `initialize`, `Engine`,
+`canonicalize` and `ProtocolError`. Initialize with the shipped WASM bytes or
+URL before creating an engine. The Node-only `./node` entrypoint exposes the
+same operations without WASM initialization. Engine methods are `ingestMesh`,
+`processRequest`, `canonicalPlan` and `evaluatePlan`; all forward bytes to Rust.
+The Node facade admits ordinary ArrayBuffer-backed Uint8Array views and copies
+their selected bytes before invoking NAPI. Shared backing is refused at runtime.
+The private generated addon is not the public input boundary and has not received
+the deferred direct-entry lifetime/concurrency qualification.
+
+The `geospec_engine_native` Python extension exposes `Engine` with the matching
+snake_case methods and module-level `canonicalize`. It accepts and returns bytes,
+preserving the protocol error code and message. Current wheel profiles are
+CPython 3.13 and 3.14 on Darwin ARM64.
+
+Use Node 24 for pnpm/Nx bootstrap. Build host artifacts before the TypeScript
+package and local assembly:
+
+```bash
+pnpm nx run geospec-engine-native:build-node
+pnpm nx run geospec-engine-native:build-wasm
+pnpm nx build geospec-engine-native
+pnpm nx run geospec-engine-native:assemble-package
+```
+
+WASM generation uses the matching wasm-bindgen 0.2.127 executable in the package
+cache. Assembly creates disposable tarballs, generates the platform metadata and
+exact-version optional dependency with pinned NAPI tooling, and performs no
+publication. The source manifest stays unchanged. The declared NAPI target is
+Darwin ARM64; this entry does not establish the full delivery matrix.
+
+These are byte facades over the bounded mesh matcher contract. Complete matcher
+parity, public standalone/Vitest/pytest matcher integration, mixed OCCT WASM,
+cache/runtime integration and release qualification remain pending.

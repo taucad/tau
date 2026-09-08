@@ -19,7 +19,8 @@
   "files": [
     "dist",
     "LICENSE",
-    "README.md"
+    "README.md",
+    "!dist/**/*.node"
   ],
   "keywords": [
     "cad",
@@ -32,7 +33,12 @@
   },
   "exports": {
     ".": "./src/index.ts",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./node": {
+      "types": "./src/node.ts",
+      "node": "./src/node.ts"
+    },
+    "./wasm": "./src/wasm.ts"
   },
   "publishConfig": {
     "access": "public",
@@ -42,12 +48,42 @@
         "import": "./dist/index.mjs",
         "default": "./dist/index.mjs"
       },
-      "./package.json": "./package.json"
+      "./package.json": "./package.json",
+      "./node": {
+        "types": "./dist/node.d.mts",
+        "node": "./dist/node.mjs"
+      },
+      "./wasm": {
+        "types": "./dist/wasm.d.mts",
+        "import": "./dist/wasm.mjs",
+        "default": "./dist/wasm.mjs"
+      }
     },
-    "imports": {}
+    "imports": {
+      "#native-binding": {
+        "node": "./dist/native/index.js"
+      },
+      "#wasm-binding": "./dist/wasm/geospec_engine_native_wasm.js"
+    }
   },
   "imports": {
     "#*.js": "./src/*.ts",
-    "#*": "./src/*"
+    "#*": "./src/*",
+    "#native-binding": {
+      "types": "./bindings/node/generated/index.d.ts",
+      "node": "./bindings/node/generated/index.js"
+    },
+    "#wasm-binding": "./bindings/wasm/generated/geospec_engine_native_wasm.js",
+    "#bench/*": "./bench/*.ts"
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "catalog:"
+  },
+  "napi": {
+    "binaryName": "geospec-engine-native",
+    "packageName": "@taucad/geospec-engine-native",
+    "targets": [
+      "aarch64-apple-darwin"
+    ]
   }
 }

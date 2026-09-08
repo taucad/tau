@@ -1,5 +1,9 @@
+mod bounding_box;
 mod codec;
+mod mesh;
 mod protocol;
+
+pub use protocol::Engine;
 
 use std::error::Error;
 use std::fmt;
@@ -69,5 +73,5 @@ pub fn canonicalize(input: &[u8]) -> Result<Vec<u8>, ProtocolError> {
 
 /// Processes one protocol-3 GeoSpec control request and returns canonical JSON.
 pub fn process_request(input: &[u8]) -> Result<Vec<u8>, ProtocolError> {
-    protocol::process(codec::decode(input)?)
+    Engine::new().process_request(input)
 }

@@ -24,6 +24,21 @@ pub(crate) enum Json {
     Object(Vec<(String, Json)>),
 }
 
+impl Json {
+    pub(crate) fn object<const N: usize>(entries: [(&str, Self); N]) -> Self {
+        Self::Object(
+            entries
+                .into_iter()
+                .map(|(key, value)| (key.into(), value))
+                .collect(),
+        )
+    }
+
+    pub(crate) fn string(value: &str) -> Self {
+        Self::String(value.into())
+    }
+}
+
 pub(crate) fn decode(input: &[u8]) -> Result<Json, ProtocolError> {
     if input.len() > MAX_INPUT_BYTES {
         return Err(ProtocolError::new(

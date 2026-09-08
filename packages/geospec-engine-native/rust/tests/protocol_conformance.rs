@@ -7,7 +7,7 @@ const CONTENT_HASH: &str = "0000000000000000000000000000000000000000000000000000
 
 const INITIALIZE_REQUEST: &[u8] = br#"{"method":"initialize","requestId":"r1","protocolVersion":3,"registryVersion":4,"canonicalProfile":"geospec-jcs-v1"}"#;
 const CANONICAL_INITIALIZE_REQUEST: &[u8] = br#"{"canonicalProfile":"geospec-jcs-v1","method":"initialize","protocolVersion":3,"registryVersion":4,"requestId":"r1"}"#;
-const INITIALIZE_RESPONSE: &[u8] = br#"{"requestId":"r1","result":{"canonicalProfile":"geospec-jcs-v1","capabilities":[],"protocolVersion":3,"qualification":"experimental","registryVersion":4}}"#;
+const INITIALIZE_RESPONSE: &[u8] = br#"{"requestId":"r1","result":{"canonicalProfile":"geospec-jcs-v1","capabilities":[{"name":"toHaveBoundingBox","registryVersion":4,"scope":"mesh-buffer-whole-subject"}],"protocolVersion":3,"qualification":"experimental","registryVersion":4}}"#;
 
 const POSITIVE_PLAN: &[u8] = br#"{"subjects":[{"slot":"s1","contentHash":"0000000000000000000000000000000000000000000000000000000000000000"}],"claims":[{"claimId":"c1","capability":"analyzeMesh","subjectSlots":["s1"],"payload":null,"polarity":"positive","workUnitBudget":100}]}"#;
 const CANONICAL_POSITIVE_PLAN: &[u8] = br#"{"claims":[{"capability":"analyzeMesh","claimId":"c1","payload":null,"polarity":"positive","subjectSlots":["s1"],"workUnitBudget":100}],"subjects":[{"contentHash":"0000000000000000000000000000000000000000000000000000000000000000","slot":"s1"}]}"#;
@@ -98,7 +98,7 @@ fn initializes_with_exact_canonical_request_and_response_bytes() {
     assert_eq!(response["result"]["qualification"], "experimental");
     assert_eq!(
         response["result"]["capabilities"].as_array().map(Vec::len),
-        Some(0)
+        Some(1)
     );
 }
 

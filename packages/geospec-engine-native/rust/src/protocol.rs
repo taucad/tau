@@ -1,6 +1,8 @@
-use std::collections::HashSet;
+use sha2::{Digest, Sha256};
+use std::collections::{HashMap, HashSet};
 
-use crate::codec::{encode, Json};
+use crate::codec::{decode, encode, Json};
+use crate::mesh::Mesh;
 use crate::{ErrorKind, ProtocolError};
 
 const PROTOCOL_VERSION: f64 = 3.0;
@@ -40,12 +42,96 @@ const CAPABILITIES: [&str; 28] = [
     "analyzeMeshOverlap",
 ];
 
-pub(crate) fn process(request: Json) -> Result<Vec<u8>, ProtocolError> {
+/// Experimental whole-subject mesh engine with owned, content-addressed subjects.
+#[derive(Default)]
+pub struct Engine {
+    subjects: HashMap<String, Mesh>,
+}
+
+impl Engine {
+    /// Creates an engine with no ingested subjects.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Admits exact mesh-buffer-v1 bytes in the whole-subject mm/z-up frame.
+    pub fn ingest_mesh(&mut self, request: &[u8], mesh: &[u8]) -> Result<Vec<u8>, ProtocolError> {
+        let value = decode(request)?;
+        let request = object(&value, "ingestSubject request")?;
+        let fields = [
+            "method",
+            "requestId",
+            "protocolVersion",
+            "registryVersion",
+            "canonicalProfile",
+            "contentHash",
+            "format",
+            "frame",
+        ];
+        require_fields(request, &fields, &fields, "ingestSubject request")?;
+        if string_field(request, "method")? != "ingestSubject" {
+            return invalid_request("Mesh admission requires method ingestSubject.");
+        }
+        validate_versions(request)?;
+        let request_id = logical_id(request, "requestId")?;
+        let format = string_field(request, "format")?;
+        if format != "mesh-buffer-v1" {
+            return Err(ProtocolError::new(
+                ErrorKind::UnsupportedVersion,
+                "Only mesh-buffer-v1 admission is supported.",
+            ));
+        }
+        let frame = object(field(request, "frame")?, "frame")?;
+        require_fields(
+            frame,
+            &["coordinateSystem", "unit"],
+            &["coordinateSystem", "unit"],
+            "frame",
+        )?;
+        if string_field(frame, "coordinateSystem")? != "z-up"
+            || string_field(frame, "unit")? != "mm"
+        {
+            return invalid_request(
+                "Mesh frame must be whole-subject millimetres with z-up coordinates.",
+            );
+        }
+        let content_hash = string_field(request, "contentHash")?;
+        validate_content_hash(content_hash)
+            .map_err(|error| ProtocolError::new(ErrorKind::InvalidRequest, error.to_string()))?;
+        let subject = Mesh::decode(mesh)?;
+        let verified_hash = format!("{:x}", Sha256::digest(mesh));
+        if content_hash != verified_hash {
+            return invalid_request("Mesh contentHash does not match the exact supplied bytes.");
+        }
+        let response = encode(&Json::object([
+            ("requestId", Json::string(request_id)),
+            (
+                "result",
+                Json::object([(
+                    "subject",
+                    Json::object([
+                        ("contentHash", Json::string(content_hash)),
+                        ("format", Json::string(format)),
+                    ]),
+                )]),
+            ),
+        ]))?;
+        self.subjects.insert(verified_hash, subject);
+        Ok(response)
+    }
+
+    /// Negotiates capabilities or evaluates claims against this engine's subjects.
+    pub fn process_request(&self, request: &[u8]) -> Result<Vec<u8>, ProtocolError> {
+        process(self, decode(request)?)
+    }
+}
+
+fn process(engine: &Engine, request: Json) -> Result<Vec<u8>, ProtocolError> {
     let request = object(&request, "request")?;
     let method = string_field(request, "method")?;
     match method {
         "initialize" => initialize(request),
-        "submitClaims" => submit_claims(request),
+        "submitClaims" => submit_claims(engine, request),
         _ => Err(ProtocolError::new(
             ErrorKind::InvalidRequest,
             format!("GeoSpec method '{method}' is not supported by this engine slice."),
@@ -86,13 +172,20 @@ fn initialize(request: &[(String, Json)]) -> Result<Vec<u8>, ProtocolError> {
                     Json::String(CANONICAL_PROFILE.into()),
                 ),
                 ("qualification".into(), Json::String("experimental".into())),
-                ("capabilities".into(), Json::Array(Vec::new())),
+                (
+                    "capabilities".into(),
+                    Json::Array(vec![Json::object([
+                        ("name", Json::string(CAPABILITIES[0])),
+                        ("registryVersion", Json::Number(REGISTRY_VERSION)),
+                        ("scope", Json::string("mesh-buffer-whole-subject")),
+                    ])]),
+                ),
             ]),
         ),
     ]))
 }
 
-fn submit_claims(request: &[(String, Json)]) -> Result<Vec<u8>, ProtocolError> {
+fn submit_claims(engine: &Engine, request: &[(String, Json)]) -> Result<Vec<u8>, ProtocolError> {
     require_fields(
         request,
         &[
@@ -124,7 +217,7 @@ fn submit_claims(request: &[(String, Json)]) -> Result<Vec<u8>, ProtocolError> {
     )?;
 
     let subject_values = array(field(plan, "subjects")?, "plan.subjects")?;
-    let mut subjects = HashSet::new();
+    let mut subjects = HashMap::new();
     for subject in subject_values {
         let subject = object(subject, "plan subject").map_err(as_invalid_claim)?;
         require_fields(
@@ -135,13 +228,14 @@ fn submit_claims(request: &[(String, Json)]) -> Result<Vec<u8>, ProtocolError> {
         )
         .map_err(as_invalid_claim)?;
         let slot = logical_id(subject, "slot").map_err(as_invalid_claim)?;
-        if !subjects.insert(slot) {
+        let hash = string_field(subject, "contentHash").map_err(as_invalid_claim)?;
+        if subjects.insert(slot, hash).is_some() {
             return Err(ProtocolError::new(
                 ErrorKind::InvalidClaim,
                 format!("GeoSpec plan contains duplicate subject slot '{slot}'."),
             ));
         }
-        validate_content_hash(string_field(subject, "contentHash").map_err(as_invalid_claim)?)?;
+        validate_content_hash(hash)?;
     }
 
     let claim_values = array(field(plan, "claims")?, "plan.claims")?;
@@ -195,7 +289,7 @@ fn submit_claims(request: &[(String, Json)]) -> Result<Vec<u8>, ProtocolError> {
         )
         .map_err(as_invalid_claim)?;
         for slot in &subject_slots {
-            if !subjects.contains(slot.as_str()) {
+            if !subjects.contains_key(slot.as_str()) {
                 return Err(ProtocolError::new(
                     ErrorKind::InvalidClaim,
                     format!(
@@ -219,7 +313,24 @@ fn submit_claims(request: &[(String, Json)]) -> Result<Vec<u8>, ProtocolError> {
             }
         }
 
-        results.push(refused_result(claim_id, capability));
+        if capability == CAPABILITIES[0] {
+            if subject_slots.len() != 1 {
+                return invalid_claim(
+                    "toHaveBoundingBox requires exactly one existing subject slot.",
+                );
+            }
+            let hash = subjects[subject_slots[0].as_str()];
+            let mesh = engine.subjects.get(hash).ok_or_else(|| {
+                ProtocolError::new(
+                    ErrorKind::InvalidClaim,
+                    "Bounding-box subject content must first be ingested into this Engine.",
+                )
+            })?;
+            results
+                .push(crate::bounding_box::evaluate(mesh, hash, claim).map_err(as_invalid_claim)?);
+        } else {
+            results.push(refused_result(claim_id, capability));
+        }
     }
 
     encode(&Json::Object(vec![
@@ -310,7 +421,7 @@ fn validate_budget(value: &Json) -> Result<(), ProtocolError> {
     }
 }
 
-fn require_fields(
+pub(crate) fn require_fields(
     object: &[(String, Json)],
     allowed: &[&str],
     required: &[&str],
@@ -331,21 +442,27 @@ fn require_fields(
     Ok(())
 }
 
-fn object<'a>(value: &'a Json, name: &str) -> Result<&'a [(String, Json)], ProtocolError> {
+pub(crate) fn object<'a>(
+    value: &'a Json,
+    name: &str,
+) -> Result<&'a [(String, Json)], ProtocolError> {
     match value {
         Json::Object(value) => Ok(value),
         _ => invalid_request(format!("GeoSpec {name} must be an object.")),
     }
 }
 
-fn array<'a>(value: &'a Json, name: &str) -> Result<&'a [Json], ProtocolError> {
+pub(crate) fn array<'a>(value: &'a Json, name: &str) -> Result<&'a [Json], ProtocolError> {
     match value {
         Json::Array(value) => Ok(value),
         _ => invalid_request(format!("GeoSpec {name} must be an array.")),
     }
 }
 
-fn field<'a>(object: &'a [(String, Json)], key: &str) -> Result<&'a Json, ProtocolError> {
+pub(crate) fn field<'a>(
+    object: &'a [(String, Json)],
+    key: &str,
+) -> Result<&'a Json, ProtocolError> {
     optional_field(object, key).ok_or_else(|| {
         ProtocolError::new(
             ErrorKind::InvalidRequest,
@@ -354,14 +471,17 @@ fn field<'a>(object: &'a [(String, Json)], key: &str) -> Result<&'a Json, Protoc
     })
 }
 
-fn optional_field<'a>(object: &'a [(String, Json)], key: &str) -> Option<&'a Json> {
+pub(crate) fn optional_field<'a>(object: &'a [(String, Json)], key: &str) -> Option<&'a Json> {
     object
         .iter()
         .find(|(candidate, _)| candidate == key)
         .map(|(_, value)| value)
 }
 
-fn string_field<'a>(object: &'a [(String, Json)], key: &str) -> Result<&'a str, ProtocolError> {
+pub(crate) fn string_field<'a>(
+    object: &'a [(String, Json)],
+    key: &str,
+) -> Result<&'a str, ProtocolError> {
     match field(object, key)? {
         Json::String(value) => Ok(value),
         _ => invalid_request(format!("GeoSpec field '{key}' must be a string.")),
@@ -377,7 +497,7 @@ fn logical_id<'a>(object: &'a [(String, Json)], key: &str) -> Result<&'a str, Pr
     }
 }
 
-fn number_field(object: &[(String, Json)], key: &str) -> Result<f64, ProtocolError> {
+pub(crate) fn number_field(object: &[(String, Json)], key: &str) -> Result<f64, ProtocolError> {
     match field(object, key)? {
         Json::Number(value) => Ok(*value),
         _ => invalid_request(format!("GeoSpec field '{key}' must be a number.")),
@@ -398,7 +518,7 @@ fn invalid_request<T>(message: impl Into<String>) -> Result<T, ProtocolError> {
     Err(ProtocolError::new(ErrorKind::InvalidRequest, message))
 }
 
-fn invalid_claim<T>(message: impl Into<String>) -> Result<T, ProtocolError> {
+pub(crate) fn invalid_claim<T>(message: impl Into<String>) -> Result<T, ProtocolError> {
     Err(ProtocolError::new(ErrorKind::InvalidClaim, message))
 }
 

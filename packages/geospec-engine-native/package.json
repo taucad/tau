@@ -1,0 +1,53 @@
+{
+  "name": "@taucad/geospec-engine-native",
+  "version": "0.0.1",
+  "description": "Portable GeoSpec native engine",
+  "type": "module",
+  "sideEffects": false,
+  "private": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taucad/tau.git",
+    "directory": "packages/geospec-engine-native"
+  },
+  "homepage": "https://github.com/taucad/tau/tree/main/packages/geospec-engine-native#readme",
+  "bugs": {
+    "url": "https://github.com/taucad/tau/issues"
+  },
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "keywords": [
+    "cad",
+    "typescript"
+  ],
+  "author": "Richard Fontein",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs",
+        "default": "./dist/index.mjs"
+      },
+      "./package.json": "./package.json"
+    },
+    "imports": {}
+  },
+  "imports": {
+    "#*.js": "./src/*.ts",
+    "#*": "./src/*"
+  }
+}

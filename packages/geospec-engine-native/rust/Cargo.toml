@@ -1,0 +1,15 @@
+[package]
+name = "geospec-engine-native-core"
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.88"
+license = "Apache-2.0"
+publish = false
+
+[dependencies]
+ryu-js = "=1.0.2"
+serde = "=1.0.219"
+serde_json = { version = "=1.0.143", features = ["float_roundtrip"] }
+
+[lib]
+path = "src/lib.rs"

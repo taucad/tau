@@ -2718,6 +2718,8 @@ importers:
         specifier: workspace:*
         version: link:../../libs/tau-examples
 
+  packages/geospec-engine-native: {}
+
   packages/plugins/assimp:
     dependencies:
       '@taucad/geometry-core':

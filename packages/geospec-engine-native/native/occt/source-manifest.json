@@ -71,6 +71,9 @@
     "explanation": "Seven Windows script/template files use CRLF in archive as declared by pinned .gitattributes; all other archive file bytes match exact Git blobs. Archive bytes retained unchanged.",
     "unexplainedDifferences": 0
   },
-  "licenseFiles": ["LICENSE_LGPL_21.txt", "OCCT_LGPL_EXCEPTION.txt"],
+  "licenseFiles": [
+    "LICENSE_LGPL_21.txt",
+    "OCCT_LGPL_EXCEPTION.txt"
+  ],
   "buildRequirement": "Fetch and verify this exact archive independent of optional repos or Brain; compiled bridge/source recipe is separate."
 }

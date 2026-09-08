@@ -1,0 +1,41 @@
+{
+  "name": "geospec-engine-native",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "packages/geospec-engine-native",
+  "projectType": "library",
+  "tags": ["scope:shared", "type:package"],
+  "targets": {
+    "test-rust": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo test --manifest-path packages/geospec-engine-native/rust/Cargo.toml --locked --target-dir node_modules/.cache/geospec-engine-native/target",
+        "forwardAllArgs": false
+      }
+    },
+    "check-wasm": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo check --manifest-path packages/geospec-engine-native/rust/Cargo.toml --locked --target wasm32-unknown-unknown --target-dir node_modules/.cache/geospec-engine-native/target",
+        "forwardAllArgs": false
+      }
+    },
+    "format-rust": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo fmt --manifest-path packages/geospec-engine-native/rust/Cargo.toml -- --check",
+        "forwardAllArgs": false
+      }
+    },
+    "clippy-rust": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo clippy --manifest-path packages/geospec-engine-native/rust/Cargo.toml --locked --all-targets --target-dir node_modules/.cache/geospec-engine-native/target -- -D warnings",
+        "forwardAllArgs": false
+      }
+    }
+  }
+}

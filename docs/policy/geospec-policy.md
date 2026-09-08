@@ -1,6 +1,6 @@
 ---
 title: 'GeoSpec Policy'
-description: 'Rules for GeoSpec matcher API design, evidence naming, diagnostics, failure messages, C++/WASM implementation, and high-assurance geometry test authoring.'
+description: 'Rules for GeoSpec matcher API design, evidence naming, diagnostics, failure messages, compiled native/WASM implementation, and high-assurance geometry test authoring.'
 status: active
 created: '2026-06-23'
 updated: '2026-09-05'
@@ -9,6 +9,7 @@ related:
   - docs/policy/testing-policy.md
   - docs/policy/brep-policy.md
   - docs/policy/geometry-naming-policy.md
+  - docs/research/geospec-native-engine-charter.md
   - docs/research/geospec-hybrid-wasm-matcher-architecture.md
   - docs/research/geospec-production-assertions-audit.md
   - docs/research/geospec-production-assertions-catalog.md
@@ -351,9 +352,9 @@ INCORRECT:
 for (const cell of grid) open[cell] = classify(cell.center) === 'out';
 ```
 
-## 18. Do Heavy Geometry In C++/WASM, Minimizing Boundary Crossings
+## 18. Do Heavy Geometry In The Compiled Engine, Minimizing Boundary Crossings
 
-Perform heavy geometry in compiled C++/WASM, and treat every JS↔WASM crossing as a first-order cost. A matcher's native entry point must accept a whole claim and return a whole verdict in one coarse-grained call named by the eigenquestion it answers (§1) — not stream per-point or per-pair queries across the boundary. Maximize the work done per crossing; minimize both the count of crossings and the volume of marshalled JSON. Intermediate geometry stays in C++.
+Perform heavy geometry in the compiled native/WASM engine. The additive Rust engine owns analysis, proof computation and Manifold Rust CSG; OCCT operations stay inside its private C++ bridge. Treat JS/Python↔engine crossings as a first-order cost. A matcher's engine entry point accepts a whole claim or claim batch and returns complete verdicts in coarse calls named by the engineering question (§1), not per-point or per-pair host queries. Minimize crossing count and marshalled bytes. Intermediate geometry stays in engine-owned Rust/C++ memory, including BRep-to-CSG transfer. Preserve the existing TypeScript/WASM engine and its immutable reference evidence during the additive program.
 
 **Why**: Boundary crossings and serialization dominate the cost of fine-grained native APIs; one `proveX(...)` call keeps the algorithm and its intermediate geometry where they belong.
 
@@ -362,7 +363,7 @@ Perform heavy geometry in compiled C++/WASM, and treat every JS↔WASM crossing 
 CORRECT:
 
 ```typescript
-// One coarse call; all intermediate geometry stays in C++.
+// One coarse call; all intermediate geometry stays inside the compiled engine.
 const verdict = native.proveVoidTopology({ material, region, path, isolatedFrom, minCrossSection });
 ```
 
@@ -375,7 +376,7 @@ for (const occurrence of material) states.push(native.classifyPoints(occurrence,
 
 ## 19. Use A Hybrid Geometry Kernel, Each Engine Where Strongest
 
-GeoSpec's native module may embed more than one geometry engine and select per operation by strength. Perform interop (e.g. tessellation → mesh) inside C++, never by round-tripping geometry through JS.
+GeoSpec's compiled engine may embed multiple backends behind provider-neutral capability contracts. Select operations deterministically by the claim and required evidence (§5, §16); timing, cache state or an operation failure never selects weaker evidence. Perform interop (for example AP242 BRep tessellation to a CSG mesh) inside engine-owned Rust/C++ memory, never by round-tripping geometry through JS or Python. Keep foreign kernel types private to their backend. The additive native program uses Manifold Rust; a shipping C++ Manifold fallback requires a separately recorded user exception under the native charter's Q3 ruling.
 
 | Concern                                                                                   | Engine                     | Why                                                                                                |
 | ----------------------------------------------------------------------------------------- | -------------------------- | -------------------------------------------------------------------------------------------------- |
@@ -388,15 +389,16 @@ For an exact-BRep kernel, a mesh that substitutes for exact-BRep evidence must b
 
 ## 20. Evolve The Native Surface To Fit The Matcher
 
-Grow the native binding surface to fit what matchers need; do not contort a matcher into JS gymnastics to avoid a native change. Exposing an additional OCCT operation, adding a second engine, or rebuilding the wasm is an expected, first-class lever when it improves accuracy or collapses boundary crossings (§16, §18). The binding set is a design choice, not a fixed constraint.
+Grow the compiled engine surface to fit required matcher evidence. Add the needed Rust analysis or private OCCT bridge operation instead of implementing geometry in JS/Python to avoid a native change. Rebuilding native/WASM artifacts and extending an existing backend capability are expected when they improve accuracy or reduce boundary crossings (§16, §18). Keep language bindings as coarse protocol adapters; backend changes must preserve the declared semantic profile and pass conformance before promotion.
 
-**Why**: Re-implementing exact geometry in JS around a frozen native surface produces slow, approximate matchers (the voxel void-continuity sampler); the correct fix is usually a coarser, more capable native call.
+**Why**: Re-implementing geometry in a host language around a frozen native surface duplicates proof logic and boundary costs; extend the shared compiled owner.
 
 CORRECT:
 
 ```text
 // Add the native op the matcher actually needs, then call it once.
-geospec.single.yml: expose Manifold Decompose/Slice; add a proveVoidTopology binding.
+Rust core: compose Manifold Rust decomposition/slicing behind one void-proof operation.
+OCCT bridge: expose the required BRep query as an internal coarse operation.
 ```
 
 INCORRECT:

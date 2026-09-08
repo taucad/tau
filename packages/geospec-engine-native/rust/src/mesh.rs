@@ -6,6 +6,11 @@ pub(crate) struct Mesh {
     pub(crate) indices: Vec<usize>,
 }
 
+#[cfg(test)]
+thread_local! {
+    pub(crate) static BOUNDS_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 impl Mesh {
     pub(crate) fn decode(bytes: &[u8]) -> Result<Self, ProtocolError> {
         if bytes.len() > 16 * 1024 * 1024 {
@@ -66,6 +71,8 @@ impl Mesh {
 
     /// The reference computes size/center first and reconstructs min/max.
     pub(crate) fn bounds(&self) -> [[f64; 3]; 4] {
+        #[cfg(test)]
+        BOUNDS_CALLS.with(|count| count.set(count.get() + 1));
         let mut min = [f64::INFINITY; 3];
         let mut max = [f64::NEG_INFINITY; 3];
         for &index in &self.indices {

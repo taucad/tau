@@ -8,11 +8,36 @@ use crate::ProtocolError;
 const FIELDS: [&str; 4] = ["min", "max", "size", "center"];
 const AXES: [&str; 3] = ["x", "y", "z"];
 
-pub(crate) fn evaluate(
-    mesh: &Mesh,
-    hash: &str,
-    claim: &[(String, Json)],
-) -> Result<Json, ProtocolError> {
+pub(crate) struct Prepared {
+    expected: Json,
+    tolerance: f64,
+    declared: [[Option<f64>; 3]; 4],
+}
+
+impl Prepared {
+    pub(crate) fn normalized_payload(&self) -> Json {
+        let mut expected = Vec::new();
+        for (name, axes) in FIELDS.iter().zip(self.declared) {
+            let fields: Vec<_> = AXES
+                .iter()
+                .zip(axes)
+                .filter_map(|(axis, value)| {
+                    value.map(|value| ((*axis).to_owned(), Json::Number(value)))
+                })
+                .collect();
+            if !fields.is_empty() {
+                expected.push(((*name).to_owned(), Json::Object(fields)));
+            }
+        }
+        expected.push(("tolerance".into(), Json::Number(self.tolerance)));
+        Json::object([
+            ("kind", Json::string("boundingBox")),
+            ("expected", Json::Object(expected)),
+        ])
+    }
+}
+
+pub(crate) fn prepare(claim: &[(String, Json)]) -> Result<Prepared, ProtocolError> {
     let payload = object(field(claim, "payload")?, "bounding-box payload")?;
     require_fields(
         payload,
@@ -57,6 +82,22 @@ pub(crate) fn evaluate(
             declared[index] = declared_axes(value, index < 2)?;
         }
     }
+    Ok(Prepared {
+        expected: expected_value.clone(),
+        tolerance,
+        declared,
+    })
+}
+
+pub(crate) fn evaluate(
+    mesh: &Mesh,
+    hash: &str,
+    claim: &[(String, Json)],
+    prepared: &Prepared,
+) -> Result<Json, ProtocolError> {
+    let expected_value = &prepared.expected;
+    let tolerance = prepared.tolerance;
+    let declared = &prepared.declared;
     let work = mesh.indices.len()
         + declared
             .iter()

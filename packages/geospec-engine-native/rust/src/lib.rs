@@ -1,3 +1,4 @@
+pub mod backend;
 mod bounding_box;
 mod codec;
 mod mesh;
@@ -19,6 +20,7 @@ pub(crate) enum ErrorKind {
     LimitExceeded,
     UnknownCapability,
     UnsupportedVersion,
+    UnsupportedNormalization,
 }
 
 impl ErrorKind {
@@ -33,6 +35,7 @@ impl ErrorKind {
             Self::LimitExceeded => "limit-exceeded",
             Self::UnknownCapability => "unknown-capability",
             Self::UnsupportedVersion => "unsupported-version",
+            Self::UnsupportedNormalization => "unsupported-normalization",
         }
     }
 }

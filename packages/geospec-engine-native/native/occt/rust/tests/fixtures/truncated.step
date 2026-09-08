@@ -1,0 +1,5 @@
+ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION(('GeoSpec SB1 XDE reader fixture: two-cube assembly with SHAPE_ASPECT and native datum placement'),'2;1');
+FILE_NAME('two-cube-assembly.step','2026-07-03T00:00:00',('GeoSpec'),('Tau'),'GeoSpec','GeoSpec','');
+FILE_SCH

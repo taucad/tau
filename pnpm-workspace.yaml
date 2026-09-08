@@ -11,9 +11,6 @@ packages:
   - tools/*
 
 allowBuilds:
-  '@google/genai': false
-  '@hatchet-dev/typescript-sdk': false
-  '@vvago/vale': true
   '@datadog/pprof': false
   '@parcel/watcher': true
   '@swc/core': true
@@ -32,16 +29,6 @@ allowBuilds:
   nestjs-pino: true
 
 catalog:
-  '@hatchet-dev/typescript-sdk': 1.29.2
-  '@getpaseo/protocol': 0.7.0-beta.1
-  '@better-auth/stripe': ^1.6.19
-  '@getpaseo/client': 0.7.0-beta.1
-  '@getpaseo/relay': 0.7.0-beta.1
-  'shiki': ^3.23.0
-  '@agentclientprotocol/sdk': 1.4.0
-  '@modelcontextprotocol/sdk': ^1.29.0
-  'clsx': ^2.1.1
-  'tailwind-merge': ^3.6.0
   '@rolldown/browser': 1.2.3
   '@ai-sdk/provider-utils': ^4.0.30
   '@arethetypeswrong/cli': ^0.18.3
@@ -78,6 +65,7 @@ catalog:
   '@langchain/xai': ^1.4.3
   '@msgpack/msgpack': ^3.1.3
   '@libcascade/toolchain': 3.0.2
+  '@napi-rs/cli': 3.8.6
   '@nestjs/common': ^11.1.27
   '@nestjs/core': ^11.1.27
   '@nestjs/platform-fastify': ^11.1.27
@@ -266,9 +254,6 @@ catalog:
   ws: ^8.21.0
   xstate: ^5.32.1
   zod: ^4.4.3
-  '@vitejs/plugin-react': 6.1.1
-  oxc-transform-react: 0.148.0
-  '@napi-rs/cli': 3.8.6
 catalogs:
   electron-vite7:
     electron-vite: 5.0.0

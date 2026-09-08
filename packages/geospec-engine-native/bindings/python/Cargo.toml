@@ -1,0 +1,16 @@
+[package]
+name = "geospec-engine-native-python"
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.88"
+license = "Apache-2.0"
+publish = false
+
+[lib]
+name = "geospec_engine_native"
+path = "src/lib.rs"
+crate-type = ["cdylib"]
+
+[dependencies]
+geospec-engine-native-core = { path = "../../rust" }
+pyo3 = "=0.26.0"

@@ -9,7 +9,8 @@
     "target": "ESNext",
     "paths": {
       "#*": ["./src/*"]
-    }
+    },
+    "allowJs": true
   },
   "include": [
     "vitest.config.ts",
@@ -22,6 +23,9 @@
     "src/**/*.ts",
     "src/**/*.tsx",
     "src/**/*.js",
-    "src/**/*.jsx"
+    "src/**/*.jsx",
+    "vitest.node26.config.ts",
+    "bindings/browser-conformance/**/*.ts",
+    "bindings/*/*.mjs"
   ]
 }

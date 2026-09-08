@@ -124,6 +124,38 @@ impl Engine {
     pub fn process_request(&self, request: &[u8]) -> Result<Vec<u8>, ProtocolError> {
         process(self, decode(request)?)
     }
+    /// Normalizes the supported early claim plan without executing geometry.
+    pub fn canonical_plan(&self, request: &[u8]) -> Result<Vec<u8>, ProtocolError> {
+        let value = decode(request)?;
+        let request = object(&value, "submitClaims request")?;
+        let (_, plan) = submit_request(request)?;
+        encode(&canonical_plan_value(plan)?)
+    }
+
+    /// Evaluates a neutral early plan and returns results without transport IDs.
+    pub fn evaluate_plan(&self, plan: &[u8]) -> Result<Vec<u8>, ProtocolError> {
+        let value = decode(plan)?;
+        let envelope = object(&value, "canonical plan")?;
+        let fields = [
+            "protocolVersion",
+            "registryVersion",
+            "canonicalProfile",
+            "numericProfile",
+            "plan",
+        ];
+        require_fields(envelope, &fields, &fields, "canonical plan")?;
+        validate_versions(envelope)?;
+        if string_field(envelope, "numericProfile")? != "mesh-f32-bounds-v1" {
+            return Err(ProtocolError::new(
+                ErrorKind::UnsupportedVersion,
+                "Unsupported canonical plan numeric profile.",
+            ));
+        }
+        let normalized = canonical_plan_value(field(envelope, "plan")?)?;
+        let normalized = object(&normalized, "canonical plan")?;
+        let prepared = prepare_claims(Some(self), field(normalized, "plan")?)?;
+        encode(&evaluate_claims(prepared)?)
+    }
 }
 
 fn process(engine: &Engine, request: Json) -> Result<Vec<u8>, ProtocolError> {
@@ -185,7 +217,7 @@ fn initialize(request: &[(String, Json)]) -> Result<Vec<u8>, ProtocolError> {
     ]))
 }
 
-fn submit_claims(engine: &Engine, request: &[(String, Json)]) -> Result<Vec<u8>, ProtocolError> {
+fn submit_request(request: &[(String, Json)]) -> Result<(&str, &Json), ProtocolError> {
     require_fields(
         request,
         &[
@@ -206,9 +238,28 @@ fn submit_claims(engine: &Engine, request: &[(String, Json)]) -> Result<Vec<u8>,
         ],
         "submitClaims request",
     )?;
+    if string_field(request, "method")? != "submitClaims" {
+        return invalid_request("Canonical plans require method submitClaims.");
+    }
     validate_versions(request)?;
     let request_id = logical_id(request, "requestId")?;
-    let plan = object(field(request, "plan")?, "plan")?;
+    Ok((request_id, field(request, "plan")?))
+}
+
+struct PreparedClaim<'a> {
+    claim: &'a [(String, Json)],
+    claim_id: &'a str,
+    capability: &'a str,
+    hash: Option<&'a str>,
+    mesh: Option<&'a Mesh>,
+    bounds: Option<crate::bounding_box::Prepared>,
+}
+
+fn prepare_claims<'a>(
+    engine: Option<&'a Engine>,
+    plan: &'a Json,
+) -> Result<Vec<PreparedClaim<'a>>, ProtocolError> {
+    let plan = object(plan, "plan")?;
     require_fields(
         plan,
         &["subjects", "claims"],
@@ -246,7 +297,7 @@ fn submit_claims(engine: &Engine, request: &[(String, Json)]) -> Result<Vec<u8>,
         ));
     }
     let mut claim_ids = HashSet::new();
-    let mut results = Vec::with_capacity(claim_values.len());
+    let mut prepared = Vec::with_capacity(claim_values.len());
     for claim in claim_values {
         let claim = object(claim, "claim").map_err(as_invalid_claim)?;
         require_fields(
@@ -313,31 +364,96 @@ fn submit_claims(engine: &Engine, request: &[(String, Json)]) -> Result<Vec<u8>,
             }
         }
 
-        if capability == CAPABILITIES[0] {
+        let (hash, mesh, bounds) = if capability == CAPABILITIES[0] {
             if subject_slots.len() != 1 {
                 return invalid_claim(
                     "toHaveBoundingBox requires exactly one existing subject slot.",
                 );
             }
             let hash = subjects[subject_slots[0].as_str()];
-            let mesh = engine.subjects.get(hash).ok_or_else(|| {
-                ProtocolError::new(
-                    ErrorKind::InvalidClaim,
-                    "Bounding-box subject content must first be ingested into this Engine.",
-                )
-            })?;
-            results
-                .push(crate::bounding_box::evaluate(mesh, hash, claim).map_err(as_invalid_claim)?);
+            let mesh = if let Some(engine) = engine {
+                Some(engine.subjects.get(hash).ok_or_else(|| {
+                    ProtocolError::new(
+                        ErrorKind::InvalidClaim,
+                        "Bounding-box subject content must first be ingested into this Engine.",
+                    )
+                })?)
+            } else {
+                None
+            };
+            let bounds = crate::bounding_box::prepare(claim).map_err(as_invalid_claim)?;
+            (Some(hash), mesh, Some(bounds))
         } else {
-            results.push(refused_result(claim_id, capability));
+            (None, None, None)
+        };
+        prepared.push(PreparedClaim {
+            claim,
+            claim_id,
+            capability,
+            hash,
+            mesh,
+            bounds,
+        });
+    }
+    Ok(prepared)
+}
+
+fn evaluate_claims(prepared: Vec<PreparedClaim<'_>>) -> Result<Json, ProtocolError> {
+    let mut results = Vec::with_capacity(prepared.len());
+    for claim in prepared {
+        if let (Some(mesh), Some(hash), Some(bounds)) = (claim.mesh, claim.hash, claim.bounds) {
+            results.push(
+                crate::bounding_box::evaluate(mesh, hash, claim.claim, &bounds)
+                    .map_err(as_invalid_claim)?,
+            );
+        } else {
+            results.push(refused_result(claim.claim_id, claim.capability));
         }
     }
+    Ok(Json::object([("results", Json::Array(results))]))
+}
 
-    encode(&Json::Object(vec![
-        ("requestId".into(), Json::String(request_id.into())),
+fn submit_claims(engine: &Engine, request: &[(String, Json)]) -> Result<Vec<u8>, ProtocolError> {
+    let (request_id, plan) = submit_request(request)?;
+    let prepared = prepare_claims(Some(engine), plan)?;
+    let result = evaluate_claims(prepared)?;
+    encode(&Json::object([
+        ("requestId", Json::string(request_id)),
+        ("result", result),
+    ]))
+}
+
+fn canonical_plan_value(plan: &Json) -> Result<Json, ProtocolError> {
+    let prepared = prepare_claims(None, plan)?;
+    let mut claims = Vec::with_capacity(prepared.len());
+    for claim in prepared {
+        let payload = if let Some(bounds) = claim.bounds {
+            bounds.normalized_payload()
+        } else if claim.capability == "analyzeMesh" {
+            Json::Null
+        } else {
+            return Err(ProtocolError::new(
+                ErrorKind::UnsupportedNormalization,
+                format!(
+                    "Canonical plan normalization is unavailable for capability '{}'.",
+                    claim.capability
+                ),
+            ));
+        };
+        let mut fields = claim.claim.to_vec();
+        fields.retain(|(key, _)| key != "payload");
+        fields.push(("payload".into(), payload));
+        claims.push(Json::Object(fields));
+    }
+    let subjects = field(object(plan, "plan")?, "subjects")?.clone();
+    Ok(Json::object([
+        ("protocolVersion", Json::Number(PROTOCOL_VERSION)),
+        ("registryVersion", Json::Number(REGISTRY_VERSION)),
+        ("canonicalProfile", Json::string(CANONICAL_PROFILE)),
+        ("numericProfile", Json::string("mesh-f32-bounds-v1")),
         (
-            "result".into(),
-            Json::Object(vec![("results".into(), Json::Array(results))]),
+            "plan",
+            Json::object([("subjects", subjects), ("claims", Json::Array(claims))]),
         ),
     ]))
 }
@@ -524,4 +640,71 @@ pub(crate) fn invalid_claim<T>(message: impl Into<String>) -> Result<T, Protocol
 
 fn as_invalid_claim(error: ProtocolError) -> ProtocolError {
     ProtocolError::new(ErrorKind::InvalidClaim, error.to_string())
+}
+
+#[cfg(test)]
+mod batch_tests {
+    use super::Engine;
+    use crate::mesh::{Mesh, BOUNDS_CALLS};
+    use serde_json::{json, Value};
+
+    #[test]
+    fn validates_the_complete_batch_before_computing_any_bounds() {
+        let hash = "0".repeat(64);
+        let mut engine = Engine::new();
+        engine.subjects.insert(
+            hash.clone(),
+            Mesh {
+                positions: vec![[0.0, 0.0, 0.0], [3.0, 0.0, 0.0], [0.0, 2.0, 1.0]],
+                indices: vec![0, 1, 2],
+            },
+        );
+        let claim = json!({
+            "claimId": "first", "capability": "toHaveBoundingBox",
+            "subjectSlots": ["part"], "polarity": "positive", "workUnitBudget": 10,
+            "payload": { "kind": "boundingBox", "expected": { "size": {"x": 3} } }
+        });
+        let request = json!({
+            "method": "submitClaims", "requestId": "transport",
+            "protocolVersion": 3, "registryVersion": 4, "canonicalProfile": "geospec-jcs-v1",
+            "plan": {"subjects": [{"slot": "part", "contentHash": hash}], "claims": [claim]}
+        });
+        BOUNDS_CALLS.with(|count| count.set(0));
+        let encoded = serde_json::to_vec(&request).unwrap();
+        let plan = engine.canonical_plan(&encoded).unwrap();
+        assert_eq!(BOUNDS_CALLS.with(|count| count.get()), 0);
+        let result: Value = serde_json::from_slice(&engine.evaluate_plan(&plan).unwrap()).unwrap();
+        assert_eq!(result["results"][0]["status"], "passed");
+        assert_eq!(BOUNDS_CALLS.with(|count| count.get()), 1);
+
+        for variant in ["payload", "subject", "budget"] {
+            let mut request = request.clone();
+            let mut later = claim.clone();
+            later["claimId"] = json!("later");
+            match variant {
+                "payload" => later["payload"]["expected"]["tolerance"] = Value::Null,
+                "subject" => later["subjectSlots"] = json!(["missing"]),
+                _ => later["workUnitBudget"] = json!(0),
+            }
+            request["plan"]["claims"]
+                .as_array_mut()
+                .unwrap()
+                .push(later.clone());
+            let mut neutral: Value = serde_json::from_slice(&plan).unwrap();
+            neutral["plan"]["claims"]
+                .as_array_mut()
+                .unwrap()
+                .push(later);
+            BOUNDS_CALLS.with(|count| count.set(0));
+            let raw = engine
+                .process_request(&serde_json::to_vec(&request).unwrap())
+                .unwrap_err();
+            assert_eq!(raw.code(), "invalid-claim", "{variant}");
+            let normalized = engine
+                .evaluate_plan(&serde_json::to_vec(&neutral).unwrap())
+                .unwrap_err();
+            assert_eq!(normalized.code(), "invalid-claim", "{variant}");
+            assert_eq!(BOUNDS_CALLS.with(|count| count.get()), 0, "{variant}");
+        }
+    }
 }

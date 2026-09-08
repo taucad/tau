@@ -21,6 +21,7 @@
     "/experiments/**",
     "/packages/runtime/occt-reports/**",
     "/libs/converter/src/assets/**",
+    "/packages/geospec-engine-native/native/manifold-rust/source/**",
     "**/generated/**",
     "**/assets/**",
     "**/public/*.js",

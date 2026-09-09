@@ -11,6 +11,7 @@ path = "src/lib.rs"
 crate-type = ["cdylib"]
 
 [dependencies]
+geospec-engine-native-runtime = { path = "../../native/runtime" }
 geospec-engine-native-core = { path = "../../rust" }
 napi = { version = "=3.12.2", default-features = false, features = ["napi8"] }
 napi-derive = "=3.6.3"

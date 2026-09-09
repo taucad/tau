@@ -36,10 +36,7 @@ describe('candidate preview extraction', () => {
         encoding: 'utf8',
       }),
     );
-    writeFileSync(
-      join(source, 'manifest.json'),
-      `${JSON.stringify({ packages: [{ ...manifest, filename }] })}\n`,
-    );
+    writeFileSync(join(source, 'manifest.json'), `${JSON.stringify({ packages: [{ ...manifest, filename }] })}\n`);
 
     const [directory] = extractCandidatePackages({ from: source, out: output });
 
@@ -76,7 +73,12 @@ describe('hosted preview consumer', () => {
     writeFileSync(join(native, 'package.json'), `${JSON.stringify({ name: 'example-linux' })}\n`);
     writeFileSync(
       metadata,
-      `${JSON.stringify({ packages: [{ name: 'example', url: 'https://pkg.pr.new/example@abc1234' }, { name: 'example-linux', url: 'https://pkg.pr.new/example-linux@abc1234' }] })}\n`,
+      `${JSON.stringify({
+        packages: [
+          { name: 'example', url: 'https://pkg.pr.new/example@abc1234' },
+          { name: 'example-linux', url: 'https://pkg.pr.new/example-linux@abc1234' },
+        ],
+      })}\n`,
     );
 
     const calls = [];
@@ -103,5 +105,31 @@ describe('hosted preview consumer', () => {
 
     assert.deepEqual(result, { installed: 2, roots: ['example'] });
     assert.deepEqual(calls[1][1], ['install', '--ignore-scripts', 'https://pkg.pr.new/example@abc1234']);
+  });
+
+  it('should reject untrusted or stale metadata before invoking npm', () => {
+    const source = temporaryDirectory();
+    const root = join(source, '00');
+    const metadata = join(source, 'preview.json');
+    mkdirSync(root);
+    writeFileSync(join(root, 'package.json'), JSON.stringify({ name: 'example' }) + '\n');
+
+    for (const url of ['https://example.com/example@abc1234', 'https://pkg.pr.new/example@stale00']) {
+      writeFileSync(metadata, JSON.stringify({ packages: [{ name: 'example', url }] }) + '\n');
+      let installs = 0;
+      assert.throws(
+        () =>
+          verifyPreviewInstall({
+            from: source,
+            metadata,
+            sha: 'abc1234',
+            install: () => {
+              installs += 1;
+            },
+          }),
+        /untrusted or stale/u,
+      );
+      assert.equal(installs, 0);
+    }
   });
 });

@@ -48,19 +48,19 @@ export const verifyPreviewInstall = ({ from, metadata, sha, install = execFileSy
       installed += 1;
       const pkg = JSON.parse(readFileSync(manifest, 'utf8'));
       if (pkg.version !== expectedVersion) {
-        throw new Error(`${name} has ${pkg.version}, expected ${expectedVersion}`);
+        throw new Error(`${String(name)} has ${String(pkg.version)}, expected ${expectedVersion}`);
       }
       for (const field of dependencyFields) {
         for (const [dependency, specifier] of Object.entries(pkg[field] ?? {})) {
           if (names.has(dependency) && !String(specifier).startsWith('https://pkg.pr.new/')) {
-            throw new Error(`${name} keeps an unpublished ${field} reference to ${dependency}: ${specifier}`);
+            throw new Error(
+              `${String(name)} keeps an unpublished ${field} reference to ${dependency}: ${String(specifier)}`,
+            );
           }
         }
       }
     }
-    if (
-      selected.some(({ name }) => !existsSync(join(directory, 'node_modules', name, 'package.json')))
-    ) {
+    if (selected.some(({ name }) => !existsSync(join(directory, 'node_modules', name, 'package.json')))) {
       throw new Error('not every preview root was installed');
     }
     return { installed, roots: selected.map(({ name }) => name) };

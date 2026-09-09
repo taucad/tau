@@ -7,5 +7,10 @@ name = "geospec-engine-native"
 version = "0.0.0"
 requires-python = ">=3.13,<3.15"
 
+[project.entry-points.pytest11]
+geospec = "geospec.pytest_plugin"
+
 [tool.maturin]
 bindings = "pyo3"
+python-source = "python"
+python-packages = ["geospec", "geospec_engine_native"]

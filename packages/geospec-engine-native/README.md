@@ -66,6 +66,29 @@ Control documents are limited to 16 MiB, nesting depth 64, decoded strings of
 control JSON, not geometry payloads. Claim IDs and subject slots are logical
 identities; transport request IDs remain outside canonical plan identity.
 
+## Configured BRep feature measurements
+
+The configured full engine exposes the numeric filters of `toHavePlanarFace`,
+`toHaveCylindricalFace` and `toHaveCircularHole` under
+`evidence.witnesses.measurementContract.profile = "geospec-feature-metric-nominal-v1"`.
+These filters compare backend nominal binary64 measurements. Equality uses
+`abs(measured - expected) <= tolerance`; zero tolerance means nominal equality,
+not an exact-real geometry certificate. Area conditions preserve the authored
+`>`, `>=`, `<` and `<=` operators without expanding them by tolerance. Independent
+accuracy calibration does not add a runtime error enclosure or implicit epsilon.
+
+Planar normal components and offsets retain their shared sign convention.
+Cylindrical axis labels select the largest absolute direction component, with
+x/y/z tie order; a label does not certify exact axial alignment. Analytic Plane
+or Cylinder backend identity remains required for the corresponding inventory.
+
+The measurement contract covers numeric filters only. Circular-hole membership
+and through/blind topology require separate qualification: the current
+reversed-cylinder and bounds-derived inventory is not a qualified topology
+proof. This limitation also prevents treating these measurements as continuous
+containment, clearance, insertion, wall or void guarantees. F1/F2 certificates
+retain their separately declared admitted domains and verification contracts.
+
 ## Development checks
 
 Run these Nx targets from the workspace root. They invoke Rust **1.88.0**

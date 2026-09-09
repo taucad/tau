@@ -460,6 +460,12 @@ class GeoSpecEngine:
                     "to_satisfy_rational_plate() does not accept arguments."
                 )
             payload: object = {"contract": "geospec.plate-two-windows/v1"}
+        elif capability == "toSatisfyParallelPlaneDistance":
+            if arguments:
+                raise TypeError(
+                    "to_satisfy_parallel_plane_distance() does not accept arguments."
+                )
+            payload = {"contract": "geospec.pmi.parallel-plane-distance/v1"}
         else:
             payload = {"kind": _matcher_kind(capability), "arguments": list(arguments)}
         return self._evaluate_payload(

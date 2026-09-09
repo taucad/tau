@@ -4,5 +4,29 @@
   "sourceRoot": "packages/geospec",
   "projectType": "library",
   "tags": ["scope:shared", "type:package"],
-  "targets": {}
+  "targets": {
+    "test-m3-corpus": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "node --test packages/geospec/host-tests/m3-corpus/corpus.test.mjs packages/geospec/host-tests/m3-corpus/profile-v3.test.mjs"
+      }
+    },
+    "test-m3-installed-delivery": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "python3 \"${GEOSPEC_M3_DELIVERY_DRIVER:?}\"",
+        "forwardAllArgs": false
+      }
+    },
+    "test-m3-independent-bindings": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "node --test packages/geospec/host-tests/m3-corpus/independent-bindings.test.mjs",
+        "forwardAllArgs": false
+      }
+    }
+  }
 }

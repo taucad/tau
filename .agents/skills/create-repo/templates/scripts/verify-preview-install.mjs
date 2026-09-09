@@ -25,9 +25,19 @@ export const verifyPreviewInstall = ({ from, metadata, sha, install = execFileSy
   );
   const roots = candidates.filter(({ name }) => !referenced.has(name));
   const selected = roots.length > 0 ? roots : candidates;
-  const urls = new Map(
-    JSON.parse(readFileSync(resolve(metadata), 'utf8')).packages.map(({ name, url }) => [name, url]),
-  );
+  const urls = new Map();
+  const metadataPackages = JSON.parse(readFileSync(resolve(metadata), 'utf8')).packages ?? [];
+  for (const { name, url } of metadataPackages) {
+    if (!names.has(name) || urls.has(name) || typeof url !== 'string') {
+      throw new Error('preview metadata contains an unknown, duplicate, or invalid package');
+    }
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'https:' || parsed.hostname !== 'pkg.pr.new' || !parsed.pathname.endsWith('@' + sha)) {
+      throw new Error('preview metadata contains an untrusted or stale URL for ' + String(name));
+    }
+    urls.set(name, url);
+  }
+  if (urls.size !== names.size) throw new Error('preview metadata is missing a candidate package URL');
   const rootUrls = selected.map(({ name }) => urls.get(name));
   if (rootUrls.some((url) => typeof url !== 'string')) {
     throw new Error('preview metadata is missing a root package URL');
@@ -52,7 +62,7 @@ export const verifyPreviewInstall = ({ from, metadata, sha, install = execFileSy
       }
       for (const field of dependencyFields) {
         for (const [dependency, specifier] of Object.entries(pkg[field] ?? {})) {
-          if (names.has(dependency) && !String(specifier).startsWith('https://pkg.pr.new/')) {
+          if (names.has(dependency) && specifier !== urls.get(dependency)) {
             throw new Error(
               `${String(name)} keeps an unpublished ${field} reference to ${dependency}: ${String(specifier)}`,
             );

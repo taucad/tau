@@ -81,6 +81,7 @@
     "oxfmt": "@@CREATE_REPO_oxfmt-version@@",
     "oxlint": "@@CREATE_REPO_oxlint-version@@",
     "oxlint-tsgolint": "@@CREATE_REPO_oxlint-tsgolint-version@@",
+    "pkg-pr-new": "@@CREATE_REPO_pkg-pr-new-version@@",
     "playwright": "@@CREATE_REPO_playwright-version@@",
     "publint": "@@CREATE_REPO_publint-version@@",
     "semver": "@@CREATE_REPO_semver-version@@",

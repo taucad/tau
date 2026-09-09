@@ -56,7 +56,7 @@ export function ChatEditorBreadcrumbs({ filePath, children }: ChatEditorBreadcru
     <div className='flex flex-row items-center justify-between px-2 py-1 text-muted-foreground'>
       <div
         ref={scrollContainerRef}
-        className='flex min-w-0 flex-1 flex-row items-center gap-0.5 overflow-x-auto overscroll-x-none [scrollbar-width:none] [&::-webkit-scrollbar]:hidden'
+        className='flex min-w-0 flex-1 [scrollbar-width:none] flex-row items-center gap-0.5 overflow-x-auto overscroll-x-none [&::-webkit-scrollbar]:hidden'
       >
         {breadcrumbs.length > 0 ? (
           breadcrumbs.map((crumb) => (

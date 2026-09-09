@@ -8,7 +8,6 @@ category: audit
 related:
   - docs/research/ocjs-occt-surface-audit.md
   - docs/research/ocjs-skipped-test-reactivation.md
-  - repos/opencascade.js/docs/policy/ocjs-trailing-default-emission-policy.md
 ---
 
 # OCJS register_optional Enum/Class Inner-Type Gap — Lost OCCT Surface Quantification

@@ -6,7 +6,7 @@ created: '2026-05-13'
 updated: '2026-05-13'
 category: audit
 related:
-  - .agent/skills/audit-cursor-context/SKILL.md
+  - .agents/skills/audit-cursor-context/SKILL.md
 ---
 
 # Cursor Context Budget Audit

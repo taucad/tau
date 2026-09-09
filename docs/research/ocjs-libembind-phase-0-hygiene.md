@@ -1,17 +1,16 @@
 ---
 title: 'OCJS Libembind Patch Hygiene + Path B Canonicalization (Phase 0)'
-description: 'Phase 0 execution log for the OCJS optional-overload migration: reset libembind.js to a vendored pristine snapshot on every build, fold Path B (primitive-priority `$getSignature` fallback) into the canonical patch as Hunk 4, hash-verify both ends of the pipeline, and add a CI sentinel that fails loudly on regression.'
+description: 'Phase 0 execution log for resetting libembind.js, canonicalizing the primitive-priority signature fallback, verifying pipeline hashes, and adding a CI regression sentinel.'
 status: draft
 created: '2026-05-28'
 updated: '2026-05-28'
-category: implementation
+category: migration
 related:
   - docs/research/ocjs-optional-overload-strategic-review-opus-4-7.md
   - docs/research/ocjs-optional-overload-strategic-review-gpt-5-5.md
   - docs/research/ocjs-optional-overload-poc-coverage-gaps.md
   - docs/research/ocjs-bindgen-libembind-outstanding-issues-catalog.md
   - docs/research/ocjs-libembind-strategic-direction-assessment.md
-  - repos/opencascade.js/docs/policy/ocjs-trailing-default-emission-policy.md
 ---
 
 # OCJS Libembind Patch Hygiene + Path B Canonicalization (Phase 0)

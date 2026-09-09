@@ -4,16 +4,13 @@ description: 'Per-row bench fixture for the 38-row OCJS trailing-default emissio
 status: draft
 created: '2026-05-28'
 updated: '2026-05-28'
-category: implementation
+category: investigation
 related:
   - docs/research/ocjs-occt-surface-audit.md
   - docs/research/ocjs-optional-overload-strategic-review-opus-4-7.md
   - docs/research/ocjs-optional-overload-strategic-review-gpt-5-5.md
   - docs/research/ocjs-optional-overload-poc-coverage-gaps.md
   - docs/research/ocjs-optional-overload-resolution-blueprint.md
-  - repos/opencascade.js/docs/policy/ocjs-trailing-default-emission-policy.md
-  - repos/opencascade.js/experiments/poc-occt-integration/README.md
-  - repos/opencascade.js/experiments/matrix-row-bench/README.md
 ---
 
 # OCJS Matrix-Row Bench Fixture — Per-Row Scoring + Q3 Quantification

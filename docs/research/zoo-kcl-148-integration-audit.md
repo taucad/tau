@@ -6,7 +6,7 @@ created: '2026-05-04'
 updated: '2026-05-04'
 category: audit
 related:
-  - .agent/skills/rebuild-kcl-wasm-lib/SKILL.md
+  - .agents/skills/rebuild-kcl-wasm-lib/SKILL.md
   - docs/research/kcl-feature-surface-gaps.md
 ---
 

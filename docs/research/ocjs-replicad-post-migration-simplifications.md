@@ -1,12 +1,11 @@
 ---
 title: 'OCJS Replicad Post-Migration Simplifications'
-description: 'Audit of every workaround, ceremony, and explicit-arg pattern in replicad source that exists only because of OCJS pre-migration emission shapes (sub-2a/sub-2b shadowing, numOverloads gates, trailing-default arity expansion). Inventory of simplifications enabled by the trailing-default → matrix-driven emission migration.'
+description: 'Audit of Replicad workarounds caused by pre-migration OCJS emission shapes, with simplifications enabled by matrix-driven trailing-default emission.'
 status: draft
 created: '2026-05-28'
 updated: '2026-05-28'
 category: audit
 related:
-  - repos/opencascade.js/docs/policy/ocjs-trailing-default-emission-policy.md
   - docs/research/ocjs-occt-surface-audit.md
   - docs/research/ocjs-optional-overload-strategic-review-opus-4-7.md
   - docs/research/ocjs-optional-overload-strategic-review-gpt-5-5.md

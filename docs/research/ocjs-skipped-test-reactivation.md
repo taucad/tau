@@ -6,7 +6,6 @@ created: '2026-05-29'
 updated: '2026-05-29'
 category: investigation
 related:
-  - repos/opencascade.js/docs/policy/ocjs-trailing-default-emission-policy.md
   - docs/research/ocjs-occt-surface-audit.md
   - docs/research/ocjs-phase-4-build-outcome.md
   - docs/research/ocjs-phase-4-smoke-readiness.md
@@ -103,7 +102,7 @@ The gate needs one class carrying BOTH a fan-out (val_default / arity-pad) emiss
 
 | Working optional type               | Carrier classes                                                                                     | Fan-out sibling? / constructibility                                                                                                                                                     |
 | ----------------------------------- | --------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `handle<NCollection_BaseAllocator>` | NCollection container ctors (optional allocator, row 3)                                             | No clean fan-out (val_default) sibling method; container methods carry no trailing defaults. `Clear(val)` is val-_discrimination_ (bool vs handle), not a default-on-absence fan-out.   |
+| `handle<NCollection_BaseAllocator>` | NCollection container ctors (optional allocator, row 3)                                             | No clean fan-out (val*default) sibling method; container methods carry no trailing defaults. `Clear(val)` is val-\_discrimination* (bool vs handle), not a default-on-absence fan-out.  |
 | `bool` / `int` (as ctor params)     | sub-2b math/approx classes (`math_BrentMinimum`, `Approx_FitAndDivide*`, `GeomInt_TheComputeLine*`) | Both ctors are all-optional degenerate siblings (optional + optional, not optional + fan-out); not straightforwardly constructible (need `math_*Function` / `AppCont_Function` inputs). |
 | `int` (return)                      | `BOPDS_Interf::GetIndexNew()` (row 21)                                                              | Low-level boolean-operation internal class; not meaningfully constructible for a behavioral smoke; no clean fan-out sibling.                                                            |
 

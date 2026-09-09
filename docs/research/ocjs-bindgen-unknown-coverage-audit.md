@@ -196,7 +196,7 @@ Verified manually:
 186612:export type BRepGraphInc_BaseRef = unknown;           # from BRepGraphInc_Storage
 ```
 
-This affects **27 of the 57 top-level `export type X = unknown` aliases** (every BRepGraphInc**). The link-time pass `_replace_undeclared_with_unknown` (`buildFromYaml.py:72`) only *rewrites\* references in type positions — it does not drop pre-emitted alias declarations. The TypeScript compiler resolves the merged-namespace pair to `unknown` (declaration merging weakens the class declaration), which is why `BRepGraphInc*\*` types appear non-functional in consumer code despite the underlying class being correctly bound.
+This affects **27 of the 57 top-level `export type X = unknown` aliases** (every BRepGraphInc\**). The link-time pass `_replace_undeclared_with_unknown` (`buildFromYaml.py:72`) only *rewrites\* references in type positions — it does not drop pre-emitted alias declarations. The TypeScript compiler resolves the merged-namespace pair to `unknown` (declaration merging weakens the class declaration), which is why `BRepGraphInc*\*` types appear non-functional in consumer code despite the underlying class being correctly bound.
 
 ### Finding 6: NCollection auto-discovery template-arg gap (root cause F)
 
@@ -499,13 +499,13 @@ def _render_function_proto(self, proto, templateDecl, templateArgs):
 
 ## Trade-offs
 
-| Concern                                                 | Cost                                                                                          | Mitigation                                                                                            |
-| ------------------------------------------------------- | --------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| Build time grows                                        | ~50–100 extra .cpp files per build configuration (R1)                                         | Negligible — Nx parallel compile; existing per-class files dominate cost                              |
-| Symbol surface bloat                                    | New inner-class symbols enter the link manifest                                               | `enumerate-symbols.py` already auto-discovers; no manual edit needed                                  |
-| Stable JS public-name churn                             | `BRepGraph_TopoView_FaceOps` is longer than the truncated `TopoView_FaceOps`                  | Acceptable — TopoView_FaceOps was _never reachable_ before; no consumer depends on the truncated name |
-| Template-arg propagation may surface latent type errors | Some inherited-method bindings may flip from accidental-success-via-unknown to typed mismatch | Treat as a quality improvement; fix the underlying mismatch on a case-by-case basis as they surface   |
-| R3 may drop methods consumers expect                    | Methods whose param/return resolve to excluded classes get dropped silently                   | Emit a `// dropped: param X resolves to excluded type` JSDoc for transparency                         |
+| Concern                                                 | Cost                                                                                          | Mitigation                                                                                             |
+| ------------------------------------------------------- | --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| Build time grows                                        | ~50–100 extra .cpp files per build configuration (R1)                                         | Negligible — Nx parallel compile; existing per-class files dominate cost                               |
+| Symbol surface bloat                                    | New inner-class symbols enter the link manifest                                               | `enumerate-symbols.py` already auto-discovers; no manual edit needed                                   |
+| Stable JS public-name churn                             | `BRepGraph_TopoView_FaceOps` is longer than the truncated `TopoView_FaceOps`                  | Acceptable — TopoView*FaceOps was \_never reachable* before; no consumer depends on the truncated name |
+| Template-arg propagation may surface latent type errors | Some inherited-method bindings may flip from accidental-success-via-unknown to typed mismatch | Treat as a quality improvement; fix the underlying mismatch on a case-by-case basis as they surface    |
+| R3 may drop methods consumers expect                    | Methods whose param/return resolve to excluded classes get dropped silently                   | Emit a `// dropped: param X resolves to excluded type` JSDoc for transparency                          |
 
 ## Diagrams
 

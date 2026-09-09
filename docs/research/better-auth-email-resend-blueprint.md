@@ -8,7 +8,6 @@ category: architecture
 related:
   - docs/research/sharing-architecture.md
   - docs/research/publication-viewer-layout-blueprint.md
-  - docs/research/stripe-better-auth-integration.md
 ---
 
 # Better Auth Email + Resend Activation Blueprint

@@ -280,7 +280,7 @@ function BreadcrumbNav({
     <div className='flex items-center border-b text-sm'>
       <div
         ref={scrollContainerRef}
-        className='mx-2 flex flex-1 snap-x snap-mandatory items-center gap-0.5 overflow-x-auto overscroll-x-none [scrollbar-width:none] [&::-webkit-scrollbar]:hidden'
+        className='mx-2 flex flex-1 snap-x snap-mandatory [scrollbar-width:none] items-center gap-0.5 overflow-x-auto overscroll-x-none [&::-webkit-scrollbar]:hidden'
       >
         {/* "Files" root button - inside scrollable area */}
         <button

@@ -13,7 +13,6 @@ related:
   - docs/research/ocjs-optional-overload-strategic-review-gpt-5-5.md
   - docs/research/ocjs-optional-overload-poc-coverage-gaps.md
   - docs/research/ocjs-optional-overload-resolution-blueprint.md
-  - repos/opencascade.js/docs/policy/ocjs-trailing-default-emission-policy.md
 ---
 
 # OCJS Phase 2 — Val-Dispatch Emission, Classifier Infrastructure, Rule 3 Hard Skip, Rule 5 CI Guard, NO9 Regression Pins

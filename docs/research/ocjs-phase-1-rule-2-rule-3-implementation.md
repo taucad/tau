@@ -1,10 +1,10 @@
 ---
 title: 'OCJS Phase 1 — Rule 2 Sibling-Aliasing Detector + Rule 3 JS-Effective Arity Precondition Implementation'
-description: 'Implementation report for Phase 1 of the OCJS trailing-default migration: bindgen-side sub-2b sibling-aliasing detector (matrix row 8), JS-effective arity range helper + collision check (matrix row 27), val-discrimination emission for sub-2b conflict pairs, and the NO2/NO3 sentinel regression tests pinning their correctness.'
+description: 'Phase 1 report for the OCJS trailing-default migration: sibling-alias detection, JS-effective arity collision checks, val-discrimination emission, and sentinel regressions.'
 status: draft
 created: '2026-05-28'
 updated: '2026-05-28'
-category: implementation
+category: migration
 related:
   - docs/research/ocjs-occt-surface-audit.md
   - docs/research/ocjs-libembind-phase-0-hygiene.md
@@ -12,7 +12,6 @@ related:
   - docs/research/ocjs-optional-overload-strategic-review-gpt-5-5.md
   - docs/research/ocjs-optional-overload-poc-coverage-gaps.md
   - docs/research/ocjs-optional-overload-resolution-blueprint.md
-  - repos/opencascade.js/docs/policy/ocjs-trailing-default-emission-policy.md
 ---
 
 # OCJS Phase 1 — Rule 2 + Rule 3 Implementation

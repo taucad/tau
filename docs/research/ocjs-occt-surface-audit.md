@@ -6,7 +6,6 @@ created: '2026-05-28'
 updated: '2026-05-28'
 category: audit
 related:
-  - repos/opencascade.js/docs/policy/ocjs-trailing-default-emission-policy.md
   - docs/research/ocjs-optional-overload-strategic-review-opus-4-7.md
   - docs/research/ocjs-optional-overload-strategic-review-gpt-5-5.md
   - docs/research/ocjs-optional-overload-poc-coverage-gaps.md

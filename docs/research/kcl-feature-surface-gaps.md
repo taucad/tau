@@ -8,7 +8,7 @@ category: audit
 related:
   - docs/research/zoo-kcl-148-integration-audit.md
   - docs/research/zoo-kcl-std-prelude-load-failure.md
-  - .agent/skills/rebuild-kcl-wasm-lib/SKILL.md
+  - .agents/skills/rebuild-kcl-wasm-lib/SKILL.md
 ---
 
 # KCL feature surface gaps (Tau vs modeling-app)

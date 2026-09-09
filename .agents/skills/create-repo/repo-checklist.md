@@ -65,7 +65,8 @@ Applicability:
 | R    | Browser jobs prove required adapters are usable on their bound runner and headless mode.                                      |
 | R    | Same-repository PRs publish the entire tested candidate set once through the exact locked `pkg-pr-new` CLI.                   |
 | R    | Preview publication rewrites versions and sibling references, updates one SHA-addressed comment, and requires no npm token.   |
-| R    | Fork PRs skip preview publication; `ci-gate` requires it only when eligible.                                                  |
+| R    | A clean post-publish consumer installs hosted root previews and verifies rewritten sibling URLs and preview versions.         |
+| R    | Fork PRs skip preview publication and hosted consumer checks; `ci-gate` requires both only when eligible.                     |
 | R    | Publish job has `id-token: write`, no checkout, no registry token, and is idempotent.                                         |
 | R    | Existing registry versions are byte/provenance verified rather than overwritten.                                              |
 | R    | Registry verification installs by exact version and checks package, source repo, workflow, commit, integrity, and provenance. |

@@ -173,10 +173,12 @@ the npm Trusted Publisher identity.
 4. For same-repository pull requests, expand the tested candidate tarballs and
    publish every package directory in one locked `pkg-pr-new` invocation with
    `--previewVersion --comment=update --commentWithSha --no-template`. Require
-   the preview in `ci-gate`; fork pull requests skip it. Add `--pnpm` only when
-   the packed manifests still contain pnpm `catalog:` specifiers. Install the
-   GitHub App with read access to Actions, code, and metadata plus write access
-   to checks, commit statuses, and pull requests, scoped to the repository.
+   a hosted root preview in an isolated npm project, verify rewritten sibling
+   URLs and preview versions, and require both jobs in `ci-gate`; fork pull
+   requests skip them. Add `--pnpm` only when the packed manifests still contain
+   pnpm `catalog:` specifiers. Install the GitHub App with read access to Actions,
+   code, and metadata plus write access to checks, commit statuses, and pull
+   requests, scoped to the repository.
 5. Publish idempotently through OIDC. If the version exists, compare registry
    bytes and provenance instead of overwriting it.
 6. `registry-verify` installs from the registry and checks the provenance

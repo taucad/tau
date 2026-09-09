@@ -63,6 +63,10 @@ Applicability:
 | R    | Every host/consumer job downloads and tests that candidate without rebuilding it.                                             |
 | R    | Candidate and consumer jobs run the bound host setup before executing host-dependent code.                                    |
 | R    | Browser jobs prove required adapters are usable on their bound runner and headless mode.                                      |
+| R    | Same-repository pull requests publish every tested package through one locked `pkg-pr-new` invocation.                        |
+| R    | Preview versions use `0.0.0-preview-<sha>` and sibling package references resolve through pkg.pr.new URLs.                    |
+| R    | A clean post-publish consumer installs hosted root previews and verifies rewritten sibling URLs and preview versions.         |
+| R    | Fork PRs skip preview publication and hosted consumer checks; `ci-gate` requires both only when eligible.                     |
 | R    | Publish job has `id-token: write`, no checkout, no registry token, and is idempotent.                                         |
 | R    | Existing registry versions are byte/provenance verified rather than overwritten.                                              |
 | R    | Registry verification installs by exact version and checks package, source repo, workflow, commit, integrity, and provenance. |
@@ -99,6 +103,7 @@ Applicability:
 | R    | Installed binary subpaths resolve and load.                                                          |
 | R    | Documentation code fences typecheck against public package imports.                                  |
 | R    | Declared cross-host determinism compares semantic output or exact bytes.                             |
+| R    | A clean consumer can install a root and direct native preview URL and observe changed package bytes. |
 
 ## G. Hygiene and maintenance loop
 

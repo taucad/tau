@@ -7,7 +7,7 @@ const CONTENT_HASH: &str = "0000000000000000000000000000000000000000000000000000
 
 const INITIALIZE_REQUEST: &[u8] = br#"{"method":"initialize","requestId":"r1","protocolVersion":3,"registryVersion":4,"canonicalProfile":"geospec-jcs-v1"}"#;
 const CANONICAL_INITIALIZE_REQUEST: &[u8] = br#"{"canonicalProfile":"geospec-jcs-v1","method":"initialize","protocolVersion":3,"registryVersion":4,"requestId":"r1"}"#;
-const INITIALIZE_RESPONSE: &[u8] = br#"{"requestId":"r1","result":{"canonicalProfile":"geospec-jcs-v1","capabilities":[{"name":"toHaveBoundingBox","registryVersion":4,"scope":"mesh-buffer-whole-subject"}],"protocolVersion":3,"qualification":"experimental","registryVersion":4}}"#;
+const HISTORICAL_INITIALIZE_RESPONSE: &[u8] = br#"{"requestId":"r1","result":{"canonicalProfile":"geospec-jcs-v1","capabilities":[{"name":"toHaveBoundingBox","registryVersion":4,"scope":"mesh-buffer-whole-subject"}],"protocolVersion":3,"qualification":"experimental","registryVersion":4}}"#;
 
 const POSITIVE_PLAN: &[u8] = br#"{"subjects":[{"slot":"s1","contentHash":"0000000000000000000000000000000000000000000000000000000000000000"}],"claims":[{"claimId":"c1","capability":"analyzeMesh","subjectSlots":["s1"],"payload":null,"polarity":"positive","workUnitBudget":100}]}"#;
 const CANONICAL_POSITIVE_PLAN: &[u8] = br#"{"claims":[{"capability":"analyzeMesh","claimId":"c1","payload":null,"polarity":"positive","subjectSlots":["s1"],"workUnitBudget":100}],"subjects":[{"contentHash":"0000000000000000000000000000000000000000000000000000000000000000","slot":"s1"}]}"#;
@@ -89,7 +89,20 @@ fn enforces_the_frozen_container_depth_rule() {
 #[test]
 fn initializes_with_exact_canonical_request_and_response_bytes() {
     assert_canonical(INITIALIZE_REQUEST, CANONICAL_INITIALIZE_REQUEST);
-    let response = assert_response(INITIALIZE_REQUEST, INITIALIZE_RESPONSE);
+    // CONFIG-01 is the only reviewed discovery amendment in this source control.
+    let amendment: Value =
+        serde_json::from_str(include_str!("fixtures/initialize-config-01.json")).unwrap();
+    let expected = amendment["expectedUtf8"].as_str().unwrap();
+    let mut previous: Value = serde_json::from_str(expected).unwrap();
+    previous["result"]
+        .as_object_mut()
+        .unwrap()
+        .remove("configuration");
+    assert_eq!(
+        previous,
+        serde_json::from_slice::<Value>(HISTORICAL_INITIALIZE_RESPONSE).unwrap()
+    );
+    let response = assert_response(INITIALIZE_REQUEST, expected.as_bytes());
 
     assert_eq!(response["requestId"], "r1");
     assert_eq!(response["result"]["protocolVersion"], 3);

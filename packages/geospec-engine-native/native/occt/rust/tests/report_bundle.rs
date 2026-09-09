@@ -1,0 +1,280 @@
+use geospec_engine_native_occt::{
+    BrepConnector, BrepEntity, BrepSubject, Document, OcctConnector, SurfaceFacts,
+    TessellationProfile, WallOptions, WallThicknessOutcome,
+};
+use std::path::PathBuf;
+
+const COARSE: TessellationProfile = TessellationProfile {
+    linear_deflection_mm: 0.5,
+    angular_deflection_rad: 0.8,
+};
+const FINE: TessellationProfile = TessellationProfile {
+    linear_deflection_mm: 0.001,
+    angular_deflection_rad: 0.05,
+};
+const SOURCE_REPORTED_WHOLE_MIN: [f64; 3] = [-5.0000001, -5.0000001, -5.0000001];
+const SOURCE_REPORTED_WHOLE_MAX: [f64; 3] = [35.0000001, 5.0000001, 5.0000001];
+const SOURCE_REPORTED_OCCURRENCE_BOUNDS: [([f64; 3], [f64; 3]); 2] = [
+    ([-5.0, -5.0, -5.0], [5.0, 5.0, 5.0]),
+    ([25.0, -5.0, -5.0], [35.0, 5.0, 5.0]),
+];
+
+fn fixture(name: &str) -> Vec<u8> {
+    std::fs::read(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures")
+            .join(name),
+    )
+    .expect("retained fixture must be readable")
+}
+
+fn fnv1a64(bytes: &[u8]) -> u64 {
+    bytes.iter().fold(0xcbf2_9ce4_8422_2325, |hash, byte| {
+        (hash ^ u64::from(*byte)).wrapping_mul(0x0000_0100_0000_01b3)
+    })
+}
+
+fn mesh_hash(mesh: &geospec_engine_native_core::backend::TriangleMesh) -> u64 {
+    let mut bytes = Vec::with_capacity(
+        mesh.positions.len() * std::mem::size_of::<[f64; 3]>()
+            + mesh.triangles.len() * std::mem::size_of::<[u32; 3]>(),
+    );
+    for point in &mesh.positions {
+        for value in point {
+            bytes.extend_from_slice(&value.to_bits().to_le_bytes());
+        }
+    }
+    for triangle in &mesh.triangles {
+        for value in triangle {
+            bytes.extend_from_slice(&value.to_le_bytes());
+        }
+    }
+    fnv1a64(&bytes)
+}
+
+fn run_query_order(first: TessellationProfile, second: TessellationProfile, label: &str) {
+    let document = Document::from_step(&fixture("two-cube-assembly.step")).unwrap();
+    let nominal_facts = document.facts().unwrap();
+    let nominal_faces = document.faces().unwrap();
+
+    let first_mesh = BrepSubject::tessellate(&document, BrepEntity::Whole, first).unwrap();
+    let first_hash = mesh_hash(&first_mesh);
+    let report = document.reported_facts_and_mesh().unwrap();
+    let second_mesh = BrepSubject::tessellate(&document, BrepEntity::Whole, second).unwrap();
+
+    assert_eq!(document.facts().unwrap().as_ref(), nominal_facts.as_ref());
+    assert_eq!(document.faces().unwrap().as_ref(), nominal_faces.as_ref());
+    assert_eq!(
+        nominal_facts.shape.bounds.min.map(f64::to_bits),
+        [(-5.0_f64).to_bits(); 3]
+    );
+    assert_eq!(
+        nominal_facts.shape.bounds.max.map(f64::to_bits),
+        [35.0_f64.to_bits(), 5.0_f64.to_bits(), 5.0_f64.to_bits()]
+    );
+    assert_eq!(report.facts.shape.bounds.min, SOURCE_REPORTED_WHOLE_MIN);
+    assert_eq!(report.facts.shape.bounds.max, SOURCE_REPORTED_WHOLE_MAX);
+    assert_eq!(report.mesh.positions.len(), 72);
+    assert_eq!(report.mesh.triangles.len(), 24);
+    assert_eq!(
+        report.mesh.triangles.first(),
+        Some(&[0, 1, 2]),
+        "reported mesh is source-order triangle soup"
+    );
+    assert_eq!(
+        report.mesh.triangles.last(),
+        Some(&[69, 70, 71]),
+        "reported mesh is source-order triangle soup"
+    );
+    assert_eq!(first_mesh, second_mesh);
+
+    let report_facts = &report.facts;
+    eprintln!(
+        "query-order={label} nominal-facts-fnv1a64={:016x} report-facts-fnv1a64={:016x} report-mesh-fnv1a64={:016x} query-mesh-fnv1a64={first_hash:016x}",
+        fnv1a64(format!("{nominal_facts:?}").as_bytes()),
+        fnv1a64(format!("{report_facts:?}").as_bytes()),
+        mesh_hash(&report.mesh),
+    );
+}
+
+#[test]
+fn fixed_report_bundle_preserves_nominal_queries_and_copy_history_entities() {
+    let connector = OcctConnector;
+    let identity = connector.identity_profile();
+    assert_eq!(identity.ingest_profile, "geospec-step-xde-report-v2");
+    assert_eq!(identity.backend_profile, "occt-8.1.0-dev1-3d097a-report-v2");
+
+    let document = Document::from_step(&fixture("two-cube-assembly.step")).unwrap();
+    let admission = document.admission_facts().unwrap();
+    assert_eq!(admission.source_length_unit, "millimetre");
+    assert_eq!(
+        admission.source_unit_to_millimeters.to_bits(),
+        1.0_f64.to_bits()
+    );
+    assert_eq!(admission.occurrence_count, 2);
+
+    let first = document.reported_facts_and_mesh().unwrap();
+    let second = document.reported_facts_and_mesh().unwrap();
+    assert_eq!(first.facts.as_ref(), second.facts.as_ref());
+    assert_eq!(first.whole_faces.as_ref(), second.whole_faces.as_ref());
+    assert_eq!(first.occurrence_faces, second.occurrence_faces);
+    assert_eq!(first.mesh.as_ref(), second.mesh.as_ref());
+
+    assert_eq!(first.facts.shape.bounds.min, SOURCE_REPORTED_WHOLE_MIN);
+    assert_eq!(first.facts.shape.bounds.max, SOURCE_REPORTED_WHOLE_MAX);
+    assert_eq!(first.whole_faces.len(), 12);
+    assert_eq!(first.occurrence_faces.len(), 2);
+    for (occurrence, ((expected_min, expected_max), faces)) in SOURCE_REPORTED_OCCURRENCE_BOUNDS
+        .iter()
+        .zip(first.occurrence_faces.iter())
+        .enumerate()
+    {
+        assert_eq!(
+            first.facts.occurrences[occurrence].bounds.min,
+            *expected_min
+        );
+        assert_eq!(
+            first.facts.occurrences[occurrence].bounds.max,
+            *expected_max
+        );
+        assert_eq!(faces.len(), 6);
+        for (face, expected_index) in faces.iter().zip(1_u32..) {
+            assert_eq!(
+                face.entity,
+                BrepEntity::Face {
+                    occurrence: occurrence as u32,
+                    face: expected_index,
+                }
+            );
+            assert!(face
+                .facts
+                .center_of_mass
+                .iter()
+                .zip(face.bounds.min.iter().zip(face.bounds.max.iter()))
+                .all(|(center, (min, max))| center >= min && center <= max));
+        }
+    }
+    for (face, expected_index) in first.whole_faces.iter().zip(1_u32..) {
+        assert_eq!(face.entity, BrepEntity::WholeFace(expected_index));
+    }
+
+    let facts = &first.facts;
+    let whole_faces = &first.whole_faces;
+    let occurrence_faces = &first.occurrence_faces;
+    eprintln!(
+        "repeat-report facts-fnv1a64={:016x} whole-faces-fnv1a64={:016x} occurrence-faces-fnv1a64={:016x} mesh-fnv1a64={:016x}",
+        fnv1a64(format!("{facts:?}").as_bytes()),
+        fnv1a64(format!("{whole_faces:?}").as_bytes()),
+        fnv1a64(format!("{occurrence_faces:?}").as_bytes()),
+        mesh_hash(&first.mesh),
+    );
+
+    run_query_order(COARSE, FINE, "coarse-fine");
+    run_query_order(FINE, COARSE, "fine-coarse");
+}
+
+#[test]
+fn wall_translation_preserves_actual_consumed_requests() {
+    let measured = Document::from_step(&fixture("ap242-box.step"))
+        .unwrap()
+        .minimum_wall_thickness(&WallOptions {
+            work_unit_budget: 100_000,
+            mesh_linear_tolerance_mm: 0.02,
+            mesh_angular_tolerance_degrees: 0.5,
+        })
+        .unwrap();
+    let WallThicknessOutcome::Measured(measured) = measured else {
+        panic!("closed box must yield measured wall evidence")
+    };
+    assert!(measured.consumed > 0);
+
+    let empty = Document::from_step(&fixture("regular-solid-controls.step"))
+        .unwrap()
+        .minimum_wall_thickness(&WallOptions {
+            work_unit_budget: 100_000,
+            mesh_linear_tolerance_mm: 0.02,
+            mesh_angular_tolerance_degrees: 0.5,
+        })
+        .unwrap();
+    let WallThicknessOutcome::Empty { consumed, .. } = empty else {
+        panic!("mixed regular-solid control must yield empty wall evidence")
+    };
+    eprintln!(
+        "wall-consumed measured={} empty={consumed}",
+        measured.consumed
+    );
+}
+
+#[test]
+fn curved_profile_order_preserves_fixed_report_and_nominal_queries() {
+    let bytes = fixture("ap242-radius1-height10.step");
+    let baseline = Document::from_step(&bytes).unwrap();
+    let nominal = baseline.facts().unwrap();
+    let nominal_faces = baseline.faces().unwrap();
+    let fixed = baseline.reported_facts_and_mesh().unwrap();
+    for (label, first, second) in [("coarse-fine", COARSE, FINE), ("fine-coarse", FINE, COARSE)] {
+        let document = Document::from_step(&bytes).unwrap();
+        let first_mesh = BrepSubject::tessellate(&document, BrepEntity::Whole, first).unwrap();
+        let report_between = document.reported_facts_and_mesh().unwrap();
+        let second_mesh = BrepSubject::tessellate(&document, BrepEntity::Whole, second).unwrap();
+        assert_ne!(
+            first_mesh.triangles.len(),
+            second_mesh.triangles.len(),
+            "curved profiles must exercise distinct triangulations"
+        );
+        assert_ne!(mesh_hash(&first_mesh), mesh_hash(&second_mesh));
+        let report_after = document.reported_facts_and_mesh().unwrap();
+        for report in [&report_between, &report_after] {
+            assert_eq!(report.facts, fixed.facts);
+            assert_eq!(report.whole_faces, fixed.whole_faces);
+            assert_eq!(report.occurrence_faces, fixed.occurrence_faces);
+            assert_eq!(report.mesh, fixed.mesh);
+        }
+        assert_eq!(document.facts().unwrap(), nominal);
+        assert_eq!(document.faces().unwrap(), nominal_faces);
+        eprintln!("curved-order={label} first-triangles={} second-triangles={} fixed-report-triangles={} fixed-report-fnv={:016x}", first_mesh.triangles.len(), second_mesh.triangles.len(), fixed.mesh.triangles.len(), mesh_hash(&fixed.mesh));
+    }
+}
+
+#[test]
+fn reported_faces_preserve_oriented_surfaces_and_analytic_cap_bounds() {
+    let document = Document::from_step(&fixture("two-cube-assembly.step")).unwrap();
+    let nominal = document.faces().unwrap();
+    let report = document.reported_facts_and_mesh().unwrap();
+    assert!(nominal.iter().any(|face| face.reversed));
+    assert_eq!(nominal.len(), report.whole_faces.len());
+    for (source, reported) in nominal.iter().zip(report.whole_faces.iter()) {
+        assert_eq!(reported.facts.index, source.facts.index);
+        assert_eq!(reported.reversed, source.reversed);
+        assert_eq!(reported.facts.surface, source.facts.surface);
+    }
+    for faces in &report.occurrence_faces {
+        let mut directions = [[false; 2]; 3];
+        for face in faces.iter() {
+            let SurfaceFacts::Plane { normal, .. } = &face.facts.surface else {
+                panic!("cube faces must remain planar");
+            };
+            let normal = normal.map(|value| if face.reversed { -value } else { value });
+            let axis = normal.iter().position(|value| value.abs() == 1.0).unwrap();
+            assert!(normal
+                .iter()
+                .enumerate()
+                .all(|(index, value)| index == axis || *value == 0.0));
+            directions[axis][usize::from(normal[axis] > 0.0)] = true;
+        }
+        assert_eq!(directions, [[true; 2]; 3]);
+    }
+
+    let rod = Document::from_step(&fixture("ap242-radius1-height10.step")).unwrap();
+    let report = rod.reported_facts_and_mesh().unwrap();
+    let cap = report
+        .whole_faces
+        .iter()
+        .find(|face| {
+            matches!(face.facts.surface, SurfaceFacts::Plane { .. })
+                && face.facts.center_of_mass[2] == 0.0
+        })
+        .expect("radius-one rod has a planar cap at z=0");
+    assert_eq!(cap.bounds.min[2], -1e-7);
+    assert_eq!(cap.bounds.max[2], 1e-7);
+}

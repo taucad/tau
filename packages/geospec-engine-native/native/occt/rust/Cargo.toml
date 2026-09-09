@@ -16,3 +16,15 @@ serde = { version = "=1.0.219", features = ["derive"] }
 
 [build-dependencies]
 cc = "=1.4.4"
+
+[[test]]
+name = "trimmed_cylinder"
+path = "tests/trimmed_cylinder.rs"
+
+[[test]]
+name = "set_containment"
+path = "tests/set_containment.rs"
+
+[[test]]
+name = "report_bundle"
+path = "tests/report_bundle.rs"

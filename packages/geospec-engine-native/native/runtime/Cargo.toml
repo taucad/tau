@@ -1,0 +1,16 @@
+[package]
+name = "geospec-engine-native-runtime"
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.88"
+license = "Apache-2.0"
+publish = false
+
+[dependencies]
+geospec-engine-native-core = { path = "../../rust" }
+geospec-engine-native-occt = { path = "../occt/rust" }
+geospec-engine-native-csg = { path = "../manifold-rust/adapter" }
+
+[dev-dependencies]
+serde_json = { version = "=1.0.143", features = ["float_roundtrip"] }
+sha2 = { version = "=0.10.9", features = ["force-soft"] }

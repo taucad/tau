@@ -2,6 +2,19 @@
 
 use std::{error::Error, fmt};
 
+pub mod brep;
+pub mod csg;
+pub mod csg_scope;
+pub mod resources;
+
+/// Explicit retention limits, separate from control or binary input lengths.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct AnalysisRetentionLimits {
+    pub max_mesh_bytes: u64,
+    pub max_mesh_entries: u32,
+    pub max_solid_entries: u32,
+}
+
 /// Indexed triangles with coordinates in the adapter's declared numeric profile.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TriangleMesh {
@@ -15,6 +28,7 @@ pub enum BackendErrorKind {
     InvalidInput,
     Unsupported,
     ComputationFailed,
+    BudgetExceeded { limit: u64, used: u64 },
 }
 
 /// An owned backend error, without pointers or foreign exception types.

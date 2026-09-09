@@ -1,0 +1,68 @@
+{
+  "status": "W2.C-GLTF-INSTANCE-01 independent descriptor counterparts, frozen before candidate comparison",
+  "source": {
+    "path": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/execution/subject-resource-identity-controls.json",
+    "sha256": "fdab2daa821e6f3971b99fbf63337d745996247a018d644358d2a997e34fc24b"
+  },
+  "method": "Only approved ingestProfile change to instance-v2; ASCII strings/keys and integer values encoded with Python sorted compact JSON, SHA256 stdlib. Historical primary/resources/frames/area expectations unchanged. No candidate geometry or codec used.",
+  "primaryUtf8": "{\"accessors\":[{\"bufferView\":0,\"componentType\":5126,\"count\":4,\"max\":[4,2,0],\"min\":[0,0,0],\"type\":\"VEC3\"},{\"bufferView\":1,\"componentType\":5123,\"count\":3,\"type\":\"SCALAR\"}],\"asset\":{\"version\":\"2.0\"},\"bufferViews\":[{\"buffer\":0,\"byteLength\":48,\"byteOffset\":0},{\"buffer\":0,\"byteLength\":6,\"byteOffset\":48}],\"buffers\":[{\"byteLength\":54,\"uri\":\"mesh.bin\"}],\"meshes\":[{\"primitives\":[{\"attributes\":{\"POSITION\":0},\"indices\":1,\"mode\":4}]}],\"nodes\":[{\"mesh\":0}],\"scene\":0,\"scenes\":[{\"nodes\":[0]}]}",
+  "rows": [
+    {
+      "id": "A-scale1",
+      "descriptorUtf8": "{\"backendProfile\":\"portable-gltf-1.4.1-v1\",\"format\":\"gltf\",\"frame\":{\"coordinateSystem\":\"z-up\",\"outputUnit\":\"mm\",\"sourceUnit\":\"mm\",\"uniformScale\":1},\"ingestOptions\":{},\"ingestProfile\":\"geospec-gltf-f64-instance-v2\",\"primary\":{\"byteLength\":481,\"sha256\":\"9e6002828c855b60b8acab3fcb553f25a2a5f4c4dec50e90388de8aeb223cc60\"},\"resources\":[{\"byteLength\":54,\"name\":\"mesh.bin\",\"sha256\":\"44e591ff58befb886e14f45d6b795bd74a669e8c2e3604e2fb0b7687ec9d45a8\"}],\"schema\":\"geospec-subject-v1\"}",
+      "subjectHash": "5ee8cd9f75f8e15390814eeced8693a27516c2cb7944d3fb8383fe0ef063d9c9",
+      "planSubjectUtf8": "{\"slot\":\"part\",\"subjectHash\":\"5ee8cd9f75f8e15390814eeced8693a27516c2cb7944d3fb8383fe0ef063d9c9\"}",
+      "resourceHex": "0000000000000000000000000000804000000000000000000000000000000040000000000000803f0000004000000000000001000200",
+      "expectedSurfaceArea": 4
+    },
+    {
+      "id": "A-scale10",
+      "descriptorUtf8": "{\"backendProfile\":\"portable-gltf-1.4.1-v1\",\"format\":\"gltf\",\"frame\":{\"coordinateSystem\":\"z-up\",\"outputUnit\":\"mm\",\"sourceUnit\":\"cm\",\"uniformScale\":10},\"ingestOptions\":{},\"ingestProfile\":\"geospec-gltf-f64-instance-v2\",\"primary\":{\"byteLength\":481,\"sha256\":\"9e6002828c855b60b8acab3fcb553f25a2a5f4c4dec50e90388de8aeb223cc60\"},\"resources\":[{\"byteLength\":54,\"name\":\"mesh.bin\",\"sha256\":\"44e591ff58befb886e14f45d6b795bd74a669e8c2e3604e2fb0b7687ec9d45a8\"}],\"schema\":\"geospec-subject-v1\"}",
+      "subjectHash": "a29f8cad3261be82baf6c8cc8d23bd57f762e8936ae1303705a2e6177b70ed3d",
+      "planSubjectUtf8": "{\"slot\":\"part\",\"subjectHash\":\"a29f8cad3261be82baf6c8cc8d23bd57f762e8936ae1303705a2e6177b70ed3d\"}",
+      "resourceHex": "0000000000000000000000000000804000000000000000000000000000000040000000000000803f0000004000000000000001000200",
+      "expectedSurfaceArea": 400
+    },
+    {
+      "id": "B-scale1",
+      "descriptorUtf8": "{\"backendProfile\":\"portable-gltf-1.4.1-v1\",\"format\":\"gltf\",\"frame\":{\"coordinateSystem\":\"z-up\",\"outputUnit\":\"mm\",\"sourceUnit\":\"mm\",\"uniformScale\":1},\"ingestOptions\":{},\"ingestProfile\":\"geospec-gltf-f64-instance-v2\",\"primary\":{\"byteLength\":481,\"sha256\":\"9e6002828c855b60b8acab3fcb553f25a2a5f4c4dec50e90388de8aeb223cc60\"},\"resources\":[{\"byteLength\":54,\"name\":\"mesh.bin\",\"sha256\":\"d04abc048f84bdb394034a2bcb18a1140528740e05d7ea080a3c8fba77e3c18e\"}],\"schema\":\"geospec-subject-v1\"}",
+      "subjectHash": "3a7c0c58ea587360707c36d009809f0d81b74145199f9054594a31c92c169187",
+      "planSubjectUtf8": "{\"slot\":\"part\",\"subjectHash\":\"3a7c0c58ea587360707c36d009809f0d81b74145199f9054594a31c92c169187\"}",
+      "resourceHex": "0000000000000000000000000000804000000000000000000000000000000040000000000000803f0000004000000000000003000200",
+      "expectedSurfaceArea": 1
+    },
+    {
+      "id": "B-scale10",
+      "descriptorUtf8": "{\"backendProfile\":\"portable-gltf-1.4.1-v1\",\"format\":\"gltf\",\"frame\":{\"coordinateSystem\":\"z-up\",\"outputUnit\":\"mm\",\"sourceUnit\":\"cm\",\"uniformScale\":10},\"ingestOptions\":{},\"ingestProfile\":\"geospec-gltf-f64-instance-v2\",\"primary\":{\"byteLength\":481,\"sha256\":\"9e6002828c855b60b8acab3fcb553f25a2a5f4c4dec50e90388de8aeb223cc60\"},\"resources\":[{\"byteLength\":54,\"name\":\"mesh.bin\",\"sha256\":\"d04abc048f84bdb394034a2bcb18a1140528740e05d7ea080a3c8fba77e3c18e\"}],\"schema\":\"geospec-subject-v1\"}",
+      "subjectHash": "5f79b0812a6fe9e5bfa976a0e311859c563673b63a3b9db447de6bf7094b3455",
+      "planSubjectUtf8": "{\"slot\":\"part\",\"subjectHash\":\"5f79b0812a6fe9e5bfa976a0e311859c563673b63a3b9db447de6bf7094b3455\"}",
+      "resourceHex": "0000000000000000000000000000804000000000000000000000000000000040000000000000803f0000004000000000000003000200",
+      "expectedSurfaceArea": 100
+    }
+  ],
+  "orderControls": [
+    {
+      "id": "A-mesh-first",
+      "bundleOrder": ["mesh.bin", "unused.bin"],
+      "unusedHex": "010203",
+      "expectedSubjectHash": "d86bc8927e9e0858da72be3298597356dcb8deb91be3a4b28f643811cf894f70"
+    },
+    {
+      "id": "A-unused-first",
+      "bundleOrder": ["unused.bin", "mesh.bin"],
+      "unusedHex": "010203",
+      "expectedSubjectHash": "d86bc8927e9e0858da72be3298597356dcb8deb91be3a4b28f643811cf894f70"
+    }
+  ],
+  "executionSchedule": [
+    "fresh engine A then B then A then B",
+    "fresh engine B then A then B then A",
+    "fresh reconstructed engines after serialized primary/resources replay",
+    "separate scale10 same-byte admissions using declared sourceUnit cm/outputUnit mm"
+  ],
+  "notCovered": "No artifact/profile certification; no candidate result-derived expected bytes; geometry results must still use independent family expected envelopes.",
+  "sourceHistoricalControl": {
+    "path": "packages/geospec-engine-native/conformance/subject-identity-controls.json",
+    "sha256": "0902649f3c8dc1027059bb308a0395529647491e25b1398b2d3274dd2584ff76"
+  }
+}

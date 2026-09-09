@@ -4,6 +4,11 @@ use serde::de::{DeserializeSeed, MapAccess, SeqAccess, Visitor};
 
 use crate::{ErrorKind, ProtocolError};
 
+/// Locale-independent UTF-16 code-unit ordering used by canonical JSON.
+pub(crate) fn compare_utf16(left: &str, right: &str) -> std::cmp::Ordering {
+    left.encode_utf16().cmp(right.encode_utf16())
+}
+
 const MAX_INPUT_BYTES: usize = 16 * 1024 * 1024;
 const MAX_DEPTH: usize = 64;
 const MAX_STRING_BYTES: usize = 1024 * 1024;
@@ -133,9 +138,7 @@ fn write_json(value: &Json, output: &mut Vec<u8>) -> Result<(), ProtocolError> {
         }
         Json::Object(entries) => {
             let mut ordered: Vec<_> = entries.iter().collect();
-            ordered.sort_unstable_by(|(left, _), (right, _)| {
-                left.encode_utf16().cmp(right.encode_utf16())
-            });
+            ordered.sort_unstable_by(|(left, _), (right, _)| compare_utf16(left, right));
             output.push(b'{');
             for (index, (key, value)) in ordered.into_iter().enumerate() {
                 if index != 0 {

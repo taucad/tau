@@ -1,8 +1,19 @@
 pub mod backend;
-mod bounding_box;
+pub mod registry;
+pub mod certificates;
+mod analysis;
+mod subject;
+mod matchers;
+mod budget;
+mod prepared;
+mod result;
 mod codec;
+mod identity;
+mod ancillary;
 mod mesh;
 mod protocol;
+mod runtime;
+pub use runtime::EngineConfig;
 
 pub use protocol::Engine;
 
@@ -20,7 +31,8 @@ pub(crate) enum ErrorKind {
     LimitExceeded,
     UnknownCapability,
     UnsupportedVersion,
-    UnsupportedNormalization,
+    UnsupportedCapability,
+    BackendFailure,
 }
 
 impl ErrorKind {
@@ -35,7 +47,8 @@ impl ErrorKind {
             Self::LimitExceeded => "limit-exceeded",
             Self::UnknownCapability => "unknown-capability",
             Self::UnsupportedVersion => "unsupported-version",
-            Self::UnsupportedNormalization => "unsupported-normalization",
+            Self::UnsupportedCapability => "unsupported-capability",
+            Self::BackendFailure => "backend-failure",
         }
     }
 }

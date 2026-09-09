@@ -262,6 +262,33 @@ jobs:
           node-version: '@@CREATE_REPO_node-latest@@'
       - run: '@@CREATE_REPO_security-command@@'
 
+  preview:
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    needs: [candidate, consumer, browser, security]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          node-version: '@@CREATE_REPO_node-latest@@'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: npm-candidate
+          path: candidate
+      - run: node scripts/extract-candidate-packages.mjs --from candidate --out preview-packages
+      - run: >-
+          pnpm exec pkg-pr-new publish
+          --previewVersion
+          --comment=update
+          --commentWithSha
+          --no-template
+          @@CREATE_REPO_pkg-pr-new-pnpm-flag@@
+          './preview-packages/*'
+
   publish:
     if: needs.preflight.outputs.npm-publish == 'true'
     needs: [preflight, candidate, consumer, browser, security]
@@ -358,6 +385,7 @@ jobs:
         browser,
         benchmark,
         security,
+        preview,
         publish,
         registry-verify,
       ]
@@ -367,6 +395,7 @@ jobs:
         env:
           RESULTS: ${{ toJSON(needs) }}
           PUBLISH: ${{ needs.preflight.outputs.npm-publish }}
+          PREVIEW: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
         run: |
           node <<'NODE'
           const needs = JSON.parse(process.env.RESULTS);
@@ -374,6 +403,7 @@ jobs:
           if (needs.preflight?.result === 'success' && process.env.PUBLISH === 'true') {
             required.push('publish', 'registry-verify');
           }
+          if (process.env.PREVIEW === 'true') required.push('preview');
           const failures = required.filter((name) => needs[name]?.result !== 'success');
           const benchmark = needs.benchmark?.result;
           if (!['success', 'skipped'].includes(benchmark)) failures.push('benchmark');

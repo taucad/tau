@@ -63,6 +63,9 @@ Applicability:
 | R    | Every host/consumer job downloads and tests that candidate without rebuilding it.                                             |
 | R    | Candidate and consumer jobs run the bound host setup before executing host-dependent code.                                    |
 | R    | Browser jobs prove required adapters are usable on their bound runner and headless mode.                                      |
+| R    | Same-repository PRs publish the entire tested candidate set once through the exact locked `pkg-pr-new` CLI.                   |
+| R    | Preview publication rewrites versions and sibling references, updates one SHA-addressed comment, and requires no npm token.   |
+| R    | Fork PRs skip preview publication; `ci-gate` requires it only when eligible.                                                  |
 | R    | Publish job has `id-token: write`, no checkout, no registry token, and is idempotent.                                         |
 | R    | Existing registry versions are byte/provenance verified rather than overwritten.                                              |
 | R    | Registry verification installs by exact version and checks package, source repo, workflow, commit, integrity, and provenance. |
@@ -86,19 +89,20 @@ Applicability:
 
 ## F. Admission ratchets and consumers
 
-| Kind | Check                                                                                                |
-| ---- | ---------------------------------------------------------------------------------------------------- |
-| R    | `.size-limit.json` has per-entry budgets with measured-origin comments nearby.                       |
-| R    | Every wasm has raw and compressed byte ceilings as hard PR gates.                                    |
-| R    | Exactly one wall-clock benchmark is a PR gate when enabled.                                          |
-| R    | PR and `origin/main` run on the same runner; median-of-15 comparison posts one marker-keyed comment. |
-| R    | Timing threshold carries an origin comment; rename-to-admit is documented.                           |
-| R    | Monthly exploratory drift opens a `claude`-labeled issue.                                            |
-| R    | Clean-room tarball smoke imports ESM and runs the README quickstart.                                 |
-| R    | Clean-room CommonJS smoke expects a clear ESM-only failure.                                          |
-| R    | Installed binary subpaths resolve and load.                                                          |
-| R    | Documentation code fences typecheck against public package imports.                                  |
-| R    | Declared cross-host determinism compares semantic output or exact bytes.                             |
+| Kind | Check                                                                                                           |
+| ---- | --------------------------------------------------------------------------------------------------------------- |
+| R    | `.size-limit.json` has per-entry budgets with measured-origin comments nearby.                                  |
+| R    | Every wasm has raw and compressed byte ceilings as hard PR gates.                                               |
+| R    | Exactly one wall-clock benchmark is a PR gate when enabled.                                                     |
+| R    | PR and `origin/main` run on the same runner; median-of-15 comparison posts one marker-keyed comment.            |
+| R    | Timing threshold carries an origin comment; rename-to-admit is documented.                                      |
+| R    | Monthly exploratory drift opens a `claude`-labeled issue.                                                       |
+| R    | Clean-room tarball smoke imports ESM and runs the README quickstart.                                            |
+| R    | Clean-room CommonJS smoke expects a clear ESM-only failure.                                                     |
+| R    | Installed binary subpaths resolve and load.                                                                     |
+| R    | A clean consumer can install the root and any direct native preview URLs and observe the changed package bytes. |
+| R    | Documentation code fences typecheck against public package imports.                                             |
+| R    | Declared cross-host determinism compares semantic output or exact bytes.                                        |
 
 ## G. Hygiene and maintenance loop
 

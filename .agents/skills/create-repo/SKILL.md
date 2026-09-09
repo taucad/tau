@@ -55,6 +55,7 @@ Bind all values before copying files:
 | docs site        | `yes` or `no`                                         |
 | benchmark axes   | Bytes always; wall-clock optional                     |
 | host matrix      | Exact Node, browser runner, native OS, and GPU legs   |
+| pkg-pr-new       | Exact locked CLI version for pull-request previews    |
 
 Template tokens use the collision-free form `@@CREATE_REPO_<name>@@`. Replace
 only those tokens; GitHub expressions and ESLint `{{term}}` messages are not
@@ -72,6 +73,8 @@ and `notice-sections` is the dependency-derived notice text or empty. Bind
 arrays; omit `docs` from both only when the docs site is disabled. The quality
 array must include every applicable build, size, test, typecheck, package,
 dead-code, docs, format, lint, prose, and workflow gate.
+Bind `pkg-pr-new-pnpm-flag` to `--pnpm` only when a packed manifest still
+contains a pnpm `catalog:` specifier; otherwise bind it to an empty string.
 
 ### Template destinations
 
@@ -86,7 +89,7 @@ Copy files without rewriting their bodies except placeholder substitution:
 | `PULL_REQUEST_TEMPLATE.md`                                                                            | `.github/PULL_REQUEST_TEMPLATE.md`                                         |
 | `scripts/*`                                                                                           | `scripts/`                                                                 |
 | `tests/ci-release.test.mjs`, `tests/release-attestations.test.mjs`                                    | `tests/ci/`                                                                |
-| `tests/packaging.test.mjs`                                                                            | `tests/`                                                                   |
+| `tests/packaging.test.mjs`, `tests/extract-candidate-packages.test.mjs`                               | `tests/`                                                                   |
 | `release-skill/SKILL.md`                                                                              | `.agents/skills/release-<slug>/SKILL.md`                                   |
 | `prose-rules.js`, `jsdoc-quality.js`, `eslint-plugin.js`                                              | `tools/eslint-plugin/` as `prose-rules.js`, `jsdoc-quality.js`, `index.js` |
 | `vale/<pack>/*`                                                                                       | `.vale/styles/<pack>/`                                                     |
@@ -167,13 +170,20 @@ the npm Trusted Publisher identity.
    registry or Git shorthands. Do not rebuild in consumer or publish jobs.
    Bind browser runners and headless modes that expose every required platform
    capability; API presence without a usable adapter is not a passing smoke.
-4. Publish idempotently through OIDC. If the version exists, compare registry
+4. For same-repository pull requests, expand the tested candidate tarballs and
+   publish every package directory in one locked `pkg-pr-new` invocation with
+   `--previewVersion --comment=update --commentWithSha --no-template`. Require
+   the preview in `ci-gate`; fork pull requests skip it. Add `--pnpm` only when
+   the packed manifests still contain pnpm `catalog:` specifiers. Install the
+   GitHub App with read access to Actions, code, and metadata plus write access
+   to checks, commit statuses, and pull requests, scoped to the repository.
+5. Publish idempotently through OIDC. If the version exists, compare registry
    bytes and provenance instead of overwriting it.
-5. `registry-verify` installs from the registry and checks the provenance
+6. `registry-verify` installs from the registry and checks the provenance
    source repository, workflow filename, commit, and package integrity.
-6. `ci-gate` asserts every required result, including expected skips, and is
+7. `ci-gate` asserts every required result, including expected skips, and is
    the only branch-protection check.
-7. Split concurrency: cancel stale pull-request runs; serialize publish work.
+8. Split concurrency: cancel stale pull-request runs; serialize publish work.
 
 For wasm, test source correctness natively and smoke the wasm shell. Never
 rebuild-and-diff wasm bytes across tool versions.

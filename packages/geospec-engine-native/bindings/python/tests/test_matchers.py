@@ -145,7 +145,10 @@ def test_pytest_fixture_uses_the_same_native_engine(geospec_engine):
     assert geospec_engine.capabilities == ("toHaveBoundingBox",)
 
 
-def test_binary_subject_transport_keeps_geometry_out_of_json_and_preserves_order():
+@pytest.mark.parametrize("ingest_options", [None, {"name": "assembly.part#0"}])
+def test_binary_subject_transport_keeps_geometry_out_of_json_and_preserves_order(
+    ingest_options,
+):
     primary = b'{"asset":{"version":"2.0"}}'
     first = b"resource-one-payload"
     second = b"resource-two-payload"
@@ -183,7 +186,7 @@ def test_binary_subject_transport_keeps_geometry_out_of_json_and_preserves_order
                     "sourceUnit": "mm",
                     "outputUnit": "mm",
                 },
-                "ingestOptions": {},
+                "ingestOptions": {} if ingest_options is None else ingest_options,
                 "primaryByteLength": len(primary),
                 "resources": [
                     {"name": "a.bin", "byteLength": len(first)},
@@ -210,6 +213,7 @@ def test_binary_subject_transport_keeps_geometry_out_of_json_and_preserves_order
         coordinate_system="z-up",
         source_unit="mm",
         output_unit="mm",
+        ingest_options=ingest_options,
         resources=(("a.bin", first), ("b.bin", second)),
         slot="part",
     )

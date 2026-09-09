@@ -316,13 +316,21 @@ class GeoSpecEngine:
         coordinate_system: str,
         source_unit: str,
         output_unit: str,
+        ingest_options: Mapping[str, object] | None = None,
         resources: Sequence[tuple[str, bytes]] = (),
         slot: str = "subject",
     ) -> GeoSpecSubject:
-        """Admit glTF, GLB, STEP, or rational-plate through owned buffers."""
+        """Admit owned buffers, preserving literal format-specific options.
+
+        Omitted options become an empty object. The core validates supported
+        options and derives the applied scale from the source/output units.
+        """
 
         self._ensure_open()
         primary = _required_bytes(primary, "primary")
+        if ingest_options is not None and not isinstance(ingest_options, Mapping):
+            raise TypeError("ingest_options must be a mapping.")
+        options = {} if ingest_options is None else _wire_value(ingest_options)
         metadata: list[dict[str, object]] = []
         binary_resources: list[bytes] = []
         for index, resource in enumerate(resources):
@@ -349,7 +357,7 @@ class GeoSpecEngine:
                             "sourceUnit": source_unit,
                             "outputUnit": output_unit,
                         },
-                        "ingestOptions": {},
+                        "ingestOptions": options,
                         "primaryByteLength": len(primary),
                         "resources": metadata,
                     }

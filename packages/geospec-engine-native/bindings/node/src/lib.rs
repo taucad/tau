@@ -1,6 +1,5 @@
-use geospec_engine_native_core::{
-    canonicalize as core_canonicalize, Engine as CoreEngine, ProtocolError,
-};
+use geospec_engine_native_core::{canonicalize as core_canonicalize, ProtocolError};
+use geospec_engine_native_runtime::{create_engine, Engine as CoreEngine, EngineConfig};
 use napi::bindgen_prelude::{Buffer, Error, Result};
 use napi_derive::napi;
 
@@ -24,14 +23,47 @@ impl Engine {
     #[napi(constructor)]
     pub fn new() -> Self {
         Self {
-            inner: CoreEngine::new(),
+            inner: create_engine(EngineConfig::entry()),
         }
+    }
+
+    #[napi(js_name = "ingestSubject")]
+    pub fn ingest_subject(
+        &mut self,
+        request: Buffer,
+        primary: Buffer,
+        resources: Vec<Buffer>,
+    ) -> Result<Buffer, &'static str> {
+        self.inner
+            .ingest_subject(
+                request.as_ref(),
+                primary.to_vec(),
+                resources.into_iter().map(|bytes| bytes.to_vec()).collect(),
+            )
+            .map(Buffer::from)
+            .map_err(fail)
     }
 
     #[napi(js_name = "ingestMesh")]
     pub fn ingest_mesh(&mut self, request: Buffer, mesh: Buffer) -> Result<Buffer, &'static str> {
         self.inner
             .ingest_mesh(request.as_ref(), mesh.as_ref())
+            .map(Buffer::from)
+            .map_err(fail)
+    }
+
+    #[napi(js_name = "subjectHandle")]
+    pub fn subject_handle(&self, request: Buffer) -> Result<Buffer, &'static str> {
+        self.inner
+            .subject_handle(request.as_ref())
+            .map(Buffer::from)
+            .map_err(fail)
+    }
+
+    #[napi(js_name = "releaseSubject")]
+    pub fn release_subject(&mut self, request: Buffer) -> Result<Buffer, &'static str> {
+        self.inner
+            .release_subject(request.as_ref())
             .map(Buffer::from)
             .map_err(fail)
     }

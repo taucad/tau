@@ -15,10 +15,17 @@ export class ProtocolError extends Error {
 
 /** Byte-only stateful engine surface shared by Node and WASM hosts. @public */
 export type HostEngine = {
+  ingestSubject(request: HostBytes, primary: HostBytes, resources: readonly HostBytes[]): HostBytes;
   ingestMesh(request: HostBytes, mesh: HostBytes): HostBytes;
   processRequest(request: HostBytes): HostBytes;
   canonicalPlan(request: HostBytes): HostBytes;
   evaluatePlan(plan: HostBytes): HostBytes;
+};
+
+/** Node lifecycle operations over opaque core control bytes. @public */
+export type HostSubjectLifecycle = {
+  subjectHandle(request: HostBytes): HostBytes;
+  releaseSubject(request: HostBytes): HostBytes;
 };
 
 type ErrorLike = {

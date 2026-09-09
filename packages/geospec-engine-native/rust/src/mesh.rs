@@ -6,12 +6,32 @@ pub(crate) struct Mesh {
     pub(crate) indices: Vec<usize>,
 }
 
-#[cfg(test)]
-thread_local! {
-    pub(crate) static BOUNDS_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-}
-
 impl Mesh {
+    /// Retains all admitted f32 positions for mesh analysis. GSM1 bounds remain
+    /// indexed through the subject's explicit format-specific bounds scope.
+    pub(crate) fn analysis_record(&self) -> crate::analysis::mesh::MeshAnalysisRecord {
+        use crate::analysis::mesh::{MeshAnalysisRecord, Primitive};
+        MeshAnalysisRecord {
+            positions: self.positions.clone(),
+            triangles: self
+                .indices
+                .chunks_exact(3)
+                .map(|triangle| {
+                    std::array::from_fn(|axis| {
+                        u32::try_from(triangle[axis]).expect("GSM1 index was admitted as u32")
+                    })
+                })
+                .collect(),
+            triangle_primitives: vec![0; self.indices.len() / 3],
+            primitives: vec![Primitive {
+                name: "mesh-buffer#0".into(),
+                vertex_start: 0,
+                vertex_count: u32::try_from(self.positions.len())
+                    .expect("GSM1 vertex count was admitted as u32"),
+            }],
+        }
+    }
+
     pub(crate) fn decode(bytes: &[u8]) -> Result<Self, ProtocolError> {
         if bytes.len() > 16 * 1024 * 1024 {
             return Err(ProtocolError::new(
@@ -67,25 +87,5 @@ impl Mesh {
             indices.push(index);
         }
         Ok(Self { positions, indices })
-    }
-
-    /// The reference computes size/center first and reconstructs min/max.
-    pub(crate) fn bounds(&self) -> [[f64; 3]; 4] {
-        #[cfg(test)]
-        BOUNDS_CALLS.with(|count| count.set(count.get() + 1));
-        let mut min = [f64::INFINITY; 3];
-        let mut max = [f64::NEG_INFINITY; 3];
-        for &index in &self.indices {
-            for axis in 0..3 {
-                let value = self.positions[index][axis];
-                min[axis] = min[axis].min(value);
-                max[axis] = max[axis].max(value);
-            }
-        }
-        let size = std::array::from_fn(|axis| max[axis] - min[axis]);
-        let center = std::array::from_fn(|axis| (min[axis] + max[axis]) / 2.0);
-        let min = std::array::from_fn(|axis| center[axis] - size[axis] / 2.0);
-        let max = std::array::from_fn(|axis| center[axis] + size[axis] / 2.0);
-        [min, max, size, center]
     }
 }

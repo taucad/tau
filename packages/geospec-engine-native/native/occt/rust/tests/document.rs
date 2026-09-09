@@ -2,6 +2,19 @@ use geospec_engine_native_core::backend::BackendErrorKind;
 use geospec_engine_native_occt::{Document, PmiKind, SurfaceFacts, TopologyCounts};
 use std::path::PathBuf;
 
+// Preserve the six original fixture expectations. The later compounds field
+// has no independent expectation in these historical fixture controls.
+fn legacy_topology_counts(value: TopologyCounts) -> [usize; 6] {
+    [
+        value.solids,
+        value.shells,
+        value.faces,
+        value.wires,
+        value.edges,
+        value.vertices,
+    ]
+}
+
 fn fixture(name: &str) -> Vec<u8> {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures")
@@ -40,15 +53,8 @@ fn ap242_box_retains_shape_face_and_mesh_facts() {
     close3(facts.shape.bounds.max, [5.0, 10.0, 15.0], 1e-8);
     close3(facts.shape.center_of_mass, [0.0, 0.0, 0.0], 1e-8);
     assert_eq!(
-        facts.shape.topology,
-        TopologyCounts {
-            solids: 1,
-            shells: 1,
-            faces: 6,
-            wires: 6,
-            edges: 12,
-            vertices: 8
-        }
+        legacy_topology_counts(facts.shape.topology),
+        [1, 1, 6, 6, 12, 8]
     );
     assert_eq!(facts.faces.len(), 6);
     assert_eq!(
@@ -166,15 +172,8 @@ fn inch_cube_preserves_declared_units_and_converted_geometry() {
     close3(facts.shape.bounds.max, [25.4, 25.4, 25.4], 1e-8);
     close3(facts.shape.center_of_mass, [12.7, 12.7, 12.7], 1e-8);
     assert_eq!(
-        facts.shape.topology,
-        TopologyCounts {
-            solids: 1,
-            shells: 1,
-            faces: 6,
-            wires: 6,
-            edges: 12,
-            vertices: 8
-        }
+        legacy_topology_counts(facts.shape.topology),
+        [1, 1, 6, 6, 12, 8]
     );
     assert_eq!(facts.faces.len(), 6);
     assert!(facts
@@ -197,15 +196,8 @@ fn assembly_retains_occurrence_references_composed_placements_and_bounds() {
     close3(facts.shape.bounds.max, [35.0, 5.0, 5.0], 1e-8);
     close3(facts.shape.center_of_mass, [15.0, 0.0, 0.0], 1e-8);
     assert_eq!(
-        facts.shape.topology,
-        TopologyCounts {
-            solids: 2,
-            shells: 2,
-            faces: 12,
-            wires: 12,
-            edges: 24,
-            vertices: 16
-        }
+        legacy_topology_counts(facts.shape.topology),
+        [2, 2, 12, 12, 24, 16]
     );
     assert_eq!(facts.occurrences.len(), 2);
     assert!(facts.occurrences.iter().all(|occurrence| facts

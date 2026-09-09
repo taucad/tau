@@ -1,5 +1,15 @@
+pub(crate) const NUMERIC_PROFILE: &str = "geospec-st-logical-requests-v2";
+
+use crate::{
+    backend::{brep::BrepConnector, csg::CsgConnector},
+    prepared::plan::PreparedPlan,
+    runtime::EngineConfig,
+    subject::{Subject, SubjectFormat},
+};
 use sha2::{Digest, Sha256};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::{cell::RefCell, rc::Rc};
 
 use crate::codec::{decode, encode, Json};
 use crate::mesh::Mesh;
@@ -9,49 +19,93 @@ const PROTOCOL_VERSION: f64 = 3.0;
 const REGISTRY_VERSION: f64 = 4.0;
 const CANONICAL_PROFILE: &str = "geospec-jcs-v1";
 const MAX_SAFE_INTEGER: f64 = 9_007_199_254_740_991.0;
-const MAX_CLAIMS: usize = 4096;
 
-const CAPABILITIES: [&str; 28] = [
-    "toHaveBoundingBox",
-    "toHaveConnectedComponents",
-    "toBeWatertight",
-    "toHaveNoComponentInterference",
-    "toHaveAssemblyOccurrences",
-    "toHaveSpatialRelationships",
-    "toHaveMeshIntegrity",
-    "toHaveNoDiagnostics",
-    "toHaveSurfaceArea",
-    "toHaveVolume",
-    "toHaveMass",
-    "toHaveCenterOfMass",
-    "toBeValidBrep",
-    "toHaveTopologyCounts",
-    "toHaveStepUnits",
-    "toHaveProductStructure",
-    "toHavePlanarFace",
-    "toHaveCylindricalFace",
-    "toHaveCircularHole",
-    "toHaveCircularHolePattern",
-    "toHaveChamferFeature",
-    "toHaveFilletFeature",
-    "toHaveMinimumWallThickness",
-    "toHaveVoidContinuity",
-    "analyzeBrep",
-    "analyzeMesh",
-    "inspectGeometry",
-    "analyzeMeshOverlap",
-];
+use crate::registry::CAPABILITIES;
 
-/// Experimental whole-subject mesh engine with owned, content-addressed subjects.
-#[derive(Default)]
+static NEXT_ENGINE_OWNER: AtomicU64 = AtomicU64::new(1);
+
+fn next_engine_owner() -> u64 {
+    NEXT_ENGINE_OWNER
+        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |owner| {
+            owner.checked_add(1)
+        })
+        .expect("GeoSpec Engine owner counter exhausted")
+}
+
+/// Experimental thread-confined engine with owned subjects and neutral connectors.
 pub struct Engine {
-    subjects: HashMap<String, Mesh>,
+    pub(crate) subjects: HashMap<String, Rc<Subject>>,
+    pub(crate) subject_generations: HashMap<String, u64>,
+    pub(crate) owner: u64,
+    pub(crate) next_generation: u64,
+    pub(crate) config: EngineConfig,
+    pub(crate) plate_retention: Rc<crate::certificates::engine::Retention>,
+    pub(crate) brep: Option<Box<dyn BrepConnector>>,
+    pub(crate) csg: RefCell<Option<Box<dyn CsgConnector>>>,
+    pub(crate) retained_solids: RefCell<crate::backend::csg_scope::RetainedSolids>,
+}
+
+impl Default for Engine {
+    fn default() -> Self {
+        let config = EngineConfig::entry();
+        Self {
+            subjects: HashMap::new(),
+            subject_generations: HashMap::new(),
+            owner: next_engine_owner(),
+            next_generation: 0,
+            plate_retention: Rc::new(crate::certificates::engine::Retention::new(
+                config.analysis.max_mesh_bytes,
+            )),
+            brep: None,
+            csg: RefCell::new(None),
+            retained_solids: RefCell::new(crate::backend::csg_scope::RetainedSolids::new(
+                config.analysis.max_solid_entries,
+            )),
+            config,
+        }
+    }
 }
 
 impl Engine {
     /// Creates an engine with no ingested subjects.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Composes the same engine with thread-confined neutral backend connectors.
+    pub fn with_backends(
+        config: EngineConfig,
+        brep: Box<dyn BrepConnector>,
+        csg: Box<dyn CsgConnector>,
+    ) -> Self {
+        let retained_solids = RefCell::new(crate::backend::csg_scope::RetainedSolids::new(
+            config.analysis.max_solid_entries,
+        ));
+        Self {
+            plate_retention: Rc::new(crate::certificates::engine::Retention::new(
+                config.analysis.max_mesh_bytes,
+            )),
+            config,
+            retained_solids,
+            brep: Some(brep),
+            csg: RefCell::new(Some(csg)),
+            subjects: HashMap::new(),
+            subject_generations: HashMap::new(),
+            owner: next_engine_owner(),
+            next_generation: 0,
+        }
+    }
+
+    pub(crate) fn evaluate_prepared(&self, plan: PreparedPlan) -> Result<Json, ProtocolError> {
+        let resolved = plan.resolve(&self.subjects, self.config.analysis)?;
+        let mut connector = self.csg.borrow_mut();
+        match connector.as_mut() {
+            Some(connector) => resolved.evaluate_with_retained(
+                Some(connector.as_mut()),
+                &mut self.retained_solids.borrow_mut(),
+            ),
+            None => resolved.evaluate(None),
+        }
     }
 
     /// Admits exact mesh-buffer-v1 bytes in the whole-subject mm/z-up frame.
@@ -116,7 +170,13 @@ impl Engine {
                 )]),
             ),
         ]))?;
-        self.subjects.insert(verified_hash, subject);
+        let retained = Subject::new(
+            verified_hash.clone(),
+            SubjectFormat::MeshBufferV1,
+            "mm".into(),
+        );
+        let _ = retained.mesh_record.set(Rc::new(subject.analysis_record()));
+        self.admit_retained(retained)?;
         Ok(response)
     }
 
@@ -145,16 +205,22 @@ impl Engine {
         ];
         require_fields(envelope, &fields, &fields, "canonical plan")?;
         validate_versions(envelope)?;
-        if string_field(envelope, "numericProfile")? != "mesh-f32-bounds-v1" {
+        if string_field(envelope, "numericProfile")? != NUMERIC_PROFILE {
             return Err(ProtocolError::new(
                 ErrorKind::UnsupportedVersion,
                 "Unsupported canonical plan numeric profile.",
             ));
         }
-        let normalized = canonical_plan_value(field(envelope, "plan")?)?;
-        let normalized = object(&normalized, "canonical plan")?;
-        let prepared = prepare_claims(Some(self), field(normalized, "plan")?)?;
-        encode(&evaluate_claims(prepared)?)
+        let prepared = PreparedPlan::prepare(field(envelope, "plan")?)?;
+        encode(&self.evaluate_prepared(prepared)?)
+    }
+}
+
+impl Drop for Engine {
+    fn drop(&mut self) {
+        if let Some(connector) = self.csg.get_mut().as_deref_mut() {
+            let _ = self.retained_solids.get_mut().release_all(connector);
+        }
     }
 }
 
@@ -162,7 +228,7 @@ fn process(engine: &Engine, request: Json) -> Result<Vec<u8>, ProtocolError> {
     let request = object(&request, "request")?;
     let method = string_field(request, "method")?;
     match method {
-        "initialize" => initialize(request),
+        "initialize" => initialize(engine, request),
         "submitClaims" => submit_claims(engine, request),
         _ => Err(ProtocolError::new(
             ErrorKind::InvalidRequest,
@@ -171,7 +237,72 @@ fn process(engine: &Engine, request: Json) -> Result<Vec<u8>, ProtocolError> {
     }
 }
 
-fn initialize(request: &[(String, Json)]) -> Result<Vec<u8>, ProtocolError> {
+fn configuration(engine: &Engine) -> Json {
+    let binary = &engine.config.binary;
+    let analysis = &engine.config.analysis;
+    Json::object([
+        (
+            "configurationProfile",
+            Json::string("geospec-entry-config-v1"),
+        ),
+        ("defaultWorkUnitBudget", Json::Number(8_000_000.0)),
+        ("productionCapacityQualified", Json::Bool(false)),
+        (
+            "maxRetainedSubjects",
+            Json::Number(f64::from(engine.config.max_retained_subjects)),
+        ),
+        (
+            "binaryAdmissionLimits",
+            Json::object([
+                ("profileId", Json::string(&binary.profile_id)),
+                (
+                    "maxSubjectBytes",
+                    Json::Number(binary.max_subject_bytes as f64),
+                ),
+                (
+                    "maxResourceBytes",
+                    Json::Number(binary.max_resource_bytes as f64),
+                ),
+                (
+                    "maxTotalBinaryBytes",
+                    Json::Number(binary.max_total_binary_bytes as f64),
+                ),
+                ("maxVertices", Json::Number(f64::from(binary.max_vertices))),
+                (
+                    "maxTriangles",
+                    Json::Number(f64::from(binary.max_triangles)),
+                ),
+                (
+                    "maxOccurrences",
+                    Json::Number(f64::from(binary.max_occurrences)),
+                ),
+            ]),
+        ),
+        (
+            "analysisRetentionLimits",
+            Json::object([
+                ("maxMeshBytes", Json::Number(analysis.max_mesh_bytes as f64)),
+                (
+                    "maxMeshEntries",
+                    Json::Number(f64::from(analysis.max_mesh_entries)),
+                ),
+                (
+                    "maxSolidEntries",
+                    Json::Number(f64::from(analysis.max_solid_entries)),
+                ),
+            ]),
+        ),
+        (
+            "backends",
+            Json::object([
+                ("brep", Json::Bool(engine.brep.is_some())),
+                ("csg", Json::Bool(engine.csg.borrow().is_some())),
+            ]),
+        ),
+    ])
+}
+
+fn initialize(engine: &Engine, request: &[(String, Json)]) -> Result<Vec<u8>, ProtocolError> {
     require_fields(
         request,
         &[
@@ -203,14 +334,34 @@ fn initialize(request: &[(String, Json)]) -> Result<Vec<u8>, ProtocolError> {
                     "canonicalProfile".into(),
                     Json::String(CANONICAL_PROFILE.into()),
                 ),
+                ("numericProfile".into(), Json::string(NUMERIC_PROFILE)),
                 ("qualification".into(), Json::String("experimental".into())),
+                ("configuration".into(), configuration(engine)),
                 (
                     "capabilities".into(),
-                    Json::Array(vec![Json::object([
-                        ("name", Json::string(CAPABILITIES[0])),
-                        ("registryVersion", Json::Number(REGISTRY_VERSION)),
-                        ("scope", Json::string("mesh-buffer-whole-subject")),
-                    ])]),
+                    Json::Array(
+                        CAPABILITIES
+                            .iter()
+                            .map(|name| {
+                                let mut entry = Json::object([
+                                    ("name", Json::string(*name)),
+                                    ("registryVersion", Json::Number(REGISTRY_VERSION)),
+                                    ("scope", Json::string("declared-subject-profile")),
+                                    ("implementation", Json::string("partial")),
+                                    ("qualification", Json::string("unqualified")),
+                                ]);
+                                if *name == "toSatisfyRationalPlate" {
+                                    if let Json::Object(fields) = &mut entry {
+                                        fields.push((
+                                            "profile".into(),
+                                            crate::certificates::engine::profile(),
+                                        ));
+                                    }
+                                }
+                                entry
+                            })
+                            .collect(),
+                    ),
                 ),
             ]),
         ),
@@ -246,177 +397,9 @@ fn submit_request(request: &[(String, Json)]) -> Result<(&str, &Json), ProtocolE
     Ok((request_id, field(request, "plan")?))
 }
 
-struct PreparedClaim<'a> {
-    claim: &'a [(String, Json)],
-    claim_id: &'a str,
-    capability: &'a str,
-    hash: Option<&'a str>,
-    mesh: Option<&'a Mesh>,
-    bounds: Option<crate::bounding_box::Prepared>,
-}
-
-fn prepare_claims<'a>(
-    engine: Option<&'a Engine>,
-    plan: &'a Json,
-) -> Result<Vec<PreparedClaim<'a>>, ProtocolError> {
-    let plan = object(plan, "plan")?;
-    require_fields(
-        plan,
-        &["subjects", "claims"],
-        &["subjects", "claims"],
-        "plan",
-    )?;
-
-    let subject_values = array(field(plan, "subjects")?, "plan.subjects")?;
-    let mut subjects = HashMap::new();
-    for subject in subject_values {
-        let subject = object(subject, "plan subject").map_err(as_invalid_claim)?;
-        require_fields(
-            subject,
-            &["slot", "contentHash"],
-            &["slot", "contentHash"],
-            "plan subject",
-        )
-        .map_err(as_invalid_claim)?;
-        let slot = logical_id(subject, "slot").map_err(as_invalid_claim)?;
-        let hash = string_field(subject, "contentHash").map_err(as_invalid_claim)?;
-        if subjects.insert(slot, hash).is_some() {
-            return Err(ProtocolError::new(
-                ErrorKind::InvalidClaim,
-                format!("GeoSpec plan contains duplicate subject slot '{slot}'."),
-            ));
-        }
-        validate_content_hash(hash)?;
-    }
-
-    let claim_values = array(field(plan, "claims")?, "plan.claims")?;
-    if claim_values.len() > MAX_CLAIMS {
-        return Err(ProtocolError::new(
-            ErrorKind::LimitExceeded,
-            "GeoSpec plan contains more than 4096 claims.",
-        ));
-    }
-    let mut claim_ids = HashSet::new();
-    let mut prepared = Vec::with_capacity(claim_values.len());
-    for claim in claim_values {
-        let claim = object(claim, "claim").map_err(as_invalid_claim)?;
-        require_fields(
-            claim,
-            &[
-                "claimId",
-                "capability",
-                "subjectSlots",
-                "payload",
-                "polarity",
-                "workUnitBudget",
-            ],
-            &[
-                "claimId",
-                "capability",
-                "subjectSlots",
-                "polarity",
-                "workUnitBudget",
-            ],
-            "claim",
-        )
-        .map_err(as_invalid_claim)?;
-        let claim_id = logical_id(claim, "claimId").map_err(as_invalid_claim)?;
-        if !claim_ids.insert(claim_id) {
-            return Err(ProtocolError::new(
-                ErrorKind::InvalidClaim,
-                format!("GeoSpec plan contains duplicate claim ID '{claim_id}'."),
-            ));
-        }
-        let capability = string_field(claim, "capability").map_err(as_invalid_claim)?;
-        if !CAPABILITIES.contains(&capability) {
-            return Err(ProtocolError::new(
-                ErrorKind::UnknownCapability,
-                format!("GeoSpec capability '{capability}' is not in registry 4."),
-            ));
-        }
-        let subject_slots = string_array(
-            field(claim, "subjectSlots").map_err(as_invalid_claim)?,
-            "claim.subjectSlots",
-        )
-        .map_err(as_invalid_claim)?;
-        for slot in &subject_slots {
-            if !subjects.contains_key(slot.as_str()) {
-                return Err(ProtocolError::new(
-                    ErrorKind::InvalidClaim,
-                    format!(
-                        "GeoSpec claim '{claim_id}' references unresolved subject slot '{slot}'."
-                    ),
-                ));
-            }
-        }
-        let polarity = string_field(claim, "polarity").map_err(as_invalid_claim)?;
-        if !matches!(polarity, "positive" | "negative") {
-            return invalid_claim("GeoSpec claim polarity must be 'positive' or 'negative'.");
-        }
-        validate_budget(field(claim, "workUnitBudget").map_err(as_invalid_claim)?)?;
-
-        if capability == "analyzeMesh" {
-            if subject_slots.len() != 1 {
-                return invalid_claim("analyzeMesh requires exactly one existing subject slot.");
-            }
-            if !matches!(optional_field(claim, "payload"), None | Some(Json::Null)) {
-                return invalid_claim("analyzeMesh payload must be null or omitted.");
-            }
-        }
-
-        let (hash, mesh, bounds) = if capability == CAPABILITIES[0] {
-            if subject_slots.len() != 1 {
-                return invalid_claim(
-                    "toHaveBoundingBox requires exactly one existing subject slot.",
-                );
-            }
-            let hash = subjects[subject_slots[0].as_str()];
-            let mesh = if let Some(engine) = engine {
-                Some(engine.subjects.get(hash).ok_or_else(|| {
-                    ProtocolError::new(
-                        ErrorKind::InvalidClaim,
-                        "Bounding-box subject content must first be ingested into this Engine.",
-                    )
-                })?)
-            } else {
-                None
-            };
-            let bounds = crate::bounding_box::prepare(claim).map_err(as_invalid_claim)?;
-            (Some(hash), mesh, Some(bounds))
-        } else {
-            (None, None, None)
-        };
-        prepared.push(PreparedClaim {
-            claim,
-            claim_id,
-            capability,
-            hash,
-            mesh,
-            bounds,
-        });
-    }
-    Ok(prepared)
-}
-
-fn evaluate_claims(prepared: Vec<PreparedClaim<'_>>) -> Result<Json, ProtocolError> {
-    let mut results = Vec::with_capacity(prepared.len());
-    for claim in prepared {
-        if let (Some(mesh), Some(hash), Some(bounds)) = (claim.mesh, claim.hash, claim.bounds) {
-            results.push(
-                crate::bounding_box::evaluate(mesh, hash, claim.claim, &bounds)
-                    .map_err(as_invalid_claim)?,
-            );
-        } else {
-            results.push(refused_result(claim.claim_id, claim.capability));
-        }
-    }
-    Ok(Json::object([("results", Json::Array(results))]))
-}
-
 fn submit_claims(engine: &Engine, request: &[(String, Json)]) -> Result<Vec<u8>, ProtocolError> {
     let (request_id, plan) = submit_request(request)?;
-    let prepared = prepare_claims(Some(engine), plan)?;
-    let result = evaluate_claims(prepared)?;
+    let result = engine.evaluate_prepared(PreparedPlan::prepare(plan)?)?;
     encode(&Json::object([
         ("requestId", Json::string(request_id)),
         ("result", result),
@@ -424,66 +407,21 @@ fn submit_claims(engine: &Engine, request: &[(String, Json)]) -> Result<Vec<u8>,
 }
 
 fn canonical_plan_value(plan: &Json) -> Result<Json, ProtocolError> {
-    let prepared = prepare_claims(None, plan)?;
-    let mut claims = Vec::with_capacity(prepared.len());
-    for claim in prepared {
-        let payload = if let Some(bounds) = claim.bounds {
-            bounds.normalized_payload()
-        } else if claim.capability == "analyzeMesh" {
-            Json::Null
-        } else {
-            return Err(ProtocolError::new(
-                ErrorKind::UnsupportedNormalization,
-                format!(
-                    "Canonical plan normalization is unavailable for capability '{}'.",
-                    claim.capability
-                ),
-            ));
-        };
-        let mut fields = claim.claim.to_vec();
-        fields.retain(|(key, _)| key != "payload");
-        fields.push(("payload".into(), payload));
-        claims.push(Json::Object(fields));
-    }
-    let subjects = field(object(plan, "plan")?, "subjects")?.clone();
-    Ok(Json::object([
+    let prepared = PreparedPlan::prepare(plan)?;
+    Ok(canonical_plan_envelope(prepared.normalized_plan()))
+}
+
+pub(crate) fn canonical_plan_envelope(plan: Json) -> Json {
+    Json::object([
         ("protocolVersion", Json::Number(PROTOCOL_VERSION)),
         ("registryVersion", Json::Number(REGISTRY_VERSION)),
         ("canonicalProfile", Json::string(CANONICAL_PROFILE)),
-        ("numericProfile", Json::string("mesh-f32-bounds-v1")),
-        (
-            "plan",
-            Json::object([("subjects", subjects), ("claims", Json::Array(claims))]),
-        ),
-    ]))
-}
-
-fn refused_result(claim_id: &str, capability: &str) -> Json {
-    Json::Object(vec![
-        ("claimId".into(), Json::String(claim_id.into())),
-        ("status".into(), Json::String("refused".into())),
-        (
-            "diagnostics".into(),
-            Json::Array(vec![Json::Object(vec![
-                (
-                    "code".into(),
-                    Json::String("GEOSPEC_CAPABILITY_UNAVAILABLE".into()),
-                ),
-                ("severity".into(), Json::String("error".into())),
-                (
-                    "message".into(),
-                    Json::String("Capability is not implemented in this engine slice.".into()),
-                ),
-                (
-                    "details".into(),
-                    Json::Object(vec![("capability".into(), Json::String(capability.into()))]),
-                ),
-            ])]),
-        ),
+        ("numericProfile", Json::string(NUMERIC_PROFILE)),
+        ("plan", plan),
     ])
 }
 
-fn validate_versions(request: &[(String, Json)]) -> Result<(), ProtocolError> {
+pub(crate) fn validate_versions(request: &[(String, Json)]) -> Result<(), ProtocolError> {
     let protocol = number_field(request, "protocolVersion")?;
     if protocol != PROTOCOL_VERSION {
         return Err(ProtocolError::new(
@@ -508,7 +446,7 @@ fn validate_versions(request: &[(String, Json)]) -> Result<(), ProtocolError> {
     Ok(())
 }
 
-fn validate_content_hash(value: &str) -> Result<(), ProtocolError> {
+pub(crate) fn validate_content_hash(value: &str) -> Result<(), ProtocolError> {
     if value.len() == 64
         && value
             .bytes()
@@ -520,7 +458,7 @@ fn validate_content_hash(value: &str) -> Result<(), ProtocolError> {
     }
 }
 
-fn validate_budget(value: &Json) -> Result<(), ProtocolError> {
+pub(crate) fn validate_budget(value: &Json) -> Result<(), ProtocolError> {
     let Json::Number(value) = value else {
         return Err(ProtocolError::new(
             ErrorKind::InvalidClaim,
@@ -604,7 +542,10 @@ pub(crate) fn string_field<'a>(
     }
 }
 
-fn logical_id<'a>(object: &'a [(String, Json)], key: &str) -> Result<&'a str, ProtocolError> {
+pub(crate) fn logical_id<'a>(
+    object: &'a [(String, Json)],
+    key: &str,
+) -> Result<&'a str, ProtocolError> {
     let value = string_field(object, key)?;
     if value.is_empty() {
         invalid_request(format!("GeoSpec field '{key}' must not be empty."))
@@ -620,16 +561,6 @@ pub(crate) fn number_field(object: &[(String, Json)], key: &str) -> Result<f64, 
     }
 }
 
-fn string_array(value: &Json, name: &str) -> Result<Vec<String>, ProtocolError> {
-    array(value, name)?
-        .iter()
-        .map(|value| match value {
-            Json::String(value) if !value.is_empty() => Ok(value.clone()),
-            _ => invalid_request(format!("GeoSpec {name} must contain non-empty strings.")),
-        })
-        .collect()
-}
-
 fn invalid_request<T>(message: impl Into<String>) -> Result<T, ProtocolError> {
     Err(ProtocolError::new(ErrorKind::InvalidRequest, message))
 }
@@ -638,46 +569,46 @@ pub(crate) fn invalid_claim<T>(message: impl Into<String>) -> Result<T, Protocol
     Err(ProtocolError::new(ErrorKind::InvalidClaim, message))
 }
 
-fn as_invalid_claim(error: ProtocolError) -> ProtocolError {
+pub(crate) fn as_invalid_claim(error: ProtocolError) -> ProtocolError {
     ProtocolError::new(ErrorKind::InvalidClaim, error.to_string())
 }
 
 #[cfg(test)]
 mod batch_tests {
-    use super::Engine;
-    use crate::mesh::{Mesh, BOUNDS_CALLS};
+    use super::*;
     use serde_json::{json, Value};
+
+    fn fixture(hash: &str) -> (Engine, Rc<Subject>) {
+        let engine = Engine::new();
+        let retained = Subject::new(hash.into(), SubjectFormat::MeshBufferV1, "mm".into());
+        let mesh = Mesh {
+            positions: vec![[0.0, 0.0, 0.0], [3.0, 0.0, 0.0], [0.0, 2.0, 1.0]],
+            indices: vec![0, 1, 2],
+        };
+        let _ = retained.mesh_record.set(Rc::new(mesh.analysis_record()));
+        let retained = Rc::new(retained);
+        let mut engine = engine;
+        engine
+            .subjects
+            .insert(format!("mesh-f32-bounds-v1:{hash}"), Rc::clone(&retained));
+        (engine, retained)
+    }
 
     #[test]
     fn validates_the_complete_batch_before_computing_any_bounds() {
         let hash = "0".repeat(64);
-        let mut engine = Engine::new();
-        engine.subjects.insert(
-            hash.clone(),
-            Mesh {
-                positions: vec![[0.0, 0.0, 0.0], [3.0, 0.0, 0.0], [0.0, 2.0, 1.0]],
-                indices: vec![0, 1, 2],
-            },
-        );
-        let claim = json!({
-            "claimId": "first", "capability": "toHaveBoundingBox",
-            "subjectSlots": ["part"], "polarity": "positive", "workUnitBudget": 10,
-            "payload": { "kind": "boundingBox", "expected": { "size": {"x": 3} } }
-        });
-        let request = json!({
-            "method": "submitClaims", "requestId": "transport",
-            "protocolVersion": 3, "registryVersion": 4, "canonicalProfile": "geospec-jcs-v1",
-            "plan": {"subjects": [{"slot": "part", "contentHash": hash}], "claims": [claim]}
-        });
-        BOUNDS_CALLS.with(|count| count.set(0));
-        let encoded = serde_json::to_vec(&request).unwrap();
-        let plan = engine.canonical_plan(&encoded).unwrap();
-        assert_eq!(BOUNDS_CALLS.with(|count| count.get()), 0);
+        let (engine, retained) = fixture(&hash);
+        let claim = json!({"claimId":"first","capability":"toHaveBoundingBox","subjectSlots":["part"],"polarity":"positive","workUnitBudget":100,"payload":{"kind":"boundingBox","expected":{"size":{"x":3}}}});
+        let request = json!({"method":"submitClaims","requestId":"transport","protocolVersion":3,"registryVersion":4,"canonicalProfile":"geospec-jcs-v1","plan":{"subjects":[{"slot":"part","contentHash":hash}],"claims":[claim]}});
+        let plan = engine
+            .canonical_plan(&serde_json::to_vec(&request).unwrap())
+            .unwrap();
+        assert!(!retained.mesh_analysis_is_cached());
         let result: Value = serde_json::from_slice(&engine.evaluate_plan(&plan).unwrap()).unwrap();
         assert_eq!(result["results"][0]["status"], "passed");
-        assert_eq!(BOUNDS_CALLS.with(|count| count.get()), 1);
-
+        assert!(retained.mesh_analysis_is_cached());
         for variant in ["payload", "subject", "budget"] {
+            let (engine, retained) = fixture(&hash);
             let mut request = request.clone();
             let mut later = claim.clone();
             later["claimId"] = json!("later");
@@ -695,16 +626,23 @@ mod batch_tests {
                 .as_array_mut()
                 .unwrap()
                 .push(later);
-            BOUNDS_CALLS.with(|count| count.set(0));
-            let raw = engine
-                .process_request(&serde_json::to_vec(&request).unwrap())
-                .unwrap_err();
-            assert_eq!(raw.code(), "invalid-claim", "{variant}");
-            let normalized = engine
-                .evaluate_plan(&serde_json::to_vec(&neutral).unwrap())
-                .unwrap_err();
-            assert_eq!(normalized.code(), "invalid-claim", "{variant}");
-            assert_eq!(BOUNDS_CALLS.with(|count| count.get()), 0, "{variant}");
+            assert_eq!(
+                engine
+                    .process_request(&serde_json::to_vec(&request).unwrap())
+                    .unwrap_err()
+                    .code(),
+                "invalid-claim",
+                "{variant}"
+            );
+            assert_eq!(
+                engine
+                    .evaluate_plan(&serde_json::to_vec(&neutral).unwrap())
+                    .unwrap_err()
+                    .code(),
+                "invalid-claim",
+                "{variant}"
+            );
+            assert!(!retained.mesh_analysis_is_cached(), "{variant}");
         }
     }
 }

@@ -48,7 +48,7 @@ num-traits = "0.2"
 # src/robust/exact/backend.rs.
 dashu-int = { version = "0.5.1", default-features = false, features = ["std", "num-traits"] }
 dashu-ratio = { version = "0.5.1", default-features = false, features = ["std", "num-traits"] }
-clipper2-rust = "1.0.3"
+clipper2-rust = "=1.0.3"
 # Fast, *deterministic* (unseeded) hasher for the robust engine's hot maps.
 # Only used at sites whose iteration order provably never reaches the output
 # (each swap documents the invariant); SipHash's per-probe cost dominated the

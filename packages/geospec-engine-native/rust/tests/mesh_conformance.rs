@@ -141,9 +141,11 @@ fn rejects_missing_content_invalid_expectations_and_unsupported_routes() {
 
 #[test]
 fn advertises_the_same_bounded_experimental_capability_through_both_entrypoints() {
-    let manifest = fixtures();
+    // CONFIG-01 evolves experimental discovery; preserve historical fixture bytes.
+    let amendment: Value =
+        serde_json::from_str(include_str!("fixtures/initialize-config-01.json")).unwrap();
     let request = br#"{"method":"initialize","requestId":"r1","protocolVersion":3,"registryVersion":4,"canonicalProfile":"geospec-jcs-v1"}"#;
-    let expected = string(&manifest["a1Compatibility"], "initializeExpectedUtf8");
+    let expected = string(&amendment, "expectedUtf8");
     assert_response(
         Engine::new().process_request(request).expect("initialize"),
         expected,
@@ -154,4 +156,50 @@ fn advertises_the_same_bounded_experimental_capability_through_both_entrypoints(
         expected,
         "free initialize",
     );
+}
+
+// Successor envelope/evidence amendments are separate. These unchanged frozen
+// numerical controls specifically guard GSM1 indexed bounds and reconstruction.
+#[test]
+fn retains_frozen_indexed_gsm1_measurements_and_polarities() {
+    let manifest = fixtures();
+    let mut engine = Engine::new();
+    for fixture in manifest["fixtures"].as_array().unwrap() {
+        ingest(&mut engine, fixture);
+    }
+    let mut compared = 0;
+    for case in manifest["evaluations"].as_array().unwrap() {
+        let expected: Value = serde_json::from_str(string(case, "expectedUtf8")).unwrap();
+        // Numerical regression only: successor meshBase accounting is separately
+        // reviewed, so use a declared sufficient budget without editing goldens.
+        let mut request: Value = serde_json::from_str(string(case, "requestUtf8")).unwrap();
+        for claim in request["plan"]["claims"].as_array_mut().unwrap() {
+            claim["workUnitBudget"] = Value::from(8_000_000);
+        }
+        let actual: Value = serde_json::from_slice(
+            &engine
+                .process_request(&serde_json::to_vec(&request).unwrap())
+                .unwrap(),
+        )
+        .unwrap();
+        let expected_rows = expected["result"]["results"].as_array().unwrap();
+        let actual_rows = actual["result"]["results"].as_array().unwrap();
+        for (expected, actual) in expected_rows.iter().zip(actual_rows) {
+            if expected["evidence"]["measured"].is_null() {
+                continue;
+            }
+            assert_eq!(
+                actual["evidence"]["measured"], expected["evidence"]["measured"],
+                "{}: complete measured bounds",
+                case["name"]
+            );
+            assert_eq!(
+                actual["status"], expected["status"],
+                "{}: polarity",
+                case["name"]
+            );
+            compared += 1;
+        }
+    }
+    assert!(compared > 0);
 }

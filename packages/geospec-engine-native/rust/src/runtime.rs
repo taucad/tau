@@ -1,0 +1,522 @@
+//! Binary admission and explicit entry configuration for the shared engine.
+use std::{collections::HashSet, rc::Rc};
+
+use crate::{
+    analysis::mesh::{decode_glb, decode_gltf},
+    backend::{
+        resources::{BinaryAdmissionLimits, ResourceBundle},
+        AnalysisRetentionLimits, BackendError,
+    },
+    codec::{decode, encode, Json},
+    identity::{GltfFormat, MeshFrame, SubjectIdentity},
+    protocol::{
+        array, field, logical_id, number_field, object, optional_field, require_fields,
+        string_field, validate_content_hash, validate_versions,
+    },
+    subject::{Subject, SubjectFormat},
+    Engine, ErrorKind, ProtocolError,
+};
+
+/// Named implementation-entry bounds, independent of the control JSON ceiling.
+/// These values do not certify a production capacity or peak process RSS.
+#[derive(Clone, Debug)]
+pub struct EngineConfig {
+    pub binary: BinaryAdmissionLimits,
+    pub analysis: AnalysisRetentionLimits,
+    pub max_retained_subjects: u32,
+}
+
+impl EngineConfig {
+    pub fn entry() -> Self {
+        Self {
+            binary: BinaryAdmissionLimits {
+                profile_id: "geospec-entry-binary-v1".into(),
+                max_subject_bytes: 64 * 1024 * 1024,
+                max_resource_bytes: 64 * 1024 * 1024,
+                max_total_binary_bytes: 128 * 1024 * 1024,
+                max_vertices: 2_000_000,
+                max_triangles: 4_000_000,
+                max_occurrences: 65_536,
+            },
+            analysis: AnalysisRetentionLimits {
+                max_mesh_bytes: 256 * 1024 * 1024,
+                max_mesh_entries: 256,
+                max_solid_entries: 256,
+            },
+            max_retained_subjects: 32,
+        }
+    }
+}
+
+fn invalid(message: impl Into<String>) -> ProtocolError {
+    ProtocolError::new(ErrorKind::InvalidRequest, message)
+}
+fn limit(message: impl Into<String>) -> ProtocolError {
+    ProtocolError::new(ErrorKind::LimitExceeded, message)
+}
+fn backend(error: BackendError) -> ProtocolError {
+    // Backend failures during admission are input/operation errors, never a
+    // successful geometric predicate. Family evaluation has its own mapper.
+    ProtocolError::new(
+        match error.kind {
+            crate::backend::BackendErrorKind::InvalidInput => ErrorKind::InvalidRequest,
+            crate::backend::BackendErrorKind::Unsupported => ErrorKind::UnsupportedCapability,
+            crate::backend::BackendErrorKind::ComputationFailed => ErrorKind::BackendFailure,
+            crate::backend::BackendErrorKind::BudgetExceeded { .. } => ErrorKind::BackendFailure,
+        },
+        error.to_string(),
+    )
+}
+fn length(fields: &[(String, Json)], key: &str, actual: usize) -> Result<(), ProtocolError> {
+    let value = number_field(fields, key)?;
+    if value < 0.0
+        || value.fract() != 0.0
+        || value > 9_007_199_254_740_991.0
+        || value != actual as f64
+    {
+        return Err(invalid(format!(
+            "Declared {key} does not match the supplied binary length."
+        )));
+    }
+    Ok(())
+}
+fn relative_resource(name: &str) -> bool {
+    !name.is_empty()
+        && !name.contains(['\\', ':', '\0'])
+        && name.split('/').all(|part| !matches!(part, "" | "." | ".."))
+}
+
+fn decimal_u64(value: &str, name: &str) -> Result<u64, ProtocolError> {
+    let parsed = value
+        .parse::<u64>()
+        .map_err(|_| invalid(format!("Subject handle {name} must be a decimal u64.")))?;
+    if parsed == 0 || parsed.to_string() != value {
+        return Err(invalid(format!(
+            "Subject handle {name} must be a canonical positive decimal u64."
+        )));
+    }
+    Ok(parsed)
+}
+
+fn subject_key<'a>(
+    fields: &'a [(String, Json)],
+) -> Result<(String, &'static str, &'a str), ProtocolError> {
+    let (field, identity, prefix) = match (
+        optional_field(fields, "subjectHash"),
+        optional_field(fields, "contentHash"),
+    ) {
+        (Some(Json::String(identity)), None) => {
+            ("subjectHash", identity.as_str(), "geospec-subject-v1")
+        }
+        (None, Some(Json::String(identity))) => {
+            ("contentHash", identity.as_str(), "mesh-f32-bounds-v1")
+        }
+        (Some(_), None) => return Err(invalid("Subject handle subjectHash must be a string.")),
+        (None, Some(_)) => return Err(invalid("Subject handle contentHash must be a string.")),
+        _ => {
+            return Err(invalid(
+                "Subject handle requires exactly one of subjectHash or contentHash.",
+            ))
+        }
+    };
+    validate_content_hash(identity).map_err(|error| invalid(error.to_string()))?;
+    Ok((format!("{prefix}:{identity}"), field, identity))
+}
+
+impl Engine {
+    /// Owns primary/resource buffers in one transfer; geometry never enters JSON.
+    pub fn ingest_subject(
+        &mut self,
+        request: &[u8],
+        primary: Vec<u8>,
+        resources: Vec<Vec<u8>>,
+    ) -> Result<Vec<u8>, ProtocolError> {
+        let value = decode(request)?;
+        let fields = object(&value, "ingestSubject request")?;
+        let names = [
+            "method",
+            "requestId",
+            "protocolVersion",
+            "registryVersion",
+            "canonicalProfile",
+            "format",
+            "frame",
+            "ingestOptions",
+            "primaryByteLength",
+            "resources",
+        ];
+        require_fields(fields, &names, &names, "ingestSubject request")?;
+        validate_versions(fields)?;
+        if string_field(fields, "method")? != "ingestSubject" {
+            return Err(invalid(
+                "Binary subject admission requires method ingestSubject.",
+            ));
+        }
+        let request_id = logical_id(fields, "requestId")?;
+        let format = string_field(fields, "format")?;
+        length(fields, "primaryByteLength", primary.len())?;
+        if primary.len() as u64 > self.config.binary.max_subject_bytes {
+            return Err(limit(
+                "Primary geometry exceeds the configured binary subject limit.",
+            ));
+        }
+        let metadata = array(field(fields, "resources")?, "resources")?;
+        if metadata.len() != resources.len() {
+            return Err(invalid(
+                "Resource metadata and binary buffer counts differ.",
+            ));
+        }
+        let mut names = HashSet::new();
+        let mut total = primary.len() as u64;
+        // Validate the whole binary closure before moving buffers into the map,
+        // decoding primary data, or calling a retained backend.
+        for (metadata, bytes) in metadata.iter().zip(&resources) {
+            let fields = object(metadata, "resource metadata")?;
+            require_fields(
+                fields,
+                &["name", "byteLength"],
+                &["name", "byteLength"],
+                "resource metadata",
+            )?;
+            let name = string_field(fields, "name")?;
+            if !relative_resource(name) || !names.insert(name) {
+                return Err(invalid(
+                    "Resource names must be unique normalized relative paths.",
+                ));
+            }
+            length(fields, "byteLength", bytes.len())?;
+            if bytes.len() as u64 > self.config.binary.max_resource_bytes {
+                return Err(limit(
+                    "Geometry resource exceeds the configured binary resource limit.",
+                ));
+            }
+            total = total
+                .checked_add(bytes.len() as u64)
+                .ok_or_else(|| limit("Binary closure length overflow."))?;
+        }
+        if total > self.config.binary.max_total_binary_bytes {
+            return Err(limit(
+                "Binary closure exceeds the configured total binary limit.",
+            ));
+        }
+        let frame = object(field(fields, "frame")?, "frame")?;
+        require_fields(
+            frame,
+            &["coordinateSystem", "sourceUnit", "outputUnit"],
+            &["coordinateSystem", "sourceUnit", "outputUnit"],
+            "frame",
+        )?;
+        let options = object(field(fields, "ingestOptions")?, "ingestOptions")?;
+        require_fields(
+            options,
+            if format == "step" { &["name"] } else { &[] },
+            &[],
+            "ingestOptions",
+        )?;
+        let step_name = if optional_field(options, "name").is_some() {
+            Some(string_field(options, "name")?)
+        } else {
+            None
+        };
+        let mut bundle = ResourceBundle::default();
+        for (metadata, bytes) in metadata.iter().zip(resources) {
+            let name = string_field(object(metadata, "resource metadata")?, "name")?;
+            bundle.entries.insert(name.into(), bytes);
+        }
+        let retained = match format {
+            "rational-plate" => {
+                if !bundle.entries.is_empty()
+                    || string_field(frame, "coordinateSystem")? != "z-up"
+                    || string_field(frame, "sourceUnit")? != "mm"
+                    || string_field(frame, "outputUnit")? != "mm"
+                {
+                    return Err(invalid("Rational plate entry requires z-up/mm, unchanged coordinates and no resources."));
+                }
+                let source = crate::certificates::plate_syntax::PlateSource::decode(primary)
+                    .map_err(|error| invalid(error.to_string()))?;
+                let identity = SubjectIdentity::rational_plate(&source).map_err(backend)?;
+                let mut retained = Subject::new(
+                    identity.primary_hash().to_owned(),
+                    SubjectFormat::RationalPlate,
+                    "mm".into(),
+                );
+                let _ = retained.semantic_identity.set(identity);
+                retained.rational_plate = Some(
+                    crate::certificates::engine::RationalSubject::new(source)
+                        .map_err(|error| limit(error.to_string()))?,
+                );
+                retained
+            }
+            "gltf" | "glb" => {
+                let applied = MeshFrame::new(
+                    string_field(frame, "coordinateSystem")?,
+                    string_field(frame, "sourceUnit")?,
+                    string_field(frame, "outputUnit")?,
+                )
+                .map_err(backend)?;
+                let decoded = if format == "gltf" {
+                    decode_gltf(&primary, &bundle, applied.uniform_scale())
+                } else {
+                    decode_glb(&primary, &bundle, applied.uniform_scale())
+                }
+                .map_err(|error| invalid(error.to_string()))?;
+                if decoded.record.positions.len() as u64
+                    > u64::from(self.config.binary.max_vertices)
+                    || decoded.record.triangles.len() as u64
+                        > u64::from(self.config.binary.max_triangles)
+                {
+                    return Err(limit(
+                        "Decoded mesh exceeds configured vertex or triangle limits.",
+                    ));
+                }
+                let identity = SubjectIdentity::gltf(
+                    &primary,
+                    &bundle,
+                    &decoded.consumed_resources,
+                    if format == "gltf" {
+                        GltfFormat::Json
+                    } else {
+                        GltfFormat::Binary
+                    },
+                    applied,
+                )
+                .map_err(backend)?;
+                let retained = Subject::new(
+                    identity.primary_hash().to_owned(),
+                    if format == "gltf" {
+                        SubjectFormat::Gltf
+                    } else {
+                        SubjectFormat::Glb
+                    },
+                    string_field(frame, "outputUnit")?.into(),
+                );
+                let _ = retained.semantic_identity.set(identity);
+                let _ = retained.mesh_record.set(Rc::new(decoded.record));
+                retained
+            }
+            "step" => {
+                if !bundle.entries.is_empty() {
+                    return Err(invalid(
+                        "Byte-only STEP admission does not support external resources.",
+                    ));
+                }
+                if string_field(frame, "coordinateSystem")? != "z-up"
+                    || string_field(frame, "sourceUnit")? != "auto"
+                    || string_field(frame, "outputUnit")? != "mm"
+                {
+                    return Err(invalid(
+                        "STEP entry requires z-up, sourceUnit auto and outputUnit mm.",
+                    ));
+                }
+                let connector = self
+                    .brep
+                    .as_ref()
+                    .ok_or_else(|| invalid("This engine composition has no BRep connector."))?;
+                let document = connector.open_step(&primary).map_err(backend)?;
+                let facts = document.admission_facts().map_err(backend)?;
+                if facts.occurrence_count as u64 > u64::from(self.config.binary.max_occurrences) {
+                    return Err(limit(
+                        "STEP document exceeds the configured occurrence limit.",
+                    ));
+                }
+                let identity = SubjectIdentity::step(
+                    &primary,
+                    &facts.source_length_unit,
+                    facts.source_unit_to_millimeters,
+                    connector.identity_profile(),
+                    step_name,
+                )
+                .map_err(backend)?;
+                let mut retained = Subject::new(
+                    identity.primary_hash().to_owned(),
+                    SubjectFormat::Step,
+                    "mm".into(),
+                );
+                let _ = retained.semantic_identity.set(identity);
+                retained.display_name = step_name.unwrap_or("step").into();
+                retained.brep = Some(document);
+                retained
+            }
+            _ => {
+                return Err(invalid(format!(
+                    "Unsupported binary subject format '{format}'."
+                )))
+            }
+        };
+        let identity = retained
+            .semantic_identity
+            .get()
+            .expect("Full-format admission constructs identity");
+        let response = encode(&Json::object([
+            ("requestId", Json::string(request_id)),
+            (
+                "result",
+                Json::object([(
+                    "subject",
+                    Json::object([
+                        ("subjectHash", Json::string(identity.hash())),
+                        ("format", Json::string(format)),
+                        ("descriptor", identity.descriptor().clone()),
+                    ]),
+                )]),
+            ),
+        ]))?;
+        self.admit_retained(retained)?;
+        Ok(response)
+    }
+
+    /// Returns stable session metadata for one admitted semantic subject.
+    pub fn subject_handle(&self, request: &[u8]) -> Result<Vec<u8>, ProtocolError> {
+        let value = decode(request)?;
+        let fields = object(&value, "subjectHandle request")?;
+        let allowed = [
+            "method",
+            "requestId",
+            "protocolVersion",
+            "registryVersion",
+            "canonicalProfile",
+            "subjectHash",
+            "contentHash",
+        ];
+        let required = [
+            "method",
+            "requestId",
+            "protocolVersion",
+            "registryVersion",
+            "canonicalProfile",
+        ];
+        require_fields(fields, &allowed, &required, "subjectHandle request")?;
+        validate_versions(fields)?;
+        if string_field(fields, "method")? != "subjectHandle" {
+            return Err(invalid(
+                "Subject handle acquisition requires method subjectHandle.",
+            ));
+        }
+        let request_id = logical_id(fields, "requestId")?;
+        let (key, identity_field, identity) = subject_key(fields)?;
+        if !self.subjects.contains_key(&key) {
+            return Err(invalid(
+                "Subject handle identity is not admitted in this Engine.",
+            ));
+        }
+        let generation = self.subject_generations.get(&key).ok_or_else(|| {
+            ProtocolError::new(
+                ErrorKind::BackendFailure,
+                "Admitted subject has no lifecycle generation.",
+            )
+        })?;
+        encode(&Json::object([
+            ("requestId", Json::string(request_id)),
+            (
+                "result",
+                Json::object([(
+                    "subjectHandle",
+                    Json::object([
+                        ("owner", Json::string(&self.owner.to_string())),
+                        ("generation", Json::string(&generation.to_string())),
+                        (identity_field, Json::string(identity)),
+                    ]),
+                )]),
+            ),
+        ]))
+    }
+
+    /// Releases one generation-checked subject and all subject-owned retention.
+    pub fn release_subject(&mut self, request: &[u8]) -> Result<Vec<u8>, ProtocolError> {
+        let value = decode(request)?;
+        let fields = object(&value, "releaseSubject request")?;
+        let names = [
+            "method",
+            "requestId",
+            "protocolVersion",
+            "registryVersion",
+            "canonicalProfile",
+            "subjectHandle",
+        ];
+        require_fields(fields, &names, &names, "releaseSubject request")?;
+        validate_versions(fields)?;
+        if string_field(fields, "method")? != "releaseSubject" {
+            return Err(invalid("Subject release requires method releaseSubject."));
+        }
+        let request_id = logical_id(fields, "requestId")?;
+        let handle = object(field(fields, "subjectHandle")?, "subjectHandle")?;
+        require_fields(
+            handle,
+            &["owner", "generation", "subjectHash", "contentHash"],
+            &["owner", "generation"],
+            "subjectHandle",
+        )?;
+        let owner = decimal_u64(string_field(handle, "owner")?, "owner")?;
+        if owner != self.owner {
+            return Err(invalid(
+                "Subject handle belongs to a different Engine owner.",
+            ));
+        }
+        let generation = decimal_u64(string_field(handle, "generation")?, "generation")?;
+        let (key, _, _) = subject_key(handle)?;
+        let Some(current) = self.subject_generations.get(&key).copied() else {
+            return encode(&Json::object([
+                ("requestId", Json::string(request_id)),
+                ("result", Json::object([("released", Json::Bool(false))])),
+            ]));
+        };
+        if current != generation {
+            return Err(invalid(
+                "Subject handle generation does not match the admitted subject.",
+            ));
+        }
+        let mut connector = self.csg.borrow_mut();
+        if let Some(connector) = connector.as_mut() {
+            self.retained_solids
+                .borrow_mut()
+                .release_subject(&key, connector.as_mut())
+                .map_err(|error| {
+                    ProtocolError::new(ErrorKind::BackendFailure, error.to_string())
+                })?;
+        }
+        self.subjects.remove(&key);
+        self.subject_generations.remove(&key);
+        encode(&Json::object([
+            ("requestId", Json::string(request_id)),
+            ("result", Json::object([("released", Json::Bool(true))])),
+        ]))
+    }
+
+    pub(crate) fn admit_retained(&mut self, mut retained: Subject) -> Result<(), ProtocolError> {
+        retained.retention_limits = self.config.analysis;
+        retained.binary_limits = self.config.binary.clone();
+        let key = retained.cache_identity().map_err(backend)?;
+        if self.subjects.contains_key(&key) {
+            return Ok(());
+        }
+        if self.subjects.len() as u64 >= u64::from(self.config.max_retained_subjects) {
+            return Err(limit(
+                "Engine exceeds the configured retained subject count.",
+            ));
+        }
+        let generation = self
+            .next_generation
+            .checked_add(1)
+            .ok_or_else(|| limit("Engine subject generation counter exhausted."))?;
+        if let Some(plate) = &retained.rational_plate {
+            let metadata_bytes = std::mem::size_of::<Subject>()
+                + 2 * std::mem::size_of::<usize>()
+                + key.capacity()
+                + retained.content_hash.capacity()
+                + retained.source_unit.capacity()
+                + retained.display_name.capacity()
+                + retained
+                    .semantic_identity
+                    .get()
+                    .expect("rational identity")
+                    .owned_bytes();
+            plate
+                .attach(&self.plate_retention, metadata_bytes)
+                .map_err(|error| limit(error.to_string()))?;
+        }
+        self.next_generation = generation;
+        self.subject_generations.insert(key.clone(), generation);
+        self.subjects.insert(key, Rc::new(retained));
+        Ok(())
+    }
+}

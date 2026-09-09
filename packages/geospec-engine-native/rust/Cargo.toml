@@ -5,12 +5,51 @@ edition = "2021"
 rust-version = "1.88"
 license = "Apache-2.0"
 publish = false
+autotests = false
 
 [dependencies]
+gltf = { version = "=1.4.1", default-features = false, features = ["utils", "names"] }
+num-bigint = "=0.4.6"
+num-integer = "=0.1.46"
+num-rational = "=0.4.2"
+num-traits = "=0.2.19"
+regress = { version = "=0.11.1", default-features = false, features = ["std", "utf16"] }
 ryu-js = "=1.0.2"
-serde = "=1.0.219"
+serde = { version = "=1.0.219", features = ["derive"] }
 serde_json = { version = "=1.0.143", features = ["float_roundtrip"] }
 sha2 = { version = "=0.10.9", features = ["force-soft"] }
 
 [lib]
 path = "src/lib.rs"
+
+[[test]]
+name = "protocol_conformance"
+path = "tests/protocol_conformance.rs"
+
+[[test]]
+name = "mesh_conformance"
+path = "tests/mesh_conformance.rs"
+
+[[test]]
+name = "plan_conformance"
+path = "tests/plan_conformance.rs"
+
+[[test]]
+name = "matcher_proofs"
+path = "tests/matcher_proofs.rs"
+
+[[test]]
+name = "gltf_instances"
+path = "tests/gltf_instances.rs"
+
+[[test]]
+name = "effective_defaults"
+path = "tests/effective_defaults.rs"
+
+[[test]]
+name = "rational_plate_producer"
+path = "tests/rational_plate_producer.rs"
+
+[[test]]
+name = "rational_plate_verifier"
+path = "tests/rational_plate_verifier.rs"

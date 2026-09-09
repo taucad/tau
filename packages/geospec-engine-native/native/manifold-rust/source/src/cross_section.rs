@@ -12,16 +12,48 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use clipper2_rust::{area, difference_d, inflate_paths_d, intersect_d, minkowski_sum_d, simplify_paths, union_d, EndType, JoinType, PathD, PathsD, Point};
-pub use clipper2_rust::FillRule;
 use crate::types::OpType;
+pub use clipper2_rust::FillRule;
+use clipper2_rust::{
+    area, inflate_paths_d, minkowski_sum_d, simplify_paths, union_d, ClipType, ClipperD, EndType,
+    JoinType, PathD, PathsD, Point, PolyTreeD,
+};
 
 use crate::linalg::Vec2;
 use crate::math;
 use crate::types::{Polygons, Rect};
 
-// Manifold 3.4.1 CrossSection's ClipperD decimal precision.
+// Manifold 3.4.1 uses this precision for construction, booleans, and decomposition.
 const PRECISION: i32 = 8;
+
+#[derive(Clone, Copy)]
+enum BooleanOperation {
+    Union,
+    Intersection,
+    Difference,
+}
+
+/// A checked CrossSection conversion or clipping failure.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CrossSectionError {
+    /// A coordinate cannot be represented on the operation's integer grid.
+    CoordinateOutOfRange,
+    /// Clipper could not complete the requested operation.
+    ClipperFailure,
+}
+
+impl std::fmt::Display for CrossSectionError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::CoordinateOutOfRange => {
+                formatter.write_str("CrossSection coordinate out of range")
+            }
+            Self::ClipperFailure => formatter.write_str("CrossSection clipping failed"),
+        }
+    }
+}
+
+impl std::error::Error for CrossSectionError {}
 
 #[derive(Clone, Debug, Default)]
 pub struct CrossSection {
@@ -36,9 +68,50 @@ fn to_paths(polygons: &Polygons) -> PathsD {
 }
 
 fn from_paths(paths: &PathsD) -> Polygons {
-    paths.iter()
+    paths
+        .iter()
         .map(|path| path.iter().map(|p| Vec2::new(p.x, p.y)).collect())
         .collect()
+}
+
+fn validate_paths(paths: &PathsD) -> Result<(), CrossSectionError> {
+    if paths
+        .iter()
+        .flatten()
+        .any(|point| !point.x.is_finite() || !point.y.is_finite())
+    {
+        return Err(CrossSectionError::CoordinateOutOfRange);
+    }
+    Ok(())
+}
+
+fn boolean_paths(
+    subjects: &Polygons,
+    clips: &Polygons,
+    operation: BooleanOperation,
+    fill_rule: FillRule,
+    precision: i32,
+) -> Result<Polygons, CrossSectionError> {
+    let subjects = to_paths(subjects);
+    let clips = to_paths(clips);
+    validate_paths(&subjects)?;
+    validate_paths(&clips)?;
+    let clip_type = match operation {
+        BooleanOperation::Union => ClipType::Union,
+        BooleanOperation::Intersection => ClipType::Intersection,
+        BooleanOperation::Difference => ClipType::Difference,
+    };
+    let mut clipper = ClipperD::new(precision);
+    clipper.add_subject(&subjects);
+    clipper.add_clip(&clips);
+    if clipper.error_code() != 0 {
+        return Err(CrossSectionError::CoordinateOutOfRange);
+    }
+    let mut result = PathsD::new();
+    if !clipper.execute(clip_type, fill_rule, &mut result, None) || clipper.error_code() != 0 {
+        return Err(CrossSectionError::ClipperFailure);
+    }
+    Ok(from_paths(&result))
 }
 
 fn signed_area(poly: &[Vec2]) -> f64 {
@@ -64,13 +137,25 @@ impl CrossSection {
 
     /// Normalize all contours together with an explicit winding rule.
     pub fn from_polygons_with_fill_rule(polygons: Polygons, fill_rule: FillRule) -> Self {
+        Self::try_from_polygons_with_fill_rule(polygons, fill_rule)
+            .expect("CrossSection construction failed")
+    }
+
+    /// Normalize contours while preserving conversion and clipping failures.
+    pub fn try_from_polygons_with_fill_rule(
+        polygons: Polygons,
+        fill_rule: FillRule,
+    ) -> Result<Self, CrossSectionError> {
         if polygons.is_empty() {
-            return Self::default();
+            return Ok(Self::default());
         }
-        let paths = to_paths(&polygons);
-        let empty = PathsD::new();
-        let result = union_d(&paths, &empty, fill_rule, PRECISION);
-        Self { polygons: from_paths(&result) }
+        Ok(Self::new(boolean_paths(
+            &polygons,
+            &Vec::new(),
+            BooleanOperation::Union,
+            fill_rule,
+            PRECISION,
+        )?))
     }
 
     /// Create a CrossSection from a Rect (axis-aligned rectangle).
@@ -161,22 +246,61 @@ impl CrossSection {
     }
 
     pub fn union(&self, other: &Self) -> Self {
-        Self::new(from_paths(&union_d(&to_paths(&self.polygons), &to_paths(&other.polygons), FillRule::NonZero, 6)))
+        self.try_union(other).expect("CrossSection union failed")
+    }
+
+    /// Union two sections while preserving conversion and clipping failures.
+    pub fn try_union(&self, other: &Self) -> Result<Self, CrossSectionError> {
+        Ok(Self::new(boolean_paths(
+            &self.polygons,
+            &other.polygons,
+            BooleanOperation::Union,
+            FillRule::Positive,
+            PRECISION,
+        )?))
     }
 
     pub fn intersection(&self, other: &Self) -> Self {
-        Self::new(from_paths(&intersect_d(&to_paths(&self.polygons), &to_paths(&other.polygons), FillRule::NonZero, 6)))
+        self.try_intersection(other)
+            .expect("CrossSection intersection failed")
+    }
+
+    /// Intersect two sections while preserving conversion and clipping failures.
+    pub fn try_intersection(&self, other: &Self) -> Result<Self, CrossSectionError> {
+        Ok(Self::new(boolean_paths(
+            &self.polygons,
+            &other.polygons,
+            BooleanOperation::Intersection,
+            FillRule::Positive,
+            PRECISION,
+        )?))
     }
 
     pub fn difference(&self, other: &Self) -> Self {
-        Self::new(from_paths(&difference_d(&to_paths(&self.polygons), &to_paths(&other.polygons), FillRule::NonZero, 6)))
+        self.try_difference(other)
+            .expect("CrossSection difference failed")
+    }
+
+    /// Subtract a section while preserving conversion and clipping failures.
+    pub fn try_difference(&self, other: &Self) -> Result<Self, CrossSectionError> {
+        Ok(Self::new(boolean_paths(
+            &self.polygons,
+            &other.polygons,
+            BooleanOperation::Difference,
+            FillRule::Positive,
+            PRECISION,
+        )?))
     }
 
     pub fn scale(&self, v: Vec2) -> Self {
         Self::new(
             self.polygons
                 .iter()
-                .map(|poly| poly.iter().map(|p| Vec2::new(p.x * v.x, p.y * v.y)).collect())
+                .map(|poly| {
+                    poly.iter()
+                        .map(|p| Vec2::new(p.x * v.x, p.y * v.y))
+                        .collect()
+                })
                 .collect(),
         )
     }
@@ -240,12 +364,31 @@ impl CrossSection {
     /// Decompose into connected components. Each component maintains its
     /// contours (outer boundary + holes).
     pub fn decompose(&self) -> Vec<Self> {
+        self.try_decompose()
+            .expect("CrossSection decomposition failed")
+    }
+
+    /// Decompose into connected components while preserving Clipper failures.
+    pub fn try_decompose(&self) -> Result<Vec<Self>, CrossSectionError> {
         // Let Clipper's polygon tree own exact containment, including nested
         // islands. A containing bounding box does not establish hole membership.
-        let mut clipper = clipper2_rust::ClipperD::new(PRECISION);
-        clipper.add_subject(&to_paths(&self.polygons));
-        let mut tree = clipper2_rust::PolyTreeD::new();
-        clipper.execute_tree(clipper2_rust::ClipType::Union, FillRule::NonZero, &mut tree, &mut PathsD::new());
+        let paths = to_paths(&self.polygons);
+        validate_paths(&paths)?;
+        let mut clipper = ClipperD::new(PRECISION);
+        clipper.add_subject(&paths);
+        if clipper.error_code() != 0 {
+            return Err(CrossSectionError::CoordinateOutOfRange);
+        }
+        let mut tree = PolyTreeD::new();
+        if !clipper.execute_tree(
+            ClipType::Union,
+            FillRule::Positive,
+            &mut tree,
+            &mut PathsD::new(),
+        ) || clipper.error_code() != 0
+        {
+            return Err(CrossSectionError::ClipperFailure);
+        }
         let mut pending = tree.nodes[0].children().to_vec();
         let mut components = Vec::new();
         while let Some(outer) = pending.pop() {
@@ -256,7 +399,7 @@ impl CrossSection {
             }
             components.push(Self::new(from_paths(&paths)));
         }
-        components
+        Ok(components)
     }
 
     /// Simplify contours by removing near-collinear vertices.
@@ -278,10 +421,18 @@ impl CrossSection {
                 let (mut min_x, mut min_y) = (f64::MAX, f64::MAX);
                 let (mut max_x, mut max_y) = (f64::MIN, f64::MIN);
                 for p in poly {
-                    if p.x < min_x { min_x = p.x; }
-                    if p.x > max_x { max_x = p.x; }
-                    if p.y < min_y { min_y = p.y; }
-                    if p.y > max_y { max_y = p.y; }
+                    if p.x < min_x {
+                        min_x = p.x;
+                    }
+                    if p.x > max_x {
+                        max_x = p.x;
+                    }
+                    if p.y < min_y {
+                        min_y = p.y;
+                    }
+                    if p.y > max_y {
+                        max_y = p.y;
+                    }
                 }
                 let max_size = (max_x - min_x).max(max_y - min_y);
                 a > max_size * epsilon
@@ -292,7 +443,15 @@ impl CrossSection {
     }
 
     pub fn offset(&self, delta: f64) -> Self {
-        Self::new(from_paths(&inflate_paths_d(&to_paths(&self.polygons), delta, JoinType::Round, EndType::Polygon, 2.0, 6, 0.0)))
+        Self::new(from_paths(&inflate_paths_d(
+            &to_paths(&self.polygons),
+            delta,
+            JoinType::Round,
+            EndType::Polygon,
+            2.0,
+            6,
+            0.0,
+        )))
     }
 
     /// Offset with explicit join type and segment count.
@@ -355,14 +514,26 @@ impl CrossSection {
         let paths = PathsD::from(vec![path]);
         let empty = PathsD::new();
         let result = union_d(&paths, &empty, fr, 6);
-        Self { polygons: from_paths(&result) }
+        Self {
+            polygons: from_paths(&result),
+        }
     }
 
     /// Apply a function to every vertex in-place.
     pub fn warp<F: FnMut(&mut Vec2)>(&self, mut f: F) -> Self {
-        let polys = self.polygons.iter().map(|poly| {
-            poly.iter().map(|&v| { let mut v2 = v; f(&mut v2); v2 }).collect()
-        }).collect();
+        let polys = self
+            .polygons
+            .iter()
+            .map(|poly| {
+                poly.iter()
+                    .map(|&v| {
+                        let mut v2 = v;
+                        f(&mut v2);
+                        v2
+                    })
+                    .collect()
+            })
+            .collect();
         Self { polygons: polys }
     }
 
@@ -381,7 +552,9 @@ impl CrossSection {
                     }
                 }
                 let empty = PathsD::new();
-                Self { polygons: from_paths(&union_d(&paths, &empty, FillRule::NonZero, 6)) }
+                Self {
+                    polygons: from_paths(&union_d(&paths, &empty, FillRule::NonZero, 6)),
+                }
             }
             OpType::Subtract => {
                 let mut result = sections[0].clone();
@@ -402,7 +575,8 @@ impl CrossSection {
 
     /// Compute convex hull of all vertices in a slice of CrossSections.
     pub fn hull_cross_sections(sections: &[Self]) -> Self {
-        let points: Vec<Vec2> = sections.iter()
+        let points: Vec<Vec2> = sections
+            .iter()
             .flat_map(|s| s.polygons.iter().flat_map(|p| p.iter().cloned()))
             .collect();
         Self::hull_points(&points)
@@ -414,7 +588,11 @@ impl CrossSection {
             return Self::default();
         }
         let mut pts: Vec<Vec2> = points.to_vec();
-        pts.sort_by(|a, b| a.x.partial_cmp(&b.x).unwrap().then(a.y.partial_cmp(&b.y).unwrap()));
+        pts.sort_by(|a, b| {
+            a.x.partial_cmp(&b.x)
+                .unwrap()
+                .then(a.y.partial_cmp(&b.y).unwrap())
+        });
         pts.dedup_by(|a, b| (a.x - b.x).abs() < 1e-10 && (a.y - b.y).abs() < 1e-10);
 
         let cross = |o: Vec2, a: Vec2, b: Vec2| -> f64 {
@@ -422,11 +600,13 @@ impl CrossSection {
         };
 
         let n = pts.len();
-        if n < 3 { return Self::default(); }
+        if n < 3 {
+            return Self::default();
+        }
         let mut hull: Vec<Vec2> = Vec::with_capacity(2 * n);
         // Lower hull
         for &p in &pts {
-            while hull.len() >= 2 && cross(hull[hull.len()-2], hull[hull.len()-1], p) <= 0.0 {
+            while hull.len() >= 2 && cross(hull[hull.len() - 2], hull[hull.len() - 1], p) <= 0.0 {
                 hull.pop();
             }
             hull.push(p);
@@ -434,20 +614,25 @@ impl CrossSection {
         // Upper hull
         let lower_len = hull.len();
         for &p in pts.iter().rev() {
-            while hull.len() > lower_len && cross(hull[hull.len()-2], hull[hull.len()-1], p) <= 0.0 {
+            while hull.len() > lower_len
+                && cross(hull[hull.len() - 2], hull[hull.len() - 1], p) <= 0.0
+            {
                 hull.pop();
             }
             hull.push(p);
         }
         hull.pop(); // last point == first
-        if hull.len() < 3 { return Self::default(); }
+        if hull.len() < 3 {
+            return Self::default();
+        }
         Self::new(vec![hull])
     }
 
     /// Compose (merge) multiple CrossSections by combining all their contours.
     /// Matches C++ CrossSection::Compose(vector<CrossSection>) which unions all polygons.
     pub fn compose(sections: &[Self]) -> Self {
-        let all: Vec<Vec<Vec2>> = sections.iter()
+        let all: Vec<Vec<Vec2>> = sections
+            .iter()
             .flat_map(|s| s.polygons.iter().cloned())
             .collect();
         if all.is_empty() {
@@ -479,6 +664,50 @@ mod tests {
     }
 
     #[test]
+    fn test_cross_section_boolean_uses_pinned_precision() {
+        let rectangle = |min_x: f64, max_x: f64| {
+            CrossSection::new(vec![vec![
+                Vec2::new(min_x, 0.0),
+                Vec2::new(max_x, 0.0),
+                Vec2::new(max_x, 1.0),
+                Vec2::new(min_x, 1.0),
+            ]])
+        };
+        let left = CrossSection::from_polygons_with_fill_rule(
+            rectangle(0.0, 2.0).to_polygons(),
+            FillRule::Positive,
+        );
+        let right = CrossSection::from_polygons_with_fill_rule(
+            rectangle(2.0 - 9e-7, 3.0).to_polygons(),
+            FillRule::Positive,
+        );
+        let intersection = left.intersection(&right);
+        let lower = 1.9999990984797478;
+        assert_eq!(
+            intersection.to_polygons(),
+            vec![vec![
+                Vec2::new(2.0, 1.0),
+                Vec2::new(lower, 1.0),
+                Vec2::new(lower, 0.0),
+                Vec2::new(2.0, 0.0),
+            ]]
+        );
+        assert_eq!(intersection.area(), 9.015202522277832e-7);
+        let decomposed = intersection.decompose();
+        assert_eq!(
+            decomposed[0].to_polygons(),
+            vec![vec![
+                Vec2::new(2.0, 1.0),
+                Vec2::new(lower, 1.0),
+                Vec2::new(lower, 0.0),
+                Vec2::new(2.0, 0.0),
+            ]]
+        );
+
+        assert_eq!(right.bounds().min.x, lower);
+    }
+
+    #[test]
     fn test_cross_section_offset() {
         let a = CrossSection::square(1.0);
         let b = a.offset(0.25);
@@ -489,10 +718,7 @@ mod tests {
     #[test]
     fn test_cpp_cross_section_square() {
         let cs = CrossSection::square(5.0);
-        let a = crate::manifold::Manifold::cube(
-            crate::linalg::Vec3::new(5.0, 5.0, 5.0),
-            false,
-        );
+        let a = crate::manifold::Manifold::cube(crate::linalg::Vec3::new(5.0, 5.0, 5.0), false);
         let b = crate::manifold::Manifold::extrude(
             &cs.to_polygons(),
             5.0,
@@ -513,6 +739,9 @@ mod tests {
     fn test_cpp_cross_section_empty() {
         let polys: crate::types::Polygons = vec![vec![], vec![]];
         let cs = CrossSection::new(polys);
-        assert!(cs.area().abs() < 1e-10, "CrossSection from empty polygons should have zero area");
+        assert!(
+            cs.area().abs() < 1e-10,
+            "CrossSection from empty polygons should have zero area"
+        );
     }
 }

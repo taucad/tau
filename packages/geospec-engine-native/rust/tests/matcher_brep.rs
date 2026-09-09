@@ -694,6 +694,29 @@ fn evaluation_context_drives_all_eleven_matcher_families_with_one_brep_unit() {
                 assert!(object_field(&evidence, "expected").is_none());
                 let measured = object_field(&evidence, "measured").unwrap();
                 let witnesses = object_field(&evidence, "witnesses").unwrap();
+                let measurement_contract = object_field(witnesses, "measurementContract");
+                if matches!(
+                    capability,
+                    Capability::ToHavePlanarFace
+                        | Capability::ToHaveCylindricalFace
+                        | Capability::ToHaveCircularHole
+                ) {
+                    let contract = measurement_contract.unwrap();
+                    assert_eq!(
+                        object_field(contract, "profile"),
+                        Some(&Json::string("geospec-feature-metric-nominal-v1"))
+                    );
+                    assert_eq!(
+                        object_field(contract, "errorEnclosure"),
+                        Some(&Json::Bool(false))
+                    );
+                    assert_eq!(
+                        object_field(contract, "axisLabels").is_some(),
+                        capability != Capability::ToHavePlanarFace
+                    );
+                } else {
+                    assert!(measurement_contract.is_none());
+                }
                 match capability {
                     Capability::ToHaveStepUnits => {
                         assert_eq!(measured, &Json::string("mm"));
@@ -1371,4 +1394,103 @@ fn product_structure_preserves_path_and_row_major_placement_witness() {
     .unwrap();
     assert!(result.positive);
     assert_eq!(result.witnesses, crate::codec::decode(br#"{"structure":[{"name":"left","path":"left","transform":[0,-1,0,3,1,0,0,-4,0,0,1,5,0,0,0,1]}],"missing":[]}"#).unwrap());
+}
+
+#[test]
+fn nominal_feature_metrics_preserve_authored_thresholds_without_enclosures() {
+    let brep = RetainedBrep::complete();
+    let features = derive_features(&brep, &brep.facts, false).unwrap();
+    let next_radius = f64::from_bits(1.0_f64.to_bits() + 1);
+    let mut cylinder = CylindricalExpectation {
+        radius: next_radius,
+        axis: Axis::Z,
+        tolerance: 0.0,
+    };
+    let red = expected_cylinder(&cylinder)(&features);
+    assert!(!red.positive);
+    assert_eq!(red.diagnostics.len(), 1);
+    assert_eq!(
+        object_field(red.diagnostics[0].details.as_ref().unwrap(), "expected"),
+        Some(&cylinder.to_json())
+    );
+    let contract = object_field(&red.witnesses, "measurementContract").unwrap();
+    assert_eq!(
+        object_field(contract, "zeroTolerance"),
+        Some(&Json::string("nominal-equality"))
+    );
+    assert_eq!(
+        object_field(contract, "errorEnclosure"),
+        Some(&Json::Bool(false))
+    );
+    cylinder.tolerance = next_radius - 1.0;
+    assert!(expected_cylinder(&cylinder)(&features).positive);
+    cylinder.radius = 1.0;
+    cylinder.tolerance = 0.0;
+    assert!(expected_cylinder(&cylinder)(&features).positive);
+
+    let mut planar = PlanarExpectation {
+        normal: [Some(0.0), Some(0.0), Some(1.0)],
+        offset: 10.0,
+        area: Some(NumericExpectation::Conditions {
+            value: None,
+            greater_than: Some(20.0),
+            greater_than_or_equal: None,
+            less_than: None,
+            less_than_or_equal: None,
+        }),
+        tolerance: 0.25,
+    };
+    assert!(!expected_planar(&planar)(&features).positive);
+    planar.area = Some(NumericExpectation::Conditions {
+        value: None,
+        greater_than: None,
+        greater_than_or_equal: Some(20.0),
+        less_than: None,
+        less_than_or_equal: Some(20.0),
+    });
+    assert!(expected_planar(&planar)(&features).positive);
+    let next_diameter = f64::from_bits(2.0_f64.to_bits() + 1);
+    let mut hole = HoleExpectation {
+        diameter: next_diameter,
+        through: None,
+        axis: None,
+        center: None,
+        tolerance: 0.0,
+    };
+    assert!(!expected_hole(&hole)(&features).positive);
+    hole.tolerance = next_diameter - 2.0;
+    assert!(expected_hole(&hole)(&features).positive);
+}
+
+#[test]
+fn nominal_axis_label_does_not_assert_exact_alignment() {
+    let mut brep = RetainedBrep::complete();
+    let cylinder = Rc::make_mut(&mut brep.faces)
+        .iter_mut()
+        .find(|face| {
+            matches!(
+                face.facts.surface,
+                SurfaceFacts::Cylinder { radius: 0.5, .. }
+            )
+        })
+        .unwrap();
+    if let SurfaceFacts::Cylinder { axis, .. } = &mut cylinder.facts.surface {
+        *axis = [0.6, 0.0, 0.8];
+    }
+    let features = derive_features(&brep, &brep.facts, false).unwrap();
+    let outcome = expected_cylinder(&CylindricalExpectation {
+        radius: 0.5,
+        axis: Axis::Z,
+        tolerance: 0.0,
+    })(&features);
+    assert!(outcome.positive);
+    assert_eq!(
+        object_field(
+            object_field(&outcome.witnesses, "measurementContract").unwrap(),
+            "axisLabels"
+        ),
+        Some(&Json::string("dominant-component-not-exact-alignment"))
+    );
+    assert_eq!(Axis::dominant([1.0, -1.0, 1.0]), Axis::X);
+    assert_eq!(Axis::dominant([0.0, -1.0, 1.0]), Axis::Y);
 }

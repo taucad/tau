@@ -1833,7 +1833,8 @@ fn feature_outcome(
     matches: Vec<Json>,
     expected: Json,
 ) -> MatchOutcome {
-    let positive = !matches.is_empty();
+    let match_count = matches.len();
+    let positive = match_count != 0;
     let diagnostics = if positive {
         Vec::new()
     } else {
@@ -1844,12 +1845,57 @@ fn feature_outcome(
             Json::object([("expected", expected), (key, inventory.clone())]),
         )]
     };
+    let mut witnesses = vec![
+        (key.into(), inventory),
+        ("matches".into(), Json::Array(matches)),
+    ];
+    if matches!(
+        matcher,
+        "toHavePlanarFace" | "toHaveCylindricalFace" | "toHaveCircularHole"
+    ) {
+        witnesses.push((
+            "measurementContract".into(),
+            feature_measurement_contract(matcher != "toHavePlanarFace"),
+        ));
+    }
     MatchOutcome {
         positive,
-        measured: Json::object([("matchCount", Json::Number(matches.len() as f64))]),
-        witnesses: Json::object([(key, inventory), ("matches", Json::Array(matches))]),
+        measured: Json::object([("matchCount", Json::Number(match_count as f64))]),
+        witnesses: Json::Object(witnesses),
         diagnostics,
     }
+}
+
+fn feature_measurement_contract(axis_labels: bool) -> Json {
+    let mut fields = vec![
+        (
+            "profile".into(),
+            Json::string("geospec-feature-metric-nominal-v1"),
+        ),
+        (
+            "grade".into(),
+            Json::string("nominal-measurement-comparison"),
+        ),
+        ("scope".into(), Json::string("numeric-filters")),
+        ("arithmetic".into(), Json::string("binary64")),
+        (
+            "equality".into(),
+            Json::string("abs(measured-expected)<=tolerance"),
+        ),
+        (
+            "orderedComparisons".into(),
+            Json::string("authored-operator-without-tolerance"),
+        ),
+        ("zeroTolerance".into(), Json::string("nominal-equality")),
+        ("errorEnclosure".into(), Json::Bool(false)),
+    ];
+    if axis_labels {
+        fields.push((
+            "axisLabels".into(),
+            Json::string("dominant-component-not-exact-alignment"),
+        ));
+    }
+    Json::Object(fields)
 }
 
 fn derive_patterns(holes: &[Hole]) -> Vec<HolePattern> {

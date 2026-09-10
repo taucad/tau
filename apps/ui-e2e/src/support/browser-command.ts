@@ -13,8 +13,6 @@ import type {
   TargetCookie,
   TargetDiagnostics,
   TargetMouseOptions,
-  TargetPaseoConnection,
-  TargetPaseoRestFixture,
   TargetReadOptions,
   TargetState,
   TargetSurface,
@@ -24,7 +22,6 @@ import type {
   TargetWebGpuQualificationReport,
 } from './external-target.ts';
 import { testBaseURL } from './base-url.ts';
-import { startPaseoFakeDaemon as startFakePaseoDaemon } from './paseo-fake-daemon.ts';
 import { classifyWebGpuAdapter, webGpuLaunchArguments } from './webgpu-profile.ts';
 import { listTauServeChats, readTauServeFile, startTauServeFixture } from './tau-serve-fixture.ts';
 import type { TauServeFixture, TauServeFixtureOptions } from './tau-serve-fixture.ts';
@@ -56,7 +53,6 @@ const sessions = new Map<string, Session>();
 const hostFixtureProcesses = new Map<string, ChildProcess>();
 const outputRoot = resolve('out/test-results/vitest-browser/apps/ui-e2e/test-output');
 
-const paseoApiPath = '/v1/connectors/paseo';
 const tauApiUrl = process.env['TAU_E2E_API_URL'] ?? 'http://localhost:4000';
 const execFileAsync = promisify(execFile);
 
@@ -76,7 +72,36 @@ const executeTauDatabase = async (statement: string): Promise<void> => {
 
 const deleteTauTestUser = async (email: string): Promise<void> => {
   assertTauTestEmail(email);
-  await executeTauDatabase(`DELETE FROM "user" WHERE email = '${email}';`);
+  const statement = `DELETE FROM "user" WHERE email = '${email}';`;
+  try {
+    await executeTauDatabase(statement);
+  } catch (error) {
+    /* `billing.require_financial_closure` rejects the delete while a funded
+     * owner binding is retained; run the development closure first, as the
+     * desktop-e2e seeder does. */
+    if (!String(error).includes('financial closure must precede auth deletion')) {
+      throw error;
+    }
+    await execFileAsync(
+      process.execPath,
+      [
+        '--env-file-if-exists=apps/api/.env',
+        '--import',
+        '@oxc-node/core/register',
+        'apps/api/app/testing/development-billing-account.ts',
+        'close',
+        '--email',
+        email,
+      ],
+      {
+        cwd: resolve(import.meta.dirname, '../../../..'),
+        encoding: 'utf8',
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- process environment contract
+        env: { ...process.env, BILLING_ENVIRONMENT: 'development' },
+      },
+    );
+    await executeTauDatabase(statement);
+  }
 };
 
 const sessionFor = (commandContext: BrowserCommandContext): Session => {
@@ -273,104 +298,6 @@ export const uiStartHostFixture: BrowserCommand<[], string> = async (commandCont
   return started;
 };
 
-/**
- * Intercepts only Paseo's sanitized REST boundary while every UI and
- * persistence transition continues through production code.
- */
-let fakeDaemon: Awaited<ReturnType<typeof startFakePaseoDaemon>> | undefined;
-
-/**
- * Start the fake Paseo daemon for one spec.
- *
- * It runs in this Node process and the *browser* dials it with the real
- * `@getpaseo/client`, so the relay handshake, the ECDH E2EE negotiation and
- * the protocol-v2 session vocabulary are all real. Only the daemon behind the
- * socket is scripted.
- */
-export const uiStartPaseoFakeDaemon: BrowserCommand<[options: Parameters<typeof startFakePaseoDaemon>[0]]> = async (
-  _commandContext,
-  options,
-) => {
-  await fakeDaemon?.close();
-  fakeDaemon = await startFakePaseoDaemon(options);
-  return {
-    endpoint: fakeDaemon.endpoint,
-    serverId: fakeDaemon.serverId,
-    daemonPublicKeyB64: fakeDaemon.daemonPublicKeyB64,
-  };
-};
-
-/** Stop it and report every session message it saw, for assertions. */
-export const uiStopPaseoFakeDaemon: BrowserCommand = async () => {
-  const seen = fakeDaemon?.received().map(({ type }) => type) ?? [];
-  await fakeDaemon?.close();
-  fakeDaemon = undefined;
-  return seen;
-};
-
-export const uiInstallPaseoRestFixture: BrowserCommand<[fixture: TargetPaseoRestFixture]> = async (
-  commandContext,
-  fixture,
-) => {
-  const session = sessionFor(commandContext);
-  let connections: TargetPaseoConnection[] = [];
-  const headers = {
-    'access-control-allow-credentials': 'true',
-    'access-control-allow-headers': 'accept,anthropic-version,content-type',
-    'access-control-allow-methods': 'DELETE,GET,OPTIONS,POST',
-    'access-control-allow-origin': new URL(testBaseURL).origin,
-    'content-type': 'application/json',
-  };
-  const fulfillJson = async (
-    route: Parameters<Parameters<ProviderContext['route']>[1]>[0],
-    body: unknown,
-    status = 200,
-  ) => {
-    await route.fulfill({ body: JSON.stringify(body), headers, status });
-  };
-
-  await session.context.route(new RegExp(`${paseoApiPath}(?:/|$)`, 'u'), async (route) => {
-    const request = route.request();
-    if (request.method() === 'OPTIONS') {
-      await route.fulfill({ headers, status: 204 });
-      return;
-    }
-
-    const path = new URL(request.url()).pathname.slice(paseoApiPath.length);
-    if (request.method() === 'GET' && path === '') {
-      await fulfillJson(route, { connections });
-      return;
-    }
-    if (request.method() === 'POST' && path === '/pair') {
-      connections = [fixture.pairedConnection];
-      await fulfillJson(route, fixture.pairedConnection, 201);
-      return;
-    }
-
-    const connectionPath = `/${encodeURIComponent(fixture.pairedConnection.id)}`;
-    if (request.method() === 'POST' && path === `${connectionPath}/offer`) {
-      /* The one directory operation that releases pairing material. The page
-       * dials whatever relay endpoint this names — here, the fake daemon. */
-      await fulfillJson(route, {
-        offer: {
-          v: 2,
-          serverId: fixture.offer.serverId,
-          daemonPublicKeyB64: fixture.offer.daemonPublicKeyB64,
-          relay: { endpoint: fixture.offer.relayEndpoint, useTls: false },
-        },
-      });
-      return;
-    }
-    if (request.method() === 'DELETE' && path === connectionPath) {
-      connections = [];
-      await route.fulfill({ headers, status: 204 });
-      return;
-    }
-
-    await route.abort('failed');
-  });
-};
-
 /* eslint-disable @typescript-eslint/naming-convention -- Anthropic's provider wire uses snake_case. */
 /**
  * Write one scripted assistant turn onto Anthropic's streaming wire: an
@@ -489,6 +416,7 @@ export const uiInstallAgentHostGatewayFixture: BrowserCommand<[script?: readonly
     'access-control-allow-headers': 'accept,content-type',
     'access-control-allow-methods': 'OPTIONS,POST',
     'access-control-allow-origin': new URL(testBaseURL).origin,
+    'access-control-expose-headers': 'x-tau-operation-id',
     'content-type': 'text/event-stream',
   };
   const server = createServer((request, response) => {
@@ -538,7 +466,11 @@ export const uiInstallAgentHostGatewayFixture: BrowserCommand<[script?: readonly
         const writeEvent = (event: string, data: unknown): void => {
           response.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
         };
-        response.writeHead(200, { ...headers, 'cache-control': 'no-cache' });
+        response.writeHead(200, {
+          ...headers,
+          'cache-control': 'no-cache',
+          'x-tau-operation-id': `browser-host-e2e-operation-${String(currentRequest)}`,
+        });
         response.flushHeaders();
         // The walk wraps: a retried turn replays the script from the top, which
         // is what the rewind vertical in `browser-agent-host.spec.ts` asserts on.
@@ -1371,9 +1303,6 @@ export const uiBrowserCommands = {
   uiFocusTarget,
   uiGrantPermissions,
   uiHoverTarget,
-  uiInstallPaseoRestFixture,
-  uiStartPaseoFakeDaemon,
-  uiStopPaseoFakeDaemon,
   uiInstallAgentHostGatewayFixture,
   uiReadAgentHostApiRequests,
   uiSetAgentHostGatewayFailure,

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import {
   Grid,
   ArrowRight,
@@ -57,6 +57,7 @@ import {
   AlertDialogTitle,
 } from '@taucad/ui/components/alert-dialog';
 import { useCookie } from '#hooks/use-cookie.js';
+import { isFunction } from '#utils/function.utils.js';
 import { ProjectActionDropdown } from '#components/project-library/project-action-dropdown.js';
 import { Checkbox } from '@taucad/ui/components/checkbox';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
@@ -506,9 +507,9 @@ type UnifiedProjectListProps = {
   readonly actions: ProjectActions;
 };
 
-// Page size options for different view modes
-const gridPageSizes = [12, 24, 36, 48, 60];
-const tablePageSizes = [10, 20, 30, 40, 50];
+// Page size options, shared by both view modes so the remembered choice survives a view switch.
+const defaultPageSize = 20;
+const pageSizeOptions = [defaultPageSize, 50, 100, 150, 200];
 
 function UnifiedProjectList({ projects, viewMode, actions }: UnifiedProjectListProps) {
   'use no memo';
@@ -517,25 +518,8 @@ function UnifiedProjectList({ projects, viewMode, actions }: UnifiedProjectListP
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({});
   const [rowSelection, setRowSelection] = useState({});
   const [globalFilter, setGlobalFilter] = useState('');
-
-  // Find the most appropriate page size based on current selected count
-  const getAppropriatePageSize = useCallback((selectedCount = 0, isGrid = true) => {
-    const pageSizes = isGrid ? gridPageSizes : tablePageSizes;
-    // If no items are selected, use default page size
-    if (selectedCount === 0) {
-      return pageSizes[0];
-    }
-
-    // Find the closest page size that can accommodate all selected items
-    for (const size of pageSizes) {
-      if (size >= selectedCount) {
-        return size;
-      }
-    }
-
-    // If selected count is larger than any page size, return the largest available
-    return pageSizes.at(-1);
-  }, []);
+  const [pageSize, setPageSize] = useCookie<number>(cookieName.projectPageSize, defaultPageSize);
+  const [pageIndex, setPageIndex] = useState(0);
 
   // oxlint-disable-next-line react/incompatible-library -- This component is explicitly opted out because TanStack Table returns mutable functions that cannot be compiler-memoized safely.
   const table = useReactTable({
@@ -549,27 +533,19 @@ function UnifiedProjectList({ projects, viewMode, actions }: UnifiedProjectListP
     onRowSelectionChange: setRowSelection,
     onGlobalFilterChange: setGlobalFilter,
     getFilteredRowModel: getFilteredRowModel(),
+    onPaginationChange: (updater) => {
+      const next = isFunction(updater) ? updater({ pageIndex, pageSize }) : updater;
+      setPageIndex(next.pageIndex);
+      setPageSize(next.pageSize);
+    },
     state: {
       sorting,
       columnVisibility,
       rowSelection,
       globalFilter,
-    },
-    initialState: {
-      pagination: {
-        pageSize: viewMode === 'grid' ? gridPageSizes[0] : tablePageSizes[0],
-      },
+      pagination: { pageIndex, pageSize },
     },
   });
-
-  // Update page size when view mode changes or selection changes
-  useEffect(() => {
-    const selectedCount = Object.keys(rowSelection).length;
-    const newPageSize = getAppropriatePageSize(selectedCount, viewMode === 'grid');
-    if (newPageSize) {
-      table.setPageSize(newPageSize);
-    }
-  }, [viewMode, rowSelection, getAppropriatePageSize, table]);
 
   // Show empty state if no projects at all
   if (projects.length === 0) {
@@ -641,11 +617,7 @@ function UnifiedProjectList({ projects, viewMode, actions }: UnifiedProjectListP
         </div>
       )}
 
-      <DataTablePagination
-        table={table}
-        pageSizeOptions={viewMode === 'grid' ? gridPageSizes : tablePageSizes}
-        itemName='project'
-      />
+      <DataTablePagination table={table} pageSizeOptions={pageSizeOptions} itemName='project' />
     </div>
   );
 }

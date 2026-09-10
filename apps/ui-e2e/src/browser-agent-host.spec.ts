@@ -88,9 +88,11 @@ const prepareBrowserHost = async (backend: ActiveBackend): Promise<void> => {
   await target.setViewport({ width: 1440, height: 900 });
   await openSeededProject(backend);
   // No flag and no placement pick: the browser host IS the Tau placement.
-  // Asserting the single "Tau" target is what proves the API placement is gone
-  // — a surviving "Tau (Browser)" row would mean the split still exists.
-  await target.expectVisible(selectors.getByRole('button', { name: 'Select agent: Tau' }));
+  // One agent is not a choice (Q12.6), so the trigger is not rendered at all;
+  // its absence together with the absent "Tau (Browser)" row is what proves the
+  // API placement is gone — a surviving row would mean the split still exists.
+  // (`ensureChatOpen` already waited on the composer, so the row is rendered.)
+  expect(await target.isVisible(selectors.getByRole('button', { name: 'Select agent: Tau' }))).toBe(false);
   expect(await target.isVisible(selectors.getByText('Tau (Browser)', { exact: true }))).toBe(false);
 };
 

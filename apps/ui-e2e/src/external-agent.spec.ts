@@ -77,10 +77,10 @@ const createProject = async (origin: string): Promise<void> => {
 const selectCodex = async (): Promise<void> => {
   await target.expectVisible(selectors.getByRole('button', { name: 'Select agent: Tau' }), 60_000);
   await target.click(selectors.getByRole('button', { name: 'Select agent: Tau' }));
-  const row = selectors.getByRole('option', { name: /Codex · Tau Host /u });
+  const row = selectors.getByRole('option', { name: /^Codex/u });
   await target.expectVisible(row, 60_000);
   await target.click(row);
-  await target.expectVisible(selectors.getByRole('button', { name: /Select agent: Codex · Tau Host / }), 30_000);
+  await target.expectVisible(selectors.getByRole('button', { name: 'Select agent: Codex' }), 30_000);
 };
 
 const durableEvents = async (): Promise<readonly LogEvent[]> => {
@@ -106,16 +106,16 @@ describe('external agent (AV-5)', () => {
      * its descriptor, and the page turned it into a row of its own. */
     await target.expectVisible(selectors.getByRole('button', { name: 'Select agent: Tau' }), 60_000);
     await target.click(selectors.getByRole('button', { name: 'Select agent: Tau' }));
-    const row = selectors.getByRole('option', { name: /Codex · Tau Host /u });
+    const row = selectors.getByRole('option', { name: /^Codex/u });
     await target.expectVisible(row, 60_000);
-    /* The copy the user reads before placing a turn: their own login, and an
-     * isolated branch — never a promise of per-action approval (SP-4 Result 3). */
+    /* The copy the user reads before placing a turn: their own login, and the
+     * project's tree — never a promise of per-action approval (SP-4 Result 3). */
     await target.expectVisible(
-      selectors.getByText('Runs with your local Codex login in an isolated branch', { exact: true }),
+      selectors.getByText("Runs with your local Codex login in this project's tree", { exact: true }),
       10_000,
     );
     await target.click(row);
-    await target.expectVisible(selectors.getByRole('button', { name: /Select agent: Codex · Tau Host / }), 30_000);
+    await target.expectVisible(selectors.getByRole('button', { name: 'Select agent: Codex' }), 30_000);
 
     await target.type(composer, proofPrompt);
     await target.click(selectors.getByCss('button:has(svg.lucide-arrow-up)').last());
@@ -153,12 +153,10 @@ describe('external agent (AV-5)', () => {
     const runId = events.at(-1)?.runId ?? '';
     expect(runId).not.toBe('');
 
-    /* Confinement: the agent's own write landed in the materialized branch, and
-     * the workspace root the daemon was started on is untouched. */
-    await expect
-      .poll(async () => target.readTauServeFile(`.tau/workspaces/${runId}/tree/hello.txt`), { timeout: 60_000 })
-      .toContain('noask');
-    expect(await target.readTauServeFile('hello.txt')).toBeUndefined();
+    /* V2: the agent works in the project's tree — its write lands at the root
+     * and no per-run copy exists. */
+    await expect.poll(async () => target.readTauServeFile('hello.txt'), { timeout: 60_000 }).toContain('noask');
+    expect(await target.readTauServeFile(`.tau/workspaces/${runId}/tree/hello.txt`)).toBeUndefined();
 
     /* The thin projection: the turn's user message carries the external marker,
      * and the agent's own tool call is a `tool-input`/`tool-output` pair marked
@@ -215,8 +213,8 @@ describe('external agent (AV-5)', () => {
       await target.expectVisible(banner.getByText('write hello.txt', { exact: true }), 30_000);
       /* The options the host recorded, and the copy bounded by SP-4 Result 3 —
        * approving is not a promise that Tau gates each action. */
-      await target.expectVisible(banner.getByText(/Options it offered: Allow · Reject/u), 10_000);
-      await target.expectVisible(banner.getByText(/keep working in its isolated branch/u), 10_000);
+      await target.expectVisible(banner.getByText(/Options it offered: Allow · Always allow · Reject/u), 10_000);
+      await target.expectVisible(banner.getByText(/keep working in this chat's tree/u), 10_000);
 
       /* Reattach: this tab's memory of the run is gone, so a banner that comes
        * back can only have come from the log the daemon still holds. */
@@ -264,11 +262,11 @@ describe('external agent (AV-5)', () => {
       'completed',
     ]);
 
-    // The approved tool actually ran, inside the branch and nowhere else.
+    // The approved tool actually ran, in the project's tree (V2) and nowhere else.
     await expect
-      .poll(async () => target.readTauServeFile(`.tau/workspaces/${runId}/tree/hello.txt`), { timeout: 60_000 })
+      .poll(async () => target.readTauServeFile('hello.txt'), { timeout: 60_000 })
       .toContain('external agent proof');
-    expect(await target.readTauServeFile('hello.txt')).toBeUndefined();
+    expect(await target.readTauServeFile(`.tau/workspaces/${runId}/tree/hello.txt`)).toBeUndefined();
 
     // PH19 again: resolving an approval is a daemon command, never an API call.
     const apiRequests = await target.readAgentHostApiRequests();

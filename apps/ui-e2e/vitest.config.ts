@@ -72,12 +72,7 @@ export default defineConfig({
         {
           browser: 'firefox',
           name: 'firefox',
-          include: [
-            'src/browser-agent-host.spec.ts',
-            'src/chat-isolated-workspace.spec.ts',
-            'src/paseo-connection.spec.ts',
-            'src/remote-host.spec.ts',
-          ],
+          include: ['src/browser-agent-host.spec.ts', 'src/chat-isolated-workspace.spec.ts', 'src/remote-host.spec.ts'],
         },
         {
           browser: 'webkit',
@@ -88,7 +83,6 @@ export default defineConfig({
             'src/browser-agent-host.spec.ts',
             'src/project-creation-location-unsupported.spec.ts',
             'src/chat-isolated-workspace.spec.ts',
-            'src/paseo-connection.spec.ts',
             'src/remote-host.spec.ts',
           ],
         },

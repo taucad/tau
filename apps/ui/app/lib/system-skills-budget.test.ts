@@ -1,20 +1,19 @@
-import { readFileSync } from 'node:fs';
 import { kernelConfigurations } from '@taucad/types/constants';
 import { describe, expect, it } from 'vitest';
 import { builtInSystemSkills } from '#lib/system-skills-catalog.js';
 
 const maxDescriptionCharacters = 160;
-const authoredSkills = [
-  ['cad-build123d', '../../../../packages/plugins/build123d/agent/SKILL.md'],
-  ['cad-picogk', '../../../../packages/plugins/picogk/agent/SKILL.md'],
-  ['cad-openscad', '../../../../packages/plugins/openrscad/agent/SKILL.md'],
-  ['cad-replicad', '../../../../packages/plugins/replicad/agent/SKILL.md'],
-  ['cad-manifold', '../../../../packages/plugins/manifold/agent/SKILL.md'],
-  ['cad-zoo', '../../../../packages/plugins/zoo/agent/SKILL.md'],
-  ['cad-jscad', '../../../../packages/plugins/jscad/agent/SKILL.md'],
-  ['cad-opencascadejs', '../../../../packages/plugins/opencascade/agent/SKILL.md'],
-  ['geospec-authoring', '../../../../packages/plugins/middleware/agent/geospec-authoring/SKILL.md'],
-] as const;
+
+/*
+ * Derived, not listed. This table used to be nine hardcoded
+ * `../../../../packages/plugins/<name>/agent/SKILL.md` paths, which meant the
+ * test knew the workspace layout — so relocating a bundle broke it with ENOENT
+ * rather than a budget failure, and a tenth skill could ship ungated because
+ * nobody remembered to add a tenth line. The catalogue is now assembled from
+ * each package's own manifest, so asserting over it covers exactly what the app
+ * actually loads.
+ */
+const packageSkills = builtInSystemSkills.filter(({ slug }) => slug !== 'create-skill' && slug !== 'create-model');
 
 const assertSkillBudget = (skillName: string, skillMarkdown: string, maxBodyTokens = 800): void => {
   const description = /^description:\s*(.+)$/m.exec(skillMarkdown)?.[1]?.trim();
@@ -50,11 +49,21 @@ const assertCreateModelSelectionRows = (skillMarkdown: string): void => {
 };
 
 describe('progressive-disclosure system skill budgets', () => {
-  it.each(authoredSkills)('should keep %s within its body and description budgets', (skillName, path) => {
-    const skillMarkdown = readFileSync(new URL(path, import.meta.url), 'utf8');
-    expect(() => {
-      assertSkillBudget(skillName, skillMarkdown);
-    }).not.toThrow();
+  it.each(packageSkills.map((skill) => [skill.slug, skill.skillMarkdown] as const))(
+    'should keep %s within its body and description budgets',
+    (skillName, skillMarkdown) => {
+      expect(() => {
+        assertSkillBudget(skillName, skillMarkdown);
+      }).not.toThrow();
+    },
+  );
+
+  it('gates every package-owned skill, not a hand-kept subset', () => {
+    /* The count this replaced was a literal; if an owner ships a bundle and no
+     * row appears above, that is the failure mode worth catching. */
+    expect(packageSkills.length).toBeGreaterThanOrEqual(kernelConfigurations.length);
+    expect(packageSkills.map((skill) => skill.slug)).toContain('geospec-authoring');
+    expect(packageSkills.every((skill) => skill.skillMarkdown.startsWith('---\n'))).toBe(true);
   });
 
   it('should keep create-model within its 900-token body budget', () => {

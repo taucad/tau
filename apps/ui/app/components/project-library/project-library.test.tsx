@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { useState } from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { beforeEach, describe, it, expect, vi } from 'vitest';
@@ -74,8 +75,21 @@ vi.mock('#hooks/use-kernel.js', () => ({
   useKernel: () => ({ kernel: 'replicad', setKernel: vi.fn() }),
 }));
 
+const mockSetCookie = vi.fn();
+let mockCookieValues: Record<string, unknown> = {};
 vi.mock('#hooks/use-cookie.js', () => ({
-  useCookie: () => ['grid', vi.fn()],
+  // Stateful like the real hook: each cookie keeps its own value, and a write re-renders.
+  useCookie: (name: string, defaultValue: unknown) => {
+    const [value, setValue] = useState(() => mockCookieValues[name] ?? defaultValue);
+    return [
+      value,
+      (next: unknown) => {
+        mockCookieValues[name] = next;
+        mockSetCookie(name, next);
+        setValue(next);
+      },
+    ];
+  },
 }));
 
 vi.mock('#components/chat/chat-textarea.js', () => ({
@@ -137,6 +151,7 @@ vi.mock('#components/cad-preview.js', () => ({
 describe('ProjectLibrary', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockCookieValues = {};
     mockUseProjectsResult = createUseProjectsResult();
   });
 
@@ -430,5 +445,54 @@ describe('ProjectLibrary', () => {
       expect(mockToastError).toHaveBeenCalled();
     });
     expect(mockToastSuccess).not.toHaveBeenCalled();
+  });
+
+  it('paginates by the remembered page size', () => {
+    mockCookieValues = { 'project-page-size': 50 };
+    mockUseProjectsResult = {
+      ...createUseProjectsResult(),
+      projects: Array.from({ length: 60 }, (_, index) =>
+        makeProject(`proj_${String(index).padStart(21, 'p')}`, `Project ${index}`, `/project-${index}`),
+      ),
+    };
+
+    render(
+      <MemoryRouter>
+        <TooltipProvider>
+          <ProjectLibrary />
+        </TooltipProvider>
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText('Page 1 of 2')).toBeInTheDocument();
+    expect(screen.getAllByLabelText('Location: Home in this browser')).toHaveLength(50);
+  });
+
+  it('remembers a newly chosen page size', async () => {
+    Element.prototype.hasPointerCapture = vi.fn(() => false);
+    Element.prototype.scrollIntoView = vi.fn();
+    mockUseProjectsResult = {
+      ...createUseProjectsResult(),
+      projects: Array.from({ length: 60 }, (_, index) =>
+        makeProject(`proj_${String(index).padStart(21, 'p')}`, `Project ${index}`, `/project-${index}`),
+      ),
+    };
+
+    render(
+      <MemoryRouter>
+        <TooltipProvider>
+          <ProjectLibrary />
+        </TooltipProvider>
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText('Page 1 of 3')).toBeInTheDocument();
+    fireEvent.keyDown(screen.getByRole('combobox', { name: 'Items per page' }), { key: 'Enter' });
+    fireEvent.click(await screen.findByRole('option', { name: '100' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Page 1 of 1')).toBeInTheDocument();
+    });
+    expect(mockCookieValues['project-page-size']).toBe(100);
   });
 });

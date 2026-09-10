@@ -26,6 +26,9 @@ export function UsageTable({
   description,
   height = 400,
 }: UsageTableProps): React.JSX.Element {
+  // TanStack keeps its state on a stable `table` object, so the React Compiler would cache these reads forever.
+  'use no memo';
+
   const [sorting, setSorting] = useState<SortingState>([{ id: 'date', desc: true }]);
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({});
   const [globalFilter, setGlobalFilter] = useState('');

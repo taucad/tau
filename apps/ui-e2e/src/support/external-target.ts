@@ -44,59 +44,6 @@ export type TargetDiagnostics = {
   readonly url: string;
 };
 export type TargetDownload = { readonly base64: string; readonly suggestedFilename: string };
-/** What {@link startPaseoFakeDaemon} is scripted with. @public */
-export type FakePaseoDaemonScript = {
-  readonly agents?: ReadonlyArray<{
-    readonly id: string;
-    readonly title: string;
-    readonly provider: string;
-    readonly model: string;
-  }>;
-  readonly turn?: { readonly items: readonly unknown[] };
-};
-
-/** Where the page dials the fake daemon, and the identity it pins. @public */
-export type FakePaseoDaemonHandle = {
-  readonly endpoint: string;
-  readonly serverId: string;
-  readonly daemonPublicKeyB64: string;
-};
-
-export type TargetPaseoConnection = {
-  readonly id: string;
-  readonly label: string;
-  readonly serverId: string;
-  readonly relayEndpoint: string;
-  readonly createdAt: string;
-  readonly updatedAt: string;
-};
-export type TargetPaseoAgent = {
-  readonly id: string;
-  readonly label: string;
-  readonly provider: string;
-  readonly status: string;
-};
-export type TargetPaseoProvider = {
-  readonly provider: string;
-  readonly label: string;
-  readonly status: string;
-  readonly enabled: boolean;
-  readonly modelCount: number;
-};
-export type TargetPaseoRestFixture = {
-  readonly pairedConnection: TargetPaseoConnection;
-  /**
-   * The pairing material `POST /:id/offer` releases.
-   *
-   * The page opens the real E2EE session against whatever this names, so
-   * the fake daemon supplies it — nothing about the SDK path is stubbed.
-   */
-  readonly offer: {
-    readonly serverId: string;
-    readonly daemonPublicKeyB64: string;
-    readonly relayEndpoint: string;
-  };
-};
 export type TargetTauTestAccount = {
   readonly email: string;
   readonly name: string;
@@ -174,9 +121,6 @@ declare module 'vitest/browser' {
     uiFocusTarget(selector: string, surface?: TargetSurface): Promise<void>;
     uiGrantPermissions(permissions: readonly string[]): Promise<void>;
     uiHoverTarget(selector: string, surface?: TargetSurface): Promise<void>;
-    uiInstallPaseoRestFixture(fixture: TargetPaseoRestFixture): Promise<void>;
-    uiStartPaseoFakeDaemon(options: FakePaseoDaemonScript): Promise<FakePaseoDaemonHandle>;
-    uiStopPaseoFakeDaemon(): Promise<readonly string[]>;
     uiInstallAgentHostGatewayFixture(script?: readonly GatewayScriptTurn[]): Promise<void>;
     uiKeyboardPress(key: string, surface?: TargetSurface): Promise<void>;
     uiMouseClick(x: number, y: number, options?: TargetClickOptions, surface?: TargetSurface): Promise<void>;
@@ -421,15 +365,6 @@ export const releaseTauServeGateway = (): Promise<void> => server.commands.uiRel
 export const readTauServeFile = (relativePath: string): Promise<string | undefined> =>
   server.commands.uiReadTauServeFile(relativePath);
 export const listTauServeChats = (): Promise<readonly string[]> => server.commands.uiListTauServeChats();
-export const installPaseoRestFixture = (fixture: TargetPaseoRestFixture): Promise<void> =>
-  server.commands.uiInstallPaseoRestFixture(fixture);
-
-/** Start the fake Paseo daemon the page opens its real E2EE session against. */
-export const startPaseoFakeDaemon = (options: FakePaseoDaemonScript): Promise<FakePaseoDaemonHandle> =>
-  server.commands.uiStartPaseoFakeDaemon(options);
-
-/** Stop it, and report every session message it received. */
-export const stopPaseoFakeDaemon = (): Promise<readonly string[]> => server.commands.uiStopPaseoFakeDaemon();
 /** Installs the Anthropic-wire gateway fixture; omit `script` for the default browser-host script. */
 export const installAgentHostGatewayFixture = (script?: readonly GatewayScriptTurn[]): Promise<void> =>
   server.commands.uiInstallAgentHostGatewayFixture(script);

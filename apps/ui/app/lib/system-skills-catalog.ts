@@ -1,27 +1,38 @@
 /**
- * This app's system-skill layer: the shared catalogue, loaded the one way a
- * browser can.
+ * This app's system-skill layer: every package-owned bundle, loaded the one way
+ * that works in both a browser and Node.
  *
- * The rows — slug, name, description, version, when-to-use and which package
- * subpath holds the guide — live in `@taucad/agent-tools/skills` so a daemon
- * offers the same set from the same files. Only the loading is here, because
- * only a bundler can inline a package's `SKILL.md` as a string. The two
- * app-authored skills below have no package to come from and stay local.
+ * Each owner package ships `agent/skills.json` — a manifest carrying the bundle
+ * declaration *and* the rendered `SKILL.md` body — and this module imports the
+ * nine of them as JSON modules. That replaces the ten `?raw` imports that used
+ * to live here. `?raw` is a bundler-only affordance: it forced
+ * `apps/ui/vite.config.ts` to widen Vite's `fs.allow` to the whole workspace
+ * root just to read a sibling package's file, and it gave a Node host no way to
+ * load the same bytes. `with { type: 'json' }` is plain ESM, so the specifier
+ * means the same thing to Vite, to Node and to any other consumer.
+ *
+ * Only the T1 bodies come inline. `api-index.md` and the API shards stay files
+ * inside each package, fetched when something greps them — the point of the
+ * tiering is that the whole corpus is *reachable*, not that it is resident.
+ *
+ * The rows are no longer duplicated here either: name, description, version and
+ * when-to-use are read off each manifest, so a package that re-renders its
+ * bundle cannot disagree with the catalogue advertising it.
  *
  * @module
  */
 
-import { systemSkillCatalog } from '@taucad/agent-tools/skills';
-import type { SystemSkillSlug } from '@taucad/agent-tools/skills';
-import jscadSkillMarkdown from '@taucad/jscad/agent?raw';
-import build123dSkillMarkdown from '@taucad/build123d/agent?raw';
-import picogkSkillMarkdown from '@taucad/picogk/agent?raw';
-import manifoldSkillMarkdown from '@taucad/manifold/agent?raw';
-import geospecAuthoringSkillMarkdown from '@taucad/middleware/agent/geospec-authoring?raw';
-import opencascadejsSkillMarkdown from '@taucad/opencascade/agent?raw';
-import openscadSkillMarkdown from '@taucad/openrscad/agent?raw';
-import replicadSkillMarkdown from '@taucad/replicad/agent?raw';
-import zooSkillMarkdown from '@taucad/zoo/agent?raw';
+import type { SkillBundleDeclaration } from '@taucad/api-extractor';
+import build123dManifest from '@taucad/build123d/agent' with { type: 'json' };
+import jscadManifest from '@taucad/jscad/agent' with { type: 'json' };
+import manifoldManifest from '@taucad/manifold/agent' with { type: 'json' };
+import opencascadejsManifest from '@taucad/opencascade/agent' with { type: 'json' };
+import openscadManifest from '@taucad/openrscad/agent' with { type: 'json' };
+import picogkManifest from '@taucad/picogk/agent' with { type: 'json' };
+import replicadManifest from '@taucad/replicad/agent' with { type: 'json' };
+import zooManifest from '@taucad/zoo/agent' with { type: 'json' };
+import geospecManifest from 'geospec/agent/skills.json' with { type: 'json' };
+
 import { createModelSkillMarkdown } from '#lib/create-model-skill.js';
 
 export type BuiltInSystemSkill = {
@@ -36,22 +47,39 @@ export type BuiltInSystemSkill = {
 };
 
 /**
- * The browser's loader for the shared catalogue.
+ * Every manifest this app compiles in, in presentation order.
  *
- * Keyed by slug and typed by it: a catalogue row with no `?raw` import here is
- * a compile error rather than a skill that silently resolves to nothing.
+ * A flat list, not a slug-keyed record: the slug is already inside each
+ * declaration, so keying by it here would be a second place for the same fact
+ * to be written down — which is exactly the drift the manifests removed.
  */
-const browserSkillMarkdown: Readonly<Record<SystemSkillSlug, string>> = {
-  'cad-build123d': build123dSkillMarkdown,
-  'cad-picogk': picogkSkillMarkdown,
-  'cad-openscad': openscadSkillMarkdown,
-  'cad-replicad': replicadSkillMarkdown,
-  'cad-manifold': manifoldSkillMarkdown,
-  'cad-zoo': zooSkillMarkdown,
-  'cad-jscad': jscadSkillMarkdown,
-  'cad-opencascadejs': opencascadejsSkillMarkdown,
-  'geospec-authoring': geospecAuthoringSkillMarkdown,
-};
+const packageManifests: ReadonlyArray<{ readonly bundles: readonly SkillBundleDeclaration[] }> = [
+  build123dManifest,
+  picogkManifest,
+  openscadManifest,
+  replicadManifest,
+  manifoldManifest,
+  zooManifest,
+  jscadManifest,
+  opencascadejsManifest,
+  geospecManifest,
+];
+
+/** Every package-owned bundle, flattened: one package may ship more than one. */
+const packageSkills: readonly BuiltInSystemSkill[] = packageManifests.flatMap((manifest) =>
+  manifest.bundles.map(
+    (bundle): BuiltInSystemSkill => ({
+      slug: bundle.slug,
+      name: bundle.name,
+      description: bundle.description,
+      version: bundle.version,
+      source: 'system',
+      priority: 60,
+      whenToUse: bundle.whenToUse,
+      skillMarkdown: bundle.body,
+    }),
+  ),
+);
 
 export const builtInSystemSkills: readonly BuiltInSystemSkill[] = [
   {
@@ -205,16 +233,5 @@ If updating an existing artifact, inspect the current file first and preserve us
     whenToUse: 'Use when creating a CAD model without a pinned kernel or when kernel choice is ambiguous.',
     skillMarkdown: createModelSkillMarkdown,
   },
-  ...systemSkillCatalog.map(
-    (entry): BuiltInSystemSkill => ({
-      slug: entry.slug,
-      name: entry.name,
-      description: entry.description,
-      version: entry.version,
-      source: 'system',
-      priority: 60,
-      whenToUse: entry.whenToUse,
-      skillMarkdown: browserSkillMarkdown[entry.slug],
-    }),
-  ),
+  ...packageSkills,
 ];

@@ -60,6 +60,8 @@ export const cookieName = {
   /* Projects */
   // The last selected project view mode.
   projectViewMode: 'project-view-mode',
+  // The last selected project list page size.
+  projectPageSize: 'project-page-size',
 
   /* Graphics */
   // Whether the section view status is open.

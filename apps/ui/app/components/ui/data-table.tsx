@@ -48,6 +48,8 @@ export function DataTable<Data>({
   emptyMessage = 'No results.',
   onRowClick,
 }: DataTableProps<Data>): ReactNode {
+  // TanStack keeps its state on a stable `table` object, so the React Compiler would cache these reads forever.
+  'use no memo';
   return (
     <Table>
       <TableHeader>
@@ -119,6 +121,8 @@ export function DataTableVirtualized<Data>({
   overscan = 10,
   onRowClick,
 }: DataTableVirtualizedProps<Data>): ReactNode {
+  // TanStack keeps its state on a stable `table` object, so the React Compiler would cache these reads forever.
+  'use no memo';
   'use no memo';
 
   const tableContainerRef = useRef<HTMLDivElement>(null);
@@ -224,6 +228,8 @@ export function DataTableSearch<Data>({
   className,
   containerClassName,
 }: DataTableSearchProps<Data>): ReactNode {
+  // TanStack keeps its state on a stable `table` object, so the React Compiler would cache these reads forever.
+  'use no memo';
   const globalFilter = table.getState().globalFilter as string;
 
   return (
@@ -262,6 +268,8 @@ export function DataTablePagination<Data>({
   withSelectedCount = true,
   itemName = 'row',
 }: DataTablePaginationProps<Data>): ReactNode {
+  // TanStack keeps its state on a stable `table` object, so the React Compiler would cache these reads forever.
+  'use no memo';
   const selectedCount = table.getFilteredSelectedRowModel().rows.length;
   const totalCount = table.getFilteredRowModel().rows.length;
 
@@ -283,7 +291,7 @@ export function DataTablePagination<Data>({
               table.setPageSize(Number(value));
             }}
           >
-            <SelectTrigger size='sm' className='w-[70px] pr-2'>
+            <SelectTrigger size='sm' className='w-[70px] pr-2' aria-label='Items per page'>
               <SelectValue placeholder={table.getState().pagination.pageSize} />
             </SelectTrigger>
             <SelectContent position='popper' side='top'>
@@ -364,6 +372,8 @@ export function DataTableColumnHeader<Data, Value>({
   title,
   className,
 }: DataTableColumnHeaderProps<Data, Value>): ReactNode {
+  // TanStack keeps its state on a stable `table` object, so the React Compiler would cache these reads forever.
+  'use no memo';
   if (!column.getCanSort()) {
     return <div className={cn('text-sm font-medium', className)}>{title}</div>;
   }
@@ -428,6 +438,8 @@ type DataTableSortingDropdownProps<Data> = {
 };
 
 export function DataTableSortingDropdown<Data>({ table }: DataTableSortingDropdownProps<Data>): ReactNode {
+  // TanStack keeps its state on a stable `table` object, so the React Compiler would cache these reads forever.
+  'use no memo';
   const sortingState = table.getState().sorting[0];
 
   // Dynamically get sortable columns from the table
@@ -498,6 +510,8 @@ type DataTableColumnVisibilityDropdownProps<Data> = {
 export function DataTableColumnVisibilityDropdown<Data>({
   table,
 }: DataTableColumnVisibilityDropdownProps<Data>): ReactNode {
+  // TanStack keeps its state on a stable `table` object, so the React Compiler would cache these reads forever.
+  'use no memo';
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>

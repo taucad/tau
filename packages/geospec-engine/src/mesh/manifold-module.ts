@@ -11,10 +11,12 @@
 import initManifold from 'manifold-3d';
 import type { ManifoldToplevel } from 'manifold-3d';
 
+const manifoldWasmUrl = new URL(import.meta.resolve('manifold-3d/manifold.wasm')).href;
+
 let modulePromise: Promise<ManifoldToplevel> | undefined;
 
 const instantiate = async (): Promise<ManifoldToplevel> => {
-  const module = await initManifold();
+  const module = await initManifold({ locateFile: () => manifoldWasmUrl });
   module.setup();
   return module;
 };

@@ -100,6 +100,7 @@
     "src/mesh/_internal/sweep-axis.test.ts",
     "src/mesh/native.ts",
     "src/mesh/manifold-module.ts",
+    "src/mesh/manifold-module.test.ts",
     "src/mesh/analysis-record.ts",
     "src/mesh/analysis-record.test.ts",
     "src/mesh/load-mesh.ts",

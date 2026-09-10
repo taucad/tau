@@ -152,7 +152,7 @@ const integerAttribute = (tag: string, name: string): number | undefined => {
 };
 
 beforeAll(async () => {
-  [fullAssimp, context] = await Promise.all([createAssimp(), definition.initialize({}, runtime)]);
+  [fullAssimp, context] = await Promise.all([createAssimp(), definition.initialize({ backend: 'auto' }, runtime)]);
   const objectBytes = new Uint8Array(readFileSync(new URL('fixtures/cube.obj', import.meta.url)));
   const glb = await fullAssimp.convert([{ name: 'cube.obj', bytes: objectBytes }], { to: 'glb' });
   const gltf = await fullAssimp.convert(glb.files, { to: 'gltf' });

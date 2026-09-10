@@ -3,6 +3,7 @@ import type { ExportFile } from '@taucad/runtime/types';
 import type { TranscoderRuntime } from '@taucad/runtime/transcoder';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 import * as libassimpExporter from 'libassimp';
+import type { CreateAssimpOptions } from 'libassimp';
 import { assimpEdgeSchemas } from '#assimp-export-options.js';
 import { assimpTranscoder } from '#assimp.transcoder.js';
 
@@ -11,6 +12,7 @@ const assimpMock = vi.hoisted(() => ({
   createAssimp: vi.fn(),
   dispose: vi.fn(),
 }));
+const requestedBackends: Array<CreateAssimpOptions['backend']> = [];
 
 vi.mock('libassimp', async (importOriginal) => ({
   ...(await importOriginal<typeof libassimpExporter>()),
@@ -34,9 +36,16 @@ describe('assimp transcoder', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    assimpMock.createAssimp.mockResolvedValue({
-      convert: assimpMock.convert,
-      dispose: assimpMock.dispose,
+    requestedBackends.length = 0;
+    assimpMock.createAssimp.mockImplementation(async (options: CreateAssimpOptions) => {
+      requestedBackends.push(options.backend);
+      options.onLog?.({ level: 'warning', message: 'native unavailable', cause: 'missing addon' });
+      return {
+        backend: 'native',
+        buildIdentity: 'darwin-arm64-napi8',
+        convert: assimpMock.convert,
+        dispose: assimpMock.dispose,
+      };
     });
     assimpMock.convert.mockResolvedValue({
       files: [{ name: 'result.stl', bytes: new Uint8Array([1, 2, 3]) }],
@@ -60,28 +69,54 @@ describe('assimp transcoder', () => {
     }
   });
 
-  it('creates one exporter instance and disposes it during cleanup', async () => {
+  it.each(['auto', 'native', 'wasm'] as const)(
+    'creates one %s exporter instance and disposes it during cleanup',
+    async (backend) => {
+      const resolved = await definition();
+      const runtime = createRuntime();
+      const context = await resolved.initialize({ backend }, runtime);
+
+      expect(assimpMock.createAssimp).toHaveBeenCalledOnce();
+      expect(requestedBackends).toEqual([backend]);
+      expect(runtime.logger.custom).toHaveBeenCalledWith('warn', 'native unavailable', {
+        data: 'missing addon',
+      });
+      expect(runtime.logger.log).toHaveBeenCalledWith('libassimp backend=native addon=darwin-arm64-napi8');
+      await resolved.cleanup?.(context);
+      expect(assimpMock.dispose).toHaveBeenCalledOnce();
+    },
+  );
+
+  it('should preserve non-warning log levels and report an absent native build identity', async () => {
+    const cause = new Error('wasm diagnostic cause');
+    assimpMock.createAssimp.mockImplementationOnce(async (options: CreateAssimpOptions) => {
+      options.onLog?.({ level: 'error', message: 'wasm diagnostic', cause });
+      return {
+        backend: 'wasm',
+        convert: assimpMock.convert,
+        dispose: assimpMock.dispose,
+      };
+    });
     const resolved = await definition();
     const runtime = createRuntime();
-    const context = await resolved.initialize({}, runtime);
 
-    expect(assimpMock.createAssimp).toHaveBeenCalledOnce();
-    expect(assimpMock.createAssimp).toHaveBeenCalledWith();
-    await resolved.cleanup?.(context);
-    expect(assimpMock.dispose).toHaveBeenCalledOnce();
+    await resolved.initialize({ backend: 'wasm' }, runtime);
+
+    expect(runtime.logger.custom).toHaveBeenCalledWith('error', 'wasm diagnostic', { data: cause });
+    expect(runtime.logger.log).toHaveBeenCalledWith('libassimp backend=wasm addon=none');
   });
 
   it('passes every glTF input file and public target options to libassimp', async () => {
     const resolved = await definition();
     const runtime = createRuntime();
-    const context = await resolved.initialize({}, runtime);
+    const context = await resolved.initialize({ backend: 'auto' }, runtime);
     const inputs = [file('model.gltf'), file('model.bin', new Uint8Array([4, 5, 6]))];
 
     await resolved.transcode({ from: 'gltf', to: 'stl', files: inputs, options: { binary: true } }, runtime, context);
 
     expect(assimpMock.convert).toHaveBeenCalledWith(
       inputs.map(({ name, bytes }) => ({ name, bytes })),
-      { to: 'stl', exportOptions: { binary: true } },
+      { to: 'stl', exportOptions: { binary: true }, signal: runtime.signal },
     );
   });
 
@@ -96,7 +131,7 @@ describe('assimp transcoder', () => {
     });
     const resolved = await definition();
     const runtime = createRuntime();
-    const context = await resolved.initialize({}, runtime);
+    const context = await resolved.initialize({ backend: 'auto' }, runtime);
     const result = await resolved.transcode(
       { from: 'glb', to: 'step', files: [file('model.glb')], options: {} },
       runtime,
@@ -116,13 +151,39 @@ describe('assimp transcoder', () => {
     expect(result.data[1]?.bytes).toEqual(sidecar);
   });
 
+  it('should use the fallback MIME type when suffix parsing returns no segment', async () => {
+    const resolved = await definition();
+    const runtime = createRuntime();
+    const context = await resolved.initialize({ backend: 'auto' }, runtime);
+    assimpMock.convert.mockResolvedValueOnce({
+      files: [{ name: 'README', bytes: new Uint8Array([1, 2, 3]) }],
+    });
+    const split = vi.spyOn(String.prototype, 'split').mockReturnValueOnce([]);
+
+    try {
+      const result = await resolved.transcode(
+        { from: 'glb', to: 'stl', files: [file('model.glb')], options: {} },
+        runtime,
+        context,
+      );
+
+      expect(result).toEqual({
+        success: true,
+        data: [{ name: 'README', bytes: new Uint8Array([1, 2, 3]), mimeType: 'application/octet-stream' }],
+        issues: [],
+      });
+    } finally {
+      split.mockRestore();
+    }
+  });
+
   it.each([
     ['glb', 'gltf'],
     ['gltf', 'glb'],
   ] as const)('executes the %s -> %s route', async (from, to) => {
     const resolved = await definition();
     const runtime = createRuntime();
-    const context = await resolved.initialize({}, runtime);
+    const context = await resolved.initialize({ backend: 'auto' }, runtime);
 
     const result = await resolved.transcode(
       { from, to, files: [file(`model.${from}`)], options: {} },
@@ -131,13 +192,17 @@ describe('assimp transcoder', () => {
     );
 
     expect(result.success).toBe(true);
-    expect(assimpMock.convert).toHaveBeenCalledWith(expect.any(Array), { to, exportOptions: {} });
+    expect(assimpMock.convert).toHaveBeenCalledWith(expect.any(Array), {
+      to,
+      exportOptions: {},
+      signal: runtime.signal,
+    });
   });
 
   it('maps missing inputs and libassimp failures to runtime issues', async () => {
     const resolved = await definition();
     const runtime = createRuntime();
-    const context = await resolved.initialize({}, runtime);
+    const context = await resolved.initialize({ backend: 'auto' }, runtime);
 
     const missing = await resolved.transcode({ from: 'glb', to: 'stl', files: [], options: {} }, runtime, context);
     assimpMock.convert.mockRejectedValueOnce(new Error('EXPORT_FAILED at target 0'));
@@ -149,5 +214,23 @@ describe('assimp transcoder', () => {
 
     expect(missing.success ? undefined : missing.issues[0]?.message).toContain('No input files');
     expect(failed.success ? undefined : failed.issues[0]?.message).toContain('EXPORT_FAILED');
+  });
+
+  it('should map non-Error conversion failures to the stable runtime message', async () => {
+    assimpMock.convert.mockRejectedValueOnce('native panic');
+    const resolved = await definition();
+    const runtime = createRuntime();
+    const context = await resolved.initialize({ backend: 'auto' }, runtime);
+
+    const result = await resolved.transcode(
+      { from: 'glb', to: 'stl', files: [file('model.glb')], options: {} },
+      runtime,
+      context,
+    );
+
+    expect(result).toEqual({
+      success: false,
+      issues: [{ message: 'Transcoding failed', code: 'RUNTIME', type: 'runtime', severity: 'error' }],
+    });
   });
 });

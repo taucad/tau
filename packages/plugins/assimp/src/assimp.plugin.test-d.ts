@@ -7,6 +7,10 @@ import { plugin, assimp } from '#index.js';
 import type { assimpTranscoder } from '#index.js';
 
 const selected = plugin();
+assimp({ preset: 'all', transcoders: { export: { backend: 'native' } } });
+
+// @ts-expect-error Unsupported libassimp backend.
+assimp({ preset: 'all', transcoders: { export: { backend: 'invalid' } } });
 
 expectTypeOf<ExpandPluginTranscoders<readonly [typeof selected]>>().toEqualTypeOf<
   readonly [ReturnType<typeof assimpTranscoder>]

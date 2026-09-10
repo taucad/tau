@@ -10,7 +10,6 @@ const settingsSectionSchema = z.enum([
   'security',
   'api-keys',
   'billing',
-  'connections',
   'compute',
   'models',
   'agents',

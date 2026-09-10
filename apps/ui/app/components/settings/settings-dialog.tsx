@@ -1,18 +1,6 @@
 import { useCallback } from 'react';
 import type { MouseEvent } from 'react';
-import {
-  Bot,
-  BrainCircuit,
-  Cable,
-  Cpu,
-  CreditCard,
-  FlaskConical,
-  HardDrive,
-  Key,
-  Lock,
-  Settings2,
-  User,
-} from 'lucide-react';
+import { Bot, BrainCircuit, Cpu, CreditCard, FlaskConical, HardDrive, Key, Lock, Settings2, User } from 'lucide-react';
 import { AccountSettings } from '#components/auth/settings/account/account-settings.js';
 import { SecuritySettings } from '#components/auth/settings/security/security-settings.js';
 import { ApiKeys } from '#components/auth/api-key/api-keys.js';
@@ -31,9 +19,9 @@ import { GeneralSettings } from '#components/settings/general-settings.js';
 import { ExperimentalSettings } from '#components/settings/experimental-settings.js';
 import { ModelSettings } from '#components/settings/model-settings.js';
 import { AgentSettings } from '#components/settings/agent-settings.js';
-import { PaseoConnectionSettings } from '#components/settings/paseo-connection-settings.js';
 import { SettingsAuthGate } from '#components/settings/settings-auth-gate.js';
 import { RemoteComputeSettings } from '#components/settings/remote-compute-settings.js';
+import { ComputeReuseSettings } from '#components/settings/compute-reuse-settings.js';
 import { cn } from '@taucad/ui/utils/cn';
 import { useKeybinding } from '#hooks/use-keyboard.js';
 import { ResponsiveTabs } from '#components/ui/responsive-tabs.js';
@@ -56,7 +44,6 @@ const sections: readonly SettingsSectionDefinition[] = [
   { id: 'security', label: 'Security', icon: Lock, requiresAuth: true, group: 'platform' },
   { id: 'api-keys', label: 'API Keys', icon: Key, requiresAuth: true, group: 'platform' },
   { id: 'billing', label: 'Billing', icon: CreditCard, requiresAuth: true, group: 'platform' },
-  { id: 'connections', label: 'Connections', icon: Cable, requiresAuth: true, group: 'platform' },
   { id: 'compute', label: 'Compute', icon: Cpu, requiresAuth: true, group: 'platform' },
   { id: 'models', label: 'Models', icon: Bot, requiresAuth: false, group: 'ai' },
   { id: 'agents', label: 'Agents', icon: BrainCircuit, requiresAuth: false, group: 'ai' },
@@ -71,7 +58,6 @@ const sectionPathMap: Record<SettingsSection, string> = {
   security: '/settings/security',
   'api-keys': '/settings/api-keys',
   billing: '/settings/billing',
-  connections: '/settings/connections',
   compute: '/settings/compute',
   models: '/settings/models',
   agents: '/settings/agents',
@@ -200,12 +186,8 @@ export function SettingsDialog(): React.JSX.Element {
                 <BillingSettings />
               </SettingsAuthGate>
             </TabsContent>
-            <TabsContent forceMount enableAnimation={false} value='Connections'>
-              <SettingsAuthGate>
-                <PaseoConnectionSettings />
-              </SettingsAuthGate>
-            </TabsContent>
             <TabsContent forceMount enableAnimation={false} value='Compute'>
+              <ComputeReuseSettings />
               <SettingsAuthGate>
                 <RemoteComputeSettings />
               </SettingsAuthGate>

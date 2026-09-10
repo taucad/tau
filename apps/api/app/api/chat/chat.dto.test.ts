@@ -23,7 +23,7 @@ const cadAgent: CadAgentConfigInput = {
 const baseBody = {
   id: 'chat_1',
   projectId: 'proj_1',
-  execution: { workspaceId: 'workspace_1', baseRevisionId: 'rev_1', hostId: 'host_1' },
+  execution: { hostId: 'host_1', mode: 'direct', workspaceId: 'workspace_1', baseRevisionId: 'rev_1' },
   admission: { version: 1, idempotencyKey: 'request_0000000001' },
   messages: [validUserMessage],
   agent: cadAgent,

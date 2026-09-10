@@ -1,7 +1,5 @@
 import { EventEmitter } from 'node:events';
 import type { ServerResponse } from 'node:http';
-import IORedisMock from 'ioredis-mock';
-import type { Redis } from 'ioredis';
 import { Reflector } from '@nestjs/core';
 import type { ConfigService } from '@nestjs/config';
 import { HttpException, HttpStatus } from '@nestjs/common';
@@ -11,26 +9,12 @@ import type { FastifyRequest } from 'fastify';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Environment } from '#config/environment.config.js';
 import type { HostsService } from '#api/hosts/hosts.service.js';
-import type { RedisService } from '#redis/redis.service.js';
 import { LlmGatewayError } from '#api/llm/llm-gateway.error.js';
 import { LlmGatewayController } from '#api/llm/llm-gateway.controller.js';
 import { LlmGatewayAuthGuard, readLlmGatewayPrincipal } from '#api/llm/llm-gateway.guard.js';
 import { readSingleHeader, validateAnthropicHeaders } from '#api/llm/llm-gateway.headers.js';
-import { LlmGatewayLimiter } from '#api/llm/llm-gateway-limiter.service.js';
-import type { LlmGatewayOptions } from '#api/llm/llm-gateway.options.js';
 import { GatewayAbortScope, GatewayDownstreamLifecycle } from '#api/llm/llm-gateway.stream.js';
 import { HttpExceptionFilter } from '#filters/http-exception.filter.js';
-
-const gatewayOptions: LlmGatewayOptions = {
-  requestsPerMinute: 10,
-  maxConcurrentRequests: 1,
-  maxProviderConcurrentRequests: 10,
-  upstreamIdleTimeoutMs: 100,
-  postAbortSettlementTimeoutMs: 200,
-  concurrencyLeaseMs: 300_000,
-  concurrencyHeartbeatMs: 60_000,
-  maxSseEventBytes: 256 * 1024,
-};
 
 const request = (headers: Record<string, string> = {}, rawHeaders?: string[]): FastifyRequest =>
   ({
@@ -174,89 +158,6 @@ describe('gateway provider headers', () => {
       }
       expect(errorType(caught)).toBe('INVALID_REQUEST');
       expect(errorMessage(caught)).toContain(message);
-    }
-  });
-});
-
-describe('gateway per-principal admission', () => {
-  let redis: Redis | undefined;
-
-  afterEach(() => {
-    redis?.disconnect();
-    redis = undefined;
-  });
-
-  it('caps concurrency per principal without blocking another principal', async () => {
-    redis = new IORedisMock() as unknown as Redis;
-    await redis.flushall();
-    const limiter = new LlmGatewayLimiter({ client: redis } as unknown as RedisService, gatewayOptions);
-    const first = await limiter.acquire('user_a', 'openai');
-    await expect(limiter.acquire('user_a', 'openai')).rejects.toSatisfy(
-      (error: unknown) => errorType(error) === 'RATE_LIMITED',
-    );
-    const otherPrincipal = await limiter.acquire('user_b', 'openai');
-    await first.release();
-    await otherPrincipal.release();
-  });
-
-  it('caps requests per minute independently of released concurrency slots', async () => {
-    redis = new IORedisMock() as unknown as Redis;
-    await redis.flushall();
-    const limiter = new LlmGatewayLimiter({ client: redis } as unknown as RedisService, {
-      ...gatewayOptions,
-      maxConcurrentRequests: 10,
-      requestsPerMinute: 2,
-    });
-    const first = await limiter.acquire('user_rate', 'openai');
-    await first.release();
-    const second = await limiter.acquire('user_rate', 'openai');
-    await second.release();
-    await expect(limiter.acquire('user_rate', 'openai')).rejects.toSatisfy(
-      (error: unknown) => errorType(error) === 'RATE_LIMITED',
-    );
-  });
-
-  it('meters concurrency-saturated retries against the principal rate limit', async () => {
-    redis = new IORedisMock() as unknown as Redis;
-    await redis.flushall();
-    const limiter = new LlmGatewayLimiter({ client: redis } as unknown as RedisService, {
-      ...gatewayOptions,
-      requestsPerMinute: 2,
-    });
-    const first = await limiter.acquire('user_saturated', 'openai');
-    await expect(limiter.acquire('user_saturated', 'openai')).rejects.toSatisfy(
-      (error: unknown) => errorType(error) === 'RATE_LIMITED',
-    );
-    await first.release();
-    await expect(limiter.acquire('user_saturated', 'openai')).rejects.toSatisfy(
-      (error: unknown) => errorType(error) === 'RATE_LIMITED',
-    );
-  });
-
-  it('caps aggregate provider concurrency across different principals', async () => {
-    redis = new IORedisMock() as unknown as Redis;
-    await redis.flushall();
-    const limiter = new LlmGatewayLimiter(
-      { client: redis } as unknown as RedisService,
-      { ...gatewayOptions, maxProviderConcurrentRequests: 1 } as LlmGatewayOptions,
-    );
-    const acquire = limiter.acquire.bind(limiter);
-
-    const first = await acquire('user_provider_a', 'openai');
-    let otherProvider: { release(): Promise<void> } | undefined;
-    try {
-      let secondError: unknown;
-      try {
-        const unexpected = await acquire('user_provider_b', 'openai');
-        await unexpected.release();
-      } catch (error) {
-        secondError = error;
-      }
-      expect(errorType(secondError)).toBe('RATE_LIMITED');
-      otherProvider = await acquire('user_provider_b', 'anthropic');
-    } finally {
-      await first.release();
-      await otherProvider?.release();
     }
   });
 });

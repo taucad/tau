@@ -1,10 +1,31 @@
-import { HttpStatus } from '@nestjs/common';
-import type { FastifyRequest } from 'fastify';
+import { BadRequestException, HttpStatus } from '@nestjs/common';
+import type { FastifyReply, FastifyRequest } from 'fastify';
 import { LlmGatewayError } from '#api/llm/llm-gateway.error.js';
 import type { LlmGatewayErrorType } from '#api/llm/llm-gateway.error.js';
 
 const allowedAnthropicVersions = new Set(['2023-06-01']);
 const allowedAnthropicBetas = new Set(['fine-grained-tool-streaming-2025-05-14', 'interleaved-thinking-2025-05-14']);
+
+/** Rejects query inputs that are absent from the funded request identity. */
+export const assertNoQuery = (request: FastifyRequest): void => {
+  if (request.query === null || typeof request.query !== 'object' || Object.keys(request.query).length > 0) {
+    throw new BadRequestException('Query parameters are not supported');
+  }
+};
+
+/** Cancels provider work when either side of the caller transport closes prematurely. */
+export const invocationSignal = (request: FastifyRequest, reply: FastifyReply): AbortSignal => {
+  const controller = new AbortController();
+  request.raw.once('aborted', () => {
+    controller.abort(new DOMException('Request aborted', 'AbortError'));
+  });
+  reply.raw.once('close', () => {
+    if (!reply.raw.writableFinished) {
+      controller.abort(new DOMException('Response closed', 'AbortError'));
+    }
+  });
+  return controller.signal;
+};
 
 export const readSingleHeader = (
   request: FastifyRequest,
@@ -12,7 +33,7 @@ export const readSingleHeader = (
   duplicateErrorType: LlmGatewayErrorType = 'INVALID_REQUEST',
 ): string | undefined => {
   const values: string[] = [];
-  const rawHeaders = request.raw.rawHeaders;
+  const { rawHeaders } = request.raw;
   for (let index = 0; index < rawHeaders.length; index += 2) {
     if (rawHeaders[index]?.toLowerCase() === name) {
       values.push(rawHeaders[index + 1] ?? '');
@@ -36,7 +57,7 @@ export const validateAnthropicHeaders = (input: {
   readonly version?: string;
   readonly beta?: string;
 }): { readonly version: string; readonly beta?: string } => {
-  const version = input.version?.trim() || '2023-06-01';
+  const version = input.version?.trim() ?? '2023-06-01';
   if (!allowedAnthropicVersions.has(version)) {
     throw new LlmGatewayError(HttpStatus.BAD_REQUEST, 'INVALID_REQUEST', 'Unsupported anthropic-version header.');
   }
@@ -51,4 +72,16 @@ export const validateAnthropicHeaders = (input: {
     throw new LlmGatewayError(HttpStatus.BAD_REQUEST, 'INVALID_REQUEST', 'Unsupported anthropic-beta header.');
   }
   return { version, beta: betas.join(',') };
+};
+
+/** Validates the required opaque version-1 invocation identity. */
+export const validateAttemptId = (value: string | undefined): string => {
+  if (value === undefined || !/^[\u0021-\u007E]{1,128}$/u.test(value)) {
+    throw new LlmGatewayError(
+      HttpStatus.BAD_REQUEST,
+      'INVALID_REQUEST',
+      'A valid x-tau-attempt-id header is required.',
+    );
+  }
+  return value;
 };

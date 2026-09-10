@@ -68,7 +68,13 @@ export class ChatExceptionFilter implements ExceptionFilter {
         code = this.getErrorCode(exception);
       } else if (typeof exceptionResponse === 'object') {
         const responseObject = exceptionResponse as Record<string, unknown>;
-        const responseMessage = responseObject['message'];
+        const nestedError =
+          responseObject['type'] === 'error' &&
+          typeof responseObject['error'] === 'object' &&
+          responseObject['error'] !== null
+            ? (responseObject['error'] as Record<string, unknown>)
+            : undefined;
+        const responseMessage = nestedError?.['message'] ?? responseObject['message'];
         if (typeof responseMessage === 'string') {
           message = responseMessage;
         } else if (Array.isArray(responseMessage)) {
@@ -78,7 +84,12 @@ export class ChatExceptionFilter implements ExceptionFilter {
           message = exception.message;
         }
 
-        code = typeof responseObject['code'] === 'string' ? responseObject['code'] : this.getErrorCode(exception);
+        code =
+          typeof nestedError?.['type'] === 'string'
+            ? nestedError['type']
+            : typeof responseObject['code'] === 'string'
+              ? responseObject['code']
+              : this.getErrorCode(exception);
       } else {
         message = exception.message || 'An error occurred';
         code = this.getErrorCode(exception);
@@ -131,6 +142,13 @@ export class ChatExceptionFilter implements ExceptionFilter {
       this.logger.error(exception, `Chat exception: ${chatError.message}`);
     } else if (statusCode >= 400) {
       this.logger.warn(`Chat client error: ${chatError.message}`);
+    }
+
+    if (response.raw.headersSent || response.raw.destroyed) {
+      if (!response.raw.writableEnded) {
+        response.raw.destroy();
+      }
+      return;
     }
 
     // Set request ID in response header

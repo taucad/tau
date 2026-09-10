@@ -4,9 +4,11 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import type { ArgumentsHost } from '@nestjs/common';
 import type { ChatError } from '@taucad/types';
 import { ChatExceptionFilter } from '#api/chat/chat-exception.filter.js';
+import { LlmGatewayError } from '#api/llm/llm-gateway.error.js';
 
 function createMockArgumentsHost() {
   const response = {
+    raw: { headersSent: false, destroyed: false, writableEnded: false, destroy: vi.fn() },
     header: vi.fn().mockReturnThis(),
     status: vi.fn().mockReturnThis(),
     send: vi.fn().mockReturnThis(),
@@ -24,7 +26,7 @@ function createMockArgumentsHost() {
 
 /** Mirrors drizzle-orm's DrizzleQueryError, whose message embeds the failed SQL and bound params. */
 const leakySql =
-  'Failed query: insert into "paseo_connection" ("owner_id", "server_id", "secret_ciphertext") values ($1, $2, $3)\nparams: user_01H,proj_42,ws_7';
+  'Failed query: insert into "agent_device" ("owner_id", "label", "credential_hash") values ($1, $2, $3)\nparams: user_01H,proj_42,ws_7';
 
 class DrizzleQueryError extends Error {
   public constructor() {
@@ -42,6 +44,16 @@ describe('ChatExceptionFilter unknown-error disclosure', () => {
     vi.unstubAllEnvs();
   });
 
+  it('logs a post-headers failure and closes the stream without writing another response', () => {
+    const { host, response } = createMockArgumentsHost();
+    response.raw.headersSent = true;
+    new ChatExceptionFilter().catch(new Error('Malformed provider stream'), host);
+    expect(response.raw.destroy).toHaveBeenCalledTimes(1);
+    expect(response.header).not.toHaveBeenCalled();
+    expect(response.status).not.toHaveBeenCalled();
+    expect(response.send).not.toHaveBeenCalled();
+  });
+
   it('does not leak driver internals in production', () => {
     vi.stubEnv('NODE_ENV', 'production');
     const { host, response } = createMockArgumentsHost();
@@ -50,7 +62,7 @@ describe('ChatExceptionFilter unknown-error disclosure', () => {
 
     const chatError = sentError(response);
     expect(chatError.raw).toBeUndefined();
-    expect(JSON.stringify(chatError)).not.toContain('paseo_connection');
+    expect(JSON.stringify(chatError)).not.toContain('agent_device');
     expect(JSON.stringify(chatError)).not.toContain('proj_42');
     expect(chatError).toMatchObject({
       category: 'server',
@@ -68,5 +80,32 @@ describe('ChatExceptionFilter unknown-error disclosure', () => {
     new ChatExceptionFilter().catch(new DrizzleQueryError(), host);
 
     expect(sentError(response).raw).toBe(leakySql);
+  });
+
+  it.each([
+    {
+      status: 429,
+      code: 'FUNDED_HELPER_LIMIT',
+      message: 'The naming helper is at its funded-operation failsafe.',
+      category: 'rate_limit',
+    },
+    {
+      status: 503,
+      code: 'BILLING_RECOVERY_UNAVAILABLE',
+      message: 'Tau is finalizing earlier funded work. Try again shortly.',
+      category: 'overloaded',
+    },
+  ] as const)('preserves a funded gateway error as ChatError', ({ status, code, message, category }) => {
+    const { host, response } = createMockArgumentsHost();
+
+    new ChatExceptionFilter().catch(new LlmGatewayError(status, code, message), host);
+
+    expect(sentError(response)).toMatchObject({
+      category,
+      code,
+      message,
+      httpStatus: status,
+      requestId: 'req_test_123',
+    });
   });
 });

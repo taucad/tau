@@ -1,6 +1,10 @@
-import { HttpException, HttpStatus } from '@nestjs/common';
+import { HttpException } from '@nestjs/common';
+import type { HttpStatus } from '@nestjs/common';
 
 export type LlmGatewayErrorType =
+  | 'BILLING_RECOVERY_UNAVAILABLE'
+  | 'FUNDED_HELPER_LIMIT'
+  | 'FUNDED_OPERATION_LIMIT'
   | 'INSUFFICIENT_CREDIT'
   | 'INVALID_REQUEST'
   | 'MODEL_NOT_IN_CATALOG'

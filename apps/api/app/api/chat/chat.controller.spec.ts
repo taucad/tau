@@ -1,8 +1,13 @@
-import { describe, expect, it, vi } from 'vitest';
-import type { FastifyReply } from 'fastify';
+import { describe, expect, it } from 'vitest';
+import { mockDeep } from 'vitest-mock-extended';
+import { Reflector } from '@nestjs/core';
+import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { ChatTurnRequest } from '@taucad/chat/schemas';
 import { ChatController } from '#api/chat/chat.controller.js';
 import type { ChatService } from '#api/chat/chat.service.js';
+
+/** Nest's own `METHOD_METADATA` key: `@nestjs/common/constants` is not an exported subpath of the installed package. */
+const methodMetadataKey = 'method';
 
 const generatorBody = (profile: 'project_name' | 'commit_name'): ChatTurnRequest => ({
   id: 'chat_1',
@@ -15,7 +20,7 @@ const generatorBody = (profile: 'project_name' | 'commit_name'): ChatTurnRequest
 const cadBody = (): ChatTurnRequest => ({
   id: 'chat_1',
   projectId: 'proj_1',
-  execution: { workspaceId: 'workspace_1', baseRevisionId: 'rev_1', hostId: 'host_1' },
+  execution: { hostId: 'host_1', mode: 'direct', workspaceId: 'workspace_1', baseRevisionId: 'rev_1' },
   admission: { version: 1, idempotencyKey: 'request_chat_1_00000000' },
   messages: [{ id: 'msg_1', role: 'user', parts: [{ type: 'text', text: 'hello' }] }],
   agent: {
@@ -29,55 +34,70 @@ const cadBody = (): ChatTurnRequest => ({
 });
 
 const reply = (): FastifyReply => {
-  const value = { header: vi.fn(), status: vi.fn(), send: vi.fn() };
-  value.header.mockReturnValue(value);
-  value.status.mockReturnValue(value);
-  value.send.mockReturnValue(value);
-  return value as unknown as FastifyReply;
+  const value = mockDeep<FastifyReply>();
+  Object.defineProperty(value.raw, 'writableFinished', { value: false });
+  value.header.mockReturnThis();
+  value.status.mockReturnThis();
+  value.send.mockReturnThis();
+  value.raw.once.mockReturnThis();
+  return value;
+};
+const fastifyRequest = (): FastifyRequest => {
+  const value = mockDeep<FastifyRequest>();
+  Object.defineProperty(value, 'query', { value: {} });
+  value.raw.once.mockReturnThis();
+  return value;
 };
 
-/** The one shape `sendSimpleModelStream` consumes off a `streamText` result. */
-const streamResult = () => ({
-  toUIMessageStream: vi.fn(
-    () =>
+const streamResult = () =>
+  ({
+    state: 'streaming',
+    operationId: 'operation',
+    response: new Response(
       new ReadableStream({
         start(controller) {
           controller.close();
         },
       }),
-  ),
-});
+      { status: 200, headers: { 'content-type': 'text/event-stream' } },
+    ),
+    completion: Promise.resolve(),
+  }) as const;
 
 const harness = () => {
-  const chatService = {
-    getBuildNameGenerator: vi.fn(streamResult),
-    getCommitMessageGenerator: vi.fn(streamResult),
-  };
-  return { controller: new ChatController(chatService as unknown as ChatService), chatService };
+  const chatService = mockDeep<ChatService>();
+  chatService.getBuildNameGenerator.mockResolvedValue(streamResult());
+  chatService.getCommitMessageGenerator.mockResolvedValue(streamResult());
+  return { controller: new ChatController(chatService), chatService };
 };
 
 describe('ChatController after the API chat plane deletion', () => {
   it('streams the project-name generator', async () => {
     const { controller, chatService } = harness();
+    const response = reply();
 
-    await controller.createChat(generatorBody('project_name'), 'user_1', reply());
+    await controller.createChat(generatorBody('project_name'), 'user_1', fastifyRequest(), response);
 
     expect(chatService.getBuildNameGenerator).toHaveBeenCalledOnce();
     expect(chatService.getCommitMessageGenerator).not.toHaveBeenCalled();
+    expect(response.status).toHaveBeenCalledWith(200);
+    expect(response.send).toHaveBeenCalledOnce();
   });
 
   it('streams the commit-message generator', async () => {
     const { controller, chatService } = harness();
+    const response = reply();
 
-    await controller.createChat(generatorBody('commit_name'), 'user_1', reply());
+    await controller.createChat(generatorBody('commit_name'), 'user_1', fastifyRequest(), response);
 
     expect(chatService.getCommitMessageGenerator).toHaveBeenCalledOnce();
     expect(chatService.getBuildNameGenerator).not.toHaveBeenCalled();
+    expect(response.status).toHaveBeenCalledWith(200);
+    expect(response.send).toHaveBeenCalledOnce();
   });
 
   it.each([
     ['tau', { kind: 'tau', model: 'openai-gpt-5.5' }],
-    ['paseo', { kind: 'paseo', connectionId: 'connection_1', agentId: 'agent_1' }],
     ['acp', { kind: 'acp', hostId: 'origin', agentId: 'codex' }],
   ] as const)('refuses a %s CAD turn with a typed placement error', async (_kind, execution) => {
     const { controller, chatService } = harness();
@@ -87,7 +107,7 @@ describe('ChatController after the API chat plane deletion', () => {
     }
     request.agent.execution = execution;
 
-    await expect(controller.createChat(request, 'user_1', reply())).rejects.toMatchObject({
+    await expect(controller.createChat(request, 'user_1', fastifyRequest(), reply())).rejects.toMatchObject({
       status: 400,
       response: { code: 'CHAT_CAD_NOT_API_PLACED' },
     });
@@ -97,8 +117,11 @@ describe('ChatController after the API chat plane deletion', () => {
 
   it('exposes no run-directory, stream, or cancellation route', () => {
     const { controller } = harness();
-    const methods = Object.getOwnPropertyNames(Object.getPrototypeOf(controller)).filter(
-      (name) => name !== 'constructor',
+    const prototype = Object.getPrototypeOf(controller) as Record<string, unknown>;
+    const reflector = new Reflector();
+    const methods = Object.getOwnPropertyNames(prototype).filter(
+      (name) =>
+        typeof prototype[name] === 'function' && reflector.get(methodMetadataKey, prototype[name]) !== undefined,
     );
 
     expect(methods).toEqual(['createChat']);

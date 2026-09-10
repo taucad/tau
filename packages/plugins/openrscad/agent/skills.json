@@ -1,0 +1,26 @@
+{
+  "bundles": [
+    {
+      "slug": "cad-openscad",
+      "name": "OpenSCAD authoring",
+      "description": "Guides OpenSCAD model authoring in main.scad with idiomatic CSG and adaptive tessellation. Use when creating or editing .scad geometry.",
+      "version": "0.1.0-beta.1",
+      "whenToUse": "Use when creating or editing .scad geometry.",
+      "directory": "cad-openscad",
+      "files": [
+        "SKILL.md",
+        "api-index.md",
+        "api-3d-primitives.md",
+        "api-2d-primitives.md",
+        "api-transforms.md",
+        "api-booleans.md",
+        "api-extrusion-projection.md",
+        "api-control-flow-modules.md",
+        "api-math-functions.md",
+        "api-list-string-functions.md",
+        "api-special-variables-offered-as-completions.md"
+      ],
+      "body": "---\nname: cad-openscad\ndescription: Guides OpenSCAD model authoring in main.scad with idiomatic CSG and adaptive tessellation. Use when creating or editing .scad geometry.\n---\n\n# OpenSCAD authoring\n\n## Workflow\n\n1. Author the assembly entry point in `main.scad`.\n2. Put `$fa = 2; $fs = 0.4;` at the top for adaptive tessellation. Set `$fn` locally only when a feature needs an exact facet count.\n3. Use snake_case variables, reusable modules, positive dimensions, and hex colors.\n4. Build the intended CSG tree, then leave a top-level invocation such as `part();` so the file renders standalone.\n\nFor multiple files, import library modules with `use <lib/widget.scad>`, not `include`. A library may call its module at top level for standalone rendering; `use` prevents that call from duplicating geometry in `main.scad`.\n\n## Geometry choices\n\n- Use booleans for real unions, intersections, and cuts.\n- Use `hull()` only for a genuine convex hull and `minkowski()` only for a genuine offset, never as substitutes for loft or `rotate_extrude`.\n- Prefer one loop-built sketch followed by one extrusion over a union of many positioned solids.\n- Apply `render()` only to reused subtrees, not leaves.\n\n## Canonical pattern\n\n```scad\n$fa = 2;\n$fs = 0.4;\n\nmodule part() {\n  difference() {\n    intersection() {\n      sphere(10);\n      cube(15, center = true);\n    }\n    cylinder(h = 20, r = 5, center = true);\n  }\n}\n\npart();\n```\n\nCheck missing semicolons, undefined variables, unclosed modules, and non-positive dimensions first.\n\n## API reference\n\nAll 78 symbols are listed in `api-index.md`. Grep it for a name, then read only the file its heading names.\n\n- `api-3d-primitives.md` — 3D primitives\n- `api-2d-primitives.md` — 2D primitives\n- `api-transforms.md` — Transforms\n- `api-booleans.md` — Booleans\n- `api-extrusion-projection.md` — Extrusion / projection\n- `api-control-flow-modules.md` — Control-flow modules\n- `api-math-functions.md` — Math functions\n- `api-list-string-functions.md` — List / string functions\n- `api-special-variables-offered-as-completions.md` — Special variables (offered as completions)\n\nRead ranges, not whole files. Never copy a reference into a source file.\n"
+    }
+  ]
+}

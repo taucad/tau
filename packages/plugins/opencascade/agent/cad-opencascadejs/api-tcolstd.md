@@ -1,0 +1,113 @@
+# libcascade — TColStd
+
+41 top-level symbols. Signatures are verbatim typescript.
+
+// DEPRECATED
+TColStd_HPackedMapOfInteger: declare class TColStd_HPackedMapOfInteger extends Standard_Transient
+
+constructor
+
+// Returns const reference to the underlying map
+Map(): TColStd_PackedMapOfInteger;
+
+// Returns mutable reference to the underlying map
+ChangeMap(): TColStd_PackedMapOfInteger;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+// Releases the C++ object
+delete(): void;
+
+[Symbol.dispose](): void;
+
+// Indexed map of ASCII string key-value pairs
+TColStd_IndexedDataMapOfStringString: declare class TColStd_IndexedDataMapOfStringString
+
+constructor
+
+// Release the underlying C++ object to prevent memory leaks
+delete(): void;
+
+[Symbol.dispose](): void;
+
+TColStd_Array1OfAsciiString: NCollection_Array1_TCollection_AsciiString
+
+TColStd_Array1OfBoolean: NCollection_Array1_bool
+
+TColStd_Array1OfByte: NCollection_Array1_unsignedchar
+
+TColStd_Array1OfExtendedString: NCollection_Array1_TCollection_ExtendedString
+
+TColStd_Array1OfInteger: NCollection_Array1_int
+
+TColStd_Array1OfReal: NCollection_Array1_double
+
+TColStd_Array1OfTransient: NCollection_Array1_handle_Standard_Transient
+
+TColStd_Array2OfInteger: NCollection_Array2_int
+
+TColStd_Array2OfReal: NCollection_Array2_double
+
+TColStd_Array2OfTransient: NCollection_Array2_handle_Standard_Transient
+
+TColStd_HArray1OfAsciiString: NCollection_HArray1_TCollection_AsciiString
+
+TColStd_HArray1OfBoolean: NCollection_HArray1_bool
+
+TColStd_HArray1OfByte: NCollection_HArray1_unsignedchar
+
+TColStd_HArray1OfExtendedString: NCollection_HArray1_TCollection_ExtendedString
+
+TColStd_HArray1OfInteger: NCollection_HArray1_int
+
+TColStd_HArray1OfReal: NCollection_HArray1_double
+
+TColStd_HArray1OfTransient: NCollection_HArray1_handle_Standard_Transient
+
+TColStd_HArray2OfInteger: NCollection_HArray2_int
+
+TColStd_HArray2OfReal: NCollection_HArray2_double
+
+TColStd_HArray2OfTransient: NCollection_HArray2_handle_Standard_Transient
+
+TColStd_HSequenceOfAsciiString: NCollection_HSequence_TCollection_AsciiString
+
+TColStd_HSequenceOfExtendedString: NCollection_HSequence_TCollection_ExtendedString
+
+TColStd_HSequenceOfHAsciiString: NCollection_HSequence_handle_TCollection_HAsciiString
+
+TColStd_HSequenceOfHExtendedString: NCollection_HSequence_handle_TCollection_HExtendedString
+
+TColStd_HSequenceOfInteger: NCollection_HSequence_int
+
+TColStd_HSequenceOfReal: NCollection_HSequence_double
+
+TColStd_HSequenceOfTransient: NCollection_HSequence_handle_Standard_Transient
+
+TColStd_ListOfAsciiString: NCollection_List_TCollection_AsciiString
+
+TColStd_ListOfInteger: NCollection_List_int
+
+TColStd_ListOfReal: NCollection_List_double
+
+TColStd_PackedMapOfInteger: NCollection_PackedMap_int
+
+TColStd_SequenceOfAsciiString: NCollection_Sequence_TCollection_AsciiString
+
+TColStd_SequenceOfBoolean: NCollection_Sequence_bool
+
+TColStd_SequenceOfExtendedString: NCollection_Sequence_TCollection_ExtendedString
+
+TColStd_SequenceOfHAsciiString: NCollection_Sequence_handle_TCollection_HAsciiString
+
+TColStd_SequenceOfHExtendedString: NCollection_Sequence_handle_TCollection_HExtendedString
+
+TColStd_SequenceOfInteger: NCollection_Sequence_int
+
+TColStd_SequenceOfReal: NCollection_Sequence_double
+
+TColStd_SequenceOfTransient: NCollection_Sequence_handle_Standard_Transient

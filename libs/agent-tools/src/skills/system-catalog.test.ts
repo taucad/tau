@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
@@ -23,23 +24,42 @@ const nodeLoader = {
 };
 
 describe('the shared system-skill catalogue', () => {
-  it('loads every entry under Node from the file the browser bundler inlines', async () => {
+  it('loads every entry from the same manifest bytes the browser compiles in', async () => {
     const loaded = await loadSystemSkills(nodeLoader);
 
     expect(loaded.map((skill) => skill.slug)).toEqual(systemSkillCatalog.map((entry) => entry.slug));
-    /* `?raw` inlines exactly the bytes at the resolved subpath, so a Node
-     * fingerprint equal to that file's is a fingerprint equal to the browser's
-     * for the same catalogue row. */
-    const bundled = await Promise.all(
-      systemSkillCatalog.map(async (entry) => ({
-        entry,
-        markdown: await readFile(workspaceRequire.resolve(entry.subpath), 'utf8'),
-      })),
+
+    /*
+     * Each subpath now names `agent/skills.json`, which both hosts read: Node
+     * parses it here, the browser imports it with `type: 'json'`. So equality
+     * with the manifest's own `body` is equality with what the browser renders.
+     *
+     * The `SKILL.md` beside it is asserted too, because the body is stored
+     * twice — inline for JS consumers, on disk for a host that just drops the
+     * directory into `.agents/skills/`. Two copies that must not diverge is
+     * exactly the thing worth a test.
+     */
+    const inspected = await Promise.all(
+      systemSkillCatalog.map(async (entry) => {
+        const manifestPath = workspaceRequire.resolve(entry.subpath);
+        const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as {
+          readonly bundles: ReadonlyArray<{ readonly directory: string; readonly body: string }>;
+        };
+        const bundle = manifest.bundles[0];
+        const onDisk = await readFile(
+          new URL(`${bundle?.directory ?? '.'}/SKILL.md`, pathToFileURL(manifestPath)),
+          'utf8',
+        );
+        return { entry, bundle, onDisk };
+      }),
     );
-    for (const { entry, markdown } of bundled) {
+
+    for (const { entry, bundle, onDisk } of inspected) {
       const skill = loaded.find((candidate) => candidate.slug === entry.slug);
-      expect(fingerprintSkillContent(skill?.skillMarkdown ?? '')).toBe(fingerprintSkillContent(markdown));
-      expect(parseSkillFrontmatter(markdown, `system:skills/${entry.slug}/SKILL.md`)?.name).toBe(entry.slug);
+
+      expect(fingerprintSkillContent(skill?.skillMarkdown ?? '')).toBe(fingerprintSkillContent(bundle?.body ?? ''));
+      expect(fingerprintSkillContent(onDisk)).toBe(fingerprintSkillContent(bundle?.body ?? ''));
+      expect(parseSkillFrontmatter(onDisk, `system:skills/${entry.slug}/SKILL.md`)?.name).toBe(entry.slug);
     }
   });
 

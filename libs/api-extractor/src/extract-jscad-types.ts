@@ -951,18 +951,6 @@ function main(): void {
       writeFileSync(join(targetDirectory, 'index.d.ts'), content);
     }
 
-    // Generate structured JSON
-    console.log('\n📝 Generating structured API data JSON...');
-    const apiData = buildApiData();
-    const jsonPath = join(outputDirectory, 'jscad-api-data.json');
-    writeFileSync(jsonPath, JSON.stringify(apiData, null, 2));
-    console.log(`✅ API data JSON saved to ${jsonPath}`);
-    console.log(
-      `   ${apiData.metadata.totalEntries} entries: ${Object.entries(apiData.metadata.breakdown)
-        .map(([k, v]) => `${v} ${k}s`)
-        .join(', ')}`,
-    );
-
     console.log('\n@jscad/modeling type extraction completed successfully!');
   } catch (error) {
     console.error('Error during @jscad/modeling type extraction:', error);

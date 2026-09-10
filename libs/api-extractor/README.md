@@ -6,7 +6,6 @@ The root package intentionally stays asset-light. Use the dedicated subpaths:
 
 - `@taucad/api-extractor/kernel-types` for CAD kernel declarations such as Replicad, JSCAD, Manifold, and OpenCascade.js.
 - `@taucad/api-extractor/authoring-types` for non-kernel authoring packages such as GeoSpec.
-- `@taucad/api-extractor/kcl-reference` for compact KCL markdown reference text.
 
 ## GeoSpec Authoring Types
 

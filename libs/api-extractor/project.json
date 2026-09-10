@@ -68,11 +68,7 @@
         "cwd": "libs/api-extractor"
       },
       "cache": true,
-      "inputs": [
-        "{projectRoot}/src/extract-manifold-types.ts",
-        "{workspaceRoot}/packages/runtime/node_modules/manifold-3d/**/*.d.ts",
-        "sharedGlobals"
-      ],
+      "inputs": ["{projectRoot}/src/extract-manifold-types.ts", "{workspaceRoot}/pnpm-lock.yaml", "sharedGlobals"],
       "outputs": ["{projectRoot}/src/generated/manifold"]
     },
     "extract-opencascade": {
@@ -82,12 +78,38 @@
         "cwd": "libs/api-extractor"
       },
       "cache": true,
+      "inputs": ["{projectRoot}/src/extract-opencascade-types.ts", "{workspaceRoot}/pnpm-lock.yaml", "sharedGlobals"],
+      "outputs": ["{projectRoot}/src/generated/opencascade"]
+    },
+    "generate-bundles": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsx src/bundle/generate.ts",
+        "cwd": "libs/api-extractor"
+      },
+      "cache": true,
       "inputs": [
-        "{projectRoot}/src/extract-opencascade-types.ts",
-        "{workspaceRoot}/node_modules/libcascade/dist/types.d.ts",
+        "{projectRoot}/src/bundle/**/*.ts",
+        "{projectRoot}/src/languages/**/*.ts",
+        "{projectRoot}/src/model/**/*.ts",
+        "{projectRoot}/src/render/**/*.ts",
+        "{projectRoot}/src/generated/**/*",
+        "{workspaceRoot}/packages/plugins/*/agent/doctrine.md",
+        "{workspaceRoot}/packages/geospec/agent/doctrine.md",
+        "{workspaceRoot}/pnpm-lock.yaml",
         "sharedGlobals"
       ],
-      "outputs": ["{projectRoot}/src/generated/opencascade"]
+      "outputs": [
+        "{workspaceRoot}/packages/plugins/build123d/agent/cad-build123d",
+        "{workspaceRoot}/packages/plugins/jscad/agent/cad-jscad",
+        "{workspaceRoot}/packages/plugins/manifold/agent/cad-manifold",
+        "{workspaceRoot}/packages/plugins/opencascade/agent/cad-opencascadejs",
+        "{workspaceRoot}/packages/plugins/openrscad/agent/cad-openscad",
+        "{workspaceRoot}/packages/plugins/picogk/agent/cad-picogk",
+        "{workspaceRoot}/packages/plugins/replicad/agent/cad-replicad",
+        "{workspaceRoot}/packages/plugins/zoo/agent/cad-zoo",
+        "{workspaceRoot}/packages/geospec/agent/geospec-authoring"
+      ]
     }
   }
 }

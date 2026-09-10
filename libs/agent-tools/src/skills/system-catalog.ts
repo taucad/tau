@@ -110,12 +110,55 @@ export const systemSkillCatalog = [
       'Guides deterministic GeoSpec test authoring and repair. Use before creating or editing *.geospec.ts or *.geospec.js files.',
     version: '1.0.0',
     whenToUse: 'Use before creating, extending, or repairing any GeoSpec geometry test.',
-    subpath: '@taucad/middleware/agent/geospec-authoring',
+    subpath: 'geospec/agent/skills.json',
   },
 ] as const satisfies readonly SystemSkillCatalogEntry[];
 
 /** Slug of a package-backed system skill. @public */
 export type SystemSkillSlug = (typeof systemSkillCatalog)[number]['slug'];
+
+/** The manifest fields a system-skill entry is built from. */
+type ManifestBundle = {
+  readonly slug: string;
+  readonly name: string;
+  readonly version: string;
+  readonly whenToUse: string;
+  readonly body: string;
+};
+
+/**
+ * Read the first bundle out of a parsed `agent/skills.json`.
+ *
+ * Validating rather than casting, because this crosses a package boundary: a
+ * stale or half-generated manifest should make the host quietly not offer that
+ * skill, exactly as an unresolvable package does, instead of advertising a skill
+ * whose body is `undefined`.
+ *
+ * @param manifest - The parsed manifest.
+ * @returns Its first bundle, or `undefined` when the shape is not usable.
+ */
+const readFirstBundle = (manifest: unknown): ManifestBundle | undefined => {
+  if (typeof manifest !== 'object' || manifest === null || !('bundles' in manifest)) {
+    return undefined;
+  }
+  const { bundles } = manifest as { readonly bundles: unknown };
+  if (!Array.isArray(bundles)) {
+    return undefined;
+  }
+  const [bundle] = bundles as ReadonlyArray<Partial<ManifestBundle>>;
+  if (bundle === undefined) {
+    return undefined;
+  }
+  const { slug, name, version, whenToUse, body } = bundle;
+  const usable =
+    typeof slug === 'string' &&
+    typeof name === 'string' &&
+    typeof version === 'string' &&
+    typeof whenToUse === 'string' &&
+    typeof body === 'string' &&
+    body !== '';
+  return usable ? { slug, name, version, whenToUse, body } : undefined;
+};
 
 /**
  * Load the catalogue with a host's own resolver and reader.
@@ -124,6 +167,10 @@ export type SystemSkillSlug = (typeof systemSkillCatalog)[number]['slug'];
  * daemon serving a workspace without the kernel packages installed has no
  * business claiming their guides, and refusing the whole layer over one
  * missing package would be worse than offering the rest.
+ *
+ * Each resolved subpath names that package's `agent/skills.json`, which carries
+ * both the declaration and the rendered body, so one read per package replaces
+ * the read-plus-restate this used to do.
  *
  * @param deps - Subpath resolver and text reader, both the host's own.
  * @returns The system-skill entries this host can actually read.
@@ -153,12 +200,21 @@ export async function loadSystemSkills(deps: {
         if (path === undefined) {
           return undefined;
         }
+        const manifest: unknown = JSON.parse(await deps.readFile(path));
+        const bundle = readFirstBundle(manifest);
+        if (bundle === undefined) {
+          return undefined;
+        }
+        /* Name, version and when-to-use come off the manifest, not off the row
+         * beside it: the package that rendered the body is the only thing that
+         * knows what it says, so letting the row restate it just creates a
+         * second copy to fall out of date. */
         return {
-          slug: entry.slug,
-          name: entry.name,
-          version: entry.version,
-          whenToUse: entry.whenToUse,
-          skillMarkdown: await deps.readFile(path),
+          slug: bundle.slug,
+          name: bundle.name,
+          version: bundle.version,
+          whenToUse: bundle.whenToUse,
+          skillMarkdown: bundle.body,
         };
       } catch {
         return undefined;

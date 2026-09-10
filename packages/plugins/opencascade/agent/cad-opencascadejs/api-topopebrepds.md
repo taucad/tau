@@ -1,0 +1,7 @@
+# libcascade — TopOpeBRepDS
+
+2 top-level symbols. Signatures are verbatim typescript.
+
+TopOpeBRepDS_Array1OfDataMapOfIntegerListOfInterference: NCollection_Array1_int
+
+TopOpeBRepDS_HArray1OfDataMapOfIntegerListOfInterference: NCollection_HArray1_int

@@ -1,0 +1,21 @@
+# libcascade — TColGeom2d
+
+9 top-level symbols. Signatures are verbatim typescript.
+
+TColGeom2d_Array1OfBSplineCurve: NCollection_Array1_handle_Geom2d_BSplineCurve
+
+TColGeom2d_Array1OfBezierCurve: NCollection_Array1_handle_Geom2d_BezierCurve
+
+TColGeom2d_Array1OfCurve: NCollection_Array1_handle_Geom2d_Curve
+
+TColGeom2d_HArray1OfBSplineCurve: NCollection_HArray1_handle_Geom2d_BSplineCurve
+
+TColGeom2d_HArray1OfCurve: NCollection_HArray1_handle_Geom2d_Curve
+
+TColGeom2d_HSequenceOfBoundedCurve: NCollection_HSequence_handle_Geom2d_BoundedCurve
+
+TColGeom2d_SequenceOfBoundedCurve: NCollection_Sequence_handle_Geom2d_BoundedCurve
+
+TColGeom2d_SequenceOfCurve: NCollection_Sequence_handle_Geom2d_Curve
+
+TColGeom2d_SequenceOfGeometry: NCollection_Sequence_handle_Geom2d_Geometry

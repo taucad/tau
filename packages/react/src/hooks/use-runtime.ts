@@ -569,7 +569,7 @@ export function useRuntime<
           return;
         }
 
-        const client = createRuntimeClient(resolvedClientOptions);
+        const client = createRuntimeClient<Runtime, Transport>(resolvedClientOptions);
         const exportClient = client as {
           export: (format: FileExtension, options?: RuntimeClientExportGeometryInput) => Promise<ExportResult>;
         };
@@ -578,6 +578,9 @@ export function useRuntime<
             input: RuntimeRenderInput<readonly KernelPlugin[], readonly MiddlewarePlugin[]>,
           ) => Promise<RenderOutcome>;
           updateParameters: (parameters: RuntimeParameterRecord) => Promise<RenderOutcome>;
+        };
+        const capabilitiesClient = client as {
+          on(event: 'capabilities', handler: (manifest: CapabilitiesManifest) => void): () => void;
         };
 
         const unsubscribers: Array<() => void> = [];
@@ -619,7 +622,7 @@ export function useRuntime<
               setJsonSchema(result.data.jsonSchema);
             }
           }),
-          client.on('capabilities', (manifest) => {
+          capabilitiesClient.on('capabilities', (manifest) => {
             if (cancelled) {
               return;
             }

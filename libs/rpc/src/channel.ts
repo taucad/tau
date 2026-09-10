@@ -955,14 +955,22 @@ export const createChannelClient = <P extends RpcProtocol = EmptyRpcProtocol>(
 
   let off: () => void = (): void => undefined;
 
+  /** Set when the port reported its own death, which is never a graceful bye. */
+  let portDied = false;
+
   const cleanupPendingState = (origin: CloseOrigin): void => {
     for (const [, p] of callPending) {
       p.reject(new Error('Channel closed'));
     }
     callPending.clear();
     callPendingNames.clear();
+    /* A peer that said goodbye ends its listens gracefully; a wire that died
+     * under them never finished them. Ending a truncated stream normally told
+     * the consumer a short read was the whole answer (RC8 collision 2: `ws`
+     * kills the socket over an oversized frame, and every in-flight iterator
+     * completed empty instead of rejecting). */
     for (const [sid, s] of listenSinks) {
-      if (origin === 'local') {
+      if (origin === 'local' || portDied) {
         s.fail(new Error('Channel closed'));
       } else {
         s.accept(listenEnd, 0);
@@ -992,8 +1000,10 @@ export const createChannelClient = <P extends RpcProtocol = EmptyRpcProtocol>(
   const offWire = port.onMessage(onWire);
   /* A port that can report its own death is the only thing standing between a
    * killed peer and permanently pending calls: treat the death as the bye
-   * frame the peer never got to send. */
+   * frame the peer never got to send. Unlike a bye, it truncates in-flight
+   * listens rather than ending them. */
   const offPortClose = port.onClose?.(() => {
+    portDied = true;
     closeController.acceptRemote('port-closed');
   });
   off = (): void => {

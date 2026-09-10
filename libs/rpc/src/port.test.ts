@@ -495,6 +495,47 @@ describe('wrapMessagePortMain', () => {
     expect(near.close).toHaveBeenCalledTimes(1);
   });
 
+  it('fails an active listen when the underlying port dies', async () => {
+    /* A truncated stream is not a finished one. A dead wire — a killed peer,
+     * or `ws` closing the socket over an over-`maxPayload` frame — used to end
+     * every in-flight iterator normally, so the consumer read a short stream
+     * as the whole answer (RC8 collision 2). */
+    const { port1, port2 } = new MessageChannel();
+    const server = createChannelServer({
+      port: wrapMessagePortMain(port1, { label: 'dying.server' }),
+      sessionKey: 'dying',
+      impl: {
+        call: async () => 0,
+        async *listen() {
+          yield 1;
+
+          await new Promise<never>(() => {
+            void 0;
+          });
+        },
+      },
+    });
+    const client = createChannelClient({
+      port: wrapMessagePortMain(port2, { label: 'dying.client' }),
+      sessionKey: 'dying',
+    });
+
+    const received: unknown[] = [];
+    const drain = (async () => {
+      for await (const value of client.listen('e')) {
+        received.push(value);
+      }
+    })();
+    await vi.waitUntil(() => received.length === 1);
+    /* The peer's process is gone: a port death, not the `lb` frame a peer
+     * closing gracefully would have sent first. */
+    port1.close();
+
+    await expect(drain).rejects.toThrow('Channel closed');
+    expect(received).toEqual([1]);
+    server.dispose();
+  });
+
   it('rejects a pending call when the underlying port dies', async () => {
     const [near] = linkedFakePorts();
     const port = wrapMessagePortMain<unknown>(near, { label: 'dying' });

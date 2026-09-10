@@ -75,5 +75,9 @@
   },
   "taucad": {
     "hostTarget": "browser"
+  },
+  "tau": {
+    "skills": null,
+    "reason": "Bundler; no agent-facing surface"
   }
 }

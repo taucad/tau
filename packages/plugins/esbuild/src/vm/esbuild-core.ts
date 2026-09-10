@@ -36,7 +36,6 @@ export type BundlerOptions = {
   autoExportNames?: string[];
 };
 
-const esbuildWasmUrl = new URL('wasm/esbuild.wasm', import.meta.url).href;
 let esbuildInitialized = false;
 let initializationPromise: Promise<void> | undefined;
 let activeEsbuild: typeof wasmEsbuild = wasmEsbuild;
@@ -67,7 +66,14 @@ export const initializeEsbuild = async (): Promise<void> => {
           'esbuild'
         )) as typeof wasmEsbuild;
       }
-      await activeEsbuild.initialize(isNode() ? {} : { wasmURL: esbuildWasmUrl });
+      if ((import.meta as ImportMeta & { readonly env?: { readonly SSR?: boolean } }).env?.SSR === true) {
+        await activeEsbuild.initialize({});
+      } else if (isNode()) {
+        await activeEsbuild.initialize({});
+      } else {
+        const { esbuildWasmUrl } = await import('#vm/esbuild-wasm-url.js');
+        await activeEsbuild.initialize({ wasmURL: esbuildWasmUrl });
+      }
       esbuildInitialized = true;
     } catch (error) {
       initializationPromise = undefined;

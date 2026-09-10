@@ -81,18 +81,22 @@
     "@resvg/resvg-wasm": "2.6.2",
     "@taucad/geometry-core": "workspace:*",
     "manifold-3d": "catalog:",
-    "nanoraster": "file:../../../repos/nanoraster/tests/out/candidate-0df0c5d/nanoraster-0.4.1.tgz"
+    "nanoraster": "catalog:"
   },
   "devDependencies": {
     "@taucad/camera": "workspace:*",
     "@taucad/runtime": "workspace:*",
     "geist": "catalog:",
-    "nanoraster-darwin-arm64": "file:../../../repos/nanoraster/tests/out/candidate-0df0c5d/nanoraster-darwin-arm64-0.4.1.tgz",
+    "nanoraster-darwin-arm64": "0.5.1",
     "vite": "catalog:",
     "vitest-mock-extended": "catalog:",
     "zod": "catalog:"
   },
   "taucad": {
     "hostTarget": "browser"
+  },
+  "tau": {
+    "skills": null,
+    "reason": "Transcoder; its options are already tool schemas"
   }
 }

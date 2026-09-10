@@ -1,9 +1,23 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
+import type { encodeRgbaWebp } from 'nanoraster';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 import type { ExportFile } from '@taucad/runtime/types';
 import type { TranscoderRuntime } from '@taucad/runtime/transcoder';
-import { renderSvgPng, svgPngOptionsSchema, svgTranscoder } from '#svg.transcoder.js';
+import * as svgPublic from '#svg.js';
+import {
+  renderSvgPng,
+  renderSvgWebp,
+  svgPngOptionsSchema,
+  svgTranscoder,
+  svgWebpOptionsSchema,
+} from '#svg.transcoder.js';
+
+const backendMock = vi.hoisted(() => ({ encodeRgbaWebp: vi.fn<typeof encodeRgbaWebp>() }));
+
+vi.mock('#image-backend.js', () => ({
+  loadImageBackend: async () => ({ encodeRgbaWebp: backendMock.encodeRgbaWebp }),
+}));
 
 const fixture =
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="-10 -5 120 60"><path d="M0 0H100V50H0Z" fill="none" stroke="#ef4444" stroke-width="3"/><path d="M10 40L85 8" stroke="#2563eb" stroke-width="5"/></svg>';
@@ -41,6 +55,69 @@ describe('SVG image transcoder', () => {
     );
   });
 
+  it('passes the shared annotated RGBA pixels to WebP encoding with explicit premultiplied alpha', async () => {
+    const webp = new Uint8Array([0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x45, 0x42, 0x50]);
+    backendMock.encodeRgbaWebp.mockResolvedValue(webp);
+
+    const rendered = await renderSvgWebp(fixture, {
+      width: 320,
+      height: 240,
+      background: '#00000000',
+      label: 'drawing.ts',
+      axes: true,
+      scaleBar: true,
+      lengthSymbol: 'mm',
+      quality: 0.85,
+    });
+
+    expect(rendered).toEqual({ name: 'render.webp', mimeType: 'image/webp', bytes: webp });
+    expect(backendMock.encodeRgbaWebp).toHaveBeenCalledOnce();
+    const [rgba, options] = backendMock.encodeRgbaWebp.mock.calls[0]!;
+    expect(rgba).toBeInstanceOf(Uint8Array);
+    expect(rgba).toHaveLength(320 * 240 * 4);
+    expect(options).toEqual({ width: 320, height: 240, quality: 0.85, alpha: 'premultiplied' });
+    expect(svgWebpOptionsSchema.parse({}).quality).toBe(1);
+    expect(svgPublic.renderSvgWebp).toBe(renderSvgWebp);
+    expect(svgPublic.svgWebpOptionsSchema).toBe(svgWebpOptionsSchema);
+
+    const definition = await resolveRuntimePluginDefinition('transcoder', svgTranscoder());
+    const source: ExportFile = {
+      name: 'drawing.svg',
+      mimeType: 'image/svg+xml',
+      bytes: new TextEncoder().encode(fixture),
+    };
+    await expect(
+      definition.transcode(
+        { from: 'svg', to: 'webp', files: [source], options: { width: 320, height: 240 } },
+        runtime,
+        await definition.initialize({}, runtime),
+      ),
+    ).resolves.toEqual({
+      success: true,
+      data: [{ name: 'render.webp', mimeType: 'image/webp', bytes: webp }],
+      issues: [],
+    });
+  });
+
+  it('encodes the shared rendered pixels through the installed native WebP backend', async () => {
+    const { encodeRgbaWebp } = await vi.importActual<typeof import('nanoraster')>('nanoraster');
+    backendMock.encodeRgbaWebp.mockImplementationOnce(encodeRgbaWebp);
+
+    const rendered = await renderSvgWebp(fixture, {
+      width: 320,
+      height: 240,
+      background: '#00000000',
+      axes: true,
+      scaleBar: true,
+      lengthSymbol: 'mm',
+    });
+
+    expect(rendered.mimeType).toBe('image/webp');
+    expect(new TextDecoder().decode(rendered.bytes.subarray(0, 4))).toBe('RIFF');
+    expect(new TextDecoder().decode(rendered.bytes.subarray(8, 12))).toBe('WEBP');
+    expect(rendered.bytes.byteLength).toBeGreaterThan(100);
+  });
+
   it('lets resvg parse the document and requires physical units when a scale bar is requested', async () => {
     await expect(renderSvgPng('<svg')).rejects.toMatchObject({ code: 'parse' });
     await expect(renderSvgPng(fixture, { scaleBar: true })).rejects.toThrow('CAD length symbol');
@@ -63,10 +140,11 @@ describe('SVG image transcoder', () => {
     expect(tallSymbol.bytes).toEqual(wideSymbol.bytes);
   });
 
-  it('declares one strict svg→png edge and returns a typed runtime failure', async () => {
+  it('declares strict svg image edges and returns a typed runtime failure', async () => {
     const definition = await resolveRuntimePluginDefinition('transcoder', svgTranscoder());
     expect(definition.edges).toEqual([
       expect.objectContaining({ from: 'svg', to: 'png', fidelity: 'mesh', optionsSchema: svgPngOptionsSchema }),
+      expect.objectContaining({ from: 'svg', to: 'webp', fidelity: 'mesh', optionsSchema: svgWebpOptionsSchema }),
     ]);
 
     const invalid: ExportFile = {

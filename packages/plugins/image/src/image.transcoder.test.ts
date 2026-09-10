@@ -191,7 +191,7 @@ describe('image transcoder', () => {
             height: 576,
             camera: {
               framing: 'bounds',
-              direction: [0.612_372_435_7, -0.612_372_435_7, 0.5],
+              direction: [0.6123724357, -0.6123724357, 0.5],
               up: [0, 0, 1],
               margin: 0.1,
               projection: { kind: 'perspective', verticalFieldOfView: 45 },
@@ -371,23 +371,23 @@ describe('image transcoder', () => {
           ]),
         );
 
-        const request =
+        const request: Parameters<typeof imageDefinition.transcode>[0] =
           format === 'png'
             ? {
-                from: 'glb' as const,
+                from: 'glb',
                 to: format,
                 files: [glbFile()],
                 options: imageEdgeSchemas.png.parse({ width: 32, height: 24 }),
               }
             : format === 'webp'
               ? {
-                  from: 'glb' as const,
+                  from: 'glb',
                   to: format,
                   files: [glbFile()],
                   options: imageEdgeSchemas.webp.parse({ width: 32, height: 24 }),
                 }
               : {
-                  from: 'glb' as const,
+                  from: 'glb',
                   to: format,
                   files: [glbFile()],
                   options: imageEdgeSchemas.jpeg.parse({ width: 32, height: 24 }),
@@ -438,7 +438,7 @@ describe('image transcoder', () => {
               id: 'single',
               camera: {
                 framing: 'fit',
-                direction: [0.612_372_435_7, -0.612_372_435_7, 0.5],
+                direction: [0.6123724357, -0.6123724357, 0.5],
                 up: [0, 0, 1],
                 margin: 0.1,
                 projection: { kind: 'perspective', verticalFieldOfView: 45 },

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { toJSONSchema } from 'zod';
 import type { JSONSchema7, JSONSchema7Definition } from '@taucad/json-schema';
+import { renderImageMaxSections } from 'nanoraster';
 import { imageEdgeSchemas } from '#image-export-options.js';
 
 const requireSchema = (value: JSONSchema7Definition | undefined, message: string): JSONSchema7 => {
@@ -39,7 +40,7 @@ describe('imageEdgeSchemas', () => {
         mode: 'single',
         camera: {
           framing: 'fit',
-          direction: [0.612_372_435_7, -0.612_372_435_7, 0.5],
+          direction: [0.6123724357, -0.6123724357, 0.5],
           up: [0, 0, 1],
           margin: 0.1,
           projection: { kind: 'perspective', verticalFieldOfView: 45 },
@@ -76,7 +77,7 @@ describe('imageEdgeSchemas', () => {
       expect(imageEdgeSchemas.png.parse({ camera: { framing: 'bounds' } })).toMatchObject({
         camera: {
           framing: 'bounds',
-          direction: [0.612_372_435_7, -0.612_372_435_7, 0.5],
+          direction: [0.6123724357, -0.6123724357, 0.5],
           up: [0, 0, 1],
           margin: 0.1,
           projection: { kind: 'perspective', verticalFieldOfView: 45 },
@@ -217,10 +218,14 @@ describe('imageEdgeSchemas', () => {
       ).toBe(false);
       expect(imageEdgeSchemas.png.safeParse({ sections: { planes: [] } }).success).toBe(false);
       expect(
-        imageEdgeSchemas.png.safeParse({ sections: { planes: Array.from({ length: 6 }, () => ({})) } }).success,
+        imageEdgeSchemas.png.safeParse({
+          sections: { planes: Array.from({ length: renderImageMaxSections }, () => ({})) },
+        }).success,
       ).toBe(true);
       expect(
-        imageEdgeSchemas.png.safeParse({ sections: { planes: Array.from({ length: 7 }, () => ({})) } }).success,
+        imageEdgeSchemas.png.safeParse({
+          sections: { planes: Array.from({ length: renderImageMaxSections + 1 }, () => ({})) },
+        }).success,
       ).toBe(false);
       expect(
         imageEdgeSchemas.png.safeParse({ sections: { planes: [{ point: [0, 0, 0], normal: [0, 0, 0] }] } }).success,

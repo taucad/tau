@@ -15,53 +15,173 @@
 
 import { z } from 'zod';
 
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import {
   agentLogEventSchema,
   jsonValueSchema,
   providerMessageSchema,
   userProviderMessageSchema,
 } from '#log/event-schema.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import { modelProviderKinds } from '#log/event-types.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import { isGatewayProviderKind } from '#transport/gateway-model-transport.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import type { AgentLiveEvent, HostRunSnapshot, InterruptRequest, InterruptResolution } from '#waist/ports.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import type { EventLogBatch } from '#log/event-log-appender.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import type { AgentLogEvent, RunTrigger, UserProviderMessage } from '#log/event-types.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import type { TauAgentAdmissionConfig } from '#host/tau-agent-host.js';
 
 /** Maximum durable events transferred in one replay window. @public */
 export const agentChannelTailBatchLimit = 16;
 
+/**
+ * Maximum serialized bytes transferred in one replay window.
+ *
+ * A count alone does not bound a page: one `read_file` result inside a single
+ * record can be larger than a whole ordinary transcript, so sixteen records is
+ * an unbounded promise. A client may ask for less; it may not ask for more.
+ *
+ * @public
+ */
+export const agentChannelTailByteLimit = 1_048_576;
+
 const nonEmptyString = z.string().min(1);
 
-const systemPromptBlockSchema = z.strictObject({
+/**
+ * Every typed refusal an external-agent run may carry to a surface (VSC4).
+ *
+ * A refusal is a *fact about the agent*, not a stack trace: each code names one
+ * thing the user can act on — log in, pick another model, install the adapter —
+ * so a surface renders an affordance rather than a vendor sentence with a
+ * stderr tail attached. The code travels on `run.lifecycle.detail.code` and on
+ * a thrown channel error alike; the facts a login needs travel beside it as an
+ * {@link externalAgentLoginSchema} interrupt.
+ *
+ * @public
+ */
+export const externalAgentRefusalCodes = [
+  'EXTERNAL_AGENT_AUTH_REQUIRED',
+  'EXTERNAL_AGENT_MODEL_UNAVAILABLE',
+  'EXTERNAL_AGENT_UNAVAILABLE',
+  'EXTERNAL_AGENT_CONTENT_UNSUPPORTED',
+  'CLI_TOO_OLD',
+  'CLI_NOT_FOUND',
+  'ADAPTER_NOT_INSTALLED',
+  'ADAPTER_NO_BIN',
+] as const;
+
+/** One {@link externalAgentRefusalCodes} value. @public */
+export type ExternalAgentRefusalCode = (typeof externalAgentRefusalCodes)[number];
+
+/**
+ * One external agent, exactly as every tier carries it (VSC1).
+ *
+ * This is the **sole** shape of `externalAgents`: the daemon's `ready` frame,
+ * `GET /.well-known/tau-host`, the API relay, the desktop preload bootstrap and
+ * the browser's placement ladder all speak it, and the string list it replaced
+ * is gone (EQ18, VI9). It lives beside the refusal codes because it is wire
+ * vocabulary both the host and the browser import from one place.
+ *
+ * Every field is bounded because all of it is **daemon-authored text rendered
+ * in a browser**: `displayName` and a model `name` come from a vendor adapter's
+ * own config options, so they are untrusted at render time exactly as an
+ * agent's message text is.
+ *
+ * A `refusal` is an agent this installation *knows about* and cannot start.
+ * It is carried rather than dropped so a GUI can say why a row is missing
+ * instead of silently offering less than the user installed (V9).
+ *
+ * @public
+ */
+export const externalAgentDescriptorSchema = z.strictObject({
+  /** Stable registry id, the value `acpAgentExecutionSchema.agentId` carries. */
+  id: z.string().min(1).max(64),
+  /** Product name for the selector row. */
+  displayName: z.string().min(1).max(64),
+  /**
+   * Models the discovery probe read off the agent's `category: 'model'` select,
+   * in the order the agent listed them. Empty when the probe failed or timed
+   * out — never a reason to drop the agent (EQ1 fallback B).
+   */
+  models: z
+    .array(z.strictObject({ id: z.string().min(1).max(128), name: z.string().min(1).max(128) }))
+    .max(64)
+    .default([]),
+  /** The select's `currentValue`: what a turn naming no model actually runs. */
+  defaultModel: z.string().min(1).max(128).optional(),
+  /** Present exactly when this agent cannot be started; `models` is then empty. */
+  refusal: z.enum(externalAgentRefusalCodes).optional(),
+});
+
+/** One agent as every tier carries it (VSC1). @public */
+export type ExternalAgentDescriptor = z.infer<typeof externalAgentDescriptorSchema>;
+
+/** One login method an agent offered, flattened for presentation. @public */
+export const externalAgentAuthMethodSchema = z.strictObject({
+  id: nonEmptyString,
+  name: nonEmptyString,
+  description: z.string().optional(),
+  /**
+   * A command line the *user* runs in their own terminal, ready to copy.
+   *
+   * X6: Tau never runs it and never sees what it produces — the vendor's
+   * credential stays in the vendor's own store on the user's own machine.
+   */
+  terminalCommand: nonEmptyString.optional(),
+});
+
+/**
+ * What a surface needs to get the user logged in to an external agent.
+ *
+ * One shape for both portable flows, because both end at the same banner: a
+ * `-32000` refusal carries the `authMethods` the agent offered, and a URL
+ * elicitation carries the verification `url` and `code` the agent is waiting
+ * on. It is the payload of an `interrupt.recorded` of kind
+ * `external-agent-login` and the payload of the `EXTERNAL_AGENT_AUTH_REQUIRED`
+ * refusal, so a renderer written once serves both (V11).
+ *
+ * @public
+ */
+export const externalAgentLoginSchema = z.strictObject({
+  kind: z.literal('external-agent-login'),
+  /** Agent the user has to log in to. */
+  agentId: nonEmptyString,
+  /** Methods the agent listed at `initialize`; empty for a bare URL elicitation. */
+  authMethods: z.array(externalAgentAuthMethodSchema),
+  /** Where the user completes a URL (device-code) login. */
+  url: z.string().optional(),
+  /** The verification code that URL asks for, when the agent sent one. */
+  code: z.string().optional(),
+  /** The elicitation this login answers; absent for an initialize-time refusal. */
+  elicitationId: nonEmptyString.optional(),
+});
+
+/** The login facts a surface renders; see {@link externalAgentLoginSchema}. @public */
+export type ExternalAgentLogin = z.infer<typeof externalAgentLoginSchema>;
+
+/** One cache-aware system-prompt block accepted at admission. @public */
+export const agentChannelSystemPromptBlockSchema = z.strictObject({
   type: z.literal('text'),
   text: z.string(),
   cacheControl: z.strictObject({ type: z.literal('ephemeral'), scope: z.literal('global').optional() }).optional(),
 });
 
-const modelCostSchema = z.strictObject({
+/** Catalog pricing in dollars per million tokens. @public */
+export const agentChannelModelCostSchema = z.strictObject({
   input: z.number().nonnegative(),
   output: z.number().nonnegative(),
   cacheRead: z.number().nonnegative(),
   cacheWrite: z.number().nonnegative(),
 });
 
-const hostModelSchema = z.strictObject({
+/** One catalog model row a client may name for its turn. @public */
+export const agentChannelModelSchema = z.strictObject({
   id: nonEmptyString,
   providerKind: z.enum(modelProviderKinds).refine(isGatewayProviderKind),
   contextWindow: z.number().int().positive(),
   maxTokens: z.number().int().positive().optional(),
-  cost: modelCostSchema.optional(),
+  cost: agentChannelModelCostSchema.optional(),
 });
 
-const toolChoiceSchema = z.union([z.enum(['none', 'auto', 'any', 'custom']), z.array(z.string())]);
+/** How the turn may use tools: a mode, or an explicit allowlist. @public */
+export const agentChannelToolChoiceSchema = z.union([z.enum(['none', 'auto', 'any', 'custom']), z.array(z.string())]);
 
 /* Loose, deliberately: the browser assembles richer skill rows than the host
  * consumes (`resourceUri`, `source`, `version`, …) and a strict relist here
@@ -83,7 +203,12 @@ const clientContextSchema = z.strictObject({
  *
  * @public
  */
-export const agentChannelRunKindSchema = z.strictObject({ kind: z.literal('acp'), id: nonEmptyString });
+export const agentChannelRunKindSchema = z.strictObject({
+  kind: z.literal('acp'),
+  id: nonEmptyString,
+  /** Adapter-specific model id; absent takes whatever the adapter defaults to. */
+  model: nonEmptyString.max(128).optional(),
+});
 
 /** Per-admission model, prompt, tool and client context accepted over the wire. @public */
 export const agentChannelAdmissionConfigSchema = z.strictObject({
@@ -91,12 +216,16 @@ export const agentChannelAdmissionConfigSchema = z.strictObject({
   systemPrompt: z.string(),
   systemPromptBlocks: z
     .union([
-      z.tuple([systemPromptBlockSchema, systemPromptBlockSchema]),
-      z.tuple([systemPromptBlockSchema, systemPromptBlockSchema, systemPromptBlockSchema]),
+      z.tuple([agentChannelSystemPromptBlockSchema, agentChannelSystemPromptBlockSchema]),
+      z.tuple([
+        agentChannelSystemPromptBlockSchema,
+        agentChannelSystemPromptBlockSchema,
+        agentChannelSystemPromptBlockSchema,
+      ]),
     ])
     .optional(),
-  model: hostModelSchema.optional(),
-  toolChoice: toolChoiceSchema,
+  model: agentChannelModelSchema.optional(),
+  toolChoice: agentChannelToolChoiceSchema,
   allowedTools: z.array(z.string()).optional(),
   snapshot: jsonValueSchema.optional(),
   contextPayload: clientContextSchema.optional(),
@@ -113,10 +242,22 @@ const startBase = {
   runId: nonEmptyString,
   message: userProviderMessageSchema,
   config: agentChannelAdmissionConfigSchema.optional(),
+  /**
+   * How the host records what this turn writes (N26, V19).
+   *
+   * Beside `config`, not inside it: the mode governs the *host's* revision, not
+   * the model admission, and it applies identically to a Tau turn and to an
+   * external one. Absent means `direct` — the mode every host records — so a
+   * client that never learned about revisions still admits.
+   */
+  mode: z.enum(['direct', 'candidate']).optional(),
+  /** Revision the turn's base is recorded under; minted by the host when absent. */
+  baseRevisionId: nonEmptyString.optional(),
 };
 const tailWindow = {
   cursor: z.number().int().nonnegative(),
   limit: z.number().int().positive().max(agentChannelTailBatchLimit),
+  maxBytes: z.number().int().positive().max(agentChannelTailByteLimit).optional(),
 };
 
 /** Every command one client may issue on the `/agent` channel. @public */
@@ -148,16 +289,9 @@ export const agentChannelCommandSchema = z.union([
     runId: nonEmptyString,
     interruptId: nonEmptyString,
     outcome: z.enum(['approved', 'denied', 'cancelled']),
+    /* The option the human actually chose, when the request offered a list. */
+    optionId: nonEmptyString.optional(),
     payload: jsonValueSchema.optional(),
-  }),
-  /* Additive for W4-PASEO: a Paseo agent runs on the *user’s* machine, so
-   * the only Tau tools it can reach are a paired daemon's own MCP endpoint.
-   * The page cannot mint that capability (the signing secret never leaves
-   * the daemon), so it asks the daemon to, naming the run it is for. */
-  z.strictObject({
-    ...commandBase,
-    type: z.literal('mint-mcp-capability'),
-    runId: nonEmptyString,
   }),
   z.strictObject({ ...commandBase, type: z.literal('attach'), ...tailWindow }),
   z.strictObject({ ...commandBase, type: z.literal('tail'), ...tailWindow }),
@@ -169,10 +303,22 @@ type AgentChannelStartCommand = {
   readonly runId: string;
   readonly message: UserProviderMessage;
   readonly config?: AgentChannelAdmissionConfig | undefined;
+  /** How the host records this turn; absent means `direct`. */
+  readonly mode?: 'direct' | 'candidate' | undefined;
+  /** Revision the turn's base is recorded under; minted by the host when absent. */
+  readonly baseRevisionId?: string | undefined;
 } & (
   | { readonly trigger: 'submit'; readonly retainedMessageIds?: never }
   | { readonly trigger: Exclude<RunTrigger, 'submit'>; readonly retainedMessageIds: readonly string[] }
 );
+
+/** One bounded replay window a client may ask for. @public */
+export type AgentChannelTailWindow = {
+  readonly cursor: number;
+  readonly limit: number;
+  /** Serialized-byte budget for the page; the daemon's own bound applies when absent. */
+  readonly maxBytes?: number | undefined;
+};
 
 /** One client command on the `/agent` channel. @public */
 export type AgentChannelCommand =
@@ -182,9 +328,8 @@ export type AgentChannelCommand =
   | { readonly type: 'resume'; readonly chatId: string }
   | ({ readonly type: 'interrupt'; readonly chatId: string } & InterruptRequest)
   | ({ readonly type: 'resolve-interrupt'; readonly chatId: string; readonly runId: string } & InterruptResolution)
-  | { readonly type: 'mint-mcp-capability'; readonly chatId: string; readonly runId: string }
-  | { readonly type: 'tail'; readonly chatId: string; readonly cursor: number; readonly limit: number }
-  | { readonly type: 'attach'; readonly chatId: string; readonly cursor: number; readonly limit: number };
+  | ({ readonly type: 'tail'; readonly chatId: string } & AgentChannelTailWindow)
+  | ({ readonly type: 'attach'; readonly chatId: string } & AgentChannelTailWindow);
 
 /** Operations that answer with a run projection. @public */
 export type AgentChannelResultOperation = 'start' | 'steer' | 'cancel' | 'resume' | 'interrupt' | 'resolve-interrupt';
@@ -197,15 +342,6 @@ export type AgentChannelLeadership =
 /** One answer to an {@link AgentChannelCommand}. @public */
 export type AgentChannelResponse =
   | { readonly type: 'result'; readonly operation: AgentChannelResultOperation; readonly snapshot: HostRunSnapshot }
-  | {
-      readonly type: 'mcp-capability';
-      readonly chatId: string;
-      /** Absolute `/mcp` URL on the daemon that minted it. */
-      readonly url: string;
-      /** Headers the agent session must send, already including the bearer. */
-      readonly headers: Readonly<Record<string, string>>;
-      readonly expiresAt: string;
-    }
   | { readonly type: 'tail'; readonly chatId: string; readonly batch: EventLogBatch }
   | {
       readonly type: 'attach';
@@ -254,13 +390,6 @@ export const agentChannelResponseSchema = z.union([
     type: z.literal('result'),
     operation: z.enum(['start', 'steer', 'cancel', 'resume', 'interrupt', 'resolve-interrupt']),
     snapshot: hostRunSnapshotSchema,
-  }),
-  z.strictObject({
-    type: z.literal('mcp-capability'),
-    chatId: nonEmptyString,
-    url: z.url(),
-    headers: z.record(z.string(), z.string()),
-    expiresAt: nonEmptyString,
   }),
   z.strictObject({ type: z.literal('tail'), chatId: nonEmptyString, batch: eventLogBatchSchema }),
   z.strictObject({
@@ -330,7 +459,7 @@ export const agentChannelProtocolSchemas = {
 /** Narrow a validated command into the admission request the host core takes. @public */
 export const admissionConfigFor = (
   config: AgentChannelAdmissionConfig | undefined,
-  fallback: { readonly systemPrompt: string; readonly model: TauAgentAdmissionConfig['model'] },
+  fallback: { readonly systemPrompt: string; readonly model?: TauAgentAdmissionConfig['model'] },
 ): TauAgentAdmissionConfig => ({
   systemPrompt: config?.systemPrompt ?? fallback.systemPrompt,
   ...(config?.systemPromptBlocks ? { systemPromptBlocks: config.systemPromptBlocks } : {}),

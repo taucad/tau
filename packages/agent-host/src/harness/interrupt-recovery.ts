@@ -101,7 +101,7 @@ export const createInterruptRecoveryMessage = async (input: {
     const tail = input.messages.at(-1);
     if (
       tail?.role !== 'assistant' ||
-      (tail.metadata?.['stopReason'] !== 'aborted' && tail.metadata?.['stopReason'] !== 'error')
+      (tail.metadata?.stopReason !== 'aborted' && tail.metadata?.stopReason !== 'error')
     ) {
       return undefined;
     }

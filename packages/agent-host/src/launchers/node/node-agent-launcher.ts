@@ -23,17 +23,11 @@
 
 import { join } from 'node:path';
 
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import { createGatewayModelTransport } from '#transport/gateway-model-transport.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import { createTauAgentHost } from '#host/tau-agent-host.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import { createNodeEventLog } from '#node.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import { createPortableId } from '#harness/session-record.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
-import type { AgentLogEvent } from '#log/event-types.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
+import type { AgentLogEvent, RevisionFinalizedEvent } from '#log/event-types.js';
 import type {
   AgentLiveEvent,
   DurableEventLog,
@@ -43,18 +37,15 @@ import type {
   InterruptResolution,
   ToolRegistry,
 } from '#waist/ports.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import type { AgentSessionModel, CreateAgentSessionOptions } from '#harness/session.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import type { ExternalAgentPort, TauAgentHost } from '#host/tau-agent-host.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
-import { admissionConfigFor } from '#launchers/node/agent-wire.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
+import { admissionConfigFor, agentChannelTailByteLimit } from '#launchers/node/agent-wire.js';
 import type {
   AgentChannelCommand,
   AgentChannelEvent,
   AgentChannelLiveEvent,
   AgentChannelResponse,
+  AgentChannelTailWindow,
 } from '#launchers/node/agent-wire.js';
 
 /** One segment, never a path: a chat id is a directory name under `.tau/chats`. */
@@ -123,12 +114,39 @@ const createInterruptInbox = (): InterruptApprovalPort & {
   };
 };
 
+/**
+ * Events a subscriber may leave unread before it is dropped.
+ *
+ * The stream's own default high-water mark is one, so `desiredSize` falls to
+ * `1 - queued`: a subscriber this far behind is not slow, it has stopped
+ * reading. Dropping it is the honest end — a client that fell behind re-tails
+ * from its cursor, which is exactly what the durable log is for.
+ */
+const fanOutQueueLimit = 1024;
+
 /** A multi-subscriber fan-out that never blocks the producer. */
 const createFanOut = <Event>() => {
   const controllers = new Set<ReadableStreamDefaultController<Event>>();
+  const drop = (controller: ReadableStreamDefaultController<Event>, reason?: Error): void => {
+    controllers.delete(controller);
+    if (reason) {
+      try {
+        controller.error(reason);
+      } catch {
+        /* Already errored or closed; the removal above is the whole point. */
+      }
+    }
+  };
   return {
     publish: (event: Event): void => {
       for (const controller of controllers) {
+        /* An unbounded queue is the producer's problem, not the subscriber's:
+         * a client that stops reading would otherwise grow this process's
+         * heap for every event of every run it is not consuming. */
+        if ((controller.desiredSize ?? 0) < -fanOutQueueLimit) {
+          drop(controller, new Error('This subscriber fell too far behind; reattach from its cursor.'));
+          continue;
+        }
         /* A subscriber whose socket just died leaves a controller that throws
          * on `enqueue`. Publishing runs inside the durable-append path and
          * inside the model's delta callback, so letting that throw would let a
@@ -137,7 +155,7 @@ const createFanOut = <Event>() => {
         try {
           controller.enqueue(event);
         } catch {
-          controllers.delete(controller);
+          drop(controller);
         }
       }
     },
@@ -152,7 +170,13 @@ const createFanOut = <Event>() => {
             }
             active = false;
             controllers.delete(controller);
-            controller.close();
+            try {
+              controller.close();
+            } catch {
+              /* The fan-out's own `close()` or a `drop` already closed or errored
+               * this controller; an abort that lands afterwards must not throw
+               * from a listener nothing can catch (R-W2b(host) §6.3). */
+            }
             signal.removeEventListener('abort', close);
           };
           cleanup = close;
@@ -183,8 +207,12 @@ export type NodeAgentLauncherOptions = {
   readonly workspaceRoot: string;
   /** `${TAU_API_URL}/` — the base the model gateway hangs off. */
   readonly gatewayBaseUrl: string;
-  /** Default model row; one admission may override it. */
-  readonly model: AgentSessionModel;
+  /**
+   * Default model row for turns whose admission names none. Omit it and a Tau
+   * `start` that names none is refused with `HOST_MODEL_UNAVAILABLE`; an ACP
+   * turn brings its own model and is unaffected either way.
+   */
+  readonly model?: AgentSessionModel | undefined;
   /** Default system prompt; one admission may override it. */
   readonly systemPrompt: string;
   /** Tools visible to every run. */
@@ -202,36 +230,44 @@ export type NodeAgentLauncherOptions = {
    * daemon's own runs are unaffected either way.
    */
   readonly externalAgents?: ExternalAgentPort | undefined;
-  /**
-   * Mint a run-scoped Tau MCP capability for a client that cannot.
-   *
-   * A Paseo agent runs on the user's own machine and reaches Tau tools only
-   * through a paired daemon's `/mcp` endpoint — but the page holding that
-   * session cannot sign a capability, because the signing secret never
-   * leaves this process. Omit it and the command is refused, which is what
-   * a daemon with no MCP endpoint should say.
-   */
-  readonly mintMcpCapability?:
-    | ((input: { readonly chatId: string; readonly runId: string }) => {
-        readonly url: string;
-        readonly headers: Readonly<Record<string, string>>;
-        readonly expiresAt: string;
-      })
-    | undefined;
 };
+
+/**
+ * One host-authored record, before the launcher stamps its log position. @public
+ *
+ * Only the revision record: the launcher owns the log's sequencing, and a
+ * record written beside a run must apply nothing to provider history — which is
+ * true of this variant and of no other. Widen it when a second host-authored
+ * fact earns the same treatment.
+ */
+export type HostAuthoredLogEvent = Omit<RevisionFinalizedEvent, 'version' | 'leaderEpoch' | 'sequence' | 'recordedAt'>;
 
 /** A running Node agent launcher. @public */
 export type NodeAgentLauncher = {
+  /** The assembled host, for callers that need the lifecycle surface directly. */
+  readonly host: TauAgentHost;
   /** Answer one T0 command. Never tied to a client's socket lifetime. */
   execute(command: AgentChannelCommand): Promise<AgentChannelResponse>;
+  /**
+   * Append one host-authored record to a chat's durable log, and publish it.
+   *
+   * The turn boundary is outside the run loop — the host records what a turn
+   * wrote once the run is terminal (V17/VI11) — but the record belongs in the
+   * same log, at the same cursor, as everything else the client replays. This
+   * is the launcher's own appender, memoized per chat, so the record takes the
+   * next sequence rather than opening a second writer on one `events.jsonl`.
+   *
+   * @param chatId - Chat whose log takes the record.
+   * @param event - The record, without its log position.
+   * @returns The record as it was written.
+   */
+  append(chatId: string, event: HostAuthoredLogEvent): Promise<RevisionFinalizedEvent>;
   /** Durable event stream for every chat this launcher owns. */
   events(signal: AbortSignal): AsyncIterable<AgentChannelEvent>;
   /** Ephemeral model-delta stream for every chat this launcher owns. */
   liveEvents(signal: AbortSignal): AsyncIterable<AgentChannelLiveEvent>;
   /** Unresolved approval requests for one run. */
   pendingInterrupts(runId: string): Promise<readonly InterruptRequest[]>;
-  /** The assembled host, for callers that need the lifecycle surface directly. */
-  readonly host: TauAgentHost;
   close(): Promise<void>;
 };
 
@@ -315,10 +351,10 @@ export const createNodeAgentLauncher = (options: NodeAgentLauncherOptions): Node
   const host: TauAgentHost = createTauAgentHost({
     systemPrompt: options.systemPrompt,
     ...(options.systemPromptBlocks ? { systemPromptBlocks: options.systemPromptBlocks } : {}),
-    model: options.model,
+    ...(options.model ? { model: options.model } : {}),
     modelTransport: createGatewayModelTransport({
       baseUrl: options.gatewayBaseUrl,
-      model: options.model,
+      ...(options.model ? { model: options.model } : {}),
       ...(options.auth ? { auth: options.auth } : {}),
       ...(options.fetch ? { fetch: options.fetch } : {}),
     }),
@@ -445,10 +481,26 @@ export const createNodeAgentLauncher = (options: NodeAgentLauncherOptions): Node
    * @param command - The client's attach window.
    * @returns The attach projection, its leadership marker and whether this call recovered the run.
    */
+  /**
+   * The client's replay window, bounded by this daemon's own byte budget.
+   *
+   * A client that names no budget still gets one: sixteen records is not a
+   * bound when one of them can hold a whole file (P5).
+   *
+   * @param command - The client's `tail` or `attach` window.
+   * @returns The window this daemon will actually serve.
+   */
+  const readWindow = <Command extends AgentChannelTailWindow & { readonly chatId: string }>(
+    command: Command,
+  ): Command & { readonly maxBytes: number } => ({
+    ...command,
+    maxBytes: Math.min(command.maxBytes ?? agentChannelTailByteLimit, agentChannelTailByteLimit),
+  });
+
   const attach = async (
     command: Extract<AgentChannelCommand, { readonly type: 'attach' }>,
   ): Promise<Extract<AgentChannelResponse, { readonly type: 'attach' }>> => {
-    const batch = await host.readEvents(command);
+    const batch = await host.readEvents(readWindow(command));
     if (batch.endCursor === 0) {
       return {
         type: 'attach',
@@ -480,7 +532,7 @@ export const createNodeAgentLauncher = (options: NodeAgentLauncherOptions): Node
     return {
       type: 'attach',
       chatId: command.chatId,
-      batch: await host.readEvents(command),
+      batch: await host.readEvents(readWindow(command)),
       leadership: { role: 'leader', generation: generationFor(command.chatId) },
       snapshot,
       takeover: takeover && !isTerminal(snapshot.state),
@@ -492,19 +544,10 @@ export const createNodeAgentLauncher = (options: NodeAgentLauncherOptions): Node
     generationFor(command.chatId);
     switch (command.type) {
       case 'tail': {
-        return { type: 'tail', chatId: command.chatId, batch: await host.readEvents(command) };
+        return { type: 'tail', chatId: command.chatId, batch: await host.readEvents(readWindow(command)) };
       }
       case 'attach': {
         return attach(command);
-      }
-      case 'mint-mcp-capability': {
-        if (!options.mintMcpCapability) {
-          throw Object.assign(new Error('This Tau Host offers no MCP endpoint.'), {
-            code: 'HOST_MCP_UNAVAILABLE',
-          });
-        }
-        const minted = options.mintMcpCapability({ chatId: command.chatId, runId: command.runId });
-        return { type: 'mcp-capability', chatId: command.chatId, ...minted };
       }
       case 'start': {
         const external = command.config?.agent;
@@ -516,7 +559,9 @@ export const createNodeAgentLauncher = (options: NodeAgentLauncherOptions): Node
             ...admissionConfigFor(command.config, { systemPrompt: options.systemPrompt, model: options.model }),
             /* The host routes on this *before* it composes anything, so the Tau
              * fields above are inert for an external turn. */
-            ...(external ? { agent: { kind: 'acp', id: external.id } } : {}),
+            ...(external
+              ? { agent: { kind: 'acp', id: external.id, ...(external.model ? { model: external.model } : {}) } }
+              : {}),
           },
         };
         const completion = host.admit(
@@ -573,6 +618,7 @@ export const createNodeAgentLauncher = (options: NodeAgentLauncherOptions): Node
           runId: command.runId,
           interruptId: command.interruptId,
           outcome: command.outcome,
+          ...(command.optionId === undefined ? {} : { optionId: command.optionId }),
           ...(command.payload === undefined ? {} : { payload: command.payload }),
         });
         break;
@@ -584,6 +630,24 @@ export const createNodeAgentLauncher = (options: NodeAgentLauncherOptions): Node
   return {
     host,
     execute,
+    append: async (chatId, event) => {
+      const log = await openEventLog(chatId);
+      /* The same rule the host's own appender follows: continue this leader's
+       * run of sequences, and start a fresh one when the log's tail belongs to
+       * a leader that is gone. */
+      const leaderEpoch = generationFor(chatId);
+      const recorded = await log.read();
+      const tail = recorded.at(-1);
+      const stamped: RevisionFinalizedEvent = {
+        ...event,
+        version: 1,
+        leaderEpoch,
+        sequence: tail?.leaderEpoch === leaderEpoch ? tail.sequence + 1 : 0,
+        recordedAt: new Date().toISOString(),
+      };
+      await log.append(stamped);
+      return stamped;
+    },
     events: (signal) => durable.subscribe(signal),
     liveEvents: (signal) => live.subscribe(signal),
     pendingInterrupts: async (runId) => host.pendingInterrupts(runId),

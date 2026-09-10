@@ -475,6 +475,111 @@ describe('Compaction', () => {
     await second.close();
   });
 
+  /*
+   * Required compaction fails closed on its *commit* leg too. A tier-two
+   * projection that cannot be recorded must stop the turn, not run it: the
+   * model would otherwise be prompted with a compacted history the durable log
+   * never learned about, and the next reader would replay a different turn.
+   */
+  it('should reach no provider dispatch when a tier-two persist cannot be recorded', async () => {
+    const file = createMemoryEventLogFile();
+    const seedLog = await file.open();
+    const base = (sequence: number) =>
+      ({
+        version: 1,
+        leaderEpoch: 'fail-closed-epoch',
+        sequence,
+        recordedAt: '2026-09-01T00:00:00.000Z',
+        runId: 'run-fail-closed',
+      }) as const;
+    const seedEvents: AgentLogEvent[] = [];
+    for (let index = 0; index < 6; index++) {
+      const callId = `call-${index}`;
+      seedEvents.push(
+        {
+          ...base(seedEvents.length),
+          type: 'message.appended',
+          message: {
+            id: `assistant-${index}`,
+            role: 'assistant',
+            content: [
+              {
+                type: 'toolCall',
+                id: callId,
+                name: 'edit_file',
+                arguments: { targetFile: 'main.ts', oldString: 'x'.repeat(8000), newString: `${index}` },
+              },
+            ],
+            metadata: { api: 'openai-responses', provider: 'stub', model: 'stub', stopReason: 'toolUse' },
+          },
+        },
+        {
+          ...base(seedEvents.length + 1),
+          type: 'message.appended',
+          message: {
+            id: `input-${index}`,
+            role: 'tool-input',
+            toolCallId: callId,
+            toolName: 'edit_file',
+            content: { targetFile: 'main.ts', oldString: 'x'.repeat(8000), newString: `${index}` },
+          },
+        },
+        {
+          ...base(seedEvents.length + 2),
+          type: 'message.appended',
+          message: {
+            id: `output-${index}`,
+            role: 'tool-output',
+            toolCallId: callId,
+            toolName: 'edit_file',
+            content: { changed: true },
+            isError: false,
+          },
+        },
+      );
+    }
+    for (const event of seedEvents) {
+      // oxlint-disable-next-line no-await-in-loop -- The fixture seeds one physical JSONL sequence.
+      await seedLog.append(event);
+    }
+    await seedLog.close();
+
+    const dispatched: ModelStreamRequest[] = [];
+    const opened = await file.open();
+    const session = await createAgentSession({
+      chatId: 'chat-fail-closed',
+      runId: 'run-fail-closed',
+      leaderEpoch: 'fail-closed-run-epoch',
+      systemPrompt: 'system',
+      model: { id: 'stub', contextWindow: 8192 },
+      modelTransport: {
+        async *stream(request): AsyncGenerator<ModelStreamEvent> {
+          dispatched.push(request);
+          yield { type: 'completed', stopReason: 'stop' };
+        },
+      },
+      toolRegistry: { list: () => [], invoke: async () => ({ content: null, isError: false }) },
+      eventLog: {
+        ...opened,
+        append: async (event) => {
+          if (event.type === 'history.compacted') {
+            throw new Error('injected durable failure');
+          }
+          return opened.append(event);
+        },
+      },
+      summarize: async () => 'durable summary',
+      createId: () => 'fail-closed-id',
+      now: () => new Date('2026-09-01T00:00:00.000Z'),
+    });
+
+    await expect(session.prompt({ id: 'turn-fail-closed', role: 'user', content: 'continue' })).rejects.toThrow(
+      'injected durable failure',
+    );
+    expect(dispatched).toEqual([]);
+    await session.close();
+  });
+
   it('should invalidate a pending compaction when a same-length prefix has different stable ids', async () => {
     const original: UserMessage[] = Array.from({ length: 8 }, (_, index) => ({
       role: 'user',

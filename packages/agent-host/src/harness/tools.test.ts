@@ -62,6 +62,7 @@ describe('EagerDispatch', () => {
     };
     const [tool] = createAgentTools({
       registry,
+      runId: 'run-1',
       substitute: async () => ({ content: { cached: true }, isError: false }),
     });
 
@@ -105,7 +106,7 @@ const captureRegistry = (views: readonly string[]): ToolRegistry => ({
 });
 
 const captureToolResult = async (views: readonly string[]): Promise<AgentMessage> => {
-  const [tool] = createAgentTools({ registry: captureRegistry(views) });
+  const [tool] = createAgentTools({ registry: captureRegistry(views), runId: 'run-capture' });
   const result = await tool!.execute('call-capture', { targetFile: 'main.scad', mode: 'multi_angle' });
   // Restated rather than read off `AgentToolResult`, whose `details` is `any`.
   const details: HostToolExecutionDetails = { content: captureResult(views), isError: false, substituted: false };
@@ -227,7 +228,7 @@ describe('CaptureToolResults', () => {
       list: () => [{ name: 'get_kernel_result', description: 'Render', inputSchema: { type: 'object' } }],
       invoke: async () => ({ content: { success: true, status: 'ready' }, isError: false }),
     };
-    const [tool] = createAgentTools({ registry });
+    const [tool] = createAgentTools({ registry, runId: 'run-1' });
 
     const result = await tool!.execute('call-1', { targetFile: 'main.scad' });
 

@@ -76,8 +76,16 @@ class DeterministicToolCallingTransport implements ModelTransport {
   public readonly requests: ModelStreamRequest[] = [];
   private primaryCalls = 0;
 
+  public readonly usesBillingAttempt = (): boolean => true;
+
+  public readonly lookupAttempt = async (): Promise<undefined> => undefined;
+
   public async *stream(request: ModelStreamRequest): AsyncGenerator<ModelStreamEvent> {
     this.requests.push(request);
+    await request.onInvocationBound?.({
+      operationId: `operation-${request.attemptId}`,
+      status: 'pending',
+    });
     if (request.systemPrompt.startsWith('Summarize the conversation')) {
       yield { type: 'text-delta', text: 'Earlier reads all targeted main.ts.' };
       yield { type: 'completed', stopReason: 'stop' };
@@ -104,6 +112,159 @@ class DeterministicToolCallingTransport implements ModelTransport {
 }
 
 describe('pi full-turn parity fixture', () => {
+  it('never redispatches a bound invocation whose durable assistant result was lost', async () => {
+    const log = await createMemoryEventLog([
+      {
+        version: 1,
+        leaderEpoch: 'epoch-1',
+        sequence: 0,
+        recordedAt: '2026-09-01T00:00:00.000Z',
+        runId: 'run-lost-result',
+        type: 'model.invocation-prepared',
+        attemptId: 'attempt-lost-result',
+        purpose: 'generation',
+        modelId: 'stub-model',
+      },
+      {
+        version: 1,
+        leaderEpoch: 'epoch-1',
+        sequence: 1,
+        recordedAt: '2026-09-01T00:00:01.000Z',
+        runId: 'run-lost-result',
+        type: 'model.invocation-bound',
+        attemptId: 'attempt-lost-result',
+        operationId: 'operation-lost-result',
+        status: 'pending',
+      },
+    ]);
+    const stream = vi.fn(async function* () {
+      yield { type: 'completed', stopReason: 'stop' } as const;
+    });
+    const lookupAttempt = vi.fn(
+      async (): Promise<{ operationId: string; status: 'terminal' }> => ({
+        operationId: 'operation-lost-result',
+        status: 'terminal',
+      }),
+    );
+    const resume = async (resumedLog: typeof log, suffix: string): Promise<void> => {
+      const session = await createAgentSession({
+        chatId: 'chat-lost-result',
+        runId: 'run-lost-result',
+        leaderEpoch: 'epoch-1',
+        systemPrompt: 'system',
+        model: { id: 'stub-model', contextWindow: 8192, providerKind: 'openai' },
+        modelTransport: { usesBillingAttempt: () => true, lookupAttempt, stream },
+        toolRegistry: { list: () => [], invoke: vi.fn() },
+        eventLog: resumedLog,
+      });
+
+      await session.prompt({ id: `user-lost-result-${suffix}`, role: 'user', content: 'continue' });
+    };
+    await resume(log, 'first');
+    const firstEvents = await log.read();
+    await resume(await createMemoryEventLog(firstEvents.slice(0, 2)), 'second');
+
+    expect(lookupAttempt).toHaveBeenCalledTimes(2);
+    expect(stream).not.toHaveBeenCalled();
+    const events = await log.read();
+    expect(events.filter((event) => event.type === 'model.invocation-prepared')).toHaveLength(1);
+  });
+
+  it('does not call the transport when the prepared marker cannot be durably appended', async () => {
+    const stored = await createMemoryEventLog();
+    const eventLog = {
+      ...stored,
+      append: vi.fn(async (event: AgentLogEvent) => {
+        if (event.type === 'model.invocation-prepared') {
+          throw new Error('simulated durable append failure');
+        }
+        return stored.append(event);
+      }),
+    };
+    const stream = vi.fn(async function* () {
+      yield { type: 'completed', stopReason: 'stop' } as const;
+    });
+    const session = await createAgentSession({
+      chatId: 'chat-append-failure',
+      runId: 'run-append-failure',
+      leaderEpoch: 'epoch-1',
+      systemPrompt: 'system',
+      model: { id: 'stub-model', contextWindow: 8192, providerKind: 'openai' },
+      modelTransport: { usesBillingAttempt: () => true, lookupAttempt: async () => undefined, stream },
+      toolRegistry: { list: () => [], invoke: vi.fn() },
+      eventLog,
+    });
+
+    await session.prompt({ id: 'user-append-failure', role: 'user', content: 'continue' });
+
+    expect(stream).not.toHaveBeenCalled();
+    const storedEvents = await stored.read();
+    expect(storedEvents.some((event) => event.type === 'model.invocation-prepared')).toBe(false);
+  });
+
+  it('uses fresh funded attempts for tool-loop steps and no financial events for a local provider', async () => {
+    const fundedLog = await createMemoryEventLog();
+    const attempts: string[] = [];
+    let calls = 0;
+    const funded: ModelTransport = {
+      usesBillingAttempt: () => true,
+      lookupAttempt: async () => undefined,
+      async *stream(request) {
+        attempts.push(request.attemptId);
+        calls++;
+        await request.onInvocationBound?.({ operationId: `operation-${calls}`, status: 'pending' });
+        if (calls === 1) {
+          yield { type: 'tool-input', toolCallId: 'call-1', toolName: 'inspect', input: {} };
+          yield { type: 'completed', stopReason: 'toolUse' };
+          return;
+        }
+        yield { type: 'text-delta', text: 'done' };
+        yield { type: 'completed', stopReason: 'stop' };
+      },
+    };
+    const fundedSession = await createAgentSession({
+      chatId: 'chat-funded-steps',
+      runId: 'run-funded-steps',
+      leaderEpoch: 'epoch-1',
+      systemPrompt: 'system',
+      model: { id: 'stub-model', contextWindow: 8192, providerKind: 'openai' },
+      modelTransport: funded,
+      toolRegistry: {
+        list: () => [{ name: 'inspect', description: 'Inspect.', inputSchema: { type: 'object' } }],
+        invoke: async () => ({ content: {}, isError: false }),
+      },
+      eventLog: fundedLog,
+    });
+    await fundedSession.prompt({ id: 'user-funded-steps', role: 'user', content: 'inspect' });
+    expect(new Set(attempts).size).toBe(2);
+    const fundedEvents = await fundedLog.read();
+    expect(fundedEvents.filter((event) => event.type === 'model.invocation-bound')).toHaveLength(2);
+
+    const localLog = await createMemoryEventLog();
+    const localRequests: ModelStreamRequest[] = [];
+    const localSession = await createAgentSession({
+      chatId: 'chat-local',
+      runId: 'run-local',
+      leaderEpoch: 'epoch-1',
+      systemPrompt: 'system',
+      model: { id: 'local-model', contextWindow: 8192, providerKind: 'ollama' },
+      modelTransport: {
+        usesBillingAttempt: (providerKind) => providerKind !== 'ollama',
+        async *stream(request) {
+          localRequests.push(request);
+          yield { type: 'text-delta', text: 'local' };
+          yield { type: 'completed', stopReason: 'stop' };
+        },
+      },
+      toolRegistry: { list: () => [], invoke: vi.fn() },
+      eventLog: localLog,
+    });
+    await localSession.prompt({ id: 'user-local', role: 'user', content: 'local' });
+    expect(localRequests[0]?.onInvocationBound).toBeUndefined();
+    const localEvents = await localLog.read();
+    expect(localEvents.some((event) => event.type.startsWith('model.invocation-'))).toBe(false);
+  });
+
   it('drives middleware, substituted tools, and byte-identical A1 replay through one real pi turn', async () => {
     const log = await createMemoryEventLog(seedHistory());
     const transport = new DeterministicToolCallingTransport();
@@ -190,6 +351,8 @@ describe('pi full-turn parity fixture', () => {
     expect(JSON.stringify(transport.requests[0]?.messages)).toContain('<system-reminder>');
     expect(JSON.stringify(transport.requests[1]?.messages)).not.toContain('<system-reminder>');
     expect(compactions).toContain('tool_result_clearing');
+    expect(new Set(transport.requests.map((request) => request.attemptId)).size).toBe(transport.requests.length);
+    expect(events.filter((event) => event.type === 'model.invocation-bound')).toHaveLength(transport.requests.length);
     expect(events.filter((event) => event.type === 'message.envelope-replaced')).toHaveLength(2);
     expect(
       transport.requests[0]?.messages.some(
@@ -608,6 +771,7 @@ describe('pi full-turn parity fixture', () => {
       message: { id: `history-${sequence}`, role: 'user', content: String(sequence).repeat(4000) },
     }));
     const log = await createMemoryEventLog(initial);
+    const requests: ModelStreamRequest[] = [];
     const session = await createAgentSession({
       chatId: 'chat-summary-stop',
       runId: 'run-summary-stop',
@@ -615,7 +779,11 @@ describe('pi full-turn parity fixture', () => {
       systemPrompt: 'system',
       model: { id: 'stub', contextWindow: 8192 },
       modelTransport: {
+        usesBillingAttempt: () => true,
+        lookupAttempt: async () => undefined,
         async *stream(request): AsyncGenerator<ModelStreamEvent> {
+          requests.push(request);
+          await request.onInvocationBound?.({ operationId: `operation-${request.attemptId}`, status: 'pending' });
           if (request.systemPrompt.startsWith('Summarize the conversation')) {
             yield { type: 'text-delta', text: 'partial summary' };
             yield { type: 'completed', stopReason: 'length' };
@@ -635,6 +803,10 @@ describe('pi full-turn parity fixture', () => {
     const events = await log.read();
     expect(snapshot.messages.findLast((message) => message.role === 'assistant')).toBeUndefined();
     expect(events.filter((event) => event.type === 'history.compacted')).toHaveLength(0);
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.invocationPurpose).toBe('compaction');
+    expect(events.filter((event) => event.type === 'model.invocation-prepared')).toHaveLength(1);
+    expect(events.filter((event) => event.type === 'model.invocation-bound')).toHaveLength(1);
     await session.close();
   });
 });

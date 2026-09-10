@@ -53,6 +53,8 @@ export const createEventLogReducer = (): {
 } => {
   const sequence = createEventSequence();
   const knownMessageIds = new Set<string>();
+  const preparedInvocations = new Set<string>();
+  const invocationBindings = new Map<string, string>();
   let messages: ProviderMessage[] = [];
 
   const prepare = (candidate: AgentLogEvent): EventLogTransition => {
@@ -149,9 +151,35 @@ export const createEventLogReducer = (): {
         break;
       }
       case 'interrupt.recorded':
+      case 'revision.finalized':
       case 'run.lifecycle': {
         apply = () => undefined;
         break;
+      }
+      case 'model.invocation-prepared': {
+        if (preparedInvocations.has(event.attemptId)) {
+          failHistory(`Model invocation attempt "${event.attemptId}" cannot be prepared twice.`);
+        }
+        apply = () => preparedInvocations.add(event.attemptId);
+        break;
+      }
+      case 'model.invocation-bound': {
+        if (!preparedInvocations.has(event.attemptId)) {
+          failHistory(`Model invocation attempt "${event.attemptId}" must be prepared before binding.`);
+        }
+        const prior = invocationBindings.get(event.attemptId);
+        if (prior !== undefined && prior !== event.operationId) {
+          failHistory(`Model invocation attempt "${event.attemptId}" cannot bind to two operations.`);
+        }
+        apply = () => invocationBindings.set(event.attemptId, event.operationId);
+        break;
+      }
+      /* A record a newer writer emitted and this reader's vocabulary has no
+       * case for (D14). It is ordered, cursored and replayed like any other,
+       * and applies nothing: preserved without being executed. */
+      default: {
+        event satisfies never;
+        apply = () => undefined;
       }
     }
 

@@ -36,4 +36,38 @@ export const authoritativeGatewayWireFixtures = {
     'event: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null},"usage":{"output_tokens":4}}\n\n',
     'event: message_stop\ndata: {"type":"message_stop"}\n\n',
   ],
+  // One scripted gateway response per gateway call: five file-tool turns,
+  // then the closing assistant text. The browser cell serves these in order.
+  browserFileToolTurns: [
+    [
+      'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call-create","function":{"name":"create_file","arguments":"{\\"targetFile\\":\\"agent/main.ts\\",\\"content\\":\\"export const main = 1;\\\\n\\"}"}}]},"finish_reason":"tool_calls"}]}\n\n',
+      'data: {"choices":[],"usage":{"prompt_tokens":12,"completion_tokens":4}}\n\n',
+      'data: [DONE]\n\n',
+    ],
+    [
+      'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call-create-child","function":{"name":"create_file","arguments":"{\\"targetFile\\":\\"doomed/child.ts\\",\\"content\\":\\"keep me\\\\n\\"}"}}]},"finish_reason":"tool_calls"}]}\n\n',
+      'data: {"choices":[],"usage":{"prompt_tokens":12,"completion_tokens":4}}\n\n',
+      'data: [DONE]\n\n',
+    ],
+    [
+      'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call-edit","function":{"name":"edit_file","arguments":"{\\"targetFile\\":\\"agent/main.ts\\",\\"oldString\\":\\"main = 1\\",\\"newString\\":\\"main = 2\\"}"}}]},"finish_reason":"tool_calls"}]}\n\n',
+      'data: {"choices":[],"usage":{"prompt_tokens":12,"completion_tokens":4}}\n\n',
+      'data: [DONE]\n\n',
+    ],
+    [
+      'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call-read","function":{"name":"read_file","arguments":"{\\"targetFile\\":\\"agent/main.ts\\"}"}}]},"finish_reason":"tool_calls"}]}\n\n',
+      'data: {"choices":[],"usage":{"prompt_tokens":12,"completion_tokens":4}}\n\n',
+      'data: [DONE]\n\n',
+    ],
+    [
+      'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call-delete","function":{"name":"delete_file","arguments":"{\\"targetFile\\":\\"doomed\\"}"}}]},"finish_reason":"tool_calls"}]}\n\n',
+      'data: {"choices":[],"usage":{"prompt_tokens":12,"completion_tokens":4}}\n\n',
+      'data: [DONE]\n\n',
+    ],
+    [
+      'data: {"choices":[{"delta":{"content":"File tools done."},"finish_reason":"stop"}]}\n\n',
+      'data: {"choices":[],"usage":{"prompt_tokens":20,"completion_tokens":4}}\n\n',
+      'data: [DONE]\n\n',
+    ],
+  ],
 } as const;

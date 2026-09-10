@@ -9,6 +9,7 @@ import type {
   ToolRegistry,
 } from '#waist/ports.js';
 import { createTauAgentHost } from '#host/tau-agent-host.js';
+import type { ExternalAgentPort } from '#host/tau-agent-host.js';
 import { reduceEventLog } from '#log/reducer.js';
 import { ScriptedParityModelTransport, scriptedParityResponses } from '#host/scripted-model.fixture.js';
 import type { JsonObject, ProviderMessage } from '#log/event-types.js';
@@ -202,6 +203,9 @@ describe('createTauAgentHost', () => {
     ['INSUFFICIENT_CREDIT', 402],
     ['MODEL_NOT_IN_CATALOG', 400],
     ['RATE_LIMITED', 429],
+    ['FUNDED_OPERATION_LIMIT', 429],
+    ['FUNDED_HELPER_LIMIT', 429],
+    ['BILLING_RECOVERY_UNAVAILABLE', 503],
   ] as const)('retains %s as a typed failed-run snapshot', async (code, status) => {
     const file = createMemoryLogFile();
     const host = createTauAgentHost(
@@ -493,7 +497,7 @@ the cancelled tools left the system unchanged.
     });
     await expect(
       host.resolveInterrupt({ runId: 'wrong-run', interruptId: 'interrupt-1', outcome: 'approved' }),
-    ).rejects.toThrow('does not belong');
+    ).rejects.toThrow('is not pending on run wrong-run');
     await host.resolveInterrupt({ runId: 'run-interrupt', interruptId: 'interrupt-1', outcome: 'approved' });
     await expect(interruption).resolves.toEqual({ interruptId: 'interrupt-1', outcome: 'approved' });
 
@@ -854,6 +858,150 @@ the cancelled tools left the system unchanged.
         .filter((message) => message.role === 'user')
         .map((message) => message.id),
     ).toEqual(['turn-first']);
+    await host.close();
+  });
+
+  it('hands the second turn of a chat the session the first one remembered', async () => {
+    const file = createMemoryLogFile();
+    const seen: Array<{ readonly agentId: string; readonly state: JsonObject | undefined }> = [];
+    const closedChats: string[] = [];
+    let nextSession = 0;
+    const externalPort: ExternalAgentPort = {
+      list: () => ['stub-agent', 'other-agent'],
+      run: async (turn) => {
+        seen.push({ agentId: turn.agentId, state: turn.state });
+        if (typeof turn.state?.['acpSessionId'] !== 'string') {
+          nextSession += 1;
+          await turn.remember({ acpSessionId: `session-${String(nextSession)}`, model: 'stub-model' });
+        }
+      },
+      closeChat: async (chatId) => {
+        closedChats.push(chatId);
+      },
+    };
+    const host = createTauAgentHost({
+      ...hostOptions({
+        openEventLog: file.open,
+        transport: {
+          stream: () => {
+            throw new Error('An external turn must never reach the Tau model.');
+          },
+        },
+        toolRegistry: tools(async () => ({ content: null, isError: false })),
+        idPrefix: 'external-session',
+      }),
+      externalRunners: { acp: externalPort },
+    });
+
+    const start = async (input: {
+      readonly runId: string;
+      readonly messageId: string;
+      readonly agentId: string;
+    }): Promise<void> => {
+      await host.admit({
+        chatId: 'chat-external-session',
+        runId: input.runId,
+        trigger: 'submit',
+        message: { id: input.messageId, role: 'user', content: 'Run this elsewhere.' },
+        config: {
+          systemPrompt: 'unused by an external turn',
+          toolChoice: 'none',
+          agent: { kind: 'acp', id: input.agentId },
+        },
+      });
+      await host.cancel({ runId: input.runId });
+    };
+
+    await start({ runId: 'run-1', messageId: 'turn-1', agentId: 'stub-agent' });
+    await start({ runId: 'run-2', messageId: 'turn-2', agentId: 'stub-agent' });
+    // A different agent in the same chat never inherits another vendor's session.
+    await start({ runId: 'run-3', messageId: 'turn-3', agentId: 'other-agent' });
+
+    expect(seen[0]?.state?.['acpSessionId']).toBeUndefined();
+    expect(seen[1]?.state).toMatchObject({ acpSessionId: 'session-1', model: 'stub-model', agentId: 'stub-agent' });
+    expect(seen[2]?.state?.['acpSessionId']).toBeUndefined();
+
+    /* A rewind retracts a turn the vendor thread still holds, so the runner is
+     * told to end that session and the retained selection loses its id. */
+    const log = await file.open();
+    const retained = reduceEventLog(await log.read())
+      .map((message) => message.id)
+      .slice(0, 1);
+    await host.admit({
+      chatId: 'chat-external-session',
+      runId: 'run-4',
+      trigger: 'retry',
+      retainedMessageIds: retained,
+      message: { id: 'turn-4', role: 'user', content: 'Run this elsewhere.' },
+      config: {
+        systemPrompt: 'unused by an external turn',
+        toolChoice: 'none',
+        agent: { kind: 'acp', id: 'stub-agent' },
+      },
+    });
+    await host.cancel({ runId: 'run-4' });
+    expect(closedChats).toEqual(['chat-external-session']);
+    expect(seen[3]?.state?.['acpSessionId']).toBeUndefined();
+    expect(seen[3]?.state).toMatchObject({ model: 'stub-model' });
+
+    await host.close();
+    // Closing the host ends every chat the runner still holds open.
+    expect(closedChats).toEqual(['chat-external-session', 'chat-external-session']);
+  });
+
+  it('holds cancel open until an external run settles as cancelled', async () => {
+    const file = createMemoryLogFile();
+    const settled = Promise.withResolvers<void>();
+    let aborted = false;
+    const externalPort: ExternalAgentPort = {
+      list: () => ['stub-agent'],
+      run: async (turn) => {
+        turn.signal.addEventListener(
+          'abort',
+          () => {
+            aborted = true;
+            // A real adapter answers `session/cancel` a beat later, with its
+            // own terminal stop reason; settle after the turn, not inside it.
+            globalThis.setTimeout(() => {
+              settled.resolve();
+            }, 20);
+          },
+          { once: true },
+        );
+        await settled.promise;
+      },
+    };
+    const host = createTauAgentHost({
+      ...hostOptions({
+        openEventLog: file.open,
+        transport: {
+          stream: () => {
+            throw new Error('An external turn must never reach the Tau model.');
+          },
+        },
+        toolRegistry: tools(async () => ({ content: null, isError: false })),
+        idPrefix: 'external-cancel',
+      }),
+      externalRunners: { acp: externalPort },
+    });
+
+    await host.admit({
+      chatId: 'chat-external-cancel',
+      runId: 'run-external-cancel',
+      trigger: 'submit',
+      message: { id: 'turn-external-cancel', role: 'user', content: 'Run this elsewhere.' },
+      config: {
+        systemPrompt: 'unused by an external turn',
+        toolChoice: 'none',
+        agent: { kind: 'acp', id: 'stub-agent' },
+      },
+    });
+    await expect(host.snapshot('chat-external-cancel')).resolves.toMatchObject({ state: 'running' });
+
+    await host.cancel({ runId: 'run-external-cancel' });
+
+    expect(aborted).toBe(true);
+    await expect(host.snapshot('chat-external-cancel')).resolves.toMatchObject({ state: 'cancelled' });
     await host.close();
   });
 });

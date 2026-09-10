@@ -8,6 +8,7 @@
  */
 
 import { MessageChannel } from 'node:worker_threads';
+import type { Transferable } from 'node:worker_threads';
 import { createServer } from 'node:http';
 import type { Server as HttpServer } from 'node:http';
 
@@ -15,13 +16,15 @@ import { WebSocket, WebSocketServer } from 'ws';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { createChannelClient, wrapMessagePort, wrapWebSocket } from '@taucad/rpc';
-import type { Channel, MessagePortLike, MessagePortMainLike } from '@taucad/rpc';
+import type { Channel, MessagePortLike, MessagePortMainLike, WireProtocolSchemas } from '@taucad/rpc';
 import { msgpackCodec } from '@taucad/rpc/codec/msgpack';
 
 // eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import { serveAgentChannel } from '#launchers/node/agent-channel.js';
 // eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import { agentChannelProtocolSchemas } from '#launchers/node/agent-wire.js';
+// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
+import type { AgentChannelEndpoint } from '#channel/endpoint.js';
 // eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import type { AgentChannelCommand, AgentChannelProtocol, AgentChannelResponse } from '#launchers/node/agent-wire.js';
 // eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
@@ -65,7 +68,7 @@ const client = (port: Parameters<typeof createChannelClient>[0]['port']): Channe
   createChannelClient<AgentChannelProtocol>({
     port,
     sessionKey: 'tau-agent',
-    protocolSchemas: agentChannelProtocolSchemas as never,
+    protocolSchemas: agentChannelProtocolSchemas as WireProtocolSchemas<AgentChannelProtocol>,
   });
 
 describe('serveAgentChannel', () => {
@@ -136,7 +139,7 @@ describe('serveAgentChannel', () => {
      * not exist, exactly as it did in the renderer. */
     const emitterOnly: MessagePortMainLike = {
       postMessage: (value: unknown, transfer?: unknown) => {
-        channel.port1.postMessage(value, transfer as readonly []);
+        channel.port1.postMessage(value, transfer as readonly Transferable[]);
       },
       on: (event: 'close' | 'message', listener: (payload: unknown) => void) => channel.port1.on(event, listener),
       off: (event: 'close' | 'message', listener: (payload: unknown) => void) => channel.port1.off(event, listener),
@@ -151,7 +154,7 @@ describe('serveAgentChannel', () => {
     const client = createChannelClient<AgentChannelProtocol>({
       port: wrapMessagePort<unknown>(channel.port2 as unknown as MessagePortLike),
       sessionKey: 'tau-agent',
-      protocolSchemas: agentChannelProtocolSchemas as never,
+      protocolSchemas: agentChannelProtocolSchemas as WireProtocolSchemas<AgentChannelProtocol>,
     });
     disposers.push(() => {
       client.close();
@@ -167,6 +170,8 @@ describe('serveAgentChannel', () => {
   });
 
   it('refuses an endpoint that is neither a port nor a socket', () => {
-    expect(() => serveAgentChannel({} as never, recordingLauncher())).toThrow(/neither a Port/u);
+    expect(() => serveAgentChannel({} as unknown as AgentChannelEndpoint, recordingLauncher())).toThrow(
+      /neither a Port/u,
+    );
   });
 });

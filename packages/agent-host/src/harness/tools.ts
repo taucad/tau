@@ -25,6 +25,38 @@ const pathFields = new Map<string, string>([
   ['glob_search', 'path'],
 ]);
 
+/**
+ * What each Tau tool does, in ACP's `ToolKind` vocabulary.
+ *
+ * N11: a Tau-dispatched call records the same `call` facts an external agent's
+ * does, so one client projection renders both. ACP's enum is the whole
+ * taxonomy — there is no `list`, `render` or `export` — so `list_directory` is
+ * a `read` (which is also what Codex maps its own `listFiles` to) and the two
+ * calls with no honest fit are `other`. A Tau tool never reaches the generic
+ * card anyway; its bespoke renderer is chosen by name.
+ *
+ * The literal lives here, beside {@link pathFields}, because this package is
+ * published and `@taucad/chat` — where the tool *names* are declared — is not.
+ *
+ * @public
+ */
+export const tauToolKinds = new Map<string, string>([
+  ['read_file', 'read'],
+  ['list_directory', 'read'],
+  ['grep', 'search'],
+  ['glob_search', 'search'],
+  ['web_search', 'fetch'],
+  ['web_browser', 'fetch'],
+  ['create_file', 'edit'],
+  ['edit_file', 'edit'],
+  ['delete_file', 'delete'],
+  ['get_kernel_result', 'execute'],
+  ['test_model', 'execute'],
+  ['export_geometry', 'execute'],
+  ['screenshot', 'other'],
+  ['use_skill', 'other'],
+]);
+
 const normalizeBracketArrays = (input: Record<string, unknown>): Record<string, unknown> => {
   const aliases = new Map<string, Array<{ readonly index: number; readonly key: string; readonly value: unknown }>>();
   for (const [key, value] of Object.entries(input)) {
@@ -187,6 +219,8 @@ export type ToolResultSubstituter = (
 type CreateAgentToolsOptions = {
   readonly registry: ToolRegistry;
   readonly substitute?: ToolResultSubstituter | undefined;
+  /** The run every dispatch from these tools belongs to (V19). */
+  readonly runId: string;
 };
 
 /** Wrap the waist tool registry as pi `AgentTool`s, including T4 result substitution. @public */
@@ -203,6 +237,7 @@ export const createAgentTools = (options: CreateAgentToolsOptions): AgentTool[] 
         toolName: definition.name,
         input: input as JsonValue,
         signal: signal ?? new AbortController().signal,
+        runId: options.runId,
       };
       const substituted = await options.substitute?.(invocation);
       const result = substituted ?? (await options.registry.invoke(invocation));

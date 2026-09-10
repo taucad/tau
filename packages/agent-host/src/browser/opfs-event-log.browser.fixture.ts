@@ -1,9 +1,11 @@
 // eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import { createOpfsEventLog } from '#browser.js';
+import { createAgentSession } from '#harness/session.js';
 // eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import { serializeLogEvent } from '#log/serialization.js';
 // eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import type { AgentLogEvent } from '#log/event-types.js';
+import type { ModelTransport, ToolRegistry } from '#waist/ports.js';
 
 type TestSyncAccessHandle = {
   getSize(): number;
@@ -27,6 +29,31 @@ const event = (sequence: number): AgentLogEvent => ({
   runId: 'browser-run',
   message: { id: `browser-message-${sequence}`, role: 'user', content: `${sequence}` },
 });
+
+const invocationEvent = (sequence: number): AgentLogEvent =>
+  sequence === 0
+    ? {
+        version: 1,
+        type: 'model.invocation-prepared',
+        leaderEpoch: 'browser-recovery-epoch',
+        sequence,
+        recordedAt: '2026-09-05T00:00:00.000Z',
+        runId: 'browser-recovery-run',
+        attemptId: 'browser-recovery-attempt',
+        purpose: 'generation',
+        modelId: 'browser-recovery-model',
+      }
+    : {
+        version: 1,
+        type: 'model.invocation-bound',
+        leaderEpoch: 'browser-recovery-epoch',
+        sequence,
+        recordedAt: '2026-09-05T00:00:01.000Z',
+        runId: 'browser-recovery-run',
+        attemptId: 'browser-recovery-attempt',
+        operationId: 'browser-recovery-operation',
+        status: 'pending',
+      };
 
 globalThis.addEventListener('message', async () => {
   const root = await navigator.storage.getDirectory();
@@ -95,6 +122,48 @@ globalThis.addEventListener('message', async () => {
     const recoveredEvents = await failureAtomicLog.read();
     await failureAtomicLog.close();
 
+    const recoveryFileName = 'agent-host-browser-recovery-test.jsonl';
+    const recoveryFile = (await root.getFileHandle(recoveryFileName, { create: true })) as TestFileHandle;
+    const recoverySeed = new TextEncoder().encode(
+      `${serializeLogEvent(invocationEvent(0))}${serializeLogEvent(invocationEvent(1))}`,
+    );
+    let recoveryLookups = 0;
+    let providerFetches = 0;
+    const transport: ModelTransport = {
+      usesBillingAttempt: () => true,
+      lookupAttempt: async () => {
+        recoveryLookups++;
+        return { operationId: 'browser-recovery-operation', status: 'terminal' };
+      },
+      async *stream() {
+        providerFetches++;
+        yield { type: 'completed', stopReason: 'stop' };
+      },
+    };
+    const tools: ToolRegistry = { list: () => [], invoke: async () => ({ content: null, isError: false }) };
+    const recover = async (suffix: string): Promise<void> => {
+      const seedRecovery = await recoveryFile.createSyncAccessHandle();
+      seedRecovery.truncate(0);
+      seedRecovery.write(recoverySeed, { at: 0 });
+      seedRecovery.flush();
+      seedRecovery.close();
+      const durableRecoveryLog = await createOpfsEventLog({ fileHandle: recoveryFile });
+      const session = await createAgentSession({
+        chatId: 'browser-recovery-chat',
+        runId: 'browser-recovery-run',
+        leaderEpoch: 'browser-recovery-epoch',
+        systemPrompt: 'browser recovery',
+        model: { id: 'browser-recovery-model', contextWindow: 8192, providerKind: 'openai' },
+        modelTransport: transport,
+        toolRegistry: tools,
+        eventLog: durableRecoveryLog,
+      });
+      await session.prompt({ id: `browser-recovery-user-${suffix}`, role: 'user', content: 'continue' });
+      await session.close();
+    };
+    await recover('first');
+    await recover('second');
+
     globalThis.postMessage({
       origin: location.origin,
       healedCount,
@@ -104,10 +173,13 @@ globalThis.addEventListener('message', async () => {
       partialWriteRejected,
       recoveredAppend,
       recoveredCount: recoveredEvents.length,
+      recoveryLookups,
+      providerFetches,
     });
   } catch (error) {
     globalThis.postMessage({ error: error instanceof Error ? error.message : String(error) });
   } finally {
     await root.removeEntry(fileName).catch(() => undefined);
+    await root.removeEntry('agent-host-browser-recovery-test.jsonl').catch(() => undefined);
   }
 });

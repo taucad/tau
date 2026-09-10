@@ -1,6 +1,6 @@
 import type { AgentMessage } from '@earendil-works/pi-agent-core';
-import type { Api, AssistantMessage, AssistantMessageDiagnostic, Model, StopReason } from '@earendil-works/pi-ai';
-import { util as zodUtil } from 'zod';
+import type { Api, AssistantMessage, AssistantMessageDiagnostic, Model } from '@earendil-works/pi-ai';
+import { util as zodUtility } from 'zod';
 // eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import type { DurableEventLog, HostRunFailure } from '#waist/ports.js';
 // eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
@@ -16,11 +16,28 @@ import type {
   ToolInputProviderMessage,
 } from '#log/event-types.js';
 // eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
-import { normalizeToolInput, toPiToolContent } from '#harness/tools.js';
+import { normalizeToolInput, tauToolKinds, toPiToolContent } from '#harness/tools.js';
 // eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import type { HostToolExecutionDetails } from '#harness/tools.js';
 
 type WithoutBase<Event> = Event extends LogEventBase ? Omit<Event, keyof LogEventBase> : never;
+
+/**
+ * Tau's own facts about one of its dispatched calls, in the shared vocabulary.
+ *
+ * N11: the same `call` field an external agent's row carries, so one client
+ * projection renders both. Tau is the emitter, so the emitter's call id is
+ * Tau's own; the native name is the tool's name, and there is no agent-authored
+ * title to record.
+ *
+ * @param toolCallId - Tau's dispatch id for the call.
+ * @param toolName - The tool's canonical name.
+ * @returns The `call` projection, or `undefined` for a tool with no known kind.
+ */
+const tauCallFacts = (toolCallId: string, toolName: string): ToolInputProviderMessage['call'] => {
+  const kind = tauToolKinds.get(toolName);
+  return kind === undefined ? undefined : { toolCallId, kind, nativeName: toolName };
+};
 
 const transportFailureDiagnosticType = 'tau.model-transport-failure';
 const providerMetadataDiagnosticType = 'tau.provider-message-metadata';
@@ -31,7 +48,7 @@ export const createTransportFailureDiagnostic = (
   error: unknown,
   timestamp: number,
 ): AssistantMessageDiagnostic | undefined => {
-  if (!zodUtil.isObject(error) || typeof error['code'] !== 'string') {
+  if (!zodUtility.isObject(error) || typeof error['code'] !== 'string') {
     return undefined;
   }
   const message =
@@ -84,7 +101,7 @@ const providerMetadataFromDiagnostics = (
   const value = diagnostics?.findLast((diagnostic) => diagnostic.type === providerMetadataDiagnosticType)?.details?.[
     'metadata'
   ];
-  return zodUtil.isObject(value) ? (value as ProviderMessageMetadata) : undefined;
+  return zodUtility.isObject(value) ? (value as ProviderMessageMetadata) : undefined;
 };
 
 /** Recover a typed transport refusal from durable provider history. @internal */
@@ -92,18 +109,18 @@ export const transportFailureFromProviderMessages = (
   messages: readonly ProviderMessage[],
 ): HostRunFailure | undefined => {
   for (const message of messages.toReversed()) {
-    if (message.role !== 'assistant' || !Array.isArray(message.metadata?.['diagnostics'])) {
+    if (message.role !== 'assistant' || !Array.isArray(message.metadata?.diagnostics)) {
       continue;
     }
-    for (const candidate of message.metadata['diagnostics'].toReversed()) {
-      if (!zodUtil.isObject(candidate) || candidate['type'] !== transportFailureDiagnosticType) {
+    for (const candidate of message.metadata.diagnostics.toReversed()) {
+      if (!zodUtility.isObject(candidate) || candidate['type'] !== transportFailureDiagnosticType) {
         continue;
       }
-      const error = zodUtil.isObject(candidate['error']) ? candidate['error'] : undefined;
+      const error = zodUtility.isObject(candidate['error']) ? candidate['error'] : undefined;
       if (!error || typeof error['code'] !== 'string' || typeof error['message'] !== 'string') {
         continue;
       }
-      const details = zodUtil.isObject(candidate['details']) ? candidate['details'] : undefined;
+      const details = zodUtility.isObject(candidate['details']) ? candidate['details'] : undefined;
       const status = details && typeof details['status'] === 'number' ? details['status'] : undefined;
       return {
         code: error['code'],
@@ -296,6 +313,7 @@ export const piMessageToProvider = (message: AgentMessage, identities: MessageId
     throw new TypeError(`Unsupported pi session message role: ${String(message.role)}`);
   }
   const details = message.details as HostToolExecutionDetails | undefined;
+  const call = tauCallFacts(message.toolCallId, message.toolName);
   return {
     id,
     role: 'tool-output',
@@ -303,6 +321,7 @@ export const piMessageToProvider = (message: AgentMessage, identities: MessageId
     toolName: message.toolName,
     content: toJsonValue(details?.content ?? message.content),
     isError: message.isError,
+    ...(call ? { call: { ...call, status: message.isError ? 'failed' : 'completed' } } : {}),
     metadata: {
       timestamp: message.timestamp,
       ...(details ? { substituted: details.substituted } : {}),
@@ -316,13 +335,17 @@ export const toolInputToProvider = (options: {
   readonly toolCallId: string;
   readonly toolName: string;
   readonly input: unknown;
-}): ToolInputProviderMessage => ({
-  id: options.id,
-  role: 'tool-input',
-  toolCallId: options.toolCallId,
-  toolName: options.toolName,
-  content: toJsonValue(options.input),
-});
+}): ToolInputProviderMessage => {
+  const call = tauCallFacts(options.toolCallId, options.toolName);
+  return {
+    id: options.id,
+    role: 'tool-input',
+    toolCallId: options.toolCallId,
+    toolName: options.toolName,
+    content: toJsonValue(options.input),
+    ...(call ? { call } : {}),
+  };
+};
 
 /** Rehydrate pi's linear context from the A1 reducer projection. @public */
 export function providerMessageToPi(
@@ -362,17 +385,17 @@ export function providerMessageToPi(
     const hydrated: AssistantMessage = {
       role: 'assistant',
       content: message.content as unknown as AssistantMessage['content'],
-      api: typeof metadata['api'] === 'string' ? (metadata['api'] as Api) : model.api,
-      provider: typeof metadata['provider'] === 'string' ? metadata['provider'] : model.provider,
-      model: typeof metadata['model'] === 'string' ? metadata['model'] : model.id,
-      ...(typeof metadata['responseModel'] === 'string' ? { responseModel: metadata['responseModel'] } : {}),
-      ...(typeof metadata['responseId'] === 'string' ? { responseId: metadata['responseId'] } : {}),
-      ...(Array.isArray(metadata['diagnostics'])
-        ? { diagnostics: metadata['diagnostics'] as AssistantMessage['diagnostics'] }
+      api: typeof metadata.api === 'string' ? (metadata.api as Api) : model.api,
+      provider: typeof metadata.provider === 'string' ? metadata.provider : model.provider,
+      model: typeof metadata.model === 'string' ? metadata.model : model.id,
+      ...(typeof metadata.responseModel === 'string' ? { responseModel: metadata.responseModel } : {}),
+      ...(typeof metadata.responseId === 'string' ? { responseId: metadata.responseId } : {}),
+      ...(Array.isArray(metadata.diagnostics)
+        ? { diagnostics: metadata.diagnostics as AssistantMessage['diagnostics'] }
         : {}),
-      usage: isUsage(metadata['usage']) ? metadata['usage'] : zeroUsage,
-      stopReason: (metadata['stopReason'] as StopReason | undefined) ?? 'stop',
-      ...(typeof metadata['errorMessage'] === 'string' ? { errorMessage: metadata['errorMessage'] } : {}),
+      usage: isUsage(metadata.usage) ? metadata.usage : zeroUsage,
+      stopReason: metadata.stopReason ?? 'stop',
+      ...(typeof metadata.errorMessage === 'string' ? { errorMessage: metadata.errorMessage } : {}),
       timestamp: metadataNumber(message, 'timestamp'),
     };
     identities.set(hydrated, message.id, message.metadata);
@@ -386,7 +409,7 @@ export function providerMessageToPi(
     details: {
       content: message.content,
       isError: message.isError,
-      substituted: message.metadata?.['substituted'] === true,
+      substituted: message.metadata?.substituted === true,
     },
     isError: message.isError,
     timestamp: metadataNumber(message, 'timestamp'),

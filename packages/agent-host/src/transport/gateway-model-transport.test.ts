@@ -14,6 +14,8 @@ import type { GatewayModelTransportOptions } from '#transport/gateway-model-tran
 import { authoritativeGatewayWireFixtures } from '#transport/gateway-wire.fixture.js';
 
 const request = (overrides: Partial<ModelStreamRequest> = {}): ModelStreamRequest => ({
+  attemptId: 'attempt-fixture-1',
+  invocationPurpose: 'generation',
   modelId: 'fixture-model',
   // An OpenAI-COMPATIBLE catalog provider: these keep the openai-completions
   // codec. `openai` itself now routes to the Responses wire and is exercised
@@ -89,7 +91,7 @@ const fixtureResponse = (): Response => {
         controller.close();
       },
     }),
-    { status: 200, headers: { 'content-type': 'text/event-stream' } },
+    { status: 200, headers: { 'content-type': 'text/event-stream', 'x-tau-operation-id': 'operation-fixture-1' } },
   );
 };
 
@@ -104,7 +106,7 @@ const byteSplitResponse = (frames: readonly string[]): Response => {
         controller.close();
       },
     }),
-    { status: 200, headers: { 'content-type': 'text/event-stream' } },
+    { status: 200, headers: { 'content-type': 'text/event-stream', 'x-tau-operation-id': 'operation-fixture-1' } },
   );
 };
 
@@ -119,7 +121,7 @@ const responseFromChunks = (chunks: readonly string[], contentType = 'text/event
         controller.close();
       },
     }),
-    { status: 200, headers: { 'content-type': contentType } },
+    { status: 200, headers: { 'content-type': contentType, 'x-tau-operation-id': 'operation-fixture-1' } },
   );
 };
 
@@ -129,6 +131,7 @@ describe('createGatewayModelTransport', () => {
     let credentials: string | undefined;
     let headers: Headers | undefined;
     let path: string | undefined;
+    const bindings: unknown[] = [];
     const fetchSpy = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       path = new URL(input instanceof Request ? input.url : input).pathname;
       credentials = init?.credentials;
@@ -138,13 +141,21 @@ describe('createGatewayModelTransport', () => {
     });
 
     const events = await collect(
-      createGatewayModelTransport({ baseUrl: 'https://gateway.example', fetch: fetchSpy }).stream(request()),
+      createGatewayModelTransport({ baseUrl: 'https://gateway.example', fetch: fetchSpy }).stream(
+        request({
+          onInvocationBound: async (binding) => {
+            bindings.push(binding);
+          },
+        }),
+      ),
     );
 
     expect(path).toBe('/v1/llm/openai/v1/chat/completions');
     expect(credentials).toBe('include');
     expect(headers?.has('authorization')).toBe(false);
     expect(headers?.has('x-api-key')).toBe(false);
+    expect(headers?.get('x-tau-attempt-id')).toBe('attempt-fixture-1');
+    expect(bindings).toEqual([{ operationId: 'operation-fixture-1', status: 'pending' }]);
     // OpenAI's system field has no per-block cache-control wire shape, so this
     // provider deliberately degrades to pi's blanket cacheRetention policy.
     expect(body).toBe(
@@ -160,6 +171,42 @@ describe('createGatewayModelTransport', () => {
       },
       { type: 'completed', stopReason: 'toolUse' },
     ]);
+  });
+
+  /*
+   * The pi model's context window is the *request's*, not the transport's: a
+   * host that configures no default row (every client names its own) must still
+   * stream, and one whose request names none has nothing to run against.
+   */
+  it('takes the pi model context window from the request, not a configured default', async () => {
+    const modelless = createGatewayModelTransportWithModel({
+      baseUrl: 'https://gateway.example',
+      fetch: vi.fn(async () => fixtureResponse()) as unknown as typeof globalThis.fetch,
+    });
+
+    await expect(collect(modelless.stream(request({ contextWindow: 200_000 })))).resolves.toContainEqual({
+      type: 'completed',
+      stopReason: 'toolUse',
+    });
+    await expect(collect(modelless.stream(request()))).rejects.toMatchObject({ code: 'INVALID_REQUEST' });
+  });
+
+  it('looks up an ambiguous attempt without posting it again', async () => {
+    const fetchSpy = vi.fn(async (input: RequestInfo | URL) => {
+      expect(new URL(input instanceof Request ? input.url : input).pathname).toBe(
+        '/v1/billing/attempts/gateway/attempt-fixture-1',
+      );
+      return new Response(JSON.stringify({ state: 'terminal', operationId: 'operation-fixture-1' }), {
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+    const transport = createGatewayModelTransport({ baseUrl: 'https://gateway.example', fetch: fetchSpy });
+
+    await expect(transport.lookupAttempt?.('attempt-fixture-1', new AbortController().signal)).resolves.toEqual({
+      operationId: 'operation-fixture-1',
+      status: 'terminal',
+    });
+    expect(fetchSpy).toHaveBeenCalledOnce();
   });
 
   /*
@@ -187,7 +234,7 @@ describe('createGatewayModelTransport', () => {
     expect(path).toBe('/v1/llm/openai/v1/responses');
     // Same surviving header set as the completions wire, so apps/api's CORS
     // allow-list needs nothing new for this route.
-    expect(headerNames).toEqual(['accept', 'content-type', 'user-agent']);
+    expect(headerNames).toEqual(['accept', 'content-type', 'user-agent', 'x-tau-attempt-id']);
     expect(JSON.parse(body!)).toEqual({
       model: 'fixture-model',
       input: [
@@ -197,6 +244,7 @@ describe('createGatewayModelTransport', () => {
       stream: true,
       store: false,
       reasoning: { effort: 'none' },
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- OpenAI's wire uses snake_case.
       max_output_tokens: 8192,
       tools: [
         {
@@ -276,8 +324,8 @@ describe('createGatewayModelTransport', () => {
     // Every surviving name must sit in apps/api's CORS allow-list
     // (apps/api/app/constants/http-header.constant.ts) or be CORS-safelisted.
     expect(seen).toEqual([
-      ['accept', 'content-type', 'user-agent'],
-      ['accept', 'anthropic-beta', 'anthropic-version', 'content-type', 'user-agent'],
+      ['accept', 'content-type', 'user-agent', 'x-tau-attempt-id'],
+      ['accept', 'anthropic-beta', 'anthropic-version', 'content-type', 'user-agent', 'x-tau-attempt-id'],
     ]);
   });
 
@@ -349,6 +397,7 @@ describe('createGatewayModelTransport', () => {
     );
 
     expect(body?.system).toEqual([
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- Anthropic's wire uses snake_case.
       { type: 'text', text: 'static', cache_control: { type: 'ephemeral' } },
       { type: 'text', text: 'dynamic' },
     ]);
@@ -495,10 +544,10 @@ describe('createGatewayModelTransport', () => {
       cacheRead: 20,
       reasoning: 10,
       cost: {
-        input: 0.000_159_999_999_999_999_99,
-        output: 0.000_319_999_999_999_999_97,
-        cacheRead: 0.000_004_000_000_000_000_001,
-        total: 0.000_483_999_999_999_999_95,
+        input: 0.00015999999999999999,
+        output: 0.00031999999999999997,
+        cacheRead: 0.000004000000000000001,
+        total: 0.00048399999999999995,
       },
     });
     await session.close();
@@ -533,27 +582,32 @@ describe('createGatewayModelTransport', () => {
     }
   });
 
-  it.each(['INSUFFICIENT_CREDIT', 'MODEL_NOT_IN_CATALOG', 'RATE_LIMITED'] as const)(
-    'surfaces %s as a typed transport failure',
-    async (code) => {
-      const transport = createGatewayModelTransport({
-        baseUrl: 'https://gateway.example',
-        fetch: vi.fn(
-          async () =>
-            new Response(JSON.stringify({ type: 'error', error: { type: code, message: `fixture ${code}` } }), {
-              status: 402,
-              headers: { 'content-type': 'application/json' },
-            }),
-        ),
-      });
+  it.each([
+    ['INSUFFICIENT_CREDIT', 402],
+    ['MODEL_NOT_IN_CATALOG', 400],
+    ['RATE_LIMITED', 429],
+    ['FUNDED_OPERATION_LIMIT', 429],
+    ['FUNDED_HELPER_LIMIT', 429],
+    ['BILLING_RECOVERY_UNAVAILABLE', 503],
+  ] as const)('surfaces %s as a typed transport failure', async (code, status) => {
+    const transport = createGatewayModelTransport({
+      baseUrl: 'https://gateway.example',
+      fetch: vi.fn(
+        async () =>
+          new Response(JSON.stringify({ type: 'error', error: { type: code, message: `fixture ${code}` } }), {
+            status,
+            headers: { 'content-type': 'application/json' },
+          }),
+      ),
+    });
 
-      await expect(collect(transport.stream(request()))).rejects.toMatchObject({
-        name: 'GatewayModelTransportError',
-        code,
-        message: `fixture ${code}`,
-      });
-    },
-  );
+    await expect(collect(transport.stream(request()))).rejects.toMatchObject({
+      name: 'GatewayModelTransportError',
+      code,
+      message: `fixture ${code}`,
+      status,
+    });
+  });
 
   it('refuses a catalog-resolved provider whose wire is unsupported before fetch', async () => {
     const fetchSpy = vi.fn();
@@ -748,7 +802,12 @@ describe('createGatewayModelTransport', () => {
     });
     const network = createGatewayModelTransport({
       baseUrl: 'https://gateway.example',
-      fetch: vi.fn(async () => new Response(failedBody, { headers: { 'content-type': 'text/event-stream' } })),
+      fetch: vi.fn(
+        async () =>
+          new Response(failedBody, {
+            headers: { 'content-type': 'text/event-stream', 'x-tau-operation-id': 'operation-fixture-1' },
+          }),
+      ),
     });
     await expect(collect(network.stream(request()))).rejects.toMatchObject({ code: 'NETWORK_ERROR' });
 
@@ -762,7 +821,12 @@ describe('createGatewayModelTransport', () => {
     });
     const aborted = createGatewayModelTransport({
       baseUrl: 'https://gateway.example',
-      fetch: vi.fn(async () => new Response(abortedBody, { headers: { 'content-type': 'text/event-stream' } })),
+      fetch: vi.fn(
+        async () =>
+          new Response(abortedBody, {
+            headers: { 'content-type': 'text/event-stream', 'x-tau-operation-id': 'operation-fixture-1' },
+          }),
+      ),
     });
     const collecting = collect(aborted.stream(request({ signal: operation.signal })));
     operation.abort();
@@ -799,7 +863,12 @@ describe('createGatewayModelTransport', () => {
     });
     const transport = createGatewayModelTransport({
       baseUrl: 'https://gateway.example',
-      fetch: vi.fn(async () => new Response(body, { headers: { 'content-type': 'text/event-stream' } })),
+      fetch: vi.fn(
+        async () =>
+          new Response(body, {
+            headers: { 'content-type': 'text/event-stream', 'x-tau-operation-id': 'operation-fixture-1' },
+          }),
+      ),
     });
     const iterator = transport
       .stream(request({ providerKind: 'anthropic', signal: operation.signal }))

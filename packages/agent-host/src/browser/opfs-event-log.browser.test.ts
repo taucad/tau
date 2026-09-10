@@ -9,6 +9,8 @@ type WorkerResult = {
   readonly partialWriteRejected?: boolean;
   readonly recoveredAppend?: { readonly appended: boolean };
   readonly recoveredCount?: number;
+  readonly recoveryLookups?: number;
+  readonly providerFetches?: number;
   readonly error?: string;
 };
 
@@ -47,4 +49,6 @@ it('uses a dedicated-worker OPFS sync handle on a real origin', async () => {
   expect(result.partialWriteRejected).toBe(true);
   expect(result.recoveredAppend).toEqual({ appended: true });
   expect(result.recoveredCount).toBe(1);
+  expect(result.recoveryLookups).toBe(2);
+  expect(result.providerFetches).toBe(0);
 });

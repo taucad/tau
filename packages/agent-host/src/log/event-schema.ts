@@ -7,6 +7,12 @@ import { modelProviderKinds, storageDurabilityClasses } from '#log/event-types.j
 import type { AgentLogEvent, JsonValue } from '#log/event-types.js';
 
 const nonEmptyString = z.string().min(1);
+const opaqueInvocationId = z
+  .string()
+  .min(1)
+  .max(128)
+  .regex(/^[\u0021-\u007E]+$/u);
+/** Recursive schema for any durable JSON value. @public */
 export const jsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
   z.union([
     z.null(),
@@ -18,21 +24,21 @@ export const jsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
   ]),
 );
 const usageCostSchema = z.strictObject({
-  input: z.number().finite().nonnegative(),
-  output: z.number().finite().nonnegative(),
-  cacheRead: z.number().finite().nonnegative(),
-  cacheWrite: z.number().finite().nonnegative(),
-  total: z.number().finite().nonnegative(),
+  input: z.number().nonnegative(),
+  output: z.number().nonnegative(),
+  cacheRead: z.number().nonnegative(),
+  cacheWrite: z.number().nonnegative(),
+  total: z.number().nonnegative(),
 });
 const usageSchema = z
   .object({
-    input: z.number().finite().nonnegative(),
-    output: z.number().finite().nonnegative(),
-    cacheRead: z.number().finite().nonnegative(),
-    cacheWrite: z.number().finite().nonnegative(),
-    cacheWrite1h: z.number().finite().nonnegative().optional(),
-    reasoning: z.number().finite().nonnegative().optional(),
-    totalTokens: z.number().finite().nonnegative(),
+    input: z.number().nonnegative(),
+    output: z.number().nonnegative(),
+    cacheRead: z.number().nonnegative(),
+    cacheWrite: z.number().nonnegative(),
+    cacheWrite1h: z.number().nonnegative().optional(),
+    reasoning: z.number().nonnegative().optional(),
+    totalTokens: z.number().nonnegative(),
     cost: usageCostSchema,
   })
   .catchall(jsonValueSchema);
@@ -47,33 +53,61 @@ const metadataSchema = z
     usage: usageSchema.optional(),
     stopReason: z.enum(['pending', 'stop', 'length', 'toolUse', 'error', 'aborted', 'deferred']).optional(),
     errorMessage: z.string().optional(),
-    timestamp: z.number().finite().optional(),
+    timestamp: z.number().optional(),
     substituted: z.boolean().optional(),
     tauInternal: z.object({ kind: z.string() }).catchall(jsonValueSchema).optional(),
   })
   .catchall(jsonValueSchema);
 const messageBase = { id: nonEmptyString };
 const messageContent = { content: jsonValueSchema, metadata: metadataSchema.optional() };
-export const userProviderMessageSchema = z.strictObject({
+/*
+ * The emitter's own tool-call facts. `kind` and `status` are open strings on
+ * purpose: those vocabularies belong to the protocol that produced them, and an
+ * older reader must still read a newer one's value (D14).
+ */
+const toolCallProjectionSchema = z
+  .object({
+    toolCallId: nonEmptyString,
+    kind: z.string().optional(),
+    title: z.string().optional(),
+    status: z.string().optional(),
+    locations: z
+      .array(
+        z.object({ path: nonEmptyString, line: z.number().int().nonnegative().optional() }).catchall(jsonValueSchema),
+      )
+      .optional(),
+    content: jsonValueSchema.optional(),
+  })
+  .catchall(jsonValueSchema);
+/*
+ * Loose, like every event variant below and for the same reason (D14): `call`
+ * is itself a field a newer writer added to an existing message, and a strict
+ * reader would have failed the whole log rather than ignore it.
+ */
+/** Schema for a provider-normalized user message. @public */
+export const userProviderMessageSchema = z.looseObject({
   ...messageBase,
   role: z.literal('user'),
   ...messageContent,
 });
+/** Schema for any provider-normalized message role. @public */
 export const providerMessageSchema = z.discriminatedUnion('role', [
   userProviderMessageSchema,
-  z.strictObject({ ...messageBase, role: z.literal('assistant'), ...messageContent }),
-  z.strictObject({
+  z.looseObject({ ...messageBase, role: z.literal('assistant'), ...messageContent }),
+  z.looseObject({
     ...messageBase,
     role: z.literal('tool-input'),
     toolCallId: nonEmptyString,
     toolName: nonEmptyString,
+    call: toolCallProjectionSchema.optional(),
     ...messageContent,
   }),
-  z.strictObject({
+  z.looseObject({
     ...messageBase,
     role: z.literal('tool-output'),
     toolCallId: nonEmptyString,
     toolName: nonEmptyString,
+    call: toolCallProjectionSchema.optional(),
     content: jsonValueSchema,
     isError: z.boolean(),
     metadata: metadataSchema.optional(),
@@ -128,33 +162,62 @@ const runFailureDetailSchema = z
   })
   .catchall(jsonValueSchema);
 
-export const agentLogEventSchema = z.union([
-  z.strictObject({ ...eventBase, type: z.literal('message.appended'), message: providerMessageSchema }),
+const revisionPublicationSchema = z.discriminatedUnion('status', [
   z.strictObject({
+    status: z.literal('updated'),
+    branchName: nonEmptyString,
+    expectedHeadRevisionId: nonEmptyString,
+    previousHeadRevisionId: nonEmptyString.optional(),
+    headRevisionId: nonEmptyString,
+  }),
+  z.strictObject({
+    status: z.literal('conflicted'),
+    branchName: nonEmptyString,
+    expectedHeadRevisionId: nonEmptyString,
+    actualHeadRevisionId: nonEmptyString.optional(),
+    proposedHeadRevisionId: nonEmptyString,
+  }),
+]);
+const revisionNativeGitSchema = z.discriminatedUnion('status', [
+  z.strictObject({ status: z.literal('not-configured') }),
+  z.strictObject({
+    status: z.literal('stored'),
+    commitId: nonEmptyString,
+    objectFormat: z.enum(['sha1', 'sha256']),
+  }),
+  z.strictObject({ status: z.literal('failed'), errorCode: nonEmptyString }),
+]);
+
+/* Every variant below is loose for the reason `runFailureDetailSchema` states:
+ * a field a newer writer adds is retained rather than rejected, so one
+ * unreadable record never costs an older reader the whole chat (D14). */
+const knownLogEventSchema = z.union([
+  z.looseObject({ ...eventBase, type: z.literal('message.appended'), message: providerMessageSchema }),
+  z.looseObject({
     ...eventBase,
     type: z.literal('message.envelope-replaced'),
     messageId: nonEmptyString,
     replacement: providerMessageSchema,
   }),
-  z.strictObject({
+  z.looseObject({
     ...eventBase,
     type: z.literal('history.compacted'),
     evictedMessageIds: z.array(nonEmptyString).min(1),
     summary: providerMessageSchema,
   }),
-  z.strictObject({
+  z.looseObject({
     ...eventBase,
     type: z.literal('history.rewound'),
     trigger: z.enum(['retry', 'edit', 'regenerate']),
     retainedMessageIds: z.array(nonEmptyString),
   }),
-  z.strictObject({
+  z.looseObject({
     ...eventBase,
     type: z.literal('snapshot-context.refreshed'),
     messageId: nonEmptyString,
     content: jsonValueSchema,
   }),
-  z.strictObject({
+  z.looseObject({
     ...eventBase,
     type: z.literal('safeguard.recorded'),
     safeguardId: nonEmptyString,
@@ -162,14 +225,14 @@ export const agentLogEventSchema = z.union([
     reason: nonEmptyString,
     message: userProviderMessageSchema,
   }),
-  z.strictObject({
+  z.looseObject({
     ...eventBase,
     type: z.literal('safeguard.recorded'),
     safeguardId: nonEmptyString,
     action: z.literal('terminate'),
     reason: nonEmptyString,
   }),
-  z.strictObject({
+  z.looseObject({
     ...eventBase,
     type: z.literal('interrupt.recorded'),
     interruptId: nonEmptyString,
@@ -177,20 +240,84 @@ export const agentLogEventSchema = z.union([
     reason: nonEmptyString,
     payload: jsonValueSchema.optional(),
   }),
-  z.strictObject({
+  z.looseObject({
+    ...eventBase,
+    type: z.literal('revision.finalized'),
+    turnId: nonEmptyString,
+    workspaceId: nonEmptyString,
+    revisionId: nonEmptyString,
+    baseRevisionId: nonEmptyString,
+    treeId: nonEmptyString,
+    branchName: nonEmptyString,
+    publication: revisionPublicationSchema,
+    changedPaths: z.array(z.string()),
+    provenance: z.strictObject({
+      source: z.enum(['user', 'agent', 'merge', 'restore', 'import']),
+      actorId: nonEmptyString,
+      runId: nonEmptyString.optional(),
+      createdAt: z.number(),
+    }),
+    generatedSummary: z.string(),
+    nativeGit: revisionNativeGitSchema,
+  }),
+  z.looseObject({
     ...eventBase,
     type: z.literal('run.lifecycle'),
     state: z.enum(['admitted', 'running', 'paused', 'completed', 'failed', 'cancelled']),
     storageDurability: z.enum(storageDurabilityClasses).optional(),
     detail: runFailureDetailSchema.optional(),
   }),
-  z.strictObject({
+  z.looseObject({
+    ...eventBase,
+    type: z.literal('model.invocation-prepared'),
+    attemptId: opaqueInvocationId,
+    purpose: z.enum(['generation', 'compaction']),
+    modelId: z.string().min(1).max(256),
+  }),
+  z.looseObject({
+    ...eventBase,
+    type: z.literal('model.invocation-bound'),
+    attemptId: opaqueInvocationId,
+    operationId: opaqueInvocationId,
+    status: z.enum(['pending', 'terminal', 'unavailable']),
+  }),
+  z.looseObject({
     ...eventBase,
     type: z.literal('turn.history-projection-committed'),
     retainedMessageIds: z.array(nonEmptyString),
     message: userProviderMessageSchema,
     context: turnContextSchema,
   }),
+]);
+
+const knownEventTypes = new Set<string>(knownLogEventSchema.options.map((option) => option.shape.type.value));
+
+/**
+ * Schema for one durable or broadcast agent event envelope.
+ *
+ * The terminal variant is the other half of D14: a record whose `type` this
+ * reader does not know parses whole and unexamined, so it is preserved,
+ * cursored and replayed rather than failing the log — the reducer has no case
+ * for it and never executes it. A record whose type *is* known still fails
+ * closed, which is why the passthrough refuses the known ones.
+ *
+ * The declared vocabulary stays {@link AgentLogEvent}: a passthrough record is
+ * carried, not modelled. Naming it in the union would make every `switch` over
+ * the log — in this package, in the daemon and in the browser projection —
+ * narrow a known type together with an unconstrained one for no reader's gain.
+ *
+ * @public
+ */
+export const agentLogEventSchema = z.union([
+  knownLogEventSchema,
+  z
+    .looseObject({
+      ...eventBase,
+      type: nonEmptyString.refine((type) => !knownEventTypes.has(type), {
+        error: 'must not be a known event type',
+      }),
+    })
+    .transform((record) => record as AgentLogEvent),
 ]);
 
 /** Validate one untrusted durable or broadcast event envelope. @public */

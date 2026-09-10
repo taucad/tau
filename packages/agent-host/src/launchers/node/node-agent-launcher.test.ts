@@ -4,19 +4,15 @@
  * approval survives as a durable event, and a reconnect replays from a cursor.
  */
 
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import { createNodeAgentLauncher } from '#launchers/node/node-agent-launcher.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import type { NodeAgentLauncher } from '#launchers/node/node-agent-launcher.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import { authoritativeGatewayWireFixtures } from '#transport/gateway-wire.fixture.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import type { ToolRegistry } from '#waist/ports.js';
 
 const model = { id: 'fixture-model', providerKind: 'vertexai', contextWindow: 200_000, maxTokens: 4096 } as const;
@@ -37,7 +33,7 @@ const sseResponse = (chunks: readonly string[]): Response => {
         controller.close();
       },
     }),
-    { status: 200, headers: { 'content-type': 'text/event-stream' } },
+    { status: 200, headers: { 'content-type': 'text/event-stream', 'x-tau-operation-id': 'operation-daemon-1' } },
   );
 };
 
@@ -69,6 +65,21 @@ const makeLauncher = async (fetchImplementation: typeof globalThis.fetch): Promi
     workspaceRoot,
     gatewayBaseUrl: 'https://gateway.example',
     model,
+    systemPrompt: 'You are Tau.',
+    toolRegistry: emptyTools,
+    auth: () => 'daemon-bearer',
+    fetch: fetchImplementation,
+  });
+  return launcher;
+};
+
+/** The same launcher with no default model row: every turn must name its own. */
+const makeModellessLauncher = async (fetchImplementation: typeof globalThis.fetch): Promise<NodeAgentLauncher> => {
+  const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-node-launcher-'));
+  roots.push(workspaceRoot);
+  launcher = createNodeAgentLauncher({
+    workspaceRoot,
+    gatewayBaseUrl: 'https://gateway.example',
     systemPrompt: 'You are Tau.',
     toolRegistry: emptyTools,
     auth: () => 'daemon-bearer',
@@ -119,7 +130,12 @@ describe('createNodeAgentLauncher', () => {
     expect(typeof (attached.leadership.role === 'leader' ? attached.leadership.generation : '')).toBe('string');
 
     const logPath = join(currentRoot(), '.tau', 'chats', 'chat-1', 'events.jsonl');
-    expect(await readFile(logPath, 'utf8')).toContain('"type":"run.lifecycle"');
+    const durableLog = await readFile(logPath, 'utf8');
+    expect(durableLog).toContain('"type":"run.lifecycle"');
+    expect(durableLog.indexOf('"type":"model.invocation-prepared"')).toBeLessThan(
+      durableLog.indexOf('"type":"model.invocation-bound"'),
+    );
+    expect(durableLog).toContain('"operationId":"operation-daemon-1"');
 
     // A reconnecting client reads the same transcript from a cursor.
     const replayed = await host.execute({ type: 'tail', chatId: 'chat-1', cursor: 0, limit: 16 });
@@ -200,11 +216,13 @@ describe('createNodeAgentLauncher', () => {
       runId: 'run-2',
       interruptId: 'int-1',
       outcome: 'denied',
+      optionId: 'reject',
     });
     expect(await host.pendingInterrupts('run-2')).toEqual([]);
-    expect(await readFile(join(currentRoot(), '.tau', 'chats', 'chat-2', 'events.jsonl'), 'utf8')).toContain(
-      '"phase":"resolved"',
-    );
+    const resolved = await readFile(join(currentRoot(), '.tau', 'chats', 'chat-2', 'events.jsonl'), 'utf8');
+    expect(resolved).toContain('"phase":"resolved"');
+    /* The exact option a human chose is durable, so a resumed run replays that decision. */
+    expect(resolved).toContain('"optionId":"reject"');
   });
 
   /*
@@ -225,9 +243,9 @@ describe('createNodeAgentLauncher', () => {
         workspaceRoot,
         gatewayBaseUrl: liveGateway,
         model: {
-          id: process.env['TAU_HOST_MODEL'] ?? 'claude-sonnet-4-5',
-          providerKind: 'anthropic',
-          contextWindow: 200_000,
+          id: process.env['TAU_HOST_MODEL'] ?? 'openai-gpt-5.6-luna',
+          providerKind: 'openai',
+          contextWindow: 400_000,
           maxTokens: 1024,
         },
         systemPrompt: 'Answer with the single word: ready.',
@@ -292,5 +310,215 @@ describe('createNodeAgentLauncher', () => {
     await drain;
     expect(observed).toContain('run.lifecycle');
     expect(observed).toContain('message.appended');
+  });
+
+  it('re-attaches to a run left non-terminal on a model-less launcher by reusing the committed model row', async () => {
+    /* The previous host died mid-turn: its log holds the admission, the committed
+     * turn context (which carries the model row) and a `running` marker. */
+    const first = await makeModellessLauncher(scriptedGateway());
+    const leaderEpoch = 'a'.repeat(32);
+    const chatDirectory = join(currentRoot(), '.tau', 'chats', 'chat-interrupted');
+    await mkdir(chatDirectory, { recursive: true });
+    const recordedAt = new Date().toISOString();
+    const base = { version: 1, leaderEpoch, recordedAt, runId: 'run-interrupted' };
+    await writeFile(
+      join(chatDirectory, 'events.jsonl'),
+      [
+        { ...base, sequence: 0, type: 'run.lifecycle', state: 'admitted' },
+        {
+          ...base,
+          sequence: 1,
+          type: 'turn.history-projection-committed',
+          retainedMessageIds: [],
+          message: { id: 'user-1', role: 'user', content: 'hello' },
+          context: {
+            version: 1,
+            systemPrompt: 'You are Tau.',
+            model,
+            toolChoice: 'auto',
+            initialMessages: [],
+            postCompactionMessages: [],
+          },
+        },
+        { ...base, sequence: 2, type: 'run.lifecycle', state: 'running' },
+      ]
+        .map((event) => JSON.stringify(event))
+        .join('\n') + '\n',
+      'utf8',
+    );
+
+    let attached = await first.execute({ type: 'attach', chatId: 'chat-interrupted', cursor: 0, limit: 16 });
+    expect(attached.type).toBe('attach');
+    for (
+      let attempt = 0;
+      attempt < 200 && attached.type === 'attach' && attached.snapshot?.state !== 'completed';
+      attempt++
+    ) {
+      // oxlint-disable-next-line no-await-in-loop -- polling a durable projection is sequential by nature.
+      await new Promise((resolve) => {
+        setTimeout(resolve, 10);
+      });
+      // oxlint-disable-next-line no-await-in-loop -- each poll depends on the previous projection.
+      attached = await first.execute({ type: 'attach', chatId: 'chat-interrupted', cursor: 0, limit: 16 });
+    }
+    expect(attached.type === 'attach' && attached.snapshot?.state).toBe('completed');
+  });
+
+  /*
+   * Observation is not recovery. `tail` and `attach` read the same window, and
+   * only one of them may restart a run a restart left behind — otherwise every
+   * viewer of a chat takes it over just by looking at it.
+   */
+  it('recovers a non-terminal run on attach and never on tail', async () => {
+    const host = await makeLauncher(scriptedGateway());
+    const leaderEpoch = 'b'.repeat(32);
+    const logPath = join(currentRoot(), '.tau', 'chats', 'chat-viewer', 'events.jsonl');
+    await mkdir(join(currentRoot(), '.tau', 'chats', 'chat-viewer'), { recursive: true });
+    const base = {
+      version: 1,
+      leaderEpoch,
+      recordedAt: new Date().toISOString(),
+      runId: 'run-viewer',
+    };
+    const seeded =
+      [
+        { ...base, sequence: 0, type: 'run.lifecycle', state: 'admitted' },
+        {
+          ...base,
+          sequence: 1,
+          type: 'turn.history-projection-committed',
+          retainedMessageIds: [],
+          message: { id: 'user-1', role: 'user', content: 'hello' },
+          context: {
+            version: 1,
+            systemPrompt: 'You are Tau.',
+            model,
+            toolChoice: 'auto',
+            initialMessages: [],
+            postCompactionMessages: [],
+          },
+        },
+        { ...base, sequence: 2, type: 'run.lifecycle', state: 'running' },
+      ]
+        .map((event) => JSON.stringify(event))
+        .join('\n') + '\n';
+    await writeFile(logPath, seeded, 'utf8');
+
+    const tailed = await host.execute({ type: 'tail', chatId: 'chat-viewer', cursor: 0, limit: 16 });
+    expect(tailed.type).toBe('tail');
+    await new Promise((resolve) => {
+      setTimeout(resolve, 50);
+    });
+    // A viewer changed nothing: no resumed run, no new lifecycle marker.
+    expect(await readFile(logPath, 'utf8')).toBe(seeded);
+
+    const attached = await host.execute({ type: 'attach', chatId: 'chat-viewer', cursor: 0, limit: 16 });
+    expect(attached).toMatchObject({ type: 'attach', takeover: true });
+    let recovered = await readFile(logPath, 'utf8');
+    for (let attempt = 0; attempt < 200 && !recovered.includes('"state":"completed"'); attempt++) {
+      // oxlint-disable-next-line no-await-in-loop -- polling a durable projection is sequential by nature.
+      await new Promise((resolve) => {
+        setTimeout(resolve, 10);
+      });
+      // oxlint-disable-next-line no-await-in-loop -- each poll depends on the previous read.
+      recovered = await readFile(logPath, 'utf8');
+    }
+    // Exactly one recovery: the next attach observes a terminal run and takes nothing over.
+    const settled = await host.execute({ type: 'attach', chatId: 'chat-viewer', cursor: 0, limit: 16 });
+    expect(settled).toMatchObject({ type: 'attach', takeover: false });
+  });
+
+  /*
+   * `allowedTools` narrows the daemon's registry; it never widens it (D17). A
+   * client that names a tool this host does not expose gets the tools it does
+   * expose, not a new one.
+   */
+  it('cannot widen the selected tool set with an allowedTools entry the host does not expose', async () => {
+    const bodies: string[] = [];
+    const registry: ToolRegistry = {
+      list: () => [{ name: 'inspect', description: 'Inspect the model.', inputSchema: { type: 'object' } }],
+      invoke: async () => ({ content: 'inspected', isError: false }),
+    };
+    const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-node-launcher-'));
+    roots.push(workspaceRoot);
+    const host = createNodeAgentLauncher({
+      workspaceRoot,
+      gatewayBaseUrl: 'https://gateway.example',
+      model,
+      systemPrompt: 'You are Tau.',
+      toolRegistry: registry,
+      auth: () => 'daemon-bearer',
+      fetch: vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        bodies.push(typeof init?.body === 'string' ? init.body : '');
+        return sseResponse(authoritativeGatewayWireFixtures.browserTurn);
+      }) as unknown as typeof globalThis.fetch,
+    });
+    launcher = host;
+
+    await host.execute({
+      type: 'start',
+      trigger: 'submit',
+      chatId: 'chat-narrowing',
+      runId: 'run-narrowing',
+      message: { id: 'user-1', role: 'user', content: 'hello' },
+      config: {
+        systemPrompt: 'You are Tau.',
+        toolChoice: 'auto',
+        allowedTools: ['inspect', 'ghost_tool'],
+      },
+    });
+    for (let attempt = 0; attempt < 200 && bodies.length === 0; attempt++) {
+      // oxlint-disable-next-line no-await-in-loop -- awaiting the first gateway request is sequential.
+      await new Promise((resolve) => {
+        setTimeout(resolve, 10);
+      });
+    }
+
+    expect(bodies[0]).toContain('inspect');
+    expect(bodies[0]).not.toContain('ghost_tool');
+    // The request is still committed verbatim: narrowing is applied, not rewritten.
+    const durable = await readFile(join(workspaceRoot, '.tau', 'chats', 'chat-narrowing', 'events.jsonl'), 'utf8');
+    expect(durable).toContain('"allowedTools":["inspect","ghost_tool"]');
+  });
+
+  it('refuses a Tau start when neither the launcher nor the admission names a model', async () => {
+    const host = await makeModellessLauncher(scriptedGateway());
+    await expect(
+      host.execute({
+        type: 'start',
+        trigger: 'submit',
+        chatId: 'chat-modelless',
+        runId: 'run-modelless',
+        message: { id: 'user-1', role: 'user', content: 'hello' },
+      }),
+    ).rejects.toMatchObject({ code: 'HOST_MODEL_UNAVAILABLE' });
+  });
+
+  it('runs a turn on a model-less launcher when the admission carries its own model row', async () => {
+    const host = await makeModellessLauncher(scriptedGateway());
+    const started = await host.execute({
+      type: 'start',
+      trigger: 'submit',
+      chatId: 'chat-own-model',
+      runId: 'run-own-model',
+      message: { id: 'user-1', role: 'user', content: 'hello' },
+      config: { systemPrompt: 'You are Tau.', toolChoice: 'auto', model },
+    });
+    expect(started.type).toBe('result');
+
+    let attached = await host.execute({ type: 'attach', chatId: 'chat-own-model', cursor: 0, limit: 16 });
+    for (
+      let attempt = 0;
+      attempt < 200 && attached.type === 'attach' && attached.snapshot?.state !== 'completed';
+      attempt++
+    ) {
+      // oxlint-disable-next-line no-await-in-loop -- polling a durable projection is sequential by nature.
+      await new Promise((resolve) => {
+        setTimeout(resolve, 10);
+      });
+      // oxlint-disable-next-line no-await-in-loop -- each poll depends on the previous projection.
+      attached = await host.execute({ type: 'attach', chatId: 'chat-own-model', cursor: 0, limit: 16 });
+    }
+    expect(attached.type === 'attach' && attached.snapshot?.state).toBe('completed');
   });
 });

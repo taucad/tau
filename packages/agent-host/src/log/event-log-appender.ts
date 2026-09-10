@@ -26,8 +26,20 @@ export type EventLogAppender = {
   append(event: AgentLogEvent): Promise<EventLogAppendOutcome>;
   /** Read the validated records currently visible to this appender. */
   read(): Promise<readonly AgentLogEvent[]>;
-  /** Read at most `limit` records starting at the zero-based cursor. */
-  readBatch(input: { readonly cursor: number; readonly limit: number }): Promise<EventLogBatch>;
+  /**
+   * Read at most `limit` records starting at the zero-based cursor, and at
+   * most `maxBytes` of serialized payload when one is named.
+   *
+   * A count alone does not bound a page: one record holding a whole file read
+   * can be larger than every other record in the log put together. A record
+   * that exceeds the budget on its own is still returned, so an oversized
+   * record slows a reader down rather than wedging its cursor.
+   */
+  readBatch(input: {
+    readonly cursor: number;
+    readonly limit: number;
+    readonly maxBytes?: number | undefined;
+  }): Promise<EventLogBatch>;
   /** Flush pending operations and release the underlying file handle. */
   close(): Promise<void>;
 };
@@ -38,6 +50,31 @@ export type EventLogStorage = {
   append(bytes: Uint8Array<ArrayBuffer>): Promise<void>;
   truncate(size: number): Promise<void>;
   close(): Promise<void>;
+};
+
+/**
+ * Take the longest prefix of a page that fits a byte budget.
+ *
+ * Measured with the same serializer the file is written with, so the budget is
+ * the bytes the reader will actually receive rather than an estimate. The
+ * first record is always taken: a cursor must advance even past a record no
+ * budget could hold.
+ *
+ * @param window - The count-bounded page.
+ * @param maxBytes - Serialized-byte budget for the page.
+ * @returns The records that fit, always at least one when the page is not empty.
+ */
+const byteBounded = (window: readonly AgentLogEvent[], maxBytes: number): AgentLogEvent[] => {
+  const taken: AgentLogEvent[] = [];
+  let total = 0;
+  for (const event of window) {
+    total += serializeLogEventBytes(event).byteLength;
+    if (total > maxBytes && taken.length > 0) {
+      break;
+    }
+    taken.push(event);
+  }
+  return taken;
 };
 
 /**
@@ -133,14 +170,18 @@ export const createEventLogAppender = async (storage: EventLogStorage): Promise<
         assertOpen();
         return [...events];
       }),
-    readBatch: async ({ cursor, limit }) =>
+    readBatch: async ({ cursor, limit, maxBytes }) =>
       enqueue(async () => {
         assertOpen();
         if (!Number.isSafeInteger(cursor) || cursor < 0 || !Number.isSafeInteger(limit) || limit < 1) {
           throw new EventLogError('EVENT_INVALID', 'Event-log cursor and limit must be positive safe integers.');
         }
+        if (maxBytes !== undefined && (!Number.isSafeInteger(maxBytes) || maxBytes < 1)) {
+          throw new EventLogError('EVENT_INVALID', 'An event-log byte budget must be a positive safe integer.');
+        }
         const boundedCursor = Math.min(cursor, events.length);
-        const batch = events.slice(boundedCursor, boundedCursor + limit);
+        const window = events.slice(boundedCursor, boundedCursor + limit);
+        const batch = maxBytes === undefined ? window : byteBounded(window, maxBytes);
         return {
           cursor: boundedCursor,
           nextCursor: boundedCursor + batch.length,

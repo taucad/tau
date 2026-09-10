@@ -81,6 +81,28 @@ describe('event-log reducer properties', () => {
     expect(reduceEventLog([first!, first!, second!, first!])).toEqual([first!.message, second!.message]);
   });
 
+  it('requires preparation and rejects conflicting operation bindings', () => {
+    const prepared: AgentLogEvent = {
+      ...base(0),
+      type: 'model.invocation-prepared',
+      attemptId: 'attempt-1',
+      purpose: 'generation',
+      modelId: 'model-1',
+    };
+    const bound: AgentLogEvent = {
+      ...base(1),
+      type: 'model.invocation-bound',
+      attemptId: 'attempt-1',
+      operationId: 'operation-1',
+      status: 'pending',
+    };
+    expect(reduceEventLog([prepared, bound])).toEqual([]);
+    expect(() => reduceEventLog([{ ...bound, sequence: 0 }])).toThrow('must be prepared before binding');
+    expect(() =>
+      reduceEventLog([prepared, bound, { ...bound, sequence: 2, operationId: 'operation-2', status: 'terminal' }]),
+    ).toThrow('cannot bind to two operations');
+  });
+
   it('discards only a torn final line', () => {
     const events = appendEvents(2);
     const text = events.map((event) => serializeLogEvent(event)).join('');
@@ -314,6 +336,59 @@ describe('event-log appender durability', () => {
     await log.close();
   });
 
+  /*
+   * D14: an event a newer writer produced must not cost an older reader the
+   * chat. Both halves are covered here — an unknown field on a known type, and
+   * an unknown type — because either one used to raise `LINE_INVALID` for the
+   * whole file and leave the transcript unopenable.
+   */
+  it('preserves an unknown event type and an unknown field on a known one', async () => {
+    const seeded = [
+      '{"version":1,"leaderEpoch":"epoch-a","sequence":0,"recordedAt":"2026-08-31T00:00:00.000Z","runId":"run-a","type":"run.lifecycle","state":"admitted","futureField":{"kept":true}}',
+      '{"version":1,"leaderEpoch":"epoch-a","sequence":1,"recordedAt":"2026-08-31T00:00:00.000Z","runId":"run-a","type":"future.fact","note":"kept"}',
+    ]
+      .map((line) => `${line}\n`)
+      .join('');
+    let bytes = new TextEncoder().encode(seeded);
+    const storage: EventLogStorage = {
+      read: async () => bytes,
+      append: async (next) => {
+        const combined = new Uint8Array(bytes.byteLength + next.byteLength);
+        combined.set(bytes);
+        combined.set(next, bytes.byteLength);
+        bytes = combined;
+      },
+      truncate: async (size) => {
+        bytes = bytes.slice(0, size);
+      },
+      close: async () => undefined,
+    };
+    const log = await createEventLogAppender(storage);
+
+    const events = await log.read();
+    expect(events).toHaveLength(2);
+    expect(events[0]).toMatchObject({ type: 'run.lifecycle', state: 'admitted', futureField: { kept: true } });
+    expect(events[1]).toMatchObject({ type: 'future.fact', note: 'kept' });
+    // Byte-identical: the reader re-emits what it could not interpret.
+    expect(events.map((event) => serializeLogEvent(event)).join('')).toBe(seeded);
+    await expect(log.readBatch({ cursor: 0, limit: 16 })).resolves.toMatchObject({ nextCursor: 2, events });
+    // Preserved without being executed: neither record reaches provider history.
+    expect(reduceEventLog(events)).toEqual([]);
+
+    // The log stays writable behind a record this reader does not understand.
+    await expect(log.append({ ...base(2), type: 'message.appended', message: messageFor(0) })).resolves.toEqual({
+      appended: true,
+    });
+    expect(new TextDecoder().decode(bytes).startsWith(seeded)).toBe(true);
+    await log.close();
+  });
+
+  it('still fails closed for a malformed record of a known type', () => {
+    expect(() => parseLogEvent({ ...base(0), type: 'run.lifecycle', state: 'not-a-lifecycle-state' })).toThrow(
+      expect.objectContaining({ code: 'EVENT_INVALID' }),
+    );
+  });
+
   it('reads replay through bounded cursor batches without returning the full log', async () => {
     const storage: EventLogStorage = {
       read: async () => new Uint8Array(new ArrayBuffer(0)),
@@ -332,6 +407,44 @@ describe('event-log appender durability', () => {
       nextCursor: 3,
       endCursor: 5,
       events: appendEvents(5).slice(1, 3),
+    });
+    await log.close();
+  });
+
+  /*
+   * A count is not a bound: one record holding a file read can be larger than
+   * every other record in the log (P5). The byte budget is measured with the
+   * same serializer the page is sent with.
+   */
+  it('bounds a batch by serialized bytes and still advances past an oversized record', async () => {
+    const storage: EventLogStorage = {
+      read: async () => new Uint8Array(new ArrayBuffer(0)),
+      append: async () => undefined,
+      truncate: async () => undefined,
+      close: async () => undefined,
+    };
+    const log = await createEventLogAppender(storage);
+    const large = (sequence: number): AgentLogEvent => ({
+      ...base(sequence),
+      type: 'message.appended',
+      message: { id: `large-${sequence}`, role: 'user', content: 'x'.repeat(400_000) },
+    });
+    for (const event of [large(0), large(1), large(2)]) {
+      // oxlint-disable-next-line no-await-in-loop -- the fixture preserves physical append order.
+      await log.append(event);
+    }
+
+    await expect(log.readBatch({ cursor: 0, limit: 16, maxBytes: 500_000 })).resolves.toMatchObject({
+      cursor: 0,
+      nextCursor: 1,
+      endCursor: 3,
+    });
+    // One record larger than the whole budget still advances the cursor.
+    await expect(log.readBatch({ cursor: 0, limit: 16, maxBytes: 1 })).resolves.toMatchObject({ nextCursor: 1 });
+    // Two fit in a budget that holds two.
+    await expect(log.readBatch({ cursor: 0, limit: 16, maxBytes: 900_000 })).resolves.toMatchObject({ nextCursor: 2 });
+    await expect(log.readBatch({ cursor: 0, limit: 16, maxBytes: 0 })).rejects.toMatchObject({
+      code: 'EVENT_INVALID',
     });
     await log.close();
   });

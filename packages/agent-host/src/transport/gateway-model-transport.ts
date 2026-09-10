@@ -11,12 +11,9 @@ import type {
   ProviderStreams,
 } from '@earendil-works/pi-ai';
 import { util as zodUtility } from 'zod';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import { MessageIdentities, providerMessageToPi } from '#harness/session-record.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import type { JsonObject, ModelProviderKind, ModelSystemPromptBlock } from '#log/event-types.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
-import type { ModelStreamEvent, ModelStreamRequest, ModelTransport } from '#waist/ports.js';
+import type { ModelInvocationBinding, ModelStreamEvent, ModelStreamRequest, ModelTransport } from '#waist/ports.js';
 
 const openAiGatewayPath = 'v1/llm/openai/v1';
 const anthropicGatewayPath = 'v1/llm/anthropic';
@@ -26,6 +23,9 @@ const piCookieAuthValidationHeaders = { authorization: 'cookie-authenticated' } 
 
 /** Stable gateway failures surfaced across the W3 transport boundary. @public */
 export const gatewayModelErrorCodes = [
+  'BILLING_RECOVERY_UNAVAILABLE',
+  'FUNDED_HELPER_LIMIT',
+  'FUNDED_OPERATION_LIMIT',
   'INSUFFICIENT_CREDIT',
   'MODEL_NOT_IN_CATALOG',
   'MODEL_PROVIDER_UNSUPPORTED',
@@ -155,16 +155,26 @@ export type GatewayModelTransportOptions = {
    */
   readonly auth?: (() => string | undefined | Promise<string | undefined>) | undefined;
   readonly baseUrl: string;
-  readonly model: {
-    readonly contextWindow: number;
-    readonly maxTokens?: number | undefined;
-    readonly cost?: ModelCostRates | undefined;
-  };
+  /**
+   * Catalog limits for a host that configures one default model. Optional: a
+   * host that has none — every turn names its own row — supplies these through
+   * {@link ModelStreamRequest} instead, which is what the harness always does.
+   */
+  readonly model?:
+    | {
+        readonly contextWindow: number;
+        readonly maxTokens?: number | undefined;
+        readonly cost?: ModelCostRates | undefined;
+      }
+    | undefined;
   readonly fetch?: typeof globalThis.fetch | undefined;
 };
 
 type WireRecord = Record<string, unknown>;
-type GatewayFetchState = { failure?: GatewayModelTransportError | undefined };
+type GatewayFetchState = {
+  failure?: GatewayModelTransportError | undefined;
+  binding?: ModelInvocationBinding | undefined;
+};
 type PiGatewayModel = Model<'anthropic-messages'> | Model<'openai-completions'> | Model<'openai-responses'>;
 type PiTool = NonNullable<Context['tools']>[number];
 
@@ -341,6 +351,8 @@ const authenticatedFetch =
     readonly signal: AbortSignal;
     readonly state: GatewayFetchState;
     readonly providerKind: ModelProviderKind;
+    readonly attemptId: string;
+    readonly onInvocationBound?: ModelStreamRequest['onInvocationBound'];
     readonly systemPromptBlocks?: readonly ModelSystemPromptBlock[] | undefined;
   }): typeof globalThis.fetch =>
   async (input, init) => {
@@ -361,6 +373,7 @@ const authenticatedFetch =
       // Same allow-list problem: pi's Anthropic client stamps this browser
       // escape hatch, which Tau's gateway never reads (it proxies server-side).
       headers.delete('anthropic-dangerous-direct-browser-access');
+      headers.set('x-tau-attempt-id', options.attemptId);
       let body = init?.body;
       // Anthropic can preserve SP-8's three cache breakpoints. OpenAI has no
       // per-system-block cache-control wire shape and uses pi's blanket retention.
@@ -382,6 +395,18 @@ const authenticatedFetch =
         options.state.failure = failure;
         throw failure;
       }
+      const operationId = response.headers.get('x-tau-operation-id');
+      if (!operationId || operationId.length > 128 || !/^[\u0021-\u007E]+$/u.test(operationId)) {
+        const failure = new GatewayModelTransportError({
+          code: 'MALFORMED_RESPONSE',
+          message: 'Tau model gateway did not return a valid operation identity.',
+          status: response.status,
+        });
+        options.state.failure = failure;
+        throw failure;
+      }
+      options.state.binding = { operationId, status: 'pending' };
+      await options.onInvocationBound?.(options.state.binding);
       const contentType = response.headers.get('content-type')?.split(';', 1)[0]?.trim().toLowerCase();
       if (contentType !== 'text/event-stream' || !response.body) {
         const failure = new GatewayModelTransportError({
@@ -412,7 +437,14 @@ const piModelFor = (options: {
   readonly request: ModelStreamRequest;
   readonly transport: GatewayModelTransportOptions;
 }): PiGatewayModel => {
-  const maxTokens = options.request.maxTokens ?? options.transport.model.maxTokens ?? 8192;
+  const maxTokens = options.request.maxTokens ?? options.transport.model?.maxTokens ?? 8192;
+  const contextWindow = options.request.contextWindow ?? options.transport.model?.contextWindow;
+  if (contextWindow === undefined) {
+    throw new GatewayModelTransportError({
+      code: 'INVALID_REQUEST',
+      message: 'Tau model gateway request named no context window and this transport configures no default model.',
+    });
+  }
   const common = {
     id: options.request.modelId,
     name: options.request.modelId,
@@ -420,13 +452,13 @@ const piModelFor = (options: {
     reasoning: true,
     input: ['text', 'image'] as Array<'text' | 'image'>,
     cost: options.request.modelCost ??
-      options.transport.model.cost ?? {
+      options.transport.model?.cost ?? {
         input: 0,
         output: 0,
         cacheRead: 0,
         cacheWrite: 0,
       },
-    contextWindow: options.transport.model.contextWindow,
+    contextWindow,
     maxTokens,
   };
   return options.request.providerKind === 'anthropic'
@@ -564,7 +596,61 @@ const streamPiEvents = async function* (options: {
  * @public
  */
 export const createGatewayModelTransport = (options: GatewayModelTransportOptions): ModelTransport => ({
+  usesBillingAttempt: isGatewayProviderKind,
+  async lookupAttempt(attemptId, signal) {
+    if (!attemptId || attemptId.length > 128 || !/^[\u0021-\u007E]+$/u.test(attemptId)) {
+      throw new GatewayModelTransportError({
+        code: 'INVALID_REQUEST',
+        message: 'Invalid Tau invocation attempt identity.',
+      });
+    }
+    const headers = new Headers();
+    const token = await options.auth?.();
+    if (token !== undefined) {
+      headers.set('authorization', `Bearer ${token}`);
+    }
+    const response = await (options.fetch ?? globalThis.fetch.bind(globalThis))(
+      new URL(
+        `v1/billing/attempts/gateway/${encodeURIComponent(attemptId)}`,
+        options.baseUrl.endsWith('/') ? options.baseUrl : `${options.baseUrl}/`,
+      ),
+      { credentials: 'include', headers, signal },
+    );
+    if (!response.ok) {
+      throw await responseError(response);
+    }
+    const payload: unknown = await response.json();
+    if (!zodUtility.isObject(payload)) {
+      throw new GatewayModelTransportError({
+        code: 'MALFORMED_RESPONSE',
+        message: 'Tau attempt lookup returned invalid JSON.',
+      });
+    }
+    if (payload['state'] === 'not_found') {
+      return undefined;
+    }
+    const operationId = readString(payload, 'operationId');
+    const state = readString(payload, 'state');
+    if (
+      !operationId ||
+      operationId.length > 128 ||
+      !/^[\u0021-\u007E]+$/u.test(operationId) ||
+      !['pending', 'terminal', 'unavailable'].includes(state ?? '')
+    ) {
+      throw new GatewayModelTransportError({
+        code: 'MALFORMED_RESPONSE',
+        message: 'Tau attempt lookup returned an invalid operation envelope.',
+      });
+    }
+    return { operationId, status: state as ModelInvocationBinding['status'] };
+  },
   async *stream(request) {
+    if (!request.attemptId || request.attemptId.length > 128 || !/^[\u0021-\u007E]+$/u.test(request.attemptId)) {
+      throw new GatewayModelTransportError({
+        code: 'INVALID_REQUEST',
+        message: 'Invalid Tau invocation attempt identity.',
+      });
+    }
     if (!isGatewayProviderKind(request.providerKind)) {
       throw new GatewayModelTransportError({
         code: 'MODEL_PROVIDER_UNSUPPORTED',
@@ -584,6 +670,8 @@ export const createGatewayModelTransport = (options: GatewayModelTransportOption
         signal: request.signal,
         state,
         providerKind: request.providerKind!,
+        attemptId: request.attemptId,
+        onInvocationBound: request.onInvocationBound,
         systemPromptBlocks: request.systemPromptBlocks,
       }),
       maxRetries: 0,

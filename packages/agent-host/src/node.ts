@@ -1,4 +1,5 @@
-import { mkdir, open, unlink } from 'node:fs/promises';
+import { mkdir, open, readFile, stat, unlink } from 'node:fs/promises';
+import { setTimeout as sleep } from 'node:timers/promises';
 import type { FileHandle } from 'node:fs/promises';
 import { dirname } from 'node:path';
 // eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
@@ -14,35 +15,82 @@ export type NodeEventLogOptions = {
   readonly filePath: string;
 };
 
-const acquireWriterLock = async (filePath: string): Promise<{ readonly handle: FileHandle; readonly path: string }> => {
-  const path = `${filePath}.lock`;
-  let handle: FileHandle;
+// A lock whose recorded writer pid no longer exists was left behind by a crashed or killed host;
+// nothing will ever release it, so it may be taken over. Unreadable or non-numeric content counts as held.
+// ponytail: pid liveness only; a reused pid after reboot keeps a dead lock alive until that process exits — add a boot id if that bites.
+const isStaleLock = async (path: string): Promise<boolean> => {
+  const pid = Number.parseInt(await readFile(path, 'utf8').catch(() => ''), 10);
+  if (!Number.isInteger(pid) || pid <= 0) {
+    return false;
+  }
   try {
-    handle = await open(path, 'wx');
+    process.kill(pid, 0);
+    return false;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ESRCH';
+  }
+};
+
+const openLock = async (path: string): Promise<FileHandle | undefined> => {
+  try {
+    return await open(path, 'wx');
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
-      throw new EventLogError('WRITER_LOCKED', `Event log "${filePath}" already has an active Node writer.`, {
-        cause: error,
-      });
+      return undefined;
     }
     throw error;
+  }
+};
+
+const acquireWriterLock = async (filePath: string): Promise<{ readonly handle: FileHandle; readonly path: string }> => {
+  const path = `${filePath}.lock`;
+  const locked = (): EventLogError =>
+    new EventLogError('WRITER_LOCKED', `Event log "${filePath}" already has an active Node writer.`);
+  let handle = await openLock(path);
+  let tookOver = false;
+  if (handle === undefined && (await isStaleLock(path))) {
+    await unlink(path).catch(() => undefined);
+    handle = await openLock(path);
+    tookOver = true;
+  }
+  // A lock released between the EEXIST and the pid read reads as held; one more try before refusing.
+  handle ??= await openLock(path);
+  if (handle === undefined) {
+    throw locked();
   }
   try {
     await handle.writeFile(`${process.pid}\n`);
     await handle.sync();
-    return { handle, path };
   } catch (error) {
     await handle.close().catch(() => undefined);
     await unlink(path).catch(() => undefined);
     throw error;
   }
+  if (tookOver) {
+    // Two takers can both unlink one stale lock, so both `wx` creates succeed and the earlier file is
+    // gone. Only the handle whose inode the path still names holds the lock; the other must stand
+    // down without unlinking (the path is the winner's now).
+    // ponytail: verify-after-settle narrows the race to sub-millisecond straggling (0/40 measured), not a proof — an OS advisory lock (flock) is the sound upgrade.
+    await sleep(200);
+    const [mine, onDisk] = await Promise.all([handle.stat(), stat(path).catch(() => undefined)]);
+    if (onDisk?.ino !== mine.ino) {
+      await handle.close().catch(() => undefined);
+      throw locked();
+    }
+  }
+  return { handle, path };
 };
 
 const releaseWriterLock = async (lock: { readonly handle: FileHandle; readonly path: string }): Promise<void> => {
+  // A straggling taker past the settle window may already own the path; unlinking it would admit a
+  // third writer, so only the lock the path still names is removed (6-review C1).
+  const [mine, onDisk] = await Promise.all([lock.handle.stat(), stat(lock.path).catch(() => undefined)]);
   try {
     await lock.handle.close();
   } finally {
-    await unlink(lock.path).catch(() => undefined);
+    if (onDisk?.ino === mine.ino) {
+      await unlink(lock.path).catch(() => undefined);
+    }
   }
 };
 

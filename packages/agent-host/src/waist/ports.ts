@@ -1,7 +1,5 @@
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import type { EventLogAppender } from '#log/event-log-appender.js';
 import type { ModelCostRates, StopReason, Usage } from '@earendil-works/pi-ai';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import type {
   JsonObject,
   JsonValue,
@@ -51,6 +49,12 @@ export type AgentLiveEvent = {
 
 /** Complete input for one model stream. @public */
 export type ModelStreamRequest = {
+  /** Durable caller identity for this one Tau gateway invocation. */
+  readonly attemptId: string;
+  /** Why this distinct provider invocation exists. */
+  readonly invocationPurpose: 'generation' | 'compaction';
+  /** Called after the response header is validated and before its stream is consumed. */
+  readonly onInvocationBound?: ((binding: ModelInvocationBinding) => Promise<void>) | undefined;
   /** Gateway or local-provider model identity. */
   readonly modelId: string;
   /** Catalog pricing in dollars per million tokens. */
@@ -59,6 +63,8 @@ export type ModelStreamRequest = {
   readonly providerKind?: ModelProviderKind | undefined;
   /** Requested output-token ceiling; the gateway clamps it to the catalog and remaining context. */
   readonly maxTokens?: number | undefined;
+  /** Catalog context window of the selected model, in tokens. */
+  readonly contextWindow?: number | undefined;
   /** System instruction supplied before provider history. */
   readonly systemPrompt: string;
   /** Optional cache-aware structure for the same prompt; pi continues to consume `systemPrompt`. */
@@ -73,8 +79,18 @@ export type ModelStreamRequest = {
 
 /** W3: bearer/local model boundary with normalized streaming and usage. @public */
 export type ModelTransport = {
+  /** Whether this provider/model selection uses Tau's funded gateway. */
+  usesBillingAttempt?: ((providerKind: ModelProviderKind | undefined) => boolean) | undefined;
+  /** Resolve an ambiguous prepared attempt without dispatching it again. */
+  lookupAttempt?: ((attemptId: string, signal: AbortSignal) => Promise<ModelInvocationBinding | undefined>) | undefined;
   /** Start one provider stream. */
   stream(request: ModelStreamRequest): AsyncIterable<ModelStreamEvent>;
+};
+
+/** Opaque API-owned operation binding exposed to portable hosts. @public */
+export type ModelInvocationBinding = {
+  readonly operationId: string;
+  readonly status: 'pending' | 'terminal' | 'unavailable';
 };
 
 /** Input for one direct in-host tool dispatch. @public */
@@ -87,6 +103,16 @@ export type HostToolInvocation = {
   readonly input: JsonValue;
   /** Cancels the active tool operation. */
   readonly signal: AbortSignal;
+  /**
+   * The run this call serves, when one owns it.
+   *
+   * A registry that roots a turn somewhere other than the host's own workspace
+   * — a candidate revision's checkout (V19) — has no other way to tell which
+   * turn is calling: one registry serves every concurrent run. Absent for a
+   * dispatch that belongs to no Tau run, such as an MCP call from an external
+   * adapter, which is served at the workspace root.
+   */
+  readonly runId?: string | undefined;
 };
 
 /** Normalized result of one tool dispatch. @public */
@@ -125,6 +151,14 @@ export type InterruptResolution = {
   readonly interruptId: string;
   /** Operator or policy decision. */
   readonly outcome: 'approved' | 'denied' | 'cancelled';
+  /**
+   * The exact option the decider chose, when the request offered a list.
+   *
+   * An outcome is not a choice: an ACP permission request may offer both
+   * "allow once" and "allow always", and re-deriving one from `approved`
+   * substitutes the host's guess for the human's decision.
+   */
+  readonly optionId?: string | undefined;
   /** Optional structured response. */
   readonly payload?: JsonValue | undefined;
 };

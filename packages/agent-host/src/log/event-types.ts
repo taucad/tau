@@ -49,11 +49,65 @@ export type UserProviderMessage = MessageBase & { readonly role: 'user' };
 /** A provider-normalized assistant message. @public */
 export type AssistantProviderMessage = MessageBase & { readonly role: 'assistant' };
 
+/** One file, and optionally one line, a tool call named. @public */
+export type ToolCallLocation = {
+  readonly path: string;
+  readonly line?: number | undefined;
+};
+
+/**
+ * The emitter's own tool-call facts, retained beside Tau's dispatch identity.
+ *
+ * One vocabulary for both emitters (N11): a Tau-dispatched call and an
+ * external agent's call record the same fields, so a client renders them with
+ * one projection and no second tool namespace exists. `toolCallId` is the
+ * *emitter's* id — an ACP `tool_call.toolCallId`, say — which is why it is
+ * recorded here rather than conflated with the message's own `toolCallId`.
+ *
+ * `kind` and `status` stay strings: their vocabularies belong to the protocol
+ * that produced them and extend without Tau's involvement, and D14 keeps an
+ * older reader able to read a newer writer's value.
+ *
+ * @public
+ */
+export type ToolCallProjection = {
+  /** The emitter's own call id. */
+  readonly toolCallId: string;
+  /** What the call does, in the emitter's vocabulary (`read`, `edit`, …). */
+  readonly kind?: string | undefined;
+  /** Human-readable summary the emitter chose. */
+  readonly title?: string | undefined;
+  /** Where the call had reached when this message was recorded. */
+  readonly status?: string | undefined;
+  /** Files the call named. */
+  readonly locations?: readonly ToolCallLocation[] | undefined;
+  /** Presentation blocks the emitter rendered, verbatim. */
+  readonly content?: JsonValue | undefined;
+  /**
+   * The emitter's *programmatic* tool name, when it has one.
+   *
+   * `title` is a human sentence an agent composed ("List files in 'src'"); this
+   * is the identity a client can switch on. ACP's own `ToolCall.name` is
+   * experimental and neither shipping adapter sets it, so a projection
+   * recovers this from wherever the emitter actually put it.
+   */
+  readonly nativeName?: string | undefined;
+  /**
+   * The emitter's `_meta`, verbatim.
+   *
+   * D14: the log preserves facts it has no field for. `_meta` is where both
+   * ACP adapters put their vendor identity, so dropping it would make the
+   * emitter's own tool name unrecoverable from the durable record.
+   */
+  readonly meta?: JsonValue | undefined;
+};
+
 /** A complete tool-call input retained before dispatch. @public */
 export type ToolInputProviderMessage = MessageBase & {
   readonly role: 'tool-input';
   readonly toolCallId: string;
   readonly toolName: string;
+  readonly call?: ToolCallProjection | undefined;
 };
 
 /** A complete tool result retained after dispatch. @public */
@@ -62,6 +116,7 @@ export type ToolOutputProviderMessage = MessageBase & {
   readonly toolCallId: string;
   readonly toolName: string;
   readonly isError: boolean;
+  readonly call?: ToolCallProjection | undefined;
 };
 
 /** A stable-id provider message reconstructed by the event-log reducer. @public */
@@ -161,6 +216,69 @@ export type InterruptRecordedEvent = LogEventBase & {
   readonly payload?: JsonValue;
 };
 
+/**
+ * Where one turn's recorded revision landed on its branch. @public
+ *
+ * The expected-old CAS either moved the branch head or refused to, and the
+ * refusal names what it found — the reader needs both halves to say whether the
+ * turn is on the branch or beside it.
+ */
+export type RevisionPublicationRecord =
+  | {
+      readonly status: 'updated';
+      readonly branchName: string;
+      readonly expectedHeadRevisionId: string;
+      readonly previousHeadRevisionId?: string;
+      readonly headRevisionId: string;
+    }
+  | {
+      readonly status: 'conflicted';
+      readonly branchName: string;
+      readonly expectedHeadRevisionId: string;
+      readonly actualHeadRevisionId?: string;
+      readonly proposedHeadRevisionId: string;
+    };
+
+/**
+ * The revision a host recorded for one turn (V17, VI11).
+ *
+ * The host — never the agent and never the client — records what a turn wrote,
+ * so the fact has to reach the client the same way every other durable fact
+ * does: as one record in the chat's own log, replayed on every reattach. It
+ * carries the whole finalization rather than an id, because a client that has
+ * no access to the host's revision store must still be able to render the
+ * turn's revision, its branch and its changed paths from this record alone.
+ *
+ * @public
+ */
+export type RevisionFinalizedEvent = LogEventBase & {
+  readonly type: 'revision.finalized';
+  /** Stable user-message id of the turn this revision records. */
+  readonly turnId: string;
+  /** Turn workspace the host prepared for the run. */
+  readonly workspaceId: string;
+  readonly revisionId: string;
+  readonly baseRevisionId: string;
+  /** Object id of the recorded **tree**, not of the revision that carries it. */
+  readonly treeId: string;
+  readonly branchName: string;
+  readonly publication: RevisionPublicationRecord;
+  /** Paths that differ between the turn's base tree and its recorded tree. */
+  readonly changedPaths: readonly string[];
+  readonly provenance: {
+    readonly source: 'user' | 'agent' | 'merge' | 'restore' | 'import';
+    readonly actorId: string;
+    readonly runId?: string;
+    /** Milliseconds since the Unix epoch. */
+    readonly createdAt: number;
+  };
+  readonly generatedSummary: string;
+  readonly nativeGit:
+    | { readonly status: 'not-configured' }
+    | { readonly status: 'stored'; readonly commitId: string; readonly objectFormat: 'sha1' | 'sha256' }
+    | { readonly status: 'failed'; readonly errorCode: string };
+};
+
 /** A durable run lifecycle state. @public */
 export type RunLifecycleState = 'admitted' | 'running' | 'paused' | 'completed' | 'failed' | 'cancelled';
 
@@ -211,6 +329,32 @@ export type RunLifecycleEvent = LogEventBase & {
   readonly state: RunLifecycleState;
   readonly storageDurability?: StorageDurabilityClass | undefined;
   readonly detail?: RunFailureDetail | undefined;
+  /**
+   * Why the executor stopped, in its own vocabulary, on a terminal marker.
+   *
+   * A string, not a union: an external runner's reasons belong to the protocol
+   * that produced them (ACP's `max_tokens`, `refusal`, `max_turn_requests`) and
+   * extend without Tau's involvement, and D14 keeps an older reader able to read
+   * a newer writer's value. It *narrows* {@link RunLifecycleState}, which cannot
+   * say why a turn ended short, and never replaces it (V6).
+   */
+  readonly stopReason?: string | undefined;
+};
+
+/** Records one Tau-gateway invocation identity before any provider request. @public */
+export type ModelInvocationPreparedEvent = LogEventBase & {
+  readonly type: 'model.invocation-prepared';
+  readonly attemptId: string;
+  readonly purpose: 'generation' | 'compaction';
+  readonly modelId: string;
+};
+
+/** Binds a prepared gateway attempt to the API-owned financial operation. @public */
+export type ModelInvocationBoundEvent = LogEventBase & {
+  readonly type: 'model.invocation-bound';
+  readonly attemptId: string;
+  readonly operationId: string;
+  readonly status: 'pending' | 'terminal' | 'unavailable';
 };
 
 /** Commits the exact retained history prefix and the next user message at turn start. @public */
@@ -243,5 +387,8 @@ export type AgentLogEvent =
   | SnapshotContextRefreshedEvent
   | SafeguardRecordedEvent
   | InterruptRecordedEvent
+  | RevisionFinalizedEvent
   | RunLifecycleEvent
+  | ModelInvocationPreparedEvent
+  | ModelInvocationBoundEvent
   | TurnHistoryProjectionCommittedEvent;

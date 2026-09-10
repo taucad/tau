@@ -12,17 +12,16 @@ import type {
   ToolCall,
   Usage,
 } from '@earendil-works/pi-ai';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import type {
   AgentLiveEvent,
   DurableEventLog,
   HostRunSnapshot,
   HostToolDefinition,
+  ModelInvocationBinding,
   ModelStreamEvent,
   ModelTransport,
   ToolRegistry,
 } from '#waist/ports.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import type {
   AgentToolChoice,
   JsonObject,
@@ -35,27 +34,18 @@ import type {
   TurnContextSnapshot,
   UserProviderMessage,
 } from '#log/event-types.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import {
   createTurnContextSnapshot,
   createToolResultTrimmerMiddleware,
   latexDelimiterMiddleware,
 } from '#harness/cad-middleware.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import type { ClientContext, RecentSkillsPort } from '#harness/cad-middleware.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import { installCompaction } from '#harness/compaction.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import type { CompactionOutcome, CompactionSummarizer } from '#harness/compaction.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import { composeModelCallMiddleware } from '#harness/model-call-middleware.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import type { ModelCallMiddleware } from '#harness/model-call-middleware.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import { createAgentSafeguards } from '#harness/safeguards.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import type { SafeguardOutcome, SafeguardThresholds } from '#harness/safeguards.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import {
   createSessionRecord,
   createProviderMetadataDiagnostic,
@@ -68,13 +58,9 @@ import {
   toolInputToProvider,
   transportFailureFromProviderMessages,
 } from '#harness/session-record.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import type { MessageIdentities, SessionRecord } from '#harness/session-record.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import { applyHostToolResult, createAgentTools, normalizeToolInput } from '#harness/tools.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import type { ToolResultSubstituter } from '#harness/tools.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import { createInterruptRecoveryMessage } from '#harness/interrupt-recovery.js';
 
 const zeroUsage: Usage = {
@@ -162,6 +148,11 @@ type CreateTransportStreamOptions = {
   readonly usePostCompactionContext?: (() => boolean) | undefined;
   readonly systemPromptBlocks?: (() => TurnContextSnapshot['systemPromptBlocks']) | undefined;
   readonly onLiveDelta?: ((event: Omit<AgentLiveEvent, 'chatId' | 'runId'>) => void | Promise<void>) | undefined;
+  readonly prepareInvocation?:
+    | ((purpose: 'generation' | 'compaction', modelId: string, signal: AbortSignal) => Promise<string>)
+    | undefined;
+  readonly bindInvocation?: ((attemptId: string, metadata: ProviderMessageMetadata) => Promise<void>) | undefined;
+  readonly invocationPurpose?: 'generation' | 'compaction' | undefined;
 };
 
 /** Adapt the W3 model transport into pi's provider event protocol. @public */
@@ -176,6 +167,7 @@ export const createTransportStreamFunction =
       let active: { readonly kind: 'text' | 'thinking'; readonly index: number } | undefined;
       let terminalReason: StopReason | undefined;
       let transportMetadata: ProviderMessageMetadata | undefined;
+      let invocationMetadata: ProviderMessageMetadata | undefined;
       let usageSettled = false;
       output.push({ type: 'start', partial });
 
@@ -205,12 +197,29 @@ export const createTransportStreamFunction =
       };
 
       try {
+        const invocationPurpose = options.invocationPurpose ?? 'generation';
+        const funded = options.transport.usesBillingAttempt?.(options.providerKind) === true;
+        const attemptId =
+          funded && options.prepareInvocation
+            ? await options.prepareInvocation(invocationPurpose, model.id, signal)
+            : options.createId();
         const committedContext = options.committedContext?.();
         const events = options.transport.stream({
+          attemptId,
+          invocationPurpose,
+          ...(funded
+            ? {
+                onInvocationBound: async (binding: ModelInvocationBinding) => {
+                  invocationMetadata = { tauInternal: { kind: 'billing-invocation', attemptId, ...binding } };
+                  await options.bindInvocation?.(attemptId, invocationMetadata);
+                },
+              }
+            : {}),
           modelId: model.id,
           modelCost: model.cost,
           providerKind: options.providerKind,
           maxTokens: model.maxTokens,
+          contextWindow: model.contextWindow,
           systemPrompt: committedContext?.systemPrompt ?? context.systemPrompt ?? '',
           systemPromptBlocks: committedContext?.systemPromptBlocks ?? options.systemPromptBlocks?.(),
           messages: [
@@ -321,6 +330,9 @@ export const createTransportStreamFunction =
             ? { errorMessage: `Model transport stopped with ${stopReason}.` }
             : {}),
         };
+        if (invocationMetadata) {
+          transportMetadata = { ...transportMetadata, ...invocationMetadata };
+        }
         const durableMetadata: ProviderMessageMetadata | undefined =
           stopReason === 'aborted' && !usageSettled
             ? { ...transportMetadata, usageUnsettled: { type: 'tau.usage-unsettled', reason: 'aborted' } }
@@ -341,6 +353,9 @@ export const createTransportStreamFunction =
           output.push({ type: 'done', reason: stopReason, message: partial });
         }
       } catch (error) {
+        if (invocationMetadata) {
+          transportMetadata = { ...transportMetadata, ...invocationMetadata };
+        }
         closeActive();
         const reason = signal.aborted ? 'aborted' : 'error';
         const diagnostic = createTransportFailureDiagnostic(error, Date.now());
@@ -387,6 +402,8 @@ const compactionModelsWithTransport = (options: {
   readonly identities: MessageIdentities;
   readonly toolInputIds: Map<string, string>;
   readonly createId: () => string;
+  readonly prepareInvocation?: CreateTransportStreamOptions['prepareInvocation'];
+  readonly bindInvocation?: CreateTransportStreamOptions['bindInvocation'];
 }): Models => {
   const models: Pick<Models, 'completeSimple'> = {
     completeSimple: async (model, context, streamOptions): Promise<AssistantMessage> => {
@@ -395,11 +412,27 @@ const compactionModelsWithTransport = (options: {
       let stopReason: StopReason | undefined;
       const signal = streamOptions?.signal ?? new AbortController().signal;
       try {
+        const funded = options.transport.usesBillingAttempt?.(options.providerKind) === true;
+        const attemptId =
+          funded && options.prepareInvocation
+            ? await options.prepareInvocation('compaction', model.id, signal)
+            : options.createId();
         const stream = options.transport.stream({
+          attemptId,
+          invocationPurpose: 'compaction',
+          ...(funded
+            ? {
+                onInvocationBound: async (binding: ModelInvocationBinding) =>
+                  options.bindInvocation?.(attemptId, {
+                    tauInternal: { kind: 'billing-invocation', attemptId, ...binding },
+                  }),
+              }
+            : {}),
           modelId: model.id,
           modelCost: model.cost,
           providerKind: options.providerKind,
           maxTokens: streamOptions?.maxTokens ?? model.maxTokens,
+          contextWindow: model.contextWindow,
           systemPrompt: context.systemPrompt ?? '',
           messages: providerHistory(context.messages as AgentMessage[], options),
           tools: [],
@@ -677,7 +710,81 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
         ? options.toolRegistry.invoke(invocation)
         : { content: { errorCode: 'TOOL_NOT_FOUND', message: `Unknown tool: ${invocation.toolName}` }, isError: true },
   };
-  const tools = createAgentTools({ registry: toolRegistry, substitute: options.substituteToolResult });
+  const tools = createAgentTools({
+    registry: toolRegistry,
+    runId: options.runId,
+    substitute: options.substituteToolResult,
+  });
+  const bindInvocation = async (attemptId: string, metadata: ProviderMessageMetadata): Promise<void> => {
+    const binding = metadata.tauInternal;
+    if (binding?.['kind'] !== 'billing-invocation' || binding['attemptId'] !== attemptId) {
+      return;
+    }
+    const { operationId, status } = binding;
+    if (
+      typeof operationId !== 'string' ||
+      (status !== 'pending' && status !== 'terminal' && status !== 'unavailable')
+    ) {
+      throw new Error('Tau gateway returned malformed invocation metadata.');
+    }
+    const currentEvents = await record.events();
+    const prior = currentEvents.find(
+      (event) =>
+        event.runId === options.runId && event.type === 'model.invocation-bound' && event.attemptId === attemptId,
+    );
+    if (prior?.type === 'model.invocation-bound' && prior.operationId !== operationId) {
+      throw new Error(`Model invocation ${attemptId} has a conflicting operation binding.`);
+    }
+    if (!prior) {
+      await record.append({
+        type: 'model.invocation-bound',
+        attemptId,
+        operationId,
+        status,
+      });
+    }
+  };
+  const prepareInvocation = async (
+    purpose: 'generation' | 'compaction',
+    modelId: string,
+    signal: AbortSignal,
+  ): Promise<string> => {
+    const recordedEvents = await record.events();
+    const events = recordedEvents.filter((event) => event.runId === options.runId);
+    const prepared = events.findLast((event) => event.type === 'model.invocation-prepared');
+    if (prepared?.type === 'model.invocation-prepared') {
+      const preparedIndex = events.indexOf(prepared);
+      const bound = events.find(
+        (event) => event.type === 'model.invocation-bound' && event.attemptId === prepared.attemptId,
+      );
+      const completed = events.slice(preparedIndex + 1).some((event) => {
+        if (prepared.purpose === 'compaction') {
+          return event.type === 'history.compacted';
+        }
+        return (
+          event.type === 'message.appended' &&
+          event.message.role === 'assistant' &&
+          event.message.metadata?.tauInternal?.['kind'] === 'billing-invocation' &&
+          event.message.metadata.tauInternal['attemptId'] === prepared.attemptId
+        );
+      });
+      if (!completed) {
+        const recovered = await options.modelTransport.lookupAttempt?.(prepared.attemptId, signal);
+        if (recovered && !bound) {
+          await record.append({
+            type: 'model.invocation-bound',
+            attemptId: prepared.attemptId,
+            operationId: recovered.operationId,
+            status: recovered.status,
+          });
+        }
+        throw new Error(`Model invocation ${prepared.attemptId} has no durable result; it will not be sent again.`);
+      }
+    }
+    const attemptId = createId();
+    await record.append({ type: 'model.invocation-prepared', attemptId, purpose, modelId });
+    return attemptId;
+  };
   let restoreRecentSkillContent = false;
   const base = createTransportStreamFunction({
     transport: options.modelTransport,
@@ -685,6 +792,7 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
     identities: record.messages,
     toolInputIds,
     createId,
+    ...(options.modelTransport.usesBillingAttempt ? { prepareInvocation, bindInvocation } : {}),
     committedContext: () => committedContext,
     usePostCompactionContext: () => restoreRecentSkillContent,
     systemPromptBlocks: () => options.systemPromptBlocks,
@@ -733,6 +841,7 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
           identities: record.messages,
           toolInputIds,
           createId,
+          ...(options.modelTransport.usesBillingAttempt ? { prepareInvocation, bindInvocation } : {}),
         }),
     onSummary: () => {
       restoreRecentSkillContent = true;

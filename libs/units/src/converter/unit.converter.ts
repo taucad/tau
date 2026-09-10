@@ -1,4 +1,5 @@
 import { standardInternationalBaseUnits } from '#constants/unit.constants.js';
+import { quantityRegistry } from '#constants/quantity.constants.js';
 import type {
   AmountOfSubstanceSymbol,
   ElectricCurrentSymbol,
@@ -8,7 +9,37 @@ import type {
   ThermodynamicTemperatureSymbol,
   TimeSymbol,
   UnitQuantity,
+  QuantityId,
+  UnitId,
 } from '#types/unit.types.js';
+
+/** Convert between admitted units of one semantic quantity. @public */
+export function convertQuantity<Q extends QuantityId>(input: {
+  readonly quantity: Q;
+  readonly value: number;
+  readonly from: UnitId<Q>;
+  readonly to: UnitId<Q>;
+}): number {
+  if (!Number.isFinite(input.value)) {
+    throw new RangeError('Quantity value must be finite');
+  }
+
+  const definition = quantityRegistry[input.quantity];
+  const units: Readonly<Record<string, { readonly factor: number; readonly offset: number }>> = definition.units;
+  const from = units[input.from];
+  const to = units[input.to];
+
+  if (!from || !to) {
+    throw new TypeError(`Invalid unit for quantity "${input.quantity}"`);
+  }
+
+  const result = (input.value * from.factor + from.offset - to.offset) / to.factor;
+  if (!Number.isFinite(result)) {
+    throw new RangeError('Quantity conversion overflowed');
+  }
+
+  return result;
+}
 
 /**
  * Build conversion maps programmatically from standardInternationalBaseUnits

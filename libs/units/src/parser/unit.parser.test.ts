@@ -176,6 +176,12 @@ describe('parseLengthInput', () => {
   });
 });
 
+describe('parseUnitInput', () => {
+  it('should reject unitless input instead of guessing a quantity', () => {
+    expect(parseUnitInput('12.5')).toBeUndefined();
+  });
+});
+
 // =============================================================================
 // MASS PARSER TESTS
 // =============================================================================

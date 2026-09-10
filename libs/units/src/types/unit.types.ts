@@ -1,4 +1,13 @@
+import type { quantityRegistry } from '#constants/quantity.constants.js';
 import type { standardInternationalBaseUnits, standardInternationalDerivedUnits } from '#constants/unit.constants.js';
+
+/** Stable semantic IDs from the canonical quantity registry. @public */
+export type QuantityId = keyof typeof quantityRegistry;
+
+/** Stable unit IDs admitted by a quantity. @public */
+export type UnitId<Q extends QuantityId = QuantityId> = Q extends QuantityId
+  ? keyof (typeof quantityRegistry)[Q]['units'] & string
+  : never;
 
 /** @public */
 export type UnitSystem =

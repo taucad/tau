@@ -449,16 +449,8 @@ export function parseLuminousIntensityInput(input: string): ParsedUnit<'luminous
  */
 /** @public */
 export function parseUnitInput(input: string): ParsedUnit | undefined {
-  // Try length first (most complex with special notation)
-  const lengthResult = parseLengthInput(input);
-
-  if (lengthResult) {
-    // ParseLengthInput already returns the complete ParsedUnit with quantity
-    return lengthResult;
-  }
-
-  // Try other quantities in order
   const parsers: Array<(input: string) => ParsedUnit | undefined> = [
+    parseLengthInput,
     parseMassInput,
     parseTimeInput,
     parseElectricCurrentInput,
@@ -466,14 +458,7 @@ export function parseUnitInput(input: string): ParsedUnit | undefined {
     parseAmountOfSubstanceInput,
     parseLuminousIntensityInput,
   ];
+  const matches = parsers.map((parser) => parser(input)).filter((result) => result?.symbol !== undefined);
 
-  for (const parser of parsers) {
-    const result = parser(input);
-
-    if (result) {
-      return result;
-    }
-  }
-
-  return undefined;
+  return matches.length === 1 ? matches[0] : undefined;
 }

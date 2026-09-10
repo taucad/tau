@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  convertQuantity,
   convertLength,
   convertMass,
   convertTime,
@@ -8,6 +9,124 @@ import {
   convertAmountOfSubstance,
   convertLuminousIntensity,
 } from '#converter/unit.converter.js';
+import { quantityIds, quantityRegistry } from '#constants/quantity.constants.js';
+import type { QuantityId, UnitId } from '#types/unit.types.js';
+
+const expectedDimensions = {
+  length: { length: 1 },
+  mass: { mass: 1 },
+  time: { time: 1 },
+  electricCurrent: { electricCurrent: 1 },
+  thermodynamicTemperature: { thermodynamicTemperature: 1 },
+  temperatureDifference: { thermodynamicTemperature: 1 },
+  amountOfSubstance: { amountOfSubstance: 1 },
+  luminousIntensity: { luminousIntensity: 1 },
+  planeAngle: {},
+  solidAngle: {},
+  ratio: {},
+  frequency: { time: -1 },
+  force: { mass: 1, length: 1, time: -2 },
+  pressure: { mass: 1, length: -1, time: -2 },
+  energy: { mass: 1, length: 2, time: -2 },
+  torque: { mass: 1, length: 2, time: -2 },
+  power: { mass: 1, length: 2, time: -3 },
+  electricCharge: { time: 1, electricCurrent: 1 },
+  electricPotential: { mass: 1, length: 2, time: -3, electricCurrent: -1 },
+  capacitance: { mass: -1, length: -2, time: 4, electricCurrent: 2 },
+  electricalResistance: { mass: 1, length: 2, time: -3, electricCurrent: -2 },
+  electricalConductance: { mass: -1, length: -2, time: 3, electricCurrent: 2 },
+  magneticFlux: { mass: 1, length: 2, time: -2, electricCurrent: -1 },
+  magneticFluxDensity: { mass: 1, time: -2, electricCurrent: -1 },
+  inductance: { mass: 1, length: 2, time: -2, electricCurrent: -2 },
+  luminousFlux: { luminousIntensity: 1 },
+  illuminance: { luminousIntensity: 1, length: -2 },
+  activityRadionuclide: { time: -1 },
+  absorbedDose: { length: 2, time: -2 },
+  doseEquivalent: { length: 2, time: -2 },
+  catalyticActivity: { amountOfSubstance: 1, time: -1 },
+  area: { length: 2 },
+  volume: { length: 3 },
+  speed: { length: 1, time: -1 },
+  acceleration: { length: 1, time: -2 },
+  density: { mass: 1, length: -3 },
+} as const satisfies Record<QuantityId, Readonly<Record<string, number>>>;
+
+describe('convertQuantity', () => {
+  it('should match independent SI conversion oracles', () => {
+    expect(convertQuantity({ quantity: 'length', value: 1, from: 'inch', to: 'meter' })).toBe(0.0254);
+    expect(convertQuantity({ quantity: 'area', value: 1, from: 'squareMillimeter', to: 'squareMeter' })).toBe(1e-6);
+    expect(convertQuantity({ quantity: 'volume', value: 1, from: 'cubicMillimeter', to: 'cubicMeter' })).toBe(1e-9);
+    expect(
+      convertQuantity({ quantity: 'thermodynamicTemperature', value: 32, from: 'fahrenheit', to: 'kelvin' }),
+    ).toBeCloseTo(273.15, 12);
+    expect(convertQuantity({ quantity: 'temperatureDifference', value: 18, from: 'fahrenheit', to: 'kelvin' })).toBe(
+      10,
+    );
+    expect(convertQuantity({ quantity: 'planeAngle', value: 180, from: 'degree', to: 'radian' })).toBeCloseTo(
+      Math.PI,
+      15,
+    );
+    expect(
+      convertQuantity({ quantity: 'speed', value: 36, from: 'kilometerPerHour', to: 'meterPerSecond' }),
+    ).toBeCloseTo(10, 7);
+  });
+
+  it('should reject non-finite values and units outside the selected quantity', () => {
+    expect(() => convertQuantity({ quantity: 'length', value: Number.NaN, from: 'meter', to: 'meter' })).toThrow(
+      RangeError,
+    );
+    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- Runtime boundary test deliberately bypasses the UnitId constraint.
+    expect(() => convertQuantity({ quantity: 'length', value: 1, from: 'second' as 'meter', to: 'meter' })).toThrow(
+      TypeError,
+    );
+  });
+
+  it('should expose canonical IDs, dimensions, and only valid compound units from one registry', () => {
+    expect(quantityIds).toEqual(Object.keys(quantityRegistry));
+    expect(Object.fromEntries(quantityIds.map((quantity) => [quantity, quantityRegistry[quantity].dimension]))).toEqual(
+      expectedDimensions,
+    );
+    expect(quantityRegistry.area.units['squareMillimeter'].factor).toBe(1e-6);
+    expect(quantityRegistry.volume.units['cubicMillimeter'].factor).toBe(1e-9);
+    expect(Object.hasOwn(quantityRegistry.density.units, 'millikilogramPerCubicMeter')).toBe(false);
+    expect(
+      Object.values(quantityRegistry).every(({ canonicalUnit, units }) => Object.hasOwn(units, canonicalUnit)),
+    ).toBe(true);
+    expect(
+      Object.values(quantityRegistry).every(({ units }) =>
+        Object.values(units).every(
+          ({ factor, offset }) => Number.isFinite(factor) && factor > 0 && Number.isFinite(offset),
+        ),
+      ),
+    ).toBe(true);
+  });
+
+  it('should round-trip every admitted unit through its canonical unit', () => {
+    for (const quantity of quantityIds) {
+      const definition = quantityRegistry[quantity];
+      // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- Object.keys returns this registry entry's admitted unit IDs.
+      const units = Object.keys(definition.units) as UnitId[];
+      for (const unit of units) {
+        for (const value of [-100, 0, 1, 123.456]) {
+          const canonical = convertQuantity({ quantity, value, from: unit, to: definition.canonicalUnit });
+          expect(convertQuantity({ quantity, value: canonical, from: definition.canonicalUnit, to: unit })).toBeCloseTo(
+            value,
+            12,
+          );
+        }
+      }
+    }
+  });
+
+  it('should preserve a legacy CAD millimeter value through canonical meters', () => {
+    const meters = convertQuantity({ quantity: 'length', value: 0.2, from: 'millimeter', to: 'meter' });
+    expect(meters).toBe(0.0002);
+    expect(convertQuantity({ quantity: 'length', value: meters, from: 'meter', to: 'millimeter' })).toBeCloseTo(
+      0.2,
+      15,
+    );
+  });
+});
 
 // =============================================================================
 // LENGTH CONVERSION TESTS
@@ -68,8 +187,8 @@ describe('convertMass', () => {
   });
 
   it('should convert between imperial and metric', () => {
-    expect(convertMass(1, 'kg', 'lb')).toBeCloseTo(2.204_62, 3);
-    expect(convertMass(1, 'lb', 'kg')).toBeCloseTo(0.453_592, 5);
+    expect(convertMass(1, 'kg', 'lb')).toBeCloseTo(2.20462, 3);
+    expect(convertMass(1, 'lb', 'kg')).toBeCloseTo(0.453592, 5);
   });
 });
 

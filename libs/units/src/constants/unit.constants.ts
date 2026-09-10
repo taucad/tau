@@ -1,4 +1,5 @@
 import { siMagnitudes } from '#constants/magnitude.constants.js';
+import type { UnitMagnitudeName, UnitMagnitudeSymbol } from '#types/magnitude.types.js';
 
 /**
  * The system that the unit belongs to.
@@ -64,7 +65,12 @@ function generateSiMagnitudeVariants<BaseUnit extends string, BaseSymbol extends
   baseUnit: BaseUnit,
   baseSymbol: BaseSymbol,
   baseConversionFactor = 1,
-) {
+): Array<{
+  readonly unit: `${UnitMagnitudeName}${BaseUnit}`;
+  readonly symbol: `${UnitMagnitudeSymbol}${BaseSymbol}`;
+  readonly factor: number;
+  readonly system: 'si';
+}> {
   return siMagnitudes.map(
     (magnitude) =>
       ({
@@ -74,6 +80,35 @@ function generateSiMagnitudeVariants<BaseUnit extends string, BaseSymbol extends
         system: 'si',
       }) as const,
   );
+}
+
+function generatePoweredMeterVariants<const Power extends 2 | 3>(
+  power: Power,
+): Array<{
+  readonly unit: `${Power extends 2 ? 'square' : 'cubic'}${Capitalize<`${UnitMagnitudeName}meter`>}`;
+  readonly symbol: `${UnitMagnitudeSymbol}m${Power extends 2 ? '²' : '³'}`;
+  readonly factor: number;
+  readonly system: 'si';
+}> {
+  const powerName = power === 2 ? 'square' : 'cubic';
+  const powerSymbol = power === 2 ? '²' : '³';
+
+  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the runtime capitalization below implements the declared template-literal unit names.
+  return siMagnitudes.map((magnitude) => {
+    const meter = magnitude.name ? `${magnitude.name[0]?.toUpperCase()}${magnitude.name.slice(1)}meter` : 'Meter';
+
+    return {
+      unit: `${powerName}${meter}`,
+      symbol: `${magnitude.symbol}m${powerSymbol}`,
+      factor: magnitude.factor ** power,
+      system: 'si',
+    } as const;
+  }) as Array<{
+    readonly unit: `${Power extends 2 ? 'square' : 'cubic'}${Capitalize<`${UnitMagnitudeName}meter`>}`;
+    readonly symbol: `${UnitMagnitudeSymbol}m${Power extends 2 ? '²' : '³'}`;
+    readonly factor: number;
+    readonly system: 'si';
+  }>;
 }
 
 /** @public */
@@ -123,13 +158,13 @@ export const standardInternationalBaseUnits = {
       {
         unit: 'pound',
         symbol: 'lb',
-        factor: 0.453_592_37,
+        factor: 0.45359237,
         system: 'imperial',
       },
       {
         unit: 'ounce',
         symbol: 'oz',
-        factor: 0.028_349_523_125,
+        factor: 0.028349523125,
         system: 'imperial',
       },
     ],
@@ -210,7 +245,7 @@ export const standardInternationalDerivedUnits = {
   planeAngle: {
     unit: 'radian',
     symbol: 'rad',
-    dimension: 'Θ',
+    dimension: '',
     quantity: 'plane angle',
     variants: [
       ...generateSiMagnitudeVariants('radian', 'rad'),
@@ -265,7 +300,7 @@ export const standardInternationalDerivedUnits = {
       {
         unit: 'poundForce',
         symbol: 'lbf',
-        factor: 4.448_221_615_260_5,
+        factor: 4.4482216152605,
         system: 'imperial',
       },
     ],
@@ -286,7 +321,7 @@ export const standardInternationalDerivedUnits = {
       {
         unit: 'psi',
         symbol: 'psi',
-        factor: 6894.757_293_168,
+        factor: 6894.757293168,
         system: 'imperial',
       },
     ],
@@ -430,17 +465,17 @@ export const standardInternationalDerivedUnits = {
     dimension: 'm²',
     quantity: 'area',
     variants: [
-      ...generateSiMagnitudeVariants('squareMeter', 'm²'),
+      ...generatePoweredMeterVariants(2),
       {
         unit: 'squareInch',
         symbol: 'in²',
-        factor: 0.000_645_16,
+        factor: 0.00064516,
         system: 'imperial',
       },
       {
         unit: 'squareFoot',
         symbol: 'ft²',
-        factor: 0.092_903_04,
+        factor: 0.09290304,
         system: 'imperial',
       },
     ],
@@ -451,7 +486,7 @@ export const standardInternationalDerivedUnits = {
     dimension: 'm³',
     quantity: 'volume',
     variants: [
-      ...generateSiMagnitudeVariants('cubicMeter', 'm³'),
+      ...generatePoweredMeterVariants(3),
       {
         unit: 'liter',
         symbol: 'L',
@@ -461,25 +496,25 @@ export const standardInternationalDerivedUnits = {
       {
         unit: 'milliliter',
         symbol: 'mL',
-        factor: 0.000_001,
+        factor: 0.000001,
         system: 'si',
       },
       {
         unit: 'cubicInch',
         symbol: 'in³',
-        factor: 0.000_016_387_064,
+        factor: 0.000016387064,
         system: 'imperial',
       },
       {
         unit: 'cubicFoot',
         symbol: 'ft³',
-        factor: 0.028_316_846_592,
+        factor: 0.028316846592,
         system: 'imperial',
       },
       {
         unit: 'gallon',
         symbol: 'gal',
-        factor: 0.003_785_411_784,
+        factor: 0.003785411784,
         system: 'imperial',
       },
     ],
@@ -494,13 +529,13 @@ export const standardInternationalDerivedUnits = {
       {
         unit: 'kilometerPerHour',
         symbol: 'km/h',
-        factor: 0.277_777_778,
+        factor: 1000 / 3600,
         system: 'si',
       },
       {
         unit: 'milePerHour',
         symbol: 'mph',
-        factor: 0.447_04,
+        factor: 0.44704,
         system: 'imperial',
       },
       {
@@ -521,7 +556,7 @@ export const standardInternationalDerivedUnits = {
       {
         unit: 'gravity',
         symbol: 'g',
-        factor: 9.806_65,
+        factor: 9.80665,
         system: 'si',
       },
     ],
@@ -536,13 +571,13 @@ export const standardInternationalDerivedUnits = {
       {
         unit: 'poundFoot',
         symbol: 'lb⋅ft',
-        factor: 1.355_817_948_331_4,
+        factor: 1.3558179483314,
         system: 'imperial',
       },
       {
         unit: 'poundInch',
         symbol: 'lb⋅in',
-        factor: 0.112_984_829_027_616_7,
+        factor: 0.1129848290276167,
         system: 'imperial',
       },
     ],
@@ -553,7 +588,6 @@ export const standardInternationalDerivedUnits = {
     dimension: 'kg⋅m⁻³',
     quantity: 'density',
     variants: [
-      ...generateSiMagnitudeVariants('kilogramPerCubicMeter', 'kg/m³'),
       {
         unit: 'gramPerCubicCentimeter',
         symbol: 'g/cm³',
@@ -563,7 +597,7 @@ export const standardInternationalDerivedUnits = {
       {
         unit: 'poundPerCubicFoot',
         symbol: 'lb/ft³',
-        factor: 16.018_463_373_960_142,
+        factor: 16.018463373960142,
         system: 'imperial',
       },
     ],

@@ -1,29 +1,56 @@
+import { BillingAccountClosureService } from '#api/billing/billing-account-closure.service.js';
+import { recoverAndCancelStripeClosure } from '#api/billing/billing-account-closure-stripe.js';
 import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import Stripe from 'stripe';
+import type { Stripe } from 'stripe';
+import { financialEnvironmentSchema } from '@taucad/billing';
+import { DatabaseService } from '#database/database.service.js';
+import { BillingCashService } from '#api/billing/billing-cash.service.js';
+import { BillingPaymentsService } from '#api/billing/billing-payments.service.js';
+import { createBillingStripeClient } from '#api/billing/billing-stripe.js';
 import { DatabaseModule } from '#database/database.module.js';
 import { EmailModule } from '#email/email.module.js';
 import { ModelModule } from '#api/models/model.module.js';
 import { BillingController } from '#api/billing/billing.controller.js';
 import { BillingService } from '#api/billing/billing.service.js';
-import { ChatPreflightService } from '#api/billing/chat-preflight.service.js';
-import { CreditLedgerOutbox } from '#api/billing/credit-ledger-outbox.service.js';
+import { BillingPolicyService } from '#api/billing/billing-policy.service.js';
 import { CreditLedgerService } from '#api/billing/credit-ledger.service.js';
-import { CreditMaintenanceService } from '#api/billing/credit-maintenance.service.js';
-import { StripeEventRouter } from '#api/billing/stripe-event-router.service.js';
-import { stripeClientKey } from '#api/billing/billing.constants.js';
+import { BillingUsageService } from '#api/billing/billing-usage.service.js';
+import { BillableModelInvocationService } from '#api/billing/billable-model-invocation.service.js';
+import { billableModelQualificationResolverKey } from '#api/billing/billable-model-invocation.types.js';
+import {
+  CodeOwnedBillableModelQualificationResolver,
+  registerBillableModelMeterContracts,
+} from '#api/billing/billable-model-qualification.js';
+import { createBillableModelProviderAdapters } from '#api/billing/billable-model-provider.js';
+import { stripeClientKey, stripeReadClientKey } from '#api/billing/billing.constants.js';
 import type { Environment } from '#config/environment.config.js';
 
 /**
- * Billing capability: the shared Stripe client (BA6), the entitlements
- * projection, the durable credit-ledger paths, and the webhook fan-out. The
- * Better Auth stripe plugin (AuthModule) consumes the exported services for its
- * lifecycle hooks; Chat/Kernels import this module for enforcement in B2/B4.
+ * Send every funded provider call to a local upstream instead, path preserved.
  *
- * Every `@Injectable` under `app/api/billing/` is registered here — including
- * ChatPreflightService, which ChatController injects. Consumers get it by
- * importing this module; ModelModule is imported for its ModelService dep.
+ * The development-only seam behind `TAU_LLM_PROVIDER_UPSTREAM_URL` (refused by
+ * `environmentSchema` outside `BILLING_ENVIRONMENT=development`): the desktop e2e
+ * suite drives the *real* gateway — admission, qualification, normalization,
+ * metering — and only the last hop lands on its own stub, which is what makes
+ * D16 assertable end to end without a provider key.
+ *
+ * ponytail: only the Anthropic host is rewritten, because that is the wire the
+ * desktop turn drives; the API's own OpenAI-wire callers (chat naming) keep
+ * their real upstream, or no adapter at all without a key. Widen the host set
+ * if another development stub is ever needed.
  */
+const providerUpstreamFetch =
+  (upstream: string): typeof fetch =>
+  async (input, init) => {
+    const target = input instanceof Request ? new URL(input.url) : new URL(input);
+    if (target.host !== 'api.anthropic.com') {
+      return fetch(input, init);
+    }
+    return fetch(new URL(`${target.pathname}${target.search}`, upstream), init);
+  };
+
+/** PostgreSQL financial authority; unqualified legacy collection and hosted callers remain closed. */
 @Module({
   imports: [DatabaseModule, EmailModule, ModelModule],
   controllers: [BillingController],
@@ -32,21 +59,146 @@ import type { Environment } from '#config/environment.config.js';
       provide: stripeClientKey,
       useFactory(configService: ConfigService<Environment, true>): Stripe {
         const secretKey = configService.get('STRIPE_SECRET_KEY', { infer: true });
-        // Local dev runs without keys ('' per the env schema): the dummy secret
-        // keeps DI construction green while every real Stripe call fails closed.
-        // apiVersion is deliberately omitted — the SDK pins its bundled default
-        // (blueprint Q24: pin at SDK major, bump deliberately).
-        return new Stripe(secretKey === '' ? 'sk_test_dummy_dev_only' : secretKey);
+        return createBillingStripeClient({ secretKey: secretKey || 'sk_test_dummy_dev_only' });
       },
       inject: [ConfigService],
     },
+    {
+      provide: stripeReadClientKey,
+      inject: [ConfigService],
+      useFactory(config: ConfigService<Environment, true>): Stripe {
+        return createBillingStripeClient({
+          secretKey: config.get('STRIPE_READ_SECRET_KEY', { infer: true }) || 'rk_test_unconfigured',
+        });
+      },
+    },
+    {
+      provide: BillingAccountClosureService,
+      inject: [DatabaseService, stripeReadClientKey, ConfigService],
+      useFactory(
+        database: DatabaseService,
+        sourceStripe: Stripe,
+        config: ConfigService<Environment, true>,
+      ): BillingAccountClosureService {
+        const parsed = financialEnvironmentSchema.safeParse(config.get('BILLING_ENVIRONMENT', { infer: true }));
+        const environment = parsed.success ? parsed.data : 'development';
+        return new BillingAccountClosureService(
+          database,
+          {
+            recoverAndCancel: async (input) =>
+              recoverAndCancelStripeClosure(
+                {
+                  database: database.database,
+                  sourceStripe,
+                  environment,
+                  stripeAccountId: config.get('STRIPE_ACCOUNT_ID', { infer: true }),
+                  livemode: config.get('STRIPE_LIVEMODE', { infer: true }),
+                },
+                input,
+              ),
+          },
+          environment,
+        );
+      },
+    },
+    {
+      provide: BillingCashService,
+      inject: [DatabaseService, stripeReadClientKey, CreditLedgerService, ConfigService],
+      // eslint-disable-next-line max-params-no-constructor/max-params-no-constructor -- Nest resolves four distinct provider tokens.
+      useFactory(
+        database: DatabaseService,
+        sourceStripe: Stripe,
+        ledger: CreditLedgerService,
+        config: ConfigService<Environment, true>,
+      ): BillingCashService {
+        const environment = financialEnvironmentSchema.safeParse(config.get('BILLING_ENVIRONMENT', { infer: true }));
+        // Ordinary app composition has no protected refund credential.
+        return new BillingCashService(database, sourceStripe, sourceStripe, ledger, {
+          environment: environment.success ? environment.data : 'development',
+          stripeAccountId: config.get('STRIPE_ACCOUNT_ID', { infer: true }),
+          livemode: config.get('STRIPE_LIVEMODE', { infer: true }),
+        });
+      },
+    },
+    {
+      provide: BillingPaymentsService,
+      inject: [
+        DatabaseService,
+        stripeClientKey,
+        stripeReadClientKey,
+        ConfigService,
+        BillingPolicyService,
+        CreditLedgerService,
+        BillingCashService,
+      ],
+      // eslint-disable-next-line max-params-no-constructor/max-params-no-constructor -- Nest resolves the seven explicitly declared provider tokens.
+      useFactory(
+        database: DatabaseService,
+        stripe: Stripe,
+        sourceStripe: Stripe,
+        config: ConfigService<Environment, true>,
+        policy: BillingPolicyService,
+        ledger: CreditLedgerService,
+        cash: BillingCashService,
+      ): BillingPaymentsService {
+        const environment = financialEnvironmentSchema.safeParse(config.get('BILLING_ENVIRONMENT', { infer: true }));
+        const accountId = config.get('STRIPE_ACCOUNT_ID', { infer: true });
+        const livemode = config.get('STRIPE_LIVEMODE', { infer: true });
+        return new BillingPaymentsService(
+          database,
+          stripe,
+          sourceStripe,
+          {
+            environment: environment.success ? environment.data : 'development',
+            stripeAccountId: accountId,
+            livemode: livemode ?? false,
+            uiOrigin: config.get('TAU_FRONTEND_URL', { infer: true }),
+            webhookSecret:
+              environment.success && accountId && livemode !== undefined
+                ? config.get('STRIPE_WEBHOOK_SECRET', { infer: true })
+                : '',
+            // Complete lifecycle and operational qualification must precede a separate enablement change.
+            collection: null,
+          },
+          policy,
+          ledger,
+          cash,
+        );
+      },
+    },
     BillingService,
-    ChatPreflightService,
-    CreditLedgerOutbox,
     CreditLedgerService,
-    CreditMaintenanceService,
-    StripeEventRouter,
+    BillingPolicyService,
+    BillingUsageService,
+    BillableModelInvocationService,
+    {
+      provide: billableModelQualificationResolverKey,
+      inject: [ConfigService],
+      useFactory(config: ConfigService<Environment, true>): CodeOwnedBillableModelQualificationResolver {
+        registerBillableModelMeterContracts();
+        const accounts = config.get('BILLING_PROVIDER_ACCOUNTS', { infer: true });
+        const credentialAccounts = new Map(Object.entries(accounts));
+        const upstream = config.get('TAU_LLM_PROVIDER_UPSTREAM_URL', { infer: true });
+        return new CodeOwnedBillableModelQualificationResolver({
+          adapters: createBillableModelProviderAdapters(
+            config,
+            upstream === undefined ? undefined : providerUpstreamFetch(upstream),
+          ),
+          credentialAccounts,
+          executionTimeout: config.get('BILLING_INVOCATION_DEADLINE', { infer: true }),
+        });
+      },
+    },
   ],
-  exports: [stripeClientKey, BillingService, ChatPreflightService, CreditLedgerService, StripeEventRouter],
+  exports: [
+    BillingAccountClosureService,
+    stripeClientKey,
+    stripeReadClientKey,
+    BillingPaymentsService,
+    BillingService,
+    CreditLedgerService,
+    BillingPolicyService,
+    BillableModelInvocationService,
+  ],
 })
 export class BillingModule {}

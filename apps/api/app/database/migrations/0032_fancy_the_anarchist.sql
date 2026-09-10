@@ -1,0 +1,1 @@
+CREATE INDEX "credit_operation_pending_llm_account_activity_due" ON "billing"."credit_operation" USING btree ("account_id","activity","due_at","id") WHERE "billing"."credit_operation"."customer_state" = 'pending' AND "billing"."credit_operation"."category" = 'llm';

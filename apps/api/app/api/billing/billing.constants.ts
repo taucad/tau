@@ -1,13 +1,7 @@
-/**
- * NestJS DI token for the shared Stripe SDK client (BA6): the Better Auth
- * plugin, BillingService, and the top-up controller all use one instance.
- */
+/** NestJS token for the first-party billing Stripe client. */
 export const stripeClientKey = 'stripeClientKey';
-
-/**
- * Redis cache key for a user's entitlements projection (wire form).
- */
-export const entitlementsRedisKey = (userId: string): string => `tau:billing:entitlements:${userId}`;
+/** Read-only Stripe source client for reconciliation and card display. */
+export const stripeReadClientKey = 'stripeReadClientKey';
 
 /**
  * Redis hash key for a user's hot-path credit balances (owned by the B2 Lua
@@ -37,12 +31,6 @@ export const reservationTtl = 5 * 60_000;
  * Free-tier daily turn soft cap (Q1).
  */
 export const freeTierDailyTurnCap = 10;
-
-/**
- * Entitlements cache TTL. Webhook fan-out invalidates eagerly; the TTL only
- * bounds staleness when an invalidation is missed.
- */
-export const entitlementsCacheTtlSeconds = 300;
 
 /**
  * Monthly credit grants per tier in microdollars (AD16), with AD10 rollover

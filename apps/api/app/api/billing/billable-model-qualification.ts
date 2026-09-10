@@ -1,0 +1,498 @@
+import type { InputCountCapability } from '#api/billing/billable-model-input-count.js';
+import { BadRequestException } from '@nestjs/common';
+import { validateAnthropicHeaders } from '#api/llm/llm-gateway.headers.js';
+import { qualifiedMeterContracts } from '#api/billing/billing-policy.js';
+import { maximumMeterCharge } from '#api/billing/billable-model-bound.js';
+import { createBillableModelEvidenceCollector } from '#api/billing/billable-model-evidence.js';
+import {
+  billableModelOutputMaximum,
+  billableModelRequestContainsImage,
+  safeParseBillableModelRequest,
+} from '#api/billing/billable-model-request.js';
+import type {
+  BillableInvocationIntent,
+  BillableModelProviderAdapter,
+  BillableModelQualificationResolver,
+  BillableProviderWire,
+  QualifiedBillableInvocation,
+} from '#api/billing/billable-model-invocation.types.js';
+import type { JointInputMaximum, MeterQuantity, SupplierValuation } from '#api/billing/credit-ledger.types.js';
+
+type Rate = { dimension: MeterQuantity['dimension']; tier: MeterQuantity['tier']; numeratorPicoUsd: bigint };
+type Route = {
+  routeId: string;
+  providerId: string;
+  modelId: string;
+  modelDisplayName: string;
+  wire: BillableProviderWire;
+  contextMaximum: bigint;
+  outputMaximum: bigint;
+  combinedMaximum?: bigint;
+  allowsImage?: boolean;
+  outputParameter: 'max_output_tokens' | 'max_completion_tokens' | 'max_tokens';
+  validThrough?: string;
+  rates?: readonly Rate[];
+  temporaryUnavailableReason?: string;
+};
+
+const million = 1_000_000n;
+const picoUsd = (usd: string): bigint => {
+  const [whole = '0', fraction = ''] = usd.split('.');
+  return BigInt(whole) * 1_000_000_000_000n + BigInt(`${fraction.padEnd(12, '0') || '0'}`);
+};
+// oxlint-disable-next-line max-params -- mirrors the supplier tariff dimensions in the static table.
+const rates = (
+  input: string,
+  read: string,
+  write: string | undefined,
+  output: string,
+  writeTier = 'default',
+): readonly Rate[] => [
+  { dimension: 'uncached_input', tier: null, numeratorPicoUsd: picoUsd(input) },
+  { dimension: 'cache_read', tier: null, numeratorPicoUsd: picoUsd(read) },
+  ...(write === undefined
+    ? []
+    : [{ dimension: 'cache_write', tier: writeTier, numeratorPicoUsd: picoUsd(write) } as const]),
+  { dimension: 'output', tier: null, numeratorPicoUsd: picoUsd(output) },
+];
+const inputOutputRates = (input: string, output: string): readonly Rate[] => [
+  { dimension: 'uncached_input', tier: null, numeratorPicoUsd: picoUsd(input) },
+  { dimension: 'output', tier: null, numeratorPicoUsd: picoUsd(output) },
+];
+const catalogRouteIds: Readonly<Record<string, string>> = {
+  'claude-fable-5-1': 'anthropic-claude-fable-5.1',
+  'claude-fable-5': 'anthropic-claude-fable-5',
+  'claude-opus-5': 'anthropic-claude-opus-5',
+  'claude-opus-4-8': 'anthropic-claude-opus-4.8',
+  'claude-sonnet-5': 'anthropic-claude-sonnet-5',
+  'claude-sonnet-4-6': 'anthropic-claude-sonnet-4.6',
+  'claude-haiku-4-5-20251001': 'anthropic-claude-haiku-4.5',
+  'gpt-6-astra': 'openai-gpt-6-astra',
+  'gpt-5.6-sol': 'openai-gpt-5.6-sol',
+  'gpt-5.6-terra': 'openai-gpt-5.6-terra',
+  'gpt-5.6-luna': 'openai-gpt-5.6-luna',
+  'gpt-5.5': 'openai-gpt-5.5',
+  'gemini-3.1-pro-preview': 'google-gemini-3.1-pro',
+  'gemini-3.7-flash': 'google-gemini-3.7-flash',
+  'gemini-3.5-flash-lite': 'google-gemini-3.5-flash-lite',
+  'gemini-3.5-flash': 'google-gemini-3.5-flash',
+  'moonshotai/Kimi-K3': 'together-kimi-k3',
+  'zai-org/GLM-5.2': 'together-glm-5.2',
+  'morph-minimax27-230b': 'morph-minimax-m2.7',
+  'grok-4.6': 'xai-grok-4.6',
+};
+
+// oxlint-disable-next-line max-params -- keeps the audited static route table compact.
+const route = (
+  providerId: string,
+  modelId: string,
+  modelDisplayName: string,
+  wire: BillableProviderWire,
+  contextMaximum: number,
+  outputMaximum: number,
+  supplierRates?: readonly Rate[],
+  extra?: Partial<
+    Pick<Route, 'allowsImage' | 'combinedMaximum' | 'outputParameter' | 'temporaryUnavailableReason' | 'validThrough'>
+  >,
+): Route => ({
+  routeId: catalogRouteIds[modelId] ?? `${providerId}-${modelId.replaceAll('.', '-').toLowerCase()}`,
+  providerId,
+  modelId,
+  modelDisplayName,
+  wire,
+  contextMaximum: BigInt(contextMaximum),
+  outputMaximum: BigInt(outputMaximum),
+  outputParameter:
+    extra?.outputParameter ??
+    (wire === 'anthropic' ? 'max_tokens' : wire === 'openai-responses' ? 'max_output_tokens' : 'max_completion_tokens'),
+  ...(supplierRates === undefined ? {} : { rates: supplierRates }),
+  ...extra,
+});
+
+const routes = [
+  route(
+    'anthropic',
+    'claude-fable-5-1',
+    'Fable 5.1',
+    'anthropic',
+    1_000_000,
+    128_000,
+    rates('10', '.25', '12.5', '50', '5m'),
+  ),
+  route(
+    'anthropic',
+    'claude-fable-5',
+    'Fable 5',
+    'anthropic',
+    1_000_000,
+    128_000,
+    rates('10', '1', '12.5', '50', '5m'),
+  ),
+  route('anthropic', 'claude-opus-5', 'Opus 5', 'anthropic', 1_000_000, 128_000, rates('5', '.5', '6.25', '25', '5m')),
+  route(
+    'anthropic',
+    'claude-opus-4-8',
+    'Opus 4.8',
+    'anthropic',
+    1_000_000,
+    128_000,
+    rates('5', '.5', '6.25', '25', '5m'),
+  ),
+  route(
+    'anthropic',
+    'claude-sonnet-5',
+    'Sonnet 5',
+    'anthropic',
+    1_000_000,
+    128_000,
+    rates('2', '.2', '2.5', '10', '5m'),
+  ),
+  route(
+    'anthropic',
+    'claude-sonnet-4-6',
+    'Sonnet 4.6',
+    'anthropic',
+    1_000_000,
+    64_000,
+    rates('3', '.3', '3.75', '15', '5m'),
+  ),
+  route(
+    'anthropic',
+    'claude-haiku-4-5-20251001',
+    'Haiku 4.5',
+    'anthropic',
+    200_000,
+    64_000,
+    rates('1', '.1', '1.25', '5', '5m'),
+  ),
+  route(
+    'openai',
+    'gpt-6-astra',
+    'GPT-6 Astra',
+    'openai-responses',
+    1_050_000,
+    128_000,
+    rates('20', '2', '25', '75', '30m'),
+  ),
+  route(
+    'openai',
+    'gpt-5.6-sol',
+    'GPT-5.6 Sol',
+    'openai-responses',
+    1_050_000,
+    128_000,
+    rates('8', '.8', '10', '30', '30m'),
+    { validThrough: '2026-11-21T23:59:59.999Z' },
+  ),
+  route(
+    'openai',
+    'gpt-5.6-terra',
+    'GPT-5.6 Terra',
+    'openai-responses',
+    1_050_000,
+    128_000,
+    rates('4', '.4', '5', '18', '30m'),
+  ),
+  route(
+    'openai',
+    'gpt-5.6-luna',
+    'GPT-5.6 Luna',
+    'openai-responses',
+    1_050_000,
+    128_000,
+    rates('.4', '.04', '.5', '1.8', '30m'),
+  ),
+  route('openai', 'gpt-5.5', 'GPT-5.5', 'openai-responses', 1_050_000, 128_000, rates('10', '1', undefined, '45')),
+  route(
+    'vertexai',
+    'gemini-3.1-pro-preview',
+    'Gemini 3.1 Pro',
+    'openai-completions',
+    1_000_000,
+    65_536,
+    rates('4', '.4', undefined, '18'),
+  ),
+  route(
+    'vertexai',
+    'gemini-3.7-flash',
+    'Gemini 3.7 Flash',
+    'openai-completions',
+    1_000_000,
+    65_536,
+    rates('.75', '.075', undefined, '3.75'),
+    { validThrough: '2026-12-31T23:59:59.999Z' },
+  ),
+  route(
+    'vertexai',
+    'gemini-3.5-flash-lite',
+    'Gemini 3.5 Flash Lite',
+    'openai-completions',
+    1_048_576,
+    65_536,
+    rates('.3', '.03', undefined, '2.5'),
+  ),
+  route(
+    'vertexai',
+    'gemini-3.5-flash',
+    'Gemini 3.5 Flash',
+    'openai-completions',
+    1_048_576,
+    65_536,
+    rates('1.5', '.15', undefined, '9'),
+  ),
+  route(
+    'together',
+    'moonshotai/Kimi-K3',
+    'Kimi K3',
+    'openai-completions',
+    1_000_000,
+    200_000,
+    rates('3', '.3', undefined, '15'),
+  ),
+  route(
+    'together',
+    'zai-org/GLM-5.2',
+    'GLM 5.2',
+    'openai-completions',
+    1_000_000,
+    131_072,
+    rates('1.4', '.26', undefined, '4.4'),
+    { allowsImage: false },
+  ),
+  route(
+    'morph',
+    'morph-minimax27-230b',
+    'MiniMax M2.7',
+    'openai-completions',
+    196_608,
+    196_608,
+    inputOutputRates('.279', '1.2'),
+    { allowsImage: false, combinedMaximum: 196_608n, outputParameter: 'max_tokens' },
+  ),
+  route('xai', 'grok-4.6', 'Grok 4.6', 'openai-completions', 500_000, 64_000, rates('4', '1', undefined, '12')),
+] as const;
+
+const tieredValuations = new Map<string, { minimum: bigint; baseRates: readonly Rate[] }>([
+  ['gpt-6-astra', { minimum: 272_001n, baseRates: rates('10', '1', '12.5', '50', '30m') }],
+  ['gpt-5.6-sol', { minimum: 272_001n, baseRates: rates('4', '.4', '5', '20', '30m') }],
+  ['gpt-5.6-terra', { minimum: 272_001n, baseRates: rates('2', '.2', '2.5', '12', '30m') }],
+  ['gpt-5.6-luna', { minimum: 272_001n, baseRates: rates('.2', '.02', '.25', '1.2', '30m') }],
+  ['gpt-5.5', { minimum: 272_001n, baseRates: rates('5', '.5', undefined, '30') }],
+  ['gemini-3.1-pro-preview', { minimum: 200_001n, baseRates: rates('2', '.2', undefined, '12') }],
+  ['grok-4.6', { minimum: 200_000n, baseRates: rates('2', '.5', undefined, '6') }],
+]);
+const jointInputProviders = new Set(['anthropic', 'openai', 'morph', 'xai']);
+const observedValuationProviders = new Set(['anthropic', 'openai', 'morph', 'xai']);
+
+const sourceRevision = (routeId: string): string => `official-pricing:2026-09-06:${routeId}`;
+const valuationRates = (entries: readonly Rate[]) =>
+  entries.map((entry) => ({
+    dimension: entry.dimension,
+    tier: entry.tier,
+    numeratorPicoUsd: entry.numeratorPicoUsd.toString(),
+    denominatorUnits: million.toString(),
+  }));
+
+/** Every static cloud catalog route retained by the funded qualification boundary. */
+export const billableModelRouteIds = routes.map((entry) => entry.routeId);
+
+/* Clients speak the catalog `/v1/models` row id; provider model ids are never
+ * accepted on the wire, so this table is keyed by route id alone. */
+const routeById = new Map(routes.map((entry) => [entry.routeId, entry]));
+
+export type BillableModelQualificationDependencies = {
+  adapters: ReadonlyMap<string, BillableModelProviderAdapter>;
+  credentialAccounts: ReadonlyMap<string, string>;
+  /** Explicit route selection; production supplies none until count liability is qualified. */
+  inputCounters?: ReadonlyMap<string, InputCountCapability | undefined>;
+  /** Milliseconds. */
+  executionTimeout: number;
+};
+
+/**
+ * Read-only projection of every funded route's meter contract and supplier tariff.
+ * The development policy generator reads it; it owns no behaviour of its own.
+ */
+export const billableModelRouteMeters = routes.flatMap((entry) =>
+  entry.rates === undefined
+    ? []
+    : [{ routeId: entry.routeId, meterContractId: `model-meter-v1:${entry.routeId}`, rates: entry.rates }],
+);
+
+/* The replica declares this process's whole fleet, matching the publisher and payment
+ * paths. Declaring only the requested route rejects any policy that enables another. */
+
+/** Registers the closed meter contracts exported by the qualification resolver. */
+export const registerBillableModelMeterContracts = (): void => {
+  for (const entry of billableModelRouteMeters) {
+    qualifiedMeterContracts.set(
+      entry.meterContractId,
+      new Set(entry.rates.map((rateEntry) => `${rateEntry.dimension}:${rateEntry.tier ?? ''}`)),
+    );
+  }
+};
+
+const admittedAnthropicBeta = (value: string): string | undefined => {
+  try {
+    return validateAnthropicHeaders({ beta: value }).beta;
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * Admit the provider headers the funded contract forwards.
+ *
+ * Exactly the Anthropic headers the gateway's own allowlist admits: one
+ * version, and the beta features `validateAnthropicHeaders` normalizes; every
+ * other header, on every wire, is refused.
+ *
+ * @param intent - The invocation whose price headers are being admitted.
+ * @returns The lower-cased, normalized transport headers.
+ */
+const admitPriceHeaders = (
+  intent: Pick<BillableInvocationIntent, 'priceHeaders' | 'providerWire'>,
+): Record<string, string> => {
+  const transportHeaders: Record<string, string> = {};
+  for (const [name, value] of Object.entries(intent.priceHeaders)) {
+    const normalizedName = name.toLowerCase();
+    let admitted: string | undefined;
+    if (intent.providerWire === 'anthropic' && normalizedName === 'anthropic-version' && value === '2023-06-01') {
+      admitted = value;
+    } else if (intent.providerWire === 'anthropic' && normalizedName === 'anthropic-beta') {
+      admitted = admittedAnthropicBeta(value);
+    }
+    if (admitted === undefined) {
+      throw new BadRequestException('Provider header is outside the funded request contract');
+    }
+    transportHeaders[normalizedName] = admitted;
+  }
+  return transportHeaders;
+};
+
+/** Resolves a provider request into code-owned financial maxima and supplier economics. */
+export class CodeOwnedBillableModelQualificationResolver implements BillableModelQualificationResolver {
+  public constructor(private readonly dependencies: BillableModelQualificationDependencies) {}
+
+  public resolve(intent: Omit<BillableInvocationIntent, 'authUserId' | 'signal'>): QualifiedBillableInvocation {
+    const transportHeaders = admitPriceHeaders(intent);
+    const parsed = safeParseBillableModelRequest(intent.body, intent.providerWire);
+    if (!parsed.success) {
+      throw new BadRequestException('Model request is outside the funded request contract');
+    }
+    const selected = routeById.get(parsed.data.model);
+    if (!selected || selected.wire !== intent.providerWire) {
+      throw new BadRequestException('Model route is not qualified');
+    }
+    if (!selected.rates) {
+      throw new BadRequestException(`Model route is temporarily unavailable: ${selected.temporaryUnavailableReason}`);
+    }
+    if (selected.allowsImage === false && billableModelRequestContainsImage(parsed.data)) {
+      throw new BadRequestException('Images are not qualified for this model route');
+    }
+    const maximumOutput = billableModelOutputMaximum(parsed.data);
+    if (
+      maximumOutput === undefined ||
+      parsed.data[selected.outputParameter] === undefined ||
+      maximumOutput > selected.outputMaximum
+    ) {
+      throw new BadRequestException('Exactly one bounded output-token maximum is required');
+    }
+    const maximumInput = (selected.combinedMaximum ?? selected.contextMaximum) - maximumOutput;
+    if (maximumInput < 0n) {
+      throw new BadRequestException('Output maximum exceeds the provider context');
+    }
+    const quantities = selected.rates.map(
+      (rateEntry): MeterQuantity => ({
+        dimension: rateEntry.dimension,
+        tier: rateEntry.tier,
+        quantity: rateEntry.dimension === 'output' ? maximumOutput : maximumInput,
+      }),
+    );
+    const jointInputMaximum: JointInputMaximum | undefined = jointInputProviders.has(selected.providerId)
+      ? { version: 'joint-input-v1', quantity: maximumInput.toString() }
+      : undefined;
+    const supplierMaximumPicoUsd = maximumMeterCharge(
+      selected.rates.map((rateEntry) => ({
+        dimension: rateEntry.dimension,
+        quantity: rateEntry.dimension === 'output' ? maximumOutput : maximumInput,
+        numerator: rateEntry.numeratorPicoUsd,
+        denominator: million,
+      })),
+      jointInputMaximum,
+    );
+    const adapter = this.dependencies.adapters.get(selected.routeId);
+    const credentialAccount = this.dependencies.credentialAccounts.get(selected.providerId);
+    if (!adapter || !credentialAccount) {
+      throw new BadRequestException('Model route runtime is unavailable');
+    }
+    const selectedCount = this.dependencies.inputCounters?.has(selected.routeId) ?? false;
+    if (selectedCount && selected.providerId !== 'openai') {
+      throw new BadRequestException('Exact input counting is not qualified for this route');
+    }
+    const meterContractId = `model-meter-v1:${selected.routeId}`;
+    const tieredValuation = tieredValuations.get(selected.modelId);
+    const baseRates = tieredValuation?.baseRates ?? selected.rates;
+    const supplierValuation: SupplierValuation | undefined = observedValuationProviders.has(selected.providerId)
+      ? {
+          version: 'supplier-valuation-v1',
+          sourceRevision: sourceRevision(selected.routeId),
+          longContextMinimumInputTokens: tieredValuation?.minimum.toString() ?? null,
+          baseRates: valuationRates(baseRates),
+          longContextRates: tieredValuation === undefined ? null : valuationRates(selected.rates),
+        }
+      : undefined;
+    return {
+      ...(selectedCount ? { inputCount: { capability: this.dependencies.inputCounters?.get(selected.routeId) } } : {}),
+      routeId: selected.routeId,
+      surface: intent.surface,
+      providerWire: selected.wire,
+      modelId: selected.modelId,
+      modelDisplayName: selected.modelDisplayName,
+      providerId: selected.providerId,
+      sku: `model:${selected.routeId}`,
+      meterContractId,
+      maximumQuantities: quantities,
+      supplierMaximumPicoUsd,
+      maximumResponseBytes: Number(maximumOutput) * 64 + 1_048_576,
+      replica: { schemaVersion: 1, meterContractIds: [...qualifiedMeterContracts.keys()] },
+      invocation: {
+        contractVersion:
+          selected.validThrough === undefined ? 'model-route-v1' : `model-route-v1:through:${selected.validThrough}`,
+        supplierRatesValidUntil: selected.validThrough ?? null,
+        credentialAccount,
+        supplierRates: selected.rates.map((rateEntry) => ({
+          dimension: rateEntry.dimension,
+          tier: rateEntry.tier,
+          numeratorPicoUsd: rateEntry.numeratorPicoUsd.toString(),
+          denominatorUnits: million.toString(),
+        })),
+        ...(supplierValuation === undefined ? {} : { supplierValuation }),
+        ...(jointInputMaximum === undefined ? {} : { jointInputMaximum }),
+        executionTimeout: this.dependencies.executionTimeout,
+      },
+      normalizedRequest: {
+        // The catalog route id is translated back to the supplier's own model id here; nothing downstream re-translates.
+        body: {
+          ...parsed.data,
+          model: selected.providerId === 'vertexai' ? `google/${selected.modelId}` : selected.modelId,
+        },
+        headers: transportHeaders,
+      },
+      adapter,
+    };
+  }
+}
+
+/** Adapter helper for transports that already own byte-exact execution. */
+export const withBillableEvidenceCollector = (
+  wire: BillableProviderWire,
+  adapter: Omit<BillableModelProviderAdapter, 'createEvidenceCollector'>,
+): BillableModelProviderAdapter => ({
+  ...adapter,
+  createEvidenceCollector: (qualification) =>
+    createBillableModelEvidenceCollector(
+      wire,
+      new Set(qualification.invocation.supplierRates.map((rateEntry) => rateEntry.dimension)),
+    ),
+});

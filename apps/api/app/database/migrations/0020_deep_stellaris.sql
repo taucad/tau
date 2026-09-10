@@ -1,0 +1,2 @@
+ALTER TABLE "billing"."billing_policy_head" ADD COLUMN "observed_activation_id" text;--> statement-breakpoint
+ALTER TABLE "billing"."billing_policy_head" ADD CONSTRAINT "billing_policy_head_environment_observed_activation_id_billing_policy_activation_environment_id_fk" FOREIGN KEY ("environment","observed_activation_id") REFERENCES "billing"."billing_policy_activation"("environment","id") ON DELETE restrict ON UPDATE no action;

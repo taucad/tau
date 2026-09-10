@@ -127,6 +127,104 @@
       "when": 1788377465879,
       "tag": "0018_agent_run",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1788584223651,
+      "tag": "0019_giant_quentin_quire",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1788590762816,
+      "tag": "0020_deep_stellaris",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1788593225445,
+      "tag": "0021_married_supreme_intelligence",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1788601395066,
+      "tag": "0022_easy_captain_britain",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1788602649557,
+      "tag": "0023_loud_bloodstorm",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1788644349155,
+      "tag": "0024_eager_madame_masque",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1788654993616,
+      "tag": "0025_solid_the_liberteens",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1788655011228,
+      "tag": "0026_glorious_ink",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1788658336203,
+      "tag": "0027_neat_micromax",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1788665324173,
+      "tag": "0028_lethal_bloodstrike",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1788665513495,
+      "tag": "0029_sleepy_starjammers",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1788667197622,
+      "tag": "0030_high_sabretooth",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1788775944048,
+      "tag": "0031_concerned_plazm",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1788998320002,
+      "tag": "0032_fancy_the_anarchist",
+      "breakpoints": true
     }
   ]
 }

@@ -32,6 +32,7 @@
   },
   "exports": {
     ".": "./src/index.ts",
+    "./agent-tools": "./src/agent-tools.ts",
     "./runtime-host": "./src/runtime-host.ts",
     "./package.json": "./package.json"
   },
@@ -42,6 +43,11 @@
         "types": "./dist/index.d.mts",
         "import": "./dist/index.mjs",
         "default": "./dist/index.mjs"
+      },
+      "./agent-tools": {
+        "types": "./dist/agent-tools.d.mts",
+        "import": "./dist/agent-tools.mjs",
+        "default": "./dist/agent-tools.mjs"
       },
       "./runtime-host": {
         "types": "./dist/runtime-host.d.mts",

@@ -17,6 +17,12 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { toPiToolContent } from '@taucad/agent-host';
+import type { JsonValue } from '@taucad/agent-host';
+import { NodeFsProvider } from '@taucad/filesystem/backend/node';
+import type { GeoSpecRunner } from 'geospec/runner/worker';
+import type { HashedGeometryResult } from '@taucad/runtime/types';
+
+import * as agentToolsRegistry from '@taucad/agent-tools/registry';
 
 import { createHostToolRegistry } from '#agent-tools.js';
 import type { HostExportFile, HostRuntimeClient } from '#agent-tools.js';
@@ -51,29 +57,62 @@ const webpFile = (name: string): HostExportFile => ({
   bytes: new Uint8Array([1, 2, 3]),
 });
 
+const glb = (): Uint8Array<ArrayBuffer> => {
+  const content = new Uint8Array(12);
+  const header = new DataView(content.buffer);
+  header.setUint32(0, 0x46_54_6c_67, true);
+  header.setUint32(4, 2, true);
+  header.setUint32(8, content.byteLength, true);
+  return content;
+};
+
 const fakeRuntime = (overrides: Partial<HostRuntimeClient> = {}): HostRuntimeClient => {
+  const content = glb();
   const base: HostRuntimeClient = {
-    render: vi.fn(async () => ({ superseded: false, geometry: { success: true, issues: [] } })),
-    export: vi.fn(
-      async (): Promise<{ readonly success: true; readonly data: readonly HostExportFile[] }> => ({
+    evaluate: vi.fn(
+      async (): Promise<HashedGeometryResult> => ({
         success: true,
-        data: [webpFile('capture.webp')],
+        data: { format: 'gltf', content, hash: 'geometry' },
+        issues: [],
       }),
     ),
-    capabilities: { routes: [{ targetFormat: 'webp', kernelId: 'k' }] },
-    activeKernelId: 'k',
+    export: vi.fn<HostRuntimeClient['export']>(async () => ({
+      success: true,
+      data: [webpFile('render.webp')],
+      issues: [],
+    })),
+    transcode: vi.fn<HostRuntimeClient['transcode']>(async () => ({
+      success: true,
+      data: [webpFile('render.webp')],
+      issues: [],
+    })),
   };
   return { ...base, ...overrides };
 };
 
-const invoke = async (registry: ReturnType<typeof createHostToolRegistry>, toolName: string, input: unknown) =>
+const invoke = async (registry: ReturnType<typeof createHostToolRegistry>, toolName: string, input: JsonValue) =>
   registry.invoke({
     toolCallId: 'call-1',
     toolName,
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- test input is the tool's own JSON shape.
-    input: input as never,
+    input,
     signal: new AbortController().signal,
   });
+
+const waitForFileEvent = async (
+  events: ReadonlyArray<{ readonly type: string; readonly path?: string }>,
+  path: string,
+): Promise<void> => {
+  const deadline = Date.now() + 10_000;
+  while (!events.some((event) => event.path === path)) {
+    if (Date.now() > deadline) {
+      throw new Error(`No watch event arrived for ${path}: ${JSON.stringify(events)}`);
+    }
+    // oxlint-disable-next-line no-await-in-loop -- bounded polling waits for the OS watcher.
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 25);
+    });
+  }
+};
 
 describe('createHostToolRegistry', () => {
   it('offers the file tools and use_skill with no runtime, and never a geometry tool it cannot serve', async () => {
@@ -90,12 +129,35 @@ describe('createHostToolRegistry', () => {
     expect(names).not.toContain('export_geometry');
   });
 
+  it("refuses a tool write under Tau's control metadata and still serves the read (V19 mask)", async () => {
+    const workspaceRoot = await makeWorkspace();
+    await mkdir(join(workspaceRoot, '.tau', 'chats', 'chat-1'), { recursive: true });
+    await writeFile(join(workspaceRoot, '.tau', 'chats', 'chat-1', 'events.jsonl'), '{"seq":1}\n', 'utf8');
+    const registry = createHostToolRegistry({ workspaceRoot });
+
+    const refused = await invoke(registry, 'create_file', {
+      targetFile: '.tau/chats/chat-1/events.jsonl',
+      content: '{"seq":99}\n',
+    });
+    expect(refused.isError).toBe(true);
+    expect(JSON.stringify(refused.content)).toContain('PERMISSION_DENIED');
+    expect(JSON.stringify(refused.content)).toContain('Tau records that itself');
+    expect(await readFile(join(workspaceRoot, '.tau', 'chats', 'chat-1', 'events.jsonl'), 'utf8')).toBe('{"seq":1}\n');
+
+    const read = await invoke(registry, 'read_file', { targetFile: '.tau/chats/chat-1/events.jsonl' });
+    expect(read.isError).toBe(false);
+    expect(JSON.stringify(read.content)).toContain('seq');
+
+    const authored = await invoke(registry, 'create_file', { targetFile: '.tau/chats-notes.md', content: 'ok\n' });
+    expect(authored.isError).toBe(false);
+  });
+
   it('offers test_model wherever the GeoSpec engine resolves, with no runtime attached', async () => {
     const registry = createHostToolRegistry({ workspaceRoot: await makeWorkspace() });
     expect(registry.list().map((tool) => tool.name)).toContain('test_model');
   });
 
-  it('withholds test_model when this installation has no GeoSpec engine', async () => {
+  it('withholds test_model when the host withholds it (geospecRunner: false)', async () => {
     const registry = createHostToolRegistry({ workspaceRoot: await makeWorkspace(), geospecRunner: false });
     expect(registry.list().map((tool) => tool.name)).not.toContain('test_model');
   });
@@ -124,7 +186,7 @@ describe('createHostToolRegistry', () => {
     const registry = createHostToolRegistry({
       workspaceRoot,
       // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the fake supplies exactly the runner slice the adapter drives.
-      geospecRunner: async () => ({ run, close }) as never,
+      geospecRunner: async () => ({ run, close }) as unknown as GeoSpecRunner,
     });
 
     const result = await invoke(registry, 'test_model', {});
@@ -205,6 +267,237 @@ describe('createHostToolRegistry', () => {
     expect(await readFile(join(workspaceRoot, 'notes.md'), 'utf8')).toBe('# notes\n');
   });
 
+  it('drops a rooted registry once the checkout it served is released', async () => {
+    const projectRoot = await makeWorkspace();
+    const [first, second] = [await makeWorkspace(), await makeWorkspace()];
+    /* The map `withTurnRevisions` publishes: an entry per admitted run, deleted
+       when the turn settles and its tree is destroyed. Every turn mints a new
+       checkout, so the memo has to be bounded by this map or it holds one
+       registry — every tool's compiled JSON Schema — per turn, forever. */
+    const checkouts = new Map<string, { readonly cwd: string }>();
+    const built = vi.spyOn(agentToolsRegistry, 'createChatToolRegistry');
+    try {
+      const registry = createHostToolRegistry({ workspaceRoot: projectRoot, checkouts });
+      const live = built.mock.calls.length;
+
+      const readIn = async (runId: string): Promise<unknown> =>
+        registry.invoke({
+          toolCallId: `call-${runId}`,
+          toolName: 'read_file',
+          input: { targetFile: 'main.ts' },
+          runId,
+          signal: new AbortController().signal,
+        });
+
+      checkouts.set('run-1', { cwd: first });
+      await readIn('run-1');
+      expect(built.mock.calls.length).toBe(live + 1);
+
+      /* The turn settles, its tree is destroyed, and the next turn works in a
+         checkout of its own — the moment the memo would grow is the moment the
+         released root is dropped from it. */
+      checkouts.delete('run-1');
+      checkouts.set('run-2', { cwd: second });
+      await readIn('run-2');
+      expect(built.mock.calls.length).toBe(live + 2);
+
+      // Nothing kept the first root's registry: serving it again builds it again.
+      checkouts.delete('run-2');
+      checkouts.set('run-3', { cwd: first });
+      await readIn('run-3');
+      expect(built.mock.calls.length).toBe(live + 3);
+    } finally {
+      built.mockRestore();
+    }
+  });
+
+  it('should keep two rooted registries isolated through file, root observation, runtime export and GeoSpec wiring', async () => {
+    const alphaRoot = await makeWorkspace();
+    const betaRoot = await makeWorkspace();
+    await writeFile(join(alphaRoot, 'main.ts'), 'export const root = "alpha";\n', 'utf8');
+    await writeFile(join(betaRoot, 'main.ts'), 'export const root = "beta";\n', 'utf8');
+    await writeFile(join(alphaRoot, 'model.geospec.ts'), 'export const root = "alpha";\n', 'utf8');
+    await writeFile(join(betaRoot, 'model.geospec.ts'), 'export const root = "beta";\n', 'utf8');
+
+    const alphaEvents: Array<{ readonly type: string; readonly path?: string }> = [];
+    const betaEvents: Array<{ readonly type: string; readonly path?: string }> = [];
+    const stopAlpha = new NodeFsProvider(alphaRoot).watch({ paths: ['main.ts'] }, (event) => alphaEvents.push(event));
+    const stopBeta = new NodeFsProvider(betaRoot).watch({ paths: ['main.ts'] }, (event) => betaEvents.push(event));
+    const runtimeFor = (root: string, label: string): HostRuntimeClient =>
+      fakeRuntime({
+        evaluate: vi.fn<HostRuntimeClient['evaluate']>(async ({ source }) => {
+          if (source.path === undefined) {
+            throw new TypeError('Expected a source path');
+          }
+          return {
+            success: true,
+            issues: [],
+            data: {
+              format: 'gltf',
+              content: glb(),
+              hash: `${label}:${await readFile(join(root, source.path), 'utf8')}`,
+            },
+          };
+        }),
+        export: vi.fn<HostRuntimeClient['export']>(async (format, options) => {
+          // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- tsgo's spec config keeps source optional.
+          const sourcePath = options?.source?.path;
+          if (sourcePath === undefined) {
+            throw new TypeError('Expected export source options');
+          }
+          return {
+            success: true,
+            issues: [],
+            data: [
+              {
+                name: `model.${format}`,
+                mimeType: 'model/stl',
+                bytes: new TextEncoder().encode(await readFile(join(root, sourcePath), 'utf8')),
+              },
+            ],
+          };
+        }),
+      });
+    const alphaRuntime = runtimeFor(alphaRoot, 'alpha');
+    const betaRuntime = runtimeFor(betaRoot, 'beta');
+    const geospecFor = (label: string) => {
+      const run = vi.fn<GeoSpecRunner['run']>(async ({ files = [] }) => ({
+        success: true,
+        passed: 1,
+        failed: 0,
+        selectedTests: 1,
+        files: files.map(
+          (file) =>
+            ({
+              file,
+              result: {
+                success: true,
+                passed: true,
+                issues: [],
+                bundle: { success: true, code: '', issues: [], dependencies: [], unresolvedPaths: [] },
+                tests: [{ suite: [label], name: 'rooted', status: 'passed', assertions: [], diagnostics: [] }],
+              },
+            }) as const,
+        ),
+      }));
+      const close = vi.fn(async () => undefined);
+      const runner: GeoSpecRunner = { run, on: () => () => undefined, abort: () => undefined, close };
+      return { runner, run };
+    };
+    const alphaGeoSpec = geospecFor('alpha');
+    const betaGeoSpec = geospecFor('beta');
+    const alpha = createHostToolRegistry({
+      workspaceRoot: alphaRoot,
+      runtimeClient: async () => alphaRuntime,
+      geospecRunner: async () => alphaGeoSpec.runner,
+    });
+    const beta = createHostToolRegistry({
+      workspaceRoot: betaRoot,
+      runtimeClient: async () => betaRuntime,
+      geospecRunner: async () => betaGeoSpec.runner,
+    });
+
+    try {
+      await invoke(alpha, 'create_file', { targetFile: 'scratch.ts', content: 'alpha scratch\n' });
+      await invoke(beta, 'create_file', { targetFile: 'scratch.ts', content: 'beta scratch\n' });
+      await invoke(alpha, 'edit_file', {
+        targetFile: 'main.ts',
+        oldString: '"alpha"',
+        newString: '"alpha-edited"',
+      });
+      await invoke(beta, 'edit_file', { targetFile: 'main.ts', oldString: '"beta"', newString: '"beta-edited"' });
+      await Promise.all([waitForFileEvent(alphaEvents, 'main.ts'), waitForFileEvent(betaEvents, 'main.ts')]);
+
+      const alphaRead = await invoke(alpha, 'read_file', { targetFile: 'main.ts' });
+      const betaRead = await invoke(beta, 'read_file', { targetFile: 'main.ts' });
+      expect(JSON.stringify(alphaRead.content)).toContain('alpha-edited');
+      expect(JSON.stringify(betaRead.content)).toContain('beta-edited');
+      await invoke(alpha, 'delete_file', { targetFile: 'scratch.ts' });
+      await expect(readFile(join(alphaRoot, 'scratch.ts'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+      expect(await readFile(join(betaRoot, 'scratch.ts'), 'utf8')).toBe('beta scratch\n');
+      const outsideRead = await invoke(alpha, 'read_file', { targetFile: '../main.ts' });
+      expect(outsideRead.isError).toBe(true);
+
+      await Promise.all([
+        invoke(alpha, 'get_kernel_result', { targetFile: 'main.ts' }),
+        invoke(beta, 'get_kernel_result', { targetFile: 'main.ts' }),
+      ]);
+      const [alphaExport, betaExport, alphaSpec, betaSpec] = await Promise.all([
+        invoke(alpha, 'export_geometry', { targetFile: 'main.ts', format: 'stl' }),
+        invoke(beta, 'export_geometry', { targetFile: 'main.ts', format: 'stl' }),
+        invoke(alpha, 'test_model', { files: ['model.geospec.ts'] }),
+        invoke(beta, 'test_model', { files: ['model.geospec.ts'] }),
+      ]);
+      const artifactPath = '.tau/artifacts/call-1__main.ts-stl/model.stl';
+      expect(alphaExport).toMatchObject({
+        isError: false,
+        content: { success: true, format: 'stl', files: [{ name: 'model.stl', artifactPath }] },
+      });
+      expect(betaExport).toMatchObject({
+        isError: false,
+        content: { success: true, format: 'stl', files: [{ name: 'model.stl', artifactPath }] },
+      });
+      const alphaArtifact = await invoke(alpha, 'read_file', { targetFile: artifactPath });
+      const betaArtifact = await invoke(beta, 'read_file', { targetFile: artifactPath });
+      expect(JSON.stringify(alphaArtifact.content)).toContain('alpha-edited');
+      expect(JSON.stringify(betaArtifact.content)).toContain('beta-edited');
+      await invoke(alpha, 'edit_file', {
+        targetFile: 'main.ts',
+        oldString: 'alpha-edited',
+        newString: 'alpha-export-2',
+      });
+      const alphaExport2 = await alpha.invoke({
+        toolCallId: 'call-2',
+        toolName: 'export_geometry',
+        input: { targetFile: 'main.ts', format: 'stl' },
+        signal: new AbortController().signal,
+      });
+      const artifactPath2 = '.tau/artifacts/call-2__main.ts-stl/model.stl';
+      expect(alphaExport2).toMatchObject({
+        isError: false,
+        content: { success: true, files: [{ artifactPath: artifactPath2 }] },
+      });
+      const alphaArtifact1AfterExport2 = await invoke(alpha, 'read_file', { targetFile: artifactPath });
+      const alphaArtifact2 = await invoke(alpha, 'read_file', { targetFile: artifactPath2 });
+      expect(JSON.stringify(alphaArtifact1AfterExport2.content)).toContain('alpha-edited');
+      expect(JSON.stringify(alphaArtifact2.content)).toContain('alpha-export-2');
+      expect(alphaSpec.content).toMatchObject({
+        success: true,
+        passed: 1,
+        passes: [{ requirement: 'alpha > rooted', targetFile: 'model.geospec.ts' }],
+      });
+      expect(betaSpec.content).toMatchObject({
+        success: true,
+        passed: 1,
+        passes: [{ requirement: 'beta > rooted', targetFile: 'model.geospec.ts' }],
+      });
+      expect(alphaRuntime.evaluate).toHaveBeenCalledWith(expect.objectContaining({ source: { path: 'main.ts' } }));
+      expect(betaRuntime.evaluate).toHaveBeenCalledWith(expect.objectContaining({ source: { path: 'main.ts' } }));
+      expect(alphaRuntime.export).toHaveBeenCalledWith('stl', expect.objectContaining({ source: { path: 'main.ts' } }));
+      expect(betaRuntime.export).toHaveBeenCalledWith('stl', expect.objectContaining({ source: { path: 'main.ts' } }));
+      expect(alphaGeoSpec.run).toHaveBeenCalledWith({ files: ['model.geospec.ts'] });
+      expect(betaGeoSpec.run).toHaveBeenCalledWith({ files: ['model.geospec.ts'] });
+
+      const cancelled = new AbortController();
+      cancelled.abort();
+      await expect(
+        alpha.invoke({
+          toolCallId: 'cancelled-alpha',
+          toolName: 'edit_file',
+          input: { targetFile: 'main.ts', oldString: 'alpha-export-2', newString: 'wrong' },
+          signal: cancelled.signal,
+        }),
+      ).rejects.toMatchObject({ name: 'AbortError' });
+      const alphaAfterCancellation = await invoke(alpha, 'read_file', { targetFile: 'main.ts' });
+      const betaAfterCancellation = await invoke(beta, 'read_file', { targetFile: 'main.ts' });
+      expect(JSON.stringify(alphaAfterCancellation.content)).toContain('alpha-export-2');
+      expect(JSON.stringify(betaAfterCancellation.content)).toContain('beta-edited');
+    } finally {
+      stopAlpha();
+      stopBeta();
+    }
+  });
+
   it('captures one isometric image and six canonical views as data URLs', async () => {
     const runtime = fakeRuntime();
     const registry = createHostToolRegistry({
@@ -217,12 +510,11 @@ describe('createHostToolRegistry', () => {
     expect(JSON.stringify(single.content)).toContain('data:image/webp;base64,');
 
     const batchRuntime = fakeRuntime({
-      export: vi.fn(
-        async (): Promise<{ readonly success: true; readonly data: readonly HostExportFile[] }> => ({
-          success: true,
-          data: ['front', 'back', 'right', 'left', 'top', 'bottom'].map((name) => webpFile(`${name}.webp`)),
-        }),
-      ),
+      transcode: vi.fn<HostRuntimeClient['transcode']>(async () => ({
+        success: true,
+        data: ['front', 'back', 'right', 'left', 'top', 'bottom'].map((name) => webpFile(`render-${name}.webp`)),
+        issues: [],
+      })),
     });
     const batchRegistry = createHostToolRegistry({
       workspaceRoot: await makeWorkspace(),
@@ -232,8 +524,7 @@ describe('createHostToolRegistry', () => {
     expect(batch.isError).toBe(false);
     expect(JSON.stringify(batch.content)).toContain('"view":"bottom"');
 
-    /* The daemon has its own encoder (`Buffer`) but not its own tool-result
-     * mapping: `toPiToolContent` is the one seam both placements record
+    /* `toPiToolContent` is the one seam both placements record
      * through, so a daemon capture reaches the model as image blocks too,
      * never as base64 text. */
     const piContent = toPiToolContent(batch.content);
@@ -243,15 +534,126 @@ describe('createHostToolRegistry', () => {
     expect(JSON.stringify(piContent)).not.toContain('data:image/webp;base64,');
   });
 
-  it('refuses an image capture the active kernel has no route for', async () => {
+  it('uses the evaluated SVG coordinate unit without host configuration and refuses unknown scale', async () => {
+    const evaluate = vi.fn<HostRuntimeClient['evaluate']>(async () => ({
+      success: true,
+      issues: [],
+      data: { format: 'svg', content: '<svg viewBox="0 0 10 10"/>', hash: 'drawing', units: { length: 'cm' } },
+    }));
+    const transcode = vi.fn<HostRuntimeClient['transcode']>(async () => ({
+      success: true,
+      issues: [],
+      data: [{ name: 'drawing.png', mimeType: 'image/png', bytes: new Uint8Array([1]) }],
+    }));
     const registry = createHostToolRegistry({
       workspaceRoot: await makeWorkspace(),
-      runtimeClient: async () => fakeRuntime({ capabilities: { routes: [{ targetFormat: 'glb', kernelId: 'k' }] } }),
+      runtimeClient: async () => fakeRuntime({ evaluate, transcode }),
+    });
+
+    const result = await invoke(registry, 'screenshot', { targetFile: 'drawing.ts', mode: 'single' });
+    expect(result.isError).toBe(false);
+    expect(transcode.mock.calls[0]?.[0]).toMatchObject({
+      from: 'svg',
+      to: 'png',
+      options: { lengthSymbol: 'cm', axes: true, scaleBar: true },
+    });
+
+    evaluate.mockResolvedValue({
+      success: true,
+      issues: [],
+      data: { format: 'svg', content: '<svg/>', hash: 'unqualified' },
+    });
+    const unqualified = await invoke(registry, 'screenshot', { targetFile: 'drawing.ts', mode: 'single' });
+    expect(unqualified.isError).toBe(true);
+    expect(JSON.stringify(unqualified.content)).toContain('artifact coordinate length unit');
+    expect(transcode).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not start cancelled CAD work after shared lazy acquisition and preserves a sibling request', async () => {
+    const entered = Promise.withResolvers<void>();
+    const acquired = Promise.withResolvers<HostRuntimeClient>();
+    const runtime = fakeRuntime();
+    const registry = createHostToolRegistry({
+      workspaceRoot: await makeWorkspace(),
+      runtimeClient: async () => {
+        entered.resolve();
+        return acquired.promise;
+      },
+    });
+    const controller = new AbortController();
+    const cancelled = registry.invoke({
+      toolCallId: 'cancelled',
+      toolName: 'get_kernel_result',
+      input: { targetFile: 'cancelled.ts' },
+      signal: controller.signal,
+    });
+    await entered.promise;
+    const cancelledResult = expect(cancelled).rejects.toMatchObject({ name: 'AbortError' });
+    controller.abort();
+    await cancelledResult;
+
+    const siblingController = new AbortController();
+    const sibling = registry.invoke({
+      toolCallId: 'sibling',
+      toolName: 'get_kernel_result',
+      input: { targetFile: 'sibling.ts' },
+      signal: siblingController.signal,
+    });
+    acquired.resolve(runtime);
+    const siblingResult = await sibling;
+    expect(siblingResult.isError).toBe(false);
+    expect(runtime.evaluate).toHaveBeenCalledTimes(1);
+    expect(runtime.evaluate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source: { path: 'sibling.ts' },
+        signal: siblingController.signal,
+      }),
+    );
+  });
+
+  it('passes capture cancellation to the runtime transcode without closing the shared client', async () => {
+    const entered = Promise.withResolvers<AbortSignal | undefined>();
+    const finish = Promise.withResolvers<Awaited<ReturnType<HostRuntimeClient['transcode']>>>();
+    const transcode = vi.fn<HostRuntimeClient['transcode']>(async ({ signal }) => {
+      entered.resolve(signal);
+      return finish.promise;
+    });
+    const runtime = fakeRuntime({ transcode });
+    const registry = createHostToolRegistry({
+      workspaceRoot: await makeWorkspace(),
+      runtimeClient: async () => runtime,
+    });
+    const controller = new AbortController();
+    const capture = registry.invoke({
+      toolCallId: 'capture',
+      toolName: 'screenshot',
+      input: { targetFile: 'main.ts', mode: 'single' },
+      signal: controller.signal,
+    });
+    expect(await entered.promise).toBe(controller.signal);
+    const cancelledResult = expect(capture).rejects.toMatchObject({ name: 'AbortError' });
+    controller.abort();
+    await cancelledResult;
+    finish.resolve({ success: true, issues: [], data: [webpFile('render.webp')] });
+    const siblingResult = await invoke(registry, 'get_kernel_result', { targetFile: 'sibling.ts' });
+    expect(siblingResult.isError).toBe(false);
+  });
+
+  it('refuses an image capture when the selected image provider rejects the exact edge', async () => {
+    const registry = createHostToolRegistry({
+      workspaceRoot: await makeWorkspace(),
+      runtimeClient: async () =>
+        fakeRuntime({
+          transcode: vi.fn<HostRuntimeClient['transcode']>(async () => ({
+            success: false,
+            issues: [{ code: 'RUNTIME', type: 'runtime', severity: 'error', message: 'No glb to webp route' }],
+          })),
+        }),
     });
 
     const result = await invoke(registry, 'screenshot', { targetFile: 'main.ts', mode: 'single' });
     expect(result.isError).toBe(true);
-    expect(JSON.stringify(result.content)).toContain('cannot capture');
+    expect(JSON.stringify(result.content)).toContain('No glb to webp route');
   });
 
   /*
@@ -296,7 +698,7 @@ describe('createHostToolRegistry', () => {
       workspaceRoot: await makeWorkspace(),
       runtimeClient: async () =>
         fakeRuntime({
-          render: vi.fn(async () => {
+          evaluate: vi.fn(async () => {
             /* The runtime's own fallback for a worker `error` state that carried
              * no diagnostic (`runtime-client-core.ts`). */
             throw new Error('Runtime render failed');

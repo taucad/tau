@@ -102,8 +102,57 @@ services:
       '
     restart: 'no'
 
+  hatchet-database:
+    image: postgres:17-alpine
+    profiles: [jobs]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGUSER: dev_user
+      PGPASSWORD: dev_password
+      PGDATABASE: postgres
+    entrypoint: >
+      /bin/sh -c '
+        set -eu;
+        if ! psql -tAc "SELECT 1 FROM pg_database WHERE datname = '"'"'hatchet'"'"'" | grep -q 1; then
+          psql -v ON_ERROR_STOP=1 -c "CREATE DATABASE hatchet";
+        fi;
+      '
+    restart: 'no'
+
+  hatchet:
+    image: ghcr.io/hatchet-dev/hatchet/hatchet-lite-dev:v0.105.12
+    container_name: tau-hatchet
+    profiles: [jobs]
+    depends_on:
+      hatchet-database:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgresql://dev_user:dev_password@postgres:5432/hatchet?sslmode=disable
+      SERVER_GRPC_BIND_ADDRESS: 0.0.0.0
+      SERVER_GRPC_BROADCAST_ADDRESS: localhost:7070
+      SERVER_GRPC_INSECURE: 'true'
+      SERVER_AUTH_COOKIE_INSECURE: 'true'
+      SERVER_AUTH_COOKIE_DOMAIN: localhost
+      SERVER_SECURITY_CHECK_ENABLED: 'false'
+    ports:
+      - '7070:7070'
+      - '8888:8888'
+    volumes:
+      - hatchet_config:/config
+    healthcheck:
+      test: ['CMD', 'curl', '--fail', 'http://localhost:8888/api/live']
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    restart: unless-stopped
+
 volumes:
   postgres_data:
   redis_data:
   otel_lgtm_data:
   minio-data:
+  hatchet_config:

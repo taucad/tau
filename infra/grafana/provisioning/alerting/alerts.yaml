@@ -133,3 +133,113 @@ groups:
           severity: warning
           service: tau-api
           component: api
+
+      - uid: billing-funded-operation-limit
+        title: 'P1: Funded LLM Failsafe Reached'
+        condition: billing_funded_operation_limit
+        data:
+          - refId: billing_funded_operation_limit
+            datasourceUid: prometheus
+            relativeTimeRange:
+              from: 300
+              to: 0
+            model:
+              expr: >
+                sum(increase(tau_billing_funded_operation_denials_total{service_name="tau-api",tau_billing_capacity_pool="primary",tau_billing_denial_reason="genuine_saturation"}[5m])) > 0
+              intervalMs: 15000
+              maxDataPoints: 20
+        for: 0s
+        annotations:
+          summary: A primary funded LLM request reached the account abuse failsafe after recovery.
+        labels:
+          severity: warning
+          service: tau-api
+          component: billing
+
+      - uid: billing-funded-operation-recovery-failed
+        title: 'P1: Funded LLM Recovery Failed'
+        condition: billing_funded_operation_recovery_failed
+        data:
+          - refId: billing_funded_operation_recovery_failed
+            datasourceUid: prometheus
+            relativeTimeRange:
+              from: 300
+              to: 0
+            model:
+              expr: >
+                sum(increase(tau_billing_funded_operation_recoveries_total{service_name="tau-api",tau_billing_recovery_outcome="failed"}[5m])) > 0
+              intervalMs: 15000
+              maxDataPoints: 20
+        for: 0s
+        annotations:
+          summary: Funded LLM recovery failed; admission remains fail-closed without changing customer money.
+        labels:
+          severity: warning
+          service: tau-api
+          component: billing
+
+      - uid: billing-funded-operation-due-age
+        title: 'P1: Funded LLM Recovery SLO Breach'
+        condition: billing_funded_operation_due_age
+        data:
+          - refId: billing_funded_operation_due_age
+            datasourceUid: prometheus
+            relativeTimeRange:
+              from: 300
+              to: 0
+            model:
+              expr: >
+                max(tau_billing_funded_operation_oldest_due_age{service_name="tau-api"}) > 30000
+              intervalMs: 15000
+              maxDataPoints: 20
+        for: 1m
+        annotations:
+          summary: The oldest due funded LLM operation has exceeded the 30-second healthy recovery SLO.
+        labels:
+          severity: warning
+          service: tau-api
+          component: billing
+
+      - uid: billing-funded-operation-occupancy
+        title: 'P1: Funded LLM Pool Near Failsafe'
+        condition: billing_funded_operation_occupancy
+        data:
+          - refId: billing_funded_operation_occupancy
+            datasourceUid: prometheus
+            relativeTimeRange:
+              from: 900
+              to: 0
+            model:
+              expr: >
+                max(tau_billing_funded_operation_current{service_name="tau-api",tau_billing_pending_state="pending"}) >= 56
+              intervalMs: 15000
+              maxDataPoints: 60
+        for: 10m
+        annotations:
+          summary: A funded LLM capacity pool has remained above 87.5% of its 64-operation abuse failsafe.
+        labels:
+          severity: warning
+          service: tau-api
+          component: billing
+
+      - uid: billing-funded-operation-recovery-provider-execution
+        title: 'P1: Provider Execution During Recovery'
+        condition: billing_funded_operation_recovery_provider_execution
+        data:
+          - refId: billing_funded_operation_recovery_provider_execution
+            datasourceUid: prometheus
+            relativeTimeRange:
+              from: 300
+              to: 0
+            model:
+              expr: >
+                max(tau_billing_funded_operation_recovery_provider_executions{service_name="tau-api"}) > 0
+              intervalMs: 15000
+              maxDataPoints: 20
+        for: 0s
+        annotations:
+          summary: DB-only funded LLM recovery observed a provider execution; the invariant is zero.
+        labels:
+          severity: warning
+          service: tau-api
+          component: billing

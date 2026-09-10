@@ -10,7 +10,10 @@
         {
           "refId": "rpc_errors_high",
           "queryType": "",
-          "relativeTimeRange": { "from": 300, "to": 0 },
+          "relativeTimeRange": {
+            "from": 300,
+            "to": 0
+          },
           "datasourceUid": "prometheus",
           "model": {
             "expr": "sum(rate(rpc_server_call_duration_count{service_name=\"tau-api\",rpc_status=\"error\"}[5m])) / sum(rate(rpc_server_call_duration_count{service_name=\"tau-api\"}[5m])) > 0.1",
@@ -40,7 +43,10 @@
         {
           "refId": "ws_disconnect_spike",
           "queryType": "",
-          "relativeTimeRange": { "from": 300, "to": 0 },
+          "relativeTimeRange": {
+            "from": 300,
+            "to": 0
+          },
           "datasourceUid": "prometheus",
           "model": {
             "expr": "rate(ws_disconnections_total{service_name=\"tau-api\",ws_close_reason=~\"transport close|transport error|ping timeout\"}[5m]) > 1",
@@ -70,7 +76,10 @@
         {
           "refId": "llm_errors",
           "queryType": "",
-          "relativeTimeRange": { "from": 600, "to": 0 },
+          "relativeTimeRange": {
+            "from": 600,
+            "to": 0
+          },
           "datasourceUid": "prometheus",
           "model": {
             "expr": "sum(rate(gen_ai_client_operation_duration_count{service_name=\"tau-api\",error_type!=\"\"}[10m])) / sum(rate(gen_ai_client_operation_duration_count{service_name=\"tau-api\"}[10m])) > 0.05",
@@ -100,7 +109,10 @@
         {
           "refId": "http_5xx_high",
           "queryType": "",
-          "relativeTimeRange": { "from": 300, "to": 0 },
+          "relativeTimeRange": {
+            "from": 300,
+            "to": 0
+          },
           "datasourceUid": "prometheus",
           "model": {
             "expr": "sum(rate(http_server_duration_count{service_name=\"tau-api\",http_status_code=~\"5..\"}[5m])) / sum(rate(http_server_duration_count{service_name=\"tau-api\"}[5m])) > 0.05",
@@ -130,7 +142,10 @@
         {
           "refId": "cache_hit_rate_low",
           "queryType": "",
-          "relativeTimeRange": { "from": 1800, "to": 0 },
+          "relativeTimeRange": {
+            "from": 1800,
+            "to": 0
+          },
           "datasourceUid": "prometheus",
           "model": {
             "expr": "(\n  sum by (gen_ai_request_model, gen_ai_provider_name) (rate(gen_ai_client_token_usage_sum{service_name=\"tau-api\", gen_ai_token_type=\"cache_read\"}[30m]))\n  /\n  (\n    sum by (gen_ai_request_model, gen_ai_provider_name) (rate(gen_ai_client_token_usage_sum{service_name=\"tau-api\", gen_ai_token_type=\"cache_read\"}[30m]))\n    +\n    sum by (gen_ai_request_model, gen_ai_provider_name) (rate(gen_ai_client_token_usage_sum{service_name=\"tau-api\", gen_ai_token_type=\"input\"}[30m]))\n  )\n) < 0.4\nand\nsum by (gen_ai_request_model, gen_ai_provider_name) (increase(gen_ai_client_token_usage_sum{service_name=\"tau-api\", gen_ai_token_type=\"input\"}[30m])) >= 200000",
@@ -151,6 +166,292 @@
         "severity": "warning",
         "service": "tau-api",
         "component": "ai"
+      }
+    },
+    {
+      "uid": "billing-reservation-failure-spike",
+      "title": "P1: Credit Reservation Failure Spike",
+      "condition": "billing_reservation_failure_spike_threshold",
+      "data": [
+        {
+          "refId": "billing_reservation_failure_spike",
+          "queryType": "",
+          "relativeTimeRange": {
+            "from": 900,
+            "to": 0
+          },
+          "datasourceUid": "prometheus",
+          "model": {
+            "expr": "sum(rate(tau_billing_credit_reservation_failures_total{service_name=\"tau-api\"}[10m])) * 60",
+            "intervalMs": 15000,
+            "maxDataPoints": 20,
+            "refId": "billing_reservation_failure_spike"
+          }
+        },
+        {
+          "refId": "billing_reservation_failure_spike_threshold",
+          "queryType": "",
+          "relativeTimeRange": {
+            "from": 0,
+            "to": 0
+          },
+          "datasourceUid": "__expr__",
+          "model": {
+            "type": "threshold",
+            "expression": "billing_reservation_failure_spike",
+            "refId": "billing_reservation_failure_spike_threshold",
+            "conditions": [
+              {
+                "evaluator": {
+                  "type": "gt",
+                  "params": [5]
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "noDataState": "OK",
+      "execErrState": "OK",
+      "for": "10m",
+      "annotations": {
+        "summary": "Insufficient-balance rejections above 5/min for 10m \u2014 pricing, grant, or estimator incident (C20)."
+      },
+      "labels": {
+        "severity": "warning",
+        "service": "tau-api",
+        "component": "billing"
+      }
+    },
+    {
+      "uid": "billing-commit-failure-spike",
+      "title": "P1: Ledger Commit Failure Spike",
+      "condition": "billing_commit_failure_spike_threshold",
+      "data": [
+        {
+          "refId": "billing_commit_failure_spike",
+          "queryType": "",
+          "relativeTimeRange": {
+            "from": 900,
+            "to": 0
+          },
+          "datasourceUid": "prometheus",
+          "model": {
+            "expr": "sum(rate(tau_billing_credit_commit_failures_total{service_name=\"tau-api\"}[10m])) * 60",
+            "intervalMs": 15000,
+            "maxDataPoints": 20,
+            "refId": "billing_commit_failure_spike"
+          }
+        },
+        {
+          "refId": "billing_commit_failure_spike_threshold",
+          "queryType": "",
+          "relativeTimeRange": {
+            "from": 0,
+            "to": 0
+          },
+          "datasourceUid": "__expr__",
+          "model": {
+            "type": "threshold",
+            "expression": "billing_commit_failure_spike",
+            "refId": "billing_commit_failure_spike_threshold",
+            "conditions": [
+              {
+                "evaluator": {
+                  "type": "gt",
+                  "params": [1]
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "noDataState": "OK",
+      "execErrState": "OK",
+      "for": "10m",
+      "annotations": {
+        "summary": "Post-response ledger commits/releases failing above 1/min \u2014 Redis/outbox degradation; sweeps will floor-settle but investigate (C20)."
+      },
+      "labels": {
+        "severity": "warning",
+        "service": "tau-api",
+        "component": "billing"
+      }
+    },
+    {
+      "uid": "billing-negative-balance-anomaly",
+      "title": "P1: Negative-Balance Account Anomaly",
+      "condition": "billing_negative_balance_anomaly_threshold",
+      "data": [
+        {
+          "refId": "billing_negative_balance_anomaly",
+          "queryType": "",
+          "relativeTimeRange": {
+            "from": 900,
+            "to": 0
+          },
+          "datasourceUid": "prometheus",
+          "model": {
+            "expr": "max(tau_billing_negative_balance_accounts{service_name=\"tau-api\"})",
+            "intervalMs": 15000,
+            "maxDataPoints": 20,
+            "refId": "billing_negative_balance_anomaly"
+          }
+        },
+        {
+          "refId": "billing_negative_balance_anomaly_threshold",
+          "queryType": "",
+          "relativeTimeRange": {
+            "from": 0,
+            "to": 0
+          },
+          "datasourceUid": "__expr__",
+          "model": {
+            "type": "threshold",
+            "expression": "billing_negative_balance_anomaly",
+            "refId": "billing_negative_balance_anomaly_threshold",
+            "conditions": [
+              {
+                "evaluator": {
+                  "type": "gt",
+                  "params": [25]
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "noDataState": "OK",
+      "execErrState": "OK",
+      "for": "30m",
+      "annotations": {
+        "summary": "More than 25 accounts in debt for 30m \u2014 abuse wave or a commit-floor bug (Q37/C20)."
+      },
+      "labels": {
+        "severity": "warning",
+        "service": "tau-api",
+        "component": "billing"
+      }
+    },
+    {
+      "uid": "billing-refund-clawback-flags",
+      "title": "P1: Refund Clawback Flags",
+      "condition": "billing_refund_clawback_flags_threshold",
+      "data": [
+        {
+          "refId": "billing_refund_clawback_flags",
+          "queryType": "",
+          "relativeTimeRange": {
+            "from": 900,
+            "to": 0
+          },
+          "datasourceUid": "prometheus",
+          "model": {
+            "expr": "sum(increase(tau_billing_accounts_flagged_total{service_name=\"tau-api\"}[1h]))",
+            "intervalMs": 15000,
+            "maxDataPoints": 20,
+            "refId": "billing_refund_clawback_flags"
+          }
+        },
+        {
+          "refId": "billing_refund_clawback_flags_threshold",
+          "queryType": "",
+          "relativeTimeRange": {
+            "from": 0,
+            "to": 0
+          },
+          "datasourceUid": "__expr__",
+          "model": {
+            "type": "threshold",
+            "expression": "billing_refund_clawback_flags",
+            "refId": "billing_refund_clawback_flags_threshold",
+            "conditions": [
+              {
+                "evaluator": {
+                  "type": "gt",
+                  "params": [0]
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "noDataState": "OK",
+      "execErrState": "OK",
+      "for": "5m",
+      "annotations": {
+        "summary": "A refund clawed back already-spent credits (account left negative) \u2014 dispute-abuse signal, review the flagged account (Q37/S46)."
+      },
+      "labels": {
+        "severity": "warning",
+        "service": "tau-api",
+        "component": "billing"
+      }
+    },
+    {
+      "uid": "billing-funded-operation-limit",
+      "title": "P1: Funded LLM Failsafe Reached",
+      "condition": "billing_funded_operation_limit",
+      "data": [
+        {
+          "refId": "billing_funded_operation_limit",
+          "queryType": "",
+          "relativeTimeRange": {
+            "from": 300,
+            "to": 0
+          },
+          "datasourceUid": "prometheus",
+          "model": {
+            "expr": "sum(increase(tau_billing_funded_operation_denials_total{service_name=\"tau-api\",tau_billing_capacity_pool=\"primary\",tau_billing_denial_reason=\"genuine_saturation\"}[5m])) > 0",
+            "intervalMs": 15000,
+            "maxDataPoints": 20,
+            "refId": "billing_funded_operation_limit"
+          }
+        }
+      ],
+      "noDataState": "OK",
+      "execErrState": "OK",
+      "for": "0s",
+      "annotations": {
+        "summary": "A primary funded LLM request reached the account abuse failsafe after recovery."
+      },
+      "labels": {
+        "severity": "warning",
+        "service": "tau-api",
+        "component": "billing"
+      }
+    },
+    {
+      "uid": "billing-funded-operation-recovery-failed",
+      "title": "P1: Funded LLM Recovery Failed",
+      "condition": "billing_funded_operation_recovery_failed",
+      "data": [
+        {
+          "refId": "billing_funded_operation_recovery_failed",
+          "queryType": "",
+          "relativeTimeRange": {
+            "from": 300,
+            "to": 0
+          },
+          "datasourceUid": "prometheus",
+          "model": {
+            "expr": "sum(increase(tau_billing_funded_operation_recoveries_total{service_name=\"tau-api\",tau_billing_recovery_outcome=\"failed\"}[5m])) > 0",
+            "intervalMs": 15000,
+            "maxDataPoints": 20,
+            "refId": "billing_funded_operation_recovery_failed"
+          }
+        }
+      ],
+      "noDataState": "OK",
+      "execErrState": "OK",
+      "for": "0s",
+      "annotations": {
+        "summary": "Funded LLM recovery failed; admission remains fail-closed without changing customer money."
+      },
+      "labels": {
+        "severity": "warning",
+        "service": "tau-api",
+        "component": "billing"
       }
     }
   ]

@@ -10,7 +10,10 @@
         {
           "refId": "redis_down",
           "queryType": "",
-          "relativeTimeRange": { "from": 300, "to": 0 },
+          "relativeTimeRange": {
+            "from": 300,
+            "to": 0
+          },
           "datasourceUid": "prometheus",
           "model": {
             "expr": "redis_connection_state{service_name=\"tau-api\"} == 0",
@@ -40,7 +43,10 @@
         {
           "refId": "db_startup_logs",
           "queryType": "range",
-          "relativeTimeRange": { "from": 600, "to": 0 },
+          "relativeTimeRange": {
+            "from": 600,
+            "to": 0
+          },
           "datasourceUid": "loki",
           "model": {
             "expr": "sum(count_over_time({service_name=\"tau-api\"} |~ \"Database (connectivity probe|migration) failed\" [5m]))",
@@ -53,7 +59,10 @@
         {
           "refId": "db_startup_reduce",
           "queryType": "",
-          "relativeTimeRange": { "from": 0, "to": 0 },
+          "relativeTimeRange": {
+            "from": 0,
+            "to": 0
+          },
           "datasourceUid": "__expr__",
           "model": {
             "type": "reduce",
@@ -65,7 +74,10 @@
         {
           "refId": "db_startup_threshold",
           "queryType": "",
-          "relativeTimeRange": { "from": 0, "to": 0 },
+          "relativeTimeRange": {
+            "from": 0,
+            "to": 0
+          },
           "datasourceUid": "__expr__",
           "model": {
             "type": "threshold",
@@ -73,8 +85,13 @@
             "conditions": [
               {
                 "type": "query",
-                "evaluator": { "type": "gt", "params": [0] },
-                "operator": { "type": "and" }
+                "evaluator": {
+                  "type": "gt",
+                  "params": [0]
+                },
+                "operator": {
+                  "type": "and"
+                }
               }
             ],
             "refId": "db_startup_threshold"

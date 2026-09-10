@@ -19,10 +19,14 @@ remap UIDs — they must already exist on the target Grafana instance.
 
 ## Rule groups
 
-| File                | Severity                   | Rules                                                                                                                                                        |
-| ------------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `tau-critical.json` | P0 — page on-call          | `redis-connection-lost` (Prometheus), `database-startup-failure` (Loki LogQL — fires on `Database connectivity probe failed` / `Database migration failed`). |
-| `tau-warning.json`  | P1 — notify Slack, no page | `rpc-failure-rate`, `ws-disconnect-storm`, `llm-error-rate`, `high-5xx-rate` (all Prometheus).                                                               |
+| File                | Severity                   | Rules                                                                                                                                                                                                                                                                 |
+| ------------------- | -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tau-critical.json` | P0 — page on-call          | `redis-connection-lost` (Prometheus), `database-startup-failure` (Loki LogQL — fires on `Database connectivity probe failed` / `Database migration failed`), `billing-ledger-drift` (C12 money invariant — non-zero drift pages).                                     |
+| `tau-warning.json`  | P1 — notify Slack, no page | `rpc-failure-rate`, `ws-disconnect-storm`, `llm-error-rate`, `high-5xx-rate`, plus the billing pack (C20): `billing-reservation-failure-spike`, `billing-commit-failure-spike`, `billing-negative-balance-anomaly`, `billing-refund-clawback-flags` (all Prometheus). |
+
+Webhook **settlement lag** (top-up created → settled) has no first-party metric;
+monitor it via Stripe Dashboard → Developers → Webhooks (delivery latency +
+failure rate on the Tau endpoint) — part of the launch-checklist click-ops.
 
 ## Adding a new alert
 

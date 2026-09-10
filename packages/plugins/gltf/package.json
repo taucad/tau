@@ -69,5 +69,9 @@
   },
   "taucad": {
     "hostTarget": "browser"
+  },
+  "tau": {
+    "skills": null,
+    "reason": "Transcoder; its options are already tool schemas"
   }
 }

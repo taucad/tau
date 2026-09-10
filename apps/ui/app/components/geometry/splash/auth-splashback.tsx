@@ -4,12 +4,6 @@ import { useActorRef, useSelector } from '@xstate/react';
 import type { SnapshotFrom } from 'xstate';
 import { Check } from 'lucide-react';
 import type { Geometry } from '@taucad/types';
-import { defineRuntime } from '@taucad/runtime/worker';
-import { inProcessTransport } from '@taucad/runtime/transport/in-process';
-import { fromMemoryFs } from '@taucad/runtime/filesystem';
-import { jscad } from '@taucad/jscad';
-import { parameterCache, geometryCache } from '@taucad/middleware';
-import { esbuild } from '@taucad/esbuild';
 import { authSplashbackMachine, timing as machineTiming } from '#components/geometry/splash/auth-splashback.machine.js';
 import { UnifiedSplashbackViewer } from '#components/geometry/splash/unified-splashback-viewer.js';
 import type { SplashbackPhase } from '#components/geometry/splash/unified-splashback-viewer.js';
@@ -23,18 +17,10 @@ import {
   assemblySplitRatio as defaultAssemblySplitRatio,
   loadingScatterRadius,
 } from '#components/geometry/splash/auth-splashback.constants.js';
+import { splashClientOptions } from '#runtime/demo-client-options.js';
 
 // eslint-disable-next-line @typescript-eslint/naming-convention -- file path key
 const gearCode = { 'main.js': gearJscad };
-
-const splashbackRuntime = defineRuntime({
-  plugins: [jscad(), esbuild()],
-  middleware: [parameterCache(), geometryCache()],
-});
-const splashbackKernelClientOptions = {
-  runtime: splashbackRuntime,
-  transport: inProcessTransport({ runtime: splashbackRuntime, fileSystem: fromMemoryFs() }),
-};
 
 const gear12Parameters = { numberTeeth: 12 };
 const gear8Parameters = { numberTeeth: 8 };
@@ -877,12 +863,12 @@ export function AuthSplashback(): React.JSX.Element {
   // `enabled: showContainer` gate caused a re-render storm on every cycle restart that
   // briefly re-displayed the loading spinner over the still-rendered assembly.
   const { geometry: gear12Geometry } = useRuntime({
-    clientOptions: splashbackKernelClientOptions,
+    clientOptions: splashClientOptions,
     source: { files: gearCode },
     initialParameters: gear12Parameters,
   });
   const { geometry: gear8Geometry } = useRuntime({
-    clientOptions: splashbackKernelClientOptions,
+    clientOptions: splashClientOptions,
     source: { files: gearCode },
     initialParameters: gear8Parameters,
   });

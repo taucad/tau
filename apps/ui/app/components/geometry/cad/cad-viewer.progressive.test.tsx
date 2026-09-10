@@ -6,6 +6,7 @@ import type { Geometry } from '@taucad/types';
 import { CadViewer } from '#components/geometry/cad/cad-viewer.js';
 
 let providerMounts = 0;
+let gltfMeshMounts = 0;
 
 vi.mock('#hooks/use-graphics.js', () => ({
   useGraphicsSelector: (selector: (snapshot: { context: Record<string, unknown> }) => unknown) =>
@@ -14,6 +15,7 @@ vi.mock('#hooks/use-graphics.js', () => ({
         resolvedGraphicsBackend: 'webgl',
         webGpuAvailable: false,
         graphicsBackendPreference: 'webgl',
+        gltfPresentation: { requestedRevision: 1 },
       },
     }),
 }));
@@ -32,7 +34,12 @@ vi.mock('#components/geometry/graphics/three/react/progressive-scene.js', () => 
 }));
 
 vi.mock('#components/geometry/graphics/three/react/gltf-mesh.js', () => ({
-  GltfMesh: () => <div data-testid='final-scene' />,
+  GltfMesh: () => {
+    useEffect(() => {
+      gltfMeshMounts += 1;
+    }, []);
+    return <div data-testid='final-scene' />;
+  },
 }));
 
 vi.mock('#components/geometry/cad/webgl-error-boundary.js', () => ({
@@ -57,7 +64,11 @@ const snapshot = (visible: boolean): ResolvedSceneSnapshot => ({
   },
   assets: [],
 });
-const finalGeometry: Geometry = { format: 'gltf', hash: 'final', content: new Uint8Array([1]) };
+const finalGeometry: Geometry = {
+  format: 'gltf',
+  hash: 'final',
+  content: new Uint8Array([1]),
+};
 
 describe('CadViewer progressive projection', () => {
   it('keeps the Three provider mounted across frames and final reconciliation', () => {
@@ -67,5 +78,21 @@ describe('CadViewer progressive projection', () => {
     rerender(<CadViewer geometry={finalGeometry} />);
 
     expect(providerMounts).toBe(1);
+  });
+
+  it('keeps one GLTF owner mounted across geometry hashes', () => {
+    gltfMeshMounts = 0;
+    const { rerender } = render(<CadViewer geometry={finalGeometry} />);
+    rerender(
+      <CadViewer
+        geometry={{
+          format: 'gltf',
+          hash: 'next',
+          content: new Uint8Array([2]),
+        }}
+      />,
+    );
+
+    expect(gltfMeshMounts).toBe(1);
   });
 });

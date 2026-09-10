@@ -42,6 +42,7 @@ export const CadViewer = memo(
     const machineResolvedBackend = useGraphicsSelector((state) => state.context.resolvedGraphicsBackend);
     const gpuAvailable = useGraphicsSelector((state) => state.context.webGpuAvailable);
     const graphicsPreference = useGraphicsSelector((state) => state.context.graphicsBackendPreference);
+    const requestedGltfRevision = useGraphicsSelector((state) => state.context.gltfPresentation.requestedRevision);
 
     const graphicsBackendEffective = useMemo(
       () => mergeGraphicsBackendWithQueryOverride(machineResolvedBackend, graphicsPreference, gpuAvailable),
@@ -66,10 +67,10 @@ export const CadViewer = memo(
     } else if (geometry?.format === 'gltf') {
       scene = (
         <GltfMesh
-          key={geometry.hash}
           gltfFile={geometry.content}
           sourceFile={sourceFile}
           geometryHash={geometry.hash}
+          presentationRevision={requestedGltfRevision}
           enableMatcap={enableMatcap}
           enableSurfaces={enableSurfaces}
           enableLines={enableLines}

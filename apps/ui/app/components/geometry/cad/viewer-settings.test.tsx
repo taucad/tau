@@ -14,7 +14,6 @@ type GraphicsState = {
     readonly enableAxes: boolean;
     readonly enableMatcap: boolean;
     readonly enablePostProcessing: boolean;
-    readonly environmentPreset: 'studio' | 'performance';
     readonly graphicsBackendPreference: 'webgl' | 'webgpu';
     readonly webGpuAvailable: boolean;
     readonly upDirection: 'x' | 'y' | 'z';
@@ -45,7 +44,6 @@ vi.mock('#hooks/use-graphics.js', () => ({
         enableAxes: true,
         enableMatcap: false,
         enablePostProcessing: false,
-        environmentPreset: 'performance',
         graphicsBackendPreference: 'webgpu',
         webGpuAvailable: true,
         upDirection: 'z',
@@ -64,7 +62,7 @@ describe('ViewerSettings', () => {
     vi.clearAllMocks();
   });
 
-  it('should omit graphics backend controls from 3D viewer settings', async () => {
+  it('should retain post-processing while omitting removed viewer controls', async () => {
     const user = userEvent.setup();
     render(
       <TooltipProvider>
@@ -74,7 +72,11 @@ describe('ViewerSettings', () => {
 
     await user.click(screen.getByRole('button'));
 
+    expect(await screen.findByText('Post-processing')).toBeVisible();
     expect(await screen.findByText('Timeout')).toBeVisible();
+    expect(screen.queryByText('Environment')).not.toBeInTheDocument();
+    expect(screen.queryByText('Studio')).not.toBeInTheDocument();
+    expect(screen.queryByText('Performance')).not.toBeInTheDocument();
     expect(screen.queryByText('Backend')).not.toBeInTheDocument();
     expect(screen.queryByText('Graphics backend')).not.toBeInTheDocument();
     expect(screen.queryByText('WebGPU')).not.toBeInTheDocument();

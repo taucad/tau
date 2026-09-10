@@ -7,7 +7,6 @@ import type { LengthSymbol, UnitSystem } from '@taucad/units';
 import { standardInternationalBaseUnits } from '@taucad/units/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
 import type {
-  EnvironmentPreset,
   GraphicsBackendPreference,
   PinnedMeasurement,
   ResolvedGraphicsBackend,
@@ -18,7 +17,6 @@ import {
 } from '#components/geometry/graphics/graphics-backend.js';
 import { deriveModelInteractionUnitId, modelInteractionMachine } from '#machines/model-interaction.machine.js';
 import type { ModelInteractionSource, ViewerHoverSuppressionReason } from '#machines/model-interaction.machine.js';
-import { buildGltfComponentManifest } from '#components/geometry/graphics/metadata/gltf-component-manifest.js';
 import {
   applyProgressiveSceneUpdate,
   clearProgressiveSceneProjection,
@@ -30,6 +28,60 @@ import type { ProgressiveSceneProjection } from '#machines/progressive-scene-pro
 export type ModelInteractionRef = ActorRefFrom<typeof modelInteractionMachine>;
 
 export type ModelPointerClickSuppressionReason = 'measureTool';
+
+export type GltfPresentationBarrier = 'display-ready' | 'analysis-ready';
+
+export type GltfPresentationTelemetry = Readonly<{
+  revision: number;
+  key: string;
+  backend: ResolvedGraphicsBackend;
+  barrier: GltfPresentationBarrier;
+  outcome: 'presented' | 'failed' | 'cancelled' | 'stale';
+  glbBytes: number;
+  meshCount: number;
+  triangleCount: number;
+  sourceLineCount: number;
+  lineSegmentCount: number;
+  durations: Readonly<
+    Partial<
+      Record<
+        | 'parse'
+        | 'manifest'
+        | 'annotation'
+        | 'topologySubmit'
+        | 'topologyWorker'
+        | 'topologyHydrate'
+        | 'fatLines'
+        | 'materials'
+        | 'pipelineWarmup'
+        | 'commitToFirstFrame'
+        | 'receiptToFirstFrame',
+        number
+      >
+    >
+  >;
+  modelEmptyFrames: number;
+  committedBundleHighWaterMark: number;
+  candidateBundleHighWaterMark: number;
+  topologyJobsStarted: number;
+  topologyJobsDiscarded: number;
+}>;
+
+export type GltfPresentationProjection = Readonly<{
+  requestedRevision: number;
+  requestedKey?: string;
+  presentedRevision: number;
+  presentedKey?: string;
+  phase: 'idle' | 'preparing' | 'awaiting-analysis' | 'presented' | 'failed';
+  recentTelemetry: readonly GltfPresentationTelemetry[];
+}>;
+
+const maximumGltfPresentationTelemetryRecords = 20;
+
+const withGltfPresentationPhase = (
+  projection: Omit<GltfPresentationProjection, 'phase'>,
+  phase: GltfPresentationProjection['phase'],
+): GltfPresentationProjection => ({ ...projection, phase });
 
 const addSuppressionReason = <T extends string>(reasons: readonly T[], reason: T): T[] =>
   reasons.includes(reason) ? [...reasons] : [...reasons, reason];
@@ -82,8 +134,6 @@ export type GraphicsContext = {
   enableMatcap: boolean;
   enablePostProcessing: boolean;
   upDirection: 'x' | 'y' | 'z';
-  environmentPreset: EnvironmentPreset;
-
   /** User preference (`auto` uses runtime GPU probe). */
   graphicsBackendPreference: GraphicsBackendPreference;
   /** Probe result cached after startup (invoked probe). */
@@ -148,6 +198,8 @@ export type GraphicsContext = {
   geometry: Geometry | undefined;
   /** Deterministic key derived from the geometry content hash. Used for skip-when-unchanged optimizations. */
   geometryKey: string;
+  /** Requested-versus-presented GLTF identity and bounded renderer handoff measurements. */
+  gltfPresentation: GltfPresentationProjection;
   /** Resolved transient scenes keyed by timeline sequence; final geometry remains separate. */
   progressiveScene: ProgressiveSceneProjection;
 };
@@ -170,7 +222,6 @@ export type GraphicsEvent =
   | { type: 'setMatcapVisibility'; payload: boolean }
   | { type: 'setPostProcessingVisibility'; payload: boolean }
   | { type: 'setUpDirection'; payload: 'x' | 'y' | 'z' }
-  | { type: 'setEnvironmentPreset'; payload: EnvironmentPreset }
   | { type: 'setGraphicsBackendPreference'; payload: GraphicsBackendPreference }
   // Clipping plane events
   | { type: 'setSectionViewActive'; payload: boolean }
@@ -225,6 +276,23 @@ export type GraphicsEvent =
       units: { length: LengthSymbol };
       sourceFile?: string;
     }
+  | { type: 'gltfPreparationStarted'; revision: number; key: string }
+  | {
+      type: 'gltfDisplayReady';
+      revision: number;
+      key: string;
+      barrier: GltfPresentationBarrier;
+    }
+  | { type: 'gltfAnalysisReady'; revision: number; key: string }
+  | {
+      type: 'gltfPresentationCommitted';
+      revision: number;
+      key: string;
+      unitId: string;
+      manifest: GeometryComponentManifest;
+    }
+  | { type: 'gltfPresentationFailed'; revision: number; key: string }
+  | { type: 'gltfPresentationMeasured'; telemetry: GltfPresentationTelemetry }
   | {
       type: 'syncProgressiveScene';
       updates: readonly ProgressiveSceneUpdate[];
@@ -238,21 +306,62 @@ export type GraphicsEvent =
       manifest: GeometryComponentManifest;
       source?: ModelInteractionSource;
     }
-  | { type: 'clearModelComponentManifest'; unitId: string; source?: ModelInteractionSource }
+  | {
+      type: 'clearModelComponentManifest';
+      unitId: string;
+      source?: ModelInteractionSource;
+    }
   | {
       type: 'setHoveredModelComponent';
       unitId: string;
       componentId: string | undefined;
       source?: ModelInteractionSource;
     }
-  | { type: 'toggleModelComponentSelection'; unitId: string; componentId: string; source?: ModelInteractionSource }
-  | { type: 'selectModelComponent'; unitId: string; componentId: string; source?: ModelInteractionSource }
-  | { type: 'clearModelComponentSelection'; unitId: string; source?: ModelInteractionSource }
-  | { type: 'hideModelComponent'; unitId: string; componentId: string; source?: ModelInteractionSource }
-  | { type: 'showModelComponent'; unitId: string; componentId: string; source?: ModelInteractionSource }
-  | { type: 'showHiddenModelComponents'; unitId: string; source?: ModelInteractionSource }
-  | { type: 'isolateModelComponent'; unitId: string; componentId: string; source?: ModelInteractionSource }
-  | { type: 'clearModelComponentIsolation'; unitId: string; source?: ModelInteractionSource }
+  | {
+      type: 'toggleModelComponentSelection';
+      unitId: string;
+      componentId: string;
+      source?: ModelInteractionSource;
+    }
+  | {
+      type: 'selectModelComponent';
+      unitId: string;
+      componentId: string;
+      source?: ModelInteractionSource;
+    }
+  | {
+      type: 'clearModelComponentSelection';
+      unitId: string;
+      source?: ModelInteractionSource;
+    }
+  | {
+      type: 'hideModelComponent';
+      unitId: string;
+      componentId: string;
+      source?: ModelInteractionSource;
+    }
+  | {
+      type: 'showModelComponent';
+      unitId: string;
+      componentId: string;
+      source?: ModelInteractionSource;
+    }
+  | {
+      type: 'showHiddenModelComponents';
+      unitId: string;
+      source?: ModelInteractionSource;
+    }
+  | {
+      type: 'isolateModelComponent';
+      unitId: string;
+      componentId: string;
+      source?: ModelInteractionSource;
+    }
+  | {
+      type: 'clearModelComponentIsolation';
+      unitId: string;
+      source?: ModelInteractionSource;
+    }
   | {
       type: 'setModelComponentOpacity';
       unitId: string;
@@ -260,11 +369,28 @@ export type GraphicsEvent =
       opacity: number;
       source?: ModelInteractionSource;
     }
-  | { type: 'resetModelComponentOpacities'; unitId: string; source?: ModelInteractionSource }
-  | { type: 'focusModelComponent'; unitId: string; componentId: string; source?: ModelInteractionSource }
-  | { type: 'clearModelComponentFocus'; unitId: string; source?: ModelInteractionSource }
+  | {
+      type: 'resetModelComponentOpacities';
+      unitId: string;
+      source?: ModelInteractionSource;
+    }
+  | {
+      type: 'focusModelComponent';
+      unitId: string;
+      componentId: string;
+      source?: ModelInteractionSource;
+    }
+  | {
+      type: 'clearModelComponentFocus';
+      unitId: string;
+      source?: ModelInteractionSource;
+    }
   // Scene radius update from Three.js bounding sphere (sent by Stage)
-  | { type: 'sceneRadiusUpdated'; radius: number; centerMeters: [number, number, number] };
+  | {
+      type: 'sceneRadiusUpdated';
+      radius: number;
+      centerMeters: [number, number, number];
+    };
 
 // Emitted events
 export type GraphicsEmitted =
@@ -285,7 +411,6 @@ export type GraphicsInput = {
   enableMatcap?: boolean;
   enablePostProcessing?: boolean;
   upDirection?: 'x' | 'y' | 'z';
-  environmentPreset?: EnvironmentPreset;
   /** Saved pinned measurements to restore */
   pinnedMeasurements?: PinnedMeasurement[];
   graphicsBackendPreference?: GraphicsBackendPreference;
@@ -441,36 +566,6 @@ function length(v: [number, number, number]): number {
 function normalize(v: [number, number, number]): [number, number, number] {
   const length_ = length(v) || 1;
   return [v[0] / length_, v[1] / length_, v[2] / length_];
-}
-
-function extractComponentManifestUpdates({
-  geometry,
-  sourceFile,
-}: {
-  readonly geometry: Geometry;
-  readonly sourceFile?: string;
-}): { unitId: string; manifest: GeometryComponentManifest } | undefined {
-  if (geometry.format !== 'gltf') {
-    return undefined;
-  }
-
-  try {
-    const manifest = buildGltfComponentManifest(geometry.content, {
-      sourceFile,
-      geometryHash: geometry.hash,
-    });
-    return {
-      unitId: deriveModelInteractionUnitId({
-        sourceFile,
-        geometryHash: geometry.hash,
-        manifest,
-      }),
-      manifest,
-    };
-  } catch (error) {
-    console.error('Failed to extract GLTF component manifest in graphics machine', error);
-    return undefined;
-  }
 }
 
 // Apply XYZ-order Euler rotation to a vector
@@ -745,18 +840,37 @@ export const graphicsMachine = setup({
     updateGeometry: enqueueActions(({ enqueue, event, context }) => {
       assertEvent(event, 'updateGeometry');
 
-      const componentManifestUpdate = extractComponentManifestUpdates({
-        geometry: event.geometry,
-        sourceFile: event.sourceFile,
-      });
-
       enqueue.assign({
         geometry: event.geometry,
         geometryKey: event.geometry.hash,
+        gltfPresentation:
+          event.geometry.format === 'gltf'
+            ? withGltfPresentationPhase(
+                {
+                  ...context.gltfPresentation,
+                  requestedRevision: context.gltfPresentation.requestedRevision + 1,
+                  requestedKey: event.geometry.hash,
+                },
+                'preparing',
+              )
+            : withGltfPresentationPhase(
+                {
+                  ...context.gltfPresentation,
+                  requestedRevision: context.gltfPresentation.requestedRevision + 1,
+                  requestedKey: undefined,
+                  presentedRevision: context.gltfPresentation.requestedRevision + 1,
+                  presentedKey: undefined,
+                },
+                'idle',
+              ),
         modelInteractionUnitId:
-          componentManifestUpdate?.unitId ??
-          (event.sourceFile ? deriveModelInteractionUnitId({ sourceFile: event.sourceFile }) : undefined),
-        pickableMeshesVersion: context.pickableMeshesVersion + 1,
+          event.geometry.format === 'gltf'
+            ? context.modelInteractionUnitId
+            : event.sourceFile
+              ? deriveModelInteractionUnitId({ sourceFile: event.sourceFile })
+              : undefined,
+        pickableMeshesVersion:
+          event.geometry.format === 'gltf' ? context.pickableMeshesVersion : context.pickableMeshesVersion + 1,
         cadUnits: {
           length: {
             symbol: event.units.length,
@@ -764,22 +878,101 @@ export const graphicsMachine = setup({
         },
       });
 
-      if (componentManifestUpdate) {
-        enqueue.sendTo(context.modelInteractionRef, {
-          type: 'loadManifest',
-          unitId: componentManifestUpdate.unitId,
-          manifest: componentManifestUpdate.manifest,
-          source: 'viewer',
-        });
-      }
-
-      if (event.sourceFile && !componentManifestUpdate) {
+      if (event.geometry.format !== 'gltf' && event.sourceFile) {
         enqueue.sendTo(context.modelInteractionRef, {
           type: 'clearManifest',
-          unitId: deriveModelInteractionUnitId({ sourceFile: event.sourceFile }),
+          unitId: deriveModelInteractionUnitId({
+            sourceFile: event.sourceFile,
+          }),
           source: 'viewer',
         });
       }
+    }),
+
+    beginGltfPreparation: assign({
+      gltfPresentation({ context, event }) {
+        assertEvent(event, 'gltfPreparationStarted');
+        return event.revision === context.gltfPresentation.requestedRevision &&
+          event.key === context.gltfPresentation.requestedKey
+          ? withGltfPresentationPhase(context.gltfPresentation, 'preparing')
+          : context.gltfPresentation;
+      },
+    }),
+
+    recordGltfDisplayReady: assign({
+      gltfPresentation({ context, event }) {
+        assertEvent(event, 'gltfDisplayReady');
+        return event.revision === context.gltfPresentation.requestedRevision &&
+          event.key === context.gltfPresentation.requestedKey
+          ? withGltfPresentationPhase(
+              context.gltfPresentation,
+              event.barrier === 'analysis-ready' ? 'awaiting-analysis' : 'preparing',
+            )
+          : context.gltfPresentation;
+      },
+    }),
+
+    recordGltfAnalysisReady: assign({
+      gltfPresentation({ context, event }) {
+        assertEvent(event, 'gltfAnalysisReady');
+        return event.revision === context.gltfPresentation.requestedRevision &&
+          event.key === context.gltfPresentation.requestedKey
+          ? withGltfPresentationPhase(context.gltfPresentation, 'preparing')
+          : context.gltfPresentation;
+      },
+    }),
+
+    commitGltfPresentation: enqueueActions(({ enqueue, context, event }) => {
+      assertEvent(event, 'gltfPresentationCommitted');
+      if (
+        event.revision !== context.gltfPresentation.requestedRevision ||
+        event.key !== context.gltfPresentation.requestedKey
+      ) {
+        return;
+      }
+      enqueue.assign({
+        gltfPresentation: withGltfPresentationPhase(
+          {
+            ...context.gltfPresentation,
+            presentedRevision: event.revision,
+            presentedKey: event.key,
+          },
+          'presented',
+        ),
+        modelInteractionUnitId: event.unitId,
+        pickableMeshesVersion: context.pickableMeshesVersion + 1,
+      });
+      enqueue.sendTo(context.modelInteractionRef, {
+        type: 'loadManifest',
+        unitId: event.unitId,
+        manifest: event.manifest,
+        source: 'viewer',
+      });
+    }),
+
+    failGltfPresentation: assign({
+      gltfPresentation({ context, event }) {
+        assertEvent(event, 'gltfPresentationFailed');
+        return event.revision === context.gltfPresentation.requestedRevision &&
+          event.key === context.gltfPresentation.requestedKey
+          ? withGltfPresentationPhase(
+              context.gltfPresentation,
+              context.gltfPresentation.presentedKey === undefined ? 'failed' : 'presented',
+            )
+          : context.gltfPresentation;
+      },
+    }),
+
+    recordGltfPresentationTelemetry: assign({
+      gltfPresentation({ context, event }) {
+        assertEvent(event, 'gltfPresentationMeasured');
+        return {
+          ...context.gltfPresentation,
+          recentTelemetry: [...context.gltfPresentation.recentTelemetry, event.telemetry].slice(
+            -maximumGltfPresentationTelemetryRecords,
+          ),
+        };
+      },
     }),
 
     syncProgressiveScene: assign({
@@ -803,7 +996,10 @@ export const graphicsMachine = setup({
 
     updateSceneRadius: enqueueActions(({ enqueue, event }) => {
       assertEvent(event, 'sceneRadiusUpdated');
-      enqueue.assign({ geometryRadius: event.radius, geometryCenter: event.centerMeters });
+      enqueue.assign({
+        geometryRadius: event.radius,
+        geometryCenter: event.centerMeters,
+      });
       enqueue.emit({
         type: 'geometryRadiusCalculated',
         radius: event.radius,
@@ -867,13 +1063,6 @@ export const graphicsMachine = setup({
     setUpDirection: assign({
       upDirection({ event }) {
         assertEvent(event, 'setUpDirection');
-        return event.payload;
-      },
-    }),
-
-    setEnvironmentPreset: assign({
-      environmentPreset({ event }) {
-        assertEvent(event, 'setEnvironmentPreset');
         return event.payload;
       },
     }),
@@ -1155,14 +1344,23 @@ export const graphicsMachine = setup({
       ({ context }) => context.modelInteractionRef,
       ({ event }) => {
         assertEvent(event, 'loadModelComponentManifest');
-        return { type: 'loadManifest', unitId: event.unitId, manifest: event.manifest, source: event.source };
+        return {
+          type: 'loadManifest',
+          unitId: event.unitId,
+          manifest: event.manifest,
+          source: event.source,
+        };
       },
     ),
     clearModelComponentManifest: sendTo(
       ({ context }) => context.modelInteractionRef,
       ({ event }) => {
         assertEvent(event, 'clearModelComponentManifest');
-        return { type: 'clearManifest', unitId: event.unitId, source: event.source };
+        return {
+          type: 'clearManifest',
+          unitId: event.unitId,
+          source: event.source,
+        };
       },
     ),
     setHoveredModelComponent: sendTo(
@@ -1209,42 +1407,69 @@ export const graphicsMachine = setup({
       ({ context }) => context.modelInteractionRef,
       ({ event }) => {
         assertEvent(event, 'clearModelComponentSelection');
-        return { type: 'clearSelection', unitId: event.unitId, source: event.source };
+        return {
+          type: 'clearSelection',
+          unitId: event.unitId,
+          source: event.source,
+        };
       },
     ),
     hideModelComponent: sendTo(
       ({ context }) => context.modelInteractionRef,
       ({ event }) => {
         assertEvent(event, 'hideModelComponent');
-        return { type: 'hideComponent', unitId: event.unitId, componentId: event.componentId, source: event.source };
+        return {
+          type: 'hideComponent',
+          unitId: event.unitId,
+          componentId: event.componentId,
+          source: event.source,
+        };
       },
     ),
     showModelComponent: sendTo(
       ({ context }) => context.modelInteractionRef,
       ({ event }) => {
         assertEvent(event, 'showModelComponent');
-        return { type: 'showComponent', unitId: event.unitId, componentId: event.componentId, source: event.source };
+        return {
+          type: 'showComponent',
+          unitId: event.unitId,
+          componentId: event.componentId,
+          source: event.source,
+        };
       },
     ),
     showHiddenModelComponents: sendTo(
       ({ context }) => context.modelInteractionRef,
       ({ event }) => {
         assertEvent(event, 'showHiddenModelComponents');
-        return { type: 'showHiddenComponents', unitId: event.unitId, source: event.source };
+        return {
+          type: 'showHiddenComponents',
+          unitId: event.unitId,
+          source: event.source,
+        };
       },
     ),
     isolateModelComponent: sendTo(
       ({ context }) => context.modelInteractionRef,
       ({ event }) => {
         assertEvent(event, 'isolateModelComponent');
-        return { type: 'isolateComponent', unitId: event.unitId, componentId: event.componentId, source: event.source };
+        return {
+          type: 'isolateComponent',
+          unitId: event.unitId,
+          componentId: event.componentId,
+          source: event.source,
+        };
       },
     ),
     clearModelComponentIsolation: sendTo(
       ({ context }) => context.modelInteractionRef,
       ({ event }) => {
         assertEvent(event, 'clearModelComponentIsolation');
-        return { type: 'clearIsolation', unitId: event.unitId, source: event.source };
+        return {
+          type: 'clearIsolation',
+          unitId: event.unitId,
+          source: event.source,
+        };
       },
     ),
     setModelComponentOpacity: sendTo(
@@ -1264,21 +1489,34 @@ export const graphicsMachine = setup({
       ({ context }) => context.modelInteractionRef,
       ({ event }) => {
         assertEvent(event, 'resetModelComponentOpacities');
-        return { type: 'resetComponentOpacities', unitId: event.unitId, source: event.source };
+        return {
+          type: 'resetComponentOpacities',
+          unitId: event.unitId,
+          source: event.source,
+        };
       },
     ),
     focusModelComponent: sendTo(
       ({ context }) => context.modelInteractionRef,
       ({ event }) => {
         assertEvent(event, 'focusModelComponent');
-        return { type: 'focusComponent', unitId: event.unitId, componentId: event.componentId, source: event.source };
+        return {
+          type: 'focusComponent',
+          unitId: event.unitId,
+          componentId: event.componentId,
+          source: event.source,
+        };
       },
     ),
     clearModelComponentFocus: sendTo(
       ({ context }) => context.modelInteractionRef,
       ({ event }) => {
         assertEvent(event, 'clearModelComponentFocus');
-        return { type: 'clearFocus', unitId: event.unitId, source: event.source };
+        return {
+          type: 'clearFocus',
+          unitId: event.unitId,
+          source: event.source,
+        };
       },
     ),
     stopOwnedModelInteraction: enqueueActions(({ enqueue, context }) => {
@@ -1378,8 +1616,6 @@ export const graphicsMachine = setup({
       enableMatcap: input.enableMatcap ?? false,
       enablePostProcessing: input.enablePostProcessing ?? false,
       upDirection: input.upDirection ?? 'z',
-      environmentPreset: input.environmentPreset ?? 'performance',
-
       graphicsBackendPreference: preference,
       webGpuAvailable: false,
       resolvedGraphicsBackend: resolveGraphicsBackendPreference(preference, false),
@@ -1430,6 +1666,12 @@ export const graphicsMachine = setup({
       // Shapes
       geometry: undefined,
       geometryKey: '',
+      gltfPresentation: {
+        requestedRevision: 0,
+        presentedRevision: 0,
+        phase: 'idle',
+        recentTelemetry: [],
+      },
       progressiveScene: createProgressiveSceneProjection(),
     };
   },
@@ -1483,9 +1725,6 @@ export const graphicsMachine = setup({
         setUpDirection: {
           actions: 'setUpDirection',
         },
-        setEnvironmentPreset: {
-          actions: 'setEnvironmentPreset',
-        },
         setGraphicsBackendPreference: {
           actions: 'setGraphicsBackendPreference',
         },
@@ -1524,6 +1763,24 @@ export const graphicsMachine = setup({
         // Geometry updates
         updateGeometry: {
           actions: 'updateGeometry',
+        },
+        gltfPreparationStarted: {
+          actions: 'beginGltfPreparation',
+        },
+        gltfDisplayReady: {
+          actions: 'recordGltfDisplayReady',
+        },
+        gltfAnalysisReady: {
+          actions: 'recordGltfAnalysisReady',
+        },
+        gltfPresentationCommitted: {
+          actions: 'commitGltfPresentation',
+        },
+        gltfPresentationFailed: {
+          actions: 'failGltfPresentation',
+        },
+        gltfPresentationMeasured: {
+          actions: 'recordGltfPresentationTelemetry',
         },
         syncProgressiveScene: {
           actions: 'syncProgressiveScene',
@@ -1804,3 +2061,19 @@ export const selectProgressiveSceneSnapshot = (snapshot: GraphicsSnapshot): Reso
 
 export const selectProgressiveSceneStatus = (snapshot: GraphicsSnapshot): ProgressiveSceneProjection['status'] =>
   snapshot.context.progressiveScene.status;
+
+export const selectRequestedGltfRevision = (snapshot: GraphicsSnapshot): number =>
+  snapshot.context.gltfPresentation.requestedRevision;
+
+export const selectRequestedGeometryKey = (snapshot: GraphicsSnapshot): string =>
+  snapshot.context.gltfPresentation.requestedKey ?? snapshot.context.geometryKey;
+
+export const selectPresentedGeometryKey = (snapshot: GraphicsSnapshot): string =>
+  snapshot.context.gltfPresentation.presentedKey ?? snapshot.context.geometryKey;
+
+export const selectPresentedGltfRevision = (snapshot: GraphicsSnapshot): number =>
+  snapshot.context.gltfPresentation.presentedRevision;
+
+export const selectLatestGltfPresentationTelemetry = (
+  snapshot: GraphicsSnapshot,
+): GltfPresentationTelemetry | undefined => snapshot.context.gltfPresentation.recentTelemetry.at(-1);

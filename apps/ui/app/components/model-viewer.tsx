@@ -174,7 +174,6 @@ const ModelViewerWithOwnGraphics = memo(function ModelViewerWithOwnGraphics(
       enableMatcap: defaultGraphicsSettings.enableMatcap,
       enablePostProcessing: defaultGraphicsSettings.enablePostProcessing,
       upDirection: defaultGraphicsSettings.upDirection,
-      environmentPreset: defaultGraphicsSettings.environmentPreset,
       graphicsBackendPreference: defaultGraphicsSettings.graphicsBackend ?? 'webgl',
     },
   });

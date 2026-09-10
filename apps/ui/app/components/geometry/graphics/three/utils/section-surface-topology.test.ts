@@ -10,6 +10,7 @@ import {
   buildSectionSurfaceTopologyForGeometry,
   collectSectionSurfaceSources,
   registerGltfSectionSurfaceSources,
+  setGltfSectionSurfaceRegistrationState,
   sliceSectionSurfaceSource,
   sliceSectionSurfaceTopologyForGeometry,
 } from '#components/geometry/graphics/three/utils/section-surface-topology.js';
@@ -106,7 +107,11 @@ describe('section surface topology', () => {
           worldPlane: new THREE.Plane(new THREE.Vector3(0, 0, 1), 0),
           meshWorldMatrix: new THREE.Matrix4(),
         }),
-      ).toMatchObject({ status: 'complete', closedContours: [expect.any(Array)], trueCutComponentCount: 1 });
+      ).toMatchObject({
+        status: 'complete',
+        closedContours: [expect.any(Array)],
+        trueCutComponentCount: 1,
+      });
     },
   );
 
@@ -159,7 +164,10 @@ describe('section surface topology', () => {
   it('certifies non-indexed glTF seams without rebuilding topology per plane', () => {
     const geometry = new THREE.BoxGeometry(2, 2, 2).toNonIndexed();
     const topology = buildSectionSurfaceTopologyForGeometry(geometry);
-    expect(topology).toMatchObject({ status: 'ready', topology: { path: 'fallback' } });
+    expect(topology).toMatchObject({
+      status: 'ready',
+      topology: { path: 'fallback' },
+    });
     expect(buildSectionSurfaceTopologyForGeometry(geometry)).toBe(topology);
     const buildMilliseconds = topology.status === 'ready' ? topology.topology.buildMilliseconds : undefined;
 
@@ -254,6 +262,22 @@ describe('section surface topology', () => {
     expect(collectSectionSurfaceSources(root)).toEqual([]);
   });
 
+  it.each(['pending', 'cancelled'] as const)('does not run standalone fallback below a %s glTF root', (status) => {
+    const scene = new THREE.Group();
+    scene.add(new THREE.Mesh(cubeGeometry(), new THREE.MeshBasicMaterial()));
+    setGltfSectionSurfaceRegistrationState(scene, status);
+
+    expect(collectSectionSurfaceSources(scene)).toEqual([]);
+  });
+
+  it('permits standalone fallback only for an explicitly unsupported glTF root', () => {
+    const scene = new THREE.Group();
+    scene.add(new THREE.Mesh(cubeGeometry(), new THREE.MeshBasicMaterial()));
+    setGltfSectionSurfaceRegistrationState(scene, 'unsupported');
+
+    expect(collectSectionSurfaceSources(scene)).toHaveLength(1);
+  });
+
   it('certifies face-split bodies as one logical source and rejects partial visibility', async () => {
     const unitId = 'unit';
     const bodyId = 'body';
@@ -277,18 +301,29 @@ describe('section surface topology', () => {
       scene,
       manifest: bodyManifest,
       unitId,
-      parser: { json: {}, associations: new Map(), getDependency: async () => undefined },
+      parser: {
+        json: {},
+        associations: new Map(),
+        getDependency: async () => undefined,
+      },
     });
 
     const visible = collectSectionSurfaceSources(scene);
     expect(visible).toHaveLength(1);
-    expect(visible[0]!.source).toMatchObject({ key: 'unit:body', topology: { status: 'ready' } });
+    expect(visible[0]!.source).toMatchObject({
+      key: 'unit:body',
+      topology: { status: 'ready' },
+    });
     expect(
       sliceSectionSurfaceSource({
         visibleSource: visible[0]!,
         worldPlane: new THREE.Plane(new THREE.Vector3(0, 0, 1), 0),
       }),
-    ).toMatchObject({ status: 'complete', trueCutComponentCount: 1, unresolvedTrueCutEdgeCount: 0 });
+    ).toMatchObject({
+      status: 'complete',
+      trueCutComponentCount: 1,
+      unresolvedTrueCutEdgeCount: 0,
+    });
 
     firstFace.visible = false;
     const partial = collectSectionSurfaceSources(scene)[0]!;
@@ -298,7 +333,10 @@ describe('section surface topology', () => {
         visibleSource: partial,
         worldPlane: new THREE.Plane(new THREE.Vector3(0, 0, 1), 0),
       }),
-    ).toMatchObject({ status: 'unsupported', failure: { code: 'partial-visibility' } });
+    ).toMatchObject({
+      status: 'unsupported',
+      failure: { code: 'partial-visibility' },
+    });
   });
 
   it('uses a valid manifold extension and fails closed when a present claim is malformed', async () => {
@@ -322,24 +360,52 @@ describe('section surface topology', () => {
           ],
           accessors: [
             { componentType: 5126, count: position.count, type: 'VEC3' },
-            { bufferView: 0, componentType: 5123, count: index.count, type: 'SCALAR' },
-            { bufferView: 1, componentType: 5123, count: accessorOverrides[2]?.count ?? index.count, type: 'SCALAR' },
-            { bufferView: 2, componentType: 5123, count: accessorOverrides[3]?.count ?? 0, type: 'SCALAR' },
-            { bufferView: 3, componentType: 5123, count: accessorOverrides[4]?.count ?? 0, type: 'SCALAR' },
+            {
+              bufferView: 0,
+              componentType: 5123,
+              count: index.count,
+              type: 'SCALAR',
+            },
+            {
+              bufferView: 1,
+              componentType: 5123,
+              count: accessorOverrides[2]?.count ?? index.count,
+              type: 'SCALAR',
+            },
+            {
+              bufferView: 2,
+              componentType: 5123,
+              count: accessorOverrides[3]?.count ?? 0,
+              type: 'SCALAR',
+            },
+            {
+              bufferView: 3,
+              componentType: 5123,
+              count: accessorOverrides[4]?.count ?? 0,
+              type: 'SCALAR',
+            },
           ],
         },
         associations: new Map([[mesh, { nodes: 0, meshes: 0, primitives: 0 }]]),
         getDependency: async (_type: 'accessor', accessorIndex: number) =>
           accessorIndex === 0 ? position : (accessorOverrides[accessorIndex] ?? index),
       } as const;
-      await registerGltfSectionSurfaceSources({ scene, manifest, unitId: 'unit', parser });
+      await registerGltfSectionSurfaceSources({
+        scene,
+        manifest,
+        unitId: 'unit',
+        parser,
+      });
       return collectSectionSurfaceSources(scene)[0]!;
     };
 
     const valid = await createRegistered({
       manifoldPrimitive: { attributes: { [positionAttribute]: 0 }, indices: 2 },
     });
-    expect(valid.source.topology).toMatchObject({ status: 'ready', topology: { path: 'extension' } });
+    expect(valid.source.topology).toMatchObject({
+      status: 'ready',
+      topology: { path: 'extension' },
+    });
     expect(
       sliceSectionSurfaceSource({
         visibleSource: valid,
@@ -358,7 +424,10 @@ describe('section surface topology', () => {
     outOfRange.setX(0, 8);
     const outOfRangeRegistered = await createRegistered(
       {
-        manifoldPrimitive: { attributes: { [positionAttribute]: 0 }, indices: 2 },
+        manifoldPrimitive: {
+          attributes: { [positionAttribute]: 0 },
+          indices: 2,
+        },
         mergeIndices: 3,
         mergeValues: 4,
       },
@@ -377,7 +446,10 @@ describe('section surface topology', () => {
     collapsed.setX(1, collapsed.getX(0));
     const collapsedRegistered = await createRegistered(
       {
-        manifoldPrimitive: { attributes: { [positionAttribute]: 0 }, indices: 2 },
+        manifoldPrimitive: {
+          attributes: { [positionAttribute]: 0 },
+          indices: 2,
+        },
         mergeIndices: 3,
         mergeValues: 4,
       },
@@ -441,12 +513,23 @@ describe('section surface topology', () => {
         meshes: [
           {
             primitives: [
-              { attributes: { [positionAttribute]: 0 }, indices: 1, material: 0 },
-              { attributes: { [positionAttribute]: 0 }, indices: 2, material: 1 },
+              {
+                attributes: { [positionAttribute]: 0 },
+                indices: 1,
+                material: 0,
+              },
+              {
+                attributes: { [positionAttribute]: 0 },
+                indices: 2,
+                material: 1,
+              },
             ],
             extensions: {
               [manifoldExtension]: {
-                manifoldPrimitive: { attributes: { [positionAttribute]: 0 }, indices: 3 },
+                manifoldPrimitive: {
+                  attributes: { [positionAttribute]: 0 },
+                  indices: 3,
+                },
                 mergeIndices: 4,
                 mergeValues: 5,
               },
@@ -455,8 +538,18 @@ describe('section surface topology', () => {
         ],
         accessors: [
           { componentType: 5126, count: sharedPosition.count, type: 'VEC3' },
-          { bufferView: 0, componentType: 5123, count: firstIndices.length, type: 'SCALAR' },
-          { bufferView: 0, componentType: 5123, count: secondIndices.length, type: 'SCALAR' },
+          {
+            bufferView: 0,
+            componentType: 5123,
+            count: firstIndices.length,
+            type: 'SCALAR',
+          },
+          {
+            bufferView: 0,
+            componentType: 5123,
+            count: secondIndices.length,
+            type: 'SCALAR',
+          },
           {
             bufferView: 0,
             componentType: 5123,
@@ -464,8 +557,18 @@ describe('section surface topology', () => {
             type: 'SCALAR',
             sparse: { count: changes.length },
           },
-          { bufferView: 1, componentType: 5121, count: changes.length, type: 'SCALAR' },
-          { bufferView: 2, componentType: 5123, count: changes.length, type: 'SCALAR' },
+          {
+            bufferView: 1,
+            componentType: 5121,
+            count: changes.length,
+            type: 'SCALAR',
+          },
+          {
+            bufferView: 2,
+            componentType: 5123,
+            count: changes.length,
+            type: 'SCALAR',
+          },
         ],
       },
       associations: new Map([
@@ -475,11 +578,22 @@ describe('section surface topology', () => {
       getDependency: async (_type: 'accessor', accessorIndex: number) => accessors[accessorIndex],
     } as const;
 
-    await registerGltfSectionSurfaceSources({ scene, manifest, unitId: 'unit', parser });
+    await registerGltfSectionSurfaceSources({
+      scene,
+      manifest,
+      unitId: 'unit',
+      parser,
+    });
     const exactSource = collectSectionSurfaceSources(scene)[0]!;
-    expect(exactSource.source.topology).toMatchObject({ status: 'ready', topology: { path: 'extension' } });
+    expect(exactSource.source.topology).toMatchObject({
+      status: 'ready',
+      topology: { path: 'extension' },
+    });
     const plane = new THREE.Plane(new THREE.Vector3(1, 0, 0), 0);
-    const exact = sliceSectionSurfaceSource({ visibleSource: exactSource, worldPlane: plane });
+    const exact = sliceSectionSurfaceSource({
+      visibleSource: exactSource,
+      worldPlane: plane,
+    });
     const fallback = sliceSectionSurfaceTopologyForGeometry({
       geometry: base,
       worldPlane: plane,
@@ -502,7 +616,10 @@ describe('section surface topology', () => {
     geometries[1]!.translate(4, 0, 0);
     const meshes = geometries.map((geometry, index) => {
       const mesh = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial());
-      setModelComponentOwner(mesh, { unitId: 'unit', componentId: faceIds[index]! });
+      setModelComponentOwner(mesh, {
+        unitId: 'unit',
+        componentId: faceIds[index]!,
+      });
       return mesh;
     });
     const scene = new THREE.Group();
@@ -514,10 +631,18 @@ describe('section surface topology', () => {
     const parser = {
       json: {
         meshes: geometries.map((_, index) => ({
-          primitives: [{ attributes: { [positionAttribute]: index * 2 }, indices: index * 2 + 1 }],
+          primitives: [
+            {
+              attributes: { [positionAttribute]: index * 2 },
+              indices: index * 2 + 1,
+            },
+          ],
           extensions: {
             [manifoldExtension]: {
-              manifoldPrimitive: { attributes: { [positionAttribute]: index * 2 }, indices: index * 2 + 1 },
+              manifoldPrimitive: {
+                attributes: { [positionAttribute]: index * 2 },
+                indices: index * 2 + 1,
+              },
             },
           },
         })),

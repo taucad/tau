@@ -14,7 +14,6 @@ import { cadMachine, selectCanSaveSelectedSceneStage } from '#machines/cad.machi
 import type { CadContext } from '#machines/cad.machine.js';
 import { graphicsMachine, selectProgressiveSceneSnapshot } from '#machines/graphics.machine.js';
 import type { LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
-import type { runtime } from '#runtime/ui-runtime.definition.js';
 
 type SceneDigest = Extract<ProgressiveSceneUpdate, { readonly type: 'reset' }>['sceneDigest'];
 type ContentDigest = ResolvedSceneAsset['contentDigest'];
@@ -77,7 +76,7 @@ const portableReset = (renderId: string, sequence: number): ProgressiveSceneUpda
 };
 
 const createCadActor = (
-  client = createMockRuntimeClient<typeof runtime>(),
+  client = createMockRuntimeClient(),
   fileManagerRef?: NonNullable<CadContext['fileManagerRef']>,
 ) => {
   const cleanups: Array<() => void> = [];
@@ -189,21 +188,8 @@ describe('cad progressive scene ownership', () => {
     expect(actor.getSnapshot().context.geometry?.hash).toBe('last-good');
   });
 
-  it('closes a cancelled transient branch without changing final geometry', () => {
-    actor.send({
-      type: 'geometryComputed',
-      geometry: { format: 'gltf', content: new Uint8Array([1]), hash: 'last-good' },
-      issues: [],
-    });
-    actor.send({ type: 'sceneUpdate', update: reset('render-b', 0) });
-    actor.send({ type: 'progressiveSceneCancelled' });
-
-    expect(actor.getSnapshot().context.sceneTimeline.streamState).toBe('cancelled');
-    expect(actor.getSnapshot().context.geometry?.hash).toBe('last-good');
-  });
-
   it('restores one evicted frame from storage, keeps it selected, and resumes Live without rerendering', async () => {
-    const client = createMockRuntimeClient<typeof runtime>();
+    const client = createMockRuntimeClient();
     const restored = reset('render-a', 0, 3 * 1024 * 1024);
     if (restored.type !== 'reset') {
       throw new TypeError('Expected reset fixture');
@@ -288,7 +274,7 @@ describe('cad progressive scene ownership', () => {
   });
 
   it('saves one portable selected stage with collision-safe naming without invoking render or export', async () => {
-    const client = createMockRuntimeClient<typeof runtime>();
+    const client = createMockRuntimeClient();
     const fileManager = createFileManagerProbe();
     const collision = Object.assign(new Error('A file already exists'), {
       code: 'NAME_EXISTS',
@@ -346,7 +332,7 @@ describe('cad progressive scene ownership', () => {
   });
 
   it('never overwrites a portable stage when another save wins directory allocation', async () => {
-    const client = createMockRuntimeClient<typeof runtime>();
+    const client = createMockRuntimeClient();
     const fileManager = createFileManagerProbe();
     fileManager.canCreate.mockResolvedValue(true);
     fileManager.createDirectory
@@ -373,7 +359,7 @@ describe('cad progressive scene ownership', () => {
     fileManager.canCreate.mockResolvedValue(true);
     fileManager.write.mockReturnValue(pending.promise);
     actor.stop();
-    actor = createCadActor(createMockRuntimeClient<typeof runtime>(), fileManager.fileManagerRef);
+    actor = createCadActor(createMockRuntimeClient(), fileManager.fileManagerRef);
     actor.start();
     await waitFor(actor, (snapshot) => snapshot.matches('idle'));
     actor.send({ type: 'initializeModel', entryPath: 'main.cs' });
@@ -405,7 +391,7 @@ describe('cad progressive scene ownership', () => {
       fileManager.canCreate.mockResolvedValue(true);
       fileManager.write.mockReturnValue(pending.promise);
       actor.stop();
-      actor = createCadActor(createMockRuntimeClient<typeof runtime>(), fileManager.fileManagerRef);
+      actor = createCadActor(createMockRuntimeClient(), fileManager.fileManagerRef);
       actor.start();
       await waitFor(actor, (snapshot) => snapshot.matches('idle'));
       actor.send({ type: 'initializeModel', entryPath: 'main.cs' });
@@ -429,7 +415,7 @@ describe('cad progressive scene ownership', () => {
   it.each(['reset', 'delta'] as const)(
     'promotes a selected %s manifest and deduplicated reachable assets without rendering',
     async (kind) => {
-      const client = createMockRuntimeClient<typeof runtime>();
+      const client = createMockRuntimeClient();
       const fileManager = createFileManagerProbe();
       fileManager.canCreate
         .mockResolvedValueOnce(Object.assign(new Error('Exists'), { code: 'NAME_EXISTS' }))
@@ -518,7 +504,7 @@ describe('cad progressive scene ownership', () => {
         fileManager.createDirectory.mockResolvedValueOnce(undefined).mockRejectedValueOnce(failed);
       }
       actor.stop();
-      actor = createCadActor(createMockRuntimeClient<typeof runtime>(), fileManager.fileManagerRef);
+      actor = createCadActor(createMockRuntimeClient(), fileManager.fileManagerRef);
       actor.start();
       await waitFor(actor, (snapshot) => snapshot.matches('idle'));
       actor.send({ type: 'initializeModel', entryPath: 'main.cs' });
@@ -552,7 +538,7 @@ describe('cad progressive scene ownership', () => {
     if (initial.type !== 'reset') {
       throw new Error('Expected reset');
     }
-    const client = createMockRuntimeClient<typeof runtime>();
+    const client = createMockRuntimeClient();
     Object.defineProperty(client, 'readSceneSnapshot', {
       value: vi.fn().mockResolvedValue({ type: 'found', snapshot: initial.snapshot }),
     });
@@ -607,7 +593,7 @@ describe('cad progressive scene ownership', () => {
   });
 
   it('surfaces filesystem preflight failures without overwriting or invoking the kernel', async () => {
-    const client = createMockRuntimeClient<typeof runtime>();
+    const client = createMockRuntimeClient();
     const fileManager = createFileManagerProbe();
     const readOnly = Object.assign(new Error('The workspace is read-only'), {
       code: 'READ_ONLY_MOUNT',

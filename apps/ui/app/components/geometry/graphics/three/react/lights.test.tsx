@@ -42,10 +42,7 @@ vi.mock('#components/geometry/graphics/three/utils/lights.utils.js', () => ({
 }));
 
 type TestElementProperties = {
-  readonly args?: unknown;
   readonly children?: React.ReactNode;
-  readonly intensity?: unknown;
-  readonly position?: unknown;
 };
 
 const collectElements = (node: React.ReactNode): Array<React.ReactElement<TestElementProperties>> => {
@@ -70,7 +67,7 @@ describe('Lights', () => {
     const { renderHook } = await import('@testing-library/react');
 
     // oxlint-disable-next-line new-cap -- invoking component as function for hook testing
-    renderHook(() => Lights({ environmentPreset: 'studio' }));
+    renderHook(() => Lights({}));
 
     expect(useDeferredValue).toHaveBeenCalled();
   });
@@ -84,7 +81,7 @@ describe('Lights', () => {
     const { applyLightingForCamera } = await import('#components/geometry/graphics/three/utils/lights.utils.js');
 
     // oxlint-disable-next-line new-cap -- invoking component as function for hook testing
-    renderHook(() => Lights({ environmentPreset: 'studio' }));
+    renderHook(() => Lights({}));
 
     // Execute the useFrame callback that was registered
     const frameCallback = vi.mocked(useFrame).mock.calls.at(-1)?.[0];
@@ -118,7 +115,7 @@ describe('Lights', () => {
     vi.mocked(applyLightingForCamera).mockClear();
 
     // oxlint-disable-next-line new-cap -- invoking component as function for hook testing
-    renderHook(() => Lights({ environmentPreset: 'studio' }));
+    renderHook(() => Lights({}));
 
     const frameCallback = vi.mocked(useFrame).mock.calls.at(-1)?.[0];
     if (typeof frameCallback === 'function') {
@@ -137,29 +134,31 @@ describe('Lights', () => {
     );
   });
 
-  it('should use same-count fixed performance key and lower fill lights', async () => {
+  it('should render the Studio environment as the sole non-matcap rig', async () => {
     mockUseTheme.mockReturnValue({ theme: Theme.LIGHT });
 
     const { Lights } = await import('#components/geometry/graphics/three/react/lights.js');
+    const { Environment, Lightformer } = await import('@react-three/drei');
     const { renderHook } = await import('@testing-library/react');
 
     // oxlint-disable-next-line new-cap -- invoking component as function for hook testing
-    const { result } = renderHook(() => Lights({ environmentPreset: 'performance', upDirection: 'x' }));
+    const { result } = renderHook(() => Lights({ upDirection: 'x' }));
     const elements = collectElements(result.current);
-    const hemisphere = elements.find((element) => element.type === 'hemisphereLight');
 
-    // oxlint-disable-next-line tau-lint/no-hardcoded-color -- asserting Three.js performance light colors
-    expect(hemisphere?.props.args).toEqual(['#ffffff', '#777777', 1]);
-    expect(hemisphere?.props.position).toEqual([1, 0, 0]);
+    expect(elements.filter((element) => element.type === Environment)).toHaveLength(1);
+    expect(elements.filter((element) => element.type === Lightformer)).toHaveLength(5);
+    expect(elements.filter((element) => element.type === 'directionalLight')).toHaveLength(1);
+    expect(elements.filter((element) => element.type === 'hemisphereLight')).toHaveLength(0);
+  });
 
-    const directionalLights = elements.filter((element) => element.type === 'directionalLight');
-    expect(directionalLights).toHaveLength(3);
+  it('should omit the Studio environment when matcap is enabled', async () => {
+    const { Lights } = await import('#components/geometry/graphics/three/react/lights.js');
+    const { Environment } = await import('@react-three/drei');
+    const { renderHook } = await import('@testing-library/react');
 
-    const performanceLights = directionalLights.slice(1);
-    expect(performanceLights.map((element) => element.props.position)).toEqual([
-      [5, -1, -3],
-      [-5, 1, 3],
-    ]);
-    expect(performanceLights.map((element) => element.props.intensity)).toEqual([2, 1.5]);
+    // oxlint-disable-next-line new-cap -- invoking component as function for hook testing
+    const { result } = renderHook(() => Lights({ enableMatcap: true }));
+
+    expect(collectElements(result.current).filter((element) => element.type === Environment)).toHaveLength(0);
   });
 });

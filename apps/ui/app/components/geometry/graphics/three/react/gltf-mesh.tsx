@@ -1,5 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import type { Dispatch, SetStateAction } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo, useLayoutEffect } from 'react';
 import { GLTFLoader } from 'three/addons';
 import type { GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import type { Camera, Group, Object3D, Material, Texture, Intersection, Ray, BufferGeometry, Mesh } from 'three';
@@ -13,7 +12,7 @@ import {
   WebGLCoordinateSystem,
   WebGPUCoordinateSystem,
 } from 'three';
-import { useThree } from '@react-three/fiber';
+import { useFrame, useThree } from '@react-three/fiber';
 import type { ThreeEvent } from '@react-three/fiber';
 import { applyMatcap } from '#components/geometry/graphics/three/materials/gltf-matcap.js';
 import {
@@ -52,13 +51,7 @@ import {
   getModelComponentIdInHierarchy,
   setModelComponentOwner,
 } from '#components/geometry/graphics/three/utils/model-component-owner.js';
-import {
-  useCameraRig,
-  useGraphics,
-  useGraphicsSelector,
-  useModelInteractionRef,
-  useModelInteractionSelector,
-} from '#hooks/use-graphics.js';
+import { useCameraRig, useGraphics, useGraphicsSelector, useModelInteractionSelector } from '#hooks/use-graphics.js';
 import { deriveModelInteractionUnitId, getModelInteractionUnitState } from '#machines/model-interaction.machine.js';
 import type { ModelInteractionUnitState } from '#machines/model-interaction.machine.js';
 import {
@@ -68,36 +61,26 @@ import {
 import { raycastFirstVisibleMeshHit } from '#components/geometry/graphics/three/utils/bvh-raycast.js';
 import type { RaycastClipState } from '#components/geometry/graphics/three/utils/bvh-raycast.js';
 import type { GeometryComponentManifest, GeometryComponentNode, GeometryComponentPrimitiveRef } from '@taucad/types';
+import { createThreeResourceDisposer } from '@taucad/three/resources';
 import {
   applyCanonicalGltfBounds,
   createCanonicalGltfToTauMatrix,
 } from '#components/geometry/graphics/three/gltf-world.js';
-import { registerGltfSectionSurfaceSources } from '#components/geometry/graphics/three/utils/section-surface-topology.js';
-import type { SectionTopologyGltfParser } from '#components/geometry/graphics/three/utils/section-surface-topology.js';
+import {
+  registerGltfSectionSurfaceSources,
+  setGltfSectionSurfaceRegistrationState,
+} from '#components/geometry/graphics/three/utils/section-surface-topology.js';
+import type {
+  GltfSectionTopologyTiming,
+  SectionTopologyGltfParser,
+} from '#components/geometry/graphics/three/utils/section-surface-topology.js';
+import { createSectionTopologyScheduler } from '#components/geometry/graphics/three/utils/section-topology-scheduler.js';
+import type { GltfPresentationBarrier, GltfPresentationTelemetry } from '#machines/graphics.machine.js';
 
 // Module-scoped GLTFLoader instance. GLTFLoader is stateless and fully reusable,
 // so creating a fresh instance per parse wastes initialization overhead and GC pressure.
 const gltfLoader = new GLTFLoader();
 const modelHitBlockingSceneTags = new Set<SceneTagKey>([sceneTag.sectionViewHelper, sceneTag.measurementUi]);
-
-const clearGltfScenes = (
-  setBaseScene: Dispatch<SetStateAction<Group | undefined>>,
-  setScene: Dispatch<SetStateAction<Group | undefined>>,
-  setManifest: Dispatch<SetStateAction<GeometryComponentManifest | undefined>>,
-): void => {
-  setBaseScene((previous) => {
-    if (previous) {
-      disposeSceneResources(previous);
-    }
-    return undefined;
-  });
-  setScene(undefined);
-  setManifest(undefined);
-};
-
-const setRenderedScene = (setter: Dispatch<SetStateAction<Group | undefined>>, scene: Group): void => {
-  setter(scene);
-};
 
 function isFatLineSegmentsMesh(child: Object3D): boolean {
   return child.type === 'LineSegments2';
@@ -130,8 +113,16 @@ type GltfSceneProbe = {
   readonly byteLength: number;
   readonly childrenCount: number;
   readonly bbox: {
-    readonly min: { readonly x: number; readonly y: number; readonly z: number };
-    readonly max: { readonly x: number; readonly y: number; readonly z: number };
+    readonly min: {
+      readonly x: number;
+      readonly y: number;
+      readonly z: number;
+    };
+    readonly max: {
+      readonly x: number;
+      readonly y: number;
+      readonly z: number;
+    };
     readonly finite: boolean;
   };
 };
@@ -200,42 +191,52 @@ export function probeGltfScene(gltf: GLTF, byteLength: number): void {
   }
 }
 
-/**
- * Dispose a material and all its texture properties.
- */
-function disposeMaterialWithTextures(mat: Material): void {
-  for (const value of Object.values(mat)) {
+const collectMaterialTextures = (material: Material, resources: Set<{ dispose: () => void }>): void => {
+  for (const value of Object.values(material)) {
     if (value && typeof value === 'object' && 'isTexture' in value) {
-      (value as Texture).dispose();
+      resources.add(value as Texture);
     }
   }
+};
 
-  mat.dispose();
-}
-
-/**
- * Recursively dispose all GPU resources (geometries, materials, textures) in a scene graph.
- * This prevents GPU memory leaks when replacing or unmounting GLTF scenes.
- */
-function disposeSceneResources(object: Object3D): void {
-  object.traverse((child) => {
-    // Dispose geometry
-    if ('geometry' in child) {
-      const { geometry } = child as { geometry?: BufferGeometry };
-      geometry?.dispose();
+/** Captures the resources owned by one parsed glTF presentation. */
+function createGltfResourceDisposer(
+  scene: Group,
+  originalMaterials: ReadonlyMap<number, Material | Material[]> = new Map(),
+  includeSceneTextures = false,
+): () => void {
+  let disposed = false;
+  return () => {
+    if (disposed) {
+      return;
     }
-
-    // Dispose material(s) and their textures
-    if ('material' in child) {
-      const { material } = child as { material?: Material | Material[] };
-      if (material) {
-        const materials = Array.isArray(material) ? material : [material];
-        for (const mat of materials) {
-          disposeMaterialWithTextures(mat);
+    disposed = true;
+    const resources = new Set<{ dispose: () => void }>();
+    scene.traverse((child) => {
+      if ('geometry' in child) {
+        const { geometry } = child as { geometry?: BufferGeometry };
+        if (geometry) {
+          resources.add(geometry);
         }
       }
+      for (const material of getObjectMaterials(child)) {
+        resources.add(material);
+        if (includeSceneTextures) {
+          collectMaterialTextures(material, resources);
+        }
+      }
+    });
+    for (const saved of originalMaterials.values()) {
+      for (const material of Array.isArray(saved) ? saved : [saved]) {
+        resources.add(material);
+        // Original-material snapshots retain the parsed GLTF textures. Current scene
+        // materials may instead reference the shared matcap singleton, which this
+        // presentation does not own and therefore must not dispose.
+        collectMaterialTextures(material, resources);
+      }
     }
-  });
+    createThreeResourceDisposer(resources)();
+  };
 }
 
 /**
@@ -261,8 +262,8 @@ function saveOriginalMaterials(scene: Group): Map<number, Material | Material[]>
 }
 
 /**
- * Restore saved original materials onto a scene.
- * Disposes any current materials that differ from the originals (e.g. matcap materials).
+ * Restore clones of saved original materials onto a scene.
+ * The saved map remains an immutable ownership inventory for final disposal.
  */
 function restoreOriginalMaterials(scene: Group, saved: Map<number, Material | Material[]>): void {
   scene.traverse((child) => {
@@ -275,7 +276,8 @@ function restoreOriginalMaterials(scene: Group, saved: Map<number, Material | Ma
 
       // Preserve clipping planes so section-view clipping survives material restoration
       const currentMats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-      const restoredMats = Array.isArray(original) ? original : [original];
+      const replacement = Array.isArray(original) ? original.map((material) => material.clone()) : original.clone();
+      const restoredMats = Array.isArray(replacement) ? replacement : [replacement];
       for (let i = 0; i < restoredMats.length && i < currentMats.length; i++) {
         const currentMat = currentMats[i];
         const restoredMat = restoredMats[i];
@@ -287,41 +289,13 @@ function restoreOriginalMaterials(scene: Group, saved: Map<number, Material | Ma
       // Dispose current material if it was replaced (e.g. matcap)
       if (mesh.material !== original) {
         for (const mat of currentMats) {
-          disposeMaterialWithTextures(mat);
+          mat.dispose();
         }
       }
 
-      // Assign saved clones directly (they are pristine copies never used as active materials).
-      // Re-clone the saved copies so the stored originals remain untouched for future restores.
-      if (Array.isArray(original)) {
-        mesh.material = original;
-        saved.set(
-          mesh.id,
-          original.map((m) => m.clone()),
-        );
-      } else {
-        mesh.material = original;
-        saved.set(mesh.id, original.clone());
-      }
+      mesh.material = replacement;
     }
   });
-}
-
-/**
- * Dispose saved material clones stored in the originals map.
- */
-function disposeSavedMaterials(saved: Map<number, Material | Material[]>): void {
-  for (const mat of saved.values()) {
-    if (Array.isArray(mat)) {
-      for (const m of mat) {
-        disposeMaterialWithTextures(m);
-      }
-    } else {
-      disposeMaterialWithTextures(mat);
-    }
-  }
-
-  saved.clear();
 }
 
 type GltfMeshDisplayProperties = {
@@ -331,6 +305,8 @@ type GltfMeshDisplayProperties = {
   readonly gltfFile: Uint8Array<ArrayBuffer>;
   readonly sourceFile?: string;
   readonly geometryHash?: string;
+  /** Monotonic graphics-machine revision for this requested artifact. */
+  readonly presentationRevision?: number;
   /**
    * Whether to enable matcap material.
    */
@@ -346,6 +322,51 @@ type GltfMeshDisplayProperties = {
   readonly onModelComponentSecondaryPointerCandidate?: (
     target: ModelComponentSecondaryPointerTarget | undefined,
   ) => void;
+};
+
+type GltfPresentationTimings = Partial<Record<keyof GltfPresentationTelemetry['durations'], number>>;
+
+type PreparedGltfPresentation = {
+  readonly revision: number;
+  readonly key: string;
+  readonly unitId: string;
+  readonly scene: Group;
+  readonly manifest: GeometryComponentManifest;
+  readonly parser: SectionTopologyGltfParser;
+  readonly originalMaterials: Map<number, Material | Material[]>;
+  readonly receivedAt: number;
+  readonly timings: GltfPresentationTimings;
+  barrier: GltfPresentationBarrier;
+  sectionStatus: 'pending' | 'ready' | 'unsupported' | 'cancelled';
+  analysisPromise?: Promise<'completed' | 'discarded' | 'failed'>;
+  committedAt?: number;
+  firstFrameAt?: number;
+  modelEmptyFrames: number;
+  telemetrySent: boolean;
+  disposed: boolean;
+  dispose: () => void;
+};
+
+const countGltfPresentation = (
+  scene: Group,
+): Pick<GltfPresentationTelemetry, 'meshCount' | 'triangleCount' | 'sourceLineCount' | 'lineSegmentCount'> => {
+  let meshCount = 0;
+  let triangleCount = 0;
+  let sourceLineCount = 0;
+  let lineSegmentCount = 0;
+  scene.traverse((object) => {
+    if (isSurfaceObject(object)) {
+      meshCount += 1;
+      triangleCount += Math.floor(
+        (object.geometry.getIndex()?.count ?? object.geometry.getAttribute('position').count) / 3,
+      );
+    } else if (isLineObject(object)) {
+      sourceLineCount += 1;
+      const { geometry } = object as Object3D & { geometry: BufferGeometry };
+      lineSegmentCount += Math.floor(geometry.getAttribute('position').count / 2);
+    }
+  });
+  return { meshCount, triangleCount, sourceLineCount, lineSegmentCount };
 };
 
 type ComponentVisualStateOptions = {
@@ -423,8 +444,16 @@ export type ModelPointerClickDispatch =
       readonly componentId: string;
       readonly source: 'viewer';
     }
-  | { readonly type: 'clearModelComponentFocus'; readonly unitId: string; readonly source: 'viewer' }
-  | { readonly type: 'clearModelComponentSelection'; readonly unitId: string; readonly source: 'viewer' };
+  | {
+      readonly type: 'clearModelComponentFocus';
+      readonly unitId: string;
+      readonly source: 'viewer';
+    }
+  | {
+      readonly type: 'clearModelComponentSelection';
+      readonly unitId: string;
+      readonly source: 'viewer';
+    };
 
 export type ModelComponentSecondaryPointerTarget = {
   readonly unitId: string;
@@ -454,7 +483,12 @@ export function resolveModelPointerClickAction({
     return { type: 'allowSceneUi' };
   }
 
-  if (shouldConsumeGuardedModelPointerClick({ suppressNextModelPointerClick, isModelPointerClickSuppressed })) {
+  if (
+    shouldConsumeGuardedModelPointerClick({
+      suppressNextModelPointerClick,
+      isModelPointerClickSuppressed,
+    })
+  ) {
     return { type: 'consumeModelPointerGuard' };
   }
 
@@ -496,7 +530,10 @@ export function resolveModelPointerMissedAction({
   readonly suppressNextModelPointerClick: boolean;
   readonly isModelPointerClickSuppressed: boolean;
 }): ModelPointerClickAction {
-  return shouldConsumeGuardedModelPointerClick({ suppressNextModelPointerClick, isModelPointerClickSuppressed })
+  return shouldConsumeGuardedModelPointerClick({
+    suppressNextModelPointerClick,
+    isModelPointerClickSuppressed,
+  })
     ? { type: 'consumeModelPointerGuard' }
     : { type: 'clearFocusAndSelection' };
 }
@@ -535,7 +572,10 @@ export function resolveComponentVisualState({
   isolatedComponentIds,
   focusedComponentId,
   explicitOpacity,
-}: ComponentVisualStateOptions): { readonly visible: boolean; readonly opacity: number } {
+}: ComponentVisualStateOptions): {
+  readonly visible: boolean;
+  readonly opacity: number;
+} {
   const isDimmedByIsolation = isolatedComponentIds.size > 0 && !isolatedComponentIds.has(componentId);
   const isDimmedByFocus = focusedComponentId !== undefined && focusedComponentId !== componentId;
 
@@ -572,7 +612,10 @@ function resolveComponentVisualStateWithManifest({
   isolatedComponentIds,
   focusedComponentId,
   opacityByComponentId,
-}: ComponentVisualStateWithManifestOptions): { readonly visible: boolean; readonly opacity: number } {
+}: ComponentVisualStateWithManifestOptions): {
+  readonly visible: boolean;
+  readonly opacity: number;
+} {
   const isIncludedByIsolation =
     isolatedComponentIds.size === 0 ||
     hasComponentOrAncestor(manifest, componentId, isolatedComponentIds) ||
@@ -582,10 +625,19 @@ function resolveComponentVisualStateWithManifest({
     focusedSet !== undefined &&
     !hasComponentOrAncestor(manifest, componentId, focusedSet) &&
     !hasComponentOrDescendant(manifest, componentId, focusedSet);
-  const explicitOpacity = resolveInheritedOpacity({ manifest, componentId, opacityByComponentId });
+  const explicitOpacity = resolveInheritedOpacity({
+    manifest,
+    componentId,
+    opacityByComponentId,
+  });
 
   return {
-    visible: isModelComponentVisible({ manifest, componentId, hiddenComponentIds, isolatedComponentIds }),
+    visible: isModelComponentVisible({
+      manifest,
+      componentId,
+      hiddenComponentIds,
+      isolatedComponentIds,
+    }),
     opacity: explicitOpacity ?? (!isIncludedByIsolation || isDimmedByFocus ? 0.5 : 1),
   };
 }
@@ -790,7 +842,10 @@ export function annotateSceneComponents(
   }): string | undefined => {
     const existingComponentId = getModelComponentId(object);
     if (typeof existingComponentId === 'string') {
-      setModelComponentOwner(object, { unitId: options.unitId, componentId: existingComponentId });
+      setModelComponentOwner(object, {
+        unitId: options.unitId,
+        componentId: existingComponentId,
+      });
       for (const child of object.children) {
         annotateObject({
           object: child,
@@ -873,7 +928,9 @@ function getObjectMaterials(object: Object3D): Material[] {
     return [];
   }
 
-  const { material } = object as Object3D & { material?: Material | Material[] };
+  const { material } = object as Object3D & {
+    material?: Material | Material[];
+  };
   return material ? getMaterials(material) : [];
 }
 
@@ -939,7 +996,10 @@ export function applyModelComponentVisualStateToScene({
     const emphasis = resolveModelComponentEmphasisWithManifest(modelVisualState, componentManifest, componentId);
     for (const material of materials) {
       const snapshot = getOrCaptureModelMaterialAppearance(material);
-      applyModelMaterialAppearance(material, snapshot, { opacity: visualState.opacity, emphasis });
+      applyModelMaterialAppearance(material, snapshot, {
+        opacity: visualState.opacity,
+        emphasis,
+      });
     }
   });
 }
@@ -977,34 +1037,48 @@ export function GltfMesh({
   gltfFile,
   sourceFile,
   geometryHash,
+  presentationRevision = 0,
   enableMatcap = false,
   enableSurfaces = true,
   enableLines = true,
   onModelComponentSecondaryPointerCandidate,
 }: GltfMeshDisplayProperties): React.JSX.Element | undefined {
   const graphicsActor = useGraphics();
-  const modelInteractionRef = useModelInteractionRef();
   const graphicsBackendThree = useThreeGraphicsBackend();
   const sectionView = useSectionView();
   const cameraRig = useCameraRig();
   const assetMatrix = useMemo(() => createCanonicalGltfToTauMatrix(), []);
-  // The "base scene" is the parsed GLTF with line segments converted but no material overrides.
-  // It serves as the template from which material modes (matcap/original) are derived.
-  const [baseScene, setBaseScene] = useState<Group | undefined>(undefined);
-  // The rendered scene has material mode applied and is what <primitive> displays.
-  const [scene, setScene] = useState<Group | undefined>(undefined);
-  const [componentManifest, setComponentManifest] = useState<GeometryComponentManifest | undefined>(undefined);
+  const [presentation, setPresentation] = useState<PreparedGltfPresentation | undefined>();
+  const committedPresentationRef = useRef<PreparedGltfPresentation | undefined>(undefined);
+  const candidatePresentationRef = useRef<PreparedGltfPresentation | undefined>(undefined);
+  const retiredPresentationsRef = useRef<PreparedGltfPresentation[]>([]);
+  const frameProbeRef = useRef<{ revision: number; modelEmptyFrames: number } | undefined>(undefined);
+  const [topologyScheduler] = useState(createSectionTopologyScheduler);
   const { size, invalidate, gl, camera } = useThree();
   const { theme } = useTheme();
   const activeEdgeColor = theme === Theme.DARK ? gltfEdgeColorDarkMode : gltfEdgeColorLightMode;
   const matcapTint = theme === Theme.DARK ? darkModeIntensityScale : 1;
-  const unitId = deriveModelInteractionUnitId({ sourceFile, geometryHash });
+  const requestedUnitId = deriveModelInteractionUnitId({
+    sourceFile,
+    geometryHash,
+  });
+  const scene = presentation?.scene;
+  const componentManifest = presentation?.manifest;
+  const unitId = presentation?.unitId ?? requestedUnitId;
+  const sectionBarrierRef = useRef<GltfPresentationBarrier>(
+    sectionView.isActive && sectionView.enableMesh ? 'analysis-ready' : 'display-ready',
+  );
+  const materialOptionsRef = useRef({ enableMatcap, matcapTint });
+  const materialSignaturesRef = useRef(new WeakMap<PreparedGltfPresentation, string>());
+
+  useEffect(() => {
+    sectionBarrierRef.current = sectionView.isActive && sectionView.enableMesh ? 'analysis-ready' : 'display-ready';
+    materialOptionsRef.current = { enableMatcap, matcapTint };
+  }, [enableMatcap, matcapTint, sectionView.enableMesh, sectionView.isActive]);
 
   // Memoize resolution vector to avoid creating new objects on each render
   const resolutionRef = useRef(new Vector2(size.width, size.height));
 
-  // Saved clones of the original materials so we can restore them after matcap is toggled off.
-  const originalMaterialsRef = useRef<Map<number, Material | Material[]>>(new Map());
   const lastHoveredComponentIdRef = useRef<string | undefined>(undefined);
   const lastFocusedComponentIdRef = useRef<string | undefined>(undefined);
   const modelRaycasterRef = useRef(new Raycaster());
@@ -1059,9 +1133,94 @@ export function GltfMesh({
     };
   }, [size, scene, invalidate]);
 
-  // ── Effect 1: Parse GLTF binary (expensive, only on gltfFile change) ──────
-  // Parses the GLTF, converts line segments, and saves original materials.
-  // Does not apply matcap or any material overrides -- that is handled by Effect 2.
+  const emitTelemetry = useCallback(
+    (bundle: PreparedGltfPresentation, outcome: GltfPresentationTelemetry['outcome']): void => {
+      if (bundle.telemetrySent || (outcome === 'presented' && bundle.firstFrameAt === undefined)) {
+        return;
+      }
+      bundle.telemetrySent = true;
+      const schedulerStats = topologyScheduler.stats();
+      graphicsActor.send({
+        type: 'gltfPresentationMeasured',
+        telemetry: {
+          revision: bundle.revision,
+          key: bundle.key,
+          backend: graphicsBackendThree,
+          barrier: bundle.barrier,
+          outcome,
+          glbBytes: gltfFile.byteLength,
+          ...countGltfPresentation(bundle.scene),
+          durations: bundle.timings,
+          modelEmptyFrames:
+            frameProbeRef.current?.revision === bundle.revision
+              ? frameProbeRef.current.modelEmptyFrames
+              : bundle.modelEmptyFrames,
+          committedBundleHighWaterMark: 1,
+          candidateBundleHighWaterMark: 1,
+          topologyJobsStarted: schedulerStats.started,
+          topologyJobsDiscarded: schedulerStats.discarded,
+        },
+      });
+    },
+    [gltfFile.byteLength, graphicsActor, graphicsBackendThree, topologyScheduler],
+  );
+
+  const ensureSectionAnalysis = useCallback(
+    async (bundle: PreparedGltfPresentation): Promise<'completed' | 'discarded' | 'failed'> => {
+      if (bundle.sectionStatus === 'ready') {
+        return 'completed';
+      }
+      if (bundle.sectionStatus === 'cancelled') {
+        return 'discarded';
+      }
+      if (bundle.sectionStatus === 'unsupported') {
+        return 'failed';
+      }
+      if (bundle.analysisPromise) {
+        return bundle.analysisPromise;
+      }
+      const analyze = async (): Promise<'completed' | 'discarded' | 'failed'> => {
+        const outcome = await topologyScheduler.submit({
+          generation: bundle.revision,
+          run: async () => {
+            await registerGltfSectionSurfaceSources({
+              scene: bundle.scene,
+              manifest: bundle.manifest,
+              unitId: bundle.unitId,
+              parser: bundle.parser,
+              onTiming: (timing: GltfSectionTopologyTiming) => {
+                bundle.timings.topologySubmit = timing.submitMilliseconds;
+                bundle.timings.topologyWorker = timing.workerMilliseconds;
+                bundle.timings.topologyHydrate = timing.hydrateMilliseconds;
+              },
+            });
+          },
+        });
+        const completedWhileDisplayed = outcome === 'discarded' && committedPresentationRef.current === bundle;
+        if ((outcome === 'completed' || completedWhileDisplayed) && !bundle.disposed) {
+          bundle.sectionStatus = 'ready';
+          graphicsActor.send({
+            type: 'gltfAnalysisReady',
+            revision: bundle.revision,
+            key: bundle.key,
+          });
+          invalidate();
+        } else {
+          bundle.sectionStatus = outcome === 'failed' ? 'unsupported' : 'cancelled';
+          setGltfSectionSurfaceRegistrationState(bundle.scene, bundle.sectionStatus);
+        }
+        if (bundle.firstFrameAt !== undefined) {
+          emitTelemetry(bundle, 'presented');
+        }
+        return outcome;
+      };
+      bundle.analysisPromise = analyze();
+      return bundle.analysisPromise;
+    },
+    [emitTelemetry, graphicsActor, invalidate, topologyScheduler],
+  );
+
+  // Parse and fully prepare one unattached candidate while the committed scene remains visible.
   useEffect(() => {
     // Object-wrapped cancellation token (mirrors `viewport-gizmo-cube.tsx`'s
     // `warmupCancellation` shape). The function-call indirection through
@@ -1073,48 +1232,118 @@ export function GltfMesh({
     const cancellation = { cancelled: false };
     const isCancelled = (): boolean => cancellation.cancelled;
 
+    const receivedAt = performance.now();
+    const timings: GltfPresentationTimings = {};
+    frameProbeRef.current = { revision: presentationRevision, modelEmptyFrames: 0 };
+    graphicsActor.send({
+      type: 'gltfPreparationStarted',
+      revision: presentationRevision,
+      key: geometryHash ?? '',
+    });
+
     const loadGltf = async (): Promise<void> => {
+      let unpreparedDispose: (() => void) | undefined;
       try {
+        const parseStartedAt = performance.now();
         const gltf = await gltfLoader.parseAsync(gltfFile.buffer, '');
+        timings.parse = performance.now() - parseStartedAt;
+        unpreparedDispose = createGltfResourceDisposer(gltf.scene, undefined, true);
 
         if (isCancelled()) {
-          disposeSceneResources(gltf.scene);
+          unpreparedDispose();
           return;
         }
 
         probeGltfScene(gltf, gltfFile.byteLength);
 
-        const graphicsOwnedManifest = getModelInteractionUnitState(
-          modelInteractionRef.getSnapshot().context,
-          unitId,
-        ).manifest;
-        const manifest = graphicsOwnedManifest ?? buildGltfComponentManifest(gltfFile, { sourceFile, geometryHash });
+        const manifestStartedAt = performance.now();
+        const manifest = buildGltfComponentManifest(gltfFile, { sourceFile, geometryHash });
+        timings.manifest = performance.now() - manifestStartedAt;
+        const annotationStartedAt = performance.now();
         annotateSceneComponents(gltf.scene, manifest, {
-          unitId,
+          unitId: requestedUnitId,
           associations: gltf.parser.associations as ReadonlyMap<Object3D, GltfLoaderAssociation>,
         });
-        await registerGltfSectionSurfaceSources({
-          scene: gltf.scene,
-          manifest,
-          unitId,
-          parser: gltf.parser as unknown as SectionTopologyGltfParser,
-        });
-        if (isCancelled()) {
-          disposeSceneResources(gltf.scene);
-          return;
-        }
+        timings.annotation = performance.now() - annotationStartedAt;
+        setGltfSectionSurfaceRegistrationState(gltf.scene, 'pending');
 
         // Convert LineSegments to LineSegments2 for fat line rendering
+        const fatLinesStartedAt = performance.now();
         const edgeColor = theme === Theme.DARK ? gltfEdgeColorDarkMode : gltfEdgeColorLightMode;
         applyFatLineSegments(gltf, {
           resolution: resolutionRef.current,
           backend: graphicsBackendThree,
           edgeColor,
         });
+        timings.fatLines = performance.now() - fatLinesStartedAt;
 
-        // Save clones of the original materials before any overrides
-        disposeSavedMaterials(originalMaterialsRef.current);
-        originalMaterialsRef.current = saveOriginalMaterials(gltf.scene);
+        const originalMaterials = saveOriginalMaterials(gltf.scene);
+        const materialsStartedAt = performance.now();
+        const materialOptions = materialOptionsRef.current;
+        if (materialOptions.enableMatcap) {
+          await applyMatcap({ scene: gltf.scene }, materialOptions.matcapTint, graphicsBackendThree);
+        }
+        applyGltfSurfaceDepthBiasToScene(gltf.scene, graphicsBackendThree);
+        seedSceneMaterialAppearances(gltf.scene);
+        timings.materials = performance.now() - materialsStartedAt;
+        unpreparedDispose = undefined;
+        const bundle: PreparedGltfPresentation = {
+          revision: presentationRevision,
+          key: geometryHash ?? '',
+          unitId: requestedUnitId,
+          scene: gltf.scene,
+          manifest,
+          parser: gltf.parser as unknown as SectionTopologyGltfParser,
+          originalMaterials,
+          receivedAt,
+          timings,
+          barrier: sectionBarrierRef.current,
+          sectionStatus: 'pending',
+          modelEmptyFrames: 0,
+          telemetrySent: false,
+          disposed: false,
+          dispose: () => undefined,
+        };
+        materialSignaturesRef.current.set(
+          bundle,
+          `${materialOptions.enableMatcap}:${materialOptions.matcapTint}:${graphicsBackendThree}`,
+        );
+        const disposeResources = createGltfResourceDisposer(bundle.scene, bundle.originalMaterials);
+        bundle.dispose = () => {
+          if (bundle.disposed) {
+            return;
+          }
+          bundle.disposed = true;
+          bundle.sectionStatus = 'cancelled';
+          setGltfSectionSurfaceRegistrationState(bundle.scene, 'cancelled');
+          disposeResources();
+        };
+        candidatePresentationRef.current = bundle;
+
+        graphicsActor.send({
+          type: 'gltfDisplayReady',
+          revision: bundle.revision,
+          key: bundle.key,
+          barrier: bundle.barrier,
+        });
+        if (bundle.barrier === 'analysis-ready') {
+          const outcome = await ensureSectionAnalysis(bundle);
+          if (outcome !== 'completed' || isCancelled()) {
+            bundle.dispose();
+            if (candidatePresentationRef.current === bundle) {
+              candidatePresentationRef.current = undefined;
+            }
+            if (!isCancelled()) {
+              graphicsActor.send({
+                type: 'gltfPresentationFailed',
+                revision: bundle.revision,
+                key: bundle.key,
+              });
+              emitTelemetry(bundle, outcome === 'discarded' ? 'stale' : 'failed');
+            }
+            return;
+          }
+        }
 
         // R4: pipeline pre-warm. The `Line2NodeMaterial` for edges (and the surface mesh
         // pipelines) would otherwise pay `createRenderPipelineAsync` latency on the first
@@ -1130,6 +1359,7 @@ export function GltfMesh({
         };
         const { compileAsync: compile, coordinateSystem } = renderer;
         if (typeof compile === 'function') {
+          const warmupStartedAt = performance.now();
           try {
             const endpointCameras = [cameraRig.perspectiveCamera, cameraRig.orthographicCamera];
             if (coordinateSystem === WebGLCoordinateSystem || coordinateSystem === WebGPUCoordinateSystem) {
@@ -1144,30 +1374,80 @@ export function GltfMesh({
           } catch (error) {
             console.error('GLTF pipeline warm-up failed', error);
           }
+          timings.pipelineWarmup = performance.now() - warmupStartedAt;
           if (isCancelled()) {
-            disposeSceneResources(gltf.scene);
+            bundle.dispose();
+            if (candidatePresentationRef.current === bundle) {
+              candidatePresentationRef.current = undefined;
+            }
             return;
           }
         }
 
-        setBaseScene(gltf.scene);
-        setComponentManifest(manifest);
+        const previous = committedPresentationRef.current;
+        bundle.modelEmptyFrames =
+          frameProbeRef.current?.revision === bundle.revision ? frameProbeRef.current.modelEmptyFrames : 0;
+        bundle.committedAt = performance.now();
+        committedPresentationRef.current = bundle;
+        if (candidatePresentationRef.current === bundle) {
+          candidatePresentationRef.current = undefined;
+        }
+        if (previous) {
+          retiredPresentationsRef.current.push(previous);
+        }
+        setPresentation(bundle);
         invalidate();
       } catch (error) {
         if (!isCancelled()) {
           console.error('Failed to load GLTF:', error);
+          graphicsActor.send({
+            type: 'gltfPresentationFailed',
+            revision: presentationRevision,
+            key: geometryHash ?? '',
+          });
+          graphicsActor.send({
+            type: 'gltfPresentationMeasured',
+            telemetry: {
+              revision: presentationRevision,
+              key: geometryHash ?? '',
+              backend: graphicsBackendThree,
+              barrier: sectionBarrierRef.current,
+              outcome: 'failed',
+              glbBytes: gltfFile.byteLength,
+              meshCount: 0,
+              triangleCount: 0,
+              sourceLineCount: 0,
+              lineSegmentCount: 0,
+              durations: timings,
+              modelEmptyFrames:
+                frameProbeRef.current?.revision === presentationRevision ? frameProbeRef.current.modelEmptyFrames : 0,
+              committedBundleHighWaterMark: committedPresentationRef.current ? 1 : 0,
+              candidateBundleHighWaterMark: 0,
+              topologyJobsStarted: topologyScheduler.stats().started,
+              topologyJobsDiscarded: topologyScheduler.stats().discarded,
+            },
+          });
         }
+        unpreparedDispose?.();
       }
     };
-
-    // Dispose previous base scene and saved materials before loading new one
-    clearGltfScenes(setBaseScene, setScene, setComponentManifest);
 
     void loadGltf();
 
     return () => {
       cancellation.cancelled = true;
-      graphicsActor.send({ type: 'setHoveredModelComponent', unitId, componentId: undefined, source: 'viewer' });
+      const candidate = candidatePresentationRef.current;
+      if (candidate?.revision === presentationRevision) {
+        candidate.dispose();
+        candidatePresentationRef.current = undefined;
+        emitTelemetry(candidate, 'cancelled');
+      }
+      graphicsActor.send({
+        type: 'setHoveredModelComponent',
+        unitId: requestedUnitId,
+        componentId: undefined,
+        source: 'viewer',
+      });
     };
   }, [
     gltfFile,
@@ -1175,11 +1455,13 @@ export function GltfMesh({
     invalidate,
     gl,
     graphicsActor,
-    modelInteractionRef,
     sourceFile,
     geometryHash,
-    unitId,
+    requestedUnitId,
     cameraRig,
+    presentationRevision,
+    ensureSectionAnalysis,
+    emitTelemetry,
   ]);
 
   // Theme-aware edge tint without re-parsing the GLTF binary.
@@ -1192,41 +1474,91 @@ export function GltfMesh({
     invalidate();
   }, [scene, activeEdgeColor, invalidate]);
 
-  // Cleanup on unmount: dispose base scene and saved materials
-  useEffect(
-    () => () => {
-      disposeSavedMaterials(originalMaterialsRef.current);
-    },
-    [],
-  );
-
-  // Effect 2: Apply materials (lightweight, runs on matcap toggle or new base scene).
-  // Applies matcap or restores original materials on the base scene.
-  // When enableMatcap changes, only this effect runs (no GLTF re-parse).
-  // Visibility is NOT handled here -- it is handled by the dedicated visibility effect
-  // below to avoid expensive material re-application on visibility toggles.
-  const applyMaterials = useCallback(
-    (targetScene: Group): void => {
-      if (enableMatcap) {
-        void applyMatcap({ scene: targetScene }, matcapTint, graphicsBackendThree);
-      } else {
-        restoreOriginalMaterials(targetScene, originalMaterialsRef.current);
-      }
-    },
-    [enableMatcap, graphicsBackendThree, matcapTint],
-  );
-
-  useEffect(() => {
-    if (!baseScene) {
+  useLayoutEffect(() => {
+    if (!presentation) {
       return;
     }
+    graphicsActor.send({
+      type: 'gltfPresentationCommitted',
+      revision: presentation.revision,
+      key: presentation.key,
+      unitId: presentation.unitId,
+      manifest: presentation.manifest,
+    });
+  }, [graphicsActor, presentation]);
 
-    applyMaterials(baseScene);
-    applyGltfSurfaceDepthBiasToScene(baseScene, graphicsBackendThree);
-    seedSceneMaterialAppearances(baseScene);
-    setRenderedScene(setScene, baseScene);
+  // Retire the previous bundle only after React has detached its primitive.
+  useEffect(() => {
+    for (const retired of retiredPresentationsRef.current.splice(0)) {
+      retired.dispose();
+    }
+  }, [presentation]);
+
+  // Ordinary views schedule section analysis after presentation; active section
+  // views submit immediately and await the same promise before their next swap.
+  useEffect(() => {
+    if (presentation?.sectionStatus !== 'pending') {
+      return;
+    }
+    if (sectionView.isActive && sectionView.enableMesh) {
+      void ensureSectionAnalysis(presentation);
+      return;
+    }
+    const handle = setTimeout(() => {
+      void ensureSectionAnalysis(presentation);
+    }, 50);
+    return () => {
+      clearTimeout(handle);
+    };
+  }, [ensureSectionAnalysis, presentation, sectionView.enableMesh, sectionView.isActive]);
+
+  useFrame(() => {
+    if (!scene && frameProbeRef.current) {
+      frameProbeRef.current.modelEmptyFrames += 1;
+    }
+    const committed = committedPresentationRef.current;
+    if (!committed || committed.firstFrameAt !== undefined || committed.committedAt === undefined) {
+      return;
+    }
+    committed.firstFrameAt = performance.now();
+    committed.timings.commitToFirstFrame = committed.firstFrameAt - committed.committedAt;
+    committed.timings.receiptToFirstFrame = committed.firstFrameAt - committed.receivedAt;
+    if (committed.sectionStatus !== 'pending') {
+      emitTelemetry(committed, 'presented');
+    }
+  });
+
+  useEffect(
+    () => () => {
+      topologyScheduler.dispose();
+      candidatePresentationRef.current?.dispose();
+      committedPresentationRef.current?.dispose();
+      for (const retired of retiredPresentationsRef.current.splice(0)) {
+        retired.dispose();
+      }
+    },
+    [topologyScheduler],
+  );
+
+  // Material-mode changes mutate only the committed bundle and never reparse the GLB.
+  useEffect(() => {
+    if (!presentation) {
+      return;
+    }
+    const materialSignature = `${enableMatcap}:${matcapTint}:${graphicsBackendThree}`;
+    if (materialSignaturesRef.current.get(presentation) === materialSignature) {
+      return;
+    }
+    if (enableMatcap) {
+      void applyMatcap({ scene: presentation.scene }, matcapTint, graphicsBackendThree);
+    } else {
+      restoreOriginalMaterials(presentation.scene, presentation.originalMaterials);
+    }
+    applyGltfSurfaceDepthBiasToScene(presentation.scene, graphicsBackendThree);
+    seedSceneMaterialAppearances(presentation.scene);
+    materialSignaturesRef.current.set(presentation, materialSignature);
     invalidate();
-  }, [baseScene, applyMaterials, graphicsBackendThree, invalidate]);
+  }, [enableMatcap, graphicsBackendThree, invalidate, matcapTint, presentation]);
 
   // Toggle visibility when enableSurfaces or enableLines change
   useEffect(() => {
@@ -1374,7 +1706,12 @@ export function GltfMesh({
     });
     lastHoveredComponentIdRef.current = hoverUpdate.nextCachedComponentId;
     if (hoverUpdate.shouldSend) {
-      graphicsActor.send({ type: 'setHoveredModelComponent', unitId, componentId: undefined, source: 'viewer' });
+      graphicsActor.send({
+        type: 'setHoveredModelComponent',
+        unitId,
+        componentId: undefined,
+        source: 'viewer',
+      });
     }
   }, [graphicsActor, modelVisualState.isViewerHoverSuppressed, unitId]);
 
@@ -1403,7 +1740,10 @@ export function GltfMesh({
       }
 
       event.stopPropagation();
-      for (const dispatchEvent of resolveModelPointerClickDispatches({ clickAction, unitId })) {
+      for (const dispatchEvent of resolveModelPointerClickDispatches({
+        clickAction,
+        unitId,
+      })) {
         graphicsActor.send(dispatchEvent);
       }
     },
@@ -1472,7 +1812,12 @@ export function GltfMesh({
   const handlePointerMissed = useCallback(() => {
     lastHoveredComponentIdRef.current = undefined;
     if (!modelVisualState.isViewerHoverSuppressed) {
-      graphicsActor.send({ type: 'setHoveredModelComponent', unitId, componentId: undefined, source: 'viewer' });
+      graphicsActor.send({
+        type: 'setHoveredModelComponent',
+        unitId,
+        componentId: undefined,
+        source: 'viewer',
+      });
     }
 
     const missedAction = resolveModelPointerMissedAction({
@@ -1484,8 +1829,16 @@ export function GltfMesh({
       return;
     }
 
-    graphicsActor.send({ type: 'clearModelComponentFocus', unitId, source: 'viewer' });
-    graphicsActor.send({ type: 'clearModelComponentSelection', unitId, source: 'viewer' });
+    graphicsActor.send({
+      type: 'clearModelComponentFocus',
+      unitId,
+      source: 'viewer',
+    });
+    graphicsActor.send({
+      type: 'clearModelComponentSelection',
+      unitId,
+      source: 'viewer',
+    });
   }, [graphicsActor, modelVisualState.isViewerHoverSuppressed, unitId]);
 
   if (!scene) {

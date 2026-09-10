@@ -12,6 +12,8 @@ export type ThumbnailRenderRequest = {
   readonly kind: ThumbnailKind;
   /** Exact settled identity for automatic work; manual work reads the latest model. */
   readonly identity?: string;
+  /** Actor-owned cancellation for render and downstream service work. */
+  readonly signal: AbortSignal;
 };
 
 /** Injected side effects + tuning for {@link thumbnailMachine}. */
@@ -68,14 +70,16 @@ export const thumbnailMachine = setup({
     renderAndStore: fromPromise<
       Exclude<ThumbnailResult, { readonly status: 'failed' }>,
       Pick<ThumbnailContext, 'render' | 'store' | 'activeKind' | 'activeHash'>
-    >(async ({ input }) => {
+    >(async ({ input, signal }) => {
       if (!input.activeKind) {
         throw new Error('Thumbnail render started without an active kind');
       }
       const rendered = await input.render({
         kind: input.activeKind,
+        signal,
         ...(input.activeKind === 'automatic-thumbnail' && input.activeHash ? { identity: input.activeHash } : {}),
       });
+      signal.throwIfAborted();
       if ('status' in rendered) {
         return { ...rendered, kind: input.activeKind };
       }

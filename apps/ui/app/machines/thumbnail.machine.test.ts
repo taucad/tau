@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { createActor } from 'xstate';
-import type { ThumbnailInput } from '#machines/thumbnail.machine.js';
+import type { ThumbnailInput, ThumbnailRenderRequest } from '#machines/thumbnail.machine.js';
 import { thumbnailMachine } from '#machines/thumbnail.machine.js';
 
 const deferred = <T>() => {
@@ -181,7 +181,8 @@ describe('thumbnailMachine', () => {
       await vi.waitFor(() => {
         expect(render).toHaveBeenCalledTimes(2);
       });
-      expect(render).toHaveBeenNthCalledWith(2, { kind: 'automatic-thumbnail', identity: 'h2' });
+      expect(render.mock.calls[1]![0]).toMatchObject({ kind: 'automatic-thumbnail', identity: 'h2' });
+      expect(render.mock.calls[1]![0].signal).toBeInstanceOf(AbortSignal);
     } finally {
       actor.stop();
     }
@@ -228,7 +229,7 @@ describe('thumbnailMachine', () => {
   it('should never drop manual requests and should run them before a pending automatic settle', async () => {
     vi.useFakeTimers();
     const releases = [deferred<void>(), deferred<void>(), deferred<void>(), deferred<void>()];
-    const render = vi.fn(async (request: { kind: string; identity?: string }) => {
+    const render = vi.fn(async (request: ThumbnailRenderRequest) => {
       const index = render.mock.calls.length - 1;
       await releases[index]!.promise;
       return {
@@ -243,7 +244,8 @@ describe('thumbnailMachine', () => {
     try {
       actor.send({ type: 'settled', hash: 'h1' });
       await vi.advanceTimersByTimeAsync(10);
-      expect(render).toHaveBeenNthCalledWith(1, { kind: 'automatic-thumbnail', identity: 'h1' });
+      expect(render.mock.calls[0]![0]).toMatchObject({ kind: 'automatic-thumbnail', identity: 'h1' });
+      expect(render.mock.calls[0]![0].signal).toBeInstanceOf(AbortSignal);
 
       actor.send({ type: 'settled', hash: 'h2' });
       actor.send({ type: 'regenerate' });
@@ -252,23 +254,56 @@ describe('thumbnailMachine', () => {
       await vi.waitFor(() => {
         expect(render).toHaveBeenCalledTimes(2);
       });
-      expect(render).toHaveBeenNthCalledWith(2, { kind: 'manual-thumbnail' });
+      expect(render.mock.calls[1]![0]).toMatchObject({ kind: 'manual-thumbnail' });
+      expect(render.mock.calls[1]![0].signal).toBeInstanceOf(AbortSignal);
 
       releases[1]!.resolve();
       await vi.waitFor(() => {
         expect(render).toHaveBeenCalledTimes(3);
       });
-      expect(render).toHaveBeenNthCalledWith(3, { kind: 'manual-thumbnail' });
+      expect(render.mock.calls[2]![0]).toMatchObject({ kind: 'manual-thumbnail' });
+      expect(render.mock.calls[2]![0].signal).toBeInstanceOf(AbortSignal);
 
       releases[2]!.resolve();
       await vi.advanceTimersByTimeAsync(10);
       await vi.waitFor(() => {
         expect(render).toHaveBeenCalledTimes(4);
       });
-      expect(render).toHaveBeenNthCalledWith(4, { kind: 'automatic-thumbnail', identity: 'h2' });
+      expect(render.mock.calls[3]![0]).toMatchObject({ kind: 'automatic-thumbnail', identity: 'h2' });
+      expect(render.mock.calls[3]![0].signal).toBeInstanceOf(AbortSignal);
       releases[3]!.resolve();
     } finally {
       actor.stop();
     }
+  });
+
+  it('should abort an active render and never store its late bytes after stop', async () => {
+    const pending = deferred<{
+      bytes: Uint8Array<ArrayBuffer>;
+      identity: string;
+      generation: number;
+      locatorIdentity: string;
+    }>();
+    const render = vi.fn(async (_request: ThumbnailRenderRequest) => pending.promise);
+    const deps = createDeps({ render });
+    const actor = createActor(thumbnailMachine, { input: deps }).start();
+
+    actor.send({ type: 'regenerate' });
+    await vi.waitFor(() => {
+      expect(render).toHaveBeenCalledOnce();
+    });
+    const { signal } = render.mock.calls[0]![0];
+    actor.stop();
+
+    expect(signal.aborted).toBe(true);
+    pending.resolve({
+      bytes: new Uint8Array([1]),
+      identity: 'late',
+      generation: 1,
+      locatorIdentity: 'locator-1',
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(deps.store).not.toHaveBeenCalled();
   });
 });

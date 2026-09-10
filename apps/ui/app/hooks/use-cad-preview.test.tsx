@@ -154,6 +154,8 @@ describe('CadPreviewProvider isolated filesystem contract', () => {
     expect(mockMount).toHaveBeenCalledWith(previewPrefix, {
       backend: 'memory',
       storageRootKey: `memory:preview:${previewInstance}`,
+      // RC6: regenerated from the shared bundle, never authored here.
+      class: 'derived',
     });
     const writtenFiles = mockClientWriteFiles.mock.calls[0]?.[0];
     expect(writtenFiles && Object.keys(writtenFiles)).toEqual([`${previewPrefix}/main.scad`]);

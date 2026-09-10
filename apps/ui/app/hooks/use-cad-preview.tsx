@@ -13,7 +13,7 @@ import { useFileManager } from '#hooks/use-file-manager.js';
 import { joinPath } from '@taucad/utils/path';
 import { defaultGraphicsSettings } from '#constants/editor.constants.js';
 import type { LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
-import { defaultKernelOptions } from '#constants/kernel-options.presets.js';
+import { ephemeralKernelOptions } from '#constants/ephemeral-kernel-options.js';
 import { useProjectKernelOptions } from '#hooks/use-project-kernel-options.js';
 import { nativeKernelRequirementForEntryPath } from '#constants/available-kernel-configurations.js';
 
@@ -152,7 +152,7 @@ export function CadPreviewProvider(props: CadPreviewProviderProps): React.JSX.El
     return <CadPreviewPipeline {...props} kernelOptionsFactory={props.kernelOptionsFactory} />;
   }
   if (props.files !== undefined) {
-    return <CadPreviewPipeline {...props} kernelOptionsFactory={defaultKernelOptions} />;
+    return <CadPreviewPipeline {...props} kernelOptionsFactory={ephemeralKernelOptions} />;
   }
   return <PersistentCadPreviewProvider {...props} />;
 }
@@ -204,7 +204,6 @@ function CadPreviewPipeline({
       enableMatcap: defaultGraphicsSettings.enableMatcap,
       enablePostProcessing: defaultGraphicsSettings.enablePostProcessing,
       upDirection: defaultGraphicsSettings.upDirection,
-      environmentPreset: defaultGraphicsSettings.environmentPreset,
       graphicsBackendPreference: defaultGraphicsSettings.graphicsBackend ?? 'webgl',
     },
   });
@@ -240,6 +239,8 @@ function CadPreviewPipeline({
             await workspace.mount(previewPrefix, {
               backend: 'memory',
               storageRootKey: `memory:preview:${previewInstance}`,
+              // Regenerated from the shared bundle on every mount.
+              class: 'derived',
             });
             mountedPrefixRef.current = previewPrefix;
             signal.throwIfAborted();

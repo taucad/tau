@@ -11,14 +11,13 @@ import { fromSafeAsync } from '#lib/xstate.lib.js';
 import { cadMachine, selectCadFailureIssues } from '#machines/cad.machine.js';
 import type { CadContext } from '#machines/cad.machine.js';
 import { logMachine } from '#machines/logs.machine.js';
-import type { runtime } from '#runtime/ui-runtime.definition.js';
 import type { AppRuntimeClient, KernelOptionsFactory, LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
 
 const noop = () => {
   /* No-op */
 };
 
-const createMockAppRuntimeClient = () => createMockRuntimeClient<typeof runtime>();
+const createMockAppRuntimeClient = () => createMockRuntimeClient();
 
 const createKernelOptionsFactory = (): LazyKernelOptionsFactory => async () => () =>
   mock<ReturnType<KernelOptionsFactory>>({

@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
 import { fromThreeRenderBounds } from '@taucad/three/spatial';
 import { useGraphics, useGraphicsSelector, useRenderFrame } from '#hooks/use-graphics.js';
+import { selectPresentedGeometryKey } from '#machines/graphics.machine.js';
 
 // Reusable temporaries for per-frame bounding calculations (avoids GC pressure).
 // Safe for multi-Canvas use because JavaScript is single-threaded and each
@@ -41,7 +42,7 @@ export function useGeometryBounds(
   // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- React refs use null
   outerRef: RefObject<THREE.Group | null>,
 ): GeometryBoundsResult {
-  const geometryKey = useGraphicsSelector((state) => state.context.geometryKey);
+  const geometryKey = useGraphicsSelector(selectPresentedGeometryKey);
   const renderFrame = useRenderFrame();
 
   const [{ geometryRadius, geometryCenter, geometryBounds }, set] = useState<{
@@ -91,7 +92,10 @@ export function useGeometryBounds(
       return;
     }
 
-    const physicalBounds = fromThreeRenderBounds({ renderFrame, bounds: _box3 });
+    const physicalBounds = fromThreeRenderBounds({
+      renderFrame,
+      bounds: _box3,
+    });
     const snapshotBounds = new THREE.Box3(
       new THREE.Vector3(...physicalBounds.min),
       new THREE.Vector3(...physicalBounds.max),

@@ -31,6 +31,7 @@ import {
   useSectionView,
 } from '#components/geometry/graphics/three/use-section-view.js';
 import { measureInputMachine } from '#machines/measure-input.machine.js';
+import { selectPresentedGeometryKey } from '#machines/graphics.machine.js';
 
 const measurementPickBlockingSceneTags = new Set<SceneTagKey>([sceneTag.measurementUi, sceneTag.sectionViewHelper]);
 
@@ -121,7 +122,7 @@ export function MeasureTool(): React.JSX.Element {
   const graphicsActor = useGraphics();
   const renderFrame = useRenderFrame();
   const sectionView = useSectionView();
-  const geometryKey = useGraphicsSelector((state) => state.context.geometryKey);
+  const geometryKey = useGraphicsSelector(selectPresentedGeometryKey);
   const pickableMeshesVersion = useGraphicsSelector((state) => state.context.pickableMeshesVersion);
   const modelDisplayRevision = useModelInteractionSelector((state) => state.context.displayRevision);
   const measurements = useGraphicsSelector((state) => state.context.measurements);
@@ -426,8 +427,14 @@ export function MeasureTool(): React.JSX.Element {
         <MeasurementLine
           key={measurement.id}
           id={measurement.id}
-          start={toThreeRenderPoint({ renderFrame, pointMeters: measurement.startPoint })}
-          end={toThreeRenderPoint({ renderFrame, pointMeters: measurement.endPoint })}
+          start={toThreeRenderPoint({
+            renderFrame,
+            pointMeters: measurement.startPoint,
+          })}
+          end={toThreeRenderPoint({
+            renderFrame,
+            pointMeters: measurement.endPoint,
+          })}
           distance={measurement.distance}
           metersPerDisplayUnit={metersPerDisplayUnit}
           lengthSymbol={lengthSymbol}

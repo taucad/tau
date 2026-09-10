@@ -9,10 +9,9 @@ import { stopRootWithRehydration } from '#lib/xstate-test.utils.js';
 import { cadMachine } from '#machines/cad.machine.js';
 import { cadPreviewMachine } from '#machines/cad-preview.machine.js';
 import type { PrepareFilesInput } from '#machines/cad-preview.machine.js';
-import type { runtime } from '#runtime/ui-runtime.definition.js';
 import type { KernelOptionsFactory, LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
 
-const createMockAppRuntimeClient = () => createMockRuntimeClient<typeof runtime>();
+const createMockAppRuntimeClient = () => createMockRuntimeClient();
 
 const createKernelOptionsFactory = (): LazyKernelOptionsFactory => async () => () =>
   mock<ReturnType<KernelOptionsFactory>>({

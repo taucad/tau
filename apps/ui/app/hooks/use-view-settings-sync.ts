@@ -77,7 +77,6 @@ export function useViewSettingsSync({
     }),
     cameraViewEqual,
   );
-  const environmentPreset = useSelector(graphicsRef, (s) => s.context.environmentPreset);
   const graphicsBackendPreference = useSelector(graphicsRef, (s) => s.context.graphicsBackendPreference);
 
   // Pinned measurements for persistence
@@ -114,7 +113,6 @@ export function useViewSettingsSync({
       upDirection,
       cameraFovAngle,
       cameraView: persistCameraView ? cameraView : undefined,
-      environmentPreset,
       graphicsBackend: graphicsBackendPreference,
       pinnedMeasurements,
       renderTimeout,
@@ -158,7 +156,6 @@ export function useViewSettingsSync({
     cameraFovAngle,
     cameraView,
     persistCameraView,
-    environmentPreset,
     graphicsBackendPreference,
     measurements,
     renderTimeout,

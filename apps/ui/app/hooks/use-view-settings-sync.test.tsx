@@ -158,6 +158,7 @@ describe('useViewSettingsSync', () => {
       });
     });
     expect(editorSend.mock.calls.at(-1)?.[0]).not.toHaveProperty('settings.componentDisplay');
+    expect(editorSend.mock.calls.at(-1)?.[0]).not.toHaveProperty(`settings.${['environment', 'Preset'].join('')}`);
     graphicsRef.stop();
   });
 

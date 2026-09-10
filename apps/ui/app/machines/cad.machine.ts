@@ -22,6 +22,7 @@ import type { JSONSchema7 } from '@taucad/json-schema';
 import type { LengthSymbol } from '@taucad/units';
 import { defaultRenderTimeout } from '#constants/editor.constants.js';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
+import { getComputeReuseMode } from '#lib/compute-reuse-preference.js';
 import type { logMachine } from '#machines/logs.machine.js';
 import type { fileManagerMachine } from '#machines/file-manager.machine.js';
 import type { FileContentService } from '@taucad/fs-client/file-content-service';
@@ -177,7 +178,6 @@ type CadEvent =
   | { type: 'selectSceneSequence'; sequence: number }
   | { type: 'followLiveScene' }
   | { type: 'saveSelectedSceneStage' }
-  | { type: 'progressiveSceneCancelled' }
   | Extract<SceneSnapshotReaderEvent, { type: 'sceneSnapshotLoaded' | 'sceneSnapshotFailed' }>
   | Extract<SceneStageWriterEvent, { type: 'sceneStageSaved' | 'sceneStageSaveFailed' }>
   | KernelConnectedEvent
@@ -549,8 +549,16 @@ const connectKernelActor = fromSafeAsync<KernelConnectedEvent, ConnectKernelInpu
   ]);
 
   const resolveKernelOptions = await lazyKernelOptionsFactory();
+  const computeConnection =
+    getComputeReuseMode() === 'durable' && snapshot.context.projectId
+      ? snapshot.context.openComputeBinding?.(snapshot.context.projectId)
+      : undefined;
+  if (computeConnection) {
+    cleanups.push(computeConnection.dispose);
+  }
   const kernelOptions = resolveKernelOptions({
     fileSystem: fromFileSystemBridge(() => snapshot.context.openFileSystemBridge!(fileSystemRoot)),
+    compute: computeConnection?.compute,
   });
   client = createRuntimeClient(kernelOptions);
 
@@ -942,9 +950,6 @@ export const cadMachine = setup({
     failSceneTimeline: assign({
       sceneTimeline: ({ context }) => settleSceneTimeline(context.sceneTimeline, 'failed'),
     }),
-    cancelSceneTimeline: assign({
-      sceneTimeline: ({ context }) => settleSceneTimeline(context.sceneTimeline, 'cancelled'),
-    }),
     storeRehydratedSceneSnapshot: assign({
       sceneTimeline({ context, event }) {
         assertEvent(event, 'sceneSnapshotLoaded');
@@ -1081,9 +1086,6 @@ export const cadMachine = setup({
     },
     sceneSnapshotFailed: {
       actions: ['storeSceneSnapshotFailure'],
-    },
-    progressiveSceneCancelled: {
-      actions: ['cancelSceneTimeline'],
     },
   },
   initial: 'connecting',
@@ -1364,5 +1366,5 @@ export const selectProgressiveSceneCapability = (snapshot: CadSnapshot): Progres
     return undefined;
   }
   return Object.entries(capabilities.renderCapabilities).find(([kernelId]) => kernelId === activeKernelId)?.[1]
-    .progressiveScene;
+    ?.progressiveScene;
 };

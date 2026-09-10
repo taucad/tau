@@ -1,19 +1,6 @@
 import React, { useCallback, useState, useMemo } from 'react';
 import type { ClassValue } from 'clsx';
-import {
-  Axis3D,
-  Box,
-  Grid3X3,
-  Layers,
-  Rotate3D,
-  Settings,
-  PenLine,
-  Sparkles,
-  ArrowUp,
-  Timer,
-  Lightbulb,
-  Check,
-} from 'lucide-react';
+import { Axis3D, Box, Grid3X3, Layers, Rotate3D, Settings, PenLine, Sparkles, ArrowUp, Timer } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { Button } from '@taucad/ui/components/button';
 import {
@@ -30,7 +17,6 @@ import { InfoTooltip } from '#components/ui/info-tooltip.js';
 import { DropdownMenuSelectItem, preventMenuSliderEscapeDismissal } from '#components/ui/menu-slider-item.js';
 import { axesColors } from '#constants/color.constants.js';
 import { defaultRenderTimeout } from '#constants/editor.constants.js';
-import type { EnvironmentPreset } from '#constants/editor.constants.js';
 import { useGraphics, useGraphicsSelector } from '#hooks/use-graphics.js';
 import { useCad, useCadSelector } from '#hooks/use-cad.js';
 
@@ -60,29 +46,6 @@ const upDirectionOptions: Array<{ value: UpDirection; label: React.ReactNode; ar
   { value: 'x', label: <span style={{ color: axesColors.x }}>X</span>, ariaLabel: 'X-up' },
   { value: 'y', label: <span style={{ color: axesColors.y }}>Y</span>, ariaLabel: 'Y-up' },
   { value: 'z', label: <span style={{ color: axesColors.z }}>Z</span>, ariaLabel: 'Z-up' },
-];
-
-type EnvironmentPresetOption = {
-  readonly id: EnvironmentPreset;
-  readonly label: string;
-  readonly description: string;
-};
-
-function isEnvironmentPreset(value: string): value is EnvironmentPreset {
-  return value === 'studio' || value === 'performance';
-}
-
-const environmentPresetOptions: EnvironmentPresetOption[] = [
-  {
-    id: 'studio',
-    label: 'Studio',
-    description: 'Full lighting rig with reflections',
-  },
-  {
-    id: 'performance',
-    label: 'Performance',
-    description: 'Minimal lights for best performance',
-  },
 ];
 
 type ViewerSettingsProps = {
@@ -115,7 +78,6 @@ export function ViewerSettings({ className, overflowControls }: ViewerSettingsPr
   const enableAxes = useGraphicsSelector((state) => state.context.enableAxes);
   const enableMatcap = useGraphicsSelector((state) => state.context.enableMatcap);
   const enablePostProcessing = useGraphicsSelector((state) => state.context.enablePostProcessing);
-  const environmentPreset = useGraphicsSelector((state) => state.context.environmentPreset);
   const upDirection = useGraphicsSelector((state) => state.context.upDirection);
   const is2dGeometry = useGraphicsSelector((state) => state.context.geometry?.format === 'svg');
 
@@ -171,17 +133,6 @@ export function ViewerSettings({ className, overflowControls }: ViewerSettingsPr
     [graphicsRef],
   );
 
-  const handleEnvironmentPresetChange = useCallback(
-    (value: string) => {
-      if (!isEnvironmentPreset(value)) {
-        return;
-      }
-
-      graphicsRef.send({ type: 'setEnvironmentPreset', payload: value });
-    },
-    [graphicsRef],
-  );
-
   const handleUpDirectionChange = useCallback(
     (value: UpDirection) => {
       graphicsRef.send({ type: 'setUpDirection', payload: value });
@@ -201,13 +152,6 @@ export function ViewerSettings({ className, overflowControls }: ViewerSettingsPr
     [renderTimeout],
   );
 
-  const currentEnvironmentPresetOption = useMemo(
-    () => environmentPresetOptions.find((option) => option.id === environmentPreset) ?? environmentPresetOptions[0]!,
-    [environmentPreset],
-  );
-
-  const getEnvironmentPresetOptionValue = useCallback((option: EnvironmentPresetOption): string => option.id, []);
-  const getEnvironmentPresetOptionLabel = useCallback((option: EnvironmentPresetOption): string => option.label, []);
   const getTimeoutValue = useCallback((option: TimeoutOption): string => String(option.value), []);
   const getTimeoutLabel = useCallback((option: TimeoutOption): string => option.label, []);
 
@@ -276,37 +220,6 @@ export function ViewerSettings({ className, overflowControls }: ViewerSettingsPr
                 </span>
               </div>
             </DropdownMenuSwitchItem>
-            <DropdownMenuSelectItem
-              value={currentEnvironmentPresetOption}
-              options={environmentPresetOptions}
-              title='Environment preset'
-              description='Choose lighting and environment preset for this viewer.'
-              getOptionValue={getEnvironmentPresetOptionValue}
-              getOptionLabel={getEnvironmentPresetOptionLabel}
-              renderOption={(option, isSelected) => (
-                <span className='flex w-full items-center justify-between gap-2'>
-                  <span className='flex min-w-0 flex-1 flex-col'>
-                    <span>{option.label}</span>
-                    <span className='text-xs leading-snug whitespace-normal text-muted-foreground'>
-                      {option.description}
-                    </span>
-                  </span>
-                  {isSelected ? <Check className='size-4 shrink-0' /> : null}
-                </span>
-              )}
-              selectPopoverContentClassName='min-w-72 w-auto max-w-[min(var(--radix-popover-content-available-width))]'
-              shouldCloseOnSelect={() => false}
-              infoTooltip={
-                <InfoTooltip>
-                  Lighting environment for the 3D viewer.
-                  <br /> Studio offers full reflections; Performance minimizes light cost.
-                </InfoTooltip>
-              }
-              onValueChange={handleEnvironmentPresetChange}
-            >
-              <Lightbulb />
-              Environment
-            </DropdownMenuSelectItem>
             <DropdownMenuSeparator />
           </>
         )}

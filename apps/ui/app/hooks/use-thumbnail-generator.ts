@@ -81,38 +81,50 @@ export function useThumbnailGenerator(): { regenerate: () => Promise<ThumbnailRe
         const snapshot = cadActorRef.current?.getSnapshot();
         const geometry = snapshot?.context.geometry;
         const identity = request.identity ?? identityRef.current;
-        if (snapshot?.context.entryPath && geometry?.format === 'svg' && request.kind === 'automatic-thumbnail') {
-          return { status: 'skipped', identity, reason: 'svg-source' };
-        }
-        if (!snapshot?.context.entryPath || geometry?.format !== 'gltf') {
-          throw new Error('source-unavailable: settled canonical GLB not ready');
+        if (!snapshot?.context.entryPath || (geometry?.format !== 'gltf' && geometry?.format !== 'svg')) {
+          throw new Error('source-unavailable: settled canonical geometry not ready');
         }
         const generation = generationRef.current;
         const renderedLocatorIdentity = locatorIdentity(await getProjectFileSystemConfig(projectId));
-        const files = await imageService.export({
-          kind: request.kind,
-          identity,
-          projectId,
-          sourceFormat: 'glb',
-          sourcePath: snapshot.context.entryPath,
-          geometryHash: geometry.hash,
-          content: geometry.content,
-          format: 'webp',
-          exportOptions: {
-            mode: 'single',
-            width: 768,
-            height: 576,
-            lineWidth: thumbnailLineWidth,
-            camera: {
-              framing: 'bounds',
-              direction: [0.612_372_435_7, -0.612_372_435_7, 0.5],
-              up: [0, 0, 1],
-              margin: 0.1,
-              projection: { kind: 'perspective', verticalFieldOfView: 45 },
-            },
-            quality: 0.9,
-          },
-        });
+        const files = await imageService.export(
+          geometry.format === 'svg'
+            ? {
+                kind: request.kind,
+                identity,
+                projectId,
+                signal: request.signal,
+                sourceFormat: 'svg',
+                sourcePath: snapshot.context.entryPath,
+                content: geometry.content,
+                format: 'webp',
+                exportOptions: { width: 768, height: 576, quality: 0.9 },
+              }
+            : {
+                kind: request.kind,
+                identity,
+                projectId,
+                signal: request.signal,
+                sourceFormat: 'glb',
+                sourcePath: snapshot.context.entryPath,
+                geometryHash: geometry.hash,
+                content: geometry.content,
+                format: 'webp',
+                exportOptions: {
+                  mode: 'single',
+                  width: 768,
+                  height: 576,
+                  lineWidth: thumbnailLineWidth,
+                  camera: {
+                    framing: 'bounds',
+                    direction: [0.6123724357, -0.6123724357, 0.5],
+                    up: [0, 0, 1],
+                    margin: 0.1,
+                    projection: { kind: 'perspective', verticalFieldOfView: 45 },
+                  },
+                  quality: 0.9,
+                },
+              },
+        );
         if (!files) {
           throw new Error('thumbnail request was coalesced or suppressed after an unchanged failure');
         }
@@ -130,6 +142,9 @@ export function useThumbnailGenerator(): { regenerate: () => Promise<ThumbnailRe
           return { status: 'skipped', reason: 'superseded' };
         }
         const currentLocatorIdentity = locatorIdentity(await getProjectFileSystemConfig(projectId));
+        if (artifact.generation !== generationRef.current || artifact.identity !== identityRef.current) {
+          return { status: 'skipped', reason: 'superseded' };
+        }
         if (artifact.locatorIdentity !== currentLocatorIdentity) {
           return { status: 'skipped', reason: 'locator-changed' };
         }
@@ -151,6 +166,18 @@ export function useThumbnailGenerator(): { regenerate: () => Promise<ThumbnailRe
       },
     },
   });
+
+  useEffect(
+    () => () => {
+      generationRef.current += 1;
+      identityRef.current = `${projectId}:disposed`;
+      const error = new DOMException('Thumbnail generator was disposed.', 'AbortError');
+      for (const resolve of manualResultResolversRef.current.splice(0)) {
+        resolve({ status: 'failed', kind: 'manual-thumbnail', error });
+      }
+    },
+    [projectId],
+  );
 
   useEffect(() => {
     if (!mainCadActor) {

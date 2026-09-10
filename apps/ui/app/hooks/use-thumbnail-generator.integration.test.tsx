@@ -173,14 +173,40 @@ describe('useThumbnailGenerator integration', () => {
     expect(writeFile).toHaveBeenCalledOnce();
   });
 
-  it('should gracefully skip automatic SVG thumbnails without invoking the GLB exporter', async () => {
+  it('should automatically render and store SVG thumbnails as WebP', async () => {
     geometryFormat = 'svg';
     renderHook(() => useThumbnailGenerator());
 
     settle('drawing-hash');
     await advance(2000);
 
-    expect(exportImage).not.toHaveBeenCalled();
+    expect(exportImage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'automatic-thumbnail',
+        sourceFormat: 'svg',
+        format: 'webp',
+        content: '<svg xmlns="http://www.w3.org/2000/svg"/>',
+        exportOptions: { width: 768, height: 576, quality: 0.9 },
+      }),
+    );
+    expect(writeFile).toHaveBeenCalledWith('thumbnail.webp', webpBytes(1), { source: 'machine' });
+  });
+
+  it('should abort an active export on unmount and never write its late bytes', async () => {
+    const pending = deferred<ReturnType<typeof webpFile>>();
+    exportImage.mockImplementationOnce(async () => pending.promise);
+    const hook = renderHook(() => useThumbnailGenerator());
+
+    settle('geometry-hash');
+    await advance(1000);
+    const job = exportImage.mock.calls[0]![0];
+    expect(job.signal?.aborted).toBe(false);
+
+    hook.unmount();
+    expect(job.signal?.aborted).toBe(true);
+    pending.resolve(webpFile(9));
+    await advance(0);
+
     expect(writeFile).not.toHaveBeenCalled();
   });
 });

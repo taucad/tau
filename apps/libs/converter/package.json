@@ -32,7 +32,9 @@
     "@taucad/runtime": "workspace:*"
   },
   "exports": {
-    ".": "./src/index.ts",
+    ".": "./src/contracts.ts",
+    "./contracts": "./src/contracts.ts",
+    "./runtime": "./src/runtime.ts",
     "./package.json": "./package.json"
   },
   "imports": {

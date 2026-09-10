@@ -2,22 +2,27 @@ import { describe, expect, it } from 'vitest';
 import { revisionMetadataSchema } from '#revision-metadata.js';
 
 describe('revisionMetadataSchema', () => {
-  it('rejects an unknown sixth provenance source identically for both persistence formats', () => {
-    const metadata = {
+  it('rejects an unknown sixth provenance source', () => {
+    const result = revisionMetadataSchema.safeParse({
       version: 1,
+      id: 'a-revision',
       parents: [],
       provenance: { source: 'automation', actorId: 'test', createdAt: 0 },
       summary: { generated: 'test' },
-    };
-    const results = [
-      revisionMetadataSchema.safeParse({ ...metadata, id: 'browser-revision' }),
-      revisionMetadataSchema.safeParse({ ...metadata, revisionId: 'native-git-revision' }),
-    ];
-    const issues = results.map((result) =>
-      result.success ? [] : result.error.issues.map(({ code, message, path }) => ({ code, message, path })),
-    );
+    });
 
-    expect(results.map(({ success }) => success)).toEqual([false, false]);
-    expect(issues[0]).toEqual(issues[1]);
+    expect(result.success).toBe(false);
+  });
+
+  it('requires the one identifier every persistence format now writes', () => {
+    const result = revisionMetadataSchema.safeParse({
+      version: 1,
+      revisionId: 'native-git-revision',
+      parents: [],
+      provenance: { source: 'agent', actorId: 'test', createdAt: 0 },
+      summary: { generated: 'test' },
+    });
+
+    expect(result.success).toBe(false);
   });
 });

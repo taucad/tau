@@ -91,27 +91,11 @@ export type {
   RevisionTreeMergeResult,
   TextConflict,
 } from '#revision-merge.js';
-export { RevisionAuthority, revisionBranchName } from '#revision-authority.js';
-export type {
-  BranchHeadUpdateResult,
-  CreateRevisionInput,
-  Revision,
-  RevisionAuthorityOptions,
-  RevisionBranchName,
-  RevisionProvenance,
-  RevisionSummary,
-  StaleBranchHeadConflict,
-  UpdateBranchHeadInput,
-} from '#revision-authority.js';
-export { createBrowserRevisionPersistence } from '#revision-persistence.js';
-export type {
-  BrowserRevisionPersistenceOptions,
-  PersistedRevisionBranchHead,
-  RevisionPersistenceEntry,
-  RevisionPersistencePort,
-  RevisionPersistenceReceipt,
-  RevisionPersistenceSnapshot,
-} from '#revision-persistence.js';
+/* The revision authority, its persistence port and `revisionBranchName` are
+ * `@taucad/revisions`. The frozen S6 boundary is that nothing reachable from
+ * this library's export map can initialize a revision authority (RC8 work 10);
+ * what an authority is built out of — trees, ids, merges, the resource queue —
+ * stays here and is imported by it. */
 export {
   captureRevisionTree,
   MaterializedWorkspaceAuthority,

@@ -16,24 +16,6 @@ export type {
   RevisionTreeMergeResult,
   TextConflict,
 } from '#revision-merge.js';
-export { RevisionAuthority, revisionBranchName } from '#revision-authority.js';
-export type {
-  BranchHeadUpdateResult,
-  CreateRevisionInput,
-  Revision,
-  RevisionAuthorityOptions,
-  RevisionBranchName,
-  RevisionProvenance,
-  RevisionSummary,
-  StaleBranchHeadConflict,
-  UpdateBranchHeadInput,
-} from '#revision-authority.js';
-export type {
-  PersistedRevisionBranchHead,
-  RevisionPersistenceEntry,
-  RevisionPersistencePort,
-  RevisionPersistenceReceipt,
-  RevisionPersistenceSnapshot,
-} from '#revision-persistence.js';
+/* No authority symbol: see the note in `../index.ts`. */
 export { materializedWorkspaceId } from '#workspace-identity.js';
 export type { MaterializedWorkspaceId } from '#workspace-identity.js';

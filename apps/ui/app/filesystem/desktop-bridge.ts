@@ -12,6 +12,11 @@
  * `@taucad/runtime/electron/renderer`, whose same-window guard is the tree's
  * one relay-acceptance predicate.
  */
+import type { ChatRevisionMode } from '@taucad/chat/schemas';
+import type { ComputeStoreControl } from '@taucad/runtime/types';
+import { z } from 'zod';
+import { externalAgentDescriptorSchema } from '@taucad/agent-host';
+import type { ExternalAgentDescriptor } from '@taucad/agent-host';
 import { isDesktopTarget as isDesktopBuildTarget } from '#lib/build-target.js';
 
 /**
@@ -23,7 +28,10 @@ type DesktopShell = {
   readonly relayTag: string;
   readonly nodeFs: { readonly homeRoot: string };
   readonly runtimeKernelIds?: readonly string[];
+  readonly externalAgents?: readonly ExternalAgentDescriptor[];
+  readonly revisions?: readonly ChatRevisionMode[];
   readonly nativeCode?: DesktopBridge['nativeCode'];
+  readonly compute?: DesktopBridge['compute'];
   readonly appIcon: { setTheme(theme: 'light' | 'dark'): void };
   readonly dialog: DesktopBridge['dialog'];
   readonly openFiles: DesktopBridge['openFiles'];
@@ -56,6 +64,21 @@ export const setDesktopAppIconTheme = (theme: 'light' | 'dark'): void => {
  */
 export type DesktopBridge = {
   readonly runtimeKernelIds: readonly string[];
+  /**
+   * External ACP agents launcher 2 knows about (W4-ACP), as the one canonical
+   * descriptor (VSC1), which the execution selector draws one row each from.
+   * Main resolved, CLI-probed and model-probed them before this window existed,
+   * so it is a plain value beside `runtimeKernelIds` rather than a probe the
+   * page repeats; empty means Tau's own runs only.
+   */
+  readonly externalAgents: readonly ExternalAgentDescriptor[];
+  /**
+   * Revision modes launcher 2 records a turn in (V17), published by main
+   * exactly as the daemon publishes its own on `/.well-known/tau-host`. Empty
+   * means the utility has no revision port and the composer offers no revision
+   * selector for this computer.
+   */
+  readonly revisions: readonly ChatRevisionMode[];
   readonly nativeCode: {
     isTrusted(projectRoot: string): Promise<boolean>;
     grant(projectRoot: string): Promise<boolean>;
@@ -87,7 +110,15 @@ export type DesktopBridge = {
      * over a WebSocket. Main refuses a root the user never granted, and the
      * promise then never settles rather than resolving onto a port to nowhere.
      */
-    connect(workspaceRoot: string): Promise<MessagePort>;
+    connect(workspaceRoot: string, computeMode: 'off' | 'memory' | 'durable'): Promise<MessagePort>;
+  };
+  readonly compute: {
+    inspect(projectRoot: string): ReturnType<ComputeStoreControl['inspect']>;
+    clear(projectRoot: string): ReturnType<ComputeStoreControl['clear']>;
+    collect(
+      projectRoot: string,
+      input: Omit<Parameters<ComputeStoreControl['collect']>[0], 'signal'>,
+    ): ReturnType<ComputeStoreControl['collect']>;
   };
   readonly dialog: {
     /**
@@ -151,6 +182,14 @@ export const desktopBridge = (): DesktopBridge | undefined => {
 
   built ??= {
     runtimeKernelIds: shell.runtimeKernelIds ?? [],
+    /* Parsed, not trusted: the names and model ids main put here came out of a
+     * vendor adapter's own config options, and this page renders them. */
+    externalAgents:
+      z
+        .array(externalAgentDescriptorSchema)
+        .max(16)
+        .safeParse(shell.externalAgents ?? []).data ?? [],
+    revisions: shell.revisions ?? [],
     nativeCode: shell.nativeCode ?? {
       isTrusted: async () => false,
       grant: async () => false,
@@ -161,7 +200,19 @@ export const desktopBridge = (): DesktopBridge | undefined => {
       connect: async () => connectServices('nodeFs'),
     },
     agentHost: {
-      connect: async (workspaceRoot: string) => connectServices('agentHost', { workspaceRoot }),
+      connect: async (workspaceRoot: string, computeMode: 'off' | 'memory' | 'durable') =>
+        connectServices('agentHost', { workspaceRoot, computeMode }),
+    },
+    compute: shell.compute ?? {
+      inspect: async () => {
+        throw new Error('Native compute controls are unavailable.');
+      },
+      clear: async () => {
+        throw new Error('Native compute controls are unavailable.');
+      },
+      collect: async () => {
+        throw new Error('Native compute controls are unavailable.');
+      },
     },
     dialog: shell.dialog,
     openFiles: shell.openFiles,

@@ -341,7 +341,10 @@ export const SliderInput = ({
           onKeyDown={handleKeyDown}
         />
         {trailingAdornment ? (
-          <span data-slot='slider-input-adornment' className='col-start-2 row-start-1 shrink-0 select-none'>
+          <span
+            data-slot='slider-input-adornment'
+            className='col-start-2 row-start-1 flex h-full shrink-0 items-center justify-center select-none'
+          >
             {trailingAdornment}
           </span>
         ) : null}

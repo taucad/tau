@@ -119,7 +119,7 @@ export function DockviewTab(properties: DockviewTabProps): React.JSX.Element {
           <button
             type='button'
             aria-label={`Close ${fullTitle}`}
-            className="dv-default-tab-action absolute right-1 z-10 size-4.5! rounded-[5px]! bg-transparent p-0! opacity-0 group-hover/default-tab:opacity-100 before:pointer-events-none before:absolute before:inset-y-0 before:right-full before:w-6 before:bg-linear-to-r before:from-transparent before:to-accent before:content-[''] hover:bg-input!"
+            className="dv-default-tab-action absolute right-1 z-10 size-4.5! rounded-[calc(var(--dv-tab-border-radius)-0.25rem)]! bg-transparent p-0! opacity-0 group-hover/default-tab:opacity-100 before:pointer-events-none before:absolute before:inset-y-0 before:right-full before:w-6 before:bg-linear-to-r before:from-transparent before:to-accent before:content-[''] hover:bg-input!"
             onClick={handleClose}
             onPointerDown={(event) => {
               event.stopPropagation();

@@ -1101,14 +1101,14 @@ describe('IndexedDbStorageProvider', () => {
       const chat = await provider.createChat('resource_test', {
         name: 'WithModel',
         messages: [],
-        activeExecution: { kind: 'paseo', connectionId: 'connection-1', agentId: 'claude' },
+        activeExecution: { kind: 'acp', hostId: 'origin', agentId: 'claude' },
         activeKernel: 'manifold',
       });
 
       await provider.patchChat(chat.id, 'name', 'Renamed');
 
       const stored = await provider.getChat(chat.id);
-      expect(stored?.activeExecution).toEqual({ kind: 'paseo', connectionId: 'connection-1', agentId: 'claude' });
+      expect(stored?.activeExecution).toEqual({ kind: 'acp', hostId: 'origin', agentId: 'claude' });
       expect(stored?.activeKernel).toBe('manifold');
     });
   });

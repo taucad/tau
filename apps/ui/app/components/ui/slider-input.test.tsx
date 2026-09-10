@@ -87,6 +87,12 @@ describe('SliderInput', () => {
     expect(screen.getByText('Leading')).toBeInTheDocument();
     expect(screen.getByText('%')).toBeInTheDocument();
     expect(container.querySelector<HTMLElement>('[data-slot="slider-input-fill"]')).toHaveStyle({ width: '50%' });
+    expect(container.querySelector<HTMLElement>('[data-slot="slider-input-adornment"]')).toHaveClass(
+      'flex',
+      'h-full',
+      'items-center',
+      'justify-center',
+    );
   });
 
   it('clamps fill width and handles a zero-width range', () => {

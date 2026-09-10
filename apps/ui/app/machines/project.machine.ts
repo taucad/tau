@@ -748,7 +748,6 @@ export const projectMachine = setup({
             enableMatcap: settings.enableMatcap,
             enablePostProcessing: settings.enablePostProcessing,
             upDirection: settings.upDirection,
-            environmentPreset: settings.environmentPreset,
             pinnedMeasurements: settings.pinnedMeasurements,
             graphicsBackendPreference: settings.graphicsBackend ?? 'webgl',
             modelInteractionRef: context.modelInteractionRef,

@@ -8,6 +8,8 @@ import { TauWordmark } from '#components/icons/tau-wordmark.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import type { Handle } from '#types/matches.types.js';
 import { ClientOnly } from '#components/ui/utils/client-only.js';
+import { isDesktopTarget } from '#lib/build-target.js';
+import { cn } from '@taucad/ui/utils/cn';
 
 const AuthSplashbackLazy = lazy(async () => {
   const m = await import('#components/geometry/splash/auth-splashback.js');
@@ -24,7 +26,13 @@ export default function AuthPage(): React.JSX.Element {
     <AuthEmailDraftProvider>
       <div className='grid min-h-svh lg:grid-cols-2'>
         <div className='flex flex-col gap-4 p-6 md:p-10'>
-          <div className='flex justify-center gap-2 md:justify-start'>
+          <div
+            className={cn(
+              'flex justify-center gap-2 md:justify-start',
+              // Shell-less window: this row overlaps the desktop drag band.
+              isDesktopTarget() && '[&_a]:[app-region:no-drag]',
+            )}
+          >
             <Tooltip>
               <TooltipTrigger asChild className='flex items-center gap-2 font-medium'>
                 <Link to='/'>

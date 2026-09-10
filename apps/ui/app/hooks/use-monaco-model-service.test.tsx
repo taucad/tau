@@ -9,6 +9,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook } from '@testing-library/react';
+import { createMockRuntimeClient } from '@taucad/runtime-testing';
 import type { ActorRefFrom } from 'xstate';
 import type { cadMachine } from '#machines/cad.machine.js';
 import { registry } from '#lib/monaco-language-registry.js';
@@ -24,6 +25,8 @@ const capabilities: AppCapabilitiesManifest = {
   ],
   routes: [],
   renderCapabilities: {},
+  autonomousRenderLoop: true,
+  transport: createMockRuntimeClient().transport,
 };
 
 type Snapshot = { context: { activeKernelId?: string; capabilities?: AppCapabilitiesManifest } };
@@ -135,7 +138,7 @@ describe('useGeometryUnitKernelPrefetch', () => {
   it('should read extensions from each live capabilities snapshot', () => {
     const actor = createStubActor();
     const units = unitsOf(['main.ts', actor]);
-    const unavailable: AppCapabilitiesManifest = { registrations: [], routes: [], renderCapabilities: {} };
+    const unavailable: AppCapabilitiesManifest = { ...capabilities, registrations: [], routes: [] };
 
     renderHook(() => {
       useGeometryUnitKernelPrefetch(units, true);

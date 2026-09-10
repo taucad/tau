@@ -42,6 +42,18 @@ describe('graphics view settings parsing', () => {
     expect(defaultGraphicsSettings.renderTimeout).toBe(defaultRenderTimeout);
   });
 
+  it('should strip a legacy environment preset without discarding other settings', () => {
+    const obsoleteSettingsKey = ['environment', 'Preset'].join('');
+    const settings = parseGraphicsViewSettings({
+      ...defaultGraphicsSettings,
+      [obsoleteSettingsKey]: 'performance',
+      enableGrid: false,
+    });
+
+    expect(settings.enableGrid).toBe(false);
+    expect(settings).not.toHaveProperty(obsoleteSettingsKey);
+  });
+
   it('should migrate v6 camera state while extracting legacy component display separately', () => {
     const persisted = {
       ...defaultGraphicsSettings,

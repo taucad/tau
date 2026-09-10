@@ -7,7 +7,10 @@
  * conflict paths; independent authority subtrees can still run in parallel.
  */
 
+/* eslint-disable tau-lint/no-direct-indexeddb -- This worker is the browser compute-store authority. */
+
 import { exposeFileSystem, workerReadyMessageType } from '@taucad/fs-bridge';
+import { createIndexedDbComputeEngine, exposeComputeStoreChannel } from '@taucad/runtime/host';
 
 import { populateBundledTypesMount } from '@taucad/filesystem/bundled-types-mount';
 import type { BundledTypesMountEntry } from '@taucad/filesystem/bundled-types-mount';
@@ -148,7 +151,11 @@ self.addEventListener('unhandledrejection', (event) => {
 
 async function createNodeModulesMount(): Promise<void> {
   try {
-    await fileService.mount('/node_modules', { backend: 'opfs', providerBasePath: 'tau-node-modules' });
+    await fileService.mount('/node_modules', {
+      backend: 'opfs',
+      providerBasePath: 'tau-node-modules',
+      class: 'derived',
+    });
     console.debug('[FM-Worker] /node_modules mounted on OPFS');
   } catch (error) {
     console.warn('[FM-Worker] Failed to mount OPFS /node_modules, falling through to root', error);
@@ -210,6 +217,7 @@ try {
   mountTable.mount('/', rootProvider, {
     backend: homeStorageBackend,
     storageRootKey: providerRegistry.resolveStorageRootKey(rootScope),
+    class: 'authored',
   });
 } catch (error) {
   postWorkerInitError(`mount root ${homeStorageBackend} provider`, error);
@@ -242,6 +250,93 @@ exposeFileSystem(fileService, {
 });
 
 let languageFsSyncDispose: { dispose(): void } | undefined;
+let computeStore: ReturnType<typeof createIndexedDbComputeEngine> | undefined;
+let admittedComputeProjectId: string | undefined;
+const computeChannels = new Set<ReturnType<typeof exposeComputeStoreChannel>>();
+
+const rejectComputePort = (port: MessagePort, message: string): void => {
+  port.postMessage({ error: message });
+  port.close();
+};
+
+const openComputeChannel = async (port: MessagePort, projectId: unknown): Promise<void> => {
+  try {
+    if (typeof projectId !== 'string' || projectId.length === 0) {
+      throw new Error('Compute project identity is required.');
+    }
+    if (projectId !== admittedComputeProjectId) {
+      throw new Error('Compute store project authority does not match the active project.');
+    }
+    computeStore ??= createIndexedDbComputeEngine({ factory: globalThis.indexedDB });
+    const control = await computeStore.control({ workspace: projectId });
+    if (projectId !== admittedComputeProjectId) {
+      throw new Error('Compute store project authority changed while opening the channel.');
+    }
+    const channel = exposeComputeStoreChannel({
+      port,
+      engine: computeStore.engine,
+      workspace: projectId,
+      generation: async () => {
+        const report = await control.inspect({});
+        return report.generation;
+      },
+    });
+    computeChannels.add(channel);
+    channel.onClose(() => computeChannels.delete(channel));
+  } catch (error) {
+    rejectComputePort(port, error instanceof Error ? error.message : String(error));
+  }
+};
+
+const runComputeControl = async (data: {
+  port: MessagePort;
+  projectId: unknown;
+  action: unknown;
+  budget?: unknown;
+  cursor?: unknown;
+}): Promise<void> => {
+  try {
+    if (typeof data.projectId !== 'string' || data.projectId.length === 0) {
+      throw new Error('Compute project identity is required.');
+    }
+    if (data.projectId !== admittedComputeProjectId) {
+      throw new Error('Compute control project authority does not match the active project.');
+    }
+    if (data.action !== 'inspect' && data.action !== 'clear' && data.action !== 'collect') {
+      throw new Error('Compute control action is invalid.');
+    }
+    if (
+      data.action === 'collect' &&
+      (typeof data.budget !== 'number' || !Number.isSafeInteger(data.budget) || data.budget < 1 || data.budget > 1000)
+    ) {
+      throw new Error('Compute collection budget must be a safe integer from 1 to 1000.');
+    }
+    if (data.cursor !== undefined && (typeof data.cursor !== 'string' || data.cursor.length > 1024)) {
+      throw new Error('Compute collection cursor is invalid.');
+    }
+    computeStore ??= createIndexedDbComputeEngine({ factory: globalThis.indexedDB });
+    const control = await computeStore.control({ workspace: data.projectId });
+    if (data.projectId !== admittedComputeProjectId) {
+      throw new Error('Compute control project authority changed while opening the store.');
+    }
+    let result;
+    if (data.action === 'inspect') {
+      result = await control.inspect({});
+    } else if (data.action === 'clear') {
+      result = await control.clear({});
+    } else {
+      result = await control.collect({
+        budget: data.budget as number,
+        ...(data.cursor ? { cursor: data.cursor } : {}),
+      });
+    }
+    data.port.postMessage({ result });
+  } catch (error) {
+    data.port.postMessage({ error: error instanceof Error ? error.message : String(error) });
+  } finally {
+    data.port.close();
+  }
+};
 
 self.addEventListener(
   'message',
@@ -253,12 +348,44 @@ self.addEventListener(
       slotSab?: SharedArrayBuffer;
       arenaSab?: SharedArrayBuffer;
       rootDirectory?: string;
+      projectId?: unknown;
+      action?: unknown;
+      budget?: unknown;
+      cursor?: unknown;
     }>,
   ) => {
     const { data } = event;
+    if (data.type === 'computeStoreAdmission') {
+      const projectId = typeof data.projectId === 'string' ? data.projectId : undefined;
+      if (projectId === admittedComputeProjectId) {
+        return;
+      }
+      admittedComputeProjectId = projectId;
+      for (const channel of computeChannels) {
+        channel.dispose('compute project admission changed');
+      }
+      computeChannels.clear();
+      return;
+    }
     if (data.type === 'filePool' && data.buffer instanceof SharedArrayBuffer) {
       fileService.setFilePool(new SharedPool(data.buffer));
       console.debug('[FM-Worker] filePool attached');
+      return;
+    }
+
+    if (data.type === 'computeStoreConnect' && data.port instanceof MessagePort) {
+      void openComputeChannel(data.port, data.projectId);
+      return;
+    }
+
+    if (data.type === 'computeStoreControl' && data.port instanceof MessagePort) {
+      void runComputeControl({
+        port: data.port,
+        projectId: data.projectId,
+        action: data.action,
+        budget: data.budget,
+        cursor: data.cursor,
+      });
       return;
     }
 

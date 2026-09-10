@@ -29,7 +29,7 @@ import { createGeoSpecWebRunner } from 'geospec/runner/web';
 import type { GeoSpecWebRunnerOptions } from 'geospec/runner/web';
 import { z } from 'zod';
 import { createDefaultKernelOptions } from '#constants/kernel-worker.constants.js';
-import { uiRuntimeConfigSchema } from '#runtime/ui-runtime.definition.js';
+import { uiRuntimeConfigSchema } from '#runtime/ui-runtime.schema.js';
 import type {
   GeoSpecRunnerWorkerInitializeRequest,
   GeoSpecRunnerWorkerRequest,

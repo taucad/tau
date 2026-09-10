@@ -44,8 +44,6 @@ export const mobilePanelIds = [
  * These settings are stored per-build-per-view in EditorState and used to
  * initialize GraphicsMachine instances for each viewer panel.
  */
-export type EnvironmentPreset = 'studio' | 'performance';
-
 /**
  * A measurement that the user has explicitly pinned for persistence.
  */
@@ -94,7 +92,6 @@ export type GraphicsViewSettings = {
   cameraView?: PersistedCameraView;
   /** Render timeout. Milliseconds. */
   renderTimeout: number;
-  environmentPreset: EnvironmentPreset;
   /** Persisted pinned measurements -- optional so legacy data deserializes cleanly */
   pinnedMeasurements?: PinnedMeasurement[];
   /**
@@ -165,7 +162,6 @@ export const graphicsViewSettingsSchema = z.object({
   cameraFovAngle: z.number(),
   /** Render timeout. Milliseconds. */
   renderTimeout: z.number(),
-  environmentPreset: z.enum(['studio', 'performance']),
   pinnedMeasurements: z.array(pinnedMeasurementSchema).optional(),
   graphicsBackend: z.enum(['auto', 'webgl', 'webgpu']).optional(),
   componentDisplay: componentDisplayStateSchema.optional(),
@@ -337,7 +333,6 @@ export const defaultGraphicsSettings: GraphicsViewSettings = {
   upDirection: 'z',
   cameraFovAngle: 60,
   renderTimeout: defaultRenderTimeout,
-  environmentPreset: 'performance',
   graphicsBackend: 'webgl',
   schemaVersion: 10,
 };

@@ -169,25 +169,15 @@ function createMockMonaco(): {
 }
 
 // =============================================================================
-// Mock es-module-lexer
+// Mock the pure-JavaScript es-module-lexer entry.
 // =============================================================================
 
-// Mock the entire module to avoid WASM initialization in tests
-vi.mock('es-module-lexer', () => {
+vi.mock('es-module-lexer/js', () => {
   type MockImport = { n: string; s: number; e: number; ss: number; se: number; d: number };
   type MockExport = { s: number; e: number; ls: number; le: number; n: string; ln: string };
 
-  let initialized = false;
   return {
-    // oxlint-disable-next-line promise/prefer-await-to-then -- test setup
-    init: Promise.resolve().then(() => {
-      initialized = true;
-    }),
     parse(code: string): [MockImport[], MockExport[]] {
-      if (!initialized) {
-        throw new Error('es-module-lexer not initialized');
-      }
-
       // Simple regex-based import parser for tests
       const imports: MockImport[] = [];
       const importRegex = /import\s+(?:.*?\s+from\s+)?["']([^"']+)["']/g;

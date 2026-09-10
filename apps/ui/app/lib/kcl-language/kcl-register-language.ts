@@ -37,6 +37,27 @@ let isRegistered = false;
 /** Global marker service reference (injected by activation) */
 let globalMarkerService: MonacoMarkerService | undefined;
 
+class MockKclEngineConnection {
+  // oxlint-disable-next-line max-params -- KCL WASM engine bridge contract has four positional parameters.
+  public fireModelingCommandFromWasm(_id: string, _range: string, _command: string, _idToRange: string): never {
+    throw new Error('Mock execution should not require modeling commands');
+  }
+
+  // oxlint-disable-next-line max-params -- KCL WASM engine bridge contract has four positional parameters.
+  public async sendModelingCommandFromWasm(
+    _id: string,
+    _range: string,
+    _command: string,
+    _idToRange: string,
+  ): Promise<Uint8Array<ArrayBuffer>> {
+    throw new Error('Mock execution should not require modeling commands');
+  }
+
+  public async startNewSession(): Promise<void> {
+    // Mock execution has no engine session state to reset.
+  }
+}
+
 /**
  * Get the symbol service instance.
  */
@@ -305,10 +326,9 @@ async function initializeSymbolServiceWasm(): Promise<void> {
 
   try {
     // Dynamically import the WASM module, path, and mock connections
-    const [wasmModule, wasmPathModule, engineModule] = await Promise.all([
+    const [wasmModule, wasmPathModule] = await Promise.all([
       import('@taucad/kcl-wasm-lib'),
       import('@taucad/kcl-wasm-lib/kcl.wasm?url'),
-      import('@taucad/zoo/engine-connection'),
     ]);
 
     // Initialize WASM
@@ -342,7 +362,7 @@ async function initializeSymbolServiceWasm(): Promise<void> {
     // Set up mock execution function for variable values
     // Create a minimal mock file system that throws on file operations
     // (mock execution for single-file hover/intellisense doesn't need real file access)
-    const mockEngine = new engineModule.MockEngineConnection();
+    const mockEngine = new MockKclEngineConnection();
     const mockFileSystem = {
       async readFile(): Promise<Uint8Array<ArrayBuffer>> {
         throw new Error('Mock file system does not support file reads');

@@ -35,8 +35,15 @@ import { SvgSpriteMount } from '#components/icons/svg-sprite-mount.js';
 import { BuildSkewBanner } from '#components/build-skew-banner.js';
 import { HeadlessImageProvider } from '#providers/headless-image-provider.js';
 import { authClient } from '#lib/auth-client.js';
-import { BillingSessionProvider } from '@taucad/billing/hooks/billing-session';
-import { useTopupReturn } from '@taucad/billing/hooks/use-topup-return';
+import { BillingSessionProvider, useBillingSession } from '@taucad/billing/hooks/billing-session';
+// eslint-disable-next-line @nx/enforce-module-boundaries -- root composes the first-party billing session and return contract
+import { formatCreditAtoms } from '@taucad/billing';
+import { followPaymentRedirect, getPaymentAction, recoverPaymentAction } from '#lib/billing-payment-client.js';
+import {
+  FinancialSessionProvider,
+  FinancialSessionScope,
+  useFinancialSession,
+} from '#providers/financial-session-provider.js';
 
 export const links: LinksFunction = () => [...globalStylesLinks, ...webManifestLinks];
 
@@ -46,7 +53,10 @@ export const meta: MetaFunction = () => [
   // oxlint-disable-next-line tau-lint/no-hardcoded-color -- browser meta tag
   { name: 'theme-color', content: '#ffffff' },
   { name: 'apple-mobile-web-app-title', content: metaConfig.name },
-  { name: 'apple-mobile-web-app-status-bar-style', content: 'black-translucent' },
+  {
+    name: 'apple-mobile-web-app-status-bar-style',
+    content: 'black-translucent',
+  },
   { name: 'apple-mobile-web-app-capable', content: 'yes' },
   { name: 'mobile-web-app-capable', content: 'yes' },
   { rel: 'apple-touch-icon', href: '/apple-touch-icon.png' },
@@ -167,29 +177,43 @@ export function Layout({ children }: { readonly children: ReactNode }): React.JS
    */
   return (
     <QueryClientProvider client={queryClient}>
-      <AuthConfigProvider>
-        <BillingSessionBridge>
-          <AnalyticsProvider>
-            <ThemeProvider specifiedTheme={ssrTheme} themeAction='/action/set-theme'>
-              <ColorProvider>
-                <LayoutDocument env={data?.env ?? {}} ssrTheme={ssrTheme}>
-                  {application}
-                </LayoutDocument>
-              </ColorProvider>
-            </ThemeProvider>
-          </AnalyticsProvider>
-        </BillingSessionBridge>
-      </AuthConfigProvider>
+      <FinancialSessionProvider>
+        <AuthConfigProvider>
+          <BillingSessionBridge>
+            <AnalyticsProvider>
+              <ThemeProvider specifiedTheme={ssrTheme} themeAction='/action/set-theme'>
+                <ColorProvider>
+                  <LayoutDocument env={data?.env ?? {}} ssrTheme={ssrTheme}>
+                    {application}
+                  </LayoutDocument>
+                </ColorProvider>
+              </ThemeProvider>
+            </AnalyticsProvider>
+          </BillingSessionBridge>
+        </AuthConfigProvider>
+      </FinancialSessionProvider>
     </QueryClientProvider>
   );
 }
 
 const BillingSessionBridge = ({ children }: { readonly children: ReactNode }): React.JSX.Element => {
   const { data: session } = authClient.useSession();
+  const identity =
+    ENV.TAU_BILLING_ENVIRONMENT === undefined || session?.user.id === undefined
+      ? undefined
+      : { apiBaseUrl: ENV.TAU_API_URL, environment: ENV.TAU_BILLING_ENVIRONMENT, ownerId: session.user.id };
   return (
-    <BillingSessionProvider value={{ apiBaseUrl: ENV.TAU_API_URL, userId: session?.user.id }}>
-      {children}
-    </BillingSessionProvider>
+    <FinancialSessionScope identity={identity}>
+      <BillingSessionProvider
+        value={{
+          apiBaseUrl: ENV.TAU_API_URL,
+          environment: ENV.TAU_BILLING_ENVIRONMENT,
+          userId: session?.user.id,
+        }}
+      >
+        {children}
+      </BillingSessionProvider>
+    </FinancialSessionScope>
   );
 };
 
@@ -251,10 +275,108 @@ function LayoutDocument({
 }
 
 export default function App(): React.JSX.Element {
-  // Handles the hosted-Checkout `?topup=success` return on any route.
-  useTopupReturn({ onPaymentReceived: () => toast('Payment received — your balance will update shortly.') });
+  usePaymentActionReturn();
   return <Page />;
 }
+
+export const usePaymentActionReturn = (): void => {
+  const { apiBaseUrl, environment, userId } = useBillingSession();
+  const financialSession = useFinancialSession();
+  useEffect(() => {
+    if (apiBaseUrl === undefined || environment === undefined || userId === undefined) {
+      return;
+    }
+    const binding = { apiBaseUrl, environment, ownerId: userId, financialSession: financialSession.capture() };
+    let active = true;
+    const url = new URL(globalThis.location.href);
+    const actionId = url.searchParams.get('payment_action');
+    if (actionId === null || !/^[A-Za-z0-9._:-]{1,128}$/u.test(actionId)) {
+      return;
+    }
+    const inspectReturn = async (): Promise<void> => {
+      try {
+        const action = await getPaymentAction(binding, actionId);
+        if (!active) {
+          return;
+        }
+        url.searchParams.delete('payment_action');
+        globalThis.history.replaceState(globalThis.history.state, '', url);
+        switch (action.state) {
+          case 'fulfilled': {
+            if (!action.receipt) {
+              return;
+            }
+            toast.success(`${formatCreditAtoms(BigInt(action.receipt.grantedCreditAtoms))} credits added.`);
+            break;
+          }
+          case 'funds_received': {
+            toast('Payment received. Credits are still being added.');
+            break;
+          }
+          case 'processing': {
+            toast('Payment is still processing.');
+            break;
+          }
+          case 'redirect_required': {
+            toast.warning('Checkout is ready to continue.', {
+              action: {
+                label: 'Resume Checkout',
+                onClick: () => {
+                  if (active && binding.financialSession.isCurrent()) {
+                    followPaymentRedirect(action);
+                  }
+                },
+              },
+            });
+            break;
+          }
+          case 'attention_required': {
+            if (action.attention?.action === 'continue_hosted') {
+              toast.warning('Your payment needs attention.', {
+                action: {
+                  label: 'Continue in Checkout',
+                  onClick: async () => {
+                    if (!active || !binding.financialSession.isCurrent()) {
+                      return;
+                    }
+                    const recovered = await recoverPaymentAction(
+                      { ...binding, subjectId: action.subjectId },
+                      action.actionId,
+                    );
+                    // oxlint-disable-next-line typescript/no-unnecessary-condition -- cleanup can flip active while recovery is pending
+                    if (active && binding.financialSession.isCurrent()) {
+                      followPaymentRedirect(recovered);
+                    }
+                  },
+                },
+              });
+            } else {
+              toast.warning('Your payment needs attention. Reopen billing to continue.');
+            }
+            break;
+          }
+          case 'failed':
+          case 'canceled': {
+            toast.warning('Payment was not completed.');
+            break;
+          }
+          default: {
+            break;
+          }
+        }
+      } catch {
+        if (active) {
+          toast.warning('Could not check the returned payment.');
+        }
+      }
+    };
+    // async-iife: bootstrap
+    void inspectReturn();
+    return () => {
+      active = false;
+    };
+  }, [apiBaseUrl, environment, financialSession, userId]);
+};
 
 export function ErrorBoundary(): React.JSX.Element {
   return <Page error={<ErrorPage />} />;

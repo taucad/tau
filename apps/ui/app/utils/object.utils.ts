@@ -315,9 +315,7 @@ export function extractModifiedProperties<T extends Record<string, unknown>>(
 
     if (
       (typeof value === 'number' && !Number.isFinite(value)) ||
-      (Array.isArray(value) &&
-        ((value.length > 0 && value.every((item) => item === null)) ||
-          value.some((item) => typeof item === 'number' && !Number.isFinite(item))))
+      (Array.isArray(value) && value.some((item) => typeof item === 'number' && !Number.isFinite(item)))
     ) {
       continue;
     }

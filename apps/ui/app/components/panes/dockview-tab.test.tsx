@@ -51,7 +51,7 @@ describe('DockviewTab', () => {
       'right-1',
       'z-10',
       'size-4.5!',
-      'rounded-[5px]!',
+      'rounded-[calc(var(--dv-tab-border-radius)-0.25rem)]!',
       'bg-transparent',
       'before:right-full',
       'before:w-6',
@@ -60,6 +60,7 @@ describe('DockviewTab', () => {
       'before:to-accent',
       'hover:bg-input!',
     );
+    expect(close).not.toHaveClass('rounded-[5px]!');
     expect(close).not.toHaveClass('group-hover/default-tab:bg-input!');
     expect(close).not.toHaveClass('right-0', 'right-0.5', 'bg-muted-foreground/10');
   });

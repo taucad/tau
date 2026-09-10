@@ -21,12 +21,13 @@ const createService = async (nodeModulesBasePath?: string): Promise<WorkspaceFil
   const scope = { backend: 'memory', storageRootKey: 'memory:sentinel-test' } as const;
   const provider = await providerRegistry.getProvider(scope);
   const mountTable = new MountTable();
-  mountTable.mount('/', provider, scope);
+  mountTable.mount('/', provider, { ...scope, class: 'authored' });
   if (nodeModulesBasePath !== undefined) {
     const nodeModulesScope = { backend: 'memory', storageRootKey: 'memory:sentinel-node-modules' } as const;
     mountTable.mount('/node_modules', await providerRegistry.getProvider(nodeModulesScope), {
       ...nodeModulesScope,
       providerBasePath: nodeModulesBasePath,
+      class: 'derived',
     });
   }
   return new WorkspaceFileService({

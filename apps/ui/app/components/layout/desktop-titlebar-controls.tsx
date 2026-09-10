@@ -79,11 +79,6 @@ export const DesktopTitlebarControls = ({
         data-slot='desktop-titlebar-controls'
         className='flex h-9 items-center gap-1 bg-transparent pr-2 pl-22 [app-region:no-drag] [&_button]:[app-region:no-drag]'
       >
-        <span
-          aria-hidden
-          data-slot='desktop-titlebar-drag-region'
-          className='absolute inset-y-0 left-0 w-[84px] [app-region:drag]'
-        />
         <SidebarTrigger aria-label='Toggle Sidebar' onSidebarResize={onSidebarResize} />
         <HistoryButton direction='Back' isDisabled={!availability.back} />
         <HistoryButton direction='Forward' isDisabled={!availability.forward} />

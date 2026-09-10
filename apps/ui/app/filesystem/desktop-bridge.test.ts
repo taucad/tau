@@ -107,9 +107,10 @@ describe('desktopBridge', () => {
     /* Ruling C3's launcher 2: the far end is `serveAgentChannel(port, launcher)`
      * in the services utility, and the root is what main checks before minting
      * anything. Same listener-before-request order as `nodeFs`. */
-    await expect(desktopBridge()?.agentHost.connect('/Users/tester/Projects/widget')).resolves.toBe(port);
+    await expect(desktopBridge()?.agentHost.connect('/Users/tester/Projects/widget', 'durable')).resolves.toBe(port);
     expect(requestServicesPort).toHaveBeenCalledExactlyOnceWith(expect.any(String), 'agentHost', {
       workspaceRoot: '/Users/tester/Projects/widget',
+      computeMode: 'durable',
     });
   });
 
@@ -118,7 +119,7 @@ describe('desktopBridge', () => {
     const { desktopBridge } = await loadBridge();
     const bridge = desktopBridge();
 
-    await Promise.all([bridge?.nodeFs.connect(), bridge?.agentHost.connect('/Users/tester/Projects/widget')]);
+    await Promise.all([bridge?.nodeFs.connect(), bridge?.agentHost.connect('/Users/tester/Projects/widget', 'off')]);
 
     const [first] = requestServicesPort.mock.calls[0] as [string, string];
     const [second] = requestServicesPort.mock.calls[1] as [string, string];

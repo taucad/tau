@@ -41,7 +41,7 @@ export default defineConfig({
     'import.meta.env.TAU_TARGET': '"desktop"',
   },
   plugins: [
-    createUiSourceAliasPlugin(),
+    createUiSourceAliasPlugin({ emitModuleGraph: true, target: 'desktop' }),
     tauRuntime(),
     base64Loader,
     createUiReactCompilerPlugin(),
@@ -51,7 +51,7 @@ export default defineConfig({
   ],
   worker: {
     // https://vite.dev/config/worker-options.html#worker-plugins
-    plugins: () => [createUiSourceAliasPlugin(), nxViteTsPaths()],
+    plugins: () => [createUiSourceAliasPlugin({ emitModuleGraph: true, target: 'desktop' }), nxViteTsPaths()],
   },
   ssr: uiSsrOptions,
   server: {

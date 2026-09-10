@@ -1,13 +1,6 @@
 import { useCallback, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { Download, Check, ChevronDown, ArrowUpRight } from 'lucide-react';
-import { defineRuntime } from '@taucad/runtime/worker';
-import { inProcessTransport } from '@taucad/runtime/transport/in-process';
-import { fromMemoryFs } from '@taucad/runtime/filesystem';
-import { openrscad } from '@taucad/openrscad';
-import { parameterCache, geometryCache, gltfEdgeDetection } from '@taucad/middleware';
-import { esbuild } from '@taucad/esbuild';
-import { assimp } from '@taucad/assimp';
 import { parameterEntryPath } from '@taucad/types';
 import { deriveExportFormatOptions } from '#routes/_index/hero-viewer.utils.js';
 import type { ExportFormatOption } from '#routes/_index/hero-viewer.utils.js';
@@ -27,21 +20,13 @@ import qrcodeScad from '#routes/_index/qrcode.scad?raw';
 import { downloadExportArtifactSet } from '#utils/export-artifact-set.utils.js';
 import { createParameterEntry, serializeParameterEntry } from '#utils/parameter-config.utils.js';
 import { projectUrl } from '#utils/project-url.utils.js';
+import { heroClientOptions } from '#runtime/demo-client-options.js';
 
 const heroMainFile = 'main.scad';
 
 const heroCode = { [heroMainFile]: qrcodeScad };
 
 const heroUnits: Units = { length: { sourceSymbol: 'mm', displaySymbol: 'mm' } };
-
-const heroRuntime = defineRuntime({
-  plugins: [assimp(), openrscad(), esbuild()],
-  middleware: [parameterCache(), geometryCache(), gltfEdgeDetection()],
-});
-const heroKernelClientOptions = {
-  runtime: heroRuntime,
-  transport: inProcessTransport({ runtime: heroRuntime, fileSystem: fromMemoryFs() }),
-};
 
 export function HeroViewer(): React.JSX.Element {
   const navigate = useNavigate();
@@ -53,7 +38,7 @@ export function HeroViewer(): React.JSX.Element {
   const [isExporting, setIsExporting] = useState(false);
 
   const { geometry, status, defaultParameters, jsonSchema, exportGeometry, capabilities, setParameters } = useRuntime({
-    clientOptions: heroKernelClientOptions,
+    clientOptions: heroClientOptions,
     source: { files: heroCode },
   });
 

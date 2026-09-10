@@ -1,11 +1,7 @@
-import { describe, it, expect, beforeAll } from 'vitest';
-import { init, parse } from 'es-module-lexer';
+import { describe, it, expect } from 'vitest';
+import { parse } from 'es-module-lexer/js';
 
 describe('es-module-lexer integration', () => {
-  beforeAll(async () => {
-    await init;
-  });
-
   it('should parse named imports', () => {
     const code = `import { draw, something } from 'replicad';`;
     const [imports] = parse(code);
@@ -106,10 +102,6 @@ describe('es-module-lexer integration', () => {
 });
 
 describe('import position detection', () => {
-  beforeAll(async () => {
-    await init;
-  });
-
   it('should detect if cursor is on an import specifier', () => {
     const code = `import { draw } from 'replicad';`;
     const [imports] = parse(code);

@@ -253,6 +253,41 @@ describe('Page header contract', () => {
   });
 });
 
+describe('Desktop window drag band', () => {
+  it('spans the window on desktop and leaves the header chrome clickable', () => {
+    state.hasBreadcrumb = true;
+    vi.stubEnv('TAU_TARGET', 'desktop');
+    const { container } = render(<Page />);
+
+    expect(container.querySelector('[data-slot=desktop-drag-band]')).toHaveClass(
+      'fixed',
+      'inset-x-0',
+      'top-0',
+      'h-9',
+      '[app-region:drag]',
+    );
+    for (const chrome of container.querySelectorAll('header > div')) {
+      expect(chrome).toHaveClass('[app-region:no-drag]');
+    }
+  });
+
+  it('survives the routes that opt out of the application shell', () => {
+    state.enablePageWrapper = false;
+    vi.stubEnv('TAU_TARGET', 'desktop');
+    const { container } = render(<Page />);
+
+    expect(container.querySelector('[data-slot=application-shell]')).not.toBeInTheDocument();
+    expect(container.querySelector('[data-slot=desktop-drag-band]')).toBeInTheDocument();
+  });
+
+  it('stays out of the browser build, which keeps its own title bar', () => {
+    const { container } = render(<Page />);
+
+    expect(container.querySelector('[data-slot=desktop-drag-band]')).not.toBeInTheDocument();
+    expect(container.querySelector('header > div')).not.toHaveClass('[app-region:no-drag]');
+  });
+});
+
 describe('Page auth-aware wrapper contract', () => {
   it.each([
     ['authed', true],

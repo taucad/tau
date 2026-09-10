@@ -132,6 +132,14 @@
         "command": "node --import @oxc-node/core/register scripts/generate-svg-sprite.mts"
       }
     },
+    "generate-configuration-icons": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "node scripts/generate-configuration-icons.mts"
+      }
+    },
     "bootstrap-https-certs": {
       "executor": "nx:run-commands",
       "cache": false,
@@ -177,6 +185,17 @@
     },
     "typecheck": {
       "dependsOn": ["typegen"]
+    },
+    "test:e2e": {
+      "executor": "nx:run-commands",
+      "metadata": {
+        "description": "The worker-tier browser suites the jsdom sweep excludes (OPFS, Web Locks, WebGPU): app/workers/agent-host.vitest.browser.config.ts. Named test:e2e so `nx affected -t test:e2e` selects it on the only CI lane that installs Chromium, exactly as apps/desktop-e2e does. G-ACP-REFUSE0's sole check lives here."
+      },
+      "dependsOn": ["copy-assets", "^copy-assets"],
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "../../node_modules/.bin/vitest run --config app/workers/agent-host.vitest.browser.config.ts"
+      }
     },
     "sourcemaps": {
       "executor": "nx:run-commands",

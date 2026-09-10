@@ -1,4 +1,6 @@
+import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
+import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
@@ -17,6 +19,7 @@ import { base64Loader } from '@taucad/vite/base64-loader';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const testScriptsAlias = '#scripts';
 const uiReactCompilerPluginName = 'vite:react-compiler';
+const streamdownShikiFacade = path.resolve(__dirname, 'app/lib/streamdown-shiki.ts');
 
 const toOriginOrRaw = (value: string | undefined): string | undefined => {
   if (!value) {
@@ -68,55 +71,216 @@ export const uiSsrOptions = {
   external: ['@taucad/runtime', '@taucad/openrscad', '@taulabs/openrscad-engine'],
 } as const satisfies UserConfig['ssr'];
 
+type UiSourceAliasPluginOptions = {
+  readonly emitModuleGraph?: boolean;
+  readonly target?: 'web' | 'desktop';
+};
+
+const desktopSourceOverrides = new Map([
+  ['#constants/local-kernel-options.js', '#constants/local-kernel-options.desktop.js'],
+  ['#constants/ephemeral-kernel-options.js', '#constants/ephemeral-kernel-options.desktop.js'],
+  ['#runtime/converter-client-options.js', '#runtime/converter-client-options.desktop.js'],
+  ['#runtime/demo-client-options.js', '#runtime/demo-client-options.desktop.js'],
+  ['#services/headless-image-backend.js', '#services/headless-image-backend.desktop.js'],
+  ['#services/browser-agent-worker.js', '#services/browser-agent-worker.desktop.js'],
+]);
+
+const normalizeProvenancePath = (moduleId: string): string => {
+  const normalized = moduleId.replaceAll('\\', '/');
+  const workspaceRoot = `${path.resolve(__dirname, '../..').replaceAll('\\', '/')}/`;
+  return normalized.startsWith(workspaceRoot) ? normalized.slice(workspaceRoot.length) : normalized;
+};
+
 /** Shared with `desktop/vite.config.ts`, which reuses the web plugin list. */
-export const createUiSourceAliasPlugin = (): Plugin => ({
-  name: 'tau-ui-source-alias',
-  enforce: 'pre',
-  resolveId(source, importer) {
-    if (!source.startsWith('#')) {
-      return null;
-    }
-
-    const uiRoot = `${path.resolve(__dirname)}${path.sep}`;
-    const designSystemRoot = `${path.resolve(__dirname, '../../packages/ui/src')}${path.sep}`;
-    const resolvedImporter = importer === undefined ? undefined : path.resolve(importer);
-    if (
-      resolvedImporter !== undefined &&
-      !resolvedImporter.startsWith(uiRoot) &&
-      !resolvedImporter.startsWith(designSystemRoot)
-    ) {
-      return null;
-    }
-
-    const [specifier, query] = source.split('?', 2);
-    if (specifier === undefined) {
-      return null;
-    }
-
-    const sourceRoot = resolvedImporter?.startsWith(designSystemRoot)
-      ? designSystemRoot
-      : path.resolve(__dirname, 'app');
-    const sourcePath = path.resolve(sourceRoot, specifier.slice(1));
-    const candidatePaths = [sourcePath];
-    if (specifier.endsWith('.js')) {
-      const sourceBasePath = sourcePath.slice(0, -'.js'.length);
-      candidatePaths.push(
-        `${sourceBasePath}.ts`,
-        `${sourceBasePath}.tsx`,
-        `${sourceBasePath}.js`,
-        `${sourceBasePath}.jsx`,
-      );
-    }
-
-    for (const candidatePath of candidatePaths) {
-      if (existsSync(candidatePath)) {
-        return query === undefined ? candidatePath : `${candidatePath}?${query}`;
+export const createUiSourceAliasPlugin = (options: UiSourceAliasPluginOptions = {}): Plugin => {
+  let viteRoot = __dirname;
+  let graphFileName: string | undefined;
+  let graphAssets: Array<{ fileName: string; sourcePath: string; sha256: string }> = [];
+  return {
+    name: 'tau-ui-source-alias',
+    enforce: 'pre',
+    configResolved(config) {
+      viteRoot = config.root;
+    },
+    resolveId(source, importer) {
+      if (source === 'shiki' && importer?.includes('/streamdown/') && importer.includes('/code-block-')) {
+        return streamdownShikiFacade;
       }
-    }
+      if (!source.startsWith('#')) {
+        return null;
+      }
 
-    return null;
-  },
-});
+      const uiRoot = `${path.resolve(__dirname)}${path.sep}`;
+      const designSystemRoot = `${path.resolve(__dirname, '../../packages/ui/src')}${path.sep}`;
+      const resolvedImporter = importer === undefined ? undefined : path.resolve(importer);
+      if (
+        resolvedImporter !== undefined &&
+        !resolvedImporter.startsWith(uiRoot) &&
+        !resolvedImporter.startsWith(designSystemRoot)
+      ) {
+        return null;
+      }
+
+      const [requestedSpecifier, query] = source.split('?', 2);
+      const specifier =
+        options.target === 'desktop' && requestedSpecifier
+          ? (desktopSourceOverrides.get(requestedSpecifier) ?? requestedSpecifier)
+          : requestedSpecifier;
+      if (specifier === undefined) {
+        return null;
+      }
+
+      const sourceRoot = resolvedImporter?.startsWith(designSystemRoot)
+        ? designSystemRoot
+        : path.resolve(__dirname, 'app');
+      const sourcePath = path.resolve(sourceRoot, specifier.slice(1));
+      const candidatePaths = [sourcePath];
+      if (specifier.endsWith('.js')) {
+        const sourceBasePath = sourcePath.slice(0, -'.js'.length);
+        candidatePaths.push(
+          `${sourceBasePath}.ts`,
+          `${sourceBasePath}.tsx`,
+          `${sourceBasePath}.js`,
+          `${sourceBasePath}.jsx`,
+        );
+      }
+
+      for (const candidatePath of candidatePaths) {
+        if (existsSync(candidatePath)) {
+          return query === undefined ? candidatePath : `${candidatePath}?${query}`;
+        }
+      }
+
+      return null;
+    },
+    generateBundle(_outputOptions, bundle) {
+      if (options.emitModuleGraph !== true || this.environment.config.consumer !== 'client') {
+        return;
+      }
+
+      const chunks = Object.values(bundle).filter((output) => output.type === 'chunk');
+      const assets = Object.values(bundle).filter((output) => output.type === 'asset');
+      const emittedFileNames = new Set(Object.keys(bundle));
+      graphAssets = assets.map((asset) => ({
+        fileName: asset.fileName,
+        sourcePath: asset.originalFileNames[0]
+          ? normalizeProvenancePath(path.resolve(viteRoot, asset.originalFileNames[0]))
+          : '',
+        sha256: createHash('sha256').update(asset.source).digest('hex'),
+      }));
+      const graphReferenceId = this.emitFile({
+        type: 'asset',
+        name: 'tau-module-graph.json',
+        source: JSON.stringify({
+          chunks: chunks.map((chunk) => {
+            const renderedModuleIds = Object.entries(chunk.modules)
+              .filter(([moduleId, rendered]) => rendered.renderedLength > 0 || moduleId === chunk.facadeModuleId)
+              .map(([moduleId]) => moduleId);
+            const importedChunks = chunk.imports
+              .map((importPath) => {
+                const fromOutputRoot = path.posix.normalize(
+                  path.posix.join(path.posix.dirname(chunk.fileName), importPath),
+                );
+                return emittedFileNames.has(importPath)
+                  ? importPath
+                  : emittedFileNames.has(fromOutputRoot)
+                    ? fromOutputRoot
+                    : undefined;
+              })
+              .filter((fileName): fileName is string => fileName !== undefined);
+            const forwardingOnly = this.parse(chunk.code).body.every(
+              (statement) =>
+                statement.type === 'ImportDeclaration' ||
+                statement.type === 'ExportAllDeclaration' ||
+                (statement.type === 'ExportNamedDeclaration' && statement.declaration === null),
+            );
+            return {
+              fileName: chunk.fileName,
+              // Rolldown reports renderedLength=0 for every module in some
+              // emitted wrapper chunks. Fall back only for that otherwise
+              // provenance-empty chunk; populated chunks keep the strict
+              // rendered/facade filter and exclude tree-shaken modules.
+              moduleIds: (renderedModuleIds.length > 0 ? renderedModuleIds : chunk.moduleIds).map((moduleId) =>
+                normalizeProvenancePath(moduleId),
+              ),
+              imports: importedChunks,
+              forwardingOnly,
+            };
+          }),
+          assets: graphAssets,
+        }),
+      });
+      graphFileName = this.getFileName(graphReferenceId);
+    },
+    writeBundle: {
+      order: 'post',
+      async handler(outputOptions, bundle) {
+        if (
+          options.emitModuleGraph !== true ||
+          this.environment.config.consumer !== 'client' ||
+          outputOptions.dir === undefined ||
+          graphFileName === undefined
+        ) {
+          return;
+        }
+
+        const outputRoot = path.resolve(outputOptions.dir);
+        const chunks = await Promise.all(
+          Object.values(bundle)
+            .filter((output) => output.type === 'chunk')
+            .map(async (chunk) => {
+              const chunkPath = path.resolve(outputRoot, chunk.fileName);
+              if (!existsSync(chunkPath)) {
+                return undefined;
+              }
+
+              const code = await readFile(chunkPath, 'utf8');
+              const program = this.parse(code);
+              const imports = program.body
+                .flatMap((statement) => {
+                  if (
+                    statement.type === 'ImportDeclaration' ||
+                    statement.type === 'ExportAllDeclaration' ||
+                    statement.type === 'ExportNamedDeclaration'
+                  ) {
+                    return statement.source?.value && typeof statement.source.value === 'string'
+                      ? [statement.source.value]
+                      : [];
+                  }
+                  return [];
+                })
+                .map((importPath) =>
+                  path.posix.normalize(path.posix.join(path.posix.dirname(chunk.fileName), importPath)),
+                )
+                .filter((fileName) => existsSync(path.resolve(outputRoot, fileName)));
+              const renderedModuleIds = Object.entries(chunk.modules)
+                .filter(([moduleId, rendered]) => rendered.renderedLength > 0 || moduleId === chunk.facadeModuleId)
+                .map(([moduleId]) => moduleId);
+
+              return {
+                fileName: chunk.fileName,
+                moduleIds: (renderedModuleIds.length > 0 ? renderedModuleIds : chunk.moduleIds).map((moduleId) =>
+                  normalizeProvenancePath(moduleId),
+                ),
+                imports,
+                forwardingOnly: program.body.every(
+                  (statement) =>
+                    statement.type === 'ImportDeclaration' ||
+                    statement.type === 'ExportAllDeclaration' ||
+                    (statement.type === 'ExportNamedDeclaration' && statement.declaration === null),
+                ),
+              };
+            }),
+        );
+        const assets = graphAssets.filter((asset) => existsSync(path.resolve(outputRoot, asset.fileName)));
+        await writeFile(
+          path.resolve(outputRoot, graphFileName),
+          JSON.stringify({ chunks: chunks.filter((chunk) => chunk !== undefined), assets }),
+        );
+      },
+    },
+  };
+};
 
 /**
  * Applies the native React Compiler without admitting the second JSX and Fast

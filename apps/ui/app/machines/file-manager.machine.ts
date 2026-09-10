@@ -1,6 +1,8 @@
 import { assign, assertEvent, setup, enqueueActions } from 'xstate';
 import type { FileEntry, FileSystemBackend } from '@taucad/types';
 import type { FileSystemBridgeConnection } from '@taucad/fs-bridge';
+import type { ComputeBinding, ComputeStoreControl } from '@taucad/runtime';
+import { connectComputeStoreChannel } from '@taucad/runtime/host';
 import { safeDispose } from '@taucad/utils/dispose';
 import FileManagerWorker from '#machines/file-manager.worker.js?worker';
 import {
@@ -39,6 +41,46 @@ const fileCacheMaxSingleFileBytes = 1024 * 1024;
 
 const filePoolBytes = 50 * 1024 * 1024;
 
+const computeOpeners = (worker: Worker, admittedProjectId: string | undefined) => {
+  const openComputeStorePort = (projectId: string): MessagePort => {
+    if (!admittedProjectId || projectId !== admittedProjectId) {
+      throw new Error('Compute store project authority does not match the active project.');
+    }
+    const channel = new MessageChannel();
+    worker.postMessage({ type: 'computeStoreConnect', projectId, port: channel.port1 }, [channel.port1]);
+    return channel.port2;
+  };
+  const openComputeBinding = (projectId: string) => {
+    const connection = connectComputeStoreChannel(openComputeStorePort(projectId));
+    return { compute: { mode: 'durable', store: connection.store } as const, dispose: connection.dispose };
+  };
+  const computeControl = <Name extends keyof ComputeStoreControl>(
+    projectId: string,
+    action: Name,
+    input: Parameters<ComputeStoreControl[Name]>[0],
+  ): ReturnType<ComputeStoreControl[Name]> => {
+    if (!admittedProjectId || projectId !== admittedProjectId) {
+      throw new Error('Compute control project authority does not match the active project.');
+    }
+    const channel = new MessageChannel();
+    worker.postMessage({ type: 'computeStoreControl', projectId, action, ...input, port: channel.port1 }, [
+      channel.port1,
+    ]);
+    return new Promise<Awaited<ReturnType<ComputeStoreControl[Name]>>>((resolve, reject) => {
+      channel.port2.addEventListener('message', ({ data }: MessageEvent<{ result?: unknown; error?: string }>) => {
+        channel.port2.close();
+        if (data.error) {
+          reject(new Error(data.error));
+        } else {
+          resolve(data.result as Awaited<ReturnType<ComputeStoreControl[Name]>>);
+        }
+      });
+      channel.port2.start();
+    }) as ReturnType<ComputeStoreControl[Name]>;
+  };
+  return { openComputeBinding, openComputeStorePort, computeControl };
+};
+
 /**
  * Why webaccess can't be initialized when the FM machine enters the
  * `webAccessUnavailable` recovery state. Drives the copy/recovery surface
@@ -59,6 +101,9 @@ type FileManagerContext = {
   proxy: (FileManagerProxy & { listen?: (event: string, handler: (data: unknown) => void) => () => void }) | undefined;
   bridgeDispose?: () => void;
   openFileSystemBridge?: (root: string) => FileSystemBridgeConnection;
+  openComputeBinding?: (projectId: string) => { compute: ComputeBinding; dispose: () => void };
+  openComputeStorePort?: (projectId: string) => MessagePort;
+  computeControl?: ReturnType<typeof computeOpeners>['computeControl'];
   filePoolBuffer: SharedArrayBuffer | undefined;
   contentService: FileContentService | undefined;
   treeService: FileTreeService | undefined;
@@ -107,6 +152,9 @@ type WorkerConnectedEvent = {
   proxy: FileManagerProxy & { listen?: (event: string, handler: (data: unknown) => void) => () => void };
   bridgeDispose: () => void;
   openFileSystemBridge: (root: string) => FileSystemBridgeConnection;
+  openComputeBinding: (projectId: string) => { compute: ComputeBinding; dispose: () => void };
+  openComputeStorePort: (projectId: string) => MessagePort;
+  computeControl: ReturnType<typeof computeOpeners>['computeControl'];
   filePoolBuffer: SharedArrayBuffer | undefined;
 };
 
@@ -277,8 +325,20 @@ const connectWorkerActor = fromSafeAsync<WorkerConnectedEvent, { context: FileMa
     const proxy = createFileSystemBridgeProxy(bridge);
     await proxy.configureProjectRoots(await getProjectRootConfigs(context.onRootSkipped));
     const openBridge = (root: string): FileSystemBridgeConnection => openFileSystemBridge(worker, { root });
+    worker.postMessage({ type: 'computeStoreAdmission', projectId: context.projectId });
+    const { openComputeBinding, openComputeStorePort, computeControl } = computeOpeners(worker, context.projectId);
 
-    return { type: 'workerConnected', worker, proxy, bridgeDispose, openFileSystemBridge: openBridge, filePoolBuffer };
+    return {
+      type: 'workerConnected',
+      worker,
+      proxy,
+      bridgeDispose,
+      openFileSystemBridge: openBridge,
+      openComputeBinding,
+      openComputeStorePort,
+      computeControl,
+      filePoolBuffer,
+    };
   },
 );
 
@@ -540,6 +600,9 @@ export const fileManagerMachine = setup({
         proxy: undefined,
         bridgeDispose: undefined,
         openFileSystemBridge: undefined,
+        openComputeBinding: undefined,
+        openComputeStorePort: undefined,
+        computeControl: undefined,
         worker: context.sharedWorker ? context.worker : undefined,
         contentService: undefined,
         treeService: undefined,
@@ -555,6 +618,19 @@ export const fileManagerMachine = setup({
       projectId({ event }) {
         assertEvent(event, 'setRoot');
         return event.projectId;
+      },
+      openComputeBinding({ context, event }: { context: FileManagerContext; event: FileManagerEvent }) {
+        assertEvent(event, 'setRoot');
+        context.worker?.postMessage({ type: 'computeStoreAdmission', projectId: event.projectId });
+        return context.worker ? computeOpeners(context.worker, event.projectId).openComputeBinding : undefined;
+      },
+      openComputeStorePort({ context, event }: { context: FileManagerContext; event: FileManagerEvent }) {
+        assertEvent(event, 'setRoot');
+        return context.worker ? computeOpeners(context.worker, event.projectId).openComputeStorePort : undefined;
+      },
+      computeControl({ context, event }: { context: FileManagerContext; event: FileManagerEvent }) {
+        assertEvent(event, 'setRoot');
+        return context.worker ? computeOpeners(context.worker, event.projectId).computeControl : undefined;
       },
       error: undefined,
       // Workspace identity is a per-init *output* of `initializeServicesActor`;
@@ -582,6 +658,18 @@ export const fileManagerMachine = setup({
       openFileSystemBridge({ event }: { event: FileManagerEvent }) {
         assertEvent(event, 'workerConnected');
         return event.openFileSystemBridge;
+      },
+      openComputeBinding({ event }: { event: FileManagerEvent }) {
+        assertEvent(event, 'workerConnected');
+        return event.openComputeBinding;
+      },
+      openComputeStorePort({ event }: { event: FileManagerEvent }) {
+        assertEvent(event, 'workerConnected');
+        return event.openComputeStorePort;
+      },
+      computeControl({ event }: { event: FileManagerEvent }) {
+        assertEvent(event, 'workerConnected');
+        return event.computeControl;
       },
       filePoolBuffer({ event }) {
         assertEvent(event, 'workerConnected');
@@ -692,6 +780,9 @@ export const fileManagerMachine = setup({
     worker: undefined,
     proxy: undefined,
     openFileSystemBridge: undefined,
+    openComputeBinding: undefined,
+    openComputeStorePort: undefined,
+    computeControl: undefined,
     // Seed with the parent's SAB when nested so the connect actor's gate
     // observes a non-undefined buffer and skips re-allocation.
     filePoolBuffer: input.sharedFilePoolBuffer,

@@ -8,6 +8,7 @@ import { ForkAction } from '#components/share/fork-action.js';
 import type { ParsedPublication } from '#components/share/parsed-publication.js';
 import { ProjectExportAction } from '#routes/w.$workspace.$project/project-export-action.js';
 import { cn } from '@taucad/ui/utils/cn';
+import { isDesktopTarget } from '#lib/build-target.js';
 import { toast } from '#components/ui/sonner.js';
 
 type PublicationTopbarProps = {
@@ -58,7 +59,14 @@ export function PublicationTopbar({
   return (
     <header
       data-slot='publication-topbar'
-      className={cn('flex h-12 shrink-0 items-center justify-between gap-2 border-b px-2 sm:gap-4 sm:px-4', className)}
+      className={cn(
+        'flex h-12 shrink-0 items-center justify-between gap-2 border-b px-2 sm:gap-4 sm:px-4',
+        // This bar is the top of a window that has no application shell, so it
+        // overlaps the desktop drag band (see `Page`). Its controls subtract
+        // themselves; the gaps between them stay draggable.
+        isDesktopTarget() && '[&_:is(a,button,input)]:[app-region:no-drag]',
+        className,
+      )}
     >
       <Tooltip>
         <TooltipTrigger asChild className='flex items-center gap-2 font-medium'>

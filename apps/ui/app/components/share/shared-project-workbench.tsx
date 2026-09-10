@@ -40,7 +40,7 @@ export const SharedProjectHydrator = ({
     const mounted = { current: false };
     const hydrate = async (): Promise<void> => {
       try {
-        await workspace.mount(rootDirectory, { backend: 'memory', storageRootKey });
+        await workspace.mount(rootDirectory, { backend: 'memory', storageRootKey, class: 'authored' });
         mounted.current = true;
         await writeFiles(files);
         const { treeService } = await whenServicesReady();

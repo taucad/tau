@@ -51,6 +51,7 @@ const environmentSchema = z.preprocess(
   z.object({
     /* eslint-disable @typescript-eslint/naming-convention -- environment variables are not camelCase */
     TAU_API_URL: z.url(),
+    TAU_BILLING_ENVIRONMENT: z.enum(['development', 'staging', 'prod-us', 'prod-eu']).optional(),
     TAU_WEBSOCKET_URL: z.url().describe('WebSocket URL for the API (e.g., wss://api.tau.new or ws://localhost:4001)'),
     TAU_FRONTEND_URL: z.url(),
     /**
@@ -104,6 +105,7 @@ export const getEnvironment = async (): Promise<Environment> => parseEnvironment
  */
 const clientEnvironmentKeys = [
   'TAU_API_URL',
+  'TAU_BILLING_ENVIRONMENT',
   'TAU_WEBSOCKET_URL',
   'TAU_FRONTEND_URL',
   'TAU_DEBUG',

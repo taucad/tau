@@ -445,9 +445,14 @@ describe('FileManagerProvider — client + workspace facades', () => {
     const { result } = renderProvider();
 
     await act(async () => {
-      await result.current.workspace.mount('/scratch', { backend: 'memory', storageRootKey: 'memory:0' });
+      await result.current.workspace.mount('/scratch', {
+        class: 'authored',
+        backend: 'memory',
+        storageRootKey: 'memory:0',
+      });
     });
     expect(mockMount).toHaveBeenCalledExactlyOnceWith('/scratch', {
+      class: 'authored',
       backend: 'memory',
       storageRootKey: 'memory:0',
     });

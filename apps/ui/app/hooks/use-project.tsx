@@ -29,7 +29,7 @@ import { inspect } from '#machines/inspector.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import type { LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
 import type { StorageProvider } from '#types/storage.types.js';
-import { defaultKernelOptions } from '#constants/kernel-options.presets.js';
+import { localKernelOptions } from '#constants/local-kernel-options.js';
 import { joinPath } from '@taucad/utils/path';
 import { parseParameterEntry, createDefaultEntry, serializeParameterEntry } from '#utils/parameter-config.utils.js';
 import { compareChatsByRecency } from '#utils/chat-recency.utils.js';
@@ -173,7 +173,7 @@ export function ProjectProvider({
   onFocusedChatResolved,
   provide,
   input,
-  kernelOptionsFactory = defaultKernelOptions,
+  kernelOptionsFactory,
   profile = 'editor',
 }: {
   readonly children: ReactNode;
@@ -189,6 +189,7 @@ export function ProjectProvider({
   readonly kernelOptionsFactory?: LazyKernelOptionsFactory;
   readonly profile?: 'editor' | 'shared';
 }): React.JSX.Element {
+  const resolvedKernelOptionsFactory = kernelOptionsFactory ?? localKernelOptions(projectId);
   const queryClient = useQueryClient();
   // Create the project machine actor - it will auto-load based on projectId
   const fileManager = useFileManager();
@@ -275,7 +276,7 @@ export function ProjectProvider({
         projectId,
         fileManagerRef: fileManager.fileManagerRef,
         fileSystemRoot: fileManager.fileManagerRef.getSnapshot().context.rootDirectory,
-        kernelOptionsFactory,
+        kernelOptionsFactory: resolvedKernelOptionsFactory,
         ...input,
       },
       inspect,

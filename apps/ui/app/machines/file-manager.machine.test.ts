@@ -404,6 +404,7 @@ describe('fileManagerMachine', () => {
     const actor = createActor(fileManagerMachine, {
       input: {
         rootDirectory: '/projects/project-a',
+        projectId: 'project-a',
         shouldInitializeOnStart: true,
       },
     });
@@ -445,6 +446,7 @@ describe('fileManagerMachine', () => {
     const actor = createActor(fileManagerMachine, {
       input: {
         rootDirectory: '/projects/project-a',
+        projectId: 'project-a',
         shouldInitializeOnStart: true,
       },
     });
@@ -455,8 +457,16 @@ describe('fileManagerMachine', () => {
     });
 
     actor.getSnapshot().context.openFileSystemBridge?.('/projects/project-a');
+    expect(() => actor.getSnapshot().context.openComputeStorePort?.('workspace-candidate')).toThrow(/authority/);
+    actor.getSnapshot().context.openComputeStorePort?.('project-a');
 
     expect(mockOpenFileSystemBridge).toHaveBeenCalledWith(expect.anything(), { root: '/projects/project-a' });
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- Vitest's asymmetric matcher is intentionally untyped.
+    expect(workerTestState.instances[0]?.postMessage).toHaveBeenCalledWith(
+      // oxlint-disable-next-line typescript/no-unsafe-assignment -- Vitest's asymmetric matcher is intentionally untyped.
+      expect.objectContaining({ type: 'computeStoreConnect', projectId: 'project-a' }),
+      [expect.any(MessagePort)],
+    );
     actor.stop();
   });
 

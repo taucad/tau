@@ -89,7 +89,7 @@ vi.mock('#constants/kernel-worker.constants.js', () => ({
   createDefaultKernelOptions: workerMocks.createDefaultKernelOptions,
 }));
 
-vi.mock('#runtime/ui-runtime.definition.js', () => ({
+vi.mock('#runtime/ui-runtime.schema.js', () => ({
   uiRuntimeConfigSchema: workerMocks.uiRuntimeConfigSchema,
 }));
 

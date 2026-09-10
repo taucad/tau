@@ -213,6 +213,24 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
   // value is `false`, or when its function form returns `false` for the current
   // viewer (see `Handle.enablePageWrapper`). The wrapper stays on unless some
   // match opts out.
+  /*
+   * `titleBarStyle: 'hiddenInset'` gives macOS no implicit drag area, so the
+   * window's grab band has to be declared in CSS. It belongs to the shell, not
+   * to a route: every route renders through `Page`, including the ones that opt
+   * out of the wrapper below (auth, share links), and a per-route handle leaves
+   * each new route to remember one. Chromium unions the `drag` rects and
+   * subtracts the `no-drag` ones, so interactive chrome sitting in the band —
+   * the header children here, the dockview tabs, the titlebar controls — opts
+   * itself back out.
+   */
+  const desktopDragBand = desktopTarget ? (
+    <span
+      aria-hidden
+      data-slot='desktop-drag-band'
+      className='pointer-events-none fixed inset-x-0 top-0 z-0 h-9 [app-region:drag]'
+    />
+  ) : null;
+
   const chromeContext = { authState: resolvedAuth, flags };
   const enablePageWrapper = !pageWrapperMatches.some((match) => {
     const value = match.handle.enablePageWrapper;
@@ -238,6 +256,7 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
     // and keep the bare outlet.
     return (
       <Compose components={Providers}>
+        {desktopDragBand}
         {enableOverflowY ? (
           <div className='h-dvh overflow-y-auto'>
             <Outlet />
@@ -251,6 +270,7 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
 
   return (
     <Compose components={Providers}>
+      {desktopDragBand}
       <SidebarProvider className='h-dvh min-h-0 overflow-hidden'>
         <ApplicationShell isDesktopTarget={desktopTarget}>
           <SidebarInset className={cn('size-full min-w-0', headerHeightClass)}>
@@ -265,6 +285,7 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
                   className={cn(
                     'pointer-events-auto ml-2 flex h-full items-center gap-1 md:group-data-[sidebar-open=false]/app-shell:ml-(--titlebar-controls-width)',
                     !hasBreadcrumbItems && 'md:hidden',
+                    desktopTarget && '[app-region:no-drag]',
                   )}
                 >
                   {desktopTarget ? null : <SidebarTrigger className='md:hidden' />}
@@ -305,7 +326,12 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
                   </Breadcrumb>
                 </div>
 
-                <div className='pointer-events-auto flex items-center gap-2 px-2'>
+                <div
+                  className={cn(
+                    'pointer-events-auto flex items-center gap-2 px-2',
+                    desktopTarget && '[app-region:no-drag]',
+                  )}
+                >
                   {hasActionItems
                     ? actionItems.map((match) => <Fragment key={match.id}>{match.handle.actions?.(match)}</Fragment>)
                     : null}

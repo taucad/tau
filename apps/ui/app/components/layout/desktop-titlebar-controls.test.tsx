@@ -39,7 +39,6 @@ describe('DesktopTitlebarControls', () => {
     const { container } = render(<DesktopTitlebarControls onSidebarResize={vi.fn()} />, { wrapper: TooltipProvider });
     const titlebar = container.querySelector('[data-slot=desktop-titlebar]');
     const controls = container.querySelector('[data-slot=desktop-titlebar-controls]');
-    const dragRegion = container.querySelector('[data-slot=desktop-titlebar-drag-region]');
     const sidebar = screen.getByRole('button', { name: 'Toggle Sidebar' });
     const backButton = screen.getByRole('button', { name: 'Back' });
     const forwardButton = screen.getByRole('button', { name: 'Forward' });
@@ -48,7 +47,6 @@ describe('DesktopTitlebarControls', () => {
     expect(titlebar).not.toHaveClass('border-b');
     expect(controls).toHaveClass('h-9', 'bg-transparent', 'pl-22', '[app-region:no-drag]');
     expect(controls).not.toHaveClass('border-b', '[app-region:drag]');
-    expect(dragRegion).toHaveClass('w-[84px]', '[app-region:drag]');
     expect(sidebar).toHaveAttribute('data-has-resize', 'true');
     expect(sidebar.querySelectorAll('span')).toHaveLength(1);
     expect(backButton).toHaveClass('hover:bg-accent', 'hover:text-foreground');

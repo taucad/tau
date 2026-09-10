@@ -50,7 +50,7 @@ export const verifyPreviewInstall = ({ from, metadata, sha, install = execFileSy
       stdio: 'inherit',
     });
 
-    const expectedVersion = `0.0.0-preview-${sha}`;
+    const expectedVersion = `0.0.0-preview-${sha.slice(0, 7)}`;
     let installed = 0;
     for (const name of names) {
       const manifest = join(directory, 'node_modules', name, 'package.json');

@@ -60,6 +60,7 @@ describe('candidate preview extraction', () => {
 
 describe('hosted preview consumer', () => {
   it('should install only roots and verify rewritten sibling previews', () => {
+    const sha = 'abc1234abc1234abc1234abc1234abc1234abc12';
     const source = temporaryDirectory();
     const root = join(source, '00');
     const native = join(source, '01');
@@ -75,8 +76,8 @@ describe('hosted preview consumer', () => {
       metadata,
       `${JSON.stringify({
         packages: [
-          { name: 'example', url: 'https://pkg.pr.new/example@abc1234' },
-          { name: 'example-linux', url: 'https://pkg.pr.new/example-linux@abc1234' },
+          { name: 'example', url: `https://pkg.pr.new/example@${sha}` },
+          { name: 'example-linux', url: `https://pkg.pr.new/example-linux@${sha}` },
         ],
       })}\n`,
     );
@@ -85,7 +86,7 @@ describe('hosted preview consumer', () => {
     const result = verifyPreviewInstall({
       from: source,
       metadata,
-      sha: 'abc1234',
+      sha,
       install(command, args, options) {
         calls.push([command, args]);
         if (args[0] !== 'install') return;
@@ -94,7 +95,7 @@ describe('hosted preview consumer', () => {
         mkdirSync(join(modules, 'example-linux'), { recursive: true });
         writeFileSync(
           join(modules, 'example', 'package.json'),
-          `${JSON.stringify({ name: 'example', version: '0.0.0-preview-abc1234', optionalDependencies: { 'example-linux': 'https://pkg.pr.new/example-linux@abc1234' } })}\n`,
+          `${JSON.stringify({ name: 'example', version: '0.0.0-preview-abc1234', optionalDependencies: { 'example-linux': `https://pkg.pr.new/example-linux@${sha}` } })}\n`,
         );
         writeFileSync(
           join(modules, 'example-linux', 'package.json'),
@@ -104,7 +105,7 @@ describe('hosted preview consumer', () => {
     });
 
     assert.deepEqual(result, { installed: 2, roots: ['example'] });
-    assert.deepEqual(calls[1][1], ['install', '--ignore-scripts', 'https://pkg.pr.new/example@abc1234']);
+    assert.deepEqual(calls[1][1], ['install', '--ignore-scripts', `https://pkg.pr.new/example@${sha}`]);
   });
 
   it('should reject untrusted or stale metadata before invoking npm', () => {

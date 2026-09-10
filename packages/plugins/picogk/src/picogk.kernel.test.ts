@@ -2,9 +2,14 @@
 // @vitest-environment node
 import { createHash } from 'node:crypto';
 
-import { actionDigest, canonicalizeComputeAction, contentDigest } from '@taucad/cache-core';
-import type { ComputeAction } from '@taucad/cache-core';
-import type { AnyKernelDefinition, KernelComputeSessionLookup } from '@taucad/runtime/kernel';
+import type {
+  AnyKernelDefinition,
+  ComputeAnnouncement,
+  ComputeReuseScope,
+  ComputeScopeReceipt,
+  KernelComputeCapability,
+  OpenComputeScopeInput,
+} from '@taucad/runtime/kernel';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 import { createMockFileSystem, createMockKernelRuntime } from '@taucad/runtime-testing';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -92,6 +97,59 @@ const context = () => ({
   },
   computeAssets: { workerSha256: 'a'.repeat(64), resourceSha256: ['b'.repeat(64)] },
 });
+
+const publication = (overrides?: { readonly cacheKey?: string; readonly sha256?: string }) => ({
+  cacheKey: voxelCacheKey,
+  kind: 'triangles',
+  artifactPath: '/private/component.tau-compute',
+  byteLength: triangle.byteLength,
+  sha256: createHash('sha256').update(triangle).digest('hex'),
+  positionCount: 18,
+  indexCount: 3,
+  ...overrides,
+});
+
+const onCapability = (capability: KernelComputeCapability): Extract<KernelComputeCapability, { status: 'on' }> => {
+  if (capability.status !== 'on') {
+    throw new Error('Expected an on capability.');
+  }
+  return capability;
+};
+
+/** A kernel runtime whose compute scope keeps the memory capability but records what the kernel did with it. */
+const computeRuntime = () => {
+  const base = createMockKernelRuntime();
+  const capability = onCapability(base.compute);
+  const opened: OpenComputeScopeInput[] = [];
+  const announced: ComputeAnnouncement[][] = [];
+  const closed: string[] = [];
+  const receipts: ComputeScopeReceipt[] = [];
+  const openScope = vi.fn((open: OpenComputeScopeInput): ComputeReuseScope => {
+    const scope = capability.openScope(open);
+    opened.push(open);
+    return {
+      ...scope,
+      announce: (request) => {
+        announced.push([...request.entries]);
+        return scope.announce(request);
+      },
+      close: (request) => {
+        closed.push(request.outcome);
+        const receipt = scope.close(request);
+        receipts.push(receipt);
+        return receipt;
+      },
+    };
+  });
+  return {
+    runtime: { ...base, compute: { ...capability, openScope } },
+    opened,
+    announced,
+    closed,
+    receipts,
+    resident: () => opened[0]!.resident,
+  };
+};
 
 const workerError = (type: 'syntax' | 'validation' | 'runtime' | 'kernel') =>
   new PicogkWorkerError([
@@ -197,7 +255,6 @@ describe('PicoGK kernel', () => {
       }),
     );
     expect(built.geometry).toMatchObject({ format: 'gltf' });
-    expect(value.session.prehydrateCompute).toHaveBeenCalledOnce();
     expect(value.session.request).toHaveBeenCalledWith(
       expect.objectContaining({
         params: expect.objectContaining({ compute: expect.objectContaining({ prepared: [] }) }),
@@ -419,275 +476,118 @@ describe('PicoGK kernel', () => {
   });
 
   it('publishes managed component misses only after a successful final build', async () => {
-    const record = vi.fn(
-      () =>
-        ({
-          status: 'staged',
-          actionDigest: actionDigest({ value: `sha256:${'d'.repeat(64)}` }),
-        }) as const,
-    );
-    const flush = vi.fn(async () => undefined);
-    const cacheRuntime = {
-      ...createMockKernelRuntime(),
-      compute: {
-        ...runtime.compute,
-        openSession: vi.fn(async () => ({
-          prepared: () => [],
-          lookup: () => ({ status: 'miss' }) as const,
-          record,
-          flush,
-        })),
-      },
-    };
+    const compute = computeRuntime();
     const value = context();
-    value.session.request.mockResolvedValueOnce({
-      ...buildResult(),
-      computePublications: [
-        {
-          cacheKey: voxelCacheKey,
-          kind: 'triangles',
-          artifactPath: '/private/component.tau-compute',
-          byteLength: triangle.byteLength,
-          sha256: createHash('sha256').update(triangle).digest('hex'),
-          positionCount: 18,
-          indexCount: 3,
-        },
-      ],
-    });
-    await definition.createGeometry({ entryPath: 'main.cs', parameters: {}, options: {} }, cacheRuntime, value);
-    expect(record).toHaveBeenCalledOnce();
-    expect(record).toHaveBeenCalledWith(
-      expect.objectContaining({
-        action: expect.objectContaining({ namespace: 'picogk.component-materialization.v2' }),
-        bytes: triangle,
-      }),
-    );
-    expect(flush).toHaveBeenCalledOnce();
+    value.session.request.mockResolvedValueOnce({ ...buildResult(), computePublications: [publication()] });
 
-    record.mockClear();
-    flush.mockClear();
+    await definition.createGeometry({ entryPath: 'main.cs', parameters: {}, options: {} }, compute.runtime, value);
+
+    expect(compute.announced).toEqual([
+      [
+        expect.objectContaining({
+          kind: 'action',
+          action: expect.objectContaining({ namespace: 'picogk.component-materialization.v2' }),
+          estimatedBytes: triangle.byteLength,
+        }),
+      ],
+    ]);
+    expect(compute.closed).toEqual(['delivered']);
+    const settlement = await compute.receipts[0]!.settled;
+    expect(settlement.status).toBe('published');
+    const exported = await compute.resident().exportEntries({
+      digests: settlement.published,
+      signal: compute.runtime.signal,
+    });
+    expect(exported.entries.map((entry) => entry.bytes)).toEqual([triangle]);
+
+    const failed = computeRuntime();
     value.session.request.mockRejectedValueOnce(new Error('worker failed'));
     await expect(
-      definition.createGeometry({ entryPath: 'main.cs', parameters: {}, options: {} }, cacheRuntime, value),
+      definition.createGeometry({ entryPath: 'main.cs', parameters: {}, options: {} }, failed.runtime, value),
     ).rejects.toThrow('worker failed');
-    expect(record).not.toHaveBeenCalled();
-    expect(flush).not.toHaveBeenCalled();
+    expect(failed.announced).toEqual([]);
+    expect(failed.closed).toEqual([]);
   });
 
-  it('should reuse exact component actions across source and parameter edits while excluding historical producers', async () => {
-    const key = actionDigest({ value: `sha256:${'c'.repeat(64)}` });
-    const digest = contentDigest({ value: `sha256:${'d'.repeat(64)}` });
-    const record = vi.fn((_input: { action: ComputeAction }) => ({ status: 'staged', actionDigest: key }) as const);
-    const prepared: Array<{
-      canonicalAction: string;
-      bytes: Uint8Array<ArrayBuffer>;
-      actionDigest: typeof key;
-      contentDigest: typeof digest;
-    }> = [];
-    const lookup = vi.fn<() => KernelComputeSessionLookup>(
-      () => ({ status: 'hit', source: 'cache', bytes: triangle, actionDigest: key, contentDigest: digest }) as const,
-    );
-    const cacheRuntime = {
-      ...createMockKernelRuntime(),
-      compute: {
-        ...runtime.compute,
-        openSession: vi.fn(async () => ({
-          prepared: () => prepared,
-          lookup,
-          record,
-          flush: vi.fn(async () => undefined),
-        })),
-      },
-    };
+  it('opens one scope per build and derives each component action from the publication', async () => {
+    const compute = computeRuntime();
     const value = context();
     let source = 'first source';
-    cacheRuntime.filesystem.readFiles = async (paths) =>
+    const modelDigests: string[] = [];
+    compute.runtime.filesystem.readFiles = async (paths) =>
       Object.fromEntries(paths.map((path) => [path, new TextEncoder().encode(source)]));
-    value.session.request.mockResolvedValueOnce({
-      ...buildResult(),
-      computePublications: [
-        {
-          cacheKey: voxelCacheKey,
-          kind: 'triangles',
-          artifactPath: '/private/component.tau-compute',
-          byteLength: triangle.byteLength,
-          sha256: createHash('sha256').update(triangle).digest('hex'),
-          positionCount: 18,
-          indexCount: 3,
-        },
-      ],
+    value.session.request.mockImplementation(async (request: { params: { compute?: { modelDigest: string } } }) => {
+      const digest = request.params.compute?.modelDigest;
+      if (digest !== undefined) {
+        modelDigests.push(digest);
+      }
+      return { ...buildResult(), computePublications: [publication()] };
     });
-    await definition.createGeometry({ entryPath: 'main.cs', parameters: {}, options: {} }, cacheRuntime, value);
-    const { action } = record.mock.calls[0]![0];
-    expect(action.inputs).toEqual([{ kind: 'content', role: 'geometry', digest: `sha256:${'1'.repeat(64)}` }]);
-    expect(action.arguments).toMatchObject({ geometryKind: 'voxels' });
-    expect(cacheRuntime.compute.openSession).toHaveBeenCalledWith({
-      namespace: 'picogk.component-materialization.v2',
-      scope: { producer: action.producer },
-      policy: 'best-effort',
-    });
-    const historical = {
-      ...action,
-      producer: { ...action.producer, implementationAssets: [contentDigest({ value: `sha256:${'e'.repeat(64)}` })] },
-    };
-    const invalidDigestAction = {
-      ...action,
-      arguments: { cacheKey: '1:voxels', kind: 'triangles', positionCount: 18, indexCount: 3, geometryKind: 'voxels' },
-    };
-    for (const candidate of [historical, invalidDigestAction, action]) {
-      prepared.push({
-        canonicalAction: canonicalizeComputeAction(candidate),
-        bytes: triangle,
-        actionDigest: key,
-        contentDigest: digest,
-      });
+
+    await definition.createGeometry({ entryPath: 'main.cs', parameters: {}, options: {} }, compute.runtime, value);
+    const announcement = compute.announced[0]![0]!;
+    if (announcement.kind !== 'action') {
+      throw new Error('Expected an action announcement.');
     }
-    value.session.prehydrateCompute.mockClear();
-    value.session.request.mockResolvedValue(buildResult());
+    expect(announcement.action.inputs).toEqual([
+      { kind: 'content', role: 'geometry', digest: `sha256:${'1'.repeat(64)}` },
+    ]);
+    expect(announcement.action.arguments).toMatchObject({ geometryKind: 'voxels' });
+    expect(compute.opened).toEqual([
+      expect.objectContaining({
+        namespace: 'picogk.component-materialization.v2',
+        producer: announcement.action.producer,
+        admissionFloor: 0,
+      }),
+    ]);
+
     source = 'edited source';
     await definition.createGeometry(
       { entryPath: 'main.cs', parameters: { radius: 7 }, options: {} },
-      cacheRuntime,
+      compute.runtime,
       value,
     );
-    expect(cacheRuntime.compute.openSession).toHaveBeenLastCalledWith({
-      namespace: 'picogk.component-materialization.v2',
-      scope: { producer: action.producer },
-      policy: 'best-effort',
-    });
-    expect(lookup).toHaveBeenCalledExactlyOnceWith({ action });
-    expect(value.session.prehydrateCompute).toHaveBeenCalledExactlyOnceWith([
-      {
-        identity: { cacheKey: voxelCacheKey, kind: 'triangles', positionCount: 18, indexCount: 3 },
-        bytes: triangle,
-        contentDigest: digest,
-      },
-    ]);
-    lookup.mockReturnValueOnce({ status: 'miss' });
-    value.session.prehydrateCompute.mockClear();
-    await definition.createGeometry({ entryPath: 'main.cs', parameters: {}, options: {} }, cacheRuntime, value);
-    expect(value.session.prehydrateCompute).toHaveBeenCalledExactlyOnceWith([]);
-    lookup.mockReturnValueOnce({ status: 'hit', source: 'session', bytes: triangle, actionDigest: key });
-    value.session.prehydrateCompute.mockClear();
-    await definition.createGeometry({ entryPath: 'main.cs', parameters: {}, options: {} }, cacheRuntime, value);
-    expect(value.session.prehydrateCompute).toHaveBeenCalledExactlyOnceWith([]);
-    prepared.pop();
-    lookup.mockClear();
-    value.session.prehydrateCompute.mockClear();
-    await definition.createGeometry({ entryPath: 'main.cs', parameters: {}, options: {} }, cacheRuntime, value);
-    expect(lookup).not.toHaveBeenCalled();
-    expect(value.session.prehydrateCompute).toHaveBeenCalledExactlyOnceWith([]);
+    expect(compute.opened).toHaveLength(2);
+    expect(modelDigests).toHaveLength(2);
+    expect(modelDigests[0]).not.toBe(modelDigests[1]);
   });
 
   it.each(['1:voxels', 'mesh:sha256:bad', `lines:sha256:${'1'.repeat(64)}`])(
     'should reject invalid component digest key %s before publishing cache data',
     async (cacheKey) => {
-      const record = vi.fn();
-      const cacheRuntime = {
-        ...createMockKernelRuntime(),
-        compute: {
-          ...runtime.compute,
-          openSession: vi.fn(async () => ({
-            prepared: () => [],
-            lookup: () => ({ status: 'miss' }) as const,
-            record,
-            flush: vi.fn(async () => undefined),
-          })),
-        },
-      };
+      const compute = computeRuntime();
       const value = context();
       value.session.request.mockResolvedValueOnce({
         ...buildResult(),
-        computePublications: [
-          {
-            cacheKey,
-            kind: 'triangles',
-            artifactPath: '/private/component.tau-compute',
-            byteLength: triangle.byteLength,
-            sha256: createHash('sha256').update(triangle).digest('hex'),
-            positionCount: 18,
-            indexCount: 3,
-          },
-        ],
+        computePublications: [publication({ cacheKey })],
       });
+
       await expect(
-        definition.createGeometry({ entryPath: 'main.cs', parameters: {}, options: {} }, cacheRuntime, value),
+        definition.createGeometry({ entryPath: 'main.cs', parameters: {}, options: {} }, compute.runtime, value),
       ).resolves.toMatchObject({ geometry: { format: 'gltf' } });
-      expect(record).not.toHaveBeenCalled();
-      expect(cacheRuntime.logger.warn).toHaveBeenCalledWith(
+
+      expect(compute.announced).toEqual([]);
+      expect(compute.runtime.logger.warn).toHaveBeenCalledWith(
         'PicoGK component cache publication failed.',
         expect.objectContaining({ data: expect.any(Error) }),
       );
     },
   );
 
-  it('ignores foreign prepared actions and reports corrupt component publications as best-effort misses', async () => {
-    const validMiss = JSON.stringify({
-      namespace: 'picogk.component-materialization.v2',
-      operation: 'snapshot-geometry',
-      arguments: { cacheKey: '1:mesh', kind: 'triangles', positionCount: 9, indexCount: 3 },
-    });
-    const preparedMetadata = {
-      bytes: triangle,
-      actionDigest: actionDigest({ value: `sha256:${'c'.repeat(64)}` }),
-      contentDigest: contentDigest({ value: `sha256:${'d'.repeat(64)}` }),
-    };
-    const prepared = [
-      { ...preparedMetadata, canonicalAction: '{' },
-      {
-        ...preparedMetadata,
-        canonicalAction: JSON.stringify({
-          namespace: 'foreign',
-          operation: 'snapshot-geometry',
-          arguments: { cacheKey: 'foreign', kind: 'triangles', positionCount: 9, indexCount: 3 },
-        }),
-      },
-      {
-        ...preparedMetadata,
-        canonicalAction: JSON.stringify({
-          namespace: 'picogk.component-materialization.v2',
-          operation: 'snapshot-geometry',
-          arguments: { cacheKey: 'invalid', kind: 'lines', positionCount: 0, indexCount: 0 },
-        }),
-      },
-      { ...preparedMetadata, canonicalAction: validMiss },
-    ];
-    const lookup = vi.fn(() => ({ status: 'miss' }) as const);
-    const cacheRuntime = {
-      ...createMockKernelRuntime(),
-      compute: {
-        ...runtime.compute,
-        openSession: vi.fn(async () => ({
-          prepared: () => prepared,
-          lookup,
-          record: vi.fn(),
-          flush: vi.fn(async () => undefined),
-        })),
-      },
-    };
+  it('reports corrupt component publications as best-effort misses', async () => {
+    const compute = computeRuntime();
     const value = context();
     value.session.request.mockResolvedValueOnce({
       ...buildResult(),
-      computePublications: [
-        {
-          cacheKey: `mesh:sha256:${'2'.repeat(64)}`,
-          kind: 'triangles',
-          artifactPath: '/private/corrupt.tau-compute',
-          byteLength: triangle.byteLength,
-          sha256: '0'.repeat(64),
-          positionCount: 9,
-          indexCount: 3,
-        },
-      ],
+      computePublications: [publication({ cacheKey: `mesh:sha256:${'2'.repeat(64)}`, sha256: '0'.repeat(64) })],
     });
 
     await expect(
-      definition.createGeometry({ entryPath: 'main.cs', parameters: {}, options: {} }, cacheRuntime, value),
+      definition.createGeometry({ entryPath: 'main.cs', parameters: {}, options: {} }, compute.runtime, value),
     ).resolves.toMatchObject({ geometry: { format: 'gltf' } });
 
-    expect(lookup).not.toHaveBeenCalled();
-    expect(value.session.prehydrateCompute).toHaveBeenCalledWith([]);
-    expect(cacheRuntime.logger.warn).toHaveBeenCalledWith(
+    expect(compute.announced).toEqual([]);
+    expect(compute.runtime.logger.warn).toHaveBeenCalledWith(
       'PicoGK component cache publication failed.',
       expect.objectContaining({ data: expect.any(Error) }),
     );
@@ -770,17 +670,25 @@ describe('PicoGK kernel', () => {
     );
   });
 
-  it('treats compute prehydration failure as a best-effort miss', async () => {
+  it('treats compute preparation failure as a best-effort miss', async () => {
     const value = context();
-    value.session.prehydrateCompute.mockRejectedValueOnce(new Error('cache unavailable'));
+    const failingRuntime = {
+      ...createMockKernelRuntime(),
+      filesystem: {
+        ...runtime.filesystem,
+        readFiles: async () => {
+          throw new Error('cache unavailable');
+        },
+      },
+    };
     value.session.request.mockResolvedValueOnce(buildResult());
     await expect(
-      definition.createGeometry({ entryPath: 'main.cs', parameters: {}, options: {} }, runtime, value),
+      definition.createGeometry({ entryPath: 'main.cs', parameters: {}, options: {} }, failingRuntime, value),
     ).resolves.toMatchObject({ geometry: { format: 'gltf' } });
     expect(value.session.request).toHaveBeenCalledWith(
       expect.objectContaining({ params: expect.not.objectContaining({ compute: expect.anything() }) }),
     );
-    expect(runtime.logger.warn).toHaveBeenCalledWith(
+    expect(failingRuntime.logger.warn).toHaveBeenCalledWith(
       'PicoGK component cache preparation failed.',
       expect.objectContaining({ data: expect.any(Error) }),
     );

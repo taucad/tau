@@ -13,7 +13,13 @@ internal static class Program
     private static readonly object ProtocolGate = new();
     private static TextWriter protocol = Console.Out;
 
-    private static int Main(string[] args) => Run(args, Console.In, Console.Out, Console.Error, watchParent: true);
+    private static int Main(string[] args) => args switch
+    {
+        // Build-time only: emit the author-callable C# surface as JSON. Read-only,
+        // and it never initializes the PicoGK native library.
+        ["--emit-api", var outputPath, var sourceRoot] => ApiExtraction.Emit(outputPath, sourceRoot),
+        _ => Run(args, Console.In, Console.Out, Console.Error, watchParent: true),
+    };
 
     internal static long ManagedHeapBytesAfterCollection()
     {

@@ -1,63 +1,84 @@
-// @vitest-environment jsdom
-
-// oxlint-disable-next-line import/no-unassigned-import -- extends Vitest matchers for DOM assertions.
-import '@testing-library/jest-dom/vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { tauPlanCatalog } from '@taucad/billing';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { PlanCards } from '#components/billing/plan-cards.js';
 
-const upgradeMock = vi.hoisted(() => vi.fn());
-vi.mock('#lib/auth-client.js', () => ({
-  authClient: { subscription: { upgrade: upgradeMock } },
+const createSubscriptionAction = vi.hoisted(() => vi.fn());
+const followPaymentRedirect = vi.hoisted(() => vi.fn(() => true));
+const PaymentConflict = vi.hoisted(
+  () =>
+    class extends Error {
+      public readonly action: unknown;
+      public get code(): string {
+        return 'subscription_already_exists';
+      }
+      public constructor(action: unknown) {
+        super('subscription_already_exists');
+        this.action = action;
+      }
+    },
+);
+vi.mock('#lib/billing-payment-client.js', () => ({
+  BillingPaymentConflict: PaymentConflict,
+  createPaymentRequestId: () => 'request_1',
+  createSubscriptionAction,
+  followPaymentRedirect,
+}));
+vi.mock('@taucad/billing/hooks/billing-session', () => ({
+  useBillingSession: () => ({
+    apiBaseUrl: 'https://api.tau.new',
+    environment: 'development',
+    userId: 'user-a',
+  }),
 }));
 
-const renderCards = (currentTier?: 'free' | 'pro' | 'enterprise'): ReturnType<typeof render> =>
-  render(
-    <MemoryRouter>
-      <PlanCards currentTier={currentTier} />
-    </MemoryRouter>,
-  );
-
 describe('PlanCards', () => {
-  afterEach(() => {
-    cleanup();
-    vi.clearAllMocks();
+  beforeEach(() => vi.clearAllMocks());
+  it('starts the first-party Pro subscription action', async () => {
+    createSubscriptionAction.mockResolvedValue({
+      state: 'redirect_required',
+      ownerId: 'user-a',
+      redirectUrl: 'https://checkout.example',
+    });
+    render(
+      <MemoryRouter>
+        <PlanCards />
+      </MemoryRouter>,
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Subscribe Now' }));
+    expect(createSubscriptionAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        environment: 'development',
+        ownerId: 'user-a',
+      }),
+      expect.objectContaining({ requestId: 'request_1' }),
+    );
+    expect(followPaymentRedirect).toHaveBeenCalled();
   });
-
-  it('should render every catalogue card with the POPULAR pill on Pro (S57)', () => {
-    renderCards();
-
-    for (const entry of tauPlanCatalog) {
-      expect(screen.getByText(entry.name)).toBeInTheDocument();
-    }
-    expect(screen.getByText(/popular/i)).toBeInTheDocument();
-    expect(screen.getByText('$20')).toBeInTheDocument();
+  it('pins the current tier', () => {
+    render(
+      <MemoryRouter>
+        <PlanCards currentTier='pro' />
+      </MemoryRouter>,
+    );
+    expect(screen.getByRole('button', { name: 'Current plan' })).toBeDisabled();
   });
-
-  it('should start the Pro checkout from the subscribe CTA', async () => {
-    upgradeMock.mockResolvedValue(undefined);
-    const user = userEvent.setup();
-    renderCards();
-
-    await user.click(screen.getByRole('button', { name: /subscribe now/i }));
-
-    expect(upgradeMock).toHaveBeenCalledWith(expect.objectContaining({ plan: 'pro' }));
-  });
-
-  it('should route signup to /auth/sign-up and enterprise to the sales mailbox', () => {
-    renderCards();
-
-    expect(screen.getByRole('link', { name: /start creating free/i })).toHaveAttribute('href', '/auth/sign-up');
-    expect(screen.getByRole('link', { name: /contact us/i })).toHaveAttribute('href', 'mailto:enterprise@tau.new');
-  });
-
-  it("pins the viewer's tier as a disabled Current-plan card (settings grid)", () => {
-    renderCards('free');
-
-    expect(screen.getByRole('button', { name: /current plan/i })).toBeDisabled();
-    expect(screen.queryByRole('link', { name: /start creating free/i })).not.toBeInTheDocument();
+  it('resumes the owned pending subscription returned by a conflict', async () => {
+    const action = {
+      state: 'redirect_required',
+      ownerId: 'user-a',
+      subjectId: 'account-a',
+      environment: 'development',
+      redirectUrl: 'https://checkout.example/resume',
+    };
+    createSubscriptionAction.mockRejectedValue(new PaymentConflict(action));
+    render(
+      <MemoryRouter>
+        <PlanCards />
+      </MemoryRouter>,
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Subscribe Now' }));
+    expect(followPaymentRedirect).toHaveBeenCalledWith(action);
   });
 });

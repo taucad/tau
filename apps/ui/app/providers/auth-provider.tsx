@@ -8,6 +8,7 @@ import { authClient } from '#lib/auth-client.js';
 import { ENV } from '#environment.config.js';
 import { apiKeyPlugin } from '#utils/api-key-plugin.js';
 import { magicLinkPlugin } from '#utils/magic-link-plugin.js';
+import { useOptionalFinancialSession } from '#providers/financial-session-provider.js';
 
 /**
  * The auth surface Electron's preload exposes to the renderer (batch A, item
@@ -145,6 +146,7 @@ export function DesktopAuthBridge(): undefined {
   // when no client is in scope, and this component is deliberately mountable
   // on either side of the provider.
   const queryClient = useContext(QueryClientContext);
+  const financialSession = useOptionalFinancialSession();
 
   useEffect(() => {
     if (import.meta.env.TAU_TARGET !== 'desktop') {
@@ -159,10 +161,11 @@ export function DesktopAuthBridge(): undefined {
     }
 
     return bridge.onAuthChanged(() => {
+      financialSession?.purge('owner_changed');
       void queryClient?.invalidateQueries({ queryKey: authQueryKeyPrefix });
       authClient.$store.notify('$sessionSignal');
     });
-  }, [queryClient]);
+  }, [financialSession, queryClient]);
 }
 
 export function AuthConfigProvider({ children }: { readonly children: React.ReactNode }): React.JSX.Element {

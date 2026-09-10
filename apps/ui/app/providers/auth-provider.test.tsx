@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// oxlint-disable-next-line import/no-unassigned-import -- registers DOM matchers for this test module
 import '@testing-library/jest-dom/vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -8,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AuthConfigLink, DesktopAuthBridge, desktopAuthAction } from '#providers/auth-provider.js';
 import type { TauDesktopAuthBridge } from '#providers/auth-provider.js';
+import { FinancialSessionProvider } from '#providers/financial-session-provider.js';
 
 const mocks = vi.hoisted(() => ({
   notify: vi.fn(),
@@ -53,7 +55,9 @@ const createBridge = () => {
 const renderBridge = (queryClient: QueryClient): ReturnType<typeof render> =>
   render(
     <QueryClientProvider client={queryClient}>
-      <DesktopAuthBridge />
+      <FinancialSessionProvider>
+        <DesktopAuthBridge />
+      </FinancialSessionProvider>
     </QueryClientProvider>,
   );
 
@@ -76,12 +80,14 @@ describe('DesktopAuthBridge', () => {
     vi.stubEnv('TAU_TARGET', 'desktop');
     const { bridge, emit } = createBridge();
     globalThis.window.tauAuth = bridge;
+    queryClient.setQueryData(['billing', 'credits'], { stale: true });
 
     renderBridge(queryClient);
     emit();
 
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ['auth'] });
     expect(mocks.notify).toHaveBeenCalledWith('$sessionSignal');
+    expect(queryClient.getQueryData(['billing', 'credits'])).toBeUndefined();
   });
 
   it('unsubscribes from the shell on unmount', () => {

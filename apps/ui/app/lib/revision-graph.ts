@@ -1,5 +1,7 @@
 import type { Chat } from '@taucad/chat';
 import * as revisionFs from '@taucad/filesystem';
+// The authority's own vocabulary is `@taucad/revisions` (RC8 work 10).
+import * as revisionStore from '@taucad/revisions';
 import { hashBytes, hashString } from '@taucad/utils/hash';
 import { buildRevisions, buildTimeline } from '#lib/file-restore-timeline.js';
 import type { FileOp, Revision } from '#lib/file-restore-timeline.js';
@@ -10,10 +12,10 @@ import type {
   PersistedRevisionGraphState,
 } from '#types/revision.types.js';
 
-type RevisionBranchName = revisionFs.RevisionBranchName;
+type RevisionBranchName = revisionStore.RevisionBranchName;
 type RevisionId = revisionFs.RevisionId;
-type RevisionProvenance = revisionFs.RevisionProvenance;
-type RevisionSummary = revisionFs.RevisionSummary;
+type RevisionProvenance = revisionStore.RevisionProvenance;
+type RevisionSummary = revisionStore.RevisionSummary;
 
 export type RevisionDiffSummary = {
   readonly changedPaths: readonly string[];
@@ -266,7 +268,7 @@ export const buildRevisionGraph = (input: BuildRevisionGraphInput): RevisionGrap
       parentTurnIds,
       parentSource: record === undefined ? 'inferred' : 'recorded',
       ...projectFork(forkPointTurnId, ids),
-      branch: revisionFs.revisionBranchName(branchName),
+      branch: revisionStore.revisionBranchName(branchName),
       tree,
       treeId: record?.treeId === undefined ? immutableTreeId(tree) : revisionFs.revisionId(record.treeId),
       provenance: record?.provenance ?? {
@@ -305,7 +307,7 @@ export const buildRevisionGraph = (input: BuildRevisionGraphInput): RevisionGrap
           : ids.get(headTurnId)
         : revisionFs.revisionId(record.headRevisionId);
     return {
-      name: revisionFs.revisionBranchName(name),
+      name: revisionStore.revisionBranchName(name),
       ...(headTurnId === undefined ? {} : { headTurnId }),
       ...(headId === undefined ? {} : { headId }),
       ...(record?.publication === undefined ? {} : { publication: record.publication }),

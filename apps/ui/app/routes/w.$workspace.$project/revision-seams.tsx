@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
 import { useChats } from '#hooks/use-chats.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { useProject } from '#hooks/use-project.js';
@@ -6,6 +6,10 @@ import { useRevisionActor } from '#routes/w.$workspace.$project/revision-provide
 import { useRevisions } from '#hooks/use-revisions.js';
 import { computeAbandonedTurnIds } from '#lib/file-restore-timeline.js';
 import { useFinalizedChatWorkspaces } from '#providers/chat-workspace-authority-provider.js';
+import {
+  getHostFinalizedRevisions,
+  subscribeHostFinalizedRevisions,
+} from '#chat-clients/_internal/browser-agent-host-transport.js';
 import type { MyUIMessage } from '@taucad/chat';
 
 /**
@@ -22,7 +26,11 @@ import type { MyUIMessage } from '@taucad/chat';
  *   event and therefore never expose a partial revision.
  * - **Seam 3 (authority):** finalized workspaces project their already-settled
  *   revision identity and branch publication into the durable graph exactly
- *   once per workspace/revision pair.
+ *   once per workspace/revision pair. Both authorities feed it: this tab's
+ *   workspace authority for a browser-placed turn, and the host's own
+ *   `revision.finalized` record for a turn a daemon or desktop utility ran
+ *   (VI11). The two are one shape and one dedupe key, so a project whose chats
+ *   are split across placements has one graph.
  */
 export function RevisionSeams(): undefined {
   const actor = useRevisionActor();
@@ -32,7 +40,19 @@ export function RevisionSeams(): undefined {
   const projectChatIds = useMemo(() => chats.map((chat) => chat.id), [chats]);
   const { revisions, headRevision } = useRevisions();
   const finalizedWorkspaces = useFinalizedChatWorkspaces();
+  const hostFinalizedRevisions = useSyncExternalStore(
+    subscribeHostFinalizedRevisions,
+    getHostFinalizedRevisions,
+    getHostFinalizedRevisions,
+  );
   const dispatchedFinalizations = useRef(new Set<string>());
+  const projectChatIdSet = useMemo(() => new Set(projectChatIds), [projectChatIds]);
+  /* Host records are collected per tab, not per project: a chat this project
+   * does not own must not register a node in this project's graph. */
+  const finalizations = useMemo(
+    () => [...finalizedWorkspaces, ...hostFinalizedRevisions.filter((result) => projectChatIdSet.has(result.chatId))],
+    [finalizedWorkspaces, hostFinalizedRevisions, projectChatIdSet],
+  );
 
   // Dispatch subscriptions read fresh derived state through a ref so
   // it never closes over a stale revisions snapshot.
@@ -42,7 +62,7 @@ export function RevisionSeams(): undefined {
   }, [headRevision, revisions]);
 
   useEffect(() => {
-    for (const result of finalizedWorkspaces) {
+    for (const result of finalizations) {
       const identity = JSON.stringify([result.workspaceId, result.revisionId]);
       if (dispatchedFinalizations.current.has(identity)) {
         continue;
@@ -50,7 +70,7 @@ export function RevisionSeams(): undefined {
       dispatchedFinalizations.current.add(identity);
       actor.send({ type: 'authoritativeRevisionFinalized', result });
     }
-  }, [actor, finalizedWorkspaces]);
+  }, [actor, finalizations]);
 
   // Fork registration and completion are project-wide. Rebind on membership
   // so a background session acquired after mount is covered.

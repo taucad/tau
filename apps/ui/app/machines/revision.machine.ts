@@ -30,7 +30,18 @@ import type {
  * by the `planning` state's `on` handler) and then completes (`onDone`).
  */
 
-export type RestoreTarget = { messageId: string; anchor: number };
+export type RestoreTarget = {
+  messageId: string;
+  anchor: number;
+  /**
+   * The stored revision this target names, when the revision authority holds
+   * one. Present, restoring is an authority checkout — the tree comes from the
+   * store rather than from replayed chat evidence, which is what makes any
+   * finalized revision restorable from any agent.
+   */
+  revisionId?: string;
+  identitySource?: 'authoritative' | 'transcript';
+};
 
 /** Emitted by the `computePlan` actor back into the machine. */
 export type PlanComputedEvent = {

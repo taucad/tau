@@ -30,8 +30,8 @@ import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-works
 import { useFeature } from '#flags/use-feature.js';
 import { useHeadlessImageService } from '#providers/headless-image-provider.js';
 import { captureCadImages } from '#services/headless-capture.js';
-import { useCameraRegistryVersion } from '#hooks/use-graphics.js';
-import { getGraphicsCameraState, hasGraphicsCameraRig } from '#services/graphics-camera-registry.js';
+import { useGraphicsCameraRigQuery } from '#hooks/use-graphics.js';
+import { getGraphicsCameraState } from '#services/graphics-camera-registry.js';
 
 export function ProjectCommandPaletteItems({ match }: { readonly match: UIMatch }): undefined {
   const { projectRef, geometryUnits, mainEntryPath } = useProject();
@@ -47,8 +47,8 @@ export function ProjectCommandPaletteItems({ match }: { readonly match: UIMatch 
 
   const mainCadRef = geometryUnits.get(mainEntryPath);
   const geometryFormat = useSelector(mainCadRef, (state) => state?.context.geometry?.format);
-  useCameraRegistryVersion();
-  const cameraReady = hasGraphicsCameraRig(mainGraphicsRef);
+  const hasCameraRig = useGraphicsCameraRigQuery();
+  const cameraReady = hasCameraRig(mainGraphicsRef);
   const canCapturePng = Boolean(
     geometryFormat && geometryFormat !== 'webrtc' && (geometryFormat !== 'gltf' || cameraReady),
   );

@@ -455,7 +455,12 @@ export type ResolvedRestore = {
  */
 export function resolveRestore(
   chats: Chat[],
-  requested: { messageId: string; anchor: number },
+  requested: {
+    messageId: string;
+    anchor: number;
+    revisionId?: string | undefined;
+    identitySource?: 'authoritative' | 'transcript' | undefined;
+  },
   supersededTurnIds: readonly string[],
 ): ResolvedRestore {
   const timeline = buildTimeline(activeOps(chats, supersededTurnIds));
@@ -467,8 +472,15 @@ export function resolveRestore(
   if (!target) {
     throw new Error('Revision no longer exists');
   }
+  /* An authoritative target was materialized by the authority's checkout
+   * before the machine ran; replaying the transcript approximation on top of
+   * it would make the transcript the last writer (8-review S5). The machine
+   * still needs the resolved target for `Current`, `isLatest` and undo. */
+  const materializedByCheckout = requested.identitySource === 'authoritative' && requested.revisionId !== undefined;
   return {
-    plan: materializeAt(timeline, target.cutoffSeq),
+    plan: materializedByCheckout
+      ? { write: new Map(), remove: new Set(), unrecoverable: new Set() }
+      : materializeAt(timeline, target.cutoffSeq),
     target: { messageId: target.messageId, anchor: target.anchor },
     isLatest: revisions.at(-1)?.messageId === target.messageId,
     n: target.n,

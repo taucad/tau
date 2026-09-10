@@ -1,6 +1,10 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook } from '@testing-library/react';
+import { createActor } from 'xstate';
+import { parseLogEvent } from '@taucad/agent-host';
+import { projectAgentHostRevisionFinalized } from '#services/agent-host-event-projection.js';
+import { revisionMachine } from '#machines/revision.machine.js';
 import { mock } from 'vitest-mock-extended';
 import type { Chat, MyUIMessage } from '@taucad/chat';
 import type { PersistedRevisionGraphNode, PersistedRevisionGraphState } from '#types/revision.types.js';
@@ -147,6 +151,13 @@ const installSession = (
   const liveChat = { messages, status } as unknown as ChatSession['chat'];
   sessions.set(chatId, { chatId, chat: liveChat, persistenceActorRef } as unknown as ChatSession);
 };
+
+const live: Array<{ stop: () => void }> = [];
+afterEach(() => {
+  for (const actor of live.splice(0)) {
+    actor.stop();
+  }
+});
 
 beforeEach(() => {
   sessions.clear();
@@ -354,5 +365,54 @@ describe('useVisibleRevisions — turn completion visibility', () => {
     expect(visible.result.current.revisions).toEqual([]);
     expect(raw.result.current.graph.byTurnId.has('u1')).toBe(true);
     expect(visible.result.current.graph.byTurnId.has('u1')).toBe(false);
+  });
+  /* The host half of the same chain (V17/G-REV-HOST): a turn a daemon or the
+     desktop utility ran is finalized on the host, reaches this tab as one
+     durable `revision.finalized` record, and must produce the same Revision —
+     the one `ChatRevisionMarker` reads as "Current" — as a browser-placed turn.
+     Driven through the real projection and the real machine so a record that
+     names the wrong turn, or loses its revision id, cannot pass. */
+  it('shows a host-recorded turn as the current Revision', () => {
+    const messages = [user('u1', 100), assistant(200, [createPart('main.scad', 'cube(10);')])];
+    chatsRef.current = [chat(50, messages)];
+    const record = parseLogEvent({
+      version: 1,
+      leaderEpoch: 'leader-1',
+      sequence: 7,
+      recordedAt: '2026-09-08T00:00:00.000Z',
+      runId: 'run-host-1',
+      type: 'revision.finalized',
+      turnId: 'u1',
+      workspaceId: 'trun-host-1',
+      revisionId: 'rev:trun-host-1',
+      baseRevisionId: 'rev:base-1',
+      treeId: 'rev:trun-host-1',
+      branchName: 'agent/chatA/trun-host-1',
+      publication: {
+        status: 'updated',
+        branchName: 'agent/chatA/trun-host-1',
+        expectedHeadRevisionId: 'rev:base-1',
+        headRevisionId: 'rev:trun-host-1',
+      },
+      changedPaths: ['main.scad'],
+      provenance: { source: 'agent', actorId: 'tau-host', runId: 'run-host-1', createdAt: 100 },
+      generatedSummary: 'Agent turn run-host-1',
+      nativeGit: { status: 'not-configured' },
+    });
+    const result = projectAgentHostRevisionFinalized(record, 'chatA');
+    expect(result).toBeDefined();
+    const actor = createActor(revisionMachine, {
+      input: { projectId: 'p', initial: { headTurnId: '', supersededTurnIds: [], dirty: false }, persist: vi.fn() },
+    }).start();
+    live.push(actor);
+    actor.send({ type: 'authoritativeRevisionFinalized', result: result! });
+    actorContext.graph = actor.getSnapshot().context.graph;
+    installSession('chatA', messages, { requestLifecycle: 'idle' });
+
+    const { result: view } = renderHook(() => useVisibleRevisions());
+
+    expect(view.current.revisions.map(({ messageId, n }) => ({ messageId, n }))).toEqual([{ messageId: 'u1', n: 1 }]);
+    expect(view.current.byMessageId.get('u1')).toBeDefined();
+    expect(view.current.headRevision?.n).toBe(view.current.byMessageId.get('u1')?.n);
   });
 });

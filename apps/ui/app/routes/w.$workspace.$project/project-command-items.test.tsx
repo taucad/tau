@@ -8,6 +8,7 @@ let registeredItems: CommandPaletteItem[] = [];
 let isTauDebugEnabled = false;
 let geometryFormat: 'gltf' | 'svg' | undefined;
 let cameraState: Record<string, unknown> | undefined;
+let cameraRegistryVersion = 0;
 const openPanel = vi.fn();
 const captureCadImages = vi.fn<(options: unknown) => Promise<ExportFile[]>>();
 const downloadBlob = vi.fn<(blob: Blob, filename: string) => void>();
@@ -46,7 +47,10 @@ vi.mock('#hooks/use-project.js', () => ({
 vi.mock('#services/headless-capture.js', () => ({ captureCadImages }));
 
 vi.mock('#hooks/use-graphics.js', () => ({
-  useCameraRegistryVersion: () => 1,
+  useGraphicsCameraRigQuery: () => {
+    const _version = cameraRegistryVersion;
+    return () => Boolean(cameraState) && _version >= 0;
+  },
 }));
 vi.mock('#services/graphics-camera-registry.js', () => ({
   hasGraphicsCameraRig: () => Boolean(cameraState),
@@ -129,6 +133,7 @@ describe('ProjectCommandPaletteItems', () => {
     isTauDebugEnabled = false;
     geometryFormat = undefined;
     cameraState = undefined;
+    cameraRegistryVersion = 0;
     openPanel.mockClear();
     captureCadImages.mockReset();
     downloadBlob.mockReset();
@@ -207,5 +212,21 @@ describe('ProjectCommandPaletteItems', () => {
     expect(blob).toBeInstanceOf(Blob);
     expect(blob.type).toBe('image/png');
     expect(filename).toBe('test-project.png');
+  });
+
+  it('reacts to camera registration and unregistration for a stable graphics actor', () => {
+    geometryFormat = 'gltf';
+    const view = render(<ProjectCommandPaletteItems match={match} />);
+    expect(registeredItems.find((item) => item.id === 'download-png')?.disabled).toBe(true);
+
+    cameraState = { position: [1, 2, 3] };
+    cameraRegistryVersion += 1;
+    view.rerender(<ProjectCommandPaletteItems match={match} />);
+    expect(registeredItems.find((item) => item.id === 'download-png')?.disabled).toBe(false);
+
+    cameraState = undefined;
+    cameraRegistryVersion += 1;
+    view.rerender(<ProjectCommandPaletteItems match={match} />);
+    expect(registeredItems.find((item) => item.id === 'download-png')?.disabled).toBe(true);
   });
 });

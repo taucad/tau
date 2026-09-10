@@ -713,6 +713,20 @@ describe('resolveRestore', () => {
     expect(resolved.plan.write.get('a.ts')).toBe('v1');
   });
 
+  it('8-review S5: leaves an authoritative target to the checkout that already materialized it', () => {
+    const replayed = resolveRestore([twoRevisionChat()], { messageId: 'u1', anchor: 100 }, []);
+    expect(replayed.plan.write.size + replayed.plan.remove.size).toBeGreaterThan(0);
+    const resolved = resolveRestore(
+      [twoRevisionChat()],
+      { messageId: 'u1', anchor: 100, revisionId: 'a'.repeat(40), identitySource: 'authoritative' },
+      [],
+    );
+    expect(resolved.plan.write.size).toBe(0);
+    expect(resolved.plan.remove.size).toBe(0);
+    expect(resolved.target).toEqual(replayed.target);
+    expect(resolved.isLatest).toBe(replayed.isLatest);
+  });
+
   it('should fall back to the anchor when the messageId is stale (R12)', () => {
     const resolved = resolveRestore([twoRevisionChat()], { messageId: 'stale-id', anchor: 100 }, []);
     expect(resolved.target.messageId).toBe('u1');

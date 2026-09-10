@@ -12,6 +12,11 @@ import type { Revision } from '#lib/file-restore-timeline.js';
 import { emptyRevisionGraph } from '#lib/revision-graph.js';
 import { useFinalizedChatWorkspaces } from '#providers/chat-workspace-authority-provider.js';
 import type { FinalizedChatWorkspace } from '#providers/chat-workspace-authority-provider.js';
+import {
+  getHostFinalizedRevisions,
+  subscribeHostFinalizedRevisions,
+} from '#chat-clients/_internal/browser-agent-host-transport.js';
+import type { AuthoritativeRevisionFinalization } from '#types/revision.types.js';
 import type { Chat, MyUIMessage } from '@taucad/chat';
 
 vi.mock('#hooks/active-chat-provider.js', () => ({
@@ -34,6 +39,10 @@ vi.mock('#hooks/use-revisions.js', () => ({ useRevisions: vi.fn() }));
 vi.mock('#providers/chat-workspace-authority-provider.js', () => ({
   useFinalizedChatWorkspaces: vi.fn(),
 }));
+vi.mock('#chat-clients/_internal/browser-agent-host-transport.js', () => ({
+  getHostFinalizedRevisions: vi.fn(),
+  subscribeHostFinalizedRevisions: vi.fn(),
+}));
 
 const rev = (over: Partial<Revision> = {}): Revision => ({
   n: 1,
@@ -54,6 +63,7 @@ const terminalHandlers = new Map<string, (event: { messages: MyUIMessage[] }) =>
 const sessions = new Map<string, ChatSession>();
 const store = mock<ChatSessionStore>();
 let finalizedWorkspaces: readonly FinalizedChatWorkspace[] = [];
+let hostFinalizedRevisions: readonly AuthoritativeRevisionFinalization[] = [];
 
 const finalizedWorkspace = (over: Partial<FinalizedChatWorkspace> = {}): FinalizedChatWorkspace => ({
   projectId: 'p1',
@@ -138,6 +148,7 @@ const setup = (view: Partial<RevisionsView>): void => {
   terminalHandlers.clear();
   sessions.clear();
   finalizedWorkspaces = [];
+  hostFinalizedRevisions = [];
   projectChatIds.splice(0, projectChatIds.length, 'c1');
   installSession('c1');
 
@@ -160,6 +171,8 @@ const setup = (view: Partial<RevisionsView>): void => {
   store.subscribeMembership.mockReturnValue(() => undefined);
   vi.mocked(useChatSessionStore).mockReturnValue(store);
   vi.mocked(useFinalizedChatWorkspaces).mockImplementation(() => finalizedWorkspaces);
+  vi.mocked(getHostFinalizedRevisions).mockImplementation(() => hostFinalizedRevisions);
+  vi.mocked(subscribeHostFinalizedRevisions).mockReturnValue(() => undefined);
 };
 
 beforeEach(() => {
@@ -189,6 +202,36 @@ describe('RevisionSeams', () => {
 
     expect(send).toHaveBeenCalledTimes(2);
     expect(send).toHaveBeenLastCalledWith({ type: 'authoritativeRevisionFinalized', result: second });
+  });
+
+  it('registers a revision a host recorded, once, for a chat this project owns', () => {
+    setup({});
+    const { projectId: _projectId, ...hostRecorded } = finalizedWorkspace({
+      turnId: 'u-host-1',
+      revisionId: 'rev-host-1',
+      treeId: 'rev-host-1',
+      workspaceId: 'trun-host-1',
+      provenance: { source: 'agent', actorId: 'tau-host', runId: 'run-host-1', createdAt: 100 },
+    });
+    /* A chat the project does not own: the host store is per tab, and a second
+       project's chat must not register a node in this project's graph. */
+    const foreign: AuthoritativeRevisionFinalization = {
+      ...hostRecorded,
+      chatId: 'c-other-project',
+      turnId: 'u-host-2',
+      revisionId: 'rev-host-2',
+      workspaceId: 'trun-host-2',
+    };
+    hostFinalizedRevisions = [hostRecorded, foreign];
+    const { rerender } = render(<RevisionSeams />);
+
+    expect(send).toHaveBeenCalledExactlyOnceWith({ type: 'authoritativeRevisionFinalized', result: hostRecorded });
+
+    /* The same turn, once the host's own publication record also reaches this
+       tab's authority: one workspace/revision pair is one graph node. */
+    finalizedWorkspaces = [finalizedWorkspace({ ...hostRecorded, projectId: 'p1' })];
+    rerender(<RevisionSeams />);
+    expect(send).toHaveBeenCalledTimes(1);
   });
 
   it('T-WIRE-SUBMIT-FORK: a new user turn (kind:send) below the tip sends NEW_USER_TURN with the abandoned tail', () => {

@@ -53,7 +53,11 @@ One writer owns each shared index, canonical document, queue, or source file. Se
 
 ## Temporary execution and durable evidence
 
-Native scratchpads, task-output files, build directories and dependency caches may remain where their tools require them. Copy or collect valuable output into the artifact tree before treating it as preserved. A path into `/tmp`, `out`, or a provider cache is not the durable copy of an expensive result.
+Write retained but disposable run output under `out/research/<subject>/<run>/<lane>/` at the Tau workspace root. This includes routine command logs, superseded retries, browser traces, screenshots used only for diagnosis, copied before/after trees, generated build products and process markers. Use operating-system temporary storage for scratch with no workspace affinity and `node_modules/.cache/<producer>` for dependency-coupled intermediates. These locations are not durable evidence and may be cleaned by their owners.
+
+Promote only valuable outputs into `docs/research/artifacts/<subject>/`: cited results, decisive failures, final verification, manifests, hashes, compact machine-readable measurements, provenance, and source or patches needed to reproduce the finding. A file in the artifact tree is presumed intentional and committable. Do not place every attempt there and rely on a later commit pass to infer what is disposable.
+
+Before closeout, replace references to disposable output with promoted evidence or record the command, source identity, result summary and limitation in the report. Keep exact large evidence only when its bytes are the research subject or reproduction is materially expensive; use the repository's established large-file storage. Otherwise preserve a hash, compact excerpt or screenshot and reproduction instructions. Never commit credentials, tokens, dependency trees, build products or duplicate payloads as evidence.
 
 Keep large artifacts out of the model context. Retain their file, format, provenance and a useful summary; use the repository's established large-file storage when required. Re-creatable dependency trees need not be copied, but preserve the versions, command, source or patch, and expensive results needed to understand and reproduce the experiment.
 
@@ -64,6 +68,8 @@ Native histories are read-only evidence. Archive task-relevant sources with cred
 Read the owner and checkpoint first, inspect surviving jobs before redispatch, and verify outputs against the filesystem or relevant runtime. A quiet live worker is not dead. A finished job is not proof of semantic acceptance. Recover missing results from supported result/history surfaces, preserving their provenance.
 
 Report which outcomes are verified, incomplete, unavailable, or superseded. Validate the root document with `pnpm docs:validate`; separately check artifact paths, sources and the relevant semantic evidence because the root validator does not recurse into artifacts.
+
+Before handing off for commit, verify that the owning Tau Brain paths contain only durable evidence and that disposable output is under `out/research`. A request to commit all Tau Brain changes should therefore be able to commit every non-ignored path and leave that repository clean; classification belongs to the producer and closeout owner, not the commit workflow.
 
 Check these files in the owning repository:
 

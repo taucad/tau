@@ -36,7 +36,7 @@ A Markdown queue supports **one coordinator**. If independent coordinators must 
 
 ## Implement with useful concurrency
 
-Decompose along actual ownership and dependencies. Different symptom files can share one root cause; those edits belong to one owner or an ordered shared-contract task. When subagent workers are requested, fill available capacity with independent, concrete lanes, then refill from the next-ready set. Leave worker model/class selection to the agent and harness defaults; honor explicit operator overrides. Discover current limits rather than baking in an agent count.
+Decompose along actual ownership and dependencies. Different symptom files can share one root cause; those edits belong to one owner or an ordered shared-contract task. When subagent workers are requested, use independent, concrete lanes where parallelism improves delivery; select further lanes from the next-ready set as needed, not to fill a capacity quota. Keep tightly coupled work with one owner. Leave worker model/class selection to the agent and harness defaults; honor explicit operator overrides. Discover current limits rather than baking in an agent count.
 
 Each brief contains task/attempt ID, selected outcome, governing rulings, relevant source, exclusive write budget, acceptance check, durable output path and permitted checkpoint channel. Workers may inspect dependencies, but must return a newly discovered write collision to the coordinator before crossing ownership. Existing user changes remain attributable and intact.
 

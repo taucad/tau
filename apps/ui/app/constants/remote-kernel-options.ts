@@ -1,10 +1,8 @@
 import { packageVersion } from '@taucad/runtime/metadata';
 import { webSocketTransport } from '@taucad/runtime/transport/websocket';
 
-import { ENV } from '#environment.config.js';
 import { createRemoteHostSession, RemoteHostApiError } from '#lib/remote-host-client.js';
 import { getRemoteComputePlacement, setRemoteComputePlacement } from '#lib/remote-compute-placement.js';
-import { createUiRuntimeConfig } from '#runtime/ui-runtime.config.js';
 import type { LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
 
 const failureState = (error: unknown): 'device-offline' | 'busy' | 'version-mismatch' | 'disconnected' => {
@@ -29,9 +27,7 @@ export const remoteKernelOptions: LazyKernelOptionsFactory = async () => {
   setRemoteComputePlacement({ state: 'connecting', deviceId: selected.deviceId });
   try {
     const session = await createRemoteHostSession(selected.deviceId, packageVersion);
-    const runtimeConfig = createUiRuntimeConfig(ENV);
     return ({ fileSystem }) => ({
-      config: runtimeConfig,
       transport: webSocketTransport({
         url: session.url,
         fileSystem,

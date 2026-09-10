@@ -1,7 +1,7 @@
 import type { RuntimeConfigInput } from '@taucad/runtime/worker';
 import type { Environment } from '#environment.config.js';
 import type { runtime } from '#runtime/ui-runtime.definition.js';
-import { uiRuntimeConfigSchema } from '#runtime/ui-runtime.definition.js';
+import { uiRuntimeConfigSchema } from '#runtime/ui-runtime.schema.js';
 
 export type UiRuntimeConfigInput = RuntimeConfigInput<typeof runtime>;
 

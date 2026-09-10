@@ -1,4 +1,3 @@
-import { z } from 'zod';
 import { defineRuntime } from '@taucad/runtime/worker';
 import { openrscad } from '@taucad/openrscad';
 import { assimp } from '@taucad/assimp';
@@ -14,17 +13,14 @@ import { replicad } from '@taucad/replicad';
 import { rhino } from '@taucad/rhino';
 import { zoo } from '@taucad/zoo';
 import { observabilityMiddleware } from '#runtime/observability/observability.middleware.js';
+import { uiRuntimeConfigSchema } from '#runtime/ui-runtime.schema.js';
+import type { UiRuntimeConfig } from '#runtime/ui-runtime.schema.js';
+
+export { uiRuntimeConfigSchema } from '#runtime/ui-runtime.schema.js';
 
 type UiRuntimeOptions = {
   readonly withSourceMapping?: boolean;
 };
-
-export const uiRuntimeConfigSchema = z.object({
-  tauApiUrl: z.url(),
-  tauWebSocketUrl: z.url(),
-});
-
-type UiRuntimeConfig = z.output<typeof uiRuntimeConfigSchema>;
 
 const createUiRuntimeOptions = (config: UiRuntimeConfig, options: UiRuntimeOptions = {}) => ({
   plugins: [

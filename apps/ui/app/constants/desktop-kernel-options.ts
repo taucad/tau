@@ -1,12 +1,12 @@
 import { ENV } from '#environment.config.js';
-import { debugKernelOptions } from '#constants/kernel-options.presets.js';
-import { desktopBridge, isDesktopTarget, nodeHomeRoot } from '#filesystem/desktop-bridge.js';
+import { desktopBridge, nodeHomeRoot } from '#filesystem/desktop-bridge.js';
 import { getProjectFileSystemConfig } from '#filesystem/handle-store.js';
 import { createUiRuntimeConfig } from '#runtime/ui-runtime.config.js';
 import type { runtime } from '#runtime/ui-runtime.definition.js';
 import type { LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
+import type { ComputeReuseMode } from '#lib/compute-reuse-preference.js';
 
-const desktopProjectRoot = async (projectId: string): Promise<string> => {
+export const desktopProjectRoot = async (projectId: string): Promise<string> => {
   const config = await getProjectFileSystemConfig(projectId);
   if (config?.backend !== 'node') {
     throw new Error(`Project ${projectId} is not on disk, so no host path can root the desktop kernel.`);
@@ -42,7 +42,7 @@ export const revokeDesktopNativeCodeTrust = async (projectId: string): Promise<v
  * @returns The lazy options factory for this project's desktop kernel.
  */
 export const desktopKernelOptions =
-  (projectId: string, nativeKernelId?: string): LazyKernelOptionsFactory =>
+  (projectId: string, nativeKernelId?: string, computeMode: ComputeReuseMode = 'durable'): LazyKernelOptionsFactory =>
   async () => {
     const projectRoot = await desktopProjectRoot(projectId);
     if (nativeKernelId) {
@@ -59,21 +59,8 @@ export const desktopKernelOptions =
     const { createElectronClientOptions } = await import('@taucad/runtime/electron/renderer');
     const provideClientOptions = createElectronClientOptions<typeof runtime>({
       config: createUiRuntimeConfig(ENV),
-      context: { projectRoot, definition: 'default' },
+      context: { projectRoot, definition: 'default', computeMode },
     });
     const clientOptions = await provideClientOptions();
     return () => clientOptions;
   };
-
-/**
- * The preset backing a **local** kernel on this host.
- *
- * The one selection point between the browser's debug web worker and the
- * desktop utility process, gated on the `TAU_TARGET` build define so the web
- * bundle never reaches the Electron renderer module.
- *
- * @param projectId - Project the kernel renders.
- * @returns The host's local kernel options factory.
- */
-export const localKernelOptions = (projectId: string, nativeKernelId?: string): LazyKernelOptionsFactory =>
-  isDesktopTarget ? desktopKernelOptions(projectId, nativeKernelId) : debugKernelOptions;

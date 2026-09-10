@@ -2,7 +2,8 @@ import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createDefaultKernelOptions, createDebugKernelOptions } from '#constants/kernel-worker.constants.js';
-import { runtime, uiRuntimeConfigSchema } from '#runtime/ui-runtime.definition.js';
+import { runtime } from '#runtime/ui-runtime.definition.js';
+import { uiRuntimeConfigSchema } from '#runtime/ui-runtime.schema.js';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import { resolveRuntimeDefinition } from '@taucad/runtime/worker';
 

@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { resolveRuntimeDefinition } from '@taucad/runtime/worker';
 import type { RuntimeConfigInput } from '@taucad/runtime/worker';
 import { createUiRuntimeConfig } from '#runtime/ui-runtime.config.js';
-import { runtime, uiRuntimeConfigSchema } from '#runtime/ui-runtime.definition.js';
+import { runtime } from '#runtime/ui-runtime.definition.js';
+import { uiRuntimeConfigSchema } from '#runtime/ui-runtime.schema.js';
 
 const tauApiUrlEnvironmentKey = 'TAU_API_URL';
 const tauWebSocketUrlEnvironmentKey = 'TAU_WEBSOCKET_URL';

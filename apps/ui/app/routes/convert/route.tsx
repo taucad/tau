@@ -1,7 +1,5 @@
-import { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router';
-import { createRuntimeClient } from '@taucad/runtime/client';
-import { webWorkerTransport } from '@taucad/runtime/transport/web';
 import { formatConfigurations } from '@taucad/types/constants';
 import { Download, Upload, RotateCcw, Package, Code2 } from 'lucide-react';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
@@ -38,6 +36,7 @@ import {
   getFormatFromFilename,
   formatDisplayName,
   formatFileSize,
+  isConfiguredConverterFormat,
 } from '#components/geometry/converter/converter-utils.js';
 import { Converter } from '#components/geometry/converter/converter.js';
 import { FovControl } from '#components/geometry/cad/fov-control.js';
@@ -54,18 +53,15 @@ import { Loader } from '#components/ui/loader.js';
 import { ProjectProvider, useProject } from '#hooks/use-project.js';
 import { GraphicsProvider, useGraphicsSelector } from '#hooks/use-graphics.js';
 import { metaConfig } from '#constants/meta.constants.js';
-import {
-  converterExportFormats,
-  converterImportFormats,
-  createConverterSource,
-} from '#routes/convert/converter-runtime.definition.js';
+import { createConverterSource } from '@taucad/converter/contracts';
+import type { ConverterSource } from '@taucad/converter/contracts';
 import type {
-  converterRuntime,
   ConverterExportFormat,
   ConverterImportFormat,
   ConverterRuntimeClient,
-  ConverterSource,
 } from '#routes/convert/converter-runtime.definition.js';
+import { createConverterClient } from '#runtime/converter-client-options.js';
+import { beginConverterOperation, createActiveConverterClient } from '#routes/convert/converter-client-lifecycle.js';
 
 export const handle: Handle = {
   breadcrumb() {
@@ -84,6 +80,7 @@ type UploadedFileInfo = {
 };
 
 const converterViewId = 'converter-main';
+const noConverterExportFormats: ConverterExportFormat[] = [];
 
 function ConverterContent(): React.JSX.Element {
   const { projectRef, viewGraphics } = useProject();
@@ -145,39 +142,86 @@ function ConverterContentInner(): React.JSX.Element {
   const [glbData, setGlbData] = useState<Uint8Array<ArrayBuffer> | undefined>(undefined);
   const [source, setSource] = useState<ConverterSource | undefined>(undefined);
   const [client, setClient] = useState<ConverterRuntimeClient | undefined>(undefined);
+  const [converterImportFormats, setConverterImportFormats] = useState<ConverterImportFormat[]>([]);
+  const [converterExportFormats, setConverterExportFormats] = useState<ConverterExportFormat[]>([]);
   const [selectedFormats, setSelectedFormats] = useCookie<ConverterExportFormat[]>(
     cookieName.converterOutputFormats,
-    [],
+    noConverterExportFormats,
   );
   const [useZipForMultiple, setUseZipForMultiple] = useCookie<boolean>(cookieName.converterMultifileZip, true);
   const [isConverting, setIsConverting] = useState(false);
+  const conversionGeneration = useRef(0);
 
   useEffect(() => {
     let active = true;
-    const runtimeClient = createRuntimeClient<typeof converterRuntime>({
-      transport: webWorkerTransport({
-        createWorker: () =>
-          new Worker(new URL('converter-runtime.worker.ts', import.meta.url), {
-            name: 'tau-converter-runtime-worker',
-            type: 'module',
-          }),
-      }),
-    });
-    queueMicrotask(() => {
-      if (active) {
-        setClient(runtimeClient);
+    let runtimeClient: ConverterRuntimeClient | undefined;
+    let unsubscribe: (() => void) | undefined;
+    const connectConverter = async (): Promise<void> => {
+      try {
+        const createdClient = await createActiveConverterClient(createConverterClient, () => active);
+        if (!createdClient) {
+          return;
+        }
+        runtimeClient = createdClient;
+        unsubscribe = createdClient.on('capabilities', (capabilities) => {
+          if (!active) {
+            return;
+          }
+          setConverterImportFormats([
+            ...new Set(
+              capabilities.registrations
+                .flatMap((registration) => (registration.kind === 'kernel' ? registration.extensions : []))
+                .filter((format) => isConfiguredConverterFormat(format)),
+            ),
+          ] as ConverterImportFormat[]);
+          setConverterExportFormats([
+            ...new Set(
+              capabilities.routes
+                .map((route) => route.targetFormat)
+                .filter((format) => isConfiguredConverterFormat(format)),
+            ),
+          ]);
+        });
+        await createdClient.connect();
+        if (!active) {
+          unsubscribe();
+          createdClient.terminate();
+          return;
+        }
+        setClient(createdClient);
+      } catch (error) {
+        unsubscribe?.();
+        runtimeClient?.terminate();
+        if (active) {
+          toast.error(
+            `Failed to load the converter runtime: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
       }
-    });
+    };
+    void connectConverter();
     return () => {
       active = false;
-      runtimeClient.terminate();
+      conversionGeneration.current += 1;
+      unsubscribe?.();
+      runtimeClient?.terminate();
     };
   }, []);
 
+  useEffect(() => {
+    if (converterExportFormats.length > 0) {
+      setSelectedFormats((formats) => {
+        const configuredFormats = formats.filter((format) => converterExportFormats.includes(format));
+        return configuredFormats.length === formats.length ? formats : configuredFormats;
+      });
+    }
+  }, [converterExportFormats, setSelectedFormats]);
+
   const handleFileSelect = useCallback(
     async (files: File[]) => {
+      const isCurrentOperation = beginConverterOperation(conversionGeneration);
       setIsConverting(true);
-
+      let operationToast: string | number | undefined;
       try {
         if (!client) {
           throw new Error('The converter runtime is still loading');
@@ -198,47 +242,43 @@ function ConverterContentInner(): React.JSX.Element {
             async (file) => [file.webkitRelativePath || file.name, new Uint8Array(await file.arrayBuffer())] as const,
           ),
         );
-        const nextSource = createConverterSource(entries, entryFile.webkitRelativePath || entryFile.name);
-        const operation = (async () => {
-          const outcome = await client.render({ source: nextSource });
-          if (outcome.superseded) {
-            throw new Error('Conversion was superseded by a newer upload');
-          }
-          if (!outcome.geometry.success) {
-            throw new Error(outcome.geometry.issues.map((issue) => issue.message).join('\n'));
-          }
-          if (outcome.geometry.data.format !== 'gltf') {
-            throw new Error(`Converter returned unsupported preview geometry: ${outcome.geometry.data.format}`);
-          }
-          setUploadedFile({ name: entryFile.name, format, size: entryFile.size });
-          setSource(nextSource);
-          setGlbData(outcome.geometry.data.content);
-        })();
-        toast.promise(operation, {
-          loading: `Converting ${entryFile.name}...`,
-          success: `Converted ${entryFile.name} successfully`,
-          error(error: unknown) {
-            let message = 'Failed to convert file';
-            if (error instanceof Error) {
-              message = `${message}: ${error.message}`;
-            }
-
-            return message;
-          },
-        });
-        await operation;
-      } catch (error) {
-        let message = 'Failed to process file';
-        if (error instanceof Error) {
-          message = `${message}: ${error.message}`;
+        if (!isCurrentOperation()) {
+          return;
         }
-
-        toast.error(message);
+        const nextSource = createConverterSource(entries, entryFile.webkitRelativePath || entryFile.name);
+        operationToast = toast.loading(`Converting ${entryFile.name}...`);
+        const outcome = await client.render({ source: nextSource });
+        if (!isCurrentOperation() || outcome.superseded) {
+          return;
+        }
+        if (!outcome.geometry.success) {
+          throw new Error(outcome.geometry.issues.map((issue) => issue.message).join('\n'));
+        }
+        if (outcome.geometry.data.format !== 'gltf') {
+          throw new Error(`Converter returned unsupported preview geometry: ${outcome.geometry.data.format}`);
+        }
+        setUploadedFile({ name: entryFile.name, format, size: entryFile.size });
+        setSource(nextSource);
+        setGlbData(outcome.geometry.data.content);
+        toast.success(`Converted ${entryFile.name} successfully`, { id: operationToast });
+      } catch (error) {
+        if (isCurrentOperation()) {
+          let message = 'Failed to process file';
+          if (error instanceof Error) {
+            message = `${message}: ${error.message}`;
+          }
+          toast.error(message, operationToast === undefined ? undefined : { id: operationToast });
+        }
       } finally {
-        setIsConverting(false);
+        if (isCurrentOperation()) {
+          setIsConverting(false);
+        }
+        if (!isCurrentOperation() && operationToast !== undefined) {
+          toast.dismiss(operationToast);
+        }
       }
     },
-    [client],
+    [client, converterImportFormats],
   );
 
   const handleFormatToggle = useCallback(
@@ -255,6 +295,8 @@ function ConverterContentInner(): React.JSX.Element {
   );
 
   const handleReset = useCallback(() => {
+    conversionGeneration.current += 1;
+    setIsConverting(false);
     setUploadedFile(undefined);
     setSource(undefined);
     setGlbData(undefined);
@@ -341,6 +383,7 @@ function ConverterContentInner(): React.JSX.Element {
                   </FloatingPanelContentHeader>
                   <FloatingPanelContentBody className='flex h-full flex-col justify-between gap-4 p-3 pt-2'>
                     <Converter
+                      availableFormats={converterExportFormats}
                       exportFormat={exportFormat}
                       selectedFormats={selectedFormats}
                       shouldUseZipForMultiple={useZipForMultiple}

@@ -26,6 +26,7 @@ export type ExportedFile = {
 };
 
 type ConverterProperties = {
+  readonly availableFormats: readonly ConverterExportFormat[];
   readonly exportFormat: (format: ConverterExportFormat) => Promise<ExportFile[]>;
   readonly selectedFormats: ConverterExportFormat[];
   readonly shouldUseZipForMultiple: boolean;
@@ -42,6 +43,7 @@ type ConverterProperties = {
 };
 
 export function Converter({
+  availableFormats,
   exportFormat,
   selectedFormats,
   shouldUseZipForMultiple,
@@ -169,6 +171,7 @@ export function Converter({
   return (
     <div data-slot='converter' className={cn('@container/converter flex flex-col gap-6', className)}>
       <FormatSelector
+        formats={availableFormats}
         selectedFormats={selectedFormats}
         onFormatToggle={onFormatToggle}
         onClearSelection={onClearSelection}

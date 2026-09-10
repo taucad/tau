@@ -13,7 +13,6 @@ import { IDBFactory } from 'fake-indexeddb';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type * as DesktopKernelOptions from '#constants/desktop-kernel-options.js';
 import type * as HandleStore from '#filesystem/handle-store.js';
-import type * as KernelOptionsPresets from '#constants/kernel-options.presets.js';
 
 const homeRoot = '/Users/tester/Library/Application Support/Tau/home';
 const projectId = 'proj_aaaaaaaaaaaaaaaaaaaaa';
@@ -52,14 +51,12 @@ const installDesktopBridge = (): void => {
 /** Fresh module graph per case: the target flag is read once at module scope. */
 const loadModules = async (): Promise<{
   desktop: typeof DesktopKernelOptions;
-  presets: typeof KernelOptionsPresets;
   handleStore: typeof HandleStore;
 }> => {
   vi.resetModules();
   globalThis.indexedDB = new IDBFactory();
   return {
     desktop: await import('#constants/desktop-kernel-options.js'),
-    presets: await import('#constants/kernel-options.presets.js'),
     handleStore: await import('#filesystem/handle-store.js'),
   };
 };
@@ -74,29 +71,6 @@ afterEach(() => {
   vi.unstubAllEnvs();
   vi.resetModules();
   requestRuntimePort.mockReset();
-});
-
-describe('localKernelOptions', () => {
-  it(
-    'keeps the browser preset off the desktop build',
-    async () => {
-      const { desktop, presets } = await loadModules();
-
-      expect(desktop.localKernelOptions(projectId)).toBe(presets.debugKernelOptions);
-    },
-    moduleGraphTimeout,
-  );
-
-  it(
-    'selects the desktop preset behind the TAU_TARGET define',
-    async () => {
-      installDesktopBridge();
-      const { desktop, presets } = await loadModules();
-
-      expect(desktop.localKernelOptions(projectId)).not.toBe(presets.debugKernelOptions);
-    },
-    moduleGraphTimeout,
-  );
 });
 
 describe('desktopKernelOptions', () => {

@@ -1,15 +1,15 @@
 /**
  * App-level aliases for the runtime client used across the UI.
  *
- * The UI owns a concrete runtime definition. Keep this alias projected from
- * that definition so app code keeps the runtime client's format-specific
- * render/export typing instead of erasing it.
+ * The UI can connect to browser-authored or independently hosted runtimes.
+ * Variable app state therefore uses the runtime's host-neutral client shape,
+ * while local option authoring remains projected from the exact browser runtime.
  */
 
-import type { CapabilitiesManifest, RuntimeClient } from '@taucad/runtime';
-import type { RuntimeClientOptionsWithTransport, RuntimeExportOptions } from '@taucad/runtime/client';
+import type { RuntimeClient } from '@taucad/runtime';
+import type { RuntimeClientOptionsWithTransport } from '@taucad/runtime/client';
+import type { ComputeBinding } from '@taucad/runtime';
 import type { RuntimeFileSystem } from '@taucad/runtime/filesystem';
-import type { RuntimeKernels, RuntimeMiddleware, RuntimeTranscoders } from '@taucad/runtime/worker';
 import type { runtime } from '#runtime/ui-runtime.definition.js';
 import type { UiRuntimeConfigInput } from '#runtime/ui-runtime.config.js';
 
@@ -19,22 +19,9 @@ import type { UiRuntimeConfigInput } from '#runtime/ui-runtime.config.js';
  * Use this alias instead of inlining the runtime projection so that
  * downstream consumers have a single source of truth.
  */
-export type AppRuntimeClient = RuntimeClient<typeof runtime>;
+export type AppRuntimeClient = RuntimeClient;
 
-export type AppCapabilitiesManifest = CapabilitiesManifest<
-  RuntimeKernels<typeof runtime>,
-  RuntimeMiddleware<typeof runtime>,
-  RuntimeTranscoders<typeof runtime>
->;
-
-export type AppRuntimeExportFormat = Parameters<AppRuntimeClient['export']>[0];
-
-export type AppRuntimeExportOptions<Format extends AppRuntimeExportFormat> = RuntimeExportOptions<
-  RuntimeKernels<typeof runtime>,
-  RuntimeMiddleware<typeof runtime>,
-  RuntimeTranscoders<typeof runtime>,
-  Format
->;
+export type AppCapabilitiesManifest = NonNullable<AppRuntimeClient['capabilities']>;
 
 /**
  * Deferred-construction shape for typed runtime client options.
@@ -49,11 +36,12 @@ export type AppRuntimeExportOptions<Format extends AppRuntimeExportFormat> = Run
 export type KernelOptionsFactory = (deps: {
   readonly fileSystem: RuntimeFileSystem;
   readonly runtimeConfig: UiRuntimeConfigInput;
+  readonly compute?: ComputeBinding;
 }) => RuntimeClientOptionsWithTransport<typeof runtime>;
 
 export type PageKernelOptionsFactory = (
   deps: Omit<Parameters<KernelOptionsFactory>[0], 'runtimeConfig'>,
-) => RuntimeClientOptionsWithTransport<typeof runtime>;
+) => RuntimeClientOptionsWithTransport;
 
 /**
  * Async loader for {@link KernelOptionsFactory}.

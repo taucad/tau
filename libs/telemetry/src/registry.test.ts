@@ -6,7 +6,54 @@ describe('TauMetrics', () => {
   const metrics = Object.values(TauMetrics);
 
   it('should define all canonical metrics', () => {
-    expect(metrics).toHaveLength(46);
+    expect(metrics).toHaveLength(53);
+  });
+
+  it('should bound funded-operation telemetry to content-free dimensions', () => {
+    expect(
+      TauMetrics.billingFundedOperationRecoveries.attributes.safeParse({
+        'deployment.environment': 'preview-123',
+        'tau.billing.capacity_pool': 'primary',
+        'tau.billing.recovery.outcome': 'resolved',
+      }).success,
+    ).toBe(false);
+    expect(
+      TauMetrics.billingFundedOperationDenials.attributes.safeParse({
+        'deployment.environment': 'prod-us',
+        'tau.billing.capacity_pool': 'helper',
+        'tau.billing.denial.reason': 'genuine_saturation',
+      }).success,
+    ).toBe(true);
+    expect(
+      TauMetrics.billingFundedOperationTerminals.attributes.safeParse({
+        'deployment.environment': 'development',
+        'tau.billing.capacity_pool': 'primary',
+        'tau.billing.terminal.kind': 'final_usage',
+        'tau.billing.terminal.incomplete_reason': 'max_output_tokens',
+      }).success,
+    ).toBe(true);
+    expect(
+      TauMetrics.billingFundedOperationTerminals.attributes.safeParse({
+        'deployment.environment': 'development',
+        'tau.billing.capacity_pool': 'primary',
+        'tau.billing.terminal.kind': 'final_usage',
+        'tau.billing.terminal.incomplete_reason': 'provider supplied text',
+      }).success,
+    ).toBe(false);
+    expect(
+      TauMetrics.billingFundedOperationCurrent.attributes.safeParse({
+        'deployment.environment': 'prod-us',
+        'tau.billing.capacity_pool': 'primary',
+        'tau.billing.pending.state': 'due',
+      }).success,
+    ).toBe(true);
+    expect(
+      TauMetrics.billingFundedOperationRecoveryBatchDuration.attributes.safeParse({
+        'deployment.environment': 'prod-us',
+        'tau.billing.capacity_pool': 'primary',
+        'tau.billing.recovery.batch.outcome': 'provider supplied text',
+      }).success,
+    ).toBe(false);
   });
 
   it('should expose the tool-result offload counter with the canonical OTEL name', () => {

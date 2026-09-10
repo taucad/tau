@@ -5,7 +5,7 @@ import { defineCounter, defineHistogram, defineGauge, defineUpDownCounter } from
 /**
  * Canonical metric registry for Tau.
  *
- * All 33 metrics with OTEL-compliant names. Renames from legacy:
+ * Canonical metrics with OTEL-compliant names. Renames from legacy:
  * - `ws.connections.total` -> `ws.disconnections` (counters must not use `.total`)
  * - `sse.events.total` -> `sse.events` (counters must not use `.total`)
  * - `kernel.execution.total` -> `kernel.executions` (counters must be pluralized, no `.total`)
@@ -572,5 +572,82 @@ export const TauMetrics = {
     unit: '{account}',
     description: 'Accounts left negative by a refund clawback of already-spent credits (Q37 dispute-abuse signal)',
     attributes: z.object({}),
+  }),
+
+  billingFundedOperationRecoveries: defineCounter({
+    name: 'tau.billing.funded_operation.recoveries',
+    unit: '{operation}',
+    description: 'Funded LLM recovery work by bounded outcome and capacity pool',
+    attributes: z.object({
+      'deployment.environment': z.enum(['development', 'staging', 'prod-us', 'prod-eu']),
+      'tau.billing.capacity_pool': z.enum(['primary', 'helper']),
+      'tau.billing.recovery.outcome': z.enum(['attempted', 'claimed', 'resolved', 'failed']),
+    }),
+  }),
+
+  billingFundedOperationDenials: defineCounter({
+    name: 'tau.billing.funded_operation.denials',
+    unit: '{denial}',
+    description: 'Funded LLM admission denials by bounded reason and capacity pool',
+    attributes: z.object({
+      'deployment.environment': z.enum(['development', 'staging', 'prod-us', 'prod-eu']),
+      'tau.billing.capacity_pool': z.enum(['primary', 'helper']),
+      'tau.billing.denial.reason': z.enum(['genuine_saturation', 'recovery_in_progress', 'recovery_failed']),
+    }),
+  }),
+
+  billingFundedOperationTerminals: defineCounter({
+    name: 'tau.billing.funded_operation.terminals',
+    unit: '{operation}',
+    description: 'Funded LLM terminal evidence by bounded kind, incomplete reason, and capacity pool',
+    attributes: z.object({
+      'deployment.environment': z.enum(['development', 'staging', 'prod-us', 'prod-eu']),
+      'tau.billing.capacity_pool': z.enum(['primary', 'helper']),
+      'tau.billing.terminal.kind': z.enum(['final_usage', 'provider_rejected', 'absorbed_unknown']),
+      'tau.billing.terminal.incomplete_reason': z.enum(['none', 'max_output_tokens', 'content_filter', 'other']),
+    }),
+  }),
+
+  billingFundedOperationCurrent: defineGauge({
+    name: 'tau.billing.funded_operation.current',
+    unit: '{operation}',
+    description: 'Current pending or overdue funded LLM operations by capacity pool',
+    attributes: z.object({
+      'deployment.environment': z.enum(['development', 'staging', 'prod-us', 'prod-eu']),
+      'tau.billing.capacity_pool': z.enum(['primary', 'helper']),
+      'tau.billing.pending.state': z.enum(['pending', 'due']),
+    }),
+  }),
+
+  billingFundedOperationOldestDueAge: defineGauge({
+    name: 'tau.billing.funded_operation.oldest_due_age',
+    unit: 'ms',
+    description: 'Age of the oldest overdue funded LLM operation by capacity pool',
+    attributes: z.object({
+      'deployment.environment': z.enum(['development', 'staging', 'prod-us', 'prod-eu']),
+      'tau.billing.capacity_pool': z.enum(['primary', 'helper']),
+    }),
+  }),
+
+  billingFundedOperationRecoveryBatchDuration: defineHistogram({
+    name: 'tau.billing.funded_operation.recovery.batch.duration',
+    unit: 's',
+    description: 'Duration of one bounded funded LLM recovery batch by capacity pool and outcome',
+    buckets: [0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30],
+    attributes: z.object({
+      'deployment.environment': z.enum(['development', 'staging', 'prod-us', 'prod-eu']),
+      'tau.billing.capacity_pool': z.enum(['primary', 'helper']),
+      'tau.billing.recovery.batch.outcome': z.enum(['succeeded', 'failed']),
+    }),
+  }),
+
+  billingFundedOperationRecoveryProviderExecutions: defineGauge({
+    name: 'tau.billing.funded_operation.recovery.provider_executions',
+    unit: '{operation}',
+    description: 'Provider executions observed in DB-only funded LLM recovery; invariant is zero',
+    attributes: z.object({
+      'deployment.environment': z.enum(['development', 'staging', 'prod-us', 'prod-eu']),
+      'tau.billing.capacity_pool': z.enum(['primary', 'helper']),
+    }),
   }),
 } as const;

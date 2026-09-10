@@ -62,17 +62,23 @@ export const clientEnvironment = (source: NodeJS.ProcessEnv = process.env): Reco
 };
 
 /**
- * Model the services utility's agent host runs turns against.
+ * Base URL the services utility's agent host hangs its gateway calls off.
  *
- * A row, not a catalogue: the desktop host is the daemon-capability
- * integration, not a model picker — the renderer's Path-A chat owns model
- * selection. `openai-gpt-5.6-luna` is the row the smoke lane's live tier uses,
- * so the two agree on what "the desktop agent" means.
+ * The **API origin**, never a path: `createGatewayModelTransport` appends
+ * `v1/llm/openai/v1` and `v1/llm/anthropic` itself, so any prefix added here is
+ * sent twice and the API answers 404 before a guard ever runs. Every other
+ * caller (`tau serve`, the host daemon, the e2e fixtures) passes an origin too.
+ *
+ * There is no override any more. `TAU_DESKTOP_AGENT_GATEWAY_URL` used to point
+ * the utility at the desktop e2e mock; D19 moved that stub behind the real API
+ * (`TAU_LLM_PROVIDER_UPSTREAM_URL`), so the suite exercises this default rather
+ * than replacing it.
+ *
+ * @param source - Main's own environment.
+ * @returns The gateway origin, without a trailing slash.
  */
-export const desktopAgentModel = {
-  id: 'openai-gpt-5.6-luna',
-  contextWindow: 400_000,
-} as const;
+export const desktopAgentGatewayBaseUrl = (source: NodeJS.ProcessEnv = process.env): string =>
+  desktopEnvironment(source)['TAU_API_URL']!.replace(/\/$/u, '');
 
 /** System prompt for the services-utility agent host. */
 export const desktopAgentSystemPrompt =

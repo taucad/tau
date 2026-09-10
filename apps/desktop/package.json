@@ -13,6 +13,8 @@
     "#*": "./src/*"
   },
   "dependencies": {
+    "@agentclientprotocol/claude-agent-acp": "catalog:",
+    "@agentclientprotocol/codex-acp": "catalog:",
     "@gltf-transform/core": "catalog:",
     "@gltf-transform/functions": "catalog:",
     "@taucad/agent-host": "workspace:*",
@@ -24,6 +26,7 @@
     "@taucad/esbuild": "workspace:*",
     "@taucad/filesystem": "workspace:*",
     "@taucad/gltf": "workspace:*",
+    "@taucad/host": "workspace:*",
     "@taucad/image": "workspace:*",
     "@taucad/jscad": "workspace:*",
     "@taucad/manifold": "workspace:*",
@@ -36,11 +39,15 @@
     "@taucad/runtime": "workspace:*",
     "@taucad/zoo": "workspace:*",
     "@taulabs/openrscad-engine": "catalog:",
-    "libassimp": "file:../../out/artifacts/libassimp/candidate-2e4c6cf/libassimp-0.2.0.tgz",
+    "esbuild": "catalog:",
+    "libassimp": "catalog:",
+    "nanoraster": "catalog:",
+    "pino-pretty": "catalog:",
     "uint8array-extras": "catalog:",
     "zod": "catalog:"
   },
   "devDependencies": {
+    "@electron/asar": "4.3.0",
     "@electron/notarize": "^3.1.1",
     "@electron/osx-sign": "^2.7.0",
     "@electron/packager": "^20.3.0",

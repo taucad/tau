@@ -9,6 +9,7 @@
 
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { Worker } from 'node:worker_threads';
 
 import {
   app,
@@ -25,16 +26,25 @@ import {
 } from 'electron';
 import type { IpcMainInvokeEvent, MessageBoxOptions } from 'electron';
 import { installElectronRuntimeHeaders, registerElectronRuntimeMain } from '@taucad/runtime/electron/main';
+import { connectSqliteComputeStoreWorker } from '@taucad/runtime/node';
+import type { ComputeBinding } from '@taucad/runtime/types';
+import { discoverAcpAgents, externalAgentDescriptors, hostRevisionModes } from '@taucad/host';
 
 import kernelUtilityEntry from '#tau/kernel-host?modulePath';
 import servicesUtilityEntry from '#tau/services-host?modulePath';
+import computeStoreWorkerEntry from '#main/compute-store.worker?modulePath';
 
 import { appOrigin, appSchemePrivileges, registerAppProtocol } from '#main/app-protocol.js';
 import { createAuthService } from '#main/auth-service.js';
-import { createDiagnosticsLog, forwardRendererDiagnostics, forwardUtilityDiagnostics } from '#main/diagnostics.js';
+import {
+  createDiagnosticsLog,
+  forwardRendererDiagnostics,
+  forwardUtilityDiagnostics,
+  kernelUtilityDiagnostics,
+} from '#main/diagnostics.js';
 import {
   clientEnvironment,
-  desktopAgentModel,
+  desktopAgentGatewayBaseUrl,
   desktopAgentSystemPrompt,
   desktopEnvironment,
 } from '#main/environment.js';
@@ -55,7 +65,7 @@ import {
 } from '#main/project-roots.js';
 import { createServicesBroker, servicesConcerns } from '#main/services-broker.js';
 import type { ServicesConcern } from '#main/services-broker.js';
-import { utilityEnvironment } from '#main/utility-environment.js';
+import { loginShellEnvironment, packagedEsbuildEnvironment, utilityEnvironment } from '#main/utility-environment.js';
 import { createQuickLookController, removeStaleQuickLookSessions } from '#main/quick-look.js';
 import type { QuickLookController } from '#main/quick-look.js';
 import { createOpenFileQueue } from '#main/open-files.js';
@@ -65,6 +75,7 @@ import {
   bootstrapArgumentPrefix,
   desktopNativeKernelIds,
   nativeCodeTrustChannels,
+  computeControlChannels,
   servicesPortRelayTag,
 } from '#shared/desktop-bootstrap.js';
 import type { AppIconTheme } from '#shared/desktop-bootstrap.js';
@@ -139,9 +150,15 @@ app.on('window-all-closed', () => {
   }
 });
 
-export const bootstrapElectronApp = async (): Promise<void> => {
+const bootstrapElectronApp = async (): Promise<void> => {
   await app.whenReady();
   app.dock?.setIcon(applicationIcon);
+  /* Finder hands a packaged app launchd's environment, which finds no vendor
+   * CLI and carries none of the user's `CODEX_HOME`, proxy or CA settings; fix
+   * it once here so discovery, the model probe and every utility fork inherit
+   * the user's own login shell (G-ACP-PKG, decision Q13). The e2e specs that
+   * pin the launcher environment opt out inside the helper. */
+  const loginShell = app.isPackaged ? await loginShellEnvironment() : undefined;
   const environment = desktopEnvironment();
 
   const logDirectory = join(app.getPath('userData'), 'logs');
@@ -151,8 +168,12 @@ export const bootstrapElectronApp = async (): Promise<void> => {
   const picogkResourceRoot = app.isPackaged
     ? join(process.resourcesPath, 'picogk')
     : join(import.meta.dirname, '../../resources/picogk');
+  const esbuildEnvironment = packagedEsbuildEnvironment(app.isPackaged, process.resourcesPath);
   const log = createDiagnosticsLog({ directory: logDirectory, echo: isDevelopment });
   log.log('info', 'main.ready', { electron: process.versions.electron, packaged: app.isPackaged, isDevelopment });
+  if (loginShell !== undefined) {
+    log.log('info', 'main.login-shell-path', loginShell);
+  }
 
   /* L2's contract: the home root must exist before the renderer's first mount,
    * because `NodeFsProvider` realpath-checks its base. */
@@ -171,6 +192,7 @@ export const bootstrapElectronApp = async (): Promise<void> => {
   const quickLookTemporaryRoot = join(app.getPath('temp'), 'tau-quick-look');
   removeStaleQuickLookSessions(quickLookTemporaryRoot);
   const quickLookControllers = new Map<number, QuickLookController>();
+  let quitting = false;
 
   const auth = createAuthService({
     apiUrl: environment['TAU_API_URL']!.replace(/\/$/u, ''),
@@ -222,34 +244,117 @@ export const bootstrapElectronApp = async (): Promise<void> => {
     log.log('info', 'main.app-protocol-registered', { clientRoot });
   }
 
-  registerElectronRuntimeMain({
+  let computeWorker: Worker | undefined;
+  const computeConnections = new Map<string, ReturnType<typeof connectSqliteComputeStoreWorker>>();
+  let computeProjectRootFor = (executionRoot: string): string => executionRoot;
+  const invalidateComputeWorker = (worker: Worker): void => {
+    if (computeWorker !== worker) {
+      return;
+    }
+    for (const stale of computeConnections.values()) {
+      stale.dispose();
+    }
+    computeConnections.clear();
+    computeWorker = undefined;
+  };
+  const computeConnection = (projectRoot: string) => {
+    let connection = computeConnections.get(projectRoot);
+    if (!connection) {
+      if (!computeWorker) {
+        const worker = new Worker(computeStoreWorkerEntry, {
+          workerData: { directory: join(app.getPath('userData'), 'compute') },
+        });
+        worker.once('exit', () => {
+          invalidateComputeWorker(worker);
+        });
+        worker.on('error', (error) => {
+          invalidateComputeWorker(worker);
+          log.log('error', 'compute.worker', error);
+        });
+        computeWorker = worker;
+      }
+      connection = connectSqliteComputeStoreWorker({ worker: computeWorker, workspace: projectRoot });
+      computeConnections.set(projectRoot, connection);
+    }
+    return connection;
+  };
+  const baseForkResolver = createKernelForkResolver({
+    registry: roots,
+    defaultRoot: homeRoot,
+    nativeTrustMarkerPath: nativeTrust.markerPath,
+    untrustedNativeMarkerPath: nativeTrust.untrustedMarkerPath(),
+  });
+  const runtimeMain = registerElectronRuntimeMain({
     utilityEntry: kernelUtilityEntry,
     /* The kernel utility appends its engine-identity record (N5/N6) to the same
      * rotating log main writes, which is the e2e's only observable for which
      * engine actually loaded — the version never crosses the runtime wire. */
     env: utilityEnvironment(environment, {
+      ...esbuildEnvironment,
       TAU_DESKTOP_LOG_DIR: logDirectory, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
       TAU_BUILD123D_RESOURCE_ROOT: build123dResourceRoot, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
       TAU_PICOGK_RESOURCE_ROOT: picogkResourceRoot, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
     }),
     forkEnvAllowlist: [...kernelForkEnvAllowlist],
-    resolveFork: createKernelForkResolver({
-      registry: roots,
-      defaultRoot: homeRoot,
-      nativeTrustMarkerPath: nativeTrust.markerPath,
-    }),
+    resolveFork: (context) => {
+      const resolved = baseForkResolver(context);
+      const mode = context['computeMode'] ?? 'memory';
+      if (mode !== 'off' && mode !== 'memory' && mode !== 'durable') {
+        throw new Error('Desktop shell refused unknown compute mode.');
+      }
+      if (context['purpose'] === 'ephemeral' && mode === 'durable') {
+        throw new Error('Desktop shell refused durable compute for an ephemeral runtime.');
+      }
+      const executionRoot = context['projectRoot'] ?? homeRoot;
+      const computeProjectRoot = roots.canonical(computeProjectRootFor(executionRoot));
+      if (!computeProjectRoot) {
+        throw new Error('Desktop shell refused unadmitted compute project root.');
+      }
+      const compute: ComputeBinding =
+        mode === 'durable' ? { mode, store: computeConnection(computeProjectRoot).store } : { mode };
+      return { ...resolved, compute };
+    },
     serviceName: 'tau-kernel-host',
     onError(error) {
       log.log('error', 'kernel.broker', error);
     },
+    ...kernelUtilityDiagnostics(log),
+  });
+
+  const trustedComputeRoot = (event: IpcMainInvokeEvent, projectRoot: unknown): string => {
+    if (!trusted(event.senderFrame) || typeof projectRoot !== 'string' || !roots.isTrusted(projectRoot)) {
+      throw new Error('Desktop shell refused compute control.');
+    }
+    const canonicalRoot = roots.canonical(projectRoot)!;
+    return roots.canonical(services.computeProjectRoot(canonicalRoot) ?? canonicalRoot)!;
+  };
+  ipcMain.handle(computeControlChannels.inspect, async (event, projectRoot) =>
+    computeConnection(trustedComputeRoot(event, projectRoot)).control.inspect({}),
+  );
+  ipcMain.handle(computeControlChannels.clear, async (event, projectRoot) =>
+    computeConnection(trustedComputeRoot(event, projectRoot)).control.clear({}),
+  );
+  ipcMain.handle(computeControlChannels.collect, async (event, projectRoot, input: unknown) => {
+    const root = trustedComputeRoot(event, projectRoot);
+    const { budget, cursor } = (input ?? {}) as { budget?: unknown; cursor?: unknown };
+    if (!Number.isSafeInteger(budget) || (budget as number) < 1 || (budget as number) > 1000) {
+      throw new Error('Desktop shell refused invalid compute collection budget.');
+    }
+    if (cursor !== undefined && (typeof cursor !== 'string' || cursor.length > 1024)) {
+      throw new Error('Desktop shell refused invalid compute collection cursor.');
+    }
+    return computeConnection(root).control.collect({ budget: budget as number, ...(cursor ? { cursor } : {}) });
   });
 
   const services = createServicesBroker({
     utilityEntry: servicesUtilityEntry,
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- environment names are SCREAMING_SNAKE
-    env: utilityEnvironment(environment, { TAU_DESKTOP_LOG_DIR: logDirectory }),
+    env: utilityEnvironment(environment, {
+      ...esbuildEnvironment,
+      TAU_DESKTOP_LOG_DIR: logDirectory, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
+    }),
     fork: (entry, args, forkOptions) => utilityProcess.fork(entry, args, forkOptions),
     createChannel: () => new MessageChannelMain(),
+    connectRuntime: (context) => runtimeMain.connect({ purpose: 'main-process-client', context }),
     onSpawn: (utility) => {
       forwardUtilityDiagnostics('services', utility, log);
     },
@@ -257,6 +362,7 @@ export const bootstrapElectronApp = async (): Promise<void> => {
       log.log(level, event, detail);
     },
   });
+  computeProjectRootFor = (executionRoot) => services.computeProjectRoot(executionRoot) ?? executionRoot;
   const publishRoots = (): void => {
     services.post({ type: 'allowRoots', roots: roots.roots() });
   };
@@ -273,17 +379,39 @@ export const bootstrapElectronApp = async (): Promise<void> => {
    * constructs it). Configured here rather than left to a renderer request
    * because main owns the gateway URL and the credential; the *workspace root*
    * is not here, because it is per-connection and arrives with the port. */
-  const gatewayBaseUrl = environment['TAU_API_URL']!;
+  /* W4-ACP: which external agents *this machine* can actually start — the
+   * pinned adapters that resolve beside this app, minus any whose CLI does not
+   * answer `--version`. Resolved here, once, because both halves need the same
+   * answer: the utility builds launcher 2's port from the adapters, and the
+   * renderer draws one selector row per id out of the preload bootstrap. A
+   * machine with neither installed advertises nothing; it is never a refusal. */
+  /* Measured on an M-series host, 20 `--version` runs each: `claude` 10 ms warm
+   * / 89 ms cold, `codex` 10 ms warm / 13 ms cold. Both probes run together, so
+   * boot pays the slower one; 1.5 s is ~17x the worst observed and only bites a
+   * CLI that hangs, which is the case the timeout exists for.
+   *
+   * The *model* probe runs beside it on its own 5 s clock (V5 / EQ1 A): it
+   * opens a real vendor session, which Claude answered in 1.9 s here, so one
+   * shared budget would either kill it or make every boot wait on it. A probe
+   * that fails or times out leaves the agent advertised with no model list — a
+   * logged-out CLI must never remove the row. */
+  const acp = await discoverAcpAgents({ resolveFrom: import.meta.url, probeTimeout: 1500 });
+  /* The one canonical descriptor (VSC1): the renderer draws its rows from this,
+   * the utility gets the adapters themselves, and neither builds its own idea
+   * of what an agent is called or which models it offers. */
+  const acpDescriptors = externalAgentDescriptors(acp);
+  log.log('info', 'agent-host.external-agents', {
+    agents: acp.agents.map((adapter) => `${adapter.id}:${(adapter.models ?? []).length}`),
+    refused: acp.refused.map((refusal) => `${refusal.id}: ${refusal.code}`),
+  });
   services.post({
     type: 'agentHost',
     config: {
-      /* Test seam for the launcher-2 e2e leg: the services utility's gateway
-       * calls are Node `fetch`, which Playwright cannot route the way it
-       * routes the renderer's, so the smoke tier points them at its fixture
-       * here. Production keeps the API's own gateway. */
-      gatewayBaseUrl: environment['TAU_DESKTOP_AGENT_GATEWAY_URL'] ?? `${gatewayBaseUrl.replace(/\/$/u, '')}/v1/llm`,
-      model: desktopAgentModel,
+      gatewayBaseUrl: desktopAgentGatewayBaseUrl(environment),
       systemPrompt: desktopAgentSystemPrompt,
+      tauApiUrl: environment['TAU_API_URL']!,
+      tauWebSocketUrl: environment['TAU_WEBSOCKET_URL']!,
+      externalAgents: acp.agents,
     },
   });
 
@@ -497,7 +625,24 @@ export const bootstrapElectronApp = async (): Promise<void> => {
         log.log('error', 'services.untrusted-root', { concern, workspaceRoot: resolved['workspaceRoot'] });
         return;
       }
-      const port = services.connect(concern as ServicesConcern, resolved);
+      if (
+        concern === 'agentHost' &&
+        resolved['computeMode'] !== 'off' &&
+        resolved['computeMode'] !== 'memory' &&
+        resolved['computeMode'] !== 'durable'
+      ) {
+        log.log('error', 'services.invalid-compute-mode');
+        return;
+      }
+      const servicesContext =
+        concern === 'agentHost'
+          ? {
+              workspaceRoot: resolved['workspaceRoot']!,
+              computeMode: resolved['computeMode']!,
+              nativeTrustFile: nativeTrust.markerPath(resolved['workspaceRoot']!),
+            }
+          : resolved;
+      const port = services.connect(concern as ServicesConcern, servicesContext);
       event.senderFrame?.postMessage(servicesPortRelayTag, { requestId }, [port]);
     } catch (error) {
       log.log('error', 'services.connect-failed', error);
@@ -525,6 +670,8 @@ export const bootstrapElectronApp = async (): Promise<void> => {
             env: clientEnvironment(environment),
             homeRoot,
             runtimeKernelIds: desktopNativeKernelIds,
+            externalAgents: acpDescriptors,
+            revisions: hostRevisionModes,
           })}`,
         ],
       },
@@ -540,7 +687,11 @@ export const bootstrapElectronApp = async (): Promise<void> => {
       quickLook.dispose();
       quickLookControllers.delete(window.id);
     });
-    forwardRendererDiagnostics(window.webContents, log);
+    forwardRendererDiagnostics(window.webContents, log, () => {
+      if (!quitting && !window.isDestroyed() && !window.webContents.isDestroyed()) {
+        window.webContents.reload();
+      }
+    });
 
     /* Deny every new window and every in-window navigation away from the app,
      * sending real links to the user's browser instead. `will-redirect` is
@@ -604,14 +755,52 @@ export const bootstrapElectronApp = async (): Promise<void> => {
     }
   });
 
-  app.on('will-quit', () => {
-    showOpenFileImport = undefined;
-    for (const controller of quickLookControllers.values()) {
-      controller.dispose();
+  let shutdownComplete = false;
+  let shutdown: Promise<void> | undefined;
+  app.on('before-quit', (event) => {
+    quitting = true;
+    if (shutdownComplete) {
+      return;
     }
-    quickLookControllers.clear();
-    auth.dispose();
-    services.dispose();
+    event.preventDefault();
+    if (!shutdown) {
+      shutdown = (async () => {
+        try {
+          showOpenFileImport = undefined;
+          for (const controller of quickLookControllers.values()) {
+            controller.dispose();
+          }
+          quickLookControllers.clear();
+          auth.dispose();
+        } catch (error) {
+          log.log('error', 'main.shutdown', error);
+        }
+        try {
+          await services.dispose();
+        } catch (error) {
+          log.log('error', 'main.shutdown', error);
+        }
+        try {
+          runtimeMain.dispose();
+        } catch (error) {
+          log.log('error', 'main.shutdown', error);
+        }
+        try {
+          for (const connection of computeConnections.values()) {
+            connection.dispose();
+          }
+          computeConnections.clear();
+          await computeWorker?.terminate();
+          computeWorker = undefined;
+        } catch (error) {
+          log.log('error', 'main.shutdown', error);
+        }
+        shutdownComplete = true;
+        app.quit();
+      })();
+      // async-iife: bootstrap -- Electron event callbacks cannot return shutdown completion.
+      void shutdown;
+    }
   });
 };
 

@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 
 /**
- * Purpose: Assemble, sign, optionally notarize, and verify the distributable Tau macOS app.
+ * Purpose: Assemble and verify Tau macOS packages, with signing/notarization selected explicitly.
  * Why: Quick Look extensions must enter Contents/PlugIns before one inside-out signing pass.
  * Environment: macOS, Xcode tools, built desktop/UI/native artifacts; optional TAU_MACOS_PACKAGE_OUTPUT_ROOT;
- * Apple credentials only for --release.
- * Usage: node --import @oxc-node/core/register scripts/package-macos.mts [--release]
+ * Apple credentials only for --release; --unsigned skips all package signing.
+ * Usage: node --import @oxc-node/core/register scripts/package-macos.mts [--release | --unsigned]
  * Exit codes: 0 on a verified app/ZIP; non-zero on missing artifacts, credentials, or validation failure.
  */
 
@@ -18,9 +18,15 @@ import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { acpAgentProfiles } from '@taucad/host';
 import { notarize } from '@electron/notarize';
 import { sign } from '@electron/osx-sign';
 import { packager } from '@electron/packager';
+
+// oxlint-disable-next-line no-restricted-imports -- Operational scripts are outside the app's # source alias.
+import { parseMacosPackageMode } from './macos-package-mode.mjs';
+// oxlint-disable-next-line no-restricted-imports -- Operational scripts are outside the app's # source alias.
+import { copyRuntimeClosure } from './runtime-closure.mjs';
 
 type PackageMetadata = {
   readonly name: string;
@@ -49,11 +55,13 @@ const extensionRoot = resolve(desktopRoot, 'macos/dist/extensions');
 const hostInfo = resolve(desktopRoot, 'macos/generated/TauHost-Info.plist');
 const extensionEntitlements = resolve(desktopRoot, 'macos/Config/TauQuickLook.entitlements');
 const uiClientRoot = resolve(workspaceRoot, 'apps/ui/desktop/build/client');
+const esbuildPluginModules = resolve(workspaceRoot, 'packages/plugins/esbuild/node_modules');
+const imagePluginModules = resolve(workspaceRoot, 'packages/plugins/image/node_modules');
 const openrscadPluginModules = resolve(workspaceRoot, 'packages/plugins/openrscad/node_modules');
 const assimpPluginModules = resolve(workspaceRoot, 'packages/plugins/assimp/node_modules');
 const pythonResourceRoot = resolve(desktopRoot, 'resources/python');
 const picoGkResourceRoot = resolve(desktopRoot, 'resources/picogk');
-const release = process.argv.slice(2).includes('--release');
+const { release, unsigned } = parseMacosPackageMode(process.argv.slice(2));
 const extensions = ['TauQuickLookPreview.appex', 'TauQuickLookThumbnail.appex'] as const;
 const adhocAppEntitlements = [
   'com.apple.security.cs.allow-jit',
@@ -77,10 +85,6 @@ if (process.platform !== 'darwin') {
 if ([resolve('/'), homedir(), tmpdir(), desktopRoot, workspaceRoot].includes(outputRoot)) {
   throw new Error(`Refusing unsafe package output root: ${outputRoot}`);
 }
-if (process.argv.slice(2).some((argument) => argument !== '--release')) {
-  throw new TypeError('Usage: package-macos.mts [--release]');
-}
-
 const readJson = async <Value extends NonNullable<unknown>>(path: string): Promise<Value> =>
   JSON.parse(await readFile(path, 'utf8')) as Value;
 
@@ -152,12 +156,13 @@ const developerIdentity = (): string => {
   return identity;
 };
 
-const excludesSourceMaps = (path: string): boolean => !path.endsWith('.map');
+const excludesBuildDiagnostics = (path: string): boolean =>
+  !path.endsWith('.map') && !/^tau-module-graph.*\.json$/u.test(basename(path));
 
 const copyRuntimePackage = async (name: string, source: string): Promise<void> => {
   await cp(source, resolve(stageRoot, 'node_modules', name), {
     recursive: true,
-    filter: (path) => !['node_modules', 'src'].includes(basename(path)) && excludesSourceMaps(path),
+    filter: (path) => !['node_modules', 'src'].includes(basename(path)) && excludesBuildDiagnostics(path),
   });
 };
 
@@ -172,16 +177,42 @@ const openrscadEngineDarwinArm64 = dirname(
   ),
 );
 const openrscadMetadata = await readJson<{ readonly version: string }>(resolve(openrscadEngine, 'package.json'));
+const esbuild = await realpath(resolve(esbuildPluginModules, 'esbuild'));
+const esbuildDarwinArm64 = dirname(
+  createRequire(resolve(esbuild, 'package.json')).resolve('@esbuild/darwin-arm64/package.json'),
+);
+const esbuildMetadata = await readJson<{ readonly version: string }>(resolve(esbuild, 'package.json'));
 const libassimp = await realpath(resolve(assimpPluginModules, 'libassimp'));
 const libassimpDarwinArm64 = dirname(
   createRequire(resolve(libassimp, 'package.json')).resolve('libassimp-darwin-arm64/package.json'),
 );
 const libassimpMetadata = await readJson<{ readonly version: string }>(resolve(libassimp, 'package.json'));
+const nanoraster = await realpath(resolve(imagePluginModules, 'nanoraster'));
+const nanorasterDarwinArm64 = dirname(
+  createRequire(resolve(nanoraster, 'package.json')).resolve('nanoraster-darwin-arm64/package.json'),
+);
+const nanorasterMetadata = await readJson<{ readonly version: string }>(resolve(nanoraster, 'package.json'));
+/* The ACP adapters are spawned as `node <modulePath>` from inside the packaged
+ * app, so they are staged with their runtime dependency closure and unpacked
+ * out of the ASAR — a module path inside `app.asar` is not a real file. */
+const acpAdapters = await Promise.all(
+  acpAgentProfiles.map(async (profile) => {
+    const manifest = await readJson<{ readonly version: string }>(
+      resolve(desktopRoot, 'node_modules', profile.package, 'package.json'),
+    );
+    return {
+      name: profile.package,
+      source: await realpath(resolve(desktopRoot, 'node_modules', profile.package)),
+      version: manifest.version,
+    };
+  }),
+);
 
 await rm(outputRoot, { recursive: true, force: true });
 await Promise.all([
   mkdir(resolve(stageRoot, 'dist'), { recursive: true }),
   mkdir(resolve(stageRoot, 'node_modules/@taulabs'), { recursive: true }),
+  mkdir(resolve(stageRoot, 'node_modules/@esbuild'), { recursive: true }),
 ]);
 
 const metadata = await readJson<PackageMetadata>(resolve(desktopRoot, 'package.json'));
@@ -191,16 +222,20 @@ const electron = await readJson<{ readonly version: string }>(
 await Promise.all([
   cp(resolve(desktopRoot, 'dist/main'), resolve(stageRoot, 'dist/main'), {
     recursive: true,
-    filter: excludesSourceMaps,
+    filter: excludesBuildDiagnostics,
   }),
   cp(resolve(desktopRoot, 'dist/preload'), resolve(stageRoot, 'dist/preload'), {
     recursive: true,
-    filter: excludesSourceMaps,
+    filter: excludesBuildDiagnostics,
   }),
   copyRuntimePackage('@taulabs/openrscad-engine', openrscadEngine),
   copyRuntimePackage('@taulabs/openrscad-engine-darwin-arm64', openrscadEngineDarwinArm64),
+  copyRuntimePackage('esbuild', esbuild),
+  copyRuntimePackage('@esbuild/darwin-arm64', esbuildDarwinArm64),
   copyRuntimePackage('libassimp', libassimp),
   copyRuntimePackage('libassimp-darwin-arm64', libassimpDarwinArm64),
+  copyRuntimePackage('nanoraster', nanoraster),
+  copyRuntimePackage('nanoraster-darwin-arm64', nanorasterDarwinArm64),
   writeFile(
     resolve(stageRoot, 'package.json'),
     `${JSON.stringify(
@@ -213,8 +248,13 @@ await Promise.all([
         dependencies: {
           '@taulabs/openrscad-engine': openrscadMetadata.version,
           '@taulabs/openrscad-engine-darwin-arm64': openrscadMetadata.version,
+          '@esbuild/darwin-arm64': esbuildMetadata.version,
+          esbuild: esbuildMetadata.version,
           libassimp: libassimpMetadata.version,
           'libassimp-darwin-arm64': libassimpMetadata.version,
+          nanoraster: nanorasterMetadata.version,
+          'nanoraster-darwin-arm64': nanorasterMetadata.version,
+          ...Object.fromEntries(acpAdapters.map(({ name, version }) => [name, version])),
         },
       },
       undefined,
@@ -222,6 +262,18 @@ await Promise.all([
     )}\n`,
   ),
 ]);
+
+for (const { name, source } of acpAdapters) {
+  /* Serial: the closure nests one package inside another, so two adapters
+   * racing on the same staged directories would make the layout undecidable. */
+  // oxlint-disable-next-line no-await-in-loop -- see above.
+  await copyRuntimeClosure({
+    name,
+    source,
+    modulesRoot: resolve(stageRoot, 'node_modules'),
+    filter: excludesBuildDiagnostics,
+  });
+}
 
 const packagePaths = await packager({
   dir: stageRoot,
@@ -237,7 +289,7 @@ const packagePaths = await packager({
   electronVersion: electron.version,
   icon: resolve(desktopRoot, 'resources/icon.icns'),
   extendInfo: hostInfo,
-  asar: { unpack: '**/*.node' },
+  asar: { unpack: '**/{*.node,bin/esbuild,@agentclientprotocol/**}' },
   prune: false,
 });
 
@@ -249,7 +301,7 @@ const resources = resolve(appPath, 'Contents/Resources');
 const plugins = resolve(appPath, 'Contents/PlugIns');
 await mkdir(resolve(resources, 'branding'), { recursive: true });
 await Promise.all([
-  cp(uiClientRoot, resolve(resources, 'ui/client'), { recursive: true, filter: excludesSourceMaps }),
+  cp(uiClientRoot, resolve(resources, 'ui/client'), { recursive: true, filter: excludesBuildDiagnostics }),
   cp(resolve(desktopRoot, 'resources/icon.png'), resolve(resources, 'branding/icon.png')),
   cp(resolve(desktopRoot, 'resources/icon-dark.png'), resolve(resources, 'branding/icon-dark.png')),
   cp(resolve(pythonResourceRoot, 'darwin-arm64'), resolve(resources, 'python/darwin-arm64'), {
@@ -266,44 +318,46 @@ await Promise.all(
   extensions.map(async (extension) =>
     cp(resolve(extensionRoot, extension), resolve(plugins, extension), {
       recursive: true,
-      filter: excludesSourceMaps,
+      filter: excludesBuildDiagnostics,
     }),
   ),
 );
 console.log(`Removed Intel slices from ${String(await thinIntelSlices(appPath))} bundled Mach-O files`);
 
 const identity = release ? developerIdentity() : '-';
-await sign({
-  app: appPath,
-  platform: 'darwin',
-  identity,
-  identityValidation: release,
-  preAutoEntitlements: false,
-  preEmbedProvisioningProfile: false,
-  strictVerify: true,
-  batchCodesignCalls: true,
-  ignore: (path) =>
-    (path.includes('/Contents/Resources/python/') || path.includes('/Contents/Resources/picogk/')) &&
-    !isMachObject(path),
-  optionsForFile: (path) => ({
-    ...(!release && (path === appPath || /\/Tau Helper(?: \([^)]+\))?\.app(?:\/|$)/u.test(path))
-      ? { entitlements: adhocAppEntitlements }
-      : {}),
-    ...(path.includes('/Contents/PlugIns/') ? { entitlements: extensionEntitlements } : {}),
-    ...(path.includes('/Contents/Resources/python/') && path.endsWith('/bin/python3.13')
-      ? { entitlements: ['com.apple.security.cs.disable-library-validation'] }
-      : {}),
-    ...(path.endsWith('/Contents/Resources/picogk/darwin-arm64/Tau.PicoGK.Worker')
-      ? {
-          entitlements: [
-            'com.apple.security.cs.allow-jit',
-            ...(release ? [] : ['com.apple.security.cs.disable-library-validation']),
-          ],
-        }
-      : {}),
-    ...(release ? {} : { timestamp: 'none' }),
-  }),
-});
+if (!unsigned) {
+  await sign({
+    app: appPath,
+    platform: 'darwin',
+    identity,
+    identityValidation: release,
+    preAutoEntitlements: false,
+    preEmbedProvisioningProfile: false,
+    strictVerify: true,
+    batchCodesignCalls: true,
+    ignore: (path) =>
+      (path.includes('/Contents/Resources/python/') || path.includes('/Contents/Resources/picogk/')) &&
+      !isMachObject(path),
+    optionsForFile: (path) => ({
+      ...(!release && (path === appPath || /\/Tau Helper(?: \([^)]+\))?\.app(?:\/|$)/u.test(path))
+        ? { entitlements: adhocAppEntitlements }
+        : {}),
+      ...(path.includes('/Contents/PlugIns/') ? { entitlements: extensionEntitlements } : {}),
+      ...(path.includes('/Contents/Resources/python/') && path.endsWith('/bin/python3.13')
+        ? { entitlements: ['com.apple.security.cs.disable-library-validation'] }
+        : {}),
+      ...(path.endsWith('/Contents/Resources/picogk/darwin-arm64/Tau.PicoGK.Worker')
+        ? {
+            entitlements: [
+              'com.apple.security.cs.allow-jit',
+              ...(release ? [] : ['com.apple.security.cs.disable-library-validation']),
+            ],
+          }
+        : {}),
+      ...(release ? {} : { timestamp: 'none' }),
+    }),
+  });
+}
 
 const packagedPythonRoot = resolve(resources, 'python/darwin-arm64');
 const packagedPythonManifestPath = resolve(packagedPythonRoot, 'tau-runtime-manifest.json');
@@ -326,23 +380,27 @@ await writeFile(packagedPicoGkManifestPath, `${JSON.stringify(packagedPicoGkMani
 
 // The inner signing pass mutates Mach-O bytes. Refresh their integrity hashes, then reseal only the
 // outer bundle so runtime verification covers the exact executable macOS will launch.
-await sign({
-  app: appPath,
-  platform: 'darwin',
-  identity,
-  identityValidation: release,
-  preAutoEntitlements: false,
-  preEmbedProvisioningProfile: false,
-  strictVerify: true,
-  batchCodesignCalls: true,
-  ignore: (path) => path !== appPath,
-  optionsForFile: (path) => ({
-    ...(path === appPath && !release ? { entitlements: adhocAppEntitlements } : {}),
-    ...(release ? {} : { timestamp: 'none' }),
-  }),
-});
+if (!unsigned) {
+  await sign({
+    app: appPath,
+    platform: 'darwin',
+    identity,
+    identityValidation: release,
+    preAutoEntitlements: false,
+    preEmbedProvisioningProfile: false,
+    strictVerify: true,
+    batchCodesignCalls: true,
+    ignore: (path) => path !== appPath,
+    optionsForFile: (path) => ({
+      ...(path === appPath && !release ? { entitlements: adhocAppEntitlements } : {}),
+      ...(release ? {} : { timestamp: 'none' }),
+    }),
+  });
+}
 
-execFileSync('codesign', ['--verify', '--deep', '--strict', '--verbose=2', appPath], { stdio: 'inherit' });
+if (!unsigned) {
+  execFileSync('codesign', ['--verify', '--deep', '--strict', '--verbose=2', appPath], { stdio: 'inherit' });
+}
 const assertArm64 = (path: string): void => {
   const architectures = execFileSync('lipo', ['-archs', path], { encoding: 'utf8' }).trim();
   if (architectures !== 'arm64') {
@@ -366,5 +424,5 @@ if (release) {
 const zipPath = resolve(outputRoot, 'Tau-macos-arm64.zip');
 execFileSync('ditto', ['-c', '-k', '--sequesterRsrc', '--keepParent', appPath, zipPath], { stdio: 'inherit' });
 await rm(stageRoot, { recursive: true, force: true });
-console.log(`${release ? 'Signed and notarized' : 'Ad-hoc signed'} Tau: ${appPath}`);
+console.log(`${release ? 'Signed and notarized' : unsigned ? 'Unsigned' : 'Ad-hoc signed'} Tau: ${appPath}`);
 console.log(`Distribution archive: ${zipPath}`);

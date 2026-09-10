@@ -4,15 +4,16 @@
  * Purpose: Exercise the packaged Tau app and its Quick Look extensions through macOS system APIs.
  * Why: A compiled extension is not useful until Launch Services discovers it and Finder can render with it.
  * Environment: macOS with the packaged app produced by package-macos.mts; optional
- * TAU_MACOS_PACKAGE_OUTPUT_ROOT matching the package command.
- * Usage: node --import @oxc-node/core/register scripts/verify-macos-package.mts [--release]
- * Exit codes: 0 when signing, architecture, discovery, preview, thumbnail, cancellation, and cleanup checks pass.
+ * TAU_MACOS_PACKAGE_OUTPUT_ROOT matching the package command; --unsigned skips signing-specific checks.
+ * Usage: node --import @oxc-node/core/register scripts/verify-macos-package.mts [--release | --unsigned]
+ * Exit codes: 0 when applicable signing, architecture, discovery, preview, thumbnail, cancellation, and cleanup checks pass.
  */
 
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import {
   copyFileSync,
+  cpSync,
   closeSync,
   existsSync,
   lstatSync,
@@ -32,6 +33,9 @@ import { basename, dirname, join, relative, resolve } from 'node:path';
 
 import quickLookManifest from '#macos/quick-look-formats.json' with { type: 'json' };
 
+// oxlint-disable-next-line no-restricted-imports -- Operational scripts are outside the app's # source alias.
+import { parseMacosPackageMode } from './macos-package-mode.mjs';
+
 const desktopRoot = resolve(import.meta.dirname, '..');
 const workspaceRoot = resolve(desktopRoot, '../..');
 const outputRoot = resolve(process.env['TAU_MACOS_PACKAGE_OUTPUT_ROOT'] ?? resolve(desktopRoot, 'package-out'));
@@ -39,15 +43,11 @@ const appPath = resolve(outputRoot, 'Tau-darwin-arm64/Tau.app');
 const appExecutable = resolve(appPath, 'Contents/MacOS/Tau');
 const brandingRoot = resolve(appPath, 'Contents/Resources/branding');
 const extensionTemporaryRoot = resolve(tmpdir(), 'tau-quick-look');
-const release = process.argv.slice(2).includes('--release');
+const { release, unsigned } = parseMacosPackageMode(process.argv.slice(2));
 
 if (process.platform !== 'darwin') {
   throw new Error('The macOS package can only be verified on macOS.');
 }
-if (process.argv.slice(2).some((argument) => argument !== '--release')) {
-  throw new TypeError('Usage: verify-macos-package.mts [--release]');
-}
-
 const run = (command: string, arguments_: readonly string[], timeout = 60_000): string => {
   const result = spawnSync(command, arguments_, { encoding: 'utf8', timeout });
   if (result.error) {
@@ -341,7 +341,9 @@ const verifyPicoGkResource = (): string => {
   return resolve(root, manifest.workerPath);
 };
 
-run('codesign', ['--verify', '--deep', '--strict', '--verbose=2', appPath]);
+if (!unsigned) {
+  run('codesign', ['--verify', '--deep', '--strict', '--verbose=2', appPath]);
+}
 for (const icon of ['icon.png', 'icon-dark.png']) {
   if (!existsSync(resolve(brandingRoot, icon))) {
     throw new Error(`The packaged app is missing branding/${icon}.`);
@@ -365,7 +367,13 @@ const nativeIdentity = run('env', [
   '-e',
   `const addon=require(${JSON.stringify(libassimpAddon)});process.stdout.write(JSON.stringify([addon.buildIdentity,addon.napiVersion,addon.packageVersion]))`,
 ]);
-if (nativeIdentity !== '["darwin-arm64-napi8",8,"0.2.0"]') {
+const libassimpVersion = run('env', [
+  'ELECTRON_RUN_AS_NODE=1',
+  appExecutable,
+  '-e',
+  `process.stdout.write(require(${JSON.stringify(resolve(appPath, 'Contents/Resources/app.asar/node_modules/libassimp/package.json'))}).version)`,
+]);
+if (nativeIdentity !== JSON.stringify(['darwin-arm64-napi8', 8, libassimpVersion])) {
   throw new Error(`The packaged Electron runtime loaded an unexpected libassimp addon: ${nativeIdentity}`);
 }
 
@@ -384,21 +392,74 @@ const openrscadEntry = resolve(
   appPath,
   'Contents/Resources/app.asar/node_modules/@taulabs/openrscad-engine/dist/node.js',
 );
-const openrscadEngineVersion = JSON.parse(
-  readFileSync(
-    resolve(appPath, 'Contents/Resources/app.asar/node_modules/@taulabs/openrscad-engine/package.json'),
-    'utf8',
-  ),
-) as { readonly version: string };
+const openrscadEngineVersion = run('env', [
+  'ELECTRON_RUN_AS_NODE=1',
+  appExecutable,
+  '-e',
+  `process.stdout.write(require(${JSON.stringify(resolve(appPath, 'Contents/Resources/app.asar/node_modules/@taulabs/openrscad-engine/package.json'))}).version)`,
+]);
 const openrscadIdentity = run('env', [
   'ELECTRON_RUN_AS_NODE=1',
   appExecutable,
   '-e',
   `import(${JSON.stringify(openrscadEntry)}).then(async ({version,backend})=>process.stdout.write(JSON.stringify([await version(),backend]))).catch((error)=>{console.error(error);process.exitCode=1})`,
 ]);
-if (openrscadIdentity !== JSON.stringify([openrscadEngineVersion.version, 'native'])) {
+if (openrscadIdentity !== JSON.stringify([openrscadEngineVersion, 'native'])) {
   throw new Error(
-    `The packaged Electron runtime loaded an unexpected OpenRSCAD engine: ${openrscadIdentity} (expected ${JSON.stringify([openrscadEngineVersion.version, 'native'])})`,
+    `The packaged Electron runtime loaded an unexpected OpenRSCAD engine: ${openrscadIdentity} (expected ${JSON.stringify([openrscadEngineVersion, 'native'])})`,
+  );
+}
+
+const esbuildExecutable = resolve(
+  appPath,
+  'Contents/Resources/app.asar.unpacked/node_modules/@esbuild/darwin-arm64/bin/esbuild',
+);
+if (!existsSync(esbuildExecutable)) {
+  throw new Error('The packaged app does not contain the adjacent @esbuild/darwin-arm64 executable.');
+}
+const esbuildEntry = resolve(appPath, 'Contents/Resources/app.asar/node_modules/esbuild/lib/main.js');
+const esbuildIdentity = run('env', [
+  'ELECTRON_RUN_AS_NODE=1',
+  `ESBUILD_BINARY_PATH=${esbuildExecutable}`,
+  appExecutable,
+  '-e',
+  `const esbuild=require(${JSON.stringify(esbuildEntry)});const result=esbuild.transformSync('const answer: number = 42',{loader:'ts'});if(!result.code.includes('answer = 42'))throw new Error('esbuild transform returned unexpected output');process.stdout.write(esbuild.version)`,
+]);
+const esbuildVersion = run('env', [
+  'ELECTRON_RUN_AS_NODE=1',
+  appExecutable,
+  '-e',
+  `process.stdout.write(require(${JSON.stringify(resolve(appPath, 'Contents/Resources/app.asar/node_modules/esbuild/package.json'))}).version)`,
+]);
+if (esbuildIdentity !== esbuildVersion) {
+  throw new Error(`The packaged Electron runtime used an unexpected esbuild version: ${esbuildIdentity}`);
+}
+
+const nanorasterAddon = resolve(
+  appPath,
+  'Contents/Resources/app.asar.unpacked/node_modules/nanoraster-darwin-arm64/nanoraster.darwin-arm64.node',
+);
+if (!existsSync(nanorasterAddon)) {
+  throw new Error('The packaged app does not contain the adjacent nanoraster-darwin-arm64 addon.');
+}
+const nanorasterEntry = resolve(appPath, 'Contents/Resources/app.asar/node_modules/nanoraster/dist/index.node.mjs');
+const nanorasterIdentity = run('env', [
+  'ELECTRON_RUN_AS_NODE=1',
+  appExecutable,
+  '-e',
+  `import(${JSON.stringify(nanorasterEntry)}).then(async ({describeAdapter})=>{const adapter=await describeAdapter();const loaded=process.report.getReport().sharedObjects.filter((path)=>path.endsWith('nanoraster.darwin-arm64.node'));const rootVersion=require(${JSON.stringify(resolve(appPath, 'Contents/Resources/app.asar/node_modules/nanoraster/package.json'))}).version;const platformVersion=require(${JSON.stringify(resolve(appPath, 'Contents/Resources/app.asar/node_modules/nanoraster-darwin-arm64/package.json'))}).version;process.stdout.write(JSON.stringify([adapter.backend,loaded,rootVersion,platformVersion]))}).catch((error)=>{console.error(error);process.exitCode=1})`,
+]);
+const [nanorasterBackend, loadedNanorasterAddons, nanorasterVersion, nanorasterPlatformVersion] = JSON.parse(
+  nanorasterIdentity,
+) as [string, string[], string, string];
+if (
+  nanorasterBackend !== 'metal' ||
+  loadedNanorasterAddons.length !== 1 ||
+  realpathSync(loadedNanorasterAddons[0]!) !== realpathSync(nanorasterAddon) ||
+  nanorasterVersion !== nanorasterPlatformVersion
+) {
+  throw new Error(
+    `The packaged Electron runtime loaded an unexpected nanoraster backend or addon: ${nanorasterIdentity}`,
   );
 }
 
@@ -416,31 +477,33 @@ for (const path of filesUnder(appPath)) {
 
 verifyPythonResource('arm64');
 const picoGkWorker = verifyPicoGkResource();
-const picoGkEntitlements = run('codesign', ['-d', '--entitlements', ':-', picoGkWorker]);
-if (!picoGkEntitlements.includes('com.apple.security.cs.allow-jit')) {
-  throw new Error('The PicoGK worker is missing the CoreCLR JIT entitlement.');
-}
-const disablesLibraryValidation = picoGkEntitlements.includes('com.apple.security.cs.disable-library-validation');
-if ((!release && !disablesLibraryValidation) || (release && disablesLibraryValidation)) {
-  throw new Error(
-    release
-      ? 'The release PicoGK worker unnecessarily disables library validation.'
-      : 'The ad-hoc PicoGK worker must disable library validation for its independently signed CoreCLR dylibs.',
-  );
-}
-if (picoGkEntitlements.includes('com.apple.security.get-task-allow')) {
-  throw new Error('The PicoGK worker carries the debug get-task-allow entitlement.');
-}
-for (const helper of ['Tau Helper', 'Tau Helper (GPU)', 'Tau Helper (Plugin)', 'Tau Helper (Renderer)']) {
-  const helperPath = resolve(appPath, `Contents/Frameworks/${helper}.app`);
-  const entitlements = run('codesign', ['-d', '--entitlements', ':-', helperPath]);
-  const helperDisablesLibraryValidation = entitlements.includes('com.apple.security.cs.disable-library-validation');
-  if ((!release && !helperDisablesLibraryValidation) || (release && helperDisablesLibraryValidation)) {
+if (!unsigned) {
+  const picoGkEntitlements = run('codesign', ['-d', '--entitlements', ':-', picoGkWorker]);
+  if (!picoGkEntitlements.includes('com.apple.security.cs.allow-jit')) {
+    throw new Error('The PicoGK worker is missing the CoreCLR JIT entitlement.');
+  }
+  const disablesLibraryValidation = picoGkEntitlements.includes('com.apple.security.cs.disable-library-validation');
+  if ((!release && !disablesLibraryValidation) || (release && disablesLibraryValidation)) {
     throw new Error(
       release
-        ? `${helper} unnecessarily disables library validation.`
-        : `${helper} must disable library validation for an ad-hoc Electron bundle.`,
+        ? 'The release PicoGK worker unnecessarily disables library validation.'
+        : 'The ad-hoc PicoGK worker must disable library validation for its independently signed CoreCLR dylibs.',
     );
+  }
+  if (picoGkEntitlements.includes('com.apple.security.get-task-allow')) {
+    throw new Error('The PicoGK worker carries the debug get-task-allow entitlement.');
+  }
+  for (const helper of ['Tau Helper', 'Tau Helper (GPU)', 'Tau Helper (Plugin)', 'Tau Helper (Renderer)']) {
+    const helperPath = resolve(appPath, `Contents/Frameworks/${helper}.app`);
+    const entitlements = run('codesign', ['-d', '--entitlements', ':-', helperPath]);
+    const helperDisablesLibraryValidation = entitlements.includes('com.apple.security.cs.disable-library-validation');
+    if ((!release && !helperDisablesLibraryValidation) || (release && helperDisablesLibraryValidation)) {
+      throw new Error(
+        release
+          ? `${helper} unnecessarily disables library validation.`
+          : `${helper} must disable library validation for an ad-hoc Electron bundle.`,
+      );
+    }
   }
 }
 const picoGkProbe = mkdtempSync(resolve(tmpdir(), 'tau-picogk-probe-'));
@@ -537,156 +600,256 @@ run(
   300_000,
 );
 
-run('open', ['-gj', appPath]);
-const extensionIdentifiers = [
-  'com.taucad.tau.desktop.quicklook-preview',
-  'com.taucad.tau.desktop.quicklook-thumbnail',
-] as const;
-const delay = async (milliseconds: number): Promise<void> =>
-  new Promise((resolve) => {
-    setTimeout(resolve, milliseconds);
-  });
-const waitForExtensionDiscovery = async (attempt = 0): Promise<void> => {
-  const plugins = run('pluginkit', ['-m', '-A', '-D']);
-  if (extensionIdentifiers.every((identifier) => plugins.includes(identifier))) {
-    return;
-  }
-  if (attempt === 19) {
-    throw new Error('Launch Services did not discover both Tau Quick Look extensions');
-  }
-  await delay(250);
-  await waitForExtensionDiscovery(attempt + 1);
-};
-await waitForExtensionDiscovery();
-stopPackagedApp();
-await delay(500);
-if (processRows().some((row) => row.command === appExecutable)) {
-  throw new Error('Tau remained running; offline extension verification is invalid');
-}
-
-const classifications = [
-  ['packages/plugins/gltf/src/fixtures/cube.glb', ['org.khronos.glb']],
-  ['packages/plugins/brep/src/fixtures/cube.step', ['com.taucad.step', 'com.shapr3d.step', 'com.shapr3d.stp']],
-  ['packages/plugins/rhino/src/fixtures/cube-mesh.3dm', ['com.mcneel.rhinoceros.3dm', 'com.shapr3d.rhino.3dm']],
-  ['packages/plugins/assimp/src/fixtures/cube-ascii.fbx', ['com.autodesk.mac.fbx']],
-] as const;
-for (const [relativePath, expectedTypes] of classifications) {
-  const path = resolve(workspaceRoot, relativePath);
-  const metadata = run('mdls', ['-raw', '-name', 'kMDItemContentType', path]).trim();
-  if (!(expectedTypes as readonly string[]).includes(metadata)) {
-    throw new Error(`${relativePath} resolved to unexpected UTI ${metadata}`);
-  }
-}
-
-const testRoot = mkdtempSync(join(tmpdir(), 'tau-quick-look-verify-'));
-const thumbnailProbe = resolve(testRoot, 'quick-look-thumbnail-probe');
-const previewProbe = resolve(testRoot, 'quick-look-preview-probe');
-const initialSessions = temporarySessions();
-const measurements: string[] = [];
-try {
-  run('xcrun', [
-    'swiftc',
-    '-O',
-    resolve(desktopRoot, 'scripts/quick-look-thumbnail-probe.swift'),
-    '-o',
-    thumbnailProbe,
-  ]);
-  run('xcrun', ['swiftc', '-O', resolve(desktopRoot, 'scripts/quick-look-preview-probe.swift'), '-o', previewProbe]);
-
-  for (const format of quickLookManifest.formats.filter(({ systemPreview }) => !systemPreview)) {
-    const source = copyFixture(format, testRoot);
-    const output = resolve(testRoot, `${randomUUID()}-${basename(source)}.png`);
-    // oxlint-disable-next-line no-await-in-loop -- Quick Look hosts are measured one fixture at a time.
-    const measured = await runMeasured({
-      command: thumbnailProbe,
-      arguments: [source, output, '128', '1'],
-      processName: 'TauQuickLookThumbnail',
-      processTimeoutMilliseconds: 50_000,
-    });
-    assertThumbnailDimensions(output, 128);
-    measurements.push(
-      `${format.extensions.join('/')}=${String(Math.round(measured.milliseconds))}ms/${String(Math.round(measured.peakResidentKilobytes / 1024))}MB`,
+if (unsigned) {
+  const probeRoot = mkdtempSync(join(tmpdir(), 'tau-quick-look-converter-probe-'));
+  const probeBundle = resolve(probeRoot, 'TauQuickLookConverterProbe.app');
+  const probeExecutable = resolve(probeBundle, 'Contents/MacOS/TauQuickLookConverterProbe');
+  const probeResources = resolve(probeBundle, 'Contents/Resources');
+  const initialSessions = temporarySessions();
+  try {
+    mkdirSync(dirname(probeExecutable), { recursive: true });
+    mkdirSync(probeResources, { recursive: true });
+    cpSync(
+      resolve(appPath, 'Contents/PlugIns/TauQuickLookPreview.appex/Contents/Resources/runtime'),
+      resolve(probeResources, 'runtime'),
+      { recursive: true },
     );
-  }
+    writeFileSync(
+      resolve(probeBundle, 'Contents/Info.plist'),
+      '<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleExecutable</key><string>TauQuickLookConverterProbe</string><key>CFBundleIdentifier</key><string>com.taucad.tau.quicklook-converter-probe</string><key>CFBundlePackageType</key><string>APPL</string></dict></plist>',
+    );
+    run('xcrun', [
+      'swiftc',
+      '-O',
+      resolve(desktopRoot, 'macos/generated/FormatManifest.generated.swift'),
+      resolve(desktopRoot, 'macos/TauQuickLookCore/TauConverter.swift'),
+      resolve(desktopRoot, 'scripts/quick-look-converter-probe.swift'),
+      '-framework',
+      'AppKit',
+      '-framework',
+      'WebKit',
+      '-o',
+      probeExecutable,
+    ]);
+    const source = resolve(probeRoot, 'cube.step');
+    copyFileSync(resolve(workspaceRoot, 'packages/plugins/brep/src/fixtures/cube.step'), source);
+    const preview = resolve(probeRoot, 'preview.usdz');
+    const thumbnail = resolve(probeRoot, 'thumbnail.png');
+    run(probeExecutable, [source, 'usdz', preview, 'convert'], 60_000);
+    if (
+      !readFileSync(preview)
+        .subarray(0, 4)
+        .equals(Buffer.from([0x50, 0x4b, 0x03, 0x04]))
+    ) {
+      throw new Error('The unsigned Quick Look converter probe returned invalid USDZ data.');
+    }
+    run('unzip', ['-t', preview]);
+    const previewMembers = run('unzip', ['-Z1', preview]);
+    if (!previewMembers.split('\n').some((name) => /\.usd[ac]?$/u.test(name))) {
+      throw new Error(`The unsigned Quick Look converter USDZ contains no USD member: ${previewMembers}`);
+    }
+    run(probeExecutable, [source, 'png', thumbnail, 'convert'], 60_000);
+    assertThumbnailDimensions(thumbnail, 128);
 
-  const thumbnailCases = [
-    ['packages/plugins/brep/src/fixtures/cube.step', 128, 1],
-    ['packages/plugins/brep/src/fixtures/cube.step', 256, 2],
-    ['packages/plugins/brep/src/fixtures/cube-brep.iges', 256, 2],
-    ['packages/plugins/brep/src/fixtures/cube.brep', 256, 2],
-    ['packages/plugins/assimp/src/fixtures/cube.off', 256, 2],
+    const malformed = resolve(probeRoot, 'malformed.off');
+    writeFileSync(malformed, 'OFF\n8 12 0\nnot geometry\n');
+    const malformedResult = spawnSync(
+      probeExecutable,
+      [malformed, 'png', resolve(probeRoot, 'malformed.png'), 'convert'],
+      {
+        encoding: 'utf8',
+        timeout: 60_000,
+      },
+    );
+    if (
+      malformedResult.status !== 1 ||
+      malformedResult.signal !== null ||
+      !/(?:convert|geometry|invalid|OFF|failed)/iu.test(malformedResult.stderr)
+    ) {
+      throw new Error(
+        `Malformed input did not produce the expected conversion diagnostic: status=${String(malformedResult.status)} signal=${String(malformedResult.signal)} stderr=${malformedResult.stderr}`,
+      );
+    }
+    run(probeExecutable, [source, 'png', resolve(probeRoot, 'cancelled.png'), 'cancel'], 10_000);
+    const leaked = [...temporarySessions()].filter((name) => !initialSessions.has(name));
+    if (leaked.length > 0) {
+      throw new Error(`Unsigned Quick Look converter left temporary sessions behind: ${leaked.join(', ')}`);
+    }
+  } finally {
+    rmSync(probeRoot, { recursive: true, force: true });
+  }
+  console.log(`Verified ${String(arm64MachObjectCount)} arm64 Mach-O files and the unsigned Quick Look converter.`);
+} else {
+  run('open', ['-gj', appPath]);
+  const extensionIdentifiers = [
+    'com.taucad.tau.desktop.quicklook-preview',
+    'com.taucad.tau.desktop.quicklook-thumbnail',
   ] as const;
-  for (const [relativePath, size, scale] of thumbnailCases) {
-    const source = resolve(testRoot, `${randomUUID()}-${basename(relativePath)}`);
-    const output = resolve(testRoot, `${basename(source)}.png`);
-    copyFileSync(resolve(workspaceRoot, relativePath), source);
-    // oxlint-disable-next-line no-await-in-loop -- Serial order preserves cold-then-warm measurements.
-    const measured = await runMeasured({
-      command: thumbnailProbe,
-      arguments: [source, output, String(size), String(scale)],
-      processName: 'TauQuickLookThumbnail',
+  const delay = async (milliseconds: number): Promise<void> =>
+    new Promise((resolve) => {
+      setTimeout(resolve, milliseconds);
+    });
+  const waitForExtensionDiscovery = async (attempt = 0): Promise<void> => {
+    const plugins = run('pluginkit', ['-m', '-A', '-D']);
+    if (extensionIdentifiers.every((identifier) => plugins.includes(identifier))) {
+      return;
+    }
+    if (attempt === 19) {
+      throw new Error('Launch Services did not discover both Tau Quick Look extensions');
+    }
+    await delay(250);
+    await waitForExtensionDiscovery(attempt + 1);
+  };
+  await waitForExtensionDiscovery();
+  stopPackagedApp();
+  await delay(500);
+  if (processRows().some((row) => row.command === appExecutable)) {
+    throw new Error('Tau remained running; offline extension verification is invalid');
+  }
+
+  const classifications = [
+    ['packages/plugins/gltf/src/fixtures/cube.glb', ['org.khronos.glb']],
+    ['packages/plugins/brep/src/fixtures/cube.step', ['com.taucad.step', 'com.shapr3d.step', 'com.shapr3d.stp']],
+    ['packages/plugins/rhino/src/fixtures/cube-mesh.3dm', ['com.mcneel.rhinoceros.3dm', 'com.shapr3d.rhino.3dm']],
+    ['packages/plugins/assimp/src/fixtures/cube-ascii.fbx', ['com.autodesk.mac.fbx']],
+  ] as const;
+  for (const [relativePath, expectedTypes] of classifications) {
+    const path = resolve(workspaceRoot, relativePath);
+    const metadata = run('mdls', ['-raw', '-name', 'kMDItemContentType', path]).trim();
+    if (!(expectedTypes as readonly string[]).includes(metadata)) {
+      throw new Error(`${relativePath} resolved to unexpected UTI ${metadata}`);
+    }
+  }
+
+  const testRoot = mkdtempSync(join(tmpdir(), 'tau-quick-look-verify-'));
+  const thumbnailProbe = resolve(testRoot, 'quick-look-thumbnail-probe');
+  const previewProbe = resolve(testRoot, 'quick-look-preview-probe');
+  const initialSessions = temporarySessions();
+  const measurements: string[] = [];
+  try {
+    run('xcrun', [
+      'swiftc',
+      '-O',
+      resolve(desktopRoot, 'scripts/quick-look-thumbnail-probe.swift'),
+      '-o',
+      thumbnailProbe,
+    ]);
+    run('xcrun', ['swiftc', '-O', resolve(desktopRoot, 'scripts/quick-look-preview-probe.swift'), '-o', previewProbe]);
+
+    /**
+     * One retry per Quick Look request (thumbnail and preview appexes alike). macOS RunningBoard kills the thumbnail
+     * extension after every request on some hosts (`0xDEAD10CC`, a system
+     * framework holding `/System/Library/Caches/com.apple.IntlDataCache.le`
+     * while the appex is suspended); a request that lands on an instance being
+     * torn down fails with the generic `QLThumbnailErrorDomain error 0` and no
+     * Tau-side record. The request is idempotent, and the repeat has succeeded
+     * in every observation (lane 20-iges-quicklook, 2026-09-09). A second
+     * failure is a real defect and propagates.
+     */
+    const runQuickLookMeasured = async (options: Parameters<typeof runMeasured>[0]) => {
+      try {
+        return await runMeasured(options);
+      } catch (error) {
+        console.warn(`thumbnail request failed once, retrying (host-side Quick Look teardown race): ${String(error)}`);
+        return runMeasured(options);
+      }
+    };
+
+    for (const format of quickLookManifest.formats.filter(({ systemPreview }) => !systemPreview)) {
+      const source = copyFixture(format, testRoot);
+      const output = resolve(testRoot, `${randomUUID()}-${basename(source)}.png`);
+      // oxlint-disable-next-line no-await-in-loop -- Quick Look hosts are measured one fixture at a time.
+      const measured = await runQuickLookMeasured({
+        command: thumbnailProbe,
+        arguments: [source, output, '128', '1'],
+        processName: 'TauQuickLookThumbnail',
+        processTimeoutMilliseconds: 50_000,
+      });
+      assertThumbnailDimensions(output, 128);
+      measurements.push(
+        `${format.extensions.join('/')}=${String(Math.round(measured.milliseconds))}ms/${String(Math.round(measured.peakResidentKilobytes / 1024))}MB`,
+      );
+    }
+
+    const thumbnailCases = [
+      ['packages/plugins/brep/src/fixtures/cube.step', 128, 1],
+      ['packages/plugins/brep/src/fixtures/cube.step', 256, 2],
+      ['packages/plugins/brep/src/fixtures/cube-brep.iges', 256, 2],
+      ['packages/plugins/brep/src/fixtures/cube.brep', 256, 2],
+      ['packages/plugins/assimp/src/fixtures/cube.off', 256, 2],
+    ] as const;
+    for (const [relativePath, size, scale] of thumbnailCases) {
+      const source = resolve(testRoot, `${randomUUID()}-${basename(relativePath)}`);
+      const output = resolve(testRoot, `${basename(source)}.png`);
+      copyFileSync(resolve(workspaceRoot, relativePath), source);
+      // oxlint-disable-next-line no-await-in-loop -- Serial order preserves cold-then-warm measurements.
+      const measured = await runQuickLookMeasured({
+        command: thumbnailProbe,
+        arguments: [source, output, String(size), String(scale)],
+        processName: 'TauQuickLookThumbnail',
+        processTimeoutMilliseconds: 50_000,
+      });
+      assertThumbnailDimensions(output, size * scale);
+      measurements.push(
+        `${basename(relativePath)} thumbnail=${String(Math.round(measured.milliseconds))}ms/${String(Math.round(measured.peakResidentKilobytes / 1024))}MB`,
+      );
+    }
+
+    const previewSource = resolve(testRoot, `${randomUUID()}-cube.step`);
+    copyFileSync(resolve(workspaceRoot, 'packages/plugins/brep/src/fixtures/cube.step'), previewSource);
+    const previewStartedAt = Math.floor(Date.now() / 1000);
+    const preview = await runQuickLookMeasured({
+      command: previewProbe,
+      arguments: [previewSource],
+      processName: 'TauQuickLookPreview',
       processTimeoutMilliseconds: 50_000,
     });
-    assertThumbnailDimensions(output, size * scale);
+    const previewLog = run('/usr/bin/log', [
+      'show',
+      '--start',
+      `@${String(previewStartedAt)}`,
+      '--style',
+      'compact',
+      '--predicate',
+      'process == "TauQuickLookPreview" AND subsystem == "com.taucad.tau.desktop"',
+    ]);
+    if (!previewLog.includes('Interactive preview ready')) {
+      throw new Error('Quick Look did not report a loaded interactive preview');
+    }
     measurements.push(
-      `${basename(relativePath)} thumbnail=${String(Math.round(measured.milliseconds))}ms/${String(Math.round(measured.peakResidentKilobytes / 1024))}MB`,
+      `cube.step preview=${String(Math.round(preview.milliseconds))}ms/${String(Math.round(preview.peakResidentKilobytes / 1024))}MB`,
     );
+
+    const malformed = resolve(testRoot, `${randomUUID()}-malformed.off`);
+    writeFileSync(malformed, 'OFF\n8 12 0\nnot geometry\n');
+    const malformedResult = spawnSync(thumbnailProbe, [malformed, resolve(testRoot, 'malformed.png'), '128', '1'], {
+      encoding: 'utf8',
+      timeout: 50_000,
+    });
+    if (malformedResult.status === 0) {
+      throw new Error('Malformed OFF input unexpectedly produced a thumbnail');
+    }
+
+    const cancellationSource = resolve(testRoot, `${randomUUID()}-cancel.step`);
+    copyFileSync(resolve(workspaceRoot, 'packages/plugins/brep/src/fixtures/cube.step'), cancellationSource);
+    run(thumbnailProbe, [cancellationSource, resolve(testRoot, 'cancelled.png'), '256', '2', '1'], 10_000);
+
+    run('open', ['-gj', '-a', appPath, resolve(workspaceRoot, 'packages/plugins/brep/src/fixtures/cube.step')]);
+    await delay(500);
+    stopPackagedApp();
+    await delay(1000);
+
+    const leaked = [...temporarySessions()].filter((name) => !initialSessions.has(name));
+    if (leaked.length > 0) {
+      throw new Error(`Quick Look left temporary sessions behind: ${leaked.join(', ')}`);
+    }
+  } finally {
+    rmSync(testRoot, { recursive: true, force: true });
   }
 
-  const previewSource = resolve(testRoot, `${randomUUID()}-cube.step`);
-  copyFileSync(resolve(workspaceRoot, 'packages/plugins/brep/src/fixtures/cube.step'), previewSource);
-  const previewStartedAt = Math.floor(Date.now() / 1000);
-  const preview = await runMeasured({
-    command: previewProbe,
-    arguments: [previewSource],
-    processName: 'TauQuickLookPreview',
-    processTimeoutMilliseconds: 50_000,
-  });
-  const previewLog = run('/usr/bin/log', [
-    'show',
-    '--start',
-    `@${String(previewStartedAt)}`,
-    '--style',
-    'compact',
-    '--predicate',
-    'process == "TauQuickLookPreview" AND subsystem == "com.taucad.tau.desktop"',
-  ]);
-  if (!previewLog.includes('Interactive preview ready')) {
-    throw new Error('Quick Look did not report a loaded interactive preview');
-  }
-  measurements.push(
-    `cube.step preview=${String(Math.round(preview.milliseconds))}ms/${String(Math.round(preview.peakResidentKilobytes / 1024))}MB`,
+  console.log(`Verified ${String(arm64MachObjectCount)} arm64 Mach-O files and both extension registrations.`);
+  console.log(
+    'Verified Finder-equivalent interactive preview, thumbnails, malformed input, cancellation, cleanup, and Open With.',
   );
-
-  const malformed = resolve(testRoot, `${randomUUID()}-malformed.off`);
-  writeFileSync(malformed, 'OFF\n8 12 0\nnot geometry\n');
-  const malformedResult = spawnSync(thumbnailProbe, [malformed, resolve(testRoot, 'malformed.png'), '128', '1'], {
-    encoding: 'utf8',
-    timeout: 50_000,
-  });
-  if (malformedResult.status === 0) {
-    throw new Error('Malformed OFF input unexpectedly produced a thumbnail');
-  }
-
-  const cancellationSource = resolve(testRoot, `${randomUUID()}-cancel.step`);
-  copyFileSync(resolve(workspaceRoot, 'packages/plugins/brep/src/fixtures/cube.step'), cancellationSource);
-  run(thumbnailProbe, [cancellationSource, resolve(testRoot, 'cancelled.png'), '256', '2', '1'], 10_000);
-
-  run('open', ['-gj', '-a', appPath, resolve(workspaceRoot, 'packages/plugins/brep/src/fixtures/cube.step')]);
-  await delay(500);
-  stopPackagedApp();
-  await delay(1000);
-
-  const leaked = [...temporarySessions()].filter((name) => !initialSessions.has(name));
-  if (leaked.length > 0) {
-    throw new Error(`Quick Look left temporary sessions behind: ${leaked.join(', ')}`);
-  }
-} finally {
-  rmSync(testRoot, { recursive: true, force: true });
+  console.log(`Quick Look while Tau stopped: ${measurements.join(', ')}`);
 }
-
-console.log(`Verified ${String(arm64MachObjectCount)} arm64 Mach-O files and both extension registrations.`);
-console.log(
-  'Verified Finder-equivalent interactive preview, thumbnails, malformed input, cancellation, cleanup, and Open With.',
-);
-console.log(`Quick Look while Tau stopped: ${measurements.join(', ')}`);

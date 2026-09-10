@@ -137,6 +137,11 @@ export const selectKernel = async (page: Page, kernelName: string): Promise<void
  */
 export const sendPrompt = async (page: Page, prompt: string): Promise<void> => {
   await parkPointer(page);
+  /* A chat refuses a message while its run is in flight ("Stop it before
+   * sending another message"), and a run stays in flight until the host has
+   * recorded its revision — longer than the bytes its tools wrote take to land
+   * on disk, which is what most callers just waited for. */
+  await expectCount(stopButtonOf(page), 0, 120_000);
   const composer = composerOf(page);
   await composer.click();
   await composer.fill(prompt);
@@ -162,14 +167,18 @@ export const submitPrompt = async (page: Page, prompt: string): Promise<string> 
  * and only paid latency for it — 60 s per home-composer submit, since the home
  * page never renders a stop button at all.
  */
-export const cancelRun = async (page: Page): Promise<void> => {
-  await stopButtonOf(page)
-    .waitFor({ state: 'visible', timeout: 15_000 })
-    .catch(() => undefined);
-  if ((await stopButtonOf(page).count()) > 0) {
-    await stopButtonOf(page).click();
+export const cancelRun = async (page: Page, settled?: () => boolean): Promise<void> => {
+  /* Strict where it can be: a live run must render its stop button, so a moved
+   * selector fails here instead of turning this cancel and `sendPrompt`'s
+   * idle-wait into silent no-ops (6-review C3). A turn this short can also
+   * settle before the button ever renders (desktop-chat-in-project.spec.ts),
+   * so the caller's own completion signal is the other way out (7-review M1). */
+  const stop = stopButtonOf(page);
+  await expect.poll(async () => settled?.() === true || (await stop.count()) > 0, { timeout: 15_000 }).toBe(true);
+  if (settled?.() !== true && (await stop.count()) > 0) {
+    await stop.click();
   }
-  await expectCount(stopButtonOf(page), 0, 120_000);
+  await expectCount(stop, 0, 120_000);
 };
 
 /**
@@ -185,7 +194,7 @@ export const cancelRun = async (page: Page): Promise<void> => {
  * here rather than passing quietly.
  *
  * @param logPath - `<userData>/logs/desktop.log`.
- * @returns The resolved engine version, e.g. `0.11.0-beta.3`.
+ * @returns The resolved engine version, e.g. `0.11.0-beta.4`.
  */
 export const expectNativeKernelEngine = async (logPath: string): Promise<string> => {
   let engine: { readonly native?: boolean; readonly backend?: string; readonly version?: string } | undefined;
@@ -517,4 +526,60 @@ export const expectKernelReparsed = async (
       timeout: 60_000,
     })
     .toBe(true);
+};
+
+/** The chat id the project route carries, which names the durable log's directory. */
+export const activeChatId = (page: Page): string => {
+  const url = page.url();
+  const chatId = new URL(url).searchParams.get('chat');
+  expect(chatId, `the project route carries no chat id: ${url}`).toBeTruthy();
+  return chatId!;
+};
+
+/**
+ * The two witnesses that a turn ran in launcher 2 — the services utility.
+ *
+ * Every desktop turn is launcher 2 since D18 removed the browser placement row,
+ * so every chat spec is entitled to this, not just the launcher spec:
+ *
+ * - `services.agent-host-served` is written inside the process that ran the
+ *   agent, so the renderer cannot produce it.
+ * - the durable log is on real disk under the project root; a browser-host turn
+ *   would leave its runs in OPFS or IndexedDB instead.
+ *
+ * @param logPath - The shell's rotating diagnostics log.
+ * @param projectRoot - The project's absolute directory.
+ * @param chatId - The chat whose durable log must exist.
+ * @returns Nothing.
+ */
+export const expectLauncher2Turn = async (logPath: string, projectRoot: string, chatId: string): Promise<void> => {
+  await expect
+    .poll(() => (existsSync(logPath) ? readFileSync(logPath, 'utf8') : ''), { timeout: 180_000 })
+    .toContain('services.agent-host-served');
+  const eventsPath = join(projectRoot, '.tau/chats', chatId, 'events.jsonl');
+  await expect.poll(() => existsSync(eventsPath), { timeout: 180_000 }).toBe(true);
+  expect(readFileSync(eventsPath, 'utf8').trim().length).toBeGreaterThan(0);
+};
+
+/**
+ * Open the chat's execution picker and read back the rows it offers.
+ *
+ * {@link selectChatModel} picks a Tau model row by name; this one exists for the
+ * rows a *host* contributes — the external ACP agents, whose presence is the
+ * assertion rather than a step on the way to one.
+ *
+ * @param page - The desktop page.
+ * @returns Every option label the picker rendered, in order.
+ */
+export const openExecutionPicker = async (page: Page): Promise<readonly string[]> => {
+  await parkPointer(page);
+  /* The agent picker has its own trigger beside the composer; `Meta+Slash`
+   * opens the *model* picker, which only exists for a Tau execution. */
+  await page
+    .getByRole('button', { name: /^Select agent: /u })
+    .first()
+    .click();
+  const options = page.getByRole('option');
+  await expectVisible(options.first());
+  return options.allTextContents();
 };

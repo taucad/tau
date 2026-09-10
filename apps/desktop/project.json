@@ -147,6 +147,27 @@
         "command": "node --import @oxc-node/core/register apps/desktop/scripts/package-macos.mts --release"
       }
     },
+    "package-macos-unsigned": {
+      "executor": "nx:run-commands",
+      "dependsOn": [
+        "build",
+        "build-quick-look-extensions",
+        "prepare-build123d-python-macos",
+        "prepare-picogk-dotnet-macos"
+      ],
+      "outputs": ["{projectRoot}/package-out"],
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/package-macos.mts --unsigned"
+      }
+    },
+    "test-macos-package-mode": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/macos-package-mode.test.mts"
+      }
+    },
     "verify-macos-package": {
       "executor": "nx:run-commands",
       "options": {
@@ -159,6 +180,21 @@
       "options": {
         "cwd": ".",
         "command": "node --import @oxc-node/core/register apps/desktop/scripts/verify-macos-package.mts --release"
+      }
+    },
+    "verify-macos-unsigned": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/verify-macos-package.mts --unsigned"
+      }
+    },
+    "check-renderer-payload": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/check-renderer-payload.mts"
       }
     }
   }

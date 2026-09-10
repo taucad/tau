@@ -10,7 +10,13 @@ import type { TauSceneManifest } from '@taucad/runtime/types';
 
 import { authenticatePackagedDesktop, launchDesktopApp } from '#support/desktop-app.js';
 import type { DesktopSession } from '#support/desktop-app.js';
-import { gatewayFixtureFinalText, gatewayFixtureModelName, installGatewayFixture } from '#support/gateway-fixture.js';
+import { desktopE2ECompletedArtifact } from '#support/config.js';
+import {
+  gatewayFixtureFinalText,
+  gatewayFixtureModelName,
+  installGatewayFixture,
+  startGatewayFixture,
+} from '#support/gateway-fixture.js';
 import type { GatewayFixture } from '#support/gateway-fixture.js';
 import { deleteTauTestUser, seedTauTestUser, tauTestAccount } from '#support/tau-account.js';
 import {
@@ -380,12 +386,19 @@ test('boots the packaged desktop app with no endpoint environment', async () => 
   await expectCount(session.page.getByText('Application Error', { exact: true }), 0);
 });
 
-test('runs the Build123d filesystem, parameter, topology, watcher, viewer, and STEP loop', async () => {
+test('[completed-artifact] runs the Build123d filesystem, parameter, topology, watcher, viewer, and STEP loop', async () => {
   const existingWorkerPids = new Set(nativeWorkers().map(({ pid }) => pid));
   const account = tauTestAccount('build123d');
   seededEmail = account.email;
   const token = await seedTauTestUser(account);
-  session = await launchDesktopApp({ token, env: { TAU_E2E_TRUST_NATIVE_CODE: '1' } });
+  fixture = await startGatewayFixture({ targetFile: 'main.py', content: build123dSource });
+  session = await launchDesktopApp({
+    token,
+    env: {
+      TAU_E2E_TRUST_NATIVE_CODE: '1',
+      TAU_E2E_DISABLE_CREDENTIAL_PERSISTENCE: '1',
+    },
+  });
   const { page } = session;
   const rendererErrors: string[] = [];
   page.on('console', (message) => {
@@ -393,11 +406,14 @@ test('runs the Build123d filesystem, parameter, topology, watcher, viewer, and S
       rendererErrors.push(message.text());
     }
   });
-  fixture = await installGatewayFixture(page, { targetFile: 'main.py', content: build123dSource });
+  await fixture.routeThrough(page);
 
   try {
     await expectVisible(page.locator('[aria-label="Ask Tau to build anything..."]'), 120_000);
     await declineCookieBanner(page);
+    if (desktopE2ECompletedArtifact) {
+      await authenticatePackagedDesktop(session, token);
+    }
     await expectSignedIn(page);
     await selectKernel(page, 'Build123d');
     await connectPickedFolder(session);
@@ -518,6 +534,9 @@ test('renders a persisted Replicad project card without relaxing the Electron CS
   try {
     await expectVisible(page.locator('[aria-label="Ask Tau to build anything..."]'), 120_000);
     await declineCookieBanner(page);
+    if (desktopE2ECompletedArtifact) {
+      await authenticatePackagedDesktop(session, token);
+    }
     await expectSignedIn(page);
     await selectKernel(page, 'Replicad');
     await connectPickedFolder(session);
@@ -539,7 +558,7 @@ test('renders a persisted Replicad project card without relaxing the Electron CS
   }
 });
 
-test('runs packaged PicoGK C# through filesystem, topology, failures, export, trust, and cleanup', async () => {
+test('[completed-artifact] runs packaged PicoGK C# through filesystem, topology, failures, export, trust, and cleanup', async () => {
   if (process.platform !== 'darwin' || process.arch !== 'arm64') {
     return;
   }
@@ -547,11 +566,13 @@ test('runs packaged PicoGK C# through filesystem, topology, failures, export, tr
   const account = tauTestAccount('picogk');
   seededEmail = account.email;
   const token = await seedTauTestUser(account);
+  fixture = await startGatewayFixture({ targetFile: 'main.cs', content: picogkSource });
   session = await launchDesktopApp({
     token,
     packaged: true,
     env: {
       PATH: '/usr/bin:/bin',
+      TAU_E2E_KEEP_PATH: '1',
       TAU_DEBUG: 'true',
       /* An ad-hoc package signature cannot access Electron's prior Keychain
        * item unattended. Memory-only custody still exercises the production
@@ -566,7 +587,7 @@ test('runs packaged PicoGK C# through filesystem, topology, failures, export, tr
       rendererErrors.push(message.text());
     }
   });
-  fixture = await installGatewayFixture(page, { targetFile: 'main.cs', content: picogkSource });
+  await fixture.routeThrough(page);
 
   try {
     await expectVisible(page.locator('[aria-label="Ask Tau to build anything..."]'), 120_000);

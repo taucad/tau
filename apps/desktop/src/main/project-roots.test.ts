@@ -17,6 +17,14 @@ describe('createProjectRootRegistry', () => {
     expect(registry.isTrusted(`${homeRoot}/widget/nested/deep`)).toBe(true);
   });
 
+  it('returns the canonical spelling of a trusted project without collapsing it to Home', () => {
+    const registry = createProjectRootRegistry();
+    registry.admit(homeRoot);
+    expect(registry.canonical(`${homeRoot}/widget/.`)).toBe(`${homeRoot}/widget`);
+    expect(registry.canonical(`${homeRoot}/other`)).toBe(`${homeRoot}/other`);
+    expect(registry.canonical('/etc')).toBeUndefined();
+  });
+
   it('refuses a sibling whose name merely starts with an admitted root', () => {
     const registry = createProjectRootRegistry();
     registry.admit(homeRoot);
@@ -64,7 +72,11 @@ describe('createKernelForkResolver', () => {
   const resolverFor = () => {
     const registry = createProjectRootRegistry();
     registry.admit(homeRoot);
-    return createKernelForkResolver({ registry, defaultRoot: homeRoot });
+    return createKernelForkResolver({
+      registry,
+      defaultRoot: homeRoot,
+      untrustedNativeMarkerPath: '/private/tau/untrusted-ephemeral.json',
+    });
   };
 
   it('passes a trusted root through as TAU_PROJECT_ROOT', () => {
@@ -75,6 +87,24 @@ describe('createKernelForkResolver', () => {
 
   it('falls back to the default root when the renderer names none', () => {
     expect(resolverFor()({})).toEqual({ env: { TAU_PROJECT_ROOT: homeRoot } });
+  });
+
+  it('selects memory-backed ephemeral purpose without falling back to Home', () => {
+    expect(resolverFor()({ purpose: 'ephemeral', definition: 'default' })).toEqual({
+      env: {
+        TAU_RUNTIME_EPHEMERAL: '1',
+        TAU_NATIVE_CODE_TRUST_FILE: '/private/tau/untrusted-ephemeral.json',
+      },
+    });
+  });
+
+  it('refuses a root combined with ephemeral purpose', () => {
+    expect(() => resolverFor()({ purpose: 'ephemeral', projectRoot: homeRoot })).toThrow(/rooted ephemeral/u);
+  });
+
+  it('refuses unknown purposes and definitions instead of selecting a fallback', () => {
+    expect(() => resolverFor()({ purpose: 'temporary' })).toThrow(/unknown runtime purpose/u);
+    expect(() => resolverFor()({ definition: 'developer' })).toThrow(/unknown runtime definition/u);
   });
 
   it('refuses an untrusted root instead of silently substituting the default', () => {

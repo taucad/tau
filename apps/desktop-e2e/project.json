@@ -9,6 +9,13 @@
     "test": {
       "executor": "nx:noop"
     },
+    "test:harness": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "{workspaceRoot}/apps/desktop-e2e",
+        "command": "../../node_modules/.bin/vitest run --config vitest.unit.config.ts"
+      }
+    },
     "typecheck": {
       "executor": "nx:run-commands",
       "options": {
@@ -16,8 +23,40 @@
         "command": "tsgo -p apps/desktop-e2e/tsconfig.json --noEmit"
       }
     },
-    "test:e2e:desktop": {
+    "test:e2e": {
       "executor": "nx:run-commands",
+      "metadata": {
+        "description": "Deterministic desktop chat tier (D19). Named test:e2e so `nx affected -t test:e2e` selects it, and built unpackaged so the Electron shell can run under xvfb on the CI e2e runner. `api:billing-policy:publish:development` runs on every invocation: it replays by job key, so re-running against an already-published identical policy is a no-op, and a genuine publish failure stays red."
+      },
+      "dependsOn": [
+        {
+          "projects": ["desktop"],
+          "target": "build"
+        },
+        {
+          "projects": ["api"],
+          "target": "build"
+        }
+      ],
+      "options": {
+        "cwd": "{workspaceRoot}/apps/desktop-e2e",
+        "parallel": false,
+        "commands": [
+          "docker-compose -f ../../infra/docker-compose.yml up -d postgres redis minio minio-bootstrap",
+          "pnpm --dir ../.. exec nx run api:db-migrate",
+          "pnpm --dir ../.. exec nx run api:billing-policy:publish:development",
+          "../../node_modules/.bin/vitest run --config vitest.config.ts src/desktop-chat-in-project.spec.ts src/desktop-chat-replay.spec.ts src/desktop-chat-launcher-2.spec.ts src/desktop-mcp-fixture.spec.ts"
+        ],
+        "env": {
+          "TAU_E2E_API_URL": "http://localhost:4014"
+        }
+      }
+    },
+    "test:e2e:packaged": {
+      "executor": "nx:run-commands",
+      "metadata": {
+        "description": "Packaged-app specs (macOS arm64 only: they launch package-out/Tau-darwin-arm64). Kept off `test:e2e` so the Ubuntu e2e runner is not asked for a package it cannot build. `TAU_E2E_DESKTOP_EXECUTABLE` is assigned on the vitest command rather than in `env` because the Assimp spec requires an absolute path and Nx strips a leading `{workspaceRoot}/` from option values."
+      },
       "dependsOn": [
         {
           "projects": ["desktop"],
@@ -34,7 +73,8 @@
         "commands": [
           "docker-compose -f ../../infra/docker-compose.yml up -d postgres redis minio minio-bootstrap",
           "pnpm --dir ../.. exec nx run api:db-migrate",
-          "../../node_modules/.bin/vitest run --config vitest.config.ts src/desktop-chat-in-project.spec.ts src/desktop-chat-replay.spec.ts src/desktop-build123d.spec.ts src/desktop-assimp.spec.ts"
+          "pnpm --dir ../.. exec nx run api:billing-policy:publish:development",
+          "TAU_E2E_DESKTOP_EXECUTABLE=\"$PWD/../desktop/package-out/Tau-darwin-arm64/Tau.app/Contents/MacOS/Tau\" ../../node_modules/.bin/vitest run --config vitest.config.ts src/desktop-build123d.spec.ts src/desktop-assimp.spec.ts"
         ],
         "env": {
           "TAU_E2E_API_URL": "http://localhost:4014"
@@ -59,12 +99,51 @@
         "commands": [
           "docker-compose -f ../../infra/docker-compose.yml up -d postgres redis minio minio-bootstrap",
           "pnpm --dir ../.. exec nx run api:db-migrate",
+          "pnpm --dir ../.. exec nx run api:billing-policy:publish:development",
           "../../node_modules/.bin/vitest run --config vitest.config.ts src/desktop-chat-live.spec.ts"
         ],
         "env": {
           "TAU_E2E_API_URL": "http://localhost:4014",
           "TAU_E2E_LIVE_LLM": "true"
         }
+      }
+    },
+    "test:e2e:desktop:acp": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "metadata": {
+        "description": "External-agent tier (W4-ACP): the desktop's ACP rows, and one real turn through the operator's own Codex login. Kept off test:e2e because it spends their quota and needs the Codex CLI; the spec skips when the adapter or the CLI is absent."
+      },
+      "dependsOn": [
+        {
+          "projects": ["desktop"],
+          "target": "build"
+        },
+        {
+          "projects": ["api"],
+          "target": "build"
+        }
+      ],
+      "options": {
+        "cwd": "{workspaceRoot}/apps/desktop-e2e",
+        "parallel": false,
+        "commands": [
+          "docker-compose -f ../../infra/docker-compose.yml up -d postgres redis minio minio-bootstrap",
+          "pnpm --dir ../.. exec nx run api:db-migrate",
+          "pnpm --dir ../.. exec nx run api:billing-policy:publish:development",
+          "../../node_modules/.bin/vitest run --config vitest.config.ts src/desktop-chat-acp.spec.ts"
+        ],
+        "env": {
+          "TAU_E2E_API_URL": "http://localhost:4014"
+        }
+      }
+    },
+    "test:e2e:desktop:completed-artifact": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "cwd": "{workspaceRoot}",
+        "command": "node --import @oxc-node/core/register apps/desktop-e2e/scripts/run-completed-artifact.mts"
       }
     }
   }

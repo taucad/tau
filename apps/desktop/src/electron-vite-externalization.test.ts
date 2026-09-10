@@ -48,7 +48,13 @@ const matchesExternal = async (rule: unknown, id: string): Promise<boolean> => {
   return false;
 };
 
-const resolveMainExternals = async (): Promise<(id: string) => Promise<boolean>> => {
+type MainExternals = {
+  readonly isExternal: (id: string) => Promise<boolean>;
+  /** `externalizeDeps.include` as the config declares it. */
+  readonly include: readonly string[];
+};
+
+const resolveMainExternals = async (): Promise<MainExternals> => {
   const electronVite = (await import(
     pathToFileURL(join(appRoot, 'node_modules/electron-vite/dist/index.js')).href
   )) as ElectronViteApi;
@@ -73,7 +79,12 @@ const resolveMainExternals = async (): Promise<(id: string) => Promise<boolean>>
       'production',
     );
     const external = viteConfig.build.rolldownOptions?.external ?? viteConfig.build.rollupOptions?.external;
-    return async (id: string) => matchesExternal(external, id);
+    const declared = (mainConfig['build'] as { externalizeDeps?: { include?: readonly string[] } } | undefined)
+      ?.externalizeDeps?.include;
+    if (!declared) {
+      throw new TypeError('electron-vite main config declares no externalizeDeps.include');
+    }
+    return { isExternal: async (id: string) => matchesExternal(external, id), include: declared };
   } finally {
     process.chdir(previousDirectory);
     if (previousNodeEnvironment === undefined) {
@@ -86,25 +97,34 @@ const resolveMainExternals = async (): Promise<(id: string) => Promise<boolean>>
 
 describe('electron-vite main externalization', () => {
   it('bundles workspace sources and keeps host/runtime imports external', async () => {
-    const isExternal = await resolveMainExternals();
-    for (const id of ['@taucad/openrscad', '@taucad/middleware', '@taucad/filesystem', '@taucad/agent-host']) {
+    const { isExternal, include } = await resolveMainExternals();
+    for (const id of [
+      '@taucad/openrscad',
+      '@taucad/middleware',
+      '@taucad/filesystem',
+      '@taucad/agent-host',
+      '@taucad/host/agent-tools',
+      'pino-pretty',
+    ]) {
       // oxlint-disable-next-line eslint/no-await-in-loop -- one resolved config, cheap predicate
       expect([id, await isExternal(id)]).toEqual([id, false]);
     }
-    for (const id of ['@taulabs/openrscad-engine', 'libassimp', 'electron', 'node:fs']) {
+    for (const id of [...include, 'electron', 'node:fs']) {
       // oxlint-disable-next-line eslint/no-await-in-loop -- one resolved config, cheap predicate
       expect([id, await isExternal(id)]).toEqual([id, true]);
     }
   }, 60_000);
 
-  it('declares runtime-loaded packages as direct dependencies', () => {
+  it('declares runtime-loaded packages as direct dependencies', async () => {
+    const { include } = await resolveMainExternals();
     const manifest = JSON.parse(readFileSync(join(appRoot, 'package.json'), 'utf8')) as {
       readonly dependencies?: Readonly<Record<string, string>>;
     };
 
-    expect(Object.keys(manifest.dependencies ?? {})).toEqual(
-      expect.arrayContaining(['@taulabs/openrscad-engine', 'libassimp']),
-    );
+    /* Every externalized package must be a declared dependency: the unpackaged
+     * build resolves them from `apps/desktop/node_modules`, and an undeclared
+     * one kills the kernel host at boot (`nanoraster/options`, 2026-09-07). */
+    expect(Object.keys(manifest.dependencies ?? {})).toEqual(expect.arrayContaining([...include]));
   });
 
   it.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
@@ -112,6 +132,7 @@ describe('electron-vite main externalization', () => {
     () => {
       const require = createRequire(join(appRoot, 'package.json'));
       const assimpRequire = createRequire(require.resolve('libassimp/package.json'));
+      const manifest = assimpRequire('libassimp/package.json') as { readonly version: string };
       const addon = assimpRequire('libassimp-darwin-arm64') as {
         readonly buildIdentity: string;
         readonly napiVersion: number;
@@ -121,7 +142,7 @@ describe('electron-vite main externalization', () => {
       expect(addon).toMatchObject({
         buildIdentity: 'darwin-arm64-napi8',
         napiVersion: 8,
-        packageVersion: '0.2.0',
+        packageVersion: manifest.version,
       });
       expect(assimpRequire.resolve('libassimp-darwin-arm64/package.json')).toBeTruthy();
     },

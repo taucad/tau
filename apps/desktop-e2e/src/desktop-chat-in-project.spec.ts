@@ -1,4 +1,5 @@
 import { readFileSync, statSync } from 'node:fs';
+import { join } from 'node:path';
 import process from 'node:process';
 import { afterEach, expect, test } from 'vitest';
 import { launchDesktopApp } from '#support/desktop-app.js';
@@ -7,8 +8,10 @@ import { gatewayFixtureFinalText, gatewayFixtureModelName, installGatewayFixture
 import type { GatewayFixture } from '#support/gateway-fixture.js';
 import { deleteTauTestUser, seedTauTestUser, tauTestAccount } from '#support/tau-account.js';
 import {
+  activeChatId,
   connectPickedFolder,
   declineCookieBanner,
+  expectLauncher2Turn,
   expectModelBuilt,
   expectSignedIn,
   expectVisible,
@@ -114,6 +117,10 @@ test('builds an openrscad model on disk from the project chat', async () => {
     // O9 (G23): desktop numbers are their own baseline — the in-process native
     // bench does not transfer across the copy-only utility wire.
     console.info(`[desktop-e2e] in-project prompt-to-file-on-disk: ${String(Date.now() - promptStart)} ms`);
+
+    /* Every desktop turn is launcher 2 (D18), so this spec witnesses it too:
+     * the utility served the channel and the durable log is on real disk. */
+    await expectLauncher2Turn(session.logPath, join(root, slug), activeChatId(page));
 
     await expectModelBuilt({ finalText: gatewayFixtureFinalText, logPath: session.logPath, page, sourcePath });
     console.info(`[desktop-e2e] in-project prompt-to-framed-geometry: ${String(Date.now() - promptStart)} ms`);

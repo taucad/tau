@@ -49,4 +49,11 @@ describe('native project trust', () => {
     expect(trust.isTrusted(project)).toBe(false);
     expect(existsSync(oldMarker)).toBe(false);
   });
+
+  it('keeps the ephemeral denial marker outside the grant namespace and absent', () => {
+    const { options } = fixture();
+    const trust = createNativeProjectTrustStore(options);
+    expect(trust.untrustedMarkerPath()).toBe(join(options.markerRoot, 'untrusted-ephemeral.json'));
+    expect(existsSync(trust.untrustedMarkerPath())).toBe(false);
+  });
 });

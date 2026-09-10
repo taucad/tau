@@ -1,16 +1,19 @@
 import { readFileSync, statSync } from 'node:fs';
+import { join } from 'node:path';
 import process from 'node:process';
 import { afterEach, expect, test } from 'vitest';
 import { authenticatePackagedDesktop, launchDesktopApp } from '#support/desktop-app.js';
 import type { DesktopSession } from '#support/desktop-app.js';
 import { gatewayFixtureModelName, installGatewayFixture } from '#support/gateway-fixture.js';
 import type { GatewayFixture } from '#support/gateway-fixture.js';
-import { deleteTauTestUser, seedTauTestUser, tauCreditBalanceMicro, tauTestAccount } from '#support/tau-account.js';
+import { deleteTauTestUser, seedTauTestUser, tauCreditBalanceAtoms, tauTestAccount } from '#support/tau-account.js';
 import {
+  activeChatId,
   connectPickedFolder,
   declineCookieBanner,
   expectCount,
   expectGeometryFramed,
+  expectLauncher2Turn,
   expectSignedIn,
   expectVisible,
   selectChatModel,
@@ -24,13 +27,14 @@ import {
 /**
  * Z-live (work item Z4): the same scenario against a real frontier model.
  *
- * The turn under test is driven from **inside the project route**, and the
- * seeding turn the home composer necessarily starts is served by the mocked
- * Anthropic gateway (`#support/gateway-fixture.js`) — that fixture redirects
- * only `/v1/llm/anthropic/`, so the OpenAI row selected afterwards reaches the
- * real gateway and the live turn is the only spend in the test. The retired
- * `tau` replay row used to fill that seeding slot; it cannot, because
- * `admitWorkspace` now refuses a wire the browser agent host cannot speak.
+ * The turn under test is driven from **inside the project route**. Both turns go
+ * through the real Tau gateway. `global-setup.ts` keeps the provider seam armed
+ * in this tier too, and the seam rewrites only the Anthropic host: the seeding
+ * turn on the fixture route lands on this suite's stub, while the live turn's
+ * wire (`TAU_E2E_LIVE_MODEL`, OpenAI by default) reaches the real provider with
+ * its real key. The balance is sampled either side of the live turn alone, so
+ * the credit delta is that turn's exact cost; an Anthropic live model would be
+ * stubbed and is not a supported selection.
  *
  * Gated on the explicit `TAU_E2E_LIVE_LLM` flag and **never** on key presence:
  * `apps/api/.env.test` ships non-empty mock provider keys, so a
@@ -95,14 +99,12 @@ test.skipIf(!live)('builds a model on disk with a live frontier model', async ()
      * admission rather than silently downgraded. */
     await selectChatModel(page, gatewayFixtureModelName);
     const slug = await submitPrompt(page, prompt);
-    /* Wait for the seeded turn to finish on the mock rather than cancelling it:
-     * a cancel races a turn this short, and the deterministic tier measured the
-     * race at ~1 run in 6. Two gateway requests is the scripted turn's own
-     * completion signal. */
-    const scriptedRequestsPerTurn = 2;
-    await expect
-      .poll(() => fixture!.gatewayRequests.length, { timeout: 120_000 })
-      .toBeGreaterThanOrEqual(scriptedRequestsPerTurn);
+    /* Wait for the seeded turn to finish rather than cancelling it: a cancel
+     * races a turn this short, and the deterministic tier measured the race at
+     * ~1 run in 6. The file on disk plus a settled run is the completion signal
+     * this tier has — a live seed's request count is not scripted. */
+    await waitForProjectOnDisk(session.pickedDirectory, slug, { extension: '.scad' });
+    await waitForRunToSettle(page, 300_000);
     await selectChatModel(page, modelName);
     /* Gate the live turn's liveness on the seed's mtime. Ungated, both signals
      * are satisfied by the *mocked* turn: `waitForProjectOnDisk` finds the
@@ -118,7 +120,7 @@ test.skipIf(!live)('builds a model on disk with a live frontier model', async ()
     const seedWritten = statSync(
       await waitForProjectOnDisk(session.pickedDirectory, slug, { extension: '.scad' }),
     ).mtimeMs;
-    const creditsBefore = await tauCreditBalanceMicro(token);
+    const creditsBefore = await tauCreditBalanceAtoms(token);
     const liveStart = Date.now();
     await sendPrompt(page, prompt);
     /* The file, not the stop button, is the liveness signal: on a stalled run
@@ -128,20 +130,23 @@ test.skipIf(!live)('builds a model on disk with a live frontier model', async ()
       writtenAfter: seedWritten,
     });
     await waitForRunToSettle(page, 480_000);
-    const creditsAfter = await tauCreditBalanceMicro(token);
-    const spentMicro = creditsBefore - creditsAfter;
+    const creditsAfter = await tauCreditBalanceAtoms(token);
+    const spentAtoms = creditsBefore - creditsAfter;
     console.info(
-      `[desktop-e2e] live spend: ${String(spentMicro)} micro-dollars ` +
+      `[desktop-e2e] live spend: ${String(spentAtoms)} credit atoms ` +
         `(${String(creditsBefore)} → ${String(creditsAfter)}) over ${String(Date.now() - liveStart)} ms`,
     );
     /* Acceptance 6 asks for *real spend recorded*. Without this the lane
      * passes when the run never reached a provider. Live tier only — the whole
-     * test is `skipIf(!live)`, and the seeding turn above is mocked, so a
-     * non-zero balance delta can only come from the live turn. */
-    expect(spentMicro, 'the live run metered no credits — no provider call was made').toBeGreaterThan(0);
+     * test is `skipIf(!live)`, and the balance is sampled after the seeding turn
+     * has settled, so a non-zero delta can only come from the live turn. */
+    expect(spentAtoms, 'the live run metered no credits — no provider call was made').toBeGreaterThan(0);
     const source = readFileSync(sourcePath, 'utf8');
     console.info(`[desktop-e2e] live model=${modelName} wrote ${sourcePath} (${String(source.length)} bytes)`);
     expect(source.length).toBeGreaterThan(0);
+
+    /* Live or not, the turn ran in the services utility (D18). */
+    await expectLauncher2Turn(session.logPath, join(session.pickedDirectory, slug), activeChatId(page));
 
     await expectCount(page.getByText(/ROOT_UNAVAILABLE/u), 0);
     await expectVisible(page.getByTestId('cad-viewer-canvas-region').locator('canvas'), 120_000);

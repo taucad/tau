@@ -29,9 +29,10 @@ const inside = (root: string, path: string): string => {
 };
 
 /** Resolve the prepared native payload owned by the desktop app. */
-export const build123dKernelOptions = (): z.infer<typeof build123dOptionsSchema> => {
+export const build123dKernelOptions = (
+  trustFile = process.env['TAU_NATIVE_CODE_TRUST_FILE'],
+): z.infer<typeof build123dOptionsSchema> => {
   const resourceRoot = process.env['TAU_BUILD123D_RESOURCE_ROOT'];
-  const trustFile = process.env['TAU_NATIVE_CODE_TRUST_FILE'];
   if (!resourceRoot || !trustFile) {
     throw new Error('The desktop shell did not supply Build123d resources and project trust.');
   }

@@ -1,28 +1,31 @@
 /* eslint-disable @typescript-eslint/naming-convention -- Anthropic's provider wire is snake_case. */
 import { createServer } from 'node:http';
 import type { Page } from 'playwright';
+import { desktopE2EProviderStubUrl } from '#support/config.js';
 
 /**
- * The deterministic chat tier's mocked model gateway (substrate wave S0).
+ * The deterministic chat tier's stubbed **provider upstream** (D16/D19).
  *
- * A desktop port of `apps/ui-e2e/src/support/browser-command.ts`'s
- * `uiInstallAgentHostGatewayFixture`. A Tau turn runs in the renderer's browser
- * agent host, which speaks a provider wire straight to
- * `POST <api>/v1/llm/anthropic/v1/messages`; the API is a dumb pipe on that
- * path. Redirecting exactly that request to a local server makes the chat tier
- * deterministic without an API key, a provider round trip or the retired `tau`
- * replay wire (charter ruling C3's re-rule, 2026-09-02).
+ * It used to be a mocked *gateway*: a page route redirected the renderer's
+ * `POST <api>/v1/llm/anthropic/v1/messages` to this server and the API was
+ * bypassed entirely. Two things retired that shape. D18 removed the desktop's
+ * browser placement row, so every desktop turn now runs in the services utility
+ * and calls the API with Node `fetch` that no page route can touch; and D19 asks
+ * for launcher 2 verified against the *real* Tau gateway.
  *
- * Three differences from the web fixture:
+ * So this server moved one hop further out. `global-setup.ts` names it to the API
+ * as `TAU_LLM_PROVIDER_UPSTREAM_URL`, and every funded call arrives here as
+ * `POST /v1/messages` having already passed admission, qualification and the
+ * catalog→supplier rewrite. That makes the whole chain assertable without a
+ * provider key: what this server sees is the *supplier* model id, which is the
+ * forwarded half of D16's one vocabulary.
  *
- * - The renderer's document origin is `app://tau`, so every CORS header echoes
- *   the request's own `origin` rather than a test base URL.
- * - `GET /v1/models` is **not** stubbed. `ui-e2e`'s browser-host vertical runs
- *   with no API at all and has to fake the catalog; this suite boots a real API
- *   on its own port for auth, projects and credits, and that API already serves
- *   the same rows out of `model.constants.ts`. A second copy could only drift.
- * - Only the Anthropic path is redirected, so the live tier can seed a project
- *   on the mock for free and still spend on a real OpenAI row.
+ * Two things it deliberately does not do:
+ *
+ * - `GET /v1/models` is **not** stubbed. This suite boots a real API on its own
+ *   port, and that API already serves the same rows out of `model.constants.ts`.
+ * - No CORS. The only client is the API's own Node `fetch`; the renderer talks to
+ *   the API origin it is allowed to connect to and never to 127.0.0.1.
  *
  * The scripted turn is the simplest one that proves the whole desktop chain:
  * one `create_file` writing a real OpenSCAD model to `main.scad` (so the native
@@ -32,8 +35,10 @@ import type { Page } from 'playwright';
 
 /** The catalog row the deterministic specs drive, and the wire it speaks. */
 export const gatewayFixtureModelName = 'Haiku 4.5';
-/** The same row's catalog id, as it appears on the wire. */
+/** The same row's catalog id — what a client sends, and all the gateway accepts. */
 export const gatewayFixtureModelId = 'anthropic-claude-haiku-4.5';
+/** The supplier id the gateway rewrites that row to; what this stub must receive. */
+export const gatewayFixtureSupplierModelId = 'claude-haiku-4-5-20251001';
 
 /** The assistant's opening line, before the tool call. */
 export const gatewayFixtureOpeningText = 'Browser host started the workspace change.';
@@ -60,35 +65,41 @@ export type GatewayFixtureFile = {
   readonly content: string;
 };
 
+/** One deterministic tool call emitted by the gateway on its own model round. */
+export type GatewayFixtureToolCall = {
+  readonly name: string;
+  readonly input: Readonly<Record<string, unknown>>;
+};
+
+/** Optional multi-round tool script; the existing single-file input remains the default. */
+export type GatewayFixtureScript = {
+  readonly toolCalls: readonly GatewayFixtureToolCall[];
+};
+
 const defaultGatewayFixtureFile: GatewayFixtureFile = {
   targetFile: 'main.scad',
   content: gatewayFixtureScadSource,
 };
 
-/** The renderer's document origin, and therefore every request's `Origin`. */
-const desktopAppOrigin = 'app://tau';
-const gatewayPath = '/v1/llm/anthropic/v1/messages';
+/** The path the API's anthropic adapter targets, origin-swapped to this stub. */
+const upstreamPath = '/v1/messages';
 
 /** One installed fixture: what it saw, and how to take it down. */
 export type GatewayFixture = {
-  /** Every gateway request body, in order. */
+  /** Every forwarded provider request body, in order, as the supplier saw it. */
   readonly gatewayRequests: readonly unknown[];
-  /** Every `\/v1\/chat\/` path the renderer still called, in order. */
+  /** Each forwarded request's `model`, in order — the supplier ids the gateway rewrote to. */
+  readonly supplierModels: readonly string[];
+  /** The `anthropic-beta` header value of every forwarded request, `undefined` when absent. */
+  readonly supplierBetas: ReadonlyArray<string | undefined>;
+  /** Every `\/v1\/chat\/` path the renderer called, in order. */
   readonly apiChatRequests: readonly string[];
-  /**
-   * The port the mock listens on.
-   *
-   * Launcher 2 needs it *before* the app starts: the services utility reads
-   * `TAU_DESKTOP_AGENT_GATEWAY_URL` at fork time and calls the gateway with
-   * Node `fetch`, which no page route can touch.
-   */
-  readonly port: number;
-  /** Point one renderer's own gateway and chat calls at this mock. */
+  /** Record one renderer's API chat calls. Nothing is redirected any more. */
   readonly routeThrough: (page: Page) => Promise<void>;
   readonly close: () => Promise<void>;
 };
 
-type WireMessage = { readonly content?: unknown };
+type WireMessage = { readonly content?: unknown; readonly role?: unknown };
 
 /**
  * Whether the tool this request is answering has just run.
@@ -112,27 +123,42 @@ export const endsWithToolResult = (body: { readonly messages?: readonly WireMess
   return Array.isArray(last) && last.some((block) => (block as { readonly type?: string }).type === 'tool_result');
 };
 
-const corsHeaders = (origin: string | undefined): Record<string, string> => ({
-  'access-control-allow-credentials': 'true',
-  'access-control-allow-headers': 'accept,anthropic-version,authorization,content-type',
-  'access-control-allow-methods': 'OPTIONS,POST',
-  'access-control-allow-origin': origin ?? desktopAppOrigin,
-});
+const completedToolCallCount = (body: { readonly messages?: readonly WireMessage[] }): number => {
+  let count = 0;
+  const { messages = [] } = body;
+  for (const message of messages.toReversed()) {
+    if (message.role !== 'user') {
+      continue;
+    }
+    const { content } = message;
+    let messageResults = 0;
+    if (Array.isArray(content)) {
+      messageResults = content.filter((block) => (block as { readonly type?: string }).type === 'tool_result').length;
+    }
+    if (messageResults === 0) {
+      break;
+    }
+    count += messageResults;
+  }
+  return count;
+};
 
 /**
- * Serve the Anthropic wire locally, without binding it to a renderer yet.
+ * Serve the provider upstream locally, without binding it to a renderer yet.
  *
- * Split from {@link installGatewayFixture} for launcher 2, whose gateway caller
- * is the services utility rather than the page: its `TAU_DESKTOP_AGENT_GATEWAY_URL`
- * has to be known before `electron.launch`, so the server must outlive — and
- * predate — any page.
+ * Started per test and torn down in `afterEach`, on the fixed port the API was
+ * told about once at boot ({@link desktopE2EProviderStubUrl}).
  *
  * @returns The live fixture; close it in `afterEach`.
  */
 export const startGatewayFixture = async (
-  file: GatewayFixtureFile = defaultGatewayFixtureFile,
+  input: GatewayFixtureFile | GatewayFixtureScript = defaultGatewayFixtureFile,
 ): Promise<GatewayFixture> => {
+  const toolCalls: readonly GatewayFixtureToolCall[] =
+    'toolCalls' in input ? input.toolCalls : [{ name: 'create_file', input }];
   const gatewayRequests: unknown[] = [];
+  const supplierModels: string[] = [];
+  const supplierBetas: Array<string | undefined> = [];
   const apiChatRequests: string[] = [];
   let requestIndex = 0;
 
@@ -140,23 +166,16 @@ export const startGatewayFixture = async (
     // async-iife: bootstrap
     // Node owns request-listener settlement; failures become connection errors.
     void (async () => {
-      const headers = corsHeaders(request.headers.origin);
       try {
-        if (request.method === 'OPTIONS') {
-          response.writeHead(204, {
-            ...headers,
-            'access-control-allow-headers':
-              request.headers['access-control-request-headers'] ?? headers['access-control-allow-headers'],
-          });
-          response.end();
-          return;
+        const requestPath = new URL(request.url ?? '/', 'http://desktop-provider-stub.invalid').pathname;
+        if (request.method !== 'POST' || requestPath !== upstreamPath) {
+          throw new Error(`Unexpected provider upstream request: ${request.method ?? 'unknown'} ${requestPath}`);
         }
-        const requestPath = new URL(request.url ?? '/', 'http://desktop-gateway.invalid').pathname;
-        if (request.method !== 'POST' || requestPath !== gatewayPath) {
-          throw new Error(`Unexpected browser-host gateway request: ${request.method ?? 'unknown'} ${requestPath}`);
-        }
+        /* The gateway forwards exactly the Anthropic headers the funded request
+         * contract admits (`billable-model-qualification.ts`), so a missing
+         * version means the request did not come through the gateway. */
         if (request.headers['anthropic-version'] !== '2023-06-01') {
-          throw new Error('Browser-host Anthropic gateway request omitted anthropic-version: 2023-06-01.');
+          throw new Error('Forwarded Anthropic request omitted anthropic-version: 2023-06-01.');
         }
 
         const chunks: string[] = [];
@@ -164,15 +183,36 @@ export const startGatewayFixture = async (
         for await (const chunk of request) {
           chunks.push(String(chunk));
         }
-        const body = JSON.parse(chunks.join('')) as { readonly messages?: readonly WireMessage[] };
+        const body = JSON.parse(chunks.join('')) as {
+          readonly messages?: readonly WireMessage[];
+          readonly model?: unknown;
+        };
         gatewayRequests.push(body);
+        /* D16's forwarded half, asserted where it is actually observable: the
+         * client sent the catalog route id and the gateway rewrote it. Refused
+         * rather than recorded — a catalog id arriving here would mean the
+         * gateway relayed the request untranslated. */
+        if (body.model !== gatewayFixtureSupplierModelId) {
+          throw new Error(
+            `Forwarded provider request carried model ${JSON.stringify(body.model)}; expected the supplier id ${gatewayFixtureSupplierModelId}.`,
+          );
+        }
+        supplierModels.push(body.model);
+        const beta = request.headers['anthropic-beta'];
+        supplierBetas.push(Array.isArray(beta) ? beta.join(',') : beta);
 
         const index = requestIndex++;
-        const closing = endsWithToolResult(body);
+        const completedCalls = completedToolCallCount(body);
+        const toolCall = toolCalls[completedCalls];
+        const closing = toolCall === undefined;
         const writeEvent = (event: string, data: unknown): void => {
           response.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
         };
-        response.writeHead(200, { ...headers, 'cache-control': 'no-cache', 'content-type': 'text/event-stream' });
+        response.writeHead(200, {
+          'cache-control': 'no-cache',
+          'content-type': 'text/event-stream',
+          'x-tau-operation-id': `desktop-e2e-operation-${String(index)}`,
+        });
         response.flushHeaders();
         writeEvent('message_start', {
           type: 'message_start',
@@ -184,7 +224,11 @@ export const startGatewayFixture = async (
             model: gatewayFixtureModelId,
             stop_reason: null,
             stop_sequence: null,
-            usage: { input_tokens: 20, output_tokens: 0 },
+            /* All four dimensions the haiku route prices. Anthropic reports the two
+             * cache counters on every stream, and the API's evidence collector treats
+             * a missing one as `absorbed_unknown`: the turn then never settles and the
+             * account's balance never moves, which is exactly what the receipt asserts. */
+            usage: { input_tokens: 20, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, output_tokens: 0 },
           },
         });
         writeEvent('content_block_start', {
@@ -202,7 +246,7 @@ export const startGatewayFixture = async (
           writeEvent('message_delta', {
             type: 'message_delta',
             delta: { stop_reason: 'end_turn', stop_sequence: null },
-            usage: { output_tokens: 9 },
+            usage: { cache_creation_input_tokens: 0, cache_read_input_tokens: 0, output_tokens: 9 },
           });
         } else {
           writeEvent('content_block_start', {
@@ -211,7 +255,7 @@ export const startGatewayFixture = async (
             content_block: {
               type: 'tool_use',
               id: `desktop-e2e-call-${String(index)}`,
-              name: 'create_file',
+              name: toolCall.name,
               input: {},
             },
           });
@@ -220,14 +264,14 @@ export const startGatewayFixture = async (
             index: 1,
             delta: {
               type: 'input_json_delta',
-              partial_json: JSON.stringify(file),
+              partial_json: JSON.stringify(toolCall.input),
             },
           });
           writeEvent('content_block_stop', { type: 'content_block_stop', index: 1 });
           writeEvent('message_delta', {
             type: 'message_delta',
             delta: { stop_reason: 'tool_use', stop_sequence: null },
-            usage: { output_tokens: 48 },
+            usage: { cache_creation_input_tokens: 0, cache_read_input_tokens: 0, output_tokens: 48 },
           });
         }
         writeEvent('message_stop', { type: 'message_stop' });
@@ -236,40 +280,28 @@ export const startGatewayFixture = async (
         /* Destroying the socket makes a rejected request invisible to the spec:
          * the chat simply never advances and the poll dies at its timeout with
          * no cause. Name the fault before dropping the wire. */
-        console.error('[desktop-gateway] rejected request', error);
+        console.error('[desktop-provider-stub] rejected request', error);
         response.destroy(error instanceof Error ? error : new Error(String(error)));
       }
     })();
   });
+  const stub = new URL(desktopE2EProviderStubUrl);
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject);
-    server.listen(0, '127.0.0.1', () => {
+    server.listen(Number(stub.port), stub.hostname, () => {
       server.off('error', reject);
       resolve();
     });
   });
-  const address = server.address();
-  if (!address || typeof address === 'string') {
-    throw new Error('The desktop gateway fixture did not bind a TCP address.');
-  }
 
   const routeThrough = async (page: Page): Promise<void> => {
     const context = page.context();
-    /* Only the Anthropic wire, never `/v1/llm/` wholesale: the live tier seeds
-     * its project on this mock and then spends on an OpenAI row, so a broader
-     * route would swallow the one turn that is supposed to reach a provider.
-     *
-     * Redirected below the renderer's CSP: the page still sees the API origin it
-     * is allowed to connect to, and `connect-src` never learns about 127.0.0.1. */
-    await context.route(/\/v1\/llm\/anthropic\//u, async (route) => {
-      const url = new URL(route.request().url());
-      url.hostname = '127.0.0.1';
-      url.port = String(address.port);
-      await route.continue({ url: url.href });
-    });
-    /* A browser-placed chat's runs live in its durable log on disk, never in
-     * the API. Recorded, never redirected — the call reaches the API exactly as
-     * it did before, so this observation changes no behaviour. */
+    /* Recorded, never redirected: a chat's runs live in its durable log on disk,
+     * and this call reaches the API exactly as it did before, so the observation
+     * changes no behaviour. The renderer's own `/v1/llm/` route is gone with the
+     * browser placement (D18) — the services utility calls the gateway with Node
+     * `fetch`, which no page route can see, and the stub above is where that
+     * traffic is observed instead. */
     await context.route(/\/v1\/chat\//u, async (route) => {
       apiChatRequests.push(new URL(route.request().url()).pathname);
       await route.continue();
@@ -278,7 +310,8 @@ export const startGatewayFixture = async (
 
   return {
     apiChatRequests,
-    port: address.port,
+    supplierModels,
+    supplierBetas,
     routeThrough,
     close: async () =>
       new Promise<void>((resolve) => {
@@ -292,9 +325,10 @@ export const startGatewayFixture = async (
 };
 
 /**
- * Start the mock and bind it to one renderer — the browser-host tiers' form.
+ * Start the stub and record one renderer's API chat calls.
  *
  * @param page - The Electron renderer page, already launched.
+ * @param file - The file the scripted `create_file` writes.
  * @returns The live fixture; close it in `afterEach`.
  */
 export const installGatewayFixture = async (page: Page, file?: GatewayFixtureFile): Promise<GatewayFixture> => {

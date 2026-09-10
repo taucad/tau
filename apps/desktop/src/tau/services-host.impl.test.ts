@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MessageChannel } from 'node:worker_threads';
@@ -6,9 +6,59 @@ import { MessageChannel } from 'node:worker_threads';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createAgentChannelClient } from '@taucad/agent-host/channel-client';
 import type { AgentChannelClient } from '@taucad/agent-host/channel-client';
+import type * as TauHost from '@taucad/host';
+import type * as AgentTools from '@taucad/host/agent-tools';
+import type * as RuntimeClient from '@taucad/runtime/client';
 
 import { createServicesHost } from '#tau/services-host.impl.js';
-import type { ServicesHostOptions, UtilityMessage, UtilityPort } from '#tau/services-host.impl.js';
+import type { AgentHostConfig, ServicesHostOptions, UtilityMessage, UtilityPort } from '#tau/services-host.impl.js';
+
+/**
+ * Every `createAcpExternalAgentPort` call the utility makes, in order.
+ *
+ * The MCP wiring is invisible from the channel — it only shows up in what the
+ * external-agent port was handed — so the real factory is wrapped rather than
+ * replaced: every other assertion in this file still exercises the genuine
+ * port, including its "cannot start the codex agent" refusal.
+ */
+const acpPortCalls = vi.hoisted(() => [] as Array<Parameters<typeof TauHost.createAcpExternalAgentPort>[0]>);
+const toolRegistryCalls = vi.hoisted(() => [] as Array<Parameters<typeof AgentTools.createHostToolRegistry>[0]>);
+const runtimeClientCalls = vi.hoisted(() => [] as Array<ReturnType<typeof RuntimeClient.createRuntimeClient>>);
+
+vi.mock('@taucad/host', async (importOriginal) => {
+  const actual = await importOriginal<typeof TauHost>();
+  return {
+    ...actual,
+    createAcpExternalAgentPort: (options: Parameters<typeof TauHost.createAcpExternalAgentPort>[0]) => {
+      acpPortCalls.push(options);
+      return actual.createAcpExternalAgentPort(options);
+    },
+  };
+});
+
+vi.mock('@taucad/host/agent-tools', async (importOriginal) => {
+  const actual = await importOriginal<typeof AgentTools>();
+  return {
+    ...actual,
+    createHostToolRegistry: (options: Parameters<typeof actual.createHostToolRegistry>[0]) => {
+      toolRegistryCalls.push(options);
+      return actual.createHostToolRegistry(options);
+    },
+  };
+});
+
+vi.mock('@taucad/runtime/client', async (importOriginal) => {
+  const actual = await importOriginal<typeof RuntimeClient>();
+  return {
+    ...actual,
+    createRuntimeClient: (...args: Parameters<typeof actual.createRuntimeClient>) => {
+      const client = actual.createRuntimeClient(...args);
+      vi.spyOn(client, 'terminate');
+      runtimeClientCalls.push(client);
+      return client;
+    },
+  };
+});
 
 const homeRoot = '/Users/tester/Library/Application Support/Tau/home';
 
@@ -96,8 +146,9 @@ describe('createServicesHost — concern ports', () => {
 describe('createServicesHost — agent host configuration', () => {
   const config = {
     gatewayBaseUrl: 'http://localhost:4000/v1/llm',
-    model: { id: 'openai-gpt-5.6-luna', contextWindow: 400_000 },
     systemPrompt: 'You are Tau.',
+    tauApiUrl: 'http://localhost:4000',
+    tauWebSocketUrl: 'ws://localhost:4001',
   };
 
   it('stores the frame rather than constructing a host', () => {
@@ -107,7 +158,12 @@ describe('createServicesHost — agent host configuration', () => {
     host.handleMessage(frame({ type: 'agentHost', config }));
 
     expect(host.agentHostConfig()).toEqual(config);
-    expect(log).toHaveBeenCalledWith('agent-host-config-received', { model: 'openai-gpt-5.6-luna' });
+    expect(log).toHaveBeenCalledWith('agent-host-config-received', {
+      gatewayBaseUrl: 'http://localhost:4000/v1/llm',
+      /* The utility's own witness of what main discovered; empty here because
+       * this frame carries no adapters. */
+      externalAgents: [],
+    });
     /* The superseded accessor and its `createAgentHost` seam are gone. */
     expect(host).not.toHaveProperty('agentHost');
   });
@@ -146,24 +202,49 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
       channel.port1.close();
       channel.port2.close();
     }
+    for (const host of hosts.splice(0)) {
+      host.dispose();
+    }
+    acpPortCalls.length = 0;
+    toolRegistryCalls.length = 0;
+    runtimeClientCalls.length = 0;
     await Promise.all(workspaces.splice(0).map(async (root) => rm(root, { recursive: true, force: true })));
   });
 
+  /** Hosts to dispose, so the utility's loopback listener never outlives a test. */
+  const hosts: Array<ReturnType<typeof createServicesHost>> = [];
+
   const config = {
     gatewayBaseUrl: 'http://localhost:4000/v1/llm',
-    model: { id: 'openai-gpt-5.6-luna', contextWindow: 400_000 },
     systemPrompt: 'You are Tau.',
+    tauApiUrl: 'http://localhost:4000',
+    tauWebSocketUrl: 'ws://localhost:4001',
   };
 
   /** A configured host with one real, granted workspace directory. */
-  const configuredHost = async () => {
+  const configuredHost = async (
+    overrides: Partial<AgentHostConfig> = {},
+    hostOverrides: Partial<ServicesHostOptions> = {},
+  ) => {
     const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-desktop-agent-'));
     workspaces.push(workspaceRoot);
-    const harness = hostHarness();
+    const harness = hostHarness(hostOverrides);
+    hosts.push(harness.host);
     harness.host.handleMessage(frame({ type: 'allowRoots', roots: [workspaceRoot] }));
-    harness.host.handleMessage(frame({ type: 'agentHost', config }));
+    harness.host.handleMessage(frame({ type: 'agentHost', config: { ...config, ...overrides } }));
     return { ...harness, workspaceRoot };
   };
+
+  /** One external-agent turn, admitted the way the renderer admits it. */
+  const startExternal = async (client: AgentChannelClient, agentId: string): Promise<unknown> =>
+    client.execute({
+      type: 'start',
+      trigger: 'submit',
+      chatId: `chat-${agentId}`,
+      runId: `run-${agentId}`,
+      message: { id: 'message-1', role: 'user', content: 'Model a bracket.' },
+      config: { agent: { kind: 'acp', id: agentId }, systemPrompt: 'You are Tau.', toolChoice: 'auto' },
+    });
 
   /**
    * Hand the host one leg of a `worker_threads` channel and dial the other.
@@ -175,7 +256,7 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
     const channel = new MessageChannel();
     channels.push(channel);
     host.handleMessage(
-      frame({ type: 'concern', concern: 'agentHost', context: { workspaceRoot } }, [
+      frame({ type: 'concern', concern: 'agentHost', context: { workspaceRoot, nativeTrustFile: '/trust/widget' } }, [
         channel.port1 as unknown as UtilityPort,
       ]),
     );
@@ -197,6 +278,38 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
     });
   });
 
+  it('terminates a connected runtime client when its main-owned port closes', async () => {
+    let closePort: (() => void) | undefined;
+    const terminate = vi.fn();
+    const runtimePort = {
+      on: vi.fn((event: string, listener: () => void) => {
+        if (event === 'close') {
+          closePort = listener;
+        }
+      }),
+      off: vi.fn(),
+      start: vi.fn(),
+      close: vi.fn(),
+      postMessage: vi.fn(),
+    };
+    const { host, workspaceRoot } = await configuredHost(
+      {},
+      {
+        requestRuntimePort: vi.fn(async () => ({ port: runtimePort, release: vi.fn() })),
+      },
+    );
+    connect(host, workspaceRoot);
+    const registry = toolRegistryCalls.at(-1)!;
+    await registry.runtimeClient!(workspaceRoot);
+    vi.mocked(runtimeClientCalls[0]!.terminate).mockImplementation(terminate);
+
+    closePort!();
+
+    await vi.waitFor(() => {
+      expect(terminate).toHaveBeenCalledOnce();
+    });
+  });
+
   it('keeps one always-on launcher per root across connections', async () => {
     const { host, log, workspaceRoot } = await configuredHost();
     connect(host, workspaceRoot);
@@ -210,6 +323,173 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
       ['agent-host-served', { workspaceRoot, reused: true }],
     ]);
   });
+
+  it('starts no external agents when main discovered none', async () => {
+    /* The honest empty list, not a refusal: a machine without the pinned
+     * adapters — or without their CLIs — is simply a Tau-runs-only host. */
+    const { host, workspaceRoot } = await configuredHost();
+    await expect(startExternal(connect(host, workspaceRoot), 'codex')).rejects.toThrow(/runs no acp agents/u);
+  });
+
+  it('wires the agents main discovered into launcher 2, and only those', async () => {
+    const { host, workspaceRoot } = await configuredHost({
+      externalAgents: [
+        {
+          id: 'claude',
+          displayName: 'Claude Code',
+          package: '@agentclientprotocol/claude-agent-acp',
+          version: '0.70.0',
+          cli: 'claude',
+          configEnv: ['CLAUDE_CONFIG_DIR'],
+          modulePath: '/opt/adapters/claude-agent-acp.mjs',
+        },
+      ],
+    });
+    const client = connect(host, workspaceRoot);
+
+    /* The port's own inventory answers — a different refusal from the "runs no
+     * acp agents" above, and the only way to reach it is a wired port whose
+     * list is exactly what main discovered. */
+    await expect(startExternal(client, 'codex')).rejects.toThrow(/cannot start the codex agent/u);
+  });
+
+  it('serves its own MCP endpoint to the agents it wires (V7)', async () => {
+    const { host, workspaceRoot } = await configuredHost({
+      externalAgents: [
+        {
+          id: 'codex',
+          displayName: 'Codex',
+          package: '@agentclientprotocol/codex-acp',
+          version: '0.5.6',
+          cli: 'codex',
+          configEnv: ['CODEX_HOME'],
+          modulePath: '/opt/adapters/codex-acp.mjs',
+        },
+      ],
+    });
+    connect(host, workspaceRoot);
+
+    const [wired] = acpPortCalls;
+    expect(wired).toBeDefined();
+    /* The socket binds a tick after the connection is served, exactly as the
+     * daemon's own URL resolves per run rather than at wiring time. */
+    await expect.poll(() => wired!.mcp?.url ?? '').toMatch(/^http:\/\/127\.0\.0\.1:\d+\/mcp\//u);
+    /* A capability, not the channel token (VI4): a distinct prefix, a distinct
+     * secret, and a grant of the four read-only tools. */
+    expect(wired!.mcp?.mint({ runId: 'run-1', chatId: 'chat-1' }).token).toMatch(/^tau-mcp-host-v1\./u);
+
+    /* The listener is real and the route reaches the endpoint: an unadmitted
+     * request is refused by the capability check, not by a missing route. */
+    const refused = await fetch(wired!.mcp!.url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }),
+    });
+    expect(refused.status).toBe(401);
+    const unrouted = await fetch(new URL('/mcp/elsewhere', wired!.mcp!.url));
+    expect(unrouted.status).toBe(404);
+  });
+
+  it('records one finalized revision per turn on launcher 2 (V17)', async () => {
+    const { host, workspaceRoot } = await configuredHost();
+    await writeFile(join(workspaceRoot, 'main.ts'), 'export const size = 1;\n');
+    const client = connect(host, workspaceRoot);
+
+    /* The gateway is main's real URL and nothing is listening, so the turn is
+       admitted and then fails. That is the point: a revision is recorded for
+       every turn that *ran*, not only for one that succeeded — the writes a
+       failed turn already made are exactly what would otherwise be unrecorded. */
+    await client.execute({
+      type: 'start',
+      trigger: 'submit',
+      chatId: 'chat-revision',
+      runId: 'run-revision',
+      message: { id: 'message-1', role: 'user', content: 'Model a bracket.' },
+      config: {
+        systemPrompt: 'You are Tau.',
+        toolChoice: 'auto',
+        model: { id: 'fixture-model', providerKind: 'vertexai', contextWindow: 200_000 },
+      },
+    });
+
+    /* Read off disk rather than through the launcher: the utility keeps its
+       launchers private, and the store the revision lands in is the one a later
+       process — the next window, or R-W4's candidate porcelain — reopens. */
+    const store = join(workspaceRoot, '.tau', 'workspaces', 'revisions');
+    const branch = join(store, 'branches', 'agent%2Fchat-revision.json');
+    const headParents = async (): Promise<readonly string[] | undefined> => {
+      try {
+        const { head } = JSON.parse(await readFile(branch, 'utf8')) as { head: string };
+        const node = JSON.parse(
+          await readFile(join(store, 'nodes', encodeURIComponent(head), 'metadata.json'), 'utf8'),
+        ) as { parents: readonly string[] };
+        return node.parents;
+      } catch {
+        return undefined;
+      }
+    };
+    /* The branch opens at the base (no parent) and moves to the turn revision
+       under a CAS at settlement, so the head worth waiting for is the one that
+       descends from that base. */
+    await expect.poll(headParents, { timeout: 10_000 }).toHaveLength(1);
+  }, 20_000);
+
+  it('registers a candidate turn checkout with main as a runtime context, and releases it at settlement', async () => {
+    const runtimeContext = vi.fn();
+    const { host, workspaceRoot } = await configuredHost({}, { runtimeContext });
+    const client = connect(host, workspaceRoot);
+
+    /* The gateway is unreachable, so the turn is admitted and then fails — and
+       the checkout's whole lifetime still runs: prepared at admission, released
+       at settlement. */
+    await client.execute({
+      type: 'start',
+      trigger: 'submit',
+      chatId: 'chat-candidate',
+      runId: 'run-candidate',
+      mode: 'candidate',
+      message: { id: 'message-1', role: 'user', content: 'Model a bracket.' },
+      config: {
+        systemPrompt: 'You are Tau.',
+        toolChoice: 'auto',
+        model: { id: 'fixture-model', providerKind: 'vertexai', contextWindow: 200_000 },
+      },
+    });
+
+    const checkout = join(workspaceRoot, '.tau', 'workspaces', 'tchat-candidate', 'tree');
+    /* Main answers `requestRuntimePort` only for a registered context, so this
+       pair is what lets a candidate turn's kernel and GeoSpec tools read the
+       tree its file tools write — and stops answering when the tree is gone. */
+    await expect
+      .poll(() => runtimeContext.mock.calls, { timeout: 10_000 })
+      .toEqual([
+        ['register', checkout, workspaceRoot],
+        ['release', checkout, workspaceRoot],
+      ]);
+  }, 20_000);
+
+  it('leaves a direct turn to the project context main already registered', async () => {
+    const runtimeContext = vi.fn();
+    const { host, workspaceRoot } = await configuredHost({}, { runtimeContext });
+    const client = connect(host, workspaceRoot);
+
+    await client.execute({
+      type: 'start',
+      trigger: 'submit',
+      chatId: 'chat-direct',
+      runId: 'run-direct',
+      message: { id: 'message-1', role: 'user', content: 'Model a bracket.' },
+      config: {
+        systemPrompt: 'You are Tau.',
+        toolChoice: 'auto',
+        model: { id: 'fixture-model', providerKind: 'vertexai', contextWindow: 200_000 },
+      },
+    });
+
+    /* A direct turn publishes the live root under its own run id; registering
+       it again would put the project's own context on a turn's lifetime. */
+    expect(runtimeContext).not.toHaveBeenCalled();
+  }, 20_000);
 
   it('refuses a root the user never granted, and closes the port', async () => {
     const { host, log } = await configuredHost();
@@ -235,7 +515,11 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
     const { host, log } = hostHarness();
     host.handleMessage(frame({ type: 'allowRoots', roots: [workspaceRoot] }));
     const port = stubPort();
-    host.handleMessage(frame({ type: 'concern', concern: 'agentHost', context: { workspaceRoot } }, [port]));
+    host.handleMessage(
+      frame({ type: 'concern', concern: 'agentHost', context: { workspaceRoot, nativeTrustFile: '/trust/widget' } }, [
+        port,
+      ]),
+    );
 
     expect(log).toHaveBeenCalledWith('agent-host.not-configured', { workspaceRoot });
     expect(port.close).toHaveBeenCalled();

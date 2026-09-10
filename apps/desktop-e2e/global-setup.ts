@@ -3,9 +3,19 @@ import { execFileSync, spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import { createWriteStream, mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
 import process from 'node:process';
-// oxlint-disable-next-line no-restricted-imports -- Vitest loads global setup before test aliases exist.
-import { desktopE2EApiUrl, desktopE2EFrontendUrl } from './src/support/config.ts';
+/* oxlint-disable no-restricted-imports -- Vitest loads global setup before test aliases exist. */
+import {
+  desktopE2EApiUrl,
+  desktopE2ECompletedArtifact,
+  desktopE2EFrontendUrl,
+  desktopE2EPackagedExecutable,
+  desktopE2EProviderStubKey,
+  desktopE2EProviderStubUrl,
+} from './src/support/config.ts';
+/* oxlint-enable no-restricted-imports */
 
 /**
  * Desktop smoke E2E stack boot (work item Z2).
@@ -46,7 +56,43 @@ const waitForApi = async (child: ChildProcess): Promise<void> => {
   }
 };
 
+const stopChild = async (child: ChildProcess): Promise<void> => {
+  if (child.exitCode !== null || child.signalCode !== null) {
+    return;
+  }
+  await new Promise<void>((resolve) => {
+    const exited = (): void => {
+      clearTimeout(killTimeout);
+      resolve();
+    };
+    const killTimeout = setTimeout(() => {
+      child.kill('SIGKILL');
+    }, 5000);
+    child.once('exit', exited);
+    child.kill('SIGTERM');
+  });
+};
+
+const closeLog = async (apiLog: ReturnType<typeof createWriteStream>): Promise<void> =>
+  new Promise<void>((resolve) => {
+    apiLog.end(resolve);
+  });
+
 export const setup = async (): Promise<() => void> => {
+  if (desktopE2ECompletedArtifact) {
+    desktopE2EPackagedExecutable();
+    const apiUrl = new URL(desktopE2EApiUrl);
+    if (
+      !['127.0.0.1', '[::1]', 'localhost'].includes(apiUrl.hostname) ||
+      desktopE2EApiUrl === 'http://localhost:4014' ||
+      process.env['TAU_E2E_EXTERNAL_SERVICES'] !== 'true'
+    ) {
+      throw new Error(
+        'Completed-artifact E2E requires TAU_E2E_EXTERNAL_SERVICES=true and a non-default loopback-only TAU_E2E_API_URL.',
+      );
+    }
+  }
+
   if (await isApiReady()) {
     throw new Error(`Desktop E2E requires ownership of its dedicated API at ${desktopE2EApiUrl}`);
   }
@@ -65,16 +111,45 @@ export const setup = async (): Promise<() => void> => {
   environment['TAU_API_URL'] = desktopE2EApiUrl;
   environment['TAU_FRONTEND_URL'] = desktopE2EFrontendUrl;
   environment['TAU_TEST_MODE'] = 'true';
+  /* D16/D19: the deterministic tier drives the *real* gateway — admission,
+   * qualification, the catalog→supplier rewrite and metering all run — and only the
+   * last hop lands on this suite's own stub. Process environment beats
+   * `--env-file-if-exists=.env`, so the fixture key wins over both an empty
+   * `.env.example` value and a developer's real one.
+   *
+   * The live tier keeps it too: the seam rewrites only the Anthropic host
+   * (`billing.module.ts`), so the seed turn on the fixture route stays mocked
+   * while the live turn's own wire (`TAU_E2E_LIVE_MODEL`, OpenAI by default)
+   * reaches the real provider and earns the credit delta; an Anthropic live
+   * model would be stubbed and is not a supported live selection. Not the
+   * completed-artifact tier: its isolated API has no billing environment, and
+   * `environmentSchema` refuses this name without `BILLING_ENVIRONMENT=development`. */
+  if (!desktopE2ECompletedArtifact) {
+    environment['TAU_LLM_PROVIDER_UPSTREAM_URL'] = desktopE2EProviderStubUrl;
+    environment['ANTHROPIC_API_KEY'] = desktopE2EProviderStubKey;
+  }
 
   /* Kept, unlike `ui-e2e`'s `stdio: 'ignore'`: a chat run that fails
    * server-side is otherwise invisible from the Electron side of the glass. */
   const logDirectory = resolve(import.meta.dirname, '../../out/test-results/desktop-e2e');
   mkdirSync(logDirectory, { recursive: true });
   const apiLog = createWriteStream(resolve(logDirectory, 'api.log'), { flags: 'w' });
+  // Nest also loads .env from cwd. Completed-package tests use the fixture's
+  // private directory so neither Node nor Nest can read real API credentials.
+  const apiCwd = desktopE2ECompletedArtifact ? process.env['TAU_E2E_API_CWD'] : apiRoot;
+  if (!apiCwd) {
+    throw new Error('Completed-artifact E2E requires the isolated launcher API directory.');
+  }
   const api = spawn(
     process.execPath,
-    ['--env-file-if-exists=.env', '--import', '@oxc-node/core/register', 'dist/main.js'],
-    { cwd: apiRoot, env: environment, stdio: ['ignore', 'pipe', 'pipe'] },
+    [
+      ...(desktopE2ECompletedArtifact ? [] : ['--env-file-if-exists=.env']),
+      '--import',
+      new URL('register.mjs', pathToFileURL(createRequire(import.meta.url).resolve('@oxc-node/core/package.json')))
+        .href,
+      resolve(apiRoot, 'dist/main.js'),
+    ],
+    { cwd: apiCwd, env: environment, stdio: ['ignore', 'pipe', 'pipe'] },
   );
   api.stdout.pipe(apiLog);
   api.stderr.pipe(apiLog);
@@ -82,11 +157,13 @@ export const setup = async (): Promise<() => void> => {
   try {
     await waitForApi(api);
   } catch (error) {
-    api.kill('SIGTERM');
+    await stopChild(api);
+    await closeLog(apiLog);
     throw error;
   }
 
-  return () => {
-    api.kill('SIGTERM');
+  return async () => {
+    await stopChild(api);
+    await closeLog(apiLog);
   };
 };

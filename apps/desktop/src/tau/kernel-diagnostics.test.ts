@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 
-import { desktopAssimpBackend, desktopOpenrscadKernel } from '#tau/desktop-runtime.definition.js';
+import { desktopAssimpBackend, desktopOpenrscadKernel } from '#tau/desktop-runtime.factory.js';
 
 import { kernelEngineEvent, kernelEngineRecord } from '#tau/kernel-diagnostics.js';
 
@@ -14,13 +14,13 @@ describe('kernelEngineRecord', () => {
     expect(
       kernelEngineRecord({
         kernelId: 'openrscad',
-        version: '0.11.0-beta.3',
+        version: '0.11.0-beta.4',
         backend: 'native',
         versions: { electron: '43.5.0', node: '24.19.0' },
       }),
     ).toEqual({
       kernelId: 'openrscad',
-      version: '0.11.0-beta.3',
+      version: '0.11.0-beta.4',
       backend: 'native',
       native: true,
       electron: '43.5.0',
@@ -34,7 +34,7 @@ describe('kernelEngineRecord', () => {
      * now the same string either way, so a witness keyed on it could not fail. */
     const record = kernelEngineRecord({
       kernelId: 'openrscad',
-      version: '0.11.0-beta.3',
+      version: '0.11.0-beta.4',
       backend: 'wasm',
       versions: { electron: '43.5.0', node: '24.19.0' },
     });

@@ -1,3 +1,2 @@
-/* oxlint-disable no-barrel-files/no-barrel-files -- electron-vite requires this default entry; implementation stays in main.ts */
-
-export { bootstrapElectronApp } from '#main/main.js';
+/* oxlint-disable import/no-unassigned-import -- Electron's entry module bootstraps on import. */
+import '#main/main.js';

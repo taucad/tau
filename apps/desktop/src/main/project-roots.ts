@@ -32,6 +32,8 @@ export type ProjectRootRegistry = {
   roots(): readonly string[];
   /** Whether `directory` is an admitted root or lives inside one. */
   isTrusted(directory: string): boolean;
+  /** Canonical spelling of a trusted directory, or undefined when untrusted. */
+  canonical(directory: string): string | undefined;
 };
 
 /** Options for {@link createProjectRootRegistry}. */
@@ -102,6 +104,15 @@ export const createProjectRootRegistry = (options: ProjectRootRegistryOptions = 
        * keeps `…/home-evil` from matching `…/home`. */
       return [...admitted].some((root) => candidate === root || candidate.startsWith(root + sep));
     },
+    canonical(directory) {
+      if (!isAbsolute(directory)) {
+        return undefined;
+      }
+      const candidate = resolve(directory);
+      return [...admitted].some((root) => candidate === root || candidate.startsWith(root + sep))
+        ? candidate
+        : undefined;
+    },
   };
 };
 
@@ -157,7 +168,12 @@ export const sanitizeServicesContext = (payload: unknown): Record<string, string
 };
 
 /** Environment names {@link createKernelForkResolver} may set. */
-export const kernelForkEnvAllowlist = ['TAU_PROJECT_ROOT', 'TAU_RUNTIME_DEBUG', 'TAU_NATIVE_CODE_TRUST_FILE'] as const;
+export const kernelForkEnvAllowlist = [
+  'TAU_PROJECT_ROOT',
+  'TAU_RUNTIME_DEBUG',
+  'TAU_RUNTIME_EPHEMERAL',
+  'TAU_NATIVE_CODE_TRUST_FILE',
+] as const;
 
 /** Options for {@link createKernelForkResolver}. */
 export type KernelForkResolverOptions = {
@@ -167,6 +183,8 @@ export type KernelForkResolverOptions = {
   readonly defaultRoot: string;
   /** Main-owned marker path for this project's native-code trust state. */
   readonly nativeTrustMarkerPath?: (projectRoot: string) => string;
+  /** Permanent absent marker used by memory-backed scratch runtimes. */
+  readonly untrustedNativeMarkerPath?: string;
 };
 
 /**
@@ -182,6 +200,28 @@ export type KernelForkResolverOptions = {
  */
 export const createKernelForkResolver = (options: KernelForkResolverOptions): ElectronRuntimeForkResolver => {
   return (context) => {
+    const { definition, purpose } = context;
+    if (purpose !== undefined && purpose !== 'ephemeral') {
+      throw new Error(`Desktop shell refused unknown runtime purpose: ${purpose}`);
+    }
+    if (definition !== undefined && definition !== 'default' && definition !== 'debug') {
+      throw new Error(`Desktop shell refused unknown runtime definition: ${definition}`);
+    }
+    if (purpose === 'ephemeral') {
+      if (context['projectRoot'] !== undefined || context['root'] !== undefined) {
+        throw new Error('Desktop shell refused a rooted ephemeral runtime.');
+      }
+      if (!options.untrustedNativeMarkerPath) {
+        throw new Error('Desktop shell has no native-code denial marker for an ephemeral runtime.');
+      }
+      return {
+        env: {
+          TAU_RUNTIME_EPHEMERAL: '1',
+          TAU_NATIVE_CODE_TRUST_FILE: options.untrustedNativeMarkerPath,
+          ...(definition === 'debug' ? { TAU_RUNTIME_DEBUG: '1' } : {}),
+        },
+      };
+    }
     const requested = context['projectRoot'];
     if (requested !== undefined && !options.registry.isTrusted(requested)) {
       throw new Error(`Desktop shell refused an untrusted project root: ${requested}`);
@@ -203,7 +243,7 @@ export const createKernelForkResolver = (options: KernelForkResolverOptions): El
          * anything here. This arm and `debugRuntime` are the shell's half of
          * the E6 contract and cost one branch; removing them would mean
          * rebuilding both when the renderer gains the toggle. */
-        ...(context['definition'] === 'debug' ? { TAU_RUNTIME_DEBUG: '1' } : {}),
+        ...(definition === 'debug' ? { TAU_RUNTIME_DEBUG: '1' } : {}),
       },
     };
   };

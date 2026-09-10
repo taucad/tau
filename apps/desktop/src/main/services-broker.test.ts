@@ -7,21 +7,32 @@ import type { ServicesBrokerOptions } from '#main/services-broker.js';
 type Spawned = {
   postMessage: ReturnType<typeof vi.fn>;
   kill: ReturnType<typeof vi.fn>;
-  on: (event: 'exit', listener: () => void) => void;
+  on: (event: 'exit' | 'message', listener: (value?: unknown) => void) => void;
   exit: () => void;
+  message: (data: unknown) => void;
 };
 
 const spawnUtility = (): Spawned => {
   const exits: Array<() => void> = [];
+  const messages: Array<(message: unknown) => void> = [];
   return {
     postMessage: vi.fn(),
     kill: vi.fn(),
-    on: (_event, listener) => {
-      exits.push(listener);
+    on: (event, listener) => {
+      if (event === 'exit') {
+        exits.push(listener);
+      } else {
+        messages.push(listener);
+      }
     },
     exit: () => {
       for (const listener of exits) {
         listener();
+      }
+    },
+    message: (data) => {
+      for (const listener of messages) {
+        listener(data);
       }
     },
   };
@@ -29,18 +40,27 @@ const spawnUtility = (): Spawned => {
 
 const brokerHarness = () => {
   const spawns: Spawned[] = [];
+  const runtimeExits: Array<() => void> = [];
   const fork = vi.fn((): Spawned => {
     const utility = spawnUtility();
     spawns.push(utility);
     return utility;
   });
+  const connectRuntime = vi.fn(() => ({
+    port: { id: 'runtime' },
+    closed: new Promise<void>((resolve) => {
+      runtimeExits.push(resolve);
+    }),
+    dispose: vi.fn(),
+  }));
   const options = {
     utilityEntry: '/dist/main/chunks/services-host.js',
     env: { PATH: '/usr/bin' },
     fork,
     createChannel: () => ({ port1: { id: 'renderer' }, port2: { id: 'utility' } }),
+    connectRuntime,
   } as unknown as ServicesBrokerOptions;
-  return { broker: createServicesBroker(options), fork, spawns };
+  return { broker: createServicesBroker(options), connectRuntime, fork, runtimeExits, spawns };
 };
 
 describe('createServicesBroker', () => {
@@ -69,6 +89,207 @@ describe('createServicesBroker', () => {
       { type: 'concern', concern: 'agentHost', context: { workspaceRoot: '/home/widget' } },
       [{ id: 'utility' }],
     ]);
+  });
+
+  it('mints runtime ports only from a main-admitted agent context', () => {
+    const { broker, connectRuntime, spawns } = brokerHarness();
+    broker.connect('agentHost', {
+      workspaceRoot: '/home/widget',
+      nativeTrustFile: '/markers/widget.json',
+      computeMode: 'durable',
+    });
+    spawns[0]?.message({ type: 'runtime-port-request', requestId: 'runtime-1', workspaceRoot: '/home/widget' });
+    spawns[0]?.message({ type: 'runtime-port-request', requestId: 'runtime-2', workspaceRoot: '/home/other' });
+
+    expect(spawns[0]?.postMessage).toHaveBeenCalledWith({ type: 'runtime-port', requestId: 'runtime-1' }, [
+      { id: 'runtime' },
+    ]);
+    expect(spawns[0]?.postMessage).toHaveBeenCalledWith({ type: 'runtime-port-refused', requestId: 'runtime-2' });
+    expect(connectRuntime).toHaveBeenCalledExactlyOnceWith({
+      projectRoot: '/home/widget',
+      computeProjectRoot: '/home/widget',
+      computeMode: 'durable',
+      definition: 'default',
+    });
+  });
+
+  it('canonicalizes equivalent project spellings before retaining compute identity', () => {
+    const { broker, connectRuntime, spawns } = brokerHarness();
+    broker.connect('agentHost', { workspaceRoot: '/home/widget/.', computeMode: 'durable' });
+    spawns[0]?.message({ type: 'runtime-port-request', requestId: 'runtime-1', workspaceRoot: '/home/widget' });
+
+    expect(connectRuntime).toHaveBeenCalledExactlyOnceWith({
+      projectRoot: '/home/widget',
+      computeProjectRoot: '/home/widget',
+      computeMode: 'durable',
+      definition: 'default',
+    });
+  });
+
+  it('retains one original identity across candidates while keeping projects separate', () => {
+    const { broker, connectRuntime, spawns } = brokerHarness();
+    broker.connect('agentHost', { workspaceRoot: '/home/a', computeMode: 'durable' });
+    broker.connect('agentHost', { workspaceRoot: '/home/b', computeMode: 'durable' });
+    for (const [workspaceRoot, projectRoot] of [
+      ['/home/a/.tau/workspaces/one/tree', '/home/a'],
+      ['/home/a/.tau/workspaces/two/tree', '/home/a'],
+      ['/home/b/.tau/workspaces/one/tree', '/home/b'],
+    ] as const) {
+      spawns[0]?.message({ type: 'runtime-context-register', workspaceRoot, projectRoot });
+      spawns[0]?.message({ type: 'runtime-port-request', requestId: workspaceRoot, workspaceRoot });
+    }
+
+    expect(connectRuntime).toHaveBeenNthCalledWith(1, {
+      projectRoot: '/home/a/.tau/workspaces/one/tree',
+      computeProjectRoot: '/home/a',
+      computeMode: 'durable',
+      definition: 'default',
+    });
+    expect(connectRuntime).toHaveBeenNthCalledWith(2, {
+      projectRoot: '/home/a/.tau/workspaces/two/tree',
+      computeProjectRoot: '/home/a',
+      computeMode: 'durable',
+      definition: 'default',
+    });
+    expect(connectRuntime).toHaveBeenNthCalledWith(3, {
+      projectRoot: '/home/b/.tau/workspaces/one/tree',
+      computeProjectRoot: '/home/b',
+      computeMode: 'durable',
+      definition: 'default',
+    });
+    expect(broker.computeProjectRoot('/home/a/.tau/workspaces/one/tree/.')).toBe('/home/a');
+    expect(broker.computeProjectRoot('/home/b/.tau/workspaces/one/tree')).toBe('/home/b');
+  });
+
+  it('mints a runtime port for a candidate turn checkout while it is registered, and not after', () => {
+    const { broker, connectRuntime, spawns } = brokerHarness();
+    broker.connect('agentHost', { workspaceRoot: '/home/widget', computeMode: 'durable' });
+    const checkout = '/home/widget/.tau/workspaces/trun-1/tree';
+    spawns[0]?.message({ type: 'runtime-context-register', workspaceRoot: checkout, projectRoot: '/home/widget' });
+    spawns[0]?.message({ type: 'runtime-port-request', requestId: 'runtime-1', workspaceRoot: checkout });
+
+    /* Rooted at the checkout, not the project: a candidate turn's kernel and
+     * GeoSpec tools must read the tree its file tools write. */
+    expect(connectRuntime).toHaveBeenCalledExactlyOnceWith({
+      projectRoot: checkout,
+      computeProjectRoot: '/home/widget',
+      computeMode: 'durable',
+      definition: 'default',
+    });
+    expect(spawns[0]?.postMessage).toHaveBeenCalledWith({ type: 'runtime-port', requestId: 'runtime-1' }, [
+      { id: 'runtime' },
+    ]);
+
+    spawns[0]?.message({ type: 'runtime-context-release', workspaceRoot: checkout, projectRoot: '/home/widget' });
+    spawns[0]?.message({ type: 'runtime-port-request', requestId: 'runtime-2', workspaceRoot: checkout });
+
+    expect(connectRuntime).toHaveBeenCalledOnce();
+    expect(spawns[0]?.postMessage).toHaveBeenCalledWith({ type: 'runtime-port-refused', requestId: 'runtime-2' });
+  });
+
+  it('registers a checkout only under a granted project, and never evicts the project itself', () => {
+    const { broker, connectRuntime, spawns } = brokerHarness();
+    broker.connect('agentHost', { workspaceRoot: '/home/widget' });
+    /* A checkout outside the granted project, and one under a project nobody
+     * granted: the utility is trusted code, but the grant is main's fence. */
+    spawns[0]?.message({ type: 'runtime-context-register', workspaceRoot: '/etc', projectRoot: '/home/widget' });
+    spawns[0]?.message({
+      type: 'runtime-context-register',
+      workspaceRoot: '/home/other/.tau/workspaces/t/tree',
+      projectRoot: '/home/other',
+    });
+    spawns[0]?.message({ type: 'runtime-port-request', requestId: 'runtime-1', workspaceRoot: '/etc' });
+    spawns[0]?.message({
+      type: 'runtime-port-request',
+      requestId: 'runtime-2',
+      workspaceRoot: '/home/other/.tau/workspaces/t/tree',
+    });
+    /* A release frame naming the project cannot take the project's own context
+     * down with it — only a checkout this broker registered is releasable. */
+    spawns[0]?.message({
+      type: 'runtime-context-release',
+      workspaceRoot: '/home/widget',
+      projectRoot: '/home/widget',
+    });
+    spawns[0]?.message({ type: 'runtime-port-request', requestId: 'runtime-3', workspaceRoot: '/home/widget' });
+
+    expect(connectRuntime).toHaveBeenCalledExactlyOnceWith({
+      projectRoot: '/home/widget',
+      computeProjectRoot: '/home/widget',
+      computeMode: 'off',
+      definition: 'default',
+    });
+  });
+
+  it('forgets the checkouts of a utility that died without releasing them', () => {
+    const { broker, connectRuntime, spawns } = brokerHarness();
+    broker.connect('agentHost', { workspaceRoot: '/home/widget' });
+    const checkout = '/home/widget/.tau/workspaces/trun-1/tree';
+    spawns[0]?.message({ type: 'runtime-context-register', workspaceRoot: checkout, projectRoot: '/home/widget' });
+    /* Only the utility that registered a checkout ever releases it, so one that
+     * dies mid-turn would otherwise leave the root admissible for the life of
+     * the app — over a tree the turn's release already deleted. */
+    spawns[0]?.exit();
+    broker.connect('agentHost', { workspaceRoot: '/home/widget' });
+    spawns[1]?.message({ type: 'runtime-port-request', requestId: 'runtime-1', workspaceRoot: checkout });
+    /* The project the fresh fork re-registered is still served: only the dead
+     * utility's checkouts are forgotten. */
+    spawns[1]?.message({ type: 'runtime-port-request', requestId: 'runtime-2', workspaceRoot: '/home/widget' });
+
+    expect(spawns[1]?.postMessage).toHaveBeenCalledWith({ type: 'runtime-port-refused', requestId: 'runtime-1' });
+    expect(connectRuntime).toHaveBeenCalledExactlyOnceWith({
+      projectRoot: '/home/widget',
+      computeProjectRoot: '/home/widget',
+      computeMode: 'off',
+      definition: 'default',
+    });
+  });
+
+  it('reacquires a fresh runtime lease after the prior computation exits', async () => {
+    const { broker, connectRuntime, runtimeExits, spawns } = brokerHarness();
+    broker.connect('agentHost', { workspaceRoot: '/home/widget' });
+    spawns[0]?.message({ type: 'runtime-port-request', requestId: 'runtime-1', workspaceRoot: '/home/widget' });
+    runtimeExits[0]?.();
+    await Promise.resolve();
+    spawns[0]?.message({ type: 'runtime-port-request', requestId: 'runtime-2', workspaceRoot: '/home/widget' });
+
+    expect(connectRuntime).toHaveBeenCalledTimes(2);
+  });
+
+  it('releases the exact runtime lease requested by the utility client', () => {
+    const { broker, connectRuntime, spawns } = brokerHarness();
+    broker.connect('agentHost', { workspaceRoot: '/home/widget' });
+    spawns[0]?.message({ type: 'runtime-port-request', requestId: 'runtime-1', workspaceRoot: '/home/widget' });
+    spawns[0]?.message({ type: 'runtime-port-release', requestId: 'runtime-1' });
+
+    expect(connectRuntime.mock.results[0]?.value.dispose).toHaveBeenCalledOnce();
+  });
+
+  it('waits for released runtime processes before disposal settles', async () => {
+    const { broker, runtimeExits, spawns } = brokerHarness();
+    broker.connect('agentHost', { workspaceRoot: '/home/widget' });
+    spawns[0]?.message({ type: 'runtime-port-request', requestId: 'runtime-1', workspaceRoot: '/home/widget' });
+    let settled = false;
+    const disposal = (async () => {
+      await broker.dispose();
+      settled = true;
+    })();
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    runtimeExits[0]?.();
+    await disposal;
+    expect(settled).toBe(true);
+  });
+
+  it('refuses a duplicate live runtime request identity without overwriting its lease', () => {
+    const { broker, connectRuntime, spawns } = brokerHarness();
+    broker.connect('agentHost', { workspaceRoot: '/home/widget' });
+    const request = { type: 'runtime-port-request', requestId: 'runtime-1', workspaceRoot: '/home/widget' };
+    spawns[0]?.message(request);
+    spawns[0]?.message(request);
+
+    expect(connectRuntime).toHaveBeenCalledOnce();
+    expect(spawns[0]?.postMessage).toHaveBeenCalledWith({ type: 'runtime-port-refused', requestId: 'runtime-1' });
   });
 
   it('replays the latest control frame of each kind onto a fresh fork', () => {

@@ -4,10 +4,16 @@ import { mkdtemp, mkdir, readdir, readFile, writeFile, rm } from 'node:fs/promis
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import process from 'node:process';
+import type { DownloadItem, Event } from 'electron';
 import { _electron as electron } from 'playwright';
 import type { ElectronApplication, Page } from 'playwright';
 import { expect } from 'vitest';
-import { desktopE2EApiUrl, desktopE2EFrontendUrl } from '#support/config.js';
+import {
+  desktopE2EApiUrl,
+  desktopE2ECompletedArtifact,
+  desktopE2EFrontendUrl,
+  desktopE2EPackagedExecutable,
+} from '#support/config.js';
 
 /**
  * Electron launch + diagnostics for the desktop smoke suite (work item Z1).
@@ -27,8 +33,15 @@ const workspaceRoot = resolve(import.meta.dirname, '../../../..');
  * a snapshot of a built bundle instead. */
 const clientRoot = process.env['TAU_DESKTOP_CLIENT_ROOT'] ?? join(workspaceRoot, 'apps/ui/desktop/build/client');
 const desktopRoot = join(workspaceRoot, 'apps/desktop');
-const packagedExecutable = join(desktopRoot, 'package-out/Tau-darwin-arm64/Tau.app/Contents/MacOS/Tau');
+const defaultPackagedExecutable = join(desktopRoot, 'package-out/Tau-darwin-arm64/Tau.app/Contents/MacOS/Tau');
 const diagnosticsRoot = join(workspaceRoot, 'out/test-results/desktop-e2e');
+const completedArtifactForbiddenEnvironment = [
+  'NODE_OPTIONS',
+  'NODE_PATH',
+  'TAU_BUILD123D_RESOURCE_ROOT',
+  'TAU_DESKTOP_CLIENT_ROOT',
+  'TAU_PICOGK_RESOURCE_ROOT',
+] as const;
 
 /**
  * WebGPU launch profile. The default is the hardware adapter this Mac has;
@@ -66,14 +79,68 @@ export type DesktopSession = {
   readonly close: () => Promise<void>;
 };
 
+/** Save and await the next download emitted by the packaged Electron session. */
+export const captureNextDesktopDownload = async (
+  desktopSession: DesktopSession,
+  savePath: string,
+  trigger: () => Promise<void>,
+): Promise<{ readonly filename: string; readonly path: string }> => {
+  await desktopSession.application.evaluate(({ session }, path) => {
+    const state = globalThis as typeof globalThis & {
+      __TAU_E2E_DOWNLOAD_CLEANUP__?: () => void;
+      __TAU_E2E_DOWNLOAD__?: { readonly filename: string; readonly state: string };
+    };
+    state.__TAU_E2E_DOWNLOAD_CLEANUP__?.();
+    delete state.__TAU_E2E_DOWNLOAD__;
+    const listener = (_event: Event, item: DownloadItem): void => {
+      item.setSavePath(path);
+      item.once('done', (_doneEvent, doneState) => {
+        state.__TAU_E2E_DOWNLOAD__ = { filename: item.getFilename(), state: doneState };
+      });
+      session.defaultSession.off('will-download', listener);
+    };
+    state.__TAU_E2E_DOWNLOAD_CLEANUP__ = () => {
+      session.defaultSession.off('will-download', listener);
+      delete state.__TAU_E2E_DOWNLOAD_CLEANUP__;
+    };
+    session.defaultSession.on('will-download', listener);
+  }, savePath);
+  let download: { readonly filename: string; readonly state: string } | undefined;
+  try {
+    await trigger();
+    await expect
+      .poll(
+        async () => {
+          download = await desktopSession.application.evaluate(() => {
+            const state = globalThis as typeof globalThis & {
+              __TAU_E2E_DOWNLOAD__?: { readonly filename: string; readonly state: string };
+            };
+            return state.__TAU_E2E_DOWNLOAD__;
+          });
+          return download;
+        },
+        { timeout: 180_000 },
+      )
+      .toBeDefined();
+  } finally {
+    await desktopSession.application.evaluate(() => {
+      const state = globalThis as typeof globalThis & { __TAU_E2E_DOWNLOAD_CLEANUP__?: () => void };
+      state.__TAU_E2E_DOWNLOAD_CLEANUP__?.();
+    });
+  }
+  if (!download) {
+    throw new Error('Electron reported no completed download after its session event settled.');
+  }
+  expect(download.state).toBe('completed');
+  return { filename: download.filename, path: savePath };
+};
+
 /**
  * Launch the built desktop shell against the suite's dedicated API.
  *
  * @param options - The seeded bearer handed to main through A7, plus any extra
- *   environment the shell needs. `env` exists for launcher 2, whose services
- *   utility reads `TAU_DESKTOP_AGENT_GATEWAY_URL` at fork time: its gateway
- *   calls are Node `fetch` from the utility process, so no page route can
- *   reach them and the value has to be present before the app starts.
+ *   environment the shell needs (`env`) — native-code trust, credential
+ *   persistence and the like, all read at launch.
  * @returns The live session.
  */
 export const launchDesktopApp = async (options: {
@@ -82,6 +149,15 @@ export const launchDesktopApp = async (options: {
   readonly packaged?: boolean | undefined;
   readonly useProductionEndpointDefaults?: boolean | undefined;
 }): Promise<DesktopSession> => {
+  if (desktopE2ECompletedArtifact && options.packaged === false) {
+    throw new Error('A completed-artifact run cannot launch the workspace desktop app.');
+  }
+  if (
+    desktopE2ECompletedArtifact &&
+    completedArtifactForbiddenEnvironment.some((name) => options.env?.[name] !== undefined)
+  ) {
+    throw new Error('A completed-artifact run cannot override Node or packaged runtime resource paths.');
+  }
   const userData = await mkdtemp(join(tmpdir(), 'tau-desktop-e2e-user-'));
   /* A fixed, already-lowercase leaf inside the random parent: the workspace
    * slug the UI mints is the folder name slugified, so a `mkdtemp` name with
@@ -92,6 +168,15 @@ export const launchDesktopApp = async (options: {
   await mkdir(pickedDirectory, { recursive: true });
   const output: string[] = [];
   const inheritedEnvironment = { ...(process.env as Record<string, string>) };
+  const packaged = desktopE2ECompletedArtifact || options.packaged === true;
+  const packagedExecutable = desktopE2ECompletedArtifact ? desktopE2EPackagedExecutable() : defaultPackagedExecutable;
+  if (desktopE2ECompletedArtifact) {
+    delete inheritedEnvironment['NODE_OPTIONS'];
+    delete inheritedEnvironment['NODE_PATH'];
+    delete inheritedEnvironment['TAU_BUILD123D_RESOURCE_ROOT'];
+    delete inheritedEnvironment['TAU_DESKTOP_CLIENT_ROOT'];
+    delete inheritedEnvironment['TAU_PICOGK_RESOURCE_ROOT'];
+  }
   if (options.useProductionEndpointDefaults) {
     delete inheritedEnvironment['TAU_API_URL'];
     delete inheritedEnvironment['TAU_WEBSOCKET_URL'];
@@ -99,9 +184,9 @@ export const launchDesktopApp = async (options: {
   }
 
   const application = await electron.launch({
-    ...(options.packaged ? { executablePath: packagedExecutable } : {}),
-    args: [...(options.packaged ? [] : [desktopRoot]), `--user-data-dir=${userData}`, ...webGpuArguments()],
-    cwd: desktopRoot,
+    ...(packaged ? { executablePath: packagedExecutable } : {}),
+    args: [...(packaged ? [] : [desktopRoot]), `--user-data-dir=${userData}`, ...webGpuArguments()],
+    cwd: packaged ? userData : desktopRoot,
     env: {
       ...inheritedEnvironment,
       NODE_ENV: 'production',
@@ -117,7 +202,7 @@ export const launchDesktopApp = async (options: {
             TAU_WEBSOCKET_URL: desktopE2EApiUrl.replace(/^http/u, 'ws'),
             TAU_FRONTEND_URL: desktopE2EFrontendUrl,
           }),
-      ...(options.packaged ? {} : { TAU_DESKTOP_CLIENT_ROOT: clientRoot }),
+      ...(packaged ? {} : { TAU_DESKTOP_CLIENT_ROOT: clientRoot }),
       TAU_DESKTOP_TOKEN: options.token,
       TAU_E2E_PICK_DIRECTORY: pickedDirectory,
       ...options.env,
@@ -145,7 +230,7 @@ export const launchDesktopApp = async (options: {
     });
     page.on('pageerror', (error) => consoleErrors.push(`pageerror: ${error.message}`));
     await page.context().tracing.start({ screenshots: true, snapshots: true });
-    if (options.packaged) {
+    if (packaged) {
       await application.evaluate(({ dialog, shell }, selectedDirectory) => {
         const testState = globalThis as typeof globalThis & { __TAU_E2E_EXTERNAL_URL__?: string };
         shell.openExternal = async (url): Promise<void> => {

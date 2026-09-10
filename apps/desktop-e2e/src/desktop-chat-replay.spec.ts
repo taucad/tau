@@ -8,12 +8,14 @@ import { gatewayFixtureFinalText, gatewayFixtureModelName, installGatewayFixture
 import type { GatewayFixture } from '#support/gateway-fixture.js';
 import { deleteTauTestUser, seedTauTestUser, tauTestAccount } from '#support/tau-account.js';
 import {
+  activeChatId,
   cancelRun,
   connectPickedFolder,
   declineCookieBanner,
   expectCount,
   expectGeometryFramed,
   expectKernelReparsed,
+  expectLauncher2Turn,
   expectModelBuilt,
   expectNativeKernelEngine,
   expectSignedIn,
@@ -98,6 +100,14 @@ test('builds an openrscad model on disk from the desktop composer', async () => 
     // O9: the desktop numbers are their own baseline (G23) — in-process bench
     // figures do not transfer across the copy-only utility wire.
     console.info(`[desktop-e2e] prompt-to-file-on-disk: ${String(Date.now() - geometryStart)} ms (${sourcePath})`);
+
+    /* Every desktop turn is launcher 2 (D18): the seeded home-composer turn was
+     * served by the utility and left its durable log on real disk. */
+    await expectLauncher2Turn(
+      session.logPath,
+      join(location === 'picked' ? session.pickedDirectory : session.homeRoot, slug),
+      activeChatId(page),
+    );
 
     await expectModelBuilt({ finalText: gatewayFixtureFinalText, logPath: session.logPath, page, sourcePath });
     console.info(`[desktop-e2e] prompt-to-framed-geometry: ${String(Date.now() - geometryStart)} ms`);
@@ -197,7 +207,7 @@ test('renders an external write through the native kernel utility', async () => 
     const slug = await submitPrompt(page, prompt);
     /* Cancel the seeding turn: while a run is live the viewport follows the
      * isolated workspace overlay, not the project's own files. */
-    await cancelRun(page);
+    await cancelRun(page, () => fixture!.gatewayRequests.length >= 2);
 
     const sourcePath = join(location === 'picked' ? session.pickedDirectory : session.homeRoot, slug, 'main.scad');
     await expect.poll(() => existsSync(sourcePath), { timeout: 120_000 }).toBe(true);

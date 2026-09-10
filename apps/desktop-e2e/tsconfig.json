@@ -14,5 +14,5 @@
       "@taucad/runtime-testing": ["../../packages/runtime-testing/src/index.ts"]
     }
   },
-  "include": ["vitest.config.ts", "global-setup.ts", "src/**/*.ts"]
+  "include": ["vitest.config.ts", "vitest.unit.config.ts", "global-setup.ts", "scripts/**/*.mts", "src/**/*.ts"]
 }

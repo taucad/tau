@@ -14,6 +14,8 @@ export type NativeProjectTrustStore = {
   grant(projectRoot: string): void;
   revoke(projectRoot: string): void;
   markerPath(projectRoot: string): string;
+  /** Marker path outside the grant namespace; it is kept absent to deny scratch native execution. */
+  untrustedMarkerPath(): string;
 };
 
 export type NativeProjectTrustStoreOptions = {
@@ -38,6 +40,8 @@ export const createNativeProjectTrustStore = ({
   storePath,
   markerRoot,
 }: NativeProjectTrustStoreOptions): NativeProjectTrustStore => {
+  const untrustedMarker = resolve(markerRoot, 'untrusted-ephemeral.json');
+  rmSync(untrustedMarker, { force: true });
   const grants = new Map<string, ProjectIdentity>();
   try {
     const stored: unknown = JSON.parse(readFileSync(storePath, 'utf8'));
@@ -98,6 +102,7 @@ export const createNativeProjectTrustStore = ({
   return {
     isTrusted,
     markerPath,
+    untrustedMarkerPath: () => untrustedMarker,
     grant(projectRoot) {
       const identity = identify(projectRoot);
       const previous = grants.get(identity.path);

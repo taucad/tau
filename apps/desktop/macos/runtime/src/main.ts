@@ -1,7 +1,7 @@
 import { createRuntimeClient } from '@taucad/runtime/client';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
-import { converterRuntime } from '@taucad/converter';
+import { converterRuntime } from '@taucad/converter/runtime';
 import { GLB_BUFFER, WebIO } from '@gltf-transform/core';
 import type { GLTF, JSONDocument } from '@gltf-transform/core';
 import { normals, prune } from '@gltf-transform/functions';

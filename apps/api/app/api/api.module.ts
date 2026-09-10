@@ -15,7 +15,6 @@ import { WebSocketModule } from '#api/websocket/websocket.module.js';
 import { PublicationsModule } from '#api/publications/publications.module.js';
 import { DurableEventsModule } from '#api/durable-events/durable-events.module.js';
 import { JobsModule } from '#api/jobs/jobs.module.js';
-import { PaseoConnectorModule } from '#api/connectors/paseo/paseo-connector.module.js';
 import { RepositoriesModule } from '#api/repositories/repositories.module.js';
 
 @Module({
@@ -38,7 +37,6 @@ import { RepositoriesModule } from '#api/repositories/repositories.module.js';
     ProviderModule,
     PublicationsModule,
     RepositoriesModule,
-    PaseoConnectorModule,
     TelemetryIngestModule,
 
     // Testing modules

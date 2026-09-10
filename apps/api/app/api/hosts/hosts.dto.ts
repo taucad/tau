@@ -50,11 +50,44 @@ export const hostCapabilitiesSchema = z.object({
     .object({
       workspaceRoot: z.string().min(1),
       /**
-       * External ACP agents the daemon can start (W4-ACP). Relayed verbatim to
-       * the client so the selector lists only agents that can actually run; the
-       * API neither validates the ids against a catalog nor stores them.
+       * External ACP agents the daemon knows about (W4-ACP), as the one
+       * canonical descriptor (VSC1): the startable ones carry their probed
+       * model list, and one whose adapter or CLI failed carries its refusal
+       * code so the browser can say *why* a row is missing.
+       *
+       * Relayed verbatim — the API resolves no id against a catalog and stores
+       * nothing — but bounded here, because every string is daemon-authored
+       * text a browser will render. The shape mirrors
+       * `externalAgentDescriptorSchema` in `@taucad/agent-host`; `apps/api` does
+       * not depend on that package, so the bounds are restated here. The relay
+       * owns no vocabulary: `refusal` is bounded, and the browser validates it
+       * against the canonical code list at its own edge.
        */
-      externalAgents: z.array(z.string().min(1).max(64)).max(16).optional(),
+      externalAgents: z
+        .array(
+          z.strictObject({
+            id: z.string().min(1).max(64),
+            displayName: z.string().min(1).max(64),
+            models: z
+              .array(z.strictObject({ id: z.string().min(1).max(128), name: z.string().min(1).max(128) }))
+              .max(64)
+              .default([]),
+            defaultModel: z.string().min(1).max(128).optional(),
+            refusal: z.string().min(1).max(64).optional(),
+          }),
+        )
+        .max(16)
+        .optional(),
+      /**
+       * Revision modes the daemon records a turn in (V17 / VSC5). Relayed
+       * verbatim like the agent list: the composer offers its revision selector
+       * from the placement's modes, so a field dropped here is a choice the
+       * paired client silently loses.
+       */
+      revisions: z
+        .array(z.enum(['direct', 'candidate']))
+        .max(2)
+        .optional(),
     })
     .optional(),
 });

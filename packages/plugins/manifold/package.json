@@ -35,7 +35,8 @@
   },
   "exports": {
     ".": "./src/index.ts",
-    "./agent": "./agent/SKILL.md",
+    "./agent": "./agent/skills.json",
+    "./agent/*": "./agent/*",
     "./package.json": "./package.json"
   },
   "publishConfig": {
@@ -46,7 +47,8 @@
         "import": "./dist/index.mjs",
         "default": "./dist/index.mjs"
       },
-      "./agent": "./agent/SKILL.md",
+      "./agent": "./agent/skills.json",
+      "./agent/*": "./agent/*",
       "./package.json": "./package.json"
     },
     "imports": {}
@@ -72,5 +74,8 @@
   },
   "taucad": {
     "hostTarget": "browser"
+  },
+  "tau": {
+    "skills": "./agent/skills.json"
   }
 }

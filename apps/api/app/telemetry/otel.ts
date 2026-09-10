@@ -26,7 +26,11 @@ import { BatchLogRecordProcessor } from '@opentelemetry/sdk-logs';
 import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
 import { LangChainInstrumentation } from '@traceloop/instrumentation-langchain';
 
-const metricsPort = Number(process.env['OTEL_METRICS_PORT']) || 9464;
+const configuredMetricsPort = process.env['OTEL_METRICS_PORT'];
+const metricsPort = configuredMetricsPort === undefined ? 9464 : Number(configuredMetricsPort);
+if (!Number.isInteger(metricsPort) || metricsPort < 0 || metricsPort > 65_535) {
+  throw new Error('OTEL_METRICS_PORT must be an integer from 0 to 65535');
+}
 
 // OTEL env vars must be set before SDK initialization (NestJS ConfigModule
 // loads after the SDK starts, so these cannot live in environment.config.ts).

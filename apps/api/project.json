@@ -107,6 +107,62 @@
       "options": {
         "command": "bash apps/api/scripts/sync-grafana-dashboards.sh"
       }
+    },
+    "test:billing-foundation": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "node apps/api/scripts/test-billing-foundation.mts"
+      },
+      "dependsOn": ["build:billing-command"]
+    },
+    "generate:billing-policy:development": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "metadata": {
+        "description": "Rewrite the fleet, rates and routes of infra/billing/development.billing-policy.json from the code-owned billable model route table."
+      },
+      "options": {
+        "cwd": "{workspaceRoot}",
+        "command": "node --import @oxc-node/core/register apps/api/scripts/generate-development-billing-policy.mts"
+      }
+    },
+    "billing-policy:publish:development": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "metadata": {
+        "description": "Bootstrap local billing: install the billing protections, seed the development supplier budgets, then publish infra/billing/development.billing-policy.json as the development tariff authority. Re-running fails on the head revision once a policy exists; that is deliberate. To publish a regenerated policy over an existing head, run the publish command directly with a fresh --activation-id/--job-key plus --expected-head-revision and --expected-predecessor-activation-id read from billing.billing_policy_head."
+      },
+      "dependsOn": ["build:billing-command"],
+      "options": {
+        "cwd": "{workspaceRoot}",
+        "parallel": false,
+        "commands": [
+          "node --env-file-if-exists=apps/api/.env apps/api/dist/billing-command.js protect",
+          "node --env-file-if-exists=apps/api/.env --import @oxc-node/core/register apps/api/app/testing/development-billing-account.ts budgets",
+          "node --env-file-if-exists=apps/api/.env apps/api/dist/billing-command.js publish --environment development --file infra/billing/development.billing-policy.json --activation-id development-bootstrap-v1 --job-key development-bootstrap-v1 --expected-head-revision 0 --expected-predecessor-activation-id none --announced-at now --effective-at now"
+        ]
+      }
+    },
+    "build:billing-command": {
+      "executor": "nx:run-commands",
+      "outputs": ["{projectRoot}/dist/billing-command.js"],
+      "options": {
+        "command": "vite build --config vite.billing-command.config.ts",
+        "cwd": "{projectRoot}"
+      }
+    },
+    "billing-recovery": {
+      "executor": "nx:run-commands",
+      "continuous": true,
+      "dependsOn": ["build:billing-command"],
+      "options": {
+        "command": "node --env-file-if-exists=apps/api/.env apps/api/dist/billing-command.js recover-llm-worker --environment development --limit 100 --poll-milliseconds 5000",
+        "cwd": "{workspaceRoot}",
+        "env": {
+          "OTEL_METRICS_PORT": "9465"
+        }
+      }
     }
   }
 }

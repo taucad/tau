@@ -297,4 +297,61 @@ export class MetricsService {
     description: TauMetrics.billingAccountsFlagged.description,
     unit: TauMetrics.billingAccountsFlagged.unit,
   });
+
+  public readonly billingFundedOperationRecoveries = this.apiMeter.createCounter(
+    TauMetrics.billingFundedOperationRecoveries.name,
+    {
+      description: TauMetrics.billingFundedOperationRecoveries.description,
+      unit: TauMetrics.billingFundedOperationRecoveries.unit,
+    },
+  );
+
+  public readonly billingFundedOperationDenials = this.apiMeter.createCounter(
+    TauMetrics.billingFundedOperationDenials.name,
+    {
+      description: TauMetrics.billingFundedOperationDenials.description,
+      unit: TauMetrics.billingFundedOperationDenials.unit,
+    },
+  );
+
+  public readonly billingFundedOperationTerminals = this.apiMeter.createCounter(
+    TauMetrics.billingFundedOperationTerminals.name,
+    {
+      description: TauMetrics.billingFundedOperationTerminals.description,
+      unit: TauMetrics.billingFundedOperationTerminals.unit,
+    },
+  );
+
+  public readonly billingFundedOperationCurrent = this.apiMeter.createGauge(
+    TauMetrics.billingFundedOperationCurrent.name,
+    {
+      description: TauMetrics.billingFundedOperationCurrent.description,
+      unit: TauMetrics.billingFundedOperationCurrent.unit,
+    },
+  );
+
+  public readonly billingFundedOperationOldestDueAge = this.apiMeter.createGauge(
+    TauMetrics.billingFundedOperationOldestDueAge.name,
+    {
+      description: TauMetrics.billingFundedOperationOldestDueAge.description,
+      unit: TauMetrics.billingFundedOperationOldestDueAge.unit,
+    },
+  );
+
+  public readonly billingFundedOperationRecoveryBatchDuration = this.apiMeter.createHistogram(
+    TauMetrics.billingFundedOperationRecoveryBatchDuration.name,
+    {
+      description: TauMetrics.billingFundedOperationRecoveryBatchDuration.description,
+      unit: TauMetrics.billingFundedOperationRecoveryBatchDuration.unit,
+      advice: { explicitBucketBoundaries: [...TauMetrics.billingFundedOperationRecoveryBatchDuration.buckets] },
+    },
+  );
+
+  public readonly billingFundedOperationRecoveryProviderExecutions = this.apiMeter.createGauge(
+    TauMetrics.billingFundedOperationRecoveryProviderExecutions.name,
+    {
+      description: TauMetrics.billingFundedOperationRecoveryProviderExecutions.description,
+      unit: TauMetrics.billingFundedOperationRecoveryProviderExecutions.unit,
+    },
+  );
 }

@@ -25,7 +25,10 @@ describe('environmentSchema', () => {
       Object.entries(withRequiredCookieSecret(process.env)).filter(([key]) => key !== 'MOONSHOT_API_KEY'),
     );
     const optionalResult = environmentSchema.safeParse(withoutMoonshot);
-    const configuredResult = environmentSchema.safeParse({ ...withoutMoonshot, MOONSHOT_API_KEY: 'sk-test-moonshot' });
+    const configuredResult = environmentSchema.safeParse({
+      ...withoutMoonshot,
+      MOONSHOT_API_KEY: 'sk-test-moonshot',
+    });
 
     expect(optionalResult.success).toBe(true);
     expect(configuredResult.success).toBe(true);
@@ -39,7 +42,10 @@ describe('environmentSchema', () => {
     const absent = environmentSchema.safeParse(
       Object.fromEntries(Object.entries(environment).filter(([key]) => key !== 'GITHUB_API_TOKEN')),
     );
-    const configured = environmentSchema.safeParse({ ...environment, GITHUB_API_TOKEN: 'github-token' });
+    const configured = environmentSchema.safeParse({
+      ...environment,
+      GITHUB_API_TOKEN: 'github-token',
+    });
 
     expect(absent.success).toBe(true);
     expect(configured.success).toBe(true);
@@ -63,7 +69,10 @@ describe('environmentSchema', () => {
   });
 
   it('should reject development default TAU_S3_ENDPOINT when NODE_ENV is production and endpoint is unset', () => {
-    const base: Record<string, unknown> = { ...withRequiredCookieSecret(process.env), NODE_ENV: 'production' };
+    const base: Record<string, unknown> = {
+      ...withRequiredCookieSecret(process.env),
+      NODE_ENV: 'production',
+    };
     const envWithoutEndpoint = Object.fromEntries(Object.entries(base).filter(([key]) => key !== 'TAU_S3_ENDPOINT'));
     const result = environmentSchema.safeParse(envWithoutEndpoint);
     expect(result.success).toBe(false);
@@ -141,7 +150,11 @@ describe('environmentSchema', () => {
       TAU_S3_SECRET_ACCESS_KEY: 'secret',
       TAU_S3_FORCE_PATH_STYLE: false,
       TAU_API_URL: 'https://api.tau.new',
+      BILLING_ENVIRONMENT: 'prod-us',
       STRIPE_SECRET_KEY: 'sk_live_test',
+      STRIPE_READ_SECRET_KEY: 'rk_live_read_test',
+      STRIPE_ACCOUNT_ID: 'acct_test',
+      STRIPE_LIVEMODE: 'true',
       STRIPE_WEBHOOK_SECRET: 'whsec_test',
       STRIPE_PRICE_ID_PRO_MONTHLY: 'price_test',
       STRIPE_PRODUCT_ID_CREDIT_PACK: 'prod_test',
@@ -185,6 +198,24 @@ describe('environmentSchema', () => {
     }
   });
 
+  it.each(['BILLING_ENVIRONMENT', 'STRIPE_READ_SECRET_KEY', 'STRIPE_ACCOUNT_ID', 'STRIPE_LIVEMODE'])(
+    'requires explicit %s in production',
+    (key) => {
+      const result = environmentSchema.safeParse({
+        ...withRequiredCookieSecret(process.env),
+        NODE_ENV: 'production',
+        STRIPE_READ_SECRET_KEY: 'rk_test_read',
+        STRIPE_ACCOUNT_ID: 'acct_test',
+        STRIPE_LIVEMODE: 'false',
+        [key]: undefined,
+      });
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.issues.some((issue) => issue.path[0] === key)).toBe(true);
+      }
+    },
+  );
+
   it('should reject localhost TAU_API_URL in production mode', () => {
     const result = environmentSchema.safeParse({
       ...withRequiredCookieSecret(process.env),
@@ -211,6 +242,23 @@ describe('environmentSchema', () => {
     expect(result.success).toBe(false);
     if (!result.success) {
       expect(result.error.issues.some((issue) => issue.path.join('.') === 'TAU_API_URL')).toBe(true);
+    }
+  });
+
+  it('should accept TAU_LLM_PROVIDER_UPSTREAM_URL only in the development billing environment', () => {
+    const environment = {
+      ...withRequiredCookieSecret(process.env),
+      TAU_LLM_PROVIDER_UPSTREAM_URL: 'http://127.0.0.1:4015',
+    };
+    const development = environmentSchema.safeParse({ ...environment, BILLING_ENVIRONMENT: 'development' });
+    const production = environmentSchema.safeParse({ ...environment, BILLING_ENVIRONMENT: 'prod-us' });
+
+    expect(development.success).toBe(true);
+    expect(production.success).toBe(false);
+    if (!production.success) {
+      expect(production.error.issues.some((issue) => issue.path.join('.') === 'TAU_LLM_PROVIDER_UPSTREAM_URL')).toBe(
+        true,
+      );
     }
   });
 });

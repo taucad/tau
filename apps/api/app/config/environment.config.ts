@@ -83,11 +83,45 @@ const environmentSchemaBase = z.object({
   // Redis Configuration
   // Billing (Stripe + credit ledger). STRIPE_* default to '' (the RESEND_API_KEY pattern) so local
   // dev works without keys; billing endpoints fail closed on the empty value, and production
-  // requires all four to be non-empty (see superRefine below).
+  // requires explicit financial scope and all configured credentials (see superRefine below).
+  BILLING_ENVIRONMENT: z.enum(['development', 'staging', 'prod-us', 'prod-eu']).optional(),
+  BILLING_USAGE_CURSOR_SECRET: z.string().min(32).optional(),
+  BILLING_REQUEST_DIGEST_SECRET: z.string().min(32).optional(),
+  BILLING_PROVIDER_ACCOUNTS: jsonCodec(
+    z.partialRecord(
+      z.enum(['anthropic', 'openai', 'vertexai', 'together', 'morph', 'xai']),
+      z
+        .string()
+        .min(1)
+        .max(128)
+        .regex(/^[A-Za-z0-9][A-Za-z0-9_.:-]*$/u),
+    ),
+  )
+    .optional()
+    .default({}),
+  TAU_LLM_PROVIDER_UPSTREAM_URL: z
+    .url()
+    .optional()
+    .describe(
+      'Development-only provider upstream origin. Every funded provider call keeps its path and is sent to this origin instead, so an e2e run can drive the real gateway against a local stub. Refused outside BILLING_ENVIRONMENT=development.',
+    ),
+  BILLING_INVOCATION_DEADLINE: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(300_000)
+    .default(300_000)
+    .describe('Maximum funded provider execution time in milliseconds, including admission'),
   STRIPE_SECRET_KEY: z
     .string()
     .default('')
     .describe('Stripe API secret key (sk_test_... in staging, sk_live_... in prod); empty = billing disabled'),
+  STRIPE_READ_SECRET_KEY: z.string().default(''),
+  STRIPE_ACCOUNT_ID: z.string().default(''),
+  STRIPE_LIVEMODE: z
+    .enum(['true', 'false'])
+    .transform((value) => value === 'true')
+    .optional(),
   STRIPE_WEBHOOK_SECRET: z.string().default('').describe('Signing secret for the /v1/auth/stripe/webhook endpoint'),
   STRIPE_PRICE_ID_PRO_MONTHLY: z
     .string()
@@ -162,6 +196,16 @@ const environmentSchemaBase = z.object({
 });
 
 export const environmentSchema = environmentSchemaBase.superRefine((data, context) => {
+  // Checked before the production gate below: redirecting funded provider traffic must be
+  // refused in staging and production too, not only when NODE_ENV happens to be production.
+  if (data.TAU_LLM_PROVIDER_UPSTREAM_URL !== undefined && data.BILLING_ENVIRONMENT !== 'development') {
+    context.addIssue({
+      code: 'custom',
+      message: 'TAU_LLM_PROVIDER_UPSTREAM_URL requires BILLING_ENVIRONMENT=development',
+      path: ['TAU_LLM_PROVIDER_UPSTREAM_URL'],
+    });
+  }
+
   if (data.NODE_ENV !== 'production') {
     return;
   }
@@ -246,10 +290,26 @@ export const environmentSchema = environmentSchemaBase.superRefine((data, contex
   // credit grant, and a missing price id breaks upgrade checkout.
   const stripeKeys = [
     'STRIPE_SECRET_KEY',
+    'STRIPE_READ_SECRET_KEY',
+    'STRIPE_ACCOUNT_ID',
     'STRIPE_WEBHOOK_SECRET',
     'STRIPE_PRICE_ID_PRO_MONTHLY',
     'STRIPE_PRODUCT_ID_CREDIT_PACK',
   ] as const;
+  if (data.BILLING_ENVIRONMENT === undefined) {
+    context.addIssue({
+      code: 'custom',
+      message: 'BILLING_ENVIRONMENT is required in production',
+      path: ['BILLING_ENVIRONMENT'],
+    });
+  }
+  if (data.STRIPE_LIVEMODE === undefined) {
+    context.addIssue({
+      code: 'custom',
+      message: 'STRIPE_LIVEMODE is required in production',
+      path: ['STRIPE_LIVEMODE'],
+    });
+  }
   for (const key of stripeKeys) {
     if (!data[key]) {
       context.addIssue({

@@ -57,7 +57,7 @@ COPY . .
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
     --mount=type=cache,id=nx,target=/app/.nx/cache \
     --mount=type=secret,id=nx_cloud_token,env=NX_CLOUD_ACCESS_TOKEN \
-    pnpm nx build api
+    pnpm nx build api && pnpm nx run api:build:billing-command
 
 # ── Prune to production deploy tree ───────────────────────────────────────
 FROM build AS pruned

@@ -1,16 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
-import { mock } from 'vitest-mock-extended';
-import type Stripe from 'stripe';
 import { betterAuth } from 'better-auth';
 import { memoryAdapter } from 'better-auth/adapters/memory';
 import { getBetterAuthConfig } from '#config/better-auth.config.js';
 import type { Environment } from '#config/environment.config.js';
-import type { AuthService } from '#auth/auth.service.js';
 import type { ConfigService } from '@nestjs/config';
 import type { DatabaseService } from '#database/database.service.js';
 import type { EmailService } from '#email/email.service.js';
-import type { BillingService } from '#api/billing/billing.service.js';
-import type { StripeEventRouter } from '#api/billing/stripe-event-router.service.js';
 
 const createConfig = (authUrl = 'http://localhost:4000') => {
   const emailService = {
@@ -33,19 +28,16 @@ const createConfig = (authUrl = 'http://localhost:4000') => {
       return values.get(key) ?? '';
     }),
   } satisfies Pick<ConfigService<Environment, true>, 'get'>;
-  const authService = undefined as unknown as AuthService;
 
+  const closure = { prepareForAuthDeletion: vi.fn().mockResolvedValue(undefined) };
   const config = getBetterAuthConfig({
+    closure,
     databaseService,
     configService: configService as unknown as ConfigService<Environment, true>,
-    authService,
     emailService: emailService as unknown as EmailService,
-    billingService: mock<BillingService>(),
-    stripeEventRouter: mock<StripeEventRouter>(),
-    stripeClient: mock<Stripe>(),
   });
 
-  return { config, emailService };
+  return { config, emailService, closure };
 };
 
 type TestEmailCallbackArgs = {
@@ -81,6 +73,27 @@ const sendVerificationEmail = async (
 };
 
 describe('getBetterAuthConfig abuse gates', () => {
+  it('awaits financial closure and propagates its denial before auth deletion', async () => {
+    const { config, closure } = createConfig();
+    const beforeDelete = config.user?.deleteUser?.beforeDelete;
+    if (!beforeDelete) {
+      throw new Error('Financial deletion hook is missing');
+    }
+    const user = {
+      id: 'user_close',
+      email: 'close@example.test',
+      name: 'Closure',
+      emailVerified: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    const request = new Request('http://localhost:4000/v1/auth/delete-user');
+    await beforeDelete(user, request);
+    expect(closure.prepareForAuthDeletion).toHaveBeenCalledWith({ authUserId: user.id, request });
+    closure.prepareForAuthDeletion.mockRejectedValueOnce(new Error('closure not durable'));
+    await expect(beforeDelete(user, request)).rejects.toThrow('closure not durable');
+  });
+
   it.each([
     ['http://localhost:4000', false],
     ['https://api.tau.new', true],
@@ -130,7 +143,7 @@ describe('getBetterAuthConfig abuse gates', () => {
   it('pins the same plugin order in both lockstep plugin lists', async () => {
     const { config } = createConfig();
     const { staticAuthConfig } = await import('#config/auth.js');
-    const expected = ['api-key', 'magic-link', 'stripe', 'one-time-token', 'bearer'];
+    const expected = ['api-key', 'magic-link', 'one-time-token', 'bearer'];
 
     expect(config.plugins?.map((plugin) => plugin.id)).toEqual(expected);
     expect(staticAuthConfig.plugins.map((plugin) => plugin.id)).toEqual(expected);
@@ -139,8 +152,12 @@ describe('getBetterAuthConfig abuse gates', () => {
   it('stores desktop one-time tokens hashed so a leaked verification row cannot be replayed', async () => {
     const { config } = createConfig();
     const { staticAuthConfig } = await import('#config/auth.js');
-    const runtimeOtt = config.plugins?.[3] as unknown as { options?: { storeToken?: string } };
-    const staticOtt = staticAuthConfig.plugins[3] as unknown as { options?: { storeToken?: string } };
+    const runtimeOtt = config.plugins?.find((plugin) => plugin.id === 'one-time-token') as unknown as {
+      options?: { storeToken?: string };
+    };
+    const staticOtt = staticAuthConfig.plugins.find((plugin) => plugin.id === 'one-time-token') as unknown as {
+      options?: { storeToken?: string };
+    };
 
     expect(runtimeOtt.options?.storeToken).toBe('hashed');
     expect(staticOtt.options?.storeToken).toBe('hashed');

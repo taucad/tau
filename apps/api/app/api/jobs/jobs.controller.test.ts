@@ -78,12 +78,12 @@ describe('JobsController paired-runner authorization', () => {
     const actionDigest = `sha256:${'a'.repeat(64)}` as const;
     const outputDigest = `sha256:${'b'.repeat(64)}` as const;
     const record = {
-      schemaVersion: 1,
+      schemaVersion: 1 as const,
       actionDigest,
       codec: { id: 'openfoam-stage', version: '1' },
       output: { digest: outputDigest, size: 42, mediaType: 'application/octet-stream' },
       dependencies: [],
-    } as const;
+    };
     const jobs = {
       isRunnerAuthorized: vi.fn(async () => true),
       isArtifactAttemptAuthorized: vi.fn(async () => true),
@@ -216,6 +216,53 @@ describe('JobsController paired-runner authorization', () => {
       key: `jobs/owner-1/actions/job-1/sha256/${'c'.repeat(64)}.json`,
       tier: 'private',
     });
+  });
+
+  it('decodes a string-chunked action record body byte-exactly', async () => {
+    // Q16 (2026-09-09): `readBoundedBytes` admits string chunks; `Uint8Array.from(string)`
+    // produced one zero byte per character, so this record could never be parsed.
+    const actionDigest = `sha256:${'e'.repeat(64)}` as const;
+    const outputDigest = `sha256:${'f'.repeat(64)}` as const;
+    const record = {
+      schemaVersion: 1,
+      actionDigest,
+      codec: { id: 'openfoam-stage', version: '1' },
+      output: { digest: outputDigest, size: 12, mediaType: 'application/octet-stream' },
+      dependencies: [],
+    } as const;
+    const text = JSON.stringify(record);
+    const jobs = {
+      isRunnerAuthorized: vi.fn(async () => true),
+      isArtifactAttemptAuthorized: vi.fn(async () => true),
+    };
+    const hosts = { authenticateDevice: vi.fn(async () => device) };
+    const storage = {
+      headBlob: vi
+        .fn()
+        .mockResolvedValueOnce({
+          contentType: 'application/vnd.tau.compute-action+json',
+          size: text.length,
+          etag: 'action',
+        })
+        .mockResolvedValueOnce({ contentType: 'application/octet-stream', size: 12, etag: 'content' }),
+      getBlob: vi.fn(async () => ({
+        body: Readable.from([text]),
+        contentType: 'application/vnd.tau.compute-action+json',
+        etag: 'action',
+      })),
+    };
+    const controller = new JobsController(
+      jobs as unknown as JobsService,
+      hosts as unknown as HostsService,
+      storage as unknown as ObjectStorageService,
+    );
+
+    await expect(
+      controller.readWorkerAction(
+        { jobId: 'job-1', attemptId: 'attempt-2', attempt: 2, actionDigest },
+        'Bearer credential',
+      ),
+    ).resolves.toEqual({ status: 'hit', record });
   });
 
   it('rejects action records outside the authenticated active attempt before storage access', async () => {

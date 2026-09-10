@@ -1,11 +1,13 @@
 import process from 'node:process';
-import { Catch, HttpException, HttpStatus, Logger } from '@nestjs/common';
+import { Catch, ConflictException, HttpException, HttpStatus, Logger } from '@nestjs/common';
 import type { ArgumentsHost, ExceptionFilter } from '@nestjs/common';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { ZodSerializationException, ZodValidationException } from 'nestjs-zod';
 import { ZodError } from 'zod';
 import { trace, SpanStatusCode, context as otelContext } from '@opentelemetry/api';
 import type { HttpErrorResponse } from '@taucad/types';
+import { wirePaymentActionSchema } from '@taucad/billing';
+import type { WirePaymentAction } from '@taucad/billing';
 import { httpHeader } from '#constants/http-header.constant.js';
 import { LlmGatewayError } from '#api/llm/llm-gateway.error.js';
 
@@ -66,7 +68,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
       }
     } else if (exception instanceof HttpException) {
       statusCode = exception.getStatus();
-      errorResponse = this.fromHttpException(exception, statusCode, request.url, requestId);
+      errorResponse = this.fromHttpException(exception, request.url, requestId);
     } else if (exception instanceof Error) {
       // Handle unknown errors
       statusCode = HttpStatus.INTERNAL_SERVER_ERROR;
@@ -95,7 +97,10 @@ export class HttpExceptionFilter implements ExceptionFilter {
 
       const span = trace.getSpan(otelContext.active());
       if (span) {
-        span.setStatus({ code: SpanStatusCode.ERROR, message: errorResponse.error });
+        span.setStatus({
+          code: SpanStatusCode.ERROR,
+          message: errorResponse.error,
+        });
         if (exception instanceof Error) {
           span.recordException(exception);
         }
@@ -114,14 +119,20 @@ export class HttpExceptionFilter implements ExceptionFilter {
 
   private fromHttpException(
     exception: HttpException,
-    statusCode: number,
     path: string,
     requestId: string | undefined,
-  ): HttpErrorResponse {
+  ): HttpErrorResponse & { action?: WirePaymentAction } {
+    const statusCode = exception.getStatus();
     const exceptionResponse = exception.getResponse();
 
     if (typeof exceptionResponse === 'string') {
-      return { error: exceptionResponse, statusCode, code: this.getErrorCode(exception), path, requestId };
+      return {
+        error: exceptionResponse,
+        statusCode,
+        code: this.getErrorCode(exception),
+        path,
+        requestId,
+      };
     }
     if (typeof exceptionResponse !== 'object') {
       return {
@@ -133,14 +144,20 @@ export class HttpExceptionFilter implements ExceptionFilter {
       };
     }
     // Handle structured error responses (e.g., { code: 'UNAUTHORIZED', message: '...' })
-    const { message, code } = exceptionResponse as Record<string, unknown>;
-    const baseResponse: HttpErrorResponse = {
+    const { message, code, action } = exceptionResponse as Record<string, unknown>;
+    const baseResponse: HttpErrorResponse & { action?: WirePaymentAction } = {
       error: typeof message === 'string' ? message : exception.message || 'An error occurred',
       code: typeof code === 'string' ? code : this.getErrorCode(exception),
       statusCode,
       path,
       requestId,
     };
+    if (exception instanceof ConflictException) {
+      const paymentAction = wirePaymentActionSchema.safeParse(action);
+      if (paymentAction.success) {
+        baseResponse.action = paymentAction.data;
+      }
+    }
     if (Array.isArray(message)) {
       baseResponse.message = message;
     }

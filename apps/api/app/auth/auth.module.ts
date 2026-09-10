@@ -1,12 +1,13 @@
 /* oxlint-disable no-use-extend-native/no-use-extend-native -- Reflect.Metadata is required */
+import { BillingAccountClosureService } from '#api/billing/billing-account-closure.service.js';
+import { BillingPaymentsService } from '#api/billing/billing-payments.service.js';
 import type { DynamicModule, NestModule, OnModuleInit } from '@nestjs/common';
-import { Global, Inject, Logger, Module } from '@nestjs/common';
+import { Global, HttpException, Inject, Logger, Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DiscoveryModule, DiscoveryService, HttpAdapterHost, MetadataScanner } from '@nestjs/core';
 import { betterAuth } from 'better-auth';
 import type { FastifyReply as Reply, FastifyRequest as Request } from 'fastify';
 import { FastifyAdapter } from '@nestjs/platform-fastify';
-import type Stripe from 'stripe';
 import { getBetterAuthConfig } from '#config/better-auth.config.js';
 import { authInstanceKey, hookKey, beforeHookKey, afterHookKey } from '#constants/auth.constant.js';
 import { DatabaseModule } from '#database/database.module.js';
@@ -17,9 +18,6 @@ import type { Environment } from '#config/environment.config.js';
 import { EmailModule } from '#email/email.module.js';
 import { EmailService } from '#email/email.service.js';
 import { BillingModule } from '#api/billing/billing.module.js';
-import { BillingService } from '#api/billing/billing.service.js';
-import { StripeEventRouter } from '#api/billing/stripe-event-router.service.js';
-import { stripeClientKey } from '#api/billing/billing.constants.js';
 
 type AuthInstance = ReturnType<typeof betterAuth>;
 
@@ -28,20 +26,7 @@ const hooks = [
   { metadataKey: afterHookKey, hookType: 'after' },
 ] as const;
 
-/**
- * Better Auth host module (BA12 responsibility split):
- * - The **`@better-auth/stripe` plugin** owns Stripe-facing session flows —
- *   checkout, billing portal, subscription mirroring, and webhook signature
- *   verification at `/v1/auth/stripe/webhook` (which is why that path gets a
- *   byte-exact raw-body carve-out below; `JSON.stringify` re-serialization
- *   breaks signatures).
- * - The **BillingModule** owns everything money: credit grants flow ONLY via
- *   `invoice.paid` through `StripeEventRouter.dispatch` (plugin `onEvent`);
- *   the plugin's lifecycle hooks are invalidate-only. Entitlements are a
- *   projection over the plugin-mirrored `subscription` rows.
- * - Stripe customers are created lazily at the first billing action
- *   (`createCustomerOnSignUp: false`) — signup never depends on Stripe.
- */
+/** Authentication remains available while first-party payment ownership is qualified. */
 @Global()
 @Module({
   imports: [DiscoveryModule, DatabaseModule],
@@ -57,35 +42,22 @@ export class AuthModule implements NestModule, OnModuleInit {
       providers: [
         {
           provide: authInstanceKey,
+          // eslint-disable-next-line max-params-no-constructor/max-params-no-constructor -- Nest resolves four distinct auth composition tokens.
           async useFactory(
             databaseService: DatabaseService,
             configService: ConfigService<Environment, true>,
-            authService: AuthService,
             emailService: EmailService,
-            billingService: BillingService,
-            stripeEventRouter: StripeEventRouter,
-            stripeClient: Stripe,
+            closure: BillingAccountClosureService,
           ): Promise<AuthInstance> {
             const config = getBetterAuthConfig({
               databaseService,
               configService,
-              authService,
               emailService,
-              billingService,
-              stripeEventRouter,
-              stripeClient,
+              closure,
             });
             return betterAuth(config);
           },
-          inject: [
-            DatabaseService,
-            ConfigService,
-            AuthService,
-            EmailService,
-            BillingService,
-            StripeEventRouter,
-            stripeClientKey,
-          ],
+          inject: [DatabaseService, ConfigService, EmailService, BillingAccountClosureService],
         },
         BetterAuthService,
       ],
@@ -100,6 +72,7 @@ export class AuthModule implements NestModule, OnModuleInit {
     @Inject(DiscoveryService) private readonly discoveryService: DiscoveryService,
     @Inject(MetadataScanner) private readonly metadataScanner: MetadataScanner,
     @Inject(HttpAdapterHost) private readonly adapter: HttpAdapterHost<FastifyAdapter>,
+    @Inject(BillingPaymentsService) private readonly payments: BillingPaymentsService,
   ) {}
 
   public onModuleInit(): void {
@@ -143,25 +116,31 @@ export class AuthModule implements NestModule, OnModuleInit {
       return;
     }
 
-    // Stripe webhook signature verification needs the byte-exact raw payload:
-    // the JSON.stringify re-serialization used by the catch-all below changes
-    // whitespace and breaks every delivery (silent loss of credit grants). A
-    // scoped Fastify plugin swaps the JSON parser for a raw-buffer parser on
-    // exactly this route; @better-auth/stripe then reads the original bytes via
-    // request.text() and verifies the signature (blueprint AD8).
+    // This scoped parser preserves signed bytes ahead of the authentication wildcard.
     const stripeWebhookPath = `${basePath}/stripe/webhook`;
     void instance.register(async (scoped) => {
       scoped.removeContentTypeParser('application/json');
-      scoped.addContentTypeParser('application/json', { parseAs: 'buffer' }, (_request, body, done) => {
-        done(null, body);
-      });
-      scoped.post(stripeWebhookPath, async (request: Request, reply: Reply) => {
-        // oxlint-disable-next-line @typescript-eslint/no-unsafe-type-assertion -- the scoped parser above guarantees a raw byte body
-        const rawBody = request.body as Uint8Array<ArrayBuffer>;
-        // UTF-8 decode is byte-faithful for valid UTF-8 (all Stripe JSON);
-        // Request re-encodes the string to the identical bytes for
-        // signature verification downstream.
-        await this.forwardToAuth(request, reply, new TextDecoder().decode(rawBody));
+      scoped.addContentTypeParser(
+        'application/json',
+        { parseAs: 'buffer', bodyLimit: 1024 * 1024 },
+        (_request, body, done) => {
+          done(null, body);
+        },
+      );
+      scoped.post(stripeWebhookPath, { bodyLimit: 1024 * 1024 }, async (request: Request, reply: Reply) => {
+        if (!Buffer.isBuffer(request.body) || typeof request.headers['stripe-signature'] !== 'string') {
+          await reply.status(400).send({ code: 'invalid_stripe_delivery' });
+          return;
+        }
+        try {
+          await this.payments.receiveWebhook(new Uint8Array(request.body), request.headers['stripe-signature']);
+          await reply.status(200).send({ received: true });
+        } catch (error) {
+          const status = error instanceof HttpException ? error.getStatus() : 503;
+          await reply
+            .status(status)
+            .send({ code: status >= 500 ? 'stripe_inbox_unavailable' : 'invalid_stripe_delivery' });
+        }
       });
     });
 

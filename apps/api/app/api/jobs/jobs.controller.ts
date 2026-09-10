@@ -56,7 +56,7 @@ const readBoundedBytes = async (
       body.destroy?.();
       throw new ConflictException({ code: 'JOB_ACTION_RECORD_INVALID_CHUNK' });
     }
-    const bytes = Uint8Array.from(chunk);
+    const bytes = typeof chunk === 'string' ? new TextEncoder().encode(chunk) : Uint8Array.from(chunk);
     size += bytes.byteLength;
     if (size > limit) {
       body.destroy?.();

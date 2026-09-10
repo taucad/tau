@@ -6,6 +6,12 @@ import type {
 <% if (capabilities.some(({ role }) => role === 'kernel')) { %>
   ExpandPluginKernels,
 <% } %>
+<% if (capabilities.some(({ role }) => role === 'job')) { %>
+  ExpandPluginJobs,
+<% } %>
+<% if (capabilities.some(({ role }) => role === 'machine')) { %>
+  ExpandPluginMachines,
+<% } %>
 <% if (capabilities.some(({ role }) => role === 'middleware')) { %>
   ExpandPluginMiddleware,
 <% } %>
@@ -13,17 +19,38 @@ import type {
   ExpandPluginTranscoders,
 <% } %>
 } from '@taucad/runtime/plugin';
+<% if (capabilities.some(({ role }) => role === 'job' || role === 'machine')) { %>
+import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
+<% } %>
 
 // eslint-disable-next-line import-x/no-extraneous-dependencies -- package-import self-reference resolves this package's source alias.
 import { plugin, <%= alias %> } from '#index.js';
 // eslint-disable-next-line import-x/no-extraneous-dependencies -- package-import self-reference resolves this package's source alias.
-import type {<% capabilities.forEach((capability, index) => { %><%= index === 0 ? ' ' : ', ' %><%= capability.factoryName %><% }); %> } from '#index.js';
+import<%= capabilities.some(({ role }) => role === 'job' || role === 'machine') ? '' : ' type' %> {<% capabilities.forEach((capability, index) => { %><%= index === 0 ? ' ' : ', ' %><%= capability.factoryName %><% }); %> } from '#index.js';
 
 const selected = plugin();
-<% for (const capability of capabilities) { const projection = capability.role === 'kernel' ? 'ExpandPluginKernels' : capability.role === 'middleware' ? 'ExpandPluginMiddleware' : capability.role === 'bundler' ? 'ExpandPluginBundlers' : 'ExpandPluginTranscoders'; %>
+<% for (const capability of capabilities) { const projection = capability.role === 'kernel' ? 'ExpandPluginKernels' : capability.role === 'middleware' ? 'ExpandPluginMiddleware' : capability.role === 'bundler' ? 'ExpandPluginBundlers' : capability.role === 'job' ? 'ExpandPluginJobs' : capability.role === 'machine' ? 'ExpandPluginMachines' : 'ExpandPluginTranscoders'; %>
 expectTypeOf<<%= projection %><readonly [typeof selected]>>().toEqualTypeOf<
   readonly [ReturnType<typeof <%= capability.factoryName %>>]
 >();
 <% } %>
 
 expectTypeOf(<%= alias %>).toEqualTypeOf(plugin);
+<% if (capabilities.some(({ role }) => role === 'job')) { const job = capabilities.find(({ role }) => role === 'job'); %>
+
+const jobDefinition = await resolveRuntimePluginDefinition('job', <%= job.factoryName %>());
+type JobConfiguration = Parameters<typeof jobDefinition.execute>[0]['configuration'];
+expectTypeOf<JobConfiguration>().toEqualTypeOf<{ enabled: boolean }>();
+// @ts-expect-error -- execution receives the admitted Zod output, never an arbitrary value.
+const invalidJobConfiguration: JobConfiguration = { enabled: 'yes' };
+void invalidJobConfiguration;
+<% } %>
+<% if (capabilities.some(({ role }) => role === 'machine')) { const machine = capabilities.find(({ role }) => role === 'machine'); %>
+
+const machineDefinition = await resolveRuntimePluginDefinition('machine', <%= machine.factoryName %>());
+type MachineBinding = Parameters<typeof machineDefinition.connect>[0]['configuration'];
+expectTypeOf<MachineBinding>().toEqualTypeOf<{ logicalId: string }>();
+// @ts-expect-error -- connection receives the admitted binding-schema output.
+const invalidMachineBinding: MachineBinding = { logicalId: 42 };
+void invalidMachineBinding;
+<% } %>

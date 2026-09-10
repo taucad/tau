@@ -23,8 +23,9 @@ import path from 'node:path';
 import { assertRootedPath, VirtualPathError } from '@taucad/utils/path';
 import { AbstractFileSystemProvider } from '#backend/abstract-provider.js';
 import { headSniffByteLength, seemsBinary, countLineBytes } from '#content-metadata.js';
-import type { FileStat, ProviderCapabilities, WatchRequest } from '#types.js';
+import type { FileReadStreamOptions, FileStat, ProviderCapabilities, WatchRequest } from '#types.js';
 import type { NodeFsWatchEvent } from '#backend/node/protocol.js';
+import { streamChunkSize, validateFileReadStreamOptions } from '#backend/stream-utils.js';
 
 /** The name `_atomicWrite` gives its temp file: `.<target>.<pid>.<uuid>.tmp`. */
 const inFlightTemporaryName = /^\..+\.\d+\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.tmp$/u;
@@ -343,6 +344,100 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
     for (const unsubscribe of this._openSubscriptions) {
       unsubscribe();
     }
+  }
+
+  /** Open and read the file only as the consumer requests bounded chunks. */
+  public readFileStream(path_: string, options?: FileReadStreamOptions): ReadableStream<Uint8Array<ArrayBuffer>> {
+    this._assertRootedPath(path_);
+    validateFileReadStreamOptions(options);
+    const position = options?.position ?? 0;
+    const length = options?.length;
+    if (length !== undefined && position > Number.MAX_SAFE_INTEGER - length) {
+      throw new RangeError('position plus length must not exceed the safe integer range.');
+    }
+    let offset = position;
+    const end = length === undefined ? Number.MAX_SAFE_INTEGER : position + length;
+    let handle: Awaited<ReturnType<typeof fs.open>> | undefined;
+    let opening: Promise<Awaited<ReturnType<typeof fs.open>>> | undefined;
+    let closing: Promise<void> | undefined;
+    let closed = false;
+    const isClosed = (): boolean => closed;
+    const isAborted = (): boolean => options?.signal?.aborted === true;
+    const close = async (): Promise<void> => {
+      closed = true;
+      options?.signal?.removeEventListener('abort', abort);
+      closing ??= (async () => {
+        const opened = handle ?? (await opening);
+        await opened?.close();
+        handle = undefined;
+      })();
+      await closing;
+    };
+    const closeAfterAbort = async (): Promise<void> => {
+      try {
+        await close();
+        controller?.error(new DOMException('The operation was aborted.', 'AbortError'));
+      } catch (error) {
+        controller?.error(error);
+      }
+    };
+    const closeAfterFailure = async (): Promise<void> => {
+      try {
+        await close();
+      } catch {
+        // Preserve the acquisition or read failure that required cleanup.
+      }
+    };
+    let controller: ReadableStreamDefaultController<Uint8Array<ArrayBuffer>> | undefined;
+    const abort = (): void => {
+      void closeAfterAbort();
+    };
+    return new ReadableStream(
+      {
+        start(controller_) {
+          controller = controller_;
+          options?.signal?.addEventListener('abort', abort, { once: true });
+          if (options?.signal?.aborted) {
+            abort();
+          }
+        },
+        pull: async (controller) => {
+          if (closed) {
+            return;
+          }
+          if (offset >= end) {
+            await close();
+            controller.close();
+            return;
+          }
+          try {
+            opening ??= (async () => fs.open(await this._resolve(path_), 'r'))();
+            handle ??= await opening;
+            if (isClosed()) {
+              return;
+            }
+            const requested = Math.min(streamChunkSize, end - offset);
+            const chunk = new Uint8Array(requested);
+            const { bytesRead } = await handle.read(chunk, 0, requested, offset);
+            if (isClosed() || isAborted()) {
+              return;
+            }
+            if (bytesRead === 0) {
+              await close();
+              controller.close();
+              return;
+            }
+            offset += bytesRead;
+            controller.enqueue(chunk.subarray(0, bytesRead));
+          } catch (error) {
+            await closeAfterFailure();
+            controller.error(error);
+          }
+        },
+        cancel: close,
+      },
+      { highWaterMark: 0 },
+    );
   }
 
   protected async readFileRaw(path_: string): Promise<Uint8Array<ArrayBuffer>> {

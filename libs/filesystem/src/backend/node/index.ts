@@ -5,6 +5,8 @@
  */
 
 export { NodeFsProvider } from '#backend/node/provider.js';
+export { acquireNodeAuthorityWriter, NodeAuthorityWriterError } from '#backend/node/authority-writer-lock.js';
+export type { AcquireNodeAuthorityWriterInput, NodeAuthorityWriter } from '#backend/node/authority-writer-lock.js';
 export { serveNodeFsProvider } from '#backend/node/host.js';
 export type { NodeFsHostOptions } from '#backend/node/host.js';
 export { toNodeFsPort } from '#backend/node/port.js';

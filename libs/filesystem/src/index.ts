@@ -26,6 +26,14 @@ export type { ProviderRegistryOptions } from '#provider-registry.js';
 export { resolveStorageRootKey } from '#storage-root-key.js';
 export type { StorageRootIdentity } from '#storage-root-key.js';
 
+export {
+  admitCapacityWrite,
+  defaultRevisionReserveBytes,
+  measureCapacityDomain,
+  revisionReserveFloorBytes,
+} from '#capacity-domain.js';
+export type { CapacityDecision, CapacityDomain, CapacityMeasurement, CapacityRequest } from '#capacity-domain.js';
+
 export { BoundedFileCache } from '#bounded-file-cache.js';
 export { ResourceQueue } from '#resource-queue.js';
 export { ChangeEventBus } from '#change-event-bus.js';

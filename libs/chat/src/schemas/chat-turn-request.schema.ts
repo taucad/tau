@@ -22,12 +22,35 @@ export const chatRunAdmissionSchema = z
   .strict()
   .meta({ id: 'ChatRunAdmission' });
 
-/** Immutable browser execution target for one detached CAD turn. @public */
+/**
+ * How the host records this turn's writes (north star N26).
+ *
+ * `direct` writes the host's live workspace tree; `candidate` writes an
+ * isolated checkout that merges back at settlement. The UI may label these
+ * anything it likes ("Locally" / "New branch"); the wire says `direct` and
+ * `candidate`.
+ *
+ * @public
+ */
+export const chatRevisionModeSchema = z.enum(['direct', 'candidate']).meta({ id: 'ChatRevisionMode' });
+
+/**
+ * Immutable execution target for one CAD turn: which host writes, and how it
+ * records what it wrote.
+ *
+ * `mode` is required on every placement, because the host that owns the tree is
+ * the one that has to be told (r7 W4). `workspaceId` and `baseRevisionId` name
+ * a *browser* workspace claim and are therefore absent for a host-placed turn,
+ * where the host owns its own workspace and mints its own base.
+ *
+ * @public
+ */
 export const chatExecutionTargetSchema = z
   .object({
-    workspaceId: z.string().min(1).max(128),
-    baseRevisionId: z.string().min(1).max(256),
     hostId: z.string().min(1).max(128),
+    mode: chatRevisionModeSchema,
+    workspaceId: z.string().min(1).max(128).optional(),
+    baseRevisionId: z.string().min(1).max(256).optional(),
   })
   .strict()
   .meta({ id: 'ChatExecutionTarget' });
@@ -82,8 +105,11 @@ export type ChatRunAdmission = z.infer<typeof chatRunAdmissionSchema>;
 /** Wire-shape admission metadata. @public */
 export type ChatRunAdmissionInput = z.input<typeof chatRunAdmissionSchema>;
 
-/** Immutable browser execution target for one detached CAD turn. @public */
+/** Immutable execution target for one CAD turn. @public */
 export type ChatExecutionTarget = z.infer<typeof chatExecutionTargetSchema>;
+
+/** How the host records this turn's writes. @public */
+export type ChatRevisionMode = z.infer<typeof chatRevisionModeSchema>;
 
 /** Wire-shape (input) of a chat-turn request. @public */
 export type ChatTurnRequestInput = z.input<typeof chatTurnRequestSchema>;

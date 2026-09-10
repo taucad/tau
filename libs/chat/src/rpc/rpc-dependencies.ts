@@ -19,6 +19,12 @@ import type {
 } from '#schemas/rpc.schema.js';
 import type { DiffStatsWithContent } from '#schemas/tools/diff.schema.js';
 import type { ExportFile, FileContentMetadata } from '@taucad/types';
+
+/** Local execution metadata that never enters an RPC payload or durable record. @public */
+export type RpcInvocationContext = Readonly<{
+  /** Cancels only the active wait and its cooperative operation. */
+  signal?: AbortSignal;
+}>;
 /**
  * One direct child returned by {@link RpcFileSystem.readdir}.
  * `name` is a basename, never a path.
@@ -115,7 +121,7 @@ export type RpcFileStat =
  * @public
  */
 export type RpcRuntimeClient = {
-  getKernelResult(targetFile: string): Promise<GetKernelResultRpcResult>;
+  getKernelResult(targetFile: string, context?: RpcInvocationContext): Promise<GetKernelResultRpcResult>;
 };
 
 /**
@@ -140,12 +146,15 @@ export type RpcGraphicsExportGeometryResult =
  * @public
  */
 export type RpcGraphicsClient = {
-  exportGeometry(args: Pick<ExportGeometryRpcInput, 'targetFile' | 'format'>): Promise<RpcGraphicsExportGeometryResult>;
+  exportGeometry(
+    args: Pick<ExportGeometryRpcInput, 'targetFile' | 'format'>,
+    context?: RpcInvocationContext,
+  ): Promise<RpcGraphicsExportGeometryResult>;
 };
 
 /** Browser/headless image capture client independent of a mounted viewport. @public */
 export type RpcImageClient = {
-  captureImages(args: CaptureImagesRpcInput): Promise<CaptureImagesRpcResult>;
+  captureImages(args: CaptureImagesRpcInput, context?: RpcInvocationContext): Promise<CaptureImagesRpcResult>;
 };
 
 /**

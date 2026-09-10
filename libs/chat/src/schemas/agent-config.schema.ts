@@ -45,10 +45,10 @@ export const tauAgentExecutionSchema = z
  * placement for an external agent — the adapter is a local process spawned by a
  * daemon, so a turn that names no host has nowhere to run.
  *
- * The agent always works in a materialized branch, never the workspace root:
  * SP-4 proved ACP session modes are advisory against a CLI whose own config
- * disables approvals, so confinement is the host's filesystem placement and the
- * revision mode is not a user choice for this execution.
+ * disables approvals, so confinement is the host's filesystem placement — but
+ * *which* placement is a user choice like any other turn's: the revision mode
+ * rides `ChatExecutionTarget`, not the execution (V18).
  *
  * @public
  */
@@ -59,23 +59,15 @@ export const acpAgentExecutionSchema = z
     hostId: z.string().min(1),
     /** Registry agent id the daemon advertised, e.g. `claude` or `codex`. */
     agentId: z.string().min(1).max(64),
+    /** Adapter-specific model id; absent takes the adapter's own default. */
+    model: z.string().min(1).max(128).optional(),
   })
   .strict()
   .meta({ id: 'AcpAgentExecution' });
 
-/** Paseo-owned coding-agent execution selected through a paired connection. @public */
-export const paseoAgentExecutionSchema = z
-  .object({
-    kind: z.literal('paseo'),
-    connectionId: z.string().min(1).max(128),
-    agentId: z.string().min(1).max(256),
-  })
-  .strict()
-  .meta({ id: 'PaseoAgentExecution' });
-
 /** Execution substrate for a CAD turn. This is deliberately separate from Tau's model-provider catalog. @public */
 export const cadAgentExecutionSchema = z
-  .discriminatedUnion('kind', [tauAgentExecutionSchema, acpAgentExecutionSchema, paseoAgentExecutionSchema])
+  .discriminatedUnion('kind', [tauAgentExecutionSchema, acpAgentExecutionSchema])
   .meta({ id: 'CadAgentExecution' });
 
 /**
@@ -165,9 +157,6 @@ export type TauAgentExecution = z.infer<typeof tauAgentExecutionSchema>;
 
 /** External ACP agent execution selection. @public */
 export type AcpAgentExecution = z.infer<typeof acpAgentExecutionSchema>;
-
-/** Paseo-owned execution selection. @public */
-export type PaseoAgentExecution = z.infer<typeof paseoAgentExecutionSchema>;
 
 /** Parsed shape of the project-name agent config. @public */
 export type ProjectNameAgentConfig = z.infer<typeof projectNameAgentConfigSchema>;

@@ -65,33 +65,27 @@ describe('getErrorCode', () => {
     });
   });
 
-  describe('message fallback (errors without code property)', () => {
-    it('should classify "not found" message as FILE_NOT_FOUND', () => {
-      expect(getErrorCode(new Error('File not found'))).toBe(rpcClientErrorCode.fileNotFound);
+  describe('errors without a code property', () => {
+    /* Classification comes from `code` alone. These messages read like a
+     * classification and are deliberately not treated as one: the substring
+     * heuristics they used to drive reported `PARSE_ERROR` for any failure
+     * whose path ended in `.json`. */
+    it.each([
+      'File not found',
+      'ENOENT: no such file',
+      'No such file or directory',
+      'Permission denied',
+      'Failed to parse input',
+      'Invalid JSON',
+      'Something went wrong',
+    ])('should classify %s as IO_ERROR', (message) => {
+      expect(getErrorCode(new Error(message))).toBe(rpcClientErrorCode.ioError);
     });
 
-    it('should classify "enoent" in message as FILE_NOT_FOUND', () => {
-      expect(getErrorCode(new Error('ENOENT: no such file'))).toBe(rpcClientErrorCode.fileNotFound);
-    });
-
-    it('should classify "no such file" message as FILE_NOT_FOUND', () => {
-      expect(getErrorCode(new Error('No such file or directory'))).toBe(rpcClientErrorCode.fileNotFound);
-    });
-
-    it('should classify "permission" message as PERMISSION_DENIED', () => {
-      expect(getErrorCode(new Error('Permission denied'))).toBe(rpcClientErrorCode.permissionDenied);
-    });
-
-    it('should classify "parse" message as PARSE_ERROR', () => {
-      expect(getErrorCode(new Error('Failed to parse input'))).toBe(rpcClientErrorCode.parseError);
-    });
-
-    it('should classify "json" message as PARSE_ERROR', () => {
-      expect(getErrorCode(new Error('Invalid JSON'))).toBe(rpcClientErrorCode.parseError);
-    });
-
-    it('should fall back to IO_ERROR for unrecognized Error messages', () => {
-      expect(getErrorCode(new Error('Something went wrong'))).toBe(rpcClientErrorCode.ioError);
+    it('should not read a classification out of a path in the message', () => {
+      /* The defect this pins: a write that failed for any reason on
+       * `tau.json` was reported to the client as a parse failure. */
+      expect(getErrorCode(new Error('Write failed: /project/tau.json'))).toBe(rpcClientErrorCode.ioError);
     });
   });
 

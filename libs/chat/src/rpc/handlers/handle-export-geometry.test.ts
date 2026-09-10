@@ -31,9 +31,12 @@ describe('handleExportGeometry', () => {
     const fileSystem = mock<RpcFileSystem>();
     fileSystem.writeBinaryFile.mockResolvedValue(undefined);
 
-    await handleExportGeometry({ toolCallId: 'tc-1', targetFile: 'src/pen.ts', format: 'stl' }, graphics, fileSystem);
+    await handleExportGeometry(
+      { toolCallId: 'tc-1', targetFile: 'src/pen.ts', format: 'stl' },
+      { graphics, fileSystem },
+    );
 
-    expect(graphics.exportGeometry).toHaveBeenCalledWith({ targetFile: 'src/pen.ts', format: 'stl' });
+    expect(graphics.exportGeometry).toHaveBeenCalledWith({ targetFile: 'src/pen.ts', format: 'stl' }, undefined);
   });
 
   it('should embed slug(targetFile) and format in artifactPath', async () => {
@@ -50,8 +53,7 @@ describe('handleExportGeometry', () => {
 
     const result = await handleExportGeometry(
       { toolCallId: 'tc-42', targetFile: 'src/pen with spaces.ts', format: 'stl' },
-      graphics,
-      fileSystem,
+      { graphics, fileSystem },
     );
 
     expect(result.success).toBe(true);
@@ -85,8 +87,7 @@ describe('handleExportGeometry', () => {
 
     const result = await handleExportGeometry(
       { toolCallId: 'tc-1', targetFile: 'main.ts', format: 'stl' },
-      graphics,
-      fileSystem,
+      { graphics, fileSystem },
     );
 
     expect(result).toEqual({
@@ -107,11 +108,34 @@ describe('handleExportGeometry', () => {
 
     const result = await handleExportGeometry(
       { toolCallId: 'tc-1', targetFile: 'main.ts', format: 'glb' },
-      graphics,
-      fileSystem,
+      { graphics, fileSystem },
     );
 
     expect(result).toEqual({ success: false, errorCode: rpcClientErrorCode.unknown, message: 'boom' });
+    expect(fileSystem.writeBinaryFile).not.toHaveBeenCalled();
+  });
+
+  it('does not persist artifacts after a non-cooperative export resolves into cancellation', async () => {
+    const controller = new AbortController();
+    const context = { signal: controller.signal };
+    const graphics = mock<RpcGraphicsClient>();
+    graphics.exportGeometry.mockImplementation(async (_input, receivedContext) => {
+      expect(receivedContext).toBe(context);
+      controller.abort(new Error('export stopped'));
+      return {
+        success: true,
+        files: [{ name: 'model.stl', bytes: new Uint8Array([1]), mimeType: 'model/stl' }],
+      };
+    });
+    const fileSystem = mock<RpcFileSystem>();
+
+    await expect(
+      handleExportGeometry(
+        { toolCallId: 'tc-1', targetFile: 'main.ts', format: 'stl' },
+        { graphics, fileSystem },
+        context,
+      ),
+    ).rejects.toThrow('export stopped');
     expect(fileSystem.writeBinaryFile).not.toHaveBeenCalled();
   });
 });

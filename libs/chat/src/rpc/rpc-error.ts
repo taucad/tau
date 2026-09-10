@@ -6,7 +6,8 @@ import type { RpcHandlerError } from '#rpc/rpc-dependencies.js';
 
 /**
  * Canonical mapping from POSIX errno codes to RPC client error codes.
- * Used as the primary classification signal — checked before message matching.
+ * The only classification signal: `code` is set by every filesystem Tau
+ * speaks to, and nothing is inferred from an error's message.
  *
  * ZenFS (kerium Exception), Node.js (ErrnoException), and the kernel filesystem
  * bridge all set `error.code` to these POSIX strings.
@@ -44,19 +45,11 @@ export function getErrorCode(error: unknown): RpcClientErrorCode {
       return errnoToRpcCode[errno]!;
     }
 
-    const message = error.message.toLowerCase();
-    if (message.includes('not found') || message.includes('enoent') || message.includes('no such file')) {
-      return rpcClientErrorCode.fileNotFound;
-    }
-
-    if (message.includes('permission') || message.includes('eacces')) {
-      return rpcClientErrorCode.permissionDenied;
-    }
-
-    if (message.includes('parse') || message.includes('json')) {
-      return rpcClientErrorCode.parseError;
-    }
-
+    /* A message is prose, not a classification: substring matching read
+     * `PARSE_ERROR` out of any failure whose path ended in `.json`, and
+     * `FILE_NOT_FOUND` out of any sentence containing "not found". Every
+     * filesystem Tau speaks to — ZenFS, Node and the kernel bridge — sets
+     * `code`, so an error without one is simply an I/O failure. */
     return rpcClientErrorCode.ioError;
   }
 

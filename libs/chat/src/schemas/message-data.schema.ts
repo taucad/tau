@@ -19,6 +19,14 @@ export const usageDataSchema = z.object({
   cacheReadTokensCost: z.number(),
   cacheWriteTokensCost: z.number(),
   totalCost: z.number(),
+  /**
+   * External agent that reported this usage, when Tau did not run the turn.
+   *
+   * Attribution is durable truth: the transcript has to be able to say *whose*
+   * tokens these were, and the cost fields above are zero for an external turn
+   * because Tau did not price it. Absent for Tau's own turns.
+   */
+  agent: z.string().optional(),
 });
 
 /** @public */

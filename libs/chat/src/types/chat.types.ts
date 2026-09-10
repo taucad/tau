@@ -32,7 +32,7 @@ export type Chat = {
   messageEdits?: Record<string, MyUIMessage>; // Edit drafts by messageId
   error?: ChatError; // Persisted error for display after page reload
   startupRequest?: ChatStartupRequest;
-  /** Chat-scoped execution target. Paseo targets contain opaque ids only. */
+  /** Chat-scoped execution target; opaque ids only, never credentials. */
   activeExecution?: CadAgentExecution;
   /**
    * Chat-scoped active CAD kernel. Same semantics as {@link Chat.activeExecution}

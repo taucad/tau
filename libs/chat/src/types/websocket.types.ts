@@ -5,7 +5,7 @@
  * against the workspace in every placement, so these shapes describe the
  * request/response pair itself and name no transport. The Socket.IO chat-RPC
  * protocol and its lease-fencing envelopes that used to live here left with the
- * API's chat plane (W4-PASEO).
+ * API's chat plane.
  *
  * Tool-specific types are in tool.types.ts; RPC method names in rpc.types.ts.
  */

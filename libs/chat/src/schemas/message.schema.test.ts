@@ -274,4 +274,61 @@ describe('safeValidateUiMessages Tau wire extensions', () => {
       reasoningEndedAtMs?: number | undefined;
     }>();
   });
+
+  it('validates a mixed transcript whose external calls are dynamic tool parts', async () => {
+    /* V3: an external agent's call is a `dynamic-tool` part, never a static
+     * `tool-<title>` one. The static form fails here with "Unsupported static
+     * tool: tool-List files", which would 400 the whole turn the moment a chat
+     * containing a Codex turn is posted back to the API. */
+    const result = await safeValidateUiMessages([
+      userMessage,
+      {
+        id: 'm1',
+        role: 'assistant',
+        parts: [
+          {
+            type: 'dynamic-tool',
+            toolName: 'listFiles',
+            toolCallId: 'list-1',
+            state: 'output-available',
+            title: 'List files',
+            toolMetadata: { tau: { kind: 'read', nativeName: 'listFiles', origin: 'external', agentId: 'codex' } },
+            input: { path: '.' },
+            // eslint-disable-next-line @typescript-eslint/naming-convention -- Codex's own `rawOutput` field name.
+            output: { formatted_output: 'tau.json' },
+          },
+          {
+            type: 'tool-read_file',
+            toolCallId: 'read-1',
+            state: 'output-available',
+            input: { targetFile: 'main.scad' },
+            output: { content: 'cube(10);', size: 9, contentKind: 'text', totalLines: 1 },
+          },
+          { type: 'text', text: 'Done.' },
+        ],
+      },
+    ]);
+
+    expect(result.success).toBe(true);
+  });
+
+  it('refuses the static tool part an external call must never become', async () => {
+    const result = await safeValidateUiMessages([
+      userMessage,
+      {
+        id: 'm1',
+        role: 'assistant',
+        parts: [
+          {
+            type: 'tool-List files',
+            toolCallId: 'list-1',
+            state: 'input-available',
+            input: { title: 'List files' },
+          },
+        ],
+      },
+    ]);
+
+    expect(result.success).toBe(false);
+  });
 });

@@ -11,6 +11,7 @@ export type {
   RpcSkillResolver,
   RpcDependencies,
   RpcHandlerError,
+  RpcInvocationContext,
 } from '#rpc/rpc-dependencies.js';
 export { createRpcDispatcher, type RpcDispatcher } from '#rpc/rpc-dispatcher.js';
 export {

@@ -1,13 +1,15 @@
 import type { ExportGeometryRpcInput, ExportGeometryRpcResult } from '#schemas/rpc.schema.js';
 import { rpcClientErrorCode } from '#schemas/rpc.schema.js';
-import type { RpcFileSystem, RpcGraphicsClient } from '#rpc/rpc-dependencies.js';
+import type { RpcDependencies, RpcInvocationContext } from '#rpc/rpc-dependencies.js';
 import { writeArtifactSet } from '#rpc/handlers/write-artifact.js';
 
 export async function handleExportGeometry(
   input: ExportGeometryRpcInput,
-  graphics: RpcGraphicsClient | undefined,
-  fileSystem: RpcFileSystem,
+  dependencies: Pick<RpcDependencies, 'graphics' | 'fileSystem'>,
+  context?: RpcInvocationContext,
 ): Promise<ExportGeometryRpcResult> {
+  context?.signal?.throwIfAborted();
+  const { graphics, fileSystem } = dependencies;
   if (!graphics) {
     return {
       success: false,
@@ -16,7 +18,8 @@ export async function handleExportGeometry(
     };
   }
 
-  const result = await graphics.exportGeometry({ targetFile: input.targetFile, format: input.format });
+  const result = await graphics.exportGeometry({ targetFile: input.targetFile, format: input.format }, context);
+  context?.signal?.throwIfAborted();
 
   if (!result.success) {
     return result;
@@ -31,6 +34,7 @@ export async function handleExportGeometry(
     },
     fileSystem,
   );
+  context?.signal?.throwIfAborted();
 
   if (!files) {
     return {

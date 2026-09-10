@@ -1,7 +1,7 @@
 import type { RpcCall, RpcInput, RpcResult, RpcSchemasRegistry } from '#schemas/rpc.schema.js';
 import { rpcName } from '#constants/rpc.constants.js';
 import type { RpcName } from '#types/rpc.types.js';
-import type { RpcDependencies } from '#rpc/rpc-dependencies.js';
+import type { RpcDependencies, RpcInvocationContext } from '#rpc/rpc-dependencies.js';
 import { handleReadFile } from '#rpc/handlers/handle-read-file.js';
 import { handleCreateFile } from '#rpc/handlers/handle-create-file.js';
 import { handleDeleteFile } from '#rpc/handlers/handle-delete-file.js';
@@ -17,12 +17,12 @@ import { handleEditFile } from '#rpc/handlers/handle-edit-file.js';
 import { handleResolveSkill } from '#rpc/handlers/handle-resolve-skill.js';
 
 type RpcHandlerMap = {
-  [K in RpcName]: (args: RpcInput<K>) => Promise<RpcResult<K>>;
+  [K in RpcName]: (args: RpcInput<K>, context?: RpcInvocationContext) => Promise<RpcResult<K>>;
 };
 
 /** @public */
 export type RpcDispatcher = {
-  dispatch<K extends keyof RpcSchemasRegistry>(call: RpcCall<K>): Promise<RpcResult<K>>;
+  dispatch<K extends keyof RpcSchemasRegistry>(call: RpcCall<K>, context?: RpcInvocationContext): Promise<RpcResult<K>>;
 };
 
 /**
@@ -44,19 +44,26 @@ export function createRpcDispatcher(deps: RpcDependencies): RpcDispatcher {
     [rpcName.listDirectory]: async (args) => handleListDirectory(args, deps.fileSystem),
     [rpcName.grep]: async (args) => handleGrep(args, deps.fileSystem),
     [rpcName.globSearch]: async (args) => handleGlobSearch(args, deps.fileSystem),
-    [rpcName.getKernelResult]: async (args) => handleGetKernelResult(args, deps.kernelClient),
-    [rpcName.captureImages]: async (args) => handleCaptureImages(args, deps.images),
+    [rpcName.getKernelResult]: async (args, context) => handleGetKernelResult(args, deps.kernelClient, context),
+    [rpcName.captureImages]: async (args, context) => handleCaptureImages(args, deps.images, context),
     [rpcName.runGeoSpecTests]: async (args) => handleRunGeoSpecTests(args, deps.geospec),
-    [rpcName.exportGeometry]: async (args) => handleExportGeometry(args, deps.graphics, deps.fileSystem),
+    [rpcName.exportGeometry]: async (args, context) =>
+      handleExportGeometry(args, { graphics: deps.graphics, fileSystem: deps.fileSystem }, context),
     [rpcName.appendFile]: async (args) => handleAppendFile(args, deps.fileSystem),
     [rpcName.editFile]: async (args) => handleEditFile(args, deps.fileSystem),
     [rpcName.resolveSkill]: async (args) => handleResolveSkill(args, deps.skillResolver),
   };
 
-  const dispatch = async <K extends keyof RpcSchemasRegistry>(call: RpcCall<K>): Promise<RpcResult<K>> => {
+  const dispatch = async <K extends keyof RpcSchemasRegistry>(
+    call: RpcCall<K>,
+    context?: RpcInvocationContext,
+  ): Promise<RpcResult<K>> => {
+    context?.signal?.throwIfAborted();
     // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- tsgo widens indexed handler; `K` pins rpcName ↔ args on RpcCall<K>
-    const run = handlers[call.rpcName] as (args: RpcInput<K>) => Promise<RpcResult<K>>;
-    return run(call.args);
+    const run = handlers[call.rpcName] as (args: RpcInput<K>, context?: RpcInvocationContext) => Promise<RpcResult<K>>;
+    const result = await run(call.args, context);
+    context?.signal?.throwIfAborted();
+    return result;
   };
 
   return { dispatch };

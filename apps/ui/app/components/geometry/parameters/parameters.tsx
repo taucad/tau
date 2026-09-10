@@ -198,12 +198,7 @@ export function Parameters({
           />
         </>
       ) : (
-        <PanelEmptyState
-          icon={Info}
-          title={emptyMessage}
-          description={emptyDescription}
-          className='mx-2 mb-2 rounded-xs border border-dashed'
-        />
+        <PanelEmptyState icon={Info} title={emptyMessage} description={emptyDescription} />
       )}
     </div>
   );

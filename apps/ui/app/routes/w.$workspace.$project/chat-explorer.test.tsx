@@ -302,15 +302,13 @@ beforeEach(() => {
 });
 
 describe('ChatExplorerTree', () => {
-  it('should render the empty project state through CollectionEmptyState', () => {
+  it('should render the empty project state through PanelEmptyState', () => {
     mocks.useProject.mockReturnValue(null);
 
     renderExplorerTree();
 
     expect(screen.getByRole('textbox', { name: 'Filter parts' })).toHaveAttribute('placeholder', 'Filter parts...');
-    expect(
-      screen.getByText('No model components available').closest('[data-slot="collection-empty-state"]'),
-    ).toBeTruthy();
+    expect(screen.getByText('No model components available').closest('[data-slot="panel-empty-state"]')).toBeTruthy();
   });
 
   it('should render default-open Paneview units and filter every unit from one permanent input', async () => {
@@ -351,7 +349,7 @@ describe('ChatExplorerTree', () => {
     expect(screen.queryByText('main_part')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'helper_part' })).toBeInTheDocument();
     expect(screen.getByText('helper')).toHaveAttribute('data-slot', 'highlight');
-    expect(screen.getByText('No matching parts').closest('[data-slot="collection-empty-state"]')).toBeTruthy();
+    expect(screen.getByText('No matching parts').closest('[data-slot="panel-empty-state"]')).toBeTruthy();
 
     await user.click(screen.getByRole('button', { name: 'Clear search' }));
 
@@ -483,7 +481,7 @@ describe('ChatExplorerTree', () => {
     expect(screen.getByText('src/main.ts')).toBeInTheDocument();
     expect(screen.getByText('src/unopened.ts')).toBeInTheDocument();
     expect(
-      screen.getByText('Open renderer to inspect components').closest('[data-slot="collection-empty-state"]'),
+      screen.getByText('Open renderer to inspect components').closest('[data-slot="panel-empty-state"]'),
     ).toBeTruthy();
   });
 

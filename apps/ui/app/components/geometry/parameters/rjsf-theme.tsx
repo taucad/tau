@@ -12,7 +12,7 @@ import type {
   ErrorListProps,
   RJSFSchema,
 } from '@rjsf/utils';
-import { ChevronDown, Trash2 } from 'lucide-react';
+import { ChevronDown, SearchX, Trash2 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Button } from '@taucad/ui/components/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
@@ -32,7 +32,7 @@ import {
   isObjectLikeSchema,
 } from '#components/geometry/parameters/rjsf-utils.js';
 import { hasCustomValue } from '#utils/object.utils.js';
-import { CollectionEmptyState } from '#components/ui/collection-empty-state.js';
+import { PanelEmptyState } from '#components/ui/panel-empty-state.js';
 import { InlineCode } from '#components/code/code-block.js';
 import {
   emptyRjsfLayoutContext,
@@ -355,9 +355,11 @@ function ObjectFieldTemplate(
 
     return (
       <div className='[&:has(.properties:not(:empty))_.no-params]:hidden'>
-        <CollectionEmptyState className='no-params break-all'>
-          No parameters matching &quot;{formContext.searchTerm}&quot;
-        </CollectionEmptyState>
+        <PanelEmptyState
+          icon={SearchX}
+          title={`No parameters matching "${formContext.searchTerm}"`}
+          className='no-params break-all'
+        />
         <div
           data-slot='parameter-catalog'
           className='properties m-2 overflow-hidden rounded-md border border-border bg-card p-1 empty:hidden'

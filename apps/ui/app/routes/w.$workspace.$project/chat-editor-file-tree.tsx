@@ -78,7 +78,7 @@ import {
 } from '@taucad/ui/components/context-menu';
 import { useProject } from '#hooks/use-project.js';
 import { mountFileOperationParticipants } from '#filesystem/file-operation-participants.js';
-import { CollectionEmptyState } from '#components/ui/collection-empty-state.js';
+import { PanelEmptyState } from '#components/ui/panel-empty-state.js';
 import { HighlightText } from '#components/highlight-text.js';
 import { FileExtensionIcon, getIconIdForFilename } from '#components/icons/file-extension-icon.js';
 import { getFileExtension, encodeTextFile } from '#utils/filesystem.utils.js';
@@ -1864,7 +1864,9 @@ export const ChatEditorFileTree = memo(function ({
               })()}
             </div>
           ) : (
-            <CollectionEmptyState className='m-2'>No files available</CollectionEmptyState>
+            <div className='min-h-0 flex-1 p-2'>
+              <PanelEmptyState icon={FolderOpen} title='No files available' className='rounded-xl border bg-card' />
+            </div>
           )}
         </FloatingPanelContentBody>
       </FloatingPanelContent>

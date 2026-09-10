@@ -6,7 +6,7 @@ import type { PaneviewApi, PaneviewPanelApi } from 'dockview-react';
 import { PaneviewReact } from 'dockview-react';
 import type { GeometryComponentManifest, GeometryComponentNode } from '@taucad/types';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
-import { CollectionEmptyState } from '#components/ui/collection-empty-state.js';
+import { PanelEmptyState } from '#components/ui/panel-empty-state.js';
 import { SearchInput } from '#components/search-input.js';
 import { HighlightText } from '#components/highlight-text.js';
 import {
@@ -832,15 +832,17 @@ export function ComponentRow({
 }
 
 function ExplorerEmptyState(): React.JSX.Element {
-  return <CollectionEmptyState>No model components available</CollectionEmptyState>;
-}
-
-function ExplorerUnavailableState(): React.JSX.Element {
   return (
-    <CollectionEmptyState className='min-h-16 break-all'>Open renderer to inspect components</CollectionEmptyState>
+    <div className='size-full p-2'>
+      <PanelEmptyState icon={Box} title='No model components available' className='rounded-xl border bg-card' />
+    </div>
   );
 }
 
+function ExplorerUnavailableState(): React.JSX.Element {
+  return <PanelEmptyState icon={Box} title='Open renderer to inspect components' className='min-h-16 break-all' />;
+}
+
 function ExplorerNoMatchesState(): React.JSX.Element {
-  return <CollectionEmptyState className='min-h-16 break-all'>No matching parts</CollectionEmptyState>;
+  return <PanelEmptyState icon={Box} title='No matching parts' className='min-h-16 break-all' />;
 }

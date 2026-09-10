@@ -1,4 +1,4 @@
-import { ChevronsDown, Filter, Settings, Trash } from 'lucide-react';
+import { ChevronsDown, Filter, Settings, Terminal, Trash } from 'lucide-react';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSelector } from '@xstate/react';
 import type { PaneviewApi, PaneviewPanelApi } from 'dockview-react';
@@ -16,7 +16,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@taucad/ui/components/dropdown-menu';
-import { CollectionEmptyState } from '#components/ui/collection-empty-state.js';
+import { PanelEmptyState } from '#components/ui/panel-empty-state.js';
 import { PaneButton } from '#components/ui/pane-button.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { SearchInput } from '#components/search-input.js';
@@ -212,9 +212,7 @@ const ConsolePanelBody = ({ params }: { readonly params: ConsolePanelParams }): 
     );
   } else {
     content = (
-      <CollectionEmptyState className='m-2 h-[calc(100%-1rem)]'>
-        {params.totalCount === 0 ? 'No logs yet.' : 'No matching logs.'}
-      </CollectionEmptyState>
+      <PanelEmptyState icon={Terminal} title={params.totalCount === 0 ? 'No logs yet.' : 'No matching logs.'} />
     );
   }
 
@@ -473,7 +471,9 @@ export const ChatConsole = memo(function ChatConsole(): React.JSX.Element {
 
       <div className='min-h-0 flex-1 overflow-hidden'>
         {entryPaths.length === 0 ? (
-          <CollectionEmptyState className='bg-card'>No geometry units.</CollectionEmptyState>
+          <div className='size-full p-2'>
+            <PanelEmptyState icon={Terminal} title='No geometry units.' className='rounded-xl border bg-card' />
+          </div>
         ) : (
           <ConsolePaneview
             entryPaths={entryPaths}

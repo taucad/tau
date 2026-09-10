@@ -21,6 +21,13 @@ export type CacheCodec<T> = {
   readonly id: string;
   readonly version: string;
   readonly mediaType: string;
+  /**
+   * Qualified determinism class. `byte-exact` (the default) surfaces and
+   * poisons a conflicting output; `equivalent` retains the first verified
+   * payload and counts the divergence, and may only be claimed with independent
+   * geometric evidence.
+   */
+  readonly determinism?: 'byte-exact' | 'equivalent';
   readonly encode: (input: {
     readonly value: T;
     readonly signal: AbortSignal;
@@ -56,14 +63,36 @@ export type ComputeAction = {
 /** Cache failure behavior for one evaluation. @public */
 export type CachePolicy = 'best-effort' | 'required';
 
+declare const cacheRetentionBrand: unique symbol;
+
+/**
+ * Authorized stable owner of required durable data.
+ *
+ * Minted by the runtime from an authorized workload context; a caller-provided
+ * owner string is not permission. Its owner can recover and release it after a
+ * session restart.
+ * @public
+ */
+export type CacheRetention = {
+  readonly [cacheRetentionBrand]: true;
+  /** Diagnostic label of the owning job or checkpoint. */
+  readonly name: string;
+};
+
 /** Inputs for one content-addressed compute evaluation. @public */
 export type ComputeEvaluationInput<T> = {
   readonly action: ComputeAction;
   readonly codec: CacheCodec<T>;
-  readonly policy: CachePolicy;
   readonly compute: (input: { readonly signal: AbortSignal }) => Promise<T>;
   readonly signal?: AbortSignal;
-};
+} & (
+  | { readonly policy: 'best-effort' }
+  | {
+      /** Cold *and* hit paths pin, promote and await the backend barrier before success. */
+      readonly policy: 'required';
+      readonly retention: CacheRetention;
+    }
+);
 
 /** Result of a cache lookup or newly completed computation. @public */
 export type ComputeEvaluationResult<T> =
@@ -72,13 +101,15 @@ export type ComputeEvaluationResult<T> =
       readonly value: T;
       readonly actionDigest: ActionDigest;
       readonly contentDigest: ContentDigest;
+      /** Present only when a required policy promoted this hit past a durable barrier. */
+      readonly retention?: CacheRetention;
     }
   | {
       readonly source: 'computed';
       readonly value: T;
       readonly actionDigest: ActionDigest;
       readonly publication:
-        | { readonly status: 'stored'; readonly contentDigest: ContentDigest }
+        | { readonly status: 'stored'; readonly contentDigest: ContentDigest; readonly retention?: CacheRetention }
         | {
             readonly status: 'skipped';
             readonly reason: 'encode-failed' | 'content-store-failed' | 'action-store-failed';

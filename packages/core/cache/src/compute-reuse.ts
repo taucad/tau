@@ -4,6 +4,7 @@ import type { ActionStore, ComputeActionRecord, ContentStore } from '#store.js';
 import type {
   ActionDigest,
   CacheCodec,
+  CacheRetention,
   ComputeAction,
   ComputeEvaluationInput,
   ComputeEvaluationResult,
@@ -11,10 +12,31 @@ import type {
   ContentDigest,
 } from '#types.js';
 
+/**
+ * Promote one already-published record to required durability.
+ *
+ * Called on the hit path as well as the miss path: a hit on previously
+ * disposable data still needs a stable owner pin and the backend's durable
+ * barrier before a required evaluation may succeed. A backend that cannot
+ * acknowledge durability returns `no-durable-storage`, which is a refusal.
+ * @public
+ */
+export type ComputeDurablePromotion = (input: {
+  readonly actionDigest: ActionDigest;
+  readonly contentDigest: ContentDigest;
+  readonly retention: CacheRetention;
+  readonly signal: AbortSignal;
+}) => Promise<{ readonly status: 'promoted' } | { readonly status: 'no-durable-storage' }>;
+
 /** Stores used by a compute reuse service. @public */
 export type ComputeReuseServiceOptions = {
   readonly contentStore: ContentStore;
   readonly actionStore: ActionStore;
+  /**
+   * Required-durability barrier. Absent means this service cannot acknowledge
+   * required work at all, and every `required` evaluation is refused.
+   */
+  readonly promote?: ComputeDurablePromotion;
 };
 
 type PendingEvaluation = {
@@ -230,11 +252,42 @@ const publishComputed = async <T>(input: {
   };
 };
 
+const promoteRequired = async (input: {
+  readonly retention: CacheRetention;
+  readonly actionKey: ActionDigest;
+  readonly contentDigest: ContentDigest;
+  readonly promote: ComputeDurablePromotion | undefined;
+  readonly signal: AbortSignal;
+}): Promise<CacheRetention> => {
+  const { retention } = input;
+  if (!input.promote) {
+    throw requiredFailure(
+      'Required durability is unavailable: this compute store cannot acknowledge a durable barrier.',
+      new Error('no-durable-storage'),
+    );
+  }
+  const outcome = await input.promote({
+    actionDigest: input.actionKey,
+    contentDigest: input.contentDigest,
+    retention,
+    signal: input.signal,
+  });
+  throwIfAborted(input.signal);
+  if (outcome.status === 'no-durable-storage') {
+    throw requiredFailure(
+      'Required durability is unavailable: the backend refused a durable barrier.',
+      new Error('no-durable-storage'),
+    );
+  }
+  return retention;
+};
+
 const runEvaluation = async <T>(input: {
   readonly evaluation: ComputeEvaluationInput<T>;
   readonly actionKey: ActionDigest;
   readonly contentStore: ContentStore;
   readonly actionStore: ActionStore;
+  readonly promote: ComputeDurablePromotion | undefined;
   readonly signal: AbortSignal;
 }): Promise<ComputeEvaluationResult<T>> => {
   const lookup = await lookupWithPolicy(input);
@@ -244,12 +297,42 @@ const runEvaluation = async <T>(input: {
       value: lookup.value,
       actionDigest: input.actionKey,
       contentDigest: lookup.contentDigest,
+      ...(input.evaluation.policy === 'required'
+        ? {
+            retention: await promoteRequired({
+              retention: input.evaluation.retention,
+              actionKey: input.actionKey,
+              contentDigest: lookup.contentDigest,
+              promote: input.promote,
+              signal: input.signal,
+            }),
+          }
+        : {}),
     };
   }
   throwIfAborted(input.signal);
   const value = await input.evaluation.compute({ signal: input.signal });
   throwIfAborted(input.signal);
-  return publishComputed({ ...input, value });
+  const published = await publishComputed({ ...input, value });
+  if (input.evaluation.policy !== 'required' || published.source !== 'computed') {
+    return published;
+  }
+  if (published.publication.status !== 'stored') {
+    throw requiredFailure('Required publication did not store its content.', new Error(published.publication.reason));
+  }
+  return {
+    ...published,
+    publication: {
+      ...published.publication,
+      retention: await promoteRequired({
+        retention: input.evaluation.retention,
+        actionKey: input.actionKey,
+        contentDigest: published.publication.contentDigest,
+        promote: input.promote,
+        signal: input.signal,
+      }),
+    },
+  };
 };
 
 const waitFor = async <T>(input: {
@@ -330,6 +413,7 @@ export const createComputeReuseService = (options: ComputeReuseServiceOptions): 
               actionKey,
               contentStore: options.contentStore,
               actionStore: options.actionStore,
+              promote: options.promote,
               signal: controller.signal,
             });
           } finally {

@@ -1,6 +1,6 @@
 export { canonicalizeCacheValue, encodeCacheValue } from '#cache-value.js';
 export { createComputeReuseService } from '#compute-reuse.js';
-export type { ComputeReuseServiceOptions } from '#compute-reuse.js';
+export type { ComputeDurablePromotion, ComputeReuseServiceOptions } from '#compute-reuse.js';
 export {
   actionDigest,
   canonicalizeComputeAction,
@@ -24,6 +24,7 @@ export type {
 export type {
   ActionStore,
   CacheMaintenance,
+  CacheRejectionReason,
   CacheStoreStatistics,
   ComputeActionRecord,
   ComputeOutputReference,
@@ -33,6 +34,7 @@ export type {
   ActionDigest,
   CacheCodec,
   CachePolicy,
+  CacheRetention,
   CacheValue,
   ComputeAction,
   ComputeActionInput,

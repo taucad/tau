@@ -16,6 +16,16 @@ export type ComputeActionRecord = {
   readonly dependencies: readonly ActionDigest[];
 };
 
+/**
+ * Why a store refused a write.
+ *
+ * `conflict` is a byte-exact codec producing different output for one action:
+ * publish-once is preserved and the digest is poisoned, never last-writer-wins.
+ * `stale-generation` is a write captured before a clear.
+ * @public
+ */
+export type CacheRejectionReason = 'entry-too-large' | 'conflict' | 'stale-generation' | 'quota' | 'unavailable';
+
 /** Current bounded-store usage and lifetime counters. @public */
 export type CacheStoreStatistics = {
   readonly entries: number;
@@ -79,7 +89,7 @@ export type ContentStore = {
     readonly bytes: Uint8Array<ArrayBuffer>;
     readonly signal?: AbortSignal;
   }) => Promise<
-    { readonly status: 'stored' | 'existing' } | { readonly status: 'rejected'; readonly reason: 'entry-too-large' }
+    { readonly status: 'stored' | 'existing' } | { readonly status: 'rejected'; readonly reason: CacheRejectionReason }
   >;
   readonly maintenance: CacheMaintenance;
 };
@@ -94,7 +104,8 @@ export type ActionStore = {
     readonly record: ComputeActionRecord;
     readonly signal?: AbortSignal;
   }) => Promise<
-    { readonly status: 'published' | 'existing' } | { readonly status: 'rejected'; readonly reason: 'entry-too-large' }
+    | { readonly status: 'published' | 'existing' }
+    | { readonly status: 'rejected'; readonly reason: CacheRejectionReason }
   >;
   readonly maintenance: CacheMaintenance;
 };

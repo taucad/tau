@@ -35,6 +35,46 @@ describe('createProviderRpcFileSystem', () => {
     expect(await fileSystem.readFile('log.txt')).toBe('first\nsecond\n');
   });
 
+  /* Rule 16 / VI11: one fence inside this factory serves both launchers — the
+   * Node host's `NodeFsProvider` and the browser worker's relayed provider —
+   * because a fence at either construction site alone leaves the other open. */
+  it('refuses every write under Tau\u2019s own control metadata and still serves the read', async () => {
+    await provider.mkdir('.tau/chats/chat-1', { recursive: true });
+    await provider.writeFile('.tau/chats/chat-1/events.jsonl', '{"type":"run.lifecycle"}\n');
+    const fileSystem = fileSystemFor();
+
+    await expect(fileSystem.writeFile('.tau/chats/chat-1/events.jsonl', 'forged\n')).rejects.toMatchObject({
+      code: 'EPERM',
+      reason: 'WORKSPACE_MASKED_PATH',
+    });
+    /* The append-only transcript is the most attractive target for the one
+     * mutation a fence forgets, so it is guarded too (3-review S5). */
+    await expect(fileSystem.appendFile('.tau/chats/chat-1/events.jsonl', 'forged\n')).rejects.toMatchObject({
+      code: 'EPERM',
+    });
+    await expect(fileSystem.writeFile('.tau/workspaces/trun-1/identity.json', '{}')).rejects.toMatchObject({
+      code: 'EPERM',
+    });
+    /* The browser port's object store is revision evidence (RC6 S5 gate 15):
+     * an agent that could write it could forge the account of its own turn. */
+    await expect(fileSystem.writeFile('.tau/revisions/objects/ab/cdef', 'forged')).rejects.toMatchObject({
+      code: 'EPERM',
+      reason: 'WORKSPACE_MASKED_PATH',
+    });
+    /* The engine stores are the same evidence on a disk host (8-review S3). */
+    await expect(fileSystem.writeFile('.jj/repo/store/forged', 'forged')).rejects.toMatchObject({
+      code: 'EPERM',
+      reason: 'WORKSPACE_MASKED_PATH',
+    });
+    await expect(fileSystem.writeFile('.git/refs/heads/main', 'forged')).rejects.toMatchObject({
+      code: 'EPERM',
+      reason: 'WORKSPACE_MASKED_PATH',
+    });
+    /* Reads stay open: an agent may read back the account of its own turn. */
+    expect(await fileSystem.readFile('.tau/chats/chat-1/events.jsonl')).toBe('{"type":"run.lifecycle"}\n');
+    expect(await provider.readFile('.tau/chats/chat-1/events.jsonl', 'utf8')).toBe('{"type":"run.lifecycle"}\n');
+  });
+
   it('writes binary bytes verbatim', async () => {
     const fileSystem = fileSystemFor();
 

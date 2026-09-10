@@ -185,9 +185,14 @@ export const createChatToolRegistry = (options: ChatToolRegistryOptions): ToolRe
         invocation.signal.addEventListener('abort', onAbort, { once: true });
         let result: Awaited<ReturnType<typeof dispatcher.dispatch>>;
         try {
+          if (typeof parsed.data !== 'object' || parsed.data === null || Array.isArray(parsed.data)) {
+            throw new TypeError('Tool input schema returned a non-object value');
+          }
+          const args =
+            mapped.rpc === rpcName.exportGeometry ? { ...parsed.data, toolCallId: invocation.toolCallId } : parsed.data;
           result = await Promise.race([
             // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- schema validation above pins the tool↔RPC input pair.
-            dispatcher.dispatch({ rpcName: mapped.rpc, args: parsed.data } as RpcCall),
+            dispatcher.dispatch({ rpcName: mapped.rpc, args } as RpcCall, { signal: invocation.signal }),
             aborted.promise,
           ]);
         } finally {

@@ -31,12 +31,18 @@
       "types": "./src/capture/index.ts",
       "import": "./src/capture/index.ts",
       "default": "./src/capture/index.ts"
+    },
+    "./runtime": {
+      "types": "./src/runtime/index.ts",
+      "import": "./src/runtime/index.ts",
+      "default": "./src/runtime/index.ts"
     }
   },
   "dependencies": {
     "@taucad/agent-host": "workspace:*",
     "@taucad/chat": "workspace:*",
     "@taucad/filesystem": "workspace:*",
+    "@taucad/runtime": "workspace:*",
     "@taucad/utils": "workspace:*",
     "geospec": "workspace:*",
     "zod": "catalog:"

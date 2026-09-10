@@ -19,6 +19,7 @@ import { applyClientTextMutation, createExactReplacementPlan } from '@taucad/cha
 import type { RpcDirectoryEntry, RpcFileStat, RpcFileSystem } from '@taucad/chat/rpc';
 import { getErrno } from '@taucad/utils/error';
 import { assertRootedPath } from '@taucad/utils/path';
+import { maskWorkspaceWrites } from '#registry/workspace-mask.js';
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder('utf-8', { fatal: true });
@@ -61,7 +62,11 @@ export type ProviderRpcFileSystemOptions = {
  * ```
  */
 export const createProviderRpcFileSystem = (options: ProviderRpcFileSystemOptions): RpcFileSystem => {
-  const { provider, mutations, signal } = options;
+  const { mutations, signal } = options;
+  /* Rule 16 / VI11, fenced once for both launchers: an agent may read Tau's own
+   * control metadata and may never write it, and this is the single provider
+   * every file tool, the MCP endpoint and `export_geometry` all mutate through. */
+  const provider = maskWorkspaceWrites(options.provider);
   const bytes = async (path: string): Promise<Uint8Array<ArrayBuffer>> =>
     new Uint8Array(await provider.readFile(assertRootedPath(path)));
   const stat = async (path: string): Promise<RpcFileStat> => {

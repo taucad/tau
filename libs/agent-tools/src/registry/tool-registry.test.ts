@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import type { RpcFileSystem } from '@taucad/chat/rpc';
+import type { RpcFileSystem, RpcGraphicsClient, RpcInvocationContext, RpcRuntimeClient } from '@taucad/chat/rpc';
+import type { JsonValue } from '@taucad/agent-host';
 
 import { createChatToolRegistry } from '#registry/tool-registry.js';
 import type { ChatToolRegistryOptions } from '#registry/tool-registry.js';
@@ -47,8 +48,8 @@ const invoke = async (
   registry.invoke({
     toolCallId: 'call-1',
     toolName,
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- test input is the tool's own JSON shape.
-    input: call.input as never,
+    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- tests intentionally exercise unvalidated JSON shapes.
+    input: call.input as JsonValue,
     signal: call.signal ?? new AbortController().signal,
   });
 
@@ -170,6 +171,24 @@ describe('createChatToolRegistry invocation', () => {
     expect(JSON.stringify(result.content)).toContain('export const main');
   });
 
+  it('uses the trusted invocation ID for exported artifact paths', async () => {
+    const exportGeometry = vi.fn<RpcGraphicsClient['exportGeometry']>(async () => ({
+      success: true,
+      files: [{ name: 'model.stl', mimeType: 'model/stl', bytes: new Uint8Array([1]) }],
+    }));
+    const result = await invoke(build({ graphics: { exportGeometry } }), 'export_geometry', {
+      input: { targetFile: 'main.ts', format: 'stl', toolCallId: 'untrusted' },
+    });
+
+    expect(result).toMatchObject({
+      isError: false,
+      content: {
+        success: true,
+        files: [{ artifactPath: '.tau/artifacts/call-1__main.ts-stl/model.stl' }],
+      },
+    });
+  });
+
   it('throws the abort reason when the signal is already aborted', async () => {
     const controller = new AbortController();
     controller.abort(new Error('cancelled by operator'));
@@ -196,5 +215,57 @@ describe('createChatToolRegistry invocation', () => {
     });
     controller.abort(new Error('interrupted mid-read'));
     await expect(pending).rejects.toThrow('interrupted mid-read');
+  });
+
+  it('forwards local cancellation context without serializing it into RPC input', async () => {
+    const controller = new AbortController();
+    const getKernelResult = vi.fn<RpcRuntimeClient['getKernelResult']>(async () => ({
+      success: true,
+      status: 'ready',
+      kernelIssues: [],
+    }));
+    const result = await invoke(build({ kernelClient: { getKernelResult } }), 'get_kernel_result', {
+      input: { targetFile: 'main.ts' },
+      signal: controller.signal,
+    });
+
+    expect(result.isError).toBe(false);
+    expect(getKernelResult).toHaveBeenCalledExactlyOnceWith('main.ts', { signal: controller.signal });
+    expect(JSON.stringify(result.content)).not.toContain('signal');
+  });
+
+  it('isolates an aborted non-cooperative CAD call from its sibling', async () => {
+    const first = new AbortController();
+    const second = new AbortController();
+    const seenSignals: AbortSignal[] = [];
+    const getKernelResult = vi.fn<RpcRuntimeClient['getKernelResult']>(
+      async (targetFile: string, context?: RpcInvocationContext) => {
+        if (context?.signal) {
+          seenSignals.push(context.signal);
+        }
+        if (targetFile === 'a.ts') {
+          return new Promise<never>(() => {
+            // Deliberately non-cooperative: the registry race must still settle the wait.
+          });
+        }
+        return { success: true, status: 'ready', kernelIssues: [] };
+      },
+    );
+    const registry = build({ kernelClient: { getKernelResult } });
+    const interrupted = invoke(registry, 'get_kernel_result', {
+      input: { targetFile: 'a.ts' },
+      signal: first.signal,
+    });
+    const sibling = invoke(registry, 'get_kernel_result', {
+      input: { targetFile: 'b.ts' },
+      signal: second.signal,
+    });
+
+    first.abort(new Error('only a stopped'));
+
+    await expect(interrupted).rejects.toThrow('only a stopped');
+    await expect(sibling).resolves.toMatchObject({ isError: false });
+    expect(seenSignals).toEqual([first.signal, second.signal]);
+    expect(second.signal.aborted).toBe(false);
   });
 });

@@ -1,8 +1,9 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { z } from 'zod';
 import { renderHook, act, waitFor } from '@testing-library/react';
 import { mock } from 'vitest-mock-extended';
 import type { Chat } from '@ai-sdk/react';
-import type { CadAgentConfigInput, MyUIMessage } from '@taucad/chat';
+import type { CadAgentConfigInput, CadAgentExecution, MyUIMessage } from '@taucad/chat';
 import { useCadAgentConfig } from '#hooks/use-cad-agent-config.js';
 import { useActiveChatInstance } from '#chat-clients/_internal/use-active-chat-instance.js';
 import { useChatActions, useChatSelector } from '#hooks/use-chat.js';
@@ -13,17 +14,17 @@ import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import type { ChatSessionStore } from '#services/chat-session-store.js';
 import type { AgentHostClientOptions, AgentHostClient } from '#services/agent-host-client.js';
 import { useCadChatClient } from '#chat-clients/use-cad-chat-client.js';
-import { withChatRevisionMode } from '#utils/chat-revision-mode.js';
 
 const workspaceHarness = vi.hoisted(() => ({
   current: undefined as
     | {
-        execution: { workspaceId: string; baseRevisionId: string; hostId: string };
+        execution: { hostId: string; mode: 'direct' | 'candidate'; workspaceId: string; baseRevisionId: string };
         admitted: boolean;
       }
     | undefined,
   listeners: new Set<() => void>(),
   admissionGate: undefined as Promise<void> | undefined,
+  revisionMode: 'direct' as 'direct' | 'candidate',
   prepare: vi.fn(),
 }));
 const browserHostHarness = vi.hoisted(() => ({
@@ -59,6 +60,11 @@ const availabilityHarness = vi.hoisted(() => {
   const availability: HostAvailability = { status: 'available', durability: 'exclusive-append' };
   return { availability };
 });
+const placementHarness = vi.hoisted(() => ({
+  localHostId: undefined as 'desktop' | undefined,
+  /** What each placement advertised for revisions; `browser` is the page's own worker. */
+  revisions: new Map<string, ReadonlyArray<'direct' | 'candidate'>>(),
+}));
 
 vi.mock('#hooks/use-cad-agent-config.js', () => ({
   useAgentHostPlacements: () => ({ targets: [], loading: false }),
@@ -158,6 +164,11 @@ vi.mock('#services/daemon-agent-host-client.js', () => ({
   createDaemonAgentHostTransport: (dial: () => Promise<unknown>) => ({ dial }),
 }));
 vi.mock('#lib/agent-host-placement.js', () => ({
+  desktopWorkspaceRoot: async () => '/Users/test/Tau/home/proj_test',
+  localAgentHostId: () => placementHarness.localHostId,
+  daemonPlacementOf: (execution: CadAgentExecution) =>
+    execution.kind === 'tau' ? (execution.hostId ?? placementHarness.localHostId) : execution.hostId,
+  placementRevisionModes: (hostId: string | undefined) => placementHarness.revisions.get(hostId ?? 'browser') ?? [],
   openAgentHostChannel: browserHostHarness.openAgentHostChannel,
 }));
 vi.mock('#filesystem/handle-store.js', () => ({
@@ -180,6 +191,10 @@ vi.mock('#providers/chat-workspace-authority-provider.js', () => ({
   useOptionalChatWorkspaceAuthority: () => ({
     get: () => workspaceHarness.current,
     prepare: workspaceHarness.prepare,
+    revisionMode: () => workspaceHarness.revisionMode,
+    setRevisionMode: (_chatId: string, mode: 'direct' | 'candidate') => {
+      workspaceHarness.revisionMode = mode;
+    },
     finalize: async () => undefined,
     discard: async () => undefined,
     markAdmitted: async () => {
@@ -268,7 +283,7 @@ const expectAnyHostAdmission: unknown = expect.objectContaining({ config: expect
 const expectRunBody = (agent: CadAgentConfigInput = buildAgent()): Record<string, unknown> => ({
   agent,
   projectId: 'proj_test',
-  execution: { workspaceId: 'workspace_test', baseRevisionId: 'rev_test', hostId: 'host_test' },
+  execution: { hostId: 'host_test', mode: 'direct', workspaceId: 'workspace_test', baseRevisionId: 'rev_test' },
   admission: {
     version: 1,
     idempotencyKey: expect.stringMatching(/^req_/u) as unknown,
@@ -278,16 +293,36 @@ const expectRunBody = (agent: CadAgentConfigInput = buildAgent()): Record<string
 });
 
 beforeEach(() => {
+  placementHarness.localHostId = undefined;
+  placementHarness.revisions.clear();
+  // Every host in this suite records both modes unless a test says otherwise.
+  for (const key of ['browser', 'origin', 'desktop', 'device-1']) {
+    placementHarness.revisions.set(key, ['direct', 'candidate']);
+  }
+  workspaceHarness.revisionMode = 'direct';
   vi.clearAllMocks();
   browserHostHarness.registration = undefined;
   browserHostHarness.run = undefined;
   workspaceHarness.listeners.clear();
   workspaceHarness.admissionGate = undefined;
   workspaceHarness.current = {
-    execution: { workspaceId: 'workspace_test', baseRevisionId: 'rev_test', hostId: 'host_test' },
+    execution: { hostId: 'host_test', mode: 'direct', workspaceId: 'workspace_test', baseRevisionId: 'rev_test' },
     admitted: false,
   };
-  workspaceHarness.prepare.mockImplementation(async () => workspaceHarness.current!);
+  // The real authority stamps the claim's own mode onto the target it hands
+  // back; the harness has to do the same or the wire assertion proves nothing.
+  const mintedClaim: NonNullable<typeof workspaceHarness.current> = {
+    execution: { hostId: 'host_test', mode: 'direct', workspaceId: 'workspace_test', baseRevisionId: 'rev_test' },
+    admitted: false,
+  };
+  workspaceHarness.prepare.mockImplementation(async (_chatId: string, options?: { mode?: 'direct' | 'candidate' }) => {
+    const claim = workspaceHarness.current ?? mintedClaim;
+    workspaceHarness.current = {
+      ...claim,
+      execution: { ...claim.execution, mode: options?.mode ?? 'direct' },
+    };
+    return workspaceHarness.current;
+  });
   mountAgentMock(buildAgent());
   useChatSelectorMock.mockReturnValue('ready');
   installActiveSession('chat_test');
@@ -303,6 +338,28 @@ beforeEach(() => {
 });
 
 describe('useCadChatClient', () => {
+  it('places an implicit desktop Tau turn on the services utility', async () => {
+    placementHarness.localHostId = 'desktop';
+    const chat = mock<Chat<MyUIMessage>>();
+    Object.defineProperty(chat, 'messages', { get: () => [] });
+    useActiveChatInstanceMock.mockReturnValue(chat);
+    installActions(buildActions());
+
+    renderHook(() => useCadChatClient());
+    await waitFor(() => {
+      expect(browserHostHarness.registration).toBeDefined();
+    });
+    await browserHostHarness.registration!.createClient();
+
+    const [transport] = browserHostHarness.createDaemonClient.mock.calls.at(-1) as [{ dial: () => Promise<unknown> }];
+    await expect(transport.dial()).resolves.toEqual({ hostId: 'desktop' });
+    expect(browserHostHarness.openAgentHostChannel).toHaveBeenCalledWith('desktop', {
+      workspaceRoot: '/Users/test/Tau/home/proj_test',
+    });
+    expect(browserHostHarness.createClient).not.toHaveBeenCalled();
+    expect(workspaceHarness.prepare).not.toHaveBeenCalled();
+  });
+
   it('does not dispatch execution until the admitted claim is durably committed', async () => {
     const admission = Promise.withResolvers<void>();
     workspaceHarness.admissionGate = admission.promise;
@@ -432,8 +489,9 @@ describe('useCadChatClient', () => {
     const body = actions.sendMessage.mock.calls[0]?.[1]?.body as Record<string, unknown>;
     // No browser workspace claim was prepared or admitted for this turn...
     expect(workspaceHarness.prepare).not.toHaveBeenCalled();
-    // ...so the body names none, and carries the host on the execution instead.
-    expect(body).not.toHaveProperty('execution');
+    // ...so the target names none — only the daemon that writes and the mode
+    // it must record the turn in (V18).
+    expect(body['execution']).toEqual({ hostId: 'origin', mode: 'direct' });
     expect(body['agent']).toMatchObject({ execution: { kind: 'tau', hostId: 'origin' } });
   });
 
@@ -469,11 +527,44 @@ describe('useCadChatClient', () => {
     });
     const body = actions.sendMessage.mock.calls[0]?.[1]?.body as Record<string, unknown>;
     expect(workspaceHarness.prepare).not.toHaveBeenCalled();
-    expect(body).not.toHaveProperty('execution');
+    expect(body['execution']).toEqual({ hostId: 'origin', mode: 'direct' });
     expect(body['agent']).toMatchObject({ execution: { kind: 'acp', hostId: 'origin', agentId: 'codex' } });
-    // The admission names the agent and nothing else: no model, no prompt
-    // blocks, no tool grant — the external agent brings its own (X6).
-    expect(body['browserHost']).toEqual({ trigger: 'submit', agent: { kind: 'acp', id: 'codex' } });
+    // The admission names the agent and the CAD context the client composed —
+    // and nothing a Tau turn negotiates: no model row, no prompt blocks, no
+    // tool grant, because the external agent brings its own (X6/V12).
+    expect(body['browserHost']).toMatchObject({ trigger: 'submit', agent: { kind: 'acp', id: 'codex' } });
+    const external = z.object({ context: z.record(z.string(), z.unknown()) }).safeParse(body['browserHost']);
+    const context = external.data?.context ?? {};
+    expect(Object.keys(context).toSorted()).toEqual(['systemPrompt']);
+    expect(String(context['systemPrompt'])).toContain('<workflow>');
+  });
+
+  it('carries the adapter model an external-agent execution names, and nothing else', async () => {
+    mountAgentMock(
+      buildAgent({ execution: { kind: 'acp', hostId: 'origin', agentId: 'codex', model: 'gpt-5.3-codex-spark' } }),
+    );
+    const chat = mock<Chat<MyUIMessage>>();
+    Object.defineProperty(chat, 'messages', { get: () => [] });
+    useActiveChatInstanceMock.mockReturnValue(chat);
+    const actions = buildActions();
+    installActions(actions);
+
+    const { result } = renderHook(() => useCadChatClient());
+    await waitFor(() => {
+      expect(browserHostHarness.registration).toBeDefined();
+    });
+    await browserHostHarness.registration!.createClient();
+    act(() => {
+      result.current.submit({ text: 'Build it.' });
+    });
+    await waitFor(() => {
+      expect(actions.sendMessage).toHaveBeenCalled();
+    });
+    const body = actions.sendMessage.mock.calls[0]?.[1]?.body as Record<string, unknown>;
+    expect(body['browserHost']).toMatchObject({
+      trigger: 'submit',
+      agent: { kind: 'acp', id: 'codex', model: 'gpt-5.3-codex-spark' },
+    });
   });
 
   it('reattaches a daemon-placed chat to the daemon log no browser claim substantiates', async () => {
@@ -512,30 +603,34 @@ describe('useCadChatClient', () => {
     expect(reattachHostChat).not.toHaveBeenCalled();
   });
 
-  it('refuses a branch-mode Tau Host turn instead of silently writing to the live workspace', async () => {
-    mountAgentMock(
-      buildAgent({
-        execution: withChatRevisionMode({ kind: 'tau', model: 'openai-gpt-5.5', hostId: 'origin' }, 'branch'),
-      }),
-    );
+  it('refuses a turn whose mode the placed host cannot record, with one typed code', async () => {
+    // V18/VSC5: a host with no revision port would run the turn unrecorded.
+    placementHarness.revisions.set('origin', ['direct']);
+    workspaceHarness.revisionMode = 'candidate';
+    mountAgentMock(buildAgent({ execution: { kind: 'tau', model: 'openai-gpt-5.5', hostId: 'origin' } }));
     const chat = mock<Chat<MyUIMessage>>();
     Object.defineProperty(chat, 'messages', { get: () => [] });
     useActiveChatInstanceMock.mockReturnValue(chat);
     const actions = buildActions();
     installActions(actions);
 
+    // The banner's `ChatError` carries no code, so the typed refusal is read
+    // off the error the client surfaces — which is what a caller keys on.
+    const surfaced = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const { result } = renderHook(() => useCadChatClient());
     act(() => {
       result.current.submit({ text: 'Build it.' });
     });
 
     await waitFor(() => {
-      expect(persistedErrors.at(-1)).toMatchObject({
-        /* oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- `expect.stringContaining` is typed `any` by vitest. */
-        message: expect.stringContaining('writes directly to that computer'),
-      });
+      expect(surfaced.mock.calls.at(-1)?.[1]).toMatchObject({ code: 'REVISION_MODE_UNSUPPORTED' });
+    });
+    expect(persistedErrors.at(-1)).toMatchObject({
+      /* oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- `expect.stringContaining` is typed `any` by vitest. */
+      message: expect.stringContaining('cannot record a turn in a new branch'),
     });
     expect(actions.sendMessage).not.toHaveBeenCalled();
+    surfaced.mockRestore();
   });
 
   it('builds browser start config from the request agent and resolves retry-model metadata per admission', async () => {
@@ -661,7 +756,7 @@ describe('useCadChatClient', () => {
     installActions(actions);
 
     const { result } = renderHook(() => useCadChatClient());
-    await act(async () => result.current.respondToToolApproval('interrupt-1', true, 'Proceed'));
+    await act(async () => result.current.respondToToolApproval('interrupt-1', true, { reason: 'Proceed' }));
 
     expect(browserHostHarness.resolveInterrupt).toHaveBeenCalledWith({
       chatId: 'chat_test',
@@ -683,6 +778,30 @@ describe('useCadChatClient', () => {
       },
     ]);
     expect(chat.addToolApprovalResponse).not.toHaveBeenCalled();
+  });
+
+  /* The option the human chose has to survive the whole chain, and the two
+   * browser hops are the only ones with no product-path coverage: if either
+   * dropped the field every other test still passes (4-review S2). */
+  it('carries the exact option a human chose down to the browser transport', async () => {
+    browserHostHarness.run = { runId: 'run-paused', state: 'paused', eventCount: 4 };
+    const chat = mock<Chat<MyUIMessage>>();
+    Object.defineProperty(chat, 'messages', { get: () => [] });
+    useActiveChatInstanceMock.mockReturnValue(chat);
+    useChatSelectorMock.mockReturnValue('streaming');
+    installActions(buildActions());
+
+    const { result } = renderHook(() => useCadChatClient());
+    await act(async () => result.current.respondToToolApproval('interrupt-1', true, { optionId: 'allow-always' }));
+
+    expect(browserHostHarness.resolveInterrupt).toHaveBeenCalledWith({
+      chatId: 'chat_test',
+      runId: 'run-paused',
+      interruptId: 'interrupt-1',
+      approved: true,
+      reason: undefined,
+      optionId: 'allow-always',
+    });
   });
 
   it('should call actions.sendMessage with body.agent built from useCadAgentConfig when submit fires', async () => {
@@ -776,7 +895,7 @@ describe('useCadChatClient', () => {
   it('dispatches a retry selected while the prior workspace publication is settling', async () => {
     mountAgentMock(buildAgent({ execution: { kind: 'tau', model: 'openai-gpt-5.5' } }));
     workspaceHarness.current = {
-      execution: { workspaceId: 'workspace_old', baseRevisionId: 'rev_old', hostId: 'host_test' },
+      execution: { hostId: 'host_test', mode: 'direct', workspaceId: 'workspace_old', baseRevisionId: 'rev_old' },
       admitted: true,
     };
     const chat = mock<Chat<MyUIMessage>>();
@@ -797,7 +916,7 @@ describe('useCadChatClient', () => {
     expect(actions.retryMessage).not.toHaveBeenCalled();
 
     workspaceHarness.current = {
-      execution: { workspaceId: 'workspace_retry', baseRevisionId: 'rev_retry', hostId: 'host_test' },
+      execution: { hostId: 'host_test', mode: 'direct', workspaceId: 'workspace_retry', baseRevisionId: 'rev_retry' },
       admitted: false,
     };
     act(() => {
@@ -824,9 +943,10 @@ describe('useCadChatClient', () => {
     ];
     expect(messageId).toBe('assistant_retry');
     expect(options.body.execution).toEqual({
+      hostId: 'host_test',
+      mode: 'direct',
       workspaceId: 'workspace_retry',
       baseRevisionId: 'rev_retry',
-      hostId: 'host_test',
     });
     expect(options.body.browserHost).toMatchObject({ trigger: 'retry', retainedMessageIds: [] });
   });
@@ -991,7 +1111,12 @@ describe('useCadChatClient', () => {
     workspaceHarness.current = undefined;
     workspaceHarness.prepare.mockImplementation(async () => {
       workspaceHarness.current = {
-        execution: { workspaceId: 'workspace_second', baseRevisionId: 'rev_second', hostId: 'host_test' },
+        execution: {
+          hostId: 'host_test',
+          mode: 'direct',
+          workspaceId: 'workspace_second',
+          baseRevisionId: 'rev_second',
+        },
         admitted: false,
       };
       return workspaceHarness.current;
@@ -1000,9 +1125,10 @@ describe('useCadChatClient', () => {
     const body = await compose();
 
     expect(body['execution']).toEqual({
+      hostId: 'host_test',
+      mode: 'direct',
       workspaceId: 'workspace_second',
       baseRevisionId: 'rev_second',
-      hostId: 'host_test',
     });
     expect((workspaceHarness.current as { readonly admitted: boolean } | undefined)?.admitted).toBe(true);
   });
@@ -1112,7 +1238,7 @@ describe('useCadChatClient', () => {
     expect(actions.sendMessage).toHaveBeenCalledTimes(1);
 
     workspaceHarness.current = {
-      execution: { workspaceId: 'workspace_test', baseRevisionId: 'rev_test', hostId: 'host_test' },
+      execution: { hostId: 'host_test', mode: 'direct', workspaceId: 'workspace_test', baseRevisionId: 'rev_test' },
       admitted: false,
     };
     act(() => {
@@ -1129,12 +1255,9 @@ describe('useCadChatClient', () => {
     });
   });
 
-  it('forwards the revision mode derived from the active execution to every prepare call site', async () => {
-    mountAgentMock(
-      buildAgent({
-        execution: withChatRevisionMode({ kind: 'tau', model: 'openai-gpt-5.5' }, 'branch'),
-      }),
-    );
+  it('forwards the composer’s revision mode to every prepare call site', async () => {
+    workspaceHarness.revisionMode = 'candidate';
+    mountAgentMock(buildAgent({ execution: { kind: 'tau', model: 'openai-gpt-5.5' } }));
     const chat = mock<Chat<MyUIMessage>>();
     Object.defineProperty(chat, 'messages', { get: () => [] });
     useActiveChatInstanceMock.mockReturnValue(chat);
@@ -1174,12 +1297,15 @@ describe('useCadChatClient', () => {
 
     expect(workspaceHarness.prepare.mock.calls.length).toBeGreaterThanOrEqual(4);
     for (const call of workspaceHarness.prepare.mock.calls) {
-      expect(call).toEqual(['chat_test', { mode: 'branch' }]);
+      expect(call).toEqual(['chat_test', { mode: 'candidate' }]);
     }
   });
 
-  it('defaults to local mode and keeps the client-only mode off the strict turn wire', async () => {
-    mountAgentMock(buildAgent({ execution: withChatRevisionMode({ kind: 'tau', model: 'openai-gpt-5.5' }, 'branch') }));
+  it('carries the mode on the execution target and never on the execution object', async () => {
+    workspaceHarness.revisionMode = 'candidate';
+    // No retained claim: this turn mints one in the picked mode.
+    workspaceHarness.current = undefined;
+    mountAgentMock(buildAgent({ execution: { kind: 'tau', model: 'openai-gpt-5.5' } }));
     const chat = mock<Chat<MyUIMessage>>();
     useActiveChatInstanceMock.mockReturnValue(chat);
     const actions = buildActions();
@@ -1193,9 +1319,14 @@ describe('useCadChatClient', () => {
       expect(actions.sendMessage).toHaveBeenCalledOnce();
     });
 
-    const body = actions.sendMessage.mock.calls[0]?.[1]?.body as { readonly agent: CadAgentConfigInput };
+    const body = actions.sendMessage.mock.calls[0]?.[1]?.body as {
+      readonly agent: CadAgentConfigInput;
+      readonly execution: Record<string, unknown>;
+    };
     expect(body.agent.execution).toEqual({ kind: 'tau', model: 'openai-gpt-5.5' });
+    expect(body.execution).toMatchObject({ mode: 'candidate' });
 
+    workspaceHarness.revisionMode = 'direct';
     mountAgentMock(buildAgent());
     workspaceHarness.current = undefined;
     rerender();
@@ -1203,7 +1334,7 @@ describe('useCadChatClient', () => {
       result.current.submit({ text: 'default mode' });
     });
     await waitFor(() => {
-      expect(workspaceHarness.prepare.mock.calls.at(-1)).toEqual(['chat_test', { mode: 'local' }]);
+      expect(workspaceHarness.prepare.mock.calls.at(-1)).toEqual(['chat_test', { mode: 'direct' }]);
     });
   });
 });

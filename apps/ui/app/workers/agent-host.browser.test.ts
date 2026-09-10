@@ -1,7 +1,11 @@
-import { afterEach, expect, it } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 import { DirectIdbProvider, OPFSProvider } from '@taucad/filesystem/backend';
 import { createBrowserAgentHostClient } from '#services/agent-host-client.js';
+import { agentHostTailBatchLimit } from '#workers/agent-host.contract.js';
+import { handleAgentHostWorkerRequest } from '#workers/agent-host.impl.js';
 import type { FileSystemProvider } from '@taucad/filesystem';
+// eslint-disable-next-line @nx/enforce-module-boundaries -- The browser vitest config reads this same composed source fixture until FIX-PROJ adds the UI package dependency.
+import { authoritativeGatewayWireFixtures } from '../../../../packages/agent-host/src/transport/gateway-wire.fixture.js';
 
 let provider: FileSystemProvider | undefined;
 
@@ -64,7 +68,6 @@ it('runs a gateway turn in the dedicated launcher and commits its OPFS event log
     ],
     model: { id: 'fixture-model', providerKind: 'vertexai', contextWindow: 200_000 },
     runtimeConfig: { tauApiUrl: 'https://api.tau.test', tauWebSocketUrl: 'wss://api.tau.test' },
-    lengthSymbol: 'mm',
   } as const satisfies Parameters<typeof createBrowserAgentHostClient>[0];
   const client = createBrowserAgentHostClient({
     ...clientOptions,
@@ -165,7 +168,6 @@ it('refuses initialization when the persisted project root is missing', async ()
     ],
     model: { id: 'fixture-model', providerKind: 'vertexai', contextWindow: 200_000 },
     runtimeConfig: { tauApiUrl: 'https://api.tau.test', tauWebSocketUrl: 'wss://api.tau.test' },
-    lengthSymbol: 'mm',
   });
 
   await expect(
@@ -231,7 +233,6 @@ it('reclaims an abandoned transactional writer lock after winning attach takeove
     ],
     model: { id: 'fixture-model', providerKind: 'vertexai', contextWindow: 200_000 },
     runtimeConfig: { tauApiUrl: 'https://api.tau.test', tauWebSocketUrl: 'wss://api.tau.test' },
-    lengthSymbol: 'mm',
   });
 
   try {
@@ -267,7 +268,6 @@ it('detects a dead leader and proactively reattaches the follower from its durab
     ],
     model: { id: 'fixture-model', providerKind: 'vertexai', contextWindow: 200_000 },
     runtimeConfig: { tauApiUrl: 'https://api.tau.test', tauWebSocketUrl: 'wss://api.tau.test' },
-    lengthSymbol: 'mm',
     closeTimeout: 20,
   } as const satisfies Parameters<typeof createBrowserAgentHostClient>[0];
   const leaderWorker = new Worker(new URL('agent-host.worker.ts', import.meta.url), {
@@ -349,5 +349,165 @@ it('detects a dead leader and proactively reattaches the follower from its durab
     leaderWorker.terminate();
     followerWorker.terminate();
     await Promise.allSettled([leader.close(), follower.close()]);
+  }
+});
+
+/*
+ * The worker's own tool path, driven in the page: the config's gateway
+ * middleware answers every call with the same single-turn script, so a
+ * multi-tool turn has to script the wire per call — done here by swapping
+ * `fetch` around this module's real `handleAgentHostWorkerRequest`.
+ *
+ * `export_geometry` stays out: it connects the runtime worker, whose
+ * shared-memory transport needs a cross-origin-isolated page, and those headers
+ * live in the browser vitest config (a W10 test hold).
+ */
+it('runs the file tools over the one relayed workspace provider and refuses a non-empty directory delete', async () => {
+  const fileSystemProvider = new OPFSProvider();
+  provider = fileSystemProvider;
+  await fileSystemProvider.initialize();
+  const { createFileSystemBridgePort } = await import('@taucad/fs-bridge');
+  const providerBasePath = `agent-host-tools-${crypto.randomUUID()}`;
+  const workspace = rootedProvider(fileSystemProvider, providerBasePath);
+  const sessionId = `session-${crypto.randomUUID()}`;
+  const turns = authoritativeGatewayWireFixtures.browserFileToolTurns;
+  let served = 0;
+  const realFetch = globalThis.fetch.bind(globalThis);
+  globalThis.fetch = async (input, init) => {
+    const url = input instanceof Request ? input.url : String(input);
+    if (!url.includes('/v1/llm/')) {
+      return realFetch(input, init);
+    }
+    const frames = turns[Math.min(served++, turns.length - 1)] ?? [];
+    return new Response(frames.join(''), {
+      status: 200,
+      headers: { 'content-type': 'text/event-stream', 'x-tau-operation-id': 'operation-file-tool-fixture' },
+    });
+  };
+
+  try {
+    await handleAgentHostWorkerRequest(
+      {
+        type: 'initialize',
+        fileSystemPort: createFileSystemBridgePort(workspace).port,
+        projectRootPort: createFileSystemBridgePort(workspace).port,
+        projectStorage: { projectId: providerBasePath, backend: 'opfs', providerBasePath },
+        authority: { projectId: providerBasePath, workspaceId: providerBasePath },
+        gatewayBaseUrl: location.origin,
+        systemPrompt: 'Browser file-tool fixture.',
+        systemPromptBlocks: [
+          { type: 'text', text: 'Browser file-tool fixture.' },
+          { type: 'text', text: 'Dynamic fixture.' },
+        ],
+        model: { id: 'fixture-model', providerKind: 'vertexai', contextWindow: 200_000 },
+        runtimeConfig: { tauApiUrl: 'https://api.tau.test', tauWebSocketUrl: 'wss://api.tau.test' },
+      },
+      sessionId,
+    );
+    await handleAgentHostWorkerRequest(
+      {
+        type: 'start',
+        chatId: 'chat-file-tools',
+        runId: 'run-file-tools',
+        trigger: 'submit',
+        message: { id: 'user-file-tools', role: 'user', content: 'Exercise the file tools.' },
+      },
+      sessionId,
+    );
+    // `start` returns at admission; the run settles asynchronously, exactly as
+    // the client's own `waitForRunCompletion` observes it.
+    const snapshot = await vi.waitFor(
+      async () => {
+        const attached = await handleAgentHostWorkerRequest(
+          { type: 'attach', chatId: 'chat-file-tools', cursor: 0, limit: agentHostTailBatchLimit },
+          sessionId,
+        );
+        const settled = attached.type === 'attach' ? attached.snapshot : undefined;
+        if (settled?.state !== 'completed') {
+          throw new Error(`Run is ${settled?.state ?? 'unknown'}.`);
+        }
+        return settled;
+      },
+      { timeout: 20_000, interval: 50 },
+    );
+    expect(snapshot).toMatchObject({ runId: 'run-file-tools', state: 'completed' });
+    const outputFor = (toolName: string): string =>
+      JSON.stringify(
+        snapshot.messages.find((message) => message.role === 'tool-output' && message.toolName === toolName),
+      );
+
+    // `create_file` wrote, and `edit_file` changed exactly the requested occurrence.
+    expect(await fileSystemProvider.readFile(`${providerBasePath}/agent/main.ts`, 'utf8')).toBe(
+      'export const main = 2;\n',
+    );
+    // `read_file` returned the edited bytes through the same provider.
+    expect(outputFor('read_file')).toContain('export const main = 2;');
+    // `delete_file` refuses a non-empty directory instead of removing the subtree.
+    expect(outputFor('delete_file')).toContain('ENOTEMPTY');
+    expect(await fileSystemProvider.readFile(`${providerBasePath}/doomed/child.ts`, 'utf8')).toBe('keep me\n');
+  } finally {
+    globalThis.fetch = realFetch;
+    await handleAgentHostWorkerRequest({ type: 'close' }, sessionId);
+  }
+});
+
+/*
+ * An `acp` agent is a daemon placement: the browser worker has no external
+ * runner to give it to. Answering the wire with the same typed refusal the
+ * host raises beats silently running the turn on a Tau model the user did not
+ * choose.
+ */
+it('refuses a start that names an external agent instead of running it on Tau', async () => {
+  const fileSystemProvider = new OPFSProvider();
+  provider = fileSystemProvider;
+  await fileSystemProvider.initialize();
+  const { createFileSystemBridgePort } = await import('@taucad/fs-bridge');
+  const providerBasePath = `agent-host-external-${crypto.randomUUID()}`;
+  const workspace = rootedProvider(fileSystemProvider, providerBasePath);
+  const sessionId = `session-${crypto.randomUUID()}`;
+
+  try {
+    await handleAgentHostWorkerRequest(
+      {
+        type: 'initialize',
+        fileSystemPort: createFileSystemBridgePort(workspace).port,
+        projectRootPort: createFileSystemBridgePort(workspace).port,
+        projectStorage: { projectId: providerBasePath, backend: 'opfs', providerBasePath },
+        authority: { projectId: providerBasePath, workspaceId: providerBasePath },
+        gatewayBaseUrl: location.origin,
+        systemPrompt: 'Browser external-agent fixture.',
+        systemPromptBlocks: [
+          { type: 'text', text: 'Browser external-agent fixture.' },
+          { type: 'text', text: 'Dynamic fixture.' },
+        ],
+        model: { id: 'fixture-model', providerKind: 'vertexai', contextWindow: 200_000 },
+        runtimeConfig: { tauApiUrl: 'https://api.tau.test', tauWebSocketUrl: 'wss://api.tau.test' },
+      },
+      sessionId,
+    );
+
+    await expect(
+      handleAgentHostWorkerRequest(
+        {
+          type: 'start',
+          chatId: 'chat-external-agent',
+          runId: 'run-external-agent',
+          trigger: 'submit',
+          message: { id: 'user-external-agent', role: 'user', content: 'Run this on Codex.' },
+          agent: { kind: 'acp', id: 'codex' },
+        },
+        sessionId,
+      ),
+    ).rejects.toMatchObject({ code: 'EXTERNAL_AGENT_UNAVAILABLE' });
+
+    // The refusal is durable-free: nothing was admitted for the refused run.
+    await expect(
+      handleAgentHostWorkerRequest(
+        { type: 'attach', chatId: 'chat-external-agent', cursor: 0, limit: agentHostTailBatchLimit },
+        sessionId,
+      ),
+    ).resolves.toMatchObject({ type: 'attach', batch: { endCursor: 0 } });
+  } finally {
+    await handleAgentHostWorkerRequest({ type: 'close' }, sessionId);
   }
 });

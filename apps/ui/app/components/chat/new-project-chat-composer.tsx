@@ -76,7 +76,7 @@ export function NewProjectChatComposer({
         const created = await projectManager.createProject({
           kernel,
           /* The chip's value verbatim — not a Tau execution rebuilt from the
-           * model. Rebuilding dropped `hostId` (and any `acp`/`paseo` choice),
+           * model. Rebuilding dropped `hostId` (and any `acp` choice),
            * so a project started from a "Tau Host · …" chip ran its first turn
            * in this browser instead, against a chip that still named the
            * daemon. Both providers keep this execution's Tau model in step with

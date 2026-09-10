@@ -31,4 +31,16 @@ describe('ChatErrorRateLimit', () => {
     expect(continueChat).toHaveBeenCalledTimes(1);
     expect(regenerate).not.toHaveBeenCalled();
   });
+
+  it('shows funded-operation copy without presenting it as ordinary pacing', () => {
+    render(
+      <ChatErrorRateLimit
+        title='Funded operation limit reached'
+        description='The funded-operation failsafe is active.'
+      />,
+    );
+
+    expect(screen.getByText('Funded operation limit reached')).toBeInTheDocument();
+    expect(screen.getByText('The funded-operation failsafe is active.')).toBeInTheDocument();
+  });
 });

@@ -9,10 +9,7 @@ import { render, screen } from '@testing-library/react';
 // a fresh chat (no messages yet) silently dropped the model badge.
 
 const chatSelectorState: {
-  activeExecution:
-    | { kind: 'tau'; model: string }
-    | { kind: 'paseo'; connectionId: string; agentId: string }
-    | undefined;
+  activeExecution: { kind: 'tau'; model: string } | { kind: 'acp'; hostId: string; agentId: string } | undefined;
   messages: unknown[];
 } = {
   activeExecution: { kind: 'tau', model: 'manifold-model' },
@@ -83,8 +80,8 @@ describe('ChatHistoryStatus — chat-scoped model badge', () => {
     expect(screen.getByText('PINNED-MODEL')).toBeTruthy();
   });
 
-  it('omits the Tau model badge for a Paseo execution', () => {
-    chatSelectorState.activeExecution = { kind: 'paseo', connectionId: 'connection-1', agentId: 'claude' };
+  it('omits the Tau model badge for an external execution', () => {
+    chatSelectorState.activeExecution = { kind: 'acp', hostId: 'origin', agentId: 'claude' };
     chatSelectorState.messages = [
       // Even with stamped messages present, the deleted message-scan loop
       // must not be reintroduced — the badge is driven exclusively by the

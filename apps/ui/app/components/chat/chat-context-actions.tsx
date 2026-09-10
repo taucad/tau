@@ -16,8 +16,8 @@ import { menuItemLayoutClass, menuItemVariants } from '@taucad/ui/components/men
 import type { DraftImageOptions } from '#hooks/use-chat.js';
 import { useHeadlessImageService } from '#providers/headless-image-provider.js';
 import { captureCadImages, captureFilesToDataUrls } from '#services/headless-capture.js';
-import { useCameraRegistryVersion } from '#hooks/use-graphics.js';
-import { getGraphicsCameraState, hasGraphicsCameraRig } from '#services/graphics-camera-registry.js';
+import { useGraphicsCameraRigQuery } from '#hooks/use-graphics.js';
+import { getGraphicsCameraState } from '#services/graphics-camera-registry.js';
 
 type ChatContextActionsProperties = {
   readonly addImage: (image: string, options?: DraftImageOptions) => void;
@@ -58,8 +58,8 @@ export function ChatContextActions({
   const mainGraphicsRef = useMainGraphics();
   const cadActor = geometryUnits.get(mainEntryPath);
 
-  useCameraRegistryVersion();
-  const mainCameraReady = hasGraphicsCameraRig(mainGraphicsRef);
+  const hasCameraRig = useGraphicsCameraRigQuery();
+  const mainCameraReady = hasCameraRig(mainGraphicsRef);
   const mainGeometryFormat = useSelector(cadActor, (state) => state?.context.geometry?.format);
   const viewSettings = useSelector(editorRef, (state) => state.context.viewSettings);
 
@@ -209,7 +209,7 @@ ${error.stack ? `\n\`\`\`\n${error.stack}\n\`\`\`` : ''}`;
           action() {
             handleViewScreenshot(graphicsRef, settings?.entryPath);
           },
-          disabled: !format || format === 'webrtc' || (format === 'gltf' && !hasGraphicsCameraRig(graphicsRef)),
+          disabled: !format || format === 'webrtc' || (format === 'gltf' && !hasCameraRig(graphicsRef)),
         });
       }
     }
@@ -248,6 +248,7 @@ ${error.stack ? `\n\`\`\`\n${error.stack}\n\`\`\`` : ''}`;
     viewSettings,
     mainEntryPath,
     handleViewScreenshot,
+    hasCameraRig,
   ]);
 
   const groupedContextItems = useMemo(() => {

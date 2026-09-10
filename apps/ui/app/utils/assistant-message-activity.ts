@@ -30,6 +30,7 @@
 
 import type { MyMessagePart } from '@taucad/chat';
 import { fileUnchangedMarker } from '@taucad/chat/constants';
+import { agentApprovalToolName } from '#services/agent-host-event-projection.js';
 
 // ── Categories ───────────────────────────────────────────────────────────────
 
@@ -93,11 +94,37 @@ const partTypeCategoryMap = new Map<string, ActivityCategory>([
 ]);
 
 /**
+ * The emitter's ACP `ToolKind` for an external tool part, if it sent one.
+ *
+ * External calls are `dynamic-tool` parts, so they have no `tool-<name>` type
+ * to key on — the kind is the vocabulary they share with Tau's own tools (N11).
+ */
+export const externalToolKind = (part: MyMessagePart): string | undefined => {
+  if (part.type !== 'dynamic-tool') {
+    return undefined;
+  }
+  const tau = part.toolMetadata?.['tau'];
+  const kind = typeof tau === 'object' && tau !== null && !Array.isArray(tau) ? tau['kind'] : undefined;
+  return typeof kind === 'string' ? kind : undefined;
+};
+
+/**
  * Maps a message part to its activity category.
+ *
+ * An external agent's call groups by its `kind` rather than by a tool name this
+ * build has to know in advance: a `think` call is the same activity as Tau's own
+ * reasoning, and everything else is exploration. A durable approval is
+ * presented by the banner above the composer, so its part is transparent here.
  */
 export const classifyActivityPart = (part: MyMessagePart): ActivityCategory => {
   if (part.type === 'text') {
     return part.text.trim() === '' ? 'skip' : 'text';
+  }
+  if (part.type === 'dynamic-tool') {
+    if (part.toolName === agentApprovalToolName) {
+      return 'skip';
+    }
+    return externalToolKind(part) === 'think' ? 'reasoning' : 'research';
   }
   return partTypeCategoryMap.get(part.type) ?? 'data';
 };
@@ -198,6 +225,7 @@ const isCachedReadFilePart = (part: MyMessagePart): boolean => {
   return typeof content === 'string' && fileUnchangedMarker.matches(content);
 };
 
+// oxlint-disable-next-line eslint/complexity -- one counter per segment; the summary's whole job is this tally.
 const generateResearchSummary = (parts: readonly MyMessagePart[]): SummaryParts => {
   let files = 0;
   let cachedReads = 0;
@@ -206,7 +234,28 @@ const generateResearchSummary = (parts: readonly MyMessagePart[]): SummaryParts 
   let renders = 0;
   let images = 0;
   let tests = 0;
+  let calls = 0;
   for (const part of parts) {
+    if (part.type === 'dynamic-tool') {
+      switch (externalToolKind(part)) {
+        case 'read': {
+          files++;
+          break;
+        }
+        case 'search': {
+          searches++;
+          break;
+        }
+        case 'fetch': {
+          fetches++;
+          break;
+        }
+        default: {
+          calls++;
+        }
+      }
+      continue;
+    }
     switch (part.type) {
       case 'tool-read_file': {
         files++;
@@ -263,6 +312,9 @@ const generateResearchSummary = (parts: readonly MyMessagePart[]): SummaryParts 
   }
   if (tests > 0) {
     segments.push(pluralize(tests, 'test'));
+  }
+  if (calls > 0) {
+    segments.push(pluralize(calls, 'tool call'));
   }
 
   return { verb: 'Explored', verbActive: 'Exploring', detail: segments.join(', ') };

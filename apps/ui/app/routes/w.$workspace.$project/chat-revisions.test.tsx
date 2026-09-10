@@ -1,12 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, within } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { ChatRevisions } from '#routes/w.$workspace.$project/chat-revisions.js';
 import { useVisibleRevisions } from '#hooks/use-revisions.js';
 import type { RevisionsView } from '#hooks/use-revisions.js';
 import { useRestoreToPoint } from '#hooks/use-restore-to-point.js';
 import type { Revision } from '#lib/file-restore-timeline.js';
-import { ImmutableRevisionTree, revisionBranchName, revisionId } from '@taucad/filesystem';
+import { ImmutableRevisionTree, revisionId } from '@taucad/filesystem';
+import { revisionBranchName } from '@taucad/revisions';
 import type { RevisionGraph, RevisionGraphNode } from '#lib/revision-graph.js';
 
 vi.mock('#components/ui/floating-panel.js', () => ({
@@ -20,6 +21,13 @@ vi.mock('#components/ui/floating-panel.js', () => ({
   FloatingPanelClose: () => <button type='button'>close</button>,
 }));
 vi.mock('#hooks/use-revisions.js', () => ({ useVisibleRevisions: vi.fn() }));
+/* The branch section reads the workspace authority; mounting the real provider
+ * hangs a jsdom mount (see `revision-branches.test.tsx`), and every read it
+ * makes is a snapshot function, so a stub authority is the whole seam. */
+let authority: ReturnType<typeof stubAuthority> | undefined;
+vi.mock('#providers/chat-workspace-authority-provider.js', () => ({
+  useOptionalChatWorkspaceAuthority: () => authority,
+}));
 vi.mock('#hooks/use-restore-to-point.js', () => ({ useRestoreToPoint: vi.fn() }));
 const editSummary = vi.fn();
 vi.mock('#hooks/use-revision-graph.js', () => ({
@@ -91,6 +99,31 @@ const graphFor = (revisions: readonly Revision[], head: Revision | undefined): R
   };
 };
 
+const branchSummary = (
+  name: string,
+): { name: string; headRevisionId: string; summary: string; actorId: string; source: 'agent'; createdAt: number } => ({
+  name,
+  headRevisionId: `head-${name}`,
+  summary: `${name} head`,
+  actorId: 'tau-host',
+  source: 'agent',
+  createdAt: 1,
+});
+
+/** A workspace authority whose head reference is `head`, and nothing else. */
+const stubAuthority = (head: string | undefined) => {
+  const branches = [branchSummary('main'), branchSummary('agent/chat_b')];
+  return {
+    subscribe: () => () => undefined,
+    listBranches: () => branches,
+    headBranch: () => head,
+    diffRevisions: () => [],
+    checkout: vi.fn(),
+    mergeBranch: vi.fn(),
+    deleteBranch: vi.fn(),
+  };
+};
+
 const setRevisions = (view: Partial<RevisionsView>): void => {
   const revisions = view.revisions ?? [rev1, rev2];
   const headRevision =
@@ -108,6 +141,7 @@ const setRevisions = (view: Partial<RevisionsView>): void => {
 };
 
 beforeEach(() => {
+  authority = undefined;
   restore.mockClear();
   returnToLatest.mockClear();
   editSummary.mockClear();
@@ -138,10 +172,45 @@ describe('ChatRevisions', () => {
     expect(screen.getByText('Current')).not.toBeNull();
   });
 
+  it('T-PANE-CURRENT: "Current" is the head reference’s branch, not the newest revision’s (Q11)', () => {
+    // The newest revision is on the candidate branch, and the live tree is on
+    // the trunk — the exact state a candidate turn leaves behind.
+    const graph = graphFor([rev1, rev2], rev2);
+    const candidate = { ...graph.nodes[1]!, branch: revisionBranchName('agent/chat_b') };
+    const nodes = [graph.nodes[0]!, candidate];
+    setRevisions({ graph: { ...graph, nodes, byId: new Map(nodes.map((node) => [node.id, node])) } });
+    authority = stubAuthority('main');
+
+    const view = render(<ChatRevisions isExpanded setIsExpanded={vi.fn()} />);
+    const rowOf = (name: string): HTMLElement =>
+      within(screen.getByRole('region', { name: 'Revision branches' }))
+        .getByText(name)
+        .closest('li')!;
+
+    expect(rowOf('main')).toHaveTextContent('Current');
+    expect(rowOf('agent/chat_b')).not.toHaveTextContent('Current');
+    // A candidate that is the graph head is still a branch you can act on.
+    expect(within(rowOf('agent/chat_b')).getByRole('button', { name: 'Switch' })).toBeVisible();
+    expect(within(rowOf('agent/chat_b')).getByRole('button', { name: /Merge into main/u })).toBeVisible();
+    expect(within(rowOf('agent/chat_b')).getByRole('button', { name: /Discard/u })).toBeVisible();
+
+    // And the label follows a Switch, which moves the head reference.
+    authority = stubAuthority('agent/chat_b');
+    view.rerender(<ChatRevisions isExpanded setIsExpanded={vi.fn()} />);
+    expect(rowOf('agent/chat_b')).toHaveTextContent('Current');
+    expect(within(rowOf('agent/chat_b')).queryByRole('button', { name: 'Switch' })).toBeNull();
+    expect(within(rowOf('main')).getByRole('button', { name: 'Switch' })).toBeVisible();
+  });
+
   it('T-PANE-RESTORE: a Restore click restores that Revision by messageId + anchor', () => {
     render(<ChatRevisions isExpanded setIsExpanded={vi.fn()} />);
     fireEvent.click(screen.getByRole('button', { name: 'Restore to Revision 1' }));
-    expect(restore).toHaveBeenCalledWith({ messageId: 'u1', anchor: 100 });
+    expect(restore).toHaveBeenCalledWith({
+      messageId: 'u1',
+      anchor: 100,
+      identitySource: 'authoritative',
+      revisionId: revisionId('rev:u1'),
+    });
   });
 
   it('T-PANE-HEAD: the current (head) Revision reads Current and offers no Restore', () => {
@@ -155,7 +224,12 @@ describe('ChatRevisions', () => {
     render(<ChatRevisions isExpanded setIsExpanded={vi.fn()} />);
     expect(screen.getByText('Modified')).not.toBeNull();
     fireEvent.click(screen.getByRole('button', { name: /Discard changes/ }));
-    expect(restore).toHaveBeenCalledWith({ messageId: 'u2', anchor: 200 });
+    expect(restore).toHaveBeenCalledWith({
+      messageId: 'u2',
+      anchor: 200,
+      identitySource: 'authoritative',
+      revisionId: revisionId('rev:u2'),
+    });
   });
 
   it('renders nothing when the pane is collapsed', () => {
@@ -172,6 +246,9 @@ describe('ChatRevisions', () => {
 
   it('renders the branch, fork point, conflict, publication, and inspect-only state', () => {
     const historical = graphNode(rev1, {
+      // Transcript identity is what makes a superseded branch inspect-only: an
+      // authoritative node is restored by checking its revision out.
+      identitySource: 'transcript',
       branch: revisionBranchName('explore/lightweight'),
       parentTurnIds: ['u0'],
       forkPointTurnId: 'u0',
@@ -202,6 +279,35 @@ describe('ChatRevisions', () => {
     expect(screen.getByText('Head publication rejected')).not.toBeNull();
     expect(screen.getByText('Historical branch · inspect only')).not.toBeNull();
     expect(screen.queryByRole('button', { name: 'Restore to Revision 1' })).toBeDisabled();
+  });
+
+  it('M2: restores a superseded branch the revision store still holds', () => {
+    // Same node, authoritative identity: `isRestorable` is about replaying chat
+    // evidence, and a stored revision needs none of it.
+    const superseded = graphNode(rev1, {
+      branch: revisionBranchName('explore/lightweight'),
+      isRestorable: false,
+    });
+    const graph: RevisionGraph = {
+      nodes: [superseded],
+      byId: new Map([[superseded.id, superseded]]),
+      byTurnId: new Map([[superseded.turnId, superseded]]),
+      branches: [{ name: superseded.branch, headTurnId: 'u1' }],
+    };
+    setRevisions({ revisions: [rev1], headRevision: undefined, graph });
+
+    render(<ChatRevisions isExpanded setIsExpanded={vi.fn()} />);
+
+    expect(screen.queryByText('Historical branch · inspect only')).toBeNull();
+    const button = screen.getByRole('button', { name: 'Restore to Revision 1' });
+    expect(button).not.toBeDisabled();
+    fireEvent.click(button);
+    expect(restore).toHaveBeenCalledWith({
+      messageId: 'u1',
+      anchor: 100,
+      identitySource: 'authoritative',
+      revisionId: revisionId('rev:u1'),
+    });
   });
 
   it('exposes exact revision/tree/path/job metadata and saves an accessible edited summary', () => {

@@ -354,7 +354,7 @@ function useCookieModel(): ActiveChatModel {
  * choice in the chat row, which is the placement the composer carries across.
  *
  * ponytail: un-gate the chip here and this hook has to hold the selection in
- * state instead — a `hostId`, or an `acp`/`paseo` choice, would otherwise
+ * state instead — a `hostId`, or an `acp` choice, would otherwise
  * evaporate between the click and the submit. Recorded as residue in
  * `docs/research/agent-host-transports-and-offline.md`
  * (§ Addendum: FIX-SEEDED-PLACEMENT).

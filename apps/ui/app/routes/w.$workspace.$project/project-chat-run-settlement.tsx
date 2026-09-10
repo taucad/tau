@@ -10,9 +10,9 @@
  * providers (homepage, marketing, library) do not mount it, so chat sessions
  * stay universally creatable while settlement stays a project concern.
  *
- * This was `ProjectChatRpcBindings` until W4-PASEO. Its other half — the
- * API-coordinated run directory, the Socket.IO RPC rooms, and the server-minted
- * run id — went with the API chat plane: a run is now owned by the host that
+ * This was `ProjectChatRpcBindings` until the API chat plane was cut. Its other
+ * half — the API-coordinated run directory, the Socket.IO RPC rooms, and the
+ * server-minted run id — went with that plane: a run is now owned by the host that
  * executes it and lives in `.tau/chats/<chatId>/events.jsonl` (PH19). What
  * survives is the half that was always browser-host work.
  *

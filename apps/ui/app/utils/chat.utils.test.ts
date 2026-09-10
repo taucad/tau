@@ -140,6 +140,33 @@ describe('serializeMessage', () => {
       expect(serializeMessage(message)).toBe('Model: gpt-4 | Tokens: 10 in / 20 out');
     });
 
+    /* V6: an external turn's tokens are the vendor's own report, and Tau quotes
+     * no price for them — it did not sell them. The agent is named instead. */
+    it('names the external agent and quotes no Tau price for its usage', () => {
+      const message = baseMessage([
+        {
+          type: 'data-usage',
+          data: {
+            type: 'usage',
+            id: 'u1',
+            agent: 'codex',
+            model: 'gpt-5.3-codex',
+            inputTokens: 1200,
+            outputTokens: 300,
+            reasoningTokens: 0,
+            cacheReadTokens: 0,
+            cacheWriteTokens: 0,
+            inputTokensCost: 0,
+            outputTokensCost: 0,
+            cacheReadTokensCost: 0,
+            cacheWriteTokensCost: 0,
+            totalCost: 0,
+          },
+        },
+      ]);
+      expect(serializeMessage(message)).toBe('Agent: codex | Model: gpt-5.3-codex | Tokens: 1200 in / 300 out');
+    });
+
     it('includes cost when totalCost > 0', () => {
       const message = baseMessage([
         {

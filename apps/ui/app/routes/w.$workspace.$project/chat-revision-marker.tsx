@@ -21,7 +21,7 @@ export function ChatRevisionMarker({
 }: {
   readonly userMessageId: string;
 }): React.JSX.Element | undefined {
-  const { byMessageId, headRevision, isDirty } = useVisibleRevisions();
+  const { byMessageId, headRevision, isDirty, graph } = useVisibleRevisions();
   const { restore, isBusy } = useRestoreToPoint();
 
   const revision = byMessageId.get(userMessageId);
@@ -30,8 +30,16 @@ export function ChatRevisionMarker({
   }
 
   const isActive = headRevision?.n === revision.n;
+  // The projected node for this turn, when the revision store holds one: a
+  // restore of an authoritative node is a checkout, not a transcript replay.
+  const node = graph.byTurnId.get(revision.messageId);
   const restoreThis = (): void => {
-    restore({ messageId: revision.messageId, anchor: revision.anchor });
+    restore({
+      messageId: revision.messageId,
+      anchor: revision.anchor,
+      ...(node === undefined ? {} : { identitySource: node.identitySource }),
+      ...(node?.identitySource === 'authoritative' ? { revisionId: node.id } : {}),
+    });
   };
 
   return (

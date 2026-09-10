@@ -15,16 +15,16 @@ import type {
   WireProtocolSchemas,
 } from '@taucad/agent-host';
 import {
+  agentChannelModelSchema,
+  agentChannelSystemPromptBlockSchema,
+  agentChannelToolChoiceSchema,
   agentLogEventSchema,
-  isGatewayProviderKind,
   jsonValueSchema,
-  modelProviderKinds,
   providerMessageSchema,
   userProviderMessageSchema,
 } from '@taucad/agent-host';
 import type { ProjectFileSystemConfig } from '#filesystem/handle-store.js';
 import type { UiRuntimeConfigInput } from '#runtime/ui-runtime.config.js';
-import type { LengthSymbol } from '@taucad/units';
 import { z } from 'zod';
 import { skillMetadataSchema } from '@taucad/chat/schemas';
 
@@ -95,6 +95,8 @@ export type AgentHostWorkerInitializeRequest = {
   readonly type: 'initialize';
   readonly fileSystemPort: MessagePort;
   readonly projectRootPort: MessagePort;
+  readonly computeMode?: 'off' | 'memory' | 'durable' | undefined;
+  readonly computeStorePort?: MessagePort | undefined;
   readonly projectStorage: ProjectFileSystemConfig;
   readonly authority: { readonly projectId: string; readonly workspaceId: string };
   readonly gatewayBaseUrl: string;
@@ -109,7 +111,6 @@ export type AgentHostWorkerInitializeRequest = {
     | readonly [ModelSystemPromptBlock, ModelSystemPromptBlock, ModelSystemPromptBlock];
   readonly model: AgentHostModel;
   readonly runtimeConfig: UiRuntimeConfigInput;
-  readonly lengthSymbol: LengthSymbol;
   readonly testingEnabled?: boolean | undefined;
 };
 
@@ -124,15 +125,27 @@ export type AgentHostWorkerInitializeRequest = {
  *
  * @public
  */
-export type AgentHostExternalAgent =
-  | { readonly kind: 'acp'; readonly id: string }
-  | {
-      readonly kind: 'paseo';
-      readonly id: string;
-      readonly connectionId: string;
-      readonly mcpUrl?: string | undefined;
-      readonly mcpHeaders?: Readonly<Record<string, string>> | undefined;
-    };
+export type AgentHostExternalAgent = { readonly kind: 'acp'; readonly id: string; readonly model?: string };
+
+/**
+ * The CAD context an external turn carries (V12).
+ *
+ * Deliberately *not* {@link AgentHostAdmissionConfig}: none of what a Tau turn
+ * negotiates — the model row, the cache blocks, the tool grant — applies to an
+ * agent that brings its own. What the client *composed* does apply, because it
+ * is the same knowledge a Tau turn works from, and the daemon sends it as
+ * embedded resources on the session's first prompt.
+ *
+ * @public
+ */
+export type AgentHostExternalContext = {
+  /** The CAD system prompt, kernel facts included. */
+  readonly systemPrompt: string;
+  /** Skills and memory the client assembled for this turn. */
+  readonly contextPayload?: ClientContext | undefined;
+  /** The editor snapshot this turn was composed against. */
+  readonly snapshot?: JsonValue | undefined;
+};
 
 type AgentHostWorkerStartRequestBase = {
   readonly type: 'start';
@@ -141,6 +154,20 @@ type AgentHostWorkerStartRequestBase = {
   readonly message: UserProviderMessage;
   readonly config?: AgentHostAdmissionConfig | undefined;
   readonly agent?: AgentHostExternalAgent | undefined;
+  /** Present only beside {@link AgentHostWorkerStartRequestBase.agent}. */
+  readonly context?: AgentHostExternalContext | undefined;
+  /**
+   * How the host that runs this turn records what it writes (V19).
+   *
+   * Carried here because one client object is sent to *both* transports: this
+   * is a `strictObject`, so a browser-placed turn would be rejected whole the
+   * moment the client started attaching the mode a daemon-placed turn needs.
+   * The browser worker records its own revisions in the page's authority and
+   * ignores both fields.
+   */
+  readonly mode?: 'direct' | 'candidate' | undefined;
+  /** Revision the turn's base is recorded under; minted by the host when absent. */
+  readonly baseRevisionId?: string | undefined;
 };
 
 export type AgentHostWorkerStartRequest = AgentHostWorkerStartRequestBase &
@@ -160,6 +187,8 @@ export type AgentHostWorkerCommandInput =
       readonly runId: string;
       readonly interruptId: string;
       readonly outcome: 'approved' | 'denied' | 'cancelled';
+      /** The option the human actually chose, when the request offered a list. */
+      readonly optionId?: string | undefined;
       readonly payload?: JsonValue | undefined;
     }
   | { readonly type: 'tail'; readonly chatId: string; readonly cursor: number; readonly limit: number }
@@ -250,25 +279,6 @@ export type AgentHostWorkerConnect = {
 };
 
 const nonEmptyString = z.string().min(1);
-const systemPromptBlockSchema = z.strictObject({
-  type: z.literal('text'),
-  text: z.string(),
-  cacheControl: z.strictObject({ type: z.literal('ephemeral'), scope: z.literal('global').optional() }).optional(),
-});
-const modelCostSchema = z.strictObject({
-  input: z.number().nonnegative(),
-  output: z.number().nonnegative(),
-  cacheRead: z.number().nonnegative(),
-  cacheWrite: z.number().nonnegative(),
-});
-const hostModelSchema = z.strictObject({
-  id: nonEmptyString,
-  providerKind: z.enum(modelProviderKinds).refine(isGatewayProviderKind),
-  contextWindow: z.number().int().positive(),
-  maxTokens: z.number().int().positive().optional(),
-  cost: modelCostSchema.optional(),
-});
-const toolChoiceSchema = z.union([z.enum(['none', 'auto', 'any', 'custom']), z.array(z.string())]);
 const clientContextSchema = z.strictObject({
   // The canonical client-authored skill metadata wire shape — a local strict
   // relist here rejected real payloads (resourceUri/source/version/whenToUse/
@@ -310,11 +320,15 @@ const messagePortSchema = z.custom<MessagePort>(
 export const agentHostAdmissionConfigSchema = z.strictObject({
   systemPrompt: z.string(),
   systemPromptBlocks: z.union([
-    z.tuple([systemPromptBlockSchema, systemPromptBlockSchema]),
-    z.tuple([systemPromptBlockSchema, systemPromptBlockSchema, systemPromptBlockSchema]),
+    z.tuple([agentChannelSystemPromptBlockSchema, agentChannelSystemPromptBlockSchema]),
+    z.tuple([
+      agentChannelSystemPromptBlockSchema,
+      agentChannelSystemPromptBlockSchema,
+      agentChannelSystemPromptBlockSchema,
+    ]),
   ]),
-  model: hostModelSchema,
-  toolChoice: toolChoiceSchema,
+  model: agentChannelModelSchema,
+  toolChoice: agentChannelToolChoiceSchema,
   allowedTools: z.array(z.string()),
   testingEnabled: z.boolean().optional(),
   snapshot: jsonValueSchema.optional(),
@@ -323,32 +337,30 @@ export const agentHostAdmissionConfigSchema = z.strictObject({
 });
 
 const commandBase = { chatId: nonEmptyString };
-/** Wire validator for {@link AgentHostExternalAgent}. @public */
 /**
- * Which external runner owns the turn.
+ * Wire validator for {@link AgentHostExternalAgent}.
  *
- * `acp` is a daemon-spawned adapter and needs nothing beyond the agent id.
- * `paseo` also names the paired connection its session opens on, because the
- * page holds that session and the agent id alone does not say which daemon it
- * lives on.
+ * `acp` is a daemon-spawned adapter and needs nothing beyond the agent id and,
+ * optionally, the adapter's own model id.
+ *
+ * @public
  */
-export const agentHostExternalAgentSchema = z.union([
-  z.strictObject({ kind: z.literal('acp'), id: nonEmptyString }),
-  z.strictObject({
-    kind: z.literal('paseo'),
-    id: nonEmptyString,
-    connectionId: nonEmptyString,
-    /**
-     * A paired Tau Host's `/mcp` endpoint and its run-scoped bearer.
-     *
-     * Minted by that daemon at admission (the page cannot sign one; the
-     * secret never leaves the daemon). Absent means the agent runs with no
-     * Tau tools, which the selector says out loud rather than failing.
-     */
-    mcpUrl: z.url().optional(),
-    mcpHeaders: z.record(z.string(), z.string()).optional(),
-  }),
-]);
+export const agentHostExternalAgentSchema = z.strictObject({
+  kind: z.literal('acp'),
+  id: nonEmptyString,
+  model: nonEmptyString.optional(),
+});
+
+/**
+ * Wire validator for {@link AgentHostExternalContext}.
+ *
+ * @public
+ */
+export const agentHostExternalContextSchema = z.strictObject({
+  systemPrompt: z.string(),
+  contextPayload: clientContextSchema.optional(),
+  snapshot: jsonValueSchema.optional(),
+});
 
 const startBase = {
   ...commandBase,
@@ -357,6 +369,11 @@ const startBase = {
   message: userProviderMessageSchema,
   config: agentHostAdmissionConfigSchema.optional(),
   agent: agentHostExternalAgentSchema.optional(),
+  context: agentHostExternalContextSchema.optional(),
+  /* Mirrors `agent-wire.ts`'s `startBase`: the client sends one start object to
+   * both transports, and this one is strict. */
+  mode: z.enum(['direct', 'candidate']).optional(),
+  baseRevisionId: nonEmptyString.optional(),
 };
 const startRequestSchema = z.union([
   z.strictObject({ ...startBase, trigger: z.literal('submit') }),
@@ -381,6 +398,10 @@ const commandSchemas = [
     runId: nonEmptyString,
     interruptId: nonEmptyString,
     outcome: z.enum(['approved', 'denied', 'cancelled']),
+    /* Mirrors `agent-wire.ts`: this is a `strictObject`, so a resolution
+     * carrying the field would otherwise be rejected whole by the browser
+     * worker's leader broadcast (4-review S1). */
+    optionId: nonEmptyString.optional(),
     payload: jsonValueSchema.optional(),
   }),
   z.strictObject({ ...commandBase, type: z.literal('attach'), ...tailWindow }),
@@ -416,17 +437,22 @@ const initializeRequestSchema = z.strictObject({
   type: z.literal('initialize'),
   fileSystemPort: messagePortSchema,
   projectRootPort: messagePortSchema,
+  computeMode: z.enum(['off', 'memory', 'durable']).optional(),
+  computeStorePort: messagePortSchema.optional(),
   projectStorage: projectStorageSchema,
   authority: z.strictObject({ projectId: nonEmptyString, workspaceId: nonEmptyString }),
   gatewayBaseUrl: z.url(),
   systemPrompt: z.string(),
   systemPromptBlocks: z.union([
-    z.tuple([systemPromptBlockSchema, systemPromptBlockSchema]),
-    z.tuple([systemPromptBlockSchema, systemPromptBlockSchema, systemPromptBlockSchema]),
+    z.tuple([agentChannelSystemPromptBlockSchema, agentChannelSystemPromptBlockSchema]),
+    z.tuple([
+      agentChannelSystemPromptBlockSchema,
+      agentChannelSystemPromptBlockSchema,
+      agentChannelSystemPromptBlockSchema,
+    ]),
   ]),
-  model: hostModelSchema,
+  model: agentChannelModelSchema,
   runtimeConfig: z.strictObject({ tauApiUrl: z.url(), tauWebSocketUrl: z.url() }),
-  lengthSymbol: z.custom<LengthSymbol>((value) => typeof value === 'string' && value.length > 0),
   testingEnabled: z.boolean().optional(),
 });
 const agentHostWorkerCallRequestSchema = z.union([

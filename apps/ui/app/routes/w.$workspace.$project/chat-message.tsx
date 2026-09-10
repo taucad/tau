@@ -2,6 +2,7 @@ import { ChevronDown, ChevronRight, RefreshCw, Wrench } from 'lucide-react';
 import { memo, useCallback, useMemo, useState } from 'react';
 import { messageRole } from '@taucad/chat/constants';
 import type { MyMessagePart, UsageData } from '@taucad/chat';
+import { externalAgentDisplayName } from '#lib/agent-host-placement.js';
 import { useChatActions, useChatSelector } from '#hooks/use-chat.js';
 import { useCadChatClient } from '#chat-clients/use-cad-chat-client.js';
 import type { CombinedChatState } from '#hooks/use-chat.js';
@@ -53,6 +54,7 @@ import { ChatMessageToolGetKernelResult } from '#routes/w.$workspace.$project/ch
 import { ChatMessageToolScreenshot } from '#routes/w.$workspace.$project/chat-message-tool-screenshot.js';
 import { ChatMessageToolExportGeometry } from '#routes/w.$workspace.$project/chat-message-tool-export-geometry.js';
 import { ChatMessagePartUnknown } from '#routes/w.$workspace.$project/chat-message-tool-unknown.js';
+import { ChatMessageToolExternal } from '#routes/w.$workspace.$project/chat-message-tool-external.js';
 import { ChatMessageFileAttachments } from '#routes/w.$workspace.$project/chat-message-file.js';
 import { ChatMessagePlanning } from '#routes/w.$workspace.$project/chat-message-planning.js';
 import { ChatStreamingStopButton } from '#components/chat/chat-textarea-submit-button.js';
@@ -193,9 +195,9 @@ function renderAssistantPart(
     case 'dynamic-tool': {
       // A host's durable interrupt is presented by `ChatApprovalBanner` above
       // the composer; rendering its projected part here would show the same
-      // request twice, and as an "unknown part" card.
+      // request twice.
       return part.toolName === agentApprovalToolName ? undefined : (
-        <ChatMessagePartUnknown key={part.toolCallId} part={part} />
+        <ChatMessageToolExternal key={part.toolCallId} part={part} />
       );
     }
 
@@ -426,6 +428,31 @@ type ChatMessageProperties = {
   /** Rendered after this message's content, before its action row (e.g. the turn's revision marker). */
   readonly footer?: React.ReactNode;
 };
+
+/**
+ * Who produced this message, when it was not Tau.
+ *
+ * Read from the durable usage record rather than from the composer's current
+ * selection (V6): a transcript is history, and a chat whose selector has since
+ * moved to another agent must still say which one actually answered. A Tau turn
+ * shows nothing — the model selector above already names its model, and a
+ * second badge on every message would be noise.
+ *
+ * @param properties - The message's projected usage parts.
+ * @returns The badge, or nothing for a Tau turn.
+ */
+function ChatMessageAttribution({ usageParts }: { readonly usageParts: UsageData[] }): React.JSX.Element | undefined {
+  const attributed = usageParts.findLast((usage) => usage.agent !== undefined);
+  if (!attributed?.agent) {
+    return undefined;
+  }
+  const name = externalAgentDisplayName(attributed.agent);
+  return (
+    <span className='px-1 text-xs text-muted-foreground'>
+      {attributed.model === 'unknown' ? name : `${name} · ${attributed.model}`}
+    </span>
+  );
+}
 
 function selectLastUserMessageId(state: CombinedChatState): string | undefined {
   for (let index = state.messages.length - 1; index >= 0; index--) {
@@ -702,6 +729,7 @@ export const ChatMessage = memo(function ({ messageId, footer }: ChatMessageProp
               <TooltipContent side='bottom'>Switch model</TooltipContent>
             </Tooltip>
             <div className='flex flex-row items-center justify-end gap-1'>
+              <ChatMessageAttribution usageParts={usageParts} />
               {usageParts.length > 0 ? <ChatMessageDataUsage usageParts={usageParts} /> : null}
             </div>
           </div>

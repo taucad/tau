@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useRef } from 'react';
 import type { ChatStatus } from 'ai';
 import { isAnyToolPart, modelSupportsInput } from '@taucad/chat';
-import type { CadAgentConfigInput, ModelProvider, MyUIMessage, TauAgentHostId } from '@taucad/chat';
+import type { CadAgentConfigInput, CadAgentExecution, ModelProvider, MyUIMessage, TauAgentHostId } from '@taucad/chat';
 import { getCadSystemPrompt } from '@taucad/chat/prompts';
 import { getProviderFacingToolInputSchemas } from '@taucad/chat/schemas';
+import type { ChatExecutionTarget } from '@taucad/chat/schemas';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { idPrefix } from '@taucad/types/constants';
 import { messageRole, messageStatus } from '@taucad/chat/constants';
-import { awaitAgentHostAvailability, useAgentHostPlacements, useCadAgentConfig } from '#hooks/use-cad-agent-config.js';
+import { awaitAgentHostAvailability, useCadAgentConfig } from '#hooks/use-cad-agent-config.js';
 import { useActiveChatInstance } from '#chat-clients/_internal/use-active-chat-instance.js';
 import { useChatActions, useChatSelector } from '#hooks/use-chat.js';
 import { useActiveChatSession } from '#hooks/active-chat-provider.js';
@@ -32,18 +33,27 @@ import {
 import type { AgentHostClientOptions } from '#services/agent-host-client.js';
 import type { AgentChannelClient } from '@taucad/agent-host';
 import { createDaemonAgentHostTransport } from '#services/daemon-agent-host-client.js';
-import { desktopWorkspaceRoot, openAgentHostChannel } from '#lib/agent-host-placement.js';
+import {
+  daemonPlacementOf,
+  desktopWorkspaceRoot,
+  openAgentHostChannel,
+  placementRevisionModes,
+} from '#lib/agent-host-placement.js';
 import { getProjectFileSystemConfig } from '#filesystem/handle-store.js';
 import type { ProjectFileSystemConfig } from '#filesystem/handle-store.js';
 import { useOptionalFileManager } from '#hooks/use-file-manager.js';
 import { ENV } from '#environment.config.js';
 import { createUiRuntimeConfig } from '#runtime/ui-runtime.config.js';
-import { withTauExecutionModel } from '#utils/chat-execution.js';
-import { getChatRevisionMode, withoutChatRevisionMode } from '#utils/chat-revision-mode.js';
+import { useComputeReuseMode } from '#lib/compute-reuse-preference.js';
+import { withExecutionModel } from '#utils/chat-execution.js';
 import { useModels } from '#hooks/use-models.js';
 import type { ResolvedModel } from '#hooks/use-models.js';
 import { createCachedSystemPromptBlocks } from '@taucad/agent-host';
-import type { AgentHostAdmissionConfig, AgentHostExternalAgent } from '#workers/agent-host.contract.js';
+import type {
+  AgentHostAdmissionConfig,
+  AgentHostExternalAgent,
+  AgentHostExternalContext,
+} from '#workers/agent-host.contract.js';
 import { buildBrowserAgentHostSnapshotContext } from '#chat-clients/_internal/browser-agent-host-snapshot-context.js';
 
 /**
@@ -95,8 +105,18 @@ export type CadChatClient = {
   regenerateTail: () => void;
   /** Abort the in-flight request, if any. */
   stop: () => void;
-  /** Approve or deny a durable external-tool interrupt and resume it with the current agent config. */
-  respondToToolApproval: (approvalId: string, approved: boolean, reason?: string) => Promise<void>;
+  /**
+   * Approve or deny a durable external-tool interrupt and resume it with the current agent config.
+   *
+   * `optionId` is the exact choice a request that offered a list was answered
+   * with; without it the host re-derives one from `approved`, which substitutes
+   * its guess for the human's decision (V6).
+   */
+  respondToToolApproval: (
+    approvalId: string,
+    approved: boolean,
+    decision?: { readonly reason?: string | undefined; readonly optionId?: string | undefined },
+  ) => Promise<void>;
   /** Live message list from the bound `Chat` instance. */
   messages: readonly MyUIMessage[];
   /** Live status from the bound `Chat` instance. */
@@ -156,27 +176,23 @@ type BrowserHostAdmissionConfig = Omit<AgentHostAdmissionConfig, 'model'> & {
  * and the user's own CLI login (W4-ACP / X6).
  */
 type BrowserHostAdmission = BrowserHostTrigger &
-  ({ readonly config: BrowserHostAdmissionConfig } | { readonly agent: AgentHostExternalAgent });
+  (
+    | { readonly config: BrowserHostAdmissionConfig }
+    | { readonly agent: AgentHostExternalAgent; readonly context: AgentHostExternalContext }
+  );
 
 const createRunBody = (input: {
   readonly agent: CadAgentConfigInput;
   readonly projectId: string;
-  /**
-   * The durable workspace claim this turn writes under. Absent for a Tau Host
-   * turn: the daemon owns its own workspace, and no browser claim describes it.
-   */
-  readonly execution?:
-    | { readonly workspaceId: string; readonly baseRevisionId: string; readonly hostId: string }
-    | undefined;
+  /** Which host writes this turn, and how it records what it wrote. */
+  readonly execution?: ChatExecutionTarget | undefined;
   readonly browserHost?: ((runId: string) => BrowserHostAdmission) | undefined;
   /** Minted by the caller when it had to do async work for this same run. */
   readonly runId?: string | undefined;
 }): Readonly<Record<string, unknown>> => {
   const runId = input.runId ?? generatePrefixedId(idPrefix.request);
   return Object.freeze({
-    // The revision mode is a client-only selection; `tauAgentExecutionSchema`
-    // is strict and would reject it at the turn boundary.
-    agent: { ...input.agent, execution: withoutChatRevisionMode(input.agent.execution) },
+    agent: input.agent,
     projectId: input.projectId,
     ...(input.execution === undefined ? {} : { execution: input.execution }),
     admission: Object.freeze({
@@ -268,30 +284,45 @@ const agentHostConfig = (input: {
 };
 
 /**
+ * The CAD context one external-agent turn carries (V12).
+ *
+ * @param input - The composer's agent configuration and the chat it runs in.
+ * @returns The system prompt, skills and snapshot the daemon embeds.
+ */
+const externalAgentContext = (input: {
+  readonly agent: CadAgentConfigInput;
+  readonly chatId: string;
+}): AgentHostExternalContext => {
+  const { agent } = input;
+  const prompt = getCadSystemPrompt(agent.kernel, agent.mode, agent.testingEnabled, { chatId: input.chatId });
+  return {
+    systemPrompt: [prompt.static, prompt.dynamic].join('\n\n'),
+    ...(agent.snapshot === undefined ? {} : { snapshot: toStrictJson(agent.snapshot) }),
+    ...(agent.contextPayload === undefined ? {} : { contextPayload: toStrictJson(agent.contextPayload) }),
+  };
+};
+
+/**
  * Every Tau turn is a browser-host turn: the API-coordinated placement was
- * removed, not demoted. A non-Tau execution (Paseo) returns no admission and
- * the transport keeps coordinating it through the API until W4 re-homes it.
+ * removed, not demoted.
  */
 const hostAdmission = (input: {
   readonly agent: CadAgentConfigInput;
   readonly chatId: string;
   readonly resolveModel: (modelId: string) => ResolvedModel;
   readonly trigger: BrowserHostTrigger;
-  /** A daemon-minted Tau MCP endpoint for a Paseo run, when one is paired. */
-  readonly mcp?: { readonly mcpUrl: string; readonly mcpHeaders: Readonly<Record<string, string>> } | undefined;
 }): ((runId: string) => BrowserHostAdmission) | undefined => {
   if (input.agent.execution.kind === 'acp') {
-    const { agentId } = input.agent.execution;
-    return () => ({ ...input.trigger, agent: { kind: 'acp', id: agentId } });
-  }
-  if (input.agent.execution.kind === 'paseo') {
-    /* SP-10: Paseo runs on the *browser* host, not a daemon — the page holds
-     * the E2EE session, so this is a browser-host admission like a Tau turn's,
-     * carrying the runner discriminant instead of a Tau model. */
-    const { agentId, connectionId } = input.agent.execution;
+    const { agentId, model } = input.agent.execution;
     return () => ({
       ...input.trigger,
-      agent: { kind: 'paseo', id: agentId, connectionId, ...input.mcp },
+      agent: { kind: 'acp', id: agentId, ...(model === undefined ? {} : { model }) },
+      /* The agent brings its own model, tools and login (X6), so none of the
+       * Tau admission travels — but the CAD knowledge does. Composed by the
+       * same helper a Tau turn uses, minus the model facts an external run has
+       * no row for; the daemon sends it as embedded resources on the session's
+       * first prompt (V12). */
+      context: externalAgentContext({ agent: input.agent, chatId: input.chatId }),
     });
   }
   /* Every remaining kind is Tau: the union is exhausted above. */
@@ -314,61 +345,10 @@ const hostAdmission = (input: {
  * @param projectId - Project whose node root launcher 2 is granted.
  * @returns An open channel client.
  */
-/**
- * Ask a paired daemon to mint this run's Tau MCP capability.
- *
- * A Paseo agent runs on the user’s own machine, so the only Tau tools it can
- * reach are a paired `tau serve`'s `/mcp` endpoint — and the page cannot sign
- * the capability, because the signing secret never leaves that daemon. A
- * daemon with no MCP endpoint refuses, and the run proceeds without Tau
- * tools, which is what the selector row already tells the user.
- *
- * @param input - The daemon to ask and the run to bind the capability to.
- * @returns The endpoint and headers, or `undefined` when none is available.
- */
-const mintPaseoMcpCapability = async (input: {
-  readonly hostId: TauAgentHostId;
-  readonly projectId: string;
-  readonly chatId: string;
-  readonly runId: string;
-}): Promise<{ readonly mcpUrl: string; readonly mcpHeaders: Readonly<Record<string, string>> } | undefined> => {
-  let channel: AgentChannelClient | undefined;
-  try {
-    channel = await dialAgentHost(input.hostId, input.projectId);
-    const answer = await channel.execute({
-      type: 'mint-mcp-capability',
-      chatId: input.chatId,
-      runId: input.runId,
-    });
-    return answer.type === 'mcp-capability' ? { mcpUrl: answer.url, mcpHeaders: answer.headers } : undefined;
-  } catch {
-    /* No paired host, no MCP endpoint, or an unreachable one. The turn still
-     * runs — without Tau tools — rather than failing on a capability the
-     * user was already told they might not have. */
-    return undefined;
-  } finally {
-    channel?.close();
-  }
-};
-
 const dialAgentHost = async (hostId: TauAgentHostId, projectId: string): Promise<AgentChannelClient> =>
   hostId === 'desktop'
     ? openAgentHostChannel(hostId, { workspaceRoot: await desktopWorkspaceRoot(projectId) })
     : openAgentHostChannel(hostId);
-
-/**
- * The daemon this turn is placed on, if any.
- *
- * A Tau turn names one *optionally* — absent means this browser's own worker.
- * An external agent names one **always**: `acpAgentExecutionSchema` requires a
- * `hostId` because the adapter is a local process no browser can host. Reading
- * it in one place is what keeps the two kinds on the same daemon path.
- *
- * @param execution - The turn's execution selection.
- * @returns The host id, or `undefined` for a browser-placed or Paseo turn.
- */
-const daemonPlacementOf = (execution: CadAgentConfigInput['execution']): TauAgentHostId | undefined =>
-  execution.kind === 'tau' || execution.kind === 'acp' ? execution.hostId : undefined;
 
 const retainedMessageIdsBeforeTurn = (
   messages: readonly MyUIMessage[],
@@ -441,7 +421,7 @@ export const useCadChatClient = (): CadChatClient => {
   // branching needed.
   const { activeChatId } = useActiveChatSession();
   const store = useChatSessionStore();
-  const { projectId, geometryUnits, mainEntryPath } = useProject();
+  const { projectId, mainEntryPath } = useProject();
   // Optional: the API path renders without a FileManagerProvider; the
   // browser-host registration effect below guards on its presence.
   const fileManager = useOptionalFileManager();
@@ -449,6 +429,7 @@ export const useCadChatClient = (): CadChatClient => {
   const syncProjectRoots = fileManager?.workspace.syncProjectRoots;
   const { resolveModel } = useModels();
   const workspaceAuthority = useOptionalChatWorkspaceAuthority();
+  const computeMode = useComputeReuseMode();
   // Always the current resolver: a dispatch composed before `GET /v1/models`
   // answers must read the catalog row that arrives *while* it waits, not the
   // unresolved one its render closed over.
@@ -456,156 +437,161 @@ export const useCadChatClient = (): CadChatClient => {
   useEffect(() => {
     resolveModelRef.current = resolveModel;
   }, [resolveModel]);
-  /*
-   * The paired Tau Host a Paseo run borrows Tau tools from.
-   *
-   * ponytail: the first online host, not the one on the Paseo daemon's own
-   * machine — nothing maps a Paseo connection to a host device yet, and the
-   * topology that matters (one laptop running both) has exactly one. The
-   * selector row reports the same thing, so the two never disagree.
-   */
-  const { targets: hostPlacements } = useAgentHostPlacements();
-  const paseoMcpHostRef = useRef<TauAgentHostId | undefined>(undefined);
-  useEffect(() => {
-    paseoMcpHostRef.current = hostPlacements.find((placement) => placement.online)?.hostId;
-  }, [hostPlacements]);
   const preparing = useRef(false);
   const messages = Array.isArray(chat.messages) ? chat.messages : [];
 
-  useEffect(() => {
-    if (agent.execution.kind === 'paseo') {
-      return;
-    }
-    const { execution } = agent;
-    const daemonHostId = execution.hostId;
-    if (daemonHostId !== undefined) {
-      /* A daemon owns its own workspace, its own filesystem and its own tools:
-       * nothing here claims workspace authority, opens a bridge, or resolves
-       * project storage — the whole point of placing the turn there. */
-      const unregister = registerAgentHost(activeChatId, {
-        projectStorage: async () => {
-          throw new Error('A Tau Host turn reads its workspace from the daemon, not from this browser.');
-        },
-        markRunId: async () => undefined,
-        createClient: async () =>
-          /* A dial *function*, not an already-open channel: a relayed channel
-           * dies for reasons that have nothing to do with the run, and the
-           * transport can only heal itself if it can dial again. */
-          createAgentHostClient(createDaemonAgentHostTransport(async () => dialAgentHost(daemonHostId, projectId))),
-      });
-      /* And because it claims nothing, reload discovery — which substantiates a
-       * run from this browser's claims — never retains it: the reattach rides
-       * the registration instead, which is also the first moment the transport
-       * can answer a reconnect for this chat with the daemon rather than the
-       * API. Ordering matters; the store defers the resume by a microtask. */
-      store.reattachHostChat({ chatId: activeChatId, hostId: daemonHostId });
-      return unregister;
-    }
-    /* An external agent is *always* daemon-placed — the adapter is a local
-     * process, and `acpAgentExecutionSchema` requires a `hostId` for exactly
-     * that reason — so there is no browser assembly below for it to fall into. */
-    if (execution.kind !== 'tau') {
-      return;
-    }
-    if (!workspaceAuthority || fileManagerRef === undefined || syncProjectRoots === undefined) {
-      return;
-    }
-    let projectStorage: Promise<ProjectFileSystemConfig> | undefined;
-    const resolveProjectStorage = async (): Promise<ProjectFileSystemConfig> => {
-      const resolved =
-        projectStorage ??
-        (projectStorage = (async () => {
-          const config = await getProjectFileSystemConfig(projectId);
-          if (!config) {
-            throw new Error(`Project ${projectId} has no filesystem configuration.`);
-          }
-          // The stored row carries the full project record (manifest, files,
-          // editorState, ...); the admission wire takes only the per-backend
-          // storage discriminant — project it explicitly.
-          switch (config.backend) {
-            case 'memory': {
-              return {
-                projectId: config.projectId,
-                backend: config.backend,
-                storageRootKey: config.storageRootKey,
-                providerBasePath: config.providerBasePath,
-              };
-            }
-            case 'webaccess': {
-              return {
-                projectId: config.projectId,
-                backend: config.backend,
-                workspaceId: config.workspaceId,
-                providerBasePath: config.providerBasePath,
-              };
-            }
-            default: {
-              return {
-                projectId: config.projectId,
-                backend: config.backend,
-                providerBasePath: config.providerBasePath,
-              };
-            }
-          }
-        })());
-      return resolved;
-    };
-    const openProjectRootBridge = () => {
-      const { openFileSystemBridge, rootDirectory } = fileManagerRef.getSnapshot().context;
-      if (!openFileSystemBridge) {
-        throw new Error('The active project filesystem bridge is unavailable.');
+  /**
+   * Register the transport one execution's turn runs over.
+   *
+   * Taken as an argument rather than read from `agent`, because the seeded
+   * first turn composes from the row the store just consumed — one render
+   * ahead of anything a React effect can see (V-W1 §5). The body, the host
+   * admission and this registration must all key on that same execution, or a
+   * seeded `acp` row lands on the browser worker while its admission names an
+   * agent only a daemon can start.
+   */
+  const registerTurnHost = useCallback(
+    (execution: CadAgentExecution): (() => void) | undefined => {
+      const daemonHostId = daemonPlacementOf(execution);
+      if (daemonHostId !== undefined) {
+        /* A daemon owns its own workspace, its own filesystem and its own tools:
+         * nothing here claims workspace authority, opens a bridge, or resolves
+         * project storage — the whole point of placing the turn there. */
+        const unregister = registerAgentHost(activeChatId, {
+          projectStorage: async () => {
+            throw new Error('A Tau Host turn reads its workspace from the daemon, not from this browser.');
+          },
+          markRunId: async () => undefined,
+          createClient: async () =>
+            /* A dial *function*, not an already-open channel: a relayed channel
+             * dies for reasons that have nothing to do with the run, and the
+             * transport can only heal itself if it can dial again. */
+            createAgentHostClient(createDaemonAgentHostTransport(async () => dialAgentHost(daemonHostId, projectId))),
+        });
+        /* And because it claims nothing, reload discovery — which substantiates a
+         * run from this browser's claims — never retains it: the reattach rides
+         * the registration instead, which is also the first moment the transport
+         * can answer a reconnect for this chat with the daemon rather than the
+         * API. Ordering matters; the store defers the resume by a microtask. */
+        store.reattachHostChat({ chatId: activeChatId, hostId: daemonHostId });
+        return unregister;
       }
-      return openFileSystemBridge(rootDirectory);
-    };
-    return registerAgentHost(activeChatId, {
-      projectStorage: resolveProjectStorage,
-      markRunId: async (runId) => workspaceAuthority.markRunId(activeChatId, runId),
-      createClient: async () => {
-        await syncProjectRoots();
-        const [prepared, storage, capabilities] = await Promise.all([
-          workspaceAuthority.prepare(activeChatId, { mode: getChatRevisionMode(execution) }),
-          resolveProjectStorage(),
-          readRootedBridgeCapabilities(openProjectRootBridge),
-        ]);
-        if (!capabilities.writable || !capabilities.durability) {
-          throw new Error('The active project filesystem is not writable or did not declare durability.');
+      /* An external agent is *always* daemon-placed — the adapter is a local
+       * process, and `acpAgentExecutionSchema` requires a `hostId` for exactly
+       * that reason — so there is no browser assembly below for it to fall into. */
+      if (execution.kind !== 'tau') {
+        return undefined;
+      }
+      if (!workspaceAuthority || fileManagerRef === undefined || syncProjectRoots === undefined) {
+        return undefined;
+      }
+      let projectStorage: Promise<ProjectFileSystemConfig> | undefined;
+      const resolveProjectStorage = async (): Promise<ProjectFileSystemConfig> => {
+        const resolved =
+          projectStorage ??
+          (projectStorage = (async () => {
+            const config = await getProjectFileSystemConfig(projectId);
+            if (!config) {
+              throw new Error(`Project ${projectId} has no filesystem configuration.`);
+            }
+            // The stored row carries the full project record (manifest, files,
+            // editorState, ...); the admission wire takes only the per-backend
+            // storage discriminant — project it explicitly.
+            switch (config.backend) {
+              case 'memory': {
+                return {
+                  projectId: config.projectId,
+                  backend: config.backend,
+                  storageRootKey: config.storageRootKey,
+                  providerBasePath: config.providerBasePath,
+                };
+              }
+              case 'webaccess': {
+                return {
+                  projectId: config.projectId,
+                  backend: config.backend,
+                  workspaceId: config.workspaceId,
+                  providerBasePath: config.providerBasePath,
+                };
+              }
+              default: {
+                return {
+                  projectId: config.projectId,
+                  backend: config.backend,
+                  providerBasePath: config.providerBasePath,
+                };
+              }
+            }
+          })());
+        return resolved;
+      };
+      const openProjectRootBridge = () => {
+        const { openFileSystemBridge, rootDirectory } = fileManagerRef.getSnapshot().context;
+        if (!openFileSystemBridge) {
+          throw new Error('The active project filesystem bridge is unavailable.');
         }
-        const config = agentHostConfig({
-          agent,
-          chatId: activeChatId,
-          runId: activeChatId,
-          resolvedModel: resolveModel(execution.model),
-        });
-        return createBrowserAgentHostClient({
-          openFileSystemBridge: prepared.openFileSystemBridge,
-          openProjectRootBridge,
-          projectStorage: storage,
-          durability: capabilities.durability,
-          authority: { projectId, workspaceId: prepared.execution.workspaceId },
-          gatewayBaseUrl: ENV.TAU_API_URL,
-          systemPrompt: config.systemPrompt,
-          systemPromptBlocks: config.systemPromptBlocks,
-          model: config.model,
-          runtimeConfig: createUiRuntimeConfig(ENV),
-          lengthSymbol: geometryUnits.get(mainEntryPath)?.getSnapshot().context.units.length ?? 'mm',
-          testingEnabled: config.testingEnabled,
-        });
-      },
-    });
-  }, [
-    activeChatId,
-    agent,
-    fileManagerRef,
-    geometryUnits,
-    mainEntryPath,
-    projectId,
-    resolveModel,
-    store,
-    syncProjectRoots,
-    workspaceAuthority,
-  ]);
+        return openFileSystemBridge(rootDirectory);
+      };
+      return registerAgentHost(activeChatId, {
+        projectStorage: resolveProjectStorage,
+        markRunId: async (runId) => workspaceAuthority.markRunId(activeChatId, runId),
+        createClient: async () => {
+          await syncProjectRoots();
+          const [prepared, storage, capabilities] = await Promise.all([
+            // `admitWorkspace` already prepared this chat's claim in the picked
+            // mode; this reuses it rather than choosing again.
+            workspaceAuthority.prepare(activeChatId, { mode: workspaceAuthority.revisionMode(activeChatId) }),
+            resolveProjectStorage(),
+            readRootedBridgeCapabilities(openProjectRootBridge),
+          ]);
+          if (!capabilities.writable || !capabilities.durability) {
+            throw new Error('The active project filesystem is not writable or did not declare durability.');
+          }
+          const config = agentHostConfig({
+            agent: { ...agent, execution },
+            chatId: activeChatId,
+            runId: activeChatId,
+            resolvedModel: resolveModel(execution.model),
+          });
+          return createBrowserAgentHostClient({
+            openFileSystemBridge: prepared.openFileSystemBridge,
+            openProjectRootBridge,
+            computeMode,
+            openComputeStorePort: () => {
+              const opener = fileManagerRef.getSnapshot().context.openComputeStorePort;
+              if (!opener) {
+                throw new Error('The active project compute authority is unavailable.');
+              }
+              return opener(projectId);
+            },
+            projectStorage: storage,
+            durability: capabilities.durability,
+            authority: { projectId, workspaceId: prepared.execution.workspaceId },
+            gatewayBaseUrl: ENV.TAU_API_URL,
+            systemPrompt: config.systemPrompt,
+            systemPromptBlocks: config.systemPromptBlocks,
+            model: config.model,
+            runtimeConfig: createUiRuntimeConfig(ENV),
+            testingEnabled: config.testingEnabled,
+          });
+        },
+      });
+    },
+    [
+      activeChatId,
+      agent,
+      computeMode,
+      fileManagerRef,
+      mainEntryPath,
+      projectId,
+      resolveModel,
+      store,
+      syncProjectRoots,
+      workspaceAuthority,
+    ],
+  );
 
-  const revisionMode = getChatRevisionMode(agent.execution);
+  useEffect(() => registerTurnHost(agent.execution), [agent.execution, registerTurnHost]);
 
   /** The catalog row for this turn's model, waiting out a cold `GET /v1/models`. */
   const awaitResolvedModel = useCallback(async (modelId: string): Promise<ResolvedModel> => {
@@ -626,45 +612,48 @@ export const useCadChatClient = (): CadChatClient => {
    * (or reuse) this chat's workspace, and mark it admitted before the turn is
    * composed. Every dispatch resolves its execution target here — a body
    * composed ahead of time can name a workspace a later `prepare` discarded.
+   *
+   * `turnExecution` defaults to the live selection; the seeded first turn hands
+   * in the execution of the row it consumed, so its placement, its host probe
+   * and its (absent) browser claim are resolved from the same object the body
+   * and the admission are composed from.
    */
   const admitWorkspace = useCallback(
     async (
       turnId: string | undefined,
-    ): Promise<
-      { readonly workspaceId: string; readonly baseRevisionId: string; readonly hostId: string } | undefined
-    > => {
-      const daemonHostId = daemonPlacementOf(agent.execution);
+      turnExecution: CadAgentExecution = agent.execution,
+    ): Promise<ChatExecutionTarget> => {
+      const daemonHostId = daemonPlacementOf(turnExecution);
+      const turnRevisionMode = workspaceAuthority?.revisionMode(activeChatId) ?? 'direct';
       // Every host placement waits out its own probe: a turn dispatched before
       // one answers must WAIT for it (the seeded first turn fires at chat load,
       // ahead of the probe), and an answered "unavailable" must refuse with its
       // reason — never a silent downgrade, in either direction.
-      if (agent.execution.kind !== 'paseo') {
-        const availability = await awaitAgentHostAvailability({
-          projectId,
-          ...(daemonHostId === undefined ? {} : { hostId: daemonHostId }),
-        });
-        if (availability.status !== 'available') {
-          throw Object.assign(
-            new Error(
-              availability.status === 'pending'
-                ? daemonHostId === undefined
-                  ? 'Tau is still checking whether this project can run the agent in your browser.'
-                  : 'Tau is still looking for that agent host.'
-                : availability.reason,
-            ),
-            { code: 'CHAT_PLACEMENT_UNAVAILABLE' },
-          );
-        }
+      const availability = await awaitAgentHostAvailability({
+        projectId,
+        ...(daemonHostId === undefined ? {} : { hostId: daemonHostId }),
+      });
+      if (availability.status !== 'available') {
+        throw Object.assign(
+          new Error(
+            availability.status === 'pending'
+              ? daemonHostId === undefined
+                ? 'Tau is still checking whether this project can run the agent in your browser.'
+                : 'Tau is still looking for that agent host.'
+              : availability.reason,
+          ),
+          { code: 'CHAT_PLACEMENT_UNAVAILABLE' },
+        );
       }
       /* The model catalog is a *Tau* concern: an external agent runs on its own
        * subscription, so there is no row to resolve and no gateway wire to
        * refuse. */
-      if (agent.execution.kind === 'tau') {
+      if (turnExecution.kind === 'tau') {
         // The host config is built from the model's catalog row (provider wire,
         // context window, rates). The seeded first turn composes before
         // `GET /v1/models` answers, and reading an unresolved row threw the
         // turn away instead of waiting the moment out.
-        const resolved = await awaitResolvedModel(agent.execution.model);
+        const resolved = await awaitResolvedModel(turnExecution.model);
         // The availability above is per project; the model's wire is per
         // turn. A resolved catalog row the browser host cannot speak (the
         // `tau` replay row, for one) must refuse here, before a body is
@@ -680,19 +669,26 @@ export const useCadChatClient = (): CadChatClient => {
           );
         }
       }
+      /* V18: the mode is admitted against the *capability* of the host that
+       * will write, for Tau and ACP alike. A host with no revision port would
+       * run the turn unrecorded, which is the one outcome I-EDIT forbids — so
+       * it is refused here, before a body is composed, with one typed code. */
+      if (!placementRevisionModes(daemonHostId).includes(turnRevisionMode)) {
+        throw Object.assign(
+          new Error(
+            `${daemonHostId === undefined ? 'This browser' : 'That agent host'} cannot record a turn in ${
+              turnRevisionMode === 'direct' ? 'the project folder' : 'a new branch'
+            }.`,
+          ),
+          { code: 'REVISION_MODE_UNSUPPORTED' },
+        );
+      }
       if (daemonHostId !== undefined) {
-        /* DT1: a daemon writes to the workspace it was started on, and Tau has
-         * no porcelain for branching a directory it does not own. A `branch`
-         * selection is refused rather than silently downgraded to `local`. */
-        if (revisionMode === 'branch') {
-          throw Object.assign(
-            new Error('A Tau Host turn writes directly to that computer’s workspace. Switch back to working locally.'),
-            { code: 'CHAT_PLACEMENT_UNAVAILABLE' },
-          );
-        }
-        /* No browser workspace claim: the daemon owns the files, so preparing
-         * or admitting one here would fence a workspace nothing writes to. */
-        return undefined;
+        /* No browser workspace claim: the daemon owns the files, mints its own
+         * base and records its own revision, so preparing or admitting one here
+         * would fence a workspace nothing writes to. The target still rides —
+         * naming the mode is the whole point of sending it (r7 W4). */
+        return { hostId: daemonHostId, mode: turnRevisionMode };
       }
       if (!workspaceAuthority) {
         throw new Error('The durable workspace authority is unavailable for this chat.');
@@ -725,11 +721,11 @@ export const useCadChatClient = (): CadChatClient => {
       }
       const prepared =
         workspaceAuthority.get(activeChatId) ??
-        (await workspaceAuthority.prepare(activeChatId, { mode: revisionMode }));
+        (await workspaceAuthority.prepare(activeChatId, { mode: turnRevisionMode }));
       await workspaceAuthority.markAdmitted(activeChatId, turnId);
       return prepared.execution;
     },
-    [activeChatId, agent.execution, awaitResolvedModel, projectId, revisionMode, workspaceAuthority],
+    [activeChatId, agent.execution, awaitResolvedModel, projectId, workspaceAuthority],
   );
 
   /** Surface a dropped dispatch on the same banner the transport errors use. */
@@ -760,14 +756,7 @@ export const useCadChatClient = (): CadChatClient => {
   }, [requestInFlight, surfaceDispatchFailure]);
 
   const withWorkspace = useCallback(
-    (
-      turnId: string | undefined,
-      operation: (
-        execution:
-          | { readonly workspaceId: string; readonly baseRevisionId: string; readonly hostId: string }
-          | undefined,
-      ) => void,
-    ) => {
+    (turnId: string | undefined, operation: (execution: ChatExecutionTarget) => void) => {
       // A Tau Host turn needs no browser workspace authority; every other Tau
       // turn does, and dispatching without one would compose a body naming a
       // workspace no claim carries.
@@ -809,28 +798,34 @@ export const useCadChatClient = (): CadChatClient => {
       store.setLatestAgentBody(activeChatId, undefined);
       return;
     }
-    store.setLatestAgentBody(activeChatId, async () => {
+    store.setLatestAgentBody(activeChatId, async (executionOverride) => {
       const lastAssistantId = messages.findLast((message) => message.role === 'assistant')?.id;
+      // One agent object for the admission, the placement and the body. The
+      // seeded first turn dispatches before this effect's `agent` has hydrated
+      // from the chat row, so the dispatcher hands in the execution it read
+      // from that row; composing the three from separate sources is how the
+      // body and the host admission came to disagree.
+      const turnAgent = executionOverride ? { ...agent, execution: executionOverride } : agent;
+      if (executionOverride && daemonPlacementOf(executionOverride) !== daemonPlacementOf(agent.execution)) {
+        // V-W1 §5: the effect above keys on the render's execution, which for a
+        // seeded turn is still the pre-hydration fallback. Re-register on the
+        // row's own execution so the transport, the body and the admission are
+        // one placement. `registerAgentHost`'s unregister is identity-guarded,
+        // so the effect's stale cleanup cannot drop this one.
+        registerTurnHost(executionOverride);
+      }
       try {
-        /* Minted before the body so the run id the capability is bound to is
-         * the one the admission carries — a capability for a different run is
-         * refused by the daemon's own claim fence. */
         const runId = generatePrefixedId(idPrefix.request);
-        const mcpHost = agent.execution.kind === 'paseo' ? paseoMcpHostRef.current : undefined;
-        const mcp = mcpHost
-          ? await mintPaseoMcpCapability({ hostId: mcpHost, projectId, chatId: activeChatId, runId })
-          : undefined;
         return createRunBody({
-          agent,
+          agent: turnAgent,
           projectId,
           runId,
-          execution: await admitWorkspace(userTurnIdAtOrBefore(messages, lastAssistantId)),
+          execution: await admitWorkspace(userTurnIdAtOrBefore(messages, lastAssistantId), turnAgent.execution),
           browserHost: hostAdmission({
-            agent,
+            agent: turnAgent,
             chatId: activeChatId,
             resolveModel: resolveModelRef.current,
             trigger: hydrationTrigger(messages, lastAssistantId),
-            ...(mcp ? { mcp } : {}),
           }),
         });
       } catch (error) {
@@ -847,6 +842,7 @@ export const useCadChatClient = (): CadChatClient => {
     agent,
     messages,
     projectId,
+    registerTurnHost,
     resolveModel,
     store,
     surfaceDispatchFailure,
@@ -922,7 +918,7 @@ export const useCadChatClient = (): CadChatClient => {
       // would silently fall through to the active model and the
       // model-selector dropdown would be a no-op (R10/t17).
       withWorkspace(userTurnIdAtOrBefore(messages, messageId), (execution) => {
-        const requestAgent = modelId ? { ...agent, execution: withTauExecutionModel(agent.execution, modelId) } : agent;
+        const requestAgent = modelId ? { ...agent, execution: withExecutionModel(agent.execution, modelId) } : agent;
         const overrideBody = createRunBody({
           agent: requestAgent,
           projectId,
@@ -985,7 +981,12 @@ export const useCadChatClient = (): CadChatClient => {
   }, [actions, activeChatId, workspaceAuthority]);
 
   const respondToToolApproval = useCallback(
-    async (approvalId: string, approved: boolean, reason?: string): Promise<void> => {
+    async (
+      approvalId: string,
+      approved: boolean,
+      decision?: { readonly reason?: string | undefined; readonly optionId?: string | undefined },
+    ): Promise<void> => {
+      const { reason, optionId } = decision ?? {};
       const browserRun = getBrowserAgentHostRun(activeChatId);
       if (browserRun) {
         await resolveBrowserAgentHostInterrupt({
@@ -994,6 +995,7 @@ export const useCadChatClient = (): CadChatClient => {
           interruptId: approvalId,
           approved,
           reason,
+          optionId,
         });
         actions.setMessages(
           messages.map((message) => ({
@@ -1011,12 +1013,21 @@ export const useCadChatClient = (): CadChatClient => {
         );
         return;
       }
-      if (requestInFlight || !workspaceAuthority) {
+      /* The branch below is the browser placement's: it claims this chat's
+         workspace and re-admits the run over the API transport. A daemon-placed
+         chat has neither — the daemon owns the files and records the turn — so
+         reaching it for one would admit a claim nothing writes to, and a claim
+         admitted here is exactly what lets this tab finalize a revision for a
+         turn the host already finalized (5-review N5). With no live host run to
+         answer, the stale affordance is dropped instead. */
+      if (requestInFlight || !workspaceAuthority || daemonPlacementOf(agent.execution) !== undefined) {
         return;
       }
       // Re-admits this chat's own in-flight run rather than starting a new
       // turn, so it never waits on the admission its own claim already holds.
-      const prepared = await workspaceAuthority.prepare(activeChatId, { mode: revisionMode });
+      const prepared = await workspaceAuthority.prepare(activeChatId, {
+        mode: workspaceAuthority.revisionMode(activeChatId),
+      });
       await workspaceAuthority.markAdmitted(activeChatId, userTurnIdAtOrBefore(messages));
       const runBody = store.startRun(activeChatId, createRunBody({ agent, projectId, execution: prepared.execution }));
       try {
@@ -1030,7 +1041,7 @@ export const useCadChatClient = (): CadChatClient => {
         store.endRun(activeChatId);
       }
     },
-    [actions, activeChatId, agent, chat, messages, projectId, requestInFlight, revisionMode, store, workspaceAuthority],
+    [actions, activeChatId, agent, chat, messages, projectId, requestInFlight, store, workspaceAuthority],
   );
 
   return {

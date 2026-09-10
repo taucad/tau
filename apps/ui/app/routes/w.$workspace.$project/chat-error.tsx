@@ -130,11 +130,23 @@ export const ChatError = memo(function ({ className }: { readonly className?: st
     }
 
     case errorCategory.rateLimit: {
-      return <ChatErrorRateLimit className={cn('min-w-0', className)} />;
+      return (
+        <ChatErrorRateLimit
+          className={cn('min-w-0', className)}
+          title={parsedError.code === 'FUNDED_OPERATION_LIMIT' ? 'Funded operation limit reached' : undefined}
+          description={parsedError.message}
+        />
+      );
     }
 
     case errorCategory.overloaded: {
-      return <ChatErrorServiceUnavailable className={cn('min-w-0', className)} />;
+      return (
+        <ChatErrorServiceUnavailable
+          className={cn('min-w-0', className)}
+          title={parsedError.code === 'BILLING_RECOVERY_UNAVAILABLE' ? 'Finalizing earlier work' : undefined}
+          description={parsedError.message}
+        />
+      );
     }
 
     case errorCategory.toolError: {

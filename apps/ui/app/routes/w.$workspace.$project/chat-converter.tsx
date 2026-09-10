@@ -43,14 +43,17 @@ import { groupExportFormatsByFidelity } from '#components/files/export-format-gr
 import type { cadMachine } from '#machines/cad.machine.js';
 import { widgets, templates as rjsfTemplates } from '#components/geometry/parameters/rjsf-theme.js';
 import type { RJSFContext } from '#components/geometry/parameters/rjsf-context.js';
+import { rjsfFields } from '#components/geometry/parameters/rjsf-field-path.js';
 import {
+  getDiscriminatedUnionInfo,
   mergeFormDefaults,
   normalizeRjsfFormData,
+  resetRjsfField,
   rjsfDefaultFormStateBehavior,
   rjsfIdPrefix,
   rjsfIdSeparator,
 } from '#components/geometry/parameters/rjsf-utils.js';
-import { deleteValueAtPath, extractModifiedProperties } from '#utils/object.utils.js';
+import { extractModifiedProperties } from '#utils/object.utils.js';
 import type { AppRuntimeClient } from '#types/runtime-client.alias.js';
 import { createExportArtifactZip, downloadExportArtifactSet } from '#utils/export-artifact-set.utils.js';
 import { downloadBlob } from '@taucad/utils/file';
@@ -110,24 +113,6 @@ function schemaObject(schema: JSONSchema7 | boolean | undefined): JSONSchema7 | 
   return schema && typeof schema === 'object' ? schema : undefined;
 }
 
-function modeForSchema(schema: JSONSchema7): string | undefined {
-  const mode = schemaObject(schema.properties?.['mode']);
-  if (!mode) {
-    return undefined;
-  }
-  if (typeof mode.const === 'string') {
-    return mode.const;
-  }
-  return mode.enum?.length === 1 && typeof mode.enum[0] === 'string' ? mode.enum[0] : undefined;
-}
-
-function unionBranches(schema: JSONSchema7): JSONSchema7[] {
-  return [...(schema.anyOf ?? schema.oneOf ?? [])].flatMap((branch) => {
-    const object = schemaObject(branch);
-    return object ? [object] : [];
-  });
-}
-
 function schemaDefaults(schema: JSONSchema7): Record<string, unknown> {
   if (!schema.properties) {
     return {};
@@ -145,38 +130,36 @@ export function resolveActiveSchema(
   input: Record<string, unknown>,
   defaults: Record<string, unknown> = {},
 ): { schema: JSONSchema7; defaults: Record<string, unknown> } {
-  const branches = unionBranches(schema);
-  if (branches.length === 0) {
+  const union = getDiscriminatedUnionInfo(schema);
+  if (!union) {
     return { schema, defaults };
   }
 
-  const branchModes = branches.map((branch) => modeForSchema(branch));
-  if (branchModes.some((mode) => mode === undefined) || new Set(branchModes).size !== branches.length) {
+  const requestedValue = Object.hasOwn(input, union.discriminator)
+    ? input[union.discriminator]
+    : Object.hasOwn(defaults, union.discriminator)
+      ? defaults[union.discriminator]
+      : union.values[0];
+  const branchIndex = union.values.findIndex((value) => Object.is(value, requestedValue));
+  if (branchIndex === -1) {
     return { schema, defaults };
   }
-  const modes = branchModes as string[];
-  const requestedMode =
-    typeof input['mode'] === 'string'
-      ? input['mode']
-      : typeof defaults['mode'] === 'string'
-        ? defaults['mode']
-        : modes[0];
-  const branch = branches.find((candidate) => modeForSchema(candidate) === requestedMode) ?? branches[0]!;
+  const selectedValue = union.values[branchIndex]!;
+  const branch = union.branches[branchIndex]!;
   const { anyOf: _anyOf, oneOf: _oneOf, properties: rootProperties, required: rootRequired, ...root } = schema;
-  const modeSchema = schemaObject(branch.properties?.['mode']);
+  const discriminatorSchema = schemaObject(branch.properties?.[union.discriminator]);
   const properties = {
     ...rootProperties,
     ...branch.properties,
-    mode: {
-      ...modeSchema,
-      title: 'Mode',
-      enum: modes,
-      default: requestedMode,
+    [union.discriminator]: {
+      ...discriminatorSchema,
+      enum: [...union.values],
+      default: selectedValue,
     },
   } satisfies JSONSchema7['properties'];
-  const required = [...new Set([...(rootRequired ?? []), ...(branch.required ?? []), 'mode'])];
+  const required = [...new Set([...(rootRequired ?? []), ...(branch.required ?? []), union.discriminator])];
   const activeSchema: JSONSchema7 = { ...root, ...branch, properties, required };
-  const activeDefaults = { ...defaults, ...schemaDefaults(branch), mode: requestedMode };
+  const activeDefaults = { ...defaults, ...schemaDefaults(branch), [union.discriminator]: selectedValue };
   return { schema: activeSchema, defaults: sanitizeFormDelta(activeSchema, activeDefaults) };
 }
 
@@ -508,15 +491,26 @@ export function ExportSchemaForm({
   readonly value: Record<string, unknown>;
   readonly onChange: (value: Record<string, unknown>) => void;
 }): ReactElement {
-  const formData = useMemo(() => mergeFormDefaults(resolved.defaults, value), [resolved.defaults, value]);
+  const formData = useMemo(
+    () => mergeFormDefaults(resolved.schema, resolved.defaults, value),
+    [resolved.defaults, resolved.schema, value],
+  );
   const activeResolved = useMemo(
     () => resolveActiveSchema(resolved.schema, formData, resolved.defaults),
     [resolved.defaults, resolved.schema, formData],
   );
   const activeFormData = useMemo(
-    () => sanitizeFormDelta(activeResolved.schema, mergeFormDefaults(activeResolved.defaults, value)),
+    () =>
+      sanitizeFormDelta(
+        activeResolved.schema,
+        mergeFormDefaults(activeResolved.schema, activeResolved.defaults, value),
+      ),
     [activeResolved, value],
   );
+  const currentFormDataRef = useRef(activeFormData);
+  useEffect(() => {
+    currentFormDataRef.current = activeFormData;
+  }, [activeFormData]);
 
   const handleChange = useCallback(
     (event: IChangeEvent<Record<string, unknown>>) => {
@@ -524,6 +518,7 @@ export function ExportSchemaForm({
       const nextResolved = resolveActiveSchema(resolved.schema, normalized, resolved.defaults);
       const newData = fillMissingBatchViewIds(nextResolved.schema, normalized);
       const sanitized = sanitizeFormDelta(nextResolved.schema, newData);
+      currentFormDataRef.current = sanitized;
       const delta = Object.fromEntries(
         Object.entries(extractModifiedProperties(sanitized, nextResolved.defaults)).filter(
           ([key, entry]) => !Array.isArray(entry) || entry.length > 0 || Object.hasOwn(nextResolved.defaults, key),
@@ -535,17 +530,22 @@ export function ExportSchemaForm({
     [resolved.defaults, resolved.schema, onChange],
   );
 
-  const resetSingleParameter = useCallback(
-    (fieldPath: string[]) => {
-      onChange(deleteValueAtPath(value, fieldPath));
+  const resetSingleParameter = useCallback<RJSFContext['resetSingleParameter']>(
+    (input) => {
+      const reset = resetRjsfField({ ...input, formData: currentFormDataRef.current });
+      if (reset !== undefined) {
+        currentFormDataRef.current = reset;
+        onChange(extractModifiedProperties(reset, activeResolved.defaults));
+      }
     },
-    [value, onChange],
+    [activeResolved.defaults, onChange],
   );
 
   const formContext = useMemo<RJSFContext>(
     () => ({
       ...exportFormContextBase,
       idPrefix,
+      parameterSemantics: 'configuration',
       rootPresentation: 'embedded',
       defaultParameters: activeResolved.defaults,
       resetSingleParameter,
@@ -561,6 +561,7 @@ export function ExportSchemaForm({
         formData={activeFormData}
         validator={rjsfValidator}
         widgets={widgets}
+        fields={rjsfFields}
         templates={rjsfTemplates}
         idPrefix={idPrefix}
         idSeparator={rjsfIdSeparator}
@@ -589,16 +590,11 @@ function ExportFormatSettings({
   readonly onContentChange: (format: FileExtension, content: RuntimeContentInput) => void;
   readonly onOptionsChange: (format: FileExtension, options: Record<string, unknown>) => void;
 }) {
-  const [isOpen, setIsOpen] = useState(true);
   const hasDualSchemas = Boolean(resolved.content && resolved.exportOptions);
   const isModified = Object.keys(formatContent).length > 0 || Object.keys(formatOptions).length > 0;
 
   return (
-    <Collapsible
-      open={isOpen}
-      className='overflow-hidden rounded-lg border border-border bg-background'
-      onOpenChange={setIsOpen}
-    >
+    <Collapsible defaultOpen={false} className='overflow-hidden rounded-lg border border-border bg-background'>
       <CollapsibleTrigger className='group/collapsible flex h-8 w-full items-center justify-between rounded-lg px-2 text-left transition-colors duration-150 hover:bg-accent data-[state=open]:rounded-b-none data-[state=open]:bg-accent motion-reduce:transition-none'>
         <h3 className='flex min-w-0 flex-1 items-center gap-1.5 text-[13px] font-medium text-foreground'>
           <FileExtensionIcon filename={`file.${format}`} className='size-3.5 shrink-0' />

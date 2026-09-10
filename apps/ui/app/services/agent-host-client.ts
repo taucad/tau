@@ -14,13 +14,13 @@ import type {
 import { isGatewayProviderKind } from '@taucad/agent-host';
 import { connectAgentWorkerChannel } from '@taucad/agent-host/channel-client';
 import { randomUuid } from '@taucad/utils/id';
-import type { LengthSymbol } from '@taucad/units';
 import type { ProjectFileSystemConfig } from '#filesystem/handle-store.js';
 import type { UiRuntimeConfigInput } from '#runtime/ui-runtime.config.js';
 import type {
   AgentHostAdmissionConfig,
   AgentHostCapabilityReport,
   AgentHostExternalAgent,
+  AgentHostExternalContext,
   AgentHostModel,
   AgentHostWorkerCallRequest,
   AgentHostWorkerCallResponse,
@@ -40,6 +40,7 @@ import type {
   AgentHostTransportResponse,
   AgentHostTransportStreams,
 } from '#services/agent-host-transport.js';
+import { createBrowserAgentWorker } from '#services/browser-agent-worker.js';
 
 export type BrowserAgentHostCapability = AgentHostCapabilityReport;
 
@@ -76,12 +77,6 @@ type BrowserAgentHostCapabilityProbeOptions = {
   readonly capabilityProbeTimeout?: number | undefined;
 };
 
-const createDefaultWorker = (): Worker =>
-  new Worker(new URL('../workers/agent-host.worker.ts', import.meta.url), {
-    type: 'module',
-    name: 'tau-agent-host-worker',
-  });
-
 const connectWorker = (worker: Worker, sessionId: string): Channel<AgentHostWorkerProtocol> => {
   const channel = new MessageChannel();
   worker.postMessage(parseAgentHostWorkerConnect({ type: 'agent-host/connect', sessionId, port: channel.port1 }), [
@@ -104,7 +99,7 @@ const runBrowserAgentHostCapabilityProbe = async (
   if (!withoutSync.supported) {
     return staticReport;
   }
-  const worker = (options.createWorker ?? createDefaultWorker)();
+  const worker = (options.createWorker ?? createBrowserAgentWorker)();
   const channel = connectWorker(worker, randomUuid());
   const capabilityAbort = new AbortController();
   const capabilityTimeoutId = globalThis.setTimeout(() => {
@@ -157,6 +152,8 @@ export class AgentHostWorkerError extends Error {
 export type AgentHostClientOptions = {
   readonly openFileSystemBridge: () => FileSystemBridgeConnection;
   readonly openProjectRootBridge: () => FileSystemBridgeConnection;
+  readonly computeMode?: 'off' | 'memory' | 'durable' | undefined;
+  readonly openComputeStorePort?: (() => MessagePort) | undefined;
   readonly projectStorage: ProjectFileSystemConfig;
   readonly durability: StorageDurabilityClass;
   readonly authority: { readonly projectId: string; readonly workspaceId: string };
@@ -165,7 +162,6 @@ export type AgentHostClientOptions = {
   readonly systemPromptBlocks: AgentHostAdmissionConfig['systemPromptBlocks'];
   readonly model: AgentHostModel;
   readonly runtimeConfig: UiRuntimeConfigInput;
-  readonly lengthSymbol: LengthSymbol;
   readonly testingEnabled?: boolean | undefined;
   readonly createWorker?: (() => Worker) | undefined;
   readonly initializationTimeout?: number | undefined;
@@ -185,6 +181,16 @@ type AgentHostStartInputBase = {
    * to spawn — and only a daemon-placed execution ever carries one.
    */
   readonly agent?: AgentHostExternalAgent | undefined;
+  /** CAD context for that external agent (V12); meaningless without one. */
+  readonly context?: AgentHostExternalContext | undefined;
+  /**
+   * How the host records what this turn writes (V19), for a Tau turn and an
+   * external one alike. Absent means `direct`; a host that does not advertise
+   * the named mode refuses the admission.
+   */
+  readonly mode?: 'direct' | 'candidate' | undefined;
+  /** Revision the turn's base is recorded under; minted by the host when absent. */
+  readonly baseRevisionId?: string | undefined;
 };
 
 export type AgentHostStartInput = AgentHostStartInputBase &
@@ -519,6 +525,9 @@ export const createAgentHostClient = (
         message: userMessage(input.message),
         ...(input.config ? { config: input.config } : {}),
         ...(input.agent ? { agent: input.agent } : {}),
+        ...(input.context ? { context: input.context } : {}),
+        ...(input.mode ? { mode: input.mode } : {}),
+        ...(input.baseRevisionId ? { baseRevisionId: input.baseRevisionId } : {}),
       } as const;
       return runCommand({
         chatId: input.chatId,
@@ -627,7 +636,7 @@ const createAgentHostWorkerTransport = (options: AgentHostClientOptions): AgentH
   }
   let worker: Worker;
   try {
-    worker = (options.createWorker ?? createDefaultWorker)();
+    worker = (options.createWorker ?? createBrowserAgentWorker)();
   } catch (error) {
     bridge.dispose();
     projectRootBridge.dispose();
@@ -681,11 +690,18 @@ const createAgentHostWorkerTransport = (options: AgentHostClientOptions): AgentH
 
   // Issued eagerly, before anything awaits readiness: the two bridge ports are
   // transferred with it, and a later issue would race a command that queued.
+  const computeMode = options.computeMode ?? 'memory';
+  const computeStorePort = computeMode === 'durable' ? options.openComputeStorePort?.() : undefined;
+  if (computeMode === 'durable' && !computeStorePort) {
+    throw new AgentHostWorkerError('COMPUTE_AUTHORITY_UNAVAILABLE', 'Durable compute requires the project authority.');
+  }
   const initialize = rawCall(
     {
       type: 'initialize',
       fileSystemPort: bridge.port,
       projectRootPort: projectRootBridge.port,
+      computeMode,
+      computeStorePort,
       projectStorage: options.projectStorage,
       authority: options.authority,
       gatewayBaseUrl: options.gatewayBaseUrl,
@@ -693,10 +709,9 @@ const createAgentHostWorkerTransport = (options: AgentHostClientOptions): AgentH
       systemPromptBlocks: options.systemPromptBlocks,
       model: options.model,
       runtimeConfig: options.runtimeConfig,
-      lengthSymbol: options.lengthSymbol,
       testingEnabled: options.testingEnabled,
     },
-    [bridge.port, projectRootBridge.port],
+    [bridge.port, projectRootBridge.port, ...(computeStorePort ? [computeStorePort] : [])],
   );
   const initializeWorker = async (): Promise<void> => {
     const deadline = new AbortController();

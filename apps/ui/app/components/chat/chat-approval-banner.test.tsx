@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { MyUIMessage } from '@taucad/chat';
+import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import type { CombinedChatState } from '#hooks/use-chat.js';
 import { agentApprovalToolName } from '#services/agent-host-event-projection.js';
 
@@ -23,6 +24,7 @@ const { ChatApprovalBanner, pendingAgentHostApprovals } = await import('#compone
 const approvalMessage = (
   input: Record<string, unknown>,
   state: 'approval-requested' | 'output-available' = 'approval-requested',
+  outcome: 'approved' | 'cancelled' = 'approved',
 ): MyUIMessage =>
   ({
     id: 'assistant-1',
@@ -34,7 +36,7 @@ const approvalMessage = (
         toolCallId: 'interrupt-1',
         state,
         input,
-        ...(state === 'approval-requested' ? { approval: { id: 'interrupt-1' } } : { output: { outcome: 'approved' } }),
+        ...(state === 'approval-requested' ? { approval: { id: 'interrupt-1' } } : { output: { outcome } }),
       },
     ],
   }) as unknown as MyUIMessage;
@@ -44,6 +46,7 @@ const pendingInput = {
   kind: 'approval',
   prompt: 'write hello.txt',
   options: [
+    { optionId: 'allow-always', name: 'Always allow', kind: 'allow_always' },
     { optionId: 'allow', name: 'Allow', kind: 'allow_once' },
     { optionId: 'reject', name: 'Reject', kind: 'reject_once' },
   ],
@@ -57,7 +60,13 @@ describe('pendingAgentHostApprovals', () => {
     expect(pendingAgentHostApprovals([approvalMessage(pendingInput, 'output-available')])).toEqual([]);
   });
 
-  it('reports a Paseo or Tau tool part awaiting approval under its own tool name', () => {
+  it('drops an interrupt a terminal run left behind, so it cannot hide a later one', () => {
+    const laterRun = { id: 'assistant-2', role: 'assistant', parts: [] } as unknown as MyUIMessage;
+
+    expect(pendingAgentHostApprovals([approvalMessage(pendingInput), laterRun])).toEqual([]);
+  });
+
+  it('reports a Tau tool part awaiting approval under its own tool name', () => {
     const message = {
       id: 'assistant-2',
       role: 'assistant',
@@ -104,12 +113,14 @@ describe('ChatApprovalBanner', () => {
     render(<ChatApprovalBanner />);
 
     expect(screen.getByRole('region', { name: 'Approval required' })).toBeInTheDocument();
-    expect(screen.getByText('Codex is waiting for approval')).toBeInTheDocument();
+    /* The bare registry id: `externalAgentDisplayName` reads the descriptor a
+     * paired host published, and this unit has no host. */
+    expect(screen.getByText('codex is waiting for approval')).toBeInTheDocument();
     expect(screen.getByText('write hello.txt')).toBeInTheDocument();
     expect(screen.getByText(/Allow/u)).toBeInTheDocument();
     expect(screen.getByText(/Reject/u)).toBeInTheDocument();
     // SP-4 Result 3: never a promise of per-action confinement.
-    expect(screen.getByText(/keep working in its isolated branch/u)).toBeInTheDocument();
+    expect(screen.getByText(/keep working in this chat's tree/u)).toBeInTheDocument();
   });
 
   it('claims a branch only for the placement that actually materializes one', () => {
@@ -119,29 +130,168 @@ describe('ChatApprovalBanner', () => {
     render(<ChatApprovalBanner />);
 
     expect(screen.getByText('Tau is waiting for approval')).toBeInTheDocument();
-    expect(screen.queryByText(/isolated branch/u)).not.toBeInTheDocument();
+    expect(screen.queryByText(/chat's tree/u)).not.toBeInTheDocument();
     expect(screen.getByText(/does not ask again for each action/u)).toBeInTheDocument();
   });
 
-  it('resolves the interrupt through the chat client and leaves the banner to the log', async () => {
+  /* V6: the record is the truth. The composer has moved on to another agent
+   * while this run stays paused, and the banner must still name the one that is
+   * actually waiting. */
+  it('names the requester the log recorded, not the one the composer is on', () => {
+    messages = [approvalMessage({ ...pendingInput, agentId: 'claude' })];
+    activeExecution = { kind: 'acp', hostId: 'origin', agentId: 'codex' };
+
+    render(<ChatApprovalBanner />);
+
+    expect(screen.getByText('claude is waiting for approval')).toBeInTheDocument();
+    expect(screen.queryByText(/codex is waiting/u)).not.toBeInTheDocument();
+  });
+
+  /* EQ5: one button per option the agent offered, and the keyboard lands on
+   * `allow_once` — one turn's consent — rather than on the standing grant the
+   * agent happened to list first. */
+  it('renders one button per offered option and focuses the single-turn allowance', () => {
     messages = [approvalMessage(pendingInput)];
+
+    render(<ChatApprovalBanner />);
+
+    expect(screen.getAllByRole('button').map((button) => button.textContent)).toEqual([
+      'Always allow',
+      'Allow',
+      'Reject',
+    ]);
+    expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument();
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Allow' }));
+  });
+
+  it('resolves the interrupt with the exact option chosen and leaves the banner to the log', async () => {
+    messages = [approvalMessage(pendingInput)];
+    const user = userEvent.setup();
+
+    render(<ChatApprovalBanner />);
+    await user.click(screen.getByRole('button', { name: 'Always allow' }));
+
+    expect(respondToToolApproval).toHaveBeenCalledExactlyOnceWith('interrupt-1', true, { optionId: 'allow-always' });
+    // The click did not clear it: only the durable `resolved` event does.
+    expect(screen.getByRole('region', { name: 'Approval required' })).toBeInTheDocument();
+  });
+
+  it('denies through the same client verb, naming the rejection option', async () => {
+    messages = [approvalMessage(pendingInput)];
+    const user = userEvent.setup();
+
+    render(<ChatApprovalBanner />);
+    await user.click(screen.getByRole('button', { name: 'Reject' }));
+
+    expect(respondToToolApproval).toHaveBeenCalledExactlyOnceWith('interrupt-1', false, { optionId: 'reject' });
+  });
+
+  /* A Tau tool gated by the API offers no option list of its own. */
+  it('falls back to Approve and Deny when the request offered no options', async () => {
+    messages = [approvalMessage({ ...pendingInput, options: [] })];
     const user = userEvent.setup();
 
     render(<ChatApprovalBanner />);
     await user.click(screen.getByRole('button', { name: 'Approve' }));
 
-    expect(respondToToolApproval).toHaveBeenCalledExactlyOnceWith('interrupt-1', true);
-    // The click did not clear it: only the durable `resolved` event does.
-    expect(screen.getByRole('region', { name: 'Approval required' })).toBeInTheDocument();
+    expect(respondToToolApproval).toHaveBeenCalledExactlyOnceWith('interrupt-1', true, { optionId: undefined });
   });
+});
 
-  it('denies through the same client verb', async () => {
-    messages = [approvalMessage(pendingInput)];
-    const user = userEvent.setup();
+describe('a login an external agent is waiting on', () => {
+  it('renders the verification url and code, and no decision at all', () => {
+    messages = [
+      approvalMessage({
+        interruptId: 'login-1',
+        kind: 'approval',
+        prompt: 'Open the verification page and enter FAKE-CODE.',
+        options: [],
+        login: { agentId: 'codex', methods: [], url: 'https://example.invalid/device', code: 'FAKE-CODE' },
+      }),
+    ];
 
     render(<ChatApprovalBanner />);
-    await user.click(screen.getByRole('button', { name: 'Deny' }));
 
-    expect(respondToToolApproval).toHaveBeenCalledExactlyOnceWith('interrupt-1', false);
+    expect(screen.getByRole('link', { name: 'https://example.invalid/device' })).toHaveAttribute(
+      'href',
+      'https://example.invalid/device',
+    );
+    expect(screen.getByText(/FAKE-CODE/u)).toBeInTheDocument();
+    /* Tau never brokers a vendor login (X6/VI4): there is nothing to approve
+     * here, and nothing that would open one on the user's behalf. */
+    expect(screen.queryByRole('button', { name: /approve/iu })).toBeNull();
+    expect(screen.queryByRole('button', { name: /sign in|log ?in/iu })).toBeNull();
+  });
+
+  it('still renders the login of a refusal the host settled, and reports nothing pending', () => {
+    const refused = approvalMessage(
+      {
+        interruptId: 'login-3',
+        kind: 'approval',
+        prompt: 'codex is not logged in.',
+        options: [],
+        login: { agentId: 'codex', methods: [], url: 'https://example.invalid/device', code: 'FAKE-CODE' },
+      },
+      'output-available',
+      'cancelled',
+    );
+    messages = [refused];
+
+    /* The record is settled the moment it is written — nothing ever answers a
+     * login — so the chat is not "approval required" and the badge is clear,
+     * while the thing the user has to do is still on screen. */
+    expect(pendingAgentHostApprovals(messages)).toEqual([]);
+    expect(refused.parts.every((part) => !('state' in part) || part.state !== 'approval-requested')).toBe(true);
+
+    render(<ChatApprovalBanner />);
+
+    expect(screen.getByText(/FAKE-CODE/u)).toBeInTheDocument();
+  });
+
+  it('stands the affordance down once the login record says the flow completed', () => {
+    messages = [
+      approvalMessage(
+        {
+          interruptId: 'login-4',
+          kind: 'approval',
+          prompt: 'Open the verification page and enter FAKE-CODE.',
+          options: [],
+          login: { agentId: 'codex', methods: [], url: 'https://example.invalid/device', code: 'FAKE-CODE' },
+        },
+        'output-available',
+        'approved',
+      ),
+    ];
+
+    render(<ChatApprovalBanner />);
+
+    expect(screen.queryByText(/FAKE-CODE/u)).toBeNull();
+  });
+
+  it('renders a terminal-auth command as copyable text, never as an action', () => {
+    messages = [
+      approvalMessage({
+        interruptId: 'login-2',
+        kind: 'approval',
+        prompt: 'codex is not logged in.',
+        options: [],
+        login: {
+          agentId: 'codex',
+          methods: [{ id: 'codex-login', name: 'Log in with Codex', terminalCommand: 'codex login' }],
+        },
+      }),
+    ];
+
+    render(
+      <TooltipProvider>
+        <ChatApprovalBanner />
+      </TooltipProvider>,
+    );
+
+    expect(screen.getByText('codex login')).toBeInTheDocument();
+    /* Named for whoever the descriptor called this agent; no discovery has run
+     * in this test, so the id stands in for the product name. */
+    expect(screen.getByRole('region', { name: 'Sign in to codex' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /approve|deny/iu })).toBeNull();
   });
 });

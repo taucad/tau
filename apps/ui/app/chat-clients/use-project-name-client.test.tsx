@@ -2,7 +2,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { parseChatTurnRequest } from '@taucad/chat/schemas';
 import { useProjectNameClient } from '#chat-clients/use-project-name-client.js';
-import type { NameGeneratorRequestError } from '#chat-clients/_internal/name-generator-client.js';
+import { NameGeneratorRequestError } from '#chat-clients/_internal/name-generator-client.js';
 
 // eslint-disable-next-line @typescript-eslint/naming-convention -- ENV/TAU_API_URL mirror the SCREAMING_SNAKE_CASE keys exported by the real environment.config module
 vi.mock('#environment.config.js', () => ({ ENV: { TAU_API_URL: 'https://api.test.local' } }));
@@ -136,6 +136,32 @@ describe('useProjectNameClient', () => {
       expect((error as Error).message).toContain('402');
       expect((error as Error).message).toContain('insufficient credits');
       expect((error as NameGeneratorRequestError).status).toBe(402);
+    }
+  });
+
+  it('should retain the helper funded-limit code without failing the primary chat', async () => {
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          category: 'rate_limit',
+          title: 'Rate Limit Exceeded',
+          message: 'The naming helper is at its funded-operation failsafe.',
+          code: 'FUNDED_HELPER_LIMIT',
+          httpStatus: 429,
+        }),
+        { status: 429, statusText: 'Too Many Requests' },
+      ),
+    );
+    const { result } = renderHook(() => useProjectNameClient());
+
+    try {
+      await act(async () => result.current.generate({ projectId: 'proj_test', text: 'Hi' }));
+      expect.fail('should have thrown');
+    } catch (error) {
+      expect(error).toBeInstanceOf(NameGeneratorRequestError);
+      expect((error as NameGeneratorRequestError).status).toBe(429);
+      expect((error as NameGeneratorRequestError).code).toBe('FUNDED_HELPER_LIMIT');
+      expect((error as Error).message).toContain('The naming helper is at its funded-operation failsafe.');
     }
   });
 

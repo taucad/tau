@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { parseLogEvent } from '@taucad/agent-host';
 import type { AgentLiveEvent, AgentLogEvent } from '@taucad/agent-host';
+import type { UIMessageChunk } from 'ai';
 import { isRecord } from '@taucad/utils/schema';
 import {
   agentApprovalToolName,
   projectAgentHostEvent,
   projectAgentHostLiveEvent,
+  projectAgentHostRevisionFinalized,
   projectAgentHostUserTurn,
 } from '#services/agent-host-event-projection.js';
 import hexagonalNutLog from '#services/__fixtures__/daemon-reattach-hexnut.jsonl?raw';
@@ -115,7 +117,7 @@ describe('projectAgentHostEvent', () => {
           { type: 'toolCall', id: 'call-1', name: 'create_file', arguments: { targetFile: 'proof.txt' } },
         ],
         metadata: {
-          model: 'openai/gpt-5.5',
+          model: 'openai-gpt-5.5',
           usage: {
             input: 12,
             output: 7,
@@ -150,7 +152,7 @@ describe('projectAgentHostEvent', () => {
       data: {
         type: 'usage',
         id: 'assistant-1:usage',
-        model: 'openai/gpt-5.5',
+        model: 'openai-gpt-5.5',
         inputTokens: 12,
         outputTokens: 7,
         reasoningTokens: 0,
@@ -289,6 +291,38 @@ describe('projectAgentHostEvent', () => {
     ]);
   });
 
+  it('projects a login an external agent is waiting on as facts, not a decision', () => {
+    expect(
+      projectAgentHostEvent({
+        ...base,
+        type: 'interrupt.recorded',
+        interruptId: 'login-1',
+        phase: 'requested',
+        reason: 'Open the verification page and enter FAKE-CODE.',
+        payload: {
+          kind: 'external-agent-login',
+          agentId: 'codex',
+          authMethods: [{ id: 'codex-login', name: 'Log in with Codex', terminalCommand: 'codex login' }],
+          url: 'https://example.invalid/device',
+          code: 'FAKE-CODE',
+        },
+      })[0],
+    ).toMatchObject({
+      type: 'tool-input-available',
+      input: {
+        interruptId: 'login-1',
+        prompt: 'Open the verification page and enter FAKE-CODE.',
+        options: [],
+        login: {
+          agentId: 'codex',
+          methods: [{ id: 'codex-login', name: 'Log in with Codex', terminalCommand: 'codex login' }],
+          url: 'https://example.invalid/device',
+          code: 'FAKE-CODE',
+        },
+      },
+    });
+  });
+
   it('falls back to the durable reason when a host records no structured payload', () => {
     expect(
       projectAgentHostEvent({
@@ -358,19 +392,42 @@ describe('projectAgentHostEvent', () => {
     ).toEqual(expected);
   });
 
-  it('renders the typed gateway reason rather than a generic host failure', () => {
-    expect(
-      projectAgentHostEvent({
-        ...base,
-        type: 'run.lifecycle',
-        state: 'failed',
-        detail: {
-          code: 'UPSTREAM_REJECTED',
-          message: 'The model provider rejected the request (HTTP 400).',
-          status: 502,
-        },
-      }),
-    ).toEqual([{ type: 'error', errorText: 'The model provider rejected the request (HTTP 400).' }]);
+  it.each([
+    {
+      code: 'FUNDED_OPERATION_LIMIT',
+      status: 429,
+      message: 'The funded-operation failsafe is active.',
+      category: 'rate_limit',
+    },
+    {
+      code: 'BILLING_RECOVERY_UNAVAILABLE',
+      status: 503,
+      message: 'Tau is finalizing earlier funded work.',
+      category: 'overloaded',
+    },
+    {
+      code: 'PROVIDER_UNAVAILABLE',
+      status: 503,
+      message: 'The model provider is unavailable.',
+      category: 'overloaded',
+    },
+  ] as const)('projects typed $code failure as a persistent ChatError', ({ code, status, message, category }) => {
+    const [chunk] = projectAgentHostEvent({
+      ...base,
+      type: 'run.lifecycle',
+      state: 'failed',
+      detail: { code, message, status },
+    });
+    if (chunk?.type !== 'error') {
+      throw new Error('Expected an error projection');
+    }
+    expect(JSON.parse(chunk.errorText)).toEqual({
+      category,
+      title: category === 'rate_limit' ? 'Rate Limit Exceeded' : 'Service Temporarily Unavailable',
+      message,
+      code,
+      httpStatus: status,
+    });
   });
 
   it('falls back to the generic host failure only when the run recorded no reason', () => {
@@ -379,7 +436,7 @@ describe('projectAgentHostEvent', () => {
     ]);
   });
 
-  it('handles every durable event type and rejects unknown ones', () => {
+  it('handles every durable event type and projects unknown ones to nothing', () => {
     const events = [
       {
         ...base,
@@ -432,9 +489,7 @@ describe('projectAgentHostEvent', () => {
     const projected = events.map((event) => projectAgentHostEvent(event));
     expect(projected).toHaveLength(9);
     expect(projected[1]).toEqual([]);
-    expect(() => projectAgentHostEvent({ ...base, type: 'future.event' } as unknown as AgentLogEvent)).toThrow(
-      'Unmapped agent-host event: future.event',
-    );
+    expect(projectAgentHostEvent({ ...base, type: 'future.event' } as unknown as AgentLogEvent)).toEqual([]);
   });
 
   /*
@@ -494,5 +549,257 @@ describe('projectAgentHostEvent', () => {
     );
     expect(occurrences).toHaveLength(47);
     expect(new Set(events.map((event) => event.runId)).size).toBe(4);
+  });
+});
+
+describe('projectAgentHostRevisionFinalized', () => {
+  /* Exactly what a host writes: `packages/host/src/revisions.ts` builds this
+     record from its own finalization, and `parseLogEvent` is what the client's
+     own log reader validates it with — so the fixture goes through it. */
+  const record = parseLogEvent({
+    ...base,
+    type: 'revision.finalized',
+    turnId: 'user-turn-1',
+    workspaceId: 'trun-1',
+    revisionId: 'rev:trun-1',
+    baseRevisionId: 'rev:base-1',
+    treeId: 'rev:trun-1',
+    branchName: 'agent/chat-1/trun-1',
+    publication: {
+      status: 'updated',
+      branchName: 'agent/chat-1/trun-1',
+      expectedHeadRevisionId: 'rev:base-1',
+      previousHeadRevisionId: 'rev:base-1',
+      headRevisionId: 'rev:trun-1',
+    },
+    changedPaths: ['main.scad'],
+    provenance: { source: 'agent', actorId: 'tau-host', runId: 'run-1', createdAt: 1_788_220_800_000 },
+    generatedSummary: 'Agent turn run-1',
+    nativeGit: { status: 'not-configured' },
+  });
+
+  it("becomes the finalization the revision graph takes from this tab's own authority", () => {
+    expect(projectAgentHostRevisionFinalized(record, 'chat-1')).toEqual({
+      turnId: 'user-turn-1',
+      revisionId: 'rev:trun-1',
+      baseRevisionId: 'rev:base-1',
+      treeId: 'rev:trun-1',
+      branchName: 'agent/chat-1/trun-1',
+      publication: {
+        status: 'updated',
+        branchName: 'agent/chat-1/trun-1',
+        expectedHeadRevisionId: 'rev:base-1',
+        previousHeadRevisionId: 'rev:base-1',
+        headRevisionId: 'rev:trun-1',
+      },
+      changedPaths: ['main.scad'],
+      provenance: { source: 'agent', actorId: 'tau-host', runId: 'run-1', createdAt: 1_788_220_800_000 },
+      generatedSummary: 'Agent turn run-1',
+      chatId: 'chat-1',
+      jobIds: [],
+      workspaceId: 'trun-1',
+      nativeGit: { status: 'not-configured' },
+    });
+  });
+
+  it('renders no transcript chunk of its own, and reads nothing out of another record', () => {
+    expect(projectAgentHostEvent(record)).toEqual([]);
+    expect(projectAgentHostRevisionFinalized({ ...base, type: 'run.lifecycle', state: 'completed' }, 'chat-1')).toBe(
+      undefined,
+    );
+  });
+});
+
+describe('external tool-call chunks', () => {
+  const externalMetadata = { tauInternal: { kind: 'external-tool', origin: 'external', agentId: 'codex' } } as const;
+  const chunksOf = (message: unknown): readonly UIMessageChunk[] =>
+    projectAgentHostEvent({ ...base, type: 'message.appended', message } as AgentLogEvent);
+
+  it("marks every external call dynamic, and carries the emitter's own facts", () => {
+    const [chunk] = chunksOf({
+      id: 'external-input',
+      role: 'tool-input',
+      toolCallId: 'call-1',
+      toolName: 'listFiles',
+      call: { toolCallId: 'list-1', kind: 'read', title: 'List files', status: 'pending', nativeName: 'listFiles' },
+      content: { path: '.' },
+      metadata: externalMetadata,
+    });
+
+    expect(chunk).toMatchObject({
+      type: 'tool-input-available',
+      toolName: 'listFiles',
+      dynamic: true,
+      title: 'List files',
+      toolMetadata: { tau: { kind: 'read', nativeName: 'listFiles', origin: 'external', agentId: 'codex' } },
+    });
+  });
+
+  it('leaves no external tool chunk static, whatever the row carries', () => {
+    const rows = [
+      { role: 'tool-input', toolCallId: 'a', toolName: 'shell', content: {}, metadata: externalMetadata },
+      {
+        role: 'tool-input',
+        toolCallId: 'b',
+        toolName: 'ls -la',
+        call: { toolCallId: 'b' },
+        content: {},
+        metadata: externalMetadata,
+      },
+      {
+        role: 'tool-output',
+        toolCallId: 'a',
+        toolName: 'shell',
+        content: {},
+        isError: false,
+        metadata: externalMetadata,
+      },
+      {
+        role: 'tool-output',
+        toolCallId: 'b',
+        toolName: 'ls -la',
+        content: 'boom',
+        isError: true,
+        metadata: externalMetadata,
+      },
+    ];
+    const chunks = rows.flatMap((row, index) => [...chunksOf({ id: `external-${String(index)}`, ...row })]);
+    const toolChunks = chunks.filter((chunk) => chunk.type.startsWith('tool-'));
+
+    expect(toolChunks).toHaveLength(4);
+    /* This is what makes the red unknown-part card unreachable by construction:
+     * with `dynamic` set, no `tool-${title}` part type can ever be minted. */
+    expect(toolChunks.every((chunk) => 'dynamic' in chunk && chunk.dynamic === true)).toBe(true);
+  });
+
+  it("keeps Tau's own call static, and still carries its kind", () => {
+    const [chunk] = chunksOf({
+      id: 'tau-input',
+      role: 'tool-input',
+      toolCallId: 'call-2',
+      toolName: 'list_directory',
+      call: { toolCallId: 'call-2', kind: 'read', nativeName: 'list_directory' },
+      content: { path: '.' },
+    });
+
+    expect(chunk).toMatchObject({ type: 'tool-input-available', toolName: 'list_directory' });
+    expect(chunk).not.toHaveProperty('dynamic');
+    expect(chunk).toMatchObject({ toolMetadata: { tau: { kind: 'read', nativeName: 'list_directory' } } });
+  });
+});
+
+describe('external attribution', () => {
+  const base = {
+    version: 1,
+    leaderEpoch: 'epoch-1',
+    sequence: 1,
+    recordedAt: '2026-01-01T00:00:00.000Z',
+    runId: 'run-1',
+  } as const;
+
+  /*
+   * V6. The vendor's own token report reaches the same `data-usage` part a Tau
+   * turn produces, with every Tau cost at zero — Tau did not sell this turn —
+   * and the agent named so the reader knows the missing price is a fact.
+   */
+  it('carries the external agent and the model it ran on, priced at nothing', () => {
+    const chunks = projectAgentHostEvent({
+      ...base,
+      type: 'message.appended',
+      message: {
+        id: 'assistant-ext',
+        role: 'assistant',
+        content: [{ type: 'text', text: 'Done.' }],
+        metadata: {
+          model: 'gpt-5.3-codex',
+          responseModel: 'gpt-5.3-codex',
+          usage: {
+            input: 1200,
+            output: 300,
+            cacheRead: 0,
+            cacheWrite: 0,
+            totalTokens: 1500,
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+          },
+          tauInternal: {
+            kind: 'external-tool',
+            origin: 'external',
+            agentId: 'codex',
+            vendorCost: { amount: 0.01, currency: 'USD', reportedBy: 'codex' },
+          },
+        },
+      },
+    });
+
+    expect(chunks).toContainEqual({
+      type: 'data-usage',
+      id: 'assistant-ext:usage',
+      data: {
+        type: 'usage',
+        id: 'assistant-ext:usage',
+        agent: 'codex',
+        model: 'gpt-5.3-codex',
+        inputTokens: 1200,
+        outputTokens: 300,
+        reasoningTokens: 0,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        inputTokensCost: 0,
+        outputTokensCost: 0,
+        cacheReadTokensCost: 0,
+        cacheWriteTokensCost: 0,
+        totalCost: 0,
+      },
+    });
+  });
+
+  it("leaves a Tau turn's usage unattributed", () => {
+    const chunks = projectAgentHostEvent({
+      ...base,
+      type: 'message.appended',
+      message: {
+        id: 'assistant-tau',
+        role: 'assistant',
+        content: [{ type: 'text', text: 'Done.' }],
+        metadata: {
+          model: 'openai-gpt-5.5',
+          usage: {
+            input: 1,
+            output: 1,
+            cacheRead: 0,
+            cacheWrite: 0,
+            totalTokens: 2,
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0.01 },
+          },
+        },
+      },
+    });
+
+    const usage = chunks.find((chunk) => chunk.type === 'data-usage');
+    expect(usage).toBeDefined();
+    expect(usage && 'data' in usage ? usage.data : {}).not.toHaveProperty('agent');
+  });
+
+  /* The banner reads the requester from the record, so the projection has to
+   * carry it out of the durable interrupt payload. */
+  it('projects the agent that raised a durable interrupt', () => {
+    const [request] = projectAgentHostEvent({
+      ...base,
+      type: 'interrupt.recorded',
+      interruptId: 'interrupt-1',
+      phase: 'requested',
+      reason: 'write hello.txt',
+      payload: {
+        kind: 'approval',
+        prompt: 'write hello.txt',
+        agentId: 'claude',
+        context: { options: [{ optionId: 'allow', name: 'Allow', kind: 'allow_once' }] },
+      },
+    });
+
+    expect(request).toMatchObject({
+      type: 'tool-input-available',
+      input: { agentId: 'claude', options: [{ optionId: 'allow', name: 'Allow', kind: 'allow_once' }] },
+    });
   });
 });

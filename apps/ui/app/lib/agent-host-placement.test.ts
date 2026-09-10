@@ -3,15 +3,32 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   AgentHostPlacementError,
   discoverOriginAgentHost,
+  externalAgentDisplayName,
+  hostDirectoryOutage,
   listAgentHostPlacements,
   loopbackAdmissionRefusal,
   openAgentHostChannel,
   probeCloudPlacement,
+  placementRevisionModes,
   probeLoopbackAgentHost,
   shouldAutoOfferCloudPlacement,
 } from '#lib/agent-host-placement.js';
+import { RemoteHostApiError } from '#lib/remote-host-client.js';
+import type { DesktopBridge } from '#filesystem/desktop-bridge.js';
 
 const descriptor = { v: 1, agent: true, label: 'studio-mini', workspaceRoot: '/Users/x/tau-workspace/lamp' } as const;
+
+/** Descriptors exactly as a daemon publishes them (VSC1), model probe included. */
+const claudeAgent = { id: 'claude', displayName: 'Claude Code', models: [{ id: 'sonnet', name: 'Sonnet' }] };
+const codexAgent = {
+  id: 'codex',
+  displayName: 'Codex',
+  models: [
+    { id: 'gpt-5.6-sol', name: 'GPT-5.6-Sol' },
+    { id: 'gpt-5.3-codex-spark', name: 'GPT-5.3-Codex-Spark' },
+  ],
+  defaultModel: 'gpt-5.6-sol',
+};
 
 const jsonResponse = (body: unknown, status = 200): Response =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -59,6 +76,19 @@ describe('discoverOriginAgentHost', () => {
     await expect(
       discoverOriginAgentHost({ fetch: respond as unknown as typeof fetch, origin: 'http://127.0.0.1:7777' }),
     ).resolves.toBeUndefined();
+  });
+});
+
+describe('localAgentHostId', () => {
+  it.each([
+    ['desktop', 'desktop'],
+    ['web', undefined],
+  ] as const)('selects the implicit local host for the %s build', async (target, expected) => {
+    vi.stubEnv('TAU_TARGET', target);
+    vi.resetModules();
+    const placement = await import('#lib/agent-host-placement.js');
+    expect(placement.localAgentHostId()).toBe(expected);
+    vi.unstubAllEnvs();
   });
 });
 
@@ -131,9 +161,16 @@ describe('listAgentHostPlacements', () => {
         ],
       }),
     ).resolves.toEqual([
-      { hostId: 'origin', rung: 1, label: 'studio-mini', workspaceRoot: descriptor.workspaceRoot, online: true },
-      { hostId: 'device-agent', rung: 2, label: 'workshop', workspaceRoot: '/srv/tau', online: true },
-      { hostId: 'device-offline', rung: 2, label: 'laptop', workspaceRoot: '/home/tau', online: false },
+      {
+        hostId: 'origin',
+        rung: 1,
+        label: 'studio-mini',
+        workspaceRoot: descriptor.workspaceRoot,
+        online: true,
+        revisions: [],
+      },
+      { hostId: 'device-agent', rung: 2, label: 'workshop', workspaceRoot: '/srv/tau', online: true, revisions: [] },
+      { hostId: 'device-offline', rung: 2, label: 'laptop', workspaceRoot: '/home/tau', online: false, revisions: [] },
     ]);
   });
 
@@ -171,16 +208,17 @@ describe('listAgentHostPlacements', () => {
         label: 'Tau Cloud',
         workspaceRoot: '/workspace',
         online: true,
+        revisions: [],
         cloudProjectId: 'project-a',
       },
-      { hostId: 'device-laptop', rung: 2, label: 'workshop', workspaceRoot: '/srv/tau', online: true },
+      { hostId: 'device-laptop', rung: 2, label: 'workshop', workspaceRoot: '/srv/tau', online: true, revisions: [] },
     ]);
   });
 
   it('carries each host’s external agents through to the selector', async () => {
     await expect(
       listAgentHostPlacements({
-        discoverOrigin: async () => ({ ...descriptor, externalAgents: ['claude', 'codex'] }),
+        discoverOrigin: async () => ({ ...descriptor, externalAgents: [claudeAgent, codexAgent] }),
         listHosts: async () => [
           {
             id: 'device-agent',
@@ -189,7 +227,7 @@ describe('listAgentHostPlacements', () => {
             lastSeenAt: null,
             revokedAt: null,
             online: true,
-            agent: { workspaceRoot: '/srv/tau', externalAgents: ['codex'] },
+            agent: { workspaceRoot: '/srv/tau', externalAgents: [codexAgent] },
           },
         ],
       }),
@@ -200,7 +238,8 @@ describe('listAgentHostPlacements', () => {
         label: 'studio-mini',
         workspaceRoot: descriptor.workspaceRoot,
         online: true,
-        externalAgents: ['claude', 'codex'],
+        revisions: [],
+        externalAgents: [claudeAgent, codexAgent],
       },
       {
         hostId: 'device-agent',
@@ -208,8 +247,43 @@ describe('listAgentHostPlacements', () => {
         label: 'workshop',
         workspaceRoot: '/srv/tau',
         online: true,
-        externalAgents: ['codex'],
+        revisions: [],
+        externalAgents: [codexAgent],
       },
+    ]);
+  });
+
+  it('publishes each agent’s product name for the surfaces that hold no placement', async () => {
+    /* V14: `displayName` on the descriptor is the single source, so the
+     * approval banner and the transcript badge read it from here instead of
+     * each keeping their own `{claude: 'Claude Code'}` map. */
+    await listAgentHostPlacements({
+      discoverOrigin: async () => ({ ...descriptor, externalAgents: [claudeAgent, codexAgent] }),
+      listHosts: async () => [],
+    });
+
+    expect(externalAgentDisplayName('codex')).toBe('Codex');
+    expect(externalAgentDisplayName('claude')).toBe('Claude Code');
+    // An agent no host has described names itself rather than inventing a product.
+    expect(externalAgentDisplayName('gemini')).toBe('gemini');
+  });
+
+  it('keeps a refused agent’s row, carrying the code that says why', async () => {
+    /* V9: a user who installed Codex and sees no row cannot tell a missing
+     * feature from a stale CLI, so the refusal travels rather than the row
+     * disappearing. */
+    await expect(
+      listAgentHostPlacements({
+        discoverOrigin: async () => ({
+          ...descriptor,
+          externalAgents: [{ id: 'codex', displayName: 'Codex', models: [], refusal: 'CLI_TOO_OLD' }],
+        }),
+        listHosts: async () => [],
+      }),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        externalAgents: [{ id: 'codex', displayName: 'Codex', models: [], refusal: 'CLI_TOO_OLD' }],
+      }),
     ]);
   });
 
@@ -219,7 +293,57 @@ describe('listAgentHostPlacements', () => {
     ).resolves.toEqual([
       // The root belongs to the *project*, not to the host, so discovery names
       // none: `desktopWorkspaceRoot` resolves it at dial time.
-      { hostId: 'desktop', rung: 'in-process', label: 'This computer', workspaceRoot: '', online: true },
+      { hostId: 'desktop', rung: 'in-process', label: 'This computer', workspaceRoot: '', online: true, revisions: [] },
+    ]);
+  });
+
+  it('carries every host’s revision capability into the book turn admission reads', async () => {
+    await listAgentHostPlacements({
+      desktop: true,
+      bridge: () => ({ externalAgents: [], revisions: ['direct'] }) as unknown as DesktopBridge,
+      discoverOrigin: async () => ({ ...descriptor, revisions: ['direct', 'candidate'] }),
+      listHosts: async () => [
+        {
+          id: 'device-agent',
+          label: 'workshop',
+          createdAt: new Date(0),
+          lastSeenAt: null,
+          revokedAt: null,
+          online: true,
+          agent: { workspaceRoot: '/srv/tau' },
+        },
+      ],
+    });
+
+    expect(placementRevisionModes('origin')).toEqual(['direct', 'candidate']);
+    expect(placementRevisionModes('desktop')).toEqual(['direct']);
+    // A daemon that advertised nothing has no revision port, so it offers no mode.
+    expect(placementRevisionModes('device-agent')).toEqual([]);
+    // The browser worker records both by construction: it *is* the recorder.
+    expect(placementRevisionModes(undefined)).toEqual(['direct', 'candidate']);
+  });
+
+  it('carries the external agents main discovered onto the desktop row', async () => {
+    /* The selector draws one row per id, so launcher 2 has to advertise the
+     * same list the utility wired into its port — the desktop's answer to the
+     * daemon's `externalAgents` descriptor field. */
+    await expect(
+      listAgentHostPlacements({
+        desktop: true,
+        bridge: () => ({ externalAgents: [claudeAgent, codexAgent] }) as unknown as DesktopBridge,
+        discoverOrigin: async () => undefined,
+        listHosts: async () => [],
+      }),
+    ).resolves.toEqual([
+      {
+        hostId: 'desktop',
+        rung: 'in-process',
+        label: 'This computer',
+        workspaceRoot: '',
+        online: true,
+        revisions: [],
+        externalAgents: [claudeAgent, codexAgent],
+      },
     ]);
   });
 
@@ -232,6 +356,23 @@ describe('listAgentHostPlacements', () => {
         },
       }),
     ).resolves.toHaveLength(1);
+  });
+
+  /* A persisted rung-2 selection has no target to publish while the directory
+   * is down, so a swallowed refusal leaves its dispatch waiting out the whole
+   * probe timeout and then refusing with a sentence naming nothing. */
+  it('records the directory’s own refusal, and clears it once the directory answers', async () => {
+    await listAgentHostPlacements({
+      discoverOrigin: async () => descriptor,
+      listHosts: async () => {
+        throw new RemoteHostApiError('DEVICE_OFFLINE', 'That computer is offline. Start `tau serve` on it.');
+      },
+    });
+    expect(hostDirectoryOutage()).toBe('That computer is offline. Start `tau serve` on it.');
+
+    await listAgentHostPlacements({ discoverOrigin: async () => undefined, listHosts: async () => [] });
+
+    expect(hostDirectoryOutage()).toBeUndefined();
   });
 });
 
@@ -316,7 +457,7 @@ describe('launcher 2', () => {
       bridge: () => ({ agentHost: { connect } }),
     });
 
-    expect(connect).toHaveBeenCalledWith('/Users/x/Library/Application Support/Tau/home/lamp');
+    expect(connect).toHaveBeenCalledWith('/Users/x/Library/Application Support/Tau/home/lamp', 'durable');
     expect(typeof client.execute).toBe('function');
     client.close();
     channel.port2.close();

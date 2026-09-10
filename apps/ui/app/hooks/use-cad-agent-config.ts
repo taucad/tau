@@ -16,7 +16,7 @@ import {
   waitForRootedBridgeOpener,
 } from '#providers/chat-workspace-authority-provider.js';
 import type { StorageDurabilityClass } from '@taucad/agent-host';
-import { listAgentHostPlacements } from '#lib/agent-host-placement.js';
+import { hostDirectoryOutage, listAgentHostPlacements } from '#lib/agent-host-placement.js';
 import type { AgentHostPlacementTarget } from '#lib/agent-host-placement.js';
 import { unknownIconId } from '#components/icons/svg-icon.js';
 
@@ -98,6 +98,12 @@ export const awaitAgentHostAvailability = async (
   const settled = resolvedAvailability.get(key);
   if (settled) {
     return settled;
+  }
+  // A dead directory cannot describe a daemon placement at all, so refuse with
+  // what it said rather than after the timeout.
+  const outage = input.hostId === undefined ? undefined : hostDirectoryOutage();
+  if (outage !== undefined) {
+    return { status: 'unavailable', reason: outage };
   }
   return new Promise<BrowserAgentHostProjectAvailability>((resolve) => {
     const waiters = availabilityWaiters.get(key) ?? new Set<AvailabilityWaiter>();
@@ -261,6 +267,16 @@ export const useAgentHostPlacements = (): {
             ? { status: 'available', durability: 'exclusive-append' }
             : { status: 'unavailable', reason: `${target.label} is offline.` },
         );
+      }
+      // Waiters registered before the directory answered — the seeded first
+      // turn among them — are settled here; later dispatches read the outage
+      // directly. `availabilityKey` names the browser probe's slot `:browser`,
+      // and that one is another probe's to publish.
+      const outage = hostDirectoryOutage();
+      if (outage !== undefined) {
+        for (const key of [...availabilityWaiters.keys()].filter((waiting) => !waiting.endsWith(':browser'))) {
+          publishAvailability(key, { status: 'unavailable', reason: outage });
+        }
       }
       if (active) {
         setState({ targets, loading: false });

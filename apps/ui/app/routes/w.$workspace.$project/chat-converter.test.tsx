@@ -4,6 +4,7 @@ import type { ActorRefFrom } from 'xstate';
 import type { CapabilitiesManifest, ExportRoute } from '@taucad/runtime';
 import type { FileExtension } from '@taucad/types';
 import type { JSONSchema7 } from '@taucad/json-schema';
+import type * as RjsfCore from '@rjsf/core';
 import type { cadMachine } from '#machines/cad.machine.js';
 
 vi.mock('@xstate/react', () => ({
@@ -144,7 +145,8 @@ vi.mock('#utils/keys.utils.js', () => ({
   formatKeyCombination: () => 'Ctrl+D',
 }));
 
-vi.mock('@rjsf/core', () => ({
+vi.mock('@rjsf/core', async (importOriginal) => ({
+  ...(await importOriginal<typeof RjsfCore>()),
   default: ({
     schema,
     formData,
@@ -320,6 +322,34 @@ describe('ChatConverter', () => {
     expect(resolveActiveSchema(schema, {}, {})).toEqual({ schema, defaults: {} });
   });
 
+  it('should resolve a required non-mode discriminator without coercing an unknown value', () => {
+    const schema: JSONSchema7 = {
+      type: 'object',
+      properties: { shared: { type: 'number' } },
+      oneOf: [
+        {
+          properties: { algorithm: { const: 'steady' }, iterations: { type: 'number', default: 10 } },
+          required: ['algorithm'],
+        },
+        {
+          properties: { algorithm: { const: 'transient' }, duration: { type: 'number', default: 5 } },
+          required: ['algorithm'],
+        },
+      ],
+    };
+
+    expect(resolveActiveSchema(schema, { algorithm: 'transient' }, { algorithm: 'steady', shared: 1 })).toMatchObject({
+      defaults: { algorithm: 'transient', duration: 5, shared: 1 },
+      schema: {
+        properties: { algorithm: { default: 'transient' }, duration: { default: 5 }, shared: { type: 'number' } },
+      },
+    });
+    expect(resolveActiveSchema(schema, { algorithm: 'future' }, { algorithm: 'steady' })).toEqual({
+      schema,
+      defaults: { algorithm: 'steady' },
+    });
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     mockGeometry = { format: 'gltf', content: new Uint8Array([1]) };
@@ -438,22 +468,22 @@ describe('ChatConverter', () => {
     expect((exportButton as HTMLButtonElement).disabled).toBe(false);
   });
 
-  it('should render RJSF form when format with schema is selected', () => {
+  it('should collapse format options by default', () => {
     render(<ChatConverter isExpanded />);
 
     const stlButton = screen.getByRole('button', { name: /stl/i });
     fireEvent.click(stlButton);
 
     const optionsTrigger = screen.getByRole('button', { name: /stl options/i });
-    expect(screen.getByTestId('rjsf-form')).toBeDefined();
+    expect(optionsTrigger).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByTestId('rjsf-form')).toBeNull();
+
+    fireEvent.click(optionsTrigger);
     expect(screen.getByTestId('rjsf-form').dataset['idPrefix']).toBe('///root-stl-options');
     expect(screen.getByTestId('rjsf-form').dataset['rootPresentation']).toBe('embedded');
 
     fireEvent.click(optionsTrigger);
     expect(screen.queryByTestId('rjsf-form')).toBeNull();
-
-    fireEvent.click(optionsTrigger);
-    expect(screen.getByTestId('rjsf-form')).toBeDefined();
   });
 
   it('should not render RJSF form when format without schema is selected', () => {
@@ -470,6 +500,10 @@ describe('ChatConverter', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /stl/i }));
     fireEvent.click(screen.getByRole('button', { name: /step/i }));
+    expect(screen.queryAllByTestId('rjsf-form')).toHaveLength(0);
+
+    fireEvent.click(screen.getByRole('button', { name: /stl options/i }));
+    fireEvent.click(screen.getByRole('button', { name: /step options/i }));
     expect(screen.getAllByTestId('rjsf-form')).toHaveLength(2);
 
     fireEvent.click(screen.getByRole('button', { name: /stl options/i }));
@@ -501,6 +535,7 @@ describe('ChatConverter', () => {
     render(<ChatConverter isExpanded />);
 
     fireEvent.click(screen.getByRole('button', { name: /webp/i }));
+    fireEvent.click(screen.getByRole('button', { name: /webp options defaults/i }));
     expect(screen.getByRole('region', { name: 'Content' })).toBeDefined();
     expect(screen.queryByRole('heading', { name: 'Content' })).toBeNull();
     expect(screen.getByTestId('rjsf-form').dataset['fields']).toBe('includeEdges');
@@ -541,6 +576,7 @@ describe('ChatConverter', () => {
 
     render(<ChatConverter isExpanded />);
     fireEvent.click(screen.getByRole('button', { name: /webp/i }));
+    fireEvent.click(screen.getByRole('button', { name: /webp options defaults/i }));
 
     expect(screen.getByRole('heading', { name: 'Content' })).toBeDefined();
     expect(screen.getByRole('heading', { name: 'Format' })).toBeDefined();
@@ -577,6 +613,7 @@ describe('ChatConverter', () => {
     render(<ChatConverter isExpanded />);
 
     fireEvent.click(screen.getByRole('button', { name: /webp/i }));
+    fireEvent.click(screen.getByRole('button', { name: /webp options defaults/i }));
 
     expect(JSON.parse(screen.getByTestId('rjsf-form').dataset['displayDescriptors'] ?? '{}')).toEqual({
       width: { descriptor: 'count', unit: 'px' },
@@ -594,6 +631,7 @@ describe('ChatConverter', () => {
     render(<ChatConverter isExpanded />);
 
     fireEvent.click(screen.getByRole('button', { name: /webp/i }));
+    fireEvent.click(screen.getByRole('button', { name: /webp options defaults/i }));
     expect(screen.getByTestId('rjsf-form').dataset['fields']).toBe(
       'mode,width,height,quality,lineWidth,background,label,axes,scaleBar,camera',
     );
@@ -819,6 +857,7 @@ describe('ChatConverter', () => {
 
       const stepButton = screen.getByRole('button', { name: /step/i });
       fireEvent.click(stepButton);
+      fireEvent.click(screen.getByRole('button', { name: /step options defaults/i }));
 
       expect(screen.getByTestId('rjsf-form')).toBeDefined();
     });
@@ -867,6 +906,7 @@ describe('ChatConverter', () => {
 
       const stlButton = screen.getByRole('button', { name: /stl/i });
       fireEvent.click(stlButton);
+      fireEvent.click(screen.getByRole('button', { name: /stl options defaults/i }));
 
       expect(screen.getByTestId('rjsf-form')).toBeDefined();
     });
@@ -952,6 +992,7 @@ describe('ChatConverter', () => {
       await vi.waitFor(() => {
         expect(screen.getByRole('button', { name: /export webp/i })).toBeDefined();
       });
+      fireEvent.click(screen.getByRole('button', { name: /webp options modified/i }));
 
       const exportForm = screen.getAllByTestId('rjsf-form').find((form) => form.dataset['fields']?.startsWith('mode,'));
       expect(exportForm?.dataset['fields']).toBe('mode,width,height,quality,lineWidth,background,axes,scaleBar,views');

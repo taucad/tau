@@ -2,6 +2,8 @@ import { z } from 'zod';
 import type { UIMessageChunk } from 'ai';
 import type { AgentLiveEvent, AgentLogEvent } from '@taucad/agent-host';
 import type { MyUIMessage } from '@taucad/chat';
+import { errorCategoryTitles, httpStatusToCategory } from '@taucad/chat/utils';
+import type { AuthoritativeRevisionFinalization } from '#types/revision.types.js';
 import { isRecord } from '@taucad/utils/schema';
 
 type ProviderMessage = Extract<AgentLogEvent, { readonly type: 'message.appended' }>['message'];
@@ -14,6 +16,16 @@ const errorText = (value: JsonValue | undefined, fallback: string): string => {
     return value;
   }
   if (isRecord(value) && typeof value['message'] === 'string') {
+    if (typeof value['code'] === 'string' && typeof value['status'] === 'number') {
+      const category = httpStatusToCategory(value['status']);
+      return JSON.stringify({
+        category,
+        title: errorCategoryTitles[category],
+        message: value['message'],
+        code: value['code'],
+        httpStatus: value['status'],
+      });
+    }
     return value['message'];
   }
   return value === undefined ? fallback : JSON.stringify(value);
@@ -33,6 +45,12 @@ const usageChunks = (message: AssistantProviderMessage): UIMessageChunk[] => {
   }
   const { cost } = usage;
   const id = `${message.id}:usage`;
+  /* Who produced these tokens, from the durable marker rather than from
+   * whatever the composer is selected on now (V6). An external turn's costs are
+   * all zero — Tau did not sell it — so the reader needs the agent's name to
+   * know that the missing price is a fact and not a gap. */
+  const tauInternal = isRecord(metadata.tauInternal) ? metadata.tauInternal : undefined;
+  const agent = tauInternal?.['origin'] === 'external' ? tauInternal['agentId'] : undefined;
   return [
     {
       type: 'data-usage',
@@ -40,6 +58,7 @@ const usageChunks = (message: AssistantProviderMessage): UIMessageChunk[] => {
       data: {
         type: 'usage',
         id,
+        ...(typeof agent === 'string' ? { agent } : {}),
         model: metadata.responseModel ?? metadata.model ?? 'unknown',
         inputTokens: usage.input,
         outputTokens: usage.output,
@@ -111,6 +130,52 @@ const assistantChunks = (
   return chunks;
 };
 
+type ToolProviderMessage = Extract<ProviderMessage, { readonly role: 'tool-input' | 'tool-output' }>;
+
+/** The SDK's own JSON-object shape for a tool part's metadata; `ai` does not export the alias. */
+type ToolChunkMetadata = NonNullable<Extract<UIMessageChunk, { type: 'tool-input-available' }>['toolMetadata']>;
+
+/**
+ * The emitter's own tool-call facts, in the shape the AI SDK carries them.
+ *
+ * ACP is the boundary vocabulary (V3): an external agent's call becomes a
+ * `dynamic-tool` part, so no `tool-${title}` type is ever minted and the
+ * unknown-part fallback is unreachable for tool parts by construction rather
+ * than by adding a branch per agent. `call` rides along as the part's `toolMetadata`
+ * under one `tau` namespace — Tau's own dispatch records the same field, so a
+ * renderer reads one shape for both emitters.
+ *
+ * @param message - The durable tool row.
+ * @returns Chunk fields shared by the input and output chunks.
+ */
+const toolChunkFacts = (
+  message: ToolProviderMessage,
+): { dynamic?: true; title?: string; toolMetadata?: ToolChunkMetadata } => {
+  const tauInternal = isRecord(message.metadata?.tauInternal) ? message.metadata.tauInternal : undefined;
+  const external = tauInternal?.['origin'] === 'external';
+  const { call } = message;
+  const agentId = tauInternal?.['agentId'];
+  /* The SDK carries a part's `toolMetadata` from the *input* chunk and reuses it
+   * for the result, so the emitter's `status` is deliberately not forwarded:
+   * frozen at `pending` it would contradict the part's own state, which is the
+   * one lifecycle a renderer should read. The durable log keeps it either way.
+   *
+   * The durable log's JSON and the SDK's `JSONValue` describe the same bytes and
+   * differ only in array readonly-ness, so this asserts rather than re-copies. */
+  const { status: _status, ...facts } = call ?? {};
+  const durable = {
+    ...facts,
+    ...(external ? { origin: 'external' } : {}),
+    ...(typeof agentId === 'string' ? { agentId } : {}),
+  };
+  const tau = durable as ToolChunkMetadata;
+  return {
+    ...(external ? { dynamic: true } : {}),
+    ...(call?.title === undefined ? {} : { title: call.title }),
+    ...(Object.keys(tau).length === 0 ? {} : { toolMetadata: { tau } }),
+  };
+};
+
 const messageChunks = (message: ProviderMessage, runId: string, streamedBlocks?: Set<string>): UIMessageChunk[] => {
   switch (message.role) {
     case 'user': {
@@ -126,17 +191,20 @@ const messageChunks = (message: ProviderMessage, runId: string, streamedBlocks?:
           toolCallId: message.toolCallId,
           toolName: message.toolName,
           input: message.content,
+          ...toolChunkFacts(message),
         },
       ];
     }
     case 'tool-output': {
+      const { title: _title, ...facts } = toolChunkFacts(message);
       const output: UIMessageChunk = message.isError
         ? {
             type: 'tool-output-error',
             toolCallId: message.toolCallId,
             errorText: errorText(message.content, `${message.toolName} failed`),
+            ...facts,
           }
-        : { type: 'tool-output-available', toolCallId: message.toolCallId, output: message.content };
+        : { type: 'tool-output-available', toolCallId: message.toolCallId, output: message.content, ...facts };
       return [output, { type: 'finish-step' }, { type: 'start-step' }];
     }
   }
@@ -179,6 +247,43 @@ export const projectAgentHostUserMessage = (message: UserProviderMessage, record
   };
 };
 
+/**
+ * Read back the revision a *host* recorded for one turn.
+ *
+ * A browser-placed turn's revision is finalized by the workspace authority in
+ * this tab, so the finalization is already in hand. A host-placed turn's is
+ * finalized on the host, which owns the files (VI11) — the only thing that
+ * crosses to the client is this durable record, and it carries the whole
+ * finalization so the graph node it becomes is identical either way.
+ *
+ * @param event - One durable log record.
+ * @param chatId - The chat whose log carried it; the record does not repeat it.
+ * @returns The finalization, or `undefined` for every other record.
+ */
+export const projectAgentHostRevisionFinalized = (
+  event: AgentLogEvent,
+  chatId: string,
+): AuthoritativeRevisionFinalization | undefined =>
+  event.type === 'revision.finalized'
+    ? {
+        turnId: event.turnId,
+        revisionId: event.revisionId,
+        baseRevisionId: event.baseRevisionId,
+        treeId: event.treeId,
+        branchName: event.branchName,
+        publication: event.publication,
+        changedPaths: event.changedPaths,
+        provenance: event.provenance,
+        generatedSummary: event.generatedSummary,
+        chatId,
+        /* The host runs no Tau jobs against a turn; a browser-placed turn's
+         * ids come from its own claim, which a host placement never mints. */
+        jobIds: [],
+        workspaceId: event.workspaceId,
+        nativeGit: event.nativeGit,
+      }
+    : undefined;
+
 /** Extract the durable user turn carried by either canonical commit event. */
 export const projectAgentHostUserTurn = (event: AgentLogEvent): MyUIMessage | undefined => {
   if (event.type === 'message.appended' && event.message.role === 'user') {
@@ -206,11 +311,6 @@ export const projectAgentHostLiveEvent = (
     ...(first ? ([{ type: 'reasoning-start', id }] as const) : []),
     { type: 'reasoning-delta', id, delta: event.delta },
   ];
-};
-
-const unmappedEvent = (event: never): never => {
-  const { type } = event as { readonly type?: unknown };
-  throw new TypeError(`Unmapped agent-host event: ${typeof type === 'string' ? type : 'unknown'}`);
 };
 
 const lifecycleChunks = (
@@ -275,6 +375,41 @@ export type AgentHostApproval = {
   readonly kind: 'approval' | 'operator' | 'safeguard';
   readonly prompt: string;
   readonly options: readonly AgentHostApprovalOption[];
+  /**
+   * External agent that raised this interrupt, when one did.
+   *
+   * Durable, so a banner rendered after a reload — or while the composer has
+   * moved on to another agent — still names who is actually waiting (V6).
+   */
+  readonly agentId?: string | undefined;
+  /**
+   * A sign-in the agent is waiting on, when that is what this interrupt is.
+   *
+   * Present, the interrupt is not a decision at all — nothing here is approved
+   * or denied. It is what the *user* has to do somewhere else: open a
+   * verification URL, or run a command in their own terminal (V11). Tau never
+   * performs it, so a presenter renders the facts and no action of its own.
+   */
+  readonly login?: AgentHostLogin | undefined;
+};
+
+/** One sign-in method an external agent offered. @public */
+export type AgentHostLoginMethod = {
+  readonly id: string;
+  readonly name: string;
+  readonly description?: string | undefined;
+  /** A command line the user runs themselves; Tau never runs it (X6). */
+  readonly terminalCommand?: string | undefined;
+};
+
+/** The sign-in an external agent is waiting on. @public */
+export type AgentHostLogin = {
+  readonly agentId: string;
+  readonly methods: readonly AgentHostLoginMethod[];
+  /** Where the user completes a device-code login. */
+  readonly url?: string | undefined;
+  /** The code that page asks for. */
+  readonly code?: string | undefined;
 };
 
 /*
@@ -293,6 +428,7 @@ const approvalOptionSchema = z.looseObject({
 const interruptRequestSchema = z.looseObject({
   kind: z.enum(['approval', 'operator', 'safeguard']).optional(),
   prompt: z.string().optional(),
+  agentId: z.string().optional(),
   context: z
     .looseObject({
       toolCall: z.looseObject({ title: z.string().optional() }).optional(),
@@ -300,6 +436,63 @@ const interruptRequestSchema = z.looseObject({
     })
     .optional(),
 });
+
+/* `externalAgentLoginSchema` in `agent-wire.ts` is the writer's own shape; this
+ * is the reader's, loose for the same reason as the rest of the payload. */
+const loginPayloadSchema = z.looseObject({
+  kind: z.literal('external-agent-login'),
+  agentId: z.string().min(1),
+  authMethods: z
+    .array(
+      z.looseObject({
+        id: z.string().min(1),
+        name: z.string().optional(),
+        description: z.string().optional(),
+        terminalCommand: z.string().optional(),
+      }),
+    )
+    .optional(),
+  url: z.string().optional(),
+  code: z.string().optional(),
+});
+
+const loginMethodSchema = z.object({
+  id: z.string().min(1),
+  name: z.string(),
+  description: z.string().optional(),
+  terminalCommand: z.string().optional(),
+});
+
+const agentHostLoginSchema = z.object({
+  agentId: z.string().min(1),
+  methods: z.array(loginMethodSchema),
+  url: z.string().optional(),
+  code: z.string().optional(),
+});
+
+/**
+ * The sign-in one interrupt payload describes, if it describes one.
+ *
+ * @param payload - The durable `interrupt.recorded` payload.
+ * @returns The login facts a presenter renders, or `undefined`.
+ */
+const loginOf = (payload: unknown): AgentHostLogin | undefined => {
+  const parsed = loginPayloadSchema.safeParse(payload).data;
+  if (!parsed) {
+    return undefined;
+  }
+  return {
+    agentId: parsed.agentId,
+    methods: (parsed.authMethods ?? []).map((method) => ({
+      id: method.id,
+      name: method.name ?? method.id,
+      ...(method.description === undefined ? {} : { description: method.description }),
+      ...(method.terminalCommand === undefined ? {} : { terminalCommand: method.terminalCommand }),
+    })),
+    ...(parsed.url === undefined ? {} : { url: parsed.url }),
+    ...(parsed.code === undefined ? {} : { code: parsed.code }),
+  };
+};
 
 const interruptResolutionSchema = z.looseObject({
   outcome: z.enum(['approved', 'denied', 'cancelled']).optional(),
@@ -310,6 +503,8 @@ const agentHostApprovalSchema = z.object({
   kind: z.enum(['approval', 'operator', 'safeguard']),
   prompt: z.string(),
   options: z.array(z.object({ optionId: z.string().min(1), name: z.string(), kind: z.string().optional() })),
+  agentId: z.string().optional(),
+  login: agentHostLoginSchema.optional(),
 });
 
 /**
@@ -334,6 +529,7 @@ const approvalChunks = (
     return [{ type: 'tool-output-available', toolCallId: event.interruptId, output: { outcome } }];
   }
   const request = interruptRequestSchema.safeParse(event.payload).data;
+  const login = loginOf(event.payload);
   const input: AgentHostApproval = {
     interruptId: event.interruptId,
     kind: request?.kind ?? 'approval',
@@ -343,6 +539,8 @@ const approvalChunks = (
       name: option.name ?? option.optionId,
       ...(option.kind === undefined ? {} : { kind: option.kind }),
     })),
+    ...(request?.agentId === undefined ? {} : { agentId: request.agentId }),
+    ...(login === undefined ? {} : { login }),
   };
   return [
     {
@@ -373,14 +571,25 @@ export const projectAgentHostEvent = (
     case 'history.compacted':
     case 'snapshot-context.refreshed':
     case 'safeguard.recorded':
+    case 'model.invocation-prepared':
+    case 'model.invocation-bound':
+    case 'revision.finalized':
     case 'turn.history-projection-committed': {
+      /* `revision.finalized` is a fact about the project's revision graph, not
+       * about the transcript: it is read by `projectAgentHostRevisionFinalized`
+       * and renders no chunk of its own. */
       return [];
     }
     case 'interrupt.recorded': {
       return approvalChunks(event);
     }
     default: {
-      return unmappedEvent(event);
+      /* D14: the log preserves records this reader does not know (a newer
+       * daemon, a cached older bundle); they project to nothing rather than
+       * aborting the chat stream. A *known* type without a case is still a
+       * compile error. */
+      event satisfies never;
+      return [];
     }
   }
 };

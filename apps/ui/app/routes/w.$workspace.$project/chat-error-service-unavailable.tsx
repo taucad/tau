@@ -7,8 +7,12 @@ import { useChatActions } from '#hooks/use-chat.js';
 
 export const ChatErrorServiceUnavailable = memo(function ({
   className,
+  title = 'Unable to reach Tau',
+  description = "We couldn't connect to the Tau service. This could be due to a network issue or the service may be temporarily unavailable. Please check your connection and try again.",
 }: {
   readonly className?: string;
+  readonly title?: string;
+  readonly description?: string;
 }): React.JSX.Element {
   const { continueChat } = useChatActions();
 
@@ -16,12 +20,9 @@ export const ChatErrorServiceUnavailable = memo(function ({
     <div className={cn('flex flex-col gap-2 rounded-md border border-warning/20 bg-warning/10 p-3 text-sm', className)}>
       <div className='flex items-center gap-2'>
         <WifiOff className='size-4 shrink-0 text-warning' />
-        <p className='font-medium text-foreground'>Unable to reach Tau</p>
+        <p className='font-medium text-foreground'>{title}</p>
       </div>
-      <p className='text-xs text-muted-foreground'>
-        We couldn&apos;t connect to the Tau service. This could be due to a network issue or the service may be
-        temporarily unavailable. Please check your connection and try again.
-      </p>
+      <p className='text-xs text-muted-foreground'>{description}</p>
       <div className='flex justify-end'>
         <Button
           variant='outline'

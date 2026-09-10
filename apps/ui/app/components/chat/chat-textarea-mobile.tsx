@@ -6,10 +6,11 @@ import { Textarea } from '@taucad/ui/components/textarea';
 import { SvgIcon } from '#components/icons/svg-icon.js';
 import { cn } from '@taucad/ui/utils/cn';
 import { menuContentVariants, menuItemVariants } from '@taucad/ui/components/menu.variants';
+import { ChatAgentModelSelector } from '#components/chat/chat-agent-model-selector.js';
 import { ChatModelSelector } from '#components/chat/chat-model-selector.js';
 import { ChatExecutionSelector, formatChatAgentActivity } from '#components/chat/chat-execution-selector.js';
 import { ChatKernelSelector } from '#components/chat/chat-kernel-selector.js';
-import { ChatRevisionSelector } from '#components/chat/chat-revision-selector.js';
+import { ChatRevisionSelector, useChatRevisionPlacement } from '#components/chat/chat-revision-selector.js';
 import { ChatToolSelector } from '#components/chat/chat-tool-selector.js';
 import { ChatContextActions } from '#components/chat/chat-context-actions.js';
 import { ChatTextareaBorderBeam } from '#components/chat/chat-textarea-border-beam.js';
@@ -177,6 +178,7 @@ export const ChatTextareaMobile = memo(function ({
     execution: { execution },
     session,
   } = useChatComposer();
+  const { isOffered: isRevisionSelectorOffered } = useChatRevisionPlacement();
 
   useEffect(() => {
     if (!closeOptionsRef) {
@@ -320,12 +322,37 @@ export const ChatTextareaMobile = memo(function ({
                         </div>
                       )}
                     </ChatModelSelector>
-                  ) : null}
+                  ) : (
+                    /* The ACP sibling: same slot, the agent's own model
+                     * namespace (V5); nothing at all when the host advertised
+                     * no models. */
+                    <ChatAgentModelSelector
+                      isNested
+                      data-chat-textarea-focustrap={focusTrapAttribute}
+                      popoverProperties={{ align: 'start' }}
+                      onSelect={() => {
+                        setIsDrawerOpen(false);
+                        focusInput();
+                      }}
+                    >
+                      {({ selectedModel }) => (
+                        <div className={menuItemClassName}>
+                          <span className='flex w-full items-center justify-between'>
+                            <div className='flex flex-col items-start'>
+                              <span className='truncate'>{selectedModel.name}</span>
+                              <span className='text-xs text-muted-foreground'>Model for this agent</span>
+                            </div>
+                            <ChevronRight className='size-4 text-muted-foreground' />
+                          </span>
+                        </div>
+                      )}
+                    </ChatAgentModelSelector>
+                  )}
 
                   {creationLocationControl}
 
-                  {/* Revision Selector */}
-                  {execution.kind === 'tau' ? (
+                  {/* Revision Selector — offered by host capability, never by execution kind (V18). */}
+                  {isRevisionSelectorOffered ? (
                     <ChatRevisionSelector
                       isNested
                       data-chat-textarea-focustrap={focusTrapAttribute}
@@ -338,12 +365,9 @@ export const ChatTextareaMobile = memo(function ({
                       {({ currentConfig }) => (
                         <div className={menuItemClassName} data-slot='chat-revision-selector'>
                           <span className='flex w-full items-center justify-between'>
-                            <div className='flex items-center gap-2'>
-                              <currentConfig.icon className='size-4' />
-                              <div className='flex flex-col items-start'>
-                                <span>{currentConfig.label}</span>
-                                <span className='text-xs text-muted-foreground'>{currentConfig.description}</span>
-                              </div>
+                            <div className='flex flex-col items-start'>
+                              <span>{currentConfig.label}</span>
+                              <span className='text-xs text-muted-foreground'>{currentConfig.description}</span>
                             </div>
                             <ChevronRight className='size-4 text-muted-foreground' />
                           </span>

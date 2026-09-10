@@ -1,12 +1,17 @@
 import { memo, useCallback, useEffect, useMemo, useRef } from 'react';
-import { Bot, ChevronDown, Paperclip, Wrench, AtSign } from 'lucide-react';
+import { Bot, Brain, Paperclip, Wrench, AtSign } from 'lucide-react';
 import type { Chat, ToolSelection } from '@taucad/chat';
 import type { FileEntry } from '@taucad/types';
 import type { FileTreeService } from '@taucad/fs-client/file-tree-service';
 import { ChatModelSelector, openModelSelectorKeyCombination } from '#components/chat/chat-model-selector.js';
-import { ChatExecutionSelector, formatChatAgentActivity } from '#components/chat/chat-execution-selector.js';
+import { ChatAgentModelSelector, useChatAgentModel } from '#components/chat/chat-agent-model-selector.js';
+import {
+  ChatExecutionSelector,
+  formatChatAgentActivity,
+  useChatAgentSelection,
+} from '#components/chat/chat-execution-selector.js';
 import { ChatKernelSelector } from '#components/chat/chat-kernel-selector.js';
-import { ChatRevisionSelector } from '#components/chat/chat-revision-selector.js';
+import { ChatRevisionSelector, useChatRevisionPlacement } from '#components/chat/chat-revision-selector.js';
 import { ChatToolSelector } from '#components/chat/chat-tool-selector.js';
 import { ChatAgentSelector, toggleModeKeyCombination } from '#components/chat/chat-mode-selector.js';
 import { Button } from '@taucad/ui/components/button';
@@ -416,11 +421,14 @@ export const ChatTextareaLeftControls = memo(function ({
     agentActivity,
     session,
   } = useChatComposer();
+  const { isOffered: isRevisionSelectorOffered } = useChatRevisionPlacement();
+  const { isOffered: isAgentSelectorOffered, label: selectedAgentLabel } = useChatAgentSelection();
+  const { selectedModel: selectedAgentModel } = useChatAgentModel();
 
   return (
     <div className='absolute bottom-2 left-2 flex flex-row items-center gap-1 text-muted-foreground'>
       <ChatTextareaModeControl />
-      {session ? (
+      {session && isAgentSelectorOffered ? (
         <Tooltip>
           <ChatExecutionSelector
             data-chat-textarea-focustrap
@@ -435,25 +443,18 @@ export const ChatTextareaLeftControls = memo(function ({
                   size='sm'
                   aria-label={`Select agent: ${label}`}
                   aria-description={`Agent status: ${formatChatAgentActivity(activity)}`}
-                  className='h-7 cursor-pointer! rounded-full text-muted-foreground hover:text-foreground'
+                  className='h-7 cursor-pointer! rounded-full text-muted-foreground hover:text-foreground @max-[22rem]:w-7'
                 >
-                  <span
-                    className={cn(
-                      'size-1.5 rounded-full bg-muted-foreground',
-                      activity === 'working' && 'animate-pulse bg-sky-500',
-                      activity === 'approval-required' && 'bg-amber-500',
-                      activity === 'stopping' && 'animate-pulse bg-orange-500',
-                    )}
-                    aria-hidden='true'
-                  />
                   <span className='hidden max-w-24 truncate text-xs @[22rem]:block'>{label}</span>
                   <Bot className='size-4 @[22rem]:hidden' aria-hidden='true' />
-                  <ChevronDown className='size-4' aria-hidden='true' />
                 </Button>
               </TooltipTrigger>
             )}
           </ChatExecutionSelector>
-          <TooltipContent>Select agent · {formatChatAgentActivity(agentActivity)}</TooltipContent>
+          {/* The dot is gone, so readiness reads out of the tooltip (Q12.5). */}
+          <TooltipContent>
+            Select agent ({selectedAgentLabel}) · {formatChatAgentActivity(agentActivity)}
+          </TooltipContent>
         </Tooltip>
       ) : null}
       {/* Model selector */}
@@ -473,13 +474,7 @@ export const ChatTextareaLeftControls = memo(function ({
                   className='h-7 cursor-pointer! rounded-full text-muted-foreground hover:text-foreground @max-[22rem]:w-7 @xs:max-w-fit @[22rem]:pr-2'
                 >
                   <span className='hidden truncate text-xs @[22rem]:block'>{selectedModel.name}</span>
-                  <span className='relative flex size-4 items-center justify-center'>
-                    <ChevronDown className='absolute scale-0 transition-transform duration-200 ease-in-out group-hover:scale-0 @[22rem]:scale-100' />
-                    <SvgIcon
-                      id={selectedModel.family}
-                      className='absolute scale-100 grayscale transition-transform duration-200 ease-in-out group-hover:scale-100 @[22rem]:scale-0'
-                    />
-                  </span>
+                  <SvgIcon id={selectedModel.family} className='size-4 shrink-0 grayscale' />
                 </Button>
               </TooltipTrigger>
             )}
@@ -491,10 +486,41 @@ export const ChatTextareaLeftControls = memo(function ({
             </span>
           </TooltipContent>
         </Tooltip>
-      ) : null}
+      ) : (
+        /* The ACP sibling: same slot, the agent's own model namespace (V5).
+         * It renders nothing when the host advertised no models. */
+        <Tooltip>
+          <ChatAgentModelSelector
+            data-chat-textarea-focustrap
+            popoverProperties={{ align: 'start' }}
+            onSelect={focusEditor}
+            onClose={focusEditor}
+          >
+            {({ selectedModel }) => (
+              <TooltipTrigger asChild>
+                <Button
+                  variant='outline'
+                  size='sm'
+                  /* Collapsed to an icon below the breakpoint like every other
+                   * trigger in the row, so the name has to come from here. */
+                  aria-label={`Select model (${selectedModel.name})`}
+                  className='h-7 cursor-pointer! rounded-full text-muted-foreground hover:text-foreground @max-[22rem]:w-7 @xs:max-w-fit @[22rem]:pr-2'
+                >
+                  <span className='hidden max-w-24 truncate text-xs @[22rem]:block'>{selectedModel.name}</span>
+                  {/* ponytail: the agent's model namespace carries no family, so
+                   * there is no brand sprite to collapse to — one generic glyph,
+                   * not an agentId-to-icon table. */}
+                  <Brain className='size-4 shrink-0' aria-hidden='true' />
+                </Button>
+              </TooltipTrigger>
+            )}
+          </ChatAgentModelSelector>
+          <TooltipContent>Select model ({selectedAgentModel.name})</TooltipContent>
+        </Tooltip>
+      )}
       {creationLocationControl}
-      {/* Revision selector */}
-      {execution.kind === 'tau' ? (
+      {/* Revision selector — offered by host capability, never by execution kind (V18). */}
+      {isRevisionSelectorOffered ? (
         <Tooltip>
           <ChatRevisionSelector
             data-chat-textarea-focustrap
@@ -509,10 +535,9 @@ export const ChatTextareaLeftControls = memo(function ({
                   variant='outline'
                   size='sm'
                   aria-label={`Work in: ${currentConfig.label}`}
-                  className='h-7 cursor-pointer! rounded-full text-muted-foreground hover:text-foreground @max-[22rem]:w-7 @xs:max-w-fit @[22rem]:pr-2'
+                  className='h-7 cursor-pointer! rounded-full text-muted-foreground hover:text-foreground @xs:max-w-fit'
                 >
-                  <span className='hidden truncate text-xs @[22rem]:block'>{currentConfig.label}</span>
-                  <currentConfig.icon className='size-4' aria-hidden='true' />
+                  <span className='truncate text-xs'>{currentConfig.label}</span>
                 </Button>
               </TooltipTrigger>
             )}
@@ -534,18 +559,13 @@ export const ChatTextareaLeftControls = memo(function ({
                 <Button
                   variant='outline'
                   size='sm'
+                  aria-label={`Select kernel (${selectedKernel.name})`}
                   className='h-7 cursor-pointer! rounded-full text-muted-foreground hover:text-foreground @max-[22rem]:w-7 @xs:max-w-fit @[22rem]:pr-2'
                 >
                   <span className='hidden items-center gap-1.5 truncate text-xs @[22rem]:inline-flex'>
                     {selectedKernel.name}
                   </span>
-                  <span className='relative flex size-4 items-center justify-center'>
-                    <ChevronDown className='absolute scale-0 transition-transform duration-200 ease-in-out group-hover:scale-0 @[22rem]:scale-100' />
-                    <SvgIcon
-                      id={selectedKernel.id}
-                      className='absolute scale-100 grayscale transition-transform duration-200 ease-in-out group-hover:scale-100 @[22rem]:scale-0'
-                    />
-                  </span>
+                  <SvgIcon id={selectedKernel.id} className='size-4 shrink-0 grayscale' />
                 </Button>
               </TooltipTrigger>
             )}
@@ -721,6 +741,7 @@ function ChatTextareaModeControl(): React.JSX.Element | undefined {
             <Button
               variant='outline'
               size='sm'
+              aria-label={`Select mode (${currentConfig.label})`}
               className={cn(
                 'h-7 cursor-pointer! rounded-full text-muted-foreground hover:text-foreground @max-[22rem]:w-7 @xs:max-w-fit @[22rem]:pr-2',
                 currentConfig.activeClass,

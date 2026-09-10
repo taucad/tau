@@ -592,3 +592,47 @@ it('shows generic diagnostics for an unsupported historical static tool', () => 
   render(<ChatMessage messageId='msg-unknown' />);
   expect(screen.getByTestId('tool-unknown')).toBeInTheDocument();
 });
+
+/*
+ * V6. The transcript is history: a message an external agent produced says so,
+ * from its own durable usage record, whatever the composer is selected on now.
+ * A Tau turn shows nothing — the model selector already names its model.
+ */
+describe('external attribution badge', () => {
+  const usagePart = (data: Record<string, unknown>): MyUIMessage['parts'][number] =>
+    ({
+      type: 'data-usage',
+      data: {
+        type: 'usage',
+        id: 'usage-1',
+        model: 'gpt-5.3-codex',
+        inputTokens: 1200,
+        outputTokens: 300,
+        reasoningTokens: 0,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        inputTokensCost: 0,
+        outputTokensCost: 0,
+        cacheReadTokensCost: 0,
+        cacheWriteTokensCost: 0,
+        totalCost: 0,
+        ...data,
+      },
+    }) as unknown as MyUIMessage['parts'][number];
+
+  it('names the external agent and the model its usage recorded', () => {
+    setMessages([{ id: 'msg-external', role: 'assistant', parts: [usagePart({ agent: 'codex' })] }]);
+
+    render(<ChatMessage messageId='msg-external' />);
+
+    expect(screen.getByText('codex · gpt-5.3-codex')).toBeInTheDocument();
+  });
+
+  it('shows no badge on a Tau turn', () => {
+    setMessages([{ id: 'msg-tau', role: 'assistant', parts: [usagePart({ model: 'openai-gpt-5.5' })] }]);
+
+    render(<ChatMessage messageId='msg-tau' />);
+
+    expect(screen.queryByText(/openai-gpt-5\.5/u)).not.toBeInTheDocument();
+  });
+});

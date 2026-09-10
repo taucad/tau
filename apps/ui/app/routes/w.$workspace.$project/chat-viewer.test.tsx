@@ -265,7 +265,6 @@ const mockGraphicsActor = {
       enablePostProcessing: false,
       upDirection: 'z',
       cameraFovAngle: 45,
-      environmentPreset: 'studio',
       measurements: [],
       units: undefined,
       progressiveScene: createProgressiveSceneProjection(),

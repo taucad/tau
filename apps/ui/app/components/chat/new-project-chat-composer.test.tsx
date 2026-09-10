@@ -108,7 +108,6 @@ describe('NewProjectChatComposer', () => {
   it.each([
     ['a paired Tau Host daemon', { kind: 'tau', model: 'gpt-test', hostId: 'device-av4' }],
     ['an external ACP agent on a daemon', { kind: 'acp', hostId: 'device-av4', agentId: 'codex' }],
-    ['a Paseo agent', { kind: 'paseo', connectionId: 'conn-1', agentId: 'agent-1' }],
   ] as ReadonlyArray<readonly [string, CadAgentExecution]>)(
     'seeds the created chat with %s exactly as the chip shows it',
     async (_name, execution) => {

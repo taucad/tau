@@ -35,7 +35,7 @@ import { Topic } from '@taucad/events';
 import { z } from 'zod';
 import { createActor } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
-import type { Chat as ChatEntity, MyUIMessage } from '@taucad/chat';
+import type { CadAgentExecution, Chat as ChatEntity, MyUIMessage } from '@taucad/chat';
 import { isAnyToolPart } from '@taucad/chat';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { idPrefix } from '@taucad/types/constants';
@@ -242,9 +242,12 @@ function hasPendingApproval(messages: readonly MyUIMessage[]): boolean {
  * the way. Owned by the profile-scoped chat client; called by the store only for
  * dispatches that carry no body of their own.
  *
+ * @param execution - Compose the turn from this execution instead of the one
+ * the client's React tree currently holds. The seeded first turn passes the
+ * execution of the row it just consumed, which the tree has not hydrated yet.
  * @public
  */
-export type LatestAgentBodyFactory = () => Promise<Readonly<Record<string, unknown>>>;
+export type LatestAgentBodyFactory = (execution?: CadAgentExecution) => Promise<Readonly<Record<string, unknown>>>;
 
 type InternalSession = ChatSession & {
   /** React/view consumers currently observing this session. */
@@ -669,7 +672,14 @@ export class ChatSessionStore {
                 session.seededDispatch = true;
                 persistenceActorRef.send({
                   type: 'startRequest',
-                  request: { kind: 'regenerate' },
+                  /* The consumed row's execution rides with the dispatch. The
+                   * `chatRetrieved` event that assigns it to the machine is
+                   * only returned on the next line, and the chat client's
+                   * published factory closes over a React snapshot older still
+                   * — so without this the chat's own `acp` agent (or its
+                   * pinned Tau host/model) is rebuilt from the cookie and the
+                   * first turn silently runs somewhere else. */
+                  request: { kind: 'regenerate', execution: consumedChat.activeExecution },
                 });
 
                 return { type: 'chatRetrieved', chat: { ...consumedChat, error: undefined } };
@@ -831,7 +841,7 @@ export class ChatSessionStore {
             return undefined;
           }
           try {
-            return await compose();
+            return await compose(request.kind === 'regenerate' ? request.execution : undefined);
           } catch (error) {
             console.error('[ChatSessionStore] durable workspace admission failed for a seeded dispatch', error);
             return undefined;

@@ -1,3 +1,18 @@
+/**
+ * This app's system-skill layer: the shared catalogue, loaded the one way a
+ * browser can.
+ *
+ * The rows — slug, name, description, version, when-to-use and which package
+ * subpath holds the guide — live in `@taucad/agent-tools/skills` so a daemon
+ * offers the same set from the same files. Only the loading is here, because
+ * only a bundler can inline a package's `SKILL.md` as a string. The two
+ * app-authored skills below have no package to come from and stay local.
+ *
+ * @module
+ */
+
+import { systemSkillCatalog } from '@taucad/agent-tools/skills';
+import type { SystemSkillSlug } from '@taucad/agent-tools/skills';
 import jscadSkillMarkdown from '@taucad/jscad/agent?raw';
 import build123dSkillMarkdown from '@taucad/build123d/agent?raw';
 import picogkSkillMarkdown from '@taucad/picogk/agent?raw';
@@ -18,6 +33,24 @@ export type BuiltInSystemSkill = {
   readonly priority: 60;
   readonly whenToUse: string;
   readonly skillMarkdown: string;
+};
+
+/**
+ * The browser's loader for the shared catalogue.
+ *
+ * Keyed by slug and typed by it: a catalogue row with no `?raw` import here is
+ * a compile error rather than a skill that silently resolves to nothing.
+ */
+const browserSkillMarkdown: Readonly<Record<SystemSkillSlug, string>> = {
+  'cad-build123d': build123dSkillMarkdown,
+  'cad-picogk': picogkSkillMarkdown,
+  'cad-openscad': openscadSkillMarkdown,
+  'cad-replicad': replicadSkillMarkdown,
+  'cad-manifold': manifoldSkillMarkdown,
+  'cad-zoo': zooSkillMarkdown,
+  'cad-jscad': jscadSkillMarkdown,
+  'cad-opencascadejs': opencascadejsSkillMarkdown,
+  'geospec-authoring': geospecAuthoringSkillMarkdown,
 };
 
 export const builtInSystemSkills: readonly BuiltInSystemSkill[] = [
@@ -172,103 +205,16 @@ If updating an existing artifact, inspect the current file first and preserve us
     whenToUse: 'Use when creating a CAD model without a pinned kernel or when kernel choice is ambiguous.',
     skillMarkdown: createModelSkillMarkdown,
   },
-  {
-    slug: 'cad-build123d',
-    name: 'Build123d Authoring',
-    description:
-      'Guides native Build123d BRep authoring in main.py. Use when creating or editing trusted Python CAD projects in Tau Desktop.',
-    version: '1.0.0',
-    source: 'system',
-    priority: 60,
-    whenToUse: 'Use for Build123d source, .py CAD files, or a Build123d-pinned desktop project.',
-    skillMarkdown: build123dSkillMarkdown,
-  },
-  {
-    slug: 'cad-picogk',
-    name: 'PicoGK Authoring',
-    description:
-      'Guides trusted PicoGK C# voxel authoring in main.cs. Use when creating or editing PicoGK projects in Tau Desktop.',
-    version: '1.0.0',
-    source: 'system',
-    priority: 60,
-    whenToUse: 'Use for PicoGK source, .cs CAD files, or a PicoGK-pinned desktop project.',
-    skillMarkdown: picogkSkillMarkdown,
-  },
-  {
-    slug: 'cad-openscad',
-    name: 'OpenSCAD Authoring',
-    description:
-      'Guides OpenSCAD model authoring in main.scad with idiomatic CSG and adaptive tessellation. Use when creating or editing .scad geometry.',
-    version: '1.0.0',
-    source: 'system',
-    priority: 60,
-    whenToUse: 'Use for OpenSCAD source, .scad files, or an OpenSCAD-pinned project.',
-    skillMarkdown: openscadSkillMarkdown,
-  },
-  {
-    slug: 'cad-replicad',
-    name: 'Replicad Authoring',
-    description:
-      'Guides precise Replicad BRep authoring in main.ts. Use when creating or editing TypeScript geometry imported from replicad.',
-    version: '1.0.0',
-    source: 'system',
-    priority: 60,
-    whenToUse: 'Use for Replicad source, replicad imports, or a Replicad-pinned project.',
-    skillMarkdown: replicadSkillMarkdown,
-  },
-  {
-    slug: 'cad-manifold',
-    name: 'Manifold Authoring',
-    description:
-      'Guides robust Manifold mesh CAD in main.ts. Use when creating or editing TypeScript geometry with manifold-3d/manifoldCAD.',
-    version: '1.0.0',
-    source: 'system',
-    priority: 60,
-    whenToUse: 'Use for Manifold source, manifold-3d imports, or a Manifold-pinned project.',
-    skillMarkdown: manifoldSkillMarkdown,
-  },
-  {
-    slug: 'cad-zoo',
-    name: 'Zoo KCL Authoring',
-    description:
-      'Guides Zoo KCL modeling in main.kcl with pipe-based analytical geometry. Use when creating or editing KCL models.',
-    version: '1.0.0',
-    source: 'system',
-    priority: 60,
-    whenToUse: 'Use for KCL source, .kcl files, or a Zoo-pinned project.',
-    skillMarkdown: zooSkillMarkdown,
-  },
-  {
-    slug: 'cad-jscad',
-    name: 'JSCAD Authoring',
-    description:
-      'Guides JSCAD modeling in main.ts with 2D-first CSG and deliberate tessellation. Use when creating or editing @jscad/modeling geometry.',
-    version: '1.0.0',
-    source: 'system',
-    priority: 60,
-    whenToUse: 'Use for JSCAD source, @jscad/modeling imports, or a JSCAD-pinned project.',
-    skillMarkdown: jscadSkillMarkdown,
-  },
-  {
-    slug: 'cad-opencascadejs',
-    name: 'OpenCascade.js Authoring',
-    description:
-      'Guides direct OpenCascade.js BRep authoring in main.ts. Use when creating or editing libcascade geometry.',
-    version: '1.0.0',
-    source: 'system',
-    priority: 60,
-    whenToUse: 'Use for direct OpenCascade.js source, libcascade imports, or an OpenCascade-pinned project.',
-    skillMarkdown: opencascadejsSkillMarkdown,
-  },
-  {
-    slug: 'geospec-authoring',
-    name: 'GeoSpec Authoring',
-    description:
-      'Guides deterministic GeoSpec test authoring and repair. Use before creating or editing *.geospec.ts or *.geospec.js files.',
-    version: '1.0.0',
-    source: 'system',
-    priority: 60,
-    whenToUse: 'Use before creating, extending, or repairing any GeoSpec geometry test.',
-    skillMarkdown: geospecAuthoringSkillMarkdown,
-  },
+  ...systemSkillCatalog.map(
+    (entry): BuiltInSystemSkill => ({
+      slug: entry.slug,
+      name: entry.name,
+      description: entry.description,
+      version: entry.version,
+      source: 'system',
+      priority: 60,
+      whenToUse: entry.whenToUse,
+      skillMarkdown: browserSkillMarkdown[entry.slug],
+    }),
+  ),
 ];

@@ -14,7 +14,11 @@ import type {
   AgentHostWorkerLiveEvent,
   AgentHostWorkerProtocol,
 } from '#workers/agent-host.contract.js';
-import { agentHostWorkerProtocolSchemas, parseAgentHostWorkerConnect } from '#workers/agent-host.contract.js';
+import {
+  agentHostWorkerCommandSchema,
+  agentHostWorkerProtocolSchemas,
+  parseAgentHostWorkerConnect,
+} from '#workers/agent-host.contract.js';
 
 type ErrorListener = (event: ErrorEvent) => void;
 
@@ -286,7 +290,6 @@ const createTestClient = (
     ],
     model: { id: 'fixture-model', providerKind: 'openai', contextWindow: 200_000 },
     runtimeConfig: { tauApiUrl: 'https://api.tau.test', tauWebSocketUrl: 'wss://api.tau.test' },
-    lengthSymbol: 'mm',
     createWorker: () => worker as unknown as Worker,
     ...overrides,
   });
@@ -384,7 +387,6 @@ describe('createBrowserAgentHostClient', () => {
           ],
           model: { id: `${providerKind}-model`, providerKind, contextWindow: 200_000 },
           runtimeConfig: { tauApiUrl: 'https://api.tau.test', tauWebSocketUrl: 'wss://api.tau.test' },
-          lengthSymbol: 'mm',
         }),
       ).toThrow(expect.objectContaining({ code: 'MODEL_PROVIDER_UNSUPPORTED' }));
       expect(openFileSystemBridge).not.toHaveBeenCalled();
@@ -415,7 +417,6 @@ describe('createBrowserAgentHostClient', () => {
       ],
       model: { id: 'anthropic-model', providerKind: 'anthropic', contextWindow: 200_000 },
       runtimeConfig: { tauApiUrl: 'https://api.tau.test', tauWebSocketUrl: 'wss://api.tau.test' },
-      lengthSymbol: 'mm',
       createWorker: () => worker as unknown as Worker,
     });
 
@@ -442,12 +443,15 @@ describe('createBrowserAgentHostClient', () => {
     const projectRootDispose = vi.fn();
     const channel = new MessageChannel();
     const projectRootChannel = new MessageChannel();
+    const openComputeStorePort = vi.fn();
     const events: unknown[] = [];
     const client = createBrowserAgentHostClient({
       openFileSystemBridge: () =>
         ({ port: channel.port1, dispose: bridgeDispose }) as unknown as FileSystemBridgeConnection,
       openProjectRootBridge: () =>
         ({ port: projectRootChannel.port1, dispose: projectRootDispose }) as unknown as FileSystemBridgeConnection,
+      computeMode: 'off',
+      openComputeStorePort,
       projectStorage: { projectId: 'project-one', backend: 'opfs', providerBasePath: 'project-one' },
       durability: 'exclusive-append',
       authority: { projectId: 'project-one', workspaceId: 'workspace-one' },
@@ -460,7 +464,6 @@ describe('createBrowserAgentHostClient', () => {
       ],
       model: { id: 'fixture-model', providerKind: 'openai', contextWindow: 200_000 },
       runtimeConfig: { tauApiUrl: 'https://api.tau.test', tauWebSocketUrl: 'wss://api.tau.test' },
-      lengthSymbol: 'mm',
       createWorker: () => worker as unknown as Worker,
     });
     const liveEvents: unknown[] = [];
@@ -522,6 +525,7 @@ describe('createBrowserAgentHostClient', () => {
     const start = worker.requests[1];
     expect(initialize).toMatchObject({
       type: 'initialize',
+      computeMode: 'off',
       projectStorage: { providerBasePath: 'project-one' },
       authority: { projectId: 'project-one', workspaceId: 'workspace-one' },
       model: { providerKind: 'openai' },
@@ -532,6 +536,8 @@ describe('createBrowserAgentHostClient', () => {
     }
     expect(initialize.fileSystemPort).toBeInstanceOf(MessagePort);
     expect(initialize.projectRootPort).toBeInstanceOf(MessagePort);
+    expect(initialize.computeStorePort).toBeUndefined();
+    expect(openComputeStorePort).not.toHaveBeenCalled();
     expect(start).toMatchObject({
       type: 'start',
       chatId: 'chat-1',
@@ -581,7 +587,6 @@ describe('createBrowserAgentHostClient', () => {
       ],
       model: { id: 'fixture-model', providerKind: 'openai', contextWindow: 200_000 },
       runtimeConfig: { tauApiUrl: 'https://api.tau.test', tauWebSocketUrl: 'wss://api.tau.test' },
-      lengthSymbol: 'mm',
       createWorker: () => worker as unknown as Worker,
       commandTimeout: 5,
     });
@@ -732,7 +737,6 @@ describe('createBrowserAgentHostClient', () => {
       ],
       model: { id: 'fixture-model', providerKind: 'openai', contextWindow: 200_000 },
       runtimeConfig: { tauApiUrl: 'https://api.tau.test', tauWebSocketUrl: 'wss://api.tau.test' },
-      lengthSymbol: 'mm',
       createWorker: () => worker as unknown as Worker,
       closeTimeout: 5,
     });
@@ -781,7 +785,6 @@ describe('createBrowserAgentHostClient', () => {
       ],
       model: { id: 'fixture-model', providerKind: 'openai', contextWindow: 200_000 },
       runtimeConfig: { tauApiUrl: 'https://api.tau.test', tauWebSocketUrl: 'wss://api.tau.test' },
-      lengthSymbol: 'mm',
       createWorker: () => worker as unknown as Worker,
     });
 
@@ -812,12 +815,33 @@ describe('createBrowserAgentHostClient', () => {
       ],
       model: { id: 'fixture-model', providerKind: 'openai', contextWindow: 200_000 },
       runtimeConfig: { tauApiUrl: 'https://api.tau.test', tauWebSocketUrl: 'wss://api.tau.test' },
-      lengthSymbol: 'mm',
       createWorker: () => worker as unknown as Worker,
     });
 
     worker.crash();
     await expect(client.close()).resolves.toBeUndefined();
     expect(worker.terminate).toHaveBeenCalledOnce();
+  });
+});
+
+describe('the browser worker command contract', () => {
+  /* The commands are `strictObject`s and the resolution is spread verbatim into
+   * one (`createAgentHostClient`), so a field the Node wire carries and this
+   * twin does not is not ignored — it rejects the whole command, and the user
+   * sees "The host did not accept that decision." (4-review S1). */
+  it('accepts the option a human chose, exactly as the Node wire does', () => {
+    const resolution = {
+      type: 'resolve-interrupt',
+      chatId: 'chat-1',
+      runId: 'run-1',
+      interruptId: 'interrupt-1',
+      outcome: 'approved',
+      optionId: 'allow-always',
+      requestId: 'req-1',
+      sessionId: 'session-1',
+    };
+
+    expect(agentHostWorkerCommandSchema.safeParse(resolution)).toMatchObject({ success: true });
+    expect(agentHostWorkerCommandSchema.safeParse({ ...resolution, optionId: '' }).success).toBe(false);
   });
 });

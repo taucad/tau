@@ -1,27 +1,19 @@
 import type { ReactNode } from 'react';
 import { createContext, useCallback, useContext, useEffect, useMemo, useSyncExternalStore } from 'react';
 import { z } from 'zod';
-import {
-  MaterializedWorkspaceAuthority,
-  RevisionAuthority,
-  captureRevisionTree,
-  createBrowserRevisionPersistence,
-  mergeRevisionTrees,
-  materializedWorkspaceId,
-  revisionBranchName,
-  revisionId,
-} from '@taucad/filesystem';
+import { ImmutableRevisionTree, materializedWorkspaceId, mergeRevisionTrees, revisionId } from '@taucad/filesystem';
+import { mainRevisionBranch, revisionBranchName, TurnRevisionRecorder, turnRevisionBranch } from '@taucad/revisions';
+import type { BranchHeadUpdateResult, RevisionAuthority, RevisionBranchName } from '@taucad/revisions';
 import type {
-  ImmutableRevisionTree,
   MaterializedWorkspace,
+  MaterializedWorkspaceAuthority,
+  MaterializedWorkspaceMode,
   ProviderCapabilities,
-  Revision,
-  RevisionBranchName,
   RevisionId,
   RevisionTreeConflict,
   RootedFileSystem,
 } from '@taucad/filesystem';
-import type { ChatExecutionTarget } from '@taucad/chat/schemas';
+import type { ChatExecutionTarget, ChatRevisionMode } from '@taucad/chat/schemas';
 import { generatePrefixedId, randomUuid } from '@taucad/utils/id';
 import { idPrefix } from '@taucad/types/constants';
 import { joinPath } from '@taucad/utils/path';
@@ -36,7 +28,7 @@ import { useFileManager } from '#hooks/use-file-manager.js';
 import type { FileSystemClientFacade } from '#hooks/use-file-manager.js';
 import type { FileManagerRef } from '#machines/file-manager.machine.types.js';
 import { useProject } from '#hooks/use-project.js';
-import type { ChatRevisionMode } from '#utils/chat-revision-mode.js';
+import { subscribeHostFinalizedRevisions } from '#chat-clients/_internal/browser-agent-host-transport.js';
 import type {
   AuthoritativeRevisionFinalization,
   PersistedBranchPublication,
@@ -47,7 +39,11 @@ import type {
 export type PreparedChatWorkspace = Readonly<{
   chatId: string;
   projectId: string;
-  execution: ChatExecutionTarget;
+  /**
+   * A browser claim always names its workspace, so the two fields the wire
+   * leaves optional for a host-placed turn are required here.
+   */
+  execution: ChatExecutionTarget & { readonly workspaceId: string; readonly baseRevisionId: string };
   branch: RevisionBranchName;
   workspace: MaterializedWorkspace;
   openFileSystemBridge: () => FileSystemBridgeConnection;
@@ -95,9 +91,53 @@ type InFlightChatFinalization = Readonly<{
   token: Record<string, never>;
 }>;
 
+/** One branch the revision authority holds a head for, whichever agent wrote it (DT1). */
+export type RevisionBranchSummary = Readonly<{
+  name: string;
+  headRevisionId: string;
+  /** The head revision's own generated summary — what the branch last did. */
+  summary: string;
+  /** Who wrote the head: a chat id for a Tau turn, the agent's own actor for an external one. */
+  actorId: string;
+  source: 'user' | 'agent' | 'merge' | 'restore' | 'import';
+  /** Milliseconds since the Unix epoch. */
+  createdAt: number;
+}>;
+
+/** One path-level difference between two revision trees (DT1 diff). */
+export type RevisionPathChange = Readonly<{
+  path: string;
+  change: 'added' | 'modified' | 'removed';
+}>;
+
+/** What one DT1 branch merge did. A conflict is an outcome, never a failure (I-CONF). */
+export type BranchMergeResult =
+  | Readonly<{
+      status: 'merged';
+      branchName: string;
+      revisionId: string;
+      changedPaths: readonly string[];
+    }>
+  | Readonly<{ status: 'up-to-date'; branchName: string; revisionId: string }>
+  | Readonly<{
+      status: 'conflicted';
+      branchName: string;
+      conflict: Extract<PersistedRevisionConflict, { readonly type: 'merge' }>;
+    }>;
+
 type ChatWorkspaceAuthorityContextValue = Readonly<{
-  /** `mode` defaults to `local`: the turn writes the live project tree. */
+  /** `mode` defaults to `direct`: the turn writes the live project tree. */
   prepare: (chatId: string, options?: { readonly mode?: ChatRevisionMode }) => Promise<PreparedChatWorkspace>;
+  /**
+   * The mode this chat's *next* turn is admitted in — the composer's revision
+   * selection, which exists before any claim does and outlives each claim.
+   *
+   * It lives beside the claims rather than on the execution object because it
+   * describes the placement, not the model (V18): a Codex turn on a capable
+   * host picks it exactly like a Tau turn does.
+   */
+  revisionMode: (chatId: string) => ChatRevisionMode;
+  setRevisionMode: (chatId: string, mode: ChatRevisionMode) => void;
   reclaim: (chatId: string) => Promise<PreparedChatWorkspace | undefined>;
   reclaimAll: () => Promise<readonly PreparedChatWorkspace[]>;
   markAdmitted: (chatId: string, turnId?: string) => Promise<void>;
@@ -119,6 +159,50 @@ type ChatWorkspaceAuthorityContextValue = Readonly<{
   retireClaim: (chatId: string) => Promise<void>;
   subscribe: (listener: () => void) => () => void;
   listFinalized: () => readonly FinalizedChatWorkspace[];
+  /**
+   * DT1 porcelain over the revision authority: point the live project tree at
+   * one stored revision. Switching a branch and restoring a revision are the
+   * same operation — a branch is a name for a head — so there is one verb.
+   */
+  checkout: (revision: string) => Promise<readonly RevisionPathChange[]>;
+  /** DT1 porcelain: merge one branch into another; a conflict is a value (I-CONF). */
+  mergeBranch: (input: {
+    readonly source: string;
+    readonly target: string;
+    readonly actorId: string;
+  }) => Promise<BranchMergeResult>;
+  /**
+   * DT1 porcelain: remove one branch ref under its expected-old head.
+   *
+   * The name goes; the revisions it reached stay in the object store and stay
+   * reachable by id, which is what makes discarding a branch safe.
+   */
+  deleteBranch: (branch: string) => Promise<BranchHeadUpdateResult>;
+  /** DT1 porcelain: what changed between two stored revisions, by path. */
+  diffRevisions: (input: { readonly from?: string | undefined; readonly to: string }) => readonly RevisionPathChange[];
+  /**
+   * DT1 porcelain: every branch head the revision authority holds.
+   *
+   * The authority, not the chat projection: a Tau turn, a Codex turn on a host
+   * sharing this root and a branch this profile has never seen a transcript for
+   * all publish their head into the same store, and this reads that store.
+   * Identity-stable for `useSyncExternalStore`.
+   */
+  listBranches: () => readonly RevisionBranchSummary[];
+  /**
+   * DT1 porcelain: the branch the live project tree is on — the store's own head
+   * reference, in the spirit of Git's HEAD.
+   *
+   * This, not the graph head, is what "Current" means: a checkout moves it, a
+   * merge into it moves the live tree with it, and a candidate that happens to
+   * be the newest revision is still just a branch you can switch to (operator
+   * decisions 2026-09-09, question 11).
+   *
+   * Undefined while the live tree holds a revision no branch names — a Restore
+   * of an older turn — so the pane paints nothing Current rather than labelling
+   * a branch "The live project tree" over an older tree (c2-review S1).
+   */
+  headBranch: () => string | undefined;
 }>;
 
 const ChatWorkspaceAuthorityContext = createContext<ChatWorkspaceAuthorityContextValue | undefined>(undefined);
@@ -126,25 +210,10 @@ const workspaceStorageDirectory = '.tau/workspaces';
 const workspaceClaimDirectory = `${workspaceStorageDirectory}/claims`;
 const workspacePublicationDirectory = `${workspaceStorageDirectory}/publications`;
 const workspaceConflictDirectory = `${workspaceStorageDirectory}/conflicts`;
-/**
- * Kernel-generated output, not project content: `kernel-worker.ts` already
- * excludes `.tau/cache/**` from its watches. Capturing it made every geometry
- * cache bin ride the base revision, merge into the live project on finalize,
- * and show up in `changedPaths` — and made the live cache a deletion candidate
- * whenever the agent's tree lacked it. The live kernel repopulates its own cache.
- */
-const generatedCacheDirectory = '.tau/cache';
-/**
- * The host's canonical chat log (PH19: `.tau/chats/<chatId>/events.jsonl`) is
- * written to the **project root**, not the turn tree — so in local mode, where
- * the live root IS the agent tree, an unexcluded log rides straight into the
- * revision capture and lands in `changedPaths`. The log is a session record,
- * never project content.
- */
-const chatLogDirectory = '.tau/chats';
-/** Directories `captureProjectTree` never walks: authority state, kernel cache, chat logs. */
-const captureExcludedDirectories = [workspaceStorageDirectory, generatedCacheDirectory, chatLogDirectory] as const;
 const emptyFinalizedChatWorkspaces: readonly FinalizedChatWorkspace[] = [];
+const emptyRevisionBranches: readonly RevisionBranchSummary[] = [];
+/** How long a queued live-tree writer waits before it gives up on the holder. Milliseconds. */
+const liveTreeWaitTimeout = 300_000;
 
 const nonEmptyStringSchema = z.string().min(1);
 const persistedChatWorkspaceClaimSchema = z.strictObject({
@@ -363,36 +432,6 @@ const createClientRootedFileSystem = (binding: WorkspaceFileSystemBinding): Root
 
 const createOpaqueId = (prefix: string): string => `${prefix}_${randomUuid()}`;
 
-const equalBytes = (left: Uint8Array<ArrayBuffer>, right: Uint8Array<ArrayBuffer>): boolean =>
-  left.byteLength === right.byteLength && left.every((value, index) => value === right[index]);
-
-const changedPathsBetween = (base: ImmutableRevisionTree, next: ImmutableRevisionTree): readonly string[] => {
-  const baseFiles = new Map(base.entries().map((entry) => [entry.path, entry.content]));
-  const nextFiles = new Map(next.entries().map((entry) => [entry.path, entry.content]));
-  return [...new Set([...baseFiles.keys(), ...nextFiles.keys()])]
-    .filter((path) => {
-      const before = baseFiles.get(path);
-      const after = nextFiles.get(path);
-      return before === undefined || after === undefined || !equalBytes(before, after);
-    })
-    .sort((left, right) => (left < right ? -1 : left > right ? 1 : 0));
-};
-
-const sameTree = (left: ImmutableRevisionTree, right: ImmutableRevisionTree): boolean =>
-  changedPathsBetween(left, right).length === 0;
-
-const sameFinalizationRevision = (left: Revision, right: Revision): boolean =>
-  left.id === right.id &&
-  left.parents.length === right.parents.length &&
-  left.parents.every((parent, index) => parent === right.parents[index]) &&
-  sameTree(left.tree, right.tree) &&
-  left.provenance.source === right.provenance.source &&
-  left.provenance.actorId === right.provenance.actorId &&
-  left.provenance.runId === right.provenance.runId &&
-  left.provenance.createdAt === right.provenance.createdAt &&
-  left.summary.generated === right.summary.generated &&
-  left.summary.edited === right.summary.edited;
-
 const finalizationFingerprint = (input: ChatWorkspaceFinalizationInput): string =>
   JSON.stringify({
     actorId: input.actorId,
@@ -417,76 +456,6 @@ export const createPreparedWorkspaceFileSystems = async (
   };
 };
 
-/**
- * Three-way merge, apply, and verify one isolated workspace against the current
- * live project.
- *
- * Verification covers **only the paths this merge applied**. The preview and
- * geometry pipeline writes its own outputs (`thumbnail.webp`, parameter and
- * geometry caches) into the live root while the settlement runs, unfenced; a
- * whole-tree comparison therefore failed on bytes the settlement never wrote,
- * and the run retried five times and stopped. Re-reading exactly what was
- * written and unlinked keeps the whole point of the check — a write that
- * silently did not land still refuses to publish — without owning writes that
- * belong to another writer.
- */
-export const mergeWorkspaceIntoLiveProject = async (input: {
-  readonly base: ImmutableRevisionTree;
-  readonly live: RootedFileSystem;
-  readonly agent: RootedFileSystem;
-}): Promise<
-  | Readonly<{ status: 'merged'; tree: ImmutableRevisionTree }>
-  | Readonly<{ status: 'conflicted'; conflicts: readonly RevisionTreeConflict[] }>
-> => {
-  const liveTree = await captureProjectTree(input.live);
-  // Local mode binds the live root AS the agent root (`bindInPlace`), so a
-  // second capture is not a second opinion — it is a second *snapshot*, and a
-  // pipeline write landing between the two reads as an agent change.
-  const agentTree = input.agent === input.live ? liveTree : await captureProjectTree(input.agent);
-  const merged = mergeRevisionTrees(input.base, liveTree, agentTree);
-  if (merged.status === 'conflicted') {
-    return merged;
-  }
-
-  const liveFiles = new Map(liveTree.entries().map(({ path, content }) => [path, content]));
-  const targetFiles = new Map(merged.tree.entries().map(({ path, content }) => [path, content]));
-  const removedPaths = [...liveFiles.keys()]
-    .filter((path) => !targetFiles.has(path))
-    .sort((left, right) => right.length - left.length || right.localeCompare(left));
-  for (const path of removedPaths) {
-    // oxlint-disable-next-line no-await-in-loop -- ordered application keeps retries deterministic.
-    await input.live.unlink(path);
-  }
-  const writtenPaths: string[] = [];
-  for (const [path, content] of targetFiles) {
-    const current = liveFiles.get(path);
-    if (current !== undefined && equalBytes(current, content)) {
-      continue;
-    }
-    // oxlint-disable-next-line no-await-in-loop -- ordered application keeps retries deterministic.
-    await input.live.writeFile(path, content);
-    writtenPaths.push(path);
-  }
-
-  const verified = await captureProjectTree(input.live);
-  const verifiedFiles = new Map(verified.entries().map(({ path, content }) => [path, content]));
-  const unverifiedPaths = [
-    ...removedPaths.filter((path) => verifiedFiles.has(path)),
-    ...writtenPaths.filter((path) => {
-      const applied = verifiedFiles.get(path);
-      return applied === undefined || !equalBytes(applied, targetFiles.get(path)!);
-    }),
-  ].sort();
-  if (unverifiedPaths.length > 0) {
-    const error = Object.assign(
-      new Error(`Live project verification did not match the paths this merge applied: ${unverifiedPaths.join(', ')}`),
-      { code: 'WORKSPACE_VERIFY_FAILED', paths: Object.freeze(unverifiedPaths) },
-    );
-    throw error;
-  }
-  return { status: 'merged', tree: merged.tree };
-};
-
 const persistedMergeConflict = (
   conflicts: readonly RevisionTreeConflict[],
 ): Extract<PersistedRevisionConflict, { readonly type: 'merge' }> => ({
@@ -495,9 +464,16 @@ const persistedMergeConflict = (
   paths: [...new Set(conflicts.map(({ path }) => path))].sort(),
 });
 
+/**
+ * Project one branch publication into the durable record the pane reads.
+ *
+ * `fallbackHead` covers the one shape a *finalization* never produces: a
+ * deletion, whose publication names no head at all.
+ */
 const persistedPublication = (input: {
-  readonly publication: Awaited<ReturnType<RevisionAuthority['updateBranchHead']>>;
+  readonly publication: BranchHeadUpdateResult;
   readonly expectedHead: RevisionId;
+  readonly fallbackHead: RevisionId;
 }): PersistedBranchPublication => {
   if (input.publication.status === 'updated') {
     return {
@@ -507,7 +483,7 @@ const persistedPublication = (input: {
       ...(input.publication.previousHead === undefined
         ? {}
         : { previousHeadRevisionId: input.publication.previousHead }),
-      headRevisionId: input.publication.head,
+      headRevisionId: input.publication.head ?? input.fallbackHead,
     };
   }
   return {
@@ -517,11 +493,15 @@ const persistedPublication = (input: {
     ...(input.publication.conflict.actualHead === undefined
       ? {}
       : { actualHeadRevisionId: input.publication.conflict.actualHead }),
-    proposedHeadRevisionId: input.publication.conflict.proposedHead,
+    proposedHeadRevisionId: input.publication.conflict.proposedHead ?? input.fallbackHead,
   };
 };
 
 const claimPathFor = (chatId: string): string => `${workspaceClaimDirectory}/${encodeURIComponent(chatId)}.json`;
+
+/** Whether a claim, as written, makes its chat the project's one live-tree writer (DT2). */
+const writesLiveTree = (claim: PersistedChatWorkspaceClaim): boolean =>
+  (claim.mode ?? 'branch') === 'local' && claim.admitted && !claim.cancelled;
 
 const claimLockPrefix = (projectId: string): string => `tau:chat-workspace-claim:${encodeURIComponent(projectId)}:`;
 const claimLockName = (projectId: string, chatId: string): string =>
@@ -539,6 +519,103 @@ const claimLocksBusy = async (projectId: string): Promise<boolean> => {
   const prefix = claimLockPrefix(projectId);
   const snapshot = await locks.query();
   return [...(snapshot.held ?? []), ...(snapshot.pending ?? [])].some((lock) => lock.name?.startsWith(prefix) === true);
+};
+
+/**
+ * The one live-tree lock of a project (DT2).
+ *
+ * Under `claimLockPrefix` on purpose: `preparesInFlight` already stands the
+ * orphan sweep down for anything holding a claim lock on this project, and a
+ * turn writing the live tree is exactly when that sweep must not run.
+ */
+const liveTreeLockName = (projectId: string): string => `${claimLockPrefix(projectId)}live-tree`;
+
+/**
+ * Take the project live-tree lock and hold it until the returned release runs.
+ *
+ * Web Locks queue FIFO across tabs, which is the whole of DT2's ordering: the
+ * previous polled wait woke every waiter on the same tick and let two of them
+ * pass the advisory check before either wrote its admission (2-review S5).
+ *
+ * @param projectId - The project whose live tree is being claimed.
+ * @returns The release for the granted lock.
+ */
+const acquireLiveTreeLock = async (projectId: string): Promise<() => void> => {
+  const release = await requestLiveTreeLock(projectId, { wait: true });
+  return release!;
+};
+
+/**
+ * Take the project live-tree lock without queueing for it.
+ *
+ * A reclaim runs under the chat's cross-document claim lock, and every release
+ * of the live-tree lock runs under that same claim lock in the holding
+ * document — so a reclaim that waited would deadlock two tabs for the whole
+ * `liveTreeWaitTimeout` (8-review M4). Reclaim inherits a free lock or is
+ * simply not the writer in this document; only admission waits.
+ *
+ * @param projectId - The project whose live tree is being claimed.
+ * @returns The release, or `undefined` when another document holds the lock.
+ */
+const tryAcquireLiveTreeLock = async (projectId: string): Promise<(() => void) | undefined> =>
+  requestLiveTreeLock(projectId, { wait: false });
+
+const requestLiveTreeLock = async (
+  projectId: string,
+  mode: { readonly wait: boolean },
+): Promise<(() => void) | undefined> => {
+  if (!Reflect.has(globalThis, 'navigator') || !Reflect.has(globalThis.navigator, 'locks')) {
+    throw Object.assign(new Error('The browser cannot serialize durable chat workspace claims.'), {
+      code: 'WORKSPACE_CLAIM_LOCK_UNAVAILABLE',
+    });
+  }
+  const held = Promise.withResolvers<void>();
+  const granted = Promise.withResolvers<(() => void) | undefined>();
+  /* An admitted claim whose run died never releases, so the wait is bounded and
+   * the rejection reaches the chat error banner — a submit must never vanish
+   * into a holder that is gone. */
+  const controller = new AbortController();
+  const waitExpiry = globalThis.setTimeout(() => {
+    controller.abort();
+  }, liveTreeWaitTimeout);
+  /* async-iife: bootstrap -- the lock is held for as long as the caller keeps
+   * it, which is past this function's own return; the settlement it hides is
+   * the release, and the grant is reported through `granted`. */
+  void (async (): Promise<void> => {
+    try {
+      const outcome = await globalThis.navigator.locks.request(
+        liveTreeLockName(projectId),
+        mode.wait ? { mode: 'exclusive', signal: controller.signal } : { mode: 'exclusive', ifAvailable: true },
+        async (lock) => {
+          globalThis.clearTimeout(waitExpiry);
+          if (lock === null) {
+            return null;
+          }
+          granted.resolve(() => {
+            held.resolve();
+          });
+          await held.promise;
+          return undefined;
+        },
+      );
+      if (outcome === null) {
+        globalThis.clearTimeout(waitExpiry);
+        granted.resolve(undefined);
+      }
+    } catch (error) {
+      globalThis.clearTimeout(waitExpiry);
+      held.resolve();
+      granted.reject(
+        Object.assign(
+          new Error(
+            'Another chat is still working in this project folder. Wait for it to finish, or switch this chat to a new branch.',
+          ),
+          { code: 'WORKSPACE_LOCAL_CLAIM_CONFLICT', cause: error },
+        ),
+      );
+    }
+  })();
+  return granted.promise;
 };
 
 const withClaimLock = async <T,>(projectId: string, chatId: string, operation: () => Promise<T>): Promise<T> => {
@@ -624,11 +701,17 @@ const workspaceAuthorityMismatch = (
     { code: 'WORKSPACE_AUTHORITY_MISMATCH' },
   );
 
-/** Local mode is exactly "the workspace root is the live project root" — no extra state to track. */
-const preparedRevisionMode = (
-  state: { readonly rootedFileSystem: RootedFileSystem },
-  prepared: PreparedChatWorkspace,
-): ChatRevisionMode => (prepared.workspace.filesystem === state.rootedFileSystem ? 'local' : 'branch');
+/**
+ * The wire says `direct | candidate` (N26); `libs/filesystem` says
+ * `local | branch`, because a materialized workspace is a filesystem concept
+ * older than the wire. One translation each way, here, at the only boundary
+ * where both vocabularies meet.
+ */
+const wireRevisionMode = (mode: MaterializedWorkspaceMode): ChatRevisionMode =>
+  mode === 'local' ? 'direct' : 'candidate';
+
+const workspaceRevisionMode = (mode: ChatRevisionMode): MaterializedWorkspaceMode =>
+  mode === 'direct' ? 'local' : 'branch';
 
 const getHostId = (): string => {
   if (!Reflect.has(globalThis, 'sessionStorage')) {
@@ -648,6 +731,8 @@ type BrowserWorkspaceAuthorityState = {
   readonly projectId: string;
   readonly binding: WorkspaceFileSystemBinding;
   readonly rootedFileSystem: RootedFileSystem;
+  /** Host-neutral prepare/capture/merge/finalize; this provider owns only claims, locks and notification. */
+  readonly recorder: TurnRevisionRecorder;
   readonly authority: MaterializedWorkspaceAuthority;
   readonly revisions: RevisionAuthority;
   readonly prepared: Map<string, PreparedChatWorkspace>;
@@ -656,6 +741,30 @@ type BrowserWorkspaceAuthorityState = {
   readonly pending: Map<string, Promise<PreparedChatWorkspace>>;
   readonly finalizing: Map<string, InFlightChatFinalization>;
   readonly listeners: Set<() => void>;
+  /** The composer's revision selection per chat; see the context's `revisionMode`. */
+  readonly revisionModes: Map<string, ChatRevisionMode>;
+  /** Releases for the project live-tree lock, by the chat admitted under it (DT2). */
+  readonly liveTreeHolds: Map<string, () => void>;
+  /** Identity-stable branch list for `useSyncExternalStore`, and the heads it was built from. */
+  branchSnapshot: readonly RevisionBranchSummary[];
+  branchSnapshotKey: string;
+  /** The store's head reference — the branch the live project tree is on (Q11). */
+  headBranch: string | undefined;
+  /**
+   * Whether the live tree holds a revision no branch names, after a Restore.
+   *
+   * The head reference itself is left where it was — a claim's branch still
+   * comes from it — but no branch is the live tree, so nothing is Current
+   * (c2-review S1).
+   */
+  detached: boolean;
+  /**
+   * Whether the revision authority has been asked to hydrate, and whether it
+   * has. Rehydration is deliberately lazy — constructing an authority touches
+   * no storage — so the branch list starts it on its first read rather than at
+   * mount, where it reorders every continuation the claim race is decided in.
+   */
+  branchHydration: 'idle' | 'loading' | 'ready';
   readonly hostId: string;
 };
 
@@ -684,23 +793,27 @@ const getBrowserWorkspaceAuthority = (input: {
     return existing;
   }
   const rootedFileSystem = createClientRootedFileSystem(input.binding);
+  const recorder = new TurnRevisionRecorder({ filesystem: rootedFileSystem });
   const created: BrowserWorkspaceAuthorityState = {
     projectId: input.projectId,
     binding: input.binding,
     rootedFileSystem,
-    authority: new MaterializedWorkspaceAuthority({ filesystem: rootedFileSystem }),
-    revisions: new RevisionAuthority({
-      persistence: createBrowserRevisionPersistence({
-        filesystem: rootedFileSystem,
-        storageDirectory: `${workspaceStorageDirectory}/revisions`,
-      }),
-    }),
+    recorder,
+    authority: recorder.workspaces,
+    revisions: recorder.revisions,
     prepared: new Map(),
     finalized: new Map(),
     finalizedSnapshot: emptyFinalizedChatWorkspaces,
     pending: new Map(),
     finalizing: new Map(),
     listeners: new Set(),
+    revisionModes: new Map(),
+    liveTreeHolds: new Map(),
+    branchSnapshot: emptyRevisionBranches,
+    branchSnapshotKey: '',
+    headBranch: undefined,
+    detached: false,
+    branchHydration: 'idle',
     hostId: getHostId(),
   };
   browserWorkspaceAuthorities.set(input.projectId, created);
@@ -713,48 +826,6 @@ export const browserWorkspaceAuthorityTestApi = {
   reset: (): void => {
     browserWorkspaceAuthorities.clear();
   },
-};
-
-/**
- * One walker, shared with the materialized-workspace substrate: it already
- * skips entries that vanish between the listing and the read, which is what
- * kept an in-flight atomic write's `.<name>.<pid>.<uuid>.tmp` sibling from
- * failing workspace admission on a node-backed folder.
- */
-const captureProjectTree = async (filesystem: RootedFileSystem): Promise<ImmutableRevisionTree> =>
-  captureRevisionTree(filesystem, {
-    exclude: (path) =>
-      captureExcludedDirectories.some((excluded) => path === excluded || path.startsWith(`${excluded}/`)),
-  });
-
-/**
- * The revision this chat's next base descends from: the head of the most
- * recently published `agent/<chatId>/<runId>` lane. Every run publishes onto
- * its own branch, so without this each claim's base is a fresh root and the
- * chat's durable lineage is a pile of disconnected "Base for chat" revisions —
- * nothing can walk back to the turn that actually produced the live tree.
- * Empty for the chat's first claim (a genuine root).
- *
- * ponytail: per chat, not per project. Two chats taking turns on one live tree
- * still produce two lineages; local mode admits only one at a time, and a
- * project-wide head is a bigger ruling than this defect needs.
- */
-const chatLineageHead = (revisions: RevisionAuthority, chatId: string, workspaceId: string): readonly RevisionId[] => {
-  const lanePrefix = `agent/${chatId}/`;
-  let latest: Revision | undefined;
-  for (const [branch, head] of revisions.listBranchHeads()) {
-    if (!branch.startsWith(lanePrefix) || branch === `${lanePrefix}${workspaceId}`) {
-      continue;
-    }
-    const revision = revisions.getRevision(head);
-    if (
-      revision !== undefined &&
-      (latest === undefined || revision.provenance.createdAt > latest.provenance.createdAt)
-    ) {
-      latest = revision;
-    }
-  }
-  return latest === undefined ? [] : [latest.id];
 };
 
 /** Entries under `.tau/workspaces` that are authority state, not materialized workspaces. */
@@ -789,7 +860,15 @@ const sweepOrphanedWorkspaces = async (state: BrowserWorkspaceAuthorityState): P
   // Snapshot BEFORE reading claims: a directory that appears after this line is
   // never a candidate, so a `prepare` that starts mid-sweep cannot be swept.
   const entries = await filesystem.readdir(workspaceStorageDirectory);
-  const candidates = entries.filter((entry) => !workspaceReservedEntries.has(entry));
+  /* SR4, and the mirror of the host's own sweep: a Tau Host sharing this root —
+   * the desktop services utility, or a daemon serving a placed chat — mints
+   * `t<runId>` workspaces for turns this authority knows nothing about, and
+   * sweeps its own at its own start (`sweepTurnWorkspaces`). Deleting one here
+   * deletes the tree a live host turn is writing. Each authority sweeps what it
+   * mints, and this one mints `generatePrefixedId(idPrefix.run)`. */
+  const candidates = entries.filter(
+    (entry) => !workspaceReservedEntries.has(entry) && entry.startsWith(`${idPrefix.run}_`),
+  );
   if (candidates.length === 0) {
     return;
   }
@@ -812,14 +891,123 @@ const sweepOrphanedWorkspaces = async (state: BrowserWorkspaceAuthorityState): P
   }
   await Promise.all(
     orphans.map(async (candidate) => {
-      // A publication is the durable record of a finalized run; its directory
-      // is evidence, not garbage.
-      if (await filesystem.exists(`${workspacePublicationDirectory}/${encodeURIComponent(candidate)}.json`)) {
+      /* A publication is the durable record of a finalized run; its directory
+       * is evidence, not garbage. So is a conflict record: a stale-head
+       * publication keeps the run's tree so the porcelain can diff and retry
+       * it, and its claim is retired at the same moment — which made it an
+       * orphan whose tree the very next mount deleted, leaving a conflict
+       * pointing at nothing (6-review M6). */
+      if (
+        (await filesystem.exists(`${workspacePublicationDirectory}/${encodeURIComponent(candidate)}.json`)) ||
+        (await filesystem.exists(`${workspaceConflictDirectory}/${encodeURIComponent(candidate)}.json`))
+      ) {
         return;
       }
       await state.authority.destroy(materializedWorkspaceId(candidate));
     }),
   );
+};
+
+const equalRevisionBytes = (left: Uint8Array<ArrayBuffer>, right: Uint8Array<ArrayBuffer>): boolean =>
+  left.byteLength === right.byteLength && left.every((value, index) => value === right[index]);
+
+/**
+ * Path-level difference between two revision trees.
+ *
+ * Paths and byte equality only: the porcelain's diff answers "what moved", and
+ * a line-level view is the file viewer's job over the two trees.
+ *
+ * @param base - The tree changed from; an absent one makes every path an add.
+ * @param next - The tree changed to.
+ * @returns Every differing path, sorted, with its kind of change.
+ */
+const diffRevisionTrees = (
+  base: ImmutableRevisionTree | undefined,
+  next: ImmutableRevisionTree,
+): readonly RevisionPathChange[] => {
+  const baseFiles = new Map(base?.entries().map((entry) => [entry.path, entry.content]) ?? []);
+  const nextFiles = new Map(next.entries().map((entry) => [entry.path, entry.content]));
+  return [...new Set([...baseFiles.keys(), ...nextFiles.keys()])]
+    .sort((left, right) => (left < right ? -1 : left > right ? 1 : 0))
+    .flatMap((path): readonly RevisionPathChange[] => {
+      const before = baseFiles.get(path);
+      const after = nextFiles.get(path);
+      if (before === undefined) {
+        return after === undefined ? [] : [{ path, change: 'added' }];
+      }
+      if (after === undefined) {
+        return [{ path, change: 'removed' }];
+      }
+      return equalRevisionBytes(before, after) ? [] : [{ path, change: 'modified' }];
+    });
+};
+
+/**
+ * The nearest revision both heads descend from.
+ *
+ * Breadth-first over recorded parents, which is exact for the shapes this graph
+ * mints (one base parent per turn, two per merge) and terminates because the
+ * revision graph is acyclic by construction.
+ *
+ * ponytail: nearest-by-distance, not a criss-cross-safe merge base — the store R-W1 brings
+ * carries the engine's own merge base, and this goes when it lands.
+ *
+ * @param revisions - The authority holding both histories.
+ * @param left - One head.
+ * @param right - The other head.
+ * @returns The merge base, or `undefined` when the histories are unrelated.
+ */
+const mergeBaseOf = (revisions: RevisionAuthority, left: RevisionId, right: RevisionId): RevisionId | undefined => {
+  const ancestorsOf = (head: RevisionId): ReadonlySet<RevisionId> => {
+    const seen = new Set<RevisionId>();
+    const queue: RevisionId[] = [head];
+    while (queue.length > 0) {
+      const id = queue.shift()!;
+      if (seen.has(id)) {
+        continue;
+      }
+      seen.add(id);
+      queue.push(...(revisions.getRevision(id)?.parents ?? []));
+    }
+    return seen;
+  };
+  const leftAncestors = ancestorsOf(left);
+  const queue: RevisionId[] = [right];
+  const seen = new Set<RevisionId>();
+  while (queue.length > 0) {
+    const id = queue.shift()!;
+    if (seen.has(id)) {
+      continue;
+    }
+    seen.add(id);
+    if (leftAncestors.has(id)) {
+      return id;
+    }
+    queue.push(...(revisions.getRevision(id)?.parents ?? []));
+  }
+  return undefined;
+};
+
+/**
+ * Write one revision tree over the live project root.
+ *
+ * The write itself is `TurnRevisionRecorder.applyTree` — the same ordered
+ * removal, write and `WORKSPACE_VERIFY_FAILED` re-read a settlement runs, at
+ * the shared owner rather than duplicated here (R-W4b §5.4). This adds only the
+ * shape the pane reports: which paths changed, and how.
+ *
+ * @param state - The authority whose rooted filesystem is the live project.
+ * @param tree - The tree the project should hold when this returns.
+ * @returns Every path this write changed.
+ */
+const applyTreeToLiveRoot = async (
+  state: BrowserWorkspaceAuthorityState,
+  tree: ImmutableRevisionTree,
+): Promise<readonly RevisionPathChange[]> => {
+  const live = await state.recorder.captureTree();
+  const changes = diffRevisionTrees(live, tree);
+  await state.recorder.applyTree(tree, live);
+  return changes;
 };
 
 /** Owns per-run materialized workspace capabilities for one project route. */
@@ -848,10 +1036,7 @@ export function ChatWorkspaceAuthorityProvider({ children }: { readonly children
       },
     },
   });
-  const rootedFileSystem = state.rootedFileSystem;
-  const revisions = state.revisions;
-  const finalized = state.finalized;
-  const finalizing = state.finalizing;
+  const { rootedFileSystem, finalized, finalizing } = state;
   const notify = useCallback(() => {
     for (const listener of state.listeners) {
       listener();
@@ -870,25 +1055,28 @@ export function ChatWorkspaceAuthorityProvider({ children }: { readonly children
     }): Promise<PreparedChatWorkspace> => {
       const { chatId, workspace, admitted, reclaimed, cancelled, runId, turnId } = input;
       const { workspaceId, baseRevisionId } = workspace.identity;
-      await state.revisions.ready;
-      if (!state.revisions.getRevision(baseRevisionId)) {
-        await state.revisions.createRevision({
-          id: baseRevisionId,
-          parents: chatLineageHead(state.revisions, chatId, workspaceId),
-          tree: workspace.baseTree,
-          provenance: { source: 'user', actorId: projectId, createdAt: Date.now() },
-          summary: { generated: `Base for chat ${chatId}` },
-        });
-      }
-      const branch = revisionBranchName(`agent/${chatId}/${workspaceId}`);
-      if (!state.revisions.getBranchHead(branch)) {
-        await state.revisions.updateBranchHead({ branch, expectedHead: undefined, head: baseRevisionId });
-      }
+      /* The lane a candidate publishes onto, and the trunk the live tree is on
+       * for a direct turn — the same rule the recorder records by (Q11). */
+      const branch =
+        workspace.identity.mode === 'branch'
+          ? turnRevisionBranch(chatId)
+          : state.headBranch === undefined
+            ? mainRevisionBranch
+            : revisionBranchName(state.headBranch);
       const preparedFileSystems = await createPreparedWorkspaceFileSystems(workspace.filesystem);
+      /* The identity marker is the durable mode: a reclaimed `branch` claim
+       * after a reload must show as the mode it executes (review 2-review S4). */
+      const wireMode = wireRevisionMode(workspace.identity.mode);
+      state.revisionModes.set(chatId, wireMode);
       const value: PreparedChatWorkspace = Object.freeze({
         chatId,
         projectId,
-        execution: Object.freeze({ workspaceId, baseRevisionId, hostId: state.hostId }),
+        execution: Object.freeze({
+          hostId: state.hostId,
+          mode: wireMode,
+          workspaceId,
+          baseRevisionId,
+        }),
         branch,
         workspace,
         ...preparedFileSystems,
@@ -903,6 +1091,50 @@ export function ChatWorkspaceAuthorityProvider({ children }: { readonly children
       return value;
     },
     [notify, projectId],
+  );
+
+  /** Give the live tree back, if this chat holds it. */
+  const releaseLiveTree = useCallback(
+    (chatId: string): void => {
+      state.liveTreeHolds.get(chatId)?.();
+      state.liveTreeHolds.delete(chatId);
+    },
+    [state],
+  );
+
+  /**
+   * Hold — or give back — the project live tree for this chat (DT2).
+   *
+   * One verb rather than two so a claim update states the invariant once: this
+   * chat is the project's live-tree writer, or it is not.
+   *
+   * @param chatId - The chat whose claim is being written.
+   * @param held - Whether that claim, as written, makes it the live-tree writer.
+   */
+  const setLiveTreeHold = useCallback(
+    async (chatId: string, held: boolean, options?: { readonly wait?: boolean }): Promise<void> => {
+      if (!held) {
+        releaseLiveTree(chatId);
+        return;
+      }
+      if (state.liveTreeHolds.has(chatId)) {
+        return;
+      }
+      const release =
+        options?.wait === false ? await tryAcquireLiveTreeLock(projectId) : await acquireLiveTreeLock(projectId);
+      if (release === undefined) {
+        // Another document is the writer; this one reclaims the record only.
+        return;
+      }
+      /* A concurrent admission of the same chat may have won the race while
+       * this one waited; one hold per chat, and the loser gives its own back. */
+      if (state.liveTreeHolds.has(chatId)) {
+        release();
+        return;
+      }
+      state.liveTreeHolds.set(chatId, release);
+    },
+    [projectId, releaseLiveTree, state],
   );
 
   /**
@@ -938,6 +1170,12 @@ export function ChatWorkspaceAuthorityProvider({ children }: { readonly children
           await quarantineInvalidRecord(state.rootedFileSystem, path);
           return undefined;
         }
+        /* Reclaim restores `admitted` exactly as it was persisted and used to
+         * take no lock of its own, so after a reload — or in a second tab that
+         * reclaimed this claim — an admitted live-tree writer had no hold in
+         * this document and the next chat walked straight past the DT2 queue
+         * into the same tree (6-review M3). */
+        await setLiveTreeHold(chatId, writesLiveTree(claim), { wait: false });
         return assemble({
           chatId,
           workspace: await state.authority.bindInPlace({
@@ -983,7 +1221,7 @@ export function ChatWorkspaceAuthorityProvider({ children }: { readonly children
         ...(claim.turnId === undefined ? {} : { turnId: claim.turnId }),
       });
     },
-    [assemble, projectId, state],
+    [assemble, projectId, setLiveTreeHold, state],
   );
 
   const discard = useCallback(
@@ -1008,6 +1246,7 @@ export function ChatWorkspaceAuthorityProvider({ children }: { readonly children
           await state.rootedFileSystem.unlink(path);
         }
         state.prepared.delete(chatId);
+        releaseLiveTree(chatId);
         notify();
         try {
           await state.authority.destroy(current.workspace.identity.workspaceId);
@@ -1025,50 +1264,21 @@ export function ChatWorkspaceAuthorityProvider({ children }: { readonly children
         }
       });
     },
-    [notify, projectId, state],
-  );
-
-  /** The chat, if any, that already holds an admitted live-tree claim on this project. */
-  const admittedLocalClaimHolder = useCallback(
-    async (chatId: string): Promise<string | undefined> => {
-      if (!(await state.rootedFileSystem.exists(workspaceClaimDirectory))) {
-        return undefined;
-      }
-      const files = await state.rootedFileSystem.readdir(workspaceClaimDirectory);
-      const claims = await Promise.all(
-        files
-          .filter((file) => file.endsWith('.json'))
-          .map(async (file) =>
-            readPersistedRecord(
-              state.rootedFileSystem,
-              `${workspaceClaimDirectory}/${file}`,
-              persistedChatWorkspaceClaimSchema,
-            ),
-          ),
-      );
-      return claims.find(
-        (claim) =>
-          claim !== undefined &&
-          claim.projectId === projectId &&
-          claim.chatId !== chatId &&
-          claim.mode === 'local' &&
-          claim.admitted &&
-          !claim.cancelled,
-      )?.chatId;
-    },
-    [projectId, state],
+    [notify, projectId, releaseLiveTree, state],
   );
 
   const prepare = useCallback(
     async (chatId: string, options?: { readonly mode?: ChatRevisionMode }): Promise<PreparedChatWorkspace> => {
-      const mode = options?.mode ?? 'local';
+      const mode = workspaceRevisionMode(options?.mode ?? 'direct');
       const current = state.prepared.get(chatId);
       if (current) {
         // The composer claims a workspace at mount to publish the latest agent
         // body, long before the user touches the Revision Picker. An admitted
         // claim belongs to a live run and keeps its mode; an unadmitted one is
         // released so the picked mode reaches the next turn.
-        if (current.admitted || preparedRevisionMode(state, current) === mode) {
+        // `bindInPlace` returns a confining wrapper, never the live root itself,
+        // so the claim's mode is the identity record — never a reference check.
+        if (current.admitted || current.workspace.identity.mode === mode) {
           return current;
         }
         await discard(chatId);
@@ -1077,73 +1287,79 @@ export function ChatWorkspaceAuthorityProvider({ children }: { readonly children
       if (inFlight) {
         return inFlight;
       }
-      const operation = withClaimLock(projectId, chatId, async () => {
-        const reclaimed = await reclaimUnderClaimLock(chatId);
+      const operation = (async (): Promise<PreparedChatWorkspace> => {
+        const reclaimed = await withClaimLock(projectId, chatId, async () => reclaimUnderClaimLock(chatId));
         if (reclaimed) {
           return reclaimed;
         }
-        if (mode === 'local') {
-          // Pre-isolation Tau let concurrent runs write one live tree, which is
-          // why charter ruling D6 exists. Refuse instead of racing; queued
-          // admission is deferred task DT2.
-          const holder = await admittedLocalClaimHolder(chatId);
-          if (holder !== undefined) {
-            throw Object.assign(
-              new Error(
-                'Another chat is already working in this project folder. Wait for it to finish, or switch this chat to a new branch.',
-              ),
-              { code: 'WORKSPACE_LOCAL_CLAIM_CONFLICT', chatId: holder },
-            );
-          }
+        if (mode === 'local' && !state.liveTreeHolds.has(chatId)) {
+          // DT2: one live-tree writer at a time. Pre-isolation Tau let
+          // concurrent runs write one tree, which is why charter ruling D6
+          // exists — but refusing the second chat threw away a turn the user
+          // meant, so it waits the holder out instead. Taken and given straight
+          // back: this is the queue, not the claim. The lock is *held* by the
+          // admission below, so a chat that only prepared — the composer claims
+          // one at mount, long before any submit — blocks nobody.
+          //
+          // Outside the claim lock, deliberately: this waits up to
+          // `liveTreeWaitTimeout` (5 minutes), and holding this chat's claim
+          // lock across it blocked the very `discard`/`markAdmitted` that would
+          // end the wait — the second tab's own retirement queues behind it
+          // (6-review M5).
+          (await acquireLiveTreeLock(projectId))();
         }
-        const tree = await captureProjectTree(state.rootedFileSystem);
-        const baseRevisionId = revisionId(createOpaqueId('rev'));
-        // A branch is the immutable publication lane for one logical run. A
-        // later turn in the same chat must never reuse the previous run's
-        // head, otherwise its base-CAS would conflict with its own history.
-        const workspaceId = materializedWorkspaceId(generatePrefixedId(idPrefix.run));
-        const workspace =
-          mode === 'local'
-            ? await state.authority.bindInPlace({
+        return withClaimLock(projectId, chatId, async () => {
+          // The wait above is not under this lock, so another tab may have
+          // written this chat's claim while it ran.
+          const raced = await reclaimUnderClaimLock(chatId);
+          if (raced) {
+            return raced;
+          }
+          // One workspace per claim; the publication lane is the chat's own
+          // branch, and every turn's base is published onto it before the turn
+          // runs, so a later turn's base-CAS stands on its own history.
+          const workspaceId = materializedWorkspaceId(generatePrefixedId(idPrefix.run));
+          const { workspace } = await state.recorder.prepare({
+            workspaceId,
+            mode,
+            lane: chatId,
+            actorId: projectId,
+          });
+          const { baseRevisionId } = workspace.identity;
+          await state.rootedFileSystem.mkdir(workspaceClaimDirectory, { recursive: true });
+          try {
+            await writePersistedRecord({
+              filesystem: state.rootedFileSystem,
+              path: claimPathFor(chatId),
+              schema: persistedChatWorkspaceClaimSchema,
+              value: {
+                version: 1,
+                chatId,
+                projectId,
                 workspaceId,
                 baseRevisionId,
-                tree,
-                filesystem: state.rootedFileSystem,
-              })
-            : await state.authority.materialize({ workspaceId, baseRevisionId, tree });
-        await state.rootedFileSystem.mkdir(workspaceClaimDirectory, { recursive: true });
-        try {
-          await writePersistedRecord({
-            filesystem: state.rootedFileSystem,
-            path: claimPathFor(chatId),
-            schema: persistedChatWorkspaceClaimSchema,
-            value: {
-              version: 1,
-              chatId,
-              projectId,
-              workspaceId,
-              baseRevisionId,
-              mode,
-              admitted: false,
-              cancelled: false,
-            },
-          });
-        } catch (error) {
-          try {
-            await state.authority.destroy(workspaceId);
-          } catch {
-            // Preserve the claim-write failure; the unclaimed workspace is not authoritative.
+                mode,
+                admitted: false,
+                cancelled: false,
+              },
+            });
+          } catch (error) {
+            try {
+              await state.authority.destroy(workspaceId);
+            } catch {
+              // Preserve the claim-write failure; the unclaimed workspace is not authoritative.
+            }
+            throw error;
           }
-          throw error;
-        }
-        return assemble({
-          chatId,
-          workspace,
-          admitted: false,
-          reclaimed: false,
-          cancelled: false,
+          return assemble({
+            chatId,
+            workspace,
+            admitted: false,
+            reclaimed: false,
+            cancelled: false,
+          });
         });
-      });
+      })();
       state.pending.set(chatId, operation);
       try {
         return await operation;
@@ -1151,7 +1367,7 @@ export function ChatWorkspaceAuthorityProvider({ children }: { readonly children
         state.pending.delete(chatId);
       }
     },
-    [admittedLocalClaimHolder, assemble, discard, projectId, reclaimUnderClaimLock, state],
+    [assemble, discard, projectId, reclaimUnderClaimLock, state],
   );
 
   /**
@@ -1243,12 +1459,32 @@ export function ChatWorkspaceAuthorityProvider({ children }: { readonly children
         ) {
           return;
         }
-        await writePersistedRecord({
-          filesystem: state.rootedFileSystem,
-          path,
-          schema: persistedChatWorkspaceClaimSchema,
-          value: nextClaim,
-        });
+        /* DT2: the fence, and the ordered queue. The advisory check in `prepare`
+         * cannot be it — the composer prepares a claim at mount, so by submit
+         * time both contenders already hold one and neither re-checks. Held
+         * from here until the claim is retired, so exactly one chat is an
+         * admitted live-tree writer at a time, across tabs. A claim that stops
+         * being a live-tree writer gives the lock back *before* its record is
+         * written: its turn is over either way, and the next writer's own
+         * admission is what publishes the change that matters.
+         */
+        await setLiveTreeHold(chatId, writesLiveTree(nextClaim));
+        try {
+          await writePersistedRecord({
+            filesystem: state.rootedFileSystem,
+            path,
+            schema: persistedChatWorkspaceClaimSchema,
+            value: nextClaim,
+          });
+        } catch (error) {
+          /* The hold is taken before the record so no window exists where an
+           * admitted claim is unfenced — but a write that throws (quota,
+           * ENOSPC) would otherwise leave the project lock held by a chat that
+           * never became a writer, and nothing releases it for the life of the
+           * document (6-review M4). */
+          releaseLiveTree(chatId);
+          throw error;
+        }
         state.prepared.set(
           chatId,
           Object.freeze({
@@ -1262,7 +1498,7 @@ export function ChatWorkspaceAuthorityProvider({ children }: { readonly children
         notify();
       });
     },
-    [notify, projectId, state],
+    [notify, projectId, releaseLiveTree, setLiveTreeHold, state],
   );
 
   const markAdmitted = useCallback(
@@ -1307,11 +1543,12 @@ export function ChatWorkspaceAuthorityProvider({ children }: { readonly children
         }
         await state.rootedFileSystem.unlink(path);
         state.prepared.delete(chatId);
+        releaseLiveTree(chatId);
         current.workspace.filesystem.dispose();
         notify();
       });
     },
-    [notify, projectId, state],
+    [notify, projectId, releaseLiveTree, state],
   );
 
   const preparedWorkspaces: ReadonlyMap<string, PreparedChatWorkspace> = state.prepared;
@@ -1330,11 +1567,26 @@ export function ChatWorkspaceAuthorityProvider({ children }: { readonly children
         if (!current) {
           return undefined;
         }
-        const settled = await mergeWorkspaceIntoLiveProject({
-          base: current.workspace.baseTree,
-          live: rootedFileSystem,
-          agent: current.workspace.filesystem,
-        });
+        const authoritativeRunId = input.runId ?? current.runId;
+        /* Settlement merges into the live root whatever the mode, so it is a
+         * live-tree write and takes the DT2 hold unless this chat already is the
+         * writer — Web Locks are not re-entrant, so that test is load-bearing
+         * (8-review M3). */
+        const releaseSettlementHold = state.liveTreeHolds.has(chatId)
+          ? undefined
+          : await acquireLiveTreeLock(projectId);
+        let settled;
+        try {
+          settled = await state.recorder.finalize({
+            lane: chatId,
+            workspace: current.workspace,
+            actorId: input.actorId,
+            ...(authoritativeRunId === undefined ? {} : { runId: authoritativeRunId }),
+            summary: input.summary,
+          });
+        } finally {
+          releaseSettlementHold?.();
+        }
         if (settled.status === 'conflicted') {
           const result: ConflictedChatWorkspace = Object.freeze({
             status: 'conflicted',
@@ -1355,64 +1607,34 @@ export function ChatWorkspaceAuthorityProvider({ children }: { readonly children
           await retireClaimPreservingWorkspace(chatId);
           return result;
         }
-        const head = revisionId(`rev:${current.execution.workspaceId}`);
-        const authoritativeRunId = input.runId ?? current.runId;
-        await revisions.ready;
-        const existingRevision = revisions.getRevision(head);
-        const revisionInput: Revision = Object.freeze({
-          id: head,
-          parents: Object.freeze([current.workspace.identity.baseRevisionId]),
-          tree: settled.tree,
-          provenance: Object.freeze({
-            source: 'agent',
-            actorId: input.actorId,
-            ...(authoritativeRunId === undefined ? {} : { runId: authoritativeRunId }),
-            createdAt: existingRevision?.provenance.createdAt ?? Date.now(),
-          }),
-          summary: Object.freeze({ generated: input.summary }),
-        });
-        if (existingRevision !== undefined && !sameFinalizationRevision(existingRevision, revisionInput)) {
-          throw new Error(`Finalization retry does not match stored revision: ${head}`);
-        }
-        const storedRevision = existingRevision ?? (await revisions.createRevision(revisionInput));
-        const existingHead = revisions.getBranchHead(current.branch);
-        const publication: Awaited<ReturnType<RevisionAuthority['updateBranchHead']>> =
-          existingHead === storedRevision.id
-            ? {
-                status: 'updated',
-                branch: current.branch,
-                previousHead: current.workspace.identity.baseRevisionId,
-                head: storedRevision.id,
-              }
-            : await revisions.updateBranchHead({
-                branch: current.branch,
-                expectedHead: current.workspace.identity.baseRevisionId,
-                head: storedRevision.id,
-              });
+        const { revision: storedRevision, persistence } = settled;
+        // The tree id, not the revision id — the same fact the host records (8-review S2).
+        const settledRevision = await state.recorder.port.readRevision(storedRevision.id);
         const result: FinalizedChatWorkspace = Object.freeze({
           turnId: input.turnId,
           ...(input.parentTurnId === undefined ? {} : { parentTurnId: input.parentTurnId }),
           revisionId: storedRevision.id,
           baseRevisionId: current.workspace.identity.baseRevisionId,
-          treeId: storedRevision.id,
-          branchName: current.branch,
+          treeId: settledRevision?.treeId ?? storedRevision.id,
+          branchName: settled.branch,
           publication: persistedPublication({
-            publication,
+            publication: settled.publication,
             expectedHead: current.workspace.identity.baseRevisionId,
+            fallbackHead: storedRevision.id,
           }),
-          changedPaths: changedPathsBetween(current.workspace.baseTree, storedRevision.tree),
+          changedPaths: settled.changedPaths,
           provenance: storedRevision.provenance,
           generatedSummary: storedRevision.summary.generated,
           chatId,
           jobIds: Object.freeze([...(input.jobIds ?? [])]),
           projectId,
           workspaceId: current.execution.workspaceId,
-          nativeGit: ((): PersistedNativeGitStatus => {
-            const receipt = revisions.getRevisionPersistence(storedRevision.id);
-            return receipt?.type === 'native-git'
-              ? { status: 'stored', commitId: receipt.commitId, objectFormat: receipt.objectFormat }
-              : { status: 'not-configured' };
-          })(),
+          /* One store: a recorded revision is durable in it by construction, so
+           * the receipt is the evidence rather than an optional native leg. */
+          nativeGit: ((): PersistedNativeGitStatus =>
+            persistence === undefined
+              ? { status: 'not-configured' }
+              : { status: 'stored', commitId: persistence.commitId, objectFormat: persistence.objectFormat })(),
           ...(storedRevision.provenance.runId === undefined ? {} : { runId: storedRevision.provenance.runId }),
         });
         await rootedFileSystem.mkdir(workspacePublicationDirectory, { recursive: true });
@@ -1425,6 +1647,12 @@ export function ChatWorkspaceAuthorityProvider({ children }: { readonly children
         const conflictPath = `${workspaceConflictDirectory}/${encodeURIComponent(current.execution.workspaceId)}.json`;
         if (await rootedFileSystem.exists(conflictPath)) {
           await rootedFileSystem.unlink(conflictPath);
+        }
+        if (String(settled.branch) === state.headBranch) {
+          /* The turn published onto the branch the head reference names, and
+           * settlement wrote its tree into the live folder: the live tree is on
+           * that branch again, whatever a Restore left behind (c2-review S1). */
+          Reflect.set(state, 'detached', false);
         }
         finalized.set(current.execution.workspaceId, result);
         Reflect.set(state, 'finalizedSnapshot', [...finalized.values()]);
@@ -1453,10 +1681,289 @@ export function ChatWorkspaceAuthorityProvider({ children }: { readonly children
       preparedWorkspaces,
       projectId,
       retireClaimPreservingWorkspace,
-      revisions,
       rootedFileSystem,
       state,
     ],
+  );
+
+  /**
+   * DT1: re-read the store's head reference.
+   *
+   * Asynchronous, and the pane's snapshot is not, so the value is cached beside
+   * the branch list and refreshed wherever it can move: hydration, a checkout,
+   * and a host writing revisions into the same store.
+   */
+  const refreshHeadBranch = useCallback(async (): Promise<void> => {
+    const stored = await state.recorder.port.readHead();
+    if (state.headBranch === stored?.branch && !state.detached) {
+      return;
+    }
+    // Re-reading the head is what ends a detached live tree (c2-review S1).
+    Reflect.set(state, 'detached', false);
+    Reflect.set(state, 'headBranch', stored?.branch);
+    notify();
+  }, [notify, state]);
+
+  /**
+   * DT1: point the live project tree at one stored revision.
+   *
+   * Switching a branch and restoring a revision are the same operation — a
+   * branch is a name for a head — so the porcelain has one verb. Under the
+   * project live-tree lock, so it can never overwrite a turn running in the
+   * project folder: the same queue DT2 admits live-tree writers through.
+   */
+  const checkout = useCallback(
+    async (revision: string): Promise<readonly RevisionPathChange[]> => {
+      await state.revisions.ready;
+      /* The projection loads only ref-reachable revisions; a discarded branch's
+       * turns are still whole objects in the store, and a Restore names them by
+       * id (8-review S1). */
+      const tree =
+        state.revisions.getRevision(revisionId(revision))?.tree ??
+        (await state.recorder.port.readTree(revisionId(revision)));
+      if (!tree) {
+        throw Object.assign(new Error(`This project holds no revision ${revision}.`), {
+          code: 'REVISION_NOT_FOUND',
+        });
+      }
+      const release = await acquireLiveTreeLock(projectId);
+      try {
+        const changes = await applyTreeToLiveRoot(state, tree);
+        /* The folder is now on whatever branch names this revision, so the head
+         * reference goes with it — that is what makes "Current" the branch the
+         * live tree is on rather than the branch of the newest turn (Q11). A
+         * restore to a revision no branch names leaves the head where it is. */
+        const branch = [...state.revisions.listBranchHeads()].find(([, head]) => head === revisionId(revision))?.[0];
+        if (branch === undefined) {
+          /* Detached: the folder holds a revision no branch names, so no branch
+           * is "The live project tree" until the next turn or the next switch
+           * puts it back on one. The head reference stays where it is — a
+           * claim's branch is still read from it (c2-review S1). */
+          Reflect.set(state, 'detached', true);
+          notify();
+          return changes;
+        }
+        await state.recorder.port.setHead(String(branch));
+        await refreshHeadBranch();
+        return changes;
+      } finally {
+        release();
+      }
+    },
+    [notify, projectId, refreshHeadBranch, state],
+  );
+
+  /**
+   * DT1: merge one branch into another and publish the result.
+   *
+   * The conflict is a *value*: `mergeRevisionTrees` returns it rather than
+   * throwing, this returns it in the same shape the finalizer's own conflicted
+   * settlement uses, and nothing is written — both branches, both trees and the
+   * merge base are all still there to try again from (I-CONF).
+   */
+  const mergeBranch = useCallback(
+    async (input: {
+      readonly source: string;
+      readonly target: string;
+      readonly actorId: string;
+    }): Promise<BranchMergeResult> => {
+      await state.revisions.ready;
+      const source = revisionBranchName(input.source);
+      const target = revisionBranchName(input.target);
+      const sourceHead = state.revisions.getBranchHead(source);
+      const targetHead = state.revisions.getBranchHead(target);
+      if (sourceHead === undefined || targetHead === undefined) {
+        throw Object.assign(
+          new Error(`This project holds no head for ${sourceHead === undefined ? source : target}.`),
+          { code: 'REVISION_BRANCH_NOT_FOUND' },
+        );
+      }
+      const sourceRevision = state.revisions.getRevision(sourceHead);
+      const targetRevision = state.revisions.getRevision(targetHead);
+      if (!sourceRevision || !targetRevision) {
+        throw Object.assign(new Error('A branch head names a revision this project does not hold.'), {
+          code: 'REVISION_NOT_FOUND',
+        });
+      }
+      if (sourceHead === targetHead) {
+        return { status: 'up-to-date', branchName: target, revisionId: targetHead };
+      }
+      const base = mergeBaseOf(state.revisions, targetHead, sourceHead);
+      const baseTree =
+        base === undefined
+          ? new ImmutableRevisionTree([])
+          : (state.revisions.getRevision(base)?.tree ?? new ImmutableRevisionTree([]));
+      const merged = mergeRevisionTrees(baseTree, targetRevision.tree, sourceRevision.tree);
+      if (merged.status === 'conflicted') {
+        return { status: 'conflicted', branchName: target, conflict: persistedMergeConflict(merged.conflicts) };
+      }
+      const changedPaths = diffRevisionTrees(targetRevision.tree, merged.tree).map((change) => change.path);
+      if (changedPaths.length === 0) {
+        return { status: 'up-to-date', branchName: target, revisionId: targetHead };
+      }
+      /* Through the recorder, so a merge is content-addressed like every other
+       * revision. An opaque id here poisoned the branch it published onto: the
+       * chat's next `prepare` names that head as its parent, and `writeRevision`
+       * refuses a parent that is not an object id (6-review M1). */
+      const revision = await state.recorder.record({
+        parents: [targetHead, sourceHead],
+        tree: merged.tree,
+        provenance: { source: 'merge', actorId: input.actorId, createdAt: Date.now() },
+        summary: { generated: `Merged ${source} into ${target}` },
+      });
+      const publication = await state.revisions.updateBranchHead({
+        branch: target,
+        expectedHead: targetHead,
+        head: revision.id,
+      });
+      if (publication.status === 'conflicted') {
+        /* Another writer moved the target head while this merge computed. The
+         * merge revision stays — it is immutable evidence of what was tried —
+         * and the caller merges again from the head that won. */
+        throw Object.assign(new Error(`The ${target} head moved while this merge was computed.`), {
+          code: 'REVISION_BRANCH_HEAD_CONFLICT',
+        });
+      }
+      if (String(target) === state.headBranch) {
+        /* The live tree follows the head reference: merging into the branch the
+         * folder is on lands in the folder too, under the same live-tree lock a
+         * checkout takes (Q11). */
+        const release = await acquireLiveTreeLock(projectId);
+        try {
+          await applyTreeToLiveRoot(state, merged.tree);
+        } finally {
+          release();
+        }
+      }
+      notify();
+      return {
+        status: 'merged',
+        branchName: target,
+        revisionId: revision.id,
+        changedPaths: Object.freeze([...changedPaths]),
+      };
+    },
+    [notify, projectId, state],
+  );
+
+  /**
+   * DT1: discard one branch by removing its ref.
+   *
+   * Under the authority's own per-branch expected-old check, so a branch whose
+   * head moved while the pane was showing it is refused rather than silently
+   * dropped. Nothing in the object store is deleted.
+   */
+  const deleteBranch = useCallback(
+    async (branch: string): Promise<BranchHeadUpdateResult> => {
+      await state.revisions.ready;
+      const name = revisionBranchName(branch);
+      const result = await state.revisions.deleteBranchHead({
+        branch: name,
+        expectedHead: state.revisions.getBranchHead(name),
+      });
+      Reflect.set(state, 'branchSnapshotKey', '');
+      notify();
+      return result;
+    },
+    [notify, state],
+  );
+
+  /** DT1: every branch head the authority holds, newest write first. */
+  const listBranches = useCallback((): readonly RevisionBranchSummary[] => {
+    if (state.branchHydration !== 'ready') {
+      if (state.branchHydration === 'idle') {
+        Reflect.set(state, 'branchHydration', 'loading');
+        // async-iife: bootstrap -- hydration has no caller to return to; it notifies.
+        void (async (): Promise<void> => {
+          try {
+            await state.revisions.ready;
+            await refreshHeadBranch();
+            Reflect.set(state, 'branchHydration', 'ready');
+            notify();
+          } catch (error) {
+            // Unreadable revision storage is not a broken pane; the list stays empty.
+            Reflect.set(state, 'branchHydration', 'idle');
+            console.error('[ChatWorkspaceAuthority] revision authority did not hydrate', error);
+          }
+        })();
+      }
+      return state.branchSnapshot;
+    }
+    const heads = [...state.revisions.listBranchHeads()].sort(([left], [right]) => left.localeCompare(right));
+    const key = heads.map(([name, head]) => `${name}\u0000${head}`).join('\u0001');
+    if (state.branchSnapshotKey === key) {
+      return state.branchSnapshot;
+    }
+    Reflect.set(state, 'branchSnapshotKey', key);
+    Reflect.set(
+      state,
+      'branchSnapshot',
+      Object.freeze(
+        heads.flatMap(([name, head]): readonly RevisionBranchSummary[] => {
+          const revision = state.revisions.getRevision(head);
+          return revision === undefined
+            ? []
+            : [
+                Object.freeze({
+                  name: String(name),
+                  headRevisionId: String(head),
+                  summary: revision.summary.edited ?? revision.summary.generated,
+                  actorId: revision.provenance.actorId,
+                  source: revision.provenance.source,
+                  createdAt: revision.provenance.createdAt,
+                }),
+              ];
+        }),
+      ),
+    );
+    return state.branchSnapshot;
+  }, [notify, refreshHeadBranch, state]);
+
+  /**
+   * A branch a *host* publishes reaches this pane when its record arrives.
+   *
+   * `listBranches` is authority state, and the authority reads its store once —
+   * correct for the only writer, wrong the moment a daemon or the desktop
+   * services utility writes revisions into the same `.tau/revisions` store
+   * from another process. The host's own `revision.finalized` record is the one
+   * signal that reaches the page, so it is what re-reads the store.
+   *
+   * Nothing is awaited at mount: the subscription is synchronous and the reload
+   * only runs on an event. (An `await` in a mount effect here reorders every
+   * continuation the cross-tab claim race is decided in — R-W4b note 2.)
+   */
+  useEffect(
+    () =>
+      subscribeHostFinalizedRevisions(() => {
+        if (state.branchHydration !== 'ready') {
+          return;
+        }
+        // async-iife: bootstrap -- the store event has no caller to return to; it notifies.
+        void (async (): Promise<void> => {
+          try {
+            await state.revisions.reload();
+            await refreshHeadBranch();
+            Reflect.set(state, 'branchSnapshotKey', '');
+            notify();
+          } catch (error) {
+            console.error('[ChatWorkspaceAuthority] revision authority did not reload', error);
+          }
+        })();
+      }),
+    [notify, refreshHeadBranch, state],
+  );
+
+  /** DT1: what changed between two stored revisions, by path. */
+  const diffRevisions = useCallback(
+    (input: { readonly from?: string | undefined; readonly to: string }): readonly RevisionPathChange[] => {
+      const to = state.revisions.getRevision(revisionId(input.to));
+      if (!to) {
+        return [];
+      }
+      const from = input.from === undefined ? undefined : state.revisions.getRevision(revisionId(input.from));
+      return diffRevisionTrees(from?.tree, to.tree);
+    },
+    [state],
   );
 
   useEffect(() => {
@@ -1464,6 +1971,7 @@ export function ChatWorkspaceAuthorityProvider({ children }: { readonly children
     const hydratePublications = async (): Promise<void> => {
       // The bridge client can be transiently absent (and is absent in shallow
       // test mounts); hydration retries on the next state change.
+      // oxlint-disable-next-line typescript/no-unnecessary-condition -- the binding type says required; a shallow test mount hands over a partial one, and losing this guard throws there.
       if (!state.binding.client) {
         return;
       }
@@ -1514,6 +2022,14 @@ export function ChatWorkspaceAuthorityProvider({ children }: { readonly children
   const value = useMemo<ChatWorkspaceAuthorityContextValue>(
     () => ({
       prepare,
+      revisionMode: (chatId) => state.revisionModes.get(chatId) ?? 'direct',
+      setRevisionMode: (chatId, mode) => {
+        if ((state.revisionModes.get(chatId) ?? 'direct') === mode) {
+          return;
+        }
+        state.revisionModes.set(chatId, mode);
+        notify();
+      },
       reclaim,
       reclaimAll,
       markAdmitted,
@@ -1528,13 +2044,25 @@ export function ChatWorkspaceAuthorityProvider({ children }: { readonly children
         return () => state.listeners.delete(listener);
       },
       listFinalized: () => state.finalizedSnapshot,
+      checkout,
+      mergeBranch,
+      deleteBranch,
+      diffRevisions,
+      listBranches,
+      headBranch: () => (state.detached ? undefined : state.headBranch),
     }),
     [
+      checkout,
+      deleteBranch,
+      diffRevisions,
+      listBranches,
       discard,
       finalize,
+      mergeBranch,
       markAdmitted,
       markCancelled,
       markRunId,
+      notify,
       prepare,
       reclaim,
       reclaimAll,
@@ -1571,6 +2099,35 @@ export const usePreparedChatWorkspace = (chatId: string): PreparedChatWorkspace 
     }
   }, [authority, chatId, workspace]);
   return workspace;
+};
+
+const noAuthoritySubscribe = (): (() => void) => () => undefined;
+
+/**
+ * The mode this chat's next turn is admitted in, and the setter the revision
+ * selector writes through.
+ *
+ * `undefined` outside a project route, where there is no authority to hold the
+ * selection and therefore no revision selector to render.
+ *
+ * @param chatId - The chat whose selection to read.
+ * @returns The selection and its setter, or `undefined`.
+ * @public
+ */
+export const useChatRevisionMode = (
+  chatId: string,
+): { readonly mode: ChatRevisionMode; readonly setMode: (mode: ChatRevisionMode) => void } | undefined => {
+  const authority = useOptionalChatWorkspaceAuthority();
+  const mode = useSyncExternalStore(
+    authority?.subscribe ?? noAuthoritySubscribe,
+    () => authority?.revisionMode(chatId) ?? 'direct',
+    (): ChatRevisionMode => 'direct',
+  );
+  const setMode = useCallback(
+    (next: ChatRevisionMode) => authority?.setRevisionMode(chatId, next),
+    [authority, chatId],
+  );
+  return authority === undefined ? undefined : { mode, setMode };
 };
 
 /** Project-wide authoritative publications produced by chat workspaces. */

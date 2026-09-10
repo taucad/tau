@@ -182,7 +182,12 @@ const testRunBody = Object.freeze({
     testingEnabled: true,
   }),
   projectId: 'project_test',
-  execution: Object.freeze({ workspaceId: 'workspace_test', baseRevisionId: 'revision_test', hostId: 'host_test' }),
+  execution: Object.freeze({
+    hostId: 'host_test',
+    mode: 'direct',
+    workspaceId: 'workspace_test',
+    baseRevisionId: 'revision_test',
+  }),
   admission: Object.freeze({ version: 1, idempotencyKey: 'req_test_chat_session_store' }),
 });
 
@@ -1464,7 +1469,12 @@ describe('ChatSessionStore', () => {
           testingEnabled: true,
         },
         projectId: 'project_startup',
-        execution: { workspaceId: 'workspace_startup', baseRevisionId: 'revision_startup', hostId: 'host_startup' },
+        execution: {
+          hostId: 'host_startup',
+          mode: 'direct',
+          workspaceId: 'workspace_startup',
+          baseRevisionId: 'revision_startup',
+        },
       };
       store.acquire('chat_startup_hydration');
 

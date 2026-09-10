@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { playwright } from '@vitest/browser-playwright';
 import { nxViteTsPaths } from '@nx/vite/plugins/nx-tsconfig-paths.plugin';
 import { defineConfig } from 'vitest/config';
+import type { BrowserProviderOption } from 'vitest/node';
 import { tauRuntime } from '@taucad/runtime/vite';
 // eslint-disable-next-line @nx/enforce-module-boundaries -- This composed browser contract fixture exercises the package wire through the UI worker until FIX-PROJ adds the UI package dependency.
 import { authoritativeGatewayWireFixtures } from '../../../../packages/agent-host/src/transport/gateway-wire.fixture.js';
@@ -42,6 +43,7 @@ export default defineConfig({
           response.writeHead(200, {
             'content-type': 'text/event-stream',
             'cache-control': 'no-cache',
+            'x-tau-operation-id': 'operation-browser-fixture',
           });
           for (const frame of authoritativeGatewayWireFixtures.browserTurn) {
             response.write(frame);
@@ -72,7 +74,14 @@ export default defineConfig({
       headless: true,
       // `--enable-unsafe-webgpu` is what `apps/ui-e2e` launches with; the
       // headless capture probe needs a real adapter or its answer is vacuous.
-      provider: playwright({ launchOptions: { channel: 'chromium', args: ['--enable-unsafe-webgpu'] } }),
+      // `@vitest/browser-playwright` resolves a second `vitest` peer variant (its jsdom lacks
+      // the optional `supports-color` peer), so the option it returns is nominally — not
+      // structurally — distinct from this program's own `vitest/node` declaration. This is the
+      // only vitest config inside a typecheck program, so no other config surfaces the split.
+      // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- duplicated `vitest` declarations leave no narrower bridge
+      provider: playwright({
+        launchOptions: { channel: 'chromium', args: ['--enable-unsafe-webgpu'] },
+      }) as unknown as BrowserProviderOption,
       instances: [{ browser: 'chromium' }],
     },
   },

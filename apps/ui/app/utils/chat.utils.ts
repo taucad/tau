@@ -373,10 +373,15 @@ function aggregateUsage(usageParts: UsageData[]): string {
     totalCost += d.totalCost;
   }
 
-  const model = usageParts.at(-1)?.model ?? '';
+  const last = usageParts.at(-1);
+  const model = last?.model ?? '';
+  /* No price for an external turn, and that is the honest line: Tau did not
+   * sell those tokens, so it has no cost to quote and must not present the
+   * vendor's own billing as one (V6). The agent is named instead. */
   const cost = totalCost > 0 ? ` | Cost: $${totalCost.toFixed(4)}` : '';
+  const agent = last?.agent === undefined ? '' : `Agent: ${last.agent} | `;
 
-  return `Model: ${model} | Tokens: ${inputTokens} in / ${outputTokens} out${cost}`;
+  return `${agent}Model: ${model} | Tokens: ${inputTokens} in / ${outputTokens} out${cost}`;
 }
 
 /**

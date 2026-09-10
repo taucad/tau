@@ -2,14 +2,14 @@ import { createElement } from 'react';
 import type { PropsWithChildren } from 'react';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ImmutableRevisionTree, revisionId } from '@taucad/filesystem';
 import type { ProviderCapabilities, RootedFileSystem } from '@taucad/filesystem';
+import { createBrowserRevisionPort, mainRevisionBranch, turnRevisionBranch } from '@taucad/revisions';
+import { ImmutableRevisionTree, revisionId } from '@taucad/filesystem/revisions';
 import type { FileSystemClientFacade } from '#hooks/use-file-manager.js';
 import {
   ChatWorkspaceAuthorityProvider,
   browserWorkspaceAuthorityTestApi,
   createPreparedWorkspaceFileSystems,
-  mergeWorkspaceIntoLiveProject,
   readRootedBridgeCapabilities,
   useChatWorkspaceAuthority,
   usePreparedChatWorkspace,
@@ -52,9 +52,15 @@ const installSerialWebLocks = (): void => {
     locks: {
       request: async (
         name: string,
-        _options: { readonly mode: 'exclusive' },
-        callback: (lock: { readonly name: string }) => Promise<unknown>,
+        options: { readonly mode: 'exclusive'; readonly ifAvailable?: boolean },
+        // oxlint-disable-next-line typescript/no-restricted-types -- the Web Locks API answers `ifAvailable` with null
+        callback: (lock: { readonly name: string; readonly mode: 'exclusive' } | null) => Promise<unknown>,
       ): Promise<unknown> => {
+        /* `ifAvailable`: a held name answers `null` at once instead of queueing —
+         * the reclaim path's contract (8-review M4). */
+        if (options.ifAvailable === true && tails.has(name)) {
+          return callback(null);
+        }
         const prior = tails.get(name) ?? Promise.resolve();
         const release = Promise.withResolvers<void>();
         const tail = (async (): Promise<void> => {
@@ -64,7 +70,7 @@ const installSerialWebLocks = (): void => {
         tails.set(name, tail);
         await prior;
         try {
-          return await callback({ name });
+          return await callback({ name, mode: 'exclusive' });
         } finally {
           release.resolve();
           if (tails.get(name) === tail) {
@@ -193,6 +199,19 @@ const memoryFileSystem = (initial: Readonly<Record<string, string>>): RootedFile
       return () => undefined;
     },
   };
+};
+
+/**
+ * One file's text out of the *one* store, addressed by revision id.
+ *
+ * The authority no longer keeps a second uncompressed copy of each tree under
+ * `.tau/workspaces/revisions/nodes/<id>/tree`, so a test that wants to see what
+ * a revision recorded reads the content-addressed objects the recorder wrote.
+ */
+const storedText = async (filesystem: RootedFileSystem, id: string, path: string): Promise<string | undefined> => {
+  const tree = await createBrowserRevisionPort({ filesystem }).readTree(revisionId(id));
+  const entry = tree?.entries().find((candidate) => candidate.path === path);
+  return entry === undefined ? undefined : decoder.decode(entry.content);
 };
 
 const fileManagerFor = async (filesystem: RootedFileSystem): Promise<unknown> => {
@@ -371,159 +390,6 @@ describe('isolated workspace capability and publication', () => {
       proxy.dispose();
     }
   });
-
-  it('should apply an agent-created file to the live project before publication may continue', async () => {
-    const live = memoryFileSystem({ 'main.scad': '' });
-    const agent = memoryFileSystem({ 'main.scad': 'cube(20);', 'main.geospec.ts': 'it("passes", () => {});' });
-
-    const result = await mergeWorkspaceIntoLiveProject({
-      base: new ImmutableRevisionTree([['main.scad', '']]),
-      live,
-      agent,
-    });
-
-    expect(result.status).toBe('merged');
-    await expect(live.readFile('main.scad', 'utf8')).resolves.toBe('cube(20);');
-    await expect(live.readFile('main.geospec.ts', 'utf8')).resolves.toContain('passes');
-  });
-
-  it('should preserve non-overlapping live and agent edits through the existing three-way merge', async () => {
-    const base = 'one\ntwo\nthree\n';
-    const live = memoryFileSystem({ 'main.scad': 'ONE\ntwo\nthree\n' });
-    const agent = memoryFileSystem({ 'main.scad': 'one\ntwo\nTHREE\n' });
-
-    const result = await mergeWorkspaceIntoLiveProject({
-      base: new ImmutableRevisionTree([['main.scad', base]]),
-      live,
-      agent,
-    });
-
-    expect(result.status).toBe('merged');
-    await expect(live.readFile('main.scad', 'utf8')).resolves.toBe('ONE\ntwo\nTHREE\n');
-  });
-
-  it('should surface an overlapping merge conflict without overwriting the live project', async () => {
-    const live = memoryFileSystem({ 'main.scad': 'live\n' });
-    const agent = memoryFileSystem({ 'main.scad': 'agent\n' });
-
-    const result = await mergeWorkspaceIntoLiveProject({
-      base: new ImmutableRevisionTree([['main.scad', 'base\n']]),
-      live,
-      agent,
-    });
-
-    expect(result).toMatchObject({ status: 'conflicted', conflicts: [{ type: 'text', path: 'main.scad' }] });
-    await expect(live.readFile('main.scad', 'utf8')).resolves.toBe('live\n');
-  });
-
-  it('should publish nothing when apply fails and converge when the retained workspace is retried', async () => {
-    const live = memoryFileSystem({ 'main.scad': '' });
-    const agent = memoryFileSystem({ 'main.scad': 'cube(20);' });
-    const originalWrite = live.writeFile.bind(live);
-    let attempts = 0;
-    live.writeFile = async (path, data) => {
-      attempts += 1;
-      if (attempts === 1) {
-        throw Object.assign(new Error('disk full'), { code: 'ENOSPC' });
-      }
-      await originalWrite(path, data);
-    };
-    const input = { base: new ImmutableRevisionTree([['main.scad', '']]), live, agent };
-
-    await expect(mergeWorkspaceIntoLiveProject(input)).rejects.toMatchObject({ code: 'ENOSPC' });
-    await expect(live.readFile('main.scad', 'utf8')).resolves.toBe('');
-    await expect(mergeWorkspaceIntoLiveProject(input)).resolves.toMatchObject({ status: 'merged' });
-    await expect(live.readFile('main.scad', 'utf8')).resolves.toBe('cube(20);');
-  });
-
-  it('settles when the preview pipeline writes its own files between the merge and its verification', async () => {
-    const live = memoryFileSystem({ 'main.scad': '' });
-    const agent = memoryFileSystem({ 'main.scad': 'cube(20);' });
-    const write = live.writeFile.bind(live);
-    live.writeFile = async (path, data) => {
-      await write(path, data);
-      if (path === 'main.scad') {
-        // The geometry pipeline re-renders on the agent's edit and writes its
-        // own outputs to the live root; the settlement neither owns nor fences
-        // them, so verifying the whole tree fails on writes it never made.
-        await write('thumbnail.webp', new Uint8Array([1, 2, 3]));
-        await write('.tau/cache/geometry/warm.bin', 'warm');
-      }
-    };
-
-    const result = await mergeWorkspaceIntoLiveProject({
-      base: new ImmutableRevisionTree([['main.scad', '']]),
-      live,
-      agent,
-    });
-
-    expect(result).toMatchObject({ status: 'merged' });
-    // The published tree is what the settlement applied, not whatever the
-    // pipeline had scribbled by the time it looked again.
-    expect(result.status === 'merged' ? result.tree.entries().map(({ path }) => path) : []).toEqual(['main.scad']);
-    await expect(live.readFile('main.scad', 'utf8')).resolves.toBe('cube(20);');
-    await expect(live.readFile('thumbnail.webp')).resolves.toHaveLength(3);
-  });
-
-  it('still refuses to publish when an applied write silently did not land', async () => {
-    const live = memoryFileSystem({ 'main.scad': '' });
-    const agent = memoryFileSystem({ 'main.scad': 'cube(20);' });
-    live.writeFile = async () => undefined;
-
-    await expect(
-      mergeWorkspaceIntoLiveProject({ base: new ImmutableRevisionTree([['main.scad', '']]), live, agent }),
-    ).rejects.toMatchObject({ code: 'WORKSPACE_VERIFY_FAILED' });
-  });
-
-  it('still refuses to publish when an applied deletion silently did not land', async () => {
-    const live = memoryFileSystem({ 'main.scad': 'cube(20);', 'stale.scad': 'sphere(1);' });
-    const agent = memoryFileSystem({ 'main.scad': 'cube(20);' });
-    live.unlink = async () => undefined;
-
-    await expect(
-      mergeWorkspaceIntoLiveProject({
-        base: new ImmutableRevisionTree([
-          ['main.scad', 'cube(20);'],
-          ['stale.scad', 'sphere(1);'],
-        ]),
-        live,
-        agent,
-      }),
-    ).rejects.toMatchObject({ code: 'WORKSPACE_VERIFY_FAILED' });
-  });
-
-  it('captures a local-mode root once so a mid-walk pipeline write is not replayed as an agent change', async () => {
-    const project = memoryFileSystem({ 'main.scad': 'cube(20);' });
-    const write = project.writeFile.bind(project);
-    const readdir = project.readdir.bind(project);
-    const applied: string[] = [];
-    project.writeFile = async (path, data) => {
-      applied.push(path);
-      await write(path, data);
-    };
-    let walks = 0;
-    project.readdir = async (path) => {
-      if (path === '') {
-        walks += 1;
-        if (walks === 2) {
-          // Two concurrent captures of ONE root are two different snapshots:
-          // a pipeline write landing between them reads as an agent change.
-          await write('thumbnail.webp', new Uint8Array([7]));
-        }
-      }
-      return readdir(path);
-    };
-
-    // Local mode: `bindInPlace` hands the live root back as the agent root.
-    const result = await mergeWorkspaceIntoLiveProject({
-      base: new ImmutableRevisionTree([['main.scad', 'cube(20);']]),
-      live: project,
-      agent: project,
-    });
-
-    expect(result).toMatchObject({ status: 'merged' });
-    expect(applied).toEqual([]);
-  });
 });
 
 describe('chat workspace finalization retries', () => {
@@ -532,7 +398,7 @@ describe('chat workspace finalization retries', () => {
     vi.restoreAllMocks();
   });
 
-  it('rejects a retry whose immutable revision payload differs from the stored revision', async () => {
+  it('converges a retry after a failed publication onto one revision', async () => {
     const filesystem = memoryFileSystem({ 'main.scad': '' });
     hookState.projectId = 'project_retry';
     hookState.fileManager = await fileManagerFor(filesystem);
@@ -563,20 +429,21 @@ describe('chat workspace finalization retries', () => {
       projectId: hookState.projectId,
       binding: authorityBinding((hookState.fileManager as { client: FileSystemClientFacade }).client, '/project'),
     });
-    const stored = state.revisions.getRevision(revisionId(`rev:${prepared.execution.workspaceId}`));
-    expect(stored?.summary.generated).toBe(original.summary);
+    await state.revisions.ready;
 
-    await expect(result.current.finalize('chat_retry', { ...original, summary: 'Different summary' })).rejects.toThrow(
-      'does not match',
-    );
-    await expect(result.current.finalize('chat_retry', original)).resolves.toMatchObject({
+    /* Identity is content-addressed, so the retry does not have to be compared
+       against a stored payload to be safe: the same tree and the same headers
+       recompute the same commit id, and the chat's branch ends on exactly the
+       revision the retry reports. */
+    const settled = await result.current.finalize('chat_retry', original);
+    expect(settled).toMatchObject({
       status: 'finalized',
-      finalization: {
-        provenance: stored?.provenance,
-        generatedSummary: stored?.summary.generated,
-        changedPaths: ['main.scad'],
-      },
+      finalization: { generatedSummary: original.summary, changedPaths: ['main.scad'] },
     });
+    /* A direct-mode turn records onto the trunk the live tree tracks (Q11). */
+    const head = state.revisions.getBranchHead(mainRevisionBranch);
+    expect(head).toBe(settled?.status === 'finalized' ? settled.finalization.revisionId : undefined);
+    expect(state.revisions.getRevision(head!)?.summary.generated).toBe(original.summary);
   });
 
   it('coalesces concurrent finalizers for one chat into one immutable publication', async () => {
@@ -694,7 +561,7 @@ describe('chat workspace finalization retries', () => {
     hookState.fileManager = await fileManagerFor(filesystem);
     const { result } = renderHook(() => useChatWorkspaceAuthority(), { wrapper: authorityWrapper });
     // Only branch mode can diverge from the live tree, so only branch mode can conflict.
-    const prepared = await act(async () => result.current.prepare('chat_conflict_settlement', { mode: 'branch' }));
+    const prepared = await act(async () => result.current.prepare('chat_conflict_settlement', { mode: 'candidate' }));
     await result.current.markAdmitted('chat_conflict_settlement');
     await prepared.workspace.filesystem.writeFile('main.scad', 'agent\n');
     await filesystem.writeFile('main.scad', 'live\n');
@@ -729,7 +596,7 @@ describe('local revision mode', () => {
     hookState.fileManager = await fileManagerFor(filesystem);
     const { result } = renderHook(() => useChatWorkspaceAuthority(), { wrapper: authorityWrapper });
 
-    const prepared = await act(async () => result.current.prepare('chat_local_bind', { mode: 'local' }));
+    const prepared = await act(async () => result.current.prepare('chat_local_bind', { mode: 'direct' }));
     await prepared.workspace.filesystem.writeFile('main.scad', 'cube(20);');
 
     await expect(filesystem.readFile('main.scad', 'utf8')).resolves.toBe('cube(20);');
@@ -747,7 +614,7 @@ describe('local revision mode', () => {
     hookState.projectId = 'project_local_finalize';
     hookState.fileManager = await fileManagerFor(filesystem);
     const { result } = renderHook(() => useChatWorkspaceAuthority(), { wrapper: authorityWrapper });
-    const prepared = await act(async () => result.current.prepare('chat_local_finalize', { mode: 'local' }));
+    const prepared = await act(async () => result.current.prepare('chat_local_finalize', { mode: 'direct' }));
     await result.current.markAdmitted('chat_local_finalize', 'turn_local');
     await prepared.workspace.filesystem.writeFile('main.scad', 'cube(30);');
     // The live tree already carries the agent's write: finalization's three-way
@@ -777,7 +644,7 @@ describe('local revision mode', () => {
     hookState.projectId = 'project_local_pipeline';
     hookState.fileManager = await fileManagerFor(filesystem);
     const { result } = renderHook(() => useChatWorkspaceAuthority(), { wrapper: authorityWrapper });
-    const prepared = await act(async () => result.current.prepare('chat_local_pipeline', { mode: 'local' }));
+    const prepared = await act(async () => result.current.prepare('chat_local_pipeline', { mode: 'direct' }));
     await result.current.markAdmitted('chat_local_pipeline', 'turn_pipeline');
     await prepared.workspace.filesystem.writeFile('main.scad', 'cube(30);');
 
@@ -823,7 +690,7 @@ describe('local revision mode', () => {
     hookState.fileManager = await fileManagerFor(filesystem);
     const seed = renderHook(() => useChatWorkspaceAuthority(), { wrapper: authorityWrapper });
     // A persisted branch claim to reclaim from.
-    await act(async () => seed.result.current.prepare('chat_race', { mode: 'branch' }));
+    await act(async () => seed.result.current.prepare('chat_race', { mode: 'candidate' }));
     browserWorkspaceAuthorityTestApi.reset();
 
     hookState.fileManager = await fileManagerFor(filesystem);
@@ -831,7 +698,7 @@ describe('local revision mode', () => {
     // The picked mode differs, so `prepare` discards the reclaimed branch claim
     // and writes a fresh one — exactly the window a racing reclaim reopens.
     await act(async () => {
-      await Promise.all([result.current.reclaim('chat_race'), result.current.prepare('chat_race', { mode: 'local' })]);
+      await Promise.all([result.current.reclaim('chat_race'), result.current.prepare('chat_race', { mode: 'direct' })]);
     });
 
     const claim = JSON.parse(await filesystem.readFile('.tau/workspaces/claims/chat_race.json', 'utf8')) as Record<
@@ -886,12 +753,89 @@ describe('local revision mode', () => {
     await expect(filesystem.readFile('main.scad', 'utf8')).resolves.toBe('cube(10);');
   });
 
+  it('M6: keeps the workspace a conflict record still points at', async () => {
+    /* A stale-head publication retires the claim and keeps the run's tree so
+     * the porcelain can diff and retry it. That made the directory an orphan by
+     * the sweep's own definition, and the very next mount deleted the evidence
+     * the conflict record names (6-review M6). */
+    const filesystem = memoryFileSystem({
+      'main.scad': 'cube(10);',
+      '.tau/workspaces/run_conflicted/identity.json': JSON.stringify({
+        version: 1,
+        workspaceId: 'run_conflicted',
+        baseRevisionId: 'rev_conflicted',
+        metrics: { files: 0, bytes: 0, durationMs: 0 },
+      }),
+      '.tau/workspaces/run_conflicted/tree/main.scad': 'cube(40);',
+      '.tau/workspaces/conflicts/run_conflicted.json': JSON.stringify({
+        version: 1,
+        status: 'conflicted',
+        chatId: 'chat_conflicted',
+        projectId: 'project_conflict_sweep',
+        turnId: 'turn_conflicted',
+        workspaceId: 'run_conflicted',
+        branchName: 'agent/chat_conflicted',
+        conflict: { type: 'merge', kind: 'text', paths: ['main.scad'] },
+      }),
+      '.tau/workspaces/run_orphan/identity.json': JSON.stringify({
+        version: 1,
+        workspaceId: 'run_orphan',
+        baseRevisionId: 'rev_orphan',
+        metrics: { files: 0, bytes: 0, durationMs: 0 },
+      }),
+    });
+    hookState.projectId = 'project_conflict_sweep';
+    hookState.fileManager = await fileManagerFor(filesystem);
+    renderHook(() => useChatWorkspaceAuthority(), { wrapper: authorityWrapper });
+
+    // The unreferenced orphan still goes, so the sweep provably ran.
+    await waitFor(async () => {
+      await expect(filesystem.exists('.tau/workspaces/run_orphan')).resolves.toBe(false);
+    });
+    await expect(filesystem.readFile('.tau/workspaces/run_conflicted/tree/main.scad', 'utf8')).resolves.toBe(
+      'cube(40);',
+    );
+  });
+
+  it('leaves a Tau Host turn workspace on the shared root to the host that owns it (SR4)', async () => {
+    /* The desktop utility and the daemon write `t<runId>` workspaces into the
+       same `.tau/workspaces` this authority sweeps, for turns it holds no claim
+       for. Sweeping one destroys the tree a live host turn is writing. */
+    const filesystem = memoryFileSystem({
+      'main.scad': 'cube(10);',
+      '.tau/workspaces/trun_host_live/identity.json': JSON.stringify({
+        version: 1,
+        workspaceId: 'trun_host_live',
+        baseRevisionId: 'rev_host',
+        metrics: { files: 0, bytes: 0, durationMs: 0 },
+      }),
+      '.tau/workspaces/trun_host_live/tree/main.scad': 'cube(20);',
+      '.tau/workspaces/run_orphan/identity.json': JSON.stringify({
+        version: 1,
+        workspaceId: 'run_orphan',
+        baseRevisionId: 'rev_orphan',
+        metrics: { files: 0, bytes: 0, durationMs: 0 },
+      }),
+    });
+    hookState.projectId = 'project_host_sweep';
+    hookState.fileManager = await fileManagerFor(filesystem);
+    renderHook(() => useChatWorkspaceAuthority(), { wrapper: authorityWrapper });
+
+    // This authority's own orphan still goes, so the sweep is provably running.
+    await waitFor(async () => {
+      await expect(filesystem.exists('.tau/workspaces/run_orphan')).resolves.toBe(false);
+    });
+    await expect(filesystem.readFile('.tau/workspaces/trun_host_live/tree/main.scad', 'utf8')).resolves.toBe(
+      'cube(20);',
+    );
+  });
+
   it('keeps the durable chat log out of a local-mode revision capture', async () => {
     const filesystem = memoryFileSystem({ 'main.scad': 'cube(10);' });
     hookState.projectId = 'project_local_log';
     hookState.fileManager = await fileManagerFor(filesystem);
     const { result } = renderHook(() => useChatWorkspaceAuthority(), { wrapper: authorityWrapper });
-    const prepared = await act(async () => result.current.prepare('chat_local_log', { mode: 'local' }));
+    const prepared = await act(async () => result.current.prepare('chat_local_log', { mode: 'direct' }));
     await result.current.markAdmitted('chat_local_log', 'turn_local_log');
     // PH19: the host writes its canonical log to the project root. In local
     // mode that root IS the agent tree, so an unexcluded log rides into the
@@ -916,8 +860,8 @@ describe('local revision mode', () => {
     hookState.projectId = 'project_local_reclaim';
     hookState.fileManager = await fileManagerFor(filesystem);
     const seeded = renderHook(() => useChatWorkspaceAuthority(), { wrapper: authorityWrapper });
-    const local = await act(async () => seeded.result.current.prepare('chat_local_reclaim', { mode: 'local' }));
-    const branch = await act(async () => seeded.result.current.prepare('chat_branch_reclaim', { mode: 'branch' }));
+    const local = await act(async () => seeded.result.current.prepare('chat_local_reclaim', { mode: 'direct' }));
+    const branch = await act(async () => seeded.result.current.prepare('chat_branch_reclaim', { mode: 'candidate' }));
     // A claim written before this field existed must still reclaim as a branch.
     const legacy = JSON.parse(
       await filesystem.readFile('.tau/workspaces/claims/chat_branch_reclaim.json', 'utf8'),
@@ -952,7 +896,7 @@ describe('local revision mode', () => {
     // so the mode the user picks afterwards must still reach the next turn.
     const eager = await act(async () => result.current.prepare('chat_mode_switch'));
 
-    const branched = await act(async () => result.current.prepare('chat_mode_switch', { mode: 'branch' }));
+    const branched = await act(async () => result.current.prepare('chat_mode_switch', { mode: 'candidate' }));
 
     expect(branched.execution.workspaceId).not.toBe(eager.execution.workspaceId);
     await expect(filesystem.exists(`.tau/workspaces/${eager.execution.workspaceId}`)).resolves.toBe(false);
@@ -960,26 +904,75 @@ describe('local revision mode', () => {
     await expect(filesystem.readFile('main.scad', 'utf8')).resolves.toBe('cube(10);');
     // An admitted claim belongs to a live run: the switch applies to the next turn.
     await result.current.markAdmitted('chat_mode_switch', 'turn_switch');
-    await expect(act(async () => result.current.prepare('chat_mode_switch', { mode: 'local' }))).resolves.toMatchObject(
-      { execution: { workspaceId: branched.execution.workspaceId } },
-    );
+    await expect(
+      act(async () => result.current.prepare('chat_mode_switch', { mode: 'direct' })),
+    ).resolves.toMatchObject({ execution: { workspaceId: branched.execution.workspaceId } });
   });
 
-  it('refuses a second admitted local writer on the same project with a typed code', async () => {
+  it('queues a second direct-mode writer behind the chat holding the live tree (DT2)', async () => {
     const filesystem = memoryFileSystem({ 'main.scad': 'cube(10);' });
     hookState.projectId = 'project_local_conflict';
     hookState.fileManager = await fileManagerFor(filesystem);
     const { result } = renderHook(() => useChatWorkspaceAuthority(), { wrapper: authorityWrapper });
-    await act(async () => result.current.prepare('chat_local_first', { mode: 'local' }));
+    await act(async () => result.current.prepare('chat_local_first', { mode: 'direct' }));
     await result.current.markAdmitted('chat_local_first', 'turn_first');
 
-    await expect(result.current.prepare('chat_local_second', { mode: 'local' })).rejects.toMatchObject({
-      code: 'WORKSPACE_LOCAL_CLAIM_CONFLICT',
+    let settled = false;
+    const queued = (async () => {
+      const prepared = await result.current.prepare('chat_local_second', { mode: 'direct' });
+      settled = true;
+      return prepared;
+    })();
+    // One live-tree writer at a time: the second claim waits rather than
+    // throwing the user's turn away (DT2, replacing the old refusal).
+    await act(async () => {
+      await new Promise((resolve) => {
+        globalThis.setTimeout(resolve, 600);
+      });
     });
-    // Branch mode is never blocked by a live-tree writer.
+    expect(settled).toBe(false);
+
+    await result.current.discard('chat_local_first');
+    await expect(act(async () => queued)).resolves.toMatchObject({ chatId: 'chat_local_second' });
+
+    // Candidate mode is never blocked by a live-tree writer.
+    await act(async () => result.current.discard('chat_local_second'));
     await expect(
-      act(async () => result.current.prepare('chat_local_second', { mode: 'branch' })),
+      act(async () => result.current.prepare('chat_local_second', { mode: 'candidate' })),
     ).resolves.toMatchObject({ chatId: 'chat_local_second' });
+  });
+
+  it('admits one live-tree writer at a time when both chats already hold a claim (DT2)', async () => {
+    const filesystem = memoryFileSystem({ 'main.scad': 'cube(10);' });
+    hookState.projectId = 'project_local_double_admit';
+    hookState.fileManager = await fileManagerFor(filesystem);
+    const { result } = renderHook(() => useChatWorkspaceAuthority(), { wrapper: authorityWrapper });
+    /* The composer claims a workspace at mount, so by submit time both chats
+       already hold an unadmitted local claim and neither re-enters `prepare`.
+       The advisory check there is therefore never the fence — admission is. */
+    await act(async () => result.current.prepare('chat_double_first', { mode: 'direct' }));
+    await act(async () => result.current.prepare('chat_double_second', { mode: 'direct' }));
+    await result.current.markAdmitted('chat_double_first', 'turn_first');
+
+    let secondAdmitted = false;
+    const queued = (async () => {
+      await result.current.markAdmitted('chat_double_second', 'turn_second');
+      secondAdmitted = true;
+    })();
+    await act(async () => {
+      await new Promise((resolve) => {
+        globalThis.setTimeout(resolve, 300);
+      });
+    });
+
+    expect(secondAdmitted).toBe(false);
+    expect(result.current.get('chat_double_second')?.admitted).toBe(false);
+    expect(result.current.get('chat_double_first')?.admitted).toBe(true);
+
+    // The holder retires; the queued writer is admitted in its turn, not before.
+    await result.current.retireClaim('chat_double_first');
+    await act(async () => queued);
+    expect(result.current.get('chat_double_second')?.admitted).toBe(true);
   });
 
   it('keeps an agent write off the restore-timeline dirty seam by never emitting a content change', async () => {
@@ -994,7 +987,7 @@ describe('local revision mode', () => {
     const contentService = { write: vi.fn(), writeBatch: vi.fn(), delete: vi.fn(), onDidContentChange: vi.fn() };
     hookState.fileManager = { ...fileManager, contentService };
     const { result } = renderHook(() => useChatWorkspaceAuthority(), { wrapper: authorityWrapper });
-    const prepared = await act(async () => result.current.prepare('chat_local_dirty', { mode: 'local' }));
+    const prepared = await act(async () => result.current.prepare('chat_local_dirty', { mode: 'direct' }));
 
     await prepared.workspace.filesystem.writeFile('main.scad', 'cube(60);');
 
@@ -1050,7 +1043,7 @@ describe('run settlement', () => {
     hookState.fileManager = await fileManagerFor(filesystem);
     const { result } = renderHook(() => useChatWorkspaceAuthority(), { wrapper: authorityWrapper });
 
-    const first = await act(async () => result.current.prepare('chat_lineage', { mode: 'local' }));
+    const first = await act(async () => result.current.prepare('chat_lineage', { mode: 'direct' }));
     await result.current.markAdmitted('chat_lineage', 'turn_1');
     await first.workspace.filesystem.writeFile('main.scad', 'cube(10);');
     const published = await act(async () =>
@@ -1064,18 +1057,18 @@ describe('run settlement', () => {
     expect(published).toMatchObject({ status: 'finalized' });
     const headRevisionId = published?.status === 'finalized' ? published.finalization.revisionId : 'never-published';
 
-    const second = await act(async () => result.current.prepare('chat_lineage', { mode: 'local' }));
+    const second = await act(async () => result.current.prepare('chat_lineage', { mode: 'direct' }));
 
     // A fresh root per claim leaves the durable graph a pile of disconnected
     // "Base for chat" revisions, so nothing downstream can walk the chat's
-    // lineage back through the turn that produced the live tree.
-    const node = `.tau/workspaces/revisions/nodes/${encodeURIComponent(second.execution.baseRevisionId)}`;
-    const metadata = JSON.parse(await filesystem.readFile(`${node}/metadata.json`, 'utf8')) as {
-      readonly parents: readonly string[];
-    };
-    expect(metadata.parents).toEqual([headRevisionId]);
+    // lineage back through the turn that produced the live tree. Content
+    // addressing removes even the copy: the live tree the later claim starts
+    // from IS the published revision's tree, so that revision is its base.
+    expect(second.execution.baseRevisionId).toBe(headRevisionId);
     // The base is the live tree, which already carries the previous turn's write.
-    await expect(filesystem.readFile(`${node}/tree/main.scad`, 'utf8')).resolves.toBe('cube(10);');
+    await expect(storedText(filesystem, second.execution.baseRevisionId, 'main.scad')).resolves.toBe('cube(10);');
+    // One store: the authority keeps no second copy of the tree.
+    await expect(filesystem.exists('.tau/workspaces/revisions')).resolves.toBe(false);
   });
 
   it('admits a workspace whose directory listing named an atomic write that renamed away', async () => {
@@ -1094,12 +1087,11 @@ describe('run settlement', () => {
     await expect(filesystem.exists(temporary)).resolves.toBe(false);
 
     const { result } = renderHook(() => useChatWorkspaceAuthority(), { wrapper: authorityWrapper });
-    const prepared = await act(async () => result.current.prepare('chat_vanishing_temp', { mode: 'local' }));
+    const prepared = await act(async () => result.current.prepare('chat_vanishing_temp', { mode: 'direct' }));
 
     expect(prepared.execution.workspaceId).toMatch(/^run_/);
-    const node = `.tau/workspaces/revisions/nodes/${encodeURIComponent(prepared.execution.baseRevisionId)}`;
-    await expect(filesystem.readFile(`${node}/tree/main.scad`, 'utf8')).resolves.toBe('cube(10);');
-    await expect(filesystem.exists(`${node}/tree/${temporary}`)).resolves.toBe(false);
+    await expect(storedText(filesystem, prepared.execution.baseRevisionId, 'main.scad')).resolves.toBe('cube(10);');
+    await expect(storedText(filesystem, prepared.execution.baseRevisionId, temporary)).resolves.toBeUndefined();
   });
 
   it('keeps generated kernel cache out of the captured trees and the live merge', async () => {
@@ -1110,7 +1102,7 @@ describe('run settlement', () => {
     hookState.projectId = 'project_cache_capture';
     hookState.fileManager = await fileManagerFor(filesystem);
     const { result } = renderHook(() => useChatWorkspaceAuthority(), { wrapper: authorityWrapper });
-    const prepared = await act(async () => result.current.prepare('chat_cache_capture', { mode: 'branch' }));
+    const prepared = await act(async () => result.current.prepare('chat_cache_capture', { mode: 'candidate' }));
 
     const workspaceDirectory = `.tau/workspaces/${prepared.execution.workspaceId}`;
     await expect(filesystem.exists(`${workspaceDirectory}/tree/.tau/cache/geometry/warm.bin`)).resolves.toBe(false);
@@ -1136,7 +1128,7 @@ describe('run settlement', () => {
     hookState.projectId = 'project_unremovable';
     hookState.fileManager = await fileManagerFor(filesystem);
     const { result } = renderHook(() => useChatWorkspaceAuthority(), { wrapper: authorityWrapper });
-    const prepared = await act(async () => result.current.prepare('chat_unremovable', { mode: 'branch' }));
+    const prepared = await act(async () => result.current.prepare('chat_unremovable', { mode: 'candidate' }));
     await result.current.markAdmitted('chat_unremovable', 'turn_unremovable');
     await prepared.workspace.filesystem.writeFile('main.scad', 'cube(20);');
     // Chrome stages File System Access writes through a sibling `<name>.crswap`
@@ -1172,6 +1164,566 @@ describe('run settlement', () => {
     // The next turn must be able to claim a fresh workspace.
     const replacement = await act(async () => result.current.prepare('chat_unremovable'));
     expect(replacement.execution.workspaceId).not.toBe(prepared.execution.workspaceId);
+  });
+});
+
+describe('DT1 revision porcelain', () => {
+  afterEach(() => {
+    browserWorkspaceAuthorityTestApi.reset();
+  });
+
+  /**
+   * A revision store two agents already wrote into: `main` from a Tau turn, and
+   * a candidate branch from an external (Codex) turn a Tau Host recorded on the
+   * same root.
+   *
+   * Minted through the port, because there is one store: a revision's id **is**
+   * its Git commit id, so a seeded literal like `rev_main` is not a revision
+   * this authority can ever load, merge or check out.
+   */
+  const seededStore = async (): Promise<{
+    filesystem: RootedFileSystem;
+    main: string;
+    codex: string;
+    /** Mints one more revision in the same store — a turn no branch names. */
+    mint: (input: {
+      readonly parents: readonly string[];
+      readonly actorId: string;
+      readonly summary: string;
+      readonly files: Readonly<Record<string, string>>;
+    }) => Promise<string>;
+  }> => {
+    const filesystem = memoryFileSystem({ 'main.scad': 'cube(10);' });
+    const port = createBrowserRevisionPort({ filesystem });
+    const mint = async (input: {
+      readonly parents: readonly string[];
+      readonly actorId: string;
+      readonly summary: string;
+      readonly files: Readonly<Record<string, string>>;
+    }): Promise<string> => {
+      const receipt = await port.writeRevision({
+        parents: input.parents.map((parent) => revisionId(parent)),
+        tree: new ImmutableRevisionTree(Object.entries(input.files)),
+        provenance: { source: 'agent', actorId: input.actorId, createdAt: 1_700_000_000_000 },
+        summary: { generated: input.summary },
+      });
+      return receipt.commitId;
+    };
+    const main = await mint({
+      parents: [],
+      actorId: 'chat_tau',
+      summary: 'Tau turn',
+      files: { 'main.scad': 'cube(10);' },
+    });
+    const codex = await mint({
+      parents: [main],
+      actorId: 'codex',
+      summary: 'Codex turn',
+      files: { 'main.scad': 'cube(10);', 'bracket.scad': 'cube(5);' },
+    });
+    await port.updateRef({ name: 'main', expectedHead: undefined, head: revisionId(main) });
+    await port.updateRef({
+      name: 'agent/chat-codex/trun-codex',
+      expectedHead: undefined,
+      head: revisionId(codex),
+    });
+    // The live tree is on the trunk, as every project this authority opens is.
+    await port.setHead('main');
+    return { filesystem, main, codex, mint };
+  };
+
+  const porcelain = async (projectId: string) => {
+    const seeded = await seededStore();
+    hookState.projectId = projectId;
+    hookState.fileManager = await fileManagerFor(seeded.filesystem);
+    const { result } = renderHook(() => useChatWorkspaceAuthority(), { wrapper: authorityWrapper });
+    await waitFor(() => {
+      expect(result.current.listBranches().length).toBe(2);
+    });
+    return { ...seeded, result };
+  };
+
+  it('8-review S7/S1: checks out a revision whose branch was deleted before a reload dropped it', async () => {
+    const { codex, filesystem, result } = await porcelain('project_deleted_branch_checkout');
+    await act(async () => {
+      await result.current.deleteBranch('agent/chat-codex/trun-codex');
+    });
+    expect(result.current.listBranches().map((branch) => branch.name)).toEqual(['main']);
+
+    // A reload: the projection is rebuilt from refs, and the deleted branch's
+    // revision is reachable from none of them.
+    browserWorkspaceAuthorityTestApi.reset();
+    installSerialWebLocks();
+    hookState.fileManager = await fileManagerFor(filesystem);
+    const reloaded = renderHook(() => useChatWorkspaceAuthority(), { wrapper: authorityWrapper });
+    await waitFor(() => {
+      expect(reloaded.result.current.listBranches().length).toBe(1);
+    });
+
+    /* The store still holds the revision, and checkout is the store's verb,
+     * not the projection's (8-review S1). */
+    await expect(act(async () => reloaded.result.current.checkout(codex))).resolves.toEqual([
+      { path: 'bracket.scad', change: 'added' },
+    ]);
+    await expect(filesystem.readFile('bracket.scad', 'utf8')).resolves.toBe('cube(5);');
+  });
+
+  it('lists every branch head the authority holds, whichever agent wrote it', async () => {
+    const { codex, main, result } = await porcelain('project_porcelain_list');
+
+    // The Codex turn's branch is a peer of main, not a second-class record.
+    expect(result.current.listBranches()).toEqual([
+      {
+        name: 'agent/chat-codex/trun-codex',
+        headRevisionId: codex,
+        summary: 'Codex turn',
+        actorId: 'codex',
+        source: 'agent',
+        createdAt: 1_700_000_000_000,
+      },
+      {
+        name: 'main',
+        headRevisionId: main,
+        summary: 'Tau turn',
+        actorId: 'chat_tau',
+        source: 'agent',
+        createdAt: 1_700_000_000_000,
+      },
+    ]);
+    // Identity-stable, or every `useSyncExternalStore` subscriber spins.
+    expect(result.current.listBranches()).toBe(result.current.listBranches());
+  });
+
+  it('switches the live project tree to a branch head, and restores it back', async () => {
+    const { codex, filesystem, main, result } = await porcelain('project_porcelain_switch');
+
+    await expect(act(async () => result.current.checkout(codex))).resolves.toEqual([
+      { path: 'bracket.scad', change: 'added' },
+    ]);
+    await expect(filesystem.readFile('bracket.scad', 'utf8')).resolves.toBe('cube(5);');
+
+    // Restore is the same verb: any revision, from any agent, in either direction.
+    await expect(act(async () => result.current.checkout(main))).resolves.toEqual([
+      { path: 'bracket.scad', change: 'removed' },
+    ]);
+    await expect(filesystem.exists('bracket.scad')).resolves.toBe(false);
+    await expect(filesystem.readFile('main.scad', 'utf8')).resolves.toBe('cube(10);');
+  });
+
+  it('moves the head reference on a switch, and lands a merge into it in the live tree (Q11)', async () => {
+    const { codex, filesystem, main, result } = await porcelain('project_porcelain_head');
+    expect(result.current.headBranch()).toBe('main');
+
+    // A checkout moves where the live tree is, so it moves the head reference.
+    await act(async () => {
+      await result.current.checkout(codex);
+    });
+    await waitFor(() => {
+      expect(result.current.headBranch()).toBe('agent/chat-codex/trun-codex');
+    });
+
+    await act(async () => {
+      await result.current.checkout(main);
+    });
+    await waitFor(() => {
+      expect(result.current.headBranch()).toBe('main');
+    });
+    await expect(filesystem.exists('bracket.scad')).resolves.toBe(false);
+
+    /* Merging into the branch the live tree is on lands in the folder, with no
+     * second checkout: the working tree follows the head reference. */
+    await act(async () => {
+      await result.current.mergeBranch({ source: 'agent/chat-codex/trun-codex', target: 'main', actorId: 'user_1' });
+    });
+    await expect(filesystem.readFile('bracket.scad', 'utf8')).resolves.toBe('cube(5);');
+
+    // Durable: the next process opening this project reads the same head.
+    await expect(createBrowserRevisionPort({ filesystem }).readHead()).resolves.toMatchObject({ branch: 'main' });
+  });
+
+  it('c2-review S1: a restore to a revision no branch names leaves nothing Current', async () => {
+    const { filesystem, main, mint, result } = await porcelain('project_porcelain_detached');
+    // What a Restore of an older turn checks out: a revision the store holds
+    // and no branch head names.
+    const older = await mint({
+      parents: [main],
+      actorId: 'chat_tau',
+      summary: 'An earlier turn',
+      files: { 'main.scad': 'cube(1);' },
+    });
+
+    await act(async () => {
+      await result.current.checkout(older);
+    });
+    await expect(filesystem.readFile('main.scad', 'utf8')).resolves.toBe('cube(1);');
+    /* The pane's `activeBranch`: nothing is "The live project tree" while the
+     * folder is on none of the branches. */
+    await waitFor(() => {
+      expect(result.current.headBranch()).toBeUndefined();
+    });
+
+    /* The head reference itself was not nulled — the next direct turn still
+     * publishes onto the branch it names, which is what ends the detachment. */
+    const prepared = await act(async () => result.current.prepare('chat_detached', { mode: 'direct' }));
+    await result.current.markAdmitted('chat_detached', 'turn_detached');
+    await prepared.workspace.filesystem.writeFile('main.scad', 'cube(2);');
+    await expect(
+      result.current.finalize('chat_detached', {
+        actorId: 'agent-local',
+        runId: 'run-detached',
+        turnId: 'turn_detached',
+        summary: 'Back on the trunk',
+      }),
+    ).resolves.toMatchObject({ status: 'finalized', finalization: { branchName: 'main' } });
+    expect(result.current.headBranch()).toBe('main');
+  });
+
+  it('refuses to check out a revision this project does not hold', async () => {
+    const { result } = await porcelain('project_porcelain_missing');
+
+    await expect(result.current.checkout('0'.repeat(40))).rejects.toMatchObject({ code: 'REVISION_NOT_FOUND' });
+  });
+
+  it('diffs two revisions by path, in both directions', async () => {
+    const { codex, main, result } = await porcelain('project_porcelain_diff');
+
+    expect(result.current.diffRevisions({ from: main, to: codex })).toEqual([
+      { path: 'bracket.scad', change: 'added' },
+    ]);
+    expect(result.current.diffRevisions({ from: codex, to: main })).toEqual([
+      { path: 'bracket.scad', change: 'removed' },
+    ]);
+    // No base names the whole tree as new: what a branch introduced from nothing.
+    expect(result.current.diffRevisions({ to: codex })).toEqual([
+      { path: 'bracket.scad', change: 'added' },
+      { path: 'main.scad', change: 'added' },
+    ]);
+  });
+
+  it('merges a candidate branch back into main and publishes the merge revision', async () => {
+    const { codex, filesystem, result } = await porcelain('project_porcelain_merge');
+
+    const merged = await act(async () =>
+      result.current.mergeBranch({
+        source: 'agent/chat-codex/trun-codex',
+        target: 'main',
+        actorId: 'user_1',
+      }),
+    );
+
+    expect(merged).toMatchObject({ status: 'merged', branchName: 'main', changedPaths: ['bracket.scad'] });
+    const main = result.current.listBranches().find((entry) => entry.name === 'main');
+    expect(main?.headRevisionId).toBe(merged.status === 'merged' ? merged.revisionId : undefined);
+    expect(main?.summary).toBe('Merged agent/chat-codex/trun-codex into main');
+    // The merge is a revision like any other: checking it out is the whole result.
+    await act(async () => {
+      await result.current.checkout(main!.headRevisionId);
+    });
+    expect(result.current.diffRevisions({ from: codex, to: main!.headRevisionId })).toEqual([]);
+    // The merge revision was recorded by the recorder, into the one store.
+    await expect(storedText(filesystem, main!.headRevisionId, 'bracket.scad')).resolves.toBe('cube(5);');
+    await expect(filesystem.exists('.tau/workspaces/revisions')).resolves.toBe(false);
+  });
+
+  it('returns a merge conflict as a value, losing neither branch (I-CONF)', async () => {
+    // Both branches edited the same path differently, from a shared base.
+    const filesystem = memoryFileSystem({ 'main.scad': 'cube(10);' });
+    const port = createBrowserRevisionPort({ filesystem });
+    const mint = async (
+      parents: readonly string[],
+      input: Readonly<{ actorId: string; summary: string; source: string }>,
+    ): Promise<string> => {
+      const { actorId, summary, source } = input;
+      const receipt = await port.writeRevision({
+        parents: parents.map((parent) => revisionId(parent)),
+        tree: new ImmutableRevisionTree([['main.scad', source]]),
+        provenance: { source: 'agent', actorId, createdAt: 1_700_000_000_000 },
+        summary: { generated: summary },
+      });
+      return receipt.commitId;
+    };
+    const base = await mint([], { actorId: 'chat_tau', summary: 'Base', source: 'cube(1);' });
+    const main = await mint([base], { actorId: 'chat_tau', summary: 'Tau turn', source: 'cube(30);' });
+    const codex = await mint([base], { actorId: 'codex', summary: 'Codex turn', source: 'cube(20);' });
+    await port.updateRef({ name: 'main', expectedHead: undefined, head: revisionId(main) });
+    await port.updateRef({
+      name: 'agent/chat-codex/trun-codex',
+      expectedHead: undefined,
+      head: revisionId(codex),
+    });
+
+    hookState.projectId = 'project_porcelain_conflict';
+    hookState.fileManager = await fileManagerFor(filesystem);
+    const { result } = renderHook(() => useChatWorkspaceAuthority(), { wrapper: authorityWrapper });
+    await waitFor(() => {
+      expect(result.current.listBranches().length).toBe(2);
+    });
+
+    const conflicted = await act(async () =>
+      result.current.mergeBranch({
+        source: 'agent/chat-codex/trun-codex',
+        target: 'main',
+        actorId: 'user_1',
+      }),
+    );
+
+    expect(conflicted).toEqual({
+      status: 'conflicted',
+      branchName: 'main',
+      conflict: { type: 'merge', kind: 'text', paths: ['main.scad'] },
+    });
+    // Nothing was published and nothing was lost: both heads still stand.
+    expect(result.current.listBranches().map((entry) => entry.headRevisionId)).toEqual([codex, main]);
+  });
+
+  it('M1: prepares a turn on a branch whose head is a merge the porcelain published', async () => {
+    // The chat's own lane, which `prepare` will later descend from.
+    const chatId = 'chat_m1';
+    const branch = turnRevisionBranch(chatId);
+    const { codex, filesystem, main } = await seededStore();
+    await createBrowserRevisionPort({ filesystem }).updateRef({
+      name: branch,
+      expectedHead: undefined,
+      head: revisionId(main),
+    });
+    hookState.projectId = 'project_porcelain_m1';
+    hookState.fileManager = await fileManagerFor(filesystem);
+    const { result } = renderHook(() => useChatWorkspaceAuthority(), { wrapper: authorityWrapper });
+    await waitFor(() => {
+      expect(result.current.listBranches().length).toBe(3);
+    });
+    expect(codex).not.toBe(main);
+
+    const merged = await act(async () =>
+      result.current.mergeBranch({
+        source: 'agent/chat-codex/trun-codex',
+        target: branch,
+        actorId: 'user_1',
+      }),
+    );
+    expect(merged).toMatchObject({ status: 'merged' });
+
+    /* The merge revision has to be a real object in the store, or the next turn
+     * on this lane cannot descend from it: the porcelain used to publish a
+     * merge minted by the authority alone, whose `rev_*` id the recorder then
+     * refused with `Invalid sha1 Git object id` (6-review M1). */
+    const nextTurn = await act(async () => result.current.prepare(chatId, { mode: 'direct' }));
+    expect(nextTurn.execution.baseRevisionId).toMatch(/^[\da-f]{40}$/u);
+  });
+});
+
+describe('DT2 live-tree hold lifecycle', () => {
+  afterEach(() => {
+    browserWorkspaceAuthorityTestApi.reset();
+  });
+
+  it('M4: gives the project hold back when the claim write that would admit a writer fails', async () => {
+    const filesystem = memoryFileSystem({ 'main.scad': 'cube(10);' });
+    hookState.projectId = 'project_hold_release';
+    hookState.fileManager = await fileManagerFor(filesystem);
+    const { result } = renderHook(() => useChatWorkspaceAuthority(), { wrapper: authorityWrapper });
+
+    await act(async () => result.current.prepare('chat_a', { mode: 'direct' }));
+    const originalWriteFile = filesystem.writeFile.bind(filesystem);
+    filesystem.writeFile = async (path: string, content: string | Uint8Array<ArrayBuffer>): Promise<void> => {
+      if (path.startsWith('.tau/workspaces/claims/chat_a')) {
+        throw Object.assign(new Error('Quota exceeded'), { code: 'QUOTA_EXCEEDED' });
+      }
+      return originalWriteFile(path, content);
+    };
+    await expect(result.current.markAdmitted('chat_a', 'turn_a')).rejects.toThrow('Quota exceeded');
+    filesystem.writeFile = originalWriteFile;
+
+    // The hold was taken before the write. Leaked, it makes every later
+    // live-tree turn in this project wait out a writer that never existed.
+    await expect(act(async () => result.current.prepare('chat_b', { mode: 'direct' }))).resolves.toMatchObject({
+      chatId: 'chat_b',
+    });
+  });
+
+  it('M3: re-takes the project hold for an admitted claim it reclaimed after a reload', async () => {
+    const filesystem = memoryFileSystem({ 'main.scad': 'cube(10);' });
+    hookState.projectId = 'project_hold_reclaim';
+    hookState.fileManager = await fileManagerFor(filesystem);
+    const first = renderHook(() => useChatWorkspaceAuthority(), { wrapper: authorityWrapper });
+    await act(async () => first.result.current.prepare('chat_holder', { mode: 'direct' }));
+    await act(async () => {
+      await first.result.current.markAdmitted('chat_holder', 'turn_holder');
+    });
+    first.unmount();
+
+    // A reload: the document's state and every Web Lock it held are gone, and
+    // the claim on disk is all that survives.
+    browserWorkspaceAuthorityTestApi.reset();
+    installSerialWebLocks();
+    hookState.fileManager = await fileManagerFor(filesystem);
+    const { result } = renderHook(() => useChatWorkspaceAuthority(), { wrapper: authorityWrapper });
+    const reclaimed = await act(async () => result.current.reclaim('chat_holder'));
+    expect(reclaimed?.admitted).toBe(true);
+
+    /* Reclaim restores `admitted` exactly as it was persisted and takes no lock
+     * of its own, so after a reload an admitted live-tree writer had no hold in
+     * this document and the next chat walked straight past the queue into the
+     * same tree (6-review M3). */
+    const queued = result.current.prepare('chat_other', { mode: 'direct' });
+    await expect(
+      Promise.race([
+        queued.then((): 'prepared' => 'prepared'),
+        new Promise<'waiting'>((resolve) => {
+          globalThis.setTimeout(() => {
+            resolve('waiting');
+          }, 100);
+        }),
+      ]),
+    ).resolves.toBe('waiting');
+
+    await act(async () => {
+      await result.current.discard('chat_holder');
+      await queued;
+    });
+  });
+
+  it('M5: keeps a queued live-tree turn from blocking its own chat claim operations', async () => {
+    const filesystem = memoryFileSystem({ 'main.scad': 'cube(10);' });
+    hookState.projectId = 'project_hold_queue';
+    hookState.fileManager = await fileManagerFor(filesystem);
+    const { result } = renderHook(() => useChatWorkspaceAuthority(), { wrapper: authorityWrapper });
+
+    // `chat_holder` is the admitted live-tree writer, so `chat_queued` waits.
+    await act(async () => result.current.prepare('chat_holder', { mode: 'direct' }));
+    await act(async () => {
+      await result.current.markAdmitted('chat_holder', 'turn_holder');
+    });
+    const queued = result.current.prepare('chat_queued', { mode: 'direct' });
+    const settled = await Promise.race([
+      queued.then((): 'prepared' => 'prepared'),
+      new Promise<'waiting'>((resolve) => {
+        globalThis.setTimeout(() => {
+          resolve('waiting');
+        }, 100);
+      }),
+    ]);
+    expect(settled).toBe('waiting');
+
+    /* The wait is `liveTreeWaitTimeout` long. Under this chat's own claim lock
+     * it queued every other operation on it behind five minutes — including the
+     * `reclaim` a second tab performs at mount, and the `discard` that would
+     * end the wait (6-review M5). This resolves only because the wait is not
+     * holding that lock.
+     */
+    await expect(result.current.reclaim('chat_queued')).resolves.toBeUndefined();
+
+    // Retiring the holder lets the queued turn through.
+    await act(async () => {
+      await result.current.discard('chat_holder');
+      await queued;
+    });
+    expect(result.current.get('chat_queued')?.chatId).toBe('chat_queued');
+  });
+
+  it('8-review S2: records the settled tree id, not the revision id, as the finalization tree', async () => {
+    const filesystem = memoryFileSystem({ 'main.scad': 'cube(10);' });
+    hookState.projectId = 'project_tree_id';
+    hookState.fileManager = await fileManagerFor(filesystem);
+    const { result } = renderHook(() => useChatWorkspaceAuthority(), { wrapper: authorityWrapper });
+    const prepared = await act(async () => result.current.prepare('chat_tree', { mode: 'direct' }));
+    await prepared.workspace.filesystem.writeFile('main.scad', 'cube(20);');
+    const settled = await act(async () =>
+      result.current.finalize('chat_tree', {
+        actorId: 'agent-a',
+        runId: 'run-a',
+        turnId: 'turn-a',
+        summary: 'Tree turn',
+      }),
+    );
+    expect(settled?.status).toBe('finalized');
+    if (settled?.status !== 'finalized') {
+      return;
+    }
+    const state = browserWorkspaceAuthorityTestApi.get({
+      projectId: hookState.projectId,
+      binding: authorityBinding((hookState.fileManager as { client: FileSystemClientFacade }).client, '/project'),
+    });
+    const revision = await state.recorder.port.readRevision(revisionId(settled.finalization.revisionId));
+    // The same fact the host records: a tree id names content, a revision id names a commit.
+    expect(settled.finalization.treeId).toBe(revision?.treeId);
+    expect(settled.finalization.treeId).not.toBe(settled.finalization.revisionId);
+  });
+
+  it('8-review M3: a branch-mode chat settles under the project hold, never beside the live-tree writer', async () => {
+    const filesystem = memoryFileSystem({ 'main.scad': 'cube(10);' });
+    hookState.projectId = 'project_hold_settle';
+    hookState.fileManager = await fileManagerFor(filesystem);
+    const { result } = renderHook(() => useChatWorkspaceAuthority(), { wrapper: authorityWrapper });
+
+    await act(async () => result.current.prepare('chat_holder', { mode: 'direct' }));
+    await act(async () => {
+      await result.current.markAdmitted('chat_holder', 'turn_holder');
+    });
+    const prepared = await act(async () => result.current.prepare('chat_branch', { mode: 'candidate' }));
+    await prepared.workspace.filesystem.writeFile('main.scad', 'cube(20);');
+
+    /* Settlement touches the same store the admitted writer is publishing
+     * into; a chat without the hold must queue behind it (8-review M3). */
+    const settling = result.current.finalize('chat_branch', {
+      actorId: 'agent-b',
+      runId: 'run-b',
+      turnId: 'turn-b',
+      summary: 'Branch turn',
+    });
+    await expect(
+      Promise.race([
+        settling.then((): 'settled' => 'settled'),
+        new Promise<'waiting'>((resolve) => {
+          globalThis.setTimeout(() => {
+            resolve('waiting');
+          }, 100);
+        }),
+      ]),
+    ).resolves.toBe('waiting');
+
+    await act(async () => {
+      await result.current.discard('chat_holder');
+      await settling;
+    });
+  });
+
+  it('8-review M4: reclaims an admitted writer without waiting out a hold another document keeps', async () => {
+    const filesystem = memoryFileSystem({ 'main.scad': 'cube(10);' });
+    hookState.projectId = 'project_hold_foreign';
+    hookState.fileManager = await fileManagerFor(filesystem);
+    const first = renderHook(() => useChatWorkspaceAuthority(), { wrapper: authorityWrapper });
+    await act(async () => first.result.current.prepare('chat_holder', { mode: 'direct' }));
+    await act(async () => {
+      await first.result.current.markAdmitted('chat_holder', 'turn_holder');
+    });
+    first.unmount();
+
+    browserWorkspaceAuthorityTestApi.reset();
+    installSerialWebLocks();
+    // Another tab of the same project holds the live tree and is not letting go.
+    const foreign = Promise.withResolvers<void>();
+    void navigator.locks.request(
+      `tau:chat-workspace-claim:${encodeURIComponent('project_hold_foreign')}:live-tree`,
+      { mode: 'exclusive' },
+      async () => foreign.promise,
+    );
+    hookState.fileManager = await fileManagerFor(filesystem);
+    const { result } = renderHook(() => useChatWorkspaceAuthority(), { wrapper: authorityWrapper });
+
+    /* Reclaim runs on every reload for every persisted claim; blocking it on a
+     * hold that belongs to another document stalls the whole boot (8-review M4). */
+    const reclaimed = await Promise.race([
+      act(async () => result.current.reclaim('chat_holder')),
+      new Promise<'blocked'>((resolve) => {
+        globalThis.setTimeout(() => {
+          resolve('blocked');
+        }, 500);
+      }),
+    ]);
+    expect(reclaimed).not.toBe('blocked');
+    expect((reclaimed as { admitted?: boolean } | undefined)?.admitted).toBe(true);
+    foreign.resolve();
   });
 });
 

@@ -8,14 +8,18 @@ import type { AgentHostClient } from '#services/agent-host-client.js';
 import {
   agentHostAdmissionConfigSchema,
   agentHostExternalAgentSchema,
+  agentHostExternalContextSchema,
   agentHostTailBatchLimit,
 } from '#workers/agent-host.contract.js';
 import {
   projectAgentHostEvent,
   projectAgentHostLiveEvent,
+  projectAgentHostRevisionFinalized,
   projectAgentHostUserMessage,
   projectAgentHostUserTurn,
 } from '#services/agent-host-event-projection.js';
+import type { AuthoritativeRevisionFinalization } from '#types/revision.types.js';
+import { Topic } from '@taucad/events';
 import type { MyUIMessage } from '@taucad/chat';
 
 type AgentLogEvent = Parameters<Parameters<AgentHostClient['subscribe']>[0]>[1];
@@ -48,6 +52,58 @@ const browserRuns = new Map<string, BrowserAgentHostRun>();
 const boundRunIds = new Map<string, string>();
 const activeClients = new Map<string, { readonly client: AgentHostClient; readonly runId: string }>();
 const clientSettlements = new Map<string, Promise<void>>();
+
+/**
+ * Revisions a *host* recorded, by workspace and revision.
+ *
+ * A browser-placed turn's revision is finalized by this tab's workspace
+ * authority, which publishes it itself. A host-placed turn's is finalized on
+ * the host — the client never touches those files — and reaches this tab as one
+ * durable `revision.finalized` record in the chat's log. Collected here because
+ * this is the one place every durable record passes through, live and on
+ * replay; `RevisionSeams` unions the two sources into the revision graph.
+ */
+const hostFinalizedRevisions = new Map<string, AuthoritativeRevisionFinalization>();
+/**
+ * Host-recorded turns one tab keeps.
+ *
+ * The graph reads the turns on screen; a tab left open for days would otherwise
+ * retain every record it ever saw, including other projects' (they are filtered
+ * at read). FIFO by arrival, like the host's own `settledRunHistory`.
+ */
+const hostFinalizedLimit = 256;
+let hostFinalizedSnapshot: readonly AuthoritativeRevisionFinalization[] = [];
+const hostFinalizedTopic = new Topic<void>({ name: 'host-finalized-revisions' });
+
+/** Every host-recorded revision this tab has seen. @see hostFinalizedRevisions */
+export const getHostFinalizedRevisions = (): readonly AuthoritativeRevisionFinalization[] => hostFinalizedSnapshot;
+
+/** Wake a reader when a host records another turn. @see hostFinalizedRevisions */
+export const subscribeHostFinalizedRevisions = (listener: () => void): (() => void) =>
+  hostFinalizedTopic.subscribe(listener);
+
+const recordHostFinalizedRevision = (chatId: string, event: AgentLogEvent | AgentLiveEvent): void => {
+  if (!('leaderEpoch' in event)) {
+    return;
+  }
+  const finalized = projectAgentHostRevisionFinalized(event, chatId);
+  if (finalized === undefined) {
+    return;
+  }
+  const identity = JSON.stringify([finalized.workspaceId, finalized.revisionId]);
+  if (hostFinalizedRevisions.has(identity)) {
+    return;
+  }
+  hostFinalizedRevisions.set(identity, finalized);
+  for (const oldest of hostFinalizedRevisions.keys()) {
+    if (hostFinalizedRevisions.size <= hostFinalizedLimit) {
+      break;
+    }
+    hostFinalizedRevisions.delete(oldest);
+  }
+  hostFinalizedSnapshot = [...hostFinalizedRevisions.values()];
+  hostFinalizedTopic.emit();
+};
 
 export const getBrowserAgentHostRun = (chatId: string): BrowserAgentHostRun | undefined => browserRuns.get(chatId);
 
@@ -214,16 +270,32 @@ const browserHostAdmissionSchema = z.union([
     retainedMessageIds: z.array(z.string()),
     config: agentHostAdmissionConfigSchema,
   }),
-  z.strictObject({ trigger: z.literal('submit'), agent: agentHostExternalAgentSchema }),
+  z.strictObject({
+    trigger: z.literal('submit'),
+    agent: agentHostExternalAgentSchema,
+    context: agentHostExternalContextSchema.optional(),
+  }),
   z.strictObject({
     trigger: z.enum(['retry', 'edit', 'regenerate']),
     retainedMessageIds: z.array(z.string()),
     agent: agentHostExternalAgentSchema,
+    context: agentHostExternalContextSchema.optional(),
   }),
 ]);
 const browserAdmissionBodySchema = z.object({
   admission: z.strictObject({ version: z.literal(1), idempotencyKey: z.string().min(1) }),
   browserHost: browserHostAdmissionSchema,
+  /* The turn's placement, as `createRunBody` composed it. Only the two revision
+   * fields are read here: the host that runs the turn is the one that records
+   * it, so the mode has to travel with the admission rather than stay in the
+   * page (V19, G-REV-MODE). Loose, because the rest of the target is the
+   * client's own bookkeeping. */
+  execution: z
+    .object({
+      mode: z.enum(['direct', 'candidate']).optional(),
+      baseRevisionId: z.string().min(1).optional(),
+    })
+    .optional(),
 });
 
 const admissionIssue = (error: z.ZodError): string => {
@@ -418,6 +490,10 @@ const createHostStream = <Message extends UIMessage>(input: {
       }
     };
     const queueEvent = (event: AgentLogEvent | AgentLiveEvent): void => {
+      /* Before the run filter below: a reattach replays the whole log, and the
+       * revisions of a chat's *earlier* turns are as much this project's graph
+       * as the trailing run's. */
+      recordHostFinalizedRevision(input.chatId, event);
       projection = enqueueAfter(projection, event);
       void reportProjectionFailure(projection);
     };
@@ -608,6 +684,8 @@ export const resolveBrowserAgentHostInterrupt = async (input: {
   readonly interruptId: string;
   readonly approved: boolean;
   readonly reason?: string | undefined;
+  /** The exact option the human chose, when the request offered a list. */
+  readonly optionId?: string | undefined;
 }): Promise<void> => {
   const active = activeClients.get(input.chatId);
   if (!active || active.runId !== input.runId) {
@@ -616,6 +694,7 @@ export const resolveBrowserAgentHostInterrupt = async (input: {
   await active.client.resolveInterrupt(input.chatId, input.runId, {
     interruptId: input.interruptId,
     outcome: input.approved ? 'approved' : 'denied',
+    ...(input.optionId ? { optionId: input.optionId } : {}),
     ...(input.reason ? { payload: { reason: input.reason } } : {}),
   });
 };
@@ -623,10 +702,9 @@ export const resolveBrowserAgentHostInterrupt = async (input: {
 /**
  * Routes one AI SDK chat pipeline into the browser agent host.
  *
- * There is no longer an "or": since W4-PASEO every CAD execution kind is
- * host-placed — `tau` and `paseo` on this worker, `acp` on a daemon — so the
- * API transport this class used to wrap has no turn left to carry and was
- * deleted with it. An admission that cannot be parsed is a refusal naming the
+ * There is no longer an "or": every CAD execution kind is host-placed — `tau`
+ * on this worker, `acp` on a daemon — so the API transport this class used to
+ * wrap has no turn left to carry and was deleted with it. An admission that cannot be parsed is a refusal naming the
  * real reason, never a delegation that replaces it with someone else's.
  */
 export class BrowserPlacementChatTransport<Message extends UIMessage> implements ChatTransport<Message> {
@@ -653,7 +731,13 @@ export class BrowserPlacementChatTransport<Message extends UIMessage> implements
       chatId: options.chatId,
       messages: options.messages,
       runId: admission.admission.idempotencyKey,
-      admission: hostAdmission(admission.browserHost, options.trigger),
+      admission: {
+        ...hostAdmission(admission.browserHost, options.trigger),
+        ...(admission.execution?.mode === undefined ? {} : { mode: admission.execution.mode }),
+        ...(admission.execution?.baseRevisionId === undefined
+          ? {}
+          : { baseRevisionId: admission.execution.baseRevisionId }),
+      },
       abortSignal: options.abortSignal,
     });
   }

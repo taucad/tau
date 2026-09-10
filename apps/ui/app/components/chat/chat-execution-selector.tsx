@@ -1,21 +1,16 @@
-import { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useMemo } from 'react';
 import type { ReactNode } from 'react';
-import { Bot, Check, Laptop, Plus, Server } from 'lucide-react';
+import { Bot, Check, Server } from 'lucide-react';
 import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
 import { Badge } from '@taucad/ui/components/badge';
-import { menuItemVariants } from '@taucad/ui/components/menu.variants';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
 import type { ChatAgentActivity } from '#hooks/active-chat-provider.js';
-import { listPaseoConnections } from '#lib/paseo-connection-client.js';
-import { provisionCloudHost } from '#lib/remote-host-client.js';
-import { useProject } from '#hooks/use-project.js';
-import { listPaseoAgentsOverSdk } from '#lib/paseo/paseo-client.js';
-import { ENV } from '#environment.config.js';
-import type { PaseoAgent, PaseoConnection } from '#lib/paseo-connection-client.js';
-import { openSettingsDialog } from '#hooks/use-settings-dialog.js';
+import { isDesktopTarget } from '#lib/build-target.js';
 import { cn } from '@taucad/ui/utils/cn';
 import { useAgentHostPlacements, useBrowserAgentHostProjectAvailability } from '#hooks/use-cad-agent-config.js';
 import type { AgentHostPlacementTarget } from '#lib/agent-host-placement.js';
+import { externalAgentRefusalReasons } from '#lib/external-agent.js';
+import type { ExternalAgentDescriptor } from '@taucad/agent-host';
 import { withTauExecutionModel } from '#utils/chat-execution.js';
 import type { TauAgentHostId } from '@taucad/chat';
 
@@ -31,24 +26,14 @@ type TauHostTarget = {
   readonly placement: AgentHostPlacementTarget;
   /** Set on an external-agent row: the ACP agent this host would start. */
   readonly agentId?: string;
+  /** Set on an external-agent row the host cannot start; the row is listed, not selectable. */
+  readonly agent?: ExternalAgentDescriptor;
   /** Row subtitle: a workspace path for a Tau row, the credential note for an ACP one. */
   readonly note?: string;
   /** The note is a refusal, not a description — it reads as one. */
   readonly noteIsRefusal?: boolean;
-  /**
-   * Set on the row that has no host yet: selecting it provisions this project's
-   * cloud host and places the turn on whatever device that call returns.
-   */
-  readonly provisionProjectId?: string;
 };
-type PaseoTarget = {
-  readonly key: string;
-  readonly kind: 'paseo';
-  readonly connectionId: string;
-  readonly connectionLabel: string;
-  readonly agent: PaseoAgent;
-};
-type ExecutionTarget = TauTarget | TauHostTarget | PaseoTarget;
+type ExecutionTarget = TauTarget | TauHostTarget;
 
 type ChatExecutionSelectorProps = Omit<React.HTMLAttributes<HTMLDivElement>, 'children' | 'onSelect'> & {
   readonly children: (target: {
@@ -69,87 +54,64 @@ type ChatExecutionSelectorProps = Omit<React.HTMLAttributes<HTMLDivElement>, 'ch
  * the turn; it never silently runs somewhere else.
  */
 const tauTarget: TauTarget = { key: 'tau', kind: 'tau', label: 'Tau' };
-const targetKey = (connectionId: string, agentId: string): string =>
-  `paseo:${encodeURIComponent(connectionId)}:${encodeURIComponent(agentId)}`;
 const tauHostKey = (hostId: TauAgentHostId): string => `tau-host:${encodeURIComponent(hostId)}`;
-
-/** The one name every cloud host wears; there is only ever one per project. */
-const cloudHostLabel = 'Tau Cloud';
 
 /**
  * A daemon's row label.
  *
  * `desktop` is the Electron services utility's in-process launcher: it is not
- * a *remote* host at all, so naming it after its machine would be a lie. A
- * cloud host is a machine the user has never seen and never will, so naming it
- * after one would be a lie too — it is *this project's* host, and says so.
+ * a *remote* host at all, and it *is* the Tau agent on this machine, so it
+ * wears the plain name (Q12.3). A remote daemon keeps the one thing that tells
+ * two of them apart.
  */
 const tauHostLabel = (placement: AgentHostPlacementTarget): string =>
-  placement.hostId === 'desktop'
-    ? 'This computer'
-    : placement.cloudProjectId
-      ? cloudHostLabel
-      : `Tau Host · ${placement.label}`;
+  placement.hostId === 'desktop' ? 'Tau' : `Tau Host · ${placement.label}`;
 
 const tauHostTarget = (placement: AgentHostPlacementTarget): TauHostTarget => ({
   key: tauHostKey(placement.hostId),
   kind: 'tau-host',
   label: tauHostLabel(placement),
   placement,
-  ...(placement.cloudProjectId
-    ? { note: 'Runs in Tau’s cloud — keeps working when you close the tab' }
-    : placement.workspaceRoot === ''
-      ? {}
-      : { note: placement.workspaceRoot }),
-});
-
-/** The un-provisioned cloud row's key; the one row whose selection is async. */
-const cloudPlacementKey = 'tau-host:cloud';
-
-/**
- * The row for a project whose cloud host does not exist yet.
- *
- * It is offered to every signed-in owner, because provisioning is theirs to
- * choose; what is gated on a platform probe (PH8) is whether Tau ever reaches
- * for it *unasked*, which it does only for iOS-class limits and downlevel
- * fallback — never on Safari desktop.
- *
- * A refused provisioning replaces the row's description with the refusal: the
- * choice was made here, so this is where its outcome belongs.
- */
-const cloudPlacementTarget = (projectId: string, refusal: string | undefined): TauHostTarget => ({
-  key: cloudPlacementKey,
-  kind: 'tau-host',
-  label: cloudHostLabel,
-  placement: { hostId: 'cloud', rung: 2, label: cloudHostLabel, workspaceRoot: '', online: true },
-  note: refusal ?? 'Runs in Tau’s cloud — keeps working when you close the tab',
-  ...(refusal === undefined ? {} : { noteIsRefusal: true }),
-  provisionProjectId: projectId,
+  ...(placement.workspaceRoot === '' ? {} : { note: placement.workspaceRoot }),
 });
 
 const acpAgentKey = (hostId: TauAgentHostId, agentId: string): string =>
   `acp:${encodeURIComponent(hostId)}:${encodeURIComponent(agentId)}`;
 
-/** Product names for the registry agent ids a daemon advertises. */
-const externalAgentNames: Readonly<Record<string, string>> = { claude: 'Claude Code', codex: 'Codex' };
-const externalAgentName = (agentId: string): string => externalAgentNames[agentId] ?? agentId;
-
 /**
  * One external-agent row.
  *
+ * The name is the descriptor's own `displayName` (V14): the host that resolved
+ * the adapter is the only thing that knows what the agent is called, so there
+ * is no name map here — nor in the approval banner, which reads the same
+ * descriptor through `externalAgentDisplayName`.
+ *
+ * A **refused** agent still gets a row, carrying its code (V9): a user who
+ * installed Codex and sees nothing cannot tell a missing feature from a stale
+ * CLI. It is listed and not selectable, exactly as an offline host is.
+ *
  * The copy is deliberate on both halves: **your local login** (the adapter
- * inherits the CLI's own credential — Tau never brokers a key, X6) and **an
- * isolated branch** (SP-4 proved ACP session modes are advisory, so confinement
- * is the materialized branch, and the UI must not promise per-action approval).
+ * inherits the CLI's own credential — Tau never brokers a key, X6) and **this
+ * project's tree** (V2: the agent works where the chat's revision mode says,
+ * the host records the revision, and the UI must not promise per-action
+ * approval — SP-4 proved ACP session modes are advisory).
  */
-const acpAgentTarget = (placement: AgentHostPlacementTarget, agentId: string): TauHostTarget => ({
-  key: acpAgentKey(placement.hostId, agentId),
+const acpAgentTarget = (placement: AgentHostPlacementTarget, agent: ExternalAgentDescriptor): TauHostTarget => ({
+  key: acpAgentKey(placement.hostId, agent.id),
   kind: 'tau-host',
-  label: `${externalAgentName(agentId)} · ${placement.hostId === 'desktop' ? 'This computer' : `Tau Host ${placement.label}`}`,
+  label: agent.displayName,
   placement,
-  agentId,
-  note: `Runs with your local ${externalAgentName(agentId)} login in an isolated branch`,
+  agentId: agent.id,
+  agent,
+  note:
+    agent.refusal === undefined
+      ? `Runs with your local ${agent.displayName} login in this project's tree`
+      : `${externalAgentRefusalReasons[agent.refusal]} (${agent.refusal})`,
+  ...(agent.refusal === undefined ? {} : { noteIsRefusal: true }),
 });
+
+/** A descriptor for an agent no host has described yet, so a persisted selection still names itself. */
+const unknownAgent = (agentId: string): ExternalAgentDescriptor => ({ id: agentId, displayName: agentId, models: [] });
 
 /** Launcher 2's own row — the one the desktop tier drives by label and test id. */
 const isDesktopRow = (target: ExecutionTarget): target is TauHostTarget =>
@@ -157,31 +119,8 @@ const isDesktopRow = (target: ExecutionTarget): target is TauHostTarget =>
 
 const placementTargets = (placement: AgentHostPlacementTarget): readonly TauHostTarget[] => [
   tauHostTarget(placement),
-  ...(placement.externalAgents ?? []).map((agentId) => acpAgentTarget(placement, agentId)),
+  ...(placement.externalAgents ?? []).map((agent) => acpAgentTarget(placement, agent)),
 ];
-
-export const formatPaseoAgentStatus = (status: string): string => {
-  switch (status.toLowerCase()) {
-    case 'idle': {
-      return 'Ready';
-    }
-    case 'running': {
-      return 'Working';
-    }
-    case 'initializing': {
-      return 'Starting';
-    }
-    case 'error': {
-      return 'Error';
-    }
-    case 'closed': {
-      return 'Stopped';
-    }
-    default: {
-      return 'Unavailable';
-    }
-  }
-};
 
 export const formatChatAgentActivity = (activity: ChatAgentActivity): string => {
   switch (activity) {
@@ -200,114 +139,23 @@ export const formatChatAgentActivity = (activity: ChatAgentActivity): string => 
   }
 };
 
-export const ChatExecutionSelector = memo(function ({
-  children,
-  onSelect,
-  onClose,
-  isNested,
-  ...properties
-}: ChatExecutionSelectorProps): React.JSX.Element {
-  const [open, setOpen] = useState(false);
-  const [connections, setConnections] = useState<PaseoConnection[]>([]);
-  const [agents, setAgents] = useState<PaseoTarget[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string>();
-  const [provisionedCloudHostId, setProvisionedCloudHostId] = useState<string>();
-  const [cloudRefusal, setCloudRefusal] = useState<string>();
+/**
+ * The rows this chat can be placed on, and the one it is placed on now.
+ *
+ * @returns Every offered target and the selected one.
+ */
+const useExecutionTargets = (): {
+  readonly hostTargets: readonly TauHostTarget[];
+  readonly selectedTarget: ExecutionTarget;
+} => {
   const {
-    execution: { execution, setActiveExecution },
-    model: { modelId, model },
-    agentActivity,
+    execution: { execution },
   } = useChatComposer();
-  const browserHost = useBrowserAgentHostProjectAvailability(model.provider.id);
   const { targets: hostPlacements } = useAgentHostPlacements();
-  const { projectId } = useProject({ enableNoContext: true }) ?? {};
-  /*
-   * Whether any paired Tau Host is online to serve a Paseo agent's Tau tools.
-   *
-   * ponytail: presence, not pairing — nothing yet maps a Paseo connection to
-   * the Tau Host on the *same* machine, and the topology that matters (one
-   * laptop running both) has exactly one. Replace with a real pairing when a
-   * user has two hosts and the wrong one gets picked.
-   */
-  const hasHostMcp = hostPlacements.some((placement) => placement.online);
-  const tauNote =
-    browserHost.status === 'unavailable'
-      ? browserHost.reason
-      : browserHost.status === 'available'
-        ? browserHost.caveat
-        : undefined;
-  const hostTargets = useMemo(() => {
-    const placed = hostPlacements.flatMap((placement) => placementTargets(placement));
-    /* One cloud row per project, and only when this project has no cloud host
-     * listed yet — a provisioned one is an ordinary rung-2 device that already
-     * came through the ladder above. */
-    const hasCloud = hostPlacements.some((placement) => placement.cloudProjectId === projectId);
-    return projectId && !hasCloud ? [...placed, cloudPlacementTarget(projectId, cloudRefusal)] : placed;
-  }, [cloudRefusal, hostPlacements, projectId]);
-
-  useEffect(() => {
-    // Resolve a durable Paseo selection eagerly after reload so the trigger
-    // never falls back to the opaque "Paseo agent" placeholder. Tau remains
-    // lazy because it has no remote display metadata to hydrate.
-    if (!open && execution.kind !== 'paseo') {
-      return;
-    }
-    /* An `AbortController` rather than a closed-over flag: TypeScript narrows a
-     * `let` (or a literal's property) assigned only in the cleanup to `false`
-     * inside this callback, so every staleness guard below read as dead code. */
-    const discovery = new AbortController();
-    /* Read through a call, not a property: an early `if (signal.aborted) return`
-     * narrows the property to `false` for the rest of the function, and every
-     * later staleness guard then reads as dead code the checker can drop. */
-    const isStale = (): boolean => discovery.signal.aborted;
-    const discover = async (): Promise<void> => {
-      await Promise.resolve();
-      if (isStale()) {
-        return;
-      }
-      setLoading(true);
-      setError(undefined);
-      try {
-        const nextConnections = await listPaseoConnections();
-        /* Every paired connection is dialled: the directory no longer claims to
-         * know which daemons are reachable, and the socket that finds out is
-         * the one this page is about to open anyway. */
-        const discovered = await Promise.all(
-          nextConnections.map(async (connection) => {
-            const nextAgents = await listPaseoAgentsOverSdk({
-              apiBaseUrl: ENV.TAU_API_URL,
-              connectionId: connection.id,
-            });
-            return nextAgents.map<PaseoTarget>((agent) => ({
-              key: targetKey(connection.id, agent.id),
-              kind: 'paseo',
-              connectionId: connection.id,
-              connectionLabel: connection.label,
-              agent,
-            }));
-          }),
-        );
-        if (!isStale()) {
-          setConnections(nextConnections);
-          setAgents(discovered.flat());
-        }
-      } catch (error) {
-        if (!isStale()) {
-          setError(error instanceof Error ? error.message : 'Could not discover Paseo agents');
-        }
-      } finally {
-        if (!isStale()) {
-          setLoading(false);
-        }
-      }
-    };
-    // async-iife: bootstrap; the effect cleanup cancels stale discovery results.
-    void discover();
-    return () => {
-      discovery.abort();
-    };
-  }, [execution.kind, open]);
+  const hostTargets = useMemo(
+    () => hostPlacements.flatMap((placement) => placementTargets(placement)),
+    [hostPlacements],
+  );
 
   const selectedTarget = useMemo<ExecutionTarget>(() => {
     if (execution.kind === 'tau') {
@@ -315,9 +163,9 @@ export const ChatExecutionSelector = memo(function ({
       if (hostId === undefined) {
         return tauTarget;
       }
-      // A persisted daemon selection must name itself before discovery answers,
-      // exactly as a persisted Paseo agent does — otherwise the trigger reads
-      // "Tau" for a turn that will not run in this browser at all.
+      // A persisted daemon selection must name itself before the ladder
+      // answers — otherwise the trigger reads "Tau" for a turn that will not
+      // run in this browser at all.
       return (
         hostTargets.find((target) => target.agentId === undefined && target.placement.hostId === hostId) ??
         tauHostTarget({
@@ -326,51 +174,77 @@ export const ChatExecutionSelector = memo(function ({
           label: hostId,
           workspaceRoot: '',
           online: false,
-          /* A host provisioned seconds ago is not in the ladder's answer yet —
-           * its container is still booting — and the trigger must not read
-           * "Tau Host · agent_2f9…" in the meantime. */
-          ...(hostId === provisionedCloudHostId && projectId ? { cloudProjectId: projectId } : {}),
+          /* A placeholder for a host the ladder has not described yet: it has
+           * advertised nothing, so it offers no revision modes either. */
+          revisions: [],
         })
       );
     }
-    if (execution.kind === 'acp') {
-      const { agentId, hostId } = execution;
-      return (
-        hostTargets.find((target) => target.agentId === agentId && target.placement.hostId === hostId) ??
-        acpAgentTarget(
-          {
-            hostId,
-            rung: hostId === 'desktop' ? 'in-process' : hostId === 'origin' ? 1 : 2,
-            label: hostId,
-            workspaceRoot: '',
-            online: false,
-          },
-          agentId,
-        )
-      );
-    }
+    const { agentId, hostId } = execution;
     return (
-      agents.find(
-        (target) => target.connectionId === execution.connectionId && target.agent.id === execution.agentId,
-      ) ?? {
-        key: targetKey(execution.connectionId, execution.agentId),
-        kind: 'paseo',
-        connectionId: execution.connectionId,
-        connectionLabel: connections.find((connection) => connection.id === execution.connectionId)?.label ?? 'Paseo',
-        agent: { id: execution.agentId, label: 'Paseo agent', provider: 'Paseo', status: 'unknown' },
-      }
+      hostTargets.find((target) => target.agentId === agentId && target.placement.hostId === hostId) ??
+      acpAgentTarget(
+        {
+          hostId,
+          rung: hostId === 'desktop' ? 'in-process' : hostId === 'origin' ? 1 : 2,
+          label: hostId,
+          workspaceRoot: '',
+          online: false,
+          revisions: [],
+        },
+        unknownAgent(agentId),
+      )
     );
-  }, [agents, connections, execution, hostTargets]);
+  }, [execution, hostTargets]);
+
+  return { hostTargets, selectedTarget };
+};
+
+/**
+ * Whether the composer offers the agent control, and what it is set to.
+ *
+ * One agent is not a choice, and the bottom row has no width to spend on a
+ * control that cannot change anything (Q12.6). The label is the same one the
+ * trigger wears, so the tooltip can name the selected agent.
+ *
+ * @returns Whether to render the control, and the selected agent's name.
+ * @public
+ */
+export const useChatAgentSelection = (): { readonly isOffered: boolean; readonly label: string } => {
+  const { hostTargets, selectedTarget } = useExecutionTargets();
+  return {
+    isOffered: hostTargets.length + (isDesktopTarget() ? 0 : 1) > 1,
+    label: selectedTarget.label,
+  };
+};
+
+export const ChatExecutionSelector = memo(function ({
+  children,
+  onSelect,
+  onClose,
+  isNested,
+  ...properties
+}: ChatExecutionSelectorProps): React.JSX.Element {
+  const {
+    execution: { execution, setActiveExecution },
+    model: { modelId, model },
+    agentActivity,
+  } = useChatComposer();
+  const browserHost = useBrowserAgentHostProjectAvailability(model.provider.id);
+  const { hostTargets, selectedTarget } = useExecutionTargets();
+  const tauNote =
+    browserHost.status === 'unavailable'
+      ? browserHost.reason
+      : browserHost.status === 'available'
+        ? browserHost.caveat
+        : undefined;
 
   const groupedTargets = useMemo(
     () => [
-      { name: 'Tau', items: [tauTarget, ...hostTargets] as ExecutionTarget[] },
-      ...connections.map((connection) => ({
-        name: connection.label,
-        items: agents.filter((target) => target.connectionId === connection.id) as ExecutionTarget[],
-      })),
+      /* D18: the desktop build never constructs the browser worker, so it never offers the row. */
+      { name: 'Agents', items: [...(isDesktopTarget() ? [] : [tauTarget]), ...hostTargets] as ExecutionTarget[] },
     ],
-    [agents, connections, hostTargets],
+    [hostTargets],
   );
 
   const selectTarget = useCallback(
@@ -388,59 +262,37 @@ export const ChatExecutionSelector = memo(function ({
       if (hostTarget) {
         // An offline daemon is listed so the user can see *why* it is not an
         // option; selecting it would place a turn nothing can admit.
-        if (!hostTarget.placement.online) {
+        /* Listed so the user can see *why* it is not an option; selecting a
+         * refused agent would place a turn its host has already said it cannot
+         * start. */
+        if (!hostTarget.placement.online || hostTarget.agent?.refusal !== undefined) {
           return;
         }
         const placeOn = (hostId: TauAgentHostId): void => {
-          /* An external agent carries no Tau model and no revision mode: it runs
-           * on its own subscription, always in a materialized branch. */
+          /* An external agent carries no *Tau* model: it runs on its own
+           * subscription, in its own model namespace (VI3), so the row is
+           * seeded with the model the host probed as that agent's current one
+           * and the picker beside it writes any other. `withTauExecutionModel`
+           * is never reached from here — it would convert the row back to Tau. */
           setActiveExecution(
             hostTarget.agentId === undefined
               ? { ...withTauExecutionModel(execution, modelId), kind: 'tau', model: modelId, hostId }
-              : { kind: 'acp', hostId, agentId: hostTarget.agentId },
+              : {
+                  kind: 'acp',
+                  hostId,
+                  agentId: hostTarget.agentId,
+                  ...(hostTarget.agent?.defaultModel === undefined ? {} : { model: hostTarget.agent.defaultModel }),
+                },
           );
           onSelect?.();
         };
-        const { provisionProjectId } = hostTarget;
-        if (provisionProjectId !== undefined) {
-          setCloudRefusal(undefined);
-          setLoading(true);
-          const provision = async (): Promise<void> => {
-            try {
-              /* Provisioning is idempotent per owner and project, so a second
-               * click — or a reload mid-boot — lands on the same host rather
-               * than a second container. */
-              const { deviceId } = await provisionCloudHost(provisionProjectId);
-              setProvisionedCloudHostId(deviceId);
-              placeOn(deviceId);
-              /* This row alone keeps the list open across its await (see
-               * `shouldCloseOnSelect`), so it is the one that has to close
-               * itself once the placement is made. */
-              setOpen(false);
-            } catch (error) {
-              setCloudRefusal(error instanceof Error ? error.message : 'Could not start a Tau Cloud host');
-            } finally {
-              setLoading(false);
-            }
-          };
-          // async-iife: bootstrap -- a click handler cannot await; failures land on the row's note.
-          void provision();
-          return;
-        }
         placeOn(hostTarget.placement.hostId);
-        return;
       }
-      const target = agents.find((entry) => entry.key === key);
-      if (!target) {
-        return;
-      }
-      setActiveExecution({ kind: 'paseo', connectionId: target.connectionId, agentId: target.agent.id });
-      onSelect?.();
     },
-    [agents, execution, hostTargets, modelId, onSelect, setActiveExecution],
+    [execution, hostTargets, modelId, onSelect, setActiveExecution],
   );
 
-  const selectedLabel = selectedTarget.kind === 'paseo' ? selectedTarget.agent.label : selectedTarget.label;
+  const selectedLabel = selectedTarget.label;
 
   return (
     <ComboBoxResponsive
@@ -453,38 +305,23 @@ export const ChatExecutionSelector = memo(function ({
         if (target.kind === 'tau') {
           return [target.label];
         }
-        if (target.kind === 'tau-host') {
-          return [target.label, target.placement.label, target.placement.workspaceRoot, target.agentId ?? ''];
-        }
-        return [
-          target.agent.label,
-          target.agent.provider,
-          target.connectionLabel,
-          formatPaseoAgentStatus(target.agent.status),
-        ];
+        return [target.label, target.placement.label, target.placement.workspaceRoot, target.agentId ?? ''];
       }}
       value={selectedTarget}
       title='Select an agent'
-      description='Choose Tau in this browser, a Tau Host workspace, or an agent discovered through a paired Paseo daemon.'
+      description='Choose Tau in this browser, or a Tau Host workspace.'
       searchPlaceHolder='Search agents...'
-      emptyListMessage={error ?? 'No agents discovered.'}
-      isLoadingMore={loading}
+      emptyListMessage='No agents discovered.'
       isNested={isNested}
-      isOpen={open}
-      onOpenChange={setOpen}
       onClose={onClose}
       onSelect={selectTarget}
-      /* Every other row places its turn synchronously. Provisioning a cloud
-       * host is a round trip that can be refused, and closing the list on the
-       * click threw the refusal away — the live G5 leg saw a 500 and a page
-       * that showed nothing at all. The row stays put until it has an answer;
-       * the success path closes the list itself. */
-      shouldCloseOnSelect={(key) => key !== cloudPlacementKey}
       renderLabel={(target, selected) => (
         <span
           className={cn(
             'flex w-full min-w-0 items-center justify-between gap-2',
-            target.kind === 'tau-host' && !target.placement.online ? 'opacity-60' : undefined,
+            target.kind === 'tau-host' && (!target.placement.online || target.agent?.refusal !== undefined)
+              ? 'opacity-60'
+              : undefined,
           )}
           data-slot={target.kind === 'tau-host' ? 'chat-execution-tau-host' : undefined}
           /* Launcher 2's stable hooks, and *only* launcher 2's: an `aria-label`
@@ -495,22 +332,10 @@ export const ChatExecutionSelector = memo(function ({
           aria-label={isDesktopRow(target) ? `Select agent: ${target.label}` : undefined}
         >
           <span className='flex min-w-0 items-center gap-2'>
-            {target.kind === 'tau' ? (
-              <Bot className='size-4 shrink-0' />
-            ) : target.kind === 'tau-host' ? (
-              <Server className='size-4 shrink-0' />
-            ) : (
-              <Laptop className='size-4 shrink-0' />
-            )}
+            {target.kind === 'tau' ? <Bot className='size-4 shrink-0' /> : <Server className='size-4 shrink-0' />}
             <span className='min-w-0'>
-              <span className='block truncate'>{target.kind === 'paseo' ? target.agent.label : target.label}</span>
-              {target.kind === 'paseo' ? (
-                <span className='block truncate text-xs text-muted-foreground'>
-                  {hasHostMcp
-                    ? target.agent.provider
-                    : `${target.agent.provider} · no Tau tools — pair a Tau Host on that machine`}
-                </span>
-              ) : target.kind === 'tau-host' ? (
+              <span className='block truncate'>{target.label}</span>
+              {target.kind === 'tau-host' ? (
                 target.note ? (
                   <span
                     data-slot='chat-execution-tau-host-workspace'
@@ -535,30 +360,11 @@ export const ChatExecutionSelector = memo(function ({
             </span>
           </span>
           <span className='flex shrink-0 items-center gap-2'>
-            {target.kind === 'paseo' ? (
-              <Badge variant='outline'>{formatPaseoAgentStatus(target.agent.status)}</Badge>
-            ) : null}
             {target.kind === 'tau-host' && !target.placement.online ? <Badge variant='outline'>Offline</Badge> : null}
             {selected?.key === target.key ? <Check className='size-4' /> : null}
           </span>
         </span>
       )}
-      footer={
-        <>
-          <div className='border-t' />
-          <div className='p-1'>
-            <button
-              type='button'
-              className={cn(menuItemVariants({ highlight: 'selected' }), 'h-auto w-full')}
-              onClick={() => {
-                openSettingsDialog('connections');
-              }}
-            >
-              <Plus /> Pair or manage Paseo
-            </button>
-          </div>
-        </>
-      }
     >
       {children({ label: selectedLabel, kind: selectedTarget.kind, activity: agentActivity })}
     </ComboBoxResponsive>

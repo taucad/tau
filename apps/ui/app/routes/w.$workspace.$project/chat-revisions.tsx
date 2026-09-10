@@ -1,5 +1,5 @@
 import { GitBranch, History, RotateCcw, XIcon } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import {
   FloatingPanel,
   FloatingPanelClose,
@@ -17,6 +17,9 @@ import { PanelEmptyState } from '#components/ui/panel-empty-state.js';
 import { Input } from '@taucad/ui/components/input';
 import { useRevisionGraphActions } from '#hooks/use-revision-graph.js';
 import type { RevisionGraphNode } from '#lib/revision-graph.js';
+import { RevisionBranches } from '#routes/w.$workspace.$project/revision-branches.js';
+import { useOptionalChatWorkspaceAuthority } from '#providers/chat-workspace-authority-provider.js';
+import type { BranchMergeResult, RevisionBranchSummary } from '#providers/chat-workspace-authority-provider.js';
 
 /**
  * The Revisions pane (R13) — the primary, discoverable cross-chat time-travel
@@ -75,6 +78,7 @@ export function RevisionsPanelBody(): React.JSX.Element {
 
   return (
     <div data-slot='revisions-panel-body' className='size-full min-h-0 overflow-hidden bg-sidebar'>
+      <RevisionBranchesSection />
       <div className='size-full scroll-shadows-y overflow-y-auto p-2 [--scroll-fade-end:transparent] [--scroll-fade-size:28px]'>
         {graph.nodes.length === 0 ? (
           <PanelEmptyState
@@ -89,7 +93,12 @@ export function RevisionsPanelBody(): React.JSX.Element {
               const { revision } = node;
               const isActive = graph.headId === node.id;
               const restoreThis = (): void => {
-                restore({ messageId: revision.messageId, anchor: revision.anchor });
+                restore({
+                  messageId: revision.messageId,
+                  anchor: revision.anchor,
+                  identitySource: node.identitySource,
+                  ...(node.identitySource === 'authoritative' ? { revisionId: node.id } : {}),
+                });
               };
               return (
                 <li key={node.id} className='rounded-xl border border-border/70 bg-card'>
@@ -102,11 +111,15 @@ export function RevisionsPanelBody(): React.JSX.Element {
                     revision={revision}
                     isActive={isActive}
                     isModified={isActive && isDirty}
-                    isBusy={isBusy || !node.isRestorable}
+                    isBusy={isBusy || (!node.isRestorable && node.identitySource === 'transcript')}
                     onRestore={restoreThis}
                     onDiscard={restoreThis}
                   />
-                  {node.isRestorable ? null : (
+                  {/* The gate is about *replaying chat evidence*: a node the
+                      revision store holds is restored by checking it out, so a
+                      superseded branch is inspect-only only when that is the
+                      only route it has. */}
+                  {node.isRestorable || node.identitySource === 'authoritative' ? null : (
                     <p className='px-3 pb-2 text-xs text-muted-foreground'>Historical branch · inspect only</p>
                   )}
                 </li>
@@ -118,6 +131,92 @@ export function RevisionsPanelBody(): React.JSX.Element {
     </div>
   );
 }
+
+/**
+ * The DT1 branch porcelain, wired to the workspace authority, with "Current"
+ * read from the store's head reference.
+ *
+ * Optional authority on purpose: the Revisions pane also renders in profiles
+ * that never mount one (the generic chat client), and a branch list is an
+ * addition to that pane, never a precondition for it.
+ *
+ * Not from the graph head: a checkout moves where the live tree is without
+ * recording a turn, so labelling the newest turn's branch "Current" mislabelled
+ * the folder after every Switch and left a candidate that happened to be the
+ * newest revision with no verb at all (operator decisions 2026-09-09, question
+ * 11). A store with no head reference yet labels nothing current, which is what
+ * the transcript-fallback guard used to do.
+ */
+function RevisionBranchesSection(): React.ReactNode {
+  const authority = useOptionalChatWorkspaceAuthority();
+  const activeBranch = useSyncExternalStore(
+    authority?.subscribe ?? noBranchSubscription,
+    authority?.headBranch ?? noHeadBranch,
+    authority?.headBranch ?? noHeadBranch,
+  );
+  const [merge, setMerge] = useState<{ readonly source: string; readonly result: BranchMergeResult }>();
+  const [isBusy, setIsBusy] = useState(false);
+  const branches = useSyncExternalStore(
+    authority?.subscribe ?? noBranchSubscription,
+    authority?.listBranches ?? noBranches,
+    authority?.listBranches ?? noBranches,
+  );
+  if (!authority) {
+    return null;
+  }
+  const activeHead =
+    activeBranch === undefined ? undefined : branches.find((branch) => branch.name === activeBranch)?.headRevisionId;
+  const run = (operation: () => Promise<unknown>): void => {
+    setIsBusy(true);
+    // async-iife: bootstrap -- a click cannot await; failures reach the console sink.
+    void (async () => {
+      try {
+        await operation();
+      } catch (error) {
+        console.error('[RevisionBranches] branch operation failed', error);
+      } finally {
+        setIsBusy(false);
+      }
+    })();
+  };
+  return (
+    <RevisionBranches
+      branches={branches}
+      {...(activeBranch === undefined ? {} : { activeBranch })}
+      isBusy={isBusy}
+      {...(merge === undefined ? {} : { mergeResult: merge })}
+      diff={(branch) =>
+        activeHead === undefined ? [] : authority.diffRevisions({ from: activeHead, to: branch.headRevisionId })
+      }
+      onSwitch={(branch) => {
+        run(async () => authority.checkout(branch.headRevisionId));
+      }}
+      onMerge={(branch) => {
+        if (activeBranch === undefined) {
+          return;
+        }
+        run(async () => {
+          const result = await authority.mergeBranch({
+            source: branch.name,
+            target: activeBranch,
+            actorId: 'user',
+          });
+          setMerge({ source: branch.name, result });
+        });
+      }}
+      onDiscard={(branch) => {
+        /* The ref goes; every revision it reached stays in the object store and
+         * stays reachable by id, so the evidence survives the name. */
+        run(async () => authority.deleteBranch(branch.name));
+      }}
+    />
+  );
+}
+
+const noBranches = (): readonly RevisionBranchSummary[] => emptyBranches;
+const noHeadBranch = (): string | undefined => undefined;
+const emptyBranches: readonly RevisionBranchSummary[] = [];
+const noBranchSubscription = (): (() => void) => () => undefined;
 
 function RevisionGraphMetadata({
   node,
@@ -166,16 +265,25 @@ function RevisionGraphMetadata({
         <dl className='mt-2 grid grid-cols-[auto_1fr] gap-x-2 gap-y-1 break-all'>
           <dt>Revision</dt>
           <dd>
-            <code>{node.id}</code>
+            {/* A 40-hex commit id is unreadable in a 240px pane; twelve is what
+                every engine's own porcelain shows, and the full id is one hover
+                (or one copy) away. */}
+            <code title={node.id}>{node.id.slice(0, 12)}</code>
           </dd>
           <dt>Tree</dt>
           <dd>
-            <code>{node.treeId}</code>
+            <code title={node.treeId}>{node.treeId.slice(0, 12)}</code>
           </dd>
           <dt>Identity</dt>
           <dd>{node.identitySource === 'authoritative' ? 'Workspace finalizer' : 'Transcript fallback'}</dd>
           <dt>Base revision</dt>
-          <dd>{node.baseRevisionId === undefined ? 'Not recorded' : <code>{node.baseRevisionId}</code>}</dd>
+          <dd>
+            {node.baseRevisionId === undefined ? (
+              'Not recorded'
+            ) : (
+              <code title={node.baseRevisionId}>{node.baseRevisionId.slice(0, 12)}</code>
+            )}
+          </dd>
           <dt>Chat</dt>
           <dd>
             {node.chatName} · <code>{node.chatId}</code>

@@ -59,7 +59,20 @@ export type ChatRequestBody = Readonly<Record<string, unknown>>;
 
 export type ChatRequest =
   | { kind: 'send'; message: MyUIMessage; body?: ChatRequestBody }
-  | { kind: 'regenerate'; body?: ChatRequestBody }
+  | {
+      kind: 'regenerate';
+      body?: ChatRequestBody;
+      /**
+       * Execution the body must be composed from, when the dispatcher knows it
+       * and the React tree does not yet. The seeded first turn is dispatched
+       * from inside `loadChatActor`, one statement before the `chatRetrieved`
+       * event that assigns {@link ChatPersistenceMachineContext.activeExecution};
+       * without this the bodyless dispatch composes from the un-hydrated
+       * cookie fallback and runs the chat's `acp` (or host-pinned Tau) turn as
+       * a plain browser Tau turn.
+       */
+      execution?: CadAgentExecution;
+    }
   | {
       kind: 'edit';
       messageId: string;
@@ -124,8 +137,8 @@ export type ChatPersistenceMachineContext = {
   // Request queued while a previous request is being stopped; consumed on requestFinished
   pendingRequest?: ChatRequest;
   /**
-   * Chat-scoped execution target. Paseo selections contain opaque connection
-   * and agent ids only; pairing credentials never enter durable chat state.
+   * Chat-scoped execution target. Selections contain opaque host and agent
+   * ids only; credentials never enter durable chat state.
    */
   activeExecution?: CadAgentExecution;
   /**

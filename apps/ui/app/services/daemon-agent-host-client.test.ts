@@ -114,10 +114,6 @@ const fakeChannel = (options: { readonly hold?: Promise<void> } = {}): FakeChann
             }
           : { type: 'tail', chatId: command.chatId, batch };
       }
-      if (command.type === 'mint-mcp-capability') {
-        // The Paseo runner asks a daemon for this directly; the transport never does.
-        throw new Error('unexpected mint command on the transport');
-      }
       const runId = command.type === 'resume' ? 'resumed-run' : command.runId;
       return { type: 'result', operation: command.type, snapshot: snapshotFor(command.chatId, runId, 'completed') };
     },

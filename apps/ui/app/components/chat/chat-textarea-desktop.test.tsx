@@ -59,8 +59,11 @@ vi.mock('@xstate/react', () => ({
   useSelector: () => undefined,
 }));
 
+// `planMode` is the only flag this row reads, so one switch covers it.
+const mockPlanModeEnabled = { current: false };
+
 vi.mock('#flags/use-feature.js', () => ({
-  useFeature: () => false,
+  useFeature: () => mockPlanModeEnabled.current,
 }));
 
 vi.mock('#components/chat/chat-model-selector.js', () => ({
@@ -70,17 +73,31 @@ vi.mock('#components/chat/chat-model-selector.js', () => ({
   ),
 }));
 
+const mockAgentSelectorOffered = { current: true };
+
 vi.mock('#components/chat/chat-execution-selector.js', () => ({
   formatChatAgentActivity: () => 'Approval needed',
+  useChatAgentSelection: () => ({ isOffered: mockAgentSelectorOffered.current, label: 'Claude Code' }),
   ChatExecutionSelector: ({
     children,
   }: {
     readonly children: (props: {
       readonly label: string;
-      readonly kind: 'tau' | 'paseo';
+      readonly kind: 'tau' | 'tau-host';
       readonly activity: 'approval-required';
     }) => React.ReactNode;
-  }) => <div>{children({ label: 'Claude Code', kind: 'paseo', activity: 'approval-required' })}</div>,
+  }) => <div>{children({ label: 'Claude Code', kind: 'tau-host', activity: 'approval-required' })}</div>,
+}));
+
+const acpModel = { id: 'gpt-5.6-sol', name: 'GPT-5.6-Sol' };
+
+vi.mock('#components/chat/chat-agent-model-selector.js', () => ({
+  useChatAgentModel: () => ({ models: [acpModel], selectedModel: acpModel, isOffered: true, agentName: 'Codex' }),
+  ChatAgentModelSelector: ({
+    children,
+  }: {
+    readonly children: (props: { readonly selectedModel: typeof acpModel }) => React.ReactNode;
+  }) => <div>{children({ selectedModel: acpModel })}</div>,
 }));
 
 vi.mock('#components/chat/chat-kernel-selector.js', () => ({
@@ -97,8 +114,18 @@ vi.mock('#components/chat/chat-tool-selector.js', () => ({
   ),
 }));
 
+const modeConfig = {
+  label: 'Agent',
+  icon: () => <span data-testid='mode-icon' />,
+  activeClass: '',
+};
+
 vi.mock('#components/chat/chat-mode-selector.js', () => ({
-  ChatAgentSelector: () => <div data-testid='mode-selector' />,
+  ChatAgentSelector: ({
+    children,
+  }: {
+    readonly children: (props: { readonly currentConfig: typeof modeConfig }) => React.ReactNode;
+  }) => <div data-testid='mode-selector'>{children({ currentConfig: modeConfig })}</div>,
   toggleModeKeyCombination: { key: 'm' },
 }));
 
@@ -160,6 +187,8 @@ describe('ChatTextareaLeftControls — chat-scoped kernel label', () => {
     mockKernelByConsumer.current = manifoldKernel;
     mockExecutionByConsumer.current = { kind: 'tau', model: 'm' };
     mockSessionByConsumer.current = false;
+    mockAgentSelectorOffered.current = true;
+    mockPlanModeEnabled.current = false;
   });
 
   it('should render the kernel label from useChatComposer().kernel (no direct useKernel)', () => {
@@ -186,8 +215,8 @@ describe('ChatTextareaLeftControls — chat-scoped kernel label', () => {
     expect(location.previousElementSibling).toHaveTextContent('Select model');
   });
 
-  it('names the agent selector and hides the Tau model selector for a Paseo execution', () => {
-    mockExecutionByConsumer.current = { kind: 'paseo', connectionId: 'connection-1', agentId: 'claude' };
+  it('names the agent selector and hides the Tau model selector for an external execution', () => {
+    mockExecutionByConsumer.current = { kind: 'acp', hostId: 'origin', agentId: 'claude' };
     mockSessionByConsumer.current = true;
 
     renderControls();
@@ -197,5 +226,74 @@ describe('ChatTextareaLeftControls — chat-scoped kernel label', () => {
       'Agent status: Approval needed',
     );
     expect(screen.queryByTestId('model-selector')).toBeNull();
+  });
+
+  /* Q12.2 + Q12.5: the readiness dot is gone from the trigger and readiness
+   * reads out of the tooltip, in the model selector's style. */
+  it('names the selected agent and its readiness in the agent tooltip', () => {
+    mockSessionByConsumer.current = true;
+
+    renderControls();
+
+    expect(screen.getAllByTestId('tooltip-content').map((node) => node.textContent)).toContain(
+      'Select agent (Claude Code) · Approval needed',
+    );
+  });
+
+  /* Q12.6: one agent is not a choice. */
+  it('does not render the agent selector when Tau is the only agent', () => {
+    mockSessionByConsumer.current = true;
+    mockAgentSelectorOffered.current = false;
+
+    renderControls();
+
+    expect(screen.queryByRole('button', { name: /^Select agent: /u })).toBeNull();
+  });
+
+  /* Q12 fold 1: the ACP model trigger collapses like its Tau sibling, so its
+   * label is hidden below the container breakpoint and the name moves to the
+   * trigger's accessible name. */
+  it('collapses the ACP model label below the container breakpoint and keeps its accessible name', () => {
+    mockExecutionByConsumer.current = { kind: 'acp', hostId: 'origin', agentId: 'codex' };
+    mockSessionByConsumer.current = true;
+
+    renderControls();
+
+    const trigger = screen.getByRole('button', { name: 'Select model (GPT-5.6-Sol)' });
+    const label = trigger.querySelector('span')!;
+    expect(label).toHaveTextContent('GPT-5.6-Sol');
+    expect(label.className).toContain('hidden');
+    expect(label.className).toContain('@[22rem]:block');
+    expect(trigger.className).toContain('@max-[22rem]:w-7');
+  });
+
+  /* C3-review M2: at the 280 px pane every trigger label is `display:none`, so
+   * the kernel and mode triggers are only reachable by their `aria-label`. */
+  it('names the kernel and mode triggers when their labels are collapsed', () => {
+    mockKernelByConsumer.current = openscadKernel;
+    mockPlanModeEnabled.current = true;
+
+    renderControls();
+
+    expect(screen.getByRole('button', { name: 'Select kernel (OpenSCAD)' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Select mode (Agent)' })).toBeInTheDocument();
+  });
+
+  /* C3-review M1: the agent trigger collapses to 28 px like its four siblings. */
+  it('collapses the agent trigger below the container breakpoint', () => {
+    mockSessionByConsumer.current = true;
+
+    renderControls();
+
+    expect(screen.getByRole('button', { name: 'Select agent: Claude Code' }).className).toContain('@max-[22rem]:w-7');
+  });
+
+  /* Q12.7: no chevron on any trigger in the row. */
+  it('renders no chevron on any trigger', () => {
+    mockSessionByConsumer.current = true;
+
+    const { container } = renderControls();
+
+    expect(container.querySelectorAll('svg.lucide-chevron-down')).toHaveLength(0);
   });
 });

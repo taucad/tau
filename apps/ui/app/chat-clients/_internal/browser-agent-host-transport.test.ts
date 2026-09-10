@@ -9,11 +9,13 @@ import type { AgentHostClient } from '#services/agent-host-client.js';
 import {
   BrowserPlacementChatTransport,
   getBrowserAgentHostRun,
+  getHostFinalizedRevisions,
   registerAgentHost,
   registerAgentHostRunReset,
   resolveBrowserAgentHostInterrupt,
 } from '#chat-clients/_internal/browser-agent-host-transport.js';
 import { agentHostTailBatchLimit } from '#workers/agent-host.contract.js';
+import { parseErrorForPersistence } from '#utils/error.utils.js';
 import hexagonalNutLog from '#services/__fixtures__/daemon-reattach-hexnut.jsonl?raw';
 import hexagonalNutFourRunLog from '#services/__fixtures__/daemon-reattach-hexnut-4runs.jsonl?raw';
 
@@ -89,7 +91,7 @@ const browserConfig = {
     { type: 'text', text: '' },
     { type: 'text', text: 'dynamic' },
   ],
-  model: { id: 'openai/gpt-5.5', providerKind: 'openai', contextWindow: 200_000 },
+  model: { id: 'openai-gpt-5.5', providerKind: 'openai', contextWindow: 200_000 },
   toolChoice: 'auto',
   allowedTools: ['read_file'],
 } as const;
@@ -99,7 +101,7 @@ const browserBody = (input: {
   readonly trigger: 'submit' | 'retry' | 'edit' | 'regenerate';
   readonly retainedMessageIds?: readonly string[];
 }) => ({
-  agent: { execution: { kind: 'tau', model: 'openai/gpt-5.5', placement: 'browser-host' } },
+  agent: { execution: { kind: 'tau', model: 'openai-gpt-5.5', placement: 'browser-host' } },
   admission: { version: 1, idempotencyKey: input.runId },
   browserHost:
     input.trigger === 'submit'
@@ -269,6 +271,132 @@ describe('BrowserPlacementChatTransport', () => {
     unregister();
   });
 
+  /* The store is module-scoped and lives as long as the tab: a session that
+     sees thousands of host-recorded turns must not retain every one of them,
+     and the snapshot the graph reads is rebuilt on each arrival (5-review N6). */
+  it('keeps only the most recent host-recorded revisions this tab has seen', async () => {
+    installBrowserGlobals();
+    const chatId = 'chat-host-finalized-cap';
+    const runId = 'run-host-finalized-cap';
+    const transport = new BrowserPlacementChatTransport();
+    const recorded = 300;
+    const finalized = (index: number): AgentLogEvent =>
+      parseLogEvent({
+        version: 1,
+        leaderEpoch: 'leader-cap',
+        sequence: index + 1,
+        recordedAt: '2026-09-01T00:00:01.000Z',
+        runId,
+        type: 'revision.finalized',
+        turnId: `user-${String(index)}`,
+        workspaceId: `trun-${String(index)}`,
+        revisionId: `rev:trun-${String(index)}`,
+        baseRevisionId: 'rev:base-1',
+        treeId: `rev:trun-${String(index)}`,
+        branchName: `agent/${chatId}/trun-${String(index)}`,
+        publication: {
+          status: 'updated',
+          branchName: `agent/${chatId}/trun-${String(index)}`,
+          expectedHeadRevisionId: 'rev:base-1',
+          headRevisionId: `rev:trun-${String(index)}`,
+        },
+        changedPaths: ['main.scad'],
+        provenance: { source: 'agent', actorId: 'tau-host', runId, createdAt: 1_788_220_800_000 },
+        generatedSummary: `Agent turn ${String(index)}`,
+        nativeGit: { status: 'not-configured' },
+      });
+    let listener: Parameters<AgentHostClient['subscribe']>[0] | undefined;
+    const client = clientFor(chatId, runId, {
+      subscribe: vi.fn((next: Parameters<AgentHostClient['subscribe']>[0]) => {
+        listener = next;
+        return () => {
+          listener = undefined;
+        };
+      }),
+      start: vi.fn(async () => {
+        for (let index = 0; index < recorded; index += 1) {
+          listener?.(chatId, finalized(index));
+        }
+        listener?.(chatId, {
+          version: 1,
+          leaderEpoch: 'leader-cap',
+          sequence: recorded + 1,
+          recordedAt: '2026-09-01T00:00:02.000Z',
+          runId,
+          type: 'run.lifecycle',
+          state: 'completed',
+        });
+        return snapshot(chatId, runId);
+      }),
+    });
+    const unregister = registerAgentHost(chatId, {
+      projectStorage: async () => {
+        throw new Error('A host-placed turn reads its workspace from the daemon.');
+      },
+      markRunId: async () => undefined,
+      createClient: async () => client,
+    });
+
+    const stream = await transport.sendMessages({
+      chatId,
+      trigger: 'submit-message',
+      messageId: undefined,
+      messages: [{ id: 'user-1', role: 'user', parts: [{ type: 'text', text: 'Build it.' }] }],
+      abortSignal: undefined,
+      body: {
+        agent: { execution: { kind: 'acp', hostId: 'origin', agentId: 'codex' } },
+        admission: { version: 1, idempotencyKey: runId },
+        browserHost: { trigger: 'submit', agent: { kind: 'acp', id: 'codex' } },
+      },
+    });
+    await drain(stream.getReader());
+
+    const kept = getHostFinalizedRevisions();
+    expect(kept).toHaveLength(256);
+    expect(kept.at(0)?.workspaceId).toBe(`trun-${String(recorded - 256)}`);
+    expect(kept.at(-1)?.workspaceId).toBe(`trun-${String(recorded - 1)}`);
+    unregister();
+  });
+
+  /* G-REV-MODE: the host that runs the turn is the host that records it, so
+     the composer's revision selection has to leave the page with the admission.
+     The body's `execution` is where `createRunBody` puts it. */
+  it("carries the turn's revision mode from the durable body to the host's start command", async () => {
+    installBrowserGlobals();
+    const chatId = 'chat-revision-mode';
+    const runId = 'run-revision-mode';
+    const transport = new BrowserPlacementChatTransport();
+    const commands: Array<Record<string, unknown>> = [];
+    const unregister = registerAgentHost(chatId, {
+      projectStorage: async () => {
+        throw new Error('A Tau Host turn reads its workspace from the daemon.');
+      },
+      markRunId: async () => undefined,
+      createClient: async () => scriptedClient(commands),
+    });
+
+    const stream = await transport.sendMessages({
+      chatId,
+      trigger: 'submit-message',
+      messageId: undefined,
+      messages: [{ id: 'user-1', role: 'user', parts: [{ type: 'text', text: 'Build it.' }] }],
+      abortSignal: undefined,
+      body: {
+        ...browserBody({ runId, trigger: 'submit' }),
+        execution: { hostId: 'origin', mode: 'candidate', baseRevisionId: 'rev:base-1' },
+      },
+    });
+    await drain(stream.getReader());
+
+    expect(commands.find((command) => command['type'] === 'start')).toMatchObject({
+      type: 'start',
+      runId,
+      mode: 'candidate',
+      baseRevisionId: 'rev:base-1',
+    });
+    unregister();
+  });
+
   it('refuses an external-agent turn whose admission does not parse', async () => {
     installBrowserGlobals();
     const transport = new BrowserPlacementChatTransport();
@@ -339,7 +467,11 @@ describe('BrowserPlacementChatTransport', () => {
         sequence: 4,
         type: 'run.lifecycle',
         state: 'failed',
-        detail: { message: 'The model gateway refused this run.', code: 'GATEWAY_UNAUTHORIZED', status: 401 },
+        detail: {
+          message: 'The funded-operation failsafe is active. Try again after current work finishes.',
+          code: 'FUNDED_OPERATION_LIMIT',
+          status: 429,
+        },
       },
     ] satisfies AgentLogEvent[];
     const markRunId = vi.fn(async () => undefined);
@@ -385,7 +517,16 @@ describe('BrowserPlacementChatTransport', () => {
 
     expect(client.start).not.toHaveBeenCalled();
     expect(client.resume).not.toHaveBeenCalled();
-    expect(chunks).toContainEqual({ type: 'error', errorText: 'The model gateway refused this run.' });
+    const failure = chunks.find((chunk) => chunk.type === 'error');
+    if (failure?.type !== 'error') {
+      throw new Error('Expected the durable failure chunk');
+    }
+    expect(parseErrorForPersistence(new Error(failure.errorText))).toMatchObject({
+      category: 'rate_limit',
+      code: 'FUNDED_OPERATION_LIMIT',
+      httpStatus: 429,
+      message: 'The funded-operation failsafe is active. Try again after current work finishes.',
+    });
     // Settlement reads this: a terminal browser run must never be looked up
     // through the API projection, and a failed one releases its claim.
     expect(getBrowserAgentHostRun(chatId)).toMatchObject({ runId, state: 'failed', turnId: 'user-reload-failed' });

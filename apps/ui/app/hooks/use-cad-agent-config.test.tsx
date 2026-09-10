@@ -4,8 +4,10 @@ import type { ChatSnapshot, ContextPayload } from '@taucad/chat';
 import type { KernelId } from '@taucad/types/constants';
 import { resolveKernel } from '@taucad/types/constants';
 import {
+  awaitAgentHostAvailability,
   awaitBrowserAgentHostAvailability,
   resetBrowserAgentHostAvailability,
+  useAgentHostPlacements,
   useBrowserAgentHostProjectAvailability,
   useCadAgentConfig,
 } from '#hooks/use-cad-agent-config.js';
@@ -89,9 +91,23 @@ vi.mock('#services/agent-host-client.js', () => ({
   isBrowserAgentHostProviderKind: (providerKind: string) => providerKind === 'openai' || providerKind === 'anthropic',
 }));
 
+/** The host directory's refusal, recorded by discovery exactly as the real one does. */
+const directoryHarness = vi.hoisted(() => ({ outage: undefined as string | undefined, refusal: 'offline' }));
+vi.mock('#lib/agent-host-placement.js', () => ({
+  listAgentHostPlacements: async () => {
+    directoryHarness.outage = directoryHarness.refusal;
+    return [];
+  },
+  hostDirectoryOutage: () => directoryHarness.outage,
+}));
+
 const noop = (): void => undefined;
 
-/** A Tau execution carrying the client-only revision mode the strict wire type omits. */
+/**
+ * A persisted Tau execution still carrying the retired `revision` ride-along
+ * (the mode moved to `ChatExecutionTarget` in V18). The assembler must carry
+ * whatever the row holds through verbatim rather than rewriting it.
+ */
 const branchExecutionFields = { kind: 'tau', model: 'openai-gpt-5.5', revision: 'branch' };
 const branchExecution = branchExecutionFields as unknown as ChatComposerContextValue['execution']['execution'];
 
@@ -152,6 +168,7 @@ const mountChatSelectorMocks = (overrides: { draftMode?: string; draftToolChoice
 beforeEach(() => {
   vi.clearAllMocks();
   resetBrowserAgentHostAvailability();
+  directoryHarness.outage = undefined;
   capabilityHarness.supported = true;
   capabilityHarness.readError = undefined;
   bridgeHarness.open.mockReturnValue({ port: new MessageChannel().port1, dispose: vi.fn() });
@@ -295,6 +312,26 @@ describe('useCadAgentConfig', () => {
       status: 'unavailable',
       reason: 'This project’s storage cannot hold a durable agent log.',
     });
+  });
+
+  it('refuses a persisted daemon placement with the directory’s own message', async () => {
+    directoryHarness.outage = 'That computer is offline. Start `tau serve` on it.';
+
+    // The dispatch arrives after discovery has already given up, so nothing
+    // will ever publish that host's key: it must refuse now, not in 20 seconds.
+    await expect(awaitAgentHostAvailability({ projectId: 'project-test', hostId: 'device-1' }, 50)).resolves.toEqual({
+      status: 'unavailable',
+      reason: 'That computer is offline. Start `tau serve` on it.',
+    });
+  });
+
+  it('settles a dispatch already waiting when the directory fails under it', async () => {
+    // The seeded first turn waits on its host before discovery answers.
+    const settled = awaitAgentHostAvailability({ projectId: 'project-test', hostId: 'device-1' }, 50);
+
+    renderHook(() => useAgentHostPlacements());
+
+    await expect(settled).resolves.toEqual({ status: 'unavailable', reason: 'offline' });
   });
 
   it('bounds the dispatch wait rather than hanging a turn forever', async () => {

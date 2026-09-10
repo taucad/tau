@@ -71,7 +71,13 @@ const exportOptions = {
   '3mf': options,
 } as const;
 
-const buildAndExport = async (kernel: typeof openrscadKernel, source: string, format: 'glb' | '3mf') => {
+const buildAndExport = async (
+  kernel: typeof openrscadKernel,
+  source: string,
+  request: 'glb' | '3mf' | { format: 'glb' | '3mf'; parameters: Record<string, unknown> },
+) => {
+  const format = typeof request === 'string' ? request : request.format;
+  const parameters = typeof request === 'string' ? {} : request.parameters;
   const definition: AnyKernelDefinition = await resolveRuntimePluginDefinition('kernel', kernel());
   const runtime = createMockKernelRuntime({
     filesystemOverrides: {
@@ -84,7 +90,7 @@ const buildAndExport = async (kernel: typeof openrscadKernel, source: string, fo
     },
   });
   const context: unknown = await definition.initialize({}, runtime);
-  const created = (await definition.createGeometry({ entryPath, parameters: {}, options }, runtime, context)) as {
+  const created = (await definition.createGeometry({ entryPath, parameters, options }, runtime, context)) as {
     nativeHandle: { stats: { triangleCount: number; vertexCount: number; volume: number; area: number } };
   };
   const exported = await definition.exportGeometry(
@@ -103,6 +109,22 @@ describe('@taulabs/openrscad-engine native/WebAssembly parity', () => {
   it('binds the addon for the default kernel, so the comparison is not wasm against itself', async () => {
     const engine = await import('@taulabs/openrscad-engine');
     expect([engine.backend, engine.backendCause]).toEqual(['native', undefined]);
+  });
+
+  it('applies grouped parameter overrides in both backends', async () => {
+    const source = '/* [Body] */\nsize = 5;\ncube(size);';
+    const group = 'Body';
+    const parameters = { [group]: { size: 7 } };
+    const wasmDefault = await buildAndExport(wasmKernel, source, 'glb');
+    const nativeDefault = await buildAndExport(openrscadKernel, source, 'glb');
+    const wasm = await buildAndExport(wasmKernel, source, { format: 'glb', parameters });
+    const native = await buildAndExport(openrscadKernel, source, { format: 'glb', parameters });
+
+    expect(wasmDefault.stats.volume).toBe(125);
+    expect(nativeDefault.stats.volume).toBe(125);
+    expect(wasm.stats.volume).toBe(343);
+    expect(native.stats.volume).toBe(343);
+    expect(Buffer.from(native.file.bytes).equals(Buffer.from(wasm.file.bytes))).toBe(true);
   });
 
   for (const [name, source] of Object.entries(fixtures)) {

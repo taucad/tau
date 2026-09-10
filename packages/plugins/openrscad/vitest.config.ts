@@ -1,10 +1,13 @@
-import { defineConfig } from 'vitest/config';
+import { configDefaults, defineConfig } from 'vitest/config';
 import { nxViteTsPaths } from '@nx/vite/plugins/nx-tsconfig-paths.plugin';
 
 export default defineConfig({
   plugins: [nxViteTsPaths()],
   test: {
     environment: 'node',
+    // `e2e/` is its own Vitest Browser project (`e2e/vitest.config.ts`); its
+    // spec imports `vitest/browser`, which only exists in browser mode.
+    exclude: [...configDefaults.exclude, 'e2e/**'],
     typecheck: {
       enabled: true,
       include: ['**/*.test-d.ts'],

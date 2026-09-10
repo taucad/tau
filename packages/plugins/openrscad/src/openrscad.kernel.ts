@@ -216,14 +216,13 @@ const collectSourceBundle = async (options: {
   };
 };
 
-const flattenParameters = (parameters: Record<string, unknown>, prefix = ''): Record<string, unknown> => {
+const flattenParameters = (parameters: Record<string, unknown>): Record<string, unknown> => {
   const flattened: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(parameters)) {
-    const name = prefix ? `${prefix}.${key}` : key;
     if (isRecordObject(value)) {
-      Object.assign(flattened, flattenParameters(value, name));
+      Object.assign(flattened, flattenParameters(value));
     } else {
-      flattened[name] = value;
+      flattened[key] = value;
     }
   }
   return flattened;
@@ -402,7 +401,7 @@ const assertExport = (result: ExportShape3DOutput): ExportShape3DOutput => {
 };
 
 /** Engine version this kernel is authored against. @public */
-const engineVersion = '0.11.0-beta.3';
+const engineVersion = '0.11.0-beta.4';
 
 /** Options for {@link createOpenrscadKernel}. @public */
 export type CreateOpenrscadKernelOptions = {

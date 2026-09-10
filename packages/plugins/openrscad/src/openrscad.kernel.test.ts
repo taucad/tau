@@ -263,7 +263,7 @@ describe('OpenRSCADKernel', () => {
     // the engine *release*, not the backend: the addon and the WebAssembly
     // build of one release are byte-identical (`native-wasm-parity.test.ts`),
     // so they deliberately share this cache namespace.
-    expect(definition.version).toBe('0.11.0-beta.3');
+    expect(definition.version).toBe('0.11.0-beta.4');
   });
 
   it('logs the backend the engine bound', async () => {
@@ -1209,6 +1209,28 @@ endsolid tetrahedron`);
       },
       issues: [],
     });
+  });
+
+  it('applies grouped customizer overrides to their leaf parameters', async () => {
+    const definition = await resolveRuntimePluginDefinition('kernel', openrscadKernel());
+    const runtime = createRuntime({
+      'project/model.scad': '/* [Body] */\ndimensions = [1, 2, 3];\ncube(dimensions);',
+    });
+    const context = await definition.initialize({}, runtime);
+    const created = await renderModel({
+      definition,
+      runtime,
+      context,
+      entryPath: 'project/model.scad',
+      parameters: { Body: { dimensions: [7, 8, 9] } },
+    });
+    if (created.geometry.format !== 'gltf') {
+      throw new Error('Expected GLB render geometry');
+    }
+
+    expect(getBoundingBoxFromInspect(await getInspectReport(created.geometry.content))?.size).toEqual([
+      0.007, 0.009, 0.008,
+    ]);
   });
 
   it('returns a valid empty GLB for an empty source', async () => {

@@ -1,0 +1,66 @@
+{
+  "name": "@taucad/revisions",
+  "version": "0.0.1",
+  "description": "Host-neutral revision port with jj, native-Git and browser adapters for Tau",
+  "type": "module",
+  "sideEffects": false,
+  "private": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taucad/tau.git",
+    "directory": "packages/revisions"
+  },
+  "homepage": "https://github.com/taucad/tau/tree/main/packages/revisions#readme",
+  "bugs": {
+    "url": "https://github.com/taucad/tau/issues"
+  },
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "keywords": [
+    "cad",
+    "typescript",
+    "revisions",
+    "jujutsu",
+    "git"
+  ],
+  "author": "Richard Fontein",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./node": "./src/node/index.ts",
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs",
+        "default": "./dist/index.mjs"
+      },
+      "./node": {
+        "types": "./dist/node/index.d.mts",
+        "import": "./dist/node/index.mjs",
+        "default": "./dist/node/index.mjs"
+      },
+      "./package.json": "./package.json"
+    },
+    "imports": {}
+  },
+  "imports": {
+    "#*.js": "./src/*.ts",
+    "#*": "./src/*"
+  },
+  "dependencies": {
+    "@taucad/filesystem": "workspace:*",
+    "zod": "catalog:"
+  }
+}

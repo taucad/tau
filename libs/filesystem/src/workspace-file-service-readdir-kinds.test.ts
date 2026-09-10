@@ -53,8 +53,12 @@ const createService = async () => {
   );
 
   const mountTable = new MountTable();
-  mountTable.mount('/', source.provider, { backend: 'memory', storageRootKey: 'memory:source' });
-  mountTable.mount('/other', target.provider, { backend: 'memory', storageRootKey: 'memory:target' });
+  mountTable.mount('/', source.provider, { class: 'authored', backend: 'memory', storageRootKey: 'memory:source' });
+  mountTable.mount('/other', target.provider, {
+    class: 'authored',
+    backend: 'memory',
+    storageRootKey: 'memory:target',
+  });
 
   const service = new WorkspaceFileService({
     providerRegistry,

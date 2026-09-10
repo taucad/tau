@@ -26,6 +26,7 @@ const createAuthority = async (databasePrefix: string, options?: { disableChanne
   const provider = await registry.getProvider(scope);
   const mountTable = new MountTable();
   mountTable.mount('/', provider, {
+    class: 'authored',
     backend: 'indexeddb',
     storageRootKey: registry.resolveStorageRootKey(scope),
   });

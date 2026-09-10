@@ -23,14 +23,17 @@ async function createMountedWorkspaceFileService() {
 
   const mountTable = new MountTable();
   mountTable.mount('/', rootProvider, {
+    class: 'authored',
     backend: 'memory',
     storageRootKey: 'memory:mount-integration-root',
   });
   mountTable.mount('/node_modules', nodeModulesProvider, {
+    class: 'authored',
     backend: 'memory',
     storageRootKey: 'memory:mount-integration-node-modules',
   });
   mountTable.mount('/previews/deps', nodeModulesProvider, {
+    class: 'authored',
     backend: 'memory',
     storageRootKey: 'memory:mount-integration-node-modules',
   });
@@ -269,7 +272,7 @@ describe('MountTable integration', () => {
       const providerRegistry = new ProviderRegistry();
       const provider = await providerRegistry.getProvider({ backend: 'memory', storageRootKey: 'memory:test-root' });
       const mt = new MountTable();
-      mt.mount('/', provider, { backend: 'memory', storageRootKey: 'memory:test-root' });
+      mt.mount('/', provider, { class: 'authored', backend: 'memory', storageRootKey: 'memory:test-root' });
 
       const svc = new WorkspaceFileService({
         providerRegistry,
@@ -302,13 +305,19 @@ describe('MountTable integration', () => {
         storageRootKey: 'memory:second-project',
       });
       const siblingMountTable = new MountTable();
-      siblingMountTable.mount('/', rootProvider, { backend: 'memory', storageRootKey: 'memory:root' });
+      siblingMountTable.mount('/', rootProvider, {
+        class: 'authored',
+        backend: 'memory',
+        storageRootKey: 'memory:root',
+      });
       siblingMountTable.mount('/projects/proj_A', firstProjectProvider, {
+        class: 'authored',
         backend: 'indexeddb',
         storageRootKey: providerRegistry.resolveStorageRootKey({ backend: 'indexeddb' }),
         providerBasePath: 'projects/proj_A',
       });
       siblingMountTable.mount('/projects/proj_B', secondProjectProvider, {
+        class: 'authored',
         backend: 'memory',
         storageRootKey: 'memory:second-project',
         providerBasePath: 'projects/proj_B',

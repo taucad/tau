@@ -18,6 +18,18 @@ import type { FileSystemProvider } from '#types.js';
 import { assertRootedPath, joinRelativePath, resolveAuthorityPath } from '@taucad/utils/path';
 
 /**
+ * What the bytes behind one mount are to a revision: `authored` content a
+ * revision carries, `derived` content a producer regenerates, or
+ * `authority-metadata` an authority owns.
+ *
+ * @public
+ */
+export type MountPathClass = 'authored' | 'derived' | 'authority-metadata';
+
+/** Every admitted mount class, for the fail-closed registration check. @public */
+export const mountPathClasses: readonly MountPathClass[] = Object.freeze(['authored', 'derived', 'authority-metadata']);
+
+/**
  * Common option fields shared by every {@link MountConfig} variant.
  * @public
  */
@@ -27,6 +39,12 @@ export type MountConfigCommon = {
    * Defaults to `''` for a provider rooted at the mount itself.
    */
   readonly providerBasePath?: string;
+  /**
+   * Required, with no default: an unclassified mount is a compile error, and
+   * {@link MountTable.mount} refuses one at runtime. A mount whose class is a
+   * guess is how derived bytes reach a revision (RC6 / S5 work 2).
+   */
+  readonly class: MountPathClass;
 };
 
 /**
@@ -254,6 +272,8 @@ export type MountMetadata = {
   readonly backend: FileSystemBackend;
   readonly storageRootKey?: string;
   readonly providerBasePath?: string;
+  /** Required; {@link MountTable.mount} refuses an unclassified mount. */
+  readonly class: MountPathClass;
 };
 
 /**
@@ -266,6 +286,7 @@ export type MountEntry = {
   readonly backend: FileSystemBackend;
   readonly storageRootKey?: string;
   readonly providerBasePath: string;
+  readonly class: MountPathClass;
 };
 
 /**
@@ -296,8 +317,8 @@ export type MountResolution = {
  * declare const opfsProvider: FileSystemProvider;
  *
  * const table = new MountTable();
- * table.mount('/', projectProvider, { backend: 'indexeddb' });
- * table.mount('/node_modules', opfsProvider, { backend: 'opfs' });
+ * table.mount('/', projectProvider, { backend: 'indexeddb', class: 'authored' });
+ * table.mount('/node_modules', opfsProvider, { backend: 'opfs', class: 'derived' });
  *
  * const { provider, path } = table.resolve('/node_modules/lodash/index.js');
  * // provider === opfsProvider, path === 'lodash/index.js'
@@ -316,6 +337,9 @@ export class MountTable {
    * @param config - Backend identifier and additional mount options.
    */
   public mount(prefix: string, provider: FileSystemProvider, config: MountMetadata): void {
+    if (!mountPathClasses.includes(config.class)) {
+      throw new TypeError(`Mount ${prefix} must declare authored | derived | authority-metadata.`);
+    }
     const normalized = this._normalizePrefix(prefix);
 
     const existingIndex = this._mounts.findIndex((m) => m.prefix === normalized);
@@ -330,6 +354,7 @@ export class MountTable {
       backend: config.backend,
       storageRootKey: config.storageRootKey,
       providerBasePath,
+      class: config.class,
     });
     this._mounts.sort((a, b) => b.prefix.length - a.prefix.length);
   }

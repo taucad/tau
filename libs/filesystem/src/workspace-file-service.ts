@@ -562,6 +562,41 @@ export class WorkspaceFileService {
         : resolution.provider.readFile(resolution.path);
     }
 
+    const readFileStream = (path: string, options?: FileReadStreamOptions): ReadableStream<Uint8Array<ArrayBuffer>> => {
+      validateFileReadStreamOptions(options);
+      const { resolution } = resolveLocal(path);
+      let reader = resolution.provider.readFileStream?.(resolution.path, options).getReader();
+      const cancelAfterFailure = async (reason: unknown): Promise<void> => {
+        try {
+          await reader?.cancel(reason);
+        } catch {
+          // Preserve the read or staleness failure that required cleanup.
+        }
+      };
+      return new ReadableStream(
+        {
+          async pull(controller) {
+            try {
+              assertCurrent();
+              reader ??= bufferToStream(await resolution.provider.readFile(resolution.path), options).getReader();
+              const result = await reader.read();
+              assertCurrent();
+              if (result.done) {
+                controller.close();
+              } else {
+                controller.enqueue(result.value);
+              }
+            } catch (error) {
+              await cancelAfterFailure(error);
+              throw error;
+            }
+          },
+          cancel: async (reason) => reader?.cancel(reason),
+        },
+        { highWaterMark: 0 },
+      );
+    };
+
     const readdir = async (path: string): Promise<string[]> => {
       const { resolution } = resolveLocal(path);
       return resolution.provider.readdir(resolution.path);
@@ -687,6 +722,7 @@ export class WorkspaceFileService {
         // The provider and rooted view lifetime remain owned by WorkspaceFileService.
       },
       readFile,
+      readFileStream,
       writeFile,
       appendFile,
       readdir,
@@ -2109,7 +2145,12 @@ export class WorkspaceFileService {
     ) {
       return;
     }
-    this._mountTable.mount(canonicalPrefix, provider, { backend: config.backend, storageRootKey, providerBasePath });
+    this._mountTable.mount(canonicalPrefix, provider, {
+      backend: config.backend,
+      storageRootKey,
+      providerBasePath,
+      class: config.class,
+    });
     this._resetTopologyState();
   }
 
@@ -2291,7 +2332,15 @@ export class WorkspaceFileService {
         existing.storageRootKey !== storageRootKey ||
         existing.providerBasePath !== providerBasePath
       ) {
-        this._mountTable.mount(prefix, provider, { backend: config.backend, storageRootKey, providerBasePath });
+        // A project route is the user's authored tree by definition; the
+        // derived and authority-metadata families inside it are named by the
+        // revision path policy, not by a second mount (RC6 / S5 work 2).
+        this._mountTable.mount(prefix, provider, {
+          backend: config.backend,
+          storageRootKey,
+          providerBasePath,
+          class: 'authored',
+        });
         topologyChanged = true;
       }
     }
@@ -2321,7 +2370,7 @@ export class WorkspaceFileService {
     await this._syncExternalRoots(stagedRoots);
   }
 
-  private _toScope(config: MountConfig): WorkspaceScope {
+  private _toScope(config: WorkspaceScope | MountConfig): WorkspaceScope {
     if (config.backend === 'webaccess') {
       // Defensive runtime check — the discriminated `MountConfig` makes
       // this unreachable in well-typed call sites, but structured-clone

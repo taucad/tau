@@ -80,6 +80,7 @@ describe('@taucad/filesystem node backend containment', () => {
     const { externals } = reachableSpecifiers(join(sourceDirectory, 'backend/node/index.ts'));
 
     expect([...externals].filter((specifier) => specifier.startsWith('node:')).sort()).toEqual([
+      'node:child_process',
       'node:crypto',
       'node:fs',
       'node:fs/promises',

@@ -46,6 +46,29 @@ export type ChangeNotification = Readonly<
 >;
 
 /**
+ * Acquire the existing ordered mutation locks without owning a notification channel.
+ *
+ * @param paths - Logical and physical resource tokens.
+ * @param operation - Body executed under all selected locks.
+ * @returns The operation result, or its rejection.
+ * @internal
+ */
+export const withCrossTabLocks = async <T>(paths: readonly string[], operation: () => Promise<T>): Promise<T> => {
+  if (typeof navigator === 'undefined' || !('locks' in navigator)) {
+    return operation();
+  }
+  const sortedPaths = [...new Set(paths)].sort();
+  const acquire = async (index: number): Promise<T> => {
+    const path = sortedPaths[index];
+    if (path === undefined) {
+      return operation();
+    }
+    return navigator.locks.request(`${lockPrefix}${path}`, { mode: 'exclusive' }, async () => acquire(index + 1));
+  };
+  return acquire(0);
+};
+
+/**
  * Coordinates filesystem writes across browser tabs.
  *
  * - Uses `navigator.locks` for supplied logical/physical resource serialization
@@ -93,19 +116,7 @@ export class CrossTabCoordinator {
    * @returns The operation result.
    */
   public async withLocks<T>(paths: readonly string[], operation: () => Promise<T>): Promise<T> {
-    if (typeof navigator === 'undefined' || !('locks' in navigator)) {
-      return operation();
-    }
-
-    const sortedPaths = [...new Set(paths)].sort();
-    const acquire = async (index: number): Promise<T> => {
-      const path = sortedPaths[index];
-      if (path === undefined) {
-        return operation();
-      }
-      return navigator.locks.request(`${lockPrefix}${path}`, { mode: 'exclusive' }, async () => acquire(index + 1));
-    };
-    return acquire(0);
+    return withCrossTabLocks(paths, operation);
   }
 
   /**

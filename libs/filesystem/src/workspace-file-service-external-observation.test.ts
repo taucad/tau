@@ -100,10 +100,7 @@ async function createWebAccessService(options?: {
     storageRootKey: rootStorageRootKey,
   });
   const mountTable = new MountTable();
-  mountTable.mount('/', rootProvider, {
-    backend: 'memory',
-    storageRootKey: rootStorageRootKey,
-  });
+  mountTable.mount('/', rootProvider, { class: 'authored', backend: 'memory', storageRootKey: rootStorageRootKey });
   const eventBus = new ChangeEventBus();
   const service = new WorkspaceFileService({
     providerRegistry,

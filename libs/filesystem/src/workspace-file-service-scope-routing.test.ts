@@ -28,7 +28,7 @@ async function createService() {
   const provider = await providerRegistry.getProvider({ backend: 'memory', storageRootKey: 'memory:test-root' });
 
   const mountTable = new MountTable();
-  mountTable.mount('/', provider, { backend: 'memory', storageRootKey: 'memory:test-root' });
+  mountTable.mount('/', provider, { class: 'authored', backend: 'memory', storageRootKey: 'memory:test-root' });
 
   const resourceQueue = new ResourceQueue();
   const eventBus = new ChangeEventBus();
@@ -102,6 +102,7 @@ describe('WorkspaceFileService — unified scope routing', () => {
       storageRootKey: 'memory:nested-boundary',
     });
     mountTable.mount('/scope/dir/mounted', nestedProvider, {
+      class: 'authored',
       backend: 'memory',
       storageRootKey: 'memory:nested-boundary',
     });
@@ -122,10 +123,12 @@ describe('WorkspaceFileService — unified scope routing', () => {
       storageRootKey: 'memory:copy-target-boundary',
     });
     mountTable.mount('/source/mounted', sourceNested, {
+      class: 'authored',
       backend: 'memory',
       storageRootKey: 'memory:copy-source-boundary',
     });
     mountTable.mount('/target/mounted', targetNested, {
+      class: 'authored',
       backend: 'memory',
       storageRootKey: 'memory:copy-target-boundary',
     });
@@ -316,6 +319,7 @@ describe('WorkspaceFileService — rooted project filesystems', () => {
   it('can root a trusted ephemeral preview at an exact dynamic mount', async () => {
     const { service } = await createService();
     await service.mount('/previews/preview', {
+      class: 'authored',
       backend: 'memory',
       storageRootKey: 'memory:preview:preview',
     });
@@ -544,6 +548,7 @@ describe('WorkspaceFileService — rooted project filesystems', () => {
       storageRootKey: 'memory:nested-overlay',
     });
     mountTable.mount(`/projects/${alphaProjectId}/nested`, nestedProvider, {
+      class: 'authored',
       backend: 'memory',
       storageRootKey: 'memory:nested-overlay',
     });
@@ -671,6 +676,37 @@ describe('WorkspaceFileService — rooted project filesystems', () => {
     });
     expect(events).toEqual([{ type: 'reset' }]);
     stop();
+  });
+
+  it('keeps a rooted stream confined to its captured mount and refuses it after replacement', async () => {
+    const { service, providerRegistry } = await createService();
+    await configureProjects(service, [{ projectId: alphaProjectId, storageRootKey: 'memory:stream-old' }]);
+    const oldProvider = await providerRegistry.getProvider({
+      backend: 'memory',
+      storageRootKey: 'memory:stream-old',
+    });
+    const cancelled = vi.fn();
+    oldProvider.readFileStream = () =>
+      new ReadableStream<Uint8Array<ArrayBuffer>>(
+        {
+          pull(controller) {
+            controller.enqueue(new Uint8Array([1]));
+          },
+          cancel: cancelled,
+        },
+        { highWaterMark: 0 },
+      );
+    const rooted = service.createRootedFileSystem(`/projects/${alphaProjectId}`);
+    const stream = rooted.readFileStream?.('large.bin');
+    expect(stream).toBeDefined();
+    const reader = stream!.getReader();
+    await expect(reader.read()).resolves.toMatchObject({ done: false, value: new Uint8Array([1]) });
+
+    await configureProjects(service, [{ projectId: alphaProjectId, storageRootKey: 'memory:stream-new' }]);
+    await service.writeFile(`/projects/${alphaProjectId}/large.bin`, new Uint8Array([9]));
+
+    await expect(reader.read()).rejects.toMatchObject({ code: 'ESTALE' });
+    expect(cancelled).toHaveBeenCalledOnce();
   });
 
   it('stops a stale rooted watch before invoking a reset handler that throws', async () => {

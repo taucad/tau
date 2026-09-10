@@ -51,7 +51,7 @@ async function createWorkspaceFileService(options?: { crossTabCoordinator?: Cros
   const provider = await providerRegistry.getProvider({ backend: 'memory', storageRootKey: 'memory:0' });
 
   const mountTable = new MountTable();
-  mountTable.mount('/', provider, { backend: 'memory', storageRootKey: 'memory:0' });
+  mountTable.mount('/', provider, { class: 'authored', backend: 'memory', storageRootKey: 'memory:0' });
 
   const resourceQueue = new ResourceQueue();
   const eventBus = new ChangeEventBus();
@@ -997,7 +997,7 @@ describe('WorkspaceFileService', () => {
         const registry = new ProviderRegistry({ databasePrefix });
         const provider = await registry.getProvider({ backend: 'memory', storageRootKey: 'memory:test-root' });
         const mountTable = new MountTable();
-        mountTable.mount('/', provider, { backend: 'memory', storageRootKey: 'memory:test-root' });
+        mountTable.mount('/', provider, { class: 'authored', backend: 'memory', storageRootKey: 'memory:test-root' });
         return {
           registry,
           service: new WorkspaceFileService({
@@ -2762,6 +2762,7 @@ describe('WorkspaceFileService integration [DirectIDB]', () => {
 
     const mountTable = new MountTable();
     mountTable.mount('/', provider, {
+      class: 'authored',
       backend: 'indexeddb',
       storageRootKey: providerRegistry.resolveStorageRootKey({ backend: 'indexeddb' }),
     });
@@ -2811,6 +2812,7 @@ describe('WorkspaceFileService integration [DirectIDB]', () => {
     const provider = await providerRegistry.getProvider({ backend: 'indexeddb' });
     const mountTable = new MountTable();
     mountTable.mount('/', provider, {
+      class: 'authored',
       backend: 'indexeddb',
       storageRootKey: providerRegistry.resolveStorageRootKey({ backend: 'indexeddb' }),
     });
@@ -2917,7 +2919,7 @@ describe('WorkspaceFileService integration [DirectIDB]', () => {
       const providerRegistry = new ProviderRegistry();
       const provider = await providerRegistry.getProvider({ backend: 'memory', storageRootKey: 'memory:test-root' });
       const mountTable = new MountTable();
-      mountTable.mount('/', provider, { backend: 'memory', storageRootKey: 'memory:test-root' });
+      mountTable.mount('/', provider, { class: 'authored', backend: 'memory', storageRootKey: 'memory:test-root' });
 
       const resourceQueue = new ResourceQueue();
       const eventBus = new ChangeEventBus();
@@ -3163,7 +3165,11 @@ describe('WorkspaceFileService integration [DirectIDB]', () => {
       });
 
       const mountTable = new MountTable();
-      mountTable.mount('/', rootProvider, { backend: 'memory', storageRootKey: 'memory:dynamic-test-root' });
+      mountTable.mount('/', rootProvider, {
+        class: 'authored',
+        backend: 'memory',
+        storageRootKey: 'memory:dynamic-test-root',
+      });
 
       mountedService = new WorkspaceFileService({
         providerRegistry: mountedRegistry,
@@ -3175,6 +3181,7 @@ describe('WorkspaceFileService integration [DirectIDB]', () => {
 
     it('mounts and unmounts one isolated preview root', async () => {
       await mountedService.mount('/previews/card-a', {
+        class: 'authored',
         backend: 'memory',
         storageRootKey: 'memory:preview:card-a',
       });
@@ -3190,10 +3197,7 @@ describe('WorkspaceFileService integration [DirectIDB]', () => {
       async (prefix) => {
         const getProvider = vi.spyOn(mountedRegistry, 'getProvider');
         await expect(
-          mountedService.mount(prefix, {
-            backend: 'memory',
-            storageRootKey: 'memory:preview:a',
-          }),
+          mountedService.mount(prefix, { class: 'authored', backend: 'memory', storageRootKey: 'memory:preview:a' }),
         ).rejects.toThrow(/not admitted|canonical/);
         expect(getProvider).not.toHaveBeenCalled();
       },
@@ -3203,6 +3207,7 @@ describe('WorkspaceFileService integration [DirectIDB]', () => {
       const getProvider = vi.spyOn(mountedRegistry, 'getProvider');
       await expect(
         mountedService.mount('/previews/card-a', {
+          class: 'authored',
           backend: 'memory',
           storageRootKey: 'memory:preview:card-b',
         }),

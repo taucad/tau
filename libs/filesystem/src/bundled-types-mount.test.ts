@@ -15,7 +15,7 @@ const decoder = new TextDecoder();
 async function createService(providerRegistry = new ProviderRegistry()): Promise<WorkspaceFileService> {
   const provider = await providerRegistry.getProvider({ backend: 'memory', storageRootKey: 'memory:test-root' });
   const mountTable = new MountTable();
-  mountTable.mount('/', provider, { backend: 'memory', storageRootKey: 'memory:test-root' });
+  mountTable.mount('/', provider, { class: 'authored', backend: 'memory', storageRootKey: 'memory:test-root' });
   return new WorkspaceFileService({
     providerRegistry,
     resourceQueue: new ResourceQueue(),

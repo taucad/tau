@@ -44,6 +44,9 @@ export const parameterCache = defineMiddleware({
   version: '2.0.0',
 
   async wrapGetParameters(input, handler, { compute, dependencyHash, logger, tracer }) {
+    if (compute.status !== 'on') {
+      return handler(input);
+    }
     const result = await traceCacheOperation(tracer, 'cache.parameter.evaluate', async () =>
       compute.evaluate({
         action: parameterAction(dependencyHash),

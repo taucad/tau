@@ -195,6 +195,20 @@ describe('geometryCache', () => {
     expect(handler).toHaveBeenCalledTimes(2);
   });
 
+  it('calls the handler directly and never evaluates when the compute capability is off', async () => {
+    const runtime = { ...createMockRuntime(), compute: { status: 'off' } } as const;
+    const built = reusableBuild();
+    const handler = vi.fn(async () => built);
+
+    const first = await middleware.wrapCreateGeometry!(createMockInput(), handler, runtime);
+    const second = await middleware.wrapCreateGeometry!(createMockInput(), handler, runtime);
+
+    expect(handler).toHaveBeenCalledTimes(2);
+    expect(first).toBe(built);
+    expect(second).toBe(built);
+    expect(runtime.tracer.startSpan).not.toHaveBeenCalled();
+  });
+
   it('misses when the dependency identity changes', async () => {
     const runtime = createMockRuntime();
     const handler = vi.fn(async () => reusableBuild());

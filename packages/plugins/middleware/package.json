@@ -18,7 +18,6 @@
   "types": "./dist/index.d.mts",
   "files": [
     "dist",
-    "agent",
     "LICENSE",
     "README.md",
     "CHANGELOG.md"
@@ -35,7 +34,6 @@
   },
   "exports": {
     ".": "./src/index.ts",
-    "./agent/geospec-authoring": "./agent/geospec-authoring/SKILL.md",
     "./package.json": "./package.json"
   },
   "publishConfig": {
@@ -46,7 +44,6 @@
         "import": "./dist/index.mjs",
         "default": "./dist/index.mjs"
       },
-      "./agent/geospec-authoring": "./agent/geospec-authoring/SKILL.md",
       "./package.json": "./package.json"
     },
     "imports": {}
@@ -75,5 +72,9 @@
   },
   "taucad": {
     "hostTarget": "browser"
+  },
+  "tau": {
+    "skills": null,
+    "reason": "Runtime middleware toolkit; no agent-facing API of its own"
   }
 }

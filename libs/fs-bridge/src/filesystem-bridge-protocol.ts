@@ -7,6 +7,7 @@ import type {
   ProjectRootConfig,
   ProjectRootDiscoveryStatus,
   RootedFileSystem,
+  MountConfig,
   StorageRootConfig,
   WatchEvent,
   WatchRequest,
@@ -285,12 +286,24 @@ const projectLocatorSchema: z.ZodType<ProjectLocator> = z.discriminatedUnion('ba
     path: z.string(),
   }),
 ]);
-const workspaceScopeSchema: z.ZodType<WorkspaceScope> = z.discriminatedUnion('backend', [
+const workspaceScopeVariants = [
   z.looseObject({ backend: z.literal('webaccess'), directoryHandle: directoryHandleSchema, workspaceId: z.string() }),
   z.looseObject({ backend: z.literal('indexeddb') }),
   z.looseObject({ backend: z.literal('opfs') }),
   z.looseObject({ backend: z.literal('memory'), storageRootKey: z.string() }),
   z.looseObject({ backend: z.literal('node'), path: z.string() }),
+] as const;
+const workspaceScopeSchema: z.ZodType<WorkspaceScope> = z.discriminatedUnion('backend', workspaceScopeVariants);
+/* A mount config is a scope plus its registration-time classification (RC6 /
+ * S5 work 2). Same variants, one extra required field, so the wire cannot carry
+ * an unclassified mount across the bridge either. */
+const mountPathClassSchema = z.enum(['authored', 'derived', 'authority-metadata']);
+const mountConfigSchema: z.ZodType<MountConfig> = z.discriminatedUnion('backend', [
+  workspaceScopeVariants[0].extend({ class: mountPathClassSchema }),
+  workspaceScopeVariants[1].extend({ class: mountPathClassSchema }),
+  workspaceScopeVariants[2].extend({ class: mountPathClassSchema }),
+  workspaceScopeVariants[3].extend({ class: mountPathClassSchema }),
+  workspaceScopeVariants[4].extend({ class: mountPathClassSchema }),
 ]);
 
 const manifestIssueSchema = z.discriminatedUnion('code', [
@@ -532,7 +545,7 @@ const callSchemas = {
   duplicateFile: { args: twoStringArgs, result: voidResult },
   copyDirectory: { args: twoStringArgs, result: voidResult },
   getZippedDirectory: { args: z.tuple([z.string(), scopedOptionsSchema.optional()]), result: z.instanceof(Blob) },
-  mount: { args: z.tuple([z.string(), workspaceScopeSchema]), result: voidResult },
+  mount: { args: z.tuple([z.string(), mountConfigSchema]), result: voidResult },
   unmount: { args: oneStringArgument, result: voidResult },
   configureProjectRoots: { args: z.tuple([projectRootConfigurationSchema]), result: voidResult },
   listProjectManifests: { args: noArgs, result: projectDiscoveryResultSchema },

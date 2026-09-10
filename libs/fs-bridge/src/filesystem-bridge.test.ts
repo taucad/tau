@@ -895,7 +895,7 @@ describe('exposeFileSystem skip-originator dispatch', () => {
     const providerRegistry = new ProviderRegistry();
     const provider = await providerRegistry.getProvider({ backend: 'memory', storageRootKey: 'memory:bridge-test' });
     const mountTable = new MountTable();
-    mountTable.mount('/', provider, { backend: 'memory', storageRootKey: 'memory:bridge-test' });
+    mountTable.mount('/', provider, { class: 'authored', backend: 'memory', storageRootKey: 'memory:bridge-test' });
     const bus = new ChangeEventBus();
     const crossTabCoordinator = new CrossTabCoordinator();
     const service = new WorkspaceFileService({
@@ -1210,7 +1210,11 @@ describe('exposeFileSystem skip-originator dispatch', () => {
       storageRootKey: 'memory:bridge-stale-root',
     });
     const mountTable = new MountTable();
-    mountTable.mount('/', rootProvider, { backend: 'memory', storageRootKey: 'memory:bridge-stale-root' });
+    mountTable.mount('/', rootProvider, {
+      class: 'authored',
+      backend: 'memory',
+      storageRootKey: 'memory:bridge-stale-root',
+    });
     const bus = new ChangeEventBus();
     const service = new WorkspaceFileService({
       providerRegistry,
@@ -1293,7 +1297,7 @@ describe('exposeFileSystem skip-originator dispatch', () => {
       storageRootKey: 'memory:bridge-root',
     });
     const mountTable = new MountTable();
-    mountTable.mount('/', rootProvider, { backend: 'memory' });
+    mountTable.mount('/', rootProvider, { class: 'authored', backend: 'memory' });
     const bus = new ChangeEventBus();
     const service = new WorkspaceFileService({
       providerRegistry,

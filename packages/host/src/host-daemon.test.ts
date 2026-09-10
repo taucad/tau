@@ -12,7 +12,17 @@ import { WebSocket, WebSocketServer } from 'ws';
 import { startHostDaemon } from '#host-daemon.js';
 import type { HostDaemonEvent } from '#host-daemon.js';
 import { writeHostCredential } from '#credential-store.js';
+import { hostRevisionModes } from '#revisions.js';
+import * as revisions from '#revisions.js';
+import * as agentTools from '#agent-tools.js';
 import type { HostJobWorkerFactory } from '#job-worker.js';
+
+/* Observe the tool-surface decision the daemon forwards, without changing it. */
+const registrySpy = vi.spyOn(agentTools, 'createHostToolRegistry');
+/* Captured before the spy replaces it: a case that counts subscriptions still
+ * has to build the real recorder around the real launcher. */
+const realWithTurnRevisions = revisions.withTurnRevisions;
+const revisionsSpy = vi.spyOn(revisions, 'withTurnRevisions');
 
 let temporaryDirectory: string | undefined;
 const originalWorkingDirectory = process.cwd();
@@ -220,6 +230,43 @@ describe('startHostDaemon', () => {
     expect(await daemon.closed).toEqual({ cause: 'requested' });
   }, 20_000);
 
+  it('forwards testModel as the host-owned geospecRunner decision, defaulting to on', async () => {
+    temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-daemon-test-model-'));
+    process.env['TAU_CONFIG_DIR'] = temporaryDirectory;
+    process.chdir(fileURLToPath(new URL('../../..', import.meta.url)));
+    await writeHostCredential({
+      v: 1,
+      deviceId: 'device-1',
+      credential: 'secret-credential-value-that-never-enters-a-url',
+    });
+    const runtimeHost = {
+      modulePath: fileURLToPath(new URL('fixtures/runtime-host-failing-child.mjs', import.meta.url)),
+    };
+    const relayUrl = new URL('http://127.0.0.1:1');
+
+    registrySpy.mockClear();
+    const withheld = startHostDaemon({
+      relayUrl,
+      runtimeHost,
+      agent: { ...(await agentOptionsIn(join(temporaryDirectory, 'withheld'))), testModel: false },
+      onEvent: () => undefined,
+    });
+    await withheld.ready;
+    await withheld.close();
+    expect(registrySpy).toHaveBeenLastCalledWith(expect.objectContaining({ geospecRunner: false }));
+
+    registrySpy.mockClear();
+    const offered = startHostDaemon({
+      relayUrl,
+      runtimeHost,
+      agent: await agentOptionsIn(join(temporaryDirectory, 'offered')),
+      onEvent: () => undefined,
+    });
+    await offered.ready;
+    await offered.close();
+    expect(registrySpy.mock.lastCall?.[0]?.geospecRunner).toBeUndefined();
+  }, 20_000);
+
   it('advertises the agent capability on the control ready frame', async () => {
     temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-daemon-capability-'));
     process.env['TAU_CONFIG_DIR'] = temporaryDirectory;
@@ -257,8 +304,99 @@ describe('startHostDaemon', () => {
     const [readyFrame] = (await once(controlSocket, 'message')) as [Uint8Array<ArrayBuffer>];
     expect(JSON.parse(Buffer.from(readyFrame).toString())).toMatchObject({
       type: 'ready',
-      capabilities: { agent: { workspaceRoot: agent.workspaceRoot } },
+      /* V17 / VSC5: a paired client reads its placement's revision modes off
+         this frame, so the capability has to ride the same relay the workspace
+         root does. */
+      capabilities: { agent: { workspaceRoot: agent.workspaceRoot, revisions: [...hostRevisionModes] } },
     });
+
+    await daemon.close();
+  }, 20_000);
+
+  /*
+   * Every candidate turn works in a checkout of its own — the recorder derives
+   * the workspace id from the run id — and the geometry tools need a runtime
+   * client rooted in it. `agentRuntimes` is keyed by root, and nothing but the
+   * checkout's own release can know that root is gone: without eviction the
+   * daemon keeps one live client, over a tree that no longer exists, per turn.
+   */
+  it('gives back a candidate turn checkout runtime client when the checkout is released', async () => {
+    temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-daemon-checkout-runtime-'));
+    process.env['TAU_CONFIG_DIR'] = temporaryDirectory;
+    process.chdir(fileURLToPath(new URL('../../..', import.meta.url)));
+    const relay = await startRelay();
+    registrySpy.mockClear();
+    const daemon = await startPairedAgentDaemon(temporaryDirectory, relay, []);
+    await daemon.ready;
+
+    /* The daemon's own map and its own runtime factory, taken from the call it
+       made rather than rebuilt here. */
+    const registryOptions = registrySpy.mock.lastCall?.[0];
+    const runtimeClient = registryOptions?.runtimeClient;
+    if (!registryOptions?.checkouts || !runtimeClient) {
+      throw new TypeError('Expected the daemon to build its tool registry over a checkout map.');
+    }
+    /* The registry only reads the map; `withTurnRevisions` is what writes it,
+       and this case stands in for it. */
+    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the daemon's own map, taken from the call it made.
+    const checkouts = registryOptions.checkouts as Map<string, { cwd: string; mode: string }>;
+    const checkout = join(temporaryDirectory, 'workspace', '.tau', 'workspaces', 'trun-1', 'tree');
+    await mkdir(checkout, { recursive: true });
+    checkouts.set('run-1', { cwd: checkout, mode: 'candidate' });
+    const first = await runtimeClient(checkout);
+    expect(await runtimeClient(checkout)).toBe(first);
+
+    checkouts.delete('run-1');
+    checkouts.set('run-2', { cwd: checkout, mode: 'candidate' });
+    expect(await runtimeClient(checkout)).not.toBe(first);
+    // Given back the same way, so this test leaves no live socket behind either.
+    checkouts.delete('run-2');
+    /* The eviction terminates the client a microtask later (it holds a promise,
+       not a client); let it land before the daemon takes the child down. */
+    await delay(0);
+
+    await daemon.close();
+  }, 20_000);
+
+  /*
+   * PH19 ruling 2 keeps the API's run directory free of content, so nothing it
+   * receives may wait on a revision. The recorder's stream holds a terminal
+   * marker until the turn's whole-tree capture is durable — a guarantee clients
+   * need — and a reporter riding it both delays every directory update and
+   * queues events for the length of the capture, past which the launcher's
+   * fan-out errors the subscriber and the reporter never resubscribes.
+   */
+  it('reports runs from the launcher itself, never from the stream that waits for a revision', async () => {
+    temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-daemon-reporter-stream-'));
+    process.env['TAU_CONFIG_DIR'] = temporaryDirectory;
+    process.chdir(fileURLToPath(new URL('../../..', import.meta.url)));
+    const relay = await startRelay();
+    const subscriptions = { launcher: 0, recorded: 0 };
+    revisionsSpy.mockImplementationOnce((launcher, options) => {
+      const events = launcher.events.bind(launcher);
+      /* Patched in place, not wrapped: the daemon holds this very object, and
+       * counting subscriptions on a copy would not see the ones it makes. */
+      Object.assign(launcher, {
+        events: (signal: AbortSignal) => {
+          subscriptions.launcher += 1;
+          return events(signal);
+        },
+      });
+      const recorded = realWithTurnRevisions(launcher, options);
+      return {
+        ...recorded,
+        events: (signal: AbortSignal) => {
+          subscriptions.recorded += 1;
+          return recorded.events(signal);
+        },
+      };
+    });
+
+    const daemon = await startPairedAgentDaemon(temporaryDirectory, relay, []);
+    await daemon.ready;
+    /* Two on the launcher — the recorder's own settlement watch and the run
+     * reporter — and none on the recorder, which no client is listening to yet. */
+    expect(subscriptions).toEqual({ launcher: 2, recorded: 0 });
 
     await daemon.close();
   }, 20_000);

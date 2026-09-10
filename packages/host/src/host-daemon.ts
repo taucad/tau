@@ -6,21 +6,20 @@ import { WebSocket } from 'ws';
 
 import { createNodeAgentLauncher } from '@taucad/agent-host/node-launcher';
 import type { NodeAgentLauncher } from '@taucad/agent-host/node-launcher';
-import type { AgentSessionModel } from '@taucad/agent-host';
+import type { AgentSessionModel, ExternalAgentDescriptor } from '@taucad/agent-host';
 import { createRuntimeClient } from '@taucad/runtime';
 import { fromNodeFs } from '@taucad/runtime/filesystem/node';
 import { webSocketTransport } from '@taucad/runtime/transport/websocket';
+import type { ComputeBinding, ComputeStoreControl } from '@taucad/runtime/types';
 
 import { startAgentServer } from '#agent-server.js';
 import type { AgentServerHandle } from '#agent-server.js';
-import { createAcpExternalAgentPort, discoverAcpAgents } from '#acp/index.js';
-import type { AcpAdapterRefusal } from '#acp/index.js';
+import { createAcpExternalAgentPort, discoverAcpAgents, externalAgentDescriptors } from '#acp/index.js';
 import { createHostMcpEndpoint } from '#mcp-server.js';
 import type { HostMcpEndpoint } from '#mcp-server.js';
 import { startRunReporter } from '#run-reporter.js';
 import type { RunReporter } from '#run-reporter.js';
 import { createHostToolRegistry } from '#agent-tools.js';
-import type { HostRuntimeClient } from '#agent-tools.js';
 import { hostControlInboundSchema, pairingResponseSchema, pairingTokenResponseSchema } from '#host.schemas.js';
 import type { HostControlInbound, HostControlOutbound } from '#host.schemas.js';
 import { readHostCredential, removeHostCredential, writeHostCredential } from '#credential-store.js';
@@ -28,6 +27,8 @@ import type { HostCredential } from '#credential-store.js';
 import { spliceFrameSockets } from '#frame-splice.js';
 import type { FrameSpliceCloseResult, FrameSpliceHandle } from '#frame-splice.js';
 import type { HostJobWorkerFactory, HostJobWorkerHandle } from '#job-worker.js';
+import { hostRevisionModes, sweepTurnWorkspaces, withTurnRevisions } from '#revisions.js';
+import type { TurnCheckout } from '#revisions.js';
 import { startRuntimeChild } from '#runtime-child-supervisor.js';
 import type { RuntimeChildHandle } from '#runtime-child-supervisor.js';
 
@@ -78,10 +79,13 @@ export type HostDaemonEvent =
       readonly state: 'ready' | 'stopped';
       /** Origin the agent channel — and any served UI — answers on. */
       readonly url?: string;
-      /** External ACP agents this daemon advertises (W4-ACP). */
-      readonly externalAgents?: readonly string[];
-      /** Why each *other* pinned agent is not advertised; never a crash. */
-      readonly refusedAgents?: readonly AcpAdapterRefusal[];
+      /**
+       * Every external ACP agent this daemon knows about (W4-ACP), as the one
+       * canonical descriptor (VSC1): the startable ones carry their probed
+       * model list, and one that could not be started carries its refusal code
+       * instead of vanishing.
+       */
+      readonly externalAgents?: readonly ExternalAgentDescriptor[];
     }
   | {
       readonly type: 'warning';
@@ -92,7 +96,13 @@ export type HostDaemonEvent =
         /* Retriable, never fatal: the compute child backs the relay sessions and
          * the geometry tools, and nothing else. The agent channel and its file
          * tools keep serving while the loop retries the child. */
-        | 'RUNTIME_CHILD_FAILED';
+        | 'RUNTIME_CHILD_FAILED'
+        /* The turn ran and is durable in its own log; only its revision is
+         * missing (V17). Retriable in the sense that the next turn records. */
+        | 'REVISION_NOT_RECORDED'
+        /* Housekeeping, reported because it deletes: turn workspaces a previous
+         * host left behind were removed at start (V19, SR4). */
+        | 'TURN_WORKSPACES_SWEPT';
       readonly message: string;
     };
 
@@ -109,12 +119,22 @@ export type HostDaemonEvent =
 export type HostDaemonAgentOptions = {
   /** Absolute workspace root; `.tau/chats/<chatId>/events.jsonl` lives under it. */
   readonly workspaceRoot: string;
+  /** Host-admitted compute binding shared by direct and candidate execution roots. */
+  readonly compute?: ComputeBinding | (() => ComputeBinding);
+  readonly computeControl?: ComputeStoreControl;
   /** Base the model gateway hangs off, e.g. the Tau API origin. */
   readonly gatewayBaseUrl: string;
   /** Default model row; one admission may override it. */
   readonly model: AgentSessionModel;
   /** Default system prompt; one admission may override it. */
   readonly systemPrompt: string;
+  /**
+   * Offer the `test_model` tool. Defaults to `true`, which still yields the
+   * tool only where `@taucad/geospec-engine` resolves — `false` withholds it
+   * from an installation that has the engine, so the surface is this host's
+   * own decision rather than a resolution accident.
+   */
+  readonly testModel?: boolean | undefined;
   /** Channel admission secret; at least 32 characters. */
   readonly token: string;
   /** Human-readable name published on `/.well-known/tau-host`; defaults to the machine hostname. */
@@ -144,6 +164,14 @@ export type HostDaemonOptions = {
   readonly agent?: HostDaemonAgentOptions;
   readonly maxSessions?: number;
   readonly onEvent?: (event: HostDaemonEvent) => void;
+  /**
+   * Resolves a package subpath from the embedding application's module graph,
+   * for the system-skill catalogue. See
+   * {@link HostToolRegistryOptions.resolveSkillSubpath} — a daemon composed by
+   * an app that declares the kernel plugins must pass its own base, because
+   * this package declares none of them.
+   */
+  readonly resolveSkillSubpath?: (subpath: string) => string;
 };
 
 /** Final daemon closure result. @public */
@@ -366,9 +394,16 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
   let agentLauncher: NodeAgentLauncher | undefined;
   let agentServer: AgentServerHandle | undefined;
   let agentMcp: HostMcpEndpoint | undefined;
-  let agentExternalAgents: readonly string[] = [];
+  let agentExternalAgents: readonly ExternalAgentDescriptor[] = [];
   let agentRunReporter: RunReporter | undefined;
-  let agentRuntime: Promise<HostRuntimeClient> | undefined;
+  /**
+   * The geometry tools' runtime client, one per root a turn works in.
+   *
+   * Keyed rather than single because a candidate turn works in its own checkout
+   * (V19): the child process is shared, but each root needs its own client so
+   * the files the kernel reads are the ones that turn is writing.
+   */
+  const agentRuntimes = new Map<string, Promise<ReturnType<typeof createRuntimeClient>>>();
 
   const emit = (event: HostDaemonEvent): void => {
     try {
@@ -406,7 +441,7 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
          * new port while every tool keeps dialling the dead one, so a render
          * fails with a transport error that names nothing instead of the
          * supervisor's real reason. */
-        agentRuntime = undefined;
+        agentRuntimes.clear();
         closeSessions('CHILD_EXIT');
       }
     })();
@@ -420,35 +455,45 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
    * @param workspaceRoot - Root served to the child over its `/fs` socket.
    * @returns A render client bound to the loopback child.
    */
-  const ensureAgentRuntime = async (workspaceRoot: string): Promise<HostRuntimeClient> => {
-    agentRuntime ??= (async (): Promise<HostRuntimeClient> => {
-      let child: RuntimeChildHandle;
-      try {
-        child = await ensureRuntimeChild();
-      } catch (error) {
-        /* Never memoize the rejection: the relay loop retries the child, and a
-         * cached failure would keep the geometry tools refusing long after it
-         * recovered. Clearing it here is safe because `??=` hands every caller
-         * during the pending window this same promise. */
-        agentRuntime = undefined;
-        /* The geometry tools' typed refusal, not a bare supervisor error: a
-         * daemon whose child is down still answers every file tool. */
-        throw Object.assign(
-          new Error(`This Tau Host has no runtime attached: ${error instanceof Error ? error.message : String(error)}`),
-          { code: 'RUNTIME_UNAVAILABLE' },
-        );
-      }
-      // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the runtime client's render result is the structural render surface the tools need.
-      return createRuntimeClient({
-        transport: webSocketTransport({
-          url: child.url,
-          fileSystem: fromNodeFs(workspaceRoot),
-          createSocket: (url) =>
-            new WebSocket(url, { headers: { authorization: `Bearer ${child.authorizationToken}` } }),
-        }),
-      }) as unknown as HostRuntimeClient;
-    })();
-    return agentRuntime;
+  const ensureAgentRuntime = async (workspaceRoot: string): Promise<ReturnType<typeof createRuntimeClient>> => {
+    const pending =
+      agentRuntimes.get(workspaceRoot) ??
+      (async (): Promise<ReturnType<typeof createRuntimeClient>> => {
+        let child: RuntimeChildHandle;
+        try {
+          child = await ensureRuntimeChild();
+        } catch (error) {
+          /* Never memoize the rejection: the relay loop retries the child, and a
+           * cached failure would keep the geometry tools refusing long after it
+           * recovered. Deleting it here is safe because every caller during the
+           * pending window was handed this same promise. */
+          agentRuntimes.delete(workspaceRoot);
+          /* The geometry tools' typed refusal, not a bare supervisor error: a
+           * daemon whose child is down still answers every file tool. */
+          throw Object.assign(
+            new Error(
+              `This Tau Host has no runtime attached: ${error instanceof Error ? error.message : String(error)}`,
+            ),
+            { code: 'RUNTIME_UNAVAILABLE' },
+          );
+        }
+        return createRuntimeClient({
+          transport: webSocketTransport({
+            url: child.url,
+            fileSystem: fromNodeFs(workspaceRoot),
+            createSocket: (url) =>
+              new WebSocket(url, { headers: { authorization: `Bearer ${child.authorizationToken}` } }),
+            ...(options.agent?.compute
+              ? {
+                  compute:
+                    typeof options.agent.compute === 'function' ? options.agent.compute() : options.agent.compute,
+                }
+              : {}),
+          }),
+        });
+      })();
+    agentRuntimes.set(workspaceRoot, pending);
+    return pending;
   };
 
   /**
@@ -457,9 +502,52 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
    * @param agent - Workspace, gateway, model, admission secret, and binding.
    */
   const startAgent = async (agent: HostDaemonAgentOptions): Promise<void> => {
+    /* Where each admitted turn runs, written by the recorder and read by the
+     * Tau tool registry and the external port alike: the port is built inside
+     * the launcher the recorder wraps, so the three share the map rather than a
+     * call (V19). */
+    const checkouts = new (class extends Map<string, TurnCheckout> {
+      /**
+       * Give back the checkout's runtime client with the checkout.
+       *
+       * The map *is* the checkout lifecycle — `withTurnRevisions` sets an entry
+       * at admission and deletes it at release — and `agentRuntimes` is keyed by
+       * root, so nothing else would ever evict a candidate turn's client: it
+       * would hold a live socket to the child over a tree that no longer exists,
+       * one per turn, for the life of the daemon (5-review S4). The desktop
+       * composition hangs its own eviction off the same seam.
+       *
+       * @param runId - The run whose checkout is released.
+       * @returns Whether the entry was there.
+       */
+      public override delete(runId: string): boolean {
+        const checkout = this.get(runId);
+        if (checkout?.mode === 'candidate') {
+          const pending = agentRuntimes.get(checkout.cwd);
+          agentRuntimes.delete(checkout.cwd);
+          // async-iife: bootstrap -- the map holds a promise; nothing waits for the client it gives back.
+          void (async (): Promise<void> => {
+            try {
+              const client = await pending;
+              client?.terminate();
+            } catch {
+              /* A client that never connected has nothing to give back. */
+            }
+          })();
+        }
+        return super.delete(runId);
+      }
+    })();
     const toolRegistry = createHostToolRegistry({
       workspaceRoot: agent.workspaceRoot,
-      runtimeClient: async () => ensureAgentRuntime(agent.workspaceRoot),
+      checkouts,
+      ...(options.resolveSkillSubpath === undefined ? {} : { resolveSkillSubpath: options.resolveSkillSubpath }),
+      /* Per root, not per host: a candidate turn's kernel must read the tree
+       * that turn is writing, which is its checkout and not the project. */
+      runtimeClient: async (root) => ensureAgentRuntime(root),
+      /* The host's own decision, not a resolution accident: `false` withholds
+       * `test_model` from an installation whose GeoSpec engine resolves. */
+      geospecRunner: agent.testModel === false ? false : undefined,
     });
     /* Resolution *and* the CLI probe happen before the channel answers, because
      * the descriptor and the control `ready` frame both carry the list: a client
@@ -473,32 +561,34 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
       discovery.agents.length > 0
         ? createHostMcpEndpoint({ secret: randomBytes(32).toString('base64url'), registry: toolRegistry })
         : undefined;
-    const launcher = createNodeAgentLauncher({
+    /* Once, before the first turn: a daemon that died mid-turn — or that ran
+     * before V2 deleted the per-run tree copy — left workspaces nothing reads
+     * again. No live owner exists yet at this point, which is what makes start
+     * the safe moment (SR4). */
+    const sweep = await sweepTurnWorkspaces({ workspaceRoot: agent.workspaceRoot });
+    if (sweep.removed > 0) {
+      emit({
+        type: 'warning',
+        code: 'TURN_WORKSPACES_SWEPT',
+        message: `Removed ${String(sweep.removed)} orphaned turn workspace(s) under ${agent.workspaceRoot}.`,
+      });
+    }
+    /* V17 / I-EDIT: the host records the turn, so the recorder wraps the
+     * launcher rather than sitting beside it — the base tree has to be captured
+     * before the launcher admits anything. */
+    const base = createNodeAgentLauncher({
       workspaceRoot: agent.workspaceRoot,
       gatewayBaseUrl: agent.gatewayBaseUrl,
       model: agent.model,
       systemPrompt: agent.systemPrompt,
       toolRegistry,
       auth: () => currentCredential?.credential,
-      /* W4-PASEO: the browser holds the Paseo session, so it asks the daemon
-       * for the capability rather than signing one it has no secret for. */
-      ...(mcp
-        ? {
-            mintMcpCapability: (input: { readonly chatId: string; readonly runId: string }) => {
-              const minted = mcp.mint(input);
-              return {
-                url: agentServer ? new URL('mcp', agentServer.url()).href : '',
-                headers: { Authorization: `Bearer ${minted.token}` },
-                expiresAt: minted.expiresAt,
-              };
-            },
-          }
-        : {}),
       ...(discovery.agents.length > 0
         ? {
             externalAgents: createAcpExternalAgentPort({
               agents: discovery.agents,
               workspaceRoot: agent.workspaceRoot,
+              checkouts,
               /* The MCP url is only known once the server is listening, so it is
                * resolved per run rather than captured here. */
               ...(mcp
@@ -515,7 +605,29 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
           }
         : {}),
     });
-    const externalAgents = discovery.agents.map((adapter) => adapter.id);
+    const launcher = withTurnRevisions(base, {
+      workspaceRoot: agent.workspaceRoot,
+      checkouts,
+      ...(options.resolveSkillSubpath === undefined ? {} : { resolveSkillSubpath: options.resolveSkillSubpath }),
+      /* A turn that ran but could not be recorded is a warning, never a
+       * fatal: the run itself is already durable in its own log, and a host
+       * that stopped answering over a settlement failure would lose the next
+       * turn too. */
+      onSettled: ({ chatId, runId, status, error }) => {
+        if (status === 'recorded') {
+          return;
+        }
+        emit({
+          type: 'warning',
+          code: 'REVISION_NOT_RECORDED',
+          message:
+            status === 'conflicted'
+              ? `Chat ${chatId} run ${runId}: the turn's writes conflicted with the live workspace.`
+              : `Chat ${chatId} run ${runId}: ${error instanceof Error ? error.message : JSON.stringify(error)}`,
+        });
+      },
+    });
+    const externalAgents = externalAgentDescriptors(discovery);
     const server = startAgentServer({
       launcher,
       token: agent.token,
@@ -526,6 +638,8 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
       ...(agent.allowedOrigins ? { allowedOrigins: agent.allowedOrigins } : {}),
       ...(mcp ? { mcp } : {}),
       ...(externalAgents.length > 0 ? { externalAgents } : {}),
+      revisions: hostRevisionModes,
+      ...(agent.computeControl ? { computeControl: agent.computeControl } : {}),
     });
     try {
       await server.ready;
@@ -543,15 +657,17 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
      * and puts identity and state on the control socket, never content. It is
      * started here rather than beside the control connection because a run
      * outlives every relay reconnect, and `sendControl` is a no-op while the
-     * socket is down. */
-    agentRunReporter = startRunReporter({ events: (signal) => launcher.events(signal), send: sendControlOrThrow });
-    emit({
-      type: 'agent',
-      state: 'ready',
-      url: server.url().href,
-      externalAgents,
-      refusedAgents: discovery.refused,
-    });
+     * socket is down.
+     *
+     * The *base* stream, not the recorder's: the wrapper holds a terminal
+     * marker until the turn's revision is durable, which is a guarantee clients
+     * need and the run directory does not — it keeps no content. Riding the
+     * wrapper delayed every terminal frame by a whole-tree capture and, worse,
+     * grew this subscriber's queue for the length of it, past which the
+     * launcher's fan-out errors it and the reporter never resubscribes
+     * (5-review S2). */
+    agentRunReporter = startRunReporter({ events: (signal) => base.events(signal), send: sendControlOrThrow });
+    emit({ type: 'agent', state: 'ready', url: server.url().href, externalAgents });
     /* A daemon with the agent capability is *useful* the moment this channel
      * answers: pairing, the relay, and the compute child are all downstream of
      * it, and `tau serve --ui` must not block on any of them. */
@@ -653,6 +769,8 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
    * answer — it is the only thing that will ever tell the directory this run
    * exists — so the reporter has to learn that it was dropped and re-send it on
    * the next connection.
+   *
+   * @param message - The control frame to send.
    */
   const sendControlOrThrow = (message: HostControlOutbound): void => {
     if (controlSocket?.readyState !== WebSocket.OPEN) {
@@ -902,6 +1020,10 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
         ? {
             workspaceRoot: options.agent.workspaceRoot,
             ...(agentExternalAgents.length > 0 ? { externalAgents: agentExternalAgents } : {}),
+            /* V17 / VSC5: what this host can record a turn in. The composer
+             * offers the selector from this and nothing else, so a daemon that
+             * omitted it would silently lose the choice. */
+            revisions: hostRevisionModes,
           }
         : undefined;
     sendControl({

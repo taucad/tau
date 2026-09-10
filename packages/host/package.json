@@ -68,6 +68,7 @@
   },
   "peerDependencies": {
     "@taucad/geospec-engine": "^0.1.0-beta.0",
+    "@taucad/revisions": "^0.1.0-beta.0",
     "@taucad/runtime": "^0.1.0-beta.0",
     "geospec": "^0.1.0-beta.0",
     "zod": "^4.0.0"
@@ -85,6 +86,7 @@
     "@taucad/chat": "workspace:*",
     "@taucad/filesystem": "workspace:*",
     "@taucad/geospec-engine": "workspace:*",
+    "@taucad/revisions": "workspace:*",
     "@taucad/runtime": "workspace:*",
     "@taucad/types": "workspace:*",
     "@taucad/utils": "workspace:*",

@@ -33,6 +33,8 @@ import { isOriginAllowed } from '@taucad/runtime/transport/websocket-host';
 import { serveAgentChannel } from '@taucad/agent-host/node-launcher';
 import type { NodeAgentLauncher } from '@taucad/agent-host/node-launcher';
 
+import type { ExternalAgentDescriptor } from '@taucad/agent-host';
+import type { ComputeStoreControl } from '@taucad/runtime/types';
 import { isolationHeaders, serveStaticUi } from '#static-ui.js';
 import type { StaticUiHandler } from '#static-ui.js';
 
@@ -124,8 +126,21 @@ export type AgentServerOptions = {
    * secret travels into a vendor adapter's process.
    */
   readonly mcp?: { handle(request: IncomingMessage, response: ServerResponse): Promise<void> } | undefined;
-  /** External ACP agents this daemon can start; published on {@link hostDescriptorPath}. */
-  readonly externalAgents?: readonly string[] | undefined;
+  /**
+   * Every external ACP agent this daemon knows about, as the one canonical
+   * descriptor (VSC1); published on {@link hostDescriptorPath}. A same-origin
+   * page reads its model lists and refusal codes from here, exactly as a paired
+   * client reads them off the `ready` frame.
+   */
+  readonly externalAgents?: readonly ExternalAgentDescriptor[] | undefined;
+  /**
+   * Revision modes this host records a turn in (V17 / VSC5); published on
+   * {@link hostDescriptorPath}. A same-origin page reads its placement's modes
+   * from here, exactly as a paired client reads them off the `ready` frame.
+   */
+  readonly revisions?: ReadonlyArray<'direct' | 'candidate'> | undefined;
+  /** Bounded host-authority controls; absent when this host has no durable store. */
+  readonly computeControl?: ComputeStoreControl;
 };
 
 /** Handle returned by {@link startAgentServer}. @public */
@@ -250,6 +265,7 @@ export const startAgentServer = (options: AgentServerOptions): AgentServerHandle
       label: options.label ?? hostname(),
       workspaceRoot: options.workspaceRoot,
       ...(options.externalAgents?.length ? { externalAgents: [...options.externalAgents] } : {}),
+      ...(options.revisions?.length ? { revisions: [...options.revisions] } : {}),
     });
     response.writeHead(200, {
       ...isolationHeaders,
@@ -267,6 +283,67 @@ export const startAgentServer = (options: AgentServerOptions): AgentServerHandle
     const { pathname } = new URL(request.url ?? '/', 'http://localhost');
     if (pathname === hostDescriptorPath) {
       serveDescriptor(request, response);
+      return;
+    }
+    const computeOperation = routeOfPath(pathname, pathPrefix)?.match(/^compute\/(inspect|clear|collect)$/u)?.[1];
+    if (computeOperation) {
+      if (!isAdmitted(request)) {
+        response.writeHead(401).end();
+        return;
+      }
+      if (request.method !== 'POST' || !options.computeControl) {
+        response.writeHead(options.computeControl ? 405 : 404).end();
+        return;
+      }
+      const answer = async (): Promise<void> => {
+        try {
+          let bytes = 0;
+          const chunks: Array<Uint8Array<ArrayBuffer>> = [];
+          for await (const chunk of request) {
+            if (!Buffer.isBuffer(chunk)) {
+              throw new TypeError('invalid request chunk');
+            }
+            const value = Uint8Array.from(chunk);
+            bytes += value.byteLength;
+            if (bytes > 4096) {
+              throw new Error('request too large');
+            }
+            chunks.push(value);
+          }
+          const body = chunks.length > 0 ? (JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown) : {};
+          const input = body as { readonly budget?: unknown; readonly cursor?: unknown };
+          let result: unknown;
+          if (computeOperation === 'inspect') {
+            result = await options.computeControl!.inspect({});
+          } else if (computeOperation === 'clear') {
+            result = await options.computeControl!.clear({});
+          } else {
+            if (
+              !Number.isSafeInteger(input.budget) ||
+              (input.budget as number) < 1 ||
+              (input.budget as number) > 1000
+            ) {
+              throw new Error('invalid budget');
+            }
+            if (input.cursor !== undefined && (typeof input.cursor !== 'string' || input.cursor.length > 1024)) {
+              throw new Error('invalid cursor');
+            }
+            result = await options.computeControl!.collect({
+              budget: input.budget as number,
+              ...(input.cursor ? { cursor: input.cursor } : {}),
+            });
+          }
+          const encoded = JSON.stringify({ v: 1, operation: computeOperation, result });
+          response.writeHead(200, {
+            'content-type': 'application/json',
+            'content-length': String(Buffer.byteLength(encoded)),
+          });
+          response.end(encoded);
+        } catch {
+          response.writeHead(400).end();
+        }
+      };
+      void answer();
       return;
     }
     const { mcp } = options;

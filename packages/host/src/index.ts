@@ -37,6 +37,8 @@ export type { AgentServerHandle, AgentServerOptions } from '#agent-server.js';
 export { startRunReporter } from '#run-reporter.js';
 export type { RunReporter, RunReporterOptions } from '#run-reporter.js';
 export type { HostRunState } from '#host.schemas.js';
+export { hostRevisionModes, hostTurnCaptureExclusions, sweepTurnWorkspaces, withTurnRevisions } from '#revisions.js';
+export type { TurnCheckout, TurnRevisionOptions, TurnRevisionOutcome, TurnWorkspaceSweep } from '#revisions.js';
 export { isolationHeaders, serveStaticUi } from '#static-ui.js';
 export type { StaticUiHandler, StaticUiOptions } from '#static-ui.js';
 export { createHostToolRegistry } from '#agent-tools.js';
@@ -44,29 +46,37 @@ export type { HostToolRegistryOptions } from '#agent-tools.js';
 export {
   acpAdapterEnvironment,
   acpAdapterOverrideVariable,
-  acpAdapterPins,
+  acpAgentProfiles,
   acpCliProbeTimeout,
   acpEnvironmentAllowlist,
   acpEnvironmentPrefixAllowlist,
-  branchDirectory,
+  acpLiveSessionLimit,
+  acpModelProbeTimeout,
+  acpNativeToolNamePaths,
+  acpSessionIdleTimeout,
   createAcpExternalAgentPort,
   discoverAcpAgents,
-  ensureBranchDirectory,
+  externalAgentDescriptors,
+  modelChoice,
+  openAcpSession,
+  probeAcpAgentModels,
   probeAcpAgents,
   resolveAcpAdapters,
-  runAcpSession,
   spawnAcpAdapter,
   tauMcpServerName,
 } from '#acp/index.js';
 export type {
   AcpAdapter,
-  AcpAdapterPin,
   AcpAdapterRefusal,
   AcpAgentDiscovery,
+  AcpAgentProfile,
   AcpExternalAgentPortOptions,
+  AcpPromptTurn,
+  AcpAgentFacts,
+  AcpSession,
   AcpTurnOutcome,
   AcpWireFrame,
-  RunAcpSessionOptions,
+  OpenAcpSessionOptions,
   SpawnedAcpAdapter,
 } from '#acp/index.js';
 export {

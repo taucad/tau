@@ -3,5 +3,21 @@
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "packages/host",
   "projectType": "library",
-  "tags": ["scope:shared", "type:package"]
+  "tags": ["scope:shared", "type:package"],
+  "targets": {
+    "test:acp-live": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "metadata": {
+        "description": "One real turn through each pinned ACP adapter, against the operator's own Codex and Claude logins. Kept off the default test target because it spends their quota; the suite still skips unless both adapters resolve and both CLIs answer."
+      },
+      "options": {
+        "cwd": "{workspaceRoot}/packages/host",
+        "command": "../../node_modules/.bin/vitest run --config vitest.config.ts src/acp/acp-live.integration.test.ts",
+        "env": {
+          "TAU_ACP_LIVE": "1"
+        }
+      }
+    }
+  }
 }

@@ -13,12 +13,15 @@ import { connect } from 'node:net';
 import { hostname, tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { WebSocket } from 'ws';
 
 import type { NodeAgentLauncher } from '@taucad/agent-host/node-launcher';
+import type { ComputeGeneration, ComputeStoreControl } from '@taucad/runtime/types';
 
 import { hostSessionCookieName, startAgentServer } from '#agent-server.js';
+import { externalAgentDescriptorSchema } from '@taucad/agent-host';
+import type { ExternalAgentDescriptor } from '@taucad/agent-host';
 import type { AgentServerHandle } from '#agent-server.js';
 
 const token = 'agent-server-token-with-at-least-32-characters';
@@ -102,6 +105,39 @@ describe('startAgentServer', () => {
       expect(response.headers.get('set-cookie')).toBeNull();
     });
 
+    it('publishes the revision modes this host records a turn in (V17)', async () => {
+      /* The composer offers the revision selector from the placement's modes and
+         nothing else, so a descriptor that omitted them would silently take the
+         choice away from a same-origin page. */
+      server = startAgentServer({ launcher: stubLauncher(), token, workspaceRoot, revisions: ['direct'] });
+      await server.ready;
+      const response = await fetch(new URL('/.well-known/tau-host', server.url()));
+      await expect(response.json()).resolves.toMatchObject({ revisions: ['direct'] });
+    });
+
+    it('publishes the canonical agent descriptor, refusals included (VSC1)', async () => {
+      /* One shape, every tier: the same-origin page parses this body with the
+         same schema a paired client applies to the `ready` frame, so a model
+         list — or the reason an agent cannot run — reaches the selector by the
+         same route from either placement. */
+      const advertised: readonly ExternalAgentDescriptor[] = [
+        {
+          id: 'codex',
+          displayName: 'Codex',
+          models: [{ id: 'gpt-5.6-sol', name: 'GPT-5.6-Sol' }],
+          defaultModel: 'gpt-5.6-sol',
+        },
+        { id: 'claude', displayName: 'Claude Code', models: [], refusal: 'CLI_TOO_OLD' },
+      ];
+      server = startAgentServer({ launcher: stubLauncher(), token, workspaceRoot, externalAgents: advertised });
+      await server.ready;
+      const response = await fetch(new URL('/.well-known/tau-host', server.url()));
+      const body = (await response.json()) as { readonly externalAgents: unknown[] };
+
+      expect(body.externalAgents).toEqual(advertised);
+      expect(body.externalAgents.map((agent) => externalAgentDescriptorSchema.parse(agent))).toEqual(advertised);
+    });
+
     it('prefers a configured label over the machine hostname', async () => {
       const origin = await start(undefined, 'workshop-mac');
       const response = await fetch(new URL('/.well-known/tau-host', origin));
@@ -128,6 +164,40 @@ describe('startAgentServer', () => {
     await expect(
       upgrade(origin, { headers: { authorization: `Bearer ${token}`, origin: origin.href.replace(/\/$/u, '') } }),
     ).resolves.toBeUndefined();
+  });
+
+  it('keeps bounded compute controls behind the existing admission secret', async () => {
+    const generation = 1 as ComputeGeneration;
+    const inspect = vi.fn<ComputeStoreControl['inspect']>(async () => ({
+      entries: 0,
+      logicalBytes: 0,
+      pinnedBytes: 0,
+      pendingBytes: 0,
+      generation,
+      physicalBytes: { status: 'unsupported' },
+    }));
+    const clear = vi.fn<ComputeStoreControl['clear']>(async () => ({ status: 'cleared', generation, retained: 0 }));
+    const collect = vi.fn<ComputeStoreControl['collect']>(async () => ({ status: 'complete', reclaimed: 0 }));
+    const computeControl: ComputeStoreControl = { inspect, clear, collect };
+    server = startAgentServer({
+      launcher: stubLauncher(),
+      token,
+      workspaceRoot,
+      computeControl,
+    });
+    await server.ready;
+
+    const refused = await fetch(new URL('/compute/inspect', server.url()), { method: 'POST' });
+    expect(refused.status).toBe(401);
+    const response = await fetch(new URL('/compute/collect', server.url()), {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ budget: 25, cursor: 'next' }),
+    });
+    expect(response.status).toBe(200);
+    expect(collect).toHaveBeenCalledExactlyOnceWith({ budget: 25, cursor: 'next' });
+    const body: unknown = await response.json();
+    expect(body).toMatchObject({ v: 1, operation: 'collect' });
   });
 
   it('refuses an upgrade on any path but the agent route', async () => {

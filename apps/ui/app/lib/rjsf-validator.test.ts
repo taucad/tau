@@ -63,6 +63,18 @@ describe('rjsfValidator', () => {
     );
   });
 
+  it('fails closed when a schema reference cannot be resolved', () => {
+    const unresolvedReference: RJSFSchema = { $ref: '#/definitions/missing' };
+    const rootSchema: RJSFSchema = {
+      definitions: { positive: { type: 'number', minimum: 1 } },
+    };
+
+    const result = rjsfValidator.rawValidation(unresolvedReference, {});
+    expect(result.validationError).toBeInstanceOf(Error);
+    expect(result.errors).toBeUndefined();
+    expect(isJsonSchemaValid(unresolvedReference, 2, rootSchema)).toBe(false);
+  });
+
   it('adapts schema and custom validation failures', () => {
     vi.stubGlobal(
       'structuredClone',

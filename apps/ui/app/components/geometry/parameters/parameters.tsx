@@ -6,15 +6,17 @@ import type { RJSFSchema } from '@rjsf/utils';
 import { SearchInput } from '#components/search-input.js';
 import { cn } from '@taucad/ui/utils/cn';
 import { templates, uiSchema, widgets } from '#components/geometry/parameters/rjsf-theme.js';
+import { rjsfFields } from '#components/geometry/parameters/rjsf-field-path.js';
 import type { RJSFContext, Units } from '#components/geometry/parameters/rjsf-context.js';
 import {
   mergeFormDefaults,
   normalizeRjsfFormData,
+  resetRjsfField,
   rjsfDefaultFormStateBehavior,
   rjsfIdPrefix,
   rjsfIdSeparator,
 } from '#components/geometry/parameters/rjsf-utils.js';
-import { deleteValueAtPath, extractModifiedProperties, getValueAtPath, setValueAtPath } from '#utils/object.utils.js';
+import { extractModifiedProperties } from '#utils/object.utils.js';
 import { PanelEmptyState } from '#components/ui/panel-empty-state.js';
 import { rjsfValidator } from '#lib/rjsf-validator.js';
 
@@ -91,30 +93,15 @@ export function Parameters({
     [onParametersChange, defaultParameters],
   );
 
-  // Enhanced reset function that handles nested paths and arrays
-  const resetSingleParameter = useCallback(
-    (fieldPath: string[]) => {
-      // Use the current form data from RJSF instead of the parameters prop
-      // This ensures we're working with the actual form state, not stale props
-      const currentFormData = currentFormDataRef.current;
-
-      // Check if we're resetting an array item (path ends with a numeric string)
-      const lastSegment = fieldPath.at(-1);
-      const isArrayItem = lastSegment !== undefined && /^\d+$/.test(lastSegment);
-
-      if (isArrayItem) {
-        // For array items, restore the default value instead of deleting
-        // oxlint-disable-next-line @typescript-eslint/no-confusing-void-expression -- getValueAtPath returns value or undefined, not void
-        const defaultValue = getValueAtPath(defaultParameters, fieldPath as readonly string[]);
-        const updatedParameters = setValueAtPath(currentFormData, fieldPath, defaultValue);
-        setParameters(updatedParameters);
-      } else {
-        // For non-array items, delete the value (which removes it from modified parameters)
-        const updatedParameters = deleteValueAtPath(currentFormData, fieldPath);
+  const resetSingleParameter = useCallback<RJSFContext['resetSingleParameter']>(
+    (input) => {
+      const updatedParameters = resetRjsfField({ ...input, formData: currentFormDataRef.current });
+      if (updatedParameters !== undefined) {
+        currentFormDataRef.current = updatedParameters;
         setParameters(updatedParameters);
       }
     },
-    [setParameters, defaultParameters],
+    [setParameters],
   );
 
   const handleSearchChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
@@ -128,6 +115,7 @@ export function Parameters({
   const formContext = useMemo<RJSFContext>(
     () => ({
       idPrefix: rjsfIdPrefix,
+      parameterSemantics: 'legacy-cad',
       rootPresentation: 'catalog',
       allExpanded,
       searchTerm: activeFilterTerm,
@@ -145,7 +133,10 @@ export function Parameters({
     [allExpanded, activeFilterTerm, resetSingleParameter, defaultParameters, units],
   );
 
-  const mergedData = useMemo(() => mergeFormDefaults(defaultParameters, parameters), [defaultParameters, parameters]);
+  const mergedData = useMemo(
+    () => mergeFormDefaults(jsonSchema ?? {}, defaultParameters, parameters),
+    [jsonSchema, defaultParameters, parameters],
+  );
   const hasParameters = jsonSchema && Object.keys(jsonSchema.properties ?? {}).length > 0;
 
   // Initialize the ref with the current edited parameters when component mounts or data changes
@@ -158,6 +149,7 @@ export function Parameters({
       return;
     }
     const formData = normalizeRjsfFormData(jsonSchema, event.formData ?? {}) as Record<string, unknown>;
+    currentFormDataRef.current = formData;
     setParameters(formData);
   };
 
@@ -197,6 +189,7 @@ export function Parameters({
             idPrefix={rjsfIdPrefix}
             idSeparator={rjsfIdSeparator}
             widgets={widgets}
+            fields={rjsfFields}
             formData={mergedData}
             formContext={formContext}
             experimental_defaultFormStateBehavior={rjsfDefaultFormStateBehavior}

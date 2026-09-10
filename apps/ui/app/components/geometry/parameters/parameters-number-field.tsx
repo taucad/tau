@@ -113,9 +113,9 @@ export const ParametersNumberField = ({
   const trailingAdornment =
     descriptor === 'count' ? (
       <CountIndicator />
-    ) : (
+    ) : unit ? (
       <UnitIndicator descriptor={descriptor} unit={unit} isApproximation={isApproximation} />
-    );
+    ) : undefined;
 
   return (
     <SliderInput
@@ -130,8 +130,9 @@ export const ParametersNumberField = ({
       trailingAdornment={trailingAdornment}
       disabled={disabled}
       className={cn(
-        'h-[var(--param-field-h,1.5rem)] w-full rounded-[var(--param-field-radius,var(--radius-md))] border border-transparent bg-muted px-2 text-right text-[var(--param-field-color,var(--color-muted-foreground))] text-sm',
+        'h-[var(--param-field-h,1.5rem)] w-full rounded-[var(--param-field-radius,var(--radius-md))] border border-transparent bg-muted text-right text-[var(--param-field-color,var(--color-muted-foreground))] text-sm',
         'transition-colors hover:text-[var(--param-field-color-focus,var(--color-foreground))] focus-within:bg-background focus-within:text-[var(--param-field-color-focus,var(--color-foreground))]',
+        trailingAdornment ? 'pl-2' : 'px-2',
         disabled && 'opacity-50',
         className,
       )}

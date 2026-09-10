@@ -191,7 +191,7 @@ export const isUnitlessParameter = (parameterName: string): boolean => {
   return unitlessTerms.some((term) => normalizedName.includes(term));
 };
 
-export type MeasurementDescriptor = 'length' | 'angle' | 'count' | 'unitless';
+export type MeasurementDescriptor = 'length' | 'angle' | 'count' | 'quantity' | 'unitless';
 
 /**
  * Determine the descriptor type based on parameter name

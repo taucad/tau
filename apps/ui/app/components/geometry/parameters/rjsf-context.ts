@@ -9,13 +9,19 @@ export type Units = {
   };
 };
 
+export type RjsfFieldResetInput = {
+  readonly fieldPath: readonly string[];
+  readonly defaultValue: unknown;
+};
+
 // eslint-disable-next-line @typescript-eslint/naming-convention -- RJSF uses this format for formContext
 export type RJSFContext = {
   idPrefix: string;
+  parameterSemantics: 'configuration' | 'legacy-cad';
   rootPresentation: 'catalog' | 'embedded';
   searchTerm: string;
   allExpanded: boolean;
-  resetSingleParameter: (fieldPath: string[]) => void;
+  resetSingleParameter: (input: RjsfFieldResetInput) => void;
   shouldShowField: (prettyLabel: string) => boolean;
   defaultParameters?: Record<string, unknown>;
   units: Units;

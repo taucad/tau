@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { Registry, RJSFSchema, WidgetProps } from '@rjsf/utils';
 import { describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
@@ -8,6 +8,7 @@ import { TooltipProvider } from '@taucad/ui/components/tooltip';
 
 const formContext: RJSFContext = {
   idPrefix: '///root',
+  parameterSemantics: 'legacy-cad',
   rootPresentation: 'catalog',
   searchTerm: '',
   allExpanded: true,
@@ -38,6 +39,10 @@ function widgetProps(overrides: Partial<WidgetProps<Record<string, unknown>, RJS
   } satisfies WidgetProps<Record<string, unknown>, RJSFSchema, RJSFContext>;
 }
 
+function withParameterSemantics(parameterSemantics: RJSFContext['parameterSemantics']): RJSFContext {
+  return { ...formContext, parameterSemantics };
+}
+
 const renderWidget = (props: WidgetProps<Record<string, unknown>, RJSFSchema, RJSFContext>) =>
   render(
     <TooltipProvider>
@@ -46,6 +51,22 @@ const renderWidget = (props: WidgetProps<Record<string, unknown>, RJSFSchema, RJ
   );
 
 describe('ParametersWidget number hardening', () => {
+  it('should preserve nullable numbers as empty rather than coercing null to zero', () => {
+    const onChange = vi.fn();
+    renderWidget(widgetProps({ value: null, schema: { type: ['number', 'null'], default: 12 }, onChange }));
+
+    expect(screen.getByRole('spinbutton', { name: 'Input for Width' })).toHaveValue(null);
+    expect(onChange).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'Input for Width' }), { target: { value: '3' } });
+    expect(onChange).toHaveBeenCalledWith(3);
+  });
+
+  it('should not select an arbitrary scalar from an unsupported union', () => {
+    expect(() => renderWidget(widgetProps({ schema: { type: ['number', 'string'] } }))).toThrow(
+      'Unsupported type: number,string',
+    );
+  });
+
   it('should render an empty field with the schema default as its placeholder for undefined values', () => {
     renderWidget(widgetProps({ value: undefined }));
 
@@ -72,6 +93,94 @@ describe('ParametersWidget number hardening', () => {
       </TooltipProvider>,
     );
     expect(screen.getByRole('textbox', { name: 'Input for Width' })).toHaveAttribute('readonly');
+  });
+
+  it('should retain the legacy CAD name heuristic', () => {
+    const { container } = renderWidget(widgetProps({ value: 10 }));
+
+    expect(screen.getByText('mm')).toBeInTheDocument();
+    expect(container.querySelector('[data-slot="slider-input"]')).toHaveClass('pl-2');
+  });
+
+  it('should keep unannotated configuration numbers unit-free', async () => {
+    const onChange = vi.fn();
+    const props = widgetProps({ name: 'width', value: 10, onChange });
+    props.registry.formContext = withParameterSemantics('configuration');
+    const { container } = renderWidget(props);
+
+    expect(screen.queryByText('mm')).toBeNull();
+    expect(container.querySelector('[data-slot="slider-input"]')).toHaveClass('px-2');
+    expect(container.querySelector('[data-slot="slider-input-adornment"]')).toBeNull();
+    fireEvent.change(screen.getByRole('textbox', { name: 'Input for Width' }), { target: { value: '12' } });
+
+    await waitFor(() => {
+      expect(onChange).toHaveBeenCalledWith(12);
+    });
+  });
+
+  it('should give a quantity annotation precedence and preserve canonical constraints', async () => {
+    const onChange = vi.fn();
+    const props = widgetProps({
+      name: 'count',
+      value: 0.001,
+      schema: {
+        type: 'number',
+        default: 0.001,
+        minimum: 0.0005,
+        maximum: 0.01,
+        multipleOf: 0.0005,
+        'x-tau-quantity': 'length',
+      },
+      onChange,
+    });
+    props.registry.formContext = {
+      ...withParameterSemantics('configuration'),
+      units: { length: { sourceSymbol: 'm', displaySymbol: 'mm' } },
+    };
+    const { container } = renderWidget(props);
+
+    expect(screen.getByText('m')).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Input for Count' })).toHaveValue('0.001');
+    expect(container.querySelector('[data-slot="slider-input-fill"]')).toHaveStyle({
+      width: '5.2631578947368425%',
+    });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Input for Count' }), { target: { value: '0.002' } });
+
+    await waitFor(() => {
+      expect(onChange).toHaveBeenCalledWith(0.002);
+    });
+  });
+
+  it('should preserve explicit configuration display descriptors when no quantity is annotated', () => {
+    const props = widgetProps({ name: 'width', value: 10 });
+    props.registry.formContext = {
+      ...withParameterSemantics('configuration'),
+      displayDescriptors: { width: { descriptor: 'count', unit: 'px' } },
+    };
+    renderWidget(props);
+
+    expect(screen.getByText('×')).toBeInTheDocument();
+    expect(screen.queryByText('mm')).toBeNull();
+  });
+
+  it('should refuse an unknown quantity annotation instead of guessing from its name', () => {
+    const props = widgetProps({
+      value: 10,
+      schema: { type: 'number', 'x-tau-quantity': 'distance' },
+    });
+    props.registry.formContext = withParameterSemantics('configuration');
+
+    expect(() => renderWidget(props)).toThrow('Unsupported x-tau-quantity: distance');
+  });
+});
+
+describe('ParametersWidget nullable default', () => {
+  it('should not display a null default as a zero placeholder', () => {
+    renderWidget(widgetProps({ name: 'amount', schema: { type: ['number', 'null'], default: null }, value: null }));
+
+    const input = screen.getByRole('spinbutton', { name: 'Input for Amount' });
+    expect(input).toHaveValue(null);
+    expect(input).not.toHaveAttribute('placeholder');
   });
 });
 

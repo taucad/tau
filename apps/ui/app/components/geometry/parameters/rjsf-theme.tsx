@@ -26,7 +26,6 @@ import { ModifiedIndicator } from '#components/ui/modified-indicator.js';
 import { HighlightText } from '#components/highlight-text.js';
 import { ParametersWidget } from '#components/geometry/parameters/parameters-widget.js';
 import {
-  rjsfIdToJsonPath,
   isSchemaMatchingSearch,
   getFieldDefaultValue,
   getDiscriminatedUnionInfo,
@@ -40,6 +39,7 @@ import {
   rjsfLayoutContext,
   useRjsfLayoutContext,
 } from '#components/geometry/parameters/rjsf-context.js';
+import { useRenderedFieldPath } from '#components/geometry/parameters/rjsf-field-path.js';
 import type { RJSFContext, RjsfLayoutContextValue } from '#components/geometry/parameters/rjsf-context.js';
 
 const ArrayItemRemoveAction = ({ action }: { readonly action: RjsfLayoutContextValue['arrayItemAction'] }) => {
@@ -165,9 +165,10 @@ function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSc
   const { label, help, required, description, errors, children, schema, formData, id, registry } = props;
   const { formContext } = registry;
   const layoutContext = useRjsfLayoutContext();
-  const fieldPath = rjsfIdToJsonPath(id, formContext.idPrefix);
+  const renderedField = useRenderedFieldPath();
+  const fieldPath = renderedField?.path;
 
-  if (layoutContext.embeddedDiscriminator !== undefined && layoutContext.embeddedDiscriminator === fieldPath.at(-1)) {
+  if (layoutContext.embeddedDiscriminator !== undefined && layoutContext.embeddedDiscriminator === fieldPath?.at(-1)) {
     return null;
   }
 
@@ -222,7 +223,7 @@ function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSc
     let isInMatchingGroup = false;
     if (!labelMatches && !descriptionMatches) {
       // Parse the ID to extract parent group names (e.g., ///root///handrails///colors///post)
-      const idParts = rjsfIdToJsonPath(id, formContext.idPrefix);
+      const idParts = fieldPath ?? [];
       for (let i = 0; i < idParts.length - 1; i++) {
         const parentSegment = idParts[i];
         if (parentSegment) {
@@ -244,19 +245,25 @@ function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSc
   }
 
   // Get the appropriate default value (handles array items specially)
-  const defaultValue = formContext.defaultParameters
-    ? getFieldDefaultValue({
-        fieldPath,
-        formData,
-        schemaDefault: schema.default,
-        defaultParameters: formContext.defaultParameters,
-      })
-    : schema.default;
+  const defaultValue =
+    formContext.defaultParameters && fieldPath !== undefined
+      ? getFieldDefaultValue({
+          fieldPath,
+          formData,
+          schemaDefault: schema.default,
+          defaultParameters: formContext.defaultParameters,
+        })
+      : schema.default;
 
-  const fieldHasValue = hasCustomValue(formData, defaultValue, fieldPath);
+  const fieldHasValue =
+    fieldPath !== undefined &&
+    (Object.is(formData, null) ? !Object.is(defaultValue, null) : hasCustomValue(formData, defaultValue, fieldPath));
+  const canReset = !(renderedField?.isArrayItem && defaultValue === undefined);
 
   const handleReset = () => {
-    formContext.resetSingleParameter(fieldPath);
+    if (fieldPath !== undefined && canReset) {
+      formContext.resetSingleParameter({ fieldPath, defaultValue });
+    }
   };
 
   return (
@@ -273,7 +280,7 @@ function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSc
             <HighlightText text={prettyLabel} searchTerm={formContext.searchTerm} />
             {required ? <span className='text-destructive/50'>*</span> : null}
           </span>
-          {fieldHasValue ? (
+          {fieldHasValue && canReset ? (
             <ModifiedIndicator
               onReset={handleReset}
               tooltip={`Reset ${prettyLabel}`}
@@ -527,6 +534,7 @@ function ScopedArrayFieldItem({
   readonly item: ArrayFieldTemplateItemType<Record<string, unknown>, RJSFSchema, RJSFContext>;
   readonly title: string;
 }): React.ReactNode {
+  const { key, ...itemProps } = item;
   const layoutContext = useMemo<RjsfLayoutContextValue>(
     () => ({
       objectArrayItem: isObjectLikeSchema(item.schema),
@@ -542,7 +550,7 @@ function ScopedArrayFieldItem({
 
   return (
     <rjsfLayoutContext.Provider value={layoutContext}>
-      <ArrayFieldItemTemplate {...item} />
+      <ArrayFieldItemTemplate key={key} {...itemProps} />
     </rjsfLayoutContext.Provider>
   );
 }
@@ -782,11 +790,9 @@ export const templates: TemplatesType<Record<string, unknown>, RJSFSchema, RJSFC
   FieldErrorTemplate: ({ errors }) => (errors ? <div className='mt-1 text-xs text-destructive'>{errors}</div> : null),
   FieldHelpTemplate: ({ help }) => (help ? <div className='mt-1 text-xs text-muted-foreground'>{help}</div> : null),
   TitleFieldTemplate: ({ title }) => (title ? <h2 className='mb-2 text-lg font-medium'>{title}</h2> : null),
-  UnsupportedFieldTemplate({ reason, schema, idSchema, registry }) {
-    const fieldId: unknown = idSchema?.$id;
-    const { formContext } = registry;
-    const fieldPath = typeof fieldId === 'string' ? rjsfIdToJsonPath(fieldId, formContext.idPrefix) : [];
-    const fieldName = fieldPath.at(-1) ?? 'root';
+  UnsupportedFieldTemplate({ reason, schema }) {
+    const fieldPath = useRenderedFieldPath()?.path;
+    const fieldName = fieldPath?.at(-1) ?? 'root';
     const isArrayType = schema.type === 'array';
 
     return (

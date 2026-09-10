@@ -15,6 +15,7 @@ import {
   rjsfIdSeparator,
 } from '#components/geometry/parameters/rjsf-utils.js';
 import { templates, uiSchema, widgets } from '#components/geometry/parameters/rjsf-theme.js';
+import { rjsfFields } from '#components/geometry/parameters/rjsf-field-path.js';
 import type { RJSFContext } from '#components/geometry/parameters/rjsf-context.js';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 
@@ -44,6 +45,7 @@ const optionalSectionsSchema: RJSFSchema = {
 
 const formContext: RJSFContext = {
   idPrefix: rjsfIdPrefix,
+  parameterSemantics: 'configuration',
   rootPresentation: 'catalog',
   searchTerm: '',
   allExpanded: true,
@@ -97,6 +99,7 @@ describe('RJSF form-state policy', () => {
           formData={{}}
           validator={validator}
           templates={templates}
+          fields={rjsfFields}
           widgets={widgets}
           uiSchema={uiSchema}
           idPrefix={rjsfIdPrefix}

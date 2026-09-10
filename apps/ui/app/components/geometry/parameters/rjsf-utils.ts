@@ -2,25 +2,48 @@
  * Utility functions for React JSON Schema Form (RJSF) operations
  */
 import type { Experimental_DefaultFormStateBehavior, RJSFSchema } from '@rjsf/utils';
-import deepmerge from 'deepmerge';
 import { formatDisplayLabel } from '#utils/string.utils.js';
+import { deleteValueAtPath, setValueAtPath } from '#utils/object.utils.js';
+import type { RjsfFieldResetInput } from '#components/geometry/parameters/rjsf-context.js';
+
+/** Reset a field without creating holes or relying on deep merging inside replacement arrays. */
+export const resetRjsfField = ({
+  formData,
+  fieldPath,
+  defaultValue,
+}: RjsfFieldResetInput & {
+  readonly formData: Record<string, unknown>;
+}): Record<string, unknown> | undefined => {
+  if (fieldPath.length === 0) {
+    return undefined;
+  }
+  let parent: unknown = formData;
+  let crossesArray = false;
+  for (const segment of fieldPath.slice(0, -1)) {
+    crossesArray ||= Array.isArray(parent);
+    if (typeof parent !== 'object' || parent === null || !Object.hasOwn(parent, segment)) {
+      return undefined;
+    }
+    parent = (parent as Record<string, unknown>)[segment];
+  }
+  const isArrayItem = Array.isArray(parent);
+  if (isArrayItem && defaultValue === undefined) {
+    return undefined;
+  }
+  return (crossesArray || isArrayItem) && defaultValue !== undefined
+    ? setValueAtPath(formData, fieldPath, defaultValue)
+    : deleteValueAtPath(formData, fieldPath);
+};
 
 /**
- * The prefix used in RJSF IDs.
- *
- * It's important that this prefix is not used in the field names, otherwise
- * the JSON path used for field resets will be incorrect.
+ * The prefix used in RJSF renderer IDs. Reset paths come from rendered ancestry, not these IDs.
  *
  * @see https://rjsf-team.github.io/react-jsonschema-form/docs/api-reference/form-props/#idprefix
  */
 export const rjsfIdPrefix = '///root';
 
 /**
- * The separator used in RJSF IDs. It's important that this separator
- * is not used in the field names, otherwise the JSON path used for
- * field resets will be incorrect.
- *
- * Therefore, we use a separator that is unlikely to be used in field names.
+ * The separator used in RJSF renderer IDs. It is not an encoding of reset paths.
  *
  * @see https://rjsf-team.github.io/react-jsonschema-form/docs/api-reference/form-props/#idseparator
  */
@@ -32,58 +55,25 @@ export const rjsfDefaultFormStateBehavior = {
   arrayMinItems: { populate: 'requiredOnly' },
 } as const satisfies Experimental_DefaultFormStateBehavior;
 
-/** Merge schema defaults with edits without concatenating JSON-array values. */
-const formDefaultsMergeOptions: deepmerge.Options = {
-  arrayMerge: (_target: unknown[], source: unknown[]) => source,
-  customMerge:
-    () =>
-    (target: unknown, source: unknown): unknown => {
-      if (
-        typeof target === 'object' &&
-        target !== null &&
-        !Array.isArray(target) &&
-        typeof source === 'object' &&
-        source !== null &&
-        !Array.isArray(source) &&
-        ['mode', 'framing', 'kind'].some(
-          (key) =>
-            key in target &&
-            key in source &&
-            (target as Record<string, unknown>)[key] !== (source as Record<string, unknown>)[key],
-        )
-      ) {
-        return source;
-      }
-      return deepmerge<Record<string, unknown>>(
-        target as Record<string, unknown>,
-        source as Record<string, unknown>,
-        formDefaultsMergeOptions,
-      );
-    },
-};
-
-export const mergeFormDefaults = (
-  defaults: Record<string, unknown>,
-  values: Record<string, unknown>,
-): Record<string, unknown> => deepmerge<Record<string, unknown>>(defaults, values, formDefaultsMergeOptions);
-
 export type DiscriminatedUnionInfo = {
   readonly discriminator: string;
   readonly branches: readonly RJSFSchema[];
-  readonly values: readonly unknown[];
+  readonly values: ReadonlyArray<string | number | boolean>;
 };
 
 const isRjsfSchema = (value: unknown): value is RJSFSchema =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
-const getLiteralValue = (schema: RJSFSchema | undefined): unknown => {
+const getLiteralValue = (schema: RJSFSchema | undefined): string | number | boolean | undefined => {
   if (!schema) {
     return undefined;
   }
-  if (schema.const !== undefined) {
-    return schema.const as unknown;
+  const constant = schema.const;
+  if (typeof constant === 'string' || typeof constant === 'number' || typeof constant === 'boolean') {
+    return constant;
   }
-  return schema.enum?.length === 1 ? (schema.enum[0] as unknown) : undefined;
+  const value = schema.enum?.length === 1 ? schema.enum[0] : undefined;
+  return typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' ? value : undefined;
 };
 
 export const getDiscriminatedUnionInfo = (schema: RJSFSchema): DiscriminatedUnionInfo | undefined => {
@@ -98,6 +88,9 @@ export const getDiscriminatedUnionInfo = (schema: RJSFSchema): DiscriminatedUnio
 
   const firstProperties = (branches[0]?.properties ?? {}) as Record<string, unknown>;
   for (const discriminator of Object.keys(firstProperties)) {
+    if (!branches.every((branch) => branch.required?.includes(discriminator) === true)) {
+      continue;
+    }
     const values = branches.map((branch) => {
       const properties = (branch.properties ?? {}) as Record<string, unknown>;
       const property = properties[discriminator];
@@ -111,6 +104,76 @@ export const getDiscriminatedUnionInfo = (schema: RJSFSchema): DiscriminatedUnio
   return undefined;
 };
 
+const objectValue = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const selectedUnionBranch = (union: DiscriminatedUnionInfo, value: Record<string, unknown>): RJSFSchema | undefined => {
+  if (!Object.hasOwn(value, union.discriminator)) {
+    return undefined;
+  }
+  const selected = value[union.discriminator];
+  const index = union.values.findIndex((candidate) => Object.is(candidate, selected));
+  return index === -1 ? undefined : union.branches[index];
+};
+
+const mergedObjectSchema = (schema: RJSFSchema, branch?: RJSFSchema): RJSFSchema =>
+  branch === undefined
+    ? schema
+    : {
+        ...schema,
+        ...branch,
+        properties: { ...schema.properties, ...branch.properties },
+        required: [...new Set([...(schema.required ?? []), ...(branch.required ?? [])])],
+        oneOf: undefined,
+        anyOf: undefined,
+      };
+
+const directDefaults = (schema: RJSFSchema): Record<string, unknown> =>
+  Object.fromEntries(
+    Object.entries(schema.properties ?? {}).flatMap(([key, property]) =>
+      isRjsfSchema(property) && Object.hasOwn(property, 'default') ? [[key, property.default]] : [],
+    ),
+  );
+
+const mergeFormValue = (schema: RJSFSchema, defaults: unknown, values: unknown): unknown => {
+  if (!objectValue(defaults) || !objectValue(values)) {
+    return values;
+  }
+
+  const union = getDiscriminatedUnionInfo(schema);
+  const defaultBranch = union === undefined ? undefined : selectedUnionBranch(union, defaults);
+  const valueBranch = union === undefined ? undefined : selectedUnionBranch(union, values);
+  const hasExplicitDiscriminator = union !== undefined && Object.hasOwn(values, union.discriminator);
+  const changesBranch = hasExplicitDiscriminator && valueBranch !== defaultBranch;
+  const activeBranch = hasExplicitDiscriminator ? valueBranch : (valueBranch ?? defaultBranch);
+  const activeSchema = mergedObjectSchema(schema, activeBranch);
+  const retainedProperties = new Set([
+    ...Object.keys(schema.properties ?? {}),
+    ...Object.keys(valueBranch?.properties ?? {}),
+  ]);
+  const oldExclusiveProperties = new Set(
+    Object.keys(defaultBranch?.properties ?? {}).filter((key) => !retainedProperties.has(key)),
+  );
+  const inherited = Object.fromEntries(
+    Object.entries(defaults).filter(([key]) => !changesBranch || !oldExclusiveProperties.has(key)),
+  );
+  const selectedDefaults = valueBranch !== undefined && changesBranch ? directDefaults(valueBranch) : {};
+  const result: Record<string, unknown> = { ...inherited, ...selectedDefaults };
+
+  for (const [key, value] of Object.entries(values)) {
+    const propertySchema = activeSchema.properties?.[key];
+    result[key] = isRjsfSchema(propertySchema) ? mergeFormValue(propertySchema, result[key], value) : value;
+  }
+  return result;
+};
+
+/** Merge schema defaults with explicit values without concatenating JSON arrays or retaining inactive branch defaults. */
+export const mergeFormDefaults = (
+  schema: RJSFSchema,
+  defaults: Record<string, unknown>,
+  values: Record<string, unknown>,
+): Record<string, unknown> => mergeFormValue(schema, defaults, values) as Record<string, unknown>;
+
 export const isObjectLikeSchema = (schema: RJSFSchema): boolean =>
   schema.type === 'object' || getDiscriminatedUnionInfo(schema) !== undefined;
 
@@ -122,17 +185,8 @@ const activeObjectSchema = (schema: RJSFSchema, value: unknown): RJSFSchema => {
 
   const selectedValue = (value as Record<string, unknown>)[union.discriminator];
   const selectedIndex = union.values.findIndex((candidate) => Object.is(candidate, selectedValue));
-  const selectedBranch = union.branches[Math.max(0, selectedIndex)];
-  return selectedBranch
-    ? {
-        ...schema,
-        ...selectedBranch,
-        properties: { ...schema.properties, ...selectedBranch.properties },
-        required: [...new Set([...(schema.required ?? []), ...(selectedBranch.required ?? [])])],
-        oneOf: undefined,
-        anyOf: undefined,
-      }
-    : schema;
+  const selectedBranch = selectedIndex === -1 ? undefined : union.branches[selectedIndex];
+  return mergedObjectSchema(schema, selectedBranch);
 };
 
 /** Remove RJSF's transient undefined fields and invalid empty optional objects after a multi-schema branch change. */
@@ -174,27 +228,6 @@ export const normalizeRjsfFormData = (schema: RJSFSchema, value: unknown): unkno
     }),
   );
 };
-
-/**
- * Converts RJSF ID to JSON path array. Handles underscores in field names.
- *
- * @param rjsfId - The RJSF field ID
- * @param idPrefix - The exact root prefix configured on the owning RJSF form
- * @returns Array of path segments (e.g., ["config", "database", "host"])
- */
-export function rjsfIdToJsonPath(rjsfId: string, idPrefix: string): string[] {
-  if (rjsfId === idPrefix) {
-    return [];
-  }
-
-  const pathPrefix = `${idPrefix}${rjsfIdSeparator}`;
-  if (!rjsfId.startsWith(pathPrefix)) {
-    throw new Error(`RJSF ID "${rjsfId}" does not belong to root "${idPrefix}"`);
-  }
-
-  const pathString = rjsfId.slice(pathPrefix.length);
-  return pathString ? pathString.split(rjsfIdSeparator) : [];
-}
 
 /**
  * Helper to recursively check if a schema or its nested properties match the search term

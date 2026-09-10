@@ -2,13 +2,30 @@ import type { RJSFSchema } from '@rjsf/utils';
 import { describe, expect, it } from 'vitest';
 import {
   getFieldDefaultValue,
+  getDiscriminatedUnionInfo,
   isSchemaMatchingSearch,
   mergeFormDefaults,
   normalizeRjsfFormData,
-  rjsfIdToJsonPath,
-  rjsfIdPrefix,
-  rjsfIdSeparator,
+  resetRjsfField,
 } from '#components/geometry/parameters/rjsf-utils.js';
+
+describe('resetRjsfField refusal', () => {
+  it('should refuse a missing array-item default without changing the original JSON array', () => {
+    const formData = { point: [9, 8, 7] };
+
+    expect(resetRjsfField({ formData, fieldPath: ['point', '1'], defaultValue: undefined })).toBeUndefined();
+    expect(formData).toEqual({ point: [9, 8, 7] });
+    expect(Object.hasOwn(formData.point, '1')).toBe(true);
+  });
+
+  it('should refuse a root reset and stale missing ancestry', () => {
+    const formData = { value: 2 };
+
+    expect(resetRjsfField({ formData, fieldPath: [], defaultValue: 1 })).toBeUndefined();
+    expect(resetRjsfField({ formData, fieldPath: ['missing', 'value'], defaultValue: 1 })).toBeUndefined();
+    expect(formData).toEqual({ value: 2 });
+  });
+});
 
 describe('getFieldDefaultValue', () => {
   it.each([
@@ -66,6 +83,10 @@ describe('mergeFormDefaults', () => {
   it('should replace edited arrays while preserving nested object defaults', () => {
     expect(
       mergeFormDefaults(
+        {
+          type: 'object',
+          properties: { sections: { type: 'object', properties: { planes: { type: 'array' } } } },
+        },
         { sections: { planes: [{ point: [0, 0, 0] }], clipLines: true } },
         { sections: { planes: [{ point: [1, 2, 3] }] } },
       ),
@@ -75,10 +96,107 @@ describe('mergeFormDefaults', () => {
   it('should replace a changed discriminated branch instead of retaining fields from the old branch', () => {
     expect(
       mergeFormDefaults(
+        {
+          type: 'object',
+          properties: {
+            camera: {
+              oneOf: [
+                {
+                  type: 'object',
+                  properties: { framing: { const: 'fit' }, direction: { type: 'array' }, margin: { type: 'number' } },
+                  required: ['framing'],
+                },
+                {
+                  type: 'object',
+                  properties: { framing: { const: 'fixed' }, position: { type: 'array' }, target: { type: 'array' } },
+                  required: ['framing'],
+                },
+              ],
+            },
+          },
+        },
         { camera: { framing: 'fit', direction: [1, 0, 0], margin: 0.1 } },
         { camera: { framing: 'fixed', position: [3, -3, 2], target: [0, 0, 0] } },
       ),
     ).toEqual({ camera: { framing: 'fixed', position: [3, -3, 2], target: [0, 0, 0] } });
+  });
+
+  it('should follow an arbitrary required discriminator and retain common and selected defaults', () => {
+    const schema: RJSFSchema = {
+      type: 'object',
+      properties: {
+        solver: {
+          type: 'object',
+          properties: { shared: { type: 'number' } },
+          oneOf: [
+            {
+              properties: { algorithm: { const: 'steady' }, iterations: { type: 'number', default: 10 } },
+              required: ['algorithm'],
+            },
+            {
+              properties: { algorithm: { const: 'transient' }, duration: { type: 'number', default: 5 } },
+              required: ['algorithm'],
+            },
+          ],
+        },
+      },
+    };
+
+    expect(
+      mergeFormDefaults(
+        schema,
+        { solver: { algorithm: 'steady', iterations: 10, shared: 1, extension: true } },
+        { solver: { algorithm: 'transient', duration: 2, shared: 1 } },
+      ),
+    ).toEqual({ solver: { algorithm: 'transient', duration: 2, shared: 1, extension: true } });
+    expect(
+      mergeFormDefaults(
+        schema,
+        { solver: { algorithm: 'steady', iterations: 10 } },
+        { solver: { algorithm: 'transient' } },
+      ),
+    ).toEqual({
+      solver: { algorithm: 'transient', duration: 5 },
+    });
+    expect(
+      mergeFormDefaults(
+        schema,
+        { solver: { algorithm: 'steady', iterations: 10 } },
+        { solver: { algorithm: 'future', payload: 3 } },
+      ),
+    ).toEqual({ solver: { algorithm: 'future', payload: 3 } });
+  });
+});
+
+describe('getDiscriminatedUnionInfo', () => {
+  it('should require every branch to require the discriminator', () => {
+    const optional: RJSFSchema = {
+      anyOf: [
+        { properties: { algorithm: { const: 'steady' } } },
+        { properties: { algorithm: { const: 'transient' } } },
+      ],
+    };
+    expect(getDiscriminatedUnionInfo(optional)).toBeUndefined();
+    const required: RJSFSchema = {
+      oneOf: [
+        { properties: { algorithm: { const: 'steady' } }, required: ['algorithm'] },
+        { properties: { algorithm: { const: 'transient' } }, required: ['algorithm'] },
+      ],
+    };
+    expect(getDiscriminatedUnionInfo(required)?.discriminator).toBe('algorithm');
+  });
+
+  it('should preserve unknown discriminator data for validation instead of selecting branch zero', () => {
+    const schema: RJSFSchema = {
+      oneOf: [
+        { properties: { algorithm: { const: 'steady' }, iterations: { type: 'number' } }, required: ['algorithm'] },
+        { properties: { algorithm: { const: 'transient' }, duration: { type: 'number' } }, required: ['algorithm'] },
+      ],
+    };
+    expect(normalizeRjsfFormData(schema, { algorithm: 'future', payload: 3 })).toEqual({
+      algorithm: 'future',
+      payload: 3,
+    });
   });
 });
 
@@ -688,167 +806,6 @@ describe('isSchemaMatchingSearch', () => {
       };
       // Should match parent when child matches
       expect(isSchemaMatchingSearch(schema, 'Email Notifications')).toBe(true);
-    });
-  });
-});
-
-describe('rjsfIdToJsonPath', () => {
-  describe('Basic functionality', () => {
-    it('should convert single level path', () => {
-      const rjsfId = `${rjsfIdPrefix}${rjsfIdSeparator}username`;
-      expect(rjsfIdToJsonPath(rjsfId, rjsfIdPrefix)).toEqual(['username']);
-    });
-
-    it('should convert multi-level path', () => {
-      const rjsfId = `${rjsfIdPrefix}${rjsfIdSeparator}config${rjsfIdSeparator}database${rjsfIdSeparator}host`;
-      expect(rjsfIdToJsonPath(rjsfId, rjsfIdPrefix)).toEqual(['config', 'database', 'host']);
-    });
-
-    it('should return empty array for root level', () => {
-      const rjsfId = `${rjsfIdPrefix}${rjsfIdSeparator}`;
-      expect(rjsfIdToJsonPath(rjsfId, rjsfIdPrefix)).toEqual([]);
-    });
-
-    it('should handle just prefix without separator', () => {
-      const rjsfId = rjsfIdPrefix; // "///root"
-      expect(rjsfIdToJsonPath(rjsfId, rjsfIdPrefix)).toEqual([]);
-    });
-
-    it('should reject a path outside the configured root', () => {
-      const rjsfId = `config${rjsfIdSeparator}database${rjsfIdSeparator}host`;
-      expect(() => rjsfIdToJsonPath(rjsfId, rjsfIdPrefix)).toThrow('does not belong to root');
-    });
-
-    it('should support a dynamic export root', () => {
-      const exportRoot = `${rjsfIdPrefix}-usdz-options`;
-      const rjsfId = `${exportRoot}${rjsfIdSeparator}tessellation${rjsfIdSeparator}linearTolerance`;
-      expect(rjsfIdToJsonPath(rjsfId, exportRoot)).toEqual(['tessellation', 'linearTolerance']);
-    });
-  });
-
-  describe('Field names with underscores', () => {
-    it('should preserve underscores in field names', () => {
-      const rjsfId = `${rjsfIdPrefix}${rjsfIdSeparator}user_name`;
-      expect(rjsfIdToJsonPath(rjsfId, rjsfIdPrefix)).toEqual(['user_name']);
-    });
-
-    it('should preserve underscores in multi-level paths', () => {
-      const rjsfId = `${rjsfIdPrefix}${rjsfIdSeparator}db_config${rjsfIdSeparator}host_name${rjsfIdSeparator}primary_host`;
-      expect(rjsfIdToJsonPath(rjsfId, rjsfIdPrefix)).toEqual(['db_config', 'host_name', 'primary_host']);
-    });
-
-    it('should preserve multiple consecutive underscores', () => {
-      const rjsfId = `${rjsfIdPrefix}${rjsfIdSeparator}field__with__underscores`;
-      expect(rjsfIdToJsonPath(rjsfId, rjsfIdPrefix)).toEqual(['field__with__underscores']);
-    });
-
-    it('should preserve leading underscores', () => {
-      const rjsfId = `${rjsfIdPrefix}${rjsfIdSeparator}_privateField`;
-      expect(rjsfIdToJsonPath(rjsfId, rjsfIdPrefix)).toEqual(['_privateField']);
-    });
-
-    it('should preserve trailing underscores', () => {
-      const rjsfId = `${rjsfIdPrefix}${rjsfIdSeparator}field_`;
-      expect(rjsfIdToJsonPath(rjsfId, rjsfIdPrefix)).toEqual(['field_']);
-    });
-  });
-
-  describe('Special characters and numbers', () => {
-    it('should handle field names with numbers', () => {
-      const rjsfId = `${rjsfIdPrefix}${rjsfIdSeparator}field1${rjsfIdSeparator}field2${rjsfIdSeparator}field3`;
-      expect(rjsfIdToJsonPath(rjsfId, rjsfIdPrefix)).toEqual(['field1', 'field2', 'field3']);
-    });
-
-    it('should handle numeric field names', () => {
-      const rjsfId = `${rjsfIdPrefix}${rjsfIdSeparator}0${rjsfIdSeparator}1${rjsfIdSeparator}2`;
-      expect(rjsfIdToJsonPath(rjsfId, rjsfIdPrefix)).toEqual(['0', '1', '2']);
-    });
-
-    it('should handle array indices', () => {
-      const rjsfId = `${rjsfIdPrefix}${rjsfIdSeparator}items${rjsfIdSeparator}0${rjsfIdSeparator}name`;
-      expect(rjsfIdToJsonPath(rjsfId, rjsfIdPrefix)).toEqual(['items', '0', 'name']);
-    });
-
-    it('should handle field names with hyphens', () => {
-      const rjsfId = `${rjsfIdPrefix}${rjsfIdSeparator}field-name${rjsfIdSeparator}sub-field`;
-      expect(rjsfIdToJsonPath(rjsfId, rjsfIdPrefix)).toEqual(['field-name', 'sub-field']);
-    });
-
-    it('should handle camelCase field names', () => {
-      const rjsfId = `${rjsfIdPrefix}${rjsfIdSeparator}firstName${rjsfIdSeparator}lastName${rjsfIdSeparator}emailAddress`;
-      expect(rjsfIdToJsonPath(rjsfId, rjsfIdPrefix)).toEqual(['firstName', 'lastName', 'emailAddress']);
-    });
-
-    it('should handle PascalCase field names', () => {
-      const rjsfId = `${rjsfIdPrefix}${rjsfIdSeparator}FirstName${rjsfIdSeparator}LastName`;
-      expect(rjsfIdToJsonPath(rjsfId, rjsfIdPrefix)).toEqual(['FirstName', 'LastName']);
-    });
-
-    it('should handle field names with dots', () => {
-      const rjsfId = `${rjsfIdPrefix}${rjsfIdSeparator}field.name${rjsfIdSeparator}sub.field`;
-      expect(rjsfIdToJsonPath(rjsfId, rjsfIdPrefix)).toEqual(['field.name', 'sub.field']);
-    });
-  });
-
-  describe('Edge cases', () => {
-    it('should handle empty string', () => {
-      expect(() => rjsfIdToJsonPath('', rjsfIdPrefix)).toThrow('does not belong to root');
-    });
-
-    it('should handle string with only separator', () => {
-      const rjsfId = rjsfIdSeparator; // "///"
-      expect(() => rjsfIdToJsonPath(rjsfId, rjsfIdPrefix)).toThrow('does not belong to root');
-    });
-
-    it('should handle multiple consecutive separators', () => {
-      const rjsfId = `${rjsfIdPrefix}${rjsfIdSeparator}field1${rjsfIdSeparator}${rjsfIdSeparator}field2`;
-      // This creates an empty string segment between the separators
-      expect(rjsfIdToJsonPath(rjsfId, rjsfIdPrefix)).toEqual(['field1', '', 'field2']);
-    });
-
-    it('should handle trailing separator', () => {
-      const rjsfId = `${rjsfIdPrefix}${rjsfIdSeparator}field1${rjsfIdSeparator}field2${rjsfIdSeparator}`;
-      // Trailing separator creates an empty string at the end
-      expect(rjsfIdToJsonPath(rjsfId, rjsfIdPrefix)).toEqual(['field1', 'field2', '']);
-    });
-
-    it('should handle very long paths', () => {
-      const segments = Array.from({ length: 50 }, (_, i) => `level${i}`);
-      const rjsfId = `${rjsfIdPrefix}${rjsfIdSeparator}${segments.join(rjsfIdSeparator)}`;
-      expect(rjsfIdToJsonPath(rjsfId, rjsfIdPrefix)).toEqual(segments);
-    });
-
-    it('should handle single character field names', () => {
-      const rjsfId = `${rjsfIdPrefix}${rjsfIdSeparator}a${rjsfIdSeparator}b${rjsfIdSeparator}c`;
-      expect(rjsfIdToJsonPath(rjsfId, rjsfIdPrefix)).toEqual(['a', 'b', 'c']);
-    });
-
-    it('should handle field names with spaces', () => {
-      const rjsfId = `${rjsfIdPrefix}${rjsfIdSeparator}field name${rjsfIdSeparator}sub field`;
-      expect(rjsfIdToJsonPath(rjsfId, rjsfIdPrefix)).toEqual(['field name', 'sub field']);
-    });
-
-    it('should handle field names with special unicode characters', () => {
-      const rjsfId = `${rjsfIdPrefix}${rjsfIdSeparator}field_名前${rjsfIdSeparator}sub_поле`;
-      expect(rjsfIdToJsonPath(rjsfId, rjsfIdPrefix)).toEqual(['field_名前', 'sub_поле']);
-    });
-  });
-
-  describe('Consistency with constants', () => {
-    it('should use the correct prefix constant', () => {
-      expect(rjsfIdPrefix).toBe('///root');
-    });
-
-    it('should use the correct separator constant', () => {
-      expect(rjsfIdSeparator).toBe('///');
-    });
-
-    it('should correctly remove prefix and separator combination', () => {
-      const field = 'testField';
-      const rjsfId = `${rjsfIdPrefix}${rjsfIdSeparator}${field}`;
-      const result = rjsfIdToJsonPath(rjsfId, rjsfIdPrefix);
-      expect(result).toEqual([field]);
-      expect(result[0]).toBe(field);
     });
   });
 });

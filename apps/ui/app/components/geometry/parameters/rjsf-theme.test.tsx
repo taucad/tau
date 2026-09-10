@@ -7,6 +7,7 @@ import { customizeValidator } from '@rjsf/validator-ajv8';
 import type { WidgetProps, RJSFSchema, Registry } from '@rjsf/utils';
 import { mock } from 'vitest-mock-extended';
 import { templates, uiSchema, widgets } from '#components/geometry/parameters/rjsf-theme.js';
+import { rjsfFields } from '#components/geometry/parameters/rjsf-field-path.js';
 import type { RJSFContext } from '#components/geometry/parameters/rjsf-context.js';
 import {
   rjsfDefaultFormStateBehavior,
@@ -85,6 +86,7 @@ const renderSchemaForm = ({
 }) => {
   const formContext: RJSFContext = {
     idPrefix: rjsfIdPrefix,
+    parameterSemantics: 'legacy-cad',
     rootPresentation: 'catalog',
     searchTerm,
     allExpanded,
@@ -101,6 +103,7 @@ const renderSchemaForm = ({
         validator={validator}
         widgets={widgets}
         templates={templates}
+        fields={rjsfFields}
         uiSchema={uiSchema}
         idPrefix={rjsfIdPrefix}
         idSeparator={rjsfIdSeparator}
@@ -325,6 +328,7 @@ describe('fixed-length arrays', () => {
     const onChange = vi.fn();
     const formContext: RJSFContext = {
       idPrefix: rjsfIdPrefix,
+      parameterSemantics: 'legacy-cad',
       rootPresentation: 'catalog',
       searchTerm: '',
       allExpanded: true,
@@ -348,6 +352,7 @@ describe('fixed-length arrays', () => {
           validator={validator}
           widgets={widgets}
           templates={templates}
+          fields={rjsfFields}
           uiSchema={uiSchema}
           idPrefix={rjsfIdPrefix}
           idSeparator={rjsfIdSeparator}
@@ -370,6 +375,7 @@ describe('fixed-length arrays', () => {
   it('should preserve Add and Remove controls for homogeneous arrays', () => {
     const formContext: RJSFContext = {
       idPrefix: rjsfIdPrefix,
+      parameterSemantics: 'legacy-cad',
       rootPresentation: 'catalog',
       searchTerm: '',
       allExpanded: true,
@@ -388,6 +394,7 @@ describe('fixed-length arrays', () => {
           validator={validator}
           widgets={widgets}
           templates={templates}
+          fields={rjsfFields}
           uiSchema={uiSchema}
           idPrefix={rjsfIdPrefix}
           idSeparator={rjsfIdSeparator}
@@ -633,31 +640,37 @@ describe('root presentation', () => {
     rootPresentation,
     formData,
     resetSingleParameter = vi.fn(),
+    renderedSchema = schema,
+    defaultParameters = { binary: false, tessellation: { linearTolerance: 0.01 } },
   }: {
     idPrefix?: string;
     rootPresentation: RJSFContext['rootPresentation'];
     formData?: Record<string, unknown>;
     resetSingleParameter?: RJSFContext['resetSingleParameter'];
+    renderedSchema?: RJSFSchema;
+    defaultParameters?: Record<string, unknown>;
   }) => {
     const formContext: RJSFContext = {
       idPrefix,
+      parameterSemantics: 'configuration',
       rootPresentation,
       searchTerm: '',
       allExpanded: true,
       resetSingleParameter,
       shouldShowField: () => true,
-      defaultParameters: { binary: false, tessellation: { linearTolerance: 0.01 } },
+      defaultParameters,
       units: { length: { sourceSymbol: 'mm', displaySymbol: 'mm' } },
     };
 
     return render(
       <TooltipProvider>
         <Form
-          schema={schema}
+          schema={renderedSchema}
           formData={formData}
           validator={validator}
           widgets={widgets}
           templates={templates}
+          fields={rjsfFields}
           uiSchema={uiSchema}
           idPrefix={idPrefix}
           idSeparator={rjsfIdSeparator}
@@ -698,6 +711,39 @@ describe('root presentation', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Reset Binary' }));
 
-    expect(resetSingleParameter).toHaveBeenCalledWith(['binary']);
+    expect(resetSingleParameter).toHaveBeenCalledWith({ fieldPath: ['binary'], defaultValue: false });
+  });
+
+  it('should preserve exact rendered object names and array indices', () => {
+    const resetSingleParameter = vi.fn();
+    const emptyName = '';
+    renderForm({
+      rootPresentation: 'embedded',
+      resetSingleParameter,
+      renderedSchema: {
+        type: 'object',
+        properties: {
+          'a///b': { type: 'number', default: 1 },
+          '///': { type: 'number', default: 1 },
+          [emptyName]: { type: 'number', default: 1 },
+          '0': { type: 'number', default: 1 },
+          items: { type: 'array', items: { type: 'number', default: 1 } },
+        },
+      },
+      defaultParameters: { 'a///b': 1, '///': 1, [emptyName]: 1, '0': 1, items: [1] },
+      formData: { 'a///b': 2, '///': 2, [emptyName]: 2, '0': 2, items: [2] },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reset A/// B' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Reset ///' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Reset 0' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Reset' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Reset Items 1' }));
+
+    expect(resetSingleParameter).toHaveBeenCalledWith({ fieldPath: ['a///b'], defaultValue: 1 });
+    expect(resetSingleParameter).toHaveBeenCalledWith({ fieldPath: ['///'], defaultValue: 1 });
+    expect(resetSingleParameter).toHaveBeenCalledWith({ fieldPath: ['0'], defaultValue: 1 });
+    expect(resetSingleParameter).toHaveBeenCalledWith({ fieldPath: [''], defaultValue: 1 });
+    expect(resetSingleParameter).toHaveBeenCalledWith({ fieldPath: ['items', '0'], defaultValue: 1 });
   });
 });

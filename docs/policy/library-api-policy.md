@@ -3,7 +3,7 @@ title: 'Library API Policy'
 description: 'Design rules for world-class JavaScript/TypeScript library APIs: factories, defineX, named operation inputs, max 3 params, naming, subpath exports, events, plugins, and lazy init.'
 status: active
 created: '2026-02-23'
-updated: '2026-09-03'
+updated: '2026-09-05'
 related:
   - docs/policy/api-evolution-policy.md
   - docs/policy/resource-cleanup-policy.md
@@ -39,7 +39,9 @@ const client = new RuntimeWorkerClient(worker, onLog); // leaks implementation
 
 ## 2. Define Functions for Plugin Authors
 
-Use `defineX()` functions for plugin implementation contracts. For runtime capabilities, `defineKernel`, `defineMiddleware`, `defineBundler`, and `defineTranscoder` are the only public authoring primitives: each returns the callable plugin factory directly, and each factory call returns plain serializable metadata while carrying executable implementation through an internal non-enumerable slot owned by the worker or host runtime.
+Use `defineX()` functions for plugin implementation contracts. Runtime capability authoring uses `defineKernel`, `defineMiddleware`, `defineBundler`, `defineTranscoder`, `defineJobProvider`, and `defineMachine`: each returns the callable capability factory directly, and each factory call returns plain serializable metadata while carrying executable implementation through an internal non-enumerable slot owned by the worker or host runtime. Jobs and machines belong to host composition, not the CAD worker protocol. Extend the existing toolkit ABI explicitly when adding roles; never create an unversioned parallel plugin family.
+
+`defineConfiguration` is a pure schema authoring/admission utility, not another executable capability role or a configuration client. Keep it in runtime's configuration module and focused subpaths. Job configuration is owned by its job definition; boot configuration and secrets stay host-local. A toolkit may provide several schema-bearing job kinds without introducing a generic `invoke` interface or redundant solver authoring primitive.
 
 ```typescript
 export const myKernel = defineKernel({
@@ -94,7 +96,17 @@ render(source, parameters, renderOptions);
 
 ### Evolving public operations use named input objects
 
-Every public operation that performs I/O, crosses a process/provider/plugin boundary, or is expected to gain controls over time uses one **named, exported, readonly object for its operation-data parameter**. Distinct framework-owned `runtime` or provider-owned `context` parameters may still follow under the rules below. This applies even when the input's only current field is `signal`: cancellation is part of the operation envelope, and an `AbortSignal` must not become the sole positional parameter.
+Use a **named, exported, readonly object for evolving operation data**. I/O or a process/provider/plugin boundary makes cancellation, identity and preconditions important; it does not, by itself, require every argument to share one object. A stable subject or route discriminator may precede the named request when it improves call-site clarity or dependent inference, as in `export(format, input)`. Distinct framework-owned `runtime` or provider-owned `context` parameters may follow under the rules below. When the request's only current field is `signal`, keep it inside that request: an `AbortSignal` must not become the sole positional parameter.
+
+| Semantic shape                                | Signature                                 | Reason                                                             |
+| --------------------------------------------- | ----------------------------------------- | ------------------------------------------------------------------ |
+| Same-owner operation fields and controls      | `submit(input)`, `connect(input)`         | Identity, configuration and preconditions evolve together          |
+| Stable subject/route plus evolving request    | `export(format, input)`                   | The route discriminates inferred options; controls stay extensible |
+| Operation, framework services, provider state | `createGeometry(input, runtime, context)` | Three distinct ownership boundaries                                |
+| Scalar semantic construction                  | `quantity('length')`                      | No request lifecycle or unrelated control fields                   |
+| Standard event/lifecycle convention           | `on(event, handler)`, `close()`           | Preserve familiar stable contracts                                 |
+
+Do not migrate a signature merely to reduce its arity. Verify inference, ownership and actual callers; a wire envelope can differ from the ergonomic local call. New job/machine operations with several identities and preconditions normally use one named request. Do not pre-add unused fields.
 
 ```typescript
 export type MachineSnapshotInput = {
@@ -113,7 +125,7 @@ getSnapshot(input: { readonly signal: AbortSignal }): Promise<MachineSnapshot>;
 
 Add future fields to the same operation object only when they share that operation's ownership. Provider-owned option keyspaces remain nested under a named property as required by §21; do not flatten them beside runtime-owned fields.
 
-This rule does not wrap conventional scalar utilities, standard callback/event shapes such as `on(event, handler)`, or zero-input lifecycle methods such as `close()` and `dispose()`. Those signatures are already stable conventions rather than evolving operation envelopes.
+This rule does not wrap conventional scalar utilities, standard callback/event shapes such as `on(event, handler)`, or zero-input lifecycle methods such as `close()` and `dispose()`. Those signatures are already stable conventions rather than evolving operation envelopes. The subject-plus-request form above is also valid for I/O operations; it still has one extensible operation-data object.
 
 **Why**: A named object lets an operation acquire cancellation, freshness, pagination, request identity, tracing, or other same-concern controls without a breaking positional change. Naming the type also gives documentation, tests, transports, and adapters one contract to reference instead of repeating anonymous object shapes.
 
@@ -165,7 +177,7 @@ async exportGeometry({ format, tessellation, nativeHandle }, _runtime, _ctx) {
   // Everything the developer needs is in the first param
 ```
 
-**2. Same-concern params.** If all parameters answer the same question ("what should this operation do?"), they belong in one object regardless of count. Three "input data" params is worse than one input object -- even though it's within max-3.
+**2. Same-concern params.** Group peer operation-data fields in one object regardless of count. A stable subject or route discriminator is the explicit exception above, not permission to split arbitrary data across positions. Three "input data" params is worse than one input object -- even though it's within max-3.
 
 ```typescript
 // INCORRECT: all three are operation input data
@@ -302,7 +314,7 @@ replicad.plugin.ts             plugin.ts
 replicad.plugin.test.ts        plugin.test.ts
 ```
 
-Hyphens stay legal inside the name segment (`opencascade-native.kernel.ts`); only the role separator is a dot. Roles are `plugin`, `kernel`, `transcoder`, `middleware`, and `bundler`. Helper, schema, and scenario modules carry no role marker (`assimp-backend.ts`, `replicad.schemas.ts`, `image-import-failure.test.ts`) and are not governed. `tau-lint/plugin-capability-filename` enforces this for flat modules under `packages/plugins/*/src`.
+Hyphens stay legal inside the name segment (`opencascade-native.kernel.ts`); only the role separator is a dot. Roles are `plugin`, `kernel`, `transcoder`, `middleware`, `bundler`, `job`, and `machine`. Helper, schema, and scenario modules carry no role marker (`assimp-backend.ts`, `replicad.schemas.ts`, `image-import-failure.test.ts`) and are not governed. Keep `tau-lint/plugin-capability-filename` and the plugin generator aligned with these roles for flat modules under `packages/plugins/*/src`.
 
 **Why**: A capability is locatable by filename, and a test always sits next to the subject it covers instead of drifting one convention away from it.
 
@@ -769,9 +781,11 @@ Hook return objects follow the same ownership rule and must avoid reserved-word 
 
 ## 22. Temporal Values
 
-All numeric temporal values — durations, timeouts, intervals, delays, debounces, ages, windows, polling cadences — are in **milliseconds**. Never encode the unit in the identifier (no `Ms`, `Sec`, `S`, `Min`, `Seconds`, `Hours` suffixes; no `ms`/`s`/`min` prefixes).
+All numeric **operational timing** values — timeouts, retry delays, debounces, cache ages, polling cadences and wall-clock durations — are in **milliseconds**. Physical quantity values use their quantity registry's coherent SI unit: physical time and simulation time are **seconds**, speed is metres per second, and frequency is inverse seconds. Never encode the unit in the identifier (no `Ms`, `Sec`, `S`, `Min`, `Seconds`, `Hours` suffixes; no `ms`/`s`/`min` prefixes), except the external-contract allowlist below.
 
-**Why**: A single canonical unit eliminates conversion bugs at module boundaries. Milliseconds is the JavaScript ecosystem's de facto temporal unit (`setTimeout`, `setInterval`, `Date.now`, `performance.now`, `AbortSignal.timeout`, `requestAnimationFrame` callback timestamp), so aligning with it removes ambient cognitive load. Allowing unit suffixes invites divergence — once one module accepts seconds for "human readability", every consumer must read JSDoc to know which unit applies, and every wire-protocol round-trip becomes a conversion-bug surface.
+Classify the semantic value, not its name: a solver's simulated duration is physical time, while its execution deadline is operational timing. Numeric defaults, bounds and examples use the same canonical unit as the value. Convert explicitly at native-provider, external-protocol and legacy-model boundaries; do not reinterpret existing stored numbers merely by adding quantity metadata. Presentation unit preferences do not change the stored unit.
+
+**Why**: One canonical unit per semantic quantity eliminates implicit conversion at module boundaries. Operational timing follows JavaScript's millisecond APIs (`setTimeout`, `Date.now`, `performance.now`, `AbortSignal.timeout`); physical quantities follow coherent SI so derived dimensions remain correct. Choosing units by human readability or identifier suffix instead of the owning contract reintroduces ambiguity.
 
 CORRECT:
 
@@ -804,7 +818,7 @@ client.setRenderTimeout(30_000); // `setRenderTimeoutMs` would be forbidden
 
 ### Documenting the unit
 
-Because the identifier carries no suffix, every public temporal field must declare `Milliseconds.` in its JSDoc — a single word on its own sentence. This is the only acceptable place for the unit to appear in source.
+Because the identifier carries no suffix, every public operational timing field must declare `Milliseconds.` in its JSDoc — a single word on its own sentence. Physical time declares `Seconds.` and its quantity semantics; schema metadata carries the registry quantity kind, not a guessed unit from a field name.
 
 CORRECT:
 
@@ -835,7 +849,7 @@ The full allowlist lives in `libs/oxlint/src/rules/no-time-unit-suffix.js`. Addi
 
 If a future API genuinely needs to accept multiple temporal units (e.g., a CLI surface that takes `--timeout 30s`), introduce a branded `Milliseconds` type and a converter (`seconds(30)` → `Milliseconds`). Do not solve unit ambiguity by reintroducing suffixes.
 
-**Enforced by**: `tau-lint/no-time-unit-suffix` (forbids `Ms`/`Sec`/`Min`/etc. suffixes on identifiers) and `tau-lint/no-bare-time-identifier` (requires the `Milliseconds.` JSDoc tag on temporal fields).
+**Enforced by**: `tau-lint/no-time-unit-suffix` (forbids unit suffixes except its explicit allowlist) and `tau-lint/no-bare-time-identifier` (requires descriptive timing names). Unit classification and JSDoc correctness require semantic review; the latter rule does not check unit tags.
 
 ## 23. Async Surface Hygiene (Antipatterns)
 

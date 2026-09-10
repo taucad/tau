@@ -3,7 +3,7 @@ title: 'Runtime API Policy'
 description: 'Naming and ownership rules for runtime consumer, plugin-author, transport, filesystem, and artifact APIs.'
 status: active
 created: '2026-07-20'
-updated: '2026-08-28'
+updated: '2026-09-06'
 related:
   - docs/policy/library-api-policy.md
   - docs/policy/runtime-architecture-policy.md
@@ -77,7 +77,9 @@ Name unresolved model input `source` on every high-level operation that may esta
 Only source-bearing operations accept it:
 
 - `RuntimeClient.render({ source })`;
+- request-scoped `RuntimeClient.evaluate({ source })`;
 - request-scoped `RuntimeClient.export(format, { source })`;
+- `RuntimeClient.snapshotSource({ source })`;
 - `useRuntime({ source })`; and
 - wrappers that directly adapt one of those operations.
 

@@ -43,7 +43,7 @@ Most of these properties are configuration, not code. This policy codifies the c
 
 Applies to every package under `packages/*`, `packages/plugins/*`, and `packages/core/*` whose `package.json` declares `"private": false`.
 
-Internal workspace libraries under `libs/*` and `apps/libs/*` are `"private": true` and exempt from publish-specific rules; Rule 1's internal-library dependency shape still applies. They must either remain internal or be bundled into a publishable package via `deps.alwaysBundle` (see Rule 4). Runtime bundles only engine-owned private helpers. Concrete kernels, middleware, bundlers, transcoders, and backend helper logic belong to published plugin or core packages. Telemetry remains private application infrastructure and is not bundled or published.
+Internal workspace libraries under `libs/*` and `apps/libs/*` are `"private": true` and exempt from publish-specific rules; Rule 1's internal-library dependency shape still applies. They must either remain internal or be bundled into a publishable package via `deps.alwaysBundle` (see Rule 4). Runtime bundles only generic substrate-owned private helpers, including those used by its jobs/configuration modules. Concrete kernels, middleware, bundlers, transcoders, solver/device/slicer implementations, and backend helper logic belong to published plugin or core packages. Telemetry remains private application infrastructure and is not bundled or published.
 
 ## Rules
 
@@ -210,6 +210,8 @@ export default defineConfig({
 ```
 
 The runtime bundle list is exactly events, filesystem, fs-bridge, JSON Schema, memory, RPC, types, units, and utils. Concrete plugin and public core packages stay external.
+
+Generic jobs and configuration are internal runtime modules with focused public runtime subpaths, not separate jobs/configuration packages. Reuse the existing single runtime bundle owner for their private filesystem/path/units dependencies; do not introduce a dependency back-edge, duplicate private bundle or new foundation publication merely to preserve the superseded separate-package layout. Base configuration imports remain independent of the explicit Zod authoring entry. Check packed JavaScript and declarations from both entries; source aliases are not publication proof. Independently published consumers outside this consolidation still require their own valid dependency disposition.
 
 Every bundled private workspace library has exactly one published owner at any time — the pkgcheck bundle-ownership gate enforces this. When a private helper serves multiple published packages after the plugin split, either its shared logic becomes a published core package the plugins consume, or the private library is dissolved into its consumers. Never bundle the same private library into two published owners. `@taucad/converter` takes the dissolution path: it is removed entirely (per-backend import kernels in plugin packages, shared glTF machinery in `@taucad/geometry-core`), so no package bundles it — see `docs/research/runtime-converter-dissolution-blueprint.md`.
 

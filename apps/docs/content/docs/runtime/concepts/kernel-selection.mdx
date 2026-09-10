@@ -9,7 +9,7 @@ When you call `render({ source: { path } })` or `export(format, { source: { path
 
 ## Context and Motivation
 
-Different kernels own different file types: OpenRSCAD for `.scad`, Zoo for `.kcl`, Build123d for `.py`, and Replicad, OpenCASCADE, and JSCAD all for `.ts`/`.js`. For JS/TS the decision hangs on which library the file imports -- possibly transitively, through a local module. Selection must stay cheap for the common case (extension match) and correct for the ambiguous one (import analysis), and consumer `source.path` is already a canonical [runtime path](./path-namespaces) by the time it arrives.
+Each kernel declares the extensions it owns ([Choose a Kernel](../guides/choosing-a-kernel)), but `.ts`/`.js` is claimed by several: the decision hangs on which library the file imports, possibly transitively through a local module. Selection must stay cheap for the common case (extension match) and correct for the ambiguous one (import analysis), and consumer `source.path` is already a canonical [runtime path](./path-namespaces) by the time it arrives.
 
 ## How It Works
 
@@ -35,8 +35,6 @@ flowchart TD
     CatchAll -->|"extensions: '*'"| LoadCatchAll["Load custom kernel, cache, return"]
     CatchAll -->|None| Fail["No kernel can handle"]
 ```
-
-Pass 1 matches extensions and entry-file regexes, pass 2 traces the import graph through the bundler, and pass 3 falls back to an application-registered catch-all.
 
 ### Pass 1: Extension Fast Path
 
@@ -69,7 +67,6 @@ If nothing matches, selection returns `undefined` and the framework reports that
 
 - **Performance** -- extension and regex checks are cheap; bundler detection is not, and runs only when the cheap passes fail to decide.
 - **Correctness** -- the regex sees only the entry file; the bundler sees the whole import graph.
-- **Priority** -- plugin order in `defineRuntime({ plugins: [...] })` is selection priority. When several kernels match, the first registered wins.
 
 ## Caching of Selection Results
 
@@ -85,7 +82,7 @@ In autonomous rendering mode (the default), the worker's filesystem watch subscr
 
 ## Implications
 
-- **Order matters** -- register kernels in priority order; put Replicad before JSCAD if both match `.ts` and Replicad should win ambiguous files.
+- **Order matters** -- plugin order in `defineRuntime({ plugins: [...] })` is selection priority; put Replicad before JSCAD if both match `.ts` and Replicad should win.
 - **Catch-all last** -- register an application `'*'` kernel last so explicit format owners get first chance.
 - **Automatic invalidation** -- in autonomous mode, file changes re-trigger selection through the watch subscription.
 

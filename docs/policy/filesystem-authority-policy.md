@@ -3,7 +3,7 @@ title: 'Filesystem Authority Policy'
 description: 'The single-filesystem-authority invariant: one FM-worker authority per host, one provider instance per storage root, mounts as pure routing from persistent config, manifest-based discovery, cross-tab coherence, and webaccess handle lifecycle rules.'
 status: active
 created: '2026-07-13'
-updated: '2026-08-28'
+updated: '2026-09-08'
 related:
   - docs/policy/filesystem-policy.md
   - docs/policy/runtime-api-policy.md
@@ -17,6 +17,9 @@ related:
   - docs/research/workspace-naming-and-storage-backend-abstraction.md
   - docs/research/workspace-immediate-disconnect-undo-blueprint.md
   - docs/research/rooted-filesystem-root-relative-path-unification.md
+  - docs/research/client-host-topology-and-filesystem-authority.md
+  - docs/research/agent-revisions-and-compute-cache-spike-closeout-blueprint.md
+  - docs/research/agent-host-closeout-v2-charter.md
 ---
 
 # Filesystem Authority Policy
@@ -33,14 +36,14 @@ The thumbnail refresh-loss bug class (v3 forensics) had two structural causes: e
 
 Requirements the filesystem must satisfy at all times:
 
-| Req | Statement                                                                                                                                      |
-| --- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| A   | One canonical authority-global namespace (`/projects/<id>/…`) resolvable at any time from any consumer — never dependent on which page is open |
-| B   | Heterogeneous storage roots: IndexedDB database(s), the OPFS root, N webaccess directory handles, ephemeral memory scratch                     |
-| C   | Coherence: two reads of the same path through any route observe the same bytes; a write is immediately visible to every consumer in the tab    |
-| D   | Reactivity: watchers fire for all writers — in-app, cross-tab, external-on-disk — including the appearance of new projects                     |
-| E   | All consumers reach storage through one authority; runtime consumers receive only writable rooted views, never the authority-global namespace  |
-| F   | Cross-tab safety: serialized writes and change propagation                                                                                     |
+| Req | Statement                                                                                                                                                                                 |
+| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A   | One canonical authority-global namespace (`/projects/<id>/…`) resolvable at any time from any consumer — never dependent on which page is open                                            |
+| B   | Heterogeneous storage roots: IndexedDB database(s), the OPFS root, N webaccess directory handles, ephemeral memory scratch                                                                |
+| C   | Coherence: two reads of the same path through any route observe the same bytes; a write is immediately visible to every consumer in the tab                                               |
+| D   | Reactivity: watchers fire for all writers — in-app, cross-tab, external-on-disk — including the appearance of new projects                                                                |
+| E   | All consumers reach storage through one authority; runtime consumers receive writable rooted authored-data views, never the authority-global namespace; host-owned records follow Rule 15 |
+| F   | Cross-tab safety: serialized writes and change propagation                                                                                                                                |
 
 The invariant that satisfies them: **one provider instance per storage root, shared by every mount routing into that root; mounts are pure routing entries registered from persistent config at authority boot, never from page lifecycle.**
 
@@ -48,7 +51,7 @@ The invariant that satisfies them: **one provider instance per storage root, sha
 
 ### 1. Single filesystem authority per host
 
-All filesystem I/O runs in one place per host — the file-manager worker in the browser, or the caller-supplied rooted filesystem in CLI/Node environments. Trusted administration uses the authority-global namespace to select and configure project routes. Runtime, GeoSpec, preview, chat, and headless consumers receive only an opaque, fully writable rooted filesystem for one selected project; that capability's root is `''`. No feature worker may instantiate providers, open backing stores, inspect global routes, or receive the authority-global shared file pool. The main thread remains the writer of asset thumbnail files declared by `tau.json`.
+All filesystem I/O runs in one place per host — the file-manager worker in the browser, or the caller-supplied rooted filesystem in CLI/Node environments. Trusted administration uses the authority-global namespace to select and configure project routes. Runtime, GeoSpec, preview, chat, and headless consumers receive only an opaque rooted filesystem with full authored-data write semantics for one selected project; that capability's root is `''`, and host-owned records follow Rule 15. No feature worker may instantiate providers, open backing stores, inspect global routes, or receive the authority-global shared file pool. The main thread remains the writer of asset thumbnail files declared by `tau.json`.
 
 **Why**: Requirement C is unenforceable with more than one writer topology; every coherence mechanism in this policy assumes a single chokepoint.
 
@@ -188,9 +191,32 @@ After provider initialization settles, `getProvider()` must verify that the prom
 
 The captured mount entry also owns every post-I/O side effect. An admitted old-provider operation may complete against that provider, but it must not update a replacement route's pool, tree, or watches. Qualify remote facts with the existing physical pair `{ storageRootKey, providerBasePath }`; apply them only to matching projections after provider refresh completes.
 
-The view is not read-only. Source files, generated files, `.tau/cache`, and project-local `node_modules` are all writable and persist through the underlying provider. No rights matrix, write allowlist, grant lifecycle, route generation, receipt, or service worker participates in this boundary. Runtime and headless code receive the opaque filesystem and local path only; project selection and authority-global routing remain in trusted composition code.
+The view is not read-only. Source files, generated files, `.tau/cache`, and project-local `node_modules` remain writable and persist through the underlying provider. Preserve those semantics rather than introducing cache-only writes or a general rights matrix. Runtime and headless code receive the opaque filesystem and local path only; project selection and authority-global routing remain in trusted composition code.
+
+The narrow host-record ownership exception is the north star's I-MASK/I-EVIDENCE: agents may read but not author `.tau/chats/**` or `.tau/workspaces/**`, and the evidence namespace is outside their rooted view and the authored revision tree. Enforce this at the authority-owned admission boundary for every agent-reachable mutation route, including tools and agent-authored CAD/kernel code, not only one RPC wrapper. Reject canonical protected mutations before provider I/O; establish equivalent backing-object ownership for aliases before mutation. Preflight direct/batch writes, appends, both rename operands and ancestor removal/replacement before the first mutation; authorization preflight does not promise an atomic storage transaction. Refuse an unsafe route when its confinement cannot be established, including native execution with unqualified ambient filesystem access. Do not remove normal authored-data writes, hide readable records, or expose a raw provider/shared mutable buffer that bypasses the boundary. Protection follows the captured logical view and record ownership: an explicitly issued writable authored tree physically stored below `.tau/workspaces/<run>/tree` is not made read-only by its backing path.
+
+Authenticated host event/control writers use the same storage authority through its protected owner path; a caller-supplied flag or claimed actor identity must not grant that access. E-D requires remote agent hosts to append through the workspace authority, not a local shadow log. Its durable acknowledgement contract is owned by the filesystem context policy; local rooting, an advisory lock file or best-effort diagnostic append does not qualify ownership, fencing or durability. These rules state the required boundary, not that current rooted/provider adapters already implement it.
 
 **Why**: Reachability is enforced once, before provider I/O, without asking every runtime layer to reproduce authorization logic.
+
+### 16. Private stores and control metadata live outside authored identity
+
+Every workspace has exactly four storage classes, each with one owner; a byte is never in two of them and none is inferred from a path spelling alone:
+
+| Class                                                                                                                                                                       | Owner and location                                                                                                                                                | Authored identity                                                     | Agent's rooted view                                                                                               |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| Authored tree: sources, inputs, configuration, authored `.tau` controls (`.tau/config.json`, generated ignore and revision configuration)                                   | The workspace revision tree under the single authority                                                                                                            | Yes: these bytes are the revision                                     | Read and write (Rule 15)                                                                                          |
+| Host records: `.tau/chats/**`, `.tau/workspaces/**`                                                                                                                         | The authority's protected owner path; hosts append, agents may only read                                                                                          | No                                                                    | Read-only (Rule 15, I-MASK)                                                                                       |
+| Revision objects, refs and transactional store metadata; binding, epoch, lease, head-routing and idempotency state (`.tau/revisions/**`, `refs/tau/*`, `.tau/binding.json`) | The revision authority's control plane, written only through `RevisionPort` and the authority's admission                                                         | No: a revision hash never covers its own store, refs or control state | Absent from the view; a canonical path under it is refused before provider I/O                                    |
+| Private capability stores: the executing host's compute L2 and any future per-host derived store                                                                            | One opaque store per executing capability host and authorized workspace grant, physically outside every authored root, revision root, worktree and candidate slot | No                                                                    | Absent; the ordinary `.tau/cache` stays a writable derived directory and is not a projection of the private store |
+
+Classification is trusted and structural, never a glob: the authority names each class at admission, the generated ignore file is a convenience barrier, and a post-snapshot membership audit proves that no control or private byte entered a revision and no authored `.tau` control was excluded. Already-tracked bytes stay tracked; force-add attempts and symlink escapes into a private store are refused. Candidate slots share the host's private store through the capability, never through a per-candidate copy or a cache file retained inside the slot.
+
+Deleting one project releases that project's owners and pins in the private store, not the workspace store; two workspace grants stay isolated even for identical content; a moved physical host starts cold with no implicit store transfer. Ordinary garbage collection and candidate or worker teardown preserve every pin a live owner holds; an explicit clear-all refuses while such pins exist, or first moves the required content under an existing durable artifact owner.
+
+**Why**: The revision id is the outer cache key and must be stable across hosts, so nothing host-local, transactional or derived may enter it; the agent is confined by placement, so nothing it can reach may alter control state.
+
+Drafted 2026-09-08 under the Agent Host Closeout v2 charter (standing ruling SR5, blueprint Q3) for operator ratification at that program's closeout; dependent code proceeds against this draft.
 
 ## Anti-Patterns
 
@@ -202,7 +228,8 @@ The view is not read-only. Source files, generated files, `.tau/cache`, and proj
 - Adding a second cross-tab coherence channel instead of using `CrossTabCoordinator` (Rule 6).
 - Treating `ProjectLibraryState` as a discovery registry or using it to recover manifest fields (Rule 5).
 - Passing an authority-global bridge, global file-pool buffer, project id, or global `/projects/<id>` path into runtime/headless code instead of issuing a rooted view (Rules 4 and 15).
-- Reintroducing read-only source views or cache-only write allowlists; a rooted runtime filesystem is fully writable inside its virtual tree (Rule 15).
+- Reintroducing read-only source views or cache-only write allowlists; full authored-data writes remain available, with only the canonical host-record ownership exception (Rule 15).
+- Writing revision store, ref, binding or epoch state through the authored filesystem surface, excluding it by a blanket `.tau` or `dist` glob, or copying a private cache into a candidate slot (Rule 16).
 
 ## Rule Mapping (former filesystem-policy numbering)
 

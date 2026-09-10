@@ -14,7 +14,7 @@ Install the runtime framework, one kernel, and one bundler, then wire the runtim
 
 ## Install the Packages
 
-The runtime ships no kernels, so install at least one kernel plugin (`@taucad/replicad`) and the bundler plugin (`@taucad/esbuild`) that compiles TypeScript model code. `zod` is a required peer dependency.
+The runtime ships no kernels, so install at least one kernel plugin (`@taucad/replicad`) and the `@taucad/esbuild` bundler that compiles TypeScript model code. `zod` is a required peer dependency.
 
 ```bash tab="pnpm"
 pnpm add @taucad/runtime @taucad/replicad @taucad/esbuild zod
@@ -32,7 +32,7 @@ Add other plugins the same way when you need them — see [Choose a Kernel](../g
 
 ### Native Build123d
 
-`@taucad/build123d` is not a browser plugin and is not made usable by installing a global Python. A native host must package the pinned CPython and wheel tree outside its application archive, pass the exact executable and worker hashes to the plugin, and provide a separately revocable trusted-project marker. Tau Desktop owns that complete integration. See [Build123d](../reference/build123d) before adding it to another Electron or Node host.
+`@taucad/build123d` is not a browser plugin, and a global Python does not make it usable: the host packages the pinned CPython and wheel tree itself. Read [Build123d](../reference/build123d) first.
 
 ## Framework Configuration
 
@@ -99,7 +99,7 @@ const client = createRuntimeClient({
 
 ## Subpath Imports
 
-The package splits its API across subpaths so bundles carry only what they import: the client from `@taucad/runtime`, transports from `@taucad/runtime/transport/*`, filesystems from `@taucad/runtime/filesystem` (Node and browser backends sit behind `/node` and `/browser` because they depend on platform APIs), and authoring entries from `@taucad/runtime/kernel`, `/middleware`, and `/bundler`. Each [API Reference](../api/client) page names the subpath that exports its symbols.
+The package splits its API across subpaths so bundles carry only what they import: the client from `@taucad/runtime`, transports from `/transport/*`, filesystems from `/filesystem` (with platform backends behind `/node` and `/browser`), and authoring entries from `/kernel`, `/middleware`, and `/bundler`. Each [API Reference](../api/client) page names the subpath that exports its symbols.
 
 ## What's Next
 

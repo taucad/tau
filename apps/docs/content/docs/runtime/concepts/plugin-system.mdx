@@ -17,7 +17,7 @@ import { replicad } from '@taucad/replicad';
 const toolkit = replicad();
 ```
 
-Calling the factory selects its default preset. Presets select capability paths such as `kernels.default` and `transcoders.default`; role-nested options configure the factories that preset selected. Toolkits are authored with `definePlugin` from `@taucad/runtime/plugin`, which validates preset paths against the declared capability buckets. Expansion preserves plugin order, then preset path order, then direct bucket order.
+Calling the factory selects its default preset. Presets select capability paths such as `kernels.default`; role-nested options configure the factories that preset selected. Toolkits are authored with `definePlugin` from `@taucad/runtime/plugin`, which validates preset paths against the declared capability buckets. Expansion preserves plugin order, then preset path order, then direct bucket order.
 
 ## Compose a runtime
 
@@ -31,7 +31,7 @@ export const runtime = defineRuntime({
 });
 ```
 
-Configure packaged capabilities through their toolkit. Direct buckets remain for app-local capabilities, isolated tests, or whole-role ordering that must interleave outside plugin expansion.
+Configure packaged capabilities through their toolkit; direct buckets remain for app-local capabilities and isolated tests.
 
 ## Identity and collisions
 
@@ -45,15 +45,15 @@ Capability IDs are flat and author-declared. `meta.name` identifies the toolkit,
 
 Published toolkits declare `@taucad/runtime` in `peerDependencies`. Dynamic loaders warn when that range misses their bundled runtime; runtime composition itself never reads package manifests, and path-loaded modules without a resolvable manifest skip the check by design.
 
-Plugin factories and instances carry the exact `runtimePluginAbiVersion` in frozen global-registry slots so duplicate runtime copies can interoperate in one realm. These brands are construction markers, not a security boundary, and structured clone drops them; the validated capabilities manifest is the worker/process compatibility contract.
+Plugin factories and instances carry the exact `runtimePluginAbiVersion` so duplicate runtime copies can interoperate in one realm. These brands are construction markers, not a security boundary, and structured clone drops them; the validated capabilities manifest is the worker/process compatibility contract.
 
 ## Backend lifecycle
 
 Executable definitions stay worker-owned. Heavy backends load in `defineKernel` or `defineTranscoder` `initialize()` and live in the returned context; module-level backend caches are not part of the capability model.
 
-Root-importing a toolkit exposes descriptors without fetching its WASM payload. Kernels and transcoders initialize when their selected route first executes, once per worker.
+Root-importing a toolkit exposes descriptors without fetching its WASM payload; kernels and transcoders initialize when their selected route first executes, once per worker.
 
-Native-language kernels keep the same public lifecycle. `@taucad/build123d` starts its private, integrity-checked Python child from `initialize()`, retains generation-scoped shape handles in that process, and terminates the descendant tree from `cleanup()`. This is not a public runner plugin role: the language protocol, process supervision, and artifact channel remain package-owned until a second native language proves a reusable seam.
+Native-language kernels keep the same public lifecycle: [`@taucad/build123d`](../reference/build123d) starts its private Python child from `initialize()` and terminates the descendant tree from `cleanup()`. This is not a public runner plugin role -- the language protocol, process supervision, and artifact channel stay package-owned.
 
 ## Capability-derived formats
 

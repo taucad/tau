@@ -2,10 +2,11 @@
 title: Build123d
 description: Author trusted native Python CAD projects in Tau Desktop.
 docType: reference
+wordBudgetOverride: 450
 icon: lucide:boxes
 ---
 
-Build123d is Tau's native Python BRep kernel. It runs only when the active runtime advertises `build123d`; Tau Desktop packages the pinned CPython, Build123d, and OCP payload and asks you to trust the physical project directory before Python starts. The web runtime neither advertises the kernel nor ships the native payload.
+Build123d is Tau's native Python BRep kernel. Tau Desktop packages the pinned CPython, Build123d, and OCP payload and asks you to trust the physical project directory before Python starts; the web runtime neither advertises the kernel nor ships the payload.
 
 ## Authoring contract
 
@@ -47,19 +48,19 @@ def main(params: Params) -> Shape:
 
 Supported parameter annotations are `bool`, `int`, `float`, `str`, and scalar `Literal` values. Every field needs a literal default. `__tau__.parameters` may refine the generated JSON Schema with numeric bounds, string bounds/patterns, descriptions, and enums. Put non-Python files read by the model in `__tau__.dependencies` so edits invalidate the render.
 
-Local imports must be static and project-relative. Tau parses the entry and local import closure without executing it, mirrors the rooted project into a private directory, then calls `main(Params(...))` in a warm native process. Editing an imported `.py` file or declared data dependency follows the same filesystem watcher and autonomous rerender loop as other kernels.
+Local imports must be static and project-relative. Tau parses the entry and its local import closure without executing it, mirrors the rooted project into a private directory, then calls `main(Params(...))` in a warm native process. Editing an imported `.py` file or declared data dependency triggers the same autonomous rerender loop as other kernels.
 
 ## Geometry, topology, and export
 
-The kernel retains the Build123d/OCP shapes from the successful build. Preview meshing emits a GLB with the canonical `TAU_cad_topology` component, face, edge, label, color, and hierarchy payload. STEP export consumes the same retained shapes and does not run the source again.
+The kernel retains the Build123d/OCP shapes from the successful build. Preview meshing emits a GLB carrying the canonical `TAU_cad_topology` payload, and STEP export consumes the same retained shapes without running the source again.
 
 Tau maps Build123d's Z-up millimeter coordinates to glTF Y-up meters. Preview tessellation is a runtime render option, not a model parameter; STEP remains an exact BRep export.
 
 ## Trust and resources
 
-Python executes with the desktop user's operating-system permissions. Utility-process isolation protects the UI from a crash or hang but is not a malicious-code sandbox. Trust only code you know, and use the visible project control to revoke native execution. A moved or replaced physical directory does not inherit an old grant.
+Python executes with the desktop user's operating-system permissions. Utility-process isolation protects the UI from a crash or hang but is not a malicious-code sandbox: trust only code you know, and revoke native execution from the visible project control. A moved or replaced directory does not inherit an old grant.
 
-Production hosts must pass an exact packaged interpreter, worker, support-file hashes, and trust marker to `build123d()`. The kernel never searches `PATH`, uses a virtual environment, runs `pip`, downloads wheels, or silently falls back to system Python.
+Production hosts pass exact packaged interpreter, worker, and support-file hashes plus a trust marker to `build123d()`. The kernel never searches `PATH`, runs `pip`, downloads wheels, or falls back to system Python.
 
 ## Related
 

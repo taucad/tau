@@ -43,7 +43,7 @@ A single-writer topology with zero-copy binary transfer and bounded caches preve
 9. **Bridge skip-originator is internal** — when a filesystem bridge port initiates a mutation, the resulting `ChangeEvent` may carry an originating port id for intra-process routing only (`tagEventOrigin` / `getEventOrigin` on `@taucad/filesystem`). The filesystem bridge adapter (`@taucad/fs-bridge` `exposeFileSystem`) skips delivering `fileChanged` back to that port. This metadata is **not** part of the wire shape of `ChangeEvent`, is **not** passed as a second argument to `ChangeEventBus.emit`, and **must not** surface in consumer-facing UI APIs.
 10. **Filesystem transport reports facts, not project recency** — filesystem APIs emit typed content-change facts; project-domain participants and machines decide whether those facts are activity.
 11. **Virtual routes are projections, not physical identity** — `/projects/<id>` resolves through a persisted locator; provider paths come from `{ storageRootKey, providerBasePath }`, never from manifest fields.
-12. **Runtime reachability is filesystem-owned** — issue one fully writable rooted view per selected project; runtime receives only that filesystem and local paths.
+12. **Runtime reachability is filesystem-owned** — issue one rooted view with full authored-data writes per selected project; runtime receives only that filesystem and local paths. Host-record protection is the narrow exception owned by filesystem authority Rule 15.
 
 ## Bridge self-write suppression (skip-originator)
 
@@ -90,7 +90,7 @@ Use the path grammar owned by the boundary. Authority routing uses `resolveAutho
 
 ### Rule 0c: Preserve full write and watch semantics inside the view
 
-A rooted view supports the same writes, queues, cache invalidation, persistence, and events as global WFS operations. Do not add cache-only writes, read-only source trees, or path allowlists. Rebase watch requests and emitted events to the capability-local namespace (`''`, `main.ts`, `lib/part.ts`), and never deliver sibling-project events. Scoped runtime bridges use transfer/copy delivery and must not receive the authority-global shared file pool, because a pool hit would bypass rooted RPC dispatch.
+A rooted view supports the same authored-data writes, queues, cache invalidation, persistence, and events as global WFS operations. Do not add cache-only writes, read-only source trees, or generic path allowlists. Apply only the canonical host-record protection in [filesystem authority Rule 15](filesystem-authority-policy.md#15-rooted-views-are-the-runtime-reachability-boundary), covering all mutation routes without duplicating its ownership rules here. Rebase watch requests and emitted events to the capability-local namespace (`''`, `main.ts`, `lib/part.ts`), and never deliver sibling-project events. Scoped runtime bridges use transfer/copy delivery and must not receive the authority-global shared file pool, because a pool hit would bypass rooted RPC dispatch.
 
 A rooted view preserves the exact canonical virtual paths carried by concrete create, change, delete, and rename events regardless of backing-filesystem naming semantics. It must not lowercase, normalize Unicode, infer aliases, or widen a concrete event to `reset`. Only explicit information-loss signals—such as overflow, observer `unknown`/`errored`, stale-root detection, backend replacement, or an irreducibly summarized change—use reset recovery. Preserve the hidden mutation origin through rooted writes and suppress only the originating scoped port's echo.
 

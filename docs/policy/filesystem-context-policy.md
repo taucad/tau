@@ -3,9 +3,11 @@ title: 'Filesystem Context Policy'
 description: 'Rules for the filesystem-backed context management pipeline: transcripts, tool offloading, skills, memory, compaction, and middleware ordering.'
 status: active
 created: '2026-03-24'
-updated: '2026-07-10'
+updated: '2026-09-05'
 related:
   - docs/policy/context-engineering-policy.md
+  - docs/policy/filesystem-authority-policy.md
+  - docs/research/client-host-topology-and-filesystem-authority.md
   - docs/research/transcript-search-architecture.md
   - docs/research/harness-cache-hygiene-audit.md
 ---
@@ -22,9 +24,11 @@ Tau implements dynamic context discovery (see `docs/policy/context-engineering-p
 
 ### 1. Unified Append-Only Transcripts
 
-Store all conversation events in a single append-only JSONL file per chat session at `.tau/transcripts/{chatId}.jsonl`.
+Store authoritative portable host events at `<workspace>/.tau/chats/<chatId>/events.jsonl` through that workspace's filesystem authority. Reuse the canonical `AgentLogEvent` schema and `EventLogAppender`; do not replace their epoch, sequence, identity or replay fields with the diagnostic schema below. Await the storage owner's qualified append/flush acknowledgement before committing the corresponding durable event, publishing its replay cursor or claiming durable completion. A remote execution host uses the same authority; unreachable or uncertain writes are explicit refusal/buffered state, not a successful local shadow log. The host-owned write path is protected by filesystem authority Rule 15.
 
-**Why**: A unified, append-only file enables grep-based recall without loading full history into context. Separate files or overwrite semantics lose prior data.
+An optional grep-oriented diagnostic projection may use `.tau/transcripts/{chatId}.jsonl`. The role-based schema below describes that projection, not the canonical event log or a second replay authority. Best-effort diagnostic loss does not relax authoritative append or required-compaction guarantees. Reuse existing context hooks; this policy does not require reviving a retired transcript middleware. Legacy-named middleware examples identify their original owner and ordering intent, not a current-source inventory; the portable host owner qualifies the corresponding behavior.
+
+**Why**: Authority-owned append-only events preserve truthful replay; a human-readable projection aids bounded recall without replacing that authority.
 
 #### JSONL Schema
 
@@ -65,14 +69,14 @@ INCORRECT:
 
 ### 2. Adding Transcript Event Types
 
-When adding a new event type to the transcript:
+When adding a new event type to the diagnostic transcript:
 
 1. Add a new `role` value or use an existing role with a distinguishing `type` field
 2. Include only fields useful for agent grep — no opaque data, no full tool output
 3. Always include `timestamp`
-4. Append via `appendTranscriptLine()` — fire-and-forget, never blocks the agent loop
+4. Use the context owner's diagnostic append hook, observing failures without blocking the agent loop; never apply this rule to authoritative events or required compaction
 5. Update the JSONL schema table in Rule 1
-6. Add tests in `transcript.middleware.test.ts`
+6. Add the corresponding context-owner projection tests; use its actual current owner rather than creating a retired middleware just to match an old filename
 
 ### 3. Transcript Search Prompt
 
@@ -143,9 +147,9 @@ The middleware chain order in `chat.service.ts` is load-bearing (earlier entries
 
 ### 8. Most Context Writes Are Non-Blocking
 
-Routine transcript and offloading writes use fire-and-forget (`void promise`). Context persistence must not block the agent loop when it is an observability or recall enhancement.
+Routine diagnostic transcript and optional offloading writes may be non-blocking when they are only observability or recall enhancements; observe their failures. Do not return a persisted-output reference before its referenced bytes are available. Authoritative host event appends are awaited under Rule 1, not fire-and-forget diagnostics.
 
-**Why**: A filesystem or RPC failure during write should not prevent the agent from responding. Transcript loss is acceptable; agent hang is not.
+**Why**: An optional diagnostic failure need not prevent a response, but missing authoritative history or a false persisted-output receipt is not successful persistence.
 
 Required compaction commits are the exception. When compaction is the gate that makes a provider request valid and small enough to send, the transcript append and state rewrite are part of the request contract. Failure blocks provider dispatch and is surfaced noisily instead of being hidden behind a degraded continuation.
 
@@ -168,9 +172,9 @@ Required compaction commits are the exception. When compaction is the gate that 
 
 ### 4. Blocking Writes
 
-- INCORRECT: `await appendTranscriptLine(...)` in the middleware hot path
-- CORRECT: `void appendTranscriptLine(...)` — fire-and-forget for ordinary transcript capture
-- EXCEPTION: required compaction transcript commits are awaited and fail closed before provider dispatch
+- INCORRECT: Treating optional diagnostic persistence as a mandatory provider-dispatch gate
+- CORRECT: Observe optional diagnostic writes without blocking ordinary capture
+- REQUIRED: Await authoritative host events and referenced-output publication; required compaction commits fail closed before provider dispatch
 
 ### 5. Implicit Compaction Fallbacks
 
@@ -189,7 +193,7 @@ When adding or modifying filesystem-based context:
 - [ ] Data is greppable by the agent (full text, no opaque binary)
 - [ ] No duplication with another middleware hook
 - [ ] Uses append-only semantics (not overwrite)
-- [ ] Writes are fire-and-forget (void the promise), except required compaction commits that gate provider dispatch
+- [ ] Optional diagnostics are non-blocking; authoritative events, referenced output publication and required compaction have truthful awaited commit boundaries
 - [ ] `timestamp` is included on every JSONL line
 - [ ] Schema table in Rule 1 is updated for new event types
 - [ ] Tests added in the corresponding middleware test file

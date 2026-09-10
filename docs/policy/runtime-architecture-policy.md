@@ -1,9 +1,9 @@
 ---
 title: 'Runtime Architecture Policy'
-description: 'CAD runtime worker architecture from editor to geometry computation. Covers runtime engine boundaries, plugin toolkits, transport, and lifecycle.'
+description: 'Runtime SDK ownership and CAD worker architecture. Covers generic job/configuration modules, plugin boundaries, transport, and independent lifecycles.'
 status: active
 created: '2026-02-18'
-updated: '2026-09-05'
+updated: '2026-09-06'
 related:
   - docs/policy/compatibility-policy.md
   - docs/policy/worker-policy.md
@@ -24,7 +24,7 @@ related:
 
 # Runtime Architecture Policy
 
-Internal reference for the CAD runtime worker architecture: from editor to geometry computation.
+Internal reference for runtime SDK ownership and the CAD worker architecture from editor to geometry computation. The CAD lifecycle sections describe the CAD executor, not every capability hosted by the SDK.
 
 ## Rationale
 
@@ -132,7 +132,13 @@ Capability ids stay flat and author-declared (`replicad`, `geometry-cache`). Plu
 
 ### Package Ownership Boundaries
 
-`@taucad/runtime` owns only the generic production engine: contracts, authoring helpers, route planning, worker/client/transport/filesystem infrastructure, and diagnostics. Concrete kernels, middleware, bundlers, transcoders, testing helpers, toolchain assets, and backend lifecycle code live outside runtime.
+`@taucad/runtime` owns the generic production substrate: contracts, authoring helpers, route planning, worker/client/transport/filesystem infrastructure, generic durable jobs, pure configuration admission/validation, and diagnostics. Keep jobs under `src/jobs/` and configuration under `src/configuration/`, not separate `@taucad/jobs` or configuration-core packages. Concrete kernels, middleware, bundlers, transcoders, solver/device/slicer implementations, testing helpers, toolchain assets, and backend-specific lifecycle code live outside runtime.
+
+Jobs must work without a CAD session. Pure configuration use must start no host or connection. Keep their modules independent of the CAD engine and SDK facade; only composition depends on the modules. Client detachment must not implicitly cancel accepted jobs, unpair devices or shut down their host. A single package is not a single service lifetime.
+
+Expose focused authoring through `/job`, `/configuration` and `/configuration/zod`; retain environment-specific host entries and browser-safe consumer imports. The base configuration entry uses Standard Schema contracts without importing Zod or React; the Zod helper belongs only to its explicit entry. Reuse canonical private filesystem/path/units code through runtime's existing single-owner bundle/declaration assembly. Do not extract foundations or copy registry/brand definitions merely to support separate jobs/configuration packages. Independently published filesystem consumers retain their own dependency obligations.
+
+Daemon, CLI and Electron products compose runtime host entries. Runtime must not import the heavy `@taucad/host` product root. Validate installed dependency payloads and actual import graphs separately; subpaths and tree shaking do not remove npm installation dependencies. This ownership is ratified by the [manufacturing charter's M41](../research/agentic-manufacturing-program-charter.md); export availability is established by the actual package manifest and its checks, not by this target contract alone.
 
 Plugin packages live under `packages/plugins/*` and publish as `@taucad/<toolkit>`. They declare the package-named camelCase callable factory and re-export that binding as `plugin` (`export { replicad, replicad as plugin }`), expose role-named direct factories, and have no default export. Plugin and core packages declare `@taucad/runtime` as a required peer dependency, never a hard dependency, so one runtime instance serves the install (see `docs/policy/npm-policy.md`). Every dynamic loader checks the resolved package manifest's peer range warn-only; runtime composition never performs this package-level check.
 
@@ -203,6 +209,8 @@ Runtime itself must not import these concrete backends from its root or engine s
 
 The resolved `CapabilitiesManifest` has one ordered `routes` array; routes carry kernel fidelity and have no parallel `routeId` array. Consumers use `RuntimeClient.routesFor` and `bestRouteFor` so route selection stays framework-owned. A late `capabilities` subscriber receives the current manifest immediately after subscribing.
 
+Host advertisements must name each service's actual protocol version. CAD uses the shared runtime wire constant; a host-manifest envelope version or toolkit construction ABI is not that service's protocol version. Keep unknown service families inert and reject an incompatible known service before use.
+
 ```text
 1. createRuntimeClient(options)                          → RuntimeClient created, no Worker yet
 2. client.on('geometry', handler)                       → Subscribe to render results (any time)
@@ -223,11 +231,21 @@ The `render()` method accepts two input shapes via generic overloads:
 
 ### Geometry Event
 
-When the selected preview completes (success or failure), the `geometry` event fires with the full `HashedGeometryResult`. This is the authoritative output stream for both public commands and autonomous watched-filesystem rerenders. Stale previews never publish.
+When the selected preview completes (success or failure), the `geometry` event fires with the full `HashedGeometryResult`. This is the authoritative output stream for public preview commands and autonomous watched-filesystem rerenders. Stale previews never publish.
 
 Runtime-client production fan-out composes `Topic<E>` from `@taucad/events`; do not maintain parallel handler sets or manual dispatch loops. Keep the unified typed client event map exhaustive as geometry, progress, `parametersResolved`, diagnostics, and `activeKernelChanged` evolve. `activeKernelChanged` carries `string | undefined`, not a closed kernel-id union. Apply `docs/policy/event-fanout-policy.md` across the filesystem, runtime-client, fs-client, and UI session-store route.
 
 An intentionally geometry-free render is successful and returns the canonical zero-mesh GLB produced by `@taucad/geometry-core`. `NO_RENDER_GEOMETRY` means an adapter failed to produce any public geometry artifact; do not use it to represent a valid empty model.
+
+### Request-Scoped CAD Operations
+
+Use `client.evaluate({ source, parameters, renderOptions, content, signal })` for transient display evaluation that must not select a preview. Its result is `HashedGeometryResult`, not a supersedable preview outcome. Use `client.export(format, { source, parameters, exportOptions, content, signal })` for a source-owned export. Neither operation may mutate preview selection, publish preview geometry, or infer its source from `activeKernelId`. Agent tools share these operations rather than serializing render-then-export transactions. Durable scheduling and recovery remain the jobs facet's responsibility; evaluation alone is not a durable job.
+
+Per-request cancellation must cancel only that request or its connection wait, never the shared connection or a sibling operation. Observe every started promise even when cancellation wins, and reject pending evaluations deterministically on termination. Inline inputs retain the existing filesystem staging semantics; do not claim that evaluation creates an atomic source revision. Image capture consumes the exact evaluated artifact rather than taking another source snapshot, restaging old files, or recomputing the model solely for capture. A `gltf` geometry discriminant is not proof of a GLB container: qualify the bytes before selecting a GLB-only image route.
+
+SVG coordinate provenance belongs to the producing kernel's artifact: `GeometrySvg.units.length` declares the physical unit of one SVG user-coordinate unit. Its absence means physical scale is unknown; ordinary SVG remains valid, but annotated capture must refuse rather than use a host default or display preference. Preserve that metadata through geometry transport. Correlate multi-view image outputs with the requested view identities before labeling them.
+
+Agent invocation cancellation travels as local call context through the shared dispatcher and runtime adapter, not inside serialized RPC arguments or durable records. It may stop ephemeral CAD/image work and the caller's wait; it never implies cancellation of an accepted durable job. Non-cooperative work must remain observed, and cancellation must not start later artifact persistence or image conversion.
 
 ### Auto-Cancellation (Latest-Wins)
 
@@ -453,7 +471,7 @@ During detection, bare specifiers appear as external imports in `metafile.output
 
 ## Package Exports
 
-Target runtime exports are engine and authoring surfaces only. The manifest also exposes `@taucad/runtime/metadata` for package version and build metadata used by external consumers:
+Target runtime exports are generic substrate and authoring surfaces, never concrete backends. The manifest also exposes `@taucad/runtime/metadata` for package version and build metadata used by external consumers:
 
 ```text
 @taucad/runtime             → createRuntimeClient, filesystem constructors, public engine types
@@ -463,6 +481,9 @@ Target runtime exports are engine and authoring surfaces only. The manifest also
 @taucad/runtime/transcoder  → defineTranscoder and transcoder authoring types
 @taucad/runtime/middleware  → defineMiddleware and middleware authoring types
 @taucad/runtime/bundler     → defineBundler and bundler authoring types
+@taucad/runtime/job         → generic job definitions and contracts
+@taucad/runtime/configuration → pure configuration authoring, manifest admission and validation
+@taucad/runtime/configuration/zod → native Zod quantity authoring helper
 @taucad/runtime/transport   → defineRuntimeTransport and transport implementations
 ```
 

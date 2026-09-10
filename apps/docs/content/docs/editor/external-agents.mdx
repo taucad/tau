@@ -1,0 +1,41 @@
+---
+title: External Agents
+description: Run Codex inside a Tau project through its own CLI, its own login, and its own bill.
+docType: reference
+icon: 'lucide:terminal text-purple'
+wordBudgetOverride: 500
+---
+
+An external agent is a coding CLI you already have installed. Tau starts it, gives it the project, and shows its work in the chat — it does not resell it.
+
+## Supported CLIs
+
+| Agent       | Adapter                                        | CLI      | Minimum CLI |
+| ----------- | ---------------------------------------------- | -------- | ----------- |
+| Codex       | `@agentclientprotocol/codex-acp` 1.7.0         | `codex`  | 0.148.0     |
+| Claude Code | `@agentclientprotocol/claude-agent-acp` 0.70.0 | `claude` | none pinned |
+
+An older CLI is refused before the turn starts, naming the version it found. Codex is the qualified path; Claude Code is discovered and offered, and its live turns are not yet qualified.
+
+Agents run on a Tau Host: Tau Desktop, or `tau serve` paired with the browser. A browser tab with no host refuses the turn rather than quietly answering it with Tau.
+
+Each agent keeps its own configuration directory — `CODEX_HOME`, `CLAUDE_CONFIG_DIR`. Nothing else about your environment travels: no Tau credential and no provider key reaches the child process.
+
+## Where the agent works
+
+Each chat picks a revision mode, and every turn is recorded as a revision either way.
+
+- **Direct** — the agent works in the project folder itself. Its edits are the files you are looking at.
+- **Candidate** — the host materializes a checkout, the agent works there, and the result comes back as a branch you can review and merge.
+
+Both are offered wherever the host advertises them; Tau Desktop and `tau serve` advertise both. `.tau/chats`, `.tau/workspaces` and `.tau/revisions` are readable to the agent and refuse its writes.
+
+## What reaches the vendor
+
+The agent is the vendor's own client, so what it reads it may send. In direct mode that is your project tree. The CAD context Tau adds — the kernel, the open files, the model state — rides the session's first prompt as embedded resources, and is transmitted the same way.
+
+## Billing and sign-in
+
+The vendor bills the account you signed that CLI into. Tau charges no credits for an external turn and quotes no price for one: the chat footer names the agent, the model and the vendor's own usage report.
+
+Tau surfaces a login; it never brokers one. A logged-out agent refuses with the methods it offers — a terminal command such as `codex login`, or a verification page and code — and the chat shows exactly that.

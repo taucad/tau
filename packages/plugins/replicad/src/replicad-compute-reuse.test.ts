@@ -1,9 +1,7 @@
 // @vitest-environment node
-import { createHash } from 'node:crypto';
-
-import { actionDigest, canonicalizeComputeAction, contentDigest } from '@taucad/cache-core';
+import { contentDigest, digestAction, digestContent } from '@taucad/cache-core';
 import type { ActionDigest, ComputeAction } from '@taucad/cache-core';
-import type { KernelComputeSession } from '@taucad/runtime/kernel';
+import type { ComputeGeneration, ComputeReuseScope, ComputeStoreEntry } from '@taucad/runtime/kernel';
 import { describe, expect, it, vi } from 'vitest';
 
 import { createReplicadComputeReuse } from '#replicad-compute-reuse.js';
@@ -86,53 +84,60 @@ class FakeShape {
   }
 }
 
-type CacheEntry = { readonly bytes: Uint8Array<ArrayBuffer>; readonly actionDigest: ActionDigest };
+type CacheEntry = ComputeStoreEntry;
 
-const digestFor = (value: string): ActionDigest =>
-  actionDigest({ value: `sha256:${createHash('sha256').update(value).digest('hex')}` });
+type Adapter = ReturnType<typeof createReplicadComputeReuse>;
 
-const createSession = (cache: Map<string, CacheEntry>, overrides: Partial<KernelComputeSession> = {}) => {
-  const staged = new Map<string, CacheEntry>();
-  const record = vi.fn<KernelComputeSession['record']>(({ action, bytes }) => {
-    const key = canonicalizeComputeAction(action);
-    const entry = { bytes: new Uint8Array(bytes), actionDigest: digestFor(key) };
-    staged.set(key, entry);
-    return { status: 'staged', actionDigest: entry.actionDigest };
+/**
+ * A minimal stand-in for the runtime's scope: it records announcements and, on
+ * a delivered close, exports the adapter's residency into the shared store.
+ */
+const createScope = (adapter: Adapter, cache: Map<ActionDigest, CacheEntry>) => {
+  const announced: ActionDigest[] = [];
+  const announce = vi.fn<ComputeReuseScope['announce']>(({ entries }) => {
+    const admitted: ActionDigest[] = [];
+    for (const entry of entries) {
+      if (entry.kind === 'action') {
+        announced.push(entry.digest);
+        admitted.push(entry.digest);
+      }
+    }
+    return { admitted, rejected: [] };
   });
-  const session: KernelComputeSession = {
-    prepared: () => [],
-    lookup: ({ action }) => {
-      const key = canonicalizeComputeAction(action);
-      const stagedEntry = staged.get(key);
-      if (stagedEntry) {
-        return {
-          status: 'hit',
-          source: 'session',
-          bytes: new Uint8Array(stagedEntry.bytes),
-          actionDigest: stagedEntry.actionDigest,
-        };
-      }
-      const cachedEntry = cache.get(key);
-      if (!cachedEntry) {
-        return { status: 'miss' };
-      }
-      return {
-        status: 'hit',
-        source: 'cache',
-        bytes: new Uint8Array(cachedEntry.bytes),
-        actionDigest: cachedEntry.actionDigest,
-        contentDigest: contentDigest({ value: `sha256:${'c'.repeat(64)}` }),
-      };
-    },
-    record,
-    flush: vi.fn(async () => {
-      for (const entry of staged) {
-        cache.set(entry[0], entry[1]);
-      }
+  const scope: ComputeReuseScope = {
+    generation: 1 as ComputeGeneration,
+    warm: async () => ({ status: 'imported', imported: [], omitted: [], bytes: 0 }),
+    announce,
+    close: ({ outcome }) => ({
+      settled: (async () => {
+        if (outcome !== 'delivered') {
+          return { status: 'abandoned', published: [], omitted: announced, conflicts: [] } as const;
+        }
+        const exported = await adapter.resident.exportEntries({
+          digests: announced,
+          signal: new AbortController().signal,
+        });
+        for (const entry of exported.entries) {
+          // oxlint-disable-next-line no-await-in-loop -- each entry carries its own content identity.
+          const digest = await digestAction({ action: entry.action });
+          cache.set(digest, {
+            action: entry.action,
+            actionDigest: digest,
+            // oxlint-disable-next-line no-await-in-loop -- content identity is per entry.
+            contentDigest: await digestContent({ bytes: entry.bytes }),
+            mediaType: entry.mediaType,
+            bytes: new Uint8Array(entry.bytes),
+            determinism: entry.determinism,
+          });
+        }
+        return { status: 'published', published: [...cache.keys()], omitted: exported.omitted, conflicts: [] } as const;
+      })(),
     }),
-    ...overrides,
   };
-  return { session, record, staged };
+  const publish = async (): Promise<void> => {
+    await scope.close({ outcome: 'delivered' }).settled;
+  };
+  return { scope, announce, publish };
 };
 
 const producer = (version = 'test@1'): ComputeAction['producer'] => ({
@@ -181,20 +186,20 @@ const createFixture = (
 
 describe('Replicad semantic compute reuse', () => {
   it('preserves destructured synchronous syntax, hits exact actions, and restores fresh shapes', async () => {
-    const cache = new Map<string, CacheEntry>();
+    const cache = new Map<ActionDigest, CacheEntry>();
     const { adapter, calls } = createFixture();
     const { makeBox } = adapter.library as typeof adapter.library & {
       makeBox(first: readonly number[], second: readonly number[]): FakeShape;
     };
-    const cold = createSession(cache);
-    const first = await adapter.run(cold.session, async () => makeBox([0, 0, 0], [2, 3, 4]));
-    await cold.session.flush();
+    const cold = createScope(adapter, cache);
+    const first = await adapter.run(cold.scope, async () => makeBox([0, 0, 0], [2, 3, 4]));
+    await cold.publish();
     expect(first.serialize()).toBe('box(0,0,0;2,3,4)');
     expect(calls.box).toBe(1);
 
-    const warm = createSession(cache);
-    const second = await adapter.run(warm.session, async () => makeBox([-0, 0, 0], [2, 3, 4]));
-    const third = await adapter.run(warm.session, async () => makeBox([0, 0, 0], [2, 3, 4]));
+    const warm = createScope(adapter, cache);
+    const second = await adapter.run(warm.scope, async () => makeBox([-0, 0, 0], [2, 3, 4]));
+    const third = await adapter.run(warm.scope, async () => makeBox([0, 0, 0], [2, 3, 4]));
     expect(calls.box).toBe(1);
     expect(calls.deserialize).toBe(2);
     expect(second).not.toBe(first);
@@ -206,62 +211,62 @@ describe('Replicad semantic compute reuse', () => {
   });
 
   it('reuses boolean and consuming transform descendants while preserving exact output', async () => {
-    const cache = new Map<string, CacheEntry>();
+    const cache = new Map<ActionDigest, CacheEntry>();
     const { adapter, calls } = createFixture();
     const library = adapter.library as typeof adapter.library & {
       makeBox(first: readonly number[], second: readonly number[]): FakeShape;
       makeCylinder(radius: number, height: number): FakeShape;
     };
-    const build = async (session: KernelComputeSession) =>
-      adapter.run(session, async () => {
+    const build = async (scope: ComputeReuseScope) =>
+      adapter.run(scope, async () => {
         const box = library.makeBox([0, 0, 0], [10, 10, 10]);
         const cylinder = library.makeCylinder(2, 10);
         return box.cut(cylinder, { optimisation: 'commonFace' }).translateZ(5);
       });
 
-    const cold = createSession(cache);
-    const first = await build(cold.session);
-    await cold.session.flush();
-    const warm = createSession(cache);
-    const second = await build(warm.session);
+    const cold = createScope(adapter, cache);
+    const first = await build(cold.scope);
+    await cold.publish();
+    const warm = createScope(adapter, cache);
+    const second = await build(warm.scope);
     expect(second.serialize()).toBe(first.serialize());
     expect(calls).toMatchObject({ box: 1, cylinder: 1, deserialize: 4 });
   });
 
   it('invalidates arguments, implementation versions, and environments independently', async () => {
-    const cache = new Map<string, CacheEntry>();
+    const cache = new Map<ActionDigest, CacheEntry>();
     for (const fixture of [
       createFixture(),
       createFixture({ version: 'test@2' }),
       createFixture({ environment: 'multi' }),
     ]) {
-      const session = createSession(cache);
+      const session = createScope(fixture.adapter, cache);
       const library = fixture.adapter.library as typeof fixture.adapter.library & {
         makeSphere(radius: number): FakeShape;
       };
       // oxlint-disable-next-line no-await-in-loop -- each warm stage depends on the preceding publication.
-      await fixture.adapter.run(session.session, async () => library.makeSphere(2));
+      await fixture.adapter.run(session.scope, async () => library.makeSphere(2));
       // oxlint-disable-next-line no-await-in-loop -- preserve deterministic cache publication order.
-      await session.session.flush();
+      await session.publish();
       expect(fixture.calls.sphere).toBe(1);
     }
     const base = createFixture();
-    const changedArgument = createSession(cache);
+    const changedArgument = createScope(base.adapter, cache);
     const library = base.adapter.library as typeof base.adapter.library & { makeSphere(radius: number): FakeShape };
-    await base.adapter.run(changedArgument.session, async () => library.makeSphere(3));
+    await base.adapter.run(changedArgument.scope, async () => library.makeSphere(3));
     expect(base.calls.sphere).toBe(1);
   });
 
   it('bypasses unknown, incomplete, mutable, and unserializable calls without false hits', async () => {
-    const cache = new Map<string, CacheEntry>();
+    const cache = new Map<ActionDigest, CacheEntry>();
     const { adapter, calls } = createFixture();
-    const session = createSession(cache);
+    const session = createScope(adapter, cache);
     const library = adapter.library as typeof adapter.library & {
       makeBox(first: unknown, second: unknown): FakeShape;
       makeCylinder(...values: unknown[]): FakeShape;
       makeSphere(radius: number): FakeShape;
     };
-    await adapter.run(session.session, async () => {
+    await adapter.run(session.scope, async () => {
       expect((adapter.library as unknown as { untouched: unknown }).untouched).toEqual({ exact: true });
       const invalid = library.makeSphere(Number.NaN);
       expect(invalid.serialize()).toBe('sphere(NaN)');
@@ -277,46 +282,52 @@ describe('Replicad semantic compute reuse', () => {
   });
 
   it('does not publish failed executions and safely recomputes rejected or invalid hits', async () => {
-    const cache = new Map<string, CacheEntry>();
+    const cache = new Map<ActionDigest, CacheEntry>();
     const { adapter, calls } = createFixture();
     const library = adapter.library as typeof adapter.library & { makeSphere(radius: number): FakeShape };
-    const failed = createSession(cache);
+    const failed = createScope(adapter, cache);
     await expect(
-      adapter.run(failed.session, async () => {
+      adapter.run(failed.scope, async () => {
         library.makeSphere(4);
         throw new Error('model failed');
       }),
     ).rejects.toThrow('model failed');
     expect(cache).toHaveLength(0);
 
-    const rejected = createSession(cache, { record: () => ({ status: 'rejected', reason: 'session-byte-limit' }) });
-    await adapter.run(rejected.session, async () => library.makeSphere(5));
+    const rejected = createScope(adapter, cache);
+    await adapter.run(rejected.scope, async () => library.makeSphere(5));
     expect(calls.sphere).toBe(2);
 
-    const seed = createSession(cache);
-    await adapter.run(seed.session, async () => library.makeSphere(6));
-    await seed.session.flush();
-    const key = [...cache.keys()].find((candidate) => candidate.includes('"radius":6'))!;
-    cache.set(key, { ...cache.get(key)!, bytes: new TextEncoder().encode('invalid') });
-    const corrupt = createSession(cache);
-    const recomputed = await adapter.run(corrupt.session, async () => library.makeSphere(6));
+    const seed = createScope(adapter, cache);
+    await adapter.run(seed.scope, async () => library.makeSphere(6));
+    await seed.publish();
+    const key = [...cache.keys()].find(
+      (candidate) => JSON.stringify(cache.get(candidate)!.action.arguments) === '{"radius":6}',
+    )!;
+    const corrupted: CacheEntry = { ...cache.get(key)!, bytes: new TextEncoder().encode('invalid') };
+    cache.set(key, corrupted);
+    // A warm import replaces residency with the store's (now corrupt) bytes.
+    adapter.resident.clear({ generation: 1 as ComputeGeneration });
+    await adapter.resident.importEntries({ entries: [corrupted], signal: new AbortController().signal });
+    const corrupt = createScope(adapter, cache);
+    const recomputed = await adapter.run(corrupt.scope, async () => library.makeSphere(6));
     expect(recomputed.serialize()).toBe('sphere(6)');
     expect(calls.sphere).toBe(4);
   });
 
   it('disables interception without assets and unwraps shape arrays and render records', async () => {
-    const cache = new Map<string, CacheEntry>();
+    const cache = new Map<ActionDigest, CacheEntry>();
     const { adapter, calls } = createFixture({ enabled: false });
-    const session = createSession(cache);
+    const session = createScope(adapter, cache);
     const library = adapter.library as typeof adapter.library & { makeSphere(radius: number): FakeShape };
-    const raw = await adapter.run(session.session, async () => library.makeSphere(1));
+    const raw = await adapter.run(session.scope, async () => library.makeSphere(1));
     expect(calls.sphere).toBe(1);
-    expect(session.record).not.toHaveBeenCalled();
+    expect(session.announce).not.toHaveBeenCalled();
     expect(adapter.unwrap(raw)).toBe(raw);
 
     const enabled = createFixture().adapter;
-    const enabledSession = createSession(cache);
-    const wrapped = await enabled.run(enabledSession.session, async () =>
+    const enabledSession = createScope(enabled, cache);
+    const wrapped = await enabled.run(enabledSession.scope, async () =>
       (enabled.library as typeof enabled.library & { makeSphere(radius: number): FakeShape }).makeSphere(9),
     );
     expect(enabled.unwrap([wrapped])).toEqual([expect.objectContaining({ value: 'sphere(9)' })]);

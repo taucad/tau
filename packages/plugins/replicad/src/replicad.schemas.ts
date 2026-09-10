@@ -34,6 +34,12 @@ export const replicadOptionsSchema = z.object({
   libraryTracing: z.enum(['off', 'summary', 'per-call']).optional().default('off'),
   withSourceMapping: z.boolean().optional().default(false),
   tessellationInstancing: z.boolean().optional().default(true),
+  /**
+   * Semantic compute reuse switch. Omitted keeps today's behaviour (on when the
+   * implementation assets identify a producer); `false` is a real off arm that
+   * installs no proxy and constructs no recipe.
+   */
+  computeReuse: z.boolean().optional(),
 });
 
 /**

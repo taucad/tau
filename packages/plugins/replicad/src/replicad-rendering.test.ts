@@ -105,3 +105,32 @@ export default function main() {
     }
   });
 });
+
+describe('Replicad — SVG coordinate provenance', { timeout: 120_000 }, () => {
+  it('should identify unchanged SVG user coordinates as millimetres', async () => {
+    const file = 'sketch.ts';
+    const result = await createTestGeometry({
+      runtime,
+      files: {
+        [file]: `
+import { draw } from 'replicad';
+export default function main() {
+  return draw().hLine(50).vLine(30).hLine(-50).close();
+}`,
+      },
+      mainFile: file,
+      parameters: {},
+    });
+    assertSuccess(result, 'replicad SVG createGeometry');
+
+    expect(result.data).toMatchObject({
+      format: 'svg',
+      units: { length: 'mm' },
+    });
+    if (result.data.format !== 'svg') {
+      throw new TypeError(`Expected SVG geometry, received ${result.data.format}`);
+    }
+    expect(result.data.content).toContain('viewBox="-1.000001 -31.000001 52.000001999999995 32.000002"');
+    expect(result.data.content).toContain('d="M 0 0 L 50 0 L 50 -30 L 0 -30 L 0 0 Z"');
+  });
+});

@@ -316,6 +316,7 @@ function renderSvgDocument(shapeConfigs: readonly SvgShapeConfiguration[]): Geom
 
   return {
     format: 'svg',
+    units: { length: 'mm' },
     ...(shapeConfigs.length === 1 ? { name: shapeConfigs[0]!.name } : {}),
     content: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${viewBox}">${paths}</svg>`,
   };

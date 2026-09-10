@@ -61,10 +61,58 @@ export const build123dAnalysisSchema = z.object({
   unresolved: z.array(z.string()),
 });
 
+/** One entry of a bounded compute bundle: its identities and its slice of the binary payload. */
+export const build123dComputeDescriptorSchema = z.object({
+  action: build123dComputeActionSchema,
+  actionDigest: digestSchema,
+  contentDigest: digestSchema,
+  byteLength: z.number().int().nonnegative(),
+});
+
+/** EQ16: one control frame carries at most this many descriptors. */
+export const build123dComputeDescriptorLimit = 512;
+
+const bundleSchema = z.object({ artifactPath: z.string().min(1), byteLength: z.number().int().nonnegative() });
+
+export const build123dComputeExportSchema = z.object({
+  descriptors: z.array(build123dComputeDescriptorSchema).max(build123dComputeDescriptorLimit),
+  omitted: z.array(z.string()),
+  bundle: bundleSchema.optional(),
+});
+
+export const build123dComputeImportSchema = z.object({
+  imported: z.array(digestSchema),
+  omitted: z.array(z.string()),
+});
+
+export const build123dComputeStatsSchema = z.object({
+  entries: z.number().int().nonnegative(),
+  logicalBytes: z.number().int().nonnegative(),
+  evictions: z.number().int().nonnegative(),
+  omissions: z.number().int().nonnegative(),
+});
+
+export const build123dComputeClearSchema = z.object({ generation: z.number().int() });
+
 export const build123dBuildSchema = z.object({
   handleId: z.string().min(1),
   observedDependencies: z.array(z.string()),
-  computeArtifact: z.object({ artifactPath: z.string().min(1), byteLength: z.number().int().nonnegative() }).optional(),
+  compute: z
+    .object({
+      announcements: z
+        .array(
+          z.object({
+            action: build123dComputeActionSchema,
+            actionDigest: digestSchema,
+            computeDuration: z.number().nonnegative(),
+            estimatedBytes: z.number().int().nonnegative(),
+          }),
+        )
+        .max(build123dComputeDescriptorLimit),
+      hits: z.number().int().nonnegative(),
+      stats: build123dComputeStatsSchema,
+    })
+    .optional(),
 });
 
 export const build123dArtifactSchema = z.object({
@@ -74,17 +122,6 @@ export const build123dArtifactSchema = z.object({
 
 export const build123dEmptySchema = z.object({});
 export const build123dShutdownSchema = z.object({ shutdown: z.literal(true) });
-
-/** One deterministic BRep publication produced by the Python semantic adapter. */
-export const build123dComputePublicationsSchema = z.object({
-  publications: z.array(
-    z.object({
-      action: build123dComputeActionSchema,
-      bytes: z.string().regex(/^(?:[A-Za-z\d+/]{4})*(?:[A-Za-z\d+/]{2}==|[A-Za-z\d+/]{3}=)?$/u),
-      mediaType: z.literal('application/vnd.opencascade.brep'),
-    }),
-  ),
-});
 
 /** Structured issue emitted by the private Python worker. */
 export type Build123dIssue = z.infer<typeof build123dIssueSchema>;

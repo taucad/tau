@@ -7,8 +7,8 @@ import {
   chmodSync,
   mkdirSync,
   mkdtempSync,
-  readFileSync,
   realpathSync,
+  readdirSync,
   rmSync,
   symlinkSync,
   unlinkSync,
@@ -19,7 +19,9 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
 import { createMockLogger } from '@taucad/runtime-testing';
-import type { KernelComputeSession } from '@taucad/runtime/kernel';
+import type { ComputeGeneration, ComputeStoreEntry } from '@taucad/runtime/kernel';
+import { actionDigest, contentDigest } from '@taucad/cache-core';
+import type { ComputeAction } from '@taucad/cache-core';
 import {
   processEnvironment as processEnvironmentForTest,
   terminateProcessTree as terminateProcessTreeForTest,
@@ -484,41 +486,10 @@ readline.on('line',(line)=>{const request=JSON.parse(line);if(request.method==='
     await session.cleanup();
   });
 
-  it('stages confined compute candidates and validates worker publications', async () => {
-    const value = fixture();
-    const digest = `sha256:${'a'.repeat(64)}`;
-    const computeSession = {
-      prepared: () => [
-        {
-          canonicalAction: '{"operation":"box"}',
-          actionDigest: digest,
-          contentDigest: digest,
-          bytes: new Uint8Array([1, 2, 3]),
-        },
-      ],
-    } as unknown as KernelComputeSession;
-    const preload = await value.session.stageComputePreload(computeSession);
-    const staged = JSON.parse(readFileSync(preload.artifactPath, 'utf8')) as {
-      schemaVersion: number;
-      entries: Array<{ bytes: string }>;
-    };
-    expect(staged).toEqual({
-      schemaVersion: 1,
-      entries: [
-        {
-          canonicalAction: '{"operation":"box"}',
-          actionDigest: digest,
-          contentDigest: digest,
-          bytes: 'AQID',
-        },
-      ],
-    });
-    await value.session.removeComputePreload(preload);
-    await expect(value.session.removeComputePreload(preload)).resolves.toBeUndefined();
-    await expect(
-      value.session.removeComputePreload({ artifactPath: join(value.root, 'outside.json'), byteLength: 0 }),
-    ).rejects.toThrow(/escaped/);
-
+  it('mirrors the worker lineage cache through the bounded bundle protocol', async () => {
+    const digest = actionDigest({ value: `sha256:${'a'.repeat(64)}` });
+    const other = actionDigest({ value: `sha256:${'b'.repeat(64)}` });
+    const content = contentDigest({ value: `sha256:${'c'.repeat(64)}` });
     const action = {
       schemaVersion: 1,
       namespace: 'build123d.operation.v1',
@@ -528,18 +499,106 @@ readline.on('line',(line)=>{const request=JSON.parse(line);if(request.method==='
       arguments: { length: 1 },
       environment: {},
       codec: { id: 'build123d.bintools-brep', version: '1' },
-    };
-    const payload = JSON.stringify({
-      publications: [{ action, bytes: 'AQID', mediaType: 'application/vnd.opencascade.brep' }],
+    } as unknown as ComputeAction;
+    // A fake worker that adopts every non-zero slice and answers one export from its own bundle.
+    const value = fixture(
+      respondingWorker(`(() => {
+        const exportedAction=${JSON.stringify(JSON.stringify(action))};
+        const fs=require('node:fs'); const path=require('node:path');
+        const artifacts=process.argv[process.argv.indexOf('--artifacts')+1];
+        if(request.method==='compute.import'){
+          const payload=fs.readFileSync(request.params.bundle.artifactPath);
+          fs.unlinkSync(request.params.bundle.artifactPath);
+          const imported=[]; const omitted=[]; let offset=0;
+          for(const descriptor of request.params.descriptors){
+            const slice=payload.subarray(offset, offset+descriptor.byteLength);
+            offset+=descriptor.byteLength;
+            (slice[0]!==0 ? imported : omitted).push(descriptor.actionDigest);
+          }
+          return {protocolVersion:1,requestId:request.requestId,result:{imported,omitted}};
+        }
+        if(request.method==='compute.export'){
+          const bundlePath=path.join(artifacts,'export.bin');
+          fs.writeFileSync(bundlePath, Buffer.from([7,8,9]));
+          return {protocolVersion:1,requestId:request.requestId,result:{
+            descriptors:[{action:JSON.parse(exportedAction),actionDigest:request.params.digests[0],contentDigest:'sha256:'+'c'.repeat(64),byteLength:3}],
+            omitted:request.params.digests.slice(1),
+            bundle:{artifactPath:bundlePath,byteLength:3}}};
+        }
+        return {protocolVersion:1,requestId:request.requestId,result:{}};
+      })()`),
+    );
+    const binding = value.session.createResidentBinding();
+    const { signal } = new AbortController();
+    expect(binding.contains({ digest })).toBe(false);
+    expect(await binding.importEntries({ entries: [], signal })).toEqual({ imported: [], omitted: [] });
+    expect(await binding.exportEntries({ digests: [], signal })).toEqual({ entries: [], omitted: [] });
+
+    const entry = {
+      action,
+      actionDigest: digest,
+      contentDigest: content,
+      mediaType: 'application/vnd.opencascade.brep',
+      bytes: new Uint8Array([1, 2, 3]),
+      determinism: 'byte-exact',
+    } satisfies ComputeStoreEntry;
+    const imported = await binding.importEntries({
+      entries: [entry, { ...entry, actionDigest: other, bytes: new Uint8Array([0, 0, 0]) }],
+      signal,
     });
-    const artifactPath = join(value.artifactPath, 'compute.json');
-    writeFileSync(artifactPath, payload);
-    const publicationSession = new PythonSession({ ...value.options, maxArtifactBytes: 4096 });
-    const publications = await publicationSession.readComputePublications({ artifactPath, byteLength: payload.length });
-    expect(publications).toEqual([
-      { action, bytes: new Uint8Array([1, 2, 3]), mediaType: 'application/vnd.opencascade.brep' },
+    expect(imported.imported).toEqual([digest]);
+    expect(imported.omitted).toEqual([other]);
+    expect(binding.contains({ digest })).toBe(true);
+    expect(binding.contains({ digest: other })).toBe(false);
+
+    const exported = await binding.exportEntries({ digests: [digest, other], signal });
+    expect(exported.entries).toEqual([
+      {
+        action,
+        bytes: new Uint8Array([7, 8, 9]),
+        mediaType: 'application/vnd.opencascade.brep',
+        determinism: 'byte-exact',
+      },
     ]);
-    await publicationSession.cleanup();
+    expect(exported.omitted).toEqual([other]);
+
+    binding.track([other]);
+    value.session.observeResidentBytes(4096);
+    expect(binding.stats()).toEqual({
+      entries: 2,
+      logicalBytes: 4096,
+      encodedBytes: { status: 'unsupported' },
+      evictions: 0,
+      omissions: 1,
+    });
+    binding.clear({ generation: 3 as unknown as ComputeGeneration });
+    expect(binding.contains({ digest })).toBe(false);
+    expect(binding.stats().evictions).toBe(2);
+    await value.session.cleanup();
+  });
+
+  it('removes an unconsumed compute import bundle when the request fails', async () => {
+    const value = fixture();
+    const binding = value.session.createResidentBinding();
+    const digest = actionDigest({ value: `sha256:${'a'.repeat(64)}` });
+    const requestSpy = vi.spyOn(value.session, 'request').mockRejectedValueOnce(new Error('import failed'));
+    await expect(
+      binding.importEntries({
+        entries: [
+          {
+            action: {} as unknown as ComputeAction,
+            actionDigest: digest,
+            contentDigest: contentDigest({ value: `sha256:${'b'.repeat(64)}` }),
+            mediaType: 'application/vnd.opencascade.brep',
+            bytes: new Uint8Array([1]),
+            determinism: 'byte-exact',
+          },
+        ],
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toThrow('import failed');
+    requestSpy.mockRestore();
+    expect(readdirSync(value.artifactPath)).toEqual([]);
     await value.session.cleanup();
   });
 

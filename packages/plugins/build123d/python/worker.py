@@ -14,6 +14,7 @@ import inspect
 import json
 import math
 import os
+import queue
 import re
 import signal
 import shutil
@@ -21,6 +22,7 @@ import sys
 import threading
 import time
 import traceback
+import types
 import unicodedata
 import uuid
 from pathlib import Path
@@ -34,10 +36,32 @@ from glb import write_glb
 PROTOCOL_VERSION = 1
 MAX_FRAME_BYTES = 1_048_576
 MAX_HANDLES = 32
-MAX_COMPUTE_PRELOAD_BYTES = 96 * 1024 * 1024
+MAX_COMPUTE_BUNDLE_BYTES = 96 * 1024 * 1024
+# EQ16: one control frame carries at most this many descriptors under the 1 MiB frame cap.
+MAX_COMPUTE_DESCRIPTORS = 512
+# EQ27: retain an operation whose own kernel call took at least this many milliseconds.
+COMPUTE_ADMISSION_FLOOR = 5.0
+# EQ12: resident bounds for the Build123d worker.
+MAX_COMPUTE_RESIDENT_BYTES = 256 * 1024 * 1024
+MAX_COMPUTE_RESIDENT_ENTRIES = 4096
+MAX_COMPUTE_STAMPS = 16384
+MAX_COMPUTE_LINEAGE_DEPTH = 8
+# D18: cheap conservative provisional charge, reconciled by the exported length off-path.
+COMPUTE_BASE_CHARGE_BYTES = 4096
+COMPUTE_FACE_CHARGE_BYTES = 512
 _DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 _PROTOCOL_OUTPUT = sys.stdout
+
+
+def _is_cancel_frame(line: bytes) -> bool:
+    """Recognize the out-of-band cancel notification without consuming a request slot."""
+
+    try:
+        request = json.loads(line)
+    except ValueError:
+        return False
+    return isinstance(request, dict) and request.get("method") == "cancel"
 
 
 def _terminate_orphaned_process_tree(temporary_root: Path) -> None:
@@ -123,16 +147,16 @@ def _is_relative_to(path: Path, parent: Path) -> bool:
 
 
 def _project_modules(workspace: Path) -> dict[str, str]:
+    prefix = os.path.join(str(workspace.resolve()), "")
     result: dict[str, str] = {}
-    for name, module in tuple(sys.modules.items()):
+    for name, module in sys.modules.copy().items():
         file_name = getattr(module, "__file__", None)
         if not isinstance(file_name, str):
             continue
-        path = Path(file_name)
-        if not path.is_absolute():
-            path = path.absolute()
-        if _is_relative_to(path, workspace) and path.suffix == ".py":
-            result[name] = path.relative_to(workspace).as_posix()
+        if not os.path.isabs(file_name):
+            file_name = os.path.abspath(file_name)
+        if file_name.startswith(prefix) and file_name.endswith(".py") and os.path.basename(file_name) != ".py":
+            result[name] = os.path.relpath(file_name, workspace).replace(os.sep, "/")
     return result
 
 
@@ -144,6 +168,10 @@ def _evict_project_modules(workspace: Path) -> None:
 
 class _ComputeBypass(Exception):
     """Internal signal for values outside the deterministic allow-list."""
+
+
+class _ComputeCancelled(Exception):
+    """Cooperative cancellation observed at a safe operation boundary."""
 
 
 def _canonical_compute_value(value: Any) -> str:
@@ -176,6 +204,12 @@ def _brep_bytes(shape: Any) -> bytes:
     return serialize_shape(shape.wrapped)
 
 
+def _cast_shape(wrapped: Any) -> Any:
+    from build123d import Compound
+
+    return Compound.cast(wrapped)
+
+
 def _shape_from_brep(data: bytes) -> Any:
     from build123d import Compound
     from build123d.persistence import deserialize_shape
@@ -187,81 +221,219 @@ def _content_digest(data: bytes) -> str:
     return f"sha256:{hashlib.sha256(data).hexdigest()}"
 
 
+def _action_digest(action: dict[str, Any]) -> str:
+    return _content_digest(_canonical_compute_value(action).encode())
+
+
+def _implementation_value(value: Any) -> Any:
+    """Represent one implementation constant, including nested code, by value."""
+
+    if value is None or type(value) in (bool, int, float, str):
+        return repr(value)
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return [_implementation_value(item) for item in value]
+    if isinstance(value, dict):
+        return {repr(key): _implementation_value(item) for key, item in value.items()}
+    if isinstance(value, types.CodeType):
+        return _implementation_fingerprint(value)
+    return repr(value)
+
+
+def _implementation_fingerprint(code: types.CodeType) -> dict[str, Any]:
+    return {
+        "code": base64.b64encode(code.co_code).decode("ascii"),
+        "consts": _implementation_value(code.co_consts),
+        "names": list(code.co_names),
+        "varnames": list(code.co_varnames),
+        "argcount": code.co_argcount,
+        "kwonlyargcount": code.co_kwonlyargcount,
+        "flags": code.co_flags,
+    }
+
+
+def _callable_fingerprint(function: Any) -> str:
+    """Digest one patched implementation by body, constants, nested code and defaults."""
+
+    code = getattr(function, "__code__", None)
+    if not isinstance(code, types.CodeType):
+        raise _ComputeBypass()
+    return _content_digest(
+        _canonical_compute_value(
+            {
+                "qualname": getattr(function, "__qualname__", ""),
+                "implementation": _implementation_fingerprint(code),
+                "defaults": _implementation_value(getattr(function, "__defaults__", None)),
+                "kwdefaults": _implementation_value(getattr(function, "__kwdefaults__", None)),
+            }
+        ).encode()
+    )
+
+
+def _detached(wrapped: Any) -> Any:
+    """A private wrapper over the same native TShape, immune to a caller's in-place move."""
+
+    return wrapped.Located(wrapped.Location())
+
+
+def _tshape_key(wrapped: Any) -> int:
+    """Stable key for the underlying native TShape, independent of location and orientation."""
+
+    from OCP.TopLoc import TopLoc_Location
+
+    return hash(wrapped.Located(TopLoc_Location()))
+
+
+def _direct_children(wrapped: Any) -> list[Any]:
+    from OCP.TopoDS import TopoDS_Iterator
+
+    iterator = TopoDS_Iterator(wrapped)
+    children: list[Any] = []
+    while iterator.More() and len(children) < MAX_COMPUTE_STAMPS:
+        children.append(iterator.Value())
+        iterator.Next()
+    return children
+
+
+def _placement(wrapped: Any) -> dict[str, Any]:
+    """Canonical absolute placement: the exact location matrix plus orientation."""
+
+    transformation = wrapped.Location().Transformation()
+    return {
+        "matrix": [
+            _compute_value(transformation.Value(row, column)) for row in range(1, 4) for column in range(1, 5)
+        ],
+        "orientation": int(wrapped.Orientation()),
+    }
+
+
+def _estimate_compute_bytes(shape: Any) -> int:
+    """Cheap provisional charge from topology size; never an encode for sizing."""
+
+    from OCP.TopAbs import TopAbs_ShapeEnum
+    from OCP.TopExp import TopExp_Explorer
+
+    explorer = TopExp_Explorer(shape.wrapped, TopAbs_ShapeEnum.TopAbs_FACE)
+    faces = 0
+    while explorer.More():
+        faces += 1
+        explorer.Next()
+    return COMPUTE_BASE_CHARGE_BYTES + faces * COMPUTE_FACE_CHARGE_BYTES
+
+
+class _ComputeCache:
+    """Worker-lifetime resident lineage cache holding live native shapes."""
+
+    def __init__(self) -> None:
+        self.residents: dict[str, Any] = {}
+        self.actions: dict[str, dict[str, Any]] = {}
+        self.charges: dict[str, int] = {}
+        self.stamps: dict[int, list[tuple[Any, str]]] = {}
+        self.logical_bytes = 0
+        self.evictions = 0
+        self.omissions = 0
+        self.generation = 0
+
+    def stamp(self, shape: Any, digest: str) -> None:
+        """Record lineage against the native TShape, holding a reference so it cannot be aliased."""
+
+        wrapped = shape.wrapped
+        while len(self.stamps) >= MAX_COMPUTE_STAMPS:
+            self.stamps.pop(next(iter(self.stamps)))
+        self.stamps.setdefault(_tshape_key(wrapped), []).append((_detached(wrapped), digest))
+
+    def partners(self, wrapped: Any) -> list[tuple[Any, str]]:
+        """Stamped shapes sharing this native TShape, verified past the hash bucket."""
+
+        return [entry for entry in self.stamps.get(_tshape_key(wrapped), ()) if entry[0].IsPartner(wrapped)]
+
+    def get(self, digest: str) -> Any:
+        """Return a share-mode clone of one resident, or None. No I/O, codec or mesh work."""
+
+        shape = self.residents.get(digest)
+        if shape is None:
+            return None
+        self.residents[digest] = self.residents.pop(digest)
+        return _cast_shape(_detached(shape.wrapped))
+
+    def put(self, digest: str, shape: Any, action: dict[str, Any], charge: int) -> None:
+        if digest in self.residents:
+            return
+        wrapped = shape.wrapped
+        self.residents[digest] = _cast_shape(_detached(wrapped))
+        self.actions[digest] = action
+        self.charges[digest] = charge
+        self.logical_bytes += charge
+        while self.residents and (
+            self.logical_bytes > MAX_COMPUTE_RESIDENT_BYTES or len(self.residents) > MAX_COMPUTE_RESIDENT_ENTRIES
+        ):
+            self._evict(next(iter(self.residents)))
+
+    def _evict(self, digest: str) -> None:
+        self.residents.pop(digest, None)
+        self.actions.pop(digest, None)
+        self.logical_bytes -= self.charges.pop(digest, 0)
+        self.evictions += 1
+
+    def adopt(self, action: dict[str, Any], digest: str, data: bytes) -> bool:
+        """Import warm bytes. Integrity is proven; validity is not, so it is not recorded."""
+
+        try:
+            shape = _shape_from_brep(data)
+        except Exception:
+            self.omissions += 1
+            return False
+        self.put(digest, shape, action, len(data))
+        return True
+
+    def clear(self, generation: int) -> None:
+        self.residents.clear()
+        self.actions.clear()
+        self.charges.clear()
+        self.stamps.clear()
+        self.logical_bytes = 0
+        self.generation = generation
+
+    def stats(self) -> dict[str, Any]:
+        return {
+            "entries": len(self.residents),
+            "logicalBytes": self.logical_bytes,
+            "evictions": self.evictions,
+            "omissions": self.omissions,
+        }
+
+
 class _ComputeAdapter:
     """Version-pinned synchronous semantic reuse for deterministic Build123d operations."""
 
     _primitive_names = ("make_box", "make_cone", "make_cylinder", "make_sphere", "make_torus")
 
-    def __init__(self, artifacts: Path, config: Any) -> None:
+    def __init__(self, cache: _ComputeCache, config: Any, cancelled: Any = None) -> None:
         if not isinstance(config, dict):
             raise TypeError("Build123d compute configuration must be an object")
-        self.artifacts = artifacts.resolve()
+        self.cache = cache
         self.namespace = config.get("namespace")
         self.producer = config.get("producer")
         self.environment = config.get("environment")
         if not isinstance(self.namespace, str) or not isinstance(self.producer, dict):
             raise TypeError("Build123d compute identity is invalid")
-        self.available: dict[str, bytes] = {}
-        self.publications: list[dict[str, Any]] = []
+        self.cancelled = cancelled
+        self.announcements: list[dict[str, Any]] = []
+        self.hits = 0
         self._patches: list[tuple[type[Any], str, Any]] = []
-        self._read_preload(config.get("preload"))
-
-    def _read_preload(self, descriptor: Any) -> None:
-        if not isinstance(descriptor, dict):
-            raise TypeError("Build123d compute preload must be an artifact descriptor")
-        path_value = descriptor.get("artifactPath")
-        byte_length = descriptor.get("byteLength")
-        if not isinstance(path_value, str) or type(byte_length) is not int or byte_length < 0:
-            raise TypeError("Build123d compute preload descriptor is invalid")
-        path = Path(path_value)
-        resolved = path.resolve(strict=True)
-        if path.is_symlink() or resolved.parent != self.artifacts:
-            raise ValueError("Build123d compute preload escaped the private artifact directory")
-        try:
-            if byte_length > MAX_COMPUTE_PRELOAD_BYTES or resolved.stat().st_size != byte_length:
-                raise ValueError("Build123d compute preload has an invalid size")
-            payload = json.loads(resolved.read_bytes())
-        finally:
-            resolved.unlink(missing_ok=True)
-        if not isinstance(payload, dict) or payload.get("schemaVersion") != 1 or not isinstance(payload.get("entries"), list):
-            raise ValueError("Build123d compute preload is invalid")
-        for entry in payload["entries"]:
-            self._add_prepared(entry)
-
-    def _add_prepared(self, entry: Any) -> None:
-        if not isinstance(entry, dict):
-            raise ValueError("Build123d compute preload entry is invalid")
-        canonical_action = entry.get("canonicalAction")
-        content_digest = entry.get("contentDigest")
-        action_digest = entry.get("actionDigest")
-        encoded = entry.get("bytes")
-        if (
-            not isinstance(canonical_action, str)
-            or not isinstance(content_digest, str)
-            or not _DIGEST.fullmatch(content_digest)
-            or not isinstance(action_digest, str)
-            or not _DIGEST.fullmatch(action_digest)
-            or not isinstance(encoded, str)
-        ):
-            raise ValueError("Build123d compute preload entry identity is invalid")
-        try:
-            action = json.loads(canonical_action)
-            data = base64.b64decode(encoded, validate=True)
-        except (ValueError, json.JSONDecodeError) as error:
-            raise ValueError("Build123d compute preload entry payload is invalid") from error
-        if _content_digest(data) != content_digest:
-            raise ValueError("Build123d compute preload content digest is invalid")
-        key = _canonical_compute_value(action)
-        previous = self.available.get(key)
-        if previous is not None and previous != data:
-            raise ValueError("Build123d compute preload contains conflicting artifacts")
-        self.available[key] = data
+        self._fingerprints: dict[str, str] = {}
 
     def _action(self, operation: str, inputs: list[dict[str, str]], arguments: Any) -> dict[str, Any]:
+        producer = {
+            **self.producer,
+            "implementationAssets": [
+                *self.producer.get("implementationAssets", []),
+                self._fingerprints[operation],
+            ],
+        }
         return {
             "schemaVersion": 1,
             "namespace": self.namespace,
-            "producer": self.producer,
+            "producer": producer,
             "operation": operation,
             "inputs": inputs,
             "arguments": arguments,
@@ -269,24 +441,78 @@ class _ComputeAdapter:
             "codec": {"id": "build123d.bintools-brep", "version": "1"},
         }
 
+    def lineage(self, shape: Any) -> str | None:
+        """Identify a live shape by lineage alone; an unknown operand is a bypass, never a hit."""
+
+        return self._identify(getattr(shape, "wrapped", None), 0)
+
+    def _identify(self, wrapped: Any, depth: int) -> str | None:
+        if wrapped is None or depth > MAX_COMPUTE_LINEAGE_DEPTH:
+            return None
+        partners = self.cache.partners(wrapped)
+        for stamped, digest in partners:
+            if stamped.IsSame(wrapped) and stamped.Orientation() == wrapped.Orientation():
+                return digest
+        if partners:
+            return self._derive("Shape.located", [partners[0][1]], wrapped)
+        children = _direct_children(wrapped)
+        sources = [self._identify(child, depth + 1) for child in children]
+        if not sources or any(source is None for source in sources):
+            self.cache.omissions += 1
+            return None
+        return self._derive("Shape.compose", sources, wrapped)
+
+    def _derive(self, operation: str, sources: list[str], wrapped: Any) -> str:
+        """Name a placement or composition of already identified shapes. Never a stored result."""
+
+        action = {
+            "schemaVersion": 1,
+            "namespace": self.namespace,
+            "producer": self.producer,
+            "operation": operation,
+            "inputs": [
+                {"kind": "action", "role": f"source:{index}", "digest": digest}
+                for index, digest in enumerate(sources)
+            ],
+            "arguments": _placement(wrapped),
+            "environment": self.environment,
+            "codec": {"id": "build123d.bintools-brep", "version": "1"},
+        }
+        digest = _action_digest(action)
+        self.cache.stamps.setdefault(_tshape_key(wrapped), []).append((_detached(wrapped), digest))
+        return digest
+
+    def _checkpoint(self) -> None:
+        if self.cancelled is not None and self.cancelled.is_set():
+            raise _ComputeCancelled()
+
     def _invoke(self, action: dict[str, Any], compute: Any) -> Any:
-        key = _canonical_compute_value(action)
-        cached = self.available.get(key)
+        self._checkpoint()
+        digest = _action_digest(action)
+        cached = self.cache.get(digest)
         if cached is not None:
-            return _shape_from_brep(cached)
+            self.hits += 1
+            self.cache.stamp(cached, digest)
+            return cached
+        started = time.perf_counter()
         result = compute()
-        try:
-            data = _brep_bytes(result)
-        except Exception:
+        duration = (time.perf_counter() - started) * 1000
+        from build123d import Shape
+
+        if not isinstance(result, Shape) or result.wrapped is None:
             return result
-        self.available[key] = data
-        self.publications.append(
-            {
-                "action": action,
-                "bytes": base64.b64encode(data).decode("ascii"),
-                "mediaType": "application/vnd.opencascade.brep",
-            }
-        )
+        self.cache.stamp(result, digest)
+        if duration >= COMPUTE_ADMISSION_FLOOR:
+            charge = _estimate_compute_bytes(result)
+            self.cache.put(digest, result, action, charge)
+            self.announcements.append(
+                {
+                    "action": action,
+                    "actionDigest": digest,
+                    "computeDuration": duration,
+                    "estimatedBytes": charge,
+                }
+            )
         return result
 
     def _primitive(self, name: str, original: Any, signature: inspect.Signature, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
@@ -305,10 +531,12 @@ class _ComputeAdapter:
             bound.apply_defaults()
             operand_name = "to_fuse" if name == "fuse" else "to_cut"
             operands = bound.arguments[operand_name]
-            shape_inputs = (shape, *operands)
+            lineage = [self.lineage(item) for item in (shape, *operands)]
+            if any(digest is None for digest in lineage):
+                raise _ComputeBypass()
             inputs = [
-                {"kind": "content", "role": "receiver" if index == 0 else f"operand:{index - 1}", "digest": _content_digest(_brep_bytes(item))}
-                for index, item in enumerate(shape_inputs)
+                {"kind": "action", "role": "receiver" if index == 0 else f"operand:{index - 1}", "digest": digest}
+                for index, digest in enumerate(lineage)
             ]
             arguments = (
                 {"glue": _compute_value(bound.arguments["glue"]), "tolerance": _compute_value(bound.arguments["tol"])}
@@ -328,6 +556,10 @@ class _ComputeAdapter:
         for name in self._primitive_names:
             descriptor = inspect.getattr_static(Solid, name)
             original = getattr(Solid, name)
+            try:
+                self._fingerprints[f"Solid.{name}"] = _callable_fingerprint(original)
+            except _ComputeBypass:
+                continue
             signature = inspect.signature(original)
 
             def patched(
@@ -345,6 +577,10 @@ class _ComputeAdapter:
         for name in ("fuse", "cut"):
             descriptor = inspect.getattr_static(Shape, name)
             original = getattr(Shape, name)
+            try:
+                self._fingerprints[f"Shape.{name}"] = _callable_fingerprint(original)
+            except _ComputeBypass:
+                continue
 
             def patched(shape: Any, *args: Any, _name: str = name, _original: Any = original, **kwargs: Any) -> Any:
                 return self._boolean(_name, _original, shape, args, kwargs)
@@ -400,7 +636,15 @@ def _validate_parameters(parameters: Any, schema: dict[str, Any]) -> dict[str, A
     return validated
 
 
-def _load_model(workspace: Path, entry_path: str, parameters: Any) -> tuple[tuple[Any, ...], list[str]]:
+def _validate_results(values: tuple[Any, ...]) -> None:
+    """Validate every final result (G-F13)."""
+
+    for shape in values:
+        if not shape.is_valid:
+            raise ValueError("main(params) returned an invalid shape")
+
+
+def _load_model(workspace: Path, entry_path: str, parameters: Any, adapter: Any = None) -> tuple[tuple[Any, ...], list[str]]:
     workspace = workspace.resolve()
     analysis = analyze_project(workspace, entry_path)
     validated = _validate_parameters(parameters, analysis["jsonSchema"])
@@ -432,8 +676,7 @@ def _load_model(workspace: Path, entry_path: str, parameters: Any) -> tuple[tupl
         values = (result,) if isinstance(result, Shape) else tuple(result) if isinstance(result, (list, tuple)) else ()
         if not values or any(not isinstance(shape, Shape) for shape in values):
             raise TypeError("main(params) must return a Shape or a non-empty list/tuple of Shapes")
-        if any(not shape.is_valid for shape in values):
-            raise ValueError("main(params) returned an invalid shape")
+        _validate_results(values)
         explicit_labels = [shape.label.strip() for shape in values if shape.label and shape.label.strip()]
         duplicates = sorted({label for label in explicit_labels if explicit_labels.count(label) > 1})
         if duplicates:
@@ -472,16 +715,31 @@ def _normal(a: tuple[float, float, float], b: tuple[float, float, float], c: tup
 
 
 def _mesh_shape(shape: Any, linear_tolerance: float, angular_tolerance: float) -> dict[str, Any]:
+    from OCP.BRep import BRep_Tool
+    from OCP.BRepMesh import BRepMesh_IncrementalMesh
+    from OCP.TopAbs import TopAbs_Orientation
+    from OCP.TopLoc import TopLoc_Location
+
     located = shape.moved(shape.location.inverse() * shape.global_location)
+    BRepMesh_IncrementalMesh(located.wrapped, linear_tolerance, True, angular_tolerance, True)
     positions: list[float] = []
     normals: list[float] = []
     indices: list[int] = []
     face_groups: list[dict[str, int]] = []
     for face_id, face in enumerate(located.faces(), 1):
-        vertices, triangles = face.tessellate(linear_tolerance, angular_tolerance)
+        location = TopLoc_Location()
+        triangulation = BRep_Tool.Triangulation_s(face.wrapped, location)
+        transform = location.Transformation()
+        vertices = []
+        for index in range(1, triangulation.NbNodes() + 1):
+            point = triangulation.Node(index).Transformed(transform)
+            vertices.append((float(point.X()) / 1000, float(point.Z()) / 1000, -float(point.Y()) / 1000))
+        reverse = face.wrapped.Orientation() == TopAbs_Orientation.TopAbs_REVERSED
         start = len(indices)
-        for triangle in triangles:
-            points = [_point(vertices[index]) for index in triangle]
+        for triangle_index in range(1, triangulation.NbTriangles() + 1):
+            first, second, third = triangulation.Triangle(triangle_index).Get()
+            triangle = (first - 1, third - 1, second - 1) if reverse else (first - 1, second - 1, third - 1)
+            points = [vertices[index] for index in triangle]
             normal = _normal(*points)
             for point in points:
                 positions.extend(point)
@@ -568,6 +826,8 @@ class Worker:
         self.artifacts = artifacts.resolve()
         self.handles: dict[str, tuple[Any, ...]] = {}
         self.seen_requests: set[str] = set()
+        self.compute = _ComputeCache()
+        self.cancelled = threading.Event()
 
     def _artifact(self, suffix: str) -> Path:
         path = self.artifacts / f"{uuid.uuid4().hex}.{suffix}"
@@ -575,17 +835,120 @@ class Worker:
             raise RuntimeError("Artifact path escaped the private directory")
         return path
 
-    def _write_compute_publications(self, adapter: _ComputeAdapter) -> dict[str, Any] | None:
-        if not adapter.publications:
-            return None
-        artifact = self._artifact("compute-publications.json")
-        payload = json.dumps({"publications": adapter.publications}, separators=(",", ":"), ensure_ascii=False).encode()
+    def _confined(self, descriptor: Any) -> Path:
+        """Resolve one caller-named bundle inside the private artifact directory."""
+
+        if not isinstance(descriptor, dict):
+            raise TypeError("Build123d compute bundle must be an artifact descriptor")
+        path_value = descriptor.get("artifactPath")
+        byte_length = descriptor.get("byteLength")
+        if not isinstance(path_value, str) or type(byte_length) is not int or byte_length < 0:
+            raise TypeError("Build123d compute bundle descriptor is invalid")
+        path = Path(path_value)
+        resolved = path.resolve(strict=True)
+        if path.is_symlink() or resolved.parent != self.artifacts:
+            raise ValueError("Build123d compute bundle escaped the private artifact directory")
+        if byte_length > MAX_COMPUTE_BUNDLE_BYTES or resolved.stat().st_size != byte_length:
+            raise ValueError("Build123d compute bundle has an invalid size")
+        return resolved
+
+    def _import_compute(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Adopt one bounded warm bundle; a malformed bundle imports nothing."""
+
+        descriptors = params.get("descriptors")
+        if not isinstance(descriptors, list) or len(descriptors) > MAX_COMPUTE_DESCRIPTORS:
+            raise ValueError("Build123d compute import descriptors are invalid")
+        resolved = self._confined(params.get("bundle"))
         try:
-            artifact.write_bytes(payload)
-        except OSError:
-            artifact.unlink(missing_ok=True)
-            return None
-        return {"artifactPath": str(artifact), "byteLength": len(payload)}
+            payload = resolved.read_bytes()
+        finally:
+            resolved.unlink(missing_ok=True)
+        staged: list[tuple[dict[str, Any], str, Any, int]] = []
+        omitted: list[str] = []
+        decode_omissions = 0
+        offset = 0
+        for descriptor in descriptors:
+            if not isinstance(descriptor, dict):
+                raise ValueError("Build123d compute import descriptor is invalid")
+            action = descriptor.get("action")
+            action_digest = descriptor.get("actionDigest")
+            content_digest = descriptor.get("contentDigest")
+            byte_length = descriptor.get("byteLength")
+            if (
+                not isinstance(action, dict)
+                or not isinstance(action_digest, str)
+                or not _DIGEST.fullmatch(action_digest)
+                or not isinstance(content_digest, str)
+                or not _DIGEST.fullmatch(content_digest)
+                or type(byte_length) is not int
+                or byte_length < 0
+                or offset + byte_length > len(payload)
+            ):
+                raise ValueError("Build123d compute import descriptor is invalid")
+            data = payload[offset : offset + byte_length]
+            offset += byte_length
+            if _action_digest(action) != action_digest or _content_digest(data) != content_digest:
+                omitted.append(action_digest)
+                continue
+            try:
+                shape = _shape_from_brep(data)
+            except Exception:
+                decode_omissions += 1
+                omitted.append(action_digest)
+                continue
+            staged.append((action, action_digest, shape, len(data)))
+        if offset != len(payload):
+            raise ValueError("Build123d compute import bundle has trailing bytes")
+        self.compute.omissions += decode_omissions
+        imported: list[str] = []
+        for action, action_digest, shape, byte_length in staged:
+            self.compute.put(action_digest, shape, action, byte_length)
+            imported.append(action_digest)
+        return {"imported": imported, "omitted": omitted}
+
+    def _export_compute(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Encode selected admitted residents. Runs only after the runtime permits publication."""
+
+        digests = params.get("digests")
+        if (
+            not isinstance(digests, list)
+            or len(digests) > MAX_COMPUTE_DESCRIPTORS
+            or any(not isinstance(digest, str) or not _DIGEST.fullmatch(digest) for digest in digests)
+        ):
+            raise ValueError("Build123d compute export digests are invalid")
+        descriptors: list[dict[str, Any]] = []
+        omitted: list[str] = []
+        chunks: list[bytes] = []
+        for digest in digests:
+            shape = self.compute.residents.get(digest)
+            action = self.compute.actions.get(digest)
+            if shape is None or action is None:
+                omitted.append(digest)
+                continue
+            try:
+                data = _brep_bytes(shape)
+            except Exception:
+                omitted.append(digest)
+                continue
+            chunks.append(data)
+            descriptors.append(
+                {
+                    "action": action,
+                    "actionDigest": digest,
+                    "contentDigest": _content_digest(data),
+                    "byteLength": len(data),
+                }
+            )
+        if not descriptors:
+            return {"descriptors": [], "omitted": omitted}
+        artifact = self._artifact("compute-bundle.bin")
+        payload = b"".join(chunks)
+        artifact.write_bytes(payload)
+        return {
+            "descriptors": descriptors,
+            "omitted": omitted,
+            "bundle": {"artifactPath": str(artifact), "byteLength": len(payload)},
+        }
 
     def dispatch(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
         if method == "analyze":
@@ -593,17 +956,42 @@ class Worker:
         if method == "build":
             if len(self.handles) >= MAX_HANDLES:
                 raise RuntimeError("Retained Build123d handle limit reached")
-            adapter = _ComputeAdapter(self.artifacts, params["compute"]) if "compute" in params else None
+            adapter = (
+                _ComputeAdapter(self.compute, params["compute"], self.cancelled) if "compute" in params else None
+            )
             with adapter if adapter is not None else nullcontext():
-                shapes, observed = _load_model(self.workspace, params["entryPath"], params.get("parameters", {}))
+                shapes, observed = _load_model(
+                    self.workspace, params["entryPath"], params.get("parameters", {}), adapter
+                )
             handle_id = uuid.uuid4().hex
             self.handles[handle_id] = shapes
-            compute_artifact = self._write_compute_publications(adapter) if adapter is not None else None
             return {
                 "handleId": handle_id,
                 "observedDependencies": observed,
-                **({"computeArtifact": compute_artifact} if compute_artifact else {}),
+                **(
+                    {
+                        "compute": {
+                            "announcements": adapter.announcements[:MAX_COMPUTE_DESCRIPTORS],
+                            "hits": adapter.hits,
+                            "stats": self.compute.stats(),
+                        }
+                    }
+                    if adapter is not None
+                    else {}
+                ),
             }
+        if method == "compute.import":
+            return self._import_compute(params)
+        if method == "compute.export":
+            return self._export_compute(params)
+        if method == "compute.clear":
+            generation = params.get("generation")
+            if type(generation) is not int:
+                raise ValueError("Build123d compute clear generation is invalid")
+            self.compute.clear(generation)
+            return {"generation": generation}
+        if method == "compute.stats":
+            return self.compute.stats()
         if method == "mesh":
             shapes = self.handles[params["handleId"]]
             components, meshes = _topology(shapes, params["linearTolerance"], params["angularTolerance"])
@@ -626,13 +1014,30 @@ class Worker:
             return {}
         if method == "shutdown":
             self.handles.clear()
+            self.compute.clear(self.compute.generation)
             return {"shutdown": True}
         raise ValueError(f"Unknown protocol method: {method}")
 
-    def run(self) -> bool:
+    def _read_frames(self, frames: Any, stream: Any) -> None:
+        """Read protocol frames, observing out-of-band cancellation while a build runs."""
+
+        for line in stream:
+            if _is_cancel_frame(line):
+                self.cancelled.set()
+                continue
+            frames.put(line)
+        frames.put(None)
+
+    def run(self, stream: Any = None) -> bool:
         importlib.import_module("build123d")
         _send({"protocolVersion": PROTOCOL_VERSION, "type": "ready", "pythonVersion": sys.version.split()[0]})
-        for line in sys.stdin.buffer:
+        frames: queue.Queue[bytes | None] = queue.Queue()
+        reader = threading.Thread(
+            target=self._read_frames, args=(frames, sys.stdin.buffer if stream is None else stream), daemon=True
+        )
+        reader.start()
+        for line in iter(frames.get, None):
+            self.cancelled.clear()
             entry_path: str | None = None
             request_id = "unknown"
             try:

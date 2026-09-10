@@ -1,16 +1,21 @@
 import { randomUUID } from 'node:crypto';
-import { writeFile, unlink } from 'node:fs/promises';
+import { unlink, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 
 import { NativeProcessSession, NativeWorkerReportedError } from '@taucad/native-process-core';
 import type { NativeProtocolResponse } from '@taucad/native-process-core';
-import type { KernelComputeSession, RuntimeLogger } from '@taucad/runtime/kernel';
-import type { ComputeAction } from '@taucad/cache-core';
+import type { ResidentCacheBinding, ResidentExportEntry, RuntimeLogger } from '@taucad/runtime/kernel';
+import { actionDigest } from '@taucad/cache-core';
+import type { ActionDigest, ComputeAction } from '@taucad/cache-core';
 import type { z } from 'zod';
 
 import {
   build123dArtifactSchema,
-  build123dComputePublicationsSchema,
+  build123dComputeClearSchema,
+  build123dComputeDescriptorLimit,
+  build123dComputeExportSchema,
+  build123dComputeImportSchema,
+  build123dComputeStatsSchema,
   build123dEmptySchema,
   build123dIssueSchema,
   build123dProtocolVersion,
@@ -19,6 +24,8 @@ import {
   build123dShutdownSchema,
 } from '#build123d.protocol.js';
 import type { Build123dIssue } from '#build123d.protocol.js';
+
+const brepMediaType = 'application/vnd.opencascade.brep';
 
 /** Host-owned paths, integrity evidence, and limits for one Python session. */
 export type PythonSessionOptions = {
@@ -40,19 +47,19 @@ type PythonRequest<Result> = {
   readonly params: Record<string, unknown>;
   readonly schema: z.ZodType<Result>;
   readonly signal: AbortSignal;
+  /** Ask the worker to stop at its own operation boundary instead of recycling it. */
+  readonly cancelMethod?: string;
 };
 
-/** Worker-private preload descriptor passed through the bounded NDJSON request. */
-export type Build123dComputePreload = {
-  readonly artifactPath: string;
-  readonly byteLength: number;
-};
-
-/** One exact semantic publication returned by the worker after a successful build. */
-export type Build123dComputePublication = {
-  readonly action: ComputeAction;
-  readonly bytes: Uint8Array<ArrayBuffer>;
-  readonly mediaType: 'application/vnd.opencascade.brep';
+/**
+ * The worker's lineage cache as the runtime sees it.
+ *
+ * `contains` mirrors what the worker reported; the view is eventually consistent
+ * and conservative, so an omission is a miss and never a false hit.
+ */
+export type Build123dResidentBinding = ResidentCacheBinding & {
+  /** Record identities the worker admitted during a build. */
+  readonly track: (digests: readonly ActionDigest[]) => void;
 };
 
 /** Error reported by the checked-in Python worker. */
@@ -86,6 +93,7 @@ export class PythonSession {
   private backgroundRelease: Promise<void> | undefined;
   private readonly options: PythonSessionOptions;
   private supportFilesValidated = false;
+  private residentBytes = 0;
 
   public constructor(sessionOptions: PythonSessionOptions) {
     this.options = sessionOptions;
@@ -140,6 +148,8 @@ export class PythonSession {
     try {
       return await this.session.request({ ...request, parseResult: (value) => schema.parse(value) });
     } catch (error) {
+      // A cooperatively cancelled request settles as the caller's abort, not as a worker fault.
+      request.signal.throwIfAborted();
       if (error instanceof NativeWorkerReportedError) {
         throw new Build123dWorkerError(build123dIssueSchema.array().parse(error.issues));
       }
@@ -173,63 +183,137 @@ export class PythonSession {
   }
 
   /**
-   * Stage the bounded, already-prehydrated cache candidates for one Python build.
-   * @param session - Operation-scoped compute session.
-   * @returns Private preload artifact descriptor.
+   * Bind the worker's lineage cache as the kernel-owned resident cache.
+   * @returns The resident binding one compute scope is opened against.
    */
-  public async stageComputePreload(session: KernelComputeSession): Promise<Build123dComputePreload> {
-    const artifactPath = resolve(this.options.artifactPath, `${randomUUID()}.compute-preload.json`);
-    const payload = new TextEncoder().encode(
-      JSON.stringify({
-        schemaVersion: 1,
-        entries: session.prepared().map((entry) => ({
-          canonicalAction: entry.canonicalAction,
-          actionDigest: entry.actionDigest,
-          contentDigest: entry.contentDigest,
-          bytes: Buffer.from(entry.bytes).toString('base64'),
-        })),
+  public createResidentBinding(): Build123dResidentBinding {
+    const mirror = new Set<ActionDigest>();
+    let evictions = 0;
+    let omissions = 0;
+    const control = new AbortController();
+    return {
+      contains: ({ digest }) => mirror.has(digest),
+      track: (digests) => {
+        for (const digest of digests) {
+          mirror.add(digest);
+        }
+      },
+      importEntries: async ({ entries, signal }) => {
+        const admitted = entries.slice(0, build123dComputeDescriptorLimit);
+        if (admitted.length === 0) {
+          return { imported: [], omitted: [] };
+        }
+        const bundle = await this.writeBundle(admitted.map(({ bytes }) => bytes));
+        const result = await this.request({
+          method: 'compute.import',
+          params: {
+            descriptors: admitted.map((entry) => ({
+              action: entry.action,
+              actionDigest: entry.actionDigest,
+              contentDigest: entry.contentDigest,
+              byteLength: entry.bytes.byteLength,
+            })),
+            bundle,
+          },
+          schema: build123dComputeImportSchema,
+          signal,
+        }).finally(async () => unlink(bundle.artifactPath).catch(() => undefined));
+        for (const digest of result.imported) {
+          mirror.add(actionDigest({ value: digest }));
+        }
+        omissions += result.omitted.length + (entries.length - admitted.length);
+        return {
+          imported: result.imported.map((digest) => actionDigest({ value: digest })),
+          omitted: [
+            ...result.omitted.map((digest) => actionDigest({ value: digest })),
+            ...entries.slice(build123dComputeDescriptorLimit).map((entry) => entry.actionDigest),
+          ],
+        };
+      },
+      exportEntries: async ({ digests, signal }) => {
+        const admitted = digests.slice(0, build123dComputeDescriptorLimit);
+        if (admitted.length === 0) {
+          return { entries: [], omitted: [] };
+        }
+        const result = await this.request({
+          method: 'compute.export',
+          params: { digests: admitted },
+          schema: build123dComputeExportSchema,
+          signal,
+        });
+        const omitted: ActionDigest[] = [
+          ...result.omitted.map((digest) => actionDigest({ value: digest })),
+          ...digests.slice(build123dComputeDescriptorLimit),
+        ];
+        if (!result.bundle) {
+          return { entries: [], omitted };
+        }
+        const payload = await this.readArtifact(result.bundle);
+        const entries: ResidentExportEntry[] = [];
+        let offset = 0;
+        for (const descriptor of result.descriptors) {
+          const bytes = payload.slice(offset, offset + descriptor.byteLength);
+          offset += descriptor.byteLength;
+          if (bytes.byteLength !== descriptor.byteLength) {
+            omitted.push(actionDigest({ value: descriptor.actionDigest }));
+            continue;
+          }
+          entries.push({
+            action: descriptor.action as unknown as ComputeAction,
+            bytes: new Uint8Array(bytes),
+            mediaType: brepMediaType,
+            determinism: 'byte-exact',
+          });
+        }
+        return { entries, omitted };
+      },
+      stats: () => ({
+        entries: mirror.size,
+        logicalBytes: this.residentBytes,
+        encodedBytes: { status: 'unsupported' },
+        evictions,
+        omissions,
       }),
-    );
-    await writeFile(artifactPath, payload, { flag: 'wx', mode: 0o600 });
-    return { artifactPath, byteLength: payload.byteLength };
+      clear: ({ generation }) => {
+        // Fences the mirror synchronously; the worker clears at its next safe boundary.
+        evictions += mirror.size;
+        mirror.clear();
+        this.backgroundRelease = this.ignoreFailure(
+          this.request({
+            method: 'compute.clear',
+            params: { generation },
+            schema: build123dComputeClearSchema,
+            signal: control.signal,
+          }),
+        );
+      },
+    };
   }
 
-  /**
-   * Remove a preload artifact when a request fails before the worker consumes it.
-   * @param preload - Private preload artifact descriptor.
-   */
-  public async removeComputePreload(preload: Build123dComputePreload): Promise<void> {
-    if (dirname(resolve(preload.artifactPath)) !== resolve(this.options.artifactPath)) {
-      throw new Error('Build123d compute preload escaped the private artifact directory.');
-    }
-    try {
-      await unlink(preload.artifactPath);
-    } catch {
-      // The worker deletes a successfully consumed preload before executing user code.
-    }
+  /** Read the worker's own resident accounting. */
+  public async readComputeStats(signal: AbortSignal): Promise<z.infer<typeof build123dComputeStatsSchema>> {
+    return this.request({ method: 'compute.stats', params: {}, schema: build123dComputeStatsSchema, signal });
   }
 
-  /**
-   * Read, validate, and consume deterministic BRep publications from the worker.
-   * @param artifact - Worker publication bundle descriptor.
-   * @returns Validated semantic BRep publications.
-   */
-  public async readComputePublications(
-    artifact: z.infer<typeof build123dArtifactSchema>,
-  ): Promise<readonly Build123dComputePublication[]> {
-    const bytes = await this.readArtifact(artifact);
-    const parsed = build123dComputePublicationsSchema.parse(JSON.parse(new TextDecoder().decode(bytes)));
-    return parsed.publications.map((publication) => ({
-      action: publication.action as unknown as ComputeAction,
-      bytes: new Uint8Array(Buffer.from(publication.bytes, 'base64')),
-      mediaType: publication.mediaType,
-    }));
+  /** Record the worker-reported logical residency for the binding's statistics. */
+  public observeResidentBytes(bytes: number): void {
+    this.residentBytes = bytes;
   }
 
   /** Drain pending releases and terminate the native worker. */
   public async cleanup(): Promise<void> {
     await this.backgroundRelease;
     await this.session.cleanup();
+  }
+
+  private async writeBundle(payloads: ReadonlyArray<Uint8Array<ArrayBuffer>>): Promise<{
+    readonly artifactPath: string;
+    readonly byteLength: number;
+  }> {
+    const artifactPath = resolve(this.options.artifactPath, `${randomUUID()}.compute-bundle.bin`);
+    const payload = Buffer.concat(payloads.map((bytes) => Buffer.from(bytes)));
+    await writeFile(artifactPath, payload, { flag: 'wx', mode: 0o600 });
+    return { artifactPath, byteLength: payload.byteLength };
   }
 
   private async ignoreFailure(operation: Promise<unknown>): Promise<void> {

@@ -1,9 +1,16 @@
 import { asBuffer, createKernelError, createKernelSuccess, defineKernel } from '@taucad/runtime/kernel';
-import type { KernelIssue } from '@taucad/runtime/kernel';
+import type { ComputeAnnouncement, KernelIssue } from '@taucad/runtime/kernel';
 import { createExportFile } from '@taucad/runtime/types';
-import { contentDigest } from '@taucad/cache-core';
+import { actionDigest, canonicalizeComputeAction, contentDigest } from '@taucad/cache-core';
+import type { ActionDigest, ComputeAction } from '@taucad/cache-core';
+import { sha256StringSync } from '@taucad/utils/hash';
 
-import { build123dAnalysisSchema, build123dArtifactSchema, build123dBuildSchema } from '#build123d.protocol.js';
+import {
+  build123dAnalysisSchema,
+  build123dArtifactSchema,
+  build123dBuildSchema,
+  build123dComputeDescriptorLimit,
+} from '#build123d.protocol.js';
 import { build123dExportSchemas, build123dOptionsSchema, build123dRenderSchema } from '#build123d.schemas.js';
 import { Build123dWorkerError, PythonSession } from '#python-session.js';
 import { createWorkspaceMirror } from '#build123d-workspace-mirror.js';
@@ -15,6 +22,20 @@ const computeEnvironment = {
   architecture: process.arch,
   lengthUnit: 'millimeter',
 } as const;
+
+/** EQ27: retain an operation whose own kernel call took at least this many milliseconds. */
+const computeAdmissionFloor = 5;
+
+/**
+ * Recompute the worker's action identity before it can name a stored record.
+ *
+ * The worker canonicalizes the same action independently; a disagreement would
+ * key the shared store inconsistently, so it is dropped rather than announced.
+ */
+const verifiedDigest = (action: ComputeAction, claimed: string): ActionDigest | undefined => {
+  const digest = actionDigest({ value: `sha256:${sha256StringSync(canonicalizeComputeAction(action))}` });
+  return digest === claimed ? digest : undefined;
+};
 
 /** Opaque identity for shapes retained in one Python process generation. @public */
 export type Build123dNativeHandle = {
@@ -71,7 +92,9 @@ export const build123dKernel = defineKernel({
     return {
       mirror,
       session,
+      resident: session.createResidentBinding(),
       observedDependencies: [] as string[],
+      warmCandidates: [] as ActionDigest[],
       computeProducer: {
         id: '@taucad/build123d',
         version: computeProducerVersion,
@@ -119,47 +142,77 @@ export const build123dKernel = defineKernel({
 
   async createGeometry({ entryPath, parameters }, runtime, context) {
     await context.mirror.sync(runtime.filesystem);
-    const computeSession = await runtime.compute.openSession({
-      namespace: computeNamespace,
-      scope: { entryPath },
-      policy: 'best-effort',
-    });
-    const preload = await context.session.stageComputePreload(computeSession);
-    try {
+    const build = async (compute: Record<string, unknown> | undefined) => {
       const result = await context.session.request({
         method: 'build',
-        params: {
-          entryPath,
-          parameters,
-          compute: {
-            namespace: computeNamespace,
-            producer: context.computeProducer,
-            environment: computeEnvironment,
-            preload,
-          },
-        },
+        params: { entryPath, parameters, ...(compute ? { compute } : {}) },
         schema: build123dBuildSchema,
         signal: runtime.signal,
+        // G-F5: an abort stops the worker at its next funnel boundary and keeps the resident prefix.
+        cancelMethod: 'cancel',
       });
       context.observedDependencies = result.observedDependencies;
-      if (result.computeArtifact) {
-        const publications = await context.session.readComputePublications(result.computeArtifact);
-        runtime.signal.throwIfAborted();
-        for (const publication of publications) {
-          computeSession.record(publication);
-        }
+      return result;
+    };
+
+    try {
+      if (runtime.compute.status !== 'on') {
+        // Off arm: no scope, no announcement, no publication tail, no worker-side patching.
+        const plain = await build(undefined);
+        return { nativeHandle: { sessionGeneration: context.session.generation, handleId: plain.handleId } };
       }
-      await computeSession.flush();
-      return {
-        nativeHandle: {
-          sessionGeneration: context.session.generation,
-          handleId: result.handleId,
-        },
-      };
+      const scope = runtime.compute.openScope({
+        namespace: computeNamespace,
+        producer: context.computeProducer,
+        environment: computeEnvironment,
+        discovery: { entryPath },
+        resident: context.resident,
+        admissionFloor: computeAdmissionFloor,
+      });
+      let outcome: 'delivered' | 'failed' = 'failed';
+      try {
+        // Warm discovery runs before every build, so a worker that outlives another
+        // producer's publication still picks it up (D16 refresh clause).
+        await scope.warm({ digests: context.warmCandidates, maxEntries: build123dComputeDescriptorLimit });
+        runtime.signal.throwIfAborted();
+        const result = await build({
+          namespace: computeNamespace,
+          producer: context.computeProducer,
+          environment: computeEnvironment,
+        });
+        if (result.compute) {
+          const announcements: ComputeAnnouncement[] = [];
+          const admitted: ActionDigest[] = [];
+          for (const entry of result.compute.announcements) {
+            const action = entry.action as unknown as ComputeAction;
+            const digest = verifiedDigest(action, entry.actionDigest);
+            if (!digest) {
+              continue;
+            }
+            admitted.push(digest);
+            announcements.push({
+              kind: 'action',
+              action,
+              digest,
+              computeDuration: entry.computeDuration,
+              estimatedBytes: entry.estimatedBytes,
+            });
+          }
+          context.resident.track(admitted);
+          context.session.observeResidentBytes(result.compute.stats.logicalBytes);
+          scope.announce({ entries: announcements });
+          context.warmCandidates = [...new Set([...context.warmCandidates, ...admitted])].slice(
+            -build123dComputeDescriptorLimit,
+          );
+        }
+        outcome = 'delivered';
+        return { nativeHandle: { sessionGeneration: context.session.generation, handleId: result.handleId } };
+      } finally {
+        // Seals metadata only; the runtime permits the export tail after real delivery.
+        scope.close({ outcome: runtime.signal.aborted ? 'cancelled' : outcome });
+      }
     } catch (error) {
       throw new Build123dKernelError(issuesFrom(error, entryPath));
-    } finally {
-      await context.session.removeComputePreload(preload);
     }
   },
 

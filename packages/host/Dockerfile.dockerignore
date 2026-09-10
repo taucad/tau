@@ -85,11 +85,11 @@ infra
 # =============================================================================
 # packages/host/Dockerfile additions (BuildKit reads <dockerfile>.dockerignore
 # in preference to the root file, so this is a copy of the root rules plus the
-# workspace's local `file:`/`link:` dependencies, which live under `repos/` and
-# are therefore excluded above — `pnpm install --frozen-lockfile` cannot resolve
-# the lockfile without them).
+# workspace's local `file:`/`link:` dependencies, which live under `out/` and
+# `repos/` and are therefore excluded above — `pnpm install --frozen-lockfile`
+# cannot resolve the lockfile without them).
 # =============================================================================
-!repos/nanoraster/tests/out/candidate-0df0c5d/*.tgz
+!out/artifacts/nanoraster/candidate-bef3b79-20260905T2252NZ/*.tgz
 !repos/openrscad/packages/npm-native/package.json
 !repos/openrscad/packages/npm-native/dist
 !repos/openrscad/packages/npm-native/dist/**

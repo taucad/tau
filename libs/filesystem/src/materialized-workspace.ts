@@ -1,16 +1,31 @@
 import { assertRootedPath, joinRelativePath } from '@taucad/utils/path';
+import { bufferToStream } from '#backend/stream-utils.js';
 import { ResourceQueue } from '#resource-queue.js';
 import type { RootedFileSystem } from '#workspace-file-service.js';
-import type { FileStat, WatchEvent, WatchRequest } from '#types.js';
+import type { FileReadStreamOptions, FileStat, WatchEvent, WatchRequest } from '#types.js';
 import { ImmutableRevisionTree, revisionId } from '#revision-tree.js';
 import type { MaterializedWorkspaceId } from '#workspace-identity.js';
 
 type RevisionId = ReturnType<typeof revisionId>;
 
-/** Immutable identity binding a writable root to its exact base revision. @public */
+/**
+ * How a workspace holds its writable tree: `local` binds a caller-owned root in
+ * place, `branch` owns a complete materialized copy. @public
+ */
+export type MaterializedWorkspaceMode = 'local' | 'branch';
+
+/**
+ * Immutable identity binding a writable root to its exact base revision.
+ *
+ * `mode` is the non-reference marker for "bound in place": `bindInPlace` returns
+ * a confining wrapper around the caller's root, never the root object itself, so
+ * no consumer can recognise a local workspace by comparing filesystem
+ * references. @public
+ */
 export type MaterializedWorkspaceIdentity = Readonly<{
   workspaceId: MaterializedWorkspaceId;
   baseRevisionId: RevisionId;
+  mode: MaterializedWorkspaceMode;
 }>;
 
 /** Measured materialization result for one isolated root. @public */
@@ -48,6 +63,7 @@ export class MaterializedWorkspaceError extends Error {
 type WorkspaceCapabilityState = {
   active: boolean;
   readonly inFlight: Set<Promise<unknown>>;
+  readonly streams: Set<Readonly<{ cancel(reason?: unknown): Promise<void> }>>;
   readonly watches: Set<() => void>;
 };
 
@@ -67,6 +83,14 @@ type MaterializedWorkspaceAuthorityOptions = Readonly<{
 
 const defaultStorageDirectory = '.tau/workspaces';
 const defaultMaterializationConcurrency = 16;
+
+const cleanupDisposedStream = async (stream: Readonly<{ cancel(reason?: unknown): Promise<void> }>): Promise<void> => {
+  try {
+    await stream.cancel();
+  } catch {
+    // Synchronous capability disposal is best-effort; destroy awaits and reports no cleanup aggregate.
+  }
+};
 
 type PersistedWorkspaceIdentity = Readonly<{
   version: 1;
@@ -142,6 +166,90 @@ const createWorkspaceFileSystem = (options: CreateWorkspaceFileSystemOptions): R
       : run(async () => source.readFile(resolved));
   }
 
+  /**
+   * Chunk a whole-file read for a source that cannot stream natively.
+   *
+   * ponytail: the browser's fs-client-backed rooted view has no streaming read,
+   * so it buffers each file whole on first pull and the workspace advertises
+   * streaming it cannot deliver chunk-by-chunk. The bytes and the lifecycle are
+   * identical; only the peak per-file memory is not. Upgrade path:
+   * `readFileStream` over the fs-bridge into `FileSystemClient` and its facade,
+   * then delete this fallback.
+   */
+  const bufferedSourceStream = (
+    resolvedPath: string,
+    readOptions?: FileReadStreamOptions,
+  ): ReadableStream<Uint8Array<ArrayBuffer>> => {
+    let buffered: ReadableStreamDefaultReader<Uint8Array<ArrayBuffer>> | undefined;
+    return new ReadableStream(
+      {
+        async pull(controller) {
+          buffered ??= bufferToStream(await source.readFile(resolvedPath), readOptions).getReader();
+          const result = await buffered.read();
+          if (result.done) {
+            controller.close();
+          } else {
+            controller.enqueue(result.value);
+          }
+        },
+        cancel: async (reason) => buffered?.cancel(reason),
+      },
+      { highWaterMark: 0 },
+    );
+  };
+
+  const readFileStream = (
+    path: string,
+    readOptions?: FileReadStreamOptions,
+  ): ReadableStream<Uint8Array<ArrayBuffer>> => {
+    assertActive();
+    const resolved = resolve(path);
+    const sourceStream = source.readFileStream?.(resolved, readOptions) ?? bufferedSourceStream(resolved, readOptions);
+    const reader = sourceStream.getReader();
+    let cancellation: Promise<void> | undefined;
+    const activeStream = {
+      async cancel(reason?: unknown): Promise<void> {
+        cancellation ??= (async () => {
+          await reader.cancel(reason);
+          state.streams.delete(activeStream);
+        })();
+        await cancellation;
+      },
+    };
+    const cleanup = async (reason?: unknown): Promise<void> => {
+      await activeStream.cancel(reason);
+    };
+    const cleanupAfterFailure = async (reason: unknown): Promise<void> => {
+      try {
+        await cleanup(reason);
+      } catch {
+        // Preserve the read or revocation failure that required cleanup.
+      }
+    };
+    state.streams.add(activeStream);
+    return new ReadableStream(
+      {
+        async pull(controller) {
+          try {
+            const result = await run(async () => reader.read());
+            assertActive();
+            if (result.done) {
+              state.streams.delete(activeStream);
+              controller.close();
+            } else {
+              controller.enqueue(result.value);
+            }
+          } catch (error) {
+            await cleanupAfterFailure(error);
+            throw error;
+          }
+        },
+        cancel: cleanup,
+      },
+      { highWaterMark: 0 },
+    );
+  };
+
   const watch = (request: WatchRequest, handler: (event: WatchEvent) => void): (() => void) => {
     assertActive();
     if (request.paths.length === 0) {
@@ -200,8 +308,12 @@ const createWorkspaceFileSystem = (options: CreateWorkspaceFileSystemOptions): R
       for (const stop of state.watches) {
         stop();
       }
+      for (const stream of state.streams) {
+        void cleanupDisposedStream(stream);
+      }
     },
     readFile,
+    readFileStream,
     writeFile: async (path, data) => run(async () => source.writeFile(resolve(path), data)),
     appendFile: async (path, data) => {
       const resolved = resolve(path);
@@ -368,6 +480,7 @@ export class MaterializedWorkspaceAuthority {
         const identity: MaterializedWorkspaceIdentity = Object.freeze({
           workspaceId: input.workspaceId,
           baseRevisionId: input.baseRevisionId,
+          mode: 'branch',
         });
         const metrics = Object.freeze({
           files: input.tree.size,
@@ -383,7 +496,12 @@ export class MaterializedWorkspaceAuthority {
             metrics,
           } satisfies PersistedWorkspaceIdentity),
         );
-        const state: WorkspaceCapabilityState = { active: true, inFlight: new Set(), watches: new Set() };
+        const state: WorkspaceCapabilityState = {
+          active: true,
+          inFlight: new Set(),
+          streams: new Set(),
+          watches: new Set(),
+        };
         this.#states.set(input.workspaceId, state);
         return Object.freeze({
           identity,
@@ -438,6 +556,7 @@ export class MaterializedWorkspaceAuthority {
         workspaceId: input.workspaceId,
         baseRevisionId:
           persisted?.baseRevisionId === undefined ? input.baseRevisionId : revisionId(persisted.baseRevisionId),
+        mode: 'local',
       });
       const metrics = Object.freeze(
         persisted?.metrics ?? {
@@ -458,12 +577,17 @@ export class MaterializedWorkspaceAuthority {
           } satisfies PersistedWorkspaceIdentity),
         );
       }
-      const state: WorkspaceCapabilityState = { active: true, inFlight: new Set(), watches: new Set() };
+      const state: WorkspaceCapabilityState = {
+        active: true,
+        inFlight: new Set(),
+        streams: new Set(),
+        watches: new Set(),
+      };
       this.#states.set(input.workspaceId, state);
       return Object.freeze({
         identity,
         baseTree: input.tree,
-        filesystem: input.filesystem,
+        filesystem: createWorkspaceFileSystem({ source: input.filesystem, prefix: '', identity, state }),
         metadata: createWorkspaceFileSystem({
           source: this.#filesystem,
           prefix: metadataDirectory,
@@ -504,6 +628,7 @@ export class MaterializedWorkspaceAuthority {
       const identity: MaterializedWorkspaceIdentity = Object.freeze({
         workspaceId,
         baseRevisionId: revisionId(persisted.baseRevisionId),
+        mode: persisted.mode === 'local' ? 'local' : 'branch',
       });
       const treeDirectory = joinRelativePath(workspaceDirectory, 'tree');
       const baseDirectory = joinRelativePath(workspaceDirectory, 'base');
@@ -515,7 +640,12 @@ export class MaterializedWorkspaceAuthority {
         throw new MaterializedWorkspaceError('WORKSPACE_DISPOSED', `Workspace base tree is missing: ${workspaceId}`);
       }
       await this.#filesystem.mkdir(metadataDirectory, { recursive: true });
-      const state: WorkspaceCapabilityState = { active: true, inFlight: new Set(), watches: new Set() };
+      const state: WorkspaceCapabilityState = {
+        active: true,
+        inFlight: new Set(),
+        streams: new Set(),
+        watches: new Set(),
+      };
       this.#states.set(workspaceId, state);
       const filesystem = createWorkspaceFileSystem({
         source: this.#filesystem,
@@ -563,6 +693,20 @@ export class MaterializedWorkspaceAuthority {
         for (const stop of state.watches) {
           stop();
         }
+        const cancellations = await Promise.allSettled(
+          [...state.streams].map(async (stream) => {
+            await stream.cancel();
+          }),
+        );
+        const failures: unknown[] = [];
+        for (const result of cancellations) {
+          if (result.status === 'rejected') {
+            failures.push(result.reason as unknown);
+          }
+        }
+        if (failures.length > 0) {
+          throw new AggregateError(failures, 'Cannot destroy a workspace before every stream is closed.');
+        }
         await Promise.allSettled(state.inFlight);
         this.#states.delete(workspaceId);
       }
@@ -576,7 +720,28 @@ export class MaterializedWorkspaceAuthority {
 export type CaptureRevisionTreeOptions = Readonly<{
   /** Rooted paths the walk must not descend into or record. */
   exclude?: (path: string) => boolean;
+  /** File paths that must be present in the completed capture. */
+  requiredPaths?: readonly string[];
+  /** Maximum number of file streams read at once. Defaults to 16. */
+  concurrency?: number;
+  /** Maximum aggregate file payload. Defaults to 1 GiB. */
+  maximumTotalBytes?: number;
+  /** Cancels traversal and all active file streams. */
+  signal?: AbortSignal;
 }>;
+
+const defaultCaptureConcurrency = 16;
+const defaultCaptureMaximumTotalBytes = 1024 * 1024 * 1024;
+
+const assertCaptureLimit = (value: number, label: string, maximum: number): number => {
+  if (!Number.isSafeInteger(value) || value < 1 || value > maximum) {
+    throw new RangeError(`${label} must be a positive safe integer no greater than ${maximum}.`);
+  }
+  return value;
+};
+
+const captureAbortError = (signal: AbortSignal): unknown =>
+  signal.reason ?? new DOMException('The revision tree capture was aborted.', 'AbortError');
 
 /**
  * Capture a rooted filesystem as an immutable file-only revision tree.
@@ -584,8 +749,11 @@ export type CaptureRevisionTreeOptions = Readonly<{
  * A listing is a snapshot, not a lock: on a real filesystem an entry can be
  * gone before the `stat`/`readFile` that follows it — an atomic write's temp
  * file is renamed over its target, a workspace sweep removes a run directory.
- * A vanished entry is therefore *skipped*, never a failed capture (which is how
- * a `.<name>.<pid>.<uuid>.tmp` sibling took down workspace admission).
+ * An undeclared vanished entry is therefore *skipped*, never a failed capture
+ * (which is how a `.<name>.<pid>.<uuid>.tmp` sibling took down workspace
+ * admission). A path declared in `requiredPaths` remains fail-closed.
+ * Callers that require a coherent process checkpoint must quiesce its writers;
+ * this bounded filesystem walk does not create an atomic snapshot or a lock.
  *
  * @public
  */
@@ -593,8 +761,36 @@ export const captureRevisionTree = async (
   filesystem: RootedFileSystem,
   options?: CaptureRevisionTreeOptions,
 ): Promise<ImmutableRevisionTree> => {
-  const entries: Array<readonly [string, Uint8Array<ArrayBuffer>]> = [];
+  const concurrency = assertCaptureLimit(options?.concurrency ?? defaultCaptureConcurrency, 'concurrency', 256);
+  const maximumTotalBytes = assertCaptureLimit(
+    options?.maximumTotalBytes ?? defaultCaptureMaximumTotalBytes,
+    'maximumTotalBytes',
+    Number.MAX_SAFE_INTEGER,
+  );
   const excluded = options?.exclude;
+  const requiredPaths = new Set(
+    (options?.requiredPaths ?? []).map((path) => {
+      const requiredPath = assertRootedPath(path);
+      if (requiredPath === '') {
+        throw new TypeError('A required capture path must name a file, not the tree root.');
+      }
+      return requiredPath;
+    }),
+  );
+  const abortController = new AbortController();
+  const abortFromCaller = (): void => {
+    abortController.abort(captureAbortError(options?.signal ?? abortController.signal));
+  };
+  if (options?.signal?.aborted === true) {
+    abortFromCaller();
+  } else {
+    options?.signal?.addEventListener('abort', abortFromCaller, { once: true });
+  }
+  const throwIfAborted = (): void => {
+    if (abortController.signal.aborted) {
+      throw captureAbortError(abortController.signal);
+    }
+  };
   const skipIfVanished = async <T>(operation: () => Promise<T>): Promise<T | undefined> => {
     try {
       return await operation();
@@ -605,29 +801,169 @@ export const captureRevisionTree = async (
       throw error;
     }
   };
+  const filePaths: string[] = [];
   const visit = async (path: string): Promise<void> => {
+    throwIfAborted();
     const children = await skipIfVanished(async () => filesystem.readdir(path));
-    await Promise.all(
-      (children ?? []).map(async (child) => {
-        const childPath = joinRelativePath(path, child);
-        if (excluded?.(childPath) === true) {
-          return;
-        }
-        const stat = await skipIfVanished(async () => filesystem.stat(childPath));
-        if (stat === undefined) {
-          return;
-        }
-        if (stat.type === 'dir') {
-          await visit(childPath);
-          return;
-        }
-        const content = await skipIfVanished(async () => filesystem.readFile(childPath));
-        if (content !== undefined) {
-          entries.push([childPath, content]);
-        }
-      }),
-    );
+    for (const child of children ?? []) {
+      throwIfAborted();
+      const childPath = joinRelativePath(path, child);
+      if (excluded?.(childPath) === true) {
+        continue;
+      }
+      // oxlint-disable-next-line eslint/no-await-in-loop -- Sequential traversal avoids a second nested concurrency pool.
+      const stat = await skipIfVanished(async () => filesystem.stat(childPath));
+      if (stat === undefined) {
+        continue;
+      }
+      if (stat.type === 'dir') {
+        // oxlint-disable-next-line eslint/no-await-in-loop -- Sequential traversal avoids deadlocking nested bounded pools.
+        await visit(childPath);
+      } else {
+        filePaths.push(childPath);
+      }
+    }
   };
-  await visit('');
-  return new ImmutableRevisionTree(entries);
+  try {
+    await visit('');
+    const entries = Array.from<readonly [string, Uint8Array<ArrayBuffer>] | undefined>({
+      length: filePaths.length,
+    });
+    let nextIndex = 0;
+    let capturedBytes = 0;
+    let firstFailure: unknown;
+    const captureFile = async (path: string, index: number): Promise<void> => {
+      let reservedBytes = 0;
+      let reader: ReadableStreamDefaultReader<Uint8Array<ArrayBuffer>> | undefined;
+      let cancellation: Promise<void> | undefined;
+      let captureFailure: unknown;
+      let failed = false;
+      let vanished = false;
+      const containCancellationRejection = async (pending: Promise<void>): Promise<void> => {
+        try {
+          await pending;
+        } catch {
+          // The worker joins and reports this same promise before it settles.
+        }
+      };
+      const cancelReader = (reason: unknown = captureAbortError(abortController.signal)): void => {
+        if (reader !== undefined) {
+          cancellation ??= reader.cancel(reason);
+          void containCancellationRejection(cancellation);
+        }
+      };
+      const cancelReaderAfterAbort = (): void => {
+        cancelReader();
+      };
+      try {
+        throwIfAborted();
+        const streamOptions = { signal: abortController.signal };
+        /*
+         * A rooted view that cannot stream natively buffers each file whole.
+         *
+         * ponytail: the browser's fs-client adapter, the file-manager worker and
+         * the runtime worker proxy have no streaming read, so only the aggregate
+         * `maximumTotalBytes` bound holds for them — a single file larger than
+         * the bound is resident before the RangeError, exactly as it was before
+         * this walk became streaming. Upgrade path: `readFileStream` over the
+         * fs-bridge into `FileSystemClient` and its facade, then delete this.
+         */
+        const stream =
+          filesystem.readFileStream?.(path, streamOptions) ??
+          bufferToStream(await filesystem.readFile(path), streamOptions);
+        reader = stream.getReader();
+        abortController.signal.addEventListener('abort', cancelReaderAfterAbort, { once: true });
+        const chunks: Array<Uint8Array<ArrayBuffer>> = [];
+        let complete = false;
+        while (!complete) {
+          // oxlint-disable-next-line eslint/no-await-in-loop -- Stream chunks must be consumed in source order.
+          const result = await reader.read();
+          throwIfAborted();
+          if (result.done) {
+            complete = true;
+            continue;
+          }
+          if (capturedBytes + result.value.byteLength > maximumTotalBytes) {
+            throw new RangeError(`Revision tree capture exceeds maximumTotalBytes (${maximumTotalBytes}).`);
+          }
+          capturedBytes += result.value.byteLength;
+          reservedBytes += result.value.byteLength;
+          chunks.push(result.value);
+        }
+        const content = new Uint8Array(reservedBytes);
+        let offset = 0;
+        for (const chunk of chunks) {
+          content.set(chunk, offset);
+          offset += chunk.byteLength;
+        }
+        entries[index] = [path, content];
+      } catch (error) {
+        capturedBytes -= reservedBytes;
+        if (!requiredPaths.has(path) && isNotFoundError(error)) {
+          vanished = true;
+        } else {
+          failed = true;
+          captureFailure = error;
+        }
+      } finally {
+        abortController.signal.removeEventListener('abort', cancelReaderAfterAbort);
+        if (failed || vanished || abortController.signal.aborted) {
+          cancelReader(captureFailure);
+        }
+        if (cancellation !== undefined) {
+          try {
+            await cancellation;
+          } catch (error) {
+            captureFailure = failed
+              ? new AggregateError(
+                  [captureFailure, error],
+                  `Revision capture failed and stream cleanup failed: ${path}`,
+                )
+              : error;
+            failed = true;
+          }
+        }
+        reader?.releaseLock();
+      }
+      if (failed) {
+        throw captureFailure instanceof Error
+          ? captureFailure
+          : new Error(`Revision capture failed: ${path}`, { cause: captureFailure });
+      }
+    };
+    const worker = async (): Promise<void> => {
+      while (!abortController.signal.aborted) {
+        const index = nextIndex;
+        nextIndex += 1;
+        if (index >= filePaths.length) {
+          return;
+        }
+        try {
+          // oxlint-disable-next-line eslint/no-await-in-loop -- Each worker owns one sequential lane in the shared pool.
+          await captureFile(filePaths[index]!, index);
+        } catch (error) {
+          firstFailure ??= error;
+          abortController.abort(error);
+        }
+      }
+    };
+    await Promise.allSettled(Array.from({ length: Math.min(concurrency, filePaths.length) }, async () => worker()));
+    if (firstFailure !== undefined) {
+      throw firstFailure instanceof Error
+        ? firstFailure
+        : new Error('Revision tree capture failed.', { cause: firstFailure });
+    }
+    throwIfAborted();
+    const completeEntries = entries.filter(
+      (entry): entry is readonly [string, Uint8Array<ArrayBuffer>] => entry !== undefined,
+    );
+    const capturedPaths = new Set(completeEntries.map(([path]) => path));
+    const missingRequired = [...requiredPaths].filter((path) => !capturedPaths.has(path));
+    if (missingRequired.length > 0) {
+      throw new Error(`Required capture paths were not captured: ${missingRequired.join(', ')}`);
+    }
+    return new ImmutableRevisionTree(completeEntries);
+  } finally {
+    options?.signal?.removeEventListener('abort', abortFromCaller);
+  }
 };

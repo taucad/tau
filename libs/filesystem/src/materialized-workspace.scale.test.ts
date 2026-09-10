@@ -16,7 +16,7 @@ describe.runIf(runScale)('MaterializedWorkspaceAuthority C0 scale evidence', () 
   it('materializes and verifies the 100,000-file control fixture', { timeout: 120_000 }, async () => {
     const provider = new MemoryProvider();
     const mountTable = new MountTable();
-    mountTable.mount('/project', provider, { backend: 'memory', storageRootKey: 'memory:c0-scale' });
+    mountTable.mount('/project', provider, { class: 'authored', backend: 'memory', storageRootKey: 'memory:c0-scale' });
     const eventBus = new ChangeEventBus();
     const resourceQueue = new ResourceQueue();
     const crossTabCoordinator = new CrossTabCoordinator();

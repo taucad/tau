@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ChangeEventBus } from '#change-event-bus.js';
 import { CrossTabCoordinator } from '#cross-tab-coordinator.js';
 import { MemoryProvider } from '#backend/memory-provider.js';
@@ -24,6 +24,7 @@ const createHarness = (options?: {
   const provider = new MemoryProvider();
   const mountTable = new MountTable();
   mountTable.mount('/project', provider, {
+    class: 'authored',
     backend: 'memory',
     storageRootKey: 'memory:materialized-workspace-test',
   });
@@ -101,6 +102,20 @@ const vanishingFileSystem = (
       }
       return encoder.encode(value);
     }) as RootedFileSystem['readFile'],
+    readFileStream: (path: string) =>
+      new ReadableStream<Uint8Array<ArrayBuffer>>({
+        start(controller) {
+          if (missing.has(path)) {
+            throw enoent(path);
+          }
+          const value = entries[path];
+          if (typeof value !== 'string') {
+            throw enoent(path);
+          }
+          controller.enqueue(encoder.encode(value));
+          controller.close();
+        },
+      }),
     readdir: async (path: string): Promise<string[]> => {
       if (missing.has(path)) {
         throw enoent(path);
@@ -325,6 +340,241 @@ describe('MaterializedWorkspaceAuthority', () => {
     expect(captured.entries().map(({ path }) => path)).toEqual(['main.ts']);
   });
 
+  /* eslint-disable @typescript-eslint/naming-convention -- Path-keyed fixtures use the empty string for the rooted filesystem root. */
+  it('captures a rooted view that has no streaming read by buffering each file', async () => {
+    // The browser's `createClientRootedFileSystem` wraps a `FileSystemClient`
+    // with no streaming read; requiring one failed every browser-placed chat.
+    const filesystem: RootedFileSystem = {
+      ...vanishingFileSystem(
+        { '': ['main.ts', 'nested'], 'main.ts': 'kept', nested: ['keep.txt'], 'nested/keep.txt': 'nested kept' },
+        new Set(),
+      ),
+      readFileStream: undefined,
+    };
+
+    const captured = await captureRevisionTree(filesystem);
+
+    expect(captured.entries().map(({ path, content }) => [path, new TextDecoder().decode(content)] as const)).toEqual([
+      ['main.ts', 'kept'],
+      ['nested/keep.txt', 'nested kept'],
+    ]);
+  });
+  /* eslint-enable @typescript-eslint/naming-convention -- Re-enable after the path-keyed fixtures */
+
+  /* eslint-disable @typescript-eslint/naming-convention -- Path-keyed fixtures use the empty string for the rooted filesystem root. */
+  it('rejects required files that vanish, are excluded, or resolve as directories', async () => {
+    const filesystem = vanishingFileSystem(
+      { '': ['gone.txt', 'excluded.txt', 'directory'], 'excluded.txt': 'hidden', directory: [] },
+      new Set(['gone.txt']),
+    );
+
+    await expect(captureRevisionTree(filesystem, { requiredPaths: ['gone.txt'] })).rejects.toThrow(
+      'Required capture paths were not captured: gone.txt',
+    );
+    await expect(
+      captureRevisionTree(filesystem, {
+        exclude: (path) => path === 'excluded.txt',
+        requiredPaths: ['excluded.txt'],
+      }),
+    ).rejects.toThrow('Required capture paths were not captured: excluded.txt');
+    await expect(captureRevisionTree(filesystem, { requiredPaths: ['directory'] })).rejects.toThrow(
+      'Required capture paths were not captured: directory',
+    );
+  });
+
+  it('bounds sibling stream reads at the default concurrency', async () => {
+    const paths = Array.from({ length: 24 }, (_, index) => `file-${index}.bin`);
+    const filesystem = vanishingFileSystem(
+      { '': paths, ...Object.fromEntries(paths.map((path) => [path, 'x'])) },
+      new Set(),
+    );
+    let active = 0;
+    let maximumActive = 0;
+    filesystem.readFileStream = () =>
+      new ReadableStream<Uint8Array<ArrayBuffer>>({
+        async start(controller) {
+          active += 1;
+          maximumActive = Math.max(maximumActive, active);
+          await new Promise<void>((resolve) => {
+            setTimeout(resolve, 1);
+          });
+          controller.enqueue(new Uint8Array([1]));
+          controller.close();
+          active -= 1;
+        },
+      });
+
+    const captured = await captureRevisionTree(filesystem);
+
+    expect(captured.size).toBe(paths.length);
+    expect(maximumActive).toBe(16);
+  });
+
+  it('enforces one aggregate byte budget across parallel growing streams', async () => {
+    const filesystem = vanishingFileSystem({ '': ['a.bin', 'b.bin'], 'a.bin': 'aaa', 'b.bin': 'bbb' }, new Set());
+    const bufferedRead = vi.spyOn(filesystem, 'readFile');
+    filesystem.readFileStream = () =>
+      new ReadableStream<Uint8Array<ArrayBuffer>>({
+        start(controller) {
+          controller.enqueue(new Uint8Array(3));
+          controller.enqueue(new Uint8Array(3));
+          controller.close();
+        },
+      });
+
+    await expect(captureRevisionTree(filesystem, { concurrency: 2, maximumTotalBytes: 5 })).rejects.toThrow(
+      'Revision tree capture exceeds maximumTotalBytes (5)',
+    );
+    expect(bufferedRead).not.toHaveBeenCalled();
+  });
+
+  it('waits for the exact delayed stream cancellation before rejecting', async () => {
+    const filesystem = vanishingFileSystem({ '': ['large.bin'], 'large.bin': 'large' }, new Set());
+    let releaseCancellation: (() => void) | undefined;
+    const cancellationGate = new Promise<void>((resolve) => {
+      releaseCancellation = resolve;
+    });
+    let cancellationStarted = false;
+    filesystem.readFileStream = () =>
+      new ReadableStream<Uint8Array<ArrayBuffer>>({
+        start(controller) {
+          controller.enqueue(new Uint8Array(6));
+        },
+        async cancel() {
+          cancellationStarted = true;
+          await cancellationGate;
+        },
+      });
+    let settled = false;
+    const capture = captureRevisionTree(filesystem, { maximumTotalBytes: 5 });
+    const observeCapture = async (): Promise<void> => {
+      try {
+        await capture;
+      } catch {
+        // The assertion below owns the expected capture rejection.
+      } finally {
+        settled = true;
+      }
+    };
+    const observation = observeCapture();
+    await vi.waitFor(() => {
+      expect(cancellationStarted).toBe(true);
+    });
+
+    expect(settled).toBe(false);
+    releaseCancellation?.();
+    await expect(capture).rejects.toThrow('Revision tree capture exceeds maximumTotalBytes (5)');
+    await observation;
+    expect(settled).toBe(true);
+  });
+
+  it('contains rejecting cancellation and reports it with the capture failure', async () => {
+    const filesystem = vanishingFileSystem({ '': ['large.bin'], 'large.bin': 'large' }, new Set());
+    const unhandledRejection = vi.fn();
+    process.on('unhandledRejection', unhandledRejection);
+    filesystem.readFileStream = () =>
+      new ReadableStream<Uint8Array<ArrayBuffer>>({
+        start(controller) {
+          controller.enqueue(new Uint8Array(6));
+        },
+        cancel: async () => {
+          throw new Error('stream cleanup failed');
+        },
+      });
+
+    try {
+      const failure = await captureRevisionTree(filesystem, { maximumTotalBytes: 5 }).catch((error: unknown) => error);
+      expect(failure).toBeInstanceOf(AggregateError);
+      expect((failure as AggregateError).errors).toEqual([
+        expect.objectContaining({ message: 'Revision tree capture exceeds maximumTotalBytes (5).' }),
+        expect.objectContaining({ message: 'stream cleanup failed' }),
+      ]);
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 0);
+      });
+      expect(unhandledRejection).not.toHaveBeenCalled();
+    } finally {
+      process.off('unhandledRejection', unhandledRejection);
+    }
+  });
+
+  it('rejects when cleanup fails after an undeclared file vanishes during its read', async () => {
+    const filesystem = vanishingFileSystem({ '': ['gone.bin'], 'gone.bin': 'gone' }, new Set());
+    const reader = {
+      read: vi.fn(async () => {
+        throw Object.assign(new Error('gone while reading'), { code: 'ENOENT' });
+      }),
+      cancel: vi.fn(async () => {
+        throw new Error('vanished stream cleanup failed');
+      }),
+      releaseLock: vi.fn(),
+    };
+    filesystem.readFileStream = () =>
+      ({ getReader: () => reader }) as unknown as ReadableStream<Uint8Array<ArrayBuffer>>;
+
+    await expect(captureRevisionTree(filesystem)).rejects.toThrow('vanished stream cleanup failed');
+    expect(reader.cancel).toHaveBeenCalledOnce();
+    expect(reader.releaseLock).toHaveBeenCalledOnce();
+  });
+
+  it('rejects a non-Error undefined stream failure instead of omitting the file', async () => {
+    const filesystem = vanishingFileSystem({ '': ['broken.bin'], 'broken.bin': 'broken' }, new Set());
+    const reader = {
+      read: vi.fn().mockRejectedValue(undefined),
+      cancel: vi.fn(async () => undefined),
+      releaseLock: vi.fn(),
+    };
+    filesystem.readFileStream = () =>
+      ({ getReader: () => reader }) as unknown as ReadableStream<Uint8Array<ArrayBuffer>>;
+
+    await expect(captureRevisionTree(filesystem)).rejects.toMatchObject({
+      message: 'Revision capture failed: broken.bin',
+      cause: undefined,
+    });
+    expect(reader.cancel).toHaveBeenCalledOnce();
+    expect(reader.releaseLock).toHaveBeenCalledOnce();
+  });
+
+  it('aborts active streams, drains their cancellation, and returns no partial tree', async () => {
+    const filesystem = vanishingFileSystem({ '': ['a.bin', 'b.bin'], 'a.bin': 'a', 'b.bin': 'b' }, new Set());
+    const cancelled: string[] = [];
+    const started: string[] = [];
+    filesystem.readFileStream = (path) =>
+      new ReadableStream<Uint8Array<ArrayBuffer>>({
+        async pull() {
+          started.push(path);
+          await new Promise<void>(() => {
+            // Capture remains pending until the abort path cancels this stream.
+          });
+        },
+        cancel: async () => {
+          await Promise.resolve();
+          cancelled.push(path);
+        },
+      });
+    const abortController = new AbortController();
+    const capture = captureRevisionTree(filesystem, { concurrency: 2, signal: abortController.signal });
+    await vi.waitFor(() => {
+      expect(started).toHaveLength(2);
+    });
+    abortController.abort(new Error('stop capture'));
+
+    await expect(capture).rejects.toThrow('stop capture');
+    expect(cancelled.sort()).toEqual(['a.bin', 'b.bin']);
+  });
+
+  it('validates capture limits before touching the filesystem', async () => {
+    const filesystem = vanishingFileSystem({ '': [] }, new Set());
+    const readdir = vi.spyOn(filesystem, 'readdir');
+
+    await expect(captureRevisionTree(filesystem, { concurrency: 0 })).rejects.toThrow(RangeError);
+    await expect(captureRevisionTree(filesystem, { maximumTotalBytes: Number.POSITIVE_INFINITY })).rejects.toThrow(
+      RangeError,
+    );
+    expect(readdir).not.toHaveBeenCalled();
+  });
+  /* eslint-enable @typescript-eslint/naming-convention -- Re-enable after path-keyed fixtures. */
+
   it('rejects duplicate identities, traversal, and use after destruction', async () => {
     const { authority } = harness();
     const workspaceId = materializedWorkspaceId('lifecycle');
@@ -338,6 +588,122 @@ describe('MaterializedWorkspaceAuthority', () => {
     await expect(authority.destroy(workspaceId)).resolves.toBe(true);
     await expect(workspace.filesystem.readFile('main.ts')).rejects.toMatchObject({ code: 'WORKSPACE_DISPOSED' });
     await expect(authority.destroy(workspaceId)).resolves.toBe(false);
+  });
+
+  it('cancels live streams and refuses reads after capability disposal', async () => {
+    const cancelled = vi.fn();
+    const { authority } = harness({
+      wrap: (filesystem) => ({
+        ...filesystem,
+        readFileStream: () =>
+          new ReadableStream<Uint8Array<ArrayBuffer>>({
+            pull(controller) {
+              controller.enqueue(new Uint8Array([1]));
+            },
+            cancel() {
+              cancelled();
+            },
+          }),
+      }),
+    });
+    const workspace = await authority.materialize({
+      workspaceId: materializedWorkspaceId('stream-lifecycle'),
+      baseRevisionId: revisionId('rev-stream'),
+      tree: baseTree(),
+    });
+    const stream = workspace.filesystem.readFileStream?.('main.ts');
+    expect(stream).toBeDefined();
+
+    workspace.filesystem.dispose();
+    await vi.waitFor(() => {
+      expect(cancelled).toHaveBeenCalledOnce();
+    });
+    await expect(stream!.getReader().read()).rejects.toMatchObject({ code: 'WORKSPACE_DISPOSED' });
+  });
+
+  it('keeps stream cleanup tracked until destroy finishes cancellation', async () => {
+    let releaseCancellation: (() => void) | undefined;
+    const cancellationGate = new Promise<void>((resolve) => {
+      releaseCancellation = resolve;
+    });
+    const { authority } = harness({
+      wrap: (filesystem) => ({
+        ...filesystem,
+        readFileStream: () =>
+          new ReadableStream<Uint8Array<ArrayBuffer>>({
+            cancel: async () => cancellationGate,
+          }),
+      }),
+    });
+    const workspaceId = materializedWorkspaceId('stream-destroy-race');
+    const workspace = await authority.materialize({
+      workspaceId,
+      baseRevisionId: revisionId('rev-stream-race'),
+      tree: baseTree(),
+    });
+    workspace.filesystem.readFileStream?.('main.ts');
+    workspace.filesystem.dispose();
+    let destroyed = false;
+    const destroyWorkspace = async (): Promise<void> => {
+      destroyed = await authority.destroy(workspaceId);
+    };
+    const destroy = destroyWorkspace();
+    await Promise.resolve();
+    expect(destroyed).toBe(false);
+    releaseCancellation?.();
+    await destroy;
+    expect(destroyed).toBe(true);
+  });
+
+  it('preserves a source read failure when stream cleanup also rejects', async () => {
+    const { authority } = harness({
+      wrap: (filesystem) => ({
+        ...filesystem,
+        readFileStream: () =>
+          new ReadableStream<Uint8Array<ArrayBuffer>>({
+            pull() {
+              throw new Error('source read failed');
+            },
+            cancel() {
+              throw new Error('source cancel failed');
+            },
+          }),
+      }),
+    });
+    const workspace = await authority.materialize({
+      workspaceId: materializedWorkspaceId('stream-read-failure'),
+      baseRevisionId: revisionId('rev-stream-failure'),
+      tree: baseTree(),
+    });
+    const reader = workspace.filesystem.readFileStream?.('main.ts').getReader();
+    await expect(reader?.read()).rejects.toThrow('source read failed');
+  });
+
+  it('refuses destructive removal when stream cancellation fails', async () => {
+    const { authority } = harness({
+      wrap: (filesystem) => ({
+        ...filesystem,
+        readFileStream: () =>
+          new ReadableStream<Uint8Array<ArrayBuffer>>({
+            cancel() {
+              throw new Error('descriptor cleanup failed');
+            },
+          }),
+      }),
+    });
+    const workspaceId = materializedWorkspaceId('stream-cancel-failure');
+    const workspace = await authority.materialize({
+      workspaceId,
+      baseRevisionId: revisionId('rev-stream-cancel-failure'),
+      tree: baseTree(),
+    });
+    workspace.filesystem.readFileStream?.('main.ts');
+    workspace.filesystem.dispose();
+
+    await expect(authority.destroy(workspaceId)).rejects.toThrow(
+      'Cannot destroy a workspace before every stream is closed.',
+    );
+    await expect(authority.destroy(workspaceId)).rejects.toThrow('Cannot destroy a workspace');
   });
 
   it('destroys a workspace whose tree gains a late child between listing and removal', async () => {

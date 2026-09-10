@@ -106,6 +106,7 @@ export type {
   MaterializedWorkspaceErrorCode,
   MaterializedWorkspaceIdentity,
   MaterializedWorkspaceMetrics,
+  MaterializedWorkspaceMode,
 } from '#materialized-workspace.js';
 export { materializedWorkspaceId } from '#workspace-identity.js';
 export type { MaterializedWorkspaceId } from '#workspace-identity.js';

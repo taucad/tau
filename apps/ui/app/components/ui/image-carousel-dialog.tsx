@@ -80,7 +80,8 @@ function ImageCarouselDialog({
   const currentItem = items[clampedActiveIndex];
   const currentDownloadName = currentItem ? getDownloadName(currentItem, clampedActiveIndex) : undefined;
   const carouselOptions = React.useMemo(
-    () => ({ loop: hasMultipleItems, startIndex: clampedInitialIndex }),
+    // Duration 0 makes prev/next and arrow keys jump instantly instead of sliding.
+    () => ({ duration: 0, loop: hasMultipleItems, startIndex: clampedInitialIndex }),
     [clampedInitialIndex, hasMultipleItems],
   );
   const canUseDocument = isOpen && typeof document !== 'undefined';
@@ -208,7 +209,7 @@ function ImageCarouselDialog({
           }
         }}
         className={cn(
-          'z-101! flex h-[80vh]! max-h-none! w-auto! max-w-[90vw]! items-center justify-center overflow-visible rounded-none border-0 bg-transparent p-0 shadow-none *:data-[slot=dialog-close]:hidden max-md:w-[90vw]',
+          'z-101! pointer-events-none flex h-[80vh]! max-h-none! w-auto! max-w-[90vw]! items-center justify-center overflow-visible rounded-none border-0 bg-transparent p-0 shadow-none *:data-[slot=dialog-close]:hidden max-md:w-[90vw]',
           contentClassName,
         )}
       >
@@ -219,19 +220,20 @@ function ImageCarouselDialog({
         <Carousel
           ref={carouselReference}
           aria-label='Image preview carousel'
-          className='flex h-full w-full min-w-0 flex-col outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset'
+          className='flex h-full w-full min-w-0 flex-col outline-none'
           opts={carouselOptions}
           setApi={setCarouselApi}
           tabIndex={0}
         >
           <div className='relative flex min-h-0 flex-1 items-center justify-center overflow-hidden'>
-            <CarouselContent className='h-full items-center'>
+            <CarouselContent className='ml-0 h-full items-center'>
               {items.map((item, index) => (
                 <CarouselItem key={item.id} className='flex h-full items-center justify-center pl-0'>
                   <div className='relative flex h-full w-full items-center justify-center'>
+                    {/* Only the image takes clicks; the rest of the dialog falls through to the closing backdrop. */}
                     <img
                       alt={item.alt}
-                      className='max-h-[80vh] max-w-[90vw] rounded-lg object-contain'
+                      className='pointer-events-auto max-h-[80vh] max-w-[90vw] rounded-lg object-contain'
                       loading='eager'
                       src={item.src}
                       onError={() => {

@@ -82,7 +82,7 @@ export const ChatTextareaImageStrip = memo(function ({
                 className={cn(
                   'absolute top-1 right-1 z-10 flex size-5 items-center justify-center',
                   'rounded-full border bg-background text-muted-foreground',
-                  'outline-none hover:text-destructive focus-visible:ring-2 focus-visible:ring-ring',
+                  'outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring',
                 )}
                 aria-label={`Remove uploaded image ${index + 1}`}
                 onPointerDown={(event) => {

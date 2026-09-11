@@ -14,16 +14,23 @@ const logDirectory = (): string => mkdtempSync(join(tmpdir(), 'tau-diagnostics-'
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
 });
 
 describe('createDiagnosticsLog', () => {
   it('should format console levels like the API while keeping the file plain and detailed', () => {
+    vi.stubEnv('TAU_DEBUG', 'true');
     const debug = vi.spyOn(console, 'debug').mockImplementation(() => undefined);
     const info = vi.spyOn(console, 'log').mockImplementation(() => undefined);
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    const log = createDiagnosticsLog({ directory: logDirectory(), producer: 'tau-desktop:test' });
-    const detail = { message: 'module evaluated', source: 'http://localhost:3001/worker.ts', line: 7 };
+    const log = createDiagnosticsLog({ directory: logDirectory() });
+    const hash = '050cd13ce2b252a2dcd93bdad7d42eee9719a2de31953aca8c9e4589fa65395d';
+    const detail = {
+      message: `[Kernel:worker] cache computed for ${hash}`,
+      source: 'http://localhost:3001/worker.ts',
+      line: 7,
+    };
 
     log.log('debug', 'renderer.console', detail);
     log.log('info', 'renderer.console', detail);
@@ -38,16 +45,39 @@ describe('createDiagnosticsLog', () => {
       expect.stringContaining('\u001B[31mERROR\u001B[39m:'),
     ]);
     for (const output of outputs) {
-      expect(output).toMatch(/^\[tau-desktop:test\] \[\d{2}:\d{2}:\d{2}\.\d{3}\]/u);
-      expect(output).toContain('\u001B[1m\u001B[33m[renderer.console] \u001B[0mmodule evaluated');
+      expect(output).toMatch(/^\[desktop\] \[\d{2}:\d{2}:\d{2}\.\d{3}\]/u);
+      expect(output).toContain('[Kernel:worker] cache computed for 050cd13c…');
+      expect(output).not.toContain('[renderer.console]');
+      expect(output).not.toContain(hash);
       expect(output).not.toContain('localhost');
     }
 
     const file = readFileSync(log.filePath, 'utf8');
     expect(file).toContain(
-      'DEBUG renderer.console {"message":"module evaluated","source":"http://localhost:3001/worker.ts","line":7}',
+      `DEBUG renderer.console {"message":"[Kernel:worker] cache computed for ${hash}","source":"http://localhost:3001/worker.ts","line":7}`,
     );
     expect(file).not.toContain('\u001B');
+  });
+
+  it('should hide debug and collapse consecutive duplicate terminal records without dropping file records', () => {
+    const debug = vi.spyOn(console, 'debug').mockImplementation(() => undefined);
+    const info = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const log = createDiagnosticsLog({ directory: logDirectory(), producer: 'services' });
+
+    log.log('debug', 'services.starting');
+    log.log('warn', 'renderer.console', { message: 'duplicate warning' });
+    log.log('warn', 'renderer.console', { message: 'duplicate warning' });
+    log.log('warn', 'renderer.console', { message: 'duplicate warning' });
+    log.log('info', 'services.agent-host-served');
+
+    expect(debug).not.toHaveBeenCalled();
+    expect(warn.mock.calls.map(([message]) => String(message))).toEqual([
+      expect.stringContaining('duplicate warning'),
+      expect.stringContaining('↳ repeated ×2'),
+    ]);
+    expect(String(info.mock.calls[0]?.[0])).toContain('[agent-host-served]');
+    expect(readFileSync(log.filePath, 'utf8').match(/duplicate warning/gu)).toHaveLength(3);
   });
 
   it('records level, event, and detail on one line', () => {

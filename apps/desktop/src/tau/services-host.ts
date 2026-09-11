@@ -27,9 +27,7 @@ if (!parentPort) {
  * stdout. Absent the directory the default console sink still applies. */
 const logDirectory = process.env['TAU_DESKTOP_LOG_DIR'];
 const diagnostics =
-  logDirectory === undefined
-    ? undefined
-    : createDiagnosticsLog({ directory: logDirectory, producer: 'tau-desktop:services' });
+  logDirectory === undefined ? undefined : createDiagnosticsLog({ directory: logDirectory, producer: 'services' });
 const pendingRuntimePorts = new Map<
   string,
   {
@@ -126,4 +124,4 @@ parentPort.on('message', (message) => {
 });
 
 // oxlint-disable-next-line no-console -- startup trace, forwarded to userData/logs
-console.log(`[tau-desktop:services] started node=${process.versions.node}`);
+console.log(`[services] started node=${process.versions.node}`);

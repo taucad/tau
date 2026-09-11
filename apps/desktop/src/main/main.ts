@@ -138,10 +138,10 @@ if (process.platform === 'win32') {
 }
 
 process.on('uncaughtException', (error) => {
-  console.error('[tau-desktop:main] uncaughtException', error);
+  console.error('[desktop] uncaughtException', error);
 });
 process.on('unhandledRejection', (reason) => {
-  console.error('[tau-desktop:main] unhandledRejection', reason);
+  console.error('[desktop] unhandledRejection', reason);
 });
 
 app.on('window-all-closed', () => {
@@ -810,7 +810,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
 /* oxlint-disable promise/prefer-await-to-then, unicorn/prefer-top-level-await -- see comment above */
 if (ownsSingleInstanceLock) {
   bootstrapElectronApp().catch((error: unknown) => {
-    console.error('[tau-desktop:main] bootstrap failed', error);
+    console.error('[desktop] bootstrap failed', error);
     app.exit(1);
   });
 } else {

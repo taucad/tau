@@ -63,7 +63,7 @@ const recordEngineIdentity = async (): Promise<void> => {
   try {
     const definition = await resolveRuntimePluginDefinition('kernel', desktopOpenrscadKernel);
     const { backend } = await import('@taulabs/openrscad-engine');
-    createDiagnosticsLog({ directory, producer: 'tau-desktop:kernel' }).log(
+    createDiagnosticsLog({ directory, producer: 'kernel' }).log(
       'info',
       kernelEngineEvent,
       kernelEngineRecord({
@@ -75,7 +75,7 @@ const recordEngineIdentity = async (): Promise<void> => {
     );
   } catch (error) {
     // oxlint-disable-next-line no-console -- the diagnostics sink is what failed
-    console.error('[tau-desktop:kernel] engine diagnostics failed', error);
+    console.error('[kernel] engine diagnostics failed', error);
   }
 };
 

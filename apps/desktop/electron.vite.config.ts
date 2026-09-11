@@ -22,6 +22,7 @@ const bundledWorkspaceDependencies = [
   '@taucad/replicad',
   '@taucad/rhino',
   '@taucad/runtime',
+  '@taucad/skills',
   '@taucad/zoo',
   'pino-pretty',
   'zod',

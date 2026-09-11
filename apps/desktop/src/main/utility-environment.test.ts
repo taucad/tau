@@ -14,8 +14,9 @@ describe('utilityEnvironment', () => {
         TMPDIR: '/tmp',
         LANG: 'en_NZ.UTF-8',
         NODE_ENV: 'production',
+        TAU_DEBUG: 'true',
       }),
-    ).toEqual({ PATH: '/usr/bin', TMPDIR: '/tmp', LANG: 'en_NZ.UTF-8', NODE_ENV: 'production' });
+    ).toEqual({ PATH: '/usr/bin', TMPDIR: '/tmp', LANG: 'en_NZ.UTF-8', NODE_ENV: 'production', TAU_DEBUG: 'true' });
   });
 
   it('drops everything that changes what the child is, or leaks a secret into it', () => {

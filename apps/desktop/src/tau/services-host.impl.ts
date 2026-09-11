@@ -23,7 +23,6 @@
  */
 
 import { randomBytes, randomUUID } from 'node:crypto';
-import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:http';
 import type { Server } from 'node:http';
 import { isAbsolute, resolve, sep } from 'node:path';
@@ -43,6 +42,7 @@ import { createHostGeoSpecRunner, createHostToolRegistry } from '@taucad/host/ag
 import type { HostGeoSpecRuntimeClient } from '@taucad/host/agent-tools';
 import { createRuntimeClient } from '@taucad/runtime/client';
 import { electronUtilityMainTransport } from '@taucad/runtime/electron/renderer';
+import { systemSkillBundles } from '@taucad/skills/resources';
 
 import type { createDesktopRuntime } from '#tau/desktop-runtime.factory.js';
 
@@ -130,7 +130,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     options.log ??
     ((event: string, detail?: unknown): void => {
       // oxlint-disable-next-line no-console -- forwarded to userData/logs through main's stdio
-      console.log(`[tau-desktop:services] ${event}${detail === undefined ? '' : ` ${JSON.stringify(detail)}`}`);
+      console.log(`[services] ${event}${detail === undefined ? '' : ` ${JSON.stringify(detail)}`}`);
     });
   const { requestRuntimePort, runtimeContext } = options;
   const serve = options.serve ?? serveNodeFsProvider;
@@ -378,10 +378,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     const toolRegistry = createHostToolRegistry({
       workspaceRoot,
       checkouts,
-      /* This app declares every kernel plugin; `@taucad/host` declares none of
-       * them, so resolving from the host's own module finds one skill owner out
-       * of nine. The base has to come from here. */
-      resolveSkillSubpath: (subpath) => fileURLToPath(import.meta.resolve(subpath)),
+      systemSkillBundles,
       /* Rooted per run, exactly as the daemon does it: a candidate turn's kernel
        * and GeoSpec tools read the checkout its file tools write, because the
        * checkout was registered with main as a runtime context above. */

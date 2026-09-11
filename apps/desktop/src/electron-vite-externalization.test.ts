@@ -104,6 +104,7 @@ describe('electron-vite main externalization', () => {
       '@taucad/filesystem',
       '@taucad/agent-host',
       '@taucad/host/agent-tools',
+      '@taucad/skills/resources',
       'pino-pretty',
     ]) {
       // oxlint-disable-next-line eslint/no-await-in-loop -- one resolved config, cheap predicate

@@ -37,6 +37,7 @@
     "@taucad/replicad": "workspace:*",
     "@taucad/rhino": "workspace:*",
     "@taucad/runtime": "workspace:*",
+    "@taucad/skills": "workspace:*",
     "@taucad/zoo": "workspace:*",
     "@taulabs/openrscad-engine": "catalog:",
     "esbuild": "catalog:",

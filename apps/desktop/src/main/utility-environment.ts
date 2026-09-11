@@ -132,6 +132,8 @@ export const utilityEnvironmentNames = [
   'NODE_ENV',
   /* Opt-in frame tracing across every Tau process; absent unless the operator sets it. */
   'TAU_ELECTRON_DEBUG',
+  /* Opt-in debug logging across main and utility processes. */
+  'TAU_DEBUG',
   'TAU_BUILD123D_RESOURCE_ROOT',
   'TAU_PICOGK_RESOURCE_ROOT',
 ] as const;

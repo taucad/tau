@@ -1,9 +1,8 @@
 import type { GrepRpcInput, GrepRpcResult } from '#schemas/rpc.schema.js';
 import type { RpcFileSystem } from '#rpc/rpc-dependencies.js';
 import { toRpcError } from '#rpc/rpc-error.js';
-import { assertRootedPath } from '@taucad/utils/path';
+import { assertRootedPath, joinRelativePath } from '@taucad/utils/path';
 import { rpcClientErrorCode } from '#schemas/rpc.schema.js';
-import { joinRelativePath } from '@taucad/utils/path';
 
 /**
  * Default `headLimit` when the caller omits one. Mirrors claude-code's
@@ -19,7 +18,11 @@ const defaultGrepHeadLimit = 50;
  */
 const maxGrepLineChars = 500;
 
-async function collectFilePaths(fileSystem: RpcFileSystem, basePath: string): Promise<string[]> {
+async function collectFilePaths(
+  fileSystem: RpcFileSystem,
+  basePath: string,
+  includeExplicitOnly: boolean,
+): Promise<string[]> {
   const paths: string[] = [];
   const entries = await fileSystem.readdir(basePath);
 
@@ -27,9 +30,9 @@ async function collectFilePaths(fileSystem: RpcFileSystem, basePath: string): Pr
     const fullPath = joinRelativePath(basePath, entry.name);
     if (entry.type === 'file') {
       paths.push(fullPath);
-    } else {
+    } else if (includeExplicitOnly || entry.traverseOnImplicitSearch !== false) {
       // oxlint-disable-next-line no-await-in-loop -- recursive traversal
-      const subPaths = await collectFilePaths(fileSystem, fullPath);
+      const subPaths = await collectFilePaths(fileSystem, fullPath, includeExplicitOnly);
       paths.push(...subPaths);
     }
   }
@@ -48,10 +51,11 @@ async function resolveSearchPaths(fileSystem: RpcFileSystem, basePath: string): 
   // FILE_NOT_FOUND when the caller types a wrong path (no thrown
   // `Grep search failed` exception, mirrors claude-code's GrepTool.validateInput).
   if (basePath === '') {
-    return collectFilePaths(fileSystem, '');
+    return collectFilePaths(fileSystem, '', false);
   }
   const stat = await fileSystem.stat(basePath);
-  return stat.isDirectory ? collectFilePaths(fileSystem, basePath) : [basePath];
+  const explicitlyScopedToSkills = basePath === '.agents/skills' || basePath.startsWith('.agents/skills/');
+  return stat.isDirectory ? collectFilePaths(fileSystem, basePath, explicitlyScopedToSkills) : [basePath];
 }
 
 /** @public */

@@ -200,7 +200,7 @@ Check \`<project_layout>\` for existing files. Read before editing.${tddNote}
     name: 'output_efficiency',
     cacheBreak: false,
     compute: () => `<output_efficiency>
-Length limits: keep text between tool calls to <=25 words. Keep final responses to <=100 words unless the task requires more detail.
+Length limits: keep text between tool calls to <=25 words. Keep final responses concise, but fully answer the user's request.
 </output_efficiency>`,
   });
 

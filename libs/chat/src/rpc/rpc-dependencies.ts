@@ -37,6 +37,8 @@ export type RpcDirectoryEntry =
       type: 'dir';
       size: number;
       modifiedAt?: string;
+      /** False for virtual directories that recursive project-wide search must skip. */
+      traverseOnImplicitSearch?: boolean;
     }
   | ({
       name: string;

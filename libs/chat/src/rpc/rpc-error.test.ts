@@ -33,6 +33,11 @@ describe('getErrorCode', () => {
       expect(getErrorCode(error)).toBe(rpcClientErrorCode.permissionDenied);
     });
 
+    it('should map EROFS to PERMISSION_DENIED', () => {
+      const error = makeErrnoError('Read-only file system', 'EROFS');
+      expect(getErrorCode(error)).toBe(rpcClientErrorCode.permissionDenied);
+    });
+
     it('should fall through to message matching for unknown errno codes', () => {
       const error = makeErrnoError('Connection refused', 'ECONNREFUSED');
       expect(getErrorCode(error)).toBe(rpcClientErrorCode.ioError);

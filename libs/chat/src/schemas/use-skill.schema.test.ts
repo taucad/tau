@@ -18,6 +18,8 @@ describe('use_skill schemas', () => {
       skillPath: '.agents/skills/woodworking/SKILL.md',
       baseDirectory: '.agents/skills/woodworking',
       source: 'user',
+      version: '1.0.0',
+      whenToUse: 'Use for joinery.',
       fingerprint: 'abc123',
       frontmatter: { name: 'woodworking' },
       content: '# Woodworking\n\nNo read_file gutters here.',
@@ -25,6 +27,8 @@ describe('use_skill schemas', () => {
     });
 
     expect(input.skillName).toBe('woodworking');
+    expect(output.version).toBe('1.0.0');
+    expect(output.whenToUse).toBe('Use for joinery.');
     expect(output.content).not.toContain('\t# Woodworking');
   });
 

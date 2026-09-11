@@ -1,9 +1,8 @@
 import type { GlobSearchRpcInput, GlobSearchRpcResult } from '#schemas/rpc.schema.js';
 import type { RpcFileSystem } from '#rpc/rpc-dependencies.js';
 import { toRpcError } from '#rpc/rpc-error.js';
-import { assertRootedPath } from '@taucad/utils/path';
+import { assertRootedPath, joinRelativePath } from '@taucad/utils/path';
 import type { FileContentMetadata } from '@taucad/types';
-import { joinRelativePath } from '@taucad/utils/path';
 
 type GlobSearchEntry = Extract<GlobSearchRpcResult, { success: true }>['entries'][number];
 
@@ -14,7 +13,11 @@ type CollectedEntry = {
   modifiedAt?: string;
 } & FileContentMetadata;
 
-async function collectFileEntries(fileSystem: RpcFileSystem, basePath: string): Promise<CollectedEntry[]> {
+async function collectFileEntries(
+  fileSystem: RpcFileSystem,
+  basePath: string,
+  includeExplicitOnly: boolean,
+): Promise<CollectedEntry[]> {
   const result: CollectedEntry[] = [];
   const entries = await fileSystem.readdir(basePath);
 
@@ -39,9 +42,9 @@ async function collectFileEntries(fileSystem: RpcFileSystem, basePath: string): 
           ...(entry.modifiedAt ? { modifiedAt: entry.modifiedAt } : {}),
         });
       }
-    } else {
+    } else if (includeExplicitOnly || entry.traverseOnImplicitSearch !== false) {
       // oxlint-disable-next-line no-await-in-loop -- recursive traversal
-      const subEntries = await collectFileEntries(fileSystem, fullPath);
+      const subEntries = await collectFileEntries(fileSystem, fullPath, includeExplicitOnly);
       result.push(...subEntries);
     }
   }
@@ -56,7 +59,8 @@ export async function handleGlobSearch(
 ): Promise<GlobSearchRpcResult> {
   try {
     const basePath = assertRootedPath(input.path ?? '');
-    const allEntries = await collectFileEntries(fileSystem, basePath);
+    const explicitlyScopedToSkills = basePath === '.agents/skills' || basePath.startsWith('.agents/skills/');
+    const allEntries = await collectFileEntries(fileSystem, basePath, explicitlyScopedToSkills);
 
     const { minimatch } = await import('minimatch');
     const matched = allEntries.filter((entry) => minimatch(entry.path, input.pattern, { matchBase: true }));

@@ -17,6 +17,7 @@ const errnoToRpcCode: Record<string, RpcClientErrorCode> = {
   ENOENT: rpcClientErrorCode.fileNotFound,
   EACCES: rpcClientErrorCode.permissionDenied,
   EPERM: rpcClientErrorCode.permissionDenied,
+  EROFS: rpcClientErrorCode.permissionDenied,
 };
 /* eslint-enable @typescript-eslint/naming-convention -- end POSIX errno block */
 

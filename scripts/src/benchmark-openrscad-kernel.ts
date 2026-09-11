@@ -1,5 +1,10 @@
 #!/usr/bin/env -S pnpm tsx
-// Benchmark Tau's native OpenRSCAD artifact path and native-handle reuse.
+// Benchmark Tau's OpenRSCAD artifact path and native-handle reuse.
+//
+// One kernel, whichever payload `@taulabs/openrscad-engine` bound for this host
+// (the addon under Node when a platform package matches; its WebAssembly build
+// otherwise). Backend-to-backend comparison is not this script's job — that is
+// `apps/runtime-e2e/src/benchmarks/native-speedup.bench.test.ts`.
 
 /* oxlint-disable no-await-in-loop -- Interleaved benchmark samples must execute serially. */
 /* oxlint-disable typescript/no-unsafe-assignment -- Dynamic kernel definitions erase handle/context types. */
@@ -16,15 +21,15 @@ import type { AnyKernelDefinition, KernelRuntime } from '@taucad/runtime/kernel'
 const parseArgs = (args: string[]) => {
   if (args.includes('--help') || args.includes('-h')) {
     console.log(`
-OpenRSCAD Native Kernel Benchmark
+OpenRSCAD Kernel Benchmark
 
 Usage:
-  pnpm tsx scripts/src/benchmark-openrscad-native-kernel.ts [options]
+  pnpm tsx scripts/src/benchmark-openrscad-kernel.ts [options]
 
 Options:
       --corpus <dir>   Add every .scad file below a corpus directory
       --report <file>  JSON report path
-                       (default: out/reports/benchmarks/openrscad-native-kernel/native-kernel-results.json)
+                       (default: out/reports/benchmarks/openrscad-kernel/kernel-results.json)
       --samples <n>    Samples per case (default: 30)
   -h, --help           Show this help message
 `);
@@ -32,7 +37,7 @@ Options:
   }
   const result = {
     corpus: undefined as string | undefined,
-    report: resolve('out/reports/benchmarks/openrscad-native-kernel/native-kernel-results.json'),
+    report: resolve('out/reports/benchmarks/openrscad-kernel/kernel-results.json'),
     samples: 30,
   };
   for (let index = 0; index < args.length; index += 1) {

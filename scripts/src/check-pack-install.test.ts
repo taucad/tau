@@ -1,5 +1,8 @@
-import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import type { Manifest } from '#check-pack-install.js';
@@ -10,9 +13,37 @@ import {
   isToleratedImportFailure,
   manifestViolations,
   requiredArtifactPaths,
+  probeSource,
 } from '#check-pack-install.js';
 
 const repositoryRoot = fileURLToPath(new URL('../..', import.meta.url));
+
+it('loads JSON and documentation assets without suppressing broken modules or missing assets', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'tau-pack-probe-'));
+  try {
+    writeFileSync(join(directory, 'schema.json'), '{"type":"object"}');
+    writeFileSync(join(directory, 'agent.md'), '# Plugin instructions');
+    writeFileSync(join(directory, 'invalid.json'), '{');
+    writeFileSync(join(directory, 'broken.mjs'), 'throw new Error("module failure");');
+    writeFileSync(join(directory, 'probe.mjs'), probeSource);
+    writeFileSync(
+      join(directory, 'probe-plan.json'),
+      JSON.stringify({
+        specifiers: ['./schema.json', './agent.md', './invalid.json', './missing.md', './broken.mjs'],
+        instantiations: {},
+      }),
+    );
+    const result = spawnSync(process.execPath, ['probe.mjs'], { cwd: directory, encoding: 'utf8' });
+    expect(result.status, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual([
+      expect.objectContaining({ specifier: './invalid.json' }),
+      expect.objectContaining({ specifier: './missing.md', code: 'ENOENT' }),
+      expect.objectContaining({ specifier: './broken.mjs', message: 'module failure' }),
+    ]);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
 
 const readManifest = (packageDirectory: string): Manifest =>
   JSON.parse(readFileSync(join(repositoryRoot, packageDirectory, 'package.json'), 'utf8')) as Manifest & {

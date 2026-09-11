@@ -502,6 +502,9 @@ const internalImportsExceptions: Readonly<Record<string, Readonly<Record<string,
     '#e2e/*.js': 'browser-engine harness outside src/; relative imports are banned workspace-wide',
     '#experiments/*.js': 'load-path experiments outside src/; relative imports are banned workspace-wide',
   },
+  '@taucad/openrscad': {
+    '#e2e/*.js': 'browser USDZ harness outside src/; relative imports are banned workspace-wide',
+  },
   '@taucad/tau-examples': {
     '#scripts/*.js': 'thumbnail/manifest generators outside src/; relative imports are banned workspace-wide',
   },
@@ -625,7 +628,7 @@ const vendoredAssetReasons: Readonly<Record<string, Readonly<Record<string, stri
   '@taucad/rhino': {
     'node_modules/rhino3dm/rhino3dm.wasm': 'rhino3dm declares no exports field, so the deep path is the only address',
   },
-  '@taucad/ui': {
+  '@taucad/app': {
     '../../node_modules/geist/dist/fonts/geist-sans/Geist-Variable.woff2':
       'geist exports only ./font* JS entries, never the raw font files',
     '../../node_modules/geist/dist/fonts/geist-mono/GeistMono-Variable.woff2':

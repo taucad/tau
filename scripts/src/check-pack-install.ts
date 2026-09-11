@@ -257,7 +257,8 @@ const runRuntimeQuickStart = (appRoot: string, installedRoot: string): void => {
   console.log(`README quick start: ${quickStartOutput}`);
 };
 
-const probeSource = `
+/** Installed-consumer probe: load modules and JSON; resolve and read exported documentation. */
+export const probeSource = `
 import { readFileSync } from 'node:fs';
 
 const plan = JSON.parse(readFileSync(new URL('./probe-plan.json', import.meta.url), 'utf8'));
@@ -272,7 +273,14 @@ const record = (specifier, error) => {
 
 for (const specifier of plan.specifiers) {
   try {
-    await import(specifier);
+    const url = new URL(import.meta.resolve(specifier));
+    if (url.pathname.endsWith('.json')) {
+      await import(specifier, { with: { type: 'json' } });
+    } else if (url.pathname.endsWith('.md')) {
+      readFileSync(url, 'utf8');
+    } else {
+      await import(specifier);
+    }
   } catch (error) {
     record(specifier, error);
   }

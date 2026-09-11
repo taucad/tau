@@ -1,0 +1,60 @@
+{
+  "name": "@taucad/jobs-hatchet",
+  "version": "0.0.1",
+  "description": "Hatchet orchestration adapter for Tau durable jobs and daemon workers",
+  "type": "module",
+  "sideEffects": false,
+  "private": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taucad/tau.git",
+    "directory": "packages/jobs-hatchet"
+  },
+  "homepage": "https://github.com/taucad/tau/tree/main/packages/jobs-hatchet#readme",
+  "bugs": {
+    "url": "https://github.com/taucad/tau/issues"
+  },
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "keywords": [
+    "cad",
+    "typescript"
+  ],
+  "author": "Richard Fontein",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs",
+        "default": "./dist/index.mjs"
+      },
+      "./package.json": "./package.json"
+    },
+    "imports": {}
+  },
+  "imports": {
+    "#*.js": "./src/*.ts",
+    "#*": "./src/*"
+  },
+  "dependencies": {
+    "@hatchet-dev/typescript-sdk": "catalog:",
+    "@taucad/jobs": "workspace:*"
+  },
+  "devDependencies": {
+    "@taucad/cache-core": "workspace:*"
+  }
+}

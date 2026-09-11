@@ -20,6 +20,7 @@ import type { HostMcpEndpoint } from '#mcp-server.js';
 import { startRunReporter } from '#run-reporter.js';
 import type { RunReporter } from '#run-reporter.js';
 import { createHostToolRegistry } from '#agent-tools.js';
+import type { HostSystemSkillBundle } from '#agent-tools.js';
 import { hostControlInboundSchema, pairingResponseSchema, pairingTokenResponseSchema } from '#host.schemas.js';
 import type { HostControlInbound, HostControlOutbound } from '#host.schemas.js';
 import { readHostCredential, removeHostCredential, writeHostCredential } from '#credential-store.js';
@@ -164,14 +165,8 @@ export type HostDaemonOptions = {
   readonly agent?: HostDaemonAgentOptions;
   readonly maxSessions?: number;
   readonly onEvent?: (event: HostDaemonEvent) => void;
-  /**
-   * Resolves a package subpath from the embedding application's module graph,
-   * for the system-skill catalogue. See
-   * {@link HostToolRegistryOptions.resolveSkillSubpath} — a daemon composed by
-   * an app that declares the kernel plugins must pass its own base, because
-   * this package declares none of them.
-   */
-  readonly resolveSkillSubpath?: (subpath: string) => string;
+  /** Package-owned skills supplied by the embedding application. */
+  readonly systemSkillBundles?: readonly HostSystemSkillBundle[];
 };
 
 /** Final daemon closure result. @public */
@@ -541,7 +536,7 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
     const toolRegistry = createHostToolRegistry({
       workspaceRoot: agent.workspaceRoot,
       checkouts,
-      ...(options.resolveSkillSubpath === undefined ? {} : { resolveSkillSubpath: options.resolveSkillSubpath }),
+      ...(options.systemSkillBundles === undefined ? {} : { systemSkillBundles: options.systemSkillBundles }),
       /* Per root, not per host: a candidate turn's kernel must read the tree
        * that turn is writing, which is its checkout and not the project. */
       runtimeClient: async (root) => ensureAgentRuntime(root),
@@ -608,7 +603,6 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
     const launcher = withTurnRevisions(base, {
       workspaceRoot: agent.workspaceRoot,
       checkouts,
-      ...(options.resolveSkillSubpath === undefined ? {} : { resolveSkillSubpath: options.resolveSkillSubpath }),
       /* A turn that ran but could not be recorded is a warning, never a
        * fatal: the run itself is already durable in its own log, and a host
        * that stopped answering over a settlement failure would lose the next

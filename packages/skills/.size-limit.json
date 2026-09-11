@@ -1,0 +1,7 @@
+[
+  {
+    "name": "published ESM entry points",
+    "path": "dist/**/*.mjs",
+    "limit": "3 kB"
+  }
+]

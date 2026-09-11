@@ -283,7 +283,7 @@ function BreadcrumbNav({
         <button
           type='button'
           className={cn(
-            'my-1.5 shrink-0 snap-start rounded-xs px-1 py-0.5 hover:bg-muted',
+            'my-1 shrink-0 snap-start rounded-xs px-1 py-0.5 hover:bg-muted',
             currentPath === '' && 'font-medium text-foreground',
             currentPath !== '' && 'text-muted-foreground',
           )}
@@ -297,7 +297,7 @@ function BreadcrumbNav({
         {crumbs.map((crumb, index) => {
           const isLast = index === crumbs.length - 1;
           return (
-            <div key={crumb.path} className='my-1.5 flex shrink-0 snap-start items-center gap-0.5'>
+            <div key={crumb.path} className='my-1 flex shrink-0 snap-start items-center gap-0.5'>
               <ChevronRight className='size-3 text-muted-foreground' />
               <button
                 ref={isLast ? currentCrumbRef : undefined}
@@ -716,7 +716,10 @@ export function FileSelector({
   );
 
   const content = (
-    <Command shouldFilter={false} className='flex flex-col'>
+    <Command
+      shouldFilter={false}
+      className='flex flex-col [&_[data-slot=command-input-wrapper]]:px-2 [&_[data-slot=command-input-wrapper]]:py-1'
+    >
       <BreadcrumbNav currentPath={currentPath} onNavigate={handleNavigate} />
       <CommandInput placeholder={searchPlaceholder} value={searchQuery} onValueChange={setSearchQuery} />
       <CommandList className='max-h-[300px] scroll-shadows-y'>

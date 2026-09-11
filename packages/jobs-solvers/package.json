@@ -1,0 +1,66 @@
+{
+  "name": "@taucad/jobs-solvers",
+  "version": "0.0.1",
+  "description": "OpenFOAM and CalculiX job providers for Tau engineering workloads",
+  "type": "module",
+  "sideEffects": false,
+  "private": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taucad/tau.git",
+    "directory": "packages/jobs-solvers"
+  },
+  "homepage": "https://github.com/taucad/tau/tree/main/packages/jobs-solvers#readme",
+  "bugs": {
+    "url": "https://github.com/taucad/tau/issues"
+  },
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "keywords": [
+    "cad",
+    "typescript"
+  ],
+  "author": "Richard Fontein",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "test:docker-integration": "TAU_SOLVER_DOCKER_INTEGRATION=1 vitest run src/docker.integration.test.ts"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./definitions": "./src/definitions/index.ts",
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs",
+        "default": "./dist/index.mjs"
+      },
+      "./definitions": {
+        "types": "./dist/definitions/index.d.mts",
+        "import": "./dist/definitions/index.mjs",
+        "default": "./dist/definitions/index.mjs"
+      },
+      "./package.json": "./package.json"
+    },
+    "imports": {}
+  },
+  "imports": {
+    "#*.js": "./src/*.ts",
+    "#*": "./src/*"
+  },
+  "dependencies": {
+    "@taucad/cache-core": "workspace:*",
+    "@taucad/jobs": "workspace:*"
+  }
+}

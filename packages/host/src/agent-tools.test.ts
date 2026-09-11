@@ -13,6 +13,7 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -23,6 +24,7 @@ import type { GeoSpecRunner } from 'geospec/runner/worker';
 import type { HashedGeometryResult } from '@taucad/runtime/types';
 
 import * as agentToolsRegistry from '@taucad/agent-tools/registry';
+import type { SystemSkillBundle } from '@taucad/agent-tools/registry';
 
 import { createHostToolRegistry } from '#agent-tools.js';
 import type { HostExportFile, HostRuntimeClient } from '#agent-tools.js';
@@ -49,6 +51,47 @@ const withSkill = async (root: string, slug: string, description: string): Promi
     'utf8',
   );
   return directory;
+};
+
+const makeSystemSkill = async (): Promise<SystemSkillBundle> => {
+  const root = await mkdtemp(join(tmpdir(), 'tau-system-skill-'));
+  roots.push(root);
+  const skillMarkdown =
+    '---\nname: cad-test\ndescription: Test package skill\nversion: 1.0.0\nenabled: true\n---\n\n# System skill\n';
+  const apiIndex = 'cylinder(h, r | r1,r2 | d, center=false)\n';
+  await Promise.all([
+    writeFile(join(root, 'SKILL.md'), skillMarkdown, 'utf8'),
+    writeFile(join(root, 'api-index.md'), apiIndex, 'utf8'),
+  ]);
+  return {
+    slug: 'cad-test',
+    name: 'CAD Test',
+    description: 'Test package skill',
+    version: '1.0.0',
+    whenToUse: 'Use in this test.',
+    body: skillMarkdown,
+    fingerprint: 'bundle-fingerprint',
+    files: [
+      {
+        path: 'SKILL.md',
+        url: pathToFileURL(join(root, 'SKILL.md')).href,
+        byteLength: Buffer.byteLength(skillMarkdown),
+        lineCount: 1,
+        contentKind: 'text',
+        mediaType: 'text/markdown',
+        sha256: '0'.repeat(64),
+      },
+      {
+        path: 'api-index.md',
+        url: pathToFileURL(join(root, 'api-index.md')).href,
+        byteLength: Buffer.byteLength(apiIndex),
+        lineCount: 1,
+        contentKind: 'text',
+        mediaType: 'text/markdown',
+        sha256: '1'.repeat(64),
+      },
+    ],
+  };
 };
 
 const webpFile = (name: string): HostExportFile => ({
@@ -204,6 +247,41 @@ describe('createHostToolRegistry', () => {
     const result = await invoke(registry, 'use_skill', { skillName: 'bracket-design' });
     expect(result.isError).toBe(false);
     expect(JSON.stringify(result.content)).toContain('Bracket design rules');
+  });
+
+  it('projects injected package skills as lazy read-only files without polluting root search', async () => {
+    const workspaceRoot = await makeWorkspace();
+    const registry = createHostToolRegistry({
+      workspaceRoot,
+      systemSkillBundles: [await makeSystemSkill()],
+    });
+
+    const activated = await invoke(registry, 'use_skill', { skillName: 'cad-test' });
+    expect(activated.isError, JSON.stringify(activated)).toBe(false);
+    expect(JSON.stringify(activated.content)).toContain('.agents/skills/cad-test');
+    expect(JSON.stringify(activated.content)).toContain('api-index.md');
+
+    const read = await invoke(registry, 'read_file', {
+      targetFile: '.agents/skills/cad-test/api-index.md',
+    });
+    expect(read.isError).toBe(false);
+    expect(JSON.stringify(read.content)).toContain('cylinder(h, r | r1,r2 | d, center=false)');
+
+    const implicit = await invoke(registry, 'grep', { pattern: 'cylinder' });
+    expect(JSON.stringify(implicit.content)).not.toContain('api-index.md');
+    const explicit = await invoke(registry, 'grep', {
+      pattern: 'cylinder',
+      path: '.agents/skills/cad-test',
+    });
+    expect(JSON.stringify(explicit.content)).toContain('.agents/skills/cad-test/api-index.md');
+
+    const refused = await invoke(registry, 'edit_file', {
+      targetFile: '.agents/skills/cad-test/api-index.md',
+      oldString: 'cylinder',
+      newString: 'cube',
+    });
+    expect(refused.isError).toBe(true);
+    expect(JSON.stringify(refused.content)).toContain('PERMISSION_DENIED');
   });
 
   it('activates an installed Tau Store skill named by the plugin manifest', async () => {

@@ -2,7 +2,12 @@ import { ResourceQueue } from '@taucad/filesystem';
 import type { FileSystemProvider } from '@taucad/filesystem';
 import type { FileSystemBridgeProxy } from '@taucad/fs-bridge';
 import { toRpcError } from '@taucad/chat/rpc';
-import { createChatToolRegistry, createProviderRpcFileSystem } from '@taucad/agent-tools/registry';
+import {
+  createChatToolRegistry,
+  createProviderRpcFileSystem,
+  createSkillBundleRegistry,
+  createSkillResourceFileSystem,
+} from '@taucad/agent-tools/registry';
 import { createRuntimeAgentClients } from '@taucad/agent-tools/runtime';
 import type { RuntimeAgentClient } from '@taucad/agent-tools/runtime';
 import { createRuntimeClient } from '@taucad/runtime/client';
@@ -14,6 +19,7 @@ import { randomUuid } from '@taucad/utils/id';
 import { assertRootedPath } from '@taucad/utils/path';
 import { z } from 'zod';
 import { createGatewayModelTransport, createTauAgentHost } from '@taucad/agent-host';
+import { systemSkillBundles } from '@taucad/skills/resources';
 import type {
   AgentLiveEvent,
   AgentLogEvent,
@@ -78,6 +84,8 @@ type ProjectFileSystemBridge = Pick<
   | 'hello'
   | 'dispose'
 >;
+
+const systemSkillRegistry = createSkillBundleRegistry(systemSkillBundles);
 
 type LeaderBroadcast =
   | {
@@ -186,7 +194,9 @@ const supportsOpfsSyncAccess = async (): Promise<boolean> => {
     return false;
   }
   try {
-    const fileHandle = (await root.getFileHandle(probeName, { create: true })) as FileSystemFileHandle & {
+    const fileHandle = (await root.getFileHandle(probeName, {
+      create: true,
+    })) as FileSystemFileHandle & {
       createSyncAccessHandle?: () => Promise<{ close: () => void }>;
     };
     try {
@@ -493,7 +503,11 @@ const publishEvent = async (active: WorkerSession, chatId: string, event: AgentL
   if (!state) {
     return;
   }
-  const { endCursor } = await active.host.readEvents({ chatId, cursor: Number.MAX_SAFE_INTEGER, limit: 1 });
+  const { endCursor } = await active.host.readEvents({
+    chatId,
+    cursor: Number.MAX_SAFE_INTEGER,
+    limit: 1,
+  });
   channelFor(chatId).postMessage({
     ...broadcastBinding(active, chatId),
     type: 'cursor',
@@ -539,10 +553,20 @@ const openProjectEventLog = async (active: WorkerSession, chatId: string): Promi
               requireStoragePathSegment(active.providerBasePath, 'providerBasePath'),
               { create: false },
             );
-            const tau = await project.getDirectoryHandle('.tau', { create: true });
-            const chats = await tau.getDirectoryHandle('chats', { create: true });
-            const chat = await chats.getDirectoryHandle(chatPath, { create: true });
-            return await createOpfsEventLog({ fileHandle: await chat.getFileHandle('events.jsonl', { create: true }) });
+            const tau = await project.getDirectoryHandle('.tau', {
+              create: true,
+            });
+            const chats = await tau.getDirectoryHandle('chats', {
+              create: true,
+            });
+            const chat = await chats.getDirectoryHandle(chatPath, {
+              create: true,
+            });
+            return await createOpfsEventLog({
+              fileHandle: await chat.getFileHandle('events.jsonl', {
+                create: true,
+              }),
+            });
           } catch (error) {
             throw Object.assign(new Error(`Project event storage for ${chatId} is not writable.`), {
               code: 'STORAGE_NOT_WRITABLE',
@@ -740,7 +764,11 @@ const executeCommand = async (
       const completion = active.host.admit(
         command.trigger === 'submit'
           ? { ...base, trigger: 'submit' }
-          : { ...base, trigger: command.trigger, retainedMessageIds: command.retainedMessageIds },
+          : {
+              ...base,
+              trigger: command.trigger,
+              retainedMessageIds: command.retainedMessageIds,
+            },
       );
       return {
         type: 'result',
@@ -758,7 +786,10 @@ const executeCommand = async (
       };
     }
     case 'steer': {
-      await active.host.steer({ runId: command.runId, message: command.message });
+      await active.host.steer({
+        runId: command.runId,
+        message: command.message,
+      });
       break;
     }
     case 'cancel': {
@@ -771,7 +802,12 @@ const executeCommand = async (
     }
   }
   const snapshot: HostRunSnapshot = await active.host.snapshot(command.chatId);
-  return { type: 'result', requestId: command.requestId, operation: command.type, snapshot };
+  return {
+    type: 'result',
+    requestId: command.requestId,
+    operation: command.type,
+    snapshot,
+  };
 };
 
 const postForwardedResponse = async (options: {
@@ -813,7 +849,11 @@ const sendTailBatch = async (options: {
   if (!active || !state) {
     return;
   }
-  const batch = await active.host.readEvents({ chatId, cursor, limit: agentHostTailBatchLimit });
+  const batch = await active.host.readEvents({
+    chatId,
+    cursor,
+    limit: agentHostTailBatchLimit,
+  });
   channel.postMessage({
     ...broadcastBinding(active, chatId),
     type: 'tail',
@@ -967,7 +1007,13 @@ function channelFor(chatId: string): BroadcastChannel {
     if (message.type === 'tail-request' || message.type === 'tail-ack') {
       if (message.targetGeneration === state.lease.generation) {
         trackTask(
-          async () => sendTailBatch({ channel, targetId: message.senderId, chatId, cursor: message.cursor }),
+          async () =>
+            sendTailBatch({
+              channel,
+              targetId: message.senderId,
+              chatId,
+              cursor: message.cursor,
+            }),
           () => undefined,
         );
       }
@@ -1105,7 +1151,9 @@ const waitForForwardedResponse = async (
 const forwardCommand = async (command: AgentHostWorkerCommand): Promise<ForwardedResponse> => {
   const active = session;
   if (!active) {
-    throw Object.assign(new Error('Agent host worker is not initialized.'), { code: 'SESSION_NOT_INITIALIZED' });
+    throw Object.assign(new Error('Agent host worker is not initialized.'), {
+      code: 'SESSION_NOT_INITIALIZED',
+    });
   }
   const first = await waitForForwardedResponse(active, command, false);
   if (first) {
@@ -1115,7 +1163,10 @@ const forwardCommand = async (command: AgentHostWorkerCommand): Promise<Forwarde
     return first.type === 'attach'
       ? {
           ...first,
-          leadership: { role: 'follower', generation: first.leadership.generation },
+          leadership: {
+            role: 'follower',
+            generation: first.leadership.generation,
+          },
           takeover: false,
         }
       : first;
@@ -1136,7 +1187,10 @@ const forwardCommand = async (command: AgentHostWorkerCommand): Promise<Forwarde
   return replay.type === 'attach'
     ? {
         ...replay,
-        leadership: { role: 'follower', generation: replay.leadership.generation },
+        leadership: {
+          role: 'follower',
+          generation: replay.leadership.generation,
+        },
         takeover: false,
       }
     : replay;
@@ -1162,7 +1216,11 @@ const replayRecoveredBatch = async (options: {
     }
     if (leadership.has(chatId)) {
       // oxlint-disable-next-line no-await-in-loop -- Durable cursor windows must be replayed in order.
-      batch = await active.host.readEvents({ chatId, cursor: batch.nextCursor, limit: agentHostTailBatchLimit });
+      batch = await active.host.readEvents({
+        chatId,
+        cursor: batch.nextCursor,
+        limit: agentHostTailBatchLimit,
+      });
       continue;
     }
     if (followerGeneration) {
@@ -1206,7 +1264,12 @@ const recoverFollower = async (chatId: string): Promise<void> => {
   if (followerGeneration) {
     observeFollowerLeader(chatId, followerGeneration);
   }
-  await replayRecoveredBatch({ active, chatId, initial: response.batch, followerGeneration });
+  await replayRecoveredBatch({
+    active,
+    chatId,
+    initial: response.batch,
+    followerGeneration,
+  });
 };
 
 function scheduleFollowerRecovery(chatId: string): void {
@@ -1316,7 +1379,26 @@ const initialize = async (request: AgentHostWorkerInitializeRequest, sessionId: 
   });
   const toolRegistry = createChatToolRegistry({
     fileSystemFor: (signal) =>
-      createProviderRpcFileSystem({ provider: workspaceProvider, mutations: fileSystemMutations, signal }),
+      createSkillResourceFileSystem({
+        upper: createProviderRpcFileSystem({
+          provider: workspaceProvider,
+          mutations: fileSystemMutations,
+          signal,
+        }),
+        registry: systemSkillRegistry,
+        readResource: async (resource, { signal: resourceSignal }) => {
+          const response = await fetch(resource.url, {
+            signal: resourceSignal,
+          });
+          if (!response.ok) {
+            throw Object.assign(new Error(`Resource request failed with HTTP ${String(response.status)}.`), {
+              code: 'EIO',
+            });
+          }
+          return new Uint8Array(await response.arrayBuffer());
+        },
+        signal,
+      }),
     skillResolver,
     ...runtimeRpc,
     geospec: geoSpecClient,
@@ -1339,7 +1421,10 @@ const initialize = async (request: AgentHostWorkerInitializeRequest, sessionId: 
     systemPrompt: request.systemPrompt,
     systemPromptBlocks: request.systemPromptBlocks,
     model: request.model,
-    modelTransport: createGatewayModelTransport({ baseUrl: request.gatewayBaseUrl, model: request.model }),
+    modelTransport: createGatewayModelTransport({
+      baseUrl: request.gatewayBaseUrl,
+      model: request.model,
+    }),
     toolRegistry,
     openEventLog: async (chatId) => {
       if (!activeReference.current) {
@@ -1350,7 +1435,10 @@ const initialize = async (request: AgentHostWorkerInitializeRequest, sessionId: 
     interruptPort: {
       pause: async (interrupt) => {
         const settled = Promise.withResolvers<InterruptResolution>();
-        interruptWaiters.set(interrupt.interruptId, { request: interrupt, settled });
+        interruptWaiters.set(interrupt.interruptId, {
+          request: interrupt,
+          settled,
+        });
         return settled.promise;
       },
       pending: async ({ runId }) =>
@@ -1485,7 +1573,11 @@ export const handleAgentHostWorkerRequest = async (
       code: 'SESSION_NOT_INITIALIZED',
     });
   }
-  const command: AgentHostWorkerCommand = { ...request, requestId: randomUuid(), sessionId };
+  const command: AgentHostWorkerCommand = {
+    ...request,
+    requestId: randomUuid(),
+    sessionId,
+  };
   const alreadyLeader = leadership.has(request.chatId);
   const isLeader = await ensureLeadership(request.chatId);
   const response = isLeader

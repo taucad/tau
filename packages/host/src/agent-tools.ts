@@ -22,7 +22,6 @@
  */
 
 import { readFile, readdir, stat } from 'node:fs/promises';
-import { fileURLToPath } from 'node:url';
 
 import { ResourceQueue } from '@taucad/filesystem';
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
@@ -30,8 +29,14 @@ import { NodeFsProvider } from '@taucad/filesystem/backend/node';
 import { rpcClientErrorCode } from '@taucad/chat';
 import { toRpcError } from '@taucad/chat/rpc';
 import type { RpcGeoSpecClient, RpcSkillResolver } from '@taucad/chat/rpc';
-import { createChatToolRegistry, createProviderRpcFileSystem } from '@taucad/agent-tools/registry';
-import { createSkillResolver, loadSystemSkills } from '@taucad/agent-tools/skills';
+import {
+  createChatToolRegistry,
+  createProviderRpcFileSystem,
+  createSkillBundleRegistry,
+  createSkillResourceFileSystem,
+} from '@taucad/agent-tools/registry';
+import type { ReadSkillResource } from '@taucad/agent-tools/registry';
+import { createSkillResolver } from '@taucad/agent-tools/skills';
 import { createRuntimeAgentClients } from '@taucad/agent-tools/runtime';
 import { createProjectModelLoader, runGeoSpecTests } from '@taucad/agent-tools/geospec';
 import type { GeoSpecRuntimeClient } from 'geospec/model';
@@ -71,6 +76,26 @@ export type HostExportFile = ExportFile;
  * @public
  */
 export type HostRuntimeClient = Pick<RuntimeClient, 'evaluate' | 'export' | 'transcode'>;
+
+/** One package-owned skill bundle accepted by the host. @public */
+export type HostSystemSkillBundle = {
+  readonly slug: string;
+  readonly name: string;
+  readonly description: string;
+  readonly version: string;
+  readonly whenToUse: string;
+  readonly body: string;
+  readonly fingerprint: string;
+  readonly files: ReadonlyArray<{
+    readonly path: string;
+    readonly url: string;
+    readonly byteLength: number;
+    readonly lineCount: number;
+    readonly contentKind: 'text';
+    readonly mediaType: 'text/markdown';
+    readonly sha256: string;
+  }>;
+};
 
 const issueMessage = (issues: ReadonlyArray<{ readonly message: string }>, fallback: string): string =>
   issues.map((issue) => issue.message).join('; ') || fallback;
@@ -160,36 +185,6 @@ export const createHostGeoSpecRunner = async (
   });
 };
 
-/**
- * Resolve one skill subpath from whichever module graph actually declares it.
- *
- * Two bases, tried in order, because the owners are split across two: this
- * package declares `geospec` and the GeoSpec engine, while the eight kernel
- * plugins are dependencies of the app that composes it. Measured from this
- * workspace, the host's own base resolves 1 of 9 and `apps/desktop`'s resolves
- * 8 of 9; only the pair resolves all nine, and neither is wrong about its own.
- *
- * `import.meta.resolve` is the ESM call, but the base — not the call — is what
- * decides the answer, so swapping `createRequire` for it changes nothing on its
- * own. The caller's base has to be passed in, exactly as `resolveFrom` is for
- * ACP adapters in `acp/registry.ts`.
- *
- * @param subpath - Package subpath naming a guide, e.g. `@taucad/replicad/agent`.
- * @param fromCaller - The embedding application's resolver, when it supplied one.
- * @returns The absolute path of the guide.
- * @throws When neither base can see the owning package.
- */
-const resolveSkillSubpath = (subpath: string, fromCaller?: (subpath: string) => string): string => {
-  if (fromCaller !== undefined) {
-    try {
-      return fromCaller(subpath);
-    } catch {
-      /* Fall through: this package may declare what the app does not. */
-    }
-  }
-  return fileURLToPath(import.meta.resolve(subpath));
-};
-
 /** Options for {@link createHostToolRegistry}. @public */
 export type HostToolRegistryOptions = {
   /** Absolute workspace root every file tool is confined to. */
@@ -224,23 +219,8 @@ export type HostToolRegistryOptions = {
    * turn directly.
    */
   readonly checkouts?: ReadonlyMap<string, { readonly cwd: string }> | undefined;
-  /**
-   * Resolves a package subpath to an absolute path, from the *embedding
-   * application's* module graph.
-   *
-   * This host declares `geospec` and the GeoSpec engine; it does not declare
-   * the kernel plugins, which are dependencies of whatever app composes it.
-   * Resolving from this module therefore finds exactly one skill owner out of
-   * nine — and `import.meta.resolve` has the same base as `createRequire`, so
-   * modernizing the call alone does not change that. The base is the thing that
-   * has to come from the caller, exactly as `resolveFrom` already does for ACP
-   * adapters in `acp/registry.ts`.
-   *
-   * Pass `(subpath) => fileURLToPath(import.meta.resolve(subpath))` from a
-   * module inside the app that declares the kernels. Omit it and this host
-   * offers only the skills it can resolve itself.
-   */
-  readonly resolveSkillSubpath?: ((subpath: string) => string) | undefined;
+  /** Package-owned skills supplied by the embedding application. */
+  readonly systemSkillBundles?: readonly HostSystemSkillBundle[] | undefined;
 };
 
 /**
@@ -259,6 +239,23 @@ export type HostToolRegistryOptions = {
  */
 export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRegistry => {
   const rooted = new Map<string, ToolRegistry>();
+  const skillRegistry =
+    options.systemSkillBundles === undefined ? undefined : createSkillBundleRegistry(options.systemSkillBundles);
+  const systemSkills = skillRegistry?.bundles.map((bundle) => ({
+    slug: bundle.slug,
+    name: bundle.name,
+    version: bundle.version,
+    whenToUse: bundle.whenToUse,
+    skillMarkdown: bundle.body,
+    fingerprint: bundle.fingerprint,
+    files: bundle.files,
+  }));
+  const readSkillResource: ReadSkillResource = async (resource, input) => {
+    input.signal?.throwIfAborted();
+    const bytes = new Uint8Array(await readFile(new URL(resource.url)));
+    input.signal?.throwIfAborted();
+    return bytes;
+  };
 
   /**
    * Every tool this host serves, over one absolute root.
@@ -320,17 +317,7 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
       },
     });
 
-    /**
-     * Skills are files, and both halves of the resolver now read the *same*
-     * files the browser does.
-     *
-     * The workspace half goes through the rooted provider — listing included, so
-     * a mount the provider projects is a directory the resolver can see. The
-     * system half is the shared catalogue: the browser inlines each guide with a
-     * `?raw` import and this resolves the same package subpath on disk, so the
-     * two hosts fingerprint identical content. A guide whose package is not
-     * installed beside this daemon is simply not offered.
-     */
+    /** Workspace skills remain authored files; package skills come from the injected registry. */
     const skillReaders = {
       readFile: async (path: string): Promise<Uint8Array<ArrayBuffer>> =>
         new Uint8Array(await provider.readFile(assertRootedPath(path))),
@@ -345,15 +332,8 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
         );
       },
     };
-    /* Read once, lazily: this registry is built synchronously, and the guides
-     * are only needed when something actually asks for a skill. */
-    const systemSkills = loadSystemSkills({
-      resolve: (subpath) => resolveSkillSubpath(subpath, options.resolveSkillSubpath),
-      readFile: async (path) => readFile(path, 'utf8'),
-    });
     const skillResolver: RpcSkillResolver = {
-      resolveSkill: async (skillName) =>
-        createSkillResolver({ ...skillReaders, systemSkills: await systemSkills }).resolveSkill(skillName),
+      resolveSkill: async (skillName) => createSkillResolver({ ...skillReaders, systemSkills }).resolveSkill(skillName),
     };
 
     const runnerFactory =
@@ -395,7 +375,12 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
     };
 
     return createChatToolRegistry({
-      fileSystemFor: (signal) => createProviderRpcFileSystem({ provider, mutations, signal }),
+      fileSystemFor: (signal) => {
+        const upper = createProviderRpcFileSystem({ provider, mutations, signal });
+        return skillRegistry === undefined
+          ? upper
+          : createSkillResourceFileSystem({ upper, registry: skillRegistry, readResource: readSkillResource, signal });
+      },
       ...(runtimeClient === undefined ? {} : { kernelClient, graphics, images }),
       ...(geospec === undefined ? {} : { geospec }),
       skillResolver,

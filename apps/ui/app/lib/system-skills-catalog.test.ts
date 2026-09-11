@@ -68,7 +68,11 @@ describe('builtInSystemSkills', () => {
     for (const { catalogEntry, resolved } of results) {
       expect(catalogEntry).toEqual(expect.objectContaining({ priority: 60, source: 'system' }));
       expect(resolved).toEqual(
-        expect.objectContaining({ success: true, skillName: catalogEntry?.slug, source: 'system' }),
+        expect.objectContaining({
+          success: true,
+          skillName: catalogEntry?.slug,
+          source: 'system',
+        }),
       );
     }
   });
@@ -90,5 +94,28 @@ describe('builtInSystemSkills', () => {
   it('preserves JSCAD multi-shape output as one flat array of named geometries', () => {
     const jscad = builtInSystemSkills.find(({ slug }) => slug === 'cad-jscad');
     expect(jscad?.skillMarkdown).toContain('one flat array of named geometries');
+  });
+
+  it.each([
+    ['cad-openscad', 10],
+    ['geospec-authoring', 5],
+  ] as const)('returns actionable paths and every supporting file for %s', async (slug, supportingCount) => {
+    const resolver = createSkillResolver({
+      readFile: async () => {
+        throw new Error('package resources stay lazy during activation');
+      },
+      listDirectory: async () => [],
+    });
+
+    const resolved = await resolver.resolveSkill(slug);
+    expect(resolved.success).toBe(true);
+    if (!resolved.success) {
+      throw new Error(`Expected ${slug} to resolve`);
+    }
+    expect(resolved.resourceUri).toBe(`system:skills/${slug}/SKILL.md`);
+    expect(resolved.skillPath).toBe(`.agents/skills/${slug}/SKILL.md`);
+    expect(resolved.baseDirectory).toBe(`.agents/skills/${slug}`);
+    expect(resolved.fingerprint).toMatch(/^[\da-f]{64}$/u);
+    expect(resolved.supportingFiles).toHaveLength(supportingCount);
   });
 });

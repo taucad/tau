@@ -16,6 +16,7 @@
 
 import type { ResolveSkillRpcResult, SkillMetadata } from '@taucad/chat';
 import { rpcClientErrorCode } from '@taucad/chat';
+import { getErrno } from '@taucad/utils/error';
 
 import {
   canonicalSkillsDirectory,
@@ -48,6 +49,10 @@ export type SystemSkillEntry = {
   readonly version: string;
   readonly whenToUse: string;
   readonly skillMarkdown: string;
+  /** Generated whole-bundle identity for package-backed skills. */
+  readonly fingerprint?: string;
+  /** Declared bundle files. Omitted for app-only inline skills. */
+  readonly files?: ReadonlyArray<{ readonly path: string }>;
 };
 
 /** Everything {@link createSkillResolver} needs from its host. @public */
@@ -105,13 +110,15 @@ export function createSkillResolver(deps: SkillResolverDependencies): SkillResol
   const storeSkills = deps.storeSkills ?? defaultStoreSkills;
 
   async function listSkills(): Promise<SkillMetadata[]> {
-    const discovered = await Promise.all([
+    const [filesystem, store] = await Promise.all([
       discoverFilesystemSkills(deps, canonicalSkillsDirectory, 'user'),
       discoverTauStoreManifestSkills(deps, storeSkills),
-      discoverSystemSkills(systemSkills),
     ]);
+    const visibleSystemSkills = filesystem.blocked
+      ? []
+      : systemSkills.filter((skill) => !filesystem.occupiedNames.has(skill.slug));
 
-    return mergeSkillMetadata(discovered.flat());
+    return mergeSkillMetadata([...filesystem.skills, ...store, ...discoverSystemSkills(visibleSystemSkills)]);
   }
 
   return {
@@ -171,7 +178,9 @@ export function createSkillResolver(deps: SkillResolverDependencies): SkillResol
           frontmatter: parseFrontmatterRecord(content),
           content,
           supportingFiles: await listSupportingFiles(deps, baseDirectory),
-          ...(skill.shadowedSources !== undefined && { shadowedSources: skill.shadowedSources }),
+          ...(skill.shadowedSources !== undefined && {
+            shadowedSources: skill.shadowedSources,
+          }),
         };
       } catch {
         return {
@@ -210,8 +219,22 @@ async function discoverFilesystemSkills(
   deps: SkillResolverDependencies,
   directory: string,
   defaultSource: string,
-): Promise<SkillMetadata[]> {
-  const entries = await deps.listDirectory(directory).catch(() => []);
+): Promise<{
+  readonly skills: SkillMetadata[];
+  readonly occupiedNames: ReadonlySet<string>;
+  readonly blocked: boolean;
+}> {
+  let entries: readonly SkillResolverDirectoryEntry[];
+  try {
+    entries = await deps.listDirectory(directory);
+  } catch (error) {
+    return {
+      skills: [],
+      occupiedNames: new Set(),
+      blocked: getErrno(error) === 'ENOTDIR',
+    };
+  }
+  const occupiedNames = new Set(entries.map(({ name }) => name));
   const skillFiles = entries
     .filter((entry) => entry.isFolder)
     .map((entry) => ({
@@ -243,7 +266,11 @@ async function discoverFilesystemSkills(
     }),
   );
 
-  return skills.filter((skill): skill is SkillMetadata => skill !== undefined);
+  return {
+    skills: skills.filter((skill): skill is SkillMetadata => skill !== undefined),
+    occupiedNames,
+    blocked: false,
+  };
 }
 
 async function discoverTauStoreManifestSkills(
@@ -297,21 +324,29 @@ async function readManifest(deps: SkillResolverDependencies): Promise<InstalledP
 function discoverSystemSkills(systemSkills: readonly SystemSkillEntry[]): SkillMetadata[] {
   const skills: Array<SkillMetadata | undefined> = systemSkills.map((skill) => {
     const resourceUri = `system:skills/${skill.slug}/SKILL.md`;
+    const baseDirectory = `${canonicalSkillsDirectory}/${skill.slug}`;
+    const skillPath = `${baseDirectory}/${skillFileName}`;
     const metadata = parseSkillFrontmatter(skill.skillMarkdown, resourceUri, {
       source: 'system',
       resourceUri,
+      ...(skill.files === undefined ? {} : { path: baseDirectory, skillPath }),
     });
 
     if (!metadata) {
       return undefined;
     }
 
-    const { path: _path, skillPath: _skillPath, ...virtualMetadata } = metadata;
+    let normalizedMetadata = metadata;
+    if (skill.files === undefined) {
+      const { path: _path, skillPath: _skillPath, ...virtualMetadata } = metadata;
+      normalizedMetadata = virtualMetadata;
+    }
     return {
-      ...virtualMetadata,
+      ...normalizedMetadata,
       source: 'system',
       version: skill.version,
       whenToUse: skill.whenToUse,
+      fingerprint: skill.fingerprint ?? metadata.fingerprint,
     };
   });
   return skills.filter((skill): skill is SkillMetadata => skill !== undefined);
@@ -327,6 +362,8 @@ function resolveSystemSkill(skill: SkillMetadata, systemSkills: readonly SystemS
     };
   }
 
+  const baseDirectory = `${canonicalSkillsDirectory}/${systemSkill.slug}`;
+  const skillPath = `${baseDirectory}/${skillFileName}`;
   return {
     success: true,
     skillName: skill.name,
@@ -335,11 +372,18 @@ function resolveSystemSkill(skill: SkillMetadata, systemSkills: readonly SystemS
     source: 'system',
     enabled: skill.enabled ?? true,
     resourceUri: skill.resourceUri ?? `system:skills/${systemSkill.slug}/SKILL.md`,
-    fingerprint: fingerprintSkillContent(systemSkill.skillMarkdown),
+    ...(systemSkill.files === undefined ? {} : { skillPath, baseDirectory }),
+    version: systemSkill.version,
+    whenToUse: systemSkill.whenToUse,
+    fingerprint: systemSkill.fingerprint ?? fingerprintSkillContent(systemSkill.skillMarkdown),
     frontmatter: parseFrontmatterRecord(systemSkill.skillMarkdown),
     content: systemSkill.skillMarkdown,
-    supportingFiles: [],
-    ...(skill.shadowedSources !== undefined && { shadowedSources: skill.shadowedSources }),
+    supportingFiles:
+      systemSkill.files?.filter(({ path }) => path !== skillFileName).map(({ path }) => `${baseDirectory}/${path}`) ??
+      [],
+    ...(skill.shadowedSources !== undefined && {
+      shadowedSources: skill.shadowedSources,
+    }),
   };
 }
 
@@ -395,6 +439,8 @@ function normalizePromptSkillMetadata(skill: SkillMetadata): SkillMetadata {
     ...(skill.whenToUse !== undefined && { whenToUse: skill.whenToUse }),
     ...(skill.fingerprint !== undefined && { fingerprint: skill.fingerprint }),
     enabled: skill.enabled ?? true,
-    ...(skill.shadowedSources !== undefined && { shadowedSources: skill.shadowedSources }),
+    ...(skill.shadowedSources !== undefined && {
+      shadowedSources: skill.shadowedSources,
+    }),
   };
 }

@@ -28,7 +28,9 @@ const resolverOver = (
 describe('createSkillResolver', () => {
   it('discovers a workspace skill and resolves its content', async () => {
     const resolver = resolverOver(
-      { '.agents/skills/bracket/SKILL.md': skillMarkdown('bracket', 'Bracket design rules') },
+      {
+        '.agents/skills/bracket/SKILL.md': skillMarkdown('bracket', 'Bracket design rules'),
+      },
       { '.agents/skills': [{ name: 'bracket', isFolder: true }] },
     );
 
@@ -64,7 +66,91 @@ describe('createSkillResolver', () => {
       },
     );
     const resolved = await withSystem.resolveSkill('create-skill');
-    expect(resolved).toMatchObject({ success: true, source: 'system', title: 'Create Skill', supportingFiles: [] });
+    expect(resolved).toMatchObject({
+      success: true,
+      source: 'system',
+      title: 'Create Skill',
+      supportingFiles: [],
+    });
+  });
+
+  it('returns actionable package resource paths without reading supporting files', async () => {
+    const readFile = vi.fn(async () => {
+      throw new Error('supporting files stay lazy');
+    });
+    const resolver = createSkillResolver({
+      readFile,
+      listDirectory: vi.fn(async () => []),
+      systemSkills: [
+        {
+          slug: 'demo',
+          name: 'Demo',
+          version: '2.0.0',
+          whenToUse: 'Use for demos.',
+          skillMarkdown: skillMarkdown('demo', 'Demo system skill'),
+          fingerprint: 'bundle-fingerprint',
+          files: [{ path: 'SKILL.md' }, { path: 'api-index.md' }, { path: 'references/detail.md' }],
+        },
+      ],
+    });
+
+    await expect(resolver.resolveSkill('demo')).resolves.toMatchObject({
+      success: true,
+      resourceUri: 'system:skills/demo/SKILL.md',
+      skillPath: '.agents/skills/demo/SKILL.md',
+      baseDirectory: '.agents/skills/demo',
+      version: '2.0.0',
+      whenToUse: 'Use for demos.',
+      fingerprint: 'bundle-fingerprint',
+      supportingFiles: ['.agents/skills/demo/api-index.md', '.agents/skills/demo/references/detail.md'],
+    });
+    expect(readFile).toHaveBeenCalledOnce();
+    expect(readFile).toHaveBeenCalledWith('.agents/plugins/installed.json');
+  });
+
+  it('hides a system bundle behind any colliding upper child even when that child is invalid', async () => {
+    const resolver = resolverOver(
+      {},
+      { '.agents/skills': [{ name: 'demo', isFolder: false }] },
+      {
+        systemSkills: [
+          {
+            slug: 'demo',
+            name: 'Demo',
+            version: '1.0.0',
+            whenToUse: 'Use for demos.',
+            skillMarkdown: skillMarkdown('demo', 'Demo system skill'),
+            files: [{ path: 'SKILL.md' }],
+          },
+        ],
+      },
+    );
+
+    expect(await resolver.listSkills()).toStrictEqual([]);
+    await expect(resolver.resolveSkill('demo')).resolves.toMatchObject({
+      success: false,
+    });
+  });
+
+  it('hides every system bundle when an upper ancestor is not a directory', async () => {
+    const resolver = createSkillResolver({
+      readFile: vi.fn(),
+      listDirectory: vi.fn(async () => {
+        throw Object.assign(new Error('not a directory'), { code: 'ENOTDIR' });
+      }),
+      systemSkills: [
+        {
+          slug: 'demo',
+          name: 'Demo',
+          version: '1.0.0',
+          whenToUse: 'Use for demos.',
+          skillMarkdown: skillMarkdown('demo', 'Demo system skill'),
+          files: [{ path: 'SKILL.md' }],
+        },
+      ],
+    });
+
+    expect(await resolver.listSkills()).toStrictEqual([]);
   });
 
   it('falls back to the shipped store markdown when an installed skill file is unreadable', async () => {
@@ -87,7 +173,10 @@ describe('createSkillResolver', () => {
 
     const listed = await resolver.listSkills();
     expect(listed.map((skill) => skill.name)).toStrictEqual(['woodworking']);
-    expect(listed[0]).toMatchObject({ source: 'tau-store', resourceUri: 'tau-store:skills/woodworking/SKILL.md' });
+    expect(listed[0]).toMatchObject({
+      source: 'tau-store',
+      resourceUri: 'tau-store:skills/woodworking/SKILL.md',
+    });
   });
 
   it('refuses an unknown skill with a typed error rather than throwing', async () => {

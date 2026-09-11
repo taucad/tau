@@ -120,6 +120,7 @@ const request = async <T>(
       readonly parseEvent: (value: unknown) => { readonly stage: string };
       readonly onEvent: (event: { readonly stage: string }) => void;
     };
+    readonly cancelMethod?: string;
   } = {},
 ): Promise<T> =>
   session.request({
@@ -128,6 +129,7 @@ const request = async <T>(
     signal: options.signal ?? new AbortController().signal,
     parseResult: options.parseResult ?? ((value) => value as T),
     ...(options.events ? { events: options.events } : {}),
+    ...(options.cancelMethod === undefined ? {} : { cancelMethod: options.cancelMethod }),
   });
 
 const respondingWorker = (response: string): string => `${ready}
@@ -450,6 +452,53 @@ readline.on('line',(line)=>{const request=JSON.parse(line);if(active)process.exi
       await value.session.cleanup();
       await sibling.cleanup();
     }
+  });
+
+  it('cancels cooperatively when a request names a cancel method, and kills when it cannot', async () => {
+    // The worker answers the cancel notification itself; the process is never recycled.
+    const cooperative = fixture(`${ready}
+const readline=require('node:readline').createInterface({input:process.stdin});
+let pending;
+readline.on('line',(line)=>{
+ const frame=JSON.parse(line);
+ if(frame.method==='cancel'){
+  process.stdout.write(JSON.stringify({protocolVersion:1,requestId:pending,issues:[{message:'cancelled'}]})+'\\n');
+  return;
+ }
+ pending=frame.requestId;
+});
+${keepAlive}`);
+    const controller = new AbortController();
+    const operation = request(cooperative.session, { signal: controller.signal, cancelMethod: 'cancel' });
+    while (privateSession(cooperative.session).pending.size === 0) {
+      await delay(2);
+    }
+    const generation = cooperative.session.generation;
+    const child = privateSession(cooperative.session).child;
+    controller.abort(new Error('user edited again'));
+    await expect(operation).rejects.toThrow(NativeWorkerReportedError);
+    expect(cooperative.session.generation).toBe(generation);
+    expect(privateSession(cooperative.session).child).toBe(child);
+    // The same worker still serves the next request, so its resident prefix survives.
+    const next = request(cooperative.session, { cancelMethod: 'cancel' });
+    await vi.waitFor(() => {
+      expect(privateSession(cooperative.session).pending.size).toBe(1);
+    });
+    expect(privateSession(cooperative.session).child).toBe(child);
+    await cooperative.session.cleanup();
+    await expect(next).rejects.toThrow();
+
+    // Kill remains the fallback when the worker's input is gone.
+    const unwritable = fixture(`${ready}${keepAlive}`);
+    const killController = new AbortController();
+    const killed = request(unwritable.session, { signal: killController.signal, cancelMethod: 'cancel' });
+    while (privateSession(unwritable.session).pending.size === 0) {
+      await delay(2);
+    }
+    privateSession(unwritable.session).child!.stdin.end();
+    killController.abort(new Error('deadline'));
+    await expect(killed).rejects.toThrow(/deadline/);
+    await unwritable.session.cleanup();
   });
 
   it('bounds the queue and handles abort, timeout, trust revocation, spawn, and write failures', async () => {

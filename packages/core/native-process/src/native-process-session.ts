@@ -48,6 +48,14 @@ export type NativeProcessRequest<Result, Event = never> = {
   readonly signal: AbortSignal;
   /** Optional request-scoped unsolicited event channel; terminal responses remain unchanged. */
   readonly events?: NativeProcessEventSubscription<Event>;
+  /**
+   * Out-of-band method that asks the worker to stop at its own safe boundary.
+   *
+   * When set, an abort sends this notification instead of recycling the process, so
+   * native work completed so far stays resident. The request timeout remains the
+   * kill fallback for a worker that does not observe it.
+   */
+  readonly cancelMethod?: string;
 };
 
 /** Configuration for one supervised native child process. @public */
@@ -460,6 +468,14 @@ export class NativeProcessSession<Issue> {
       }, this.options.requestTimeout);
       requestTimer.unref();
       const abort = (): void => {
+        if (request.cancelMethod !== undefined && child.stdin.writable) {
+          // Cooperative stop: the worker answers this request itself and keeps its resident prefix.
+          child.stdin.write(
+            `${JSON.stringify({ protocolVersion: this.options.protocolVersion, method: request.cancelMethod, requestId })}\n`,
+            'utf8',
+          );
+          return;
+        }
         this.requestTermination(abortReason(request.signal));
       };
       request.signal.addEventListener('abort', abort, { once: true });

@@ -56,11 +56,43 @@ export async function seedPaidPurchase(input: {
     taxBasis: 'synthetic_local_zero_tax',
     paymentMethod: null,
   };
+  await input.database
+    .insert(billingStripeCustomer)
+    .values({
+      id: customerBindingId,
+      accountId: input.accountId,
+      environment: input.environment,
+      stripeAccountId,
+      livemode: false,
+      stripeCustomerId: `cus_${id}`,
+    })
+    .onConflictDoNothing({
+      target: [
+        billingStripeCustomer.accountId,
+        billingStripeCustomer.environment,
+        billingStripeCustomer.stripeAccountId,
+        billingStripeCustomer.livemode,
+      ],
+    });
+  const [customer] = await input.database
+    .select({ id: billingStripeCustomer.id, stripeCustomerId: billingStripeCustomer.stripeCustomerId })
+    .from(billingStripeCustomer)
+    .where(
+      and(
+        eq(billingStripeCustomer.accountId, input.accountId),
+        eq(billingStripeCustomer.environment, input.environment),
+        eq(billingStripeCustomer.stripeAccountId, stripeAccountId),
+        eq(billingStripeCustomer.livemode, false),
+      ),
+    );
+  if (!customer?.stripeCustomerId) {
+    throw new Error('Fixture customer binding is missing a Stripe customer');
+  }
   const paidEvidence: PaidPaymentEvidence = {
     version: 'stripe-paid-v1',
     stripeAccountId,
     livemode: false,
-    customerId: `cus_${id}`,
+    customerId: customer.stripeCustomerId,
     currency: 'usd',
     principalMinor: '500',
     taxMinor: '0',
@@ -74,14 +106,6 @@ export async function seedPaidPurchase(input: {
     paidAt: paidAt.toISOString(),
     paymentMethod: null,
   };
-  await input.database.insert(billingStripeCustomer).values({
-    id: customerBindingId,
-    accountId: input.accountId,
-    environment: input.environment,
-    stripeAccountId,
-    livemode: false,
-    stripeCustomerId: `cus_${id}`,
-  });
   const proof = { paidAt, paidEvidence, paymentIntentId: `pi_${id}`, chargeId: `ch_${id}` };
   await input.database.insert(billingPurchase).values({
     id,
@@ -90,7 +114,7 @@ export async function seedPaidPurchase(input: {
     offerSnapshot,
     creditAtoms: input.atoms,
     state: input.prepared ? 'prepared' : 'paid_unfulfilled',
-    customerBindingId,
+    customerBindingId: customer.id,
     requestId: id,
     requestHash: '0'.repeat(64),
     purpose: 'manual_checkout',

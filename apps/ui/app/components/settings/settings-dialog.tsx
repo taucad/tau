@@ -130,7 +130,13 @@ export function SettingsDialog(): React.JSX.Element {
 
   return (
     <Dialog open={isOpen} onOpenChange={handleOpenChange}>
-      <DialogContent className={cn('gap-0 overflow-hidden p-0', 'h-[min(90vh,900px)] grid-rows-[1fr]', 'sm:max-w-4xl')}>
+      <DialogContent
+        className={cn(
+          'gap-0 overflow-hidden p-0',
+          'h-[min(90vh,900px)] grid-rows-[1fr]',
+          'sm:max-w-4xl lg:max-w-5xl xl:max-w-6xl 2xl:max-w-7xl',
+        )}
+      >
         <DialogTitle className='sr-only'>Settings</DialogTitle>
         <DialogDescription className='sr-only'>Application settings and preferences</DialogDescription>
 
@@ -160,45 +166,45 @@ export function SettingsDialog(): React.JSX.Element {
               'md:pr-6',
             )}
           >
-            <TabsContent forceMount enableAnimation={false} value='Account'>
+            <TabsContent enableAnimation={false} value='Account'>
               <SettingsAuthGate>
                 <AccountSettings />
               </SettingsAuthGate>
             </TabsContent>
-            <TabsContent forceMount enableAnimation={false} value='Security'>
+            <TabsContent enableAnimation={false} value='Security'>
               <SettingsAuthGate>
                 <SecuritySettings />
               </SettingsAuthGate>
             </TabsContent>
-            <TabsContent forceMount enableAnimation={false} value='API Keys'>
+            <TabsContent enableAnimation={false} value='API Keys'>
               <SettingsAuthGate>
                 <ApiKeys />
               </SettingsAuthGate>
             </TabsContent>
-            <TabsContent forceMount enableAnimation={false} value='General'>
+            <TabsContent enableAnimation={false} value='General'>
               <GeneralSettings />
             </TabsContent>
-            <TabsContent forceMount enableAnimation={false} value='Filesystem'>
+            <TabsContent enableAnimation={false} value='Filesystem'>
               <FileSystemSettings />
             </TabsContent>
-            <TabsContent forceMount enableAnimation={false} value='Billing'>
+            <TabsContent enableAnimation={false} value='Billing'>
               <SettingsAuthGate>
                 <BillingSettings />
               </SettingsAuthGate>
             </TabsContent>
-            <TabsContent forceMount enableAnimation={false} value='Compute'>
+            <TabsContent className='flex flex-col gap-6 pb-6' enableAnimation={false} value='Compute'>
               <ComputeReuseSettings />
               <SettingsAuthGate>
                 <RemoteComputeSettings />
               </SettingsAuthGate>
             </TabsContent>
-            <TabsContent forceMount enableAnimation={false} value='Models'>
+            <TabsContent enableAnimation={false} value='Models'>
               <ModelSettings />
             </TabsContent>
-            <TabsContent forceMount enableAnimation={false} value='Agents'>
+            <TabsContent enableAnimation={false} value='Agents'>
               <AgentSettings />
             </TabsContent>
-            <TabsContent forceMount enableAnimation={false} value='Experimental'>
+            <TabsContent enableAnimation={false} value='Experimental'>
               <ExperimentalSettings />
             </TabsContent>
           </ResponsiveTabs>

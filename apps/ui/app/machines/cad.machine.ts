@@ -185,6 +185,17 @@ type CadEvent =
 
 type CadEmitted = { type: 'geometryEvaluated'; geometry: Geometry };
 
+const consoleLogData = (data: unknown): string => {
+  if (data === undefined) {
+    return '';
+  }
+  try {
+    return ` ${JSON.stringify(data)}`;
+  } catch {
+    return ' [data is not serialisable]';
+  }
+};
+
 type CadInput = {
   shouldInitializeKernelOnStart: boolean;
   parentRef?: AnyActorRef;
@@ -698,7 +709,7 @@ export const cadMachine = setup({
       assertEvent(event, 'kernelLog');
       const logMethod = event.level === 'error' ? console.error : event.level === 'warn' ? console.warn : console.debug;
       const origin = typeof event.origin === 'string' ? event.origin : 'worker';
-      logMethod(`[Kernel:${origin}]`, event.message, event.data ?? '');
+      logMethod(`[Kernel:${origin}] ${event.message}${consoleLogData(event.data)}`);
       if (context.logActorRef) {
         const storedOrigin = context.entryPath ? { ...event.origin, file: context.entryPath } : event.origin;
         enqueue.sendTo(context.logActorRef, {

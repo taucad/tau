@@ -66,6 +66,7 @@ export default defineConfig({
       'app/workers/agent-host.browser.test.ts',
       'app/workers/gltf-codec.browser.test.ts',
       'app/workers/headless-capture-in-worker.browser.test.ts',
+      'app/workers/skill-resources.browser.test.ts',
       'app/machines/file-manager.browser.test.ts',
     ],
     fileParallelism: false,
@@ -80,7 +81,10 @@ export default defineConfig({
       // only vitest config inside a typecheck program, so no other config surfaces the split.
       // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- duplicated `vitest` declarations leave no narrower bridge
       provider: playwright({
-        launchOptions: { channel: 'chromium', args: ['--enable-unsafe-webgpu'] },
+        launchOptions: {
+          channel: 'chromium',
+          args: ['--enable-unsafe-webgpu'],
+        },
       }) as unknown as BrowserProviderOption,
       instances: [{ browser: 'chromium' }],
     },

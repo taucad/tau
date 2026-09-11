@@ -127,6 +127,8 @@ type PlanCardsProps = {
   /** Marks the viewer's tier as "Current plan" instead of a CTA (settings grid). */
   readonly currentTier?: BillingTier;
   readonly className?: string;
+  /** Keeps long feature lists bounded inside compact surfaces such as Settings. */
+  readonly isFeatureListScrollable?: boolean;
 };
 
 /**
@@ -134,7 +136,11 @@ type PlanCardsProps = {
  * both the index pricing section and the BillingSettings free-state grid.
  * Cards stack on mobile (U14).
  */
-export function PlanCards({ currentTier, className }: PlanCardsProps): React.JSX.Element {
+export function PlanCards({
+  currentTier,
+  className,
+  isFeatureListScrollable = false,
+}: PlanCardsProps): React.JSX.Element {
   return (
     <div className={cn('grid grid-cols-1 gap-4 md:grid-cols-3', className)}>
       {tauPlanCatalog.map((entry) => (
@@ -153,7 +159,15 @@ export function PlanCards({ currentTier, className }: PlanCardsProps): React.JSX
             </p>
           </CardHeader>
           <CardContent className='flex flex-1 flex-col gap-4'>
-            <ul className='flex flex-1 flex-col gap-1.5 text-sm'>
+            <ul
+              aria-label={isFeatureListScrollable ? `${entry.name} features` : undefined}
+              className={cn(
+                'flex flex-1 flex-col gap-1.5 text-sm',
+                isFeatureListScrollable &&
+                  'max-h-80 scroll-shadows-y overscroll-contain pr-2 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none',
+              )}
+              tabIndex={isFeatureListScrollable ? 0 : undefined}
+            >
               {entry.features.map((feature) => (
                 <li key={feature} className='flex items-start gap-2'>
                   <Check className='mt-0.5 size-3.5 shrink-0 text-primary' />

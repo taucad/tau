@@ -126,8 +126,6 @@ const svgIssueToError = (error: unknown): HeadlessImageError => {
   return new HeadlessImageError('unknown', error instanceof Error ? error.message : String(error));
 };
 
-const sourceLocator = (job: HeadlessImageJob): string => job.sourcePath;
-
 const cloneFiles = (files: readonly ExportFile[]): ExportFile[] =>
   files.map((file) => ({ ...file, bytes: new Uint8Array(file.bytes) }));
 
@@ -315,14 +313,10 @@ export class HeadlessImageService {
           queued.settled = true;
           queued.cleanupAbort();
           queued.reject(error);
-          console.warn('Headless image job failed', {
-            message: error instanceof Error ? error.message : String(error),
-            kind: queued.job.kind,
-            ...(queued.job.projectId ? { projectId: queued.job.projectId } : {}),
-            identity: queued.job.identity,
-            sourceLocator: sourceLocator(queued.job),
-            code: error instanceof HeadlessImageError ? error.code : 'unknown',
-          });
+          const code = error instanceof HeadlessImageError ? error.code : 'unknown';
+          console.warn(
+            `Headless image job failed (${queued.job.kind}/${code}): ${error instanceof Error ? error.message : String(error)}`,
+          );
           if (error instanceof HeadlessImageError && error.isGpuFault) {
             this.terminateClients();
           }
@@ -336,7 +330,7 @@ export class HeadlessImageService {
             kind: queued.job.kind,
             identity: queued.job.identity,
             success: false,
-            errorCode: error instanceof HeadlessImageError ? error.code : 'unknown',
+            errorCode: code,
           });
         } finally {
           queued.cleanupAbort();

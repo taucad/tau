@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Button } from '@taucad/ui/components/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@taucad/ui/components/card';
 import { setComputeReuseMode, useComputeReuseMode } from '#lib/compute-reuse-preference.js';
 import type { ComputeReuseMode } from '#lib/compute-reuse-preference.js';
 import { useProject } from '#hooks/use-project.js';
@@ -23,7 +24,7 @@ export function ComputeReuseSettings(): React.JSX.Element {
   const projectId = project?.projectId;
   const collectCursor = collection && collection.projectId === projectId ? collection.cursor : undefined;
   const currentStatus = status && status.projectId === projectId ? status.value : undefined;
-  const confirmClear = confirmClearProjectId === projectId;
+  const confirmClear = projectId !== undefined && confirmClearProjectId === projectId;
   const available = Boolean(
     project && (desktopBridge() ?? fileManager?.fileManagerRef.getSnapshot().context.computeControl),
   );
@@ -75,68 +76,78 @@ export function ComputeReuseSettings(): React.JSX.Element {
     }
   };
   return (
-    <section className='flex flex-col gap-3' aria-labelledby='compute-reuse-title'>
-      <div>
-        <h2 id='compute-reuse-title' className='text-lg font-semibold'>
-          Compute reuse
-        </h2>
-        <p className='text-sm text-muted-foreground'>Choose how local CAD work reuses expensive results.</p>
-      </div>
-      <fieldset className='flex flex-col gap-2'>
-        <legend className='sr-only'>Compute reuse mode</legend>
-        {modes.map((mode) => (
-          <label key={mode.value} className='flex cursor-pointer items-start gap-3 rounded-md border p-3'>
-            <input
-              className='mt-1'
-              type='radio'
-              name='compute-reuse-mode'
-              value={mode.value}
-              checked={selected === mode.value}
-              onChange={() => {
-                setComputeReuseMode(mode.value);
-              }}
-            />
-            <span>
-              <span className='block font-medium'>{mode.label}</span>
-              <span className='text-sm text-muted-foreground'>{mode.description}</span>
-            </span>
-          </label>
-        ))}
-      </fieldset>
-      <div className='flex flex-wrap gap-2'>
-        <Button variant='outline' disabled={!available} onClick={async () => control('inspect')}>
-          Inspect
-        </Button>
-        <Button variant='outline' disabled={!available} onClick={async () => control('collect', collectCursor)}>
-          {collectCursor ? 'Continue collect' : 'Collect'}
-        </Button>
-        {confirmClear ? (
-          <Button
-            variant='destructive'
-            onClick={async () => {
-              setConfirmClearProjectId(undefined);
-              return control('clear');
-            }}
-          >
-            Confirm clear
+    <Card aria-labelledby='compute-reuse-title'>
+      <CardHeader>
+        <CardTitle id='compute-reuse-title'>Compute reuse</CardTitle>
+        <CardDescription>Choose how local CAD work reuses expensive results.</CardDescription>
+      </CardHeader>
+      <CardContent className='flex flex-col gap-4'>
+        <fieldset className='grid gap-2 lg:grid-cols-3'>
+          <legend className='sr-only'>Compute reuse mode</legend>
+          {modes.map((mode) => (
+            <label
+              key={mode.value}
+              className='flex cursor-pointer items-start gap-3 rounded-md border p-3 has-checked:border-primary'
+            >
+              <input
+                className='mt-1 accent-primary'
+                type='radio'
+                name='compute-reuse-mode'
+                value={mode.value}
+                checked={selected === mode.value}
+                onChange={() => {
+                  setComputeReuseMode(mode.value);
+                }}
+              />
+              <span>
+                <span className='block text-sm font-medium'>{mode.label}</span>
+                <span className='text-xs text-muted-foreground'>{mode.description}</span>
+              </span>
+            </label>
+          ))}
+        </fieldset>
+        <div className='flex flex-wrap items-center gap-2 border-t pt-4'>
+          <Button size='sm' variant='outline' disabled={!available} onClick={async () => control('inspect')}>
+            Inspect
           </Button>
-        ) : (
           <Button
+            size='sm'
             variant='outline'
             disabled={!available}
-            onClick={() => {
-              setConfirmClearProjectId(projectId);
-            }}
+            onClick={async () => control('collect', collectCursor)}
           >
-            Clear
+            {collectCursor ? 'Continue collect' : 'Collect'}
           </Button>
-        )}
-      </div>
-      {currentStatus ? (
-        <p role='status' className='text-sm text-muted-foreground'>
-          {currentStatus}
-        </p>
-      ) : null}
-    </section>
+          {confirmClear ? (
+            <Button
+              size='sm'
+              variant='destructive'
+              onClick={async () => {
+                setConfirmClearProjectId(undefined);
+                return control('clear');
+              }}
+            >
+              Confirm clear
+            </Button>
+          ) : (
+            <Button
+              size='sm'
+              variant='outline'
+              disabled={!available}
+              onClick={() => {
+                setConfirmClearProjectId(projectId);
+              }}
+            >
+              Clear
+            </Button>
+          )}
+          {currentStatus ? (
+            <p role='status' className='basis-full text-xs text-muted-foreground'>
+              {currentStatus}
+            </p>
+          ) : null}
+        </div>
+      </CardContent>
+    </Card>
   );
 }

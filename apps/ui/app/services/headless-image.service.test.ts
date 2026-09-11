@@ -339,7 +339,7 @@ describe('HeadlessImageService', () => {
   });
 
   it('does not cache failed captures', async () => {
-    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const { imageClient, service } = createFixture();
     vi.mocked(imageClient.transcode)
       .mockResolvedValueOnce({
@@ -359,6 +359,7 @@ describe('HeadlessImageService', () => {
     await expect(service.export(captureJob('failed'))).rejects.toMatchObject({ code: 'encode' });
     await expect(service.export(captureJob('retry'))).resolves.toEqual(files());
     expect(imageClient.transcode).toHaveBeenCalledTimes(2);
+    expect(warn).toHaveBeenCalledWith('Headless image job failed (capture/encode): encode failed');
   });
 
   it('suppresses repeated automatic failures for one immutable identity', async () => {

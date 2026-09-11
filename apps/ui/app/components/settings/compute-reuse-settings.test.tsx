@@ -5,6 +5,7 @@ const state = vi.hoisted(() => ({
   mode: 'durable' as 'off' | 'memory' | 'durable',
   set: vi.fn(),
   available: true,
+  projectId: 'project-a' as string | undefined,
   inspect: vi.fn(async (_input: unknown): Promise<unknown> => undefined),
   clear: vi.fn(async (_input: unknown): Promise<unknown> => undefined),
   collect: vi
@@ -16,7 +17,9 @@ vi.mock('#lib/compute-reuse-preference.js', () => ({
   useComputeReuseMode: () => state.mode,
   setComputeReuseMode: state.set,
 }));
-vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ projectId: 'project-a' }) }));
+vi.mock('#hooks/use-project.js', () => ({
+  useProject: () => (state.projectId ? { projectId: state.projectId } : undefined),
+}));
 vi.mock('#hooks/use-file-manager.js', () => ({
   useOptionalFileManager: () =>
     state.available
@@ -48,6 +51,7 @@ const { ComputeReuseSettings } = await import('./compute-reuse-settings.js');
 beforeEach(() => {
   state.set.mockReset();
   state.available = true;
+  state.projectId = 'project-a';
   state.inspect.mockReset();
   state.clear.mockReset();
   state.collect.mockReset();
@@ -88,4 +92,10 @@ it('disables controls without authority and reports failures and retained clear 
   expect(screen.getByRole('button', { name: 'Confirm clear' })).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Confirm clear' }));
   expect(await screen.findByRole('status')).toHaveTextContent('11 bytes retained');
+});
+
+it('keeps cache controls unavailable without an active project', () => {
+  state.projectId = undefined;
+  render(<ComputeReuseSettings />);
+  expect(screen.getByRole('button', { name: 'Clear' })).toBeDisabled();
 });

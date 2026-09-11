@@ -211,7 +211,7 @@ export function BillingSettings(): React.JSX.Element {
           {entitlements.tier === 'free' ? (
             // U2/T7: the free state shows the full plan grid — same catalogue
             // as the landing pricing section, "Current plan" pinned to Free.
-            <PlanCards currentTier='free' className='pt-2' />
+            <PlanCards currentTier='free' className='pt-2' isFeatureListScrollable />
           ) : undefined}
         </CardContent>
       </Card>

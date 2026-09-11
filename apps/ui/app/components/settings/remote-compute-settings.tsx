@@ -3,6 +3,7 @@ import { Cpu, RefreshCw, Trash2 } from 'lucide-react';
 import { useSearchParams } from 'react-router';
 
 import { Button } from '@taucad/ui/components/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@taucad/ui/components/card';
 import { approveRemoteHostPairing, listRemoteHosts, revokeRemoteHost } from '#lib/remote-host-client.js';
 import type { RemoteHostDevice } from '#lib/remote-host-client.js';
 import {
@@ -39,7 +40,7 @@ export function RemoteComputeSettings(): React.JSX.Element {
   }, []);
 
   useEffect(() => {
-    queueMicrotask(() => void refresh());
+    queueMicrotask(refresh);
   }, [refresh]);
 
   const approve = async (): Promise<void> => {
@@ -78,49 +79,53 @@ export function RemoteComputeSettings(): React.JSX.Element {
   };
 
   return (
-    <section className='flex flex-col gap-6' aria-labelledby='remote-compute-title'>
-      <div>
-        <h2 id='remote-compute-title' className='text-lg font-semibold'>
-          Tau Host
-        </h2>
-        <p className='text-sm text-muted-foreground'>
+    <Card aria-labelledby='remote-compute-title'>
+      <CardHeader>
+        <CardTitle id='remote-compute-title'>Tau Host</CardTitle>
+        <CardDescription>
           Run CAD kernels on a paired Tau Host while this browser remains the project filesystem authority.
-        </p>
-      </div>
+        </CardDescription>
+      </CardHeader>
+      <CardContent className='flex flex-col gap-4'>
+        {pairingCode ? (
+          <div className='rounded-md border border-primary/40 p-3'>
+            <p className='text-sm font-medium'>Pair Tau Host {pairingCode}</p>
+            <p className='mb-3 text-xs text-muted-foreground'>Approve only if this code is visible in your Tau CLI.</p>
+            <Button
+              size='sm'
+              disabled={busy}
+              onClick={async () => {
+                await approve();
+              }}
+            >
+              Approve device
+            </Button>
+          </div>
+        ) : null}
 
-      {pairingCode ? (
-        <div className='rounded-md border border-primary/40 p-4'>
-          <p className='font-medium'>Pair Tau Host {pairingCode}</p>
-          <p className='mb-3 text-sm text-muted-foreground'>Approve only if this code is visible in your Tau CLI.</p>
-          <Button disabled={busy} onClick={() => void approve()}>
-            Approve device
+        <div className='flex items-center justify-between gap-4 rounded-md border p-3'>
+          <div>
+            <p className='text-sm font-medium'>{placementCopy[placement.state]}</p>
+            {placement.state !== 'local' && placement.message ? (
+              <p className='text-xs text-destructive'>{placement.message}</p>
+            ) : null}
+          </div>
+          <Button size='sm' variant='outline' disabled={placement.state === 'local'} onClick={selectLocalCompute}>
+            Use local
           </Button>
         </div>
-      ) : null}
 
-      <div className='flex items-center justify-between gap-4 rounded-md border p-4'>
-        <div>
-          <p className='font-medium'>{placementCopy[placement.state]}</p>
-          {placement.state !== 'local' && placement.message ? (
-            <p className='text-sm text-destructive'>{placement.message}</p>
-          ) : null}
-        </div>
-        <Button variant='outline' disabled={placement.state === 'local'} onClick={selectLocalCompute}>
-          Use local
-        </Button>
-      </div>
-
-      <div className='flex flex-col gap-3'>
         {devices.map((device) => (
-          <div key={device.id} className='flex items-center justify-between gap-4 rounded-md border p-4'>
+          <div key={device.id} className='flex items-center justify-between gap-4 rounded-md border p-3'>
             <div>
-              <p className='font-medium'>{device.label}</p>
-              <p className='text-sm text-muted-foreground'>
+              <p className='text-sm font-medium'>{device.label}</p>
+              <p className='text-xs text-muted-foreground'>
                 {device.online ? `Online · ${device.runtimeVersion ?? 'runtime unknown'}` : 'Offline'}
               </p>
             </div>
             <div className='flex gap-2'>
               <Button
+                size='sm'
                 disabled={busy || !device.online}
                 onClick={() => {
                   selectRemoteComputeDevice(device.id);
@@ -133,27 +138,37 @@ export function RemoteComputeSettings(): React.JSX.Element {
                 size='icon'
                 aria-label={`Revoke ${device.label}`}
                 disabled={busy}
-                onClick={() => void revoke(device.id)}
+                onClick={async () => {
+                  await revoke(device.id);
+                }}
               >
                 <Trash2 className='size-4' aria-hidden='true' />
               </Button>
             </div>
           </div>
         ))}
-      </div>
 
-      {error ? (
-        <p role='alert' className='text-sm text-destructive'>
-          {error}
-        </p>
-      ) : null}
-      <Button variant='ghost' className='self-start' disabled={busy} onClick={() => void refresh()}>
-        <RefreshCw className='size-4' aria-hidden='true' /> Refresh devices
-      </Button>
-
-      <p className='text-xs text-muted-foreground'>
-        Experimental: paired project code executes on the remote computer. Use only with projects you trust.
-      </p>
-    </section>
+        {error ? (
+          <p role='alert' className='text-sm text-destructive'>
+            {error}
+          </p>
+        ) : null}
+        <div className='flex flex-wrap items-center justify-between gap-3 border-t pt-4'>
+          <p className='text-xs text-muted-foreground'>
+            Paired project code executes on the remote computer. Use only with projects you trust.
+          </p>
+          <Button
+            size='sm'
+            variant='ghost'
+            disabled={busy}
+            onClick={async () => {
+              await refresh();
+            }}
+          >
+            <RefreshCw className='size-4' aria-hidden='true' /> Refresh devices
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
   );
 }

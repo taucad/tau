@@ -1,0 +1,62 @@
+name: Billing nightly (slow matrix)
+
+# The slow Stripe Test Clock matrix (S3/S4/S7/S8/S11 + refund/settlement legs)
+# runs nightly against the shared test account — too slow for every PR, cheap
+# once a day. Same suite as the PR-gated L3 lane; the nightly cadence catches
+# drift in Stripe API behavior and account-state accumulation.
+
+on:
+  schedule:
+    - cron: '17 14 * * *' # 14:17 UTC — quiet hours for the shared test account.
+  workflow_dispatch: {}
+
+concurrency:
+  group: stripe-test-account
+  cancel-in-progress: false
+
+jobs:
+  billing-nightly:
+    name: Billing L3 nightly
+    runs-on: ubuntu-latest
+    env:
+      STRIPE_SECRET_KEY: ${{ secrets.STRIPE_TEST_SECRET_KEY }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Skip without a Stripe test key
+        id: gate
+        run: |
+          if [ -z "$STRIPE_SECRET_KEY" ]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "STRIPE_TEST_SECRET_KEY not configured — nothing to run."
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup Nx Environment
+        if: steps.gate.outputs.enabled == 'true'
+        uses: ./.github/actions/setup-nx
+
+      - name: Install Stripe CLI
+        if: steps.gate.outputs.enabled == 'true'
+        run: |
+          curl -fsSL https://packages.stripe.dev/api/security/keypair/stripe-cli-gpg/public | gpg --dearmor | sudo tee /usr/share/keyrings/stripe.gpg >/dev/null
+          echo "deb [signed-by=/usr/share/keyrings/stripe.gpg] https://packages.stripe.dev/stripe-cli-debian-local stable main" | sudo tee -a /etc/apt/sources.list.d/stripe.list
+          sudo apt-get update -qq && sudo apt-get install -y stripe
+
+      - name: Prepare API env file
+        if: steps.gate.outputs.enabled == 'true'
+        run: cp apps/api/.env.example apps/api/.env
+
+      - name: Start Postgres + Redis + MinIO
+        if: steps.gate.outputs.enabled == 'true'
+        run: docker-compose -f infra/docker-compose.yml up -d postgres redis minio minio-bootstrap
+
+      - name: Apply Drizzle migrations
+        if: steps.gate.outputs.enabled == 'true'
+        run: cd apps/api && DATABASE_URL=postgresql://dev_user:dev_password@localhost:5432/tau_dev pnpm exec drizzle-kit migrate
+
+      - name: Run the full billing integration matrix (L2 + L3)
+        if: steps.gate.outputs.enabled == 'true'
+        run: pnpm nx run api:test:models -- app/testing/billing-webhook-signature.integration.test.ts app/testing/billing-lifecycle.integration.test.ts

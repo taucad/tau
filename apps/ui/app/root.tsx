@@ -113,6 +113,16 @@ const extractBetterFetchErrorBodyMessage = (error: unknown): string | undefined 
   return typeof message === 'string' ? message : undefined;
 };
 
+export const handleQueryError = (error: unknown, metadata: Readonly<Record<string, unknown>> | undefined): void => {
+  if (metadata?.['handlesErrorLocally'] === true) {
+    return;
+  }
+  const message = extractBetterFetchErrorBodyMessage(error);
+  if (message !== undefined) {
+    toast.error(message);
+  }
+};
+
 export function Layout({ children }: { readonly children: ReactNode }): React.JSX.Element {
   const data = useRouteLoaderData<typeof loader>('root');
   // Preserve null so the theme provider can resolve the system preference before hydration.
@@ -134,11 +144,8 @@ export function Layout({ children }: { readonly children: ReactNode }): React.JS
       },
     });
 
-    client.getQueryCache().config.onError = (error) => {
-      const message = extractBetterFetchErrorBodyMessage(error);
-      if (message !== undefined) {
-        toast.error(message);
-      }
+    client.getQueryCache().config.onError = (error, query) => {
+      handleQueryError(error, query.meta);
     };
 
     return client;

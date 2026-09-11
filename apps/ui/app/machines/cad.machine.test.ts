@@ -708,7 +708,7 @@ describe('cadMachine', () => {
     it.each([undefined, { component: 'Replicad', operation: 'render' }, { component: 'Replicad', file: '/main.ts' }])(
       'should attribute %j origin to the current compilation unit',
       async (origin) => {
-        vi.spyOn(console, 'debug').mockImplementation(noop);
+        const debug = vi.spyOn(console, 'debug').mockImplementation(noop);
         const logRef = createActor(logMachine).start();
         const { actor } = await startAndConnect({ logRef });
         actor.send({ type: 'initializeModel', entryPath: stubEntryPath });
@@ -722,6 +722,8 @@ describe('cadMachine', () => {
           data: { threads: 4 },
         });
         await waitFor(logRef, (snapshot) => snapshot.context.logBuffer.size === 1);
+
+        expect(debug).toHaveBeenCalledWith('[Kernel:worker] kernel ready {"threads":4}');
 
         expect(logRef.getSnapshot().context.logBuffer.get(0)).toMatchObject({
           level: 'info',

@@ -338,18 +338,12 @@
  * Override --scroll-fade-size to control the fade distance.
  *
  * --scroll-fade-end controls the alpha of the mask at the fading edge.
- * Dark mode keeps the original `transparent` so content fades fully into
- * the dark background (reads as a depth shadow). Light mode uses a
- * partially-opaque value so the edge stays visibly dimmed instead of
- * washing all the way out to the surface color (the "whitened" look).
+ * A fully transparent 28px edge matches the workbench tab treatment and
+ * prevents clipped content from remaining visible at the scroll boundary.
  */
 
 :root {
-  --scroll-fade-end: oklch(0 0 0 / 0.45);
-}
-
-.dark,
-:root[class~='dark'] {
+  --scroll-fade-size: 28px;
   --scroll-fade-end: transparent;
 }
 
@@ -410,7 +404,6 @@
 }
 
 @utility scroll-shadows-x {
-  --scroll-fade-size: 14px;
   overflow: auto;
   mask-image: linear-gradient(
     to right,
@@ -424,7 +417,6 @@
 }
 
 @utility scroll-shadows-y {
-  --scroll-fade-size: 14px;
   overflow: auto;
   mask-image: linear-gradient(
     to bottom,
@@ -438,7 +430,6 @@
 }
 
 @utility scroll-shadows {
-  --scroll-fade-size: 14px;
   overflow: auto;
   mask-image:
     linear-gradient(
@@ -469,14 +460,12 @@
  * overflowing a fixed-height clipped viewport).
  */
 @utility scroll-shadow-bottom {
-  --scroll-fade-size: 14px;
   mask-image: linear-gradient(to bottom, black, black calc(100% - var(--scroll-fade-size)), var(--scroll-fade-end));
 }
 
 /* Static inline-end fade for clipped labels such as fixed-width tabs. */
 @utility scroll-shadow-right {
-  --scroll-fade-size: 14px;
-  mask-image: linear-gradient(to right, black, black calc(100% - var(--scroll-fade-size)), transparent);
+  mask-image: linear-gradient(to right, black, black calc(100% - var(--scroll-fade-size)), var(--scroll-fade-end));
 }
 
 /* END SCROLL SHADOWS */

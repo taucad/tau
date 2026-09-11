@@ -64,6 +64,17 @@ describe('PlanCards', () => {
     );
     expect(screen.getByRole('button', { name: 'Current plan' })).toBeDisabled();
   });
+  it('makes bounded feature lists keyboard-scrollable', () => {
+    render(
+      <MemoryRouter>
+        <PlanCards isFeatureListScrollable />
+      </MemoryRouter>,
+    );
+    const featureList = screen.getByRole('list', { name: 'Pro Plan features' });
+
+    expect(featureList).toHaveAttribute('tabindex', '0');
+    expect(featureList).toHaveClass('max-h-80', 'scroll-shadows-y');
+  });
   it('resumes the owned pending subscription returned by a conflict', async () => {
     const action = {
       state: 'redirect_required',

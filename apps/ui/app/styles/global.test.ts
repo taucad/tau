@@ -378,13 +378,21 @@ describe('global corner shape', () => {
   });
 });
 
-describe('scroll-shadow-right', () => {
+describe('scroll fades', () => {
+  it('uses the workbench fade globally', () => {
+    const scrollFadeStart = globalStyles.indexOf(':root', globalStyles.indexOf('/* START SCROLL SHADOWS */'));
+
+    expect(readRuleTokens(scrollFadeStart)).toMatchObject({
+      '--scroll-fade-size': '28px',
+      '--scroll-fade-end': 'transparent',
+    });
+  });
+
   it('provides a static CSS-only inline-end fade', () => {
     const style = readRuleStyle(globalStyles.indexOf('@utility scroll-shadow-right'));
 
-    expect(style.getPropertyValue('--scroll-fade-size')).toBe('14px');
     expect(style.getPropertyValue('mask-image')).toBe(
-      'linear-gradient(to right, black, black calc(100% - var(--scroll-fade-size)), transparent)',
+      'linear-gradient(to right, black, black calc(100% - var(--scroll-fade-size)), var(--scroll-fade-end))',
     );
     expect(style.getPropertyValue('animation')).toBe('');
   });

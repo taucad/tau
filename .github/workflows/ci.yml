@@ -151,7 +151,19 @@ jobs:
       - name: Install Chromium for Vitest Browser
         run: pnpm exec playwright install --with-deps chromium
 
+      # `desktop-e2e:test:e2e` boots a real API, which reads this file for its
+      # `BILLING_*` development values; without them it refuses to start. Same
+      # step, same source file, as the `billing-e2e` lane below.
+      - name: Prepare API env file
+        run: cp apps/api/.env.example apps/api/.env
+
+      # `desktop-e2e:test:e2e` joins this fan-in (D19). It launches the *unpackaged*
+      # Electron shell, which is why xvfb is enough and `desktop:package-macos` is
+      # not in its dependency chain; it brings up its own Postgres/Redis/MinIO and
+      # publishes the development billing policy before its specs.
       - name: Run affected end-to-end suites
+        env:
+          TAU_E2E_WEBGPU_PROFILE: software
         run: xvfb-run --auto-servernum pnpm nx affected -t test:e2e test:e2e:development
 
       - name: Check workspace root hygiene
@@ -163,9 +175,46 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: vitest-browser-diagnostics
-          path: out/test-results/vitest-browser
+          path: |
+            out/test-results/vitest-browser
+            out/test-results/desktop-e2e
           if-no-files-found: ignore
           retention-days: 7
+
+  # Required real-device qualification. The runner label is an infrastructure
+  # contract: this lane must never silently fall back to SwiftShader.
+  webgpu-hardware:
+    name: WebGPU hardware qualification
+    runs-on: [self-hosted, tau-webgpu]
+    needs: [plan]
+    if: needs.plan.outputs.e2e == 'true'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+
+      - name: Install managed Chromium for Vitest Browser
+        run: pnpm exec playwright install chromium
+
+      - name: Run affected hardware WebGPU qualification
+        env:
+          TAU_E2E_WEBGPU_PROFILE: hardware
+        run: xvfb-run --auto-servernum pnpm nx affected -t test:e2e:webgpu
+
+      - name: Check workspace root hygiene
+        if: always()
+        run: pnpm nx run scripts:validate-workspace-root
+
+      - name: Upload hardware WebGPU diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: vitest-browser-webgpu-hardware-diagnostics
+          path: out/test-results/vitest-browser
+          if-no-files-found: error
+          retention-days: 14
 
   size-report:
     name: Bundle size report
@@ -348,8 +397,121 @@ jobs:
       - name: Qualify API development and production servers
         run: pnpm nx run-many -t test:server-modes
 
-      - name: Run deterministic file-edit profile qualification
-        run: pnpm nx run-many -t test:models -- app/testing/tau-replay.integration.test.ts app/testing/file-edit-profile-live-filesystem.integration.test.ts
+      # The Tau agent plane left the API at W3-CUT-2 (2026-09-02); the surviving
+      # deterministic edit qualification is the Tier-D edit bench.
+      - name: Run deterministic file-edit qualification (edit bench)
+        run: pnpm nx run-many -t test:models -- app/testing/edit-bench/edit-bench.test.ts
+
+      # L2 billing lane (every PR, zero Stripe credentials): offline-signed
+      # webhooks through the raw-body carve-out + signature verification +
+      # settlement, against the real Postgres + Redis started above.
+      - name: Run billing webhook suite (L2, offline-signed)
+        run: pnpm nx run-many -t test:models -- app/testing/billing-webhook-signature.integration.test.ts
+
+  # L3 billing e2e (secrets-gated): real Stripe test-mode objects + `stripe
+  # listen` forwarding the live event stream into the app under test. Skipped
+  # cleanly on forks (secrets unavailable) and when the key is not configured.
+  # Serialized against the shared test account via its own concurrency group.
+  billing-e2e:
+    name: Billing e2e (Stripe test mode)
+    runs-on: ubuntu-latest
+    needs: [plan]
+    if: (github.event_name == 'push') || (github.event.pull_request.head.repo.full_name == github.repository && needs.plan.outputs.api == 'true')
+    concurrency:
+      group: stripe-test-account
+      cancel-in-progress: false
+    env:
+      STRIPE_SECRET_KEY: ${{ secrets.STRIPE_TEST_SECRET_KEY }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Skip without a Stripe test key
+        id: gate
+        run: |
+          if [ -z "$STRIPE_SECRET_KEY" ]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "STRIPE_TEST_SECRET_KEY not configured — skipping the L3 lane."
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup Nx Environment
+        if: steps.gate.outputs.enabled == 'true'
+        uses: ./.github/actions/setup-nx
+
+      - name: Install Stripe CLI
+        if: steps.gate.outputs.enabled == 'true'
+        run: |
+          curl -fsSL https://packages.stripe.dev/api/security/keypair/stripe-cli-gpg/public | gpg --dearmor | sudo tee /usr/share/keyrings/stripe.gpg >/dev/null
+          echo "deb [signed-by=/usr/share/keyrings/stripe.gpg] https://packages.stripe.dev/stripe-cli-debian-local stable main" | sudo tee -a /etc/apt/sources.list.d/stripe.list
+          sudo apt-get update -qq && sudo apt-get install -y stripe
+
+      - name: Prepare API env file
+        if: steps.gate.outputs.enabled == 'true'
+        run: cp apps/api/.env.example apps/api/.env
+
+      - name: Start Postgres + Redis + MinIO
+        if: steps.gate.outputs.enabled == 'true'
+        run: docker-compose -f infra/docker-compose.yml up -d postgres redis minio minio-bootstrap
+
+      - name: Apply Drizzle migrations
+        if: steps.gate.outputs.enabled == 'true'
+        run: cd apps/api && DATABASE_URL=postgresql://dev_user:dev_password@localhost:5432/tau_dev pnpm exec drizzle-kit migrate
+
+      - name: Run billing lifecycle suite (L3, Test Clocks + stripe listen)
+        if: steps.gate.outputs.enabled == 'true'
+        run: pnpm nx run-many -t test:models -- app/testing/billing-lifecycle.integration.test.ts
+
+  # D19's funded cell: one real frontier turn placed on launcher 2, against a local
+  # API with real provider keys. Secrets-gated exactly like `billing-e2e` above and
+  # never a required check — the deterministic half of D19 runs in the `e2e` job,
+  # which stubs the provider upstream. Only the OpenAI key is needed: the seam stays
+  # armed for the Anthropic host in this tier, so the home composer's seeding turn
+  # lands on the suite's stub, and only the live turn spends on the frontier row the
+  # credit delta measures.
+  desktop-e2e-live:
+    name: Desktop live LLM (launcher 2)
+    runs-on: ubuntu-latest
+    needs: [plan]
+    if: (github.event_name == 'push') || (github.event.pull_request.head.repo.full_name == github.repository && needs.plan.outputs.e2e == 'true')
+    env:
+      OPENAI_API_KEY: ${{ secrets.TAU_E2E_OPENAI_API_KEY }}
+      TAU_E2E_WEBGPU_PROFILE: software
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Skip without live provider keys
+        id: gate
+        run: |
+          if [ -z "$OPENAI_API_KEY" ]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "TAU_E2E_OPENAI_API_KEY not configured — skipping the live desktop lane."
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup Nx Environment
+        if: steps.gate.outputs.enabled == 'true'
+        uses: ./.github/actions/setup-nx
+
+      - name: Prepare API env file
+        if: steps.gate.outputs.enabled == 'true'
+        run: cp apps/api/.env.example apps/api/.env
+
+      - name: Run the live launcher-2 turn
+        if: steps.gate.outputs.enabled == 'true'
+        run: xvfb-run --auto-servernum pnpm nx run-many -t test:e2e:desktop:live
+
+      - name: Upload desktop diagnostics
+        if: always() && steps.gate.outputs.enabled == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: desktop-e2e-live-diagnostics
+          path: out/test-results/desktop-e2e
+          if-no-files-found: ignore
+          retention-days: 7
 
   # Staging deployments — deploy after builds pass so the Nx Cloud cache is populated.
   # The staging UI is hosted on Netlify (`taucad` site, custom domain `taucad.dev`)

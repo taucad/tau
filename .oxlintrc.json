@@ -29,6 +29,9 @@
     // Opt-in benchmark/parity CLIs run by hand against a locally built native
     // addon; unpublished (`files` excludes them) and outside every tsconfig.
     "bench/**",
+    // Compute-reuse baseline harness (charter W0): opt-in benchmark code
+    // reaching runtime-internal seams through a loader hook; outside tsconfig.
+    "apps/runtime-e2e/src/compute-baseline/harness/**",
     "**/*.jscad.js",
     "**/fixtures/scripts/**"
   ],
@@ -1005,6 +1008,7 @@
           {
             "capIsNewExceptions": [
               "Injectable",
+              "LlmGatewayPrincipal",
               "Module",
               "Controller",
               "Get",
@@ -1046,6 +1050,31 @@
       "rules": {
         "import/extensions": "off",
         "no-restricted-imports": "off"
+      }
+    },
+    {
+      "files": ["apps/ui/app/**/*.{ts,tsx}"],
+      // Tests and route entries retain the uncompiled React Router/Vitest transform paths.
+      "excludeFiles": [
+        "apps/ui/app/**/*.{test,spec}.{ts,tsx}",
+        "apps/ui/app/root.{ts,tsx}",
+        "apps/ui/app/routes/*.{ts,tsx}",
+        "apps/ui/app/routes/**/route.{ts,tsx}"
+      ],
+      "rules": {
+        "react/error-boundaries": "error",
+        "react/globals": "error",
+        "react/immutability": "error",
+        "react/incompatible-library": "error",
+        "react/preserve-manual-memoization": "error",
+        "react/purity": "error",
+        "react/refs": "error",
+        "react/set-state-in-effect": "error",
+        "react/set-state-in-render": "error",
+        "react/static-components": "error",
+        "react/unsupported-syntax": "error",
+        "react/use-memo": "error",
+        "react/void-use-memo": "error"
       }
     },
     {
@@ -1303,6 +1332,124 @@
         "max-params": "warn"
       },
       "plugins": ["typescript"]
+    },
+    {
+      // Hooks are below components and routes; W1 removes the billing exceptions.
+      "files": ["apps/ui/app/hooks/**/*.{ts,tsx,mts,cts}"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "paths": ["error", "domain", "freelist", "smalloc", "punycode", "sys", "querystring", "colors"],
+            "patterns": [
+              {
+                "group": ["#components/*", "#routes/*"],
+                "message": "Hooks must not import from UI components or routes. Move the dependency down or inject it."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      // Infrastructure layers may not depend on hooks, components, or routes.
+      "files": [
+        "apps/ui/app/machines/**/*.{ts,tsx,mts,cts}",
+        "apps/ui/app/lib/**/*.{ts,tsx,mts,cts}",
+        "apps/ui/app/services/**/*.{ts,tsx,mts,cts}",
+        "apps/ui/app/utils/**/*.{ts,tsx,mts,cts}",
+        "apps/ui/app/constants/**/*.{ts,tsx,mts,cts}",
+        "apps/ui/app/filesystem/**/*.{ts,tsx,mts,cts}",
+        "apps/ui/app/db/**/*.{ts,tsx,mts,cts}",
+        "apps/ui/app/workers/**/*.{ts,tsx,mts,cts}"
+      ],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "paths": ["error", "domain", "freelist", "smalloc", "punycode", "sys", "querystring", "colors"],
+            "patterns": [
+              {
+                "group": ["#components/*", "#hooks/*", "#routes/*"],
+                "message": "Infrastructure must not import from hooks, UI components, or routes. Move the dependency down or inject it."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      // Current UI primitive/component inversions. -- W2
+      "files": [
+        "apps/ui/app/hooks/active-chat-provider.test.tsx",
+        "apps/ui/app/hooks/use-draft-image-error-toast.ts",
+        "apps/ui/app/hooks/use-favicon.ts",
+        "apps/ui/app/hooks/use-models.tsx",
+        "apps/ui/app/hooks/use-project-creation-location-error.test.ts",
+        "apps/ui/app/hooks/use-project-creation-location-error.ts",
+        "apps/ui/app/hooks/use-project-creation-location.test.ts",
+        "apps/ui/app/hooks/use-project-creation-location.ts",
+        "apps/ui/app/hooks/use-service-worker.tsx",
+        "apps/ui/app/utils/at-reference.utils.ts",
+        "apps/ui/app/utils/magic-link-plugin.ts"
+      ],
+      "rules": { "no-restricted-imports": "off" }
+    },
+    {
+      // Current graphics inversions. -- W3
+      "files": [
+        "apps/ui/app/machines/controls-listener.machine.test.ts",
+        "apps/ui/app/machines/controls-listener.machine.ts",
+        "apps/ui/app/machines/graphics.machine.ts",
+        "apps/ui/app/machines/resolve-screenshot-overlay.ts",
+        "apps/ui/app/machines/screenshot-capability.machine.test.ts",
+        "apps/ui/app/machines/screenshot-capability.machine.ts",
+        "apps/ui/app/machines/screenshot-capability.utils.test.ts"
+      ],
+      "rules": { "no-restricted-imports": "off" }
+    },
+    {
+      // Current file/telemetry inversion. -- W4
+      "files": [
+        "apps/ui/app/utils/workspace-telemetry.utils.test.ts",
+        "apps/ui/app/utils/workspace-telemetry.utils.ts"
+      ],
+      "rules": { "no-restricted-imports": "off" }
+    },
+    {
+      // Current chat inversions. -- W6
+      "files": [
+        "apps/ui/app/hooks/use-chat.tsx",
+        "apps/ui/app/lib/skill-resolver.ts",
+        "apps/ui/app/lib/system-skills-catalog.test.ts",
+        "apps/ui/app/services/chat-session-store.ts",
+        "apps/ui/app/utils/chat.utils.test.ts",
+        "apps/ui/app/utils/chat.utils.ts"
+      ],
+      "rules": { "no-restricted-imports": "off" }
+    },
+    {
+      // Current revision inversions. -- W8
+      "files": [
+        "apps/ui/app/hooks/use-restore-to-point.ts",
+        "apps/ui/app/hooks/use-revisions.test.tsx",
+        "apps/ui/app/hooks/use-revisions.ts"
+      ],
+      "rules": { "no-restricted-imports": "off" }
+    },
+    {
+      // Current publish/import inversions. -- W9
+      "files": [
+        "apps/ui/app/lib/github-api.ts",
+        "apps/ui/app/machines/import-disk.machine.test.ts",
+        "apps/ui/app/machines/import-disk.machine.ts"
+      ],
+      "rules": { "no-restricted-imports": "off" }
+    },
+    {
+      // Current settings inversion. -- W10
+      "files": ["apps/ui/app/constants/route.constants.ts"],
+      "rules": { "no-restricted-imports": "off" }
     },
     {
       // libcascade exposes generated OCCT/Emscripten names whose constructor

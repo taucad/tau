@@ -46,6 +46,9 @@ const workspacePackageDirectories = () => {
   absorbChildren(path.join(root, 'libs'));
   absorbChildren(path.join(root, 'apps'));
   absorbChildren(path.join(root, 'apps/libs'));
+  for (const app of fs.readdirSync(path.join(root, 'apps'))) {
+    absorbChildren(path.join(root, 'apps', app, 'apps'));
+  }
   absorbChildren(path.join(root, 'examples'));
   if (fs.existsSync(path.join(root, 'scripts/package.json'))) {
     directories.add(path.join(root, 'scripts'));
@@ -249,6 +252,10 @@ const config = [
       // oxlint/eslint disable banner and lives in no tsconfig project.
       '**/.agents/skills/*/references/*.d.ts',
       '**/reports/**',
+      '**/package-out*/**',
+      'package-out*/**',
+      'apps/desktop/package-out*/**',
+      'apps/desktop/resources/python/**',
       // GeoSpec fixture generation scripts are verbatim-normative model-code
       // inputs run through the runtime VM (see fixtures/README.md), not
       // library sources — same class as prompt examples and experiments.
@@ -261,6 +268,10 @@ const config = [
       // wasm bindings. They are unpublished (`files` excludes `bench/`) and
       // outside the package tsconfig.
       'packages/plugins/opencascade-native/bench/**',
+      // Same class: the compute-reuse baseline harness (charter W0) is an
+      // opt-in benchmark reaching runtime-internal seams through a loader
+      // hook; `.mts` files outside the project tsconfig.
+      'apps/runtime-e2e/src/compute-baseline/harness/**',
     ],
   },
 
@@ -292,6 +303,21 @@ const config = [
         'error',
         {
           allowCircularSelfDependency: true,
+          /*
+           * Libraries that are deliberately lazy-loaded in one consumer and
+           * statically imported in another: the UI keeps the runtime and the
+           * filesystem bridge out of its initial bundle, and the CLI client
+           * loads the agent host on demand, while the Node daemon, its render
+           * probe and the integration tests import the same packages directly.
+           * Entries are matched as regular expressions against the import
+           * specifier, so `(/|$)` keeps `@taucad/runtime` from also exempting
+           * `@taucad/runtime-testing`.
+           */
+          checkDynamicDependenciesExceptions: [
+            '@taucad/runtime(/|$)',
+            '@taucad/agent-host(/|$)',
+            '@taucad/fs-bridge(/|$)',
+          ],
           depConstraints: [
             {
               sourceTag: 'scope:api',
@@ -765,6 +791,22 @@ const config = [
         'error',
         {
           patterns: [dreiDeepJsImportRestriction],
+        },
+      ],
+    },
+  },
+  {
+    files: ['apps/api/**/*.{ts,tsx,mts,cts}'],
+    rules: {
+      '@typescript-eslint/no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['@taucad/billing/hooks/*'],
+              message: 'API code must not import the React-only @taucad/billing hooks surface.',
+            },
+          ],
         },
       ],
     },

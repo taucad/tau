@@ -19,7 +19,7 @@ const config: KnipConfig = {
   // Named one by one rather than as `tools/*`: knip turns each ignored workspace pattern into a negated
   // project glob (`tools/*` → `!tools/**`), which also hid `tools/pkgcheck.ts` — and with it every
   // dependency that file is the only consumer of — from the root workspace.
-  ignoreWorkspaces: ['tools/nx', 'tools/workspace-plugin', 'libs/api-extractor', 'libs/tau-examples'],
+  ignoreWorkspaces: ['tools/nx', 'tools/workspace-plugin', 'libs/tau-examples'],
 
   vitest: {
     config: ['vitest.config.{js,ts}', 'vite.config.{js,ts}'],

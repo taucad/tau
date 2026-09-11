@@ -39,7 +39,8 @@
       "options": {
         "targetName": "lint",
         "eslintConfig": "eslint.config.mjs"
-      }
+      },
+      "exclude": ["libs/oxlint/src/rules/fixtures/**"]
     },
     {
       "plugin": "./tools/tsgo.plugin.ts",
@@ -58,9 +59,16 @@
   "targetDefaults": {
     "typecheck": {
       "executor": "nx:run-commands",
+      "inputs": ["default", "^production"],
       "options": {
         "forwardAllArgs": false
       }
+    },
+    "test": {
+      "inputs": ["default", "^production"]
+    },
+    "build": {
+      "inputs": ["production", "^production"]
     },
     "lint": {
       "options": {
@@ -92,6 +100,9 @@
       "options": {
         "cwd": "."
       }
+    },
+    "nx-release-publish": {
+      "dependsOn": ["pkgcheck"]
     }
   },
   "generators": {
@@ -109,32 +120,25 @@
     "enabled": false
   },
   "namedInputs": {
-    "sharedGlobals": ["{workspaceRoot}/.github/workflows/ci.yml"],
-    "default": ["{projectRoot}/**/*", "sharedGlobals"]
+    "sharedGlobals": ["{workspaceRoot}/.github/workflows/ci.yml", "{workspaceRoot}/.github/workflows/publish.yml"],
+    "default": ["{projectRoot}/**/*", "sharedGlobals"],
+    "production": [
+      "default",
+      "!{projectRoot}/**/*.test.*",
+      "!{projectRoot}/**/*.spec.*",
+      "!{projectRoot}/**/*.test-d.*",
+      "!{projectRoot}/vitest.config.*",
+      "!{projectRoot}/**/*.md"
+    ]
   },
   "release": {
-    "projects": [
-      "packages/*",
-      "packages/kernels/*",
-      "converter",
-      "events",
-      "filesystem",
-      "fs-bridge",
-      "gltf-extensions",
-      "json-schema",
-      "memory",
-      "rpc",
-      "types",
-      "units",
-      "utils",
-      "vm"
-    ],
+    "projects": ["tag:type:package"],
     "projectsRelationship": "fixed",
     "versionPlans": {
       "ignorePatternsForPlanCheck": ["**/*.spec.ts", "**/*.test.ts", "**/*.md"]
     },
     "version": {
-      "preVersionCommand": "pnpm nx run-many -t build --projects=packages/*,packages/kernels/*,converter,events,filesystem,fs-bridge,gltf-extensions,json-schema,memory,rpc,types,units,utils,vm",
+      "preVersionCommand": "pnpm nx run-many -t build --projects=tag:type:package",
       "currentVersionResolver": "git-tag",
       "fallbackCurrentVersionResolver": "disk"
     },

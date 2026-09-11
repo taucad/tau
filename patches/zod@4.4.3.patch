@@ -1,0 +1,45 @@
+diff --git a/src/v4/core/checks.ts b/src/v4/core/checks.ts
+index e640775056bf6e3764a97ffec0e459377e56b805..d4cd3c0077ba244cd52dc713d077bbb3268e3006 100644
+--- a/src/v4/core/checks.ts
++++ b/src/v4/core/checks.ts
+@@ -274,8 +274,8 @@ export const $ZodCheckNumberFormat: core.$constructor<$ZodCheckNumberFormat> = /
+     inst._zod.onattach.push((inst) => {
+       const bag = inst._zod.bag;
+       bag.format = def.format;
+-      bag.minimum = minimum;
+-      bag.maximum = maximum;
++      bag.minimum = Math.max(bag.minimum ?? -Infinity, minimum);
++      bag.maximum = Math.min(bag.maximum ?? Infinity, maximum);
+       if (isInt) bag.pattern = regexes.integer;
+     });
+
+diff --git a/v4/core/checks.cjs b/v4/core/checks.cjs
+index e95ba628f9ca174f7c9f6d15ebe027944f9ae1c1..5a0909150aab4d7ae247cdf1243d54df3ed32188 100644
+--- a/v4/core/checks.cjs
++++ b/v4/core/checks.cjs
+@@ -129,8 +129,8 @@ exports.$ZodCheckNumberFormat = core.$constructor("$ZodCheckNumberFormat", (inst
+     inst._zod.onattach.push((inst) => {
+         const bag = inst._zod.bag;
+         bag.format = def.format;
+-        bag.minimum = minimum;
+-        bag.maximum = maximum;
++        bag.minimum = Math.max(bag.minimum ?? -Infinity, minimum);
++        bag.maximum = Math.min(bag.maximum ?? Infinity, maximum);
+         if (isInt)
+             bag.pattern = regexes.integer;
+     });
+diff --git a/v4/core/checks.js b/v4/core/checks.js
+index 285b6ace95e5dfbe47c3511c384a97d19182531c..eecf7d2de4bd9cffc9c92c578cf59398dca6ebf4 100644
+--- a/v4/core/checks.js
++++ b/v4/core/checks.js
+@@ -103,8 +103,8 @@ export const $ZodCheckNumberFormat = /*@__PURE__*/ core.$constructor("$ZodCheckN
+     inst._zod.onattach.push((inst) => {
+         const bag = inst._zod.bag;
+         bag.format = def.format;
+-        bag.minimum = minimum;
+-        bag.maximum = maximum;
++        bag.minimum = Math.max(bag.minimum ?? -Infinity, minimum);
++        bag.maximum = Math.min(bag.maximum ?? Infinity, maximum);
+         if (isInt)
+             bag.pattern = regexes.integer;
+     });

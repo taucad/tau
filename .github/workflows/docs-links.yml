@@ -1,0 +1,37 @@
+name: Docs external links
+
+on:
+  schedule:
+    - cron: '17 4 * * 1'
+  workflow_dispatch: {}
+
+permissions:
+  contents: 'read'
+
+jobs:
+  links:
+    name: Check external links
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Restore lychee cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .lycheecache
+          key: docs-links-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: docs-links-${{ runner.os }}-
+
+      # This workflow never runs on pull requests; failures remain visible as scheduled-run alerts.
+      - name: Check external documentation links
+        uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
+        with:
+          args: >-
+            --cache --max-cache-age 7d --no-progress
+            --root-dir "${{ github.workspace }}" --scheme https --scheme http
+            'apps/docs/content/**/*.mdx'
+          fail: true
+          failIfEmpty: true
+          jobSummary: true

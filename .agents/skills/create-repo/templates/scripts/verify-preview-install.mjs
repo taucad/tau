@@ -73,7 +73,26 @@ export const verifyPreviewInstall = ({ from, metadata, sha, install = execFileSy
     if (selected.some(({ name }) => !existsSync(join(directory, 'node_modules', name, 'package.json')))) {
       throw new Error('not every preview root was installed');
     }
-    return { installed, roots: selected.map(({ name }) => name) };
+
+    // `npm install` honours os/cpu/libc, so a root install only lands the
+    // packages this runner can use — every other published package would be
+    // accepted unread. `npm pack` fetches a manifest regardless of platform.
+    for (const [name, url] of urls) {
+      const [packed] = JSON.parse(
+        install('npm', ['pack', url, '--pack-destination', directory, '--json'], {
+          cwd: directory,
+          encoding: 'utf8',
+        }),
+      );
+      if (packed?.name !== name) {
+        throw new Error(`${url} published ${String(packed?.name)}, expected ${String(name)}`);
+      }
+      if (packed.version !== expectedVersion) {
+        throw new Error(`${String(name)} published ${String(packed.version)}, expected ${expectedVersion}`);
+      }
+    }
+
+    return { installed, published: urls.size, roots: selected.map(({ name }) => name) };
   } finally {
     rmSync(directory, { force: true, recursive: true });
   }
@@ -92,7 +111,9 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       throw new Error('expected --from, --metadata, and --sha');
     }
     const result = verifyPreviewInstall(values);
-    process.stdout.write(`verified ${result.installed} preview package(s) from ${result.roots.join(', ')}\n`);
+    process.stdout.write(
+      `verified ${result.published} published preview package(s), ${result.installed} installed from ${result.roots.join(', ')}\n`,
+    );
   } catch (error) {
     process.stderr.write(`::error::${error instanceof Error ? error.message : String(error)}\n`);
     process.exitCode = 1;

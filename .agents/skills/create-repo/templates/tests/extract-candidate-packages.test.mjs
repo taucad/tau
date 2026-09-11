@@ -89,6 +89,11 @@ describe('hosted preview consumer', () => {
       sha,
       install(command, args, options) {
         calls.push([command, args]);
+        if (args[0] === 'pack') {
+          const [, url] = args;
+          const name = url.slice('https://pkg.pr.new/'.length, url.lastIndexOf('@'));
+          return `${JSON.stringify([{ name, version: '0.0.0-preview-abc1234' }])}\n`;
+        }
         if (args[0] !== 'install') return;
         const modules = join(options.cwd, 'node_modules');
         mkdirSync(join(modules, 'example'), { recursive: true });
@@ -104,8 +109,62 @@ describe('hosted preview consumer', () => {
       },
     });
 
-    assert.deepEqual(result, { installed: 2, roots: ['example'] });
+    assert.deepEqual(result, { installed: 2, published: 2, roots: ['example'] });
     assert.deepEqual(calls[1][1], ['install', '--ignore-scripts', `https://pkg.pr.new/example@${sha}`]);
+  });
+
+  it('should reject a published sibling the platform filter hid from the install', () => {
+    const sha = 'abc1234abc1234abc1234abc1234abc1234abc12';
+    const source = temporaryDirectory();
+    const root = join(source, '00');
+    const native = join(source, '01');
+    const metadata = join(source, 'preview.json');
+    mkdirSync(root);
+    mkdirSync(native);
+    writeFileSync(
+      join(root, 'package.json'),
+      `${JSON.stringify({ name: 'example', optionalDependencies: { 'example-linux': '1.0.0' } })}\n`,
+    );
+    writeFileSync(join(native, 'package.json'), `${JSON.stringify({ name: 'example-linux' })}\n`);
+    writeFileSync(
+      metadata,
+      `${JSON.stringify({
+        packages: [
+          { name: 'example', url: `https://pkg.pr.new/example@${sha}` },
+          { name: 'example-linux', url: `https://pkg.pr.new/example-linux@${sha}` },
+        ],
+      })}\n`,
+    );
+
+    assert.throws(
+      () =>
+        verifyPreviewInstall({
+          from: source,
+          metadata,
+          sha,
+          install(command, args, options) {
+            if (args[0] === 'pack') {
+              const [, url] = args;
+              const name = url.slice('https://pkg.pr.new/'.length, url.lastIndexOf('@'));
+              return `${JSON.stringify([
+                { name, version: name === 'example' ? '0.0.0-preview-abc1234' : '1.0.0' },
+              ])}\n`;
+            }
+            if (args[0] !== 'install') return;
+            const modules = join(options.cwd, 'node_modules');
+            mkdirSync(join(modules, 'example'), { recursive: true });
+            writeFileSync(
+              join(modules, 'example', 'package.json'),
+              `${JSON.stringify({
+                name: 'example',
+                version: '0.0.0-preview-abc1234',
+                optionalDependencies: { 'example-linux': `https://pkg.pr.new/example-linux@${sha}` },
+              })}\n`,
+            );
+          },
+        }),
+      /example-linux published 1\.0\.0, expected 0\.0\.0-preview-abc1234/u,
+    );
   });
 
   it('should reject untrusted or stale metadata before invoking npm', () => {

@@ -66,6 +66,7 @@ Applicability:
 | R    | Same-repository pull requests publish every tested package through one locked `pkg-pr-new` invocation.                        |
 | R    | Preview versions use `0.0.0-preview-<sha>` and sibling package references resolve through pkg.pr.new URLs.                    |
 | R    | A clean post-publish consumer installs hosted root previews and verifies rewritten sibling URLs and preview versions.         |
+| R    | That consumer also fetches every published manifest with `npm pack`, since a root install hides platform-filtered packages.   |
 | R    | Fork PRs skip preview publication and hosted consumer checks; `ci-gate` requires both only when eligible.                     |
 | R    | Publish job has `id-token: write`, no checkout, no registry token, and is idempotent.                                         |
 | R    | Existing registry versions are byte/provenance verified rather than overwritten.                                              |

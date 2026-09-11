@@ -99,7 +99,21 @@ export function ActiveSessions({ className }: ActiveSessionsProps): React.JSX.El
               )}
             </div>
           ) : activeSessions.length === 0 ? (
-            <p className='p-4 text-sm text-muted-foreground'>No active sessions found.</p>
+            <div className='flex min-h-24 flex-wrap items-center gap-3 p-4'>
+              <p className='min-w-48 flex-1 text-sm text-muted-foreground'>No active sessions found.</p>
+              <Button
+                className='ml-auto'
+                variant='outline'
+                size='sm'
+                disabled={isFetching}
+                onClick={async () => {
+                  await refetch();
+                }}
+              >
+                {isFetching ? <Spinner /> : <RefreshCw aria-hidden='true' />}
+                Try again
+              </Button>
+            </div>
           ) : (
             activeSessions.map((activeSession, index) => (
               <div key={activeSession.id}>

@@ -138,4 +138,22 @@ describe('ActiveSessions', () => {
 
     expect(screen.getByRole('status', { name: 'Loading active sessions' })).toHaveAttribute('aria-busy', 'true');
   });
+
+  it('should retry an unexpected empty session list', async () => {
+    authState.listSessions.mockReturnValue({
+      data: [],
+      error: null,
+      isError: false,
+      isFetching: false,
+      isPending: false,
+      refetch: authState.refetch,
+    });
+
+    renderSessions();
+    expect(screen.getByText('No active sessions found.')).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Try again' }));
+
+    expect(authState.refetch).toHaveBeenCalledOnce();
+  });
 });

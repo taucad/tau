@@ -6,7 +6,6 @@ PCDM: declare class PCDM
 
 constructor
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -25,7 +24,6 @@ endElement(): boolean;
 
 GetElement(): LDOM_Element;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -40,7 +38,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -49,17 +46,14 @@ PCDM_DriverError: declare class PCDM_DriverError extends Standard_Failure
 
 constructor
 
-// Returns the exception type name
 ExceptionType(): string;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
 PCDM_ReadWriter: declare class PCDM_ReadWriter extends Standard_Transient
 
-// returns {@link PCDM_ReadWriter_1`PCDM_ReadWriter_1`}
 Version(): TCollection_AsciiString;
 
 WriteReferenceCounter(aData: Storage_Data, aDocument: CDM_Document): void;
@@ -70,14 +64,12 @@ WriteExtensions(aData: Storage_Data, aDocument: CDM_Document): void;
 
 WriteVersion(aData: Storage_Data, aDocument: CDM_Document): void;
 
-// returns the convenient Reader for a File
 static Reader(aFileName: TCollection_ExtendedString): PCDM_ReadWriter;
 
 static Writer(): PCDM_ReadWriter;
 
 static WriteFileFormat(aData: Storage_Data, aDocument: CDM_Document): void;
 
-// tries to get a format in the file
 static FileFormat(aFileName: TCollection_ExtendedString): TCollection_ExtendedString;
 
 static get_type_name(): string;
@@ -86,7 +78,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -95,7 +86,6 @@ PCDM_ReadWriter_1: declare class PCDM_ReadWriter_1 extends PCDM_ReadWriter
 
 constructor
 
-// returns {@link PCDM_ReadWriter_1`PCDM_ReadWriter_1`}
 Version(): TCollection_AsciiString;
 
 WriteReferenceCounter(aData: Storage_Data, aDocument: CDM_Document): void;
@@ -112,7 +102,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -127,12 +116,10 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Status of reading of a document
 PCDM_ReaderStatus: typeof PCDM_ReaderStatus[keyof typeof PCDM_ReaderStatus]
 
 PCDM_Reference: declare class PCDM_Reference
@@ -145,7 +132,6 @@ FileName(): TCollection_ExtendedString;
 
 DocumentVersion(): number;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -162,7 +148,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -179,23 +164,19 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// persistent implementation of storage
 PCDM_StorageDriver: declare class PCDM_StorageDriver extends PCDM_Writer
 
 constructor
 
-// raises NotImplemented
 Make(aDocument: CDM_Document): PCDM_Document;
 Make(aDocument: CDM_Document, Documents: NCollection_Sequence_handle_PCDM_Document): void;
 Make(aDocument: CDM_Document): PCDM_Document;
 Make(aDocument: CDM_Document, Documents: NCollection_Sequence_handle_PCDM_Document): void;
 
-// Warning! raises DriverError if an error occurs during inside the Make method
 Write(aDocument: CDM_Document, aFileName: TCollection_ExtendedString, theRange: Message_ProgressRange): void;
 Write(theDocument: CDM_Document, theOStream: unknown, theRange: Message_ProgressRange): void;
 Write(aDocument: CDM_Document, aFileName: TCollection_ExtendedString, theRange: Message_ProgressRange): void;
@@ -219,12 +200,10 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Status of storage of a document on disk
 PCDM_StoreStatus: typeof PCDM_StoreStatus[keyof typeof PCDM_StoreStatus]
 
 PCDM_TypeOfFileDriver: typeof PCDM_TypeOfFileDriver[keyof typeof PCDM_TypeOfFileDriver]
@@ -239,7 +218,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;

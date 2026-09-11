@@ -2,12 +2,10 @@
 
 1 top-level symbols. Signatures are verbatim typescript.
 
-// A framework providing advanced tolerance control
 BRep_Builder: declare class BRep_Builder extends TopoDS_Builder
 
 constructor
 
-// Makes an undefined Face
 MakeFace(F: TopoDS_Face): void;
 MakeFace(theFace: TopoDS_Face, theTriangulation: Poly_Triangulation): void;
 MakeFace(F: TopoDS_Face, S: Geom_Surface, Tol: number): void;
@@ -33,9 +31,7 @@ MakeFace(theFace: TopoDS_Face, theTriangulation: Poly_Triangulation): void;
 MakeFace(F: TopoDS_Face, S: Geom_Surface, Tol: number): void;
 MakeFace(theFace: TopoDS_Face, theTriangulations: NCollection_List_handle_Poly_Triangulation, theActiveTriangulation: Poly_Triangulation): void;
 MakeFace(F: TopoDS_Face, S: Geom_Surface, L: TopLoc_Location, Tol: number): void;
-// F: Mutated in place
 
-// Updates the face F using the tolerance value Tol, surface S and location Location
 UpdateFace(F: TopoDS_Face, S: Geom_Surface, L: TopLoc_Location, Tol: number): void;
 UpdateFace(theFace: TopoDS_Face, theTriangulation: Poly_Triangulation, theToReset: boolean): void;
 UpdateFace(F: TopoDS_Face, Tol: number): void;
@@ -46,10 +42,8 @@ UpdateFace(F: TopoDS_Face, S: Geom_Surface, L: TopLoc_Location, Tol: number): vo
 UpdateFace(theFace: TopoDS_Face, theTriangulation: Poly_Triangulation, theToReset: boolean): void;
 UpdateFace(F: TopoDS_Face, Tol: number): void;
 
-// Sets the NaturalRestriction flag of the face
 NaturalRestriction(F: TopoDS_Face, N: boolean): void;
 
-// Makes an undefined Edge (no geometry)
 MakeEdge(E: TopoDS_Edge): void;
 MakeEdge(E: TopoDS_Edge, P: Poly_Polygon3D): void;
 MakeEdge(E: TopoDS_Edge, C: Geom_Curve, Tol: number): void;
@@ -86,9 +80,7 @@ MakeEdge(E: TopoDS_Edge, C: Geom_Curve, Tol: number): void;
 MakeEdge(E: TopoDS_Edge, N: Poly_PolygonOnTriangulation, T: Poly_Triangulation): void;
 MakeEdge(E: TopoDS_Edge, C: Geom_Curve, L: TopLoc_Location, Tol: number): void;
 MakeEdge(E: TopoDS_Edge, N: Poly_PolygonOnTriangulation, T: Poly_Triangulation, L: TopLoc_Location): void;
-// E: Mutated in place
 
-// Changes an Edge 3D polygon
 UpdateEdge(E: TopoDS_Edge, P: Poly_Polygon3D): void;
 UpdateEdge(E: TopoDS_Edge, Tol: number): void;
 UpdateEdge(E: TopoDS_Edge, C: Geom_Curve, Tol: number): void;
@@ -451,22 +443,17 @@ UpdateEdge(E: TopoDS_Edge, C1: Geom2d_Curve, C2: Geom2d_Curve, S: Geom_Surface, 
 UpdateEdge(E: TopoDS_Edge, C: Geom2d_Curve, S: Geom_Surface, L: TopLoc_Location, Tol: number, Pf: gp_Pnt2d, Pl: gp_Pnt2d): void;
 UpdateEdge(E: TopoDS_Edge, C1: Geom2d_Curve, C2: Geom2d_Curve, S: Geom_Surface, L: TopLoc_Location, Tol: number, Pf: gp_Pnt2d, Pl: gp_Pnt2d): void;
 
-// Sets the geometric continuity on the edge
 Continuity(E: TopoDS_Edge, F1: TopoDS_Face, F2: TopoDS_Face, C: GeomAbs_Shape): void;
 Continuity(E: TopoDS_Edge, S1: Geom_Surface, S2: Geom_Surface, L1: TopLoc_Location, L2: TopLoc_Location, C: GeomAbs_Shape): void;
 Continuity(E: TopoDS_Edge, F1: TopoDS_Face, F2: TopoDS_Face, C: GeomAbs_Shape): void;
 Continuity(E: TopoDS_Edge, S1: Geom_Surface, S2: Geom_Surface, L1: TopLoc_Location, L2: TopLoc_Location, C: GeomAbs_Shape): void;
 
-// Sets the same parameter flag for the edge <E>
 SameParameter(E: TopoDS_Edge, S: boolean): void;
 
-// Sets the same range flag for the edge <E>
 SameRange(E: TopoDS_Edge, S: boolean): void;
 
-// Sets the degenerated flag for the edge <E>
 Degenerated(E: TopoDS_Edge, D: boolean): void;
 
-// Sets the range of the 3d curve if Only3d=TRUE, otherwise sets the range to all the representations
 Range(E: TopoDS_Edge, First: number, Last: number, Only3d: boolean): void;
 Range(E: TopoDS_Edge, F: TopoDS_Face, First: number, Last: number): void;
 Range(E: TopoDS_Edge, S: Geom_Surface, L: TopLoc_Location, First: number, Last: number): void;
@@ -477,20 +464,16 @@ Range(E: TopoDS_Edge, First: number, Last: number, Only3d: boolean): void;
 Range(E: TopoDS_Edge, F: TopoDS_Face, First: number, Last: number): void;
 Range(E: TopoDS_Edge, S: Geom_Surface, L: TopLoc_Location, First: number, Last: number): void;
 
-// Add to <Eout> the geometric representations of <Ein>
 Transfert(Ein: TopoDS_Edge, Eout: TopoDS_Edge): void;
 Transfert(Ein: TopoDS_Edge, Eout: TopoDS_Edge, Vin: TopoDS_Vertex, Vout: TopoDS_Vertex): void;
 Transfert(Ein: TopoDS_Edge, Eout: TopoDS_Edge): void;
 Transfert(Ein: TopoDS_Edge, Eout: TopoDS_Edge, Vin: TopoDS_Vertex, Vout: TopoDS_Vertex): void;
 
-// Makes an udefined vertex without geometry
 MakeVertex(V: TopoDS_Vertex): void;
 MakeVertex(V: TopoDS_Vertex, P: gp_Pnt, Tol: number): void;
 MakeVertex(V: TopoDS_Vertex): void;
 MakeVertex(V: TopoDS_Vertex, P: gp_Pnt, Tol: number): void;
-// V: Mutated in place
 
-// Updates the vertex tolerance
 UpdateVertex(V: TopoDS_Vertex, Tol: number): void;
 UpdateVertex(V: TopoDS_Vertex, P: gp_Pnt, Tol: number): void;
 UpdateVertex(V: TopoDS_Vertex, P: number, E: TopoDS_Edge, Tol: number): void;
@@ -528,7 +511,6 @@ UpdateVertex(V: TopoDS_Vertex, P: number, E: TopoDS_Edge, F: TopoDS_Face, Tol: n
 UpdateVertex(Ve: TopoDS_Vertex, U: number, V: number, F: TopoDS_Face, Tol: number): void;
 UpdateVertex(V: TopoDS_Vertex, P: number, E: TopoDS_Edge, S: Geom_Surface, L: TopLoc_Location, Tol: number): void;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;

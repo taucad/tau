@@ -46,7 +46,7 @@ Check overload suffixes, unfreed temporaries, build order, and missing disposal 
 
 All 65053 symbols are listed in `api-index.md`. Grep it for a name, then read only the file its heading names.
 
-- 39 reference files, named in `api-index.md`
-- 466 further files are fetched on demand; `api-index.md` names them.
+- 26 reference files, named in `api-index.md`
+- 379 further files are fetched on demand; `api-index.md` names them.
 
 Read ranges, not whole files. Never copy a reference into a source file.

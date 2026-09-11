@@ -1,643 +1,828 @@
 # libcascade — NCollection (8)
 
-8 top-level symbols. Signatures are verbatim typescript.
+15 top-level symbols. Signatures are verbatim typescript.
 
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_StepGeom_PcurveOrSurface: declare class NCollection_Array1_StepGeom_PcurveOrSurface
+NCollection_Array1_handle_HLRAlgo_PolyShellData: declare class NCollection_Array1_handle_HLRAlgo_PolyShellData
 
 constructor
 
-// Initialise the items with theValue
-Init(theValue: StepGeom_PcurveOrSurface): void;
+Init(theValue: HLRAlgo_PolyShellData): void;
 
-// Size query
 Size(): number;
 
-// Length query (legacy int-returning API)
 Length(): number;
 
-// Return TRUE if array has zero length
 IsEmpty(): boolean;
 
-// Lower bound
 Lower(): number;
 
-// Upper bound
 Upper(): number;
 
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_StepGeom_PcurveOrSurface): NCollection_Array1_StepGeom_PcurveOrSurface;
+Assign(theOther: NCollection_Array1_handle_HLRAlgo_PolyShellData): NCollection_Array1_handle_HLRAlgo_PolyShellData;
 
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_StepGeom_PcurveOrSurface): NCollection_Array1_StepGeom_PcurveOrSurface;
+CopyValues(theOther: NCollection_Array1_handle_HLRAlgo_PolyShellData): NCollection_Array1_handle_HLRAlgo_PolyShellData;
 
-// Move assignment
-Move(theOther: NCollection_Array1_StepGeom_PcurveOrSurface): NCollection_Array1_StepGeom_PcurveOrSurface;
-// theOther: Mutated in place
+Move(theOther: NCollection_Array1_handle_HLRAlgo_PolyShellData): NCollection_Array1_handle_HLRAlgo_PolyShellData;
 
-First(): StepGeom_PcurveOrSurface;
+First(): HLRAlgo_PolyShellData;
 
-ChangeFirst(): StepGeom_PcurveOrSurface;
+ChangeFirst(): HLRAlgo_PolyShellData;
 
-Last(): StepGeom_PcurveOrSurface;
+Last(): HLRAlgo_PolyShellData;
 
-ChangeLast(): StepGeom_PcurveOrSurface;
+ChangeLast(): HLRAlgo_PolyShellData;
 
-// Constant value access
-Value(theIndex: number): StepGeom_PcurveOrSurface;
+Value(theIndex: number): HLRAlgo_PolyShellData;
 
-// Variable value access
-ChangeValue(theIndex: number): StepGeom_PcurveOrSurface;
+ChangeValue(theIndex: number): HLRAlgo_PolyShellData;
 
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): StepGeom_PcurveOrSurface;
-// theIndex: 0-based index in [0, `Size()`-1]
+At(theIndex: number): HLRAlgo_PolyShellData;
 
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): StepGeom_PcurveOrSurface;
-// theIndex: 0-based index in [0, `Size()`-1]
+ChangeAt(theIndex: number): HLRAlgo_PolyShellData;
 
-// Set value
-SetValue(theIndex: number, theItem: StepGeom_PcurveOrSurface): void;
+SetValue(theIndex: number, theItem: HLRAlgo_PolyShellData): void;
 
-// Changes the lowest bound
 UpdateLowerBound(theLower: number): void;
 
-// Changes the upper bound
 UpdateUpperBound(theUpper: number): void;
 
-// Resizes the array to specified bounds
 Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
 Resize(theSize: number, theToCopyData: boolean): void;
 Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
 Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
 
 IsDeletable(): boolean;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_StepGeom_SurfaceBoundary: declare class NCollection_Array1_StepGeom_SurfaceBoundary
+NCollection_Array1_handle_IGESAppli_FiniteElement: declare class NCollection_Array1_handle_IGESAppli_FiniteElement
 
 constructor
 
-// Initialise the items with theValue
-Init(theValue: StepGeom_SurfaceBoundary): void;
+Init(theValue: IGESAppli_FiniteElement): void;
 
-// Size query
 Size(): number;
 
-// Length query (legacy int-returning API)
 Length(): number;
 
-// Return TRUE if array has zero length
 IsEmpty(): boolean;
 
-// Lower bound
 Lower(): number;
 
-// Upper bound
 Upper(): number;
 
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_StepGeom_SurfaceBoundary): NCollection_Array1_StepGeom_SurfaceBoundary;
+Assign(theOther: NCollection_Array1_handle_IGESAppli_FiniteElement): NCollection_Array1_handle_IGESAppli_FiniteElement;
 
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_StepGeom_SurfaceBoundary): NCollection_Array1_StepGeom_SurfaceBoundary;
+CopyValues(theOther: NCollection_Array1_handle_IGESAppli_FiniteElement): NCollection_Array1_handle_IGESAppli_FiniteElement;
 
-// Move assignment
-Move(theOther: NCollection_Array1_StepGeom_SurfaceBoundary): NCollection_Array1_StepGeom_SurfaceBoundary;
-// theOther: Mutated in place
+Move(theOther: NCollection_Array1_handle_IGESAppli_FiniteElement): NCollection_Array1_handle_IGESAppli_FiniteElement;
 
-First(): StepGeom_SurfaceBoundary;
+First(): IGESAppli_FiniteElement;
 
-ChangeFirst(): StepGeom_SurfaceBoundary;
+ChangeFirst(): IGESAppli_FiniteElement;
 
-Last(): StepGeom_SurfaceBoundary;
+Last(): IGESAppli_FiniteElement;
 
-ChangeLast(): StepGeom_SurfaceBoundary;
+ChangeLast(): IGESAppli_FiniteElement;
 
-// Constant value access
-Value(theIndex: number): StepGeom_SurfaceBoundary;
+Value(theIndex: number): IGESAppli_FiniteElement;
 
-// Variable value access
-ChangeValue(theIndex: number): StepGeom_SurfaceBoundary;
+ChangeValue(theIndex: number): IGESAppli_FiniteElement;
 
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): StepGeom_SurfaceBoundary;
-// theIndex: 0-based index in [0, `Size()`-1]
+At(theIndex: number): IGESAppli_FiniteElement;
 
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): StepGeom_SurfaceBoundary;
-// theIndex: 0-based index in [0, `Size()`-1]
+ChangeAt(theIndex: number): IGESAppli_FiniteElement;
 
-// Set value
-SetValue(theIndex: number, theItem: StepGeom_SurfaceBoundary): void;
+SetValue(theIndex: number, theItem: IGESAppli_FiniteElement): void;
 
-// Changes the lowest bound
 UpdateLowerBound(theLower: number): void;
 
-// Changes the upper bound
 UpdateUpperBound(theUpper: number): void;
 
-// Resizes the array to specified bounds
 Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
 Resize(theSize: number, theToCopyData: boolean): void;
 Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
 Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
 
 IsDeletable(): boolean;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_StepGeom_TrimmingSelect: declare class NCollection_Array1_StepGeom_TrimmingSelect
+NCollection_Array1_handle_IGESAppli_Node: declare class NCollection_Array1_handle_IGESAppli_Node
 
 constructor
 
-// Initialise the items with theValue
-Init(theValue: StepGeom_TrimmingSelect): void;
+Init(theValue: IGESAppli_Node): void;
 
-// Size query
 Size(): number;
 
-// Length query (legacy int-returning API)
 Length(): number;
 
-// Return TRUE if array has zero length
 IsEmpty(): boolean;
 
-// Lower bound
 Lower(): number;
 
-// Upper bound
 Upper(): number;
 
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_StepGeom_TrimmingSelect): NCollection_Array1_StepGeom_TrimmingSelect;
+Assign(theOther: NCollection_Array1_handle_IGESAppli_Node): NCollection_Array1_handle_IGESAppli_Node;
 
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_StepGeom_TrimmingSelect): NCollection_Array1_StepGeom_TrimmingSelect;
+CopyValues(theOther: NCollection_Array1_handle_IGESAppli_Node): NCollection_Array1_handle_IGESAppli_Node;
 
-// Move assignment
-Move(theOther: NCollection_Array1_StepGeom_TrimmingSelect): NCollection_Array1_StepGeom_TrimmingSelect;
-// theOther: Mutated in place
+Move(theOther: NCollection_Array1_handle_IGESAppli_Node): NCollection_Array1_handle_IGESAppli_Node;
 
-First(): StepGeom_TrimmingSelect;
+First(): IGESAppli_Node;
 
-ChangeFirst(): StepGeom_TrimmingSelect;
+ChangeFirst(): IGESAppli_Node;
 
-Last(): StepGeom_TrimmingSelect;
+Last(): IGESAppli_Node;
 
-ChangeLast(): StepGeom_TrimmingSelect;
+ChangeLast(): IGESAppli_Node;
 
-// Constant value access
-Value(theIndex: number): StepGeom_TrimmingSelect;
+Value(theIndex: number): IGESAppli_Node;
 
-// Variable value access
-ChangeValue(theIndex: number): StepGeom_TrimmingSelect;
+ChangeValue(theIndex: number): IGESAppli_Node;
 
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): StepGeom_TrimmingSelect;
-// theIndex: 0-based index in [0, `Size()`-1]
+At(theIndex: number): IGESAppli_Node;
 
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): StepGeom_TrimmingSelect;
-// theIndex: 0-based index in [0, `Size()`-1]
+ChangeAt(theIndex: number): IGESAppli_Node;
 
-// Set value
-SetValue(theIndex: number, theItem: StepGeom_TrimmingSelect): void;
+SetValue(theIndex: number, theItem: IGESAppli_Node): void;
 
-// Changes the lowest bound
 UpdateLowerBound(theLower: number): void;
 
-// Changes the upper bound
 UpdateUpperBound(theUpper: number): void;
 
-// Resizes the array to specified bounds
 Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
 Resize(theSize: number, theToCopyData: boolean): void;
 Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
 Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
 
 IsDeletable(): boolean;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_StepShape_GeometricSetSelect: declare class NCollection_Array1_StepShape_GeometricSetSelect
+NCollection_Array1_handle_IGESData_IGESEntity: declare class NCollection_Array1_handle_IGESData_IGESEntity
 
 constructor
 
-// Initialise the items with theValue
-Init(theValue: StepShape_GeometricSetSelect): void;
+Init(theValue: IGESData_IGESEntity): void;
 
-// Size query
 Size(): number;
 
-// Length query (legacy int-returning API)
 Length(): number;
 
-// Return TRUE if array has zero length
 IsEmpty(): boolean;
 
-// Lower bound
 Lower(): number;
 
-// Upper bound
 Upper(): number;
 
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_StepShape_GeometricSetSelect): NCollection_Array1_StepShape_GeometricSetSelect;
+Assign(theOther: NCollection_Array1_handle_IGESData_IGESEntity): NCollection_Array1_handle_IGESData_IGESEntity;
 
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_StepShape_GeometricSetSelect): NCollection_Array1_StepShape_GeometricSetSelect;
+CopyValues(theOther: NCollection_Array1_handle_IGESData_IGESEntity): NCollection_Array1_handle_IGESData_IGESEntity;
 
-// Move assignment
-Move(theOther: NCollection_Array1_StepShape_GeometricSetSelect): NCollection_Array1_StepShape_GeometricSetSelect;
-// theOther: Mutated in place
+Move(theOther: NCollection_Array1_handle_IGESData_IGESEntity): NCollection_Array1_handle_IGESData_IGESEntity;
 
-First(): StepShape_GeometricSetSelect;
+First(): IGESData_IGESEntity;
 
-ChangeFirst(): StepShape_GeometricSetSelect;
+ChangeFirst(): IGESData_IGESEntity;
 
-Last(): StepShape_GeometricSetSelect;
+Last(): IGESData_IGESEntity;
 
-ChangeLast(): StepShape_GeometricSetSelect;
+ChangeLast(): IGESData_IGESEntity;
 
-// Constant value access
-Value(theIndex: number): StepShape_GeometricSetSelect;
+Value(theIndex: number): IGESData_IGESEntity;
 
-// Variable value access
-ChangeValue(theIndex: number): StepShape_GeometricSetSelect;
+ChangeValue(theIndex: number): IGESData_IGESEntity;
 
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): StepShape_GeometricSetSelect;
-// theIndex: 0-based index in [0, `Size()`-1]
+At(theIndex: number): IGESData_IGESEntity;
 
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): StepShape_GeometricSetSelect;
-// theIndex: 0-based index in [0, `Size()`-1]
+ChangeAt(theIndex: number): IGESData_IGESEntity;
 
-// Set value
-SetValue(theIndex: number, theItem: StepShape_GeometricSetSelect): void;
+SetValue(theIndex: number, theItem: IGESData_IGESEntity): void;
 
-// Changes the lowest bound
 UpdateLowerBound(theLower: number): void;
 
-// Changes the upper bound
 UpdateUpperBound(theUpper: number): void;
 
-// Resizes the array to specified bounds
 Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
 Resize(theSize: number, theToCopyData: boolean): void;
 Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
 Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
 
 IsDeletable(): boolean;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_StepShape_ShapeDimensionRepresentationItem: declare class NCollection_Array1_StepShape_ShapeDimensionRepresentationItem
+NCollection_Array1_handle_IGESData_LineFontEntity: declare class NCollection_Array1_handle_IGESData_LineFontEntity
 
 constructor
 
-// Initialise the items with theValue
-Init(theValue: StepShape_ShapeDimensionRepresentationItem): void;
+Init(theValue: IGESData_LineFontEntity): void;
 
-// Size query
 Size(): number;
 
-// Length query (legacy int-returning API)
 Length(): number;
 
-// Return TRUE if array has zero length
 IsEmpty(): boolean;
 
-// Lower bound
 Lower(): number;
 
-// Upper bound
 Upper(): number;
 
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_StepShape_ShapeDimensionRepresentationItem): NCollection_Array1_StepShape_ShapeDimensionRepresentationItem;
+Assign(theOther: NCollection_Array1_handle_IGESData_LineFontEntity): NCollection_Array1_handle_IGESData_LineFontEntity;
 
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_StepShape_ShapeDimensionRepresentationItem): NCollection_Array1_StepShape_ShapeDimensionRepresentationItem;
+CopyValues(theOther: NCollection_Array1_handle_IGESData_LineFontEntity): NCollection_Array1_handle_IGESData_LineFontEntity;
 
-// Move assignment
-Move(theOther: NCollection_Array1_StepShape_ShapeDimensionRepresentationItem): NCollection_Array1_StepShape_ShapeDimensionRepresentationItem;
-// theOther: Mutated in place
+Move(theOther: NCollection_Array1_handle_IGESData_LineFontEntity): NCollection_Array1_handle_IGESData_LineFontEntity;
 
-First(): StepShape_ShapeDimensionRepresentationItem;
+First(): IGESData_LineFontEntity;
 
-ChangeFirst(): StepShape_ShapeDimensionRepresentationItem;
+ChangeFirst(): IGESData_LineFontEntity;
 
-Last(): StepShape_ShapeDimensionRepresentationItem;
+Last(): IGESData_LineFontEntity;
 
-ChangeLast(): StepShape_ShapeDimensionRepresentationItem;
+ChangeLast(): IGESData_LineFontEntity;
 
-// Constant value access
-Value(theIndex: number): StepShape_ShapeDimensionRepresentationItem;
+Value(theIndex: number): IGESData_LineFontEntity;
 
-// Variable value access
-ChangeValue(theIndex: number): StepShape_ShapeDimensionRepresentationItem;
+ChangeValue(theIndex: number): IGESData_LineFontEntity;
 
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): StepShape_ShapeDimensionRepresentationItem;
-// theIndex: 0-based index in [0, `Size()`-1]
+At(theIndex: number): IGESData_LineFontEntity;
 
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): StepShape_ShapeDimensionRepresentationItem;
-// theIndex: 0-based index in [0, `Size()`-1]
+ChangeAt(theIndex: number): IGESData_LineFontEntity;
 
-// Set value
-SetValue(theIndex: number, theItem: StepShape_ShapeDimensionRepresentationItem): void;
+SetValue(theIndex: number, theItem: IGESData_LineFontEntity): void;
 
-// Changes the lowest bound
 UpdateLowerBound(theLower: number): void;
 
-// Changes the upper bound
 UpdateUpperBound(theUpper: number): void;
 
-// Resizes the array to specified bounds
 Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
 Resize(theSize: number, theToCopyData: boolean): void;
 Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
 Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
 
 IsDeletable(): boolean;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_StepShape_Shell: declare class NCollection_Array1_StepShape_Shell
+NCollection_Array1_handle_IGESData_ViewKindEntity: declare class NCollection_Array1_handle_IGESData_ViewKindEntity
 
 constructor
 
-// Initialise the items with theValue
-Init(theValue: StepShape_Shell): void;
+Init(theValue: IGESData_ViewKindEntity): void;
 
-// Size query
 Size(): number;
 
-// Length query (legacy int-returning API)
 Length(): number;
 
-// Return TRUE if array has zero length
 IsEmpty(): boolean;
 
-// Lower bound
 Lower(): number;
 
-// Upper bound
 Upper(): number;
 
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_StepShape_Shell): NCollection_Array1_StepShape_Shell;
+Assign(theOther: NCollection_Array1_handle_IGESData_ViewKindEntity): NCollection_Array1_handle_IGESData_ViewKindEntity;
 
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_StepShape_Shell): NCollection_Array1_StepShape_Shell;
+CopyValues(theOther: NCollection_Array1_handle_IGESData_ViewKindEntity): NCollection_Array1_handle_IGESData_ViewKindEntity;
 
-// Move assignment
-Move(theOther: NCollection_Array1_StepShape_Shell): NCollection_Array1_StepShape_Shell;
-// theOther: Mutated in place
+Move(theOther: NCollection_Array1_handle_IGESData_ViewKindEntity): NCollection_Array1_handle_IGESData_ViewKindEntity;
 
-First(): StepShape_Shell;
+First(): IGESData_ViewKindEntity;
 
-ChangeFirst(): StepShape_Shell;
+ChangeFirst(): IGESData_ViewKindEntity;
 
-Last(): StepShape_Shell;
+Last(): IGESData_ViewKindEntity;
 
-ChangeLast(): StepShape_Shell;
+ChangeLast(): IGESData_ViewKindEntity;
 
-// Constant value access
-Value(theIndex: number): StepShape_Shell;
+Value(theIndex: number): IGESData_ViewKindEntity;
 
-// Variable value access
-ChangeValue(theIndex: number): StepShape_Shell;
+ChangeValue(theIndex: number): IGESData_ViewKindEntity;
 
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): StepShape_Shell;
-// theIndex: 0-based index in [0, `Size()`-1]
+At(theIndex: number): IGESData_ViewKindEntity;
 
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): StepShape_Shell;
-// theIndex: 0-based index in [0, `Size()`-1]
+ChangeAt(theIndex: number): IGESData_ViewKindEntity;
 
-// Set value
-SetValue(theIndex: number, theItem: StepShape_Shell): void;
+SetValue(theIndex: number, theItem: IGESData_ViewKindEntity): void;
 
-// Changes the lowest bound
 UpdateLowerBound(theLower: number): void;
 
-// Changes the upper bound
 UpdateUpperBound(theUpper: number): void;
 
-// Resizes the array to specified bounds
 Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
 Resize(theSize: number, theToCopyData: boolean): void;
 Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
 Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
 
 IsDeletable(): boolean;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_StepShape_ValueQualifier: declare class NCollection_Array1_StepShape_ValueQualifier
+NCollection_Array1_handle_IGESDefs_TabularData: declare class NCollection_Array1_handle_IGESDefs_TabularData
 
 constructor
 
-// Initialise the items with theValue
-Init(theValue: StepShape_ValueQualifier): void;
+Init(theValue: IGESDefs_TabularData): void;
 
-// Size query
 Size(): number;
 
-// Length query (legacy int-returning API)
 Length(): number;
 
-// Return TRUE if array has zero length
 IsEmpty(): boolean;
 
-// Lower bound
 Lower(): number;
 
-// Upper bound
 Upper(): number;
 
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_StepShape_ValueQualifier): NCollection_Array1_StepShape_ValueQualifier;
+Assign(theOther: NCollection_Array1_handle_IGESDefs_TabularData): NCollection_Array1_handle_IGESDefs_TabularData;
 
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_StepShape_ValueQualifier): NCollection_Array1_StepShape_ValueQualifier;
+CopyValues(theOther: NCollection_Array1_handle_IGESDefs_TabularData): NCollection_Array1_handle_IGESDefs_TabularData;
 
-// Move assignment
-Move(theOther: NCollection_Array1_StepShape_ValueQualifier): NCollection_Array1_StepShape_ValueQualifier;
-// theOther: Mutated in place
+Move(theOther: NCollection_Array1_handle_IGESDefs_TabularData): NCollection_Array1_handle_IGESDefs_TabularData;
 
-First(): StepShape_ValueQualifier;
+First(): IGESDefs_TabularData;
 
-ChangeFirst(): StepShape_ValueQualifier;
+ChangeFirst(): IGESDefs_TabularData;
 
-Last(): StepShape_ValueQualifier;
+Last(): IGESDefs_TabularData;
 
-ChangeLast(): StepShape_ValueQualifier;
+ChangeLast(): IGESDefs_TabularData;
 
-// Constant value access
-Value(theIndex: number): StepShape_ValueQualifier;
+Value(theIndex: number): IGESDefs_TabularData;
 
-// Variable value access
-ChangeValue(theIndex: number): StepShape_ValueQualifier;
+ChangeValue(theIndex: number): IGESDefs_TabularData;
 
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): StepShape_ValueQualifier;
-// theIndex: 0-based index in [0, `Size()`-1]
+At(theIndex: number): IGESDefs_TabularData;
 
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): StepShape_ValueQualifier;
-// theIndex: 0-based index in [0, `Size()`-1]
+ChangeAt(theIndex: number): IGESDefs_TabularData;
 
-// Set value
-SetValue(theIndex: number, theItem: StepShape_ValueQualifier): void;
+SetValue(theIndex: number, theItem: IGESDefs_TabularData): void;
 
-// Changes the lowest bound
 UpdateLowerBound(theLower: number): void;
 
-// Changes the upper bound
 UpdateUpperBound(theUpper: number): void;
 
-// Resizes the array to specified bounds
 Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
 Resize(theSize: number, theToCopyData: boolean): void;
 Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
 Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
 
 IsDeletable(): boolean;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_StepVisual_AnnotationPlaneElement: declare class NCollection_Array1_StepVisual_AnnotationPlaneElement
+NCollection_Array1_handle_IGESDimen_GeneralNote: declare class NCollection_Array1_handle_IGESDimen_GeneralNote
 
 constructor
 
-// Initialise the items with theValue
-Init(theValue: StepVisual_AnnotationPlaneElement): void;
+Init(theValue: IGESDimen_GeneralNote): void;
 
-// Size query
 Size(): number;
 
-// Length query (legacy int-returning API)
 Length(): number;
 
-// Return TRUE if array has zero length
 IsEmpty(): boolean;
 
-// Lower bound
 Lower(): number;
 
-// Upper bound
 Upper(): number;
 
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_StepVisual_AnnotationPlaneElement): NCollection_Array1_StepVisual_AnnotationPlaneElement;
+Assign(theOther: NCollection_Array1_handle_IGESDimen_GeneralNote): NCollection_Array1_handle_IGESDimen_GeneralNote;
 
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_StepVisual_AnnotationPlaneElement): NCollection_Array1_StepVisual_AnnotationPlaneElement;
+CopyValues(theOther: NCollection_Array1_handle_IGESDimen_GeneralNote): NCollection_Array1_handle_IGESDimen_GeneralNote;
 
-// Move assignment
-Move(theOther: NCollection_Array1_StepVisual_AnnotationPlaneElement): NCollection_Array1_StepVisual_AnnotationPlaneElement;
-// theOther: Mutated in place
+Move(theOther: NCollection_Array1_handle_IGESDimen_GeneralNote): NCollection_Array1_handle_IGESDimen_GeneralNote;
 
-First(): StepVisual_AnnotationPlaneElement;
+First(): IGESDimen_GeneralNote;
 
-ChangeFirst(): StepVisual_AnnotationPlaneElement;
+ChangeFirst(): IGESDimen_GeneralNote;
 
-Last(): StepVisual_AnnotationPlaneElement;
+Last(): IGESDimen_GeneralNote;
 
-ChangeLast(): StepVisual_AnnotationPlaneElement;
+ChangeLast(): IGESDimen_GeneralNote;
 
-// Constant value access
-Value(theIndex: number): StepVisual_AnnotationPlaneElement;
+Value(theIndex: number): IGESDimen_GeneralNote;
 
-// Variable value access
-ChangeValue(theIndex: number): StepVisual_AnnotationPlaneElement;
+ChangeValue(theIndex: number): IGESDimen_GeneralNote;
 
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): StepVisual_AnnotationPlaneElement;
-// theIndex: 0-based index in [0, `Size()`-1]
+At(theIndex: number): IGESDimen_GeneralNote;
 
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): StepVisual_AnnotationPlaneElement;
-// theIndex: 0-based index in [0, `Size()`-1]
+ChangeAt(theIndex: number): IGESDimen_GeneralNote;
 
-// Set value
-SetValue(theIndex: number, theItem: StepVisual_AnnotationPlaneElement): void;
+SetValue(theIndex: number, theItem: IGESDimen_GeneralNote): void;
 
-// Changes the lowest bound
 UpdateLowerBound(theLower: number): void;
 
-// Changes the upper bound
 UpdateUpperBound(theUpper: number): void;
 
-// Resizes the array to specified bounds
 Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
 Resize(theSize: number, theToCopyData: boolean): void;
 Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
 Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
 
 IsDeletable(): boolean;
 
-// Releases the C++ object
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_Array1_handle_IGESDimen_LeaderArrow: declare class NCollection_Array1_handle_IGESDimen_LeaderArrow
+
+constructor
+
+Init(theValue: IGESDimen_LeaderArrow): void;
+
+Size(): number;
+
+Length(): number;
+
+IsEmpty(): boolean;
+
+Lower(): number;
+
+Upper(): number;
+
+Assign(theOther: NCollection_Array1_handle_IGESDimen_LeaderArrow): NCollection_Array1_handle_IGESDimen_LeaderArrow;
+
+CopyValues(theOther: NCollection_Array1_handle_IGESDimen_LeaderArrow): NCollection_Array1_handle_IGESDimen_LeaderArrow;
+
+Move(theOther: NCollection_Array1_handle_IGESDimen_LeaderArrow): NCollection_Array1_handle_IGESDimen_LeaderArrow;
+
+First(): IGESDimen_LeaderArrow;
+
+ChangeFirst(): IGESDimen_LeaderArrow;
+
+Last(): IGESDimen_LeaderArrow;
+
+ChangeLast(): IGESDimen_LeaderArrow;
+
+Value(theIndex: number): IGESDimen_LeaderArrow;
+
+ChangeValue(theIndex: number): IGESDimen_LeaderArrow;
+
+At(theIndex: number): IGESDimen_LeaderArrow;
+
+ChangeAt(theIndex: number): IGESDimen_LeaderArrow;
+
+SetValue(theIndex: number, theItem: IGESDimen_LeaderArrow): void;
+
+UpdateLowerBound(theLower: number): void;
+
+UpdateUpperBound(theUpper: number): void;
+
+Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
+Resize(theSize: number, theToCopyData: boolean): void;
+Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
+Resize(theSize: number, theToCopyData: boolean): void;
+
+IsDeletable(): boolean;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_Array1_handle_IGESDraw_ConnectPoint: declare class NCollection_Array1_handle_IGESDraw_ConnectPoint
+
+constructor
+
+Init(theValue: IGESDraw_ConnectPoint): void;
+
+Size(): number;
+
+Length(): number;
+
+IsEmpty(): boolean;
+
+Lower(): number;
+
+Upper(): number;
+
+Assign(theOther: unknown): unknown;
+
+CopyValues(theOther: unknown): unknown;
+
+Move(theOther: unknown): unknown;
+
+First(): IGESDraw_ConnectPoint;
+
+ChangeFirst(): IGESDraw_ConnectPoint;
+
+Last(): IGESDraw_ConnectPoint;
+
+ChangeLast(): IGESDraw_ConnectPoint;
+
+Value(theIndex: number): IGESDraw_ConnectPoint;
+
+ChangeValue(theIndex: number): IGESDraw_ConnectPoint;
+
+At(theIndex: number): IGESDraw_ConnectPoint;
+
+ChangeAt(theIndex: number): IGESDraw_ConnectPoint;
+
+SetValue(theIndex: number, theItem: IGESDraw_ConnectPoint): void;
+
+UpdateLowerBound(theLower: number): void;
+
+UpdateUpperBound(theUpper: number): void;
+
+Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
+Resize(theSize: number, theToCopyData: boolean): void;
+Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
+Resize(theSize: number, theToCopyData: boolean): void;
+
+IsDeletable(): boolean;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_Array1_handle_IGESGeom_Boundary: declare class NCollection_Array1_handle_IGESGeom_Boundary
+
+constructor
+
+Init(theValue: IGESGeom_Boundary): void;
+
+Size(): number;
+
+Length(): number;
+
+IsEmpty(): boolean;
+
+Lower(): number;
+
+Upper(): number;
+
+Assign(theOther: NCollection_Array1_handle_IGESGeom_Boundary): NCollection_Array1_handle_IGESGeom_Boundary;
+
+CopyValues(theOther: NCollection_Array1_handle_IGESGeom_Boundary): NCollection_Array1_handle_IGESGeom_Boundary;
+
+Move(theOther: NCollection_Array1_handle_IGESGeom_Boundary): NCollection_Array1_handle_IGESGeom_Boundary;
+
+First(): IGESGeom_Boundary;
+
+ChangeFirst(): IGESGeom_Boundary;
+
+Last(): IGESGeom_Boundary;
+
+ChangeLast(): IGESGeom_Boundary;
+
+Value(theIndex: number): IGESGeom_Boundary;
+
+ChangeValue(theIndex: number): IGESGeom_Boundary;
+
+At(theIndex: number): IGESGeom_Boundary;
+
+ChangeAt(theIndex: number): IGESGeom_Boundary;
+
+SetValue(theIndex: number, theItem: IGESGeom_Boundary): void;
+
+UpdateLowerBound(theLower: number): void;
+
+UpdateUpperBound(theUpper: number): void;
+
+Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
+Resize(theSize: number, theToCopyData: boolean): void;
+Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
+Resize(theSize: number, theToCopyData: boolean): void;
+
+IsDeletable(): boolean;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_Array1_handle_IGESGeom_CurveOnSurface: declare class NCollection_Array1_handle_IGESGeom_CurveOnSurface
+
+constructor
+
+Init(theValue: IGESGeom_CurveOnSurface): void;
+
+Size(): number;
+
+Length(): number;
+
+IsEmpty(): boolean;
+
+Lower(): number;
+
+Upper(): number;
+
+Assign(theOther: NCollection_Array1_handle_IGESGeom_CurveOnSurface): NCollection_Array1_handle_IGESGeom_CurveOnSurface;
+
+CopyValues(theOther: NCollection_Array1_handle_IGESGeom_CurveOnSurface): NCollection_Array1_handle_IGESGeom_CurveOnSurface;
+
+Move(theOther: NCollection_Array1_handle_IGESGeom_CurveOnSurface): NCollection_Array1_handle_IGESGeom_CurveOnSurface;
+
+First(): IGESGeom_CurveOnSurface;
+
+ChangeFirst(): IGESGeom_CurveOnSurface;
+
+Last(): IGESGeom_CurveOnSurface;
+
+ChangeLast(): IGESGeom_CurveOnSurface;
+
+Value(theIndex: number): IGESGeom_CurveOnSurface;
+
+ChangeValue(theIndex: number): IGESGeom_CurveOnSurface;
+
+At(theIndex: number): IGESGeom_CurveOnSurface;
+
+ChangeAt(theIndex: number): IGESGeom_CurveOnSurface;
+
+SetValue(theIndex: number, theItem: IGESGeom_CurveOnSurface): void;
+
+UpdateLowerBound(theLower: number): void;
+
+UpdateUpperBound(theUpper: number): void;
+
+Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
+Resize(theSize: number, theToCopyData: boolean): void;
+Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
+Resize(theSize: number, theToCopyData: boolean): void;
+
+IsDeletable(): boolean;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_Array1_handle_IGESGeom_TransformationMatrix: declare class NCollection_Array1_handle_IGESGeom_TransformationMatrix
+
+constructor
+
+Init(theValue: IGESGeom_TransformationMatrix): void;
+
+Size(): number;
+
+Length(): number;
+
+IsEmpty(): boolean;
+
+Lower(): number;
+
+Upper(): number;
+
+Assign(theOther: NCollection_Array1_handle_IGESGeom_TransformationMatrix): NCollection_Array1_handle_IGESGeom_TransformationMatrix;
+
+CopyValues(theOther: NCollection_Array1_handle_IGESGeom_TransformationMatrix): NCollection_Array1_handle_IGESGeom_TransformationMatrix;
+
+Move(theOther: NCollection_Array1_handle_IGESGeom_TransformationMatrix): NCollection_Array1_handle_IGESGeom_TransformationMatrix;
+
+First(): IGESGeom_TransformationMatrix;
+
+ChangeFirst(): IGESGeom_TransformationMatrix;
+
+Last(): IGESGeom_TransformationMatrix;
+
+ChangeLast(): IGESGeom_TransformationMatrix;
+
+Value(theIndex: number): IGESGeom_TransformationMatrix;
+
+ChangeValue(theIndex: number): IGESGeom_TransformationMatrix;
+
+At(theIndex: number): IGESGeom_TransformationMatrix;
+
+ChangeAt(theIndex: number): IGESGeom_TransformationMatrix;
+
+SetValue(theIndex: number, theItem: IGESGeom_TransformationMatrix): void;
+
+UpdateLowerBound(theLower: number): void;
+
+UpdateUpperBound(theUpper: number): void;
+
+Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
+Resize(theSize: number, theToCopyData: boolean): void;
+Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
+Resize(theSize: number, theToCopyData: boolean): void;
+
+IsDeletable(): boolean;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_Array1_handle_IGESGraph_Color: declare class NCollection_Array1_handle_IGESGraph_Color
+
+constructor
+
+Init(theValue: IGESGraph_Color): void;
+
+Size(): number;
+
+Length(): number;
+
+IsEmpty(): boolean;
+
+Lower(): number;
+
+Upper(): number;
+
+Assign(theOther: NCollection_Array1_handle_IGESGraph_Color): NCollection_Array1_handle_IGESGraph_Color;
+
+CopyValues(theOther: NCollection_Array1_handle_IGESGraph_Color): NCollection_Array1_handle_IGESGraph_Color;
+
+Move(theOther: NCollection_Array1_handle_IGESGraph_Color): NCollection_Array1_handle_IGESGraph_Color;
+
+First(): IGESGraph_Color;
+
+ChangeFirst(): IGESGraph_Color;
+
+Last(): IGESGraph_Color;
+
+ChangeLast(): IGESGraph_Color;
+
+Value(theIndex: number): IGESGraph_Color;
+
+ChangeValue(theIndex: number): IGESGraph_Color;
+
+At(theIndex: number): IGESGraph_Color;
+
+ChangeAt(theIndex: number): IGESGraph_Color;
+
+SetValue(theIndex: number, theItem: IGESGraph_Color): void;
+
+UpdateLowerBound(theLower: number): void;
+
+UpdateUpperBound(theUpper: number): void;
+
+Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
+Resize(theSize: number, theToCopyData: boolean): void;
+Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
+Resize(theSize: number, theToCopyData: boolean): void;
+
+IsDeletable(): boolean;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_Array1_handle_IGESGraph_TextDisplayTemplate: declare class NCollection_Array1_handle_IGESGraph_TextDisplayTemplate
+
+constructor
+
+Init(theValue: IGESGraph_TextDisplayTemplate): void;
+
+Size(): number;
+
+Length(): number;
+
+IsEmpty(): boolean;
+
+Lower(): number;
+
+Upper(): number;
+
+Assign(theOther: NCollection_Array1_handle_IGESGraph_TextDisplayTemplate): NCollection_Array1_handle_IGESGraph_TextDisplayTemplate;
+
+CopyValues(theOther: NCollection_Array1_handle_IGESGraph_TextDisplayTemplate): NCollection_Array1_handle_IGESGraph_TextDisplayTemplate;
+
+Move(theOther: NCollection_Array1_handle_IGESGraph_TextDisplayTemplate): NCollection_Array1_handle_IGESGraph_TextDisplayTemplate;
+
+First(): IGESGraph_TextDisplayTemplate;
+
+ChangeFirst(): IGESGraph_TextDisplayTemplate;
+
+Last(): IGESGraph_TextDisplayTemplate;
+
+ChangeLast(): IGESGraph_TextDisplayTemplate;
+
+Value(theIndex: number): IGESGraph_TextDisplayTemplate;
+
+ChangeValue(theIndex: number): IGESGraph_TextDisplayTemplate;
+
+At(theIndex: number): IGESGraph_TextDisplayTemplate;
+
+ChangeAt(theIndex: number): IGESGraph_TextDisplayTemplate;
+
+SetValue(theIndex: number, theItem: IGESGraph_TextDisplayTemplate): void;
+
+UpdateLowerBound(theLower: number): void;
+
+UpdateUpperBound(theUpper: number): void;
+
+Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
+Resize(theSize: number, theToCopyData: boolean): void;
+Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
+Resize(theSize: number, theToCopyData: boolean): void;
+
+IsDeletable(): boolean;
+
 delete(): void;
 
 [Symbol.dispose](): void;

@@ -1,643 +1,783 @@
 # libcascade — NCollection (15)
 
-8 top-level symbols. Signatures are verbatim typescript.
+20 top-level symbols. Signatures are verbatim typescript.
 
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_handle_IGESGeom_CurveOnSurface: declare class NCollection_Array1_handle_IGESGeom_CurveOnSurface
+NCollection_DataMap_TCollection_ExtendedString_handle_NCollection_HArray1_double: declare class NCollection_DataMap_TCollection_ExtendedString_handle_NCollection_HArray1_double extends NCollection_BaseMap
 
 constructor
 
-// Initialise the items with theValue
-Init(theValue: IGESGeom_CurveOnSurface): void;
+Exchange(theOther: unknown): void;
 
-// Size query
-Size(): number;
+GetHasher(): unknown;
 
-// Length query (legacy int-returning API)
-Length(): number;
+Assign(theOther: unknown): unknown;
 
-// Return TRUE if array has zero length
-IsEmpty(): boolean;
+ReSize(N: number): void;
 
-// Lower bound
-Lower(): number;
+Bind(theKey: TCollection_ExtendedString, theItem: unknown): boolean;
 
-// Upper bound
-Upper(): number;
+Bound(theKey: TCollection_ExtendedString, theItem: unknown): unknown;
 
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_handle_IGESGeom_CurveOnSurface): NCollection_Array1_handle_IGESGeom_CurveOnSurface;
+TryBind(theKey: TCollection_ExtendedString, theItem: unknown): boolean;
 
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_handle_IGESGeom_CurveOnSurface): NCollection_Array1_handle_IGESGeom_CurveOnSurface;
+TryBound(theKey: TCollection_ExtendedString, theItem: unknown): unknown;
 
-// Move assignment
-Move(theOther: NCollection_Array1_handle_IGESGeom_CurveOnSurface): NCollection_Array1_handle_IGESGeom_CurveOnSurface;
-// theOther: Mutated in place
+IsBound(theKey: TCollection_ExtendedString): boolean;
 
-First(): IGESGeom_CurveOnSurface;
+UnBind(theKey: TCollection_ExtendedString): boolean;
 
-ChangeFirst(): IGESGeom_CurveOnSurface;
+Seek(theKey: TCollection_ExtendedString): unknown;
 
-Last(): IGESGeom_CurveOnSurface;
+ChangeSeek(theKey: TCollection_ExtendedString): unknown;
 
-ChangeLast(): IGESGeom_CurveOnSurface;
+ChangeFind(theKey: TCollection_ExtendedString): unknown;
 
-// Constant value access
-Value(theIndex: number): IGESGeom_CurveOnSurface;
+Clear(doReleaseMemory: boolean): void;
+Clear(theAllocator: NCollection_BaseAllocator): void;
+Clear(doReleaseMemory: boolean): void;
+Clear(theAllocator: NCollection_BaseAllocator): void;
 
-// Variable value access
-ChangeValue(theIndex: number): IGESGeom_CurveOnSurface;
-
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): IGESGeom_CurveOnSurface;
-// theIndex: 0-based index in [0, `Size()`-1]
-
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): IGESGeom_CurveOnSurface;
-// theIndex: 0-based index in [0, `Size()`-1]
-
-// Set value
-SetValue(theIndex: number, theItem: IGESGeom_CurveOnSurface): void;
-
-// Changes the lowest bound
-UpdateLowerBound(theLower: number): void;
-
-// Changes the upper bound
-UpdateUpperBound(theUpper: number): void;
-
-// Resizes the array to specified bounds
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
-
-IsDeletable(): boolean;
-
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_handle_IGESGeom_TransformationMatrix: declare class NCollection_Array1_handle_IGESGeom_TransformationMatrix
+NCollection_DataMap_TCollection_ExtendedString_handle_NCollection_HArray1_int: declare class NCollection_DataMap_TCollection_ExtendedString_handle_NCollection_HArray1_int extends NCollection_BaseMap
 
 constructor
 
-// Initialise the items with theValue
-Init(theValue: IGESGeom_TransformationMatrix): void;
+Exchange(theOther: unknown): void;
 
-// Size query
-Size(): number;
+GetHasher(): unknown;
 
-// Length query (legacy int-returning API)
-Length(): number;
+Assign(theOther: unknown): unknown;
 
-// Return TRUE if array has zero length
-IsEmpty(): boolean;
+ReSize(N: number): void;
 
-// Lower bound
-Lower(): number;
+Bind(theKey: TCollection_ExtendedString, theItem: unknown): boolean;
 
-// Upper bound
-Upper(): number;
+Bound(theKey: TCollection_ExtendedString, theItem: unknown): unknown;
 
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_handle_IGESGeom_TransformationMatrix): NCollection_Array1_handle_IGESGeom_TransformationMatrix;
+TryBind(theKey: TCollection_ExtendedString, theItem: unknown): boolean;
 
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_handle_IGESGeom_TransformationMatrix): NCollection_Array1_handle_IGESGeom_TransformationMatrix;
+TryBound(theKey: TCollection_ExtendedString, theItem: unknown): unknown;
 
-// Move assignment
-Move(theOther: NCollection_Array1_handle_IGESGeom_TransformationMatrix): NCollection_Array1_handle_IGESGeom_TransformationMatrix;
-// theOther: Mutated in place
+IsBound(theKey: TCollection_ExtendedString): boolean;
 
-First(): IGESGeom_TransformationMatrix;
+UnBind(theKey: TCollection_ExtendedString): boolean;
 
-ChangeFirst(): IGESGeom_TransformationMatrix;
+Seek(theKey: TCollection_ExtendedString): unknown;
 
-Last(): IGESGeom_TransformationMatrix;
+ChangeSeek(theKey: TCollection_ExtendedString): unknown;
 
-ChangeLast(): IGESGeom_TransformationMatrix;
+ChangeFind(theKey: TCollection_ExtendedString): unknown;
 
-// Constant value access
-Value(theIndex: number): IGESGeom_TransformationMatrix;
+Clear(doReleaseMemory: boolean): void;
+Clear(theAllocator: NCollection_BaseAllocator): void;
+Clear(doReleaseMemory: boolean): void;
+Clear(theAllocator: NCollection_BaseAllocator): void;
 
-// Variable value access
-ChangeValue(theIndex: number): IGESGeom_TransformationMatrix;
-
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): IGESGeom_TransformationMatrix;
-// theIndex: 0-based index in [0, `Size()`-1]
-
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): IGESGeom_TransformationMatrix;
-// theIndex: 0-based index in [0, `Size()`-1]
-
-// Set value
-SetValue(theIndex: number, theItem: IGESGeom_TransformationMatrix): void;
-
-// Changes the lowest bound
-UpdateLowerBound(theLower: number): void;
-
-// Changes the upper bound
-UpdateUpperBound(theUpper: number): void;
-
-// Resizes the array to specified bounds
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
-
-IsDeletable(): boolean;
-
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_handle_IGESGraph_Color: declare class NCollection_Array1_handle_IGESGraph_Color
+NCollection_DataMap_TCollection_ExtendedString_int: declare class NCollection_DataMap_TCollection_ExtendedString_int extends NCollection_BaseMap
 
 constructor
 
-// Initialise the items with theValue
-Init(theValue: IGESGraph_Color): void;
+Exchange(theOther: unknown): void;
 
-// Size query
-Size(): number;
+GetHasher(): unknown;
 
-// Length query (legacy int-returning API)
-Length(): number;
+Assign(theOther: unknown): unknown;
 
-// Return TRUE if array has zero length
-IsEmpty(): boolean;
+ReSize(N: number): void;
 
-// Lower bound
-Lower(): number;
+Bind(theKey: TCollection_ExtendedString, theItem: number): boolean;
 
-// Upper bound
-Upper(): number;
+Bound(theKey: TCollection_ExtendedString, theItem: number): number;
 
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_handle_IGESGraph_Color): NCollection_Array1_handle_IGESGraph_Color;
+TryBind(theKey: TCollection_ExtendedString, theItem: number): boolean;
 
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_handle_IGESGraph_Color): NCollection_Array1_handle_IGESGraph_Color;
+TryBound(theKey: TCollection_ExtendedString, theItem: number): number;
 
-// Move assignment
-Move(theOther: NCollection_Array1_handle_IGESGraph_Color): NCollection_Array1_handle_IGESGraph_Color;
-// theOther: Mutated in place
+IsBound(theKey: TCollection_ExtendedString): boolean;
 
-First(): IGESGraph_Color;
+UnBind(theKey: TCollection_ExtendedString): boolean;
 
-ChangeFirst(): IGESGraph_Color;
+Seek(theKey: TCollection_ExtendedString): number;
 
-Last(): IGESGraph_Color;
+ChangeSeek(theKey: TCollection_ExtendedString): number;
 
-ChangeLast(): IGESGraph_Color;
+ChangeFind(theKey: TCollection_ExtendedString): number;
 
-// Constant value access
-Value(theIndex: number): IGESGraph_Color;
+Clear(doReleaseMemory: boolean): void;
+Clear(theAllocator: NCollection_BaseAllocator): void;
+Clear(doReleaseMemory: boolean): void;
+Clear(theAllocator: NCollection_BaseAllocator): void;
 
-// Variable value access
-ChangeValue(theIndex: number): IGESGraph_Color;
-
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): IGESGraph_Color;
-// theIndex: 0-based index in [0, `Size()`-1]
-
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): IGESGraph_Color;
-// theIndex: 0-based index in [0, `Size()`-1]
-
-// Set value
-SetValue(theIndex: number, theItem: IGESGraph_Color): void;
-
-// Changes the lowest bound
-UpdateLowerBound(theLower: number): void;
-
-// Changes the upper bound
-UpdateUpperBound(theUpper: number): void;
-
-// Resizes the array to specified bounds
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
-
-IsDeletable(): boolean;
-
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_handle_IGESGraph_TextDisplayTemplate: declare class NCollection_Array1_handle_IGESGraph_TextDisplayTemplate
+NCollection_DataMap_TCollection_ExtendedString_uint8_t: declare class NCollection_DataMap_TCollection_ExtendedString_uint8_t extends NCollection_BaseMap
 
 constructor
 
-// Initialise the items with theValue
-Init(theValue: IGESGraph_TextDisplayTemplate): void;
+Exchange(theOther: unknown): void;
 
-// Size query
-Size(): number;
+GetHasher(): unknown;
 
-// Length query (legacy int-returning API)
-Length(): number;
+Assign(theOther: unknown): unknown;
 
-// Return TRUE if array has zero length
-IsEmpty(): boolean;
+ReSize(N: number): void;
 
-// Lower bound
-Lower(): number;
+Bind(theKey: TCollection_ExtendedString, theItem: number): boolean;
 
-// Upper bound
-Upper(): number;
+Bound(theKey: TCollection_ExtendedString, theItem: number): number;
 
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_handle_IGESGraph_TextDisplayTemplate): NCollection_Array1_handle_IGESGraph_TextDisplayTemplate;
+TryBind(theKey: TCollection_ExtendedString, theItem: number): boolean;
 
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_handle_IGESGraph_TextDisplayTemplate): NCollection_Array1_handle_IGESGraph_TextDisplayTemplate;
+TryBound(theKey: TCollection_ExtendedString, theItem: number): number;
 
-// Move assignment
-Move(theOther: NCollection_Array1_handle_IGESGraph_TextDisplayTemplate): NCollection_Array1_handle_IGESGraph_TextDisplayTemplate;
-// theOther: Mutated in place
+IsBound(theKey: TCollection_ExtendedString): boolean;
 
-First(): IGESGraph_TextDisplayTemplate;
+UnBind(theKey: TCollection_ExtendedString): boolean;
 
-ChangeFirst(): IGESGraph_TextDisplayTemplate;
+Seek(theKey: TCollection_ExtendedString): number;
 
-Last(): IGESGraph_TextDisplayTemplate;
+ChangeSeek(theKey: TCollection_ExtendedString): number;
 
-ChangeLast(): IGESGraph_TextDisplayTemplate;
+ChangeFind(theKey: TCollection_ExtendedString): number;
 
-// Constant value access
-Value(theIndex: number): IGESGraph_TextDisplayTemplate;
+Clear(doReleaseMemory: boolean): void;
+Clear(theAllocator: NCollection_BaseAllocator): void;
+Clear(doReleaseMemory: boolean): void;
+Clear(theAllocator: NCollection_BaseAllocator): void;
 
-// Variable value access
-ChangeValue(theIndex: number): IGESGraph_TextDisplayTemplate;
-
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): IGESGraph_TextDisplayTemplate;
-// theIndex: 0-based index in [0, `Size()`-1]
-
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): IGESGraph_TextDisplayTemplate;
-// theIndex: 0-based index in [0, `Size()`-1]
-
-// Set value
-SetValue(theIndex: number, theItem: IGESGraph_TextDisplayTemplate): void;
-
-// Changes the lowest bound
-UpdateLowerBound(theLower: number): void;
-
-// Changes the upper bound
-UpdateUpperBound(theUpper: number): void;
-
-// Resizes the array to specified bounds
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
-
-IsDeletable(): boolean;
-
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_handle_IGESGraph_TextFontDef: declare class NCollection_Array1_handle_IGESGraph_TextFontDef
+NCollection_DataMap_TDF_Label_TDF_Label: declare class NCollection_DataMap_TDF_Label_TDF_Label extends NCollection_BaseMap
 
 constructor
 
-// Initialise the items with theValue
-Init(theValue: IGESGraph_TextFontDef): void;
+Exchange(theOther: unknown): void;
 
-// Size query
-Size(): number;
+GetHasher(): unknown;
 
-// Length query (legacy int-returning API)
-Length(): number;
+Assign(theOther: unknown): unknown;
 
-// Return TRUE if array has zero length
-IsEmpty(): boolean;
+ReSize(N: number): void;
 
-// Lower bound
-Lower(): number;
+Bind(theKey: TDF_Label, theItem: TDF_Label): boolean;
 
-// Upper bound
-Upper(): number;
+Bound(theKey: TDF_Label, theItem: TDF_Label): TDF_Label;
 
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_handle_IGESGraph_TextFontDef): NCollection_Array1_handle_IGESGraph_TextFontDef;
+TryBind(theKey: TDF_Label, theItem: TDF_Label): boolean;
 
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_handle_IGESGraph_TextFontDef): NCollection_Array1_handle_IGESGraph_TextFontDef;
+TryBound(theKey: TDF_Label, theItem: TDF_Label): TDF_Label;
 
-// Move assignment
-Move(theOther: NCollection_Array1_handle_IGESGraph_TextFontDef): NCollection_Array1_handle_IGESGraph_TextFontDef;
-// theOther: Mutated in place
+IsBound(theKey: TDF_Label): boolean;
 
-First(): IGESGraph_TextFontDef;
+UnBind(theKey: TDF_Label): boolean;
 
-ChangeFirst(): IGESGraph_TextFontDef;
+Seek(theKey: TDF_Label): TDF_Label;
 
-Last(): IGESGraph_TextFontDef;
+ChangeSeek(theKey: TDF_Label): TDF_Label;
 
-ChangeLast(): IGESGraph_TextFontDef;
+ChangeFind(theKey: TDF_Label): TDF_Label;
 
-// Constant value access
-Value(theIndex: number): IGESGraph_TextFontDef;
+Clear(doReleaseMemory: boolean): void;
+Clear(theAllocator: NCollection_BaseAllocator): void;
+Clear(doReleaseMemory: boolean): void;
+Clear(theAllocator: NCollection_BaseAllocator): void;
 
-// Variable value access
-ChangeValue(theIndex: number): IGESGraph_TextFontDef;
-
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): IGESGraph_TextFontDef;
-// theIndex: 0-based index in [0, `Size()`-1]
-
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): IGESGraph_TextFontDef;
-// theIndex: 0-based index in [0, `Size()`-1]
-
-// Set value
-SetValue(theIndex: number, theItem: IGESGraph_TextFontDef): void;
-
-// Changes the lowest bound
-UpdateLowerBound(theLower: number): void;
-
-// Changes the upper bound
-UpdateUpperBound(theUpper: number): void;
-
-// Resizes the array to specified bounds
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
-
-IsDeletable(): boolean;
-
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_handle_IGESSolid_Face: declare class NCollection_Array1_handle_IGESSolid_Face
+NCollection_DataMap_TDF_Label_int: declare class NCollection_DataMap_TDF_Label_int extends NCollection_BaseMap
 
 constructor
 
-// Initialise the items with theValue
-Init(theValue: IGESSolid_Face): void;
+Exchange(theOther: unknown): void;
 
-// Size query
-Size(): number;
+GetHasher(): unknown;
 
-// Length query (legacy int-returning API)
-Length(): number;
+Assign(theOther: unknown): unknown;
 
-// Return TRUE if array has zero length
-IsEmpty(): boolean;
+ReSize(N: number): void;
 
-// Lower bound
-Lower(): number;
+Bind(theKey: TDF_Label, theItem: number): boolean;
 
-// Upper bound
-Upper(): number;
+Bound(theKey: TDF_Label, theItem: number): number;
 
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_handle_IGESSolid_Face): NCollection_Array1_handle_IGESSolid_Face;
+TryBind(theKey: TDF_Label, theItem: number): boolean;
 
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_handle_IGESSolid_Face): NCollection_Array1_handle_IGESSolid_Face;
+TryBound(theKey: TDF_Label, theItem: number): number;
 
-// Move assignment
-Move(theOther: NCollection_Array1_handle_IGESSolid_Face): NCollection_Array1_handle_IGESSolid_Face;
-// theOther: Mutated in place
+IsBound(theKey: TDF_Label): boolean;
 
-First(): IGESSolid_Face;
+UnBind(theKey: TDF_Label): boolean;
 
-ChangeFirst(): IGESSolid_Face;
+Seek(theKey: TDF_Label): number;
 
-Last(): IGESSolid_Face;
+ChangeSeek(theKey: TDF_Label): number;
 
-ChangeLast(): IGESSolid_Face;
+ChangeFind(theKey: TDF_Label): number;
 
-// Constant value access
-Value(theIndex: number): IGESSolid_Face;
+Clear(doReleaseMemory: boolean): void;
+Clear(theAllocator: NCollection_BaseAllocator): void;
+Clear(doReleaseMemory: boolean): void;
+Clear(theAllocator: NCollection_BaseAllocator): void;
 
-// Variable value access
-ChangeValue(theIndex: number): IGESSolid_Face;
-
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): IGESSolid_Face;
-// theIndex: 0-based index in [0, `Size()`-1]
-
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): IGESSolid_Face;
-// theIndex: 0-based index in [0, `Size()`-1]
-
-// Set value
-SetValue(theIndex: number, theItem: IGESSolid_Face): void;
-
-// Changes the lowest bound
-UpdateLowerBound(theLower: number): void;
-
-// Changes the upper bound
-UpdateUpperBound(theUpper: number): void;
-
-// Resizes the array to specified bounds
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
-
-IsDeletable(): boolean;
-
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_handle_IGESSolid_Loop: declare class NCollection_Array1_handle_IGESSolid_Loop
+NCollection_DataMap_TopoDS_Shape_BRepGraph_NodeId_TopTools_ShapeMapHasher: declare class NCollection_DataMap_TopoDS_Shape_BRepGraph_NodeId_TopTools_ShapeMapHasher extends NCollection_BaseMap
 
 constructor
 
-// Initialise the items with theValue
-Init(theValue: IGESSolid_Loop): void;
+Exchange(theOther: NCollection_DataMap_TopoDS_Shape_BRepGraph_NodeId_TopTools_ShapeMapHasher): void;
 
-// Size query
-Size(): number;
+GetHasher(): TopTools_ShapeMapHasher;
 
-// Length query (legacy int-returning API)
-Length(): number;
+Assign(theOther: NCollection_DataMap_TopoDS_Shape_BRepGraph_NodeId_TopTools_ShapeMapHasher): NCollection_DataMap_TopoDS_Shape_BRepGraph_NodeId_TopTools_ShapeMapHasher;
 
-// Return TRUE if array has zero length
-IsEmpty(): boolean;
+ReSize(N: number): void;
 
-// Lower bound
-Lower(): number;
+Bind(theKey: TopoDS_Shape, theItem: BRepGraph_NodeId): boolean;
 
-// Upper bound
-Upper(): number;
+Bound(theKey: TopoDS_Shape, theItem: BRepGraph_NodeId): BRepGraph_NodeId;
 
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_handle_IGESSolid_Loop): NCollection_Array1_handle_IGESSolid_Loop;
+TryBind(theKey: TopoDS_Shape, theItem: BRepGraph_NodeId): boolean;
 
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_handle_IGESSolid_Loop): NCollection_Array1_handle_IGESSolid_Loop;
+TryBound(theKey: TopoDS_Shape, theItem: BRepGraph_NodeId): BRepGraph_NodeId;
 
-// Move assignment
-Move(theOther: NCollection_Array1_handle_IGESSolid_Loop): NCollection_Array1_handle_IGESSolid_Loop;
-// theOther: Mutated in place
+IsBound(theKey: TopoDS_Shape): boolean;
 
-First(): IGESSolid_Loop;
+UnBind(theKey: TopoDS_Shape): boolean;
 
-ChangeFirst(): IGESSolid_Loop;
+Seek(theKey: TopoDS_Shape): BRepGraph_NodeId;
 
-Last(): IGESSolid_Loop;
+ChangeSeek(theKey: TopoDS_Shape): BRepGraph_NodeId;
 
-ChangeLast(): IGESSolid_Loop;
+ChangeFind(theKey: TopoDS_Shape): BRepGraph_NodeId;
 
-// Constant value access
-Value(theIndex: number): IGESSolid_Loop;
+Clear(doReleaseMemory: boolean): void;
+Clear(theAllocator: NCollection_BaseAllocator): void;
+Clear(doReleaseMemory: boolean): void;
+Clear(theAllocator: NCollection_BaseAllocator): void;
 
-// Variable value access
-ChangeValue(theIndex: number): IGESSolid_Loop;
-
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): IGESSolid_Loop;
-// theIndex: 0-based index in [0, `Size()`-1]
-
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): IGESSolid_Loop;
-// theIndex: 0-based index in [0, `Size()`-1]
-
-// Set value
-SetValue(theIndex: number, theItem: IGESSolid_Loop): void;
-
-// Changes the lowest bound
-UpdateLowerBound(theLower: number): void;
-
-// Changes the upper bound
-UpdateUpperBound(theUpper: number): void;
-
-// Resizes the array to specified bounds
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
-
-IsDeletable(): boolean;
-
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_handle_IGESSolid_Shell: declare class NCollection_Array1_handle_IGESSolid_Shell
+NCollection_DataMap_TopoDS_Shape_BRepOffset_Offset_TopTools_ShapeMapHasher: declare class NCollection_DataMap_TopoDS_Shape_BRepOffset_Offset_TopTools_ShapeMapHasher extends NCollection_BaseMap
 
 constructor
 
-// Initialise the items with theValue
-Init(theValue: IGESSolid_Shell): void;
+Exchange(theOther: NCollection_DataMap_TopoDS_Shape_BRepOffset_Offset_TopTools_ShapeMapHasher): void;
 
-// Size query
-Size(): number;
+GetHasher(): TopTools_ShapeMapHasher;
 
-// Length query (legacy int-returning API)
-Length(): number;
+Assign(theOther: NCollection_DataMap_TopoDS_Shape_BRepOffset_Offset_TopTools_ShapeMapHasher): NCollection_DataMap_TopoDS_Shape_BRepOffset_Offset_TopTools_ShapeMapHasher;
 
-// Return TRUE if array has zero length
-IsEmpty(): boolean;
+ReSize(N: number): void;
 
-// Lower bound
-Lower(): number;
+Bind(theKey: TopoDS_Shape, theItem: BRepOffset_Offset): boolean;
 
-// Upper bound
-Upper(): number;
+Bound(theKey: TopoDS_Shape, theItem: BRepOffset_Offset): BRepOffset_Offset;
 
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_handle_IGESSolid_Shell): NCollection_Array1_handle_IGESSolid_Shell;
+TryBind(theKey: TopoDS_Shape, theItem: BRepOffset_Offset): boolean;
 
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_handle_IGESSolid_Shell): NCollection_Array1_handle_IGESSolid_Shell;
+TryBound(theKey: TopoDS_Shape, theItem: BRepOffset_Offset): BRepOffset_Offset;
 
-// Move assignment
-Move(theOther: NCollection_Array1_handle_IGESSolid_Shell): NCollection_Array1_handle_IGESSolid_Shell;
-// theOther: Mutated in place
+IsBound(theKey: TopoDS_Shape): boolean;
 
-First(): IGESSolid_Shell;
+UnBind(theKey: TopoDS_Shape): boolean;
 
-ChangeFirst(): IGESSolid_Shell;
+Seek(theKey: TopoDS_Shape): BRepOffset_Offset;
 
-Last(): IGESSolid_Shell;
+ChangeSeek(theKey: TopoDS_Shape): BRepOffset_Offset;
 
-ChangeLast(): IGESSolid_Shell;
+ChangeFind(theKey: TopoDS_Shape): BRepOffset_Offset;
 
-// Constant value access
-Value(theIndex: number): IGESSolid_Shell;
+Clear(doReleaseMemory: boolean): void;
+Clear(theAllocator: NCollection_BaseAllocator): void;
+Clear(doReleaseMemory: boolean): void;
+Clear(theAllocator: NCollection_BaseAllocator): void;
 
-// Variable value access
-ChangeValue(theIndex: number): IGESSolid_Shell;
+delete(): void;
 
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): IGESSolid_Shell;
-// theIndex: 0-based index in [0, `Size()`-1]
+[Symbol.dispose](): void;
 
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): IGESSolid_Shell;
-// theIndex: 0-based index in [0, `Size()`-1]
+NCollection_DataMap_TopoDS_Shape_BRepTopAdaptor_Tool_TopTools_ShapeMapHasher: declare class NCollection_DataMap_TopoDS_Shape_BRepTopAdaptor_Tool_TopTools_ShapeMapHasher extends NCollection_BaseMap
 
-// Set value
-SetValue(theIndex: number, theItem: IGESSolid_Shell): void;
+constructor
 
-// Changes the lowest bound
-UpdateLowerBound(theLower: number): void;
+Exchange(theOther: NCollection_DataMap_TopoDS_Shape_BRepTopAdaptor_Tool_TopTools_ShapeMapHasher): void;
 
-// Changes the upper bound
-UpdateUpperBound(theUpper: number): void;
+GetHasher(): TopTools_ShapeMapHasher;
 
-// Resizes the array to specified bounds
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
+Assign(theOther: NCollection_DataMap_TopoDS_Shape_BRepTopAdaptor_Tool_TopTools_ShapeMapHasher): NCollection_DataMap_TopoDS_Shape_BRepTopAdaptor_Tool_TopTools_ShapeMapHasher;
 
-IsDeletable(): boolean;
+ReSize(N: number): void;
 
-// Releases the C++ object
+Bind(theKey: TopoDS_Shape, theItem: BRepTopAdaptor_Tool): boolean;
+
+Bound(theKey: TopoDS_Shape, theItem: BRepTopAdaptor_Tool): BRepTopAdaptor_Tool;
+
+TryBind(theKey: TopoDS_Shape, theItem: BRepTopAdaptor_Tool): boolean;
+
+TryBound(theKey: TopoDS_Shape, theItem: BRepTopAdaptor_Tool): BRepTopAdaptor_Tool;
+
+IsBound(theKey: TopoDS_Shape): boolean;
+
+UnBind(theKey: TopoDS_Shape): boolean;
+
+Seek(theKey: TopoDS_Shape): BRepTopAdaptor_Tool;
+
+ChangeSeek(theKey: TopoDS_Shape): BRepTopAdaptor_Tool;
+
+ChangeFind(theKey: TopoDS_Shape): BRepTopAdaptor_Tool;
+
+Clear(doReleaseMemory: boolean): void;
+Clear(theAllocator: NCollection_BaseAllocator): void;
+Clear(doReleaseMemory: boolean): void;
+Clear(theAllocator: NCollection_BaseAllocator): void;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_DataMap_TopoDS_Shape_Bnd_Box_TopTools_ShapeMapHasher: declare class NCollection_DataMap_TopoDS_Shape_Bnd_Box_TopTools_ShapeMapHasher extends NCollection_BaseMap
+
+constructor
+
+Exchange(theOther: NCollection_DataMap_TopoDS_Shape_Bnd_Box_TopTools_ShapeMapHasher): void;
+
+GetHasher(): TopTools_ShapeMapHasher;
+
+Assign(theOther: NCollection_DataMap_TopoDS_Shape_Bnd_Box_TopTools_ShapeMapHasher): NCollection_DataMap_TopoDS_Shape_Bnd_Box_TopTools_ShapeMapHasher;
+
+ReSize(N: number): void;
+
+Bind(theKey: TopoDS_Shape, theItem: Bnd_Box): boolean;
+
+Bound(theKey: TopoDS_Shape, theItem: Bnd_Box): Bnd_Box;
+
+TryBind(theKey: TopoDS_Shape, theItem: Bnd_Box): boolean;
+
+TryBound(theKey: TopoDS_Shape, theItem: Bnd_Box): Bnd_Box;
+
+IsBound(theKey: TopoDS_Shape): boolean;
+
+UnBind(theKey: TopoDS_Shape): boolean;
+
+Seek(theKey: TopoDS_Shape): Bnd_Box;
+
+ChangeSeek(theKey: TopoDS_Shape): Bnd_Box;
+
+ChangeFind(theKey: TopoDS_Shape): Bnd_Box;
+
+Clear(doReleaseMemory: boolean): void;
+Clear(theAllocator: NCollection_BaseAllocator): void;
+Clear(doReleaseMemory: boolean): void;
+Clear(theAllocator: NCollection_BaseAllocator): void;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_DataMap_TopoDS_Shape_NCollection_List_Message_Msg_TopTools_ShapeMapHasher: declare class NCollection_DataMap_TopoDS_Shape_NCollection_List_Message_Msg_TopTools_ShapeMapHasher extends NCollection_BaseMap
+
+constructor
+
+Exchange(theOther: NCollection_DataMap_TopoDS_Shape_NCollection_List_Message_Msg_TopTools_ShapeMapHasher): void;
+
+GetHasher(): TopTools_ShapeMapHasher;
+
+Assign(theOther: NCollection_DataMap_TopoDS_Shape_NCollection_List_Message_Msg_TopTools_ShapeMapHasher): NCollection_DataMap_TopoDS_Shape_NCollection_List_Message_Msg_TopTools_ShapeMapHasher;
+
+ReSize(N: number): void;
+
+Bind(theKey: TopoDS_Shape, theItem: NCollection_List_Message_Msg): boolean;
+
+Bound(theKey: TopoDS_Shape, theItem: NCollection_List_Message_Msg): NCollection_List_Message_Msg;
+
+TryBind(theKey: TopoDS_Shape, theItem: NCollection_List_Message_Msg): boolean;
+
+TryBound(theKey: TopoDS_Shape, theItem: NCollection_List_Message_Msg): NCollection_List_Message_Msg;
+
+IsBound(theKey: TopoDS_Shape): boolean;
+
+UnBind(theKey: TopoDS_Shape): boolean;
+
+Seek(theKey: TopoDS_Shape): NCollection_List_Message_Msg;
+
+ChangeSeek(theKey: TopoDS_Shape): NCollection_List_Message_Msg;
+
+ChangeFind(theKey: TopoDS_Shape): NCollection_List_Message_Msg;
+
+Clear(doReleaseMemory: boolean): void;
+Clear(theAllocator: NCollection_BaseAllocator): void;
+Clear(doReleaseMemory: boolean): void;
+Clear(theAllocator: NCollection_BaseAllocator): void;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_DataMap_TopoDS_Shape_NCollection_List_TopoDS_Shape_TopTools_ShapeMapHasher: declare class NCollection_DataMap_TopoDS_Shape_NCollection_List_TopoDS_Shape_TopTools_ShapeMapHasher extends NCollection_BaseMap
+
+constructor
+
+Exchange(theOther: NCollection_DataMap_TopoDS_Shape_NCollection_List_TopoDS_Shape_TopTools_ShapeMapHasher): void;
+
+GetHasher(): TopTools_ShapeMapHasher;
+
+Assign(theOther: NCollection_DataMap_TopoDS_Shape_NCollection_List_TopoDS_Shape_TopTools_ShapeMapHasher): NCollection_DataMap_TopoDS_Shape_NCollection_List_TopoDS_Shape_TopTools_ShapeMapHasher;
+
+ReSize(N: number): void;
+
+Bind(theKey: TopoDS_Shape, theItem: NCollection_List_TopoDS_Shape): boolean;
+
+Bound(theKey: TopoDS_Shape, theItem: NCollection_List_TopoDS_Shape): NCollection_List_TopoDS_Shape;
+
+TryBind(theKey: TopoDS_Shape, theItem: NCollection_List_TopoDS_Shape): boolean;
+
+TryBound(theKey: TopoDS_Shape, theItem: NCollection_List_TopoDS_Shape): NCollection_List_TopoDS_Shape;
+
+IsBound(theKey: TopoDS_Shape): boolean;
+
+UnBind(theKey: TopoDS_Shape): boolean;
+
+Seek(theKey: TopoDS_Shape): NCollection_List_TopoDS_Shape;
+
+ChangeSeek(theKey: TopoDS_Shape): NCollection_List_TopoDS_Shape;
+
+ChangeFind(theKey: TopoDS_Shape): NCollection_List_TopoDS_Shape;
+
+Clear(doReleaseMemory: boolean): void;
+Clear(theAllocator: NCollection_BaseAllocator): void;
+Clear(doReleaseMemory: boolean): void;
+Clear(theAllocator: NCollection_BaseAllocator): void;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_DataMap_TopoDS_Shape_NCollection_List_double_TopTools_ShapeMapHasher: declare class NCollection_DataMap_TopoDS_Shape_NCollection_List_double_TopTools_ShapeMapHasher extends NCollection_BaseMap
+
+constructor
+
+Exchange(theOther: NCollection_DataMap_TopoDS_Shape_NCollection_List_double_TopTools_ShapeMapHasher): void;
+
+GetHasher(): TopTools_ShapeMapHasher;
+
+Assign(theOther: NCollection_DataMap_TopoDS_Shape_NCollection_List_double_TopTools_ShapeMapHasher): NCollection_DataMap_TopoDS_Shape_NCollection_List_double_TopTools_ShapeMapHasher;
+
+ReSize(N: number): void;
+
+Bind(theKey: TopoDS_Shape, theItem: NCollection_List_double): boolean;
+
+Bound(theKey: TopoDS_Shape, theItem: NCollection_List_double): NCollection_List_double;
+
+TryBind(theKey: TopoDS_Shape, theItem: NCollection_List_double): boolean;
+
+TryBound(theKey: TopoDS_Shape, theItem: NCollection_List_double): NCollection_List_double;
+
+IsBound(theKey: TopoDS_Shape): boolean;
+
+UnBind(theKey: TopoDS_Shape): boolean;
+
+Seek(theKey: TopoDS_Shape): NCollection_List_double;
+
+ChangeSeek(theKey: TopoDS_Shape): NCollection_List_double;
+
+ChangeFind(theKey: TopoDS_Shape): NCollection_List_double;
+
+Clear(doReleaseMemory: boolean): void;
+Clear(theAllocator: NCollection_BaseAllocator): void;
+Clear(doReleaseMemory: boolean): void;
+Clear(theAllocator: NCollection_BaseAllocator): void;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_DataMap_TopoDS_Shape_RWMesh_NodeAttributes_TopTools_ShapeMapHasher: declare class NCollection_DataMap_TopoDS_Shape_RWMesh_NodeAttributes_TopTools_ShapeMapHasher extends NCollection_BaseMap
+
+constructor
+
+Exchange(theOther: NCollection_DataMap_TopoDS_Shape_RWMesh_NodeAttributes_TopTools_ShapeMapHasher): void;
+
+GetHasher(): TopTools_ShapeMapHasher;
+
+Assign(theOther: NCollection_DataMap_TopoDS_Shape_RWMesh_NodeAttributes_TopTools_ShapeMapHasher): NCollection_DataMap_TopoDS_Shape_RWMesh_NodeAttributes_TopTools_ShapeMapHasher;
+
+ReSize(N: number): void;
+
+Bind(theKey: TopoDS_Shape, theItem: RWMesh_NodeAttributes): boolean;
+
+Bound(theKey: TopoDS_Shape, theItem: RWMesh_NodeAttributes): RWMesh_NodeAttributes;
+
+TryBind(theKey: TopoDS_Shape, theItem: RWMesh_NodeAttributes): boolean;
+
+TryBound(theKey: TopoDS_Shape, theItem: RWMesh_NodeAttributes): RWMesh_NodeAttributes;
+
+IsBound(theKey: TopoDS_Shape): boolean;
+
+UnBind(theKey: TopoDS_Shape): boolean;
+
+Seek(theKey: TopoDS_Shape): RWMesh_NodeAttributes;
+
+ChangeSeek(theKey: TopoDS_Shape): RWMesh_NodeAttributes;
+
+ChangeFind(theKey: TopoDS_Shape): RWMesh_NodeAttributes;
+
+Clear(doReleaseMemory: boolean): void;
+Clear(theAllocator: NCollection_BaseAllocator): void;
+Clear(doReleaseMemory: boolean): void;
+Clear(theAllocator: NCollection_BaseAllocator): void;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_DataMap_TopoDS_Shape_TDF_Label_TopTools_ShapeMapHasher: declare class NCollection_DataMap_TopoDS_Shape_TDF_Label_TopTools_ShapeMapHasher extends NCollection_BaseMap
+
+constructor
+
+Exchange(theOther: NCollection_DataMap_TopoDS_Shape_TDF_Label_TopTools_ShapeMapHasher): void;
+
+GetHasher(): TopTools_ShapeMapHasher;
+
+Assign(theOther: NCollection_DataMap_TopoDS_Shape_TDF_Label_TopTools_ShapeMapHasher): NCollection_DataMap_TopoDS_Shape_TDF_Label_TopTools_ShapeMapHasher;
+
+ReSize(N: number): void;
+
+Bind(theKey: TopoDS_Shape, theItem: TDF_Label): boolean;
+
+Bound(theKey: TopoDS_Shape, theItem: TDF_Label): TDF_Label;
+
+TryBind(theKey: TopoDS_Shape, theItem: TDF_Label): boolean;
+
+TryBound(theKey: TopoDS_Shape, theItem: TDF_Label): TDF_Label;
+
+IsBound(theKey: TopoDS_Shape): boolean;
+
+UnBind(theKey: TopoDS_Shape): boolean;
+
+Seek(theKey: TopoDS_Shape): TDF_Label;
+
+ChangeSeek(theKey: TopoDS_Shape): TDF_Label;
+
+ChangeFind(theKey: TopoDS_Shape): TDF_Label;
+
+Clear(doReleaseMemory: boolean): void;
+Clear(theAllocator: NCollection_BaseAllocator): void;
+Clear(doReleaseMemory: boolean): void;
+Clear(theAllocator: NCollection_BaseAllocator): void;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_DataMap_TopoDS_Shape_TopoDS_Shape_TopTools_ShapeMapHasher: declare class NCollection_DataMap_TopoDS_Shape_TopoDS_Shape_TopTools_ShapeMapHasher extends NCollection_BaseMap
+
+constructor
+
+Exchange(theOther: NCollection_DataMap_TopoDS_Shape_TopoDS_Shape_TopTools_ShapeMapHasher): void;
+
+GetHasher(): TopTools_ShapeMapHasher;
+
+Assign(theOther: NCollection_DataMap_TopoDS_Shape_TopoDS_Shape_TopTools_ShapeMapHasher): NCollection_DataMap_TopoDS_Shape_TopoDS_Shape_TopTools_ShapeMapHasher;
+
+ReSize(N: number): void;
+
+Bind(theKey: TopoDS_Shape, theItem: TopoDS_Shape): boolean;
+
+Bound(theKey: TopoDS_Shape, theItem: TopoDS_Shape): TopoDS_Shape;
+
+TryBind(theKey: TopoDS_Shape, theItem: TopoDS_Shape): boolean;
+
+TryBound(theKey: TopoDS_Shape, theItem: TopoDS_Shape): TopoDS_Shape;
+
+IsBound(theKey: TopoDS_Shape): boolean;
+
+UnBind(theKey: TopoDS_Shape): boolean;
+
+Seek(theKey: TopoDS_Shape): TopoDS_Shape;
+
+ChangeSeek(theKey: TopoDS_Shape): TopoDS_Shape;
+
+ChangeFind(theKey: TopoDS_Shape): TopoDS_Shape;
+
+Clear(doReleaseMemory: boolean): void;
+Clear(theAllocator: NCollection_BaseAllocator): void;
+Clear(doReleaseMemory: boolean): void;
+Clear(theAllocator: NCollection_BaseAllocator): void;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_DataMap_TopoDS_Shape_double_TopTools_ShapeMapHasher: declare class NCollection_DataMap_TopoDS_Shape_double_TopTools_ShapeMapHasher extends NCollection_BaseMap
+
+constructor
+
+Exchange(theOther: NCollection_DataMap_TopoDS_Shape_double_TopTools_ShapeMapHasher): void;
+
+GetHasher(): TopTools_ShapeMapHasher;
+
+Assign(theOther: NCollection_DataMap_TopoDS_Shape_double_TopTools_ShapeMapHasher): NCollection_DataMap_TopoDS_Shape_double_TopTools_ShapeMapHasher;
+
+ReSize(N: number): void;
+
+Bind(theKey: TopoDS_Shape, theItem: number): boolean;
+
+Bound(theKey: TopoDS_Shape, theItem: number): number;
+
+TryBind(theKey: TopoDS_Shape, theItem: number): boolean;
+
+TryBound(theKey: TopoDS_Shape, theItem: number): number;
+
+IsBound(theKey: TopoDS_Shape): boolean;
+
+UnBind(theKey: TopoDS_Shape): boolean;
+
+Seek(theKey: TopoDS_Shape): number;
+
+ChangeSeek(theKey: TopoDS_Shape): number;
+
+ChangeFind(theKey: TopoDS_Shape): number;
+
+Clear(doReleaseMemory: boolean): void;
+Clear(theAllocator: NCollection_BaseAllocator): void;
+Clear(doReleaseMemory: boolean): void;
+Clear(theAllocator: NCollection_BaseAllocator): void;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_DataMap_TopoDS_Shape_gp_XYZ_TopTools_ShapeMapHasher: declare class NCollection_DataMap_TopoDS_Shape_gp_XYZ_TopTools_ShapeMapHasher extends NCollection_BaseMap
+
+constructor
+
+Exchange(theOther: NCollection_DataMap_TopoDS_Shape_gp_XYZ_TopTools_ShapeMapHasher): void;
+
+GetHasher(): TopTools_ShapeMapHasher;
+
+Assign(theOther: NCollection_DataMap_TopoDS_Shape_gp_XYZ_TopTools_ShapeMapHasher): NCollection_DataMap_TopoDS_Shape_gp_XYZ_TopTools_ShapeMapHasher;
+
+ReSize(N: number): void;
+
+Bind(theKey: TopoDS_Shape, theItem: gp_XYZ): boolean;
+
+Bound(theKey: TopoDS_Shape, theItem: gp_XYZ): gp_XYZ;
+
+TryBind(theKey: TopoDS_Shape, theItem: gp_XYZ): boolean;
+
+TryBound(theKey: TopoDS_Shape, theItem: gp_XYZ): gp_XYZ;
+
+IsBound(theKey: TopoDS_Shape): boolean;
+
+UnBind(theKey: TopoDS_Shape): boolean;
+
+Seek(theKey: TopoDS_Shape): gp_XYZ;
+
+ChangeSeek(theKey: TopoDS_Shape): gp_XYZ;
+
+ChangeFind(theKey: TopoDS_Shape): gp_XYZ;
+
+Clear(doReleaseMemory: boolean): void;
+Clear(theAllocator: NCollection_BaseAllocator): void;
+Clear(doReleaseMemory: boolean): void;
+Clear(theAllocator: NCollection_BaseAllocator): void;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_DataMap_TopoDS_Shape_handle_NCollection_HArray2_TopoDS_Shape_TopTools_ShapeMapHasher: declare class NCollection_DataMap_TopoDS_Shape_handle_NCollection_HArray2_TopoDS_Shape_TopTools_ShapeMapHasher extends NCollection_BaseMap
+
+constructor
+
+Exchange(theOther: NCollection_DataMap_TopoDS_Shape_handle_NCollection_HArray2_TopoDS_Shape_TopTools_ShapeMapHasher): void;
+
+GetHasher(): TopTools_ShapeMapHasher;
+
+Assign(theOther: NCollection_DataMap_TopoDS_Shape_handle_NCollection_HArray2_TopoDS_Shape_TopTools_ShapeMapHasher): NCollection_DataMap_TopoDS_Shape_handle_NCollection_HArray2_TopoDS_Shape_TopTools_ShapeMapHasher;
+
+ReSize(N: number): void;
+
+Bind(theKey: TopoDS_Shape, theItem: unknown): boolean;
+
+Bound(theKey: TopoDS_Shape, theItem: unknown): unknown;
+
+TryBind(theKey: TopoDS_Shape, theItem: unknown): boolean;
+
+TryBound(theKey: TopoDS_Shape, theItem: unknown): unknown;
+
+IsBound(theKey: TopoDS_Shape): boolean;
+
+UnBind(theKey: TopoDS_Shape): boolean;
+
+Seek(theKey: TopoDS_Shape): unknown;
+
+ChangeSeek(theKey: TopoDS_Shape): unknown;
+
+ChangeFind(theKey: TopoDS_Shape): unknown;
+
+Clear(doReleaseMemory: boolean): void;
+Clear(theAllocator: NCollection_BaseAllocator): void;
+Clear(doReleaseMemory: boolean): void;
+Clear(theAllocator: NCollection_BaseAllocator): void;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_DataMap_TopoDS_Shape_handle_Standard_Transient_TopTools_ShapeMapHasher: declare class NCollection_DataMap_TopoDS_Shape_handle_Standard_Transient_TopTools_ShapeMapHasher extends NCollection_BaseMap
+
+constructor
+
+Exchange(theOther: NCollection_DataMap_TopoDS_Shape_handle_Standard_Transient_TopTools_ShapeMapHasher): void;
+
+GetHasher(): TopTools_ShapeMapHasher;
+
+Assign(theOther: NCollection_DataMap_TopoDS_Shape_handle_Standard_Transient_TopTools_ShapeMapHasher): NCollection_DataMap_TopoDS_Shape_handle_Standard_Transient_TopTools_ShapeMapHasher;
+
+ReSize(N: number): void;
+
+Bind(theKey: TopoDS_Shape, theItem: Standard_Transient): boolean;
+
+Bound(theKey: TopoDS_Shape, theItem: Standard_Transient): Standard_Transient;
+
+TryBind(theKey: TopoDS_Shape, theItem: Standard_Transient): boolean;
+
+TryBound(theKey: TopoDS_Shape, theItem: Standard_Transient): Standard_Transient;
+
+IsBound(theKey: TopoDS_Shape): boolean;
+
+UnBind(theKey: TopoDS_Shape): boolean;
+
+Seek(theKey: TopoDS_Shape): Standard_Transient;
+
+ChangeSeek(theKey: TopoDS_Shape): Standard_Transient;
+
+ChangeFind(theKey: TopoDS_Shape): Standard_Transient;
+
+Clear(doReleaseMemory: boolean): void;
+Clear(theAllocator: NCollection_BaseAllocator): void;
+Clear(doReleaseMemory: boolean): void;
+Clear(theAllocator: NCollection_BaseAllocator): void;
+
 delete(): void;
 
 [Symbol.dispose](): void;

@@ -28,7 +28,6 @@ FirstIntersection(I1: PeriodicInterval): PeriodicInterval;
 
 SecondIntersection(I2: PeriodicInterval): PeriodicInterval;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;

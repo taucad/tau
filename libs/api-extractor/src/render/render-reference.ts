@@ -19,7 +19,7 @@ const indexSummaryWords = 10;
 const firstSentence = (text: string): string => {
   const trimmed = text.replaceAll(/\s+/gu, ' ').trim();
   const stop = trimmed.search(/[.:;]\s|[.:;]$/u);
-  return stop === -1 ? trimmed : trimmed.slice(0, stop);
+  return (stop === -1 ? trimmed : trimmed.slice(0, stop)).trimEnd();
 };
 
 /** A short purpose for an index line: first sentence, capped at ten words. */
@@ -109,15 +109,23 @@ const parameterLines = (entry: ApiEntry, indent: string): readonly string[] =>
     .filter((parameter) => parameter.description !== undefined && parameter.description !== '')
     .map((parameter) => `${indent}//   ${parameter.name}: ${firstSentence(parameter.description ?? '')}`);
 
+/** Normalize declarations from upstream while preserving their source-language layout. */
+const sourceLines = (text: string, indent: string): readonly string[] =>
+  text
+    .replaceAll('\r\n', '\n')
+    .split('\n')
+    .map((line) => `${indent}${line.trimEnd()}`);
+
 const renderEntryBody = (entry: ApiEntry, depth: number): readonly string[] => {
   const indent = '  '.repeat(depth);
   const lines: string[] = [...annotationLines(entry, indent)];
 
   if (entry.signatures === undefined || entry.signatures.length === 0) {
-    lines.push(`${indent}${entry.name}${entry.type === undefined ? '' : `: ${entry.type.text}`}`);
+    const rendered = `${entry.name}${entry.type === undefined ? '' : `: ${entry.type.text}`}`;
+    lines.push(...sourceLines(rendered, indent));
   } else {
     for (const signature of entry.signatures) {
-      lines.push(`${indent}${signature.text}`);
+      lines.push(...sourceLines(signature.text, indent));
     }
   }
 

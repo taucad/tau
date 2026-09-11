@@ -1,6 +1,6 @@
 # libcascade — StepGeom (2)
 
-22 top-level symbols. Signatures are verbatim typescript.
+23 top-level symbols. Signatures are verbatim typescript.
 
 StepGeom_BezierCurveAndRationalBSplineCurve: declare class StepGeom_BezierCurveAndRationalBSplineCurve extends StepGeom_BSplineCurve
 
@@ -45,7 +45,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -60,7 +59,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -110,7 +108,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -125,7 +122,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -140,7 +136,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -155,7 +150,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -192,7 +186,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -240,12 +233,10 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Added from StepGeom Rev2 to Rev4
 StepGeom_CartesianTransformationOperator2d: declare class StepGeom_CartesianTransformationOperator2d extends StepGeom_CartesianTransformationOperator
 
 constructor
@@ -256,7 +247,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -289,7 +279,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -318,7 +307,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -350,7 +338,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -365,7 +352,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -394,7 +380,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -418,7 +403,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -451,7 +435,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -466,38 +449,29 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Representation of STEP entity CurveBoundedSurface
 StepGeom_CurveBoundedSurface: declare class StepGeom_CurveBoundedSurface extends StepGeom_BoundedSurface
 
 constructor
 
-// Initialize all fields (own and inherited)
 Init(aRepresentationItem_Name: TCollection_HAsciiString, aBasisSurface: StepGeom_Surface, aBoundaries: NCollection_HArray1_StepGeom_SurfaceBoundary, aImplicitOuter: boolean): void;
 Init(aName: TCollection_HAsciiString): void;
 Init(aRepresentationItem_Name: TCollection_HAsciiString, aBasisSurface: StepGeom_Surface, aBoundaries: NCollection_HArray1_StepGeom_SurfaceBoundary, aImplicitOuter: boolean): void;
 Init(aName: TCollection_HAsciiString): void;
 
-// Returns field BasisSurface
 BasisSurface(): StepGeom_Surface;
 
-// Set field BasisSurface
 SetBasisSurface(BasisSurface: StepGeom_Surface): void;
 
-// Returns field Boundaries
 Boundaries(): NCollection_HArray1_StepGeom_SurfaceBoundary;
 
-// Set field Boundaries
 SetBoundaries(Boundaries: NCollection_HArray1_StepGeom_SurfaceBoundary): void;
 
-// Returns field ImplicitOuter
 ImplicitOuter(): boolean;
 
-// Set field ImplicitOuter
 SetImplicitOuter(ImplicitOuter: boolean): void;
 
 static get_type_name(): string;
@@ -506,7 +480,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -515,19 +488,14 @@ StepGeom_CurveOnSurface: declare class StepGeom_CurveOnSurface extends StepData_
 
 constructor
 
-// Recognizes a CurveOnSurface Kind Entity that is
 CaseNum(ent: Standard_Transient): number;
 
-// returns Value as a Pcurve (Null if another type)
 Pcurve(): StepGeom_Pcurve;
 
-// returns Value as a SurfaceCurve (Null if another type)
 SurfaceCurve(): StepGeom_SurfaceCurve;
 
-// returns Value as a CompositeCurveOnSurface (Null if another type)
 CompositeCurveOnSurface(): StepGeom_CompositeCurveOnSurface;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -555,7 +523,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -584,7 +551,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -612,7 +578,41 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
+delete(): void;
+
+[Symbol.dispose](): void;
+
+StepGeom_DegenerateToroidalSurface: declare class StepGeom_DegenerateToroidalSurface extends StepGeom_ToroidalSurface
+
+constructor
+
+Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis2Placement3d, aMajorRadius: number, aMinorRadius: number, aSelectOuter: boolean): void;
+Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis2Placement3d, aMajorRadius: number, aMinorRadius: number): void;
+Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis2Placement3d): void;
+Init(aName: TCollection_HAsciiString): void;
+Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis2Placement3d, aMajorRadius: number, aMinorRadius: number, aSelectOuter: boolean): void;
+Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis2Placement3d, aMajorRadius: number, aMinorRadius: number): void;
+Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis2Placement3d): void;
+Init(aName: TCollection_HAsciiString): void;
+Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis2Placement3d, aMajorRadius: number, aMinorRadius: number, aSelectOuter: boolean): void;
+Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis2Placement3d, aMajorRadius: number, aMinorRadius: number): void;
+Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis2Placement3d): void;
+Init(aName: TCollection_HAsciiString): void;
+Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis2Placement3d, aMajorRadius: number, aMinorRadius: number, aSelectOuter: boolean): void;
+Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis2Placement3d, aMajorRadius: number, aMinorRadius: number): void;
+Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis2Placement3d): void;
+Init(aName: TCollection_HAsciiString): void;
+
+SetSelectOuter(aSelectOuter: boolean): void;
+
+SelectOuter(): boolean;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
 delete(): void;
 
 [Symbol.dispose](): void;

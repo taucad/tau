@@ -16,7 +16,6 @@ Fa: number
 
 Fb: number
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -41,7 +40,6 @@ FA: number
 
 FB: number
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -64,7 +62,6 @@ Fb: number
 
 Fc: number
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -77,7 +74,6 @@ LowerBound: number
 
 UpperBound: number
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -96,7 +92,6 @@ FTolerance: number
 
 StepMin: number
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -113,7 +108,6 @@ MaxIterations: number
 
 Tolerance: number
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -126,7 +120,6 @@ SingularityTolerance: number
 
 UsePivoting: boolean
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -137,7 +130,6 @@ constructor
 
 UseBounds: boolean
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -170,7 +162,6 @@ IsFinite(theInfLimit?: number): boolean;
 
 IsEqual(theOther: MathUtils_Domain1D, theTol?: number): boolean;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -211,7 +202,6 @@ IsVFullPeriod(thePeriod: number, theTol?: number): boolean;
 
 IsFinite(theInfLimit?: number): boolean;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -224,7 +214,6 @@ Value(argNo0: number, theY?: number): { returnValue: boolean; theY: number };
 
 Values(argNo0: number, theY?: number, theDY?: number): { returnValue: boolean; theY: number; theDY: number };
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -237,7 +226,6 @@ Value(theX: number, theY?: number): { returnValue: boolean; theY: number };
 
 Values(theX: number, theY?: number, theDY?: number): { returnValue: boolean; theY: number; theDY: number };
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -250,7 +238,6 @@ Value(theX: number, theY?: number): { returnValue: boolean; theY: number };
 
 Values(theX: number, theY?: number, theDY?: number): { returnValue: boolean; theY: number; theDY: number };
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -263,7 +250,6 @@ Value(theX: number, theY?: number): { returnValue: boolean; theY: number };
 
 Values(theX: number, theY?: number, theDY?: number): { returnValue: boolean; theY: number; theDY: number };
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -276,7 +262,6 @@ Value(theX: number, theY?: number): { returnValue: boolean; theY: number };
 
 Values(theX: number, theY?: number, theDY?: number): { returnValue: boolean; theY: number; theDY: number };
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -293,7 +278,6 @@ Degree(): number;
 
 Coefficient(theIndex: number): number;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -306,7 +290,6 @@ Value(theX: number, theY?: number): { returnValue: boolean; theY: number };
 
 Values(theX: number, theY?: number, theDY?: number): { returnValue: boolean; theY: number; theDY: number };
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -317,7 +300,6 @@ constructor
 
 Value(theX: number, theY?: number): { returnValue: boolean; theY: number };
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -330,7 +312,6 @@ Value(theX: number, theY?: number): { returnValue: boolean; theY: number };
 
 Values(theX: number, theY?: number, theDY?: number): { returnValue: boolean; theY: number; theDY: number };
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -341,7 +322,6 @@ constructor
 
 Value(theX: math_VectorBase_double, theY?: number): { returnValue: boolean; theY: number };
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -356,7 +336,6 @@ Gradient(theX: math_VectorBase_double, theG: math_VectorBase_double): boolean;
 
 Values(theX: math_VectorBase_double, theY: number, theG: math_VectorBase_double): { returnValue: boolean; theY: number };
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -371,7 +350,6 @@ Gradient(theX: math_VectorBase_double, theG: math_VectorBase_double): boolean;
 
 Values(theX: math_VectorBase_double, theY: number, theG: math_VectorBase_double): { returnValue: boolean; theY: number };
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -386,7 +364,6 @@ Gradient(theX: math_VectorBase_double, theG: math_VectorBase_double): boolean;
 
 Values(theX: math_VectorBase_double, theY: number, theG: math_VectorBase_double): { returnValue: boolean; theY: number };
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -401,7 +378,6 @@ Gradient(theX: math_VectorBase_double, theG: math_VectorBase_double): boolean;
 
 Values(theX: math_VectorBase_double, theY: number, theG: math_VectorBase_double): { returnValue: boolean; theY: number };
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -416,7 +392,6 @@ Gradient(theX: math_VectorBase_double, theG: math_VectorBase_double): boolean;
 
 Values(theX: math_VectorBase_double, theY: number, theG: math_VectorBase_double): { returnValue: boolean; theY: number };
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -431,7 +406,6 @@ Gradient(theX: math_VectorBase_double, theG: math_VectorBase_double): boolean;
 
 Values(theX: math_VectorBase_double, theY: number, theG: math_VectorBase_double): { returnValue: boolean; theY: number };
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -446,7 +420,6 @@ Gradient(theX: math_VectorBase_double, theG: math_VectorBase_double): boolean;
 
 Values(theX: math_VectorBase_double, theY: number, theG: math_VectorBase_double): { returnValue: boolean; theY: number };
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -461,7 +434,6 @@ Gradient(theX: math_VectorBase_double, theG: math_VectorBase_double): boolean;
 
 Values(theX: math_VectorBase_double, theY: number, theG: math_VectorBase_double): { returnValue: boolean; theY: number };
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -478,7 +450,6 @@ FNew: number
 
 NbEvals: number
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -493,7 +464,6 @@ NextInt(): number;
 
 NextReal(): number;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -514,7 +484,6 @@ Determinant: number | null | undefined
 
 IsDone(): boolean;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -533,7 +502,6 @@ EigenVectors: math_Matrix | null | undefined
 
 IsDone(): boolean;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -556,7 +524,6 @@ RelativeError: number | null | undefined
 
 IsDone(): boolean;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -573,7 +540,6 @@ Determinant: number | null | undefined
 
 IsDone(): boolean;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -590,7 +556,6 @@ Determinant: number | null | undefined
 
 IsDone(): boolean;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -607,7 +572,6 @@ Determinant: number | null | undefined
 
 IsDone(): boolean;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -624,7 +588,6 @@ Roots: [number, number, number, number]
 
 IsDone(): boolean;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -645,7 +608,6 @@ Derivative: number | null | undefined
 
 IsDone(): boolean;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -670,7 +632,6 @@ Jacobian: math_Matrix | null | undefined
 
 IsDone(): boolean;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;

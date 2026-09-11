@@ -1,385 +1,222 @@
 # libcascade — Geom (2)
 
-1 top-level symbols. Signatures are verbatim typescript.
+16 top-level symbols. Signatures are verbatim typescript.
 
-// Describes a BSpline surface
-Geom_BSplineSurface: declare class Geom_BSplineSurface extends Geom_BoundedSurface
+Geom_BezierSurface: declare class Geom_BezierSurface extends Geom_BoundedSurface
 
 constructor
 
-// Returns true if an evaluation representation is attached
 HasEvalRepresentation(): boolean;
 
-// Returns the current evaluation representation descriptor (may be null)
 EvalRepresentation(): GeomEval_RepSurfaceDesc_Base;
 
-// Sets a new evaluation representation
 SetEvalRepresentation(theDesc: GeomEval_RepSurfaceDesc_Base): void;
 
-// Removes the evaluation representation
 ClearEvalRepresentation(): void;
 
-// Exchanges the u and v parametric directions on this BSpline surface
 ExchangeUV(): void;
 
-// Sets the surface U periodic
-SetUPeriodic(): void;
+Increase(UDeg: number, VDeg: number): void;
 
-// Sets the surface V periodic
-SetVPeriodic(): void;
+InsertPoleColAfter(VIndex: number, CPoles: NCollection_Array1_gp_Pnt): void;
+InsertPoleColAfter(VIndex: number, CPoles: NCollection_Array1_gp_Pnt, CPoleWeights: NCollection_Array1_double): void;
+InsertPoleColAfter(VIndex: number, CPoles: NCollection_Array1_gp_Pnt): void;
+InsertPoleColAfter(VIndex: number, CPoles: NCollection_Array1_gp_Pnt, CPoleWeights: NCollection_Array1_double): void;
 
-// returns the parameter normalized within the period if the surface is periodic
-PeriodicNormalization(U?: number, V?: number): { U: number; V: number };
+InsertPoleColBefore(VIndex: number, CPoles: NCollection_Array1_gp_Pnt): void;
+InsertPoleColBefore(VIndex: number, CPoles: NCollection_Array1_gp_Pnt, CPoleWeights: NCollection_Array1_double): void;
+InsertPoleColBefore(VIndex: number, CPoles: NCollection_Array1_gp_Pnt): void;
+InsertPoleColBefore(VIndex: number, CPoles: NCollection_Array1_gp_Pnt, CPoleWeights: NCollection_Array1_double): void;
 
-// Assigns the knot of index Index in the knots table in the corresponding parametric direction to be the origin of this periodic BSpline surface
-SetUOrigin(Index: number): void;
+InsertPoleRowAfter(UIndex: number, CPoles: NCollection_Array1_gp_Pnt): void;
+InsertPoleRowAfter(UIndex: number, CPoles: NCollection_Array1_gp_Pnt, CPoleWeights: NCollection_Array1_double): void;
+InsertPoleRowAfter(UIndex: number, CPoles: NCollection_Array1_gp_Pnt): void;
+InsertPoleRowAfter(UIndex: number, CPoles: NCollection_Array1_gp_Pnt, CPoleWeights: NCollection_Array1_double): void;
 
-// Assigns the knot of index Index in the knots table in the corresponding parametric direction to be the origin of this periodic BSpline surface
-SetVOrigin(Index: number): void;
+InsertPoleRowBefore(UIndex: number, CPoles: NCollection_Array1_gp_Pnt): void;
+InsertPoleRowBefore(UIndex: number, CPoles: NCollection_Array1_gp_Pnt, CPoleWeights: NCollection_Array1_double): void;
+InsertPoleRowBefore(UIndex: number, CPoles: NCollection_Array1_gp_Pnt): void;
+InsertPoleRowBefore(UIndex: number, CPoles: NCollection_Array1_gp_Pnt, CPoleWeights: NCollection_Array1_double): void;
 
-// Sets the surface U not periodic
-SetUNotPeriodic(): void;
+RemovePoleCol(VIndex: number): void;
 
-// Sets the surface V not periodic
-SetVNotPeriodic(): void;
+RemovePoleRow(UIndex: number): void;
 
-// Changes the orientation of this BSpline surface in the U parametric direction
-UReverse(): void;
+Segment(U1: number, U2: number, V1: number, V2: number): void;
 
-// Changes the orientation of this BSpline surface in the V parametric direction
-VReverse(): void;
-
-// Computes the u parameter on the modified surface, produced by reversing its U parametric direction, for the point of u parameter U, on this BSpline surface
-UReversedParameter(U: number): number;
-
-// Computes the v parameter on the modified surface, produced by reversing its V parametric direction, for the point of v parameter V on this BSpline surface
-VReversedParameter(V: number): number;
-
-// Increases the degrees of this BSpline surface to UDegree and VDegree in the u and v parametric directions respectively
-IncreaseDegree(UDegree: number, VDegree: number): void;
-
-// Inserts into the knots table for the U parametric direction of this BSpline surface
-InsertUKnots(Knots: NCollection_Array1_double, Mults: NCollection_Array1_int, ParametricTolerance?: number, Add?: boolean): void;
-
-// Inserts into the knots table for the V parametric direction of this BSpline surface
-InsertVKnots(Knots: NCollection_Array1_double, Mults: NCollection_Array1_int, ParametricTolerance?: number, Add?: boolean): void;
-
-// Reduces to M the multiplicity of the knot of index Index in the U parametric direction
-RemoveUKnot(Index: number, M: number, Tolerance: number): boolean;
-
-// Reduces to M the multiplicity of the knot of index Index in the V parametric direction
-RemoveVKnot(Index: number, M: number, Tolerance: number): boolean;
-
-// Increases the multiplicity of the knot of range UIndex in the UKnots sequence
-IncreaseUMultiplicity(UIndex: number, M: number): void;
-IncreaseUMultiplicity(FromI1: number, ToI2: number, M: number): void;
-IncreaseUMultiplicity(UIndex: number, M: number): void;
-IncreaseUMultiplicity(FromI1: number, ToI2: number, M: number): void;
-
-// Increments the multiplicity of the consecutives uknots FromI1..ToI2 by step
-IncrementUMultiplicity(FromI1: number, ToI2: number, Step: number): void;
-
-// Increases the multiplicity of a knot in the V direction
-IncreaseVMultiplicity(VIndex: number, M: number): void;
-IncreaseVMultiplicity(FromI1: number, ToI2: number, M: number): void;
-IncreaseVMultiplicity(VIndex: number, M: number): void;
-IncreaseVMultiplicity(FromI1: number, ToI2: number, M: number): void;
-
-// Increments the multiplicity of the consecutives vknots FromI1..ToI2 by step
-IncrementVMultiplicity(FromI1: number, ToI2: number, Step: number): void;
-
-// Inserts a knot value in the sequence of UKnots
-InsertUKnot(U: number, M: number, ParametricTolerance: number, Add?: boolean): void;
-
-// Inserts a knot value in the sequence of VKnots
-InsertVKnot(V: number, M: number, ParametricTolerance: number, Add?: boolean): void;
-
-// Segments the surface between U1 and U2 in the U-Direction
-Segment(U1: number, U2: number, V1: number, V2: number, theUTolerance?: number, theVTolerance?: number): void;
-
-// Segments the surface between U1 and U2 in the U-Direction
-CheckAndSegment(U1: number, U2: number, V1: number, V2: number, theUTolerance?: number, theVTolerance?: number): void;
-
-// Substitutes the UKnots of range UIndex with K
-SetUKnot(UIndex: number, K: number): void;
-SetUKnot(UIndex: number, K: number, M: number): void;
-SetUKnot(UIndex: number, K: number): void;
-SetUKnot(UIndex: number, K: number, M: number): void;
-
-// Changes all the U-knots of the surface
-SetUKnots(UK: NCollection_Array1_double): void;
-
-// Substitutes the VKnots of range VIndex with K
-SetVKnot(VIndex: number, K: number): void;
-SetVKnot(VIndex: number, K: number, M: number): void;
-SetVKnot(VIndex: number, K: number): void;
-SetVKnot(VIndex: number, K: number, M: number): void;
-
-// Changes all the V-knots of the surface
-SetVKnots(VK: NCollection_Array1_double): void;
-
-// Locates the parametric value U in the sequence of UKnots
-LocateU(U: number, ParametricTolerance: number, I1: number, I2: number, WithKnotRepetition: boolean): { I1: number; I2: number };
-
-// Locates the parametric value V in the sequence of knots
-LocateV(V: number, ParametricTolerance: number, I1: number, I2: number, WithKnotRepetition: boolean): { I1: number; I2: number };
-
-// Substitutes the pole of range (UIndex, VIndex) with P
 SetPole(UIndex: number, VIndex: number, P: gp_Pnt): void;
 SetPole(UIndex: number, VIndex: number, P: gp_Pnt, Weight: number): void;
 SetPole(UIndex: number, VIndex: number, P: gp_Pnt): void;
 SetPole(UIndex: number, VIndex: number, P: gp_Pnt, Weight: number): void;
 
-// Changes a column of poles or a part of this column
 SetPoleCol(VIndex: number, CPoles: NCollection_Array1_gp_Pnt): void;
 SetPoleCol(VIndex: number, CPoles: NCollection_Array1_gp_Pnt, CPoleWeights: NCollection_Array1_double): void;
 SetPoleCol(VIndex: number, CPoles: NCollection_Array1_gp_Pnt): void;
 SetPoleCol(VIndex: number, CPoles: NCollection_Array1_gp_Pnt, CPoleWeights: NCollection_Array1_double): void;
 
-// Changes a row of poles or a part of this row with the corresponding weights
-SetPoleRow(UIndex: number, CPoles: NCollection_Array1_gp_Pnt, CPoleWeights: NCollection_Array1_double): void;
 SetPoleRow(UIndex: number, CPoles: NCollection_Array1_gp_Pnt): void;
 SetPoleRow(UIndex: number, CPoles: NCollection_Array1_gp_Pnt, CPoleWeights: NCollection_Array1_double): void;
 SetPoleRow(UIndex: number, CPoles: NCollection_Array1_gp_Pnt): void;
+SetPoleRow(UIndex: number, CPoles: NCollection_Array1_gp_Pnt, CPoleWeights: NCollection_Array1_double): void;
 
-// Changes the weight of the pole of range UIndex, VIndex
 SetWeight(UIndex: number, VIndex: number, Weight: number): void;
 
-// Changes a column of weights of a part of this column
 SetWeightCol(VIndex: number, CPoleWeights: NCollection_Array1_double): void;
 
-// Changes a row of weights or a part of this row
 SetWeightRow(UIndex: number, CPoleWeights: NCollection_Array1_double): void;
 
-// Move a point with parameter U and V to P
-MovePoint(U: number, V: number, P: gp_Pnt, UIndex1: number, UIndex2: number, VIndex1: number, VIndex2: number, UFirstIndex?: number, ULastIndex?: number, VFirstIndex?: number, VLastIndex?: number): { UFirstIndex: number; ULastIndex: number; VFirstIndex: number; VLastIndex: number };
+UReverse(): void;
 
-// Returns true if the first control points row and the last control points row are identical
-IsUClosed(): boolean;
+UReversedParameter(U: number): number;
 
-// Returns true if the first control points column and the last last control points column are identical
-IsVClosed(): boolean;
+VReverse(): void;
 
-// Returns True if the order of continuity of the surface in the U direction is N
-IsCNu(N: number): boolean;
+VReversedParameter(V: number): number;
 
-// Returns True if the order of continuity of the surface in the V direction is N
-IsCNv(N: number): boolean;
-
-// Returns True if the surface is closed in the U direction and if the B-spline has been turned into a periodic surface using the function SetUPeriodic
-IsUPeriodic(): boolean;
-
-// Returns False if for each row of weights all the weights are identical
-IsURational(): boolean;
-
-// Returns True if the surface is closed in the V direction and if the B-spline has been turned into a periodic surface using the function SetVPeriodic
-IsVPeriodic(): boolean;
-
-// Returns False if for each column of weights all the weights are identical
-IsVRational(): boolean;
-
-// Returns the parametric bounds of the surface
 Bounds(U1: number, U2: number, V1: number, V2: number): { U1: number; U2: number; V1: number; V2: number };
 
-// Returns the continuity of the surface
 Continuity(): GeomAbs_Shape;
 
-// Computes the Index of the UKnots which gives the first parametric value of the surface in the U direction
-FirstUKnotIndex(): number;
-
-// Computes the Index of the VKnots which gives the first parametric value of the surface in the V direction
-FirstVKnotIndex(): number;
-
-// Computes the Index of the UKnots which gives the last parametric value of the surface in the U direction
-LastUKnotIndex(): number;
-
-// Computes the Index of the VKnots which gives the last parametric value of the surface in the V direction
-LastVKnotIndex(): number;
-
-// Returns the number of knots in the U direction
-NbUKnots(): number;
-
-// Returns number of poles in the U direction
-NbUPoles(): number;
-
-// Returns the number of knots in the V direction
-NbVKnots(): number;
-
-// Returns the number of poles in the V direction
-NbVPoles(): number;
-
-// Returns the pole of range (UIndex, VIndex)
-Pole(UIndex: number, VIndex: number): gp_Pnt;
-
-// Returns the poles of the B-spline surface
-// DEPRECATED
-Poles(P: NCollection_Array2_gp_Pnt): void;
-Poles(): NCollection_Array2_gp_Pnt;
-Poles(P: NCollection_Array2_gp_Pnt): void;
-Poles(): NCollection_Array2_gp_Pnt;
-// P: Mutated in place
-
-// Returns the degree of the normalized B-splines Ni,n in the U direction
-UDegree(): number;
-
-// Returns the Knot value of range UIndex
-UKnot(UIndex: number): number;
-
-// Returns NonUniform or Uniform or QuasiUniform or PiecewiseBezier
-UKnotDistribution(): GeomAbs_BSplKnotDistribution;
-
-// Returns the knots in the U direction
-// DEPRECATED
-UKnots(Ku: NCollection_Array1_double): void;
-UKnots(): NCollection_Array1_double;
-UKnots(Ku: NCollection_Array1_double): void;
-UKnots(): NCollection_Array1_double;
-// Ku: Mutated in place
-
-// Returns the uknots sequence
-// DEPRECATED
-UKnotSequence(Ku: NCollection_Array1_double): void;
-UKnotSequence(): NCollection_Array1_double;
-UKnotSequence(Ku: NCollection_Array1_double): void;
-UKnotSequence(): NCollection_Array1_double;
-// Ku: Mutated in place
-
-// Returns the multiplicity value of knot of range UIndex in the u direction
-UMultiplicity(UIndex: number): number;
-
-// Returns the multiplicities of the knots in the U direction
-// DEPRECATED
-UMultiplicities(Mu: NCollection_Array1_int): void;
-UMultiplicities(): NCollection_Array1_int;
-UMultiplicities(Mu: NCollection_Array1_int): void;
-UMultiplicities(): NCollection_Array1_int;
-// Mu: Mutated in place
-
-// Returns the degree of the normalized B-splines Ni,d in the V direction
-VDegree(): number;
-
-// Returns the Knot value of range VIndex
-VKnot(VIndex: number): number;
-
-// Returns NonUniform or Uniform or QuasiUniform or PiecewiseBezier
-VKnotDistribution(): GeomAbs_BSplKnotDistribution;
-
-// Returns the knots in the V direction
-// DEPRECATED
-VKnots(Kv: NCollection_Array1_double): void;
-VKnots(): NCollection_Array1_double;
-VKnots(Kv: NCollection_Array1_double): void;
-VKnots(): NCollection_Array1_double;
-// Kv: Mutated in place
-
-// Returns the vknots sequence
-// DEPRECATED
-VKnotSequence(Kv: NCollection_Array1_double): void;
-VKnotSequence(): NCollection_Array1_double;
-VKnotSequence(Kv: NCollection_Array1_double): void;
-VKnotSequence(): NCollection_Array1_double;
-// Kv: Mutated in place
-
-// Returns the multiplicity value of knot of range VIndex in the v direction
-VMultiplicity(VIndex: number): number;
-
-// Returns the multiplicities of the knots in the V direction
-// DEPRECATED
-VMultiplicities(Mv: NCollection_Array1_int): void;
-VMultiplicities(): NCollection_Array1_int;
-VMultiplicities(Mv: NCollection_Array1_int): void;
-VMultiplicities(): NCollection_Array1_int;
-// Mv: Mutated in place
-
-// Returns the weight value of range UIndex, VIndex
-Weight(UIndex: number, VIndex: number): number;
-
-// Returns the weights of the B-spline surface
-// DEPRECATED
-Weights(W: NCollection_Array2_double): void;
-Weights(): NCollection_Array2_double;
-Weights(W: NCollection_Array2_double): void;
-Weights(): NCollection_Array2_double;
-// W: Mutated in place
-
-// Returns a const reference to the weights array
-WeightsArray(): NCollection_Array2_double;
-
-// Computes the point of parameter (U, V) on the surface
 EvalD0(U: number, V: number): gp_Pnt;
 
-// Computes the point and first partial derivatives at (U, V)
 EvalD1(U: number, V: number): Geom_Surface_ResD1;
 
-// Computes the point and partial derivatives up to 2nd order at (U, V)
 EvalD2(U: number, V: number): Geom_Surface_ResD2;
 
-// Computes the point and partial derivatives up to 3rd order at (U, V)
 EvalD3(U: number, V: number): Geom_Surface_ResD3;
 
-// Computes the derivative of order Nu in U and Nv in V at (U, V)
 EvalDN(U: number, V: number, Nu: number, Nv: number): gp_Vec;
 
-// Raised if FromUK1 = ToUK2 or FromVK1 = ToVK2
-LocalD0(U: number, V: number, FromUK1: number, ToUK2: number, FromVK1: number, ToVK2: number, P: gp_Pnt): void;
-// P: Mutated in place
+NbUPoles(): number;
 
-// Raised if the local continuity of the surface is not C1 between the knots FromUK1, ToUK2 and FromVK1, ToVK2
-LocalD1(U: number, V: number, FromUK1: number, ToUK2: number, FromVK1: number, ToVK2: number, P: gp_Pnt, D1U: gp_Vec, D1V: gp_Vec): void;
-// P: Mutated in place
-// D1U: Mutated in place
-// D1V: Mutated in place
+NbVPoles(): number;
 
-// Raised if the local continuity of the surface is not C2 between the knots FromUK1, ToUK2 and FromVK1, ToVK2
-LocalD2(U: number, V: number, FromUK1: number, ToUK2: number, FromVK1: number, ToVK2: number, P: gp_Pnt, D1U: gp_Vec, D1V: gp_Vec, D2U: gp_Vec, D2V: gp_Vec, D2UV: gp_Vec): void;
-// P: Mutated in place
-// D1U: Mutated in place
-// D1V: Mutated in place
-// D2U: Mutated in place
-// D2V: Mutated in place
-// D2UV: Mutated in place
+Pole(UIndex: number, VIndex: number): gp_Pnt;
 
-// Raised if the local continuity of the surface is not C3 between the knots FromUK1, ToUK2 and FromVK1, ToVK2
-LocalD3(U: number, V: number, FromUK1: number, ToUK2: number, FromVK1: number, ToVK2: number, P: gp_Pnt, D1U: gp_Vec, D1V: gp_Vec, D2U: gp_Vec, D2V: gp_Vec, D2UV: gp_Vec, D3U: gp_Vec, D3V: gp_Vec, D3UUV: gp_Vec, D3UVV: gp_Vec): void;
-// P: Mutated in place
-// D1U: Mutated in place
-// D1V: Mutated in place
-// D2U: Mutated in place
-// D2V: Mutated in place
-// D2UV: Mutated in place
-// D3U: Mutated in place
-// D3V: Mutated in place
-// D3UUV: Mutated in place
-// D3UVV: Mutated in place
+// DEPRECATED
+Poles(P: NCollection_Array2_gp_Pnt): void;
+Poles(): NCollection_Array2_gp_Pnt;
+Poles(P: NCollection_Array2_gp_Pnt): void;
+Poles(): NCollection_Array2_gp_Pnt;
 
-// Raised if the local continuity of the surface is not CNu between the knots FromUK1, ToUK2 and CNv between the knots FromVK1, ToVK2
-LocalDN(U: number, V: number, FromUK1: number, ToUK2: number, FromVK1: number, ToVK2: number, Nu: number, Nv: number): gp_Vec;
+UDegree(): number;
 
-// Computes the point of parameter U, V on the BSpline surface patch defines between the knots UK1 UK2, VK1, VK2
-LocalValue(U: number, V: number, FromUK1: number, ToUK2: number, FromVK1: number, ToVK2: number): gp_Pnt;
-
-// Computes the U isoparametric curve
 UIso(U: number): Geom_Curve;
-UIso(U: number, CheckRational: boolean): Geom_Curve;
-UIso(U: number): Geom_Curve;
-UIso(U: number, CheckRational: boolean): Geom_Curve;
 
-// Computes the V isoparametric curve
-VIso(V: number): Geom_Curve;
-VIso(V: number, CheckRational: boolean): Geom_Curve;
-VIso(V: number): Geom_Curve;
-VIso(V: number, CheckRational: boolean): Geom_Curve;
+VDegree(): number;
 
-// Applies the transformation T to this BSpline surface
+VIso(V: number): Geom_Curve;
+
+Weight(UIndex: number, VIndex: number): number;
+
+// DEPRECATED
+Weights(W: NCollection_Array2_double): void;
+Weights(): NCollection_Array2_double;
+Weights(W: NCollection_Array2_double): void;
+Weights(): NCollection_Array2_double;
+
+WeightsArray(): NCollection_Array2_double;
+
+IsUClosed(): boolean;
+
+IsVClosed(): boolean;
+
+IsCNu(N: number): boolean;
+
+IsCNv(N: number): boolean;
+
+IsUPeriodic(): boolean;
+
+IsVPeriodic(): boolean;
+
+IsURational(): boolean;
+
+IsVRational(): boolean;
+
 Transform(T: gp_Trsf): void;
 
-// Returns the value of the maximum degree of the normalized B-spline basis functions in the u and v directions
 static MaxDegree(): number;
 
-// Computes two tolerance values for this BSpline surface, based on the given tolerance in 3D space Tolerance3D
 Resolution(Tolerance3D: number, UTolerance?: number, VTolerance?: number): { UTolerance: number; VTolerance: number };
 
-// Creates a new object which is a copy of this BSpline surface
+Copy(): Geom_Geometry;
+
+UKnots(): NCollection_Array1_double;
+
+VKnots(): NCollection_Array1_double;
+
+UMultiplicities(): NCollection_Array1_int;
+
+VMultiplicities(): NCollection_Array1_int;
+
+UKnotSequence(): NCollection_Array1_double;
+
+VKnotSequence(): NCollection_Array1_double;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+Geom_BoundedCurve: declare class Geom_BoundedCurve extends Geom_Curve
+
+EndPoint(): gp_Pnt;
+
+StartPoint(): gp_Pnt;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+Geom_BoundedSurface: declare class Geom_BoundedSurface extends Geom_Surface
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+Geom_CartesianPoint: declare class Geom_CartesianPoint extends Geom_Point
+
+constructor
+
+SetCoord(X: number, Y: number, Z: number): void;
+
+SetPnt(P: gp_Pnt): void;
+
+SetX(X: number): void;
+
+SetY(Y: number): void;
+
+SetZ(Z: number): void;
+
+Coord(X: number, Y: number, Z: number): { X: number; Y: number; Z: number };
+
+Pnt(): gp_Pnt;
+
+X(): number;
+
+Y(): number;
+
+Z(): number;
+
+Transform(T: gp_Trsf): void;
+
 Copy(): Geom_Geometry;
 
 static get_type_name(): string;
@@ -388,7 +225,684 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
+delete(): void;
+
+[Symbol.dispose](): void;
+
+Geom_Circle: declare class Geom_Circle extends Geom_Conic
+
+constructor
+
+SetCirc(C: gp_Circ): void;
+
+SetRadius(R: number): void;
+
+Circ(): gp_Circ;
+
+Radius(): number;
+
+ReversedParameter(U: number): number;
+
+Eccentricity(): number;
+
+FirstParameter(): number;
+
+LastParameter(): number;
+
+IsClosed(): boolean;
+
+IsPeriodic(): boolean;
+
+EvalD0(U: number): gp_Pnt;
+
+EvalD1(U: number): Geom_Curve_ResD1;
+
+EvalD2(U: number): Geom_Curve_ResD2;
+
+EvalD3(U: number): Geom_Curve_ResD3;
+
+EvalDN(U: number, N: number): gp_Vec;
+
+Transform(T: gp_Trsf): void;
+
+Copy(): Geom_Geometry;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+Geom_Conic: declare class Geom_Conic extends Geom_Curve
+
+SetAxis(theA1: gp_Ax1): void;
+
+SetLocation(theP: gp_Pnt): void;
+
+SetPosition(theA2: gp_Ax2): void;
+
+Axis(): gp_Ax1;
+
+Location(): gp_Pnt;
+
+Position(): gp_Ax2;
+
+Eccentricity(): number;
+
+XAxis(): gp_Ax1;
+
+YAxis(): gp_Ax1;
+
+Reverse(): void;
+
+ReversedParameter(U: number): number;
+
+Continuity(): GeomAbs_Shape;
+
+IsCN(N: number): boolean;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+Geom_ConicalSurface: declare class Geom_ConicalSurface extends Geom_ElementarySurface
+
+constructor
+
+SetCone(C: gp_Cone): void;
+
+SetRadius(R: number): void;
+
+SetSemiAngle(Ang: number): void;
+
+Cone(): gp_Cone;
+
+UReversedParameter(U: number): number;
+
+VReversedParameter(V: number): number;
+
+VReverse(): void;
+
+TransformParameters(U: number, V: number, T: gp_Trsf): { U: number; V: number };
+
+ParametricTransformation(T: gp_Trsf): gp_GTrsf2d;
+
+Apex(): gp_Pnt;
+
+Bounds(U1: number, U2: number, V1: number, V2: number): { U1: number; U2: number; V1: number; V2: number };
+
+Coefficients(A1?: number, A2?: number, A3?: number, B1?: number, B2?: number, B3?: number, C1?: number, C2?: number, C3?: number, D?: number): { A1: number; A2: number; A3: number; B1: number; B2: number; B3: number; C1: number; C2: number; C3: number; D: number };
+
+RefRadius(): number;
+
+SemiAngle(): number;
+
+IsUClosed(): boolean;
+
+IsVClosed(): boolean;
+
+IsUPeriodic(): boolean;
+
+IsVPeriodic(): boolean;
+
+UIso(U: number): Geom_Curve;
+
+VIso(V: number): Geom_Curve;
+
+EvalD0(U: number, V: number): gp_Pnt;
+
+EvalD1(U: number, V: number): Geom_Surface_ResD1;
+
+EvalD2(U: number, V: number): Geom_Surface_ResD2;
+
+EvalD3(U: number, V: number): Geom_Surface_ResD3;
+
+EvalDN(U: number, V: number, Nu: number, Nv: number): gp_Vec;
+
+Transform(T: gp_Trsf): void;
+
+Copy(): Geom_Geometry;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+Geom_Curve: declare class Geom_Curve extends Geom_Geometry
+
+Reverse(): void;
+
+ReversedParameter(U: number): number;
+
+TransformedParameter(U: number, T: gp_Trsf): number;
+
+ParametricTransformation(T: gp_Trsf): number;
+
+Reversed(): Geom_Curve;
+
+FirstParameter(): number;
+
+LastParameter(): number;
+
+IsClosed(): boolean;
+
+IsPeriodic(): boolean;
+
+Period(): number;
+
+Continuity(): GeomAbs_Shape;
+
+IsCN(N: number): boolean;
+
+EvalD0(U: number): gp_Pnt;
+
+EvalD1(U: number): Geom_Curve_ResD1;
+
+EvalD2(U: number): Geom_Curve_ResD2;
+
+EvalD3(U: number): Geom_Curve_ResD3;
+
+EvalDN(U: number, N: number): gp_Vec;
+
+D0(U: number, P: gp_Pnt): void;
+
+D1(U: number, P: gp_Pnt, V1: gp_Vec): void;
+
+D2(U: number, P: gp_Pnt, V1: gp_Vec, V2: gp_Vec): void;
+
+D3(U: number, P: gp_Pnt, V1: gp_Vec, V2: gp_Vec, V3: gp_Vec): void;
+
+DN(U: number, N: number): gp_Vec;
+
+Value(U: number): gp_Pnt;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+Geom_CylindricalSurface: declare class Geom_CylindricalSurface extends Geom_ElementarySurface
+
+constructor
+
+SetCylinder(C: gp_Cylinder): void;
+
+SetRadius(R: number): void;
+
+Cylinder(): gp_Cylinder;
+
+UReversedParameter(U: number): number;
+
+VReversedParameter(V: number): number;
+
+TransformParameters(U: number, V: number, T: gp_Trsf): { U: number; V: number };
+
+ParametricTransformation(T: gp_Trsf): gp_GTrsf2d;
+
+Bounds(U1: number, U2: number, V1: number, V2: number): { U1: number; U2: number; V1: number; V2: number };
+
+Coefficients(A1?: number, A2?: number, A3?: number, B1?: number, B2?: number, B3?: number, C1?: number, C2?: number, C3?: number, D?: number): { A1: number; A2: number; A3: number; B1: number; B2: number; B3: number; C1: number; C2: number; C3: number; D: number };
+
+Radius(): number;
+
+IsUClosed(): boolean;
+
+IsVClosed(): boolean;
+
+IsUPeriodic(): boolean;
+
+IsVPeriodic(): boolean;
+
+UIso(U: number): Geom_Curve;
+
+VIso(V: number): Geom_Curve;
+
+EvalD0(U: number, V: number): gp_Pnt;
+
+EvalD1(U: number, V: number): Geom_Surface_ResD1;
+
+EvalD2(U: number, V: number): Geom_Surface_ResD2;
+
+EvalD3(U: number, V: number): Geom_Surface_ResD3;
+
+EvalDN(U: number, V: number, Nu: number, Nv: number): gp_Vec;
+
+Transform(T: gp_Trsf): void;
+
+Copy(): Geom_Geometry;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+Geom_Direction: declare class Geom_Direction extends Geom_Vector
+
+constructor
+
+SetCoord(X: number, Y: number, Z: number): void;
+
+SetDir(V: gp_Dir): void;
+
+SetX(X: number): void;
+
+SetY(Y: number): void;
+
+SetZ(Z: number): void;
+
+Dir(): gp_Dir;
+
+Magnitude(): number;
+
+SquareMagnitude(): number;
+
+Cross(Other: Geom_Vector): void;
+
+CrossCross(V1: Geom_Vector, V2: Geom_Vector): void;
+
+Crossed(Other: Geom_Vector): Geom_Vector;
+
+CrossCrossed(V1: Geom_Vector, V2: Geom_Vector): Geom_Vector;
+
+Transform(T: gp_Trsf): void;
+
+Copy(): Geom_Geometry;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+Geom_ElementarySurface: declare class Geom_ElementarySurface extends Geom_Surface
+
+SetAxis(theA1: gp_Ax1): void;
+
+SetLocation(theLoc: gp_Pnt): void;
+
+SetPosition(theAx3: gp_Ax3): void;
+
+Axis(): gp_Ax1;
+
+Location(): gp_Pnt;
+
+Position(): gp_Ax3;
+
+UReverse(): void;
+
+UReversedParameter(U: number): number;
+
+VReverse(): void;
+
+VReversedParameter(V: number): number;
+
+Continuity(): GeomAbs_Shape;
+
+IsCNu(N: number): boolean;
+
+IsCNv(N: number): boolean;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+Geom_Ellipse: declare class Geom_Ellipse extends Geom_Conic
+
+constructor
+
+SetElips(E: gp_Elips): void;
+
+SetMajorRadius(MajorRadius: number): void;
+
+SetMinorRadius(MinorRadius: number): void;
+
+Elips(): gp_Elips;
+
+ReversedParameter(U: number): number;
+
+Directrix1(): gp_Ax1;
+
+Directrix2(): gp_Ax1;
+
+Eccentricity(): number;
+
+Focal(): number;
+
+Focus1(): gp_Pnt;
+
+Focus2(): gp_Pnt;
+
+MajorRadius(): number;
+
+MinorRadius(): number;
+
+Parameter(): number;
+
+FirstParameter(): number;
+
+LastParameter(): number;
+
+IsClosed(): boolean;
+
+IsPeriodic(): boolean;
+
+EvalD0(U: number): gp_Pnt;
+
+EvalD1(U: number): Geom_Curve_ResD1;
+
+EvalD2(U: number): Geom_Curve_ResD2;
+
+EvalD3(U: number): Geom_Curve_ResD3;
+
+EvalDN(U: number, N: number): gp_Vec;
+
+Transform(T: gp_Trsf): void;
+
+Copy(): Geom_Geometry;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+Geom_Geometry: declare class Geom_Geometry extends Standard_Transient
+
+Mirror(P: gp_Pnt): void;
+Mirror(A1: gp_Ax1): void;
+Mirror(A2: gp_Ax2): void;
+Mirror(P: gp_Pnt): void;
+Mirror(A1: gp_Ax1): void;
+Mirror(A2: gp_Ax2): void;
+Mirror(P: gp_Pnt): void;
+Mirror(A1: gp_Ax1): void;
+Mirror(A2: gp_Ax2): void;
+
+Rotate(A1: gp_Ax1, Ang: number): void;
+
+Scale(P: gp_Pnt, S: number): void;
+
+Translate(V: gp_Vec): void;
+Translate(P1: gp_Pnt, P2: gp_Pnt): void;
+Translate(V: gp_Vec): void;
+Translate(P1: gp_Pnt, P2: gp_Pnt): void;
+
+Transform(T: gp_Trsf): void;
+
+Mirrored(P: gp_Pnt): Geom_Geometry;
+Mirrored(A1: gp_Ax1): Geom_Geometry;
+Mirrored(A2: gp_Ax2): Geom_Geometry;
+Mirrored(P: gp_Pnt): Geom_Geometry;
+Mirrored(A1: gp_Ax1): Geom_Geometry;
+Mirrored(A2: gp_Ax2): Geom_Geometry;
+Mirrored(P: gp_Pnt): Geom_Geometry;
+Mirrored(A1: gp_Ax1): Geom_Geometry;
+Mirrored(A2: gp_Ax2): Geom_Geometry;
+
+Rotated(A1: gp_Ax1, Ang: number): Geom_Geometry;
+
+Scaled(P: gp_Pnt, S: number): Geom_Geometry;
+
+Transformed(T: gp_Trsf): Geom_Geometry;
+
+Translated(V: gp_Vec): Geom_Geometry;
+Translated(P1: gp_Pnt, P2: gp_Pnt): Geom_Geometry;
+Translated(V: gp_Vec): Geom_Geometry;
+Translated(P1: gp_Pnt, P2: gp_Pnt): Geom_Geometry;
+
+Copy(): Geom_Geometry;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+Geom_Hyperbola: declare class Geom_Hyperbola extends Geom_Conic
+
+constructor
+
+SetHypr(H: gp_Hypr): void;
+
+SetMajorRadius(MajorRadius: number): void;
+
+SetMinorRadius(MinorRadius: number): void;
+
+Hypr(): gp_Hypr;
+
+ReversedParameter(U: number): number;
+
+FirstParameter(): number;
+
+LastParameter(): number;
+
+IsClosed(): boolean;
+
+IsPeriodic(): boolean;
+
+Asymptote1(): gp_Ax1;
+
+Asymptote2(): gp_Ax1;
+
+ConjugateBranch1(): gp_Hypr;
+
+ConjugateBranch2(): gp_Hypr;
+
+Directrix1(): gp_Ax1;
+
+Directrix2(): gp_Ax1;
+
+Eccentricity(): number;
+
+Focal(): number;
+
+Focus1(): gp_Pnt;
+
+Focus2(): gp_Pnt;
+
+MajorRadius(): number;
+
+MinorRadius(): number;
+
+OtherBranch(): gp_Hypr;
+
+Parameter(): number;
+
+EvalD0(U: number): gp_Pnt;
+
+EvalD1(U: number): Geom_Curve_ResD1;
+
+EvalD2(U: number): Geom_Curve_ResD2;
+
+EvalD3(U: number): Geom_Curve_ResD3;
+
+EvalDN(U: number, N: number): gp_Vec;
+
+Transform(T: gp_Trsf): void;
+
+Copy(): Geom_Geometry;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+Geom_Line: declare class Geom_Line extends Geom_Curve
+
+constructor
+
+SetLin(L: gp_Lin): void;
+
+SetDirection(V: gp_Dir): void;
+
+SetLocation(P: gp_Pnt): void;
+
+SetPosition(A1: gp_Ax1): void;
+
+Lin(): gp_Lin;
+
+Position(): gp_Ax1;
+
+Reverse(): void;
+
+ReversedParameter(U: number): number;
+
+FirstParameter(): number;
+
+LastParameter(): number;
+
+IsClosed(): boolean;
+
+IsPeriodic(): boolean;
+
+Continuity(): GeomAbs_Shape;
+
+IsCN(N: number): boolean;
+
+EvalD0(U: number): gp_Pnt;
+
+EvalD1(U: number): Geom_Curve_ResD1;
+
+EvalD2(U: number): Geom_Curve_ResD2;
+
+EvalD3(U: number): Geom_Curve_ResD3;
+
+EvalDN(U: number, N: number): gp_Vec;
+
+Transform(T: gp_Trsf): void;
+
+TransformedParameter(U: number, T: gp_Trsf): number;
+
+ParametricTransformation(T: gp_Trsf): number;
+
+Copy(): Geom_Geometry;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+Geom_OffsetCurve: declare class Geom_OffsetCurve extends Geom_Curve
+
+constructor
+
+HasEvalRepresentation(): boolean;
+
+EvalRepresentation(): GeomEval_RepCurveDesc_Base;
+
+SetEvalRepresentation(theDesc: GeomEval_RepCurveDesc_Base): void;
+
+ClearEvalRepresentation(): void;
+
+Reverse(): void;
+
+ReversedParameter(U: number): number;
+
+SetBasisCurve(C: Geom_Curve, isNotCheckC0?: boolean): void;
+
+SetDirection(V: gp_Dir): void;
+
+SetOffsetValue(D: number): void;
+
+BasisCurve(): Geom_Curve;
+
+Continuity(): GeomAbs_Shape;
+
+Direction(): gp_Dir;
+
+EvalD0(U: number): gp_Pnt;
+
+EvalD1(U: number): Geom_Curve_ResD1;
+
+EvalD2(U: number): Geom_Curve_ResD2;
+
+EvalD3(U: number): Geom_Curve_ResD3;
+
+EvalDN(U: number, N: number): gp_Vec;
+
+FirstParameter(): number;
+
+LastParameter(): number;
+
+Offset(): number;
+
+IsClosed(): boolean;
+
+IsCN(N: number): boolean;
+
+IsPeriodic(): boolean;
+
+Period(): number;
+
+Transform(T: gp_Trsf): void;
+
+TransformedParameter(U: number, T: gp_Trsf): number;
+
+ParametricTransformation(T: gp_Trsf): number;
+
+Copy(): Geom_Geometry;
+
+GetBasisCurveContinuity(): GeomAbs_Shape;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
 delete(): void;
 
 [Symbol.dispose](): void;

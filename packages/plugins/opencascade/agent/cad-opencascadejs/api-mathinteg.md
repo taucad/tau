@@ -10,7 +10,6 @@ NbLevels: number
 
 StepFactor: number
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -23,7 +22,6 @@ NbGaussPoints: number
 
 Adaptive: boolean
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -34,7 +32,6 @@ constructor
 
 MaxOrder: number
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -51,7 +48,6 @@ NbEquations: number
 
 IsDone(): boolean;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;

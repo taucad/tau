@@ -1,13 +1,11 @@
 # libcascade — StepRepr (3)
 
-16 top-level symbols. Signatures are verbatim typescript.
+18 top-level symbols. Signatures are verbatim typescript.
 
-// Representation of STEP entity QuantifiedAssemblyComponentUsage
 StepRepr_QuantifiedAssemblyComponentUsage: declare class StepRepr_QuantifiedAssemblyComponentUsage extends StepRepr_AssemblyComponentUsage
 
 constructor
 
-// Initialize all fields (own and inherited)
 Init(aProductDefinitionRelationship_Id: TCollection_HAsciiString, aProductDefinitionRelationship_Name: TCollection_HAsciiString, hasProductDefinitionRelationship_Description: boolean, aProductDefinitionRelationship_Description: TCollection_HAsciiString, aProductDefinitionRelationship_RelatingProductDefinition: StepBasic_ProductDefinition, aProductDefinitionRelationship_RelatedProductDefinition: StepBasic_ProductDefinition, hasAssemblyComponentUsage_ReferenceDesignator: boolean, aAssemblyComponentUsage_ReferenceDesignator: TCollection_HAsciiString, aQuantity: Standard_Transient): void;
 Init(aProductDefinitionRelationship_Id: TCollection_HAsciiString, aProductDefinitionRelationship_Name: TCollection_HAsciiString, hasProductDefinitionRelationship_Description: boolean, aProductDefinitionRelationship_Description: TCollection_HAsciiString, aProductDefinitionRelationship_RelatingProductDefinition: StepBasic_ProductDefinitionOrReference, aProductDefinitionRelationship_RelatedProductDefinition: StepBasic_ProductDefinitionOrReference, hasAssemblyComponentUsage_ReferenceDesignator: boolean, aAssemblyComponentUsage_ReferenceDesignator: TCollection_HAsciiString, aQuantity: Standard_Transient): void;
 Init(aProductDefinitionRelationship_Id: TCollection_HAsciiString, aProductDefinitionRelationship_Name: TCollection_HAsciiString, hasProductDefinitionRelationship_Description: boolean, aProductDefinitionRelationship_Description: TCollection_HAsciiString, aProductDefinitionRelationship_RelatingProductDefinition: StepBasic_ProductDefinition, aProductDefinitionRelationship_RelatedProductDefinition: StepBasic_ProductDefinition, hasReferenceDesignator: boolean, aReferenceDesignator: TCollection_HAsciiString): void;
@@ -45,10 +43,8 @@ Init(aProductDefinitionRelationship_Id: TCollection_HAsciiString, aProductDefini
 Init(aId: TCollection_HAsciiString, aName: TCollection_HAsciiString, hasDescription: boolean, aDescription: TCollection_HAsciiString, aRelatingProductDefinition: StepBasic_ProductDefinition, aRelatedProductDefinition: StepBasic_ProductDefinition): void;
 Init(aId: TCollection_HAsciiString, aName: TCollection_HAsciiString, hasDescription: boolean, aDescription: TCollection_HAsciiString, aRelatingProductDefinition: StepBasic_ProductDefinitionOrReference, aRelatedProductDefinition: StepBasic_ProductDefinitionOrReference): void;
 
-// Returns field Quantity
 Quantity(): Standard_Transient;
 
-// Set field Quantity
 SetQuantity(Quantity: Standard_Transient): void;
 
 static get_type_name(): string;
@@ -57,7 +53,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -81,7 +76,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -100,7 +94,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -119,12 +112,10 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Base class for complex types (MEASURE_REPRESENTATION_ITEM, MEASURE_WITH_UNIT, REPRESENTATION_ITEM, LENGTH_MEASURE_WITH_UNIT/PLANE_ANGLE_MEASURE_WITH_UNIT)
 StepRepr_ReprItemAndMeasureWithUnit: declare class StepRepr_ReprItemAndMeasureWithUnit extends StepRepr_RepresentationItem
 
 constructor
@@ -148,12 +139,10 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Base class for complex types (MEASURE_REPRESENTATION_ITEM, MEASURE_WITH_UNIT, QUALIFIED_REPRESENTATION_ITEM REPRESENTATION_ITEM, LENGTH_MEASURE_WITH_UNIT/PLANE_ANGLE_MEASURE_WITH_UNIT)
 StepRepr_ReprItemAndMeasureWithUnitAndQRI: declare class StepRepr_ReprItemAndMeasureWithUnitAndQRI extends StepRepr_ReprItemAndMeasureWithUnit
 
 constructor
@@ -178,7 +167,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -197,7 +185,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -216,7 +203,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -249,7 +235,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -274,23 +259,18 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Representation of STEP entity RepresentationContextReference
 StepRepr_RepresentationContextReference: declare class StepRepr_RepresentationContextReference extends Standard_Transient
 
 constructor
 
-// Initialize all fields (own and inherited)
 Init(theContextIdentifier: TCollection_HAsciiString): void;
 
-// Returns field ContextIdentifier
 ContextIdentifier(): TCollection_HAsciiString;
 
-// Sets field ContextIdentifier
 SetContextIdentifier(theContextIdentifier: TCollection_HAsciiString): void;
 
 static get_type_name(): string;
@@ -299,7 +279,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -320,7 +299,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -345,48 +323,36 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Representation of STEP SELECT type RepresentationOrRepresentationReference
 StepRepr_RepresentationOrRepresentationReference: declare class StepRepr_RepresentationOrRepresentationReference extends StepData_SelectType
 
 constructor
 
-// Recognizes a kind of RepresentationOrRepresentationReference select type - 1 -> Representation - 2 -> RepresentationReference
 CaseNum(ent: Standard_Transient): number;
 
-// Returns Value as Representation (or Null if another type)
 Representation(): StepRepr_Representation;
 
-// Returns Value as RepresentationReference (or Null if another type)
 RepresentationReference(): StepRepr_RepresentationReference;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Representation of STEP entity RepresentationReference
 StepRepr_RepresentationReference: declare class StepRepr_RepresentationReference extends Standard_Transient
 
 constructor
 
-// Initialize all fields (own and inherited)
 Init(theId: TCollection_HAsciiString, theContextOfItems: StepRepr_RepresentationContextReference): void;
 
-// Returns field Id
 Id(): TCollection_HAsciiString;
 
-// Sets field Id
 SetId(theId: TCollection_HAsciiString): void;
 
-// Returns field ContextOfItems
 ContextOfItems(): StepRepr_RepresentationContextReference;
 
-// Sets field ContextOfItems
 SetContextOfItems(theContextOfItems: StepRepr_RepresentationContextReference): void;
 
 static get_type_name(): string;
@@ -395,7 +361,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -430,7 +395,49 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
+delete(): void;
+
+[Symbol.dispose](): void;
+
+StepRepr_RepresentationRelationshipWithTransformation: declare class StepRepr_RepresentationRelationshipWithTransformation extends StepRepr_ShapeRepresentationRelationship
+
+constructor
+
+Init(aName: TCollection_HAsciiString, aDescription: TCollection_HAsciiString, aRep1: StepRepr_Representation, aRep2: StepRepr_Representation, aTransf: StepRepr_Transformation): void;
+Init(aName: TCollection_HAsciiString, aDescription: TCollection_HAsciiString, aRep1: StepRepr_Representation, aRep2: StepRepr_Representation): void;
+Init(aName: TCollection_HAsciiString, aDescription: TCollection_HAsciiString, aRep1: StepRepr_Representation, aRep2: StepRepr_Representation, aTransf: StepRepr_Transformation): void;
+Init(aName: TCollection_HAsciiString, aDescription: TCollection_HAsciiString, aRep1: StepRepr_Representation, aRep2: StepRepr_Representation): void;
+
+TransformationOperator(): StepRepr_Transformation;
+
+SetTransformationOperator(aTrans: StepRepr_Transformation): void;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+StepRepr_RepresentedDefinition: declare class StepRepr_RepresentedDefinition extends StepData_SelectType
+
+constructor
+
+CaseNum(ent: Standard_Transient): number;
+
+GeneralProperty(): StepBasic_GeneralProperty;
+
+PropertyDefinition(): StepRepr_PropertyDefinition;
+
+PropertyDefinitionRelationship(): StepRepr_PropertyDefinitionRelationship;
+
+ShapeAspect(): StepRepr_ShapeAspect;
+
+ShapeAspectRelationship(): StepRepr_ShapeAspectRelationship;
+
 delete(): void;
 
 [Symbol.dispose](): void;

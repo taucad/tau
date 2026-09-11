@@ -1,888 +1,740 @@
 # libcascade — NCollection (28)
 
-17 top-level symbols. Signatures are verbatim typescript.
+11 top-level symbols. Signatures are verbatim typescript.
 
-// Purpose
-NCollection_DataMap_int_handle_MAT_BasicElt: declare class NCollection_DataMap_int_handle_MAT_BasicElt extends NCollection_BaseMap
-
-constructor
-
-// Exchange the content of two maps without re-allocations
-Exchange(theOther: unknown): void;
-// theOther: Mutated in place
-
-// Returns const reference to the hasher
-GetHasher(): unknown;
-
-// Assignment
-Assign(theOther: unknown): unknown;
-
-// ReSize
-ReSize(N: number): void;
-
-// Bind binds Item to Key in map
-Bind(theKey: number, theItem: MAT_BasicElt): boolean;
-// theKey: key to add/update
-// theItem: new item
-
-// Bound binds Item to Key in map
-Bound(theKey: number, theItem: MAT_BasicElt): MAT_BasicElt;
-// theKey: key to add/update
-// theItem: new item
-
-// TryBind binds Item to Key in map only if Key is not yet bound
-TryBind(theKey: number, theItem: MAT_BasicElt): boolean;
-// theKey: key to add
-// theItem: item to bind if Key is not yet bound
-
-// TryBound binds Item to Key in map only if Key is not yet bound
-TryBound(theKey: number, theItem: MAT_BasicElt): MAT_BasicElt;
-// theKey: key to add
-// theItem: item to bind if Key is not yet bound
-
-// IsBound
-IsBound(theKey: number): boolean;
-
-// UnBind removes Item Key pair from map
-UnBind(theKey: number): boolean;
-
-// Seek returns pointer to Item by Key
-Seek(theKey: number): MAT_BasicElt;
-
-// ChangeSeek returns modifiable pointer to Item by Key
-ChangeSeek(theKey: number): MAT_BasicElt;
-
-// ChangeFind returns modifiable Item by Key
-ChangeFind(theKey: number): MAT_BasicElt;
-
-// Clear data
-Clear(doReleaseMemory: boolean): void;
-Clear(theAllocator: NCollection_BaseAllocator): void;
-Clear(doReleaseMemory: boolean): void;
-Clear(theAllocator: NCollection_BaseAllocator): void;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// Purpose
-NCollection_DataMap_int_int: declare class NCollection_DataMap_int_int extends NCollection_BaseMap
+NCollection_Sequence_handle_Expr_NamedExpression: declare class NCollection_Sequence_handle_Expr_NamedExpression extends NCollection_BaseSequence
 
 constructor
 
-// Exchange the content of two maps without re-allocations
-Exchange(theOther: unknown): void;
-// theOther: Mutated in place
-
-// Returns const reference to the hasher
-GetHasher(): unknown;
-
-// Assignment
-Assign(theOther: unknown): unknown;
-
-// ReSize
-ReSize(N: number): void;
-
-// Bind binds Item to Key in map
-Bind(theKey: number, theItem: number): boolean;
-// theKey: key to add/update
-// theItem: new item
-
-// Bound binds Item to Key in map
-Bound(theKey: number, theItem: number): number;
-// theKey: key to add/update
-// theItem: new item
-
-// TryBind binds Item to Key in map only if Key is not yet bound
-TryBind(theKey: number, theItem: number): boolean;
-// theKey: key to add
-// theItem: item to bind if Key is not yet bound
-
-// TryBound binds Item to Key in map only if Key is not yet bound
-TryBound(theKey: number, theItem: number): number;
-// theKey: key to add
-// theItem: item to bind if Key is not yet bound
-
-// IsBound
-IsBound(theKey: number): boolean;
-
-// UnBind removes Item Key pair from map
-UnBind(theKey: number): boolean;
-
-// Seek returns pointer to Item by Key
-Seek(theKey: number): number;
-
-// ChangeSeek returns modifiable pointer to Item by Key
-ChangeSeek(theKey: number): number;
-
-// ChangeFind returns modifiable Item by Key
-ChangeFind(theKey: number): number;
-
-// Clear data
-Clear(doReleaseMemory: boolean): void;
-Clear(theAllocator: NCollection_BaseAllocator): void;
-Clear(doReleaseMemory: boolean): void;
-Clear(theAllocator: NCollection_BaseAllocator): void;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// Purpose
-NCollection_DoubleMap_int_TDF_Label: declare class NCollection_DoubleMap_int_TDF_Label extends NCollection_BaseMap
-
-constructor
-
-// Exchange the content of two maps without re-allocations
-Exchange(theOther: unknown): void;
-// theOther: Mutated in place
-
-// Assignment
-Assign(theOther: unknown): unknown;
-
-// ReSize
-ReSize(N: number): void;
-
-// Bind binds the pair (Key1, Key2)
-Bind(theKey1: number, theKey2: TDF_Label): void;
-
-// TryBind binds the pair (Key1, Key2) only if neither key is already bound
-TryBind(theKey1: number, theKey2: TDF_Label): boolean;
-// theKey1: first key to bind
-// theKey2: second key to bind
-
-// - AreBound
-AreBound(theKey1: number, theKey2: TDF_Label): boolean;
-
-// IsBound1
-IsBound1(theKey1: number): boolean;
-
-// IsBound2
-IsBound2(theKey2: TDF_Label): boolean;
-
-// UnBind1
-UnBind1(theKey1: number): boolean;
-
-// UnBind2
-UnBind2(theKey2: TDF_Label): boolean;
-
-// Find the Key1 and return pointer to Key2 or NULL if Key1 is not bound
-Seek1(theKey1: number): TDF_Label;
-// theKey1: Key1 to find
-
-// Find the Key2 and return pointer to Key1 or NULL if not bound
-Seek2(theKey2: TDF_Label): number;
-// theKey2: Key2 to find
-
-// Clear data
-Clear(doReleaseMemory: boolean): void;
-Clear(theAllocator: NCollection_BaseAllocator): void;
-Clear(doReleaseMemory: boolean): void;
-Clear(theAllocator: NCollection_BaseAllocator): void;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// Class `NCollection_DynamicArray` (dynamic array of objects)
-NCollection_DynamicArray_BOPDS_Curve: declare class NCollection_DynamicArray_BOPDS_Curve
-
-constructor
-
-Size(): number;
-
-Length(): number;
-
-Lower(): number;
+static Lower(): number;
 
 Upper(): number;
 
 IsEmpty(): boolean;
 
-Assign(theOther: NCollection_DynamicArray_BOPDS_Curve, theOwnAllocator: boolean): NCollection_DynamicArray_BOPDS_Curve;
+Reverse(): void;
 
-Append(theValue: BOPDS_Curve): BOPDS_Curve;
+Exchange(I: number, J: number): void;
 
-InsertAfter(theIndex: number, theValue: BOPDS_Curve): BOPDS_Curve;
+Clear(theAllocator?: NCollection_BaseAllocator): void;
 
-InsertBefore(theIndex: number, theValue: BOPDS_Curve): BOPDS_Curve;
+Assign(theOther: NCollection_Sequence_handle_Expr_NamedExpression): NCollection_Sequence_handle_Expr_NamedExpression;
 
-EraseLast(): void;
+Remove(theIndex: number): void;
+Remove(theFromIndex: number, theToIndex: number): void;
+Remove(theIndex: number): void;
+Remove(theFromIndex: number, theToIndex: number): void;
 
-Appended(): BOPDS_Curve;
+Append(theItem: Expr_NamedExpression): void;
+Append(theSeq: NCollection_Sequence_handle_Expr_NamedExpression): void;
+Append(theItem: Expr_NamedExpression): void;
+Append(theSeq: NCollection_Sequence_handle_Expr_NamedExpression): void;
 
-Value(theIndex: number): BOPDS_Curve;
+Prepend(theItem: Expr_NamedExpression): void;
+Prepend(theSeq: NCollection_Sequence_handle_Expr_NamedExpression): void;
+Prepend(theItem: Expr_NamedExpression): void;
+Prepend(theSeq: NCollection_Sequence_handle_Expr_NamedExpression): void;
 
-First(): BOPDS_Curve;
+InsertBefore(theIndex: number, theItem: Expr_NamedExpression): void;
+InsertBefore(theIndex: number, theSeq: NCollection_Sequence_handle_Expr_NamedExpression): void;
+InsertBefore(theIndex: number, theItem: Expr_NamedExpression): void;
+InsertBefore(theIndex: number, theSeq: NCollection_Sequence_handle_Expr_NamedExpression): void;
 
-ChangeFirst(): BOPDS_Curve;
+InsertAfter(theIndex: number, theSeq: NCollection_Sequence_handle_Expr_NamedExpression): void;
+InsertAfter(theIndex: number, theItem: Expr_NamedExpression): void;
+InsertAfter(theIndex: number, theSeq: NCollection_Sequence_handle_Expr_NamedExpression): void;
+InsertAfter(theIndex: number, theItem: Expr_NamedExpression): void;
 
-Last(): BOPDS_Curve;
+Split(theIndex: number, theSeq: NCollection_Sequence_handle_Expr_NamedExpression): void;
 
-ChangeLast(): BOPDS_Curve;
+First(): Expr_NamedExpression;
 
-ChangeValue(theIndex: number): BOPDS_Curve;
+ChangeFirst(): Expr_NamedExpression;
 
-SetValue(theIndex: number, theValue: BOPDS_Curve): BOPDS_Curve;
+Last(): Expr_NamedExpression;
 
-Clear(theReleaseMemory?: boolean): void;
+ChangeLast(): Expr_NamedExpression;
 
-SetIncrement(theIncrement: number): void;
+Value(theIndex: number): Expr_NamedExpression;
 
-// Releases the C++ object
+ChangeValue(theIndex: number): Expr_NamedExpression;
+
+SetValue(theIndex: number, theItem: Expr_NamedExpression): void;
+
+At(theIndex: number): Expr_NamedExpression;
+
+ChangeAt(theIndex: number): Expr_NamedExpression;
+
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Class `NCollection_DynamicArray` (dynamic array of objects)
-NCollection_DynamicArray_BOPDS_FaceInfo: declare class NCollection_DynamicArray_BOPDS_FaceInfo
+NCollection_Sequence_handle_Expr_NamedFunction: declare class NCollection_Sequence_handle_Expr_NamedFunction extends NCollection_BaseSequence
 
 constructor
 
-Size(): number;
-
-Length(): number;
-
-Lower(): number;
+static Lower(): number;
 
 Upper(): number;
 
 IsEmpty(): boolean;
 
-Assign(theOther: NCollection_DynamicArray_BOPDS_FaceInfo, theOwnAllocator: boolean): NCollection_DynamicArray_BOPDS_FaceInfo;
+Reverse(): void;
 
-Append(theValue: BOPDS_FaceInfo): BOPDS_FaceInfo;
+Exchange(I: number, J: number): void;
 
-InsertAfter(theIndex: number, theValue: BOPDS_FaceInfo): BOPDS_FaceInfo;
+Clear(theAllocator?: NCollection_BaseAllocator): void;
 
-InsertBefore(theIndex: number, theValue: BOPDS_FaceInfo): BOPDS_FaceInfo;
+Assign(theOther: NCollection_Sequence_handle_Expr_NamedFunction): NCollection_Sequence_handle_Expr_NamedFunction;
 
-EraseLast(): void;
+Remove(theIndex: number): void;
+Remove(theFromIndex: number, theToIndex: number): void;
+Remove(theIndex: number): void;
+Remove(theFromIndex: number, theToIndex: number): void;
 
-Appended(): BOPDS_FaceInfo;
+Append(theItem: Expr_NamedFunction): void;
+Append(theSeq: NCollection_Sequence_handle_Expr_NamedFunction): void;
+Append(theItem: Expr_NamedFunction): void;
+Append(theSeq: NCollection_Sequence_handle_Expr_NamedFunction): void;
 
-Value(theIndex: number): BOPDS_FaceInfo;
+Prepend(theItem: Expr_NamedFunction): void;
+Prepend(theSeq: NCollection_Sequence_handle_Expr_NamedFunction): void;
+Prepend(theItem: Expr_NamedFunction): void;
+Prepend(theSeq: NCollection_Sequence_handle_Expr_NamedFunction): void;
 
-First(): BOPDS_FaceInfo;
+InsertBefore(theIndex: number, theItem: Expr_NamedFunction): void;
+InsertBefore(theIndex: number, theSeq: NCollection_Sequence_handle_Expr_NamedFunction): void;
+InsertBefore(theIndex: number, theItem: Expr_NamedFunction): void;
+InsertBefore(theIndex: number, theSeq: NCollection_Sequence_handle_Expr_NamedFunction): void;
 
-ChangeFirst(): BOPDS_FaceInfo;
+InsertAfter(theIndex: number, theSeq: NCollection_Sequence_handle_Expr_NamedFunction): void;
+InsertAfter(theIndex: number, theItem: Expr_NamedFunction): void;
+InsertAfter(theIndex: number, theSeq: NCollection_Sequence_handle_Expr_NamedFunction): void;
+InsertAfter(theIndex: number, theItem: Expr_NamedFunction): void;
 
-Last(): BOPDS_FaceInfo;
+Split(theIndex: number, theSeq: NCollection_Sequence_handle_Expr_NamedFunction): void;
 
-ChangeLast(): BOPDS_FaceInfo;
+First(): Expr_NamedFunction;
 
-ChangeValue(theIndex: number): BOPDS_FaceInfo;
+ChangeFirst(): Expr_NamedFunction;
 
-SetValue(theIndex: number, theValue: BOPDS_FaceInfo): BOPDS_FaceInfo;
+Last(): Expr_NamedFunction;
 
-Clear(theReleaseMemory?: boolean): void;
+ChangeLast(): Expr_NamedFunction;
 
-SetIncrement(theIncrement: number): void;
+Value(theIndex: number): Expr_NamedFunction;
 
-// Releases the C++ object
+ChangeValue(theIndex: number): Expr_NamedFunction;
+
+SetValue(theIndex: number, theItem: Expr_NamedFunction): void;
+
+At(theIndex: number): Expr_NamedFunction;
+
+ChangeAt(theIndex: number): Expr_NamedFunction;
+
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Class `NCollection_DynamicArray` (dynamic array of objects)
-NCollection_DynamicArray_BOPDS_InterfEE: declare class NCollection_DynamicArray_BOPDS_InterfEE
+NCollection_Sequence_handle_Geom2d_BoundedCurve: declare class NCollection_Sequence_handle_Geom2d_BoundedCurve extends NCollection_BaseSequence
 
 constructor
 
-Size(): number;
-
-Length(): number;
-
-Lower(): number;
+static Lower(): number;
 
 Upper(): number;
 
 IsEmpty(): boolean;
 
-Assign(theOther: NCollection_DynamicArray_BOPDS_InterfEE, theOwnAllocator: boolean): NCollection_DynamicArray_BOPDS_InterfEE;
+Reverse(): void;
 
-Append(theValue: BOPDS_InterfEE): BOPDS_InterfEE;
+Exchange(I: number, J: number): void;
 
-InsertAfter(theIndex: number, theValue: BOPDS_InterfEE): BOPDS_InterfEE;
+Clear(theAllocator?: NCollection_BaseAllocator): void;
 
-InsertBefore(theIndex: number, theValue: BOPDS_InterfEE): BOPDS_InterfEE;
+Assign(theOther: NCollection_Sequence_handle_Geom2d_BoundedCurve): NCollection_Sequence_handle_Geom2d_BoundedCurve;
 
-EraseLast(): void;
+Remove(theIndex: number): void;
+Remove(theFromIndex: number, theToIndex: number): void;
+Remove(theIndex: number): void;
+Remove(theFromIndex: number, theToIndex: number): void;
 
-Appended(): BOPDS_InterfEE;
+Append(theItem: Geom2d_BoundedCurve): void;
+Append(theSeq: NCollection_Sequence_handle_Geom2d_BoundedCurve): void;
+Append(theItem: Geom2d_BoundedCurve): void;
+Append(theSeq: NCollection_Sequence_handle_Geom2d_BoundedCurve): void;
 
-Value(theIndex: number): BOPDS_InterfEE;
+Prepend(theItem: Geom2d_BoundedCurve): void;
+Prepend(theSeq: NCollection_Sequence_handle_Geom2d_BoundedCurve): void;
+Prepend(theItem: Geom2d_BoundedCurve): void;
+Prepend(theSeq: NCollection_Sequence_handle_Geom2d_BoundedCurve): void;
 
-First(): BOPDS_InterfEE;
+InsertBefore(theIndex: number, theItem: Geom2d_BoundedCurve): void;
+InsertBefore(theIndex: number, theSeq: NCollection_Sequence_handle_Geom2d_BoundedCurve): void;
+InsertBefore(theIndex: number, theItem: Geom2d_BoundedCurve): void;
+InsertBefore(theIndex: number, theSeq: NCollection_Sequence_handle_Geom2d_BoundedCurve): void;
 
-ChangeFirst(): BOPDS_InterfEE;
+InsertAfter(theIndex: number, theSeq: NCollection_Sequence_handle_Geom2d_BoundedCurve): void;
+InsertAfter(theIndex: number, theItem: Geom2d_BoundedCurve): void;
+InsertAfter(theIndex: number, theSeq: NCollection_Sequence_handle_Geom2d_BoundedCurve): void;
+InsertAfter(theIndex: number, theItem: Geom2d_BoundedCurve): void;
 
-Last(): BOPDS_InterfEE;
+Split(theIndex: number, theSeq: NCollection_Sequence_handle_Geom2d_BoundedCurve): void;
 
-ChangeLast(): BOPDS_InterfEE;
+First(): Geom2d_BoundedCurve;
 
-ChangeValue(theIndex: number): BOPDS_InterfEE;
+ChangeFirst(): Geom2d_BoundedCurve;
 
-SetValue(theIndex: number, theValue: BOPDS_InterfEE): BOPDS_InterfEE;
+Last(): Geom2d_BoundedCurve;
 
-Clear(theReleaseMemory?: boolean): void;
+ChangeLast(): Geom2d_BoundedCurve;
 
-SetIncrement(theIncrement: number): void;
+Value(theIndex: number): Geom2d_BoundedCurve;
 
-// Releases the C++ object
+ChangeValue(theIndex: number): Geom2d_BoundedCurve;
+
+SetValue(theIndex: number, theItem: Geom2d_BoundedCurve): void;
+
+At(theIndex: number): Geom2d_BoundedCurve;
+
+ChangeAt(theIndex: number): Geom2d_BoundedCurve;
+
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Class `NCollection_DynamicArray` (dynamic array of objects)
-NCollection_DynamicArray_BOPDS_InterfEF: declare class NCollection_DynamicArray_BOPDS_InterfEF
+NCollection_Sequence_handle_Geom2d_Curve: declare class NCollection_Sequence_handle_Geom2d_Curve extends NCollection_BaseSequence
 
 constructor
 
-Size(): number;
-
-Length(): number;
-
-Lower(): number;
+static Lower(): number;
 
 Upper(): number;
 
 IsEmpty(): boolean;
 
-Assign(theOther: NCollection_DynamicArray_BOPDS_InterfEF, theOwnAllocator: boolean): NCollection_DynamicArray_BOPDS_InterfEF;
+Reverse(): void;
 
-Append(theValue: BOPDS_InterfEF): BOPDS_InterfEF;
+Exchange(I: number, J: number): void;
 
-InsertAfter(theIndex: number, theValue: BOPDS_InterfEF): BOPDS_InterfEF;
+Clear(theAllocator?: NCollection_BaseAllocator): void;
 
-InsertBefore(theIndex: number, theValue: BOPDS_InterfEF): BOPDS_InterfEF;
+Assign(theOther: NCollection_Sequence_handle_Geom2d_Curve): NCollection_Sequence_handle_Geom2d_Curve;
 
-EraseLast(): void;
+Remove(theIndex: number): void;
+Remove(theFromIndex: number, theToIndex: number): void;
+Remove(theIndex: number): void;
+Remove(theFromIndex: number, theToIndex: number): void;
 
-Appended(): BOPDS_InterfEF;
+Append(theItem: Geom2d_Curve): void;
+Append(theSeq: NCollection_Sequence_handle_Geom2d_Curve): void;
+Append(theItem: Geom2d_Curve): void;
+Append(theSeq: NCollection_Sequence_handle_Geom2d_Curve): void;
 
-Value(theIndex: number): BOPDS_InterfEF;
+Prepend(theItem: Geom2d_Curve): void;
+Prepend(theSeq: NCollection_Sequence_handle_Geom2d_Curve): void;
+Prepend(theItem: Geom2d_Curve): void;
+Prepend(theSeq: NCollection_Sequence_handle_Geom2d_Curve): void;
 
-First(): BOPDS_InterfEF;
+InsertBefore(theIndex: number, theItem: Geom2d_Curve): void;
+InsertBefore(theIndex: number, theSeq: NCollection_Sequence_handle_Geom2d_Curve): void;
+InsertBefore(theIndex: number, theItem: Geom2d_Curve): void;
+InsertBefore(theIndex: number, theSeq: NCollection_Sequence_handle_Geom2d_Curve): void;
 
-ChangeFirst(): BOPDS_InterfEF;
+InsertAfter(theIndex: number, theSeq: NCollection_Sequence_handle_Geom2d_Curve): void;
+InsertAfter(theIndex: number, theItem: Geom2d_Curve): void;
+InsertAfter(theIndex: number, theSeq: NCollection_Sequence_handle_Geom2d_Curve): void;
+InsertAfter(theIndex: number, theItem: Geom2d_Curve): void;
 
-Last(): BOPDS_InterfEF;
+Split(theIndex: number, theSeq: NCollection_Sequence_handle_Geom2d_Curve): void;
 
-ChangeLast(): BOPDS_InterfEF;
+First(): Geom2d_Curve;
 
-ChangeValue(theIndex: number): BOPDS_InterfEF;
+ChangeFirst(): Geom2d_Curve;
 
-SetValue(theIndex: number, theValue: BOPDS_InterfEF): BOPDS_InterfEF;
+Last(): Geom2d_Curve;
 
-Clear(theReleaseMemory?: boolean): void;
+ChangeLast(): Geom2d_Curve;
 
-SetIncrement(theIncrement: number): void;
+Value(theIndex: number): Geom2d_Curve;
 
-// Releases the C++ object
+ChangeValue(theIndex: number): Geom2d_Curve;
+
+SetValue(theIndex: number, theItem: Geom2d_Curve): void;
+
+At(theIndex: number): Geom2d_Curve;
+
+ChangeAt(theIndex: number): Geom2d_Curve;
+
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Class `NCollection_DynamicArray` (dynamic array of objects)
-NCollection_DynamicArray_BOPDS_InterfEZ: declare class NCollection_DynamicArray_BOPDS_InterfEZ
+NCollection_Sequence_handle_Geom2d_Geometry: declare class NCollection_Sequence_handle_Geom2d_Geometry extends NCollection_BaseSequence
 
 constructor
 
-Size(): number;
-
-Length(): number;
-
-Lower(): number;
+static Lower(): number;
 
 Upper(): number;
 
 IsEmpty(): boolean;
 
-Assign(theOther: NCollection_DynamicArray_BOPDS_InterfEZ, theOwnAllocator: boolean): NCollection_DynamicArray_BOPDS_InterfEZ;
+Reverse(): void;
 
-Append(theValue: BOPDS_InterfEZ): BOPDS_InterfEZ;
+Exchange(I: number, J: number): void;
 
-InsertAfter(theIndex: number, theValue: BOPDS_InterfEZ): BOPDS_InterfEZ;
+Clear(theAllocator?: NCollection_BaseAllocator): void;
 
-InsertBefore(theIndex: number, theValue: BOPDS_InterfEZ): BOPDS_InterfEZ;
+Assign(theOther: NCollection_Sequence_handle_Geom2d_Geometry): NCollection_Sequence_handle_Geom2d_Geometry;
 
-EraseLast(): void;
+Remove(theIndex: number): void;
+Remove(theFromIndex: number, theToIndex: number): void;
+Remove(theIndex: number): void;
+Remove(theFromIndex: number, theToIndex: number): void;
 
-Appended(): BOPDS_InterfEZ;
+Append(theItem: Geom2d_Geometry): void;
+Append(theSeq: NCollection_Sequence_handle_Geom2d_Geometry): void;
+Append(theItem: Geom2d_Geometry): void;
+Append(theSeq: NCollection_Sequence_handle_Geom2d_Geometry): void;
 
-Value(theIndex: number): BOPDS_InterfEZ;
+Prepend(theItem: Geom2d_Geometry): void;
+Prepend(theSeq: NCollection_Sequence_handle_Geom2d_Geometry): void;
+Prepend(theItem: Geom2d_Geometry): void;
+Prepend(theSeq: NCollection_Sequence_handle_Geom2d_Geometry): void;
 
-First(): BOPDS_InterfEZ;
+InsertBefore(theIndex: number, theItem: Geom2d_Geometry): void;
+InsertBefore(theIndex: number, theSeq: NCollection_Sequence_handle_Geom2d_Geometry): void;
+InsertBefore(theIndex: number, theItem: Geom2d_Geometry): void;
+InsertBefore(theIndex: number, theSeq: NCollection_Sequence_handle_Geom2d_Geometry): void;
 
-ChangeFirst(): BOPDS_InterfEZ;
+InsertAfter(theIndex: number, theSeq: NCollection_Sequence_handle_Geom2d_Geometry): void;
+InsertAfter(theIndex: number, theItem: Geom2d_Geometry): void;
+InsertAfter(theIndex: number, theSeq: NCollection_Sequence_handle_Geom2d_Geometry): void;
+InsertAfter(theIndex: number, theItem: Geom2d_Geometry): void;
 
-Last(): BOPDS_InterfEZ;
+Split(theIndex: number, theSeq: NCollection_Sequence_handle_Geom2d_Geometry): void;
 
-ChangeLast(): BOPDS_InterfEZ;
+First(): Geom2d_Geometry;
 
-ChangeValue(theIndex: number): BOPDS_InterfEZ;
+ChangeFirst(): Geom2d_Geometry;
 
-SetValue(theIndex: number, theValue: BOPDS_InterfEZ): BOPDS_InterfEZ;
+Last(): Geom2d_Geometry;
 
-Clear(theReleaseMemory?: boolean): void;
+ChangeLast(): Geom2d_Geometry;
 
-SetIncrement(theIncrement: number): void;
+Value(theIndex: number): Geom2d_Geometry;
 
-// Releases the C++ object
+ChangeValue(theIndex: number): Geom2d_Geometry;
+
+SetValue(theIndex: number, theItem: Geom2d_Geometry): void;
+
+At(theIndex: number): Geom2d_Geometry;
+
+ChangeAt(theIndex: number): Geom2d_Geometry;
+
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Class `NCollection_DynamicArray` (dynamic array of objects)
-NCollection_DynamicArray_BOPDS_InterfFF: declare class NCollection_DynamicArray_BOPDS_InterfFF
+NCollection_Sequence_handle_Geom_BoundedCurve: declare class NCollection_Sequence_handle_Geom_BoundedCurve extends NCollection_BaseSequence
 
 constructor
 
-Size(): number;
-
-Length(): number;
-
-Lower(): number;
+static Lower(): number;
 
 Upper(): number;
 
 IsEmpty(): boolean;
 
-Assign(theOther: NCollection_DynamicArray_BOPDS_InterfFF, theOwnAllocator: boolean): NCollection_DynamicArray_BOPDS_InterfFF;
+Reverse(): void;
 
-Append(theValue: BOPDS_InterfFF): BOPDS_InterfFF;
+Exchange(I: number, J: number): void;
 
-InsertAfter(theIndex: number, theValue: BOPDS_InterfFF): BOPDS_InterfFF;
+Clear(theAllocator?: NCollection_BaseAllocator): void;
 
-InsertBefore(theIndex: number, theValue: BOPDS_InterfFF): BOPDS_InterfFF;
+Assign(theOther: NCollection_Sequence_handle_Geom_BoundedCurve): NCollection_Sequence_handle_Geom_BoundedCurve;
 
-EraseLast(): void;
+Remove(theIndex: number): void;
+Remove(theFromIndex: number, theToIndex: number): void;
+Remove(theIndex: number): void;
+Remove(theFromIndex: number, theToIndex: number): void;
 
-Appended(): BOPDS_InterfFF;
+Append(theItem: Geom_BoundedCurve): void;
+Append(theSeq: NCollection_Sequence_handle_Geom_BoundedCurve): void;
+Append(theItem: Geom_BoundedCurve): void;
+Append(theSeq: NCollection_Sequence_handle_Geom_BoundedCurve): void;
 
-Value(theIndex: number): BOPDS_InterfFF;
+Prepend(theItem: Geom_BoundedCurve): void;
+Prepend(theSeq: NCollection_Sequence_handle_Geom_BoundedCurve): void;
+Prepend(theItem: Geom_BoundedCurve): void;
+Prepend(theSeq: NCollection_Sequence_handle_Geom_BoundedCurve): void;
 
-First(): BOPDS_InterfFF;
+InsertBefore(theIndex: number, theItem: Geom_BoundedCurve): void;
+InsertBefore(theIndex: number, theSeq: NCollection_Sequence_handle_Geom_BoundedCurve): void;
+InsertBefore(theIndex: number, theItem: Geom_BoundedCurve): void;
+InsertBefore(theIndex: number, theSeq: NCollection_Sequence_handle_Geom_BoundedCurve): void;
 
-ChangeFirst(): BOPDS_InterfFF;
+InsertAfter(theIndex: number, theSeq: NCollection_Sequence_handle_Geom_BoundedCurve): void;
+InsertAfter(theIndex: number, theItem: Geom_BoundedCurve): void;
+InsertAfter(theIndex: number, theSeq: NCollection_Sequence_handle_Geom_BoundedCurve): void;
+InsertAfter(theIndex: number, theItem: Geom_BoundedCurve): void;
 
-Last(): BOPDS_InterfFF;
+Split(theIndex: number, theSeq: NCollection_Sequence_handle_Geom_BoundedCurve): void;
 
-ChangeLast(): BOPDS_InterfFF;
+First(): Geom_BoundedCurve;
 
-ChangeValue(theIndex: number): BOPDS_InterfFF;
+ChangeFirst(): Geom_BoundedCurve;
 
-SetValue(theIndex: number, theValue: BOPDS_InterfFF): BOPDS_InterfFF;
+Last(): Geom_BoundedCurve;
 
-Clear(theReleaseMemory?: boolean): void;
+ChangeLast(): Geom_BoundedCurve;
 
-SetIncrement(theIncrement: number): void;
+Value(theIndex: number): Geom_BoundedCurve;
 
-// Releases the C++ object
+ChangeValue(theIndex: number): Geom_BoundedCurve;
+
+SetValue(theIndex: number, theItem: Geom_BoundedCurve): void;
+
+At(theIndex: number): Geom_BoundedCurve;
+
+ChangeAt(theIndex: number): Geom_BoundedCurve;
+
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Class `NCollection_DynamicArray` (dynamic array of objects)
-NCollection_DynamicArray_BOPDS_InterfFZ: declare class NCollection_DynamicArray_BOPDS_InterfFZ
+NCollection_Sequence_handle_Geom_Curve: declare class NCollection_Sequence_handle_Geom_Curve extends NCollection_BaseSequence
 
 constructor
 
-Size(): number;
-
-Length(): number;
-
-Lower(): number;
+static Lower(): number;
 
 Upper(): number;
 
 IsEmpty(): boolean;
 
-Assign(theOther: NCollection_DynamicArray_BOPDS_InterfFZ, theOwnAllocator: boolean): NCollection_DynamicArray_BOPDS_InterfFZ;
+Reverse(): void;
 
-Append(theValue: BOPDS_InterfFZ): BOPDS_InterfFZ;
+Exchange(I: number, J: number): void;
 
-InsertAfter(theIndex: number, theValue: BOPDS_InterfFZ): BOPDS_InterfFZ;
+Clear(theAllocator?: NCollection_BaseAllocator): void;
 
-InsertBefore(theIndex: number, theValue: BOPDS_InterfFZ): BOPDS_InterfFZ;
+Assign(theOther: NCollection_Sequence_handle_Geom_Curve): NCollection_Sequence_handle_Geom_Curve;
 
-EraseLast(): void;
+Remove(theIndex: number): void;
+Remove(theFromIndex: number, theToIndex: number): void;
+Remove(theIndex: number): void;
+Remove(theFromIndex: number, theToIndex: number): void;
 
-Appended(): BOPDS_InterfFZ;
+Append(theItem: Geom_Curve): void;
+Append(theSeq: NCollection_Sequence_handle_Geom_Curve): void;
+Append(theItem: Geom_Curve): void;
+Append(theSeq: NCollection_Sequence_handle_Geom_Curve): void;
 
-Value(theIndex: number): BOPDS_InterfFZ;
+Prepend(theItem: Geom_Curve): void;
+Prepend(theSeq: NCollection_Sequence_handle_Geom_Curve): void;
+Prepend(theItem: Geom_Curve): void;
+Prepend(theSeq: NCollection_Sequence_handle_Geom_Curve): void;
 
-First(): BOPDS_InterfFZ;
+InsertBefore(theIndex: number, theItem: Geom_Curve): void;
+InsertBefore(theIndex: number, theSeq: NCollection_Sequence_handle_Geom_Curve): void;
+InsertBefore(theIndex: number, theItem: Geom_Curve): void;
+InsertBefore(theIndex: number, theSeq: NCollection_Sequence_handle_Geom_Curve): void;
 
-ChangeFirst(): BOPDS_InterfFZ;
+InsertAfter(theIndex: number, theSeq: NCollection_Sequence_handle_Geom_Curve): void;
+InsertAfter(theIndex: number, theItem: Geom_Curve): void;
+InsertAfter(theIndex: number, theSeq: NCollection_Sequence_handle_Geom_Curve): void;
+InsertAfter(theIndex: number, theItem: Geom_Curve): void;
 
-Last(): BOPDS_InterfFZ;
+Split(theIndex: number, theSeq: NCollection_Sequence_handle_Geom_Curve): void;
 
-ChangeLast(): BOPDS_InterfFZ;
+First(): Geom_Curve;
 
-ChangeValue(theIndex: number): BOPDS_InterfFZ;
+ChangeFirst(): Geom_Curve;
 
-SetValue(theIndex: number, theValue: BOPDS_InterfFZ): BOPDS_InterfFZ;
+Last(): Geom_Curve;
 
-Clear(theReleaseMemory?: boolean): void;
+ChangeLast(): Geom_Curve;
 
-SetIncrement(theIncrement: number): void;
+Value(theIndex: number): Geom_Curve;
 
-// Releases the C++ object
+ChangeValue(theIndex: number): Geom_Curve;
+
+SetValue(theIndex: number, theItem: Geom_Curve): void;
+
+At(theIndex: number): Geom_Curve;
+
+ChangeAt(theIndex: number): Geom_Curve;
+
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Class `NCollection_DynamicArray` (dynamic array of objects)
-NCollection_DynamicArray_BOPDS_InterfVE: declare class NCollection_DynamicArray_BOPDS_InterfVE
+NCollection_Sequence_handle_IFSelect_Selection: declare class NCollection_Sequence_handle_IFSelect_Selection extends NCollection_BaseSequence
 
 constructor
 
-Size(): number;
-
-Length(): number;
-
-Lower(): number;
+static Lower(): number;
 
 Upper(): number;
 
 IsEmpty(): boolean;
 
-Assign(theOther: NCollection_DynamicArray_BOPDS_InterfVE, theOwnAllocator: boolean): NCollection_DynamicArray_BOPDS_InterfVE;
+Reverse(): void;
 
-Append(theValue: BOPDS_InterfVE): BOPDS_InterfVE;
+Exchange(I: number, J: number): void;
 
-InsertAfter(theIndex: number, theValue: BOPDS_InterfVE): BOPDS_InterfVE;
+Clear(theAllocator?: NCollection_BaseAllocator): void;
 
-InsertBefore(theIndex: number, theValue: BOPDS_InterfVE): BOPDS_InterfVE;
+Assign(theOther: NCollection_Sequence_handle_IFSelect_Selection): NCollection_Sequence_handle_IFSelect_Selection;
 
-EraseLast(): void;
+Remove(theIndex: number): void;
+Remove(theFromIndex: number, theToIndex: number): void;
+Remove(theIndex: number): void;
+Remove(theFromIndex: number, theToIndex: number): void;
 
-Appended(): BOPDS_InterfVE;
+Append(theItem: IFSelect_Selection): void;
+Append(theSeq: NCollection_Sequence_handle_IFSelect_Selection): void;
+Append(theItem: IFSelect_Selection): void;
+Append(theSeq: NCollection_Sequence_handle_IFSelect_Selection): void;
 
-Value(theIndex: number): BOPDS_InterfVE;
+Prepend(theItem: IFSelect_Selection): void;
+Prepend(theSeq: NCollection_Sequence_handle_IFSelect_Selection): void;
+Prepend(theItem: IFSelect_Selection): void;
+Prepend(theSeq: NCollection_Sequence_handle_IFSelect_Selection): void;
 
-First(): BOPDS_InterfVE;
+InsertBefore(theIndex: number, theItem: IFSelect_Selection): void;
+InsertBefore(theIndex: number, theSeq: NCollection_Sequence_handle_IFSelect_Selection): void;
+InsertBefore(theIndex: number, theItem: IFSelect_Selection): void;
+InsertBefore(theIndex: number, theSeq: NCollection_Sequence_handle_IFSelect_Selection): void;
 
-ChangeFirst(): BOPDS_InterfVE;
+InsertAfter(theIndex: number, theSeq: NCollection_Sequence_handle_IFSelect_Selection): void;
+InsertAfter(theIndex: number, theItem: IFSelect_Selection): void;
+InsertAfter(theIndex: number, theSeq: NCollection_Sequence_handle_IFSelect_Selection): void;
+InsertAfter(theIndex: number, theItem: IFSelect_Selection): void;
 
-Last(): BOPDS_InterfVE;
+Split(theIndex: number, theSeq: NCollection_Sequence_handle_IFSelect_Selection): void;
 
-ChangeLast(): BOPDS_InterfVE;
+First(): IFSelect_Selection;
 
-ChangeValue(theIndex: number): BOPDS_InterfVE;
+ChangeFirst(): IFSelect_Selection;
 
-SetValue(theIndex: number, theValue: BOPDS_InterfVE): BOPDS_InterfVE;
+Last(): IFSelect_Selection;
 
-Clear(theReleaseMemory?: boolean): void;
+ChangeLast(): IFSelect_Selection;
 
-SetIncrement(theIncrement: number): void;
+Value(theIndex: number): IFSelect_Selection;
 
-// Releases the C++ object
+ChangeValue(theIndex: number): IFSelect_Selection;
+
+SetValue(theIndex: number, theItem: IFSelect_Selection): void;
+
+At(theIndex: number): IFSelect_Selection;
+
+ChangeAt(theIndex: number): IFSelect_Selection;
+
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Class `NCollection_DynamicArray` (dynamic array of objects)
-NCollection_DynamicArray_BOPDS_InterfVF: declare class NCollection_DynamicArray_BOPDS_InterfVF
+NCollection_Sequence_handle_IntPatch_Line: declare class NCollection_Sequence_handle_IntPatch_Line extends NCollection_BaseSequence
 
 constructor
 
-Size(): number;
-
-Length(): number;
-
-Lower(): number;
+static Lower(): number;
 
 Upper(): number;
 
 IsEmpty(): boolean;
 
-Assign(theOther: NCollection_DynamicArray_BOPDS_InterfVF, theOwnAllocator: boolean): NCollection_DynamicArray_BOPDS_InterfVF;
+Reverse(): void;
 
-Append(theValue: BOPDS_InterfVF): BOPDS_InterfVF;
+Exchange(I: number, J: number): void;
 
-InsertAfter(theIndex: number, theValue: BOPDS_InterfVF): BOPDS_InterfVF;
+Clear(theAllocator?: NCollection_BaseAllocator): void;
 
-InsertBefore(theIndex: number, theValue: BOPDS_InterfVF): BOPDS_InterfVF;
+Assign(theOther: NCollection_Sequence_handle_IntPatch_Line): NCollection_Sequence_handle_IntPatch_Line;
 
-EraseLast(): void;
+Remove(theIndex: number): void;
+Remove(theFromIndex: number, theToIndex: number): void;
+Remove(theIndex: number): void;
+Remove(theFromIndex: number, theToIndex: number): void;
 
-Appended(): BOPDS_InterfVF;
+Append(theItem: IntPatch_Line): void;
+Append(theSeq: NCollection_Sequence_handle_IntPatch_Line): void;
+Append(theItem: IntPatch_Line): void;
+Append(theSeq: NCollection_Sequence_handle_IntPatch_Line): void;
 
-Value(theIndex: number): BOPDS_InterfVF;
+Prepend(theItem: IntPatch_Line): void;
+Prepend(theSeq: NCollection_Sequence_handle_IntPatch_Line): void;
+Prepend(theItem: IntPatch_Line): void;
+Prepend(theSeq: NCollection_Sequence_handle_IntPatch_Line): void;
 
-First(): BOPDS_InterfVF;
+InsertBefore(theIndex: number, theItem: IntPatch_Line): void;
+InsertBefore(theIndex: number, theSeq: NCollection_Sequence_handle_IntPatch_Line): void;
+InsertBefore(theIndex: number, theItem: IntPatch_Line): void;
+InsertBefore(theIndex: number, theSeq: NCollection_Sequence_handle_IntPatch_Line): void;
 
-ChangeFirst(): BOPDS_InterfVF;
+InsertAfter(theIndex: number, theSeq: NCollection_Sequence_handle_IntPatch_Line): void;
+InsertAfter(theIndex: number, theItem: IntPatch_Line): void;
+InsertAfter(theIndex: number, theSeq: NCollection_Sequence_handle_IntPatch_Line): void;
+InsertAfter(theIndex: number, theItem: IntPatch_Line): void;
 
-Last(): BOPDS_InterfVF;
+Split(theIndex: number, theSeq: NCollection_Sequence_handle_IntPatch_Line): void;
 
-ChangeLast(): BOPDS_InterfVF;
+First(): IntPatch_Line;
 
-ChangeValue(theIndex: number): BOPDS_InterfVF;
+ChangeFirst(): IntPatch_Line;
 
-SetValue(theIndex: number, theValue: BOPDS_InterfVF): BOPDS_InterfVF;
+Last(): IntPatch_Line;
 
-Clear(theReleaseMemory?: boolean): void;
+ChangeLast(): IntPatch_Line;
 
-SetIncrement(theIncrement: number): void;
+Value(theIndex: number): IntPatch_Line;
 
-// Releases the C++ object
+ChangeValue(theIndex: number): IntPatch_Line;
+
+SetValue(theIndex: number, theItem: IntPatch_Line): void;
+
+At(theIndex: number): IntPatch_Line;
+
+ChangeAt(theIndex: number): IntPatch_Line;
+
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Class `NCollection_DynamicArray` (dynamic array of objects)
-NCollection_DynamicArray_BOPDS_InterfVV: declare class NCollection_DynamicArray_BOPDS_InterfVV
+NCollection_Sequence_handle_MAT2d_Connexion: declare class NCollection_Sequence_handle_MAT2d_Connexion extends NCollection_BaseSequence
 
 constructor
 
-Size(): number;
-
-Length(): number;
-
-Lower(): number;
+static Lower(): number;
 
 Upper(): number;
 
 IsEmpty(): boolean;
 
-Assign(theOther: NCollection_DynamicArray_BOPDS_InterfVV, theOwnAllocator: boolean): NCollection_DynamicArray_BOPDS_InterfVV;
+Reverse(): void;
 
-Append(theValue: BOPDS_InterfVV): BOPDS_InterfVV;
+Exchange(I: number, J: number): void;
 
-InsertAfter(theIndex: number, theValue: BOPDS_InterfVV): BOPDS_InterfVV;
+Clear(theAllocator?: NCollection_BaseAllocator): void;
 
-InsertBefore(theIndex: number, theValue: BOPDS_InterfVV): BOPDS_InterfVV;
+Assign(theOther: NCollection_Sequence_handle_MAT2d_Connexion): NCollection_Sequence_handle_MAT2d_Connexion;
 
-EraseLast(): void;
+Remove(theIndex: number): void;
+Remove(theFromIndex: number, theToIndex: number): void;
+Remove(theIndex: number): void;
+Remove(theFromIndex: number, theToIndex: number): void;
 
-Appended(): BOPDS_InterfVV;
+Append(theItem: MAT2d_Connexion): void;
+Append(theSeq: NCollection_Sequence_handle_MAT2d_Connexion): void;
+Append(theItem: MAT2d_Connexion): void;
+Append(theSeq: NCollection_Sequence_handle_MAT2d_Connexion): void;
 
-Value(theIndex: number): BOPDS_InterfVV;
+Prepend(theItem: MAT2d_Connexion): void;
+Prepend(theSeq: NCollection_Sequence_handle_MAT2d_Connexion): void;
+Prepend(theItem: MAT2d_Connexion): void;
+Prepend(theSeq: NCollection_Sequence_handle_MAT2d_Connexion): void;
 
-First(): BOPDS_InterfVV;
+InsertBefore(theIndex: number, theItem: MAT2d_Connexion): void;
+InsertBefore(theIndex: number, theSeq: NCollection_Sequence_handle_MAT2d_Connexion): void;
+InsertBefore(theIndex: number, theItem: MAT2d_Connexion): void;
+InsertBefore(theIndex: number, theSeq: NCollection_Sequence_handle_MAT2d_Connexion): void;
 
-ChangeFirst(): BOPDS_InterfVV;
+InsertAfter(theIndex: number, theSeq: NCollection_Sequence_handle_MAT2d_Connexion): void;
+InsertAfter(theIndex: number, theItem: MAT2d_Connexion): void;
+InsertAfter(theIndex: number, theSeq: NCollection_Sequence_handle_MAT2d_Connexion): void;
+InsertAfter(theIndex: number, theItem: MAT2d_Connexion): void;
 
-Last(): BOPDS_InterfVV;
+Split(theIndex: number, theSeq: NCollection_Sequence_handle_MAT2d_Connexion): void;
 
-ChangeLast(): BOPDS_InterfVV;
+First(): MAT2d_Connexion;
 
-ChangeValue(theIndex: number): BOPDS_InterfVV;
+ChangeFirst(): MAT2d_Connexion;
 
-SetValue(theIndex: number, theValue: BOPDS_InterfVV): BOPDS_InterfVV;
+Last(): MAT2d_Connexion;
 
-Clear(theReleaseMemory?: boolean): void;
+ChangeLast(): MAT2d_Connexion;
 
-SetIncrement(theIncrement: number): void;
+Value(theIndex: number): MAT2d_Connexion;
 
-// Releases the C++ object
+ChangeValue(theIndex: number): MAT2d_Connexion;
+
+SetValue(theIndex: number, theItem: MAT2d_Connexion): void;
+
+At(theIndex: number): MAT2d_Connexion;
+
+ChangeAt(theIndex: number): MAT2d_Connexion;
+
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Class `NCollection_DynamicArray` (dynamic array of objects)
-NCollection_DynamicArray_BOPDS_InterfVZ: declare class NCollection_DynamicArray_BOPDS_InterfVZ
+NCollection_Sequence_handle_MAT_Arc: declare class NCollection_Sequence_handle_MAT_Arc extends NCollection_BaseSequence
 
 constructor
 
-Size(): number;
-
-Length(): number;
-
-Lower(): number;
+static Lower(): number;
 
 Upper(): number;
 
 IsEmpty(): boolean;
 
-Assign(theOther: NCollection_DynamicArray_BOPDS_InterfVZ, theOwnAllocator: boolean): NCollection_DynamicArray_BOPDS_InterfVZ;
+Reverse(): void;
 
-Append(theValue: BOPDS_InterfVZ): BOPDS_InterfVZ;
+Exchange(I: number, J: number): void;
 
-InsertAfter(theIndex: number, theValue: BOPDS_InterfVZ): BOPDS_InterfVZ;
+Clear(theAllocator?: NCollection_BaseAllocator): void;
 
-InsertBefore(theIndex: number, theValue: BOPDS_InterfVZ): BOPDS_InterfVZ;
+Assign(theOther: NCollection_Sequence_handle_MAT_Arc): NCollection_Sequence_handle_MAT_Arc;
 
-EraseLast(): void;
+Remove(theIndex: number): void;
+Remove(theFromIndex: number, theToIndex: number): void;
+Remove(theIndex: number): void;
+Remove(theFromIndex: number, theToIndex: number): void;
 
-Appended(): BOPDS_InterfVZ;
+Append(theItem: MAT_Arc): void;
+Append(theSeq: NCollection_Sequence_handle_MAT_Arc): void;
+Append(theItem: MAT_Arc): void;
+Append(theSeq: NCollection_Sequence_handle_MAT_Arc): void;
 
-Value(theIndex: number): BOPDS_InterfVZ;
+Prepend(theItem: MAT_Arc): void;
+Prepend(theSeq: NCollection_Sequence_handle_MAT_Arc): void;
+Prepend(theItem: MAT_Arc): void;
+Prepend(theSeq: NCollection_Sequence_handle_MAT_Arc): void;
 
-First(): BOPDS_InterfVZ;
+InsertBefore(theIndex: number, theItem: MAT_Arc): void;
+InsertBefore(theIndex: number, theSeq: NCollection_Sequence_handle_MAT_Arc): void;
+InsertBefore(theIndex: number, theItem: MAT_Arc): void;
+InsertBefore(theIndex: number, theSeq: NCollection_Sequence_handle_MAT_Arc): void;
 
-ChangeFirst(): BOPDS_InterfVZ;
+InsertAfter(theIndex: number, theSeq: NCollection_Sequence_handle_MAT_Arc): void;
+InsertAfter(theIndex: number, theItem: MAT_Arc): void;
+InsertAfter(theIndex: number, theSeq: NCollection_Sequence_handle_MAT_Arc): void;
+InsertAfter(theIndex: number, theItem: MAT_Arc): void;
 
-Last(): BOPDS_InterfVZ;
+Split(theIndex: number, theSeq: NCollection_Sequence_handle_MAT_Arc): void;
 
-ChangeLast(): BOPDS_InterfVZ;
+First(): MAT_Arc;
 
-ChangeValue(theIndex: number): BOPDS_InterfVZ;
+ChangeFirst(): MAT_Arc;
 
-SetValue(theIndex: number, theValue: BOPDS_InterfVZ): BOPDS_InterfVZ;
+Last(): MAT_Arc;
 
-Clear(theReleaseMemory?: boolean): void;
+ChangeLast(): MAT_Arc;
 
-SetIncrement(theIncrement: number): void;
+Value(theIndex: number): MAT_Arc;
 
-// Releases the C++ object
-delete(): void;
+ChangeValue(theIndex: number): MAT_Arc;
 
-[Symbol.dispose](): void;
+SetValue(theIndex: number, theItem: MAT_Arc): void;
 
-// Class `NCollection_DynamicArray` (dynamic array of objects)
-NCollection_DynamicArray_BOPDS_InterfZZ: declare class NCollection_DynamicArray_BOPDS_InterfZZ
+At(theIndex: number): MAT_Arc;
 
-constructor
+ChangeAt(theIndex: number): MAT_Arc;
 
-Size(): number;
-
-Length(): number;
-
-Lower(): number;
-
-Upper(): number;
-
-IsEmpty(): boolean;
-
-Assign(theOther: NCollection_DynamicArray_BOPDS_InterfZZ, theOwnAllocator: boolean): NCollection_DynamicArray_BOPDS_InterfZZ;
-
-Append(theValue: BOPDS_InterfZZ): BOPDS_InterfZZ;
-
-InsertAfter(theIndex: number, theValue: BOPDS_InterfZZ): BOPDS_InterfZZ;
-
-InsertBefore(theIndex: number, theValue: BOPDS_InterfZZ): BOPDS_InterfZZ;
-
-EraseLast(): void;
-
-Appended(): BOPDS_InterfZZ;
-
-Value(theIndex: number): BOPDS_InterfZZ;
-
-First(): BOPDS_InterfZZ;
-
-ChangeFirst(): BOPDS_InterfZZ;
-
-Last(): BOPDS_InterfZZ;
-
-ChangeLast(): BOPDS_InterfZZ;
-
-ChangeValue(theIndex: number): BOPDS_InterfZZ;
-
-SetValue(theIndex: number, theValue: BOPDS_InterfZZ): BOPDS_InterfZZ;
-
-Clear(theReleaseMemory?: boolean): void;
-
-SetIncrement(theIncrement: number): void;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// Class `NCollection_DynamicArray` (dynamic array of objects)
-NCollection_DynamicArray_BOPDS_Point: declare class NCollection_DynamicArray_BOPDS_Point
-
-constructor
-
-Size(): number;
-
-Length(): number;
-
-Lower(): number;
-
-Upper(): number;
-
-IsEmpty(): boolean;
-
-Assign(theOther: unknown, theOwnAllocator: boolean): unknown;
-
-Append(theValue: BOPDS_Point): BOPDS_Point;
-
-InsertAfter(theIndex: number, theValue: BOPDS_Point): BOPDS_Point;
-
-InsertBefore(theIndex: number, theValue: BOPDS_Point): BOPDS_Point;
-
-EraseLast(): void;
-
-Appended(): BOPDS_Point;
-
-Value(theIndex: number): BOPDS_Point;
-
-First(): BOPDS_Point;
-
-ChangeFirst(): BOPDS_Point;
-
-Last(): BOPDS_Point;
-
-ChangeLast(): BOPDS_Point;
-
-ChangeValue(theIndex: number): BOPDS_Point;
-
-SetValue(theIndex: number, theValue: BOPDS_Point): BOPDS_Point;
-
-Clear(theReleaseMemory?: boolean): void;
-
-SetIncrement(theIncrement: number): void;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// Class `NCollection_DynamicArray` (dynamic array of objects)
-NCollection_DynamicArray_ExtremaPC_ExtremumResult: declare class NCollection_DynamicArray_ExtremaPC_ExtremumResult
-
-constructor
-
-Size(): number;
-
-Length(): number;
-
-Lower(): number;
-
-Upper(): number;
-
-IsEmpty(): boolean;
-
-Assign(theOther: NCollection_DynamicArray_ExtremaPC_ExtremumResult, theOwnAllocator: boolean): NCollection_DynamicArray_ExtremaPC_ExtremumResult;
-
-Append(theValue: unknown): unknown;
-
-InsertAfter(theIndex: number, theValue: unknown): unknown;
-
-InsertBefore(theIndex: number, theValue: unknown): unknown;
-
-EraseLast(): void;
-
-Appended(): unknown;
-
-Value(theIndex: number): unknown;
-
-First(): unknown;
-
-ChangeFirst(): unknown;
-
-Last(): unknown;
-
-ChangeLast(): unknown;
-
-ChangeValue(theIndex: number): unknown;
-
-SetValue(theIndex: number, theValue: unknown): unknown;
-
-Clear(theReleaseMemory?: boolean): void;
-
-SetIncrement(theIncrement: number): void;
-
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;

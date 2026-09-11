@@ -1,643 +1,682 @@
 # libcascade — NCollection (14)
 
-8 top-level symbols. Signatures are verbatim typescript.
+13 top-level symbols. Signatures are verbatim typescript.
 
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_handle_IGESData_IGESEntity: declare class NCollection_Array1_handle_IGESData_IGESEntity
-
-constructor
-
-// Initialise the items with theValue
-Init(theValue: IGESData_IGESEntity): void;
-
-// Size query
-Size(): number;
-
-// Length query (legacy int-returning API)
-Length(): number;
-
-// Return TRUE if array has zero length
-IsEmpty(): boolean;
-
-// Lower bound
-Lower(): number;
-
-// Upper bound
-Upper(): number;
-
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_handle_IGESData_IGESEntity): NCollection_Array1_handle_IGESData_IGESEntity;
-
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_handle_IGESData_IGESEntity): NCollection_Array1_handle_IGESData_IGESEntity;
-
-// Move assignment
-Move(theOther: NCollection_Array1_handle_IGESData_IGESEntity): NCollection_Array1_handle_IGESData_IGESEntity;
-// theOther: Mutated in place
-
-First(): IGESData_IGESEntity;
-
-ChangeFirst(): IGESData_IGESEntity;
-
-Last(): IGESData_IGESEntity;
-
-ChangeLast(): IGESData_IGESEntity;
-
-// Constant value access
-Value(theIndex: number): IGESData_IGESEntity;
-
-// Variable value access
-ChangeValue(theIndex: number): IGESData_IGESEntity;
-
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): IGESData_IGESEntity;
-// theIndex: 0-based index in [0, `Size()`-1]
-
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): IGESData_IGESEntity;
-// theIndex: 0-based index in [0, `Size()`-1]
-
-// Set value
-SetValue(theIndex: number, theItem: IGESData_IGESEntity): void;
-
-// Changes the lowest bound
-UpdateLowerBound(theLower: number): void;
-
-// Changes the upper bound
-UpdateUpperBound(theUpper: number): void;
-
-// Resizes the array to specified bounds
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
-
-IsDeletable(): boolean;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_handle_IGESData_LineFontEntity: declare class NCollection_Array1_handle_IGESData_LineFontEntity
+NCollection_Array2_handle_Standard_Transient: declare class NCollection_Array2_handle_Standard_Transient
 
 constructor
 
-// Initialise the items with theValue
-Init(theValue: IGESData_LineFontEntity): void;
+static BeginPosition(theRowLower: number, argNo1: number, theColLower: number, theColUpper: number): number;
 
-// Size query
+static LastPosition(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number): number;
+
 Size(): number;
 
-// Length query (legacy int-returning API)
 Length(): number;
 
-// Return TRUE if array has zero length
-IsEmpty(): boolean;
+NbRows(): number;
 
-// Lower bound
-Lower(): number;
+NbColumns(): number;
 
-// Upper bound
-Upper(): number;
+RowLength(): number;
 
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_handle_IGESData_LineFontEntity): NCollection_Array1_handle_IGESData_LineFontEntity;
+ColLength(): number;
 
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_handle_IGESData_LineFontEntity): NCollection_Array1_handle_IGESData_LineFontEntity;
+LowerRow(): number;
 
-// Move assignment
-Move(theOther: NCollection_Array1_handle_IGESData_LineFontEntity): NCollection_Array1_handle_IGESData_LineFontEntity;
-// theOther: Mutated in place
+UpperRow(): number;
 
-First(): IGESData_LineFontEntity;
+LowerCol(): number;
 
-ChangeFirst(): IGESData_LineFontEntity;
+UpperCol(): number;
 
-Last(): IGESData_LineFontEntity;
+UpdateLowerRow(theLowerRow: number): void;
 
-ChangeLast(): IGESData_LineFontEntity;
+UpdateLowerCol(theLowerCol: number): void;
 
-// Constant value access
-Value(theIndex: number): IGESData_LineFontEntity;
+UpdateUpperRow(theUpperRow: number): void;
 
-// Variable value access
-ChangeValue(theIndex: number): IGESData_LineFontEntity;
+UpdateUpperCol(theUpperCol: number): void;
 
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): IGESData_LineFontEntity;
-// theIndex: 0-based index in [0, `Size()`-1]
-
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): IGESData_LineFontEntity;
-// theIndex: 0-based index in [0, `Size()`-1]
-
-// Set value
-SetValue(theIndex: number, theItem: IGESData_LineFontEntity): void;
-
-// Changes the lowest bound
-UpdateLowerBound(theLower: number): void;
-
-// Changes the upper bound
-UpdateUpperBound(theUpper: number): void;
-
-// Resizes the array to specified bounds
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
-
-IsDeletable(): boolean;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_handle_IGESData_ViewKindEntity: declare class NCollection_Array1_handle_IGESData_ViewKindEntity
-
-constructor
-
-// Initialise the items with theValue
-Init(theValue: IGESData_ViewKindEntity): void;
-
-// Size query
-Size(): number;
-
-// Length query (legacy int-returning API)
-Length(): number;
-
-// Return TRUE if array has zero length
-IsEmpty(): boolean;
-
-// Lower bound
-Lower(): number;
-
-// Upper bound
-Upper(): number;
-
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_handle_IGESData_ViewKindEntity): NCollection_Array1_handle_IGESData_ViewKindEntity;
-
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_handle_IGESData_ViewKindEntity): NCollection_Array1_handle_IGESData_ViewKindEntity;
-
-// Move assignment
-Move(theOther: NCollection_Array1_handle_IGESData_ViewKindEntity): NCollection_Array1_handle_IGESData_ViewKindEntity;
-// theOther: Mutated in place
-
-First(): IGESData_ViewKindEntity;
-
-ChangeFirst(): IGESData_ViewKindEntity;
-
-Last(): IGESData_ViewKindEntity;
-
-ChangeLast(): IGESData_ViewKindEntity;
-
-// Constant value access
-Value(theIndex: number): IGESData_ViewKindEntity;
-
-// Variable value access
-ChangeValue(theIndex: number): IGESData_ViewKindEntity;
-
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): IGESData_ViewKindEntity;
-// theIndex: 0-based index in [0, `Size()`-1]
-
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): IGESData_ViewKindEntity;
-// theIndex: 0-based index in [0, `Size()`-1]
-
-// Set value
-SetValue(theIndex: number, theItem: IGESData_ViewKindEntity): void;
-
-// Changes the lowest bound
-UpdateLowerBound(theLower: number): void;
-
-// Changes the upper bound
-UpdateUpperBound(theUpper: number): void;
-
-// Resizes the array to specified bounds
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
-
-IsDeletable(): boolean;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_handle_IGESDefs_TabularData: declare class NCollection_Array1_handle_IGESDefs_TabularData
-
-constructor
-
-// Initialise the items with theValue
-Init(theValue: IGESDefs_TabularData): void;
-
-// Size query
-Size(): number;
-
-// Length query (legacy int-returning API)
-Length(): number;
-
-// Return TRUE if array has zero length
-IsEmpty(): boolean;
-
-// Lower bound
-Lower(): number;
-
-// Upper bound
-Upper(): number;
-
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_handle_IGESDefs_TabularData): NCollection_Array1_handle_IGESDefs_TabularData;
-
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_handle_IGESDefs_TabularData): NCollection_Array1_handle_IGESDefs_TabularData;
-
-// Move assignment
-Move(theOther: NCollection_Array1_handle_IGESDefs_TabularData): NCollection_Array1_handle_IGESDefs_TabularData;
-// theOther: Mutated in place
-
-First(): IGESDefs_TabularData;
-
-ChangeFirst(): IGESDefs_TabularData;
-
-Last(): IGESDefs_TabularData;
-
-ChangeLast(): IGESDefs_TabularData;
-
-// Constant value access
-Value(theIndex: number): IGESDefs_TabularData;
-
-// Variable value access
-ChangeValue(theIndex: number): IGESDefs_TabularData;
-
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): IGESDefs_TabularData;
-// theIndex: 0-based index in [0, `Size()`-1]
-
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): IGESDefs_TabularData;
-// theIndex: 0-based index in [0, `Size()`-1]
-
-// Set value
-SetValue(theIndex: number, theItem: IGESDefs_TabularData): void;
-
-// Changes the lowest bound
-UpdateLowerBound(theLower: number): void;
-
-// Changes the upper bound
-UpdateUpperBound(theUpper: number): void;
-
-// Resizes the array to specified bounds
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
-
-IsDeletable(): boolean;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_handle_IGESDimen_GeneralNote: declare class NCollection_Array1_handle_IGESDimen_GeneralNote
-
-constructor
-
-// Initialise the items with theValue
-Init(theValue: IGESDimen_GeneralNote): void;
-
-// Size query
-Size(): number;
-
-// Length query (legacy int-returning API)
-Length(): number;
-
-// Return TRUE if array has zero length
-IsEmpty(): boolean;
-
-// Lower bound
-Lower(): number;
-
-// Upper bound
-Upper(): number;
-
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_handle_IGESDimen_GeneralNote): NCollection_Array1_handle_IGESDimen_GeneralNote;
-
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_handle_IGESDimen_GeneralNote): NCollection_Array1_handle_IGESDimen_GeneralNote;
-
-// Move assignment
-Move(theOther: NCollection_Array1_handle_IGESDimen_GeneralNote): NCollection_Array1_handle_IGESDimen_GeneralNote;
-// theOther: Mutated in place
-
-First(): IGESDimen_GeneralNote;
-
-ChangeFirst(): IGESDimen_GeneralNote;
-
-Last(): IGESDimen_GeneralNote;
-
-ChangeLast(): IGESDimen_GeneralNote;
-
-// Constant value access
-Value(theIndex: number): IGESDimen_GeneralNote;
-
-// Variable value access
-ChangeValue(theIndex: number): IGESDimen_GeneralNote;
-
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): IGESDimen_GeneralNote;
-// theIndex: 0-based index in [0, `Size()`-1]
-
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): IGESDimen_GeneralNote;
-// theIndex: 0-based index in [0, `Size()`-1]
-
-// Set value
-SetValue(theIndex: number, theItem: IGESDimen_GeneralNote): void;
-
-// Changes the lowest bound
-UpdateLowerBound(theLower: number): void;
-
-// Changes the upper bound
-UpdateUpperBound(theUpper: number): void;
-
-// Resizes the array to specified bounds
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
-
-IsDeletable(): boolean;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_handle_IGESDimen_LeaderArrow: declare class NCollection_Array1_handle_IGESDimen_LeaderArrow
-
-constructor
-
-// Initialise the items with theValue
-Init(theValue: IGESDimen_LeaderArrow): void;
-
-// Size query
-Size(): number;
-
-// Length query (legacy int-returning API)
-Length(): number;
-
-// Return TRUE if array has zero length
-IsEmpty(): boolean;
-
-// Lower bound
-Lower(): number;
-
-// Upper bound
-Upper(): number;
-
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_handle_IGESDimen_LeaderArrow): NCollection_Array1_handle_IGESDimen_LeaderArrow;
-
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_handle_IGESDimen_LeaderArrow): NCollection_Array1_handle_IGESDimen_LeaderArrow;
-
-// Move assignment
-Move(theOther: NCollection_Array1_handle_IGESDimen_LeaderArrow): NCollection_Array1_handle_IGESDimen_LeaderArrow;
-// theOther: Mutated in place
-
-First(): IGESDimen_LeaderArrow;
-
-ChangeFirst(): IGESDimen_LeaderArrow;
-
-Last(): IGESDimen_LeaderArrow;
-
-ChangeLast(): IGESDimen_LeaderArrow;
-
-// Constant value access
-Value(theIndex: number): IGESDimen_LeaderArrow;
-
-// Variable value access
-ChangeValue(theIndex: number): IGESDimen_LeaderArrow;
-
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): IGESDimen_LeaderArrow;
-// theIndex: 0-based index in [0, `Size()`-1]
-
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): IGESDimen_LeaderArrow;
-// theIndex: 0-based index in [0, `Size()`-1]
-
-// Set value
-SetValue(theIndex: number, theItem: IGESDimen_LeaderArrow): void;
-
-// Changes the lowest bound
-UpdateLowerBound(theLower: number): void;
-
-// Changes the upper bound
-UpdateUpperBound(theUpper: number): void;
-
-// Resizes the array to specified bounds
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
-
-IsDeletable(): boolean;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_handle_IGESDraw_ConnectPoint: declare class NCollection_Array1_handle_IGESDraw_ConnectPoint
-
-constructor
-
-// Initialise the items with theValue
-Init(theValue: IGESDraw_ConnectPoint): void;
-
-// Size query
-Size(): number;
-
-// Length query (legacy int-returning API)
-Length(): number;
-
-// Return TRUE if array has zero length
-IsEmpty(): boolean;
-
-// Lower bound
-Lower(): number;
-
-// Upper bound
-Upper(): number;
-
-// Replaces this array by a copy of theOther array
+Assign(theOther: NCollection_Array2_handle_Standard_Transient): NCollection_Array2_handle_Standard_Transient;
+Assign(theOther: unknown): unknown;
+Assign(theOther: NCollection_Array2_handle_Standard_Transient): NCollection_Array2_handle_Standard_Transient;
 Assign(theOther: unknown): unknown;
 
-// Copies values from theOther array without changing this array bounds
+CopyValues(theOther: NCollection_Array2_handle_Standard_Transient): NCollection_Array2_handle_Standard_Transient;
+CopyValues(theOther: unknown): unknown;
+CopyValues(theOther: NCollection_Array2_handle_Standard_Transient): NCollection_Array2_handle_Standard_Transient;
 CopyValues(theOther: unknown): unknown;
 
-// Move assignment
+Move(theOther: NCollection_Array2_handle_Standard_Transient): NCollection_Array2_handle_Standard_Transient;
 Move(theOther: unknown): unknown;
-// theOther: Mutated in place
+Move(theOther: NCollection_Array2_handle_Standard_Transient): NCollection_Array2_handle_Standard_Transient;
+Move(theOther: unknown): unknown;
 
-First(): IGESDraw_ConnectPoint;
+SetValue(theRow: number, theCol: number, theItem: Standard_Transient): void;
+SetValue(theIndex: number, theItem: unknown): void;
+SetValue(theRow: number, theCol: number, theItem: Standard_Transient): void;
+SetValue(theIndex: number, theItem: unknown): void;
 
-ChangeFirst(): IGESDraw_ConnectPoint;
-
-Last(): IGESDraw_ConnectPoint;
-
-ChangeLast(): IGESDraw_ConnectPoint;
-
-// Constant value access
-Value(theIndex: number): IGESDraw_ConnectPoint;
-
-// Variable value access
-ChangeValue(theIndex: number): IGESDraw_ConnectPoint;
-
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): IGESDraw_ConnectPoint;
-// theIndex: 0-based index in [0, `Size()`-1]
-
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): IGESDraw_ConnectPoint;
-// theIndex: 0-based index in [0, `Size()`-1]
-
-// Set value
-SetValue(theIndex: number, theItem: IGESDraw_ConnectPoint): void;
-
-// Changes the lowest bound
-UpdateLowerBound(theLower: number): void;
-
-// Changes the upper bound
-UpdateUpperBound(theUpper: number): void;
-
-// Resizes the array to specified bounds
+Resize(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+Resize(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
 Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
 Resize(theSize: number, theToCopyData: boolean): void;
+Resize(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+Resize(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
 Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
 Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
+Resize(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+Resize(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
+Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
+Resize(theSize: number, theToCopyData: boolean): void;
+Resize(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+Resize(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
+Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
+Resize(theSize: number, theToCopyData: boolean): void;
 
-IsDeletable(): boolean;
+ResizeWithTrim(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+ResizeWithTrim(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
+ResizeWithTrim(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+ResizeWithTrim(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_handle_IGESGeom_Boundary: declare class NCollection_Array1_handle_IGESGeom_Boundary
+NCollection_Array2_handle_StepGeom_CartesianPoint: declare class NCollection_Array2_handle_StepGeom_CartesianPoint
 
 constructor
 
-// Initialise the items with theValue
-Init(theValue: IGESGeom_Boundary): void;
+static BeginPosition(theRowLower: number, argNo1: number, theColLower: number, theColUpper: number): number;
 
-// Size query
+static LastPosition(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number): number;
+
 Size(): number;
 
-// Length query (legacy int-returning API)
 Length(): number;
 
-// Return TRUE if array has zero length
-IsEmpty(): boolean;
+NbRows(): number;
 
-// Lower bound
-Lower(): number;
+NbColumns(): number;
 
-// Upper bound
-Upper(): number;
+RowLength(): number;
 
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_handle_IGESGeom_Boundary): NCollection_Array1_handle_IGESGeom_Boundary;
+ColLength(): number;
 
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_handle_IGESGeom_Boundary): NCollection_Array1_handle_IGESGeom_Boundary;
+LowerRow(): number;
 
-// Move assignment
-Move(theOther: NCollection_Array1_handle_IGESGeom_Boundary): NCollection_Array1_handle_IGESGeom_Boundary;
-// theOther: Mutated in place
+UpperRow(): number;
 
-First(): IGESGeom_Boundary;
+LowerCol(): number;
 
-ChangeFirst(): IGESGeom_Boundary;
+UpperCol(): number;
 
-Last(): IGESGeom_Boundary;
+UpdateLowerRow(theLowerRow: number): void;
 
-ChangeLast(): IGESGeom_Boundary;
+UpdateLowerCol(theLowerCol: number): void;
 
-// Constant value access
-Value(theIndex: number): IGESGeom_Boundary;
+UpdateUpperRow(theUpperRow: number): void;
 
-// Variable value access
-ChangeValue(theIndex: number): IGESGeom_Boundary;
+UpdateUpperCol(theUpperCol: number): void;
 
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): IGESGeom_Boundary;
-// theIndex: 0-based index in [0, `Size()`-1]
+Assign(theOther: unknown): unknown;
+Assign(theOther: unknown): unknown;
+Assign(theOther: unknown): unknown;
+Assign(theOther: unknown): unknown;
 
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): IGESGeom_Boundary;
-// theIndex: 0-based index in [0, `Size()`-1]
+CopyValues(theOther: unknown): unknown;
+CopyValues(theOther: unknown): unknown;
+CopyValues(theOther: unknown): unknown;
+CopyValues(theOther: unknown): unknown;
 
-// Set value
-SetValue(theIndex: number, theItem: IGESGeom_Boundary): void;
+Move(theOther: unknown): unknown;
+Move(theOther: unknown): unknown;
+Move(theOther: unknown): unknown;
+Move(theOther: unknown): unknown;
 
-// Changes the lowest bound
-UpdateLowerBound(theLower: number): void;
+SetValue(theRow: number, theCol: number, theItem: StepGeom_CartesianPoint): void;
+SetValue(theIndex: number, theItem: unknown): void;
+SetValue(theRow: number, theCol: number, theItem: StepGeom_CartesianPoint): void;
+SetValue(theIndex: number, theItem: unknown): void;
 
-// Changes the upper bound
-UpdateUpperBound(theUpper: number): void;
-
-// Resizes the array to specified bounds
+Resize(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+Resize(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
 Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
 Resize(theSize: number, theToCopyData: boolean): void;
+Resize(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+Resize(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
 Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
 Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
+Resize(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+Resize(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
+Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
+Resize(theSize: number, theToCopyData: boolean): void;
+Resize(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+Resize(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
+Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
+Resize(theSize: number, theToCopyData: boolean): void;
 
-IsDeletable(): boolean;
+ResizeWithTrim(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+ResizeWithTrim(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
+ResizeWithTrim(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+ResizeWithTrim(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
 
-// Releases the C++ object
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_Array2_handle_StepGeom_SurfacePatch: declare class NCollection_Array2_handle_StepGeom_SurfacePatch
+
+constructor
+
+static BeginPosition(theRowLower: number, argNo1: number, theColLower: number, theColUpper: number): number;
+
+static LastPosition(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number): number;
+
+Size(): number;
+
+Length(): number;
+
+NbRows(): number;
+
+NbColumns(): number;
+
+RowLength(): number;
+
+ColLength(): number;
+
+LowerRow(): number;
+
+UpperRow(): number;
+
+LowerCol(): number;
+
+UpperCol(): number;
+
+UpdateLowerRow(theLowerRow: number): void;
+
+UpdateLowerCol(theLowerCol: number): void;
+
+UpdateUpperRow(theUpperRow: number): void;
+
+UpdateUpperCol(theUpperCol: number): void;
+
+Assign(theOther: NCollection_Array2_handle_StepGeom_SurfacePatch): NCollection_Array2_handle_StepGeom_SurfacePatch;
+Assign(theOther: unknown): unknown;
+Assign(theOther: NCollection_Array2_handle_StepGeom_SurfacePatch): NCollection_Array2_handle_StepGeom_SurfacePatch;
+Assign(theOther: unknown): unknown;
+
+CopyValues(theOther: NCollection_Array2_handle_StepGeom_SurfacePatch): NCollection_Array2_handle_StepGeom_SurfacePatch;
+CopyValues(theOther: unknown): unknown;
+CopyValues(theOther: NCollection_Array2_handle_StepGeom_SurfacePatch): NCollection_Array2_handle_StepGeom_SurfacePatch;
+CopyValues(theOther: unknown): unknown;
+
+Move(theOther: NCollection_Array2_handle_StepGeom_SurfacePatch): NCollection_Array2_handle_StepGeom_SurfacePatch;
+Move(theOther: unknown): unknown;
+Move(theOther: NCollection_Array2_handle_StepGeom_SurfacePatch): NCollection_Array2_handle_StepGeom_SurfacePatch;
+Move(theOther: unknown): unknown;
+
+SetValue(theRow: number, theCol: number, theItem: StepGeom_SurfacePatch): void;
+SetValue(theIndex: number, theItem: unknown): void;
+SetValue(theRow: number, theCol: number, theItem: StepGeom_SurfacePatch): void;
+SetValue(theIndex: number, theItem: unknown): void;
+
+Resize(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+Resize(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
+Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
+Resize(theSize: number, theToCopyData: boolean): void;
+Resize(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+Resize(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
+Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
+Resize(theSize: number, theToCopyData: boolean): void;
+Resize(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+Resize(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
+Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
+Resize(theSize: number, theToCopyData: boolean): void;
+Resize(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+Resize(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
+Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
+Resize(theSize: number, theToCopyData: boolean): void;
+
+ResizeWithTrim(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+ResizeWithTrim(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
+ResizeWithTrim(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+ResizeWithTrim(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_Array2_int: declare class NCollection_Array2_int
+
+constructor
+
+static BeginPosition(theRowLower: number, argNo1: number, theColLower: number, theColUpper: number): number;
+
+static LastPosition(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number): number;
+
+Size(): number;
+
+Length(): number;
+
+NbRows(): number;
+
+NbColumns(): number;
+
+RowLength(): number;
+
+ColLength(): number;
+
+LowerRow(): number;
+
+UpperRow(): number;
+
+LowerCol(): number;
+
+UpperCol(): number;
+
+UpdateLowerRow(theLowerRow: number): void;
+
+UpdateLowerCol(theLowerCol: number): void;
+
+UpdateUpperRow(theUpperRow: number): void;
+
+UpdateUpperCol(theUpperCol: number): void;
+
+Assign(theOther: NCollection_Array2_int): NCollection_Array2_int;
+Assign(theOther: unknown): unknown;
+Assign(theOther: NCollection_Array2_int): NCollection_Array2_int;
+Assign(theOther: unknown): unknown;
+
+CopyValues(theOther: NCollection_Array2_int): NCollection_Array2_int;
+CopyValues(theOther: unknown): unknown;
+CopyValues(theOther: NCollection_Array2_int): NCollection_Array2_int;
+CopyValues(theOther: unknown): unknown;
+
+Move(theOther: NCollection_Array2_int): NCollection_Array2_int;
+Move(theOther: unknown): unknown;
+Move(theOther: NCollection_Array2_int): NCollection_Array2_int;
+Move(theOther: unknown): unknown;
+
+SetValue(theRow: number, theCol: number, theItem: number): void;
+SetValue(theIndex: number, theItem: unknown): void;
+SetValue(theRow: number, theCol: number, theItem: number): void;
+SetValue(theIndex: number, theItem: unknown): void;
+
+Resize(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+Resize(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
+Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
+Resize(theSize: number, theToCopyData: boolean): void;
+Resize(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+Resize(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
+Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
+Resize(theSize: number, theToCopyData: boolean): void;
+Resize(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+Resize(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
+Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
+Resize(theSize: number, theToCopyData: boolean): void;
+Resize(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+Resize(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
+Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
+Resize(theSize: number, theToCopyData: boolean): void;
+
+ResizeWithTrim(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+ResizeWithTrim(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
+ResizeWithTrim(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+ResizeWithTrim(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_DataMap_TCollection_AsciiString_RWObj_Material: declare class NCollection_DataMap_TCollection_AsciiString_RWObj_Material extends NCollection_BaseMap
+
+constructor
+
+Exchange(theOther: unknown): void;
+
+GetHasher(): unknown;
+
+Assign(theOther: unknown): unknown;
+
+ReSize(N: number): void;
+
+Bind(theKey: TCollection_AsciiString, theItem: RWObj_Material): boolean;
+
+Bound(theKey: TCollection_AsciiString, theItem: RWObj_Material): RWObj_Material;
+
+TryBind(theKey: TCollection_AsciiString, theItem: RWObj_Material): boolean;
+
+TryBound(theKey: TCollection_AsciiString, theItem: RWObj_Material): RWObj_Material;
+
+IsBound(theKey: TCollection_AsciiString): boolean;
+
+UnBind(theKey: TCollection_AsciiString): boolean;
+
+Seek(theKey: TCollection_AsciiString): RWObj_Material;
+
+ChangeSeek(theKey: TCollection_AsciiString): RWObj_Material;
+
+ChangeFind(theKey: TCollection_AsciiString): RWObj_Material;
+
+Clear(doReleaseMemory: boolean): void;
+Clear(theAllocator: NCollection_BaseAllocator): void;
+Clear(doReleaseMemory: boolean): void;
+Clear(theAllocator: NCollection_BaseAllocator): void;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_DataMap_TCollection_AsciiString_TCollection_AsciiString: declare class NCollection_DataMap_TCollection_AsciiString_TCollection_AsciiString extends NCollection_BaseMap
+
+constructor
+
+Exchange(theOther: unknown): void;
+
+GetHasher(): unknown;
+
+Assign(theOther: unknown): unknown;
+
+ReSize(N: number): void;
+
+Bind(theKey: TCollection_AsciiString, theItem: TCollection_AsciiString): boolean;
+
+Bound(theKey: TCollection_AsciiString, theItem: TCollection_AsciiString): TCollection_AsciiString;
+
+TryBind(theKey: TCollection_AsciiString, theItem: TCollection_AsciiString): boolean;
+
+TryBound(theKey: TCollection_AsciiString, theItem: TCollection_AsciiString): TCollection_AsciiString;
+
+IsBound(theKey: TCollection_AsciiString): boolean;
+
+UnBind(theKey: TCollection_AsciiString): boolean;
+
+Seek(theKey: TCollection_AsciiString): TCollection_AsciiString;
+
+ChangeSeek(theKey: TCollection_AsciiString): TCollection_AsciiString;
+
+ChangeFind(theKey: TCollection_AsciiString): TCollection_AsciiString;
+
+Clear(doReleaseMemory: boolean): void;
+Clear(theAllocator: NCollection_BaseAllocator): void;
+Clear(doReleaseMemory: boolean): void;
+Clear(theAllocator: NCollection_BaseAllocator): void;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_DataMap_TCollection_AsciiString_TopoDS_Shape: declare class NCollection_DataMap_TCollection_AsciiString_TopoDS_Shape extends NCollection_BaseMap
+
+constructor
+
+Exchange(theOther: unknown): void;
+
+GetHasher(): unknown;
+
+Assign(theOther: unknown): unknown;
+
+ReSize(N: number): void;
+
+Bind(theKey: TCollection_AsciiString, theItem: TopoDS_Shape): boolean;
+
+Bound(theKey: TCollection_AsciiString, theItem: TopoDS_Shape): TopoDS_Shape;
+
+TryBind(theKey: TCollection_AsciiString, theItem: TopoDS_Shape): boolean;
+
+TryBound(theKey: TCollection_AsciiString, theItem: TopoDS_Shape): TopoDS_Shape;
+
+IsBound(theKey: TCollection_AsciiString): boolean;
+
+UnBind(theKey: TCollection_AsciiString): boolean;
+
+Seek(theKey: TCollection_AsciiString): TopoDS_Shape;
+
+ChangeSeek(theKey: TCollection_AsciiString): TopoDS_Shape;
+
+ChangeFind(theKey: TCollection_AsciiString): TopoDS_Shape;
+
+Clear(doReleaseMemory: boolean): void;
+Clear(theAllocator: NCollection_BaseAllocator): void;
+Clear(doReleaseMemory: boolean): void;
+Clear(theAllocator: NCollection_BaseAllocator): void;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_DataMap_TCollection_AsciiString_handle_STEPCAFControl_ExternFile: declare class NCollection_DataMap_TCollection_AsciiString_handle_STEPCAFControl_ExternFile extends NCollection_BaseMap
+
+constructor
+
+Exchange(theOther: unknown): void;
+
+GetHasher(): unknown;
+
+Assign(theOther: unknown): unknown;
+
+ReSize(N: number): void;
+
+Bind(theKey: TCollection_AsciiString, theItem: STEPCAFControl_ExternFile): boolean;
+
+Bound(theKey: TCollection_AsciiString, theItem: STEPCAFControl_ExternFile): STEPCAFControl_ExternFile;
+
+TryBind(theKey: TCollection_AsciiString, theItem: STEPCAFControl_ExternFile): boolean;
+
+TryBound(theKey: TCollection_AsciiString, theItem: STEPCAFControl_ExternFile): STEPCAFControl_ExternFile;
+
+IsBound(theKey: TCollection_AsciiString): boolean;
+
+UnBind(theKey: TCollection_AsciiString): boolean;
+
+Seek(theKey: TCollection_AsciiString): STEPCAFControl_ExternFile;
+
+ChangeSeek(theKey: TCollection_AsciiString): STEPCAFControl_ExternFile;
+
+ChangeFind(theKey: TCollection_AsciiString): STEPCAFControl_ExternFile;
+
+Clear(doReleaseMemory: boolean): void;
+Clear(theAllocator: NCollection_BaseAllocator): void;
+Clear(doReleaseMemory: boolean): void;
+Clear(theAllocator: NCollection_BaseAllocator): void;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_DataMap_TCollection_AsciiString_handle_Standard_Transient: declare class NCollection_DataMap_TCollection_AsciiString_handle_Standard_Transient extends NCollection_BaseMap
+
+constructor
+
+Exchange(theOther: unknown): void;
+
+GetHasher(): unknown;
+
+Assign(theOther: unknown): unknown;
+
+ReSize(N: number): void;
+
+Bind(theKey: TCollection_AsciiString, theItem: Standard_Transient): boolean;
+
+Bound(theKey: TCollection_AsciiString, theItem: Standard_Transient): Standard_Transient;
+
+TryBind(theKey: TCollection_AsciiString, theItem: Standard_Transient): boolean;
+
+TryBound(theKey: TCollection_AsciiString, theItem: Standard_Transient): Standard_Transient;
+
+IsBound(theKey: TCollection_AsciiString): boolean;
+
+UnBind(theKey: TCollection_AsciiString): boolean;
+
+Seek(theKey: TCollection_AsciiString): Standard_Transient;
+
+ChangeSeek(theKey: TCollection_AsciiString): Standard_Transient;
+
+ChangeFind(theKey: TCollection_AsciiString): Standard_Transient;
+
+Clear(doReleaseMemory: boolean): void;
+Clear(theAllocator: NCollection_BaseAllocator): void;
+Clear(doReleaseMemory: boolean): void;
+Clear(theAllocator: NCollection_BaseAllocator): void;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_DataMap_TCollection_AsciiString_int: declare class NCollection_DataMap_TCollection_AsciiString_int extends NCollection_BaseMap
+
+constructor
+
+Exchange(theOther: unknown): void;
+
+GetHasher(): unknown;
+
+Assign(theOther: unknown): unknown;
+
+ReSize(N: number): void;
+
+Bind(theKey: TCollection_AsciiString, theItem: number): boolean;
+
+Bound(theKey: TCollection_AsciiString, theItem: number): number;
+
+TryBind(theKey: TCollection_AsciiString, theItem: number): boolean;
+
+TryBound(theKey: TCollection_AsciiString, theItem: number): number;
+
+IsBound(theKey: TCollection_AsciiString): boolean;
+
+UnBind(theKey: TCollection_AsciiString): boolean;
+
+Seek(theKey: TCollection_AsciiString): number;
+
+ChangeSeek(theKey: TCollection_AsciiString): number;
+
+ChangeFind(theKey: TCollection_AsciiString): number;
+
+Clear(doReleaseMemory: boolean): void;
+Clear(theAllocator: NCollection_BaseAllocator): void;
+Clear(doReleaseMemory: boolean): void;
+Clear(theAllocator: NCollection_BaseAllocator): void;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_DataMap_TCollection_ExtendedString_TCollection_ExtendedString: declare class NCollection_DataMap_TCollection_ExtendedString_TCollection_ExtendedString extends NCollection_BaseMap
+
+constructor
+
+Exchange(theOther: unknown): void;
+
+GetHasher(): unknown;
+
+Assign(theOther: unknown): unknown;
+
+ReSize(N: number): void;
+
+Bind(theKey: TCollection_ExtendedString, theItem: TCollection_ExtendedString): boolean;
+
+Bound(theKey: TCollection_ExtendedString, theItem: TCollection_ExtendedString): TCollection_ExtendedString;
+
+TryBind(theKey: TCollection_ExtendedString, theItem: TCollection_ExtendedString): boolean;
+
+TryBound(theKey: TCollection_ExtendedString, theItem: TCollection_ExtendedString): TCollection_ExtendedString;
+
+IsBound(theKey: TCollection_ExtendedString): boolean;
+
+UnBind(theKey: TCollection_ExtendedString): boolean;
+
+Seek(theKey: TCollection_ExtendedString): TCollection_ExtendedString;
+
+ChangeSeek(theKey: TCollection_ExtendedString): TCollection_ExtendedString;
+
+ChangeFind(theKey: TCollection_ExtendedString): TCollection_ExtendedString;
+
+Clear(doReleaseMemory: boolean): void;
+Clear(theAllocator: NCollection_BaseAllocator): void;
+Clear(doReleaseMemory: boolean): void;
+Clear(theAllocator: NCollection_BaseAllocator): void;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_DataMap_TCollection_ExtendedString_double: declare class NCollection_DataMap_TCollection_ExtendedString_double extends NCollection_BaseMap
+
+constructor
+
+Exchange(theOther: unknown): void;
+
+GetHasher(): unknown;
+
+Assign(theOther: unknown): unknown;
+
+ReSize(N: number): void;
+
+Bind(theKey: TCollection_ExtendedString, theItem: number): boolean;
+
+Bound(theKey: TCollection_ExtendedString, theItem: number): number;
+
+TryBind(theKey: TCollection_ExtendedString, theItem: number): boolean;
+
+TryBound(theKey: TCollection_ExtendedString, theItem: number): number;
+
+IsBound(theKey: TCollection_ExtendedString): boolean;
+
+UnBind(theKey: TCollection_ExtendedString): boolean;
+
+Seek(theKey: TCollection_ExtendedString): number;
+
+ChangeSeek(theKey: TCollection_ExtendedString): number;
+
+ChangeFind(theKey: TCollection_ExtendedString): number;
+
+Clear(doReleaseMemory: boolean): void;
+Clear(theAllocator: NCollection_BaseAllocator): void;
+Clear(doReleaseMemory: boolean): void;
+Clear(theAllocator: NCollection_BaseAllocator): void;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_DataMap_TCollection_ExtendedString_handle_CDM_MetaData: declare class NCollection_DataMap_TCollection_ExtendedString_handle_CDM_MetaData extends NCollection_BaseMap
+
+constructor
+
+Exchange(theOther: unknown): void;
+
+GetHasher(): unknown;
+
+Assign(theOther: unknown): unknown;
+
+ReSize(N: number): void;
+
+Bind(theKey: TCollection_ExtendedString, theItem: CDM_MetaData): boolean;
+
+Bound(theKey: TCollection_ExtendedString, theItem: CDM_MetaData): CDM_MetaData;
+
+TryBind(theKey: TCollection_ExtendedString, theItem: CDM_MetaData): boolean;
+
+TryBound(theKey: TCollection_ExtendedString, theItem: CDM_MetaData): CDM_MetaData;
+
+IsBound(theKey: TCollection_ExtendedString): boolean;
+
+UnBind(theKey: TCollection_ExtendedString): boolean;
+
+Seek(theKey: TCollection_ExtendedString): CDM_MetaData;
+
+ChangeSeek(theKey: TCollection_ExtendedString): CDM_MetaData;
+
+ChangeFind(theKey: TCollection_ExtendedString): CDM_MetaData;
+
+Clear(doReleaseMemory: boolean): void;
+Clear(theAllocator: NCollection_BaseAllocator): void;
+Clear(doReleaseMemory: boolean): void;
+Clear(theAllocator: NCollection_BaseAllocator): void;
+
 delete(): void;
 
 [Symbol.dispose](): void;

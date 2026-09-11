@@ -2,32 +2,20 @@
 
 3 top-level symbols. Signatures are verbatim typescript.
 
-// Tool for encoding/decoding base64 stream
 FSD_Base64: declare class FSD_Base64
 
 constructor
 
-// Function encoding a buffer to base64 string
 static Encode(theEncodedStr: string, theStrLen: number, theData: number, theDataLen: number): number;
 static Encode(theData: number, theDataLen: number): TCollection_AsciiString;
 static Encode(theEncodedStr: string, theStrLen: number, theData: number, theDataLen: number): number;
 static Encode(theData: number, theDataLen: number): TCollection_AsciiString;
-// theEncodedStr: the place for encoded string
-// theStrLen: the length of the buffer theEncodedStr in bytes
-// theData: the input binary data
-// theDataLen: the length of input data in bytes
 
-// Function decoding base64 string
 static Decode(theDecodedData: number, theDataLen: number, theEncodedStr: string, theStrLen: number): number;
 static Decode(theStr: string, theLen: number): NCollection_Buffer;
 static Decode(theDecodedData: number, theDataLen: number, theEncodedStr: string, theStrLen: number): number;
 static Decode(theStr: string, theLen: number): NCollection_Buffer;
-// theDecodedData: the place for decoded data
-// theDataLen: the length of the buffer theDecodedData in bytes
-// theEncodedStr: the input encoded string
-// theStrLen: the length of input encoded string
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -74,7 +62,6 @@ Destroy(): void;
 
 static MagicNumber(): string;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -109,7 +96,6 @@ bdata: number
 
 edata: number
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;

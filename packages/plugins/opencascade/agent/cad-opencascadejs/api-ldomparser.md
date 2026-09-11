@@ -14,7 +14,6 @@ GetError(aData: TCollection_AsciiString): TCollection_AsciiString;
 
 GetBOM(): LDOM_OSStream_BOMType;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;

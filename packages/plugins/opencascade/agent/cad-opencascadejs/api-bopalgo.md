@@ -1,6 +1,6 @@
 # libcascade — BOPAlgo
 
-51 top-level symbols. Signatures are verbatim typescript.
+61 top-level symbols. Signatures are verbatim typescript.
 
 BOPAlgo_AlertAcquiredSelfIntersection: declare class BOPAlgo_AlertAcquiredSelfIntersection extends TopoDS_AlertWithShape
 
@@ -12,7 +12,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -27,7 +26,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -42,7 +40,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -57,7 +54,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -72,7 +68,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -87,7 +82,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -102,7 +96,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -117,7 +110,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -132,7 +124,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -147,7 +138,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -162,7 +152,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -177,7 +166,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -192,7 +180,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -207,7 +194,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -222,7 +208,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -237,7 +222,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -252,7 +236,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -267,7 +250,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -282,7 +264,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -297,7 +278,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -312,7 +292,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -327,7 +306,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -342,7 +320,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -357,7 +334,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -372,7 +348,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -387,7 +362,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -402,7 +376,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -417,7 +390,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -432,7 +404,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -447,7 +418,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -462,7 +432,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -477,7 +446,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -492,7 +460,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -507,7 +474,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -522,7 +488,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -537,7 +502,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -552,7 +516,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -567,7 +530,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -582,7 +544,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -597,7 +558,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -612,157 +572,115 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// The class provides the root interface for the algorithms in Boolean Component
 BOPAlgo_Algo: declare class BOPAlgo_Algo extends BOPAlgo_Options
 
-// The main method to implement the operation Providing the range allows to enable Progress indicator User break functionalities
 Perform(theRange?: Message_ProgressRange): void;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Class for representing the relative contribution of each step of the operation to the whole progress
 BOPAlgo_PISteps: declare class BOPAlgo_PISteps
 
 constructor
 
-// Returns the steps
 Steps(): NCollection_Array1_double;
 
-// Returns modifiable steps
 ChangeSteps(): NCollection_Array1_double;
 
-// Assign the value theStep to theOperation
 SetStep(theOperation: number, theStep: number): void;
 
-// Returns the step assigned to the operation
 GetStep(theOperation: number): number;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Additional root class to provide interface to be launched from parallel vector
 BOPAlgo_ParallelAlgo: declare class BOPAlgo_ParallelAlgo extends BOPAlgo_Algo
 
-// The main method to implement the operation
 Perform(): void;
 Perform(theRange: Message_ProgressRange): void;
 Perform(): void;
 Perform(theRange: Message_ProgressRange): void;
 
-// Sets the range for a single run
 SetProgressRange(theRange: Message_ProgressRange): void;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// check the validity of argument(s) for Boolean Operations
 BOPAlgo_ArgumentAnalyzer: declare class BOPAlgo_ArgumentAnalyzer extends BOPAlgo_Algo
 
 constructor
 
-// sets object shape
 SetShape1(TheShape: TopoDS_Shape): void;
 
-// sets tool shape
 SetShape2(TheShape: TopoDS_Shape): void;
 
-// returns object shape
 GetShape1(): TopoDS_Shape;
 
-// returns tool shape
 GetShape2(): TopoDS_Shape;
 
-// returns ref
 OperationType(): BOPAlgo_Operation;
 
-// returns ref
 StopOnFirstFaulty(): boolean;
 
-// Returns (modifiable) mode that means checking types of shapes
 ArgumentTypeMode(): boolean;
 
-// Returns (modifiable) mode that means checking of self-intersection of shapes
 SelfInterMode(): boolean;
 
-// Returns (modifiable) mode that means checking of small edges
 SmallEdgeMode(): boolean;
 
-// Returns (modifiable) mode that means checking of possibility to split or rebuild faces
 RebuildFaceMode(): boolean;
 
-// Returns (modifiable) mode that means checking of tangency between subshapes
 TangentMode(): boolean;
 
-// Returns (modifiable) mode that means checking of problem of merging vertices
 MergeVertexMode(): boolean;
 
-// Returns (modifiable) mode that means checking of problem of merging edges
 MergeEdgeMode(): boolean;
 
-// Returns (modifiable) mode that means checking of problem of continuity of the shape
 ContinuityMode(): boolean;
 
-// Returns (modifiable) mode that means checking of problem of invalid curve on surface
 CurveOnSurfaceMode(): boolean;
 
-// performs analysis
 Perform(theRange?: Message_ProgressRange): void;
 
-// result of test
 HasFaulty(): boolean;
 
-// returns a result of test
 GetCheckResult(): NCollection_List_BOPAlgo_CheckResult;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// The class represents the Building part of the Boolean Operations algorithm
 BOPAlgo_BOP: declare class BOPAlgo_BOP extends BOPAlgo_ToolsProvider
 
 constructor
 
-// Clears internal fields and arguments
 Clear(): void;
 
 SetOperation(theOperation: BOPAlgo_Operation): void;
 
 Operation(): BOPAlgo_Operation;
 
-// The main method to implement the operation Providing the range allows to enable Progress indicator User break functionalities
 Perform(theRange?: Message_ProgressRange): void;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// The class is a General Fuse algorithm - base algorithm for the algorithms in the Boolean Component
 BOPAlgo_Builder: declare class BOPAlgo_Builder extends BOPAlgo_BuilderShape
 
 constructor
 
-// Clears the content of the algorithm
 Clear(): void;
 
-// Returns the Data Structure, holder of intersection information
 PDS(): BOPDS_DS;
 
-// Returns the Context, tool for cashing heavy algorithms
 Context(): IntTools_Context;
 
 AddArgument(theShape: TopoDS_Shape): void;
@@ -783,7 +701,6 @@ SetCheckInverted(theCheck: boolean): void;
 
 CheckInverted(): boolean;
 
-// The main method to implement the operation Providing the range allows to enable Progress indicator User break functionalities
 Perform(theRange?: Message_ProgressRange): void;
 
 BuildBOP(theObjects: NCollection_List_TopoDS_Shape, theObjState: TopAbs_State, theTools: NCollection_List_TopoDS_Shape, theToolsState: TopAbs_State, theRange: Message_ProgressRange, theReport: Message_Report): void;
@@ -797,62 +714,46 @@ Origins(): NCollection_DataMap_TopoDS_Shape_NCollection_List_TopoDS_Shape_TopToo
 
 ShapesSD(): NCollection_DataMap_TopoDS_Shape_TopoDS_Shape_TopTools_ShapeMapHasher;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// The root class for algorithms to build faces/solids from set of edges/faces
 BOPAlgo_BuilderArea: declare class BOPAlgo_BuilderArea extends BOPAlgo_Algo
 
-// Sets the context for the algorithms
 SetContext(theContext: IntTools_Context): void;
 
-// Returns the input shapes
 Shapes(): NCollection_List_TopoDS_Shape;
 
-// Sets the shapes for building areas
 SetShapes(theLS: NCollection_List_TopoDS_Shape): void;
 
-// Returns the found loops
 Loops(): NCollection_List_TopoDS_Shape;
 
-// Returns the found areas
 Areas(): NCollection_List_TopoDS_Shape;
 
-// Defines the preventing of addition of internal parts into result
 SetAvoidInternalShapes(theAvoidInternal: boolean): void;
 
-// Returns the AvoidInternalShapes flag
 IsAvoidInternalShapes(): boolean;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// The algorithm to build new faces from the given faces and set of edges lying on this face
 BOPAlgo_BuilderFace: declare class BOPAlgo_BuilderFace extends BOPAlgo_BuilderArea
 
 constructor
 
-// Sets the face generatix
 SetFace(theFace: TopoDS_Face): void;
 
-// Returns the face generatix
 Face(): TopoDS_Face;
 
-// Performs the algorithm
 Perform(theRange?: Message_ProgressRange): void;
 
 Orientation(): TopAbs_Orientation;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Root class for algorithms that has shape as result
 BOPAlgo_BuilderShape: declare class BOPAlgo_BuilderShape extends BOPAlgo_Algo
 
 Shape(): TopoDS_Shape;
@@ -875,22 +776,264 @@ SetToFillHistory(theHistFlag: boolean): void;
 
 HasHistory(): boolean;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Solid Builder is the algorithm for building solids from set of faces
 BOPAlgo_BuilderSolid: declare class BOPAlgo_BuilderSolid extends BOPAlgo_BuilderArea
 
 constructor
 
-// The main method to implement the operation Providing the range allows to enable Progress indicator User break functionalities
 Perform(theRange?: Message_ProgressRange): void;
 
 GetBoxesMap(): NCollection_DataMap_TopoDS_Shape_Bnd_Box_TopTools_ShapeMapHasher;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
+
+BOPAlgo_CellsBuilder: declare class BOPAlgo_CellsBuilder extends BOPAlgo_Builder
+
+constructor
+
+Clear(): void;
+
+AddToResult(theLSToTake: NCollection_List_TopoDS_Shape, theLSToAvoid: NCollection_List_TopoDS_Shape, theMaterial?: number, theUpdate?: boolean): void;
+
+AddAllToResult(theMaterial?: number, theUpdate?: boolean): void;
+
+RemoveFromResult(theLSToTake: NCollection_List_TopoDS_Shape, theLSToAvoid: NCollection_List_TopoDS_Shape): void;
+
+RemoveAllFromResult(): void;
+
+RemoveInternalBoundaries(): void;
+
+GetAllParts(): TopoDS_Shape;
+
+MakeContainers(): void;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+BOPAlgo_CheckResult: declare class BOPAlgo_CheckResult
+
+constructor
+
+SetShape1(TheShape: TopoDS_Shape): void;
+
+AddFaultyShape1(TheShape: TopoDS_Shape): void;
+
+SetShape2(TheShape: TopoDS_Shape): void;
+
+AddFaultyShape2(TheShape: TopoDS_Shape): void;
+
+GetShape1(): TopoDS_Shape;
+
+GetShape2(): TopoDS_Shape;
+
+GetFaultyShapes1(): NCollection_List_TopoDS_Shape;
+
+GetFaultyShapes2(): NCollection_List_TopoDS_Shape;
+
+SetCheckStatus(TheStatus: BOPAlgo_CheckStatus): void;
+
+GetCheckStatus(): BOPAlgo_CheckStatus;
+
+SetMaxDistance1(theDist: number): void;
+
+SetMaxDistance2(theDist: number): void;
+
+SetMaxParameter1(thePar: number): void;
+
+SetMaxParameter2(thePar: number): void;
+
+GetMaxDistance1(): number;
+
+GetMaxDistance2(): number;
+
+GetMaxParameter1(): number;
+
+GetMaxParameter2(): number;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+BOPAlgo_CheckStatus: typeof BOPAlgo_CheckStatus[keyof typeof BOPAlgo_CheckStatus]
+
+BOPAlgo_CheckerSI: declare class BOPAlgo_CheckerSI extends BOPAlgo_Algo
+
+constructor
+
+Perform(theRange?: Message_ProgressRange): void;
+
+SetLevelOfCheck(theLevel: number): void;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+BOPAlgo_GlueEnum: typeof BOPAlgo_GlueEnum[keyof typeof BOPAlgo_GlueEnum]
+
+BOPAlgo_MakeConnected: declare class BOPAlgo_MakeConnected extends BOPAlgo_Options
+
+constructor
+
+SetArguments(theArgs: NCollection_List_TopoDS_Shape): void;
+
+AddArgument(theS: TopoDS_Shape): void;
+
+Arguments(): NCollection_List_TopoDS_Shape;
+
+Perform(): void;
+
+MakePeriodic(theParams: BOPAlgo_MakePeriodic_PeriodicityParams): void;
+
+RepeatShape(theDirectionID: number, theTimes: number): void;
+
+ClearRepetitions(): void;
+
+PeriodicityTool(): BOPAlgo_MakePeriodic;
+
+MaterialsOnPositiveSide(theS: TopoDS_Shape): NCollection_List_TopoDS_Shape;
+
+MaterialsOnNegativeSide(theS: TopoDS_Shape): NCollection_List_TopoDS_Shape;
+
+History(): BRepTools_History;
+
+GetModified(theS: TopoDS_Shape): NCollection_List_TopoDS_Shape;
+
+GetOrigins(theS: TopoDS_Shape): NCollection_List_TopoDS_Shape;
+
+Shape(): TopoDS_Shape;
+
+PeriodicShape(): TopoDS_Shape;
+
+Clear(): void;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+BOPAlgo_MakePeriodic: declare class BOPAlgo_MakePeriodic extends BOPAlgo_Options
+
+constructor
+
+SetShape(theShape: TopoDS_Shape): void;
+
+SetPeriodicityParameters(theParams: BOPAlgo_MakePeriodic_PeriodicityParams): void;
+
+PeriodicityParameters(): BOPAlgo_MakePeriodic_PeriodicityParams;
+
+MakePeriodic(theDirectionID: number, theIsPeriodic: boolean, thePeriod?: number): void;
+
+IsPeriodic(theDirectionID: number): boolean;
+
+Period(theDirectionID: number): number;
+
+MakeXPeriodic(theIsPeriodic: boolean, thePeriod?: number): void;
+
+IsXPeriodic(): boolean;
+
+XPeriod(): number;
+
+MakeYPeriodic(theIsPeriodic: boolean, thePeriod?: number): void;
+
+IsYPeriodic(): boolean;
+
+YPeriod(): number;
+
+MakeZPeriodic(theIsPeriodic: boolean, thePeriod?: number): void;
+
+IsZPeriodic(): boolean;
+
+ZPeriod(): number;
+
+SetTrimmed(theDirectionID: number, theIsTrimmed: boolean, theFirst?: number): void;
+
+IsInputTrimmed(theDirectionID: number): boolean;
+
+PeriodFirst(theDirectionID: number): number;
+
+SetXTrimmed(theIsTrimmed: boolean, theFirst?: boolean): void;
+
+IsInputXTrimmed(): boolean;
+
+XPeriodFirst(): number;
+
+SetYTrimmed(theIsTrimmed: boolean, theFirst?: boolean): void;
+
+IsInputYTrimmed(): boolean;
+
+YPeriodFirst(): number;
+
+SetZTrimmed(theIsTrimmed: boolean, theFirst?: boolean): void;
+
+IsInputZTrimmed(): boolean;
+
+ZPeriodFirst(): number;
+
+Perform(): void;
+
+RepeatShape(theDirectionID: number, theTimes: number): TopoDS_Shape;
+
+XRepeat(theTimes: number): TopoDS_Shape;
+
+YRepeat(theTimes: number): TopoDS_Shape;
+
+ZRepeat(theTimes: number): TopoDS_Shape;
+
+RepeatedShape(): TopoDS_Shape;
+
+ClearRepetitions(): void;
+
+Shape(): TopoDS_Shape;
+
+GetTwins(theS: TopoDS_Shape): NCollection_List_TopoDS_Shape;
+
+History(): BRepTools_History;
+
+Clear(): void;
+
+static ToDirectionID(theDirectionID: number): number;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+BOPAlgo_MakePeriodic_PeriodicityParams: declare class BOPAlgo_MakePeriodic_PeriodicityParams
+
+constructor
+
+Clear(): void;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+BOPAlgo_MakerVolume: declare class BOPAlgo_MakerVolume extends BOPAlgo_Builder
+
+constructor
+
+Clear(): void;
+
+SetIntersect(bIntersect: boolean): void;
+
+IsIntersect(): boolean;
+
+Box(): TopoDS_Solid;
+
+Faces(): NCollection_List_TopoDS_Shape;
+
+SetAvoidInternalShapes(theAvoidInternal: boolean): void;
+
+IsAvoidInternalShapes(): boolean;
+
+Perform(theRange?: Message_ProgressRange): void;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+BOPAlgo_Operation: typeof BOPAlgo_Operation[keyof typeof BOPAlgo_Operation]

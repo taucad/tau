@@ -1,8 +1,7 @@
 # libcascade — BOPTools
 
-2 top-level symbols. Signatures are verbatim typescript.
+8 top-level symbols. Signatures are verbatim typescript.
 
-// Provides tools used in Boolean Operations algorithm
 BOPTools_AlgoTools: declare class BOPTools_AlgoTools
 
 constructor
@@ -155,69 +154,178 @@ static TreatCompound(theS: TopoDS_Shape, theList: NCollection_List_TopoDS_Shape,
 
 static IsOpenShell(theShell: TopoDS_Shell): boolean;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// The class contains handy static functions dealing with the topology This is the copy of the BOPTools_AlgoTools2D.cdl
 BOPTools_AlgoTools2D: declare class BOPTools_AlgoTools2D
 
 constructor
 
-// Compute P-Curve for the edge <aE> on the face <aF>
 static BuildPCurveForEdgeOnFace(aE: TopoDS_Edge, aF: TopoDS_Face, theContext?: IntTools_Context): void;
 
-// Compute tangent for the edge <aE> [in 3D] at parameter <aT>
 static EdgeTangent(anE: TopoDS_Edge, aT: number, Tau: gp_Vec): boolean;
-// Tau: Mutated in place
 
-// Compute surface parameters <U,V> of the face <aF> for the point from the edge <aE> at parameter <aT>
 static PointOnSurface(aE: TopoDS_Edge, aF: TopoDS_Face, aT: number, U: number, V: number, theContext: IntTools_Context): { U: number; V: number };
 
-// Get P-Curve <aC> for the edge <aE> on surface <aF>
 static CurveOnSurface(aE: TopoDS_Edge, aF: TopoDS_Face, aToler: number, theContext: IntTools_Context): { aC: Geom2d_Curve; aToler: number; [Symbol.dispose](): void };
 static CurveOnSurface(aE: TopoDS_Edge, aF: TopoDS_Face, aFirst: number, aLast: number, aToler: number, theContext: IntTools_Context): { aC: Geom2d_Curve; aFirst: number; aLast: number; aToler: number; [Symbol.dispose](): void };
 static CurveOnSurface(aE: TopoDS_Edge, aF: TopoDS_Face, aToler: number, theContext: IntTools_Context): { aC: Geom2d_Curve; aToler: number; [Symbol.dispose](): void };
 static CurveOnSurface(aE: TopoDS_Edge, aF: TopoDS_Face, aFirst: number, aLast: number, aToler: number, theContext: IntTools_Context): { aC: Geom2d_Curve; aFirst: number; aLast: number; aToler: number; [Symbol.dispose](): void };
 
-// Returns TRUE if the edge <aE> has P-Curve <aC> on surface <aF>
 static HasCurveOnSurface(aE: TopoDS_Edge, aF: TopoDS_Face, aFirst?: number, aLast?: number, aToler?: number): { returnValue: boolean; aC: Geom2d_Curve; aFirst: number; aLast: number; aToler: number; [Symbol.dispose](): void };
 static HasCurveOnSurface(aE: TopoDS_Edge, aF: TopoDS_Face): boolean;
 static HasCurveOnSurface(aE: TopoDS_Edge, aF: TopoDS_Face, aFirst?: number, aLast?: number, aToler?: number): { returnValue: boolean; aC: Geom2d_Curve; aFirst: number; aLast: number; aToler: number; [Symbol.dispose](): void };
 static HasCurveOnSurface(aE: TopoDS_Edge, aF: TopoDS_Face): boolean;
 
-// Adjust P-Curve <theC2D> (3D-curve <theC3D>) on surface of the face <theF>
 static AdjustPCurveOnFace(theF: TopoDS_Face, theC3D: Geom_Curve, theC2D: Geom2d_Curve, theContext: IntTools_Context): { theC2DA: Geom2d_Curve; [Symbol.dispose](): void };
 static AdjustPCurveOnFace(theF: TopoDS_Face, theFirst: number, theLast: number, theC2D: Geom2d_Curve, theContext: IntTools_Context): { theC2DA: Geom2d_Curve; [Symbol.dispose](): void };
 static AdjustPCurveOnFace(theF: TopoDS_Face, theC3D: Geom_Curve, theC2D: Geom2d_Curve, theContext: IntTools_Context): { theC2DA: Geom2d_Curve; [Symbol.dispose](): void };
 static AdjustPCurveOnFace(theF: TopoDS_Face, theFirst: number, theLast: number, theC2D: Geom2d_Curve, theContext: IntTools_Context): { theC2DA: Geom2d_Curve; [Symbol.dispose](): void };
 
-// Adjust P-Curve <aC2D> (3D-curve <C3D>) on surface <aF>
 static AdjustPCurveOnSurf(aF: BRepAdaptor_Surface, aT1: number, aT2: number, aC2D: Geom2d_Curve): { aC2DA: Geom2d_Curve; [Symbol.dispose](): void };
 
-// Compute intermediate value in between [aFirst, aLast]
 static IntermediatePoint(aFirst: number, aLast: number): number;
 static IntermediatePoint(anE: TopoDS_Edge): number;
 static IntermediatePoint(aFirst: number, aLast: number): number;
 static IntermediatePoint(anE: TopoDS_Edge): number;
 
-// Make P-Curve <aC> for the edge <aE> on surface <aF>
 static Make2D(aE: TopoDS_Edge, aF: TopoDS_Face, aFirst: number, aLast: number, aToler: number, theContext: IntTools_Context): { aC: Geom2d_Curve; aFirst: number; aLast: number; aToler: number; [Symbol.dispose](): void };
 
-// Make P-Curve <aC> for the 3D-curve <C3D> on surface <aF>
 static MakePCurveOnFace(aF: TopoDS_Face, C3D: Geom_Curve, aToler: number, theContext: IntTools_Context): { aC: Geom2d_Curve; aToler: number; [Symbol.dispose](): void };
 static MakePCurveOnFace(aF: TopoDS_Face, C3D: Geom_Curve, aT1: number, aT2: number, aToler: number, theContext: IntTools_Context): { aC: Geom2d_Curve; aToler: number; [Symbol.dispose](): void };
 static MakePCurveOnFace(aF: TopoDS_Face, C3D: Geom_Curve, aToler: number, theContext: IntTools_Context): { aC: Geom2d_Curve; aToler: number; [Symbol.dispose](): void };
 static MakePCurveOnFace(aF: TopoDS_Face, C3D: Geom_Curve, aT1: number, aT2: number, aToler: number, theContext: IntTools_Context): { aC: Geom2d_Curve; aToler: number; [Symbol.dispose](): void };
 
-// Attach P-Curve from the edge <aEold> on surface <aF> to the edge <aEnew> Returns 0 in case of success
 static AttachExistingPCurve(aEold: TopoDS_Edge, aEnew: TopoDS_Edge, aF: TopoDS_Face, aCtx: IntTools_Context): number;
 
-// Checks if CurveOnSurface of theE on theF matches with isoline of theF surface
 static IsEdgeIsoline(theE: TopoDS_Edge, theF: TopoDS_Face, isTheUIso?: boolean, isTheVIso?: boolean): { isTheUIso: boolean; isTheVIso: boolean };
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
+
+BOPTools_AlgoTools3D: declare class BOPTools_AlgoTools3D
+
+constructor
+
+static DoSplitSEAMOnFace(theESplit: TopoDS_Edge, theFace: TopoDS_Face): boolean;
+static DoSplitSEAMOnFace(theEOrigin: TopoDS_Edge, theESplit: TopoDS_Edge, theFace: TopoDS_Face): boolean;
+static DoSplitSEAMOnFace(theESplit: TopoDS_Edge, theFace: TopoDS_Face): boolean;
+static DoSplitSEAMOnFace(theEOrigin: TopoDS_Edge, theESplit: TopoDS_Edge, theFace: TopoDS_Face): boolean;
+
+static GetNormalToFaceOnEdge(aE: TopoDS_Edge, aF: TopoDS_Face, aT: number, aD: gp_Dir, theContext: IntTools_Context): void;
+static GetNormalToFaceOnEdge(aE: TopoDS_Edge, aF: TopoDS_Face, aD: gp_Dir, theContext: IntTools_Context): void;
+static GetNormalToFaceOnEdge(aE: TopoDS_Edge, aF: TopoDS_Face, aT: number, aD: gp_Dir, theContext: IntTools_Context): void;
+static GetNormalToFaceOnEdge(aE: TopoDS_Edge, aF: TopoDS_Face, aD: gp_Dir, theContext: IntTools_Context): void;
+
+static SenseFlag(aNF1: gp_Dir, aNF2: gp_Dir): number;
+
+static GetNormalToSurface(aS: Geom_Surface, U: number, V: number, aD: gp_Dir): boolean;
+
+static GetApproxNormalToFaceOnEdge(aE: TopoDS_Edge, aF: TopoDS_Face, aT: number, aPx: gp_Pnt, aD: gp_Dir, theContext: IntTools_Context): boolean;
+static GetApproxNormalToFaceOnEdge(theE: TopoDS_Edge, theF: TopoDS_Face, aT: number, aP: gp_Pnt, aDNF: gp_Dir, aDt2D: number): boolean;
+static GetApproxNormalToFaceOnEdge(theE: TopoDS_Edge, theF: TopoDS_Face, aT: number, aDt2D: number, aP: gp_Pnt, aDNF: gp_Dir, theContext: IntTools_Context): boolean;
+static GetApproxNormalToFaceOnEdge(aE: TopoDS_Edge, aF: TopoDS_Face, aT: number, aPx: gp_Pnt, aD: gp_Dir, theContext: IntTools_Context): boolean;
+static GetApproxNormalToFaceOnEdge(theE: TopoDS_Edge, theF: TopoDS_Face, aT: number, aP: gp_Pnt, aDNF: gp_Dir, aDt2D: number): boolean;
+static GetApproxNormalToFaceOnEdge(theE: TopoDS_Edge, theF: TopoDS_Face, aT: number, aDt2D: number, aP: gp_Pnt, aDNF: gp_Dir, theContext: IntTools_Context): boolean;
+static GetApproxNormalToFaceOnEdge(aE: TopoDS_Edge, aF: TopoDS_Face, aT: number, aPx: gp_Pnt, aD: gp_Dir, theContext: IntTools_Context): boolean;
+static GetApproxNormalToFaceOnEdge(theE: TopoDS_Edge, theF: TopoDS_Face, aT: number, aP: gp_Pnt, aDNF: gp_Dir, aDt2D: number): boolean;
+static GetApproxNormalToFaceOnEdge(theE: TopoDS_Edge, theF: TopoDS_Face, aT: number, aDt2D: number, aP: gp_Pnt, aDNF: gp_Dir, theContext: IntTools_Context): boolean;
+
+static PointNearEdge(aE: TopoDS_Edge, aF: TopoDS_Face, aP2D: gp_Pnt2d, aPx: gp_Pnt, theContext: IntTools_Context): number;
+static PointNearEdge(aE: TopoDS_Edge, aF: TopoDS_Face, aT: number, aDt2D: number, aP2D: gp_Pnt2d, aPx: gp_Pnt): number;
+static PointNearEdge(aE: TopoDS_Edge, aF: TopoDS_Face, aT: number, aP2D: gp_Pnt2d, aPx: gp_Pnt, theContext: IntTools_Context): number;
+static PointNearEdge(aE: TopoDS_Edge, aF: TopoDS_Face, aT: number, aDt2D: number, aP2D: gp_Pnt2d, aPx: gp_Pnt, theContext: IntTools_Context): number;
+static PointNearEdge(aE: TopoDS_Edge, aF: TopoDS_Face, aP2D: gp_Pnt2d, aPx: gp_Pnt, theContext: IntTools_Context): number;
+static PointNearEdge(aE: TopoDS_Edge, aF: TopoDS_Face, aT: number, aDt2D: number, aP2D: gp_Pnt2d, aPx: gp_Pnt): number;
+static PointNearEdge(aE: TopoDS_Edge, aF: TopoDS_Face, aT: number, aP2D: gp_Pnt2d, aPx: gp_Pnt, theContext: IntTools_Context): number;
+static PointNearEdge(aE: TopoDS_Edge, aF: TopoDS_Face, aT: number, aDt2D: number, aP2D: gp_Pnt2d, aPx: gp_Pnt, theContext: IntTools_Context): number;
+static PointNearEdge(aE: TopoDS_Edge, aF: TopoDS_Face, aP2D: gp_Pnt2d, aPx: gp_Pnt, theContext: IntTools_Context): number;
+static PointNearEdge(aE: TopoDS_Edge, aF: TopoDS_Face, aT: number, aDt2D: number, aP2D: gp_Pnt2d, aPx: gp_Pnt): number;
+static PointNearEdge(aE: TopoDS_Edge, aF: TopoDS_Face, aT: number, aP2D: gp_Pnt2d, aPx: gp_Pnt, theContext: IntTools_Context): number;
+static PointNearEdge(aE: TopoDS_Edge, aF: TopoDS_Face, aT: number, aDt2D: number, aP2D: gp_Pnt2d, aPx: gp_Pnt, theContext: IntTools_Context): number;
+static PointNearEdge(aE: TopoDS_Edge, aF: TopoDS_Face, aP2D: gp_Pnt2d, aPx: gp_Pnt, theContext: IntTools_Context): number;
+static PointNearEdge(aE: TopoDS_Edge, aF: TopoDS_Face, aT: number, aDt2D: number, aP2D: gp_Pnt2d, aPx: gp_Pnt): number;
+static PointNearEdge(aE: TopoDS_Edge, aF: TopoDS_Face, aT: number, aP2D: gp_Pnt2d, aPx: gp_Pnt, theContext: IntTools_Context): number;
+static PointNearEdge(aE: TopoDS_Edge, aF: TopoDS_Face, aT: number, aDt2D: number, aP2D: gp_Pnt2d, aPx: gp_Pnt, theContext: IntTools_Context): number;
+
+static MinStepIn2d(): number;
+
+static IsEmptyShape(aS: TopoDS_Shape): boolean;
+
+static OrientEdgeOnFace(aE: TopoDS_Edge, aF: TopoDS_Face, aER: TopoDS_Edge): void;
+
+static PointInFace(theF: TopoDS_Face, theP: gp_Pnt, theP2D: gp_Pnt2d, theContext: IntTools_Context): number;
+static PointInFace(theF: TopoDS_Face, theE: TopoDS_Edge, theT: number, theDt2D: number, theP: gp_Pnt, theP2D: gp_Pnt2d, theContext: IntTools_Context): number;
+static PointInFace(theF: TopoDS_Face, theL: Geom2d_Curve, theP: gp_Pnt, theP2D: gp_Pnt2d, theContext: IntTools_Context, theDt2D: number): number;
+static PointInFace(theF: TopoDS_Face, theP: gp_Pnt, theP2D: gp_Pnt2d, theContext: IntTools_Context): number;
+static PointInFace(theF: TopoDS_Face, theE: TopoDS_Edge, theT: number, theDt2D: number, theP: gp_Pnt, theP2D: gp_Pnt2d, theContext: IntTools_Context): number;
+static PointInFace(theF: TopoDS_Face, theL: Geom2d_Curve, theP: gp_Pnt, theP2D: gp_Pnt2d, theContext: IntTools_Context, theDt2D: number): number;
+static PointInFace(theF: TopoDS_Face, theP: gp_Pnt, theP2D: gp_Pnt2d, theContext: IntTools_Context): number;
+static PointInFace(theF: TopoDS_Face, theE: TopoDS_Edge, theT: number, theDt2D: number, theP: gp_Pnt, theP2D: gp_Pnt2d, theContext: IntTools_Context): number;
+static PointInFace(theF: TopoDS_Face, theL: Geom2d_Curve, theP: gp_Pnt, theP2D: gp_Pnt2d, theContext: IntTools_Context, theDt2D: number): number;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+BOPTools_ConnexityBlock: declare class BOPTools_ConnexityBlock
+
+constructor
+
+Shapes(): NCollection_List_TopoDS_Shape;
+
+ChangeShapes(): NCollection_List_TopoDS_Shape;
+
+SetRegular(theFlag: boolean): void;
+
+IsRegular(): boolean;
+
+Loops(): NCollection_List_TopoDS_Shape;
+
+ChangeLoops(): NCollection_List_TopoDS_Shape;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+BOPTools_CoupleOfShape: declare class BOPTools_CoupleOfShape
+
+constructor
+
+SetShape1(theShape: TopoDS_Shape): void;
+
+Shape1(): TopoDS_Shape;
+
+SetShape2(theShape: TopoDS_Shape): void;
+
+Shape2(): TopoDS_Shape;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+BOPTools_Set: declare class BOPTools_Set
+
+constructor
+
+Assign(Other: BOPTools_Set): BOPTools_Set;
+
+Shape(): TopoDS_Shape;
+
+Add(theS: TopoDS_Shape, theType: TopAbs_ShapeEnum): void;
+
+NbShapes(): number;
+
+IsEqual(aOther: BOPTools_Set): boolean;
+
+GetSum(): number;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+BOPTools_ListOfConnexityBlock: NCollection_List_BOPTools_ConnexityBlock
+
+BOPTools_ListOfCoupleOfShape: NCollection_List_BOPTools_CoupleOfShape

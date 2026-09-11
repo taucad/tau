@@ -1,30 +1,7 @@
 # libcascade — StepToTopoDS (2)
 
-19 top-level symbols. Signatures are verbatim typescript.
+18 top-level symbols. Signatures are verbatim typescript.
 
-// This class implements the common services for all classes of {@link StepToTopoDS`StepToTopoDS`} which report error and sets and returns precision
-StepToTopoDS_Root: declare class StepToTopoDS_Root
-
-IsDone(): boolean;
-
-// Returns the value of "MyPrecision"
-Precision(): number;
-
-// Sets the value of "MyPrecision"
-SetPrecision(preci: number): void;
-
-// Returns the value of "MaxTol"
-MaxTol(): number;
-
-// Sets the value of MaxTol
-SetMaxTol(maxpreci: number): void;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// This Tool Class provides Information to build a Cas.Cad BRep from a ProSTEP Shape model
 StepToTopoDS_Tool: declare class StepToTopoDS_Tool
 
 constructor
@@ -88,45 +65,35 @@ C1Cur3(): number;
 
 C2Cur3(): number;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Translate STEP entity composite_curve to {@link TopoDS_Wire`TopoDS_Wire`} If surface is given, the curve is assumed to lie on that surface and in case if any segment of it is a curve_on_surface, the pcurve for that segment will be taken
 StepToTopoDS_TranslateCompositeCurve: declare class StepToTopoDS_TranslateCompositeCurve extends StepToTopoDS_Root
 
 constructor
 
-// Translates standalone composite_curve
 Init(CC: StepGeom_CompositeCurve, TP: Transfer_TransientProcess, theLocalFactors: StepData_Factors): boolean;
 Init(CC: StepGeom_CompositeCurve, TP: Transfer_TransientProcess, S: StepGeom_Surface, Surf: Geom_Surface, theLocalFactors: StepData_Factors): boolean;
 Init(CC: StepGeom_CompositeCurve, TP: Transfer_TransientProcess, theLocalFactors: StepData_Factors): boolean;
 Init(CC: StepGeom_CompositeCurve, TP: Transfer_TransientProcess, S: StepGeom_Surface, Surf: Geom_Surface, theLocalFactors: StepData_Factors): boolean;
 
-// Returns result of last translation or null wire if failed
 Value(): TopoDS_Wire;
 
-// Returns True if composite_curve contains a segment with infinite parameters
 IsInfiniteSegment(): boolean;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Translate curve_bounded_surface into {@link TopoDS_Face`TopoDS_Face`}
 StepToTopoDS_TranslateCurveBoundedSurface: declare class StepToTopoDS_TranslateCurveBoundedSurface extends StepToTopoDS_Root
 
 constructor
 
-// Translate surface
 Init(CBS: StepGeom_CurveBoundedSurface, TP: Transfer_TransientProcess, theLocalFactors?: StepData_Factors): boolean;
 
-// Returns result of last translation or null wire if failed
 Value(): TopoDS_Face;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -137,12 +104,7 @@ constructor
 
 Init(E: StepShape_Edge, T: StepToTopoDS_Tool, NMTool: StepToTopoDS_NMTool, theLocalFactors: StepData_Factors): void;
 
-// Warning! C3D is assumed to be a Curve 3D ..
 MakeFromCurve3D(C3D: StepGeom_Curve, EC: StepShape_EdgeCurve, Vend: StepShape_Vertex, preci: number, E: TopoDS_Edge, V1: TopoDS_Vertex, V2: TopoDS_Vertex, T: StepToTopoDS_Tool, theLocalFactors: StepData_Factors): void;
-// E: Mutated in place
-// V1: Mutated in place
-// V2: Mutated in place
-// T: Mutated in place
 
 MakePCurve(PCU: StepGeom_Pcurve, ConvSurf: Geom_Surface, theLocalFactors?: StepData_Factors): Geom2d_Curve;
 
@@ -150,7 +112,6 @@ Value(): TopoDS_Shape;
 
 Error(): StepToTopoDS_TranslateEdgeError;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -167,7 +128,6 @@ Value(): TopoDS_Shape;
 
 Error(): StepToTopoDS_TranslateEdgeLoopError;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -186,7 +146,6 @@ Value(): TopoDS_Shape;
 
 Error(): StepToTopoDS_TranslatePolyLoopError;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -206,7 +165,6 @@ Value(): TopoDS_Shape;
 
 Error(): StepToTopoDS_TranslateShellError;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -223,7 +181,6 @@ Value(): TopoDS_Shape;
 
 Error(): StepToTopoDS_TranslateSolidError;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -240,7 +197,6 @@ Value(): TopoDS_Shape;
 
 Error(): StepToTopoDS_TranslateVertexError;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -257,7 +213,6 @@ Value(): TopoDS_Shape;
 
 Error(): StepToTopoDS_TranslateVertexLoopError;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;

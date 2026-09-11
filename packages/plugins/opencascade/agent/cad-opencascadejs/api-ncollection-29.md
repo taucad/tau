@@ -1,35 +1,118 @@
 # libcascade — NCollection (29)
 
-23 top-level symbols. Signatures are verbatim typescript.
+10 top-level symbols. Signatures are verbatim typescript.
 
-// Class `NCollection_DynamicArray` (dynamic array of objects)
-NCollection_DynamicArray_MathRoot_NullInterval: declare class NCollection_DynamicArray_MathRoot_NullInterval
+NCollection_Sequence_handle_MAT_BasicElt: declare class NCollection_Sequence_handle_MAT_BasicElt extends NCollection_BaseSequence
 
 constructor
 
-Size(): number;
-
-Length(): number;
-
-Lower(): number;
+static Lower(): number;
 
 Upper(): number;
 
 IsEmpty(): boolean;
 
-Assign(theOther: NCollection_DynamicArray_MathRoot_NullInterval, theOwnAllocator: boolean): NCollection_DynamicArray_MathRoot_NullInterval;
+Reverse(): void;
 
-Append(theValue: unknown): unknown;
+Exchange(I: number, J: number): void;
 
-InsertAfter(theIndex: number, theValue: unknown): unknown;
+Clear(theAllocator?: NCollection_BaseAllocator): void;
 
-InsertBefore(theIndex: number, theValue: unknown): unknown;
+Assign(theOther: NCollection_Sequence_handle_MAT_BasicElt): NCollection_Sequence_handle_MAT_BasicElt;
 
-EraseLast(): void;
+Remove(theIndex: number): void;
+Remove(theFromIndex: number, theToIndex: number): void;
+Remove(theIndex: number): void;
+Remove(theFromIndex: number, theToIndex: number): void;
 
-Appended(): unknown;
+Append(theItem: MAT_BasicElt): void;
+Append(theSeq: NCollection_Sequence_handle_MAT_BasicElt): void;
+Append(theItem: MAT_BasicElt): void;
+Append(theSeq: NCollection_Sequence_handle_MAT_BasicElt): void;
 
-Value(theIndex: number): unknown;
+Prepend(theItem: MAT_BasicElt): void;
+Prepend(theSeq: NCollection_Sequence_handle_MAT_BasicElt): void;
+Prepend(theItem: MAT_BasicElt): void;
+Prepend(theSeq: NCollection_Sequence_handle_MAT_BasicElt): void;
+
+InsertBefore(theIndex: number, theItem: MAT_BasicElt): void;
+InsertBefore(theIndex: number, theSeq: NCollection_Sequence_handle_MAT_BasicElt): void;
+InsertBefore(theIndex: number, theItem: MAT_BasicElt): void;
+InsertBefore(theIndex: number, theSeq: NCollection_Sequence_handle_MAT_BasicElt): void;
+
+InsertAfter(theIndex: number, theSeq: NCollection_Sequence_handle_MAT_BasicElt): void;
+InsertAfter(theIndex: number, theItem: MAT_BasicElt): void;
+InsertAfter(theIndex: number, theSeq: NCollection_Sequence_handle_MAT_BasicElt): void;
+InsertAfter(theIndex: number, theItem: MAT_BasicElt): void;
+
+Split(theIndex: number, theSeq: NCollection_Sequence_handle_MAT_BasicElt): void;
+
+First(): MAT_BasicElt;
+
+ChangeFirst(): MAT_BasicElt;
+
+Last(): MAT_BasicElt;
+
+ChangeLast(): MAT_BasicElt;
+
+Value(theIndex: number): MAT_BasicElt;
+
+ChangeValue(theIndex: number): MAT_BasicElt;
+
+SetValue(theIndex: number, theItem: MAT_BasicElt): void;
+
+At(theIndex: number): MAT_BasicElt;
+
+ChangeAt(theIndex: number): MAT_BasicElt;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_Sequence_handle_NCollection_HSequence_gp_Pnt: declare class NCollection_Sequence_handle_NCollection_HSequence_gp_Pnt extends NCollection_BaseSequence
+
+constructor
+
+static Lower(): number;
+
+Upper(): number;
+
+IsEmpty(): boolean;
+
+Reverse(): void;
+
+Exchange(I: number, J: number): void;
+
+Clear(theAllocator?: NCollection_BaseAllocator): void;
+
+Assign(theOther: NCollection_Sequence_handle_NCollection_HSequence_gp_Pnt): NCollection_Sequence_handle_NCollection_HSequence_gp_Pnt;
+
+Remove(theIndex: number): void;
+Remove(theFromIndex: number, theToIndex: number): void;
+Remove(theIndex: number): void;
+Remove(theFromIndex: number, theToIndex: number): void;
+
+Append(theItem: unknown): void;
+Append(theSeq: NCollection_Sequence_handle_NCollection_HSequence_gp_Pnt): void;
+Append(theItem: unknown): void;
+Append(theSeq: NCollection_Sequence_handle_NCollection_HSequence_gp_Pnt): void;
+
+Prepend(theItem: unknown): void;
+Prepend(theSeq: NCollection_Sequence_handle_NCollection_HSequence_gp_Pnt): void;
+Prepend(theItem: unknown): void;
+Prepend(theSeq: NCollection_Sequence_handle_NCollection_HSequence_gp_Pnt): void;
+
+InsertBefore(theIndex: number, theItem: unknown): void;
+InsertBefore(theIndex: number, theSeq: NCollection_Sequence_handle_NCollection_HSequence_gp_Pnt): void;
+InsertBefore(theIndex: number, theItem: unknown): void;
+InsertBefore(theIndex: number, theSeq: NCollection_Sequence_handle_NCollection_HSequence_gp_Pnt): void;
+
+InsertAfter(theIndex: number, theSeq: NCollection_Sequence_handle_NCollection_HSequence_gp_Pnt): void;
+InsertAfter(theIndex: number, theItem: unknown): void;
+InsertAfter(theIndex: number, theSeq: NCollection_Sequence_handle_NCollection_HSequence_gp_Pnt): void;
+InsertAfter(theIndex: number, theItem: unknown): void;
+
+Split(theIndex: number, theSeq: NCollection_Sequence_handle_NCollection_HSequence_gp_Pnt): void;
 
 First(): unknown;
 
@@ -39,447 +122,332 @@ Last(): unknown;
 
 ChangeLast(): unknown;
 
-ChangeValue(theIndex: number): unknown;
-
-SetValue(theIndex: number, theValue: unknown): unknown;
-
-Clear(theReleaseMemory?: boolean): void;
-
-SetIncrement(theIncrement: number): void;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// Class `NCollection_DynamicArray` (dynamic array of objects)
-NCollection_DynamicArray_NCollection_List_handle_BOPDS_PaveBlock: declare class NCollection_DynamicArray_NCollection_List_handle_BOPDS_PaveBlock
-
-constructor
-
-Size(): number;
-
-Length(): number;
-
-Lower(): number;
-
-Upper(): number;
-
-IsEmpty(): boolean;
-
-Assign(theOther: NCollection_DynamicArray_NCollection_List_handle_BOPDS_PaveBlock, theOwnAllocator: boolean): NCollection_DynamicArray_NCollection_List_handle_BOPDS_PaveBlock;
-
-Append(theValue: NCollection_List_handle_BOPDS_PaveBlock): NCollection_List_handle_BOPDS_PaveBlock;
-
-InsertAfter(theIndex: number, theValue: NCollection_List_handle_BOPDS_PaveBlock): NCollection_List_handle_BOPDS_PaveBlock;
-
-InsertBefore(theIndex: number, theValue: NCollection_List_handle_BOPDS_PaveBlock): NCollection_List_handle_BOPDS_PaveBlock;
-
-EraseLast(): void;
-
-Appended(): NCollection_List_handle_BOPDS_PaveBlock;
-
-Value(theIndex: number): NCollection_List_handle_BOPDS_PaveBlock;
-
-First(): NCollection_List_handle_BOPDS_PaveBlock;
-
-ChangeFirst(): NCollection_List_handle_BOPDS_PaveBlock;
-
-Last(): NCollection_List_handle_BOPDS_PaveBlock;
-
-ChangeLast(): NCollection_List_handle_BOPDS_PaveBlock;
-
-ChangeValue(theIndex: number): NCollection_List_handle_BOPDS_PaveBlock;
-
-SetValue(theIndex: number, theValue: NCollection_List_handle_BOPDS_PaveBlock): NCollection_List_handle_BOPDS_PaveBlock;
-
-Clear(theReleaseMemory?: boolean): void;
-
-SetIncrement(theIncrement: number): void;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// Class `NCollection_DynamicArray` (dynamic array of objects)
-NCollection_DynamicArray_TopoDS_Face: declare class NCollection_DynamicArray_TopoDS_Face
-
-constructor
-
-Size(): number;
-
-Length(): number;
-
-Lower(): number;
-
-Upper(): number;
-
-IsEmpty(): boolean;
-
-Assign(theOther: NCollection_DynamicArray_TopoDS_Face, theOwnAllocator: boolean): NCollection_DynamicArray_TopoDS_Face;
-
-Append(theValue: TopoDS_Face): TopoDS_Face;
-
-InsertAfter(theIndex: number, theValue: TopoDS_Face): TopoDS_Face;
-
-InsertBefore(theIndex: number, theValue: TopoDS_Face): TopoDS_Face;
-
-EraseLast(): void;
-
-Appended(): TopoDS_Face;
-
-Value(theIndex: number): TopoDS_Face;
-
-First(): TopoDS_Face;
-
-ChangeFirst(): TopoDS_Face;
-
-Last(): TopoDS_Face;
-
-ChangeLast(): TopoDS_Face;
-
-ChangeValue(theIndex: number): TopoDS_Face;
-
-SetValue(theIndex: number, theValue: TopoDS_Face): TopoDS_Face;
-
-Clear(theReleaseMemory?: boolean): void;
-
-SetIncrement(theIncrement: number): void;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// Class `NCollection_DynamicArray` (dynamic array of objects)
-NCollection_DynamicArray_TopoDS_Shape: declare class NCollection_DynamicArray_TopoDS_Shape
-
-constructor
-
-Size(): number;
-
-Length(): number;
-
-Lower(): number;
-
-Upper(): number;
-
-IsEmpty(): boolean;
-
-Assign(theOther: NCollection_DynamicArray_TopoDS_Shape, theOwnAllocator: boolean): NCollection_DynamicArray_TopoDS_Shape;
-
-Append(theValue: TopoDS_Shape): TopoDS_Shape;
-
-InsertAfter(theIndex: number, theValue: TopoDS_Shape): TopoDS_Shape;
-
-InsertBefore(theIndex: number, theValue: TopoDS_Shape): TopoDS_Shape;
-
-EraseLast(): void;
-
-Appended(): TopoDS_Shape;
-
-Value(theIndex: number): TopoDS_Shape;
-
-First(): TopoDS_Shape;
-
-ChangeFirst(): TopoDS_Shape;
-
-Last(): TopoDS_Shape;
-
-ChangeLast(): TopoDS_Shape;
-
-ChangeValue(theIndex: number): TopoDS_Shape;
-
-SetValue(theIndex: number, theValue: TopoDS_Shape): TopoDS_Shape;
-
-Clear(theReleaseMemory?: boolean): void;
-
-SetIncrement(theIncrement: number): void;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// Class `NCollection_DynamicArray` (dynamic array of objects)
-NCollection_DynamicArray_double: declare class NCollection_DynamicArray_double
-
-constructor
-
-Size(): number;
-
-Length(): number;
-
-Lower(): number;
-
-Upper(): number;
-
-IsEmpty(): boolean;
-
-Assign(theOther: NCollection_DynamicArray_double, theOwnAllocator: boolean): NCollection_DynamicArray_double;
-
-Append(theValue: number): number;
-
-InsertAfter(theIndex: number, theValue: number): number;
-
-InsertBefore(theIndex: number, theValue: number): number;
-
-EraseLast(): void;
-
-Appended(): number;
-
-Value(theIndex: number): number;
-
-First(): number;
-
-ChangeFirst(): number;
-
-Last(): number;
-
-ChangeLast(): number;
-
-ChangeValue(theIndex: number): number;
-
-SetValue(theIndex: number, theValue: number): number;
-
-Clear(theReleaseMemory?: boolean): void;
-
-SetIncrement(theIncrement: number): void;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// Class `NCollection_DynamicArray` (dynamic array of objects)
-NCollection_DynamicArray_gp_Pnt2d: declare class NCollection_DynamicArray_gp_Pnt2d
-
-constructor
-
-Size(): number;
-
-Length(): number;
-
-Lower(): number;
-
-Upper(): number;
-
-IsEmpty(): boolean;
-
-Assign(theOther: NCollection_DynamicArray_gp_Pnt2d, theOwnAllocator: boolean): NCollection_DynamicArray_gp_Pnt2d;
-
-Append(theValue: gp_Pnt2d): gp_Pnt2d;
-
-InsertAfter(theIndex: number, theValue: gp_Pnt2d): gp_Pnt2d;
-
-InsertBefore(theIndex: number, theValue: gp_Pnt2d): gp_Pnt2d;
-
-EraseLast(): void;
-
-Appended(): gp_Pnt2d;
-
-Value(theIndex: number): gp_Pnt2d;
-
-First(): gp_Pnt2d;
-
-ChangeFirst(): gp_Pnt2d;
-
-Last(): gp_Pnt2d;
-
-ChangeLast(): gp_Pnt2d;
-
-ChangeValue(theIndex: number): gp_Pnt2d;
-
-SetValue(theIndex: number, theValue: gp_Pnt2d): gp_Pnt2d;
-
-Clear(theReleaseMemory?: boolean): void;
-
-SetIncrement(theIncrement: number): void;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// Class `NCollection_DynamicArray` (dynamic array of objects)
-NCollection_DynamicArray_gp_XYZ: declare class NCollection_DynamicArray_gp_XYZ
-
-constructor
-
-Size(): number;
-
-Length(): number;
-
-Lower(): number;
-
-Upper(): number;
-
-IsEmpty(): boolean;
-
-Assign(theOther: NCollection_DynamicArray_gp_XYZ, theOwnAllocator: boolean): NCollection_DynamicArray_gp_XYZ;
-
-Append(theValue: gp_XYZ): gp_XYZ;
-
-InsertAfter(theIndex: number, theValue: gp_XYZ): gp_XYZ;
-
-InsertBefore(theIndex: number, theValue: gp_XYZ): gp_XYZ;
-
-EraseLast(): void;
-
-Appended(): gp_XYZ;
-
-Value(theIndex: number): gp_XYZ;
-
-First(): gp_XYZ;
-
-ChangeFirst(): gp_XYZ;
-
-Last(): gp_XYZ;
-
-ChangeLast(): gp_XYZ;
-
-ChangeValue(theIndex: number): gp_XYZ;
-
-SetValue(theIndex: number, theValue: gp_XYZ): gp_XYZ;
-
-Clear(theReleaseMemory?: boolean): void;
-
-SetIncrement(theIncrement: number): void;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// Class `NCollection_DynamicArray` (dynamic array of objects)
-NCollection_DynamicArray_handle_Adaptor3d_Surface: declare class NCollection_DynamicArray_handle_Adaptor3d_Surface
-
-constructor
-
-Size(): number;
-
-Length(): number;
-
-Lower(): number;
-
-Upper(): number;
-
-IsEmpty(): boolean;
-
-Assign(theOther: NCollection_DynamicArray_handle_Adaptor3d_Surface, theOwnAllocator: boolean): NCollection_DynamicArray_handle_Adaptor3d_Surface;
-
-Append(theValue: Adaptor3d_Surface): Adaptor3d_Surface;
-
-InsertAfter(theIndex: number, theValue: Adaptor3d_Surface): Adaptor3d_Surface;
-
-InsertBefore(theIndex: number, theValue: Adaptor3d_Surface): Adaptor3d_Surface;
-
-EraseLast(): void;
-
-Appended(): Adaptor3d_Surface;
-
-Value(theIndex: number): Adaptor3d_Surface;
-
-First(): Adaptor3d_Surface;
-
-ChangeFirst(): Adaptor3d_Surface;
-
-Last(): Adaptor3d_Surface;
-
-ChangeLast(): Adaptor3d_Surface;
-
-ChangeValue(theIndex: number): Adaptor3d_Surface;
-
-SetValue(theIndex: number, theValue: Adaptor3d_Surface): Adaptor3d_Surface;
-
-Clear(theReleaseMemory?: boolean): void;
-
-SetIncrement(theIncrement: number): void;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// Class `NCollection_DynamicArray` (dynamic array of objects)
-NCollection_DynamicArray_handle_NCollection_HSequence_int: declare class NCollection_DynamicArray_handle_NCollection_HSequence_int
-
-constructor
-
-Size(): number;
-
-Length(): number;
-
-Lower(): number;
-
-Upper(): number;
-
-IsEmpty(): boolean;
-
-Assign(theOther: NCollection_DynamicArray_handle_NCollection_HSequence_int, theOwnAllocator: boolean): NCollection_DynamicArray_handle_NCollection_HSequence_int;
-
-Append(theValue: unknown): unknown;
-
-InsertAfter(theIndex: number, theValue: unknown): unknown;
-
-InsertBefore(theIndex: number, theValue: unknown): unknown;
-
-EraseLast(): void;
-
-Appended(): unknown;
-
 Value(theIndex: number): unknown;
 
-First(): unknown;
-
-ChangeFirst(): unknown;
-
-Last(): unknown;
-
-ChangeLast(): unknown;
-
 ChangeValue(theIndex: number): unknown;
 
-SetValue(theIndex: number, theValue: unknown): unknown;
+SetValue(theIndex: number, theItem: unknown): void;
 
-Clear(theReleaseMemory?: boolean): void;
+At(theIndex: number): unknown;
 
-SetIncrement(theIncrement: number): void;
+ChangeAt(theIndex: number): unknown;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Class `NCollection_DynamicArray` (dynamic array of objects)
-NCollection_DynamicArray_handle_Standard_Transient: declare class NCollection_DynamicArray_handle_Standard_Transient
+NCollection_Sequence_handle_PCDM_Document: declare class NCollection_Sequence_handle_PCDM_Document extends NCollection_BaseSequence
 
 constructor
 
-Size(): number;
-
-Length(): number;
-
-Lower(): number;
+static Lower(): number;
 
 Upper(): number;
 
 IsEmpty(): boolean;
 
-Assign(theOther: NCollection_DynamicArray_handle_Standard_Transient, theOwnAllocator: boolean): NCollection_DynamicArray_handle_Standard_Transient;
+Reverse(): void;
 
-Append(theValue: Standard_Transient): Standard_Transient;
+Exchange(I: number, J: number): void;
 
-InsertAfter(theIndex: number, theValue: Standard_Transient): Standard_Transient;
+Clear(theAllocator?: NCollection_BaseAllocator): void;
 
-InsertBefore(theIndex: number, theValue: Standard_Transient): Standard_Transient;
+Assign(theOther: NCollection_Sequence_handle_PCDM_Document): NCollection_Sequence_handle_PCDM_Document;
 
-EraseLast(): void;
+Remove(theIndex: number): void;
+Remove(theFromIndex: number, theToIndex: number): void;
+Remove(theIndex: number): void;
+Remove(theFromIndex: number, theToIndex: number): void;
 
-Appended(): Standard_Transient;
+Append(theItem: PCDM_Document): void;
+Append(theSeq: NCollection_Sequence_handle_PCDM_Document): void;
+Append(theItem: PCDM_Document): void;
+Append(theSeq: NCollection_Sequence_handle_PCDM_Document): void;
 
-Value(theIndex: number): Standard_Transient;
+Prepend(theItem: PCDM_Document): void;
+Prepend(theSeq: NCollection_Sequence_handle_PCDM_Document): void;
+Prepend(theItem: PCDM_Document): void;
+Prepend(theSeq: NCollection_Sequence_handle_PCDM_Document): void;
+
+InsertBefore(theIndex: number, theItem: PCDM_Document): void;
+InsertBefore(theIndex: number, theSeq: NCollection_Sequence_handle_PCDM_Document): void;
+InsertBefore(theIndex: number, theItem: PCDM_Document): void;
+InsertBefore(theIndex: number, theSeq: NCollection_Sequence_handle_PCDM_Document): void;
+
+InsertAfter(theIndex: number, theSeq: NCollection_Sequence_handle_PCDM_Document): void;
+InsertAfter(theIndex: number, theItem: PCDM_Document): void;
+InsertAfter(theIndex: number, theSeq: NCollection_Sequence_handle_PCDM_Document): void;
+InsertAfter(theIndex: number, theItem: PCDM_Document): void;
+
+Split(theIndex: number, theSeq: NCollection_Sequence_handle_PCDM_Document): void;
+
+First(): PCDM_Document;
+
+ChangeFirst(): PCDM_Document;
+
+Last(): PCDM_Document;
+
+ChangeLast(): PCDM_Document;
+
+Value(theIndex: number): PCDM_Document;
+
+ChangeValue(theIndex: number): PCDM_Document;
+
+SetValue(theIndex: number, theItem: PCDM_Document): void;
+
+At(theIndex: number): PCDM_Document;
+
+ChangeAt(theIndex: number): PCDM_Document;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_Sequence_handle_Poly_Triangulation: declare class NCollection_Sequence_handle_Poly_Triangulation extends NCollection_BaseSequence
+
+constructor
+
+static Lower(): number;
+
+Upper(): number;
+
+IsEmpty(): boolean;
+
+Reverse(): void;
+
+Exchange(I: number, J: number): void;
+
+Clear(theAllocator?: NCollection_BaseAllocator): void;
+
+Assign(theOther: NCollection_Sequence_handle_Poly_Triangulation): NCollection_Sequence_handle_Poly_Triangulation;
+
+Remove(theIndex: number): void;
+Remove(theFromIndex: number, theToIndex: number): void;
+Remove(theIndex: number): void;
+Remove(theFromIndex: number, theToIndex: number): void;
+
+Append(theItem: Poly_Triangulation): void;
+Append(theSeq: NCollection_Sequence_handle_Poly_Triangulation): void;
+Append(theItem: Poly_Triangulation): void;
+Append(theSeq: NCollection_Sequence_handle_Poly_Triangulation): void;
+
+Prepend(theItem: Poly_Triangulation): void;
+Prepend(theSeq: NCollection_Sequence_handle_Poly_Triangulation): void;
+Prepend(theItem: Poly_Triangulation): void;
+Prepend(theSeq: NCollection_Sequence_handle_Poly_Triangulation): void;
+
+InsertBefore(theIndex: number, theItem: Poly_Triangulation): void;
+InsertBefore(theIndex: number, theSeq: NCollection_Sequence_handle_Poly_Triangulation): void;
+InsertBefore(theIndex: number, theItem: Poly_Triangulation): void;
+InsertBefore(theIndex: number, theSeq: NCollection_Sequence_handle_Poly_Triangulation): void;
+
+InsertAfter(theIndex: number, theSeq: NCollection_Sequence_handle_Poly_Triangulation): void;
+InsertAfter(theIndex: number, theItem: Poly_Triangulation): void;
+InsertAfter(theIndex: number, theSeq: NCollection_Sequence_handle_Poly_Triangulation): void;
+InsertAfter(theIndex: number, theItem: Poly_Triangulation): void;
+
+Split(theIndex: number, theSeq: NCollection_Sequence_handle_Poly_Triangulation): void;
+
+First(): Poly_Triangulation;
+
+ChangeFirst(): Poly_Triangulation;
+
+Last(): Poly_Triangulation;
+
+ChangeLast(): Poly_Triangulation;
+
+Value(theIndex: number): Poly_Triangulation;
+
+ChangeValue(theIndex: number): Poly_Triangulation;
+
+SetValue(theIndex: number, theItem: Poly_Triangulation): void;
+
+At(theIndex: number): Poly_Triangulation;
+
+ChangeAt(theIndex: number): Poly_Triangulation;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_Sequence_handle_STEPSelections_AssemblyLink: declare class NCollection_Sequence_handle_STEPSelections_AssemblyLink extends NCollection_BaseSequence
+
+constructor
+
+static Lower(): number;
+
+Upper(): number;
+
+IsEmpty(): boolean;
+
+Reverse(): void;
+
+Exchange(I: number, J: number): void;
+
+Clear(theAllocator?: NCollection_BaseAllocator): void;
+
+Assign(theOther: NCollection_Sequence_handle_STEPSelections_AssemblyLink): NCollection_Sequence_handle_STEPSelections_AssemblyLink;
+
+Remove(theIndex: number): void;
+Remove(theFromIndex: number, theToIndex: number): void;
+Remove(theIndex: number): void;
+Remove(theFromIndex: number, theToIndex: number): void;
+
+Append(theItem: STEPSelections_AssemblyLink): void;
+Append(theSeq: NCollection_Sequence_handle_STEPSelections_AssemblyLink): void;
+Append(theItem: STEPSelections_AssemblyLink): void;
+Append(theSeq: NCollection_Sequence_handle_STEPSelections_AssemblyLink): void;
+
+Prepend(theItem: STEPSelections_AssemblyLink): void;
+Prepend(theSeq: NCollection_Sequence_handle_STEPSelections_AssemblyLink): void;
+Prepend(theItem: STEPSelections_AssemblyLink): void;
+Prepend(theSeq: NCollection_Sequence_handle_STEPSelections_AssemblyLink): void;
+
+InsertBefore(theIndex: number, theItem: STEPSelections_AssemblyLink): void;
+InsertBefore(theIndex: number, theSeq: NCollection_Sequence_handle_STEPSelections_AssemblyLink): void;
+InsertBefore(theIndex: number, theItem: STEPSelections_AssemblyLink): void;
+InsertBefore(theIndex: number, theSeq: NCollection_Sequence_handle_STEPSelections_AssemblyLink): void;
+
+InsertAfter(theIndex: number, theSeq: NCollection_Sequence_handle_STEPSelections_AssemblyLink): void;
+InsertAfter(theIndex: number, theItem: STEPSelections_AssemblyLink): void;
+InsertAfter(theIndex: number, theSeq: NCollection_Sequence_handle_STEPSelections_AssemblyLink): void;
+InsertAfter(theIndex: number, theItem: STEPSelections_AssemblyLink): void;
+
+Split(theIndex: number, theSeq: NCollection_Sequence_handle_STEPSelections_AssemblyLink): void;
+
+First(): STEPSelections_AssemblyLink;
+
+ChangeFirst(): STEPSelections_AssemblyLink;
+
+Last(): STEPSelections_AssemblyLink;
+
+ChangeLast(): STEPSelections_AssemblyLink;
+
+Value(theIndex: number): STEPSelections_AssemblyLink;
+
+ChangeValue(theIndex: number): STEPSelections_AssemblyLink;
+
+SetValue(theIndex: number, theItem: STEPSelections_AssemblyLink): void;
+
+At(theIndex: number): STEPSelections_AssemblyLink;
+
+ChangeAt(theIndex: number): STEPSelections_AssemblyLink;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_Sequence_handle_ShapeAnalysis_FreeBoundData: declare class NCollection_Sequence_handle_ShapeAnalysis_FreeBoundData extends NCollection_BaseSequence
+
+constructor
+
+static Lower(): number;
+
+Upper(): number;
+
+IsEmpty(): boolean;
+
+Reverse(): void;
+
+Exchange(I: number, J: number): void;
+
+Clear(theAllocator?: NCollection_BaseAllocator): void;
+
+Assign(theOther: NCollection_Sequence_handle_ShapeAnalysis_FreeBoundData): NCollection_Sequence_handle_ShapeAnalysis_FreeBoundData;
+
+Remove(theIndex: number): void;
+Remove(theFromIndex: number, theToIndex: number): void;
+Remove(theIndex: number): void;
+Remove(theFromIndex: number, theToIndex: number): void;
+
+Append(theItem: ShapeAnalysis_FreeBoundData): void;
+Append(theSeq: NCollection_Sequence_handle_ShapeAnalysis_FreeBoundData): void;
+Append(theItem: ShapeAnalysis_FreeBoundData): void;
+Append(theSeq: NCollection_Sequence_handle_ShapeAnalysis_FreeBoundData): void;
+
+Prepend(theItem: ShapeAnalysis_FreeBoundData): void;
+Prepend(theSeq: NCollection_Sequence_handle_ShapeAnalysis_FreeBoundData): void;
+Prepend(theItem: ShapeAnalysis_FreeBoundData): void;
+Prepend(theSeq: NCollection_Sequence_handle_ShapeAnalysis_FreeBoundData): void;
+
+InsertBefore(theIndex: number, theItem: ShapeAnalysis_FreeBoundData): void;
+InsertBefore(theIndex: number, theSeq: NCollection_Sequence_handle_ShapeAnalysis_FreeBoundData): void;
+InsertBefore(theIndex: number, theItem: ShapeAnalysis_FreeBoundData): void;
+InsertBefore(theIndex: number, theSeq: NCollection_Sequence_handle_ShapeAnalysis_FreeBoundData): void;
+
+InsertAfter(theIndex: number, theSeq: NCollection_Sequence_handle_ShapeAnalysis_FreeBoundData): void;
+InsertAfter(theIndex: number, theItem: ShapeAnalysis_FreeBoundData): void;
+InsertAfter(theIndex: number, theSeq: NCollection_Sequence_handle_ShapeAnalysis_FreeBoundData): void;
+InsertAfter(theIndex: number, theItem: ShapeAnalysis_FreeBoundData): void;
+
+Split(theIndex: number, theSeq: NCollection_Sequence_handle_ShapeAnalysis_FreeBoundData): void;
+
+First(): ShapeAnalysis_FreeBoundData;
+
+ChangeFirst(): ShapeAnalysis_FreeBoundData;
+
+Last(): ShapeAnalysis_FreeBoundData;
+
+ChangeLast(): ShapeAnalysis_FreeBoundData;
+
+Value(theIndex: number): ShapeAnalysis_FreeBoundData;
+
+ChangeValue(theIndex: number): ShapeAnalysis_FreeBoundData;
+
+SetValue(theIndex: number, theItem: ShapeAnalysis_FreeBoundData): void;
+
+At(theIndex: number): ShapeAnalysis_FreeBoundData;
+
+ChangeAt(theIndex: number): ShapeAnalysis_FreeBoundData;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_Sequence_handle_Standard_Transient: declare class NCollection_Sequence_handle_Standard_Transient extends NCollection_BaseSequence
+
+constructor
+
+static Lower(): number;
+
+Upper(): number;
+
+IsEmpty(): boolean;
+
+Reverse(): void;
+
+Exchange(I: number, J: number): void;
+
+Clear(theAllocator?: NCollection_BaseAllocator): void;
+
+Assign(theOther: NCollection_Sequence_handle_Standard_Transient): NCollection_Sequence_handle_Standard_Transient;
+
+Remove(theIndex: number): void;
+Remove(theFromIndex: number, theToIndex: number): void;
+Remove(theIndex: number): void;
+Remove(theFromIndex: number, theToIndex: number): void;
+
+Append(theItem: Standard_Transient): void;
+Append(theSeq: NCollection_Sequence_handle_Standard_Transient): void;
+Append(theItem: Standard_Transient): void;
+Append(theSeq: NCollection_Sequence_handle_Standard_Transient): void;
+
+Prepend(theItem: Standard_Transient): void;
+Prepend(theSeq: NCollection_Sequence_handle_Standard_Transient): void;
+Prepend(theItem: Standard_Transient): void;
+Prepend(theSeq: NCollection_Sequence_handle_Standard_Transient): void;
+
+InsertBefore(theIndex: number, theItem: Standard_Transient): void;
+InsertBefore(theIndex: number, theSeq: NCollection_Sequence_handle_Standard_Transient): void;
+InsertBefore(theIndex: number, theItem: Standard_Transient): void;
+InsertBefore(theIndex: number, theSeq: NCollection_Sequence_handle_Standard_Transient): void;
+
+InsertAfter(theIndex: number, theSeq: NCollection_Sequence_handle_Standard_Transient): void;
+InsertAfter(theIndex: number, theItem: Standard_Transient): void;
+InsertAfter(theIndex: number, theSeq: NCollection_Sequence_handle_Standard_Transient): void;
+InsertAfter(theIndex: number, theItem: Standard_Transient): void;
+
+Split(theIndex: number, theSeq: NCollection_Sequence_handle_Standard_Transient): void;
 
 First(): Standard_Transient;
 
@@ -489,382 +457,217 @@ Last(): Standard_Transient;
 
 ChangeLast(): Standard_Transient;
 
+Value(theIndex: number): Standard_Transient;
+
 ChangeValue(theIndex: number): Standard_Transient;
 
-SetValue(theIndex: number, theValue: Standard_Transient): Standard_Transient;
+SetValue(theIndex: number, theItem: Standard_Transient): void;
 
-Clear(theReleaseMemory?: boolean): void;
+At(theIndex: number): Standard_Transient;
 
-SetIncrement(theIncrement: number): void;
+ChangeAt(theIndex: number): Standard_Transient;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Class `NCollection_DynamicArray` (dynamic array of objects)
-NCollection_DynamicArray_int: declare class NCollection_DynamicArray_int
+NCollection_Sequence_handle_StepElement_CurveElementSectionDefinition: declare class NCollection_Sequence_handle_StepElement_CurveElementSectionDefinition extends NCollection_BaseSequence
 
 constructor
 
-Size(): number;
-
-Length(): number;
-
-Lower(): number;
+static Lower(): number;
 
 Upper(): number;
 
 IsEmpty(): boolean;
 
-Assign(theOther: NCollection_DynamicArray_int, theOwnAllocator: boolean): NCollection_DynamicArray_int;
+Reverse(): void;
 
-Append(theValue: number): number;
+Exchange(I: number, J: number): void;
 
-InsertAfter(theIndex: number, theValue: number): number;
+Clear(theAllocator?: NCollection_BaseAllocator): void;
 
-InsertBefore(theIndex: number, theValue: number): number;
+Assign(theOther: NCollection_Sequence_handle_StepElement_CurveElementSectionDefinition): NCollection_Sequence_handle_StepElement_CurveElementSectionDefinition;
 
-EraseLast(): void;
+Remove(theIndex: number): void;
+Remove(theFromIndex: number, theToIndex: number): void;
+Remove(theIndex: number): void;
+Remove(theFromIndex: number, theToIndex: number): void;
 
-Appended(): number;
+Append(theItem: StepElement_CurveElementSectionDefinition): void;
+Append(theSeq: NCollection_Sequence_handle_StepElement_CurveElementSectionDefinition): void;
+Append(theItem: StepElement_CurveElementSectionDefinition): void;
+Append(theSeq: NCollection_Sequence_handle_StepElement_CurveElementSectionDefinition): void;
 
-Value(theIndex: number): number;
+Prepend(theItem: StepElement_CurveElementSectionDefinition): void;
+Prepend(theSeq: NCollection_Sequence_handle_StepElement_CurveElementSectionDefinition): void;
+Prepend(theItem: StepElement_CurveElementSectionDefinition): void;
+Prepend(theSeq: NCollection_Sequence_handle_StepElement_CurveElementSectionDefinition): void;
 
-First(): number;
+InsertBefore(theIndex: number, theItem: StepElement_CurveElementSectionDefinition): void;
+InsertBefore(theIndex: number, theSeq: NCollection_Sequence_handle_StepElement_CurveElementSectionDefinition): void;
+InsertBefore(theIndex: number, theItem: StepElement_CurveElementSectionDefinition): void;
+InsertBefore(theIndex: number, theSeq: NCollection_Sequence_handle_StepElement_CurveElementSectionDefinition): void;
 
-ChangeFirst(): number;
+InsertAfter(theIndex: number, theSeq: NCollection_Sequence_handle_StepElement_CurveElementSectionDefinition): void;
+InsertAfter(theIndex: number, theItem: StepElement_CurveElementSectionDefinition): void;
+InsertAfter(theIndex: number, theSeq: NCollection_Sequence_handle_StepElement_CurveElementSectionDefinition): void;
+InsertAfter(theIndex: number, theItem: StepElement_CurveElementSectionDefinition): void;
 
-Last(): number;
+Split(theIndex: number, theSeq: NCollection_Sequence_handle_StepElement_CurveElementSectionDefinition): void;
 
-ChangeLast(): number;
+First(): StepElement_CurveElementSectionDefinition;
 
-ChangeValue(theIndex: number): number;
+ChangeFirst(): StepElement_CurveElementSectionDefinition;
 
-SetValue(theIndex: number, theValue: number): number;
+Last(): StepElement_CurveElementSectionDefinition;
 
-Clear(theReleaseMemory?: boolean): void;
+ChangeLast(): StepElement_CurveElementSectionDefinition;
 
-SetIncrement(theIncrement: number): void;
+Value(theIndex: number): StepElement_CurveElementSectionDefinition;
 
-// Releases the C++ object
+ChangeValue(theIndex: number): StepElement_CurveElementSectionDefinition;
+
+SetValue(theIndex: number, theItem: StepElement_CurveElementSectionDefinition): void;
+
+At(theIndex: number): StepElement_CurveElementSectionDefinition;
+
+ChangeAt(theIndex: number): StepElement_CurveElementSectionDefinition;
+
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// High-performance hash map using open addressing with Robin Hood hashing
-NCollection_FlatDataMap_BRepGraph_ItemId_BRepGraph_ItemId_NCollection_DefaultHasher_BRepGraph_ItemId: declare class NCollection_FlatDataMap_BRepGraph_ItemId_BRepGraph_ItemId_NCollection_DefaultHasher_BRepGraph_ItemId
+NCollection_Sequence_handle_StepElement_ElementMaterial: declare class NCollection_Sequence_handle_StepElement_ElementMaterial extends NCollection_BaseSequence
 
 constructor
 
-// Returns number of elements
-Size(): number;
+static Lower(): number;
 
-// Returns number of elements (legacy int-returning API, convention shared with BaseMap)
-Extent(): number;
+Upper(): number;
 
-// Returns true if map is empty
 IsEmpty(): boolean;
 
-// Returns current capacity
-Capacity(): number;
+Reverse(): void;
 
-// Check if key exists
-IsBound(theKey: BRepGraph_ItemId): boolean;
+Exchange(I: number, J: number): void;
 
-// Find value by key, returns nullptr if not found
-Seek(theKey: BRepGraph_ItemId): BRepGraph_ItemId;
+Clear(theAllocator?: NCollection_BaseAllocator): void;
 
-// Find value by key (mutable), returns nullptr if not found
-ChangeSeek(theKey: BRepGraph_ItemId): BRepGraph_ItemId;
+Assign(theOther: NCollection_Sequence_handle_StepElement_ElementMaterial): NCollection_Sequence_handle_StepElement_ElementMaterial;
 
-// Find value by key, throws if not found
-Find(theKey: BRepGraph_ItemId): BRepGraph_ItemId;
+Remove(theIndex: number): void;
+Remove(theFromIndex: number, theToIndex: number): void;
+Remove(theIndex: number): void;
+Remove(theFromIndex: number, theToIndex: number): void;
 
-// Find value by key (mutable), throws if not found
-ChangeFind(theKey: BRepGraph_ItemId): BRepGraph_ItemId;
+Append(theItem: StepElement_ElementMaterial): void;
+Append(theSeq: NCollection_Sequence_handle_StepElement_ElementMaterial): void;
+Append(theItem: StepElement_ElementMaterial): void;
+Append(theSeq: NCollection_Sequence_handle_StepElement_ElementMaterial): void;
 
-// Bind key to value
-Bind(theKey: BRepGraph_ItemId, theItem: BRepGraph_ItemId): boolean;
+Prepend(theItem: StepElement_ElementMaterial): void;
+Prepend(theSeq: NCollection_Sequence_handle_StepElement_ElementMaterial): void;
+Prepend(theItem: StepElement_ElementMaterial): void;
+Prepend(theSeq: NCollection_Sequence_handle_StepElement_ElementMaterial): void;
 
-// TryBind binds key to value only if key is not yet bound
-TryBind(theKey: BRepGraph_ItemId, theItem: BRepGraph_ItemId): boolean;
-// theKey: key to add
-// theItem: item to bind if key is not yet bound
+InsertBefore(theIndex: number, theItem: StepElement_ElementMaterial): void;
+InsertBefore(theIndex: number, theSeq: NCollection_Sequence_handle_StepElement_ElementMaterial): void;
+InsertBefore(theIndex: number, theItem: StepElement_ElementMaterial): void;
+InsertBefore(theIndex: number, theSeq: NCollection_Sequence_handle_StepElement_ElementMaterial): void;
 
-// Bound binds key to value and returns reference to the value
-Bound(theKey: BRepGraph_ItemId, theItem: BRepGraph_ItemId): BRepGraph_ItemId;
-// theKey: key to add/update
-// theItem: new item
+InsertAfter(theIndex: number, theSeq: NCollection_Sequence_handle_StepElement_ElementMaterial): void;
+InsertAfter(theIndex: number, theItem: StepElement_ElementMaterial): void;
+InsertAfter(theIndex: number, theSeq: NCollection_Sequence_handle_StepElement_ElementMaterial): void;
+InsertAfter(theIndex: number, theItem: StepElement_ElementMaterial): void;
 
-// TryBound binds key to value only if key is not yet bound
-TryBound(theKey: BRepGraph_ItemId, theItem: BRepGraph_ItemId): BRepGraph_ItemId;
-// theKey: key to add
-// theItem: item to bind if key is not yet bound
+Split(theIndex: number, theSeq: NCollection_Sequence_handle_StepElement_ElementMaterial): void;
 
-// Remove key from map
-UnBind(theKey: BRepGraph_ItemId): boolean;
+First(): StepElement_ElementMaterial;
 
-// Clear all elements
-Clear(doReleaseMemory?: boolean): void;
-// doReleaseMemory: if true, free the internal buffer
+ChangeFirst(): StepElement_ElementMaterial;
 
-// Exchange content with another map
-Exchange(theOther: NCollection_FlatDataMap_BRepGraph_ItemId_BRepGraph_ItemId_NCollection_DefaultHasher_BRepGraph_ItemId): void;
-// theOther: Mutated in place
+Last(): StepElement_ElementMaterial;
 
-// Returns const reference to the hasher
-GetHasher(): unknown;
+ChangeLast(): StepElement_ElementMaterial;
 
-// Reserve capacity for at least theN elements
-reserve(theN: number): void;
+Value(theIndex: number): StepElement_ElementMaterial;
 
-// Reserve capacity for at least theN elements
-Reserve(theN: number): void;
+ChangeValue(theIndex: number): StepElement_ElementMaterial;
 
-// Releases the C++ object
+SetValue(theIndex: number, theItem: StepElement_ElementMaterial): void;
+
+At(theIndex: number): StepElement_ElementMaterial;
+
+ChangeAt(theIndex: number): StepElement_ElementMaterial;
+
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Template class for Handle-managed 1D arrays
-NCollection_HArray1_AppParCurves_ConstraintCouple: declare class NCollection_HArray1_AppParCurves_ConstraintCouple
+NCollection_Sequence_handle_StepFEA_ElementGeometricRelationship: declare class NCollection_Sequence_handle_StepFEA_ElementGeometricRelationship extends NCollection_BaseSequence
 
 constructor
 
-// Returns const reference to the underlying array
-Array1(): NCollection_Array1_AppParCurves_ConstraintCouple;
+static Lower(): number;
 
-// Returns mutable reference to the underlying array
-ChangeArray1(): NCollection_Array1_AppParCurves_ConstraintCouple;
+Upper(): number;
 
-static get_type_name(): string;
+IsEmpty(): boolean;
 
-static get_type_descriptor(): Standard_Type;
+Reverse(): void;
 
-DynamicType(): Standard_Type;
+Exchange(I: number, J: number): void;
 
-// Releases the C++ object
-delete(): void;
+Clear(theAllocator?: NCollection_BaseAllocator): void;
 
-[Symbol.dispose](): void;
+Assign(theOther: NCollection_Sequence_handle_StepFEA_ElementGeometricRelationship): NCollection_Sequence_handle_StepFEA_ElementGeometricRelationship;
 
-// Template class for Handle-managed 1D arrays
-NCollection_HArray1_Bnd_Box: declare class NCollection_HArray1_Bnd_Box
+Remove(theIndex: number): void;
+Remove(theFromIndex: number, theToIndex: number): void;
+Remove(theIndex: number): void;
+Remove(theFromIndex: number, theToIndex: number): void;
 
-constructor
+Append(theItem: StepFEA_ElementGeometricRelationship): void;
+Append(theSeq: NCollection_Sequence_handle_StepFEA_ElementGeometricRelationship): void;
+Append(theItem: StepFEA_ElementGeometricRelationship): void;
+Append(theSeq: NCollection_Sequence_handle_StepFEA_ElementGeometricRelationship): void;
 
-// Returns const reference to the underlying array
-Array1(): NCollection_Array1_Bnd_Box;
+Prepend(theItem: StepFEA_ElementGeometricRelationship): void;
+Prepend(theSeq: NCollection_Sequence_handle_StepFEA_ElementGeometricRelationship): void;
+Prepend(theItem: StepFEA_ElementGeometricRelationship): void;
+Prepend(theSeq: NCollection_Sequence_handle_StepFEA_ElementGeometricRelationship): void;
 
-// Returns mutable reference to the underlying array
-ChangeArray1(): NCollection_Array1_Bnd_Box;
+InsertBefore(theIndex: number, theItem: StepFEA_ElementGeometricRelationship): void;
+InsertBefore(theIndex: number, theSeq: NCollection_Sequence_handle_StepFEA_ElementGeometricRelationship): void;
+InsertBefore(theIndex: number, theItem: StepFEA_ElementGeometricRelationship): void;
+InsertBefore(theIndex: number, theSeq: NCollection_Sequence_handle_StepFEA_ElementGeometricRelationship): void;
 
-static get_type_name(): string;
+InsertAfter(theIndex: number, theSeq: NCollection_Sequence_handle_StepFEA_ElementGeometricRelationship): void;
+InsertAfter(theIndex: number, theItem: StepFEA_ElementGeometricRelationship): void;
+InsertAfter(theIndex: number, theSeq: NCollection_Sequence_handle_StepFEA_ElementGeometricRelationship): void;
+InsertAfter(theIndex: number, theItem: StepFEA_ElementGeometricRelationship): void;
 
-static get_type_descriptor(): Standard_Type;
+Split(theIndex: number, theSeq: NCollection_Sequence_handle_StepFEA_ElementGeometricRelationship): void;
 
-DynamicType(): Standard_Type;
+First(): StepFEA_ElementGeometricRelationship;
 
-// Releases the C++ object
-delete(): void;
+ChangeFirst(): StepFEA_ElementGeometricRelationship;
 
-[Symbol.dispose](): void;
+Last(): StepFEA_ElementGeometricRelationship;
 
-// Template class for Handle-managed 1D arrays
-NCollection_HArray1_ChFiDS_CircSection: declare class NCollection_HArray1_ChFiDS_CircSection
+ChangeLast(): StepFEA_ElementGeometricRelationship;
 
-constructor
+Value(theIndex: number): StepFEA_ElementGeometricRelationship;
 
-// Returns const reference to the underlying array
-Array1(): NCollection_Array1_ChFiDS_CircSection;
+ChangeValue(theIndex: number): StepFEA_ElementGeometricRelationship;
 
-// Returns mutable reference to the underlying array
-ChangeArray1(): NCollection_Array1_ChFiDS_CircSection;
+SetValue(theIndex: number, theItem: StepFEA_ElementGeometricRelationship): void;
 
-static get_type_name(): string;
+At(theIndex: number): StepFEA_ElementGeometricRelationship;
 
-static get_type_descriptor(): Standard_Type;
+ChangeAt(theIndex: number): StepFEA_ElementGeometricRelationship;
 
-DynamicType(): Standard_Type;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// Template class for Handle-managed 1D arrays
-NCollection_HArray1_HLRAlgo_PolyHidingData: declare class NCollection_HArray1_HLRAlgo_PolyHidingData
-
-constructor
-
-// Returns const reference to the underlying array
-Array1(): NCollection_Array1_HLRAlgo_PolyHidingData;
-
-// Returns mutable reference to the underlying array
-ChangeArray1(): NCollection_Array1_HLRAlgo_PolyHidingData;
-
-static get_type_name(): string;
-
-static get_type_descriptor(): Standard_Type;
-
-DynamicType(): Standard_Type;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// Template class for Handle-managed 1D arrays
-NCollection_HArray1_HLRAlgo_TriangleData: declare class NCollection_HArray1_HLRAlgo_TriangleData
-
-constructor
-
-// Returns const reference to the underlying array
-Array1(): NCollection_Array1_HLRAlgo_TriangleData;
-
-// Returns mutable reference to the underlying array
-ChangeArray1(): NCollection_Array1_HLRAlgo_TriangleData;
-
-static get_type_name(): string;
-
-static get_type_descriptor(): Standard_Type;
-
-DynamicType(): Standard_Type;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// Template class for Handle-managed 1D arrays
-NCollection_HArray1_Poly_Triangle: declare class NCollection_HArray1_Poly_Triangle
-
-constructor
-
-// Returns const reference to the underlying array
-Array1(): NCollection_Array1_Poly_Triangle;
-
-// Returns mutable reference to the underlying array
-ChangeArray1(): NCollection_Array1_Poly_Triangle;
-
-static get_type_name(): string;
-
-static get_type_descriptor(): Standard_Type;
-
-DynamicType(): Standard_Type;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// Template class for Handle-managed 1D arrays
-NCollection_HArray1_StepAP203_ApprovedItem: declare class NCollection_HArray1_StepAP203_ApprovedItem
-
-constructor
-
-// Returns const reference to the underlying array
-Array1(): NCollection_Array1_StepAP203_ApprovedItem;
-
-// Returns mutable reference to the underlying array
-ChangeArray1(): NCollection_Array1_StepAP203_ApprovedItem;
-
-static get_type_name(): string;
-
-static get_type_descriptor(): Standard_Type;
-
-DynamicType(): Standard_Type;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// Template class for Handle-managed 1D arrays
-NCollection_HArray1_StepAP203_CertifiedItem: declare class NCollection_HArray1_StepAP203_CertifiedItem
-
-constructor
-
-// Returns const reference to the underlying array
-Array1(): NCollection_Array1_StepAP203_CertifiedItem;
-
-// Returns mutable reference to the underlying array
-ChangeArray1(): NCollection_Array1_StepAP203_CertifiedItem;
-
-static get_type_name(): string;
-
-static get_type_descriptor(): Standard_Type;
-
-DynamicType(): Standard_Type;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// Template class for Handle-managed 1D arrays
-NCollection_HArray1_StepAP203_ChangeRequestItem: declare class NCollection_HArray1_StepAP203_ChangeRequestItem
-
-constructor
-
-// Returns const reference to the underlying array
-Array1(): NCollection_Array1_StepAP203_ChangeRequestItem;
-
-// Returns mutable reference to the underlying array
-ChangeArray1(): NCollection_Array1_StepAP203_ChangeRequestItem;
-
-static get_type_name(): string;
-
-static get_type_descriptor(): Standard_Type;
-
-DynamicType(): Standard_Type;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// Template class for Handle-managed 1D arrays
-NCollection_HArray1_StepAP203_ClassifiedItem: declare class NCollection_HArray1_StepAP203_ClassifiedItem
-
-constructor
-
-// Returns const reference to the underlying array
-Array1(): NCollection_Array1_StepAP203_ClassifiedItem;
-
-// Returns mutable reference to the underlying array
-ChangeArray1(): NCollection_Array1_StepAP203_ClassifiedItem;
-
-static get_type_name(): string;
-
-static get_type_descriptor(): Standard_Type;
-
-DynamicType(): Standard_Type;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// Template class for Handle-managed 1D arrays
-NCollection_HArray1_StepAP203_ContractedItem: declare class NCollection_HArray1_StepAP203_ContractedItem
-
-constructor
-
-// Returns const reference to the underlying array
-Array1(): NCollection_Array1_StepAP203_ContractedItem;
-
-// Returns mutable reference to the underlying array
-ChangeArray1(): NCollection_Array1_StepAP203_ContractedItem;
-
-static get_type_name(): string;
-
-static get_type_descriptor(): Standard_Type;
-
-DynamicType(): Standard_Type;
-
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;

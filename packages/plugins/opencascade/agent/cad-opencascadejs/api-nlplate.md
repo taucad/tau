@@ -2,7 +2,6 @@
 
 9 top-level symbols. Signatures are verbatim typescript.
 
-// define a PinPoint geometric Constraint used to load a Non Linear Plate
 NLPlate_HGPPConstraint: declare class NLPlate_HGPPConstraint extends Standard_Transient
 
 SetUVFreeSliding(UVFree: boolean): void;
@@ -57,12 +56,10 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// define a PinPoint G0 Constraint used to load a Non Linear Plate
 NLPlate_HPG0Constraint: declare class NLPlate_HPG0Constraint extends NLPlate_HGPPConstraint
 
 constructor
@@ -87,12 +84,10 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// define a PinPoint G0+G1 Constraint used to load a Non Linear Plate
 NLPlate_HPG0G1Constraint: declare class NLPlate_HPG0G1Constraint extends NLPlate_HPG0Constraint
 
 constructor
@@ -111,12 +106,10 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// define a PinPoint G0+G2 Constraint used to load a Non Linear Plate
 NLPlate_HPG0G2Constraint: declare class NLPlate_HPG0G2Constraint extends NLPlate_HPG0G1Constraint
 
 constructor
@@ -131,12 +124,10 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// define a PinPoint G0+G3 Constraint used to load a Non Linear Plate
 NLPlate_HPG0G3Constraint: declare class NLPlate_HPG0G3Constraint extends NLPlate_HPG0G2Constraint
 
 constructor
@@ -151,12 +142,10 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// define a PinPoint (no G0) G1 Constraint used to load a Non Linear Plate
 NLPlate_HPG1Constraint: declare class NLPlate_HPG1Constraint extends NLPlate_HGPPConstraint
 
 constructor
@@ -181,12 +170,10 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// define a PinPoint (no G0) G2 Constraint used to load a Non Linear Plate
 NLPlate_HPG2Constraint: declare class NLPlate_HPG2Constraint extends NLPlate_HPG1Constraint
 
 constructor
@@ -201,12 +188,10 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// define a PinPoint (no G0) G3 Constraint used to load a Non Linear Plate
 NLPlate_HPG3Constraint: declare class NLPlate_HPG3Constraint extends NLPlate_HPG2Constraint
 
 constructor
@@ -221,7 +206,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -238,12 +222,10 @@ Solve2(ord?: number, InitialConsraintOrder?: number): void;
 
 IncrementalSolve(ord?: number, InitialConsraintOrder?: number, NbIncrements?: number, UVSliding?: boolean): void;
 
-// returns True if all has been correctly done
 IsDone(): boolean;
 
 destroy(): void;
 
-// reset the Plate in the initial state ( same as after Create((Surface))
 Init(): void;
 
 Evaluate(point2d: gp_XY): gp_XYZ;
@@ -256,7 +238,6 @@ ConstraintsSliding(NbIterations?: number): void;
 
 MaxActiveConstraintOrder(): number;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;

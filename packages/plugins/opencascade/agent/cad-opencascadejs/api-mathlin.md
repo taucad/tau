@@ -18,7 +18,6 @@ Determinant: number | null | undefined
 
 IsDone(): boolean;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -37,7 +36,6 @@ Dimension: number
 
 IsDone(): boolean;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -58,7 +56,6 @@ Sign: number
 
 IsDone(): boolean;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -77,7 +74,6 @@ Rank: number
 
 IsDone(): boolean;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -100,7 +96,6 @@ Rank: number
 
 IsDone(): boolean;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -121,7 +116,6 @@ Rank: number
 
 IsDone(): boolean;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;

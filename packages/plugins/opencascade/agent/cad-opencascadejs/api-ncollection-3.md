@@ -1,643 +1,773 @@
 # libcascade — NCollection (3)
 
-8 top-level symbols. Signatures are verbatim typescript.
+14 top-level symbols. Signatures are verbatim typescript.
 
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_Bnd_Box: declare class NCollection_Array1_Bnd_Box
+NCollection_Array1_StepAP203_PersonOrganizationItem: declare class NCollection_Array1_StepAP203_PersonOrganizationItem
 
 constructor
 
-// Initialise the items with theValue
-Init(theValue: Bnd_Box): void;
+Init(theValue: StepAP203_PersonOrganizationItem): void;
 
-// Size query
 Size(): number;
 
-// Length query (legacy int-returning API)
 Length(): number;
 
-// Return TRUE if array has zero length
 IsEmpty(): boolean;
 
-// Lower bound
 Lower(): number;
 
-// Upper bound
 Upper(): number;
 
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_Bnd_Box): NCollection_Array1_Bnd_Box;
+Assign(theOther: NCollection_Array1_StepAP203_PersonOrganizationItem): NCollection_Array1_StepAP203_PersonOrganizationItem;
 
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_Bnd_Box): NCollection_Array1_Bnd_Box;
+CopyValues(theOther: NCollection_Array1_StepAP203_PersonOrganizationItem): NCollection_Array1_StepAP203_PersonOrganizationItem;
 
-// Move assignment
-Move(theOther: NCollection_Array1_Bnd_Box): NCollection_Array1_Bnd_Box;
-// theOther: Mutated in place
+Move(theOther: NCollection_Array1_StepAP203_PersonOrganizationItem): NCollection_Array1_StepAP203_PersonOrganizationItem;
 
-First(): Bnd_Box;
+First(): StepAP203_PersonOrganizationItem;
 
-ChangeFirst(): Bnd_Box;
+ChangeFirst(): StepAP203_PersonOrganizationItem;
 
-Last(): Bnd_Box;
+Last(): StepAP203_PersonOrganizationItem;
 
-ChangeLast(): Bnd_Box;
+ChangeLast(): StepAP203_PersonOrganizationItem;
 
-// Constant value access
-Value(theIndex: number): Bnd_Box;
+Value(theIndex: number): StepAP203_PersonOrganizationItem;
 
-// Variable value access
-ChangeValue(theIndex: number): Bnd_Box;
+ChangeValue(theIndex: number): StepAP203_PersonOrganizationItem;
 
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): Bnd_Box;
-// theIndex: 0-based index in [0, `Size()`-1]
+At(theIndex: number): StepAP203_PersonOrganizationItem;
 
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): Bnd_Box;
-// theIndex: 0-based index in [0, `Size()`-1]
+ChangeAt(theIndex: number): StepAP203_PersonOrganizationItem;
 
-// Set value
-SetValue(theIndex: number, theItem: Bnd_Box): void;
+SetValue(theIndex: number, theItem: StepAP203_PersonOrganizationItem): void;
 
-// Changes the lowest bound
 UpdateLowerBound(theLower: number): void;
 
-// Changes the upper bound
 UpdateUpperBound(theUpper: number): void;
 
-// Resizes the array to specified bounds
 Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
 Resize(theSize: number, theToCopyData: boolean): void;
 Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
 Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
 
 IsDeletable(): boolean;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_ChFiDS_CircSection: declare class NCollection_Array1_ChFiDS_CircSection
+NCollection_Array1_StepAP203_SpecifiedItem: declare class NCollection_Array1_StepAP203_SpecifiedItem
 
 constructor
 
-// Initialise the items with theValue
-Init(theValue: ChFiDS_CircSection): void;
+Init(theValue: StepAP203_SpecifiedItem): void;
 
-// Size query
 Size(): number;
 
-// Length query (legacy int-returning API)
 Length(): number;
 
-// Return TRUE if array has zero length
 IsEmpty(): boolean;
 
-// Lower bound
 Lower(): number;
 
-// Upper bound
 Upper(): number;
 
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_ChFiDS_CircSection): NCollection_Array1_ChFiDS_CircSection;
+Assign(theOther: NCollection_Array1_StepAP203_SpecifiedItem): NCollection_Array1_StepAP203_SpecifiedItem;
 
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_ChFiDS_CircSection): NCollection_Array1_ChFiDS_CircSection;
+CopyValues(theOther: NCollection_Array1_StepAP203_SpecifiedItem): NCollection_Array1_StepAP203_SpecifiedItem;
 
-// Move assignment
-Move(theOther: NCollection_Array1_ChFiDS_CircSection): NCollection_Array1_ChFiDS_CircSection;
-// theOther: Mutated in place
+Move(theOther: NCollection_Array1_StepAP203_SpecifiedItem): NCollection_Array1_StepAP203_SpecifiedItem;
 
-First(): ChFiDS_CircSection;
+First(): StepAP203_SpecifiedItem;
 
-ChangeFirst(): ChFiDS_CircSection;
+ChangeFirst(): StepAP203_SpecifiedItem;
 
-Last(): ChFiDS_CircSection;
+Last(): StepAP203_SpecifiedItem;
 
-ChangeLast(): ChFiDS_CircSection;
+ChangeLast(): StepAP203_SpecifiedItem;
 
-// Constant value access
-Value(theIndex: number): ChFiDS_CircSection;
+Value(theIndex: number): StepAP203_SpecifiedItem;
 
-// Variable value access
-ChangeValue(theIndex: number): ChFiDS_CircSection;
+ChangeValue(theIndex: number): StepAP203_SpecifiedItem;
 
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): ChFiDS_CircSection;
-// theIndex: 0-based index in [0, `Size()`-1]
+At(theIndex: number): StepAP203_SpecifiedItem;
 
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): ChFiDS_CircSection;
-// theIndex: 0-based index in [0, `Size()`-1]
+ChangeAt(theIndex: number): StepAP203_SpecifiedItem;
 
-// Set value
-SetValue(theIndex: number, theItem: ChFiDS_CircSection): void;
+SetValue(theIndex: number, theItem: StepAP203_SpecifiedItem): void;
 
-// Changes the lowest bound
 UpdateLowerBound(theLower: number): void;
 
-// Changes the upper bound
 UpdateUpperBound(theUpper: number): void;
 
-// Resizes the array to specified bounds
 Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
 Resize(theSize: number, theToCopyData: boolean): void;
 Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
 Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
 
 IsDeletable(): boolean;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_HLRAlgo_PolyHidingData: declare class NCollection_Array1_HLRAlgo_PolyHidingData
+NCollection_Array1_StepAP203_StartRequestItem: declare class NCollection_Array1_StepAP203_StartRequestItem
 
 constructor
 
-// Initialise the items with theValue
-Init(theValue: HLRAlgo_PolyHidingData): void;
+Init(theValue: StepAP203_StartRequestItem): void;
 
-// Size query
 Size(): number;
 
-// Length query (legacy int-returning API)
 Length(): number;
 
-// Return TRUE if array has zero length
 IsEmpty(): boolean;
 
-// Lower bound
 Lower(): number;
 
-// Upper bound
 Upper(): number;
 
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_HLRAlgo_PolyHidingData): NCollection_Array1_HLRAlgo_PolyHidingData;
+Assign(theOther: NCollection_Array1_StepAP203_StartRequestItem): NCollection_Array1_StepAP203_StartRequestItem;
 
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_HLRAlgo_PolyHidingData): NCollection_Array1_HLRAlgo_PolyHidingData;
+CopyValues(theOther: NCollection_Array1_StepAP203_StartRequestItem): NCollection_Array1_StepAP203_StartRequestItem;
 
-// Move assignment
-Move(theOther: NCollection_Array1_HLRAlgo_PolyHidingData): NCollection_Array1_HLRAlgo_PolyHidingData;
-// theOther: Mutated in place
+Move(theOther: NCollection_Array1_StepAP203_StartRequestItem): NCollection_Array1_StepAP203_StartRequestItem;
 
-First(): HLRAlgo_PolyHidingData;
+First(): StepAP203_StartRequestItem;
 
-ChangeFirst(): HLRAlgo_PolyHidingData;
+ChangeFirst(): StepAP203_StartRequestItem;
 
-Last(): HLRAlgo_PolyHidingData;
+Last(): StepAP203_StartRequestItem;
 
-ChangeLast(): HLRAlgo_PolyHidingData;
+ChangeLast(): StepAP203_StartRequestItem;
 
-// Constant value access
-Value(theIndex: number): HLRAlgo_PolyHidingData;
+Value(theIndex: number): StepAP203_StartRequestItem;
 
-// Variable value access
-ChangeValue(theIndex: number): HLRAlgo_PolyHidingData;
+ChangeValue(theIndex: number): StepAP203_StartRequestItem;
 
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): HLRAlgo_PolyHidingData;
-// theIndex: 0-based index in [0, `Size()`-1]
+At(theIndex: number): StepAP203_StartRequestItem;
 
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): HLRAlgo_PolyHidingData;
-// theIndex: 0-based index in [0, `Size()`-1]
+ChangeAt(theIndex: number): StepAP203_StartRequestItem;
 
-// Set value
-SetValue(theIndex: number, theItem: HLRAlgo_PolyHidingData): void;
+SetValue(theIndex: number, theItem: StepAP203_StartRequestItem): void;
 
-// Changes the lowest bound
 UpdateLowerBound(theLower: number): void;
 
-// Changes the upper bound
 UpdateUpperBound(theUpper: number): void;
 
-// Resizes the array to specified bounds
 Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
 Resize(theSize: number, theToCopyData: boolean): void;
 Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
 Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
 
 IsDeletable(): boolean;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_HLRAlgo_TriangleData: declare class NCollection_Array1_HLRAlgo_TriangleData
+NCollection_Array1_StepAP203_WorkItem: declare class NCollection_Array1_StepAP203_WorkItem
 
 constructor
 
-// Initialise the items with theValue
-Init(theValue: HLRAlgo_TriangleData): void;
+Init(theValue: StepAP203_WorkItem): void;
 
-// Size query
 Size(): number;
 
-// Length query (legacy int-returning API)
 Length(): number;
 
-// Return TRUE if array has zero length
 IsEmpty(): boolean;
 
-// Lower bound
 Lower(): number;
 
-// Upper bound
 Upper(): number;
 
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_HLRAlgo_TriangleData): NCollection_Array1_HLRAlgo_TriangleData;
+Assign(theOther: NCollection_Array1_StepAP203_WorkItem): NCollection_Array1_StepAP203_WorkItem;
 
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_HLRAlgo_TriangleData): NCollection_Array1_HLRAlgo_TriangleData;
+CopyValues(theOther: NCollection_Array1_StepAP203_WorkItem): NCollection_Array1_StepAP203_WorkItem;
 
-// Move assignment
-Move(theOther: NCollection_Array1_HLRAlgo_TriangleData): NCollection_Array1_HLRAlgo_TriangleData;
-// theOther: Mutated in place
+Move(theOther: NCollection_Array1_StepAP203_WorkItem): NCollection_Array1_StepAP203_WorkItem;
 
-First(): HLRAlgo_TriangleData;
+First(): StepAP203_WorkItem;
 
-ChangeFirst(): HLRAlgo_TriangleData;
+ChangeFirst(): StepAP203_WorkItem;
 
-Last(): HLRAlgo_TriangleData;
+Last(): StepAP203_WorkItem;
 
-ChangeLast(): HLRAlgo_TriangleData;
+ChangeLast(): StepAP203_WorkItem;
 
-// Constant value access
-Value(theIndex: number): HLRAlgo_TriangleData;
+Value(theIndex: number): StepAP203_WorkItem;
 
-// Variable value access
-ChangeValue(theIndex: number): HLRAlgo_TriangleData;
+ChangeValue(theIndex: number): StepAP203_WorkItem;
 
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): HLRAlgo_TriangleData;
-// theIndex: 0-based index in [0, `Size()`-1]
+At(theIndex: number): StepAP203_WorkItem;
 
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): HLRAlgo_TriangleData;
-// theIndex: 0-based index in [0, `Size()`-1]
+ChangeAt(theIndex: number): StepAP203_WorkItem;
 
-// Set value
-SetValue(theIndex: number, theItem: HLRAlgo_TriangleData): void;
+SetValue(theIndex: number, theItem: StepAP203_WorkItem): void;
 
-// Changes the lowest bound
 UpdateLowerBound(theLower: number): void;
 
-// Changes the upper bound
 UpdateUpperBound(theUpper: number): void;
 
-// Resizes the array to specified bounds
 Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
 Resize(theSize: number, theToCopyData: boolean): void;
 Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
 Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
 
 IsDeletable(): boolean;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_NCollection_Vec3_float: declare class NCollection_Array1_NCollection_Vec3_float
+NCollection_Array1_StepAP214_ApprovalItem: declare class NCollection_Array1_StepAP214_ApprovalItem
 
 constructor
 
-// Initialise the items with theValue
-Init(theValue: unknown): void;
+Init(theValue: StepAP214_ApprovalItem): void;
 
-// Size query
 Size(): number;
 
-// Length query (legacy int-returning API)
 Length(): number;
 
-// Return TRUE if array has zero length
 IsEmpty(): boolean;
 
-// Lower bound
 Lower(): number;
 
-// Upper bound
 Upper(): number;
 
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_NCollection_Vec3_float): NCollection_Array1_NCollection_Vec3_float;
+Assign(theOther: NCollection_Array1_StepAP214_ApprovalItem): NCollection_Array1_StepAP214_ApprovalItem;
 
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_NCollection_Vec3_float): NCollection_Array1_NCollection_Vec3_float;
+CopyValues(theOther: NCollection_Array1_StepAP214_ApprovalItem): NCollection_Array1_StepAP214_ApprovalItem;
 
-// Move assignment
-Move(theOther: NCollection_Array1_NCollection_Vec3_float): NCollection_Array1_NCollection_Vec3_float;
-// theOther: Mutated in place
+Move(theOther: NCollection_Array1_StepAP214_ApprovalItem): NCollection_Array1_StepAP214_ApprovalItem;
 
-First(): unknown;
+First(): StepAP214_ApprovalItem;
 
-ChangeFirst(): unknown;
+ChangeFirst(): StepAP214_ApprovalItem;
 
-Last(): unknown;
+Last(): StepAP214_ApprovalItem;
 
-ChangeLast(): unknown;
+ChangeLast(): StepAP214_ApprovalItem;
 
-// Constant value access
-Value(theIndex: number): unknown;
+Value(theIndex: number): StepAP214_ApprovalItem;
 
-// Variable value access
-ChangeValue(theIndex: number): unknown;
+ChangeValue(theIndex: number): StepAP214_ApprovalItem;
 
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): unknown;
-// theIndex: 0-based index in [0, `Size()`-1]
+At(theIndex: number): StepAP214_ApprovalItem;
 
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): unknown;
-// theIndex: 0-based index in [0, `Size()`-1]
+ChangeAt(theIndex: number): StepAP214_ApprovalItem;
 
-// Set value
-SetValue(theIndex: number, theItem: unknown): void;
+SetValue(theIndex: number, theItem: StepAP214_ApprovalItem): void;
 
-// Changes the lowest bound
 UpdateLowerBound(theLower: number): void;
 
-// Changes the upper bound
 UpdateUpperBound(theUpper: number): void;
 
-// Resizes the array to specified bounds
 Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
 Resize(theSize: number, theToCopyData: boolean): void;
 Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
 Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
 
 IsDeletable(): boolean;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_Plate_PinpointConstraint: declare class NCollection_Array1_Plate_PinpointConstraint
+NCollection_Array1_StepAP214_AutoDesignDateAndPersonItem: declare class NCollection_Array1_StepAP214_AutoDesignDateAndPersonItem
 
 constructor
 
-// Initialise the items with theValue
-Init(theValue: Plate_PinpointConstraint): void;
+Init(theValue: StepAP214_AutoDesignDateAndPersonItem): void;
 
-// Size query
 Size(): number;
 
-// Length query (legacy int-returning API)
 Length(): number;
 
-// Return TRUE if array has zero length
 IsEmpty(): boolean;
 
-// Lower bound
 Lower(): number;
 
-// Upper bound
 Upper(): number;
 
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_Plate_PinpointConstraint): NCollection_Array1_Plate_PinpointConstraint;
+Assign(theOther: NCollection_Array1_StepAP214_AutoDesignDateAndPersonItem): NCollection_Array1_StepAP214_AutoDesignDateAndPersonItem;
 
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_Plate_PinpointConstraint): NCollection_Array1_Plate_PinpointConstraint;
+CopyValues(theOther: NCollection_Array1_StepAP214_AutoDesignDateAndPersonItem): NCollection_Array1_StepAP214_AutoDesignDateAndPersonItem;
 
-// Move assignment
-Move(theOther: NCollection_Array1_Plate_PinpointConstraint): NCollection_Array1_Plate_PinpointConstraint;
-// theOther: Mutated in place
+Move(theOther: NCollection_Array1_StepAP214_AutoDesignDateAndPersonItem): NCollection_Array1_StepAP214_AutoDesignDateAndPersonItem;
 
-First(): Plate_PinpointConstraint;
+First(): StepAP214_AutoDesignDateAndPersonItem;
 
-ChangeFirst(): Plate_PinpointConstraint;
+ChangeFirst(): StepAP214_AutoDesignDateAndPersonItem;
 
-Last(): Plate_PinpointConstraint;
+Last(): StepAP214_AutoDesignDateAndPersonItem;
 
-ChangeLast(): Plate_PinpointConstraint;
+ChangeLast(): StepAP214_AutoDesignDateAndPersonItem;
 
-// Constant value access
-Value(theIndex: number): Plate_PinpointConstraint;
+Value(theIndex: number): StepAP214_AutoDesignDateAndPersonItem;
 
-// Variable value access
-ChangeValue(theIndex: number): Plate_PinpointConstraint;
+ChangeValue(theIndex: number): StepAP214_AutoDesignDateAndPersonItem;
 
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): Plate_PinpointConstraint;
-// theIndex: 0-based index in [0, `Size()`-1]
+At(theIndex: number): StepAP214_AutoDesignDateAndPersonItem;
 
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): Plate_PinpointConstraint;
-// theIndex: 0-based index in [0, `Size()`-1]
+ChangeAt(theIndex: number): StepAP214_AutoDesignDateAndPersonItem;
 
-// Set value
-SetValue(theIndex: number, theItem: Plate_PinpointConstraint): void;
+SetValue(theIndex: number, theItem: StepAP214_AutoDesignDateAndPersonItem): void;
 
-// Changes the lowest bound
 UpdateLowerBound(theLower: number): void;
 
-// Changes the upper bound
 UpdateUpperBound(theUpper: number): void;
 
-// Resizes the array to specified bounds
 Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
 Resize(theSize: number, theToCopyData: boolean): void;
 Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
 Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
 
 IsDeletable(): boolean;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_Poly_Triangle: declare class NCollection_Array1_Poly_Triangle
+NCollection_Array1_StepAP214_AutoDesignDateAndTimeItem: declare class NCollection_Array1_StepAP214_AutoDesignDateAndTimeItem
 
 constructor
 
-// Initialise the items with theValue
-Init(theValue: Poly_Triangle): void;
+Init(theValue: StepAP214_AutoDesignDateAndTimeItem): void;
 
-// Size query
 Size(): number;
 
-// Length query (legacy int-returning API)
 Length(): number;
 
-// Return TRUE if array has zero length
 IsEmpty(): boolean;
 
-// Lower bound
 Lower(): number;
 
-// Upper bound
 Upper(): number;
 
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_Poly_Triangle): NCollection_Array1_Poly_Triangle;
+Assign(theOther: NCollection_Array1_StepAP214_AutoDesignDateAndTimeItem): NCollection_Array1_StepAP214_AutoDesignDateAndTimeItem;
 
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_Poly_Triangle): NCollection_Array1_Poly_Triangle;
+CopyValues(theOther: NCollection_Array1_StepAP214_AutoDesignDateAndTimeItem): NCollection_Array1_StepAP214_AutoDesignDateAndTimeItem;
 
-// Move assignment
-Move(theOther: NCollection_Array1_Poly_Triangle): NCollection_Array1_Poly_Triangle;
-// theOther: Mutated in place
+Move(theOther: NCollection_Array1_StepAP214_AutoDesignDateAndTimeItem): NCollection_Array1_StepAP214_AutoDesignDateAndTimeItem;
 
-First(): Poly_Triangle;
+First(): StepAP214_AutoDesignDateAndTimeItem;
 
-ChangeFirst(): Poly_Triangle;
+ChangeFirst(): StepAP214_AutoDesignDateAndTimeItem;
 
-Last(): Poly_Triangle;
+Last(): StepAP214_AutoDesignDateAndTimeItem;
 
-ChangeLast(): Poly_Triangle;
+ChangeLast(): StepAP214_AutoDesignDateAndTimeItem;
 
-// Constant value access
-Value(theIndex: number): Poly_Triangle;
+Value(theIndex: number): StepAP214_AutoDesignDateAndTimeItem;
 
-// Variable value access
-ChangeValue(theIndex: number): Poly_Triangle;
+ChangeValue(theIndex: number): StepAP214_AutoDesignDateAndTimeItem;
 
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): Poly_Triangle;
-// theIndex: 0-based index in [0, `Size()`-1]
+At(theIndex: number): StepAP214_AutoDesignDateAndTimeItem;
 
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): Poly_Triangle;
-// theIndex: 0-based index in [0, `Size()`-1]
+ChangeAt(theIndex: number): StepAP214_AutoDesignDateAndTimeItem;
 
-// Set value
-SetValue(theIndex: number, theItem: Poly_Triangle): void;
+SetValue(theIndex: number, theItem: StepAP214_AutoDesignDateAndTimeItem): void;
 
-// Changes the lowest bound
 UpdateLowerBound(theLower: number): void;
 
-// Changes the upper bound
 UpdateUpperBound(theUpper: number): void;
 
-// Resizes the array to specified bounds
 Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
 Resize(theSize: number, theToCopyData: boolean): void;
 Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
 Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
 
 IsDeletable(): boolean;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_StepAP203_ApprovedItem: declare class NCollection_Array1_StepAP203_ApprovedItem
+NCollection_Array1_StepAP214_AutoDesignDatedItem: declare class NCollection_Array1_StepAP214_AutoDesignDatedItem
 
 constructor
 
-// Initialise the items with theValue
-Init(theValue: StepAP203_ApprovedItem): void;
+Init(theValue: StepAP214_AutoDesignDatedItem): void;
 
-// Size query
 Size(): number;
 
-// Length query (legacy int-returning API)
 Length(): number;
 
-// Return TRUE if array has zero length
 IsEmpty(): boolean;
 
-// Lower bound
 Lower(): number;
 
-// Upper bound
 Upper(): number;
 
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_StepAP203_ApprovedItem): NCollection_Array1_StepAP203_ApprovedItem;
+Assign(theOther: NCollection_Array1_StepAP214_AutoDesignDatedItem): NCollection_Array1_StepAP214_AutoDesignDatedItem;
 
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_StepAP203_ApprovedItem): NCollection_Array1_StepAP203_ApprovedItem;
+CopyValues(theOther: NCollection_Array1_StepAP214_AutoDesignDatedItem): NCollection_Array1_StepAP214_AutoDesignDatedItem;
 
-// Move assignment
-Move(theOther: NCollection_Array1_StepAP203_ApprovedItem): NCollection_Array1_StepAP203_ApprovedItem;
-// theOther: Mutated in place
+Move(theOther: NCollection_Array1_StepAP214_AutoDesignDatedItem): NCollection_Array1_StepAP214_AutoDesignDatedItem;
 
-First(): StepAP203_ApprovedItem;
+First(): StepAP214_AutoDesignDatedItem;
 
-ChangeFirst(): StepAP203_ApprovedItem;
+ChangeFirst(): StepAP214_AutoDesignDatedItem;
 
-Last(): StepAP203_ApprovedItem;
+Last(): StepAP214_AutoDesignDatedItem;
 
-ChangeLast(): StepAP203_ApprovedItem;
+ChangeLast(): StepAP214_AutoDesignDatedItem;
 
-// Constant value access
-Value(theIndex: number): StepAP203_ApprovedItem;
+Value(theIndex: number): StepAP214_AutoDesignDatedItem;
 
-// Variable value access
-ChangeValue(theIndex: number): StepAP203_ApprovedItem;
+ChangeValue(theIndex: number): StepAP214_AutoDesignDatedItem;
 
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): StepAP203_ApprovedItem;
-// theIndex: 0-based index in [0, `Size()`-1]
+At(theIndex: number): StepAP214_AutoDesignDatedItem;
 
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): StepAP203_ApprovedItem;
-// theIndex: 0-based index in [0, `Size()`-1]
+ChangeAt(theIndex: number): StepAP214_AutoDesignDatedItem;
 
-// Set value
-SetValue(theIndex: number, theItem: StepAP203_ApprovedItem): void;
+SetValue(theIndex: number, theItem: StepAP214_AutoDesignDatedItem): void;
 
-// Changes the lowest bound
 UpdateLowerBound(theLower: number): void;
 
-// Changes the upper bound
 UpdateUpperBound(theUpper: number): void;
 
-// Resizes the array to specified bounds
 Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
 Resize(theSize: number, theToCopyData: boolean): void;
 Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
 Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
 
 IsDeletable(): boolean;
 
-// Releases the C++ object
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_Array1_StepAP214_AutoDesignGeneralOrgItem: declare class NCollection_Array1_StepAP214_AutoDesignGeneralOrgItem
+
+constructor
+
+Init(theValue: StepAP214_AutoDesignGeneralOrgItem): void;
+
+Size(): number;
+
+Length(): number;
+
+IsEmpty(): boolean;
+
+Lower(): number;
+
+Upper(): number;
+
+Assign(theOther: NCollection_Array1_StepAP214_AutoDesignGeneralOrgItem): NCollection_Array1_StepAP214_AutoDesignGeneralOrgItem;
+
+CopyValues(theOther: NCollection_Array1_StepAP214_AutoDesignGeneralOrgItem): NCollection_Array1_StepAP214_AutoDesignGeneralOrgItem;
+
+Move(theOther: NCollection_Array1_StepAP214_AutoDesignGeneralOrgItem): NCollection_Array1_StepAP214_AutoDesignGeneralOrgItem;
+
+First(): StepAP214_AutoDesignGeneralOrgItem;
+
+ChangeFirst(): StepAP214_AutoDesignGeneralOrgItem;
+
+Last(): StepAP214_AutoDesignGeneralOrgItem;
+
+ChangeLast(): StepAP214_AutoDesignGeneralOrgItem;
+
+Value(theIndex: number): StepAP214_AutoDesignGeneralOrgItem;
+
+ChangeValue(theIndex: number): StepAP214_AutoDesignGeneralOrgItem;
+
+At(theIndex: number): StepAP214_AutoDesignGeneralOrgItem;
+
+ChangeAt(theIndex: number): StepAP214_AutoDesignGeneralOrgItem;
+
+SetValue(theIndex: number, theItem: StepAP214_AutoDesignGeneralOrgItem): void;
+
+UpdateLowerBound(theLower: number): void;
+
+UpdateUpperBound(theUpper: number): void;
+
+Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
+Resize(theSize: number, theToCopyData: boolean): void;
+Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
+Resize(theSize: number, theToCopyData: boolean): void;
+
+IsDeletable(): boolean;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_Array1_StepAP214_AutoDesignGroupedItem: declare class NCollection_Array1_StepAP214_AutoDesignGroupedItem
+
+constructor
+
+Init(theValue: StepAP214_AutoDesignGroupedItem): void;
+
+Size(): number;
+
+Length(): number;
+
+IsEmpty(): boolean;
+
+Lower(): number;
+
+Upper(): number;
+
+Assign(theOther: NCollection_Array1_StepAP214_AutoDesignGroupedItem): NCollection_Array1_StepAP214_AutoDesignGroupedItem;
+
+CopyValues(theOther: NCollection_Array1_StepAP214_AutoDesignGroupedItem): NCollection_Array1_StepAP214_AutoDesignGroupedItem;
+
+Move(theOther: NCollection_Array1_StepAP214_AutoDesignGroupedItem): NCollection_Array1_StepAP214_AutoDesignGroupedItem;
+
+First(): StepAP214_AutoDesignGroupedItem;
+
+ChangeFirst(): StepAP214_AutoDesignGroupedItem;
+
+Last(): StepAP214_AutoDesignGroupedItem;
+
+ChangeLast(): StepAP214_AutoDesignGroupedItem;
+
+Value(theIndex: number): StepAP214_AutoDesignGroupedItem;
+
+ChangeValue(theIndex: number): StepAP214_AutoDesignGroupedItem;
+
+At(theIndex: number): StepAP214_AutoDesignGroupedItem;
+
+ChangeAt(theIndex: number): StepAP214_AutoDesignGroupedItem;
+
+SetValue(theIndex: number, theItem: StepAP214_AutoDesignGroupedItem): void;
+
+UpdateLowerBound(theLower: number): void;
+
+UpdateUpperBound(theUpper: number): void;
+
+Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
+Resize(theSize: number, theToCopyData: boolean): void;
+Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
+Resize(theSize: number, theToCopyData: boolean): void;
+
+IsDeletable(): boolean;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_Array1_StepAP214_AutoDesignPresentedItemSelect: declare class NCollection_Array1_StepAP214_AutoDesignPresentedItemSelect
+
+constructor
+
+Init(theValue: StepAP214_AutoDesignPresentedItemSelect): void;
+
+Size(): number;
+
+Length(): number;
+
+IsEmpty(): boolean;
+
+Lower(): number;
+
+Upper(): number;
+
+Assign(theOther: NCollection_Array1_StepAP214_AutoDesignPresentedItemSelect): NCollection_Array1_StepAP214_AutoDesignPresentedItemSelect;
+
+CopyValues(theOther: NCollection_Array1_StepAP214_AutoDesignPresentedItemSelect): NCollection_Array1_StepAP214_AutoDesignPresentedItemSelect;
+
+Move(theOther: NCollection_Array1_StepAP214_AutoDesignPresentedItemSelect): NCollection_Array1_StepAP214_AutoDesignPresentedItemSelect;
+
+First(): StepAP214_AutoDesignPresentedItemSelect;
+
+ChangeFirst(): StepAP214_AutoDesignPresentedItemSelect;
+
+Last(): StepAP214_AutoDesignPresentedItemSelect;
+
+ChangeLast(): StepAP214_AutoDesignPresentedItemSelect;
+
+Value(theIndex: number): StepAP214_AutoDesignPresentedItemSelect;
+
+ChangeValue(theIndex: number): StepAP214_AutoDesignPresentedItemSelect;
+
+At(theIndex: number): StepAP214_AutoDesignPresentedItemSelect;
+
+ChangeAt(theIndex: number): StepAP214_AutoDesignPresentedItemSelect;
+
+SetValue(theIndex: number, theItem: StepAP214_AutoDesignPresentedItemSelect): void;
+
+UpdateLowerBound(theLower: number): void;
+
+UpdateUpperBound(theUpper: number): void;
+
+Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
+Resize(theSize: number, theToCopyData: boolean): void;
+Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
+Resize(theSize: number, theToCopyData: boolean): void;
+
+IsDeletable(): boolean;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_Array1_StepAP214_AutoDesignReferencingItem: declare class NCollection_Array1_StepAP214_AutoDesignReferencingItem
+
+constructor
+
+Init(theValue: StepAP214_AutoDesignReferencingItem): void;
+
+Size(): number;
+
+Length(): number;
+
+IsEmpty(): boolean;
+
+Lower(): number;
+
+Upper(): number;
+
+Assign(theOther: NCollection_Array1_StepAP214_AutoDesignReferencingItem): NCollection_Array1_StepAP214_AutoDesignReferencingItem;
+
+CopyValues(theOther: NCollection_Array1_StepAP214_AutoDesignReferencingItem): NCollection_Array1_StepAP214_AutoDesignReferencingItem;
+
+Move(theOther: NCollection_Array1_StepAP214_AutoDesignReferencingItem): NCollection_Array1_StepAP214_AutoDesignReferencingItem;
+
+First(): StepAP214_AutoDesignReferencingItem;
+
+ChangeFirst(): StepAP214_AutoDesignReferencingItem;
+
+Last(): StepAP214_AutoDesignReferencingItem;
+
+ChangeLast(): StepAP214_AutoDesignReferencingItem;
+
+Value(theIndex: number): StepAP214_AutoDesignReferencingItem;
+
+ChangeValue(theIndex: number): StepAP214_AutoDesignReferencingItem;
+
+At(theIndex: number): StepAP214_AutoDesignReferencingItem;
+
+ChangeAt(theIndex: number): StepAP214_AutoDesignReferencingItem;
+
+SetValue(theIndex: number, theItem: StepAP214_AutoDesignReferencingItem): void;
+
+UpdateLowerBound(theLower: number): void;
+
+UpdateUpperBound(theUpper: number): void;
+
+Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
+Resize(theSize: number, theToCopyData: boolean): void;
+Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
+Resize(theSize: number, theToCopyData: boolean): void;
+
+IsDeletable(): boolean;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_Array1_StepAP214_DateAndTimeItem: declare class NCollection_Array1_StepAP214_DateAndTimeItem
+
+constructor
+
+Init(theValue: StepAP214_DateAndTimeItem): void;
+
+Size(): number;
+
+Length(): number;
+
+IsEmpty(): boolean;
+
+Lower(): number;
+
+Upper(): number;
+
+Assign(theOther: NCollection_Array1_StepAP214_DateAndTimeItem): NCollection_Array1_StepAP214_DateAndTimeItem;
+
+CopyValues(theOther: NCollection_Array1_StepAP214_DateAndTimeItem): NCollection_Array1_StepAP214_DateAndTimeItem;
+
+Move(theOther: NCollection_Array1_StepAP214_DateAndTimeItem): NCollection_Array1_StepAP214_DateAndTimeItem;
+
+First(): StepAP214_DateAndTimeItem;
+
+ChangeFirst(): StepAP214_DateAndTimeItem;
+
+Last(): StepAP214_DateAndTimeItem;
+
+ChangeLast(): StepAP214_DateAndTimeItem;
+
+Value(theIndex: number): StepAP214_DateAndTimeItem;
+
+ChangeValue(theIndex: number): StepAP214_DateAndTimeItem;
+
+At(theIndex: number): StepAP214_DateAndTimeItem;
+
+ChangeAt(theIndex: number): StepAP214_DateAndTimeItem;
+
+SetValue(theIndex: number, theItem: StepAP214_DateAndTimeItem): void;
+
+UpdateLowerBound(theLower: number): void;
+
+UpdateUpperBound(theUpper: number): void;
+
+Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
+Resize(theSize: number, theToCopyData: boolean): void;
+Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
+Resize(theSize: number, theToCopyData: boolean): void;
+
+IsDeletable(): boolean;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_Array1_StepAP214_DateItem: declare class NCollection_Array1_StepAP214_DateItem
+
+constructor
+
+Init(theValue: StepAP214_DateItem): void;
+
+Size(): number;
+
+Length(): number;
+
+IsEmpty(): boolean;
+
+Lower(): number;
+
+Upper(): number;
+
+Assign(theOther: NCollection_Array1_StepAP214_DateItem): NCollection_Array1_StepAP214_DateItem;
+
+CopyValues(theOther: NCollection_Array1_StepAP214_DateItem): NCollection_Array1_StepAP214_DateItem;
+
+Move(theOther: NCollection_Array1_StepAP214_DateItem): NCollection_Array1_StepAP214_DateItem;
+
+First(): StepAP214_DateItem;
+
+ChangeFirst(): StepAP214_DateItem;
+
+Last(): StepAP214_DateItem;
+
+ChangeLast(): StepAP214_DateItem;
+
+Value(theIndex: number): StepAP214_DateItem;
+
+ChangeValue(theIndex: number): StepAP214_DateItem;
+
+At(theIndex: number): StepAP214_DateItem;
+
+ChangeAt(theIndex: number): StepAP214_DateItem;
+
+SetValue(theIndex: number, theItem: StepAP214_DateItem): void;
+
+UpdateLowerBound(theLower: number): void;
+
+UpdateUpperBound(theUpper: number): void;
+
+Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
+Resize(theSize: number, theToCopyData: boolean): void;
+Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
+Resize(theSize: number, theToCopyData: boolean): void;
+
+IsDeletable(): boolean;
+
 delete(): void;
 
 [Symbol.dispose](): void;

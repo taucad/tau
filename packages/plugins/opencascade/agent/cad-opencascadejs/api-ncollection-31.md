@@ -1,751 +1,381 @@
 # libcascade — NCollection (31)
 
-34 top-level symbols. Signatures are verbatim typescript.
+43 top-level symbols. Signatures are verbatim typescript.
 
-// Template class for Handle-managed 1D arrays
-NCollection_HArray1_StepShape_ValueQualifier: declare class NCollection_HArray1_StepShape_ValueQualifier
+NCollection_Sequence_handle_XCAFDimTolObjects_DatumObject: declare class NCollection_Sequence_handle_XCAFDimTolObjects_DatumObject extends NCollection_BaseSequence
 
 constructor
 
-// Returns const reference to the underlying array
-Array1(): NCollection_Array1_StepShape_ValueQualifier;
+static Lower(): number;
 
-// Returns mutable reference to the underlying array
-ChangeArray1(): NCollection_Array1_StepShape_ValueQualifier;
+Upper(): number;
 
-static get_type_name(): string;
+IsEmpty(): boolean;
 
-static get_type_descriptor(): Standard_Type;
+Reverse(): void;
 
-DynamicType(): Standard_Type;
+Exchange(I: number, J: number): void;
 
-// Releases the C++ object
+Clear(theAllocator?: NCollection_BaseAllocator): void;
+
+Assign(theOther: NCollection_Sequence_handle_XCAFDimTolObjects_DatumObject): NCollection_Sequence_handle_XCAFDimTolObjects_DatumObject;
+
+Remove(theIndex: number): void;
+Remove(theFromIndex: number, theToIndex: number): void;
+Remove(theIndex: number): void;
+Remove(theFromIndex: number, theToIndex: number): void;
+
+Append(theItem: XCAFDimTolObjects_DatumObject): void;
+Append(theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_DatumObject): void;
+Append(theItem: XCAFDimTolObjects_DatumObject): void;
+Append(theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_DatumObject): void;
+
+Prepend(theItem: XCAFDimTolObjects_DatumObject): void;
+Prepend(theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_DatumObject): void;
+Prepend(theItem: XCAFDimTolObjects_DatumObject): void;
+Prepend(theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_DatumObject): void;
+
+InsertBefore(theIndex: number, theItem: XCAFDimTolObjects_DatumObject): void;
+InsertBefore(theIndex: number, theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_DatumObject): void;
+InsertBefore(theIndex: number, theItem: XCAFDimTolObjects_DatumObject): void;
+InsertBefore(theIndex: number, theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_DatumObject): void;
+
+InsertAfter(theIndex: number, theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_DatumObject): void;
+InsertAfter(theIndex: number, theItem: XCAFDimTolObjects_DatumObject): void;
+InsertAfter(theIndex: number, theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_DatumObject): void;
+InsertAfter(theIndex: number, theItem: XCAFDimTolObjects_DatumObject): void;
+
+Split(theIndex: number, theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_DatumObject): void;
+
+First(): XCAFDimTolObjects_DatumObject;
+
+ChangeFirst(): XCAFDimTolObjects_DatumObject;
+
+Last(): XCAFDimTolObjects_DatumObject;
+
+ChangeLast(): XCAFDimTolObjects_DatumObject;
+
+Value(theIndex: number): XCAFDimTolObjects_DatumObject;
+
+ChangeValue(theIndex: number): XCAFDimTolObjects_DatumObject;
+
+SetValue(theIndex: number, theItem: XCAFDimTolObjects_DatumObject): void;
+
+At(theIndex: number): XCAFDimTolObjects_DatumObject;
+
+ChangeAt(theIndex: number): XCAFDimTolObjects_DatumObject;
+
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Template class for Handle-managed 1D arrays
-NCollection_HArray1_StepVisual_AnnotationPlaneElement: declare class NCollection_HArray1_StepVisual_AnnotationPlaneElement
+NCollection_Sequence_handle_XCAFDimTolObjects_DimensionObject: declare class NCollection_Sequence_handle_XCAFDimTolObjects_DimensionObject extends NCollection_BaseSequence
 
 constructor
 
-// Returns const reference to the underlying array
-Array1(): NCollection_Array1_StepVisual_AnnotationPlaneElement;
+static Lower(): number;
 
-// Returns mutable reference to the underlying array
-ChangeArray1(): NCollection_Array1_StepVisual_AnnotationPlaneElement;
+Upper(): number;
 
-static get_type_name(): string;
+IsEmpty(): boolean;
 
-static get_type_descriptor(): Standard_Type;
+Reverse(): void;
 
-DynamicType(): Standard_Type;
+Exchange(I: number, J: number): void;
 
-// Releases the C++ object
+Clear(theAllocator?: NCollection_BaseAllocator): void;
+
+Assign(theOther: NCollection_Sequence_handle_XCAFDimTolObjects_DimensionObject): NCollection_Sequence_handle_XCAFDimTolObjects_DimensionObject;
+
+Remove(theIndex: number): void;
+Remove(theFromIndex: number, theToIndex: number): void;
+Remove(theIndex: number): void;
+Remove(theFromIndex: number, theToIndex: number): void;
+
+Append(theItem: XCAFDimTolObjects_DimensionObject): void;
+Append(theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_DimensionObject): void;
+Append(theItem: XCAFDimTolObjects_DimensionObject): void;
+Append(theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_DimensionObject): void;
+
+Prepend(theItem: XCAFDimTolObjects_DimensionObject): void;
+Prepend(theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_DimensionObject): void;
+Prepend(theItem: XCAFDimTolObjects_DimensionObject): void;
+Prepend(theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_DimensionObject): void;
+
+InsertBefore(theIndex: number, theItem: XCAFDimTolObjects_DimensionObject): void;
+InsertBefore(theIndex: number, theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_DimensionObject): void;
+InsertBefore(theIndex: number, theItem: XCAFDimTolObjects_DimensionObject): void;
+InsertBefore(theIndex: number, theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_DimensionObject): void;
+
+InsertAfter(theIndex: number, theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_DimensionObject): void;
+InsertAfter(theIndex: number, theItem: XCAFDimTolObjects_DimensionObject): void;
+InsertAfter(theIndex: number, theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_DimensionObject): void;
+InsertAfter(theIndex: number, theItem: XCAFDimTolObjects_DimensionObject): void;
+
+Split(theIndex: number, theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_DimensionObject): void;
+
+First(): XCAFDimTolObjects_DimensionObject;
+
+ChangeFirst(): XCAFDimTolObjects_DimensionObject;
+
+Last(): XCAFDimTolObjects_DimensionObject;
+
+ChangeLast(): XCAFDimTolObjects_DimensionObject;
+
+Value(theIndex: number): XCAFDimTolObjects_DimensionObject;
+
+ChangeValue(theIndex: number): XCAFDimTolObjects_DimensionObject;
+
+SetValue(theIndex: number, theItem: XCAFDimTolObjects_DimensionObject): void;
+
+At(theIndex: number): XCAFDimTolObjects_DimensionObject;
+
+ChangeAt(theIndex: number): XCAFDimTolObjects_DimensionObject;
+
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Template class for Handle-managed 1D arrays
-NCollection_HArray1_StepVisual_BoxCharacteristicSelect: declare class NCollection_HArray1_StepVisual_BoxCharacteristicSelect
+NCollection_Sequence_handle_XCAFDimTolObjects_GeomToleranceObject: declare class NCollection_Sequence_handle_XCAFDimTolObjects_GeomToleranceObject extends NCollection_BaseSequence
 
 constructor
 
-// Returns const reference to the underlying array
-Array1(): NCollection_Array1_StepVisual_BoxCharacteristicSelect;
+static Lower(): number;
 
-// Returns mutable reference to the underlying array
-ChangeArray1(): NCollection_Array1_StepVisual_BoxCharacteristicSelect;
+Upper(): number;
 
-static get_type_name(): string;
+IsEmpty(): boolean;
 
-static get_type_descriptor(): Standard_Type;
+Reverse(): void;
 
-DynamicType(): Standard_Type;
+Exchange(I: number, J: number): void;
 
-// Releases the C++ object
+Clear(theAllocator?: NCollection_BaseAllocator): void;
+
+Assign(theOther: NCollection_Sequence_handle_XCAFDimTolObjects_GeomToleranceObject): NCollection_Sequence_handle_XCAFDimTolObjects_GeomToleranceObject;
+
+Remove(theIndex: number): void;
+Remove(theFromIndex: number, theToIndex: number): void;
+Remove(theIndex: number): void;
+Remove(theFromIndex: number, theToIndex: number): void;
+
+Append(theItem: XCAFDimTolObjects_GeomToleranceObject): void;
+Append(theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_GeomToleranceObject): void;
+Append(theItem: XCAFDimTolObjects_GeomToleranceObject): void;
+Append(theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_GeomToleranceObject): void;
+
+Prepend(theItem: XCAFDimTolObjects_GeomToleranceObject): void;
+Prepend(theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_GeomToleranceObject): void;
+Prepend(theItem: XCAFDimTolObjects_GeomToleranceObject): void;
+Prepend(theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_GeomToleranceObject): void;
+
+InsertBefore(theIndex: number, theItem: XCAFDimTolObjects_GeomToleranceObject): void;
+InsertBefore(theIndex: number, theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_GeomToleranceObject): void;
+InsertBefore(theIndex: number, theItem: XCAFDimTolObjects_GeomToleranceObject): void;
+InsertBefore(theIndex: number, theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_GeomToleranceObject): void;
+
+InsertAfter(theIndex: number, theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_GeomToleranceObject): void;
+InsertAfter(theIndex: number, theItem: XCAFDimTolObjects_GeomToleranceObject): void;
+InsertAfter(theIndex: number, theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_GeomToleranceObject): void;
+InsertAfter(theIndex: number, theItem: XCAFDimTolObjects_GeomToleranceObject): void;
+
+Split(theIndex: number, theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_GeomToleranceObject): void;
+
+First(): XCAFDimTolObjects_GeomToleranceObject;
+
+ChangeFirst(): XCAFDimTolObjects_GeomToleranceObject;
+
+Last(): XCAFDimTolObjects_GeomToleranceObject;
+
+ChangeLast(): XCAFDimTolObjects_GeomToleranceObject;
+
+Value(theIndex: number): XCAFDimTolObjects_GeomToleranceObject;
+
+ChangeValue(theIndex: number): XCAFDimTolObjects_GeomToleranceObject;
+
+SetValue(theIndex: number, theItem: XCAFDimTolObjects_GeomToleranceObject): void;
+
+At(theIndex: number): XCAFDimTolObjects_GeomToleranceObject;
+
+ChangeAt(theIndex: number): XCAFDimTolObjects_GeomToleranceObject;
+
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Template class for Handle-managed 1D arrays
-NCollection_HArray1_StepVisual_CameraModelD3MultiClippingInterectionSelect: declare class NCollection_HArray1_StepVisual_CameraModelD3MultiClippingInterectionSelect
+NCollection_Sequence_int: declare class NCollection_Sequence_int extends NCollection_BaseSequence
 
 constructor
 
-// Returns const reference to the underlying array
-Array1(): NCollection_Array1_StepVisual_CameraModelD3MultiClippingInterectionSelect;
+static Lower(): number;
 
-// Returns mutable reference to the underlying array
-ChangeArray1(): NCollection_Array1_StepVisual_CameraModelD3MultiClippingInterectionSelect;
+Upper(): number;
 
-static get_type_name(): string;
+IsEmpty(): boolean;
 
-static get_type_descriptor(): Standard_Type;
+Reverse(): void;
 
-DynamicType(): Standard_Type;
+Exchange(I: number, J: number): void;
 
-// Releases the C++ object
+Clear(theAllocator?: NCollection_BaseAllocator): void;
+
+Assign(theOther: NCollection_Sequence_int): NCollection_Sequence_int;
+
+Remove(theIndex: number): void;
+Remove(theFromIndex: number, theToIndex: number): void;
+Remove(theIndex: number): void;
+Remove(theFromIndex: number, theToIndex: number): void;
+
+Append(theItem: number): void;
+Append(theSeq: NCollection_Sequence_int): void;
+Append(theItem: number): void;
+Append(theSeq: NCollection_Sequence_int): void;
+
+Prepend(theItem: number): void;
+Prepend(theSeq: NCollection_Sequence_int): void;
+Prepend(theItem: number): void;
+Prepend(theSeq: NCollection_Sequence_int): void;
+
+InsertBefore(theIndex: number, theItem: number): void;
+InsertBefore(theIndex: number, theSeq: NCollection_Sequence_int): void;
+InsertBefore(theIndex: number, theItem: number): void;
+InsertBefore(theIndex: number, theSeq: NCollection_Sequence_int): void;
+
+InsertAfter(theIndex: number, theSeq: NCollection_Sequence_int): void;
+InsertAfter(theIndex: number, theItem: number): void;
+InsertAfter(theIndex: number, theSeq: NCollection_Sequence_int): void;
+InsertAfter(theIndex: number, theItem: number): void;
+
+Split(theIndex: number, theSeq: NCollection_Sequence_int): void;
+
+First(): number;
+
+ChangeFirst(): number;
+
+Last(): number;
+
+ChangeLast(): number;
+
+Value(theIndex: number): number;
+
+ChangeValue(theIndex: number): number;
+
+SetValue(theIndex: number, theItem: number): void;
+
+At(theIndex: number): number;
+
+ChangeAt(theIndex: number): number;
+
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Template class for Handle-managed 1D arrays
-NCollection_HArray1_StepVisual_CameraModelD3MultiClippingUnionSelect: declare class NCollection_HArray1_StepVisual_CameraModelD3MultiClippingUnionSelect
+NCollection_Shared_NCollection_DynamicArray_BRepMesh_Circle_void: declare class NCollection_Shared_NCollection_DynamicArray_BRepMesh_Circle_void extends Standard_Transient
 
 constructor
 
-// Returns const reference to the underlying array
-Array1(): NCollection_Array1_StepVisual_CameraModelD3MultiClippingUnionSelect;
-
-// Returns mutable reference to the underlying array
-ChangeArray1(): NCollection_Array1_StepVisual_CameraModelD3MultiClippingUnionSelect;
-
-static get_type_name(): string;
-
-static get_type_descriptor(): Standard_Type;
-
-DynamicType(): Standard_Type;
-
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Template class for Handle-managed 1D arrays
-NCollection_HArray1_StepVisual_DirectionCountSelect: declare class NCollection_HArray1_StepVisual_DirectionCountSelect
+NCollection_Shared_NCollection_DynamicArray_BRepMesh_Vertex_void: declare class NCollection_Shared_NCollection_DynamicArray_BRepMesh_Vertex_void extends Standard_Transient
 
 constructor
 
-// Returns const reference to the underlying array
-Array1(): NCollection_Array1_StepVisual_DirectionCountSelect;
-
-// Returns mutable reference to the underlying array
-ChangeArray1(): NCollection_Array1_StepVisual_DirectionCountSelect;
-
-static get_type_name(): string;
-
-static get_type_descriptor(): Standard_Type;
-
-DynamicType(): Standard_Type;
-
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Template class for Handle-managed 1D arrays
-NCollection_HArray1_StepVisual_DraughtingCalloutElement: declare class NCollection_HArray1_StepVisual_DraughtingCalloutElement
+NCollection_Shared_Standard_Mutex_void: declare class NCollection_Shared_Standard_Mutex_void extends Standard_Transient
 
 constructor
 
-// Returns const reference to the underlying array
-Array1(): NCollection_Array1_StepVisual_DraughtingCalloutElement;
-
-// Returns mutable reference to the underlying array
-ChangeArray1(): NCollection_Array1_StepVisual_DraughtingCalloutElement;
-
-static get_type_name(): string;
-
-static get_type_descriptor(): Standard_Type;
-
-DynamicType(): Standard_Type;
-
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Template class for Handle-managed 1D arrays
-NCollection_HArray1_StepVisual_FillStyleSelect: declare class NCollection_HArray1_StepVisual_FillStyleSelect
+NCollection_TListIterator_HLRAlgo_Interference: declare class NCollection_TListIterator_HLRAlgo_Interference extends NCollection_BaseList_Iterator
 
 constructor
 
-// Returns const reference to the underlying array
-Array1(): NCollection_Array1_StepVisual_FillStyleSelect;
+More(): boolean;
 
-// Returns mutable reference to the underlying array
-ChangeArray1(): NCollection_Array1_StepVisual_FillStyleSelect;
+Next(): void;
 
-static get_type_name(): string;
+Value(): HLRAlgo_Interference;
 
-static get_type_descriptor(): Standard_Type;
+ChangeValue(): HLRAlgo_Interference;
 
-DynamicType(): Standard_Type;
-
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Template class for Handle-managed 1D arrays
-NCollection_HArray1_StepVisual_InvisibleItem: declare class NCollection_HArray1_StepVisual_InvisibleItem
+NCollection_Array1_BRepGraph_NodeId_Typed_BRepGraph_NodeId_Kind_CoEdge: NCollection_Array1_BRepGraph_CoEdgeId
 
-constructor
+NCollection_Array1_BRepGraph_RefId_Typed_BRepGraph_RefId_Kind_Child: NCollection_Array1_BRepGraph_ChildRefId
 
-// Returns const reference to the underlying array
-Array1(): NCollection_Array1_StepVisual_InvisibleItem;
+NCollection_Array1_BRepGraph_RefId_Typed_BRepGraph_RefId_Kind_Face: NCollection_Array1_BRepGraph_FaceRefId
 
-// Returns mutable reference to the underlying array
-ChangeArray1(): NCollection_Array1_StepVisual_InvisibleItem;
+NCollection_Array1_BRepGraph_RefId_Typed_BRepGraph_RefId_Kind_Occurrence: NCollection_Array1_BRepGraph_OccurrenceRefId
 
-static get_type_name(): string;
+NCollection_Array1_BRepGraph_RefId_Typed_BRepGraph_RefId_Kind_Shell: NCollection_Array1_BRepGraph_ShellRefId
 
-static get_type_descriptor(): Standard_Type;
+NCollection_Array1_BRepGraph_RefId_Typed_BRepGraph_RefId_Kind_Solid: NCollection_Array1_BRepGraph_SolidRefId
 
-DynamicType(): Standard_Type;
+NCollection_Array1_BRepGraph_RefId_Typed_BRepGraph_RefId_Kind_Wire: NCollection_Array1_BRepGraph_WireRefId
 
-// Releases the C++ object
-delete(): void;
+NCollection_Array1_TFunction_DataMapOfGUIDDriver: NCollection_Array1_int
 
-[Symbol.dispose](): void;
+NCollection_Array1_TopOpeBRepDS_DataMapOfIntegerListOfInterference: NCollection_Array1_int
 
-// Template class for Handle-managed 1D arrays
-NCollection_HArray1_StepVisual_LayeredItem: declare class NCollection_HArray1_StepVisual_LayeredItem
+NCollection_Array1_handle_StepElement_HSequenceOfCurveElementPurposeMember: NCollection_Array1_handle_NCollection_HSequence_handle_StepElement_CurveElementPurposeMember
 
-constructor
+NCollection_Array1_handle_StepElement_HSequenceOfSurfaceElementPurposeMember: NCollection_Array1_handle_NCollection_HSequence_handle_StepElement_SurfaceElementPurposeMember
 
-// Returns const reference to the underlying array
-Array1(): NCollection_Array1_StepVisual_LayeredItem;
+NCollection_Array1_uint8_t: NCollection_Array1_unsignedchar
 
-// Returns mutable reference to the underlying array
-ChangeArray1(): NCollection_Array1_StepVisual_LayeredItem;
+NCollection_Array2_handle_TColStd_HArray1OfInteger: NCollection_Array2_handle_NCollection_HArray1_int
 
-static get_type_name(): string;
+NCollection_Array2_handle_TColStd_HArray1OfReal: NCollection_Array2_handle_NCollection_HArray1_double
 
-static get_type_descriptor(): Standard_Type;
+NCollection_DataMap_TCollection_ExtendedString_unsignedchar: NCollection_DataMap_TCollection_ExtendedString_uint8_t
 
-DynamicType(): Standard_Type;
+NCollection_DataMap_TopoDS_Shape_Message_ListOfMsg_TopTools_ShapeMapHasher: NCollection_DataMap_TopoDS_Shape_NCollection_List_Message_Msg_TopTools_ShapeMapHasher
 
-// Releases the C++ object
-delete(): void;
+NCollection_DataMap_TopoDS_Shape_TColStd_ListOfReal_TopTools_ShapeMapHasher: NCollection_DataMap_TopoDS_Shape_NCollection_List_double_TopTools_ShapeMapHasher
 
-[Symbol.dispose](): void;
+NCollection_DataMap_TopoDS_Shape_TopTools_ListOfShape_TopTools_ShapeMapHasher: NCollection_DataMap_TopoDS_Shape_NCollection_List_TopoDS_Shape_TopTools_ShapeMapHasher
 
-// Template class for Handle-managed 1D arrays
-NCollection_HArray1_StepVisual_PresentationStyleSelect: declare class NCollection_HArray1_StepVisual_PresentationStyleSelect
+NCollection_DataMap_TopoDS_Shape_handle_TopTools_HArray2OfShape_TopTools_ShapeMapHasher: NCollection_DataMap_TopoDS_Shape_handle_NCollection_HArray2_TopoDS_Shape_TopTools_ShapeMapHasher
 
-constructor
+NCollection_HArray1_TFunction_DataMapOfGUIDDriver: NCollection_HArray1_int
 
-// Returns const reference to the underlying array
-Array1(): NCollection_Array1_StepVisual_PresentationStyleSelect;
+NCollection_HArray1_TopOpeBRepDS_DataMapOfIntegerListOfInterference: NCollection_HArray1_int
 
-// Returns mutable reference to the underlying array
-ChangeArray1(): NCollection_Array1_StepVisual_PresentationStyleSelect;
+NCollection_HArray1_handle_StepElement_HSequenceOfCurveElementPurposeMember: NCollection_HArray1_handle_NCollection_HSequence_handle_StepElement_CurveElementPurposeMember
 
-static get_type_name(): string;
+NCollection_HArray1_handle_StepElement_HSequenceOfSurfaceElementPurposeMember: NCollection_HArray1_handle_NCollection_HSequence_handle_StepElement_SurfaceElementPurposeMember
 
-static get_type_descriptor(): Standard_Type;
+NCollection_HArray1_uint8_t: NCollection_HArray1_unsignedchar
 
-DynamicType(): Standard_Type;
+NCollection_HArray2_handle_TColStd_HArray1OfInteger: NCollection_HArray2_handle_NCollection_HArray1_int
 
-// Releases the C++ object
-delete(): void;
+NCollection_HArray2_handle_TColStd_HArray1OfReal: NCollection_HArray2_handle_NCollection_HArray1_double
 
-[Symbol.dispose](): void;
+NCollection_HSequence_handle_TColgp_HSequenceOfPnt: NCollection_HSequence_handle_NCollection_HSequence_gp_Pnt
 
-// Template class for Handle-managed 1D arrays
-NCollection_HArray1_StepVisual_RenderingPropertiesSelect: declare class NCollection_HArray1_StepVisual_RenderingPropertiesSelect
+NCollection_IndexedDataMap_TopoDS_Shape_TopTools_ListOfShape_TopTools_ShapeMapHasher: NCollection_IndexedDataMap_TopoDS_Shape_NCollection_List_TopoDS_Shape_TopTools_ShapeMapHasher
 
-constructor
+NCollection_List_TopTools_ListOfShape: NCollection_List_NCollection_List_TopoDS_Shape
 
-// Returns const reference to the underlying array
-Array1(): NCollection_Array1_StepVisual_RenderingPropertiesSelect;
+NCollection_List_unsignedchar: NCollection_List_uint8_t
 
-// Returns mutable reference to the underlying array
-ChangeArray1(): NCollection_Array1_StepVisual_RenderingPropertiesSelect;
+NCollection_Sequence_TColGeom2d_SequenceOfGeometry: NCollection_Sequence_NCollection_Sequence_handle_Geom2d_Geometry
 
-static get_type_name(): string;
+NCollection_Sequence_handle_TColgp_HSequenceOfPnt: NCollection_Sequence_handle_NCollection_HSequence_gp_Pnt
 
-static get_type_descriptor(): Standard_Type;
+NCollection_Shared_NCollection_DynamicArray_BRepMesh_Circle: NCollection_Shared_NCollection_DynamicArray_BRepMesh_Circle_void
 
-DynamicType(): Standard_Type;
+NCollection_Shared_NCollection_DynamicArray_BRepMesh_Vertex: NCollection_Shared_NCollection_DynamicArray_BRepMesh_Vertex_void
 
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// Template class for Handle-managed 1D arrays
-NCollection_HArray1_StepVisual_StyleContextSelect: declare class NCollection_HArray1_StepVisual_StyleContextSelect
-
-constructor
-
-// Returns const reference to the underlying array
-Array1(): NCollection_Array1_StepVisual_StyleContextSelect;
-
-// Returns mutable reference to the underlying array
-ChangeArray1(): NCollection_Array1_StepVisual_StyleContextSelect;
-
-static get_type_name(): string;
-
-static get_type_descriptor(): Standard_Type;
-
-DynamicType(): Standard_Type;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// Template class for Handle-managed 1D arrays
-NCollection_HArray1_StepVisual_SurfaceStyleElementSelect: declare class NCollection_HArray1_StepVisual_SurfaceStyleElementSelect
-
-constructor
-
-// Returns const reference to the underlying array
-Array1(): NCollection_Array1_StepVisual_SurfaceStyleElementSelect;
-
-// Returns mutable reference to the underlying array
-ChangeArray1(): NCollection_Array1_StepVisual_SurfaceStyleElementSelect;
-
-static get_type_name(): string;
-
-static get_type_descriptor(): Standard_Type;
-
-DynamicType(): Standard_Type;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// Template class for Handle-managed 1D arrays
-NCollection_HArray1_StepVisual_TessellatedEdgeOrVertex: declare class NCollection_HArray1_StepVisual_TessellatedEdgeOrVertex
-
-constructor
-
-// Returns const reference to the underlying array
-Array1(): NCollection_Array1_StepVisual_TessellatedEdgeOrVertex;
-
-// Returns mutable reference to the underlying array
-ChangeArray1(): NCollection_Array1_StepVisual_TessellatedEdgeOrVertex;
-
-static get_type_name(): string;
-
-static get_type_descriptor(): Standard_Type;
-
-DynamicType(): Standard_Type;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// Template class for Handle-managed 1D arrays
-NCollection_HArray1_StepVisual_TextOrCharacter: declare class NCollection_HArray1_StepVisual_TextOrCharacter
-
-constructor
-
-// Returns const reference to the underlying array
-Array1(): NCollection_Array1_StepVisual_TextOrCharacter;
-
-// Returns mutable reference to the underlying array
-ChangeArray1(): NCollection_Array1_StepVisual_TextOrCharacter;
-
-static get_type_name(): string;
-
-static get_type_descriptor(): Standard_Type;
-
-DynamicType(): Standard_Type;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// Template class for Handle-managed 1D arrays
-NCollection_HArray1_TCollection_AsciiString: declare class NCollection_HArray1_TCollection_AsciiString
-
-constructor
-
-// Returns const reference to the underlying array
-Array1(): NCollection_Array1_TCollection_AsciiString;
-
-// Returns mutable reference to the underlying array
-ChangeArray1(): NCollection_Array1_TCollection_AsciiString;
-
-static get_type_name(): string;
-
-static get_type_descriptor(): Standard_Type;
-
-DynamicType(): Standard_Type;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// Template class for Handle-managed 1D arrays
-NCollection_HArray1_TCollection_ExtendedString: declare class NCollection_HArray1_TCollection_ExtendedString
-
-constructor
-
-// Returns const reference to the underlying array
-Array1(): NCollection_Array1_TCollection_ExtendedString;
-
-// Returns mutable reference to the underlying array
-ChangeArray1(): NCollection_Array1_TCollection_ExtendedString;
-
-static get_type_name(): string;
-
-static get_type_descriptor(): Standard_Type;
-
-DynamicType(): Standard_Type;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// Template class for Handle-managed 1D arrays
-NCollection_HArray1_TDF_Label: declare class NCollection_HArray1_TDF_Label
-
-constructor
-
-// Returns const reference to the underlying array
-Array1(): NCollection_Array1_TDF_Label;
-
-// Returns mutable reference to the underlying array
-ChangeArray1(): NCollection_Array1_TDF_Label;
-
-static get_type_name(): string;
-
-static get_type_descriptor(): Standard_Type;
-
-DynamicType(): Standard_Type;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// Template class for Handle-managed 1D arrays
-NCollection_HArray1_TopoDS_Shape: declare class NCollection_HArray1_TopoDS_Shape
-
-constructor
-
-// Returns const reference to the underlying array
-Array1(): NCollection_Array1_TopoDS_Shape;
-
-// Returns mutable reference to the underlying array
-ChangeArray1(): NCollection_Array1_TopoDS_Shape;
-
-static get_type_name(): string;
-
-static get_type_descriptor(): Standard_Type;
-
-DynamicType(): Standard_Type;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// Template class for Handle-managed 1D arrays
-NCollection_HArray1_bool: declare class NCollection_HArray1_bool
-
-constructor
-
-// Returns const reference to the underlying array
-Array1(): NCollection_Array1_bool;
-
-// Returns mutable reference to the underlying array
-ChangeArray1(): NCollection_Array1_bool;
-
-static get_type_name(): string;
-
-static get_type_descriptor(): Standard_Type;
-
-DynamicType(): Standard_Type;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// Template class for Handle-managed 1D arrays
-NCollection_HArray1_double: declare class NCollection_HArray1_double
-
-constructor
-
-// Returns const reference to the underlying array
-Array1(): NCollection_Array1_double;
-
-// Returns mutable reference to the underlying array
-ChangeArray1(): NCollection_Array1_double;
-
-static get_type_name(): string;
-
-static get_type_descriptor(): Standard_Type;
-
-DynamicType(): Standard_Type;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// Template class for Handle-managed 1D arrays
-NCollection_HArray1_float: declare class NCollection_HArray1_float
-
-constructor
-
-// Returns const reference to the underlying array
-Array1(): NCollection_Array1_float;
-
-// Returns mutable reference to the underlying array
-ChangeArray1(): NCollection_Array1_float;
-
-static get_type_name(): string;
-
-static get_type_descriptor(): Standard_Type;
-
-DynamicType(): Standard_Type;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// Template class for Handle-managed 1D arrays
-NCollection_HArray1_gp_Pnt: declare class NCollection_HArray1_gp_Pnt
-
-constructor
-
-// Returns const reference to the underlying array
-Array1(): NCollection_Array1_gp_Pnt;
-
-// Returns mutable reference to the underlying array
-ChangeArray1(): NCollection_Array1_gp_Pnt;
-
-static get_type_name(): string;
-
-static get_type_descriptor(): Standard_Type;
-
-DynamicType(): Standard_Type;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// Template class for Handle-managed 1D arrays
-NCollection_HArray1_gp_Pnt2d: declare class NCollection_HArray1_gp_Pnt2d
-
-constructor
-
-// Returns const reference to the underlying array
-Array1(): NCollection_Array1_gp_Pnt2d;
-
-// Returns mutable reference to the underlying array
-ChangeArray1(): NCollection_Array1_gp_Pnt2d;
-
-static get_type_name(): string;
-
-static get_type_descriptor(): Standard_Type;
-
-DynamicType(): Standard_Type;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// Template class for Handle-managed 1D arrays
-NCollection_HArray1_gp_XY: declare class NCollection_HArray1_gp_XY
-
-constructor
-
-// Returns const reference to the underlying array
-Array1(): NCollection_Array1_gp_XY;
-
-// Returns mutable reference to the underlying array
-ChangeArray1(): NCollection_Array1_gp_XY;
-
-static get_type_name(): string;
-
-static get_type_descriptor(): Standard_Type;
-
-DynamicType(): Standard_Type;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// Template class for Handle-managed 1D arrays
-NCollection_HArray1_gp_XYZ: declare class NCollection_HArray1_gp_XYZ
-
-constructor
-
-// Returns const reference to the underlying array
-Array1(): NCollection_Array1_gp_XYZ;
-
-// Returns mutable reference to the underlying array
-ChangeArray1(): NCollection_Array1_gp_XYZ;
-
-static get_type_name(): string;
-
-static get_type_descriptor(): Standard_Type;
-
-DynamicType(): Standard_Type;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// Template class for Handle-managed 1D arrays
-NCollection_HArray1_handle_Geom2d_BSplineCurve: declare class NCollection_HArray1_handle_Geom2d_BSplineCurve
-
-constructor
-
-// Returns const reference to the underlying array
-Array1(): NCollection_Array1_handle_Geom2d_BSplineCurve;
-
-// Returns mutable reference to the underlying array
-ChangeArray1(): NCollection_Array1_handle_Geom2d_BSplineCurve;
-
-static get_type_name(): string;
-
-static get_type_descriptor(): Standard_Type;
-
-DynamicType(): Standard_Type;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// Template class for Handle-managed 1D arrays
-NCollection_HArray1_handle_Geom2d_Curve: declare class NCollection_HArray1_handle_Geom2d_Curve
-
-constructor
-
-// Returns const reference to the underlying array
-Array1(): NCollection_Array1_handle_Geom2d_Curve;
-
-// Returns mutable reference to the underlying array
-ChangeArray1(): NCollection_Array1_handle_Geom2d_Curve;
-
-static get_type_name(): string;
-
-static get_type_descriptor(): Standard_Type;
-
-DynamicType(): Standard_Type;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// Template class for Handle-managed 1D arrays
-NCollection_HArray1_handle_Geom_BSplineCurve: declare class NCollection_HArray1_handle_Geom_BSplineCurve
-
-constructor
-
-// Returns const reference to the underlying array
-Array1(): NCollection_Array1_handle_Geom_BSplineCurve;
-
-// Returns mutable reference to the underlying array
-ChangeArray1(): NCollection_Array1_handle_Geom_BSplineCurve;
-
-static get_type_name(): string;
-
-static get_type_descriptor(): Standard_Type;
-
-DynamicType(): Standard_Type;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// Template class for Handle-managed 1D arrays
-NCollection_HArray1_handle_Geom_Curve: declare class NCollection_HArray1_handle_Geom_Curve
-
-constructor
-
-// Returns const reference to the underlying array
-Array1(): NCollection_Array1_handle_Geom_Curve;
-
-// Returns mutable reference to the underlying array
-ChangeArray1(): NCollection_Array1_handle_Geom_Curve;
-
-static get_type_name(): string;
-
-static get_type_descriptor(): Standard_Type;
-
-DynamicType(): Standard_Type;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// Template class for Handle-managed 1D arrays
-NCollection_HArray1_handle_IGESAppli_FiniteElement: declare class NCollection_HArray1_handle_IGESAppli_FiniteElement
-
-constructor
-
-// Returns const reference to the underlying array
-Array1(): NCollection_Array1_handle_IGESAppli_FiniteElement;
-
-// Returns mutable reference to the underlying array
-ChangeArray1(): NCollection_Array1_handle_IGESAppli_FiniteElement;
-
-static get_type_name(): string;
-
-static get_type_descriptor(): Standard_Type;
-
-DynamicType(): Standard_Type;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// Template class for Handle-managed 1D arrays
-NCollection_HArray1_handle_IGESAppli_Node: declare class NCollection_HArray1_handle_IGESAppli_Node
-
-constructor
-
-// Returns const reference to the underlying array
-Array1(): NCollection_Array1_handle_IGESAppli_Node;
-
-// Returns mutable reference to the underlying array
-ChangeArray1(): NCollection_Array1_handle_IGESAppli_Node;
-
-static get_type_name(): string;
-
-static get_type_descriptor(): Standard_Type;
-
-DynamicType(): Standard_Type;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// Template class for Handle-managed 1D arrays
-NCollection_HArray1_handle_IGESData_IGESEntity: declare class NCollection_HArray1_handle_IGESData_IGESEntity
-
-constructor
-
-// Returns const reference to the underlying array
-Array1(): NCollection_Array1_handle_IGESData_IGESEntity;
-
-// Returns mutable reference to the underlying array
-ChangeArray1(): NCollection_Array1_handle_IGESData_IGESEntity;
-
-static get_type_name(): string;
-
-static get_type_descriptor(): Standard_Type;
-
-DynamicType(): Standard_Type;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
+NCollection_Shared_Standard_Mutex: NCollection_Shared_Standard_Mutex_void

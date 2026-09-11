@@ -1,102 +1,71 @@
 # libcascade — gp
 
-6 top-level symbols. Signatures are verbatim typescript.
+14 top-level symbols. Signatures are verbatim typescript.
 
-// The geometric processor package, called gp, provides an implementation of entities used
 gp: declare class gp
 
-// Method of package gp
 static Resolution(): number;
 
-// Identifies a Cartesian point with coordinates X = Y = Z = 0.0.0
 static Origin(): gp_Pnt;
 
-// Returns a unit vector with the combination (1,0,0)
 static DX(): gp_Dir;
 
-// Returns a unit vector with the combination (0,1,0)
 static DY(): gp_Dir;
 
-// Returns a unit vector with the combination (0,0,1)
 static DZ(): gp_Dir;
 
-// Identifies an axis where its origin is Origin and its unit vector coordinates X = 1.0, Y = Z = 0.0
 static OX(): gp_Ax1;
 
-// Identifies an axis where its origin is Origin and its unit vector coordinates Y = 1.0, X = Z = 0.0
 static OY(): gp_Ax1;
 
-// Identifies an axis where its origin is Origin and its unit vector coordinates Z = 1.0, Y = X = 0.0
 static OZ(): gp_Ax1;
 
-// Identifies a coordinate system where its origin is Origin, and its "main Direction" and "X Direction" coordinates Z = 1.0, X = Y =0.0 and X direction coordinates X = 1.0, Y = Z = 0.0
 static XOY(): gp_Ax2;
 
-// Identifies a coordinate system where its origin is Origin, and its "main Direction" and "X Direction" coordinates Y = 1.0, X = Z =0.0 and X direction coordinates Z = 1.0, X = Y = 0.0
 static ZOX(): gp_Ax2;
 
-// Identifies a coordinate system where its origin is Origin, and its "main Direction" and "X Direction" coordinates X = 1.0, Z = Y =0.0 and X direction coordinates Y = 1.0, X = Z = 0.0 In 2D space
 static YOZ(): gp_Ax2;
 
-// Identifies a Cartesian point with coordinates X = Y = 0.0
 static Origin2d(): gp_Pnt2d;
 
-// Returns a unit vector with the combinations (1,0)
 static DX2d(): gp_Dir2d;
 
-// Returns a unit vector with the combinations (0,1)
 static DY2d(): gp_Dir2d;
 
-// Identifies an axis where its origin is Origin2d and its unit vector coordinates are
 static OX2d(): gp_Ax2d;
 
-// Identifies an axis where its origin is Origin2d and its unit vector coordinates are Y = 1.0, X = 0.0
 static OY2d(): gp_Ax2d;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Describes an axis in 3D space
 gp_Ax1: declare class gp_Ax1
 
 constructor
 
-// Assigns V as the "Direction" of this axis
 SetDirection(theV: gp_Dir): void;
 
-// Assigns P as the origin of this axis
 SetLocation(theP: gp_Pnt): void;
 
-// Returns the direction of <me>
 Direction(): gp_Dir;
 
-// Returns the location point of <me>
 Location(): gp_Pnt;
 
-// Returns True if
 IsCoaxial(Other: gp_Ax1, AngularTolerance: number, LinearTolerance: number): boolean;
 
-// Returns True if the direction of this and another axis are normal to each other
 IsNormal(theOther: gp_Ax1, theAngularTolerance: number): boolean;
 
-// Returns True if the direction of this and another axis are parallel with opposite orientation
 IsOpposite(theOther: gp_Ax1, theAngularTolerance: number): boolean;
 
-// Returns True if the direction of this and another axis are parallel with same orientation or opposite orientation
 IsParallel(theOther: gp_Ax1, theAngularTolerance: number): boolean;
 
-// Computes the angular value, in radians, between this.Direction() and theOther.Direction()
 Angle(theOther: gp_Ax1): number;
 
-// Reverses the unit vector of this axis and assigns the result to this axis
 Reverse(): void;
 
-// Reverses the unit vector of this axis and creates a new one
 Reversed(): gp_Ax1;
 
-// Performs the symmetrical transformation of an axis placement with respect to the point P which is the center of the symmetry and assigns the result to this axis
 Mirror(P: gp_Pnt): void;
 Mirror(A1: gp_Ax1): void;
 Mirror(A2: gp_Ax2): void;
@@ -107,7 +76,6 @@ Mirror(P: gp_Pnt): void;
 Mirror(A1: gp_Ax1): void;
 Mirror(A2: gp_Ax2): void;
 
-// Performs the symmetrical transformation of an axis placement with respect to the point P which is the center of the symmetry and creates a new axis
 Mirrored(P: gp_Pnt): gp_Ax1;
 Mirrored(A1: gp_Ax1): gp_Ax1;
 Mirrored(A2: gp_Ax2): gp_Ax1;
@@ -118,86 +86,63 @@ Mirrored(P: gp_Pnt): gp_Ax1;
 Mirrored(A1: gp_Ax1): gp_Ax1;
 Mirrored(A2: gp_Ax2): gp_Ax1;
 
-// Rotates this axis at an angle theAngRad (in radians) about the axis theA1 and assigns the result to this axis
 Rotate(theA1: gp_Ax1, theAngRad: number): void;
 
-// Rotates this axis at an angle theAngRad (in radians) about the axis theA1 and creates a new one
 Rotated(theA1: gp_Ax1, theAngRad: number): gp_Ax1;
 
-// Applies a scaling transformation to this axis with
 Scale(theP: gp_Pnt, theS: number): void;
 
-// Applies a scaling transformation to this axis with
 Scaled(theP: gp_Pnt, theS: number): gp_Ax1;
 
-// Applies the transformation theT to this axis and assigns the result to this axis
 Transform(theT: gp_Trsf): void;
 
-// Applies the transformation theT to this axis and creates a new one
 Transformed(theT: gp_Trsf): gp_Ax1;
 
-// Translates this axis by the vector theV, and assigns the result to this axis
 Translate(theV: gp_Vec): void;
 Translate(theP1: gp_Pnt, theP2: gp_Pnt): void;
 Translate(theV: gp_Vec): void;
 Translate(theP1: gp_Pnt, theP2: gp_Pnt): void;
 
-// Translates this axis by the vector theV, and creates a new one
 Translated(theV: gp_Vec): gp_Ax1;
 Translated(theP1: gp_Pnt, theP2: gp_Pnt): gp_Ax1;
 Translated(theV: gp_Vec): gp_Ax1;
 Translated(theP1: gp_Pnt, theP2: gp_Pnt): gp_Ax1;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Describes a right-handed coordinate system in 3D space
 gp_Ax2: declare class gp_Ax2
 
 constructor
 
-// Assigns the origin and "main Direction" of the axis A1 to this coordinate system, then recomputes its "X Direction" and "Y Direction"
 SetAxis(A1: gp_Ax1): void;
 
-// Changes the "main Direction" of this coordinate system, then recomputes its "X Direction" and "Y Direction"
 SetDirection(V: gp_Dir): void;
 
-// Changes the "Location" point (origin) of <me>
 SetLocation(theP: gp_Pnt): void;
 
-// Changes the "Xdirection" of <me>
 SetXDirection(theVx: gp_Dir): void;
 
-// Changes the "Ydirection" of <me>
 SetYDirection(theVy: gp_Dir): void;
 
-// Computes the angular value, in radians, between the main direction of <me> and the main direction of <theOther>
 Angle(theOther: gp_Ax2): number;
 
-// Returns the main axis of <me>
 Axis(): gp_Ax1;
 
-// Returns the main direction of <me>
 Direction(): gp_Dir;
 
-// Returns the "Location" point (origin) of <me>
 Location(): gp_Pnt;
 
-// Returns the "XDirection" of <me>
 XDirection(): gp_Dir;
 
-// Returns the "YDirection" of <me>
 YDirection(): gp_Dir;
 
-// Returns True if
 IsCoplanar(Other: gp_Ax2, LinearTolerance: number, AngularTolerance: number): boolean;
 IsCoplanar(A1: gp_Ax1, LinearTolerance: number, AngularTolerance: number): boolean;
 IsCoplanar(Other: gp_Ax2, LinearTolerance: number, AngularTolerance: number): boolean;
 IsCoplanar(A1: gp_Ax1, LinearTolerance: number, AngularTolerance: number): boolean;
 
-// Performs a symmetrical transformation of this coordinate system with respect to
 Mirror(P: gp_Pnt): void;
 Mirror(A1: gp_Ax1): void;
 Mirror(A2: gp_Ax2): void;
@@ -208,7 +153,6 @@ Mirror(P: gp_Pnt): void;
 Mirror(A1: gp_Ax1): void;
 Mirror(A2: gp_Ax2): void;
 
-// Performs a symmetrical transformation of this coordinate system with respect to
 Mirrored(P: gp_Pnt): gp_Ax2;
 Mirrored(A1: gp_Ax1): gp_Ax2;
 Mirrored(A2: gp_Ax2): gp_Ax2;
@@ -221,17 +165,14 @@ Mirrored(A2: gp_Ax2): gp_Ax2;
 
 Rotate(theA1: gp_Ax1, theAng: number): void;
 
-// Rotates an axis placement
 Rotated(theA1: gp_Ax1, theAng: number): gp_Ax2;
 
 Scale(theP: gp_Pnt, theS: number): void;
 
-// Applies a scaling transformation on the axis placement
 Scaled(theP: gp_Pnt, theS: number): gp_Ax2;
 
 Transform(theT: gp_Trsf): void;
 
-// Transforms an axis placement with a Trsf
 Transformed(theT: gp_Trsf): gp_Ax2;
 
 Translate(theV: gp_Vec): void;
@@ -239,53 +180,39 @@ Translate(theP1: gp_Pnt, theP2: gp_Pnt): void;
 Translate(theV: gp_Vec): void;
 Translate(theP1: gp_Pnt, theP2: gp_Pnt): void;
 
-// Translates an axis plaxement in the direction of the vector <theV>
 Translated(theV: gp_Vec): gp_Ax2;
 Translated(theP1: gp_Pnt, theP2: gp_Pnt): gp_Ax2;
 Translated(theV: gp_Vec): gp_Ax2;
 Translated(theP1: gp_Pnt, theP2: gp_Pnt): gp_Ax2;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Describes a coordinate system in a plane (2D space)
 gp_Ax22d: declare class gp_Ax22d
 
 constructor
 
-// Assigns the origin and the two unit vectors of the coordinate system theA1 to this coordinate system
 SetAxis(theA1: gp_Ax22d): void;
 
-// Changes the XAxis and YAxis ("Location" point and "Direction") of <me>
 SetXAxis(theA1: gp_Ax2d): void;
 
-// Changes the XAxis and YAxis ("Location" point and "Direction") of <me>
 SetYAxis(theA1: gp_Ax2d): void;
 
-// Changes the "Location" point (origin) of <me>
 SetLocation(theP: gp_Pnt2d): void;
 
-// Assigns theVx to the "X Direction" of this coordinate system
 SetXDirection(theVx: gp_Dir2d): void;
 
-// Assigns theVy to the "Y Direction" of this coordinate system
 SetYDirection(theVy: gp_Dir2d): void;
 
-// Returns an axis, for which
 XAxis(): gp_Ax2d;
 
-// Returns an axis, for which
 YAxis(): gp_Ax2d;
 
-// Returns the "Location" point (origin) of <me>
 Location(): gp_Pnt2d;
 
-// Returns the "XDirection" of <me>
 XDirection(): gp_Dir2d;
 
-// Returns the "YDirection" of <me>
 YDirection(): gp_Dir2d;
 
 Mirror(theP: gp_Pnt2d): void;
@@ -293,7 +220,6 @@ Mirror(theA: gp_Ax2d): void;
 Mirror(theP: gp_Pnt2d): void;
 Mirror(theA: gp_Ax2d): void;
 
-// Performs the symmetrical transformation of an axis placement with respect to the point theP which is the center of the symmetry
 Mirrored(theP: gp_Pnt2d): gp_Ax22d;
 Mirrored(theA: gp_Ax2d): gp_Ax22d;
 Mirrored(theP: gp_Pnt2d): gp_Ax22d;
@@ -301,17 +227,14 @@ Mirrored(theA: gp_Ax2d): gp_Ax22d;
 
 Rotate(theP: gp_Pnt2d, theAng: number): void;
 
-// Rotates an axis placement
 Rotated(theP: gp_Pnt2d, theAng: number): gp_Ax22d;
 
 Scale(theP: gp_Pnt2d, theS: number): void;
 
-// Applies a scaling transformation on the axis placement
 Scaled(theP: gp_Pnt2d, theS: number): gp_Ax22d;
 
 Transform(theT: gp_Trsf2d): void;
 
-// Transforms an axis placement with a Trsf
 Transformed(theT: gp_Trsf2d): gp_Ax22d;
 
 Translate(theV: gp_Vec2d): void;
@@ -319,53 +242,39 @@ Translate(theP1: gp_Pnt2d, theP2: gp_Pnt2d): void;
 Translate(theV: gp_Vec2d): void;
 Translate(theP1: gp_Pnt2d, theP2: gp_Pnt2d): void;
 
-// Translates an axis plaxement in the direction of the vector <theV>
 Translated(theV: gp_Vec2d): gp_Ax22d;
 Translated(theP1: gp_Pnt2d, theP2: gp_Pnt2d): gp_Ax22d;
 Translated(theV: gp_Vec2d): gp_Ax22d;
 Translated(theP1: gp_Pnt2d, theP2: gp_Pnt2d): gp_Ax22d;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Describes an axis in the plane (2D space)
 gp_Ax2d: declare class gp_Ax2d
 
 constructor
 
-// Changes the "Location" point (origin) of <me>
 SetLocation(theP: gp_Pnt2d): void;
 
-// Changes the direction of <me>
 SetDirection(theV: gp_Dir2d): void;
 
-// Returns the origin of <me>
 Location(): gp_Pnt2d;
 
-// Returns the direction of <me>
 Direction(): gp_Dir2d;
 
-// Returns True if
 IsCoaxial(Other: gp_Ax2d, AngularTolerance: number, LinearTolerance: number): boolean;
 
-// Returns true if this axis and the axis theOther are normal to each other
 IsNormal(theOther: gp_Ax2d, theAngularTolerance: number): boolean;
 
-// Returns true if this axis and the axis theOther are parallel, and have opposite orientations
 IsOpposite(theOther: gp_Ax2d, theAngularTolerance: number): boolean;
 
-// Returns true if this axis and the axis theOther are parallel, and have either the same or opposite orientations
 IsParallel(theOther: gp_Ax2d, theAngularTolerance: number): boolean;
 
-// Computes the angle, in radians, between this axis and the axis theOther
 Angle(theOther: gp_Ax2d): number;
 
-// Reverses the direction of <me> and assigns the result to this axis
 Reverse(): void;
 
-// Computes a new axis placement with a direction opposite to the direction of <me>
 Reversed(): gp_Ax2d;
 
 Mirror(P: gp_Pnt2d): void;
@@ -373,7 +282,6 @@ Mirror(A: gp_Ax2d): void;
 Mirror(P: gp_Pnt2d): void;
 Mirror(A: gp_Ax2d): void;
 
-// Performs the symmetrical transformation of an axis placement with respect to the point P which is the center of the symmetry
 Mirrored(P: gp_Pnt2d): gp_Ax2d;
 Mirrored(A: gp_Ax2d): gp_Ax2d;
 Mirrored(P: gp_Pnt2d): gp_Ax2d;
@@ -381,17 +289,14 @@ Mirrored(A: gp_Ax2d): gp_Ax2d;
 
 Rotate(theP: gp_Pnt2d, theAng: number): void;
 
-// Rotates an axis placement
 Rotated(theP: gp_Pnt2d, theAng: number): gp_Ax2d;
 
 Scale(P: gp_Pnt2d, S: number): void;
 
-// Applies a scaling transformation on the axis placement
 Scaled(theP: gp_Pnt2d, theS: number): gp_Ax2d;
 
 Transform(theT: gp_Trsf2d): void;
 
-// Transforms an axis placement with a Trsf
 Transformed(theT: gp_Trsf2d): gp_Ax2d;
 
 Translate(theV: gp_Vec2d): void;
@@ -399,71 +304,51 @@ Translate(theP1: gp_Pnt2d, theP2: gp_Pnt2d): void;
 Translate(theV: gp_Vec2d): void;
 Translate(theP1: gp_Pnt2d, theP2: gp_Pnt2d): void;
 
-// Translates an axis placement in the direction of the vector theV
 Translated(theV: gp_Vec2d): gp_Ax2d;
 Translated(theP1: gp_Pnt2d, theP2: gp_Pnt2d): gp_Ax2d;
 Translated(theV: gp_Vec2d): gp_Ax2d;
 Translated(theP1: gp_Pnt2d, theP2: gp_Pnt2d): gp_Ax2d;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Describes a coordinate system in 3D space
 gp_Ax3: declare class gp_Ax3
 
 constructor
 
-// Reverses the X direction of <me>
 XReverse(): void;
 
-// Reverses the Y direction of <me>
 YReverse(): void;
 
-// Reverses the Z direction of <me>
 ZReverse(): void;
 
-// Assigns the origin and "main Direction" of the axis theA1 to this coordinate system, then recomputes its "X Direction" and "Y Direction"
 SetAxis(theA1: gp_Ax1): void;
 
-// Changes the main direction of this coordinate system, then recomputes its "X Direction" and "Y Direction"
 SetDirection(theV: gp_Dir): void;
 
-// Changes the "Location" point (origin) of <me>
 SetLocation(theP: gp_Pnt): void;
 
-// Changes the "Xdirection" of <me>
 SetXDirection(theVx: gp_Dir): void;
 
-// Changes the "Ydirection" of <me>
 SetYDirection(theVy: gp_Dir): void;
 
-// Computes the angular value between the main direction of <me> and the main direction of <theOther>
 Angle(theOther: gp_Ax3): number;
 
-// Returns the main axis of <me>
 Axis(): gp_Ax1;
 
-// Computes a right-handed coordinate system with the same "X Direction" and "Y Direction" as those of this coordinate system, then recomputes the "main Direction"
 Ax2(): gp_Ax2;
 
-// Returns the main direction of <me>
 Direction(): gp_Dir;
 
-// Returns the "Location" point (origin) of <me>
 Location(): gp_Pnt;
 
-// Returns the "XDirection" of <me>
 XDirection(): gp_Dir;
 
-// Returns the "YDirection" of <me>
 YDirection(): gp_Dir;
 
-// Returns True if the coordinate system is right-handed
 Direct(): boolean;
 
-// Returns True if
 IsCoplanar(theOther: gp_Ax3, theLinearTolerance: number, theAngularTolerance: number): boolean;
 IsCoplanar(theA1: gp_Ax1, theLinearTolerance: number, theAngularTolerance: number): boolean;
 IsCoplanar(theOther: gp_Ax3, theLinearTolerance: number, theAngularTolerance: number): boolean;
@@ -479,7 +364,6 @@ Mirror(theP: gp_Pnt): void;
 Mirror(theA1: gp_Ax1): void;
 Mirror(theA2: gp_Ax2): void;
 
-// Performs the symmetrical transformation of an axis placement with respect to the point theP which is the center of the symmetry
 Mirrored(theP: gp_Pnt): gp_Ax3;
 Mirrored(theA1: gp_Ax1): gp_Ax3;
 Mirrored(theA2: gp_Ax2): gp_Ax3;
@@ -492,17 +376,14 @@ Mirrored(theA2: gp_Ax2): gp_Ax3;
 
 Rotate(theA1: gp_Ax1, theAng: number): void;
 
-// Rotates an axis placement
 Rotated(theA1: gp_Ax1, theAng: number): gp_Ax3;
 
 Scale(theP: gp_Pnt, theS: number): void;
 
-// Applies a scaling transformation on the axis placement
 Scaled(theP: gp_Pnt, theS: number): gp_Ax3;
 
 Transform(theT: gp_Trsf): void;
 
-// Transforms an axis placement with a Trsf
 Transformed(theT: gp_Trsf): gp_Ax3;
 
 Translate(theV: gp_Vec): void;
@@ -510,13 +391,493 @@ Translate(theP1: gp_Pnt, theP2: gp_Pnt): void;
 Translate(theV: gp_Vec): void;
 Translate(theP1: gp_Pnt, theP2: gp_Pnt): void;
 
-// Translates an axis plaxement in the direction of the vector <theV>
 Translated(theV: gp_Vec): gp_Ax3;
 Translated(theP1: gp_Pnt, theP2: gp_Pnt): gp_Ax3;
 Translated(theV: gp_Vec): gp_Ax3;
 Translated(theP1: gp_Pnt, theP2: gp_Pnt): gp_Ax3;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
+
+gp_Circ: declare class gp_Circ
+
+constructor
+
+SetAxis(theA1: gp_Ax1): void;
+
+SetLocation(theP: gp_Pnt): void;
+
+SetPosition(theA2: gp_Ax2): void;
+
+SetRadius(theRadius: number): void;
+
+Area(): number;
+
+Axis(): gp_Ax1;
+
+Length(): number;
+
+Location(): gp_Pnt;
+
+Position(): gp_Ax2;
+
+Radius(): number;
+
+XAxis(): gp_Ax1;
+
+YAxis(): gp_Ax1;
+
+Distance(theP: gp_Pnt): number;
+
+SquareDistance(theP: gp_Pnt): number;
+
+Contains(theP: gp_Pnt, theLinearTolerance: number): boolean;
+
+Mirror(theP: gp_Pnt): void;
+Mirror(theA1: gp_Ax1): void;
+Mirror(theA2: gp_Ax2): void;
+Mirror(theP: gp_Pnt): void;
+Mirror(theA1: gp_Ax1): void;
+Mirror(theA2: gp_Ax2): void;
+Mirror(theP: gp_Pnt): void;
+Mirror(theA1: gp_Ax1): void;
+Mirror(theA2: gp_Ax2): void;
+
+Mirrored(theP: gp_Pnt): gp_Circ;
+Mirrored(theA1: gp_Ax1): gp_Circ;
+Mirrored(theA2: gp_Ax2): gp_Circ;
+Mirrored(theP: gp_Pnt): gp_Circ;
+Mirrored(theA1: gp_Ax1): gp_Circ;
+Mirrored(theA2: gp_Ax2): gp_Circ;
+Mirrored(theP: gp_Pnt): gp_Circ;
+Mirrored(theA1: gp_Ax1): gp_Circ;
+Mirrored(theA2: gp_Ax2): gp_Circ;
+
+Rotate(theA1: gp_Ax1, theAng: number): void;
+
+Rotated(theA1: gp_Ax1, theAng: number): gp_Circ;
+
+Scale(theP: gp_Pnt, theS: number): void;
+
+Scaled(theP: gp_Pnt, theS: number): gp_Circ;
+
+Transform(theT: gp_Trsf): void;
+
+Transformed(theT: gp_Trsf): gp_Circ;
+
+Translate(theV: gp_Vec): void;
+Translate(theP1: gp_Pnt, theP2: gp_Pnt): void;
+Translate(theV: gp_Vec): void;
+Translate(theP1: gp_Pnt, theP2: gp_Pnt): void;
+
+Translated(theV: gp_Vec): gp_Circ;
+Translated(theP1: gp_Pnt, theP2: gp_Pnt): gp_Circ;
+Translated(theV: gp_Vec): gp_Circ;
+Translated(theP1: gp_Pnt, theP2: gp_Pnt): gp_Circ;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+gp_Circ2d: declare class gp_Circ2d
+
+constructor
+
+SetLocation(theP: gp_Pnt2d): void;
+
+SetXAxis(theA: gp_Ax2d): void;
+
+SetAxis(theA: gp_Ax22d): void;
+
+SetYAxis(theA: gp_Ax2d): void;
+
+SetRadius(theRadius: number): void;
+
+Area(): number;
+
+Coefficients(theA?: number, theB?: number, theC?: number, theD?: number, theE?: number, theF?: number): { theA: number; theB: number; theC: number; theD: number; theE: number; theF: number };
+
+Contains(theP: gp_Pnt2d, theLinearTolerance: number): boolean;
+
+Distance(theP: gp_Pnt2d): number;
+
+SquareDistance(theP: gp_Pnt2d): number;
+
+Length(): number;
+
+Location(): gp_Pnt2d;
+
+Radius(): number;
+
+Axis(): gp_Ax22d;
+
+Position(): gp_Ax22d;
+
+XAxis(): gp_Ax2d;
+
+YAxis(): gp_Ax2d;
+
+Reverse(): void;
+
+Reversed(): gp_Circ2d;
+
+IsDirect(): boolean;
+
+Mirror(theP: gp_Pnt2d): void;
+Mirror(theA: gp_Ax2d): void;
+Mirror(theP: gp_Pnt2d): void;
+Mirror(theA: gp_Ax2d): void;
+
+Mirrored(theP: gp_Pnt2d): gp_Circ2d;
+Mirrored(theA: gp_Ax2d): gp_Circ2d;
+Mirrored(theP: gp_Pnt2d): gp_Circ2d;
+Mirrored(theA: gp_Ax2d): gp_Circ2d;
+
+Rotate(theP: gp_Pnt2d, theAng: number): void;
+
+Rotated(theP: gp_Pnt2d, theAng: number): gp_Circ2d;
+
+Scale(theP: gp_Pnt2d, theS: number): void;
+
+Scaled(theP: gp_Pnt2d, theS: number): gp_Circ2d;
+
+Transform(theT: gp_Trsf2d): void;
+
+Transformed(theT: gp_Trsf2d): gp_Circ2d;
+
+Translate(theV: gp_Vec2d): void;
+Translate(theP1: gp_Pnt2d, theP2: gp_Pnt2d): void;
+Translate(theV: gp_Vec2d): void;
+Translate(theP1: gp_Pnt2d, theP2: gp_Pnt2d): void;
+
+Translated(theV: gp_Vec2d): gp_Circ2d;
+Translated(theP1: gp_Pnt2d, theP2: gp_Pnt2d): gp_Circ2d;
+Translated(theV: gp_Vec2d): gp_Circ2d;
+Translated(theP1: gp_Pnt2d, theP2: gp_Pnt2d): gp_Circ2d;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+gp_Cone: declare class gp_Cone
+
+constructor
+
+SetAxis(theA1: gp_Ax1): void;
+
+SetLocation(theLoc: gp_Pnt): void;
+
+SetPosition(theA3: gp_Ax3): void;
+
+SetRadius(theR: number): void;
+
+SetSemiAngle(theAng: number): void;
+
+Apex(): gp_Pnt;
+
+UReverse(): void;
+
+VReverse(): void;
+
+Direct(): boolean;
+
+Axis(): gp_Ax1;
+
+Coefficients(theA1?: number, theA2?: number, theA3?: number, theB1?: number, theB2?: number, theB3?: number, theC1?: number, theC2?: number, theC3?: number, theD?: number): { theA1: number; theA2: number; theA3: number; theB1: number; theB2: number; theB3: number; theC1: number; theC2: number; theC3: number; theD: number };
+
+Location(): gp_Pnt;
+
+Position(): gp_Ax3;
+
+RefRadius(): number;
+
+SemiAngle(): number;
+
+XAxis(): gp_Ax1;
+
+YAxis(): gp_Ax1;
+
+Mirror(theP: gp_Pnt): void;
+Mirror(theA1: gp_Ax1): void;
+Mirror(theA2: gp_Ax2): void;
+Mirror(theP: gp_Pnt): void;
+Mirror(theA1: gp_Ax1): void;
+Mirror(theA2: gp_Ax2): void;
+Mirror(theP: gp_Pnt): void;
+Mirror(theA1: gp_Ax1): void;
+Mirror(theA2: gp_Ax2): void;
+
+Mirrored(theP: gp_Pnt): gp_Cone;
+Mirrored(theA1: gp_Ax1): gp_Cone;
+Mirrored(theA2: gp_Ax2): gp_Cone;
+Mirrored(theP: gp_Pnt): gp_Cone;
+Mirrored(theA1: gp_Ax1): gp_Cone;
+Mirrored(theA2: gp_Ax2): gp_Cone;
+Mirrored(theP: gp_Pnt): gp_Cone;
+Mirrored(theA1: gp_Ax1): gp_Cone;
+Mirrored(theA2: gp_Ax2): gp_Cone;
+
+Rotate(theA1: gp_Ax1, theAng: number): void;
+
+Rotated(theA1: gp_Ax1, theAng: number): gp_Cone;
+
+Scale(theP: gp_Pnt, theS: number): void;
+
+Scaled(theP: gp_Pnt, theS: number): gp_Cone;
+
+Transform(theT: gp_Trsf): void;
+
+Transformed(theT: gp_Trsf): gp_Cone;
+
+Translate(theV: gp_Vec): void;
+Translate(theP1: gp_Pnt, theP2: gp_Pnt): void;
+Translate(theV: gp_Vec): void;
+Translate(theP1: gp_Pnt, theP2: gp_Pnt): void;
+
+Translated(theV: gp_Vec): gp_Cone;
+Translated(theP1: gp_Pnt, theP2: gp_Pnt): gp_Cone;
+Translated(theV: gp_Vec): gp_Cone;
+Translated(theP1: gp_Pnt, theP2: gp_Pnt): gp_Cone;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+gp_Cylinder: declare class gp_Cylinder
+
+constructor
+
+SetAxis(theA1: gp_Ax1): void;
+
+SetLocation(theLoc: gp_Pnt): void;
+
+SetPosition(theA3: gp_Ax3): void;
+
+SetRadius(theR: number): void;
+
+UReverse(): void;
+
+VReverse(): void;
+
+Direct(): boolean;
+
+Axis(): gp_Ax1;
+
+Coefficients(theA1?: number, theA2?: number, theA3?: number, theB1?: number, theB2?: number, theB3?: number, theC1?: number, theC2?: number, theC3?: number, theD?: number): { theA1: number; theA2: number; theA3: number; theB1: number; theB2: number; theB3: number; theC1: number; theC2: number; theC3: number; theD: number };
+
+Location(): gp_Pnt;
+
+Position(): gp_Ax3;
+
+Radius(): number;
+
+XAxis(): gp_Ax1;
+
+YAxis(): gp_Ax1;
+
+Mirror(theP: gp_Pnt): void;
+Mirror(theA1: gp_Ax1): void;
+Mirror(theA2: gp_Ax2): void;
+Mirror(theP: gp_Pnt): void;
+Mirror(theA1: gp_Ax1): void;
+Mirror(theA2: gp_Ax2): void;
+Mirror(theP: gp_Pnt): void;
+Mirror(theA1: gp_Ax1): void;
+Mirror(theA2: gp_Ax2): void;
+
+Mirrored(theP: gp_Pnt): gp_Cylinder;
+Mirrored(theA1: gp_Ax1): gp_Cylinder;
+Mirrored(theA2: gp_Ax2): gp_Cylinder;
+Mirrored(theP: gp_Pnt): gp_Cylinder;
+Mirrored(theA1: gp_Ax1): gp_Cylinder;
+Mirrored(theA2: gp_Ax2): gp_Cylinder;
+Mirrored(theP: gp_Pnt): gp_Cylinder;
+Mirrored(theA1: gp_Ax1): gp_Cylinder;
+Mirrored(theA2: gp_Ax2): gp_Cylinder;
+
+Rotate(theA1: gp_Ax1, theAng: number): void;
+
+Rotated(theA1: gp_Ax1, theAng: number): gp_Cylinder;
+
+Scale(theP: gp_Pnt, theS: number): void;
+
+Scaled(theP: gp_Pnt, theS: number): gp_Cylinder;
+
+Transform(theT: gp_Trsf): void;
+
+Transformed(theT: gp_Trsf): gp_Cylinder;
+
+Translate(theV: gp_Vec): void;
+Translate(theP1: gp_Pnt, theP2: gp_Pnt): void;
+Translate(theV: gp_Vec): void;
+Translate(theP1: gp_Pnt, theP2: gp_Pnt): void;
+
+Translated(theV: gp_Vec): gp_Cylinder;
+Translated(theP1: gp_Pnt, theP2: gp_Pnt): gp_Cylinder;
+Translated(theV: gp_Vec): gp_Cylinder;
+Translated(theP1: gp_Pnt, theP2: gp_Pnt): gp_Cylinder;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+gp_Dir: declare class gp_Dir
+
+constructor
+
+SetCoord(theIndex: number, theXi: number): void;
+SetCoord(theXv: number, theYv: number, theZv: number): void;
+SetCoord(theIndex: number, theXi: number): void;
+SetCoord(theXv: number, theYv: number, theZv: number): void;
+
+SetX(theX: number): void;
+
+SetY(theY: number): void;
+
+SetZ(theZ: number): void;
+
+SetXYZ(theCoord: gp_XYZ): void;
+
+Coord(theIndex: number): number;
+Coord(theXv?: number, theYv?: number, theZv?: number): { theXv: number; theYv: number; theZv: number };
+Coord(theIndex: number): number;
+Coord(theXv?: number, theYv?: number, theZv?: number): { theXv: number; theYv: number; theZv: number };
+
+X(): number;
+
+Y(): number;
+
+Z(): number;
+
+XYZ(): gp_XYZ;
+
+IsEqual(theOther: gp_Dir, theAngularTolerance: number): boolean;
+
+IsNormal(theOther: gp_Dir, theAngularTolerance: number): boolean;
+
+IsOpposite(theOther: gp_Dir, theAngularTolerance: number): boolean;
+
+IsParallel(theOther: gp_Dir, theAngularTolerance: number): boolean;
+
+Angle(theOther: gp_Dir): number;
+
+AngleWithRef(theOther: gp_Dir, theVRef: gp_Dir): number;
+
+Cross(theRight: gp_Dir): void;
+
+Crossed(theRight: gp_Dir): gp_Dir;
+
+CrossCross(theV1: gp_Dir, theV2: gp_Dir): void;
+
+CrossCrossed(theV1: gp_Dir, theV2: gp_Dir): gp_Dir;
+
+Dot(theOther: gp_Dir): number;
+
+DotCross(theV1: gp_Dir, theV2: gp_Dir): number;
+
+Reverse(): void;
+
+Reversed(): gp_Dir;
+
+Mirror(theV: gp_Dir): void;
+Mirror(theA1: gp_Ax1): void;
+Mirror(theA2: gp_Ax2): void;
+Mirror(theV: gp_Dir): void;
+Mirror(theA1: gp_Ax1): void;
+Mirror(theA2: gp_Ax2): void;
+Mirror(theV: gp_Dir): void;
+Mirror(theA1: gp_Ax1): void;
+Mirror(theA2: gp_Ax2): void;
+
+Mirrored(theV: gp_Dir): gp_Dir;
+Mirrored(theA1: gp_Ax1): gp_Dir;
+Mirrored(theA2: gp_Ax2): gp_Dir;
+Mirrored(theV: gp_Dir): gp_Dir;
+Mirrored(theA1: gp_Ax1): gp_Dir;
+Mirrored(theA2: gp_Ax2): gp_Dir;
+Mirrored(theV: gp_Dir): gp_Dir;
+Mirrored(theA1: gp_Ax1): gp_Dir;
+Mirrored(theA2: gp_Ax2): gp_Dir;
+
+Rotate(theA1: gp_Ax1, theAng: number): void;
+
+Rotated(theA1: gp_Ax1, theAng: number): gp_Dir;
+
+Transform(theT: gp_Trsf): void;
+
+Transformed(theT: gp_Trsf): gp_Dir;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+gp_Dir_D: typeof gp_Dir_D[keyof typeof gp_Dir_D]
+
+gp_Dir2d: declare class gp_Dir2d
+
+constructor
+
+SetCoord(theIndex: number, theXi: number): void;
+SetCoord(theXv: number, theYv: number): void;
+SetCoord(theIndex: number, theXi: number): void;
+SetCoord(theXv: number, theYv: number): void;
+
+SetX(theX: number): void;
+
+SetY(theY: number): void;
+
+SetXY(theCoord: gp_XY): void;
+
+Coord(theIndex: number): number;
+Coord(theXv?: number, theYv?: number): { theXv: number; theYv: number };
+Coord(theIndex: number): number;
+Coord(theXv?: number, theYv?: number): { theXv: number; theYv: number };
+
+X(): number;
+
+Y(): number;
+
+XY(): gp_XY;
+
+IsEqual(theOther: gp_Dir2d, theAngularTolerance: number): boolean;
+
+IsNormal(theOther: gp_Dir2d, theAngularTolerance: number): boolean;
+
+IsOpposite(theOther: gp_Dir2d, theAngularTolerance: number): boolean;
+
+IsParallel(theOther: gp_Dir2d, theAngularTolerance: number): boolean;
+
+Angle(theOther: gp_Dir2d): number;
+
+Crossed(theRight: gp_Dir2d): number;
+
+Dot(theOther: gp_Dir2d): number;
+
+Reverse(): void;
+
+Reversed(): gp_Dir2d;
+
+Mirror(theV: gp_Dir2d): void;
+Mirror(theA: gp_Ax2d): void;
+Mirror(theV: gp_Dir2d): void;
+Mirror(theA: gp_Ax2d): void;
+
+Mirrored(theV: gp_Dir2d): gp_Dir2d;
+Mirrored(theA: gp_Ax2d): gp_Dir2d;
+Mirrored(theV: gp_Dir2d): gp_Dir2d;
+Mirrored(theA: gp_Ax2d): gp_Dir2d;
+
+Rotate(Ang: number): void;
+
+Rotated(theAng: number): gp_Dir2d;
+
+Transform(theT: gp_Trsf2d): void;
+
+Transformed(theT: gp_Trsf2d): gp_Dir2d;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+gp_Dir2d_D: typeof gp_Dir2d_D[keyof typeof gp_Dir2d_D]

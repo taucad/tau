@@ -2,67 +2,49 @@
 
 41 top-level symbols. Signatures are verbatim typescript.
 
-// Representation of STEP SELECT type ApprovedItem
 StepAP203_ApprovedItem: declare class StepAP203_ApprovedItem extends StepData_SelectType
 
 constructor
 
-// Recognizes a kind of ApprovedItem select type 1 -> ProductDefinitionFormation from StepBasic 2 -> ProductDefinition from StepBasic 3 -> ConfigurationEffectivity from StepRepr 4 -> ConfigurationItem from StepRepr 5 -> SecurityClassification from StepBasic 6 -> ChangeRequest from StepAP203 7 -> Change from StepAP203 8 -> StartRequest from StepAP203 9 -> StartWork from StepAP203 10 -> Certification from StepBasic 11 -> Contract from StepBasic 0 else
 CaseNum(ent: Standard_Transient): number;
 
-// Returns Value as ProductDefinitionFormation (or Null if another type)
 ProductDefinitionFormation(): StepBasic_ProductDefinitionFormation;
 
-// Returns Value as ProductDefinition (or Null if another type)
 ProductDefinition(): StepBasic_ProductDefinition;
 
-// Returns Value as ConfigurationEffectivity (or Null if another type)
 ConfigurationEffectivity(): StepRepr_ConfigurationEffectivity;
 
-// Returns Value as ConfigurationItem (or Null if another type)
 ConfigurationItem(): StepRepr_ConfigurationItem;
 
-// Returns Value as SecurityClassification (or Null if another type)
 SecurityClassification(): StepBasic_SecurityClassification;
 
-// Returns Value as ChangeRequest (or Null if another type)
 ChangeRequest(): StepAP203_ChangeRequest;
 
-// Returns Value as Change (or Null if another type)
 Change(): StepAP203_Change;
 
-// Returns Value as StartRequest (or Null if another type)
 StartRequest(): StepAP203_StartRequest;
 
-// Returns Value as StartWork (or Null if another type)
 StartWork(): StepAP203_StartWork;
 
-// Returns Value as Certification (or Null if another type)
 Certification(): StepBasic_Certification;
 
-// Returns Value as Contract (or Null if another type)
 Contract(): StepBasic_Contract;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Representation of STEP entity CcDesignApproval
 StepAP203_CcDesignApproval: declare class StepAP203_CcDesignApproval extends StepBasic_ApprovalAssignment
 
 constructor
 
-// Initialize all fields (own and inherited)
 Init(aApprovalAssignment_AssignedApproval: StepBasic_Approval, aItems: NCollection_HArray1_StepAP203_ApprovedItem): void;
 Init(aAssignedApproval: StepBasic_Approval): void;
 Init(aApprovalAssignment_AssignedApproval: StepBasic_Approval, aItems: NCollection_HArray1_StepAP203_ApprovedItem): void;
 Init(aAssignedApproval: StepBasic_Approval): void;
 
-// Returns field Items
 Items(): NCollection_HArray1_StepAP203_ApprovedItem;
 
-// Set field Items
 SetItems(Items: NCollection_HArray1_StepAP203_ApprovedItem): void;
 
 static get_type_name(): string;
@@ -71,26 +53,21 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Representation of STEP entity CcDesignCertification
 StepAP203_CcDesignCertification: declare class StepAP203_CcDesignCertification extends StepBasic_CertificationAssignment
 
 constructor
 
-// Initialize all fields (own and inherited)
 Init(aCertificationAssignment_AssignedCertification: StepBasic_Certification, aItems: NCollection_HArray1_StepAP203_CertifiedItem): void;
 Init(aAssignedCertification: StepBasic_Certification): void;
 Init(aCertificationAssignment_AssignedCertification: StepBasic_Certification, aItems: NCollection_HArray1_StepAP203_CertifiedItem): void;
 Init(aAssignedCertification: StepBasic_Certification): void;
 
-// Returns field Items
 Items(): NCollection_HArray1_StepAP203_CertifiedItem;
 
-// Set field Items
 SetItems(Items: NCollection_HArray1_StepAP203_CertifiedItem): void;
 
 static get_type_name(): string;
@@ -99,26 +76,21 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Representation of STEP entity CcDesignContract
 StepAP203_CcDesignContract: declare class StepAP203_CcDesignContract extends StepBasic_ContractAssignment
 
 constructor
 
-// Initialize all fields (own and inherited)
 Init(aContractAssignment_AssignedContract: StepBasic_Contract, aItems: NCollection_HArray1_StepAP203_ContractedItem): void;
 Init(aAssignedContract: StepBasic_Contract): void;
 Init(aContractAssignment_AssignedContract: StepBasic_Contract, aItems: NCollection_HArray1_StepAP203_ContractedItem): void;
 Init(aAssignedContract: StepBasic_Contract): void;
 
-// Returns field Items
 Items(): NCollection_HArray1_StepAP203_ContractedItem;
 
-// Set field Items
 SetItems(Items: NCollection_HArray1_StepAP203_ContractedItem): void;
 
 static get_type_name(): string;
@@ -127,26 +99,21 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Representation of STEP entity CcDesignDateAndTimeAssignment
 StepAP203_CcDesignDateAndTimeAssignment: declare class StepAP203_CcDesignDateAndTimeAssignment extends StepBasic_DateAndTimeAssignment
 
 constructor
 
-// Initialize all fields (own and inherited)
 Init(aDateAndTimeAssignment_AssignedDateAndTime: StepBasic_DateAndTime, aDateAndTimeAssignment_Role: StepBasic_DateTimeRole, aItems: NCollection_HArray1_StepAP203_DateTimeItem): void;
 Init(aAssignedDateAndTime: StepBasic_DateAndTime, aRole: StepBasic_DateTimeRole): void;
 Init(aDateAndTimeAssignment_AssignedDateAndTime: StepBasic_DateAndTime, aDateAndTimeAssignment_Role: StepBasic_DateTimeRole, aItems: NCollection_HArray1_StepAP203_DateTimeItem): void;
 Init(aAssignedDateAndTime: StepBasic_DateAndTime, aRole: StepBasic_DateTimeRole): void;
 
-// Returns field Items
 Items(): NCollection_HArray1_StepAP203_DateTimeItem;
 
-// Set field Items
 SetItems(Items: NCollection_HArray1_StepAP203_DateTimeItem): void;
 
 static get_type_name(): string;
@@ -155,26 +122,21 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Representation of STEP entity CcDesignPersonAndOrganizationAssignment
 StepAP203_CcDesignPersonAndOrganizationAssignment: declare class StepAP203_CcDesignPersonAndOrganizationAssignment extends StepBasic_PersonAndOrganizationAssignment
 
 constructor
 
-// Initialize all fields (own and inherited)
 Init(aPersonAndOrganizationAssignment_AssignedPersonAndOrganization: StepBasic_PersonAndOrganization, aPersonAndOrganizationAssignment_Role: StepBasic_PersonAndOrganizationRole, aItems: NCollection_HArray1_StepAP203_PersonOrganizationItem): void;
 Init(aAssignedPersonAndOrganization: StepBasic_PersonAndOrganization, aRole: StepBasic_PersonAndOrganizationRole): void;
 Init(aPersonAndOrganizationAssignment_AssignedPersonAndOrganization: StepBasic_PersonAndOrganization, aPersonAndOrganizationAssignment_Role: StepBasic_PersonAndOrganizationRole, aItems: NCollection_HArray1_StepAP203_PersonOrganizationItem): void;
 Init(aAssignedPersonAndOrganization: StepBasic_PersonAndOrganization, aRole: StepBasic_PersonAndOrganizationRole): void;
 
-// Returns field Items
 Items(): NCollection_HArray1_StepAP203_PersonOrganizationItem;
 
-// Set field Items
 SetItems(Items: NCollection_HArray1_StepAP203_PersonOrganizationItem): void;
 
 static get_type_name(): string;
@@ -183,26 +145,21 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Representation of STEP entity CcDesignSecurityClassification
 StepAP203_CcDesignSecurityClassification: declare class StepAP203_CcDesignSecurityClassification extends StepBasic_SecurityClassificationAssignment
 
 constructor
 
-// Initialize all fields (own and inherited)
 Init(aSecurityClassificationAssignment_AssignedSecurityClassification: StepBasic_SecurityClassification, aItems: NCollection_HArray1_StepAP203_ClassifiedItem): void;
 Init(aAssignedSecurityClassification: StepBasic_SecurityClassification): void;
 Init(aSecurityClassificationAssignment_AssignedSecurityClassification: StepBasic_SecurityClassification, aItems: NCollection_HArray1_StepAP203_ClassifiedItem): void;
 Init(aAssignedSecurityClassification: StepBasic_SecurityClassification): void;
 
-// Returns field Items
 Items(): NCollection_HArray1_StepAP203_ClassifiedItem;
 
-// Set field Items
 SetItems(Items: NCollection_HArray1_StepAP203_ClassifiedItem): void;
 
 static get_type_name(): string;
@@ -211,23 +168,18 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Representation of STEP entity CcDesignSpecificationReference
 StepAP203_CcDesignSpecificationReference: declare class StepAP203_CcDesignSpecificationReference extends StepBasic_DocumentReference
 
 constructor
 
-// Initialize all fields (own and inherited)
 Init(aDocumentReference_AssignedDocument: StepBasic_Document, aDocumentReference_Source: TCollection_HAsciiString, aItems: NCollection_HArray1_StepAP203_SpecifiedItem): void;
 
-// Returns field Items
 Items(): NCollection_HArray1_StepAP203_SpecifiedItem;
 
-// Set field Items
 SetItems(Items: NCollection_HArray1_StepAP203_SpecifiedItem): void;
 
 static get_type_name(): string;
@@ -236,42 +188,33 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Representation of STEP SELECT type CertifiedItem
 StepAP203_CertifiedItem: declare class StepAP203_CertifiedItem extends StepData_SelectType
 
 constructor
 
-// Recognizes a kind of CertifiedItem select type 1 -> SuppliedPartRelationship from StepRepr 0 else
 CaseNum(ent: Standard_Transient): number;
 
-// Returns Value as SuppliedPartRelationship (or Null if another type)
 SuppliedPartRelationship(): StepRepr_SuppliedPartRelationship;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Representation of STEP entity Change
 StepAP203_Change: declare class StepAP203_Change extends StepBasic_ActionAssignment
 
 constructor
 
-// Initialize all fields (own and inherited)
 Init(aActionAssignment_AssignedAction: StepBasic_Action, aItems: NCollection_HArray1_StepAP203_WorkItem): void;
 Init(aAssignedAction: StepBasic_Action): void;
 Init(aActionAssignment_AssignedAction: StepBasic_Action, aItems: NCollection_HArray1_StepAP203_WorkItem): void;
 Init(aAssignedAction: StepBasic_Action): void;
 
-// Returns field Items
 Items(): NCollection_HArray1_StepAP203_WorkItem;
 
-// Set field Items
 SetItems(Items: NCollection_HArray1_StepAP203_WorkItem): void;
 
 static get_type_name(): string;
@@ -280,26 +223,21 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Representation of STEP entity ChangeRequest
 StepAP203_ChangeRequest: declare class StepAP203_ChangeRequest extends StepBasic_ActionRequestAssignment
 
 constructor
 
-// Initialize all fields (own and inherited)
 Init(aActionRequestAssignment_AssignedActionRequest: StepBasic_VersionedActionRequest, aItems: NCollection_HArray1_StepAP203_ChangeRequestItem): void;
 Init(aAssignedActionRequest: StepBasic_VersionedActionRequest): void;
 Init(aActionRequestAssignment_AssignedActionRequest: StepBasic_VersionedActionRequest, aItems: NCollection_HArray1_StepAP203_ChangeRequestItem): void;
 Init(aAssignedActionRequest: StepBasic_VersionedActionRequest): void;
 
-// Returns field Items
 Items(): NCollection_HArray1_StepAP203_ChangeRequestItem;
 
-// Set field Items
 SetItems(Items: NCollection_HArray1_StepAP203_ChangeRequestItem): void;
 
 static get_type_name(): string;
@@ -308,179 +246,131 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Representation of STEP SELECT type ChangeRequestItem
 StepAP203_ChangeRequestItem: declare class StepAP203_ChangeRequestItem extends StepData_SelectType
 
 constructor
 
-// Recognizes a kind of ChangeRequestItem select type 1 -> ProductDefinitionFormation from StepBasic 0 else
 CaseNum(ent: Standard_Transient): number;
 
-// Returns Value as ProductDefinitionFormation (or Null if another type)
 ProductDefinitionFormation(): StepBasic_ProductDefinitionFormation;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Representation of STEP SELECT type ClassifiedItem
 StepAP203_ClassifiedItem: declare class StepAP203_ClassifiedItem extends StepData_SelectType
 
 constructor
 
-// Recognizes a kind of ClassifiedItem select type 1 -> ProductDefinitionFormation from StepBasic 2 -> AssemblyComponentUsage from StepRepr 0 else
 CaseNum(ent: Standard_Transient): number;
 
-// Returns Value as ProductDefinitionFormation (or Null if another type)
 ProductDefinitionFormation(): StepBasic_ProductDefinitionFormation;
 
-// Returns Value as AssemblyComponentUsage (or Null if another type)
 AssemblyComponentUsage(): StepRepr_AssemblyComponentUsage;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Representation of STEP SELECT type ContractedItem
 StepAP203_ContractedItem: declare class StepAP203_ContractedItem extends StepData_SelectType
 
 constructor
 
-// Recognizes a kind of ContractedItem select type 1 -> ProductDefinitionFormation from StepBasic 0 else
 CaseNum(ent: Standard_Transient): number;
 
-// Returns Value as ProductDefinitionFormation (or Null if another type)
 ProductDefinitionFormation(): StepBasic_ProductDefinitionFormation;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Representation of STEP SELECT type DateTimeItem
 StepAP203_DateTimeItem: declare class StepAP203_DateTimeItem extends StepData_SelectType
 
 constructor
 
-// Recognizes a kind of DateTimeItem select type 1 -> ProductDefinition from StepBasic 2 -> ChangeRequest from StepAP203 3 -> StartRequest from StepAP203 4 -> Change from StepAP203 5 -> StartWork from StepAP203 6 -> ApprovalPersonOrganization from StepBasic 7 -> Contract from StepBasic 8 -> SecurityClassification from StepBasic 9 -> Certification from StepBasic 0 else
 CaseNum(ent: Standard_Transient): number;
 
-// Returns Value as ProductDefinition (or Null if another type)
 ProductDefinition(): StepBasic_ProductDefinition;
 
-// Returns Value as ChangeRequest (or Null if another type)
 ChangeRequest(): StepAP203_ChangeRequest;
 
-// Returns Value as StartRequest (or Null if another type)
 StartRequest(): StepAP203_StartRequest;
 
-// Returns Value as Change (or Null if another type)
 Change(): StepAP203_Change;
 
-// Returns Value as StartWork (or Null if another type)
 StartWork(): StepAP203_StartWork;
 
-// Returns Value as ApprovalPersonOrganization (or Null if another type)
 ApprovalPersonOrganization(): StepBasic_ApprovalPersonOrganization;
 
-// Returns Value as Contract (or Null if another type)
 Contract(): StepBasic_Contract;
 
-// Returns Value as SecurityClassification (or Null if another type)
 SecurityClassification(): StepBasic_SecurityClassification;
 
-// Returns Value as Certification (or Null if another type)
 Certification(): StepBasic_Certification;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Representation of STEP SELECT type PersonOrganizationItem
 StepAP203_PersonOrganizationItem: declare class StepAP203_PersonOrganizationItem extends StepData_SelectType
 
 constructor
 
-// Recognizes a kind of PersonOrganizationItem select type 1 -> Change from StepAP203 2 -> StartWork from StepAP203 3 -> ChangeRequest from StepAP203 4 -> StartRequest from StepAP203 5 -> ConfigurationItem from StepRepr 6 -> Product from StepBasic 7 -> ProductDefinitionFormation from StepBasic 8 -> ProductDefinition from StepBasic 9 -> Contract from StepBasic 10 -> SecurityClassification from StepBasic 0 else
 CaseNum(ent: Standard_Transient): number;
 
-// Returns Value as Change (or Null if another type)
 Change(): StepAP203_Change;
 
-// Returns Value as StartWork (or Null if another type)
 StartWork(): StepAP203_StartWork;
 
-// Returns Value as ChangeRequest (or Null if another type)
 ChangeRequest(): StepAP203_ChangeRequest;
 
-// Returns Value as StartRequest (or Null if another type)
 StartRequest(): StepAP203_StartRequest;
 
-// Returns Value as ConfigurationItem (or Null if another type)
 ConfigurationItem(): StepRepr_ConfigurationItem;
 
-// Returns Value as Product (or Null if another type)
 Product(): StepBasic_Product;
 
-// Returns Value as ProductDefinitionFormation (or Null if another type)
 ProductDefinitionFormation(): StepBasic_ProductDefinitionFormation;
 
-// Returns Value as ProductDefinition (or Null if another type)
 ProductDefinition(): StepBasic_ProductDefinition;
 
-// Returns Value as Contract (or Null if another type)
 Contract(): StepBasic_Contract;
 
-// Returns Value as SecurityClassification (or Null if another type)
 SecurityClassification(): StepBasic_SecurityClassification;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Representation of STEP SELECT type SpecifiedItem
 StepAP203_SpecifiedItem: declare class StepAP203_SpecifiedItem extends StepData_SelectType
 
 constructor
 
-// Recognizes a kind of SpecifiedItem select type 1 -> ProductDefinition from StepBasic 2 -> ShapeAspect from StepRepr 0 else
 CaseNum(ent: Standard_Transient): number;
 
-// Returns Value as ProductDefinition (or Null if another type)
 ProductDefinition(): StepBasic_ProductDefinition;
 
-// Returns Value as ShapeAspect (or Null if another type)
 ShapeAspect(): StepRepr_ShapeAspect;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Representation of STEP entity StartRequest
 StepAP203_StartRequest: declare class StepAP203_StartRequest extends StepBasic_ActionRequestAssignment
 
 constructor
 
-// Initialize all fields (own and inherited)
 Init(aActionRequestAssignment_AssignedActionRequest: StepBasic_VersionedActionRequest, aItems: NCollection_HArray1_StepAP203_StartRequestItem): void;
 Init(aAssignedActionRequest: StepBasic_VersionedActionRequest): void;
 Init(aActionRequestAssignment_AssignedActionRequest: StepBasic_VersionedActionRequest, aItems: NCollection_HArray1_StepAP203_StartRequestItem): void;
 Init(aAssignedActionRequest: StepBasic_VersionedActionRequest): void;
 
-// Returns field Items
 Items(): NCollection_HArray1_StepAP203_StartRequestItem;
 
-// Set field Items
 SetItems(Items: NCollection_HArray1_StepAP203_StartRequestItem): void;
 
 static get_type_name(): string;
@@ -489,42 +379,33 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Representation of STEP SELECT type StartRequestItem
 StepAP203_StartRequestItem: declare class StepAP203_StartRequestItem extends StepData_SelectType
 
 constructor
 
-// Recognizes a kind of StartRequestItem select type 1 -> ProductDefinitionFormation from StepBasic 0 else
 CaseNum(ent: Standard_Transient): number;
 
-// Returns Value as ProductDefinitionFormation (or Null if another type)
 ProductDefinitionFormation(): StepBasic_ProductDefinitionFormation;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Representation of STEP entity StartWork
 StepAP203_StartWork: declare class StepAP203_StartWork extends StepBasic_ActionAssignment
 
 constructor
 
-// Initialize all fields (own and inherited)
 Init(aActionAssignment_AssignedAction: StepBasic_Action, aItems: NCollection_HArray1_StepAP203_WorkItem): void;
 Init(aAssignedAction: StepBasic_Action): void;
 Init(aActionAssignment_AssignedAction: StepBasic_Action, aItems: NCollection_HArray1_StepAP203_WorkItem): void;
 Init(aAssignedAction: StepBasic_Action): void;
 
-// Returns field Items
 Items(): NCollection_HArray1_StepAP203_WorkItem;
 
-// Set field Items
 SetItems(Items: NCollection_HArray1_StepAP203_WorkItem): void;
 
 static get_type_name(): string;
@@ -533,23 +414,18 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Representation of STEP SELECT type WorkItem
 StepAP203_WorkItem: declare class StepAP203_WorkItem extends StepData_SelectType
 
 constructor
 
-// Recognizes a kind of WorkItem select type 1 -> ProductDefinitionFormation from StepBasic 0 else
 CaseNum(ent: Standard_Transient): number;
 
-// Returns Value as ProductDefinitionFormation (or Null if another type)
 ProductDefinitionFormation(): StepBasic_ProductDefinitionFormation;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;

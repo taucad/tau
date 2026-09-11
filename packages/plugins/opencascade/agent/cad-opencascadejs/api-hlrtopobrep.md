@@ -2,43 +2,30 @@
 
 6 top-level symbols. Signatures are verbatim typescript.
 
-// Provides methods to fill a {@link HLRTopoBRep_Data`HLRTopoBRep_Data`}
 HLRTopoBRep_DSFiller: declare class HLRTopoBRep_DSFiller
 
 constructor
 
-// Stores in <DS> the outlines of using the current outliner and stores the isolines in <DS> using a Hatcher
 static Insert(S: TopoDS_Shape, FO: Contap_Contour, DS: HLRTopoBRep_Data, MST: NCollection_DataMap_TopoDS_Shape_BRepTopAdaptor_Tool_TopTools_ShapeMapHasher, nbIso: number): void;
-// FO: Mutated in place
-// DS: Mutated in place
-// MST: Mutated in place
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Stores the results of the OutLine and IsoLine processes
 HLRTopoBRep_Data: declare class HLRTopoBRep_Data
 
 constructor
 
-// Clear of all the maps
 Clear(): void;
 
-// Clear of all the data not needed during and after the hiding process
 Clean(): void;
 
-// Returns True if the Edge is split
 EdgeHasSplE(E: TopoDS_Edge): boolean;
 
-// Returns True if the Face has internal outline
 FaceHasIntL(F: TopoDS_Face): boolean;
 
-// Returns True if the Face has outlines on restriction
 FaceHasOutL(F: TopoDS_Face): boolean;
 
-// Returns True if the Face has isolines
 FaceHasIsoL(F: TopoDS_Face): boolean;
 
 IsSplEEdgeEdge(E1: TopoDS_Edge, E2: TopoDS_Edge): boolean;
@@ -51,22 +38,16 @@ IsIsoLFaceEdge(F: TopoDS_Face, E: TopoDS_Edge): boolean;
 
 NewSOldS(New: TopoDS_Shape): TopoDS_Shape;
 
-// Returns the list of the edges
 EdgeSplE(E: TopoDS_Edge): NCollection_List_TopoDS_Shape;
 
-// Returns the list of the internal OutLines
 FaceIntL(F: TopoDS_Face): NCollection_List_TopoDS_Shape;
 
-// Returns the list of the OutLines on restriction
 FaceOutL(F: TopoDS_Face): NCollection_List_TopoDS_Shape;
 
-// Returns the list of the IsoLines
 FaceIsoL(F: TopoDS_Face): NCollection_List_TopoDS_Shape;
 
-// Returns True if V is an outline vertex on a restriction
 IsOutV(V: TopoDS_Vertex): boolean;
 
-// Returns True if V is an internal outline vertex
 IsIntV(V: TopoDS_Vertex): boolean;
 
 AddOldS(NewS: TopoDS_Shape, OldS: TopoDS_Shape): void;
@@ -91,7 +72,6 @@ NextEdge(): void;
 
 Edge(): TopoDS_Edge;
 
-// Start an iteration on the vertices of E
 InitVertex(E: TopoDS_Edge): void;
 
 MoreVertex(): boolean;
@@ -102,17 +82,14 @@ Vertex(): TopoDS_Vertex;
 
 Parameter(): number;
 
-// Insert before the current position
 InsertBefore(V: TopoDS_Vertex, P: number): void;
 
 Append(V: TopoDS_Vertex, P: number): void;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Contains the 3 ListOfShape of a Face (Internal OutLines, OutLines on restriction and IsoLines)
 HLRTopoBRep_FaceData: declare class HLRTopoBRep_FaceData
 
 constructor
@@ -129,7 +106,6 @@ AddOutL(): NCollection_List_TopoDS_Shape;
 
 AddIsoL(): NCollection_List_TopoDS_Shape;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -144,7 +120,6 @@ static MakeVertex(E: TopoDS_Edge, P: gp_Pnt, Par: number, Tol: number, DS: HLRTo
 
 static MakeIsoLine(F: TopoDS_Face, Iso: Geom2d_Line, V1: TopoDS_Vertex, V2: TopoDS_Vertex, U1: number, U2: number, Tol: number, DS: HLRTopoBRep_Data): void;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -173,7 +148,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -186,7 +160,6 @@ Parameter(): number;
 
 Vertex(): TopoDS_Shape;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;

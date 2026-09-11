@@ -6,7 +6,6 @@ LDOMString: declare class LDOMString extends LDOMBasicString
 
 constructor
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;

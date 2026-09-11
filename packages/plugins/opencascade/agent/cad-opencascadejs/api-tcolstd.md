@@ -7,10 +7,8 @@ TColStd_HPackedMapOfInteger: declare class TColStd_HPackedMapOfInteger extends S
 
 constructor
 
-// Returns const reference to the underlying map
 Map(): TColStd_PackedMapOfInteger;
 
-// Returns mutable reference to the underlying map
 ChangeMap(): TColStd_PackedMapOfInteger;
 
 static get_type_name(): string;
@@ -19,17 +17,14 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Indexed map of ASCII string key-value pairs
 TColStd_IndexedDataMapOfStringString: declare class TColStd_IndexedDataMapOfStringString
 
 constructor
 
-// Release the underlying C++ object to prevent memory leaks
 delete(): void;
 
 [Symbol.dispose](): void;

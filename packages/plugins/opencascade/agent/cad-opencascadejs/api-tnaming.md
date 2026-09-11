@@ -1,90 +1,61 @@
 # libcascade — TNaming
 
-22 top-level symbols. Signatures are verbatim typescript.
+27 top-level symbols. Signatures are verbatim typescript.
 
-// A topological attribute can be seen as a hook into the topological structure
 TNaming: declare class TNaming
 
 constructor
 
-// Subtituter les shapes sur les structures de source vers cible
 static Substitute(labelsource: TDF_Label, labelcible: TDF_Label, mapOldNew: NCollection_DataMap_TopoDS_Shape_TopoDS_Shape_TopTools_ShapeMapHasher): void;
-// mapOldNew: Mutated in place
 
-// Mise a jour des shapes du label et de ses fils en tenant compte des substitutions decrite par mapOldNew
 static Update(label: TDF_Label, mapOldNew: NCollection_DataMap_TopoDS_Shape_TopoDS_Shape_TopTools_ShapeMapHasher): void;
-// mapOldNew: Mutated in place
 
-// Application de la Location sur les shapes du label et de ses sous labels
 static Displace(label: TDF_Label, aLocation: TopLoc_Location, WithOld?: boolean): void;
 
-// Remplace les shapes du label et des sous-labels par des copies
 static ChangeShapes(label: TDF_Label, M: NCollection_DataMap_TopoDS_Shape_TopoDS_Shape_TopTools_ShapeMapHasher): void;
-// M: Mutated in place
 
-// Application de la transformation sur les shapes du label et de ses sous labels
 static Transform(label: TDF_Label, aTransformation: gp_Trsf): void;
 
-// Replicates the named shape with the transformation <T> on the label <L> (and sub-labels if necessary) (TNaming_GENERATED is set) Replicates the shape with the transformation <T> on the label <L> (and sub-labels if necessary) (TNaming_GENERATED is set)
 static Replicate(NS: TNaming_NamedShape, T: gp_Trsf, L: TDF_Label): void;
 static Replicate(SH: TopoDS_Shape, T: gp_Trsf, L: TDF_Label): void;
 static Replicate(NS: TNaming_NamedShape, T: gp_Trsf, L: TDF_Label): void;
 static Replicate(SH: TopoDS_Shape, T: gp_Trsf, L: TDF_Label): void;
 
-// Builds shape from map content
 static MakeShape(MS: NCollection_Map_TopoDS_Shape_TopTools_ShapeMapHasher): TopoDS_Shape;
 
-// Find unique context of shape
 static FindUniqueContext(S: TopoDS_Shape, Context: TopoDS_Shape): TopoDS_Shape;
 
-// Find unique context of shape ,which is pure concatenation of atomic shapes (Compound)
 static FindUniqueContextSet(S: TopoDS_Shape, Context: TopoDS_Shape): { returnValue: TopoDS_Shape; Arr: NCollection_HArray1_TopoDS_Shape; [Symbol.dispose](): void };
 
-// Substitutes shape in source structure
 static SubstituteSShape(accesslabel: TDF_Label, From: TopoDS_Shape, To: TopoDS_Shape): boolean;
-// To: Mutated in place
 
-// Returns True if outer wire is found and the found wire in <theWire>
 static OuterWire(theFace: TopoDS_Face, theWire: TopoDS_Wire): boolean;
-// theWire: Mutated in place
 
-// Returns True if outer Shell is found and the found shell in <theShell>
 static OuterShell(theSolid: TopoDS_Solid, theShell: TopoDS_Shell): boolean;
-// theShell: Mutated in place
 
-// Appends to <anIDList> the list of the attributes IDs of this package
 static IDList(anIDList: NCollection_List_Standard_GUID): void;
-// anIDList: Mutated in place
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// A tool to create and maintain topological attributes
 TNaming_Builder: declare class TNaming_Builder
 
 constructor
 
-// Records the shape newShape which was generated during a topological construction
 Generated(newShape: TopoDS_Shape): void;
 Generated(oldShape: TopoDS_Shape, newShape: TopoDS_Shape): void;
 Generated(newShape: TopoDS_Shape): void;
 Generated(oldShape: TopoDS_Shape, newShape: TopoDS_Shape): void;
 
-// Records the shape oldShape which was deleted from the current label
 Delete(oldShape: TopoDS_Shape): void;
 
-// Records the shape newShape which is a modification of the shape oldShape
 Modify(oldShape: TopoDS_Shape, newShape: TopoDS_Shape): void;
 
-// Add a Shape to the current label, This Shape is unmodified
 Select(aShape: TopoDS_Shape, inShape: TopoDS_Shape): void;
 
-// Returns the NamedShape which has been built or is under construction
 NamedShape(): TNaming_NamedShape;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -93,30 +64,21 @@ TNaming_CopyShape: declare class TNaming_CopyShape
 
 constructor
 
-// Makes copy a set of shape(s), using the aMap
 static CopyTool(aShape: TopoDS_Shape, aMap: NCollection_IndexedDataMap_handle_Standard_Transient_handle_Standard_Transient, aResult: TopoDS_Shape): void;
-// aMap: Mutated in place
-// aResult: Mutated in place
 
-// Translates a Transient shape(s) to Transient
 static Translate(aShape: TopoDS_Shape, aMap: NCollection_IndexedDataMap_handle_Standard_Transient_handle_Standard_Transient, aResult: TopoDS_Shape, TrTool: TNaming_TranslateTool): void;
 static Translate(L: TopLoc_Location, aMap: NCollection_IndexedDataMap_handle_Standard_Transient_handle_Standard_Transient): TopLoc_Location;
 static Translate(aShape: TopoDS_Shape, aMap: NCollection_IndexedDataMap_handle_Standard_Transient_handle_Standard_Transient, aResult: TopoDS_Shape, TrTool: TNaming_TranslateTool): void;
 static Translate(L: TopLoc_Location, aMap: NCollection_IndexedDataMap_handle_Standard_Transient_handle_Standard_Transient): TopLoc_Location;
-// aMap: Mutated in place
-// aResult: Mutated in place
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// This class provides default services for an AttributeDelta on a MODIFICATION action
 TNaming_DeltaOnModification: declare class TNaming_DeltaOnModification extends TDF_DeltaOnModification
 
 constructor
 
-// Applies the delta to the attribute
 Apply(): void;
 
 static get_type_name(): string;
@@ -125,7 +87,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -134,7 +95,6 @@ TNaming_DeltaOnRemoval: declare class TNaming_DeltaOnRemoval extends TDF_DeltaOn
 
 constructor
 
-// Applies the delta to the attribute
 Apply(): void;
 
 static get_type_name(): string;
@@ -143,12 +103,10 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Defines the type of evolution in old shape - new shape pairs
 TNaming_Evolution: typeof TNaming_Evolution[keyof typeof TNaming_Evolution]
 
 TNaming_Identifier: declare class TNaming_Identifier
@@ -187,34 +145,26 @@ GeneratedIdentification(Localizer: TNaming_Localizer, NS: TNaming_NamedShape): v
 
 Identification(Localizer: TNaming_Localizer, NS: TNaming_NamedShape): void;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// A tool to visit the contents of a named shape attribute
 TNaming_Iterator: declare class TNaming_Iterator
 
 constructor
 
-// Returns True if there is a current Item in the iteration
 More(): boolean;
 
-// Moves the iteration to the next Item
 Next(): void;
 
-// Returns the old shape in this iterator object
 OldShape(): TopoDS_Shape;
 
-// Returns the new shape in this iterator object
 NewShape(): TopoDS_Shape;
 
-// Returns true if the new shape is a modification (split, fuse, etc...) of the old shape
 IsModification(): boolean;
 
 Evolution(): TNaming_Evolution;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -223,18 +173,14 @@ TNaming_IteratorOnShapesSet: declare class TNaming_IteratorOnShapesSet
 
 constructor
 
-// Initialize the iteration
 Init(S: TNaming_ShapesSet): void;
 
-// Returns True if there is a current Item in the iteration
 More(): boolean;
 
-// Move to the next Item
 Next(): void;
 
 Value(): TopoDS_Shape;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -261,16 +207,12 @@ static IsNew(S: TopoDS_Shape, NS: TNaming_NamedShape): boolean;
 
 static FindGenerator(NS: TNaming_NamedShape, S: TopoDS_Shape, theListOfGenerators: NCollection_List_TopoDS_Shape): void;
 
-// Finds context of the shape
 static FindShapeContext(NS: TNaming_NamedShape, theS: TopoDS_Shape, theSC: TopoDS_Shape): void;
-// theSC: Mutated in place
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// store the arguments of Naming
 TNaming_Name: declare class TNaming_Name
 
 constructor
@@ -318,72 +260,53 @@ Solve(aLab: TDF_Label, Valid: NCollection_Map_TDF_Label): boolean;
 
 Paste(into: TNaming_Name, RT: TDF_RelocationTable): void;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// to store naming characteristcs
 TNaming_NameType: typeof TNaming_NameType[keyof typeof TNaming_NameType]
 
-// The basis to define an attribute for the storage of topology and naming data
 TNaming_NamedShape: declare class TNaming_NamedShape extends TDF_Attribute
 
 constructor
 
-// **class method**
 static GetID(): Standard_GUID;
 
 IsEmpty(): boolean;
 
-// Returns the shapes contained in <NS>
 Get(): TopoDS_Shape;
 
-// Returns the Evolution of the attribute
 Evolution(): TNaming_Evolution;
 
-// Returns the Version of the attribute
 Version(): number;
 
-// Set the Version of the attribute
 SetVersion(version: number): void;
 
 Clear(): void;
 
-// Returns the ID of the attribute
 ID(): Standard_GUID;
 
-// Copies the attribute contents into a new other attribute
 BackupCopy(): TDF_Attribute;
 
-// Restores the contents from <anAttribute> into this one
 Restore(anAttribute: TDF_Attribute): void;
 
-// Makes a DeltaOnModification between <me> and
 DeltaOnModification(anOldAttribute: TDF_Attribute): TDF_DeltaOnModification;
 DeltaOnModification(aDelta: TDF_DeltaOnModification): void;
 DeltaOnModification(anOldAttribute: TDF_Attribute): TDF_DeltaOnModification;
 DeltaOnModification(aDelta: TDF_DeltaOnModification): void;
 
-// Makes a DeltaOnRemoval on <me> because <me> has disappeared from the DS
 DeltaOnRemoval(): TDF_DeltaOnRemoval;
 
-// Returns an new empty attribute from the good end type
 NewEmpty(): TDF_Attribute;
 
-// This method is different from the "Copy" one, because it is used when copying an attribute from a source structure into a target structure
 Paste(intoAttribute: TDF_Attribute, aRelocationTable: TDF_RelocationTable): void;
 
-// Adds the directly referenced attributes and labels to <aDataSet>
 References(aDataSet: TDF_DataSet): void;
 
-// Something to do before removing an Attribute from a label
 BeforeRemoval(): void;
 
-// Something to do before applying <anAttDelta>
 BeforeUndo(anAttDelta: TDF_AttributeDelta, forceIt?: boolean): boolean;
 
-// Something to do after applying <anAttDelta>
 AfterUndo(anAttDelta: TDF_AttributeDelta, forceIt?: boolean): boolean;
 
 static get_type_name(): string;
@@ -392,22 +315,18 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// This attribute store the topological naming of any selected shape, when this shape is not already attached to a specific label
 TNaming_Naming: declare class TNaming_Naming extends TDF_Attribute
 
 constructor
 
-// **following code from TDesignStd**
 static GetID(): Standard_GUID;
 
 static Insert(under: TDF_Label): TNaming_Naming;
 
-// Creates a Naming attribute at label <where> to identify the shape <Selection>
 static Name(where: TDF_Label, Selection: TopoDS_Shape, Context: TopoDS_Shape, Geometry?: boolean, KeepOrientation?: boolean, BNproblem?: boolean): TNaming_NamedShape;
 
 IsDefined(): boolean;
@@ -416,27 +335,18 @@ GetName(): TNaming_Name;
 
 ChangeName(): TNaming_Name;
 
-// regenerate only the Name associated to me
 Regenerate(scope: NCollection_Map_TDF_Label): boolean;
-// scope: Mutated in place
 
-// Regenerate recursively the whole name with scope
 Solve(scope: NCollection_Map_TDF_Label): boolean;
-// scope: Mutated in place
 
-// **Deferred methods from TDF_Attribute**
 ID(): Standard_GUID;
 
-// Returns an new empty attribute from the good end type
 NewEmpty(): TDF_Attribute;
 
-// Restores the backuped contents from <anAttribute> into this one
 Restore(anAttribute: TDF_Attribute): void;
 
-// This method is different from the "Copy" one, because it is used when copying an attribute from a source structure into a target structure
 Paste(intoAttribute: TDF_Attribute, aRelocationTable: TDF_RelocationTable): void;
 
-// Adds the first level referenced attributes and labels to <aDataSet>
 References(aDataSet: TDF_DataSet): void;
 
 static get_type_name(): string;
@@ -445,7 +355,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -460,12 +369,10 @@ static CurrentShapeFromShape(Valid: NCollection_Map_TDF_Label, Forbiden: NCollec
 
 static BuildDescendants(NS: TNaming_NamedShape, Labels: NCollection_Map_TDF_Label): void;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Iterates on all the descendants of a shape
 TNaming_NewShapeIterator: declare class TNaming_NewShapeIterator
 
 constructor
@@ -478,18 +385,14 @@ Label(): TDF_Label;
 
 NamedShape(): TNaming_NamedShape;
 
-// Warning! Can be a Null Shape if a descendant is deleted
 Shape(): TopoDS_Shape;
 
-// True if the new shape is a modification (split, fuse,etc...) of the old shape
 IsModification(): boolean;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Iterates on all the ascendants of a shape
 TNaming_OldShapeIterator: declare class TNaming_OldShapeIterator
 
 constructor
@@ -504,10 +407,8 @@ NamedShape(): TNaming_NamedShape;
 
 Shape(): TopoDS_Shape;
 
-// True if the new shape is a modification (split, fuse,etc...) of the old shape
 IsModification(): boolean;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -530,12 +431,10 @@ Label(): TDF_Label;
 
 NamedShape(): TNaming_NamedShape;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// To iterate on all the label which contained a given shape
 TNaming_SameShapeIterator: declare class TNaming_SameShapeIterator
 
 constructor
@@ -546,12 +445,10 @@ Next(): void;
 
 Label(): TDF_Label;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// **this class manage a scope of labels**
 TNaming_Scope: declare class TNaming_Scope
 
 constructor
@@ -577,40 +474,29 @@ GetValid(): NCollection_Map_TDF_Label;
 
 ChangeValid(): NCollection_Map_TDF_Label;
 
-// Returns the current value of <NS> according to the Valid Scope
 CurrentShape(NS: TNaming_NamedShape): TopoDS_Shape;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// This class provides a single API for selection of shapes
 TNaming_Selector: declare class TNaming_Selector
 
 constructor
 
-// **To know if a shape is already identified (not selected)**
 static IsIdentified(access: TDF_Label, selection: TopoDS_Shape, Geometry: boolean): { returnValue: boolean; NS: TNaming_NamedShape; [Symbol.dispose](): void };
 
-// Creates a topological naming on the label aLabel given as an argument at construction time
 Select(Selection: TopoDS_Shape, Context: TopoDS_Shape, Geometry: boolean, KeepOrientatation: boolean): boolean;
 Select(Selection: TopoDS_Shape, Geometry: boolean, KeepOrientatation: boolean): boolean;
 Select(Selection: TopoDS_Shape, Context: TopoDS_Shape, Geometry: boolean, KeepOrientatation: boolean): boolean;
 Select(Selection: TopoDS_Shape, Geometry: boolean, KeepOrientatation: boolean): boolean;
 
-// Updates the topological naming on the label aLabel given as an argument at construction time
 Solve(Valid: NCollection_Map_TDF_Label): boolean;
-// Valid: Mutated in place
 
-// Returns the attribute list args
 Arguments(args: NCollection_Map_handle_TDF_Attribute): void;
-// args: Mutated in place
 
-// Returns the NamedShape build or under construction, which contains the topological naming.
 NamedShape(): TNaming_NamedShape;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -619,25 +505,20 @@ TNaming_ShapesSet: declare class TNaming_ShapesSet
 
 constructor
 
-// Removes all Shapes
 Clear(): void;
 
-// Adds the Shape Adds the shapes contained in <Shapes>
 Add(S: TopoDS_Shape): boolean;
 Add(Shapes: TNaming_ShapesSet): void;
 Add(S: TopoDS_Shape): boolean;
 Add(Shapes: TNaming_ShapesSet): void;
 
-// Returns True if is in <me>
 Contains(S: TopoDS_Shape): boolean;
 
-// Removes in <me>
 Remove(S: TopoDS_Shape): boolean;
 Remove(Shapes: TNaming_ShapesSet): void;
 Remove(S: TopoDS_Shape): boolean;
 Remove(Shapes: TNaming_ShapesSet): void;
 
-// Erases in <me> the shapes not contained in <Shapes>
 Filter(Shapes: TNaming_ShapesSet): void;
 
 IsEmpty(): boolean;
@@ -648,7 +529,145 @@ ChangeMap(): NCollection_Map_TopoDS_Shape_TopTools_ShapeMapHasher;
 
 Map(): NCollection_Map_TopoDS_Shape_TopTools_ShapeMapHasher;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
+
+TNaming_Tool: declare class TNaming_Tool
+
+constructor
+
+static CurrentShape(NS: TNaming_NamedShape): TopoDS_Shape;
+static CurrentShape(NS: TNaming_NamedShape, Updated: NCollection_Map_TDF_Label): TopoDS_Shape;
+static CurrentShape(NS: TNaming_NamedShape): TopoDS_Shape;
+static CurrentShape(NS: TNaming_NamedShape, Updated: NCollection_Map_TDF_Label): TopoDS_Shape;
+
+static CurrentNamedShape(NS: TNaming_NamedShape, Updated: NCollection_Map_TDF_Label): TNaming_NamedShape;
+static CurrentNamedShape(NS: TNaming_NamedShape): TNaming_NamedShape;
+static CurrentNamedShape(NS: TNaming_NamedShape, Updated: NCollection_Map_TDF_Label): TNaming_NamedShape;
+static CurrentNamedShape(NS: TNaming_NamedShape): TNaming_NamedShape;
+
+static NamedShape(aShape: TopoDS_Shape, anAcces: TDF_Label): TNaming_NamedShape;
+
+static GetShape(NS: TNaming_NamedShape): TopoDS_Shape;
+
+static OriginalShape(NS: TNaming_NamedShape): TopoDS_Shape;
+
+static GeneratedShape(S: TopoDS_Shape, Generation: TNaming_NamedShape): TopoDS_Shape;
+
+static Collect(NS: TNaming_NamedShape, Labels: NCollection_Map_handle_TNaming_NamedShape, OnlyModif: boolean): void;
+
+static HasLabel(access: TDF_Label, aShape: TopoDS_Shape): boolean;
+
+static Label(access: TDF_Label, aShape: TopoDS_Shape, TransDef?: number): { returnValue: TDF_Label; TransDef: number; [Symbol.dispose](): void };
+
+static InitialShape(aShape: TopoDS_Shape, anAcces: TDF_Label, Labels: NCollection_List_TDF_Label): TopoDS_Shape;
+
+static ValidUntil(access: TDF_Label, S: TopoDS_Shape): number;
+
+static FindShape(Valid: NCollection_Map_TDF_Label, Forbiden: NCollection_Map_TDF_Label, Arg: TNaming_NamedShape, S: TopoDS_Shape): void;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+TNaming_TranslateTool: declare class TNaming_TranslateTool extends Standard_Transient
+
+constructor
+
+Add(S1: TopoDS_Shape, S2: TopoDS_Shape): void;
+
+MakeVertex(S: TopoDS_Shape): void;
+
+MakeEdge(S: TopoDS_Shape): void;
+
+MakeWire(S: TopoDS_Shape): void;
+
+MakeFace(S: TopoDS_Shape): void;
+
+MakeShell(S: TopoDS_Shape): void;
+
+MakeSolid(S: TopoDS_Shape): void;
+
+MakeCompSolid(S: TopoDS_Shape): void;
+
+MakeCompound(S: TopoDS_Shape): void;
+
+UpdateVertex(S1: TopoDS_Shape, S2: TopoDS_Shape, M: NCollection_IndexedDataMap_handle_Standard_Transient_handle_Standard_Transient): void;
+
+UpdateEdge(S1: TopoDS_Shape, S2: TopoDS_Shape, M: NCollection_IndexedDataMap_handle_Standard_Transient_handle_Standard_Transient): void;
+
+UpdateFace(S1: TopoDS_Shape, S2: TopoDS_Shape, M: NCollection_IndexedDataMap_handle_Standard_Transient_handle_Standard_Transient): void;
+
+UpdateShape(S1: TopoDS_Shape, S2: TopoDS_Shape): void;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+TNaming_Translator: declare class TNaming_Translator
+
+constructor
+
+Add(aShape: TopoDS_Shape): void;
+
+Perform(): void;
+
+IsDone(): boolean;
+
+Copied(aShape: TopoDS_Shape): TopoDS_Shape;
+Copied(): NCollection_DataMap_TopoDS_Shape_TopoDS_Shape_TopTools_ShapeMapHasher;
+Copied(aShape: TopoDS_Shape): TopoDS_Shape;
+Copied(): NCollection_DataMap_TopoDS_Shape_TopoDS_Shape_TopTools_ShapeMapHasher;
+
+DumpMap(isWrite?: boolean): void;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+TNaming_UsedShapes: declare class TNaming_UsedShapes extends TDF_Attribute
+
+Destroy(): void;
+
+Map(): unknown;
+
+ID(): Standard_GUID;
+
+static GetID(): Standard_GUID;
+
+BackupCopy(): TDF_Attribute;
+
+Restore(anAttribute: TDF_Attribute): void;
+
+BeforeRemoval(): void;
+
+AfterUndo(anAttDelta: TDF_AttributeDelta, forceIt?: boolean): boolean;
+
+DeltaOnAddition(): TDF_DeltaOnAddition;
+
+DeltaOnRemoval(): TDF_DeltaOnRemoval;
+
+NewEmpty(): TDF_Attribute;
+
+Paste(intoAttribute: TDF_Attribute, aRelocationTable: TDF_RelocationTable): void;
+
+References(aDataSet: TDF_DataSet): void;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+TNaming_ListOfNamedShape: NCollection_List_handle_TNaming_NamedShape

@@ -2,18 +2,14 @@
 
 1 top-level symbols. Signatures are verbatim typescript.
 
-// Provides functions for basic geometric computations on elementary curves such as conics and lines in 2D and 3D space
 ElCLib: declare class ElCLib
 
 constructor
 
-// Return a value in the range <UFirst, ULast> by adding or removing the period <ULast - UFirst> to
 static InPeriod(U: number, UFirst: number, ULast: number): number;
 
-// Adjust U1 and U2 in the parametric range UFirst Ulast of a periodic curve, where ULast - UFirst is its period
 static AdjustPeriodic(UFirst: number, ULast: number, Precision: number, U1?: number, U2?: number): { U1: number; U2: number };
 
-// For elementary curves (lines, circles and conics) from the gp package, computes the point of parameter U
 static Value(U: number, L: gp_Lin): gp_Pnt;
 static Value(U: number, C: gp_Circ): gp_Pnt;
 static Value(U: number, E: gp_Elips): gp_Pnt;
@@ -115,7 +111,6 @@ static Value(U: number, E: gp_Elips2d): gp_Pnt2d;
 static Value(U: number, H: gp_Hypr2d): gp_Pnt2d;
 static Value(U: number, Prb: gp_Parab2d): gp_Pnt2d;
 
-// For elementary curves (lines, circles and conics) from the gp package, computes
 static D1(U: number, L: gp_Lin, P: gp_Pnt, V1: gp_Vec): void;
 static D1(U: number, C: gp_Circ, P: gp_Pnt, V1: gp_Vec): void;
 static D1(U: number, E: gp_Elips, P: gp_Pnt, V1: gp_Vec): void;
@@ -216,10 +211,7 @@ static D1(U: number, C: gp_Circ2d, P: gp_Pnt2d, V1: gp_Vec2d): void;
 static D1(U: number, E: gp_Elips2d, P: gp_Pnt2d, V1: gp_Vec2d): void;
 static D1(U: number, H: gp_Hypr2d, P: gp_Pnt2d, V1: gp_Vec2d): void;
 static D1(U: number, Prb: gp_Parab2d, P: gp_Pnt2d, V1: gp_Vec2d): void;
-// P: Mutated in place
-// V1: Mutated in place
 
-// For elementary curves (circles and conics) from the gp package, computes
 static D2(U: number, C: gp_Circ, P: gp_Pnt, V1: gp_Vec, V2: gp_Vec): void;
 static D2(U: number, E: gp_Elips, P: gp_Pnt, V1: gp_Vec, V2: gp_Vec): void;
 static D2(U: number, H: gp_Hypr, P: gp_Pnt, V1: gp_Vec, V2: gp_Vec): void;
@@ -284,11 +276,7 @@ static D2(U: number, C: gp_Circ2d, P: gp_Pnt2d, V1: gp_Vec2d, V2: gp_Vec2d): voi
 static D2(U: number, E: gp_Elips2d, P: gp_Pnt2d, V1: gp_Vec2d, V2: gp_Vec2d): void;
 static D2(U: number, H: gp_Hypr2d, P: gp_Pnt2d, V1: gp_Vec2d, V2: gp_Vec2d): void;
 static D2(U: number, Prb: gp_Parab2d, P: gp_Pnt2d, V1: gp_Vec2d, V2: gp_Vec2d): void;
-// P: Mutated in place
-// V1: Mutated in place
-// V2: Mutated in place
 
-// For elementary curves (circles, ellipses and hyperbolae) from the gp package, computes
 static D3(U: number, C: gp_Circ, P: gp_Pnt, V1: gp_Vec, V2: gp_Vec, V3: gp_Vec): void;
 static D3(U: number, E: gp_Elips, P: gp_Pnt, V1: gp_Vec, V2: gp_Vec, V3: gp_Vec): void;
 static D3(U: number, H: gp_Hypr, P: gp_Pnt, V1: gp_Vec, V2: gp_Vec, V3: gp_Vec): void;
@@ -325,12 +313,7 @@ static D3(U: number, H: gp_Hypr, P: gp_Pnt, V1: gp_Vec, V2: gp_Vec, V3: gp_Vec):
 static D3(U: number, C: gp_Circ2d, P: gp_Pnt2d, V1: gp_Vec2d, V2: gp_Vec2d, V3: gp_Vec2d): void;
 static D3(U: number, E: gp_Elips2d, P: gp_Pnt2d, V1: gp_Vec2d, V2: gp_Vec2d, V3: gp_Vec2d): void;
 static D3(U: number, H: gp_Hypr2d, P: gp_Pnt2d, V1: gp_Vec2d, V2: gp_Vec2d, V3: gp_Vec2d): void;
-// P: Mutated in place
-// V1: Mutated in place
-// V2: Mutated in place
-// V3: Mutated in place
 
-// For elementary curves (lines, circles and conics) from the gp package, computes the vector corresponding to the Nth derivative at the point of parameter U
 static DN(U: number, L: gp_Lin, N: number): gp_Vec;
 static DN(U: number, C: gp_Circ, N: number): gp_Vec;
 static DN(U: number, E: gp_Elips, N: number): gp_Vec;
@@ -432,7 +415,6 @@ static DN(U: number, E: gp_Elips2d, N: number): gp_Vec2d;
 static DN(U: number, H: gp_Hypr2d, N: number): gp_Vec2d;
 static DN(U: number, Prb: gp_Parab2d, N: number): gp_Vec2d;
 
-// Curve evaluation The following basis functions compute the derivatives on elementary curves defined by their geometric characteristics
 static LineValue(U: number, Pos: gp_Ax1): gp_Pnt;
 static LineValue(U: number, Pos: gp_Ax2d): gp_Pnt2d;
 static LineValue(U: number, Pos: gp_Ax1): gp_Pnt;
@@ -513,13 +495,11 @@ static EllipseD3(U: number, Pos: gp_Ax22d, MajorRadius: number, MinorRadius: num
 static EllipseD3(U: number, Pos: gp_Ax2, MajorRadius: number, MinorRadius: number, P: gp_Pnt, V1: gp_Vec, V2: gp_Vec, V3: gp_Vec): void;
 static EllipseD3(U: number, Pos: gp_Ax22d, MajorRadius: number, MinorRadius: number, P: gp_Pnt2d, V1: gp_Vec2d, V2: gp_Vec2d, V3: gp_Vec2d): void;
 
-// In the following functions N is the order of derivation and should be greater than 0
 static HyperbolaD3(U: number, Pos: gp_Ax2, MajorRadius: number, MinorRadius: number, P: gp_Pnt, V1: gp_Vec, V2: gp_Vec, V3: gp_Vec): void;
 static HyperbolaD3(U: number, Pos: gp_Ax22d, MajorRadius: number, MinorRadius: number, P: gp_Pnt2d, V1: gp_Vec2d, V2: gp_Vec2d, V3: gp_Vec2d): void;
 static HyperbolaD3(U: number, Pos: gp_Ax2, MajorRadius: number, MinorRadius: number, P: gp_Pnt, V1: gp_Vec, V2: gp_Vec, V3: gp_Vec): void;
 static HyperbolaD3(U: number, Pos: gp_Ax22d, MajorRadius: number, MinorRadius: number, P: gp_Pnt2d, V1: gp_Vec2d, V2: gp_Vec2d, V3: gp_Vec2d): void;
 
-// In the following functions N is the order of derivation and should be greater than 0
 static LineDN(U: number, Pos: gp_Ax1, N: number): gp_Vec;
 static LineDN(U: number, Pos: gp_Ax2d, N: number): gp_Vec2d;
 static LineDN(U: number, Pos: gp_Ax1, N: number): gp_Vec;
@@ -540,13 +520,11 @@ static HyperbolaDN(U: number, Pos: gp_Ax22d, MajorRadius: number, MinorRadius: n
 static HyperbolaDN(U: number, Pos: gp_Ax2, MajorRadius: number, MinorRadius: number, N: number): gp_Vec;
 static HyperbolaDN(U: number, Pos: gp_Ax22d, MajorRadius: number, MinorRadius: number, N: number): gp_Vec2d;
 
-// The following functions compute the parametric value corresponding to a given point on a elementary curve
 static ParabolaDN(U: number, Pos: gp_Ax2, Focal: number, N: number): gp_Vec;
 static ParabolaDN(U: number, Pos: gp_Ax22d, Focal: number, N: number): gp_Vec2d;
 static ParabolaDN(U: number, Pos: gp_Ax2, Focal: number, N: number): gp_Vec;
 static ParabolaDN(U: number, Pos: gp_Ax22d, Focal: number, N: number): gp_Vec2d;
 
-// Computes the parameter value of the point P on the given curve
 static Parameter(L: gp_Lin, P: gp_Pnt): number;
 static Parameter(L: gp_Lin2d, P: gp_Pnt2d): number;
 static Parameter(C: gp_Circ, P: gp_Pnt): number;
@@ -648,37 +626,31 @@ static Parameter(H: gp_Hypr2d, P: gp_Pnt2d): number;
 static Parameter(Prb: gp_Parab, P: gp_Pnt): number;
 static Parameter(Prb: gp_Parab2d, P: gp_Pnt2d): number;
 
-// parametrization P (U) = L.Location() + U \* L.Direction()
 static LineParameter(Pos: gp_Ax1, P: gp_Pnt): number;
 static LineParameter(Pos: gp_Ax2d, P: gp_Pnt2d): number;
 static LineParameter(Pos: gp_Ax1, P: gp_Pnt): number;
 static LineParameter(Pos: gp_Ax2d, P: gp_Pnt2d): number;
 
-// Pos is the Axis of the Circle parametrization In the local coordinate system of the circle X (U) = Radius _ Cos (U) Y (U) = Radius _ Sin (U)
 static CircleParameter(Pos: gp_Ax2, P: gp_Pnt): number;
 static CircleParameter(Pos: gp_Ax22d, P: gp_Pnt2d): number;
 static CircleParameter(Pos: gp_Ax2, P: gp_Pnt): number;
 static CircleParameter(Pos: gp_Ax22d, P: gp_Pnt2d): number;
 
-// Pos is the Axis of the Ellipse parametrization In the local coordinate system of the Ellipse X (U) = MajorRadius _ Cos (U) Y (U) = MinorRadius _ Sin (U)
 static EllipseParameter(Pos: gp_Ax2, MajorRadius: number, MinorRadius: number, P: gp_Pnt): number;
 static EllipseParameter(Pos: gp_Ax22d, MajorRadius: number, MinorRadius: number, P: gp_Pnt2d): number;
 static EllipseParameter(Pos: gp_Ax2, MajorRadius: number, MinorRadius: number, P: gp_Pnt): number;
 static EllipseParameter(Pos: gp_Ax22d, MajorRadius: number, MinorRadius: number, P: gp_Pnt2d): number;
 
-// Pos is the Axis of the Hyperbola parametrization In the local coordinate system of the Hyperbola X (U) = MajorRadius _ Ch (U) Y (U) = MinorRadius _ Sh (U)
 static HyperbolaParameter(Pos: gp_Ax2, MajorRadius: number, MinorRadius: number, P: gp_Pnt): number;
 static HyperbolaParameter(Pos: gp_Ax22d, MajorRadius: number, MinorRadius: number, P: gp_Pnt2d): number;
 static HyperbolaParameter(Pos: gp_Ax2, MajorRadius: number, MinorRadius: number, P: gp_Pnt): number;
 static HyperbolaParameter(Pos: gp_Ax22d, MajorRadius: number, MinorRadius: number, P: gp_Pnt2d): number;
 
-// Pos is the mirror axis of the parabola parametrization In the local coordinate system of the parabola Y\**2 = (2*P) \* X where P is the distance between the focus and the directrix
 static ParabolaParameter(Pos: gp_Ax2, P: gp_Pnt): number;
 static ParabolaParameter(Pos: gp_Ax22d, P: gp_Pnt2d): number;
 static ParabolaParameter(Pos: gp_Ax2, P: gp_Pnt): number;
 static ParabolaParameter(Pos: gp_Ax22d, P: gp_Pnt2d): number;
 
-// These functions build a 3D geometric entity from a 2D geometric entity
 static To3d(Pos: gp_Ax2, P: gp_Pnt2d): gp_Pnt;
 static To3d(Pos: gp_Ax2, V: gp_Vec2d): gp_Vec;
 static To3d(Pos: gp_Ax2, V: gp_Dir2d): gp_Dir;
@@ -780,7 +752,6 @@ static To3d(Pos: gp_Ax2, E: gp_Elips2d): gp_Elips;
 static To3d(Pos: gp_Ax2, H: gp_Hypr2d): gp_Hypr;
 static To3d(Pos: gp_Ax2, Prb: gp_Parab2d): gp_Parab;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;

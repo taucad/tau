@@ -10,7 +10,6 @@ Poly: Poly_PolygonOnTriangulation
 
 TriRepId: number
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;

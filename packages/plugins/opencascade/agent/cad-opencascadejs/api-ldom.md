@@ -12,7 +12,6 @@ getValue(): LDOMString;
 
 setValue(aValue: LDOMString): void;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -27,7 +26,6 @@ GetValue(): LDOMBasicString;
 
 SetValue(aValue: LDOMBasicString, aDoc: LDOM_MemManager): void;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -46,7 +44,6 @@ GetLastChild(): LDOM_BasicNode;
 
 GetAttribute(aName: LDOMBasicString, aLastCh: LDOM_BasicNode): LDOM_BasicAttribute;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -59,7 +56,6 @@ getNodeType(): LDOM_Node_NodeType;
 
 GetSibling(): LDOM_BasicNode;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -72,7 +68,6 @@ GetData(): LDOMBasicString;
 
 SetData(aValue: LDOMBasicString, aDoc: LDOM_MemManager): void;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -81,7 +76,6 @@ LDOM_CDATASection: declare class LDOM_CDATASection extends LDOM_Text
 
 constructor
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -94,7 +88,6 @@ static Decode(theSrc: string, theLen: number): string;
 
 static Encode(theSrc: string, theLen: number, isAttribute: boolean): string;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -109,7 +102,6 @@ setData(aValue: LDOMString): void;
 
 getLength(): number;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -118,7 +110,6 @@ LDOM_Comment: declare class LDOM_Comment extends LDOM_CharacterData
 
 constructor
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -143,7 +134,6 @@ getElementsByTagName(theTagName: LDOMString): LDOM_NodeList;
 
 isNull(): boolean;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -152,7 +142,6 @@ LDOM_DocumentType: declare class LDOM_DocumentType
 
 constructor
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -183,7 +172,6 @@ ReplaceElement(anOther: LDOM_Element): void;
 
 GetAttributesList(): LDOM_NodeList;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -194,7 +182,6 @@ constructor
 
 static createDocument(aNamespaceURI: LDOMString, aQualifiedName: LDOMString, aDocType: LDOM_DocumentType): LDOM_Document;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -220,7 +207,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -251,7 +237,6 @@ hasChildNodes(): boolean;
 
 SetValueClear(): void;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -266,12 +251,10 @@ item(argNo0: number): LDOM_Node;
 
 getLength(): number;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Subclass if std::ostream allowing to increase performance of outputting data into a string avoiding reallocation of buffer
 LDOM_OSStream: declare class LDOM_OSStream
 
 constructor
@@ -282,25 +265,20 @@ Length(): number;
 
 Clear(): void;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
 LDOM_OSStream_BOMType: typeof LDOM_OSStream_BOMType[keyof typeof LDOM_OSStream_BOMType]
 
-// Class {@link LDOM_SBuffer`LDOM_SBuffer`} inherits std::streambuf and redefines some virtual methods of it (`overflow()` and `xsputn()`)
 LDOM_SBuffer: declare class LDOM_SBuffer
 
 constructor
 
-// Concatenates strings of all sequence elements into one string
 str(): string;
 
-// Returns full length of data contained
 Length(): number;
 
-// Clears first element of sequence and removes all others
 Clear(): void;
 
 overflow(c?: number): number;
@@ -309,7 +287,6 @@ underflow(): number;
 
 xsputn(s: string, n: number): number;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -318,7 +295,6 @@ LDOM_Text: declare class LDOM_Text extends LDOM_CharacterData
 
 constructor
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -329,7 +305,6 @@ constructor
 
 SetIndentation(theIndent: number): void;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;

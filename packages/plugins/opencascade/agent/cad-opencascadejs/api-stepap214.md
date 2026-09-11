@@ -1,16 +1,13 @@
 # libcascade — StepAP214
 
-22 top-level symbols. Signatures are verbatim typescript.
+28 top-level symbols. Signatures are verbatim typescript.
 
-// Complete AP214 CC1 , Revision 4 Upgrading from Revision 2 to Revision 4
 StepAP214: declare class StepAP214
 
 constructor
 
-// creates a Protocol
 static Protocol(): StepAP214_Protocol;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -38,7 +35,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -66,7 +62,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -94,7 +89,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -119,17 +113,14 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Representation of STEP entity AppliedExternalIdentificationAssignment
 StepAP214_AppliedExternalIdentificationAssignment: declare class StepAP214_AppliedExternalIdentificationAssignment extends StepBasic_ExternalIdentificationAssignment
 
 constructor
 
-// Initialize all fields (own and inherited)
 Init(aIdentificationAssignment_AssignedId: TCollection_HAsciiString, aIdentificationAssignment_Role: StepBasic_IdentificationRole, aExternalIdentificationAssignment_Source: StepBasic_ExternalSource, aItems: NCollection_HArray1_StepAP214_ExternalIdentificationItem): void;
 Init(aIdentificationAssignment_AssignedId: TCollection_HAsciiString, aIdentificationAssignment_Role: StepBasic_IdentificationRole, aSource: StepBasic_ExternalSource): void;
 Init(aAssignedId: TCollection_HAsciiString, aRole: StepBasic_IdentificationRole): void;
@@ -140,10 +131,8 @@ Init(aIdentificationAssignment_AssignedId: TCollection_HAsciiString, aIdentifica
 Init(aIdentificationAssignment_AssignedId: TCollection_HAsciiString, aIdentificationAssignment_Role: StepBasic_IdentificationRole, aSource: StepBasic_ExternalSource): void;
 Init(aAssignedId: TCollection_HAsciiString, aRole: StepBasic_IdentificationRole): void;
 
-// Returns field Items
 Items(): NCollection_HArray1_StepAP214_ExternalIdentificationItem;
 
-// Set field Items
 SetItems(Items: NCollection_HArray1_StepAP214_ExternalIdentificationItem): void;
 
 static get_type_name(): string;
@@ -152,26 +141,21 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Representation of STEP entity AppliedGroupAssignment
 StepAP214_AppliedGroupAssignment: declare class StepAP214_AppliedGroupAssignment extends StepBasic_GroupAssignment
 
 constructor
 
-// Initialize all fields (own and inherited)
 Init(aGroupAssignment_AssignedGroup: StepBasic_Group, aItems: NCollection_HArray1_StepAP214_GroupItem): void;
 Init(aAssignedGroup: StepBasic_Group): void;
 Init(aGroupAssignment_AssignedGroup: StepBasic_Group, aItems: NCollection_HArray1_StepAP214_GroupItem): void;
 Init(aAssignedGroup: StepBasic_Group): void;
 
-// Returns field Items
 Items(): NCollection_HArray1_StepAP214_GroupItem;
 
-// Set field Items
 SetItems(Items: NCollection_HArray1_StepAP214_GroupItem): void;
 
 static get_type_name(): string;
@@ -180,7 +164,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -208,7 +191,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -236,7 +218,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -261,7 +242,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -289,7 +269,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -298,73 +277,50 @@ StepAP214_ApprovalItem: declare class StepAP214_ApprovalItem extends StepData_Se
 
 constructor
 
-// Recognizes a ApprovalItem Kind Entity that is
 CaseNum(ent: Standard_Transient): number;
 
-// returns Value as a AssemblyComponentUsageSubstitute (Null if another type)
 AssemblyComponentUsageSubstitute(): StepRepr_AssemblyComponentUsageSubstitute;
 
-// returns Value as a DocumentFile (Null if another type)
 DocumentFile(): StepBasic_DocumentFile;
 
-// returns Value as a MaterialDesignation (Null if another type)
 MaterialDesignation(): StepRepr_MaterialDesignation;
 
-// returns Value as a MechanicalDesignGeometricPresentationRepresentation (Null if another type)
 MechanicalDesignGeometricPresentationRepresentation(): StepVisual_MechanicalDesignGeometricPresentationRepresentation;
 
-// returns Value as a PresentationArea (Null if another type)
 PresentationArea(): StepVisual_PresentationArea;
 
-// returns Value as a Product (Null if another type)
 Product(): StepBasic_Product;
 
-// returns Value as a ProductDefinition (Null if another type)
 ProductDefinition(): StepBasic_ProductDefinition;
 
-// returns Value as a ProductDefinitionFormation (Null if another type)
 ProductDefinitionFormation(): StepBasic_ProductDefinitionFormation;
 
-// returns Value as aProductDefinitionRelationship (Null if another type)
 ProductDefinitionRelationship(): StepBasic_ProductDefinitionRelationship;
 
-// returns Value as a PropertyDefinition (Null if another type)
 PropertyDefinition(): StepRepr_PropertyDefinition;
 
-// returns Value as a ShapeRepresentation (Null if another type)
 ShapeRepresentation(): StepShape_ShapeRepresentation;
 
-// returns Value as a SecurityClassification (Null if another type)
 SecurityClassification(): StepBasic_SecurityClassification;
 
-// returns Value as a ConfigurationItem (Null if another type)
 ConfigurationItem(): StepRepr_ConfigurationItem;
 
-// returns Value as a Date (Null if another type)
 Date(): StepBasic_Date;
 
-// returns Value as a Document (Null if another type)
 Document(): StepBasic_Document;
 
-// returns Value as a Effectivity (Null if another type)
 Effectivity(): StepBasic_Effectivity;
 
-// returns Value as a Group (Null if another type)
 Group(): StepBasic_Group;
 
-// returns Value as a GroupRelationship (Null if another type)
 GroupRelationship(): StepBasic_GroupRelationship;
 
-// returns Value as a ProductDefinitionFormationRelationship (Null if another type)
 ProductDefinitionFormationRelationship(): StepBasic_ProductDefinitionFormationRelationship;
 
-// returns Value as a Representation (Null if another type)
 Representation(): StepRepr_Representation;
 
-// returns Value as a ShapeAspectRelationship (Null if another type)
 ShapeAspectRelationship(): StepRepr_ShapeAspectRelationship;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -392,7 +348,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -420,7 +375,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -448,7 +402,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -476,7 +429,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -485,7 +437,6 @@ StepAP214_AutoDesignDateAndPersonItem: declare class StepAP214_AutoDesignDateAnd
 
 constructor
 
-// Recognizes a AutoDesignDateAndPersonItem Kind Entity that is
 CaseNum(ent: Standard_Transient): number;
 
 AutoDesignOrganizationAssignment(): StepAP214_AutoDesignOrganizationAssignment;
@@ -506,7 +457,6 @@ ProductDefinitionRelationship(): StepBasic_ProductDefinitionRelationship;
 
 ProductDefinitionWithAssociatedDocuments(): StepBasic_ProductDefinitionWithAssociatedDocuments;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -515,18 +465,14 @@ StepAP214_AutoDesignDateAndTimeItem: declare class StepAP214_AutoDesignDateAndTi
 
 constructor
 
-// Recognizes a AutoDesignDateAndTimeItem Kind Entity that is
 CaseNum(ent: Standard_Transient): number;
 
-// returns Value as a ApprovalPersonOrganization (Null if another type)
 ApprovalPersonOrganization(): StepBasic_ApprovalPersonOrganization;
 
-// returns Value as a AutoDesignDateAndPersonAssignment (Null if another type)
 AutoDesignDateAndPersonAssignment(): StepAP214_AutoDesignDateAndPersonAssignment;
 
 ProductDefinitionEffectivity(): StepBasic_ProductDefinitionEffectivity;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -535,19 +481,14 @@ StepAP214_AutoDesignDatedItem: declare class StepAP214_AutoDesignDatedItem exten
 
 constructor
 
-// Recognizes a AutoDesignDatedItem Kind Entity that is
 CaseNum(ent: Standard_Transient): number;
 
-// returns Value as a ApprovalPersonOrganization (Null if another type)
 ApprovalPersonOrganization(): StepBasic_ApprovalPersonOrganization;
 
-// returns Value as a AutoDesignDateAndPersonAssignment (Null if another type)
 AutoDesignDateAndPersonAssignment(): StepAP214_AutoDesignDateAndPersonAssignment;
 
-// returns Value as a ProductDefinitionEffectivity
 ProductDefinitionEffectivity(): StepBasic_ProductDefinitionEffectivity;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -572,7 +513,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -581,33 +521,24 @@ StepAP214_AutoDesignGeneralOrgItem: declare class StepAP214_AutoDesignGeneralOrg
 
 constructor
 
-// Recognizes a AutoDesignGeneralOrgItem Kind Entity that is
 CaseNum(ent: Standard_Transient): number;
 
-// returns Value as a Product (Null if another type)
 Product(): StepBasic_Product;
 
-// returns Value as a ProductDefinition (Null if another type)
 ProductDefinition(): StepBasic_ProductDefinition;
 
-// returns Value as a ProductDefinitionFormation (Null if another type)
 ProductDefinitionFormation(): StepBasic_ProductDefinitionFormation;
 
-// returns Value as a ProductDefinitionRelationship (Null if another type)
 ProductDefinitionRelationship(): StepBasic_ProductDefinitionRelationship;
 
-// returns Value as a ProductDefinitionWithAssociatedDocuments (Null if another type)
 ProductDefinitionWithAssociatedDocuments(): StepBasic_ProductDefinitionWithAssociatedDocuments;
 
-// returns Value as a Representation (Null if another type)
 Representation(): StepRepr_Representation;
 
-// returns Value as a Representation (Null if another type)
 ExternallyDefinedRepresentation(): StepRepr_ExternallyDefinedRepresentation;
 
 AutoDesignDocumentReference(): StepAP214_AutoDesignDocumentReference;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -616,7 +547,6 @@ StepAP214_AutoDesignGroupAssignment: declare class StepAP214_AutoDesignGroupAssi
 
 constructor
 
-// Initialize all fields (own and inherited)
 Init(aAssignedGroup: StepBasic_Group, aItems: NCollection_HArray1_StepAP214_AutoDesignGroupedItem): void;
 Init(aAssignedGroup: StepBasic_Group): void;
 Init(aAssignedGroup: StepBasic_Group, aItems: NCollection_HArray1_StepAP214_AutoDesignGroupedItem): void;
@@ -636,7 +566,160 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
+delete(): void;
+
+[Symbol.dispose](): void;
+
+StepAP214_AutoDesignGroupedItem: declare class StepAP214_AutoDesignGroupedItem extends StepData_SelectType
+
+constructor
+
+CaseNum(ent: Standard_Transient): number;
+
+AdvancedBrepShapeRepresentation(): StepShape_AdvancedBrepShapeRepresentation;
+
+CsgShapeRepresentation(): StepShape_CsgShapeRepresentation;
+
+FacetedBrepShapeRepresentation(): StepShape_FacetedBrepShapeRepresentation;
+
+GeometricallyBoundedSurfaceShapeRepresentation(): StepShape_GeometricallyBoundedSurfaceShapeRepresentation;
+
+GeometricallyBoundedWireframeShapeRepresentation(): StepShape_GeometricallyBoundedWireframeShapeRepresentation;
+
+ManifoldSurfaceShapeRepresentation(): StepShape_ManifoldSurfaceShapeRepresentation;
+
+Representation(): StepRepr_Representation;
+
+RepresentationItem(): StepRepr_RepresentationItem;
+
+ShapeAspect(): StepRepr_ShapeAspect;
+
+ShapeRepresentation(): StepShape_ShapeRepresentation;
+
+TemplateInstance(): StepVisual_TemplateInstance;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+StepAP214_AutoDesignNominalDateAndTimeAssignment: declare class StepAP214_AutoDesignNominalDateAndTimeAssignment extends StepBasic_DateAndTimeAssignment
+
+constructor
+
+Init(aAssignedDateAndTime: StepBasic_DateAndTime, aRole: StepBasic_DateTimeRole, aItems: NCollection_HArray1_StepAP214_AutoDesignDateAndTimeItem): void;
+Init(aAssignedDateAndTime: StepBasic_DateAndTime, aRole: StepBasic_DateTimeRole): void;
+Init(aAssignedDateAndTime: StepBasic_DateAndTime, aRole: StepBasic_DateTimeRole, aItems: NCollection_HArray1_StepAP214_AutoDesignDateAndTimeItem): void;
+Init(aAssignedDateAndTime: StepBasic_DateAndTime, aRole: StepBasic_DateTimeRole): void;
+
+SetItems(aItems: NCollection_HArray1_StepAP214_AutoDesignDateAndTimeItem): void;
+
+Items(): NCollection_HArray1_StepAP214_AutoDesignDateAndTimeItem;
+
+ItemsValue(num: number): StepAP214_AutoDesignDateAndTimeItem;
+
+NbItems(): number;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+StepAP214_AutoDesignNominalDateAssignment: declare class StepAP214_AutoDesignNominalDateAssignment extends StepBasic_DateAssignment
+
+constructor
+
+Init(aAssignedDate: StepBasic_Date, aRole: StepBasic_DateRole, aItems: NCollection_HArray1_StepAP214_AutoDesignDatedItem): void;
+Init(aAssignedDate: StepBasic_Date, aRole: StepBasic_DateRole): void;
+Init(aAssignedDate: StepBasic_Date, aRole: StepBasic_DateRole, aItems: NCollection_HArray1_StepAP214_AutoDesignDatedItem): void;
+Init(aAssignedDate: StepBasic_Date, aRole: StepBasic_DateRole): void;
+
+SetItems(aItems: NCollection_HArray1_StepAP214_AutoDesignDatedItem): void;
+
+Items(): NCollection_HArray1_StepAP214_AutoDesignDatedItem;
+
+ItemsValue(num: number): StepAP214_AutoDesignDatedItem;
+
+NbItems(): number;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+StepAP214_AutoDesignOrganizationAssignment: declare class StepAP214_AutoDesignOrganizationAssignment extends StepBasic_OrganizationAssignment
+
+constructor
+
+Init(aAssignedOrganization: StepBasic_Organization, aRole: StepBasic_OrganizationRole, aItems: NCollection_HArray1_StepAP214_AutoDesignGeneralOrgItem): void;
+Init(aAssignedOrganization: StepBasic_Organization, aRole: StepBasic_OrganizationRole): void;
+Init(aAssignedOrganization: StepBasic_Organization, aRole: StepBasic_OrganizationRole, aItems: NCollection_HArray1_StepAP214_AutoDesignGeneralOrgItem): void;
+Init(aAssignedOrganization: StepBasic_Organization, aRole: StepBasic_OrganizationRole): void;
+
+SetItems(aItems: NCollection_HArray1_StepAP214_AutoDesignGeneralOrgItem): void;
+
+Items(): NCollection_HArray1_StepAP214_AutoDesignGeneralOrgItem;
+
+ItemsValue(num: number): StepAP214_AutoDesignGeneralOrgItem;
+
+NbItems(): number;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+StepAP214_AutoDesignOrganizationItem: declare class StepAP214_AutoDesignOrganizationItem extends StepAP214_AutoDesignGeneralOrgItem
+
+constructor
+
+CaseNum(ent: Standard_Transient): number;
+
+Document(): StepBasic_Document;
+
+PhysicallyModeledProductDefinition(): StepBasic_PhysicallyModeledProductDefinition;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+StepAP214_AutoDesignPersonAndOrganizationAssignment: declare class StepAP214_AutoDesignPersonAndOrganizationAssignment extends StepBasic_PersonAndOrganizationAssignment
+
+constructor
+
+Init(aAssignedPersonAndOrganization: StepBasic_PersonAndOrganization, aRole: StepBasic_PersonAndOrganizationRole, aItems: NCollection_HArray1_StepAP214_AutoDesignGeneralOrgItem): void;
+Init(aAssignedPersonAndOrganization: StepBasic_PersonAndOrganization, aRole: StepBasic_PersonAndOrganizationRole): void;
+Init(aAssignedPersonAndOrganization: StepBasic_PersonAndOrganization, aRole: StepBasic_PersonAndOrganizationRole, aItems: NCollection_HArray1_StepAP214_AutoDesignGeneralOrgItem): void;
+Init(aAssignedPersonAndOrganization: StepBasic_PersonAndOrganization, aRole: StepBasic_PersonAndOrganizationRole): void;
+
+SetItems(aItems: NCollection_HArray1_StepAP214_AutoDesignGeneralOrgItem): void;
+
+Items(): NCollection_HArray1_StepAP214_AutoDesignGeneralOrgItem;
+
+ItemsValue(num: number): StepAP214_AutoDesignGeneralOrgItem;
+
+NbItems(): number;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
 delete(): void;
 
 [Symbol.dispose](): void;

@@ -1,643 +1,577 @@
 # libcascade — NCollection (13)
 
-8 top-level symbols. Signatures are verbatim typescript.
+7 top-level symbols. Signatures are verbatim typescript.
 
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_handle_Geom2d_Curve: declare class NCollection_Array1_handle_Geom2d_Curve
+NCollection_Array2_gp_Pnt2d: declare class NCollection_Array2_gp_Pnt2d
 
 constructor
 
-// Initialise the items with theValue
-Init(theValue: Geom2d_Curve): void;
+static BeginPosition(theRowLower: number, argNo1: number, theColLower: number, theColUpper: number): number;
 
-// Size query
+static LastPosition(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number): number;
+
 Size(): number;
 
-// Length query (legacy int-returning API)
 Length(): number;
 
-// Return TRUE if array has zero length
-IsEmpty(): boolean;
+NbRows(): number;
 
-// Lower bound
-Lower(): number;
+NbColumns(): number;
 
-// Upper bound
-Upper(): number;
+RowLength(): number;
 
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_handle_Geom2d_Curve): NCollection_Array1_handle_Geom2d_Curve;
+ColLength(): number;
 
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_handle_Geom2d_Curve): NCollection_Array1_handle_Geom2d_Curve;
+LowerRow(): number;
 
-// Move assignment
-Move(theOther: NCollection_Array1_handle_Geom2d_Curve): NCollection_Array1_handle_Geom2d_Curve;
-// theOther: Mutated in place
+UpperRow(): number;
 
-First(): Geom2d_Curve;
+LowerCol(): number;
 
-ChangeFirst(): Geom2d_Curve;
+UpperCol(): number;
 
-Last(): Geom2d_Curve;
+UpdateLowerRow(theLowerRow: number): void;
 
-ChangeLast(): Geom2d_Curve;
+UpdateLowerCol(theLowerCol: number): void;
 
-// Constant value access
-Value(theIndex: number): Geom2d_Curve;
+UpdateUpperRow(theUpperRow: number): void;
 
-// Variable value access
-ChangeValue(theIndex: number): Geom2d_Curve;
+UpdateUpperCol(theUpperCol: number): void;
 
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): Geom2d_Curve;
-// theIndex: 0-based index in [0, `Size()`-1]
+Assign(theOther: NCollection_Array2_gp_Pnt2d): NCollection_Array2_gp_Pnt2d;
+Assign(theOther: unknown): unknown;
+Assign(theOther: NCollection_Array2_gp_Pnt2d): NCollection_Array2_gp_Pnt2d;
+Assign(theOther: unknown): unknown;
 
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): Geom2d_Curve;
-// theIndex: 0-based index in [0, `Size()`-1]
+CopyValues(theOther: NCollection_Array2_gp_Pnt2d): NCollection_Array2_gp_Pnt2d;
+CopyValues(theOther: unknown): unknown;
+CopyValues(theOther: NCollection_Array2_gp_Pnt2d): NCollection_Array2_gp_Pnt2d;
+CopyValues(theOther: unknown): unknown;
 
-// Set value
-SetValue(theIndex: number, theItem: Geom2d_Curve): void;
+Move(theOther: NCollection_Array2_gp_Pnt2d): NCollection_Array2_gp_Pnt2d;
+Move(theOther: unknown): unknown;
+Move(theOther: NCollection_Array2_gp_Pnt2d): NCollection_Array2_gp_Pnt2d;
+Move(theOther: unknown): unknown;
 
-// Changes the lowest bound
-UpdateLowerBound(theLower: number): void;
+SetValue(theRow: number, theCol: number, theItem: gp_Pnt2d): void;
+SetValue(theIndex: number, theItem: unknown): void;
+SetValue(theRow: number, theCol: number, theItem: gp_Pnt2d): void;
+SetValue(theIndex: number, theItem: unknown): void;
 
-// Changes the upper bound
-UpdateUpperBound(theUpper: number): void;
-
-// Resizes the array to specified bounds
+Resize(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+Resize(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
 Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
 Resize(theSize: number, theToCopyData: boolean): void;
+Resize(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+Resize(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
 Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
 Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
+Resize(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+Resize(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
+Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
+Resize(theSize: number, theToCopyData: boolean): void;
+Resize(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+Resize(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
+Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
+Resize(theSize: number, theToCopyData: boolean): void;
 
-IsDeletable(): boolean;
+ResizeWithTrim(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+ResizeWithTrim(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
+ResizeWithTrim(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+ResizeWithTrim(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_handle_Geom_BSplineCurve: declare class NCollection_Array1_handle_Geom_BSplineCurve
+NCollection_Array2_gp_Vec: declare class NCollection_Array2_gp_Vec
 
 constructor
 
-// Initialise the items with theValue
-Init(theValue: Geom_BSplineCurve): void;
+static BeginPosition(theRowLower: number, argNo1: number, theColLower: number, theColUpper: number): number;
 
-// Size query
+static LastPosition(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number): number;
+
 Size(): number;
 
-// Length query (legacy int-returning API)
 Length(): number;
 
-// Return TRUE if array has zero length
-IsEmpty(): boolean;
+NbRows(): number;
 
-// Lower bound
-Lower(): number;
+NbColumns(): number;
 
-// Upper bound
-Upper(): number;
+RowLength(): number;
 
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_handle_Geom_BSplineCurve): NCollection_Array1_handle_Geom_BSplineCurve;
+ColLength(): number;
 
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_handle_Geom_BSplineCurve): NCollection_Array1_handle_Geom_BSplineCurve;
+LowerRow(): number;
 
-// Move assignment
-Move(theOther: NCollection_Array1_handle_Geom_BSplineCurve): NCollection_Array1_handle_Geom_BSplineCurve;
-// theOther: Mutated in place
+UpperRow(): number;
 
-First(): Geom_BSplineCurve;
+LowerCol(): number;
 
-ChangeFirst(): Geom_BSplineCurve;
+UpperCol(): number;
 
-Last(): Geom_BSplineCurve;
+UpdateLowerRow(theLowerRow: number): void;
 
-ChangeLast(): Geom_BSplineCurve;
+UpdateLowerCol(theLowerCol: number): void;
 
-// Constant value access
-Value(theIndex: number): Geom_BSplineCurve;
+UpdateUpperRow(theUpperRow: number): void;
 
-// Variable value access
-ChangeValue(theIndex: number): Geom_BSplineCurve;
+UpdateUpperCol(theUpperCol: number): void;
 
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): Geom_BSplineCurve;
-// theIndex: 0-based index in [0, `Size()`-1]
+Assign(theOther: NCollection_Array2_gp_Vec): NCollection_Array2_gp_Vec;
+Assign(theOther: unknown): unknown;
+Assign(theOther: NCollection_Array2_gp_Vec): NCollection_Array2_gp_Vec;
+Assign(theOther: unknown): unknown;
 
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): Geom_BSplineCurve;
-// theIndex: 0-based index in [0, `Size()`-1]
+CopyValues(theOther: NCollection_Array2_gp_Vec): NCollection_Array2_gp_Vec;
+CopyValues(theOther: unknown): unknown;
+CopyValues(theOther: NCollection_Array2_gp_Vec): NCollection_Array2_gp_Vec;
+CopyValues(theOther: unknown): unknown;
 
-// Set value
-SetValue(theIndex: number, theItem: Geom_BSplineCurve): void;
+Move(theOther: NCollection_Array2_gp_Vec): NCollection_Array2_gp_Vec;
+Move(theOther: unknown): unknown;
+Move(theOther: NCollection_Array2_gp_Vec): NCollection_Array2_gp_Vec;
+Move(theOther: unknown): unknown;
 
-// Changes the lowest bound
-UpdateLowerBound(theLower: number): void;
+SetValue(theRow: number, theCol: number, theItem: gp_Vec): void;
+SetValue(theIndex: number, theItem: unknown): void;
+SetValue(theRow: number, theCol: number, theItem: gp_Vec): void;
+SetValue(theIndex: number, theItem: unknown): void;
 
-// Changes the upper bound
-UpdateUpperBound(theUpper: number): void;
-
-// Resizes the array to specified bounds
+Resize(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+Resize(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
 Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
 Resize(theSize: number, theToCopyData: boolean): void;
+Resize(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+Resize(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
 Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
 Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
+Resize(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+Resize(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
+Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
+Resize(theSize: number, theToCopyData: boolean): void;
+Resize(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+Resize(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
+Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
+Resize(theSize: number, theToCopyData: boolean): void;
 
-IsDeletable(): boolean;
+ResizeWithTrim(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+ResizeWithTrim(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
+ResizeWithTrim(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+ResizeWithTrim(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_handle_Geom_BezierCurve: declare class NCollection_Array1_handle_Geom_BezierCurve
+NCollection_Array2_gp_XYZ: declare class NCollection_Array2_gp_XYZ
 
 constructor
 
-// Initialise the items with theValue
-Init(theValue: Geom_BezierCurve): void;
+static BeginPosition(theRowLower: number, argNo1: number, theColLower: number, theColUpper: number): number;
 
-// Size query
+static LastPosition(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number): number;
+
 Size(): number;
 
-// Length query (legacy int-returning API)
 Length(): number;
 
-// Return TRUE if array has zero length
-IsEmpty(): boolean;
+NbRows(): number;
 
-// Lower bound
-Lower(): number;
+NbColumns(): number;
 
-// Upper bound
-Upper(): number;
+RowLength(): number;
 
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_handle_Geom_BezierCurve): NCollection_Array1_handle_Geom_BezierCurve;
+ColLength(): number;
 
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_handle_Geom_BezierCurve): NCollection_Array1_handle_Geom_BezierCurve;
+LowerRow(): number;
 
-// Move assignment
-Move(theOther: NCollection_Array1_handle_Geom_BezierCurve): NCollection_Array1_handle_Geom_BezierCurve;
-// theOther: Mutated in place
+UpperRow(): number;
 
-First(): Geom_BezierCurve;
+LowerCol(): number;
 
-ChangeFirst(): Geom_BezierCurve;
+UpperCol(): number;
 
-Last(): Geom_BezierCurve;
+UpdateLowerRow(theLowerRow: number): void;
 
-ChangeLast(): Geom_BezierCurve;
+UpdateLowerCol(theLowerCol: number): void;
 
-// Constant value access
-Value(theIndex: number): Geom_BezierCurve;
+UpdateUpperRow(theUpperRow: number): void;
 
-// Variable value access
-ChangeValue(theIndex: number): Geom_BezierCurve;
+UpdateUpperCol(theUpperCol: number): void;
 
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): Geom_BezierCurve;
-// theIndex: 0-based index in [0, `Size()`-1]
+Assign(theOther: NCollection_Array2_gp_XYZ): NCollection_Array2_gp_XYZ;
+Assign(theOther: unknown): unknown;
+Assign(theOther: NCollection_Array2_gp_XYZ): NCollection_Array2_gp_XYZ;
+Assign(theOther: unknown): unknown;
 
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): Geom_BezierCurve;
-// theIndex: 0-based index in [0, `Size()`-1]
+CopyValues(theOther: NCollection_Array2_gp_XYZ): NCollection_Array2_gp_XYZ;
+CopyValues(theOther: unknown): unknown;
+CopyValues(theOther: NCollection_Array2_gp_XYZ): NCollection_Array2_gp_XYZ;
+CopyValues(theOther: unknown): unknown;
 
-// Set value
-SetValue(theIndex: number, theItem: Geom_BezierCurve): void;
+Move(theOther: NCollection_Array2_gp_XYZ): NCollection_Array2_gp_XYZ;
+Move(theOther: unknown): unknown;
+Move(theOther: NCollection_Array2_gp_XYZ): NCollection_Array2_gp_XYZ;
+Move(theOther: unknown): unknown;
 
-// Changes the lowest bound
-UpdateLowerBound(theLower: number): void;
+SetValue(theRow: number, theCol: number, theItem: gp_XYZ): void;
+SetValue(theIndex: number, theItem: unknown): void;
+SetValue(theRow: number, theCol: number, theItem: gp_XYZ): void;
+SetValue(theIndex: number, theItem: unknown): void;
 
-// Changes the upper bound
-UpdateUpperBound(theUpper: number): void;
-
-// Resizes the array to specified bounds
+Resize(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+Resize(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
 Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
 Resize(theSize: number, theToCopyData: boolean): void;
+Resize(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+Resize(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
 Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
 Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
+Resize(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+Resize(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
+Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
+Resize(theSize: number, theToCopyData: boolean): void;
+Resize(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+Resize(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
+Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
+Resize(theSize: number, theToCopyData: boolean): void;
 
-IsDeletable(): boolean;
+ResizeWithTrim(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+ResizeWithTrim(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
+ResizeWithTrim(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+ResizeWithTrim(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_handle_Geom_Curve: declare class NCollection_Array1_handle_Geom_Curve
+NCollection_Array2_handle_Geom_BezierSurface: declare class NCollection_Array2_handle_Geom_BezierSurface
 
 constructor
 
-// Initialise the items with theValue
-Init(theValue: Geom_Curve): void;
+static BeginPosition(theRowLower: number, argNo1: number, theColLower: number, theColUpper: number): number;
 
-// Size query
+static LastPosition(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number): number;
+
 Size(): number;
 
-// Length query (legacy int-returning API)
 Length(): number;
 
-// Return TRUE if array has zero length
-IsEmpty(): boolean;
+NbRows(): number;
 
-// Lower bound
-Lower(): number;
+NbColumns(): number;
 
-// Upper bound
-Upper(): number;
+RowLength(): number;
 
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_handle_Geom_Curve): NCollection_Array1_handle_Geom_Curve;
+ColLength(): number;
 
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_handle_Geom_Curve): NCollection_Array1_handle_Geom_Curve;
+LowerRow(): number;
 
-// Move assignment
-Move(theOther: NCollection_Array1_handle_Geom_Curve): NCollection_Array1_handle_Geom_Curve;
-// theOther: Mutated in place
+UpperRow(): number;
 
-First(): Geom_Curve;
+LowerCol(): number;
 
-ChangeFirst(): Geom_Curve;
+UpperCol(): number;
 
-Last(): Geom_Curve;
+UpdateLowerRow(theLowerRow: number): void;
 
-ChangeLast(): Geom_Curve;
+UpdateLowerCol(theLowerCol: number): void;
 
-// Constant value access
-Value(theIndex: number): Geom_Curve;
+UpdateUpperRow(theUpperRow: number): void;
 
-// Variable value access
-ChangeValue(theIndex: number): Geom_Curve;
+UpdateUpperCol(theUpperCol: number): void;
 
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): Geom_Curve;
-// theIndex: 0-based index in [0, `Size()`-1]
+Assign(theOther: NCollection_Array2_handle_Geom_BezierSurface): NCollection_Array2_handle_Geom_BezierSurface;
+Assign(theOther: unknown): unknown;
+Assign(theOther: NCollection_Array2_handle_Geom_BezierSurface): NCollection_Array2_handle_Geom_BezierSurface;
+Assign(theOther: unknown): unknown;
 
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): Geom_Curve;
-// theIndex: 0-based index in [0, `Size()`-1]
+CopyValues(theOther: NCollection_Array2_handle_Geom_BezierSurface): NCollection_Array2_handle_Geom_BezierSurface;
+CopyValues(theOther: unknown): unknown;
+CopyValues(theOther: NCollection_Array2_handle_Geom_BezierSurface): NCollection_Array2_handle_Geom_BezierSurface;
+CopyValues(theOther: unknown): unknown;
 
-// Set value
-SetValue(theIndex: number, theItem: Geom_Curve): void;
+Move(theOther: NCollection_Array2_handle_Geom_BezierSurface): NCollection_Array2_handle_Geom_BezierSurface;
+Move(theOther: unknown): unknown;
+Move(theOther: NCollection_Array2_handle_Geom_BezierSurface): NCollection_Array2_handle_Geom_BezierSurface;
+Move(theOther: unknown): unknown;
 
-// Changes the lowest bound
-UpdateLowerBound(theLower: number): void;
+SetValue(theRow: number, theCol: number, theItem: Geom_BezierSurface): void;
+SetValue(theIndex: number, theItem: unknown): void;
+SetValue(theRow: number, theCol: number, theItem: Geom_BezierSurface): void;
+SetValue(theIndex: number, theItem: unknown): void;
 
-// Changes the upper bound
-UpdateUpperBound(theUpper: number): void;
-
-// Resizes the array to specified bounds
+Resize(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+Resize(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
 Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
 Resize(theSize: number, theToCopyData: boolean): void;
+Resize(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+Resize(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
 Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
 Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
+Resize(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+Resize(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
+Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
+Resize(theSize: number, theToCopyData: boolean): void;
+Resize(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+Resize(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
+Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
+Resize(theSize: number, theToCopyData: boolean): void;
 
-IsDeletable(): boolean;
+ResizeWithTrim(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+ResizeWithTrim(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
+ResizeWithTrim(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+ResizeWithTrim(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_handle_HLRAlgo_PolyData: declare class NCollection_Array1_handle_HLRAlgo_PolyData
+NCollection_Array2_handle_Geom_Surface: declare class NCollection_Array2_handle_Geom_Surface
 
 constructor
 
-// Initialise the items with theValue
-Init(theValue: HLRAlgo_PolyData): void;
+static BeginPosition(theRowLower: number, argNo1: number, theColLower: number, theColUpper: number): number;
 
-// Size query
+static LastPosition(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number): number;
+
 Size(): number;
 
-// Length query (legacy int-returning API)
 Length(): number;
 
-// Return TRUE if array has zero length
-IsEmpty(): boolean;
+NbRows(): number;
 
-// Lower bound
-Lower(): number;
+NbColumns(): number;
 
-// Upper bound
-Upper(): number;
+RowLength(): number;
 
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_handle_HLRAlgo_PolyData): NCollection_Array1_handle_HLRAlgo_PolyData;
+ColLength(): number;
 
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_handle_HLRAlgo_PolyData): NCollection_Array1_handle_HLRAlgo_PolyData;
+LowerRow(): number;
 
-// Move assignment
-Move(theOther: NCollection_Array1_handle_HLRAlgo_PolyData): NCollection_Array1_handle_HLRAlgo_PolyData;
-// theOther: Mutated in place
+UpperRow(): number;
 
-First(): HLRAlgo_PolyData;
+LowerCol(): number;
 
-ChangeFirst(): HLRAlgo_PolyData;
+UpperCol(): number;
 
-Last(): HLRAlgo_PolyData;
+UpdateLowerRow(theLowerRow: number): void;
 
-ChangeLast(): HLRAlgo_PolyData;
+UpdateLowerCol(theLowerCol: number): void;
 
-// Constant value access
-Value(theIndex: number): HLRAlgo_PolyData;
+UpdateUpperRow(theUpperRow: number): void;
 
-// Variable value access
-ChangeValue(theIndex: number): HLRAlgo_PolyData;
+UpdateUpperCol(theUpperCol: number): void;
 
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): HLRAlgo_PolyData;
-// theIndex: 0-based index in [0, `Size()`-1]
+Assign(theOther: NCollection_Array2_handle_Geom_Surface): NCollection_Array2_handle_Geom_Surface;
+Assign(theOther: unknown): unknown;
+Assign(theOther: NCollection_Array2_handle_Geom_Surface): NCollection_Array2_handle_Geom_Surface;
+Assign(theOther: unknown): unknown;
 
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): HLRAlgo_PolyData;
-// theIndex: 0-based index in [0, `Size()`-1]
+CopyValues(theOther: NCollection_Array2_handle_Geom_Surface): NCollection_Array2_handle_Geom_Surface;
+CopyValues(theOther: unknown): unknown;
+CopyValues(theOther: NCollection_Array2_handle_Geom_Surface): NCollection_Array2_handle_Geom_Surface;
+CopyValues(theOther: unknown): unknown;
 
-// Set value
-SetValue(theIndex: number, theItem: HLRAlgo_PolyData): void;
+Move(theOther: NCollection_Array2_handle_Geom_Surface): NCollection_Array2_handle_Geom_Surface;
+Move(theOther: unknown): unknown;
+Move(theOther: NCollection_Array2_handle_Geom_Surface): NCollection_Array2_handle_Geom_Surface;
+Move(theOther: unknown): unknown;
 
-// Changes the lowest bound
-UpdateLowerBound(theLower: number): void;
+SetValue(theRow: number, theCol: number, theItem: Geom_Surface): void;
+SetValue(theIndex: number, theItem: unknown): void;
+SetValue(theRow: number, theCol: number, theItem: Geom_Surface): void;
+SetValue(theIndex: number, theItem: unknown): void;
 
-// Changes the upper bound
-UpdateUpperBound(theUpper: number): void;
-
-// Resizes the array to specified bounds
+Resize(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+Resize(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
 Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
 Resize(theSize: number, theToCopyData: boolean): void;
+Resize(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+Resize(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
 Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
 Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
+Resize(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+Resize(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
+Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
+Resize(theSize: number, theToCopyData: boolean): void;
+Resize(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+Resize(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
+Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
+Resize(theSize: number, theToCopyData: boolean): void;
 
-IsDeletable(): boolean;
+ResizeWithTrim(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+ResizeWithTrim(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
+ResizeWithTrim(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+ResizeWithTrim(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_handle_HLRAlgo_PolyShellData: declare class NCollection_Array1_handle_HLRAlgo_PolyShellData
+NCollection_Array2_handle_NCollection_HArray1_double: declare class NCollection_Array2_handle_NCollection_HArray1_double
 
 constructor
 
-// Initialise the items with theValue
-Init(theValue: HLRAlgo_PolyShellData): void;
+static BeginPosition(theRowLower: number, argNo1: number, theColLower: number, theColUpper: number): number;
 
-// Size query
+static LastPosition(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number): number;
+
 Size(): number;
 
-// Length query (legacy int-returning API)
 Length(): number;
 
-// Return TRUE if array has zero length
-IsEmpty(): boolean;
+NbRows(): number;
 
-// Lower bound
-Lower(): number;
+NbColumns(): number;
 
-// Upper bound
-Upper(): number;
+RowLength(): number;
 
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_handle_HLRAlgo_PolyShellData): NCollection_Array1_handle_HLRAlgo_PolyShellData;
+ColLength(): number;
 
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_handle_HLRAlgo_PolyShellData): NCollection_Array1_handle_HLRAlgo_PolyShellData;
+LowerRow(): number;
 
-// Move assignment
-Move(theOther: NCollection_Array1_handle_HLRAlgo_PolyShellData): NCollection_Array1_handle_HLRAlgo_PolyShellData;
-// theOther: Mutated in place
+UpperRow(): number;
 
-First(): HLRAlgo_PolyShellData;
+LowerCol(): number;
 
-ChangeFirst(): HLRAlgo_PolyShellData;
+UpperCol(): number;
 
-Last(): HLRAlgo_PolyShellData;
+UpdateLowerRow(theLowerRow: number): void;
 
-ChangeLast(): HLRAlgo_PolyShellData;
+UpdateLowerCol(theLowerCol: number): void;
 
-// Constant value access
-Value(theIndex: number): HLRAlgo_PolyShellData;
+UpdateUpperRow(theUpperRow: number): void;
 
-// Variable value access
-ChangeValue(theIndex: number): HLRAlgo_PolyShellData;
+UpdateUpperCol(theUpperCol: number): void;
 
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): HLRAlgo_PolyShellData;
-// theIndex: 0-based index in [0, `Size()`-1]
+Assign(theOther: NCollection_Array2_handle_NCollection_HArray1_double): NCollection_Array2_handle_NCollection_HArray1_double;
+Assign(theOther: unknown): unknown;
+Assign(theOther: NCollection_Array2_handle_NCollection_HArray1_double): NCollection_Array2_handle_NCollection_HArray1_double;
+Assign(theOther: unknown): unknown;
 
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): HLRAlgo_PolyShellData;
-// theIndex: 0-based index in [0, `Size()`-1]
+CopyValues(theOther: NCollection_Array2_handle_NCollection_HArray1_double): NCollection_Array2_handle_NCollection_HArray1_double;
+CopyValues(theOther: unknown): unknown;
+CopyValues(theOther: NCollection_Array2_handle_NCollection_HArray1_double): NCollection_Array2_handle_NCollection_HArray1_double;
+CopyValues(theOther: unknown): unknown;
 
-// Set value
-SetValue(theIndex: number, theItem: HLRAlgo_PolyShellData): void;
+Move(theOther: NCollection_Array2_handle_NCollection_HArray1_double): NCollection_Array2_handle_NCollection_HArray1_double;
+Move(theOther: unknown): unknown;
+Move(theOther: NCollection_Array2_handle_NCollection_HArray1_double): NCollection_Array2_handle_NCollection_HArray1_double;
+Move(theOther: unknown): unknown;
 
-// Changes the lowest bound
-UpdateLowerBound(theLower: number): void;
+SetValue(theRow: number, theCol: number, theItem: unknown): void;
+SetValue(theIndex: number, theItem: unknown): void;
+SetValue(theRow: number, theCol: number, theItem: unknown): void;
+SetValue(theIndex: number, theItem: unknown): void;
 
-// Changes the upper bound
-UpdateUpperBound(theUpper: number): void;
-
-// Resizes the array to specified bounds
+Resize(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+Resize(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
 Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
 Resize(theSize: number, theToCopyData: boolean): void;
+Resize(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+Resize(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
 Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
 Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
+Resize(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+Resize(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
+Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
+Resize(theSize: number, theToCopyData: boolean): void;
+Resize(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+Resize(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
+Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
+Resize(theSize: number, theToCopyData: boolean): void;
 
-IsDeletable(): boolean;
+ResizeWithTrim(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+ResizeWithTrim(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
+ResizeWithTrim(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+ResizeWithTrim(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_handle_IGESAppli_FiniteElement: declare class NCollection_Array1_handle_IGESAppli_FiniteElement
+NCollection_Array2_handle_NCollection_HArray1_int: declare class NCollection_Array2_handle_NCollection_HArray1_int
 
 constructor
 
-// Initialise the items with theValue
-Init(theValue: IGESAppli_FiniteElement): void;
+static BeginPosition(theRowLower: number, argNo1: number, theColLower: number, theColUpper: number): number;
 
-// Size query
+static LastPosition(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number): number;
+
 Size(): number;
 
-// Length query (legacy int-returning API)
 Length(): number;
 
-// Return TRUE if array has zero length
-IsEmpty(): boolean;
+NbRows(): number;
 
-// Lower bound
-Lower(): number;
+NbColumns(): number;
 
-// Upper bound
-Upper(): number;
+RowLength(): number;
 
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_handle_IGESAppli_FiniteElement): NCollection_Array1_handle_IGESAppli_FiniteElement;
+ColLength(): number;
 
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_handle_IGESAppli_FiniteElement): NCollection_Array1_handle_IGESAppli_FiniteElement;
+LowerRow(): number;
 
-// Move assignment
-Move(theOther: NCollection_Array1_handle_IGESAppli_FiniteElement): NCollection_Array1_handle_IGESAppli_FiniteElement;
-// theOther: Mutated in place
+UpperRow(): number;
 
-First(): IGESAppli_FiniteElement;
+LowerCol(): number;
 
-ChangeFirst(): IGESAppli_FiniteElement;
+UpperCol(): number;
 
-Last(): IGESAppli_FiniteElement;
+UpdateLowerRow(theLowerRow: number): void;
 
-ChangeLast(): IGESAppli_FiniteElement;
+UpdateLowerCol(theLowerCol: number): void;
 
-// Constant value access
-Value(theIndex: number): IGESAppli_FiniteElement;
+UpdateUpperRow(theUpperRow: number): void;
 
-// Variable value access
-ChangeValue(theIndex: number): IGESAppli_FiniteElement;
+UpdateUpperCol(theUpperCol: number): void;
 
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): IGESAppli_FiniteElement;
-// theIndex: 0-based index in [0, `Size()`-1]
+Assign(theOther: NCollection_Array2_handle_NCollection_HArray1_int): NCollection_Array2_handle_NCollection_HArray1_int;
+Assign(theOther: unknown): unknown;
+Assign(theOther: NCollection_Array2_handle_NCollection_HArray1_int): NCollection_Array2_handle_NCollection_HArray1_int;
+Assign(theOther: unknown): unknown;
 
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): IGESAppli_FiniteElement;
-// theIndex: 0-based index in [0, `Size()`-1]
+CopyValues(theOther: NCollection_Array2_handle_NCollection_HArray1_int): NCollection_Array2_handle_NCollection_HArray1_int;
+CopyValues(theOther: unknown): unknown;
+CopyValues(theOther: NCollection_Array2_handle_NCollection_HArray1_int): NCollection_Array2_handle_NCollection_HArray1_int;
+CopyValues(theOther: unknown): unknown;
 
-// Set value
-SetValue(theIndex: number, theItem: IGESAppli_FiniteElement): void;
+Move(theOther: NCollection_Array2_handle_NCollection_HArray1_int): NCollection_Array2_handle_NCollection_HArray1_int;
+Move(theOther: unknown): unknown;
+Move(theOther: NCollection_Array2_handle_NCollection_HArray1_int): NCollection_Array2_handle_NCollection_HArray1_int;
+Move(theOther: unknown): unknown;
 
-// Changes the lowest bound
-UpdateLowerBound(theLower: number): void;
+SetValue(theRow: number, theCol: number, theItem: unknown): void;
+SetValue(theIndex: number, theItem: unknown): void;
+SetValue(theRow: number, theCol: number, theItem: unknown): void;
+SetValue(theIndex: number, theItem: unknown): void;
 
-// Changes the upper bound
-UpdateUpperBound(theUpper: number): void;
-
-// Resizes the array to specified bounds
+Resize(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+Resize(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
 Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
 Resize(theSize: number, theToCopyData: boolean): void;
+Resize(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+Resize(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
 Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
 Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
-
-IsDeletable(): boolean;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_handle_IGESAppli_Node: declare class NCollection_Array1_handle_IGESAppli_Node
-
-constructor
-
-// Initialise the items with theValue
-Init(theValue: IGESAppli_Node): void;
-
-// Size query
-Size(): number;
-
-// Length query (legacy int-returning API)
-Length(): number;
-
-// Return TRUE if array has zero length
-IsEmpty(): boolean;
-
-// Lower bound
-Lower(): number;
-
-// Upper bound
-Upper(): number;
-
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_handle_IGESAppli_Node): NCollection_Array1_handle_IGESAppli_Node;
-
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_handle_IGESAppli_Node): NCollection_Array1_handle_IGESAppli_Node;
-
-// Move assignment
-Move(theOther: NCollection_Array1_handle_IGESAppli_Node): NCollection_Array1_handle_IGESAppli_Node;
-// theOther: Mutated in place
-
-First(): IGESAppli_Node;
-
-ChangeFirst(): IGESAppli_Node;
-
-Last(): IGESAppli_Node;
-
-ChangeLast(): IGESAppli_Node;
-
-// Constant value access
-Value(theIndex: number): IGESAppli_Node;
-
-// Variable value access
-ChangeValue(theIndex: number): IGESAppli_Node;
-
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): IGESAppli_Node;
-// theIndex: 0-based index in [0, `Size()`-1]
-
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): IGESAppli_Node;
-// theIndex: 0-based index in [0, `Size()`-1]
-
-// Set value
-SetValue(theIndex: number, theItem: IGESAppli_Node): void;
-
-// Changes the lowest bound
-UpdateLowerBound(theLower: number): void;
-
-// Changes the upper bound
-UpdateUpperBound(theUpper: number): void;
-
-// Resizes the array to specified bounds
+Resize(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+Resize(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
 Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
 Resize(theSize: number, theToCopyData: boolean): void;
+Resize(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+Resize(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
 Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
 Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
 
-IsDeletable(): boolean;
+ResizeWithTrim(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+ResizeWithTrim(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
+ResizeWithTrim(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+ResizeWithTrim(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;

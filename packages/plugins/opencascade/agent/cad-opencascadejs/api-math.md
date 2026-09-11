@@ -1,6 +1,6 @@
 # libcascade — math
 
-20 top-level symbols. Signatures are verbatim typescript.
+47 top-level symbols. Signatures are verbatim typescript.
 
 math: declare class math
 
@@ -12,184 +12,134 @@ static GaussPoints(Index: number, Points: math_VectorBase_double): void;
 
 static GaussWeights(Index: number, Weights: math_VectorBase_double): void;
 
-// Returns the maximal number of points for that the values are stored in the table
 static KronrodPointsMax(): number;
 
-// Returns a vector of Gauss points and a vector of their weights
 static OrderedGaussPointsAndWeights(Index: number, Points: math_VectorBase_double, Weights: math_VectorBase_double): boolean;
 
-// Returns a vector of Kronrod points and a vector of their weights for Gauss-Kronrod computation method
 static KronrodPointsAndWeights(Index: number, Points: math_VectorBase_double, Weights: math_VectorBase_double): boolean;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// This class implements the Broyden-Fletcher-Goldfarb-Shanno variant of Davidson-Fletcher-Powell minimization algorithm of a function of multiple variables.Knowledge of the function's gradient is required
 math_BFGS: declare class math_BFGS
 
 constructor
 
-// Set boundaries for conditional optimization
 SetBoundary(theLeftBorder: math_VectorBase_double, theRightBorder: math_VectorBase_double): void;
 
-// Given the starting point StartingPoint, minimization is done on the function F
 Perform(F: math_MultipleVarFunctionWithGradient, StartingPoint: math_VectorBase_double): void;
 
-// This method is called at the end of each iteration to check if the solution is found
 IsSolutionReached(F: math_MultipleVarFunctionWithGradient): boolean;
 
-// Returns true if the computations are successful, otherwise returns false
 IsDone(): boolean;
 
-// returns the location vector of the minimum
 Location(): math_VectorBase_double;
 Location(Loc: math_VectorBase_double): void;
 Location(): math_VectorBase_double;
 Location(Loc: math_VectorBase_double): void;
 
-// returns the value of the minimum
 Minimum(): number;
 
-// Returns the gradient vector at the minimum
 Gradient(): math_VectorBase_double;
 Gradient(Grad: math_VectorBase_double): void;
 Gradient(): math_VectorBase_double;
 Gradient(Grad: math_VectorBase_double): void;
 
-// Returns the number of iterations really done in the calculation of the minimum
 NbIterations(): number;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// This class implements a combination of Newton-Raphson and bissection methods to find the root of the function between two bounds
 math_BissecNewton: declare class math_BissecNewton
 
 constructor
 
-// A combination of Newton-Raphson and bissection methods is done to find the root of the function F between the bounds Bound1 and Bound2 on the function F
 Perform(F: math_FunctionWithDerivative, Bound1: number, Bound2: number, NbIterations?: number): void;
 
-// This method is called at the end of each iteration to check if the solution has been found
 IsSolutionReached(theFunction: math_FunctionWithDerivative): boolean;
 
-// Tests is the root has been successfully found
 IsDone(): boolean;
 
-// returns the value of the root
 Root(): number;
 
-// returns the value of the derivative at the root
 Derivative(): number;
 
-// returns the value of the function at the root
 Value(): number;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Given two distinct initial points, BracketMinimum implements the computation of three points (a, b, c) which bracket the minimum of the function and verify A less than B, B less than C and F(B) less than F(A), F(B) less than F(C)
 math_BracketMinimum: declare class math_BracketMinimum
 
 constructor
 
-// Set limits of the parameter
 SetLimits(theLeft: number, theRight: number): void;
 
-// Set function value at A
 SetFA(theValue: number): void;
 
-// Set function value at B
 SetFB(theValue: number): void;
 
-// The method performing the job
 Perform(F: math_Function): void;
 
-// Returns true if the computations are successful, otherwise returns false
 IsDone(): boolean;
 
-// Returns the bracketed triplet of abscissae
 Values(A?: number, B?: number, C?: number): { A: number; B: number; C: number };
 
-// returns the bracketed triplet function values
 FunctionValues(FA?: number, FB?: number, FC?: number): { FA: number; FB: number; FC: number };
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// This class implements the Brent method to find the root of a function located within two bounds
 math_BracketedRoot: declare class math_BracketedRoot
 
 constructor
 
-// Returns true if the computations are successful, otherwise returns false
 IsDone(): boolean;
 
-// returns the value of the root
 Root(): number;
 
-// returns the value of the function at the root
 Value(): number;
 
-// returns the number of iterations really done during the computation of the Root
 NbIterations(): number;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// This class implements the Brent's method to find the minimum of a function of a single variable
 math_BrentMinimum: declare class math_BrentMinimum
 
 constructor
 
-// Brent minimization is performed on function F from a given bracketing triplet of abscissas Ax, Bx, Cx (such that Bx is between Ax and Cx, F(Bx) is less than both F(Bx) and F(Cx)) The solution is found when
 Perform(F: math_Function, Ax: number, Bx: number, Cx: number): void;
 
-// This method is called at the end of each iteration to check if the solution is found
 IsSolutionReached(theFunction: math_Function): boolean;
 
-// Returns true if the computations are successful, otherwise returns false
 IsDone(): boolean;
 
-// returns the location value of the minimum
 Location(): number;
 
-// returns the value of the minimum
 Minimum(): number;
 
-// returns the number of iterations really done during the computation of the minimum
 NbIterations(): number;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Fast random number generator (the algorithm proposed by Ian C
 math_BullardGenerator: declare class math_BullardGenerator
 
 constructor
 
-// Setup new seed / reset defaults
 SetSeed(theSeed?: number): void;
 
-// Generates new 64-bit integer value
 NextInt(): number;
 
-// Generates new floating-point value
 NextReal(): number;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -204,7 +154,6 @@ Points(): math_VectorBase_double;
 
 Weights(): math_VectorBase_double;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -219,55 +168,40 @@ Points(): math_VectorBase_double;
 
 Weights(): math_VectorBase_double;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// This class implements the Crout algorithm used to solve a system A\*X = B where A is a symmetric matrix
 math_Crout: declare class math_Crout
 
 constructor
 
-// Returns True if all has been correctly done
 IsDone(): boolean;
 
-// Given an input vector \*\*, this routine returns the solution of the set of linear equations A
 Solve(B: math_VectorBase_double, X: math_VectorBase_double): void;
 
-// returns the inverse matrix of A
 Inverse(): math_Matrix;
 
-// returns in Inv the inverse matrix of A
 Invert(Inv: math_Matrix): void;
 
-// Returns the value of the determinant of the previously LU decomposed matrix A
 Determinant(): number;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// This class implements the calculation of all the real roots of a real polynomial of degree <= 4 using direct algebraic methods
 math_DirectPolynomialRoots: declare class math_DirectPolynomialRoots
 
 constructor
 
-// Returns true if the computations are successful, otherwise returns false
 IsDone(): boolean;
 
-// Returns true if there is an infinity of roots, otherwise returns false
 InfiniteRoots(): boolean;
 
-// Returns the number of distinct real roots found
 NbSolutions(): number;
 
-// Returns the value of the Nth root in default ordering
 Value(theIndex: number): number;
-// theIndex: root index (1-based)
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -276,238 +210,707 @@ math_DoubleTab: declare class math_DoubleTab
 
 constructor
 
-// Initialize all elements with theInitValue
 Init(theInitValue: number): void;
 
-// Copy data to theOther
 Copy(theOther: math_DoubleTab): void;
 
-// Returns true if the internal array is deletable (heap-allocated)
 IsDeletable(): boolean;
 
-// Set lower row index
 SetLowerRow(theLowerRow: number): void;
 
-// Set lower column index
 SetLowerCol(theLowerCol: number): void;
 
-// Get lower row index
 LowerRow(): number;
 
-// Get upper row index
 UpperRow(): number;
 
-// Get lower column index
 LowerCol(): number;
 
-// Get upper column index
 UpperCol(): number;
 
-// Get number of rows
 NbRows(): number;
 
-// Get number of columns
 NbColumns(): number;
 
-// Access element at (theRowIndex, theColIndex)
 Value(theRowIndex: number, theColIndex: number): number;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// This class finds eigenvalues and eigenvectors of real symmetric tridiagonal matrices
 math_EigenValuesSearcher: declare class math_EigenValuesSearcher
 
 constructor
 
-// Returns true if computation is performed successfully
 IsDone(): boolean;
 
-// Returns the dimension of the tridiagonal matrix
 Dimension(): number;
 
-// Returns the specified eigenvalue
 EigenValue(theIndex: number): number;
-// theIndex: index of the desired eigenvalue (1-based indexing)
 
-// Returns the specified eigenvector
 EigenVector(theIndex: number): math_VectorBase_double;
-// theIndex: index of the desired eigenvector (1-based indexing)
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// this class implements the Fletcher-Reeves-Polak_Ribiere minimization algorithm of a function of multiple variables
 math_FRPR: declare class math_FRPR
 
 constructor
 
-// The solution F = Fi is found when 2.0 _ abs(Fi - Fi-1) <= Tolerance _ (abs(Fi) + abs(Fi-1) + ZEPS)
 Perform(theFunction: math_MultipleVarFunctionWithGradient, theStartingPoint: math_VectorBase_double): void;
 
-// The solution F = Fi is found when
 IsSolutionReached(theFunction: math_MultipleVarFunctionWithGradient): boolean;
 
-// Returns true if the computations are successful, otherwise returns false
 IsDone(): boolean;
 
-// returns the location vector of the minimum
 Location(): math_VectorBase_double;
 Location(Loc: math_VectorBase_double): void;
 Location(): math_VectorBase_double;
 Location(Loc: math_VectorBase_double): void;
 
-// returns the value of the minimum
 Minimum(): number;
 
-// returns the gradient vector at the minimum
 Gradient(): math_VectorBase_double;
 Gradient(Grad: math_VectorBase_double): void;
 Gradient(): math_VectorBase_double;
 Gradient(Grad: math_VectorBase_double): void;
 
-// returns the number of iterations really done during the computation of the minimum
 NbIterations(): number;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// This abstract class describes the virtual functions associated with a Function of a single variable
 math_Function: declare class math_Function
 
-// Computes the value of the function <F> for a given value of variable <X>
 Value(X: number, F: number): { returnValue: boolean; F: number };
 
-// returns the state of the function corresponding to the latest call of any methods associated with the function
 GetStateNumber(): number;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// This algorithm uses a sample of the function to find all intervals on which the function is null, and afterwards uses the FunctionRoots algorithm to find the points where the function is null outside the "null intervals"
 math_FunctionAllRoots: declare class math_FunctionAllRoots
 
 constructor
 
-// Returns True if the computation has been done successfully
 IsDone(): boolean;
 
-// Returns the number of intervals on which the function is Null
 NbIntervals(): number;
 
-// Returns the interval of parameter of range Index
 GetInterval(Index: number, A?: number, B?: number): { A: number; B: number };
 
-// returns the State Number associated to the interval Index
 GetIntervalState(Index: number, IFirst?: number, ILast?: number): { IFirst: number; ILast: number };
 
-// returns the number of points where the function is Null
 NbPoints(): number;
 
-// Returns the parameter of the point of range Index
 GetPoint(Index: number): number;
 
-// returns the State Number associated to the point Index
 GetPointState(Index: number): number;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// This class implements the computation of a root of a function of a single variable which is near an initial guess using a minimization algorithm.Knowledge of the derivative is required
 math_FunctionRoot: declare class math_FunctionRoot
 
 constructor
 
-// Returns true if the computations are successful, otherwise returns false
 IsDone(): boolean;
 
-// returns the value of the root
 Root(): number;
 
-// returns the value of the derivative at the root
 Derivative(): number;
 
-// returns the value of the function at the root
 Value(): number;
 
-// returns the number of iterations really done on the computation of the Root
 NbIterations(): number;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// This class implements an algorithm which finds all the real roots of a function with derivative within a given range
 math_FunctionRoots: declare class math_FunctionRoots
 
 constructor
 
-// Returns true if the computations are successful, otherwise returns false
 IsDone(): boolean;
 
-// returns true if the function is considered as null between A and B
 IsAllNull(): boolean;
 
-// Returns the number of solutions found
 NbSolutions(): number;
 
-// Returns the Nth value of the root of function F
 Value(Nieme: number): number;
 
-// returns the StateNumber of the Nieme root
 StateNumber(Nieme: number): number;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// This class gives a default sample (constant difference of parameter) for a function defined between two bound A,B
 math_FunctionSample: declare class math_FunctionSample
 
 constructor
 
-// Returns the bounds of parameters
 Bounds(A: number, B: number): { A: number; B: number };
 
-// Returns the number of sample points
 NbPoints(): number;
 
-// Returns the value of parameter of the point of range Index
 GetParameter(Index: number): number;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// This abstract class describes the virtual functions associated to a set on N Functions of M independent variables
 math_FunctionSet: declare class math_FunctionSet
 
-// Returns the number of variables of the function
 NbVariables(): number;
 
-// Returns the number of equations of the function
 NbEquations(): number;
 
-// Computes the values <F> of the functions for the variable <X>
 Value(X: math_VectorBase_double, F: math_VectorBase_double): boolean;
 
-// Returns the state of the function corresponding to the latestcall of any methods associated with the function
 GetStateNumber(): number;
 
-// Releases the C++ object
+delete(): void;
+
+[Symbol.dispose](): void;
+
+math_FunctionSetRoot: declare class math_FunctionSetRoot
+
+constructor
+
+SetTolerance(Tolerance: math_VectorBase_double): void;
+
+IsSolutionReached(argNo0: math_FunctionSetWithDerivatives): boolean;
+
+Perform(theFunction: math_FunctionSetWithDerivatives, theStartingPoint: math_VectorBase_double, theStopOnDivergent: boolean): void;
+Perform(theFunction: math_FunctionSetWithDerivatives, theStartingPoint: math_VectorBase_double, theInfBound: math_VectorBase_double, theSupBound: math_VectorBase_double, theStopOnDivergent: boolean): void;
+Perform(theFunction: math_FunctionSetWithDerivatives, theStartingPoint: math_VectorBase_double, theStopOnDivergent: boolean): void;
+Perform(theFunction: math_FunctionSetWithDerivatives, theStartingPoint: math_VectorBase_double, theInfBound: math_VectorBase_double, theSupBound: math_VectorBase_double, theStopOnDivergent: boolean): void;
+
+IsDone(): boolean;
+
+NbIterations(): number;
+
+StateNumber(): number;
+
+Root(): math_VectorBase_double;
+Root(Root: math_VectorBase_double): void;
+Root(): math_VectorBase_double;
+Root(Root: math_VectorBase_double): void;
+
+Derivative(): math_Matrix;
+Derivative(Der: math_Matrix): void;
+Derivative(): math_Matrix;
+Derivative(Der: math_Matrix): void;
+
+FunctionSetErrors(): math_VectorBase_double;
+FunctionSetErrors(Err: math_VectorBase_double): void;
+FunctionSetErrors(): math_VectorBase_double;
+FunctionSetErrors(Err: math_VectorBase_double): void;
+
+IsDivergent(): boolean;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+math_FunctionSetWithDerivatives: declare class math_FunctionSetWithDerivatives extends math_FunctionSet
+
+NbVariables(): number;
+
+NbEquations(): number;
+
+Value(X: math_VectorBase_double, F: math_VectorBase_double): boolean;
+
+Derivatives(X: math_VectorBase_double, D: math_Matrix): boolean;
+
+Values(X: math_VectorBase_double, F: math_VectorBase_double, D: math_Matrix): boolean;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+math_FunctionWithDerivative: declare class math_FunctionWithDerivative extends math_Function
+
+Value(X: number, F: number): { returnValue: boolean; F: number };
+
+Derivative(X: number, D: number): { returnValue: boolean; D: number };
+
+Values(X: number, F: number, D: number): { returnValue: boolean; F: number; D: number };
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+math_Gauss: declare class math_Gauss
+
+constructor
+
+IsDone(): boolean;
+
+Solve(B: math_VectorBase_double, X: math_VectorBase_double): void;
+Solve(B: math_VectorBase_double): void;
+Solve(B: math_VectorBase_double, X: math_VectorBase_double): void;
+Solve(B: math_VectorBase_double): void;
+
+Determinant(): number;
+
+Invert(Inv: math_Matrix): void;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+math_GaussLeastSquare: declare class math_GaussLeastSquare
+
+constructor
+
+IsDone(): boolean;
+
+Solve(B: math_VectorBase_double, X: math_VectorBase_double): void;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+math_GaussMultipleIntegration: declare class math_GaussMultipleIntegration
+
+constructor
+
+IsDone(): boolean;
+
+Value(): number;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+math_GaussSetIntegration: declare class math_GaussSetIntegration
+
+constructor
+
+IsDone(): boolean;
+
+Value(): math_VectorBase_double;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+math_GaussSingleIntegration: declare class math_GaussSingleIntegration
+
+constructor
+
+IsDone(): boolean;
+
+Value(): number;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+math_GlobOptMin: declare class math_GlobOptMin
+
+constructor
+
+SetGlobalParams(theFunc: math_MultipleVarFunction, theLowerBorder: math_VectorBase_double, theUpperBorder: math_VectorBase_double, theC?: number, theDiscretizationTol?: number, theSameTol?: number): void;
+
+SetLocalParams(theLocalA: math_VectorBase_double, theLocalB: math_VectorBase_double): void;
+
+SetTol(theDiscretizationTol: number, theSameTol: number): void;
+
+GetTol(theDiscretizationTol?: number, theSameTol?: number): { theDiscretizationTol: number; theSameTol: number };
+
+Perform(isFindSingleSolution?: boolean): void;
+
+Points(theIndex: number, theSol: math_VectorBase_double): void;
+
+SetContinuity(theCont: number): void;
+
+GetContinuity(): number;
+
+SetFunctionalMinimalValue(theMinimalValue: number): void;
+
+GetFunctionalMinimalValue(): number;
+
+SetLipConstState(theFlag: boolean): void;
+
+GetLipConstState(): boolean;
+
+isDone(): boolean;
+
+GetF(): number;
+
+NbExtrema(): number;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+math_Jacobi: declare class math_Jacobi
+
+constructor
+
+IsDone(): boolean;
+
+Values(): math_VectorBase_double;
+
+Value(Num: number): number;
+
+Vectors(): math_Matrix;
+
+Vector(Num: number, V: math_VectorBase_double): void;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+math_KronrodSingleIntegration: declare class math_KronrodSingleIntegration
+
+constructor
+
+Perform(theFunction: math_Function, theLower: number, theUpper: number, theNbPnts: number): void;
+Perform(theFunction: math_Function, theLower: number, theUpper: number, theNbPnts: number, theTolerance: number, theMaxNbIter: number): void;
+Perform(theFunction: math_Function, theLower: number, theUpper: number, theNbPnts: number): void;
+Perform(theFunction: math_Function, theLower: number, theUpper: number, theNbPnts: number, theTolerance: number, theMaxNbIter: number): void;
+
+IsDone(): boolean;
+
+Value(): number;
+
+ErrorReached(): number;
+
+AbsolutError(): number;
+
+OrderReached(): number;
+
+NbIterReached(): number;
+
+static GKRule(theFunction: math_Function, theLower: number, theUpper: number, theGaussP: math_VectorBase_double, theGaussW: math_VectorBase_double, theKronrodP: math_VectorBase_double, theKronrodW: math_VectorBase_double, theValue?: number, theError?: number): { returnValue: boolean; theValue: number; theError: number };
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+math_Matrix: declare class math_Matrix
+
+constructor
+
+Init(InitialValue: number): void;
+
+RowNumber(): number;
+
+ColNumber(): number;
+
+LowerRow(): number;
+
+UpperRow(): number;
+
+LowerCol(): number;
+
+UpperCol(): number;
+
+Determinant(): number;
+
+Transpose(): void;
+
+Invert(): void;
+
+Multiply(Right: number): void;
+Multiply(Right: math_Matrix): void;
+Multiply(Left: math_VectorBase_double, Right: math_VectorBase_double): void;
+Multiply(Left: math_Matrix, Right: math_Matrix): void;
+Multiply(Right: number): void;
+Multiply(Right: math_Matrix): void;
+Multiply(Left: math_VectorBase_double, Right: math_VectorBase_double): void;
+Multiply(Left: math_Matrix, Right: math_Matrix): void;
+Multiply(Right: number): void;
+Multiply(Right: math_Matrix): void;
+Multiply(Left: math_VectorBase_double, Right: math_VectorBase_double): void;
+Multiply(Left: math_Matrix, Right: math_Matrix): void;
+Multiply(Right: number): void;
+Multiply(Right: math_Matrix): void;
+Multiply(Left: math_VectorBase_double, Right: math_VectorBase_double): void;
+Multiply(Left: math_Matrix, Right: math_Matrix): void;
+
+Multiplied(Right: number): math_Matrix;
+Multiplied(Right: math_Matrix): math_Matrix;
+Multiplied(Right: math_VectorBase_double): math_VectorBase_double;
+Multiplied(Right: number): math_Matrix;
+Multiplied(Right: math_Matrix): math_Matrix;
+Multiplied(Right: math_VectorBase_double): math_VectorBase_double;
+Multiplied(Right: number): math_Matrix;
+Multiplied(Right: math_Matrix): math_Matrix;
+Multiplied(Right: math_VectorBase_double): math_VectorBase_double;
+
+TMultiplied(Right: number): math_Matrix;
+
+Divide(Right: number): void;
+
+Divided(Right: number): math_Matrix;
+
+Add(Right: math_Matrix): void;
+Add(Left: math_Matrix, Right: math_Matrix): void;
+Add(Right: math_Matrix): void;
+Add(Left: math_Matrix, Right: math_Matrix): void;
+
+Added(Right: math_Matrix): math_Matrix;
+
+Subtract(Right: math_Matrix): void;
+Subtract(Left: math_Matrix, Right: math_Matrix): void;
+Subtract(Right: math_Matrix): void;
+Subtract(Left: math_Matrix, Right: math_Matrix): void;
+
+Subtracted(Right: math_Matrix): math_Matrix;
+
+Set(I1: number, I2: number, J1: number, J2: number, M: math_Matrix): void;
+
+SetRow(Row: number, V: math_VectorBase_double): void;
+
+SetCol(Col: number, V: math_VectorBase_double): void;
+
+SetDiag(Value: number): void;
+
+Row(Row: number): math_VectorBase_double;
+
+Col(Col: number): math_VectorBase_double;
+
+SwapRow(Row1: number, Row2: number): void;
+
+SwapCol(Col1: number, Col2: number): void;
+
+Transposed(): math_Matrix;
+
+Inverse(): math_Matrix;
+
+TMultiply(Right: math_Matrix): math_Matrix;
+TMultiply(TLeft: math_Matrix, Right: math_Matrix): void;
+TMultiply(Right: math_Matrix): math_Matrix;
+TMultiply(TLeft: math_Matrix, Right: math_Matrix): void;
+
+Value(Row: number, Col: number): number;
+
+Initialized(Other: math_Matrix): math_Matrix;
+
+Opposite(): math_Matrix;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+math_MultipleVarFunction: declare class math_MultipleVarFunction
+
+NbVariables(): number;
+
+Value(X: math_VectorBase_double, F: number): { returnValue: boolean; F: number };
+
+GetStateNumber(): number;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+math_MultipleVarFunctionWithGradient: declare class math_MultipleVarFunctionWithGradient extends math_MultipleVarFunction
+
+NbVariables(): number;
+
+Value(X: math_VectorBase_double, F: number): { returnValue: boolean; F: number };
+
+Gradient(X: math_VectorBase_double, G: math_VectorBase_double): boolean;
+
+Values(X: math_VectorBase_double, F: number, G: math_VectorBase_double): { returnValue: boolean; F: number };
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+math_MultipleVarFunctionWithHessian: declare class math_MultipleVarFunctionWithHessian extends math_MultipleVarFunctionWithGradient
+
+NbVariables(): number;
+
+Value(X: math_VectorBase_double, F: number): { returnValue: boolean; F: number };
+
+Gradient(X: math_VectorBase_double, G: math_VectorBase_double): boolean;
+
+Values(X: math_VectorBase_double, F: number, G: math_VectorBase_double): { returnValue: boolean; F: number };
+Values(X: math_VectorBase_double, F: number, G: math_VectorBase_double, H: math_Matrix): { returnValue: boolean; F: number };
+Values(X: math_VectorBase_double, F: number, G: math_VectorBase_double): { returnValue: boolean; F: number };
+Values(X: math_VectorBase_double, F: number, G: math_VectorBase_double, H: math_Matrix): { returnValue: boolean; F: number };
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+math_NewtonFunctionRoot: declare class math_NewtonFunctionRoot
+
+constructor
+
+Perform(F: math_FunctionWithDerivative, Guess: number): void;
+
+IsDone(): boolean;
+
+Root(): number;
+
+Derivative(): number;
+
+Value(): number;
+
+NbIterations(): number;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+math_NotSquare: declare class math_NotSquare extends Standard_DimensionError
+
+constructor
+
+ExceptionType(): string;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+math_PSO: declare class math_PSO
+
+constructor
+
+Perform(theSteps: math_VectorBase_double, theValue: number, theOutPnt: math_VectorBase_double, theNbIter: number): { theValue: number };
+Perform(theParticles: math_PSOParticlesPool, theNbParticles: number, theValue: number, theOutPnt: math_VectorBase_double, theNbIter: number): { theValue: number };
+Perform(theSteps: math_VectorBase_double, theValue: number, theOutPnt: math_VectorBase_double, theNbIter: number): { theValue: number };
+Perform(theParticles: math_PSOParticlesPool, theNbParticles: number, theValue: number, theOutPnt: math_VectorBase_double, theNbIter: number): { theValue: number };
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+math_PSOParticlesPool: declare class math_PSOParticlesPool
+
+constructor
+
+GetParticle(theIdx: number): PSO_Particle;
+
+GetBestParticle(): PSO_Particle;
+
+GetWorstParticle(): PSO_Particle;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+math_Powell: declare class math_Powell
+
+constructor
+
+Perform(theFunction: math_MultipleVarFunction, theStartingPoint: math_VectorBase_double, theStartingDirections: math_Matrix): void;
+
+IsSolutionReached(theFunction: math_MultipleVarFunction): boolean;
+
+IsDone(): boolean;
+
+Location(): math_VectorBase_double;
+Location(Loc: math_VectorBase_double): void;
+Location(): math_VectorBase_double;
+Location(Loc: math_VectorBase_double): void;
+
+Minimum(): number;
+
+NbIterations(): number;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+math_SVD: declare class math_SVD
+
+constructor
+
+IsDone(): boolean;
+
+Solve(B: math_VectorBase_double, X: math_VectorBase_double, Eps?: number): void;
+
+PseudoInverse(Inv: math_Matrix, Eps?: number): void;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+math_SingularMatrix: declare class math_SingularMatrix extends Standard_Failure
+
+constructor
+
+ExceptionType(): string;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+math_Status: typeof math_Status[keyof typeof math_Status]
+
+math_TrigonometricEquationFunction: declare class math_TrigonometricEquationFunction extends math_FunctionWithDerivative
+
+constructor
+
+Value(X: number, F: number): { returnValue: boolean; F: number };
+
+Derivative(X: number, D: number): { returnValue: boolean; D: number };
+
+Values(X: number, F: number, D: number): { returnValue: boolean; F: number; D: number };
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+math_TrigonometricFunctionRoots: declare class math_TrigonometricFunctionRoots
+
+constructor
+
+IsDone(): boolean;
+
+InfiniteRoots(): boolean;
+
+Value(Index: number): number;
+
+NbSolutions(): number;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+math_Uzawa: declare class math_Uzawa
+
+constructor
+
+IsDone(): boolean;
+
+Value(): math_VectorBase_double;
+
+InitialError(): math_VectorBase_double;
+
+Duale(V: math_VectorBase_double): void;
+
+Error(): math_VectorBase_double;
+
+NbIterations(): number;
+
+InverseCont(): math_Matrix;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+math_ValueAndWeight: declare class math_ValueAndWeight
+
+constructor
+
+Value(): number;
+
+Weight(): number;
+
 delete(): void;
 
 [Symbol.dispose](): void;

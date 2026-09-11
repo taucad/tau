@@ -1,643 +1,915 @@
 # libcascade — NCollection (17)
 
-8 top-level symbols. Signatures are verbatim typescript.
+19 top-level symbols. Signatures are verbatim typescript.
 
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_handle_StepBasic_NamedUnit: declare class NCollection_Array1_handle_StepBasic_NamedUnit
+NCollection_DynamicArray_BOPDS_InterfFZ: declare class NCollection_DynamicArray_BOPDS_InterfFZ
 
 constructor
 
-// Initialise the items with theValue
-Init(theValue: StepBasic_NamedUnit): void;
-
-// Size query
 Size(): number;
 
-// Length query (legacy int-returning API)
 Length(): number;
 
-// Return TRUE if array has zero length
-IsEmpty(): boolean;
-
-// Lower bound
 Lower(): number;
 
-// Upper bound
 Upper(): number;
 
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_handle_StepBasic_NamedUnit): NCollection_Array1_handle_StepBasic_NamedUnit;
+IsEmpty(): boolean;
 
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_handle_StepBasic_NamedUnit): NCollection_Array1_handle_StepBasic_NamedUnit;
+Assign(theOther: NCollection_DynamicArray_BOPDS_InterfFZ, theOwnAllocator: boolean): NCollection_DynamicArray_BOPDS_InterfFZ;
 
-// Move assignment
-Move(theOther: NCollection_Array1_handle_StepBasic_NamedUnit): NCollection_Array1_handle_StepBasic_NamedUnit;
-// theOther: Mutated in place
+Append(theValue: BOPDS_InterfFZ): BOPDS_InterfFZ;
 
-First(): StepBasic_NamedUnit;
+InsertAfter(theIndex: number, theValue: BOPDS_InterfFZ): BOPDS_InterfFZ;
 
-ChangeFirst(): StepBasic_NamedUnit;
+InsertBefore(theIndex: number, theValue: BOPDS_InterfFZ): BOPDS_InterfFZ;
 
-Last(): StepBasic_NamedUnit;
+EraseLast(): void;
 
-ChangeLast(): StepBasic_NamedUnit;
+Appended(): BOPDS_InterfFZ;
 
-// Constant value access
-Value(theIndex: number): StepBasic_NamedUnit;
+Value(theIndex: number): BOPDS_InterfFZ;
 
-// Variable value access
-ChangeValue(theIndex: number): StepBasic_NamedUnit;
+First(): BOPDS_InterfFZ;
 
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): StepBasic_NamedUnit;
-// theIndex: 0-based index in [0, `Size()`-1]
+ChangeFirst(): BOPDS_InterfFZ;
 
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): StepBasic_NamedUnit;
-// theIndex: 0-based index in [0, `Size()`-1]
+Last(): BOPDS_InterfFZ;
 
-// Set value
-SetValue(theIndex: number, theItem: StepBasic_NamedUnit): void;
+ChangeLast(): BOPDS_InterfFZ;
 
-// Changes the lowest bound
-UpdateLowerBound(theLower: number): void;
+ChangeValue(theIndex: number): BOPDS_InterfFZ;
 
-// Changes the upper bound
-UpdateUpperBound(theUpper: number): void;
+SetValue(theIndex: number, theValue: BOPDS_InterfFZ): BOPDS_InterfFZ;
 
-// Resizes the array to specified bounds
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
+Clear(theReleaseMemory?: boolean): void;
 
-IsDeletable(): boolean;
+SetIncrement(theIncrement: number): void;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_handle_StepBasic_Organization: declare class NCollection_Array1_handle_StepBasic_Organization
+NCollection_DynamicArray_BOPDS_InterfVE: declare class NCollection_DynamicArray_BOPDS_InterfVE
 
 constructor
 
-// Initialise the items with theValue
-Init(theValue: StepBasic_Organization): void;
-
-// Size query
 Size(): number;
 
-// Length query (legacy int-returning API)
 Length(): number;
 
-// Return TRUE if array has zero length
-IsEmpty(): boolean;
-
-// Lower bound
 Lower(): number;
 
-// Upper bound
 Upper(): number;
 
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_handle_StepBasic_Organization): NCollection_Array1_handle_StepBasic_Organization;
+IsEmpty(): boolean;
 
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_handle_StepBasic_Organization): NCollection_Array1_handle_StepBasic_Organization;
+Assign(theOther: NCollection_DynamicArray_BOPDS_InterfVE, theOwnAllocator: boolean): NCollection_DynamicArray_BOPDS_InterfVE;
 
-// Move assignment
-Move(theOther: NCollection_Array1_handle_StepBasic_Organization): NCollection_Array1_handle_StepBasic_Organization;
-// theOther: Mutated in place
+Append(theValue: BOPDS_InterfVE): BOPDS_InterfVE;
 
-First(): StepBasic_Organization;
+InsertAfter(theIndex: number, theValue: BOPDS_InterfVE): BOPDS_InterfVE;
 
-ChangeFirst(): StepBasic_Organization;
+InsertBefore(theIndex: number, theValue: BOPDS_InterfVE): BOPDS_InterfVE;
 
-Last(): StepBasic_Organization;
+EraseLast(): void;
 
-ChangeLast(): StepBasic_Organization;
+Appended(): BOPDS_InterfVE;
 
-// Constant value access
-Value(theIndex: number): StepBasic_Organization;
+Value(theIndex: number): BOPDS_InterfVE;
 
-// Variable value access
-ChangeValue(theIndex: number): StepBasic_Organization;
+First(): BOPDS_InterfVE;
 
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): StepBasic_Organization;
-// theIndex: 0-based index in [0, `Size()`-1]
+ChangeFirst(): BOPDS_InterfVE;
 
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): StepBasic_Organization;
-// theIndex: 0-based index in [0, `Size()`-1]
+Last(): BOPDS_InterfVE;
 
-// Set value
-SetValue(theIndex: number, theItem: StepBasic_Organization): void;
+ChangeLast(): BOPDS_InterfVE;
 
-// Changes the lowest bound
-UpdateLowerBound(theLower: number): void;
+ChangeValue(theIndex: number): BOPDS_InterfVE;
 
-// Changes the upper bound
-UpdateUpperBound(theUpper: number): void;
+SetValue(theIndex: number, theValue: BOPDS_InterfVE): BOPDS_InterfVE;
 
-// Resizes the array to specified bounds
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
+Clear(theReleaseMemory?: boolean): void;
 
-IsDeletable(): boolean;
+SetIncrement(theIncrement: number): void;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_handle_StepBasic_Person: declare class NCollection_Array1_handle_StepBasic_Person
+NCollection_DynamicArray_BOPDS_InterfVF: declare class NCollection_DynamicArray_BOPDS_InterfVF
 
 constructor
 
-// Initialise the items with theValue
-Init(theValue: StepBasic_Person): void;
-
-// Size query
 Size(): number;
 
-// Length query (legacy int-returning API)
 Length(): number;
 
-// Return TRUE if array has zero length
-IsEmpty(): boolean;
-
-// Lower bound
 Lower(): number;
 
-// Upper bound
 Upper(): number;
 
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_handle_StepBasic_Person): NCollection_Array1_handle_StepBasic_Person;
+IsEmpty(): boolean;
 
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_handle_StepBasic_Person): NCollection_Array1_handle_StepBasic_Person;
+Assign(theOther: NCollection_DynamicArray_BOPDS_InterfVF, theOwnAllocator: boolean): NCollection_DynamicArray_BOPDS_InterfVF;
 
-// Move assignment
-Move(theOther: NCollection_Array1_handle_StepBasic_Person): NCollection_Array1_handle_StepBasic_Person;
-// theOther: Mutated in place
+Append(theValue: BOPDS_InterfVF): BOPDS_InterfVF;
 
-First(): StepBasic_Person;
+InsertAfter(theIndex: number, theValue: BOPDS_InterfVF): BOPDS_InterfVF;
 
-ChangeFirst(): StepBasic_Person;
+InsertBefore(theIndex: number, theValue: BOPDS_InterfVF): BOPDS_InterfVF;
 
-Last(): StepBasic_Person;
+EraseLast(): void;
 
-ChangeLast(): StepBasic_Person;
+Appended(): BOPDS_InterfVF;
 
-// Constant value access
-Value(theIndex: number): StepBasic_Person;
+Value(theIndex: number): BOPDS_InterfVF;
 
-// Variable value access
-ChangeValue(theIndex: number): StepBasic_Person;
+First(): BOPDS_InterfVF;
 
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): StepBasic_Person;
-// theIndex: 0-based index in [0, `Size()`-1]
+ChangeFirst(): BOPDS_InterfVF;
 
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): StepBasic_Person;
-// theIndex: 0-based index in [0, `Size()`-1]
+Last(): BOPDS_InterfVF;
 
-// Set value
-SetValue(theIndex: number, theItem: StepBasic_Person): void;
+ChangeLast(): BOPDS_InterfVF;
 
-// Changes the lowest bound
-UpdateLowerBound(theLower: number): void;
+ChangeValue(theIndex: number): BOPDS_InterfVF;
 
-// Changes the upper bound
-UpdateUpperBound(theUpper: number): void;
+SetValue(theIndex: number, theValue: BOPDS_InterfVF): BOPDS_InterfVF;
 
-// Resizes the array to specified bounds
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
+Clear(theReleaseMemory?: boolean): void;
 
-IsDeletable(): boolean;
+SetIncrement(theIncrement: number): void;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_handle_StepBasic_Product: declare class NCollection_Array1_handle_StepBasic_Product
+NCollection_DynamicArray_BOPDS_InterfVV: declare class NCollection_DynamicArray_BOPDS_InterfVV
 
 constructor
 
-// Initialise the items with theValue
-Init(theValue: StepBasic_Product): void;
-
-// Size query
 Size(): number;
 
-// Length query (legacy int-returning API)
 Length(): number;
 
-// Return TRUE if array has zero length
-IsEmpty(): boolean;
-
-// Lower bound
 Lower(): number;
 
-// Upper bound
 Upper(): number;
 
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_handle_StepBasic_Product): NCollection_Array1_handle_StepBasic_Product;
+IsEmpty(): boolean;
 
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_handle_StepBasic_Product): NCollection_Array1_handle_StepBasic_Product;
+Assign(theOther: NCollection_DynamicArray_BOPDS_InterfVV, theOwnAllocator: boolean): NCollection_DynamicArray_BOPDS_InterfVV;
 
-// Move assignment
-Move(theOther: NCollection_Array1_handle_StepBasic_Product): NCollection_Array1_handle_StepBasic_Product;
-// theOther: Mutated in place
+Append(theValue: BOPDS_InterfVV): BOPDS_InterfVV;
 
-First(): StepBasic_Product;
+InsertAfter(theIndex: number, theValue: BOPDS_InterfVV): BOPDS_InterfVV;
 
-ChangeFirst(): StepBasic_Product;
+InsertBefore(theIndex: number, theValue: BOPDS_InterfVV): BOPDS_InterfVV;
 
-Last(): StepBasic_Product;
+EraseLast(): void;
 
-ChangeLast(): StepBasic_Product;
+Appended(): BOPDS_InterfVV;
 
-// Constant value access
-Value(theIndex: number): StepBasic_Product;
+Value(theIndex: number): BOPDS_InterfVV;
 
-// Variable value access
-ChangeValue(theIndex: number): StepBasic_Product;
+First(): BOPDS_InterfVV;
 
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): StepBasic_Product;
-// theIndex: 0-based index in [0, `Size()`-1]
+ChangeFirst(): BOPDS_InterfVV;
 
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): StepBasic_Product;
-// theIndex: 0-based index in [0, `Size()`-1]
+Last(): BOPDS_InterfVV;
 
-// Set value
-SetValue(theIndex: number, theItem: StepBasic_Product): void;
+ChangeLast(): BOPDS_InterfVV;
 
-// Changes the lowest bound
-UpdateLowerBound(theLower: number): void;
+ChangeValue(theIndex: number): BOPDS_InterfVV;
 
-// Changes the upper bound
-UpdateUpperBound(theUpper: number): void;
+SetValue(theIndex: number, theValue: BOPDS_InterfVV): BOPDS_InterfVV;
 
-// Resizes the array to specified bounds
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
+Clear(theReleaseMemory?: boolean): void;
 
-IsDeletable(): boolean;
+SetIncrement(theIncrement: number): void;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_handle_StepBasic_ProductContext: declare class NCollection_Array1_handle_StepBasic_ProductContext
+NCollection_DynamicArray_BOPDS_InterfVZ: declare class NCollection_DynamicArray_BOPDS_InterfVZ
 
 constructor
 
-// Initialise the items with theValue
-Init(theValue: StepBasic_ProductContext): void;
-
-// Size query
 Size(): number;
 
-// Length query (legacy int-returning API)
 Length(): number;
 
-// Return TRUE if array has zero length
-IsEmpty(): boolean;
-
-// Lower bound
 Lower(): number;
 
-// Upper bound
 Upper(): number;
 
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_handle_StepBasic_ProductContext): NCollection_Array1_handle_StepBasic_ProductContext;
+IsEmpty(): boolean;
 
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_handle_StepBasic_ProductContext): NCollection_Array1_handle_StepBasic_ProductContext;
+Assign(theOther: NCollection_DynamicArray_BOPDS_InterfVZ, theOwnAllocator: boolean): NCollection_DynamicArray_BOPDS_InterfVZ;
 
-// Move assignment
-Move(theOther: NCollection_Array1_handle_StepBasic_ProductContext): NCollection_Array1_handle_StepBasic_ProductContext;
-// theOther: Mutated in place
+Append(theValue: BOPDS_InterfVZ): BOPDS_InterfVZ;
 
-First(): StepBasic_ProductContext;
+InsertAfter(theIndex: number, theValue: BOPDS_InterfVZ): BOPDS_InterfVZ;
 
-ChangeFirst(): StepBasic_ProductContext;
+InsertBefore(theIndex: number, theValue: BOPDS_InterfVZ): BOPDS_InterfVZ;
 
-Last(): StepBasic_ProductContext;
+EraseLast(): void;
 
-ChangeLast(): StepBasic_ProductContext;
+Appended(): BOPDS_InterfVZ;
 
-// Constant value access
-Value(theIndex: number): StepBasic_ProductContext;
+Value(theIndex: number): BOPDS_InterfVZ;
 
-// Variable value access
-ChangeValue(theIndex: number): StepBasic_ProductContext;
+First(): BOPDS_InterfVZ;
 
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): StepBasic_ProductContext;
-// theIndex: 0-based index in [0, `Size()`-1]
+ChangeFirst(): BOPDS_InterfVZ;
 
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): StepBasic_ProductContext;
-// theIndex: 0-based index in [0, `Size()`-1]
+Last(): BOPDS_InterfVZ;
 
-// Set value
-SetValue(theIndex: number, theItem: StepBasic_ProductContext): void;
+ChangeLast(): BOPDS_InterfVZ;
 
-// Changes the lowest bound
-UpdateLowerBound(theLower: number): void;
+ChangeValue(theIndex: number): BOPDS_InterfVZ;
 
-// Changes the upper bound
-UpdateUpperBound(theUpper: number): void;
+SetValue(theIndex: number, theValue: BOPDS_InterfVZ): BOPDS_InterfVZ;
 
-// Resizes the array to specified bounds
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
+Clear(theReleaseMemory?: boolean): void;
 
-IsDeletable(): boolean;
+SetIncrement(theIncrement: number): void;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_handle_StepBasic_UncertaintyMeasureWithUnit: declare class NCollection_Array1_handle_StepBasic_UncertaintyMeasureWithUnit
+NCollection_DynamicArray_BOPDS_InterfZZ: declare class NCollection_DynamicArray_BOPDS_InterfZZ
 
 constructor
 
-// Initialise the items with theValue
-Init(theValue: StepBasic_UncertaintyMeasureWithUnit): void;
-
-// Size query
 Size(): number;
 
-// Length query (legacy int-returning API)
 Length(): number;
 
-// Return TRUE if array has zero length
-IsEmpty(): boolean;
-
-// Lower bound
 Lower(): number;
 
-// Upper bound
 Upper(): number;
 
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_handle_StepBasic_UncertaintyMeasureWithUnit): NCollection_Array1_handle_StepBasic_UncertaintyMeasureWithUnit;
+IsEmpty(): boolean;
 
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_handle_StepBasic_UncertaintyMeasureWithUnit): NCollection_Array1_handle_StepBasic_UncertaintyMeasureWithUnit;
+Assign(theOther: NCollection_DynamicArray_BOPDS_InterfZZ, theOwnAllocator: boolean): NCollection_DynamicArray_BOPDS_InterfZZ;
 
-// Move assignment
-Move(theOther: NCollection_Array1_handle_StepBasic_UncertaintyMeasureWithUnit): NCollection_Array1_handle_StepBasic_UncertaintyMeasureWithUnit;
-// theOther: Mutated in place
+Append(theValue: BOPDS_InterfZZ): BOPDS_InterfZZ;
 
-First(): StepBasic_UncertaintyMeasureWithUnit;
+InsertAfter(theIndex: number, theValue: BOPDS_InterfZZ): BOPDS_InterfZZ;
 
-ChangeFirst(): StepBasic_UncertaintyMeasureWithUnit;
+InsertBefore(theIndex: number, theValue: BOPDS_InterfZZ): BOPDS_InterfZZ;
 
-Last(): StepBasic_UncertaintyMeasureWithUnit;
+EraseLast(): void;
 
-ChangeLast(): StepBasic_UncertaintyMeasureWithUnit;
+Appended(): BOPDS_InterfZZ;
 
-// Constant value access
-Value(theIndex: number): StepBasic_UncertaintyMeasureWithUnit;
+Value(theIndex: number): BOPDS_InterfZZ;
 
-// Variable value access
-ChangeValue(theIndex: number): StepBasic_UncertaintyMeasureWithUnit;
+First(): BOPDS_InterfZZ;
 
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): StepBasic_UncertaintyMeasureWithUnit;
-// theIndex: 0-based index in [0, `Size()`-1]
+ChangeFirst(): BOPDS_InterfZZ;
 
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): StepBasic_UncertaintyMeasureWithUnit;
-// theIndex: 0-based index in [0, `Size()`-1]
+Last(): BOPDS_InterfZZ;
 
-// Set value
-SetValue(theIndex: number, theItem: StepBasic_UncertaintyMeasureWithUnit): void;
+ChangeLast(): BOPDS_InterfZZ;
 
-// Changes the lowest bound
-UpdateLowerBound(theLower: number): void;
+ChangeValue(theIndex: number): BOPDS_InterfZZ;
 
-// Changes the upper bound
-UpdateUpperBound(theUpper: number): void;
+SetValue(theIndex: number, theValue: BOPDS_InterfZZ): BOPDS_InterfZZ;
 
-// Resizes the array to specified bounds
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
+Clear(theReleaseMemory?: boolean): void;
 
-IsDeletable(): boolean;
+SetIncrement(theIncrement: number): void;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_handle_StepDimTol_DatumReference: declare class NCollection_Array1_handle_StepDimTol_DatumReference
+NCollection_DynamicArray_BOPDS_Point: declare class NCollection_DynamicArray_BOPDS_Point
 
 constructor
 
-// Initialise the items with theValue
-Init(theValue: StepDimTol_DatumReference): void;
-
-// Size query
 Size(): number;
 
-// Length query (legacy int-returning API)
 Length(): number;
 
-// Return TRUE if array has zero length
-IsEmpty(): boolean;
-
-// Lower bound
 Lower(): number;
 
-// Upper bound
 Upper(): number;
 
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_handle_StepDimTol_DatumReference): NCollection_Array1_handle_StepDimTol_DatumReference;
+IsEmpty(): boolean;
 
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_handle_StepDimTol_DatumReference): NCollection_Array1_handle_StepDimTol_DatumReference;
+Assign(theOther: unknown, theOwnAllocator: boolean): unknown;
 
-// Move assignment
-Move(theOther: NCollection_Array1_handle_StepDimTol_DatumReference): NCollection_Array1_handle_StepDimTol_DatumReference;
-// theOther: Mutated in place
+Append(theValue: BOPDS_Point): BOPDS_Point;
 
-First(): StepDimTol_DatumReference;
+InsertAfter(theIndex: number, theValue: BOPDS_Point): BOPDS_Point;
 
-ChangeFirst(): StepDimTol_DatumReference;
+InsertBefore(theIndex: number, theValue: BOPDS_Point): BOPDS_Point;
 
-Last(): StepDimTol_DatumReference;
+EraseLast(): void;
 
-ChangeLast(): StepDimTol_DatumReference;
+Appended(): BOPDS_Point;
 
-// Constant value access
-Value(theIndex: number): StepDimTol_DatumReference;
+Value(theIndex: number): BOPDS_Point;
 
-// Variable value access
-ChangeValue(theIndex: number): StepDimTol_DatumReference;
+First(): BOPDS_Point;
 
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): StepDimTol_DatumReference;
-// theIndex: 0-based index in [0, `Size()`-1]
+ChangeFirst(): BOPDS_Point;
 
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): StepDimTol_DatumReference;
-// theIndex: 0-based index in [0, `Size()`-1]
+Last(): BOPDS_Point;
 
-// Set value
-SetValue(theIndex: number, theItem: StepDimTol_DatumReference): void;
+ChangeLast(): BOPDS_Point;
 
-// Changes the lowest bound
-UpdateLowerBound(theLower: number): void;
+ChangeValue(theIndex: number): BOPDS_Point;
 
-// Changes the upper bound
-UpdateUpperBound(theUpper: number): void;
+SetValue(theIndex: number, theValue: BOPDS_Point): BOPDS_Point;
 
-// Resizes the array to specified bounds
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
+Clear(theReleaseMemory?: boolean): void;
 
-IsDeletable(): boolean;
+SetIncrement(theIncrement: number): void;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_handle_StepDimTol_DatumReferenceCompartment: declare class NCollection_Array1_handle_StepDimTol_DatumReferenceCompartment
+NCollection_DynamicArray_ExtremaPC_ExtremumResult: declare class NCollection_DynamicArray_ExtremaPC_ExtremumResult
 
 constructor
 
-// Initialise the items with theValue
-Init(theValue: StepDimTol_DatumReferenceCompartment): void;
-
-// Size query
 Size(): number;
 
-// Length query (legacy int-returning API)
 Length(): number;
 
-// Return TRUE if array has zero length
-IsEmpty(): boolean;
-
-// Lower bound
 Lower(): number;
 
-// Upper bound
 Upper(): number;
 
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_handle_StepDimTol_DatumReferenceCompartment): NCollection_Array1_handle_StepDimTol_DatumReferenceCompartment;
+IsEmpty(): boolean;
 
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_handle_StepDimTol_DatumReferenceCompartment): NCollection_Array1_handle_StepDimTol_DatumReferenceCompartment;
+Assign(theOther: NCollection_DynamicArray_ExtremaPC_ExtremumResult, theOwnAllocator: boolean): NCollection_DynamicArray_ExtremaPC_ExtremumResult;
 
-// Move assignment
-Move(theOther: NCollection_Array1_handle_StepDimTol_DatumReferenceCompartment): NCollection_Array1_handle_StepDimTol_DatumReferenceCompartment;
-// theOther: Mutated in place
+Append(theValue: unknown): unknown;
 
-First(): StepDimTol_DatumReferenceCompartment;
+InsertAfter(theIndex: number, theValue: unknown): unknown;
 
-ChangeFirst(): StepDimTol_DatumReferenceCompartment;
+InsertBefore(theIndex: number, theValue: unknown): unknown;
 
-Last(): StepDimTol_DatumReferenceCompartment;
+EraseLast(): void;
 
-ChangeLast(): StepDimTol_DatumReferenceCompartment;
+Appended(): unknown;
 
-// Constant value access
-Value(theIndex: number): StepDimTol_DatumReferenceCompartment;
+Value(theIndex: number): unknown;
 
-// Variable value access
-ChangeValue(theIndex: number): StepDimTol_DatumReferenceCompartment;
+First(): unknown;
 
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): StepDimTol_DatumReferenceCompartment;
-// theIndex: 0-based index in [0, `Size()`-1]
+ChangeFirst(): unknown;
 
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): StepDimTol_DatumReferenceCompartment;
-// theIndex: 0-based index in [0, `Size()`-1]
+Last(): unknown;
 
-// Set value
-SetValue(theIndex: number, theItem: StepDimTol_DatumReferenceCompartment): void;
+ChangeLast(): unknown;
 
-// Changes the lowest bound
-UpdateLowerBound(theLower: number): void;
+ChangeValue(theIndex: number): unknown;
 
-// Changes the upper bound
-UpdateUpperBound(theUpper: number): void;
+SetValue(theIndex: number, theValue: unknown): unknown;
 
-// Resizes the array to specified bounds
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
+Clear(theReleaseMemory?: boolean): void;
 
-IsDeletable(): boolean;
+SetIncrement(theIncrement: number): void;
 
-// Releases the C++ object
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_DynamicArray_MathRoot_NullInterval: declare class NCollection_DynamicArray_MathRoot_NullInterval
+
+constructor
+
+Size(): number;
+
+Length(): number;
+
+Lower(): number;
+
+Upper(): number;
+
+IsEmpty(): boolean;
+
+Assign(theOther: NCollection_DynamicArray_MathRoot_NullInterval, theOwnAllocator: boolean): NCollection_DynamicArray_MathRoot_NullInterval;
+
+Append(theValue: unknown): unknown;
+
+InsertAfter(theIndex: number, theValue: unknown): unknown;
+
+InsertBefore(theIndex: number, theValue: unknown): unknown;
+
+EraseLast(): void;
+
+Appended(): unknown;
+
+Value(theIndex: number): unknown;
+
+First(): unknown;
+
+ChangeFirst(): unknown;
+
+Last(): unknown;
+
+ChangeLast(): unknown;
+
+ChangeValue(theIndex: number): unknown;
+
+SetValue(theIndex: number, theValue: unknown): unknown;
+
+Clear(theReleaseMemory?: boolean): void;
+
+SetIncrement(theIncrement: number): void;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_DynamicArray_NCollection_List_handle_BOPDS_PaveBlock: declare class NCollection_DynamicArray_NCollection_List_handle_BOPDS_PaveBlock
+
+constructor
+
+Size(): number;
+
+Length(): number;
+
+Lower(): number;
+
+Upper(): number;
+
+IsEmpty(): boolean;
+
+Assign(theOther: NCollection_DynamicArray_NCollection_List_handle_BOPDS_PaveBlock, theOwnAllocator: boolean): NCollection_DynamicArray_NCollection_List_handle_BOPDS_PaveBlock;
+
+Append(theValue: NCollection_List_handle_BOPDS_PaveBlock): NCollection_List_handle_BOPDS_PaveBlock;
+
+InsertAfter(theIndex: number, theValue: NCollection_List_handle_BOPDS_PaveBlock): NCollection_List_handle_BOPDS_PaveBlock;
+
+InsertBefore(theIndex: number, theValue: NCollection_List_handle_BOPDS_PaveBlock): NCollection_List_handle_BOPDS_PaveBlock;
+
+EraseLast(): void;
+
+Appended(): NCollection_List_handle_BOPDS_PaveBlock;
+
+Value(theIndex: number): NCollection_List_handle_BOPDS_PaveBlock;
+
+First(): NCollection_List_handle_BOPDS_PaveBlock;
+
+ChangeFirst(): NCollection_List_handle_BOPDS_PaveBlock;
+
+Last(): NCollection_List_handle_BOPDS_PaveBlock;
+
+ChangeLast(): NCollection_List_handle_BOPDS_PaveBlock;
+
+ChangeValue(theIndex: number): NCollection_List_handle_BOPDS_PaveBlock;
+
+SetValue(theIndex: number, theValue: NCollection_List_handle_BOPDS_PaveBlock): NCollection_List_handle_BOPDS_PaveBlock;
+
+Clear(theReleaseMemory?: boolean): void;
+
+SetIncrement(theIncrement: number): void;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_DynamicArray_TopoDS_Face: declare class NCollection_DynamicArray_TopoDS_Face
+
+constructor
+
+Size(): number;
+
+Length(): number;
+
+Lower(): number;
+
+Upper(): number;
+
+IsEmpty(): boolean;
+
+Assign(theOther: NCollection_DynamicArray_TopoDS_Face, theOwnAllocator: boolean): NCollection_DynamicArray_TopoDS_Face;
+
+Append(theValue: TopoDS_Face): TopoDS_Face;
+
+InsertAfter(theIndex: number, theValue: TopoDS_Face): TopoDS_Face;
+
+InsertBefore(theIndex: number, theValue: TopoDS_Face): TopoDS_Face;
+
+EraseLast(): void;
+
+Appended(): TopoDS_Face;
+
+Value(theIndex: number): TopoDS_Face;
+
+First(): TopoDS_Face;
+
+ChangeFirst(): TopoDS_Face;
+
+Last(): TopoDS_Face;
+
+ChangeLast(): TopoDS_Face;
+
+ChangeValue(theIndex: number): TopoDS_Face;
+
+SetValue(theIndex: number, theValue: TopoDS_Face): TopoDS_Face;
+
+Clear(theReleaseMemory?: boolean): void;
+
+SetIncrement(theIncrement: number): void;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_DynamicArray_TopoDS_Shape: declare class NCollection_DynamicArray_TopoDS_Shape
+
+constructor
+
+Size(): number;
+
+Length(): number;
+
+Lower(): number;
+
+Upper(): number;
+
+IsEmpty(): boolean;
+
+Assign(theOther: NCollection_DynamicArray_TopoDS_Shape, theOwnAllocator: boolean): NCollection_DynamicArray_TopoDS_Shape;
+
+Append(theValue: TopoDS_Shape): TopoDS_Shape;
+
+InsertAfter(theIndex: number, theValue: TopoDS_Shape): TopoDS_Shape;
+
+InsertBefore(theIndex: number, theValue: TopoDS_Shape): TopoDS_Shape;
+
+EraseLast(): void;
+
+Appended(): TopoDS_Shape;
+
+Value(theIndex: number): TopoDS_Shape;
+
+First(): TopoDS_Shape;
+
+ChangeFirst(): TopoDS_Shape;
+
+Last(): TopoDS_Shape;
+
+ChangeLast(): TopoDS_Shape;
+
+ChangeValue(theIndex: number): TopoDS_Shape;
+
+SetValue(theIndex: number, theValue: TopoDS_Shape): TopoDS_Shape;
+
+Clear(theReleaseMemory?: boolean): void;
+
+SetIncrement(theIncrement: number): void;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_DynamicArray_double: declare class NCollection_DynamicArray_double
+
+constructor
+
+Size(): number;
+
+Length(): number;
+
+Lower(): number;
+
+Upper(): number;
+
+IsEmpty(): boolean;
+
+Assign(theOther: NCollection_DynamicArray_double, theOwnAllocator: boolean): NCollection_DynamicArray_double;
+
+Append(theValue: number): number;
+
+InsertAfter(theIndex: number, theValue: number): number;
+
+InsertBefore(theIndex: number, theValue: number): number;
+
+EraseLast(): void;
+
+Appended(): number;
+
+Value(theIndex: number): number;
+
+First(): number;
+
+ChangeFirst(): number;
+
+Last(): number;
+
+ChangeLast(): number;
+
+ChangeValue(theIndex: number): number;
+
+SetValue(theIndex: number, theValue: number): number;
+
+Clear(theReleaseMemory?: boolean): void;
+
+SetIncrement(theIncrement: number): void;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_DynamicArray_gp_Pnt2d: declare class NCollection_DynamicArray_gp_Pnt2d
+
+constructor
+
+Size(): number;
+
+Length(): number;
+
+Lower(): number;
+
+Upper(): number;
+
+IsEmpty(): boolean;
+
+Assign(theOther: NCollection_DynamicArray_gp_Pnt2d, theOwnAllocator: boolean): NCollection_DynamicArray_gp_Pnt2d;
+
+Append(theValue: gp_Pnt2d): gp_Pnt2d;
+
+InsertAfter(theIndex: number, theValue: gp_Pnt2d): gp_Pnt2d;
+
+InsertBefore(theIndex: number, theValue: gp_Pnt2d): gp_Pnt2d;
+
+EraseLast(): void;
+
+Appended(): gp_Pnt2d;
+
+Value(theIndex: number): gp_Pnt2d;
+
+First(): gp_Pnt2d;
+
+ChangeFirst(): gp_Pnt2d;
+
+Last(): gp_Pnt2d;
+
+ChangeLast(): gp_Pnt2d;
+
+ChangeValue(theIndex: number): gp_Pnt2d;
+
+SetValue(theIndex: number, theValue: gp_Pnt2d): gp_Pnt2d;
+
+Clear(theReleaseMemory?: boolean): void;
+
+SetIncrement(theIncrement: number): void;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_DynamicArray_gp_XYZ: declare class NCollection_DynamicArray_gp_XYZ
+
+constructor
+
+Size(): number;
+
+Length(): number;
+
+Lower(): number;
+
+Upper(): number;
+
+IsEmpty(): boolean;
+
+Assign(theOther: NCollection_DynamicArray_gp_XYZ, theOwnAllocator: boolean): NCollection_DynamicArray_gp_XYZ;
+
+Append(theValue: gp_XYZ): gp_XYZ;
+
+InsertAfter(theIndex: number, theValue: gp_XYZ): gp_XYZ;
+
+InsertBefore(theIndex: number, theValue: gp_XYZ): gp_XYZ;
+
+EraseLast(): void;
+
+Appended(): gp_XYZ;
+
+Value(theIndex: number): gp_XYZ;
+
+First(): gp_XYZ;
+
+ChangeFirst(): gp_XYZ;
+
+Last(): gp_XYZ;
+
+ChangeLast(): gp_XYZ;
+
+ChangeValue(theIndex: number): gp_XYZ;
+
+SetValue(theIndex: number, theValue: gp_XYZ): gp_XYZ;
+
+Clear(theReleaseMemory?: boolean): void;
+
+SetIncrement(theIncrement: number): void;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_DynamicArray_handle_Adaptor3d_Surface: declare class NCollection_DynamicArray_handle_Adaptor3d_Surface
+
+constructor
+
+Size(): number;
+
+Length(): number;
+
+Lower(): number;
+
+Upper(): number;
+
+IsEmpty(): boolean;
+
+Assign(theOther: NCollection_DynamicArray_handle_Adaptor3d_Surface, theOwnAllocator: boolean): NCollection_DynamicArray_handle_Adaptor3d_Surface;
+
+Append(theValue: Adaptor3d_Surface): Adaptor3d_Surface;
+
+InsertAfter(theIndex: number, theValue: Adaptor3d_Surface): Adaptor3d_Surface;
+
+InsertBefore(theIndex: number, theValue: Adaptor3d_Surface): Adaptor3d_Surface;
+
+EraseLast(): void;
+
+Appended(): Adaptor3d_Surface;
+
+Value(theIndex: number): Adaptor3d_Surface;
+
+First(): Adaptor3d_Surface;
+
+ChangeFirst(): Adaptor3d_Surface;
+
+Last(): Adaptor3d_Surface;
+
+ChangeLast(): Adaptor3d_Surface;
+
+ChangeValue(theIndex: number): Adaptor3d_Surface;
+
+SetValue(theIndex: number, theValue: Adaptor3d_Surface): Adaptor3d_Surface;
+
+Clear(theReleaseMemory?: boolean): void;
+
+SetIncrement(theIncrement: number): void;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_DynamicArray_handle_NCollection_HSequence_int: declare class NCollection_DynamicArray_handle_NCollection_HSequence_int
+
+constructor
+
+Size(): number;
+
+Length(): number;
+
+Lower(): number;
+
+Upper(): number;
+
+IsEmpty(): boolean;
+
+Assign(theOther: NCollection_DynamicArray_handle_NCollection_HSequence_int, theOwnAllocator: boolean): NCollection_DynamicArray_handle_NCollection_HSequence_int;
+
+Append(theValue: unknown): unknown;
+
+InsertAfter(theIndex: number, theValue: unknown): unknown;
+
+InsertBefore(theIndex: number, theValue: unknown): unknown;
+
+EraseLast(): void;
+
+Appended(): unknown;
+
+Value(theIndex: number): unknown;
+
+First(): unknown;
+
+ChangeFirst(): unknown;
+
+Last(): unknown;
+
+ChangeLast(): unknown;
+
+ChangeValue(theIndex: number): unknown;
+
+SetValue(theIndex: number, theValue: unknown): unknown;
+
+Clear(theReleaseMemory?: boolean): void;
+
+SetIncrement(theIncrement: number): void;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_DynamicArray_handle_Standard_Transient: declare class NCollection_DynamicArray_handle_Standard_Transient
+
+constructor
+
+Size(): number;
+
+Length(): number;
+
+Lower(): number;
+
+Upper(): number;
+
+IsEmpty(): boolean;
+
+Assign(theOther: NCollection_DynamicArray_handle_Standard_Transient, theOwnAllocator: boolean): NCollection_DynamicArray_handle_Standard_Transient;
+
+Append(theValue: Standard_Transient): Standard_Transient;
+
+InsertAfter(theIndex: number, theValue: Standard_Transient): Standard_Transient;
+
+InsertBefore(theIndex: number, theValue: Standard_Transient): Standard_Transient;
+
+EraseLast(): void;
+
+Appended(): Standard_Transient;
+
+Value(theIndex: number): Standard_Transient;
+
+First(): Standard_Transient;
+
+ChangeFirst(): Standard_Transient;
+
+Last(): Standard_Transient;
+
+ChangeLast(): Standard_Transient;
+
+ChangeValue(theIndex: number): Standard_Transient;
+
+SetValue(theIndex: number, theValue: Standard_Transient): Standard_Transient;
+
+Clear(theReleaseMemory?: boolean): void;
+
+SetIncrement(theIncrement: number): void;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_DynamicArray_int: declare class NCollection_DynamicArray_int
+
+constructor
+
+Size(): number;
+
+Length(): number;
+
+Lower(): number;
+
+Upper(): number;
+
+IsEmpty(): boolean;
+
+Assign(theOther: NCollection_DynamicArray_int, theOwnAllocator: boolean): NCollection_DynamicArray_int;
+
+Append(theValue: number): number;
+
+InsertAfter(theIndex: number, theValue: number): number;
+
+InsertBefore(theIndex: number, theValue: number): number;
+
+EraseLast(): void;
+
+Appended(): number;
+
+Value(theIndex: number): number;
+
+First(): number;
+
+ChangeFirst(): number;
+
+Last(): number;
+
+ChangeLast(): number;
+
+ChangeValue(theIndex: number): number;
+
+SetValue(theIndex: number, theValue: number): number;
+
+Clear(theReleaseMemory?: boolean): void;
+
+SetIncrement(theIncrement: number): void;
+
 delete(): void;
 
 [Symbol.dispose](): void;

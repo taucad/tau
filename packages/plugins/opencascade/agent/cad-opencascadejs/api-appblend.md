@@ -2,7 +2,6 @@
 
 1 top-level symbols. Signatures are verbatim typescript.
 
-// Bspline approximation of a surface
 AppBlend_Approx: declare class AppBlend_Approx
 
 IsDone(): boolean;
@@ -45,7 +44,6 @@ TolReached(Tol3d: number, Tol2d: number): { Tol3d: number; Tol2d: number };
 
 TolCurveOnSurf(Index: number): number;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;

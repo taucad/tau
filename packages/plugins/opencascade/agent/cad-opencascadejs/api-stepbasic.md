@@ -1,34 +1,25 @@
 # libcascade — StepBasic
 
-29 top-level symbols. Signatures are verbatim typescript.
+34 top-level symbols. Signatures are verbatim typescript.
 
-// Representation of STEP entity Action
 StepBasic_Action: declare class StepBasic_Action extends Standard_Transient
 
 constructor
 
-// Initialize all fields (own and inherited)
 Init(aName: TCollection_HAsciiString, hasDescription: boolean, aDescription: TCollection_HAsciiString, aChosenMethod: StepBasic_ActionMethod): void;
 
-// Returns field Name
 Name(): TCollection_HAsciiString;
 
-// Set field Name
 SetName(Name: TCollection_HAsciiString): void;
 
-// Returns field Description
 Description(): TCollection_HAsciiString;
 
-// Set field Description
 SetDescription(Description: TCollection_HAsciiString): void;
 
-// Returns True if optional field Description is defined
 HasDescription(): boolean;
 
-// Returns field ChosenMethod
 ChosenMethod(): StepBasic_ActionMethod;
 
-// Set field ChosenMethod
 SetChosenMethod(ChosenMethod: StepBasic_ActionMethod): void;
 
 static get_type_name(): string;
@@ -37,23 +28,18 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Representation of STEP entity ActionAssignment
 StepBasic_ActionAssignment: declare class StepBasic_ActionAssignment extends Standard_Transient
 
 constructor
 
-// Initialize all fields (own and inherited)
 Init(aAssignedAction: StepBasic_Action): void;
 
-// Returns field AssignedAction
 AssignedAction(): StepBasic_Action;
 
-// Set field AssignedAction
 SetAssignedAction(AssignedAction: StepBasic_Action): void;
 
 static get_type_name(): string;
@@ -62,44 +48,32 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Representation of STEP entity ActionMethod
 StepBasic_ActionMethod: declare class StepBasic_ActionMethod extends Standard_Transient
 
 constructor
 
-// Initialize all fields (own and inherited)
 Init(aName: TCollection_HAsciiString, hasDescription: boolean, aDescription: TCollection_HAsciiString, aConsequence: TCollection_HAsciiString, aPurpose: TCollection_HAsciiString): void;
 
-// Returns field Name
 Name(): TCollection_HAsciiString;
 
-// Set field Name
 SetName(Name: TCollection_HAsciiString): void;
 
-// Returns field Description
 Description(): TCollection_HAsciiString;
 
-// Set field Description
 SetDescription(Description: TCollection_HAsciiString): void;
 
-// Returns True if optional field Description is defined
 HasDescription(): boolean;
 
-// Returns field Consequence
 Consequence(): TCollection_HAsciiString;
 
-// Set field Consequence
 SetConsequence(Consequence: TCollection_HAsciiString): void;
 
-// Returns field Purpose
 Purpose(): TCollection_HAsciiString;
 
-// Set field Purpose
 SetPurpose(Purpose: TCollection_HAsciiString): void;
 
 static get_type_name(): string;
@@ -108,23 +82,18 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Representation of STEP entity ActionRequestAssignment
 StepBasic_ActionRequestAssignment: declare class StepBasic_ActionRequestAssignment extends Standard_Transient
 
 constructor
 
-// Initialize all fields (own and inherited)
 Init(aAssignedActionRequest: StepBasic_VersionedActionRequest): void;
 
-// Returns field AssignedActionRequest
 AssignedActionRequest(): StepBasic_VersionedActionRequest;
 
-// Set field AssignedActionRequest
 SetAssignedActionRequest(AssignedActionRequest: StepBasic_VersionedActionRequest): void;
 
 static get_type_name(): string;
@@ -133,29 +102,22 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Representation of STEP entity ActionRequestSolution
 StepBasic_ActionRequestSolution: declare class StepBasic_ActionRequestSolution extends Standard_Transient
 
 constructor
 
-// Initialize all fields (own and inherited)
 Init(aMethod: StepBasic_ActionMethod, aRequest: StepBasic_VersionedActionRequest): void;
 
-// Returns field Method
 Method(): StepBasic_ActionMethod;
 
-// Set field Method
 SetMethod(Method: StepBasic_ActionMethod): void;
 
-// Returns field Request
 Request(): StepBasic_VersionedActionRequest;
 
-// Set field Request
 SetRequest(Request: StepBasic_VersionedActionRequest): void;
 
 static get_type_name(): string;
@@ -164,7 +126,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -277,7 +238,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -300,7 +260,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -325,7 +284,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -358,7 +316,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -383,7 +340,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -404,12 +360,10 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Added from StepBasic Rev2 to Rev4
 StepBasic_ApprovalDateTime: declare class StepBasic_ApprovalDateTime extends Standard_Transient
 
 constructor
@@ -430,7 +384,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -459,7 +412,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -492,7 +444,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -513,7 +464,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -534,7 +484,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -549,7 +498,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -577,35 +525,26 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Representation of STEP entity Certification
 StepBasic_Certification: declare class StepBasic_Certification extends Standard_Transient
 
 constructor
 
-// Initialize all fields (own and inherited)
 Init(aName: TCollection_HAsciiString, aPurpose: TCollection_HAsciiString, aKind: StepBasic_CertificationType): void;
 
-// Returns field Name
 Name(): TCollection_HAsciiString;
 
-// Set field Name
 SetName(Name: TCollection_HAsciiString): void;
 
-// Returns field Purpose
 Purpose(): TCollection_HAsciiString;
 
-// Set field Purpose
 SetPurpose(Purpose: TCollection_HAsciiString): void;
 
-// Returns field Kind
 Kind(): StepBasic_CertificationType;
 
-// Set field Kind
 SetKind(Kind: StepBasic_CertificationType): void;
 
 static get_type_name(): string;
@@ -614,23 +553,18 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Representation of STEP entity CertificationAssignment
 StepBasic_CertificationAssignment: declare class StepBasic_CertificationAssignment extends Standard_Transient
 
 constructor
 
-// Initialize all fields (own and inherited)
 Init(aAssignedCertification: StepBasic_Certification): void;
 
-// Returns field AssignedCertification
 AssignedCertification(): StepBasic_Certification;
 
-// Set field AssignedCertification
 SetAssignedCertification(AssignedCertification: StepBasic_Certification): void;
 
 static get_type_name(): string;
@@ -639,23 +573,18 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Representation of STEP entity CertificationType
 StepBasic_CertificationType: declare class StepBasic_CertificationType extends Standard_Transient
 
 constructor
 
-// Initialize all fields (own and inherited)
 Init(aDescription: TCollection_HAsciiString): void;
 
-// Returns field Description
 Description(): TCollection_HAsciiString;
 
-// Set field Description
 SetDescription(Description: TCollection_HAsciiString): void;
 
 static get_type_name(): string;
@@ -664,32 +593,24 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Representation of STEP entity CharacterizedObject
 StepBasic_CharacterizedObject: declare class StepBasic_CharacterizedObject extends Standard_Transient
 
 constructor
 
-// Initialize all fields (own and inherited)
 Init(aName: TCollection_HAsciiString, hasDescription: boolean, aDescription: TCollection_HAsciiString): void;
 
-// Returns field Name
 Name(): TCollection_HAsciiString;
 
-// Set field Name
 SetName(Name: TCollection_HAsciiString): void;
 
-// Returns field Description
 Description(): TCollection_HAsciiString;
 
-// Set field Description
 SetDescription(Description: TCollection_HAsciiString): void;
 
-// Returns True if optional field Description is defined
 HasDescription(): boolean;
 
 static get_type_name(): string;
@@ -698,35 +619,26 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Representation of STEP entity Contract
 StepBasic_Contract: declare class StepBasic_Contract extends Standard_Transient
 
 constructor
 
-// Initialize all fields (own and inherited)
 Init(aName: TCollection_HAsciiString, aPurpose: TCollection_HAsciiString, aKind: StepBasic_ContractType): void;
 
-// Returns field Name
 Name(): TCollection_HAsciiString;
 
-// Set field Name
 SetName(Name: TCollection_HAsciiString): void;
 
-// Returns field Purpose
 Purpose(): TCollection_HAsciiString;
 
-// Set field Purpose
 SetPurpose(Purpose: TCollection_HAsciiString): void;
 
-// Returns field Kind
 Kind(): StepBasic_ContractType;
 
-// Set field Kind
 SetKind(Kind: StepBasic_ContractType): void;
 
 static get_type_name(): string;
@@ -735,23 +647,18 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Representation of STEP entity ContractAssignment
 StepBasic_ContractAssignment: declare class StepBasic_ContractAssignment extends Standard_Transient
 
 constructor
 
-// Initialize all fields (own and inherited)
 Init(aAssignedContract: StepBasic_Contract): void;
 
-// Returns field AssignedContract
 AssignedContract(): StepBasic_Contract;
 
-// Set field AssignedContract
 SetAssignedContract(AssignedContract: StepBasic_Contract): void;
 
 static get_type_name(): string;
@@ -760,23 +667,18 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Representation of STEP entity ContractType
 StepBasic_ContractType: declare class StepBasic_ContractType extends Standard_Transient
 
 constructor
 
-// Initialize all fields (own and inherited)
 Init(aDescription: TCollection_HAsciiString): void;
 
-// Returns field Description
 Description(): TCollection_HAsciiString;
 
-// Set field Description
 SetDescription(Description: TCollection_HAsciiString): void;
 
 static get_type_name(): string;
@@ -785,7 +687,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -813,7 +714,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -832,7 +732,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -856,7 +755,121 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
+delete(): void;
+
+[Symbol.dispose](): void;
+
+StepBasic_ConversionBasedUnitAndMassUnit: declare class StepBasic_ConversionBasedUnitAndMassUnit extends StepBasic_ConversionBasedUnit
+
+constructor
+
+Init(aDimensions: StepBasic_DimensionalExponents, aName: TCollection_HAsciiString, aConversionFactor: Standard_Transient): void;
+Init(aDimensions: StepBasic_DimensionalExponents): void;
+Init(aDimensions: StepBasic_DimensionalExponents, aName: TCollection_HAsciiString, aConversionFactor: Standard_Transient): void;
+Init(aDimensions: StepBasic_DimensionalExponents): void;
+
+SetMassUnit(aMassUnit: StepBasic_MassUnit): void;
+
+MassUnit(): StepBasic_MassUnit;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+StepBasic_ConversionBasedUnitAndPlaneAngleUnit: declare class StepBasic_ConversionBasedUnitAndPlaneAngleUnit extends StepBasic_ConversionBasedUnit
+
+constructor
+
+Init(aDimensions: StepBasic_DimensionalExponents, aName: TCollection_HAsciiString, aConversionFactor: Standard_Transient): void;
+Init(aDimensions: StepBasic_DimensionalExponents): void;
+Init(aDimensions: StepBasic_DimensionalExponents, aName: TCollection_HAsciiString, aConversionFactor: Standard_Transient): void;
+Init(aDimensions: StepBasic_DimensionalExponents): void;
+
+SetPlaneAngleUnit(aPlaneAngleUnit: StepBasic_PlaneAngleUnit): void;
+
+PlaneAngleUnit(): StepBasic_PlaneAngleUnit;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+StepBasic_ConversionBasedUnitAndRatioUnit: declare class StepBasic_ConversionBasedUnitAndRatioUnit extends StepBasic_ConversionBasedUnit
+
+constructor
+
+Init(aDimensions: StepBasic_DimensionalExponents, aName: TCollection_HAsciiString, aConversionFactor: Standard_Transient): void;
+Init(aDimensions: StepBasic_DimensionalExponents): void;
+Init(aDimensions: StepBasic_DimensionalExponents, aName: TCollection_HAsciiString, aConversionFactor: Standard_Transient): void;
+Init(aDimensions: StepBasic_DimensionalExponents): void;
+
+SetRatioUnit(aRatioUnit: StepBasic_RatioUnit): void;
+
+RatioUnit(): StepBasic_RatioUnit;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+StepBasic_ConversionBasedUnitAndSolidAngleUnit: declare class StepBasic_ConversionBasedUnitAndSolidAngleUnit extends StepBasic_ConversionBasedUnit
+
+constructor
+
+Init(aDimensions: StepBasic_DimensionalExponents, aName: TCollection_HAsciiString, aConversionFactor: Standard_Transient): void;
+Init(aDimensions: StepBasic_DimensionalExponents): void;
+Init(aDimensions: StepBasic_DimensionalExponents, aName: TCollection_HAsciiString, aConversionFactor: Standard_Transient): void;
+Init(aDimensions: StepBasic_DimensionalExponents): void;
+
+SetSolidAngleUnit(aSolidAngleUnit: StepBasic_SolidAngleUnit): void;
+
+SolidAngleUnit(): StepBasic_SolidAngleUnit;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+StepBasic_ConversionBasedUnitAndTimeUnit: declare class StepBasic_ConversionBasedUnitAndTimeUnit extends StepBasic_ConversionBasedUnit
+
+constructor
+
+Init(aDimensions: StepBasic_DimensionalExponents, aName: TCollection_HAsciiString, aConversionFactor: Standard_Transient): void;
+Init(aDimensions: StepBasic_DimensionalExponents): void;
+Init(aDimensions: StepBasic_DimensionalExponents, aName: TCollection_HAsciiString, aConversionFactor: Standard_Transient): void;
+Init(aDimensions: StepBasic_DimensionalExponents): void;
+
+SetTimeUnit(aTimeUnit: StepBasic_TimeUnit): void;
+
+TimeUnit(): StepBasic_TimeUnit;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
 delete(): void;
 
 [Symbol.dispose](): void;

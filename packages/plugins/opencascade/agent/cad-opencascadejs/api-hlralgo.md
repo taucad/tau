@@ -2,12 +2,10 @@
 
 34 top-level symbols. Signatures are verbatim typescript.
 
-// In order to have the precision required in industrial design, drawings need to offer the possibility of removing lines, which are hidden in a given projection
 HLRAlgo: declare class HLRAlgo
 
 constructor
 
-// Iterator on the visible or hidden parts of an EdgeStatus
 static UpdateMinMax(x: number, y: number, z: number, Min: [number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number], Max: [number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number]): void;
 
 static EnlargeMinMax(tol: number, Min: [number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number], Max: [number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number]): void;
@@ -24,7 +22,6 @@ static CopyMinMax(IMin: HLRAlgo_EdgesBlock_MinMaxIndices, IMax: HLRAlgo_EdgesBlo
 
 static AddMinMax(IMin: HLRAlgo_EdgesBlock_MinMaxIndices, IMax: HLRAlgo_EdgesBlock_MinMaxIndices, OMin: HLRAlgo_EdgesBlock_MinMaxIndices, OMax: HLRAlgo_EdgesBlock_MinMaxIndices): void;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -62,7 +59,6 @@ Indices(): HLRAlgo_BiPoint_IndicesT;
 
 Points(): HLRAlgo_BiPoint_PointsT;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -83,7 +79,6 @@ PntP12D(): gp_XY;
 
 PntP22D(): gp_XY;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -98,7 +93,6 @@ MoreHidden(): boolean;
 
 NextHidden(): void;
 
-// Returns the bounds and the tolerances of the current Hidden {@link Interval `Interval`}
 Hidden(Start?: number, TolStart?: number, End?: number, TolEnd?: number): { Start: number; TolStart: number; End: number; TolEnd: number };
 
 InitVisible(status: HLRAlgo_EdgeStatus): void;
@@ -107,20 +101,16 @@ MoreVisible(): boolean;
 
 NextVisible(): void;
 
-// Returns the bounds and the tolerances of the current Visible {@link Interval `Interval`}
 Visible(Start?: number, TolStart?: number, End?: number, TolEnd?: number): { Start: number; TolStart: number; End: number; TolEnd: number };
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// This class describes the Hidden Line status of an Edge
 HLRAlgo_EdgeStatus: declare class HLRAlgo_EdgeStatus
 
 constructor
 
-// Initialize an EdgeStatus
 Initialize(Start: number, TolStart: number, End: number, TolEnd: number): void;
 
 Bounds(theStart?: number, theTolStart?: number, theEnd?: number, theTolEnd?: number): { theStart: number; theTolStart: number; theEnd: number; theTolEnd: number };
@@ -129,13 +119,10 @@ NbVisiblePart(): number;
 
 VisiblePart(Index: number, Start?: number, TolStart?: number, End?: number, TolEnd?: number): { Start: number; TolStart: number; End: number; TolEnd: number };
 
-// Hides the interval <Start>, <End> with the tolerances <TolStart>, <TolEnd>
 Hide(Start: number, TolStart: number, End: number, TolEnd: number, OnFace: boolean, OnBoundary: boolean): void;
 
-// Hide the whole Edge
 HideAll(): void;
 
-// Show the whole Edge
 ShowAll(): void;
 
 AllHidden(): boolean;
@@ -148,12 +135,10 @@ AllVisible(B: boolean): void;
 AllVisible(): boolean;
 AllVisible(B: boolean): void;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// An EdgesBlock is a set of Edges
 HLRAlgo_EdgesBlock: declare class HLRAlgo_EdgesBlock extends Standard_Transient
 
 constructor
@@ -200,7 +185,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -213,7 +197,6 @@ Minimize(theMinMaxIndices: HLRAlgo_EdgesBlock_MinMaxIndices): HLRAlgo_EdgesBlock
 
 Maximize(theMinMaxIndices: HLRAlgo_EdgesBlock_MinMaxIndices): HLRAlgo_EdgesBlock_MinMaxIndices;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -244,12 +227,10 @@ BoundaryTransition(): TopAbs_Orientation;
 
 ChangeIntersection(): HLRAlgo_Intersection;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Describes an intersection on an edge to hide
 HLRAlgo_Intersection: declare class HLRAlgo_Intersection
 
 constructor
@@ -289,12 +270,10 @@ State(): TopAbs_State;
 State(S: TopAbs_State): void;
 State(): TopAbs_State;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// to remove Hidden lines on Triangulations
 HLRAlgo_PolyAlgo: declare class HLRAlgo_PolyAlgo extends Standard_Transient
 
 constructor
@@ -307,7 +286,6 @@ ChangePolyShell(): NCollection_Array1_handle_HLRAlgo_PolyShellData;
 
 Clear(): void;
 
-// Prepare all the data to process the algo
 Update(): void;
 
 InitHide(): void;
@@ -316,9 +294,7 @@ MoreHide(): boolean;
 
 NextHide(): void;
 
-// process hiding between <Pt1> and <Pt2>
 Hide(status: HLRAlgo_EdgeStatus, Index?: number, reg1?: boolean, regn?: boolean, outl?: boolean, intl?: boolean): { returnValue: HLRAlgo_BiPoint_PointsT; Index: number; reg1: boolean; regn: boolean; outl: boolean; intl: boolean; [Symbol.dispose](): void };
-// status: Mutated in place
 
 InitShow(): void;
 
@@ -326,7 +302,6 @@ MoreShow(): boolean;
 
 NextShow(): void;
 
-// process hiding between <Pt1> and <Pt2>
 Show(Index?: number, reg1?: boolean, regn?: boolean, outl?: boolean, intl?: boolean): { returnValue: HLRAlgo_BiPoint_PointsT; Index: number; reg1: boolean; regn: boolean; outl: boolean; intl: boolean; [Symbol.dispose](): void };
 
 static get_type_name(): string;
@@ -335,12 +310,10 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Data structure of a set of Triangles
 HLRAlgo_PolyData: declare class HLRAlgo_PolyData extends Standard_Transient
 
 constructor
@@ -366,11 +339,7 @@ UpdateGlobalMinMax(theBox: Bnd_Box): void;
 
 Hiding(): boolean;
 
-// process hiding between <Pt1> and <Pt2>
 HideByPolyData(thePoints: HLRAlgo_BiPoint_PointsT, theTriangle: HLRAlgo_PolyData_Triangle, theIndices: HLRAlgo_BiPoint_IndicesT, HidingShell: boolean, status: HLRAlgo_EdgeStatus): void;
-// theTriangle: Mutated in place
-// theIndices: Mutated in place
-// status: Mutated in place
 
 Indices(): HLRAlgo_PolyData_FaceIndices;
 
@@ -380,12 +349,10 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Data structure of a set of Hiding Triangles
 HLRAlgo_PolyHidingData: declare class HLRAlgo_PolyHidingData
 
 constructor
@@ -396,12 +363,10 @@ Indices(): HLRAlgo_PolyHidingData_TriangleIndices;
 
 Plane(): HLRAlgo_PolyHidingData_PlaneT;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// to Update OutLines
 HLRAlgo_PolyInternalNode: declare class HLRAlgo_PolyInternalNode extends Standard_Transient
 
 constructor
@@ -416,12 +381,10 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// to Update OutLines
 HLRAlgo_PolyInternalSegment: declare class HLRAlgo_PolyInternalSegment
 
 constructor
@@ -438,14 +401,12 @@ Conex1: number
 
 Conex2: number
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
 HLRAlgo_PolyMask: typeof HLRAlgo_PolyMask[keyof typeof HLRAlgo_PolyMask]
 
-// All the PolyData of a Shell
 HLRAlgo_PolyShellData: declare class HLRAlgo_PolyShellData extends Standard_Transient
 
 constructor
@@ -470,12 +431,10 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Implements a projector object
 HLRAlgo_Projector: declare class HLRAlgo_Projector
 
 constructor
@@ -484,22 +443,16 @@ Set(T: gp_Trsf, Persp: boolean, Focus: number): void;
 
 Directions(D1: gp_Vec2d, D2: gp_Vec2d, D3: gp_Vec2d): void;
 
-// to compute with the given scale and translation
 Scaled(On?: boolean): void;
 
-// Returns True if there is a perspective transformation
 Perspective(): boolean;
 
-// Returns the active transformation
 Transformation(): gp_Trsf;
 
-// Returns the active inverted transformation
 InvertedTransformation(): gp_Trsf;
 
-// Returns the original transformation
 FullTransformation(): gp_Trsf;
 
-// Returns the focal length
 Focus(): number;
 
 Transform(D: gp_Vec): void;
@@ -507,7 +460,6 @@ Transform(Pnt: gp_Pnt): void;
 Transform(D: gp_Vec): void;
 Transform(Pnt: gp_Pnt): void;
 
-// Transform and apply perspective if needed
 Project(P: gp_Pnt, Pout: gp_Pnt2d): void;
 Project(P: gp_Pnt, X: number, Y: number, Z: number): { X: number; Y: number; Z: number };
 Project(P: gp_Pnt, D1: gp_Vec, Pout: gp_Pnt2d, D1out: gp_Vec2d): void;
@@ -517,17 +469,13 @@ Project(P: gp_Pnt, D1: gp_Vec, Pout: gp_Pnt2d, D1out: gp_Vec2d): void;
 Project(P: gp_Pnt, Pout: gp_Pnt2d): void;
 Project(P: gp_Pnt, X: number, Y: number, Z: number): { X: number; Y: number; Z: number };
 Project(P: gp_Pnt, D1: gp_Vec, Pout: gp_Pnt2d, D1out: gp_Vec2d): void;
-// Pout: Mutated in place
 
-// return a line going through the eye towards the 2d point <X,Y>
 Shoot(X: number, Y: number): gp_Lin;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Data structure of a triangle
 HLRAlgo_TriangleData: declare class HLRAlgo_TriangleData
 
 constructor
@@ -540,12 +488,10 @@ Node3: number
 
 Flags: number
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// A WiresBlock is a set of Blocks
 HLRAlgo_WiresBlock: declare class HLRAlgo_WiresBlock extends Standard_Transient
 
 constructor
@@ -566,7 +512,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;

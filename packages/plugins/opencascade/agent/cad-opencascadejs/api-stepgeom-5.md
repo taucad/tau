@@ -1,172 +1,6 @@
 # libcascade — StepGeom (5)
 
-32 top-level symbols. Signatures are verbatim typescript.
-
-// complex type
-StepGeom_SurfaceCurveAndBoundedCurve: declare class StepGeom_SurfaceCurveAndBoundedCurve extends StepGeom_SurfaceCurve
-
-constructor
-
-// returns field BoundedCurve
-BoundedCurve(): StepGeom_BoundedCurve;
-
-static get_type_name(): string;
-
-static get_type_descriptor(): Standard_Type;
-
-DynamicType(): Standard_Type;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-StepGeom_SurfaceOfLinearExtrusion: declare class StepGeom_SurfaceOfLinearExtrusion extends StepGeom_SweptSurface
-
-constructor
-
-Init(aName: TCollection_HAsciiString, aSweptCurve: StepGeom_Curve, aExtrusionAxis: StepGeom_Vector): void;
-Init(aName: TCollection_HAsciiString, aSweptCurve: StepGeom_Curve): void;
-Init(aName: TCollection_HAsciiString): void;
-Init(aName: TCollection_HAsciiString, aSweptCurve: StepGeom_Curve, aExtrusionAxis: StepGeom_Vector): void;
-Init(aName: TCollection_HAsciiString, aSweptCurve: StepGeom_Curve): void;
-Init(aName: TCollection_HAsciiString): void;
-Init(aName: TCollection_HAsciiString, aSweptCurve: StepGeom_Curve, aExtrusionAxis: StepGeom_Vector): void;
-Init(aName: TCollection_HAsciiString, aSweptCurve: StepGeom_Curve): void;
-Init(aName: TCollection_HAsciiString): void;
-
-SetExtrusionAxis(aExtrusionAxis: StepGeom_Vector): void;
-
-ExtrusionAxis(): StepGeom_Vector;
-
-static get_type_name(): string;
-
-static get_type_descriptor(): Standard_Type;
-
-DynamicType(): Standard_Type;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-StepGeom_SurfaceOfRevolution: declare class StepGeom_SurfaceOfRevolution extends StepGeom_SweptSurface
-
-constructor
-
-Init(aName: TCollection_HAsciiString, aSweptCurve: StepGeom_Curve, aAxisPosition: StepGeom_Axis1Placement): void;
-Init(aName: TCollection_HAsciiString, aSweptCurve: StepGeom_Curve): void;
-Init(aName: TCollection_HAsciiString): void;
-Init(aName: TCollection_HAsciiString, aSweptCurve: StepGeom_Curve, aAxisPosition: StepGeom_Axis1Placement): void;
-Init(aName: TCollection_HAsciiString, aSweptCurve: StepGeom_Curve): void;
-Init(aName: TCollection_HAsciiString): void;
-Init(aName: TCollection_HAsciiString, aSweptCurve: StepGeom_Curve, aAxisPosition: StepGeom_Axis1Placement): void;
-Init(aName: TCollection_HAsciiString, aSweptCurve: StepGeom_Curve): void;
-Init(aName: TCollection_HAsciiString): void;
-
-SetAxisPosition(aAxisPosition: StepGeom_Axis1Placement): void;
-
-AxisPosition(): StepGeom_Axis1Placement;
-
-static get_type_name(): string;
-
-static get_type_descriptor(): Standard_Type;
-
-DynamicType(): Standard_Type;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-StepGeom_SurfacePatch: declare class StepGeom_SurfacePatch extends Standard_Transient
-
-constructor
-
-Init(aParentSurface: StepGeom_BoundedSurface, aUTransition: StepGeom_TransitionCode, aVTransition: StepGeom_TransitionCode, aUSense: boolean, aVSense: boolean): void;
-
-SetParentSurface(aParentSurface: StepGeom_BoundedSurface): void;
-
-ParentSurface(): StepGeom_BoundedSurface;
-
-SetUTransition(aUTransition: StepGeom_TransitionCode): void;
-
-UTransition(): StepGeom_TransitionCode;
-
-SetVTransition(aVTransition: StepGeom_TransitionCode): void;
-
-VTransition(): StepGeom_TransitionCode;
-
-SetUSense(aUSense: boolean): void;
-
-USense(): boolean;
-
-SetVSense(aVSense: boolean): void;
-
-VSense(): boolean;
-
-static get_type_name(): string;
-
-static get_type_descriptor(): Standard_Type;
-
-DynamicType(): Standard_Type;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-StepGeom_SurfaceReplica: declare class StepGeom_SurfaceReplica extends StepGeom_Surface
-
-constructor
-
-Init(aName: TCollection_HAsciiString, aParentSurface: StepGeom_Surface, aTransformation: StepGeom_CartesianTransformationOperator3d): void;
-Init(aName: TCollection_HAsciiString): void;
-Init(aName: TCollection_HAsciiString, aParentSurface: StepGeom_Surface, aTransformation: StepGeom_CartesianTransformationOperator3d): void;
-Init(aName: TCollection_HAsciiString): void;
-
-SetParentSurface(aParentSurface: StepGeom_Surface): void;
-
-ParentSurface(): StepGeom_Surface;
-
-SetTransformation(aTransformation: StepGeom_CartesianTransformationOperator3d): void;
-
-Transformation(): StepGeom_CartesianTransformationOperator3d;
-
-static get_type_name(): string;
-
-static get_type_descriptor(): Standard_Type;
-
-DynamicType(): Standard_Type;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-StepGeom_SweptSurface: declare class StepGeom_SweptSurface extends StepGeom_Surface
-
-constructor
-
-Init(aName: TCollection_HAsciiString, aSweptCurve: StepGeom_Curve): void;
-Init(aName: TCollection_HAsciiString): void;
-Init(aName: TCollection_HAsciiString, aSweptCurve: StepGeom_Curve): void;
-Init(aName: TCollection_HAsciiString): void;
-
-SetSweptCurve(aSweptCurve: StepGeom_Curve): void;
-
-SweptCurve(): StepGeom_Curve;
-
-static get_type_name(): string;
-
-static get_type_descriptor(): Standard_Type;
-
-DynamicType(): Standard_Type;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
+26 top-level symbols. Signatures are verbatim typescript.
 
 StepGeom_ToroidalSurface: declare class StepGeom_ToroidalSurface extends StepGeom_ElementarySurface
 
@@ -196,7 +30,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -237,23 +70,18 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// For immediate members of TrimmingSelect, i.e
 StepGeom_TrimmingMember: declare class StepGeom_TrimmingMember extends StepData_SelectReal
 
 constructor
 
-// Tells if a SelectMember has a name
 HasName(): boolean;
 
-// Returns the name of a SelectMember
 Name(): string;
 
-// Sets the name of a SelectMember, returns True if done, False if no name is allowed Default does nothing and returns False
 SetName(name: string): boolean;
 
 static get_type_name(): string;
@@ -262,7 +90,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -273,25 +100,18 @@ StepGeom_TrimmingSelect: declare class StepGeom_TrimmingSelect extends StepData_
 
 constructor
 
-// Recognizes a TrimmingSelect Kind Entity that is
 CaseNum(ent: Standard_Transient): number;
 
-// Returns a TrimmingMember (for PARAMETER_VALUE) as preferred
 NewMember(): StepData_SelectMember;
 
-// Recognizes a SelectMember as Real, named as PARAMETER_VALUE 1 -> ParameterValue i.e
 CaseMem(ent: StepData_SelectMember): number;
 
-// returns Value as a CartesianPoint (Null if another type)
 CartesianPoint(): StepGeom_CartesianPoint;
 
-// sets the ParameterValue as Real
 SetParameterValue(aParameterValue: number): void;
 
-// returns Value as a Real (0.0 if not a Real)
 ParameterValue(): number;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -306,7 +126,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -354,7 +173,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -369,7 +187,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -419,7 +236,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -447,7 +263,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -456,16 +271,12 @@ StepGeom_VectorOrDirection: declare class StepGeom_VectorOrDirection extends Ste
 
 constructor
 
-// Recognizes a VectorOrDirection Kind Entity that is
 CaseNum(ent: Standard_Transient): number;
 
-// returns Value as a Vector (Null if another type)
 Vector(): StepGeom_Vector;
 
-// returns Value as a Direction (Null if another type)
 Direction(): StepGeom_Direction;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;

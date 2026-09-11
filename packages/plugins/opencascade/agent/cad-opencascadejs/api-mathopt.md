@@ -12,7 +12,6 @@ Formula: MathOpt_ConjugateGradientFormula
 
 RestartInterval: number
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -35,7 +34,6 @@ Seed: number
 
 PolishBudgetPerDim: number
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -50,7 +48,6 @@ Regularization: number
 
 UseLineSearch: boolean
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -95,7 +92,6 @@ MaxRestarts: number
 
 PolishBudgetPerDim: number
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -114,7 +110,6 @@ Value: number | null | undefined
 
 Velocity: math_VectorBase_double | null | undefined
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -137,7 +132,6 @@ InitialBest: number
 
 FinalBest: number
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -152,7 +146,6 @@ EpsLic: number
 
 MaxIterations: number
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -177,7 +170,6 @@ NbIterations: number
 
 IsDone(): boolean;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;

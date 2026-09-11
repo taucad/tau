@@ -1,771 +1,740 @@
 # libcascade — NCollection (27)
 
-12 top-level symbols. Signatures are verbatim typescript.
+11 top-level symbols. Signatures are verbatim typescript.
 
-// Purpose
-NCollection_DataMap_TopoDS_Shape_handle_Standard_Transient_TopTools_ShapeMapHasher: declare class NCollection_DataMap_TopoDS_Shape_handle_Standard_Transient_TopTools_ShapeMapHasher extends NCollection_BaseMap
+NCollection_Sequence_XCAFDimTolObjects_DatumSingleModif: declare class NCollection_Sequence_XCAFDimTolObjects_DatumSingleModif extends NCollection_BaseSequence
 
 constructor
 
-// Exchange the content of two maps without re-allocations
-Exchange(theOther: NCollection_DataMap_TopoDS_Shape_handle_Standard_Transient_TopTools_ShapeMapHasher): void;
-// theOther: Mutated in place
+static Lower(): number;
 
-// Returns const reference to the hasher
-GetHasher(): TopTools_ShapeMapHasher;
+Upper(): number;
 
-// Assignment
-Assign(theOther: NCollection_DataMap_TopoDS_Shape_handle_Standard_Transient_TopTools_ShapeMapHasher): NCollection_DataMap_TopoDS_Shape_handle_Standard_Transient_TopTools_ShapeMapHasher;
+IsEmpty(): boolean;
 
-// ReSize
-ReSize(N: number): void;
+Reverse(): void;
 
-// Bind binds Item to Key in map
-Bind(theKey: TopoDS_Shape, theItem: Standard_Transient): boolean;
-// theKey: key to add/update
-// theItem: new item
+Exchange(I: number, J: number): void;
 
-// Bound binds Item to Key in map
-Bound(theKey: TopoDS_Shape, theItem: Standard_Transient): Standard_Transient;
-// theKey: key to add/update
-// theItem: new item
+Clear(theAllocator?: NCollection_BaseAllocator): void;
 
-// TryBind binds Item to Key in map only if Key is not yet bound
-TryBind(theKey: TopoDS_Shape, theItem: Standard_Transient): boolean;
-// theKey: key to add
-// theItem: item to bind if Key is not yet bound
+Assign(theOther: NCollection_Sequence_XCAFDimTolObjects_DatumSingleModif): NCollection_Sequence_XCAFDimTolObjects_DatumSingleModif;
 
-// TryBound binds Item to Key in map only if Key is not yet bound
-TryBound(theKey: TopoDS_Shape, theItem: Standard_Transient): Standard_Transient;
-// theKey: key to add
-// theItem: item to bind if Key is not yet bound
+Remove(theIndex: number): void;
+Remove(theFromIndex: number, theToIndex: number): void;
+Remove(theIndex: number): void;
+Remove(theFromIndex: number, theToIndex: number): void;
 
-// IsBound
-IsBound(theKey: TopoDS_Shape): boolean;
+Append(theItem: XCAFDimTolObjects_DatumSingleModif): void;
+Append(theSeq: NCollection_Sequence_XCAFDimTolObjects_DatumSingleModif): void;
+Append(theItem: XCAFDimTolObjects_DatumSingleModif): void;
+Append(theSeq: NCollection_Sequence_XCAFDimTolObjects_DatumSingleModif): void;
 
-// UnBind removes Item Key pair from map
-UnBind(theKey: TopoDS_Shape): boolean;
+Prepend(theItem: XCAFDimTolObjects_DatumSingleModif): void;
+Prepend(theSeq: NCollection_Sequence_XCAFDimTolObjects_DatumSingleModif): void;
+Prepend(theItem: XCAFDimTolObjects_DatumSingleModif): void;
+Prepend(theSeq: NCollection_Sequence_XCAFDimTolObjects_DatumSingleModif): void;
 
-// Seek returns pointer to Item by Key
-Seek(theKey: TopoDS_Shape): Standard_Transient;
+InsertBefore(theIndex: number, theItem: XCAFDimTolObjects_DatumSingleModif): void;
+InsertBefore(theIndex: number, theSeq: NCollection_Sequence_XCAFDimTolObjects_DatumSingleModif): void;
+InsertBefore(theIndex: number, theItem: XCAFDimTolObjects_DatumSingleModif): void;
+InsertBefore(theIndex: number, theSeq: NCollection_Sequence_XCAFDimTolObjects_DatumSingleModif): void;
 
-// ChangeSeek returns modifiable pointer to Item by Key
-ChangeSeek(theKey: TopoDS_Shape): Standard_Transient;
+InsertAfter(theIndex: number, theSeq: NCollection_Sequence_XCAFDimTolObjects_DatumSingleModif): void;
+InsertAfter(theIndex: number, theItem: XCAFDimTolObjects_DatumSingleModif): void;
+InsertAfter(theIndex: number, theSeq: NCollection_Sequence_XCAFDimTolObjects_DatumSingleModif): void;
+InsertAfter(theIndex: number, theItem: XCAFDimTolObjects_DatumSingleModif): void;
 
-// ChangeFind returns modifiable Item by Key
-ChangeFind(theKey: TopoDS_Shape): Standard_Transient;
+Split(theIndex: number, theSeq: NCollection_Sequence_XCAFDimTolObjects_DatumSingleModif): void;
 
-// Clear data
-Clear(doReleaseMemory: boolean): void;
-Clear(theAllocator: NCollection_BaseAllocator): void;
-Clear(doReleaseMemory: boolean): void;
-Clear(theAllocator: NCollection_BaseAllocator): void;
+First(): XCAFDimTolObjects_DatumSingleModif;
 
-// Releases the C++ object
+ChangeFirst(): XCAFDimTolObjects_DatumSingleModif;
+
+Last(): XCAFDimTolObjects_DatumSingleModif;
+
+ChangeLast(): XCAFDimTolObjects_DatumSingleModif;
+
+Value(theIndex: number): XCAFDimTolObjects_DatumSingleModif;
+
+ChangeValue(theIndex: number): XCAFDimTolObjects_DatumSingleModif;
+
+SetValue(theIndex: number, theItem: XCAFDimTolObjects_DatumSingleModif): void;
+
+At(theIndex: number): XCAFDimTolObjects_DatumSingleModif;
+
+ChangeAt(theIndex: number): XCAFDimTolObjects_DatumSingleModif;
+
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Purpose
-NCollection_DataMap_gp_Pnt_handle_Standard_Transient: declare class NCollection_DataMap_gp_Pnt_handle_Standard_Transient extends NCollection_BaseMap
+NCollection_Sequence_XCAFDimTolObjects_DimensionModif: declare class NCollection_Sequence_XCAFDimTolObjects_DimensionModif extends NCollection_BaseSequence
 
 constructor
 
-// Exchange the content of two maps without re-allocations
-Exchange(theOther: unknown): void;
-// theOther: Mutated in place
+static Lower(): number;
 
-// Returns const reference to the hasher
-GetHasher(): unknown;
+Upper(): number;
 
-// Assignment
-Assign(theOther: unknown): unknown;
+IsEmpty(): boolean;
 
-// ReSize
-ReSize(N: number): void;
+Reverse(): void;
 
-// Bind binds Item to Key in map
-Bind(theKey: gp_Pnt, theItem: Standard_Transient): boolean;
-// theKey: key to add/update
-// theItem: new item
+Exchange(I: number, J: number): void;
 
-// Bound binds Item to Key in map
-Bound(theKey: gp_Pnt, theItem: Standard_Transient): Standard_Transient;
-// theKey: key to add/update
-// theItem: new item
+Clear(theAllocator?: NCollection_BaseAllocator): void;
 
-// TryBind binds Item to Key in map only if Key is not yet bound
-TryBind(theKey: gp_Pnt, theItem: Standard_Transient): boolean;
-// theKey: key to add
-// theItem: item to bind if Key is not yet bound
+Assign(theOther: NCollection_Sequence_XCAFDimTolObjects_DimensionModif): NCollection_Sequence_XCAFDimTolObjects_DimensionModif;
 
-// TryBound binds Item to Key in map only if Key is not yet bound
-TryBound(theKey: gp_Pnt, theItem: Standard_Transient): Standard_Transient;
-// theKey: key to add
-// theItem: item to bind if Key is not yet bound
+Remove(theIndex: number): void;
+Remove(theFromIndex: number, theToIndex: number): void;
+Remove(theIndex: number): void;
+Remove(theFromIndex: number, theToIndex: number): void;
 
-// IsBound
-IsBound(theKey: gp_Pnt): boolean;
+Append(theItem: XCAFDimTolObjects_DimensionModif): void;
+Append(theSeq: NCollection_Sequence_XCAFDimTolObjects_DimensionModif): void;
+Append(theItem: XCAFDimTolObjects_DimensionModif): void;
+Append(theSeq: NCollection_Sequence_XCAFDimTolObjects_DimensionModif): void;
 
-// UnBind removes Item Key pair from map
-UnBind(theKey: gp_Pnt): boolean;
+Prepend(theItem: XCAFDimTolObjects_DimensionModif): void;
+Prepend(theSeq: NCollection_Sequence_XCAFDimTolObjects_DimensionModif): void;
+Prepend(theItem: XCAFDimTolObjects_DimensionModif): void;
+Prepend(theSeq: NCollection_Sequence_XCAFDimTolObjects_DimensionModif): void;
 
-// Seek returns pointer to Item by Key
-Seek(theKey: gp_Pnt): Standard_Transient;
+InsertBefore(theIndex: number, theItem: XCAFDimTolObjects_DimensionModif): void;
+InsertBefore(theIndex: number, theSeq: NCollection_Sequence_XCAFDimTolObjects_DimensionModif): void;
+InsertBefore(theIndex: number, theItem: XCAFDimTolObjects_DimensionModif): void;
+InsertBefore(theIndex: number, theSeq: NCollection_Sequence_XCAFDimTolObjects_DimensionModif): void;
 
-// ChangeSeek returns modifiable pointer to Item by Key
-ChangeSeek(theKey: gp_Pnt): Standard_Transient;
+InsertAfter(theIndex: number, theSeq: NCollection_Sequence_XCAFDimTolObjects_DimensionModif): void;
+InsertAfter(theIndex: number, theItem: XCAFDimTolObjects_DimensionModif): void;
+InsertAfter(theIndex: number, theSeq: NCollection_Sequence_XCAFDimTolObjects_DimensionModif): void;
+InsertAfter(theIndex: number, theItem: XCAFDimTolObjects_DimensionModif): void;
 
-// ChangeFind returns modifiable Item by Key
-ChangeFind(theKey: gp_Pnt): Standard_Transient;
+Split(theIndex: number, theSeq: NCollection_Sequence_XCAFDimTolObjects_DimensionModif): void;
 
-// Clear data
-Clear(doReleaseMemory: boolean): void;
-Clear(theAllocator: NCollection_BaseAllocator): void;
-Clear(doReleaseMemory: boolean): void;
-Clear(theAllocator: NCollection_BaseAllocator): void;
+First(): XCAFDimTolObjects_DimensionModif;
 
-// Releases the C++ object
+ChangeFirst(): XCAFDimTolObjects_DimensionModif;
+
+Last(): XCAFDimTolObjects_DimensionModif;
+
+ChangeLast(): XCAFDimTolObjects_DimensionModif;
+
+Value(theIndex: number): XCAFDimTolObjects_DimensionModif;
+
+ChangeValue(theIndex: number): XCAFDimTolObjects_DimensionModif;
+
+SetValue(theIndex: number, theItem: XCAFDimTolObjects_DimensionModif): void;
+
+At(theIndex: number): XCAFDimTolObjects_DimensionModif;
+
+ChangeAt(theIndex: number): XCAFDimTolObjects_DimensionModif;
+
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Purpose
-NCollection_DataMap_handle_Standard_Transient_NCollection_List_Message_Msg: declare class NCollection_DataMap_handle_Standard_Transient_NCollection_List_Message_Msg extends NCollection_BaseMap
+NCollection_Sequence_XCAFDimTolObjects_GeomToleranceModif: declare class NCollection_Sequence_XCAFDimTolObjects_GeomToleranceModif extends NCollection_BaseSequence
 
 constructor
 
-// Exchange the content of two maps without re-allocations
-Exchange(theOther: unknown): void;
-// theOther: Mutated in place
+static Lower(): number;
 
-// Returns const reference to the hasher
-GetHasher(): unknown;
+Upper(): number;
 
-// Assignment
-Assign(theOther: unknown): unknown;
+IsEmpty(): boolean;
 
-// ReSize
-ReSize(N: number): void;
+Reverse(): void;
 
-// Bind binds Item to Key in map
-Bind(theKey: Standard_Transient, theItem: NCollection_List_Message_Msg): boolean;
-// theKey: key to add/update
-// theItem: new item
+Exchange(I: number, J: number): void;
 
-// Bound binds Item to Key in map
-Bound(theKey: Standard_Transient, theItem: NCollection_List_Message_Msg): NCollection_List_Message_Msg;
-// theKey: key to add/update
-// theItem: new item
+Clear(theAllocator?: NCollection_BaseAllocator): void;
 
-// TryBind binds Item to Key in map only if Key is not yet bound
-TryBind(theKey: Standard_Transient, theItem: NCollection_List_Message_Msg): boolean;
-// theKey: key to add
-// theItem: item to bind if Key is not yet bound
+Assign(theOther: NCollection_Sequence_XCAFDimTolObjects_GeomToleranceModif): NCollection_Sequence_XCAFDimTolObjects_GeomToleranceModif;
 
-// TryBound binds Item to Key in map only if Key is not yet bound
-TryBound(theKey: Standard_Transient, theItem: NCollection_List_Message_Msg): NCollection_List_Message_Msg;
-// theKey: key to add
-// theItem: item to bind if Key is not yet bound
+Remove(theIndex: number): void;
+Remove(theFromIndex: number, theToIndex: number): void;
+Remove(theIndex: number): void;
+Remove(theFromIndex: number, theToIndex: number): void;
 
-// IsBound
-IsBound(theKey: Standard_Transient): boolean;
+Append(theItem: XCAFDimTolObjects_GeomToleranceModif): void;
+Append(theSeq: NCollection_Sequence_XCAFDimTolObjects_GeomToleranceModif): void;
+Append(theItem: XCAFDimTolObjects_GeomToleranceModif): void;
+Append(theSeq: NCollection_Sequence_XCAFDimTolObjects_GeomToleranceModif): void;
 
-// UnBind removes Item Key pair from map
-UnBind(theKey: Standard_Transient): boolean;
+Prepend(theItem: XCAFDimTolObjects_GeomToleranceModif): void;
+Prepend(theSeq: NCollection_Sequence_XCAFDimTolObjects_GeomToleranceModif): void;
+Prepend(theItem: XCAFDimTolObjects_GeomToleranceModif): void;
+Prepend(theSeq: NCollection_Sequence_XCAFDimTolObjects_GeomToleranceModif): void;
 
-// Seek returns pointer to Item by Key
-Seek(theKey: Standard_Transient): NCollection_List_Message_Msg;
+InsertBefore(theIndex: number, theItem: XCAFDimTolObjects_GeomToleranceModif): void;
+InsertBefore(theIndex: number, theSeq: NCollection_Sequence_XCAFDimTolObjects_GeomToleranceModif): void;
+InsertBefore(theIndex: number, theItem: XCAFDimTolObjects_GeomToleranceModif): void;
+InsertBefore(theIndex: number, theSeq: NCollection_Sequence_XCAFDimTolObjects_GeomToleranceModif): void;
 
-// ChangeSeek returns modifiable pointer to Item by Key
-ChangeSeek(theKey: Standard_Transient): NCollection_List_Message_Msg;
+InsertAfter(theIndex: number, theSeq: NCollection_Sequence_XCAFDimTolObjects_GeomToleranceModif): void;
+InsertAfter(theIndex: number, theItem: XCAFDimTolObjects_GeomToleranceModif): void;
+InsertAfter(theIndex: number, theSeq: NCollection_Sequence_XCAFDimTolObjects_GeomToleranceModif): void;
+InsertAfter(theIndex: number, theItem: XCAFDimTolObjects_GeomToleranceModif): void;
 
-// ChangeFind returns modifiable Item by Key
-ChangeFind(theKey: Standard_Transient): NCollection_List_Message_Msg;
+Split(theIndex: number, theSeq: NCollection_Sequence_XCAFDimTolObjects_GeomToleranceModif): void;
 
-// Clear data
-Clear(doReleaseMemory: boolean): void;
-Clear(theAllocator: NCollection_BaseAllocator): void;
-Clear(doReleaseMemory: boolean): void;
-Clear(theAllocator: NCollection_BaseAllocator): void;
+First(): XCAFDimTolObjects_GeomToleranceModif;
 
-// Releases the C++ object
+ChangeFirst(): XCAFDimTolObjects_GeomToleranceModif;
+
+Last(): XCAFDimTolObjects_GeomToleranceModif;
+
+ChangeLast(): XCAFDimTolObjects_GeomToleranceModif;
+
+Value(theIndex: number): XCAFDimTolObjects_GeomToleranceModif;
+
+ChangeValue(theIndex: number): XCAFDimTolObjects_GeomToleranceModif;
+
+SetValue(theIndex: number, theItem: XCAFDimTolObjects_GeomToleranceModif): void;
+
+At(theIndex: number): XCAFDimTolObjects_GeomToleranceModif;
+
+ChangeAt(theIndex: number): XCAFDimTolObjects_GeomToleranceModif;
+
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Purpose
-NCollection_DataMap_handle_Standard_Transient_handle_Standard_Transient: declare class NCollection_DataMap_handle_Standard_Transient_handle_Standard_Transient extends NCollection_BaseMap
+NCollection_Sequence_bool: declare class NCollection_Sequence_bool extends NCollection_BaseSequence
 
 constructor
 
-// Exchange the content of two maps without re-allocations
-Exchange(theOther: unknown): void;
-// theOther: Mutated in place
+static Lower(): number;
 
-// Returns const reference to the hasher
-GetHasher(): unknown;
+Upper(): number;
 
-// Assignment
-Assign(theOther: unknown): unknown;
+IsEmpty(): boolean;
 
-// ReSize
-ReSize(N: number): void;
+Reverse(): void;
 
-// Bind binds Item to Key in map
-Bind(theKey: Standard_Transient, theItem: Standard_Transient): boolean;
-// theKey: key to add/update
-// theItem: new item
+Exchange(I: number, J: number): void;
 
-// Bound binds Item to Key in map
-Bound(theKey: Standard_Transient, theItem: Standard_Transient): Standard_Transient;
-// theKey: key to add/update
-// theItem: new item
+Clear(theAllocator?: NCollection_BaseAllocator): void;
 
-// TryBind binds Item to Key in map only if Key is not yet bound
-TryBind(theKey: Standard_Transient, theItem: Standard_Transient): boolean;
-// theKey: key to add
-// theItem: item to bind if Key is not yet bound
+Assign(theOther: NCollection_Sequence_bool): NCollection_Sequence_bool;
 
-// TryBound binds Item to Key in map only if Key is not yet bound
-TryBound(theKey: Standard_Transient, theItem: Standard_Transient): Standard_Transient;
-// theKey: key to add
-// theItem: item to bind if Key is not yet bound
+Remove(theIndex: number): void;
+Remove(theFromIndex: number, theToIndex: number): void;
+Remove(theIndex: number): void;
+Remove(theFromIndex: number, theToIndex: number): void;
 
-// IsBound
-IsBound(theKey: Standard_Transient): boolean;
+Append(theItem: boolean): void;
+Append(theSeq: NCollection_Sequence_bool): void;
+Append(theItem: boolean): void;
+Append(theSeq: NCollection_Sequence_bool): void;
 
-// UnBind removes Item Key pair from map
-UnBind(theKey: Standard_Transient): boolean;
+Prepend(theItem: boolean): void;
+Prepend(theSeq: NCollection_Sequence_bool): void;
+Prepend(theItem: boolean): void;
+Prepend(theSeq: NCollection_Sequence_bool): void;
 
-// Seek returns pointer to Item by Key
-Seek(theKey: Standard_Transient): Standard_Transient;
+InsertBefore(theIndex: number, theItem: boolean): void;
+InsertBefore(theIndex: number, theSeq: NCollection_Sequence_bool): void;
+InsertBefore(theIndex: number, theItem: boolean): void;
+InsertBefore(theIndex: number, theSeq: NCollection_Sequence_bool): void;
 
-// ChangeSeek returns modifiable pointer to Item by Key
-ChangeSeek(theKey: Standard_Transient): Standard_Transient;
+InsertAfter(theIndex: number, theSeq: NCollection_Sequence_bool): void;
+InsertAfter(theIndex: number, theItem: boolean): void;
+InsertAfter(theIndex: number, theSeq: NCollection_Sequence_bool): void;
+InsertAfter(theIndex: number, theItem: boolean): void;
 
-// ChangeFind returns modifiable Item by Key
-ChangeFind(theKey: Standard_Transient): Standard_Transient;
+Split(theIndex: number, theSeq: NCollection_Sequence_bool): void;
 
-// Clear data
-Clear(doReleaseMemory: boolean): void;
-Clear(theAllocator: NCollection_BaseAllocator): void;
-Clear(doReleaseMemory: boolean): void;
-Clear(theAllocator: NCollection_BaseAllocator): void;
+First(): boolean;
 
-// Releases the C++ object
+ChangeFirst(): boolean;
+
+Last(): boolean;
+
+ChangeLast(): boolean;
+
+Value(theIndex: number): boolean;
+
+ChangeValue(theIndex: number): boolean;
+
+SetValue(theIndex: number, theItem: boolean): void;
+
+At(theIndex: number): boolean;
+
+ChangeAt(theIndex: number): boolean;
+
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Purpose
-NCollection_DataMap_handle_StepRepr_RepresentationItem_TopoDS_Shape: declare class NCollection_DataMap_handle_StepRepr_RepresentationItem_TopoDS_Shape extends NCollection_BaseMap
+NCollection_Sequence_double: declare class NCollection_Sequence_double extends NCollection_BaseSequence
 
 constructor
 
-// Exchange the content of two maps without re-allocations
-Exchange(theOther: unknown): void;
-// theOther: Mutated in place
+static Lower(): number;
 
-// Returns const reference to the hasher
-GetHasher(): unknown;
+Upper(): number;
 
-// Assignment
-Assign(theOther: unknown): unknown;
+IsEmpty(): boolean;
 
-// ReSize
-ReSize(N: number): void;
+Reverse(): void;
 
-// Bind binds Item to Key in map
-Bind(theKey: StepRepr_RepresentationItem, theItem: TopoDS_Shape): boolean;
-// theKey: key to add/update
-// theItem: new item
+Exchange(I: number, J: number): void;
 
-// Bound binds Item to Key in map
-Bound(theKey: StepRepr_RepresentationItem, theItem: TopoDS_Shape): TopoDS_Shape;
-// theKey: key to add/update
-// theItem: new item
+Clear(theAllocator?: NCollection_BaseAllocator): void;
 
-// TryBind binds Item to Key in map only if Key is not yet bound
-TryBind(theKey: StepRepr_RepresentationItem, theItem: TopoDS_Shape): boolean;
-// theKey: key to add
-// theItem: item to bind if Key is not yet bound
+Assign(theOther: NCollection_Sequence_double): NCollection_Sequence_double;
 
-// TryBound binds Item to Key in map only if Key is not yet bound
-TryBound(theKey: StepRepr_RepresentationItem, theItem: TopoDS_Shape): TopoDS_Shape;
-// theKey: key to add
-// theItem: item to bind if Key is not yet bound
+Remove(theIndex: number): void;
+Remove(theFromIndex: number, theToIndex: number): void;
+Remove(theIndex: number): void;
+Remove(theFromIndex: number, theToIndex: number): void;
 
-// IsBound
-IsBound(theKey: StepRepr_RepresentationItem): boolean;
+Append(theItem: number): void;
+Append(theSeq: NCollection_Sequence_double): void;
+Append(theItem: number): void;
+Append(theSeq: NCollection_Sequence_double): void;
 
-// UnBind removes Item Key pair from map
-UnBind(theKey: StepRepr_RepresentationItem): boolean;
+Prepend(theItem: number): void;
+Prepend(theSeq: NCollection_Sequence_double): void;
+Prepend(theItem: number): void;
+Prepend(theSeq: NCollection_Sequence_double): void;
 
-// Seek returns pointer to Item by Key
-Seek(theKey: StepRepr_RepresentationItem): TopoDS_Shape;
+InsertBefore(theIndex: number, theItem: number): void;
+InsertBefore(theIndex: number, theSeq: NCollection_Sequence_double): void;
+InsertBefore(theIndex: number, theItem: number): void;
+InsertBefore(theIndex: number, theSeq: NCollection_Sequence_double): void;
 
-// ChangeSeek returns modifiable pointer to Item by Key
-ChangeSeek(theKey: StepRepr_RepresentationItem): TopoDS_Shape;
+InsertAfter(theIndex: number, theSeq: NCollection_Sequence_double): void;
+InsertAfter(theIndex: number, theItem: number): void;
+InsertAfter(theIndex: number, theSeq: NCollection_Sequence_double): void;
+InsertAfter(theIndex: number, theItem: number): void;
 
-// ChangeFind returns modifiable Item by Key
-ChangeFind(theKey: StepRepr_RepresentationItem): TopoDS_Shape;
+Split(theIndex: number, theSeq: NCollection_Sequence_double): void;
 
-// Clear data
-Clear(doReleaseMemory: boolean): void;
-Clear(theAllocator: NCollection_BaseAllocator): void;
-Clear(doReleaseMemory: boolean): void;
-Clear(theAllocator: NCollection_BaseAllocator): void;
+First(): number;
 
-// Releases the C++ object
+ChangeFirst(): number;
+
+Last(): number;
+
+ChangeLast(): number;
+
+Value(theIndex: number): number;
+
+ChangeValue(theIndex: number): number;
+
+SetValue(theIndex: number, theItem: number): void;
+
+At(theIndex: number): number;
+
+ChangeAt(theIndex: number): number;
+
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Purpose
-NCollection_DataMap_handle_StepShape_TopologicalRepresentationItem_TopoDS_Shape: declare class NCollection_DataMap_handle_StepShape_TopologicalRepresentationItem_TopoDS_Shape extends NCollection_BaseMap
+NCollection_Sequence_gp_Pnt: declare class NCollection_Sequence_gp_Pnt extends NCollection_BaseSequence
 
 constructor
 
-// Exchange the content of two maps without re-allocations
-Exchange(theOther: unknown): void;
-// theOther: Mutated in place
+static Lower(): number;
 
-// Returns const reference to the hasher
-GetHasher(): unknown;
+Upper(): number;
 
-// Assignment
-Assign(theOther: unknown): unknown;
+IsEmpty(): boolean;
 
-// ReSize
-ReSize(N: number): void;
+Reverse(): void;
 
-// Bind binds Item to Key in map
-Bind(theKey: StepShape_TopologicalRepresentationItem, theItem: TopoDS_Shape): boolean;
-// theKey: key to add/update
-// theItem: new item
+Exchange(I: number, J: number): void;
 
-// Bound binds Item to Key in map
-Bound(theKey: StepShape_TopologicalRepresentationItem, theItem: TopoDS_Shape): TopoDS_Shape;
-// theKey: key to add/update
-// theItem: new item
+Clear(theAllocator?: NCollection_BaseAllocator): void;
 
-// TryBind binds Item to Key in map only if Key is not yet bound
-TryBind(theKey: StepShape_TopologicalRepresentationItem, theItem: TopoDS_Shape): boolean;
-// theKey: key to add
-// theItem: item to bind if Key is not yet bound
+Assign(theOther: NCollection_Sequence_gp_Pnt): NCollection_Sequence_gp_Pnt;
 
-// TryBound binds Item to Key in map only if Key is not yet bound
-TryBound(theKey: StepShape_TopologicalRepresentationItem, theItem: TopoDS_Shape): TopoDS_Shape;
-// theKey: key to add
-// theItem: item to bind if Key is not yet bound
+Remove(theIndex: number): void;
+Remove(theFromIndex: number, theToIndex: number): void;
+Remove(theIndex: number): void;
+Remove(theFromIndex: number, theToIndex: number): void;
 
-// IsBound
-IsBound(theKey: StepShape_TopologicalRepresentationItem): boolean;
+Append(theItem: gp_Pnt): void;
+Append(theSeq: NCollection_Sequence_gp_Pnt): void;
+Append(theItem: gp_Pnt): void;
+Append(theSeq: NCollection_Sequence_gp_Pnt): void;
 
-// UnBind removes Item Key pair from map
-UnBind(theKey: StepShape_TopologicalRepresentationItem): boolean;
+Prepend(theItem: gp_Pnt): void;
+Prepend(theSeq: NCollection_Sequence_gp_Pnt): void;
+Prepend(theItem: gp_Pnt): void;
+Prepend(theSeq: NCollection_Sequence_gp_Pnt): void;
 
-// Seek returns pointer to Item by Key
-Seek(theKey: StepShape_TopologicalRepresentationItem): TopoDS_Shape;
+InsertBefore(theIndex: number, theItem: gp_Pnt): void;
+InsertBefore(theIndex: number, theSeq: NCollection_Sequence_gp_Pnt): void;
+InsertBefore(theIndex: number, theItem: gp_Pnt): void;
+InsertBefore(theIndex: number, theSeq: NCollection_Sequence_gp_Pnt): void;
 
-// ChangeSeek returns modifiable pointer to Item by Key
-ChangeSeek(theKey: StepShape_TopologicalRepresentationItem): TopoDS_Shape;
+InsertAfter(theIndex: number, theSeq: NCollection_Sequence_gp_Pnt): void;
+InsertAfter(theIndex: number, theItem: gp_Pnt): void;
+InsertAfter(theIndex: number, theSeq: NCollection_Sequence_gp_Pnt): void;
+InsertAfter(theIndex: number, theItem: gp_Pnt): void;
 
-// ChangeFind returns modifiable Item by Key
-ChangeFind(theKey: StepShape_TopologicalRepresentationItem): TopoDS_Shape;
+Split(theIndex: number, theSeq: NCollection_Sequence_gp_Pnt): void;
 
-// Clear data
-Clear(doReleaseMemory: boolean): void;
-Clear(theAllocator: NCollection_BaseAllocator): void;
-Clear(doReleaseMemory: boolean): void;
-Clear(theAllocator: NCollection_BaseAllocator): void;
+First(): gp_Pnt;
 
-// Releases the C++ object
+ChangeFirst(): gp_Pnt;
+
+Last(): gp_Pnt;
+
+ChangeLast(): gp_Pnt;
+
+Value(theIndex: number): gp_Pnt;
+
+ChangeValue(theIndex: number): gp_Pnt;
+
+SetValue(theIndex: number, theItem: gp_Pnt): void;
+
+At(theIndex: number): gp_Pnt;
+
+ChangeAt(theIndex: number): gp_Pnt;
+
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Purpose
-NCollection_DataMap_handle_TDF_Attribute_handle_TDF_Attribute: declare class NCollection_DataMap_handle_TDF_Attribute_handle_TDF_Attribute extends NCollection_BaseMap
+NCollection_Sequence_gp_Pnt2d: declare class NCollection_Sequence_gp_Pnt2d extends NCollection_BaseSequence
 
 constructor
 
-// Exchange the content of two maps without re-allocations
-Exchange(theOther: unknown): void;
-// theOther: Mutated in place
+static Lower(): number;
 
-// Returns const reference to the hasher
-GetHasher(): unknown;
+Upper(): number;
 
-// Assignment
-Assign(theOther: unknown): unknown;
+IsEmpty(): boolean;
 
-// ReSize
-ReSize(N: number): void;
+Reverse(): void;
 
-// Bind binds Item to Key in map
-Bind(theKey: TDF_Attribute, theItem: TDF_Attribute): boolean;
-// theKey: key to add/update
-// theItem: new item
+Exchange(I: number, J: number): void;
 
-// Bound binds Item to Key in map
-Bound(theKey: TDF_Attribute, theItem: TDF_Attribute): TDF_Attribute;
-// theKey: key to add/update
-// theItem: new item
+Clear(theAllocator?: NCollection_BaseAllocator): void;
 
-// TryBind binds Item to Key in map only if Key is not yet bound
-TryBind(theKey: TDF_Attribute, theItem: TDF_Attribute): boolean;
-// theKey: key to add
-// theItem: item to bind if Key is not yet bound
+Assign(theOther: NCollection_Sequence_gp_Pnt2d): NCollection_Sequence_gp_Pnt2d;
 
-// TryBound binds Item to Key in map only if Key is not yet bound
-TryBound(theKey: TDF_Attribute, theItem: TDF_Attribute): TDF_Attribute;
-// theKey: key to add
-// theItem: item to bind if Key is not yet bound
+Remove(theIndex: number): void;
+Remove(theFromIndex: number, theToIndex: number): void;
+Remove(theIndex: number): void;
+Remove(theFromIndex: number, theToIndex: number): void;
 
-// IsBound
-IsBound(theKey: TDF_Attribute): boolean;
+Append(theItem: gp_Pnt2d): void;
+Append(theSeq: NCollection_Sequence_gp_Pnt2d): void;
+Append(theItem: gp_Pnt2d): void;
+Append(theSeq: NCollection_Sequence_gp_Pnt2d): void;
 
-// UnBind removes Item Key pair from map
-UnBind(theKey: TDF_Attribute): boolean;
+Prepend(theItem: gp_Pnt2d): void;
+Prepend(theSeq: NCollection_Sequence_gp_Pnt2d): void;
+Prepend(theItem: gp_Pnt2d): void;
+Prepend(theSeq: NCollection_Sequence_gp_Pnt2d): void;
 
-// Seek returns pointer to Item by Key
-Seek(theKey: TDF_Attribute): TDF_Attribute;
+InsertBefore(theIndex: number, theItem: gp_Pnt2d): void;
+InsertBefore(theIndex: number, theSeq: NCollection_Sequence_gp_Pnt2d): void;
+InsertBefore(theIndex: number, theItem: gp_Pnt2d): void;
+InsertBefore(theIndex: number, theSeq: NCollection_Sequence_gp_Pnt2d): void;
 
-// ChangeSeek returns modifiable pointer to Item by Key
-ChangeSeek(theKey: TDF_Attribute): TDF_Attribute;
+InsertAfter(theIndex: number, theSeq: NCollection_Sequence_gp_Pnt2d): void;
+InsertAfter(theIndex: number, theItem: gp_Pnt2d): void;
+InsertAfter(theIndex: number, theSeq: NCollection_Sequence_gp_Pnt2d): void;
+InsertAfter(theIndex: number, theItem: gp_Pnt2d): void;
 
-// ChangeFind returns modifiable Item by Key
-ChangeFind(theKey: TDF_Attribute): TDF_Attribute;
+Split(theIndex: number, theSeq: NCollection_Sequence_gp_Pnt2d): void;
 
-// Clear data
-Clear(doReleaseMemory: boolean): void;
-Clear(theAllocator: NCollection_BaseAllocator): void;
-Clear(doReleaseMemory: boolean): void;
-Clear(theAllocator: NCollection_BaseAllocator): void;
+First(): gp_Pnt2d;
 
-// Releases the C++ object
+ChangeFirst(): gp_Pnt2d;
+
+Last(): gp_Pnt2d;
+
+ChangeLast(): gp_Pnt2d;
+
+Value(theIndex: number): gp_Pnt2d;
+
+ChangeValue(theIndex: number): gp_Pnt2d;
+
+SetValue(theIndex: number, theItem: gp_Pnt2d): void;
+
+At(theIndex: number): gp_Pnt2d;
+
+ChangeAt(theIndex: number): gp_Pnt2d;
+
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Purpose
-NCollection_DataMap_handle_XCAFDimTolObjects_GeomToleranceObject_handle_XCAFDimTolObjects_DatumObject: declare class NCollection_DataMap_handle_XCAFDimTolObjects_GeomToleranceObject_handle_XCAFDimTolObjects_DatumObject extends NCollection_BaseMap
+NCollection_Sequence_gp_Trsf: declare class NCollection_Sequence_gp_Trsf extends NCollection_BaseSequence
 
 constructor
 
-// Exchange the content of two maps without re-allocations
-Exchange(theOther: unknown): void;
-// theOther: Mutated in place
+static Lower(): number;
 
-// Returns const reference to the hasher
-GetHasher(): unknown;
+Upper(): number;
 
-// Assignment
-Assign(theOther: unknown): unknown;
+IsEmpty(): boolean;
 
-// ReSize
-ReSize(N: number): void;
+Reverse(): void;
 
-// Bind binds Item to Key in map
-Bind(theKey: XCAFDimTolObjects_GeomToleranceObject, theItem: XCAFDimTolObjects_DatumObject): boolean;
-// theKey: key to add/update
-// theItem: new item
+Exchange(I: number, J: number): void;
 
-// Bound binds Item to Key in map
-Bound(theKey: XCAFDimTolObjects_GeomToleranceObject, theItem: XCAFDimTolObjects_DatumObject): XCAFDimTolObjects_DatumObject;
-// theKey: key to add/update
-// theItem: new item
+Clear(theAllocator?: NCollection_BaseAllocator): void;
 
-// TryBind binds Item to Key in map only if Key is not yet bound
-TryBind(theKey: XCAFDimTolObjects_GeomToleranceObject, theItem: XCAFDimTolObjects_DatumObject): boolean;
-// theKey: key to add
-// theItem: item to bind if Key is not yet bound
+Assign(theOther: NCollection_Sequence_gp_Trsf): NCollection_Sequence_gp_Trsf;
 
-// TryBound binds Item to Key in map only if Key is not yet bound
-TryBound(theKey: XCAFDimTolObjects_GeomToleranceObject, theItem: XCAFDimTolObjects_DatumObject): XCAFDimTolObjects_DatumObject;
-// theKey: key to add
-// theItem: item to bind if Key is not yet bound
+Remove(theIndex: number): void;
+Remove(theFromIndex: number, theToIndex: number): void;
+Remove(theIndex: number): void;
+Remove(theFromIndex: number, theToIndex: number): void;
 
-// IsBound
-IsBound(theKey: XCAFDimTolObjects_GeomToleranceObject): boolean;
+Append(theItem: gp_Trsf): void;
+Append(theSeq: NCollection_Sequence_gp_Trsf): void;
+Append(theItem: gp_Trsf): void;
+Append(theSeq: NCollection_Sequence_gp_Trsf): void;
 
-// UnBind removes Item Key pair from map
-UnBind(theKey: XCAFDimTolObjects_GeomToleranceObject): boolean;
+Prepend(theItem: gp_Trsf): void;
+Prepend(theSeq: NCollection_Sequence_gp_Trsf): void;
+Prepend(theItem: gp_Trsf): void;
+Prepend(theSeq: NCollection_Sequence_gp_Trsf): void;
 
-// Seek returns pointer to Item by Key
-Seek(theKey: XCAFDimTolObjects_GeomToleranceObject): XCAFDimTolObjects_DatumObject;
+InsertBefore(theIndex: number, theItem: gp_Trsf): void;
+InsertBefore(theIndex: number, theSeq: NCollection_Sequence_gp_Trsf): void;
+InsertBefore(theIndex: number, theItem: gp_Trsf): void;
+InsertBefore(theIndex: number, theSeq: NCollection_Sequence_gp_Trsf): void;
 
-// ChangeSeek returns modifiable pointer to Item by Key
-ChangeSeek(theKey: XCAFDimTolObjects_GeomToleranceObject): XCAFDimTolObjects_DatumObject;
+InsertAfter(theIndex: number, theSeq: NCollection_Sequence_gp_Trsf): void;
+InsertAfter(theIndex: number, theItem: gp_Trsf): void;
+InsertAfter(theIndex: number, theSeq: NCollection_Sequence_gp_Trsf): void;
+InsertAfter(theIndex: number, theItem: gp_Trsf): void;
 
-// ChangeFind returns modifiable Item by Key
-ChangeFind(theKey: XCAFDimTolObjects_GeomToleranceObject): XCAFDimTolObjects_DatumObject;
+Split(theIndex: number, theSeq: NCollection_Sequence_gp_Trsf): void;
 
-// Clear data
-Clear(doReleaseMemory: boolean): void;
-Clear(theAllocator: NCollection_BaseAllocator): void;
-Clear(doReleaseMemory: boolean): void;
-Clear(theAllocator: NCollection_BaseAllocator): void;
+First(): gp_Trsf;
 
-// Releases the C++ object
+ChangeFirst(): gp_Trsf;
+
+Last(): gp_Trsf;
+
+ChangeLast(): gp_Trsf;
+
+Value(theIndex: number): gp_Trsf;
+
+ChangeValue(theIndex: number): gp_Trsf;
+
+SetValue(theIndex: number, theItem: gp_Trsf): void;
+
+At(theIndex: number): gp_Trsf;
+
+ChangeAt(theIndex: number): gp_Trsf;
+
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Purpose
-NCollection_DataMap_handle_XCAFDoc_VisMaterial_handle_XCAFDoc_VisMaterial: declare class NCollection_DataMap_handle_XCAFDoc_VisMaterial_handle_XCAFDoc_VisMaterial extends NCollection_BaseMap
+NCollection_Sequence_gp_XY: declare class NCollection_Sequence_gp_XY extends NCollection_BaseSequence
 
 constructor
 
-// Exchange the content of two maps without re-allocations
-Exchange(theOther: unknown): void;
-// theOther: Mutated in place
+static Lower(): number;
 
-// Returns const reference to the hasher
-GetHasher(): unknown;
+Upper(): number;
 
-// Assignment
-Assign(theOther: unknown): unknown;
+IsEmpty(): boolean;
 
-// ReSize
-ReSize(N: number): void;
+Reverse(): void;
 
-// Bind binds Item to Key in map
-Bind(theKey: XCAFDoc_VisMaterial, theItem: XCAFDoc_VisMaterial): boolean;
-// theKey: key to add/update
-// theItem: new item
+Exchange(I: number, J: number): void;
 
-// Bound binds Item to Key in map
-Bound(theKey: XCAFDoc_VisMaterial, theItem: XCAFDoc_VisMaterial): XCAFDoc_VisMaterial;
-// theKey: key to add/update
-// theItem: new item
+Clear(theAllocator?: NCollection_BaseAllocator): void;
 
-// TryBind binds Item to Key in map only if Key is not yet bound
-TryBind(theKey: XCAFDoc_VisMaterial, theItem: XCAFDoc_VisMaterial): boolean;
-// theKey: key to add
-// theItem: item to bind if Key is not yet bound
+Assign(theOther: NCollection_Sequence_gp_XY): NCollection_Sequence_gp_XY;
 
-// TryBound binds Item to Key in map only if Key is not yet bound
-TryBound(theKey: XCAFDoc_VisMaterial, theItem: XCAFDoc_VisMaterial): XCAFDoc_VisMaterial;
-// theKey: key to add
-// theItem: item to bind if Key is not yet bound
+Remove(theIndex: number): void;
+Remove(theFromIndex: number, theToIndex: number): void;
+Remove(theIndex: number): void;
+Remove(theFromIndex: number, theToIndex: number): void;
 
-// IsBound
-IsBound(theKey: XCAFDoc_VisMaterial): boolean;
+Append(theItem: gp_XY): void;
+Append(theSeq: NCollection_Sequence_gp_XY): void;
+Append(theItem: gp_XY): void;
+Append(theSeq: NCollection_Sequence_gp_XY): void;
 
-// UnBind removes Item Key pair from map
-UnBind(theKey: XCAFDoc_VisMaterial): boolean;
+Prepend(theItem: gp_XY): void;
+Prepend(theSeq: NCollection_Sequence_gp_XY): void;
+Prepend(theItem: gp_XY): void;
+Prepend(theSeq: NCollection_Sequence_gp_XY): void;
 
-// Seek returns pointer to Item by Key
-Seek(theKey: XCAFDoc_VisMaterial): XCAFDoc_VisMaterial;
+InsertBefore(theIndex: number, theItem: gp_XY): void;
+InsertBefore(theIndex: number, theSeq: NCollection_Sequence_gp_XY): void;
+InsertBefore(theIndex: number, theItem: gp_XY): void;
+InsertBefore(theIndex: number, theSeq: NCollection_Sequence_gp_XY): void;
 
-// ChangeSeek returns modifiable pointer to Item by Key
-ChangeSeek(theKey: XCAFDoc_VisMaterial): XCAFDoc_VisMaterial;
+InsertAfter(theIndex: number, theSeq: NCollection_Sequence_gp_XY): void;
+InsertAfter(theIndex: number, theItem: gp_XY): void;
+InsertAfter(theIndex: number, theSeq: NCollection_Sequence_gp_XY): void;
+InsertAfter(theIndex: number, theItem: gp_XY): void;
 
-// ChangeFind returns modifiable Item by Key
-ChangeFind(theKey: XCAFDoc_VisMaterial): XCAFDoc_VisMaterial;
+Split(theIndex: number, theSeq: NCollection_Sequence_gp_XY): void;
 
-// Clear data
-Clear(doReleaseMemory: boolean): void;
-Clear(theAllocator: NCollection_BaseAllocator): void;
-Clear(doReleaseMemory: boolean): void;
-Clear(theAllocator: NCollection_BaseAllocator): void;
+First(): gp_XY;
 
-// Releases the C++ object
+ChangeFirst(): gp_XY;
+
+Last(): gp_XY;
+
+ChangeLast(): gp_XY;
+
+Value(theIndex: number): gp_XY;
+
+ChangeValue(theIndex: number): gp_XY;
+
+SetValue(theIndex: number, theItem: gp_XY): void;
+
+At(theIndex: number): gp_XY;
+
+ChangeAt(theIndex: number): gp_XY;
+
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Purpose
-NCollection_DataMap_int_NCollection_List_TopoDS_Shape: declare class NCollection_DataMap_int_NCollection_List_TopoDS_Shape extends NCollection_BaseMap
+NCollection_Sequence_handle_ChFiDS_SurfData: declare class NCollection_Sequence_handle_ChFiDS_SurfData extends NCollection_BaseSequence
 
 constructor
 
-// Exchange the content of two maps without re-allocations
-Exchange(theOther: unknown): void;
-// theOther: Mutated in place
+static Lower(): number;
 
-// Returns const reference to the hasher
-GetHasher(): unknown;
+Upper(): number;
 
-// Assignment
-Assign(theOther: unknown): unknown;
+IsEmpty(): boolean;
 
-// ReSize
-ReSize(N: number): void;
+Reverse(): void;
 
-// Bind binds Item to Key in map
-Bind(theKey: number, theItem: NCollection_List_TopoDS_Shape): boolean;
-// theKey: key to add/update
-// theItem: new item
+Exchange(I: number, J: number): void;
 
-// Bound binds Item to Key in map
-Bound(theKey: number, theItem: NCollection_List_TopoDS_Shape): NCollection_List_TopoDS_Shape;
-// theKey: key to add/update
-// theItem: new item
+Clear(theAllocator?: NCollection_BaseAllocator): void;
 
-// TryBind binds Item to Key in map only if Key is not yet bound
-TryBind(theKey: number, theItem: NCollection_List_TopoDS_Shape): boolean;
-// theKey: key to add
-// theItem: item to bind if Key is not yet bound
+Assign(theOther: NCollection_Sequence_handle_ChFiDS_SurfData): NCollection_Sequence_handle_ChFiDS_SurfData;
 
-// TryBound binds Item to Key in map only if Key is not yet bound
-TryBound(theKey: number, theItem: NCollection_List_TopoDS_Shape): NCollection_List_TopoDS_Shape;
-// theKey: key to add
-// theItem: item to bind if Key is not yet bound
+Remove(theIndex: number): void;
+Remove(theFromIndex: number, theToIndex: number): void;
+Remove(theIndex: number): void;
+Remove(theFromIndex: number, theToIndex: number): void;
 
-// IsBound
-IsBound(theKey: number): boolean;
+Append(theItem: ChFiDS_SurfData): void;
+Append(theSeq: NCollection_Sequence_handle_ChFiDS_SurfData): void;
+Append(theItem: ChFiDS_SurfData): void;
+Append(theSeq: NCollection_Sequence_handle_ChFiDS_SurfData): void;
 
-// UnBind removes Item Key pair from map
-UnBind(theKey: number): boolean;
+Prepend(theItem: ChFiDS_SurfData): void;
+Prepend(theSeq: NCollection_Sequence_handle_ChFiDS_SurfData): void;
+Prepend(theItem: ChFiDS_SurfData): void;
+Prepend(theSeq: NCollection_Sequence_handle_ChFiDS_SurfData): void;
 
-// Seek returns pointer to Item by Key
-Seek(theKey: number): NCollection_List_TopoDS_Shape;
+InsertBefore(theIndex: number, theItem: ChFiDS_SurfData): void;
+InsertBefore(theIndex: number, theSeq: NCollection_Sequence_handle_ChFiDS_SurfData): void;
+InsertBefore(theIndex: number, theItem: ChFiDS_SurfData): void;
+InsertBefore(theIndex: number, theSeq: NCollection_Sequence_handle_ChFiDS_SurfData): void;
 
-// ChangeSeek returns modifiable pointer to Item by Key
-ChangeSeek(theKey: number): NCollection_List_TopoDS_Shape;
+InsertAfter(theIndex: number, theSeq: NCollection_Sequence_handle_ChFiDS_SurfData): void;
+InsertAfter(theIndex: number, theItem: ChFiDS_SurfData): void;
+InsertAfter(theIndex: number, theSeq: NCollection_Sequence_handle_ChFiDS_SurfData): void;
+InsertAfter(theIndex: number, theItem: ChFiDS_SurfData): void;
 
-// ChangeFind returns modifiable Item by Key
-ChangeFind(theKey: number): NCollection_List_TopoDS_Shape;
+Split(theIndex: number, theSeq: NCollection_Sequence_handle_ChFiDS_SurfData): void;
 
-// Clear data
-Clear(doReleaseMemory: boolean): void;
-Clear(theAllocator: NCollection_BaseAllocator): void;
-Clear(doReleaseMemory: boolean): void;
-Clear(theAllocator: NCollection_BaseAllocator): void;
+First(): ChFiDS_SurfData;
 
-// Releases the C++ object
+ChangeFirst(): ChFiDS_SurfData;
+
+Last(): ChFiDS_SurfData;
+
+ChangeLast(): ChFiDS_SurfData;
+
+Value(theIndex: number): ChFiDS_SurfData;
+
+ChangeValue(theIndex: number): ChFiDS_SurfData;
+
+SetValue(theIndex: number, theItem: ChFiDS_SurfData): void;
+
+At(theIndex: number): ChFiDS_SurfData;
+
+ChangeAt(theIndex: number): ChFiDS_SurfData;
+
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Purpose
-NCollection_DataMap_int_NCollection_PackedMap_int_NCollection_DefaultHasher_int: declare class NCollection_DataMap_int_NCollection_PackedMap_int_NCollection_DefaultHasher_int extends NCollection_BaseMap
+NCollection_Sequence_handle_Expr_GeneralExpression: declare class NCollection_Sequence_handle_Expr_GeneralExpression extends NCollection_BaseSequence
 
 constructor
 
-// Exchange the content of two maps without re-allocations
-Exchange(theOther: NCollection_DataMap_int_NCollection_PackedMap_int_NCollection_DefaultHasher_int): void;
-// theOther: Mutated in place
+static Lower(): number;
 
-// Returns const reference to the hasher
-GetHasher(): unknown;
+Upper(): number;
 
-// Assignment
-Assign(theOther: NCollection_DataMap_int_NCollection_PackedMap_int_NCollection_DefaultHasher_int): NCollection_DataMap_int_NCollection_PackedMap_int_NCollection_DefaultHasher_int;
+IsEmpty(): boolean;
 
-// ReSize
-ReSize(N: number): void;
+Reverse(): void;
 
-// Bind binds Item to Key in map
-Bind(theKey: number, theItem: TColStd_PackedMapOfInteger): boolean;
-// theKey: key to add/update
-// theItem: new item
+Exchange(I: number, J: number): void;
 
-// Bound binds Item to Key in map
-Bound(theKey: number, theItem: TColStd_PackedMapOfInteger): TColStd_PackedMapOfInteger;
-// theKey: key to add/update
-// theItem: new item
+Clear(theAllocator?: NCollection_BaseAllocator): void;
 
-// TryBind binds Item to Key in map only if Key is not yet bound
-TryBind(theKey: number, theItem: TColStd_PackedMapOfInteger): boolean;
-// theKey: key to add
-// theItem: item to bind if Key is not yet bound
+Assign(theOther: NCollection_Sequence_handle_Expr_GeneralExpression): NCollection_Sequence_handle_Expr_GeneralExpression;
 
-// TryBound binds Item to Key in map only if Key is not yet bound
-TryBound(theKey: number, theItem: TColStd_PackedMapOfInteger): TColStd_PackedMapOfInteger;
-// theKey: key to add
-// theItem: item to bind if Key is not yet bound
+Remove(theIndex: number): void;
+Remove(theFromIndex: number, theToIndex: number): void;
+Remove(theIndex: number): void;
+Remove(theFromIndex: number, theToIndex: number): void;
 
-// IsBound
-IsBound(theKey: number): boolean;
+Append(theItem: Expr_GeneralExpression): void;
+Append(theSeq: NCollection_Sequence_handle_Expr_GeneralExpression): void;
+Append(theItem: Expr_GeneralExpression): void;
+Append(theSeq: NCollection_Sequence_handle_Expr_GeneralExpression): void;
 
-// UnBind removes Item Key pair from map
-UnBind(theKey: number): boolean;
+Prepend(theItem: Expr_GeneralExpression): void;
+Prepend(theSeq: NCollection_Sequence_handle_Expr_GeneralExpression): void;
+Prepend(theItem: Expr_GeneralExpression): void;
+Prepend(theSeq: NCollection_Sequence_handle_Expr_GeneralExpression): void;
 
-// Seek returns pointer to Item by Key
-Seek(theKey: number): TColStd_PackedMapOfInteger;
+InsertBefore(theIndex: number, theItem: Expr_GeneralExpression): void;
+InsertBefore(theIndex: number, theSeq: NCollection_Sequence_handle_Expr_GeneralExpression): void;
+InsertBefore(theIndex: number, theItem: Expr_GeneralExpression): void;
+InsertBefore(theIndex: number, theSeq: NCollection_Sequence_handle_Expr_GeneralExpression): void;
 
-// ChangeSeek returns modifiable pointer to Item by Key
-ChangeSeek(theKey: number): TColStd_PackedMapOfInteger;
+InsertAfter(theIndex: number, theSeq: NCollection_Sequence_handle_Expr_GeneralExpression): void;
+InsertAfter(theIndex: number, theItem: Expr_GeneralExpression): void;
+InsertAfter(theIndex: number, theSeq: NCollection_Sequence_handle_Expr_GeneralExpression): void;
+InsertAfter(theIndex: number, theItem: Expr_GeneralExpression): void;
 
-// ChangeFind returns modifiable Item by Key
-ChangeFind(theKey: number): TColStd_PackedMapOfInteger;
+Split(theIndex: number, theSeq: NCollection_Sequence_handle_Expr_GeneralExpression): void;
 
-// Clear data
-Clear(doReleaseMemory: boolean): void;
-Clear(theAllocator: NCollection_BaseAllocator): void;
-Clear(doReleaseMemory: boolean): void;
-Clear(theAllocator: NCollection_BaseAllocator): void;
+First(): Expr_GeneralExpression;
 
-// Releases the C++ object
-delete(): void;
+ChangeFirst(): Expr_GeneralExpression;
 
-[Symbol.dispose](): void;
+Last(): Expr_GeneralExpression;
 
-// Purpose
-NCollection_DataMap_int_TopoDS_Shape: declare class NCollection_DataMap_int_TopoDS_Shape extends NCollection_BaseMap
+ChangeLast(): Expr_GeneralExpression;
 
-constructor
+Value(theIndex: number): Expr_GeneralExpression;
 
-// Exchange the content of two maps without re-allocations
-Exchange(theOther: unknown): void;
-// theOther: Mutated in place
+ChangeValue(theIndex: number): Expr_GeneralExpression;
 
-// Returns const reference to the hasher
-GetHasher(): unknown;
+SetValue(theIndex: number, theItem: Expr_GeneralExpression): void;
 
-// Assignment
-Assign(theOther: unknown): unknown;
+At(theIndex: number): Expr_GeneralExpression;
 
-// ReSize
-ReSize(N: number): void;
+ChangeAt(theIndex: number): Expr_GeneralExpression;
 
-// Bind binds Item to Key in map
-Bind(theKey: number, theItem: TopoDS_Shape): boolean;
-// theKey: key to add/update
-// theItem: new item
-
-// Bound binds Item to Key in map
-Bound(theKey: number, theItem: TopoDS_Shape): TopoDS_Shape;
-// theKey: key to add/update
-// theItem: new item
-
-// TryBind binds Item to Key in map only if Key is not yet bound
-TryBind(theKey: number, theItem: TopoDS_Shape): boolean;
-// theKey: key to add
-// theItem: item to bind if Key is not yet bound
-
-// TryBound binds Item to Key in map only if Key is not yet bound
-TryBound(theKey: number, theItem: TopoDS_Shape): TopoDS_Shape;
-// theKey: key to add
-// theItem: item to bind if Key is not yet bound
-
-// IsBound
-IsBound(theKey: number): boolean;
-
-// UnBind removes Item Key pair from map
-UnBind(theKey: number): boolean;
-
-// Seek returns pointer to Item by Key
-Seek(theKey: number): TopoDS_Shape;
-
-// ChangeSeek returns modifiable pointer to Item by Key
-ChangeSeek(theKey: number): TopoDS_Shape;
-
-// ChangeFind returns modifiable Item by Key
-ChangeFind(theKey: number): TopoDS_Shape;
-
-// Clear data
-Clear(doReleaseMemory: boolean): void;
-Clear(theAllocator: NCollection_BaseAllocator): void;
-Clear(doReleaseMemory: boolean): void;
-Clear(theAllocator: NCollection_BaseAllocator): void;
-
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;

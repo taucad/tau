@@ -16,7 +16,6 @@ LambdaMax: number
 
 LambdaMin: number
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -33,7 +32,6 @@ AllowSoftBounds: boolean
 
 SoftBoundsExtension: number
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;

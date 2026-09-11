@@ -2,7 +2,6 @@
 
 1 top-level symbols. Signatures are verbatim typescript.
 
-// This class provides static methods to convert STEP geometric entities to OCCT
 StepToGeom: declare class StepToGeom
 
 constructor
@@ -104,7 +103,6 @@ static MakeVectorWithMagnitude2d(SV: StepGeom_Vector): Geom2d_VectorWithMagnitud
 
 static MakeYprRotation(SR: StepKinematics_SpatialRotation, theCntxt: StepRepr_GlobalUnitAssignedContext): NCollection_HArray1_double;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;

@@ -20,7 +20,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -33,13 +32,10 @@ FillListWithGraph(cmp: STEPSelections_AssemblyComponent): void;
 
 FindItemWithNAUO(nauo: StepRepr_NextAssemblyUsageOccurrence): Standard_Transient;
 
-// Returns the number of root assemblies;
 NbAssemblies(): number;
 
-// Returns root of assenbly by its rank;
 Root(rank?: number): STEPSelections_AssemblyComponent;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -66,7 +62,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -75,7 +70,6 @@ STEPSelections_SelectAssembly: declare class STEPSelections_SelectAssembly exten
 
 constructor
 
-// Returns a text defining the criterium
 ExploreLabel(): TCollection_AsciiString;
 
 static get_type_name(): string;
@@ -84,7 +78,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -93,7 +86,6 @@ STEPSelections_SelectDerived: declare class STEPSelections_SelectDerived extends
 
 constructor
 
-// Tells if the value for <ent> in <model> matches a text, with a criterium <exact>
 Matches(ent: Standard_Transient, model: Interface_InterfaceModel, text: TCollection_AsciiString, exact: boolean): boolean;
 
 static get_type_name(): string;
@@ -102,17 +94,14 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// This selection returns "STEP faces"
 STEPSelections_SelectFaces: declare class STEPSelections_SelectFaces extends IFSelect_SelectExplore
 
 constructor
 
-// Returns a text defining the criterium
 ExploreLabel(): TCollection_AsciiString;
 
 static get_type_name(): string;
@@ -121,7 +110,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -136,17 +124,14 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// This selection returns "curves in the geometric_set (except composite curves)"
 STEPSelections_SelectGSCurves: declare class STEPSelections_SelectGSCurves extends IFSelect_SelectExplore
 
 constructor
 
-// Returns a text defining the criterium
 ExploreLabel(): TCollection_AsciiString;
 
 static get_type_name(): string;
@@ -155,7 +140,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -164,7 +148,6 @@ STEPSelections_SelectInstances: declare class STEPSelections_SelectInstances ext
 
 constructor
 
-// Returns a text defining the criterium
 ExploreLabel(): TCollection_AsciiString;
 
 static get_type_name(): string;
@@ -173,7 +156,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;

@@ -1,598 +1,792 @@
 # libcascade — NCollection (21)
 
-7 top-level symbols. Signatures are verbatim typescript.
+23 top-level symbols. Signatures are verbatim typescript.
 
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_handle_StepVisual_PresentationStyleAssignment: declare class NCollection_Array1_handle_StepVisual_PresentationStyleAssignment
+NCollection_HSequence_handle_NCollection_HSequence_gp_Pnt: declare class NCollection_HSequence_handle_NCollection_HSequence_gp_Pnt
 
 constructor
 
-// Initialise the items with theValue
-Init(theValue: StepVisual_PresentationStyleAssignment): void;
+Sequence(): NCollection_Sequence_handle_NCollection_HSequence_gp_Pnt;
 
-// Size query
-Size(): number;
+ChangeSequence(): NCollection_Sequence_handle_NCollection_HSequence_gp_Pnt;
 
-// Length query (legacy int-returning API)
-Length(): number;
+Append(theItem: unknown): void;
+Append(theSequence: NCollection_Sequence_handle_NCollection_HSequence_gp_Pnt): void;
+Append(theSeq: unknown): void;
+Append(theItem: unknown): void;
+Append(theSequence: NCollection_Sequence_handle_NCollection_HSequence_gp_Pnt): void;
+Append(theSeq: unknown): void;
+Append(theItem: unknown): void;
+Append(theSequence: NCollection_Sequence_handle_NCollection_HSequence_gp_Pnt): void;
+Append(theSeq: unknown): void;
 
-// Return TRUE if array has zero length
-IsEmpty(): boolean;
+static get_type_name(): string;
 
-// Lower bound
-Lower(): number;
+static get_type_descriptor(): Standard_Type;
 
-// Upper bound
-Upper(): number;
+DynamicType(): Standard_Type;
 
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_handle_StepVisual_PresentationStyleAssignment): NCollection_Array1_handle_StepVisual_PresentationStyleAssignment;
-
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_handle_StepVisual_PresentationStyleAssignment): NCollection_Array1_handle_StepVisual_PresentationStyleAssignment;
-
-// Move assignment
-Move(theOther: NCollection_Array1_handle_StepVisual_PresentationStyleAssignment): NCollection_Array1_handle_StepVisual_PresentationStyleAssignment;
-// theOther: Mutated in place
-
-First(): StepVisual_PresentationStyleAssignment;
-
-ChangeFirst(): StepVisual_PresentationStyleAssignment;
-
-Last(): StepVisual_PresentationStyleAssignment;
-
-ChangeLast(): StepVisual_PresentationStyleAssignment;
-
-// Constant value access
-Value(theIndex: number): StepVisual_PresentationStyleAssignment;
-
-// Variable value access
-ChangeValue(theIndex: number): StepVisual_PresentationStyleAssignment;
-
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): StepVisual_PresentationStyleAssignment;
-// theIndex: 0-based index in [0, `Size()`-1]
-
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): StepVisual_PresentationStyleAssignment;
-// theIndex: 0-based index in [0, `Size()`-1]
-
-// Set value
-SetValue(theIndex: number, theItem: StepVisual_PresentationStyleAssignment): void;
-
-// Changes the lowest bound
-UpdateLowerBound(theLower: number): void;
-
-// Changes the upper bound
-UpdateUpperBound(theUpper: number): void;
-
-// Resizes the array to specified bounds
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
-
-IsDeletable(): boolean;
-
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_handle_StepVisual_TessellatedItem: declare class NCollection_Array1_handle_StepVisual_TessellatedItem
+NCollection_HSequence_handle_STEPSelections_AssemblyLink: declare class NCollection_HSequence_handle_STEPSelections_AssemblyLink
 
 constructor
 
-// Initialise the items with theValue
-Init(theValue: StepVisual_TessellatedItem): void;
+Sequence(): NCollection_Sequence_handle_STEPSelections_AssemblyLink;
 
-// Size query
-Size(): number;
+ChangeSequence(): NCollection_Sequence_handle_STEPSelections_AssemblyLink;
 
-// Length query (legacy int-returning API)
-Length(): number;
+Append(theItem: STEPSelections_AssemblyLink): void;
+Append(theSequence: NCollection_Sequence_handle_STEPSelections_AssemblyLink): void;
+Append(theSeq: unknown): void;
+Append(theItem: STEPSelections_AssemblyLink): void;
+Append(theSequence: NCollection_Sequence_handle_STEPSelections_AssemblyLink): void;
+Append(theSeq: unknown): void;
+Append(theItem: STEPSelections_AssemblyLink): void;
+Append(theSequence: NCollection_Sequence_handle_STEPSelections_AssemblyLink): void;
+Append(theSeq: unknown): void;
 
-// Return TRUE if array has zero length
-IsEmpty(): boolean;
+static get_type_name(): string;
 
-// Lower bound
-Lower(): number;
+static get_type_descriptor(): Standard_Type;
 
-// Upper bound
-Upper(): number;
+DynamicType(): Standard_Type;
 
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_handle_StepVisual_TessellatedItem): NCollection_Array1_handle_StepVisual_TessellatedItem;
-
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_handle_StepVisual_TessellatedItem): NCollection_Array1_handle_StepVisual_TessellatedItem;
-
-// Move assignment
-Move(theOther: NCollection_Array1_handle_StepVisual_TessellatedItem): NCollection_Array1_handle_StepVisual_TessellatedItem;
-// theOther: Mutated in place
-
-First(): StepVisual_TessellatedItem;
-
-ChangeFirst(): StepVisual_TessellatedItem;
-
-Last(): StepVisual_TessellatedItem;
-
-ChangeLast(): StepVisual_TessellatedItem;
-
-// Constant value access
-Value(theIndex: number): StepVisual_TessellatedItem;
-
-// Variable value access
-ChangeValue(theIndex: number): StepVisual_TessellatedItem;
-
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): StepVisual_TessellatedItem;
-// theIndex: 0-based index in [0, `Size()`-1]
-
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): StepVisual_TessellatedItem;
-// theIndex: 0-based index in [0, `Size()`-1]
-
-// Set value
-SetValue(theIndex: number, theItem: StepVisual_TessellatedItem): void;
-
-// Changes the lowest bound
-UpdateLowerBound(theLower: number): void;
-
-// Changes the upper bound
-UpdateUpperBound(theUpper: number): void;
-
-// Resizes the array to specified bounds
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
-
-IsDeletable(): boolean;
-
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_handle_StepVisual_TessellatedStructuredItem: declare class NCollection_Array1_handle_StepVisual_TessellatedStructuredItem
+NCollection_HSequence_handle_ShapeAnalysis_FreeBoundData: declare class NCollection_HSequence_handle_ShapeAnalysis_FreeBoundData
 
 constructor
 
-// Initialise the items with theValue
-Init(theValue: StepVisual_TessellatedStructuredItem): void;
+Sequence(): NCollection_Sequence_handle_ShapeAnalysis_FreeBoundData;
 
-// Size query
-Size(): number;
+ChangeSequence(): NCollection_Sequence_handle_ShapeAnalysis_FreeBoundData;
 
-// Length query (legacy int-returning API)
-Length(): number;
+Append(theItem: ShapeAnalysis_FreeBoundData): void;
+Append(theSequence: NCollection_Sequence_handle_ShapeAnalysis_FreeBoundData): void;
+Append(theSeq: unknown): void;
+Append(theItem: ShapeAnalysis_FreeBoundData): void;
+Append(theSequence: NCollection_Sequence_handle_ShapeAnalysis_FreeBoundData): void;
+Append(theSeq: unknown): void;
+Append(theItem: ShapeAnalysis_FreeBoundData): void;
+Append(theSequence: NCollection_Sequence_handle_ShapeAnalysis_FreeBoundData): void;
+Append(theSeq: unknown): void;
 
-// Return TRUE if array has zero length
-IsEmpty(): boolean;
+static get_type_name(): string;
 
-// Lower bound
-Lower(): number;
+static get_type_descriptor(): Standard_Type;
 
-// Upper bound
-Upper(): number;
+DynamicType(): Standard_Type;
 
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_handle_StepVisual_TessellatedStructuredItem): NCollection_Array1_handle_StepVisual_TessellatedStructuredItem;
-
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_handle_StepVisual_TessellatedStructuredItem): NCollection_Array1_handle_StepVisual_TessellatedStructuredItem;
-
-// Move assignment
-Move(theOther: NCollection_Array1_handle_StepVisual_TessellatedStructuredItem): NCollection_Array1_handle_StepVisual_TessellatedStructuredItem;
-// theOther: Mutated in place
-
-First(): StepVisual_TessellatedStructuredItem;
-
-ChangeFirst(): StepVisual_TessellatedStructuredItem;
-
-Last(): StepVisual_TessellatedStructuredItem;
-
-ChangeLast(): StepVisual_TessellatedStructuredItem;
-
-// Constant value access
-Value(theIndex: number): StepVisual_TessellatedStructuredItem;
-
-// Variable value access
-ChangeValue(theIndex: number): StepVisual_TessellatedStructuredItem;
-
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): StepVisual_TessellatedStructuredItem;
-// theIndex: 0-based index in [0, `Size()`-1]
-
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): StepVisual_TessellatedStructuredItem;
-// theIndex: 0-based index in [0, `Size()`-1]
-
-// Set value
-SetValue(theIndex: number, theItem: StepVisual_TessellatedStructuredItem): void;
-
-// Changes the lowest bound
-UpdateLowerBound(theLower: number): void;
-
-// Changes the upper bound
-UpdateUpperBound(theUpper: number): void;
-
-// Resizes the array to specified bounds
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
-
-IsDeletable(): boolean;
-
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_handle_TCollection_HAsciiString: declare class NCollection_Array1_handle_TCollection_HAsciiString
+NCollection_HSequence_handle_Standard_Transient: declare class NCollection_HSequence_handle_Standard_Transient
 
 constructor
 
-// Initialise the items with theValue
-Init(theValue: TCollection_HAsciiString): void;
+Sequence(): NCollection_Sequence_handle_Standard_Transient;
 
-// Size query
-Size(): number;
+ChangeSequence(): NCollection_Sequence_handle_Standard_Transient;
 
-// Length query (legacy int-returning API)
-Length(): number;
+Append(theItem: Standard_Transient): void;
+Append(theSequence: NCollection_Sequence_handle_Standard_Transient): void;
+Append(theSeq: unknown): void;
+Append(theItem: Standard_Transient): void;
+Append(theSequence: NCollection_Sequence_handle_Standard_Transient): void;
+Append(theSeq: unknown): void;
+Append(theItem: Standard_Transient): void;
+Append(theSequence: NCollection_Sequence_handle_Standard_Transient): void;
+Append(theSeq: unknown): void;
 
-// Return TRUE if array has zero length
-IsEmpty(): boolean;
+static get_type_name(): string;
 
-// Lower bound
-Lower(): number;
+static get_type_descriptor(): Standard_Type;
 
-// Upper bound
-Upper(): number;
+DynamicType(): Standard_Type;
 
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_handle_TCollection_HAsciiString): NCollection_Array1_handle_TCollection_HAsciiString;
-
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_handle_TCollection_HAsciiString): NCollection_Array1_handle_TCollection_HAsciiString;
-
-// Move assignment
-Move(theOther: NCollection_Array1_handle_TCollection_HAsciiString): NCollection_Array1_handle_TCollection_HAsciiString;
-// theOther: Mutated in place
-
-First(): TCollection_HAsciiString;
-
-ChangeFirst(): TCollection_HAsciiString;
-
-Last(): TCollection_HAsciiString;
-
-ChangeLast(): TCollection_HAsciiString;
-
-// Constant value access
-Value(theIndex: number): TCollection_HAsciiString;
-
-// Variable value access
-ChangeValue(theIndex: number): TCollection_HAsciiString;
-
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): TCollection_HAsciiString;
-// theIndex: 0-based index in [0, `Size()`-1]
-
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): TCollection_HAsciiString;
-// theIndex: 0-based index in [0, `Size()`-1]
-
-// Set value
-SetValue(theIndex: number, theItem: TCollection_HAsciiString): void;
-
-// Changes the lowest bound
-UpdateLowerBound(theLower: number): void;
-
-// Changes the upper bound
-UpdateUpperBound(theUpper: number): void;
-
-// Resizes the array to specified bounds
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
-
-IsDeletable(): boolean;
-
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_int: declare class NCollection_Array1_int
+NCollection_HSequence_handle_StepElement_CurveElementPurposeMember: declare class NCollection_HSequence_handle_StepElement_CurveElementPurposeMember
 
 constructor
 
-// Initialise the items with theValue
-Init(theValue: number): void;
+Sequence(): unknown;
 
-// Size query
-Size(): number;
+ChangeSequence(): unknown;
 
-// Length query (legacy int-returning API)
-Length(): number;
+Append(theItem: StepElement_CurveElementPurposeMember): void;
+Append(theSequence: unknown): void;
+Append(theSeq: unknown): void;
+Append(theItem: StepElement_CurveElementPurposeMember): void;
+Append(theSequence: unknown): void;
+Append(theSeq: unknown): void;
+Append(theItem: StepElement_CurveElementPurposeMember): void;
+Append(theSequence: unknown): void;
+Append(theSeq: unknown): void;
 
-// Return TRUE if array has zero length
-IsEmpty(): boolean;
+static get_type_name(): string;
 
-// Lower bound
-Lower(): number;
+static get_type_descriptor(): Standard_Type;
 
-// Upper bound
-Upper(): number;
+DynamicType(): Standard_Type;
 
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_int): NCollection_Array1_int;
-
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_int): NCollection_Array1_int;
-
-// Move assignment
-Move(theOther: NCollection_Array1_int): NCollection_Array1_int;
-// theOther: Mutated in place
-
-First(): number;
-
-ChangeFirst(): number;
-
-Last(): number;
-
-ChangeLast(): number;
-
-// Constant value access
-Value(theIndex: number): number;
-
-// Variable value access
-ChangeValue(theIndex: number): number;
-
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): number;
-// theIndex: 0-based index in [0, `Size()`-1]
-
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): number;
-// theIndex: 0-based index in [0, `Size()`-1]
-
-// Set value
-SetValue(theIndex: number, theItem: number): void;
-
-// Changes the lowest bound
-UpdateLowerBound(theLower: number): void;
-
-// Changes the upper bound
-UpdateUpperBound(theUpper: number): void;
-
-// Resizes the array to specified bounds
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
-
-IsDeletable(): boolean;
-
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_unsignedchar: declare class NCollection_Array1_unsignedchar
+NCollection_HSequence_handle_StepElement_CurveElementSectionDefinition: declare class NCollection_HSequence_handle_StepElement_CurveElementSectionDefinition
 
 constructor
 
-// Initialise the items with theValue
-Init(theValue: string): void;
+Sequence(): NCollection_Sequence_handle_StepElement_CurveElementSectionDefinition;
 
-// Size query
-Size(): number;
+ChangeSequence(): NCollection_Sequence_handle_StepElement_CurveElementSectionDefinition;
 
-// Length query (legacy int-returning API)
-Length(): number;
+Append(theItem: StepElement_CurveElementSectionDefinition): void;
+Append(theSequence: NCollection_Sequence_handle_StepElement_CurveElementSectionDefinition): void;
+Append(theSeq: unknown): void;
+Append(theItem: StepElement_CurveElementSectionDefinition): void;
+Append(theSequence: NCollection_Sequence_handle_StepElement_CurveElementSectionDefinition): void;
+Append(theSeq: unknown): void;
+Append(theItem: StepElement_CurveElementSectionDefinition): void;
+Append(theSequence: NCollection_Sequence_handle_StepElement_CurveElementSectionDefinition): void;
+Append(theSeq: unknown): void;
 
-// Return TRUE if array has zero length
-IsEmpty(): boolean;
+static get_type_name(): string;
 
-// Lower bound
-Lower(): number;
+static get_type_descriptor(): Standard_Type;
 
-// Upper bound
-Upper(): number;
+DynamicType(): Standard_Type;
 
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_unsignedchar): NCollection_Array1_unsignedchar;
-
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_unsignedchar): NCollection_Array1_unsignedchar;
-
-// Move assignment
-Move(theOther: NCollection_Array1_unsignedchar): NCollection_Array1_unsignedchar;
-// theOther: Mutated in place
-
-First(): string;
-
-ChangeFirst(): string;
-
-Last(): string;
-
-ChangeLast(): string;
-
-// Constant value access
-Value(theIndex: number): string;
-
-// Variable value access
-ChangeValue(theIndex: number): string;
-
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): string;
-// theIndex: 0-based index in [0, `Size()`-1]
-
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): string;
-// theIndex: 0-based index in [0, `Size()`-1]
-
-// Set value
-SetValue(theIndex: number, theItem: string): void;
-
-// Changes the lowest bound
-UpdateLowerBound(theLower: number): void;
-
-// Changes the upper bound
-UpdateUpperBound(theUpper: number): void;
-
-// Resizes the array to specified bounds
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
-
-IsDeletable(): boolean;
-
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Purpose
-NCollection_Array2_TopoDS_Shape: declare class NCollection_Array2_TopoDS_Shape
+NCollection_HSequence_handle_StepElement_ElementMaterial: declare class NCollection_HSequence_handle_StepElement_ElementMaterial
 
 constructor
 
-static BeginPosition(theRowLower: number, argNo1: number, theColLower: number, theColUpper: number): number;
+Sequence(): NCollection_Sequence_handle_StepElement_ElementMaterial;
 
-static LastPosition(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number): number;
+ChangeSequence(): NCollection_Sequence_handle_StepElement_ElementMaterial;
 
-// Size (number of items)
-Size(): number;
+Append(theItem: StepElement_ElementMaterial): void;
+Append(theSequence: NCollection_Sequence_handle_StepElement_ElementMaterial): void;
+Append(theSeq: unknown): void;
+Append(theItem: StepElement_ElementMaterial): void;
+Append(theSequence: NCollection_Sequence_handle_StepElement_ElementMaterial): void;
+Append(theSeq: unknown): void;
+Append(theItem: StepElement_ElementMaterial): void;
+Append(theSequence: NCollection_Sequence_handle_StepElement_ElementMaterial): void;
+Append(theSeq: unknown): void;
 
-// Length (legacy int-returning API)
-Length(): number;
+static get_type_name(): string;
 
-// Returns number of rows
-NbRows(): number;
+static get_type_descriptor(): Standard_Type;
 
-// Returns number of columns
-NbColumns(): number;
+DynamicType(): Standard_Type;
 
-// Returns length of the row, i.e
-RowLength(): number;
+delete(): void;
 
-// Returns length of the column, i.e
-ColLength(): number;
+[Symbol.dispose](): void;
 
-// LowerRow
-LowerRow(): number;
+NCollection_HSequence_handle_StepElement_SurfaceElementPurposeMember: declare class NCollection_HSequence_handle_StepElement_SurfaceElementPurposeMember
 
-// UpperRow
-UpperRow(): number;
+constructor
 
-// LowerCol
-LowerCol(): number;
+Sequence(): unknown;
 
-// UpperCol
-UpperCol(): number;
+ChangeSequence(): unknown;
 
-// Updates lower row
-UpdateLowerRow(theLowerRow: number): void;
+Append(theItem: StepElement_SurfaceElementPurposeMember): void;
+Append(theSequence: unknown): void;
+Append(theSeq: unknown): void;
+Append(theItem: StepElement_SurfaceElementPurposeMember): void;
+Append(theSequence: unknown): void;
+Append(theSeq: unknown): void;
+Append(theItem: StepElement_SurfaceElementPurposeMember): void;
+Append(theSequence: unknown): void;
+Append(theSeq: unknown): void;
 
-// Updates lower column
-UpdateLowerCol(theLowerCol: number): void;
+static get_type_name(): string;
 
-// Updates upper row
-UpdateUpperRow(theUpperRow: number): void;
+static get_type_descriptor(): Standard_Type;
 
-// Updates upper column
-UpdateUpperCol(theUpperCol: number): void;
+DynamicType(): Standard_Type;
 
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array2_TopoDS_Shape): NCollection_Array2_TopoDS_Shape;
-Assign(theOther: unknown): unknown;
-Assign(theOther: NCollection_Array2_TopoDS_Shape): NCollection_Array2_TopoDS_Shape;
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HSequence_handle_StepFEA_ElementGeometricRelationship: declare class NCollection_HSequence_handle_StepFEA_ElementGeometricRelationship
+
+constructor
+
+Sequence(): NCollection_Sequence_handle_StepFEA_ElementGeometricRelationship;
+
+ChangeSequence(): NCollection_Sequence_handle_StepFEA_ElementGeometricRelationship;
+
+Append(theItem: StepFEA_ElementGeometricRelationship): void;
+Append(theSequence: NCollection_Sequence_handle_StepFEA_ElementGeometricRelationship): void;
+Append(theSeq: unknown): void;
+Append(theItem: StepFEA_ElementGeometricRelationship): void;
+Append(theSequence: NCollection_Sequence_handle_StepFEA_ElementGeometricRelationship): void;
+Append(theSeq: unknown): void;
+Append(theItem: StepFEA_ElementGeometricRelationship): void;
+Append(theSequence: NCollection_Sequence_handle_StepFEA_ElementGeometricRelationship): void;
+Append(theSeq: unknown): void;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HSequence_handle_StepFEA_ElementRepresentation: declare class NCollection_HSequence_handle_StepFEA_ElementRepresentation
+
+constructor
+
+Sequence(): NCollection_Sequence_handle_StepFEA_ElementRepresentation;
+
+ChangeSequence(): NCollection_Sequence_handle_StepFEA_ElementRepresentation;
+
+Append(theItem: StepFEA_ElementRepresentation): void;
+Append(theSequence: NCollection_Sequence_handle_StepFEA_ElementRepresentation): void;
+Append(theSeq: unknown): void;
+Append(theItem: StepFEA_ElementRepresentation): void;
+Append(theSequence: NCollection_Sequence_handle_StepFEA_ElementRepresentation): void;
+Append(theSeq: unknown): void;
+Append(theItem: StepFEA_ElementRepresentation): void;
+Append(theSequence: NCollection_Sequence_handle_StepFEA_ElementRepresentation): void;
+Append(theSeq: unknown): void;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HSequence_handle_Storage_Root: declare class NCollection_HSequence_handle_Storage_Root
+
+constructor
+
+Sequence(): NCollection_Sequence_handle_Storage_Root;
+
+ChangeSequence(): NCollection_Sequence_handle_Storage_Root;
+
+Append(theItem: Storage_Root): void;
+Append(theSequence: NCollection_Sequence_handle_Storage_Root): void;
+Append(theSeq: unknown): void;
+Append(theItem: Storage_Root): void;
+Append(theSequence: NCollection_Sequence_handle_Storage_Root): void;
+Append(theSeq: unknown): void;
+Append(theItem: Storage_Root): void;
+Append(theSequence: NCollection_Sequence_handle_Storage_Root): void;
+Append(theSeq: unknown): void;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HSequence_handle_TCollection_HAsciiString: declare class NCollection_HSequence_handle_TCollection_HAsciiString
+
+constructor
+
+Sequence(): NCollection_Sequence_handle_TCollection_HAsciiString;
+
+ChangeSequence(): NCollection_Sequence_handle_TCollection_HAsciiString;
+
+Append(theItem: TCollection_HAsciiString): void;
+Append(theSequence: NCollection_Sequence_handle_TCollection_HAsciiString): void;
+Append(theSeq: unknown): void;
+Append(theItem: TCollection_HAsciiString): void;
+Append(theSequence: NCollection_Sequence_handle_TCollection_HAsciiString): void;
+Append(theSeq: unknown): void;
+Append(theItem: TCollection_HAsciiString): void;
+Append(theSequence: NCollection_Sequence_handle_TCollection_HAsciiString): void;
+Append(theSeq: unknown): void;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HSequence_handle_TCollection_HExtendedString: declare class NCollection_HSequence_handle_TCollection_HExtendedString
+
+constructor
+
+Sequence(): NCollection_Sequence_handle_TCollection_HExtendedString;
+
+ChangeSequence(): NCollection_Sequence_handle_TCollection_HExtendedString;
+
+Append(theItem: TCollection_HExtendedString): void;
+Append(theSequence: NCollection_Sequence_handle_TCollection_HExtendedString): void;
+Append(theSeq: unknown): void;
+Append(theItem: TCollection_HExtendedString): void;
+Append(theSequence: NCollection_Sequence_handle_TCollection_HExtendedString): void;
+Append(theSeq: unknown): void;
+Append(theItem: TCollection_HExtendedString): void;
+Append(theSequence: NCollection_Sequence_handle_TCollection_HExtendedString): void;
+Append(theSeq: unknown): void;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HSequence_handle_Transfer_Finder: declare class NCollection_HSequence_handle_Transfer_Finder
+
+constructor
+
+Sequence(): NCollection_Sequence_handle_Transfer_Finder;
+
+ChangeSequence(): NCollection_Sequence_handle_Transfer_Finder;
+
+Append(theItem: Transfer_Finder): void;
+Append(theSequence: NCollection_Sequence_handle_Transfer_Finder): void;
+Append(theSeq: unknown): void;
+Append(theItem: Transfer_Finder): void;
+Append(theSequence: NCollection_Sequence_handle_Transfer_Finder): void;
+Append(theSeq: unknown): void;
+Append(theItem: Transfer_Finder): void;
+Append(theSequence: NCollection_Sequence_handle_Transfer_Finder): void;
+Append(theSeq: unknown): void;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HSequence_handle_Units_Quantity: declare class NCollection_HSequence_handle_Units_Quantity
+
+constructor
+
+Sequence(): NCollection_Sequence_handle_Units_Quantity;
+
+ChangeSequence(): NCollection_Sequence_handle_Units_Quantity;
+
+Append(theItem: Units_Quantity): void;
+Append(theSequence: NCollection_Sequence_handle_Units_Quantity): void;
+Append(theSeq: unknown): void;
+Append(theItem: Units_Quantity): void;
+Append(theSequence: NCollection_Sequence_handle_Units_Quantity): void;
+Append(theSeq: unknown): void;
+Append(theItem: Units_Quantity): void;
+Append(theSequence: NCollection_Sequence_handle_Units_Quantity): void;
+Append(theSeq: unknown): void;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HSequence_handle_Units_Token: declare class NCollection_HSequence_handle_Units_Token
+
+constructor
+
+Sequence(): NCollection_Sequence_handle_Units_Token;
+
+ChangeSequence(): NCollection_Sequence_handle_Units_Token;
+
+Append(theItem: Units_Token): void;
+Append(theSequence: NCollection_Sequence_handle_Units_Token): void;
+Append(theSeq: unknown): void;
+Append(theItem: Units_Token): void;
+Append(theSequence: NCollection_Sequence_handle_Units_Token): void;
+Append(theSeq: unknown): void;
+Append(theItem: Units_Token): void;
+Append(theSequence: NCollection_Sequence_handle_Units_Token): void;
+Append(theSeq: unknown): void;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HSequence_handle_Units_Unit: declare class NCollection_HSequence_handle_Units_Unit
+
+constructor
+
+Sequence(): NCollection_Sequence_handle_Units_Unit;
+
+ChangeSequence(): NCollection_Sequence_handle_Units_Unit;
+
+Append(theItem: Units_Unit): void;
+Append(theSequence: NCollection_Sequence_handle_Units_Unit): void;
+Append(theSeq: unknown): void;
+Append(theItem: Units_Unit): void;
+Append(theSequence: NCollection_Sequence_handle_Units_Unit): void;
+Append(theSeq: unknown): void;
+Append(theItem: Units_Unit): void;
+Append(theSequence: NCollection_Sequence_handle_Units_Unit): void;
+Append(theSeq: unknown): void;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HSequence_int: declare class NCollection_HSequence_int
+
+constructor
+
+Sequence(): NCollection_Sequence_int;
+
+ChangeSequence(): NCollection_Sequence_int;
+
+Append(theItem: number): void;
+Append(theSequence: NCollection_Sequence_int): void;
+Append(theSeq: unknown): void;
+Append(theItem: number): void;
+Append(theSequence: NCollection_Sequence_int): void;
+Append(theSeq: unknown): void;
+Append(theItem: number): void;
+Append(theSequence: NCollection_Sequence_int): void;
+Append(theSeq: unknown): void;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_IndexedDataMap_TCollection_AsciiString_handle_Standard_Transient: declare class NCollection_IndexedDataMap_TCollection_AsciiString_handle_Standard_Transient extends NCollection_BaseMap
+
+constructor
+
+Exchange(theOther: unknown): void;
+
+GetHasher(): unknown;
+
 Assign(theOther: unknown): unknown;
 
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array2_TopoDS_Shape): NCollection_Array2_TopoDS_Shape;
-CopyValues(theOther: unknown): unknown;
-CopyValues(theOther: NCollection_Array2_TopoDS_Shape): NCollection_Array2_TopoDS_Shape;
-CopyValues(theOther: unknown): unknown;
+ReSize(N: number): void;
 
-// Move assignment
-Move(theOther: NCollection_Array2_TopoDS_Shape): NCollection_Array2_TopoDS_Shape;
-Move(theOther: unknown): unknown;
-Move(theOther: NCollection_Array2_TopoDS_Shape): NCollection_Array2_TopoDS_Shape;
-Move(theOther: unknown): unknown;
-// theOther: Mutated in place
+Add(theKey1: TCollection_AsciiString, theItem: Standard_Transient): number;
 
-// SetValue
-SetValue(theRow: number, theCol: number, theItem: TopoDS_Shape): void;
-SetValue(theIndex: number, theItem: unknown): void;
-SetValue(theRow: number, theCol: number, theItem: TopoDS_Shape): void;
-SetValue(theIndex: number, theItem: unknown): void;
+TryBound(theKey1: TCollection_AsciiString, theItem: Standard_Transient): Standard_Transient;
 
-// Resizes the array to specified bounds
-Resize(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
-Resize(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-Resize(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
-Resize(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-Resize(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
-Resize(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-Resize(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
-Resize(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-// theRowLower: new lower Row of array
-// theRowUpper: new upper Row of array
-// theColLower: new lower Column of array
-// theColUpper: new upper Column of array
-// theToCopyData: flag to copy existing data into new array
+TryBind(theKey1: TCollection_AsciiString, theItem: Standard_Transient): boolean;
 
-// Resizes the array preserving 2D element layout
-ResizeWithTrim(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
-ResizeWithTrim(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
-ResizeWithTrim(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
-ResizeWithTrim(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
-// theRowLower: new lower Row of array
-// theRowUpper: new upper Row of array
-// theColLower: new lower Column of array
-// theColUpper: new upper Column of array
-// theToCopyData: flag to copy existing data into new array
+Bind(theKey1: TCollection_AsciiString, theItem: Standard_Transient): boolean;
 
-// Releases the C++ object
+Bound(theKey1: TCollection_AsciiString, theItem: Standard_Transient): Standard_Transient;
+
+Contains(theKey1: TCollection_AsciiString): boolean;
+
+Substitute(theIndex: number, theKey1: TCollection_AsciiString, theItem: Standard_Transient): void;
+
+Swap(theIndex1: number, theIndex2: number): void;
+
+RemoveLast(): void;
+
+RemoveFromIndex(theIndex: number): void;
+
+RemoveKey(theKey1: TCollection_AsciiString): void;
+
+FindKey(theIndex: number): TCollection_AsciiString;
+
+FindFromIndex(theIndex: number): Standard_Transient;
+
+ChangeFromIndex(theIndex: number): Standard_Transient;
+
+FindIndex(theKey1: TCollection_AsciiString): number;
+
+ChangeFromKey(theKey1: TCollection_AsciiString): Standard_Transient;
+
+Seek(theKey1: TCollection_AsciiString): Standard_Transient;
+
+ChangeSeek(theKey1: TCollection_AsciiString): Standard_Transient;
+
+Clear(doReleaseMemory: boolean): void;
+Clear(theAllocator: NCollection_BaseAllocator): void;
+Clear(doReleaseMemory: boolean): void;
+Clear(theAllocator: NCollection_BaseAllocator): void;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_IndexedDataMap_TCollection_AsciiString_int: declare class NCollection_IndexedDataMap_TCollection_AsciiString_int extends NCollection_BaseMap
+
+constructor
+
+Exchange(theOther: unknown): void;
+
+GetHasher(): unknown;
+
+Assign(theOther: unknown): unknown;
+
+ReSize(N: number): void;
+
+Add(theKey1: TCollection_AsciiString, theItem: number): number;
+
+TryBound(theKey1: TCollection_AsciiString, theItem: number): number;
+
+TryBind(theKey1: TCollection_AsciiString, theItem: number): boolean;
+
+Bind(theKey1: TCollection_AsciiString, theItem: number): boolean;
+
+Bound(theKey1: TCollection_AsciiString, theItem: number): number;
+
+Contains(theKey1: TCollection_AsciiString): boolean;
+
+Substitute(theIndex: number, theKey1: TCollection_AsciiString, theItem: number): void;
+
+Swap(theIndex1: number, theIndex2: number): void;
+
+RemoveLast(): void;
+
+RemoveFromIndex(theIndex: number): void;
+
+RemoveKey(theKey1: TCollection_AsciiString): void;
+
+FindKey(theIndex: number): TCollection_AsciiString;
+
+FindFromIndex(theIndex: number): number;
+
+ChangeFromIndex(theIndex: number): number;
+
+FindIndex(theKey1: TCollection_AsciiString): number;
+
+ChangeFromKey(theKey1: TCollection_AsciiString): number;
+
+Seek(theKey1: TCollection_AsciiString): number;
+
+ChangeSeek(theKey1: TCollection_AsciiString): number;
+
+Clear(doReleaseMemory: boolean): void;
+Clear(theAllocator: NCollection_BaseAllocator): void;
+Clear(doReleaseMemory: boolean): void;
+Clear(theAllocator: NCollection_BaseAllocator): void;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_IndexedDataMap_TDF_Label_TopoDS_Shape: declare class NCollection_IndexedDataMap_TDF_Label_TopoDS_Shape extends NCollection_BaseMap
+
+constructor
+
+Exchange(theOther: unknown): void;
+
+GetHasher(): unknown;
+
+Assign(theOther: unknown): unknown;
+
+ReSize(N: number): void;
+
+Add(theKey1: TDF_Label, theItem: TopoDS_Shape): number;
+
+TryBound(theKey1: TDF_Label, theItem: TopoDS_Shape): TopoDS_Shape;
+
+TryBind(theKey1: TDF_Label, theItem: TopoDS_Shape): boolean;
+
+Bind(theKey1: TDF_Label, theItem: TopoDS_Shape): boolean;
+
+Bound(theKey1: TDF_Label, theItem: TopoDS_Shape): TopoDS_Shape;
+
+Contains(theKey1: TDF_Label): boolean;
+
+Substitute(theIndex: number, theKey1: TDF_Label, theItem: TopoDS_Shape): void;
+
+Swap(theIndex1: number, theIndex2: number): void;
+
+RemoveLast(): void;
+
+RemoveFromIndex(theIndex: number): void;
+
+RemoveKey(theKey1: TDF_Label): void;
+
+FindKey(theIndex: number): TDF_Label;
+
+FindFromIndex(theIndex: number): TopoDS_Shape;
+
+ChangeFromIndex(theIndex: number): TopoDS_Shape;
+
+FindIndex(theKey1: TDF_Label): number;
+
+ChangeFromKey(theKey1: TDF_Label): TopoDS_Shape;
+
+Seek(theKey1: TDF_Label): TopoDS_Shape;
+
+ChangeSeek(theKey1: TDF_Label): TopoDS_Shape;
+
+Clear(doReleaseMemory: boolean): void;
+Clear(theAllocator: NCollection_BaseAllocator): void;
+Clear(doReleaseMemory: boolean): void;
+Clear(theAllocator: NCollection_BaseAllocator): void;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_IndexedDataMap_TopoDS_Shape_NCollection_List_TopoDS_Shape_TopTools_ShapeMapHasher: declare class NCollection_IndexedDataMap_TopoDS_Shape_NCollection_List_TopoDS_Shape_TopTools_ShapeMapHasher extends NCollection_BaseMap
+
+constructor
+
+Exchange(theOther: NCollection_IndexedDataMap_TopoDS_Shape_NCollection_List_TopoDS_Shape_TopTools_ShapeMapHasher): void;
+
+GetHasher(): TopTools_ShapeMapHasher;
+
+Assign(theOther: NCollection_IndexedDataMap_TopoDS_Shape_NCollection_List_TopoDS_Shape_TopTools_ShapeMapHasher): NCollection_IndexedDataMap_TopoDS_Shape_NCollection_List_TopoDS_Shape_TopTools_ShapeMapHasher;
+
+ReSize(N: number): void;
+
+Add(theKey1: TopoDS_Shape, theItem: NCollection_List_TopoDS_Shape): number;
+
+TryBound(theKey1: TopoDS_Shape, theItem: NCollection_List_TopoDS_Shape): NCollection_List_TopoDS_Shape;
+
+TryBind(theKey1: TopoDS_Shape, theItem: NCollection_List_TopoDS_Shape): boolean;
+
+Bind(theKey1: TopoDS_Shape, theItem: NCollection_List_TopoDS_Shape): boolean;
+
+Bound(theKey1: TopoDS_Shape, theItem: NCollection_List_TopoDS_Shape): NCollection_List_TopoDS_Shape;
+
+Contains(theKey1: TopoDS_Shape): boolean;
+
+Substitute(theIndex: number, theKey1: TopoDS_Shape, theItem: NCollection_List_TopoDS_Shape): void;
+
+Swap(theIndex1: number, theIndex2: number): void;
+
+RemoveLast(): void;
+
+RemoveFromIndex(theIndex: number): void;
+
+RemoveKey(theKey1: TopoDS_Shape): void;
+
+FindKey(theIndex: number): TopoDS_Shape;
+
+FindFromIndex(theIndex: number): NCollection_List_TopoDS_Shape;
+
+ChangeFromIndex(theIndex: number): NCollection_List_TopoDS_Shape;
+
+FindIndex(theKey1: TopoDS_Shape): number;
+
+ChangeFromKey(theKey1: TopoDS_Shape): NCollection_List_TopoDS_Shape;
+
+Seek(theKey1: TopoDS_Shape): NCollection_List_TopoDS_Shape;
+
+ChangeSeek(theKey1: TopoDS_Shape): NCollection_List_TopoDS_Shape;
+
+Clear(doReleaseMemory: boolean): void;
+Clear(theAllocator: NCollection_BaseAllocator): void;
+Clear(doReleaseMemory: boolean): void;
+Clear(theAllocator: NCollection_BaseAllocator): void;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_IndexedDataMap_TopoDS_Shape_XCAFPrs_Style_TopTools_ShapeMapHasher: declare class NCollection_IndexedDataMap_TopoDS_Shape_XCAFPrs_Style_TopTools_ShapeMapHasher extends NCollection_BaseMap
+
+constructor
+
+Exchange(theOther: NCollection_IndexedDataMap_TopoDS_Shape_XCAFPrs_Style_TopTools_ShapeMapHasher): void;
+
+GetHasher(): TopTools_ShapeMapHasher;
+
+Assign(theOther: NCollection_IndexedDataMap_TopoDS_Shape_XCAFPrs_Style_TopTools_ShapeMapHasher): NCollection_IndexedDataMap_TopoDS_Shape_XCAFPrs_Style_TopTools_ShapeMapHasher;
+
+ReSize(N: number): void;
+
+Add(theKey1: TopoDS_Shape, theItem: XCAFPrs_Style): number;
+
+TryBound(theKey1: TopoDS_Shape, theItem: XCAFPrs_Style): XCAFPrs_Style;
+
+TryBind(theKey1: TopoDS_Shape, theItem: XCAFPrs_Style): boolean;
+
+Bind(theKey1: TopoDS_Shape, theItem: XCAFPrs_Style): boolean;
+
+Bound(theKey1: TopoDS_Shape, theItem: XCAFPrs_Style): XCAFPrs_Style;
+
+Contains(theKey1: TopoDS_Shape): boolean;
+
+Substitute(theIndex: number, theKey1: TopoDS_Shape, theItem: XCAFPrs_Style): void;
+
+Swap(theIndex1: number, theIndex2: number): void;
+
+RemoveLast(): void;
+
+RemoveFromIndex(theIndex: number): void;
+
+RemoveKey(theKey1: TopoDS_Shape): void;
+
+FindKey(theIndex: number): TopoDS_Shape;
+
+FindFromIndex(theIndex: number): XCAFPrs_Style;
+
+ChangeFromIndex(theIndex: number): XCAFPrs_Style;
+
+FindIndex(theKey1: TopoDS_Shape): number;
+
+ChangeFromKey(theKey1: TopoDS_Shape): XCAFPrs_Style;
+
+Seek(theKey1: TopoDS_Shape): XCAFPrs_Style;
+
+ChangeSeek(theKey1: TopoDS_Shape): XCAFPrs_Style;
+
+Clear(doReleaseMemory: boolean): void;
+Clear(theAllocator: NCollection_BaseAllocator): void;
+Clear(doReleaseMemory: boolean): void;
+Clear(theAllocator: NCollection_BaseAllocator): void;
+
 delete(): void;
 
 [Symbol.dispose](): void;

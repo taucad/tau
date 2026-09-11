@@ -1,6 +1,6 @@
 # libcascade — StepVisual
 
-32 top-level symbols. Signatures are verbatim typescript.
+35 top-level symbols. Signatures are verbatim typescript.
 
 StepVisual_AnnotationCurveOccurrence: declare class StepVisual_AnnotationCurveOccurrence extends StepVisual_AnnotationOccurrence
 
@@ -12,12 +12,10 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Added for Dimensional Tolerances Complex STEP entity AnnotationCurveOccurrence & AnnotationOccurrence & GeometricRepresentationItem & RepresentationItem & StyledItem
 StepVisual_AnnotationCurveOccurrenceAndGeomReprItem: declare class StepVisual_AnnotationCurveOccurrenceAndGeomReprItem extends StepVisual_AnnotationCurveOccurrence
 
 constructor
@@ -28,7 +26,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -43,7 +40,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -52,7 +48,6 @@ StepVisual_AnnotationFillAreaOccurrence: declare class StepVisual_AnnotationFill
 
 constructor
 
-// Initialize all fields (own and inherited)
 Init(theName: TCollection_HAsciiString, theStyles: NCollection_HArray1_handle_StepVisual_PresentationStyleAssignment, theItem: Standard_Transient, theFillStyleTarget: StepGeom_GeometricRepresentationItem): void;
 Init(aName: TCollection_HAsciiString, aStyles: NCollection_HArray1_handle_StepVisual_PresentationStyleAssignment, aItem: Standard_Transient): void;
 Init(aName: TCollection_HAsciiString): void;
@@ -63,10 +58,8 @@ Init(theName: TCollection_HAsciiString, theStyles: NCollection_HArray1_handle_St
 Init(aName: TCollection_HAsciiString, aStyles: NCollection_HArray1_handle_StepVisual_PresentationStyleAssignment, aItem: Standard_Transient): void;
 Init(aName: TCollection_HAsciiString): void;
 
-// Returns field fill_style_target
 FillStyleTarget(): StepGeom_GeometricRepresentationItem;
 
-// Set field fill_style_target
 SetFillStyleTarget(theTarget: StepGeom_GeometricRepresentationItem): void;
 
 static get_type_name(): string;
@@ -75,7 +68,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -90,7 +82,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -109,19 +100,14 @@ Init(theName: TCollection_HAsciiString, theStyles: NCollection_HArray1_handle_St
 Init(aName: TCollection_HAsciiString, aStyles: NCollection_HArray1_handle_StepVisual_PresentationStyleAssignment, aItem: Standard_Transient): void;
 Init(aName: TCollection_HAsciiString): void;
 
-// Returns field Elements
 Elements(): NCollection_HArray1_StepVisual_AnnotationPlaneElement;
 
-// Set field Elements
 SetElements(theElements: NCollection_HArray1_StepVisual_AnnotationPlaneElement): void;
 
-// Returns number of Elements
 NbElements(): number;
 
-// Returns Elements with the given number
 ElementsValue(theNum: number): StepVisual_AnnotationPlaneElement;
 
-// Sets Elements with given number
 SetElementsValue(theNum: number, theItem: StepVisual_AnnotationPlaneElement): void;
 
 static get_type_name(): string;
@@ -130,7 +116,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -139,16 +124,12 @@ StepVisual_AnnotationPlaneElement: declare class StepVisual_AnnotationPlaneEleme
 
 constructor
 
-// Recognizes a IdAttributeSelect Kind Entity that is
 CaseNum(ent: Standard_Transient): number;
 
-// returns Value as a DraughtingCallout (Null if another type)
 DraughtingCallout(): StepVisual_DraughtingCallout;
 
-// returns Value as a StyledItem (Null if another type)
 StyledItem(): StepVisual_StyledItem;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -163,7 +144,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -178,7 +158,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -203,7 +182,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -212,16 +190,12 @@ StepVisual_AreaOrView: declare class StepVisual_AreaOrView extends StepData_Sele
 
 constructor
 
-// Recognizes a AreaOrView Kind Entity that is
 CaseNum(ent: Standard_Transient): number;
 
-// returns Value as a PresentationArea (Null if another type)
 PresentationArea(): StepVisual_PresentationArea;
 
-// returns Value as a PresentationView (Null if another type)
 PresentationView(): StepVisual_PresentationView;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -242,7 +216,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -259,7 +232,6 @@ RealValue(): number;
 
 SetRealValue(aValue: number): void;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -274,7 +246,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -289,7 +260,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -304,7 +274,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -319,7 +288,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -347,7 +315,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -375,7 +342,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -404,7 +370,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -413,16 +378,12 @@ StepVisual_CameraModelD3MultiClippingInterectionSelect: declare class StepVisual
 
 constructor
 
-// Recognizes a IdAttributeSelect Kind Entity that is
 CaseNum(ent: Standard_Transient): number;
 
-// returns Value as a Plane (Null if another type)
 Plane(): StepGeom_Plane;
 
-// returns Value as a CameraModelD3MultiClippingUnion (Null if another type)
 CameraModelD3MultiClippingUnion(): StepVisual_CameraModelD3MultiClippingUnion;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -446,7 +407,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -470,7 +430,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -479,16 +438,12 @@ StepVisual_CameraModelD3MultiClippingUnionSelect: declare class StepVisual_Camer
 
 constructor
 
-// Recognizes a IdAttributeSelect Kind Entity that is
 CaseNum(ent: Standard_Transient): number;
 
-// returns Value as a Plane (Null if another type)
 Plane(): StepGeom_Plane;
 
-// returns Value as a CameraModelD3MultiClippingIntersection (Null if another type)
 CameraModelD3MultiClippingIntersection(): StepVisual_CameraModelD3MultiClippingIntersection;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -503,14 +458,12 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
 StepVisual_CentralOrParallel: typeof StepVisual_CentralOrParallel[keyof typeof StepVisual_CentralOrParallel]
 
-// Added for Dimensional Tolerances Complex STEP entity Characterized_Object & Characterized_Representation & Draughting_Model & Representation
 StepVisual_CharacterizedObjAndRepresentationAndDraughtingModel: declare class StepVisual_CharacterizedObjAndRepresentationAndDraughtingModel extends StepVisual_DraughtingModel
 
 constructor
@@ -521,7 +474,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -536,7 +488,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -568,7 +519,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -589,17 +539,14 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Representation of STEP entity ComplexTriangulatedFace
 StepVisual_ComplexTriangulatedFace: declare class StepVisual_ComplexTriangulatedFace extends StepVisual_TessellatedFace
 
 constructor
 
-// Initialize all fields (own and inherited)
 Init(theRepresentationItem_Name: TCollection_HAsciiString, theTessellatedFace_Coordinates: StepVisual_CoordinatesList, theTessellatedFace_Pnmax: number, theTessellatedFace_Normals: NCollection_HArray2_double, theHasTessellatedFace_GeometricLink: boolean, theTessellatedFace_GeometricLink: StepVisual_FaceOrSurface, thePnindex: NCollection_HArray1_int, theTriangleStrips: NCollection_HArray1_handle_Standard_Transient, theTriangleFans: NCollection_HArray1_handle_Standard_Transient): void;
 Init(theRepresentationItem_Name: TCollection_HAsciiString, theCoordinates: StepVisual_CoordinatesList, thePnmax: number, theNormals: NCollection_HArray2_double, theHasGeometricLink: boolean, theGeometricLink: StepVisual_FaceOrSurface): void;
 Init(aName: TCollection_HAsciiString): void;
@@ -610,34 +557,24 @@ Init(theRepresentationItem_Name: TCollection_HAsciiString, theTessellatedFace_Co
 Init(theRepresentationItem_Name: TCollection_HAsciiString, theCoordinates: StepVisual_CoordinatesList, thePnmax: number, theNormals: NCollection_HArray2_double, theHasGeometricLink: boolean, theGeometricLink: StepVisual_FaceOrSurface): void;
 Init(aName: TCollection_HAsciiString): void;
 
-// Returns field Pnindex
 Pnindex(): NCollection_HArray1_int;
 
-// Sets field Pnindex
 SetPnindex(thePnindex: NCollection_HArray1_int): void;
 
-// Returns number of Pnindex
 NbPnindex(): number;
 
-// Returns value of Pnindex by its num
 PnindexValue(theNum: number): number;
 
-// Returns field TriangleStrips
 TriangleStrips(): NCollection_HArray1_handle_Standard_Transient;
 
-// Sets field TriangleStrips
 SetTriangleStrips(theTriangleStrips: NCollection_HArray1_handle_Standard_Transient): void;
 
-// Returns number of TriangleStrips
 NbTriangleStrips(): number;
 
-// Returns field TriangleFans
 TriangleFans(): NCollection_HArray1_handle_Standard_Transient;
 
-// Sets field TriangleFans
 SetTriangleFans(theTriangleFans: NCollection_HArray1_handle_Standard_Transient): void;
 
-// Returns number of TriangleFans
 NbTriangleFans(): number;
 
 static get_type_name(): string;
@@ -646,17 +583,14 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Representation of STEP entity ComplexTriangulatedSurfaceSet
 StepVisual_ComplexTriangulatedSurfaceSet: declare class StepVisual_ComplexTriangulatedSurfaceSet extends StepVisual_TessellatedSurfaceSet
 
 constructor
 
-// Initialize all fields (own and inherited)
 Init(theRepresentationItem_Name: TCollection_HAsciiString, theTessellatedSurfaceSet_Coordinates: StepVisual_CoordinatesList, theTessellatedSurfaceSet_Pnmax: number, theTessellatedSurfaceSet_Normals: NCollection_HArray2_double, thePnindex: NCollection_HArray1_int, theTriangleStrips: NCollection_HArray1_handle_Standard_Transient, theTriangleFans: NCollection_HArray1_handle_Standard_Transient): void;
 Init(theRepresentationItem_Name: TCollection_HAsciiString, theCoordinates: StepVisual_CoordinatesList, thePnmax: number, theNormals: NCollection_HArray2_double): void;
 Init(aName: TCollection_HAsciiString): void;
@@ -667,34 +601,24 @@ Init(theRepresentationItem_Name: TCollection_HAsciiString, theTessellatedSurface
 Init(theRepresentationItem_Name: TCollection_HAsciiString, theCoordinates: StepVisual_CoordinatesList, thePnmax: number, theNormals: NCollection_HArray2_double): void;
 Init(aName: TCollection_HAsciiString): void;
 
-// Returns field Pnindex
 Pnindex(): NCollection_HArray1_int;
 
-// Sets field Pnindex
 SetPnindex(thePnindex: NCollection_HArray1_int): void;
 
-// Returns number of Pnindex
 NbPnindex(): number;
 
-// Returns value of Pnindex by its num
 PnindexValue(theNum: number): number;
 
-// Returns field TriangleStrips
 TriangleStrips(): NCollection_HArray1_handle_Standard_Transient;
 
-// Sets field TriangleStrips
 SetTriangleStrips(theTriangleStrips: NCollection_HArray1_handle_Standard_Transient): void;
 
-// Returns number of TriangleStrips
 NbTriangleStrips(): number;
 
-// Returns field TriangleFans
 TriangleFans(): NCollection_HArray1_handle_Standard_Transient;
 
-// Sets field TriangleFans
 SetTriangleFans(theTriangleFans: NCollection_HArray1_handle_Standard_Transient): void;
 
-// Returns number of TriangleFans
 NbTriangleFans(): number;
 
 static get_type_name(): string;
@@ -703,7 +627,84 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
+delete(): void;
+
+[Symbol.dispose](): void;
+
+StepVisual_CompositeText: declare class StepVisual_CompositeText extends StepGeom_GeometricRepresentationItem
+
+constructor
+
+Init(aName: TCollection_HAsciiString, aCollectedText: NCollection_HArray1_StepVisual_TextOrCharacter): void;
+Init(aName: TCollection_HAsciiString): void;
+Init(aName: TCollection_HAsciiString, aCollectedText: NCollection_HArray1_StepVisual_TextOrCharacter): void;
+Init(aName: TCollection_HAsciiString): void;
+
+SetCollectedText(aCollectedText: NCollection_HArray1_StepVisual_TextOrCharacter): void;
+
+CollectedText(): NCollection_HArray1_StepVisual_TextOrCharacter;
+
+CollectedTextValue(num: number): StepVisual_TextOrCharacter;
+
+NbCollectedText(): number;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+StepVisual_CompositeTextWithExtent: declare class StepVisual_CompositeTextWithExtent extends StepVisual_CompositeText
+
+constructor
+
+Init(aName: TCollection_HAsciiString, aCollectedText: NCollection_HArray1_StepVisual_TextOrCharacter, aExtent: StepVisual_PlanarExtent): void;
+Init(aName: TCollection_HAsciiString, aCollectedText: NCollection_HArray1_StepVisual_TextOrCharacter): void;
+Init(aName: TCollection_HAsciiString): void;
+Init(aName: TCollection_HAsciiString, aCollectedText: NCollection_HArray1_StepVisual_TextOrCharacter, aExtent: StepVisual_PlanarExtent): void;
+Init(aName: TCollection_HAsciiString, aCollectedText: NCollection_HArray1_StepVisual_TextOrCharacter): void;
+Init(aName: TCollection_HAsciiString): void;
+Init(aName: TCollection_HAsciiString, aCollectedText: NCollection_HArray1_StepVisual_TextOrCharacter, aExtent: StepVisual_PlanarExtent): void;
+Init(aName: TCollection_HAsciiString, aCollectedText: NCollection_HArray1_StepVisual_TextOrCharacter): void;
+Init(aName: TCollection_HAsciiString): void;
+
+SetExtent(aExtent: StepVisual_PlanarExtent): void;
+
+Extent(): StepVisual_PlanarExtent;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+StepVisual_ContextDependentInvisibility: declare class StepVisual_ContextDependentInvisibility extends StepVisual_Invisibility
+
+constructor
+
+Init(aInvisibleItems: NCollection_HArray1_StepVisual_InvisibleItem, aPresentationContext: StepVisual_InvisibilityContext): void;
+Init(aInvisibleItems: NCollection_HArray1_StepVisual_InvisibleItem): void;
+Init(aInvisibleItems: NCollection_HArray1_StepVisual_InvisibleItem, aPresentationContext: StepVisual_InvisibilityContext): void;
+Init(aInvisibleItems: NCollection_HArray1_StepVisual_InvisibleItem): void;
+
+SetPresentationContext(aPresentationContext: StepVisual_InvisibilityContext): void;
+
+PresentationContext(): StepVisual_InvisibilityContext;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
 delete(): void;
 
 [Symbol.dispose](): void;

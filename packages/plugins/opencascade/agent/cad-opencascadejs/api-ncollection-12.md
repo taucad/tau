@@ -1,643 +1,689 @@
 # libcascade — NCollection (12)
 
-8 top-level symbols. Signatures are verbatim typescript.
+11 top-level symbols. Signatures are verbatim typescript.
 
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_gp_Vec: declare class NCollection_Array1_gp_Vec
+NCollection_Array1_handle_StepShape_OrientedEdge: declare class NCollection_Array1_handle_StepShape_OrientedEdge
 
 constructor
 
-// Initialise the items with theValue
-Init(theValue: gp_Vec): void;
+Init(theValue: StepShape_OrientedEdge): void;
 
-// Size query
 Size(): number;
 
-// Length query (legacy int-returning API)
 Length(): number;
 
-// Return TRUE if array has zero length
 IsEmpty(): boolean;
 
-// Lower bound
 Lower(): number;
 
-// Upper bound
 Upper(): number;
 
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_gp_Vec): NCollection_Array1_gp_Vec;
+Assign(theOther: NCollection_Array1_handle_StepShape_OrientedEdge): NCollection_Array1_handle_StepShape_OrientedEdge;
 
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_gp_Vec): NCollection_Array1_gp_Vec;
+CopyValues(theOther: NCollection_Array1_handle_StepShape_OrientedEdge): NCollection_Array1_handle_StepShape_OrientedEdge;
 
-// Move assignment
-Move(theOther: NCollection_Array1_gp_Vec): NCollection_Array1_gp_Vec;
-// theOther: Mutated in place
+Move(theOther: NCollection_Array1_handle_StepShape_OrientedEdge): NCollection_Array1_handle_StepShape_OrientedEdge;
 
-First(): gp_Vec;
+First(): StepShape_OrientedEdge;
 
-ChangeFirst(): gp_Vec;
+ChangeFirst(): StepShape_OrientedEdge;
 
-Last(): gp_Vec;
+Last(): StepShape_OrientedEdge;
 
-ChangeLast(): gp_Vec;
+ChangeLast(): StepShape_OrientedEdge;
 
-// Constant value access
-Value(theIndex: number): gp_Vec;
+Value(theIndex: number): StepShape_OrientedEdge;
 
-// Variable value access
-ChangeValue(theIndex: number): gp_Vec;
+ChangeValue(theIndex: number): StepShape_OrientedEdge;
 
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): gp_Vec;
-// theIndex: 0-based index in [0, `Size()`-1]
+At(theIndex: number): StepShape_OrientedEdge;
 
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): gp_Vec;
-// theIndex: 0-based index in [0, `Size()`-1]
+ChangeAt(theIndex: number): StepShape_OrientedEdge;
 
-// Set value
-SetValue(theIndex: number, theItem: gp_Vec): void;
+SetValue(theIndex: number, theItem: StepShape_OrientedEdge): void;
 
-// Changes the lowest bound
 UpdateLowerBound(theLower: number): void;
 
-// Changes the upper bound
 UpdateUpperBound(theUpper: number): void;
 
-// Resizes the array to specified bounds
 Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
 Resize(theSize: number, theToCopyData: boolean): void;
 Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
 Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
 
 IsDeletable(): boolean;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_gp_Vec2d: declare class NCollection_Array1_gp_Vec2d
+NCollection_Array1_handle_StepVisual_CurveStyleFontPattern: declare class NCollection_Array1_handle_StepVisual_CurveStyleFontPattern
 
 constructor
 
-// Initialise the items with theValue
-Init(theValue: gp_Vec2d): void;
+Init(theValue: StepVisual_CurveStyleFontPattern): void;
 
-// Size query
 Size(): number;
 
-// Length query (legacy int-returning API)
 Length(): number;
 
-// Return TRUE if array has zero length
 IsEmpty(): boolean;
 
-// Lower bound
 Lower(): number;
 
-// Upper bound
 Upper(): number;
 
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_gp_Vec2d): NCollection_Array1_gp_Vec2d;
+Assign(theOther: NCollection_Array1_handle_StepVisual_CurveStyleFontPattern): NCollection_Array1_handle_StepVisual_CurveStyleFontPattern;
 
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_gp_Vec2d): NCollection_Array1_gp_Vec2d;
+CopyValues(theOther: NCollection_Array1_handle_StepVisual_CurveStyleFontPattern): NCollection_Array1_handle_StepVisual_CurveStyleFontPattern;
 
-// Move assignment
-Move(theOther: NCollection_Array1_gp_Vec2d): NCollection_Array1_gp_Vec2d;
-// theOther: Mutated in place
+Move(theOther: NCollection_Array1_handle_StepVisual_CurveStyleFontPattern): NCollection_Array1_handle_StepVisual_CurveStyleFontPattern;
 
-First(): gp_Vec2d;
+First(): StepVisual_CurveStyleFontPattern;
 
-ChangeFirst(): gp_Vec2d;
+ChangeFirst(): StepVisual_CurveStyleFontPattern;
 
-Last(): gp_Vec2d;
+Last(): StepVisual_CurveStyleFontPattern;
 
-ChangeLast(): gp_Vec2d;
+ChangeLast(): StepVisual_CurveStyleFontPattern;
 
-// Constant value access
-Value(theIndex: number): gp_Vec2d;
+Value(theIndex: number): StepVisual_CurveStyleFontPattern;
 
-// Variable value access
-ChangeValue(theIndex: number): gp_Vec2d;
+ChangeValue(theIndex: number): StepVisual_CurveStyleFontPattern;
 
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): gp_Vec2d;
-// theIndex: 0-based index in [0, `Size()`-1]
+At(theIndex: number): StepVisual_CurveStyleFontPattern;
 
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): gp_Vec2d;
-// theIndex: 0-based index in [0, `Size()`-1]
+ChangeAt(theIndex: number): StepVisual_CurveStyleFontPattern;
 
-// Set value
-SetValue(theIndex: number, theItem: gp_Vec2d): void;
+SetValue(theIndex: number, theItem: StepVisual_CurveStyleFontPattern): void;
 
-// Changes the lowest bound
 UpdateLowerBound(theLower: number): void;
 
-// Changes the upper bound
 UpdateUpperBound(theUpper: number): void;
 
-// Resizes the array to specified bounds
 Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
 Resize(theSize: number, theToCopyData: boolean): void;
 Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
 Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
 
 IsDeletable(): boolean;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_gp_XY: declare class NCollection_Array1_gp_XY
+NCollection_Array1_handle_StepVisual_PresentationStyleAssignment: declare class NCollection_Array1_handle_StepVisual_PresentationStyleAssignment
 
 constructor
 
-// Initialise the items with theValue
-Init(theValue: gp_XY): void;
+Init(theValue: StepVisual_PresentationStyleAssignment): void;
 
-// Size query
 Size(): number;
 
-// Length query (legacy int-returning API)
 Length(): number;
 
-// Return TRUE if array has zero length
 IsEmpty(): boolean;
 
-// Lower bound
 Lower(): number;
 
-// Upper bound
 Upper(): number;
 
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_gp_XY): NCollection_Array1_gp_XY;
+Assign(theOther: NCollection_Array1_handle_StepVisual_PresentationStyleAssignment): NCollection_Array1_handle_StepVisual_PresentationStyleAssignment;
 
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_gp_XY): NCollection_Array1_gp_XY;
+CopyValues(theOther: NCollection_Array1_handle_StepVisual_PresentationStyleAssignment): NCollection_Array1_handle_StepVisual_PresentationStyleAssignment;
 
-// Move assignment
-Move(theOther: NCollection_Array1_gp_XY): NCollection_Array1_gp_XY;
-// theOther: Mutated in place
+Move(theOther: NCollection_Array1_handle_StepVisual_PresentationStyleAssignment): NCollection_Array1_handle_StepVisual_PresentationStyleAssignment;
 
-First(): gp_XY;
+First(): StepVisual_PresentationStyleAssignment;
 
-ChangeFirst(): gp_XY;
+ChangeFirst(): StepVisual_PresentationStyleAssignment;
 
-Last(): gp_XY;
+Last(): StepVisual_PresentationStyleAssignment;
 
-ChangeLast(): gp_XY;
+ChangeLast(): StepVisual_PresentationStyleAssignment;
 
-// Constant value access
-Value(theIndex: number): gp_XY;
+Value(theIndex: number): StepVisual_PresentationStyleAssignment;
 
-// Variable value access
-ChangeValue(theIndex: number): gp_XY;
+ChangeValue(theIndex: number): StepVisual_PresentationStyleAssignment;
 
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): gp_XY;
-// theIndex: 0-based index in [0, `Size()`-1]
+At(theIndex: number): StepVisual_PresentationStyleAssignment;
 
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): gp_XY;
-// theIndex: 0-based index in [0, `Size()`-1]
+ChangeAt(theIndex: number): StepVisual_PresentationStyleAssignment;
 
-// Set value
-SetValue(theIndex: number, theItem: gp_XY): void;
+SetValue(theIndex: number, theItem: StepVisual_PresentationStyleAssignment): void;
 
-// Changes the lowest bound
 UpdateLowerBound(theLower: number): void;
 
-// Changes the upper bound
 UpdateUpperBound(theUpper: number): void;
 
-// Resizes the array to specified bounds
 Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
 Resize(theSize: number, theToCopyData: boolean): void;
 Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
 Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
 
 IsDeletable(): boolean;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_gp_XYZ: declare class NCollection_Array1_gp_XYZ
+NCollection_Array1_handle_StepVisual_TessellatedItem: declare class NCollection_Array1_handle_StepVisual_TessellatedItem
 
 constructor
 
-// Initialise the items with theValue
-Init(theValue: gp_XYZ): void;
+Init(theValue: StepVisual_TessellatedItem): void;
 
-// Size query
 Size(): number;
 
-// Length query (legacy int-returning API)
 Length(): number;
 
-// Return TRUE if array has zero length
 IsEmpty(): boolean;
 
-// Lower bound
 Lower(): number;
 
-// Upper bound
 Upper(): number;
 
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_gp_XYZ): NCollection_Array1_gp_XYZ;
+Assign(theOther: NCollection_Array1_handle_StepVisual_TessellatedItem): NCollection_Array1_handle_StepVisual_TessellatedItem;
 
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_gp_XYZ): NCollection_Array1_gp_XYZ;
+CopyValues(theOther: NCollection_Array1_handle_StepVisual_TessellatedItem): NCollection_Array1_handle_StepVisual_TessellatedItem;
 
-// Move assignment
-Move(theOther: NCollection_Array1_gp_XYZ): NCollection_Array1_gp_XYZ;
-// theOther: Mutated in place
+Move(theOther: NCollection_Array1_handle_StepVisual_TessellatedItem): NCollection_Array1_handle_StepVisual_TessellatedItem;
 
-First(): gp_XYZ;
+First(): StepVisual_TessellatedItem;
 
-ChangeFirst(): gp_XYZ;
+ChangeFirst(): StepVisual_TessellatedItem;
 
-Last(): gp_XYZ;
+Last(): StepVisual_TessellatedItem;
 
-ChangeLast(): gp_XYZ;
+ChangeLast(): StepVisual_TessellatedItem;
 
-// Constant value access
-Value(theIndex: number): gp_XYZ;
+Value(theIndex: number): StepVisual_TessellatedItem;
 
-// Variable value access
-ChangeValue(theIndex: number): gp_XYZ;
+ChangeValue(theIndex: number): StepVisual_TessellatedItem;
 
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): gp_XYZ;
-// theIndex: 0-based index in [0, `Size()`-1]
+At(theIndex: number): StepVisual_TessellatedItem;
 
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): gp_XYZ;
-// theIndex: 0-based index in [0, `Size()`-1]
+ChangeAt(theIndex: number): StepVisual_TessellatedItem;
 
-// Set value
-SetValue(theIndex: number, theItem: gp_XYZ): void;
+SetValue(theIndex: number, theItem: StepVisual_TessellatedItem): void;
 
-// Changes the lowest bound
 UpdateLowerBound(theLower: number): void;
 
-// Changes the upper bound
 UpdateUpperBound(theUpper: number): void;
 
-// Resizes the array to specified bounds
 Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
 Resize(theSize: number, theToCopyData: boolean): void;
 Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
 Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
 
 IsDeletable(): boolean;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_handle_Expr_GeneralExpression: declare class NCollection_Array1_handle_Expr_GeneralExpression
+NCollection_Array1_handle_StepVisual_TessellatedStructuredItem: declare class NCollection_Array1_handle_StepVisual_TessellatedStructuredItem
 
 constructor
 
-// Initialise the items with theValue
-Init(theValue: Expr_GeneralExpression): void;
+Init(theValue: StepVisual_TessellatedStructuredItem): void;
 
-// Size query
 Size(): number;
 
-// Length query (legacy int-returning API)
 Length(): number;
 
-// Return TRUE if array has zero length
 IsEmpty(): boolean;
 
-// Lower bound
 Lower(): number;
 
-// Upper bound
 Upper(): number;
 
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_handle_Expr_GeneralExpression): NCollection_Array1_handle_Expr_GeneralExpression;
+Assign(theOther: NCollection_Array1_handle_StepVisual_TessellatedStructuredItem): NCollection_Array1_handle_StepVisual_TessellatedStructuredItem;
 
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_handle_Expr_GeneralExpression): NCollection_Array1_handle_Expr_GeneralExpression;
+CopyValues(theOther: NCollection_Array1_handle_StepVisual_TessellatedStructuredItem): NCollection_Array1_handle_StepVisual_TessellatedStructuredItem;
 
-// Move assignment
-Move(theOther: NCollection_Array1_handle_Expr_GeneralExpression): NCollection_Array1_handle_Expr_GeneralExpression;
-// theOther: Mutated in place
+Move(theOther: NCollection_Array1_handle_StepVisual_TessellatedStructuredItem): NCollection_Array1_handle_StepVisual_TessellatedStructuredItem;
 
-First(): Expr_GeneralExpression;
+First(): StepVisual_TessellatedStructuredItem;
 
-ChangeFirst(): Expr_GeneralExpression;
+ChangeFirst(): StepVisual_TessellatedStructuredItem;
 
-Last(): Expr_GeneralExpression;
+Last(): StepVisual_TessellatedStructuredItem;
 
-ChangeLast(): Expr_GeneralExpression;
+ChangeLast(): StepVisual_TessellatedStructuredItem;
 
-// Constant value access
-Value(theIndex: number): Expr_GeneralExpression;
+Value(theIndex: number): StepVisual_TessellatedStructuredItem;
 
-// Variable value access
-ChangeValue(theIndex: number): Expr_GeneralExpression;
+ChangeValue(theIndex: number): StepVisual_TessellatedStructuredItem;
 
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): Expr_GeneralExpression;
-// theIndex: 0-based index in [0, `Size()`-1]
+At(theIndex: number): StepVisual_TessellatedStructuredItem;
 
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): Expr_GeneralExpression;
-// theIndex: 0-based index in [0, `Size()`-1]
+ChangeAt(theIndex: number): StepVisual_TessellatedStructuredItem;
 
-// Set value
-SetValue(theIndex: number, theItem: Expr_GeneralExpression): void;
+SetValue(theIndex: number, theItem: StepVisual_TessellatedStructuredItem): void;
 
-// Changes the lowest bound
 UpdateLowerBound(theLower: number): void;
 
-// Changes the upper bound
 UpdateUpperBound(theUpper: number): void;
 
-// Resizes the array to specified bounds
 Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
 Resize(theSize: number, theToCopyData: boolean): void;
 Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
 Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
 
 IsDeletable(): boolean;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_handle_Expr_NamedUnknown: declare class NCollection_Array1_handle_Expr_NamedUnknown
+NCollection_Array1_handle_TCollection_HAsciiString: declare class NCollection_Array1_handle_TCollection_HAsciiString
 
 constructor
 
-// Initialise the items with theValue
-Init(theValue: Expr_NamedUnknown): void;
+Init(theValue: TCollection_HAsciiString): void;
 
-// Size query
 Size(): number;
 
-// Length query (legacy int-returning API)
 Length(): number;
 
-// Return TRUE if array has zero length
 IsEmpty(): boolean;
 
-// Lower bound
 Lower(): number;
 
-// Upper bound
 Upper(): number;
 
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_handle_Expr_NamedUnknown): NCollection_Array1_handle_Expr_NamedUnknown;
+Assign(theOther: NCollection_Array1_handle_TCollection_HAsciiString): NCollection_Array1_handle_TCollection_HAsciiString;
 
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_handle_Expr_NamedUnknown): NCollection_Array1_handle_Expr_NamedUnknown;
+CopyValues(theOther: NCollection_Array1_handle_TCollection_HAsciiString): NCollection_Array1_handle_TCollection_HAsciiString;
 
-// Move assignment
-Move(theOther: NCollection_Array1_handle_Expr_NamedUnknown): NCollection_Array1_handle_Expr_NamedUnknown;
-// theOther: Mutated in place
+Move(theOther: NCollection_Array1_handle_TCollection_HAsciiString): NCollection_Array1_handle_TCollection_HAsciiString;
 
-First(): Expr_NamedUnknown;
+First(): TCollection_HAsciiString;
 
-ChangeFirst(): Expr_NamedUnknown;
+ChangeFirst(): TCollection_HAsciiString;
 
-Last(): Expr_NamedUnknown;
+Last(): TCollection_HAsciiString;
 
-ChangeLast(): Expr_NamedUnknown;
+ChangeLast(): TCollection_HAsciiString;
 
-// Constant value access
-Value(theIndex: number): Expr_NamedUnknown;
+Value(theIndex: number): TCollection_HAsciiString;
 
-// Variable value access
-ChangeValue(theIndex: number): Expr_NamedUnknown;
+ChangeValue(theIndex: number): TCollection_HAsciiString;
 
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): Expr_NamedUnknown;
-// theIndex: 0-based index in [0, `Size()`-1]
+At(theIndex: number): TCollection_HAsciiString;
 
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): Expr_NamedUnknown;
-// theIndex: 0-based index in [0, `Size()`-1]
+ChangeAt(theIndex: number): TCollection_HAsciiString;
 
-// Set value
-SetValue(theIndex: number, theItem: Expr_NamedUnknown): void;
+SetValue(theIndex: number, theItem: TCollection_HAsciiString): void;
 
-// Changes the lowest bound
 UpdateLowerBound(theLower: number): void;
 
-// Changes the upper bound
 UpdateUpperBound(theUpper: number): void;
 
-// Resizes the array to specified bounds
 Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
 Resize(theSize: number, theToCopyData: boolean): void;
 Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
 Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
 
 IsDeletable(): boolean;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_handle_Geom2d_BSplineCurve: declare class NCollection_Array1_handle_Geom2d_BSplineCurve
+NCollection_Array1_int: declare class NCollection_Array1_int
 
 constructor
 
-// Initialise the items with theValue
-Init(theValue: Geom2d_BSplineCurve): void;
+Init(theValue: number): void;
 
-// Size query
 Size(): number;
 
-// Length query (legacy int-returning API)
 Length(): number;
 
-// Return TRUE if array has zero length
 IsEmpty(): boolean;
 
-// Lower bound
 Lower(): number;
 
-// Upper bound
 Upper(): number;
 
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_handle_Geom2d_BSplineCurve): NCollection_Array1_handle_Geom2d_BSplineCurve;
+Assign(theOther: NCollection_Array1_int): NCollection_Array1_int;
 
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_handle_Geom2d_BSplineCurve): NCollection_Array1_handle_Geom2d_BSplineCurve;
+CopyValues(theOther: NCollection_Array1_int): NCollection_Array1_int;
 
-// Move assignment
-Move(theOther: NCollection_Array1_handle_Geom2d_BSplineCurve): NCollection_Array1_handle_Geom2d_BSplineCurve;
-// theOther: Mutated in place
+Move(theOther: NCollection_Array1_int): NCollection_Array1_int;
 
-First(): Geom2d_BSplineCurve;
+First(): number;
 
-ChangeFirst(): Geom2d_BSplineCurve;
+ChangeFirst(): number;
 
-Last(): Geom2d_BSplineCurve;
+Last(): number;
 
-ChangeLast(): Geom2d_BSplineCurve;
+ChangeLast(): number;
 
-// Constant value access
-Value(theIndex: number): Geom2d_BSplineCurve;
+Value(theIndex: number): number;
 
-// Variable value access
-ChangeValue(theIndex: number): Geom2d_BSplineCurve;
+ChangeValue(theIndex: number): number;
 
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): Geom2d_BSplineCurve;
-// theIndex: 0-based index in [0, `Size()`-1]
+At(theIndex: number): number;
 
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): Geom2d_BSplineCurve;
-// theIndex: 0-based index in [0, `Size()`-1]
+ChangeAt(theIndex: number): number;
 
-// Set value
-SetValue(theIndex: number, theItem: Geom2d_BSplineCurve): void;
+SetValue(theIndex: number, theItem: number): void;
 
-// Changes the lowest bound
 UpdateLowerBound(theLower: number): void;
 
-// Changes the upper bound
 UpdateUpperBound(theUpper: number): void;
 
-// Resizes the array to specified bounds
 Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
 Resize(theSize: number, theToCopyData: boolean): void;
 Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
 Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
 
 IsDeletable(): boolean;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_handle_Geom2d_BezierCurve: declare class NCollection_Array1_handle_Geom2d_BezierCurve
+NCollection_Array1_unsignedchar: declare class NCollection_Array1_unsignedchar
 
 constructor
 
-// Initialise the items with theValue
-Init(theValue: Geom2d_BezierCurve): void;
+Init(theValue: string): void;
 
-// Size query
 Size(): number;
 
-// Length query (legacy int-returning API)
 Length(): number;
 
-// Return TRUE if array has zero length
 IsEmpty(): boolean;
 
-// Lower bound
 Lower(): number;
 
-// Upper bound
 Upper(): number;
 
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_handle_Geom2d_BezierCurve): NCollection_Array1_handle_Geom2d_BezierCurve;
+Assign(theOther: NCollection_Array1_unsignedchar): NCollection_Array1_unsignedchar;
 
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_handle_Geom2d_BezierCurve): NCollection_Array1_handle_Geom2d_BezierCurve;
+CopyValues(theOther: NCollection_Array1_unsignedchar): NCollection_Array1_unsignedchar;
 
-// Move assignment
-Move(theOther: NCollection_Array1_handle_Geom2d_BezierCurve): NCollection_Array1_handle_Geom2d_BezierCurve;
-// theOther: Mutated in place
+Move(theOther: NCollection_Array1_unsignedchar): NCollection_Array1_unsignedchar;
 
-First(): Geom2d_BezierCurve;
+First(): string;
 
-ChangeFirst(): Geom2d_BezierCurve;
+ChangeFirst(): string;
 
-Last(): Geom2d_BezierCurve;
+Last(): string;
 
-ChangeLast(): Geom2d_BezierCurve;
+ChangeLast(): string;
 
-// Constant value access
-Value(theIndex: number): Geom2d_BezierCurve;
+Value(theIndex: number): string;
 
-// Variable value access
-ChangeValue(theIndex: number): Geom2d_BezierCurve;
+ChangeValue(theIndex: number): string;
 
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): Geom2d_BezierCurve;
-// theIndex: 0-based index in [0, `Size()`-1]
+At(theIndex: number): string;
 
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): Geom2d_BezierCurve;
-// theIndex: 0-based index in [0, `Size()`-1]
+ChangeAt(theIndex: number): string;
 
-// Set value
-SetValue(theIndex: number, theItem: Geom2d_BezierCurve): void;
+SetValue(theIndex: number, theItem: string): void;
 
-// Changes the lowest bound
 UpdateLowerBound(theLower: number): void;
 
-// Changes the upper bound
 UpdateUpperBound(theUpper: number): void;
 
-// Resizes the array to specified bounds
 Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
 Resize(theSize: number, theToCopyData: boolean): void;
 Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
 Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
 
 IsDeletable(): boolean;
 
-// Releases the C++ object
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_Array2_TopoDS_Shape: declare class NCollection_Array2_TopoDS_Shape
+
+constructor
+
+static BeginPosition(theRowLower: number, argNo1: number, theColLower: number, theColUpper: number): number;
+
+static LastPosition(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number): number;
+
+Size(): number;
+
+Length(): number;
+
+NbRows(): number;
+
+NbColumns(): number;
+
+RowLength(): number;
+
+ColLength(): number;
+
+LowerRow(): number;
+
+UpperRow(): number;
+
+LowerCol(): number;
+
+UpperCol(): number;
+
+UpdateLowerRow(theLowerRow: number): void;
+
+UpdateLowerCol(theLowerCol: number): void;
+
+UpdateUpperRow(theUpperRow: number): void;
+
+UpdateUpperCol(theUpperCol: number): void;
+
+Assign(theOther: NCollection_Array2_TopoDS_Shape): NCollection_Array2_TopoDS_Shape;
+Assign(theOther: unknown): unknown;
+Assign(theOther: NCollection_Array2_TopoDS_Shape): NCollection_Array2_TopoDS_Shape;
+Assign(theOther: unknown): unknown;
+
+CopyValues(theOther: NCollection_Array2_TopoDS_Shape): NCollection_Array2_TopoDS_Shape;
+CopyValues(theOther: unknown): unknown;
+CopyValues(theOther: NCollection_Array2_TopoDS_Shape): NCollection_Array2_TopoDS_Shape;
+CopyValues(theOther: unknown): unknown;
+
+Move(theOther: NCollection_Array2_TopoDS_Shape): NCollection_Array2_TopoDS_Shape;
+Move(theOther: unknown): unknown;
+Move(theOther: NCollection_Array2_TopoDS_Shape): NCollection_Array2_TopoDS_Shape;
+Move(theOther: unknown): unknown;
+
+SetValue(theRow: number, theCol: number, theItem: TopoDS_Shape): void;
+SetValue(theIndex: number, theItem: unknown): void;
+SetValue(theRow: number, theCol: number, theItem: TopoDS_Shape): void;
+SetValue(theIndex: number, theItem: unknown): void;
+
+Resize(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+Resize(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
+Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
+Resize(theSize: number, theToCopyData: boolean): void;
+Resize(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+Resize(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
+Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
+Resize(theSize: number, theToCopyData: boolean): void;
+Resize(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+Resize(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
+Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
+Resize(theSize: number, theToCopyData: boolean): void;
+Resize(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+Resize(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
+Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
+Resize(theSize: number, theToCopyData: boolean): void;
+
+ResizeWithTrim(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+ResizeWithTrim(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
+ResizeWithTrim(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+ResizeWithTrim(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_Array2_double: declare class NCollection_Array2_double
+
+constructor
+
+static BeginPosition(theRowLower: number, argNo1: number, theColLower: number, theColUpper: number): number;
+
+static LastPosition(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number): number;
+
+Size(): number;
+
+Length(): number;
+
+NbRows(): number;
+
+NbColumns(): number;
+
+RowLength(): number;
+
+ColLength(): number;
+
+LowerRow(): number;
+
+UpperRow(): number;
+
+LowerCol(): number;
+
+UpperCol(): number;
+
+UpdateLowerRow(theLowerRow: number): void;
+
+UpdateLowerCol(theLowerCol: number): void;
+
+UpdateUpperRow(theUpperRow: number): void;
+
+UpdateUpperCol(theUpperCol: number): void;
+
+Assign(theOther: NCollection_Array2_double): NCollection_Array2_double;
+Assign(theOther: unknown): unknown;
+Assign(theOther: NCollection_Array2_double): NCollection_Array2_double;
+Assign(theOther: unknown): unknown;
+
+CopyValues(theOther: NCollection_Array2_double): NCollection_Array2_double;
+CopyValues(theOther: unknown): unknown;
+CopyValues(theOther: NCollection_Array2_double): NCollection_Array2_double;
+CopyValues(theOther: unknown): unknown;
+
+Move(theOther: NCollection_Array2_double): NCollection_Array2_double;
+Move(theOther: unknown): unknown;
+Move(theOther: NCollection_Array2_double): NCollection_Array2_double;
+Move(theOther: unknown): unknown;
+
+SetValue(theRow: number, theCol: number, theItem: number): void;
+SetValue(theIndex: number, theItem: unknown): void;
+SetValue(theRow: number, theCol: number, theItem: number): void;
+SetValue(theIndex: number, theItem: unknown): void;
+
+Resize(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+Resize(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
+Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
+Resize(theSize: number, theToCopyData: boolean): void;
+Resize(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+Resize(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
+Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
+Resize(theSize: number, theToCopyData: boolean): void;
+Resize(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+Resize(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
+Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
+Resize(theSize: number, theToCopyData: boolean): void;
+Resize(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+Resize(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
+Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
+Resize(theSize: number, theToCopyData: boolean): void;
+
+ResizeWithTrim(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+ResizeWithTrim(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
+ResizeWithTrim(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+ResizeWithTrim(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_Array2_gp_Pnt: declare class NCollection_Array2_gp_Pnt
+
+constructor
+
+static BeginPosition(theRowLower: number, argNo1: number, theColLower: number, theColUpper: number): number;
+
+static LastPosition(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number): number;
+
+Size(): number;
+
+Length(): number;
+
+NbRows(): number;
+
+NbColumns(): number;
+
+RowLength(): number;
+
+ColLength(): number;
+
+LowerRow(): number;
+
+UpperRow(): number;
+
+LowerCol(): number;
+
+UpperCol(): number;
+
+UpdateLowerRow(theLowerRow: number): void;
+
+UpdateLowerCol(theLowerCol: number): void;
+
+UpdateUpperRow(theUpperRow: number): void;
+
+UpdateUpperCol(theUpperCol: number): void;
+
+Assign(theOther: NCollection_Array2_gp_Pnt): NCollection_Array2_gp_Pnt;
+Assign(theOther: unknown): unknown;
+Assign(theOther: NCollection_Array2_gp_Pnt): NCollection_Array2_gp_Pnt;
+Assign(theOther: unknown): unknown;
+
+CopyValues(theOther: NCollection_Array2_gp_Pnt): NCollection_Array2_gp_Pnt;
+CopyValues(theOther: unknown): unknown;
+CopyValues(theOther: NCollection_Array2_gp_Pnt): NCollection_Array2_gp_Pnt;
+CopyValues(theOther: unknown): unknown;
+
+Move(theOther: NCollection_Array2_gp_Pnt): NCollection_Array2_gp_Pnt;
+Move(theOther: unknown): unknown;
+Move(theOther: NCollection_Array2_gp_Pnt): NCollection_Array2_gp_Pnt;
+Move(theOther: unknown): unknown;
+
+SetValue(theRow: number, theCol: number, theItem: gp_Pnt): void;
+SetValue(theIndex: number, theItem: unknown): void;
+SetValue(theRow: number, theCol: number, theItem: gp_Pnt): void;
+SetValue(theIndex: number, theItem: unknown): void;
+
+Resize(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+Resize(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
+Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
+Resize(theSize: number, theToCopyData: boolean): void;
+Resize(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+Resize(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
+Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
+Resize(theSize: number, theToCopyData: boolean): void;
+Resize(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+Resize(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
+Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
+Resize(theSize: number, theToCopyData: boolean): void;
+Resize(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+Resize(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
+Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
+Resize(theSize: number, theToCopyData: boolean): void;
+
+ResizeWithTrim(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+ResizeWithTrim(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
+ResizeWithTrim(theRowLower: number, theRowUpper: number, theColLower: number, theColUpper: number, theToCopyData: boolean): void;
+ResizeWithTrim(theNbRows: number, theNbCols: number, theToCopyData: boolean): void;
+
 delete(): void;
 
 [Symbol.dispose](): void;

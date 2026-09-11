@@ -2,7 +2,6 @@
 
 1 top-level symbols. Signatures are verbatim typescript.
 
-// Options accepted by `createInstance` from the `./init` subpath
 CreateInstanceOptions: InitOpenCascadeOptions & {
 /\*\*
 

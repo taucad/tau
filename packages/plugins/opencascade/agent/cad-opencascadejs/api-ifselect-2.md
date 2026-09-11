@@ -1,470 +1,21 @@
 # libcascade — IFSelect (2)
 
-28 top-level symbols. Signatures are verbatim typescript.
+31 top-level symbols. Signatures are verbatim typescript.
 
-// A ListEditor is an auxiliary operator for Editor/EditForm I.E
-IFSelect_ListEditor: declare class IFSelect_ListEditor extends Standard_Transient
-
-constructor
-
-// Loads a Model
-LoadModel(model: Interface_InterfaceModel): void;
-
-// Loads the original values for the list
-LoadValues(vals: NCollection_HSequence_handle_TCollection_HAsciiString): void;
-
-// Declares this ListEditor to have been touched (whatever action)
-SetTouched(): void;
-
-// Clears all editions already recorded
-ClearEdit(): void;
-
-// Loads a new list to replace the older one, in once ! By default (can be redefined) checks the length of the list and the value of each item according to the def Items are all recorded as Modified
-LoadEdited(list: NCollection_HSequence_handle_TCollection_HAsciiString): boolean;
-
-// Sets a new value for the item <num> (in edited list) <val> may be a Null Handle, then the value will be cleared but not removed Returns True when done
-SetValue(num: number, val: TCollection_HAsciiString): boolean;
-
-// Adds a new item
-AddValue(val: TCollection_HAsciiString, atnum?: number): boolean;
-
-// Removes items from the list By default removes one item
-Remove(num?: number, howmany?: number): boolean;
-
-// Returns the value from which the edition started
-OriginalValues(): NCollection_HSequence_handle_TCollection_HAsciiString;
-
-// Returns the result of the edition
-EditedValues(): NCollection_HSequence_handle_TCollection_HAsciiString;
-
-// Returns count of values, edited (D) or original
-NbValues(edited?: boolean): number;
-
-// Returns a value given its rank
-Value(num: number, edited?: boolean): TCollection_HAsciiString;
-
-// Tells if a value (in edited list) has been changed, i.e
-IsChanged(num: number): boolean;
-
-// Tells if a value (in edited list) has been modified-value (not added)
-IsModified(num: number): boolean;
-
-// Tells if a value (in edited list) has been added (new one)
-IsAdded(num: number): boolean;
-
-// Tells if at least one edition (SetValue-AddValue-Remove) has been recorded
-IsTouched(): boolean;
-
-static get_type_name(): string;
-
-static get_type_descriptor(): Standard_Type;
-
-DynamicType(): Standard_Type;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// This class performs the Copy operations involved by the description of a ShareOut (evaluated by a ShareOutResult) plus, if there are, the Modifications on the results, with the help of Modifiers
-IFSelect_ModelCopier: declare class IFSelect_ModelCopier extends Standard_Transient
+IFSelect_SelectRange: declare class IFSelect_SelectRange extends IFSelect_SelectExtract
 
 constructor
 
-// Sets the ShareOut, which is used to define Modifiers to apply
-SetShareOut(sho: IFSelect_ShareOut): void;
-
-// Clears the list of produced Models
-ClearResult(): void;
-
-// Records a new File to be sent, as a couple (Name as AsciiString, Content as InterfaceModel) Returns True if Done, False if <filename> is already attached to another File
-AddFile(filename: TCollection_AsciiString, content: Interface_InterfaceModel): boolean;
-
-// Changes the Name attached to a File which was formerly defined by a call to AddFile Returns True if Done, False else
-NameFile(num: number, filename: TCollection_AsciiString): boolean;
-
-// Clears the Name attached to a File which was formerly defined by a call to AddFile
-ClearFile(num: number): boolean;
-
-// Sets a list of File Modifiers to be applied on a file
-SetAppliedModifiers(num: number, applied: IFSelect_AppliedModifiers): boolean;
-
-// Clears the list of File Modifiers to be applied on a file
-ClearAppliedModifiers(num: number): boolean;
-
-// Returns the count of Files produced, i.e
-NbFiles(): number;
-
-// Returns the File Name for a file given its rank It is empty after a call to ClearFile on same <num>
-FileName(num: number): TCollection_AsciiString;
-
-// Returns the content of a file before sending, under the form of an InterfaceModel, given its rank
-FileModel(num: number): Interface_InterfaceModel;
-
-// Returns the list of File Modifiers to be applied on a file when it will be sent, as computed by CopiedModel
-AppliedModifiers(num: number): IFSelect_AppliedModifiers;
-
-// Begins a sequence of recording the really sent files <sho>
-BeginSentFiles(sho: IFSelect_ShareOut, record: boolean): void;
-
-// Adds the name of a just sent file, if BeginSentFiles has commanded recording
-AddSentFile(filename: string): void;
-
-// Returns the list of recorded names of sent files
-SentFiles(): NCollection_HSequence_handle_TCollection_HAsciiString;
-
-static get_type_name(): string;
-
-static get_type_descriptor(): Standard_Type;
-
-DynamicType(): Standard_Type;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// This modifier applies an EditForm on the entities selected
-IFSelect_ModifEditForm: declare class IFSelect_ModifEditForm extends IFSelect_Modifier
-
-// Returns Label as "Apply EditForm <+ label of EditForm>"
-Label(): TCollection_AsciiString;
-
-static get_type_name(): string;
-
-static get_type_descriptor(): Standard_Type;
-
-DynamicType(): Standard_Type;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// This modifier reorders a whole model from its roots, i.e
-IFSelect_ModifReorder: declare class IFSelect_ModifReorder extends IFSelect_Modifier
-
-constructor
-
-// Returns Label as "Reorder, Roots (last or first)"
-Label(): TCollection_AsciiString;
-
-static get_type_name(): string;
-
-static get_type_descriptor(): Standard_Type;
-
-DynamicType(): Standard_Type;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// This class gives a frame for Actions which can work globally on a File once completely defined (i.e
-IFSelect_Modifier: declare class IFSelect_Modifier extends IFSelect_GeneralModifier
-
-static get_type_name(): string;
-
-static get_type_descriptor(): Standard_Type;
-
-DynamicType(): Standard_Type;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// This class gives a simple way to return then consult a list of packets, determined from the content of a Model, by various criteria
-IFSelect_PacketList: declare class IFSelect_PacketList extends Standard_Transient
-
-constructor
-
-// Sets a name to a packet list
-SetName(name: string): void;
-
-// Returns the recorded name for a packet list
-Name(): string;
-
-// Returns the Model of reference
-Model(): Interface_InterfaceModel;
-
-// Declares a new Packet, ready to be filled The entities to be added will be added to this Packet
-AddPacket(): void;
-
-// Adds an entity from the Model into the current packet for Add
-Add(ent: Standard_Transient): void;
-
-// Adds an list of entities into the current packet for Add
-AddList(list: NCollection_HSequence_handle_Standard_Transient): void;
-
-// Returns the count of non-empty packets
-NbPackets(): number;
-
-// Returns the count of entities in a Packet given its rank, or 0
-NbEntities(numpack: number): number;
-
-// Returns the highest number of packets which know a same entity For no duplication, should be one
-HighestDuplicationCount(): number;
-
-// Returns the count of entities duplicated
-NbDuplicated(count: number, andmore: boolean): number;
-
-static get_type_name(): string;
-
-static get_type_descriptor(): Standard_Type;
-
-DynamicType(): Standard_Type;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// A ParamEditor gives access for edition to a list of TypedValue (i.e
-IFSelect_ParamEditor: declare class IFSelect_ParamEditor extends IFSelect_Editor
-
-constructor
-
-// Adds a TypedValue By default, its short name equates its complete name, it can be made explicit
-AddValue(val: Interface_TypedValue, shortname?: string): void;
-
-// Adds a Constant Text, it will be Read Only By default, its long name equates its shortname
-AddConstantText(val: string, shortname: string, completename?: string): void;
-
-// Returns the specific label
-Label(): TCollection_AsciiString;
-
-// Returns a ParamEditor to work on the Static Parameters of which names are listed in Handle if null or empty
-static StaticEditor(list: NCollection_HSequence_handle_TCollection_HAsciiString, label?: string): IFSelect_ParamEditor;
-
-static get_type_name(): string;
-
-static get_type_descriptor(): Standard_Type;
-
-DynamicType(): Standard_Type;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// Lets you choose the manner in which you want to analyze an IGES or STEP file
-IFSelect_PrintCount: typeof IFSelect_PrintCount[keyof typeof IFSelect_PrintCount]
-
-// Indicates whether there will be information on warnings as well as on failures
-IFSelect_PrintFail: typeof IFSelect_PrintFail[keyof typeof IFSelect_PrintFail]
-
-IFSelect_RemainMode: typeof IFSelect_RemainMode[keyof typeof IFSelect_RemainMode]
-
-// Qualifies an execution status
-IFSelect_ReturnStatus: typeof IFSelect_ReturnStatus[keyof typeof IFSelect_ReturnStatus]
-
-// A SelectAnyList kind Selection selects a List of an Entity, as well as this Entity contains some
-IFSelect_SelectAnyList: declare class IFSelect_SelectAnyList extends IFSelect_SelectDeduct
-
-// Returns count of Items in the list in the Entity <ent> If <ent> has not required type, returned value must be Zero
-NbItems(ent: Standard_Transient): number;
-
-// Returns True if a Lower limit is defined
 HasLower(): boolean;
 
-// Returns Integer Value of Lower Limit (0 if none)
 LowerValue(): number;
 
-// Returns True if a Lower limit is defined
 HasUpper(): boolean;
 
-// Returns Integer Value of Upper Limit (0 if none)
 UpperValue(): number;
 
-// Returns a text defining the criterium
-Label(): TCollection_AsciiString;
-
-// Returns the specific label for the list, which is included as a part of Label
-ListLabel(): TCollection_AsciiString;
-
-static get_type_name(): string;
-
-static get_type_descriptor(): Standard_Type;
-
-DynamicType(): Standard_Type;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// A SelectAnyType sorts the Entities of which the Type is Kind of a given Type
-IFSelect_SelectAnyType: declare class IFSelect_SelectAnyType extends IFSelect_SelectExtract
-
-// Returns the Type which has to be matched for select
-TypeForMatch(): Standard_Type;
-
-// Returns True for an Entity (model->Value(num)) which is kind of the chosen type, given by the method TypeForMatch
 Sort(rank: number, ent: Standard_Transient, model: Interface_InterfaceModel): boolean;
 
-static get_type_name(): string;
-
-static get_type_descriptor(): Standard_Type;
-
-DynamicType(): Standard_Type;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// SelectBase works directly from an InterfaceModel
-IFSelect_SelectBase: declare class IFSelect_SelectBase extends IFSelect_Selection
-
-static get_type_name(): string;
-
-static get_type_descriptor(): Standard_Type;
-
-DynamicType(): Standard_Type;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// A SelectCombine type Selection defines algebraic operations between results of several Selections It is a deferred class
-IFSelect_SelectCombine: declare class IFSelect_SelectCombine extends IFSelect_Selection
-
-// Returns the count of Input Selections
-NbInputs(): number;
-
-// Returns an Input Selection, given its rank in the list
-Input(num: number): IFSelect_Selection;
-
-// Returns the rank of an input Selection, 0 if not in the list
-InputRank(sel: IFSelect_Selection): number;
-
-// Adds a Selection to the filling list By default, adds it to the end of the list A Positive rank less then NbInputs gives an insertion rank (InsertBefore
-Add(sel: IFSelect_Selection, atnum?: number): void;
-
-// Removes an input Selection
-Remove(sel: IFSelect_Selection): boolean;
-Remove(num: number): boolean;
-Remove(sel: IFSelect_Selection): boolean;
-Remove(num: number): boolean;
-
-static get_type_name(): string;
-
-static get_type_descriptor(): Standard_Type;
-
-DynamicType(): Standard_Type;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// A SelectControl kind Selection works with two input Selections in a dissymmetric way
-IFSelect_SelectControl: declare class IFSelect_SelectControl extends IFSelect_Selection
-
-// Returns the Main Input Selection
-MainInput(): IFSelect_Selection;
-
-// Returns True if a Control Input is defined Thus, Result can be computed differently if there is a Control Input or if there is none
-HasSecondInput(): boolean;
-
-// Returns the Control Input Selection, or a Null Handle
-SecondInput(): IFSelect_Selection;
-
-// Sets a Selection to be the Main Input
-SetMainInput(sel: IFSelect_Selection): void;
-
-// Sets a Selection to be the Control Input
-SetSecondInput(sel: IFSelect_Selection): void;
-
-static get_type_name(): string;
-
-static get_type_descriptor(): Standard_Type;
-
-DynamicType(): Standard_Type;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// A SelectDeduct determines a list of Entities from an Input Selection, by a computation
-IFSelect_SelectDeduct: declare class IFSelect_SelectDeduct extends IFSelect_Selection
-
-// Defines or Changes the Input Selection
-SetInput(sel: IFSelect_Selection): void;
-
-// Returns the Input Selection
-Input(): IFSelect_Selection;
-
-// Returns True if the Input Selection is defined, False else
-HasInput(): boolean;
-
-// Tells if an Alternate List has been set, i.e
-HasAlternate(): boolean;
-
-// Returns the Alternate Definition It is returned modifiable, hence an already defined SelectPointed can be used But if it was not yet defined, it is created the first time
-Alternate(): IFSelect_SelectPointed;
-
-static get_type_name(): string;
-
-static get_type_descriptor(): Standard_Type;
-
-DynamicType(): Standard_Type;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// A SelectDiff keeps the entities from a Selection, the Main Input, which are not listed by the Second Input
-IFSelect_SelectDiff: declare class IFSelect_SelectDiff extends IFSelect_SelectControl
-
-constructor
-
-// Returns a text defining the criterium
-Label(): TCollection_AsciiString;
-
-static get_type_name(): string;
-
-static get_type_descriptor(): Standard_Type;
-
-DynamicType(): Standard_Type;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// A SelectEntityNumber gets in an InterfaceModel (through a Graph), the Entity which has a specified Number (its rank of adding into the Model)
-IFSelect_SelectEntityNumber: declare class IFSelect_SelectEntityNumber extends IFSelect_SelectBase
-
-constructor
-
-// Returns a text defining the criterium
-Label(): TCollection_AsciiString;
-
-static get_type_name(): string;
-
-static get_type_descriptor(): Standard_Type;
-
-DynamicType(): Standard_Type;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// A SelectErrorEntities sorts the Entities which are qualified as "Error" (their Type has not been recognized) during reading a File
-IFSelect_SelectErrorEntities: declare class IFSelect_SelectErrorEntities extends IFSelect_SelectExtract
-
-constructor
-
-// Returns True for an Entity which is qualified as "Error", i.e
-Sort(rank: number, ent: Standard_Transient, model: Interface_InterfaceModel): boolean;
-
-// Returns a text defining the criterium
 ExtractLabel(): TCollection_AsciiString;
 
 static get_type_name(): string;
@@ -473,21 +24,136 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// A SelectExplore determines from an input list of Entities, a list obtained by a way of exploration
-IFSelect_SelectExplore: declare class IFSelect_SelectExplore extends IFSelect_SelectDeduct
+IFSelect_SelectRootComps: declare class IFSelect_SelectRootComps extends IFSelect_SelectExtract
 
-// Returns the required exploring level
-Level(): number;
+constructor
 
-// Returns a text saying "(Recursive)" or "(Level nn)" plus specific criterium returned by ExploreLabel (see below)
+Sort(rank: number, ent: Standard_Transient, model: Interface_InterfaceModel): boolean;
+
+ExtractLabel(): TCollection_AsciiString;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+IFSelect_SelectRoots: declare class IFSelect_SelectRoots extends IFSelect_SelectExtract
+
+constructor
+
+Sort(rank: number, ent: Standard_Transient, model: Interface_InterfaceModel): boolean;
+
+ExtractLabel(): TCollection_AsciiString;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+IFSelect_SelectSent: declare class IFSelect_SelectSent extends IFSelect_SelectExtract
+
+constructor
+
+SentCount(): number;
+
+AtLeast(): boolean;
+
+Sort(rank: number, ent: Standard_Transient, model: Interface_InterfaceModel): boolean;
+
+ExtractLabel(): TCollection_AsciiString;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+IFSelect_SelectShared: declare class IFSelect_SelectShared extends IFSelect_SelectDeduct
+
+constructor
+
 Label(): TCollection_AsciiString;
 
-// Returns a text defining the way of exploration
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+IFSelect_SelectSharing: declare class IFSelect_SelectSharing extends IFSelect_SelectDeduct
+
+constructor
+
+Label(): TCollection_AsciiString;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+IFSelect_SelectSignature: declare class IFSelect_SelectSignature extends IFSelect_SelectExtract
+
+constructor
+
+Signature(): IFSelect_Signature;
+
+Counter(): IFSelect_SignCounter;
+
+Sort(rank: number, ent: Standard_Transient, model: Interface_InterfaceModel): boolean;
+
+SignatureText(): TCollection_AsciiString;
+
+IsExact(): boolean;
+
+ExtractLabel(): TCollection_AsciiString;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+IFSelect_SelectSignedShared: declare class IFSelect_SelectSignedShared extends IFSelect_SelectExplore
+
+constructor
+
+Signature(): IFSelect_Signature;
+
+SignatureText(): TCollection_AsciiString;
+
+IsExact(): boolean;
+
 ExploreLabel(): TCollection_AsciiString;
 
 static get_type_name(): string;
@@ -496,27 +162,68 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// A SelectExtract determines a list of Entities from an Input Selection, as a sub-list of the Input Result It works by applying a sort criterium on each Entity of the Input
-IFSelect_SelectExtract: declare class IFSelect_SelectExtract extends IFSelect_SelectDeduct
+IFSelect_SelectSignedSharing: declare class IFSelect_SelectSignedSharing extends IFSelect_SelectExplore
 
-// Returns True if Sort criterium is Direct, False if Reverse
-IsDirect(): boolean;
+constructor
 
-// Sets Sort criterium sense to a new value (True
-SetDirect(direct: boolean): void;
+Signature(): IFSelect_Signature;
 
-// Returns True for an Entity if it satisfies the Sort criterium It receives
-Sort(rank: number, ent: Standard_Transient, model: Interface_InterfaceModel): boolean;
+SignatureText(): TCollection_AsciiString;
 
-// Returns a text saying "Picked" or "Removed", plus the specific criterium returned by ExtractLabel (see below)
+IsExact(): boolean;
+
+ExploreLabel(): TCollection_AsciiString;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+IFSelect_SelectSuite: declare class IFSelect_SelectSuite extends IFSelect_SelectDeduct
+
+constructor
+
+AddInput(item: IFSelect_Selection): boolean;
+
+AddPrevious(item: IFSelect_SelectDeduct): void;
+
+AddNext(item: IFSelect_SelectDeduct): void;
+
+NbItems(): number;
+
+Item(num: number): IFSelect_SelectDeduct;
+
+SetLabel(lab: string): void;
+
 Label(): TCollection_AsciiString;
 
-// Returns a text defining the criterium for extraction
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+IFSelect_SelectType: declare class IFSelect_SelectType extends IFSelect_SelectAnyType
+
+constructor
+
+SetType(atype: Standard_Type): void;
+
+TypeForMatch(): Standard_Type;
+
 ExtractLabel(): TCollection_AsciiString;
 
 static get_type_name(): string;
@@ -525,23 +232,32 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// A SelectFlag queries a flag noted in the bitmap of the Graph
-IFSelect_SelectFlag: declare class IFSelect_SelectFlag extends IFSelect_SelectExtract
+IFSelect_SelectUnion: declare class IFSelect_SelectUnion extends IFSelect_SelectCombine
 
 constructor
 
-// Returns the name of the flag
-FlagName(): string;
+Label(): TCollection_AsciiString;
 
-// Returns always False because RootResult has done the work
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+IFSelect_SelectUnknownEntities: declare class IFSelect_SelectUnknownEntities extends IFSelect_SelectExtract
+
+constructor
+
 Sort(rank: number, ent: Standard_Transient, model: Interface_InterfaceModel): boolean;
 
-// Returns a text defining the criterium, includes the flag name
 ExtractLabel(): TCollection_AsciiString;
 
 static get_type_name(): string;
@@ -550,50 +266,12 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// A SelectInList kind Selection selects a List of an Entity, which is composed of single Entities To know the list on which to work, SelectInList has two deferred methods
-IFSelect_SelectInList: declare class IFSelect_SelectInList extends IFSelect_SelectAnyList
+IFSelect_Selection: declare class IFSelect_Selection extends Standard_Transient
 
-// Returns an Entity, given its rank in the list
-ListedEntity(num: number, ent: Standard_Transient): Standard_Transient;
-
-static get_type_name(): string;
-
-static get_type_descriptor(): Standard_Type;
-
-DynamicType(): Standard_Type;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// A SelectIncorrectEntities sorts the Entities which have been noted as Incorrect in the Graph of the Session (flag "Incorrect") It can find a result only if ComputeCheck has formerly been called on the WorkSession
-IFSelect_SelectIncorrectEntities: declare class IFSelect_SelectIncorrectEntities extends IFSelect_SelectFlag
-
-constructor
-
-static get_type_name(): string;
-
-static get_type_descriptor(): Standard_Type;
-
-DynamicType(): Standard_Type;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// A SelectIntersection filters the Entities issued from several other Selections as Intersection of results
-IFSelect_SelectIntersection: declare class IFSelect_SelectIntersection extends IFSelect_SelectCombine
-
-constructor
-
-// Returns a text defining the criterium
 Label(): TCollection_AsciiString;
 
 static get_type_name(): string;
@@ -602,17 +280,520 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// A SelectModelEntities gets all the Entities of an InterfaceModel
-IFSelect_SelectModelEntities: declare class IFSelect_SelectModelEntities extends IFSelect_SelectBase
+IFSelect_SelectionIterator: declare class IFSelect_SelectionIterator
 
 constructor
 
-// Returns a text defining the criterium
+AddItem(sel: IFSelect_Selection): void;
+
+AddList(list: NCollection_Sequence_handle_IFSelect_Selection): void;
+
+More(): boolean;
+
+Next(): void;
+
+Value(): IFSelect_Selection;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+IFSelect_SessionDumper: declare class IFSelect_SessionDumper extends Standard_Transient
+
+static First(): IFSelect_SessionDumper;
+
+Next(): IFSelect_SessionDumper;
+
+WriteOwn(file: IFSelect_SessionFile, item: Standard_Transient): boolean;
+
+ReadOwn(file: IFSelect*SessionFile, type*: TCollection_AsciiString): { returnValue: boolean; item: Standard_Transient; [Symbol.dispose](): void };
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+IFSelect_SessionFile: declare class IFSelect_SessionFile
+
+constructor
+
+ClearLines(): void;
+
+NbLines(): number;
+
+Line(num: number): TCollection_AsciiString;
+
+AddLine(line: string): void;
+
+RemoveLastLine(): void;
+
+WriteFile(name: string): boolean;
+
+ReadFile(name: string): boolean;
+
+RecognizeFile(headerline: string): boolean;
+
+Write(filename: string): number;
+
+Read(filename: string): number;
+
+WriteSession(): number;
+
+WriteEnd(): number;
+
+WriteLine(line: string, follow?: string): void;
+
+WriteOwn(item: Standard_Transient): boolean;
+
+ReadSession(): number;
+
+ReadEnd(): number;
+
+ReadLine(): boolean;
+
+SplitLine(line: string): void;
+
+ReadOwn(): { returnValue: boolean; item: Standard_Transient; [Symbol.dispose](): void };
+
+AddItem(item: Standard_Transient, active?: boolean): void;
+
+IsDone(): boolean;
+
+WorkSession(): IFSelect_WorkSession;
+
+NewItem(ident: number, par: Standard_Transient): void;
+
+SetOwn(mode: boolean): void;
+
+SendVoid(): void;
+
+SendItem(par: Standard_Transient): void;
+
+SendText(text: string): void;
+
+SetLastGeneral(lastgen: number): void;
+
+NbParams(): number;
+
+IsVoid(num: number): boolean;
+
+IsText(num: number): boolean;
+
+ParamValue(num: number): TCollection_AsciiString;
+
+TextValue(num: number): TCollection_AsciiString;
+
+ItemValue(num: number): Standard_Transient;
+
+Destroy(): void;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+IFSelect_SessionPilot: declare class IFSelect_SessionPilot extends IFSelect_Activator
+
+constructor
+
+Session(): IFSelect_WorkSession;
+
+Library(): IFSelect_WorkLibrary;
+
+RecordMode(): boolean;
+
+SetSession(WS: IFSelect_WorkSession): void;
+
+SetLibrary(WL: IFSelect_WorkLibrary): void;
+
+SetRecordMode(mode: boolean): void;
+
+SetCommandLine(command: TCollection_AsciiString): void;
+
+CommandLine(): TCollection_AsciiString;
+
+CommandPart(numarg: number): string;
+
+NbWords(): number;
+
+Word(num: number): TCollection_AsciiString;
+
+Arg(num: number): string;
+
+RemoveWord(num: number): boolean;
+
+NbCommands(): number;
+
+Command(num: number): TCollection_AsciiString;
+
+RecordItem(item: Standard_Transient): IFSelect_ReturnStatus;
+
+RecordedItem(): Standard_Transient;
+
+Clear(): void;
+
+ReadScript(file?: string): IFSelect_ReturnStatus;
+
+Perform(): IFSelect_ReturnStatus;
+
+ExecuteAlias(aliasname: TCollection_AsciiString): IFSelect_ReturnStatus;
+
+Execute(command: TCollection_AsciiString): IFSelect_ReturnStatus;
+
+ExecuteCounter(counter: IFSelect_SignCounter, numword: number, mode?: IFSelect_PrintCount): IFSelect_ReturnStatus;
+
+Number(val: string): number;
+
+Do(number\_: number, pilot: IFSelect_SessionPilot): IFSelect_ReturnStatus;
+
+Help(number\_: number): string;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+IFSelect_ShareOut: declare class IFSelect_ShareOut extends Standard_Transient
+
+constructor
+
+Clear(onlydisp: boolean): void;
+
+ClearResult(alsoname: boolean): void;
+
+RemoveItem(item: Standard_Transient): boolean;
+
+LastRun(): number;
+
+SetLastRun(last: number): void;
+
+NbDispatches(): number;
+
+DispatchRank(disp: IFSelect_Dispatch): number;
+
+Dispatch(num: number): IFSelect_Dispatch;
+
+AddDispatch(disp: IFSelect_Dispatch): void;
+
+RemoveDispatch(rank: number): boolean;
+
+AddModifier(modifier: IFSelect_GeneralModifier, atnum: number): void;
+AddModifier(modifier: IFSelect_GeneralModifier, dispnum: number, atnum: number): void;
+AddModifier(modifier: IFSelect_GeneralModifier, atnum: number): void;
+AddModifier(modifier: IFSelect_GeneralModifier, dispnum: number, atnum: number): void;
+
+AddModif(modifier: IFSelect_GeneralModifier, formodel: boolean, atnum?: number): void;
+
+NbModifiers(formodel: boolean): number;
+
+GeneralModifier(formodel: boolean, num: number): IFSelect_GeneralModifier;
+
+ModelModifier(num: number): IFSelect_Modifier;
+
+ModifierRank(modifier: IFSelect_GeneralModifier): number;
+
+RemoveModifier(formodel: boolean, num: number): boolean;
+
+ChangeModifierRank(formodel: boolean, befor: number, after: number): boolean;
+
+SetRootName(num: number, name: TCollection_HAsciiString): boolean;
+
+HasRootName(num: number): boolean;
+
+RootName(num: number): TCollection_HAsciiString;
+
+RootNumber(name: TCollection_HAsciiString): number;
+
+SetPrefix(pref: TCollection_HAsciiString): void;
+
+SetDefaultRootName(defrt: TCollection_HAsciiString): boolean;
+
+SetExtension(ext: TCollection_HAsciiString): void;
+
+Prefix(): TCollection_HAsciiString;
+
+DefaultRootName(): TCollection_HAsciiString;
+
+Extension(): TCollection_HAsciiString;
+
+FileName(dnum: number, pnum: number, nbpack?: number): TCollection_AsciiString;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+IFSelect_ShareOutResult: declare class IFSelect_ShareOutResult
+
+constructor
+
+ShareOut(): IFSelect_ShareOut;
+
+Reset(): void;
+
+Evaluate(): void;
+
+Packets(complete?: boolean): IFSelect_PacketList;
+
+NbPackets(): number;
+
+Prepare(): void;
+
+More(): boolean;
+
+Next(): void;
+
+NextDispatch(): void;
+
+Dispatch(): IFSelect_Dispatch;
+
+DispatchRank(): number;
+
+PacketsInDispatch(numpack?: number, nbpacks?: number): { numpack: number; nbpacks: number };
+
+FileName(): TCollection_AsciiString;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+IFSelect_SignAncestor: declare class IFSelect_SignAncestor extends IFSelect_SignType
+
+constructor
+
+Matches(ent: Standard_Transient, model: Interface_InterfaceModel, text: TCollection_AsciiString, exact: boolean): boolean;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+IFSelect_SignCategory: declare class IFSelect_SignCategory extends IFSelect_Signature
+
+constructor
+
+Value(ent: Standard_Transient, model: Interface_InterfaceModel): string;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+IFSelect_SignCounter: declare class IFSelect_SignCounter extends IFSelect_SignatureList
+
+constructor
+
+Signature(): IFSelect_Signature;
+
+SetMap(withmap: boolean): void;
+
+AddEntity(ent: Standard_Transient, model: Interface_InterfaceModel): boolean;
+
+AddSign(ent: Standard_Transient, model: Interface_InterfaceModel): void;
+
+AddList(list: NCollection_HSequence_handle_Standard_Transient, model: Interface_InterfaceModel): void;
+
+AddModel(model: Interface_InterfaceModel): void;
+
+SetSelection(sel: IFSelect_Selection): void;
+
+Selection(): IFSelect_Selection;
+
+SetSelMode(selmode: number): void;
+
+SelMode(): number;
+
+Sign(ent: Standard_Transient, model: Interface_InterfaceModel): TCollection_HAsciiString;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+IFSelect_SignMultiple: declare class IFSelect_SignMultiple extends IFSelect_Signature
+
+constructor
+
+Add(subsign: IFSelect_Signature, width?: number, maxi?: boolean): void;
+
+Value(ent: Standard_Transient, model: Interface_InterfaceModel): string;
+
+Matches(ent: Standard_Transient, model: Interface_InterfaceModel, text: TCollection_AsciiString, exact: boolean): boolean;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+IFSelect_SignType: declare class IFSelect_SignType extends IFSelect_Signature
+
+constructor
+
+Value(ent: Standard_Transient, model: Interface_InterfaceModel): string;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+IFSelect_SignValidity: declare class IFSelect_SignValidity extends IFSelect_Signature
+
+constructor
+
+static CVal(ent: Standard_Transient, model: Interface_InterfaceModel): string;
+
+Value(ent: Standard_Transient, model: Interface_InterfaceModel): string;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+IFSelect_Signature: declare class IFSelect_Signature extends Interface_SignType
+
+SetIntCase(hasmin: boolean, valmin: number, hasmax: boolean, valmax: number): void;
+
+IsIntCase(hasmin?: boolean, valmin?: number, hasmax?: boolean, valmax?: number): { returnValue: boolean; hasmin: boolean; valmin: number; hasmax: boolean; valmax: number };
+
+AddCase(acase: string): void;
+
+CaseList(): NCollection_HSequence_TCollection_AsciiString;
+
+Name(): string;
+
+Label(): TCollection_AsciiString;
+
+Matches(ent: Standard_Transient, model: Interface_InterfaceModel, text: TCollection_AsciiString, exact: boolean): boolean;
+
+static MatchValue(val: string, text: TCollection_AsciiString, exact: boolean): boolean;
+
+static IntValue(val: number): string;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+IFSelect_SignatureList: declare class IFSelect_SignatureList extends Standard_Transient
+
+constructor
+
+SetList(withlist: boolean): void;
+
+ModeSignOnly(): boolean;
+
+Clear(): void;
+
+Add(ent: Standard_Transient, sign: string): void;
+
+LastValue(): string;
+
+Init(name: string, count: NCollection_IndexedDataMap_TCollection_AsciiString_int, list: NCollection_IndexedDataMap_TCollection_AsciiString_handle_Standard_Transient, nbnuls: number): void;
+
+List(root?: string): NCollection_HSequence_handle_TCollection_HAsciiString;
+
+HasEntities(): boolean;
+
+NbNulls(): number;
+
+NbTimes(sign: string): number;
+
+Entities(sign: string): NCollection_HSequence_handle_Standard_Transient;
+
+SetName(name: string): void;
+
+Name(): string;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+IFSelect_TransformStandard: declare class IFSelect_TransformStandard extends IFSelect_Transformer
+
+constructor
+
+SetCopyOption(option: boolean): void;
+
+CopyOption(): boolean;
+
+SetSelection(sel: IFSelect_Selection): void;
+
+Selection(): IFSelect_Selection;
+
+NbModifiers(): number;
+
+Modifier(num: number): IFSelect_Modifier;
+
+ModifierRank(modif: IFSelect_Modifier): number;
+
+AddModifier(modif: IFSelect_Modifier, atnum?: number): boolean;
+
+RemoveModifier(modif: IFSelect_Modifier): boolean;
+RemoveModifier(num: number): boolean;
+RemoveModifier(modif: IFSelect_Modifier): boolean;
+RemoveModifier(num: number): boolean;
+
+Updated(entfrom: Standard_Transient): { returnValue: boolean; entto: Standard_Transient; [Symbol.dispose](): void };
+
 Label(): TCollection_AsciiString;
 
 static get_type_name(): string;
@@ -621,17 +802,16 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// A SelectModelRoots gets all the Root Entities of an InterfaceModel
-IFSelect_SelectModelRoots: declare class IFSelect_SelectModelRoots extends IFSelect_SelectBase
+IFSelect_Transformer: declare class IFSelect_Transformer extends Standard_Transient
 
-constructor
+ChangeProtocol(): { returnValue: boolean; newproto: Interface_Protocol; [Symbol.dispose](): void };
 
-// Returns a text defining the criterium
+Updated(entfrom: Standard_Transient): { returnValue: boolean; entto: Standard_Transient; [Symbol.dispose](): void };
+
 Label(): TCollection_AsciiString;
 
 static get_type_name(): string;
@@ -640,7 +820,30 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
+delete(): void;
+
+[Symbol.dispose](): void;
+
+IFSelect_WorkLibrary: declare class IFSelect_WorkLibrary extends Standard_Transient
+
+ReadFile(name: string, protocol: Interface_Protocol): { returnValue: number; model: Interface_InterfaceModel; [Symbol.dispose](): void };
+
+WriteFile(ctx: IFSelect_ContextWrite): boolean;
+
+SetDumpLevels(def: number, max: number): void;
+
+DumpLevels(def?: number, max?: number): { def: number; max: number };
+
+SetDumpHelp(level: number, help: string): void;
+
+DumpHelp(level: number): string;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
 delete(): void;
 
 [Symbol.dispose](): void;

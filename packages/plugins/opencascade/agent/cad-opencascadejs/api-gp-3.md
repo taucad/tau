@@ -1,160 +1,427 @@
 # libcascade — gp (3)
 
-7 top-level symbols. Signatures are verbatim typescript.
+11 top-level symbols. Signatures are verbatim typescript.
 
-// Describes a unit vector in the plane (2D space)
-gp_Dir2d: declare class gp_Dir2d
+gp_Pln: declare class gp_Pln
 
 constructor
 
-// For this unit vector, assigns
-SetCoord(theIndex: number, theXi: number): void;
-SetCoord(theXv: number, theYv: number): void;
-SetCoord(theIndex: number, theXi: number): void;
-SetCoord(theXv: number, theYv: number): void;
+Coefficients(theA?: number, theB?: number, theC?: number, theD?: number): { theA: number; theB: number; theC: number; theD: number };
 
-// Assigns the given value to the X coordinate of this unit vector, and then normalizes it
-SetX(theX: number): void;
+SetAxis(theA1: gp_Ax1): void;
 
-// Assigns the given value to the Y coordinate of this unit vector, and then normalizes it
-SetY(theY: number): void;
+SetLocation(theLoc: gp_Pnt): void;
 
-// Assigns
-SetXY(theCoord: gp_XY): void;
+SetPosition(theA3: gp_Ax3): void;
 
-// For this unit vector returns the coordinate of range theIndex
-Coord(theIndex: number): number;
-Coord(theXv?: number, theYv?: number): { theXv: number; theYv: number };
-Coord(theIndex: number): number;
-Coord(theXv?: number, theYv?: number): { theXv: number; theYv: number };
+UReverse(): void;
 
-// For this unit vector, returns its X coordinate
-X(): number;
+VReverse(): void;
 
-// For this unit vector, returns its Y coordinate
-Y(): number;
+Direct(): boolean;
 
-// For this unit vector, returns its two coordinates as a number pair
-XY(): gp_XY;
+Axis(): gp_Ax1;
 
-// Returns True if the two vectors have the same direction i.e
-IsEqual(theOther: gp_Dir2d, theAngularTolerance: number): boolean;
+Location(): gp_Pnt;
 
-// Returns True if the angle between this unit vector and the unit vector theOther is equal to Pi/2 or -Pi/2 (normal) i.e
-IsNormal(theOther: gp_Dir2d, theAngularTolerance: number): boolean;
+Position(): gp_Ax3;
 
-// Returns True if the angle between this unit vector and the unit vector theOther is equal to Pi or -Pi (opposite)
-IsOpposite(theOther: gp_Dir2d, theAngularTolerance: number): boolean;
+Distance(theP: gp_Pnt): number;
+Distance(theL: gp_Lin): number;
+Distance(theOther: gp_Pln): number;
+Distance(theP: gp_Pnt): number;
+Distance(theL: gp_Lin): number;
+Distance(theOther: gp_Pln): number;
+Distance(theP: gp_Pnt): number;
+Distance(theL: gp_Lin): number;
+Distance(theOther: gp_Pln): number;
 
-// Returns True if the angle between this unit vector and unit vector theOther is equal to 0, Pi or -Pi
-IsParallel(theOther: gp_Dir2d, theAngularTolerance: number): boolean;
+SignedDistance(theP: gp_Pnt): number;
+SignedDistance(theL: gp_Lin): number;
+SignedDistance(theOther: gp_Pln): number;
+SignedDistance(theP: gp_Pnt): number;
+SignedDistance(theL: gp_Lin): number;
+SignedDistance(theOther: gp_Pln): number;
+SignedDistance(theP: gp_Pnt): number;
+SignedDistance(theL: gp_Lin): number;
+SignedDistance(theOther: gp_Pln): number;
 
-// Computes the angular value in radians between <me> and <theOther>
-Angle(theOther: gp_Dir2d): number;
+SquareDistance(theP: gp_Pnt): number;
+SquareDistance(theL: gp_Lin): number;
+SquareDistance(theOther: gp_Pln): number;
+SquareDistance(theP: gp_Pnt): number;
+SquareDistance(theL: gp_Lin): number;
+SquareDistance(theOther: gp_Pln): number;
+SquareDistance(theP: gp_Pnt): number;
+SquareDistance(theL: gp_Lin): number;
+SquareDistance(theOther: gp_Pln): number;
 
-// Computes the cross product between two directions
-Crossed(theRight: gp_Dir2d): number;
+XAxis(): gp_Ax1;
 
-// Computes the scalar product
-Dot(theOther: gp_Dir2d): number;
+YAxis(): gp_Ax1;
 
-Reverse(): void;
+Contains(theP: gp_Pnt, theLinearTolerance: number): boolean;
+Contains(theL: gp_Lin, theLinearTolerance: number, theAngularTolerance: number): boolean;
+Contains(theP: gp_Pnt, theLinearTolerance: number): boolean;
+Contains(theL: gp_Lin, theLinearTolerance: number, theAngularTolerance: number): boolean;
 
-// Reverses the orientation of a direction
-Reversed(): gp_Dir2d;
+Mirror(theP: gp_Pnt): void;
+Mirror(theA1: gp_Ax1): void;
+Mirror(theA2: gp_Ax2): void;
+Mirror(theP: gp_Pnt): void;
+Mirror(theA1: gp_Ax1): void;
+Mirror(theA2: gp_Ax2): void;
+Mirror(theP: gp_Pnt): void;
+Mirror(theA1: gp_Ax1): void;
+Mirror(theA2: gp_Ax2): void;
 
-Mirror(theV: gp_Dir2d): void;
-Mirror(theA: gp_Ax2d): void;
-Mirror(theV: gp_Dir2d): void;
-Mirror(theA: gp_Ax2d): void;
+Mirrored(theP: gp_Pnt): gp_Pln;
+Mirrored(theA1: gp_Ax1): gp_Pln;
+Mirrored(theA2: gp_Ax2): gp_Pln;
+Mirrored(theP: gp_Pnt): gp_Pln;
+Mirrored(theA1: gp_Ax1): gp_Pln;
+Mirrored(theA2: gp_Ax2): gp_Pln;
+Mirrored(theP: gp_Pnt): gp_Pln;
+Mirrored(theA1: gp_Ax1): gp_Pln;
+Mirrored(theA2: gp_Ax2): gp_Pln;
 
-// Performs the symmetrical transformation of a direction with respect to the direction theV which is the center of the symmetry
-Mirrored(theV: gp_Dir2d): gp_Dir2d;
-Mirrored(theA: gp_Ax2d): gp_Dir2d;
-Mirrored(theV: gp_Dir2d): gp_Dir2d;
-Mirrored(theA: gp_Ax2d): gp_Dir2d;
+Rotate(theA1: gp_Ax1, theAng: number): void;
 
-Rotate(Ang: number): void;
+Rotated(theA1: gp_Ax1, theAng: number): gp_Pln;
 
-// Rotates a direction
-Rotated(theAng: number): gp_Dir2d;
+Scale(theP: gp_Pnt, theS: number): void;
 
-Transform(theT: gp_Trsf2d): void;
+Scaled(theP: gp_Pnt, theS: number): gp_Pln;
 
-// Transforms a direction with the "Trsf" theT
-Transformed(theT: gp_Trsf2d): gp_Dir2d;
+Transform(theT: gp_Trsf): void;
 
-// Releases the C++ object
+Transformed(theT: gp_Trsf): gp_Pln;
+
+Translate(theV: gp_Vec): void;
+Translate(theP1: gp_Pnt, theP2: gp_Pnt): void;
+Translate(theV: gp_Vec): void;
+Translate(theP1: gp_Pnt, theP2: gp_Pnt): void;
+
+Translated(theV: gp_Vec): gp_Pln;
+Translated(theP1: gp_Pnt, theP2: gp_Pnt): gp_Pln;
+Translated(theV: gp_Vec): gp_Pln;
+Translated(theP1: gp_Pnt, theP2: gp_Pnt): gp_Pln;
+
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// {@link Standard `Standard`} directions in 2D space for optimized constexpr construction
-gp_Dir2d_D: typeof gp_Dir2d_D[keyof typeof gp_Dir2d_D]
-
-// Describes an ellipse in 3D space
-gp_Elips: declare class gp_Elips
+gp_Pnt: declare class gp_Pnt
 
 constructor
 
-// Changes the axis normal to the plane of the ellipse
-SetAxis(theA1: gp_Ax1): void;
+SetCoord(theIndex: number, theXi: number): void;
+SetCoord(theXp: number, theYp: number, theZp: number): void;
+SetCoord(theIndex: number, theXi: number): void;
+SetCoord(theXp: number, theYp: number, theZp: number): void;
 
-// Modifies this ellipse, by redefining its local coordinate so that its origin becomes theP
-SetLocation(theP: gp_Pnt): void;
+SetX(theX: number): void;
 
-// The major radius of the ellipse is on the "XAxis" (major axis) of the ellipse
-SetMajorRadius(theMajorRadius: number): void;
+SetY(theY: number): void;
 
-// The minor radius of the ellipse is on the "YAxis" (minor axis) of the ellipse
-SetMinorRadius(theMinorRadius: number): void;
+SetZ(theZ: number): void;
 
-// Modifies this ellipse, by redefining its local coordinate so that it becomes theA2
-SetPosition(theA2: gp_Ax2): void;
+SetXYZ(theCoord: gp_XYZ): void;
 
-// Computes the area of the Ellipse
+Coord(theIndex: number): number;
+Coord(theXp?: number, theYp?: number, theZp?: number): { theXp: number; theYp: number; theZp: number };
+Coord(): gp_XYZ;
+Coord(theIndex: number): number;
+Coord(theXp?: number, theYp?: number, theZp?: number): { theXp: number; theYp: number; theZp: number };
+Coord(): gp_XYZ;
+Coord(theIndex: number): number;
+Coord(theXp?: number, theYp?: number, theZp?: number): { theXp: number; theYp: number; theZp: number };
+Coord(): gp_XYZ;
+
+X(): number;
+
+Y(): number;
+
+Z(): number;
+
+XYZ(): gp_XYZ;
+
+ChangeCoord(): gp_XYZ;
+
+BaryCenter(theAlpha: number, theP: gp_Pnt, theBeta: number): void;
+
+IsEqual(theOther: gp_Pnt, theLinearTolerance: number): boolean;
+
+Distance(theOther: gp_Pnt): number;
+
+SquareDistance(theOther: gp_Pnt): number;
+
+Mirror(theP: gp_Pnt): void;
+Mirror(theA1: gp_Ax1): void;
+Mirror(theA2: gp_Ax2): void;
+Mirror(theP: gp_Pnt): void;
+Mirror(theA1: gp_Ax1): void;
+Mirror(theA2: gp_Ax2): void;
+Mirror(theP: gp_Pnt): void;
+Mirror(theA1: gp_Ax1): void;
+Mirror(theA2: gp_Ax2): void;
+
+Mirrored(theP: gp_Pnt): gp_Pnt;
+Mirrored(theA1: gp_Ax1): gp_Pnt;
+Mirrored(theA2: gp_Ax2): gp_Pnt;
+Mirrored(theP: gp_Pnt): gp_Pnt;
+Mirrored(theA1: gp_Ax1): gp_Pnt;
+Mirrored(theA2: gp_Ax2): gp_Pnt;
+Mirrored(theP: gp_Pnt): gp_Pnt;
+Mirrored(theA1: gp_Ax1): gp_Pnt;
+Mirrored(theA2: gp_Ax2): gp_Pnt;
+
+Rotate(theA1: gp_Ax1, theAng: number): void;
+
+Rotated(theA1: gp_Ax1, theAng: number): gp_Pnt;
+
+Scale(theP: gp_Pnt, theS: number): void;
+
+Scaled(theP: gp_Pnt, theS: number): gp_Pnt;
+
+Transform(theT: gp_Trsf): void;
+
+Transformed(theT: gp_Trsf): gp_Pnt;
+
+Translate(theV: gp_Vec): void;
+Translate(theP1: gp_Pnt, theP2: gp_Pnt): void;
+Translate(theV: gp_Vec): void;
+Translate(theP1: gp_Pnt, theP2: gp_Pnt): void;
+
+Translated(theV: gp_Vec): gp_Pnt;
+Translated(theP1: gp_Pnt, theP2: gp_Pnt): gp_Pnt;
+Translated(theV: gp_Vec): gp_Pnt;
+Translated(theP1: gp_Pnt, theP2: gp_Pnt): gp_Pnt;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+gp_Pnt2d: declare class gp_Pnt2d
+
+constructor
+
+SetCoord(theIndex: number, theXi: number): void;
+SetCoord(theXp: number, theYp: number): void;
+SetCoord(theIndex: number, theXi: number): void;
+SetCoord(theXp: number, theYp: number): void;
+
+SetX(theX: number): void;
+
+SetY(theY: number): void;
+
+SetXY(theCoord: gp_XY): void;
+
+Coord(theIndex: number): number;
+Coord(theXp?: number, theYp?: number): { theXp: number; theYp: number };
+Coord(): gp_XY;
+Coord(theIndex: number): number;
+Coord(theXp?: number, theYp?: number): { theXp: number; theYp: number };
+Coord(): gp_XY;
+Coord(theIndex: number): number;
+Coord(theXp?: number, theYp?: number): { theXp: number; theYp: number };
+Coord(): gp_XY;
+
+X(): number;
+
+Y(): number;
+
+XY(): gp_XY;
+
+ChangeCoord(): gp_XY;
+
+IsEqual(theOther: gp_Pnt2d, theLinearTolerance: number): boolean;
+
+Distance(theOther: gp_Pnt2d): number;
+
+SquareDistance(theOther: gp_Pnt2d): number;
+
+Mirror(theP: gp_Pnt2d): void;
+Mirror(theA: gp_Ax2d): void;
+Mirror(theP: gp_Pnt2d): void;
+Mirror(theA: gp_Ax2d): void;
+
+Mirrored(theP: gp_Pnt2d): gp_Pnt2d;
+Mirrored(theA: gp_Ax2d): gp_Pnt2d;
+Mirrored(theP: gp_Pnt2d): gp_Pnt2d;
+Mirrored(theA: gp_Ax2d): gp_Pnt2d;
+
+Rotate(theP: gp_Pnt2d, theAng: number): void;
+
+Rotated(theP: gp_Pnt2d, theAng: number): gp_Pnt2d;
+
+Scale(theP: gp_Pnt2d, theS: number): void;
+
+Scaled(theP: gp_Pnt2d, theS: number): gp_Pnt2d;
+
+Transform(theT: gp_Trsf2d): void;
+
+Transformed(theT: gp_Trsf2d): gp_Pnt2d;
+
+Translate(theV: gp_Vec2d): void;
+Translate(theP1: gp_Pnt2d, theP2: gp_Pnt2d): void;
+Translate(theV: gp_Vec2d): void;
+Translate(theP1: gp_Pnt2d, theP2: gp_Pnt2d): void;
+
+Translated(theV: gp_Vec2d): gp_Pnt2d;
+Translated(theP1: gp_Pnt2d, theP2: gp_Pnt2d): gp_Pnt2d;
+Translated(theV: gp_Vec2d): gp_Pnt2d;
+Translated(theP1: gp_Pnt2d, theP2: gp_Pnt2d): gp_Pnt2d;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+gp_Quaternion: declare class gp_Quaternion
+
+constructor
+
+IsEqual(theOther: gp_Quaternion): boolean;
+
+SetRotation(theVecFrom: gp_Vec, theVecTo: gp_Vec): void;
+SetRotation(theVecFrom: gp_Vec, theVecTo: gp_Vec, theHelpCrossVec: gp_Vec): void;
+SetRotation(theVecFrom: gp_Vec, theVecTo: gp_Vec): void;
+SetRotation(theVecFrom: gp_Vec, theVecTo: gp_Vec, theHelpCrossVec: gp_Vec): void;
+
+SetVectorAndAngle(theAxis: gp_Vec, theAngle: number): void;
+
+GetVectorAndAngle(theAxis: gp_Vec, theAngle?: number): { theAngle: number };
+
+SetMatrix(theMat: gp_Mat): void;
+
+GetMatrix(): gp_Mat;
+
+SetEulerAngles(theOrder: gp_EulerSequence, theAlpha: number, theBeta: number, theGamma: number): void;
+
+GetEulerAngles(theOrder: gp_EulerSequence, theAlpha?: number, theBeta?: number, theGamma?: number): { theAlpha: number; theBeta: number; theGamma: number };
+
+Set(theX: number, theY: number, theZ: number, theW: number): void;
+Set(theQuaternion: gp_Quaternion): void;
+Set(theX: number, theY: number, theZ: number, theW: number): void;
+Set(theQuaternion: gp_Quaternion): void;
+
+X(): number;
+
+Y(): number;
+
+Z(): number;
+
+W(): number;
+
+SetIdent(): void;
+
+Reverse(): void;
+
+Reversed(): gp_Quaternion;
+
+Invert(): void;
+
+Inverted(): gp_Quaternion;
+
+SquareNorm(): number;
+
+Norm(): number;
+
+Scale(theScale: number): void;
+
+Scaled(theScale: number): gp_Quaternion;
+
+StabilizeLength(): void;
+
+Normalize(): void;
+
+Normalized(): gp_Quaternion;
+
+Negated(): gp_Quaternion;
+
+Added(theOther: gp_Quaternion): gp_Quaternion;
+
+Subtracted(theOther: gp_Quaternion): gp_Quaternion;
+
+Multiplied(theOther: gp_Quaternion): gp_Quaternion;
+
+Add(theOther: gp_Quaternion): void;
+
+Subtract(theOther: gp_Quaternion): void;
+
+Multiply(theOther: gp_Quaternion): void;
+Multiply(theVec: gp_Vec): gp_Vec;
+Multiply(theOther: gp_Quaternion): void;
+Multiply(theVec: gp_Vec): gp_Vec;
+
+Dot(theOther: gp_Quaternion): number;
+
+GetRotationAngle(): number;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+gp_QuaternionNLerp: declare class gp_QuaternionNLerp
+
+constructor
+
+static Interpolate(theQStart: gp_Quaternion, theQEnd: gp_Quaternion, theT: number): gp_Quaternion;
+Interpolate(theT: number, theResultQ: gp_Quaternion): void;
+
+Init(theQStart: gp_Quaternion, theQEnd: gp_Quaternion): void;
+
+InitFromUnit(theQStart: gp_Quaternion, theQEnd: gp_Quaternion): void;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+gp_QuaternionSLerp: declare class gp_QuaternionSLerp
+
+constructor
+
+static Interpolate(theQStart: gp_Quaternion, theQEnd: gp_Quaternion, theT: number): gp_Quaternion;
+Interpolate(theT: number, theResultQ: gp_Quaternion): void;
+
+Init(theQStart: gp_Quaternion, theQEnd: gp_Quaternion): void;
+
+InitFromUnit(theQStart: gp_Quaternion, theQEnd: gp_Quaternion): void;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+gp_Sphere: declare class gp_Sphere
+
+constructor
+
+SetLocation(theLoc: gp_Pnt): void;
+
+SetPosition(theA3: gp_Ax3): void;
+
+SetRadius(theR: number): void;
+
 Area(): number;
 
-// Computes the axis normal to the plane of the ellipse
-Axis(): gp_Ax1;
+Coefficients(theA1?: number, theA2?: number, theA3?: number, theB1?: number, theB2?: number, theB3?: number, theC1?: number, theC2?: number, theC3?: number, theD?: number): { theA1: number; theA2: number; theA3: number; theB1: number; theB2: number; theB3: number; theC1: number; theC2: number; theC3: number; theD: number };
 
-// Computes the first or second directrix of this ellipse
-Directrix1(): gp_Ax1;
+UReverse(): void;
 
-// This line is obtained by the symmetrical transformation of "Directrix1" with respect to the "YAxis" of the ellipse
-Directrix2(): gp_Ax1;
+VReverse(): void;
 
-// Returns the eccentricity of the ellipse between 0.0 and 1.0 If f is the distance between the center of the ellipse and the Focus1 then the eccentricity e = f / MajorRadius
-Eccentricity(): number;
+Direct(): boolean;
 
-// Computes the focal distance
-Focal(): number;
-
-// Returns the first focus of the ellipse
-Focus1(): gp_Pnt;
-
-// Returns the second focus of the ellipse
-Focus2(): gp_Pnt;
-
-// Returns the center of the ellipse
 Location(): gp_Pnt;
 
-// Returns the major radius of the ellipse
-MajorRadius(): number;
+Position(): gp_Ax3;
 
-// Returns the minor radius of the ellipse
-MinorRadius(): number;
+Radius(): number;
 
-// Returns p = (1 - e _ e) _ MajorRadius where e is the eccentricity of the ellipse
-Parameter(): number;
+Volume(): number;
 
-// Returns the coordinate system of the ellipse
-Position(): gp_Ax2;
-
-// Returns the "XAxis" of the ellipse whose origin is the center of this ellipse
 XAxis(): gp_Ax1;
 
-// Returns the "YAxis" of the ellipse whose unit vector is the "X Direction" or the "Y Direction" of the local coordinate system of this ellipse
 YAxis(): gp_Ax1;
 
 Mirror(theP: gp_Pnt): void;
@@ -167,311 +434,284 @@ Mirror(theP: gp_Pnt): void;
 Mirror(theA1: gp_Ax1): void;
 Mirror(theA2: gp_Ax2): void;
 
-// Performs the symmetrical transformation of an ellipse with respect to the point theP which is the center of the symmetry
-Mirrored(theP: gp_Pnt): gp_Elips;
-Mirrored(theA1: gp_Ax1): gp_Elips;
-Mirrored(theA2: gp_Ax2): gp_Elips;
-Mirrored(theP: gp_Pnt): gp_Elips;
-Mirrored(theA1: gp_Ax1): gp_Elips;
-Mirrored(theA2: gp_Ax2): gp_Elips;
-Mirrored(theP: gp_Pnt): gp_Elips;
-Mirrored(theA1: gp_Ax1): gp_Elips;
-Mirrored(theA2: gp_Ax2): gp_Elips;
+Mirrored(theP: gp_Pnt): gp_Sphere;
+Mirrored(theA1: gp_Ax1): gp_Sphere;
+Mirrored(theA2: gp_Ax2): gp_Sphere;
+Mirrored(theP: gp_Pnt): gp_Sphere;
+Mirrored(theA1: gp_Ax1): gp_Sphere;
+Mirrored(theA2: gp_Ax2): gp_Sphere;
+Mirrored(theP: gp_Pnt): gp_Sphere;
+Mirrored(theA1: gp_Ax1): gp_Sphere;
+Mirrored(theA2: gp_Ax2): gp_Sphere;
 
 Rotate(theA1: gp_Ax1, theAng: number): void;
 
-// Rotates an ellipse
-Rotated(theA1: gp_Ax1, theAng: number): gp_Elips;
+Rotated(theA1: gp_Ax1, theAng: number): gp_Sphere;
 
 Scale(theP: gp_Pnt, theS: number): void;
 
-// Scales an ellipse
-Scaled(theP: gp_Pnt, theS: number): gp_Elips;
+Scaled(theP: gp_Pnt, theS: number): gp_Sphere;
 
 Transform(theT: gp_Trsf): void;
 
-// Transforms an ellipse with the transformation theT from class Trsf
-Transformed(theT: gp_Trsf): gp_Elips;
+Transformed(theT: gp_Trsf): gp_Sphere;
 
 Translate(theV: gp_Vec): void;
 Translate(theP1: gp_Pnt, theP2: gp_Pnt): void;
 Translate(theV: gp_Vec): void;
 Translate(theP1: gp_Pnt, theP2: gp_Pnt): void;
 
-// Translates an ellipse in the direction of the vector theV
-Translated(theV: gp_Vec): gp_Elips;
-Translated(theP1: gp_Pnt, theP2: gp_Pnt): gp_Elips;
-Translated(theV: gp_Vec): gp_Elips;
-Translated(theP1: gp_Pnt, theP2: gp_Pnt): gp_Elips;
+Translated(theV: gp_Vec): gp_Sphere;
+Translated(theP1: gp_Pnt, theP2: gp_Pnt): gp_Sphere;
+Translated(theV: gp_Vec): gp_Sphere;
+Translated(theP1: gp_Pnt, theP2: gp_Pnt): gp_Sphere;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Describes an ellipse in the plane (2D space)
-gp_Elips2d: declare class gp_Elips2d
+gp_Torus: declare class gp_Torus
 
 constructor
 
-// Modifies this ellipse, by redefining its local coordinate system so that
-SetLocation(theP: gp_Pnt2d): void;
+SetAxis(theA1: gp_Ax1): void;
 
-// Changes the value of the major radius
+SetLocation(theLoc: gp_Pnt): void;
+
 SetMajorRadius(theMajorRadius: number): void;
 
-// Changes the value of the minor radius
 SetMinorRadius(theMinorRadius: number): void;
 
-// Modifies this ellipse, by redefining its local coordinate system so that it becomes theA
-SetAxis(theA: gp_Ax22d): void;
+SetPosition(theA3: gp_Ax3): void;
 
-// Modifies this ellipse, by redefining its local coordinate system so that its origin and its "X Direction" become those of the axis theA
-SetXAxis(theA: gp_Ax2d): void;
-
-// Modifies this ellipse, by redefining its local coordinate system so that its origin and its "Y Direction" become those of the axis theA
-SetYAxis(theA: gp_Ax2d): void;
-
-// Computes the area of the ellipse
 Area(): number;
 
-// Returns the coefficients of the implicit equation of the ellipse
-Coefficients(theA?: number, theB?: number, theC?: number, theD?: number, theE?: number, theF?: number): { theA: number; theB: number; theC: number; theD: number; theE: number; theF: number };
+UReverse(): void;
 
-// This directrix is the line normal to the XAxis of the ellipse in the local plane (Z = 0) at a distance d = MajorRadius / e from the center of the ellipse, where e is the eccentricity of the ellipse
-Directrix1(): gp_Ax2d;
+VReverse(): void;
 
-// This line is obtained by the symmetrical transformation of "Directrix1" with respect to the minor axis of the ellipse
-Directrix2(): gp_Ax2d;
+Direct(): boolean;
 
-// Returns the eccentricity of the ellipse between 0.0 and 1.0 If f is the distance between the center of the ellipse and the Focus1 then the eccentricity e = f / MajorRadius
-Eccentricity(): number;
+Axis(): gp_Ax1;
 
-// Returns the distance between the center of the ellipse and focus1 or focus2
-Focal(): number;
+Coefficients(theCoef: NCollection_Array1_double): void;
 
-// Returns the first focus of the ellipse
-Focus1(): gp_Pnt2d;
+Location(): gp_Pnt;
 
-// Returns the second focus of the ellipse
-Focus2(): gp_Pnt2d;
+Position(): gp_Ax3;
 
-// Returns the center of the ellipse
-Location(): gp_Pnt2d;
-
-// Returns the major radius of the Ellipse
 MajorRadius(): number;
 
-// Returns the minor radius of the Ellipse
 MinorRadius(): number;
 
-// Returns p = (1 - e _ e) _ MajorRadius where e is the eccentricity of the ellipse
-Parameter(): number;
+Volume(): number;
 
-// Returns the major axis of the ellipse
-Axis(): gp_Ax22d;
+XAxis(): gp_Ax1;
 
-// Returns the major axis of the ellipse
-XAxis(): gp_Ax2d;
+YAxis(): gp_Ax1;
 
-// Returns the minor axis of the ellipse
-YAxis(): gp_Ax2d;
+Mirror(theP: gp_Pnt): void;
+Mirror(theA1: gp_Ax1): void;
+Mirror(theA2: gp_Ax2): void;
+Mirror(theP: gp_Pnt): void;
+Mirror(theA1: gp_Ax1): void;
+Mirror(theA2: gp_Ax2): void;
+Mirror(theP: gp_Pnt): void;
+Mirror(theA1: gp_Ax1): void;
+Mirror(theA2: gp_Ax2): void;
 
-Reverse(): void;
+Mirrored(theP: gp_Pnt): gp_Torus;
+Mirrored(theA1: gp_Ax1): gp_Torus;
+Mirrored(theA2: gp_Ax2): gp_Torus;
+Mirrored(theP: gp_Pnt): gp_Torus;
+Mirrored(theA1: gp_Ax1): gp_Torus;
+Mirrored(theA2: gp_Ax2): gp_Torus;
+Mirrored(theP: gp_Pnt): gp_Torus;
+Mirrored(theA1: gp_Ax1): gp_Torus;
+Mirrored(theA2: gp_Ax2): gp_Torus;
 
-Reversed(): gp_Elips2d;
+Rotate(theA1: gp_Ax1, theAng: number): void;
 
-// Returns true if the local coordinate system is direct and false in the other case
-IsDirect(): boolean;
+Rotated(theA1: gp_Ax1, theAng: number): gp_Torus;
 
-Mirror(theP: gp_Pnt2d): void;
-Mirror(theA: gp_Ax2d): void;
-Mirror(theP: gp_Pnt2d): void;
-Mirror(theA: gp_Ax2d): void;
+Scale(theP: gp_Pnt, theS: number): void;
 
-// Performs the symmetrical transformation of a ellipse with respect to the point theP which is the center of the symmetry
-Mirrored(theP: gp_Pnt2d): gp_Elips2d;
-Mirrored(theA: gp_Ax2d): gp_Elips2d;
-Mirrored(theP: gp_Pnt2d): gp_Elips2d;
-Mirrored(theA: gp_Ax2d): gp_Elips2d;
+Scaled(theP: gp_Pnt, theS: number): gp_Torus;
 
-Rotate(theP: gp_Pnt2d, theAng: number): void;
+Transform(theT: gp_Trsf): void;
 
-Rotated(theP: gp_Pnt2d, theAng: number): gp_Elips2d;
+Transformed(theT: gp_Trsf): gp_Torus;
 
-Scale(theP: gp_Pnt2d, theS: number): void;
+Translate(theV: gp_Vec): void;
+Translate(theP1: gp_Pnt, theP2: gp_Pnt): void;
+Translate(theV: gp_Vec): void;
+Translate(theP1: gp_Pnt, theP2: gp_Pnt): void;
 
-// Scales a ellipse
-Scaled(theP: gp_Pnt2d, theS: number): gp_Elips2d;
+Translated(theV: gp_Vec): gp_Torus;
+Translated(theP1: gp_Pnt, theP2: gp_Pnt): gp_Torus;
+Translated(theV: gp_Vec): gp_Torus;
+Translated(theP1: gp_Pnt, theP2: gp_Pnt): gp_Torus;
 
-Transform(theT: gp_Trsf2d): void;
-
-// Transforms an ellipse with the transformation theT from class Trsf2d
-Transformed(theT: gp_Trsf2d): gp_Elips2d;
-
-Translate(theV: gp_Vec2d): void;
-Translate(theP1: gp_Pnt2d, theP2: gp_Pnt2d): void;
-Translate(theV: gp_Vec2d): void;
-Translate(theP1: gp_Pnt2d, theP2: gp_Pnt2d): void;
-
-// Translates a ellipse in the direction of the vector theV
-Translated(theV: gp_Vec2d): gp_Elips2d;
-Translated(theP1: gp_Pnt2d, theP2: gp_Pnt2d): gp_Elips2d;
-Translated(theV: gp_Vec2d): gp_Elips2d;
-Translated(theP1: gp_Pnt2d, theP2: gp_Pnt2d): gp_Elips2d;
-
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Enumerates all 24 possible variants of generalized Euler angles, defining general 3d rotation by three rotations around main axes of coordinate system, in different possible orders
-gp_EulerSequence: typeof gp_EulerSequence[keyof typeof gp_EulerSequence]
-
-// Defines a non-persistent transformation in 3D space
-gp_GTrsf: declare class gp_GTrsf
+gp_Trsf: declare class gp_Trsf
 
 constructor
 
-// Changes this transformation into an affinity of ratio theRatio with respect to the axis theA1
-SetAffinity(theA1: gp_Ax1, theRatio: number): void;
-SetAffinity(theA2: gp_Ax2, theRatio: number): void;
-SetAffinity(theA1: gp_Ax1, theRatio: number): void;
-SetAffinity(theA2: gp_Ax2, theRatio: number): void;
+SetMirror(theP: gp_Pnt): void;
+SetMirror(theA1: gp_Ax1): void;
+SetMirror(theA2: gp_Ax2): void;
+SetMirror(theP: gp_Pnt): void;
+SetMirror(theA1: gp_Ax1): void;
+SetMirror(theA2: gp_Ax2): void;
+SetMirror(theP: gp_Pnt): void;
+SetMirror(theA1: gp_Ax1): void;
+SetMirror(theA2: gp_Ax2): void;
 
-// Replaces the coefficient (theRow, theCol) of the matrix representing this transformation by theValue
-SetValue(theRow: number, theCol: number, theValue: number): void;
+SetRotation(theA1: gp_Ax1, theAng: number): void;
+SetRotation(theR: gp_Quaternion): void;
+SetRotation(theA1: gp_Ax1, theAng: number): void;
+SetRotation(theR: gp_Quaternion): void;
 
-// Replaces the vectorial part of this transformation by theMatrix
-SetVectorialPart(theMatrix: gp_Mat): void;
+SetRotationPart(theR: gp_Quaternion): void;
 
-// Replaces the translation part of this transformation by the coordinates of the number triple theCoord
-SetTranslationPart(theCoord: gp_XYZ): void;
+SetScale(theP: gp_Pnt, theS: number): void;
 
-// Assigns the vectorial and translation parts of theT to this transformation
-SetTrsf(theT: gp_Trsf): void;
+SetDisplacement(theFromSystem1: gp_Ax3, theToSystem2: gp_Ax3): void;
 
-// Returns true if the determinant of the vectorial part of this transformation is negative
+SetTransformation(theToSystem: gp_Ax3): void;
+SetTransformation(theFromSystem1: gp_Ax3, theToSystem2: gp_Ax3): void;
+SetTransformation(R: gp_Quaternion, theT: gp_Vec): void;
+SetTransformation(theToSystem: gp_Ax3): void;
+SetTransformation(theFromSystem1: gp_Ax3, theToSystem2: gp_Ax3): void;
+SetTransformation(R: gp_Quaternion, theT: gp_Vec): void;
+SetTransformation(theToSystem: gp_Ax3): void;
+SetTransformation(theFromSystem1: gp_Ax3, theToSystem2: gp_Ax3): void;
+SetTransformation(R: gp_Quaternion, theT: gp_Vec): void;
+
+SetTranslation(theV: gp_Vec): void;
+SetTranslation(theP1: gp_Pnt, theP2: gp_Pnt): void;
+SetTranslation(theV: gp_Vec): void;
+SetTranslation(theP1: gp_Pnt, theP2: gp_Pnt): void;
+
+SetTranslationPart(theV: gp_Vec): void;
+
+SetScaleFactor(theS: number): void;
+
+SetForm(theP: gp_TrsfForm): void;
+
+SetValues(a11: number, a12: number, a13: number, a14: number, a21: number, a22: number, a23: number, a24: number, a31: number, a32: number, a33: number, a34: number): void;
+
 IsNegative(): boolean;
 
-// Returns true if this transformation is singular (and therefore, cannot be inverted)
-IsSingular(): boolean;
-
-// Returns the nature of the transformation
 Form(): gp_TrsfForm;
 
-// verify and set the shape of the GTrsf Other or CompoundTrsf Ex
-SetForm(): void;
+ScaleFactor(): number;
 
-// Returns the translation part of the GTrsf
 TranslationPart(): gp_XYZ;
 
-// Computes the vectorial part of the GTrsf
+GetRotation(theAxis: gp_XYZ, theAngle?: number): { returnValue: boolean; theAngle: number };
+GetRotation(): gp_Quaternion;
+GetRotation(theAxis: gp_XYZ, theAngle?: number): { returnValue: boolean; theAngle: number };
+GetRotation(): gp_Quaternion;
+
 VectorialPart(): gp_Mat;
 
-// Returns the coefficients of the global matrix of transformation
+HVectorialPart(): gp_Mat;
+
 Value(theRow: number, theCol: number): number;
 
 Invert(): void;
 
-// Computes the reverse transformation
-Inverted(): gp_GTrsf;
+Inverted(): gp_Trsf;
 
-// Computes the transformation composed from theT and <me>
-Multiplied(theT: gp_GTrsf): gp_GTrsf;
+Multiplied(theT: gp_Trsf): gp_Trsf;
 
-// Computes the transformation composed with <me> and theT
-Multiply(theT: gp_GTrsf): void;
+Multiply(theT: gp_Trsf): void;
 
-// Computes the product of the transformation theT and this transformation and assigns the result to this transformation
-PreMultiply(theT: gp_GTrsf): void;
+PreMultiply(theT: gp_Trsf): void;
 
 Power(theN: number): void;
 
-// Computes
-Powered(theN: number): gp_GTrsf;
+Powered(theN: number): gp_Trsf;
 
-// Transforms a triplet XYZ with a GTrsf
-Transforms(theCoord: gp_XYZ): void;
 Transforms(theX?: number, theY?: number, theZ?: number): { theX: number; theY: number; theZ: number };
 Transforms(theCoord: gp_XYZ): void;
 Transforms(theX?: number, theY?: number, theZ?: number): { theX: number; theY: number; theZ: number };
+Transforms(theCoord: gp_XYZ): void;
 
-Trsf(): gp_Trsf;
-
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Defines a non persistent transformation in 2D space
-gp_GTrsf2d: declare class gp_GTrsf2d
+gp_Trsf2d: declare class gp_Trsf2d
 
 constructor
 
-// Changes this transformation into an affinity of ratio theRatio with respect to the axis theA
-SetAffinity(theA: gp_Ax2d, theRatio: number): void;
+SetMirror(theP: gp_Pnt2d): void;
+SetMirror(theA: gp_Ax2d): void;
+SetMirror(theP: gp_Pnt2d): void;
+SetMirror(theA: gp_Ax2d): void;
 
-// Replaces the coefficient (theRow, theCol) of the matrix representing this transformation by theValue, Raises OutOfRange if theRow < 1 or theRow > 2 or theCol < 1 or theCol > 3
-SetValue(theRow: number, theCol: number, theValue: number): void;
+SetRotation(theP: gp_Pnt2d, theAng: number): void;
 
-// Replaces the translation part of this transformation by the coordinates of the number pair theCoord
-SetTranslationPart(theCoord: gp_XY): void;
+SetScale(theP: gp_Pnt2d, theS: number): void;
 
-// Assigns the vectorial and translation parts of theT to this transformation
-SetTrsf2d(theT: gp_Trsf2d): void;
+SetTransformation(theFromSystem1: gp_Ax2d, theToSystem2: gp_Ax2d): void;
+SetTransformation(theToSystem: gp_Ax2d): void;
+SetTransformation(theFromSystem1: gp_Ax2d, theToSystem2: gp_Ax2d): void;
+SetTransformation(theToSystem: gp_Ax2d): void;
 
-// Replaces the vectorial part of this transformation by theMatrix
-SetVectorialPart(theMatrix: gp_Mat2d): void;
+SetTranslation(theV: gp_Vec2d): void;
+SetTranslation(theP1: gp_Pnt2d, theP2: gp_Pnt2d): void;
+SetTranslation(theV: gp_Vec2d): void;
+SetTranslation(theP1: gp_Pnt2d, theP2: gp_Pnt2d): void;
 
-// Returns true if the determinant of the vectorial part of this transformation is negative
+SetTranslationPart(theV: gp_Vec2d): void;
+
+SetScaleFactor(theS: number): void;
+
 IsNegative(): boolean;
 
-// Returns true if this transformation is singular (and therefore, cannot be inverted)
-IsSingular(): boolean;
-
-// Returns the nature of the transformation
 Form(): gp_TrsfForm;
 
-// Returns the translation part of the GTrsf2d
+ScaleFactor(): number;
+
 TranslationPart(): gp_XY;
 
-// Computes the vectorial part of the GTrsf2d
 VectorialPart(): gp_Mat2d;
 
-// Returns the coefficients of the global matrix of transformation
+HVectorialPart(): gp_Mat2d;
+
+RotationPart(): number;
+
 Value(theRow: number, theCol: number): number;
 
 Invert(): void;
 
-// Computes the reverse transformation
-Inverted(): gp_GTrsf2d;
+Inverted(): gp_Trsf2d;
 
-// Computes the transformation composed with theT and <me>
-Multiplied(theT: gp_GTrsf2d): gp_GTrsf2d;
+Multiplied(theT: gp_Trsf2d): gp_Trsf2d;
 
-Multiply(theT: gp_GTrsf2d): void;
+Multiply(theT: gp_Trsf2d): void;
 
-// Computes the product of the transformation theT and this transformation, and assigns the result to this transformation
-PreMultiply(theT: gp_GTrsf2d): void;
+PreMultiply(theT: gp_Trsf2d): void;
 
 Power(theN: number): void;
 
-// Computes the following composition of transformations <me> _ <me> _ .......\* <me>, theN time
-Powered(theN: number): gp_GTrsf2d;
+Powered(theN: number): gp_Trsf2d;
 
-// Applies this transformation to the coordinates
-Transforms(theCoord: gp_XY): void;
 Transforms(theX?: number, theY?: number): { theX: number; theY: number };
 Transforms(theCoord: gp_XY): void;
 Transforms(theX?: number, theY?: number): { theX: number; theY: number };
+Transforms(theCoord: gp_XY): void;
 
-Transformed(theCoord: gp_XY): gp_XY;
+SetValues(a11: number, a12: number, a13: number, a21: number, a22: number, a23: number): void;
 
-// Converts this transformation into a {@link gp_Trsf2d`gp_Trsf2d`} transformation
-Trsf2d(): gp_Trsf2d;
-
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
+
+gp_TrsfForm: typeof gp_TrsfForm[keyof typeof gp_TrsfForm]

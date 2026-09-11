@@ -14,7 +14,6 @@ GetString(): string;
 
 equals(anOther: LDOMBasicString): boolean;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;

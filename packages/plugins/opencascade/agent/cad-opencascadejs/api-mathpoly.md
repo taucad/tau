@@ -18,7 +18,6 @@ NbComplexRoots: number
 
 IsDone(): boolean;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;

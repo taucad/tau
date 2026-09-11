@@ -35,7 +35,6 @@ ChangeIntersection(): number;
 
 ChangeBoundary(): number;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;

@@ -2,12 +2,10 @@
 
 1 top-level symbols. Signatures are verbatim typescript.
 
-// The {@link BndLib`BndLib`} package provides functions to add a geometric primitive to a bounding box
 BndLib: declare class BndLib
 
 constructor
 
-// Bounding box for a surface trimmed or not Adds the segment of the line L limited by the two parameter values P1 and P2, to the bounding box B, and then enlarges B by the tolerance value Tol
 static Add(C: gp_Circ, Tol: number, B: Bnd_Box): void;
 static Add(C: gp_Circ2d, Tol: number, B: Bnd_Box2d): void;
 static Add(C: gp_Elips, Tol: number, B: Bnd_Box): void;
@@ -493,7 +491,6 @@ static Add(S: gp_Cone, UMin: number, UMax: number, VMin: number, VMax: number, T
 static Add(S: gp_Sphere, UMin: number, UMax: number, VMin: number, VMax: number, Tol: number, B: Bnd_Box): void;
 static Add(P: gp_Torus, UMin: number, UMax: number, VMin: number, VMax: number, Tol: number, B: Bnd_Box): void;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;

@@ -1,377 +1,84 @@
 # libcascade — Geom (3)
 
-6 top-level symbols. Signatures are verbatim typescript.
+22 top-level symbols. Signatures are verbatim typescript.
 
-// Describes a rational or non-rational Bezier curve
-Geom_BezierCurve: declare class Geom_BezierCurve extends Geom_BoundedCurve
-
-constructor
-
-// Returns true if an evaluation representation is attached
-HasEvalRepresentation(): boolean;
-
-// Returns the current evaluation representation descriptor (may be null)
-EvalRepresentation(): GeomEval_RepCurveDesc_Base;
-
-// Sets a new evaluation representation
-SetEvalRepresentation(theDesc: GeomEval_RepCurveDesc_Base): void;
-
-// Removes the evaluation representation
-ClearEvalRepresentation(): void;
-
-// Increases the degree of a bezier curve
-Increase(Degree: number): void;
-
-// Inserts a pole P after the pole of range Index
-InsertPoleAfter(Index: number, P: gp_Pnt): void;
-InsertPoleAfter(Index: number, P: gp_Pnt, Weight: number): void;
-InsertPoleAfter(Index: number, P: gp_Pnt): void;
-InsertPoleAfter(Index: number, P: gp_Pnt, Weight: number): void;
-
-// Inserts a pole P before the pole of range Index
-InsertPoleBefore(Index: number, P: gp_Pnt): void;
-InsertPoleBefore(Index: number, P: gp_Pnt, Weight: number): void;
-InsertPoleBefore(Index: number, P: gp_Pnt): void;
-InsertPoleBefore(Index: number, P: gp_Pnt, Weight: number): void;
-
-// Removes the pole of range Index
-RemovePole(Index: number): void;
-
-// Reverses the direction of parametrization of <me> Value (NewU) = Value (1 - OldU)
-Reverse(): void;
-
-// Returns the parameter on the reversed curve for the point of parameter U on <me>
-ReversedParameter(U: number): number;
-
-// Segments the curve between U1 and U2 which can be out of the bounds of the curve
-Segment(U1: number, U2: number): void;
-
-// Substitutes the pole of range index with P
-SetPole(Index: number, P: gp_Pnt): void;
-SetPole(Index: number, P: gp_Pnt, Weight: number): void;
-SetPole(Index: number, P: gp_Pnt): void;
-SetPole(Index: number, P: gp_Pnt, Weight: number): void;
-
-// Changes the weight of the pole of range Index
-SetWeight(Index: number, Weight: number): void;
-
-// Returns True if the distance between the first point and the last point of the curve is lower or equal to the Resolution from package gp
-IsClosed(): boolean;
-
-// Continuity of the curve, returns True
-IsCN(N: number): boolean;
-
-// Returns True if the parametrization of a curve is periodic
-IsPeriodic(): boolean;
-
-// Returns false if all the weights are identical
-IsRational(): boolean;
-
-// a Bezier curve is CN
-Continuity(): GeomAbs_Shape;
-
-// Returns the polynomial degree of the curve
-Degree(): number;
-
-// Computes the point of parameter U
-EvalD0(U: number): gp_Pnt;
-
-// Computes the point and first derivative at parameter U
-EvalD1(U: number): Geom_Curve_ResD1;
-
-// Computes the point and first two derivatives at parameter U
-EvalD2(U: number): Geom_Curve_ResD2;
-
-// For this Bezier curve, computes
-EvalD3(U: number): Geom_Curve_ResD3;
-
-// For the point of parameter U of this Bezier curve, computes the vector corresponding to the Nth derivative
-EvalDN(U: number, N: number): gp_Vec;
-
-// Returns Value (U=0.), it is the first control point of the curve
-StartPoint(): gp_Pnt;
-
-// Returns Value (U=1.), it is the last control point of the Bezier curve
-EndPoint(): gp_Pnt;
-
-// Returns the value of the first parameter of this Bezier curve
-FirstParameter(): number;
-
-// Returns the value of the last parameter of this Bezier curve
-LastParameter(): number;
-
-// Returns the number of poles of this Bezier curve
-NbPoles(): number;
-
-// Returns the pole of range Index
-Pole(Index: number): gp_Pnt;
-
-// Returns all the poles of the curve
-// DEPRECATED
-Poles(P: NCollection_Array1_gp_Pnt): void;
-Poles(): NCollection_Array1_gp_Pnt;
-Poles(P: NCollection_Array1_gp_Pnt): void;
-Poles(): NCollection_Array1_gp_Pnt;
-// P: Mutated in place
-
-// Returns the weight of range Index
-Weight(Index: number): number;
-
-// Returns all the weights of the curve
-// DEPRECATED
-Weights(W: NCollection_Array1_double): void;
-Weights(): NCollection_Array1_double;
-Weights(W: NCollection_Array1_double): void;
-Weights(): NCollection_Array1_double;
-// W: Mutated in place
-
-// Returns a const reference to the weights array
-WeightsArray(): NCollection_Array1_double;
-
-// Applies the transformation T to this Bezier curve
-Transform(T: gp_Trsf): void;
-
-// Returns the value of the maximum polynomial degree of any {@link Geom_BezierCurve`Geom_BezierCurve`} curve
-static MaxDegree(): number;
-
-// Computes for this Bezier curve the parametric tolerance UTolerance for a given 3D tolerance Tolerance3D
-Resolution(Tolerance3D: number, UTolerance?: number): { UTolerance: number };
-
-// Creates a new object which is a copy of this Bezier curve
-Copy(): Geom_Geometry;
-
-// Returns Bezier knots {0.0, 1.0} as a static array
-Knots(): NCollection_Array1_double;
-
-// Returns Bezier multiplicities for the current degree
-Multiplicities(): NCollection_Array1_int;
-
-// Returns Bezier flat knots for the current degree
-KnotSequence(): NCollection_Array1_double;
-
-static get_type_name(): string;
-
-static get_type_descriptor(): Standard_Type;
-
-DynamicType(): Standard_Type;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// Describes a rational or non-rational Bezier surface
-Geom_BezierSurface: declare class Geom_BezierSurface extends Geom_BoundedSurface
+Geom_OffsetSurface: declare class Geom_OffsetSurface extends Geom_Surface
 
 constructor
 
-// Returns true if an evaluation representation is attached
 HasEvalRepresentation(): boolean;
 
-// Returns the current evaluation representation descriptor (may be null)
 EvalRepresentation(): GeomEval_RepSurfaceDesc_Base;
 
-// Sets a new evaluation representation
 SetEvalRepresentation(theDesc: GeomEval_RepSurfaceDesc_Base): void;
 
-// Removes the evaluation representation
 ClearEvalRepresentation(): void;
 
-// Exchanges the direction U and V on a Bezier surface As a consequence
-ExchangeUV(): void;
+SetBasisSurface(S: Geom_Surface, isNotCheckC0?: boolean): void;
 
-// Increases the degree of this Bezier surface in the two parametric directions
-Increase(UDeg: number, VDeg: number): void;
+SetOffsetValue(D: number): void;
 
-// Inserts a column of poles
-InsertPoleColAfter(VIndex: number, CPoles: NCollection_Array1_gp_Pnt): void;
-InsertPoleColAfter(VIndex: number, CPoles: NCollection_Array1_gp_Pnt, CPoleWeights: NCollection_Array1_double): void;
-InsertPoleColAfter(VIndex: number, CPoles: NCollection_Array1_gp_Pnt): void;
-InsertPoleColAfter(VIndex: number, CPoles: NCollection_Array1_gp_Pnt, CPoleWeights: NCollection_Array1_double): void;
+Offset(): number;
 
-// Inserts a column of poles
-InsertPoleColBefore(VIndex: number, CPoles: NCollection_Array1_gp_Pnt): void;
-InsertPoleColBefore(VIndex: number, CPoles: NCollection_Array1_gp_Pnt, CPoleWeights: NCollection_Array1_double): void;
-InsertPoleColBefore(VIndex: number, CPoles: NCollection_Array1_gp_Pnt): void;
-InsertPoleColBefore(VIndex: number, CPoles: NCollection_Array1_gp_Pnt, CPoleWeights: NCollection_Array1_double): void;
+BasisSurface(): Geom_Surface;
 
-// Inserts a row of poles
-InsertPoleRowAfter(UIndex: number, CPoles: NCollection_Array1_gp_Pnt): void;
-InsertPoleRowAfter(UIndex: number, CPoles: NCollection_Array1_gp_Pnt, CPoleWeights: NCollection_Array1_double): void;
-InsertPoleRowAfter(UIndex: number, CPoles: NCollection_Array1_gp_Pnt): void;
-InsertPoleRowAfter(UIndex: number, CPoles: NCollection_Array1_gp_Pnt, CPoleWeights: NCollection_Array1_double): void;
-
-// Inserts a row of poles
-InsertPoleRowBefore(UIndex: number, CPoles: NCollection_Array1_gp_Pnt): void;
-InsertPoleRowBefore(UIndex: number, CPoles: NCollection_Array1_gp_Pnt, CPoleWeights: NCollection_Array1_double): void;
-InsertPoleRowBefore(UIndex: number, CPoles: NCollection_Array1_gp_Pnt): void;
-InsertPoleRowBefore(UIndex: number, CPoles: NCollection_Array1_gp_Pnt, CPoleWeights: NCollection_Array1_double): void;
-
-// Removes a column of poles
-RemovePoleCol(VIndex: number): void;
-
-// Removes a row of poles
-RemovePoleRow(UIndex: number): void;
-
-// Modifies this Bezier surface by segmenting it between U1 and U2 in the u parametric direction, and between V1 and V2 in the v parametric direction
-Segment(U1: number, U2: number, V1: number, V2: number): void;
-
-// Modifies a pole value
-SetPole(UIndex: number, VIndex: number, P: gp_Pnt): void;
-SetPole(UIndex: number, VIndex: number, P: gp_Pnt, Weight: number): void;
-SetPole(UIndex: number, VIndex: number, P: gp_Pnt): void;
-SetPole(UIndex: number, VIndex: number, P: gp_Pnt, Weight: number): void;
-
-// Modifies a column of poles
-SetPoleCol(VIndex: number, CPoles: NCollection_Array1_gp_Pnt): void;
-SetPoleCol(VIndex: number, CPoles: NCollection_Array1_gp_Pnt, CPoleWeights: NCollection_Array1_double): void;
-SetPoleCol(VIndex: number, CPoles: NCollection_Array1_gp_Pnt): void;
-SetPoleCol(VIndex: number, CPoles: NCollection_Array1_gp_Pnt, CPoleWeights: NCollection_Array1_double): void;
-
-// Modifies a row of poles
-SetPoleRow(UIndex: number, CPoles: NCollection_Array1_gp_Pnt): void;
-SetPoleRow(UIndex: number, CPoles: NCollection_Array1_gp_Pnt, CPoleWeights: NCollection_Array1_double): void;
-SetPoleRow(UIndex: number, CPoles: NCollection_Array1_gp_Pnt): void;
-SetPoleRow(UIndex: number, CPoles: NCollection_Array1_gp_Pnt, CPoleWeights: NCollection_Array1_double): void;
-
-// Modifies the weight of the pole of range UIndex, VIndex
-SetWeight(UIndex: number, VIndex: number, Weight: number): void;
-
-// Modifies a column of weights
-SetWeightCol(VIndex: number, CPoleWeights: NCollection_Array1_double): void;
-
-// Modifies a row of weights
-SetWeightRow(UIndex: number, CPoleWeights: NCollection_Array1_double): void;
-
-// Changes the orientation of this Bezier surface in the u parametric direction
 UReverse(): void;
 
-// Computes the u (or v) parameter on the modified surface, produced by reversing its u (or v) parametric direction, for any point of u parameter U (or of v parameter V) on this Bezier surface
 UReversedParameter(U: number): number;
 
-// Changes the orientation of this Bezier surface in the v parametric direction
 VReverse(): void;
 
-// Computes the u (or v) parameter on the modified surface, produced by reversing its u (or v) parametric direction, for any point of u parameter U (or of v parameter V) on this Bezier surface
 VReversedParameter(V: number): number;
 
-// Returns the parametric bounds U1, U2, V1 and V2 of this Bezier surface
 Bounds(U1: number, U2: number, V1: number, V2: number): { U1: number; U2: number; V1: number; V2: number };
 
-// Returns the continuity of the surface CN
 Continuity(): GeomAbs_Shape;
 
-// Computes the point of parameter (U, V) on the surface
-EvalD0(U: number, V: number): gp_Pnt;
-
-// Computes the point and first partial derivatives at (U, V)
-EvalD1(U: number, V: number): Geom_Surface_ResD1;
-
-// Computes the point and partial derivatives up to 2nd order at (U, V)
-EvalD2(U: number, V: number): Geom_Surface_ResD2;
-
-// Computes the point and partial derivatives up to 3rd order at (U, V)
-EvalD3(U: number, V: number): Geom_Surface_ResD3;
-
-// Computes the derivative of order Nu in the u parametric direction, and Nv in the v parametric direction, at the point of parameters (U, V) of this Bezier surface
-EvalDN(U: number, V: number, Nu: number, Nv: number): gp_Vec;
-
-// Returns the number of poles in the U direction
-NbUPoles(): number;
-
-// Returns the number of poles in the V direction
-NbVPoles(): number;
-
-// Returns the pole of range UIndex, VIndex Raised if UIndex < 1 or UIndex > NbUPoles, or VIndex < 1 or VIndex > NbVPoles
-Pole(UIndex: number, VIndex: number): gp_Pnt;
-
-// Returns the poles of the Bezier surface
-// DEPRECATED
-Poles(P: NCollection_Array2_gp_Pnt): void;
-Poles(): NCollection_Array2_gp_Pnt;
-Poles(P: NCollection_Array2_gp_Pnt): void;
-Poles(): NCollection_Array2_gp_Pnt;
-// P: Mutated in place
-
-// Returns the degree of the surface in the U direction it is NbUPoles - 1
-UDegree(): number;
-
-// Computes the U isoparametric curve
-UIso(U: number): Geom_Curve;
-
-// Returns the degree of the surface in the V direction it is NbVPoles - 1
-VDegree(): number;
-
-// Computes the V isoparametric curve
-VIso(V: number): Geom_Curve;
-
-// Returns the weight of range UIndex, VIndex
-Weight(UIndex: number, VIndex: number): number;
-
-// Returns the weights of the Bezier surface
-// DEPRECATED
-Weights(W: NCollection_Array2_double): void;
-Weights(): NCollection_Array2_double;
-Weights(W: NCollection_Array2_double): void;
-Weights(): NCollection_Array2_double;
-// W: Mutated in place
-
-// Returns a const reference to the weights array
-WeightsArray(): NCollection_Array2_double;
-
-// Returns True if the first control points row and the last control points row are identical
-IsUClosed(): boolean;
-
-// Returns True if the first control points column and the last control points column are identical
-IsVClosed(): boolean;
-
-// Returns True, a Bezier surface is always CN
 IsCNu(N: number): boolean;
 
-// Returns True, a BezierSurface is always CN
 IsCNv(N: number): boolean;
 
-// Returns False
+IsUClosed(): boolean;
+
+IsVClosed(): boolean;
+
 IsUPeriodic(): boolean;
 
-// Returns False
+UPeriod(): number;
+
 IsVPeriodic(): boolean;
 
-// Returns False if the weights are identical in the U direction, The tolerance criterion is Resolution from package gp
-IsURational(): boolean;
+VPeriod(): number;
 
-// Returns False if the weights are identical in the V direction, The tolerance criterion is Resolution from package gp
-IsVRational(): boolean;
+UIso(U: number): Geom_Curve;
 
-// Applies the transformation T to this Bezier surface
+VIso(V: number): Geom_Curve;
+
+EvalD0(U: number, V: number): gp_Pnt;
+
+EvalD1(U: number, V: number): Geom_Surface_ResD1;
+
+EvalD2(U: number, V: number): Geom_Surface_ResD2;
+
+EvalD3(U: number, V: number): Geom_Surface_ResD3;
+
+EvalDN(U: number, V: number, Nu: number, Nv: number): gp_Vec;
+
 Transform(T: gp_Trsf): void;
 
-// Returns the value of the maximum polynomial degree of a Bezier surface
-static MaxDegree(): number;
+TransformParameters(U: number, V: number, T: gp_Trsf): { U: number; V: number };
 
-// Computes two tolerance values for this Bezier surface, based on the given tolerance in 3D space Tolerance3D
-Resolution(Tolerance3D: number, UTolerance?: number, VTolerance?: number): { UTolerance: number; VTolerance: number };
+ParametricTransformation(T: gp_Trsf): gp_GTrsf2d;
 
-// Creates a new object which is a copy of this Bezier surface
 Copy(): Geom_Geometry;
 
-// Returns Bezier knots {0.0, 1.0} as a static array
-UKnots(): NCollection_Array1_double;
+Surface(): Geom_Surface;
 
-// Returns Bezier knots {0.0, 1.0} as a static array
-VKnots(): NCollection_Array1_double;
+UOsculatingSurface(U: number, V: number, IsOpposite?: boolean): { returnValue: boolean; IsOpposite: boolean; UOsculSurf: Geom_BSplineSurface; [Symbol.dispose](): void };
 
-// Returns Bezier multiplicities for the U degree
-UMultiplicities(): NCollection_Array1_int;
+VOsculatingSurface(U: number, V: number, IsOpposite?: boolean): { returnValue: boolean; IsOpposite: boolean; VOsculSurf: Geom_BSplineSurface; [Symbol.dispose](): void };
 
-// Returns Bezier multiplicities for the V degree
-VMultiplicities(): NCollection_Array1_int;
-
-// Returns Bezier flat knots for the U degree
-UKnotSequence(): NCollection_Array1_double;
-
-// Returns Bezier flat knots for the V degree
-VKnotSequence(): NCollection_Array1_double;
+GetBasisSurfContinuity(): GeomAbs_Shape;
 
 static get_type_name(): string;
 
@@ -379,151 +86,56 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// The abstract class BoundedCurve describes the common behavior of bounded curves in 3D space
-Geom_BoundedCurve: declare class Geom_BoundedCurve extends Geom_Curve
-
-// Returns the end point of the curve
-EndPoint(): gp_Pnt;
-
-// Returns the start point of the curve
-StartPoint(): gp_Pnt;
-
-static get_type_name(): string;
-
-static get_type_descriptor(): Standard_Type;
-
-DynamicType(): Standard_Type;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// The root class for bounded surfaces in 3D space
-Geom_BoundedSurface: declare class Geom_BoundedSurface extends Geom_Surface
-
-static get_type_name(): string;
-
-static get_type_descriptor(): Standard_Type;
-
-DynamicType(): Standard_Type;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// Describes a point in 3D space
-Geom_CartesianPoint: declare class Geom_CartesianPoint extends Geom_Point
+Geom_Parabola: declare class Geom_Parabola extends Geom_Conic
 
 constructor
 
-// Assigns the coordinates X, Y and Z to this point
-SetCoord(X: number, Y: number, Z: number): void;
+SetFocal(Focal: number): void;
 
-// Set <me> to P.X(), P.Y(), P.Z() coordinates
-SetPnt(P: gp_Pnt): void;
+SetParab(Prb: gp_Parab): void;
 
-// Changes the X coordinate of <me>
-SetX(X: number): void;
+Parab(): gp_Parab;
 
-// Changes the Y coordinate of <me>
-SetY(Y: number): void;
-
-// Changes the Z coordinate of <me>
-SetZ(Z: number): void;
-
-// Returns the coordinates of <me>
-Coord(X: number, Y: number, Z: number): { X: number; Y: number; Z: number };
-
-// Returns a non transient cartesian point with the same coordinates as <me>
-Pnt(): gp_Pnt;
-
-// Returns the X coordinate of <me>
-X(): number;
-
-// Returns the Y coordinate of <me>
-Y(): number;
-
-// Returns the Z coordinate of <me>
-Z(): number;
-
-// Applies the transformation T to this point
-Transform(T: gp_Trsf): void;
-
-// Creates a new object which is a copy of this point
-Copy(): Geom_Geometry;
-
-static get_type_name(): string;
-
-static get_type_descriptor(): Standard_Type;
-
-DynamicType(): Standard_Type;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// Describes a circle in 3D space
-Geom_Circle: declare class Geom_Circle extends Geom_Conic
-
-constructor
-
-// Set <me> so that <me> has the same geometric properties as C
-SetCirc(C: gp_Circ): void;
-
-// Assigns the value R to the radius of this circle
-SetRadius(R: number): void;
-
-// returns the non transient circle from gp with the same geometric properties as <me>
-Circ(): gp_Circ;
-
-// Returns the radius of this circle
-Radius(): number;
-
-// Computes the parameter on the reversed circle for the point of parameter U on this circle
 ReversedParameter(U: number): number;
 
-// Returns the eccentricity e = 0 for a circle
-Eccentricity(): number;
-
-// Returns the value of the first parameter of this circle
 FirstParameter(): number;
 
-// Returns the value of the last parameter of this circle
 LastParameter(): number;
 
-// returns True
 IsClosed(): boolean;
 
-// returns True
 IsPeriodic(): boolean;
 
-// Returns the point of parameter U
+Directrix(): gp_Ax1;
+
+Eccentricity(): number;
+
+Focus(): gp_Pnt;
+
+Focal(): number;
+
+Parameter(): number;
+
 EvalD0(U: number): gp_Pnt;
 
-// Returns the point of parameter U and the first derivative
 EvalD1(U: number): Geom_Curve_ResD1;
 
-// Returns the point of parameter U, the first and second derivatives
 EvalD2(U: number): Geom_Curve_ResD2;
 
-// Returns the point of parameter U, the first, second and third derivatives
 EvalD3(U: number): Geom_Curve_ResD3;
 
-// Returns the vector corresponding to the derivative for the order of derivation N
 EvalDN(U: number, N: number): gp_Vec;
 
-// Applies the transformation T to this circle
 Transform(T: gp_Trsf): void;
 
-// Creates a new object which is a copy of this circle
+TransformedParameter(U: number, T: gp_Trsf): number;
+
+ParametricTransformation(T: gp_Trsf): number;
+
 Copy(): Geom_Geometry;
 
 static get_type_name(): string;
@@ -532,7 +144,827 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
+
+Geom_Plane: declare class Geom_Plane extends Geom_ElementarySurface
+
+constructor
+
+SetPln(Pl: gp_Pln): void;
+
+Pln(): gp_Pln;
+
+UReverse(): void;
+
+UReversedParameter(U: number): number;
+
+VReverse(): void;
+
+VReversedParameter(V: number): number;
+
+TransformParameters(U: number, V: number, T: gp_Trsf): { U: number; V: number };
+
+ParametricTransformation(T: gp_Trsf): gp_GTrsf2d;
+
+Bounds(U1: number, U2: number, V1: number, V2: number): { U1: number; U2: number; V1: number; V2: number };
+
+Coefficients(A?: number, B?: number, C?: number, D?: number): { A: number; B: number; C: number; D: number };
+
+IsUClosed(): boolean;
+
+IsVClosed(): boolean;
+
+IsUPeriodic(): boolean;
+
+IsVPeriodic(): boolean;
+
+UIso(U: number): Geom_Curve;
+
+VIso(V: number): Geom_Curve;
+
+EvalD0(U: number, V: number): gp_Pnt;
+
+EvalD1(U: number, V: number): Geom_Surface_ResD1;
+
+EvalD2(U: number, V: number): Geom_Surface_ResD2;
+
+EvalD3(U: number, V: number): Geom_Surface_ResD3;
+
+EvalDN(U: number, V: number, Nu: number, Nv: number): gp_Vec;
+
+Transform(T: gp_Trsf): void;
+
+Copy(): Geom_Geometry;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+Geom_Point: declare class Geom_Point extends Geom_Geometry
+
+Coord(X: number, Y: number, Z: number): { X: number; Y: number; Z: number };
+
+Pnt(): gp_Pnt;
+
+X(): number;
+
+Y(): number;
+
+Z(): number;
+
+Distance(Other: Geom_Point): number;
+
+SquareDistance(Other: Geom_Point): number;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+Geom_RectangularTrimmedSurface: declare class Geom_RectangularTrimmedSurface extends Geom_BoundedSurface
+
+constructor
+
+SetTrim(U1: number, U2: number, V1: number, V2: number, USense: boolean, VSense: boolean): void;
+SetTrim(Param1: number, Param2: number, UTrim: boolean, Sense: boolean): void;
+SetTrim(U1: number, U2: number, V1: number, V2: number, USense: boolean, VSense: boolean): void;
+SetTrim(Param1: number, Param2: number, UTrim: boolean, Sense: boolean): void;
+
+BasisSurface(): Geom_Surface;
+
+UReverse(): void;
+
+UReversedParameter(U: number): number;
+
+VReverse(): void;
+
+VReversedParameter(V: number): number;
+
+Bounds(U1: number, U2: number, V1: number, V2: number): { U1: number; U2: number; V1: number; V2: number };
+
+Continuity(): GeomAbs_Shape;
+
+IsUClosed(): boolean;
+
+IsVClosed(): boolean;
+
+IsCNu(N: number): boolean;
+
+IsCNv(N: number): boolean;
+
+IsUPeriodic(): boolean;
+
+UPeriod(): number;
+
+IsVPeriodic(): boolean;
+
+VPeriod(): number;
+
+UIso(U: number): Geom_Curve;
+
+VIso(V: number): Geom_Curve;
+
+EvalD0(U: number, V: number): gp_Pnt;
+
+EvalD1(U: number, V: number): Geom_Surface_ResD1;
+
+EvalD2(U: number, V: number): Geom_Surface_ResD2;
+
+EvalD3(U: number, V: number): Geom_Surface_ResD3;
+
+EvalDN(U: number, V: number, Nu: number, Nv: number): gp_Vec;
+
+Transform(T: gp_Trsf): void;
+
+TransformParameters(U: number, V: number, T: gp_Trsf): { U: number; V: number };
+
+ParametricTransformation(T: gp_Trsf): gp_GTrsf2d;
+
+Copy(): Geom_Geometry;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+Geom_SphericalSurface: declare class Geom_SphericalSurface extends Geom_ElementarySurface
+
+constructor
+
+SetRadius(R: number): void;
+
+SetSphere(S: gp_Sphere): void;
+
+Sphere(): gp_Sphere;
+
+UReversedParameter(U: number): number;
+
+VReversedParameter(V: number): number;
+
+Area(): number;
+
+Bounds(U1: number, U2: number, V1: number, V2: number): { U1: number; U2: number; V1: number; V2: number };
+
+Coefficients(A1?: number, A2?: number, A3?: number, B1?: number, B2?: number, B3?: number, C1?: number, C2?: number, C3?: number, D?: number): { A1: number; A2: number; A3: number; B1: number; B2: number; B3: number; C1: number; C2: number; C3: number; D: number };
+
+Radius(): number;
+
+Volume(): number;
+
+IsUClosed(): boolean;
+
+IsVClosed(): boolean;
+
+IsUPeriodic(): boolean;
+
+IsVPeriodic(): boolean;
+
+UIso(U: number): Geom_Curve;
+
+VIso(V: number): Geom_Curve;
+
+EvalD0(U: number, V: number): gp_Pnt;
+
+EvalD1(U: number, V: number): Geom_Surface_ResD1;
+
+EvalD2(U: number, V: number): Geom_Surface_ResD2;
+
+EvalD3(U: number, V: number): Geom_Surface_ResD3;
+
+EvalDN(U: number, V: number, Nu: number, Nv: number): gp_Vec;
+
+Transform(T: gp_Trsf): void;
+
+Copy(): Geom_Geometry;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+Geom_Surface: declare class Geom_Surface extends Geom_Geometry
+
+UReverse(): void;
+
+UReversed(): Geom_Surface;
+
+UReversedParameter(U: number): number;
+
+VReverse(): void;
+
+VReversed(): Geom_Surface;
+
+VReversedParameter(V: number): number;
+
+TransformParameters(U: number, V: number, T: gp_Trsf): { U: number; V: number };
+
+ParametricTransformation(T: gp_Trsf): gp_GTrsf2d;
+
+Bounds(U1: number, U2: number, V1: number, V2: number): { U1: number; U2: number; V1: number; V2: number };
+
+IsUClosed(): boolean;
+
+IsVClosed(): boolean;
+
+IsUPeriodic(): boolean;
+
+UPeriod(): number;
+
+IsVPeriodic(): boolean;
+
+VPeriod(): number;
+
+UIso(U: number): Geom_Curve;
+
+VIso(V: number): Geom_Curve;
+
+Continuity(): GeomAbs_Shape;
+
+IsCNu(N: number): boolean;
+
+IsCNv(N: number): boolean;
+
+EvalD0(U: number, V: number): gp_Pnt;
+
+EvalD1(U: number, V: number): Geom_Surface_ResD1;
+
+EvalD2(U: number, V: number): Geom_Surface_ResD2;
+
+EvalD3(U: number, V: number): Geom_Surface_ResD3;
+
+EvalDN(U: number, V: number, Nu: number, Nv: number): gp_Vec;
+
+D0(U: number, V: number, P: gp_Pnt): void;
+
+D1(U: number, V: number, P: gp_Pnt, D1U: gp_Vec, D1V: gp_Vec): void;
+
+D2(U: number, V: number, P: gp_Pnt, D1U: gp_Vec, D1V: gp_Vec, D2U: gp_Vec, D2V: gp_Vec, D2UV: gp_Vec): void;
+
+D3(U: number, V: number, P: gp_Pnt, D1U: gp_Vec, D1V: gp_Vec, D2U: gp_Vec, D2V: gp_Vec, D2UV: gp_Vec, D3U: gp_Vec, D3V: gp_Vec, D3UUV: gp_Vec, D3UVV: gp_Vec): void;
+
+DN(U: number, V: number, Nu: number, Nv: number): gp_Vec;
+
+Value(U: number, V: number): gp_Pnt;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+Geom_SurfaceOfLinearExtrusion: declare class Geom_SurfaceOfLinearExtrusion extends Geom_SweptSurface
+
+constructor
+
+HasEvalRepresentation(): boolean;
+
+EvalRepresentation(): GeomEval_RepSurfaceDesc_Base;
+
+SetEvalRepresentation(theDesc: GeomEval_RepSurfaceDesc_Base): void;
+
+ClearEvalRepresentation(): void;
+
+SetDirection(V: gp_Dir): void;
+
+SetBasisCurve(C: Geom_Curve): void;
+
+UReverse(): void;
+
+UReversedParameter(U: number): number;
+
+VReverse(): void;
+
+VReversedParameter(V: number): number;
+
+Bounds(U1: number, U2: number, V1: number, V2: number): { U1: number; U2: number; V1: number; V2: number };
+
+IsUClosed(): boolean;
+
+IsVClosed(): boolean;
+
+IsCNu(N: number): boolean;
+
+IsCNv(N: number): boolean;
+
+IsUPeriodic(): boolean;
+
+IsVPeriodic(): boolean;
+
+UIso(U: number): Geom_Curve;
+
+VIso(V: number): Geom_Curve;
+
+EvalD0(U: number, V: number): gp_Pnt;
+
+EvalD1(U: number, V: number): Geom_Surface_ResD1;
+
+EvalD2(U: number, V: number): Geom_Surface_ResD2;
+
+EvalD3(U: number, V: number): Geom_Surface_ResD3;
+
+EvalDN(U: number, V: number, Nu: number, Nv: number): gp_Vec;
+
+Transform(T: gp_Trsf): void;
+
+TransformParameters(U: number, V: number, T: gp_Trsf): { U: number; V: number };
+
+ParametricTransformation(T: gp_Trsf): gp_GTrsf2d;
+
+Copy(): Geom_Geometry;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+Geom_SurfaceOfRevolution: declare class Geom_SurfaceOfRevolution extends Geom_SweptSurface
+
+constructor
+
+HasEvalRepresentation(): boolean;
+
+EvalRepresentation(): GeomEval_RepSurfaceDesc_Base;
+
+SetEvalRepresentation(theDesc: GeomEval_RepSurfaceDesc_Base): void;
+
+ClearEvalRepresentation(): void;
+
+SetAxis(A1: gp_Ax1): void;
+
+SetDirection(V: gp_Dir): void;
+
+SetBasisCurve(C: Geom_Curve): void;
+
+SetLocation(P: gp_Pnt): void;
+
+Axis(): gp_Ax1;
+
+Location(): gp_Pnt;
+
+ReferencePlane(): gp_Ax2;
+
+UReverse(): void;
+
+UReversedParameter(U: number): number;
+
+VReverse(): void;
+
+VReversedParameter(V: number): number;
+
+TransformParameters(U: number, V: number, T: gp_Trsf): { U: number; V: number };
+
+ParametricTransformation(T: gp_Trsf): gp_GTrsf2d;
+
+Bounds(U1: number, U2: number, V1: number, V2: number): { U1: number; U2: number; V1: number; V2: number };
+
+IsUClosed(): boolean;
+
+IsVClosed(): boolean;
+
+IsCNu(N: number): boolean;
+
+IsCNv(N: number): boolean;
+
+IsUPeriodic(): boolean;
+
+IsVPeriodic(): boolean;
+
+UIso(U: number): Geom_Curve;
+
+VIso(V: number): Geom_Curve;
+
+EvalD0(U: number, V: number): gp_Pnt;
+
+EvalD1(U: number, V: number): Geom_Surface_ResD1;
+
+EvalD2(U: number, V: number): Geom_Surface_ResD2;
+
+EvalD3(U: number, V: number): Geom_Surface_ResD3;
+
+EvalDN(U: number, V: number, Nu: number, Nv: number): gp_Vec;
+
+Transform(T: gp_Trsf): void;
+
+Copy(): Geom_Geometry;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+Geom_SweptSurface: declare class Geom_SweptSurface extends Geom_Surface
+
+Continuity(): GeomAbs_Shape;
+
+Direction(): gp_Dir;
+
+BasisCurve(): Geom_Curve;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+Geom_ToroidalSurface: declare class Geom_ToroidalSurface extends Geom_ElementarySurface
+
+constructor
+
+SetMajorRadius(MajorRadius: number): void;
+
+SetMinorRadius(MinorRadius: number): void;
+
+SetTorus(T: gp_Torus): void;
+
+Torus(): gp_Torus;
+
+UReversedParameter(U: number): number;
+
+VReversedParameter(V: number): number;
+
+Area(): number;
+
+Bounds(U1: number, U2: number, V1: number, V2: number): { U1: number; U2: number; V1: number; V2: number };
+
+Coefficients(Coef: NCollection_Array1_double): void;
+
+MajorRadius(): number;
+
+MinorRadius(): number;
+
+Volume(): number;
+
+IsUClosed(): boolean;
+
+IsVClosed(): boolean;
+
+IsUPeriodic(): boolean;
+
+IsVPeriodic(): boolean;
+
+UIso(U: number): Geom_Curve;
+
+VIso(V: number): Geom_Curve;
+
+EvalD0(U: number, V: number): gp_Pnt;
+
+EvalD1(U: number, V: number): Geom_Surface_ResD1;
+
+EvalD2(U: number, V: number): Geom_Surface_ResD2;
+
+EvalD3(U: number, V: number): Geom_Surface_ResD3;
+
+EvalDN(U: number, V: number, Nu: number, Nv: number): gp_Vec;
+
+Transform(T: gp_Trsf): void;
+
+Copy(): Geom_Geometry;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+Geom_Transformation: declare class Geom_Transformation extends Standard_Transient
+
+constructor
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+SetMirror(thePnt: gp_Pnt): void;
+SetMirror(theA1: gp_Ax1): void;
+SetMirror(theA2: gp_Ax2): void;
+SetMirror(thePnt: gp_Pnt): void;
+SetMirror(theA1: gp_Ax1): void;
+SetMirror(theA2: gp_Ax2): void;
+SetMirror(thePnt: gp_Pnt): void;
+SetMirror(theA1: gp_Ax1): void;
+SetMirror(theA2: gp_Ax2): void;
+
+SetRotation(theA1: gp_Ax1, theAng: number): void;
+
+SetScale(thePnt: gp_Pnt, theScale: number): void;
+
+SetTransformation(theFromSystem1: gp_Ax3, theToSystem2: gp_Ax3): void;
+SetTransformation(theToSystem: gp_Ax3): void;
+SetTransformation(theFromSystem1: gp_Ax3, theToSystem2: gp_Ax3): void;
+SetTransformation(theToSystem: gp_Ax3): void;
+
+SetTranslation(theVec: gp_Vec): void;
+SetTranslation(P1: gp_Pnt, P2: gp_Pnt): void;
+SetTranslation(theVec: gp_Vec): void;
+SetTranslation(P1: gp_Pnt, P2: gp_Pnt): void;
+
+SetTrsf(theTrsf: gp_Trsf): void;
+
+IsNegative(): boolean;
+
+Form(): gp_TrsfForm;
+
+ScaleFactor(): number;
+
+Trsf(): gp_Trsf;
+
+Value(theRow: number, theCol: number): number;
+
+Invert(): void;
+
+Inverted(): Geom_Transformation;
+
+Multiplied(Other: Geom_Transformation): Geom_Transformation;
+
+Multiply(theOther: Geom_Transformation): void;
+
+Power(N: number): void;
+
+Powered(N: number): Geom_Transformation;
+
+PreMultiply(Other: Geom_Transformation): void;
+
+Transforms(theX?: number, theY?: number, theZ?: number): { theX: number; theY: number; theZ: number };
+
+Copy(): Geom_Transformation;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+Geom_TrimmedCurve: declare class Geom_TrimmedCurve extends Geom_BoundedCurve
+
+constructor
+
+Reverse(): void;
+
+ReversedParameter(U: number): number;
+
+SetTrim(U1: number, U2: number, Sense?: boolean, theAdjustPeriodic?: boolean): void;
+
+BasisCurve(): Geom_Curve;
+
+Continuity(): GeomAbs_Shape;
+
+IsCN(N: number): boolean;
+
+EndPoint(): gp_Pnt;
+
+FirstParameter(): number;
+
+IsClosed(): boolean;
+
+IsPeriodic(): boolean;
+
+Period(): number;
+
+LastParameter(): number;
+
+StartPoint(): gp_Pnt;
+
+EvalD0(U: number): gp_Pnt;
+
+EvalD1(U: number): Geom_Curve_ResD1;
+
+EvalD2(U: number): Geom_Curve_ResD2;
+
+EvalD3(U: number): Geom_Curve_ResD3;
+
+EvalDN(U: number, N: number): gp_Vec;
+
+Transform(T: gp_Trsf): void;
+
+TransformedParameter(U: number, T: gp_Trsf): number;
+
+ParametricTransformation(T: gp_Trsf): number;
+
+Copy(): Geom_Geometry;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+Geom_UndefinedDerivative: declare class Geom_UndefinedDerivative extends Standard_DomainError
+
+constructor
+
+ExceptionType(): string;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+Geom_UndefinedValue: declare class Geom_UndefinedValue extends Standard_DomainError
+
+constructor
+
+ExceptionType(): string;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+Geom_Vector: declare class Geom_Vector extends Geom_Geometry
+
+Reverse(): void;
+
+Reversed(): Geom_Vector;
+
+Angle(Other: Geom_Vector): number;
+
+AngleWithRef(Other: Geom_Vector, VRef: Geom_Vector): number;
+
+Coord(X?: number, Y?: number, Z?: number): { X: number; Y: number; Z: number };
+
+Magnitude(): number;
+
+SquareMagnitude(): number;
+
+X(): number;
+
+Y(): number;
+
+Z(): number;
+
+Cross(Other: Geom_Vector): void;
+
+Crossed(Other: Geom_Vector): Geom_Vector;
+
+CrossCross(V1: Geom_Vector, V2: Geom_Vector): void;
+
+CrossCrossed(V1: Geom_Vector, V2: Geom_Vector): Geom_Vector;
+
+Dot(Other: Geom_Vector): number;
+
+DotCross(V1: Geom_Vector, V2: Geom_Vector): number;
+
+Vec(): gp_Vec;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+Geom_VectorWithMagnitude: declare class Geom_VectorWithMagnitude extends Geom_Vector
+
+constructor
+
+SetCoord(X: number, Y: number, Z: number): void;
+
+SetVec(V: gp_Vec): void;
+
+SetX(X: number): void;
+
+SetY(Y: number): void;
+
+SetZ(Z: number): void;
+
+Magnitude(): number;
+
+SquareMagnitude(): number;
+
+Add(Other: Geom_Vector): void;
+
+Added(Other: Geom_Vector): Geom_VectorWithMagnitude;
+
+Cross(Other: Geom_Vector): void;
+
+Crossed(Other: Geom_Vector): Geom_Vector;
+
+CrossCross(V1: Geom_Vector, V2: Geom_Vector): void;
+
+CrossCrossed(V1: Geom_Vector, V2: Geom_Vector): Geom_Vector;
+
+Divide(Scalar: number): void;
+
+Divided(Scalar: number): Geom_VectorWithMagnitude;
+
+Multiplied(Scalar: number): Geom_VectorWithMagnitude;
+
+Multiply(Scalar: number): void;
+
+Normalize(): void;
+
+Normalized(): Geom_VectorWithMagnitude;
+
+Subtract(Other: Geom_Vector): void;
+
+Subtracted(Other: Geom_Vector): Geom_VectorWithMagnitude;
+
+Transform(T: gp_Trsf): void;
+
+Copy(): Geom_Geometry;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+Geom_Curve_ResD1: interface Geom_Curve_ResD1
+
+Point: gp_Pnt
+
+D1: gp_Vec
+
+Geom_Curve_ResD2: interface Geom_Curve_ResD2
+
+Point: gp_Pnt
+
+D1: gp_Vec
+
+D2: gp_Vec
+
+Geom_Curve_ResD3: interface Geom_Curve_ResD3
+
+Point: gp_Pnt
+
+D1: gp_Vec
+
+D2: gp_Vec
+
+D3: gp_Vec
+
+Geom_Surface_ResD1: interface Geom_Surface_ResD1
+
+Point: gp_Pnt
+
+D1U: gp_Vec
+
+D1V: gp_Vec
+
+Geom_Surface_ResD2: interface Geom_Surface_ResD2
+
+Point: gp_Pnt
+
+D1U: gp_Vec
+
+D1V: gp_Vec
+
+D2U: gp_Vec
+
+D2V: gp_Vec
+
+D2UV: gp_Vec

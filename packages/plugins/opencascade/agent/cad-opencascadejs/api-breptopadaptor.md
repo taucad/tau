@@ -14,7 +14,6 @@ Value(): gp_Pnt2d;
 
 Parameter(C: Adaptor2d_Curve2d): number;
 
-// Parametric resolution (2d)
 Resolution(C: Adaptor2d_Curve2d): number;
 
 Orientation(): TopAbs_Orientation;
@@ -27,7 +26,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -49,7 +47,6 @@ GetSurface(): Adaptor3d_Surface;
 
 Destroy(): void;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -86,10 +83,8 @@ NextVertex(): void;
 
 Classify(P: gp_Pnt2d, Tol: number, ReacdreOnPeriodic?: boolean): TopAbs_State;
 
-// see the code for specifications)
 IsThePointOn(P: gp_Pnt2d, Tol: number, ReacdreOnPeriodic?: boolean): boolean;
 
-// If the function returns the orientation of the arc
 Orientation(C: Adaptor2d_Curve2d): TopAbs_Orientation;
 Orientation(V: Adaptor3d_HVertex): TopAbs_Orientation;
 Orientation(C: Adaptor2d_Curve2d): TopAbs_Orientation;
@@ -97,27 +92,21 @@ Orientation(V: Adaptor3d_HVertex): TopAbs_Orientation;
 
 Destroy(): void;
 
-// answers if arcs and vertices may have 3d representations, so that we could use Tol3d and Pnt methods
 Has3d(): boolean;
 
-// returns 3d tolerance of the arc C returns 3d tolerance of the vertex V
 Tol3d(C: Adaptor2d_Curve2d): number;
 Tol3d(V: Adaptor3d_HVertex): number;
 Tol3d(C: Adaptor2d_Curve2d): number;
 Tol3d(V: Adaptor3d_HVertex): number;
 
-// returns 3d point of the vertex V
 Pnt(V: Adaptor3d_HVertex): gp_Pnt;
 
 ComputeSamplePoints(): void;
 
-// compute the sample-points for the intersections algorithms
 NbSamplesU(): number;
 
-// compute the sample-points for the intersections algorithms
 NbSamplesV(): number;
 
-// compute the sample-points for the intersections algorithms
 NbSamples(): number;
 
 SamplePoint(Index: number, P2d: gp_Pnt2d, P3d: gp_Pnt): void;
@@ -130,7 +119,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;

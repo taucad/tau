@@ -122,6 +122,24 @@ describe('renderShard', () => {
     expect(markdown).toContain('makePlane(origin: Point): Plane');
   });
 
+  it('normalizes multiline declaration whitespace without flattening it', () => {
+    const multiline = createApiCorpus(corpus.metadata, [
+      {
+        name: 'make',
+        kind: 'function',
+        signatures: [{ parameters: [], text: 'make(\r\n  size: number, \r\n): Shape; ' }],
+      },
+    ]);
+    const [shard] = planShards(multiline, { groupBy: () => 'Functions' });
+    if (shard === undefined) {
+      throw new Error('Expected one shard');
+    }
+
+    const rendered = renderShard(shard, multiline);
+    expect(rendered).toContain('make(\n  size: number,\n): Shape;');
+    expect(rendered).not.toMatch(/\r| +$/mu);
+  });
+
   it('renders members inside their container', () => {
     const shapes = shards.find((shard) => shard.title === 'shapes');
     const markdown = renderShard(shapes!, corpus);

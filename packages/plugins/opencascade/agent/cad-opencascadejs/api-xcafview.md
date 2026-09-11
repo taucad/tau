@@ -2,7 +2,6 @@
 
 2 top-level symbols. Signatures are verbatim typescript.
 
-// Access object for saved view
 XCAFView_Object: declare class XCAFView_Object extends Standard_Transient
 
 constructor
@@ -79,10 +78,8 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Defines projection types of view
 XCAFView_ProjectionType: typeof XCAFView_ProjectionType[keyof typeof XCAFView_ProjectionType]

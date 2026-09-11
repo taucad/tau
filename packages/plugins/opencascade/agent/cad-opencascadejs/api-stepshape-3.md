@@ -1,170 +1,6 @@
 # libcascade — StepShape (3)
 
-26 top-level symbols. Signatures are verbatim typescript.
-
-StepShape_OrientedClosedShell: declare class StepShape_OrientedClosedShell extends StepShape_ClosedShell
-
-constructor
-
-Init(aName: TCollection_HAsciiString, aClosedShellElement: StepShape_ClosedShell, aOrientation: boolean): void;
-Init(aName: TCollection_HAsciiString, aCfsFaces: NCollection_HArray1_handle_StepShape_Face): void;
-Init(aName: TCollection_HAsciiString): void;
-Init(aName: TCollection_HAsciiString, aClosedShellElement: StepShape_ClosedShell, aOrientation: boolean): void;
-Init(aName: TCollection_HAsciiString, aCfsFaces: NCollection_HArray1_handle_StepShape_Face): void;
-Init(aName: TCollection_HAsciiString): void;
-Init(aName: TCollection_HAsciiString, aClosedShellElement: StepShape_ClosedShell, aOrientation: boolean): void;
-Init(aName: TCollection_HAsciiString, aCfsFaces: NCollection_HArray1_handle_StepShape_Face): void;
-Init(aName: TCollection_HAsciiString): void;
-
-SetClosedShellElement(aClosedShellElement: StepShape_ClosedShell): void;
-
-ClosedShellElement(): StepShape_ClosedShell;
-
-SetOrientation(aOrientation: boolean): void;
-
-Orientation(): boolean;
-
-SetCfsFaces(aCfsFaces: NCollection_HArray1_handle_StepShape_Face): void;
-
-CfsFaces(): NCollection_HArray1_handle_StepShape_Face;
-
-CfsFacesValue(num: number): StepShape_Face;
-
-NbCfsFaces(): number;
-
-static get_type_name(): string;
-
-static get_type_descriptor(): Standard_Type;
-
-DynamicType(): Standard_Type;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-StepShape_OrientedEdge: declare class StepShape_OrientedEdge extends StepShape_Edge
-
-constructor
-
-Init(aName: TCollection_HAsciiString, aEdgeElement: StepShape_Edge, aOrientation: boolean): void;
-Init(aName: TCollection_HAsciiString, aEdgeStart: StepShape_Vertex, aEdgeEnd: StepShape_Vertex): void;
-Init(aName: TCollection_HAsciiString): void;
-Init(aName: TCollection_HAsciiString, aEdgeElement: StepShape_Edge, aOrientation: boolean): void;
-Init(aName: TCollection_HAsciiString, aEdgeStart: StepShape_Vertex, aEdgeEnd: StepShape_Vertex): void;
-Init(aName: TCollection_HAsciiString): void;
-Init(aName: TCollection_HAsciiString, aEdgeElement: StepShape_Edge, aOrientation: boolean): void;
-Init(aName: TCollection_HAsciiString, aEdgeStart: StepShape_Vertex, aEdgeEnd: StepShape_Vertex): void;
-Init(aName: TCollection_HAsciiString): void;
-
-SetEdgeElement(aEdgeElement: StepShape_Edge): void;
-
-EdgeElement(): StepShape_Edge;
-
-SetOrientation(aOrientation: boolean): void;
-
-Orientation(): boolean;
-
-SetEdgeStart(aEdgeStart: StepShape_Vertex): void;
-
-EdgeStart(): StepShape_Vertex;
-
-SetEdgeEnd(aEdgeEnd: StepShape_Vertex): void;
-
-EdgeEnd(): StepShape_Vertex;
-
-static get_type_name(): string;
-
-static get_type_descriptor(): Standard_Type;
-
-DynamicType(): Standard_Type;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-StepShape_OrientedFace: declare class StepShape_OrientedFace extends StepShape_Face
-
-constructor
-
-Init(aName: TCollection_HAsciiString, aFaceElement: StepShape_Face, aOrientation: boolean): void;
-Init(aName: TCollection_HAsciiString, aBounds: NCollection_HArray1_handle_StepShape_FaceBound): void;
-Init(aName: TCollection_HAsciiString): void;
-Init(aName: TCollection_HAsciiString, aFaceElement: StepShape_Face, aOrientation: boolean): void;
-Init(aName: TCollection_HAsciiString, aBounds: NCollection_HArray1_handle_StepShape_FaceBound): void;
-Init(aName: TCollection_HAsciiString): void;
-Init(aName: TCollection_HAsciiString, aFaceElement: StepShape_Face, aOrientation: boolean): void;
-Init(aName: TCollection_HAsciiString, aBounds: NCollection_HArray1_handle_StepShape_FaceBound): void;
-Init(aName: TCollection_HAsciiString): void;
-
-SetFaceElement(aFaceElement: StepShape_Face): void;
-
-FaceElement(): StepShape_Face;
-
-SetOrientation(aOrientation: boolean): void;
-
-Orientation(): boolean;
-
-SetBounds(aBounds: NCollection_HArray1_handle_StepShape_FaceBound): void;
-
-Bounds(): NCollection_HArray1_handle_StepShape_FaceBound;
-
-BoundsValue(num: number): StepShape_FaceBound;
-
-NbBounds(): number;
-
-static get_type_name(): string;
-
-static get_type_descriptor(): Standard_Type;
-
-DynamicType(): Standard_Type;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-StepShape_OrientedOpenShell: declare class StepShape_OrientedOpenShell extends StepShape_OpenShell
-
-constructor
-
-Init(aName: TCollection_HAsciiString, aOpenShellElement: StepShape_OpenShell, aOrientation: boolean): void;
-Init(aName: TCollection_HAsciiString, aCfsFaces: NCollection_HArray1_handle_StepShape_Face): void;
-Init(aName: TCollection_HAsciiString): void;
-Init(aName: TCollection_HAsciiString, aOpenShellElement: StepShape_OpenShell, aOrientation: boolean): void;
-Init(aName: TCollection_HAsciiString, aCfsFaces: NCollection_HArray1_handle_StepShape_Face): void;
-Init(aName: TCollection_HAsciiString): void;
-Init(aName: TCollection_HAsciiString, aOpenShellElement: StepShape_OpenShell, aOrientation: boolean): void;
-Init(aName: TCollection_HAsciiString, aCfsFaces: NCollection_HArray1_handle_StepShape_Face): void;
-Init(aName: TCollection_HAsciiString): void;
-
-SetOpenShellElement(aOpenShellElement: StepShape_OpenShell): void;
-
-OpenShellElement(): StepShape_OpenShell;
-
-SetOrientation(aOrientation: boolean): void;
-
-Orientation(): boolean;
-
-SetCfsFaces(aCfsFaces: NCollection_HArray1_handle_StepShape_Face): void;
-
-CfsFaces(): NCollection_HArray1_handle_StepShape_Face;
-
-CfsFacesValue(num: number): StepShape_Face;
-
-NbCfsFaces(): number;
-
-static get_type_name(): string;
-
-static get_type_descriptor(): Standard_Type;
-
-DynamicType(): Standard_Type;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
+35 top-level symbols. Signatures are verbatim typescript.
 
 StepShape_OrientedPath: declare class StepShape_OrientedPath extends StepShape_Path
 
@@ -202,7 +38,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -230,12 +65,10 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Added for Dimensional Tolerances
 StepShape_PlusMinusTolerance: declare class StepShape_PlusMinusTolerance extends Standard_Transient
 
 constructor
@@ -256,12 +89,10 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Representation of STEP entity PointRepresentation
 StepShape_PointRepresentation: declare class StepShape_PointRepresentation extends StepShape_ShapeRepresentation
 
 constructor
@@ -272,7 +103,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -300,12 +130,10 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Added for Dimensional Tolerances
 StepShape_PrecisionQualifier: declare class StepShape_PrecisionQualifier extends Standard_Transient
 
 constructor
@@ -322,12 +150,10 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Added for Dimensional Tolerances
 StepShape_QualifiedRepresentationItem: declare class StepShape_QualifiedRepresentationItem extends StepRepr_RepresentationItem
 
 constructor
@@ -353,7 +179,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -362,28 +187,20 @@ StepShape_ReversibleTopologyItem: declare class StepShape_ReversibleTopologyItem
 
 constructor
 
-// Recognizes a ReversibleTopologyItem Kind Entity that is
 CaseNum(ent: Standard_Transient): number;
 
-// returns Value as a Edge (Null if another type)
 Edge(): StepShape_Edge;
 
-// returns Value as a Path (Null if another type)
 Path(): StepShape_Path;
 
-// returns Value as a Face (Null if another type)
 Face(): StepShape_Face;
 
-// returns Value as a FaceBound (Null if another type)
 FaceBound(): StepShape_FaceBound;
 
-// returns Value as a ClosedShell (Null if another type)
 ClosedShell(): StepShape_ClosedShell;
 
-// returns Value as a OpenShell (Null if another type)
 OpenShell(): StepShape_OpenShell;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -416,7 +233,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -449,7 +265,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -489,7 +304,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -525,7 +339,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -557,17 +370,14 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Representation of STEP entity SeamEdge
 StepShape_SeamEdge: declare class StepShape_SeamEdge extends StepShape_OrientedEdge
 
 constructor
 
-// Initialize all fields (own and inherited)
 Init(aRepresentationItem_Name: TCollection_HAsciiString, aOrientedEdge_EdgeElement: StepShape_Edge, aOrientedEdge_Orientation: boolean, aPcurveReference: StepGeom_Pcurve): void;
 Init(aName: TCollection_HAsciiString, aEdgeElement: StepShape_Edge, aOrientation: boolean): void;
 Init(aName: TCollection_HAsciiString, aEdgeStart: StepShape_Vertex, aEdgeEnd: StepShape_Vertex): void;
@@ -585,10 +395,8 @@ Init(aName: TCollection_HAsciiString, aEdgeElement: StepShape_Edge, aOrientation
 Init(aName: TCollection_HAsciiString, aEdgeStart: StepShape_Vertex, aEdgeEnd: StepShape_Vertex): void;
 Init(aName: TCollection_HAsciiString): void;
 
-// Returns field PcurveReference
 PcurveReference(): StepGeom_Pcurve;
 
-// Set field PcurveReference
 SetPcurveReference(PcurveReference: StepGeom_Pcurve): void;
 
 static get_type_name(): string;
@@ -597,12 +405,10 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Representation of STEP entity ShapeDefinitionRepresentation
 StepShape_ShapeDefinitionRepresentation: declare class StepShape_ShapeDefinitionRepresentation extends StepRepr_PropertyDefinitionRepresentation
 
 constructor
@@ -613,17 +419,14 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Representation of STEP entity ShapeDimensionRepresentation
 StepShape_ShapeDimensionRepresentation: declare class StepShape_ShapeDimensionRepresentation extends StepShape_ShapeRepresentation
 
 constructor
 
-// Initialize all fields AP214
 Init(aName: TCollection_HAsciiString, aItems: NCollection_HArray1_handle_StepRepr_RepresentationItem, aContextOfItems: StepRepr_RepresentationContext): void;
 
 SetItemsAP242(theItems: NCollection_HArray1_StepShape_ShapeDimensionRepresentationItem): void;
@@ -636,7 +439,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -645,22 +447,16 @@ StepShape_ShapeDimensionRepresentationItem: declare class StepShape_ShapeDimensi
 
 constructor
 
-// Recognizes a ShapeDimensionRepresentationItem Kind Entity that is
 CaseNum(ent: Standard_Transient): number;
 
-// returns Value as a CompoundRepresentationItem (Null if another type)
 CompoundRepresentationItem(): StepRepr_CompoundRepresentationItem;
 
-// returns Value as a DescriptiveRepresentationItem (Null if another type)
 DescriptiveRepresentationItem(): StepRepr_DescriptiveRepresentationItem;
 
-// returns Value as a MeasureRepresentationItem (Null if another type)
 MeasureRepresentationItem(): StepRepr_MeasureRepresentationItem;
 
-// returns Value as a Placement (Null if another type)
 Placement(): StepGeom_Placement;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -675,12 +471,10 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Representation of STEP entity ShapeRepresentationWithParameters
 StepShape_ShapeRepresentationWithParameters: declare class StepShape_ShapeRepresentationWithParameters extends StepShape_ShapeRepresentation
 
 constructor
@@ -691,7 +485,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -700,16 +493,12 @@ StepShape_Shell: declare class StepShape_Shell extends StepData_SelectType
 
 constructor
 
-// Recognizes a Shell Kind Entity that is
 CaseNum(ent: Standard_Transient): number;
 
-// returns Value as a OpenShell (Null if another type)
 OpenShell(): StepShape_OpenShell;
 
-// returns Value as a ClosedShell (Null if another type)
 ClosedShell(): StepShape_ClosedShell;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -737,7 +526,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -752,7 +540,291 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
+delete(): void;
+
+[Symbol.dispose](): void;
+
+StepShape_SolidReplica: declare class StepShape_SolidReplica extends StepShape_SolidModel
+
+constructor
+
+Init(aName: TCollection_HAsciiString, aParentSolid: StepShape_SolidModel, aTransformation: StepGeom_CartesianTransformationOperator3d): void;
+Init(aName: TCollection_HAsciiString): void;
+Init(aName: TCollection_HAsciiString, aParentSolid: StepShape_SolidModel, aTransformation: StepGeom_CartesianTransformationOperator3d): void;
+Init(aName: TCollection_HAsciiString): void;
+
+SetParentSolid(aParentSolid: StepShape_SolidModel): void;
+
+ParentSolid(): StepShape_SolidModel;
+
+SetTransformation(aTransformation: StepGeom_CartesianTransformationOperator3d): void;
+
+Transformation(): StepGeom_CartesianTransformationOperator3d;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+StepShape_Sphere: declare class StepShape_Sphere extends StepGeom_GeometricRepresentationItem
+
+constructor
+
+Init(aName: TCollection_HAsciiString, aRadius: number, aCentre: StepGeom_Point): void;
+Init(aName: TCollection_HAsciiString): void;
+Init(aName: TCollection_HAsciiString, aRadius: number, aCentre: StepGeom_Point): void;
+Init(aName: TCollection_HAsciiString): void;
+
+SetRadius(aRadius: number): void;
+
+Radius(): number;
+
+SetCentre(aCentre: StepGeom_Point): void;
+
+Centre(): StepGeom_Point;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+StepShape_Subedge: declare class StepShape_Subedge extends StepShape_Edge
+
+constructor
+
+Init(aRepresentationItem_Name: TCollection_HAsciiString, aEdge_EdgeStart: StepShape_Vertex, aEdge_EdgeEnd: StepShape_Vertex, aParentEdge: StepShape_Edge): void;
+Init(aName: TCollection_HAsciiString, aEdgeStart: StepShape_Vertex, aEdgeEnd: StepShape_Vertex): void;
+Init(aName: TCollection_HAsciiString): void;
+Init(aRepresentationItem_Name: TCollection_HAsciiString, aEdge_EdgeStart: StepShape_Vertex, aEdge_EdgeEnd: StepShape_Vertex, aParentEdge: StepShape_Edge): void;
+Init(aName: TCollection_HAsciiString, aEdgeStart: StepShape_Vertex, aEdgeEnd: StepShape_Vertex): void;
+Init(aName: TCollection_HAsciiString): void;
+Init(aRepresentationItem_Name: TCollection_HAsciiString, aEdge_EdgeStart: StepShape_Vertex, aEdge_EdgeEnd: StepShape_Vertex, aParentEdge: StepShape_Edge): void;
+Init(aName: TCollection_HAsciiString, aEdgeStart: StepShape_Vertex, aEdgeEnd: StepShape_Vertex): void;
+Init(aName: TCollection_HAsciiString): void;
+
+ParentEdge(): StepShape_Edge;
+
+SetParentEdge(ParentEdge: StepShape_Edge): void;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+StepShape_Subface: declare class StepShape_Subface extends StepShape_Face
+
+constructor
+
+Init(aRepresentationItem_Name: TCollection_HAsciiString, aFace_Bounds: NCollection_HArray1_handle_StepShape_FaceBound, aParentFace: StepShape_Face): void;
+Init(aName: TCollection_HAsciiString, aBounds: NCollection_HArray1_handle_StepShape_FaceBound): void;
+Init(aName: TCollection_HAsciiString): void;
+Init(aRepresentationItem_Name: TCollection_HAsciiString, aFace_Bounds: NCollection_HArray1_handle_StepShape_FaceBound, aParentFace: StepShape_Face): void;
+Init(aName: TCollection_HAsciiString, aBounds: NCollection_HArray1_handle_StepShape_FaceBound): void;
+Init(aName: TCollection_HAsciiString): void;
+Init(aRepresentationItem_Name: TCollection_HAsciiString, aFace_Bounds: NCollection_HArray1_handle_StepShape_FaceBound, aParentFace: StepShape_Face): void;
+Init(aName: TCollection_HAsciiString, aBounds: NCollection_HArray1_handle_StepShape_FaceBound): void;
+Init(aName: TCollection_HAsciiString): void;
+
+ParentFace(): StepShape_Face;
+
+SetParentFace(ParentFace: StepShape_Face): void;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+StepShape_SurfaceModel: declare class StepShape_SurfaceModel extends StepData_SelectType
+
+constructor
+
+CaseNum(ent: Standard_Transient): number;
+
+ShellBasedSurfaceModel(): StepShape_ShellBasedSurfaceModel;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+StepShape_SweptAreaSolid: declare class StepShape_SweptAreaSolid extends StepShape_SolidModel
+
+constructor
+
+Init(aName: TCollection_HAsciiString, aSweptArea: StepGeom_CurveBoundedSurface): void;
+Init(aName: TCollection_HAsciiString): void;
+Init(aName: TCollection_HAsciiString, aSweptArea: StepGeom_CurveBoundedSurface): void;
+Init(aName: TCollection_HAsciiString): void;
+
+SetSweptArea(aSweptArea: StepGeom_CurveBoundedSurface): void;
+
+SweptArea(): StepGeom_CurveBoundedSurface;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+StepShape_SweptFaceSolid: declare class StepShape_SweptFaceSolid extends StepShape_SolidModel
+
+constructor
+
+Init(aName: TCollection_HAsciiString, aSweptArea: StepShape_FaceSurface): void;
+Init(aName: TCollection_HAsciiString): void;
+Init(aName: TCollection_HAsciiString, aSweptArea: StepShape_FaceSurface): void;
+Init(aName: TCollection_HAsciiString): void;
+
+SetSweptFace(aSweptArea: StepShape_FaceSurface): void;
+
+SweptFace(): StepShape_FaceSurface;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+StepShape_ToleranceMethodDefinition: declare class StepShape_ToleranceMethodDefinition extends StepData_SelectType
+
+constructor
+
+CaseNum(ent: Standard_Transient): number;
+
+ToleranceValue(): StepShape_ToleranceValue;
+
+LimitsAndFits(): StepShape_LimitsAndFits;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+StepShape_ToleranceValue: declare class StepShape_ToleranceValue extends Standard_Transient
+
+constructor
+
+Init(lower_bound: Standard_Transient, upper_bound: Standard_Transient): void;
+
+LowerBound(): Standard_Transient;
+
+SetLowerBound(lower_bound: Standard_Transient): void;
+
+UpperBound(): Standard_Transient;
+
+SetUpperBound(upper_bound: Standard_Transient): void;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+StepShape_TopologicalRepresentationItem: declare class StepShape_TopologicalRepresentationItem extends StepRepr_RepresentationItem
+
+constructor
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+StepShape_Torus: declare class StepShape_Torus extends StepGeom_GeometricRepresentationItem
+
+constructor
+
+Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis1Placement, aMajorRadius: number, aMinorRadius: number): void;
+Init(aName: TCollection_HAsciiString): void;
+Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis1Placement, aMajorRadius: number, aMinorRadius: number): void;
+Init(aName: TCollection_HAsciiString): void;
+
+SetPosition(aPosition: StepGeom_Axis1Placement): void;
+
+Position(): StepGeom_Axis1Placement;
+
+SetMajorRadius(aMajorRadius: number): void;
+
+MajorRadius(): number;
+
+SetMinorRadius(aMinorRadius: number): void;
+
+MinorRadius(): number;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+StepShape_TransitionalShapeRepresentation: declare class StepShape_TransitionalShapeRepresentation extends StepShape_ShapeRepresentation
+
+constructor
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+StepShape_TypeQualifier: declare class StepShape_TypeQualifier extends Standard_Transient
+
+constructor
+
+Init(name: TCollection_HAsciiString): void;
+
+Name(): TCollection_HAsciiString;
+
+SetName(name: TCollection_HAsciiString): void;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
 delete(): void;
 
 [Symbol.dispose](): void;

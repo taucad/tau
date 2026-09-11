@@ -1,13 +1,11 @@
 # libcascade — ChFiDS
 
-15 top-level symbols. Signatures are verbatim typescript.
+23 top-level symbols. Signatures are verbatim typescript.
 
 ChFiDS_ChamfMethod: typeof ChFiDS_ChamfMethod[keyof typeof ChFiDS_ChamfMethod]
 
-// this enumeration defines several modes of chamfer
 ChFiDS_ChamfMode: typeof ChFiDS_ChamfMode[keyof typeof ChFiDS_ChamfMode]
 
-// Provides data specific to chamfers distances on each of faces
 ChFiDS_ChamfSpine: declare class ChFiDS_ChamfSpine extends ChFiDS_Spine
 
 constructor
@@ -26,7 +24,6 @@ SetDistAngle(Dis: number, Angle: number): void;
 
 SetMode(theMode: ChFiDS_ChamfMode): void;
 
-// Return the method of chamfers used
 IsChamfer(): ChFiDS_ChamfMethod;
 
 static get_type_name(): string;
@@ -35,12 +32,10 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// A Section of fillet
 ChFiDS_CircSection: declare class ChFiDS_CircSection
 
 constructor
@@ -55,76 +50,54 @@ Get(C: gp_Lin, F: number, L: number): { F: number; L: number };
 Get(C: gp_Circ, F: number, L: number): { F: number; L: number };
 Get(C: gp_Lin, F: number, L: number): { F: number; L: number };
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// point start/end of fillet common to 2 adjacent filets and to an edge on one of 2 faces participating in the construction of the fillet
 ChFiDS_CommonPoint: declare class ChFiDS_CommonPoint
 
 constructor
 
-// default value for all fields
 Reset(): void;
 
-// Sets the values of a point which is a vertex on the initial facet of restriction of one of the surface
 SetVertex(theVertex: TopoDS_Vertex): void;
 
-// Sets the values of a point which is on the arc A, at parameter Param
 SetArc(Tol: number, A: TopoDS_Edge, Param: number, TArc: TopAbs_Orientation): void;
 
-// Sets the value of the parameter on the spine
 SetParameter(Param: number): void;
 
-// Set the 3d point for a commonpoint that is not a vertex or on an arc
 SetPoint(thePoint: gp_Pnt): void;
 
-// Set the output 3d vector
 SetVector(theVector: gp_Vec): void;
 
-// This method set the fuzziness on the point
 SetTolerance(Tol: number): void;
 
-// This method returns the fuzziness on the point
 Tolerance(): number;
 
-// Returns TRUE if the point is a vertex on the initial restriction facet of the surface
 IsVertex(): boolean;
 
-// Returns the information about the point when it is on the domain of the first patch, i-e when the function IsVertex returns True
 Vertex(): TopoDS_Vertex;
 
-// Returns TRUE if the point is a on an edge of the initial restriction facet of the surface
 IsOnArc(): boolean;
 
-// Returns the arc of restriction containing the vertex
 Arc(): TopoDS_Edge;
 
-// Returns the transition of the point on the arc returned by `Arc()`
 TransitionOnArc(): TopAbs_Orientation;
 
-// Returns the parameter of the point on the arc returned by the method `Arc()`
 ParameterOnArc(): number;
 
-// Returns the parameter on the spine
 Parameter(): number;
 
-// Returns the 3d point
 Point(): gp_Pnt;
 
-// Returns TRUE if the output vector is stored
 HasVector(): boolean;
 
-// Returns the output 3d vector
 Vector(): gp_Vec;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Elementary Spine for cheminements and approximations
 ChFiDS_ElSpine: declare class ChFiDS_ElSpine extends Adaptor3d_Curve
 
 constructor
@@ -135,7 +108,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Shallow copy of adaptor
 ShallowCopy(): Adaptor3d_Curve;
 
 FirstParameter(): number;
@@ -154,20 +126,14 @@ GetSavedLastParameter(): number;
 
 Continuity(): GeomAbs_Shape;
 
-// Returns the number of intervals for continuity
 NbIntervals(S: GeomAbs_Shape): number;
 
-// Stores in <T> the parameters bounding the intervals of continuity
 Intervals(T: NCollection_Array1_double, S: GeomAbs_Shape): void;
-// T: Mutated in place
 
-// Returns a curve equivalent of <me> between parameters <First> and <Last>
 Trim(First: number, Last: number, Tol: number): Adaptor3d_Curve;
 
-// Returns the parametric resolution corresponding to the real space resolution <R3d>
 Resolution(R3d: number): number;
 
-// Returns the type of the curve in the current interval
 GetType(): GeomAbs_CurveType;
 
 IsPeriodic(): boolean;
@@ -176,16 +142,12 @@ SetPeriodic(I: boolean): void;
 
 Period(): number;
 
-// Computes the point of parameter theAbsC on the curve
 EvalD0(theU: number): gp_Pnt;
 
-// Computes the point and first derivative at parameter theAbsC
 EvalD1(theU: number): Geom_Curve_ResD1;
 
-// Computes the point and first two derivatives at parameter theAbsC
 EvalD2(theU: number): Geom_Curve_ResD2;
 
-// Computes the point and first three derivatives at parameter theAbsC
 EvalD3(theU: number): Geom_Curve_ResD3;
 
 SaveFirstParameter(): void;
@@ -232,15 +194,12 @@ Bezier(): Geom_BezierCurve;
 
 BSpline(): Geom_BSplineCurve;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// -- Purpose status concerning the cause of the error
 ChFiDS_ErrorStatus: typeof ChFiDS_ErrorStatus[keyof typeof ChFiDS_ErrorStatus]
 
-// interference face/fillet
 ChFiDS_FaceInterference: declare class ChFiDS_FaceInterference
 
 constructor
@@ -275,19 +234,16 @@ LastParameter(): number;
 
 Parameter(IsFirst: boolean): number;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Provides data specific to the fillets - vector or rule of evolution (C2)
 ChFiDS_FilSpine: declare class ChFiDS_FilSpine extends ChFiDS_Spine
 
 constructor
 
 Reset(AllData?: boolean): void;
 
-// initializes the constant vector on all spine
 SetRadius(Radius: number): void;
 SetRadius(Radius: number, E: TopoDS_Edge): void;
 SetRadius(Radius: number, V: TopoDS_Vertex): void;
@@ -314,19 +270,16 @@ SetRadius(Radius: number, V: TopoDS_Vertex): void;
 SetRadius(UandR: gp_XY, IinC: number): void;
 SetRadius(C: Law_Function, IinC: number): void;
 
-// resets the constant vector on edge E
 UnSetRadius(E: TopoDS_Edge): void;
 UnSetRadius(V: TopoDS_Vertex): void;
 UnSetRadius(E: TopoDS_Edge): void;
 UnSetRadius(V: TopoDS_Vertex): void;
 
-// returns true if the radius is constant all along the spine
 IsConstant(): boolean;
 IsConstant(IE: number): boolean;
 IsConstant(): boolean;
 IsConstant(IE: number): boolean;
 
-// returns the radius if the fillet is constant all along the spine
 Radius(): number;
 Radius(IE: number): number;
 Radius(E: TopoDS_Edge): number;
@@ -341,10 +294,8 @@ AppendElSpine(Els: ChFiDS_ElSpine): void;
 
 Law(Els: ChFiDS_ElSpine): Law_Composite;
 
-// returns the elementary law
 ChangeLaw(E: TopoDS_Edge): Law_Function;
 
-// returns the maximum radius if the fillet is non-constant
 MaxRadFromSeqAndLaws(): number;
 
 static get_type_name(): string;
@@ -353,17 +304,14 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Encapsulation of IndexedDataMapOfShapeListOfShape
 ChFiDS_Map: declare class ChFiDS_Map
 
 constructor
 
-// Fills the map with the subshapes of type T1 as keys and the list of ancestors of type T2 as items
 Fill(S: TopoDS_Shape, T1: TopAbs_ShapeEnum, T2: TopAbs_ShapeEnum): void;
 
 Contains(S: TopoDS_Shape): boolean;
@@ -372,12 +320,10 @@ FindFromKey(S: TopoDS_Shape): NCollection_List_TopoDS_Shape;
 
 FindFromIndex(I: number): NCollection_List_TopoDS_Shape;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// {@link Storage`Storage`} of a curve and its 2 faces or surfaces of support
 ChFiDS_Regul: declare class ChFiDS_Regul
 
 constructor
@@ -398,26 +344,20 @@ S1(): number;
 
 S2(): number;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Contains information necessary for construction of a 3D fillet or chamfer
 ChFiDS_Spine: declare class ChFiDS_Spine extends Standard_Transient
 
 constructor
 
-// store edges composing the guideline
 SetEdges(E: TopoDS_Edge): void;
 
-// store offset edges composing the offset guideline
 SetOffsetEdges(E: TopoDS_Edge): void;
 
-// store the edge at the first position before all others
 PutInFirst(E: TopoDS_Edge): void;
 
-// store the offset edge at the first position before all others
 PutInFirstOffset(E: TopoDS_Edge): void;
 
 NbEdges(): number;
@@ -426,10 +366,8 @@ Edges(I: number): TopoDS_Edge;
 
 OffsetEdges(I: number): TopoDS_Edge;
 
-// stores if the start of a set of edges starts on a section of free border or forms a closed contour
 SetFirstStatus(S: ChFiDS_State): void;
 
-// stores if the end of a set of edges starts on a section of free border or forms a closed contour
 SetLastStatus(S: ChFiDS_State): void;
 
 AppendElSpine(Els: ChFiDS_ElSpine): void;
@@ -457,20 +395,17 @@ SplitDone(B: boolean): void;
 SplitDone(): boolean;
 SplitDone(B: boolean): void;
 
-// prepare the guideline depending on the edges that are elementary arks (take parameters from a single curvilinear abscissa)
 Load(): void;
 
 Resolution(R3d: number): number;
 
 IsClosed(): boolean;
 
-// gives the total length of all arcs before the number IndexSp
 FirstParameter(): number;
 FirstParameter(IndexSpine: number): number;
 FirstParameter(): number;
 FirstParameter(IndexSpine: number): number;
 
-// gives the total length till the ark with number IndexSpine (inclus)
 LastParameter(): number;
 LastParameter(IndexSpine: number): number;
 LastParameter(): number;
@@ -480,7 +415,6 @@ SetFirstParameter(Par: number): void;
 
 SetLastParameter(Par: number): void;
 
-// gives the length of ark with number IndexSp
 Length(IndexSpine: number): number;
 
 IsPeriodic(): boolean;
@@ -512,7 +446,6 @@ D2(AbsC: number, P: gp_Pnt, V1: gp_Vec, V2: gp_Vec): void;
 
 SetCurrent(Index: number): void;
 
-// sets the current curve and returns it
 CurrentElementarySpine(Index: number): BRepAdaptor_Curve;
 
 CurrentIndexOfElementarySpine(): number;
@@ -523,23 +456,18 @@ Line(): gp_Lin;
 
 Circle(): gp_Circ;
 
-// returns if the set of edges starts on a free boundary or if the first vertex is a breakpoint or if the set is closed
 FirstStatus(): ChFiDS_State;
 
-// returns the state at the end of the set
 LastStatus(): ChFiDS_State;
 
 Status(IsFirst: boolean): ChFiDS_State;
 
-// returns the type of concavity in the connection
 GetTypeOfConcavity(): ChFiDS_TypeOfConcavity;
 
 SetStatus(S: ChFiDS_State, IsFirst: boolean): void;
 
-// sets the type of concavity in the connection
 SetTypeOfConcavity(theType: ChFiDS_TypeOfConcavity): void;
 
-// returns if the set of edges starts (or end) on Tangency point
 IsTangencyExtremity(IsFirst: boolean): boolean;
 
 SetTangencyExtremity(IsTangency: boolean, IsFirst: boolean): void;
@@ -556,7 +484,6 @@ HasFirstTgt(): boolean;
 
 HasLastTgt(): boolean;
 
-// set a parameter reference for the approx
 SetReference(W: number): void;
 SetReference(I: number): void;
 SetReference(W: number): void;
@@ -573,10 +500,8 @@ SetErrorStatus(state: ChFiDS_ErrorStatus): void;
 
 ErrorStatus(): ChFiDS_ErrorStatus;
 
-// Return the mode of chamfers used
 Mode(): ChFiDS_ChamfMode;
 
-// Return tolesp parameter
 GetTolesp(): number;
 
 static get_type_name(): string;
@@ -585,20 +510,16 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// This enum describe the different kinds of extremities of a fillet
 ChFiDS_State: typeof ChFiDS_State[keyof typeof ChFiDS_State]
 
-// Data characterising a band of fillet
 ChFiDS_Stripe: declare class ChFiDS_Stripe extends Standard_Transient
 
 constructor
 
-// Reset everything except Spine
 Reset(): void;
 
 SetOfSurfData(): NCollection_HSequence_handle_ChFiDS_SurfData;
@@ -704,10 +625,8 @@ SolidIndex(): number;
 
 SetSolidIndex(Index: number): void;
 
-// Set nb of SurfData's at end put in DS
 InDS(First: boolean, Nb?: number): void;
 
-// Returns nb of SurfData's at end being in DS
 IsInDS(First: boolean): number;
 
 static get_type_name(): string;
@@ -716,12 +635,10 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// encapsulation of IndexedDataMapOfVertexListOfStripe
 ChFiDS_StripeMap: declare class ChFiDS_StripeMap
 
 constructor
@@ -738,7 +655,145 @@ FindKey(I: number): TopoDS_Vertex;
 
 Clear(): void;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
+
+ChFiDS_SurfData: declare class ChFiDS_SurfData extends Standard_Transient
+
+constructor
+
+Copy(Other: ChFiDS_SurfData): void;
+
+IndexOfS1(): number;
+
+IndexOfS2(): number;
+
+IsOnCurve1(): boolean;
+
+IsOnCurve2(): boolean;
+
+IndexOfC1(): number;
+
+IndexOfC2(): number;
+
+Surf(): number;
+
+Orientation(): TopAbs_Orientation;
+
+InterferenceOnS1(): ChFiDS_FaceInterference;
+
+InterferenceOnS2(): ChFiDS_FaceInterference;
+
+VertexFirstOnS1(): ChFiDS_CommonPoint;
+
+VertexFirstOnS2(): ChFiDS_CommonPoint;
+
+VertexLastOnS1(): ChFiDS_CommonPoint;
+
+VertexLastOnS2(): ChFiDS_CommonPoint;
+
+ChangeIndexOfS1(Index: number): void;
+
+ChangeIndexOfS2(Index: number): void;
+
+ChangeSurf(Index: number): void;
+
+SetIndexOfC1(Index: number): void;
+
+SetIndexOfC2(Index: number): void;
+
+ChangeOrientation(): TopAbs_Orientation;
+
+ChangeInterferenceOnS1(): ChFiDS_FaceInterference;
+
+ChangeInterferenceOnS2(): ChFiDS_FaceInterference;
+
+ChangeVertexFirstOnS1(): ChFiDS_CommonPoint;
+
+ChangeVertexFirstOnS2(): ChFiDS_CommonPoint;
+
+ChangeVertexLastOnS1(): ChFiDS_CommonPoint;
+
+ChangeVertexLastOnS2(): ChFiDS_CommonPoint;
+
+Interference(OnS: number): ChFiDS_FaceInterference;
+
+ChangeInterference(OnS: number): ChFiDS_FaceInterference;
+
+Index(OfS: number): number;
+
+Vertex(First: boolean, OnS: number): ChFiDS_CommonPoint;
+
+ChangeVertex(First: boolean, OnS: number): ChFiDS_CommonPoint;
+
+IsOnCurve(OnS: number): boolean;
+
+IndexOfC(OnS: number): number;
+
+FirstSpineParam(): number;
+FirstSpineParam(Par: number): void;
+FirstSpineParam(): number;
+FirstSpineParam(Par: number): void;
+
+LastSpineParam(): number;
+LastSpineParam(Par: number): void;
+LastSpineParam(): number;
+LastSpineParam(Par: number): void;
+
+FirstExtensionValue(): number;
+FirstExtensionValue(Extend: number): void;
+FirstExtensionValue(): number;
+FirstExtensionValue(Extend: number): void;
+
+LastExtensionValue(): number;
+LastExtensionValue(Extend: number): void;
+LastExtensionValue(): number;
+LastExtensionValue(Extend: number): void;
+
+Simul(): Standard_Transient;
+
+SetSimul(S: Standard_Transient): void;
+
+ResetSimul(): void;
+
+Get2dPoints(First: boolean, OnS: number): gp_Pnt2d;
+Get2dPoints(P2df1: gp_Pnt2d, P2dl1: gp_Pnt2d, P2df2: gp_Pnt2d, P2dl2: gp_Pnt2d): void;
+Get2dPoints(First: boolean, OnS: number): gp_Pnt2d;
+Get2dPoints(P2df1: gp_Pnt2d, P2dl1: gp_Pnt2d, P2df2: gp_Pnt2d, P2dl2: gp_Pnt2d): void;
+
+Set2dPoints(P2df1: gp_Pnt2d, P2dl1: gp_Pnt2d, P2df2: gp_Pnt2d, P2dl2: gp_Pnt2d): void;
+
+TwistOnS1(): boolean;
+TwistOnS1(T: boolean): void;
+TwistOnS1(): boolean;
+TwistOnS1(T: boolean): void;
+
+TwistOnS2(): boolean;
+TwistOnS2(T: boolean): void;
+TwistOnS2(): boolean;
+TwistOnS2(T: boolean): void;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+ChFiDS_TypeOfConcavity: typeof ChFiDS_TypeOfConcavity[keyof typeof ChFiDS_TypeOfConcavity]
+
+ChFiDS_HData: NCollection_HSequence_handle_ChFiDS_SurfData
+
+ChFiDS_ListOfHElSpine: NCollection_List_handle_ChFiDS_ElSpine
+
+ChFiDS_ListOfStripe: NCollection_List_handle_ChFiDS_Stripe
+
+ChFiDS_SecArray1: NCollection_Array1_ChFiDS_CircSection
+
+ChFiDS_SecHArray1: NCollection_HArray1_ChFiDS_CircSection
+
+ChFiDS_SequenceOfSurfData: NCollection_Sequence_handle_ChFiDS_SurfData

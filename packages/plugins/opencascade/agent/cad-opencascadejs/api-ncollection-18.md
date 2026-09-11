@@ -1,643 +1,1003 @@
 # libcascade — NCollection (18)
 
-8 top-level symbols. Signatures are verbatim typescript.
+54 top-level symbols. Signatures are verbatim typescript.
 
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_handle_StepDimTol_DatumReferenceElement: declare class NCollection_Array1_handle_StepDimTol_DatumReferenceElement
+NCollection_FlatDataMap_BRepGraph_ItemId_BRepGraph_ItemId_NCollection_DefaultHasher_BRepGraph_ItemId: declare class NCollection_FlatDataMap_BRepGraph_ItemId_BRepGraph_ItemId_NCollection_DefaultHasher_BRepGraph_ItemId
 
 constructor
 
-// Initialise the items with theValue
-Init(theValue: StepDimTol_DatumReferenceElement): void;
-
-// Size query
 Size(): number;
 
-// Length query (legacy int-returning API)
-Length(): number;
+Extent(): number;
 
-// Return TRUE if array has zero length
 IsEmpty(): boolean;
 
-// Lower bound
-Lower(): number;
+Capacity(): number;
 
-// Upper bound
-Upper(): number;
+IsBound(theKey: BRepGraph_ItemId): boolean;
 
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_handle_StepDimTol_DatumReferenceElement): NCollection_Array1_handle_StepDimTol_DatumReferenceElement;
+Seek(theKey: BRepGraph_ItemId): BRepGraph_ItemId;
 
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_handle_StepDimTol_DatumReferenceElement): NCollection_Array1_handle_StepDimTol_DatumReferenceElement;
+ChangeSeek(theKey: BRepGraph_ItemId): BRepGraph_ItemId;
 
-// Move assignment
-Move(theOther: NCollection_Array1_handle_StepDimTol_DatumReferenceElement): NCollection_Array1_handle_StepDimTol_DatumReferenceElement;
-// theOther: Mutated in place
+Find(theKey: BRepGraph_ItemId): BRepGraph_ItemId;
 
-First(): StepDimTol_DatumReferenceElement;
+ChangeFind(theKey: BRepGraph_ItemId): BRepGraph_ItemId;
 
-ChangeFirst(): StepDimTol_DatumReferenceElement;
+Bind(theKey: BRepGraph_ItemId, theItem: BRepGraph_ItemId): boolean;
 
-Last(): StepDimTol_DatumReferenceElement;
+TryBind(theKey: BRepGraph_ItemId, theItem: BRepGraph_ItemId): boolean;
 
-ChangeLast(): StepDimTol_DatumReferenceElement;
+Bound(theKey: BRepGraph_ItemId, theItem: BRepGraph_ItemId): BRepGraph_ItemId;
 
-// Constant value access
-Value(theIndex: number): StepDimTol_DatumReferenceElement;
+TryBound(theKey: BRepGraph_ItemId, theItem: BRepGraph_ItemId): BRepGraph_ItemId;
 
-// Variable value access
-ChangeValue(theIndex: number): StepDimTol_DatumReferenceElement;
+UnBind(theKey: BRepGraph_ItemId): boolean;
 
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): StepDimTol_DatumReferenceElement;
-// theIndex: 0-based index in [0, `Size()`-1]
+Clear(doReleaseMemory?: boolean): void;
 
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): StepDimTol_DatumReferenceElement;
-// theIndex: 0-based index in [0, `Size()`-1]
+Exchange(theOther: NCollection_FlatDataMap_BRepGraph_ItemId_BRepGraph_ItemId_NCollection_DefaultHasher_BRepGraph_ItemId): void;
 
-// Set value
-SetValue(theIndex: number, theItem: StepDimTol_DatumReferenceElement): void;
+GetHasher(): unknown;
 
-// Changes the lowest bound
-UpdateLowerBound(theLower: number): void;
+reserve(theN: number): void;
 
-// Changes the upper bound
-UpdateUpperBound(theUpper: number): void;
+Reserve(theN: number): void;
 
-// Resizes the array to specified bounds
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
-
-IsDeletable(): boolean;
-
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_handle_StepElement_CurveElementEndReleasePacket: declare class NCollection_Array1_handle_StepElement_CurveElementEndReleasePacket
+NCollection_HArray1_AppParCurves_ConstraintCouple: declare class NCollection_HArray1_AppParCurves_ConstraintCouple
 
 constructor
 
-// Initialise the items with theValue
-Init(theValue: StepElement_CurveElementEndReleasePacket): void;
+Array1(): NCollection_Array1_AppParCurves_ConstraintCouple;
 
-// Size query
-Size(): number;
+ChangeArray1(): NCollection_Array1_AppParCurves_ConstraintCouple;
 
-// Length query (legacy int-returning API)
-Length(): number;
+static get_type_name(): string;
 
-// Return TRUE if array has zero length
-IsEmpty(): boolean;
+static get_type_descriptor(): Standard_Type;
 
-// Lower bound
-Lower(): number;
+DynamicType(): Standard_Type;
 
-// Upper bound
-Upper(): number;
-
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_handle_StepElement_CurveElementEndReleasePacket): NCollection_Array1_handle_StepElement_CurveElementEndReleasePacket;
-
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_handle_StepElement_CurveElementEndReleasePacket): NCollection_Array1_handle_StepElement_CurveElementEndReleasePacket;
-
-// Move assignment
-Move(theOther: NCollection_Array1_handle_StepElement_CurveElementEndReleasePacket): NCollection_Array1_handle_StepElement_CurveElementEndReleasePacket;
-// theOther: Mutated in place
-
-First(): StepElement_CurveElementEndReleasePacket;
-
-ChangeFirst(): StepElement_CurveElementEndReleasePacket;
-
-Last(): StepElement_CurveElementEndReleasePacket;
-
-ChangeLast(): StepElement_CurveElementEndReleasePacket;
-
-// Constant value access
-Value(theIndex: number): StepElement_CurveElementEndReleasePacket;
-
-// Variable value access
-ChangeValue(theIndex: number): StepElement_CurveElementEndReleasePacket;
-
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): StepElement_CurveElementEndReleasePacket;
-// theIndex: 0-based index in [0, `Size()`-1]
-
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): StepElement_CurveElementEndReleasePacket;
-// theIndex: 0-based index in [0, `Size()`-1]
-
-// Set value
-SetValue(theIndex: number, theItem: StepElement_CurveElementEndReleasePacket): void;
-
-// Changes the lowest bound
-UpdateLowerBound(theLower: number): void;
-
-// Changes the upper bound
-UpdateUpperBound(theUpper: number): void;
-
-// Resizes the array to specified bounds
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
-
-IsDeletable(): boolean;
-
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_handle_StepElement_CurveElementSectionDefinition: declare class NCollection_Array1_handle_StepElement_CurveElementSectionDefinition
+NCollection_HArray1_Bnd_Box: declare class NCollection_HArray1_Bnd_Box
 
 constructor
 
-// Initialise the items with theValue
-Init(theValue: StepElement_CurveElementSectionDefinition): void;
+Array1(): NCollection_Array1_Bnd_Box;
 
-// Size query
-Size(): number;
+ChangeArray1(): NCollection_Array1_Bnd_Box;
 
-// Length query (legacy int-returning API)
-Length(): number;
+static get_type_name(): string;
 
-// Return TRUE if array has zero length
-IsEmpty(): boolean;
+static get_type_descriptor(): Standard_Type;
 
-// Lower bound
-Lower(): number;
+DynamicType(): Standard_Type;
 
-// Upper bound
-Upper(): number;
-
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_handle_StepElement_CurveElementSectionDefinition): NCollection_Array1_handle_StepElement_CurveElementSectionDefinition;
-
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_handle_StepElement_CurveElementSectionDefinition): NCollection_Array1_handle_StepElement_CurveElementSectionDefinition;
-
-// Move assignment
-Move(theOther: NCollection_Array1_handle_StepElement_CurveElementSectionDefinition): NCollection_Array1_handle_StepElement_CurveElementSectionDefinition;
-// theOther: Mutated in place
-
-First(): StepElement_CurveElementSectionDefinition;
-
-ChangeFirst(): StepElement_CurveElementSectionDefinition;
-
-Last(): StepElement_CurveElementSectionDefinition;
-
-ChangeLast(): StepElement_CurveElementSectionDefinition;
-
-// Constant value access
-Value(theIndex: number): StepElement_CurveElementSectionDefinition;
-
-// Variable value access
-ChangeValue(theIndex: number): StepElement_CurveElementSectionDefinition;
-
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): StepElement_CurveElementSectionDefinition;
-// theIndex: 0-based index in [0, `Size()`-1]
-
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): StepElement_CurveElementSectionDefinition;
-// theIndex: 0-based index in [0, `Size()`-1]
-
-// Set value
-SetValue(theIndex: number, theItem: StepElement_CurveElementSectionDefinition): void;
-
-// Changes the lowest bound
-UpdateLowerBound(theLower: number): void;
-
-// Changes the upper bound
-UpdateUpperBound(theUpper: number): void;
-
-// Resizes the array to specified bounds
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
-
-IsDeletable(): boolean;
-
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_handle_StepElement_SurfaceSection: declare class NCollection_Array1_handle_StepElement_SurfaceSection
+NCollection_HArray1_ChFiDS_CircSection: declare class NCollection_HArray1_ChFiDS_CircSection
 
 constructor
 
-// Initialise the items with theValue
-Init(theValue: StepElement_SurfaceSection): void;
+Array1(): NCollection_Array1_ChFiDS_CircSection;
 
-// Size query
-Size(): number;
+ChangeArray1(): NCollection_Array1_ChFiDS_CircSection;
 
-// Length query (legacy int-returning API)
-Length(): number;
+static get_type_name(): string;
 
-// Return TRUE if array has zero length
-IsEmpty(): boolean;
+static get_type_descriptor(): Standard_Type;
 
-// Lower bound
-Lower(): number;
+DynamicType(): Standard_Type;
 
-// Upper bound
-Upper(): number;
-
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_handle_StepElement_SurfaceSection): NCollection_Array1_handle_StepElement_SurfaceSection;
-
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_handle_StepElement_SurfaceSection): NCollection_Array1_handle_StepElement_SurfaceSection;
-
-// Move assignment
-Move(theOther: NCollection_Array1_handle_StepElement_SurfaceSection): NCollection_Array1_handle_StepElement_SurfaceSection;
-// theOther: Mutated in place
-
-First(): StepElement_SurfaceSection;
-
-ChangeFirst(): StepElement_SurfaceSection;
-
-Last(): StepElement_SurfaceSection;
-
-ChangeLast(): StepElement_SurfaceSection;
-
-// Constant value access
-Value(theIndex: number): StepElement_SurfaceSection;
-
-// Variable value access
-ChangeValue(theIndex: number): StepElement_SurfaceSection;
-
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): StepElement_SurfaceSection;
-// theIndex: 0-based index in [0, `Size()`-1]
-
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): StepElement_SurfaceSection;
-// theIndex: 0-based index in [0, `Size()`-1]
-
-// Set value
-SetValue(theIndex: number, theItem: StepElement_SurfaceSection): void;
-
-// Changes the lowest bound
-UpdateLowerBound(theLower: number): void;
-
-// Changes the upper bound
-UpdateUpperBound(theUpper: number): void;
-
-// Resizes the array to specified bounds
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
-
-IsDeletable(): boolean;
-
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_handle_StepElement_VolumeElementPurposeMember: declare class NCollection_Array1_handle_StepElement_VolumeElementPurposeMember
+NCollection_HArray1_HLRAlgo_PolyHidingData: declare class NCollection_HArray1_HLRAlgo_PolyHidingData
 
 constructor
 
-// Initialise the items with theValue
-Init(theValue: StepElement_VolumeElementPurposeMember): void;
+Array1(): NCollection_Array1_HLRAlgo_PolyHidingData;
 
-// Size query
-Size(): number;
+ChangeArray1(): NCollection_Array1_HLRAlgo_PolyHidingData;
 
-// Length query (legacy int-returning API)
-Length(): number;
+static get_type_name(): string;
 
-// Return TRUE if array has zero length
-IsEmpty(): boolean;
+static get_type_descriptor(): Standard_Type;
 
-// Lower bound
-Lower(): number;
+DynamicType(): Standard_Type;
 
-// Upper bound
-Upper(): number;
-
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_handle_StepElement_VolumeElementPurposeMember): NCollection_Array1_handle_StepElement_VolumeElementPurposeMember;
-
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_handle_StepElement_VolumeElementPurposeMember): NCollection_Array1_handle_StepElement_VolumeElementPurposeMember;
-
-// Move assignment
-Move(theOther: NCollection_Array1_handle_StepElement_VolumeElementPurposeMember): NCollection_Array1_handle_StepElement_VolumeElementPurposeMember;
-// theOther: Mutated in place
-
-First(): StepElement_VolumeElementPurposeMember;
-
-ChangeFirst(): StepElement_VolumeElementPurposeMember;
-
-Last(): StepElement_VolumeElementPurposeMember;
-
-ChangeLast(): StepElement_VolumeElementPurposeMember;
-
-// Constant value access
-Value(theIndex: number): StepElement_VolumeElementPurposeMember;
-
-// Variable value access
-ChangeValue(theIndex: number): StepElement_VolumeElementPurposeMember;
-
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): StepElement_VolumeElementPurposeMember;
-// theIndex: 0-based index in [0, `Size()`-1]
-
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): StepElement_VolumeElementPurposeMember;
-// theIndex: 0-based index in [0, `Size()`-1]
-
-// Set value
-SetValue(theIndex: number, theItem: StepElement_VolumeElementPurposeMember): void;
-
-// Changes the lowest bound
-UpdateLowerBound(theLower: number): void;
-
-// Changes the upper bound
-UpdateUpperBound(theUpper: number): void;
-
-// Resizes the array to specified bounds
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
-
-IsDeletable(): boolean;
-
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_handle_StepFEA_CurveElementEndOffset: declare class NCollection_Array1_handle_StepFEA_CurveElementEndOffset
+NCollection_HArray1_HLRAlgo_TriangleData: declare class NCollection_HArray1_HLRAlgo_TriangleData
 
 constructor
 
-// Initialise the items with theValue
-Init(theValue: StepFEA_CurveElementEndOffset): void;
+Array1(): NCollection_Array1_HLRAlgo_TriangleData;
 
-// Size query
-Size(): number;
+ChangeArray1(): NCollection_Array1_HLRAlgo_TriangleData;
 
-// Length query (legacy int-returning API)
-Length(): number;
+static get_type_name(): string;
 
-// Return TRUE if array has zero length
-IsEmpty(): boolean;
+static get_type_descriptor(): Standard_Type;
 
-// Lower bound
-Lower(): number;
+DynamicType(): Standard_Type;
 
-// Upper bound
-Upper(): number;
-
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_handle_StepFEA_CurveElementEndOffset): NCollection_Array1_handle_StepFEA_CurveElementEndOffset;
-
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_handle_StepFEA_CurveElementEndOffset): NCollection_Array1_handle_StepFEA_CurveElementEndOffset;
-
-// Move assignment
-Move(theOther: NCollection_Array1_handle_StepFEA_CurveElementEndOffset): NCollection_Array1_handle_StepFEA_CurveElementEndOffset;
-// theOther: Mutated in place
-
-First(): StepFEA_CurveElementEndOffset;
-
-ChangeFirst(): StepFEA_CurveElementEndOffset;
-
-Last(): StepFEA_CurveElementEndOffset;
-
-ChangeLast(): StepFEA_CurveElementEndOffset;
-
-// Constant value access
-Value(theIndex: number): StepFEA_CurveElementEndOffset;
-
-// Variable value access
-ChangeValue(theIndex: number): StepFEA_CurveElementEndOffset;
-
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): StepFEA_CurveElementEndOffset;
-// theIndex: 0-based index in [0, `Size()`-1]
-
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): StepFEA_CurveElementEndOffset;
-// theIndex: 0-based index in [0, `Size()`-1]
-
-// Set value
-SetValue(theIndex: number, theItem: StepFEA_CurveElementEndOffset): void;
-
-// Changes the lowest bound
-UpdateLowerBound(theLower: number): void;
-
-// Changes the upper bound
-UpdateUpperBound(theUpper: number): void;
-
-// Resizes the array to specified bounds
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
-
-IsDeletable(): boolean;
-
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_handle_StepFEA_CurveElementEndRelease: declare class NCollection_Array1_handle_StepFEA_CurveElementEndRelease
+NCollection_HArray1_Poly_Triangle: declare class NCollection_HArray1_Poly_Triangle
 
 constructor
 
-// Initialise the items with theValue
-Init(theValue: StepFEA_CurveElementEndRelease): void;
+Array1(): NCollection_Array1_Poly_Triangle;
 
-// Size query
-Size(): number;
+ChangeArray1(): NCollection_Array1_Poly_Triangle;
 
-// Length query (legacy int-returning API)
-Length(): number;
+static get_type_name(): string;
 
-// Return TRUE if array has zero length
-IsEmpty(): boolean;
+static get_type_descriptor(): Standard_Type;
 
-// Lower bound
-Lower(): number;
+DynamicType(): Standard_Type;
 
-// Upper bound
-Upper(): number;
-
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_handle_StepFEA_CurveElementEndRelease): NCollection_Array1_handle_StepFEA_CurveElementEndRelease;
-
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_handle_StepFEA_CurveElementEndRelease): NCollection_Array1_handle_StepFEA_CurveElementEndRelease;
-
-// Move assignment
-Move(theOther: NCollection_Array1_handle_StepFEA_CurveElementEndRelease): NCollection_Array1_handle_StepFEA_CurveElementEndRelease;
-// theOther: Mutated in place
-
-First(): StepFEA_CurveElementEndRelease;
-
-ChangeFirst(): StepFEA_CurveElementEndRelease;
-
-Last(): StepFEA_CurveElementEndRelease;
-
-ChangeLast(): StepFEA_CurveElementEndRelease;
-
-// Constant value access
-Value(theIndex: number): StepFEA_CurveElementEndRelease;
-
-// Variable value access
-ChangeValue(theIndex: number): StepFEA_CurveElementEndRelease;
-
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): StepFEA_CurveElementEndRelease;
-// theIndex: 0-based index in [0, `Size()`-1]
-
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): StepFEA_CurveElementEndRelease;
-// theIndex: 0-based index in [0, `Size()`-1]
-
-// Set value
-SetValue(theIndex: number, theItem: StepFEA_CurveElementEndRelease): void;
-
-// Changes the lowest bound
-UpdateLowerBound(theLower: number): void;
-
-// Changes the upper bound
-UpdateUpperBound(theUpper: number): void;
-
-// Resizes the array to specified bounds
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
-
-IsDeletable(): boolean;
-
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_handle_StepFEA_CurveElementInterval: declare class NCollection_Array1_handle_StepFEA_CurveElementInterval
+NCollection_HArray1_StepAP203_ApprovedItem: declare class NCollection_HArray1_StepAP203_ApprovedItem
 
 constructor
 
-// Initialise the items with theValue
-Init(theValue: StepFEA_CurveElementInterval): void;
+Array1(): NCollection_Array1_StepAP203_ApprovedItem;
 
-// Size query
-Size(): number;
+ChangeArray1(): NCollection_Array1_StepAP203_ApprovedItem;
 
-// Length query (legacy int-returning API)
-Length(): number;
+static get_type_name(): string;
 
-// Return TRUE if array has zero length
-IsEmpty(): boolean;
+static get_type_descriptor(): Standard_Type;
 
-// Lower bound
-Lower(): number;
+DynamicType(): Standard_Type;
 
-// Upper bound
-Upper(): number;
+delete(): void;
 
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_handle_StepFEA_CurveElementInterval): NCollection_Array1_handle_StepFEA_CurveElementInterval;
+[Symbol.dispose](): void;
 
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_handle_StepFEA_CurveElementInterval): NCollection_Array1_handle_StepFEA_CurveElementInterval;
+NCollection_HArray1_StepAP203_CertifiedItem: declare class NCollection_HArray1_StepAP203_CertifiedItem
 
-// Move assignment
-Move(theOther: NCollection_Array1_handle_StepFEA_CurveElementInterval): NCollection_Array1_handle_StepFEA_CurveElementInterval;
-// theOther: Mutated in place
+constructor
 
-First(): StepFEA_CurveElementInterval;
+Array1(): NCollection_Array1_StepAP203_CertifiedItem;
 
-ChangeFirst(): StepFEA_CurveElementInterval;
+ChangeArray1(): NCollection_Array1_StepAP203_CertifiedItem;
 
-Last(): StepFEA_CurveElementInterval;
+static get_type_name(): string;
 
-ChangeLast(): StepFEA_CurveElementInterval;
+static get_type_descriptor(): Standard_Type;
 
-// Constant value access
-Value(theIndex: number): StepFEA_CurveElementInterval;
+DynamicType(): Standard_Type;
 
-// Variable value access
-ChangeValue(theIndex: number): StepFEA_CurveElementInterval;
+delete(): void;
 
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): StepFEA_CurveElementInterval;
-// theIndex: 0-based index in [0, `Size()`-1]
+[Symbol.dispose](): void;
 
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): StepFEA_CurveElementInterval;
-// theIndex: 0-based index in [0, `Size()`-1]
+NCollection_HArray1_StepAP203_ChangeRequestItem: declare class NCollection_HArray1_StepAP203_ChangeRequestItem
 
-// Set value
-SetValue(theIndex: number, theItem: StepFEA_CurveElementInterval): void;
+constructor
 
-// Changes the lowest bound
-UpdateLowerBound(theLower: number): void;
+Array1(): NCollection_Array1_StepAP203_ChangeRequestItem;
 
-// Changes the upper bound
-UpdateUpperBound(theUpper: number): void;
+ChangeArray1(): NCollection_Array1_StepAP203_ChangeRequestItem;
 
-// Resizes the array to specified bounds
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
+static get_type_name(): string;
 
-IsDeletable(): boolean;
+static get_type_descriptor(): Standard_Type;
 
-// Releases the C++ object
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HArray1_StepAP203_ClassifiedItem: declare class NCollection_HArray1_StepAP203_ClassifiedItem
+
+constructor
+
+Array1(): NCollection_Array1_StepAP203_ClassifiedItem;
+
+ChangeArray1(): NCollection_Array1_StepAP203_ClassifiedItem;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HArray1_StepAP203_ContractedItem: declare class NCollection_HArray1_StepAP203_ContractedItem
+
+constructor
+
+Array1(): NCollection_Array1_StepAP203_ContractedItem;
+
+ChangeArray1(): NCollection_Array1_StepAP203_ContractedItem;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HArray1_StepAP203_DateTimeItem: declare class NCollection_HArray1_StepAP203_DateTimeItem
+
+constructor
+
+Array1(): NCollection_Array1_StepAP203_DateTimeItem;
+
+ChangeArray1(): NCollection_Array1_StepAP203_DateTimeItem;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HArray1_StepAP203_PersonOrganizationItem: declare class NCollection_HArray1_StepAP203_PersonOrganizationItem
+
+constructor
+
+Array1(): NCollection_Array1_StepAP203_PersonOrganizationItem;
+
+ChangeArray1(): NCollection_Array1_StepAP203_PersonOrganizationItem;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HArray1_StepAP203_SpecifiedItem: declare class NCollection_HArray1_StepAP203_SpecifiedItem
+
+constructor
+
+Array1(): NCollection_Array1_StepAP203_SpecifiedItem;
+
+ChangeArray1(): NCollection_Array1_StepAP203_SpecifiedItem;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HArray1_StepAP203_StartRequestItem: declare class NCollection_HArray1_StepAP203_StartRequestItem
+
+constructor
+
+Array1(): NCollection_Array1_StepAP203_StartRequestItem;
+
+ChangeArray1(): NCollection_Array1_StepAP203_StartRequestItem;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HArray1_StepAP203_WorkItem: declare class NCollection_HArray1_StepAP203_WorkItem
+
+constructor
+
+Array1(): NCollection_Array1_StepAP203_WorkItem;
+
+ChangeArray1(): NCollection_Array1_StepAP203_WorkItem;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HArray1_StepAP214_ApprovalItem: declare class NCollection_HArray1_StepAP214_ApprovalItem
+
+constructor
+
+Array1(): NCollection_Array1_StepAP214_ApprovalItem;
+
+ChangeArray1(): NCollection_Array1_StepAP214_ApprovalItem;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HArray1_StepAP214_AutoDesignDateAndPersonItem: declare class NCollection_HArray1_StepAP214_AutoDesignDateAndPersonItem
+
+constructor
+
+Array1(): NCollection_Array1_StepAP214_AutoDesignDateAndPersonItem;
+
+ChangeArray1(): NCollection_Array1_StepAP214_AutoDesignDateAndPersonItem;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HArray1_StepAP214_AutoDesignDateAndTimeItem: declare class NCollection_HArray1_StepAP214_AutoDesignDateAndTimeItem
+
+constructor
+
+Array1(): NCollection_Array1_StepAP214_AutoDesignDateAndTimeItem;
+
+ChangeArray1(): NCollection_Array1_StepAP214_AutoDesignDateAndTimeItem;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HArray1_StepAP214_AutoDesignDatedItem: declare class NCollection_HArray1_StepAP214_AutoDesignDatedItem
+
+constructor
+
+Array1(): NCollection_Array1_StepAP214_AutoDesignDatedItem;
+
+ChangeArray1(): NCollection_Array1_StepAP214_AutoDesignDatedItem;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HArray1_StepAP214_AutoDesignGeneralOrgItem: declare class NCollection_HArray1_StepAP214_AutoDesignGeneralOrgItem
+
+constructor
+
+Array1(): NCollection_Array1_StepAP214_AutoDesignGeneralOrgItem;
+
+ChangeArray1(): NCollection_Array1_StepAP214_AutoDesignGeneralOrgItem;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HArray1_StepAP214_AutoDesignGroupedItem: declare class NCollection_HArray1_StepAP214_AutoDesignGroupedItem
+
+constructor
+
+Array1(): NCollection_Array1_StepAP214_AutoDesignGroupedItem;
+
+ChangeArray1(): NCollection_Array1_StepAP214_AutoDesignGroupedItem;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HArray1_StepAP214_AutoDesignPresentedItemSelect: declare class NCollection_HArray1_StepAP214_AutoDesignPresentedItemSelect
+
+constructor
+
+Array1(): NCollection_Array1_StepAP214_AutoDesignPresentedItemSelect;
+
+ChangeArray1(): NCollection_Array1_StepAP214_AutoDesignPresentedItemSelect;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HArray1_StepAP214_AutoDesignReferencingItem: declare class NCollection_HArray1_StepAP214_AutoDesignReferencingItem
+
+constructor
+
+Array1(): NCollection_Array1_StepAP214_AutoDesignReferencingItem;
+
+ChangeArray1(): NCollection_Array1_StepAP214_AutoDesignReferencingItem;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HArray1_StepAP214_DateAndTimeItem: declare class NCollection_HArray1_StepAP214_DateAndTimeItem
+
+constructor
+
+Array1(): NCollection_Array1_StepAP214_DateAndTimeItem;
+
+ChangeArray1(): NCollection_Array1_StepAP214_DateAndTimeItem;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HArray1_StepAP214_DateItem: declare class NCollection_HArray1_StepAP214_DateItem
+
+constructor
+
+Array1(): NCollection_Array1_StepAP214_DateItem;
+
+ChangeArray1(): NCollection_Array1_StepAP214_DateItem;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HArray1_StepAP214_DocumentReferenceItem: declare class NCollection_HArray1_StepAP214_DocumentReferenceItem
+
+constructor
+
+Array1(): NCollection_Array1_StepAP214_DocumentReferenceItem;
+
+ChangeArray1(): NCollection_Array1_StepAP214_DocumentReferenceItem;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HArray1_StepAP214_ExternalIdentificationItem: declare class NCollection_HArray1_StepAP214_ExternalIdentificationItem
+
+constructor
+
+Array1(): NCollection_Array1_StepAP214_ExternalIdentificationItem;
+
+ChangeArray1(): NCollection_Array1_StepAP214_ExternalIdentificationItem;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HArray1_StepAP214_GroupItem: declare class NCollection_HArray1_StepAP214_GroupItem
+
+constructor
+
+Array1(): NCollection_Array1_StepAP214_GroupItem;
+
+ChangeArray1(): NCollection_Array1_StepAP214_GroupItem;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HArray1_StepAP214_OrganizationItem: declare class NCollection_HArray1_StepAP214_OrganizationItem
+
+constructor
+
+Array1(): NCollection_Array1_StepAP214_OrganizationItem;
+
+ChangeArray1(): NCollection_Array1_StepAP214_OrganizationItem;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HArray1_StepAP214_PersonAndOrganizationItem: declare class NCollection_HArray1_StepAP214_PersonAndOrganizationItem
+
+constructor
+
+Array1(): NCollection_Array1_StepAP214_PersonAndOrganizationItem;
+
+ChangeArray1(): NCollection_Array1_StepAP214_PersonAndOrganizationItem;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HArray1_StepAP214_PresentedItemSelect: declare class NCollection_HArray1_StepAP214_PresentedItemSelect
+
+constructor
+
+Array1(): NCollection_Array1_StepAP214_PresentedItemSelect;
+
+ChangeArray1(): NCollection_Array1_StepAP214_PresentedItemSelect;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HArray1_StepAP214_SecurityClassificationItem: declare class NCollection_HArray1_StepAP214_SecurityClassificationItem
+
+constructor
+
+Array1(): NCollection_Array1_StepAP214_SecurityClassificationItem;
+
+ChangeArray1(): NCollection_Array1_StepAP214_SecurityClassificationItem;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HArray1_StepDimTol_DatumReferenceModifier: declare class NCollection_HArray1_StepDimTol_DatumReferenceModifier
+
+constructor
+
+Array1(): NCollection_Array1_StepDimTol_DatumReferenceModifier;
+
+ChangeArray1(): NCollection_Array1_StepDimTol_DatumReferenceModifier;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HArray1_StepDimTol_DatumSystemOrReference: declare class NCollection_HArray1_StepDimTol_DatumSystemOrReference
+
+constructor
+
+Array1(): NCollection_Array1_StepDimTol_DatumSystemOrReference;
+
+ChangeArray1(): NCollection_Array1_StepDimTol_DatumSystemOrReference;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HArray1_StepDimTol_GeometricToleranceModifier: declare class NCollection_HArray1_StepDimTol_GeometricToleranceModifier
+
+constructor
+
+Array1(): NCollection_Array1_StepDimTol_GeometricToleranceModifier;
+
+ChangeArray1(): NCollection_Array1_StepDimTol_GeometricToleranceModifier;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HArray1_StepDimTol_ToleranceZoneTarget: declare class NCollection_HArray1_StepDimTol_ToleranceZoneTarget
+
+constructor
+
+Array1(): NCollection_Array1_StepDimTol_ToleranceZoneTarget;
+
+ChangeArray1(): NCollection_Array1_StepDimTol_ToleranceZoneTarget;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HArray1_StepElement_MeasureOrUnspecifiedValue: declare class NCollection_HArray1_StepElement_MeasureOrUnspecifiedValue
+
+constructor
+
+Array1(): NCollection_Array1_StepElement_MeasureOrUnspecifiedValue;
+
+ChangeArray1(): NCollection_Array1_StepElement_MeasureOrUnspecifiedValue;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HArray1_StepFEA_DegreeOfFreedom: declare class NCollection_HArray1_StepFEA_DegreeOfFreedom
+
+constructor
+
+Array1(): NCollection_Array1_StepFEA_DegreeOfFreedom;
+
+ChangeArray1(): NCollection_Array1_StepFEA_DegreeOfFreedom;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HArray1_StepGeom_PcurveOrSurface: declare class NCollection_HArray1_StepGeom_PcurveOrSurface
+
+constructor
+
+Array1(): NCollection_Array1_StepGeom_PcurveOrSurface;
+
+ChangeArray1(): NCollection_Array1_StepGeom_PcurveOrSurface;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HArray1_StepGeom_SurfaceBoundary: declare class NCollection_HArray1_StepGeom_SurfaceBoundary
+
+constructor
+
+Array1(): NCollection_Array1_StepGeom_SurfaceBoundary;
+
+ChangeArray1(): NCollection_Array1_StepGeom_SurfaceBoundary;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HArray1_StepGeom_TrimmingSelect: declare class NCollection_HArray1_StepGeom_TrimmingSelect
+
+constructor
+
+Array1(): NCollection_Array1_StepGeom_TrimmingSelect;
+
+ChangeArray1(): NCollection_Array1_StepGeom_TrimmingSelect;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HArray1_StepShape_GeometricSetSelect: declare class NCollection_HArray1_StepShape_GeometricSetSelect
+
+constructor
+
+Array1(): NCollection_Array1_StepShape_GeometricSetSelect;
+
+ChangeArray1(): NCollection_Array1_StepShape_GeometricSetSelect;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HArray1_StepShape_ShapeDimensionRepresentationItem: declare class NCollection_HArray1_StepShape_ShapeDimensionRepresentationItem
+
+constructor
+
+Array1(): NCollection_Array1_StepShape_ShapeDimensionRepresentationItem;
+
+ChangeArray1(): NCollection_Array1_StepShape_ShapeDimensionRepresentationItem;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HArray1_StepShape_Shell: declare class NCollection_HArray1_StepShape_Shell
+
+constructor
+
+Array1(): NCollection_Array1_StepShape_Shell;
+
+ChangeArray1(): NCollection_Array1_StepShape_Shell;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HArray1_StepShape_ValueQualifier: declare class NCollection_HArray1_StepShape_ValueQualifier
+
+constructor
+
+Array1(): NCollection_Array1_StepShape_ValueQualifier;
+
+ChangeArray1(): NCollection_Array1_StepShape_ValueQualifier;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HArray1_StepVisual_AnnotationPlaneElement: declare class NCollection_HArray1_StepVisual_AnnotationPlaneElement
+
+constructor
+
+Array1(): NCollection_Array1_StepVisual_AnnotationPlaneElement;
+
+ChangeArray1(): NCollection_Array1_StepVisual_AnnotationPlaneElement;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HArray1_StepVisual_BoxCharacteristicSelect: declare class NCollection_HArray1_StepVisual_BoxCharacteristicSelect
+
+constructor
+
+Array1(): NCollection_Array1_StepVisual_BoxCharacteristicSelect;
+
+ChangeArray1(): NCollection_Array1_StepVisual_BoxCharacteristicSelect;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HArray1_StepVisual_CameraModelD3MultiClippingInterectionSelect: declare class NCollection_HArray1_StepVisual_CameraModelD3MultiClippingInterectionSelect
+
+constructor
+
+Array1(): NCollection_Array1_StepVisual_CameraModelD3MultiClippingInterectionSelect;
+
+ChangeArray1(): NCollection_Array1_StepVisual_CameraModelD3MultiClippingInterectionSelect;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HArray1_StepVisual_CameraModelD3MultiClippingUnionSelect: declare class NCollection_HArray1_StepVisual_CameraModelD3MultiClippingUnionSelect
+
+constructor
+
+Array1(): NCollection_Array1_StepVisual_CameraModelD3MultiClippingUnionSelect;
+
+ChangeArray1(): NCollection_Array1_StepVisual_CameraModelD3MultiClippingUnionSelect;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HArray1_StepVisual_DirectionCountSelect: declare class NCollection_HArray1_StepVisual_DirectionCountSelect
+
+constructor
+
+Array1(): NCollection_Array1_StepVisual_DirectionCountSelect;
+
+ChangeArray1(): NCollection_Array1_StepVisual_DirectionCountSelect;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HArray1_StepVisual_DraughtingCalloutElement: declare class NCollection_HArray1_StepVisual_DraughtingCalloutElement
+
+constructor
+
+Array1(): NCollection_Array1_StepVisual_DraughtingCalloutElement;
+
+ChangeArray1(): NCollection_Array1_StepVisual_DraughtingCalloutElement;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HArray1_StepVisual_FillStyleSelect: declare class NCollection_HArray1_StepVisual_FillStyleSelect
+
+constructor
+
+Array1(): NCollection_Array1_StepVisual_FillStyleSelect;
+
+ChangeArray1(): NCollection_Array1_StepVisual_FillStyleSelect;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
 delete(): void;
 
 [Symbol.dispose](): void;

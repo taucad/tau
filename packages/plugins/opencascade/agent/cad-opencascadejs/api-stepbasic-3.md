@@ -1,336 +1,6 @@
 # libcascade — StepBasic (3)
 
-26 top-level symbols. Signatures are verbatim typescript.
-
-// Representation of STEP entity ExternallyDefinedItem
-StepBasic_ExternallyDefinedItem: declare class StepBasic_ExternallyDefinedItem extends Standard_Transient
-
-constructor
-
-// Initialize all fields (own and inherited)
-Init(aItemId: StepBasic_SourceItem, aSource: StepBasic_ExternalSource): void;
-
-// Returns field ItemId
-ItemId(): StepBasic_SourceItem;
-
-// Set field ItemId
-SetItemId(ItemId: StepBasic_SourceItem): void;
-
-// Returns field Source
-Source(): StepBasic_ExternalSource;
-
-// Set field Source
-SetSource(Source: StepBasic_ExternalSource): void;
-
-static get_type_name(): string;
-
-static get_type_descriptor(): Standard_Type;
-
-DynamicType(): Standard_Type;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// Representation of STEP entity GeneralProperty
-StepBasic_GeneralProperty: declare class StepBasic_GeneralProperty extends Standard_Transient
-
-constructor
-
-// Initialize all fields (own and inherited)
-Init(aId: TCollection_HAsciiString, aName: TCollection_HAsciiString, hasDescription: boolean, aDescription: TCollection_HAsciiString): void;
-
-// Returns field Id
-Id(): TCollection_HAsciiString;
-
-// Set field Id
-SetId(Id: TCollection_HAsciiString): void;
-
-// Returns field Name
-Name(): TCollection_HAsciiString;
-
-// Set field Name
-SetName(Name: TCollection_HAsciiString): void;
-
-// Returns field Description
-Description(): TCollection_HAsciiString;
-
-// Set field Description
-SetDescription(Description: TCollection_HAsciiString): void;
-
-// Returns True if optional field Description is defined
-HasDescription(): boolean;
-
-static get_type_name(): string;
-
-static get_type_descriptor(): Standard_Type;
-
-DynamicType(): Standard_Type;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// Representation of STEP entity GeneralPropertyAssociation
-StepBasic_GeneralPropertyAssociation: declare class StepBasic_GeneralPropertyAssociation extends Standard_Transient
-
-constructor
-
-// Initialize all fields (own and inherited)
-Init(aName: TCollection_HAsciiString, aDescription: TCollection_HAsciiString, aGeneralProperty: StepBasic_GeneralProperty, aPropertyDefinition: StepRepr_PropertyDefinition): void;
-
-// Returns field Name
-Name(): TCollection_HAsciiString;
-
-// Set field Name
-SetName(Name: TCollection_HAsciiString): void;
-
-// Returns field Description
-Description(): TCollection_HAsciiString;
-
-// Set field Description
-SetDescription(Description: TCollection_HAsciiString): void;
-
-// Returns field GeneralProperty
-GeneralProperty(): StepBasic_GeneralProperty;
-
-// Set field GeneralProperty
-SetGeneralProperty(GeneralProperty: StepBasic_GeneralProperty): void;
-
-// Returns field PropertyDefinition
-PropertyDefinition(): StepRepr_PropertyDefinition;
-
-// Set field PropertyDefinition
-SetPropertyDefinition(PropertyDefinition: StepRepr_PropertyDefinition): void;
-
-static get_type_name(): string;
-
-static get_type_descriptor(): Standard_Type;
-
-DynamicType(): Standard_Type;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// Representation of STEP entity GeneralPropertyRelationship
-StepBasic_GeneralPropertyRelationship: declare class StepBasic_GeneralPropertyRelationship extends Standard_Transient
-
-constructor
-
-// Initialize all fields (own and inherited)
-Init(aName: TCollection_HAsciiString, hasDescription: boolean, aDescription: TCollection_HAsciiString, aRelatingGeneralProperty: StepBasic_GeneralProperty, aRelatedGeneralProperty: StepBasic_GeneralProperty): void;
-
-// Returns field Name
-Name(): TCollection_HAsciiString;
-
-// Set field Name
-SetName(Name: TCollection_HAsciiString): void;
-
-// Returns True if optional field Description is defined
-HasDescription(): boolean;
-
-// Returns field Description
-Description(): TCollection_HAsciiString;
-
-// Set field Description
-SetDescription(Description: TCollection_HAsciiString): void;
-
-// Returns field RelatingGeneralProperty
-RelatingGeneralProperty(): StepBasic_GeneralProperty;
-
-// Set field RelatingGeneralProperty
-SetRelatingGeneralProperty(RelatingGeneralProperty: StepBasic_GeneralProperty): void;
-
-// Returns field RelatedGeneralProperty
-RelatedGeneralProperty(): StepBasic_GeneralProperty;
-
-// Set field RelatedGeneralProperty
-SetRelatedGeneralProperty(RelatedGeneralProperty: StepBasic_GeneralProperty): void;
-
-static get_type_name(): string;
-
-static get_type_descriptor(): Standard_Type;
-
-DynamicType(): Standard_Type;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// Representation of STEP entity Group
-StepBasic_Group: declare class StepBasic_Group extends Standard_Transient
-
-constructor
-
-// Initialize all fields (own and inherited)
-Init(aName: TCollection_HAsciiString, hasDescription: boolean, aDescription: TCollection_HAsciiString): void;
-
-// Returns field Name
-Name(): TCollection_HAsciiString;
-
-// Set field Name
-SetName(Name: TCollection_HAsciiString): void;
-
-// Returns field Description
-Description(): TCollection_HAsciiString;
-
-// Set field Description
-SetDescription(Description: TCollection_HAsciiString): void;
-
-// Returns True if optional field Description is defined
-HasDescription(): boolean;
-
-static get_type_name(): string;
-
-static get_type_descriptor(): Standard_Type;
-
-DynamicType(): Standard_Type;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// Representation of STEP entity GroupAssignment
-StepBasic_GroupAssignment: declare class StepBasic_GroupAssignment extends Standard_Transient
-
-constructor
-
-// Initialize all fields (own and inherited)
-Init(aAssignedGroup: StepBasic_Group): void;
-
-// Returns field AssignedGroup
-AssignedGroup(): StepBasic_Group;
-
-// Set field AssignedGroup
-SetAssignedGroup(AssignedGroup: StepBasic_Group): void;
-
-static get_type_name(): string;
-
-static get_type_descriptor(): Standard_Type;
-
-DynamicType(): Standard_Type;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// Representation of STEP entity GroupRelationship
-StepBasic_GroupRelationship: declare class StepBasic_GroupRelationship extends Standard_Transient
-
-constructor
-
-// Initialize all fields (own and inherited)
-Init(aName: TCollection_HAsciiString, hasDescription: boolean, aDescription: TCollection_HAsciiString, aRelatingGroup: StepBasic_Group, aRelatedGroup: StepBasic_Group): void;
-
-// Returns field Name
-Name(): TCollection_HAsciiString;
-
-// Set field Name
-SetName(Name: TCollection_HAsciiString): void;
-
-// Returns field Description
-Description(): TCollection_HAsciiString;
-
-// Set field Description
-SetDescription(Description: TCollection_HAsciiString): void;
-
-// Returns True if optional field Description is defined
-HasDescription(): boolean;
-
-// Returns field RelatingGroup
-RelatingGroup(): StepBasic_Group;
-
-// Set field RelatingGroup
-SetRelatingGroup(RelatingGroup: StepBasic_Group): void;
-
-// Returns field RelatedGroup
-RelatedGroup(): StepBasic_Group;
-
-// Set field RelatedGroup
-SetRelatedGroup(RelatedGroup: StepBasic_Group): void;
-
-static get_type_name(): string;
-
-static get_type_descriptor(): Standard_Type;
-
-DynamicType(): Standard_Type;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// Representation of STEP entity IdentificationAssignment
-StepBasic_IdentificationAssignment: declare class StepBasic_IdentificationAssignment extends Standard_Transient
-
-constructor
-
-// Initialize all fields (own and inherited)
-Init(aAssignedId: TCollection_HAsciiString, aRole: StepBasic_IdentificationRole): void;
-
-// Returns field AssignedId
-AssignedId(): TCollection_HAsciiString;
-
-// Set field AssignedId
-SetAssignedId(AssignedId: TCollection_HAsciiString): void;
-
-// Returns field Role
-Role(): StepBasic_IdentificationRole;
-
-// Set field Role
-SetRole(Role: StepBasic_IdentificationRole): void;
-
-static get_type_name(): string;
-
-static get_type_descriptor(): Standard_Type;
-
-DynamicType(): Standard_Type;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// Representation of STEP entity IdentificationRole
-StepBasic_IdentificationRole: declare class StepBasic_IdentificationRole extends Standard_Transient
-
-constructor
-
-// Initialize all fields (own and inherited)
-Init(aName: TCollection_HAsciiString, hasDescription: boolean, aDescription: TCollection_HAsciiString): void;
-
-// Returns field Name
-Name(): TCollection_HAsciiString;
-
-// Set field Name
-SetName(Name: TCollection_HAsciiString): void;
-
-// Returns field Description
-Description(): TCollection_HAsciiString;
-
-// Set field Description
-SetDescription(Description: TCollection_HAsciiString): void;
-
-// Returns True if optional field Description is defined
-HasDescription(): boolean;
-
-static get_type_name(): string;
-
-static get_type_descriptor(): Standard_Type;
-
-DynamicType(): Standard_Type;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
+30 top-level symbols. Signatures are verbatim typescript.
 
 StepBasic_LengthMeasureWithUnit: declare class StepBasic_LengthMeasureWithUnit extends StepBasic_MeasureWithUnit
 
@@ -342,7 +12,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -357,7 +26,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -398,7 +66,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -413,12 +80,10 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Representation of STEP entity MassUnit
 StepBasic_MassUnit: declare class StepBasic_MassUnit extends StepBasic_NamedUnit
 
 constructor
@@ -429,23 +94,18 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// for Select MeasureValue, i.e
 StepBasic_MeasureValueMember: declare class StepBasic_MeasureValueMember extends StepData_SelectReal
 
 constructor
 
-// Tells if a SelectMember has a name
 HasName(): boolean;
 
-// Returns the name of a SelectMember
 Name(): string;
 
-// Sets the name of a SelectMember, returns True if done, False if no name is allowed Default does nothing and returns False
 SetName(name: string): boolean;
 
 static get_type_name(): string;
@@ -454,7 +114,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -483,7 +142,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -498,23 +156,18 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Representation of STEP entity NameAssignment
 StepBasic_NameAssignment: declare class StepBasic_NameAssignment extends Standard_Transient
 
 constructor
 
-// Initialize all fields (own and inherited)
 Init(aAssignedName: TCollection_HAsciiString): void;
 
-// Returns field AssignedName
 AssignedName(): TCollection_HAsciiString;
 
-// Set field AssignedName
 SetAssignedName(AssignedName: TCollection_HAsciiString): void;
 
 static get_type_name(): string;
@@ -523,7 +176,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -544,32 +196,24 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Representation of STEP entity ObjectRole
 StepBasic_ObjectRole: declare class StepBasic_ObjectRole extends Standard_Transient
 
 constructor
 
-// Initialize all fields (own and inherited)
 Init(aName: TCollection_HAsciiString, hasDescription: boolean, aDescription: TCollection_HAsciiString): void;
 
-// Returns field Name
 Name(): TCollection_HAsciiString;
 
-// Set field Name
 SetName(Name: TCollection_HAsciiString): void;
 
-// Returns field Description
 Description(): TCollection_HAsciiString;
 
-// Set field Description
 SetDescription(Description: TCollection_HAsciiString): void;
 
-// Returns True if optional field Description is defined
 HasDescription(): boolean;
 
 static get_type_name(): string;
@@ -578,7 +222,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -602,7 +245,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -635,7 +277,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -660,7 +301,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -681,7 +321,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -713,7 +352,6 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -786,7 +424,307 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
+delete(): void;
+
+[Symbol.dispose](): void;
+
+StepBasic_PersonAndOrganization: declare class StepBasic_PersonAndOrganization extends Standard_Transient
+
+constructor
+
+Init(aThePerson: StepBasic_Person, aTheOrganization: StepBasic_Organization): void;
+
+SetThePerson(aThePerson: StepBasic_Person): void;
+
+ThePerson(): StepBasic_Person;
+
+SetTheOrganization(aTheOrganization: StepBasic_Organization): void;
+
+TheOrganization(): StepBasic_Organization;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+StepBasic_PersonAndOrganizationAssignment: declare class StepBasic_PersonAndOrganizationAssignment extends Standard_Transient
+
+constructor
+
+Init(aAssignedPersonAndOrganization: StepBasic_PersonAndOrganization, aRole: StepBasic_PersonAndOrganizationRole): void;
+
+SetAssignedPersonAndOrganization(aAssignedPersonAndOrganization: StepBasic_PersonAndOrganization): void;
+
+AssignedPersonAndOrganization(): StepBasic_PersonAndOrganization;
+
+SetRole(aRole: StepBasic_PersonAndOrganizationRole): void;
+
+Role(): StepBasic_PersonAndOrganizationRole;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+StepBasic_PersonAndOrganizationRole: declare class StepBasic_PersonAndOrganizationRole extends Standard_Transient
+
+constructor
+
+Init(aName: TCollection_HAsciiString): void;
+
+SetName(aName: TCollection_HAsciiString): void;
+
+Name(): TCollection_HAsciiString;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+StepBasic_PersonOrganizationSelect: declare class StepBasic_PersonOrganizationSelect extends StepData_SelectType
+
+constructor
+
+CaseNum(ent: Standard_Transient): number;
+
+Person(): StepBasic_Person;
+
+Organization(): StepBasic_Organization;
+
+PersonAndOrganization(): StepBasic_PersonAndOrganization;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+StepBasic_PersonalAddress: declare class StepBasic_PersonalAddress extends StepBasic_Address
+
+constructor
+
+Init(hasAinternalLocation: boolean, aInternalLocation: TCollection_HAsciiString, hasAstreetNumber: boolean, aStreetNumber: TCollection_HAsciiString, hasAstreet: boolean, aStreet: TCollection_HAsciiString, hasApostalBox: boolean, aPostalBox: TCollection_HAsciiString, hasAtown: boolean, aTown: TCollection_HAsciiString, hasAregion: boolean, aRegion: TCollection_HAsciiString, hasApostalCode: boolean, aPostalCode: TCollection_HAsciiString, hasAcountry: boolean, aCountry: TCollection_HAsciiString, hasAfacsimileNumber: boolean, aFacsimileNumber: TCollection_HAsciiString, hasAtelephoneNumber: boolean, aTelephoneNumber: TCollection_HAsciiString, hasAelectronicMailAddress: boolean, aElectronicMailAddress: TCollection_HAsciiString, hasAtelexNumber: boolean, aTelexNumber: TCollection_HAsciiString, aPeople: NCollection_HArray1_handle_StepBasic_Person, aDescription: TCollection_HAsciiString): void;
+Init(hasAinternalLocation: boolean, aInternalLocation: TCollection_HAsciiString, hasAstreetNumber: boolean, aStreetNumber: TCollection_HAsciiString, hasAstreet: boolean, aStreet: TCollection_HAsciiString, hasApostalBox: boolean, aPostalBox: TCollection_HAsciiString, hasAtown: boolean, aTown: TCollection_HAsciiString, hasAregion: boolean, aRegion: TCollection_HAsciiString, hasApostalCode: boolean, aPostalCode: TCollection_HAsciiString, hasAcountry: boolean, aCountry: TCollection_HAsciiString, hasAfacsimileNumber: boolean, aFacsimileNumber: TCollection_HAsciiString, hasAtelephoneNumber: boolean, aTelephoneNumber: TCollection_HAsciiString, hasAelectronicMailAddress: boolean, aElectronicMailAddress: TCollection_HAsciiString, hasAtelexNumber: boolean, aTelexNumber: TCollection_HAsciiString): void;
+Init(hasAinternalLocation: boolean, aInternalLocation: TCollection_HAsciiString, hasAstreetNumber: boolean, aStreetNumber: TCollection_HAsciiString, hasAstreet: boolean, aStreet: TCollection_HAsciiString, hasApostalBox: boolean, aPostalBox: TCollection_HAsciiString, hasAtown: boolean, aTown: TCollection_HAsciiString, hasAregion: boolean, aRegion: TCollection_HAsciiString, hasApostalCode: boolean, aPostalCode: TCollection_HAsciiString, hasAcountry: boolean, aCountry: TCollection_HAsciiString, hasAfacsimileNumber: boolean, aFacsimileNumber: TCollection_HAsciiString, hasAtelephoneNumber: boolean, aTelephoneNumber: TCollection_HAsciiString, hasAelectronicMailAddress: boolean, aElectronicMailAddress: TCollection_HAsciiString, hasAtelexNumber: boolean, aTelexNumber: TCollection_HAsciiString, aPeople: NCollection_HArray1_handle_StepBasic_Person, aDescription: TCollection_HAsciiString): void;
+Init(hasAinternalLocation: boolean, aInternalLocation: TCollection_HAsciiString, hasAstreetNumber: boolean, aStreetNumber: TCollection_HAsciiString, hasAstreet: boolean, aStreet: TCollection_HAsciiString, hasApostalBox: boolean, aPostalBox: TCollection_HAsciiString, hasAtown: boolean, aTown: TCollection_HAsciiString, hasAregion: boolean, aRegion: TCollection_HAsciiString, hasApostalCode: boolean, aPostalCode: TCollection_HAsciiString, hasAcountry: boolean, aCountry: TCollection_HAsciiString, hasAfacsimileNumber: boolean, aFacsimileNumber: TCollection_HAsciiString, hasAtelephoneNumber: boolean, aTelephoneNumber: TCollection_HAsciiString, hasAelectronicMailAddress: boolean, aElectronicMailAddress: TCollection_HAsciiString, hasAtelexNumber: boolean, aTelexNumber: TCollection_HAsciiString): void;
+
+SetPeople(aPeople: NCollection_HArray1_handle_StepBasic_Person): void;
+
+People(): NCollection_HArray1_handle_StepBasic_Person;
+
+PeopleValue(num: number): StepBasic_Person;
+
+NbPeople(): number;
+
+SetDescription(aDescription: TCollection_HAsciiString): void;
+
+Description(): TCollection_HAsciiString;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+StepBasic_PhysicallyModeledProductDefinition: declare class StepBasic_PhysicallyModeledProductDefinition extends StepBasic_ProductDefinition
+
+constructor
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+StepBasic_PlaneAngleMeasureWithUnit: declare class StepBasic_PlaneAngleMeasureWithUnit extends StepBasic_MeasureWithUnit
+
+constructor
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+StepBasic_PlaneAngleUnit: declare class StepBasic_PlaneAngleUnit extends StepBasic_NamedUnit
+
+constructor
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+StepBasic_Product: declare class StepBasic_Product extends Standard_Transient
+
+constructor
+
+Init(aId: TCollection_HAsciiString, aName: TCollection_HAsciiString, aDescription: TCollection_HAsciiString, aFrameOfReference: NCollection_HArray1_handle_StepBasic_ProductContext): void;
+
+SetId(aId: TCollection_HAsciiString): void;
+
+Id(): TCollection_HAsciiString;
+
+SetName(aName: TCollection_HAsciiString): void;
+
+Name(): TCollection_HAsciiString;
+
+SetDescription(aDescription: TCollection_HAsciiString): void;
+
+Description(): TCollection_HAsciiString;
+
+SetFrameOfReference(aFrameOfReference: NCollection_HArray1_handle_StepBasic_ProductContext): void;
+
+FrameOfReference(): NCollection_HArray1_handle_StepBasic_ProductContext;
+
+FrameOfReferenceValue(num: number): StepBasic_ProductContext;
+
+NbFrameOfReference(): number;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+StepBasic_ProductCategory: declare class StepBasic_ProductCategory extends Standard_Transient
+
+constructor
+
+Init(aName: TCollection_HAsciiString, hasAdescription: boolean, aDescription: TCollection_HAsciiString): void;
+
+SetName(aName: TCollection_HAsciiString): void;
+
+Name(): TCollection_HAsciiString;
+
+SetDescription(aDescription: TCollection_HAsciiString): void;
+
+UnSetDescription(): void;
+
+Description(): TCollection_HAsciiString;
+
+HasDescription(): boolean;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+StepBasic_ProductCategoryRelationship: declare class StepBasic_ProductCategoryRelationship extends Standard_Transient
+
+constructor
+
+Init(aName: TCollection_HAsciiString, hasDescription: boolean, aDescription: TCollection_HAsciiString, aCategory: StepBasic_ProductCategory, aSubCategory: StepBasic_ProductCategory): void;
+
+Name(): TCollection_HAsciiString;
+
+SetName(Name: TCollection_HAsciiString): void;
+
+Description(): TCollection_HAsciiString;
+
+SetDescription(Description: TCollection_HAsciiString): void;
+
+HasDescription(): boolean;
+
+Category(): StepBasic_ProductCategory;
+
+SetCategory(Category: StepBasic_ProductCategory): void;
+
+SubCategory(): StepBasic_ProductCategory;
+
+SetSubCategory(SubCategory: StepBasic_ProductCategory): void;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+StepBasic_ProductConceptContext: declare class StepBasic_ProductConceptContext extends StepBasic_ApplicationContextElement
+
+constructor
+
+Init(aApplicationContextElement_Name: TCollection_HAsciiString, aApplicationContextElement_FrameOfReference: StepBasic_ApplicationContext, aMarketSegmentType: TCollection_HAsciiString): void;
+Init(aName: TCollection_HAsciiString, aFrameOfReference: StepBasic_ApplicationContext): void;
+Init(aApplicationContextElement_Name: TCollection_HAsciiString, aApplicationContextElement_FrameOfReference: StepBasic_ApplicationContext, aMarketSegmentType: TCollection_HAsciiString): void;
+Init(aName: TCollection_HAsciiString, aFrameOfReference: StepBasic_ApplicationContext): void;
+
+MarketSegmentType(): TCollection_HAsciiString;
+
+SetMarketSegmentType(MarketSegmentType: TCollection_HAsciiString): void;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+StepBasic_ProductContext: declare class StepBasic_ProductContext extends StepBasic_ApplicationContextElement
+
+constructor
+
+Init(aName: TCollection_HAsciiString, aFrameOfReference: StepBasic_ApplicationContext, aDisciplineType: TCollection_HAsciiString): void;
+Init(aName: TCollection_HAsciiString, aFrameOfReference: StepBasic_ApplicationContext): void;
+Init(aName: TCollection_HAsciiString, aFrameOfReference: StepBasic_ApplicationContext, aDisciplineType: TCollection_HAsciiString): void;
+Init(aName: TCollection_HAsciiString, aFrameOfReference: StepBasic_ApplicationContext): void;
+
+SetDisciplineType(aDisciplineType: TCollection_HAsciiString): void;
+
+DisciplineType(): TCollection_HAsciiString;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
 delete(): void;
 
 [Symbol.dispose](): void;

@@ -1,123 +1,8 @@
 # libcascade — XCAFDoc (3)
 
-6 top-level symbols. Signatures are verbatim typescript.
+12 top-level symbols. Signatures are verbatim typescript.
 
-// Defines sections structure of an XDE document
-XCAFDoc_DocumentTool: declare class XCAFDoc_DocumentTool extends TDataStd_GenericEmpty
-
-constructor
-
-static GetID(): Standard_GUID;
-
-// Create (if not exist) DocumentTool attribute on 0.1 label if <IsAcces> is true, else on <L> label
-static Set(L: TDF_Label, IsAcces?: boolean): XCAFDoc_DocumentTool;
-
-static IsXCAFDocument(Doc: TDocStd_Document): boolean;
-
-// Returns label where the DocumentTool attribute is or 0.1 if DocumentTool is not yet set
-static DocLabel(acces: TDF_Label): TDF_Label;
-
-// Returns sub-label of `DocLabel()` with tag 1
-static ShapesLabel(acces: TDF_Label): TDF_Label;
-
-// Returns sub-label of `DocLabel()` with tag 2
-static ColorsLabel(acces: TDF_Label): TDF_Label;
-
-// Returns sub-label of `DocLabel()` with tag 3
-static LayersLabel(acces: TDF_Label): TDF_Label;
-
-// Returns sub-label of `DocLabel()` with tag 4
-static DGTsLabel(acces: TDF_Label): TDF_Label;
-
-// Returns sub-label of `DocLabel()` with tag 5
-static MaterialsLabel(acces: TDF_Label): TDF_Label;
-
-// Returns sub-label of `DocLabel()` with tag 7
-static ViewsLabel(acces: TDF_Label): TDF_Label;
-
-// Returns sub-label of `DocLabel()` with tag 8
-static ClippingPlanesLabel(acces: TDF_Label): TDF_Label;
-
-// Returns sub-label of `DocLabel()` with tag 9
-static NotesLabel(acces: TDF_Label): TDF_Label;
-
-// Returns sub-label of `DocLabel()` with tag 10
-static VisMaterialLabel(theLabel: TDF_Label): TDF_Label;
-
-// Creates (if it does not exist) ShapeTool attribute on `ShapesLabel()`
-static ShapeTool(acces: TDF_Label): XCAFDoc_ShapeTool;
-
-// Checks for the ShapeTool attribute on the label's document Returns TRUE if Tool exists, ELSE if it has not been created
-static CheckShapeTool(theAcces: TDF_Label): boolean;
-
-// Creates (if it does not exist) ColorTool attribute on `ColorsLabel()`
-static ColorTool(acces: TDF_Label): XCAFDoc_ColorTool;
-
-// Checks for the ColorTool attribute on the label's document Returns TRUE if Tool exists, ELSE if it has not been created
-static CheckColorTool(theAcces: TDF_Label): boolean;
-
-// Creates (if it does not exist) {@link XCAFDoc_VisMaterialTool`XCAFDoc_VisMaterialTool`} attribute on `VisMaterialLabel()`
-static VisMaterialTool(theLabel: TDF_Label): XCAFDoc_VisMaterialTool;
-
-// Checks for the VisMaterialTool attribute on the label's document Returns TRUE if Tool exists, ELSE if it has not been created
-static CheckVisMaterialTool(theAcces: TDF_Label): boolean;
-
-// Creates (if it does not exist) LayerTool attribute on `LayersLabel()`
-static LayerTool(acces: TDF_Label): XCAFDoc_LayerTool;
-
-// Checks for the LayerTool attribute on the label's document Returns TRUE if Tool exists, ELSE if it has not been created
-static CheckLayerTool(theAcces: TDF_Label): boolean;
-
-// Creates (if it does not exist) DimTolTool attribute on `DGTsLabel()`
-static DimTolTool(acces: TDF_Label): XCAFDoc_DimTolTool;
-
-// Checks for the DimTolTool attribute on the label's document Returns TRUE if Tool exists, ELSE if it has not been created
-static CheckDimTolTool(theAcces: TDF_Label): boolean;
-
-// Creates (if it does not exist) DimTolTool attribute on `DGTsLabel()`
-static MaterialTool(acces: TDF_Label): XCAFDoc_MaterialTool;
-
-// Checks for the MaterialTool attribute on the label's document Returns TRUE if Tool exists, ELSE if it has not been created
-static CheckMaterialTool(theAcces: TDF_Label): boolean;
-
-// Creates (if it does not exist) ViewTool attribute on `ViewsLabel()`
-static ViewTool(acces: TDF_Label): XCAFDoc_ViewTool;
-
-// Checks for the ViewTool attribute on the label's document Returns TRUE if Tool exists, ELSE if it has not been created
-static CheckViewTool(theAcces: TDF_Label): boolean;
-
-// Creates (if it does not exist) ClippingPlaneTool attribute on `ClippingPlanesLabel()`
-static ClippingPlaneTool(acces: TDF_Label): XCAFDoc_ClippingPlaneTool;
-
-// Checks for the ClippingPlaneTool attribute on the label's document Returns TRUE if Tool exists, ELSE if it has not been created
-static CheckClippingPlaneTool(theAcces: TDF_Label): boolean;
-
-// Creates (if it does not exist) NotesTool attribute on `NotesLabel()`
-static NotesTool(acces: TDF_Label): XCAFDoc_NotesTool;
-
-// Checks for the NotesTool attribute on the label's document Returns TRUE if Tool exists, ELSE if it has not been created
-static CheckNotesTool(theAcces: TDF_Label): boolean;
-
-// Returns value of current internal unit for the document converted to base unit type
-static GetLengthUnit(theDoc: TDocStd_Document, theResut: number, theBaseUnit: UnitsMethods_LengthUnit): { returnValue: boolean; theResut: number };
-static GetLengthUnit(theDoc: TDocStd_Document, theResut?: number): { returnValue: boolean; theResut: number };
-static GetLengthUnit(theDoc: TDocStd_Document, theResut: number, theBaseUnit: UnitsMethods_LengthUnit): { returnValue: boolean; theResut: number };
-static GetLengthUnit(theDoc: TDocStd_Document, theResut?: number): { returnValue: boolean; theResut: number };
-
-// Sets value of current internal unit to the document in meter
-static SetLengthUnit(theDoc: TDocStd_Document, theUnitValue: number): void;
-static SetLengthUnit(theDoc: TDocStd_Document, theUnitValue: number, theBaseUnit: UnitsMethods_LengthUnit): void;
-static SetLengthUnit(theDoc: TDocStd_Document, theUnitValue: number): void;
-static SetLengthUnit(theDoc: TDocStd_Document, theUnitValue: number, theBaseUnit: UnitsMethods_LengthUnit): void;
-
-// to be called when reading this attribute from file
-Init(): void;
-
-// Returns the ID of the attribute
-ID(): Standard_GUID;
-
-// To init this derived attribute after the attribute restore using the base restore-methods
-AfterRetrieval(forceIt?: boolean): boolean;
+XCAFDoc_Note: declare class XCAFDoc_Note extends TDF_Attribute
 
 static get_type_name(): string;
 
@@ -125,191 +10,33 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Returns an new empty attribute from the good end type
-NewEmpty(): TDF_Attribute;
+static IsMine(theLabel: TDF_Label): boolean;
 
-// Releases the C++ object
-delete(): void;
+static Get(theLabel: TDF_Label): XCAFDoc_Note;
 
-[Symbol.dispose](): void;
+Set(theUserName: TCollection_ExtendedString, theTimeStamp: TCollection_ExtendedString): void;
 
-// Tool for edit structure of document
-XCAFDoc_Editor: declare class XCAFDoc_Editor
+UserName(): TCollection_ExtendedString;
 
-constructor
+TimeStamp(): TCollection_ExtendedString;
 
-// Converts shape (compound/compsolid/shell/wire) to assembly
-static Expand(theDoc: TDF_Label, theShape: TDF_Label, theRecursively: boolean): boolean;
-static Expand(theDoc: TDF_Label, theRecursively: boolean): boolean;
-static Expand(theDoc: TDF_Label, theShape: TDF_Label, theRecursively: boolean): boolean;
-static Expand(theDoc: TDF_Label, theRecursively: boolean): boolean;
-// theDoc: input document
-// theShape: input shape label
-// theRecursively: recursively expand a compound subshape
+IsOrphan(): boolean;
 
-// Clones all labels to a new position, keeping the structure with all the attributes
-static Extract(theSrcLabels: NCollection_Sequence_TDF_Label, theDstLabel: TDF_Label, theIsNoVisMat: boolean): boolean;
-static Extract(theSrcLabel: TDF_Label, theDstLabel: TDF_Label, theIsNoVisMat: boolean): boolean;
-static Extract(theSrcLabels: NCollection_Sequence_TDF_Label, theDstLabel: TDF_Label, theIsNoVisMat: boolean): boolean;
-static Extract(theSrcLabel: TDF_Label, theDstLabel: TDF_Label, theIsNoVisMat: boolean): boolean;
-// theSrcLabels: original labels to copy from
-// theDstLabel: label to set result as a component of or a main document's label to simply set new shape
-// theIsNoVisMat: get a VisMaterial attributes as is or convert to color
+GetObject(): XCAFNoteObjects_NoteObject;
 
-// Copies shapes label with keeping of shape structure (recursively)
-static CloneShapeLabel(theSrcLabel: TDF_Label, theSrcShapeTool: XCAFDoc_ShapeTool, theDstShapeTool: XCAFDoc_ShapeTool, theMap: NCollection_DataMap_TDF_Label_TDF_Label): TDF_Label;
-// theSrcLabel: original label to copy from
-// theSrcShapeTool: shape tool to get
-// theDstShapeTool: shape tool to set
-// theMap: relating map of the original shapes label and labels created from them Mutated in place
+SetObject(theObject: XCAFNoteObjects_NoteObject): void;
 
-// Copies metadata contains from the source label to the destination label
-static CloneMetaData(theSrcLabel: TDF_Label, theDstLabel: TDF_Label, theVisMatMap: NCollection_DataMap_handle_XCAFDoc_VisMaterial_handle_XCAFDoc_VisMaterial, theToCopyColor?: boolean, theToCopyLayer?: boolean, theToCopyMaterial?: boolean, theToCopyVisMaterial?: boolean, theToCopyAttributes?: boolean): void;
-// theSrcLabel: original label to copy from
-// theDstLabel: destination shape label to set attributes
-// theVisMatMap: relating map of the original VisMaterial and created
-// theToCopyColor: copying visible value and shape color (handled all color type)
-// theToCopyLayer: copying layer
-// theToCopyMaterial: copying material
-// theToCopyVisMaterial: copying visual material
-// theToCopyAttributes: copying of other node attributes, for example, a shape's property
-
-// Gets shape labels that has down relation with the input label
-static GetParentShapeLabels(theLabel: TDF_Label, theRelatedLabels: NCollection_Map_TDF_Label): void;
-// theLabel: input label
-// theRelatedLabels: output labels Mutated in place
-
-// Gets shape labels that has up relation with the input label
-static GetChildShapeLabels(theLabel: TDF_Label, theRelatedLabels: NCollection_Map_TDF_Label): void;
-// theLabel: input label
-// theRelatedLabels: output labels Mutated in place
-
-// Filters original shape tree with keeping structure
-static FilterShapeTree(theShapeTool: XCAFDoc_ShapeTool, theLabelsToKeep: NCollection_Map_TDF_Label): boolean;
-// theShapeTool: shape tool to extract from
-// theLabelsToKeep: labels to keep
-
-// Applies geometrical scaling to the following assembly components
-static RescaleGeometry(theLabel: TDF_Label, theScaleFactor: number, theForceIfNotRoot?: boolean): boolean;
-// theLabel: starting label
-// theScaleFactor: scale factor, should be positive
-// theForceIfNotRoot: allows scaling of a non root assembly if true, otherwise - returns false
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// Attribute to store dimension and tolerance
-XCAFDoc_GeomTolerance: declare class XCAFDoc_GeomTolerance extends TDataStd_GenericEmpty
-
-constructor
-
-static GetID(): Standard_GUID;
-
-static Set(theLabel: TDF_Label): XCAFDoc_GeomTolerance;
-
-// Updates parent's label and its sub-labels with data taken from theGeomToleranceObject
-SetObject(theGeomToleranceObject: XCAFDimTolObjects_GeomToleranceObject): void;
-
-// Returns geometry tolerance object data taken from the paren's label and its sub-labels
-GetObject(): XCAFDimTolObjects_GeomToleranceObject;
-
-// Returns the ID of the attribute
-ID(): Standard_GUID;
-
-static get_type_name(): string;
-
-static get_type_descriptor(): Standard_Type;
-
-DynamicType(): Standard_Type;
-
-// Returns an new empty attribute from the good end type
-NewEmpty(): TDF_Attribute;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// This attribute allow user multirelation tree of labels
-XCAFDoc_GraphNode: declare class XCAFDoc_GraphNode extends TDF_Attribute
-
-constructor
-
-// **class methods working on the node**
-static Find(L: TDF_Label): { returnValue: boolean; G: XCAFDoc_GraphNode; [Symbol.dispose](): void };
-
-// Finds or Creates a GraphNode attribute on the label <L> with the default Graph ID, returned by the method <GetDefaultGraphID>
-static Set(L: TDF_Label): XCAFDoc_GraphNode;
-static Set(L: TDF_Label, ExplicitGraphID: Standard_GUID): XCAFDoc_GraphNode;
-static Set(L: TDF_Label): XCAFDoc_GraphNode;
-static Set(L: TDF_Label, ExplicitGraphID: Standard_GUID): XCAFDoc_GraphNode;
-
-// returns a default Graph ID
-static GetDefaultGraphID(): Standard_GUID;
-
-SetGraphID(explicitID: Standard_GUID): void;
-
-// Set GraphNode <F> as father of me and returns index of <F> in Sequence that containing Fathers GraphNodes
-SetFather(F: XCAFDoc_GraphNode): number;
-
-// Set GraphNode <Ch> as child of me and returns index of <Ch> in Sequence that containing Children GraphNodes
-SetChild(Ch: XCAFDoc_GraphNode): number;
-
-// Remove <F> from Fathers GraphNodeSequence
-UnSetFather(F: XCAFDoc_GraphNode): void;
-UnSetFather(Findex: number): void;
-UnSetFather(F: XCAFDoc_GraphNode): void;
-UnSetFather(Findex: number): void;
-
-// Remove <Ch> from GraphNodeSequence
-UnSetChild(Ch: XCAFDoc_GraphNode): void;
-UnSetChild(Chindex: number): void;
-UnSetChild(Ch: XCAFDoc_GraphNode): void;
-UnSetChild(Chindex: number): void;
-
-// Return GraphNode by index from GraphNodeSequence
-GetFather(Findex: number): XCAFDoc_GraphNode;
-
-// Return GraphNode by index from GraphNodeSequence
-GetChild(Chindex: number): XCAFDoc_GraphNode;
-
-// Return index of <F>, or zero if there is no such Graphnode
-FatherIndex(F: XCAFDoc_GraphNode): number;
-
-// Return index of <Ch>, or zero if there is no such Graphnode
-ChildIndex(Ch: XCAFDoc_GraphNode): number;
-
-// returns TRUE if <me> is father of <Ch>
-IsFather(Ch: XCAFDoc_GraphNode): boolean;
-
-// returns TRUE if <me> is child of <F>
-IsChild(F: XCAFDoc_GraphNode): boolean;
-
-// return Number of Fathers GraphNodes
-NbFathers(): number;
-
-// return Number of Childrens GraphNodes
-NbChildren(): number;
-
-// Returns the Graph ID (default or explicit one depending on the Set method used)
-ID(): Standard_GUID;
-
-// Restores the backuped contents from <anAttribute> into this one
 Restore(anAttribute: TDF_Attribute): void;
 
-// This method is different from the "Copy" one, because it is used when copying an attribute from a source structure into a target structure
 Paste(intoAttribute: TDF_Attribute, aRelocationTable: TDF_RelocationTable): void;
 
-// Returns an new empty attribute from the good end type
-NewEmpty(): TDF_Attribute;
+delete(): void;
 
-// Adds the first level referenced attributes and labels to <aDataSet>
-References(aDataSet: TDF_DataSet): void;
+[Symbol.dispose](): void;
 
-// Something to do before forgetting an Attribute to a label
-BeforeForget(): void;
+XCAFDoc_NoteBalloon: declare class XCAFDoc_NoteBalloon extends XCAFDoc_NoteComment
+
+constructor
 
 static get_type_name(): string;
 
@@ -317,143 +44,495 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
+NewEmpty(): TDF_Attribute;
+
+static GetID(): Standard_GUID;
+
+static Get(theLabel: TDF_Label): XCAFDoc_NoteBalloon;
+
+static Set(theLabel: TDF_Label, theUserName: TCollection_ExtendedString, theTimeStamp: TCollection_ExtendedString, theComment: TCollection_ExtendedString): XCAFDoc_NoteBalloon;
+Set(theComment: TCollection_ExtendedString): void;
+Set(theUserName: TCollection_ExtendedString, theTimeStamp: TCollection_ExtendedString): void;
+Set(theComment: TCollection_ExtendedString): void;
+Set(theUserName: TCollection_ExtendedString, theTimeStamp: TCollection_ExtendedString): void;
+
+ID(): Standard_GUID;
+
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Provides tools to store and retrieve attributes (Layers) of {@link TopoDS_Shape`TopoDS_Shape`} in and from {@link TDocStd_Document`TDocStd_Document`} A Document is intended to hold different attributes of ONE shape and it's sub-shapes Provide tools for management of Layers section of document
-XCAFDoc_LayerTool: declare class XCAFDoc_LayerTool extends TDataStd_GenericEmpty
+XCAFDoc_NoteBinData: declare class XCAFDoc_NoteBinData extends XCAFDoc_Note
 
 constructor
 
-// Creates (if not exist) LayerTool
-static Set(L: TDF_Label): XCAFDoc_LayerTool;
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
 
 static GetID(): Standard_GUID;
 
-// returns the label under which Layers are stored
+static Get(theLabel: TDF_Label): XCAFDoc_NoteBinData;
+
+static Set(theLabel: TDF_Label, theUserName: TCollection_ExtendedString, theTimeStamp: TCollection_ExtendedString, theTitle: TCollection_ExtendedString, theMIMEtype: TCollection_AsciiString, theData: TColStd_HArray1OfByte): XCAFDoc_NoteBinData;
+Set(theTitle: TCollection_ExtendedString, theMIMEtype: TCollection_AsciiString, theData: TColStd_HArray1OfByte): void;
+Set(theUserName: TCollection_ExtendedString, theTimeStamp: TCollection_ExtendedString): void;
+Set(theTitle: TCollection_ExtendedString, theMIMEtype: TCollection_AsciiString, theData: TColStd_HArray1OfByte): void;
+Set(theUserName: TCollection_ExtendedString, theTimeStamp: TCollection_ExtendedString): void;
+
+Title(): TCollection_ExtendedString;
+
+MIMEtype(): TCollection_AsciiString;
+
+Size(): number;
+
+Data(): TColStd_HArray1OfByte;
+
+ID(): Standard_GUID;
+
+NewEmpty(): TDF_Attribute;
+
+Restore(anAttribute: TDF_Attribute): void;
+
+Paste(intoAttribute: TDF_Attribute, aRelocationTable: TDF_RelocationTable): void;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+XCAFDoc_NoteComment: declare class XCAFDoc_NoteComment extends XCAFDoc_Note
+
+constructor
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+static GetID(): Standard_GUID;
+
+static Get(theLabel: TDF_Label): XCAFDoc_NoteComment;
+
+static Set(theLabel: TDF_Label, theUserName: TCollection_ExtendedString, theTimeStamp: TCollection_ExtendedString, theComment: TCollection_ExtendedString): XCAFDoc_NoteComment;
+Set(theComment: TCollection_ExtendedString): void;
+Set(theUserName: TCollection_ExtendedString, theTimeStamp: TCollection_ExtendedString): void;
+Set(theComment: TCollection_ExtendedString): void;
+Set(theUserName: TCollection_ExtendedString, theTimeStamp: TCollection_ExtendedString): void;
+
+Comment(): TCollection_ExtendedString;
+
+ID(): Standard_GUID;
+
+NewEmpty(): TDF_Attribute;
+
+Restore(anAttribute: TDF_Attribute): void;
+
+Paste(intoAttribute: TDF_Attribute, aRelocationTable: TDF_RelocationTable): void;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+XCAFDoc_NotesTool: declare class XCAFDoc_NotesTool extends TDataStd_GenericEmpty
+
+constructor
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+NewEmpty(): TDF_Attribute;
+
+static GetID(): Standard_GUID;
+
+static Set(theLabel: TDF_Label): XCAFDoc_NotesTool;
+
+GetNotesLabel(): TDF_Label;
+
+GetAnnotatedItemsLabel(): TDF_Label;
+
+NbNotes(): number;
+
+NbAnnotatedItems(): number;
+
+GetNotes(theNoteLabels: NCollection_Sequence_TDF_Label): void;
+GetNotes(theItemId: XCAFDoc_AssemblyItemId, theNoteLabels: NCollection_Sequence_TDF_Label): number;
+GetNotes(theItemLabel: TDF_Label, theNoteLabels: NCollection_Sequence_TDF_Label): number;
+GetNotes(theNoteLabels: NCollection_Sequence_TDF_Label): void;
+GetNotes(theItemId: XCAFDoc_AssemblyItemId, theNoteLabels: NCollection_Sequence_TDF_Label): number;
+GetNotes(theItemLabel: TDF_Label, theNoteLabels: NCollection_Sequence_TDF_Label): number;
+GetNotes(theNoteLabels: NCollection_Sequence_TDF_Label): void;
+GetNotes(theItemId: XCAFDoc_AssemblyItemId, theNoteLabels: NCollection_Sequence_TDF_Label): number;
+GetNotes(theItemLabel: TDF_Label, theNoteLabels: NCollection_Sequence_TDF_Label): number;
+
+GetAnnotatedItems(theLabels: NCollection_Sequence_TDF_Label): void;
+
+IsAnnotatedItem(theItemId: XCAFDoc_AssemblyItemId): boolean;
+IsAnnotatedItem(theItemLabel: TDF_Label): boolean;
+IsAnnotatedItem(theItemId: XCAFDoc_AssemblyItemId): boolean;
+IsAnnotatedItem(theItemLabel: TDF_Label): boolean;
+
+FindAnnotatedItem(theItemId: XCAFDoc_AssemblyItemId): TDF_Label;
+FindAnnotatedItem(theItemLabel: TDF_Label): TDF_Label;
+FindAnnotatedItem(theItemId: XCAFDoc_AssemblyItemId): TDF_Label;
+FindAnnotatedItem(theItemLabel: TDF_Label): TDF_Label;
+
+FindAnnotatedItemAttr(theItemId: XCAFDoc_AssemblyItemId, theGUID: Standard_GUID): TDF_Label;
+FindAnnotatedItemAttr(theItemLabel: TDF_Label, theGUID: Standard_GUID): TDF_Label;
+FindAnnotatedItemAttr(theItemId: XCAFDoc_AssemblyItemId, theGUID: Standard_GUID): TDF_Label;
+FindAnnotatedItemAttr(theItemLabel: TDF_Label, theGUID: Standard_GUID): TDF_Label;
+
+FindAnnotatedItemSubshape(theItemId: XCAFDoc_AssemblyItemId, theSubshapeIndex: number): TDF_Label;
+FindAnnotatedItemSubshape(theItemLabel: TDF_Label, theSubshapeIndex: number): TDF_Label;
+FindAnnotatedItemSubshape(theItemId: XCAFDoc_AssemblyItemId, theSubshapeIndex: number): TDF_Label;
+FindAnnotatedItemSubshape(theItemLabel: TDF_Label, theSubshapeIndex: number): TDF_Label;
+
+CreateComment(theUserName: TCollection_ExtendedString, theTimeStamp: TCollection_ExtendedString, theComment: TCollection_ExtendedString): XCAFDoc_Note;
+
+CreateBalloon(theUserName: TCollection_ExtendedString, theTimeStamp: TCollection_ExtendedString, theComment: TCollection_ExtendedString): XCAFDoc_Note;
+
+CreateBinData(theUserName: TCollection_ExtendedString, theTimeStamp: TCollection_ExtendedString, theTitle: TCollection_ExtendedString, theMIMEtype: TCollection_AsciiString, theData: TColStd_HArray1OfByte): XCAFDoc_Note;
+
+GetAttrNotes(theItemId: XCAFDoc_AssemblyItemId, theGUID: Standard_GUID, theNoteLabels: NCollection_Sequence_TDF_Label): number;
+GetAttrNotes(theItemLabel: TDF_Label, theGUID: Standard_GUID, theNoteLabels: NCollection_Sequence_TDF_Label): number;
+GetAttrNotes(theItemId: XCAFDoc_AssemblyItemId, theGUID: Standard_GUID, theNoteLabels: NCollection_Sequence_TDF_Label): number;
+GetAttrNotes(theItemLabel: TDF_Label, theGUID: Standard_GUID, theNoteLabels: NCollection_Sequence_TDF_Label): number;
+
+GetSubshapeNotes(theItemId: XCAFDoc_AssemblyItemId, theSubshapeIndex: number, theNoteLabels: NCollection_Sequence_TDF_Label): number;
+
+AddNote(theNoteLabel: TDF_Label, theItemId: XCAFDoc_AssemblyItemId): XCAFDoc_AssemblyItemRef;
+AddNote(theNoteLabel: TDF_Label, theItemLabel: TDF_Label): XCAFDoc_AssemblyItemRef;
+AddNote(theNoteLabel: TDF_Label, theItemId: XCAFDoc_AssemblyItemId): XCAFDoc_AssemblyItemRef;
+AddNote(theNoteLabel: TDF_Label, theItemLabel: TDF_Label): XCAFDoc_AssemblyItemRef;
+
+AddNoteToAttr(theNoteLabel: TDF_Label, theItemId: XCAFDoc_AssemblyItemId, theGUID: Standard_GUID): XCAFDoc_AssemblyItemRef;
+AddNoteToAttr(theNoteLabel: TDF_Label, theItemLabel: TDF_Label, theGUID: Standard_GUID): XCAFDoc_AssemblyItemRef;
+AddNoteToAttr(theNoteLabel: TDF_Label, theItemId: XCAFDoc_AssemblyItemId, theGUID: Standard_GUID): XCAFDoc_AssemblyItemRef;
+AddNoteToAttr(theNoteLabel: TDF_Label, theItemLabel: TDF_Label, theGUID: Standard_GUID): XCAFDoc_AssemblyItemRef;
+
+AddNoteToSubshape(theNoteLabel: TDF_Label, theItemId: XCAFDoc_AssemblyItemId, theSubshapeIndex: number): XCAFDoc_AssemblyItemRef;
+AddNoteToSubshape(theNoteLabel: TDF_Label, theItemLabel: TDF_Label, theSubshapeIndex: number): XCAFDoc_AssemblyItemRef;
+AddNoteToSubshape(theNoteLabel: TDF_Label, theItemId: XCAFDoc_AssemblyItemId, theSubshapeIndex: number): XCAFDoc_AssemblyItemRef;
+AddNoteToSubshape(theNoteLabel: TDF_Label, theItemLabel: TDF_Label, theSubshapeIndex: number): XCAFDoc_AssemblyItemRef;
+
+RemoveNote(theNoteLabel: TDF_Label, theItemId: XCAFDoc_AssemblyItemId, theDelIfOrphan: boolean): boolean;
+RemoveNote(theNoteLabel: TDF_Label, theItemLabel: TDF_Label, theDelIfOrphan: boolean): boolean;
+RemoveNote(theNoteLabel: TDF_Label, theItemId: XCAFDoc_AssemblyItemId, theDelIfOrphan: boolean): boolean;
+RemoveNote(theNoteLabel: TDF_Label, theItemLabel: TDF_Label, theDelIfOrphan: boolean): boolean;
+
+RemoveSubshapeNote(theNoteLabel: TDF_Label, theItemId: XCAFDoc_AssemblyItemId, theSubshapeIndex: number, theDelIfOrphan: boolean): boolean;
+RemoveSubshapeNote(theNoteLabel: TDF_Label, theItemLabel: TDF_Label, theSubshapeIndex: number, theDelIfOrphan: boolean): boolean;
+RemoveSubshapeNote(theNoteLabel: TDF_Label, theItemId: XCAFDoc_AssemblyItemId, theSubshapeIndex: number, theDelIfOrphan: boolean): boolean;
+RemoveSubshapeNote(theNoteLabel: TDF_Label, theItemLabel: TDF_Label, theSubshapeIndex: number, theDelIfOrphan: boolean): boolean;
+
+RemoveAttrNote(theNoteLabel: TDF_Label, theItemId: XCAFDoc_AssemblyItemId, theGUID: Standard_GUID, theDelIfOrphan: boolean): boolean;
+RemoveAttrNote(theNoteLabel: TDF_Label, theItemLabel: TDF_Label, theGUID: Standard_GUID, theDelIfOrphan: boolean): boolean;
+RemoveAttrNote(theNoteLabel: TDF_Label, theItemId: XCAFDoc_AssemblyItemId, theGUID: Standard_GUID, theDelIfOrphan: boolean): boolean;
+RemoveAttrNote(theNoteLabel: TDF_Label, theItemLabel: TDF_Label, theGUID: Standard_GUID, theDelIfOrphan: boolean): boolean;
+
+RemoveAllNotes(theItemId: XCAFDoc_AssemblyItemId, theDelIfOrphan: boolean): boolean;
+RemoveAllNotes(theItemLabel: TDF_Label, theDelIfOrphan: boolean): boolean;
+RemoveAllNotes(theItemId: XCAFDoc_AssemblyItemId, theDelIfOrphan: boolean): boolean;
+RemoveAllNotes(theItemLabel: TDF_Label, theDelIfOrphan: boolean): boolean;
+
+RemoveAllSubshapeNotes(theItemId: XCAFDoc_AssemblyItemId, theSubshapeIndex: number, theDelIfOrphan?: boolean): boolean;
+
+RemoveAllAttrNotes(theItemId: XCAFDoc_AssemblyItemId, theGUID: Standard_GUID, theDelIfOrphan: boolean): boolean;
+RemoveAllAttrNotes(theItemLabel: TDF_Label, theGUID: Standard_GUID, theDelIfOrphan: boolean): boolean;
+RemoveAllAttrNotes(theItemId: XCAFDoc_AssemblyItemId, theGUID: Standard_GUID, theDelIfOrphan: boolean): boolean;
+RemoveAllAttrNotes(theItemLabel: TDF_Label, theGUID: Standard_GUID, theDelIfOrphan: boolean): boolean;
+
+DeleteNote(theNoteLabel: TDF_Label): boolean;
+
+DeleteNotes(theNoteLabels: NCollection_Sequence_TDF_Label): number;
+
+DeleteAllNotes(): number;
+
+NbOrphanNotes(): number;
+
+GetOrphanNotes(theNoteLabels: NCollection_Sequence_TDF_Label): void;
+
+DeleteOrphanNotes(): number;
+
+ID(): Standard_GUID;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+XCAFDoc_ShapeMapTool: declare class XCAFDoc_ShapeMapTool extends TDF_Attribute
+
+constructor
+
+static GetID(): Standard_GUID;
+
+static Set(L: TDF_Label): XCAFDoc_ShapeMapTool;
+
+IsSubShape(sub: TopoDS_Shape): boolean;
+
+SetShape(S: TopoDS_Shape): void;
+
+ID(): Standard_GUID;
+
+Restore(anAttribute: TDF_Attribute): void;
+
+NewEmpty(): TDF_Attribute;
+
+Paste(intoAttribute: TDF_Attribute, aRelocationTable: TDF_RelocationTable): void;
+
+GetMap(): NCollection_IndexedMap_TopoDS_Shape_TopTools_ShapeMapHasher;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+XCAFDoc_ShapeTool: declare class XCAFDoc_ShapeTool extends TDataStd_GenericEmpty
+
+constructor
+
+static GetID(): Standard_GUID;
+
+static Set(L: TDF_Label): XCAFDoc_ShapeTool;
+
+IsTopLevel(L: TDF_Label): boolean;
+
+static IsFree(L: TDF_Label): boolean;
+
+static IsShape(L: TDF_Label): boolean;
+
+static IsSimpleShape(L: TDF_Label): boolean;
+
+static IsReference(L: TDF_Label): boolean;
+
+static IsAssembly(L: TDF_Label): boolean;
+
+static IsComponent(L: TDF_Label): boolean;
+
+static IsCompound(L: TDF_Label): boolean;
+
+static IsSubShape(L: TDF_Label): boolean;
+IsSubShape(shapeL: TDF_Label, sub: TopoDS_Shape): boolean;
+
+SearchUsingMap(S: TopoDS_Shape, L: TDF_Label, findWithoutLoc: boolean, findSubshape: boolean): boolean;
+
+Search(S: TopoDS_Shape, L: TDF_Label, findInstance: boolean, findComponent: boolean, findSubshape: boolean): boolean;
+
+FindShape(S: TopoDS_Shape, L: TDF_Label, findInstance: boolean): boolean;
+FindShape(S: TopoDS_Shape, findInstance: boolean): TDF_Label;
+FindShape(S: TopoDS_Shape, L: TDF_Label, findInstance: boolean): boolean;
+FindShape(S: TopoDS_Shape, findInstance: boolean): TDF_Label;
+
+static GetShape(L: TDF_Label, S: TopoDS_Shape): boolean;
+static GetShape(L: TDF_Label): TopoDS_Shape;
+static GetShape(L: TDF_Label, S: TopoDS_Shape): boolean;
+static GetShape(L: TDF_Label): TopoDS_Shape;
+
+static GetOneShape(theLabels: NCollection_Sequence_TDF_Label): TopoDS_Shape;
+GetOneShape(): TopoDS_Shape;
+
+NewShape(): TDF_Label;
+
+SetShape(L: TDF_Label, S: TopoDS_Shape): void;
+
+AddShape(S: TopoDS_Shape, makeAssembly?: boolean, makePrepare?: boolean): TDF_Label;
+
+RemoveShape(L: TDF_Label, removeCompletely?: boolean): boolean;
+
+Init(): void;
+
+static SetAutoNaming(V: boolean): void;
+
+static AutoNaming(): boolean;
+
+ComputeShapes(L: TDF_Label): void;
+
+ComputeSimpleShapes(): void;
+
+GetShapes(Labels: NCollection_Sequence_TDF_Label): void;
+
+GetFreeShapes(FreeLabels: NCollection_Sequence_TDF_Label): void;
+
+static GetUsers(L: TDF_Label, Labels: NCollection_Sequence_TDF_Label, getsubchilds: boolean): number;
+
+static GetLocation(L: TDF_Label): TopLoc_Location;
+
+static GetReferredShape(L: TDF_Label, Label: TDF_Label): boolean;
+
+static NbComponents(L: TDF_Label, getsubchilds?: boolean): number;
+
+static GetComponents(L: TDF_Label, Labels: NCollection_Sequence_TDF_Label, getsubchilds: boolean): boolean;
+
+AddComponent(assembly: TDF_Label, comp: TDF_Label, Loc: TopLoc_Location): TDF_Label;
+AddComponent(assembly: TDF_Label, comp: TopoDS_Shape, expand: boolean): TDF_Label;
+AddComponent(assembly: TDF_Label, comp: TDF_Label, Loc: TopLoc_Location): TDF_Label;
+AddComponent(assembly: TDF_Label, comp: TopoDS_Shape, expand: boolean): TDF_Label;
+
+RemoveComponent(comp: TDF_Label): void;
+
+UpdateAssemblies(): void;
+
+FindSubShape(shapeL: TDF_Label, sub: TopoDS_Shape, L: TDF_Label): boolean;
+
+AddSubShape(shapeL: TDF_Label, sub: TopoDS_Shape): TDF_Label;
+AddSubShape(shapeL: TDF_Label, sub: TopoDS_Shape, addedSubShapeL: TDF_Label): boolean;
+AddSubShape(shapeL: TDF_Label, sub: TopoDS_Shape): TDF_Label;
+AddSubShape(shapeL: TDF_Label, sub: TopoDS_Shape, addedSubShapeL: TDF_Label): boolean;
+
+FindMainShapeUsingMap(sub: TopoDS_Shape): TDF_Label;
+
+FindMainShape(sub: TopoDS_Shape): TDF_Label;
+
+static GetSubShapes(L: TDF_Label, Labels: NCollection_Sequence_TDF_Label): boolean;
+
 BaseLabel(): TDF_Label;
 
-// Returns internal {@link XCAFDoc_ShapeTool`XCAFDoc_ShapeTool`} tool
-ShapeTool(): XCAFDoc_ShapeTool;
+ID(): Standard_GUID;
 
-// Returns True if label belongs to a Layertable and is a Layer definition
-IsLayer(lab: TDF_Label): boolean;
+static IsExternRef(L: TDF_Label): boolean;
 
-// Returns Layer defined by label lab Returns False if the label is not in Layertable or does not define a Layer
-GetLayer(lab: TDF_Label, aLayer: TCollection_ExtendedString): boolean;
-// aLayer: Mutated in place
+SetExternRefs(SHAS: NCollection_Sequence_handle_TCollection_HAsciiString): TDF_Label;
+SetExternRefs(L: TDF_Label, SHAS: NCollection_Sequence_handle_TCollection_HAsciiString): void;
+SetExternRefs(SHAS: NCollection_Sequence_handle_TCollection_HAsciiString): TDF_Label;
+SetExternRefs(L: TDF_Label, SHAS: NCollection_Sequence_handle_TCollection_HAsciiString): void;
 
-// Finds a Layer definition in a Layertable and returns its label if found Returns False if Layer is not found in Layertable
-FindLayer(aLayer: TCollection_ExtendedString, lab: TDF_Label): boolean;
-FindLayer(aLayer: TCollection_ExtendedString, theToFindWithProperty: boolean, theToFindVisible: boolean): TDF_Label;
-FindLayer(aLayer: TCollection_ExtendedString, lab: TDF_Label): boolean;
-FindLayer(aLayer: TCollection_ExtendedString, theToFindWithProperty: boolean, theToFindVisible: boolean): TDF_Label;
-// lab: Mutated in place
+static GetExternRefs(L: TDF_Label, SHAS: NCollection_Sequence_handle_TCollection_HAsciiString): void;
 
-// Adds a Layer definition to a Layertable and returns its label (returns existing label if the same Layer is already defined) Adds a Layer definition to a Layertable and returns its label Returns existing label (if it is already defined) of visible or invisible layer, according to <theToFindVisible> parameter
-AddLayer(theLayer: TCollection_ExtendedString): TDF_Label;
-AddLayer(theLayer: TCollection_ExtendedString, theToFindVisible: boolean): TDF_Label;
-AddLayer(theLayer: TCollection_ExtendedString): TDF_Label;
-AddLayer(theLayer: TCollection_ExtendedString, theToFindVisible: boolean): TDF_Label;
+SetSHUO(Labels: NCollection_Sequence_TDF_Label): { returnValue: boolean; MainSHUOAttr: XCAFDoc_GraphNode; [Symbol.dispose](): void };
 
-// Removes Layer from the Layertable
-RemoveLayer(lab: TDF_Label): void;
+static GetSHUO(SHUOLabel: TDF_Label): { returnValue: boolean; aSHUOAttr: XCAFDoc_GraphNode; [Symbol.dispose](): void };
 
-// Returns a sequence of Layers currently stored in the Layertable
-GetLayerLabels(Labels: NCollection_Sequence_TDF_Label): void;
-// Labels: Mutated in place
+static GetAllComponentSHUO(CompLabel: TDF_Label, SHUOAttrs: NCollection_Sequence_handle_TDF_Attribute): boolean;
 
-// Sets a link from label <L> to Layer defined by <LayerL> optional parameter <shapeInOneLayer> show could shape be in number of layers or only in one
-SetLayer(L: TDF_Label, LayerL: TDF_Label, shapeInOneLayer: boolean): void;
-SetLayer(L: TDF_Label, aLayer: TCollection_ExtendedString, shapeInOneLayer: boolean): void;
-SetLayer(Sh: TopoDS_Shape, LayerL: TDF_Label, shapeInOneLayer: boolean): boolean;
-SetLayer(Sh: TopoDS_Shape, aLayer: TCollection_ExtendedString, shapeInOneLayer: boolean): boolean;
-SetLayer(L: TDF_Label, LayerL: TDF_Label, shapeInOneLayer: boolean): void;
-SetLayer(L: TDF_Label, aLayer: TCollection_ExtendedString, shapeInOneLayer: boolean): void;
-SetLayer(Sh: TopoDS_Shape, LayerL: TDF_Label, shapeInOneLayer: boolean): boolean;
-SetLayer(Sh: TopoDS_Shape, aLayer: TCollection_ExtendedString, shapeInOneLayer: boolean): boolean;
-SetLayer(L: TDF_Label, LayerL: TDF_Label, shapeInOneLayer: boolean): void;
-SetLayer(L: TDF_Label, aLayer: TCollection_ExtendedString, shapeInOneLayer: boolean): void;
-SetLayer(Sh: TopoDS_Shape, LayerL: TDF_Label, shapeInOneLayer: boolean): boolean;
-SetLayer(Sh: TopoDS_Shape, aLayer: TCollection_ExtendedString, shapeInOneLayer: boolean): boolean;
-SetLayer(L: TDF_Label, LayerL: TDF_Label, shapeInOneLayer: boolean): void;
-SetLayer(L: TDF_Label, aLayer: TCollection_ExtendedString, shapeInOneLayer: boolean): void;
-SetLayer(Sh: TopoDS_Shape, LayerL: TDF_Label, shapeInOneLayer: boolean): boolean;
-SetLayer(Sh: TopoDS_Shape, aLayer: TCollection_ExtendedString, shapeInOneLayer: boolean): boolean;
+static GetSHUOUpperUsage(NextUsageL: TDF_Label, Labels: NCollection_Sequence_TDF_Label): boolean;
 
-// Removes a link from label <L> to all layers
-UnSetLayers(L: TDF_Label): void;
-UnSetLayers(Sh: TopoDS_Shape): boolean;
-UnSetLayers(L: TDF_Label): void;
-UnSetLayers(Sh: TopoDS_Shape): boolean;
+static GetSHUONextUsage(UpperUsageL: TDF_Label, Labels: NCollection_Sequence_TDF_Label): boolean;
 
-// Remove link from label <L> and Layer <aLayer>
-UnSetOneLayer(L: TDF_Label, aLayer: TCollection_ExtendedString): boolean;
-UnSetOneLayer(L: TDF_Label, aLayerL: TDF_Label): boolean;
-UnSetOneLayer(Sh: TopoDS_Shape, aLayer: TCollection_ExtendedString): boolean;
-UnSetOneLayer(Sh: TopoDS_Shape, aLayerL: TDF_Label): boolean;
-UnSetOneLayer(L: TDF_Label, aLayer: TCollection_ExtendedString): boolean;
-UnSetOneLayer(L: TDF_Label, aLayerL: TDF_Label): boolean;
-UnSetOneLayer(Sh: TopoDS_Shape, aLayer: TCollection_ExtendedString): boolean;
-UnSetOneLayer(Sh: TopoDS_Shape, aLayerL: TDF_Label): boolean;
-UnSetOneLayer(L: TDF_Label, aLayer: TCollection_ExtendedString): boolean;
-UnSetOneLayer(L: TDF_Label, aLayerL: TDF_Label): boolean;
-UnSetOneLayer(Sh: TopoDS_Shape, aLayer: TCollection_ExtendedString): boolean;
-UnSetOneLayer(Sh: TopoDS_Shape, aLayerL: TDF_Label): boolean;
-UnSetOneLayer(L: TDF_Label, aLayer: TCollection_ExtendedString): boolean;
-UnSetOneLayer(L: TDF_Label, aLayerL: TDF_Label): boolean;
-UnSetOneLayer(Sh: TopoDS_Shape, aLayer: TCollection_ExtendedString): boolean;
-UnSetOneLayer(Sh: TopoDS_Shape, aLayerL: TDF_Label): boolean;
+RemoveSHUO(SHUOLabel: TDF_Label): boolean;
 
-// Returns True if label <L> has a Layer associated with the <aLayer>
-IsSet(L: TDF_Label, aLayer: TCollection_ExtendedString): boolean;
-IsSet(L: TDF_Label, aLayerL: TDF_Label): boolean;
-IsSet(Sh: TopoDS_Shape, aLayer: TCollection_ExtendedString): boolean;
-IsSet(Sh: TopoDS_Shape, aLayerL: TDF_Label): boolean;
-IsSet(L: TDF_Label, aLayer: TCollection_ExtendedString): boolean;
-IsSet(L: TDF_Label, aLayerL: TDF_Label): boolean;
-IsSet(Sh: TopoDS_Shape, aLayer: TCollection_ExtendedString): boolean;
-IsSet(Sh: TopoDS_Shape, aLayerL: TDF_Label): boolean;
-IsSet(L: TDF_Label, aLayer: TCollection_ExtendedString): boolean;
-IsSet(L: TDF_Label, aLayerL: TDF_Label): boolean;
-IsSet(Sh: TopoDS_Shape, aLayer: TCollection_ExtendedString): boolean;
-IsSet(Sh: TopoDS_Shape, aLayerL: TDF_Label): boolean;
-IsSet(L: TDF_Label, aLayer: TCollection_ExtendedString): boolean;
-IsSet(L: TDF_Label, aLayerL: TDF_Label): boolean;
-IsSet(Sh: TopoDS_Shape, aLayer: TCollection_ExtendedString): boolean;
-IsSet(Sh: TopoDS_Shape, aLayerL: TDF_Label): boolean;
+FindComponent(theShape: TopoDS_Shape, Labels: NCollection_Sequence_TDF_Label): boolean;
 
-// Return sequence of strings <aLayerS> that associated with label <L>
-GetLayers(L: TDF_Label): { returnValue: boolean; aLayerS: NCollection_HSequence_TCollection_ExtendedString; [Symbol.dispose](): void };
-GetLayers(Sh: TopoDS_Shape): { returnValue: boolean; aLayerS: NCollection_HSequence_TCollection_ExtendedString; [Symbol.dispose](): void };
-GetLayers(L: TDF_Label, aLayerLS: NCollection_Sequence_TDF_Label): boolean;
-GetLayers(Sh: TopoDS_Shape, aLayerLS: NCollection_Sequence_TDF_Label): boolean;
-GetLayers(L: TDF_Label): { returnValue: boolean; aLayerS: NCollection_HSequence_TCollection_ExtendedString; [Symbol.dispose](): void };
-GetLayers(Sh: TopoDS_Shape): { returnValue: boolean; aLayerS: NCollection_HSequence_TCollection_ExtendedString; [Symbol.dispose](): void };
-GetLayers(L: TDF_Label, aLayerLS: NCollection_Sequence_TDF_Label): boolean;
-GetLayers(Sh: TopoDS_Shape, aLayerLS: NCollection_Sequence_TDF_Label): boolean;
-GetLayers(L: TDF_Label): { returnValue: boolean; aLayerS: NCollection_HSequence_TCollection_ExtendedString; [Symbol.dispose](): void };
-GetLayers(Sh: TopoDS_Shape): { returnValue: boolean; aLayerS: NCollection_HSequence_TCollection_ExtendedString; [Symbol.dispose](): void };
-GetLayers(L: TDF_Label, aLayerLS: NCollection_Sequence_TDF_Label): boolean;
-GetLayers(Sh: TopoDS_Shape, aLayerLS: NCollection_Sequence_TDF_Label): boolean;
-GetLayers(L: TDF_Label): { returnValue: boolean; aLayerS: NCollection_HSequence_TCollection_ExtendedString; [Symbol.dispose](): void };
-GetLayers(Sh: TopoDS_Shape): { returnValue: boolean; aLayerS: NCollection_HSequence_TCollection_ExtendedString; [Symbol.dispose](): void };
-GetLayers(L: TDF_Label, aLayerLS: NCollection_Sequence_TDF_Label): boolean;
-GetLayers(Sh: TopoDS_Shape, aLayerLS: NCollection_Sequence_TDF_Label): boolean;
+GetSHUOInstance(theSHUO: XCAFDoc_GraphNode): TopoDS_Shape;
 
-// Return sequanese of shape labels that assigned with layers to <ShLabels>
-static GetShapesOfLayer(theLayerL: TDF_Label, theShLabels: NCollection_Sequence_TDF_Label): void;
-// theShLabels: Mutated in place
+SetInstanceSHUO(theShape: TopoDS_Shape): XCAFDoc_GraphNode;
 
-// Return TRUE if layer is visible, FALSE if invisible
-IsVisible(layerL: TDF_Label): boolean;
+GetAllSHUOInstances(theSHUO: XCAFDoc_GraphNode, theSHUOShapeSeq: NCollection_Sequence_TopoDS_Shape): boolean;
 
-// Set the visibility of layer
-SetVisibility(layerL: TDF_Label, isvisible?: boolean): void;
+static FindSHUO(Labels: NCollection_Sequence_TDF_Label): { returnValue: boolean; theSHUOAttr: XCAFDoc_GraphNode; [Symbol.dispose](): void };
 
-// Returns the ID of the attribute
+SetLocation(theShapeLabel: TDF_Label, theLoc: TopLoc_Location, theRefLabel: TDF_Label): boolean;
+
+Expand(Shape: TDF_Label): boolean;
+
+GetNamedProperties(theLabel: TDF_Label, theToCreate: boolean): TDataStd_NamedData;
+GetNamedProperties(theShape: TopoDS_Shape, theToCreate: boolean): TDataStd_NamedData;
+GetNamedProperties(theLabel: TDF_Label, theToCreate: boolean): TDataStd_NamedData;
+GetNamedProperties(theShape: TopoDS_Shape, theToCreate: boolean): TDataStd_NamedData;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+NewEmpty(): TDF_Attribute;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+XCAFDoc_View: declare class XCAFDoc_View extends TDataStd_GenericEmpty
+
+constructor
+
+static GetID(): Standard_GUID;
+
+static Set(theLabel: TDF_Label): XCAFDoc_View;
+
+ID(): Standard_GUID;
+
+SetObject(theViewObject: XCAFView_Object): void;
+
+GetObject(): XCAFView_Object;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+NewEmpty(): TDF_Attribute;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+XCAFDoc_ViewTool: declare class XCAFDoc_ViewTool extends TDataStd_GenericEmpty
+
+constructor
+
+static Set(L: TDF_Label): XCAFDoc_ViewTool;
+
+static GetID(): Standard_GUID;
+
+BaseLabel(): TDF_Label;
+
+IsView(theLabel: TDF_Label): boolean;
+
+GetViewLabels(theLabels: NCollection_Sequence_TDF_Label): void;
+
+SetView(theShapes: NCollection_Sequence_TDF_Label, theGDTs: NCollection_Sequence_TDF_Label, theClippingPlanes: NCollection_Sequence_TDF_Label, theNotes: NCollection_Sequence_TDF_Label, theAnnotations: NCollection_Sequence_TDF_Label, theViewL: TDF_Label): void;
+SetView(theShapes: NCollection_Sequence_TDF_Label, theGDTs: NCollection_Sequence_TDF_Label, theClippingPlanes: NCollection_Sequence_TDF_Label, theViewL: TDF_Label): void;
+SetView(theShapes: NCollection_Sequence_TDF_Label, theGDTs: NCollection_Sequence_TDF_Label, theViewL: TDF_Label): void;
+SetView(theShapes: NCollection_Sequence_TDF_Label, theGDTs: NCollection_Sequence_TDF_Label, theClippingPlanes: NCollection_Sequence_TDF_Label, theNotes: NCollection_Sequence_TDF_Label, theAnnotations: NCollection_Sequence_TDF_Label, theViewL: TDF_Label): void;
+SetView(theShapes: NCollection_Sequence_TDF_Label, theGDTs: NCollection_Sequence_TDF_Label, theClippingPlanes: NCollection_Sequence_TDF_Label, theViewL: TDF_Label): void;
+SetView(theShapes: NCollection_Sequence_TDF_Label, theGDTs: NCollection_Sequence_TDF_Label, theViewL: TDF_Label): void;
+SetView(theShapes: NCollection_Sequence_TDF_Label, theGDTs: NCollection_Sequence_TDF_Label, theClippingPlanes: NCollection_Sequence_TDF_Label, theNotes: NCollection_Sequence_TDF_Label, theAnnotations: NCollection_Sequence_TDF_Label, theViewL: TDF_Label): void;
+SetView(theShapes: NCollection_Sequence_TDF_Label, theGDTs: NCollection_Sequence_TDF_Label, theClippingPlanes: NCollection_Sequence_TDF_Label, theViewL: TDF_Label): void;
+SetView(theShapes: NCollection_Sequence_TDF_Label, theGDTs: NCollection_Sequence_TDF_Label, theViewL: TDF_Label): void;
+
+SetClippingPlanes(theClippingPlaneLabels: NCollection_Sequence_TDF_Label, theViewL: TDF_Label): void;
+
+RemoveView(theViewL: TDF_Label): void;
+
+GetViewLabelsForShape(theShapeL: TDF_Label, theViews: NCollection_Sequence_TDF_Label): boolean;
+
+GetViewLabelsForGDT(theGDTL: TDF_Label, theViews: NCollection_Sequence_TDF_Label): boolean;
+
+GetViewLabelsForClippingPlane(theClippingPlaneL: TDF_Label, theViews: NCollection_Sequence_TDF_Label): boolean;
+
+GetViewLabelsForNote(theNoteL: TDF_Label, theViews: NCollection_Sequence_TDF_Label): boolean;
+
+GetViewLabelsForAnnotation(theAnnotationL: TDF_Label, theViews: NCollection_Sequence_TDF_Label): boolean;
+
+AddView(): TDF_Label;
+
+GetRefShapeLabel(theViewL: TDF_Label, theShapeLabels: NCollection_Sequence_TDF_Label): boolean;
+
+GetRefGDTLabel(theViewL: TDF_Label, theGDTLabels: NCollection_Sequence_TDF_Label): boolean;
+
+GetRefClippingPlaneLabel(theViewL: TDF_Label, theClippingPlaneLabels: NCollection_Sequence_TDF_Label): boolean;
+
+GetRefNoteLabel(theViewL: TDF_Label, theNoteLabels: NCollection_Sequence_TDF_Label): boolean;
+
+GetRefAnnotationLabel(theViewL: TDF_Label, theAnnotationLabels: NCollection_Sequence_TDF_Label): boolean;
+
+IsLocked(theViewL: TDF_Label): boolean;
+
+Lock(theViewL: TDF_Label): void;
+
+Unlock(theViewL: TDF_Label): void;
+
 ID(): Standard_GUID;
 
 static get_type_name(): string;
@@ -462,62 +541,138 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Returns an new empty attribute from the good end type
 NewEmpty(): TDF_Attribute;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Used to define a Length Unit attribute containing a length unit info
-XCAFDoc_LengthUnit: declare class XCAFDoc_LengthUnit extends TDF_Attribute
+XCAFDoc_VisMaterial: declare class XCAFDoc_VisMaterial extends TDF_Attribute
 
 constructor
 
-// Returns the GUID of the attribute
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
 static GetID(): Standard_GUID;
-
-// Finds or creates a LengthUnit attribute
-static Set(theLabel: TDF_Label, theUnitValue: number): XCAFDoc_LengthUnit;
-static Set(theLabel: TDF_Label, theUnitName: TCollection_AsciiString, theUnitValue: number): XCAFDoc_LengthUnit;
-static Set(theLabel: TDF_Label, theGUID: Standard_GUID, theUnitName: TCollection_AsciiString, theUnitValue: number): XCAFDoc_LengthUnit;
-Set(theUnitName: TCollection_AsciiString, theUnitValue: number): void;
-static Set(theLabel: TDF_Label, theUnitValue: number): XCAFDoc_LengthUnit;
-static Set(theLabel: TDF_Label, theUnitName: TCollection_AsciiString, theUnitValue: number): XCAFDoc_LengthUnit;
-static Set(theLabel: TDF_Label, theGUID: Standard_GUID, theUnitName: TCollection_AsciiString, theUnitValue: number): XCAFDoc_LengthUnit;
-static Set(theLabel: TDF_Label, theUnitValue: number): XCAFDoc_LengthUnit;
-static Set(theLabel: TDF_Label, theUnitName: TCollection_AsciiString, theUnitValue: number): XCAFDoc_LengthUnit;
-static Set(theLabel: TDF_Label, theGUID: Standard_GUID, theUnitName: TCollection_AsciiString, theUnitValue: number): XCAFDoc_LengthUnit;
-// theUnitValue: length scale factor to meter The LengthUnit attribute is returned
-
-// Length unit description (could be arbitrary text)
-GetUnitName(): TCollection_AsciiString;
-
-// Returns length unit scale factor to meter
-GetUnitValue(): number;
 
 IsEmpty(): boolean;
 
-// Returns the ID of the attribute
+FillAspect(theAspect: unknown): void;
+
+HasPbrMaterial(): boolean;
+
+PbrMaterial(): XCAFDoc_VisMaterialPBR;
+
+SetPbrMaterial(theMaterial: XCAFDoc_VisMaterialPBR): void;
+
+UnsetPbrMaterial(): void;
+
+HasCommonMaterial(): boolean;
+
+CommonMaterial(): XCAFDoc_VisMaterialCommon;
+
+SetCommonMaterial(theMaterial: XCAFDoc_VisMaterialCommon): void;
+
+UnsetCommonMaterial(): void;
+
+BaseColor(): Quantity_ColorRGBA;
+
+AlphaMode(): unknown;
+
+AlphaCutOff(): number;
+
+SetAlphaMode(theMode: unknown, theCutOff?: number): void;
+
+FaceCulling(): unknown;
+
+SetFaceCulling(theFaceCulling: unknown): void;
+
+// DEPRECATED
+IsDoubleSided(): boolean;
+
+// DEPRECATED
+SetDoubleSided(theIsDoubleSided: boolean): void;
+
+RawName(): TCollection_HAsciiString;
+
+SetRawName(theName: TCollection_HAsciiString): void;
+
+IsEqual(theOther: XCAFDoc_VisMaterial): boolean;
+
+ConvertToCommonMaterial(): XCAFDoc_VisMaterialCommon;
+
+ConvertToPbrMaterial(): XCAFDoc_VisMaterialPBR;
+
 ID(): Standard_GUID;
 
-// Restores the backuped contents from <anAttribute> into this one
 Restore(anAttribute: TDF_Attribute): void;
 
-// This method is different from the "Copy" one, because it is used when copying an attribute from a source structure into a target structure
-Paste(intoAttribute: TDF_Attribute, aRelocationTable: TDF_RelocationTable): void;
-
-static get_type_name(): string;
-
-static get_type_descriptor(): Standard_Type;
-
-DynamicType(): Standard_Type;
-
-// Returns an new empty attribute from the good end type
 NewEmpty(): TDF_Attribute;
 
-// Releases the C++ object
+Paste(intoAttribute: TDF_Attribute, aRelocationTable: TDF_RelocationTable): void;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+XCAFDoc_VisMaterialCommon: declare class XCAFDoc_VisMaterialCommon
+
+constructor
+
+DiffuseTexture: unknown
+
+AmbientColor: Quantity_Color
+
+DiffuseColor: Quantity_Color
+
+SpecularColor: Quantity_Color
+
+EmissiveColor: Quantity_Color
+
+Shininess: number
+
+Transparency: number
+
+IsDefined: boolean
+
+IsEqual(theOther: XCAFDoc_VisMaterialCommon): boolean;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+XCAFDoc_VisMaterialPBR: declare class XCAFDoc_VisMaterialPBR
+
+constructor
+
+BaseColorTexture: unknown
+
+MetallicRoughnessTexture: unknown
+
+EmissiveTexture: unknown
+
+OcclusionTexture: unknown
+
+NormalTexture: unknown
+
+BaseColor: Quantity_ColorRGBA
+
+EmissiveFactor: [number, number, number]
+
+Metallic: number
+
+Roughness: number
+
+RefractionIndex: number
+
+IsDefined: boolean
+
+IsEqual(theOther: XCAFDoc_VisMaterialPBR): boolean;
+
 delete(): void;
 
 [Symbol.dispose](): void;

@@ -1,537 +1,322 @@
 # libcascade — BRepGraph (6)
 
-16 top-level symbols. Signatures are verbatim typescript.
+20 top-level symbols. Signatures are verbatim typescript.
 
-BRepGraph_ShapesView: declare class BRepGraph_ShapesView
-
-Add(theShape: TopoDS_Shape): BRepGraph_ShapesView_Result;
-Add(theShape: TopoDS_Shape, theOptions: BRepGraph_ShapesView_Options): BRepGraph_ShapesView_Result;
-Add(theShape: TopoDS_Shape, theParent: BRepGraph_NodeId): BRepGraph_ShapesView_Result;
-Add(theShape: TopoDS_Shape, theParent: BRepGraph_NodeId, theOptions: BRepGraph_ShapesView_Options): BRepGraph_ShapesView_Result;
-Add(theShape: TopoDS_Shape): BRepGraph_ShapesView_Result;
-Add(theShape: TopoDS_Shape, theOptions: BRepGraph_ShapesView_Options): BRepGraph_ShapesView_Result;
-Add(theShape: TopoDS_Shape, theParent: BRepGraph_NodeId): BRepGraph_ShapesView_Result;
-Add(theShape: TopoDS_Shape, theParent: BRepGraph_NodeId, theOptions: BRepGraph_ShapesView_Options): BRepGraph_ShapesView_Result;
-Add(theShape: TopoDS_Shape): BRepGraph_ShapesView_Result;
-Add(theShape: TopoDS_Shape, theOptions: BRepGraph_ShapesView_Options): BRepGraph_ShapesView_Result;
-Add(theShape: TopoDS_Shape, theParent: BRepGraph_NodeId): BRepGraph_ShapesView_Result;
-Add(theShape: TopoDS_Shape, theParent: BRepGraph_NodeId, theOptions: BRepGraph_ShapesView_Options): BRepGraph_ShapesView_Result;
-Add(theShape: TopoDS_Shape): BRepGraph_ShapesView_Result;
-Add(theShape: TopoDS_Shape, theOptions: BRepGraph_ShapesView_Options): BRepGraph_ShapesView_Result;
-Add(theShape: TopoDS_Shape, theParent: BRepGraph_NodeId): BRepGraph_ShapesView_Result;
-Add(theShape: TopoDS_Shape, theParent: BRepGraph_NodeId, theOptions: BRepGraph_ShapesView_Options): BRepGraph_ShapesView_Result;
-
-CollectHistoryInputs(theRoots: NCollection_Array1_BRepGraph_NodeId, theOutInputs: NCollection_DataMap_TopoDS_Shape_BRepGraph_NodeId_TopTools_ShapeMapHasher): void;
-
-AddWithHistory(theResultShape: TopoDS_Shape, theInputs: NCollection_DataMap_TopoDS_Shape_BRepGraph_NodeId_TopTools_ShapeMapHasher, theHistory: BRepTools_History, theOpLabel: TCollection_AsciiString): BRepGraph_ShapesView_Result;
-AddWithHistory(theResultShape: TopoDS_Shape, theInputRoots: NCollection_Array1_BRepGraph_NodeId, theHistory: BRepTools_History, theOpLabel: TCollection_AsciiString): BRepGraph_ShapesView_Result;
-AddWithHistory(theResultShape: TopoDS_Shape, theInputs: NCollection_DataMap_TopoDS_Shape_BRepGraph_NodeId_TopTools_ShapeMapHasher, theHistory: BRepTools_History, theOpLabel: TCollection_AsciiString, theOptions: BRepGraph_ShapesView_Options): BRepGraph_ShapesView_Result;
-AddWithHistory(theResultShape: TopoDS_Shape, theInputRoots: NCollection_Array1_BRepGraph_NodeId, theHistory: BRepTools_History, theOpLabel: TCollection_AsciiString, theOptions: BRepGraph_ShapesView_Options): BRepGraph_ShapesView_Result;
-AddWithHistory(theResultShape: TopoDS_Shape, theInputs: NCollection_DataMap_TopoDS_Shape_BRepGraph_NodeId_TopTools_ShapeMapHasher, theHistory: BRepTools_History, theOpLabel: TCollection_AsciiString): BRepGraph_ShapesView_Result;
-AddWithHistory(theResultShape: TopoDS_Shape, theInputRoots: NCollection_Array1_BRepGraph_NodeId, theHistory: BRepTools_History, theOpLabel: TCollection_AsciiString): BRepGraph_ShapesView_Result;
-AddWithHistory(theResultShape: TopoDS_Shape, theInputs: NCollection_DataMap_TopoDS_Shape_BRepGraph_NodeId_TopTools_ShapeMapHasher, theHistory: BRepTools_History, theOpLabel: TCollection_AsciiString, theOptions: BRepGraph_ShapesView_Options): BRepGraph_ShapesView_Result;
-AddWithHistory(theResultShape: TopoDS_Shape, theInputRoots: NCollection_Array1_BRepGraph_NodeId, theHistory: BRepTools_History, theOpLabel: TCollection_AsciiString, theOptions: BRepGraph_ShapesView_Options): BRepGraph_ShapesView_Result;
-AddWithHistory(theResultShape: TopoDS_Shape, theInputs: NCollection_DataMap_TopoDS_Shape_BRepGraph_NodeId_TopTools_ShapeMapHasher, theHistory: BRepTools_History, theOpLabel: TCollection_AsciiString): BRepGraph_ShapesView_Result;
-AddWithHistory(theResultShape: TopoDS_Shape, theInputRoots: NCollection_Array1_BRepGraph_NodeId, theHistory: BRepTools_History, theOpLabel: TCollection_AsciiString): BRepGraph_ShapesView_Result;
-AddWithHistory(theResultShape: TopoDS_Shape, theInputs: NCollection_DataMap_TopoDS_Shape_BRepGraph_NodeId_TopTools_ShapeMapHasher, theHistory: BRepTools_History, theOpLabel: TCollection_AsciiString, theOptions: BRepGraph_ShapesView_Options): BRepGraph_ShapesView_Result;
-AddWithHistory(theResultShape: TopoDS_Shape, theInputRoots: NCollection_Array1_BRepGraph_NodeId, theHistory: BRepTools_History, theOpLabel: TCollection_AsciiString, theOptions: BRepGraph_ShapesView_Options): BRepGraph_ShapesView_Result;
-AddWithHistory(theResultShape: TopoDS_Shape, theInputs: NCollection_DataMap_TopoDS_Shape_BRepGraph_NodeId_TopTools_ShapeMapHasher, theHistory: BRepTools_History, theOpLabel: TCollection_AsciiString): BRepGraph_ShapesView_Result;
-AddWithHistory(theResultShape: TopoDS_Shape, theInputRoots: NCollection_Array1_BRepGraph_NodeId, theHistory: BRepTools_History, theOpLabel: TCollection_AsciiString): BRepGraph_ShapesView_Result;
-AddWithHistory(theResultShape: TopoDS_Shape, theInputs: NCollection_DataMap_TopoDS_Shape_BRepGraph_NodeId_TopTools_ShapeMapHasher, theHistory: BRepTools_History, theOpLabel: TCollection_AsciiString, theOptions: BRepGraph_ShapesView_Options): BRepGraph_ShapesView_Result;
-AddWithHistory(theResultShape: TopoDS_Shape, theInputRoots: NCollection_Array1_BRepGraph_NodeId, theHistory: BRepTools_History, theOpLabel: TCollection_AsciiString, theOptions: BRepGraph_ShapesView_Options): BRepGraph_ShapesView_Result;
-
-Shape(theNode: BRepGraph_NodeId): TopoDS_Shape;
-
-HasOriginal(theNode: BRepGraph_NodeId): boolean;
-
-Original(theNode: BRepGraph_NodeId): TopoDS_Shape;
-
-Reconstruct(theRoot: BRepGraph_NodeId): TopoDS_Shape;
-
-ClearCached(theNode: BRepGraph_NodeId): void;
-ClearCached(theRef: BRepGraph_RefId): void;
-ClearCached(theNode: BRepGraph_NodeId): void;
-ClearCached(theRef: BRepGraph_RefId): void;
-
-FindNode(theShape: TopoDS_Shape): BRepGraph_NodeId;
-
-HasNode(theShape: TopoDS_Shape): boolean;
-
-RemoveShape(theShape: TopoDS_Shape): boolean;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-BRepGraph_ShapesView_AddStatus: typeof BRepGraph_ShapesView_AddStatus[keyof typeof BRepGraph_ShapesView_AddStatus]
-
-BRepGraph_ShapesView_Result: declare class BRepGraph_ShapesView_Result
+BRepGraph_CoEdgePolygon2DRepId: declare class BRepGraph_CoEdgePolygon2DRepId
 
 constructor
 
-TopologyRoot: BRepGraph_NodeId
+Index: number
 
-Product: BRepGraph_ProductId
+static Start(): unknown;
 
-Occurrence: BRepGraph_OccurrenceId
+static Invalid(): unknown;
 
-InsertedRef: BRepGraph_RefId
+IsValid(): boolean;
+IsValid(theMaxCount: number): boolean;
+IsValid(): boolean;
+IsValid(theMaxCount: number): boolean;
 
-Status: BRepGraph_ShapesView_AddStatus
+IsRemoved(theGraph: BRepGraph): boolean;
 
-AddedNodes: NCollection_DataMap_TopoDS_Shape_BRepGraph_NodeId_TopTools_ShapeMapHasher
-
-IsOk(): boolean;
-
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Lightweight mutation facade for runtime supplement attachments
-BRepGraph_SupplementEditor: declare class BRepGraph_SupplementEditor
+BRepGraph_CoEdgePolygonOnTriRepId: declare class BRepGraph_CoEdgePolygonOnTriRepId
 
 constructor
 
-// Attach one supplemental shape to an arbitrary supported core owner
-Attach(theOwner: BRepGraph_NodeId, theKind: BRepGraph_LayerTopoSupplement_AttachmentKind, theShape: TopoDS_Shape): number;
-// theOwner: active owner node
-// theKind: semantic attachment kind
-// theShape: supplemental shape to attach
+Index: number
 
-// Attach a supplemental shape to a vertex owner
-AttachToVertex(theVertex: BRepGraph_VertexId, theShape: TopoDS_Shape, theKind?: BRepGraph_LayerTopoSupplement_AttachmentKind): number;
-// theVertex: active vertex owner
-// theShape: supplemental shape to attach
-// theKind: semantic attachment kind
+static Start(): unknown;
 
-// Attach a supplemental shape to an edge owner
-AttachToEdge(theEdge: BRepGraph_EdgeId, theShape: TopoDS_Shape, theKind?: BRepGraph_LayerTopoSupplement_AttachmentKind): number;
-// theEdge: active edge owner
-// theShape: supplemental shape to attach
-// theKind: semantic attachment kind
+static Invalid(): unknown;
 
-// Attach a supplemental shape to a face owner
-AttachToFace(theFace: BRepGraph_FaceId, theShape: TopoDS_Shape, theKind?: BRepGraph_LayerTopoSupplement_AttachmentKind): number;
-// theFace: active face owner
-// theShape: supplemental shape to attach
-// theKind: semantic attachment kind
+IsValid(): boolean;
+IsValid(theMaxCount: number): boolean;
+IsValid(): boolean;
+IsValid(theMaxCount: number): boolean;
 
-// Attach a supplemental shape to a solid owner
-AttachToSolid(theSolid: BRepGraph_SolidId, theShape: TopoDS_Shape, theKind?: BRepGraph_LayerTopoSupplement_AttachmentKind): number;
-// theSolid: active solid owner
-// theShape: supplemental shape to attach
-// theKind: semantic attachment kind
+IsRemoved(theGraph: BRepGraph): boolean;
 
-// Attach a supplemental shape to a compsolid owner
-AttachToCompSolid(theCompSolid: BRepGraph_CompSolidId, theShape: TopoDS_Shape, theKind?: BRepGraph_LayerTopoSupplement_AttachmentKind): number;
-// theCompSolid: active compsolid owner
-// theShape: supplemental shape to attach
-// theKind: semantic attachment kind
-
-// Attach a supplemental shape to a shell owner
-AttachToShell(theShell: BRepGraph_ShellId, theShape: TopoDS_Shape, theKind?: BRepGraph_LayerTopoSupplement_AttachmentKind): number;
-// theShell: active shell owner
-// theShape: supplemental shape to attach
-// theKind: semantic attachment kind
-
-// Attach a supplemental shape to a compound owner
-AttachToCompound(theCompound: BRepGraph_CompoundId, theShape: TopoDS_Shape, theKind?: BRepGraph_LayerTopoSupplement_AttachmentKind): number;
-// theCompound: active compound owner
-// theShape: supplemental shape to attach
-// theKind: semantic attachment kind
-
-// Remove one attachment by uid
-RemoveAttachment(theUid: number): boolean;
-// theUid: layer-local attachment uid
-
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Iterator over supplemental `TopoDS` attachments owned by one core node
-BRepGraph_SupplementIterator: declare class BRepGraph_SupplementIterator
+BRepGraph_EdgeCurve3DRepId: declare class BRepGraph_EdgeCurve3DRepId
 
 constructor
 
-// Return true when the iterator currently points to an attachment
-More(): boolean;
+Index: number
 
-// Advance to the next attachment
-Next(): void;
+static Start(): unknown;
 
-// Return the current layer-local attachment uid
-Uid(): number;
+static Invalid(): unknown;
 
-// Return the current attachment entry
-Value(): BRepGraph_LayerTopoSupplement_Entry;
+IsValid(): boolean;
+IsValid(theMaxCount: number): boolean;
+IsValid(): boolean;
+IsValid(theMaxCount: number): boolean;
 
-// Sentinel marking end of iteration
-end(): NCollection_ForwardRangeSentinel;
+IsRemoved(theGraph: BRepGraph): boolean;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Centralized geometry access for {@link BRepGraph`BRepGraph`} - analogue of {@link BRep_Tool `BRep_Tool`}
-BRepGraph_Tool: declare class BRepGraph_Tool
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-BRepGraph_Tool_CoEdge: declare class BRepGraph_Tool_CoEdge
+BRepGraph_EdgePolygon3DRepId: declare class BRepGraph_EdgePolygon3DRepId
 
 constructor
 
-static Orientation(theGraph: BRepGraph, theCoEdge: BRepGraph_CoEdgeId): TopAbs_Orientation;
+Index: number
 
-static IsReversed(theGraph: BRepGraph, theCoEdge: BRepGraph_CoEdgeId): boolean;
+static Start(): unknown;
 
-static EdgeOf(theGraph: BRepGraph, theCoEdge: BRepGraph_CoEdgeId): BRepGraph_EdgeId;
+static Invalid(): unknown;
 
-static FaceOf(theGraph: BRepGraph, theCoEdge: BRepGraph_CoEdgeId): BRepGraph_FaceId;
+IsValid(): boolean;
+IsValid(theMaxCount: number): boolean;
+IsValid(): boolean;
+IsValid(theMaxCount: number): boolean;
 
-static SeamPair(theGraph: BRepGraph, theCoEdge: BRepGraph_CoEdgeId): BRepGraph_CoEdgeId;
+IsRemoved(theGraph: BRepGraph): boolean;
 
-static IsSeam(theGraph: BRepGraph, theCoEdge: BRepGraph_CoEdgeId): boolean;
-
-static HasPCurve(theGraph: BRepGraph, theCoEdge: BRepGraph_CoEdgeId): boolean;
-
-static SameParameter(theGraph: BRepGraph, theCoEdge: BRepGraph_CoEdgeId): boolean;
-
-static SameRange(theGraph: BRepGraph, theCoEdge: BRepGraph_CoEdgeId): boolean;
-
-static PCurve(theGraph: BRepGraph, theCoEdge: BRepGraph_CoEdgeId): Geom2d_Curve;
-
-static PCurveAdaptor(theGraph: BRepGraph, theCoEdge: BRepGraph_CoEdgeId): Geom2dAdaptor_Curve;
-static PCurveAdaptor(theGraph: BRepGraph, theRef: any): Geom2dAdaptor_Curve;
-static PCurveAdaptor(theGraph: BRepGraph, theCoEdge: BRepGraph_CoEdgeId): Geom2dAdaptor_Curve;
-static PCurveAdaptor(theGraph: BRepGraph, theRef: any): Geom2dAdaptor_Curve;
-
-static UVPoints(theGraph: BRepGraph, theCoEdge: BRepGraph_CoEdgeId): [gp_Pnt2d, gp_Pnt2d];
-
-static Range(theGraph: BRepGraph, theCoEdge: BRepGraph_CoEdgeId): [number, number];
-
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-BRepGraph_Tool_Edge: declare class BRepGraph_Tool_Edge
+BRepGraph_FaceSurfaceRepId: declare class BRepGraph_FaceSurfaceRepId
 
 constructor
 
-static Tolerance(theGraph: BRepGraph, theEdge: BRepGraph_EdgeId): number;
+Index: number
 
-static Degenerated(theGraph: BRepGraph, theEdge: BRepGraph_EdgeId): boolean;
+static Start(): unknown;
 
-static IsClosed(theGraph: BRepGraph, theEdge: BRepGraph_EdgeId): boolean;
+static Invalid(): unknown;
 
-static Range(theGraph: BRepGraph, theEdge: BRepGraph_EdgeId): [number, number];
+IsValid(): boolean;
+IsValid(theMaxCount: number): boolean;
+IsValid(): boolean;
+IsValid(theMaxCount: number): boolean;
 
-static StartVertexId(theGraph: BRepGraph, theEdge: BRepGraph_EdgeId): BRepGraph_VertexRefId;
+IsRemoved(theGraph: BRepGraph): boolean;
 
-static EndVertexId(theGraph: BRepGraph, theEdge: BRepGraph_EdgeId): BRepGraph_VertexRefId;
-
-static HasCurve(theGraph: BRepGraph, theEdge: BRepGraph_EdgeId): boolean;
-
-static Curve(theGraph: BRepGraph, theEdge: BRepGraph_EdgeId): Geom_Curve;
-static Curve(theGraph: BRepGraph, theRef: any): Geom_Curve;
-static Curve(theGraph: BRepGraph, theEdge: BRepGraph_EdgeId): Geom_Curve;
-static Curve(theGraph: BRepGraph, theRef: any): Geom_Curve;
-
-static CurveAdaptor(theGraph: BRepGraph, theEdge: BRepGraph_EdgeId): GeomAdaptor_TransformedCurve;
-static CurveAdaptor(theGraph: BRepGraph, theRef: any): GeomAdaptor_TransformedCurve;
-static CurveAdaptor(theGraph: BRepGraph, theEdge: BRepGraph_EdgeId): GeomAdaptor_TransformedCurve;
-static CurveAdaptor(theGraph: BRepGraph, theRef: any): GeomAdaptor_TransformedCurve;
-
-static FindByVertices(theGraph: BRepGraph, theStartVertex: BRepGraph_VertexId, theEndVertex: BRepGraph_VertexId, theToIgnoreOrientation?: boolean): BRepGraph_EdgeId;
-
-static FindPCurveCoEdgeId(theGraph: BRepGraph, theEdge: BRepGraph_EdgeId, theFace: BRepGraph_FaceId): BRepGraph_CoEdgeId;
-static FindPCurveCoEdgeId(theGraph: BRepGraph, theEdge: BRepGraph_EdgeId, theFace: BRepGraph_FaceId, theOrientation: TopAbs_Orientation): BRepGraph_CoEdgeId;
-static FindPCurveCoEdgeId(theGraph: BRepGraph, theEdge: BRepGraph_EdgeId, theFace: BRepGraph_FaceId): BRepGraph_CoEdgeId;
-static FindPCurveCoEdgeId(theGraph: BRepGraph, theEdge: BRepGraph_EdgeId, theFace: BRepGraph_FaceId, theOrientation: TopAbs_Orientation): BRepGraph_CoEdgeId;
-
-static FindCoEdgeId(theGraph: BRepGraph, theEdge: BRepGraph_EdgeId, theFace: BRepGraph_FaceId): BRepGraph_CoEdgeId;
-static FindCoEdgeId(theGraph: BRepGraph, theEdge: BRepGraph_EdgeId, theFace: BRepGraph_FaceId, theOrientation: TopAbs_Orientation): BRepGraph_CoEdgeId;
-static FindCoEdgeId(theGraph: BRepGraph, theEdge: BRepGraph_EdgeId, theFace: BRepGraph_FaceId): BRepGraph_CoEdgeId;
-static FindCoEdgeId(theGraph: BRepGraph, theEdge: BRepGraph_EdgeId, theFace: BRepGraph_FaceId, theOrientation: TopAbs_Orientation): BRepGraph_CoEdgeId;
-
-static NbFaces(theGraph: BRepGraph, theEdge: BRepGraph_EdgeId): number;
-
-static IsManifold(theGraph: BRepGraph, theEdge: BRepGraph_EdgeId): boolean;
-
-static IsBoundary(theGraph: BRepGraph, theEdge: BRepGraph_EdgeId): boolean;
-
-static IsSeamOnFace(theGraph: BRepGraph, theEdge: BRepGraph_EdgeId, theFace: BRepGraph_FaceId): boolean;
-
-static CurveOnSurface(theGraph: BRepGraph, theRef: any, theFace: BRepGraph_FaceId): Adaptor3d_CurveOnSurface;
-
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-BRepGraph_Tool_Face: declare class BRepGraph_Tool_Face
+BRepGraph_FaceTriangulationRepId: declare class BRepGraph_FaceTriangulationRepId
 
 constructor
 
-static Usage(theGraph: BRepGraph, theFaceRef: BRepGraph_FaceRefId): any;
+Index: number
 
-static Tolerance(theGraph: BRepGraph, theFace: BRepGraph_FaceId): number;
-static Tolerance(theGraph: BRepGraph, theFaceRef: BRepGraph_FaceRefId): number;
-static Tolerance(theGraph: BRepGraph, theFace: BRepGraph_FaceId): number;
-static Tolerance(theGraph: BRepGraph, theFaceRef: BRepGraph_FaceRefId): number;
+static Start(): unknown;
 
-static HasSurface(theGraph: BRepGraph, theFace: BRepGraph_FaceId): boolean;
-static HasSurface(theGraph: BRepGraph, theFaceRef: BRepGraph_FaceRefId): boolean;
-static HasSurface(theGraph: BRepGraph, theFace: BRepGraph_FaceId): boolean;
-static HasSurface(theGraph: BRepGraph, theFaceRef: BRepGraph_FaceRefId): boolean;
+static Invalid(): unknown;
 
-static OuterWire(theGraph: BRepGraph, theFace: BRepGraph_FaceId): BRepGraph_WireId;
-static OuterWire(theGraph: BRepGraph, theFaceRef: BRepGraph_FaceRefId): BRepGraph_WireId;
-static OuterWire(theGraph: BRepGraph, theFace: BRepGraph_FaceId): BRepGraph_WireId;
-static OuterWire(theGraph: BRepGraph, theFaceRef: BRepGraph_FaceRefId): BRepGraph_WireId;
+IsValid(): boolean;
+IsValid(theMaxCount: number): boolean;
+IsValid(): boolean;
+IsValid(theMaxCount: number): boolean;
 
-static Surface(theGraph: BRepGraph, theFace: BRepGraph_FaceId): Geom_Surface;
-static Surface(theGraph: BRepGraph, theFaceRef: BRepGraph_FaceRefId): Geom_Surface;
-static Surface(theGraph: BRepGraph, theFace: BRepGraph_FaceId): Geom_Surface;
-static Surface(theGraph: BRepGraph, theFaceRef: BRepGraph_FaceRefId): Geom_Surface;
+IsRemoved(theGraph: BRepGraph): boolean;
 
-static SurfaceAdaptor(theGraph: BRepGraph, theFace: BRepGraph_FaceId): GeomAdaptor_TransformedSurface;
-static SurfaceAdaptor(theGraph: BRepGraph, theRef: any): GeomAdaptor_TransformedSurface;
-static SurfaceAdaptor(theGraph: BRepGraph, theFaceRef: BRepGraph_FaceRefId): GeomAdaptor_TransformedSurface;
-static SurfaceAdaptor(theGraph: BRepGraph, theFace: BRepGraph_FaceId, theUFirst: number, theULast: number, theVFirst: number, theVLast: number): GeomAdaptor_TransformedSurface;
-static SurfaceAdaptor(theGraph: BRepGraph, theRef: any, theUFirst: number, theULast: number, theVFirst: number, theVLast: number): GeomAdaptor_TransformedSurface;
-static SurfaceAdaptor(theGraph: BRepGraph, theFaceRef: BRepGraph_FaceRefId, theUFirst: number, theULast: number, theVFirst: number, theVLast: number): GeomAdaptor_TransformedSurface;
-static SurfaceAdaptor(theGraph: BRepGraph, theFace: BRepGraph_FaceId): GeomAdaptor_TransformedSurface;
-static SurfaceAdaptor(theGraph: BRepGraph, theRef: any): GeomAdaptor_TransformedSurface;
-static SurfaceAdaptor(theGraph: BRepGraph, theFaceRef: BRepGraph_FaceRefId): GeomAdaptor_TransformedSurface;
-static SurfaceAdaptor(theGraph: BRepGraph, theFace: BRepGraph_FaceId, theUFirst: number, theULast: number, theVFirst: number, theVLast: number): GeomAdaptor_TransformedSurface;
-static SurfaceAdaptor(theGraph: BRepGraph, theRef: any, theUFirst: number, theULast: number, theVFirst: number, theVLast: number): GeomAdaptor_TransformedSurface;
-static SurfaceAdaptor(theGraph: BRepGraph, theFaceRef: BRepGraph_FaceRefId, theUFirst: number, theULast: number, theVFirst: number, theVLast: number): GeomAdaptor_TransformedSurface;
-static SurfaceAdaptor(theGraph: BRepGraph, theFace: BRepGraph_FaceId): GeomAdaptor_TransformedSurface;
-static SurfaceAdaptor(theGraph: BRepGraph, theRef: any): GeomAdaptor_TransformedSurface;
-static SurfaceAdaptor(theGraph: BRepGraph, theFaceRef: BRepGraph_FaceRefId): GeomAdaptor_TransformedSurface;
-static SurfaceAdaptor(theGraph: BRepGraph, theFace: BRepGraph_FaceId, theUFirst: number, theULast: number, theVFirst: number, theVLast: number): GeomAdaptor_TransformedSurface;
-static SurfaceAdaptor(theGraph: BRepGraph, theRef: any, theUFirst: number, theULast: number, theVFirst: number, theVLast: number): GeomAdaptor_TransformedSurface;
-static SurfaceAdaptor(theGraph: BRepGraph, theFaceRef: BRepGraph_FaceRefId, theUFirst: number, theULast: number, theVFirst: number, theVLast: number): GeomAdaptor_TransformedSurface;
-static SurfaceAdaptor(theGraph: BRepGraph, theFace: BRepGraph_FaceId): GeomAdaptor_TransformedSurface;
-static SurfaceAdaptor(theGraph: BRepGraph, theRef: any): GeomAdaptor_TransformedSurface;
-static SurfaceAdaptor(theGraph: BRepGraph, theFaceRef: BRepGraph_FaceRefId): GeomAdaptor_TransformedSurface;
-static SurfaceAdaptor(theGraph: BRepGraph, theFace: BRepGraph_FaceId, theUFirst: number, theULast: number, theVFirst: number, theVLast: number): GeomAdaptor_TransformedSurface;
-static SurfaceAdaptor(theGraph: BRepGraph, theRef: any, theUFirst: number, theULast: number, theVFirst: number, theVLast: number): GeomAdaptor_TransformedSurface;
-static SurfaceAdaptor(theGraph: BRepGraph, theFaceRef: BRepGraph_FaceRefId, theUFirst: number, theULast: number, theVFirst: number, theVLast: number): GeomAdaptor_TransformedSurface;
-static SurfaceAdaptor(theGraph: BRepGraph, theFace: BRepGraph_FaceId): GeomAdaptor_TransformedSurface;
-static SurfaceAdaptor(theGraph: BRepGraph, theRef: any): GeomAdaptor_TransformedSurface;
-static SurfaceAdaptor(theGraph: BRepGraph, theFaceRef: BRepGraph_FaceRefId): GeomAdaptor_TransformedSurface;
-static SurfaceAdaptor(theGraph: BRepGraph, theFace: BRepGraph_FaceId, theUFirst: number, theULast: number, theVFirst: number, theVLast: number): GeomAdaptor_TransformedSurface;
-static SurfaceAdaptor(theGraph: BRepGraph, theRef: any, theUFirst: number, theULast: number, theVFirst: number, theVLast: number): GeomAdaptor_TransformedSurface;
-static SurfaceAdaptor(theGraph: BRepGraph, theFaceRef: BRepGraph_FaceRefId, theUFirst: number, theULast: number, theVFirst: number, theVLast: number): GeomAdaptor_TransformedSurface;
-static SurfaceAdaptor(theGraph: BRepGraph, theFace: BRepGraph_FaceId): GeomAdaptor_TransformedSurface;
-static SurfaceAdaptor(theGraph: BRepGraph, theRef: any): GeomAdaptor_TransformedSurface;
-static SurfaceAdaptor(theGraph: BRepGraph, theFaceRef: BRepGraph_FaceRefId): GeomAdaptor_TransformedSurface;
-static SurfaceAdaptor(theGraph: BRepGraph, theFace: BRepGraph_FaceId, theUFirst: number, theULast: number, theVFirst: number, theVLast: number): GeomAdaptor_TransformedSurface;
-static SurfaceAdaptor(theGraph: BRepGraph, theRef: any, theUFirst: number, theULast: number, theVFirst: number, theVLast: number): GeomAdaptor_TransformedSurface;
-static SurfaceAdaptor(theGraph: BRepGraph, theFaceRef: BRepGraph_FaceRefId, theUFirst: number, theULast: number, theVFirst: number, theVLast: number): GeomAdaptor_TransformedSurface;
-
-static NbWires(theGraph: BRepGraph, theFace: BRepGraph_FaceId): number;
-static NbWires(theGraph: BRepGraph, theFaceRef: BRepGraph_FaceRefId): number;
-static NbWires(theGraph: BRepGraph, theFace: BRepGraph_FaceId): number;
-static NbWires(theGraph: BRepGraph, theFaceRef: BRepGraph_FaceRefId): number;
-
-static Bounds(theGraph: BRepGraph, theFace: BRepGraph_FaceId, theUMin: number, theUMax: number, theVMin: number, theVMax: number): { theUMin: number; theUMax: number; theVMin: number; theVMax: number };
-static Bounds(theGraph: BRepGraph, theFaceRef: BRepGraph_FaceRefId, theUMin: number, theUMax: number, theVMin: number, theVMax: number): { theUMin: number; theUMax: number; theVMin: number; theVMax: number };
-static Bounds(theGraph: BRepGraph, theFace: BRepGraph_FaceId, theUMin: number, theUMax: number, theVMin: number, theVMax: number): { theUMin: number; theUMax: number; theVMin: number; theVMax: number };
-static Bounds(theGraph: BRepGraph, theFaceRef: BRepGraph_FaceRefId, theUMin: number, theUMax: number, theVMin: number, theVMax: number): { theUMin: number; theUMax: number; theVMin: number; theVMax: number };
-
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-BRepGraph_Tool_Shell: declare class BRepGraph_Tool_Shell
+BRepGraph_RepId: declare class BRepGraph_RepId
 
 constructor
 
-static Usage(theGraph: BRepGraph, theShellRef: BRepGraph_ShellRefId): any;
+RepKind: BRepGraph_RepId_Kind
 
-static IsClosed(theGraph: BRepGraph, theShell: BRepGraph_ShellId): boolean;
-static IsClosed(theGraph: BRepGraph, theShellRef: BRepGraph_ShellRefId): boolean;
-static IsClosed(theGraph: BRepGraph, theShell: BRepGraph_ShellId): boolean;
-static IsClosed(theGraph: BRepGraph, theShellRef: BRepGraph_ShellRefId): boolean;
+Index: number
 
-static NbFaces(theGraph: BRepGraph, theShell: BRepGraph_ShellId): number;
-static NbFaces(theGraph: BRepGraph, theShellRef: BRepGraph_ShellRefId): number;
-static NbFaces(theGraph: BRepGraph, theShell: BRepGraph_ShellId): number;
-static NbFaces(theGraph: BRepGraph, theShellRef: BRepGraph_ShellRefId): number;
+static IsValidKind(theKind: BRepGraph_RepId_Kind): boolean;
 
-// Releases the C++ object
+IsValid(): boolean;
+IsValid(theMaxCount: number): boolean;
+IsValid(): boolean;
+IsValid(theMaxCount: number): boolean;
+
+IsRemoved(theGraph: BRepGraph): boolean;
+
 delete(): void;
 
 [Symbol.dispose](): void;
 
-BRepGraph_Tool_Vertex: declare class BRepGraph_Tool_Vertex
+BRepGraph_RepId_Kind: typeof BRepGraph_RepId_Kind[keyof typeof BRepGraph_RepId_Kind]
 
-constructor
+BRepGraph_ChildExplorer_Config: interface BRepGraph_ChildExplorer_Config
 
-static Usage(theGraph: BRepGraph, theVertexRef: BRepGraph_VertexRefId): any;
+Mode: BRepGraph_ChildExplorer_TraversalMode
 
-static Pnt(theGraph: BRepGraph, theRef: any): gp_Pnt;
-static Pnt(theGraph: BRepGraph, theVertex: BRepGraph_VertexId): gp_Pnt;
-static Pnt(theGraph: BRepGraph, theVertexRef: BRepGraph_VertexRefId): gp_Pnt;
-static Pnt(theGraph: BRepGraph, theRef: any): gp_Pnt;
-static Pnt(theGraph: BRepGraph, theVertex: BRepGraph_VertexId): gp_Pnt;
-static Pnt(theGraph: BRepGraph, theVertexRef: BRepGraph_VertexRefId): gp_Pnt;
-static Pnt(theGraph: BRepGraph, theRef: any): gp_Pnt;
-static Pnt(theGraph: BRepGraph, theVertex: BRepGraph_VertexId): gp_Pnt;
-static Pnt(theGraph: BRepGraph, theVertexRef: BRepGraph_VertexRefId): gp_Pnt;
+TargetKind: BRepGraph_NodeId_Kind | null | undefined
 
-static Tolerance(theGraph: BRepGraph, theVertex: BRepGraph_VertexId): number;
-static Tolerance(theGraph: BRepGraph, theVertexRef: BRepGraph_VertexRefId): number;
-static Tolerance(theGraph: BRepGraph, theVertex: BRepGraph_VertexId): number;
-static Tolerance(theGraph: BRepGraph, theVertexRef: BRepGraph_VertexRefId): number;
+AvoidKind: BRepGraph_NodeId_Kind | null | undefined
 
-static NbEdges(theGraph: BRepGraph, theVertex: BRepGraph_VertexId): number;
+EmitAvoidKind: boolean
 
-// Releases the C++ object
-delete(): void;
+AccumulateLocation: boolean
 
-[Symbol.dispose](): void;
+AccumulateOrientation: boolean
 
-BRepGraph_Tool_Wire: declare class BRepGraph_Tool_Wire
+StartLoc: TopLoc_Location
 
-constructor
+StartOri: TopAbs_Orientation
 
-static Usage(theGraph: BRepGraph, theWireRef: BRepGraph_WireRefId): any;
+BRepGraph_Compact_Result: interface BRepGraph_Compact_Result
 
-static IsClosed(theGraph: BRepGraph, theWire: BRepGraph_WireId): boolean;
-static IsClosed(theGraph: BRepGraph, theWireRef: BRepGraph_WireRefId): boolean;
-static IsClosed(theGraph: BRepGraph, theWire: BRepGraph_WireId): boolean;
-static IsClosed(theGraph: BRepGraph, theWireRef: BRepGraph_WireRefId): boolean;
+NbRemovedVertices: number
 
-static NbCoEdges(theGraph: BRepGraph, theWire: BRepGraph_WireId): number;
-static NbCoEdges(theGraph: BRepGraph, theWireRef: BRepGraph_WireRefId): number;
-static NbCoEdges(theGraph: BRepGraph, theWire: BRepGraph_WireId): number;
-static NbCoEdges(theGraph: BRepGraph, theWireRef: BRepGraph_WireRefId): number;
+NbRemovedEdges: number
 
-static NbDistinctEdges(theGraph: BRepGraph, theWire: BRepGraph_WireId): number;
-static NbDistinctEdges(theGraph: BRepGraph, theWireRef: BRepGraph_WireRefId): number;
-static NbDistinctEdges(theGraph: BRepGraph, theWire: BRepGraph_WireId): number;
-static NbDistinctEdges(theGraph: BRepGraph, theWireRef: BRepGraph_WireRefId): number;
+NbRemovedWires: number
 
-static FaceOf(theGraph: BRepGraph, theWire: BRepGraph_WireId): BRepGraph_FaceId;
-static FaceOf(theGraph: BRepGraph, theWireRef: BRepGraph_WireRefId): BRepGraph_FaceId;
-static FaceOf(theGraph: BRepGraph, theWire: BRepGraph_WireId): BRepGraph_FaceId;
-static FaceOf(theGraph: BRepGraph, theWireRef: BRepGraph_WireRefId): BRepGraph_FaceId;
+NbRemovedFaces: number
 
-static IsOuter(theGraph: BRepGraph, theWire: BRepGraph_WireId): boolean;
-static IsOuter(theGraph: BRepGraph, theWireRef: BRepGraph_WireRefId): boolean;
-static IsOuter(theGraph: BRepGraph, theWire: BRepGraph_WireId): boolean;
-static IsOuter(theGraph: BRepGraph, theWireRef: BRepGraph_WireRefId): boolean;
+NbRemovedShells: number
 
-// Releases the C++ object
-delete(): void;
+NbRemovedSolids: number
 
-[Symbol.dispose](): void;
+NbRemovedCompounds: number
 
-BRepGraph_TopoView: declare class BRepGraph_TopoView
+NbRemovedCompSolids: number
 
-Faces(): BRepGraph_TopoView_FaceOps;
+NbRemovedSurfaces: number
 
-Edges(): BRepGraph_TopoView_EdgeOps;
+NbRemovedCurves: number
 
-Vertices(): BRepGraph_TopoView_VertexOps;
+NbNodesBefore: number
 
-Wires(): BRepGraph_TopoView_WireOps;
+NbNodesAfter: number
 
-Shells(): BRepGraph_TopoView_ShellOps;
+NbUnmappedActiveDefs: number
 
-Solids(): BRepGraph_TopoView_SolidOps;
+BRepGraph_Deduplicate_Options: interface BRepGraph_Deduplicate_Options
 
-CoEdges(): BRepGraph_TopoView_CoEdgeOps;
+AnalyzeOnly: boolean
 
-Compounds(): BRepGraph_TopoView_CompoundOps;
+HistoryMode: boolean
 
-CompSolids(): BRepGraph_TopoView_CompSolidOps;
+MergeEntitiesWhenSafe: boolean
 
-Products(): BRepGraph_TopoView_ProductOps;
+CompTolerance: number
 
-Occurrences(): BRepGraph_TopoView_OccurrenceOps;
+HashTolerance: number
 
-Gen(): BRepGraph_TopoView_GenOps;
+BRepGraph_Deduplicate_Result: interface BRepGraph_Deduplicate_Result
 
-Geometry(): BRepGraph_TopoView_GeometryOps;
+NbCanonicalSurfaces: number
 
-// Releases the C++ object
-delete(): void;
+NbCanonicalCurves: number
 
-[Symbol.dispose](): void;
+NbSurfaceRewrites: number
 
-BRepGraph_TopoView_CoEdgeOps: declare class BRepGraph_TopoView_CoEdgeOps
+NbCurveRewrites: number
 
-Nb(): number;
+NbNullifiedSurfaces: number
 
-NbActive(): number;
+NbNullifiedCurves: number
 
-StartId(): BRepGraph_CoEdgeId;
+NbHistoryRecords: number
 
-EndId(): BRepGraph_CoEdgeId;
+IsEntityMergeApplied: boolean
 
-Definition(theCoEdge: BRepGraph_CoEdgeId): BRepGraphInc_CoEdgeDef;
+NbMergedVertices: number
 
-Edge(theCoEdge: BRepGraph_CoEdgeId): BRepGraph_EdgeId;
+NbMergedEdges: number
 
-Face(theCoEdge: BRepGraph_CoEdgeId): BRepGraph_FaceId;
+NbMergedWires: number
 
-Wire(theCoEdge: BRepGraph_CoEdgeId): BRepGraph_WireId;
+NbMergedFaces: number
 
-Curve2D(theCoEdge: BRepGraph_CoEdgeId): Geom2d_Curve;
+NbReorderedWires: number
 
-// Releases the C++ object
-delete(): void;
+NbToleranceOrderedWires: number
 
-[Symbol.dispose](): void;
+NbPartialOrderedWires: number
 
-BRepGraph_TopoView_CompSolidOps: declare class BRepGraph_TopoView_CompSolidOps
+AffectedFaces: BRepGraph_FaceId[]
 
-Nb(): number;
+AffectedEdges: BRepGraph_EdgeId[]
 
-NbActive(): number;
+BRepGraph_EditorView_BoundaryIssue: interface BRepGraph_EditorView_BoundaryIssue
 
-StartId(): BRepGraph_CompSolidId;
+NodeId: BRepGraph_NodeId
 
-EndId(): BRepGraph_CompSolidId;
+Description: TCollection_AsciiString
 
-Definition(theCompSolid: BRepGraph_CompSolidId): BRepGraphInc_CompSolidDef;
+BRepGraph_LayerHistory_Event: interface BRepGraph_LayerHistory_Event
 
-Relations(theCompSolid: BRepGraph_CompSolidId): BRepGraphInc_CompSolidRelations;
+OperationName: TCollection_AsciiString
 
-// Releases the C++ object
-delete(): void;
+SequenceNumber: number
 
-[Symbol.dispose](): void;
+RecordKind: BRepGraph_LayerHistory_Kind
 
-BRepGraph_TopoView_CompoundOps: declare class BRepGraph_TopoView_CompoundOps
+Mapping: any
 
-Nb(): number;
+UidMapping: any
 
-NbActive(): number;
+ItemUidMapping: any
 
-StartId(): BRepGraph_CompoundId;
+ExtraInfo: TCollection_AsciiString
 
-EndId(): BRepGraph_CompoundId;
+BRepGraph_LayerParametric_AddResult: interface BRepGraph_LayerParametric_AddResult
 
-Definition(theCompound: BRepGraph_CompoundId): BRepGraphInc_CompoundDef;
+Instance: number
 
-Relations(theCompound: BRepGraph_CompoundId): BRepGraphInc_CompoundRelations;
+Root: BRepGraph_NodeId
 
-// Releases the C++ object
-delete(): void;
+BRepGraph_LayerTopoSupplement_Entry: interface BRepGraph_LayerTopoSupplement_Entry
 
-[Symbol.dispose](): void;
+BaseOwner: BRepGraph_NodeId
+
+LocalUid: number
+
+Kind: BRepGraph_LayerTopoSupplement_AttachmentKind
+
+Shape: TopoDS_Shape
+
+BRepGraph_ParallelPolicy_Workload: interface BRepGraph_ParallelPolicy_Workload
+
+PrimaryItems: number
+
+AuxiliaryItems: number
+
+InteractionCount: number
+
+BRepGraph_ParentExplorer_Config: interface BRepGraph_ParentExplorer_Config
+
+Mode: BRepGraph_ParentExplorer_TraversalMode
+
+TargetKind: BRepGraph_NodeId_Kind | null | undefined
+
+AvoidKind: BRepGraph_NodeId_Kind | null | undefined
+
+EmitAvoidKind: boolean
+
+BRepGraph_ShapesView_Options: interface BRepGraph_ShapesView_Options
+
+Populate: BRepGraphInc_Populate_Options
+
+CreateAutoProduct: boolean
+
+Flatten: boolean
+
+Parallel: boolean
+
+TrackAddedNodes: boolean
+
+BRepGraph_Validate_Issue: interface BRepGraph_Validate_Issue
+
+Sev: BRepGraph_Validate_Severity
+
+NodeId: BRepGraph_NodeId
+
+Description: TCollection_AsciiString

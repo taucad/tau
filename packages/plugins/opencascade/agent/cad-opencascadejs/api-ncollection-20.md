@@ -1,643 +1,965 @@
 # libcascade — NCollection (20)
 
-8 top-level symbols. Signatures are verbatim typescript.
+49 top-level symbols. Signatures are verbatim typescript.
 
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_handle_StepShape_ConnectedEdgeSet: declare class NCollection_Array1_handle_StepShape_ConnectedEdgeSet
+NCollection_HArray1_handle_StepDimTol_DatumReferenceElement: declare class NCollection_HArray1_handle_StepDimTol_DatumReferenceElement
 
 constructor
 
-// Initialise the items with theValue
-Init(theValue: StepShape_ConnectedEdgeSet): void;
+Array1(): NCollection_Array1_handle_StepDimTol_DatumReferenceElement;
 
-// Size query
-Size(): number;
+ChangeArray1(): NCollection_Array1_handle_StepDimTol_DatumReferenceElement;
 
-// Length query (legacy int-returning API)
-Length(): number;
+static get_type_name(): string;
 
-// Return TRUE if array has zero length
-IsEmpty(): boolean;
+static get_type_descriptor(): Standard_Type;
 
-// Lower bound
-Lower(): number;
+DynamicType(): Standard_Type;
 
-// Upper bound
-Upper(): number;
-
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_handle_StepShape_ConnectedEdgeSet): NCollection_Array1_handle_StepShape_ConnectedEdgeSet;
-
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_handle_StepShape_ConnectedEdgeSet): NCollection_Array1_handle_StepShape_ConnectedEdgeSet;
-
-// Move assignment
-Move(theOther: NCollection_Array1_handle_StepShape_ConnectedEdgeSet): NCollection_Array1_handle_StepShape_ConnectedEdgeSet;
-// theOther: Mutated in place
-
-First(): StepShape_ConnectedEdgeSet;
-
-ChangeFirst(): StepShape_ConnectedEdgeSet;
-
-Last(): StepShape_ConnectedEdgeSet;
-
-ChangeLast(): StepShape_ConnectedEdgeSet;
-
-// Constant value access
-Value(theIndex: number): StepShape_ConnectedEdgeSet;
-
-// Variable value access
-ChangeValue(theIndex: number): StepShape_ConnectedEdgeSet;
-
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): StepShape_ConnectedEdgeSet;
-// theIndex: 0-based index in [0, `Size()`-1]
-
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): StepShape_ConnectedEdgeSet;
-// theIndex: 0-based index in [0, `Size()`-1]
-
-// Set value
-SetValue(theIndex: number, theItem: StepShape_ConnectedEdgeSet): void;
-
-// Changes the lowest bound
-UpdateLowerBound(theLower: number): void;
-
-// Changes the upper bound
-UpdateUpperBound(theUpper: number): void;
-
-// Resizes the array to specified bounds
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
-
-IsDeletable(): boolean;
-
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_handle_StepShape_ConnectedFaceSet: declare class NCollection_Array1_handle_StepShape_ConnectedFaceSet
+NCollection_HArray1_handle_StepElement_CurveElementEndReleasePacket: declare class NCollection_HArray1_handle_StepElement_CurveElementEndReleasePacket
 
 constructor
 
-// Initialise the items with theValue
-Init(theValue: StepShape_ConnectedFaceSet): void;
+Array1(): NCollection_Array1_handle_StepElement_CurveElementEndReleasePacket;
 
-// Size query
-Size(): number;
+ChangeArray1(): NCollection_Array1_handle_StepElement_CurveElementEndReleasePacket;
 
-// Length query (legacy int-returning API)
-Length(): number;
+static get_type_name(): string;
 
-// Return TRUE if array has zero length
-IsEmpty(): boolean;
+static get_type_descriptor(): Standard_Type;
 
-// Lower bound
-Lower(): number;
+DynamicType(): Standard_Type;
 
-// Upper bound
-Upper(): number;
-
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_handle_StepShape_ConnectedFaceSet): NCollection_Array1_handle_StepShape_ConnectedFaceSet;
-
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_handle_StepShape_ConnectedFaceSet): NCollection_Array1_handle_StepShape_ConnectedFaceSet;
-
-// Move assignment
-Move(theOther: NCollection_Array1_handle_StepShape_ConnectedFaceSet): NCollection_Array1_handle_StepShape_ConnectedFaceSet;
-// theOther: Mutated in place
-
-First(): StepShape_ConnectedFaceSet;
-
-ChangeFirst(): StepShape_ConnectedFaceSet;
-
-Last(): StepShape_ConnectedFaceSet;
-
-ChangeLast(): StepShape_ConnectedFaceSet;
-
-// Constant value access
-Value(theIndex: number): StepShape_ConnectedFaceSet;
-
-// Variable value access
-ChangeValue(theIndex: number): StepShape_ConnectedFaceSet;
-
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): StepShape_ConnectedFaceSet;
-// theIndex: 0-based index in [0, `Size()`-1]
-
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): StepShape_ConnectedFaceSet;
-// theIndex: 0-based index in [0, `Size()`-1]
-
-// Set value
-SetValue(theIndex: number, theItem: StepShape_ConnectedFaceSet): void;
-
-// Changes the lowest bound
-UpdateLowerBound(theLower: number): void;
-
-// Changes the upper bound
-UpdateUpperBound(theUpper: number): void;
-
-// Resizes the array to specified bounds
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
-
-IsDeletable(): boolean;
-
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_handle_StepShape_Edge: declare class NCollection_Array1_handle_StepShape_Edge
+NCollection_HArray1_handle_StepElement_CurveElementSectionDefinition: declare class NCollection_HArray1_handle_StepElement_CurveElementSectionDefinition
 
 constructor
 
-// Initialise the items with theValue
-Init(theValue: StepShape_Edge): void;
+Array1(): NCollection_Array1_handle_StepElement_CurveElementSectionDefinition;
 
-// Size query
-Size(): number;
+ChangeArray1(): NCollection_Array1_handle_StepElement_CurveElementSectionDefinition;
 
-// Length query (legacy int-returning API)
-Length(): number;
+static get_type_name(): string;
 
-// Return TRUE if array has zero length
-IsEmpty(): boolean;
+static get_type_descriptor(): Standard_Type;
 
-// Lower bound
-Lower(): number;
+DynamicType(): Standard_Type;
 
-// Upper bound
-Upper(): number;
-
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_handle_StepShape_Edge): NCollection_Array1_handle_StepShape_Edge;
-
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_handle_StepShape_Edge): NCollection_Array1_handle_StepShape_Edge;
-
-// Move assignment
-Move(theOther: NCollection_Array1_handle_StepShape_Edge): NCollection_Array1_handle_StepShape_Edge;
-// theOther: Mutated in place
-
-First(): StepShape_Edge;
-
-ChangeFirst(): StepShape_Edge;
-
-Last(): StepShape_Edge;
-
-ChangeLast(): StepShape_Edge;
-
-// Constant value access
-Value(theIndex: number): StepShape_Edge;
-
-// Variable value access
-ChangeValue(theIndex: number): StepShape_Edge;
-
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): StepShape_Edge;
-// theIndex: 0-based index in [0, `Size()`-1]
-
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): StepShape_Edge;
-// theIndex: 0-based index in [0, `Size()`-1]
-
-// Set value
-SetValue(theIndex: number, theItem: StepShape_Edge): void;
-
-// Changes the lowest bound
-UpdateLowerBound(theLower: number): void;
-
-// Changes the upper bound
-UpdateUpperBound(theUpper: number): void;
-
-// Resizes the array to specified bounds
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
-
-IsDeletable(): boolean;
-
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_handle_StepShape_Face: declare class NCollection_Array1_handle_StepShape_Face
+NCollection_HArray1_handle_StepElement_SurfaceSection: declare class NCollection_HArray1_handle_StepElement_SurfaceSection
 
 constructor
 
-// Initialise the items with theValue
-Init(theValue: StepShape_Face): void;
+Array1(): NCollection_Array1_handle_StepElement_SurfaceSection;
 
-// Size query
-Size(): number;
+ChangeArray1(): NCollection_Array1_handle_StepElement_SurfaceSection;
 
-// Length query (legacy int-returning API)
-Length(): number;
+static get_type_name(): string;
 
-// Return TRUE if array has zero length
-IsEmpty(): boolean;
+static get_type_descriptor(): Standard_Type;
 
-// Lower bound
-Lower(): number;
+DynamicType(): Standard_Type;
 
-// Upper bound
-Upper(): number;
-
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_handle_StepShape_Face): NCollection_Array1_handle_StepShape_Face;
-
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_handle_StepShape_Face): NCollection_Array1_handle_StepShape_Face;
-
-// Move assignment
-Move(theOther: NCollection_Array1_handle_StepShape_Face): NCollection_Array1_handle_StepShape_Face;
-// theOther: Mutated in place
-
-First(): StepShape_Face;
-
-ChangeFirst(): StepShape_Face;
-
-Last(): StepShape_Face;
-
-ChangeLast(): StepShape_Face;
-
-// Constant value access
-Value(theIndex: number): StepShape_Face;
-
-// Variable value access
-ChangeValue(theIndex: number): StepShape_Face;
-
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): StepShape_Face;
-// theIndex: 0-based index in [0, `Size()`-1]
-
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): StepShape_Face;
-// theIndex: 0-based index in [0, `Size()`-1]
-
-// Set value
-SetValue(theIndex: number, theItem: StepShape_Face): void;
-
-// Changes the lowest bound
-UpdateLowerBound(theLower: number): void;
-
-// Changes the upper bound
-UpdateUpperBound(theUpper: number): void;
-
-// Resizes the array to specified bounds
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
-
-IsDeletable(): boolean;
-
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_handle_StepShape_FaceBound: declare class NCollection_Array1_handle_StepShape_FaceBound
+NCollection_HArray1_handle_StepElement_VolumeElementPurposeMember: declare class NCollection_HArray1_handle_StepElement_VolumeElementPurposeMember
 
 constructor
 
-// Initialise the items with theValue
-Init(theValue: StepShape_FaceBound): void;
+Array1(): NCollection_Array1_handle_StepElement_VolumeElementPurposeMember;
 
-// Size query
-Size(): number;
+ChangeArray1(): NCollection_Array1_handle_StepElement_VolumeElementPurposeMember;
 
-// Length query (legacy int-returning API)
-Length(): number;
+static get_type_name(): string;
 
-// Return TRUE if array has zero length
-IsEmpty(): boolean;
+static get_type_descriptor(): Standard_Type;
 
-// Lower bound
-Lower(): number;
+DynamicType(): Standard_Type;
 
-// Upper bound
-Upper(): number;
-
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_handle_StepShape_FaceBound): NCollection_Array1_handle_StepShape_FaceBound;
-
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_handle_StepShape_FaceBound): NCollection_Array1_handle_StepShape_FaceBound;
-
-// Move assignment
-Move(theOther: NCollection_Array1_handle_StepShape_FaceBound): NCollection_Array1_handle_StepShape_FaceBound;
-// theOther: Mutated in place
-
-First(): StepShape_FaceBound;
-
-ChangeFirst(): StepShape_FaceBound;
-
-Last(): StepShape_FaceBound;
-
-ChangeLast(): StepShape_FaceBound;
-
-// Constant value access
-Value(theIndex: number): StepShape_FaceBound;
-
-// Variable value access
-ChangeValue(theIndex: number): StepShape_FaceBound;
-
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): StepShape_FaceBound;
-// theIndex: 0-based index in [0, `Size()`-1]
-
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): StepShape_FaceBound;
-// theIndex: 0-based index in [0, `Size()`-1]
-
-// Set value
-SetValue(theIndex: number, theItem: StepShape_FaceBound): void;
-
-// Changes the lowest bound
-UpdateLowerBound(theLower: number): void;
-
-// Changes the upper bound
-UpdateUpperBound(theUpper: number): void;
-
-// Resizes the array to specified bounds
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
-
-IsDeletable(): boolean;
-
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_handle_StepShape_OrientedClosedShell: declare class NCollection_Array1_handle_StepShape_OrientedClosedShell
+NCollection_HArray1_handle_StepFEA_CurveElementEndOffset: declare class NCollection_HArray1_handle_StepFEA_CurveElementEndOffset
 
 constructor
 
-// Initialise the items with theValue
-Init(theValue: StepShape_OrientedClosedShell): void;
+Array1(): NCollection_Array1_handle_StepFEA_CurveElementEndOffset;
 
-// Size query
-Size(): number;
+ChangeArray1(): NCollection_Array1_handle_StepFEA_CurveElementEndOffset;
 
-// Length query (legacy int-returning API)
-Length(): number;
+static get_type_name(): string;
 
-// Return TRUE if array has zero length
-IsEmpty(): boolean;
+static get_type_descriptor(): Standard_Type;
 
-// Lower bound
-Lower(): number;
+DynamicType(): Standard_Type;
 
-// Upper bound
-Upper(): number;
-
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_handle_StepShape_OrientedClosedShell): NCollection_Array1_handle_StepShape_OrientedClosedShell;
-
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_handle_StepShape_OrientedClosedShell): NCollection_Array1_handle_StepShape_OrientedClosedShell;
-
-// Move assignment
-Move(theOther: NCollection_Array1_handle_StepShape_OrientedClosedShell): NCollection_Array1_handle_StepShape_OrientedClosedShell;
-// theOther: Mutated in place
-
-First(): StepShape_OrientedClosedShell;
-
-ChangeFirst(): StepShape_OrientedClosedShell;
-
-Last(): StepShape_OrientedClosedShell;
-
-ChangeLast(): StepShape_OrientedClosedShell;
-
-// Constant value access
-Value(theIndex: number): StepShape_OrientedClosedShell;
-
-// Variable value access
-ChangeValue(theIndex: number): StepShape_OrientedClosedShell;
-
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): StepShape_OrientedClosedShell;
-// theIndex: 0-based index in [0, `Size()`-1]
-
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): StepShape_OrientedClosedShell;
-// theIndex: 0-based index in [0, `Size()`-1]
-
-// Set value
-SetValue(theIndex: number, theItem: StepShape_OrientedClosedShell): void;
-
-// Changes the lowest bound
-UpdateLowerBound(theLower: number): void;
-
-// Changes the upper bound
-UpdateUpperBound(theUpper: number): void;
-
-// Resizes the array to specified bounds
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
-
-IsDeletable(): boolean;
-
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_handle_StepShape_OrientedEdge: declare class NCollection_Array1_handle_StepShape_OrientedEdge
+NCollection_HArray1_handle_StepFEA_CurveElementEndRelease: declare class NCollection_HArray1_handle_StepFEA_CurveElementEndRelease
 
 constructor
 
-// Initialise the items with theValue
-Init(theValue: StepShape_OrientedEdge): void;
+Array1(): NCollection_Array1_handle_StepFEA_CurveElementEndRelease;
 
-// Size query
-Size(): number;
+ChangeArray1(): NCollection_Array1_handle_StepFEA_CurveElementEndRelease;
 
-// Length query (legacy int-returning API)
-Length(): number;
+static get_type_name(): string;
 
-// Return TRUE if array has zero length
-IsEmpty(): boolean;
+static get_type_descriptor(): Standard_Type;
 
-// Lower bound
-Lower(): number;
+DynamicType(): Standard_Type;
 
-// Upper bound
-Upper(): number;
-
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_handle_StepShape_OrientedEdge): NCollection_Array1_handle_StepShape_OrientedEdge;
-
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_handle_StepShape_OrientedEdge): NCollection_Array1_handle_StepShape_OrientedEdge;
-
-// Move assignment
-Move(theOther: NCollection_Array1_handle_StepShape_OrientedEdge): NCollection_Array1_handle_StepShape_OrientedEdge;
-// theOther: Mutated in place
-
-First(): StepShape_OrientedEdge;
-
-ChangeFirst(): StepShape_OrientedEdge;
-
-Last(): StepShape_OrientedEdge;
-
-ChangeLast(): StepShape_OrientedEdge;
-
-// Constant value access
-Value(theIndex: number): StepShape_OrientedEdge;
-
-// Variable value access
-ChangeValue(theIndex: number): StepShape_OrientedEdge;
-
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): StepShape_OrientedEdge;
-// theIndex: 0-based index in [0, `Size()`-1]
-
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): StepShape_OrientedEdge;
-// theIndex: 0-based index in [0, `Size()`-1]
-
-// Set value
-SetValue(theIndex: number, theItem: StepShape_OrientedEdge): void;
-
-// Changes the lowest bound
-UpdateLowerBound(theLower: number): void;
-
-// Changes the upper bound
-UpdateUpperBound(theUpper: number): void;
-
-// Resizes the array to specified bounds
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
-
-IsDeletable(): boolean;
-
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// The class `NCollection_Array1` represents unidimensional arrays of fixed size known at run time
-NCollection_Array1_handle_StepVisual_CurveStyleFontPattern: declare class NCollection_Array1_handle_StepVisual_CurveStyleFontPattern
+NCollection_HArray1_handle_StepFEA_CurveElementInterval: declare class NCollection_HArray1_handle_StepFEA_CurveElementInterval
 
 constructor
 
-// Initialise the items with theValue
-Init(theValue: StepVisual_CurveStyleFontPattern): void;
+Array1(): NCollection_Array1_handle_StepFEA_CurveElementInterval;
 
-// Size query
-Size(): number;
+ChangeArray1(): NCollection_Array1_handle_StepFEA_CurveElementInterval;
 
-// Length query (legacy int-returning API)
-Length(): number;
+static get_type_name(): string;
 
-// Return TRUE if array has zero length
-IsEmpty(): boolean;
+static get_type_descriptor(): Standard_Type;
 
-// Lower bound
-Lower(): number;
+DynamicType(): Standard_Type;
 
-// Upper bound
-Upper(): number;
+delete(): void;
 
-// Replaces this array by a copy of theOther array
-Assign(theOther: NCollection_Array1_handle_StepVisual_CurveStyleFontPattern): NCollection_Array1_handle_StepVisual_CurveStyleFontPattern;
+[Symbol.dispose](): void;
 
-// Copies values from theOther array without changing this array bounds
-CopyValues(theOther: NCollection_Array1_handle_StepVisual_CurveStyleFontPattern): NCollection_Array1_handle_StepVisual_CurveStyleFontPattern;
+NCollection_HArray1_handle_StepFEA_ElementRepresentation: declare class NCollection_HArray1_handle_StepFEA_ElementRepresentation
 
-// Move assignment
-Move(theOther: NCollection_Array1_handle_StepVisual_CurveStyleFontPattern): NCollection_Array1_handle_StepVisual_CurveStyleFontPattern;
-// theOther: Mutated in place
+constructor
 
-First(): StepVisual_CurveStyleFontPattern;
+Array1(): NCollection_Array1_handle_StepFEA_ElementRepresentation;
 
-ChangeFirst(): StepVisual_CurveStyleFontPattern;
+ChangeArray1(): NCollection_Array1_handle_StepFEA_ElementRepresentation;
 
-Last(): StepVisual_CurveStyleFontPattern;
+static get_type_name(): string;
 
-ChangeLast(): StepVisual_CurveStyleFontPattern;
+static get_type_descriptor(): Standard_Type;
 
-// Constant value access
-Value(theIndex: number): StepVisual_CurveStyleFontPattern;
+DynamicType(): Standard_Type;
 
-// Variable value access
-ChangeValue(theIndex: number): StepVisual_CurveStyleFontPattern;
+delete(): void;
 
-// 0-based checked access independent of `Lower()`/Upper()
-At(theIndex: number): StepVisual_CurveStyleFontPattern;
-// theIndex: 0-based index in [0, `Size()`-1]
+[Symbol.dispose](): void;
 
-// 0-based checked mutable access independent of `Lower()`/Upper()
-ChangeAt(theIndex: number): StepVisual_CurveStyleFontPattern;
-// theIndex: 0-based index in [0, `Size()`-1]
+NCollection_HArray1_handle_StepFEA_NodeRepresentation: declare class NCollection_HArray1_handle_StepFEA_NodeRepresentation
 
-// Set value
-SetValue(theIndex: number, theItem: StepVisual_CurveStyleFontPattern): void;
+constructor
 
-// Changes the lowest bound
-UpdateLowerBound(theLower: number): void;
+Array1(): NCollection_Array1_handle_StepFEA_NodeRepresentation;
 
-// Changes the upper bound
-UpdateUpperBound(theUpper: number): void;
+ChangeArray1(): NCollection_Array1_handle_StepFEA_NodeRepresentation;
 
-// Resizes the array to specified bounds
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-Resize(theSize: number, theToCopyData: boolean): void;
-// theLower: new lower bound of array
-// theUpper: new upper bound of array
-// theToCopyData: flag to copy existing data into new array
+static get_type_name(): string;
 
-IsDeletable(): boolean;
+static get_type_descriptor(): Standard_Type;
 
-// Releases the C++ object
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HArray1_handle_StepGeom_CartesianPoint: declare class NCollection_HArray1_handle_StepGeom_CartesianPoint
+
+constructor
+
+Array1(): NCollection_Array1_handle_StepGeom_CartesianPoint;
+
+ChangeArray1(): NCollection_Array1_handle_StepGeom_CartesianPoint;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HArray1_handle_StepGeom_CompositeCurveSegment: declare class NCollection_HArray1_handle_StepGeom_CompositeCurveSegment
+
+constructor
+
+Array1(): NCollection_Array1_handle_StepGeom_CompositeCurveSegment;
+
+ChangeArray1(): NCollection_Array1_handle_StepGeom_CompositeCurveSegment;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HArray1_handle_StepRepr_MaterialPropertyRepresentation: declare class NCollection_HArray1_handle_StepRepr_MaterialPropertyRepresentation
+
+constructor
+
+Array1(): NCollection_Array1_handle_StepRepr_MaterialPropertyRepresentation;
+
+ChangeArray1(): NCollection_Array1_handle_StepRepr_MaterialPropertyRepresentation;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HArray1_handle_StepRepr_PropertyDefinitionRepresentation: declare class NCollection_HArray1_handle_StepRepr_PropertyDefinitionRepresentation
+
+constructor
+
+Array1(): NCollection_Array1_handle_StepRepr_PropertyDefinitionRepresentation;
+
+ChangeArray1(): NCollection_Array1_handle_StepRepr_PropertyDefinitionRepresentation;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HArray1_handle_StepRepr_RepresentationItem: declare class NCollection_HArray1_handle_StepRepr_RepresentationItem
+
+constructor
+
+Array1(): NCollection_Array1_handle_StepRepr_RepresentationItem;
+
+ChangeArray1(): NCollection_Array1_handle_StepRepr_RepresentationItem;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HArray1_handle_StepRepr_ShapeAspect: declare class NCollection_HArray1_handle_StepRepr_ShapeAspect
+
+constructor
+
+Array1(): NCollection_Array1_handle_StepRepr_ShapeAspect;
+
+ChangeArray1(): NCollection_Array1_handle_StepRepr_ShapeAspect;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HArray1_handle_StepShape_ConnectedEdgeSet: declare class NCollection_HArray1_handle_StepShape_ConnectedEdgeSet
+
+constructor
+
+Array1(): NCollection_Array1_handle_StepShape_ConnectedEdgeSet;
+
+ChangeArray1(): NCollection_Array1_handle_StepShape_ConnectedEdgeSet;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HArray1_handle_StepShape_ConnectedFaceSet: declare class NCollection_HArray1_handle_StepShape_ConnectedFaceSet
+
+constructor
+
+Array1(): NCollection_Array1_handle_StepShape_ConnectedFaceSet;
+
+ChangeArray1(): NCollection_Array1_handle_StepShape_ConnectedFaceSet;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HArray1_handle_StepShape_Edge: declare class NCollection_HArray1_handle_StepShape_Edge
+
+constructor
+
+Array1(): NCollection_Array1_handle_StepShape_Edge;
+
+ChangeArray1(): NCollection_Array1_handle_StepShape_Edge;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HArray1_handle_StepShape_Face: declare class NCollection_HArray1_handle_StepShape_Face
+
+constructor
+
+Array1(): NCollection_Array1_handle_StepShape_Face;
+
+ChangeArray1(): NCollection_Array1_handle_StepShape_Face;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HArray1_handle_StepShape_FaceBound: declare class NCollection_HArray1_handle_StepShape_FaceBound
+
+constructor
+
+Array1(): NCollection_Array1_handle_StepShape_FaceBound;
+
+ChangeArray1(): NCollection_Array1_handle_StepShape_FaceBound;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HArray1_handle_StepShape_OrientedClosedShell: declare class NCollection_HArray1_handle_StepShape_OrientedClosedShell
+
+constructor
+
+Array1(): NCollection_Array1_handle_StepShape_OrientedClosedShell;
+
+ChangeArray1(): NCollection_Array1_handle_StepShape_OrientedClosedShell;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HArray1_handle_StepShape_OrientedEdge: declare class NCollection_HArray1_handle_StepShape_OrientedEdge
+
+constructor
+
+Array1(): NCollection_Array1_handle_StepShape_OrientedEdge;
+
+ChangeArray1(): NCollection_Array1_handle_StepShape_OrientedEdge;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HArray1_handle_StepVisual_CurveStyleFontPattern: declare class NCollection_HArray1_handle_StepVisual_CurveStyleFontPattern
+
+constructor
+
+Array1(): NCollection_Array1_handle_StepVisual_CurveStyleFontPattern;
+
+ChangeArray1(): NCollection_Array1_handle_StepVisual_CurveStyleFontPattern;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HArray1_handle_StepVisual_PresentationStyleAssignment: declare class NCollection_HArray1_handle_StepVisual_PresentationStyleAssignment
+
+constructor
+
+Array1(): NCollection_Array1_handle_StepVisual_PresentationStyleAssignment;
+
+ChangeArray1(): NCollection_Array1_handle_StepVisual_PresentationStyleAssignment;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HArray1_handle_StepVisual_TessellatedStructuredItem: declare class NCollection_HArray1_handle_StepVisual_TessellatedStructuredItem
+
+constructor
+
+Array1(): NCollection_Array1_handle_StepVisual_TessellatedStructuredItem;
+
+ChangeArray1(): NCollection_Array1_handle_StepVisual_TessellatedStructuredItem;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HArray1_handle_TCollection_HAsciiString: declare class NCollection_HArray1_handle_TCollection_HAsciiString
+
+constructor
+
+Array1(): NCollection_Array1_handle_TCollection_HAsciiString;
+
+ChangeArray1(): NCollection_Array1_handle_TCollection_HAsciiString;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HArray1_int: declare class NCollection_HArray1_int
+
+constructor
+
+Array1(): NCollection_Array1_int;
+
+ChangeArray1(): NCollection_Array1_int;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HArray1_unsignedchar: declare class NCollection_HArray1_unsignedchar
+
+constructor
+
+Array1(): NCollection_Array1_unsignedchar;
+
+ChangeArray1(): NCollection_Array1_unsignedchar;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HArray2_TopoDS_Shape: declare class NCollection_HArray2_TopoDS_Shape
+
+constructor
+
+Array2(): NCollection_Array2_TopoDS_Shape;
+
+ChangeArray2(): NCollection_Array2_TopoDS_Shape;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HArray2_double: declare class NCollection_HArray2_double
+
+constructor
+
+Array2(): NCollection_Array2_double;
+
+ChangeArray2(): NCollection_Array2_double;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HArray2_gp_Pnt: declare class NCollection_HArray2_gp_Pnt
+
+constructor
+
+Array2(): NCollection_Array2_gp_Pnt;
+
+ChangeArray2(): NCollection_Array2_gp_Pnt;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HArray2_gp_Pnt2d: declare class NCollection_HArray2_gp_Pnt2d
+
+constructor
+
+Array2(): NCollection_Array2_gp_Pnt2d;
+
+ChangeArray2(): NCollection_Array2_gp_Pnt2d;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HArray2_gp_XYZ: declare class NCollection_HArray2_gp_XYZ
+
+constructor
+
+Array2(): NCollection_Array2_gp_XYZ;
+
+ChangeArray2(): NCollection_Array2_gp_XYZ;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HArray2_handle_Geom_Surface: declare class NCollection_HArray2_handle_Geom_Surface
+
+constructor
+
+Array2(): NCollection_Array2_handle_Geom_Surface;
+
+ChangeArray2(): NCollection_Array2_handle_Geom_Surface;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HArray2_handle_NCollection_HArray1_double: declare class NCollection_HArray2_handle_NCollection_HArray1_double
+
+constructor
+
+Array2(): NCollection_Array2_handle_NCollection_HArray1_double;
+
+ChangeArray2(): NCollection_Array2_handle_NCollection_HArray1_double;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HArray2_handle_NCollection_HArray1_int: declare class NCollection_HArray2_handle_NCollection_HArray1_int
+
+constructor
+
+Array2(): NCollection_Array2_handle_NCollection_HArray1_int;
+
+ChangeArray2(): NCollection_Array2_handle_NCollection_HArray1_int;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HArray2_handle_Standard_Transient: declare class NCollection_HArray2_handle_Standard_Transient
+
+constructor
+
+Array2(): NCollection_Array2_handle_Standard_Transient;
+
+ChangeArray2(): NCollection_Array2_handle_Standard_Transient;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HArray2_handle_StepGeom_CartesianPoint: declare class NCollection_HArray2_handle_StepGeom_CartesianPoint
+
+constructor
+
+Array2(): NCollection_Array2_handle_StepGeom_CartesianPoint;
+
+ChangeArray2(): NCollection_Array2_handle_StepGeom_CartesianPoint;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HArray2_handle_StepGeom_SurfacePatch: declare class NCollection_HArray2_handle_StepGeom_SurfacePatch
+
+constructor
+
+Array2(): NCollection_Array2_handle_StepGeom_SurfacePatch;
+
+ChangeArray2(): NCollection_Array2_handle_StepGeom_SurfacePatch;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HArray2_int: declare class NCollection_HArray2_int
+
+constructor
+
+Array2(): NCollection_Array2_int;
+
+ChangeArray2(): NCollection_Array2_int;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HSequence_TCollection_AsciiString: declare class NCollection_HSequence_TCollection_AsciiString
+
+constructor
+
+Sequence(): NCollection_Sequence_TCollection_AsciiString;
+
+ChangeSequence(): NCollection_Sequence_TCollection_AsciiString;
+
+Append(theItem: TCollection_AsciiString): void;
+Append(theSequence: NCollection_Sequence_TCollection_AsciiString): void;
+Append(theSeq: unknown): void;
+Append(theItem: TCollection_AsciiString): void;
+Append(theSequence: NCollection_Sequence_TCollection_AsciiString): void;
+Append(theSeq: unknown): void;
+Append(theItem: TCollection_AsciiString): void;
+Append(theSequence: NCollection_Sequence_TCollection_AsciiString): void;
+Append(theSeq: unknown): void;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HSequence_TCollection_ExtendedString: declare class NCollection_HSequence_TCollection_ExtendedString
+
+constructor
+
+Sequence(): NCollection_Sequence_TCollection_ExtendedString;
+
+ChangeSequence(): NCollection_Sequence_TCollection_ExtendedString;
+
+Append(theItem: TCollection_ExtendedString): void;
+Append(theSequence: NCollection_Sequence_TCollection_ExtendedString): void;
+Append(theSeq: unknown): void;
+Append(theItem: TCollection_ExtendedString): void;
+Append(theSequence: NCollection_Sequence_TCollection_ExtendedString): void;
+Append(theSeq: unknown): void;
+Append(theItem: TCollection_ExtendedString): void;
+Append(theSequence: NCollection_Sequence_TCollection_ExtendedString): void;
+Append(theSeq: unknown): void;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HSequence_TopoDS_Shape: declare class NCollection_HSequence_TopoDS_Shape
+
+constructor
+
+Sequence(): NCollection_Sequence_TopoDS_Shape;
+
+ChangeSequence(): NCollection_Sequence_TopoDS_Shape;
+
+Append(theItem: TopoDS_Shape): void;
+Append(theSequence: NCollection_Sequence_TopoDS_Shape): void;
+Append(theSeq: unknown): void;
+Append(theItem: TopoDS_Shape): void;
+Append(theSequence: NCollection_Sequence_TopoDS_Shape): void;
+Append(theSeq: unknown): void;
+Append(theItem: TopoDS_Shape): void;
+Append(theSequence: NCollection_Sequence_TopoDS_Shape): void;
+Append(theSeq: unknown): void;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HSequence_double: declare class NCollection_HSequence_double
+
+constructor
+
+Sequence(): NCollection_Sequence_double;
+
+ChangeSequence(): NCollection_Sequence_double;
+
+Append(theItem: number): void;
+Append(theSequence: NCollection_Sequence_double): void;
+Append(theSeq: unknown): void;
+Append(theItem: number): void;
+Append(theSequence: NCollection_Sequence_double): void;
+Append(theSeq: unknown): void;
+Append(theItem: number): void;
+Append(theSequence: NCollection_Sequence_double): void;
+Append(theSeq: unknown): void;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HSequence_gp_Pnt: declare class NCollection_HSequence_gp_Pnt
+
+constructor
+
+Sequence(): NCollection_Sequence_gp_Pnt;
+
+ChangeSequence(): NCollection_Sequence_gp_Pnt;
+
+Append(theItem: gp_Pnt): void;
+Append(theSequence: NCollection_Sequence_gp_Pnt): void;
+Append(theSeq: unknown): void;
+Append(theItem: gp_Pnt): void;
+Append(theSequence: NCollection_Sequence_gp_Pnt): void;
+Append(theSeq: unknown): void;
+Append(theItem: gp_Pnt): void;
+Append(theSequence: NCollection_Sequence_gp_Pnt): void;
+Append(theSeq: unknown): void;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HSequence_handle_ChFiDS_SurfData: declare class NCollection_HSequence_handle_ChFiDS_SurfData
+
+constructor
+
+Sequence(): NCollection_Sequence_handle_ChFiDS_SurfData;
+
+ChangeSequence(): NCollection_Sequence_handle_ChFiDS_SurfData;
+
+Append(theItem: ChFiDS_SurfData): void;
+Append(theSequence: NCollection_Sequence_handle_ChFiDS_SurfData): void;
+Append(theSeq: unknown): void;
+Append(theItem: ChFiDS_SurfData): void;
+Append(theSequence: NCollection_Sequence_handle_ChFiDS_SurfData): void;
+Append(theSeq: unknown): void;
+Append(theItem: ChFiDS_SurfData): void;
+Append(theSequence: NCollection_Sequence_handle_ChFiDS_SurfData): void;
+Append(theSeq: unknown): void;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HSequence_handle_Geom2d_BoundedCurve: declare class NCollection_HSequence_handle_Geom2d_BoundedCurve
+
+constructor
+
+Sequence(): NCollection_Sequence_handle_Geom2d_BoundedCurve;
+
+ChangeSequence(): NCollection_Sequence_handle_Geom2d_BoundedCurve;
+
+Append(theItem: Geom2d_BoundedCurve): void;
+Append(theSequence: NCollection_Sequence_handle_Geom2d_BoundedCurve): void;
+Append(theSeq: unknown): void;
+Append(theItem: Geom2d_BoundedCurve): void;
+Append(theSequence: NCollection_Sequence_handle_Geom2d_BoundedCurve): void;
+Append(theSeq: unknown): void;
+Append(theItem: Geom2d_BoundedCurve): void;
+Append(theSequence: NCollection_Sequence_handle_Geom2d_BoundedCurve): void;
+Append(theSeq: unknown): void;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+NCollection_HSequence_handle_Geom_BoundedCurve: declare class NCollection_HSequence_handle_Geom_BoundedCurve
+
+constructor
+
+Sequence(): NCollection_Sequence_handle_Geom_BoundedCurve;
+
+ChangeSequence(): NCollection_Sequence_handle_Geom_BoundedCurve;
+
+Append(theItem: Geom_BoundedCurve): void;
+Append(theSequence: NCollection_Sequence_handle_Geom_BoundedCurve): void;
+Append(theSeq: unknown): void;
+Append(theItem: Geom_BoundedCurve): void;
+Append(theSequence: NCollection_Sequence_handle_Geom_BoundedCurve): void;
+Append(theSeq: unknown): void;
+Append(theItem: Geom_BoundedCurve): void;
+Append(theSequence: NCollection_Sequence_handle_Geom_BoundedCurve): void;
+Append(theSeq: unknown): void;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
 delete(): void;
 
 [Symbol.dispose](): void;

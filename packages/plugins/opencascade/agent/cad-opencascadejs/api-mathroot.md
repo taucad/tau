@@ -20,7 +20,6 @@ NbRoots(): number;
 
 NbIntervals(): number;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -35,7 +34,6 @@ B: number
 
 State: number
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -56,7 +54,6 @@ MaxIterations: number
 
 Offset: number
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -65,7 +62,6 @@ MathRoot_MultipleNoExtraHandler: declare class MathRoot_MultipleNoExtraHandler
 
 constructor
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -88,7 +84,6 @@ IsDone(): boolean;
 
 NbRoots(): number;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -107,7 +102,6 @@ InfiniteRoots: boolean
 
 IsDone(): boolean;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;

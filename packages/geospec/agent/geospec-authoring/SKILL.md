@@ -46,3 +46,14 @@ Choose matchers by question:
 Test the assembly and its independently renderable geometry units. When adding a source file, add or update its matching test and preserve sibling coverage. If a target lacks top-level geometry, add the kernel-specific export/invocation; never drop the test.
 
 On failure, fix the modeled geometry at its root. Do not weaken tolerances, delete assertions, or reduce detail merely to turn the test green.
+
+## API reference
+
+All 185 symbols are listed in `api-index.md`. Grep it for a name, then read only the file its heading names.
+
+- `api-functions.md` — Functions
+- `api-constants.md` — Constants
+- `api-types.md` — Types
+- `api-classs.md` — Classs
+
+Read ranges, not whole files. Never copy a reference into a source file.

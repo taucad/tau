@@ -2,17 +2,14 @@
 
 4 top-level symbols. Signatures are verbatim typescript.
 
-// This package gives tools to check the local continuity between two points situated on two curves or two surfaces
 LocalAnalysis: declare class LocalAnalysis
 
 constructor
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// This class gives tools to check local continuity C0 C1 C2 G1 G2 between two points situated on two curves
 LocalAnalysis_CurveContinuity: declare class LocalAnalysis_CurveContinuity
 
 constructor
@@ -49,14 +46,12 @@ IsG1(): boolean;
 
 IsG2(): boolean;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
 LocalAnalysis_StatusErrorType: typeof LocalAnalysis_StatusErrorType[keyof typeof LocalAnalysis_StatusErrorType]
 
-// This class gives tools to check local continuity C0 C1 C2 G1 G2 between two points situated on two surfaces
 LocalAnalysis_SurfaceContinuity: declare class LocalAnalysis_SurfaceContinuity
 
 constructor
@@ -101,7 +96,6 @@ IsG1(): boolean;
 
 IsG2(): boolean;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;

@@ -108,7 +108,13 @@
         "{workspaceRoot}/packages/plugins/picogk/agent/cad-picogk",
         "{workspaceRoot}/packages/plugins/replicad/agent/cad-replicad",
         "{workspaceRoot}/packages/plugins/zoo/agent/cad-zoo",
-        "{workspaceRoot}/packages/geospec/agent/geospec-authoring"
+        "{workspaceRoot}/packages/geospec/agent/geospec-authoring",
+        "{workspaceRoot}/packages/plugins/*/agent/resources.js",
+        "{workspaceRoot}/packages/plugins/*/agent/resources.d.ts",
+        "{workspaceRoot}/packages/plugins/*/agent/skills.json",
+        "{workspaceRoot}/packages/geospec/agent/resources.js",
+        "{workspaceRoot}/packages/geospec/agent/resources.d.ts",
+        "{workspaceRoot}/packages/geospec/agent/skills.json"
       ]
     }
   }

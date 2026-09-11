@@ -1,8 +1,7 @@
 # libcascade — IntCurve
 
-4 top-level symbols. Signatures are verbatim typescript.
+7 top-level symbols. Signatures are verbatim typescript.
 
-// Implementation of the ImpTool from `IntImpParGen` for conics of gp
 IntCurve_IConicTool: declare class IntCurve_IConicTool
 
 constructor
@@ -13,26 +12,20 @@ D1(U: number, P: gp_Pnt2d, T: gp_Vec2d): void;
 
 D2(U: number, P: gp_Pnt2d, T: gp_Vec2d, N: gp_Vec2d): void;
 
-// Computes the value of the signed distance between the point P and the implicit curve
 Distance(P: gp_Pnt2d): number;
 
-// Computes the Gradient of the Signed Distance between a point and the implicit curve, at the point P
 GradDistance(P: gp_Pnt2d): gp_Vec2d;
 
-// Returns the parameter U of the point on the implicit curve corresponding to the point P
 FindParameter(P: gp_Pnt2d): number;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Provides methods to intersect two conics
 IntCurve_IntConicConic: declare class IntCurve_IntConicConic extends IntRes2d_Intersection
 
 constructor
 
-// Intersection between 2 lines from gp
 Perform(L1: gp_Lin2d, D1: IntRes2d_Domain, L2: gp_Lin2d, D2: IntRes2d_Domain, TolConf: number, Tol: number): void;
 Perform(L: gp_Lin2d, DL: IntRes2d_Domain, C: gp_Circ2d, DC: IntRes2d_Domain, TolConf: number, Tol: number): void;
 Perform(L: gp_Lin2d, DL: IntRes2d_Domain, E: gp_Elips2d, DE: IntRes2d_Domain, TolConf: number, Tol: number): void;
@@ -259,7 +252,6 @@ Perform(P1: gp_Parab2d, D1: IntRes2d_Domain, P2: gp_Parab2d, D2: IntRes2d_Domain
 Perform(P: gp_Parab2d, DP: IntRes2d_Domain, H: gp_Hypr2d, DH: IntRes2d_Domain, TolConf: number, Tol: number): void;
 Perform(H1: gp_Hypr2d, D1: IntRes2d_Domain, H2: gp_Hypr2d, D2: IntRes2d_Domain, TolConf: number, Tol: number): void;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -268,7 +260,6 @@ IntCurve_IntImpConicParConic: declare class IntCurve_IntImpConicParConic extends
 
 constructor
 
-// Intersection between an implicit curve and a parametrised curve
 Perform(ITool: IntCurve_IConicTool, Dom1: IntRes2d_Domain, PCurve: IntCurve_PConic, Dom2: IntRes2d_Domain, TolConf: number, Tol: number): void;
 
 FindU(parameter: number, point: gp_Pnt2d, TheParCurev: IntCurve_PConic, TheImpTool: IntCurve_IConicTool): number;
@@ -277,7 +268,6 @@ FindV(parameter: number, point: gp_Pnt2d, TheImpTool: IntCurve_IConicTool, ParCu
 
 And_Domaine_Objet1_Intersections(TheImpTool: IntCurve_IConicTool, TheParCurve: IntCurve_PConic, TheImpCurveDomain: IntRes2d_Domain, TheParCurveDomain: IntRes2d_Domain, NbResultats: number, Inter2_And_Domain2: NCollection_Array1_double, Inter1: NCollection_Array1_double, Resultat1: NCollection_Array1_double, Resultat2: NCollection_Array1_double, EpsNul: number): { NbResultats: number };
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
@@ -286,16 +276,70 @@ IntCurve_MyImpParToolOfIntImpConicParConic: declare class IntCurve_MyImpParToolO
 
 constructor
 
-// Computes the value of the signed distance between the implicit curve and the point at parameter Param on the parametrised curve
 Value(X: number, F: number): { returnValue: boolean; F: number };
 
-// Computes the derivative of the previous function at parameter Param
 Derivative(X: number, D: number): { returnValue: boolean; D: number };
 
-// Computes the value and the derivative of the function
 Values(X: number, F: number, D: number): { returnValue: boolean; F: number; D: number };
 
-// Releases the C++ object
+delete(): void;
+
+[Symbol.dispose](): void;
+
+IntCurve_PConic: declare class IntCurve_PConic
+
+constructor
+
+SetEpsX(EpsDist: number): void;
+
+SetAccuracy(Nb: number): void;
+
+Accuracy(): number;
+
+EpsX(): number;
+
+TypeCurve(): GeomAbs_CurveType;
+
+Axis2(): gp_Ax22d;
+
+Param1(): number;
+
+Param2(): number;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+IntCurve_PConicTool: declare class IntCurve_PConicTool
+
+constructor
+
+static EpsX(C: IntCurve_PConic): number;
+
+static NbSamples(C: IntCurve_PConic): number;
+static NbSamples(C: IntCurve_PConic, U0: number, U1: number): number;
+static NbSamples(C: IntCurve_PConic): number;
+static NbSamples(C: IntCurve_PConic, U0: number, U1: number): number;
+
+static Value(C: IntCurve_PConic, X: number): gp_Pnt2d;
+
+static D1(C: IntCurve_PConic, U: number, P: gp_Pnt2d, T: gp_Vec2d): void;
+
+static D2(C: IntCurve_PConic, U: number, P: gp_Pnt2d, T: gp_Vec2d, N: gp_Vec2d): void;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+IntCurve_ProjectOnPConicTool: declare class IntCurve_ProjectOnPConicTool
+
+constructor
+
+static FindParameter(C: IntCurve_PConic, Pnt: gp_Pnt2d, Tol: number): number;
+static FindParameter(C: IntCurve_PConic, Pnt: gp_Pnt2d, LowParameter: number, HighParameter: number, Tol: number): number;
+static FindParameter(C: IntCurve_PConic, Pnt: gp_Pnt2d, Tol: number): number;
+static FindParameter(C: IntCurve_PConic, Pnt: gp_Pnt2d, LowParameter: number, HighParameter: number, Tol: number): number;
+
 delete(): void;
 
 [Symbol.dispose](): void;

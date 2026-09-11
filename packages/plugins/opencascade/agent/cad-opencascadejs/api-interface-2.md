@@ -1,262 +1,58 @@
 # libcascade — Interface (2)
 
-14 top-level symbols. Signatures are verbatim typescript.
+19 top-level symbols. Signatures are verbatim typescript.
 
-// Defines an Iterator on Entities
-Interface_EntityIterator: declare class Interface_EntityIterator
+Interface_MSG: declare class Interface_MSG
 
 constructor
 
-// Gets a list of entities and adds its to the iteration list
-AddList(list: NCollection_HSequence_handle_Standard_Transient): void;
-
-// Adds to the iteration list a defined entity
-AddItem(anentity: Standard_Transient): void;
-
-// same as AddItem (kept for compatibility)
-GetOneItem(anentity: Standard_Transient): void;
-
-// Selects entities with are Kind of a given type, keep only them (is keep is True) or reject only them (if keep is False)
-SelectType(atype: Standard_Type, keep: boolean): void;
-
-// Returns count of entities which will be iterated on Calls Start if not yet done
-NbEntities(): number;
-
-// Returns count of entities of a given type (kind of)
-NbTyped(type\_: Standard_Type): number;
-
-// Allows re-iteration (useless for the first iteration)
-Start(): void;
-
-// Says if there are other entities (vertices) to iterate the first time, calls Start
-More(): boolean;
-
-// Sets iteration to the next entity (vertex) to give
-Next(): void;
-
-// Returns the current Entity iterated, to be used by Interface tools
-Value(): Standard_Transient;
-
-// Returns the content of the Iterator, accessed through a Handle to be used by a frontal-engine logic Returns an empty Sequence if the Iterator is empty Calls Start if not yet done
-Content(): NCollection_HSequence_handle_Standard_Transient;
-
-// Clears data of iteration
 Destroy(): void;
 
-// Releases the C++ object
+Value(): string;
+
+static Read(file: string): number;
+
+static IsKey(mess: string): boolean;
+
+static Translated(key: string): string;
+
+static Record(key: string, item: string): void;
+
+static SetTrace(toprint: boolean, torecord: boolean): void;
+
+static SetMode(running: boolean, raising: boolean): void;
+
+static Intervalled(val: number, order?: number, upper?: boolean): number;
+
+static TDate(text: string, yy: number, mm: number, dd: number, hh: number, mn: number, ss: number, format?: string): void;
+
+static NDate(text: string, yy?: number, mm?: number, dd?: number, hh?: number, mn?: number, ss?: number): { returnValue: boolean; yy: number; mm: number; dd: number; hh: number; mn: number; ss: number };
+
+static CDate(text1: string, text2: string): number;
+
+static Blanks(count: number): string;
+static Blanks(val: number, max: number): string;
+static Blanks(val: string, max: number): string;
+static Blanks(count: number): string;
+static Blanks(val: number, max: number): string;
+static Blanks(val: string, max: number): string;
+static Blanks(count: number): string;
+static Blanks(val: number, max: number): string;
+static Blanks(val: string, max: number): string;
+
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// This class defines a list of Entities (Transient Objects), it can be used as a field of other Transient classes, with these features
-Interface_EntityList: declare class Interface_EntityList
+Interface_NodeOfGeneralLib: declare class Interface_NodeOfGeneralLib extends Standard_Transient
 
 constructor
 
-// Clears the List
-Clear(): void;
+AddNode(anode: Interface_GlobalNodeOfGeneralLib): void;
 
-// Appends an Entity, that is to the END of the list (keeps order, but works slowerly than Add, see below)
-Append(ent: Standard_Transient): void;
-
-// Adds an Entity to the list, that is, with NO REGARD about the order (faster than Append if count becomes greater than 10)
-Add(ent: Standard_Transient): void;
-
-// Removes an Entity from the list, if it is there
-Remove(ent: Standard_Transient): void;
-Remove(num: number): void;
-Remove(ent: Standard_Transient): void;
-Remove(num: number): void;
-
-// Returns True if the list is empty
-IsEmpty(): boolean;
-
-// Returns count of recorded Entities
-NbEntities(): number;
-
-// Returns an Item given its number
-Value(num: number): Standard_Transient;
-
-// Returns an Item given its number
-SetValue(num: number, ent: Standard_Transient): void;
-
-// Returns count of Entities of a given Type (0
-NbTypedEntities(atype: Standard_Type): number;
-
-// Returns the Entity which is of a given type
-TypedEntity(atype: Standard_Type, num?: number): Standard_Transient;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// Auxiliary class to store a literal parameter in a file intermediate directory or in an UndefinedContent
-Interface_FileParameter: declare class Interface_FileParameter
-
-constructor
-
-// Fills fields (with Entity Number set to zero) Same as above, but builds the Value from a CString
-Init(val: TCollection_AsciiString, typ: Interface_ParamType): void;
-Init(val: string, typ: Interface_ParamType): void;
-Init(val: TCollection_AsciiString, typ: Interface_ParamType): void;
-Init(val: string, typ: Interface_ParamType): void;
-
-// Same as above, but as a CString (for immediate exploitation) was C++
-CValue(): string;
-
-// Returns the type of the parameter
-ParamType(): Interface_ParamType;
-
-// Allows to set a reference to an Entity in a numbered list
-SetEntityNumber(num: number): void;
-
-// Returns value set by SetEntityNumber
-EntityNumber(): number;
-
-// Clears stored data
-Clear(): void;
-
-// Destructor
-Destroy(): void;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// Defines services which are required to load an InterfaceModel from a File
-Interface_FileReaderTool: declare class Interface_FileReaderTool
-
-// Returns the Protocol given at creation time
 Protocol(): Interface_Protocol;
 
-// Stores a Model
-SetModel(amodel: Interface_InterfaceModel): void;
-
-// Returns the stored Model
-Model(): Interface_InterfaceModel;
-
-// Sets trace level used for outputting messages
-SetTraceLevel(tracelev: number): void;
-
-// Returns trace level used for outputting messages
-TraceLevel(): number;
-
-// Allows controlling whether exception raisings are handled If err is False, they are not (hence, dbx can take control) If err is True, they are, and they are traced (by putting on messenger Entity's Number and file record num) Default given at Model's creation time is True
-SetErrorHandle(err: boolean): void;
-
-// Returns ErrorHandle flag
-ErrorHandle(): boolean;
-
-// Fills records with empty entities
-SetEntities(): void;
-
-// Recognizes a record, given its number
-Recognize(num: number): { returnValue: boolean; ach: Interface_Check; ent: Standard_Transient; [Symbol.dispose](): void };
-
-// Recognizes a record with the help of Libraries
-RecognizeByLib(num: number, glib: Interface_GeneralLib, rlib: Interface_ReaderLib): { returnValue: boolean; ach: Interface_Check; ent: Standard_Transient; [Symbol.dispose](): void };
-// glib: Mutated in place
-// rlib: Mutated in place
-
-// Provides an unknown entity, specific to the Interface called by SetEntities when Recognize has failed (Unknown alone) or by LoadModel when an Entity has caused a Fail on reading (to keep at least its literal description) Uses Protocol to do it
-UnknownEntity(): Standard_Transient;
-
-// Creates an empty Model of the norm
-NewModel(): Interface_InterfaceModel;
-
-// Reads and fills Entities from the FileReaderData set by SetData to an InterfaceModel
-LoadModel(amodel: Interface_InterfaceModel): void;
-
-// Reads, Fills and Returns one Entity read from a Record of the FileReaderData
-LoadedEntity(num: number): Standard_Transient;
-
-// Fills model's header
-BeginRead(amodel: Interface_InterfaceModel): void;
-
-// Fills an Entity, given record no
-AnalyseRecord(num: number, anent: Standard_Transient): { returnValue: boolean; acheck: Interface_Check; [Symbol.dispose](): void };
-
-// Ends file reading after reading all the entities default is doing nothing
-EndRead(amodel: Interface_InterfaceModel): void;
-
-// Clear fields
-Clear(): void;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// This class converts a floating number (Real) to a string It can be used if the standard C-C++ output functions (Sprintf or std::cout<<) are not convenient
-Interface_FloatWriter: declare class Interface_FloatWriter
-
-constructor
-
-// Sets a specific Format for Sending Reals (main format) (Default from Creation is "%E") If <reset> is given True (default), this call clears effects of former calls to SetFormatForRange and SetZeroSuppress
-SetFormat(form: string, reset?: boolean): void;
-
-// Sets a secondary Format for Real, to be applied between R1 and R2 (in absolute values)
-SetFormatForRange(form: string, R1: number, R2: number): void;
-
-// Sets Sending Real Parameters to suppress trailing Zeros and Null Exponent ("E+00"), if <mode> is given True, Resets this mode if <mode> is False (in addition to Real Forms) A call to SetRealFrom resets this mode to False ig <reset> is given True (Default from Creation is True)
-SetZeroSuppress(mode: boolean): void;
-
-// Sets again options to the defaults given by Create
-SetDefaults(chars?: number): void;
-
-// Returns active options
-Options(zerosup?: boolean, range?: boolean, R1?: number, R2?: number): { zerosup: boolean; range: boolean; R1: number; R2: number };
-
-// Returns the main format was C++
-MainFormat(): string;
-
-// Returns the format for range, if set Meaningful only if <range> from Options is True was C++
-FormatForRange(): string;
-
-// Writes a Real value <val> to a string <text> by using the options
-Write(val: number, text: string): number;
-
-// This class method converts a Real Value to a string, given options given as arguments
-static Convert(val: number, text: string, zerosup: boolean, Range1: number, Range2: number, mainform: string, rangeform: string): number;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// GTool - General Tool for a Model Provides the functions performed by Protocol/GeneralModule for entities of a Model, and recorded in a GeneralLib Optimized
-Interface_GTool: declare class Interface_GTool extends Standard_Transient
-
-constructor
-
-// Sets a new SignType
-SetSignType(sign: Interface_SignType): void;
-
-// Returns the SignType
-SignType(): Interface_SignType;
-
-// Returns the Signature for a Transient Object in a Model It calls SignType to do that If SignType is not defined, return ClassName of <ent>
-SignValue(ent: Standard_Transient, model: Interface_InterfaceModel): string;
-
-// Returns the Name of the SignType, or "Class Name"
-SignName(): string;
-
-// Sets a new Protocol if <enforce> is False and the new Protocol equates the old one then nothing is done
-SetProtocol(proto: Interface_Protocol, enforce?: boolean): void;
-
-// Returns the Protocol
-Protocol(): Interface_Protocol;
-
-// Returns the GeneralLib itself
-Lib(): Interface_GeneralLib;
-
-// Reservates maps for a count of entities <enforce> False
-Reservate(nb: number, enforce?: boolean): void;
-
-// Clears the maps which record, for each already recorded entity its Module and Case Number
-ClearEntities(): void;
+Next(): Interface_NodeOfGeneralLib;
 
 static get_type_name(): string;
 
@@ -264,77 +60,21 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-Interface_GeneralLib: declare class Interface_GeneralLib
+Interface_NodeOfReaderLib: declare class Interface_NodeOfReaderLib extends Standard_Transient
 
 constructor
 
-// Adds a couple (Module-Protocol) to the Library, given the class of a Protocol
-AddProtocol(aprotocol: Standard_Transient): void;
+AddNode(anode: Interface_GlobalNodeOfReaderLib): void;
 
-// Clears the list of Modules of a library (can be used to redefine the order of Modules before action
-Clear(): void;
-
-// Sets a library to be defined with the complete Global list (all the couples Protocol/Modules recorded in it)
-SetComplete(): void;
-
-// Starts Iteration on the Modules (sets it on the first one)
-Start(): void;
-
-// Returns True if there are more Modules to iterate on
-More(): boolean;
-
-// Iterates by getting the next Module in the list If there is none, the exception will be raised by Value
-Next(): void;
-
-// Returns the current Protocol in the Iteration
-Protocol(): Interface_Protocol;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-Interface_GlobalNodeOfGeneralLib: declare class Interface_GlobalNodeOfGeneralLib extends Standard_Transient
-
-constructor
-
-// Returns the attached Protocol stored in a given GlobalNode
-Protocol(): Interface_Protocol;
-
-// Returns the Next GlobalNode
-Next(): Interface_GlobalNodeOfGeneralLib;
-
-static get_type_name(): string;
-
-static get_type_descriptor(): Standard_Type;
-
-DynamicType(): Standard_Type;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-Interface_GlobalNodeOfReaderLib: declare class Interface_GlobalNodeOfReaderLib extends Standard_Transient
-
-constructor
-
-// Adds a Module bound with a Protocol to the list
-Add(amodule: Interface_ReaderModule, aprotocol: Interface_Protocol): void;
-
-// Returns the Module stored in a given GlobalNode
 Module(): Interface_ReaderModule;
 
-// Returns the attached Protocol stored in a given GlobalNode
 Protocol(): Interface_Protocol;
 
-// Returns the Next GlobalNode
-Next(): Interface_GlobalNodeOfReaderLib;
+Next(): Interface_NodeOfReaderLib;
 
 static get_type_name(): string;
 
@@ -342,103 +82,27 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-// Defines general form for classes of graph algorithms on Interfaces, this form is that of EntityIterator Each sub-class fills it according to its own algorithm This also allows to combine any graph result to others, all being given under one unique form
-Interface_GraphContent: declare class Interface_GraphContent extends Interface_EntityIterator
+Interface_ParamList: declare class Interface_ParamList extends Standard_Transient
 
 constructor
 
-// Does the Evaluation before starting the iteration itself (in out)
-Begin(): void;
-
-// Evaluates list of Entities to be iterated
-Evaluate(): void;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// This class detains the data which describe a Graph
-Interface_IntList: declare class Interface_IntList
-
-constructor
-
-// Initialize IntList by number of entities
-Initialize(nbe: number): void;
-
-// Returns count of stored references
-NbReferences(): number;
-
-// Returns entity headers used to describe the lists
-Entities(): NCollection_HArray1_int;
-
-// Returns the packed references storage
-References(): NCollection_HArray1_int;
-
-// Returns internal values, used for copying
-// DEPRECATED
-Internals(nbrefs?: number): { nbrefs: number; ents: NCollection_HArray1_int; refs: NCollection_HArray1_int; [Symbol.dispose](): void };
-
-// Returns count of entities to be acknowledged
-NbEntities(): number;
-
-// Changes the count of entities (ignored if decreased)
-SetNbEntities(nbe: number): void;
-
-// Sets an entity number as current (for read and fill)
-SetNumber(number\_: number): void;
-
-// Returns the current entity number
-Number(): number;
-
-// Returns an IntList, identical to <me> but set to a specified entity Number By default, not copied (in order to be read) Specified <copied> to produce another list and edit it
-List(number\_: number, copied?: boolean): Interface_IntList;
-
-// Sets current entity list to be redefined or not This is used in a Graph for redefinition list
-SetRedefined(mode: boolean): void;
-
-// Makes a reservation for <count> references to be later attached to the current entity
-Reservate(count: number): void;
-
-// Adds a reference (as an integer value, an entity number) to the current entity number
-Add(ref: number): void;
-
-// Returns the count of refs attached to current entity number
 Length(): number;
 
-// Returns True if the list for a number (default is taken as current) is "redefined" (useful for empty list)
-IsRedefined(num?: number): boolean;
+Lower(): number;
 
-// Returns a reference number in the list for current number, according to its rank
-Value(num: number): number;
+Upper(): number;
 
-// Removes an item in the list for current number, given its rank Returns True if done, False else
-Remove(num: number): boolean;
+SetValue(Index: number, Value: Interface_FileParameter): void;
 
-// Clears all data, hence each entity number has an empty list
+Value(Index: number): Interface_FileParameter;
+
+ChangeValue(Index: number): Interface_FileParameter;
+
 Clear(): void;
-
-// Resizes lists to exact sizes
-AdjustSize(margin?: number): void;
-
-// Releases the C++ object
-delete(): void;
-
-[Symbol.dispose](): void;
-
-// An Integer through a Handle (i.e
-Interface_IntVal: declare class Interface_IntVal extends Standard_Transient
-
-constructor
-
-Value(): number;
-
-CValue(): number;
 
 static get_type_name(): string;
 
@@ -446,31 +110,340 @@ static get_type_descriptor(): Standard_Type;
 
 DynamicType(): Standard_Type;
 
-// Releases the C++ object
 delete(): void;
 
 [Symbol.dispose](): void;
 
-Interface_InterfaceError: declare class Interface_InterfaceError extends Standard_Failure
+Interface_ParamSet: declare class Interface_ParamSet extends Standard_Transient
 
 constructor
 
-// Returns the exception type name
-ExceptionType(): string;
+Append(val: string, lnval: number, typ: Interface_ParamType, nument: number): number;
+Append(FP: Interface_FileParameter): number;
+Append(val: string, lnval: number, typ: Interface_ParamType, nument: number): number;
+Append(FP: Interface_FileParameter): number;
 
-// Releases the C++ object
+NbParams(): number;
+
+Param(num: number): Interface_FileParameter;
+
+ChangeParam(num: number): Interface_FileParameter;
+
+SetParam(num: number, FP: Interface_FileParameter): void;
+
+Params(num: number, nb: number): Interface_ParamList;
+
+Destroy(): void;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
 delete(): void;
 
 [Symbol.dispose](): void;
 
-Interface_InterfaceMismatch: declare class Interface_InterfaceMismatch extends Interface_InterfaceError
+Interface_ParamType: typeof Interface_ParamType[keyof typeof Interface_ParamType]
+
+Interface_Protocol: declare class Interface_Protocol extends Standard_Transient
+
+static Active(): Interface_Protocol;
+
+static SetActive(aprotocol: Interface_Protocol): void;
+
+static ClearActive(): void;
+
+NbResources(): number;
+
+Resource(num: number): Interface_Protocol;
+
+CaseNumber(obj: Standard_Transient): number;
+
+IsDynamicType(obj: Standard_Transient): boolean;
+
+NbTypes(obj: Standard_Transient): number;
+
+Type(obj: Standard_Transient, nt?: number): Standard_Type;
+
+TypeNumber(atype: Standard_Type): number;
+
+NewModel(): Interface_InterfaceModel;
+
+IsSuitableModel(model: Interface_InterfaceModel): boolean;
+
+UnknownEntity(): Standard_Transient;
+
+IsUnknownEntity(ent: Standard_Transient): boolean;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+Interface_ReaderLib: declare class Interface_ReaderLib
 
 constructor
 
-// Returns the exception type name
-ExceptionType(): string;
+static SetGlobal(amodule: Interface_ReaderModule, aprotocol: Interface_Protocol): void;
 
-// Releases the C++ object
+AddProtocol(aprotocol: Standard_Transient): void;
+
+Clear(): void;
+
+SetComplete(): void;
+
+Select(obj: Standard*Transient, CN?: number): { returnValue: boolean; module*: Interface_ReaderModule; CN: number; [Symbol.dispose](): void };
+
+Start(): void;
+
+More(): boolean;
+
+Next(): void;
+
+Module(): Interface_ReaderModule;
+
+Protocol(): Interface_Protocol;
+
 delete(): void;
 
 [Symbol.dispose](): void;
+
+Interface_ReaderModule: declare class Interface_ReaderModule extends Standard_Transient
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+Interface_ReportEntity: declare class Interface_ReportEntity extends Standard_Transient
+
+constructor
+
+SetContent(content: Standard_Transient): void;
+
+Check(): Interface_Check;
+
+CCheck(): Interface_Check;
+
+Concerned(): Standard_Transient;
+
+HasContent(): boolean;
+
+HasNewContent(): boolean;
+
+Content(): Standard_Transient;
+
+IsError(): boolean;
+
+IsUnknown(): boolean;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+Interface_STAT: declare class Interface_STAT
+
+constructor
+
+Internals(total?: number): { tit: TCollection_HAsciiString; total: number; phn: NCollection_HSequence_TCollection_AsciiString; phw: NCollection_HSequence_double; phdeb: NCollection_HSequence_int; phfin: NCollection_HSequence_int; stw: NCollection_HSequence_double; [Symbol.dispose](): void };
+
+AddPhase(weight: number, name?: string): void;
+
+AddStep(weight?: number): void;
+
+Step(num: number): number;
+
+Start(items: number, cycles?: number): void;
+
+static StartCount(items: number, title?: string): void;
+
+static NextPhase(items: number, cycles?: number): void;
+
+static SetPhase(items: number, cycles?: number): void;
+
+static NextCycle(items: number): void;
+
+static NextStep(): void;
+
+static NextItem(nbitems?: number): void;
+
+static End(): void;
+
+static Where(phase: boolean): string;
+
+static Percent(phase?: boolean): number;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+Interface_ShareFlags: declare class Interface_ShareFlags
+
+constructor
+
+Model(): Interface_InterfaceModel;
+
+IsShared(ent: Standard_Transient): boolean;
+
+NbRoots(): number;
+
+Root(num?: number): Standard_Transient;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+Interface_ShareTool: declare class Interface_ShareTool
+
+constructor
+
+Model(): Interface_InterfaceModel;
+
+IsShared(ent: Standard_Transient): boolean;
+
+NbTypedSharings(ent: Standard_Transient, atype: Standard_Type): number;
+
+TypedSharing(ent: Standard_Transient, atype: Standard_Type): Standard_Transient;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+Interface_SignLabel: declare class Interface_SignLabel extends MoniTool_SignText
+
+constructor
+
+Name(): string;
+
+Text(ent: Standard_Transient, context: Standard_Transient): TCollection_AsciiString;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+Interface_SignType: declare class Interface_SignType extends MoniTool_SignText
+
+Text(ent: Standard_Transient, context: Standard_Transient): TCollection_AsciiString;
+
+Value(ent: Standard_Transient, model: Interface_InterfaceModel): string;
+
+static ClassName(typnam: string): string;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+Interface_Static: declare class Interface_Static extends Interface_TypedValue
+
+constructor
+
+Family(): string;
+
+SetWild(wildcard: Interface_Static): void;
+
+Wild(): Interface_Static;
+
+SetUptodate(): void;
+
+UpdatedStatus(): boolean;
+
+static Init(family: string, name: string, type*: Interface_ParamType, init: string): boolean;
+static Init(family: string, name: string, type*: string, init: string): boolean;
+static Init(family: string, name: string, type*: Interface_ParamType, init: string): boolean;
+static Init(family: string, name: string, type*: string, init: string): boolean;
+
+static Static(name: string): Interface_Static;
+
+static IsPresent(name: string): boolean;
+
+static CDef(name: string, part: string): string;
+
+static IDef(name: string, part: string): number;
+
+static IsSet(name: string, proper?: boolean): boolean;
+
+static CVal(name: string): string;
+
+static IVal(name: string): number;
+
+static RVal(name: string): number;
+
+static SetCVal(name: string, val: string): boolean;
+
+static SetIVal(name: string, val: number): boolean;
+
+static SetRVal(name: string, val: number): boolean;
+
+static Update(name: string): boolean;
+
+static IsUpdated(name: string): boolean;
+
+static Items(mode?: number, criter?: string): NCollection_HSequence_handle_TCollection_HAsciiString;
+
+static Standards(): void;
+
+static FillMap(theMap: NCollection_DataMap_TCollection_AsciiString_TCollection_AsciiString): void;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+Interface_TypedValue: declare class Interface_TypedValue extends MoniTool_TypedValue
+
+constructor
+
+Type(): Interface_ParamType;
+
+static ParamTypeToValueType(typ: Interface_ParamType): MoniTool_ValueType;
+
+static ValueTypeToParamType(typ: MoniTool_ValueType): Interface_ParamType;
+
+static get_type_name(): string;
+
+static get_type_descriptor(): Standard_Type;
+
+DynamicType(): Standard_Type;
+
+delete(): void;
+
+[Symbol.dispose](): void;
+
+Interface_Array1OfHAsciiString: NCollection_Array1_handle_TCollection_HAsciiString
+
+Interface_HArray1OfHAsciiString: NCollection_HArray1_handle_TCollection_HAsciiString

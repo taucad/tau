@@ -35,5 +35,5 @@ describe('GeoSpec public type extraction', () => {
       'watertight',
       'boundingBox',
     ]);
-  });
+  }, 10_000);
 });

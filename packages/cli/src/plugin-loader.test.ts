@@ -2,7 +2,12 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { runtimePluginAbiVersion } from '@taucad/runtime/plugin';
 import { loadTauPlugin, loadTauPluginConfig } from '#plugin-loader.js';
+
+/* One past the ABI this CLI was built against: the value has to move with the
+ * constant, or the case stops proving a refusal the moment the ABI is bumped. */
+const incompatibleAbiVersion = runtimePluginAbiVersion + 1;
 
 const runtimePluginEntryUrl = new URL('../../runtime/src/plugins/plugin-entry.ts', import.meta.url).href;
 
@@ -26,7 +31,7 @@ describe('Tau plugin loading', () => {
   });
 
   const createProject = async (): Promise<string> => {
-    projectRoot = await mkdtemp(join(tmpdir(), 'taucad-cli-plugin-'));
+    projectRoot = await mkdtemp(join(tmpdir(), 'tau-cli-plugin-'));
     return projectRoot;
   };
 
@@ -97,13 +102,13 @@ describe('Tau plugin loading', () => {
       'old-factory',
       `
         const plugin = Object.assign(() => undefined, { meta: { name: 'old-factory' } });
-        Object.defineProperty(plugin, Symbol.for('@taucad/runtime/plugin-factory'), { value: 2 });
+        Object.defineProperty(plugin, Symbol.for('@taucad/runtime/plugin-factory'), { value: ${incompatibleAbiVersion} });
         export { plugin };
       `,
     );
 
     await expect(loadTauPlugin('old-factory', root)).rejects.toThrow(
-      'uses runtime plugin ABI 2, but this CLI requires 1. Align @taucad/runtime versions.',
+      `uses runtime plugin ABI ${incompatibleAbiVersion}, but this CLI requires ${runtimePluginAbiVersion}. Align @taucad/runtime versions.`,
     );
   });
 
@@ -117,7 +122,7 @@ describe('Tau plugin loading', () => {
 
   it('loads a config module containing real invoked plugin instances', async () => {
     const root = await writeProjectModule(
-      'taucad.config.mjs',
+      'tau.config.mjs',
       `
         import { definePlugin } from ${JSON.stringify(runtimePluginEntryUrl)};
         const plugin = definePlugin({ meta: { name: '@example/configured' }, presets: { default: [] } });
@@ -125,38 +130,36 @@ describe('Tau plugin loading', () => {
       `,
     );
 
-    const plugins = await loadTauPluginConfig('./taucad.config.mjs', root);
+    const plugins = await loadTauPluginConfig('./tau.config.mjs', root);
     expect(plugins.map(({ meta }) => meta.name)).toEqual(['@example/configured']);
   });
 
   it('rejects a config without a named plugins array', async () => {
-    const root = await writeProjectModule('taucad.config.mjs', 'export const plugin = true;');
+    const root = await writeProjectModule('tau.config.mjs', 'export const plugin = true;');
 
-    await expect(loadTauPluginConfig('./taucad.config.mjs', root)).rejects.toThrow(
-      'must export a named "plugins" array',
-    );
+    await expect(loadTauPluginConfig('./tau.config.mjs', root)).rejects.toThrow('must export a named "plugins" array');
   });
 
   it('rejects an unbranded value in a config plugins array', async () => {
-    const root = await writeProjectModule('taucad.config.mjs', 'export const plugins = [{}];');
+    const root = await writeProjectModule('tau.config.mjs', 'export const plugins = [{}];');
 
-    await expect(loadTauPluginConfig('./taucad.config.mjs', root)).rejects.toThrow(
+    await expect(loadTauPluginConfig('./tau.config.mjs', root)).rejects.toThrow(
       'entry 0 must be an invoked Tau plugin instance such as plugin().',
     );
   });
 
   it('rejects an incompatible config entry ABI distinctly', async () => {
     const root = await writeProjectModule(
-      'taucad.config.mjs',
+      'tau.config.mjs',
       `
         const plugin = { meta: { name: '@example/old' }, preset: 'default', capabilities: {} };
-        Object.defineProperty(plugin, Symbol.for('@taucad/runtime/plugin-instance'), { value: 2 });
+        Object.defineProperty(plugin, Symbol.for('@taucad/runtime/plugin-instance'), { value: ${incompatibleAbiVersion} });
         export const plugins = [plugin];
       `,
     );
 
-    await expect(loadTauPluginConfig('./taucad.config.mjs', root)).rejects.toThrow(
-      'entry 0 uses runtime plugin ABI 2, but this CLI requires 1. Align @taucad/runtime versions.',
+    await expect(loadTauPluginConfig('./tau.config.mjs', root)).rejects.toThrow(
+      `entry 0 uses runtime plugin ABI ${incompatibleAbiVersion}, but this CLI requires ${runtimePluginAbiVersion}. Align @taucad/runtime versions.`,
     );
   });
 
@@ -188,7 +191,7 @@ describe('Tau plugin loading', () => {
       peerDependencies: { '@taucad/runtime': '^0.2.0-beta.0' },
     });
     await writeProjectModule(
-      'taucad.config.mjs',
+      'tau.config.mjs',
       `
         import { definePlugin } from ${JSON.stringify(runtimePluginEntryUrl)};
         const plugin = definePlugin({ meta: { name: '@example/configured' }, presets: { default: [] } });
@@ -196,7 +199,7 @@ describe('Tau plugin loading', () => {
       `,
     );
 
-    await loadTauPluginConfig('./taucad.config.mjs', root);
+    await loadTauPluginConfig('./tau.config.mjs', root);
     expect(warn).toHaveBeenCalledWith(
       'Tau plugin "@example/configured" declares @taucad/runtime peer "^0.2.0-beta.0", but this CLI bundles 0.1.0-beta.1.',
     );

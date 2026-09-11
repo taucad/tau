@@ -5,12 +5,33 @@
   "projectType": "library",
   "tags": ["scope:shared", "type:package"],
   "targets": {
+    "dev-host": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsx watch --clear-screen=false --include 'packages/cli/src/**/*.ts' --include 'packages/host/src/**/*.ts' packages/cli/src/bin.ts serve --trust-projects",
+        "env": {
+          "TAU_CONFIG_DIR": "out/tau-host-dev",
+          "TAU_HOST_RELAY_URL": "http://localhost:4000"
+        },
+        "forwardAllArgs": true
+      }
+    },
     "tau": {
       "executor": "nx:run-commands",
       "dependsOn": ["build"],
       "options": {
-        "command": "node --import @oxc-node/core/register packages/cli/dist/bin/taucad.mjs",
+        "command": "node --import @oxc-node/core/register packages/cli/dist/bin/tau.mjs",
         "forwardAllArgs": true
+      }
+    },
+    "test:ds3": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "{workspaceRoot}",
+        "command": "vitest run --root packages/cli src/tail-relay.integration.test.ts",
+        "env": {
+          "TAU_DS3_TAIL_RELAY": "1"
+        }
       }
     }
   }

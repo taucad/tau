@@ -28,12 +28,24 @@ const builtInKernelIds = [
 const composeCli = async (options: CliRuntimeOptions = {}) =>
   resolveRuntimeDefinition(await createCliRuntime(options), undefined);
 
-const taucadImports = (source: string): string[] =>
-  ts
-    .preProcessFile(source, true, true)
-    .importedFiles.map(({ fileName }) => fileName)
-    .filter((specifier) => specifier.startsWith('@taucad/'))
-    .map((specifier) => specifier.split('/').slice(0, 2).join('/'));
+const taucadImports = (source: string): string[] => [
+  ...new Set(
+    ts
+      .preProcessFile(source, true, true)
+      .importedFiles.map(({ fileName }) => fileName)
+      .filter((specifier) => specifier.startsWith('@taucad/'))
+      .map((specifier) => specifier.split('/').slice(0, 2).join('/')),
+  ),
+];
+
+const picogkOptions = {
+  workerExecutable: '/picogk/Tau.PicoGK.Worker',
+  workerSha256: 'a'.repeat(64),
+  trustFile: '/picogk/trust.json',
+  resourceFiles: [{ path: '/picogk/PicoGK.dll', sha256: 'b'.repeat(64), label: 'PicoGK' }],
+  requestTimeout: 120_000,
+  maxArtifactBytes: 512 * 1024 * 1024,
+};
 
 const novelPlugin = definePlugin({
   meta: { name: '@example/novel' },
@@ -65,7 +77,9 @@ describe('createCliRuntime', () => {
     const [source, manifestSource] = await Promise.all([readFile(sourceUrl, 'utf8'), readFile(manifestUrl, 'utf8')]);
     const manifest = JSON.parse(manifestSource) as { dependencies?: Record<string, string> };
     const expected = Object.keys(manifest.dependencies ?? {}).filter(
-      (name) => name.startsWith('@taucad/') && name !== '@taucad/runtime',
+      (name) =>
+        name.startsWith('@taucad/') &&
+        !['@taucad/agent-host', '@taucad/host', '@taucad/jobs-solvers', '@taucad/runtime'].includes(name),
     );
     const actual = taucadImports(source).filter((name) => name !== '@taucad/runtime');
 
@@ -87,6 +101,17 @@ describe('createCliRuntime', () => {
 
     expect(extensions).toContain('ts');
     expect(extensions).toContain('obj');
+  });
+
+  it('registers PicoGK when the host supplies its native resources', async () => {
+    const runtime = await composeCli({ picogk: picogkOptions });
+
+    expect(runtime.kernels.map(({ id }) => id)).toEqual([
+      ...builtInKernelIds.slice(0, -1),
+      'picogk',
+      builtInKernelIds.at(-1),
+    ]);
+    expect(deriveImportExtensions(runtime)).toContain('cs');
   });
 
   it('rejects an explicit plugin that duplicates a built-in', async () => {

@@ -39,11 +39,15 @@ const packageConfig: UserConfig = {
 };
 
 const cliConfig: UserConfig = {
-  entry: { taucad: 'src/bin.ts' },
+  entry: {
+    tau: 'src/bin.ts',
+    'host-runtime-child': 'src/host-runtime-child.ts',
+    'compute-store-worker': 'src/compute-store.worker.ts',
+  },
   format: 'esm',
   outDir: 'dist/bin',
   platform: 'node',
-  target: 'node22',
+  target: 'node24',
   clean: ['dist/bin'],
   dts: false,
   minify: false,

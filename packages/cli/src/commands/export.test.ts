@@ -1,10 +1,12 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runCommand } from 'citty';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ExportResult } from '@taucad/runtime';
 import type * as RuntimeNode from '@taucad/runtime/node';
+import { exitCodes } from '#output.js';
 
 vi.mock('@taucad/runtime/node', async (importOriginal) => ({
   ...(await importOriginal<typeof RuntimeNode>()),
@@ -25,6 +27,11 @@ const importExportCommand = async () => {
 const importedRuntime = async () =>
   (await import('@taucad/runtime/node')) as unknown as {
     createNodeClient: ReturnType<typeof vi.fn>;
+  };
+
+const importedCliRuntime = async () =>
+  (await import('#cli-runtime.js')) as unknown as {
+    createCliRuntime: ReturnType<typeof vi.fn>;
   };
 
 const buildSuccessResult = (bytes: Uint8Array<ArrayBuffer>): ExportResult => ({
@@ -50,7 +57,8 @@ describe('exportCommand', () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
-    workspace = await mkdtemp(join(tmpdir(), 'taucad-cli-export-'));
+    vi.stubEnv('TAU_PICOGK_RESOURCE_ROOT', '');
+    workspace = await mkdtemp(join(tmpdir(), 'tau-cli-export-'));
     inputPath = join(workspace, 'model.ts');
     await writeFile(inputPath, '/* fixture */', 'utf8');
 
@@ -67,6 +75,7 @@ describe('exportCommand', () => {
     try {
       await rm(workspace, { recursive: true, force: true });
     } finally {
+      vi.unstubAllEnvs();
       vi.restoreAllMocks();
     }
   });
@@ -84,19 +93,36 @@ describe('exportCommand', () => {
       'plugin',
       'config',
       'telemetry',
+      'json',
     ]);
   });
 
-  it('should reject an unrecognized target extension without invoking the runtime', async () => {
+  it('should reject an unrecognized target extension as a usage error without invoking the runtime', async () => {
     const command = await importExportCommand();
 
     await expect(runCommand(command, { rawArgs: [inputPath, '--ext=totally-bogus'] })).rejects.toThrow(
       /Unrecognized target extension: "totally-bogus"/,
     );
+    await expect(runCommand(command, { rawArgs: [inputPath, '--ext=totally-bogus'] })).rejects.toMatchObject({
+      code: 'EXT_UNRECOGNIZED',
+      exit: exitCodes.usage,
+    });
 
     const runtime = await importedRuntime();
     expect(runtime.createNodeClient).not.toHaveBeenCalled();
     expect(exportFunction).not.toHaveBeenCalled();
+  });
+
+  it('should refuse a missing input file before starting the runtime', async () => {
+    const command = await importExportCommand();
+
+    await expect(runCommand(command, { rawArgs: [join(workspace, 'absent.ts'), '--ext=glb'] })).rejects.toMatchObject({
+      code: 'INPUT_NOT_FOUND',
+      exit: exitCodes.refused,
+    });
+
+    const runtime = await importedRuntime();
+    expect(runtime.createNodeClient).not.toHaveBeenCalled();
   });
 
   it.each(['--params', '--export-options', '--content'])('should report malformed JSON for %s', async (flag) => {
@@ -143,6 +169,55 @@ describe('exportCommand', () => {
     expect(terminate).not.toHaveBeenCalled();
   });
 
+  it('loads PicoGK resources for an explicit CLI export and removes its ephemeral trust marker', async () => {
+    const target = `${process.platform}-${process.arch}`;
+    const targetRoot = join(workspace, target);
+    const digest = 'a'.repeat(64);
+    await mkdir(targetRoot);
+    await writeFile(
+      join(targetRoot, 'tau-runtime-manifest.json'),
+      JSON.stringify({
+        schemaVersion: 2,
+        target,
+        rid: 'test-rid',
+        dotnetSdkVersion: '10.0.400',
+        dotnetRuntimeVersion: '10.0.11',
+        roslynVersion: '5.9.0',
+        picoGkCommit: 'commit',
+        picoGkArchiveSha256: digest,
+        picoGkHostedPatchSha256: digest,
+        hostApiVersion: 1,
+        protocolVersion: 3,
+        sceneArtifactVersion: 3,
+        topologySchemaVersion: 1,
+        sourceFilesSha256: digest,
+        workerPath: 'Tau.PicoGK.Worker',
+        workerSha256: digest,
+        resourceFiles: [{ path: 'PicoGK.dll', sha256: digest, label: 'PicoGK' }],
+      }),
+    );
+    vi.stubEnv('TAU_PICOGK_RESOURCE_ROOT', workspace);
+    let trustFile: string | undefined;
+    exportFunction.mockImplementationOnce(async () => {
+      const { createCliRuntime } = await importedCliRuntime();
+      const options = createCliRuntime.mock.calls.at(-1)?.[0] as {
+        picogk: { trustFile: string; workerExecutable: string };
+      };
+      trustFile = options.picogk.trustFile;
+      await expect(readFile(trustFile, 'utf8')).resolves.toBe('{"version":1,"trusted":true}\n');
+      expect(options.picogk.workerExecutable.endsWith(`${target}/Tau.PicoGK.Worker`)).toBe(true);
+      return buildSuccessResult(new Uint8Array([1]));
+    });
+    const command = await importExportCommand();
+
+    await runCommand(command, {
+      rawArgs: [inputPath, '--ext=glb', `--output=${join(workspace, 'picogk.glb')}`],
+    });
+
+    expect(trustFile).toBeDefined();
+    await expect(readFile(trustFile!)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
   it('should write a gap-free CLI ledger and normalized runtime telemetry profile', async () => {
     const bytes = new Uint8Array([1, 2, 3]);
     const telemetryPath = join(workspace, 'profile.json');
@@ -170,7 +245,7 @@ describe('exportCommand', () => {
       accounting: { profiledDuration: number; phaseDurationSum: number; unaccounted: number };
       runtime: { spans: Array<{ name: string; selfDuration: number }> };
     };
-    expect(profile.schema).toBe('taucad.cli-export-profile.v1');
+    expect(profile.schema).toBe('tau.cli-export-profile.v1');
     expect(profile.accounting.phaseDurationSum).toBeCloseTo(profile.accounting.profiledDuration, 10);
     expect(profile.accounting.unaccounted).toBe(0);
     expect(profile.runtime.spans).toEqual([expect.objectContaining({ name: 'kernel.export-model', selfDuration: 0 })]);
@@ -304,8 +379,127 @@ describe('exportCommand', () => {
     await expect(runCommand(command, { rawArgs: [inputPath, '--ext=glb'] })).rejects.toThrow(
       /Export failed:\n {2}boom\n {2}kaboom/,
     );
-
     expect(shutdown).toHaveBeenCalledWith({ drain: true });
+  });
+
+  it('should separate a capability refusal from a model failure by exit code', async () => {
+    exportFunction.mockResolvedValueOnce({
+      success: false,
+      issues: [{ message: 'No export route found', code: 'KERNEL_CAPABILITY_MISSING', severity: 'error' }],
+    });
+    const command = await importExportCommand();
+
+    await expect(runCommand(command, { rawArgs: [inputPath, '--ext=glb'] })).rejects.toMatchObject({
+      code: 'KERNEL_CAPABILITY_MISSING',
+      exit: exitCodes.refused,
+    });
+
+    exportFunction.mockResolvedValueOnce(buildFailureResult(['the model threw']));
+
+    await expect(runCommand(command, { rawArgs: [inputPath, '--ext=glb'] })).rejects.toMatchObject({
+      code: 'RUNTIME',
+      exit: exitCodes.error,
+    });
+  });
+
+  it('should stream a single artifact to stdout for --output - without writing a file', async () => {
+    const bytes = new Uint8Array([1, 2, 3, 4]);
+    exportFunction.mockResolvedValueOnce(buildSuccessResult(bytes));
+    const written: Array<string | Uint8Array<ArrayBuffer>> = [];
+    const write = vi.spyOn(process.stdout, 'write').mockImplementation(((
+      chunk: string | Uint8Array<ArrayBuffer>,
+      ...rest: readonly unknown[]
+    ): boolean => {
+      written.push(chunk);
+      const callback = rest.at(-1);
+      if (typeof callback === 'function') {
+        (callback as () => void)();
+      }
+      return true;
+    }) as typeof process.stdout.write);
+
+    const command = await importExportCommand();
+    try {
+      await runCommand(command, { rawArgs: [inputPath, '--ext=glb', '--output=-'] });
+    } finally {
+      write.mockRestore();
+    }
+
+    expect(written).toEqual([bytes]);
+    await expect(readFile(join(workspace, '-'))).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(readFile(join(workspace, 'model.glb'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('should refuse --output - when the export produced more than one artifact', async () => {
+    exportFunction.mockResolvedValueOnce({
+      success: true,
+      data: [
+        { name: 'model.gltf', bytes: new Uint8Array([1]), mimeType: 'model/gltf+json' },
+        { name: 'model.bin', bytes: new Uint8Array([2]), mimeType: 'application/octet-stream' },
+      ],
+      issues: [],
+    });
+    const command = await importExportCommand();
+
+    await expect(runCommand(command, { rawArgs: [inputPath, '--ext=gltf', '--output=-'] })).rejects.toMatchObject({
+      code: 'OUTPUT_STREAM_AMBIGUOUS',
+      exit: exitCodes.usage,
+    });
+  });
+
+  it('should refuse --output - combined with --json before invoking the runtime', async () => {
+    const command = await importExportCommand();
+
+    await expect(
+      runCommand(command, { rawArgs: [inputPath, '--ext=glb', '--output=-', '--json'] }),
+    ).rejects.toMatchObject({ code: 'OUTPUT_STREAM_CONFLICT', exit: exitCodes.usage });
+
+    expect(exportFunction).not.toHaveBeenCalled();
+  });
+
+  it('should write one versioned JSON record naming each artifact digest, size, and extension', async () => {
+    exportFunction.mockResolvedValueOnce(buildSuccessResult(new Uint8Array([1, 2, 3])));
+    const command = await importExportCommand();
+    const outputPath = join(workspace, 'record.glb');
+    const lines: string[] = [];
+    const write = vi.spyOn(process.stdout, 'write').mockImplementation(((
+      chunk: string | Uint8Array<ArrayBuffer>,
+      ...rest: readonly unknown[]
+    ): boolean => {
+      lines.push(String(chunk));
+      const callback = rest.at(-1);
+      if (typeof callback === 'function') {
+        (callback as () => void)();
+      }
+      return true;
+    }) as typeof process.stdout.write);
+
+    try {
+      await runCommand(command, { rawArgs: [inputPath, '--ext=glb', `--output=${outputPath}`, '--json'] });
+    } finally {
+      write.mockRestore();
+    }
+
+    expect(lines).toHaveLength(1);
+    expect(JSON.parse(lines[0]!)).toEqual({
+      v: 1,
+      kind: 'export',
+      ok: true,
+      input: inputPath,
+      format: 'glb',
+      artifacts: [
+        {
+          name: 'model.glb',
+          path: outputPath,
+          bytes: 3,
+          ext: 'glb',
+          // The digest is taken over the exact bytes the export produced.
+          sha256: createHash('sha256')
+            .update(new Uint8Array([1, 2, 3]))
+            .digest('hex'),
+        },
+      ],
+    });
   });
 
   it('should leave recognized but unroutable targets to the runtime', async () => {
@@ -330,6 +524,26 @@ describe('exportCommand', () => {
     expect(shutdown).toHaveBeenCalledOnce();
     expect(shutdown).toHaveBeenCalledWith({ drain: true });
     expect(terminate).not.toHaveBeenCalled();
+  });
+
+  it('should drain the runtime and report the signal exit code when interrupted mid-export', async () => {
+    const neverSettles = Promise.withResolvers<ExportResult>();
+    exportFunction.mockImplementationOnce(async () => {
+      process.emit('SIGINT', 'SIGINT');
+      // The signal, not the export, has to decide this run's outcome.
+      return neverSettles.promise;
+    });
+    const command = await importExportCommand();
+    const interruptListeners = process.listenerCount('SIGINT');
+
+    await expect(runCommand(command, { rawArgs: [inputPath, '--ext=glb'] })).rejects.toMatchObject({
+      code: 'EXPORT_CANCELLED',
+      exit: exitCodes.interrupted,
+    });
+
+    expect(shutdown).toHaveBeenCalledWith({ drain: true });
+    await expect(readFile(join(workspace, 'model.glb'))).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(process.listenerCount('SIGINT')).toBe(interruptListeners);
   });
 
   it('should subscribe to the log event so client output streams through consola', async () => {

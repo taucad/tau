@@ -5,7 +5,7 @@
   "type": "module",
   "sideEffects": [
     "./src/bin.ts",
-    "./dist/bin/taucad.mjs"
+    "./dist/bin/tau.mjs"
   ],
   "private": false,
   "repository": {
@@ -20,7 +20,7 @@
   "main": "./dist/index.mjs",
   "types": "./dist/index.d.mts",
   "bin": {
-    "taucad": "./dist/bin/taucad.mjs"
+    "tau": "./dist/bin/tau.mjs"
   },
   "files": [
     "dist",
@@ -49,7 +49,7 @@
   "publishConfig": {
     "access": "public",
     "bin": {
-      "taucad": "./dist/bin/taucad.mjs"
+      "tau": "./dist/bin/tau.mjs"
     },
     "exports": {
       ".": {
@@ -66,25 +66,37 @@
     "#*": "./src/*"
   },
   "dependencies": {
+    "@agentclientprotocol/claude-agent-acp": "catalog:",
+    "@agentclientprotocol/codex-acp": "catalog:",
+    "@taucad/agent-host": "workspace:*",
     "@taucad/assimp": "workspace:*",
     "@taucad/brep": "workspace:*",
     "@taucad/esbuild": "workspace:*",
     "@taucad/gltf": "workspace:*",
+    "@taucad/host": "workspace:*",
     "@taucad/image": "workspace:*",
+    "@taucad/jobs-solvers": "workspace:*",
     "@taucad/jscad": "workspace:*",
     "@taucad/manifold": "workspace:*",
     "@taucad/middleware": "workspace:*",
     "@taucad/opencascade": "workspace:*",
     "@taucad/openrscad": "workspace:*",
+    "@taucad/picogk": "workspace:*",
     "@taucad/replicad": "workspace:*",
     "@taucad/rhino": "workspace:*",
     "@taucad/runtime": "workspace:*",
     "citty": "catalog:",
     "consola": "catalog:",
+    "ink": "catalog:",
+    "react": "catalog:",
     "semver": "catalog:",
+    "ws": "catalog:",
     "zod": "catalog:"
   },
   "devDependencies": {
-    "@types/semver": "catalog:"
+    "@taucad/rpc": "workspace:*",
+    "@types/react": "catalog:",
+    "@types/semver": "catalog:",
+    "@types/ws": "^8.18.1"
   }
 }

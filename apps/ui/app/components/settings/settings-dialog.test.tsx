@@ -9,7 +9,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { SettingsDialog } from '#components/settings/settings-dialog.js';
 
 const renderSecuritySettings = vi.hoisted(() => vi.fn(() => <div>Mounted security settings</div>));
-const scrollTo = HTMLElement.prototype.scrollTo;
+const { scrollTo } = HTMLElement.prototype;
 
 vi.mock('#components/auth/settings/account/account-settings.js', () => ({
   AccountSettings: () => <div>Mounted account settings</div>,

@@ -62,7 +62,31 @@ describe('runtime error codes', () => {
   it('RuntimeTerminatedError exposes code RUNTIME_TERMINATED', () => {
     const error = new RuntimeTerminatedError();
     expect(error.code).toBe('RUNTIME_TERMINATED');
+    expect(error.message).toBe('RuntimeClient has been terminated.');
+    expect(error.detail).toBeUndefined();
     expectTypeOf(error.code).toEqualTypeOf<'RUNTIME_TERMINATED'>();
+  });
+
+  it('RuntimeTerminatedError names the boot failure and its first stderr line', () => {
+    const error = new RuntimeTerminatedError('transport-closed', {
+      exitCode: 1,
+      phase: 'boot',
+      stderrTail: '\nError: Cannot find module kernel-host.js\n    at ModuleJob\n',
+    });
+    expect(error.message).toBe(
+      'The runtime host failed to start (exit code 1): Error: Cannot find module kernel-host.js.',
+    );
+    expect(error.detail?.phase).toBe('boot');
+  });
+
+  it('RuntimeTerminatedError falls back to the wire reason for a boot failure without stderr', () => {
+    const error = new RuntimeTerminatedError('transport-closed', { phase: 'boot', reason: 'worker-uncaught: boom' });
+    expect(error.message).toBe('The runtime host failed to start (exit code unknown): worker-uncaught: boom.');
+  });
+
+  it('RuntimeTerminatedError distinguishes a mid-session host death', () => {
+    const error = new RuntimeTerminatedError('transport-closed', { exitCode: 3, phase: 'session' });
+    expect(error.message).toBe('The runtime host exited unexpectedly (exit code 3).');
   });
 
   it('SharedPoolEntryNotFoundError exposes code RUNTIME_SHARED_POOL_KEY_MISSING', () => {

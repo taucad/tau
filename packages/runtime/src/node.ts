@@ -7,6 +7,12 @@ import { fromNodeFs } from '#filesystem/from-node-fs.js';
 import type { AnyRuntimeDefinition } from '#worker/runtime-definition.js';
 
 export { isSafeRelativePath } from '@taucad/utils/path';
+export { createSqliteComputeEngine, fromSqlite } from '#cache/sqlite-compute-engine.js';
+export type { SqliteComputeEngine, SqliteComputeEngineOptions } from '#cache/sqlite-compute-engine.js';
+export { connectSqliteComputeStoreWorker } from '#cache/sqlite-compute-worker-client.js';
+export type { SqliteComputeWorker } from '#cache/sqlite-compute-worker-client.js';
+export { serveSqliteComputeStoreWorker, sqliteComputeWorkerConnectType } from '#cache/sqlite-compute-worker-host.js';
+export type { SqliteComputeWorkerConnect } from '#cache/sqlite-compute-worker-host.js';
 
 type InProcessTransportFor<Runtime extends AnyRuntimeDefinition> = ReturnType<typeof inProcessTransport<Runtime>>;
 

@@ -21,6 +21,12 @@ export const waitAsyncPollInterval = 16;
 /** Grace allowed for an isolated host to acknowledge render cancellation before termination. Milliseconds. */
 export const renderTimeoutRecoveryGrace = 1000;
 
+/** Default wall-clock deadline for one direct transcode. Milliseconds. */
+export const defaultTranscodeTimeout = 60_000;
+
+/** Grace allowed for a transcoder to observe cancellation before its isolated host is terminated. Milliseconds. */
+export const transcodeTimeoutRecoveryGrace = 1000;
+
 /** Byte length of the SharedArrayBuffer signal channel (2 Int32 slots x 4 bytes). */
 export const signalBufferByteLength = 8;
 

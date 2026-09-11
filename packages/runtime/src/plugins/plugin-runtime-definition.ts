@@ -1,4 +1,4 @@
-import type { RuntimePluginKind } from '#plugins/plugin-types.js';
+type RuntimeToolkitCapabilityKind = 'kernel' | 'middleware' | 'bundler' | 'transcoder' | 'job' | 'machine';
 
 /**
  * Same-realm plugin ABI shared by duplicate copies of `@taucad/runtime`.
@@ -8,7 +8,7 @@ import type { RuntimePluginKind } from '#plugins/plugin-types.js';
  *
  * @public
  */
-export const runtimePluginAbiVersion = 1;
+export const runtimePluginAbiVersion = 2;
 export const runtimePluginDefinitionSymbol: unique symbol = Symbol.for('@taucad/runtime/plugin-definition');
 export const runtimePluginFactoryAcceptsOptionsSymbol: unique symbol = Symbol.for(
   '@taucad/runtime/plugin-factory-accepts-options',
@@ -81,7 +81,7 @@ export function attachRuntimePluginDefinition<Plugin extends PlainPluginObject, 
 
 /** @public */
 export async function resolveRuntimePluginDefinition<Definition>(
-  kind: RuntimePluginKind,
+  kind: RuntimeToolkitCapabilityKind,
   plugin: RuntimePluginWithDefinition<Definition>,
 ): Promise<Definition> {
   const load = plugin[runtimePluginDefinitionSymbol];

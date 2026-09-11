@@ -26,6 +26,11 @@ import { compiledWasmModuleSchema } from '#transport/_internal/compiled-wasm-mod
 import type { RuntimeProtocol } from '#types/runtime-protocol.types.js';
 import { kernelIssueCodeValues } from '#types/kernel-issue-codes.js';
 import { assertRootedPath } from '@taucad/utils/path';
+import { validateArtifactPaths } from '#types/export-artifact-validation.js';
+import type { ContentDigest, SceneDigest } from '@taucad/cache-core';
+import type { SceneNodeId } from '#types/runtime-scene.types.js';
+import { standardInternationalBaseUnits } from '@taucad/units/constants';
+import type { LengthSymbol } from '@taucad/units';
 
 // ---------- Primitives ----------
 
@@ -34,6 +39,12 @@ const fileExtensionSchema = z.enum(
   // `z.enum` requires the non-empty tuple form. The cast preserves the
   // literal union (no runtime change).
   fileExtensions as unknown as readonly [FileExtension, ...FileExtension[]],
+);
+const lengthSymbolSchema = z.enum(
+  standardInternationalBaseUnits.length.variants.map(({ symbol }) => symbol) as unknown as readonly [
+    LengthSymbol,
+    ...LengthSymbol[],
+  ],
 );
 
 const rootedPathSchema = z.string().superRefine((value, context) => {
@@ -72,23 +83,6 @@ const kernelIssueSchema = z
   })
   .catchall(z.unknown());
 
-const kernelResultSchema = z.union([
-  z
-    .object({
-      success: z.literal(true),
-      data: z.unknown(),
-      issues: z.array(kernelIssueSchema),
-      serializedNativeHandle: z.unknown().optional(),
-    })
-    .catchall(z.unknown()),
-  z
-    .object({
-      success: z.literal(false),
-      issues: z.array(kernelIssueSchema),
-    })
-    .catchall(z.unknown()),
-]);
-
 const binaryContentDeliverySchema = z.discriminatedUnion('delivery', [
   z.object({ delivery: z.literal('inline'), bytes: z.instanceof(Uint8Array) }).strict(),
   z.object({ delivery: z.literal('pooled'), key: z.string() }).strict(),
@@ -114,6 +108,22 @@ const directExportFileSchema = z
     mimeType: mimeTypeSchema,
   })
   .catchall(z.unknown());
+
+const directExportFilesSchema = z
+  .array(directExportFileSchema)
+  .min(1)
+  .superRefine((files, context) => {
+    for (const issue of validateArtifactPaths(files)) {
+      context.addIssue({
+        code: 'custom',
+        path: [issue.index, 'name'],
+        message:
+          issue.reason === 'duplicate-path'
+            ? 'Artifact path duplicates an earlier input.'
+            : 'Expected a safe relative artifact path.',
+      });
+    }
+  });
 
 const exportGeometryResultSchema = z.discriminatedUnion('success', [
   z
@@ -153,11 +163,192 @@ export const getParametersResultSchema = z.union([
     .catchall(z.unknown()),
 ]);
 
-const hashedGeometryResultTransportSchema = kernelResultSchema;
+const renderIdSchema = z.uuid();
+const isSha256Digest = (value: unknown): value is `sha256:${string}` =>
+  typeof value === 'string' && /^sha256:[0-9a-f]{64}$/u.test(value);
+const contentDigestSchema = z.custom<ContentDigest>(isSha256Digest, 'Expected a lowercase SHA-256 digest');
+const sceneDigestSchema = z.custom<SceneDigest>(isSha256Digest, 'Expected a lowercase SHA-256 digest');
+const sceneNodeIdSchema = z.custom<SceneNodeId>(
+  (value) => typeof value === 'string' && value.length > 0,
+  'Expected a non-empty scene node id',
+);
+const sceneTransformSchema = z.tuple([
+  z.number(),
+  z.number(),
+  z.number(),
+  z.number(),
+  z.number(),
+  z.number(),
+  z.number(),
+  z.number(),
+  z.number(),
+  z.number(),
+  z.number(),
+  z.number(),
+  z.number(),
+  z.number(),
+  z.number(),
+  z.number(),
+]);
+const scenePresentationSchema = z
+  .object({
+    background: z.tuple([z.number(), z.number(), z.number(), z.number()]).optional(),
+    fieldOfViewDegrees: z.number().positive().optional(),
+  })
+  .strict();
+const sceneAssetReferenceSchema = z
+  .object({
+    contentDigest: contentDigestSchema,
+    semanticDigest: contentDigestSchema.optional(),
+    mediaType: z.enum(['model/gltf-binary', 'image/svg+xml']),
+    byteLength: z.number().int().nonnegative(),
+  })
+  .strict();
+const sceneNodeSchema = z
+  .object({
+    id: sceneNodeIdSchema,
+    name: z.string().optional(),
+    parentId: sceneNodeIdSchema.optional(),
+    childIds: z.array(sceneNodeIdSchema).readonly(),
+    geometry: sceneAssetReferenceSchema.optional(),
+    transform: sceneTransformSchema,
+    visible: z.boolean(),
+  })
+  .strict();
+const sceneManifestSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    rootNodeIds: z.array(sceneNodeIdSchema).readonly(),
+    nodes: z.record(z.string().min(1), sceneNodeSchema),
+    presentation: scenePresentationSchema,
+  })
+  .strict();
+const sceneGeometryTransportSchema = z.discriminatedUnion('format', [
+  z.object({ format: z.literal('gltf'), content: binaryContentDeliverySchema, hash: z.string() }).strict(),
+  z
+    .object({
+      format: z.literal('svg'),
+      content: z.string(),
+      name: z.string().optional(),
+      units: z.object({ length: lengthSymbolSchema }).strict().optional(),
+      hash: z.string(),
+    })
+    .strict(),
+]);
+const geometryTransportSchema = z.discriminatedUnion('format', [
+  ...sceneGeometryTransportSchema.options,
+  z
+    .object({
+      format: z.literal('webrtc'),
+      stream: z.union([z.instanceof(ReadableStream), z.instanceof(EventTarget)]),
+      hash: z.string(),
+    })
+    .strict(),
+]);
+const hashedGeometryResultTransportSchema = z.discriminatedUnion('success', [
+  z
+    .object({
+      success: z.literal(true),
+      data: geometryTransportSchema,
+      issues: z.array(kernelIssueSchema),
+      serializedNativeHandle: z.unknown().optional(),
+    })
+    .catchall(z.unknown()),
+  z
+    .object({
+      success: z.literal(false),
+      issues: z.array(kernelIssueSchema),
+    })
+    .catchall(z.unknown()),
+]);
+const resolvedSceneAssetTransportSchema = z.discriminatedUnion('delivery', [
+  sceneAssetReferenceSchema.extend({
+    delivery: z.literal('inline'),
+    geometry: sceneGeometryTransportSchema,
+  }),
+  sceneAssetReferenceSchema.extend({
+    delivery: z.literal('reference'),
+  }),
+]);
+const resolvedSceneSnapshotTransportSchema = z
+  .object({
+    manifest: sceneManifestSchema,
+    assets: z.array(resolvedSceneAssetTransportSchema).readonly(),
+  })
+  .strict();
+const sceneOperationSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('upsert-node'), node: sceneNodeSchema }).strict(),
+  z.object({ type: z.literal('remove-node'), nodeId: sceneNodeIdSchema }).strict(),
+  z.object({ type: z.literal('clear-scene') }).strict(),
+  z.object({ type: z.literal('set-presentation'), presentation: scenePresentationSchema }).strict(),
+]);
+const sceneBookmarkSchema = z
+  .object({
+    id: z.string().min(1),
+    label: z.string().optional(),
+    source: z.enum(['explicit', 'viewer-update', 'viewer-operation']),
+    sceneDigest: sceneDigestSchema,
+    retained: z.literal(true),
+  })
+  .strict();
+const progressiveSceneUpdateTransportSchema = z.discriminatedUnion('type', [
+  z
+    .object({
+      type: z.literal('reset'),
+      renderId: renderIdSchema,
+      sequence: z.number().int().nonnegative(),
+      revision: z.number().int().nonnegative(),
+      sceneDigest: sceneDigestSchema,
+      snapshot: resolvedSceneSnapshotTransportSchema,
+      skippedBefore: z.number().int().nonnegative(),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal('delta'),
+      renderId: renderIdSchema,
+      sequence: z.number().int().nonnegative(),
+      baseRevision: z.number().int().nonnegative(),
+      revision: z.number().int().nonnegative(),
+      baseSceneDigest: sceneDigestSchema,
+      sceneDigest: sceneDigestSchema,
+      operations: z.array(sceneOperationSchema).readonly(),
+      assets: z.array(resolvedSceneAssetTransportSchema).readonly(),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal('refinement'),
+      renderId: renderIdSchema,
+      sequence: z.number().int().nonnegative(),
+      revision: z.number().int().nonnegative(),
+      sceneDigest: sceneDigestSchema,
+      replacements: z
+        .array(
+          z
+            .object({
+              nodeId: sceneNodeIdSchema,
+              previous: contentDigestSchema,
+              replacement: resolvedSceneAssetTransportSchema,
+            })
+            .strict(),
+        )
+        .readonly(),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal('bookmark'),
+      renderId: renderIdSchema,
+      sequence: z.number().int().nonnegative(),
+      revision: z.number().int().nonnegative(),
+      bookmark: sceneBookmarkSchema,
+    })
+    .strict(),
+]);
 
 const renderPhaseSchema = z.string();
 const workerStateSchema = z.enum(['idle', 'buffering', 'rendering', 'error']);
-const renderIdSchema = z.uuid();
 const abortGenerationSchema = z.number().int().min(0).max(4_294_967_295);
 const previewCommandIdentityShape = {
   renderId: renderIdSchema,
@@ -251,6 +442,17 @@ const renderCapabilitySchema = z
       })
       .catchall(z.unknown()),
     content: contentCapabilitySchema.optional(),
+    progressiveScene: z.discriminatedUnion('type', [
+      z.object({ type: z.literal('unsupported'), reason: z.string() }).strict(),
+      z
+        .object({
+          type: z.literal('supported'),
+          deliveries: z.array(z.enum(['reset', 'delta', 'refinement'])).readonly(),
+          bookmarks: z.array(z.enum(['explicit', 'viewer-update', 'viewer-operation'])).readonly(),
+          replay: z.array(z.enum(['live', 'retained'])).readonly(),
+        })
+        .strict(),
+    ]),
   })
   .catchall(z.unknown());
 
@@ -288,6 +490,8 @@ export const runtimeInitializeMemoryHandleSchema = z
     signalBuffer: sharedArrayBufferSchema.optional(),
     geometryPoolBuffer: sharedArrayBufferSchema.optional(),
     fileSystemPort: messagePortSchema.optional(),
+    computeStorePort: messagePortSchema.optional(),
+    computeBindingMode: z.enum(['off', 'memory', 'durable']).optional(),
     devtoolsTelemetry: z.boolean().optional(),
     compiledWasmModules: z
       .array(z.object({ url: z.string(), module: compiledWasmModuleSchema }).strict())
@@ -325,6 +529,18 @@ export const runtimeExportArgsSchema = z
 
 export const runtimeExportResultSchema = exportGeometryResultSchema;
 
+export const runtimeReadSceneSnapshotArgsSchema = z.object({ bookmarkId: z.string().min(1) }).strict();
+export const runtimeReadSceneSnapshotResultSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('found'), snapshot: resolvedSceneSnapshotTransportSchema }).strict(),
+  z.object({ type: z.literal('missing') }).strict(),
+]);
+export const runtimeListSceneBookmarksArgsSchema = z.object({ renderId: renderIdSchema }).strict();
+export const runtimeListSceneBookmarksResultSchema = z.array(sceneBookmarkSchema).readonly();
+export const runtimeSceneUpdatesArgsSchema = z
+  .object({ afterSequence: z.number().int().nonnegative().optional() })
+  .strict();
+export const runtimeSceneUpdatesEventSchema = progressiveSceneUpdateTransportSchema;
+
 export const runtimeExportModelArgsSchema = z
   .object({
     stage: stageSchema.optional(),
@@ -336,6 +552,16 @@ export const runtimeExportModelArgsSchema = z
     content: runtimeContentSchema.optional(),
   })
   .catchall(z.unknown());
+
+export const runtimeEvaluateModelArgsSchema = z
+  .object({
+    stage: stageSchema.optional(),
+    file: geometryFileSchema.strict(),
+    parameters: z.record(z.string(), z.unknown()),
+    options: z.record(z.string(), z.unknown()).optional(),
+    content: runtimeContentSchema.optional(),
+  })
+  .strict();
 
 export const runtimeSourceSnapshotArgsSchema = z
   .object({
@@ -384,7 +610,7 @@ export const runtimeTranscodeArgsSchema = z
   .object({
     from: fileExtensionSchema,
     to: fileExtensionSchema,
-    files: z.array(directExportFileSchema).min(1),
+    files: directExportFilesSchema,
     options: z.record(z.string(), z.unknown()),
   })
   .strict();
@@ -568,7 +794,13 @@ export const runtimeProtocolSchemas = {
     initialize: { args: runtimeInitializeArgsSchema, result: runtimeInitializeResultSchema },
     export: { args: runtimeExportArgsSchema, result: runtimeExportResultSchema },
     exportModel: { args: runtimeExportModelArgsSchema, result: runtimeExportResultSchema },
+    evaluateModel: { args: runtimeEvaluateModelArgsSchema, result: hashedGeometryResultTransportSchema },
     snapshotSource: { args: runtimeSourceSnapshotArgsSchema, result: runtimeSourceSnapshotResultSchema },
+    readSceneSnapshot: { args: runtimeReadSceneSnapshotArgsSchema, result: runtimeReadSceneSnapshotResultSchema },
+    listSceneBookmarks: {
+      args: runtimeListSceneBookmarksArgsSchema,
+      result: runtimeListSceneBookmarksResultSchema,
+    },
     transcode: { args: runtimeTranscodeArgsSchema, result: runtimeExportResultSchema },
     cleanup: { args: runtimeCleanupArgsSchema, result: runtimeCleanupResultSchema },
   },
@@ -595,5 +827,7 @@ export const runtimeProtocolSchemas = {
     capabilitiesUpdated: runtimeCapabilitiesUpdatedArgsSchema,
     kernelEvent: runtimeKernelEventArgsSchema,
   },
-  listens: {},
+  listens: {
+    sceneUpdates: { args: runtimeSceneUpdatesArgsSchema, event: runtimeSceneUpdatesEventSchema },
+  },
 } as const satisfies WireProtocolSchemas<RuntimeProtocol>;

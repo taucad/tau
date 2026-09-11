@@ -8,6 +8,7 @@ import { z } from 'zod';
 import type { WebSocketLike } from '@taucad/rpc';
 import { isRuntimeFileSystem } from '#filesystem/runtime-filesystem.js';
 import type { RuntimeFileSystem } from '#filesystem/runtime-filesystem.js';
+import type { ComputeBinding } from '#types/runtime-compute.types.js';
 
 const runtimeFileSystemSchema = z.custom<RuntimeFileSystem>(isRuntimeFileSystem, {
   message: 'webSocketTransport: `fileSystem` must be produced by a `fromX` factory',
@@ -28,6 +29,7 @@ export const webSocketClientOptionsSchema = z
      * second socket. Accepts every handle produced by a `fromX` factory.
      */
     fileSystem: runtimeFileSystemSchema.optional(),
+    compute: z.custom<ComputeBinding>().optional(),
     /**
      * Override for socket construction — primary use is unit-test injection
      * of a fake socket pair. The transport owns socket construction on

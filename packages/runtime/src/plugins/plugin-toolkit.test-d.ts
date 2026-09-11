@@ -3,6 +3,8 @@ import { z } from 'zod';
 import type { KernelPlugin, MiddlewarePlugin, TranscoderPlugin } from '#plugins/plugin-types.js';
 import { deriveImportExtensions } from '#plugins/plugin-derivation.js';
 import { definePlugin } from '#plugins/plugin.js';
+import type { ExpandPluginJobs, ExpandPluginMachines } from '#plugins/plugin.js';
+import { attachRuntimePluginDefinition } from '#plugins/plugin-runtime-definition.js';
 import type { CapabilitiesManifest } from '#types/runtime.types.js';
 import type { RuntimeKernels, RuntimeMiddleware, RuntimeTranscoders } from '#worker/runtime-definition.js';
 import { defineRuntime } from '#worker/runtime-definition.js';
@@ -42,6 +44,49 @@ const configurableImageTranscoder = (options?: { readonly quality?: number }): I
   void options;
   return imageTranscoder();
 };
+const jobRegistration = {
+  id: 'job-provider',
+  kind: 'simulation.fake',
+  version: '1.0.0',
+  kindVersion: 1,
+  configuration: {
+    version: 1,
+    source: { id: 'simulation.fake.configuration', version: '1.0.0' },
+    dialect: 'draft-07',
+    inputSchema: {},
+    outputSchema: {},
+    ui: { version: 1, rjsf: {} },
+  },
+  resultSchema: {},
+  recovery: { type: 'restart-from-input' },
+  requirements: [],
+  artifacts: [],
+  queries: [],
+  commands: [],
+} as const;
+const job = () =>
+  attachRuntimePluginDefinition(jobRegistration, () => ({
+    execute: async () => ({ value: 1 }),
+  }));
+const machine = () =>
+  attachRuntimePluginDefinition(
+    {
+      id: 'machine-provider',
+      name: 'Machine',
+      version: '1.0.0',
+      protocolVersion: 1,
+      vendor: 'test',
+      technologies: ['additive.fff'],
+      accepts: [],
+      bindingConfiguration: jobRegistration.configuration,
+      submissionConfiguration: jobRegistration.configuration,
+      queries: {},
+    } as const,
+    () => ({
+      async *discover() {},
+      connect: async () => ({}),
+    }),
+  );
 
 const plugin = definePlugin({
   meta: { name: '@test/plugin' },
@@ -55,9 +100,20 @@ const plugin = definePlugin({
 });
 const alias = plugin;
 
+const hostPlugin = definePlugin({
+  meta: { name: '@test/host-plugin' },
+  kernels: { step: stepKernel },
+  jobs: { simulation: job },
+  machines: { printer: machine },
+  presets: { default: ['kernels.step', 'jobs.simulation', 'machines.printer'] },
+});
+
 const configurablePlugin = definePlugin({
   meta: { name: '@test/configurable' },
-  kernels: { configured: configurableStepKernel, required: requiredDirectKernel },
+  kernels: {
+    configured: configurableStepKernel,
+    required: requiredDirectKernel,
+  },
   transcoders: { image: configurableImageTranscoder },
   presets: {
     default: ['kernels.configured'],
@@ -67,8 +123,22 @@ const configurablePlugin = definePlugin({
 });
 
 describe('plugin toolkit types', () => {
+  it('projects exact mixed host capability tuples', () => {
+    const selected = hostPlugin();
+
+    expectTypeOf<ExpandPluginJobs<readonly [typeof selected]>>().toEqualTypeOf<readonly [ReturnType<typeof job>]>();
+    expectTypeOf<ExpandPluginMachines<readonly [typeof selected]>>().toEqualTypeOf<
+      readonly [ReturnType<typeof machine>]
+    >();
+    expectTypeOf(selected.capabilities.kernels[0].id).toEqualTypeOf<'step'>();
+    expectTypeOf(selected.capabilities.jobs[0].kind).toEqualTypeOf<'simulation.fake'>();
+    expectTypeOf(selected.capabilities.machines[0].protocolVersion).toEqualTypeOf<1>();
+  });
   it('projects selected plugin tuples before direct buckets', () => {
-    const runtime = defineRuntime({ plugins: [alias()], kernels: [directKernel()] });
+    const runtime = defineRuntime({
+      plugins: [alias()],
+      kernels: [directKernel()],
+    });
 
     expectTypeOf<RuntimeKernels<typeof runtime>>().toEqualTypeOf<readonly [StepKernel, DirectKernel]>();
     expectTypeOf<RuntimeMiddleware<typeof runtime>[number]['id']>().toEqualTypeOf<'cache'>();
@@ -87,8 +157,14 @@ describe('plugin toolkit types', () => {
 
   it('derives role-nested options from the selected capability factories', () => {
     configurablePlugin({ kernels: { configured: { tolerance: 0.01 } } });
-    configurablePlugin({ preset: 'required', kernels: { required: { endpoint: 'https://example.test' } } });
-    configurablePlugin({ preset: 'export', transcoders: { image: { quality: 80 } } });
+    configurablePlugin({
+      preset: 'required',
+      kernels: { required: { endpoint: 'https://example.test' } },
+    });
+    configurablePlugin({
+      preset: 'export',
+      transcoders: { image: { quality: 80 } },
+    });
 
     // @ts-expect-error -- a selected factory with required options requires its nested option.
     configurablePlugin({ preset: 'required' });
@@ -101,7 +177,9 @@ describe('plugin toolkit types', () => {
   });
 
   it('projects a selected preset and the all-presets union for a widened preset', () => {
-    const exportRuntime = defineRuntime({ plugins: [plugin({ preset: 'export' })] });
+    const exportRuntime = defineRuntime({
+      plugins: [plugin({ preset: 'export' })],
+    });
     expectTypeOf<RuntimeTranscoders<typeof exportRuntime>[number]['id']>().toEqualTypeOf<'image'>();
 
     const preset = 'default' as string;

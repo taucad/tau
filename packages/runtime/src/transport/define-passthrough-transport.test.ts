@@ -8,7 +8,7 @@
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
-import { definePassthroughTransport } from '#transport/define-runtime-transport.js';
+import { definePassthroughTransport, defineRuntimeTransport } from '#transport/define-runtime-transport.js';
 import type { RuntimeTransportClient, TransportClientReady } from '#transport/runtime-transport.types.js';
 import type { TransportDescriptor } from '#transport/runtime-transport-descriptor.types.js';
 import type { RuntimeProtocol } from '#types/runtime-protocol.types.js';
@@ -81,5 +81,69 @@ describe('definePassthroughTransport — callable TransportPlugin', () => {
     });
 
     transport({ tag: 'hello' }).materialize();
+  });
+});
+
+describe.each([
+  ['runtime', defineRuntimeTransport],
+  ['passthrough', definePassthroughTransport],
+] as const)('define%sTransport schema admission', (_name, defineTransport) => {
+  it('parses once before either consumer and reuses the parsed output', () => {
+    let parseCount = 0;
+    const seen: Array<Readonly<{ tag: string }>> = [];
+    const schema = z
+      .object({ tag: z.string().default('default') })
+      .strict()
+      .transform((options) => {
+        parseCount += 1;
+        return { tag: options.tag.toUpperCase() };
+      });
+    const clientFactory = (options: { readonly tag: string }): RuntimeTransportClient => {
+      seen.push(options);
+      return stubClient('foo');
+    };
+    clientFactory.describe = (options: { readonly tag: string }): TransportDescriptor<'foo'> => {
+      seen.push(options);
+      return stubClient('foo').describe();
+    };
+
+    const transport = defineTransport({ id: 'foo', clientOptionsSchema: schema, client: clientFactory });
+    const plugin = transport({});
+    plugin.describe();
+    plugin.materialize();
+
+    expect(parseCount).toBe(1);
+    expect(seen).toEqual([{ tag: 'DEFAULT' }, { tag: 'DEFAULT' }]);
+    expect(seen[0]).toBe(seen[1]);
+  });
+
+  it('rejects invalid and asynchronous schemas before either consumer', () => {
+    let consumerCalls = 0;
+    const clientFactory = (): RuntimeTransportClient => {
+      consumerCalls += 1;
+      return stubClient('foo');
+    };
+    clientFactory.describe = (): TransportDescriptor<'foo'> => {
+      consumerCalls += 1;
+      return stubClient('foo').describe();
+    };
+    const invalidTransport = defineTransport({
+      id: 'foo',
+      clientOptionsSchema: z.object({ tag: z.string() }).strict(),
+      client: clientFactory,
+    });
+    const asyncTransport = defineTransport({
+      id: 'foo',
+      clientOptionsSchema: z.object({ tag: z.string().refine(async () => true) }),
+      client: clientFactory,
+    });
+
+    const invalidOptions: { readonly tag: string } & Readonly<Record<string, unknown>> = {
+      tag: 'ok',
+      extra: true,
+    };
+    expect(() => invalidTransport(invalidOptions)).toThrow(z.ZodError);
+    expect(() => asyncTransport({ tag: 'ok' })).toThrow(/Encountered Promise during synchronous parse/);
+    expect(consumerCalls).toBe(0);
   });
 });

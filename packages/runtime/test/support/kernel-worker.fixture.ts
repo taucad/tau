@@ -51,7 +51,7 @@ export const seedTestFileSystem = async (files: Record<string, string | Uint8Arr
   for (const [path, content] of Object.entries(files)) {
     const normalizedPath = assertRootedPath(path);
     const separator = normalizedPath.lastIndexOf('/');
-    const directory = separator < 0 ? '' : normalizedPath.slice(0, separator);
+    const directory = separator === -1 ? '' : normalizedPath.slice(0, separator);
     if (directory) {
       await fileSystem.mkdir(directory, { recursive: true });
     }
@@ -193,7 +193,7 @@ export const createGeometryFile = (filename: string): RuntimeFileLocator => {
   const separator = filePath.lastIndexOf('/');
   return {
     filename: filePath.slice(separator + 1),
-    path: separator < 0 ? '' : filePath.slice(0, separator),
+    path: separator === -1 ? '' : filePath.slice(0, separator),
   };
 };
 

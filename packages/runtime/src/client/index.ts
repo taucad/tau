@@ -15,5 +15,7 @@ export {
   isRenderTimeoutError,
   RenderAbortedError,
   isRenderAbortedError,
+  TranscodeTimeoutError,
+  isTranscodeTimeoutError,
 } from '#framework/runtime-worker-client.js';
 export * from '#client/runtime-client-core.js';

@@ -17,6 +17,8 @@ import type {
   RuntimeSourceFiles,
   RuntimeSourceSnapshotResult,
 } from '#client/runtime-client.js';
+import type { RuntimeEvaluateInput } from '#client/runtime-client-core.js';
+import type { HashedGeometryResult } from '#types/runtime.types.js';
 import { fromMemoryFs } from '#filesystem/runtime-filesystem.js';
 import { inProcessTransport } from '#transport/in-process-transport.js';
 import { defineKernel } from '#types/runtime-kernel.types.js';
@@ -191,6 +193,33 @@ describe('RuntimeClient.render input types', () => {
     void client.render({
       source: { files: { 'main.ts': code } },
       // @ts-expect-error -- this render route advertises edges only.
+      content: { includeTopology: true },
+    });
+  });
+});
+
+describe('RuntimeClient.evaluate input types', () => {
+  it('preserves exact render options, content, source inference, and result', () => {
+    const input: RuntimeEvaluateInput<typeof runtime.kernels, typeof runtime.middleware, { 'main.ts': string }> = {
+      source: { files: { 'main.ts': code } },
+      renderOptions: { tessellation: { linearTolerance: 0.1, angularTolerance: 12 } },
+      content: { includeEdges: true },
+      signal: new AbortController().signal,
+    };
+    expectTypeOf(client.evaluate(input)).toEqualTypeOf<Promise<HashedGeometryResult>>();
+
+    // @ts-expect-error -- inferred multi-file evaluation requires an entry.
+    void client.evaluate({ source: { files: { 'a.ts': code, 'b.ts': code } } });
+    void client.evaluate({ source: { files: { 'a.ts': code, 'b.ts': code }, entry: 'a.ts' } });
+
+    void client.evaluate({
+      source: { files: { 'main.ts': code } },
+      // @ts-expect-error -- evaluation preserves the kernel's exact render schema.
+      renderOptions: { tessellation: { linearTolerance: 'fine', angularTolerance: 12 } },
+    });
+    void client.evaluate({
+      source: { files: { 'main.ts': code } },
+      // @ts-expect-error -- this evaluation route advertises edges only.
       content: { includeTopology: true },
     });
   });

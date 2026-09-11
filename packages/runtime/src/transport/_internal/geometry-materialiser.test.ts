@@ -21,6 +21,7 @@ describe('materialiseGeometry', () => {
       format: 'svg',
       content: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"><path d="M0 0L1 1"/></svg>',
       name: 'test',
+      units: { length: 'mm' },
       hash: 'h-svg',
     };
     await expect(materialiseGeometry(svg, undefined)).resolves.toBe(svg);

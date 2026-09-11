@@ -40,6 +40,11 @@
     "./types": "./src/types/index.ts",
     "./metadata": "./src/utils/package-info.ts",
     "./client": "./src/client/index.ts",
+    "./configuration": "./src/configuration/index.ts",
+    "./configuration/zod": "./src/configuration/zod.ts",
+    "./job": "./src/jobs/index.ts",
+    "./machine": "./src/machines/index.ts",
+    "./host": "./src/host/index.ts",
     "./worker": "./src/worker/index.ts",
     "./plugin": "./src/plugins/plugin-entry.ts",
     "./kernel": "./src/plugins/kernel-plugin-entry.ts",
@@ -97,6 +102,31 @@
         "types": "./dist/client/index.d.mts",
         "import": "./dist/client/index.mjs",
         "default": "./dist/client/index.mjs"
+      },
+      "./configuration": {
+        "types": "./dist/configuration/index.d.mts",
+        "import": "./dist/configuration/index.mjs",
+        "default": "./dist/configuration/index.mjs"
+      },
+      "./configuration/zod": {
+        "types": "./dist/configuration/zod.d.mts",
+        "import": "./dist/configuration/zod.mjs",
+        "default": "./dist/configuration/zod.mjs"
+      },
+      "./job": {
+        "types": "./dist/jobs/index.d.mts",
+        "import": "./dist/jobs/index.mjs",
+        "default": "./dist/jobs/index.mjs"
+      },
+      "./machine": {
+        "types": "./dist/machines/index.d.mts",
+        "import": "./dist/machines/index.mjs",
+        "default": "./dist/machines/index.mjs"
+      },
+      "./host": {
+        "types": "./dist/host/index.d.mts",
+        "import": "./dist/host/index.mjs",
+        "default": "./dist/host/index.mjs"
       },
       "./worker": {
         "types": "./dist/worker/index.d.mts",
@@ -242,7 +272,10 @@
     "#*": "./src/*"
   },
   "dependencies": {
+    "@cfworker/json-schema": "catalog:",
     "@msgpack/msgpack": "catalog:",
+    "@standard-schema/spec": "catalog:",
+    "@taucad/cache-core": "workspace:*",
     "@types/json-schema": "catalog:",
     "cdn-resolve": "catalog:",
     "deepmerge": "catalog:",
@@ -271,13 +304,14 @@
   },
   "devDependencies": {
     "@taucad/events": "workspace:*",
-    "@taucad/nx": "workspace:*",
     "@taucad/filesystem": "workspace:*",
     "@taucad/fs-bridge": "workspace:*",
     "@taucad/json-schema": "workspace:*",
     "@taucad/memory": "workspace:*",
+    "@taucad/nx": "workspace:*",
     "@taucad/rpc": "workspace:*",
     "@taucad/types": "workspace:*",
+    "@taucad/units": "workspace:*",
     "@taucad/utils": "workspace:*",
     "@types/ws": "^8.18.1",
     "next": "catalog:next16",

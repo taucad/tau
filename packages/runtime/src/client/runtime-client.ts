@@ -18,6 +18,7 @@ export {
   RuntimeTerminatedError,
   isRuntimeTerminatedError,
 } from '#client/runtime-client-core.js';
+export { TranscodeTimeoutError, isTranscodeTimeoutError } from '#framework/runtime-worker-client.js';
 export type {
   RuntimeConfigInput,
   RuntimeConfigOutput,
@@ -27,6 +28,7 @@ export type {
   FilesystemRuntimeSource,
   InlineRuntimeSource,
   RuntimeExportOptions,
+  RuntimeEvaluateInput,
   RuntimeRenderInput,
   RuntimeSource,
   RuntimeSourceContent,
@@ -44,4 +46,5 @@ export type {
   RuntimeClientOptionsWithTransport,
   RuntimeConnectionCause,
   RuntimeTerminatedCause,
+  RuntimeTerminatedDetail,
 } from '#client/runtime-client-core.js';

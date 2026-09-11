@@ -71,4 +71,18 @@ describe('definePassthroughTransport — TypeScript surface', () => {
     });
     assertType<TransportPluginId<ReturnType<typeof transport>>>('bar');
   });
+
+  it('accepts schema input while the client consumes transformed output', () => {
+    const client = (_options: { count: number }): RuntimeTransportClient => stubClient('foo');
+    client.describe = (_options: { count: number }): TransportDescriptor<'foo'> => stubDescriptor('foo');
+    const transport = definePassthroughTransport({
+      id: 'foo',
+      clientOptionsSchema: z.object({ count: z.string() }).transform(({ count }) => ({ count: Number(count) })),
+      client,
+    });
+
+    transport({ count: '3' });
+    // @ts-expect-error -- callers provide schema input, not transformed output.
+    transport({ count: 3 });
+  });
 });

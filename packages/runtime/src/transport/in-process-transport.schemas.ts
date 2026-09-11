@@ -19,6 +19,7 @@ import type { RuntimeFileSystem } from '#filesystem/runtime-filesystem.js';
 import { isRuntimeDefinition } from '#worker/runtime-definition.js';
 import type { AnyRuntimeDefinition } from '#worker/runtime-definition.js';
 import { compiledWasmModuleSchema } from '#transport/_internal/compiled-wasm-module.schema.js';
+import type { ComputeBinding } from '#types/runtime-compute.types.js';
 
 const runtimeFileSystemSchema = z.custom<RuntimeFileSystem>(
   (value) => value === undefined || isRuntimeFileSystem(value),
@@ -34,6 +35,7 @@ export const inProcessClientOptionsSchema = z
      * handle into the worker's in-isolate filesystem.
      */
     fileSystem: runtimeFileSystemSchema.optional(),
+    compute: z.custom<ComputeBinding>().optional(),
     /**
      * Worker-owned runtime definition. Required when the in-process transport
      * is used directly because this topology creates the host worker itself.

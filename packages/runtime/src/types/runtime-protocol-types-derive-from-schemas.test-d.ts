@@ -18,11 +18,13 @@
 
 import { describe, it, assertType } from 'vitest';
 import type { z } from 'zod';
+import type { GeometrySvg } from '@taucad/types';
 import type {
   runtimeInitializeArgsSchema,
   runtimeInitializeResultSchema,
   runtimeExportArgsSchema,
   runtimeExportModelArgsSchema,
+  runtimeEvaluateModelArgsSchema,
   runtimeExportResultSchema,
   runtimeOpenFileArgsSchema,
   runtimeStageAndRenderArgsSchema,
@@ -43,11 +45,13 @@ import type {
   runtimeKernelCommandArgsSchema,
   runtimeKernelEventArgsSchema,
   transportHelloPayloadSchema,
+  runtimeProtocolSchemas,
 } from '#types/runtime-protocol.schemas.js';
 import type {
   RuntimeInitializeArgs,
   RuntimeExportArgs,
   RuntimeExportModelArgs,
+  RuntimeEvaluateModelArgs,
   RuntimeOpenFileArgs,
   RuntimeStageAndRenderArgs,
   RuntimeProgressArgs,
@@ -57,6 +61,7 @@ import type {
   RuntimeStateChangedArgs,
   RuntimeProtocol,
   WireAbortReasonCode,
+  HashedGeometryResultTransport,
 } from '#types/runtime-protocol.types.js';
 
 const branded = <T>(): T => undefined as unknown as T;
@@ -88,6 +93,21 @@ describe('runtime-protocol types derive from schemas (C16)', () => {
   it('RuntimeExportModelArgs is structurally z.input<typeof runtimeExportModelArgsSchema>', () => {
     type Derived = z.input<typeof runtimeExportModelArgsSchema>;
     assertType<RuntimeExportModelArgs>(branded<Derived>());
+  });
+
+  it('RuntimeEvaluateModelArgs derives from its strict normalized schema', () => {
+    type Derived = z.input<typeof runtimeEvaluateModelArgsSchema>;
+    assertType<RuntimeEvaluateModelArgs>(branded<Derived>());
+    assertType<Derived>(branded<RuntimeEvaluateModelArgs>());
+  });
+
+  it('evaluation wire output retains optional SVG coordinate provenance', () => {
+    type Derived = z.output<(typeof runtimeProtocolSchemas.calls.evaluateModel)['result']>;
+    assertType<HashedGeometryResultTransport>(branded<Derived>());
+    assertType<Derived>(branded<HashedGeometryResultTransport>());
+    assertType<GeometrySvg>({ format: 'svg', content: '<svg/>', units: { length: 'mm' } });
+    // @ts-expect-error - coordinate provenance uses the canonical LengthSymbol union.
+    assertType<GeometrySvg>({ format: 'svg', content: '<svg/>', units: { length: 'pixels' } });
   });
 
   it('export result schema envelope exposes a discriminated success/issues shape', () => {

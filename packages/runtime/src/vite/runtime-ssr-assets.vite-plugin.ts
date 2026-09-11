@@ -3,7 +3,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { stripLiteral } from 'strip-literal';
-import type { Plugin, ResolvedConfig } from 'vite';
+import type { Environment, Plugin, ResolvedConfig } from 'vite';
 
 const urlPattern = /new\s+URL\(\s*(["'`])(?<specifier>[^"'`]+)\1\s*,\s*import\.meta\.url\s*,?\s*\)(?<href>\.href)?/g;
 const packageUrlPattern =
@@ -116,7 +116,8 @@ export const runtimeAssetsPlugin = (): Plugin => {
   let isSsrBuild = false;
   let isServe = false;
   let isServerEnvironment = false;
-  const emittedAssets = new Map<string, string>();
+  const emittedAssets = new WeakMap<Environment, Map<string, string>>();
+  const emittedReferences = new WeakMap<Environment, Set<string>>();
 
   return {
     name: 'taucad-runtime:assets',
@@ -129,7 +130,8 @@ export const runtimeAssetsPlugin = (): Plugin => {
       isSsrBuild = Boolean(config.build.ssr) && consumer !== 'client';
     },
     buildStart() {
-      emittedAssets.clear();
+      emittedAssets.set(this.environment, new Map());
+      emittedReferences.set(this.environment, new Set());
     },
     transform: {
       filter: { code: 'import.meta' },
@@ -145,6 +147,11 @@ export const runtimeAssetsPlugin = (): Plugin => {
         const matches = [...packageMatches, ...relativeMatches];
         if (matches.length === 0) {
           return;
+        }
+        const environmentAssets = emittedAssets.get(this.environment);
+        const environmentReferences = emittedReferences.get(this.environment);
+        if (!environmentAssets || !environmentReferences) {
+          throw new Error('Runtime asset state was not initialized for this build environment');
         }
 
         const replacements: Array<{ readonly match: UrlMatch; readonly replacement: string }> = [];
@@ -165,20 +172,22 @@ export const runtimeAssetsPlugin = (): Plugin => {
           const source = fs.readFileSync(match.assetPath);
           const assetKey = `${path.basename(match.assetPath)}\0${createHash('sha256').update(source).digest('hex')}`;
           this.addWatchFile(match.assetPath);
-          let referenceId = emittedAssets.get(assetKey);
+          let referenceId = environmentAssets.get(assetKey);
           if (!referenceId) {
             referenceId = this.emitFile({
               type: 'asset',
               name: path.basename(match.assetPath),
               source,
             });
-            emittedAssets.set(assetKey, referenceId);
+            environmentAssets.set(assetKey, referenceId);
+            environmentReferences.add(referenceId);
           }
+          const assetReference = `__TAUCAD_RUNTIME_ASSET__${referenceId}__`;
           replacements.push({
             match,
             replacement: match.hasHref
-              ? `import.meta.ROLLUP_FILE_URL_${referenceId}`
-              : `new URL(import.meta.ROLLUP_FILE_URL_${referenceId})`,
+              ? `new URL(${JSON.stringify(assetReference)}, import.meta.url).href`
+              : `new URL(${JSON.stringify(assetReference)}, import.meta.url)`,
           });
         }
 
@@ -188,6 +197,30 @@ export const runtimeAssetsPlugin = (): Plugin => {
         }
         return { code: result, map: null, moduleType: 'js' };
       },
+    },
+    renderChunk(code, chunk) {
+      const environmentReferences = emittedReferences.get(this.environment);
+      if (!environmentReferences) {
+        throw new Error('Runtime asset state was not initialized for this build environment');
+      }
+      let result = code;
+      for (const referenceId of environmentReferences) {
+        const assetReference = `__TAUCAD_RUNTIME_ASSET__${referenceId}__`;
+        if (!result.includes(assetReference)) {
+          continue;
+        }
+        const relativePath = path.posix.relative(path.posix.dirname(chunk.fileName), this.getFileName(referenceId));
+        const runtimePath = relativePath.startsWith('.') ? relativePath : `./${relativePath}`;
+        const encodedRuntimePath = runtimePath
+          .split('/')
+          .map((segment) => encodeURIComponent(segment).replaceAll("'", '%27'))
+          .join('/');
+        result = result.replaceAll(assetReference, encodedRuntimePath);
+        if (result.includes(assetReference)) {
+          throw new Error(`Runtime asset reference ${referenceId} was not resolved in ${chunk.fileName}`);
+        }
+      }
+      return result === code ? undefined : { code: result, map: null };
     },
   };
 };

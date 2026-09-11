@@ -33,6 +33,9 @@ import {
   MockKernelWorker,
   createMockFileSystem,
   createGeometryFile,
+  getTestFileSystem,
+  initializeWorkerForTesting,
+  seedTestFileSystem,
 } from '../../test/support/kernel-worker.fixture.js';
 /* oxlint-enable no-restricted-imports, import/extensions */
 import { defineMiddleware } from '#middleware/runtime-middleware.js';
@@ -40,7 +43,10 @@ import { attachRuntimePluginDefinition } from '#plugins/plugin-runtime-definitio
 import { checkAbort } from '#framework/cooperative-abort.js';
 import type { RuntimeStateChangedArgs } from '#types/runtime-protocol.types.js';
 import { signalSlot, abortReason } from '#types/runtime-protocol.types.js';
+import { runtimeProtocolSchemas } from '#types/runtime-protocol.schemas.js';
 import { signalBufferByteLength } from '#framework/runtime-framework.constants.js';
+import type { ProgressiveSceneUpdate, PublishSceneUpdateOutcome } from '#types/runtime-scene.types.js';
+import { digestContent } from '@taucad/cache-core';
 
 const tessellationSchema = z.object({
   tessellation: z
@@ -201,6 +207,99 @@ class VolatileDependencyKernelWorker extends MockKernelWorker {
   }
 }
 
+class ProgressiveSceneKernelWorker extends MockKernelWorker {
+  public publishOutcome?: PublishSceneUpdateOutcome;
+
+  protected override async onCreateGeometry(
+    input: CreateGeometryInput,
+    runtime: KernelRuntime,
+  ): Promise<CreateGeometryResult> {
+    this.publishOutcome = await runtime.scene.publish({
+      geometry: { format: 'gltf', content: new Uint8Array([7, 8, 9]) },
+      label: 'Stage one',
+    });
+    await runtime.scene.bookmark({ label: 'Stage one', source: 'explicit' });
+    return super.onCreateGeometry(input, runtime);
+  }
+}
+
+class ProgressiveSceneDeltaKernelWorker extends MockKernelWorker {
+  protected override async onCreateGeometry(
+    input: CreateGeometryInput,
+    runtime: KernelRuntime,
+  ): Promise<CreateGeometryResult> {
+    await runtime.scene.publishUpdate({
+      operation: 'reset',
+      sceneGeneration: 0,
+      upserts: [
+        { id: 'component:one', name: 'One', geometry: { format: 'gltf', content: new Uint8Array([1]) } },
+        { id: 'component:two', name: 'Two', geometry: { format: 'gltf', content: new Uint8Array([2]) } },
+      ],
+      removedComponentIds: [],
+    });
+    await runtime.scene.publishUpdate({
+      operation: 'delta',
+      baseSceneGeneration: 0,
+      sceneGeneration: 1,
+      upserts: [{ id: 'component:one', name: 'One', geometry: { format: 'gltf', content: new Uint8Array([3]) } }],
+      removedComponentIds: ['component:two'],
+    });
+    await runtime.scene.bookmark({ label: 'Changed', source: 'viewer-update' });
+    return super.onCreateGeometry(input, runtime);
+  }
+}
+
+class ProgressiveSceneKeyframeKernelWorker extends MockKernelWorker {
+  protected override async onCreateGeometry(
+    input: CreateGeometryInput,
+    runtime: KernelRuntime,
+  ): Promise<CreateGeometryResult> {
+    await runtime.scene.publishUpdate({
+      operation: 'reset',
+      sceneGeneration: 0,
+      upserts: [{ id: 'component:one', geometry: { format: 'gltf', content: new Uint8Array([0]) } }],
+      removedComponentIds: [],
+    });
+    for (let sceneGeneration = 1; sceneGeneration < 24; sceneGeneration += 1) {
+      // oxlint-disable-next-line eslint/no-await-in-loop -- scene generations must publish in order.
+      await runtime.scene.publishUpdate({
+        operation: 'delta',
+        baseSceneGeneration: sceneGeneration - 1,
+        sceneGeneration,
+        upserts: [
+          {
+            id: 'component:one',
+            geometry: { format: 'gltf', content: new Uint8Array([sceneGeneration]) },
+          },
+        ],
+        removedComponentIds: [],
+      });
+    }
+    return super.onCreateGeometry(input, runtime);
+  }
+}
+
+class ProgressiveSceneRefinementKernelWorker extends MockKernelWorker {
+  protected override async onCreateGeometry(
+    input: CreateGeometryInput,
+    runtime: KernelRuntime,
+  ): Promise<CreateGeometryResult> {
+    await runtime.scene.publishUpdate({
+      operation: 'reset',
+      sceneGeneration: 0,
+      upserts: [{ id: 'component:one', geometry: { format: 'gltf', content: new Uint8Array([1]) } }],
+      removedComponentIds: [],
+    });
+    await runtime.scene.publishUpdate({
+      operation: 'refinement',
+      sceneGeneration: 0,
+      replacements: [{ id: 'component:one', geometry: { format: 'gltf', content: new Uint8Array([2]) } }],
+    });
+    await runtime.scene.bookmark({ label: 'Refined', source: 'explicit' });
+    return super.onCreateGeometry(input, runtime);
+  }
+}
+
 /** Records the handles the framework released, standing in for a kernel that frees WASM memory. */
 class DisposingKernelWorker extends MockKernelWorker {
   public readonly disposedHandles: unknown[] = [];
@@ -234,6 +333,47 @@ class DisposingKernelWorker extends MockKernelWorker {
 // =============================================================================
 
 describe('KernelWorker lifecycle', () => {
+  it('should stop direct, interactive, and export renders when parameter discovery fails', async () => {
+    const issue: KernelIssue = {
+      message: 'Workspace changed while reading current schema.',
+      code: 'RUNTIME',
+      type: 'runtime',
+      severity: 'error',
+    };
+    const builds = vi.fn();
+    class FailedParameterWorker extends MockKernelWorker {
+      protected override async onGetParameters(): Promise<GetParametersResult> {
+        return { success: false, issues: [issue] };
+      }
+      protected override async onCreateGeometry(
+        input: CreateGeometryInput,
+        runtime: KernelRuntime,
+      ): Promise<CreateGeometryResult> {
+        builds();
+        return super.onCreateGeometry(input, runtime);
+      }
+    }
+    const worker = new FailedParameterWorker({ middleware: [], onLog: noopLog });
+    const file = createGeometryFile('main.ts');
+    const parameters = { RadiusMm: 16 };
+    try {
+      expect(await worker.render({ file, parameters })).toMatchObject({ success: false, issues: [issue] });
+      expect(await worker.exportModel({ file, parameters, format: 'gltf' })).toMatchObject({
+        success: false,
+        issues: [issue],
+      });
+      const results: HashedGeometryResult[] = [];
+      worker.onGeometryComputed = ({ result }) => {
+        results.push(result);
+      };
+      await openAndWaitForRender(worker, file, parameters);
+      expect(results).toEqual([{ success: false, issues: [issue] }]);
+      expect(builds).not.toHaveBeenCalled();
+    } finally {
+      await worker.cleanup();
+    }
+  });
+
   it('should replace parameter arrays across direct, interactive, and export merges', async () => {
     const capturedParameters: Array<Record<string, unknown>> = [];
     class ArrayParameterWorker extends MockKernelWorker {
@@ -274,6 +414,46 @@ describe('KernelWorker lifecycle', () => {
         sections: { planes: [{ point: [1, 2, 3] }], clipLines: true },
       })),
     );
+  });
+
+  it('drops stale values that a changed closed parameter schema no longer declares', async () => {
+    const capturedParameters: Array<Record<string, unknown>> = [];
+    class ClosedParameterWorker extends MockKernelWorker {
+      protected override async onGetParameters(): Promise<GetParametersResult> {
+        return {
+          success: true,
+          data: {
+            defaultParameters: {},
+            jsonSchema: { type: 'object', properties: {}, additionalProperties: false },
+          },
+          issues: [],
+        };
+      }
+
+      protected override async onCreateGeometry(
+        input: CreateGeometryInput,
+        runtime: KernelRuntime,
+      ): Promise<CreateGeometryResult> {
+        capturedParameters.push(input.parameters);
+        return super.onCreateGeometry(input, runtime);
+      }
+    }
+
+    const restorePersistedParameters = defineMiddleware({
+      id: 'restorePersistedParameters',
+      name: 'RestorePersistedParameters',
+      async wrapCreateGeometry(input, handler) {
+        return handler({ ...input, parameters: { ...input.parameters, RadiusMm: 16 } });
+      },
+    });
+    const worker = new ClosedParameterWorker({ middleware: [restorePersistedParameters()], onLog: noopLog });
+    const file = createGeometryFile('main.cs');
+    const parameters = { RadiusMm: 16 };
+    await worker.render({ file, parameters });
+    await openAndWaitForRender(worker, file, parameters);
+    await worker.exportModel({ file, parameters, format: 'gltf' });
+
+    expect(capturedParameters).toEqual([{}, {}, {}]);
   });
 
   afterEach(() => {
@@ -512,6 +692,10 @@ describe('KernelWorker lifecycle', () => {
       expect(onGeometry).not.toHaveBeenCalled();
       expect(worker.getWatchedPaths()).toEqual(new Set(['main.ts']));
       expect(unsubscriptions[0]).not.toHaveBeenCalled();
+      await vi.waitFor(() => {
+        expect(onGeometry).toHaveBeenCalledOnce();
+      });
+      expect(onGeometry.mock.calls[0]?.[0].renderId).not.toBe(previewId(203));
       await worker.cleanup();
     });
   });
@@ -859,6 +1043,162 @@ describe('KernelWorker lifecycle', () => {
       expect(observed.geometries.map((entry) => entry.renderId)).toEqual([renderId]);
       await worker.cleanup();
     });
+
+    it('publishes the arming render when a newly watched path replays identical content', async () => {
+      const entryBytes = new Uint8Array([1, 2, 3]);
+      const filesystem = createMockFileSystem();
+      filesystem.mocks.readFiles.mockResolvedValue({ 'main.ts': entryBytes, 'dep.ts': entryBytes });
+      filesystem.mocks.readFile.mockResolvedValue(entryBytes);
+      let watchCount = 0;
+      const inlineFileSystem = Object.assign(filesystem, {
+        watch: vi.fn(() => vi.fn()),
+        watchReady: vi.fn((_request: unknown, handler: (event: WatchEvent) => void) => {
+          watchCount += 1;
+          if (watchCount === 2) {
+            handler({ type: 'change', path: 'dep.ts' });
+          }
+          return {
+            unsubscribe: vi.fn(),
+            ready: Promise.resolve(),
+            closed: new Promise<void>(() => {
+              // This synthetic watch stays open for the duration of the test.
+            }),
+          };
+        }),
+      });
+      class DependencyKernelWorker extends MockKernelWorker {
+        protected override async onGetDependencies({
+          entryPath,
+        }: GetDependenciesInput): Promise<GetDependenciesResult> {
+          return { resolved: [entryPath, 'dep.ts'], unresolved: [] };
+        }
+      }
+      const worker = new DependencyKernelWorker({ middleware: [], onLog: noopLog, filesystem });
+      await worker.initialize({ callbacks: { onLog: noopLog }, transferables: { inlineFileSystem }, options: {} });
+      const observed = observePreview(worker);
+      const renderId = previewId(205);
+
+      worker.handleOpenFile({ renderId, file: createGeometryFile('main.ts'), parameters: {} });
+
+      const terminal = await observed.waitForState(({ state }) => state === 'idle' || state === 'error');
+      expect(terminal.renderId).toBe(renderId);
+      expect(observed.geometries.map((entry) => entry.renderId)).toEqual([renderId]);
+      await worker.cleanup();
+    });
+
+    it('stops replacement validation when cleanup closes admission during an identical replay', async () => {
+      const entryBytes = new Uint8Array([1, 2, 3]);
+      const filesystem = createMockFileSystem();
+      const validationStarted = Promise.withResolvers<void>();
+      const unsubscribe = vi.fn();
+      let deliverWatchEvent!: (event: WatchEvent) => void;
+      const inlineFileSystem = Object.assign(filesystem, {
+        watch: vi.fn(() => unsubscribe),
+        watchReady: vi.fn((_request: unknown, handler: (event: WatchEvent) => void) => {
+          deliverWatchEvent = handler;
+          return {
+            unsubscribe,
+            ready: Promise.resolve(),
+            closed: new Promise<void>(() => {
+              // This synthetic watch stays open until cleanup rejects its replacement.
+            }),
+          };
+        }),
+      });
+      const worker = new MockKernelWorker({ middleware: [], onLog: noopLog, filesystem });
+      await worker.initialize({ callbacks: { onLog: noopLog }, transferables: { inlineFileSystem }, options: {} });
+      // @ts-expect-error - seed the already-hashed dependency at the private watch handoff seam
+      worker.fileHashCache.set('dep.ts', await worker.hashContent(entryBytes));
+      filesystem.mocks.readFile.mockImplementation(async () => {
+        deliverWatchEvent({ type: 'change', path: 'dep.ts' });
+        validationStarted.resolve();
+        return entryBytes;
+      });
+
+      // @ts-expect-error - exercise replacement validation independently of render setup
+      const reconciliation = worker.reconcileWatchSet(new Map([['dep.ts', 50]]));
+      await validationStarted.promise;
+      const cleanup = worker.cleanup();
+
+      await expect(reconciliation).resolves.toBe(false);
+      await cleanup;
+      expect(unsubscribe).toHaveBeenCalledOnce();
+      expect(worker.getWatchedPaths()).toEqual(new Set());
+    });
+
+    it.each([
+      {
+        event: { type: 'change', path: 'dep.ts' } satisfies WatchEvent,
+        nextBytes: new Uint8Array([1, 2, 3]),
+        commits: true,
+      },
+      {
+        event: { type: 'change', path: 'dep.ts' } satisfies WatchEvent,
+        nextBytes: new Uint8Array([4, 5, 6]),
+        commits: false,
+      },
+      { event: { type: 'reset' } satisfies WatchEvent, nextBytes: new Uint8Array([1, 2, 3]), commits: false },
+    ])(
+      'revalidates an arming event delivered during hashing before commit ($event.type)',
+      async ({ event, nextBytes, commits }) => {
+        const entryBytes = new Uint8Array([1, 2, 3]);
+        let currentBytes = entryBytes;
+        const filesystem = createMockFileSystem();
+        filesystem.mocks.readFile.mockImplementation(async () => currentBytes);
+        const unsubscribe = vi.fn();
+        let deliverWatchEvent!: (event: WatchEvent) => void;
+        const inlineFileSystem = Object.assign(filesystem, {
+          watch: vi.fn(() => unsubscribe),
+          watchReady: vi.fn((_request: unknown, handler: (event: WatchEvent) => void) => {
+            deliverWatchEvent = handler;
+            return {
+              unsubscribe,
+              ready: Promise.resolve(),
+              closed: new Promise<void>(() => {
+                // This synthetic watch stays open for the duration of the test.
+              }),
+            };
+          }),
+        });
+        const worker = new MockKernelWorker({ middleware: [], onLog: noopLog, filesystem });
+        await worker.initialize({ callbacks: { onLog: noopLog }, transferables: { inlineFileSystem }, options: {} });
+        // @ts-expect-error - seed and gate the private hash boundary used by replacement validation
+        const originalHashContent = worker.hashContent.bind(worker);
+        // @ts-expect-error - seed the already-hashed dependency at the private watch handoff seam
+        worker.fileHashCache.set('dep.ts', await originalHashContent(entryBytes));
+        // @ts-expect-error - isolate replacement coherence from the independently covered watch-routing queue
+        worker.routeWatchEvent = async () => {
+          // Watch routing has independent coverage; this test owns only replacement coherence.
+        };
+        const hashStarted = Promise.withResolvers<void>();
+        const releaseHash = Promise.withResolvers<void>();
+        let hashCalls = 0;
+        // @ts-expect-error - hold the first validation hash to deliver an event after its bytes were read
+        worker.hashContent = async (content: Uint8Array<ArrayBuffer>) => {
+          hashCalls += 1;
+          if (hashCalls === 1) {
+            hashStarted.resolve();
+            await releaseHash.promise;
+          }
+          return originalHashContent(content);
+        };
+
+        // @ts-expect-error - exercise replacement validation independently of render setup
+        const reconciliation = worker.reconcileWatchSet(new Map([['dep.ts', 50]]));
+        await hashStarted.promise;
+        currentBytes = nextBytes;
+        deliverWatchEvent(event);
+        releaseHash.resolve();
+
+        await expect(reconciliation).resolves.toBe(commits);
+        expect(filesystem.mocks.readFile).toHaveBeenCalledTimes(event.type === 'reset' ? 1 : 2);
+        expect(worker.getWatchedPaths()).toEqual(commits ? new Set(['dep.ts']) : new Set());
+        if (!commits) {
+          expect(unsubscribe).toHaveBeenCalledOnce();
+        }
+        await worker.cleanup();
+      },
+    );
   });
 
   describe('exact and loss invalidation routing', () => {
@@ -1259,7 +1599,7 @@ describe('KernelWorker lifecycle', () => {
       expect(worker.onProgress).toBeUndefined();
     });
 
-    it('should reconcile observed paths when render() throws', async () => {
+    it('keeps request-scoped render failures out of the preview watch set', async () => {
       const filesystem = createMockFileSystem();
       filesystem.mocks.readFiles.mockResolvedValue({
         'main.ts': new Uint8Array([1, 2, 3]),
@@ -1278,7 +1618,7 @@ describe('KernelWorker lifecycle', () => {
         }),
       ).rejects.toThrow();
 
-      expect(worker.getWatchedPaths()).toContain('main.ts');
+      expect(worker.getWatchedPaths()).not.toContain('main.ts');
     });
 
     it('should refresh filesystem watches after request-scoped exportModel()', async () => {
@@ -2574,6 +2914,48 @@ describe('preview admission invariants', () => {
     expect(worker.renderCancellationRecords.size).toBe(0);
   });
 
+  it('cancels only the selected evaluateModel call and leaves the next preview admissible', async () => {
+    const evaluationEntered = Promise.withResolvers<void>();
+    class AbortableEvaluationWorker extends MockKernelWorker {
+      protected override async onCreateGeometry(
+        input: CreateGeometryInput,
+        runtime: KernelRuntime,
+      ): Promise<CreateGeometryResult> {
+        if (input.parameters['request'] === true) {
+          evaluationEntered.resolve();
+          await new Promise<void>((resolve) => {
+            runtime.signal.addEventListener(
+              'abort',
+              () => {
+                resolve();
+              },
+              { once: true },
+            );
+          });
+          runtime.signal.throwIfAborted();
+        }
+        return super.onCreateGeometry(input, runtime);
+      }
+    }
+    const filesystem = createMockFileSystem();
+    filesystem.mocks.readFiles.mockResolvedValue({ 'main.ts': new Uint8Array([1]) });
+    const worker = new AbortableEvaluationWorker({ middleware: [], onLog: noopLog, filesystem });
+    const observed = observePreview(worker);
+    const controller = new AbortController();
+    const evaluation = worker.evaluateModel(
+      { file: createGeometryFile('main.ts'), parameters: { request: true } },
+      controller.signal,
+    );
+    await evaluationEntered.promise;
+    controller.abort(new Error('stop evaluation'));
+    await expect(evaluation).rejects.toThrow('stop evaluation');
+
+    const previewRenderId = previewId(3602);
+    worker.handleOpenFile({ renderId: previewRenderId, file: createGeometryFile('main.ts'), parameters: {} });
+    await observed.waitForState((event) => event.renderId === previewRenderId && event.state === 'idle');
+    expect(observed.geometries.map(({ renderId }) => renderId)).toEqual([previewRenderId]);
+  });
+
   it('does not admit a preview for an unrelated worker-local file change (T17)', async () => {
     const worker = createConfiguredWorker();
     const observed = observePreview(worker);
@@ -3395,6 +3777,59 @@ describe('abort reason propagation', () => {
     expect(states.at(-1)).toBe('error');
   });
 
+  /**
+   * A thrown value's `.issues` array is not a `KernelIssue[]`.
+   *
+   * `WireValidationError` and `ZodError` both carry one, and the worker used to
+   * hand it to `onError` verbatim: the rows reached the wire without
+   * `severity`, the client's own `kernelIssueSchema` rejected the `errorEvent`
+   * notify, and `handleNotifyFrame` dropped it — leaving the terminal `error`
+   * state, which carried no reason either, to settle the render with the
+   * invented `'Runtime render failed'`. Live proof and chain:
+   * `docs/research/agent-host-transports-and-offline.md` § "Addendum:
+   * FIX-DAEMON-RENDER".
+   */
+  it('should report a foreign issues-bearing failure as kernel issues on a self-describing error state', async () => {
+    const reason =
+      "wire validation failed for client-call-result 'call': __bridgeError.metadata: Invalid input: expected record, received null";
+
+    class ForeignIssuesKernelWorker extends MockKernelWorker {
+      protected override async onCreateGeometry(): Promise<CreateGeometryResult> {
+        throw Object.assign(new Error(reason), {
+          issues: [
+            {
+              path: ['__bridgeError', 'metadata'],
+              message: 'Invalid input: expected record, received null',
+              code: 'custom',
+            },
+          ],
+        });
+      }
+    }
+
+    const filesystem = createMockFileSystem();
+    filesystem.mocks.readFiles.mockResolvedValue({ 'main.ts': new Uint8Array([1, 2, 3]) });
+    const worker = new ForeignIssuesKernelWorker({ middleware: [], onLog: noopLog, filesystem });
+    const observed = observePreview(worker);
+    const renderId = previewId(2402);
+
+    worker.handleOpenFile({ renderId, file: createGeometryFile('main.ts'), parameters: {} });
+    const terminal = await observed.waitForState(({ state }) => state === 'error' || state === 'idle');
+
+    /* Every emitted row must satisfy the protocol's own `kernelIssueSchema`,
+     * or the notify carrying it is dropped before any consumer sees it. */
+    expect(observed.errors).toHaveLength(1);
+    for (const issue of observed.errors[0]!.issues) {
+      expect(runtimeProtocolSchemas.notifies.errorEvent.safeParse({ issues: [issue], renderId }).success).toBe(true);
+    }
+    expect(observed.errors[0]!.issues.map((issue) => issue.message)).toContain(reason);
+
+    /* And the state transition explains itself, so a lost error event cannot
+     * force `runtime-client-core` to invent one. */
+    expect(terminal.state).toBe('error');
+    expect(terminal.detail).toContain('__bridgeError.metadata');
+  });
+
   it('should transition to idle when abortReason is superseded', async () => {
     const sab = new SharedArrayBuffer(signalBufferByteLength);
     const view = new Int32Array(sab);
@@ -3807,6 +4242,7 @@ describe('transcoder loading', () => {
     if (!result.success) {
       expect(result.issues[0]!.message).toContain('No export route found');
       expect(result.issues[0]!.message).toContain('Register a transcoder');
+      expect(result.issues[0]!.code).toBe('TRANSCODER_CAPABILITY_MISSING');
     }
   });
 
@@ -4759,5 +5195,288 @@ describe('CapabilitiesManifest target shape', () => {
       }),
     );
     /* oxlint-enable @typescript-eslint/no-unsafe-assignment */
+  });
+});
+
+describe('progressive scene lifecycle', () => {
+  it('does no progressive work when delivery was not requested', async () => {
+    const worker = new ProgressiveSceneKernelWorker({ middleware: [], onLog: noopLog });
+    const sceneUpdate = vi.fn<(update: ProgressiveSceneUpdate) => Promise<void>>(async () => undefined);
+    worker.onSceneUpdate = sceneUpdate;
+    const observed = observePreview(worker);
+
+    worker.handleOpenFile({ renderId: previewId(201), file: createGeometryFile('test.ts'), parameters: {} });
+    await observed.waitForState(({ state }) => state === 'idle');
+
+    expect(worker.publishOutcome).toEqual({ type: 'not-requested' });
+    expect(sceneUpdate).not.toHaveBeenCalled();
+    expect(observed.geometries).toHaveLength(1);
+    await worker.cleanup();
+  });
+
+  it('publishes ordered resets and bookmarks without duplicating the terminal lifecycle', async () => {
+    await seedTestFileSystem({ 'test.ts': new Uint8Array([1, 2, 3]) });
+    const worker = await initializeWorkerForTesting(
+      new ProgressiveSceneKernelWorker({ middleware: [], onLog: noopLog }),
+    );
+    const updates: ProgressiveSceneUpdate[] = [];
+    let persistedAtPublication = false;
+    worker.onSceneUpdate = async (update) => {
+      updates.push(update);
+      if (update.type === 'bookmark') {
+        const persisted = await worker.readSceneSnapshot({ bookmarkId: update.bookmark.id });
+        persistedAtPublication = persisted.type === 'found';
+      }
+    };
+    worker.setProgressiveSceneRequested(true);
+    const observed = observePreview(worker);
+    const renderId = previewId(202);
+
+    worker.handleOpenFile({ renderId, file: createGeometryFile('test.ts'), parameters: {} });
+    await observed.waitForState(({ state }) => state === 'idle');
+
+    expect(updates.map(({ type }) => type)).toEqual(['reset', 'bookmark']);
+    expect(updates.map(({ sequence }) => sequence)).toEqual([1, 2]);
+    expect(observed.states.map(({ state }) => state)).toEqual(['rendering', 'idle']);
+    expect(observed.geometries).toHaveLength(1);
+    expect(worker.publishOutcome).toMatchObject({ type: 'published', sequence: 1, revision: 1 });
+    expect(persistedAtPublication).toBe(true);
+
+    const bookmarkUpdate = updates[1];
+    expect(bookmarkUpdate?.type).toBe('bookmark');
+    if (bookmarkUpdate?.type === 'bookmark') {
+      expect(worker.listSceneBookmarks({ renderId })).toEqual([bookmarkUpdate.bookmark]);
+      const snapshot = await worker.readSceneSnapshot({ bookmarkId: bookmarkUpdate.bookmark.id });
+      expect(snapshot.type).toBe('found');
+    }
+    await worker.cleanup();
+  });
+
+  it('publishes stable component deltas and retains the reconstructed scene', async () => {
+    await seedTestFileSystem({ 'test.ts': new Uint8Array([1, 2, 3]) });
+    const worker = await initializeWorkerForTesting(
+      new ProgressiveSceneDeltaKernelWorker({ middleware: [], onLog: noopLog }),
+    );
+    const updates: ProgressiveSceneUpdate[] = [];
+    worker.onSceneUpdate = async (update) => {
+      updates.push(update);
+    };
+    worker.setProgressiveSceneRequested(true);
+    const observed = observePreview(worker);
+    const renderId = previewId(206);
+
+    worker.handleOpenFile({ renderId, file: createGeometryFile('test.ts'), parameters: {} });
+    await observed.waitForState(({ state }) => state === 'idle');
+
+    expect(updates.map(({ type }) => type)).toEqual(['reset', 'delta', 'bookmark']);
+    const [reset, delta, bookmark] = updates;
+    expect(reset?.type).toBe('reset');
+    expect(delta?.type).toBe('delta');
+    expect(bookmark?.type).toBe('bookmark');
+    if (reset?.type !== 'reset' || delta?.type !== 'delta' || bookmark?.type !== 'bookmark') {
+      throw new Error('Expected one reset, delta, and bookmark.');
+    }
+    expect(reset.snapshot.manifest.rootNodeIds).toEqual(['component:one', 'component:two']);
+    expect(reset.snapshot.assets).toHaveLength(2);
+    expect(delta.baseSceneDigest).toBe(reset.sceneDigest);
+    expect(delta.operations.map(({ type }) => type)).toEqual(['remove-node', 'upsert-node']);
+    expect(delta.assets).toHaveLength(1);
+    const retained = await worker.readSceneSnapshot({ bookmarkId: bookmark.bookmark.id });
+    expect(retained).toMatchObject({
+      type: 'found',
+      snapshot: { manifest: { rootNodeIds: ['component:one'] } },
+    });
+    if (retained.type === 'found') {
+      expect(retained.snapshot.assets).toHaveLength(1);
+      expect(retained.snapshot.assets[0]?.geometry).toMatchObject({
+        format: 'gltf',
+        content: new Uint8Array([3]),
+      });
+    }
+    expect(observed.geometries).toHaveLength(1);
+    await worker.cleanup();
+  });
+
+  it('emits periodic reconstructible keyframes so a stream can recover after a dropped delta', async () => {
+    await seedTestFileSystem({ 'test.ts': new Uint8Array([1, 2, 3]) });
+    const worker = await initializeWorkerForTesting(
+      new ProgressiveSceneKeyframeKernelWorker({ middleware: [], onLog: noopLog }),
+    );
+    const updates: ProgressiveSceneUpdate[] = [];
+    worker.onSceneUpdate = async (update) => {
+      updates.push(update);
+    };
+    worker.setProgressiveSceneRequested(true);
+    const observed = observePreview(worker);
+
+    worker.handleOpenFile({ renderId: previewId(207), file: createGeometryFile('test.ts'), parameters: {} });
+    await observed.waitForState(({ state }) => state === 'idle');
+
+    expect(updates).toHaveLength(24);
+    expect(updates.slice(0, -1).map(({ type }) => type)).toEqual([
+      'reset',
+      ...Array.from({ length: 22 }, () => 'delta'),
+    ]);
+    const keyframe = updates.at(-1);
+    expect(keyframe).toMatchObject({ type: 'reset', sequence: 24, revision: 24, skippedBefore: 23 });
+    if (keyframe?.type !== 'reset') {
+      throw new Error('Expected a periodic progressive-scene keyframe.');
+    }
+    expect(keyframe.snapshot.assets).toHaveLength(1);
+    expect(keyframe.snapshot.assets[0]?.geometry).toMatchObject({
+      format: 'gltf',
+      content: new Uint8Array([23]),
+    });
+    expect(observed.geometries).toHaveLength(1);
+    await worker.cleanup();
+  });
+
+  it('publishes representation refinements without changing semantic scene identity', async () => {
+    await seedTestFileSystem({ 'test.ts': new Uint8Array([1, 2, 3]) });
+    const worker = await initializeWorkerForTesting(
+      new ProgressiveSceneRefinementKernelWorker({ middleware: [], onLog: noopLog }),
+    );
+    const updates: ProgressiveSceneUpdate[] = [];
+    worker.onSceneUpdate = async (update) => {
+      updates.push(update);
+    };
+    worker.setProgressiveSceneRequested(true);
+    const observed = observePreview(worker);
+
+    worker.handleOpenFile({ renderId: previewId(208), file: createGeometryFile('test.ts'), parameters: {} });
+    await observed.waitForState(({ state }) => state === 'idle');
+
+    expect(updates.map(({ type }) => type)).toEqual(['reset', 'refinement', 'bookmark']);
+    const [reset, refinement, bookmark] = updates;
+    if (reset?.type !== 'reset' || refinement?.type !== 'refinement' || bookmark?.type !== 'bookmark') {
+      throw new Error('Expected one reset, refinement, and bookmark.');
+    }
+    const coarseGeometry = reset.snapshot.manifest.nodes['component:one']?.geometry;
+    expect(coarseGeometry).toBeDefined();
+    expect(refinement).toMatchObject({
+      sequence: 2,
+      revision: reset.revision,
+      sceneDigest: reset.sceneDigest,
+      replacements: [
+        {
+          nodeId: 'component:one',
+          previous: coarseGeometry?.contentDigest,
+          replacement: { geometry: { format: 'gltf', content: new Uint8Array([2]) } },
+        },
+      ],
+    });
+    expect(refinement.replacements[0]?.replacement.contentDigest).not.toBe(coarseGeometry?.contentDigest);
+
+    const retained = await worker.readSceneSnapshot({ bookmarkId: bookmark.bookmark.id });
+    expect(retained.type).toBe('found');
+    if (retained.type === 'found') {
+      expect(retained.snapshot.assets).toHaveLength(1);
+      expect(retained.snapshot.assets[0]?.geometry).toMatchObject({
+        format: 'gltf',
+        content: new Uint8Array([2]),
+      });
+      expect(retained.snapshot.manifest.nodes['component:one']?.geometry).toMatchObject({
+        semanticDigest: coarseGeometry?.contentDigest,
+        contentDigest: refinement.replacements[0]?.replacement.contentDigest,
+      });
+    }
+    expect(observed.geometries).toHaveLength(1);
+    await worker.cleanup();
+  });
+
+  it('reads a retained bookmark from project storage after its memory entry is evicted', async () => {
+    await seedTestFileSystem({ 'test.ts': new Uint8Array([1, 2, 3]) });
+    const worker = await initializeWorkerForTesting(
+      new ProgressiveSceneKernelWorker({ middleware: [], onLog: noopLog }),
+    );
+    const updates: ProgressiveSceneUpdate[] = [];
+    worker.onSceneUpdate = async (update) => {
+      updates.push(update);
+    };
+    worker.setProgressiveSceneRequested(true);
+    const observed = observePreview(worker);
+
+    worker.handleOpenFile({ renderId: previewId(203), file: createGeometryFile('test.ts'), parameters: {} });
+    await observed.waitForState(({ state }) => state === 'idle');
+    const bookmark = updates.find((update) => update.type === 'bookmark');
+    expect(bookmark?.type).toBe('bookmark');
+    if (bookmark?.type !== 'bookmark') {
+      throw new Error('Expected a retained progressive-scene bookmark.');
+    }
+
+    // @ts-expect-error -- white-box eviction proves the durable lookup path without rerunning the kernel.
+    worker.retainedSceneSnapshots.clear();
+    const result = await worker.readSceneSnapshot({ bookmarkId: bookmark.bookmark.id });
+
+    expect(result.type).toBe('found');
+    expect(worker.createGeometryCalls).toBe(1);
+    await worker.cleanup();
+  });
+
+  it('reads a retained bookmark after worker recreation without rerunning the kernel', async () => {
+    await seedTestFileSystem({ 'test.ts': new Uint8Array([1, 2, 3]) });
+    const first = await initializeWorkerForTesting(
+      new ProgressiveSceneKernelWorker({ middleware: [], onLog: noopLog }),
+    );
+    const updates: ProgressiveSceneUpdate[] = [];
+    first.onSceneUpdate = async (update) => {
+      updates.push(update);
+    };
+    first.setProgressiveSceneRequested(true);
+    const observed = observePreview(first);
+
+    first.handleOpenFile({ renderId: previewId(204), file: createGeometryFile('test.ts'), parameters: {} });
+    await observed.waitForState(({ state }) => state === 'idle');
+    const bookmark = updates.find((update) => update.type === 'bookmark');
+    expect(bookmark?.type).toBe('bookmark');
+    if (bookmark?.type !== 'bookmark') {
+      throw new Error('Expected a retained progressive-scene bookmark.');
+    }
+    await first.cleanup();
+
+    const second = await initializeWorkerForTesting(
+      new ProgressiveSceneKernelWorker({ middleware: [], onLog: noopLog }),
+    );
+    const result = await second.readSceneSnapshot({ bookmarkId: bookmark.bookmark.id });
+
+    expect(result.type).toBe('found');
+    expect(second.createGeometryCalls).toBe(0);
+    await second.cleanup();
+  });
+
+  it('returns a safe cache miss when a retained scene asset is corrupt', async () => {
+    await seedTestFileSystem({ 'test.ts': new Uint8Array([1, 2, 3]) });
+    const first = await initializeWorkerForTesting(
+      new ProgressiveSceneKernelWorker({ middleware: [], onLog: noopLog }),
+    );
+    const updates: ProgressiveSceneUpdate[] = [];
+    first.onSceneUpdate = async (update) => {
+      updates.push(update);
+    };
+    first.setProgressiveSceneRequested(true);
+    const observed = observePreview(first);
+
+    first.handleOpenFile({ renderId: previewId(205), file: createGeometryFile('test.ts'), parameters: {} });
+    await observed.waitForState(({ state }) => state === 'idle');
+    const bookmark = updates.find((update) => update.type === 'bookmark');
+    expect(bookmark?.type).toBe('bookmark');
+    if (bookmark?.type !== 'bookmark') {
+      throw new Error('Expected a retained progressive-scene bookmark.');
+    }
+    await first.cleanup();
+
+    const assetDigest = await digestContent({ bytes: new Uint8Array([7, 8, 9]) });
+    const hexadecimal = assetDigest.slice('sha256:'.length);
+    await getTestFileSystem().writeFile(
+      `.tau/cache/compute/v1/blobs/sha256/${hexadecimal.slice(0, 2)}/${hexadecimal.slice(2)}`,
+      new Uint8Array([0]),
+    );
+    const second = await initializeWorkerForTesting(
+      new ProgressiveSceneKernelWorker({ middleware: [], onLog: noopLog }),
+    );
+
+    expect(await second.readSceneSnapshot({ bookmarkId: bookmark.bookmark.id })).toEqual({ type: 'missing' });
+    expect(second.createGeometryCalls).toBe(0);
+    await second.cleanup();
   });
 });

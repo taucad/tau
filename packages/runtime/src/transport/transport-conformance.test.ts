@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/naming-convention -- Transport descriptors intentionally use protocol-shaped keys. */
 /**
  * Conformance test C2 — bundled transports satisfy the canonical
  * fat {@link RuntimeTransportClient} / {@link RuntimeTransportHost}
@@ -17,10 +16,13 @@
 import { afterEach, describe, it, expect, vi } from 'vitest';
 
 import { createChannelServer, wrapMessagePort, wrapWebSocket } from '@taucad/rpc';
-import type { Channel, ChannelServerHandle, Port, WebSocketLike } from '@taucad/rpc';
+import type { Channel, ChannelServerHandle, MessagePortMainLike, Port, WebSocketLike } from '@taucad/rpc';
 import { msgpackCodec } from '@taucad/rpc/codec/msgpack';
 import { createFileSystemBridgePort } from '@taucad/fs-bridge';
+import { contentDigest, digestAction } from '@taucad/cache-core';
+import type { ActionDigest, ComputeAction } from '@taucad/cache-core';
 import type { Geometry } from '@taucad/types';
+import { z } from 'zod';
 
 import { fromFileSystemBridge, fromMemoryFs } from '#filesystem/runtime-filesystem.js';
 import { fromNodeFs } from '#filesystem/from-node-fs.js';
@@ -39,7 +41,11 @@ import { extractInlineFileSystem } from '#transport/_internal/runtime-filesystem
 import { createWorkerDispatcher, runtimeChannelSessionKey } from '#transport/_internal/runtime-worker-dispatcher.js';
 import type { RuntimeTransportClient } from '#transport/runtime-transport.types.js';
 import type { RuntimeProtocol } from '#types/runtime-protocol.types.js';
+import { defineKernel } from '#types/runtime-kernel.types.js';
 import { defineRuntime } from '#worker/runtime-definition.js';
+import { createMemoryComputeEngine } from '#cache/memory-compute-engine.js';
+import { _registerComputeStore } from '#cache/kernel-compute-runtime.js';
+import type { ComputeStore, ResidentExportEntry } from '#types/runtime-compute.types.js';
 
 const testGeometry = { format: 'gltf', content: new Uint8Array([1]), hash: 'mock' } satisfies Geometry;
 const unsupportedSameIsolateTimeoutMessage =
@@ -133,10 +139,203 @@ describe('transport conformance — in-process (C2)', () => {
     expect(typeof ready.channel.notify).toBe('function');
     expect(ready.channel.hello.payload).toMatchObject({
       server: 'kernel-runtime-worker',
-      protocolVersion: 1,
+      protocolVersion: 3,
     });
     await client.close();
     await client.closed;
+  });
+
+  it('evaluates and exports request-owned sources without replacing the settled preview', async () => {
+    const encoder = new TextEncoder();
+    const decoder = new TextDecoder();
+    const kernel = defineKernel({
+      id: 'in-process-request-scope',
+      name: 'In-process request-scope fixture',
+      version: '1.0.0',
+      extensions: ['scope'],
+      exportFormats: { glb: { optionsSchema: z.object({}) } },
+      async initialize() {
+        return {};
+      },
+      async getDependencies(input) {
+        return { resolved: [input.entryPath], unresolved: [] };
+      },
+      async getParameters() {
+        return { success: true, data: { defaultParameters: {}, jsonSchema: {} }, issues: [] };
+      },
+      async createGeometry(input, runtime) {
+        const label = await runtime.filesystem.readFile(input.entryPath, 'utf8');
+        return {
+          geometry: { format: 'gltf', content: encoder.encode(`mesh:${label}`) },
+          nativeHandle: { label },
+          issues: [],
+        };
+      },
+      async exportGeometry(input) {
+        return {
+          success: true,
+          data: [
+            {
+              name: 'model.glb',
+              bytes: encoder.encode(`export:${input.nativeHandle.label}`),
+              mimeType: 'model/gltf-binary',
+            },
+          ],
+          issues: [],
+        };
+      },
+    })();
+    const requestRuntime = defineRuntime({ kernels: [kernel] });
+    const client = createRuntimeClient({
+      transport: inProcessTransport({ runtime: requestRuntime, fileSystem: fromMemoryFs() }),
+    });
+
+    try {
+      const preview = await client.render({ source: { files: { 'preview.scope': 'preview-c' } } });
+      expect(preview.superseded).toBe(false);
+
+      const evaluation = await client.evaluate({ source: { files: { 'evaluation.scope': 'source-a' } } });
+      expect(evaluation.success).toBe(true);
+      if (!evaluation.success || evaluation.data.format !== 'gltf') {
+        throw new Error('Expected request-scoped GLTF evaluation.');
+      }
+      expect(decoder.decode(evaluation.data.content)).toBe('mesh:source-a');
+
+      const requestExport = await client.export('glb', { source: { files: { 'export.scope': 'source-b' } } });
+      expect(requestExport.success).toBe(true);
+      if (!requestExport.success) {
+        throw new Error('Expected request-scoped export.');
+      }
+      expect(decoder.decode(requestExport.data[0]?.bytes)).toBe('export:source-b');
+
+      const previewExport = await client.export('glb');
+      expect(previewExport.success).toBe(true);
+      if (!previewExport.success) {
+        throw new Error('Expected settled-preview export.');
+      }
+      expect(decoder.decode(previewExport.data[0]?.bytes)).toBe('export:preview-c');
+    } finally {
+      await client.shutdown();
+    }
+  });
+
+  it('publishes and reuses durable compute through the public in-process factory', async () => {
+    const action: ComputeAction = {
+      schemaVersion: 1,
+      namespace: 'transport.lifecycle',
+      producer: {
+        id: 'in-process-compute',
+        version: '1',
+        implementationAssets: [contentDigest({ value: `sha256:${'1'.repeat(64)}` })],
+      },
+      operation: 'solve',
+      inputs: [],
+      arguments: {},
+      environment: {},
+      codec: { id: 'test.bytes', version: '1' },
+    };
+    const digest = await digestAction({ action });
+    let solves = 0;
+    let createCalls = 0;
+    let imports = 0;
+    let settlement: Promise<unknown> | undefined;
+    const kernel = defineKernel({
+      id: 'in-process-compute',
+      name: 'In-process compute fixture',
+      version: '1.0.0',
+      extensions: ['compute'],
+      exportFormats: {},
+      async initialize() {
+        return {};
+      },
+      async getDependencies(input) {
+        return { resolved: [input.entryPath], unresolved: [] };
+      },
+      async getParameters() {
+        return { success: true, data: { defaultParameters: {}, jsonSchema: {} }, issues: [] };
+      },
+      async exportGeometry() {
+        return { success: false, issues: [] };
+      },
+      async createGeometry(_input, runtime) {
+        createCalls += 1;
+        if (runtime.compute.status !== 'on') {
+          throw new Error('compute capability was off');
+        }
+        const native = new Map<ActionDigest, Uint8Array<ArrayBuffer>>();
+        const scope = runtime.compute.openScope({
+          namespace: action.namespace,
+          producer: action.producer,
+          environment: action.environment,
+          resident: {
+            contains: ({ digest: candidate }) => native.has(candidate),
+            importEntries: async ({ entries }) => {
+              for (const entry of entries) {
+                native.set(entry.actionDigest, new Uint8Array(entry.bytes));
+              }
+              imports += entries.length;
+              return { imported: entries.map((entry) => entry.actionDigest), omitted: [] };
+            },
+            exportEntries: async ({ digests }) => ({
+              entries: digests.flatMap((candidate): ResidentExportEntry[] => {
+                const bytes = native.get(candidate);
+                return bytes
+                  ? [{ action, bytes, mediaType: 'application/octet-stream', determinism: 'byte-exact' }]
+                  : [];
+              }),
+              omitted: digests.filter((candidate) => !native.has(candidate)),
+            }),
+            stats: () => ({
+              entries: native.size,
+              logicalBytes: 0,
+              encodedBytes: { status: 'unsupported' },
+              evictions: 0,
+              omissions: 0,
+            }),
+            clear: () => {
+              native.clear();
+            },
+          },
+        });
+        const warm = await scope.warm({ digests: [digest] });
+        if (warm.status !== 'imported' || !warm.imported.includes(digest)) {
+          solves += 1;
+          native.set(digest, new TextEncoder().encode('shape'));
+          scope.announce({ entries: [{ kind: 'action', action, digest, computeDuration: 2, estimatedBytes: 5 }] });
+        }
+        settlement = scope.close({ outcome: 'delivered' }).settled;
+        return { geometry: testGeometry, nativeHandle: {}, issues: [] };
+      },
+    })();
+    const authority = createMemoryComputeEngine();
+    const store = _registerComputeStore({
+      spec: Object.freeze({}) as ComputeStore,
+      engine: authority.engine,
+      workspace: 'trusted',
+      control: authority.control({ workspace: 'trusted' }),
+    });
+    const createClient = () =>
+      createRuntimeClient({
+        transport: inProcessTransport({
+          runtime: defineRuntime({ kernels: [kernel] }),
+          fileSystem: fromMemoryFs(),
+          compute: { mode: 'durable', store },
+        }),
+      });
+    const producer = createClient();
+    await producer.render({ source: { files: { 'main.compute': 'producer' } } });
+    await expect(settlement).resolves.toMatchObject({ status: 'published' });
+    await producer.shutdown();
+
+    const consumer = createClient();
+    try {
+      await consumer.render({ source: { files: { 'main.compute': 'consumer' } } });
+      expect(createCalls).toBe(2);
+      expect(imports).toBe(1);
+      expect(solves).toBe(1);
+    } finally {
+      await consumer.shutdown();
+    }
   });
 
   it('client.open() is idempotent (second call resolves the same channel)', async () => {
@@ -359,18 +558,18 @@ describe('transport conformance — web-worker (C2)', () => {
     }
   });
 
-  it('throws on a forged RuntimeFileSystem (must come from a fromX factory)', async () => {
+  it('rejects a forged RuntimeFileSystem at transport factory invocation', async () => {
     const { webWorkerTransport } = await import('#transport/web-worker-transport.js');
     const { workerCtor, dispose } = makeFakeWorkerCtor();
     try {
-      expect(() =>
+      expect(() => {
         webWorkerTransport({
           url: 'about:blank',
           workerCtor,
           // @ts-expect-error Intentionally malformed `fileSystem` (must come from a `fromX` factory).
           fileSystem: { kind: 'inline' },
-        }).materialize(),
-      ).toThrow(/fromX. factory/);
+        });
+      }).toThrow(/Invalid input/);
     } finally {
       dispose();
     }
@@ -386,10 +585,8 @@ describe('transport conformance — web-worker (C2)', () => {
     const fake = makeFakeWorkerCtor();
     try {
       const options = { workerCtor: fake.workerCtor } as unknown as WebWorkerTransportOptions;
-      const client = webWorkerTransport(options).materialize();
-      await expect(client.open()).rejects.toThrow(/createWorker.*worker `url`/);
+      expect(() => webWorkerTransport(options)).toThrow(/createWorker.*worker `url`/);
       expect(fake.urls).toEqual([]);
-      await client.close();
     } finally {
       fake.dispose();
     }
@@ -569,18 +766,18 @@ describe('transport conformance — node-worker (C2)', () => {
     }
   });
 
-  it('throws on a forged RuntimeFileSystem (must come from a fromX factory)', async () => {
+  it('rejects a forged RuntimeFileSystem at transport factory invocation', async () => {
     const { nodeWorkerTransport } = await import('#transport/node-worker-transport.js');
     const fake = makeFakeNodeWorkerCtor();
     try {
-      expect(() =>
+      expect(() => {
         nodeWorkerTransport({
           url: new URL('about:blank'),
           workerCtor: fake.workerCtor,
           // @ts-expect-error Intentionally malformed `fileSystem` (must come from a `fromX` factory).
           fileSystem: { kind: 'inline' },
-        }).materialize(),
-      ).toThrow(/fromX. factory/);
+        });
+      }).toThrow(/Invalid input/);
     } finally {
       fake.dispose();
     }
@@ -646,7 +843,7 @@ describe('transport conformance — node-worker (C2)', () => {
 
       fake.emit('exit', 17);
 
-      await expect(client.closed).resolves.toEqual({ cause: 'host-exit', exitCode: 17 });
+      await expect(client.closed).resolves.toEqual({ cause: 'host-exit', exitCode: 17, phase: 'boot' });
       expect(fake.terminateCalls()).toBe(1);
     } finally {
       fake.dispose();
@@ -720,7 +917,7 @@ describe('transport conformance — web-socket (C2)', () => {
       await ready.channel.ready;
       expect(ready.channel.hello.payload).toMatchObject({
         server: 'kernel-runtime-worker',
-        protocolVersion: 1,
+        protocolVersion: 3,
       });
       expect(bed.dialled.map((entry) => new URL(entry.url).pathname)).toEqual(['/runtime']);
       expect(new URL(bed.dialled[0]!.url).searchParams.get('session')).toEqual(expect.any(String));
@@ -756,9 +953,9 @@ describe('transport conformance — web-socket (C2)', () => {
         await client.open();
         bed.dialled[0]!.host.close(code, 'host stopping');
 
-        await expect(client.closed).resolves.toEqual({ cause: 'host-exit' });
+        await expect(client.closed).resolves.toEqual({ cause: 'host-exit', phase: 'session' });
         await client.close();
-        await expect(client.closed).resolves.toEqual({ cause: 'host-exit' });
+        await expect(client.closed).resolves.toEqual({ cause: 'host-exit', phase: 'session' });
       } finally {
         bed.dispose();
       }
@@ -940,7 +1137,7 @@ describe('transport conformance — shared transport internals (T37)', () => {
     const server = createChannelServer<RuntimeProtocol>({
       port: wrapMessagePort<unknown>(pair.port2, { label: 't37:peer' }),
       sessionKey: runtimeChannelSessionKey,
-      hello: { server: 'kernel-runtime-worker', runtimeVersion: 'test', protocolVersion: 1 },
+      hello: { server: 'kernel-runtime-worker', runtimeVersion: 'test', protocolVersion: 3 },
       impl: {
         async call() {
           throw new Error('T37 conformance issues no calls');
@@ -1036,6 +1233,13 @@ describe('transport conformance — shared transport internals (T37)', () => {
       },
     ],
     [
+      'electron-utility-main',
+      async (port: MessagePort): Promise<RuntimeTransportClient> => {
+        const { electronUtilityMainClient } = await import('#electron/electron-utility-client.js');
+        return electronUtilityMainClient({ port: port as unknown as MessagePortMainLike });
+      },
+    ],
+    [
       'web-socket',
       async (port: MessagePort): Promise<RuntimeTransportClient> => {
         /* The row's peer is a `MessagePort`-backed channel server, so the
@@ -1082,19 +1286,36 @@ describe('transport conformance — shared transport internals (T37)', () => {
 
       peer.peerPort.close();
 
-      await expect(client.closed).resolves.toEqual({ cause: 'host-exit' });
+      /* No exit relay is registered for this port, so the close settles only
+       * after the relay window elapses — with `exitCode` absent as a fact. */
+      await expect(client.closed).resolves.toEqual({ cause: 'host-exit', phase: 'session' });
       await client.close();
-      await expect(client.closed).resolves.toEqual({ cause: 'host-exit' });
+      await expect(client.closed).resolves.toEqual({ cause: 'host-exit', phase: 'session' });
     } finally {
       peer.dispose();
     }
+  });
+
+  it('electron-utility-main releases its exact main-owned lease on close', async () => {
+    const { port1, port2 } = new MessageChannel();
+    const release = vi.fn();
+    const { electronUtilityMainClient } = await import('#electron/electron-utility-client.js');
+    const client = electronUtilityMainClient({
+      port: port1 as unknown as MessagePortMainLike,
+      release,
+    });
+
+    await client.close();
+
+    expect(release).toHaveBeenCalledExactlyOnceWith('requested');
+    port2.close();
   });
 
   it('electron-utility settles closed with the exit code main relayed for the dead utility', async () => {
     const { registerElectronRuntimeHostExit } = await import('#electron/_internal/runtime-host-lease.js');
     const materializeElectronUtility = terminableTransports.find(([id]) => id === 'electron-utility')![1];
     const peer = wireBackedPeer();
-    let notifyHostExit: ((exitCode?: number) => void) | undefined;
+    let notifyHostExit: ((detail: { exitCode: number; released: boolean }) => void) | undefined;
     registerElectronRuntimeHostExit(peer.port, (notify) => {
       notifyHostExit = notify;
     });
@@ -1103,12 +1324,13 @@ describe('transport conformance — shared transport internals (T37)', () => {
       const ready = await client.open();
       await ready.channel.ready;
 
-      notifyHostExit?.(7);
+      notifyHostExit?.({ exitCode: 7, released: false });
 
-      await expect(client.closed).resolves.toEqual({ cause: 'host-exit', exitCode: 7 });
+      const relayed = { cause: 'host-exit', exitCode: 7, phase: 'session', released: false };
+      await expect(client.closed).resolves.toEqual(relayed);
       /* Both liveness signals exist; `finish` is idempotent and the first cause wins. */
       peer.peerPort.close();
-      await expect(client.closed).resolves.toEqual({ cause: 'host-exit', exitCode: 7 });
+      await expect(client.closed).resolves.toEqual(relayed);
     } finally {
       peer.dispose();
     }

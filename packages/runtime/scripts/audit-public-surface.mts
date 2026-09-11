@@ -45,10 +45,16 @@ const allowedMembers: ReadonlySet<string> = new Set([
   'capabilities',
   'connect',
   'render',
+  'evaluate',
   'updateParameters',
   'setOptions',
   'setRenderTimeout',
+  'setTranscodeTimeout',
   'export',
+  'transcode',
+  'snapshotSource',
+  'readSceneSnapshot',
+  'listSceneBookmarks',
   'on',
   'terminate',
   'shutdown',
@@ -74,63 +80,109 @@ const forbiddenMembers: ReadonlySet<string> = new Set([
   'incrementAbortGeneration',
 ]);
 
-const source = readFileSync(runtimeClientPath, 'utf8');
-const sourceFile = ts.createSourceFile(runtimeClientPath, source, ts.ScriptTarget.Latest, true);
-
-let runtimeClientType: ts.TypeAliasDeclaration | undefined;
-sourceFile.forEachChild((node) => {
-  if (
-    ts.isTypeAliasDeclaration(node) &&
-    node.name.text === 'RuntimeClient' &&
-    node.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword)
-  ) {
-    runtimeClientType = node;
-  }
-});
-
-if (!runtimeClientType) {
-  console.error('FAIL: could not locate exported `RuntimeClient` type alias in runtime-client-core.ts');
-  process.exit(1);
-}
-
-const literal = runtimeClientType.type;
-if (!ts.isTypeLiteralNode(literal)) {
-  console.error('FAIL: `RuntimeClient` is not declared as a type literal — audit cannot inspect members.');
-  process.exit(1);
-}
-
-const observedMembers = new Set<string>();
-for (const member of literal.members) {
-  let name: string | undefined;
-  if (ts.isPropertySignature(member) && ts.isIdentifier(member.name)) {
-    name = member.name.text;
-  } else if (ts.isMethodSignature(member) && ts.isIdentifier(member.name)) {
-    name = member.name.text;
-  } else if (ts.isGetAccessorDeclaration(member) && ts.isIdentifier(member.name)) {
-    name = member.name.text;
-  }
-  if (name) {
-    observedMembers.add(name);
-  }
-}
-
 const failures: string[] = [];
 
-for (const observed of observedMembers) {
-  if (forbiddenMembers.has(observed)) {
-    failures.push(`forbidden member \`${observed}\` reappeared on RuntimeClient — the v5 surface requires it deleted.`);
+const loadRuntimeClientBranches = (sourceOverride?: string): ReadonlyArray<ReadonlySet<string>> => {
+  const configPath = ts.findConfigFile(resolve(here, '..'), ts.sys.fileExists, 'tsconfig.lib.json');
+  if (!configPath) {
+    throw new Error('could not locate packages/runtime/tsconfig.lib.json');
   }
-  if (!allowedMembers.has(observed) && !forbiddenMembers.has(observed)) {
-    failures.push(
-      `unexpected member \`${observed}\` on RuntimeClient — add it to the allowlist if it is part of the public surface, or remove it from the type.`,
-    );
+  const config = ts.readConfigFile(configPath, ts.sys.readFile);
+  if (config.error) {
+    throw new Error(ts.flattenDiagnosticMessageText(config.error.messageText, '\n'));
   }
-}
+  const parsed = ts.parseJsonConfigFileContent(config.config, ts.sys, dirname(configPath));
+  const host = ts.createCompilerHost(parsed.options);
+  if (sourceOverride !== undefined) {
+    const originalGetSourceFile = host.getSourceFile.bind(host);
+    host.getSourceFile = (fileName, languageVersion, ...rest) =>
+      resolve(fileName) === runtimeClientPath
+        ? ts.createSourceFile(fileName, sourceOverride, languageVersion, true)
+        : originalGetSourceFile(fileName, languageVersion, ...rest);
+  }
+  const program = ts.createProgram(parsed.fileNames, parsed.options, host);
+  const sourceFile = program.getSourceFile(runtimeClientPath);
+  if (!sourceFile) {
+    throw new Error('could not load runtime-client-core.ts in the runtime TypeScript program');
+  }
+  const runtimeClientType = sourceFile.statements.find(
+    (node): node is ts.TypeAliasDeclaration =>
+      ts.isTypeAliasDeclaration(node) &&
+      node.name.text === 'RuntimeClient' &&
+      node.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword) === true,
+  );
+  if (!runtimeClientType) {
+    throw new Error('could not locate exported `RuntimeClient` type alias in runtime-client-core.ts');
+  }
 
-for (const required of allowedMembers) {
-  if (!observedMembers.has(required)) {
-    failures.push(`missing member \`${required}\` on RuntimeClient — every public surface member must be present.`);
+  const checker = program.getTypeChecker();
+  const branchNodes: ts.TypeNode[] = [];
+  const visitBranch = (node: ts.TypeNode, depth: number): void => {
+    if (depth > 8) {
+      throw new Error('RuntimeClient alias resolution exceeded eight conditional branches');
+    }
+    if (ts.isConditionalTypeNode(node)) {
+      visitBranch(node.trueType, depth + 1);
+      visitBranch(node.falseType, depth + 1);
+      return;
+    }
+    branchNodes.push(node);
+  };
+  visitBranch(runtimeClientType.type, 0);
+  if (branchNodes.length === 0 || branchNodes.length > 16) {
+    throw new Error(`RuntimeClient resolved to an unsupported branch count (${branchNodes.length})`);
   }
+  return branchNodes.map(
+    (node) => new Set(checker.getPropertiesOfType(checker.getTypeFromTypeNode(node)).map(({ name }) => name)),
+  );
+};
+
+const auditRuntimeClient = (sourceOverride?: string): readonly string[] => {
+  const branchFailures: string[] = [];
+  for (const [branchIndex, observedMembers] of loadRuntimeClientBranches(sourceOverride).entries()) {
+    const branch = `RuntimeClient branch ${branchIndex + 1}`;
+    for (const observed of observedMembers) {
+      if (forbiddenMembers.has(observed)) {
+        branchFailures.push(
+          `forbidden member \`${observed}\` reappeared on ${branch} — the v5 surface requires it deleted.`,
+        );
+      } else if (!allowedMembers.has(observed)) {
+        branchFailures.push(
+          `unexpected member \`${observed}\` on ${branch} — add it to the allowlist if it is part of the public surface, or remove it from the type.`,
+        );
+      }
+    }
+    for (const required of allowedMembers) {
+      if (!observedMembers.has(required)) {
+        branchFailures.push(
+          `missing member \`${required}\` on ${branch} — every public surface member must be present.`,
+        );
+      }
+    }
+  }
+  return branchFailures;
+};
+
+failures.push(...auditRuntimeClient());
+
+if (process.argv.includes('--self-test')) {
+  const source = readFileSync(runtimeClientPath, 'utf8');
+  const memberMarker = '  readonly lifecycleState: RuntimeLifecycleState;\n';
+  const forbidden = source.replace(memberMarker, `  readonly openFile: string;\n${memberMarker}`);
+  const unexpected = source.replace(memberMarker, `  readonly surpriseMember: string;\n${memberMarker}`);
+  const missing = source.replace(memberMarker, '');
+  const cases = [
+    ['forbidden member', forbidden, 'forbidden member `openFile`'],
+    ['unexpected member', unexpected, 'unexpected member `surpriseMember`'],
+    ['missing member', missing, 'missing member `lifecycleState`'],
+  ] as const;
+  for (const [label, mutatedSource, expected] of cases) {
+    if (mutatedSource === source || !auditRuntimeClient(mutatedSource).some((failure) => failure.includes(expected))) {
+      console.error(`FAIL: RuntimeClient ${label} mutation was not detected through the exported alias branches.`);
+      process.exit(1);
+    }
+  }
+  console.log('audit-public-surface.mts self-test OK — alias-branch member mutations are rejected.');
 }
 
 /**
@@ -153,15 +205,20 @@ const allowedBarrelExports: ReadonlySet<string> = new Set([
   'InlineRuntimeSource',
   'RuntimeExportOptions',
   'RuntimeRenderInput',
+  'RuntimeEvaluateInput',
   'RuntimeSource',
   'RuntimeSourceContent',
   'RuntimeSourceFiles',
+  'RuntimeSourceSnapshotAdditionalPath',
+  'RuntimeSourceSnapshotInput',
+  'sourcePathMatchesExtensions',
   'ExportResult',
   'RenderOutcome',
   'RenderStatus',
   'RuntimeLifecycleState',
   'RuntimeConnectionCause',
   'RuntimeTerminatedCause',
+  'RuntimeTerminatedDetail',
   'RuntimeFromTransport',
 
   // Lifecycle errors + guards

@@ -43,13 +43,15 @@ export class RuntimeTracer implements RuntimeSpanTracer {
     const parentId = this.activeSpanId;
     const spanEpoch = this.epoch;
     const startTime = performance.now();
+    let ended = false;
     this.activeSpanId = id;
 
     return {
       end: (endAttributes?: SpanAttributes) => {
-        if (spanEpoch !== this.epoch) {
+        if (ended || spanEpoch !== this.epoch) {
           return;
         }
+        ended = true;
 
         const mergedAttributes = {
           ...attributes,
@@ -68,20 +70,28 @@ export class RuntimeTracer implements RuntimeSpanTracer {
         };
 
         const duration = performance.now() - startTime;
-        this.entrySink?.({
-          name,
-          startTime,
-          duration,
-          detail,
-          workerTimeOrigin: performance.timeOrigin,
-        });
-
-        if (this.devtoolsTimelineEnabled) {
-          performance.measure(`tau:${name}:${spanEpoch}:${id}`, {
-            start: startTime,
+        try {
+          this.entrySink?.({
+            name,
+            startTime,
             duration,
             detail,
+            workerTimeOrigin: performance.timeOrigin,
           });
+        } catch {
+          // Telemetry is observational and must not change runtime outcomes.
+        }
+
+        if (this.devtoolsTimelineEnabled) {
+          try {
+            performance.measure(`tau:${name}:${spanEpoch}:${id}`, {
+              start: startTime,
+              duration,
+              detail,
+            });
+          } catch {
+            // DevTools mirroring is optional and must not change runtime outcomes.
+          }
         }
 
         this.activeSpanId = parentId;

@@ -73,7 +73,13 @@ describe('runtime initialize memory handle port validation (X7)', () => {
     const channel = new MessageChannel();
 
     try {
-      expect(runtimeInitializeMemoryHandleSchema.safeParse({ fileSystemPort: channel.port1 }).success).toBe(true);
+      expect(
+        runtimeInitializeMemoryHandleSchema.safeParse({
+          fileSystemPort: channel.port1,
+          computeStorePort: channel.port2,
+          computeBindingMode: 'durable',
+        }).success,
+      ).toBe(true);
     } finally {
       channel.port1.close();
       channel.port2.close();

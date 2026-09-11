@@ -8,6 +8,7 @@ import { z } from 'zod';
 import { isRuntimeFileSystem } from '#filesystem/runtime-filesystem.js';
 import type { RuntimeFileSystem } from '#filesystem/runtime-filesystem.js';
 import { compiledWasmModuleSchema } from '#transport/_internal/compiled-wasm-module.schema.js';
+import type { ComputeBinding } from '#types/runtime-compute.types.js';
 
 const workerCtorSchema = z.custom<unknown>((value) => typeof value === 'function');
 
@@ -41,6 +42,7 @@ export const nodeWorkerClientOptionsSchema = z
      * Optional filesystem handle produced by a `fromX` factory.
      */
     fileSystem: runtimeFileSystemSchema.optional(),
+    compute: z.custom<ComputeBinding>().optional(),
     /** Explicit Chrome DevTools Performance Timeline mirroring. */
     devtoolsTelemetry: z.boolean().optional(),
     compiledWasmModules: z

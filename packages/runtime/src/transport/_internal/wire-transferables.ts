@@ -40,8 +40,8 @@ import type { MessagePortLike } from '@taucad/rpc';
  * of the value drives it through `wrapMessagePort`, which calls those four.
  * EventEmitter-shaped ports (`on`/`off`) are deliberately **not** admitted:
  * the validator must not accept a shape its consumer cannot drive
- * (`wrapMessagePortMain` in `electron/electron-utility-host.ts` is the
- * adapter for that family, and it never crosses the initialize path).
+ * (`@taucad/rpc`'s `wrapMessagePortMain` is the adapter for that family, and
+ * it never crosses the initialize path).
  *
  * Shared with `runtime-protocol.schemas.ts`, which validates
  * `InitializeMemoryHandle.fileSystemPort` with it.

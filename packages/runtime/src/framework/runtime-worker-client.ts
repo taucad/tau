@@ -37,6 +37,7 @@ import type {
 import type { RuntimeFileLocator } from '#types/runtime-file.types.js';
 import type {
   HashedGeometryResultTransport,
+  RuntimeEvaluateModelArgs,
   RuntimeExportModelArgs,
   RuntimeSourceSnapshotArgs,
   RuntimeTranscodeArgs,
@@ -46,12 +47,29 @@ import type {
   RuntimeProtocol,
   RuntimeStateChangedArgs,
   TelemetryEntry,
+  ProgressiveSceneUpdateTransport,
+  ResolvedSceneAssetTransport,
+  ResolvedSceneSnapshotTransport,
 } from '#types/runtime-protocol.types.js';
 import type { RuntimeSourceSnapshotResult } from '#types/runtime-source-snapshot.types.js';
 import type { RuntimeContentInput } from '#types/runtime-content.types.js';
 import type { RuntimeTransportClient, RuntimeTransportTimeoutRecovery } from '#transport/runtime-transport.types.js';
-import { renderTimeoutRecoveryGrace } from '#framework/runtime-framework.constants.js';
+import {
+  defaultTranscodeTimeout,
+  renderTimeoutRecoveryGrace,
+  transcodeTimeoutRecoveryGrace,
+} from '#framework/runtime-framework.constants.js';
 import { validateProtocolHeader } from '#types/protocol-header.types.js';
+import { digestContent } from '@taucad/cache-core';
+import type {
+  ListSceneBookmarksInput,
+  ProgressiveSceneUpdate,
+  ReadSceneSnapshotInput,
+  ReadSceneSnapshotResult,
+  ResolvedSceneAsset,
+  ResolvedSceneSnapshot,
+  SceneBookmark,
+} from '#types/runtime-scene.types.js';
 
 /** Unsubscribe handle for {@link RuntimeWorkerClient} subscription helpers. */
 export type Unsubscribe = () => void;
@@ -133,6 +151,23 @@ export function isRenderTimeoutError(error: unknown): error is RenderTimeoutErro
   return error instanceof Error && error.name === 'RenderTimeoutError';
 }
 
+/** Error thrown when a direct transcode exceeds its wall-clock deadline. @public */
+export class TranscodeTimeoutError extends Error {
+  public constructor(transcodeTimeout: number) {
+    super(`Transcode timed out after ${transcodeTimeout / 1000} seconds.`);
+    this.name = 'TranscodeTimeoutError';
+  }
+
+  /** Stable public error discriminator. */
+  public get code(): 'RUNTIME_TRANSCODE_TIMEOUT' {
+    return 'RUNTIME_TRANSCODE_TIMEOUT';
+  }
+}
+
+/** Realm-safe guard for {@link TranscodeTimeoutError}. @public */
+export const isTranscodeTimeoutError = (error: unknown): error is TranscodeTimeoutError =>
+  error instanceof Error && error.name === 'TranscodeTimeoutError';
+
 /**
  * Construction options for {@link RuntimeWorkerClient}.
  *
@@ -197,6 +232,12 @@ export const assertValidRenderTimeout = (renderTimeout: number): void => {
   }
 };
 
+export const assertValidTranscodeTimeout = (transcodeTimeout: number): void => {
+  if (!Number.isFinite(transcodeTimeout) || transcodeTimeout < 0) {
+    throw new TypeError('transcodeTimeout must be a finite, non-negative number of milliseconds.');
+  }
+};
+
 /**
  * Main-thread orchestrator over a {@link RuntimeTransportClient}.
  *
@@ -229,9 +270,11 @@ export class RuntimeWorkerClient {
 
   /** Wall-clock render timeout enforced via `setTimeout`. Milliseconds. */
   private renderTimeout = 0;
+  private transcodeTimeout = defaultTranscodeTimeout;
   private selectedPreview: ActivePreviewAdmission | undefined;
   private recoveringRenderId: string | undefined;
   private recoveryTimer: ReturnType<typeof setTimeout> | undefined;
+  private transcodeRecoveryTimer: ReturnType<typeof setTimeout> | undefined;
   private queuedPreview: QueuedPreview | undefined;
   private readonly localTimeouts = new Topic<{
     readonly renderId: string;
@@ -239,6 +282,7 @@ export class RuntimeWorkerClient {
     readonly issues: readonly KernelIssue[];
   }>({ name: 'runtime-worker-client.local-timeouts' });
   private readonly disposers: Unsubscribe[] = [];
+  private readonly sceneConsumers = new Set<Promise<void>>();
   private _capabilities: CapabilitiesManifest | undefined;
   private terminated = false;
 
@@ -387,6 +431,13 @@ export class RuntimeWorkerClient {
     this.renderTimeout = renderTimeout;
   }
 
+  /** Set the wall-clock deadline captured by subsequent direct transcodes. */
+  public setTranscodeTimeout(transcodeTimeout: number): void {
+    this.ensureNotTerminated();
+    assertValidTranscodeTimeout(transcodeTimeout);
+    this.transcodeTimeout = transcodeTimeout;
+  }
+
   /**
    * Send the `export` RPC and return the result.
    *
@@ -433,6 +484,20 @@ export class RuntimeWorkerClient {
       : result;
   }
 
+  /**
+   * Evaluate an exact model request without publishing autonomous preview state.
+   *
+   * @param request - source file, parameters, render options, and optional caller-owned staged source bytes
+   * @param signal - per-call cancellation; the channel carries it as an `rc` frame
+   * @returns The evaluated geometry after transport-owned pooled delivery has been resolved
+   */
+  public async evaluateModel(request: RuntimeEvaluateModelArgs, signal?: AbortSignal): Promise<HashedGeometryResult> {
+    this.ensureNotTerminated();
+    this.ensureChannel();
+    const result = await this.channel!.call('evaluateModel', request, signal);
+    return result.success ? { ...result, data: await this.transport.resolveGeometry(result.data) } : result;
+  }
+
   /** Collect a request-scoped source closure without rendering geometry. */
   public async snapshotSource(
     request: RuntimeSourceSnapshotArgs,
@@ -443,14 +508,64 @@ export class RuntimeWorkerClient {
     return this.channel!.call('snapshotSource', request, signal);
   }
 
+  /** Resolve a retained progressive-scene snapshot by opaque bookmark identity. */
+  public async readSceneSnapshot(
+    request: ReadSceneSnapshotInput,
+    signal?: AbortSignal,
+  ): Promise<ReadSceneSnapshotResult> {
+    this.ensureNotTerminated();
+    this.ensureChannel();
+    const result = await this.channel!.call('readSceneSnapshot', request, signal);
+    return result.type === 'found'
+      ? {
+          type: 'found',
+          snapshot: await this.resolveSceneSnapshot(result.snapshot as unknown as ResolvedSceneSnapshotTransport),
+        }
+      : result;
+  }
+
+  /** List retained progressive-scene bookmarks for one render. */
+  public async listSceneBookmarks(
+    request: ListSceneBookmarksInput,
+    signal?: AbortSignal,
+  ): Promise<readonly SceneBookmark[]> {
+    this.ensureNotTerminated();
+    this.ensureChannel();
+    return this.channel!.call('listSceneBookmarks', request, signal);
+  }
+
   /** Send a direct transcoder RPC over caller-owned artifacts. */
   public async transcode(request: RuntimeTranscodeArgs, signal?: AbortSignal): Promise<ExportGeometryResult> {
     this.ensureNotTerminated();
     this.ensureChannel();
-    const result = await this.channel!.call('transcode', request, signal);
-    return this.transport.resolveExport
-      ? this.transport.resolveExport(result as unknown as RuntimeExportResultTransport)
-      : result;
+    const { transcodeTimeout } = this;
+    const timeoutController = new AbortController();
+    const callSignal = signal ? AbortSignal.any([signal, timeoutController.signal]) : timeoutController.signal;
+    let timeoutError: TranscodeTimeoutError | undefined;
+    const timer =
+      transcodeTimeout > 0
+        ? setTimeout(() => {
+            timeoutError = new TranscodeTimeoutError(transcodeTimeout);
+            timeoutController.abort(timeoutError);
+            this.armTranscodeTimeoutRecovery();
+          }, transcodeTimeout)
+        : undefined;
+    try {
+      const result = await this.channel!.call('transcode', request, callSignal);
+      if (this.transport.resolveExport) {
+        return await this.transport.resolveExport(result as unknown as RuntimeExportResultTransport);
+      }
+      return result;
+    } catch (error) {
+      if (timeoutError) {
+        throw timeoutError;
+      }
+      throw error;
+    } finally {
+      if (timer !== undefined) {
+        clearTimeout(timer);
+      }
+    }
   }
 
   /** Cleanup any worker-side state without tearing down the channel. */
@@ -521,6 +636,46 @@ export class RuntimeWorkerClient {
       this.selectedPreview!.geometryObserved = true;
       void this.resolveGeometryNotification(result, renderId, handler);
     });
+  }
+
+  /** Subscribe to ordered, already-materialised progressive scene updates. */
+  public onSceneUpdate(
+    handler: (update: ProgressiveSceneUpdate) => void,
+    onFailure?: (error: unknown) => void,
+  ): Unsubscribe {
+    let controller: AbortController | undefined;
+    let active = true;
+    const start = (channel: Channel<RuntimeProtocol>): void => {
+      if (!active || controller) {
+        return;
+      }
+      controller = new AbortController();
+      const settled = (): void => {
+        this.sceneConsumers.delete(consumption);
+      };
+      const consumption = this.monitorSceneUpdates(channel, handler, {
+        signal: controller.signal,
+        onFailure,
+        settled,
+      });
+      this.sceneConsumers.add(consumption);
+    };
+    let unsubscribePending: Unsubscribe | undefined;
+    if (this.channel) {
+      start(this.channel);
+    } else {
+      unsubscribePending = this.pendingSubscriptions.subscribe(start);
+    }
+    const unsubscribe = (): void => {
+      if (!active) {
+        return;
+      }
+      active = false;
+      unsubscribePending?.();
+      controller?.abort();
+    };
+    this.disposers.push(unsubscribe);
+    return unsubscribe;
   }
 
   /** Subscribe to autonomous error events. `renderId` is absent only for connection-scoped failures. */
@@ -608,6 +763,10 @@ export class RuntimeWorkerClient {
     if (this.recoveryTimer !== undefined) {
       clearTimeout(this.recoveryTimer);
       this.recoveryTimer = undefined;
+    }
+    if (this.transcodeRecoveryTimer !== undefined) {
+      clearTimeout(this.transcodeRecoveryTimer);
+      this.transcodeRecoveryTimer = undefined;
     }
     this.localTimeouts.dispose();
     for (const off of this.disposers) {
@@ -768,6 +927,17 @@ export class RuntimeWorkerClient {
     }
   }
 
+  private armTranscodeTimeoutRecovery(): void {
+    const recovery = this.transport.renderTimeoutRecovery;
+    if (recovery.kind !== 'terminable' || this.transcodeRecoveryTimer !== undefined) {
+      return;
+    }
+    this.transcodeRecoveryTimer = setTimeout(() => {
+      this.transcodeRecoveryTimer = undefined;
+      void this.terminateTimedOutHost(recovery);
+    }, transcodeTimeoutRecoveryGrace);
+  }
+
   private async resolveGeometryNotification(
     result: HashedGeometryResultTransport,
     renderId: string,
@@ -791,6 +961,169 @@ export class RuntimeWorkerClient {
     }
     if (this.isSelectedPreviewPublishable(renderId)) {
       handler(resolved, renderId);
+    }
+  }
+
+  private cloneSceneAsset(asset: ResolvedSceneAsset): ResolvedSceneAsset {
+    return {
+      contentDigest: asset.contentDigest,
+      mediaType: asset.mediaType,
+      byteLength: asset.byteLength,
+      geometry:
+        asset.geometry.format === 'gltf'
+          ? { format: 'gltf', content: new Uint8Array(asset.geometry.content) }
+          : {
+              format: 'svg',
+              content: asset.geometry.content,
+              ...(asset.geometry.name === undefined ? {} : { name: asset.geometry.name }),
+            },
+    };
+  }
+
+  private assertSceneAssetMetadata(
+    asset: Omit<ResolvedSceneAsset, 'geometry'>,
+    geometry: ResolvedSceneAsset['geometry'],
+  ): void {
+    const mediaType = geometry.format === 'gltf' ? 'model/gltf-binary' : 'image/svg+xml';
+    const byteLength =
+      geometry.format === 'gltf' ? geometry.content.byteLength : new TextEncoder().encode(geometry.content).byteLength;
+    if (asset.mediaType !== mediaType || asset.byteLength !== byteLength) {
+      throw new Error(`Progressive scene asset metadata mismatch for ${asset.contentDigest}.`);
+    }
+  }
+
+  private async resolveSceneAsset(
+    asset: ResolvedSceneAssetTransport,
+    assetsByDigest: Map<ResolvedSceneAsset['contentDigest'], ResolvedSceneAsset>,
+  ): Promise<ResolvedSceneAsset> {
+    if (asset.delivery === 'reference') {
+      const cached = assetsByDigest.get(asset.contentDigest);
+      if (!cached) {
+        throw new Error(`Unknown progressive scene asset reference ${asset.contentDigest}.`);
+      }
+      if (cached.mediaType !== asset.mediaType || cached.byteLength !== asset.byteLength) {
+        throw new Error(`Progressive scene asset metadata mismatch for ${asset.contentDigest}.`);
+      }
+      return this.cloneSceneAsset(cached);
+    }
+
+    if (asset.geometry.hash !== asset.contentDigest) {
+      throw new Error(`Progressive scene asset integrity check failed for ${asset.contentDigest}.`);
+    }
+    const geometry = await this.transport.resolveGeometry(asset.geometry);
+    if (geometry.format === 'webrtc') {
+      throw new TypeError('Progressive scene assets cannot contain live WebRTC streams.');
+    }
+    this.assertSceneAssetMetadata(asset, geometry);
+    const bytes = geometry.format === 'gltf' ? geometry.content : new TextEncoder().encode(geometry.content);
+    const actualDigest = await digestContent({ bytes });
+    if (actualDigest !== asset.contentDigest) {
+      throw new Error(`Progressive scene asset integrity check failed for ${asset.contentDigest}.`);
+    }
+    const resolved = this.cloneSceneAsset({
+      contentDigest: asset.contentDigest,
+      mediaType: asset.mediaType,
+      byteLength: asset.byteLength,
+      geometry,
+    });
+    assetsByDigest.set(asset.contentDigest, resolved);
+    return this.cloneSceneAsset(resolved);
+  }
+
+  private async resolveSceneSnapshot(
+    snapshot: ResolvedSceneSnapshotTransport,
+    assetsByDigest = new Map<ResolvedSceneAsset['contentDigest'], ResolvedSceneAsset>(),
+  ): Promise<ResolvedSceneSnapshot> {
+    const assets: ResolvedSceneAsset[] = [];
+    for (const asset of snapshot.assets) {
+      // oxlint-disable-next-line no-await-in-loop -- preserve asset order and bound materialisation ownership.
+      assets.push(await this.resolveSceneAsset(asset, assetsByDigest));
+    }
+    return { manifest: snapshot.manifest, assets };
+  }
+
+  private async resolveSceneUpdate(
+    update: ProgressiveSceneUpdateTransport,
+    assetsByDigest: Map<ResolvedSceneAsset['contentDigest'], ResolvedSceneAsset>,
+  ): Promise<ProgressiveSceneUpdate> {
+    switch (update.type) {
+      case 'reset': {
+        return { ...update, snapshot: await this.resolveSceneSnapshot(update.snapshot, assetsByDigest) };
+      }
+      case 'delta': {
+        const assets: ResolvedSceneAsset[] = [];
+        for (const asset of update.assets) {
+          // oxlint-disable-next-line no-await-in-loop -- preserve update order and bound materialisation ownership.
+          assets.push(await this.resolveSceneAsset(asset, assetsByDigest));
+        }
+        return { ...update, assets };
+      }
+      case 'refinement': {
+        const replacements = [];
+        for (const replacement of update.replacements) {
+          // oxlint-disable-next-line no-await-in-loop -- preserve replacement order and bound materialisation ownership.
+          const resolved = await this.resolveSceneAsset(replacement.replacement, assetsByDigest);
+          replacements.push({ ...replacement, replacement: resolved });
+        }
+        return { ...update, replacements };
+      }
+      case 'bookmark': {
+        return update;
+      }
+    }
+  }
+
+  private async monitorSceneUpdates(
+    channel: Channel<RuntimeProtocol>,
+    handler: (update: ProgressiveSceneUpdate) => void,
+    options: {
+      readonly signal: AbortSignal;
+      readonly onFailure?: (error: unknown) => void;
+      readonly settled: () => void;
+    },
+  ): Promise<void> {
+    try {
+      await this.consumeSceneUpdates(channel, options.signal, handler);
+    } catch (error) {
+      if (!options.signal.aborted) {
+        options.onFailure?.(error);
+      }
+    } finally {
+      options.settled();
+    }
+  }
+
+  private async consumeSceneUpdates(
+    channel: Channel<RuntimeProtocol>,
+    signal: AbortSignal,
+    handler: (update: ProgressiveSceneUpdate) => void,
+  ): Promise<void> {
+    let lastSequence = 0;
+    let activeRenderId: string | undefined;
+    const assetsByDigest = new Map<ResolvedSceneAsset['contentDigest'], ResolvedSceneAsset>();
+    for await (const wireUpdate of channel.listen('sceneUpdates', {}, signal)) {
+      const update = await this.resolveSceneUpdate(
+        wireUpdate as unknown as ProgressiveSceneUpdateTransport,
+        assetsByDigest,
+      );
+      if (!this.isSelectedPreviewPublishable(update.renderId)) {
+        continue;
+      }
+      if (activeRenderId !== update.renderId) {
+        if (update.type !== 'reset') {
+          throw new Error('A progressive scene stream must begin with a reset snapshot.');
+        }
+        activeRenderId = update.renderId;
+        lastSequence = 0;
+      }
+      if (update.sequence <= lastSequence) {
+        throw new Error(`Progressive scene sequence ${update.sequence} is not monotonic.`);
+      }
+      if (update.type !== 'reset' && update.sequence !== lastSequence + 1) {
+        throw new Error(`Progressive scene sequence gap after ${lastSequence}; a reset snapshot is required.`);
+      }
+      lastSequence = update.sequence;
+      handler(update);
     }
   }
 

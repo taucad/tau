@@ -1,9 +1,9 @@
-import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { build } from 'vite';
-import type { Plugin, ResolvedConfig } from 'vite';
+import type { Environment, Plugin, ResolvedConfig } from 'vite';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { runtimeAssetsPlugin } from '#vite/runtime-ssr-assets.vite-plugin.js';
 
@@ -19,6 +19,7 @@ afterEach(() => {
 type TransformContext = {
   addWatchFile: ReturnType<typeof vi.fn>;
   emitFile: ReturnType<typeof vi.fn>;
+  environment: Environment;
   resolve: ReturnType<typeof vi.fn>;
 };
 
@@ -56,8 +57,30 @@ const transform = async ({
 const createContext = (): TransformContext => ({
   addWatchFile: vi.fn(),
   emitFile: vi.fn().mockReturnValue('asset-ref'),
+  environment: vi.fn() as unknown as Environment,
   resolve: vi.fn().mockResolvedValue(undefined),
 });
+
+const renderChunk = (
+  plugin: Plugin,
+  options: {
+    readonly code: string;
+    readonly environment: Environment;
+    readonly fileName: string;
+    readonly getFileName: (referenceId: string) => string;
+  },
+) => {
+  type RenderChunkHook = (
+    this: { environment: Environment; getFileName(referenceId: string): string },
+    code: string,
+    chunk: { readonly fileName: string },
+  ) => { code: string } | undefined;
+  return (plugin.renderChunk as RenderChunkHook).call(
+    { environment: options.environment, getFileName: options.getFileName },
+    options.code,
+    { fileName: options.fileName },
+  );
+};
 
 describe('runtimeAssetsPlugin', () => {
   it('should expose the internal runtime asset behavior', () => {
@@ -85,8 +108,8 @@ describe('runtimeAssetsPlugin', () => {
 
     expect(context.emitFile).toHaveBeenCalledTimes(2);
     expect(context.addWatchFile).toHaveBeenCalledTimes(3);
-    expect(result?.code).toContain('new URL(import.meta.ROLLUP_FILE_URL_font-ref)');
-    expect(result?.code).toContain('import.meta.ROLLUP_FILE_URL_wasm-ref');
+    expect(result?.code).toContain('new URL("__TAUCAD_RUNTIME_ASSET__font-ref__", import.meta.url)');
+    expect(result?.code).toContain('new URL("__TAUCAD_RUNTIME_ASSET__wasm-ref__", import.meta.url).href');
   });
 
   it('should emit exported package assets in client builds', async () => {
@@ -102,7 +125,84 @@ describe('runtimeAssetsPlugin', () => {
     });
 
     expect(context.emitFile).toHaveBeenCalledWith(expect.objectContaining({ name: 'manifold.wasm', type: 'asset' }));
-    expect(result?.code).toContain('import.meta.ROLLUP_FILE_URL_asset-ref');
+    expect(result?.code).toContain('new URL("__TAUCAD_RUNTIME_ASSET__asset-ref__", import.meta.url).href');
+  });
+
+  it('should resolve only owned references relative to entry and nested chunks', async () => {
+    const plugin = runtimeAssetsPlugin();
+    const context = createContext();
+    await configure(plugin, { ssr: true }, context);
+    const transformed = await transform({
+      plugin,
+      code: `const asset = new URL('../../package.json', import.meta.url).href;`,
+      id: importer,
+      context,
+    });
+    const code = `${transformed?.code}\nconst duplicate = '__TAUCAD_RUNTIME_ASSET__asset-ref__';\nconst foreign = "__TAUCAD_RUNTIME_ASSET__foreign__";`;
+    const getFileName = (referenceId: string): string => {
+      expect(referenceId).toBe('asset-ref');
+      return 'chunks/package-info.json';
+    };
+
+    expect(
+      renderChunk(plugin, { code, environment: context.environment, fileName: 'index.js', getFileName })?.code,
+    ).toContain('new URL("./chunks/package-info.json", import.meta.url).href');
+    const nested = renderChunk(plugin, {
+      code,
+      environment: context.environment,
+      fileName: 'chunks/register.js',
+      getFileName,
+    })?.code;
+    expect(nested).toContain('new URL("./package-info.json", import.meta.url).href');
+    expect(nested).toContain("const duplicate = './package-info.json'");
+    expect(nested).toContain('__TAUCAD_RUNTIME_ASSET__foreign__');
+    expect(
+      renderChunk(plugin, {
+        code,
+        environment: context.environment,
+        fileName: 'index.js',
+        getFileName: () => `chunks/package #?'".json`,
+      })?.code,
+    ).toContain('new URL("./chunks/package%20%23%3F%27%22.json", import.meta.url).href');
+  });
+
+  it('should isolate emitted references between nested build environments', async () => {
+    const plugin = runtimeAssetsPlugin();
+    const outer = createContext();
+    const inner = createContext();
+    outer.emitFile.mockReturnValue('outer-ref');
+    inner.emitFile.mockReturnValue('inner-ref');
+    await configure(plugin, { ssr: true }, outer);
+    const outerTransform = await transform({
+      plugin,
+      code: `const asset = new URL('../../package.json', import.meta.url).href;`,
+      id: importer,
+      context: outer,
+    });
+    await configure(plugin, { ssr: true }, inner);
+    const innerTransform = await transform({
+      plugin,
+      code: `const asset = new URL('../../package.json', import.meta.url).href;`,
+      id: importer,
+      context: inner,
+    });
+
+    expect(
+      renderChunk(plugin, {
+        code: outerTransform?.code ?? '',
+        environment: outer.environment,
+        fileName: 'index.js',
+        getFileName: (referenceId) => `${referenceId}.json`,
+      })?.code,
+    ).toContain('./outer-ref.json');
+    expect(
+      renderChunk(plugin, {
+        code: innerTransform?.code ?? '',
+        environment: inner.environment,
+        fileName: 'index.js',
+        getFileName: (referenceId) => `${referenceId}.json`,
+      })?.code,
+    ).toContain('./inner-ref.json');
   });
 
   it('should serve exported package assets through Vite without copying them', async () => {
@@ -213,7 +313,7 @@ describe('runtimeAssetsPlugin', () => {
     const result = await transform({ plugin, code, id: importer, context });
 
     expect(context.emitFile).toHaveBeenCalledOnce();
-    expect(result?.code).toContain('import.meta.ROLLUP_FILE_URL_asset-ref');
+    expect(result?.code).toContain('new URL("__TAUCAD_RUNTIME_ASSET__asset-ref__", import.meta.url).href');
   });
 
   it('should emit a real consumer-owned WASM asset in a Vite SSR build', async () => {
@@ -232,7 +332,14 @@ describe('runtimeAssetsPlugin', () => {
     });
 
     const emitted = readdirSync(outputDirectory, { recursive: true }).map(String);
-    expect(emitted.some((file) => /fixture-[\w-]+\.wasm$/.test(file))).toBe(true);
+    const entryOutput = emitted.find((file) => /entry\.(?:mjs|js)$/.test(file));
+    expect(entryOutput).toBeDefined();
+    const entryPath = path.join(outputDirectory, entryOutput ?? 'missing');
+    const outputCode = readFileSync(entryPath, 'utf8');
+    expect(outputCode).not.toContain('ROLLUP_FILE_URL');
+    expect(outputCode).not.toContain('__TAUCAD_RUNTIME_ASSET__');
+    const builtEntry = (await import(pathToFileURL(entryPath).href)) as { readonly asset: string };
+    expect(readFileSync(fileURLToPath(builtEntry.asset), 'utf8')).toBe('fixture');
   });
 
   it('should emit a real exported dependency WASM asset in a Vite client build', async () => {
@@ -251,6 +358,12 @@ describe('runtimeAssetsPlugin', () => {
 
     const emitted = readdirSync(outputDirectory, { recursive: true }).map(String);
     expect(emitted.some((file) => /manifold(?:-[\w-]+)?\.wasm$/.test(file))).toBe(true);
+    const outputCode = emitted
+      .filter((file) => /\.[cm]?js$/.test(file))
+      .map((file) => readFileSync(path.join(outputDirectory, file), 'utf8'))
+      .join('\n');
+    expect(outputCode).not.toContain('ROLLUP_FILE_URL');
+    expect(outputCode).not.toContain('__TAUCAD_RUNTIME_ASSET__');
   });
 
   it('should emit a real exported dependency WASM asset from a Vite worker build', async () => {
@@ -274,5 +387,11 @@ describe('runtimeAssetsPlugin', () => {
 
     const emitted = readdirSync(outputDirectory, { recursive: true }).map(String);
     expect(emitted.some((file) => /manifold(?:-[\w-]+)?\.wasm$/.test(file))).toBe(true);
+    const outputCode = emitted
+      .filter((file) => /\.[cm]?js$/.test(file))
+      .map((file) => readFileSync(path.join(outputDirectory, file), 'utf8'))
+      .join('\n');
+    expect(outputCode).not.toContain('ROLLUP_FILE_URL');
+    expect(outputCode).not.toContain('__TAUCAD_RUNTIME_ASSET__');
   });
 });

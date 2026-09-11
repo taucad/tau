@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { _fromMemoryFsHandle as fromMemoryFS } from '#transport/_internal/from-memory-fs-handle.js';
 import type { RuntimeFileSystemBase } from '#types/runtime-kernel.types.js';
 
@@ -155,6 +155,22 @@ describe('filesystem constructors', () => {
       expect(stat.type).toBe('file');
       expect(stat.size).toBe(5);
       expect(stat.mtimeMs).toBeTypeOf('number');
+    });
+
+    it('should preserve file modification time until the file is written again', async () => {
+      vi.useFakeTimers();
+      try {
+        vi.setSystemTime(1000);
+        const fileSystem = makeFs({ 'stat.txt': 'initial' });
+        const initial = await fileSystem.stat('stat.txt');
+
+        vi.setSystemTime(2000);
+        expect(await fileSystem.stat('stat.txt')).toMatchObject({ mtimeMs: initial.mtimeMs });
+        await fileSystem.writeFile('stat.txt', 'updated');
+        expect(await fileSystem.stat('stat.txt')).toMatchObject({ mtimeMs: 2000 });
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it('should stat a directory', async () => {

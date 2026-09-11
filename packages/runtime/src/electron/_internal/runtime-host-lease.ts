@@ -15,11 +15,24 @@ export const takeElectronRuntimeHostRelease = (port: MessagePort): ElectronRunti
 };
 
 /**
- * Hands the transport client a subscription to this port's host-exit relay.
- * The renderer owns the `message` listener (and removes it on release); the
- * client owns what to do with the code.
+ * What Electron main reports about a dead utility: its exit code, whether main
+ * itself initiated the kill, and the stderr it captured. `released` is what
+ * separates an orderly teardown from an unexplained death.
  */
-type ElectronRuntimeHostExitSubscribe = (notify: (exitCode?: number) => void) => void;
+export type ElectronRuntimeHostExitDetail = {
+  /** Absent only when the relay carried no numeric code — never fabricated. */
+  readonly exitCode?: number;
+  readonly released: boolean;
+  readonly stderrTail?: string;
+};
+
+/**
+ * Hands the transport client a subscription to this port's host-exit relay.
+ * The renderer owns the `message` listener (and keeps it alive until the relay
+ * for this host arrives, so a release-first teardown is still explained); the
+ * client owns what to do with the detail.
+ */
+type ElectronRuntimeHostExitSubscribe = (notify: (detail: ElectronRuntimeHostExitDetail) => void) => void;
 
 const hostExitsByPort = new WeakMap<MessagePort, ElectronRuntimeHostExitSubscribe>();
 

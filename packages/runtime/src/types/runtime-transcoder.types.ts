@@ -13,7 +13,7 @@ import type { ExportFidelity, ExportFile, FileExtension } from '@taucad/types';
 import type { KernelResult } from '#types/runtime.types.js';
 import type { RuntimeImplementationAsset, RuntimeLogger } from '#types/runtime-kernel.types.js';
 import type { RuntimeSpanTracer } from '#types/runtime-tracer.types.js';
-import type { RuntimePluginDeclaration, TranscoderPlugin } from '#plugins/plugin-types.js';
+import type { RuntimePluginDeclaration, TranscoderEdgeType, TranscoderPlugin } from '#plugins/plugin-types.js';
 import {
   attachRuntimePluginDefinition,
   attachRuntimePluginFactoryOptions,
@@ -101,7 +101,7 @@ export type TranscodeResult = KernelResult<ExportFile[]>;
 export type TranscoderRuntime = {
   logger: RuntimeLogger;
   tracer: RuntimeSpanTracer;
-  /** Cancellation signal owned by the active export operation. */
+  /** Cancellation signal owned by the active export or direct-transcode operation. */
   signal: AbortSignal;
 };
 
@@ -179,7 +179,7 @@ type TranscoderDefinitionConfig<
 };
 
 type EdgeOptionMap<Edges extends readonly TranscoderEdge[]> = {
-  [Edge in Edges[number] as Edge['to'] & string]: ResolveEdgeOptions<Edge>;
+  [Edge in Edges[number] as Edge['to'] & string]: TranscoderEdgeType<Edge['from'] & string, ResolveEdgeOptions<Edge>>;
 };
 
 type SourceFormat<Edges extends readonly TranscoderEdge[]> = Edges[number]['from'] & string;

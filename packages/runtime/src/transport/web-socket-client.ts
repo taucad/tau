@@ -50,6 +50,7 @@ import {
 } from '#transport/_internal/web-socket-wire.js';
 import type { WebSocketId } from '#transport/_internal/web-socket-wire.js';
 import type { WebSocketTransportOptions } from '#transport/web-socket-transport.schemas.js';
+import { buildComputeStoreBridge } from '#transport/_internal/compute-store-bridge.js';
 
 type WebSocketConstructorLike = new (url: string) => WebSocketLike;
 
@@ -113,7 +114,13 @@ export const webSocketClient = (
   let fileSystemPort: Port<unknown> | undefined;
   let fileSystemBridge: ReturnType<typeof buildFileSystemBridge>;
   let disposeFileSystemRelay: (() => void) | undefined;
+  let computePort: Port<unknown> | undefined;
+  let computeBridge: ReturnType<typeof buildComputeStoreBridge>;
+  let disposeComputeRelay: (() => void) | undefined;
   let isClosed = false;
+  /* A socket that dies before hello is a host that failed to start; after it,
+   * a mid-session death. Readiness is the only thing that separates them. */
+  let phase: 'boot' | 'session' = 'boot';
 
   let resolveClosed: ((result: RuntimeTransportCloseResult) => void) | undefined;
   const closed = new Promise<RuntimeTransportCloseResult>((resolve) => {
@@ -132,6 +139,8 @@ export const webSocketClient = (
     }
     disposeFileSystemRelay?.();
     disposeFileSystemRelay = undefined;
+    disposeComputeRelay?.();
+    disposeComputeRelay = undefined;
     /* The `/fs` socket dies with the runtime socket; the reverse is not true
      * — a lone `/fs` failure leaves `closed` unsettled and surfaces as
      * rejected filesystem calls inside the remote kernel. */
@@ -145,13 +154,18 @@ export const webSocketClient = (
     } catch {
       /* Best-effort */
     }
+    try {
+      computePort?.close();
+    } catch {
+      /* Best-effort */
+    }
     resolveClosed?.(result);
   };
 
   /** First cause wins: `finish` is guarded, so a late `close()` cannot overwrite. */
   const watchRuntimeSocket = (socket: WebSocketLike): void => {
     socket.addEventListener('close', (event: { readonly code?: number; readonly reason?: string }) => {
-      void finish(closeCauseFor(event.code, event.reason));
+      void finish(closeCauseFor(event.code, event.reason, phase));
     });
     socket.addEventListener('error', (event: { readonly error?: unknown; readonly message?: string }) => {
       const error =
@@ -212,9 +226,36 @@ export const webSocketClient = (
       /* Both sockets are wrapped the moment they exist and before either
        * channel is constructed: `wrapWebSocket` buffers from wrap time, and
        * a frame that lands before the wrap is lost at the socket level. */
-      const runtimeSocket = createSocket(buildSocketUrl(options.url, 'runtime', session));
+      const runtimeUrl = new URL(buildSocketUrl(options.url, 'runtime', session));
+      runtimeUrl.searchParams.delete('compute');
+      if (options.compute?.mode === 'durable') {
+        runtimeUrl.searchParams.set('compute', 'durable');
+      }
+      const runtimeSocket = createSocket(runtimeUrl.href);
       runtimePort = wrapWebSocket<unknown>(runtimeSocket, msgpackCodec);
       watchRuntimeSocket(runtimeSocket);
+
+      computeBridge = buildComputeStoreBridge(options.compute);
+      if (options.compute?.mode === 'durable') {
+        const computeSocket = createSocket(buildSocketUrl(options.url, 'compute', session));
+        computePort = wrapWebSocket<unknown>(computeSocket, msgpackCodec);
+        const bridgePort = wrapMessagePort<unknown>(computeBridge.memoryHandle.computeStorePort!, {
+          label: 'web-socket:compute',
+        });
+        const stopBridgeToSocket = bridgePort.onMessage((message) => {
+          computePort?.postMessage(message);
+        });
+        const stopSocketToBridge = computePort.onMessage((message) => {
+          bridgePort.postMessage(message);
+        });
+        bridgePort.start?.();
+        disposeComputeRelay = () => {
+          stopBridgeToSocket();
+          stopSocketToBridge();
+          bridgePort.close();
+          computeBridge.dispose();
+        };
+      }
 
       fileSystemBridge = buildFileSystemBridge(options.fileSystem);
       if (fileSystemBridge) {
@@ -247,6 +288,17 @@ export const webSocketClient = (
         sessionKey: runtimeChannelSessionKey,
         protocolSchemas: runtimeProtocolSchemas,
       });
+      /* `open()` hands the channel back before hello lands, so readiness is
+       * observed separately; a host that never became ready died in boot. */
+      const observeReadiness = async (ready: Promise<unknown>): Promise<void> => {
+        try {
+          await ready;
+          phase = 'session';
+        } catch {
+          /* The phase stays `'boot'`. */
+        }
+      };
+      void observeReadiness(channel.ready);
       return { channel };
     })();
     return openPromise;
@@ -283,7 +335,9 @@ export const webSocketClient = (
       }
       /* `memoryHandle.fileSystemPort` is a transferable wire field and cannot
        * cross a socket; the host binds the filesystem from the `/fs` socket. */
-      const memoryHandle: RuntimeInitializeMemoryHandle = {};
+      const memoryHandle: RuntimeInitializeMemoryHandle = {
+        computeBindingMode: options.compute?.mode ?? 'memory',
+      };
       return channel.call('initialize', { ...input, memoryHandle });
     },
     async resolveGeometry(transport: GeometryTransport): Promise<Geometry> {

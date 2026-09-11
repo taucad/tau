@@ -11,40 +11,40 @@ import type { ProtocolHeader, WireMessage } from '#types/protocol-header.types.j
 
 describe('protocolVersion', () => {
   it('should expose the current wire protocol version as a literal', () => {
-    expect(protocolVersion).toBe(1);
+    expect(protocolVersion).toBe(3);
   });
 });
 
 describe('validateProtocolHeader', () => {
   it('should accept a header carrying the current protocol version', () => {
-    const header: ProtocolHeader = { v: 1, seq: 0 };
+    const header: ProtocolHeader = { v: 3, seq: 0 };
     expect(() => {
       validateProtocolHeader(header);
     }).not.toThrow();
   });
 
   it('should throw TransportProtocolVersionError when the version mismatches', () => {
-    // The current wire protocol is `v: 1`. Older or newer envelopes coming
+    // The current wire protocol is `v: 3`. Older or newer envelopes coming
     // over a remote channel must surface as a typed error so the runtime
     // client can distinguish "wire shape changed" from "kernel produced an
     // error".
-    const stale = { v: 0, seq: 0 } as unknown as ProtocolHeader;
+    const stale = { v: 2, seq: 0 } as unknown as ProtocolHeader;
 
     try {
       validateProtocolHeader(stale);
       expect.fail('validateProtocolHeader should throw on mismatched version');
     } catch (error) {
       expect(error).toBeInstanceOf(TransportProtocolVersionError);
-      expect((error as Error).message).toContain('1');
-      expect((error as Error).message).toContain('0');
-      expect((error as TransportProtocolVersionError).expected).toBe(1);
-      expect((error as TransportProtocolVersionError).received).toBe(0);
+      expect((error as Error).message).toContain('3');
+      expect((error as Error).message).toContain('2');
+      expect((error as TransportProtocolVersionError).expected).toBe(3);
+      expect((error as TransportProtocolVersionError).received).toBe(2);
       expect((error as TransportProtocolVersionError).code).toBe('TRANSPORT_PROTOCOL_VERSION_MISMATCH');
     }
   });
 
   it('should expose a realm-safe isTransportProtocolVersionError type guard', () => {
-    const error = new TransportProtocolVersionError(1, 2);
+    const error = new TransportProtocolVersionError(3, 2);
     expect(isTransportProtocolVersionError(error)).toBe(true);
     expect(isTransportProtocolVersionError(new Error('plain'))).toBe(false);
     expect(error.name).toBe('TransportProtocolVersionError');
@@ -73,10 +73,10 @@ describe('createSequenceCounter', () => {
 describe('WireMessage', () => {
   it('should be the structural intersection of a payload and a ProtocolHeader', () => {
     type SamplePayload = { type: 'ping' };
-    const wire: WireMessage<SamplePayload> = { type: 'ping', v: 1, seq: 0 };
+    const wire: WireMessage<SamplePayload> = { type: 'ping', v: 3, seq: 0 };
 
     expect(wire.type).toBe('ping');
-    expect(wire.v).toBe(1);
+    expect(wire.v).toBe(3);
     expect(wire.seq).toBe(0);
   });
 
@@ -84,7 +84,7 @@ describe('WireMessage', () => {
     type SamplePayload = { type: 'render' };
     const wire: WireMessage<SamplePayload> = {
       type: 'render',
-      v: 1,
+      v: 3,
       seq: 7,
       cid: 'cmd_abc123',
       rgen: 4,

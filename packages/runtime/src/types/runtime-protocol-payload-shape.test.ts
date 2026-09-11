@@ -29,10 +29,10 @@ describe('runtime-protocol payload-shape coverage (C18)', () => {
         runtimeProtocolSchemas.hello.parse({
           server: 'kernel-runtime-worker',
           runtimeVersion: 'test',
-          protocolVersion: 1,
+          protocolVersion: 3,
           futureCapability: true,
         }),
-      ).toMatchObject({ protocolVersion: 1, futureCapability: true });
+      ).toMatchObject({ protocolVersion: 3, futureCapability: true });
       expect(
         runtimeProtocolSchemas.hello.safeParse({
           server: 'kernel-runtime-worker',
@@ -72,6 +72,40 @@ describe('runtime-protocol payload-shape coverage (C18)', () => {
     });
   });
 
+  describe('transcode call', () => {
+    const file = (name: string) => ({
+      name,
+      bytes: new Uint8Array([1]),
+      mimeType: 'application/octet-stream',
+    });
+
+    it('accepts an ordered caller-owned artifact set', () => {
+      expect(
+        runtimeProtocolSchemas.calls.transcode.args.parse({
+          from: 'glb',
+          to: 'webp',
+          files: [file('model.glb'), file('textures/base color.png')],
+          options: {},
+        }).files,
+      ).toHaveLength(2);
+    });
+
+    it.each([
+      ['an empty artifact set', []],
+      ['an unsafe artifact path', [file('../model.glb')]],
+      ['an absolute artifact path', [file('/model.glb')]],
+      ['duplicate artifact paths', [file('model.glb'), file('model.glb')]],
+    ])('rejects %s', (_label, files) => {
+      const parsed = runtimeProtocolSchemas.calls.transcode.args.safeParse({
+        from: 'glb',
+        to: 'webp',
+        files,
+        options: {},
+      });
+      expect(parsed.success).toBe(false);
+    });
+  });
+
   describe('capabilities manifest', () => {
     const capabilities = {
       registrations: [
@@ -98,6 +132,12 @@ describe('runtime-protocol payload-shape coverage (C18)', () => {
         fixture: {
           renderOptions: { schema: {}, defaults: {}, futureRenderOption: true },
           content: { schema: {}, defaults: { includeTopology: true }, futureContent: true },
+          progressiveScene: {
+            type: 'supported',
+            deliveries: ['reset'],
+            bookmarks: ['explicit'],
+            replay: ['live', 'retained'],
+          },
           futureRenderCapability: true,
         },
       },

@@ -75,7 +75,13 @@ type PublicTranscoderTuple<Plugins extends readonly AnyTranscoderPlugin[]> = {
   readonly [Index in keyof Plugins]: PublicTranscoderPlugin<Plugins[Index]>;
 };
 
-type Concat<Left extends readonly unknown[], Right extends readonly unknown[]> = readonly [...Left, ...Right];
+// An omitted bucket is typed never[]; spreading it must not widen a finite tuple.
+// oxlint-disable-next-line typescript/no-restricted-types -- an empty tuple, not a variadic never array, preserves tuple length.
+type NormalizeEmpty<Values extends readonly unknown[]> = [Values[number]] extends [never] ? readonly [] : Values;
+type Concat<Left extends readonly unknown[], Right extends readonly unknown[]> = readonly [
+  ...NormalizeEmpty<Left>,
+  ...NormalizeEmpty<Right>,
+];
 
 type RuntimeOptionsKernels<Options> =
   AwaitedRuntimeOptions<Options> extends RuntimeDefinitionOptions<
@@ -371,6 +377,16 @@ function normalizeRuntimeDefinition(options: AnyRuntimeDefinitionOptions): Runti
     expanded.push(...expandedPluginCapabilities(plugin));
   }
 
+  const serviceCapabilities = expanded.filter((entry) => entry.kind === 'jobs' || entry.kind === 'machines');
+  if (serviceCapabilities.length > 0) {
+    const origins = serviceCapabilities
+      .map((entry) => `${entry.kind.slice(0, -1)} "${entry.capability.id}" from ${describeCapabilityOrigin(entry)}`)
+      .join('; ');
+    throw new TypeError(
+      `CAD runtime cannot consume host-owned plugin capabilities: ${origins}. Project the toolkit at the outer host before constructing the four-role CAD runtime.`,
+    );
+  }
+
   return {
     kernels: normalizeCapabilityBucket({ kind: 'kernels', expanded, direct: options.kernels ?? [] }),
     middleware: normalizeCapabilityBucket({ kind: 'middleware', expanded, direct: options.middleware ?? [] }),
@@ -468,10 +484,10 @@ export function defineRuntime<
     config: z.output<ConfigSchema>,
   ) => ConfiguredRuntimeCreateResult<Kernels, Middleware, Bundlers, Transcoders>;
 }): RuntimeDefinition<
-  PublicKernelTuple<Kernels>,
-  PublicMiddlewareTuple<Middleware>,
-  PublicBundlerTuple<Bundlers>,
-  PublicTranscoderTuple<Transcoders>,
+  PublicKernelTuple<NormalizeEmpty<Kernels>>,
+  PublicMiddlewareTuple<NormalizeEmpty<Middleware>>,
+  PublicBundlerTuple<NormalizeEmpty<Bundlers>>,
+  PublicTranscoderTuple<NormalizeEmpty<Transcoders>>,
   ConfigSchema
 >;
 

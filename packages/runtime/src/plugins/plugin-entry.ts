@@ -6,7 +6,9 @@ export { resolveRuntimePluginDefinition, runtimePluginAbiVersion } from '#plugin
 export type {
   AnyPluginInstance,
   ExpandPluginBundlers,
+  ExpandPluginJobs,
   ExpandPluginKernels,
+  ExpandPluginMachines,
   ExpandPluginMiddleware,
   ExpandPluginTranscoders,
   PluginCapabilities,

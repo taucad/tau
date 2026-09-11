@@ -7,14 +7,32 @@
   "implicitDependencies": ["runtime", "tau-examples", "geospec", "geospec-engine"],
   "targets": {
     "test": {
-      "inputs": ["default", "^default", { "env": "TAU_EXAMPLE_PATTERN" }, { "env": "TAU_GEOSPEC_CACHE" }]
+      "inputs": [
+        "default",
+        "^default",
+        {
+          "env": "TAU_EXAMPLE_PATTERN"
+        },
+        {
+          "env": "TAU_GEOSPEC_CACHE"
+        }
+      ]
     },
     "example-health": {
       "command": "vitest run src/tau-examples-health.test.ts",
       "options": {
         "cwd": "{projectRoot}"
       },
-      "inputs": ["default", "^default", { "env": "TAU_EXAMPLE_PATTERN" }, { "env": "TAU_GEOSPEC_CACHE" }]
+      "inputs": [
+        "default",
+        "^default",
+        {
+          "env": "TAU_EXAMPLE_PATTERN"
+        },
+        {
+          "env": "TAU_GEOSPEC_CACHE"
+        }
+      ]
     },
     "benchmark-example-health": {
       "command": "tsx scripts/benchmark-example-health.mts",
@@ -25,6 +43,20 @@
     },
     "performance-gate": {
       "command": "vitest run src/benchmarks/wasm-size.test.ts src/benchmarks/benchmark-comparator.test.ts src/benchmarks/native-speedup.bench.test.ts",
+      "options": {
+        "cwd": "{projectRoot}"
+      },
+      "cache": false
+    },
+    "compute-baseline": {
+      "command": "node --import @oxc-node/core/register src/compute-baseline/harness/driver.mts --models parity-box,hollow-box,stress-test,v8-block-late --arms bypass,durable,memory --pairs 5 --steps cold,warm,late,early,unrelated --restart --brepDigest --tag pinning",
+      "options": {
+        "cwd": "{projectRoot}"
+      },
+      "cache": false
+    },
+    "compute-baseline-summarize": {
+      "command": "node --import @oxc-node/core/register src/compute-baseline/harness/summarize.mts ../../out/reports/compute-baseline/*-pinning-*.json",
       "options": {
         "cwd": "{projectRoot}"
       },
@@ -42,7 +74,12 @@
         "cwd": "{projectRoot}"
       },
       "cache": false,
-      "dependsOn": [{ "projects": ["bundler-core", "esbuild", "rolldown"], "target": "build" }]
+      "dependsOn": [
+        {
+          "projects": ["bundler-core", "esbuild", "rolldown"],
+          "target": "build"
+        }
+      ]
     },
     "benchmark-bundler-products": {
       "command": "node scripts/benchmark-bundler-products.mts",

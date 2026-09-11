@@ -19,7 +19,7 @@ const srgbHexToLinearTuple = (hex: string, alpha: number): [number, number, numb
   const value = hex.replace(/^#/, '');
   const linear = (channel: number): number => {
     const srgb = channel / 255;
-    return srgb <= 0.040_45 ? srgb / 12.92 : ((srgb + 0.055) / 1.055) ** 2.4;
+    return srgb <= 0.04045 ? srgb / 12.92 : ((srgb + 0.055) / 1.055) ** 2.4;
   };
   return [
     linear(Number.parseInt(value.slice(0, 2), 16)),

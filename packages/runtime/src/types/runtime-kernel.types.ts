@@ -14,6 +14,7 @@
 import { z } from 'zod';
 import type { FileExtension, LogLevel, GeometryResponse, FileStatEntry } from '@taucad/types';
 import type { FileSystemProvider, WatchEvent, WatchRequest } from '@taucad/filesystem';
+import type { KernelComputeCapability } from '#types/runtime-compute.types.js';
 import type { ExportGeometryResult, GetParametersResult, KernelIssue } from '#types/runtime.types.js';
 import type { RuntimeSpanTracer } from '#types/runtime-tracer.types.js';
 import type { ExecuteResult, KernelBundler } from '#types/runtime-bundler-service.types.js';
@@ -31,6 +32,7 @@ import type {
   RuntimeContentKey,
 } from '#types/runtime-content.types.js';
 import { validateRuntimeContentDeclarations } from '#types/runtime-content.types.js';
+import type { KernelSceneRuntime, ProgressiveSceneCapability } from '#types/runtime-scene.types.js';
 
 // =============================================================================
 // Kernel Logging
@@ -156,6 +158,10 @@ export type KernelRuntime = {
   bundler: KernelBundler;
   /** Span tracer for kernel-authored performance instrumentation */
   tracer: RuntimeSpanTracer;
+  /** Always-present progressive scene service; cheap no-op when no consumer requested it. */
+  readonly scene: KernelSceneRuntime;
+  /** Compute reuse facet for the active operation. `off` carries no operations at all. */
+  readonly compute: KernelComputeCapability;
   /** Resolve a host-compiled WASM module by its absolute asset URL. */
   getCompiledWasmModule(url: string): WebAssembly.Module | undefined;
   /** Emit a namespaced kernel event to the runtime client. */
@@ -196,6 +202,8 @@ export type KernelRenderDefinition<
   readonly optionsSchema?: Schema;
   /** Framework content properties fulfilled natively by this render route. */
   readonly content?: Content;
+  /** Optional kernel support declaration; the resolved manifest always carries an explicit supported/unsupported facet. */
+  readonly progressiveScene?: ProgressiveSceneCapability;
 };
 
 /** One native export format declared by a kernel author. @public */

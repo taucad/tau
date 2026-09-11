@@ -1,8 +1,25 @@
 import deepmerge from 'deepmerge';
+import {
+  createComputeReuseService,
+  createMemoryActionStore,
+  createMemoryContentStore,
+  digestAction,
+  digestContent,
+} from '@taucad/cache-core';
+import type { ActionDigest, ComputeEvaluationInput, ComputeEvaluationResult } from '@taucad/cache-core';
 import { createRuntimeClient } from '@taucad/runtime/client';
 import type { RuntimeClient } from '@taucad/runtime/client';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
-import type { AnyKernelDefinition, KernelFileSystem, KernelRuntime, RuntimeLogger } from '@taucad/runtime/kernel';
+import type {
+  AnyKernelDefinition,
+  ComputeGeneration,
+  ComputeScopeReceipt,
+  ComputeStoreEntry,
+  KernelComputeCapability,
+  KernelFileSystem,
+  KernelRuntime,
+  RuntimeLogger,
+} from '@taucad/runtime/kernel';
 import { assertRootedPath } from '@taucad/runtime/kernel';
 import type {
   CreateGeometryHandler,
@@ -53,12 +70,7 @@ export function createTestRuntimeClient<const Runtime extends RuntimeDefinition>
   options: CreateTestRuntimeClientOptions<Runtime>,
 ): ReturnType<typeof createRuntimeClient<Runtime, ReturnType<typeof inProcessTransport<Runtime>>>>;
 /** Implements the projected public overload through the runtime's wide client implementation. @public */
-export function createTestRuntimeClient({
-  runtime,
-  files = {},
-}: CreateTestRuntimeClientOptions): ReturnType<
-  typeof createRuntimeClient<RuntimeDefinition, ReturnType<typeof inProcessTransport<RuntimeDefinition>>>
-> {
+export function createTestRuntimeClient({ runtime, files = {} }: CreateTestRuntimeClientOptions): RuntimeClient {
   return createRuntimeClient({
     transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs(normalizeInitialFiles(files)) }),
   });
@@ -289,16 +301,21 @@ export const createMockRuntime = <
   filesystem: MockFileSystem;
   state: ReturnType<typeof createMockState<State>>;
   tracer: { startSpan: ReturnType<typeof vi.fn> };
-} => ({
-  tracer: { startSpan: vi.fn(() => ({ end: vi.fn() })) },
-  logger: createMockLogger(),
-  filesystem: createMockFileSystem(options?.filesystemOverrides),
-  state: createMockState<State>(),
-  options: options?.options ?? (deepmerge({}, {}) as Options),
-  dependencies: options?.dependencies ?? [],
-  signal: options?.signal ?? new AbortController().signal,
-  dependencyHash: options?.dependencyHash ?? 'a'.repeat(64),
-});
+} => {
+  const signal = options?.signal ?? new AbortController().signal;
+  return {
+    tracer: { startSpan: vi.fn(() => ({ end: vi.fn() })) },
+    logger: createMockLogger(),
+    filesystem: createMockFileSystem(options?.filesystemOverrides),
+    compute: createMockComputeRuntime(signal),
+    progressiveSceneRequested: false,
+    state: createMockState<State>(),
+    options: options?.options ?? (deepmerge({}, {}) as Options),
+    dependencies: options?.dependencies ?? [],
+    signal,
+    dependencyHash: options?.dependencyHash ?? 'a'.repeat(64),
+  };
+};
 
 /** Creates a successful geometry result. @public */
 export const createSuccessResult = (geometry: GeometryResponse): KernelSuccessResult<GeometryResponse> => ({
@@ -345,28 +362,111 @@ export const createGeometryFile = (filename: string): { filename: string; path: 
   return { filename: path.slice(separator + 1), path: separator === -1 ? '' : path.slice(0, separator) };
 };
 
+const createMockComputeRuntime = (signal: AbortSignal): KernelComputeCapability => {
+  const service = createComputeReuseService({
+    contentStore: createMemoryContentStore({ maxBytes: 64 * 1024 * 1024 }),
+    actionStore: createMemoryActionStore({ maxBytes: 8 * 1024 * 1024 }),
+  });
+  const generation = 1 as ComputeGeneration;
+  const published = new Map<ActionDigest, ComputeStoreEntry>();
+  return {
+    status: 'on',
+    mode: 'memory',
+    evaluate: async <T>(input: ComputeEvaluationInput<T>): Promise<ComputeEvaluationResult<T>> =>
+      service.evaluate({ ...input, signal }),
+    openScope: ({ resident }) => {
+      const pending = new Set<ActionDigest>();
+      let receipt: ComputeScopeReceipt | undefined;
+      return {
+        generation,
+        warm: async ({ digests }) => {
+          const entries = digests.flatMap((digest) => {
+            const entry = published.get(digest);
+            return entry ? [entry] : [];
+          });
+          const imported = await resident.importEntries({ entries, signal });
+          return {
+            status: 'imported',
+            imported: imported.imported,
+            omitted: [...imported.omitted, ...digests.filter((digest) => !published.has(digest))],
+            bytes: entries.reduce((total, entry) => total + entry.bytes.byteLength, 0),
+          };
+        },
+        announce: ({ entries }) => {
+          const admitted: ActionDigest[] = [];
+          for (const entry of entries) {
+            if (entry.kind === 'action') {
+              pending.add(entry.digest);
+              admitted.push(entry.digest);
+            }
+          }
+          return { admitted, rejected: [] };
+        },
+        close: ({ outcome }) => {
+          receipt ??= {
+            settled: (async () => {
+              if (outcome !== 'delivered') {
+                return { status: 'abandoned', published: [], omitted: [...pending], conflicts: [] } as const;
+              }
+              const exported = await resident.exportEntries({ digests: [...pending], signal });
+              const keys: ActionDigest[] = [];
+              for (const entry of exported.entries) {
+                // oxlint-disable-next-line no-await-in-loop -- each entry has an independent content identity.
+                const key = await digestAction({ action: entry.action });
+                published.set(key, {
+                  action: entry.action,
+                  actionDigest: key,
+                  // oxlint-disable-next-line no-await-in-loop -- content identity is per entry.
+                  contentDigest: await digestContent({ bytes: entry.bytes }),
+                  mediaType: entry.mediaType,
+                  bytes: new Uint8Array(entry.bytes),
+                  determinism: entry.determinism,
+                });
+                keys.push(key);
+              }
+              return { status: 'published', published: keys, omitted: exported.omitted, conflicts: [] } as const;
+            })(),
+          };
+          return receipt;
+        },
+      };
+    },
+  };
+};
+
 /** Creates a mocked kernel runtime. @public */
 export const createMockKernelRuntime = (options?: {
   readonly filesystemOverrides?: MockFileSystemOptions;
   readonly signal?: AbortSignal;
-}): KernelRuntime & { logger: ReturnType<typeof createMockLogger>; filesystem: MockFileSystem } => ({
-  signal: options?.signal ?? new AbortController().signal,
-  emitEvent: () => undefined,
-  logger: createMockLogger(),
-  filesystem: createMockFileSystem(options?.filesystemOverrides),
-  fileContentCache: new Map(),
-  getCompiledWasmModule: () => undefined,
-  bundler: {
-    resolveDependencies: async () => ({ resolved: [], unresolved: [] }),
-    bundle: async () => ({ code: '', issues: [], success: false, dependencies: [], unresolvedPaths: [] }),
-    registerModule: () => undefined,
-  },
-  execute: async () => ({
-    success: false,
-    issues: [{ message: 'Mock executor', code: 'RUNTIME', severity: 'error' }],
-  }),
-  tracer: { startSpan: () => ({ end: () => undefined }) },
-});
+}): KernelRuntime & { logger: ReturnType<typeof createMockLogger>; filesystem: MockFileSystem } => {
+  const signal = options?.signal ?? new AbortController().signal;
+  return {
+    signal,
+    emitEvent: () => undefined,
+    logger: createMockLogger(),
+    filesystem: createMockFileSystem(options?.filesystemOverrides),
+    fileContentCache: new Map(),
+    getCompiledWasmModule: () => undefined,
+    scene: {
+      requested: false,
+      publish: async () => ({ type: 'not-requested' }),
+      publishUpdate: async () => ({ type: 'not-requested' }),
+      bookmark: async () => ({ type: 'not-requested' }),
+      flush: async () => undefined,
+    },
+    compute: createMockComputeRuntime(signal),
+    bundler: {
+      resolveDependencies: async () => ({ resolved: [], unresolved: [] }),
+      bundle: async () => ({ code: '', issues: [], success: false, dependencies: [], unresolvedPaths: [] }),
+      registerModule: () => undefined,
+    },
+    execute: async () => ({
+      success: false,
+      issues: [{ message: 'Mock executor', code: 'RUNTIME', severity: 'error' }],
+    }),
+    tracer: { startSpan: () => ({ end: () => undefined }) },
+  };
+};
 
 const noop = (): void => undefined;
 
@@ -408,8 +508,8 @@ export function createMockRuntimeClient(): unknown {
     // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- implements RuntimeClient event overloads.
     on: vi.fn(() => noop),
   };
-  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- explicit literal implements RuntimeClient overloads.
-  return client as RuntimeClient;
+  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- explicit literal implements RuntimeClient overloads; the client type gained members this stub does not model, so the assertion routes through unknown.
+  return client as unknown as RuntimeClient;
 }
 
 /** Creates standard file, middleware, and framework dependencies. @public */

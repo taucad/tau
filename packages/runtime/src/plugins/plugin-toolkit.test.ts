@@ -3,7 +3,11 @@ import { z } from 'zod';
 import type { BundlerPlugin, KernelPlugin, MiddlewarePlugin, TranscoderPlugin } from '#plugins/plugin-types.js';
 import { definePlugin, isPluginFactory } from '#plugins/plugin.js';
 import type { PluginFactory } from '#plugins/plugin.js';
-import { attachRuntimePluginFactoryOptions } from '#plugins/plugin-runtime-definition.js';
+import {
+  attachRuntimePluginDefinition,
+  attachRuntimePluginFactoryOptions,
+  resolveRuntimePluginDefinition,
+} from '#plugins/plugin-runtime-definition.js';
 import { defineRuntime, resolveRuntimeDefinition } from '#worker/runtime-definition.js';
 
 const defineUncheckedPlugin = definePlugin as unknown as (definition: unknown) => PluginFactory;
@@ -25,7 +29,10 @@ const directKernel = (): KernelPlugin<Record<never, never>, unknown, 'direct'> =
   extensions: ['direct'],
 });
 const cacheMiddleware = (): MiddlewarePlugin<'cache'> => ({ id: 'cache' });
-const testBundler = (): BundlerPlugin<'test-bundler'> => ({ id: 'test-bundler', extensions: ['ts'] });
+const testBundler = (): BundlerPlugin<'test-bundler'> => ({
+  id: 'test-bundler',
+  extensions: ['ts'],
+});
 const meshTranscoder = (): TranscoderPlugin<Record<never, never>, 'glb', 'mesh'> => ({ id: 'mesh' });
 const configuredKernel = vi.fn((options?: { readonly mode?: 'fast' | 'exact' }) => ({
   id: 'configured',
@@ -36,6 +43,52 @@ const configuredTranscoder = vi.fn((options?: { readonly quality?: number }) => 
   id: 'configured-transcoder',
   options,
 }));
+const jobRegistration = {
+  id: 'local',
+  kind: 'simulation.fake',
+  version: '1.0.0',
+  kindVersion: 1,
+  configuration: {
+    version: 1,
+    source: { id: 'simulation.fake.configuration', version: '1.0.0' },
+    dialect: 'draft-07',
+    inputSchema: {},
+    outputSchema: {},
+    ui: { version: 1, rjsf: {} },
+  },
+  resultSchema: {},
+  recovery: { type: 'restart-from-input' },
+  requirements: [],
+  artifacts: [],
+  queries: [],
+  commands: [],
+} as const;
+const simulationJob = attachRuntimePluginFactoryOptions(
+  () =>
+    attachRuntimePluginDefinition(jobRegistration, () => ({
+      execute: vi.fn(),
+    })),
+  false,
+);
+const testMachine = attachRuntimePluginFactoryOptions(
+  () =>
+    attachRuntimePluginDefinition(
+      {
+        id: 'printer',
+        name: 'Test printer',
+        version: '1.0.0',
+        protocolVersion: 1,
+        vendor: 'test',
+        technologies: ['additive.fff'],
+        accepts: [],
+        bindingConfiguration: jobRegistration.configuration,
+        submissionConfiguration: jobRegistration.configuration,
+        queries: {},
+      } as const,
+      () => ({ discover: vi.fn(), connect: vi.fn() }),
+    ),
+  false,
+);
 
 const toolkit = definePlugin({
   meta: { name: '@test/toolkit' },
@@ -59,7 +112,47 @@ const configurableToolkit = definePlugin({
   },
 });
 
+const hostToolkit = definePlugin({
+  meta: { name: '@test/host-toolkit' },
+  kernels: { alpha: noOptionsAlphaKernel },
+  jobs: { simulation: simulationJob },
+  machines: { printer: testMachine },
+  presets: {
+    default: ['kernels.alpha', 'jobs.simulation', 'machines.printer'],
+  },
+});
+
 describe('definePlugin', () => {
+  it('expands mixed CAD, job, and machine capabilities through ABI 2', async () => {
+    const selected = hostToolkit();
+
+    expect(selected.capabilities.kernels.map(({ id }) => id)).toEqual(['alpha']);
+    expect(selected.capabilities.jobs).toMatchObject([{ id: 'local' }]);
+    expect(selected.capabilities.machines).toMatchObject([{ id: 'printer' }]);
+    const [selectedJob]: readonly [ReturnType<typeof simulationJob>] = selected.capabilities.jobs;
+    const [selectedMachine]: readonly [ReturnType<typeof testMachine>] = selected.capabilities.machines;
+    await expect(resolveRuntimePluginDefinition('job', selectedJob)).resolves.toHaveProperty('execute');
+    await expect(resolveRuntimePluginDefinition('machine', selectedMachine)).resolves.toHaveProperty('connect');
+    expect(() => defineRuntime({ plugins: [selected] })).toThrow(
+      'CAD runtime cannot consume host-owned plugin capabilities: job "local" from @test/host-toolkit (path "@test/host-toolkit/jobs.simulation"); machine "printer" from @test/host-toolkit (path "@test/host-toolkit/machines.printer"). Project the toolkit at the outer host before constructing the four-role CAD runtime.',
+    );
+  });
+
+  it('rejects missing host capabilities and options for no-options host factories', () => {
+    const invalidHostToolkit = defineUncheckedPlugin({
+      meta: { name: '@test/invalid-host' },
+      jobs: { simulation: simulationJob },
+      presets: { default: ['machines.absent'] },
+    });
+
+    expect(() => invalidHostToolkit()).toThrow(
+      '@test/invalid-host preset "default" references missing capability "machines.absent".',
+    );
+    const invokeUnchecked = hostToolkit as unknown as (options: unknown) => unknown;
+    expect(() => invokeUnchecked({ jobs: { simulation: {} } })).toThrow(
+      '@test/host-toolkit preset "default" capability "jobs.simulation" does not accept options.',
+    );
+  });
   it('expands presets deterministically before direct capability buckets', () => {
     const runtime = defineRuntime({
       plugins: [toolkit()],
@@ -83,7 +176,9 @@ describe('definePlugin', () => {
     configuredKernel.mockClear();
     configuredTranscoder.mockClear();
 
-    const defaultPlugin = configurableToolkit({ kernels: { default: { mode: 'exact' } } });
+    const defaultPlugin = configurableToolkit({
+      kernels: { default: { mode: 'exact' } },
+    });
     const exportPlugin = configurableToolkit({
       preset: 'export',
       transcoders: { export: { quality: 75 } },
@@ -91,8 +186,12 @@ describe('definePlugin', () => {
 
     expect(configuredKernel).toHaveBeenCalledWith({ mode: 'exact' });
     expect(configuredTranscoder).toHaveBeenCalledWith({ quality: 75 });
-    expect(defaultPlugin.capabilities.kernels[0].options).toEqual({ mode: 'exact' });
-    expect(exportPlugin.capabilities.transcoders[0].options).toEqual({ quality: 75 });
+    expect(defaultPlugin.capabilities.kernels[0].options).toEqual({
+      mode: 'exact',
+    });
+    expect(exportPlugin.capabilities.transcoders[0].options).toEqual({
+      quality: 75,
+    });
   });
 
   it('rejects unknown, missing, and unselected option paths before expansion', () => {

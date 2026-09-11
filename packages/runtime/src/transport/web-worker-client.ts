@@ -39,6 +39,8 @@ import { reservePreview, triggerRenderTimeout } from '#transport/_internal/abort
 import { buildFileSystemBridge } from '#transport/_internal/file-system-bridge.js';
 import { webWorkerId } from '#transport/_internal/web-worker-id.js';
 import type { WebWorkerId } from '#transport/_internal/web-worker-id.js';
+import type { ComputeBinding } from '#types/runtime-compute.types.js';
+import { buildComputeStoreBridge } from '#transport/_internal/compute-store-bridge.js';
 
 /**
  * Subset of the DOM `Worker` surface the transport depends on. Tests
@@ -84,6 +86,7 @@ export type WebWorkerTransportOptions = {
   readonly devtoolsTelemetry?: boolean;
   /** Host-compiled WASM modules cloned into the worker during initialization. */
   readonly compiledWasmModules?: RuntimeInitializeMemoryHandle['compiledWasmModules'];
+  readonly compute?: ComputeBinding;
 };
 
 const wrapWorkerAsPort = (worker: WebWorkerLike): Port<unknown> => {
@@ -184,6 +187,7 @@ export const webWorkerClient = (
   };
 
   let bridge: ReturnType<typeof buildFileSystemBridge>;
+  let computeBridge: ReturnType<typeof buildComputeStoreBridge> | undefined;
   let openPromise: Promise<TransportClientReady> | undefined;
   let worker: WebWorkerLike | undefined;
   let port: Port<unknown> | undefined;
@@ -220,6 +224,11 @@ export const webWorkerClient = (
     }
     try {
       bridge?.dispose();
+    } catch {
+      /* Best-effort */
+    }
+    try {
+      computeBridge?.dispose();
     } catch {
       /* Best-effort */
     }
@@ -310,15 +319,17 @@ export const webWorkerClient = (
         throw new Error('webWorkerTransport: channel unavailable after open()');
       }
       bridge ??= buildFileSystemBridge(options.fileSystem);
+      computeBridge ??= buildComputeStoreBridge(options.compute);
       const pooled = ensurePools();
       const memoryHandle: RuntimeInitializeMemoryHandle = {
         ...(pooled.signalBuffer ? { signalBuffer: pooled.signalBuffer } : {}),
         ...(pooled.geometryPoolBuffer ? { geometryPoolBuffer: pooled.geometryPoolBuffer } : {}),
         ...(bridge ? { fileSystemPort: bridge.port } : {}),
+        ...computeBridge.memoryHandle,
         ...(options.devtoolsTelemetry === true ? { devtoolsTelemetry: true } : {}),
         ...(options.compiledWasmModules ? { compiledWasmModules: options.compiledWasmModules } : {}),
       };
-      const transferables: Transferable[] = bridge ? [bridge.port] : [];
+      const transferables: Transferable[] = [...(bridge ? [bridge.port] : []), ...computeBridge.transfer];
       const args = { ...input, memoryHandle };
       try {
         const result = await channel.call(
@@ -334,6 +345,8 @@ export const webWorkerClient = (
             bridge = undefined;
           }
         }
+        computeBridge.dispose();
+        computeBridge = undefined;
         throw error;
       }
     },

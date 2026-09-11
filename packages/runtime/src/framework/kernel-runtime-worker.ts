@@ -170,6 +170,25 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     await Promise.resolve();
   }
 
+  protected override async onCleanup(): Promise<void> {
+    for (const kernel of this.loadedKernels.values()) {
+      if (!kernel.initialized) {
+        continue;
+      }
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- release each initialized owner independently in load order.
+        await kernel.definition.cleanup?.(kernel.ctx);
+      } catch (error) {
+        this.logger.warn('Kernel cleanup failed', { data: { kernelId: kernel.entry.id, error: String(error) } });
+      }
+    }
+    this.loadedKernels.clear();
+    this.activeKernelId = undefined;
+    this.selectionCache.clear();
+    this.selectionErrors.clear();
+    this.cachedDetectionDeps = undefined;
+  }
+
   protected override async onGetDependencies(
     input: GetDependenciesInput,
     runtime: KernelRuntime,
@@ -626,6 +645,13 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
       ),
     );
     this.kernelRenderContentMap.set(config.id, definition.render?.content ?? []);
+    this.kernelProgressiveSceneCapabilityMap.set(
+      config.id,
+      definition.render?.progressiveScene ?? {
+        type: 'unsupported',
+        reason: 'Kernel does not publish progressive scene updates.',
+      },
+    );
     this.kernelInitOptionsMap.set(config.id, validatedOptions);
     this.kernelImplementationAssetsMap.set(config.id, implementationAssets);
     if (definition.render?.optionsSchema) {

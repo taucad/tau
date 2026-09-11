@@ -3,7 +3,7 @@
  *
  * Defines the typed `@taucad/rpc` {@link RuntimeProtocol} contract
  * carried by every runtime transport. Calls (`initialize`, `export`,
- * `exportModel`, `snapshotSource`, `transcode`, `cleanup`) are correlated by the channel envelope;
+ * `exportModel`, `evaluateModel`, `snapshotSource`, `transcode`, `cleanup`) are correlated by the channel envelope;
  * notifies cover the
  * autonomous client→worker commands and worker→client events.
  */
@@ -19,6 +19,17 @@ import type {
 } from '#types/runtime.types.js';
 import type { RuntimeContentInput } from '#types/runtime-content.types.js';
 import type { RuntimeSourceSnapshotResult } from '#types/runtime-source-snapshot.types.js';
+import type {
+  ListSceneBookmarksInput,
+  ProgressiveSceneUpdate,
+  ReadSceneSnapshotInput,
+  ReadSceneSnapshotResult,
+  ResolvedSceneAsset,
+  ResolvedSceneSnapshot,
+  SceneAssetReplacement,
+  SceneBookmark,
+  TauSceneOperation,
+} from '#types/runtime-scene.types.js';
 
 // =============================================================================
 // Two-Layer Geometry Transport Types
@@ -60,6 +71,43 @@ export type GeometryResponseTransport = GeometrySvg | GeometryGltfTransport | Ge
  * @public
  */
 export type GeometryTransport = GeometryResponseTransport & { readonly hash: string };
+
+/** Scene asset bytes delivered for the first use of a digest in one stream. @public */
+export type InlineResolvedSceneAssetTransport = Omit<ResolvedSceneAsset, 'geometry'> & {
+  readonly delivery: 'inline';
+  readonly geometry: GeometryTransport;
+};
+
+/** Scene asset resolved from an earlier inline delivery in the same stream. @public */
+export type ReferencedResolvedSceneAssetTransport = Omit<ResolvedSceneAsset, 'geometry'> & {
+  readonly delivery: 'reference';
+};
+
+/** Content-addressed scene asset delivery used on the wire. @public */
+export type ResolvedSceneAssetTransport = InlineResolvedSceneAssetTransport | ReferencedResolvedSceneAssetTransport;
+
+/** Materialised scene snapshot shape used on the wire before transport resolution. @public */
+export type ResolvedSceneSnapshotTransport = Omit<ResolvedSceneSnapshot, 'assets'> & {
+  readonly assets: readonly ResolvedSceneAssetTransport[];
+};
+
+/** Progressive scene event with binary assets still expressed as transport deliveries. @public */
+export type ProgressiveSceneUpdateTransport =
+  | (Omit<Extract<ProgressiveSceneUpdate, { readonly type: 'reset' }>, 'snapshot'> & {
+      readonly snapshot: ResolvedSceneSnapshotTransport;
+    })
+  | (Omit<Extract<ProgressiveSceneUpdate, { readonly type: 'delta' }>, 'assets' | 'operations'> & {
+      readonly operations: readonly TauSceneOperation[];
+      readonly assets: readonly ResolvedSceneAssetTransport[];
+    })
+  | (Omit<Extract<ProgressiveSceneUpdate, { readonly type: 'refinement' }>, 'replacements'> & {
+      readonly replacements: ReadonlyArray<
+        Omit<SceneAssetReplacement, 'replacement'> & {
+          readonly replacement: ResolvedSceneAssetTransport;
+        }
+      >;
+    })
+  | Extract<ProgressiveSceneUpdate, { readonly type: 'bookmark' }>;
 
 /**
  * Full geometry result in transit (wire format).
@@ -112,6 +160,10 @@ export type InitializeMemoryHandle = {
   signalBuffer?: SignalBufferHandle;
   geometryPoolBuffer?: GeometryPoolHandle;
   fileSystemPort?: MessagePortLike;
+  /** Private host-minted compute-store authority for this runtime lease. */
+  computeStorePort?: MessagePortLike;
+  /** Host-selected reuse mode; a supplied store port always selects durable. */
+  computeBindingMode?: 'off' | 'memory' | 'durable';
   /** Explicitly mirror runtime spans into the worker Performance Timeline. */
   devtoolsTelemetry?: boolean;
   /** Host-compiled modules available to kernel initializers by absolute URL. */
@@ -272,7 +324,16 @@ export type RuntimeExportArgs = {
   readonly content?: RuntimeContentInput;
 };
 
-/** Direct transcoder request over caller-owned source artifacts. @public */
+/**
+ * Direct transcoder request over caller-owned source artifacts.
+ *
+ * Input buffers remain caller-owned: the runtime never transfers or detaches
+ * them. Worker-backed transports structured-clone the files when dispatching
+ * this request. Callers must not mutate file names or bytes while the call is
+ * pending.
+ *
+ * @public
+ */
 export type RuntimeTranscodeArgs = {
   readonly from: FileExtension;
   readonly to: FileExtension;
@@ -296,6 +357,15 @@ export type RuntimeExportModelArgs = {
   readonly options?: Record<string, unknown>;
   readonly format: FileExtension;
   readonly exportOptions?: Record<string, unknown>;
+  readonly content?: RuntimeContentInput;
+};
+
+/** Request-owned CAD evaluation without autonomous preview publication. @public */
+export type RuntimeEvaluateModelArgs = {
+  readonly stage?: Record<string, Uint8Array<ArrayBuffer>>;
+  readonly file: { readonly path: string; readonly filename: string };
+  readonly parameters: Record<string, unknown>;
+  readonly options?: Record<string, unknown>;
   readonly content?: RuntimeContentInput;
 };
 
@@ -462,8 +532,8 @@ export const runtimeProtocolNotifyNames = [
 ] as const;
 
 /**
- * Request/response call name inventory — exactly six calls
- * (`initialize`, `export`, `exportModel`, `snapshotSource`, `transcode`, `cleanup`). The legacy `render` call is deleted; the
+ * Request/response call name inventory — exactly nine calls, including
+ * retained progressive-scene lookups. The legacy `render` call is deleted; the
  * autonomous `openFile` notify + `geometryComputed` correlation by
  * `renderId` replaces it (R18, mirrors LSP `didOpen` + diagnostics).
  * @public
@@ -472,10 +542,16 @@ export const runtimeProtocolCallNames = [
   'initialize',
   'export',
   'exportModel',
+  'evaluateModel',
   'snapshotSource',
+  'readSceneSnapshot',
+  'listSceneBookmarks',
   'transcode',
   'cleanup',
 ] as const;
+
+/** Consumer-pulled, flow-controlled stream inventory. @public */
+export const runtimeProtocolListenNames = ['sceneUpdates'] as const;
 
 /**
  * Typed `@taucad/rpc` protocol contract for the kernel runtime worker.
@@ -495,9 +571,7 @@ export const runtimeProtocolCallNames = [
  *   autonomous events (`parametersResolved`, `geometryComputed`,
  *   `errorEvent`, `progress`, `activeKernelChanged`, `stateChanged`,
  *   `log`, `logBatch`, `telemetry`, `capabilitiesUpdated`, `kernelEvent`).
- * - `listens`: reserved for future consumer-pulled streams (e.g. file
- *   watch, log tail). Empty in v5 because every streaming flow lands as
- *   a notify.
+ * - `listens`: the consumer-pulled, flow-controlled progressive-scene stream.
  *
  * Binary delivery uses {@link WithTransferables} sidecars on the
  * `export` call result and the `geometryComputed` notify args. The
@@ -528,9 +602,25 @@ export type RuntimeProtocol = {
       readonly result: ExportGeometryResult;
       readonly wireResult: RuntimeExportResultWire;
     };
+    readonly evaluateModel: {
+      readonly args: RuntimeEvaluateModelArgs;
+      /** Physical RPC result; RuntimeWorkerClient materializes it into HashedGeometryResult. */
+      readonly result: HashedGeometryResultTransport;
+    };
     readonly snapshotSource: {
       readonly args: RuntimeSourceSnapshotArgs;
       readonly result: RuntimeSourceSnapshotResult;
+    };
+    readonly readSceneSnapshot: {
+      readonly args: ReadSceneSnapshotInput;
+      readonly result: ReadSceneSnapshotResult;
+      readonly wireResult:
+        | { readonly type: 'found'; readonly snapshot: ResolvedSceneSnapshotTransport }
+        | { readonly type: 'missing' };
+    };
+    readonly listSceneBookmarks: {
+      readonly args: ListSceneBookmarksInput;
+      readonly result: readonly SceneBookmark[];
     };
     readonly transcode: {
       readonly args: RuntimeTranscodeArgs;
@@ -586,5 +676,11 @@ export type RuntimeProtocol = {
     };
     readonly kernelEvent: { readonly args: RuntimeKernelMessageArgs };
   };
-  readonly listens: Record<string, never>;
+  readonly listens: {
+    readonly sceneUpdates: {
+      readonly args: { readonly afterSequence?: number };
+      readonly event: ProgressiveSceneUpdate;
+      readonly wireEvent: ProgressiveSceneUpdateTransport;
+    };
+  };
 };

@@ -11,14 +11,18 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { runtimeProtocolCallNames, runtimeProtocolNotifyNames } from '#types/runtime-protocol.types.js';
+import {
+  runtimeProtocolCallNames,
+  runtimeProtocolListenNames,
+  runtimeProtocolNotifyNames,
+} from '#types/runtime-protocol.types.js';
 import { runtimeProtocolSchemas } from '#types/runtime-protocol.schemas.js';
 import { kernelIssueCodeValues } from '#types/kernel-issue-codes.js';
 
 describe('runtime-protocol schema coverage (C15)', () => {
-  it('binds the hello validator and empty listen inventory explicitly', () => {
+  it('binds the hello validator and bounded listen inventory explicitly', () => {
     expect(runtimeProtocolSchemas.hello).toBeDefined();
-    expect(Object.keys(runtimeProtocolSchemas.listens)).toEqual([]);
+    expect(Object.keys(runtimeProtocolSchemas.listens)).toEqual([...runtimeProtocolListenNames]);
   });
 
   it('every protocol call has a matching schema entry', () => {
@@ -56,9 +60,10 @@ describe('runtime-protocol schema coverage (C15)', () => {
     }
   });
 
-  it('should expose exactly the protocol inventory: 6 calls and 18 notifies (T18)', () => {
-    expect(Object.keys(runtimeProtocolSchemas.calls)).toHaveLength(6);
+  it('should expose exactly the protocol inventory: 9 calls, 18 notifies, and 1 listen (T18)', () => {
+    expect(Object.keys(runtimeProtocolSchemas.calls)).toHaveLength(9);
     expect(Object.keys(runtimeProtocolSchemas.notifies)).toHaveLength(18);
+    expect(Object.keys(runtimeProtocolSchemas.listens)).toHaveLength(1);
   });
 
   it('validates kernel issue codes from the canonical registry', () => {

@@ -8,7 +8,7 @@ import { createChannelClient, wrapMessagePort } from '@taucad/rpc';
 import { KernelRuntimeWorker } from '#framework/kernel-runtime-worker.js';
 import { installWorkerCrashTrap } from '#transport/_internal/worker-crash-trap.js';
 import { createWorkerDispatcher, runtimeChannelSessionKey } from '#transport/_internal/runtime-worker-dispatcher.js';
-import type { RuntimeProtocol } from '#types/runtime-protocol.types.js';
+import type { RuntimeProtocol, RuntimeTranscodeArgs } from '#types/runtime-protocol.types.js';
 import type {
   CreateGeometryInput,
   DeserializeNativeHandleInput,
@@ -18,7 +18,7 @@ import type {
   KernelDefinition,
   KernelRuntime,
 } from '#types/runtime-kernel.types.js';
-import type { TranscodeInput, TranscoderDefinition } from '#types/runtime-transcoder.types.js';
+import type { TranscodeInput, TranscodeResult, TranscoderDefinition } from '#types/runtime-transcoder.types.js';
 import type { CapabilitiesManifest, ExportGeometryResult, KernelIssue } from '#types/runtime.types.js';
 /* oxlint-disable no-restricted-imports, import/extensions -- Runtime-private white-box fixture stays outside the package build graph. */
 import {
@@ -152,6 +152,43 @@ function handleLabel(nativeHandle: unknown): string {
 }
 
 describe('KernelRuntimeWorker initialization', () => {
+  it('should clean every initialized kernel owner once even if another owner cleanup fails', async () => {
+    const firstCleanup = vi.fn(async () => {
+      throw new Error('first cleanup failed');
+    });
+    const secondCleanup = vi.fn(async () => undefined);
+    const unusedCleanup = vi.fn(async () => undefined);
+    await seedTestFileSystem({ 'model.first': '', 'model.second': '' });
+    const worker = await createMultiKernelWorker([
+      {
+        id: 'first',
+        extensions: ['first'],
+        definition: createMockKernelDefinition('first', { cleanup: firstCleanup }),
+      },
+      {
+        id: 'second',
+        extensions: ['second'],
+        definition: createMockKernelDefinition('second', { cleanup: secondCleanup }),
+      },
+      {
+        id: 'unused',
+        extensions: ['unused'],
+        definition: createMockKernelDefinition('unused', { cleanup: unusedCleanup }),
+      },
+    ]);
+    try {
+      await worker.createGeometry({ file: createGeometryFile('model.first'), parameters: {} });
+      await worker.createGeometry({ file: createGeometryFile('model.second'), parameters: {} });
+      await worker.cleanup();
+      await worker.cleanup();
+      expect(firstCleanup).toHaveBeenCalledExactlyOnceWith({ id: 'first' });
+      expect(secondCleanup).toHaveBeenCalledExactlyOnceWith({ id: 'second' });
+      expect(unusedCleanup).not.toHaveBeenCalled();
+    } finally {
+      await worker.cleanup();
+    }
+  });
+
   it('rejects repeated initialization without clearing runtime state', async () => {
     const worker = await createMultiKernelWorker([]);
     try {
@@ -287,20 +324,450 @@ describe('KernelRuntimeWorker direct transcode', () => {
         {},
       );
       worker.flushTelemetry();
-      expect(telemetry).toContainEqual(
-        expect.objectContaining({
-          name: 'kernel.transcode',
-          detail: expect.objectContaining({
-            from: 'glb',
-            to: 'webp',
-            transcoder: 'image-transcoder',
-            success: true,
-          }),
-        }),
-      );
+      expect(telemetry.at(-1)?.name).toBe('kernel.transcode');
+      expect(telemetry.at(-1)?.detail).toMatchObject({
+        from: 'glb',
+        to: 'webp',
+        transcoder: 'image-transcoder',
+        success: true,
+      });
     } finally {
       await worker.cleanup();
     }
+  });
+
+  it('skips a queued transcode whose signal aborts before dequeue', async () => {
+    const started = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const transcode = vi.fn(async () => {
+      started.resolve();
+      await release.promise;
+      return {
+        success: true,
+        data: [exportFile('capture.webp', new Uint8Array([1]), 'image/webp')],
+        issues: [],
+      };
+    });
+    const definition: TranscoderDefinition = {
+      name: 'Queued transcoder',
+      version: '1.0.0',
+      edges: [{ from: 'glb', to: 'webp', fidelity: 'mesh' }],
+      initialize: vi.fn().mockResolvedValue({}),
+      transcode,
+    };
+    const worker = await createMultiKernelWorker(
+      [],
+      [attachRuntimePluginDefinition({ id: 'queued-transcoder' }, () => definition)],
+    );
+    const request = {
+      from: 'glb',
+      to: 'webp',
+      files: [exportFile('settled.glb', new Uint8Array([1]), 'model/gltf-binary')],
+      options: {},
+    } satisfies RuntimeTranscodeArgs;
+
+    try {
+      const first = worker.transcode(request);
+      await started.promise;
+      const controller = new AbortController();
+      const queued = worker.transcode(request, controller.signal);
+      controller.abort();
+      release.resolve();
+
+      await expect(first).resolves.toMatchObject({ success: true });
+      await expect(queued).rejects.toMatchObject({ name: 'AbortError' });
+      expect(transcode).toHaveBeenCalledOnce();
+    } finally {
+      release.resolve();
+      await worker.cleanup();
+    }
+  });
+
+  it('shares one FIFO with export/render and drains accepted work before cleanup', async () => {
+    const started = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const cleanupProvider = vi.fn().mockResolvedValue(undefined);
+    const definition: TranscoderDefinition = {
+      name: 'FIFO transcoder',
+      version: '1.0.0',
+      edges: [{ from: 'glb', to: 'webp', fidelity: 'mesh' }],
+      initialize: vi.fn().mockResolvedValue({}),
+      transcode: vi.fn(async () => {
+        started.resolve();
+        await release.promise;
+        return {
+          success: true,
+          data: [exportFile('capture.webp', new Uint8Array([1]), 'image/webp')],
+          issues: [],
+        };
+      }),
+      cleanup: cleanupProvider,
+    };
+    const worker = await createMultiKernelWorker(
+      [],
+      [attachRuntimePluginDefinition({ id: 'fifo-transcoder' }, () => definition)],
+    );
+    const transcode = worker.transcode({
+      from: 'glb',
+      to: 'webp',
+      files: [exportFile('settled.glb', new Uint8Array([1]), 'model/gltf-binary')],
+      options: {},
+    });
+    await started.promise;
+    const queued = Promise.allSettled([
+      worker.exportGeometry('glb'),
+      worker.render({ file: createGeometryFile('model.unknown'), parameters: {} }),
+    ]);
+    const cleanup = worker.cleanup();
+
+    expect(await Promise.race([cleanup.then(() => 'settled'), Promise.resolve('pending')])).toBe('pending');
+    release.resolve();
+
+    await expect(transcode).resolves.toMatchObject({ success: true });
+    await expect(queued).resolves.toHaveLength(2);
+    await expect(cleanup).resolves.toBeUndefined();
+    expect(cleanupProvider).toHaveBeenCalledOnce();
+  });
+
+  it('passes active cancellation to the transcoder runtime signal', async () => {
+    const started = Promise.withResolvers<AbortSignal>();
+    const transcode = vi.fn(
+      async (_input: TranscodeInput, runtime: Parameters<TranscoderDefinition['transcode']>[1]) =>
+        new Promise<TranscodeResult>((_resolve, reject) => {
+          started.resolve(runtime.signal);
+          runtime.signal.addEventListener(
+            'abort',
+            () => {
+              reject(new DOMException('Transcode aborted.', 'AbortError'));
+            },
+            { once: true },
+          );
+        }),
+    );
+    const definition: TranscoderDefinition = {
+      name: 'Abortable transcoder',
+      version: '1.0.0',
+      edges: [{ from: 'glb', to: 'webp', fidelity: 'mesh' }],
+      initialize: vi.fn().mockResolvedValue({}),
+      transcode,
+    };
+    const worker = await createMultiKernelWorker(
+      [],
+      [attachRuntimePluginDefinition({ id: 'abortable-transcoder' }, () => definition)],
+    );
+    const telemetry: Array<{ readonly name: string; readonly detail?: Record<string, unknown> }> = [];
+    worker.setTelemetrySend((entries) => telemetry.push(...entries));
+    const controller = new AbortController();
+
+    try {
+      const result = worker.transcode(
+        {
+          from: 'glb',
+          to: 'webp',
+          files: [exportFile('settled.glb', new Uint8Array([1]), 'model/gltf-binary')],
+          options: {},
+        },
+        controller.signal,
+      );
+      const runtimeSignal = await started.promise;
+      controller.abort();
+
+      await expect(result).rejects.toMatchObject({ name: 'AbortError' });
+      expect(runtimeSignal.aborted).toBe(true);
+      worker.flushTelemetry();
+      const span = telemetry.find(({ name }) => name === 'kernel.transcode');
+      expect(span?.detail?.['success']).toBe(false);
+      expect(span?.detail?.['parentSpanId']).toBeUndefined();
+    } finally {
+      await worker.cleanup();
+    }
+  });
+
+  it('stops at cancellation boundaries after initialization and transcoding hooks', async () => {
+    const initialization = Promise.withResolvers<Record<string, unknown>>();
+    const transcode = vi.fn<TranscoderDefinition['transcode']>().mockResolvedValue({
+      success: true,
+      data: [exportFile('capture.webp', new Uint8Array([1]), 'image/webp')],
+      issues: [],
+    });
+    const definition: TranscoderDefinition = {
+      name: 'Boundary transcoder',
+      version: '1.0.0',
+      edges: [{ from: 'glb', to: 'webp', fidelity: 'mesh' }],
+      initialize: vi.fn(async () => initialization.promise),
+      transcode,
+    };
+    const worker = await createMultiKernelWorker(
+      [],
+      [attachRuntimePluginDefinition({ id: 'boundary-transcoder' }, () => definition)],
+    );
+    const request: RuntimeProtocol['calls']['transcode']['args'] = {
+      from: 'glb',
+      to: 'webp',
+      files: [exportFile('settled.glb', new Uint8Array([1]), 'model/gltf-binary')],
+      options: {},
+    };
+
+    try {
+      const initializationController = new AbortController();
+      const duringInitialization = worker.transcode(request, initializationController.signal);
+      await vi.waitFor(() => {
+        expect(definition.initialize).toHaveBeenCalledOnce();
+      });
+      initializationController.abort();
+      initialization.resolve({});
+
+      await expect(duringInitialization).rejects.toMatchObject({ name: 'AbortError' });
+      expect(transcode).not.toHaveBeenCalled();
+
+      const hookController = new AbortController();
+      transcode.mockImplementationOnce(async (input) => {
+        hookController.abort();
+        return { success: true, data: input.files, issues: [] };
+      });
+
+      await expect(worker.transcode(request, hookController.signal)).rejects.toMatchObject({ name: 'AbortError' });
+    } finally {
+      await worker.cleanup();
+    }
+  });
+
+  it('surfaces every option issue with a transcoder-specific code', async () => {
+    const definition: TranscoderDefinition = {
+      name: 'Validated transcoder',
+      version: '1.0.0',
+      edges: [
+        {
+          from: 'glb',
+          to: 'webp',
+          fidelity: 'mesh',
+          optionsSchema: z.object({ width: z.number().positive(), height: z.number().positive() }),
+        },
+      ],
+      initialize: vi.fn().mockResolvedValue({}),
+      transcode: vi.fn(),
+    };
+    const worker = await createMultiKernelWorker(
+      [],
+      [attachRuntimePluginDefinition({ id: 'validated-transcoder' }, () => definition)],
+    );
+
+    try {
+      const result = await worker.transcode({
+        from: 'glb',
+        to: 'webp',
+        files: [exportFile('settled.glb', new Uint8Array([1]), 'model/gltf-binary')],
+        options: { width: -1, height: -1 },
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.issues).toHaveLength(2);
+      expect(result.issues.every(({ code }) => code === 'TRANSCODER_OPTIONS_INVALID')).toBe(true);
+      expect(definition.transcode).not.toHaveBeenCalled();
+    } finally {
+      await worker.cleanup();
+    }
+  });
+
+  it('classifies missing routes and provider throws as distinct transcoder failures', async () => {
+    const definition: TranscoderDefinition = {
+      name: 'Throwing transcoder',
+      version: '1.0.0',
+      edges: [{ from: 'glb', to: 'webp', fidelity: 'mesh' }],
+      initialize: vi.fn().mockResolvedValue({}),
+      transcode: vi.fn().mockRejectedValue(new Error('encoder crashed')),
+    };
+    const worker = await createMultiKernelWorker(
+      [],
+      [attachRuntimePluginDefinition({ id: 'throwing-transcoder' }, () => definition)],
+    );
+    const files = [exportFile('settled.glb', new Uint8Array([1]), 'model/gltf-binary')];
+
+    try {
+      await expect(worker.transcode({ from: 'glb', to: 'png', files, options: {} })).resolves.toMatchObject({
+        success: false,
+        issues: [{ code: 'TRANSCODER_CAPABILITY_MISSING' }],
+      });
+      const failed = await worker.transcode({ from: 'glb', to: 'webp', files, options: {} });
+      expect(failed.success).toBe(false);
+      expect(failed.issues).toHaveLength(1);
+      expect(failed.issues[0]?.code).toBe('TRANSCODER_EXECUTION_FAILED');
+      expect(failed.issues[0]?.message).toContain('encoder crashed');
+    } finally {
+      await worker.cleanup();
+    }
+  });
+
+  it('retries a provider after a transient initialization failure', async () => {
+    const initialize = vi
+      .fn<TranscoderDefinition['initialize']>()
+      .mockRejectedValueOnce(new Error('adapter warming up'))
+      .mockResolvedValue({});
+    const definition: TranscoderDefinition = {
+      name: 'Retryable transcoder',
+      version: '1.0.0',
+      edges: [{ from: 'glb', to: 'webp', fidelity: 'mesh' }],
+      initialize,
+      transcode: vi.fn().mockResolvedValue({
+        success: true,
+        data: [exportFile('capture.webp', new Uint8Array([1]), 'image/webp')],
+        issues: [],
+      }),
+    };
+    const worker = await createMultiKernelWorker(
+      [],
+      [attachRuntimePluginDefinition({ id: 'retryable-transcoder' }, () => definition)],
+    );
+    const request = {
+      from: 'glb',
+      to: 'webp',
+      files: [exportFile('settled.glb', new Uint8Array([1]), 'model/gltf-binary')],
+      options: {},
+    } satisfies RuntimeTranscodeArgs;
+
+    try {
+      await expect(worker.transcode(request)).resolves.toMatchObject({
+        success: false,
+        issues: [{ code: 'TRANSCODER_INITIALIZATION_FAILED' }],
+      });
+      await expect(worker.transcode(request)).resolves.toMatchObject({ success: true });
+      expect(initialize).toHaveBeenCalledTimes(2);
+    } finally {
+      await worker.cleanup();
+    }
+  });
+
+  it('records finalized artifact failure instead of plugin-declared success', async () => {
+    const definition: TranscoderDefinition = {
+      name: 'Invalid output transcoder',
+      version: '1.0.0',
+      edges: [{ from: 'glb', to: 'webp', fidelity: 'mesh' }],
+      initialize: vi.fn().mockResolvedValue({}),
+      transcode: vi.fn().mockResolvedValue({ success: true, data: [], issues: [] }),
+    };
+    const worker = await createMultiKernelWorker(
+      [],
+      [attachRuntimePluginDefinition({ id: 'invalid-output-transcoder' }, () => definition)],
+    );
+    const telemetry: Array<{ readonly name: string; readonly detail?: Record<string, unknown> }> = [];
+    worker.setTelemetrySend((entries) => telemetry.push(...entries));
+
+    try {
+      await expect(
+        worker.transcode({
+          from: 'glb',
+          to: 'webp',
+          files: [exportFile('settled.glb', new Uint8Array([1]), 'model/gltf-binary')],
+          options: {},
+        }),
+      ).resolves.toMatchObject({ success: false, issues: [{ code: 'EXPORT_ARTIFACT_SET_INVALID' }] });
+      worker.flushTelemetry();
+      expect(
+        telemetry.filter(({ name }) => name === 'kernel.transcode').map(({ detail }) => detail?.['success']),
+      ).toEqual([false]);
+    } finally {
+      await worker.cleanup();
+    }
+  });
+
+  it('lets the first registration win when two plugins compose the same edge', async () => {
+    const factory = (id: 'first-edge' | 'second-edge') =>
+      defineTranscoder({
+        id,
+        name: id,
+        version: '1.0.0',
+        edges: [
+          {
+            from: 'glb',
+            to: 'webp',
+            fidelity: 'mesh',
+            optionsSchema:
+              id === 'first-edge' ? z.object({ first: z.literal(true) }) : z.object({ second: z.literal(true) }),
+          },
+        ] as const,
+        async initialize() {
+          return {};
+        },
+        async transcode(input) {
+          return { success: true, data: input.files, issues: [] };
+        },
+      })();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      await seedTestFileSystem({ 'model.ts': 'model' });
+      const runtime = defineRuntime({ transcoders: [factory('first-edge'), factory('second-edge')] });
+      const worker = await createMultiKernelWorker(
+        [
+          {
+            id: 'manifest-kernel',
+            extensions: ['ts'],
+            definition: createMockKernelDefinition('manifest-kernel', {
+              exportFormats: { glb: { optionsSchema: z.object({}) } },
+            }),
+          },
+        ],
+        [...runtime.transcoders],
+      );
+      await worker.createGeometry({ file: createGeometryFile('model.ts'), parameters: {} });
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('shadowed by "first-edge"'));
+      const routes = worker.capabilitiesManifest.routes.filter(
+        ({ sourceFormat, targetFormat }) => sourceFormat === 'glb' && targetFormat === 'webp',
+      );
+      expect(routes).toHaveLength(1);
+      expect(routes[0]?.transcoderId).toBe('first-edge');
+      expect(routes[0]?.exportOptions.schema.properties).toHaveProperty('first');
+      expect(routes[0]?.exportOptions.schema.properties).not.toHaveProperty('second');
+      await worker.cleanup();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('rejects a plugin registering the same edge twice', async () => {
+    const runtime = defineRuntime({
+      transcoders: [
+        defineTranscoder({
+          id: 'twice',
+          name: 'twice',
+          version: '1.0.0',
+          edges: [
+            { from: 'glb', to: 'webp', fidelity: 'mesh' },
+            { from: 'glb', to: 'webp', fidelity: 'mesh' },
+          ] as const,
+          async initialize() {
+            return {};
+          },
+          async transcode(input) {
+            return { success: true, data: input.files, issues: [] };
+          },
+        })(),
+      ],
+    });
+    const worker = new KernelRuntimeWorker({ runtime });
+
+    await expect(initializeWorkerForTesting(worker)).rejects.toThrow(
+      'Duplicate transcoder edge glb → webp registered twice by "twice".',
+    );
+  });
+
+  it('fails initialization when an edge schema cannot be advertised as JSON Schema', async () => {
+    const transcoder = defineTranscoder({
+      id: 'unadvertisable-edge',
+      name: 'Unadvertisable edge',
+      version: '1.0.0',
+      edges: [{ from: 'glb', to: 'webp', fidelity: 'mesh', optionsSchema: z.date() }] as const,
+      async initialize() {
+        return {};
+      },
+      async transcode(input) {
+        return { success: true, data: input.files, issues: [] };
+      },
+    })();
+    const worker = new KernelRuntimeWorker({ runtime: defineRuntime({ transcoders: [transcoder] }) });
+
+    await expect(initializeWorkerForTesting(worker)).rejects.toThrow(
+      'Failed to derive JSON Schema for unadvertisable-edge glb->webp.',
+    );
   });
 });
 
@@ -2108,6 +2575,112 @@ describe('cache identity regressions', () => {
       { id: 'other-kernel' },
     );
   });
+
+  it('evaluates display geometry in a request-owned lane without replacing a concurrent preview', async () => {
+    await seedTestFileSystem({
+      'preview.view': 'preview',
+      'export.source': 'export',
+    });
+    const meshGeometry = vi.fn(async (input) => ({
+      geometry: gltfGeometry(`mesh:${handleLabel(input.nativeHandle)}`),
+      issues: [] as KernelIssue[],
+    }));
+    const evaluationKernel = createMockKernelDefinition('evaluation-kernel', {
+      createGeometry: async (input, runtime) => {
+        const source = await runtime.filesystem.readFile(input.entryPath, 'utf8');
+        return { nativeHandle: { label: source }, issues: [] as KernelIssue[] };
+      },
+      meshGeometry,
+    });
+    const previewKernel = createMockKernelDefinition('preview-kernel', {
+      createGeometry: async (input) => ({
+        geometry: gltfGeometry(String(input.parameters['label'])),
+        nativeHandle: { label: String(input.parameters['label']) },
+        issues: [] as KernelIssue[],
+      }),
+    });
+    const exportKernel = createMockKernelDefinition('export-kernel', {
+      exportFormats: { glb: { optionsSchema: z.object({}) } },
+      createGeometry: async () => ({ nativeHandle: { label: 'export-b' }, issues: [] as KernelIssue[] }),
+      exportGeometry: async (input: ExportGeometryInput) => ({
+        success: true,
+        data: [exportFile('export.glb', bytesFor(handleLabel(input.nativeHandle)), 'model/gltf-binary')],
+        issues: [],
+      }),
+    });
+    const worker = await createMultiKernelWorker([
+      { id: 'preview-kernel', extensions: ['view'], definition: previewKernel },
+      { id: 'evaluation-kernel', extensions: ['eval'], definition: evaluationKernel },
+      { id: 'export-kernel', extensions: ['source'], definition: exportKernel },
+    ]);
+    const geometryEvents: string[] = [];
+    const parameterEvents: string[] = [];
+    const progressEvents: string[] = [];
+    const idle = new Map<string, ReturnType<typeof Promise.withResolvers<void>>>();
+    worker.onGeometryComputed = ({ renderId }) => geometryEvents.push(renderId);
+    worker.onParametersResolved = ({ renderId }) => parameterEvents.push(renderId);
+    worker.onProgressUpdate = ({ renderId }) => progressEvents.push(renderId);
+    worker.onStateChanged = ({ renderId, state }) => {
+      if (state === 'idle') {
+        idle.get(renderId)?.resolve();
+      }
+    };
+    const previewC = '550e8400-e29b-41d4-a716-000000000301';
+    const updateD = '550e8400-e29b-41d4-a716-000000000302';
+    idle.set(previewC, Promise.withResolvers<void>());
+    idle.set(updateD, Promise.withResolvers<void>());
+
+    try {
+      worker.handleOpenFile({
+        renderId: previewC,
+        file: createGeometryFile('preview.view'),
+        parameters: { label: 'preview-c' },
+      });
+      await idle.get(previewC)!.promise;
+      geometryEvents.length = 0;
+      parameterEvents.length = 0;
+      progressEvents.length = 0;
+
+      const evaluation = worker.evaluateModel({
+        stage: { 'nested/request.eval': bytesFor('evaluation-a') },
+        file: createGeometryFile('nested/request.eval'),
+        parameters: {},
+      });
+      const exported = worker.exportModel({
+        file: createGeometryFile('export.source'),
+        parameters: {},
+        format: 'glb',
+      });
+      worker.handleOpenFile({
+        renderId: updateD,
+        file: createGeometryFile('preview.view'),
+        parameters: { label: 'preview-d' },
+      });
+
+      const [evaluationResult, exportResult] = await Promise.all([evaluation, exported]);
+      await idle.get(updateD)!.promise;
+      expect(evaluationResult.success).toBe(true);
+      if (evaluationResult.success && evaluationResult.data.format === 'gltf') {
+        expect(textFrom(evaluationResult.data.content)).toBe('mesh:evaluation-a');
+      }
+      expect(meshGeometry).toHaveBeenCalledOnce();
+      expect(exportResult.success).toBe(true);
+      if (exportResult.success) {
+        expect(textFrom(exportResult.data[0]!.bytes)).toBe('export-b');
+      }
+      expect(textFrom(await getTestFileSystem().readFile('nested/request.eval'))).toBe('evaluation-a');
+      expect(geometryEvents).toEqual([updateD]);
+      expect(parameterEvents).toEqual([updateD]);
+      expect(new Set(progressEvents)).toEqual(new Set([updateD]));
+
+      const current = await worker.exportGeometry('gltf');
+      expect(current.success).toBe(false);
+      const published = (worker as unknown as { currentPublishedRender: MaterializedRender }).currentPublishedRender;
+      expect(published.identity.parameters).toEqual({ label: 'preview-d' });
+    } finally {
+      await worker.cleanup();
+    }
+  });
 });
 
 // ===================================================================
@@ -2158,7 +2731,10 @@ describe('installWorkerCrashTrap', () => {
    * for the duration of the install lets us pull out exactly the new
    * listener and exercise it without touching vitest's surface.
    */
-  function captureAndInstall(server: ReturnType<typeof createWorkerDispatcher>): {
+  function captureAndInstall(
+    server: ReturnType<typeof createWorkerDispatcher>,
+    options?: { readonly exit?: (code: number) => void },
+  ): {
     readonly dispose: () => void;
     readonly fireUncaught: (error: Error) => void;
     readonly fireUnhandled: (reason: unknown) => void;
@@ -2169,7 +2745,7 @@ describe('installWorkerCrashTrap', () => {
       return process;
     });
 
-    const dispose = installWorkerCrashTrap(server);
+    const dispose = installWorkerCrashTrap(server, options);
     onSpy.mockRestore();
 
     return {
@@ -2179,10 +2755,11 @@ describe('installWorkerCrashTrap', () => {
     };
   }
 
-  it('closes the channel with `lb` when an `uncaughtException` fires', async () => {
+  it('closes the channel with `lb` and ends the process when an `uncaughtException` fires', async () => {
     const fixture = await buildBootstrapFixture();
     const disposeSpy = vi.spyOn(fixture.server, 'dispose');
-    const trap = captureAndInstall(fixture.server);
+    const exit = vi.fn<(code: number) => void>();
+    const trap = captureAndInstall(fixture.server, { exit });
     teardown = (): void => {
       trap.dispose();
       fixture.server.dispose('test-cleanup');
@@ -2199,14 +2776,22 @@ describe('installWorkerCrashTrap', () => {
      * Wait for the client to observe the close handshake. */
     await fixture.client.closed;
     expect(fixture.closeReasons).toEqual([expect.stringContaining('synthetic worker crash')]);
+    /* The exit waits for the server's own close to finalize, which the
+     * client's observation only approximates. */
+    await vi.waitFor(() => {
+      expect(exit).toHaveBeenCalledWith(1);
+    });
   });
 
-  it('closes the channel with `lb` when an `unhandledRejection` fires', async () => {
+  it('leaves the channel open when an `unhandledRejection` fires', async () => {
     const fixture = await buildBootstrapFixture();
     const disposeSpy = vi.spyOn(fixture.server, 'dispose');
-    const trap = captureAndInstall(fixture.server);
+    const stderrSpy = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    const exit = vi.fn<(code: number) => void>();
+    const trap = captureAndInstall(fixture.server, { exit });
     teardown = (): void => {
       trap.dispose();
+      stderrSpy.mockRestore();
       fixture.server.dispose('test-cleanup');
       fixture.client.close('test-cleanup');
       fixture.channel.port1.close();
@@ -2215,9 +2800,14 @@ describe('installWorkerCrashTrap', () => {
 
     trap.fireUnhandled(new Error('async worker boom'));
 
-    expect(disposeSpy).toHaveBeenCalledWith(expect.stringContaining('async worker boom'));
-    await fixture.client.closed;
-    expect(fixture.closeReasons).toEqual([expect.stringContaining('async worker boom')]);
+    expect(disposeSpy).not.toHaveBeenCalled();
+    expect(exit).not.toHaveBeenCalled();
+    expect(stderrSpy).toHaveBeenCalledWith(
+      expect.stringContaining('[tau-runtime] unhandled rejection: async worker boom'),
+    );
+    /* The session survives: the next call still round-trips. */
+    await expect(fixture.client.call('cleanup', undefined)).resolves.toBeNull();
+    expect(fixture.closeReasons).toEqual([]);
   });
 
   it('removes process listeners after teardown', async () => {

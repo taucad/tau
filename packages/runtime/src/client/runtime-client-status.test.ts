@@ -5,9 +5,9 @@ import type { Channel } from '@taucad/rpc';
 import type { Geometry } from '@taucad/types';
 import { createRuntimeClient, RuntimeNotConnectedError, RuntimeTerminatedError } from '#client/runtime-client-core.js';
 import type { RenderStatus } from '#client/runtime-client-core.js';
-import { RenderTimeoutError } from '#framework/runtime-worker-client.js';
+import { RenderTimeoutError, TranscodeTimeoutError } from '#framework/runtime-worker-client.js';
 import type { GeometryTransport, RuntimeProtocol, WorkerState } from '#types/runtime-protocol.types.js';
-import type { KernelIssue } from '#types/runtime.types.js';
+import type { ExportGeometryResult, KernelIssue } from '#types/runtime.types.js';
 import type {
   RuntimeTransportClient,
   RuntimeTransportRenderTarget,
@@ -48,6 +48,11 @@ const failureGeometry = (): Omit<RuntimeProtocol['notifies']['geometryComputed']
 
 function createStatusClientFixture(options?: {
   readonly renderTimeout?: number;
+  readonly transcodeTimeout?: number;
+  readonly transcode?: (
+    args: RuntimeProtocol['calls']['transcode']['args'],
+    signal?: AbortSignal,
+  ) => Promise<ExportGeometryResult>;
   readonly resolveGeometry?: (geometry: GeometryTransport) => Promise<Geometry>;
   readonly config?: unknown;
   readonly reservePreview?: RuntimeTransportClient['reservePreview'];
@@ -70,9 +75,26 @@ function createStatusClientFixture(options?: {
   const handlers: NotifyHandlers = {};
   const handlersReadySlot = Promise.withResolvers<void>();
   const notify = vi.fn<(name: string, args: unknown) => void>();
-  const call = vi.fn(async (name: keyof RuntimeProtocol['calls']) => {
+  const call = vi.fn(async (name: keyof RuntimeProtocol['calls'], args: unknown, signal?: AbortSignal) => {
     if (name === 'cleanup') {
       return null;
+    }
+    if (name === 'transcode' && options?.transcode) {
+      signal?.throwIfAborted();
+      const operation = options.transcode(args as RuntimeProtocol['calls']['transcode']['args'], signal);
+      if (!signal) {
+        return operation;
+      }
+      const aborted = Promise.withResolvers<never>();
+      const rejectAborted = () => {
+        aborted.reject(new DOMException('Transcode aborted.', 'AbortError'));
+      };
+      signal.addEventListener('abort', rejectAborted, { once: true });
+      try {
+        return await Promise.race([operation, aborted.promise]);
+      } finally {
+        signal.removeEventListener('abort', rejectAborted);
+      }
     }
     throw new Error('Unexpected RPC call');
   });
@@ -185,6 +207,7 @@ function createStatusClientFixture(options?: {
     client: createRuntimeClient<AnyRuntimeDefinition>({
       transport: plugin,
       ...(options?.renderTimeout === undefined ? {} : { renderTimeout: options.renderTimeout }),
+      ...(options?.transcodeTimeout === undefined ? {} : { transcodeTimeout: options.transcodeTimeout }),
       ...(options?.config === undefined ? {} : { config: options.config }),
     }),
     handlers,
@@ -230,7 +253,105 @@ const waitForRuntimeNotifyHandlers = async (handlers: NotifyHandlers, attempts =
   await waitForRuntimeNotifyHandlers(handlers, attempts - 1);
 };
 
+afterEach(() => {
+  vi.useRealTimers();
+});
+
 describe('RuntimeClient renderStatus', () => {
+  it('aborts a timed-out transcode, then terminates an unresponsive isolated host', async () => {
+    let observedSignal: AbortSignal | undefined;
+    const { client, terminateHost } = createStatusClientFixture({
+      transcodeTimeout: 50,
+      transcode: async (_args, signal) =>
+        new Promise<ExportGeometryResult>(() => {
+          observedSignal = signal;
+        }),
+    });
+    const issues: KernelIssue[] = [];
+    client.on('error', (reported) => issues.push(...reported));
+    await client.connect();
+    vi.useFakeTimers();
+
+    const transcode = client.transcode({
+      from: 'glb',
+      to: 'webp',
+      files: [{ name: 'model.glb', bytes: new Uint8Array([1]), mimeType: 'model/gltf-binary' }],
+      options: {},
+    });
+    const timeoutSettlement = expect(transcode).rejects.toEqual(new TranscodeTimeoutError(50));
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(50);
+
+    await timeoutSettlement;
+    expect(observedSignal?.aborted).toBe(true);
+    expect(issues).toEqual([
+      expect.objectContaining({
+        code: 'TRANSCODER_TIMEOUT',
+        type: 'runtime',
+        severity: 'error',
+      }),
+    ]);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(terminateHost).toHaveBeenCalledOnce();
+    expect(client.lifecycleState).toBe('terminated');
+  });
+
+  it('settles every active transcode with RuntimeTerminatedError on explicit termination', async () => {
+    const { client } = createStatusClientFixture({
+      transcode: async () => Promise.withResolvers<ExportGeometryResult>().promise,
+    });
+    await client.connect();
+    const request = {
+      from: 'glb',
+      to: 'webp',
+      files: [{ name: 'model.glb', bytes: new Uint8Array([1]), mimeType: 'model/gltf-binary' }],
+      options: {},
+    } satisfies Parameters<typeof client.transcode>[0];
+    const first = client.transcode(request);
+    const queued = client.transcode(request);
+    const settlements = Promise.all([
+      expect(first).rejects.toEqual(new RuntimeTerminatedError('explicit')),
+      expect(queued).rejects.toEqual(new RuntimeTerminatedError('explicit')),
+    ]);
+
+    client.terminate();
+
+    await settlements;
+  });
+
+  it('does not escalate caller-requested transcode cancellation', async () => {
+    const { client, terminateHost } = createStatusClientFixture({
+      transcodeTimeout: 50,
+      transcode: async (_args, signal) =>
+        new Promise<ExportGeometryResult>((_resolve, reject) => {
+          signal?.addEventListener(
+            'abort',
+            () => {
+              reject(new DOMException('Transcode aborted.', 'AbortError'));
+            },
+            { once: true },
+          );
+        }),
+    });
+    await client.connect();
+    vi.useFakeTimers();
+    const controller = new AbortController();
+    const transcode = client.transcode({
+      from: 'glb',
+      to: 'webp',
+      files: [{ name: 'model.glb', bytes: new Uint8Array([1]), mimeType: 'model/gltf-binary' }],
+      options: {},
+      signal: controller.signal,
+    });
+    await Promise.resolve();
+    controller.abort();
+
+    await expect(transcode).rejects.toMatchObject({ name: 'AbortError' });
+    await vi.advanceTimersByTimeAsync(1050);
+    expect(terminateHost).not.toHaveBeenCalled();
+    client.terminate();
+  });
+
   it('should share one lazy connection attempt across concurrent callers (T1)', async () => {
     const configGate = Promise.withResolvers<unknown>();
     const config = vi.fn(async () => configGate.promise);
@@ -938,6 +1059,30 @@ describe('RuntimeClient render timeout control plane', () => {
     client.terminate();
   });
 
+  /**
+   * T28's other half. The worker now puts the reason on the terminal `error`
+   * state itself (`kernel-worker.ts`, `failRender`), so an error event lost on
+   * the way — dropped by wire validation, or never sent because admission was
+   * already closed — no longer costs the caller its diagnosis.
+   */
+  it('should settle a public render with the reason the terminal error state carries', async () => {
+    const { client, handlers, handlersReady, notify } = createStatusClientFixture();
+    await client.connect();
+    await handlersReady;
+
+    const render = client.render({ source: { path: 'main.ts' } });
+    await Promise.resolve();
+    const renderId = renderIdFromNotify(notify, 0);
+    handlers.stateChanged?.({
+      renderId,
+      abortGeneration: 1,
+      state: 'error',
+      detail: 'Kernel "openrscad" failed to load: libassimp export missing',
+    });
+    await expect(render).rejects.toThrow('Kernel "openrscad" failed to load: libassimp export missing');
+    client.terminate();
+  });
+
   it('should scope a superseded command failure to its own admission (T41)', async () => {
     const { client, handlers, handlersReady, notify } = createStatusClientFixture();
     const statuses: RenderStatus[] = [];
@@ -1003,7 +1148,7 @@ describe('RuntimeClient render timeout control plane', () => {
       causeKind: 'transport-closed',
     });
 
-    closeTransport({ cause: 'host-exit', exitCode: 1 });
+    closeTransport({ cause: 'host-exit', exitCode: 1, phase: 'session' });
 
     await termination;
     expect(client.lifecycleState).toBe('terminated');
@@ -1015,13 +1160,56 @@ describe('RuntimeClient render timeout control plane', () => {
     client.on('log', (entry) => entries.push({ level: entry.level, message: entry.message }));
     await client.connect();
 
-    closeTransport({ cause: 'host-exit', exitCode: 9 });
+    closeTransport({ cause: 'host-exit', exitCode: 9, phase: 'session' });
     await nextTask();
 
     expect(entries).toHaveLength(1);
     expect(entries[0]?.level).toBe('warn');
-    expect(entries[0]?.message).toContain('9');
+    expect(entries[0]?.message).toBe('Runtime host exited (exit code 9) during session; the client is terminating.');
     expect(client.lifecycleState).toBe('terminated');
+  });
+
+  it('logs the boot phase and the first stderr line of a host that never started', async () => {
+    const { client, closeTransport } = createStatusClientFixture();
+    const entries: string[] = [];
+    client.on('log', (entry) => entries.push(entry.message));
+    await client.connect();
+
+    closeTransport({ cause: 'host-exit', exitCode: 1, phase: 'boot', stderrTail: 'ERR_MODULE_NOT_FOUND\n  at load\n' });
+    await nextTask();
+
+    expect(entries).toEqual([
+      'Runtime host exited (exit code 1) during boot; the client is terminating. — ERR_MODULE_NOT_FOUND',
+    ]);
+  });
+
+  it('carries the boot-failure detail on the error every pending command rejects with', async () => {
+    const { client, closeTransport } = createStatusClientFixture();
+    await client.connect();
+    const render = client.render({ source: { path: 'pending.ts' } });
+    const termination = expect(render).rejects.toMatchObject({
+      causeKind: 'transport-closed',
+      detail: { exitCode: 1, phase: 'boot', stderrTail: 'ERR_MODULE_NOT_FOUND\n' },
+      message: 'The runtime host failed to start (exit code 1): ERR_MODULE_NOT_FOUND.',
+    });
+
+    closeTransport({ cause: 'host-exit', exitCode: 1, phase: 'boot', stderrTail: 'ERR_MODULE_NOT_FOUND\n' });
+
+    await termination;
+  });
+
+  it('keeps a host exit that follows terminate() an explicit termination', async () => {
+    const { client, closeTransport } = createStatusClientFixture();
+    await client.connect();
+
+    client.terminate();
+    closeTransport({ cause: 'host-exit', exitCode: 0, phase: 'session', released: true });
+    await nextTask();
+
+    await expect(client.render({ source: { path: 'after.ts' } })).rejects.toMatchObject({
+      causeKind: 'explicit',
+      message: 'RuntimeClient has been terminated.',
+    });
   });
 
   it('discards every late render-scoped frame from a superseded preview', async () => {

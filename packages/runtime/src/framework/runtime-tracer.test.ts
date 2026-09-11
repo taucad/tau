@@ -19,7 +19,9 @@ describe('RuntimeTracer', () => {
   it('emits completed spans directly without touching the Performance Timeline by default', () => {
     const entries: TelemetryEntry[] = [];
     const tracer = new RuntimeTracer();
-    tracer.setEntrySink((entry) => entries.push(entry));
+    tracer.setEntrySink((entry) => {
+      entries.push(entry);
+    });
 
     tracer.startSpan('test.operation').end();
 
@@ -37,7 +39,9 @@ describe('RuntimeTracer', () => {
   it('preserves parent-child IDs and merged attributes', () => {
     const entries: TelemetryEntry[] = [];
     const tracer = new RuntimeTracer();
-    tracer.setEntrySink((entry) => entries.push(entry));
+    tracer.setEntrySink((entry) => {
+      entries.push(entry);
+    });
     const outer = tracer.startSpan('outer', { file: 'main.ts', count: 42 });
     const inner = tracer.startSpan('inner');
 
@@ -98,5 +102,39 @@ describe('RuntimeTracer', () => {
     expect(clearMeasuresSpy).not.toHaveBeenCalled();
     clearMarksSpy.mockRestore();
     clearMeasuresSpy.mockRestore();
+  });
+
+  it('ends each span at most once', () => {
+    const entries: TelemetryEntry[] = [];
+    const tracer = new RuntimeTracer();
+    tracer.setEntrySink((entry) => entries.push(entry));
+    const span = tracer.startSpan('single-end');
+
+    span.end({ success: true });
+    span.end({ success: false });
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.detail).toMatchObject({ success: true });
+  });
+
+  it('keeps telemetry sink failures out of operation outcomes and span ancestry', () => {
+    const entries: TelemetryEntry[] = [];
+    const tracer = new RuntimeTracer();
+    tracer.setEntrySink(() => {
+      throw new Error('telemetry unavailable');
+    });
+
+    expect(() => {
+      tracer.startSpan('failed-telemetry').end();
+    }).not.toThrow();
+    tracer.setEntrySink((entry) => {
+      entries.push(entry);
+    });
+    tracer.startSpan('next-operation').end();
+
+    expect(entries[0]).toMatchObject({
+      name: 'next-operation',
+      detail: { parentSpanId: undefined },
+    });
   });
 });

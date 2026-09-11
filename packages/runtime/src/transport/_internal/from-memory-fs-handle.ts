@@ -73,19 +73,26 @@ function buildMemoryFsBase(
 ): RuntimeFileSystemBase {
   const store = new Map<string, Uint8Array<ArrayBuffer> | string>();
   const directories = new Set<string>();
+  const fileMtimes = new Map<string, number>();
+  const directoryMtimes = new Map<string, number>();
+  const initializedAt = Date.now();
 
   if (seedFiles) {
     for (const [filePath, content] of Object.entries(seedFiles)) {
       const canonicalPath = assertRootedPath(filePath);
       store.set(canonicalPath, content);
+      fileMtimes.set(canonicalPath, initializedAt);
       const parts = canonicalPath.split('/');
       for (let i = 1; i < parts.length; i++) {
-        directories.add(parts.slice(0, i).join('/'));
+        const directory = parts.slice(0, i).join('/');
+        directories.add(directory);
+        directoryMtimes.set(directory, initializedAt);
       }
     }
   }
 
   directories.add('');
+  directoryMtimes.set('', initializedAt);
 
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();
@@ -115,14 +122,20 @@ function buildMemoryFsBase(
     dispose() {
       store.clear();
       directories.clear();
+      fileMtimes.clear();
+      directoryMtimes.clear();
     },
     readFile,
     async writeFile(filePath, data) {
       const canonicalPath = assertRootedPath(filePath);
+      const writtenAt = Date.now();
       store.set(canonicalPath, data);
+      fileMtimes.set(canonicalPath, writtenAt);
       const parts = canonicalPath.split('/');
       for (let i = 1; i < parts.length; i++) {
-        directories.add(parts.slice(0, i).join('/'));
+        const directory = parts.slice(0, i).join('/');
+        directories.add(directory);
+        directoryMtimes.set(directory, writtenAt);
       }
     },
     async mkdir(directoryPath, options) {
@@ -136,6 +149,7 @@ function buildMemoryFsBase(
         throw errno('EEXIST', `EEXIST: file already exists: ${canonicalPath}`);
       }
       const parts = canonicalPath.split('/');
+      const createdAt = Date.now();
       if (options?.recursive !== true) {
         const parent = parts.slice(0, -1).join('/');
         if (!directories.has(parent)) {
@@ -143,8 +157,11 @@ function buildMemoryFsBase(
         }
       }
       directories.add(canonicalPath);
+      directoryMtimes.set(canonicalPath, createdAt);
       for (let i = 1; i < parts.length; i++) {
-        directories.add(parts.slice(0, i).join('/'));
+        const directory = parts.slice(0, i).join('/');
+        directories.add(directory);
+        directoryMtimes.set(directory, createdAt);
       }
     },
     async readdir(directoryPath) {
@@ -175,17 +192,18 @@ function buildMemoryFsBase(
         throw errno('EISDIR', `EISDIR: illegal operation on a directory: ${canonicalPath}`);
       }
       store.delete(canonicalPath);
+      fileMtimes.delete(canonicalPath);
     },
     async stat(filePath) {
       const canonicalPath = assertRootedPath(filePath);
       if (store.has(canonicalPath)) {
         const content = store.get(canonicalPath)!;
         const bytes = typeof content === 'string' ? encoder.encode(content) : content;
-        return fileStatFromBytes(bytes, Date.now());
+        return fileStatFromBytes(bytes, fileMtimes.get(canonicalPath) ?? 0);
       }
 
       if (directories.has(canonicalPath)) {
-        return { type: 'dir', size: 0, mtimeMs: Date.now() };
+        return { type: 'dir', size: 0, mtimeMs: directoryMtimes.get(canonicalPath) ?? 0 };
       }
 
       throw enoent(`ENOENT: no such file or directory: ${canonicalPath}`);
@@ -206,6 +224,7 @@ function buildMemoryFsBase(
         throw errno('ENOTEMPTY', `ENOTEMPTY: directory not empty: ${canonicalPath}`);
       }
       directories.delete(canonicalPath);
+      directoryMtimes.delete(canonicalPath);
     },
     async rename(oldPath, newPath) {
       const canonicalOldPath = assertRootedPath(oldPath);
@@ -214,23 +233,30 @@ function buildMemoryFsBase(
       if (content !== undefined) {
         store.set(canonicalNewPath, content);
         store.delete(canonicalOldPath);
+        fileMtimes.set(canonicalNewPath, fileMtimes.get(canonicalOldPath) ?? 0);
+        fileMtimes.delete(canonicalOldPath);
       } else if (directories.has(canonicalOldPath)) {
         const oldPrefix = `${canonicalOldPath}/`;
         const newPrefix = `${canonicalNewPath}/`;
         for (const [filePath, fileContent] of new Map(store)) {
           if (filePath.startsWith(oldPrefix)) {
+            const renamedPath = `${newPrefix}${filePath.slice(oldPrefix.length)}`;
             store.delete(filePath);
-            store.set(`${newPrefix}${filePath.slice(oldPrefix.length)}`, fileContent);
+            store.set(renamedPath, fileContent);
+            fileMtimes.set(renamedPath, fileMtimes.get(filePath) ?? 0);
+            fileMtimes.delete(filePath);
           }
         }
         for (const directoryPath of new Set(directories)) {
           if (directoryPath === canonicalOldPath || directoryPath.startsWith(oldPrefix)) {
-            directories.delete(directoryPath);
-            directories.add(
+            const renamedPath =
               directoryPath === canonicalOldPath
                 ? canonicalNewPath
-                : `${newPrefix}${directoryPath.slice(oldPrefix.length)}`,
-            );
+                : `${newPrefix}${directoryPath.slice(oldPrefix.length)}`;
+            directories.delete(directoryPath);
+            directories.add(renamedPath);
+            directoryMtimes.set(renamedPath, directoryMtimes.get(directoryPath) ?? 0);
+            directoryMtimes.delete(directoryPath);
           }
         }
       } else {
@@ -242,11 +268,11 @@ function buildMemoryFsBase(
       if (store.has(canonicalPath)) {
         const content = store.get(canonicalPath)!;
         const bytes = typeof content === 'string' ? encoder.encode(content) : content;
-        return fileStatFromBytes(bytes, Date.now());
+        return fileStatFromBytes(bytes, fileMtimes.get(canonicalPath) ?? 0);
       }
 
       if (directories.has(canonicalPath)) {
-        return { type: 'dir', size: 0, mtimeMs: Date.now() };
+        return { type: 'dir', size: 0, mtimeMs: directoryMtimes.get(canonicalPath) ?? 0 };
       }
 
       throw enoent(`ENOENT: no such file or directory: ${canonicalPath}`);

@@ -40,7 +40,7 @@ import type { Geometry, OnWorkerLog, LogEntry } from '@taucad/types';
 import { idPrefix } from '@taucad/types/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { createChannelServer } from '@taucad/rpc';
-import type { ChannelServer, ChannelServerHandle, Port, WithTransferables } from '@taucad/rpc';
+import type { ChannelServer, ChannelServerHandle, MessagePortLike, Port, WithTransferables } from '@taucad/rpc';
 import { runtimeProtocolSchemas } from '#types/runtime-protocol.schemas.js';
 import type { KernelIssueCode } from '#types/kernel-issue-codes.js';
 import { isKernelIssueCode } from '#types/kernel-issue-codes.js';
@@ -49,11 +49,15 @@ import type { RuntimeSourceSnapshotResult } from '#types/runtime-source-snapshot
 import type {
   GeometryTransport,
   HashedGeometryResultTransport,
+  ProgressiveSceneUpdateTransport,
+  ResolvedSceneAssetTransport,
+  ResolvedSceneSnapshotTransport,
   RuntimeHelloPayload,
   RuntimeProtocol,
   RuntimeGeometryComputedArgs,
   TelemetryEntry,
 } from '#types/runtime-protocol.types.js';
+import type { ProgressiveSceneUpdate, ResolvedSceneAsset, ResolvedSceneSnapshot } from '#types/runtime-scene.types.js';
 import type { RuntimeFileSystemBase } from '#types/runtime-kernel.types.js';
 import type { KernelWorker } from '#framework/kernel-worker.js';
 import { logFlushDebounce } from '#framework/runtime-framework.constants.js';
@@ -67,6 +71,7 @@ import type {
   RuntimeInitializeMemoryHandle,
 } from '#transport/runtime-transport.types.js';
 import { RuntimeAlreadyInitializedError } from '#transport/runtime-transport.types.js';
+import { createComputeStoreChannelClient } from '#transport/_internal/compute-store-channel.js';
 
 /** Stable session key for the runtime worker channel. */
 export const runtimeChannelSessionKey = 'tau.runtime/v1';
@@ -116,8 +121,30 @@ function toTransportResult(
   };
 }
 
-function normaliseIssueForWire<T extends { code?: unknown }>(issue: T): T & { code: KernelIssueCode } {
-  return isKernelIssueCode(issue.code) ? (issue as T & { code: KernelIssueCode }) : { ...issue, code: 'UNKNOWN' };
+const issueSeverities = new Set(['error', 'warning', 'info']);
+
+/**
+ * Make one issue row acceptable to the runtime protocol's `kernelIssueSchema`.
+ *
+ * A row the schema rejects is not a degraded frame — the receiving channel
+ * drops the whole notify silently, so a kernel's issues, a render's failure or
+ * an export's diagnosis vanish entirely (`libs/rpc/src/channel.ts`,
+ * `handleNotifyFrame`). `severity` is repaired for the same reason `code` is:
+ * these rows cross the boundary from arbitrary kernel and middleware code, and
+ * the wire is the last place that can still see them.
+ *
+ * @param issue - Candidate issue row from kernel, middleware or framework code.
+ * @returns The row with a protocol-valid `code` and `severity`.
+ */
+function normaliseIssueForWire<T extends { code?: unknown; severity?: unknown }>(
+  issue: T,
+): T & { code: KernelIssueCode; severity: 'error' | 'warning' | 'info' } {
+  const code = isKernelIssueCode(issue.code) ? issue.code : 'UNKNOWN';
+  const severity =
+    typeof issue.severity === 'string' && issueSeverities.has(issue.severity)
+      ? (issue.severity as 'error' | 'warning' | 'info')
+      : 'error';
+  return { ...issue, code, severity };
 }
 
 function prepareExportTransfer(
@@ -153,6 +180,142 @@ function prepareSourceSnapshotTransfer(
   return { ...result, data: { ...result.data, files }, issues };
 }
 
+function prepareSceneAssetTransfer(
+  asset: ResolvedSceneAsset,
+  context: {
+    readonly encode: GeometryEncoder;
+    readonly transferables: Transferable[];
+    readonly sentContentDigests?: Set<ResolvedSceneAsset['contentDigest']>;
+  },
+): ResolvedSceneAssetTransport {
+  if (context.sentContentDigests?.has(asset.contentDigest)) {
+    return {
+      delivery: 'reference',
+      contentDigest: asset.contentDigest,
+      mediaType: asset.mediaType,
+      byteLength: asset.byteLength,
+    };
+  }
+  const geometry = applyGeometryEncoder(
+    { ...asset.geometry, hash: asset.contentDigest },
+    context.encode,
+    context.transferables,
+  );
+  context.sentContentDigests?.add(asset.contentDigest);
+  return { ...asset, delivery: 'inline', geometry };
+}
+
+function prepareSceneSnapshotTransfer(
+  snapshot: ResolvedSceneSnapshot,
+  context: Parameters<typeof prepareSceneAssetTransfer>[1],
+): ResolvedSceneSnapshotTransport {
+  return {
+    manifest: snapshot.manifest,
+    assets: snapshot.assets.map((asset) => prepareSceneAssetTransfer(asset, context)),
+  };
+}
+
+function prepareSceneUpdateTransfer(
+  update: ProgressiveSceneUpdate,
+  context: Parameters<typeof prepareSceneAssetTransfer>[1],
+): ProgressiveSceneUpdateTransport {
+  switch (update.type) {
+    case 'reset': {
+      return {
+        ...update,
+        snapshot: prepareSceneSnapshotTransfer(update.snapshot, context),
+      };
+    }
+    case 'delta': {
+      return {
+        ...update,
+        assets: update.assets.map((asset) => prepareSceneAssetTransfer(asset, context)),
+      };
+    }
+    case 'refinement': {
+      return {
+        ...update,
+        replacements: update.replacements.map((replacement) => ({
+          ...replacement,
+          replacement: prepareSceneAssetTransfer(replacement.replacement, context),
+        })),
+      };
+    }
+    case 'bookmark': {
+      return update;
+    }
+  }
+}
+
+const sceneQueueClosed = Symbol('sceneQueueClosed');
+
+/** One-slot rendezvous: the kernel cannot outrun a paused RPC consumer. */
+class SceneUpdateQueue {
+  private pending:
+    | { readonly update: ProgressiveSceneUpdate; readonly consumed: ReturnType<typeof Promise.withResolvers<void>> }
+    | undefined;
+  private waiter:
+    | ReturnType<typeof Promise.withResolvers<ProgressiveSceneUpdate | typeof sceneQueueClosed>>
+    | undefined;
+  private closed = false;
+
+  public async push(update: ProgressiveSceneUpdate): Promise<void> {
+    if (this.closed) {
+      return;
+    }
+    if (this.waiter) {
+      const { waiter } = this;
+      this.waiter = undefined;
+      waiter.resolve(update);
+      return;
+    }
+    if (this.pending) {
+      await this.pending.consumed.promise;
+      return this.push(update);
+    }
+    const consumed = Promise.withResolvers<void>();
+    this.pending = { update, consumed };
+    await consumed.promise;
+  }
+
+  public async shift(signal: AbortSignal): Promise<ProgressiveSceneUpdate | typeof sceneQueueClosed> {
+    if (this.pending) {
+      const { pending } = this;
+      this.pending = undefined;
+      pending.consumed.resolve();
+      return pending.update;
+    }
+    if (this.closed || signal.aborted) {
+      return sceneQueueClosed;
+    }
+    const waiter = Promise.withResolvers<ProgressiveSceneUpdate | typeof sceneQueueClosed>();
+    this.waiter = waiter;
+    const abort = (): void => {
+      waiter.resolve(sceneQueueClosed);
+    };
+    signal.addEventListener('abort', abort, { once: true });
+    try {
+      return await waiter.promise;
+    } finally {
+      signal.removeEventListener('abort', abort);
+      if (this.waiter === waiter) {
+        this.waiter = undefined;
+      }
+    }
+  }
+
+  public close(): void {
+    if (this.closed) {
+      return;
+    }
+    this.closed = true;
+    this.pending?.consumed.resolve();
+    this.pending = undefined;
+    this.waiter?.resolve(sceneQueueClosed);
+    this.waiter = undefined;
+  }
+}
+
 /**
  * Options accepted by {@link createWorkerDispatcher}. The
  * `inlineFileSystem` field is the local-disk fast-path seam (TR16):
@@ -172,6 +335,10 @@ function prepareSourceSnapshotTransfer(
  */
 export type WorkerDispatcherOptions = {
   readonly inlineFileSystem?: RuntimeFileSystemBase;
+  /** Trusted host-side compute authority; takes precedence over client initialize fields. */
+  readonly computeStorePort?: MessagePortLike | Port<unknown>;
+  /** Trusted host-side mode when no durable authority is present. */
+  readonly computeBindingMode?: 'off' | 'memory';
   /**
    * Transport-supplied geometry encoder (typically
    * `bindings.geometryDelivery.publish`). When omitted the dispatcher
@@ -252,6 +419,7 @@ export function createWorkerDispatcher(
   let encodeBinary: BinaryEncoder = dispatcherOptions?.encodeBinary ?? inlineBinaryEncoder;
   let acknowledgeBinary = dispatcherOptions?.acknowledgeBinary ?? (() => undefined);
   let exportPublicationId = 0;
+  const sceneSubscribers = new Set<SceneUpdateQueue>();
 
   const pendingLogs: LogEntry[] = [];
   let logFlushTimer: ReturnType<typeof setTimeout> | undefined;
@@ -304,6 +472,14 @@ export function createWorkerDispatcher(
       notify('geometryComputed', args);
     };
 
+    worker.onSceneUpdate = async (event) => {
+      await Promise.all(
+        [...sceneSubscribers].map(async (subscriber) => {
+          await subscriber.push(event);
+        }),
+      );
+    };
+
     worker.onParametersResolved = (event) => {
       notify('parametersResolved', event);
     };
@@ -334,6 +510,7 @@ export function createWorkerDispatcher(
 
   let initializing = false;
   let initialized = false;
+  let computeStoreClient: ReturnType<typeof createComputeStoreChannelClient> | undefined;
   const handleInitialize: (
     args: RuntimeProtocol['calls']['initialize']['args'],
   ) => Promise<RuntimeProtocol['calls']['initialize']['result']> = async (args) => {
@@ -350,6 +527,19 @@ export function createWorkerDispatcher(
       worker.setCompiledWasmModules(memoryHandle?.compiledWasmModules ?? []);
       if (memoryHandle?.signalBuffer) {
         worker.setSignalBuffer(memoryHandle.signalBuffer);
+      }
+      const computeStorePort = dispatcherOptions?.computeStorePort ?? memoryHandle?.computeStorePort;
+      if (computeStorePort) {
+        computeStoreClient = createComputeStoreChannelClient(computeStorePort);
+        worker.setComputeBinding({ mode: 'durable', store: computeStoreClient.store });
+      } else if ((dispatcherOptions?.computeBindingMode ?? memoryHandle?.computeBindingMode) === 'off') {
+        worker.setComputeBinding({ mode: 'off' });
+      } else if (
+        dispatcherOptions?.computeBindingMode === 'memory' ||
+        memoryHandle?.computeBindingMode === 'memory' ||
+        memoryHandle?.computeBindingMode === 'durable'
+      ) {
+        worker.setComputeBinding({ mode: 'memory' });
       }
       /* Late-bind the host bindings now that we have the inbound
        * `memoryHandle`. The bindings' geometry encoder wins
@@ -378,6 +568,10 @@ export function createWorkerDispatcher(
 
       initialized = true;
       return { capabilities: worker.capabilitiesManifest };
+    } catch (error) {
+      computeStoreClient?.dispose();
+      computeStoreClient = undefined;
+      throw error;
     } finally {
       initializing = false;
       cleanupTrap();
@@ -404,6 +598,19 @@ export function createWorkerDispatcher(
     const { promise: trapPromise, cleanup: cleanupTrap } = createErrorTrap();
     try {
       return await Promise.race([worker.exportModel(args, signal), trapPromise]);
+    } finally {
+      worker.flushTelemetry();
+      cleanupTrap();
+    }
+  };
+
+  const handleEvaluateModel: (
+    args: RuntimeProtocol['calls']['evaluateModel']['args'],
+    signal?: AbortSignal,
+  ) => Promise<HashedGeometryResult> = async (args, signal) => {
+    const { promise: trapPromise, cleanup: cleanupTrap } = createErrorTrap();
+    try {
+      return await Promise.race([worker.evaluateModel(args, signal), trapPromise]);
     } finally {
       worker.flushTelemetry();
       cleanupTrap();
@@ -474,11 +681,37 @@ export function createWorkerDispatcher(
           };
           return envelope as unknown as CallResult;
         }
+        case 'evaluateModel': {
+          const result = await handleEvaluateModel(args as RuntimeProtocol['calls']['evaluateModel']['args'], signal);
+          const transferables: Transferable[] = [];
+          const value = toTransportResult(result, encodeGeometry, transferables);
+          return { value, transferables } as unknown as CallResult;
+        }
         case 'snapshotSource': {
           const result = await handleSourceSnapshot(args as RuntimeProtocol['calls']['snapshotSource']['args'], signal);
           const transferables: Transferable[] = [];
           const value = prepareSourceSnapshotTransfer(result, transferables);
           return { value, transferables } as unknown as CallResult;
+        }
+        case 'readSceneSnapshot': {
+          const result = await worker.readSceneSnapshot(
+            args as RuntimeProtocol['calls']['readSceneSnapshot']['args'],
+            signal,
+          );
+          if (result.type === 'missing') {
+            return result as unknown as CallResult;
+          }
+          const transferables: Transferable[] = [];
+          const value = {
+            type: 'found',
+            snapshot: prepareSceneSnapshotTransfer(result.snapshot, { encode: encodeGeometry, transferables }),
+          } as const;
+          return { value, transferables } as unknown as CallResult;
+        }
+        case 'listSceneBookmarks': {
+          return worker.listSceneBookmarks(
+            args as RuntimeProtocol['calls']['listSceneBookmarks']['args'],
+          ) as unknown as CallResult;
         }
         case 'transcode': {
           const result = await handleTranscode(args as RuntimeProtocol['calls']['transcode']['args'], signal);
@@ -497,6 +730,8 @@ export function createWorkerDispatcher(
           }
           flushLogs();
           await worker.cleanup();
+          computeStoreClient?.dispose();
+          computeStoreClient = undefined;
           return null as unknown as CallResult;
         }
       }
@@ -579,9 +814,39 @@ export function createWorkerDispatcher(
       }
     },
 
-    async *listen() {
-      // RuntimeProtocol does not declare any `listens` events; this branch
-      // exists only to satisfy `ChannelServer<RuntimeProtocol>`.
+    // eslint-disable-next-line max-params -- typed RPC listener signature is fixed by ChannelServer.
+    async *listen(_context, _event, args, signal) {
+      const queue = new SceneUpdateQueue();
+      const sentContentDigests = new Set<ResolvedSceneAsset['contentDigest']>();
+      const afterSequence = args.afterSequence ?? -1;
+      sceneSubscribers.add(queue);
+      worker.setProgressiveSceneRequested(true);
+      try {
+        while (!signal.aborted) {
+          // eslint-disable-next-line no-await-in-loop -- each item is delivered only after downstream demand.
+          const update = await queue.shift(signal);
+          if (update === sceneQueueClosed) {
+            return;
+          }
+          if (update.sequence <= afterSequence) {
+            continue;
+          }
+          if (update.type === 'reset' && update.skippedBefore > 0) {
+            sentContentDigests.clear();
+          }
+          const transferables: Transferable[] = [];
+          const value = prepareSceneUpdateTransfer(update, {
+            encode: encodeGeometry,
+            transferables,
+            sentContentDigests,
+          });
+          yield { value, transferables } as unknown as WithTransferables<ProgressiveSceneUpdate>;
+        }
+      } finally {
+        queue.close();
+        sceneSubscribers.delete(queue);
+        worker.setProgressiveSceneRequested(sceneSubscribers.size > 0);
+      }
     },
   };
 
@@ -591,8 +856,17 @@ export function createWorkerDispatcher(
     protocolVersion,
   };
 
+  const deliveryPort: Port<unknown> = {
+    ...port,
+    postMessage(message, transferables) {
+      port.postMessage(message, transferables);
+      if (typeof message === 'object' && message !== null && 'k' in message && message.k === 'rs') {
+        worker.permitComputePublication();
+      }
+    },
+  };
   serverHandle = createChannelServer<RuntimeProtocol>({
-    port,
+    port: deliveryPort,
     sessionKey: runtimeChannelSessionKey,
     impl,
     hello: helloPayload,

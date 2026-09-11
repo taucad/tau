@@ -18,7 +18,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Duplex } from 'node:stream';
 
-import { decode } from '@msgpack/msgpack';
+import { decode, encode } from '@msgpack/msgpack';
 import { WebSocket, WebSocketServer } from 'ws';
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -27,6 +27,7 @@ import { fromNodeFs } from '@taucad/runtime/filesystem/node';
 import { createGeometryTestHelpers } from '@taucad/runtime-testing';
 import { webSocketTransport } from '@taucad/runtime/transport/websocket';
 import { webSocketHost } from '@taucad/runtime/transport/websocket-host';
+import { createSqliteComputeEngine, fromSqlite } from '@taucad/runtime/node';
 import type { WebSocketHostHandle, WebSocketHostOptions } from '@taucad/runtime/transport/websocket-host';
 import { createRuntimeWorker } from '@taucad/runtime/worker';
 
@@ -185,6 +186,63 @@ describe('webSocketHost (in-process, real ws server)', { concurrent: false }, ()
 
     expect(await expectUpgradeFailure(`${url}/nope`)).toContain('404');
     expect(await expectUpgradeFailure(`${url}/fs`)).toContain('400');
+    expect(await expectUpgradeFailure(`${url}/compute?session=private`)).toContain('404');
+  });
+
+  it('pairs an explicitly enabled private compute socket with its runtime session', async () => {
+    const url = await startHost({
+      fileSystem: fromNodeFs(await makeRoot()),
+      allowPrivateComputePairing: true,
+    });
+    const compute = createSqliteComputeEngine({ directory: join(await makeRoot(), 'compute') });
+    const client = createRuntimeClient({
+      transport: webSocketTransport({
+        url,
+        createSocket: (runtimeUrl) => new WebSocket(runtimeUrl),
+        compute: { mode: 'durable', store: fromSqlite({ store: compute, workspace: 'trusted-project' }) },
+      }),
+    });
+    try {
+      await expect(client.render({ source: { path: 'main.ts' } })).resolves.toMatchObject({
+        superseded: false,
+        geometry: { success: true },
+      });
+    } finally {
+      client.terminate();
+    }
+  });
+
+  it.each([{ mode: 'off' }, { mode: 'memory' }] as const)(
+    'admits a $mode runtime without a private compute pair',
+    async (compute) => {
+      const url = await startHost({
+        fileSystem: fromNodeFs(await makeRoot()),
+        allowPrivateComputePairing: true,
+        pairingTimeout: 100,
+      });
+      const client = createRuntimeClient({ transport: webSocketTransport({ url, compute }) });
+      try {
+        await expect(client.render({ source: { path: 'main.ts' } })).resolves.toMatchObject({
+          superseded: false,
+          geometry: { success: true },
+        });
+      } finally {
+        client.terminate();
+      }
+    },
+  );
+
+  it('requires a bounded matching pair only for declared durable compute', async () => {
+    const url = await startHost({
+      fileSystem: fromNodeFs(await makeRoot()),
+      allowPrivateComputePairing: true,
+      pairingTimeout: 100,
+    });
+    expect(await expectUpgradeFailure(`${url}/runtime?session=forged&compute=memory`)).toContain('400');
+    const missing = await openRawSocket(`${url}/runtime?session=missing&compute=durable`);
+    const [code, reason] = (await once(missing, 'close')) as [number, Uint8Array<ArrayBuffer>];
+    expect(code).toBe(1008);
+    expect(new TextDecoder().decode(reason)).toBe('no /compute socket paired for this session');
   });
 
   it('closes an unpaired /runtime socket with 1008 once the pairing bound elapses', async () => {
@@ -252,8 +310,8 @@ describe('webSocketHost (in-process, real ws server)', { concurrent: false }, ()
     /* `close()` resolved, so every connection's dispatcher, fs proxy and worker
      * are already gone — no polling needed for this assertion. */
     expect(workerCleanups).toBe(2);
-    await expect(first.closed).resolves.toEqual({ cause: 'host-exit' });
-    await expect(second.closed).resolves.toEqual({ cause: 'host-exit' });
+    await expect(first.closed).resolves.toEqual({ cause: 'host-exit', phase: 'session' });
+    await expect(second.closed).resolves.toEqual({ cause: 'host-exit', phase: 'session' });
   });
 
   /* Finding 2 of daemon-websocket-prerequisites-blueprint.md, measured: the

@@ -35,7 +35,14 @@ import type {
   RenderPhase,
   WorkerState,
 } from '#types/runtime-protocol.types.js';
-import { RuntimeWorkerClient, RenderTimeoutError, assertValidRenderTimeout } from '#framework/runtime-worker-client.js';
+import {
+  RuntimeWorkerClient,
+  RenderTimeoutError,
+  assertValidRenderTimeout,
+  assertValidTranscodeTimeout,
+  isTranscodeTimeoutError,
+} from '#framework/runtime-worker-client.js';
+import { defaultTranscodeTimeout } from '#framework/runtime-framework.constants.js';
 import type { RuntimeTransportClient, TransportPlugin } from '#transport/runtime-transport.types.js';
 import type { TransportDescriptor } from '#transport/runtime-transport-descriptor.types.js';
 import type { RuntimeFromTransport } from '#transport/transport-projections.js';
@@ -45,6 +52,7 @@ import type {
   TranscoderPlugin,
   CollectKernelIds,
   CollectRenderOptions,
+  CollectTranscodeRoutes,
   ExportContentFor,
   ExportFormatsFor,
   ExportOptionsFor,
@@ -63,6 +71,13 @@ import type { ContentRequestFor, RuntimeContentInput } from '#types/runtime-cont
 import type { RuntimeFileLocator } from '#types/runtime-file.types.js';
 import type { RuntimeSourceSnapshotResult } from '#types/runtime-source-snapshot.types.js';
 import { assertRootedPath } from '@taucad/utils/path';
+import type {
+  ProgressiveSceneUpdate,
+  ReadSceneSnapshotResult,
+  RuntimeListSceneBookmarksInput,
+  RuntimeReadSceneSnapshotInput,
+  SceneBookmark,
+} from '#types/runtime-scene.types.js';
 
 export type { RuntimeConfigInput, RuntimeConfigOutput, RuntimeConfigProvider } from '#worker/runtime-definition.js';
 
@@ -179,6 +194,13 @@ export type RuntimeRenderInput<
   readonly renderOptions?: CollectRenderOptions<Kernels>;
 } & ContentRequestFor<RenderContentFor<Kernels, Middleware>>;
 
+/** Request-scoped model evaluation input with exact render-schema inference. @public */
+export type RuntimeEvaluateInput<
+  Kernels extends readonly KernelPlugin[],
+  Middleware extends readonly MiddlewarePlugin[],
+  Files extends RuntimeSourceFiles = RuntimeSourceFiles,
+> = RuntimeRenderInput<Kernels, Middleware, Files> & { readonly signal?: AbortSignal };
+
 type RuntimeExportSourceInput<Files extends RuntimeSourceFiles = RuntimeSourceFiles> =
   | {
       readonly source: RuntimeSource<Files>;
@@ -189,19 +211,27 @@ type RuntimeExportSourceInput<Files extends RuntimeSourceFiles = RuntimeSourceFi
       readonly parameters?: never;
     };
 
-type RuntimeTranscodeInput<Transcoders extends readonly TranscoderPlugin[]> = {
-  [Index in keyof Transcoders]: Transcoders[Index] extends TranscoderPlugin<infer EdgeMap, infer From>
-    ? {
-        [To in Extract<keyof EdgeMap, FileExtension>]: {
+type RuntimeTranscodeInput<Transcoders extends readonly TranscoderPlugin[]> =
+  CollectTranscodeRoutes<Transcoders> extends infer Route
+    ? Route extends {
+        readonly from: infer From;
+        readonly to: infer To;
+        readonly options: infer Options;
+      }
+      ? {
           readonly from: Extract<From, FileExtension>;
-          readonly to: To;
+          readonly to: Extract<To, FileExtension>;
+          /**
+           * Caller-owned input artifacts. Buffers are structured-cloned for
+           * worker delivery and are never transferred or detached. Do not
+           * mutate names or bytes while the transcode call is pending.
+           */
           readonly files: ExportFile[];
-          readonly options: EdgeMap[To];
+          readonly options: Options;
           readonly signal?: AbortSignal;
-        };
-      }[Extract<keyof EdgeMap, FileExtension>]
+        }
+      : never
     : never;
-}[number];
 
 /**
  * Export input. Runtime-owned request fields live at the top level; plugin
@@ -454,13 +484,60 @@ async function resolveRuntimeClientConfig(config: unknown): Promise<unknown> {
  * - `'explicit'` — consumer called {@link RuntimeClient.terminate}.
  * - `'transport-closed'` — the transport closed unexpectedly (e.g. worker
  *   crashed, websocket dropped).
- * - `'render-timeout'` — timeout cancellation was not acknowledged during
- *   bounded recovery, so the isolated runtime host was terminated. Construct
- *   a new client before issuing more work.
+ * - `'render-timeout'` — the transport's legacy timeout cause for an
+ *   unacknowledged render or transcode cancellation. The isolated runtime host
+ *   was terminated; construct a new client before issuing more work.
  *
  * @public
  */
 export type RuntimeTerminatedCause = 'explicit' | 'transport-closed' | 'render-timeout';
+
+/**
+ * What the transport observed about a host that died on its own. Present on
+ * {@link RuntimeTerminatedError} whenever the runtime host exited, so a boot
+ * failure can be rendered with its cause instead of a generic sentence.
+ *
+ * @public
+ */
+export type RuntimeTerminatedDetail = {
+  /** Host exit code, absent when the host gave no exit signal. */
+  readonly exitCode?: number;
+  /** `'boot'` when the host died before it was ready, `'session'` after. */
+  readonly phase: 'boot' | 'session';
+  /** Wire bye reason, when the host sent one. */
+  readonly reason?: string;
+  /** Last bytes of the host's standard error, when the supervisor captured any. */
+  readonly stderrTail?: string;
+};
+
+/**
+ * First non-empty line of a captured stderr tail.
+ *
+ * @param stderrTail - Bounded stderr the supervisor captured, if any.
+ * @returns The first non-empty trimmed line, or `undefined` when there is none.
+ * @internal
+ */
+const firstStderrLine = (stderrTail: string | undefined): string | undefined =>
+  stderrTail
+    ?.split('\n')
+    .map((line) => line.trim())
+    .find((line) => line.length > 0);
+
+/**
+ * Sentence describing a host death, from what the transport actually observed.
+ *
+ * @param detail - Transport-reported host exit facts.
+ * @returns The consumer-facing message for that death.
+ */
+const terminatedByHostExitMessage = (detail: RuntimeTerminatedDetail): string => {
+  const exitCode = detail.exitCode ?? 'unknown';
+  if (detail.phase === 'session') {
+    return `The runtime host exited unexpectedly (exit code ${exitCode}).`;
+  }
+  const cause = firstStderrLine(detail.stderrTail) ?? detail.reason;
+  const failure = `The runtime host failed to start (exit code ${exitCode})`;
+  return cause === undefined ? `${failure}.` : `${failure}: ${cause}.`;
+};
 
 /**
  * Thrown by every command API after {@link RuntimeClient.terminate} has been
@@ -470,6 +547,9 @@ export type RuntimeTerminatedCause = 'explicit' | 'transport-closed' | 'render-t
  */
 export class RuntimeTerminatedError extends Error {
   public readonly causeKind: RuntimeTerminatedCause;
+
+  /** Host exit facts, when the transport reported a host that died on its own. */
+  public readonly detail: RuntimeTerminatedDetail | undefined;
 
   /**
    * The literal discriminator code for this error type.
@@ -483,16 +563,21 @@ export class RuntimeTerminatedError extends Error {
    * The constructor for the {@link RuntimeTerminatedError} class.
    * @param causeKind - typed discriminator identifying why the client is
    *   terminal. Defaults to `'explicit'` for the common terminate() path.
+   * @param detail - host exit facts observed by the transport, when the host
+   *   died on its own.
    * @public
    */
-  public constructor(causeKind: RuntimeTerminatedCause = 'explicit') {
+  public constructor(causeKind: RuntimeTerminatedCause = 'explicit', detail?: RuntimeTerminatedDetail) {
     super(
       causeKind === 'render-timeout'
-        ? 'The isolated runtime host did not recover from a render timeout and was terminated. Create a new RuntimeClient before issuing more work.'
-        : 'RuntimeClient has been terminated.',
+        ? 'The isolated runtime host did not recover from an operation timeout and was terminated. Create a new RuntimeClient before issuing more work.'
+        : causeKind === 'transport-closed' && detail !== undefined
+          ? terminatedByHostExitMessage(detail)
+          : 'RuntimeClient has been terminated.',
     );
     this.name = 'RuntimeTerminatedError';
     this.causeKind = causeKind;
+    this.detail = detail;
   }
 }
 
@@ -712,6 +797,13 @@ type RuntimeClientBaseOptions<Transport extends AnyTransportPlugin> = {
    * unresponsive host after the recovery grace period.
    */
   renderTimeout?: number;
+  /**
+   * Wall-clock deadline applied independently to each direct transcode.
+   * Defaults to 60 seconds; zero disables the deadline. On isolated
+   * transports the runtime first aborts cooperatively, then terminates an
+   * unresponsive host after the recovery grace period.
+   */
+  transcodeTimeout?: number;
 };
 
 type RuntimeClientConfigOption<Runtime> = [RuntimeConfigInput<Runtime>] extends [never]
@@ -733,23 +825,40 @@ export type RuntimeClientOptions<
 // oxlint-enable @typescript-eslint/no-explicit-any
 
 // oxlint-disable @typescript-eslint/no-explicit-any -- variance: projects type bags from worker-owned runtime definitions
-type ClientKernels<Runtime> = Runtime extends AnyRuntimeDefinition
-  ? RuntimeKernels<Runtime> extends ReadonlyArray<KernelPlugin<any, any, any>>
-    ? RuntimeKernels<Runtime>
-    : Array<KernelPlugin<any, any, any>>
-  : Array<KernelPlugin<any, any, any>>;
+// The default is the whole runtime-definition family, not one concrete union member.
+// Select explicit dynamic bags before projecting exact definitions; distributing the
+// family through RuntimeKernels/RuntimeTranscoders collapses callable inputs to never.
+type IsExactly<Left, Right> = [Left] extends [Right] ? ([Right] extends [Left] ? true : false) : false;
 
-type ClientMiddleware<Runtime> = Runtime extends AnyRuntimeDefinition
-  ? RuntimeMiddleware<Runtime> extends ReadonlyArray<MiddlewarePlugin<any, any, any>>
-    ? RuntimeMiddleware<Runtime>
-    : Array<MiddlewarePlugin<any, any, any>>
-  : Array<MiddlewarePlugin<any, any, any>>;
+type ClientKernels<Runtime> = [AnyRuntimeDefinition] extends [Runtime]
+  ? Array<KernelPlugin<any, any, any>>
+  : number extends RuntimeKernels<Runtime>['length']
+    ? IsExactly<RuntimeKernels<Runtime>[number], KernelPlugin<Record<string, unknown>, unknown>> extends true
+      ? Array<KernelPlugin<any, any, any>>
+      : RuntimeKernels<Runtime>
+    : RuntimeKernels<Runtime> extends ReadonlyArray<KernelPlugin<any, any, any>>
+      ? RuntimeKernels<Runtime>
+      : Array<KernelPlugin<any, any, any>>;
 
-type ClientTranscoders<Runtime> = Runtime extends AnyRuntimeDefinition
-  ? RuntimeTranscoders<Runtime> extends ReadonlyArray<TranscoderPlugin<any, any, any>>
-    ? RuntimeTranscoders<Runtime>
-    : Array<TranscoderPlugin<any, any, any>>
-  : Array<TranscoderPlugin<any, any, any>>;
+type ClientMiddleware<Runtime> = [AnyRuntimeDefinition] extends [Runtime]
+  ? Array<MiddlewarePlugin<any, any, any>>
+  : number extends RuntimeMiddleware<Runtime>['length']
+    ? IsExactly<RuntimeMiddleware<Runtime>[number], MiddlewarePlugin> extends true
+      ? Array<MiddlewarePlugin<any, any, any>>
+      : RuntimeMiddleware<Runtime>
+    : RuntimeMiddleware<Runtime> extends ReadonlyArray<MiddlewarePlugin<any, any, any>>
+      ? RuntimeMiddleware<Runtime>
+      : Array<MiddlewarePlugin<any, any, any>>;
+
+type ClientTranscoders<Runtime> = [AnyRuntimeDefinition] extends [Runtime]
+  ? Array<TranscoderPlugin<any, any, any>>
+  : number extends RuntimeTranscoders<Runtime>['length']
+    ? IsExactly<RuntimeTranscoders<Runtime>[number], TranscoderPlugin<Record<string, unknown>>> extends true
+      ? Array<TranscoderPlugin<any, any, any>>
+      : RuntimeTranscoders<Runtime>
+    : RuntimeTranscoders<Runtime> extends ReadonlyArray<TranscoderPlugin<any, any, any>>
+      ? RuntimeTranscoders<Runtime>
+      : Array<TranscoderPlugin<any, any, any>>;
 // oxlint-enable @typescript-eslint/no-explicit-any
 
 type EventHandlers = {
@@ -758,6 +867,7 @@ type EventHandlers = {
   telemetry: Topic<TelemetryEntry[]>;
   parametersResolved: Topic<GetParametersResult>;
   geometry: Topic<HashedGeometryResult>;
+  sceneUpdate: Topic<ProgressiveSceneUpdate>;
   state: Topic<{ state: WorkerState; detail?: string }>;
   renderStatus: Topic<RenderStatus>;
   error: Topic<KernelIssue[]>;
@@ -945,6 +1055,17 @@ type RuntimeClientProjection<
     input: RuntimeSourceSnapshotInput<Files>,
   ): Promise<RuntimeSourceSnapshotResult>;
 
+  /** Evaluate one model without selecting or publishing preview state. */
+  evaluate<const Files extends RuntimeSourceFiles = RuntimeSourceFiles>(
+    input: RuntimeEvaluateInput<Kernels, Middleware, Files>,
+  ): Promise<HashedGeometryResult>;
+
+  /** Resolve a retained progressive-scene snapshot without rerunning the kernel. */
+  readSceneSnapshot(input: RuntimeReadSceneSnapshotInput): Promise<ReadSceneSnapshotResult>;
+
+  /** List retained timeline bookmarks for one render. */
+  listSceneBookmarks(input: RuntimeListSceneBookmarksInput): Promise<readonly SceneBookmark[]>;
+
   /**
    * Render a source through the autonomous render loop.
    *
@@ -996,6 +1117,9 @@ type RuntimeClientProjection<
    */
   setRenderTimeout(renderTimeout: number): void;
 
+  /** Set the wall-clock deadline used by subsequent direct transcodes. */
+  setTranscodeTimeout(transcodeTimeout: number): void;
+
   /**
    * Subscribe to client events. Returns an unsubscribe function.
    * Subscribable at any time during the client lifecycle.
@@ -1005,6 +1129,11 @@ type RuntimeClientProjection<
    * @returns Unsubscribe function
    */
   on(event: 'geometry', handler: (result: HashedGeometryResult) => void, options?: RuntimeSubscribeOptions): () => void;
+  on(
+    event: 'sceneUpdate',
+    handler: (update: ProgressiveSceneUpdate) => void,
+    options?: RuntimeSubscribeOptions,
+  ): () => void;
   on(event: 'renderStatus', handler: (status: RenderStatus) => void, options?: RuntimeSubscribeOptions): () => void;
   on(
     event: 'state',
@@ -1076,9 +1205,24 @@ type RuntimeClientProjection<
 
 /** High-level client projected from one complete runtime definition. @public */
 export type RuntimeClient<
-  Runtime extends AnyRuntimeDefinition = AnyRuntimeDefinition,
+  Runtime extends AnyRuntimeDefinition | undefined = undefined,
   Transport extends AnyTransportPlugin = AnyTransportPlugin,
-> = RuntimeClientProjection<ClientKernels<Runtime>, ClientMiddleware<Runtime>, ClientTranscoders<Runtime>, Transport>;
+> = [Runtime] extends [undefined]
+  ? RuntimeClientProjection<
+      ClientKernels<AnyRuntimeDefinition>,
+      ClientMiddleware<AnyRuntimeDefinition>,
+      ClientTranscoders<AnyRuntimeDefinition>,
+      Transport
+    >
+  : RuntimeClientProjection<
+      ClientKernels<Exclude<Runtime, undefined>>,
+      ClientMiddleware<Exclude<Runtime, undefined>>,
+      ClientTranscoders<Exclude<Runtime, undefined>>,
+      Transport
+    >;
+// The pre-beta RuntimeClient generic changed from the legacy four independent
+// plugin bags to one Runtime definition plus Transport. D2 owns the matching
+// `.nx/version-plans/nanoraster-migration.md` release-plan acknowledgment.
 
 /**
  * Create a high-level runtime client for an explicit transport.
@@ -1143,6 +1287,8 @@ export function createRuntimeClient(
 
   let workerClient: RuntimeWorkerClient | undefined;
   let workerClientWired = false;
+  let sceneSubscriberCount = 0;
+  let sceneWorkerUnsubscribe: (() => void) | undefined;
   let activeRenderTimeout = options.renderTimeout ?? 0;
   assertValidRenderTimeout(activeRenderTimeout);
   if (activeRenderTimeout > 0 && transport.renderTimeoutRecovery.kind === 'unsupported') {
@@ -1150,6 +1296,8 @@ export function createRuntimeClient(
       'renderTimeout must be 0 because this transport cannot enforce a wall-clock render deadline. Use a worker-backed transport with terminable timeout recovery.',
     );
   }
+  let activeTranscodeTimeout = options.transcodeTimeout ?? defaultTranscodeTimeout;
+  assertValidTranscodeTimeout(activeTranscodeTimeout);
   let terminalCause: RuntimeTerminatedCause | undefined;
   let lifecycleState: RuntimeLifecycleState = 'unconnected';
   let intentAdmissionOpen = true;
@@ -1274,6 +1422,8 @@ export function createRuntimeClient(
    * `client.exportGeometry()` settles.
    */
   const pendingExports = new Set<{ reject: (error: Error) => void }>();
+  const pendingTranscodes = new Set<{ reject: (error: Error) => void }>();
+  const pendingEvaluations = new Set<{ reject: (error: Error) => void }>();
 
   /**
    * Promise-side tracking for {@link RuntimeClient.shutdown} `drain`. Every
@@ -1298,6 +1448,25 @@ export function createRuntimeClient(
     inFlightIntents.add(promise);
     void observeUntilSettled(promise);
     return promise;
+  };
+
+  const waitForSignal = async <Value>(promise: Promise<Value>, signal?: AbortSignal): Promise<Value> => {
+    if (signal === undefined) {
+      return promise;
+    }
+    const aborted = Promise.withResolvers<never>();
+    const rejectAbort = (): void => {
+      aborted.reject(signal.reason);
+    };
+    signal.addEventListener('abort', rejectAbort, { once: true });
+    if (signal.aborted) {
+      rejectAbort();
+    }
+    try {
+      return await Promise.race([promise, aborted.promise]);
+    } finally {
+      signal.removeEventListener('abort', rejectAbort);
+    }
   };
 
   function supersedePendingRender(): void {
@@ -1345,12 +1514,34 @@ export function createRuntimeClient(
     telemetry: new Topic<TelemetryEntry[]>({ name: 'RuntimeClient.telemetry' }),
     parametersResolved: new Topic<GetParametersResult>({ name: 'RuntimeClient.parametersResolved' }),
     geometry: new Topic<HashedGeometryResult>({ name: 'RuntimeClient.geometry' }),
+    sceneUpdate: new Topic<ProgressiveSceneUpdate>({ name: 'RuntimeClient.sceneUpdate' }),
     state: new Topic<{ state: WorkerState; detail?: string }>({ name: 'RuntimeClient.state' }),
     renderStatus: new Topic<RenderStatus>({ name: 'RuntimeClient.renderStatus' }),
     error: new Topic<KernelIssue[]>({ name: 'RuntimeClient.error' }),
     capabilities: new Topic<CapabilitiesManifest>({ name: 'RuntimeClient.capabilities' }),
     activeKernelChanged: new Topic<string | undefined>({ name: 'RuntimeClient.activeKernelChanged' }),
   };
+
+  function ensureSceneWorkerSubscription(client: RuntimeWorkerClient): void {
+    if (sceneSubscriberCount === 0 || sceneWorkerUnsubscribe) {
+      return;
+    }
+    sceneWorkerUnsubscribe = client.onSceneUpdate(
+      (update) => {
+        handlers.sceneUpdate.emit(update);
+      },
+      (error) => {
+        handlers.error.emit([
+          {
+            message: error instanceof Error ? error.message : String(error),
+            code: 'RUNTIME',
+            type: 'runtime',
+            severity: 'warning',
+          },
+        ]);
+      },
+    );
+  }
 
   function getWorkerClient(): RuntimeWorkerClient {
     if (!workerClient) {
@@ -1359,6 +1550,7 @@ export function createRuntimeClient(
        * Seed the configured deadline before the first admission so its captured
        * timeout cannot default to zero while initialize() is still pending. */
       workerClient.setRenderTimeout(activeRenderTimeout);
+      workerClient.setTranscodeTimeout(activeTranscodeTimeout);
     }
     if (workerClientWired) {
       return workerClient;
@@ -1460,16 +1652,17 @@ export function createRuntimeClient(
       _capabilities = capabilities;
       handlers.capabilities.emit(capabilities);
     });
+    ensureSceneWorkerSubscription(workerClient);
     return workerClient;
   }
 
-  function terminateFromTransport(causeKind: RuntimeTerminatedCause): void {
+  function terminateFromTransport(causeKind: RuntimeTerminatedCause, detail?: RuntimeTerminatedDetail): void {
     if (lifecycleState === 'terminated') {
       return;
     }
     terminalCause = causeKind;
     intentAdmissionOpen = false;
-    const error = new RuntimeTerminatedError(causeKind);
+    const error = new RuntimeTerminatedError(causeKind, detail);
     connectionAttempt?.reject(error);
     connectionAttempt = undefined;
     pendingRender?.reject(error);
@@ -1478,8 +1671,18 @@ export function createRuntimeClient(
       slot.reject(error);
     }
     pendingExports.clear();
+    for (const slot of pendingTranscodes) {
+      slot.reject(error);
+    }
+    pendingTranscodes.clear();
+    for (const slot of pendingEvaluations) {
+      slot.reject(error);
+    }
+    pendingEvaluations.clear();
     workerClient?.terminate();
     workerClient = undefined;
+    sceneWorkerUnsubscribe = undefined;
+    sceneSubscriberCount = 0;
     setLifecycleState('terminated');
     hasSettledRender = false;
     latestWorkerState = 'idle';
@@ -1498,21 +1701,32 @@ export function createRuntimeClient(
       return;
     }
     if (result.cause === 'host-exit' || result.cause === 'wire-failure') {
-      /* `terminateFromTransport` disposes every topic, so the one detail a
-       * consumer cannot otherwise recover — the host's exit code, or the wire
-       * error — has to ride the log topic before that happens.
-       * ponytail: the exit code reaches consumers as a log entry, not a typed
-       * field; promote it when a consumer needs to branch on it. */
+      /* `terminateFromTransport` disposes every topic, so the wire error — the
+       * one detail no consumer can otherwise recover — has to ride the log
+       * topic before that happens. The host exit facts also reach consumers as
+       * `RuntimeTerminatedError.detail`. */
+      const stderrLine = result.cause === 'host-exit' ? firstStderrLine(result.stderrTail) : undefined;
       handlers.log.emit({
         id: generatePrefixedId(idPrefix.log),
         timestamp: Date.now(),
         level: logLevels.warn,
         message:
           result.cause === 'host-exit'
-            ? `Runtime host exited (exit code ${result.exitCode ?? 'unknown'}); the client is terminating.`
+            ? `Runtime host exited (exit code ${result.exitCode ?? 'unknown'}) during ${result.phase}; the client is terminating.${stderrLine === undefined ? '' : ` — ${stderrLine}`}`
             : `Runtime transport failed (${result.error.message}); the client is terminating.`,
         origin: { component: 'RuntimeClient', operation: 'observeTransportClosure' },
       });
+    }
+    if (result.cause === 'host-exit') {
+      /* `terminate()` already ran: the client asked for this death, so it stays
+       * an explicit termination rather than an unexpected transport closure. */
+      terminateFromTransport(terminalCause === 'explicit' ? 'explicit' : 'transport-closed', {
+        phase: result.phase,
+        ...(result.exitCode === undefined ? {} : { exitCode: result.exitCode }),
+        ...(result.reason === undefined ? {} : { reason: result.reason }),
+        ...(result.stderrTail === undefined ? {} : { stderrTail: result.stderrTail }),
+      });
+      return;
     }
     terminateFromTransport(result.cause === 'render-timeout' ? 'render-timeout' : 'transport-closed');
   };
@@ -1550,6 +1764,7 @@ export function createRuntimeClient(
           handlers.capabilities.emit(_capabilities);
         }
         connectedWorkerClient.setRenderTimeout(activeRenderTimeout);
+        connectedWorkerClient.setTranscodeTimeout(activeTranscodeTimeout);
         setLifecycleState('connected');
         slot.resolve(connectedWorkerClient);
       } catch (error) {
@@ -1560,6 +1775,7 @@ export function createRuntimeClient(
           if (workerClient === connectedWorkerClient) {
             workerClient = undefined;
             workerClientWired = false;
+            sceneWorkerUnsubscribe = undefined;
           }
           hasRenderFailure = true;
           setLifecycleState('unconnected');
@@ -1752,8 +1968,37 @@ export function createRuntimeClient(
     }): Promise<ExportResult> {
       assertIntentAdmissionOpen();
       const client = await ensureConnected();
+      assertIntentAdmissionOpen();
       const { signal, ...request } = input;
-      return trackInFlight(client.transcode(request, signal));
+      let rejectTranscode: ((error: Error) => void) | undefined;
+      const slot = {
+        reject(error: Error): void {
+          rejectTranscode?.(error);
+        },
+      };
+      pendingTranscodes.add(slot);
+      try {
+        return await trackInFlight(
+          new Promise<ExportResult>((resolve, reject) => {
+            rejectTranscode = reject;
+            client.transcode(request, signal).then(resolve).catch(reject);
+          }),
+        );
+      } catch (error) {
+        if (isTranscodeTimeoutError(error)) {
+          handlers.error.emit([
+            {
+              message: error.message,
+              code: 'TRANSCODER_TIMEOUT',
+              type: 'runtime',
+              severity: 'error',
+            },
+          ]);
+        }
+        throw error;
+      } finally {
+        pendingTranscodes.delete(slot);
+      }
     },
 
     async snapshotSource<const Files extends RuntimeSourceFiles = RuntimeSourceFiles>(
@@ -1776,6 +2021,69 @@ export function createRuntimeClient(
           input.signal,
         ),
       );
+    },
+
+    async evaluate<const Files extends RuntimeSourceFiles = RuntimeSourceFiles>(
+      input: RuntimeEvaluateInput<KernelPlugin[], MiddlewarePlugin[], Files>,
+    ): Promise<HashedGeometryResult> {
+      assertIntentAdmissionOpen();
+      if (!isRecord(input)) {
+        throw new TypeError('RuntimeClient.evaluate input must be an object.');
+      }
+      assertRecordInput('evaluate', 'parameters', input.parameters);
+      assertRecordInput('evaluate', 'renderOptions', input.renderOptions);
+      assertRecordInput('evaluate', 'content', input.content);
+      const normalized = normalizeRuntimeSource(input.source);
+      input.signal?.throwIfAborted();
+      const client = await waitForSignal(ensureConnected(), input.signal);
+      assertIntentAdmissionOpen();
+      let rejectEvaluation: ((error: Error) => void) | undefined;
+      const slot = {
+        reject(error: Error): void {
+          rejectEvaluation?.(error);
+        },
+      };
+      pendingEvaluations.add(slot);
+      try {
+        return await trackInFlight(
+          new Promise<HashedGeometryResult>((resolve, reject) => {
+            rejectEvaluation = reject;
+            client
+              .evaluateModel(
+                {
+                  ...(normalized.stage === undefined ? {} : { stage: normalized.stage }),
+                  file: normalized.file,
+                  parameters: input.parameters ?? {},
+                  ...(input.renderOptions === undefined ? {} : { options: input.renderOptions }),
+                  ...(input.content === undefined ? {} : { content: input.content }),
+                },
+                input.signal,
+              )
+              .then(resolve)
+              .catch(reject);
+          }),
+        );
+      } finally {
+        pendingEvaluations.delete(slot);
+      }
+    },
+
+    async readSceneSnapshot(input: RuntimeReadSceneSnapshotInput): Promise<ReadSceneSnapshotResult> {
+      assertIntentAdmissionOpen();
+      if (!isRecord(input) || typeof input.bookmarkId !== 'string' || input.bookmarkId.length === 0) {
+        throw new TypeError('RuntimeClient.readSceneSnapshot requires a non-empty bookmarkId.');
+      }
+      const client = await ensureConnected();
+      return trackInFlight(client.readSceneSnapshot({ bookmarkId: input.bookmarkId }, input.signal));
+    },
+
+    async listSceneBookmarks(input: RuntimeListSceneBookmarksInput): Promise<readonly SceneBookmark[]> {
+      assertIntentAdmissionOpen();
+      if (!isRecord(input) || typeof input.renderId !== 'string' || input.renderId.length === 0) {
+        throw new TypeError('RuntimeClient.listSceneBookmarks requires a non-empty renderId.');
+      }
+      const client = await ensureConnected();
+      return trackInFlight(client.listSceneBookmarks({ renderId: input.renderId }, input.signal));
     },
 
     async render<const Files extends RuntimeSourceFiles = RuntimeSourceFiles>(
@@ -1892,6 +2200,13 @@ export function createRuntimeClient(
       activeRenderTimeout = renderTimeout;
     },
 
+    setTranscodeTimeout(transcodeTimeout: number): void {
+      assertActive('setTranscodeTimeout');
+      assertValidTranscodeTimeout(transcodeTimeout);
+      workerClient!.setTranscodeTimeout(transcodeTimeout);
+      activeTranscodeTimeout = transcodeTimeout;
+    },
+
     on(event: string, handler: (...args: never[]) => void, options?: RuntimeSubscribeOptions): () => void {
       // Synchronous throw after terminate so a post-terminate
       // `client.on('geometry', ...)` is loud rather than silently subscribing
@@ -1917,6 +2232,31 @@ export function createRuntimeClient(
         }
         case 'geometry': {
           return handlers.geometry.subscribe(handler as (result: HashedGeometryResult) => void, options);
+        }
+        case 'sceneUpdate': {
+          sceneSubscriberCount += 1;
+          const client = getWorkerClient();
+          ensureSceneWorkerSubscription(client);
+          const offTopic = handlers.sceneUpdate.subscribe(handler as (update: ProgressiveSceneUpdate) => void);
+          let active = true;
+          const unsubscribe = (): void => {
+            if (!active) {
+              return;
+            }
+            active = false;
+            options?.signal?.removeEventListener('abort', unsubscribe);
+            offTopic();
+            sceneSubscriberCount -= 1;
+            if (sceneSubscriberCount === 0) {
+              sceneWorkerUnsubscribe?.();
+              sceneWorkerUnsubscribe = undefined;
+            }
+          };
+          options?.signal?.addEventListener('abort', unsubscribe, { once: true });
+          if (options?.signal?.aborted) {
+            unsubscribe();
+          }
+          return unsubscribe;
         }
         case 'renderStatus': {
           return handlers.renderStatus.subscribe(handler as (status: RenderStatus) => void, options);
@@ -2135,10 +2475,14 @@ export function createRuntimeClient(
       const priorConnect = connectionAttempt;
       const priorRender = pendingRender;
       const priorExports = [...pendingExports];
+      const priorTranscodes = [...pendingTranscodes];
+      const priorEvaluations = [...pendingEvaluations];
 
       connectionAttempt = undefined;
       pendingRender = undefined;
       pendingExports.clear();
+      pendingTranscodes.clear();
+      pendingEvaluations.clear();
 
       queueMicrotask(() => {
         const error = new RuntimeTerminatedError('explicit');
@@ -2149,6 +2493,12 @@ export function createRuntimeClient(
           priorRender.reject(error);
         }
         for (const slot of priorExports) {
+          slot.reject(error);
+        }
+        for (const slot of priorTranscodes) {
+          slot.reject(error);
+        }
+        for (const slot of priorEvaluations) {
           slot.reject(error);
         }
       });

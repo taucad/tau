@@ -21,6 +21,7 @@ import type {
   GetParametersInput,
 } from '#types/runtime-kernel.types.js';
 import type { ContentHookInputFor, RuntimeContentKey } from '#types/runtime-content.types.js';
+import type { KernelComputeCapability } from '#types/runtime-compute.types.js';
 import type { RuntimeSpanTracer } from '#types/runtime-tracer.types.js';
 
 // =============================================================================
@@ -79,6 +80,10 @@ export type KernelMiddlewareRuntime<
   logger: RuntimeLogger;
   /** Filesystem capability for runtime-path operations. `/` is the supplied filesystem root. */
   filesystem: KernelFileSystem;
+  /** Shared compute reuse facet for middleware-owned work. `off` carries no operations. */
+  readonly compute: KernelComputeCapability;
+  /** Live scene output is requested from this build; a terminal artifact cannot replace its execution. */
+  readonly progressiveSceneRequested: boolean;
   /** Type-safe state for persisting data during the wrap hook execution */
   state: MiddlewareState<State>;
   /** Resolved options (optionsSchema defaults merged with caller overrides) */

@@ -85,14 +85,17 @@ describe('cooperativeYield', () => {
   });
 
   it('should fall back to setTimeout(0) when scheduler.yield is unavailable', async () => {
-    const originalScheduler = globalThis.scheduler;
+    const originalDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'scheduler');
     try {
-      // @ts-expect-error -- Temporarily removing scheduler to test fallback
-      globalThis.scheduler = undefined;
+      Object.defineProperty(globalThis, 'scheduler', { configurable: true, value: undefined });
 
       await cooperativeYield();
     } finally {
-      globalThis.scheduler = originalScheduler;
+      if (originalDescriptor === undefined) {
+        Reflect.deleteProperty(globalThis, 'scheduler');
+      } else {
+        Object.defineProperty(globalThis, 'scheduler', originalDescriptor);
+      }
     }
   });
 

@@ -98,6 +98,23 @@ describe('defineRuntimeTransport generic inference (C11)', () => {
     assertType<InferredClient>({ url: 'wss://example' });
   });
 
+  it('accepts schema input while the client consumes transformed output', () => {
+    const clientFactory = (_args: { endpoint: URL }): RuntimeTransportClient => stubClient('transformed');
+    clientFactory.describe = (_args: { endpoint: URL }): TransportDescriptor<'transformed'> =>
+      stubDescribe('transformed')();
+    const transport = defineRuntimeTransport({
+      id: 'transformed',
+      clientOptionsSchema: z.object({ endpoint: z.string() }).transform(({ endpoint }) => ({
+        endpoint: new URL(endpoint),
+      })),
+      client: clientFactory,
+    });
+
+    transport({ endpoint: 'wss://example' });
+    // @ts-expect-error -- callers provide schema input, not transformed output.
+    transport({ endpoint: new URL('wss://example') });
+  });
+
   it('projects host options from a standalone host factory', () => {
     type InferredHost = TransportHostOptions<typeof standaloneHostFixture>;
     assertType<InferredHost>({ port: 8080 });

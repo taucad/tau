@@ -18,20 +18,33 @@ import {
   runtimeProtocolClientNotifyNames,
   runtimeProtocolWorkerNotifyNames,
   runtimeProtocolNotifyNames,
+  runtimeProtocolListenNames,
 } from '#types/runtime-protocol.types.js';
 import type { RuntimeProtocol } from '#types/runtime-protocol.types.js';
-import { runtimeAbortArgsSchema, runtimeStateChangedArgsSchema } from '#types/runtime-protocol.schemas.js';
+import {
+  runtimeAbortArgsSchema,
+  runtimeEvaluateModelArgsSchema,
+  runtimeProtocolSchemas,
+  runtimeStateChangedArgsSchema,
+} from '#types/runtime-protocol.schemas.js';
 
 describe('RuntimeProtocol — runtime inventory guard (R20)', () => {
-  it('should expose exactly six acknowledged calls', () => {
+  it('should expose exactly nine acknowledged calls', () => {
     expect([...runtimeProtocolCallNames]).toEqual([
       'initialize',
       'export',
       'exportModel',
+      'evaluateModel',
       'snapshotSource',
+      'readSceneSnapshot',
+      'listSceneBookmarks',
       'transcode',
       'cleanup',
     ]);
+  });
+
+  it('exposes the bounded progressive-scene listen', () => {
+    expect([...runtimeProtocolListenNames]).toEqual(['sceneUpdates']);
   });
 
   it('exposes exactly 7 client → worker notify commands (T18)', () => {
@@ -94,6 +107,66 @@ describe('RuntimeProtocol — targeted timeout wire validation', () => {
 
   it('accepts only a render identity and timeout reason (T16)', () => {
     expect(runtimeAbortArgsSchema.parse({ renderId, reason: 2 })).toEqual({ renderId, reason: 2 });
+  });
+});
+
+describe('RuntimeProtocol — request-owned evaluation validation', () => {
+  const valid = {
+    stage: { 'nested/main.ts': new Uint8Array([1, 2, 3]) },
+    file: { path: 'nested', filename: 'main.ts' },
+    parameters: { width: 10 },
+    options: { quality: 'fine' },
+    content: { includeEdges: true },
+  };
+
+  it('accepts only the normalized staged request shape', () => {
+    expect(runtimeEvaluateModelArgsSchema.parse(valid)).toEqual(valid);
+    expect(runtimeEvaluateModelArgsSchema.safeParse({ ...valid, signal: {} }).success).toBe(false);
+    expect(runtimeEvaluateModelArgsSchema.safeParse({ ...valid, source: { path: 'main.ts' } }).success).toBe(false);
+    expect(runtimeEvaluateModelArgsSchema.safeParse({ ...valid, extra: true }).success).toBe(false);
+  });
+
+  it('rejects malformed source locators, stages, and record fields', () => {
+    expect(
+      runtimeEvaluateModelArgsSchema.safeParse({ ...valid, file: { path: '../escape', filename: 'x.ts' } }).success,
+    ).toBe(false);
+    expect(
+      runtimeEvaluateModelArgsSchema.safeParse({ ...valid, file: { path: '', filename: 'nested/x.ts' } }).success,
+    ).toBe(false);
+    expect(
+      runtimeEvaluateModelArgsSchema.safeParse({ ...valid, stage: { '../escape.ts': new Uint8Array([1]) } }).success,
+    ).toBe(false);
+    expect(runtimeEvaluateModelArgsSchema.safeParse({ ...valid, stage: { 'main.ts': 'source' } }).success).toBe(false);
+    expect(runtimeEvaluateModelArgsSchema.safeParse({ ...valid, parameters: [] }).success).toBe(false);
+  });
+});
+
+describe('RuntimeProtocol — SVG coordinate provenance', () => {
+  it('preserves canonical length units and permits scale-free standard SVG', () => {
+    const schema = runtimeProtocolSchemas.calls.evaluateModel.result;
+    const scaled = {
+      success: true,
+      data: { format: 'svg', content: '<svg/>', hash: 'drawing', units: { length: 'mm' } },
+      issues: [],
+    } as const;
+    expect(schema.parse(scaled)).toEqual(scaled);
+    expect(
+      schema.safeParse({ success: true, data: { format: 'svg', content: '<svg/>', hash: 'drawing' }, issues: [] })
+        .success,
+    ).toBe(true);
+  });
+
+  it('rejects invalid unit symbols and unknown unit fields', () => {
+    const schema = runtimeProtocolSchemas.calls.evaluateModel.result;
+    for (const units of [{ length: 'pixels' }, { length: 'mm', angle: 'deg' }]) {
+      expect(
+        schema.safeParse({
+          success: true,
+          data: { format: 'svg', content: '<svg/>', hash: 'drawing', units },
+          issues: [],
+        }).success,
+      ).toBe(false);
+    }
   });
 });
 

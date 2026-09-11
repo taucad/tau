@@ -8,7 +8,7 @@ describe('plugin toolkit public surface', () => {
     expect(plugin.definePlugin).toBe(root.definePlugin);
     expect(plugin.isPluginInstance).toBeTypeOf('function');
     expect(plugin.runtimePluginAbiVersionOf).toBeTypeOf('function');
-    expect(plugin.runtimePluginAbiVersion).toBe(1);
+    expect(plugin.runtimePluginAbiVersion).toBe(2);
     expect(Object.hasOwn(plugin, 'deriveKernelExtensions')).toBe(false);
     expect(Object.hasOwn(plugin, 'default')).toBe(false);
   });

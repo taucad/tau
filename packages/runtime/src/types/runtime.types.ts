@@ -29,6 +29,7 @@ import type {
 import type { TransportDescriptor } from '#transport/runtime-transport-descriptor.types.js';
 import type { KernelIssueCode } from '#types/kernel-issue-codes.js';
 import type { RuntimeContentInput, RuntimeContentKey } from '#types/runtime-content.types.js';
+import type { ProgressiveSceneCapability } from '#types/runtime-scene.types.js';
 
 // =============================================================================
 // Error Types
@@ -407,6 +408,8 @@ export type RenderCapability<
   };
   /** Framework content supported by this kernel's composed render route. */
   content?: ContentCapability<RenderContentFor<Kernels, Middleware, Kernel>>;
+  /** Explicit progressive-scene support for this kernel. */
+  progressiveScene: ProgressiveSceneCapability;
 };
 // oxlint-enable @typescript-eslint/no-explicit-any
 
@@ -448,6 +451,7 @@ export type CapabilitiesManifest<
         defaults: RenderOptionsFor<Kernels, K>;
       };
       content?: ContentCapability<RenderContentFor<Kernels, Middleware, K>>;
+      progressiveScene: ProgressiveSceneCapability;
     };
   };
 };

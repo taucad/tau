@@ -1,4 +1,4 @@
-import type { LinksFunction, LoaderFunctionArgs, MetaFunction } from 'react-router';
+import type { LinksFunction, LoaderFunctionArgs, MetaFunction, ShouldRevalidateFunction } from 'react-router';
 import { Links, Meta, Scripts, ScrollRestoration, useRouteLoaderData } from 'react-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useEffect, useMemo } from 'react';
@@ -13,6 +13,9 @@ import { buildClientEnvScript } from '#lib/client-env-script.js';
 import { metaConfig } from '#constants/meta.constants.js';
 import { Page } from '#components/layout/page.js';
 import { readThemeCookie } from '#theme-cookie.js';
+import { readPreferenceCookies } from '#hooks/use-cookie.js';
+import { isOfflineShellPath } from '#lib/static-paths.js';
+import { OfflineShell } from '#offline/offline-shell.js';
 import { cn } from '@taucad/ui/utils/cn';
 import { Toaster } from '#components/ui/sonner.js';
 import { webManifestLinks } from '#lib/web-manifest.js';
@@ -76,17 +79,32 @@ export async function loader({ request }: LoaderFunctionArgs) {
   throwRedirectIfSubdomain(request, 'www');
 
   const theme = await readThemeCookie(request);
-  const cookie = request.headers.get('Cookie') ?? '';
 
   return {
     theme,
-    cookie,
+    // Named UI preferences only (B5 R2). The raw `Cookie` header used to land
+    // here, which put session material into serialised loader data and into
+    // the prerendered/cacheable offline shell document.
+    cookies: readPreferenceCookies(request.headers.get('Cookie') ?? undefined),
     pathname: new URL(request.url).pathname,
     // Allowlisted subset only — this value is serialised into page source both
     // by the `window.ENV` script below and React Router's `<Scripts />` payload.
     env: await getClientEnvironment(),
   };
 }
+
+/**
+ * Client loading boundary for the offline shell (B5 R2).
+ *
+ * `/usage` is prerendered as a neutral document and its data is fetched
+ * client-side, so it must never need a `.data` request. Without this, a filter
+ * or query change on the usage route revalidates the root server loader and
+ * the navigation fails while offline. Root data (theme, allowlisted
+ * preferences, public env) does not vary by usage filter, so skipping the
+ * revalidation loses nothing. Every other route keeps the framework default.
+ */
+export const shouldRevalidate: ShouldRevalidateFunction = ({ nextUrl, defaultShouldRevalidate }) =>
+  isOfflineShellPath(nextUrl.pathname) ? false : defaultShouldRevalidate;
 
 /**
  * Extracts a human-readable string from the `error.error.message` payload of a
@@ -272,6 +290,7 @@ function LayoutDocument({
         />
         <SvgSpriteMount />
         <BuildSkewBanner />
+        <OfflineShell />
         {children}
         <ScrollRestoration />
         <Scripts />

@@ -27,6 +27,22 @@ const prerenderConcurrency = 4;
  */
 export default {
   ssr: true,
+  /**
+   * `buildEnd` is the only hook that runs after prerendering, so it is where
+   * the offline shell worker is generated from the emitted `/usage` document
+   * and the Vite build manifest (B5 R3). The desktop and daemon configs are
+   * separate files and never run this: both already boot from a packaged SPA
+   * index fallback.
+   */
+  async buildEnd({ reactRouterConfig }) {
+    const { generateOfflineShell } = await import('./scripts/generate-offline-shell');
+    const { listOfflineShellPaths } = await import('./app/lib/static-paths');
+    await generateOfflineShell({
+      clientDirectory: `${reactRouterConfig.buildDirectory}/client`,
+      workerSourcePath: `${reactRouterConfig.appDirectory}/offline/offline-shell-worker.ts`,
+      documentPaths: listOfflineShellPaths(),
+    });
+  },
   prerender: {
     async paths() {
       const { listStaticPrerenderPaths } = await import('./app/lib/static-paths');

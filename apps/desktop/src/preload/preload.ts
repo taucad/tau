@@ -26,7 +26,6 @@ import { exposeElectronRuntime, relayElectronPorts } from '@taucad/runtime/elect
 import {
   appIconThemeChannel,
   computeControlChannels,
-  nativeCodeTrustChannels,
   readBootstrap,
   servicesPortRelayTag,
 } from '#shared/desktop-bootstrap.js';
@@ -76,15 +75,6 @@ contextBridge.exposeInMainWorld('tau', {
   runtimeKernelIds: bootstrap.runtimeKernelIds,
   externalAgents: bootstrap.externalAgents,
   revisions: bootstrap.revisions,
-  nativeCode: {
-    isTrusted: async (projectRoot: string): Promise<boolean> =>
-      (await ipcRenderer.invoke(nativeCodeTrustChannels.status, projectRoot)) as boolean,
-    grant: async (projectRoot: string): Promise<boolean> =>
-      (await ipcRenderer.invoke(nativeCodeTrustChannels.grant, projectRoot)) as boolean,
-    revoke: async (projectRoot: string): Promise<void> => {
-      await ipcRenderer.invoke(nativeCodeTrustChannels.revoke, projectRoot);
-    },
-  },
   compute: {
     inspect: async (projectRoot: string) =>
       (await ipcRenderer.invoke(computeControlChannels.inspect, projectRoot)) as unknown,

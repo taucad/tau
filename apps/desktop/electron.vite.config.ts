@@ -50,6 +50,8 @@ const bundledWorkspaceDependencies = [
 export const desktopExternalizedDependencies = [
   '@agentclientprotocol/claude-agent-acp',
   '@agentclientprotocol/codex-acp',
+  /* Resolves its vendored seccomp/srt-win helpers relative to its own module file. */
+  '@anthropic-ai/sandbox-runtime',
   '@taulabs/openrscad-engine',
   'esbuild',
   'libassimp',

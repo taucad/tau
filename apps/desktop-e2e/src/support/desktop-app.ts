@@ -139,8 +139,8 @@ export const captureNextDesktopDownload = async (
  * Launch the built desktop shell against the suite's dedicated API.
  *
  * @param options - The seeded bearer handed to main through A7, plus any extra
- *   environment the shell needs (`env`) — native-code trust, credential
- *   persistence and the like, all read at launch.
+ *   environment the shell needs (`env`) — credential persistence and the
+ *   like, all read at launch.
  * @returns The live session.
  */
 export const launchDesktopApp = async (options: {

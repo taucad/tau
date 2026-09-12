@@ -168,10 +168,7 @@ test.for(cases)(
     session = await launchDesktopApp({
       packaged: true,
       token,
-      env: {
-        TAU_E2E_DISABLE_CREDENTIAL_PERSISTENCE: '1',
-        TAU_E2E_TRUST_NATIVE_CODE: '1',
-      },
+      env: { TAU_E2E_DISABLE_CREDENTIAL_PERSISTENCE: '1' },
     });
     await fixture.routeThrough(session.page);
 

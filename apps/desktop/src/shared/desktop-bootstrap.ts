@@ -19,13 +19,6 @@ export const servicesPortRelayTag = 'tau:services-port';
 /** Theme notification shared by main and preload for the native app icon. */
 export const appIconThemeChannel = 'tau:app-icon-theme';
 
-/** IPC methods for the explicit native-code trust decision. */
-export const nativeCodeTrustChannels = {
-  status: 'tau:native-code-trust:status',
-  grant: 'tau:native-code-trust:grant',
-  revoke: 'tau:native-code-trust:revoke',
-} as const;
-
 /** IPC methods for bounded compute-store authority controls. */
 export const computeControlChannels = {
   inspect: 'tau:compute:inspect',

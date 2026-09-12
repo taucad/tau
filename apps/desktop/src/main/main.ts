@@ -24,7 +24,7 @@ import {
   shell,
   utilityProcess,
 } from 'electron';
-import type { IpcMainInvokeEvent, MessageBoxOptions } from 'electron';
+import type { IpcMainInvokeEvent } from 'electron';
 import { installElectronRuntimeHeaders, registerElectronRuntimeMain } from '@taucad/runtime/electron/main';
 import { connectSqliteComputeStoreWorker } from '@taucad/runtime/node';
 import type { ComputeBinding } from '@taucad/runtime/types';
@@ -69,12 +69,10 @@ import { loginShellEnvironment, packagedEsbuildEnvironment, utilityEnvironment }
 import { createQuickLookController, removeStaleQuickLookSessions } from '#main/quick-look.js';
 import type { QuickLookController } from '#main/quick-look.js';
 import { createOpenFileQueue } from '#main/open-files.js';
-import { createNativeProjectTrustStore } from '#main/native-project-trust.js';
 import {
   appIconThemeChannel,
   bootstrapArgumentPrefix,
   desktopNativeKernelIds,
-  nativeCodeTrustChannels,
   computeControlChannels,
   servicesPortRelayTag,
 } from '#shared/desktop-bootstrap.js';
@@ -185,10 +183,6 @@ const bootstrapElectronApp = async (): Promise<void> => {
    * forgot would answer `EACCES` for a folder the user believes is connected. */
   const roots = createProjectRootRegistry({ storePath: join(app.getPath('userData'), 'granted-roots.json') });
   roots.admit(homeRoot);
-  const nativeTrust = createNativeProjectTrustStore({
-    storePath: join(app.getPath('userData'), 'native-project-trust.json'),
-    markerRoot: join(app.getPath('userData'), 'native-project-trust'),
-  });
   const quickLookTemporaryRoot = join(app.getPath('temp'), 'tau-quick-look');
   removeStaleQuickLookSessions(quickLookTemporaryRoot);
   const quickLookControllers = new Map<number, QuickLookController>();
@@ -278,12 +272,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
     }
     return connection;
   };
-  const baseForkResolver = createKernelForkResolver({
-    registry: roots,
-    defaultRoot: homeRoot,
-    nativeTrustMarkerPath: nativeTrust.markerPath,
-    untrustedNativeMarkerPath: nativeTrust.untrustedMarkerPath(),
-  });
+  const baseForkResolver = createKernelForkResolver({ registry: roots, defaultRoot: homeRoot });
   const runtimeMain = registerElectronRuntimeMain({
     utilityEntry: kernelUtilityEntry,
     /* The kernel utility appends its engine-identity record (N5/N6) to the same
@@ -449,47 +438,6 @@ const bootstrapElectronApp = async (): Promise<void> => {
       await auth.signOut();
     }
   });
-  ipcMain.handle(nativeCodeTrustChannels.status, (event, projectRoot: unknown) => {
-    if (!trusted(event.senderFrame) || typeof projectRoot !== 'string' || !roots.isTrusted(projectRoot)) {
-      return false;
-    }
-    return nativeTrust.isTrusted(projectRoot);
-  });
-  ipcMain.handle(nativeCodeTrustChannels.grant, async (event, projectRoot: unknown) => {
-    if (!trusted(event.senderFrame) || typeof projectRoot !== 'string' || !roots.isTrusted(projectRoot)) {
-      return false;
-    }
-    const trustPrompt = {
-      type: 'warning',
-      title: 'Trust native code?',
-      message: 'This project can run native language runtimes and libraries on your computer.',
-      detail:
-        'Only continue for code you trust. Native project code can read files, use the network, launch programs, and modify data with your user permissions.',
-      buttons: ['Cancel', 'Trust and run'],
-      defaultId: 0,
-      cancelId: 0,
-      noLink: true,
-    } satisfies MessageBoxOptions;
-    const window = BrowserWindow.fromWebContents(event.sender);
-    const trustWithoutPrompt = !app.isPackaged && environment['TAU_E2E_TRUST_NATIVE_CODE'] === '1';
-    const promptResult = trustWithoutPrompt
-      ? undefined
-      : await (window ? dialog.showMessageBox(window, trustPrompt) : dialog.showMessageBox(trustPrompt));
-    const accepted = trustWithoutPrompt || promptResult?.response === 1;
-    if (!accepted) {
-      return false;
-    }
-    nativeTrust.grant(projectRoot);
-    log.log('warn', 'native-code.trusted', { projectRoot });
-    return true;
-  });
-  ipcMain.handle(nativeCodeTrustChannels.revoke, (event, projectRoot: unknown) => {
-    if (!trusted(event.senderFrame) || typeof projectRoot !== 'string' || !roots.isTrusted(projectRoot)) {
-      return;
-    }
-    nativeTrust.revoke(projectRoot);
-    log.log('warn', 'native-code.revoked', { projectRoot });
-  });
   ipcMain.on(appIconThemeChannel, (event, theme: unknown) => {
     if (!trusted(event.senderFrame) || (theme !== 'light' && theme !== 'dark')) {
       return;
@@ -634,15 +582,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
         log.log('error', 'services.invalid-compute-mode');
         return;
       }
-      const servicesContext =
-        concern === 'agentHost'
-          ? {
-              workspaceRoot: resolved['workspaceRoot']!,
-              computeMode: resolved['computeMode']!,
-              nativeTrustFile: nativeTrust.markerPath(resolved['workspaceRoot']!),
-            }
-          : resolved;
-      const port = services.connect(concern as ServicesConcern, servicesContext);
+      const port = services.connect(concern as ServicesConcern, resolved);
       event.senderFrame?.postMessage(servicesPortRelayTag, { requestId }, [port]);
     } catch (error) {
       log.log('error', 'services.connect-failed', error);

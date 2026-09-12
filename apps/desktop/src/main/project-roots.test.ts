@@ -72,11 +72,7 @@ describe('createKernelForkResolver', () => {
   const resolverFor = () => {
     const registry = createProjectRootRegistry();
     registry.admit(homeRoot);
-    return createKernelForkResolver({
-      registry,
-      defaultRoot: homeRoot,
-      untrustedNativeMarkerPath: '/private/tau/untrusted-ephemeral.json',
-    });
+    return createKernelForkResolver({ registry, defaultRoot: homeRoot });
   };
 
   it('passes a trusted root through as TAU_PROJECT_ROOT', () => {
@@ -91,10 +87,7 @@ describe('createKernelForkResolver', () => {
 
   it('selects memory-backed ephemeral purpose without falling back to Home', () => {
     expect(resolverFor()({ purpose: 'ephemeral', definition: 'default' })).toEqual({
-      env: {
-        TAU_RUNTIME_EPHEMERAL: '1',
-        TAU_NATIVE_CODE_TRUST_FILE: '/private/tau/untrusted-ephemeral.json',
-      },
+      env: { TAU_RUNTIME_EPHEMERAL: '1' },
     });
   });
 

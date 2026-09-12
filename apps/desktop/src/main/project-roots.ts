@@ -168,12 +168,7 @@ export const sanitizeServicesContext = (payload: unknown): Record<string, string
 };
 
 /** Environment names {@link createKernelForkResolver} may set. */
-export const kernelForkEnvAllowlist = [
-  'TAU_PROJECT_ROOT',
-  'TAU_RUNTIME_DEBUG',
-  'TAU_RUNTIME_EPHEMERAL',
-  'TAU_NATIVE_CODE_TRUST_FILE',
-] as const;
+export const kernelForkEnvAllowlist = ['TAU_PROJECT_ROOT', 'TAU_RUNTIME_DEBUG', 'TAU_RUNTIME_EPHEMERAL'] as const;
 
 /** Options for {@link createKernelForkResolver}. */
 export type KernelForkResolverOptions = {
@@ -181,10 +176,6 @@ export type KernelForkResolverOptions = {
   readonly registry: ProjectRootRegistry;
   /** Root used when the renderer names none. */
   readonly defaultRoot: string;
-  /** Main-owned marker path for this project's native-code trust state. */
-  readonly nativeTrustMarkerPath?: (projectRoot: string) => string;
-  /** Permanent absent marker used by memory-backed scratch runtimes. */
-  readonly untrustedNativeMarkerPath?: string;
 };
 
 /**
@@ -211,13 +202,9 @@ export const createKernelForkResolver = (options: KernelForkResolverOptions): El
       if (context['projectRoot'] !== undefined || context['root'] !== undefined) {
         throw new Error('Desktop shell refused a rooted ephemeral runtime.');
       }
-      if (!options.untrustedNativeMarkerPath) {
-        throw new Error('Desktop shell has no native-code denial marker for an ephemeral runtime.');
-      }
       return {
         env: {
           TAU_RUNTIME_EPHEMERAL: '1',
-          TAU_NATIVE_CODE_TRUST_FILE: options.untrustedNativeMarkerPath,
           ...(definition === 'debug' ? { TAU_RUNTIME_DEBUG: '1' } : {}),
         },
       };
@@ -230,9 +217,6 @@ export const createKernelForkResolver = (options: KernelForkResolverOptions): El
     return {
       env: {
         TAU_PROJECT_ROOT: projectRoot,
-        ...(options.nativeTrustMarkerPath
-          ? { TAU_NATIVE_CODE_TRUST_FILE: options.nativeTrustMarkerPath(projectRoot) }
-          : {}),
         /* One kernel bundle, two definitions: the debug recipe keeps kernel
          * source mapping, so it is selected by environment rather than by a
          * second `utilityEntry` that would duplicate the whole chunk.

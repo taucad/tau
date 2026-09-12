@@ -184,14 +184,6 @@ vi.mock('#main/open-files.js', () => ({
     consume: vi.fn(async () => []),
   })),
 }));
-vi.mock('#main/native-project-trust.js', () => ({
-  createNativeProjectTrustStore: vi.fn(() => ({
-    markerPath: vi.fn(() => '/trust.json'),
-    untrustedMarkerPath: vi.fn(() => '/untrusted.json'),
-    inspect: vi.fn(),
-    update: vi.fn(),
-  })),
-}));
 
 afterEach(async () => {
   await Promise.all(state.workers.splice(0).map(async (worker) => worker.terminate()));
@@ -201,6 +193,8 @@ afterEach(async () => {
   state.appListeners.clear();
   state.handlers.clear();
   state.resolveFork = undefined;
+  // Each case bootstraps main afresh; the cached module would otherwise register nothing.
+  vi.resetModules();
   for (const listener of process.listeners('uncaughtException')) {
     if (!originalUncaught.has(listener)) {
       process.removeListener('uncaughtException', listener);

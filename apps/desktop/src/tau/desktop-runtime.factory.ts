@@ -21,15 +21,14 @@ import { picogkKernelOptions } from '#tau/picogk-resources.js';
 export const desktopRuntimeConfigSchema = z.object({ tauApiUrl: z.url(), tauWebSocketUrl: z.url() });
 
 export type DesktopRuntimeOptions = {
-  readonly nativeTrustFile: string;
   readonly withSourceMapping?: boolean;
 };
 
 export const desktopOpenrscadKernel = openrscadKernel();
 export const desktopAssimpBackend = process.arch === 'arm64' ? 'native' : 'wasm';
 
-/** Construct the complete desktop recipe with an explicit main-owned native trust marker. */
-const createDesktopRuntimeImplementation = (options: DesktopRuntimeOptions) =>
+/** Construct the complete desktop recipe; native kernels run inside the shared sandbox. */
+const createDesktopRuntimeImplementation = (options: DesktopRuntimeOptions = {}) =>
   defineRuntime({
     configSchema: desktopRuntimeConfigSchema,
     createRuntime: () => ({
@@ -43,9 +42,9 @@ const createDesktopRuntimeImplementation = (options: DesktopRuntimeOptions) =>
         rhino(),
         image(),
         assimp({ preset: 'all', transcoders: { export: { backend: desktopAssimpBackend } } }),
-        build123d({ kernels: { default: build123dKernelOptions(options.nativeTrustFile) } }),
+        build123d({ kernels: { default: build123dKernelOptions() } }),
         ...(process.platform === 'darwin' && process.arch === 'arm64'
-          ? [picogk({ kernels: { default: picogkKernelOptions(options.nativeTrustFile) } })]
+          ? [picogk({ kernels: { default: picogkKernelOptions() } })]
           : []),
         replicad({
           kernels: { default: { wasm: 'auto', withSourceMapping: options.withSourceMapping === true } },

@@ -394,10 +394,7 @@ test('[completed-artifact] runs the Build123d filesystem, parameter, topology, w
   fixture = await startGatewayFixture({ targetFile: 'main.py', content: build123dSource });
   session = await launchDesktopApp({
     token,
-    env: {
-      TAU_E2E_TRUST_NATIVE_CODE: '1',
-      TAU_E2E_DISABLE_CREDENTIAL_PERSISTENCE: '1',
-    },
+    env: { TAU_E2E_DISABLE_CREDENTIAL_PERSISTENCE: '1' },
   });
   const { page } = session;
   const rendererErrors: string[] = [];
@@ -426,7 +423,7 @@ test('[completed-artifact] runs the Build123d filesystem, parameter, topology, w
     await expectVisible(page.getByText(gatewayFixtureFinalText, { exact: true }), 420_000);
     await expectCount(page.getByText(/ROOT_UNAVAILABLE/u), 0);
     await expectCount(page.getByText('File not found', { exact: true }), 0);
-    await expectVisible(page.getByText('Native code enabled', { exact: true }), 120_000);
+    await expectCount(page.getByText('Native code enabled', { exact: true }), 0);
     await expectVisible(page.getByTestId('cad-viewer-canvas-region').locator('canvas'), 120_000);
     await expectGeometryFramed(page);
 
@@ -558,7 +555,7 @@ test('renders a persisted Replicad project card without relaxing the Electron CS
   }
 });
 
-test('[completed-artifact] runs packaged PicoGK C# through filesystem, topology, failures, export, trust, and cleanup', async () => {
+test('[completed-artifact] runs packaged PicoGK C# through filesystem, topology, failures, export, and cleanup', async () => {
   if (process.platform !== 'darwin' || process.arch !== 'arm64') {
     return;
   }
@@ -603,7 +600,7 @@ test('[completed-artifact] runs packaged PicoGK C# through filesystem, topology,
     const projectRoot = join(session.pickedDirectory, slug);
     await expect.poll(() => readFileSync(sourcePath, 'utf8'), { timeout: 120_000 }).toBe(picogkSource);
     await expectVisible(page.getByText(gatewayFixtureFinalText, { exact: true }), 420_000);
-    await expectVisible(page.getByText('Native code enabled', { exact: true }), 120_000);
+    await expectCount(page.getByText('Native code enabled', { exact: true }), 0);
     await expectVisible(page.getByTestId('cad-viewer-canvas-region').locator('canvas'), 120_000);
     await expectGeometryFramed(page);
 
@@ -805,31 +802,23 @@ test('[completed-artifact] runs packaged PicoGK C# through filesystem, topology,
     const stlPath = await exportToProject(page, projectRoot, 'stl');
     expect(readFileSync(stlPath).byteLength).toBeGreaterThan(84);
 
-    const workersBeforeRevoke = picogkWorkers().filter(({ pid }) => !existingWorkerPids.has(pid));
-    expect(workersBeforeRevoke).not.toHaveLength(0);
+    const workersBeforeReload = picogkWorkers().filter(({ pid }) => !existingWorkerPids.has(pid));
+    expect(workersBeforeReload).not.toHaveLength(0);
     const renderingStatus = page.getByText('rendering...', { exact: true });
     await expectCount(renderingStatus, 0, 120_000);
     writeFileSync(sourcePath, slowPicogkSource, 'utf8');
     await expectVisible(renderingStatus, 120_000);
-    const revoke = page.getByRole('button', { name: 'Revoke', exact: true });
-    await revoke.focus();
-    await revoke.press('Enter');
-    await expect
-      .poll(() => workersBeforeRevoke.every(({ pid }) => !picogkWorkers().some((worker) => worker.pid === pid)), {
-        timeout: 15_000,
-      })
-      .toBe(true);
-    const trustFailure = page.getByText(/Native-code trust was revoked|not trusted to run native code/u);
-    await expectVisible(trustFailure, 30_000);
-    await expectCount(trustFailure, 1);
 
     writeFileSync(sourcePath, picogkSource, 'utf8');
     await page.reload();
-    await expectVisible(page.getByText('Native code enabled', { exact: true }), 120_000);
+    await expectCount(page.getByRole('button', { name: 'Revoke', exact: true }), 0);
     await expectVisible(page.getByTestId('cad-viewer-canvas-region').locator('canvas'), 120_000);
     await expectGeometryFramed(page);
-    const workersAfterRegrant = picogkWorkers().filter(({ pid }) => !existingWorkerPids.has(pid));
-    expect(workersAfterRegrant.some(({ pid }) => workersBeforeRevoke.every((worker) => worker.pid !== pid))).toBe(true);
+    await expect
+      .poll(() => workersBeforeReload.every(({ pid }) => !picogkWorkers().some((worker) => worker.pid === pid)), {
+        timeout: 120_000,
+      })
+      .toBe(true);
     expect(session.application.windows()).toHaveLength(1);
     expect(spawnSync('ps', ['-axo', 'command='], { encoding: 'utf8' }).stdout).not.toMatch(/PicoGK.*Viewer/u);
     expect(rendererErrors.some((message) => message.includes('unsafe-eval'))).toBe(false);

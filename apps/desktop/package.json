@@ -15,6 +15,7 @@
   "dependencies": {
     "@agentclientprotocol/claude-agent-acp": "catalog:",
     "@agentclientprotocol/codex-acp": "catalog:",
+    "@anthropic-ai/sandbox-runtime": "catalog:",
     "@gltf-transform/core": "catalog:",
     "@gltf-transform/functions": "catalog:",
     "@taucad/agent-host": "workspace:*",

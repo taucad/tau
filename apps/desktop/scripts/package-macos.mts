@@ -208,6 +208,12 @@ const acpAdapters = await Promise.all(
   }),
 );
 
+/* The sandbox runtime resolves its vendored helpers relative to its own module file
+ * and is spawned nowhere: it is staged with its runtime closure so the kernel utility
+ * can import it from a real directory, and stays inside the ASAR. */
+const sandboxRuntime = await realpath(resolve(desktopRoot, 'node_modules/@anthropic-ai/sandbox-runtime'));
+const sandboxRuntimeMetadata = await readJson<{ readonly version: string }>(resolve(sandboxRuntime, 'package.json'));
+
 await rm(outputRoot, { recursive: true, force: true });
 await Promise.all([
   mkdir(resolve(stageRoot, 'dist'), { recursive: true }),
@@ -254,6 +260,7 @@ await Promise.all([
           'libassimp-darwin-arm64': libassimpMetadata.version,
           nanoraster: nanorasterMetadata.version,
           'nanoraster-darwin-arm64': nanorasterMetadata.version,
+          '@anthropic-ai/sandbox-runtime': sandboxRuntimeMetadata.version,
           ...Object.fromEntries(acpAdapters.map(({ name, version }) => [name, version])),
         },
       },
@@ -263,7 +270,7 @@ await Promise.all([
   ),
 ]);
 
-for (const { name, source } of acpAdapters) {
+for (const { name, source } of [...acpAdapters, { name: '@anthropic-ai/sandbox-runtime', source: sandboxRuntime }]) {
   /* Serial: the closure nests one package inside another, so two adapters
    * racing on the same staged directories would make the layout undecidable. */
   // oxlint-disable-next-line no-await-in-loop -- see above.

@@ -189,7 +189,7 @@ groups:
               to: 0
             model:
               expr: >
-                max(tau_billing_funded_operation_oldest_due_age{service_name="tau-api"}) > 30000
+                max by (deployment_environment, tau_billing_capacity_pool) (tau_billing_funded_operation_oldest_due_age{service_name="tau-api"}) > 30000
               intervalMs: 15000
               maxDataPoints: 20
         for: 1m

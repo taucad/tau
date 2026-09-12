@@ -1,73 +1,69 @@
 import type { ColumnDef, Row } from '@tanstack/react-table';
 import type { ReactNode } from 'react';
 import { format } from 'date-fns';
-import { Link } from 'react-router';
 import { DataTableColumnHeader } from '#components/ui/data-table.js';
-import { formatCurrency } from '#utils/currency.utils.js';
 import { formatNumberAbbreviation } from '#utils/number.utils.js';
-import type { UsageRecord } from '@taucad/billing/usage';
-import { getProviderColor } from '#routes/usage/provider-colors.js';
-import { useProjectUrl } from '#hooks/use-project-slug-route.js';
+// eslint-disable-next-line @nx/enforce-module-boundaries -- this first-party usage surface owns the direct billing client contract
+import { formatCreditAtomsDisplay } from '@taucad/billing';
+import type { WireUsageEvent } from '@taucad/billing';
+import { getUsageColor } from '#routes/usage/provider-colors.js';
 
-/**
- * Provider badge component with consistent hash-based coloring.
- */
+/** Stable row identity used for sorting keys and the open detail row. */
+export const usageEventId = (event: WireUsageEvent): string =>
+  event.kind === 'base' ? event.baseTransactionId : event.transactionId;
+
+/** Credits the account actually spent on this event; a correction keeps its negative sign. */
+export const usageEventNetAtoms = (event: WireUsageEvent): bigint => -BigInt(event.accountDeltaCreditAtoms);
+
+/** When the metered work happened; `undefined` when the range is not reported. */
+export const usageEventTime = (event: WireUsageEvent): string | undefined => event.usageOccurredAt ?? undefined;
+
+const notReported = <span className='text-sm text-muted-foreground'>Not reported</span>;
+
+const tokenCell = (value: string | undefined): ReactNode =>
+  value === undefined ? (
+    notReported
+  ) : (
+    <span className='font-mono text-sm'>{formatNumberAbbreviation(Number(value))}</span>
+  );
+
 function ProviderBadge({ provider }: { readonly provider: string }): ReactNode {
-  const color = getProviderColor(provider);
-
   return (
     <span
       className='inline-flex items-center rounded-md px-2 py-1 text-xs font-medium text-white'
-      style={{ backgroundColor: color }}
+      style={{ backgroundColor: getUsageColor(provider) }}
     >
       {provider}
     </span>
   );
 }
 
-/** Usage rows carry only a project id, so the canonical URL is looked up here. */
-function UsageProjectLink({
-  projectId,
-  projectName,
-}: {
-  readonly projectId: string;
-  readonly projectName: string;
-}): ReactNode {
-  return (
-    <Link to={useProjectUrl(projectId)} className='max-w-[200px] truncate hover:underline'>
-      {projectName}
-    </Link>
-  );
-}
-
-export const usageColumns: Array<ColumnDef<UsageRecord>> = [
+export const usageColumns: Array<ColumnDef<WireUsageEvent>> = [
   {
-    accessorKey: 'date',
-    header: ({ column }) => <DataTableColumnHeader column={column} title='Date' />,
-    cell({ row }: { readonly row: Row<UsageRecord> }): ReactNode {
-      return <span className='font-mono text-sm'>{format(row.original.date, 'MMM d, yyyy HH:mm')}</span>;
-    },
-    sortingFn: 'datetime',
-    enableSorting: true,
-    enableHiding: true,
-  },
-  {
-    accessorKey: 'projectName',
-    header: ({ column }) => <DataTableColumnHeader column={column} title='Project' />,
-    cell({ row }: { readonly row: Row<UsageRecord> }): ReactNode {
-      return <UsageProjectLink projectId={row.original.projectId} projectName={row.original.projectName} />;
+    id: 'time',
+    accessorFn: (row) => usageEventTime(row) ?? '',
+    header: ({ column }) => <DataTableColumnHeader column={column} title='Time' />,
+    cell({ row }: { readonly row: Row<WireUsageEvent> }): ReactNode {
+      const occurred = usageEventTime(row.original);
+      return occurred === undefined ? (
+        notReported
+      ) : (
+        <span className='font-mono text-sm'>{format(new Date(occurred), 'MMM d, yyyy HH:mm')}</span>
+      );
     },
     enableSorting: true,
     enableHiding: true,
   },
   {
-    accessorKey: 'modelName',
+    id: 'model',
+    accessorFn: (row) => row.model.displayName ?? row.model.id,
     header: ({ column }) => <DataTableColumnHeader column={column} title='Model' />,
-    cell({ row }: { readonly row: Row<UsageRecord> }): ReactNode {
+    cell({ row }: { readonly row: Row<WireUsageEvent> }): ReactNode {
+      const { model } = row.original;
       return (
         <div className='flex items-center gap-2'>
-          <ProviderBadge provider={row.original.provider} />
-          <span className='max-w-[150px] truncate text-sm'>{row.original.modelName}</span>
+          {model.providerId === null ? undefined : <ProviderBadge provider={model.providerId} />}
+          <span className='max-w-[180px] truncate text-sm'>{model.displayName ?? model.id}</span>
         </div>
       );
     },
@@ -75,45 +71,58 @@ export const usageColumns: Array<ColumnDef<UsageRecord>> = [
     enableHiding: true,
   },
   {
-    accessorKey: 'inputTokens',
+    id: 'activity',
+    accessorFn: (row) => row.activity.kind,
+    header: ({ column }) => <DataTableColumnHeader column={column} title='Activity' />,
+    cell({ row }: { readonly row: Row<WireUsageEvent> }): ReactNode {
+      return <span className='text-sm'>{row.original.activity.kind}</span>;
+    },
+    enableSorting: true,
+    enableHiding: true,
+  },
+  {
+    id: 'status',
+    accessorFn: (row) => (row.kind === 'base' ? row.executionStatus : 'correction'),
+    header: ({ column }) => <DataTableColumnHeader column={column} title='Status' />,
+    cell({ row }: { readonly row: Row<WireUsageEvent> }): ReactNode {
+      const event = row.original;
+      return (
+        <span className='text-sm'>
+          {event.kind === 'base' ? `${event.executionStatus} · ${event.customerState}` : 'correction'}
+        </span>
+      );
+    },
+    enableSorting: true,
+    enableHiding: true,
+  },
+  {
+    id: 'input',
+    accessorFn: (row) => (row.kind === 'base' ? (row.tokens.inputTotal ?? '') : ''),
     header: ({ column }) => <DataTableColumnHeader column={column} title='Input' />,
-    cell({ row }: { readonly row: Row<UsageRecord> }): ReactNode {
-      return <span className='font-mono text-sm'>{formatNumberAbbreviation(row.original.inputTokens)}</span>;
+    cell({ row }: { readonly row: Row<WireUsageEvent> }): ReactNode {
+      return tokenCell(row.original.kind === 'base' ? (row.original.tokens.inputTotal ?? undefined) : undefined);
     },
     enableSorting: true,
     enableHiding: true,
   },
   {
-    accessorKey: 'outputTokens',
+    id: 'output',
+    accessorFn: (row) => (row.kind === 'base' ? (row.tokens.output ?? '') : ''),
     header: ({ column }) => <DataTableColumnHeader column={column} title='Output' />,
-    cell({ row }: { readonly row: Row<UsageRecord> }): ReactNode {
-      return <span className='font-mono text-sm'>{formatNumberAbbreviation(row.original.outputTokens)}</span>;
+    cell({ row }: { readonly row: Row<WireUsageEvent> }): ReactNode {
+      return tokenCell(row.original.kind === 'base' ? (row.original.tokens.output ?? undefined) : undefined);
     },
     enableSorting: true,
     enableHiding: true,
   },
   {
-    id: 'cacheTokens',
-    accessorFn: (row) => row.cacheReadTokens + row.cacheWriteTokens,
-    header: ({ column }) => <DataTableColumnHeader column={column} title='Cache' />,
-    cell({ row }: { readonly row: Row<UsageRecord> }): ReactNode {
-      const cacheTokens = row.original.cacheReadTokens + row.original.cacheWriteTokens;
-      if (cacheTokens === 0) {
-        return <span className='text-sm text-muted-foreground/50'>—</span>;
-      }
-
-      return <span className='font-mono text-sm'>{formatNumberAbbreviation(cacheTokens)}</span>;
-    },
-    enableSorting: true,
-    enableHiding: true,
-  },
-  {
-    accessorKey: 'totalCost',
-    header: ({ column }) => <DataTableColumnHeader column={column} title='Cost' />,
-    cell({ row }: { readonly row: Row<UsageRecord> }): ReactNode {
+    id: 'credits',
+    accessorFn: (row) => Number(usageEventNetAtoms(row)),
+    header: ({ column }) => <DataTableColumnHeader column={column} title='Credits' />,
+    cell({ row }: { readonly row: Row<WireUsageEvent> }): ReactNode {
       return (
         <span className='font-mono text-sm font-medium'>
-          {formatCurrency(row.original.totalCost, { significantFigures: 2 })}
+          {formatCreditAtomsDisplay(usageEventNetAtoms(row.original))}
         </span>
       );
     },

@@ -4,9 +4,11 @@ import type { PieLabelRenderProps } from 'recharts';
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@taucad/ui/components/chart';
 import type { ChartConfig } from '@taucad/ui/components/chart';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@taucad/ui/components/card';
-import { formatCurrency } from '#utils/currency.utils.js';
-import type { UsageRecord } from '@taucad/billing/usage';
-import { getProviderColor } from '#routes/usage/provider-colors.js';
+// eslint-disable-next-line @nx/enforce-module-boundaries -- this first-party usage surface owns the direct billing client contract
+import { formatCreditAtomsDisplay } from '@taucad/billing';
+import type { WireUsageActivityPage } from '@taucad/billing';
+import { getUsageColor } from '#routes/usage/provider-colors.js';
+import { displayCredits } from '#routes/usage/credits.js';
 
 // eslint-disable-next-line @typescript-eslint/naming-convention -- RADIAN is a constant
 const RADIAN = Math.PI / 180;
@@ -45,50 +47,37 @@ function renderCustomLabel(props: PieLabelRenderProps): React.ReactElement | und
 }
 
 type UsagePieChartProps = {
-  readonly records: UsageRecord[];
+  /** Server activity groups for the whole range. */
+  readonly activities: WireUsageActivityPage['items'];
+  /** Exact range total in atoms; the centre label is never a sum of slices. */
+  readonly totalCreditAtoms: string;
   readonly title?: string;
   readonly description?: string;
 };
 
-type ProviderData = {
-  provider: string;
-  cost: number;
-  fill: string;
-};
-
-/**
- * Aggregate cost by provider.
- */
-function aggregateByProvider(records: UsageRecord[]): ProviderData[] {
-  const providerMap = new Map<string, number>();
-
-  for (const record of records) {
-    const currentCost = providerMap.get(record.provider) ?? 0;
-    providerMap.set(record.provider, currentCost + record.totalCost);
-  }
-
-  return [...providerMap.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .map(([provider, cost]) => ({
-      provider,
-      cost,
-      fill: getProviderColor(provider),
-    }));
-}
-
 function UsagePieChartComponent({
-  records,
-  title = 'Cost by Provider',
+  activities,
+  totalCreditAtoms,
+  title = 'Credits by activity',
   description,
 }: UsagePieChartProps): React.JSX.Element {
-  const chartData = useMemo(() => aggregateByProvider(records), [records]);
-  const totalCost = useMemo(() => chartData.reduce((sum, item) => sum + item.cost, 0), [chartData]);
+  const chartData = useMemo(
+    () =>
+      [...activities]
+        .map((item) => ({
+          activity: item.activity,
+          credits: displayCredits(item.netUsedCreditAtoms),
+          fill: getUsageColor(item.activity),
+        }))
+        .sort((a, b) => b.credits - a.credits),
+    [activities],
+  );
 
   const chartConfig: ChartConfig = useMemo(() => {
     const config: ChartConfig = {};
     for (const item of chartData) {
-      config[item.provider] = {
-        label: item.provider,
+      config[item.activity] = {
+        label: item.activity,
         color: item.fill,
       };
     }
@@ -104,7 +93,7 @@ function UsagePieChartComponent({
           {description ? <CardDescription>{description}</CardDescription> : undefined}
         </CardHeader>
         <CardContent className='flex h-[300px] items-center justify-center'>
-          <p className='text-sm text-muted-foreground'>No data available</p>
+          <p className='text-sm text-muted-foreground'>No usage in this range</p>
         </CardContent>
       </Card>
     );
@@ -123,8 +112,8 @@ function UsagePieChartComponent({
             <ChartTooltip cursor={false} content={ChartTooltipContent} />
             <Pie
               data={chartData}
-              dataKey='cost'
-              nameKey='provider'
+              dataKey='credits'
+              nameKey='activity'
               cx='50%'
               cy='50%'
               innerRadius='35%'
@@ -135,7 +124,7 @@ function UsagePieChartComponent({
             >
               {chartData.map((entry) => (
                 // oxlint-disable-next-line @typescript-eslint/no-deprecated -- todo: fix this
-                <Cell key={entry.provider} fill={entry.fill} />
+                <Cell key={entry.activity} fill={entry.fill} />
               ))}
               <Label
                 content={({ viewBox }) => {
@@ -143,10 +132,10 @@ function UsagePieChartComponent({
                     return (
                       <text x={viewBox.cx} y={viewBox.cy} textAnchor='middle' dominantBaseline='middle'>
                         <tspan x={viewBox.cx} y={viewBox.cy} className='fill-foreground text-xl font-bold'>
-                          {formatCurrency(totalCost, { significantFigures: 3, minDecimalPlaces: 3 })}
+                          {formatCreditAtomsDisplay(BigInt(totalCreditAtoms))}
                         </tspan>
                         <tspan x={viewBox.cx} y={viewBox.cy + 20} className='fill-muted-foreground text-xs'>
-                          Total
+                          Credits
                         </tspan>
                       </text>
                     );

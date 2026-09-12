@@ -1,16 +1,22 @@
 import { memo, useState } from 'react';
 import type React from 'react';
-import { CreditCard, Play } from 'lucide-react';
+import { CreditCard, Play, Repeat } from 'lucide-react';
+// eslint-disable-next-line @nx/enforce-module-boundaries -- this first-party chat surface owns the direct billing client contract
+import { creditAtomsPerCredit } from '@taucad/billing';
 import { Button } from '@taucad/ui/components/button';
 import { cn } from '@taucad/ui/utils/cn';
 import { openSettingsDialog } from '#hooks/use-settings-dialog.js';
 import { useChatActions } from '#hooks/use-chat.js';
 import { useEntitlements } from '@taucad/billing/hooks/use-entitlements';
 import { TopupModal } from '#components/billing/topup-modal.js';
+import { ChatModelSelector } from '#components/chat/chat-model-selector.js';
+import { useModels } from '#hooks/use-models.js';
 
 type ChatErrorCreditsProps = {
   readonly className?: string;
   readonly description?: string;
+  /** Structured refusal fields the 402 carried; see `ChatError.details`. */
+  readonly details?: Record<string, unknown>;
 };
 
 const fallbackDescription = 'Your credit balance is too low. Add credits, then resume this chat.';
@@ -18,11 +24,44 @@ const fallbackDescription = 'Your credit balance is too low. Add credits, then r
 /** Contextual top-up default for mid-chat exhaustion (F7): $25. */
 const chatErrorDefaultTopupCents = 2500;
 
-export const ChatErrorCredits = memo(function ({ className, description }: ChatErrorCreditsProps): React.JSX.Element {
+const atoms = (value: unknown): bigint | undefined => {
+  if (typeof value !== 'string' || !/^\d+$/u.test(value)) {
+    return undefined;
+  }
+  return BigInt(value);
+};
+
+/**
+ * Whole credits the denied call still needed, from the shortfall the API
+ * published on the 402 (`requiredCreditAtoms` − `availableCreditAtoms`, rounded
+ * up to a credit so the number the reader adds is never short).
+ */
+const shortfallCredits = (details: Record<string, unknown> | undefined): bigint | undefined => {
+  const required = atoms(details?.['requiredCreditAtoms']);
+  const available = atoms(details?.['availableCreditAtoms']);
+  if (required === undefined || available === undefined || required <= available) {
+    return undefined;
+  }
+  return (required - available + creditAtomsPerCredit - 1n) / creditAtomsPerCredit;
+};
+
+export const ChatErrorCredits = memo(function ({
+  className,
+  description,
+  details,
+}: ChatErrorCreditsProps): React.JSX.Element {
   const { continueChat } = useChatActions();
   const entitlements = useEntitlements();
+  const { resolveModel } = useModels();
   const [isTopupOpen, setIsTopupOpen] = useState(false);
-  const resolvedDescription = description ?? fallbackDescription;
+  // The denial's `routeId` is the catalogue model id, so the reader sees the
+  // model's own name rather than a route slug.
+  const shortfall = shortfallCredits(details);
+  const routeId = typeof details?.['routeId'] === 'string' ? details['routeId'] : undefined;
+  const resolvedDescription =
+    shortfall === undefined || routeId === undefined
+      ? (description ?? fallbackDescription)
+      : `Tau paused this turn: ${shortfall} more ${shortfall === 1n ? 'credit' : 'credits'} needed for ${resolveModel(routeId).name}.`;
 
   return (
     <div
@@ -62,6 +101,16 @@ export const ChatErrorCredits = memo(function ({ className, description }: ChatE
             Plans & Billing
           </Button>
         )}
+        {/* A cheaper tier is the other fix for a shortfall (P4); the composer's
+         * picker is the owner, opened here without claiming its shortcut. */}
+        <ChatModelSelector enableShortcut={false} popoverProperties={{ align: 'end' }}>
+          {() => (
+            <Button variant='ghost' size='sm'>
+              <Repeat className='size-3.5' />
+              Switch Model
+            </Button>
+          )}
+        </ChatModelSelector>
         <Button
           variant='outline'
           size='sm'

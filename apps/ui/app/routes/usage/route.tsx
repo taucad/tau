@@ -1,6 +1,7 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { Link } from 'react-router';
-import { Clock, Filter, RefreshCw, X } from 'lucide-react';
+import type { MetaFunction } from 'react-router';
+import { Filter, RefreshCw, X } from 'lucide-react';
 import { Badge } from '@taucad/ui/components/badge';
 import { Button } from '@taucad/ui/components/button';
 import { DateRangePicker } from '#components/ui/date-range-picker.js';
@@ -13,24 +14,28 @@ import {
   DropdownMenuTrigger,
 } from '@taucad/ui/components/dropdown-menu';
 import { Loader } from '#components/ui/loader.js';
-import { ToggleGroup, ToggleGroupItem } from '@taucad/ui/components/toggle-group';
-import { useAllUsage } from '#hooks/use-all-usage.js';
+import { useCredits } from '@taucad/billing/hooks/use-credits';
+import { useUsageSnapshot } from '@taucad/billing/hooks/use-usage-snapshot';
+import type { UsageSnapshotResult } from '@taucad/billing/hooks/use-usage-snapshot';
+import type { WireUsageSnapshot } from '@taucad/billing';
 import { UsageBarChart } from '#routes/usage/charts/usage-bar-chart.js';
 import { UsageLineChart } from '#routes/usage/charts/usage-line-chart.js';
 import { UsagePieChart } from '#routes/usage/charts/usage-pie-chart.js';
-import { UsageStackedChart } from '#routes/usage/charts/usage-stacked-chart.js';
-import type { TimeBucket } from '#routes/usage/time-bucket.utils.js';
+import { ReservedTable } from '#routes/usage/reserved-table.js';
 import { UsageSummaryCards } from '#routes/usage/usage-summary-cards.js';
 import { UsageTable } from '#routes/usage/usage-table.js';
-import { useUsageFilters } from '#routes/usage/use-usage-filters.js';
+import { usageActivityKinds, usageFilterOptions, useUsageFilters } from '#routes/usage/use-usage-filters.js';
+import { usePersistSavedUsage, useSavedUsage } from '#db/billing-snapshot-store.js';
+import type { SavedUsageOutcome } from '#db/billing-snapshot-store.js';
 import type { Handle } from '#types/matches.types.js';
 
-const timeBucketOptions: Array<{ value: TimeBucket; label: string }> = [
-  { value: '5m', label: '5M' },
-  { value: '1h', label: '1H' },
-  { value: '6h', label: '6H' },
-  { value: '1d', label: '1D' },
-];
+/**
+ * The usage document is prerendered as a neutral offline shell (B5 R2), so it
+ * is reachable without a session and must never be indexed. `robots.txt`
+ * disallows crawling; only this meta tag keeps an already-known URL out of the
+ * index.
+ */
+export const meta: MetaFunction = () => [{ title: 'Tau usage' }, { name: 'robots', content: 'noindex, nofollow' }];
 
 export const handle: Handle = {
   breadcrumb() {
@@ -43,238 +48,209 @@ export const handle: Handle = {
   enableOverflowY: true,
 };
 
-export default function UsageDashboard(): React.JSX.Element {
-  const { records: allRecords, isLoading, error, refetch } = useAllUsage();
-  const [timeBucket, setTimeBucket] = useState<TimeBucket>('1d');
-  const {
-    filters,
-    setDateRange,
-    setModels,
-    setProviders,
-    setProjects,
-    clearFilters,
-    applyFilters,
-    availableModels,
-    availableProviders,
-    availableProjects,
-  } = useUsageFilters(allRecords);
+const formatInstant = (value: string): string => new Date(value).toLocaleString();
 
-  // Apply filters to get filtered records
-  const filteredRecords = useMemo(() => applyFilters(allRecords), [applyFilters, allRecords]);
+/** The exclusive wire `toDate` is shown as the inclusive last day the reader picked. */
+const appliedRange = (query: WireUsageSnapshot['query']): string => {
+  if (query.fromDate === null || query.toDate === null) {
+    return 'All time';
+  }
+  const lastDay = new Date(`${query.toDate}T00:00:00.000Z`);
+  lastDay.setUTCDate(lastDay.getUTCDate() - 1);
+  return `${query.fromDate} to ${lastDay.toISOString().slice(0, 10)} (${query.timeZone})`;
+};
 
-  // Check if any dropdown filters are active (excludes date range which is always set)
-  const hasActiveFilters = useMemo(
-    () => filters.models.length > 0 || filters.providers.length > 0 || filters.projects.length > 0,
-    [filters.models, filters.providers, filters.projects],
+/**
+ * Freshness and failure (B4 R6): every state is labelled, a failed read keeps
+ * the last good snapshot, and nothing is ever rendered as zero usage.
+ */
+function UsageFreshness({
+  usage,
+  savedLabel,
+  saveOutcome,
+}: {
+  readonly usage: UsageSnapshotResult;
+  readonly savedLabel: string | undefined;
+  readonly saveOutcome: SavedUsageOutcome | undefined;
+}): React.JSX.Element {
+  const labels: Record<UsageSnapshotResult['status'], string> = {
+    'signed-out': 'Sign in to see your Tau usage.',
+    loading: 'Loading your Tau usage…',
+    refreshing: 'Refreshing…',
+    ready: 'snapshot' in usage ? `Updated ${formatInstant(usage.snapshot.asOf)}` : '',
+    'unable-to-refresh': 'Showing saved usage; unable to refresh',
+    saved:
+      'snapshot' in usage
+        ? `Offline — saved usage for ${savedLabel ?? 'this account'}, last updated ${formatInstant(usage.snapshot.asOf)}. Reconnect for the latest usage.`
+        : '',
+    unavailable: 'No saved usage for this view',
+  };
+  const isFailed = usage.status === 'unable-to-refresh' || usage.status === 'unavailable';
+  return (
+    <div className='flex flex-wrap items-center gap-3 text-sm' data-testid='usage-freshness'>
+      {usage.status === 'loading' ? <Loader className='size-4' /> : undefined}
+      <span className={isFailed ? 'text-warning' : 'text-muted-foreground'}>{labels[usage.status]}</span>
+      {isFailed ? (
+        <Button variant='outline' size='sm' className='gap-2' onClick={usage.retry}>
+          <RefreshCw className='size-3.5' />
+          Retry
+        </Button>
+      ) : undefined}
+      {saveOutcome === 'quota-exceeded' || saveOutcome === 'unavailable' ? (
+        <span className='text-muted-foreground' data-testid='usage-offline-saving'>
+          {saveOutcome === 'quota-exceeded'
+            ? 'Not enough storage to keep this usage for offline viewing.'
+            : 'Saving usage for offline viewing is unavailable on this device.'}
+        </span>
+      ) : undefined}
+    </div>
   );
+}
 
-  const handleModelToggle = (model: string): void => {
-    const newModels = filters.models.includes(model)
-      ? filters.models.filter((m) => m !== model)
-      : [...filters.models, model];
-    setModels(newModels);
-  };
+/** Filters are request state the server applies; offline there is nothing to re-request. */
+const hidesFilters = (status: UsageSnapshotResult['status']): boolean => status === 'signed-out' || status === 'saved';
 
-  const handleProviderToggle = (provider: string): void => {
-    const newProviders = filters.providers.includes(provider)
-      ? filters.providers.filter((p) => p !== provider)
-      : [...filters.providers, provider];
-    setProviders(newProviders);
-  };
-
-  const handleProjectToggle = (projectId: string): void => {
-    const newProjects = filters.projects.includes(projectId)
-      ? filters.projects.filter((p) => p !== projectId)
-      : [...filters.projects, projectId];
-    setProjects(newProjects);
-  };
-
-  if (isLoading) {
-    return (
-      <div className='container flex h-full flex-col items-center justify-center gap-4 px-4 py-8'>
-        <Loader className='size-8' />
-        <p className='text-muted-foreground'>Loading usage data...</p>
-      </div>
-    );
+/** One canonical filter dimension; the server, not the table, applies it. */
+function FilterMenu<Value extends string>({
+  label,
+  options,
+  selected,
+  onToggle,
+}: {
+  readonly label: string;
+  readonly options: ReadonlyArray<{ id: Value; label: string }>;
+  readonly selected: readonly Value[];
+  readonly onToggle: (value: Value) => void;
+}): React.JSX.Element | undefined {
+  if (options.length === 0) {
+    return undefined;
   }
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant='outline' className='gap-2'>
+          <Filter className='size-3.5' />
+          {label}
+          {selected.length > 0 ? (
+            <Badge variant='secondary' className='ml-1 rounded-full px-1.5 py-0.5 text-xs'>
+              {selected.length}
+            </Badge>
+          ) : undefined}
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align='start' className='max-h-[300px] w-56 overflow-y-auto'>
+        <DropdownMenuLabel>Filter by {label.toLowerCase()}</DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        {options.map((option) => (
+          <DropdownMenuCheckboxItem
+            key={option.id}
+            checked={selected.includes(option.id)}
+            onSelect={(event) => {
+              event.preventDefault();
+            }}
+            onCheckedChange={() => {
+              onToggle(option.id);
+            }}
+          >
+            <span className='max-w-[180px] truncate'>{option.label}</span>
+          </DropdownMenuCheckboxItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
 
-  if (error) {
-    return (
-      <div className='container flex h-full flex-col items-center justify-center gap-4 px-4 py-8'>
-        <p className='text-destructive'>Error loading usage data: {error.message}</p>
-      </div>
-    );
-  }
+export default function UsagePage(): React.JSX.Element {
+  const { filters, query, setDateRange, toggleModel, toggleActivity, toggleProject, clearFilters, hasActiveFilters } =
+    useUsageFilters();
+  const saved = useSavedUsage(query);
+  const usage = useUsageSnapshot(query, { saved: saved?.snapshot });
+  const saveOutcome = usePersistSavedUsage(query, usage);
+  const balance = useCredits();
+  const [openEventId, setOpenEventId] = useState<string>();
+  const snapshot = 'snapshot' in usage ? usage.snapshot : undefined;
+  const options = usageFilterOptions(snapshot, filters);
 
   return (
     <div className='container mx-auto space-y-6 px-4 py-8'>
-      {/* Header */}
-      <div className='flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between'>
-        <div>
-          <h1 className='text-3xl font-bold'>Usage Dashboard</h1>
-          <p className='mt-1 text-muted-foreground'>Track AI model usage and costs across all your projects.</p>
+      <div className='flex flex-col gap-1'>
+        <h1 className='text-3xl font-bold'>Tau usage</h1>
+        <p className='text-muted-foreground'>
+          Usage through the Tau LLM provider across your devices. Local and connected external providers are billed by
+          them, not by Tau, and are not shown here.
+        </p>
+      </div>
+
+      <UsageFreshness usage={usage} savedLabel={saved?.label} saveOutcome={saveOutcome} />
+
+      {hidesFilters(usage.status) ? undefined : (
+        <div className='flex flex-wrap items-center gap-2'>
+          <DateRangePicker withPresets value={filters.dateRange} onChange={setDateRange} />
+          <FilterMenu label='Models' options={options.models} selected={filters.models} onToggle={toggleModel} />
+          <FilterMenu
+            label='Activities'
+            options={usageActivityKinds.map((activity) => ({ id: activity, label: activity }))}
+            selected={filters.activities}
+            onToggle={toggleActivity}
+          />
+          <FilterMenu
+            label='Projects'
+            options={options.projects.map((project) => ({ id: project, label: project }))}
+            selected={filters.projects}
+            onToggle={toggleProject}
+          />
+          {hasActiveFilters ? (
+            <Button variant='ghost' size='sm' className='gap-2' onClick={clearFilters}>
+              <X className='size-3.5' />
+              Clear filters
+            </Button>
+          ) : undefined}
         </div>
-      </div>
+      )}
 
-      {/* Filters */}
-      <div className='flex flex-wrap items-center gap-2'>
-        <DateRangePicker withPresets value={filters.dateRange} onChange={setDateRange} />
+      {snapshot ? (
+        <>
+          <p className='text-sm text-muted-foreground'>{appliedRange(snapshot.query)}</p>
 
-        {/* Model Filter */}
-        {availableModels.length > 0 ? (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant='outline' className='gap-2'>
-                <Filter className='size-3.5' />
-                Models
-                {filters.models.length > 0 ? (
-                  <Badge variant='secondary' className='ml-1 rounded-full px-1.5 py-0.5 text-xs'>
-                    {filters.models.length}
-                  </Badge>
-                ) : undefined}
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align='start' className='max-h-[300px] w-56 overflow-y-auto'>
-              <DropdownMenuLabel>Filter by Model</DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              {availableModels.map((model) => (
-                <DropdownMenuCheckboxItem
-                  key={model}
-                  checked={filters.models.includes(model)}
-                  onSelect={(event) => {
-                    event.preventDefault();
-                  }}
-                  onCheckedChange={() => {
-                    handleModelToggle(model);
-                  }}
-                >
-                  {model}
-                </DropdownMenuCheckboxItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        ) : undefined}
+          {snapshot.availability.state === 'available' ? undefined : (
+            <p className='text-sm text-warning' data-testid='usage-availability'>
+              {snapshot.availability.state === 'unavailable'
+                ? 'Usage is unavailable for this view'
+                : 'Partial usage for this view'}{' '}
+              ({snapshot.availability.reason})
+            </p>
+          )}
+          {snapshot.coverage.complete ? undefined : (
+            <p className='text-sm text-muted-foreground'>
+              Some earlier history is outside this account&apos;s recorded coverage.
+            </p>
+          )}
 
-        {/* Provider Filter */}
-        {availableProviders.length > 0 ? (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant='outline' className='gap-2'>
-                <Filter className='size-3.5' />
-                Providers
-                {filters.providers.length > 0 ? (
-                  <Badge variant='secondary' className='ml-1 rounded-full px-1.5 py-0.5 text-xs'>
-                    {filters.providers.length}
-                  </Badge>
-                ) : undefined}
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align='start' className='w-56'>
-              <DropdownMenuLabel>Filter by Provider</DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              {availableProviders.map((provider) => (
-                <DropdownMenuCheckboxItem
-                  key={provider}
-                  checked={filters.providers.includes(provider)}
-                  onSelect={(event) => {
-                    event.preventDefault();
-                  }}
-                  onCheckedChange={() => {
-                    handleProviderToggle(provider);
-                  }}
-                >
-                  {provider}
-                </DropdownMenuCheckboxItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        ) : undefined}
+          <UsageSummaryCards snapshot={snapshot} balance={balance} />
 
-        {/* Project Filter */}
-        {availableProjects.length > 0 ? (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant='outline' className='gap-2'>
-                <Filter className='size-3.5' />
-                Projects
-                {filters.projects.length > 0 ? (
-                  <Badge variant='secondary' className='ml-1 rounded-full px-1.5 py-0.5 text-xs'>
-                    {filters.projects.length}
-                  </Badge>
-                ) : undefined}
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align='start' className='max-h-[300px] w-56 overflow-y-auto'>
-              <DropdownMenuLabel>Filter by Project</DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              {availableProjects.map((project) => (
-                <DropdownMenuCheckboxItem
-                  key={project.id}
-                  checked={filters.projects.includes(project.id)}
-                  onSelect={(event) => {
-                    event.preventDefault();
-                  }}
-                  onCheckedChange={() => {
-                    handleProjectToggle(project.id);
-                  }}
-                >
-                  <span className='max-w-[180px] truncate'>{project.name}</span>
-                </DropdownMenuCheckboxItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        ) : undefined}
+          <ReservedTable />
 
-        {/* Clear Filters */}
-        {hasActiveFilters ? (
-          <Button variant='ghost' size='sm' className='gap-2' onClick={clearFilters}>
-            <X className='size-3.5' />
-            Clear filters
-          </Button>
-        ) : undefined}
+          <div className='grid gap-4 lg:grid-cols-2'>
+            <UsageLineChart days={snapshot.days?.items ?? []} description='Credits per day' />
+            <UsageBarChart models={snapshot.models?.items ?? []} description='Top models by credits' />
+            {snapshot.totals ? (
+              <UsagePieChart
+                activities={snapshot.activities?.items ?? []}
+                totalCreditAtoms={snapshot.totals.netUsedCreditAtoms}
+                description='Credits by activity'
+              />
+            ) : undefined}
+          </div>
 
-        {/* Time Bucket Toggle */}
-        <div className='ml-auto flex items-center gap-2'>
-          <Clock className='size-3.5 text-muted-foreground' />
-          <ToggleGroup
-            type='single'
-            variant='outline'
-            value={timeBucket}
-            size='sm'
-            onValueChange={(value) => {
-              if (value) {
-                setTimeBucket(value as TimeBucket);
-              }
-            }}
-          >
-            {timeBucketOptions.map((option) => (
-              <ToggleGroupItem key={option.value} value={option.value} aria-label={`${option.value} bucket`}>
-                {option.label}
-              </ToggleGroupItem>
-            ))}
-          </ToggleGroup>
-
-          {/* Refresh Button */}
-          <Button variant='outline' size='sm' className='gap-2' onClick={refetch}>
-            <RefreshCw className='size-3.5' />
-            Refresh
-          </Button>
-        </div>
-      </div>
-
-      {/* Summary Cards */}
-      <UsageSummaryCards records={filteredRecords} />
-
-      {/* Charts Grid */}
-      <div className='grid gap-4 lg:grid-cols-2'>
-        <UsageLineChart records={filteredRecords} timeBucket={timeBucket} description='Cost trend' />
-        <UsageBarChart records={filteredRecords} description='Top models by cost' />
-        <UsageStackedChart records={filteredRecords} timeBucket={timeBucket} description='Token composition' />
-        <UsagePieChart records={filteredRecords} description='Cost distribution by provider' />
-      </div>
-
-      {/* Data Table */}
-      <UsageTable records={filteredRecords} description='Detailed usage records' height={500} />
+          <UsageTable
+            rows={snapshot.rows?.items ?? []}
+            hasMore={snapshot.rows?.complete === false}
+            description='Select an action to see its credit explanation'
+            openEventId={openEventId}
+            onOpenEventChange={setOpenEventId}
+          />
+        </>
+      ) : undefined}
     </div>
   );
 }

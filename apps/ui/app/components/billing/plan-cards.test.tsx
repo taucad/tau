@@ -56,6 +56,17 @@ describe('PlanCards', () => {
     );
     expect(followPaymentRedirect).toHaveBeenCalled();
   });
+  it('advertises paid credit terms without a complimentary grant (D1/D2)', () => {
+    render(
+      <MemoryRouter>
+        <PlanCards />
+      </MemoryRouter>,
+    );
+    expect(screen.getByText('2,000 credits every month')).toBeInTheDocument();
+    expect(screen.getByText('Buy credits any time — 100 credits per US$1')).toBeInTheDocument();
+    expect(screen.queryByText(/of usage credits per month/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/free credits|welcome credits|refill/i)).not.toBeInTheDocument();
+  });
   it('pins the current tier', () => {
     render(
       <MemoryRouter>

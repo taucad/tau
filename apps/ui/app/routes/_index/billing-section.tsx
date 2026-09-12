@@ -12,7 +12,7 @@ export function BillingSection(): React.JSX.Element {
         <div className='mb-10 text-center'>
           <h2 className='text-3xl font-semibold tracking-tight md:text-4xl'>Simple, usage-based pricing</h2>
           <p className='mt-2 text-muted-foreground'>
-            Start free. Pay only for the AI and hosted compute you actually use.
+            Start free. Add credits when you want Tau-hosted AI, or connect your own provider.
           </p>
         </div>
         <PlanCards />

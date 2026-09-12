@@ -16,6 +16,13 @@ const safeLogicalPathSchema = z
 
 const jobCapabilityValueSchema = z.union([z.boolean(), z.number(), z.string().max(256)]);
 
+/**
+ * B7 R10 containment: one submission's supplier liability is runs x attempts,
+ * and every shipped job definition declares 1-3. Raising this needs the durable
+ * operator-funded allowance, not a larger caller-controlled number.
+ */
+export const jobMaxAttemptsCeiling = 3;
+
 export const registerJobRunnerSchema = z.object({
   capabilities: z.record(z.string().trim().min(1).max(128), jobCapabilityValueSchema),
   slots: z.number().int().min(1).max(1024),
@@ -52,7 +59,7 @@ export const jobDefinitionSchema = z
     }),
     requirements: z.array(jobCapabilityRequirementSchema).max(64),
     slotCost: z.number().int().min(1).max(1024),
-    maxAttempts: z.number().int().min(1).max(100),
+    maxAttempts: z.number().int().min(1).max(jobMaxAttemptsCeiling),
     options: z.record(z.string().max(128), z.json()),
     outputs: z
       .array(

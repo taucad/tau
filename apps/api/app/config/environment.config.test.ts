@@ -54,6 +54,63 @@ describe('environmentSchema', () => {
     }
   });
 
+  it('should default the database pool budget and per-connection deadlines', () => {
+    const result = environmentSchema.safeParse(
+      Object.fromEntries(
+        Object.entries(withRequiredCookieSecret(process.env)).filter(
+          ([key]) => key === 'DATABASE_URL' || !key.startsWith('DATABASE_'),
+        ),
+      ),
+    );
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.DATABASE_POOL_MAX).toBe(10);
+      expect(result.data.DATABASE_CONNECT_TIMEOUT_SECONDS).toBe(10);
+      expect(result.data.DATABASE_IDLE_TIMEOUT_SECONDS).toBe(60);
+      expect(result.data.DATABASE_STATEMENT_TIMEOUT_MS).toBe(15_000);
+      expect(result.data.DATABASE_LOCK_TIMEOUT_MS).toBe(5000);
+      expect(result.data.DATABASE_IDLE_IN_TRANSACTION_TIMEOUT_MS).toBe(15_000);
+      expect(result.data.DATABASE_RUNTIME_ROLE).toBe('');
+    }
+  });
+
+  it.each([
+    ['DATABASE_POOL_MAX', '0'],
+    ['DATABASE_POOL_MAX', 'unbounded'],
+    ['DATABASE_POOL_MAX', '101'],
+    ['DATABASE_CONNECT_TIMEOUT_SECONDS', '0'],
+    ['DATABASE_IDLE_TIMEOUT_SECONDS', '0'],
+    ['DATABASE_STATEMENT_TIMEOUT_MS', '99'],
+    ['DATABASE_STATEMENT_TIMEOUT_MS', '300001'],
+    ['DATABASE_LOCK_TIMEOUT_MS', '0'],
+    ['DATABASE_IDLE_IN_TRANSACTION_TIMEOUT_MS', '-1'],
+    ['DATABASE_RUNTIME_ROLE', 'tau api runtime'],
+  ])('should fail closed on an invalid %s value of %s', (key, value) => {
+    const result = environmentSchema.safeParse({ ...withRequiredCookieSecret(process.env), [key]: value });
+
+    expect(result.success).toBe(false);
+  });
+
+  it('should require a de-privileged runtime role in production', () => {
+    const base = {
+      ...withRequiredCookieSecret(process.env),
+      NODE_ENV: 'production',
+      DATABASE_RUNTIME_ROLE: '',
+    };
+
+    const absent = environmentSchema.safeParse(base);
+    const configured = environmentSchema.safeParse({ ...base, DATABASE_RUNTIME_ROLE: 'tau_api_runtime' });
+
+    expect(absent.success).toBe(false);
+    if (!absent.success) {
+      expect(absent.error.issues.some((issue) => issue.path[0] === 'DATABASE_RUNTIME_ROLE')).toBe(true);
+    }
+    expect(
+      configured.success || !configured.error.issues.some((issue) => issue.path[0] === 'DATABASE_RUNTIME_ROLE'),
+    ).toBe(true);
+  });
+
   it('should reject localhost TAU_S3_ENDPOINT while in production mode', () => {
     const result = environmentSchema.safeParse({
       ...withRequiredCookieSecret(process.env),
@@ -150,6 +207,7 @@ describe('environmentSchema', () => {
       TAU_S3_SECRET_ACCESS_KEY: 'secret',
       TAU_S3_FORCE_PATH_STYLE: false,
       TAU_API_URL: 'https://api.tau.new',
+      DATABASE_RUNTIME_ROLE: 'tau_api_runtime',
       BILLING_ENVIRONMENT: 'prod-us',
       STRIPE_SECRET_KEY: 'sk_live_test',
       STRIPE_READ_SECRET_KEY: 'rk_live_read_test',

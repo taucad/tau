@@ -27,6 +27,8 @@ const mockRedisService = {
     subscribe: async () => 1,
     unsubscribe: async () => 1,
     quit: async () => 'OK',
+    // Never connected, so the service tears it down with `disconnect()` rather than `quit()`.
+    disconnect: () => undefined,
   },
   async onModuleInit() {
     // No-op

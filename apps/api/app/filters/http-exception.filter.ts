@@ -11,6 +11,21 @@ import type { WirePaymentAction } from '@taucad/billing';
 import { httpHeader } from '#constants/http-header.constant.js';
 import { LlmGatewayError } from '#api/llm/llm-gateway.error.js';
 
+/**
+ * Bounded retry estimates for the funded-admission refusals (B9 `:292`).
+ *
+ * Neither denial carries a per-request estimate, so each value is the blueprint's
+ * own bound for the condition: 30 seconds is B9's due-to-terminal p99 target
+ * (`llm-admission-failsafe-and-recovery-blueprint.md:251`), after which a saturating
+ * funded operation has reached terminal; 60 seconds is the recovery claim lease
+ * (`credit-ledger.service.ts:1069`), after which another claimant's lease expires.
+ */
+const fundedRetryAfterSeconds = new Map<string, number>([
+  ['FUNDED_OPERATION_LIMIT', 30],
+  ['FUNDED_HELPER_LIMIT', 30],
+  ['BILLING_RECOVERY_UNAVAILABLE', 60],
+]);
+
 @Catch()
 export class HttpExceptionFilter implements ExceptionFilter {
   private readonly logger = new Logger(HttpExceptionFilter.name);
@@ -24,6 +39,13 @@ export class HttpExceptionFilter implements ExceptionFilter {
     const headerRequestId = request.headers[httpHeader.requestId] as string | undefined;
     const requestId = headerRequestId ?? (request.id as string | undefined);
 
+    // A streamed route (the model gateway) can fail after its response has left:
+    // a second reply only produces `FST_ERR_REP_ALREADY_SENT` and hides the cause.
+    if (response.sent) {
+      this.logger.error({ err: exception, requestId }, 'Request failed after its response was already sent');
+      return;
+    }
+
     let statusCode: number;
     let errorResponse: HttpErrorResponse;
 
@@ -33,11 +55,17 @@ export class HttpExceptionFilter implements ExceptionFilter {
     // report the HTTP status back to the user.
     if (exception instanceof LlmGatewayError) {
       const gatewayStatus = exception.getStatus();
-      this.logger.warn(`Model gateway refusal: ${JSON.stringify(exception.getResponse())}`);
+      const gatewayResponse = exception.getResponse();
+      this.logger.warn(`Model gateway refusal: ${JSON.stringify(gatewayResponse)}`);
       if (requestId) {
         void response.header(httpHeader.requestId, requestId);
       }
-      void response.status(gatewayStatus).send(exception.getResponse());
+      const { type } = (gatewayResponse as { error?: { type?: unknown } }).error ?? {};
+      const retryAfter = typeof type === 'string' ? fundedRetryAfterSeconds.get(type) : undefined;
+      if (retryAfter !== undefined) {
+        void response.header('retry-after', String(retryAfter));
+      }
+      void response.status(gatewayStatus).send(gatewayResponse);
       return;
     }
 

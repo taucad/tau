@@ -15,6 +15,7 @@ import {
   UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { AuthGuard } from '#auth/auth.guard.js';
 import { PublicAuth, UseAuth, User } from '#auth/decorators/auth.decorator.js';
 import { HostsService } from '#api/hosts/hosts.service.js';
@@ -37,6 +38,7 @@ import {
   workerActionRecordSchema,
 } from '#api/jobs/jobs.dto.js';
 import { JobsService } from '#api/jobs/jobs.service.js';
+import type { Environment } from '#config/environment.config.js';
 import { jobActionRecordStorageKey, jobArtifactChecksum, jobArtifactStorageKey } from '#api/jobs/job-artifacts.js';
 import { ObjectStorageService } from '#storage/object-storage.service.js';
 
@@ -76,11 +78,19 @@ const readBoundedBytes = async (
 @Controller({ path: 'jobs', version: '1' })
 @UseGuards(AuthGuard)
 export class JobsController {
+  readonly #jobsEnabled: boolean;
+
   public constructor(
     private readonly jobs: JobsService,
     private readonly hosts: HostsService,
     private readonly objectStorage: ObjectStorageService,
-  ) {}
+    config: ConfigService<Environment, true>,
+  ) {
+    // B7 R10: the paid supplier path stays refused until an operator funds it.
+    // The key is optional, so the validated read really can be undefined.
+    const configured: boolean | undefined = config.get('TAU_JOBS_ENABLED', { infer: true });
+    this.#jobsEnabled = configured ?? config.get('NODE_ENV', { infer: true }) === 'development';
+  }
 
   @Post()
   @UseAuth()
@@ -89,6 +99,9 @@ export class JobsController {
     @Body() body: SubmitJobDto,
     @User('id') ownerId: string,
   ): Promise<Awaited<ReturnType<JobsService['submit']>>> {
+    if (!this.#jobsEnabled) {
+      throw new ForbiddenException({ code: 'JOB_DISPATCH_DISABLED' });
+    }
     return this.jobs.submit({ ownerId, ...body });
   }
 

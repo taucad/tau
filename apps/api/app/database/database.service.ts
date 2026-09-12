@@ -1,15 +1,14 @@
-import path from 'node:path';
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { sql } from 'drizzle-orm';
-import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import postgres from 'postgres';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 import type { OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import type { Environment } from '#config/environment.config.js';
 import * as schema from '#database/schema.js';
 import { SqlLogger } from '#database/database.logger.js';
+import { assertSchemaCompatibility } from '#database/database-migration.js';
 import { mapPostgresErrorToHint } from '#database/postgres-error-hint.utils.js';
 
 export type DatabaseType = ReturnType<typeof drizzle<typeof schema>>;
@@ -32,15 +31,34 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
     @InjectPinoLogger(DatabaseService.name) private readonly logger: PinoLogger,
   ) {
     this.connectionString = this.configService.get<string>('DATABASE_URL', { infer: true });
+    const runtimeRole = this.configService.get('DATABASE_RUNTIME_ROLE', { infer: true });
 
+    /* eslint-disable @typescript-eslint/naming-convention -- postgres.js option and PostgreSQL startup parameter names */
     this.client = postgres(this.connectionString, {
       prepare: false,
+      // Bounded pool: replicas × max must fit the verified database capacity (B8 R3).
+      max: this.configService.get('DATABASE_POOL_MAX', { infer: true }),
+      connect_timeout: this.configService.get('DATABASE_CONNECT_TIMEOUT_SECONDS', { infer: true }),
+      idle_timeout: this.configService.get('DATABASE_IDLE_TIMEOUT_SECONDS', { infer: true }),
+      // Startup parameters apply to every pooled connection, including reconnects. `role` is
+      // assumed before the first statement and survives `RESET ROLE`, so the request path cannot
+      // climb back to the login identity.
+      connection: {
+        // Bare integers are milliseconds to PostgreSQL.
+        statement_timeout: this.configService.get('DATABASE_STATEMENT_TIMEOUT_MS', { infer: true }),
+        lock_timeout: this.configService.get('DATABASE_LOCK_TIMEOUT_MS', { infer: true }),
+        idle_in_transaction_session_timeout: this.configService.get('DATABASE_IDLE_IN_TRANSACTION_TIMEOUT_MS', {
+          infer: true,
+        }),
+        ...(runtimeRole ? { role: runtimeRole } : {}),
+      },
       onnotice: (notice) => {
         if (this.isNoticeLogEnabled) {
           this.logger.info(`${notice['message']}`);
         }
       },
     });
+    /* eslint-enable @typescript-eslint/naming-convention -- postgres.js option and PostgreSQL startup parameter names */
     this.database = drizzle(this.client, { schema, logger: new SqlLogger() });
   }
 
@@ -51,19 +69,18 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
 
   public async onModuleInit(): Promise<void> {
     await this.probeDatabaseConnectivity();
-    await this.runMigrations();
+    await this.checkSchemaCompatibility();
     this.logger.info('Database service initialized');
   }
 
   /**
-   * Pre-migration connectivity probe.
+   * Connectivity probe run before the schema compatibility check.
    *
-   * Drizzle's migrator fails on its first DDL statement (`CREATE SCHEMA …`) for
-   * every connection-level failure mode (paused project, DNS, TCP timeout, role
-   * rotation, pooler exhaustion). The opaque `Failed query: …` error it emits
-   * makes it impossible to distinguish "DB unreachable" from "DB rejected my
-   * SQL" in Fly logs. A standalone `SELECT 1` probe with structured error
-   * mapping closes that observability gap in Fly logs and operator dashboards.
+   * Every connection-level failure mode (paused project, DNS, TCP timeout, role
+   * rotation, pooler exhaustion, a missing runtime role) otherwise surfaces as an
+   * opaque query failure, making "DB unreachable" indistinguishable from "DB
+   * rejected my SQL" in Fly logs. A standalone `SELECT 1` probe with structured
+   * error mapping closes that gap for Fly logs and operator dashboards.
    */
   private async probeDatabaseConnectivity(): Promise<void> {
     this.logger.info('Starting database connectivity probe...');
@@ -78,20 +95,22 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private async runMigrations(): Promise<void> {
+  /**
+   * Schema compatibility check that replaced startup DDL.
+   *
+   * API replicas hold the de-privileged runtime role and cannot migrate; the protected
+   * one-shot job (`runMigrationJob`) owns DDL. A replica whose image disagrees with the
+   * applied schema — older or newer — fails readiness here instead of writing against it.
+   */
+  private async checkSchemaCompatibility(): Promise<void> {
     try {
-      this.logger.info('Starting database migrations...');
-
-      // Use the same database instance for migrations to ensure consistency
-      await migrate(this.database, {
-        migrationsFolder: path.join(import.meta.dirname, 'migrations'),
-      });
-
-      this.logger.info('Database migrations completed successfully');
+      this.logger.info('Checking database schema compatibility...');
+      await assertSchemaCompatibility(this.client);
+      this.logger.info('Database schema is compatible with this build');
     } catch (error) {
       const hint = mapPostgresErrorToHint(error);
-      this.logger.error({ err: error, hint }, 'Database migration failed');
-      throw new Error('Migration failed', { cause: error });
+      this.logger.error({ err: error, hint }, 'Database schema compatibility check failed');
+      throw new Error('Schema compatibility check failed', { cause: error });
     }
   }
 

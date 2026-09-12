@@ -1,12 +1,21 @@
 import { ConfigService } from '@nestjs/config';
-import { describe, expect, it, vi } from 'vitest';
+import { Logger } from '@nestjs/common';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { mock } from 'vitest-mock-extended';
 import type { FastifyReply } from 'fastify';
 import { LlmGatewayService } from '#api/llm/llm-gateway.service.js';
 import type { BillableModelInvocationService } from '#api/billing/billable-model-invocation.service.js';
 
+afterEach(() => vi.restoreAllMocks());
+
 describe('LlmGatewayService', () => {
   it('passes one authenticated attempt to the funded owner', async () => {
-    const invocations = { invoke: vi.fn(async () => ({ state: 'pending', operationId: 'operation' })) };
+    const invocations = {
+      invoke: vi.fn(async () => ({
+        state: 'pending',
+        operationId: 'operation',
+      })),
+    };
     const service = new LlmGatewayService(
       invocations as unknown as BillableModelInvocationService,
       // eslint-disable-next-line @typescript-eslint/naming-convention -- environment key
@@ -52,5 +61,52 @@ describe('LlmGatewayService', () => {
       }),
     ).rejects.toThrow('provider rejected');
     expect(reply.header).toHaveBeenCalledWith('x-tau-operation-id', 'operation');
+  });
+
+  it('should log a settlement failure without sending a second response', async () => {
+    const settlement = Promise.withResolvers<void>();
+    const error = new Error('ledger unavailable');
+    const invocations = mock<BillableModelInvocationService>();
+    invocations.invoke.mockResolvedValue({
+      state: 'streaming',
+      operationId: 'operation',
+      response: new Response('data: [DONE]\n\n', {
+        headers: { 'content-type': 'text/event-stream' },
+      }),
+      completion: settlement.promise,
+    });
+    const service = new LlmGatewayService(
+      invocations,
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- environment key
+      new ConfigService({ BILLING_ENVIRONMENT: 'development' }),
+    );
+    const reply = mock<FastifyReply>();
+    reply.header.mockReturnValue(reply);
+    reply.status.mockReturnValue(reply);
+    reply.send.mockReturnValue(reply);
+    const logged = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => {
+      // Test-local logger sink.
+    });
+
+    const relaying = service.relay({
+      provider: 'openai-completions',
+      body: { model: 'google-gemini-3.7-flash' },
+      principalId: 'user',
+      attemptId: 'attempt',
+      reply,
+      signal: new AbortController().signal,
+    });
+    await vi.waitFor(() => {
+      expect(reply.send).toHaveBeenCalledOnce();
+    });
+    settlement.reject(error);
+
+    await expect(relaying).resolves.toBeUndefined();
+    expect(reply.send).toHaveBeenCalledOnce();
+    expect(logged).toHaveBeenCalledOnce();
+    expect(logged).toHaveBeenCalledWith(
+      { err: error, operationId: 'operation' },
+      'Model invocation settlement failed after the response stream was sent',
+    );
   });
 });

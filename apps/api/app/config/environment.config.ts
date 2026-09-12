@@ -7,6 +7,33 @@ const environmentSchemaBase = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']),
   PORT: z.string().default('3000'),
   DATABASE_URL: z.string(),
+  // Bounded runtime pool (B8 R3). Every value fails closed: a non-numeric or out-of-range
+  // setting refuses startup rather than silently restoring an unbounded default.
+  DATABASE_POOL_MAX: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(100)
+    .default(10)
+    .describe('Maximum PostgreSQL backends this API process may open; replicas multiply it against database capacity'),
+  DATABASE_CONNECT_TIMEOUT_SECONDS: z.coerce.number().int().min(1).max(60).default(10),
+  DATABASE_IDLE_TIMEOUT_SECONDS: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(3600)
+    .default(60)
+    .describe('Seconds an unused pooled connection is kept before it is returned to the database'),
+  DATABASE_STATEMENT_TIMEOUT_MS: z.coerce.number().int().min(100).max(300_000).default(15_000),
+  DATABASE_LOCK_TIMEOUT_MS: z.coerce.number().int().min(100).max(60_000).default(5000),
+  DATABASE_IDLE_IN_TRANSACTION_TIMEOUT_MS: z.coerce.number().int().min(100).max(300_000).default(15_000),
+  DATABASE_RUNTIME_ROLE: z
+    .string()
+    .regex(/^[a-z_][a-z0-9_]*$|^$/u)
+    .default('')
+    .describe(
+      'De-privileged role every request connection assumes at connect (B7 R8). Empty = no SET ROLE, for a local database that has not run the migration job; production requires it.',
+    ),
   TAU_FRONTEND_URL: z.string(),
   TAU_API_URL: z
     .string()
@@ -76,9 +103,6 @@ const environmentSchemaBase = z.object({
 
   // Local Model Providers
   OLLAMA_ENABLED: z.coerce.boolean().default(false).describe('Enable Ollama local model provider'),
-  // Kernel Integrations
-  ZOO_API_KEY: z.string().describe('Zoo.dev API key for KCL kernel proxy'),
-  ZOO_WEBSOCKET_URL: z.string().describe('Zoo.dev API URL for KCL kernel proxy').default('wss://api.zoo.dev'),
 
   // Redis Configuration
   // Billing (Stripe + credit ledger). STRIPE_* default to '' (the RESEND_API_KEY pattern) so local
@@ -112,6 +136,20 @@ const environmentSchemaBase = z.object({
     .max(300_000)
     .default(300_000)
     .describe('Maximum funded provider execution time in milliseconds, including admission'),
+  BILLING_RECOVERY_INTERVAL_MS: z.coerce
+    .number()
+    .int()
+    .min(1000)
+    .max(300_000)
+    .default(30_000)
+    .describe('Milliseconds between in-process funded-operation recovery passes; every API replica polls'),
+  BILLING_EXACT_INPUT_COUNT: z
+    .enum(['true', 'false'])
+    .transform((value) => value === 'true')
+    .default(false)
+    .describe(
+      "Counts OpenAI input tokens through the supplier's own /v1/responses/input_tokens endpoint before admission, shrinking the hold from the proved byte bound to the exact count. Off by default: enabling it spends a supplier request and up to 5s of admission latency per funded OpenAI call.",
+    ),
   STRIPE_SECRET_KEY: z
     .string()
     .default('')
@@ -131,36 +169,19 @@ const environmentSchemaBase = z.object({
     .string()
     .default('')
     .describe('Terraform-provisioned Stripe product id for one-time credit packs'),
-  FREE_TIER_AI_ENABLED: z.coerce
-    .boolean()
-    .default(true)
-    .describe(
-      'AD19 kill switch: false zeroes the Free-tier AI allotment via the entitlements projection, no deploy needed',
-    ),
-  TAU_CREDIT_MARKUP_FRACTION: z.coerce
-    .number()
-    .min(0)
-    .max(1)
-    .default(0.3)
-    .describe('Markup applied to provider cost for user-facing credit charges (0.3 = 30%)'),
-  TAU_CREDIT_LEDGER_PG_FALLBACK: z.coerce
-    .boolean()
-    .default(false)
-    .describe('Serve credit reservations from Postgres row locks instead of Redis (degraded-mode escape hatch)'),
-  ZOO_ENGINE_RATE_MICRO_PER_MINUTE: z.coerce
-    .number()
-    .int()
-    .min(0)
-    .default(650_000)
-    .describe(
-      'User-charged Zoo engine rate in µ$ per started minute (Q35: list × 1.3). Default is a $0.50/min-list placeholder — ops sets the real list rate at cutover (see stripe-iac-runbook). 0 disables metering.',
-    ),
 
   REDIS_URL: z.string().describe('Redis connection URL (e.g., redis://localhost:6379 or rediss://... for TLS)'),
 
   // Durable job orchestration. Empty token keeps job dispatch unavailable without affecting chat/CAD startup.
   HATCHET_CLIENT_TOKEN: z.string().default(''),
   HATCHET_CLIENT_NAMESPACE: z.string().trim().min(1).default('tau-local'),
+  TAU_JOBS_ENABLED: z
+    .enum(['true', 'false'])
+    .transform((value) => value === 'true')
+    .optional()
+    .describe(
+      'B7 R10 gate for the paid job supplier path. Unset means enabled in development and refused everywhere else; set it true only once an operator-funded allowance covers admitted runs x attempts',
+    ),
 
   // Object storage (MinIO via infra/docker-compose in dev; Cloudflare R2 in staging/production — overrides defaults via Fly secrets + env)
   TAU_S3_ENDPOINT: z
@@ -288,7 +309,10 @@ export const environmentSchema = environmentSchemaBase.superRefine((data, contex
 
   // Billing cannot run half-configured in production: a missing webhook secret silently drops every
   // credit grant, and a missing price id breaks upgrade checkout.
-  const stripeKeys = [
+  // A production API replica that keeps its login role can run DDL and edit immutable
+  // financial evidence; B7 R8 requires the de-privileged runtime role there.
+  const requiredKeys = [
+    'DATABASE_RUNTIME_ROLE',
     'STRIPE_SECRET_KEY',
     'STRIPE_READ_SECRET_KEY',
     'STRIPE_ACCOUNT_ID',
@@ -310,7 +334,7 @@ export const environmentSchema = environmentSchemaBase.superRefine((data, contex
       path: ['STRIPE_LIVEMODE'],
     });
   }
-  for (const key of stripeKeys) {
+  for (const key of requiredKeys) {
     if (!data[key]) {
       context.addIssue({
         code: 'custom',

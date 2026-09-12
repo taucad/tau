@@ -210,7 +210,12 @@ export class DevWebSocketService implements OnModuleInit, OnModuleDestroy {
     }
 
     if (adapterClient) {
-      await adapterClient.quit();
+      if (adapterClient.status === 'ready') {
+        await adapterClient.quit();
+      } else {
+        // The offline queue is disabled, so `quit()` would throw on a dead socket.
+        adapterClient.disconnect();
+      }
       this.adapterClient = undefined;
       this.adapterConstructor = undefined;
       this.logger.debug('Redis adapter client disconnected');

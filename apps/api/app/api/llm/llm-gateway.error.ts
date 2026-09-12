@@ -21,7 +21,22 @@ export type LlmGatewayErrorType =
   | 'UPSTREAM_REJECTED';
 
 export class LlmGatewayError extends HttpException {
-  public constructor(status: HttpStatus, type: LlmGatewayErrorType, message: string) {
-    super({ type: 'error', error: { type, message } }, status);
+  /**
+   * @param status - HTTP status the gateway answers with.
+   * @param type - Stable refusal code its clients switch on.
+   * @param message - User-safe reason.
+   * @param details - Structured fields the code owns, carried inside the typed
+   * envelope so the exception filter forwards them untouched. An
+   * `INSUFFICIENT_CREDIT` denial carries `requiredCreditAtoms`,
+   * `availableCreditAtoms` and `routeId`.
+   */
+  // oxlint-disable-next-line max-params -- the envelope's four independent fields; bundling them would hide the wire shape at every call site
+  public constructor(
+    status: HttpStatus,
+    type: LlmGatewayErrorType,
+    message: string,
+    details?: Record<string, unknown>,
+  ) {
+    super({ type: 'error', error: { type, message, ...(details === undefined ? {} : { details }) } }, status);
   }
 }

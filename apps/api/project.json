@@ -163,6 +163,29 @@
           "OTEL_METRICS_PORT": "9465"
         }
       }
+    },
+    "test:billing-load": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "metadata": {
+        "description": "Run one B8.3 local capacity profile on a disposable PostgreSQL 17 cluster it creates and destroys itself; never touches the developer database. Reports land under docs/research/artifacts/tau-cloud-credit-billing-launch-charter/runs/implementation/chunks/C09/lanes/i3/, raw logs under out/research/. Append `-- --runtime=native --postgres-bin=\u2026` for a PostgreSQL 17 keg; the default compose runtime needs a local postgres:17-alpine image."
+      },
+      "dependsOn": ["build:billing-command"],
+      "options": {
+        "cwd": "{workspaceRoot}",
+        "command": "node --import @oxc-node/core/register apps/api/app/testing/billing-load/run.ts --profile=local-smoke"
+      },
+      "configurations": {
+        "smoke": {
+          "command": "node --import @oxc-node/core/register apps/api/app/testing/billing-load/run.ts --profile=local-smoke"
+        },
+        "growth": {
+          "command": "node --import @oxc-node/core/register apps/api/app/testing/billing-load/run.ts --profile=local-growth"
+        },
+        "surge": {
+          "command": "node --import @oxc-node/core/register apps/api/app/testing/billing-load/run.ts --profile=surge-64"
+        }
+      }
     }
   }
 }

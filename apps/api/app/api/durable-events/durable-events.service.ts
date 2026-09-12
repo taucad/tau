@@ -95,8 +95,13 @@ export class DurableEventsService implements OnModuleInit, OnModuleDestroy {
     if (!this.#subscriber) {
       return;
     }
-    await this.#subscriber.unsubscribe(durableEventChannel);
-    await this.#subscriber.quit();
+    if (this.#subscriber.status === 'ready') {
+      await this.#subscriber.unsubscribe(durableEventChannel);
+      await this.#subscriber.quit();
+    } else {
+      // The offline queue is disabled, so `quit()` would throw on a dead socket.
+      this.#subscriber.disconnect();
+    }
     this.#subscriber = undefined;
   }
 

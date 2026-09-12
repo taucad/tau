@@ -1,6 +1,6 @@
 import { Readable } from 'node:stream';
 import type { ReadableStream as NodeReadableStream } from 'node:stream/web';
-import { HttpStatus, Injectable } from '@nestjs/common';
+import { HttpStatus, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { FastifyReply } from 'fastify';
 import { BillableModelInvocationService } from '#api/billing/billable-model-invocation.service.js';
@@ -27,6 +27,8 @@ export type LlmGatewayRelayInput = {
 /** Relays one authenticated request through the shared funded invocation owner. */
 @Injectable()
 export class LlmGatewayService {
+  private readonly logger = new Logger(LlmGatewayService.name);
+
   public constructor(
     private readonly invocations: BillableModelInvocationService,
     private readonly config: ConfigService,
@@ -67,7 +69,16 @@ export class LlmGatewayService {
     if (contentType) {
       void input.reply.header('content-type', contentType);
     }
-    await input.reply.send(Readable.fromWeb(result.response.body! as NodeReadableStream<Uint8Array<ArrayBuffer>>));
-    await result.completion;
+    try {
+      // Both the stream itself and its settlement can fail after the headers are
+      // sent; neither may reach an exception filter that would reply a second time.
+      await input.reply.send(Readable.fromWeb(result.response.body! as NodeReadableStream<Uint8Array<ArrayBuffer>>));
+      await result.completion;
+    } catch (error) {
+      this.logger.error(
+        { err: error, operationId: result.operationId },
+        'Model invocation settlement failed after the response stream was sent',
+      );
+    }
   }
 }

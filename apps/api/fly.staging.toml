@@ -11,6 +11,11 @@ kill_timeout = '30s'
 [build]
 dockerfile = 'Dockerfile'
 
+[deploy]
+# Protected one-shot migration (B7 R8 / B8 R3): runs under the DDL identity before any new
+# app machine boots; API replicas only assert schema compatibility and never migrate.
+release_command = 'node /app/dist/billing-command.js migrate --environment staging'
+
 [processes]
 app = 'node /app/dist/main.js'
 # One worker opens at most one PostgreSQL connection (billing-command postgres max: 1).

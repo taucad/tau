@@ -102,7 +102,6 @@ const expectHealthyServer = async (mode: 'development' | 'production', port: num
       TAU_S3_SECRET_ACCESS_KEY: 'smoke',
       TAU_TEST_MODE: '',
       TAU_VIEW_COOKIE_SECRET: 'smoke-view-cookie-secret-32chars',
-      ZOO_API_KEY: 'smoke',
     });
     /* eslint-enable @typescript-eslint/naming-convention -- restore project naming checks. */
   }

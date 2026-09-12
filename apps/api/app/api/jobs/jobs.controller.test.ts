@@ -1,21 +1,33 @@
 import { Readable } from 'node:stream';
 
 import { ConflictException, ForbiddenException } from '@nestjs/common';
+import type { ConfigService } from '@nestjs/config';
 import { describe, expect, it, vi } from 'vitest';
 
+import type { Environment } from '#config/environment.config.js';
 import type { HostsService } from '#api/hosts/hosts.service.js';
 import { JobsController } from '#api/jobs/jobs.controller.js';
 import type { JobsService } from '#api/jobs/jobs.service.js';
+import type { WorkerActionPublishDto } from '#api/jobs/jobs.dto.js';
 import type { ObjectStorageService } from '#storage/object-storage.service.js';
 
 const device = { id: 'device-authenticated', ownerId: 'owner-1' };
 
-const harness = () => {
+type JobsEnvironment = { jobsEnabled?: boolean; nodeEnv?: string };
+
+const jobsConfig = (environment: JobsEnvironment = {}) =>
+  ({
+    get: (key: 'NODE_ENV' | 'TAU_JOBS_ENABLED') =>
+      key === 'TAU_JOBS_ENABLED' ? environment.jobsEnabled : (environment.nodeEnv ?? 'production'),
+  }) as unknown as ConfigService<Environment, true>;
+
+const harness = (environment: JobsEnvironment = {}) => {
   const jobs = {
     isRunnerAuthorized: vi.fn(async () => true),
     isArtifactAttemptAuthorized: vi.fn(async () => true),
     reportProgress: vi.fn(async () => ({ accepted: true })),
     registerRunner: vi.fn(async () => ({ accepted: true })),
+    submit: vi.fn(async () => ({ deduplicated: false, job: {} })),
   };
   const hosts = { authenticateDevice: vi.fn(async () => device) };
   const storage = {};
@@ -23,9 +35,17 @@ const harness = () => {
     jobs as unknown as JobsService,
     hosts as unknown as HostsService,
     storage as ObjectStorageService,
+    jobsConfig(environment),
   );
   return { controller, jobs };
 };
+
+const submission = {
+  projectId: 'project-1',
+  idempotencyKey: 'request-1',
+  definitionDigest: `sha256:${'0'.repeat(64)}`,
+  definition: {},
+} as unknown as Parameters<JobsController['submit']>[0];
 
 describe('JobsController paired-runner authorization', () => {
   it('overwrites a spoofed runner identity with the authenticated paired device', async () => {
@@ -77,8 +97,8 @@ describe('JobsController paired-runner authorization', () => {
   it('publishes an action only after its exact output content exists under owner authority', async () => {
     const actionDigest = `sha256:${'a'.repeat(64)}` as const;
     const outputDigest = `sha256:${'b'.repeat(64)}` as const;
-    const record = {
-      schemaVersion: 1 as const,
+    const record: WorkerActionPublishDto['record'] = {
+      schemaVersion: 1,
       actionDigest,
       codec: { id: 'openfoam-stage', version: '1' },
       output: { digest: outputDigest, size: 42, mediaType: 'application/octet-stream' },
@@ -97,6 +117,7 @@ describe('JobsController paired-runner authorization', () => {
       jobs as unknown as JobsService,
       hosts as unknown as HostsService,
       storage as unknown as ObjectStorageService,
+      jobsConfig(),
     );
 
     await expect(
@@ -142,6 +163,7 @@ describe('JobsController paired-runner authorization', () => {
       jobs as unknown as JobsService,
       hosts as unknown as HostsService,
       storage as unknown as ObjectStorageService,
+      jobsConfig(),
     );
 
     await expect(
@@ -203,6 +225,7 @@ describe('JobsController paired-runner authorization', () => {
       jobs as unknown as JobsService,
       hosts as unknown as HostsService,
       storage as unknown as ObjectStorageService,
+      jobsConfig(),
     );
 
     await expect(
@@ -255,6 +278,7 @@ describe('JobsController paired-runner authorization', () => {
       jobs as unknown as JobsService,
       hosts as unknown as HostsService,
       storage as unknown as ObjectStorageService,
+      jobsConfig(),
     );
 
     await expect(
@@ -280,5 +304,30 @@ describe('JobsController paired-runner authorization', () => {
         'Bearer credential',
       ),
     ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+});
+
+describe('JobsController supplier containment (B7 R10)', () => {
+  it('refuses submission before any dispatch while the paid job path is gated off', async () => {
+    const { controller, jobs } = harness();
+
+    await expect(controller.submit(submission, 'owner-1')).rejects.toBeInstanceOf(ForbiddenException);
+    expect(jobs.submit).not.toHaveBeenCalled();
+  });
+
+  it('admits submission when the operator enables it, and by default in development', async () => {
+    const enabled = harness({ jobsEnabled: true });
+    await expect(enabled.controller.submit(submission, 'owner-1')).resolves.toBeDefined();
+    expect(enabled.jobs.submit).toHaveBeenCalledWith({ ownerId: 'owner-1', ...submission });
+
+    const development = harness({ nodeEnv: 'development' });
+    await expect(development.controller.submit(submission, 'owner-1')).resolves.toBeDefined();
+  });
+
+  it('keeps an explicit operator disable authoritative in development', async () => {
+    const { controller, jobs } = harness({ nodeEnv: 'development', jobsEnabled: false });
+
+    await expect(controller.submit(submission, 'owner-1')).rejects.toBeInstanceOf(ForbiddenException);
+    expect(jobs.submit).not.toHaveBeenCalled();
   });
 });

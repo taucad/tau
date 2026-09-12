@@ -29,6 +29,7 @@
     "./worker-change-channel": "./src/worker-change-channel.ts",
     "./file-write-source": "./src/file-write-source.ts",
     "./file-system-client": "./src/file-system-client.ts",
+    "./composed-view-client": "./src/composed-view-client.ts",
     "./file-content-errors": "./src/file-content-errors.ts",
     "./seems-binary": "./src/seems-binary.ts",
     "./file-content-service": "./src/file-content-service.ts",
@@ -73,6 +74,11 @@
         "types": "./dist/file-system-client.d.mts",
         "import": "./dist/file-system-client.mjs",
         "default": "./dist/file-system-client.mjs"
+      },
+      "./composed-view-client": {
+        "types": "./dist/composed-view-client.d.mts",
+        "import": "./dist/composed-view-client.mjs",
+        "default": "./dist/composed-view-client.mjs"
       },
       "./file-content-errors": {
         "types": "./dist/file-content-errors.d.mts",

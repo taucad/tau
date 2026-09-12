@@ -8,11 +8,68 @@ import type { ChangeEvent, FileEntry, FileStat } from '@taucad/types';
 import { WorkerChangeChannel } from '#worker-change-channel.js';
 import { DirectoryListingErrorCode, DirectoryListingFailedError } from '#directory-listing.js';
 import { WorkspacePathResolver } from '#workspace-path-resolver.js';
+import { createComposedViewClient } from '#composed-view-client.js';
+import { composeView } from '@taucad/filesystem/composed-view';
+import type { ComposedViewOverlay } from '@taucad/filesystem/composed-view';
+import { MemoryProvider } from '@taucad/filesystem/backend';
 import { headlessVisibilityProvider } from '#visibility-provider.js';
 import type { VisibilityProvider } from '#visibility-provider.js';
 import type { FileContentService, ContentChangeEvent } from '#file-content-service.js';
 
 const workspaceRoot = '/projects/abc';
+
+const skillContents = '---\nname: cad-replicad\n---\n';
+const skillBytes = new TextEncoder().encode(skillContents);
+const skillsRoot = '.agents/skills';
+const skillIdentity = 'skill:cad-replicad@1.0.0#fingerprint';
+
+/** The built-in bundle overlay, shaped as `libs/agent-tools` produces it. */
+const skillOverlay = (): ComposedViewOverlay => {
+  const nodes = new Map<string, { type: 'dir'; children: readonly string[] } | { type: 'file' }>([
+    ['', { type: 'dir', children: ['.agents'] }],
+    ['.agents', { type: 'dir', children: ['skills'] }],
+    [skillsRoot, { type: 'dir', children: ['cad-replicad'] }],
+    [`${skillsRoot}/cad-replicad`, { type: 'dir', children: ['SKILL.md'] }],
+    [`${skillsRoot}/cad-replicad/SKILL.md`, { type: 'file' }],
+  ]);
+  return {
+    root: skillsRoot,
+    source: 'system-skills',
+    unit: (path) =>
+      path.startsWith(`${skillsRoot}/`) && path.slice(skillsRoot.length + 1).split('/')[0] === 'cad-replicad'
+        ? { root: `${skillsRoot}/cad-replicad`, identity: skillIdentity }
+        : undefined,
+    node: (path) => {
+      const node = nodes.get(path);
+      if (node === undefined) {
+        return undefined;
+      }
+      return node.type === 'dir'
+        ? { type: 'dir', children: node.children }
+        : { type: 'file', size: skillBytes.byteLength, contentKind: 'text', lineCount: 3 };
+    },
+    read: async () => skillBytes,
+  };
+};
+
+/**
+ * The production client: in-root reads through one composed view, everything
+ * else on the authority.
+ */
+const createComposedProxy = async (): Promise<FileSystemClient> => {
+  const provider = new MemoryProvider();
+  await provider.writeFile('main.ts', 'export {};\n');
+  return createComposedViewClient({
+    workspace: mock<FileSystemClient>({
+      readDirectory: vi.fn().mockResolvedValue([]),
+      readdir: vi.fn().mockResolvedValue([]),
+      stat: vi.fn().mockResolvedValue(textStat()),
+      getDirectoryStat: vi.fn().mockResolvedValue([]),
+    }),
+    view: composeView({ filesystem: provider }, { consumer: 'user', overlays: [skillOverlay()] }),
+    paths: new WorkspacePathResolver(workspaceRoot),
+  });
+};
 
 const textStat = (size = 0, mtimeMs = 0, lineCount = 1): FileStat => ({
   type: 'file',
@@ -122,6 +179,45 @@ function createTreeHarness(overrides?: {
     },
   };
 }
+
+describe('FileTreeService composed-view provenance (north star W2)', () => {
+  /*
+   * North-star W2 pin (execution-queue ruling P2). The Files pane and the
+   * agent's tools read one composed view (charter D1, architecture L4), so a
+   * built-in skill bundle is a row in the tree with `source: 'system-skills'`
+   * and read-only access — data, never a label on the wire (blueprint S14).
+   */
+  it('should stamp a built-in skill entry with system-skills provenance', async () => {
+    const harness = createTreeHarness({ proxy: await createComposedProxy() });
+    try {
+      const entries = await harness.tree.listDirectory('.agents/skills/cad-replicad');
+
+      expect(entries.map(({ name }) => name)).toStrictEqual(['SKILL.md']);
+      expect(harness.tree.getTreeSnapshot().get('.agents/skills/cad-replicad/SKILL.md')?.provenance).toMatchObject({
+        source: 'system-skills',
+        access: 'read-only',
+        versioned: false,
+      });
+    } finally {
+      harness.disposeChannel();
+    }
+  });
+
+  it('should stamp the project rows of the same listing as project entries', async () => {
+    const harness = createTreeHarness({ proxy: await createComposedProxy() });
+    try {
+      await harness.tree.listDirectory('');
+
+      expect(harness.tree.getTreeSnapshot().get('main.ts')?.provenance).toMatchObject({
+        source: 'project',
+        access: 'read-write',
+        versioned: true,
+      });
+    } finally {
+      harness.disposeChannel();
+    }
+  });
+});
 
 describe('FileTreeService workspace path canonicalization', () => {
   let harness: ReturnType<typeof createTreeHarness>;

@@ -1266,6 +1266,7 @@ export class FileTreeService {
       mtimeMs: entry.mtimeMs,
       isLoaded,
       ...fileMetadataFields(entry),
+      ...(entry.provenance === undefined ? {} : { provenance: entry.provenance }),
     };
   }
 
@@ -1282,6 +1283,7 @@ export class FileTreeService {
       mtimeMs: entry.mtimeMs,
       isLoaded: existing?.type === 'dir' ? existing.isLoaded : false,
       isDirectoryResolved: existing?.type === 'dir' ? existing.isDirectoryResolved : false,
+      ...(entry.provenance === undefined ? {} : { provenance: entry.provenance }),
     };
   }
 
@@ -1290,6 +1292,8 @@ export class FileTreeService {
       current.size !== next.size ||
       current.mtimeMs !== next.mtimeMs ||
       current.contentKind !== next.contentKind ||
+      current.provenance?.source !== next.provenance?.source ||
+      current.provenance?.access !== next.provenance?.access ||
       (current.contentKind === 'text' && next.contentKind === 'text' && current.lineCount !== next.lineCount)
     );
   }

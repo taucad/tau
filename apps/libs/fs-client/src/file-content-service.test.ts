@@ -10,6 +10,10 @@ import { WorkerChangeChannel } from '#worker-change-channel.js';
 import { WorkspacePathResolver, WorkspaceScopeViolationError } from '#workspace-path-resolver.js';
 import { RefreshGenerationGuard } from '#refresh-generation-guard.js';
 import { WorkspaceMutationError } from '@taucad/filesystem';
+import { composeView } from '@taucad/filesystem/composed-view';
+import type { ComposedViewOverlay } from '@taucad/filesystem/composed-view';
+import { MemoryProvider } from '@taucad/filesystem/backend';
+import { createComposedViewClient } from '#composed-view-client.js';
 
 function createMockProxy(overrides?: Partial<FileSystemClient>): FileSystemClient {
   const proxy = mock<FileSystemClient>({
@@ -1813,5 +1817,96 @@ describe('FileContentService', () => {
       }
       harness.disposeChannel();
     });
+  });
+});
+
+describe('FileContentService over the composed view (north star W2)', () => {
+  const skillContents = '---\nname: cad-replicad\n---\n';
+  const skillBytes = new TextEncoder().encode(skillContents);
+  const skillsRoot = '.agents/skills';
+  const skillPath = `${skillsRoot}/cad-replicad/SKILL.md`;
+  const identity = 'skill:cad-replicad@1.0.0#fingerprint';
+
+  const overlay = (): ComposedViewOverlay => {
+    const nodes = new Map<string, 'dir' | 'file'>([
+      ['', 'dir'],
+      ['.agents', 'dir'],
+      [skillsRoot, 'dir'],
+      [`${skillsRoot}/cad-replicad`, 'dir'],
+      [skillPath, 'file'],
+    ]);
+    const children = new Map<string, readonly string[]>([
+      ['', ['.agents']],
+      ['.agents', ['skills']],
+      [skillsRoot, ['cad-replicad']],
+      [`${skillsRoot}/cad-replicad`, ['SKILL.md']],
+    ]);
+    return {
+      root: skillsRoot,
+      source: 'system-skills',
+      unit: (path) =>
+        path.startsWith(`${skillsRoot}/`) && path.slice(skillsRoot.length + 1).split('/')[0] === 'cad-replicad'
+          ? { root: `${skillsRoot}/cad-replicad`, identity }
+          : undefined,
+      node: (path) => {
+        const kind = nodes.get(path);
+        if (kind === undefined) {
+          return undefined;
+        }
+        return kind === 'dir'
+          ? { type: 'dir', children: children.get(path) ?? [] }
+          : { type: 'file', size: skillBytes.byteLength, contentKind: 'text', lineCount: 3 };
+      },
+      read: async () => skillBytes,
+    };
+  };
+
+  const composedHarness = async (): Promise<FileContentHarness & { authority: FileSystemClient }> => {
+    const provider = new MemoryProvider();
+    await provider.writeFile('main.ts', 'export {};\n');
+    const authority = createMockProxy();
+    const proxy = createComposedViewClient({
+      workspace: authority,
+      view: composeView({ filesystem: provider }, { consumer: 'user', overlays: [overlay()] }),
+      paths: new WorkspacePathResolver('/projects/abc'),
+    });
+    return { ...createHarness({ workspaceRoot: '/projects/abc', proxy }), authority };
+  };
+
+  /*
+   * The content half of W0 pin 2 (W0 review F2): the bytes a chat's skill row
+   * links to resolve through the same composition the agent's tools read, and
+   * the entry says it is a read-only built-in.
+   */
+  it('should resolve a built-in skill file through the composed view as a read-only system-skills entry', async () => {
+    const harness = await composedHarness();
+
+    expect(new TextDecoder().decode(await harness.service.resolveBytes(skillPath))).toBe(skillContents);
+    expect((await harness.proxy.stat(`/projects/abc/${skillPath}`)).provenance).toStrictEqual({
+      source: 'system-skills',
+      versioned: false,
+      access: 'read-only',
+      identity,
+    });
+    harness.disposeChannel();
+  });
+
+  it('should refuse a write to a built-in skill file before any worker call', async () => {
+    const harness = await composedHarness();
+
+    await expect(harness.service.write(skillPath, new Uint8Array([1]), 'user')).rejects.toMatchObject({
+      code: 'EROFS',
+    });
+    expect(harness.authority.writeFile).not.toHaveBeenCalled();
+    harness.disposeChannel();
+  });
+
+  it('should keep the project half of the same view writable', async () => {
+    const harness = await composedHarness();
+
+    expect(new TextDecoder().decode(await harness.service.resolveBytes('main.ts'))).toBe('export {};\n');
+    await harness.service.write('main.ts', new TextEncoder().encode('export const a = 1;\n'), 'user');
+    expect(harness.authority.writeFile).toHaveBeenCalledWith('/projects/abc/main.ts', expect.any(Uint8Array));
+    harness.disposeChannel();
   });
 });

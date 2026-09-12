@@ -10,6 +10,7 @@ const baseConfig: UserConfig = {
     'src/worker-change-channel.ts',
     'src/file-write-source.ts',
     'src/file-system-client.ts',
+    'src/composed-view-client.ts',
     'src/file-content-errors.ts',
     'src/seems-binary.ts',
     'src/file-content-service.ts',

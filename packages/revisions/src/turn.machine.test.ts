@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 import * as machineModule from '#turn.machine.js';
 import { turnMachine } from '#turn.machine.js';
+import type { TurnLeaseActorInput } from '#turn.machine.js';
 import {
   createFakeCallbackActors,
   createFakeParent,
@@ -67,7 +68,7 @@ const start = (options?: Readonly<{ checkoutId?: string }>): Harness => {
         retireLease: promises.actor('retireLease'),
         capture: promises.actor('capture'),
         merge: promises.actor('merge'),
-        lease: callbacks.actor('lease'),
+        lease: callbacks.actor<TurnLeaseActorInput>('lease'),
       },
     }),
     {

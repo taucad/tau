@@ -29,15 +29,7 @@ export type {
   RevisionPersistenceReceipt,
   RevisionPersistenceSnapshot,
 } from '#revision-persistence.js';
-export {
-  decodeCommit,
-  encodeCommit,
-  encodeObject,
-  frameObject,
-  GitObjectError,
-  parseChangeId,
-  renderChangeId,
-} from '#git-objects.js';
+export { decodeCommit, encodeCommit, GitObjectError, parseChangeId, renderChangeId } from '#git-objects.js';
 export type {
   CommitInput,
   DecodedCommit,

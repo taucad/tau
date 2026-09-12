@@ -96,7 +96,7 @@ export type RecordedDelivery = Readonly<{ name: string; input: unknown; event: A
  */
 export type FakeCallbackActors = Readonly<{
   /** Callback actor logic for `name`; holds until the machine stops it. */
-  actor: (name: string) => CallbackActorLogic<AnyEventObject>;
+  actor: <ActorInput = unknown>(name: string) => CallbackActorLogic<AnyEventObject, ActorInput>;
   /** Deliver an event from the held resource, e.g. `{ type: 'leaseGranted' }`. */
   sendBack: (name: string, event: AnyEventObject) => void;
   /** Live invocations of `name` — the resource is held while this is above zero. */
@@ -121,8 +121,8 @@ export const createFakeCallbackActors = (): FakeCallbackActors => {
   const deliveries: RecordedDelivery[] = [];
 
   return {
-    actor: (name) =>
-      fromCallback<AnyEventObject>(({ sendBack, receive, input }) => {
+    actor<ActorInput = unknown>(name: string): CallbackActorLogic<AnyEventObject, ActorInput> {
+      return fromCallback<AnyEventObject, ActorInput>(({ sendBack, receive, input }) => {
         const list = holders.get(name) ?? [];
         list.push(sendBack);
         holders.set(name, list);
@@ -139,7 +139,8 @@ export const createFakeCallbackActors = (): FakeCallbackActors => {
           );
           releases.set(name, (releases.get(name) ?? 0) + 1);
         };
-      }),
+      });
+    },
     sendBack: (name, event) => {
       const list = holders.get(name) ?? [];
       if (list.length === 0) {

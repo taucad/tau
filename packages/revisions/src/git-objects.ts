@@ -134,21 +134,22 @@ const assertObjectId = (format: ObjectFormat, value: string): string => {
  * @param type - Object kind.
  * @param body - Object payload.
  * @returns `<type> <length>\0<body>`.
- * @public
  */
-export const frameObject = (type: GitObjectType, body: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> =>
+const frameObject = (type: GitObjectType, body: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> =>
   concatBytes(textEncoder.encode(`${assertType(type)} ${body.length}\0`), body);
 
 /**
  * Encode one Git object and compute its identity.
  *
+ * The only caller is {@link encodeCommit}: blobs and trees are written by the
+ * engine behind each adapter, and only the commit still needs Tau's bytes.
+ *
  * @param objectFormat - Recorded repository object format.
  * @param type - Object kind.
  * @param body - Object payload.
  * @returns The object with its framed bytes and hexadecimal id.
- * @public
  */
-export const encodeObject = (
+const encodeObject = (
   objectFormat: ObjectFormat,
   type: GitObjectType,
   body: Uint8Array<ArrayBuffer>,

@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 
 import * as machineModule from '#checkout.machine.js';
 import { checkoutMachine } from '#checkout.machine.js';
+import type { CheckoutFenceActorInput } from '#checkout.machine.js';
 import {
   createFakeCallbackActors,
   createFakeParent,
@@ -59,7 +60,7 @@ const start = (options?: Readonly<{ headTreeId?: string; branch?: string }>): Ha
         writeRevision: promises.actor('writeRevision'),
         casHead: promises.actor('casHead'),
         readHead: promises.actor('readHead'),
-        fence: callbacks.actor('fence'),
+        fence: callbacks.actor<CheckoutFenceActorInput>('fence'),
       },
     }),
     {

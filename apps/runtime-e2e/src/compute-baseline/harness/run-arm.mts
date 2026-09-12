@@ -381,9 +381,6 @@ const kernelFor = async () => {
   const { readFileSync } = await import('node:fs');
   const targetRoot = resolve(repo, `apps/desktop/resources/python/${process.platform}-${process.arch}`);
   const manifest = JSON.parse(readFileSync(resolve(targetRoot, 'tau-runtime-manifest.json'), 'utf8'));
-  const trustFile = join(values.store ?? repo, '.lane-b-trust.json');
-  mkdirSync(dirname(trustFile), { recursive: true });
-  writeFileSync(trustFile, '{"version":1,"trusted":true}\n');
   return {
     plugins: [
       build123d({
@@ -391,7 +388,6 @@ const kernelFor = async () => {
           default: {
             pythonExecutable: resolve(targetRoot, manifest.pythonRelativePath),
             workerPath: resolve(targetRoot, manifest.workerPath),
-            trustFile,
             pythonSha256: manifest.pythonSha256,
             workerSha256: manifest.workerSha256,
             supportFiles: manifest.supportFiles.map(({ path, sha256: digest }: { path: string; sha256: string }) => ({

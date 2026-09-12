@@ -6,7 +6,10 @@ import type { GatewayScriptTurn } from '#support/agent-host-gateway-script.js';
 
 export type TargetSurface = 'primary' | 'secondary';
 export type TargetSelector = Locator | string;
-export type TargetViewport = { readonly height: number; readonly width: number };
+export type TargetViewport = {
+  readonly height: number;
+  readonly width: number;
+};
 export type TargetClickOptions = {
   readonly button?: 'left' | 'middle' | 'right';
   readonly force?: boolean;
@@ -28,7 +31,12 @@ export type TargetCookie = {
 export type TargetReadOptions = { readonly attributes?: readonly string[] };
 export type TargetState = {
   readonly attributes: Readonly<Record<string, string | null>>;
-  readonly boundingBox?: { readonly height: number; readonly width: number; readonly x: number; readonly y: number };
+  readonly boundingBox?: {
+    readonly height: number;
+    readonly width: number;
+    readonly x: number;
+    readonly y: number;
+  };
   readonly className: string;
   readonly count: number;
   readonly focused: boolean;
@@ -37,21 +45,40 @@ export type TargetState = {
   readonly visible: boolean;
 };
 export type TargetDiagnostics = {
-  readonly consoleMessages: ReadonlyArray<{ readonly text: string; readonly type: string }>;
+  readonly consoleMessages: ReadonlyArray<{
+    readonly text: string;
+    readonly type: string;
+  }>;
   readonly pageErrors: readonly string[];
   readonly screenshot?: string;
   readonly tracePath?: string;
   readonly url: string;
 };
-export type TargetDownload = { readonly base64: string; readonly suggestedFilename: string };
+export type TargetDownload = {
+  readonly base64: string;
+  readonly suggestedFilename: string;
+};
 export type TargetTauTestAccount = {
+  readonly creditAtoms?: string;
   readonly email: string;
   readonly name: string;
   readonly password: string;
 };
+export type TargetTauBillingOperation = {
+  readonly customerState: string;
+  readonly executionStatus: string | null;
+  readonly meteringStatus: string | null;
+  readonly operationId: string;
+  readonly outputTokens: string | null;
+  readonly reasoningTokens: string | null;
+  readonly terminalRevision: string | null;
+};
 export type TargetWebGpuProfile = 'disabled' | 'hardware' | 'software';
 /** The AV-4 daemon fixture: an origin to navigate to, and a directory to read. */
-export type TargetTauServeFixture = { readonly origin: string; readonly workspace: string };
+export type TargetTauServeFixture = {
+  readonly origin: string;
+  readonly workspace: string;
+};
 export type TargetWebGpuQualificationReport = Readonly<{
   profile: TargetWebGpuProfile;
   secureContext: boolean;
@@ -99,7 +126,11 @@ declare module 'vitest/browser' {
     uiCaptureTargetDiagnostics(): Promise<TargetDiagnostics>;
     uiChooseTargetFile(
       triggerSelector: string,
-      file: { readonly base64: string; readonly mimeType: string; readonly name: string },
+      file: {
+        readonly base64: string;
+        readonly mimeType: string;
+        readonly name: string;
+      },
     ): Promise<void>;
     uiClickTarget(selector: string, options?: TargetClickOptions, surface?: TargetSurface): Promise<void>;
     uiCloseSecondaryTarget(): Promise<void>;
@@ -133,12 +164,16 @@ declare module 'vitest/browser' {
     uiPressTarget(selector: string, key: string, surface?: TargetSurface): Promise<void>;
     uiQualifyWebGpu(profile: TargetWebGpuProfile): Promise<TargetWebGpuQualificationReport>;
     uiReadTarget(selector: string, options?: TargetReadOptions, surface?: TargetSurface): Promise<TargetState>;
+    uiReadTauVertexOperations(email: string): Promise<TargetTauBillingOperation[]>;
     uiReadAgentHostApiRequests(): Promise<string[]>;
     uiReadAgentHostGatewayRequests(): Promise<unknown[]>;
     uiReleaseAgentHostGatewayFixture(): Promise<void>;
     uiSetAgentHostGatewayFailure(failure?: { readonly status: number; readonly message: string }): Promise<void>;
     uiReadTargetEvents(): Promise<{
-      readonly consoleMessages: ReadonlyArray<{ readonly text: string; readonly type: string }>;
+      readonly consoleMessages: ReadonlyArray<{
+        readonly text: string;
+        readonly type: string;
+      }>;
       readonly pageErrors: readonly string[];
     }>;
     uiReloadTarget(surface?: TargetSurface): Promise<void>;
@@ -283,9 +318,15 @@ export const cookies = (): Promise<TargetCookie[]> => server.commands.uiCookies(
 export const addCookies = (values: readonly TargetCookie[]): Promise<void> => server.commands.uiAddCookies(values);
 export const authenticateTauTestUser = (account: TargetTauTestAccount): Promise<void> =>
   server.commands.uiAuthenticateTauTestUser(account);
+export const readTauVertexOperations = (email: string): Promise<TargetTauBillingOperation[]> =>
+  server.commands.uiReadTauVertexOperations(email);
 export const chooseFile = (
   trigger: TargetSelector,
-  file: { readonly base64: string; readonly mimeType: string; readonly name: string },
+  file: {
+    readonly base64: string;
+    readonly mimeType: string;
+    readonly name: string;
+  },
 ): Promise<void> => server.commands.uiChooseTargetFile(selectorFor(trigger), file);
 export const events = (): Promise<Pick<TargetDiagnostics, 'consoleMessages' | 'pageErrors'>> =>
   server.commands.uiReadTargetEvents();
@@ -305,7 +346,9 @@ export const expectGraphicsBackend = async (backend: 'webgl' | 'webgpu'): Promis
       evaluate(() =>
         (
           globalThis as typeof globalThis & {
-            __TAU_SECTION_VIEW_TEST__?: { getGraphicsBackend(): 'webgl' | 'webgpu' };
+            __TAU_SECTION_VIEW_TEST__?: {
+              getGraphicsBackend(): 'webgl' | 'webgpu';
+            };
           }
         ).__TAU_SECTION_VIEW_TEST__?.getGraphicsBackend(),
       ),
@@ -320,7 +363,9 @@ export const expectGeometryFramed = async (): Promise<void> => {
           evaluate(() => {
             const bridges = (
               globalThis as typeof globalThis & {
-                __TAU_SECTION_VIEW_TEST_BRIDGES__?: ReadonlyArray<{ isGeometryFramed(): boolean }>;
+                __TAU_SECTION_VIEW_TEST_BRIDGES__?: ReadonlyArray<{
+                  isGeometryFramed(): boolean;
+                }>;
               }
             ).__TAU_SECTION_VIEW_TEST_BRIDGES__;
             return Boolean(bridges && bridges.length > 0 && bridges.every((bridge) => bridge.isGeometryFramed()));
@@ -383,14 +428,22 @@ export const expectVisible = async (
   timeout = 10_000,
   surface?: TargetSurface,
 ): Promise<void> => {
-  await expect.poll(async () => (await read(selector, undefined, surface)).visible, { timeout }).toBe(true);
+  await expect
+    .poll(async () => (await read(selector, undefined, surface)).visible, {
+      timeout,
+    })
+    .toBe(true);
 };
 export const expectHidden = async (
   selector: TargetSelector,
   timeout = 10_000,
   surface?: TargetSurface,
 ): Promise<void> => {
-  await expect.poll(async () => (await read(selector, undefined, surface)).visible, { timeout }).toBe(false);
+  await expect
+    .poll(async () => (await read(selector, undefined, surface)).visible, {
+      timeout,
+    })
+    .toBe(false);
 };
 export const expectCount = async (
   selector: TargetSelector,
@@ -398,14 +451,20 @@ export const expectCount = async (
   timeout = 10_000,
   surface?: TargetSurface,
 ): Promise<void> => {
-  await expect.poll(async () => (await read(selector, undefined, surface)).count, { timeout }).toBe(count);
+  await expect
+    .poll(async () => (await read(selector, undefined, surface)).count, {
+      timeout,
+    })
+    .toBe(count);
 };
 export const expectText = async (
   selector: TargetSelector,
   expected: string | RegExp,
   timeout = 10_000,
 ): Promise<void> => {
-  const assertion = expect.poll(async () => (await read(selector)).text, { timeout });
+  const assertion = expect.poll(async () => (await read(selector)).text, {
+    timeout,
+  });
   if (typeof expected === 'string') {
     await assertion.toBe(expected);
   } else {
@@ -425,7 +484,9 @@ export const expectAttribute = async (
   expected: string | RegExp,
   timeout = 10_000,
 ): Promise<void> => {
-  const assertion = expect.poll(async () => getAttribute(selector, name), { timeout });
+  const assertion = expect.poll(async () => getAttribute(selector, name), {
+    timeout,
+  });
   if (typeof expected === 'string') {
     await assertion.toBe(expected);
   } else {

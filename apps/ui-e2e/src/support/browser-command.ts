@@ -16,6 +16,7 @@ import type {
   TargetReadOptions,
   TargetState,
   TargetSurface,
+  TargetTauBillingOperation,
   TargetTauTestAccount,
   TargetViewport,
   TargetWebGpuProfile,
@@ -32,12 +33,18 @@ type ProviderContext = BrowserCommandContext['context'];
 type TargetPage = Awaited<ReturnType<ProviderContext['newPage']>>;
 
 /** Refusal the agent-host gateway fixture answers with while it is armed. */
-type AgentHostGatewayFailure = { readonly status: number; readonly message: string };
+type AgentHostGatewayFailure = {
+  readonly status: number;
+  readonly message: string;
+};
 
 type Session = {
   readonly agentHostApiRequests: string[];
   readonly agentHostGatewayRequests: unknown[];
-  readonly consoleMessages: Array<{ readonly text: string; readonly type: string }>;
+  readonly consoleMessages: Array<{
+    readonly text: string;
+    readonly type: string;
+  }>;
   readonly context: ProviderContext;
   readonly pageErrors: string[];
   readonly primary: TargetPage;
@@ -62,11 +69,55 @@ const assertTauTestEmail = (email: string): void => {
   }
 };
 
-const executeTauDatabase = async (statement: string): Promise<void> => {
-  await execFileAsync(
+const queryTauDatabase = async (statement: string): Promise<string> => {
+  const result = await execFileAsync(
     'docker',
-    ['exec', 'tau-postgres', 'psql', '-v', 'ON_ERROR_STOP=1', '-U', 'dev_user', '-d', 'tau_dev', '-c', statement],
+    [
+      'exec',
+      'tau-postgres',
+      'psql',
+      '-At',
+      '-v',
+      'ON_ERROR_STOP=1',
+      '-U',
+      'dev_user',
+      '-d',
+      'tau_dev',
+      '-c',
+      statement,
+    ],
     { encoding: 'utf8' },
+  );
+  return result.stdout.trim();
+};
+
+const executeTauDatabase = async (statement: string): Promise<void> => {
+  await queryTauDatabase(statement);
+};
+
+const runDevelopmentBillingAccount = async (
+  action: 'close' | 'fund',
+  email: string,
+  creditAtoms?: string,
+): Promise<void> => {
+  await execFileAsync(
+    process.execPath,
+    [
+      '--env-file-if-exists=apps/api/.env',
+      '--import',
+      '@oxc-node/core/register',
+      'apps/api/app/testing/development-billing-account.ts',
+      action,
+      '--email',
+      email,
+      ...(creditAtoms === undefined ? [] : ['--atoms', creditAtoms]),
+    ],
+    {
+      cwd: resolve(import.meta.dirname, '../../../..'),
+      encoding: 'utf8',
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- process environment contract
+      env: { ...process.env, BILLING_ENVIRONMENT: 'development' },
+    },
   );
 };
 
@@ -82,24 +133,7 @@ const deleteTauTestUser = async (email: string): Promise<void> => {
     if (!String(error).includes('financial closure must precede auth deletion')) {
       throw error;
     }
-    await execFileAsync(
-      process.execPath,
-      [
-        '--env-file-if-exists=apps/api/.env',
-        '--import',
-        '@oxc-node/core/register',
-        'apps/api/app/testing/development-billing-account.ts',
-        'close',
-        '--email',
-        email,
-      ],
-      {
-        cwd: resolve(import.meta.dirname, '../../../..'),
-        encoding: 'utf8',
-        // eslint-disable-next-line @typescript-eslint/naming-convention -- process environment contract
-        env: { ...process.env, BILLING_ENVIRONMENT: 'development' },
-      },
-    );
+    await runDevelopmentBillingAccount('close', email);
     await executeTauDatabase(statement);
   }
 };
@@ -123,7 +157,12 @@ const pageFor = (session: Session, surface: TargetSurface = 'primary'): TargetPa
 };
 
 const observePage = (session: Session, page: TargetPage): void => {
-  page.on('console', (message) => session.consoleMessages.push({ text: message.text(), type: message.type() }));
+  page.on('console', (message) =>
+    session.consoleMessages.push({
+      text: message.text(),
+      type: message.type(),
+    }),
+  );
   page.on('pageerror', (error) => session.pageErrors.push(error.message));
 };
 
@@ -183,29 +222,19 @@ export const uiAuthenticateTauTestUser: BrowserCommand<[account: TargetTauTestAc
   session.testUserEmail = account.email;
   const headers = { origin: testBaseURL };
   const signUp = await session.context.request.post(`${tauApiUrl}/v1/auth/sign-up/email`, {
-    data: account,
+    data: {
+      email: account.email,
+      name: account.name,
+      password: account.password,
+    },
     headers,
   });
   if (!signUp.ok()) {
     throw new Error(`Tau test-account sign-up failed with HTTP ${signUp.status()}.`);
   }
 
-  await executeTauDatabase(`
-    WITH target_user AS (
-      UPDATE "user"
-      SET email_verified = true
-      WHERE email = '${account.email}'
-      RETURNING id
-    ), inserted_account AS (
-      INSERT INTO credit_account (user_id, topup_balance_micro)
-      SELECT id, 5000000 FROM target_user
-      ON CONFLICT (user_id) DO NOTHING
-      RETURNING user_id
-    )
-    INSERT INTO credit_transaction (id, user_id, delta_micro, balance_after_micro, reason)
-    SELECT 'ctx_e2e_' || user_id, user_id, 5000000, 5000000, 'topup'
-    FROM inserted_account;
-  `);
+  await executeTauDatabase(`UPDATE "user" SET email_verified = true WHERE email = '${account.email}';`);
+  await runDevelopmentBillingAccount('fund', account.email, account.creditAtoms);
   const signIn = await session.context.request.post(`${tauApiUrl}/v1/auth/sign-in/email`, {
     data: { email: account.email, password: account.password },
     headers,
@@ -213,6 +242,29 @@ export const uiAuthenticateTauTestUser: BrowserCommand<[account: TargetTauTestAc
   if (!signIn.ok()) {
     throw new Error(`Tau test-account sign-in failed with HTTP ${signIn.status()}.`);
   }
+};
+
+export const uiReadTauVertexOperations: BrowserCommand<[email: string], TargetTauBillingOperation[]> = async (
+  _commandContext,
+  email,
+) => {
+  assertTauTestEmail(email);
+  const result = await queryTauDatabase(`
+    SELECT COALESCE(json_agg(json_build_object(
+      'operationId', operation.id,
+      'customerState', operation.customer_state,
+      'executionStatus', operation.execution_status,
+      'meteringStatus', operation.metering_status,
+      'outputTokens', operation.output_tokens::text,
+      'reasoningTokens', operation.reasoning_tokens::text,
+      'terminalRevision', operation.terminal_revision::text
+    ) ORDER BY operation.admitted_at), '[]'::json)::text
+    FROM billing.credit_operation AS operation
+    JOIN billing.billing_owner_binding AS binding ON binding.account_id = operation.account_id
+    JOIN "user" AS auth_user ON auth_user.id = binding.auth_user_id
+    WHERE auth_user.email = '${email}' AND operation.provider_id = 'vertexai';
+  `);
+  return JSON.parse(result) as TargetTauBillingOperation[];
 };
 
 export const uiOpenTarget: BrowserCommand = async (commandContext) => {
@@ -351,7 +403,10 @@ const writeScriptedTurn = async (options: {
     writeEvent('content_block_delta', {
       type: 'content_block_delta',
       index,
-      delta: { type: 'signature_delta', signature: `browser-host-e2e-signature-${String(currentRequest)}` },
+      delta: {
+        type: 'signature_delta',
+        signature: `browser-host-e2e-signature-${String(currentRequest)}`,
+      },
     });
     writeEvent('content_block_stop', { type: 'content_block_stop', index });
     index += 1;
@@ -387,14 +442,20 @@ const writeScriptedTurn = async (options: {
     writeEvent('content_block_delta', {
       type: 'content_block_delta',
       index,
-      delta: { type: 'input_json_delta', partial_json: JSON.stringify(call.args) },
+      delta: {
+        type: 'input_json_delta',
+        partial_json: JSON.stringify(call.args),
+      },
     });
     writeEvent('content_block_stop', { type: 'content_block_stop', index });
     index += 1;
   }
   writeEvent('message_delta', {
     type: 'message_delta',
-    delta: { stop_reason: (turn.toolCalls?.length ?? 0) > 0 ? 'tool_use' : 'end_turn', stop_sequence: null },
+    delta: {
+      stop_reason: (turn.toolCalls?.length ?? 0) > 0 ? 'tool_use' : 'end_turn',
+      stop_sequence: null,
+    },
     usage: { output_tokens: turn.usage.outputTokens },
   });
   writeEvent('message_stop', { type: 'message_stop' });
@@ -453,11 +514,17 @@ export const uiInstallAgentHostGatewayFixture: BrowserCommand<[script?: readonly
           // A coded provider refusal, not a dropped socket: the browser host
           // records it as the run's typed `RunFailureDetail`, which is what a
           // reattached terminal log has to render back.
-          response.writeHead(agentHostGatewayFailure.status, { ...headers, 'content-type': 'application/json' });
+          response.writeHead(agentHostGatewayFailure.status, {
+            ...headers,
+            'content-type': 'application/json',
+          });
           response.end(
             JSON.stringify({
               type: 'error',
-              error: { type: 'api_error', message: agentHostGatewayFailure.message },
+              error: {
+                type: 'api_error',
+                message: agentHostGatewayFailure.message,
+              },
             }),
           );
           return;
@@ -589,7 +656,11 @@ export const uiStartTauServeFixture: BrowserCommand<[options?: TauServeFixtureOp
    * can assert on the absence rather than on a silent 503. */
   await session.context.route(/\/v1\/chat\//u, async (route) => {
     session.agentHostApiRequests.push(new URL(route.request().url()).pathname);
-    await route.fulfill({ status: 503, body: '{}', headers: { 'content-type': 'application/json' } });
+    await route.fulfill({
+      status: 503,
+      body: '{}',
+      headers: { 'content-type': 'application/json' },
+    });
   });
   /* The model *catalog* is metadata, not the chat data path: the daemon needs a
    * resolved provider wire on the admission it is handed, and no API runs in
@@ -629,10 +700,19 @@ export const uiStartTauServeFixture: BrowserCommand<[options?: TauServeFixtureOp
             families: ['claude'],
             contextWindow: 200_000,
             maxTokens: 64_000,
-            cost: { inputTokens: 5, outputTokens: 25, cacheReadTokens: 0.5, cacheWriteTokens: 6.25 },
+            cost: {
+              inputTokens: 5,
+              outputTokens: 25,
+              cacheReadTokens: 0.5,
+              cacheWriteTokens: 6.25,
+            },
           },
           configuration: { streaming: true },
-          support: { tools: true, toolChoice: true, modalities: { input: ['text', 'image'], output: ['text'] } },
+          support: {
+            tools: true,
+            toolChoice: true,
+            modalities: { input: ['text', 'image'], output: ['text'] },
+          },
         },
       ]),
     });
@@ -669,7 +749,9 @@ export const uiCaptureTargetDiagnostics: BrowserCommand<[], TargetDiagnostics> =
   await mkdir(directory, { recursive: true });
   let screenshot: string | undefined;
   try {
-    const screenshotBytes = await session.primary.screenshot({ fullPage: true });
+    const screenshotBytes = await session.primary.screenshot({
+      fullPage: true,
+    });
     screenshot = screenshotBytes.toString('base64');
   } catch (error) {
     session.pageErrors.push(`Screenshot capture failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -711,7 +793,10 @@ export const uiQualifyWebGpu: BrowserCommand<[profile: TargetWebGpuProfile], Tar
   const session = sessionFor(commandContext);
   const page = session.primary;
   const pageReport = await page.evaluate(async (expectedProfile) => {
-    type CompilationMessage = { readonly message?: string; readonly type: string };
+    type CompilationMessage = {
+      readonly message?: string;
+      readonly type: string;
+    };
     type GpuBuffer = {
       destroy(): void;
       getMappedRange(): ArrayBuffer;
@@ -719,8 +804,14 @@ export const uiQualifyWebGpu: BrowserCommand<[profile: TargetWebGpuProfile], Tar
       unmap(): void;
     };
     type GpuDevice = {
-      readonly lost: Promise<{ readonly message?: string; readonly reason: string }>;
-      readonly queue: { onSubmittedWorkDone(): Promise<void>; submit(commands: readonly unknown[]): void };
+      readonly lost: Promise<{
+        readonly message?: string;
+        readonly reason: string;
+      }>;
+      readonly queue: {
+        onSubmittedWorkDone(): Promise<void>;
+        submit(commands: readonly unknown[]): void;
+      };
       addEventListener(
         type: 'uncapturederror',
         listener: (event: { readonly error?: { readonly message?: string } }) => void,
@@ -747,9 +838,13 @@ export const uiQualifyWebGpu: BrowserCommand<[profile: TargetWebGpuProfile], Tar
         ): void;
         finish(): unknown;
       };
-      createComputePipeline(descriptor: unknown): { getBindGroupLayout(index: number): unknown };
+      createComputePipeline(descriptor: unknown): {
+        getBindGroupLayout(index: number): unknown;
+      };
       createShaderModule(descriptor: { readonly code: string }): {
-        getCompilationInfo(): Promise<{ readonly messages: readonly CompilationMessage[] }>;
+        getCompilationInfo(): Promise<{
+          readonly messages: readonly CompilationMessage[];
+        }>;
       };
       destroy(): void;
       popErrorScope(): Promise<{ readonly message?: string } | null>;
@@ -847,7 +942,9 @@ export const uiQualifyWebGpu: BrowserCommand<[profile: TargetWebGpuProfile], Tar
 @compute @workgroup_size(1) fn main() { output[0] = 42u; }`,
       });
       device.pushErrorScope('validation');
-      const invalid = device.createShaderModule({ code: '@compute fn broken(' });
+      const invalid = device.createShaderModule({
+        code: '@compute fn broken(',
+      });
       const [validInfo, invalidInfo] = await Promise.all([valid.getCompilationInfo(), invalid.getCompilationInfo()]);
       const expectedValidationError = await device.popErrorScope();
       base.validShaderErrors = validInfo.messages.filter(({ type }) => type === 'error').length;
@@ -869,8 +966,14 @@ export const uiQualifyWebGpu: BrowserCommand<[profile: TargetWebGpuProfile], Tar
       if (!usage || !mapMode) {
         qualificationErrors.push('WebGPU buffer constants are unavailable.');
       } else {
-        storage = device.createBuffer({ size: 4, usage: usage.STORAGE + usage.COPY_SRC });
-        readback = device.createBuffer({ size: 4, usage: usage.MAP_READ + usage.COPY_DST });
+        storage = device.createBuffer({
+          size: 4,
+          usage: usage.STORAGE + usage.COPY_SRC,
+        });
+        readback = device.createBuffer({
+          size: 4,
+          usage: usage.MAP_READ + usage.COPY_DST,
+        });
         const pipeline = device.createComputePipeline({
           compute: { entryPoint: 'main', module: valid },
           layout: 'auto',
@@ -923,7 +1026,10 @@ export const uiQualifyWebGpu: BrowserCommand<[profile: TargetWebGpuProfile], Tar
   try {
     const cdpBrowser = browser as unknown as {
       // eslint-disable-next-line @typescript-eslint/naming-convention -- Playwright's public API uses this initialism.
-      newBrowserCDPSession(): Promise<{ detach(): Promise<void>; send(method: string): Promise<unknown> }>;
+      newBrowserCDPSession(): Promise<{
+        detach(): Promise<void>;
+        send(method: string): Promise<unknown>;
+      }>;
     };
     const cdp = await cdpBrowser.newBrowserCDPSession();
     browserGpuDiagnostics = JSON.stringify(await cdp.send('SystemInfo.getInfo'));
@@ -964,7 +1070,9 @@ export const uiSetViewport: BrowserCommand<[viewport: TargetViewport, surface?: 
 export const uiEmulateColorScheme: BrowserCommand<
   [colorScheme: 'dark' | 'light' | 'no-preference', surface?: TargetSurface]
 > = async (commandContext, colorScheme, surface) => {
-  await pageFor(sessionFor(commandContext), surface).emulateMedia({ colorScheme });
+  await pageFor(sessionFor(commandContext), surface).emulateMedia({
+    colorScheme,
+  });
 };
 
 export const uiEmulateContrast: BrowserCommand<[contrast: 'more' | 'no-preference', surface?: TargetSurface]> = async (
@@ -980,7 +1088,9 @@ export const uiEmulateForcedColors: BrowserCommand<[forcedColors: 'active' | 'no
   forcedColors,
   surface,
 ) => {
-  await pageFor(sessionFor(commandContext), surface).emulateMedia({ forcedColors });
+  await pageFor(sessionFor(commandContext), surface).emulateMedia({
+    forcedColors,
+  });
 };
 
 export const uiClickTarget: BrowserCommand<
@@ -1058,7 +1168,14 @@ export const uiReadTarget: BrowserCommand<
   const locator = page.locator(selector);
   const count = await locator.count();
   if (count === 0) {
-    return { attributes: {}, className: '', count, focused: false, text: null, visible: false };
+    return {
+      attributes: {},
+      className: '',
+      count,
+      focused: false,
+      text: null,
+      visible: false,
+    };
   }
   const first = locator.first();
   const attributes = Object.fromEntries(
@@ -1115,6 +1232,27 @@ export const uiAddInitScript: BrowserCommand<[source: string, argument?: unknown
   await sessionFor(commandContext).primary.addInitScript({
     content: `(${source})(${JSON.stringify(argument)})`,
   });
+};
+
+/**
+ * Registers an init script on the whole context rather than one page.
+ *
+ * `uiAddInitScript` installs on the primary page, so a page opened later — the
+ * cold offline start — would evaluate without it.
+ */
+export const uiAddContextInitScript: BrowserCommand<[source: string, argument?: unknown]> = async (
+  commandContext,
+  source,
+  argument,
+) => {
+  await sessionFor(commandContext).context.addInitScript({
+    content: `(${source})(${JSON.stringify(argument)})`,
+  });
+};
+
+/** Cuts the context off from the network, so a cached shell is all a navigation can be served from. */
+export const uiSetTargetOffline: BrowserCommand<[offline: boolean]> = async (commandContext, offline) => {
+  await sessionFor(commandContext).context.setOffline(offline);
 };
 
 export const uiWaitForTarget: BrowserCommand<
@@ -1239,17 +1377,30 @@ export const uiGrantPermissions: BrowserCommand<[permissions: readonly string[]]
   commandContext,
   permissions,
 ) => {
-  await sessionFor(commandContext).context.grantPermissions([...permissions], { origin: testBaseURL });
+  await sessionFor(commandContext).context.grantPermissions([...permissions], {
+    origin: testBaseURL,
+  });
 };
 
 export const uiChooseTargetFile: BrowserCommand<
-  [triggerSelector: string, file: { readonly base64: string; readonly mimeType: string; readonly name: string }]
+  [
+    triggerSelector: string,
+    file: {
+      readonly base64: string;
+      readonly mimeType: string;
+      readonly name: string;
+    },
+  ]
 > = async (commandContext, triggerSelector, file) => {
   const page = sessionFor(commandContext).primary;
   const chooser = page.waitForEvent('filechooser');
   await page.locator(triggerSelector).click();
   const fileChooser = await chooser;
-  await fileChooser.setFiles({ buffer: Buffer.from(file.base64, 'base64'), mimeType: file.mimeType, name: file.name });
+  await fileChooser.setFiles({
+    buffer: Buffer.from(file.base64, 'base64'),
+    mimeType: file.mimeType,
+    name: file.name,
+  });
 };
 
 export const uiDownloadTarget: BrowserCommand<
@@ -1274,15 +1425,22 @@ export const uiDownloadTarget: BrowserCommand<
 export const uiReadTargetEvents: BrowserCommand<
   [],
   {
-    readonly consoleMessages: ReadonlyArray<{ readonly text: string; readonly type: string }>;
+    readonly consoleMessages: ReadonlyArray<{
+      readonly text: string;
+      readonly type: string;
+    }>;
     readonly pageErrors: readonly string[];
   }
 > = (commandContext) => {
   const session = sessionFor(commandContext);
-  return { consoleMessages: session.consoleMessages, pageErrors: session.pageErrors };
+  return {
+    consoleMessages: session.consoleMessages,
+    pageErrors: session.pageErrors,
+  };
 };
 
 export const uiBrowserCommands = {
+  uiAddContextInitScript,
   uiAddCookies,
   uiAddInitScript,
   uiAuthenticateTauTestUser,
@@ -1318,12 +1476,14 @@ export const uiBrowserCommands = {
   uiQualifyWebGpu,
   uiReadTarget,
   uiReadAgentHostGatewayRequests,
+  uiReadTauVertexOperations,
   uiReleaseAgentHostGatewayFixture,
   uiReadTargetEvents,
   uiReloadTarget,
   uiScreenshotTarget,
   uiSampleCameraDuringClick,
   uiScrollTarget,
+  uiSetTargetOffline,
   uiSetViewport,
   uiStartHostFixture,
   uiStartTauServeFixture,

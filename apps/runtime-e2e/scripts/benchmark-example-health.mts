@@ -12,7 +12,7 @@
  *   TAU_GEOSPEC_OUTPUT   Report path, absolute or repository-relative
  *   TAU_GEOSPEC_CLOSEOUT Add focused public-analysis/diagnostic measurements (1)
  *   TAU_GEOSPEC_FOCUS_ONLY Skip the corpus and run only focused measurements (1)
- *   TAU_PICOGK_RESOURCE_ROOT / TAU_NATIVE_CODE_TRUST_FILE Native example host configuration
+ *   TAU_PICOGK_RESOURCE_ROOT                           Native example host configuration
  *
  * Usage:
  *   pnpm nx run runtime-e2e:benchmark-example-health

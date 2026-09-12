@@ -11,6 +11,8 @@ const isCi = Boolean(process.env['CI']);
 const requiredWebGpuProfile = resolveRequiredWebGpuProfile(process.env['TAU_E2E_WEBGPU_PROFILE']);
 const chromiumArguments = webGpuLaunchArguments(requiredWebGpuProfile);
 const chromiumDisabledArguments = webGpuLaunchArguments('disabled');
+const liveGeminiSpec = 'src/gemini-browser-agent-host.live.spec.ts';
+const liveGeminiEnabled = process.env['TAU_E2E_LIVE_GEMINI'] === 'true';
 
 export default defineConfig({
   root: import.meta.dirname,
@@ -52,10 +54,16 @@ export default defineConfig({
         {
           browser: 'chromium',
           name: 'chromium',
-          exclude: ['src/headless-chat-image-capture.no-webgpu.spec.ts'],
+          exclude: [
+            'src/headless-chat-image-capture.no-webgpu.spec.ts',
+            ...(liveGeminiEnabled ? [] : [liveGeminiSpec]),
+          ],
           provider: playwright({
             actionTimeout: 10_000,
-            launchOptions: { args: [...chromiumArguments], channel: 'chromium' },
+            launchOptions: {
+              args: [...chromiumArguments],
+              channel: 'chromium',
+            },
           }),
           provide: { webGpuProfile: requiredWebGpuProfile },
         },
@@ -65,7 +73,10 @@ export default defineConfig({
           include: ['src/headless-chat-image-capture.no-webgpu.spec.ts'],
           provider: playwright({
             actionTimeout: 10_000,
-            launchOptions: { args: [...chromiumDisabledArguments], channel: 'chromium' },
+            launchOptions: {
+              args: [...chromiumDisabledArguments],
+              channel: 'chromium',
+            },
           }),
           provide: { webGpuProfile: 'disabled' },
         },

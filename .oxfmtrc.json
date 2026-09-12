@@ -15,7 +15,6 @@
     "/out",
     "/.nx/cache",
     "/.nx/workspace-data",
-    ".cursor/plans/**",
     ".agents/skills/create-repo/templates/**",
     "/.claude/worktrees/**",
     "/tarballs/**",
@@ -23,6 +22,7 @@
     "/packages/runtime/occt-reports/**",
     "/libs/converter/src/assets/**",
     "**/generated/**",
+    "**/agent/*/**",
     "**/assets/**",
     "**/public/*.js",
     "**/*.typeface.json"

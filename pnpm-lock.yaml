@@ -21,6 +21,9 @@ catalogs:
     '@ai-sdk/provider-utils':
       specifier: ^4.0.30
       version: 4.0.30
+    '@anthropic-ai/sandbox-runtime':
+      specifier: 0.0.75
+      version: 0.0.75
     '@arethetypeswrong/cli':
       specifier: ^0.18.3
       version: 0.18.3
@@ -471,6 +474,9 @@ catalogs:
     isbot:
       specifier: ^5.1.43
       version: 5.1.43
+    isomorphic-git:
+      specifier: 1.38.5
+      version: 1.38.5
     js-yaml:
       specifier: 4.3.0
       version: 4.3.0
@@ -763,6 +769,7 @@ overrides:
 
 patchedDependencies:
   '@ai-sdk/langchain@2.0.181': 4db10f07aa138655b17d3bcb1e56ae99b2584a8f8dd1241aeca7f30b4937fa1d
+  '@earendil-works/pi-ai@0.84.4': 37c85de237194f22e924bd762ee21cbb4a957ccb816dcba8ae31af32cdda325b
   '@kittycad/lib@2.0.48': 8d1f46d38811b73bcc38ba26f4eba9f1d9e32be6bd271ba35c1c6365f6fe04a9
   '@taulabs/replicad@0.23.4-beta.2': 4d55bfdc8696f36ff5efc30607071d0337d46d49c57920c275b9dd15aa4ef07b
   vite-plugin-mkcert@2.0.0: 03b480d5b58a772a5b8d09aa61601839139c389c323e1d4fe6e70d399a4a2128
@@ -1854,6 +1861,9 @@ importers:
       '@agentclientprotocol/codex-acp':
         specifier: 'catalog:'
         version: 1.7.0
+      '@anthropic-ai/sandbox-runtime':
+        specifier: 'catalog:'
+        version: 0.0.75
       '@gltf-transform/core':
         specifier: 'catalog:'
         version: 4.4.0
@@ -3053,7 +3063,7 @@ importers:
         version: 0.84.4(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)))(ws@8.21.3)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315))
       '@earendil-works/pi-ai':
         specifier: 0.84.4
-        version: 0.84.4(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)))(ws@8.21.3)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315))
+        version: 0.84.4(patch_hash=37c85de237194f22e924bd762ee21cbb4a957ccb816dcba8ae31af32cdda325b)(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)))(ws@8.21.3)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315))
       '@taucad/rpc':
         specifier: workspace:*
         version: link:../../libs/rpc
@@ -3215,6 +3225,10 @@ importers:
         version: 8.20.0
 
   packages/core/native-process:
+    dependencies:
+      '@anthropic-ai/sandbox-runtime':
+        specifier: 'catalog:'
+        version: 0.0.75
     devDependencies:
       '@taucad/runtime':
         specifier: workspace:*
@@ -3962,9 +3976,16 @@ importers:
       '@taucad/filesystem':
         specifier: workspace:*
         version: link:../../libs/filesystem
+      isomorphic-git:
+        specifier: 'catalog:'
+        version: 1.38.5
       zod:
         specifier: 'catalog:'
         version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
+    devDependencies:
+      xstate:
+        specifier: 'catalog:'
+        version: 5.32.1
 
   packages/runtime:
     dependencies:
@@ -4445,6 +4466,11 @@ packages:
       '@anthropic-ai/sdk': '>=0.93.0'
       '@modelcontextprotocol/sdk': ^1.29.0
       zod: ^4.0.0
+
+  '@anthropic-ai/sandbox-runtime@0.0.75':
+    resolution: {integrity: sha512-oqAKi6QtkT2DpLwFoDCDD757zw2i6ftpLTyV8rNSV9QWF53q2m1JxEs0RYXv2CIXtCoje4RGYQylagn15RKmww==}
+    engines: {node: '>=20.11.0'}
+    hasBin: true
 
   '@anthropic-ai/sdk@0.103.0':
     resolution: {integrity: sha512-1uG7RNgoHTUxzOXqSCODKt0UTVlxWiHk/2Tt2/uQJiPW7XzBeKVuJyd3Aw6T3LPyvZV/jDTnPLX7SaM70WLLjA==}
@@ -11414,6 +11440,9 @@ packages:
 
   '@polka/url@1.0.0-next.29':
     resolution: {integrity: sha512-wwQAWhWSuHaag8c4q/KN/vCoeOJYshAIvMQwD4GpSb3OiZklFfvAgmj0VCBBImRpuF/aFgIRzllXlVX93Jevww==}
+
+  '@pondwader/socks5-server@1.0.10':
+    resolution: {integrity: sha512-bQY06wzzR8D2+vVCUoBsr5QS2U6UgPUQRmErNwtsuI6vLcyRKkafjkr3KxbtGFf9aBBIV2mcvlsKD1UYaIV+sg==}
 
   '@posthog/core@1.35.3':
     resolution: {integrity: sha512-EsGPbSLl39Jgo2KZ+kI9UAxFnh5nddaN5bNm2rXvUwF+vGmam9eN1EXeNbxhRU7ulEeIiGdm7XjoU7pzavkgIQ==}
@@ -26905,6 +26934,13 @@ snapshots:
       '@anthropic-ai/claude-agent-sdk-win32-arm64': 0.3.232
       '@anthropic-ai/claude-agent-sdk-win32-x64': 0.3.232
 
+  '@anthropic-ai/sandbox-runtime@0.0.75':
+    dependencies:
+      '@pondwader/socks5-server': 1.0.10
+      commander: 12.1.0
+      node-forge: 1.4.0
+      zod: 3.25.76
+
   '@anthropic-ai/sdk@0.103.0(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315))':
     dependencies:
       json-schema-to-ts: 3.1.1
@@ -28452,7 +28488,7 @@ snapshots:
 
   '@earendil-works/pi-agent-core@0.84.4(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)))(ws@8.21.3)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315))':
     dependencies:
-      '@earendil-works/pi-ai': 0.84.4(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)))(ws@8.21.3)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315))
+      '@earendil-works/pi-ai': 0.84.4(patch_hash=37c85de237194f22e924bd762ee21cbb4a957ccb816dcba8ae31af32cdda325b)(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)))(ws@8.21.3)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315))
       '@earendil-works/pi-telemetry': 0.84.4
       diff: 8.0.4
       ignore: 7.0.5
@@ -28466,7 +28502,7 @@ snapshots:
       - ws
       - zod
 
-  '@earendil-works/pi-ai@0.84.4(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)))(ws@8.21.3)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315))':
+  '@earendil-works/pi-ai@0.84.4(patch_hash=37c85de237194f22e924bd762ee21cbb4a957ccb816dcba8ae31af32cdda325b)(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)))(ws@8.21.3)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315))':
     dependencies:
       '@anthropic-ai/sdk': 0.91.1(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315))
       '@aws-sdk/client-bedrock-runtime': 3.1048.0
@@ -34378,6 +34414,8 @@ snapshots:
       - supports-color
 
   '@polka/url@1.0.0-next.29': {}
+
+  '@pondwader/socks5-server@1.0.10': {}
 
   '@posthog/core@1.35.3':
     dependencies:

@@ -3,6 +3,7 @@
  * from the browser File API and FileSystem API.
  */
 
+import { classify } from '@taucad/filesystem/path-registry';
 import { joinRelativePath } from '@taucad/utils/path';
 
 export type FileData = {
@@ -12,18 +13,19 @@ export type FileData = {
 
 export type FileMap = Map<string, FileData>;
 
-const isDerivedImportCachePath = (path: string): boolean => path === '.tau/cache' || path.startsWith('.tau/cache/');
+/** Regenerable bytes an import recreates rather than carries (path registry). */
+const isDerivedImportCachePath = (path: string): boolean => classify(path).class === 'cache';
 
 /**
- * Convert imported files into the project-create payload while omitting Tau's
- * derived cache subtree.
+ * Convert imported files into the project-create payload while omitting the
+ * regenerable bytes the path registry classifies as cache.
  */
 export function createImportedProjectFiles(
   files: FileMap,
   mainFile: string,
 ): Record<string, { content: Uint8Array<ArrayBuffer> }> {
   if (isDerivedImportCachePath(mainFile)) {
-    throw new Error('The selected main file is inside the derived .tau/cache directory and cannot be imported.');
+    throw new Error('The selected main file is regenerable cache content and cannot be imported.');
   }
 
   const projectFiles: Record<string, { content: Uint8Array<ArrayBuffer> }> = {};

@@ -14,15 +14,6 @@ export const desktopProjectRoot = async (projectId: string): Promise<string> => 
   return `${config.path ?? nodeHomeRoot()}/${config.providerBasePath}`;
 };
 
-/** Revoke this project's native-code grant; the desktop terminates its native worker immediately. */
-export const revokeDesktopNativeCodeTrust = async (projectId: string): Promise<void> => {
-  const bridge = desktopBridge();
-  if (!bridge) {
-    return;
-  }
-  await bridge.nativeCode.revoke(await desktopProjectRoot(projectId));
-};
-
 /**
  * Desktop kernel options: the runtime runs in an Electron utility process.
  *
@@ -49,9 +40,6 @@ export const desktopKernelOptions =
       const bridge = desktopBridge();
       if (!bridge?.runtimeKernelIds.includes(nativeKernelId)) {
         throw new Error(`${nativeKernelId} is not available in this desktop runtime.`);
-      }
-      if (!(await bridge.nativeCode.isTrusted(projectRoot)) && !(await bridge.nativeCode.grant(projectRoot))) {
-        throw new Error('Native-code trust was not granted for this project.');
       }
     }
     // Dynamic so the electron renderer module never enters the web bundle's

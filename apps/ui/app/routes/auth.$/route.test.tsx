@@ -2,8 +2,9 @@
 
 import '@testing-library/jest-dom/vitest';
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import type React from 'react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import AuthPage from '#routes/auth.$/route.js';
 
@@ -66,5 +67,60 @@ describe('AuthPage', () => {
     render(<AuthPage />);
 
     expect(screen.getByText('verify-email')).toBeInTheDocument();
+  });
+
+  /*
+   * The desktop window cannot host the flow: main sends the provider navigation
+   * to the system browser, so a form rendered here can only end at the
+   * provider's `state_mismatch`. Every bridged view must reach the shell instead,
+   * however the user arrived — a plain link included.
+   */
+  describe('inside the Electron shell', () => {
+    const signIn = vi.fn(async () => undefined);
+    const signOut = vi.fn(async () => undefined);
+
+    beforeEach(() => {
+      vi.stubEnv('TAU_TARGET', 'desktop');
+      globalThis.window.tauAuth = { signIn, signOut, onAuthChanged: () => () => undefined };
+    });
+
+    afterEach(() => {
+      vi.unstubAllEnvs();
+      delete globalThis.window.tauAuth;
+      signIn.mockClear();
+      signOut.mockClear();
+    });
+
+    it.each([
+      ['sign-in', 'signIn'],
+      ['sign-up', 'signIn'],
+      ['sign-out', 'signOut'],
+    ] as const)('hands %s to the shell instead of rendering it', (segment, bridged) => {
+      routeMocks.segment = segment;
+
+      render(<AuthPage />);
+
+      expect(screen.queryByText(`auth:${segment}`)).not.toBeInTheDocument();
+      expect(bridged === 'signIn' ? signIn : signOut).toHaveBeenCalledTimes(1);
+    });
+
+    it('offers a second attempt when the browser never opened', async () => {
+      routeMocks.segment = 'sign-in';
+
+      render(<AuthPage />);
+      await userEvent.click(screen.getByRole('button', { name: /open my browser again/i }));
+
+      expect(screen.getByText(/continue in your browser/i)).toBeInTheDocument();
+      expect(signIn).toHaveBeenCalledTimes(2);
+    });
+
+    it('still renders callback surfaces the browser lands on', () => {
+      routeMocks.segment = 'verify-email';
+
+      render(<AuthPage />);
+
+      expect(screen.getByText('verify-email')).toBeInTheDocument();
+      expect(signIn).not.toHaveBeenCalled();
+    });
   });
 });

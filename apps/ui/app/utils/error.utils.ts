@@ -1,6 +1,7 @@
 import { errorCategory, errorCategories } from '@taucad/types/constants';
 import type { ErrorCategory, ChatError } from '@taucad/types';
 import { errorCategoryTitles, httpStatusToCategory } from '@taucad/chat/utils';
+import { isRecord } from '@taucad/utils/schema';
 
 type DecodedProviderError = {
   readonly httpStatus?: number;
@@ -60,6 +61,9 @@ function tryParseChatError(message: string): ChatError | undefined {
         raw: typeof parsed['raw'] === 'string' ? parsed['raw'] : undefined,
         requestId: typeof parsed['requestId'] === 'string' ? parsed['requestId'] : undefined,
         helpUrl: typeof parsed['helpUrl'] === 'string' ? parsed['helpUrl'] : undefined,
+        // The refusal's own structured fields (an INSUFFICIENT_CREDIT shortfall)
+        // survive persistence so the card still has them after a reload.
+        details: isRecord(parsed['details']) ? parsed['details'] : undefined,
       };
     }
   } catch {

@@ -9,6 +9,9 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/t
 import type { Handle } from '#types/matches.types.js';
 import { ClientOnly } from '#components/ui/utils/client-only.js';
 import { isDesktopTarget } from '#lib/build-target.js';
+import type { DesktopAuthAction } from '#providers/auth-provider.js';
+import { useShellAuthHandoff } from '#providers/auth-provider.js';
+import { Button } from '@taucad/ui/components/button';
 import { cn } from '@taucad/ui/utils/cn';
 
 const AuthSplashbackLazy = lazy(async () => {
@@ -20,8 +23,42 @@ export const handle: Handle = {
   enablePageWrapper: false,
 };
 
+/**
+ * What the desktop window shows once the shell has taken the flow.
+ *
+ * Signing out is immediate and needs no browser, so only the sign-in family
+ * gets the handoff copy and its retry.
+ *
+ * @param action - The bridge call the shell ran.
+ * @returns The handoff panel.
+ */
+function ShellHandoff({ action }: { readonly action: DesktopAuthAction }): React.JSX.Element | undefined {
+  if (action === 'signOut') {
+    return undefined;
+  }
+
+  return (
+    <div className='w-full max-w-md text-center'>
+      <h1 className='text-lg font-medium'>Continue in your browser</h1>
+      <p className='mt-2 text-sm text-muted-foreground'>
+        Tau signs you in through your browser, then hands the session back to this window.
+      </p>
+      <Button
+        className='mt-6'
+        variant='outline'
+        onClick={() => {
+          void globalThis.window.tauAuth?.signIn();
+        }}
+      >
+        Open my browser again
+      </Button>
+    </div>
+  );
+}
+
 export default function AuthPage(): React.JSX.Element {
   const { '*': segment } = useParams();
+  const shellAction = useShellAuthHandoff(`/auth/${segment ?? ''}`);
   return (
     <AuthEmailDraftProvider>
       <div className='grid min-h-svh lg:grid-cols-2'>
@@ -43,12 +80,16 @@ export default function AuthPage(): React.JSX.Element {
             </Tooltip>
           </div>
           <div className='flex flex-1 items-center justify-center'>
-            {segment === 'verify-email' ? (
-              <VerifyEmail className='w-full max-w-md' />
-            ) : segment === 'magic-link/verify' ? (
-              <MagicLinkVerify className='w-full max-w-md' />
+            {shellAction === undefined ? (
+              segment === 'verify-email' ? (
+                <VerifyEmail className='w-full max-w-md' />
+              ) : segment === 'magic-link/verify' ? (
+                <MagicLinkVerify className='w-full max-w-md' />
+              ) : (
+                <Auth path={segment} className='w-full max-w-md' />
+              )
             ) : (
-              <Auth path={segment} className='w-full max-w-md' />
+              <ShellHandoff action={shellAction} />
             )}
           </div>
         </div>

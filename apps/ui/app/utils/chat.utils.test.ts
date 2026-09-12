@@ -129,11 +129,6 @@ describe('serializeMessage', () => {
             reasoningTokens: 0,
             cacheReadTokens: 0,
             cacheWriteTokens: 0,
-            inputTokensCost: 0,
-            outputTokensCost: 0,
-            cacheReadTokensCost: 0,
-            cacheWriteTokensCost: 0,
-            totalCost: 0,
           },
         },
       ]);
@@ -156,18 +151,15 @@ describe('serializeMessage', () => {
             reasoningTokens: 0,
             cacheReadTokens: 0,
             cacheWriteTokens: 0,
-            inputTokensCost: 0,
-            outputTokensCost: 0,
-            cacheReadTokensCost: 0,
-            cacheWriteTokensCost: 0,
-            totalCost: 0,
           },
         },
       ]);
       expect(serializeMessage(message)).toBe('Agent: codex | Model: gpt-5.3-codex | Tokens: 1200 in / 300 out');
     });
 
-    it('includes cost when totalCost > 0', () => {
+    /* B4 R2: an export names the funded operations whose receipts hold the
+     * charge; it never quotes a locally multiplied amount. */
+    it('names the funded Tau operations instead of quoting a price', () => {
       const message = baseMessage([
         {
           type: 'data-usage',
@@ -180,18 +172,31 @@ describe('serializeMessage', () => {
             reasoningTokens: 0,
             cacheReadTokens: 0,
             cacheWriteTokens: 0,
-            inputTokensCost: 0,
-            outputTokensCost: 0,
-            cacheReadTokensCost: 0,
-            cacheWriteTokensCost: 0,
-            totalCost: 0.002,
+            operationId: 'op_b',
+            attemptId: 'att_1',
+            billingStatus: 'terminal',
+          },
+        },
+        {
+          type: 'data-usage',
+          data: {
+            type: 'usage',
+            id: 'u2',
+            model: 'claude-3',
+            inputTokens: 1,
+            outputTokens: 2,
+            cacheReadTokens: 0,
+            cacheWriteTokens: 0,
+            operationId: 'op_a',
           },
         },
       ]);
-      expect(serializeMessage(message)).toBe('Model: claude-3 | Tokens: 5 in / 15 out | Cost: $0.0020');
+      const serialized = serializeMessage(message);
+      expect(serialized).toBe('Model: claude-3 | Tokens: 6 in / 17 out | Tau operations: op_a, op_b');
+      expect(serialized).not.toContain('$');
     });
 
-    it('aggregates multiple data-usage parts into one line with summed tokens and cost', () => {
+    it('aggregates multiple data-usage parts into one line with summed tokens', () => {
       const message = baseMessage([
         {
           type: 'data-usage',
@@ -204,11 +209,6 @@ describe('serializeMessage', () => {
             reasoningTokens: 0,
             cacheReadTokens: 0,
             cacheWriteTokens: 0,
-            inputTokensCost: 0,
-            outputTokensCost: 0,
-            cacheReadTokensCost: 0,
-            cacheWriteTokensCost: 0,
-            totalCost: 0.001,
           },
         },
         {
@@ -222,15 +222,10 @@ describe('serializeMessage', () => {
             reasoningTokens: 0,
             cacheReadTokens: 0,
             cacheWriteTokens: 0,
-            inputTokensCost: 0,
-            outputTokensCost: 0,
-            cacheReadTokensCost: 0,
-            cacheWriteTokensCost: 0,
-            totalCost: 0.002,
           },
         },
       ]);
-      expect(serializeMessage(message)).toBe('Model: claude-3 | Tokens: 15 in / 35 out | Cost: $0.0030');
+      expect(serializeMessage(message)).toBe('Model: claude-3 | Tokens: 15 in / 35 out');
     });
   });
 

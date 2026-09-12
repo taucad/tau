@@ -131,8 +131,9 @@ function HeroScene({
         sourcePoints={points.source}
         targetPoints={points.target}
         targetProgress={targetProgress}
-        animationSpeed={1.2}
+        duration={2400}
         pointSize={2.5}
+        isAdditive
         // oxlint-disable-next-line tau-lint/no-hardcoded-color -- decorative hero particles
         sourceColor='#14b8a6'
         // oxlint-disable-next-line tau-lint/no-hardcoded-color -- decorative hero particles

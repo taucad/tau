@@ -49,12 +49,13 @@ const createUiRuntimeOptions = (config: UiRuntimeConfig, options: UiRuntimeOptio
       kernels: {
         default: {
           baseUrl: `${config.tauWebSocketUrl}/v1/kernels/zoo`,
-          // Must match apps/api billing.constants.ts `zooCloseCodes`.
+          // Must match apps/api billing.constants.ts `zooCloseCodes` and the
+          // 1013 refusal in apps/api kernels.service.ts. There is no credit or
+          // tier refusal to report: the hosted route opens no upstream session.
           /* eslint-disable @typescript-eslint/naming-convention -- WebSocket close-code keys are numeric protocol values. */
           closeErrors: {
+            1013: 'Hosted Zoo kernels are unavailable. Pick another kernel to keep modeling.',
             4401: 'Sign in to Tau to use the Zoo kernel.',
-            4402: "You're out of Tau credits — add credits in Plans & Billing to keep modeling with Zoo.",
-            4403: 'The Zoo kernel requires a Tau Pro subscription. Upgrade in Plans & Billing to continue.',
           },
           /* eslint-enable @typescript-eslint/naming-convention -- End numeric WebSocket close-code keys. */
         },

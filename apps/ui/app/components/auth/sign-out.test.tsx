@@ -31,4 +31,13 @@ describe('SignOut', () => {
     expect(signOut).toHaveBeenCalledOnce();
     expect(purge.mock.invocationCallOrder[0]).toBeLessThan(signOut.mock.invocationCallOrder[0] ?? 0);
   });
+
+  it('purges exactly once across re-renders so it cannot re-announce to other tabs', () => {
+    const { rerender } = render(<SignOut />);
+
+    rerender(<SignOut className='changed' />);
+
+    expect(purge).toHaveBeenCalledOnce();
+    expect(signOut).toHaveBeenCalledOnce();
+  });
 });

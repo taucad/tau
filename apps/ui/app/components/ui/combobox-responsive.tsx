@@ -21,6 +21,7 @@ import {
 } from '@taucad/ui/components/drawer';
 import { Popover, PopoverContent, PopoverTrigger } from '@taucad/ui/components/popover';
 import { cn } from '@taucad/ui/utils/cn';
+import { menuGroupHeadingClass } from '@taucad/ui/components/menu.variants';
 import { Loader } from '#components/ui/loader.js';
 
 type GroupedItems<T> = {
@@ -333,7 +334,7 @@ function ItemList<T>({
       // Render group header
       if (itemData.type === 'header') {
         return (
-          <div key={`header-${itemData.groupName}`} className='px-2 py-1.5 text-xs font-medium text-muted-foreground'>
+          <div key={`header-${itemData.groupName}`} className={menuGroupHeadingClass}>
             {itemData.groupName}
           </div>
         );

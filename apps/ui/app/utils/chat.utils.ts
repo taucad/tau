@@ -366,22 +366,26 @@ function aggregateUsage(usageParts: UsageData[]): string {
 
   let inputTokens = 0;
   let outputTokens = 0;
-  let totalCost = 0;
+  const operationIds = new Set<string>();
   for (const d of usageParts) {
     inputTokens += d.inputTokens;
     outputTokens += d.outputTokens;
-    totalCost += d.totalCost;
+    if (d.operationId !== undefined) {
+      operationIds.add(d.operationId);
+    }
   }
 
   const last = usageParts.at(-1);
   const model = last?.model ?? '';
-  /* No price for an external turn, and that is the honest line: Tau did not
-   * sell those tokens, so it has no cost to quote and must not present the
-   * vendor's own billing as one (V6). The agent is named instead. */
-  const cost = totalCost > 0 ? ` | Cost: $${totalCost.toFixed(4)}` : '';
+  /* An export is a copy of the transcript, not of the bill: the charge lives on
+   * the account's receipts and is read from them, so the export names the funded
+   * operations instead of quoting a number it would have to invent (B4 R2). No
+   * price for an external turn either — Tau did not sell those tokens and must
+   * not present the vendor's own billing as one (V6). The agent is named. */
+  const operations = operationIds.size === 0 ? '' : ` | Tau operations: ${[...operationIds].sort().join(', ')}`;
   const agent = last?.agent === undefined ? '' : `Agent: ${last.agent} | `;
 
-  return `${agent}Model: ${model} | Tokens: ${inputTokens} in / ${outputTokens} out${cost}`;
+  return `${agent}Model: ${model} | Tokens: ${inputTokens} in / ${outputTokens} out${operations}`;
 }
 
 /**

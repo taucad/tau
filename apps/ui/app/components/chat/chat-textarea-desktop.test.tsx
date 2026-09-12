@@ -75,6 +75,12 @@ vi.mock('#components/chat/chat-model-selector.js', () => ({
 
 const mockAgentSelectorOffered = { current: true };
 
+// The chip has its own suite; here it only has to appear for a Tau turn and
+// stay away from an external agent's turns.
+vi.mock('#components/billing/credit-estimate.js', () => ({
+  CreditBalanceChip: () => <div data-testid='credit-balance-chip' />,
+}));
+
 vi.mock('#components/chat/chat-execution-selector.js', () => ({
   formatChatAgentActivity: () => 'Approval needed',
   useChatAgentSelection: () => ({ isOffered: mockAgentSelectorOffered.current, label: 'Claude Code' }),
@@ -226,6 +232,14 @@ describe('ChatTextareaLeftControls — chat-scoped kernel label', () => {
       'Agent status: Approval needed',
     );
     expect(screen.queryByTestId('model-selector')).toBeNull();
+    // Tau credits do not fund an external agent's turns.
+    expect(screen.queryByTestId('credit-balance-chip')).toBeNull();
+  });
+
+  it('shows the credit balance chip alongside the Tau model selector', () => {
+    renderControls();
+
+    expect(screen.getByTestId('credit-balance-chip')).toBeInTheDocument();
   });
 
   /* Q12.2 + Q12.5: the readiness dot is gone from the trigger and readiness

@@ -2,12 +2,8 @@ import { ResourceQueue } from '@taucad/filesystem';
 import type { FileSystemProvider } from '@taucad/filesystem';
 import type { FileSystemBridgeProxy } from '@taucad/fs-bridge';
 import { toRpcError } from '@taucad/chat/rpc';
-import {
-  createChatToolRegistry,
-  createProviderRpcFileSystem,
-  createSkillBundleRegistry,
-  createSkillResourceFileSystem,
-} from '@taucad/agent-tools/registry';
+import { createChatToolRegistry, createProviderRpcFileSystem } from '@taucad/agent-tools/registry';
+import { composeView } from '@taucad/filesystem/composed-view';
 import { createRuntimeAgentClients } from '@taucad/agent-tools/runtime';
 import type { RuntimeAgentClient } from '@taucad/agent-tools/runtime';
 import { createRuntimeClient } from '@taucad/runtime/client';
@@ -19,7 +15,6 @@ import { randomUuid } from '@taucad/utils/id';
 import { assertRootedPath } from '@taucad/utils/path';
 import { z } from 'zod';
 import { createGatewayModelTransport, createTauAgentHost } from '@taucad/agent-host';
-import { systemSkillBundles } from '@taucad/skills/resources';
 import type {
   AgentLiveEvent,
   AgentLogEvent,
@@ -66,6 +61,7 @@ import {
 } from '#workers/agent-host-leader.js';
 import type { AgentHostLockRequest, ChatLeaderLease } from '#workers/agent-host-leader.js';
 import { createGeoSpecWorkerRpcClient } from '#workers/geospec-runner.client.js';
+import { systemSkillsOverlay } from '#workers/system-skills-overlay.js';
 import type { GeoSpecWorkerRpcClient } from '#workers/geospec-runner.client.js';
 
 type ProjectFileSystemBridge = Pick<
@@ -84,8 +80,6 @@ type ProjectFileSystemBridge = Pick<
   | 'hello'
   | 'dispose'
 >;
-
-const systemSkillRegistry = createSkillBundleRegistry(systemSkillBundles);
 
 type LeaderBroadcast =
   | {
@@ -1377,28 +1371,16 @@ const initialize = async (request: AgentHostWorkerInitializeRequest, sessionId: 
     runtimeClient,
     imageService,
   });
+  /* One function composes every view on every host (charter D1): the bundles,
+   * the registry mask and provenance are all inside it, so this worker only
+   * adapts the RPC shape over it. */
+  const agentView = composeView(
+    { filesystem: workspaceProvider },
+    { consumer: 'agent', overlays: [systemSkillsOverlay()] },
+  );
   const toolRegistry = createChatToolRegistry({
     fileSystemFor: (signal) =>
-      createSkillResourceFileSystem({
-        upper: createProviderRpcFileSystem({
-          provider: workspaceProvider,
-          mutations: fileSystemMutations,
-          signal,
-        }),
-        registry: systemSkillRegistry,
-        readResource: async (resource, { signal: resourceSignal }) => {
-          const response = await fetch(resource.url, {
-            signal: resourceSignal,
-          });
-          if (!response.ok) {
-            throw Object.assign(new Error(`Resource request failed with HTTP ${String(response.status)}.`), {
-              code: 'EIO',
-            });
-          }
-          return new Uint8Array(await response.arrayBuffer());
-        },
-        signal,
-      }),
+      createProviderRpcFileSystem({ provider: agentView, mutations: fileSystemMutations, signal }),
     skillResolver,
     ...runtimeRpc,
     geospec: geoSpecClient,

@@ -10,6 +10,7 @@ import {
   projectAgentHostRevisionFinalized,
   projectAgentHostUserTurn,
 } from '#services/agent-host-event-projection.js';
+import { parseErrorForPersistence } from '#utils/error.utils.js';
 import hexagonalNutLog from '#services/__fixtures__/daemon-reattach-hexnut.jsonl?raw';
 import hexagonalNutFourRunLog from '#services/__fixtures__/daemon-reattach-hexnut-4runs.jsonl?raw';
 
@@ -127,6 +128,7 @@ describe('projectAgentHostEvent', () => {
             cost: { input: 0.12, output: 0.07, cacheRead: 0.03, cacheWrite: 0.02, total: 0.24 },
           },
           stopReason: 'toolUse',
+          tauInternal: { kind: 'billing-invocation', attemptId: 'att_1', operationId: 'op_1', status: 'terminal' },
         },
       },
     });
@@ -155,14 +157,11 @@ describe('projectAgentHostEvent', () => {
         model: 'openai-gpt-5.5',
         inputTokens: 12,
         outputTokens: 7,
-        reasoningTokens: 0,
         cacheReadTokens: 3,
         cacheWriteTokens: 2,
-        inputTokensCost: 0.12,
-        outputTokensCost: 0.07,
-        cacheReadTokensCost: 0.03,
-        cacheWriteTokensCost: 0.02,
-        totalCost: 0.24,
+        operationId: 'op_1',
+        attemptId: 'att_1',
+        billingStatus: 'terminal',
       },
     });
   });
@@ -427,6 +426,42 @@ describe('projectAgentHostEvent', () => {
       message,
       code,
       httpStatus: status,
+    });
+  });
+
+  it('carries a credit denial shortfall through to the persisted ChatError', () => {
+    const details = {
+      requiredCreditAtoms: '4244000',
+      availableCreditAtoms: '300000',
+      routeId: 'anthropic-claude-astra-5',
+    };
+    const [chunk] = projectAgentHostEvent({
+      ...base,
+      type: 'run.lifecycle',
+      state: 'failed',
+      detail: {
+        code: 'INSUFFICIENT_CREDIT',
+        status: 402,
+        message: 'Insufficient Tau credit for this model request.',
+        details,
+      },
+    });
+    if (chunk?.type !== 'error') {
+      throw new Error('Expected an error projection');
+    }
+    expect(JSON.parse(chunk.errorText)).toEqual({
+      category: 'credits',
+      title: 'Credit Limit Reached',
+      message: 'Insufficient Tau credit for this model request.',
+      code: 'INSUFFICIENT_CREDIT',
+      httpStatus: 402,
+      details,
+    });
+    expect(parseErrorForPersistence(new Error(chunk.errorText))).toMatchObject({
+      category: 'credits',
+      code: 'INSUFFICIENT_CREDIT',
+      httpStatus: 402,
+      details,
     });
   });
 
@@ -699,10 +734,10 @@ describe('external attribution', () => {
 
   /*
    * V6. The vendor's own token report reaches the same `data-usage` part a Tau
-   * turn produces, with every Tau cost at zero — Tau did not sell this turn —
-   * and the agent named so the reader knows the missing price is a fact.
+   * turn produces, with no Tau operation — Tau did not sell this turn — and the
+   * agent named so the reader knows the missing charge is a fact.
    */
-  it('carries the external agent and the model it ran on, priced at nothing', () => {
+  it('carries the external agent and the model it ran on, with no Tau operation', () => {
     const chunks = projectAgentHostEvent({
       ...base,
       type: 'message.appended',
@@ -741,16 +776,62 @@ describe('external attribution', () => {
         model: 'gpt-5.3-codex',
         inputTokens: 1200,
         outputTokens: 300,
-        reasoningTokens: 0,
         cacheReadTokens: 0,
         cacheWriteTokens: 0,
-        inputTokensCost: 0,
-        outputTokensCost: 0,
-        cacheReadTokensCost: 0,
-        cacheWriteTokensCost: 0,
-        totalCost: 0,
       },
     });
+  });
+
+  /* B4 R2: the catalog price the model row quotes never becomes a charge, so
+   * the projection drops `usage.cost.*` entirely and carries the operation the
+   * account's own receipt answers for instead. */
+  it('carries the funded operation identity and no priced field', () => {
+    const chunks = projectAgentHostEvent({
+      ...base,
+      type: 'message.appended',
+      message: {
+        id: 'assistant-funded',
+        role: 'assistant',
+        content: [{ type: 'text', text: 'Done.' }],
+        metadata: {
+          model: 'openai-gpt-5.5',
+          usage: {
+            input: 10,
+            output: 4,
+            reasoning: 3,
+            cacheRead: 0,
+            cacheWrite: 0,
+            totalTokens: 14,
+            cost: { input: 9.99, output: 9.99, cacheRead: 0, cacheWrite: 0, total: 19.98 },
+          },
+          tauInternal: {
+            kind: 'billing-invocation',
+            attemptId: 'att_funded',
+            operationId: 'op_funded',
+            status: 'pending',
+          },
+        },
+      },
+    });
+
+    expect(chunks).toContainEqual({
+      type: 'data-usage',
+      id: 'assistant-funded:usage',
+      data: {
+        type: 'usage',
+        id: 'assistant-funded:usage',
+        model: 'openai-gpt-5.5',
+        inputTokens: 10,
+        outputTokens: 4,
+        reasoningTokens: 3,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        operationId: 'op_funded',
+        attemptId: 'att_funded',
+        billingStatus: 'pending',
+      },
+    });
+    expect(JSON.stringify(chunks)).not.toContain('9.99');
   });
 
   it("leaves a Tau turn's usage unattributed", () => {

@@ -53,7 +53,12 @@ import {
   createChatInstance,
   getBoundDurableChatRunId,
 } from '#chat-clients/_internal/shared-chat-transport.js';
-import { registerAgentHostRunReset } from '#chat-clients/_internal/browser-agent-host-transport.js';
+import {
+  isBrowserAgentHostPlaced,
+  isBrowserAgentHostRunResumable,
+  registerAgentHostRunReset,
+  requestBrowserAgentHostResume,
+} from '#chat-clients/_internal/browser-agent-host-transport.js';
 import type { CommitCancelledDraftRestoreInput } from '#types/storage.types.js';
 
 const admissionEnvelopeSchema = z.strictObject({
@@ -86,13 +91,6 @@ export type ChatSessionDeps = {
   ) => Promise<ChatEntity | undefined>;
   setMessageEdit: (chatId: string, messageId: string, draft: MyUIMessage) => Promise<ChatEntity | undefined>;
   clearMessageEdit: (chatId: string, messageId: string) => Promise<ChatEntity | undefined>;
-};
-
-/** Snapshot of the latest aggregated cost for a chat (derived from `data-usage` parts). */
-export type UsageSnapshot = {
-  totalCost: number;
-  /** Wall-clock millis when the snapshot was last updated. */
-  lastUpdatedAt: number;
 };
 
 export type ChatSession = {
@@ -151,18 +149,6 @@ function buildRetryMessages(
     return undefined;
   }
   return messages.slice(0, messageIndex);
-}
-
-function aggregateUsageCost(messages: readonly MyUIMessage[]): number {
-  let total = 0;
-  for (const message of messages) {
-    for (const part of message.parts) {
-      if (part.type === 'data-usage') {
-        total += part.data.totalCost;
-      }
-    }
-  }
-  return total;
 }
 
 function buildDraftFromUserMessage(message: MyUIMessage): MyUIMessage {
@@ -268,7 +254,6 @@ type InternalSession = ChatSession & {
   /** Immutable wire body for the active logical run, including admission. */
   activeRunBody: Readonly<Record<string, unknown>> | undefined;
   status: ChatStatus;
-  usage: UsageSnapshot | undefined;
   /**
    * How the active profile-scoped chat client composes a per-request body for
    * this chat. Published via {@link ChatSessionStore.setLatestAgentBody} from
@@ -290,7 +275,6 @@ export class ChatSessionStore {
   readonly #membershipTopic = new Topic<void>({ name: 'ChatSessionStore.membership' });
   readonly #chatTopics = new Map<string, Topic<void>>();
   readonly #statusTopics = new Map<string, Topic<void>>();
-  readonly #usageTopics = new Map<string, Topic<void>>();
   #snapshot: readonly string[] = [];
   /**
    * Coalesces membership notifications onto a microtask so an `acquire`/
@@ -534,14 +518,6 @@ export class ChatSessionStore {
 
   public subscribeStatus(chatId: string, listener: () => void): () => void {
     return this.#addPerChatListener({ bucket: this.#statusTopics, namePrefix: 'status', chatId, listener });
-  }
-
-  public getUsage(chatId: string): UsageSnapshot | undefined {
-    return this.#sessions.get(chatId)?.usage;
-  }
-
-  public subscribeUsage(chatId: string, listener: () => void): () => void {
-    return this.#addPerChatListener({ bucket: this.#usageTopics, namePrefix: 'usage', chatId, listener });
   }
 
   /**
@@ -905,7 +881,32 @@ export class ChatSessionStore {
             // Resume the exact admitted run without slicing chat.messages. The
             // transport decides whether this attaches to a browser-host log or
             // the API's resumable stream.
+            //
+            // Reattaching otherwise only recovers a run the host is still
+            // driving: it replays the log and stops where the run stopped. A
+            // turn the gateway refused at admission (rate limit, a dead tool)
+            // leaves a terminal run and no live stream, so resuming it replayed
+            // the same failure and ended — the banner's Resume looked inert.
+            // Dispatch the turn again in that case. Placements that register no
+            // browser host keep the resume path, which is the one their
+            // transport can answer.
+            //
+            // A *credit* refusal is the exception, and the reason the request
+            // above is explicit: the call never reached the provider, so the
+            // host continues that one call from its durable log instead of
+            // regenerating — which would rewind the turn and charge a second
+            // time for the tool work the customer already paid for.
             case 'continue': {
+              // The one-shot request is only ever consumed by a browser-host
+              // stream. Setting it on a placement that cannot read it leaves it
+              // armed for a later stream this dispatch never asked for.
+              if (isBrowserAgentHostPlaced(chatId)) {
+                requestBrowserAgentHostResume(chatId);
+                if (!isBrowserAgentHostRunResumable(chatId)) {
+                  void chat.regenerate({ body: requestBody });
+                  return;
+                }
+              }
               void chat.resumeStream({ body: requestBody });
             }
           }
@@ -1028,12 +1029,6 @@ export class ChatSessionStore {
         }
       }
 
-      // Track per-turn cost aggregated across `data-usage` parts.
-      const totalCost = aggregateUsageCost(chat.messages);
-      if (totalCost !== session.usage?.totalCost) {
-        session.usage = { totalCost, lastUpdatedAt: Date.now() };
-        this.#usageTopics.get(chatId)?.emit();
-      }
       this.#chatTopics.get(chatId)?.emit();
     });
     const unregisterStatus = chat['~registerStatusCallback'](() => {
@@ -1073,7 +1068,6 @@ export class ChatSessionStore {
       seededDispatch: false,
       activeRunBody: undefined,
       status: chat.status,
-      usage: undefined,
       latestAgentBody: undefined,
       latestAgentBodyWaiters: new Set(),
       dispose: () => {
@@ -1197,7 +1191,7 @@ export class ChatSessionStore {
   }
 
   #disposeChatTopics(chatId: string): void {
-    for (const bucket of [this.#chatTopics, this.#statusTopics, this.#usageTopics]) {
+    for (const bucket of [this.#chatTopics, this.#statusTopics]) {
       const topic = bucket.get(chatId);
       if (topic) {
         topic.dispose();

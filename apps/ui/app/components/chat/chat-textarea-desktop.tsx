@@ -10,6 +10,7 @@ import {
   formatChatAgentActivity,
   useChatAgentSelection,
 } from '#components/chat/chat-execution-selector.js';
+import { CreditBalanceChip } from '#components/billing/credit-estimate.js';
 import { ChatKernelSelector } from '#components/chat/chat-kernel-selector.js';
 import { ChatRevisionSelector, useChatRevisionPlacement } from '#components/chat/chat-revision-selector.js';
 import { ChatToolSelector } from '#components/chat/chat-tool-selector.js';
@@ -519,6 +520,11 @@ export const ChatTextareaLeftControls = memo(function ({
         </Tooltip>
       )}
       {creationLocationControl}
+      {/* Available and reserved credits (P5/P6). Tau execution only — an
+       * external agent's turns are not funded by this balance. Kept after the
+       * creation-location control so that control stays adjacent to the model
+       * selector, as its own test pins. */}
+      {execution.kind === 'tau' ? <CreditBalanceChip /> : null}
       {/* Revision selector — offered by host capability, never by execution kind (V18). */}
       {isRevisionSelectorOffered ? (
         <Tooltip>

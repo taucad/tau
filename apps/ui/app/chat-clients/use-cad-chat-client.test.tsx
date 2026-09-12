@@ -60,6 +60,12 @@ const availabilityHarness = vi.hoisted(() => {
   const availability: HostAvailability = { status: 'available', durability: 'exclusive-append' };
   return { availability };
 });
+const creditPreflightHarness = vi.hoisted(() => ({
+  /** Every `(routeId, modelName)` the client pre-flighted, in dispatch order. */
+  calls: [] as Array<readonly [string, string]>,
+  /** Set by a test to make the pre-flight refuse this dispatch. */
+  refuse: undefined as (() => void) | undefined,
+}));
 const placementHarness = vi.hoisted(() => ({
   localHostId: undefined as 'desktop' | undefined,
   /** What each placement advertised for revisions; `browser` is the page's own worker. */
@@ -128,6 +134,16 @@ vi.mock('#hooks/use-models.js', () => ({
 }));
 vi.mock('#hooks/use-project.js', () => ({
   useProject: () => ({ projectId: 'proj_test', mainEntryPath: 'main.ts', geometryUnits: new Map() }),
+}));
+/* R9's turn-start pre-flight. The real hook reads the balance and the estimates
+ * through React Query; this suite drives its *decision* instead, so the client's
+ * own refusal path is what the assertions cover. Its own thresholds are proved in
+ * `use-credit-preflight.test.tsx`. */
+vi.mock('#hooks/use-credit-preflight.js', () => ({
+  useCreditPreflight: () => (routeId: string, modelName: string) => {
+    creditPreflightHarness.calls.push([routeId, modelName]);
+    creditPreflightHarness.refuse?.();
+  },
 }));
 vi.mock('#hooks/use-file-manager.js', () => {
   const fileManager = () => ({
@@ -295,6 +311,8 @@ const expectRunBody = (agent: CadAgentConfigInput = buildAgent()): Record<string
 beforeEach(() => {
   placementHarness.localHostId = undefined;
   placementHarness.revisions.clear();
+  creditPreflightHarness.calls.length = 0;
+  creditPreflightHarness.refuse = undefined;
   // Every host in this suite records both modes unless a test says otherwise.
   for (const key of ['browser', 'origin', 'desktop', 'device-1']) {
     placementHarness.revisions.set(key, ['direct', 'candidate']);
@@ -493,6 +511,106 @@ describe('useCadChatClient', () => {
     // it must record the turn in (V18).
     expect(body['execution']).toEqual({ hostId: 'origin', mode: 'direct' });
     expect(body['agent']).toMatchObject({ execution: { kind: 'tau', hostId: 'origin' } });
+  });
+
+  /*
+   * R9. The pre-flight runs inside `admitWorkspace`, the one path every verb
+   * and every bodyless dispatch shares, and *before* a claim is prepared or
+   * admitted — a turn refused for credit must leave no workspace behind.
+   */
+  it('refuses a turn the balance cannot fund, on the existing credits banner', async () => {
+    creditPreflightHarness.refuse = () => {
+      throw new Error(
+        JSON.stringify({
+          category: 'credits',
+          title: 'Credit Limit Reached',
+          message: 'Add credits to start a turn on GPT 5.5.',
+          code: 'INSUFFICIENT_CREDIT',
+          httpStatus: 402,
+          details: {
+            requiredCreditAtoms: '3084332',
+            availableCreditAtoms: '1000000',
+            routeId: 'openai-gpt-5.5',
+          },
+        }),
+      );
+    };
+    const chat = mock<Chat<MyUIMessage>>();
+    Object.defineProperty(chat, 'messages', { get: () => [] });
+    useActiveChatInstanceMock.mockReturnValue(chat);
+    const actions = buildActions();
+    installActions(actions);
+
+    const { result } = renderHook(() => useCadChatClient());
+    act(() => {
+      result.current.submit({ text: 'Build it.' });
+    });
+
+    await waitFor(() => {
+      expect(persistedErrors).toHaveLength(1);
+    });
+    // The same ChatError `chat-error.tsx` already routes to `<ChatErrorCredits>`,
+    // carrying W2's shortfall so the card can name the amount.
+    expect(persistedErrors[0]).toMatchObject({
+      category: 'credits',
+      title: 'Credit Limit Reached',
+      code: 'INSUFFICIENT_CREDIT',
+      httpStatus: 402,
+      details: {
+        requiredCreditAtoms: '3084332',
+        availableCreditAtoms: '1000000',
+        routeId: 'openai-gpt-5.5',
+      },
+    });
+    expect(actions.sendMessage).not.toHaveBeenCalled();
+    expect(workspaceHarness.prepare).not.toHaveBeenCalled();
+    expect(workspaceHarness.current?.admitted).toBe(false);
+  });
+
+  it('pre-flights the route the turn will run and dispatches when nothing refuses it', async () => {
+    const chat = mock<Chat<MyUIMessage>>();
+    Object.defineProperty(chat, 'messages', { get: () => [] });
+    useActiveChatInstanceMock.mockReturnValue(chat);
+    const actions = buildActions();
+    installActions(actions);
+
+    const { result } = renderHook(() => useCadChatClient());
+    act(() => {
+      result.current.submit({ text: 'Build it.' });
+    });
+
+    await waitFor(() => {
+      expect(actions.sendMessage).toHaveBeenCalled();
+    });
+    expect(creditPreflightHarness.calls).toEqual([['openai-gpt-5.5', 'GPT 5.5']]);
+    expect(persistedErrors).toHaveLength(0);
+  });
+
+  /*
+   * "Retry with a different model" is the credits card's own way out, so the
+   * admission — and with it the pre-flight and the browser-wire check — has to
+   * see the overriding row, not the selection the composer still shows.
+   */
+  it('pre-flights the overriding model a retry names, not the active selection', async () => {
+    const messages: MyUIMessage[] = [
+      { id: 'msg_user', role: 'user', parts: [{ type: 'text', text: 'Build it.' }] },
+      { id: 'msg_assistant', role: 'assistant', parts: [{ type: 'text', text: 'Done.' }] },
+    ];
+    const chat = mock<Chat<MyUIMessage>>();
+    Object.defineProperty(chat, 'messages', { get: () => messages });
+    useActiveChatInstanceMock.mockReturnValue(chat);
+    const actions = buildActions();
+    installActions(actions);
+
+    const { result } = renderHook(() => useCadChatClient());
+    act(() => {
+      result.current.retry('msg_assistant', 'openai-gpt-retry');
+    });
+
+    await waitFor(() => {
+      expect(actions.retryMessage).toHaveBeenCalled();
+    });
+    expect(creditPreflightHarness.calls).toEqual([['openai-gpt-retry', 'GPT Retry']]);
   });
 
   it('places an external-agent turn on its daemon, naming the agent and no Tau model', async () => {

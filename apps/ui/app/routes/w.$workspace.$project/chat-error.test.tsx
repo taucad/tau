@@ -5,6 +5,8 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import type { MockInstance } from 'vitest';
 import { render, screen } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import type { ReactNode } from 'react';
 import userEvent from '@testing-library/user-event';
 import { errorCategory } from '@taucad/types/constants';
 import type { ChatError as ChatErrorPayload } from '@taucad/types';
@@ -35,6 +37,20 @@ vi.mock('#hooks/use-chat.js', () => ({
   useChatActions: () => ({ continueChat, regenerate }),
   useChatRetrySnapshot: () => ({ retryAttempt: mockRetryAttempt, retryMaxAttempts: 5 }),
   useChatSelector: vi.fn(),
+}));
+
+/* The card's "Switch Model" action mounts the composer's own picker, which
+ * reads the chat-scoped model resolver; this suite renders the banner alone. */
+vi.mock('#components/chat/chat-model-selector.js', () => ({
+  ChatModelSelector: ({ children }: { readonly children: (props: unknown) => React.ReactNode }) => (
+    <div>{children({})}</div>
+  ),
+}));
+
+/* The shortfall copy resolves the denied route's display name through the
+ * catalogue hook, which reads route loader data this suite does not mount. */
+vi.mock('#hooks/use-models.js', () => ({
+  useModels: () => ({ resolveModel: (id: string) => ({ id, name: id }) }),
 }));
 
 vi.mock('#components/code/code-viewer.js', () => ({
@@ -175,10 +191,43 @@ describe('ChatError', () => {
     expect(screen.queryByRole('button', { name: /^retry$/i })).not.toBeInTheDocument();
   });
 
+  /* W2 carries `details` from the 402 all the way to the persisted ChatError;
+   * the banner has to hand it to the card or the shortfall is lost again. */
+  it('should pass the denial shortfall through to the credits card', () => {
+    vi.mocked(useChatSelector).mockImplementation((selector) =>
+      selector({
+        error: undefined,
+        persistedError: {
+          category: errorCategory.credits,
+          title: 'Credit Limit Reached',
+          message: 'Insufficient Tau credit for this model request.',
+          details: {
+            requiredCreditAtoms: '3084332',
+            availableCreditAtoms: '2960000',
+            routeId: 'openai-gpt-6-astra',
+          },
+        } satisfies ChatErrorPayload,
+      } as unknown as CombinedChatState),
+    );
+    mockRetryAttempt = 0;
+
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<ChatErrorBanner />, {
+      wrapper: ({ children }: { readonly children: ReactNode }) => (
+        <QueryClientProvider client={client}>{children}</QueryClientProvider>
+      ),
+    });
+
+    expect(
+      screen.getByText('Tau paused this turn: 13 more credits needed for openai-gpt-6-astra.'),
+    ).toBeInTheDocument();
+  });
+
+  /* The funded boundary's own 402 copy is credit-denominated and reaches the
+   * banner verbatim — the chat never restates a charge in dollars (B4 R2). */
   it('should render a credit error as warning Resume UI outside the tool-error fallback', async () => {
     const user = userEvent.setup();
-    const creditMessage =
-      'Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.';
+    const creditMessage = 'Insufficient Tau credit for this model request.';
     const creditError: ChatErrorPayload = {
       category: errorCategory.credits,
       title: 'Credit Limit Reached',
@@ -192,10 +241,17 @@ describe('ChatError', () => {
     );
     mockRetryAttempt = 0;
 
-    render(<ChatErrorBanner />);
+    /* `ChatErrorCredits` reads live entitlements to choose its top-up route. */
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<ChatErrorBanner />, {
+      wrapper: ({ children }: { readonly children: ReactNode }) => (
+        <QueryClientProvider client={client}>{children}</QueryClientProvider>
+      ),
+    });
 
     expect(screen.getByText('Credit Limit Reached')).toBeInTheDocument();
     expect(screen.getByText(creditMessage)).toBeInTheDocument();
+    expect(screen.queryByText(/\$/)).not.toBeInTheDocument();
     expect(screen.queryByText('Processing Error')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /retry/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /try again/i })).not.toBeInTheDocument();

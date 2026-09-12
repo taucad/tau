@@ -172,6 +172,43 @@ function createStore(): StoreType {
   return store;
 }
 
+/** A host whose run ended on the one failure a resume is allowed to continue. */
+function refusedAgentHostClient(chatId: string, runId: string): AgentHostClient {
+  return {
+    start: vi.fn(),
+    steer: vi.fn(),
+    cancel: vi.fn(),
+    resume: vi.fn(),
+    resolveInterrupt: vi.fn(),
+    attach: vi.fn(async () => ({
+      cursor: 0,
+      nextCursor: 0,
+      endCursor: 0,
+      events: [],
+      snapshot: {
+        chatId,
+        runId,
+        turnId: 'm_user',
+        state: 'failed',
+        messages: [],
+        failure: {
+          code: 'INSUFFICIENT_CREDIT',
+          message: 'Insufficient Tau credit for this model request.',
+          status: 402,
+          details: {
+            requiredCreditAtoms: '3084332',
+            availableCreditAtoms: '1000000',
+            routeId: 'openai-gpt-6-astra',
+          },
+        },
+      } as const,
+    })),
+    tail: vi.fn(async () => ({ cursor: 0, nextCursor: 0, endCursor: 0, events: [] })),
+    subscribe: vi.fn(() => () => undefined),
+    close: vi.fn(async () => undefined),
+  };
+}
+
 const testRunBody = Object.freeze({
   agent: Object.freeze({
     profile: 'cad',
@@ -579,6 +616,210 @@ describe('ChatSessionStore', () => {
       store.release(chatId);
     });
 
+    /*
+     * The banner's Resume dispatches `continue`. Reattaching only recovers a run
+     * the host is still driving, so a turn the gateway refused at admission — no
+     * credit, rate limit, a dead tool — left nothing to attach to and Resume did
+     * nothing at all. It has to dispatch the turn again instead.
+     */
+    it('re-runs the turn when a browser-placed chat has no resumable run', async () => {
+      const store = createStore();
+      const chatId = 'chat_terminal_run';
+      const session = store.acquire(chatId);
+      const unregister = registerAgentHost(chatId, {
+        projectStorage: async () => {
+          throw new Error('Unused by this dispatch.');
+        },
+        createClient: async () => {
+          throw new Error('Unused by this dispatch.');
+        },
+        markRunId: async () => undefined,
+      });
+
+      session.persistenceActorRef.send({
+        type: 'startRequest',
+        request: { kind: 'continue', body: testRunBody },
+      });
+      await vi.waitFor(() => {
+        expect(harness.created.at(-1)?.regenerate).toHaveBeenCalledOnce();
+      });
+
+      expect(harness.created.at(-1)?.resumeStream).not.toHaveBeenCalled();
+      unregister();
+      store.release(chatId);
+    });
+
+    /*
+     * R9 / Journey 2. The gateway refuses the third call of a tool loop with a
+     * 402: the two calls already settled are the customer's, and the turn ends
+     * at that boundary. Nothing in the failure path may spend them again —
+     * `finalizeInterruptedToolParts` rewrites only a dangling tail, so the
+     * `output-available` parts reach the durable row intact, and Resume
+     * dispatches rather than sitting inert on a terminal host run.
+     *
+     * And the dispatch is a `continue`, not a `regenerate`: a regenerate rewinds
+     * the host history to before the user turn, so the two settled calls would
+     * be dropped and paid for a second time. The host continues the refused run
+     * at the one call it could not fund (`tau-agent-host.ts` `resume`).
+     */
+    it('keeps the tool results a mid-run credit denial already paid for, and continues on Resume', async () => {
+      const chatId = 'chat_credit_denied_midrun';
+      const store = new ChatSessionStore();
+      const deps = createStubDeps();
+      store.setDependencies(deps);
+      const session = store.acquire(chatId);
+      await Promise.resolve();
+      deps.patchChat.mockClear();
+      const hostClient = refusedAgentHostClient(chatId, 'run_credit_denied_midrun');
+      const unregister = registerAgentHost(chatId, {
+        projectStorage: async () => {
+          throw new Error('Unused by this dispatch.');
+        },
+        createClient: async () => hostClient,
+        markRunId: async () => undefined,
+      });
+      const fake = harness.created.at(-1)!;
+      const settledTool = (toolCallId: string, targetFile: string): MyUIMessage['parts'][number] => ({
+        type: 'tool-create_file',
+        toolCallId,
+        state: 'output-available',
+        input: { targetFile, content: '//' },
+        output: {
+          message: '',
+          diffStats: { linesAdded: 1, linesRemoved: 0, originalContent: '', modifiedContent: '//' },
+        },
+      });
+      fake.messages = [
+        { id: 'm_user', role: 'user', metadata: { createdAt: 1 }, parts: [{ type: 'text', text: 'Build it.' }] },
+        {
+          id: 'm_assistant',
+          role: 'assistant',
+          metadata: { createdAt: 2 },
+          parts: [settledTool('tc_first', 'a.scad'), settledTool('tc_second', 'b.scad')],
+        },
+      ];
+
+      session.persistenceActorRef.send({ type: 'startRequest', request: { kind: 'regenerate' } });
+      // The third call's hold is refused; the run fails at that tool boundary.
+      session.persistenceActorRef.send({
+        type: 'requestFinished',
+        messages: [...fake.messages],
+        isAbort: false,
+        isError: true,
+        isDisconnect: false,
+      });
+      await vi.waitFor(() => {
+        expect(deps.patchChat).toHaveBeenCalledWith(chatId, 'messages', expect.anything());
+      });
+      const persistedMessages = deps.patchChat.mock.calls.findLast(([, field]) => field === 'messages')?.[2] as
+        | readonly MyUIMessage[]
+        | undefined;
+      expect(persistedMessages?.at(-1)?.parts.map((part) => (part as { state?: string }).state)).toEqual([
+        'output-available',
+        'output-available',
+      ]);
+      // The card reads its shortfall off the same durable row that kept them.
+      session.persistenceActorRef.send({
+        type: 'setPersistedError',
+        error: {
+          category: 'credits',
+          title: 'Credit Limit Reached',
+          message: 'Add 208.43 more credits to start a turn on GPT-6 Astra.',
+          code: 'INSUFFICIENT_CREDIT',
+          httpStatus: 402,
+          details: { requiredCreditAtoms: '3084332', availableCreditAtoms: '1000000', routeId: 'openai-gpt-6-astra' },
+        },
+      });
+      await vi.waitFor(() => {
+        expect(deps.patchChat).toHaveBeenCalledWith(
+          chatId,
+          'error',
+          expect.objectContaining({ category: 'credits', code: 'INSUFFICIENT_CREDIT' }),
+        );
+      });
+
+      // The tab learns the refused run from the host's own log, exactly as a
+      // reload would; the reattach itself spends nothing.
+      const reattached = await sharedChatTransport.reconnectToStream({ chatId, metadata: undefined });
+      await reattached?.getReader().cancel();
+
+      expect(hostClient.resume).not.toHaveBeenCalled();
+
+      // Resume, once the balance is topped up.
+      session.persistenceActorRef.send({
+        type: 'startRequest',
+        request: { kind: 'continue', body: testRunBody },
+      });
+      await vi.waitFor(() => {
+        expect(fake.resumeStream).toHaveBeenCalledOnce();
+      });
+      expect(fake.resumeStream).toHaveBeenCalledWith({ body: testRunBody });
+      // Never a regenerate: that rewinds the host history past the settled
+      // calls and pays for them twice.
+      expect(fake.regenerate).not.toHaveBeenCalled();
+      // The store never slices the transcript on the way out.
+      expect(fake.messages.at(-1)?.parts).toHaveLength(2);
+
+      unregister();
+      store.release(chatId);
+    });
+
+    it('still reattaches for a chat no browser host is placed on', async () => {
+      const store = createStore();
+      const session = store.acquire('chat_api_placed');
+
+      session.persistenceActorRef.send({
+        type: 'startRequest',
+        request: { kind: 'continue', body: testRunBody },
+      });
+      await vi.waitFor(() => {
+        expect(harness.created.at(-1)?.resumeStream).toHaveBeenCalledOnce();
+      });
+
+      expect(harness.created.at(-1)?.regenerate).not.toHaveBeenCalled();
+      store.release('chat_api_placed');
+    });
+
+    /*
+     * The host resume request is one-shot and only a browser-host stream consumes
+     * it. A `continue` on a chat no host is placed on must not arm it: nothing
+     * clears it on that path, so the next browser-placed stream for the same chat
+     * — a reattach nobody asked for — would inherit it and drive the host's
+     * resume, spending on a turn the user never pressed Resume for.
+     */
+    it('does not arm the host resume from a continue no browser host can consume', async () => {
+      const chatId = 'chat_resume_request_unplaced';
+      const store = createStore();
+      const session = store.acquire(chatId);
+      const fake = harness.created.at(-1)!;
+
+      session.persistenceActorRef.send({
+        type: 'startRequest',
+        request: { kind: 'continue', body: testRunBody },
+      });
+      await vi.waitFor(() => {
+        expect(fake.resumeStream).toHaveBeenCalledOnce();
+      });
+
+      // The same chat later gains a browser host whose run ended on a refusal a
+      // resume could continue. Reattaching it is a read, and must spend nothing.
+      const hostClient = refusedAgentHostClient(chatId, 'run_resume_request_unplaced');
+      const unregister = registerAgentHost(chatId, {
+        projectStorage: async () => {
+          throw new Error('Unused by this reattach.');
+        },
+        createClient: async () => hostClient,
+        markRunId: async () => undefined,
+      });
+      const reattached = await sharedChatTransport.reconnectToStream({ chatId, metadata: undefined });
+      await reattached?.getReader().cancel();
+
+      expect(hostClient.resume).not.toHaveBeenCalled();
+
+      unregister();
+      store.release(chatId);
+    });
+
     it('returns the same session on subsequent acquires for the same chatId', () => {
       const store = createStore();
       const first = store.acquire('chat_a');
@@ -962,7 +1203,7 @@ describe('ChatSessionStore', () => {
       expect(stale).not.toHaveBeenCalled();
     });
 
-    it('subscribeStatus and subscribeUsage notify only their respective chatIds', () => {
+    it('subscribeStatus notifies only its own chatId', () => {
       const store = createStore();
       store.acquire('chat_a');
       store.acquire('chat_b');
@@ -986,30 +1227,6 @@ describe('ChatSessionStore', () => {
 
       expect(statusA).toHaveBeenCalledTimes(1);
       expect(statusB).toHaveBeenCalledTimes(1);
-    });
-
-    it('publishes a zero usage aggregate after the only priced turn is removed', () => {
-      const store = createStore();
-      store.acquire('chat_usage_zero');
-      const fake = harness.created.find((chat) => chat.id === 'chat_usage_zero')!;
-      const usage = vi.fn();
-      store.subscribeUsage('chat_usage_zero', usage);
-      fake.messages = [
-        {
-          id: 'assistant_priced',
-          role: 'assistant',
-          metadata: { createdAt: 1 },
-          parts: [{ type: 'data-usage', data: { totalCost: 0.42 } }],
-        } as unknown as MyUIMessage,
-      ];
-      fake.emitMessagesChange();
-      expect(store.getUsage('chat_usage_zero')?.totalCost).toBe(0.42);
-
-      fake.messages = [];
-      fake.emitMessagesChange();
-
-      expect(store.getUsage('chat_usage_zero')?.totalCost).toBe(0);
-      expect(usage).toHaveBeenCalledTimes(2);
     });
   });
 

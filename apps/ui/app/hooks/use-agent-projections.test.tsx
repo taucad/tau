@@ -233,7 +233,7 @@ describe('buildAgentProjection', () => {
       workspace: 'tau',
       branch: 'main',
       pendingApprovalCount: 0,
-      totalCost: 0,
+      operationIds: [],
       unread: false,
     });
 

@@ -472,7 +472,17 @@ export const hostRunSnapshotSchema = z.strictObject({
   state: z.enum(['admitted', 'running', 'paused', 'completed', 'failed', 'cancelled']),
   messages: z.array(providerMessageSchema),
   failure: z
-    .strictObject({ code: nonEmptyString, message: z.string(), status: z.number().int().optional() })
+    .strictObject({
+      code: nonEmptyString,
+      message: z.string(),
+      status: z.number().int().optional(),
+      /* The refusal's own fields (an `INSUFFICIENT_CREDIT` denial's required
+       * and available atoms). Opaque here: the code owns the shape and the
+       * surface that renders it owns the schema. Without this key the strict
+       * object rejected every snapshot of a credit-refused run, so `attach`
+       * failed on exactly the chats whose banner needed the numbers. */
+      details: z.record(z.string(), z.unknown()).optional(),
+    })
     .optional(),
 });
 

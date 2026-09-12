@@ -1,7 +1,8 @@
 import { z } from 'zod';
 import type { UIMessageChunk } from 'ai';
 import type { AgentLiveEvent, AgentLogEvent } from '@taucad/agent-host';
-import type { MyUIMessage } from '@taucad/chat';
+import type { BillingInvocationStatus, MyUIMessage } from '@taucad/chat';
+import { billingInvocationStatusSchema } from '@taucad/chat';
 import { errorCategoryTitles, httpStatusToCategory } from '@taucad/chat/utils';
 import type { AuthoritativeRevisionFinalization } from '#types/revision.types.js';
 import { isRecord } from '@taucad/utils/schema';
@@ -11,19 +12,23 @@ type AssistantProviderMessage = Extract<ProviderMessage, { readonly role: 'assis
 type UserProviderMessage = Extract<ProviderMessage, { readonly role: 'user' }>;
 type JsonValue = ProviderMessage['content'];
 
-const errorText = (value: JsonValue | undefined, fallback: string): string => {
+const errorText = (value: unknown, fallback: string): string => {
   if (typeof value === 'string') {
     return value;
   }
   if (isRecord(value) && typeof value['message'] === 'string') {
     if (typeof value['code'] === 'string' && typeof value['status'] === 'number') {
       const category = httpStatusToCategory(value['status']);
+      const { details } = value;
       return JSON.stringify({
         category,
         title: errorCategoryTitles[category],
         message: value['message'],
         code: value['code'],
         httpStatus: value['status'],
+        // A denial's structured fields (an `INSUFFICIENT_CREDIT` shortfall, say)
+        // ride the same JSON so the card can name the amount it is short.
+        ...(isRecord(details) ? { details } : {}),
       });
     }
     return value['message'];
@@ -37,18 +42,42 @@ const blockKey = (runId: string, messageId: string, contentIndex: number): strin
 const blockId = (type: 'text-delta' | 'thinking-delta', messageId: string, contentIndex: number): string =>
   `${messageId}:${type === 'text-delta' ? 'text' : 'thinking'}:${String(contentIndex)}`;
 
+/**
+ * The funded-operation identity the harness stamped on a Tau turn.
+ *
+ * `usage.cost.*` is deliberately not read: it is the catalog price the local
+ * model row quotes, and a charge is whatever the account's own receipt says it
+ * was. Carrying the identity instead lets the reader ask the authority (B4 R2).
+ *
+ * @param tauInternal - The durable `tauInternal` metadata marker, when present.
+ * @returns The billing fields of the `data-usage` part, or none.
+ */
+const billingIdentity = (
+  tauInternal: Record<string, unknown> | undefined,
+): { operationId?: string; attemptId?: string; billingStatus?: BillingInvocationStatus } => {
+  if (tauInternal?.['kind'] !== 'billing-invocation') {
+    return {};
+  }
+  const { operationId, attemptId, status } = tauInternal;
+  const billingStatus = billingInvocationStatusSchema.safeParse(status).data;
+  return {
+    ...(typeof operationId === 'string' ? { operationId } : {}),
+    ...(typeof attemptId === 'string' ? { attemptId } : {}),
+    ...(billingStatus === undefined ? {} : { billingStatus }),
+  };
+};
+
 const usageChunks = (message: AssistantProviderMessage): UIMessageChunk[] => {
   const { metadata } = message;
   const usage = metadata?.usage;
   if (!usage) {
     return [];
   }
-  const { cost } = usage;
   const id = `${message.id}:usage`;
   /* Who produced these tokens, from the durable marker rather than from
-   * whatever the composer is selected on now (V6). An external turn's costs are
-   * all zero — Tau did not sell it — so the reader needs the agent's name to
-   * know that the missing price is a fact and not a gap. */
+   * whatever the composer is selected on now (V6). An external turn carries no
+   * Tau operation — Tau did not sell it — so the reader needs the agent's name
+   * to know that the missing charge is a fact and not a gap. */
   const tauInternal = isRecord(metadata.tauInternal) ? metadata.tauInternal : undefined;
   const agent = tauInternal?.['origin'] === 'external' ? tauInternal['agentId'] : undefined;
   return [
@@ -59,17 +88,13 @@ const usageChunks = (message: AssistantProviderMessage): UIMessageChunk[] => {
         type: 'usage',
         id,
         ...(typeof agent === 'string' ? { agent } : {}),
+        ...billingIdentity(tauInternal),
         model: metadata.responseModel ?? metadata.model ?? 'unknown',
         inputTokens: usage.input,
         outputTokens: usage.output,
-        reasoningTokens: usage.reasoning ?? 0,
+        ...(usage.reasoning === undefined ? {} : { reasoningTokens: usage.reasoning }),
         cacheReadTokens: usage.cacheRead,
         cacheWriteTokens: usage.cacheWrite,
-        inputTokensCost: cost.input,
-        outputTokensCost: cost.output,
-        cacheReadTokensCost: cost.cacheRead,
-        cacheWriteTokensCost: cost.cacheWrite,
-        totalCost: cost.total,
       },
     },
   ];

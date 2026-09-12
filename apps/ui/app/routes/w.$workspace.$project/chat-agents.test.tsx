@@ -34,7 +34,7 @@ const projection = (over: Partial<AgentProjection> = {}): AgentProjection => ({
   workspace: 'tau',
   branch: 'fea/bracket-v2',
   pendingApprovalCount: 0,
-  totalCost: 0,
+  operationIds: [],
   unread: false,
   detail: 'Streaming response',
   ...over,

@@ -187,7 +187,7 @@ describe('CadPreviewProvider isolated filesystem contract', () => {
     expect(mockUnmount).not.toHaveBeenCalled();
   });
 
-  it('requests native-code trust placement for a persistent Python project', () => {
+  it('places a persistent Python project on its native kernel', () => {
     const result = render(
       <CadPreviewProvider projectId='proj_python' mainFile='main.py'>
         <div data-testid='child' />

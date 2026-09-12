@@ -24,7 +24,7 @@ function SettingRow({
 }
 
 export function AgentSettings(): React.JSX.Element {
-  const [showModelCost, setShowModelCost] = useCookie(cookieName.chatModelCost, true);
+  const [showCredits, setShowCredits] = useCookie(cookieName.chatModelCost, true);
   const [includeFileSystem, setIncludeFileSystem] = useCookie(cookieName.chatCtxFs, true);
   const [includeActiveFile, setIncludeActiveFile] = useCookie(cookieName.chatCtxActive, true);
   const [includeOpenFiles, setIncludeOpenFiles] = useCookie(cookieName.chatCtxOpen, true);
@@ -39,8 +39,11 @@ export function AgentSettings(): React.JSX.Element {
           <CardDescription>Control what metadata is shown alongside chat messages.</CardDescription>
         </CardHeader>
         <CardContent className='flex flex-col gap-4'>
-          <SettingRow label='Show Model Cost' description='Display token cost per message in the chat history'>
-            <Switch checked={showModelCost} onCheckedChange={setShowModelCost} />
+          <SettingRow
+            label='Show Credits'
+            description='Display the Tau credits charged for each message in the chat history'
+          >
+            <Switch checked={showCredits} onCheckedChange={setShowCredits} />
           </SettingRow>
         </CardContent>
       </Card>

@@ -126,7 +126,13 @@ export const ChatError = memo(function ({ className }: { readonly className?: st
     }
 
     case errorCategory.credits: {
-      return <ChatErrorCredits className={cn('min-w-0', className)} description={parsedError.message} />;
+      return (
+        <ChatErrorCredits
+          className={cn('min-w-0', className)}
+          description={parsedError.message}
+          details={parsedError.details}
+        />
+      );
     }
 
     case errorCategory.rateLimit: {

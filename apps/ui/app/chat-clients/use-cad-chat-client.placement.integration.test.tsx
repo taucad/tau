@@ -135,6 +135,9 @@ vi.mock('#hooks/use-models.js', () => ({
 vi.mock('#hooks/use-project.js', () => ({
   useProject: () => ({ projectId: 'proj_test', mainEntryPath: 'main.ts', geometryUnits: new Map() }),
 }));
+/* The turn-start pre-flight (R9) is proved in `use-credit-preflight.test.tsx` and
+ * `use-cad-chat-client.test.tsx`; this scope funds every turn. */
+vi.mock('#hooks/use-credit-preflight.js', () => ({ useCreditPreflight: () => () => undefined }));
 vi.mock('#hooks/use-file-manager.js', () => {
   const fileManager = () => ({
     workspace: { syncProjectRoots: browserHostHarness.syncProjectRoots },

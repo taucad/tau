@@ -40,7 +40,14 @@ export type AgentProjection = {
   readonly workspace: string;
   readonly branch: string;
   readonly pendingApprovalCount: number;
-  readonly totalCost: number;
+  /**
+   * Funded Tau operations this chat's turns were charged through.
+   *
+   * The projection stays serializable and price-free: the pane reads each
+   * operation's authoritative receipt, so no local catalog multiplication can
+   * reach a user-facing amount (B4 R2).
+   */
+  readonly operationIds: readonly string[];
   readonly unread: boolean;
   readonly detail?: string;
 };
@@ -107,16 +114,17 @@ const lastMessageActivityAt = (messages: readonly MyUIMessage[], fallback: numbe
   return lastActivityAt;
 };
 
-const totalUsageCost = (messages: readonly MyUIMessage[]): number =>
-  messages.reduce(
-    (total, message) =>
-      total +
-      message.parts.reduce(
-        (messageTotal, part) => messageTotal + (part.type === 'data-usage' ? part.data.totalCost : 0),
-        0,
-      ),
-    0,
-  );
+const usageOperationIds = (messages: readonly MyUIMessage[]): string[] => {
+  const ids = new Set<string>();
+  for (const message of messages) {
+    for (const part of message.parts) {
+      if (part.type === 'data-usage' && part.data.operationId !== undefined) {
+        ids.add(part.data.operationId);
+      }
+    }
+  }
+  return [...ids].sort();
+};
 
 const branchForChat = (
   chatId: string,
@@ -235,7 +243,7 @@ export const buildAgentProjection = (input: AgentProjectionInput): AgentProjecti
     workspace: metadata?.workspace ?? defaultWorkspace,
     branch: metadata?.branch ?? branchForChat(chat.id, messages, persistedGraph),
     pendingApprovalCount,
-    totalCost: totalUsageCost(messages),
+    operationIds: usageOperationIds(messages),
     unread: chat.id !== focusedChatId && chat.hasUnreadTurn === true,
     ...(detail === undefined ? {} : { detail }),
   };
@@ -271,7 +279,7 @@ const liveProjectionSnapshot = (store: ChatSessionStore, chatIds: readonly strin
         store.getStatus(chatId),
         readLifecycle(session),
         countPendingApprovals(messages),
-        totalUsageCost(messages),
+        usageOperationIds(messages),
         lastMessageActivityAt(messages, 0),
         persistenceSnapshot.context.activeExecution,
         persistenceSnapshot.context.persistedError?.message,

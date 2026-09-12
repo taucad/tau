@@ -6,6 +6,7 @@ import { Textarea } from '@taucad/ui/components/textarea';
 import { SvgIcon } from '#components/icons/svg-icon.js';
 import { cn } from '@taucad/ui/utils/cn';
 import { menuContentVariants, menuItemVariants } from '@taucad/ui/components/menu.variants';
+import { CreditBalanceChip } from '#components/billing/credit-estimate.js';
 import { ChatAgentModelSelector } from '#components/chat/chat-agent-model-selector.js';
 import { ChatModelSelector } from '#components/chat/chat-model-selector.js';
 import { ChatExecutionSelector, formatChatAgentActivity } from '#components/chat/chat-execution-selector.js';
@@ -402,6 +403,12 @@ export const ChatTextareaMobile = memo(function ({
                         </div>
                       )}
                     </ChatKernelSelector>
+                  ) : null}
+
+                  {/* Available and reserved credits (P5/P6). Tau execution only —
+                   * an external agent's turns are not funded by this balance. */}
+                  {execution.kind === 'tau' ? (
+                    <CreditBalanceChip className={cn(menuItemClassName, 'h-auto w-full justify-start rounded-md')} />
                   ) : null}
 
                   {/* Tool Selector */}

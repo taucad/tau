@@ -10,8 +10,10 @@ import {
   BrowserPlacementChatTransport,
   getBrowserAgentHostRun,
   getHostFinalizedRevisions,
+  isBrowserAgentHostRunResumable,
   registerAgentHost,
   registerAgentHostRunReset,
+  requestBrowserAgentHostResume,
   resolveBrowserAgentHostInterrupt,
 } from '#chat-clients/_internal/browser-agent-host-transport.js';
 import { agentHostTailBatchLimit } from '#workers/agent-host.contract.js';
@@ -532,6 +534,143 @@ describe('BrowserPlacementChatTransport', () => {
     expect(getBrowserAgentHostRun(chatId)).toMatchObject({ runId, state: 'failed', turnId: 'user-reload-failed' });
     expect(markRunId).toHaveBeenCalledWith(runId);
     expect(transport.getBoundRunId(chatId)).toBe(runId);
+    unregister();
+  });
+
+  /*
+   * R9 / Journey 2. A credit refusal never reached the provider, so the run's
+   * history is whole and the host can continue it at the one call it could not
+   * fund. That makes the run resumable — but only when someone asked: a reload
+   * reattaches this chat on its own, and spending the credit the user has just
+   * topped up without being asked is the failure this guard exists to prevent.
+   */
+  it('continues a credit-refused run only when the resume was asked for', async () => {
+    installBrowserGlobals();
+    const chatId = 'chat-refused-credit';
+    const runId = 'run-refused-credit';
+    const base = {
+      version: 1,
+      leaderEpoch: 'leader-refused-credit',
+      recordedAt: '2026-09-01T00:00:01.000Z',
+      runId,
+    } as const;
+    const details = {
+      requiredCreditAtoms: '3084332',
+      availableCreditAtoms: '1000000',
+      routeId: 'openai-gpt-6-astra',
+    };
+    const events = [
+      { ...base, sequence: 1, type: 'run.lifecycle', state: 'admitted' },
+      {
+        ...base,
+        sequence: 2,
+        type: 'message.appended',
+        message: { id: 'user-refused-credit', role: 'user', content: 'Build it.' },
+      },
+      { ...base, sequence: 3, type: 'run.lifecycle', state: 'running' },
+      {
+        ...base,
+        sequence: 4,
+        type: 'run.lifecycle',
+        state: 'failed',
+        detail: {
+          message: 'Insufficient Tau credit for this model request.',
+          code: 'INSUFFICIENT_CREDIT',
+          status: 402,
+          details,
+        },
+      },
+    ] satisfies AgentLogEvent[];
+    const refusedSnapshot = {
+      chatId,
+      runId,
+      turnId: 'user-refused-credit',
+      state: 'failed',
+      messages: [{ id: 'user-refused-credit', role: 'user', content: 'Build it.' }],
+      failure: {
+        code: 'INSUFFICIENT_CREDIT',
+        message: 'Insufficient Tau credit for this model request.',
+        status: 402,
+        details,
+      },
+    } as const;
+    const client = clientFor(chatId, runId, {
+      attach: vi.fn(async () => ({ cursor: 0, nextCursor: 4, endCursor: 4, events, snapshot: refusedSnapshot })),
+      resume: vi.fn(async () => snapshot(chatId, runId)),
+    });
+    const unregister = registerAgentHost(chatId, {
+      projectStorage: async () => ({
+        projectId: 'project-refused-credit',
+        backend: 'opfs',
+        providerBasePath: 'project-refused-credit',
+      }),
+      createClient: async () => client,
+      markRunId: async () => undefined,
+    });
+    const transport = new BrowserPlacementChatTransport();
+
+    // A reload's own reattach: reads the log, spends nothing.
+    await drain((await transport.reconnectToStream({ chatId, metadata: undefined }))!.getReader());
+
+    expect(client.resume).not.toHaveBeenCalled();
+    expect(client.start).not.toHaveBeenCalled();
+    expect(getBrowserAgentHostRun(chatId)).toMatchObject({
+      runId,
+      state: 'failed',
+      failure: { code: 'INSUFFICIENT_CREDIT', details },
+    });
+    // The store's `continue` dispatch answers the Resume the credits card
+    // offers, and reads the same answer before choosing its verb.
+    expect(isBrowserAgentHostRunResumable(chatId)).toBe(true);
+    requestBrowserAgentHostResume(chatId);
+    await drain((await transport.reconnectToStream({ chatId, metadata: undefined }))!.getReader());
+
+    expect(client.resume).toHaveBeenCalledWith(chatId);
+    // The turn is continued, never re-admitted: `start` is what rewinds history.
+    expect(client.start).not.toHaveBeenCalled();
+    // One-shot: the next reattach this caller did not ask for spends nothing.
+    await drain((await transport.reconnectToStream({ chatId, metadata: undefined }))!.getReader());
+
+    expect(client.resume).toHaveBeenCalledTimes(1);
+    unregister();
+  });
+
+  it('leaves a non-retryable failed run unresumable even when a resume was asked for', async () => {
+    installBrowserGlobals();
+    const chatId = 'chat-refused-catalog';
+    const runId = 'run-refused-catalog';
+    const client = clientFor(chatId, runId, {
+      attach: vi.fn(async () => ({
+        cursor: 0,
+        nextCursor: 0,
+        endCursor: 0,
+        events: [],
+        snapshot: {
+          chatId,
+          runId,
+          turnId: 'user-refused-catalog',
+          state: 'failed',
+          messages: [],
+          failure: { code: 'MODEL_NOT_IN_CATALOG', message: 'That model is not in the catalog.', status: 400 },
+        } as const,
+      })),
+    });
+    const unregister = registerAgentHost(chatId, {
+      projectStorage: async () => ({
+        projectId: 'project-refused-catalog',
+        backend: 'opfs',
+        providerBasePath: 'project-refused-catalog',
+      }),
+      createClient: async () => client,
+      markRunId: async () => undefined,
+    });
+    const transport = new BrowserPlacementChatTransport();
+
+    requestBrowserAgentHostResume(chatId);
+    await drain((await transport.reconnectToStream({ chatId, metadata: undefined }))!.getReader());
+
+    expect(client.resume).not.toHaveBeenCalled();
+    expect(isBrowserAgentHostRunResumable(chatId)).toBe(false);
     unregister();
   });
 

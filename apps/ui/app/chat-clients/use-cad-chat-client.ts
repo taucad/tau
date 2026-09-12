@@ -11,6 +11,7 @@ import { messageRole, messageStatus } from '@taucad/chat/constants';
 import { awaitAgentHostAvailability, useCadAgentConfig } from '#hooks/use-cad-agent-config.js';
 import { useActiveChatInstance } from '#chat-clients/_internal/use-active-chat-instance.js';
 import { useChatActions, useChatSelector } from '#hooks/use-chat.js';
+import { useCreditPreflight } from '#hooks/use-credit-preflight.js';
 import { useActiveChatSession } from '#hooks/active-chat-provider.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { extractMimeTypeFromDataUrl } from '#utils/chat.utils.js';
@@ -428,6 +429,7 @@ export const useCadChatClient = (): CadChatClient => {
   const fileManagerRef = fileManager?.fileManagerRef;
   const syncProjectRoots = fileManager?.workspace.syncProjectRoots;
   const { resolveModel } = useModels();
+  const creditPreflight = useCreditPreflight();
   const workspaceAuthority = useOptionalChatWorkspaceAuthority();
   const computeMode = useComputeReuseMode();
   // Always the current resolver: a dispatch composed before `GET /v1/models`
@@ -668,6 +670,12 @@ export const useCadChatClient = (): CadChatClient => {
             { code: 'CHAT_PLACEMENT_UNAVAILABLE' },
           );
         }
+        /* R9: a turn the account cannot fund is refused here, before any
+         * workspace is prepared or admitted, with the same credits payload the
+         * gateway's own 402 would have carried. An unavailable balance or a
+         * route with no published estimate returns silently — the server's
+         * admission stays the authority, and a failed read never blocks a turn. */
+        creditPreflight(turnExecution.model, resolved.name);
       }
       /* V18: the mode is admitted against the *capability* of the host that
        * will write, for Tau and ACP alike. A host with no revision port would
@@ -725,7 +733,7 @@ export const useCadChatClient = (): CadChatClient => {
       await workspaceAuthority.markAdmitted(activeChatId, turnId);
       return prepared.execution;
     },
-    [activeChatId, agent.execution, awaitResolvedModel, projectId, workspaceAuthority],
+    [activeChatId, agent.execution, awaitResolvedModel, creditPreflight, projectId, workspaceAuthority],
   );
 
   /** Surface a dropped dispatch on the same banner the transport errors use. */
@@ -756,7 +764,15 @@ export const useCadChatClient = (): CadChatClient => {
   }, [requestInFlight, surfaceDispatchFailure]);
 
   const withWorkspace = useCallback(
-    (turnId: string | undefined, operation: (execution: ChatExecutionTarget) => void) => {
+    (
+      turnId: string | undefined,
+      operation: (execution: ChatExecutionTarget) => void,
+      /* The execution this dispatch will actually run, when it is not the live
+       * selection — "retry with a different model" is the one verb that
+       * overrides it. Admission has to see the same row the body names, or the
+       * turn is pre-flighted and wire-checked against a model it never runs. */
+      turnExecution?: CadAgentExecution,
+    ) => {
       // A Tau Host turn needs no browser workspace authority; every other Tau
       // turn does, and dispatching without one would compose a body naming a
       // workspace no claim carries.
@@ -771,7 +787,7 @@ export const useCadChatClient = (): CadChatClient => {
       preparing.current = true;
       const runPreparedOperation = async (): Promise<void> => {
         try {
-          operation(await admitWorkspace(turnId));
+          operation(await admitWorkspace(turnId, turnExecution ?? agent.execution));
         } catch (error) {
           surfaceDispatchFailure(error);
         } finally {
@@ -917,24 +933,28 @@ export const useCadChatClient = (): CadChatClient => {
       // snapshot, contextPayload) verbatim. Without this branch, retries
       // would silently fall through to the active model and the
       // model-selector dropdown would be a no-op (R10/t17).
-      withWorkspace(userTurnIdAtOrBefore(messages, messageId), (execution) => {
-        const requestAgent = modelId ? { ...agent, execution: withExecutionModel(agent.execution, modelId) } : agent;
-        const overrideBody = createRunBody({
-          agent: requestAgent,
-          projectId,
-          execution,
-          browserHost: hostAdmission({
+      const requestAgent = modelId ? { ...agent, execution: withExecutionModel(agent.execution, modelId) } : agent;
+      withWorkspace(
+        userTurnIdAtOrBefore(messages, messageId),
+        (execution) => {
+          const overrideBody = createRunBody({
             agent: requestAgent,
-            chatId: activeChatId,
-            resolveModel: resolveModelRef.current,
-            trigger: {
-              trigger: 'retry',
-              retainedMessageIds: retainedMessageIdsBeforeTurn(messages, messageId),
-            },
-          }),
-        });
-        actions.retryMessage(messageId, { body: overrideBody });
-      });
+            projectId,
+            execution,
+            browserHost: hostAdmission({
+              agent: requestAgent,
+              chatId: activeChatId,
+              resolveModel: resolveModelRef.current,
+              trigger: {
+                trigger: 'retry',
+                retainedMessageIds: retainedMessageIdsBeforeTurn(messages, messageId),
+              },
+            }),
+          });
+          actions.retryMessage(messageId, { body: overrideBody });
+        },
+        requestAgent.execution,
+      );
     },
     [actions, activeChatId, agent, messages, projectId, refuseWhileBusy, resolveModel, withWorkspace],
   );

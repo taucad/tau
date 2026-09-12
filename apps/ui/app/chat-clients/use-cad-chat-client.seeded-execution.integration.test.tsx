@@ -126,6 +126,9 @@ vi.mock('#hooks/use-project.js', () => ({
 // Absent file manager: the browser-host registration effect returns early, so
 // this scope never builds a worker-backed host client.
 vi.mock('#hooks/use-file-manager.js', () => ({ useOptionalFileManager: () => undefined }));
+/* The turn-start pre-flight (R9) is proved in `use-credit-preflight.test.tsx` and
+ * `use-cad-chat-client.test.tsx`; this scope funds every turn. */
+vi.mock('#hooks/use-credit-preflight.js', () => ({ useCreditPreflight: () => () => undefined }));
 vi.mock('#hooks/use-draft-image-error-toast.js', () => ({ useDraftImageErrorToast: () => undefined }));
 vi.mock('#providers/chat-workspace-authority-provider.js', () => ({
   useOptionalChatWorkspaceAuthority: () => ({

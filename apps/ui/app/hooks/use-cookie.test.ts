@@ -5,7 +5,7 @@
  */
 import * as Cookies from 'es-cookie';
 import { afterEach, expect, it, vi } from 'vitest';
-import { store } from '#hooks/use-cookie.js';
+import { readPreferenceCookies, store } from '#hooks/use-cookie.js';
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -44,4 +44,28 @@ it('removes a desktop preference', () => {
 
   expect(globalThis.localStorage.getItem('tau-sidebar-op')).toBeNull();
   expect(store.get('tau-sidebar-op')).toBeUndefined();
+});
+
+/**
+ * B5 R2: the root loader used to serialise the whole `Cookie` header into the
+ * document. The prerendered offline shell is cached, so only named preferences
+ * may cross that boundary.
+ */
+it('projects named UI preferences and drops everything else', () => {
+  const projected = readPreferenceCookies(
+    'tau-cad-kernel=%22openscad%22; tau-sidebar-op=true; better-auth.session_token=secret-session; tau-theme=%22dark%22; unrelated=1',
+  );
+
+  expect(projected).toStrictEqual({ 'tau-cad-kernel': '"openscad"', 'tau-sidebar-op': 'true' });
+});
+
+it('never projects an authentication cookie, however it is named', () => {
+  const projected = readPreferenceCookies('__Secure-tau.session=abc; tau-session=abc; tau_session=abc');
+
+  expect(Object.keys(projected)).toStrictEqual([]);
+});
+
+it('returns an empty projection when the request has no cookies', () => {
+  expect(readPreferenceCookies(undefined)).toStrictEqual({});
+  expect(readPreferenceCookies('')).toStrictEqual({});
 });

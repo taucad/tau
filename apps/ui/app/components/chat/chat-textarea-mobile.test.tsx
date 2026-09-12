@@ -30,6 +30,11 @@ vi.mock('#components/chat/chat-model-selector.js', () => ({
   ),
 }));
 
+// The chip has its own suite; the drawer only has to mount it.
+vi.mock('#components/billing/credit-estimate.js', () => ({
+  CreditBalanceChip: () => <div data-testid='credit-balance-chip' />,
+}));
+
 vi.mock('#components/chat/chat-kernel-selector.js', () => ({
   ChatKernelSelector: ({
     children,
@@ -196,6 +201,11 @@ describe('ChatTextareaMobile — chat-scoped kernel resolution', () => {
     renderMobile();
     expect(screen.getAllByText('JSCAD').length).toBeGreaterThan(0);
     expect(screen.queryByText('OpenSCAD')).toBeNull();
+  });
+
+  it('offers the credit balance chip inside the options drawer', () => {
+    renderMobile();
+    expect(screen.getByTestId('credit-balance-chip')).toBeInTheDocument();
   });
 
   it('names the options trigger and renders location inside Settings', () => {

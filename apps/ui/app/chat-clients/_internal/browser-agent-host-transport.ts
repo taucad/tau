@@ -20,6 +20,7 @@ import {
 } from '#services/agent-host-event-projection.js';
 import type { AuthoritativeRevisionFinalization } from '#types/revision.types.js';
 import { Topic } from '@taucad/events';
+import { isResumableRunFailure } from '@taucad/agent-host';
 import type { MyUIMessage } from '@taucad/chat';
 
 type AgentLogEvent = Parameters<Parameters<AgentHostClient['subscribe']>[0]>[1];
@@ -37,6 +38,8 @@ export type BrowserAgentHostRun = Readonly<{
   eventCount: number;
   turnId?: string;
   userMessage?: MyUIMessage;
+  /** The typed refusal a failed run ended on, when the host recorded one. */
+  failure?: HostRunSnapshot['failure'];
 }>;
 
 export type BrowserAgentHostRegistration = Readonly<{
@@ -52,6 +55,8 @@ const browserRuns = new Map<string, BrowserAgentHostRun>();
 const boundRunIds = new Map<string, string>();
 const activeClients = new Map<string, { readonly client: AgentHostClient; readonly runId: string }>();
 const clientSettlements = new Map<string, Promise<void>>();
+/** Chats whose next reattach may drive the host's own resume. @see requestBrowserAgentHostResume */
+const requestedResumes = new Set<string>();
 
 /**
  * Revisions a *host* recorded, by workspace and revision.
@@ -106,6 +111,51 @@ const recordHostFinalizedRevision = (chatId: string, event: AgentLogEvent | Agen
 };
 
 export const getBrowserAgentHostRun = (chatId: string): BrowserAgentHostRun | undefined => browserRuns.get(chatId);
+
+/**
+ * Whether this chat's turns are placed on a browser-hosted agent at all.
+ *
+ * Distinguishes "no run to reattach to" from "this placement never registers
+ * one", which the two answers below cannot tell apart on their own.
+ */
+export const isBrowserAgentHostPlaced = (chatId: string): boolean => registrations.has(chatId);
+
+/**
+ * Whether a reattach could still pick this chat's run back up.
+ *
+ * A reattach replays the log and stops where the run stopped, so a chat whose
+ * run entry settlement has already retired is unrecoverable by resuming — the
+ * turn has to be dispatched afresh instead. A terminal run is the same, with
+ * one exception: a run the gateway *refused* (no credit) never reached the
+ * provider, so its history is whole and the host can continue it at the one
+ * call it could not fund. Regenerating that instead would rewind the turn and
+ * pay a second time for tool work the customer already paid for.
+ */
+export const isBrowserAgentHostRunResumable = (chatId: string): boolean => {
+  const run = browserRuns.get(chatId);
+  return run !== undefined && (!terminal(run.state) || refusedResumably(chatId));
+};
+
+/** Whether the run this chat ended on stopped on a refusal a resume can continue. */
+const refusedResumably = (chatId: string): boolean => {
+  const run = browserRuns.get(chatId);
+  return run?.state === 'failed' && isResumableRunFailure(run.failure?.code);
+};
+
+/**
+ * Let the next reattach of this chat drive the host's own resume.
+ *
+ * Reattaching is otherwise a read: reload discovery and the host-registration
+ * effect both call `resumeStream` on their own, and a page refresh must never
+ * spend the credit the user has just topped up without being asked. So the
+ * *dispatch* says the continuation was asked for, and the transport still only
+ * acts on it when the run actually stopped on a refusal it can retry.
+ *
+ * One-shot, consumed by the stream the caller is about to open.
+ */
+export const requestBrowserAgentHostResume = (chatId: string): void => {
+  requestedResumes.add(chatId);
+};
 
 const setBrowserAgentHostRun = (chatId: string, run: BrowserAgentHostRun): void => {
   browserRuns.set(chatId, run);
@@ -398,6 +448,9 @@ const createHostStream = <Message extends UIMessage>(input: {
     announceRun = undefined;
     once?.(resolved, events);
   };
+  /* Consumed the moment the stream is created, so a later reattach this caller
+   * did not ask for never inherits it. @see requestBrowserAgentHostResume */
+  const driveResume = requestedResumes.delete(input.chatId);
   const priorSettlement = clientSettlements.get(input.chatId);
   const settlement = Promise.withResolvers<void>();
   clientSettlements.set(input.chatId, settlement.promise);
@@ -423,6 +476,7 @@ const createHostStream = <Message extends UIMessage>(input: {
     let state: BrowserRunState = 'admitted';
     let turnId: string | undefined;
     let durableUserMessage: MyUIMessage | undefined;
+    let failure: HostRunSnapshot['failure'];
     let projection = Promise.resolve();
     const seen = new Set<string>();
     const streamedBlocks = new Set<string>();
@@ -437,6 +491,7 @@ const createHostStream = <Message extends UIMessage>(input: {
         eventCount,
         ...(turnId === undefined ? {} : { turnId }),
         ...(durableUserMessage === undefined ? {} : { userMessage: durableUserMessage }),
+        ...(failure === undefined ? {} : { failure }),
       });
     };
     const enqueueChunks = async (chunks: readonly UIMessageChunk[]): Promise<void> => {
@@ -525,6 +580,7 @@ const createHostStream = <Message extends UIMessage>(input: {
       }
       state = snapshot.state;
       turnId = snapshot.turnId;
+      failure = snapshot.failure;
       const snapshotUser =
         snapshot.messages.find(
           (message): message is UserProviderMessage => message.role === 'user' && message.id === snapshot.turnId,
@@ -622,6 +678,19 @@ const createHostStream = <Message extends UIMessage>(input: {
         } else {
           reconcileSnapshot(snapshot);
         }
+      } else if (driveResume && refusedResumably(input.chatId)) {
+        // The turn the gateway refused, continued at the call it could not
+        // fund. The host owns that continuation — it reattaches the session
+        // from its own durable log — so the tool results already paid for are
+        // replayed rather than run again, and its events arrive on the
+        // subscription this stream is already writing.
+        const operation = client.resume(input.chatId);
+        if (cancelled) {
+          cancelRun();
+        }
+        const snapshot = await operation;
+        await projection;
+        reconcileSnapshot(snapshot);
       }
       if (!terminal(state) && !cancelled) {
         await terminalEvent.promise;

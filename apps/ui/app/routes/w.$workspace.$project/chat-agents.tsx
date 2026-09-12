@@ -6,10 +6,14 @@ import type { ProjectSlugs } from '#utils/project-url.utils.js';
 import { projectChatUrl } from '#utils/project-url.utils.js';
 import { cn } from '@taucad/ui/utils/cn';
 import { formatRelativeTime } from '#utils/date.utils.js';
-import { formatCurrency } from '#utils/currency.utils.js';
 import { useProject } from '#hooks/use-project.js';
 import { useProjectSlugs } from '#hooks/use-project-slug-route.js';
 import { useAgentProjections } from '#hooks/use-agent-projections.js';
+import {
+  formatReceiptTotal,
+  sumReceiptCredits,
+  useReceiptCredits,
+} from '#routes/w.$workspace.$project/chat-message-data-usage.js';
 import type { AgentProjection, AgentProjectionMetadata, AgentProjectionState } from '#hooks/use-agent-projections.js';
 import { SvgIcon } from '#components/icons/svg-icon.js';
 import { Badge } from '@taucad/ui/components/badge';
@@ -208,6 +212,17 @@ const AgentRow = ({
   );
 };
 
+/** Credits this chat was actually charged, read from its operations' receipts. */
+const AgentCredits = ({ operationIds }: { readonly operationIds: readonly string[] }): React.JSX.Element => {
+  const credits = useReceiptCredits(operationIds);
+  const summary = formatReceiptTotal(sumReceiptCredits(operationIds, credits));
+  return (
+    <span aria-label={`Tau credits: ${summary}`} className='ml-auto shrink-0 font-mono'>
+      {summary}
+    </span>
+  );
+};
+
 const AgentRowContent = ({ agent }: { readonly agent: AgentProjection }): React.JSX.Element => {
   const state = statePresentation[agent.state];
   const StateIcon = state.icon;
@@ -282,11 +297,7 @@ const AgentRowContent = ({ agent }: { readonly agent: AgentProjection }): React.
                 {agent.pendingApprovalCount > 1 ? ` · ${agent.pendingApprovalCount}` : null}
               </span>
             ) : null}
-            {agent.totalCost > 0 ? (
-              <span className='ml-auto shrink-0 font-mono'>
-                {formatCurrency(agent.totalCost, { significantFigures: 2 })}
-              </span>
-            ) : null}
+            {agent.operationIds.length > 0 ? <AgentCredits operationIds={agent.operationIds} /> : null}
           </div>
         </div>
       </div>

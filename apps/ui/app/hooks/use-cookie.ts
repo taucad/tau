@@ -6,9 +6,41 @@ import type { loader } from '#root.js';
 import { metaConfig } from '#constants/meta.constants.js';
 import { isFunction } from '#utils/function.utils.js';
 import { isDesktopTarget } from '#lib/build-target.js';
+import { cookieName as cookieNames } from '#constants/cookie.constants.js';
 import type { CookieName } from '#constants/cookie.constants.js';
 
 type Listener = () => void;
+
+/** Prefixed names of every UI preference this hook can read (B5 R2 allowlist). */
+const preferenceCookieNames: ReadonlySet<string> = new Set(
+  Object.values(cookieNames).map((name) => `${metaConfig.cookiePrefix}${name}`),
+);
+
+/** Named UI preferences projected from a request `Cookie` header. */
+export type PreferenceCookies = Readonly<Record<string, string>>;
+
+/**
+ * Project a request `Cookie` header down to the named UI preferences the SSR
+ * render needs.
+ *
+ * The root loader used to serialise the whole header into page source and
+ * loader data, which put every cookie the origin receives — session and
+ * authentication material included — into a document that B5 R3 then caches.
+ * Only the names declared in `cookie.constants.ts` survive this projection, so
+ * a prerendered or cached document can never carry account material.
+ *
+ * @param header - Raw `Cookie` request header, or `undefined` when absent.
+ * @returns Allowlisted cookie values keyed by their prefixed cookie name.
+ */
+export const readPreferenceCookies = (header: string | undefined): PreferenceCookies => {
+  const projected: Record<string, string> = {};
+  for (const [name, value] of Object.entries(Cookies.parse(header ?? ''))) {
+    if (preferenceCookieNames.has(name)) {
+      projected[name] = value;
+    }
+  }
+  return projected;
+};
 
 /**
  * `app://` is not a cookieable scheme: Chromium drops every write with
@@ -142,8 +174,8 @@ export const useCookie = <T>(name: CookieName, defaultValue: T) => {
           return cookieValue;
         }
 
-        // On server, parse from route data
-        const serverCookie = Cookies.parse(data?.cookie ?? '')[cookieName];
+        // On server, read the allowlisted preference projected by the root loader
+        const serverCookie = data?.cookies[cookieName];
         if (serverCookie === undefined) {
           // If the cookie value is undefined, return the default value
           return defaultValue;
@@ -161,7 +193,7 @@ export const useCookie = <T>(name: CookieName, defaultValue: T) => {
         store.remove(cookieName);
       },
     ],
-    [cookieName, data?.cookie, defaultValue],
+    [cookieName, data?.cookies, defaultValue],
   );
 
   const value = useSyncExternalStore((listener) => store.subscribe(cookieName, listener), selector, selector);

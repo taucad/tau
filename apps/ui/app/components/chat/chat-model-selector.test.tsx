@@ -45,8 +45,17 @@ vi.mock('#hooks/active-chat-provider.js', () => ({
   useChatComposer: () => useChatComposerMock(),
 }));
 
+const useKeybindingMock = vi.hoisted(() => vi.fn(() => ({ formattedKeyCombination: '' })));
 vi.mock('#hooks/use-keyboard.js', () => ({
-  useKeybinding: () => ({ formattedKeyCombination: '' }),
+  useKeybinding: useKeybindingMock,
+}));
+
+// The affordance hook is exercised by its own suite; here it only has to place
+// the estimate, the turns-left copy and the below-one-turn warning on the row.
+const affordanceForMock = vi.hoisted(() => vi.fn());
+vi.mock('#components/billing/credit-estimate.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  useCreditAffordance: () => affordanceForMock,
 }));
 
 const openSettingsDialogMock = vi.fn();
@@ -85,6 +94,20 @@ const modelCatalogue: Model[] = [
     description: '',
     provider: { id: 'xai', name: 'xAI' },
     details: { cost: stubCost, family: 'grok' },
+  } as unknown as Model,
+  {
+    id: 'openai-gpt-6-astra',
+    name: 'Astra',
+    description: '',
+    provider: { id: 'openai', name: 'OpenAI' },
+    details: { cost: { ...stubCost, outputTokens: 50 }, family: 'gpt' },
+  } as unknown as Model,
+  {
+    id: 'anthropic-claude-sonnet-5',
+    name: 'Sonnet 5',
+    description: '',
+    provider: { id: 'anthropic', name: 'Anthropic' },
+    details: { cost: { ...stubCost, outputTokens: 10 }, family: 'claude' },
   } as unknown as Model,
   {
     id: 'together-kimi-k3',
@@ -173,6 +196,8 @@ describe('ChatModelSelector — chat-scoped read + dual-write', () => {
     capturedComboBox.onSelect = undefined;
     capturedComboBox.renderLabel = undefined;
     capturedComboBox.value = undefined;
+    affordanceForMock.mockReturnValue(undefined);
+    useKeybindingMock.mockReturnValue({ formattedKeyCombination: '' });
   });
 
   it('renders the selected model from useChatComposer().model (not useModels)', () => {
@@ -249,5 +274,82 @@ describe('ChatModelSelector — chat-scoped read + dual-write', () => {
     render(label);
 
     expect(screen.getAllByTestId('svg-icon').map((icon) => icon.textContent)).toContain('kimi');
+  });
+});
+
+describe('ChatModelSelector — spend tiers and per-turn estimates', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    chatModelState.current = stubModel;
+    affordanceForMock.mockReturnValue(undefined);
+    useKeybindingMock.mockReturnValue({ formattedKeyCombination: '' });
+  });
+
+  const renderLabelFor = (modelId: string): void => {
+    renderSelector();
+    const model = capturedComboBox.groupedItems?.flatMap((group) => group.items).find((item) => item.id === modelId);
+    if (!model) {
+      throw new Error(`Expected ${modelId} in selector items`);
+    }
+    const label = capturedComboBox.renderLabel?.(model, undefined);
+    if (!label) {
+      throw new Error(`Expected a label renderer for ${modelId}`);
+    }
+    render(label);
+  };
+
+  it('groups by spend tier, cheapest first, instead of by provider', () => {
+    renderSelector();
+
+    expect(capturedComboBox.groupedItems?.map((group) => group.name)).toEqual(['Fast', 'Balanced', 'Frontier']);
+    const tierOf = (modelId: string): string | undefined =>
+      capturedComboBox.groupedItems?.find((group) => group.items.some((item) => item.id === modelId))?.name;
+    expect(tierOf('openai-gpt-6-astra')).toBe('Frontier');
+    expect(tierOf('anthropic-claude-sonnet-5')).toBe('Balanced');
+    expect(tierOf('cookie-model')).toBe('Fast');
+  });
+
+  it('shows the per-turn credit estimate on the row and turns left in its details', () => {
+    affordanceForMock.mockReturnValue({ credits: '308.43', turns: 9 });
+    renderLabelFor('openai-gpt-6-astra');
+
+    // The row carries the bare estimate; the hover card spells out the turns.
+    expect(screen.getAllByText(/≈ 308\.43 credits/)).toHaveLength(2);
+    expect(screen.getByText('≈ 308.43 credits per turn · about 9 turns left')).toBeInTheDocument();
+  });
+
+  it('warns but keeps a route the balance cannot cover for one turn selectable', () => {
+    affordanceForMock.mockReturnValue({ credits: '308.43', turns: 0 });
+    renderLabelFor('openai-gpt-6-astra');
+
+    expect(screen.getByText(/does not cover one turn/i)).toBeInTheDocument();
+
+    // P1: any balance buys any tier — the warned route still selects.
+    capturedComboBox.onSelect?.('openai-gpt-6-astra');
+    expect(setActiveModel).toHaveBeenCalledWith('openai-gpt-6-astra');
+  });
+
+  it('omits the turns-left clause while the balance is unreadable', () => {
+    affordanceForMock.mockReturnValue({ credits: '6.59', turns: undefined });
+    renderLabelFor('openai-gpt-6-astra');
+
+    expect(screen.getByText('≈ 6.59 credits per turn')).toBeInTheDocument();
+    expect(screen.queryByText(/turns left/)).not.toBeInTheDocument();
+  });
+
+  it('renders no estimate at all when the API publishes none for the route', () => {
+    renderLabelFor('cookie-model');
+
+    expect(screen.queryByText(/credits/i)).not.toBeInTheDocument();
+  });
+
+  it('leaves the open shortcut to the composer when a second picker opts out', () => {
+    render(
+      <ChatModelSelector enableShortcut={false}>
+        {({ selectedModel }) => <span>{selectedModel.id}</span>}
+      </ChatModelSelector>,
+    );
+
+    expect(useKeybindingMock).toHaveBeenCalledWith(expect.anything(), expect.any(Function), { enabled: false });
   });
 });

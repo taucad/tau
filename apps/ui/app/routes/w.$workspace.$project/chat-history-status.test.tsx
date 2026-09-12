@@ -1,6 +1,9 @@
 // @vitest-environment jsdom
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import type { ReactNode } from 'react';
+import { BillingSessionProvider } from '@taucad/billing/hooks/billing-session';
 
 // Chat-history-status must render the model badge from the chat-scoped
 // `Chat.activeExecution` (via `useChatSelector(state => state.activeExecution)`) —
@@ -66,6 +69,37 @@ vi.mock('#components/icons/svg-icon.js', () => ({
 
 const { ChatHistoryStatus } = await import('#routes/w.$workspace.$project/chat-history-status.js');
 
+const usagePart = (operationId: string) => ({
+  type: 'data-usage',
+  data: {
+    type: 'usage',
+    id: operationId,
+    model: 'm',
+    inputTokens: 1,
+    outputTokens: 1,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    operationId,
+  },
+});
+
+function renderStatus(): void {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const wrapper = ({ children }: { readonly children: ReactNode }) => (
+    <QueryClientProvider client={client}>
+      <BillingSessionProvider value={{ apiBaseUrl: 'https://api.example', userId: 'user', environment: 'development' }}>
+        {children}
+      </BillingSessionProvider>
+    </QueryClientProvider>
+  );
+  render(<ChatHistoryStatus />, { wrapper });
+}
+
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
+
 describe('ChatHistoryStatus — chat-scoped model badge', () => {
   beforeEach(() => {
     chatSelectorState.activeExecution = { kind: 'tau', model: 'manifold-model' };
@@ -76,7 +110,7 @@ describe('ChatHistoryStatus — chat-scoped model badge', () => {
     chatSelectorState.activeExecution = { kind: 'tau', model: 'pinned-model' };
     chatSelectorState.messages = [];
 
-    render(<ChatHistoryStatus />);
+    renderStatus();
     expect(screen.getByText('PINNED-MODEL')).toBeTruthy();
   });
 
@@ -89,7 +123,92 @@ describe('ChatHistoryStatus — chat-scoped model badge', () => {
       { metadata: { model: 'should-not-be-displayed' }, parts: [] },
     ];
 
-    render(<ChatHistoryStatus />);
+    renderStatus();
     expect(screen.queryByText('SHOULD-NOT-BE-DISPLAYED')).toBeNull();
+  });
+});
+
+/* B4 R2/R3: the footer total is the sum of the chat's resolved receipts with an
+ * explicit pending note — never a locally multiplied figure. */
+describe('ChatHistoryStatus — receipt credit footer', () => {
+  const receipt = {
+    schemaVersion: 1,
+    environment: 'development',
+    ownerId: 'user',
+    subjectId: 'account',
+    snapshotRevision: '9',
+    asOf: '2026-09-12T00:00:00.000Z',
+  };
+
+  beforeEach(() => {
+    chatSelectorState.activeExecution = { kind: 'tau', model: 'manifold-model' };
+    chatSelectorState.messages = [{ metadata: {}, parts: [usagePart('op_1'), usagePart('op_2')] }];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: string) =>
+        Promise.resolve(
+          input.endsWith('op_1')
+            ? {
+                ok: true,
+                json: async () => ({
+                  ...receipt,
+                  state: 'terminal',
+                  operationId: 'op_1',
+                  receipt: {
+                    schemaVersion: 1,
+                    environment: 'development',
+                    ownerId: 'user',
+                    subjectId: 'account',
+                    kind: 'base',
+                    operationId: 'op_1',
+                    baseTransactionId: 'txn-1',
+                    terminalRevision: '9',
+                    policyVersion: 'policy-1',
+                    activationId: 'activation-1',
+                    meterContractId: 'meter-1',
+                    category: 'llm',
+                    model: { id: 'm', displayName: null, providerId: null },
+                    activity: { kind: 'agent', projectHint: null, chatHint: null, parentAttemptKey: null },
+                    historyVersion: 1,
+                    admittedAt: receipt.asOf,
+                    dispatchIntentAt: receipt.asOf,
+                    usageOccurredAt: receipt.asOf,
+                    evidenceOccurredAt: receipt.asOf,
+                    timingStatus: 'dispatch_intent',
+                    resolvedAt: receipt.asOf,
+                    executionStatus: 'succeeded',
+                    customerState: 'settled',
+                    authorizedMaxCreditAtoms: '99999',
+                    chargedCreditAtoms: '12345',
+                    accountDeltaCreditAtoms: '-12345',
+                    meteringStatus: 'complete',
+                    meterItems: [],
+                    tokens: {
+                      status: 'complete',
+                      uncachedInput: '1',
+                      cacheRead: '0',
+                      cacheWrite: '0',
+                      inputTotal: '1',
+                      output: '1',
+                      reasoning: '0',
+                    },
+                  },
+                  correctionTotalCreditAtoms: '0',
+                  corrections: { items: [], nextCursor: null, complete: true },
+                }),
+              }
+            : { ok: false, status: 503 },
+        ),
+      ),
+    );
+  });
+
+  it('sums settled receipts and names the unresolved ones', async () => {
+    renderStatus();
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Tau credits: 1.23 · 1 pending')).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/\$/)).not.toBeInTheDocument();
   });
 });

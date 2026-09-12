@@ -12,7 +12,7 @@ import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
 import type { cadMachine } from '#machines/cad.machine.js';
 import type { graphicsMachine } from '#machines/graphics.machine.js';
 import { cn } from '@taucad/ui/utils/cn';
-import { menuItemLayoutClass, menuItemVariants } from '@taucad/ui/components/menu.variants';
+import { menuGroupHeadingClass, menuItemLayoutClass, menuItemVariants } from '@taucad/ui/components/menu.variants';
 import type { DraftImageOptions } from '#hooks/use-chat.js';
 import { useHeadlessImageService } from '#providers/headless-image-provider.js';
 import { captureCadImages, captureFilesToDataUrls } from '#services/headless-capture.js';
@@ -365,7 +365,7 @@ ${error.stack ? `\n\`\`\`\n${error.stack}\n\`\`\`` : ''}`;
       <div className={cn('max-h-64 overflow-y-auto', className)}>
         {filteredGroupedItems.map((group) => (
           <div key={group.name}>
-            <div className='px-2 py-1.5 text-xs font-medium text-muted-foreground'>{group.name}</div>
+            <div className={menuGroupHeadingClass}>{group.name}</div>
             {group.items.map((item) => {
               const isSelected = selectedIndex === currentFlatIndex && !item.disabled;
               const itemFlatIndex = currentFlatIndex;

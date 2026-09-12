@@ -56,6 +56,9 @@ vi.mock('#hooks/chat-session-store-provider.js', () => ({
   useChatSessionStore: () => ({ setLatestAgentBody: vi.fn() }),
 }));
 vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ projectId: 'proj_integration' }) }));
+/* The turn-start pre-flight (R9) is proved in `use-credit-preflight.test.tsx` and
+ * `use-cad-chat-client.test.tsx`; this scope funds every turn. */
+vi.mock('#hooks/use-credit-preflight.js', () => ({ useCreditPreflight: () => () => undefined }));
 vi.mock('#providers/chat-workspace-authority-provider.js', () => ({
   useOptionalChatWorkspaceAuthority: () => ({
     get: () => ({

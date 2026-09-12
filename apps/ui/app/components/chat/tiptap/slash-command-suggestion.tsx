@@ -7,7 +7,7 @@ import type { EditorState } from '@tiptap/pm/state';
 import { Blocks, Zap } from 'lucide-react';
 import { cn } from '@taucad/ui/utils/cn';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@taucad/ui/components/hover-card';
-import { menuContentVariants, menuItemVariants } from '@taucad/ui/components/menu.variants';
+import { menuContentVariants, menuGroupHeadingClass, menuItemVariants } from '@taucad/ui/components/menu.variants';
 import type {
   SlashCommandItem,
   SuggestionPopupState,
@@ -313,7 +313,7 @@ export const SlashCommandDropdown = memo(function SlashCommandDropdown({
             const GroupIcon = groupIcons[groupName] ?? Zap;
             return (
               <div key={groupName} className='flex flex-col gap-0.5'>
-                <div className='flex items-center gap-1.5 px-2.25 py-1 text-xs font-medium text-muted-foreground'>
+                <div className={cn(menuGroupHeadingClass, 'flex items-center gap-1.5 px-2.25')}>
                   <GroupIcon className='size-3 shrink-0' />
                   {groupName}
                 </div>

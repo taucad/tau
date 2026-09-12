@@ -1,7 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { constants } from 'node:fs';
-import { access, link, mkdir, realpath, rm, stat } from 'node:fs/promises';
-import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { mkdir, realpath, stat } from 'node:fs/promises';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { z } from 'zod';
 import {
   ImmutableRevisionTree,
@@ -23,8 +22,6 @@ import { NativeGitError } from '#native-git.types.js';
 import type {
   BindNativeGitWorkspaceInput,
   CommitNativeGitWorkspaceInput,
-  CreateNativeGitBundleInput,
-  FetchNativeGitBundleInput,
   GitObjectId,
   MergeNativeGitRevisionsInput,
   NativeGitAdapter,
@@ -99,16 +96,31 @@ const transportValueSchema = z
   .string()
   .min(1)
   .refine((value) => !value.startsWith('-') && !hasControlCharacter(value));
-const isManagedRef = (ref: string): boolean => ref === 'refs/tau' || ref.startsWith('refs/tau/');
+/**
+ * The `refs/tau/*` namespaces that are host-local and never transport.
+ *
+ * `refs/tau/{chats,evidence,artifacts}` are deliberately absent: they are the
+ * records the design pushes (D14, A15, A30), and a guard over the whole
+ * namespace refused exactly them (review 3 F13).
+ */
+const hostLocalRefPrefixes: readonly string[] = Object.freeze([
+  'refs/tau/owners',
+  'refs/tau/workspaces',
+  'refs/tau/revisions',
+  'refs/tau/transactions',
+  'refs/tau/head',
+]);
+const isManagedRef = (ref: string): boolean =>
+  hostLocalRefPrefixes.some((prefix) => ref === prefix || ref.startsWith(`${prefix}/`));
 const refPatternIntersectsManagedReferences = (pattern: string): boolean => {
   const wildcard = pattern.indexOf('*');
   if (wildcard === -1) {
     return isManagedRef(pattern);
   }
+  // A wildcard is refused when anything it can expand into is host-local.
   const prefix = pattern.slice(0, wildcard);
-  return prefix.startsWith('refs/tau/') || 'refs/tau/'.startsWith(prefix);
+  return hostLocalRefPrefixes.some((managed) => managed.startsWith(prefix) || prefix.startsWith(`${managed}/`));
 };
-const externalRefSchema = transportValueSchema.refine((ref) => !isManagedRef(ref));
 const externalRefspecSchema = transportValueSchema.refine((refspec) => {
   const normalized = refspec.startsWith('+') || refspec.startsWith('^') ? refspec.slice(1) : refspec;
   const separator = normalized.indexOf(':');
@@ -150,24 +162,26 @@ const parseRunId = (runId: string): void => {
   }
 };
 
-const parseTransportValue = (value: string, label: string): void => {
+/**
+ * Refuse a remote or ref that could be read as a Git option or carry control
+ * characters. Shared with the native revision port.
+ *
+ * @param value - The transport value.
+ * @param label - What it names, for the diagnostic.
+ */
+export const parseTransportValue = (value: string, label: string): void => {
   if (!transportValueSchema.safeParse(value).success) {
     throw new NativeGitError('INVALID_TRANSPORT', `${label} is not a safe Git transport value.`);
   }
 };
 
-const parseExternalRef = (ref: string, label: string): void => {
-  const result = externalRefSchema.safeParse(ref);
-  if (result.success) {
-    return;
-  }
-  if (!transportValueSchema.safeParse(ref).success) {
-    throw new NativeGitError('INVALID_TRANSPORT', `${label} is not a safe Git transport value.`);
-  }
-  throw new NativeGitError('INVALID_TRANSPORT', `${label} cannot address Tau-managed refs.`);
-};
-
-const parseExternalRefspec = (refspec: string): void => {
+/**
+ * Refuse a refspec that is unsafe or addresses a host-local Tau ref. Shared with
+ * the native revision port, so one allow-list governs every transport.
+ *
+ * @param refspec - The refspec to check.
+ */
+export const parseExternalRefspec = (refspec: string): void => {
   const result = externalRefspecSchema.safeParse(refspec);
   if (result.success) {
     return;
@@ -238,7 +252,16 @@ const commitMessage = (revision: Revision): Uint8Array<ArrayBuffer> => {
   return textEncoder.encode(`${title || 'Tau revision'}\n\n${metadataPrefix}${encodeMetadata(revision)}\n`);
 };
 
-const quoteFastImportPath = (path: string): string => {
+/**
+ * Quote one path the way `fast-import` requires, byte by byte.
+ *
+ * Not on a barrel: the native revision port writes its trees through the same
+ * `fast-import` stream and must quote them identically.
+ *
+ * @param path - Root-relative path.
+ * @returns The quoted path.
+ */
+export const quoteFastImportPath = (path: string): string => {
   let quoted = '"';
   for (const byte of Buffer.from(path)) {
     quoted +=
@@ -1100,55 +1123,6 @@ export const createNativeGitAdapter = (options: NativeGitAdapterOptions): Native
     ]);
   };
 
-  const createBundle = async (input: CreateNativeGitBundleInput): Promise<void> => {
-    if (input.refs.length === 0) {
-      throw new NativeGitError('INVALID_TRANSPORT', 'bundle creation requires at least one explicit ref.');
-    }
-    for (const ref of input.refs) {
-      parseExternalRef(ref, 'ref');
-      // oxlint-disable-next-line no-await-in-loop -- validation may depend on repository object format.
-      await validateRef(ref);
-    }
-    const outputPath = resolve(input.outputPath);
-    await mkdir(dirname(outputPath), { recursive: true });
-    try {
-      await access(outputPath, constants.F_OK);
-      throw new NativeGitError('INVALID_TRANSPORT', 'Bundle output already exists.');
-    } catch (error) {
-      if (error instanceof NativeGitError) {
-        throw error;
-      }
-    }
-    const temporaryPath = `${outputPath}.tau-${randomUUID()}.tmp`;
-    const repository = await initialize();
-    await verifyConnectivity();
-    try {
-      await requireSuccess(repository.repositoryPath, ['bundle', 'create', temporaryPath, ...input.refs]);
-      await link(temporaryPath, outputPath);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
-        throw new NativeGitError('INVALID_TRANSPORT', 'Bundle output already exists.');
-      }
-      throw error;
-    } finally {
-      await rm(temporaryPath, { force: true });
-    }
-  };
-
-  const fetchBundle = async (input: FetchNativeGitBundleInput): Promise<void> => {
-    const bundlePath = resolve(input.bundlePath);
-    if (input.refspecs.length === 0) {
-      throw new NativeGitError('INVALID_TRANSPORT', 'bundle fetch requires at least one explicit refspec.');
-    }
-    for (const refspec of input.refspecs) {
-      parseExternalRefspec(refspec);
-    }
-    const repository = await initialize();
-    await requireSuccess(repository.repositoryPath, ['bundle', 'verify', bundlePath]);
-    await requireSuccess(repository.repositoryPath, ['fetch', '--no-tags', '--', bundlePath, ...input.refspecs]);
-    await verifyConnectivity();
-  };
-
   const inspect = async (): Promise<NativeGitCapabilities> => {
     const repository = await initialize();
     return Object.freeze({
@@ -1156,7 +1130,6 @@ export const createNativeGitAdapter = (options: NativeGitAdapterOptions): Native
       objectFormat: repository.objectFormat,
       expectedOldRefs: true,
       linkedWorktrees: true,
-      bundles: true,
     });
   };
 
@@ -1175,7 +1148,5 @@ export const createNativeGitAdapter = (options: NativeGitAdapterOptions): Native
     resolveRef,
     fetch,
     push,
-    createBundle,
-    fetchBundle,
   });
 };

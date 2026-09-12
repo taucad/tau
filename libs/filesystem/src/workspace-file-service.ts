@@ -42,6 +42,7 @@ import type {
   MountConfig,
   MountEntry,
   MountResolution,
+  ProjectRootConfig,
   ProjectRootConfiguration,
   ProjectDiscoveryEntry,
   ProjectDiscoveryResult,
@@ -431,6 +432,7 @@ export class WorkspaceFileService {
   private readonly _mountTable: MountTable;
   private _inMemoryTree = new InMemoryFileTree();
   private readonly _projectRoutes = new Set<string>();
+  private readonly _checkoutRoutes = new Set<string>();
   private _projectConfigurationTail: Promise<void> = Promise.resolve();
   private _remoteChangeTail: Promise<void> = Promise.resolve();
   private _discoveryRoots: ReadonlyArray<{
@@ -2268,25 +2270,37 @@ export class WorkspaceFileService {
           `Project provider path must be an immediate child of the workspace root: ${providerBasePath}`,
         );
       }
-      let scope: WorkspaceScope;
-      if (config.backend === 'webaccess') {
-        const root = webAccessRoots.get(config.workspaceId);
-        if (root === undefined) {
-          throw new MissingWorkspaceHandleError({ workspaceId: config.workspaceId });
-        }
-        scope = this._toScope(root);
-      } else {
-        scope =
-          config.backend === 'memory'
-            ? this._toScope({ backend: 'memory', storageRootKey: config.storageRootKey })
-            : config.backend === 'node'
-              ? this._toScope({ backend: 'node', path: config.path })
-              : this._toScope({ backend: config.backend });
-      }
+      const scope = this._scopeForRouteConfig(config, webAccessRoots);
       const storageRootKey = this._registry.resolveStorageRootKey(scope);
       const physicalRoute = `${storageRootKey}\0${providerBasePath}`;
       if (physicalRoutes.has(physicalRoute)) {
         throw new Error(`Duplicate physical project route: ${providerBasePath}`);
+      }
+      physicalRoutes.add(physicalRoute);
+      return { prefix, config, scope, storageRootKey, providerBasePath };
+    });
+
+    const stagedCheckoutPrefixes = new Set<string>();
+    const stagedCheckoutInputs = (configuration.checkouts ?? []).map((config) => {
+      const prefix = `/checkouts/${config.checkoutId}`;
+      if (resolveAuthorityPath(prefix) !== prefix || stagedCheckoutPrefixes.has(prefix)) {
+        throw new Error(`Duplicate checkout route: ${prefix}`);
+      }
+      stagedCheckoutPrefixes.add(prefix);
+      const providerBasePath = assertRootedPath(config.providerBasePath);
+      if (providerBasePath !== config.providerBasePath) {
+        throw new TypeError(`Checkout provider path must already be canonical: ${config.providerBasePath}`);
+      }
+      /* A linked checkout lives in the workspace's host-private area, which is
+       * exactly the dot-prefixed space project discovery never scans (D4). */
+      if (!providerBasePath.startsWith('.tau/checkouts/')) {
+        throw new TypeError(`Checkout provider path must live under .tau/checkouts: ${providerBasePath}`);
+      }
+      const scope = this._scopeForRouteConfig(config, webAccessRoots);
+      const storageRootKey = this._registry.resolveStorageRootKey(scope);
+      const physicalRoute = `${storageRootKey}\0${providerBasePath}`;
+      if (physicalRoutes.has(physicalRoute)) {
+        throw new Error(`Duplicate physical checkout route: ${providerBasePath}`);
       }
       physicalRoutes.add(physicalRoute);
       return { prefix, config, scope, storageRootKey, providerBasePath };
@@ -2344,8 +2358,39 @@ export class WorkspaceFileService {
         topologyChanged = true;
       }
     }
+    const stagedCheckouts = await Promise.all(
+      stagedCheckoutInputs.map(async (staged) => ({
+        ...staged,
+        provider: await this._registry.getProvider(staged.scope),
+      })),
+    );
+    for (const { prefix, provider, config, storageRootKey, providerBasePath } of stagedCheckouts) {
+      const existing = this._mountTable.getExactMount(prefix);
+      if (
+        existing?.provider !== provider ||
+        existing.backend !== config.backend ||
+        existing.storageRootKey !== storageRootKey ||
+        existing.providerBasePath !== providerBasePath
+      ) {
+        /* A checkout route is the same authored tree a project route is; only
+         * where it sits differs (D4). */
+        this._mountTable.mount(prefix, provider, {
+          backend: config.backend,
+          storageRootKey,
+          providerBasePath,
+          class: 'authored',
+        });
+        topologyChanged = true;
+      }
+    }
     for (const prefix of this._projectRoutes) {
       if (!stagedPrefixes.has(prefix)) {
+        this._mountTable.unmount(prefix);
+        topologyChanged = true;
+      }
+    }
+    for (const prefix of this._checkoutRoutes) {
+      if (!stagedCheckoutPrefixes.has(prefix)) {
         this._mountTable.unmount(prefix);
         topologyChanged = true;
       }
@@ -2353,6 +2398,10 @@ export class WorkspaceFileService {
     this._projectRoutes.clear();
     for (const prefix of stagedPrefixes) {
       this._projectRoutes.add(prefix);
+    }
+    this._checkoutRoutes.clear();
+    for (const prefix of stagedCheckoutPrefixes) {
+      this._checkoutRoutes.add(prefix);
     }
     if (
       this._discoveryRoots.length !== configuration.roots.length ||
@@ -2368,6 +2417,26 @@ export class WorkspaceFileService {
       this._resetTopologyState();
     }
     await this._syncExternalRoots(stagedRoots);
+  }
+
+  /** The storage scope one persisted route names, project or checkout alike. */
+  private _scopeForRouteConfig(
+    config: ProjectRootConfig,
+    webAccessRoots: ReadonlyMap<string, Extract<StorageRootConfig, { backend: 'webaccess' }>>,
+  ): WorkspaceScope {
+    if (config.backend === 'webaccess') {
+      const root = webAccessRoots.get(config.workspaceId);
+      if (root === undefined) {
+        throw new MissingWorkspaceHandleError({ workspaceId: config.workspaceId });
+      }
+      return this._toScope(root);
+    }
+    if (config.backend === 'memory') {
+      return this._toScope({ backend: 'memory', storageRootKey: config.storageRootKey });
+    }
+    return config.backend === 'node'
+      ? this._toScope({ backend: 'node', path: config.path })
+      : this._toScope({ backend: config.backend });
   }
 
   private _toScope(config: WorkspaceScope | MountConfig): WorkspaceScope {

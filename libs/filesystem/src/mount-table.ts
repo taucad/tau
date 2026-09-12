@@ -130,9 +130,27 @@ export type StorageRootConfig =
       readonly path: string;
     };
 
-/** Complete persisted project-route and discovery-root configuration. @public */
+/**
+ * Persisted route for one linked checkout: git's worktree made addressable
+ * (charter D4, blueprint S4).
+ *
+ * It rides the *project's* storage root at `.tau/checkouts/<projectId>/<id>`,
+ * so `createRootedFileSystem('/checkouts/<id>')` needs no new capability and
+ * Rule 15's boundary is untouched. It is installed explicitly and is never a
+ * discovery candidate: `.tau` is dot-prefixed, so a scan skips it by the same
+ * rule that keeps app state out of project discovery.
+ *
+ * @public
+ */
+export type CheckoutRootConfig = ProjectRootConfig & {
+  readonly checkoutId: string;
+};
+
+/** Complete persisted project-route, checkout-route and discovery-root configuration. @public */
 export type ProjectRootConfiguration = {
   readonly projects: readonly ProjectRootConfig[];
+  /** Linked checkouts of those projects. Absent means none; the call replaces the whole set. */
+  readonly checkouts?: readonly CheckoutRootConfig[];
   readonly roots: readonly StorageRootConfig[];
 };
 

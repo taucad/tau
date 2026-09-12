@@ -1,13 +1,13 @@
 /* eslint-disable import-x/no-extraneous-dependencies -- the package import map resolves these internal source files. */
 /**
- * Browser-safe surface: the port, its object codec and identity layer, the
- * provider-backed adapter and the turn recorder. Adapters that spawn an engine
+ * Browser-safe surface: the port, its commit codec and identity layer, the
+ * `isomorphic-git` adapter and the turn recorder. Adapters that spawn an engine
  * live on `@taucad/revisions/node`, so a page importing this barrel never pulls
  * `node:child_process` into its bundle.
  */
 
-export { createBrowserRevisionPort } from '#browser-adapter.js';
-export type { BrowserRevisionPortOptions } from '#browser-adapter.js';
+export { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
+export type { IsomorphicGitCheckoutOptions, IsomorphicGitRevisionPortOptions } from '#isomorphic-git-adapter.js';
 export { RevisionAuthority, revisionBranchName } from '#revision-authority.js';
 export type {
   BranchHeadUpdateResult,
@@ -31,12 +31,8 @@ export type {
 } from '#revision-persistence.js';
 export {
   decodeCommit,
-  decodeTree,
-  encodeBlob,
   encodeCommit,
   encodeObject,
-  encodeTree,
-  encodeTreeGraph,
   frameObject,
   GitObjectError,
   parseChangeId,
@@ -46,13 +42,9 @@ export type {
   CommitInput,
   DecodedCommit,
   EncodedGitObject,
-  EncodedTreeGraph,
-  FlatTreeEntry,
-  GitMode,
   GitObjectErrorCode,
   GitObjectType,
   GitSignature,
-  TreeEntry,
 } from '#git-objects.js';
 export {
   bytesToHex,
@@ -65,24 +57,6 @@ export {
 } from '#object-hash.js';
 export type { ObjectFormat } from '#object-hash.js';
 export {
-  algebraContract,
-  algebraNativeDarwinArm64Sha256,
-  algebraProvenanceDigest,
-  algebraRawWasmSha256,
-  algebraSourceRevision,
-  loadRevisionAlgebra,
-} from '#revision-algebra.js';
-export type {
-  AlgebraDescriptor,
-  AlgebraDiffHunk,
-  AlgebraMergeResult,
-  HunkLevel,
-  LoadRevisionAlgebraInput,
-  MarkerStyle,
-  RevisionAlgebra,
-  SameChange,
-} from '#revision-algebra.js';
-export {
   deriveChangeId,
   parseRevisionCommitMessage,
   provenanceTrailerPrefix,
@@ -91,10 +65,9 @@ export {
 export type { RevisionTrailer } from '#revision-headers.js';
 export { RevisionPortError } from '#revision-port.js';
 export type {
-  ImportRevisionBundleInput,
+  AddCheckoutInput,
+  Checkout,
   InitRevisionStoreInput,
-  MaterializeConflictInput,
-  RevisionBundleInput,
   RevisionConflict,
   RevisionDiffEntry,
   RevisionDiffInput,
@@ -130,13 +103,4 @@ export type {
   TurnRevisionRecorderOptions,
   TurnRevisionResult,
 } from '#turn-revision.js';
-export {
-  excludedRevisionPaths,
-  generatedIgnoreContent,
-  generatedIgnoreEntries,
-  generatedIgnorePath,
-  generatedJjConfigContent,
-  generatedJjConfigPath,
-  revisionPathPolicy,
-} from '#workspace-config.js';
-export type { GeneratedJjIdentity, RevisionPathClass, RevisionPathPolicyEntry } from '#workspace-config.js';
+export { generatedIgnoreContent, generatedIgnoreEntries, generatedIgnorePath } from '#workspace-config.js';

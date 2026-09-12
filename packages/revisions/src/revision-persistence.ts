@@ -75,9 +75,13 @@ export type PortRevisionPersistenceOptions = Readonly<{
  * @example <caption>An authority over the browser store</caption>
  * ```typescript
  * import { createMemoryProvider } from '@taucad/filesystem/backend';
- * import { createBrowserRevisionPort, createPortRevisionPersistence, RevisionAuthority } from '@taucad/revisions';
+ * import {
+ *   createIsomorphicGitRevisionPort,
+ *   createPortRevisionPersistence,
+ *   RevisionAuthority,
+ * } from '@taucad/revisions';
  *
- * const port = createBrowserRevisionPort({ filesystem: await createMemoryProvider() });
+ * const port = createIsomorphicGitRevisionPort({ filesystem: await createMemoryProvider() });
  * const authority = new RevisionAuthority({ persistence: createPortRevisionPersistence({ port }) });
  * ```
  */

@@ -46,7 +46,6 @@ export type NativeGitCapabilities = Readonly<{
   objectFormat: 'sha1' | 'sha256';
   expectedOldRefs: true;
   linkedWorktrees: true;
-  bundles: true;
 }>;
 
 /** One Tau-owned detached linked Git worktree. Its path is host-local and is not a handoff identity. @public */
@@ -141,18 +140,6 @@ export type NativeGitPushInput = Readonly<{
   atomic?: boolean;
 }>;
 
-/** Input for creating a standalone standard Git bundle from explicit refs. @public */
-export type CreateNativeGitBundleInput = Readonly<{
-  outputPath: string;
-  refs: readonly string[];
-}>;
-
-/** Input for verifying and fetching a standard Git bundle. @public */
-export type FetchNativeGitBundleInput = Readonly<{
-  bundlePath: string;
-  refspecs: readonly string[];
-}>;
-
 /** Native adapter configuration. Repository and worktree roots are explicit host locators. @public */
 export type NativeGitAdapterOptions = Readonly<{
   repositoryPath: string;
@@ -176,6 +163,4 @@ export type NativeGitAdapter = Readonly<{
   resolveRef(ref: string): Promise<GitObjectId | undefined>;
   fetch(input: NativeGitFetchInput): Promise<void>;
   push(input: NativeGitPushInput): Promise<void>;
-  createBundle(input: CreateNativeGitBundleInput): Promise<void>;
-  fetchBundle(input: FetchNativeGitBundleInput): Promise<void>;
 }>;

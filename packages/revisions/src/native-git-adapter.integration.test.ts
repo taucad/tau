@@ -15,7 +15,9 @@ import { RevisionAuthority, revisionBranchName } from '#revision-authority.js';
 import type { RevisionId } from '@taucad/filesystem/revisions';
 import type { Revision, RevisionProvenance } from '#revision-authority.js';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createNativeGitAdapter, createNativeGitRevisionPersistence, NativeGitError } from '#node/index.js';
+import { createPortRevisionPersistence } from '#revision-persistence.js';
+import type { RevisionPort } from '#revision-port.js';
+import { createNativeGitAdapter, createNativeGitRevisionPort, NativeGitError } from '#node/index.js';
 
 const execute = promisify(execFile);
 const createdAt = Date.UTC(2026, 7, 28, 12, 0, 0);
@@ -230,30 +232,61 @@ nativeGitIntegration('native Git adapter integration', () => {
     expect(readResult[0]).toEqual({ status: 'fulfilled', value: undefined });
   });
 
-  it('rehydrates RevisionAuthority revisions, branch heads, and expected-old CAS', async () => {
-    const first = new RevisionAuthority({
-      persistence: createNativeGitRevisionPersistence({ repositoryPath, worktreeRoot }),
-    });
+  /* The authority-over-a-port rehydration is covered with a memory provider in
+   * `revision-authority.test.ts`; what only a real repository can prove is that
+   * the *native* store rehydrates revisions, parents, trees and branch heads
+   * through the wrapped port, and that Git's own expected-old `update-ref`
+   * refuses a stale head (W1 falsified premise 2, S12). */
+  const openPort = (executable?: string): RevisionPort =>
+    createNativeGitRevisionPort({ repositoryPath, ...(executable === undefined ? {} : { gitExecutable: executable }) });
+
+  const record = async (
+    context: Readonly<{ authority: RevisionAuthority; port: RevisionPort }>,
+    options: Readonly<{ label: string; parents: readonly RevisionId[]; content: string }>,
+  ): Promise<Revision> => {
+    const input = {
+      parents: options.parents,
+      tree: new ImmutableRevisionTree([['part.ts', options.content]]),
+      provenance: { source: 'agent', actorId: options.label, runId: `run-${options.label}`, createdAt } as const,
+      summary: { generated: `Revision ${options.label}` },
+    };
+    const receipt = await context.port.writeRevision(input);
+    return context.authority.createRevision({ id: revisionId(receipt.commitId), ...input });
+  };
+
+  it('rehydrates RevisionAuthority revisions, branch heads, and expected-old CAS from a real repository', async () => {
+    const port = openPort();
+    await port.init({ author: { name: 'Tau', email: 'tau@example.com' } });
+    const first = new RevisionAuthority({ persistence: createPortRevisionPersistence({ port }) });
     await first.ready;
-    const base = await first.createRevision(makeRevision({ id: 'authority-base', entries: [['part.ts', 'base']] }));
-    const next = await first.createRevision(
-      makeRevision({ id: 'authority-next', parents: [base.id], entries: [['part.ts', 'next']] }),
+    const base = await record({ authority: first, port }, { label: 'authority-base', parents: [], content: 'base' });
+    const next = await record(
+      { authority: first, port },
+      { label: 'authority-next', parents: [base.id], content: 'next' },
     );
     const branch = revisionBranchName('authority/main');
     await first.updateBranchHead({ branch, expectedHead: undefined, head: base.id });
-    expect(first.getRevisionPersistence(next.id)).toMatchObject({
-      type: 'native-git',
-      objectFormat: 'sha1',
+    /* A revision no ref reaches is unreferenced evidence in the object store,
+     * so `next` is named by its own branch, exactly as the recorder names every
+     * turn's head. */
+    await first.updateBranchHead({
+      branch: revisionBranchName('authority/next'),
+      expectedHead: undefined,
+      head: next.id,
     });
 
-    const reopened = new RevisionAuthority({
-      persistence: createNativeGitRevisionPersistence({ repositoryPath, worktreeRoot }),
-    });
+    const reopened = new RevisionAuthority({ persistence: createPortRevisionPersistence({ port: openPort() }) });
     await reopened.ready;
 
     expect(reopened.getRevision(next.id)?.parents).toEqual([base.id]);
-    expect(reopened.getRevision(next.id)?.tree.entries()).toEqual(next.tree.entries());
+    expect(new TextDecoder().decode(reopened.getRevision(next.id)?.tree.get('part.ts'))).toBe('next');
     expect(reopened.getBranchHead(branch)).toBe(base.id);
+    expect(reopened.getRevisionPersistence(next.id)).toMatchObject({
+      engine: 'native-git',
+      commitId: next.id,
+      objectFormat: 'sha1',
+      conflicted: false,
+    });
     await expect(reopened.updateBranchHead({ branch, expectedHead: undefined, head: next.id })).resolves.toEqual({
       status: 'conflicted',
       conflict: {
@@ -266,18 +299,21 @@ nativeGitIntegration('native Git adapter integration', () => {
     });
   });
 
-  it('rehydrates coherently when publication interleaves the managed-ref snapshot', async () => {
-    const publisher = createNativeGitAdapter({ repositoryPath, worktreeRoot });
-    const base = makeRevision({ id: 'snapshot-base', entries: [['part.ts', 'base']] });
-    const next = makeRevision({
-      id: 'snapshot-next',
-      parents: [base.id],
-      entries: [['part.ts', 'next']],
-    });
-    await publisher.storeRevision(base);
+  it('rehydrates coherently when a publication interleaves the ref snapshot', async () => {
+    const publisher = openPort();
+    await publisher.init({ author: { name: 'Tau', email: 'tau@example.com' } });
+    const seeding = new RevisionAuthority({ persistence: createPortRevisionPersistence({ port: publisher }) });
+    await seeding.ready;
+    const base = await record(
+      { authority: seeding, port: publisher },
+      { label: 'snapshot-base', parents: [], content: 'base' },
+    );
     const branch = revisionBranchName('snapshot/main');
-    await publisher.updateBranchHead({ branch, expectedHead: undefined, head: base.id });
+    await seeding.updateBranchHead({ branch, expectedHead: undefined, head: base.id });
 
+    /* `load()` reads the refs, then walks the commits they name. The race this
+     * pins is a publication landing between those two reads: the branch head the
+     * snapshot carries must still be a revision the same snapshot holds. */
     const stateDirectory = join(temporaryRoot, 'snapshot-state');
     const wrapperPath = join(temporaryRoot, 'snapshot-git');
     await writeFile(
@@ -285,10 +321,7 @@ nativeGitIntegration('native Git adapter integration', () => {
       `#!/bin/sh
 state=${stateDirectory}
 mkdir -p "$state"
-last=
-for argument in "$@"; do last=$argument; done
-if [ "$3" = for-each-ref ] && { [ "$last" = refs/tau/revisions ] || [ "$last" = refs/heads/tau/ ]; }; then
-  if [ "$last" = refs/heads/tau/ ]; then sleep 0.1; fi
+if [ "$3" = for-each-ref ]; then
   if mkdir "$state/first" 2>/dev/null; then
     git "$@" > "$state/captured"
     touch "$state/ready"
@@ -296,25 +329,25 @@ if [ "$3" = for-each-ref ] && { [ "$last" = refs/tau/revisions ] || [ "$last" = 
     cat "$state/captured"
     exit 0
   fi
-  while [ ! -f "$state/release" ]; do sleep 0.01; done
 fi
 exec git "$@"
 `,
       { mode: 0o755 },
     );
-    const reopened = new RevisionAuthority({
-      persistence: createNativeGitRevisionPersistence({ repositoryPath, worktreeRoot, gitExecutable: wrapperPath }),
-    });
-    const { ready } = reopened;
+
+    const loading = createPortRevisionPersistence({ port: openPort(wrapperPath) }).load();
     await waitForPath(join(stateDirectory, 'ready'));
-    await publisher.storeRevision(next);
-    await publisher.updateBranchHead({ branch, expectedHead: base.id, head: next.id });
+    const next = await record(
+      { authority: seeding, port: publisher },
+      { label: 'snapshot-next', parents: [base.id], content: 'next' },
+    );
+    await seeding.updateBranchHead({ branch, expectedHead: base.id, head: next.id });
     await writeFile(join(stateDirectory, 'release'), '');
 
-    await expect(ready).resolves.toBeUndefined();
-    const recoveredHead = reopened.getBranchHead(branch);
+    const snapshot = await loading;
+    const recoveredHead = snapshot.branchHeads.find((entry) => entry.branch === branch)?.head;
     expect(recoveredHead).toBeDefined();
-    expect(reopened.getRevision(recoveredHead!)).toBeDefined();
+    expect(snapshot.revisions.some((entry) => entry.revision.id === recoveredHead)).toBe(true);
   });
 
   it('keeps a committed revision successful when staging cleanup fails and recovers the stale ref on load', async () => {
@@ -564,7 +597,7 @@ exec git "$@"
     expect(await hashFile(join(workspace.rootPath, 'artifact-100MiB.bin'))).toBe(expectedLargeHash);
   }, 120_000);
 
-  it('pushes, fetches, and creates standalone bundles with explicit standard refspecs', async () => {
+  it('pushes and fetches with explicit standard refspecs', async () => {
     const source = createNativeGitAdapter({ repositoryPath, worktreeRoot });
     const revision = makeRevision({ id: 'transport-revision', entries: [['part.ts', 'transport']] });
     const stored = await source.storeRevision(revision);
@@ -588,20 +621,6 @@ exec git "$@"
       refspecs: ['refs/heads/tau/transport:refs/remotes/origin/tau/transport'],
     });
     expect(await target.resolveRef('refs/remotes/origin/tau/transport')).toBe(stored.commit);
-
-    const bundlePath = join(temporaryRoot, 'transport.bundle');
-    await source.createBundle({ outputPath: bundlePath, refs: ['refs/heads/tau/transport'] });
-    const bundleTargetPath = join(temporaryRoot, 'bundle-target');
-    await execute('git', ['init', '--quiet', bundleTargetPath]);
-    const bundleTarget = createNativeGitAdapter({
-      repositoryPath: bundleTargetPath,
-      worktreeRoot: join(temporaryRoot, 'bundle-target-worktrees'),
-    });
-    await bundleTarget.fetchBundle({
-      bundlePath,
-      refspecs: ['refs/heads/tau/transport:refs/heads/imported'],
-    });
-    expect(await bundleTarget.resolveRef('refs/heads/imported')).toBe(stored.commit);
   });
 
   it('rejects every transport route that can read or overwrite Tau-managed refs', async () => {
@@ -639,17 +658,30 @@ exec git "$@"
         refspecs: ['^refs/tau*'],
       }),
     ).rejects.toEqual(expect.objectContaining<Partial<NativeGitError>>({ code: 'INVALID_TRANSPORT' }));
-    await expect(
-      adapter.createBundle({
-        outputPath: join(temporaryRoot, 'managed.bundle'),
-        refs: ['refs/tau/revisions/private'],
-      }),
-    ).rejects.toEqual(expect.objectContaining<Partial<NativeGitError>>({ code: 'INVALID_TRANSPORT' }));
-    await expect(
-      adapter.fetchBundle({
-        bundlePath: join(temporaryRoot, 'missing.bundle'),
-        refspecs: ['refs/heads/main:refs/tau/owners/poison'],
-      }),
-    ).rejects.toEqual(expect.objectContaining<Partial<NativeGitError>>({ code: 'INVALID_TRANSPORT' }));
+  });
+
+  /* The transport allow-list, in the positive direction: `refs/tau/chats`,
+   * `refs/tau/evidence` and `refs/tau/artifacts` are records that travel, and
+   * only the host-local namespaces stay behind (review 3 F13, D14/A15). */
+  it('round-trips a chat ref through push and fetch', async () => {
+    const source = createNativeGitAdapter({ repositoryPath, worktreeRoot });
+    const revision = makeRevision({ id: 'chat-carrier', entries: [['.tau/chats/chat-1/events.jsonl', '{}\n']] });
+    const stored = await source.storeRevision(revision);
+    const chatRef = 'refs/tau/chats/chat-1';
+    await execute('git', ['-C', repositoryPath, 'update-ref', chatRef, stored.commit]);
+
+    const remotePath = join(temporaryRoot, 'chat-remote.git');
+    await execute('git', ['init', '--bare', '--quiet', remotePath]);
+    await source.push({ remote: remotePath, refspecs: [`${chatRef}:${chatRef}`] });
+    expect(await git(remotePath, 'rev-parse', chatRef)).toBe(stored.commit);
+
+    const targetPath = join(temporaryRoot, 'chat-target');
+    await execute('git', ['init', '--quiet', targetPath]);
+    const target = createNativeGitAdapter({
+      repositoryPath: targetPath,
+      worktreeRoot: join(temporaryRoot, 'chat-target-worktrees'),
+    });
+    await target.fetch({ remote: remotePath, refspecs: [`${chatRef}:${chatRef}`] });
+    expect(await target.resolveRef(chatRef)).toBe(stored.commit);
   });
 });

@@ -7,7 +7,7 @@
 import { describe, expect, it } from 'vitest';
 import { ImmutableRevisionTree, revisionId } from '@taucad/filesystem/revisions';
 import { MemoryProvider } from '@taucad/filesystem/backend';
-import { createBrowserRevisionPort } from '#browser-adapter.js';
+import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
 import { RevisionAuthority, revisionBranchName } from '#revision-authority.js';
 import type { Revision, RevisionProvenance } from '#revision-authority.js';
 import { createPortRevisionPersistence } from '#revision-persistence.js';
@@ -25,7 +25,7 @@ type Store = Readonly<{ filesystem: MemoryProvider; port: RevisionPort }>;
 
 const openStore = (filesystem: MemoryProvider = new MemoryProvider()): Store => ({
   filesystem,
-  port: createBrowserRevisionPort({ filesystem }),
+  port: createIsomorphicGitRevisionPort({ filesystem }),
 });
 
 /** Mint through the store, then index it: the id is the store's, never a literal. */
@@ -242,7 +242,7 @@ describe('RevisionAuthority', () => {
     expect(new TextDecoder().decode(reopened.getRevision(next.id)?.tree.get('main.ts'))).toBe('next');
     expect(reopened.getBranchHead(branch)).toBe(base.id);
     expect(reopened.getRevisionPersistence(next.id)).toMatchObject({
-      engine: 'browser',
+      engine: 'isomorphic-git',
       commitId: next.id,
       objectFormat: 'sha1',
       conflicted: false,
@@ -270,7 +270,7 @@ describe('RevisionAuthority', () => {
     const branch = revisionBranchName('retry/main');
     let loads = 0;
     const receipt = Object.freeze({
-      engine: 'browser',
+      engine: 'isomorphic-git',
       commitId: base.id,
       changeId: 'k'.repeat(32),
       objectFormat: 'sha1',
@@ -325,6 +325,6 @@ describe('RevisionAuthority', () => {
     });
     expect(stale.getBranchHead(branch)).toBe(actual.id);
     expect(stale.getRevision(actual.id)).toMatchObject({ id: actual.id, parents: [base.id] });
-    expect(stale.getRevisionPersistence(actual.id)).toMatchObject({ engine: 'browser', commitId: actual.id });
+    expect(stale.getRevisionPersistence(actual.id)).toMatchObject({ engine: 'isomorphic-git', commitId: actual.id });
   });
 });

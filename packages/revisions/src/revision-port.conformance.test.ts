@@ -4,36 +4,43 @@
  * The rows below are the substrate contract: a revision id that equals its
  * commit id, a `change-id` from creation, conflicts recorded as values with
  * Jujutsu's exact headers, provenance that survives the engine, `objectFormat`
- * on every receipt, and `log`/`diff` that never materialize a tree. The
- * `browser` adapter runs them everywhere; the `jj` adapter runs them wherever
- * the pinned binary resolves, and is skipped — never quietly reduced — where it
- * does not.
+ * on every receipt, `log`/`diff` that never materialize a tree, and one
+ * checkout per branch. `isomorphic-git` runs them everywhere; `native-git` runs
+ * them wherever `git` is on `PATH`, and the last test in this file is what makes
+ * the table an actual comparison rather than a promise: the same scripted edits
+ * through both adapters name the same tree (I4).
  */
 
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
+import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createMemoryProvider } from '@taucad/filesystem/backend';
 import { ImmutableRevisionTree, revisionId } from '@taucad/filesystem/revisions';
+import type { FileSystemProvider } from '@taucad/filesystem';
 import type { RevisionId } from '@taucad/filesystem/revisions';
 import type { RevisionProvenance, RevisionSummary } from '#revision-authority.js';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { createBrowserRevisionPort } from '#browser-adapter.js';
-import { createJjRevisionPort } from '#jj-adapter.js';
-import { decodeCommit, encodeCommit, parseChangeId } from '#git-objects.js';
-import { runCommand, runGitCommand } from '#git-command.js';
-import { loadRevisionAlgebra } from '#revision-algebra.js';
-import type { RevisionAlgebra } from '#revision-algebra.js';
+import { parseChangeId } from '#git-objects.js';
+import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
+import { createNativeGitRevisionPort } from '#native-git-port.js';
 import type { RevisionPort } from '#revision-port.js';
-import { generatedIgnorePath, generatedJjConfigPath } from '#workspace-config.js';
-import { resolveAlgebraArtifact, resolveTestJjExecutable } from '#test-artifacts.js';
+import { generatedIgnorePath } from '#workspace-config.js';
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
-const jjExecutable = resolveTestJjExecutable();
-const algebraArtifact = resolveAlgebraArtifact();
 const author = { name: 'Tau', email: 'tau@example.com' };
 const createdAt = Date.UTC(2026, 8, 8, 12, 0, 0);
+const projectId = 'project-conformance';
+
+const gitOnPath = ((): boolean => {
+  try {
+    execFileSync('git', ['--version'], { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+})();
 
 const provenance = (source: RevisionProvenance['source'] = 'agent'): RevisionProvenance => ({
   source,
@@ -47,59 +54,68 @@ const tree = (entries: Record<string, string>): ImmutableRevisionTree =>
 
 type Harness = Readonly<{
   port: RevisionPort;
-  workspaceRoot: string;
   readGenerated: (path: string) => Promise<string>;
   /** A second port over the same store — the next process opening this project. */
   reopen: () => RevisionPort;
   dispose: () => Promise<void>;
 }>;
 
-let algebra: RevisionAlgebra | undefined;
-
-beforeAll(async () => {
-  algebra =
-    algebraArtifact === undefined
-      ? undefined
-      : await loadRevisionAlgebra({ artifact: new Uint8Array(await readFile(algebraArtifact)) });
-});
-
-const browserHarness = async (): Promise<Harness> => {
+const isomorphicHarness = async (): Promise<Harness> => {
   const filesystem = await createMemoryProvider();
+  /* The S4 `/checkouts/<id>` route, as the page will install it: one provider
+   * per checkout, handed to the adapter, never a path joined above the project. */
+  const roots = new Map<string, FileSystemProvider>();
+  const checkouts = {
+    projectId,
+    root: async (id: string): Promise<FileSystemProvider> => {
+      const existing = roots.get(id);
+      if (existing !== undefined) {
+        return existing;
+      }
+      const created = await createMemoryProvider();
+      roots.set(id, created);
+      return created;
+    },
+  };
+  const create = (): RevisionPort => createIsomorphicGitRevisionPort({ filesystem, checkouts });
   return {
-    port: createBrowserRevisionPort({ filesystem, ...(algebra === undefined ? {} : { algebra }) }),
-    workspaceRoot: '',
+    port: create(),
     readGenerated: async (path) => filesystem.readFile(path, 'utf8'),
-    reopen: () => createBrowserRevisionPort({ filesystem, ...(algebra === undefined ? {} : { algebra }) }),
+    reopen: create,
     dispose: async () => {
       await Promise.resolve();
     },
   };
 };
 
-const jjHarness = async (): Promise<Harness> => {
-  const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-revisions-jj-'));
+const nativeHarness = async (): Promise<Harness> => {
+  const root = await mkdtemp(join(tmpdir(), 'tau-revisions-conformance-'));
+  const repositoryPath = join(root, 'project');
+  await mkdir(repositoryPath, { recursive: true });
+  // Never inside the repository's own worktree: native Git refuses that.
+  const checkouts = { projectId, directory: join(root, 'checkouts') };
+  const create = (): RevisionPort => createNativeGitRevisionPort({ repositoryPath, checkouts });
   return {
-    port: createJjRevisionPort({ workspaceRoot, jjExecutable: jjExecutable!, deadline: 120_000 }),
-    workspaceRoot,
-    readGenerated: async (path) => readFile(join(workspaceRoot, path), 'utf8'),
-    reopen: () => createJjRevisionPort({ workspaceRoot, jjExecutable: jjExecutable!, deadline: 120_000 }),
-    dispose: async () => {
-      await rm(workspaceRoot, { recursive: true, force: true });
-    },
+    port: create(),
+    readGenerated: async (path) => readFile(join(repositoryPath, path), 'utf8'),
+    reopen: create,
+    dispose: async () => rm(root, { force: true, recursive: true }),
   };
 };
 
-type Adapter = Readonly<{ name: 'browser' | 'jj'; create: () => Promise<Harness>; enabled: boolean }>;
+type Adapter = Readonly<{
+  name: 'isomorphic-git' | 'native-git';
+  create: () => Promise<Harness>;
+  enabled: boolean;
+}>;
 
 const adapters: readonly Adapter[] = [
-  { name: 'browser', create: browserHarness, enabled: true },
-  { name: 'jj', create: jjHarness, enabled: jjExecutable !== undefined },
+  { name: 'isomorphic-git', create: isomorphicHarness, enabled: true },
+  { name: 'native-git', create: nativeHarness, enabled: gitOnPath },
 ];
 
 const conformance = (adapter: Adapter): void => {
-  const suite = adapter.enabled ? describe : describe.skip;
-
-  suite(`RevisionPort conformance — ${adapter.name}`, () => {
+  describe.runIf(adapter.enabled)(`RevisionPort conformance — ${adapter.name}`, () => {
     let harness: Harness;
     let port: RevisionPort;
     let base: RevisionId;
@@ -129,20 +145,20 @@ const conformance = (adapter: Adapter): void => {
       await harness.dispose();
     });
 
-    it('describes a recorded object format, change ids and conflict handling', async () => {
+    it('describes a recorded object format, change ids, conflict handling and checkouts', async () => {
       const descriptor = await port.describe();
       expect(descriptor.engine).toBe(adapter.name);
       expect(descriptor.objectFormat).toBe('sha1');
       expect(descriptor.changeIds).toBe(true);
       expect(descriptor.conflictsAsValues).toBe(true);
+      expect(descriptor.checkouts).toBe(true);
     });
 
-    it('generates the ignore file and the engine config', async () => {
+    it('generates the ignore file', async () => {
       const ignore = await harness.readGenerated(generatedIgnorePath);
       expect(ignore).toContain('/.tau/cache/');
       expect(ignore).toContain('/.tau/workspaces/');
       expect(ignore).toContain('node_modules/');
-      expect(await harness.readGenerated(generatedJjConfigPath)).toContain('max-new-file-size = 0');
     });
 
     it('gives every revision an id equal to its commit id and a change id from creation', async () => {
@@ -256,7 +272,9 @@ const conformance = (adapter: Adapter): void => {
     it('tracks the live tree on a branch, and a reopened store reads the same head', async () => {
       // The product's other branch shape carries a slash (c2-review N4).
       const name = 'agent/tau-conformance-head';
-      expect(await port.readHead()).toBeUndefined();
+      /* `init` leaves HEAD symbolic on an unborn `main`, exactly as `git init`
+       * does — the head is a name, and the branch behind it need not exist. */
+      expect(await port.readHead()).toEqual({ branch: 'main', head: undefined });
       // Symbolic: the head is set before the branch is born, and follows it.
       await port.setHead(name);
       expect(await port.readHead()).toEqual({ branch: name, head: undefined });
@@ -301,23 +319,18 @@ const conformance = (adapter: Adapter): void => {
         summary: summary('Right side'),
       });
       const right = revisionId(rightReceipt.commitId);
-      // The engine computes the conflict when it can. A browser host with no
-      // compiled algebra records the terms the caller computed instead; both
-      // paths must produce the same headers.
-      const engineComputes = adapter.name === 'jj' || algebra !== undefined;
+      /* The caller merges — `mergeRevisionTrees` on both legs — and the terms of
+       * an unresolved merge arrive here as a value, which is what keeps a
+       * conflict in the graph without either engine owning a merge algorithm. */
       const merged = await port.writeRevision({
         parents: [left, right],
         provenance: provenance('merge'),
         summary: summary('Conflicted merge'),
-        ...(engineComputes
-          ? {}
-          : {
-              tree: tree({ 'a.txt': 'conflict\n' }),
-              conflict: {
-                trees: ['1'.repeat(40), '2'.repeat(40), '3'.repeat(40)],
-                labels: ['left', 'base', 'right'],
-              },
-            }),
+        tree: tree({ 'a.txt': 'conflict\n' }),
+        conflict: {
+          trees: ['1'.repeat(40), '2'.repeat(40), '3'.repeat(40)],
+          labels: ['left', 'base', 'right'],
+        },
       });
       expect(merged.conflicted).toBe(true);
       const conflict = await port.conflicts?.(revisionId(merged.commitId));
@@ -329,6 +342,31 @@ const conformance = (adapter: Adapter): void => {
       expect(record?.provenance.source).toBe('merge');
       expect(record?.parents).toStrictEqual([left, right]);
     }, 180_000);
+
+    it('lists the live checkout, adds one per branch, and refuses a second on the same branch', async () => {
+      const branch = 'checkout/conformance';
+      await port.updateRef({ name: branch, expectedHead: undefined, head: base });
+      const added = await port.addCheckout!({ branch });
+      expect(added).toMatchObject({ projectId, kind: 'linked', branch, baseRevisionId: base });
+      expect(added.id).not.toBe('');
+
+      const listed = await port.listCheckouts!();
+      expect(listed[0]).toMatchObject({ kind: 'live' });
+      expect(listed.filter((checkout) => checkout.branch === branch)).toHaveLength(1);
+      expect(listed.map((checkout) => checkout.id)).toContain(added.id);
+
+      await expect(port.addCheckout!({ branch })).rejects.toMatchObject({ code: 'CHECKOUT_CONFLICT' });
+    }, 180_000);
+
+    it('removes a linked checkout and refuses to remove the live one', async () => {
+      const branch = 'checkout/removable';
+      await port.updateRef({ name: branch, expectedHead: undefined, head: base });
+      const added = await port.addCheckout!({ branch });
+      await port.removeCheckout!(added.id);
+      const remaining = await port.listCheckouts!();
+      expect(remaining.map((checkout) => checkout.id)).not.toContain(added.id);
+      await expect(port.removeCheckout!('live')).rejects.toMatchObject({ code: 'CHECKOUT_CONFLICT' });
+    }, 180_000);
   });
 };
 
@@ -336,104 +374,43 @@ for (const adapter of adapters) {
   conformance(adapter);
 }
 
-const identity = jjExecutable === undefined ? describe.skip : describe;
-
-identity('a revision id is its commit id on every adapter', () => {
-  let workspaceRoot: string;
-  let port: RevisionPort;
-
-  beforeAll(async () => {
-    workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-revisions-id-'));
-    port = createJjRevisionPort({ workspaceRoot, jjExecutable: jjExecutable!, deadline: 120_000 });
-    await port.init({ author });
+/**
+ * I4, as a comparison rather than a promise: the charter's stop condition for
+ * this wave is `isomorphic-git` diverging from native Git on identity, and the
+ * only thing that can observe it is running the same edits through both.
+ */
+describe.runIf(gitOnPath)('cross-adapter identity (I4)', () => {
+  it('names the same tree — and the same revision — from the same scripted edits', async () => {
+    const harnesses = await Promise.all([isomorphicHarness(), nativeHarness()]);
+    try {
+      const records = await Promise.all(
+        harnesses.map(async (harness) => {
+          await harness.port.init({ author });
+          const first = await harness.port.writeRevision({
+            parents: [],
+            tree: tree({ 'a.txt': 'a\n', 'nested/deep/b.txt': 'b\n', 'z.txt': 'z\n' }),
+            provenance: provenance('user'),
+            summary: summary('Base revision'),
+          });
+          const second = await harness.port.writeRevision({
+            parents: [revisionId(first.commitId)],
+            tree: tree({ 'a.txt': 'a2\n', 'nested/deep/b.txt': 'b\n', 'nested/c.txt': 'c\n' }),
+            provenance: provenance('agent'),
+            summary: summary('Child revision'),
+          });
+          return harness.port.readRevision(revisionId(second.commitId));
+        }),
+      );
+      const [isomorphic, native] = records;
+      expect(isomorphic?.treeId).toMatch(/^[\da-f]{40}$/u);
+      expect(native?.treeId).toBe(isomorphic?.treeId);
+      // The commit bytes are the same encoder's on both legs, so the ids match too.
+      expect(native?.id).toBe(isomorphic?.id);
+      expect(native?.receipt.changeId).toBe(isomorphic?.receipt.changeId);
+    } finally {
+      await Promise.all(harnesses.map(async (harness) => harness.dispose()));
+    }
   }, 180_000);
-
-  afterAll(async () => {
-    await rm(workspaceRoot, { recursive: true, force: true });
-  });
-
-  it('re-encodes a revision the pinned Jujutsu wrote to exactly its own id', async () => {
-    const receipt = await port.writeRevision({
-      parents: [],
-      tree: tree({ 'a.txt': 'hello\n' }),
-      provenance: provenance('user'),
-      summary: summary('Identity check'),
-    });
-    const object = await runGitCommand({
-      gitExecutable: 'git',
-      cwd: workspaceRoot,
-      args: ['cat-file', 'commit', receipt.commitId],
-    });
-    expect(object.exitCode).toBe(0);
-    const commit = decodeCommit(object.stdout);
-    // The browser adapter's encoder, given the tree and headers the engine
-    // wrote, must name the same revision.
-    const reencoded = encodeCommit({
-      objectFormat: 'sha1',
-      tree: commit.tree,
-      parents: commit.parents,
-      author: commit.author,
-      committer: commit.committer,
-      message: commit.message,
-      changeId: parseChangeId(commit.changeId!),
-      ...(commit.conflictedTrees === undefined ? {} : { conflictedTrees: commit.conflictedTrees }),
-      ...(commit.conflictLabels === undefined ? {} : { conflictLabels: commit.conflictLabels }),
-    });
-    expect(reencoded.id).toBe(receipt.commitId);
-    expect(commit.changeId).toBe(receipt.changeId);
-  }, 180_000);
-});
-
-const canary = jjExecutable === undefined ? describe.skip : describe;
-
-canary('an authored file is never silently dropped from a snapshot', () => {
-  // One byte past Jujutsu's 1 MiB default. The blueprint's control.
-  const oversized = new Uint8Array(1_048_577).fill(0x61);
-  let workspaceRoot: string;
-
-  beforeAll(async () => {
-    workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-revisions-canary-'));
-  });
-
-  afterAll(async () => {
-    await rm(workspaceRoot, { recursive: true, force: true });
-  });
-
-  it('drops it under the engine default, and keeps it under the generated config', async () => {
-    // Red control: initialize without the generated configuration.
-    const bare = join(workspaceRoot, 'bare');
-    const bareConfig = join(workspaceRoot, 'bare-config.toml');
-    await mkdir(bare, { recursive: true });
-    await writeFile(bareConfig, '[user]\nname = "Tau"\nemail = "tau@example.com"\n');
-    const jj = async (args: readonly string[]): Promise<string> => {
-      const result = await runCommand({
-        executable: jjExecutable!,
-        cwd: bare,
-        args: ['--color=never', '--no-pager', ...args],
-        // eslint-disable-next-line @typescript-eslint/naming-convention -- process environment variable name.
-        env: { JJ_CONFIG: bareConfig },
-        deadline: 120_000,
-      });
-      return decoder.decode(result.stdout);
-    };
-    await jj(['git', 'init']);
-    await writeFile(join(bare, 'big.bin'), oversized);
-    expect(await jj(['file', 'list'])).not.toContain('big.bin');
-
-    // Green: the generated configuration is written before init.
-    const configured = join(workspaceRoot, 'configured');
-    await mkdir(configured, { recursive: true });
-    const port = createJjRevisionPort({ workspaceRoot: configured, jjExecutable: jjExecutable!, deadline: 120_000 });
-    await port.init({ author });
-    const receipt = await port.writeRevision({
-      parents: [],
-      tree: new ImmutableRevisionTree([['big.bin', oversized]]),
-      provenance: provenance('user'),
-      summary: summary('Oversized authored file'),
-    });
-    const recovered = await port.readTree(revisionId(receipt.commitId));
-    expect(recovered?.get('big.bin')?.byteLength).toBe(1_048_577);
-  }, 300_000);
 });
 
 describe('browser ref publication under a Web Lock (8-review S4)', () => {
@@ -443,7 +420,7 @@ describe('browser ref publication under a Web Lock (8-review S4)', () => {
 
   it('queues updateRef behind the same-named lock another document holds', async () => {
     const filesystem = await createMemoryProvider();
-    const port = createBrowserRevisionPort({ filesystem });
+    const port = createIsomorphicGitRevisionPort({ filesystem });
     await port.init({ author: { name: 'Tau', email: 'tau@example.test' } });
     const first = await port.writeRevision({
       parents: [],
@@ -488,7 +465,7 @@ describe('browser ref publication under a Web Lock (8-review S4)', () => {
 
   it('queues setHead behind the same-named lock another document holds (c2-review S2)', async () => {
     const filesystem = await createMemoryProvider();
-    const port = createBrowserRevisionPort({ filesystem });
+    const port = createIsomorphicGitRevisionPort({ filesystem });
     await port.init({ author: { name: 'Tau', email: 'tau@example.test' } });
     await port.setHead('main');
 

@@ -18,7 +18,7 @@ import type { RevisionProvenance, RevisionSummary } from '#revision-authority.js
 import type { ObjectFormat } from '#object-hash.js';
 
 /** Which implementation is behind one port. @public */
-export type RevisionEngine = 'jj' | 'native-git' | 'browser' | 'remote';
+export type RevisionEngine = 'isomorphic-git' | 'native-git' | 'remote';
 
 /** Runtime facts an adapter reports about itself and its repository. @public */
 export type RevisionEngineDescriptor = Readonly<{
@@ -33,10 +33,10 @@ export type RevisionEngineDescriptor = Readonly<{
   conflictsAsValues: boolean;
   /** Whether `fetch` and `push` address a real remote. */
   transports: boolean;
-  /** Whether `bundle` and `importBundle` are implemented. */
-  bundles: boolean;
   /** Whether the engine can fan in more than two parents in one revision. */
   nWayMerge: boolean;
+  /** Whether `listCheckouts`, `addCheckout` and `removeCheckout` are implemented. */
+  checkouts: boolean;
 }>;
 
 /** Durable storage evidence for one revision. `objectFormat` travels with it. @public */
@@ -118,11 +118,15 @@ export type InitRevisionStoreInput = Readonly<{
 export type WriteRevisionInput = Readonly<{
   parents: readonly RevisionId[];
   /**
-   * The exact tree to record. Omitted, the engine computes it by merging the
-   * parents — the only way to record a conflict as a value rather than as a
-   * failure, and the reason this is optional.
+   * The exact tree to record.
+   *
+   * Required: a merge is computed by the caller, with `mergeRevisionTrees` from
+   * `@taucad/filesystem/revisions`, and the terms of an unresolved one arrive
+   * here as {@link WriteRevisionInput.conflict} — which is what keeps a conflict
+   * a value in the graph without either engine having to agree on a merge
+   * algorithm (I-CONF, EQ14).
    */
-  tree?: ImmutableRevisionTree;
+  tree: ImmutableRevisionTree;
   provenance: RevisionProvenance;
   summary: RevisionSummary;
   /**
@@ -185,29 +189,42 @@ export type RevisionTransportInput = Readonly<{
   refspecs: readonly string[];
 }>;
 
-/** Input for producing one standalone bundle. @public */
-export type RevisionBundleInput = Readonly<{
-  outputPath: string;
-  refs: readonly string[];
-}>;
-
-/** Input for verifying and importing one standalone bundle. @public */
-export type ImportRevisionBundleInput = Readonly<{
-  bundlePath: string;
-  refspecs: readonly string[];
-}>;
-
 /** The conflicted term trees and labels recorded on one revision. @public */
 export type RevisionConflict = Readonly<{
   trees: readonly string[];
   labels: readonly string[];
 }>;
 
-/** Input for rendering one conflicted file's terms as conflict-marker text. @public */
-export type MaterializeConflictInput = Readonly<{
-  /** Merge terms in add/remove order; odd count, at least three. */
-  terms: ReadonlyArray<Uint8Array<ArrayBuffer>>;
-  labels?: readonly string[];
+/**
+ * One place a project's files are: the live tree, or a linked copy on a branch
+ * of its own. The id is stable across turns, and is what a chat and the
+ * workbench attach to (S5).
+ *
+ * @public
+ */
+export type Checkout = Readonly<{
+  /** Stable within one project. Derived from the branch, so one branch is one checkout. */
+  id: string;
+  projectId: string;
+  /** Where the files are: a host path on a disk host, a route on the browser leg. */
+  root: string;
+  kind: 'live' | 'linked';
+  /** The branch this checkout tracks, or `undefined` when its head is detached. */
+  branch: string | undefined;
+  /** The revision its head names, or `undefined` on an unborn branch. */
+  baseRevisionId: RevisionId | undefined;
+}>;
+
+/** Input for adding one linked checkout. @public */
+export type AddCheckoutInput = Readonly<{
+  /** The branch the new checkout tracks. One checkout per branch. */
+  branch: string;
+  /**
+   * Where an unborn branch starts. Ignored when the branch already exists: the
+   * checkout is then placed at that branch's head, which is what makes two
+   * hosts' answers to the same input the same.
+   */
+  from?: RevisionId;
 }>;
 
 /**
@@ -233,18 +250,22 @@ export type RevisionPort = Readonly<{
   diff(input: RevisionDiffInput): Promise<readonly RevisionDiffEntry[]>;
   fetch(input: RevisionTransportInput): Promise<void>;
   push(input: RevisionTransportInput): Promise<void>;
-  bundle(input: RevisionBundleInput): Promise<void>;
-  importBundle(input: ImportRevisionBundleInput): Promise<void>;
   /** Rendered Jujutsu change id of one revision. */
   changeId?(id: RevisionId): Promise<string | undefined>;
   /** Conflicted term trees and labels, or `undefined` when the revision is resolved. */
   conflicts?(id: RevisionId): Promise<RevisionConflict | undefined>;
-  /** Render conflict-marker text for one file's merge terms. */
-  materialize?(input: MaterializeConflictInput): Promise<Uint8Array<ArrayBuffer>>;
+  /** Every place this project's files are, live checkout first. */
+  listCheckouts?(): Promise<readonly Checkout[]>;
+  /** Add one linked checkout on its own branch. */
+  addCheckout?(input: AddCheckoutInput): Promise<Checkout>;
+  /** Remove one linked checkout. Removing the live checkout is refused. */
+  removeCheckout?(id: string): Promise<void>;
 }>;
 
 /** Stable failure categories every adapter shares. @public */
 export type RevisionPortErrorCode =
+  /** The requested branch already has a checkout, or the id names no checkout. */
+  | 'CHECKOUT_CONFLICT'
   | 'ENGINE_FAILED'
   | 'ENGINE_UNAVAILABLE'
   | 'INVALID_REPOSITORY'

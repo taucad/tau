@@ -1,0 +1,251 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { MemoryProvider } from '#backend/memory-provider.js';
+import { composeView } from '#composed-view.js';
+import type { ComposedViewOverlay } from '#composed-view.js';
+
+const encoder = new TextEncoder();
+const contents = {
+  'SKILL.md': '---\nname: demo\ndescription: Demo skill\n---\n',
+  'api-index.md': '# Index\nneedle\n',
+  'references/detail.md': '# Detail\n',
+} as const;
+
+const skillsRoot = '.agents/skills';
+const demoIdentity = 'skill:demo@1.0.0#demo-fingerprint';
+
+/** The paths the bundle overlay serves, shaped as the producer in `libs/agent-tools` builds them. */
+const overlayNodes = new Map<string, { type: 'dir'; children: readonly string[] } | { type: 'file'; size: number }>([
+  ['', { type: 'dir', children: ['.agents'] }],
+  ['.agents', { type: 'dir', children: ['skills'] }],
+  [skillsRoot, { type: 'dir', children: ['demo'] }],
+  [`${skillsRoot}/demo`, { type: 'dir', children: ['SKILL.md', 'api-index.md', 'references'] }],
+  [`${skillsRoot}/demo/references`, { type: 'dir', children: ['detail.md'] }],
+  [`${skillsRoot}/demo/SKILL.md`, { type: 'file', size: encoder.encode(contents['SKILL.md']).byteLength }],
+  [`${skillsRoot}/demo/api-index.md`, { type: 'file', size: encoder.encode(contents['api-index.md']).byteLength }],
+  [
+    `${skillsRoot}/demo/references/detail.md`,
+    { type: 'file', size: encoder.encode(contents['references/detail.md']).byteLength },
+  ],
+]);
+
+let provider: MemoryProvider;
+let reads: ReturnType<typeof vi.fn<(path: string) => Promise<Uint8Array<ArrayBuffer>>>>;
+
+const skillOverlay = (): ComposedViewOverlay => ({
+  root: skillsRoot,
+  source: 'system-skills',
+  unit: (path) =>
+    path.startsWith(`${skillsRoot}/`) && path.slice(skillsRoot.length + 1).split('/')[0] === 'demo'
+      ? { root: `${skillsRoot}/demo`, identity: demoIdentity }
+      : undefined,
+  node: (path) => {
+    const node = overlayNodes.get(path);
+    if (node === undefined) {
+      return undefined;
+    }
+    return node.type === 'dir'
+      ? { type: 'dir', children: node.children }
+      : {
+          type: 'file',
+          size: node.size,
+          contentKind: 'text',
+          lineCount: contents[path.slice(`${skillsRoot}/demo/`.length) as keyof typeof contents].split('\n').length,
+        };
+  },
+  read: async (path) => reads(path),
+});
+
+const agentView = () => composeView({ filesystem: provider }, { consumer: 'agent', overlays: [skillOverlay()] });
+const userView = () => composeView({ filesystem: provider }, { consumer: 'user', overlays: [skillOverlay()] });
+
+beforeEach(async () => {
+  provider = new MemoryProvider();
+  await provider.writeFile('main.ts', 'export {};\n');
+  reads = vi.fn(async (path: string) =>
+    encoder.encode(contents[path.slice(`${skillsRoot}/demo/`.length) as keyof typeof contents]),
+  );
+});
+
+describe('composeView overlays', () => {
+  it('should expose overlay files through the checkout-relative tree without reading bytes', async () => {
+    const view = agentView();
+
+    expect(reads).not.toHaveBeenCalled();
+    expect(await view.readdir('')).toContain('.agents');
+    expect(await view.readdir(skillsRoot)).toContain('demo');
+    expect(await view.readdir(`${skillsRoot}/demo`)).toStrictEqual(['SKILL.md', 'api-index.md', 'references']);
+    expect(await view.exists(`${skillsRoot}/demo/references/detail.md`)).toBe(true);
+    expect(await view.stat(`${skillsRoot}/demo/api-index.md`)).toMatchObject({
+      type: 'file',
+      contentKind: 'text',
+      lineCount: 3,
+    });
+    expect(reads).not.toHaveBeenCalled();
+    expect(await view.readFile(`${skillsRoot}/demo/api-index.md`, 'utf8')).toBe(contents['api-index.md']);
+    expect(reads).toHaveBeenCalledOnce();
+  });
+
+  /* Mount-provenance V8: a bundle is a version, never a pile of files. */
+  it('should let any project child replace the complete overlay unit', async () => {
+    await provider.mkdir(`${skillsRoot}/demo`, { recursive: true });
+    await provider.writeFile(`${skillsRoot}/demo/SKILL.md`, 'user\n');
+    const view = agentView();
+
+    expect(await view.readFile(`${skillsRoot}/demo/SKILL.md`, 'utf8')).toBe('user\n');
+    expect(await view.exists(`${skillsRoot}/demo/api-index.md`)).toBe(false);
+    await expect(view.readFile(`${skillsRoot}/demo/api-index.md`)).rejects.toBeInstanceOf(Error);
+    expect(await view.provenance(`${skillsRoot}/demo/SKILL.md`)).toStrictEqual({
+      source: 'project',
+      versioned: true,
+      access: 'read-write',
+      overrides: demoIdentity,
+    });
+    expect(reads).not.toHaveBeenCalled();
+  });
+
+  it('should fail closed when a project file collides with an overlay unit root', async () => {
+    await provider.mkdir(skillsRoot, { recursive: true });
+    await provider.writeFile(`${skillsRoot}/demo`, 'not a directory\n');
+    const view = agentView();
+
+    expect(await view.readdir(skillsRoot)).toStrictEqual(['demo']);
+    await expect(view.readFile(`${skillsRoot}/demo/api-index.md`)).rejects.toBeInstanceOf(Error);
+    expect(reads).not.toHaveBeenCalled();
+  });
+
+  it('should reject every mutation into an overlay with EROFS and keep the read open', async () => {
+    const view = agentView();
+    const path = `${skillsRoot}/demo/api-index.md`;
+
+    await expect(view.writeFile(path, 'x')).rejects.toMatchObject({ code: 'EROFS' });
+    await expect(view.unlink(path)).rejects.toMatchObject({ code: 'EROFS' });
+    await expect(view.rename(path, 'copy.md')).rejects.toMatchObject({ code: 'EROFS' });
+    await expect(view.mkdir(`${skillsRoot}/demo/more`)).rejects.toMatchObject({ code: 'EROFS' });
+    expect(await view.readFile(path, 'utf8')).toBe(contents['api-index.md']);
+  });
+
+  /* The overlay is read-only for the user too; only the mask differs (L4). */
+  it('should refuse an overlay write for the user consumer as well', async () => {
+    await expect(userView().writeFile(`${skillsRoot}/demo/SKILL.md`, 'x')).rejects.toMatchObject({ code: 'EROFS' });
+  });
+
+  it('should reject invalid and undeclared paths before reading bytes', async () => {
+    const view = agentView();
+
+    await expect(view.readFile('../outside')).rejects.toMatchObject({ code: 'PATH_OUTSIDE_ROOT' });
+    await expect(view.readFile(String.raw`.agents\skills\demo\api-index.md`)).rejects.toMatchObject({
+      code: 'INVALID_PATH',
+    });
+    await expect(view.readFile(`${skillsRoot}/demo/missing.md`)).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(view.readFile(`${skillsRoot}/other/api-index.md`)).rejects.toBeInstanceOf(Error);
+    expect(reads).not.toHaveBeenCalled();
+  });
+
+  it('should refuse an overlay file whose bytes do not match its declared length', async () => {
+    reads.mockResolvedValueOnce(encoder.encode('short'));
+
+    await expect(agentView().readFile(`${skillsRoot}/demo/api-index.md`)).rejects.toMatchObject({ code: 'EIO' });
+  });
+});
+
+describe('composeView provenance', () => {
+  it('should report the overlay source, identity and read-only access for an overlay entry', async () => {
+    expect(await agentView().provenance(`${skillsRoot}/demo/SKILL.md`)).toStrictEqual({
+      source: 'system-skills',
+      versioned: false,
+      access: 'read-only',
+      identity: demoIdentity,
+    });
+  });
+
+  it('should report the registry answer and the checkout identity for a project entry', async () => {
+    const view = composeView({ filesystem: provider, id: 'chk_live' }, { consumer: 'user' });
+
+    expect(await view.provenance('main.ts')).toStrictEqual({
+      source: 'project',
+      versioned: true,
+      access: 'read-write',
+      identity: 'chk_live',
+    });
+    expect(await view.provenance('.tau/chats/chat-1/events.jsonl')).toStrictEqual({
+      source: 'project',
+      versioned: false,
+      access: 'read-only',
+      identity: 'chk_live',
+    });
+  });
+
+  it('should stamp every row of a directory listing', async () => {
+    const rows = await agentView().readdirWithStats(`${skillsRoot}/demo`);
+
+    expect(rows.map(({ name, provenance }) => [name, provenance?.source])).toStrictEqual([
+      ['SKILL.md', 'system-skills'],
+      ['api-index.md', 'system-skills'],
+      ['references', 'system-skills'],
+    ]);
+    expect(await agentView().readdirWithStats('')).toContainEqual(
+      expect.objectContaining({ name: 'main.ts', provenance: expect.objectContaining({ source: 'project' }) }),
+    );
+  });
+});
+
+describe('composeView agent mask', () => {
+  beforeEach(async () => {
+    await provider.mkdir('.tau/chats/chat-1', { recursive: true });
+    await provider.writeFile('.tau/chats/chat-1/events.jsonl', '{"type":"run.lifecycle"}\n');
+    await provider.mkdir('.tau/runs', { recursive: true });
+    await provider.writeFile('.tau/runs/run-1.json', '{}\n');
+    await provider.mkdir('.tau/revisions/refs/heads', { recursive: true });
+    await provider.writeFile('.tau/revisions/HEAD', 'ref: refs/heads/main\n');
+    await provider.writeFile('.tau/binding.json', '{}\n');
+  });
+
+  /* North-star acceptance 6 (S18, A9): the control plane never reaches provider
+   * I/O, so `list_directory('.tau')` shows the host's records and never the
+   * revision store. */
+  it('should hide the control plane from a listing and from a read, and keep records readable', async () => {
+    const view = agentView();
+
+    expect((await view.readdir('.tau')).toSorted()).toStrictEqual(['chats', 'runs']);
+    await expect(view.readFile('.tau/revisions/HEAD')).rejects.toMatchObject({
+      code: 'EPERM',
+      reason: 'WORKSPACE_MASKED_PATH',
+    });
+    expect(await view.exists('.tau/binding.json')).toBe(false);
+
+    expect(await view.readFile('.tau/chats/chat-1/events.jsonl', 'utf8')).toBe('{"type":"run.lifecycle"}\n');
+    await expect(view.writeFile('.tau/runs/run-1.json', 'forged')).rejects.toMatchObject({
+      code: 'EROFS',
+      reason: 'WORKSPACE_MASKED_PATH',
+    });
+  });
+
+  it('should refuse every write under the control plane and the record families', async () => {
+    const view = agentView();
+
+    await expect(view.writeFile('.tau/chats/chat-1/events.jsonl', 'forged\n')).rejects.toMatchObject({
+      code: 'EROFS',
+      reason: 'WORKSPACE_MASKED_PATH',
+    });
+    /* The browser port's object store is revision evidence (RC6 S5 gate 15):
+     * an agent that could write it could forge the account of its own turn. */
+    await expect(view.writeFile('.tau/revisions/objects/ab/cdef', 'forged')).rejects.toMatchObject({
+      code: 'EPERM',
+      reason: 'WORKSPACE_MASKED_PATH',
+    });
+    /* The engine stores are the same evidence on a disk host (8-review S3). */
+    await expect(view.writeFile('.jj/repo/store/forged', 'forged')).rejects.toMatchObject({ code: 'EPERM' });
+    await expect(view.writeFile('.git/refs/heads/main', 'forged')).rejects.toMatchObject({ code: 'EPERM' });
+    /* Reads stay open: an agent may read back the account of its own turn. */
+    expect(await view.readFile('.tau/chats/chat-1/events.jsonl', 'utf8')).toBe('{"type":"run.lifecycle"}\n');
+  });
+
+  it('should show the user consumer everything the agent may not see', async () => {
+    const view = userView();
+
+    expect((await view.readdir('.tau')).toSorted()).toStrictEqual(['binding.json', 'chats', 'revisions', 'runs']);
+    expect(await view.readFile('.tau/revisions/HEAD', 'utf8')).toBe('ref: refs/heads/main\n');
+    expect(await view.provenance('.tau/revisions/HEAD')).toMatchObject({ access: 'read-only', versioned: false });
+  });
+});

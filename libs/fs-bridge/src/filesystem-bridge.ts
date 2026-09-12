@@ -12,6 +12,7 @@ import { safeDispose } from '@taucad/utils/dispose';
 import { wrapMessagePort } from '@taucad/rpc';
 import type { MessagePortLike } from '@taucad/rpc';
 import type { ChangeEvent } from '@taucad/types';
+import type { ComposedViewConsumer } from '@taucad/filesystem/composed-view';
 import type {
   FileStat,
   MkdirOptions,
@@ -98,6 +99,62 @@ const isFileSystemBridgeConnection = (
 ): bridge is FileSystemBridgeConnection => !('onMessage' in bridge.port);
 /** Milliseconds. */
 const defaultUiCoalescingWindow = 500;
+
+/** One authority path in a scoped port's own namespace, or `undefined` when it is outside that root. */
+const relativeToRoot = (root: string, path: string): string | undefined => {
+  if (root === '/') {
+    return path === '/' ? '' : path.startsWith('/') ? path.slice(1) : undefined;
+  }
+  if (path === root) {
+    return '';
+  }
+  return path.startsWith(`${root}/`) ? path.slice(root.length + 1) : undefined;
+};
+
+/**
+ * One change event as a scoped port sees it, or `undefined` when nothing in it
+ * touches that port's root.
+ *
+ * A move with one end outside the root is not a move to that port: it is a
+ * disappearance or an arrival, exactly as a rooted view's own watch reports it
+ * (`WorkspaceFileService.createRootedFileSystem`).
+ */
+const scopeEventToRoot = (event: ChangeEvent, root: string): ChangeEvent | undefined => {
+  if (event.type === 'backendChanged') {
+    return event;
+  }
+  if ('path' in event) {
+    const path = relativeToRoot(root, event.path);
+    return path === undefined ? undefined : { ...event, path };
+  }
+  const directory = event.type === 'directoryRenamed' || event.type === 'directoryCopied';
+  const [fromPath, toPath] =
+    'oldPath' in event ? ([event.oldPath, event.newPath] as const) : ([event.sourcePath, event.targetPath] as const);
+  const from = relativeToRoot(root, fromPath);
+  const to = relativeToRoot(root, toPath);
+  if (from !== undefined && to !== undefined) {
+    return 'oldPath' in event
+      ? { ...event, oldPath: from, newPath: to }
+      : { ...event, sourcePath: from, targetPath: to };
+  }
+  if (to !== undefined) {
+    return directory
+      ? {
+          type: 'directoryCreated',
+          path: to,
+          backend: event.backend,
+          ...(event.target ? { target: event.target } : {}),
+        }
+      : { type: 'fileWritten', path: to, backend: event.backend, ...(event.target ? { target: event.target } : {}) };
+  }
+  if (from !== undefined && 'oldPath' in event) {
+    return directory
+      ? { type: 'directoryDeleted', path: from, backend: event.backend }
+      : { type: 'fileDeleted', path: from, backend: event.backend };
+  }
+  /* A copy whose target left the root changed nothing inside it. */
+  return undefined;
+};
 
 const asFileSystemBridgePort = (port: MessagePort): FileSystemBridgePort => port as FileSystemBridgePort;
 
@@ -409,6 +466,12 @@ export type FileSystemBridgeOptions = {
    * forwarded to runtime calls.
    */
   root?: string;
+  /**
+   * Compose the root as this consumer's view instead of handing back the raw
+   * working copy. Omit it for the host's own capture, apply and language
+   * planes, which read the checkout itself.
+   */
+  consumer?: ComposedViewConsumer;
   /** Coalescing window for UI-bound fileChanged events (default: 500). Milliseconds. */
   uiCoalescingWindow?: number;
   /**
@@ -445,6 +508,12 @@ export type ExposeFileSystemHandle = {
 export type RootedFileSystemHandlerFactory = (
   root: string,
   context: WorkspaceMutationContext,
+  /**
+   * Which composed view the connection asked for, or `undefined` for the
+   * checkout's raw working copy — the host's own capture and apply plane,
+   * which must not see composed overlays (architecture V6).
+   */
+  consumer: ComposedViewConsumer | undefined,
 ) => FileSystemBridgeRuntimeService | undefined;
 
 type FileSystemBridgeConnectEnvelope = {
@@ -452,6 +521,7 @@ type FileSystemBridgeConnectEnvelope = {
   readonly type: string;
   readonly port: MessagePort;
   readonly root?: unknown;
+  readonly consumer?: unknown;
 };
 
 const fileSystemBridgeConnectEnvelopeSchema = (messageType: string): z.ZodType<FileSystemBridgeConnectEnvelope> =>
@@ -460,6 +530,7 @@ const fileSystemBridgeConnectEnvelopeSchema = (messageType: string): z.ZodType<F
     type: z.literal(messageType),
     port: z.instanceof(MessagePort),
     root: z.unknown().optional(),
+    consumer: z.unknown().optional(),
   });
 
 const fileSystemBridgePeerEnvelopeSchema = (messageType: string) =>
@@ -499,7 +570,11 @@ const createUnavailableHandlers = (error: unknown): StringKeyedObject =>
  * @public
  */
 type InternalExposeFileSystemOptions = FileSystemBridgeOptions & {
-  handlerForRoot?: (root: string, context: WorkspaceMutationContext) => StringKeyedObject | undefined;
+  handlerForRoot?: (
+    root: string,
+    context: WorkspaceMutationContext,
+    consumer: ComposedViewConsumer | undefined,
+  ) => StringKeyedObject | undefined;
   changeEventBus?: BridgeChangeEventBus;
   /* Inline `Pick`, no named alias.
    * ponytail: one more port-like type declaration is exactly the failure mode
@@ -517,20 +592,32 @@ function exposeFileSystemHandlers(
   const activePorts = new Set<MessagePort>();
   const serverHandles = new Map<MessagePort, BridgeServerHandle>();
   const portIds = new Map<MessagePort, string>();
-  const scopedPorts = new Set<MessagePort>();
+  /** Every scoped port and the authority root it is confined to. */
+  const scopedPorts = new Map<MessagePort, string>();
 
+  /*
+   * Events ride the view (architecture L4, A11). A scoped port is one consumer
+   * of one checkout, so it receives exactly the events whose authority path
+   * lies inside its root, spelled in its own root-relative namespace — and
+   * never its own writes, which it already knows about.
+   */
   const deliverToHandles = (events: ChangeEvent[]): void => {
     for (const event of events) {
       const originClientId = getEventOrigin(event);
       for (const [recipientPort, handle] of serverHandles) {
-        if (scopedPorts.has(recipientPort)) {
-          continue;
-        }
         const recipientPortId = portIds.get(recipientPort);
         if (originClientId !== undefined && recipientPortId !== undefined && originClientId === recipientPortId) {
           continue;
         }
-        handle.emit('fileChanged', event);
+        const root = scopedPorts.get(recipientPort);
+        if (root === undefined) {
+          handle.emit('fileChanged', event);
+          continue;
+        }
+        const scoped = scopeEventToRoot(event, root);
+        if (scoped !== undefined) {
+          handle.emit('fileChanged', scoped);
+        }
       }
     }
   };
@@ -609,6 +696,10 @@ function exposeFileSystemHandlers(
 
     const wrappedPort = wrapFileSystemBridgePort(port, 'expose-fs-bridge');
     const requestedRoot = typeof parsedEnvelope.data.root === 'string' ? parsedEnvelope.data.root : undefined;
+    const requestedConsumer =
+      parsedEnvelope.data.consumer === 'agent' || parsedEnvelope.data.consumer === 'user'
+        ? parsedEnvelope.data.consumer
+        : undefined;
     const mutationContext = { originClientId: portId };
     let portHandlers: StringKeyedObject;
     let handlersAvailable = true;
@@ -616,9 +707,9 @@ function exposeFileSystemHandlers(
     if (requestedRoot === undefined) {
       portHandlers = bindMutationContextForPort(handlers, mutationContext);
     } else {
-      scopedPorts.add(port);
+      scopedPorts.set(port, requestedRoot);
       try {
-        const rootedHandlers = options?.handlerForRoot?.(requestedRoot, mutationContext);
+        const rootedHandlers = options?.handlerForRoot?.(requestedRoot, mutationContext, requestedConsumer);
         handlersAvailable = rootedHandlers !== undefined;
         unavailableError = rootedHandlers === undefined ? new RootedFileSystemError('ROOT_UNAVAILABLE') : undefined;
         portHandlers = rootedHandlers ?? createUnavailableHandlers(unavailableError!);
@@ -801,10 +892,13 @@ export function openFileSystemBridge(
 ): FileSystemBridgeConnection {
   const messageType = options?.messageType ?? filesystemBridgeConnectMessageType;
   const channel = new MessageChannel();
-  const envelope =
-    options?.root === undefined
-      ? { v: fileSystemBridgeProtocolVersion, type: messageType, port: channel.port1 }
-      : { v: fileSystemBridgeProtocolVersion, type: messageType, port: channel.port1, root: options.root };
+  const envelope = {
+    v: fileSystemBridgeProtocolVersion,
+    type: messageType,
+    port: channel.port1,
+    ...(options?.root === undefined ? {} : { root: options.root }),
+    ...(options?.consumer === undefined ? {} : { consumer: options.consumer }),
+  };
   worker.postMessage(envelope, [channel.port1]);
   const rawPort = asFileSystemBridgePort(channel.port2);
   return {

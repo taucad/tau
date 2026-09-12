@@ -16,7 +16,8 @@ import type {
   WorkspaceScope,
 } from '@taucad/filesystem';
 import { pendingProjectCommitInputSchema } from '@taucad/filesystem';
-import type { ChangeEvent, FileStat, FileStatEntry, ProjectManifestParseIssue } from '@taucad/types';
+import type { ComposedView } from '@taucad/filesystem/composed-view';
+import type { ChangeEvent, FileProvenance, FileStat, FileStatEntry, ProjectManifestParseIssue } from '@taucad/types';
 import { projectManifestSchema, projectManifestSchemaUrl } from '@taucad/types';
 import { filesystemBackends } from '@taucad/types/constants';
 import type { BridgeProtocolSchemas } from '@taucad/rpc/bridge';
@@ -119,9 +120,18 @@ type FileSystemBridgeReadFile = {
   (path: string, options?: { readonly scope?: WorkspaceScope }): Promise<Uint8Array<ArrayBuffer>>;
 };
 
-/** Complete callable surface supported by a filesystem bridge proxy. @public */
+/**
+ * Complete callable surface supported by a filesystem bridge proxy.
+ *
+ * The last two rows are the composed view's own (L4) and answer only on a
+ * rooted connection that asked for a consumer; the workspace service has no
+ * provenance to report.
+ *
+ * @public
+ */
 export type FileSystemBridgeService = Omit<FileSystemBridgeWorkspaceService, 'readFile'> &
-  Pick<RootedFileSystem, 'rename'> & {
+  Pick<RootedFileSystem, 'rename'> &
+  Pick<ComposedView, 'provenance' | 'readdirWithStats'> & {
     readFile: FileSystemBridgeReadFile;
   };
 
@@ -201,6 +211,30 @@ const fileStatEntrySchema: z.ZodType<FileStatEntry> = z.custom<FileStatEntry>((v
 const fileStatEntriesSchema: z.ZodType<FileStatEntry[]> = z.custom<FileStatEntry[]>(
   (value) => Array.isArray(value) && value.every((entry) => fileStatEntrySchema.safeParse(entry).success),
 );
+
+const fileProvenanceSchema: z.ZodType<FileProvenance> = z.looseObject({
+  source: z.enum(['project', 'dependencies', 'system-skills']),
+  versioned: z.boolean(),
+  access: z.enum(['read-write', 'read-only']),
+  identity: z.string().optional(),
+  overrides: z.string().optional(),
+});
+
+const composedDirectoryRowSchema: z.ZodType<{ name: string } & FileStat> = z.custom<{ name: string } & FileStat>(
+  (value) => {
+    const record = plainRecordSchema.safeParse(value);
+    return (
+      record.success &&
+      stringSchema.safeParse(record.data['name']).success &&
+      fileStatSchema.safeParse(value).success &&
+      (record.data['provenance'] === undefined || fileProvenanceSchema.safeParse(record.data['provenance']).success)
+    );
+  },
+);
+
+const composedDirectoryRowsSchema: z.ZodType<Array<{ name: string } & FileStat>> = z.custom<
+  Array<{ name: string } & FileStat>
+>((value) => Array.isArray(value) && value.every((row) => composedDirectoryRowSchema.safeParse(row).success));
 
 const mutationErrorCodeValues = [
   'NAME_EXISTS',
@@ -570,6 +604,8 @@ const callSchemas = {
     result: booleanResult,
   },
   rename: { args: twoStringArgs, result: voidResult },
+  readdirWithStats: { args: oneStringArgument, result: composedDirectoryRowsSchema },
+  provenance: { args: oneStringArgument, result: fileProvenanceSchema },
 } satisfies FileSystemBridgeCallSchemas;
 
 const broadcastValidator = z.looseObject({ event: z.literal('fileChanged'), data: changeEventSchema });

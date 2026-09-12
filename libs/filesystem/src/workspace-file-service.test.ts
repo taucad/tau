@@ -392,6 +392,54 @@ describe('WorkspaceFileService', () => {
     });
   });
 
+  describe('checkout routes', () => {
+    const projectId = 'proj_kkkkkkkkkkkkkkkkkkkkk';
+    const checkoutId = 'chk_bracket_fillet';
+    const checkoutBasePath = `.tau/checkouts/${projectId}/${checkoutId}`;
+
+    /*
+     * North-star W2 red pin (execution-queue ruling P2). A linked checkout is
+     * git's worktree made addressable (charter D4, blueprint S4): a persistent
+     * `/checkouts/<id>` route over the project's own storage root, class
+     * `authored`, installed explicitly and never a discovery candidate, so that
+     * `createRootedFileSystem('/checkouts/<id>')` needs no new capability and
+     * ESTALE keeps its meaning. `ProjectRootConfiguration` has no such row
+     * today. Remove `.fails` in the change that installs the route.
+     */
+    it('should install a linked checkout route over the project storage root, invisible to discovery', async () => {
+      const provider = await providerRegistry.getProvider({ backend: 'indexeddb' });
+      await provider.mkdir(projectId);
+      await provider.writeFile(
+        `${projectId}/tau.json`,
+        serializeProjectManifest(
+          projectToManifest({
+            id: projectId,
+            name: 'bracket',
+            description: '',
+            tags: [],
+            assets: { main: { entryPath: 'main.ts' } },
+          }),
+        ),
+      );
+      const configuration = {
+        projects: [{ projectId, backend: 'indexeddb' as const, providerBasePath: projectId }],
+        checkouts: [{ checkoutId, projectId, backend: 'indexeddb' as const, providerBasePath: checkoutBasePath }],
+        roots: [{ backend: 'indexeddb' as const }],
+      };
+      await service.configureProjectRoots(configuration);
+
+      const view = service.createRootedFileSystem(`/checkouts/${checkoutId}`);
+      await view.writeFile('main.ts', 'export const bracket = 1;');
+
+      expect(decoder.decode(await provider.readFile(`${checkoutBasePath}/main.ts`))).toBe('export const bracket = 1;');
+      const { entries } = await service.listProjectManifests();
+      expect(entries.map((entry) => entry.locator.relativeDirectory)).toEqual([projectId]);
+
+      await service.configureProjectRoots({ ...configuration, checkouts: [] });
+      await expect(view.readFile('main.ts')).rejects.toMatchObject({ code: 'ESTALE' });
+    });
+  });
+
   describe('permanentlyDeleteProjectDirectory', () => {
     const projectId = 'proj_eeeeeeeeeeeeeeeeeeeee';
     const directory = 'readable-project';

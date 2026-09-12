@@ -14,6 +14,7 @@ import {
   mergeRevisionTrees,
   revisionId,
 } from '@taucad/filesystem';
+import { pathRegistry } from '@taucad/filesystem/path-registry';
 import type {
   ImmutableRevisionTree,
   MaterializedWorkspace,
@@ -33,10 +34,9 @@ import type {
 } from '#revision-authority.js';
 import { createPortRevisionPersistence } from '#revision-persistence.js';
 import type { RevisionPersistenceReceipt } from '#revision-persistence.js';
-import { createBrowserRevisionPort } from '#browser-adapter.js';
+import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
 import { RevisionPortError } from '#revision-port.js';
 import type { RevisionPort } from '#revision-port.js';
-import { excludedRevisionPaths } from '#workspace-config.js';
 
 /**
  * Where one turn writes: `local` binds the live tree in place, `branch`
@@ -45,8 +45,8 @@ import { excludedRevisionPaths } from '#workspace-config.js';
 export type TurnRevisionMode = MaterializedWorkspaceMode;
 
 /**
- * Rooted paths no turn capture ever walks: the non-authored rows of
- * {@link revisionPathPolicy}, and nothing else.
+ * Rooted paths no turn capture ever walks: every path registry row whose bytes
+ * are not versioned, and nothing else.
  *
  * Derived rather than restated, because a capture list that drifted from the
  * engine's ignore file is exactly how `.jj/repo/store/git/HEAD`, `.git/HEAD`,
@@ -54,7 +54,9 @@ export type TurnRevisionMode = MaterializedWorkspaceMode;
  * the live root *is* the agent tree, so an unexcluded entry rides straight into
  * the revision and lands in `changedPaths`. @public
  */
-export const defaultTurnCaptureExclusions: readonly string[] = excludedRevisionPaths;
+export const defaultTurnCaptureExclusions: readonly string[] = Object.freeze(
+  pathRegistry.filter((row) => !row.versioned).map((row) => row.prefix),
+);
 
 /** Dependencies for one turn-revision recorder over one authoritative root. @public */
 export type TurnRevisionRecorderOptions = Readonly<{
@@ -67,11 +69,10 @@ export type TurnRevisionRecorderOptions = Readonly<{
   /**
    * The content-addressed store every revision id is minted by.
    *
-   * Defaults to the browser adapter over `filesystem`: plain TypeScript Git
-   * objects, so the same tree and headers name the same revision in a page, in
-   * a daemon and in the desktop utility. A host that resolves the pinned
-   * Jujutsu binary, or a native-Git repository, passes that adapter instead —
-   * **once, at host composition**, never per turn.
+   * Defaults to the `isomorphic-git` adapter over `filesystem`, so the same
+   * tree and headers name the same revision in a page, in a daemon and in the
+   * desktop utility. A host with a native-Git repository passes that port
+   * instead — **once, at host composition**, never per turn.
    */
   port?: RevisionPort;
   /** Defaults to {@link defaultTurnCaptureExclusions}. */
@@ -219,7 +220,7 @@ export class TurnRevisionRecorder {
   public constructor(options: TurnRevisionRecorderOptions) {
     this.#filesystem = options.filesystem;
     this.#workspaces = options.workspaces ?? new MaterializedWorkspaceAuthority({ filesystem: options.filesystem });
-    this.#port = options.port ?? createBrowserRevisionPort({ filesystem: options.filesystem });
+    this.#port = options.port ?? createIsomorphicGitRevisionPort({ filesystem: options.filesystem });
     /* One store. The authority's graph and its branch refs are a projection of
      * the content-addressed store the ids come from — not a second copy of
      * every tree beside it (R-W1 §6.1). */

@@ -64,6 +64,7 @@ export type {
   MountEntry,
   MountMetadata,
   MountResolution,
+  CheckoutRootConfig,
   ProjectRootConfig,
   ProjectRootConfiguration,
   ProjectDiscoveryEntry,

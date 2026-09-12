@@ -1,5 +1,6 @@
 /* eslint-disable import-x/no-extraneous-dependencies -- the package import map resolves `#*.js` to this package's own source files. */
 import { createHash } from 'node:crypto';
+import { inflateSync } from 'node:zlib';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   ChangeEventBus,
@@ -125,7 +126,11 @@ describe('TurnRevisionRecorder', () => {
     // A direct turn records onto the trunk the live tree tracks; a candidate onto its own lane.
     expect(result.branch).toBe(mode === 'branch' ? turnRevisionBranch('chat_1') : mainRevisionBranch);
     expect(result.publication).toMatchObject({ status: 'updated', head: result.revision.id });
-    expect(result.persistence).toMatchObject({ engine: 'browser', commitId: result.revision.id, objectFormat: 'sha1' });
+    expect(result.persistence).toMatchObject({
+      engine: 'isomorphic-git',
+      commitId: result.revision.id,
+      objectFormat: 'sha1',
+    });
     // The merged tree reached the live project either way.
     await expect(harness.filesystem.readFile('main.scad', 'utf8')).resolves.toBe('cube(20);');
     expect(harness.recorder.revisions.getBranchHead(result.branch)).toBe(result.revision.id);
@@ -443,12 +448,13 @@ describe('TurnRevisionRecorder', () => {
     expect(second.result.revision.parents).toEqual([first.result.revision.id]);
     expect(harness.recorder.revisions.getBranchHead(mainRevisionBranch)).toBe(second.result.revision.id);
 
-    // The oracle is Git's own definition, computed by Node rather than by this
-    // package: a revision id is the SHA-1 of its stored loose-object bytes.
+    /* The oracle is Git's own definition, computed by Node rather than by this
+     * package: a revision id is the SHA-1 of its loose object's framed bytes,
+     * which a real repository stores deflated. */
     for (const id of ids) {
       // oxlint-disable-next-line no-await-in-loop -- two reads, ordered for a readable failure.
-      const framed = await harness.filesystem.readFile(`.tau/revisions/objects/${id.slice(0, 2)}/${id.slice(2)}`);
-      expect(createHash('sha1').update(framed).digest('hex')).toBe(id);
+      const stored = await harness.filesystem.readFile(`.tau/revisions/objects/${id.slice(0, 2)}/${id.slice(2)}`);
+      expect(createHash('sha1').update(inflateSync(stored)).digest('hex')).toBe(id);
     }
   });
 });

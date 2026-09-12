@@ -1288,7 +1288,7 @@ describe('exposeFileSystem skip-originator dispatch', () => {
     }
   });
 
-  it('captures one rooted handler per scoped port and excludes scoped ports from global broadcasts', async () => {
+  it('captures one rooted handler per scoped port and scopes every broadcast to that port root', async () => {
     const alphaProjectId = 'proj_aaaaaaaaaaaaaaaaaaaaa';
     const betaProjectId = 'proj_bbbbbbbbbbbbbbbbbbbbb';
     const providerRegistry = new ProviderRegistry();
@@ -1355,7 +1355,15 @@ describe('exposeFileSystem skip-originator dispatch', () => {
         expect(watchEvents).toContainEqual({ type: 'change', path: 'external.ts' });
       });
       expect(watchEvents).not.toContainEqual({ type: 'change', path: 'same.ts' });
-      expect(globalEvents).toEqual([]);
+      /* Alpha hears the external write in its own namespace, never its own
+       * write and never beta's, whose path lies outside alpha's root (L4). */
+      await vi.waitFor(() => {
+        expect(globalEvents).toContainEqual(expect.objectContaining({ type: 'fileWritten', path: 'external.ts' }));
+      });
+      expect(globalEvents).not.toContainEqual(expect.objectContaining({ path: 'same.ts' }));
+      expect(globalEvents).not.toContainEqual(
+        expect.objectContaining({ path: `/projects/${alphaProjectId}/external.ts` }),
+      );
       expect(handlerForRoot).toHaveBeenCalledTimes(2);
       expect(handlerForRoot.mock.calls[0]?.[0]).toBe(`/projects/${alphaProjectId}`);
       expect(handlerForRoot.mock.calls[0]?.[1].originClientId).toMatch(/^port_/u);
@@ -1370,6 +1378,79 @@ describe('exposeFileSystem skip-originator dispatch', () => {
       service.dispose();
       alphaChannel.port1.close();
       betaChannel.port1.close();
+    }
+  });
+
+  /*
+   * North-star W2 red pin (execution-queue ruling P2): a rooted port is a
+   * composed view of one checkout, and "events ride the view" (architecture
+   * L4). Today `deliverToHandles` skips every scoped port outright
+   * (`filesystem-bridge.ts:526`), so a UI reading a checkout through a rooted
+   * port never learns that another port wrote into it. Remove `.fails` in the
+   * change that gives scoped ports their in-root fan-out.
+   */
+  it('should deliver a peer port write under a scoped port root to that scoped port', async () => {
+    const projectId = 'proj_ccccccccccccccccccccc';
+    const providerRegistry = new ProviderRegistry();
+    const rootProvider = await providerRegistry.getProvider({
+      backend: 'memory',
+      storageRootKey: 'memory:bridge-fanout-root',
+    });
+    const mountTable = new MountTable();
+    mountTable.mount('/', rootProvider, { class: 'authored', backend: 'memory' });
+    const bus = new ChangeEventBus();
+    const service = new WorkspaceFileService({
+      providerRegistry,
+      resourceQueue: new ResourceQueue(),
+      eventBus: bus,
+      mountTable,
+    });
+    await service.configureProjectRoots({
+      projects: [
+        {
+          projectId,
+          backend: 'memory',
+          storageRootKey: 'memory:bridge-fanout',
+          providerBasePath: projectId,
+        },
+      ],
+      roots: [],
+    });
+    const handle = exposeFileSystem(service, {
+      changeEventBus: bus,
+      handlerForRoot: (root, context) => service.createRootedFileSystem(root, context),
+    });
+    const connect = (port: MessagePort, root?: string): void => {
+      messageHandlers[0]!(
+        new MessageEvent('message', {
+          data: { v: 1, type: filesystemBridgeConnectMessageType, port, ...(root === undefined ? {} : { root }) },
+        }),
+      );
+    };
+    const readerChannel = new MessageChannel();
+    const writerChannel = new MessageChannel();
+    connect(readerChannel.port1, `/projects/${projectId}`);
+    connect(writerChannel.port1, `/projects/${projectId}`);
+    const reader = createTransferredFileSystemBridgeProxy(readerChannel.port2);
+    const writer = createTransferredFileSystemBridgeProxy(writerChannel.port2);
+    const received: unknown[] = [];
+    const stopListening = reader.listen('fileChanged', (event) => received.push(event));
+
+    try {
+      await reader.ready;
+      await writer.ready;
+      await writer.writeFile('peer.ts', 'peer');
+      await vi.waitFor(() => {
+        expect(received).toContainEqual(expect.objectContaining({ type: 'fileWritten', path: 'peer.ts' }));
+      });
+    } finally {
+      stopListening();
+      reader.dispose();
+      writer.dispose();
+      handle.cleanup();
+      service.dispose();
+      readerChannel.port1.close();
+      writerChannel.port1.close();
     }
   });
 

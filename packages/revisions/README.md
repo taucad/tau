@@ -1,38 +1,45 @@
 # @taucad/revisions
 
-Host-neutral revision port with jj, native-Git and browser adapters for Tau
+Host-neutral revision port with native-Git and browser adapters for Tau
 
 A revision is an immutable, content-addressed snapshot of one workspace tree with
 its parents and provenance. Its identity **is** its Git commit id, so the same
 tree and the same headers name the same revision on every host.
 
-`RevisionPort` is the one seam every host implements. Three adapters ship here:
+`RevisionPort` is the one seam every host implements. Two ports ship here:
 
-| Adapter   | Engine                                             | Where it runs                              |
-| --------- | -------------------------------------------------- | ------------------------------------------ |
-| `jj`      | the pinned Jujutsu CLI, spawned                    | any host with the checksum-verified binary |
-| `git`     | the native Git object/ref/worktree adapter         | Node hosts with `git` on `PATH`            |
-| `browser` | the Git object encoder over a `FileSystemProvider` | the page; not a Git engine                 |
+| Port                              | Engine                                       | Where it runs                   |
+| --------------------------------- | -------------------------------------------- | ------------------------------- |
+| `createNativeGitRevisionPort`     | the `git` binary: objects, refs, worktrees   | Node hosts with `git` on `PATH` |
+| `createIsomorphicGitRevisionPort` | `isomorphic-git` over a `FileSystemProvider` | the page, the worker, anywhere  |
 
-Every revision carries a `change-id` from creation. Conflicted revisions carry
-`jj:conflict-labels` and `jj:trees` in Jujutsu's exact header order, and every
-adapter preserves the `Tau-Metadata` provenance trailer. `objectFormat` travels
-on every receipt; no caller assumes a 40-character id.
+Both write a real Git repository, and both write the _commit_ object with this
+package's own encoder: every revision carries a `change-id` from creation and a
+conflicted one carries `jj:conflict-labels` and `jj:trees` in Jujutsu's exact
+header order, none of which `git commit-tree` or `isomorphic-git`'s
+`CommitObject` can express. One encoder over two object stores is why the same
+scripted edits name the same tree — and the same revision — on both legs.
+Every port preserves the `Tau-Metadata` provenance trailer, and `objectFormat`
+travels on every receipt; no caller assumes a 40-character id.
 
-The generated ignore file and the per-project Jujutsu configuration are written
-**before** `init`, because the engine tracks whatever the ignore file does not
-exclude and drops authored files above its default size limit.
+A merge is the caller's: `mergeRevisionTrees` from `@taucad/filesystem/revisions`
+produces the tree, and the terms of an unresolved one are recorded as a value on
+the revision, so a conflict lives in the graph rather than failing an operation.
+
+The generated ignore file is written **before** `init`, because the engine
+tracks whatever the ignore file does not exclude. Its content is derived from
+`@taucad/filesystem/path-registry`: every row whose bytes are not versioned.
 
 ## Tests
 
-The port conformance table runs against the `browser` adapter unconditionally and
-against the `jj` adapter whenever the pinned binary resolves:
+The port conformance table runs the `isomorphic-git` row unconditionally and the
+`native-git` row wherever `git` is on `PATH`, and compares the two:
 
 ```bash
-TAU_JJ_EXECUTABLE=/abs/path/to/jj pnpm nx test revisions --watch=false
+pnpm nx test revisions --watch=false
 ```
 
-The native Git suite is explicit:
+The native Git adapter's integration suite is explicit:
 
 ```bash
 TAU_NATIVE_GIT_INTEGRATION=1 pnpm nx test revisions --watch=false --skip-nx-cache

@@ -1,34 +1,37 @@
 /* eslint-disable import-x/no-extraneous-dependencies -- the package import map resolves `#*.js` to this package's own source files. */
 /**
- * Git loose-object encoder and commit decoder shared by every adapter.
+ * Git commit encoder and decoder shared by every adapter.
  *
- * The byte layout, the tree ordering rule and Jujutsu's exact commit header
- * order (`jj:conflict-labels`, then `jj:trees`, then `change-id`, all after
- * `committer`) are the ones qualified against the pinned Jujutsu binary by the
- * dual-target revision-algebra spike. A revision id is the id this module
- * computes; nothing derives an identity any other way.
+ * Jujutsu's exact commit header order (`jj:conflict-labels`, then `jj:trees`,
+ * then `change-id`, all after `committer`) is the one qualified against the
+ * pinned Jujutsu binary by the dual-target revision-algebra spike. A revision
+ * id is the id this module computes; nothing derives an identity any other way.
+ *
+ * The blob, tree and pack codec that used to live here is gone: `isomorphic-git`
+ * writes those objects in the page and `git` writes them on a disk host, and
+ * both produce the same bytes. Only the commit survives, because neither engine
+ * can carry Tau's extra headers — `isomorphic-git`'s `CommitObject` has fields
+ * for `tree`, `parent`, `author`, `committer`, `message` and `gpgsig` and
+ * nothing else, and `git commit-tree` takes no arbitrary header either. Both
+ * hosts therefore write the commit produced here as a raw object.
  */
 
 /* oxlint-disable no-bitwise -- Jujutsu's change-id rendering packs and unpacks nibbles. */
 
-import { assertObjectFormat, bytesToHex, concatBytes, digest, hexToBytes, objectIdByteLength } from '#object-hash.js';
+import { assertObjectFormat, bytesToHex, concatBytes, digest, objectIdByteLength } from '#object-hash.js';
 import type { ObjectFormat } from '#object-hash.js';
 
 /** Git object kinds Tau writes. @public */
 export type GitObjectType = 'blob' | 'tree' | 'commit';
 
-/** Git tree entry modes Tau writes. @public */
-export type GitMode = '100644' | '100755' | '120000' | '160000' | '40000';
-
-/** Stable failure categories emitted by the Git object codec. @public */
+/** Stable failure categories emitted by the Git commit codec. @public */
 export type GitObjectErrorCode =
   | 'INVALID_OBJECT_FORMAT'
   | 'INVALID_OBJECT_TYPE'
   | 'INVALID_OBJECT_ID'
-  | 'INVALID_TREE'
   | 'INVALID_COMMIT';
 
-/** Typed Git object codec failure. @public */
+/** Typed Git commit codec failure. @public */
 export class GitObjectError extends Error {
   public readonly code: GitObjectErrorCode;
 
@@ -56,21 +59,6 @@ export type EncodedGitObject = Readonly<{
   body: Uint8Array<ArrayBuffer>;
   /** Loose-object bytes, exactly what Git hashes. */
   framed: Uint8Array<ArrayBuffer>;
-}>;
-
-/** One file in a flat path-keyed tree. @public */
-export type FlatTreeEntry = Readonly<{
-  path: string;
-  mode: Exclude<GitMode, '40000'>;
-  content?: Uint8Array<ArrayBuffer>;
-  objectId?: string;
-}>;
-
-/** One resolved entry of a single Git tree object. @public */
-export type TreeEntry = Readonly<{
-  name: string;
-  mode: GitMode;
-  objectId: string;
 }>;
 
 /** Git author or committer identity and time. @public */
@@ -176,210 +164,6 @@ export const encodeObject = (
     body: owned,
     framed,
   });
-};
-
-/**
- * Encode one blob object.
- *
- * @param objectFormat - Recorded repository object format.
- * @param content - File bytes.
- * @returns The blob object.
- * @public
- */
-export const encodeBlob = (objectFormat: ObjectFormat, content: Uint8Array<ArrayBuffer>): EncodedGitObject =>
-  encodeObject(objectFormat, 'blob', content);
-
-type PreparedTreeEntry = Readonly<{
-  mode: GitMode;
-  name: Uint8Array<ArrayBuffer>;
-  objectId: Uint8Array<ArrayBuffer>;
-  directory: boolean;
-}>;
-
-/**
- * Git's tree ordering: a directory name sorts as if it ended with `/`, which is
- * why a plain byte comparison of the names alone is wrong.
- *
- * @param left - First entry.
- * @param right - Second entry.
- * @returns Negative, zero or positive, as a comparator.
- */
-const compareTreeEntries = (left: PreparedTreeEntry, right: PreparedTreeEntry): number => {
-  const common = Math.min(left.name.length, right.name.length);
-  for (let index = 0; index < common; index += 1) {
-    if (left.name[index] !== right.name[index]) {
-      return left.name[index]! - right.name[index]!;
-    }
-  }
-  const leftNext = left.name.length === common ? (left.directory ? 0x2f : 0) : left.name[common]!;
-  const rightNext = right.name.length === common ? (right.directory ? 0x2f : 0) : right.name[common]!;
-  return leftNext - rightNext;
-};
-
-/**
- * Encode one Git tree object from already-resolved entries.
- *
- * @param objectFormat - Recorded repository object format.
- * @param entries - Entries in any order; Git's ordering is applied here.
- * @returns The tree object.
- * @public
- */
-export const encodeTree = (objectFormat: ObjectFormat, entries: readonly TreeEntry[]): EncodedGitObject => {
-  assertFormat(objectFormat);
-  const modes = new Set<GitMode>(['100644', '100755', '120000', '160000', '40000']);
-  const prepared = entries
-    .map((entry) => {
-      if (!modes.has(entry.mode)) {
-        throw new GitObjectError('INVALID_TREE', 'Invalid Git tree mode.');
-      }
-      const name = textEncoder.encode(entry.name);
-      if (name.length === 0 || name.includes(0) || name.includes(0x2f)) {
-        throw new GitObjectError('INVALID_TREE', 'Invalid Git tree name.');
-      }
-      return {
-        mode: entry.mode,
-        name,
-        objectId: hexToBytes(assertObjectId(objectFormat, entry.objectId)),
-        directory: entry.mode === '40000',
-      };
-    })
-    .sort(compareTreeEntries);
-  for (let index = 1; index < prepared.length; index += 1) {
-    const previous = prepared[index - 1]!.name;
-    const current = prepared[index]!.name;
-    if (previous.length === current.length && previous.every((byte, offset) => byte === current[offset])) {
-      throw new GitObjectError('INVALID_TREE', 'Duplicate Git tree name.');
-    }
-  }
-  return encodeObject(
-    objectFormat,
-    'tree',
-    concatBytes(
-      ...prepared.flatMap((entry) => [
-        textEncoder.encode(`${entry.mode} `),
-        entry.name,
-        Uint8Array.of(0),
-        entry.objectId,
-      ]),
-    ),
-  );
-};
-
-type TreeNode = { files: Map<string, FlatTreeEntry>; children: Map<string, TreeNode> };
-
-const treeNode = (): TreeNode => ({ files: new Map(), children: new Map() });
-
-const splitTreePath = (path: string): readonly string[] => {
-  const parts = path.split('/');
-  if (
-    path.startsWith('/') ||
-    path.endsWith('/') ||
-    path.includes('\0') ||
-    parts.some((part) => part === '' || part === '.' || part === '..')
-  ) {
-    throw new GitObjectError('INVALID_TREE', 'Invalid Git path.');
-  }
-  return parts;
-};
-
-/** Every object produced while encoding one flat tree. @public */
-export type EncodedTreeGraph = Readonly<{
-  tree: EncodedGitObject;
-  /** Blobs and subtrees, children before parents; the root tree is last. */
-  objects: readonly EncodedGitObject[];
-}>;
-
-/**
- * Encode a flat path-keyed file set into the full Git tree graph.
- *
- * @param objectFormat - Recorded repository object format.
- * @param entries - Root-relative file entries with no leading slash.
- * @returns The root tree and every object it needs.
- * @public
- */
-export const encodeTreeGraph = (objectFormat: ObjectFormat, entries: Iterable<FlatTreeEntry>): EncodedTreeGraph => {
-  assertFormat(objectFormat);
-  const root = treeNode();
-  for (const entry of entries) {
-    const parts = splitTreePath(entry.path);
-    let parent = root;
-    for (const part of parts.slice(0, -1)) {
-      if (parent.files.has(part)) {
-        throw new GitObjectError('INVALID_TREE', 'Git path collides with a file.');
-      }
-      let child = parent.children.get(part);
-      if (child === undefined) {
-        child = treeNode();
-        parent.children.set(part, child);
-      }
-      parent = child;
-    }
-    const name = parts.at(-1)!;
-    if (parent.children.has(name) || parent.files.has(name)) {
-      throw new GitObjectError('INVALID_TREE', 'Duplicate Git path.');
-    }
-    parent.files.set(name, entry);
-  }
-
-  const objects: EncodedGitObject[] = [];
-  const write = (node: TreeNode): EncodedGitObject => {
-    const treeEntries: TreeEntry[] = [];
-    for (const [name, entry] of node.files) {
-      if (entry.mode === '160000') {
-        if (entry.objectId === undefined || entry.content !== undefined) {
-          throw new GitObjectError('INVALID_TREE', 'A submodule entry carries only an objectId.');
-        }
-        treeEntries.push({ name, mode: entry.mode, objectId: assertObjectId(objectFormat, entry.objectId) });
-        continue;
-      }
-      if (entry.content === undefined || entry.objectId !== undefined) {
-        throw new GitObjectError('INVALID_TREE', 'A blob entry carries only content.');
-      }
-      const blob = encodeBlob(objectFormat, entry.content);
-      objects.push(blob);
-      treeEntries.push({ name, mode: entry.mode, objectId: blob.id });
-    }
-    for (const [name, child] of node.children) {
-      treeEntries.push({ name, mode: '40000', objectId: write(child).id });
-    }
-    const tree = encodeTree(objectFormat, treeEntries);
-    objects.push(tree);
-    return tree;
-  };
-  const tree = write(root);
-  return Object.freeze({ tree, objects: Object.freeze(objects) });
-};
-
-/**
- * Decode one Git tree object body.
- *
- * @param objectFormat - Recorded repository object format.
- * @param body - Tree payload without the loose-object frame.
- * @returns The entries in stored order.
- * @public
- */
-export const decodeTree = (objectFormat: ObjectFormat, body: Uint8Array<ArrayBuffer>): readonly TreeEntry[] => {
-  const idLength = objectIdByteLength(assertFormat(objectFormat));
-  const entries: TreeEntry[] = [];
-  let offset = 0;
-  while (offset < body.length) {
-    const space = body.indexOf(0x20, offset);
-    const nul = space === -1 ? -1 : body.indexOf(0, space);
-    if (space === -1 || nul === -1 || nul + 1 + idLength > body.length) {
-      throw new GitObjectError('INVALID_TREE', 'Git tree object is truncated.');
-    }
-    const mode = textDecoder.decode(body.subarray(offset, space));
-    if (mode !== '100644' && mode !== '100755' && mode !== '120000' && mode !== '160000' && mode !== '40000') {
-      throw new GitObjectError('INVALID_TREE', 'Invalid Git tree mode.');
-    }
-    entries.push({
-      name: textDecoder.decode(body.subarray(space + 1, nul)),
-      mode,
-      objectId: bytesToHex(body.subarray(nul + 1, nul + 1 + idLength)),
-    });
-    offset = nul + 1 + idLength;
-  }
-  return Object.freeze(entries);
 };
 
 const encodeSignature = (signature: GitSignature): Uint8Array<ArrayBuffer> => {

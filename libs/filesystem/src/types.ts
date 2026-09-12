@@ -9,7 +9,7 @@
  * - FileTreeNode: tree representation for /files route
  */
 
-import type { FileContentMetadata, FileStat } from '@taucad/types';
+import type { FileContentMetadata, FileProvenance, FileStat } from '@taucad/types';
 
 // oxlint-disable-next-line no-barrel-files/no-barrel-files -- re-export for internal consumers that import from #types.js
 export type { ChangeEvent, FileStat, FileStatEntry } from '@taucad/types';
@@ -103,6 +103,8 @@ export type FileTreeNode =
       /** Milliseconds since Unix epoch (provider stat). */
       mtimeMs: number;
       children: FileTreeNode[];
+      /** What a composed view says about this entry; absent on a raw authority listing. */
+      provenance?: FileProvenance;
     }
   | ({
       id: string;
@@ -112,6 +114,8 @@ export type FileTreeNode =
       /** Milliseconds since Unix epoch (provider stat). */
       mtimeMs: number;
       children?: never;
+      /** What a composed view says about this entry; absent on a raw authority listing. */
+      provenance?: FileProvenance;
     } & FileContentMetadata);
 
 /**

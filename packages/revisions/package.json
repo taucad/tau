@@ -1,7 +1,7 @@
 {
   "name": "@taucad/revisions",
   "version": "0.0.1",
-  "description": "Host-neutral revision port with jj, native-Git and browser adapters for Tau",
+  "description": "Host-neutral revision port with native-Git and browser adapters for Tau",
   "type": "module",
   "sideEffects": false,
   "private": false,
@@ -25,7 +25,6 @@
     "cad",
     "typescript",
     "revisions",
-    "jujutsu",
     "git"
   ],
   "author": "Richard Fontein",
@@ -36,7 +35,12 @@
   "exports": {
     ".": "./src/index.ts",
     "./node": "./src/node/index.ts",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./project-revisions-machine": "./src/project-revisions.machine.ts",
+    "./turn-machine": "./src/turn.machine.ts",
+    "./checkout-machine": "./src/checkout.machine.ts",
+    "./restore-machine": "./src/restore.machine.ts",
+    "./checkouts-machine": "./src/checkouts.machine.ts"
   },
   "publishConfig": {
     "access": "public",
@@ -51,7 +55,32 @@
         "import": "./dist/node/index.mjs",
         "default": "./dist/node/index.mjs"
       },
-      "./package.json": "./package.json"
+      "./package.json": "./package.json",
+      "./project-revisions-machine": {
+        "types": "./dist/project-revisions.machine.d.mts",
+        "import": "./dist/project-revisions.machine.mjs",
+        "default": "./dist/project-revisions.machine.mjs"
+      },
+      "./turn-machine": {
+        "types": "./dist/turn.machine.d.mts",
+        "import": "./dist/turn.machine.mjs",
+        "default": "./dist/turn.machine.mjs"
+      },
+      "./checkout-machine": {
+        "types": "./dist/checkout.machine.d.mts",
+        "import": "./dist/checkout.machine.mjs",
+        "default": "./dist/checkout.machine.mjs"
+      },
+      "./restore-machine": {
+        "types": "./dist/restore.machine.d.mts",
+        "import": "./dist/restore.machine.mjs",
+        "default": "./dist/restore.machine.mjs"
+      },
+      "./checkouts-machine": {
+        "types": "./dist/checkouts.machine.d.mts",
+        "import": "./dist/checkouts.machine.mjs",
+        "default": "./dist/checkouts.machine.mjs"
+      }
     },
     "imports": {}
   },
@@ -61,6 +90,13 @@
   },
   "dependencies": {
     "@taucad/filesystem": "workspace:*",
+    "isomorphic-git": "catalog:",
     "zod": "catalog:"
+  },
+  "peerDependencies": {
+    "xstate": "^5.0.0"
+  },
+  "devDependencies": {
+    "xstate": "catalog:"
   }
 }

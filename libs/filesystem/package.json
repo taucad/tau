@@ -28,6 +28,8 @@
     "./backend": "./src/backend/index.ts",
     "./backend/node": "./src/backend/node/index.ts",
     "./bundled-types-mount": "./src/bundled-types-mount.ts",
+    "./composed-view": "./src/composed-view.ts",
+    "./path-registry": "./src/path-registry.ts",
     "./revisions": "./src/revisions/index.ts",
     "./storage-root-key": "./src/storage-root-key.ts"
   },
@@ -53,6 +55,16 @@
         "types": "./dist/bundled-types-mount.d.mts",
         "import": "./dist/bundled-types-mount.mjs",
         "default": "./dist/bundled-types-mount.mjs"
+      },
+      "./composed-view": {
+        "types": "./dist/composed-view.d.mts",
+        "import": "./dist/composed-view.mjs",
+        "default": "./dist/composed-view.mjs"
+      },
+      "./path-registry": {
+        "types": "./dist/path-registry.d.mts",
+        "import": "./dist/path-registry.mjs",
+        "default": "./dist/path-registry.mjs"
       },
       "./revisions": {
         "types": "./dist/revisions/index.d.mts",

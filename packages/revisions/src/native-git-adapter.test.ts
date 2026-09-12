@@ -40,7 +40,7 @@ describe('native Git argument validation', () => {
 
   it('rejects managed refs before repository access', async () => {
     await expect(
-      adapter.createBundle({ outputPath: '/unused/tau.bundle', refs: ['refs/tau/revisions/private'] }),
+      adapter.push({ remote: 'origin', refspecs: ['refs/tau/revisions/private:refs/heads/leaked'] }),
     ).rejects.toEqual(expect.objectContaining<Partial<NativeGitError>>({ code: 'INVALID_TRANSPORT' }));
   });
 

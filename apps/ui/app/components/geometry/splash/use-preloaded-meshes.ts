@@ -1,9 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import type { Group, MeshStandardMaterial } from 'three';
-import { GLTFLoader } from 'three/addons';
 import type { Geometry } from '@taucad/types';
-import { applyCanonicalGltfWorld } from '#components/geometry/graphics/three/gltf-world.js';
+import { loadGltfWithMaterial } from '#components/geometry/splash/gltf-loader.js';
 
 /** Default material properties for gear meshes */
 const defaultMaterialProperties = {
@@ -50,40 +49,6 @@ export type UsePreloadedMeshesOptions = {
   /** Gear8 geometry to preload */
   gear8Geometry: Geometry | undefined;
 };
-
-/**
- * Loads a GLTF geometry and creates a mesh with material.
- */
-async function loadMesh(geometry: Geometry, color: string): Promise<LoadedMesh | undefined> {
-  if (geometry.format !== 'gltf') {
-    return undefined;
-  }
-
-  try {
-    const loader = new GLTFLoader();
-    const gltf = await loader.parseAsync(geometry.content.buffer, '');
-    applyCanonicalGltfWorld(gltf.scene);
-
-    const material = new THREE.MeshStandardMaterial({
-      color,
-      ...defaultMaterialProperties,
-      opacity: 1,
-    });
-
-    gltf.scene.traverse((object) => {
-      if (object instanceof THREE.Mesh) {
-        object.material = material;
-        object.castShadow = true;
-        object.receiveShadow = true;
-      }
-    });
-
-    return { scene: gltf.scene, material };
-  } catch (error) {
-    console.error('[usePreloadedMeshes] Failed to load mesh:', error);
-    return undefined;
-  }
-}
 
 /**
  * Clones a loaded mesh with a new independent material.
@@ -141,7 +106,7 @@ export function usePreloadedMeshes(options: UsePreloadedMeshesOptions): Preloade
     hasLoadedGear12Ref.current = true;
 
     const load = async (): Promise<void> => {
-      const mesh = await loadMesh(gear12Geometry, gear12Color);
+      const mesh = await loadGltfWithMaterial({ geometry: gear12Geometry, color: gear12Color });
       if (mesh) {
         setGear12Mesh(mesh);
         // Create assembly clone with independent material
@@ -162,7 +127,7 @@ export function usePreloadedMeshes(options: UsePreloadedMeshesOptions): Preloade
     hasLoadedGear8Ref.current = true;
 
     const load = async (): Promise<void> => {
-      const mesh = await loadMesh(gear8Geometry, gear8Color);
+      const mesh = await loadGltfWithMaterial({ geometry: gear8Geometry, color: gear8Color });
       if (mesh) {
         setGear8Mesh(mesh);
         // Create assembly clone with independent material

@@ -1,26 +1,14 @@
 import * as THREE from 'three';
-import { GLTFLoader } from 'three/addons';
 import type { Geometry } from '@taucad/types';
-import { sampleMeshSurface } from '#components/geometry/splash/point-sampler.js';
 import type { SampledPoints } from '#components/geometry/splash/point-sampler.js';
-import { applyCanonicalGltfWorld } from '#components/geometry/graphics/three/gltf-world.js';
-
-/**
- * Gear assembly constants calculated from circularPitch = 5
- * These match the values in unified-splashback-viewer.tsx and gear-assembly-viewer.tsx
- */
-const circularPitch = 5;
-const gear12Teeth = 12;
-const gear8Teeth = 8;
-const pitchRadius12 = (gear12Teeth * circularPitch) / (2 * Math.PI);
-const pitchRadius8 = (gear8Teeth * circularPitch) / (2 * Math.PI);
-const centerOffset = (pitchRadius12 - pitchRadius8) / 2;
+import { sampleGltfSurface } from '#components/geometry/splash/gltf-loader.js';
+import { gear12AssemblyOffsetX, gear8AssemblyOffsetX } from '#components/geometry/splash/auth-splashback.constants.js';
 
 /** Position offset for gear12 in the assembly (left gear) */
-const gear12AssemblyOffset = new THREE.Vector3(-pitchRadius12 + centerOffset, 0, 0);
+const gear12AssemblyOffset = new THREE.Vector3(gear12AssemblyOffsetX, 0, 0);
 
 /** Position offset for gear8 in the assembly (right gear) */
-const gear8AssemblyOffset = new THREE.Vector3(pitchRadius8 + centerOffset, 0, 0);
+const gear8AssemblyOffset = new THREE.Vector3(gear8AssemblyOffsetX, 0, 0);
 
 /**
  * Result of sampling points for the assembly morph animation.
@@ -35,44 +23,6 @@ export type AssemblySampledPoints = {
   /** The split ratio used (0.6 = 60% of points go to gear12, 40% to gear8) */
   splitRatio: number;
 };
-
-/**
- * Samples points from a GLTF geometry.
- *
- * @param geometry - The GLTF geometry to sample from
- * @param pointCount - Number of points to sample
- * @returns Sampled points or undefined if sampling failed
- */
-async function sampleFromGeometry(geometry: Geometry, pointCount: number): Promise<SampledPoints | undefined> {
-  if (geometry.format !== 'gltf') {
-    console.warn('[sampleFromGeometry] Geometry format is not gltf');
-    return undefined;
-  }
-
-  try {
-    const loader = new GLTFLoader();
-    const gltf = await loader.parseAsync(geometry.content.buffer, '');
-    applyCanonicalGltfWorld(gltf.scene);
-
-    // Find the first mesh in the scene
-    let foundMesh: THREE.Mesh | undefined;
-    gltf.scene.traverse((object) => {
-      if (!foundMesh && object instanceof THREE.Mesh) {
-        foundMesh = object;
-      }
-    });
-
-    if (foundMesh) {
-      return sampleMeshSurface(foundMesh, pointCount);
-    }
-
-    console.warn('[sampleFromGeometry] No mesh found in GLTF scene');
-  } catch (error) {
-    console.error('[sampleFromGeometry] Failed to sample points:', error);
-  }
-
-  return undefined;
-}
 
 /**
  * Samples points from both gears at their assembly positions.
@@ -121,8 +71,8 @@ export async function sampleAssemblyPoints({
 
   // Sample points from both geometries
   const [gear12RawPoints, gear8RawPoints] = await Promise.all([
-    sampleFromGeometry(gear12Geometry, gear12TargetCount),
-    sampleFromGeometry(gear8Geometry, gear8TargetCount),
+    sampleGltfSurface(gear12Geometry, gear12TargetCount),
+    sampleGltfSurface(gear8Geometry, gear8TargetCount),
   ]);
 
   if (!gear12RawPoints || !gear8RawPoints) {

@@ -29,6 +29,12 @@ export type MorphingPointsMaterialOptions = {
    * @default 1
    */
   opacity?: number;
+  /**
+   * Additive (luminous) blending. Off by default so particles read as opaque
+   * grains; the marketing hero opts in for its glowing look.
+   * @default false
+   */
+  additive?: boolean;
 };
 
 const defaultOptions: Required<Omit<MorphingPointsMaterialOptions, 'targetColor'>> = {
@@ -36,6 +42,7 @@ const defaultOptions: Required<Omit<MorphingPointsMaterialOptions, 'targetColor'
   pointSize: 2,
   explosionStrength: 2,
   opacity: 1,
+  additive: false,
 };
 
 /** Build one retained instanced quad per particle; WebGPU native points cannot exceed one pixel. */
@@ -117,21 +124,14 @@ const vertexShader = /* glsl */ `
     vec3 swirlOffset = vec3(noiseX, noiseY, noiseZ) * transitionIntensity * 0.5;
     midPoint += swirlOffset;
 
-    // Interpolate through the midpoint
+    // Interpolate through the midpoint. uProgress arrives already eased (see
+    // morph-animation.ts), so both halves stay linear: easing each half again
+    // would bring every particle to a dead stop at the exploded midpoint.
     // 0 -> 0.5: position -> midPoint
     // 0.5 -> 1: midPoint -> aTargetPosition
-    vec3 morphed;
-    if (uProgress < 0.5) {
-      float t = uProgress * 2.0;
-      // Ease in-out for smoother animation
-      t = t * t * (3.0 - 2.0 * t);
-      morphed = mix(aSourcePosition, midPoint, t);
-    } else {
-      float t = (uProgress - 0.5) * 2.0;
-      // Ease in-out for smoother animation
-      t = t * t * (3.0 - 2.0 * t);
-      morphed = mix(midPoint, aTargetPosition, t);
-    }
+    vec3 morphed = uProgress < 0.5
+      ? mix(aSourcePosition, midPoint, uProgress * 2.0)
+      : mix(midPoint, aTargetPosition, (uProgress - 0.5) * 2.0);
 
     // Pointer interaction: a soft breeze that brushes nearby points off the
     // surface, with a tangential swirl for organic drift. Gaussian falloff has
@@ -190,8 +190,8 @@ const fragmentShader = /* glsl */ `
       discard;
     }
 
-    // Soft edge for smoother appearance
-    float alpha = 1.0 - smoothstep(0.3, 0.5, dist);
+    // Crisp grain: only the outermost ring anti-aliases
+    float alpha = 1.0 - smoothstep(0.42, 0.5, dist);
     alpha *= uOpacity;
 
     // Interpolate color if target color is provided
@@ -221,13 +221,16 @@ const fragmentShader = /* glsl */ `
  * @returns ShaderMaterial configured for morphing points
  */
 export function createMorphingPointsMaterial(options?: MorphingPointsMaterialOptions): THREE.ShaderMaterial {
-  const { color, pointSize, explosionStrength, opacity } = { ...defaultOptions, ...options };
+  const { color, pointSize, explosionStrength, opacity, additive } = { ...defaultOptions, ...options };
   const { targetColor } = options ?? {};
 
   return new THREE.ShaderMaterial({
     transparent: true,
     depthWrite: false,
-    blending: THREE.AdditiveBlending,
+    // Grains sit exactly on the surface of the solid they dissolve from / condense into;
+    // while that solid crossfades it still writes depth and would occlude them.
+    depthTest: false,
+    blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending,
     uniforms: {
       uProgress: { value: 0 },
       uTime: { value: 0 },

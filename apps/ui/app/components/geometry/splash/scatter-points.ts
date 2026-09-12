@@ -30,17 +30,3 @@ export function generateScatterPoints(pointCount: number, radius: number): Sampl
 
   return { positions, normals, randomOffsets };
 }
-
-/**
- * Returns a `SampledPoints` whose buffers are zero-copy sub-views of the source
- * arrays from `[start, end)`. Used to split the loading scatter cloud into the
- * two halves consumed by the per-gear unloading point clouds without
- * duplicating the underlying memory.
- */
-export function sliceSampledPoints(source: SampledPoints, start: number, end: number): SampledPoints {
-  return {
-    positions: source.positions.subarray(start * 3, end * 3),
-    normals: source.normals.subarray(start * 3, end * 3),
-    randomOffsets: source.randomOffsets.subarray(start, end),
-  };
-}

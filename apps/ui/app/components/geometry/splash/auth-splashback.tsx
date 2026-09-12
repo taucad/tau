@@ -8,7 +8,7 @@ import { authSplashbackMachine, timing as machineTiming } from '#components/geom
 import { UnifiedSplashbackViewer } from '#components/geometry/splash/unified-splashback-viewer.js';
 import type { SplashbackPhase } from '#components/geometry/splash/unified-splashback-viewer.js';
 import { useSampledPoints } from '#components/geometry/splash/use-sampled-points.js';
-import { generateScatterPoints, sliceSampledPoints } from '#components/geometry/splash/scatter-points.js';
+import { generateScatterPoints } from '#components/geometry/splash/scatter-points.js';
 import { Loader } from '#components/ui/loader.js';
 import { useRuntime } from '@taucad/react';
 import gearJscad from '#components/geometry/splash/gear.jscad.js?raw';
@@ -292,7 +292,6 @@ type DerivedState = {
   showGear8: boolean;
   showAssembly: boolean;
   isFading: boolean;
-  showContainer: boolean;
   isPrompt1Typing: boolean;
   isPrompt1EnterKey: boolean;
   isPrompt1Spinner: boolean;
@@ -387,16 +386,6 @@ function deriveVisibilityState(state: AuthSplashbackState): DerivedState {
   const showPrompt3 =
     state.matches({ gear8: 'prompt3' }) || isMorphingToAssemblyPhase || showAssembly || isUnloadingPhase;
 
-  // Container stays mounted during all visible states and transitions
-  const showContainer =
-    isLoadingPhase ||
-    showGear12 ||
-    showGear8 ||
-    showAssembly ||
-    isUnloadingPhase ||
-    isMorphingToGear8Phase ||
-    isMorphingToAssemblyPhase;
-
   // === Prompt 1 status icon states ===
   const isPrompt1Typing = state.matches({ prompt1: 'typing' });
   const isPrompt1EnterKey = state.matches({ prompt1: 'enterKey' });
@@ -446,7 +435,6 @@ function deriveVisibilityState(state: AuthSplashbackState): DerivedState {
     showGear8,
     showAssembly,
     isFading,
-    showContainer,
     isPrompt1Typing,
     isPrompt1EnterKey,
     isPrompt1Spinner,
@@ -570,8 +558,6 @@ type AuthSplashbackContentProperties = {
   readonly gear12Geometry: Geometry | undefined;
   readonly gear8Geometry: Geometry | undefined;
   readonly loadingScatterPoints: ReturnType<typeof generateScatterPoints>;
-  readonly unloadingScatterPointsA: ReturnType<typeof sliceSampledPoints>;
-  readonly unloadingScatterPointsB: ReturnType<typeof sliceSampledPoints>;
 };
 
 // oxlint-disable-next-line complexity -- top-level scene composition
@@ -582,8 +568,6 @@ function AuthSplashbackContent({
   gear12Geometry,
   gear8Geometry,
   loadingScatterPoints,
-  unloadingScatterPointsA,
-  unloadingScatterPointsB,
 }: AuthSplashbackContentProperties): React.JSX.Element {
   const {
     showPrompt1,
@@ -591,7 +575,6 @@ function AuthSplashbackContent({
     showPrompt3,
     showLoading,
     isFading,
-    showContainer,
     isPrompt1Typing,
     isPrompt1EnterKey,
     isPrompt1Spinner,
@@ -717,10 +700,9 @@ function AuthSplashbackContent({
     <div className='relative flex size-full items-center justify-center overflow-hidden bg-muted' aria-hidden='true'>
       <GridPattern />
 
-      {/* Outer wrapper stays at opacity 1 throughout the unload so the canvas remains visible
-          for the per-gear particle dispersal. Per-element opacity (prompt3, tagline, container)
-          drives narrative dissolution; the container itself fades during `resetting` via
-          showContainer toggling false. */}
+      {/* The canvas never unmounts: the atom cloud the assembly disperses into is the same
+          cloud the next cycle converges from, so the loop has no seam. Per-element opacity
+          (prompt3, tagline) carries the narrative dissolution. */}
       <motion.div className='relative z-10 flex flex-col items-center gap-4 md:gap-5'>
         {/* Prompt Bubbles */}
         <div className='flex min-h-[52px] items-center justify-center px-6'>
@@ -788,19 +770,9 @@ function AuthSplashbackContent({
           </AnimatePresence>
         </div>
 
-        {/* Visualization Container — opacity tracks `showContainer` only so the canvas stays
-            fully visible during the entire unload sequence (the gears scatter into the void
-            inside the canvas itself). After particles disperse, `showContainer` flips false in
-            the resetting state and the existing 400ms transition fades the empty box out. */}
-        <motion.div
-          className={`flex items-center justify-center overflow-hidden rounded-xl border bg-background/90 backdrop-blur-sm transition-opacity duration-400 ${
-            showContainer ? 'opacity-100' : 'pointer-events-none opacity-0'
-          }`}
-          animate={{ opacity: showContainer ? 1 : 0 }}
-          transition={{ duration: 0.4, ease: 'easeOut' }}
-        >
+        <div className='flex items-center justify-center overflow-hidden rounded-xl border bg-background/90 backdrop-blur-sm'>
           <div className='relative size-72 md:size-80 lg:size-128'>
-            {showContainer && gear12Geometry && gear8Geometry ? (
+            {gear12Geometry && gear8Geometry ? (
               <UnifiedSplashbackViewer
                 phase={currentPhase}
                 gear12Geometry={gear12Geometry}
@@ -813,8 +785,6 @@ function AuthSplashbackContent({
                 crossfadeDuration={machineTiming.crossfadeDuration}
                 morphDuration={machineTiming.morphDuration}
                 loadingScatterPoints={loadingScatterPoints}
-                unloadingScatterPointsA={unloadingScatterPointsA}
-                unloadingScatterPointsB={unloadingScatterPointsB}
                 className='size-full'
                 onInteraction={handleInteraction}
                 onLoadingMorphComplete={handleLoadingMorphComplete}
@@ -828,12 +798,12 @@ function AuthSplashbackContent({
               />
             ) : undefined}
           </div>
-        </motion.div>
+        </div>
 
         {/* Tagline */}
         <div className='relative flex h-6 w-full items-center justify-center'>
           <AnimatePresence mode='wait'>
-            {showContainer && !isFading ? (
+            {isFading ? undefined : (
               <motion.p
                 key={currentTagline}
                 className='text-md absolute text-center whitespace-nowrap text-muted-foreground'
@@ -844,7 +814,7 @@ function AuthSplashbackContent({
               >
                 {currentTagline}
               </motion.p>
-            ) : undefined}
+            )}
           </AnimatePresence>
         </div>
       </motion.div>
@@ -860,7 +830,7 @@ export function AuthSplashback(): React.JSX.Element {
 
   // `useRuntime` runs unconditionally on mount: kernel + middleware caches keep subsequent
   // calls free, and status never flickers back to 'rendering' once primed. The previous
-  // `enabled: showContainer` gate caused a re-render storm on every cycle restart that
+  // `enabled` gate tied to the cycle state caused a re-render storm on every cycle restart that
   // briefly re-displayed the loading spinner over the still-rendered assembly.
   const { geometry: gear12Geometry } = useRuntime({
     clientOptions: splashClientOptions,
@@ -874,21 +844,8 @@ export function AuthSplashback(): React.JSX.Element {
   });
 
   // Generate the alpha-and-omega scatter cloud once per component lifetime. It is the
-  // morph source for loading and the dispersal target for unloading, sliced into A/B
-  // halves matching the assembly split ratio.
+  // morph source for loading and the dispersal target for unloading.
   const loadingScatterPoints = useMemo(() => generateScatterPoints(morphPointCount, loadingScatterRadius), []);
-
-  const splitCount = Math.round(morphPointCount * defaultAssemblySplitRatio);
-
-  const unloadingScatterPointsA = useMemo(
-    () => sliceSampledPoints(loadingScatterPoints, 0, splitCount),
-    [loadingScatterPoints, splitCount],
-  );
-
-  const unloadingScatterPointsB = useMemo(
-    () => sliceSampledPoints(loadingScatterPoints, splitCount, morphPointCount),
-    [loadingScatterPoints, splitCount],
-  );
 
   return (
     <AuthSplashbackContent
@@ -898,8 +855,6 @@ export function AuthSplashback(): React.JSX.Element {
       gear12Geometry={gear12Geometry}
       gear8Geometry={gear8Geometry}
       loadingScatterPoints={loadingScatterPoints}
-      unloadingScatterPointsA={unloadingScatterPointsA}
-      unloadingScatterPointsB={unloadingScatterPointsB}
     />
   );
 }

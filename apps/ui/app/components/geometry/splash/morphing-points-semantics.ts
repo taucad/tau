@@ -2,10 +2,12 @@ import { Vector3 } from 'three';
 
 const noise = (value: number): number =>
   Math.sin(value) * 0.5 + Math.sin(value * 2.3) * 0.3 + Math.sin(value * 5.7) * 0.2;
-const ease = (value: number): number => value * value * (3 - 2 * value);
 const clamp01 = (value: number): number => Math.min(1, Math.max(0, value));
 
-/** CPU oracle for the position curve shared by the GLSL and TSL morph shaders. */
+/**
+ * CPU oracle for the position curve shared by the GLSL and TSL morph shaders.
+ * `progress` is the already-eased timeline value (see `easeMorph`); the path itself is piecewise linear.
+ */
 export const resolveMorphingPointPosition = ({
   explosionStrength,
   pointer,
@@ -42,8 +44,8 @@ export const resolveMorphingPointPosition = ({
 
   const position =
     progress < 0.5
-      ? source.clone().lerp(midpoint, ease(clamp01(progress * 2)))
-      : midpoint.clone().lerp(target, ease(clamp01((progress - 0.5) * 2)));
+      ? source.clone().lerp(midpoint, clamp01(progress * 2))
+      : midpoint.clone().lerp(target, clamp01((progress - 0.5) * 2));
 
   if (!pointer || pointer.strength === 0 || pointer.radius <= 0) {
     return position;

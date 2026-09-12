@@ -1,11 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import * as THREE from 'three';
-import { GLTFLoader } from 'three/addons';
 import type { Geometry } from '@taucad/types';
-import { sampleMeshSurface } from '#components/geometry/splash/point-sampler.js';
 import type { SampledPoints } from '#components/geometry/splash/point-sampler.js';
+import { sampleGltfSurface } from '#components/geometry/splash/gltf-loader.js';
 import { sampleAssemblyPoints } from '#components/geometry/splash/assembly-point-sampler.js';
-import { applyCanonicalGltfWorld } from '#components/geometry/graphics/three/gltf-world.js';
 
 /**
  * Result of sampling points from gear geometries.
@@ -38,41 +35,6 @@ export type UseSampledPointsOptions = {
 };
 
 /**
- * Samples points from a GLTF geometry for morphing animations.
- *
- * @param geometry - The geometry to sample from
- * @param pointCount - Number of points to sample
- * @returns Promise resolving to sampled points, or undefined if sampling fails
- */
-async function samplePointsFromGeometry(geometry: Geometry, pointCount: number): Promise<SampledPoints | undefined> {
-  if (geometry.format !== 'gltf') {
-    return undefined;
-  }
-
-  try {
-    const loader = new GLTFLoader();
-    const gltf = await loader.parseAsync(geometry.content.buffer, '');
-    applyCanonicalGltfWorld(gltf.scene);
-
-    // Find the first mesh in the scene
-    let foundMesh: THREE.Mesh | undefined;
-    gltf.scene.traverse((object) => {
-      if (!foundMesh && object instanceof THREE.Mesh) {
-        foundMesh = object;
-      }
-    });
-
-    if (foundMesh) {
-      return sampleMeshSurface(foundMesh, pointCount);
-    }
-  } catch (error) {
-    console.error('[useSampledPoints] Failed to sample points from geometry:', error);
-  }
-
-  return undefined;
-}
-
-/**
  * Hook that samples points from gear geometries for morphing animations.
  *
  * This hook handles:
@@ -100,7 +62,7 @@ export function useSampledPoints(options: UseSampledPointsOptions): SampledPoint
 
   // Stable sample function
   const sampleGeometry = useCallback(
-    async (geometry: Geometry) => samplePointsFromGeometry(geometry, pointCount),
+    async (geometry: Geometry) => sampleGltfSurface(geometry, pointCount),
     [pointCount],
   );
 

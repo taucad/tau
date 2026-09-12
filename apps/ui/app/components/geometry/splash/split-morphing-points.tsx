@@ -49,10 +49,16 @@ export type SplitMorphingPointsProperties = {
    */
   readonly targetProgress: number;
   /**
-   * Animation speed for progress interpolation.
-   * @default 2
+   * Progress the cloud mounts at. Mount at 1 and drive towards 0 to run the split in
+   * reverse (assembly -> single cloud).
+   * @default 0
    */
-  readonly animationSpeed?: number;
+  readonly initialProgress?: number;
+  /**
+   * Time for progress to travel the full 0→1 range, in milliseconds.
+   * @default 1400
+   */
+  readonly duration?: number;
   /**
    * Source color for all particles (gear8 blue).
    * @default '#5B8FD9'
@@ -155,7 +161,8 @@ export function SplitMorphingPoints({
   targetPointsB,
   splitRatio = defaultAssemblySplitRatio,
   targetProgress,
-  animationSpeed = 2,
+  initialProgress = 0,
+  duration = 1400,
   /* oxlint-disable tau-lint/no-hardcoded-color -- Three.js point colors */
   sourceColor = '#5B8FD9',
   targetColorA = '#14b8a6',
@@ -180,7 +187,7 @@ export function SplitMorphingPoints({
   const containerRef = useRef<Group>(null);
 
   // Morph animation state
-  const morphProgressRef = useRef(0);
+  const morphProgressRef = useRef(initialProgress);
   const morphHasReachedTargetRef = useRef(false);
   const morphPreviousTargetRef = useRef(targetProgress);
 
@@ -324,7 +331,7 @@ export function SplitMorphingPoints({
       },
       targetProgress,
       delta,
-      animationSpeed,
+      duration,
       onComplete() {
         onMorphComplete?.(sharedRotationRef?.current ?? 0);
       },
@@ -351,19 +358,17 @@ export function SplitMorphingPoints({
       updateMorphViewport(gear8Material as THREE.ShaderMaterial, state.size.width, state.size.height);
     }
 
-    // Animate group positions and rotations based on progress
-    // At progress=0, both groups are at origin (source gear8 position)
-    // At progress=1, they're at their target assembly positions
+    // Blend both groups from the source gear8 frame (progress 0: origin, no spin)
+    // to their assembly frames (progress 1: offset, counter-rotating at the shared
+    // value the meshes also read). Scaling the spin by progress matters as much as
+    // the offset: the gear8 phase offset alone is 43°, and applying it at frame 1
+    // snaps the still-intact gear8 silhouette into two mis-rotated halves.
     if (gear12RotationRef.current && gear8RotationRef.current) {
-      // Position animation
+      const rotation = sharedRotationRef?.current ?? 0;
       gear12RotationRef.current.position.x = gear12OffsetX * progress;
       gear8RotationRef.current.position.x = gear8OffsetX * progress;
-
-      // Rotation uses shared ref value from parent (same as assembly meshes)
-      // This ensures seamless transition during crossfade
-      const rotation = sharedRotationRef?.current ?? 0;
-      gear12RotationRef.current.rotation.z = rotation;
-      gear8RotationRef.current.rotation.z = -rotation * gearRatio + gear8PhaseOffset;
+      gear12RotationRef.current.rotation.z = rotation * progress;
+      gear8RotationRef.current.rotation.z = (-rotation * gearRatio + gear8PhaseOffset) * progress;
     }
   });
 

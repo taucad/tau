@@ -4,12 +4,12 @@ export { billingTiers, tierMeets } from '#billing-tier.js';
 export type { Entitlements, SubscriptionStatus } from '#entitlements.js';
 export { entitlementsFromTier } from '#entitlements.js';
 export { getKernelRequiredTier, isKernelAllowed, kernelTierRequirements } from '#kernel-tier-requirements.js';
-export { centsToMicro, formatMicroUsd, microPerCent, microPerUsd, usdToMicro } from '#microdollars.js';
 export type { RationalCreditAtoms } from '#credit-atoms.js';
 export {
   ceilRationalCreditAtoms,
   creditAtomsPerCredit,
   formatCreditAtoms,
+  formatCreditAtomsDisplay,
   maxCreditAtoms,
   roundHalfUpRationalCreditAtoms,
   usdCentsToCreditAtoms,
@@ -23,6 +23,8 @@ export type {
   WireCorrectionReceipt,
   WireCreditBalance,
   WireMeterItem,
+  WireModelEstimates,
+  WireOpenHolds,
   WireOperationReceipt,
   WireTokenSummary,
   WireUsageActivityPage,
@@ -46,6 +48,7 @@ export {
   financialEnvironmentSchema,
   financialIdentitySchema,
   integerStringSchema,
+  maximumOpenHolds,
   parseSignedIntegerString,
   parseUnsignedIntegerString,
   rationalUnsignedIntegerStringSchema,
@@ -56,6 +59,8 @@ export {
   wireCorrectionReceiptSchema,
   wireCreditBalanceSchema,
   wireMeterItemSchema,
+  wireModelEstimatesSchema,
+  wireOpenHoldsSchema,
   wireOperationReceiptSchema,
   wireTokenSummarySchema,
   wireUsageActivityPageSchema,
@@ -71,8 +76,6 @@ export {
 } from '#financial-wire.js';
 export type { WireEntitlements } from '#entitlements-wire.js';
 export { parseEntitlements, serializeEntitlements, wireEntitlementsSchema } from '#entitlements-wire.js';
-export type { WireCreditAccount } from '#credits-wire.js';
-export { parseCreditAccount, wireCreditAccountSchema } from '#credits-wire.js';
 export type { PlanCatalogCtaKind, PlanCatalogEntry } from '#tau-plan-catalog.js';
 export { tauPlanCatalog } from '#tau-plan-catalog.js';
 export type { WirePaymentAction } from '#payment-action-wire.js';

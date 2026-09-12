@@ -12,7 +12,6 @@ import type { Entitlements } from '#entitlements.js';
 export const wireEntitlementsSchema = z.object({
   tier: z.enum(billingTiers),
   status: z.enum(['active', 'past_due', 'canceled', 'none']),
-  aiEnabled: z.boolean(),
   canUseProKernels: z.boolean(),
   canCreatePrivateShares: z.boolean(),
   canSyncFiles: z.boolean(),

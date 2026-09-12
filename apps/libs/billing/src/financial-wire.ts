@@ -652,3 +652,75 @@ export const wireBalanceExplanationSchema = z.union([
   unavailableBalanceExplanationSchema,
 ]);
 export type WireBalanceExplanation = z.infer<typeof wireBalanceExplanationSchema>;
+
+/**
+ * The retail atoms admission would authorize per funded route.
+ *
+ * Both figures are published estimates of a hold, never a balance: held and
+ * available sources stay on `wireCreditBalanceSchema`, which already carries them.
+ *
+ * `typicalHoldAtoms` prices one representative turn (a loaded workspace in context),
+ * and is what a reader should be shown as "about this much per turn".
+ * `minimumHoldAtoms` prices the smallest turn the route's wire admits, so it is the
+ * floor no real turn is admitted below — the only figure a client may *refuse* a
+ * turn against, because refusing on the representative hold denies turns the server
+ * would have funded. `tier` names the tariff the representative turn's input bound pins.
+ *
+ * @public
+ */
+export const wireModelEstimatesSchema = z
+  .object({
+    environment: financialEnvironmentSchema,
+    ownerId: financialIdentitySchema,
+    routes: z
+      .array(
+        z
+          .object({
+            routeId: financialIdentitySchema,
+            modelId: z.string().min(1).max(128),
+            typicalHoldAtoms: unsignedIntegerStringSchema,
+            minimumHoldAtoms: unsignedIntegerStringSchema,
+            tier: z.enum(['base', 'long_context']),
+          })
+          .strict(),
+      )
+      .max(256),
+  })
+  .strict();
+export type WireModelEstimates = z.infer<typeof wireModelEstimatesSchema>;
+
+/** Bounded page of open customer holds; an account never has many turns in flight. @public */
+export const maximumOpenHolds = 200;
+/**
+ * The customer holds still open on an account, newest first.
+ *
+ * Every row is a `pending` operation: its `heldCreditAtoms` are reserved against the
+ * balance and no charge exists yet. `releaseAfter` is the instant recovery may resolve
+ * the hold without further evidence (`dueAt` plus the recovery grace), so a reader can
+ * tell a turn still running from one already being released.
+ *
+ * @public
+ */
+export const wireOpenHoldsSchema = z
+  .object({
+    environment: financialEnvironmentSchema,
+    ownerId: financialIdentitySchema,
+    holds: z
+      .array(
+        z
+          .object({
+            operationId: financialIdentitySchema,
+            model: historicalModelSchema,
+            heldCreditAtoms: unsignedIntegerStringSchema,
+            admittedAt: timestampSchema.nullable(),
+            dueAt: timestampSchema,
+            releaseAfter: timestampSchema,
+            dispatchState: z.enum(['admitted', 'intent_recorded', 'accepted', 'recovery_required']),
+            customerState: z.literal('pending'),
+          })
+          .strict(),
+      )
+      .max(maximumOpenHolds),
+  })
+  .strict();
+export type WireOpenHolds = z.infer<typeof wireOpenHoldsSchema>;

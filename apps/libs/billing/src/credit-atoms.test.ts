@@ -3,6 +3,7 @@ import {
   ceilRationalCreditAtoms,
   creditAtomsPerCredit,
   formatCreditAtoms,
+  formatCreditAtomsDisplay,
   maxCreditAtoms,
   roundHalfUpRationalCreditAtoms,
   usdCentsToCreditAtoms,
@@ -41,5 +42,18 @@ describe('exact credit atom arithmetic', () => {
     expect(() => ceilRationalCreditAtoms([{ numeratorCreditAtoms: maxCreditAtoms + 1n, denominator: 1n }])).toThrow(
       RangeError,
     );
+  });
+
+  it('displays two fractional digits and bounds a nonzero amount below that precision', () => {
+    expect(formatCreditAtomsDisplay(0n)).toBe('0');
+    expect(formatCreditAtomsDisplay(1n)).toBe('<0.01');
+    expect(formatCreditAtomsDisplay(-1n)).toBe('>-0.01');
+    expect(formatCreditAtomsDisplay(50n)).toBe('0.01');
+    expect(formatCreditAtomsDisplay(49n)).toBe('<0.01');
+    expect(formatCreditAtomsDisplay(10_000n)).toBe('1');
+    expect(formatCreditAtomsDisplay(12_345n)).toBe('1.23');
+    expect(formatCreditAtomsDisplay(12_355n)).toBe('1.24');
+    expect(formatCreditAtomsDisplay(-12_355n)).toBe('-1.24');
+    expect(formatCreditAtomsDisplay(15_000n)).toBe('1.5');
   });
 });

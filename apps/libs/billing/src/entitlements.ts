@@ -15,12 +15,6 @@ export type SubscriptionStatus = 'active' | 'past_due' | 'canceled' | 'none';
 export type Entitlements = {
   readonly tier: BillingTier;
   readonly status: SubscriptionStatus;
-  /**
-   * Whether AI features are available at this tier. Always true for paid tiers;
-   * for Free it reflects the AD19 operational kill switch (`FREE_TIER_AI_ENABLED`) —
-   * the server projection zeroes it without a deploy.
-   */
-  readonly aiEnabled: boolean;
   readonly canUseProKernels: boolean;
   readonly canCreatePrivateShares: boolean;
   readonly canSyncFiles: boolean;
@@ -54,7 +48,6 @@ export type Entitlements = {
 };
 
 const freeEntitlements = {
-  aiEnabled: true,
   canUseProKernels: false,
   canCreatePrivateShares: false,
   canSyncFiles: false,
@@ -74,7 +67,6 @@ const freeEntitlements = {
 } as const;
 
 const proEntitlements = {
-  aiEnabled: true,
   canUseProKernels: true,
   canCreatePrivateShares: true,
   canSyncFiles: true,

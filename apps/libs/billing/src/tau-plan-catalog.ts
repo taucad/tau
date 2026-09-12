@@ -30,9 +30,11 @@ export type PlanCatalogEntry = {
 
 /**
  * The three-tier marketing catalogue (T6/U1/E1/E2, copy per ui-patterns doc
- * Finding 5): dollar-framed credits as the sole model spend-gate (every model
- * is available on every tier — see docs/research/drop-model-tier-gating.md),
- * and the AD13/AD15 verification + no-train boundary as customer-facing copy.
+ * Finding 5): credits are the sole model spend-gate (every model is available
+ * on every tier — see docs/research/drop-model-tier-gating.md), and the
+ * AD13/AD15 verification + no-train boundary is customer-facing copy. Launch
+ * carries no complimentary credit grant or refill countdown (charter D1/D2);
+ * only paid plan and purchased credits are advertised.
  * @public
  */
 export const tauPlanCatalog: PlanCatalogEntry[] = [
@@ -44,7 +46,8 @@ export const tauPlanCatalog: PlanCatalogEntry[] = [
     priceLabel: '$0',
     priceSubLabel: '/month',
     features: [
-      '$0.50 of usage credits per month',
+      'Buy credits any time — 100 credits per US$1',
+      'Purchased credits never expire',
       'All AI models',
       'All open-source CAD kernels',
       'Geometry testing — unlimited local validation',
@@ -64,8 +67,8 @@ export const tauPlanCatalog: PlanCatalogEntry[] = [
     priceSubLabel: '/month',
     features: [
       'Everything in Free',
-      '$20 of usage credits per month',
-      '1 month credit rollover',
+      '2,000 credits every month',
+      'Unused plan credits roll over, up to 4,000',
       'Pro kernels (Zoo / KCL, metered)',
       'Hosted design verification (Coming Soon)',
       'Private & unlisted share links',

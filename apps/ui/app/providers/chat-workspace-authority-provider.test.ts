@@ -31,7 +31,11 @@ vi.mock('#hooks/use-project.js', () => ({
 const client = (exists: ReturnType<typeof vi.fn>): FileSystemClientFacade =>
   ({ exists }) as unknown as FileSystemClientFacade;
 
-const authorityBinding = (filesystemClient: FileSystemClientFacade, rootDirectory: string) => ({
+const authorityBinding = (
+  filesystemClient: FileSystemClientFacade,
+  rootDirectory: string,
+  filesystem?: RootedFileSystem,
+) => ({
   client: filesystemClient,
   rootDirectory,
   backend: 'memory',
@@ -41,6 +45,17 @@ const authorityBinding = (filesystemClient: FileSystemClientFacade, rootDirector
     quotaBased: false,
     durability: 'ephemeral',
   } satisfies ProviderCapabilities,
+  /* The authority reads and writes the project through its own rooted bridge
+     connection, so a binding without one is a binding without a working copy. */
+  openConnection:
+    filesystem === undefined
+      ? undefined
+      : async () => {
+          const { createFileSystemBridgePort, createFileSystemBridgeProxy } = await import('@taucad/fs-bridge');
+          const proxy = createFileSystemBridgeProxy(createFileSystemBridgePort(filesystem));
+          await proxy.ready;
+          return proxy;
+        },
 });
 
 const encoder = new TextEncoder();

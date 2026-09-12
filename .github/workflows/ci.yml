@@ -106,6 +106,14 @@ jobs:
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
 
+      # Native kernel workers run inside the operating-system sandbox on every host,
+      # including CI; a Linux runner needs the Bubblewrap toolchain and capability-bearing
+      # user namespaces, which Ubuntu 24.04 restricts through AppArmor by default.
+      - name: Install Linux sandbox prerequisites
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y bubblewrap socat ripgrep
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
       # The PR gate documented in docs/policy/release-policy.md: under version plans,
       # a touched release project with no plan is an unreleased change. Base and head
       # come from NX_BASE/NX_HEAD, which `nrwl/nx-set-shas` exported above. Not run on
@@ -333,7 +341,6 @@ jobs:
             -e AUTH_URL=http://localhost \
             -e GITHUB_CLIENT_ID=smoke \
             -e GITHUB_CLIENT_SECRET=smoke \
-            -e ZOO_API_KEY=smoke \
             -e REDIS_URL=redis://localhost:6379 \
             -e TAU_S3_ENDPOINT=https://000000000000000000000000.r2.cloudflarestorage.com \
             -e TAU_S3_PUBLIC_BASE_URL=https://cdn.tau.new \

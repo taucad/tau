@@ -427,6 +427,63 @@ const config = [
             'Fix the root cause: use proper typing, type narrowing, or `as unknown as Type`. ' +
             'See docs/policy/typescript-policy.md.',
         },
+        {
+          // Retired by the workspace-filesystem north star (D2, D3, D30, A31).
+          // Path classification is one registry, and the unreachable git code
+          // is gone; no shim, alias or re-export brings either name back.
+          selector: `Identifier[name=/^(${[
+            // Six private path classifiers, replaced by @taucad/filesystem/path-registry.
+            'isDesignPath',
+            'revisionPathPolicy',
+            'excludedRevisionPaths',
+            'maskedDirectories',
+            'isMaskedPath',
+            'maskWorkspaceWrites',
+            // The Jujutsu adapter and its generated per-project configuration.
+            'generatedJjConfigContent',
+            'generatedJjConfigPath',
+            'pinnedJjRelease',
+            'resolveJjExecutable',
+            'createJjRevisionPort',
+            // The dead native-git persistence wrapper.
+            'createNativeGitRevisionPersistence',
+            // Bundles as a wire; git smart HTTP is the only transport.
+            'RevisionBundleInput',
+            'ImportRevisionBundleInput',
+            'CreateNativeGitBundleInput',
+            'FetchNativeGitBundleInput',
+            // The hand-rolled browser store, superseded by `isomorphic-git` (EQ12, W3).
+            'createBrowserRevisionPort',
+            'BrowserRevisionPortOptions',
+            // The blob, tree and pack codec `isomorphic-git` and `git` now own.
+            'encodeTreeGraph',
+            'encodeTree',
+            'encodeBlob',
+            'decodeTree',
+            'EncodedTreeGraph',
+            'FlatTreeEntry',
+            'GitMode',
+            // The compiled wasm revision algebra and its out-of-tree artifact.
+            'loadRevisionAlgebra',
+            'RevisionAlgebra',
+            'algebraContract',
+            'algebraSourceRevision',
+            'algebraProvenanceDigest',
+            'algebraRawWasmSha256',
+            'algebraNativeDarwinArm64Sha256',
+            'resolveAlgebraArtifact',
+            'algebraArtifactEnvironmentVariable',
+            // Conflict-marker rendering had no source left once the algebra went (W10 re-adds it).
+            'MaterializeConflictInput',
+          ].join('|')})$/]`,
+          message:
+            'This identifier is retired. Path classification is `classify` from ' +
+            '`@taucad/filesystem/path-registry`; the jj adapter, the dead native-git persistence ' +
+            'wrapper, the bundle transport, the hand-rolled browser codec and the wasm revision ' +
+            'algebra are deleted — the browser store is `createIsomorphicGitRevisionPort` and the ' +
+            'disk host is `createNativeGitRevisionPort`. Do not reintroduce a shim or alias. ' +
+            'See docs/research/workspace-filesystem-revisions-charter.md (D2, D3, D30, EQ12, EQ14).',
+        },
       ],
       'import-x/no-extraneous-dependencies': [
         'error',

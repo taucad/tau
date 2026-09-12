@@ -162,12 +162,12 @@ The first implementation, `@taucad/build123d`, establishes these requirements fo
 - the kernel receives only the rooted runtime filesystem, mirrors a bounded project view into a private temporary directory, and returns dependencies in the canonical root-relative runtime namespace;
 - source inspection is side-effect-free and bounded; Python parameter/import discovery uses `ast` and never imports the project;
 - a warm child accepts one serialized request lane over a private, versioned, size-bounded protocol; stdout is protocol-only and stderr is bounded diagnostic output;
-- abort, timeout, protocol corruption, trust revocation, host exit, and cleanup terminate the complete descendant process tree and remove private mirrors and artifacts;
+- abort, timeout, protocol corruption, host exit, and cleanup terminate the complete descendant process tree and remove private mirrors and artifacts;
 - artifacts cross the process boundary only through private files whose containment, size, integrity, and post-read identity are checked before deletion;
 - native handles are valid only for one process generation. Mesh and export consume retained handles and never rerun source;
-- native execution is default-deny until the desktop host grants a separately revocable trust decision bound to the physical project directory identity.
+- every native worker is spawned through the shared operating-system sandbox seam with one fixed capability profile (bundled runtime and mirrored snapshot readable, one private writable root, no network); when the sandbox cannot start, the native runtime is unavailable and the worker is never spawned unsandboxed. There is no user trust decision, trusted-location list, or override.
 
-Do not extract a shared language-runner package or public runner ABI from the first implementation. A later PicoGK kernel may copy this shape; shared code is justified only after the second implementation proves an identical stable seam. Untrusted native-code containment requires a separate sandbox launch gate and is not implied by worker or utility-process isolation.
+Do not extract a shared language-runner package or public runner ABI from the first implementation. A later PicoGK kernel may copy this shape; shared code is justified only after the second implementation proves an identical stable seam. Native-code containment is the sandbox seam itself and is not implied by worker or utility-process isolation.
 
 ### Multi-Bundler Support
 

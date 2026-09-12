@@ -22,7 +22,6 @@ const voxelCacheKey = `voxels:sha256:${'1'.repeat(64)}`;
 const kernelOptions = {
   workerExecutable: '/worker',
   workerSha256: 'a'.repeat(64),
-  trustFile: '/trust.json',
   resourceFiles: [{ path: '/resource', sha256: 'b'.repeat(64), label: 'resource' }],
 };
 const triangle = (() => {

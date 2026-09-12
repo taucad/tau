@@ -16,7 +16,6 @@ describe('@taucad/build123d', () => {
         default: {
           pythonExecutable: '/python',
           workerPath: '/worker.py',
-          trustFile: '/trust.json',
           pythonSha256: 'a'.repeat(64),
           workerSha256: 'b'.repeat(64),
           supportFiles: [
@@ -37,7 +36,6 @@ describe('@taucad/build123d', () => {
       build123dOptionsSchema.safeParse({
         pythonExecutable: '/python',
         workerPath: '/worker.py',
-        trustFile: '/trust.json',
         pythonSha256: 'a'.repeat(64),
         workerSha256: 'b'.repeat(64),
         supportFiles: [

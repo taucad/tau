@@ -30,6 +30,12 @@ export type ChatError = {
   helpUrl?: string;
   /** Raw error message for debugging */
   raw?: string;
+  /**
+   * Structured fields the refusal carried, owned by its `code`. An
+   * `INSUFFICIENT_CREDIT` denial carries `requiredCreditAtoms`,
+   * `availableCreditAtoms` and `routeId` so the card can name the shortfall.
+   */
+  details?: Record<string, unknown>;
 };
 
 /**

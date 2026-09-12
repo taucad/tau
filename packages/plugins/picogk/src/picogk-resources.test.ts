@@ -1,6 +1,6 @@
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { isAbsolute, join } from 'node:path';
+import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -37,13 +37,13 @@ describe('PicoGK prepared resources', () => {
     }
   });
 
-  const fixture = (target = hostTarget): { readonly resourceRoot: string; readonly trustFile: string } => {
+  const fixture = (target = hostTarget): { readonly resourceRoot: string } => {
     const resourceRoot = mkdtempSync(join(tmpdir(), 'tau-picogk-resources-'));
     roots.push(resourceRoot);
     const targetRoot = join(resourceRoot, target);
     mkdirSync(targetRoot, { recursive: true });
     writeFileSync(join(targetRoot, 'tau-runtime-manifest.json'), JSON.stringify(manifest(target)));
-    return { resourceRoot, trustFile: join(resourceRoot, 'trust.json') };
+    return { resourceRoot };
   };
 
   it('resolves the current host target into absolute, integrity-pinned kernel options', () => {
@@ -61,7 +61,6 @@ describe('PicoGK prepared resources', () => {
     ]);
     expect(options.requestTimeout).toBe(120_000);
     expect(options.maxArtifactBytes).toBe(512 * 1024 * 1024);
-    expect(isAbsolute(options.trustFile)).toBe(true);
   });
 
   it('accepts an explicit target and rejects a manifest for another target', () => {

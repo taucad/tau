@@ -275,6 +275,14 @@
 }
 
 @layer base {
+  /* Lucide and lucide-style icons ship stroke-width 2; 1.5 reads lighter at our icon sizes.
+     Icons that set any other weight keep it, since this only matches the default. */
+  :where(svg[stroke-width='2']) {
+    stroke-width: var(--icon-stroke-width, 1.5);
+  }
+}
+
+@layer base {
   @supports (corner-shape: superellipse(1.5)) {
     :where(*) {
       corner-shape: superellipse(1.5);

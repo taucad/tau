@@ -1,8 +1,7 @@
 // @vitest-environment node
 /* oxlint-disable typescript/no-unsafe-assignment -- Vitest asymmetric matchers are typed as any. */
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 import { validateTauCadTopology } from '@taucad/geometry-core';
 import type { TauCadTopologyPayload } from '@taucad/geometry-core';
@@ -17,7 +16,7 @@ import {
   validateGlbData,
 } from '@taucad/runtime-testing';
 import { defineRuntime } from '@taucad/runtime/worker';
-import { afterAll, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { build123d } from '#index.js';
 
@@ -33,9 +32,6 @@ type ResourceManifest = {
 const workspaceRoot = resolve(import.meta.dirname, '../../../..');
 const targetRoot = resolve(workspaceRoot, `apps/desktop/resources/python/${process.platform}-${process.arch}`);
 const manifest = JSON.parse(readFileSync(resolve(targetRoot, 'tau-runtime-manifest.json'), 'utf8')) as ResourceManifest;
-const trustRoot = mkdtempSync(join(tmpdir(), 'tau-build123d-native-test-'));
-const trustFile = join(trustRoot, 'trust.json');
-writeFileSync(trustFile, '{"version":1,"trusted":true}\n');
 
 const runtime = defineRuntime({
   plugins: [
@@ -44,7 +40,6 @@ const runtime = defineRuntime({
         default: {
           pythonExecutable: resolve(targetRoot, manifest.pythonRelativePath),
           workerPath: resolve(targetRoot, manifest.workerPath),
-          trustFile,
           pythonSha256: manifest.pythonSha256,
           workerSha256: manifest.workerSha256,
           supportFiles: manifest.supportFiles.map(({ path, sha256 }) => ({ path: resolve(targetRoot, path), sha256 })),
@@ -128,14 +123,11 @@ const readTopology = (
   return { json, payload };
 };
 
-afterAll(() => {
-  rmSync(trustRoot, { recursive: true, force: true });
-});
-
 describe('Build123d native kernel', () => {
   it('extracts parameters, renders canonical topology, and exports retained STEP', async () => {
     const previousPath = process.env['PATH'];
-    process.env['PATH'] = '';
+    // Only the system directories the sandbox wrapper resolves `which` from: no user or tool PATH.
+    process.env['PATH'] = '/usr/bin:/bin';
     const client = createTestRuntimeClient({ runtime, files: { 'main.py': source } });
     const parameters = new Promise<Record<string, unknown>>((resolve) => {
       client.on('parametersResolved', (result) => {
@@ -299,7 +291,8 @@ describe('Build123d native kernel', () => {
 
   it('renders the full Build123d V8 reference through the packaged Python topology path', async () => {
     const previousPath = process.env['PATH'];
-    process.env['PATH'] = '';
+    // Only the system directories the sandbox wrapper resolves `which` from: no user or tool PATH.
+    process.env['PATH'] = '/usr/bin:/bin';
     const client = createTestRuntimeClient({ runtime, files: { 'main.py': v8Source } });
     try {
       const rendered = await client.render({

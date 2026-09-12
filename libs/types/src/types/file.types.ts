@@ -63,6 +63,8 @@ export type FileTreeEntry =
 export type FileEntry = FileTreeEntry & {
   isLoaded: boolean;
   mtimeMs: number;
+  /** What the composed view says about this entry; absent until a view stamps it. */
+  provenance?: FileProvenance;
   /**
    * When `type === 'dir'`, `true` means immediate children have been
    * read from the worker and merged into the tree snapshot. Omitted for
@@ -82,12 +84,45 @@ export type FileStat =
       readonly type: 'dir';
       readonly size: number;
       readonly mtimeMs: number;
+      /** What a composed view says about this path; absent on a raw provider stat. */
+      readonly provenance?: FileProvenance;
     }
   | ({
       readonly type: 'file';
       readonly size: number;
       readonly mtimeMs: number;
+      /** What a composed view says about this path; absent on a raw provider stat. */
+      readonly provenance?: FileProvenance;
     } & FileContentMetadata);
+
+/**
+ * Where a composed entry's bytes come from.
+ *
+ * `project` is the checkout's own tree; the other two are read-only overlays
+ * composed above it at fixed paths and never stored in the project.
+ *
+ * @public
+ */
+export type FileProvenanceSource = 'project' | 'dependencies' | 'system-skills';
+
+/**
+ * What a composed view knows about one entry, as data.
+ *
+ * Labels are catalog, not wire: the UI maps this tuple to copy through one
+ * catalog, so no presentation string crosses a process boundary.
+ *
+ * @public
+ */
+export type FileProvenance = Readonly<{
+  source: FileProvenanceSource;
+  /** Whether the bytes enter a revision. */
+  versioned: boolean;
+  access: 'read-write' | 'read-only';
+  /** Stable identity of the serving source: a checkout id, or an overlay unit such as `skill:<slug>@<version>#<fingerprint>`. */
+  identity?: string;
+  /** Identity of the overlay unit a project entry replaces wholesale. */
+  overrides?: string;
+}>;
 
 /**
  * Stat result with path and name for directory listings.

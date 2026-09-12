@@ -15,20 +15,9 @@ import { assertRootedPath } from '@taucad/runtime/kernel';
 import type { GeoSpecRuntimeClient } from 'geospec/model';
 
 const resourceRoot = process.env['TAU_PICOGK_RESOURCE_ROOT'];
-const trustFile = process.env['TAU_NATIVE_CODE_TRUST_FILE'];
-if (Boolean(resourceRoot) !== Boolean(trustFile)) {
-  throw new Error('Example PicoGK runs require both TAU_PICOGK_RESOURCE_ROOT and TAU_NATIVE_CODE_TRUST_FILE.');
-}
-const nativePlugins =
-  resourceRoot && trustFile
-    ? [
-        picogk({
-          kernels: {
-            default: loadPicogkKernelOptions({ resourceRoot: resolve(resourceRoot), trustFile: resolve(trustFile) }),
-          },
-        }),
-      ]
-    : [];
+const nativePlugins = resourceRoot
+  ? [picogk({ kernels: { default: loadPicogkKernelOptions({ resourceRoot: resolve(resourceRoot) }) } })]
+  : [];
 
 /** Runtime composition used to generate and verify checked-in example thumbnails. @public */
 export const exampleRuntime = defineRuntime({

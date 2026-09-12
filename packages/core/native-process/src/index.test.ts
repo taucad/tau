@@ -24,6 +24,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   createWorkspaceMirror,
   NativeProcessSession,
+  NativeRuntimeUnavailableError,
+  nativeSandboxPolicy,
   NativeWorkerReportedError,
   processEnvironment,
   terminateProcessTree,
@@ -32,6 +34,36 @@ import {
 const fsOverrides = vi.hoisted(() => ({
   readFile: undefined as undefined | (() => Promise<Uint8Array<ArrayBuffer>>),
   unlink: undefined as undefined | (() => Promise<void>),
+}));
+/**
+ * The sandbox runtime is replaced by a controllable double: its default wrap runs the
+ * quoted command through `/bin/sh` unsandboxed so lifecycle cases stay portable, while
+ * a wrap failure proves the fail-closed seam. Initialization knobs are exercised in
+ * `native-sandbox.test.ts`; real containment in `native-sandbox.integration.test.ts`.
+ */
+const sandbox = vi.hoisted(() => ({
+  supported: true,
+  dependencyErrors: [] as string[],
+  initialize: vi.fn(async () => undefined),
+  wrap: vi.fn<(command: string, ...rest: unknown[]) => void>(),
+  wrapFailure: undefined as unknown,
+  launcher: '/bin/sh',
+}));
+vi.mock('@anthropic-ai/sandbox-runtime', () => ({
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- mirrors the runtime's exported class.
+  SandboxManager: {
+    isSupportedPlatform: () => sandbox.supported,
+    checkDependenciesAsync: async () => ({ errors: sandbox.dependencyErrors, warnings: [] }),
+    initialize: sandbox.initialize,
+    wrapWithSandboxArgv: async (command: string, ...rest: unknown[]) => {
+      sandbox.wrap(command, ...rest);
+      if (sandbox.wrapFailure !== undefined) {
+        // oxlint-disable-next-line typescript/only-throw-error -- launchers can reject with bare strings.
+        throw sandbox.wrapFailure;
+      }
+      return { argv: [sandbox.launcher, '-c', command], env: process.env };
+    },
+  },
 }));
 vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal<{ readFile: typeof readFile; unlink: typeof unlink }>();
@@ -60,21 +92,19 @@ const fixture = (workerBody = `${ready}${keepAlive}`, requestTimeout = 2000) => 
   const executablePath = join(root, 'native-worker');
   const workerPath = join(root, 'worker.cjs');
   const resourcePath = join(root, 'resource');
-  const trustFile = join(root, 'trust.json');
   const executableBody = `#!/bin/sh\nexec "${process.execPath}" "$@"\n`;
   writeFileSync(executablePath, executableBody);
   chmodSync(executablePath, 0o700);
   writeFileSync(workerPath, workerBody);
   writeFileSync(resourcePath, 'resource');
-  writeFileSync(trustFile, '{"version":1,"trusted":true}\n');
   const logger = createMockLogger();
   const options = {
     executablePath,
     executableSha256: hash(executableBody),
     arguments: [workerPath],
+    runtimePath: root,
     workspacePath,
     artifactPath,
-    trustFile,
     resources: [{ path: resourcePath, sha256: hash('resource'), label: 'support resource' }],
     protocolVersion: 1,
     parseReady: (value: unknown) => {
@@ -108,7 +138,7 @@ const fixture = (workerBody = `${ready}${keepAlive}`, requestTimeout = 2000) => 
       },
     },
   };
-  return { root, artifactPath, trustFile, logger, options, session: new NativeProcessSession<Issue>(options) };
+  return { root, artifactPath, logger, options, session: new NativeProcessSession<Issue>(options) };
 };
 
 const request = async <T>(
@@ -166,6 +196,11 @@ const withPlatform = async (platform: NodeJS.Platform, callback: () => Promise<v
 afterEach(() => {
   fsOverrides.readFile = undefined;
   fsOverrides.unlink = undefined;
+  sandbox.supported = true;
+  sandbox.dependencyErrors = [];
+  sandbox.wrapFailure = undefined;
+  sandbox.wrap.mockClear();
+  sandbox.initialize.mockClear();
   vi.restoreAllMocks();
   for (const root of roots.splice(0)) {
     rmSync(root, { recursive: true, force: true });
@@ -339,14 +374,8 @@ ${keepAlive}`;
     await value.session.cleanup();
   });
 
-  it('validates trust, closure, resources, and generation state', async () => {
+  it('validates closure, resources, runtime confinement, and generation state', async () => {
     const absent = fixture();
-    unlinkSync(absent.trustFile);
-    await expect(absent.session.assertTrusted()).rejects.toThrow(/not trusted/);
-    for (const marker of ['null', '{}', '{"version":2,"trusted":true}', '{"version":1,"trusted":false}']) {
-      writeFileSync(absent.trustFile, marker);
-      await expect(absent.session.assertTrusted()).rejects.toThrow(/invalid/);
-    }
     expect(absent.session.isGenerationValid(0)).toBe(false);
     await absent.session.recycle();
     await absent.session.cleanup();
@@ -356,16 +385,62 @@ ${keepAlive}`;
     for (const [field, message] of [
       ['executableSha256', 'executable'],
       ['resources', 'support resource'],
+      ['runtimePath', 'is outside the native runtime root'],
     ] as const) {
       const value = fixture();
       const options =
         field === 'resources'
           ? { ...value.options, resources: [{ ...value.options.resources[0]!, sha256: '0'.repeat(64) }] }
-          : { ...value.options, executableSha256: '0'.repeat(64) };
+          : field === 'runtimePath'
+            ? { ...value.options, runtimePath: join(value.root, 'workspace') }
+            : { ...value.options, executableSha256: '0'.repeat(64) };
       const session = new NativeProcessSession<Issue>(options);
       await expect(request(session)).rejects.toThrow(new RegExp(message));
+      expect(sandbox.wrap).not.toHaveBeenCalled();
       await session.cleanup();
     }
+  });
+
+  it('should refuse to spawn the worker when the sandbox cannot wrap it', async () => {
+    for (const failure of [new Error('profile rejected'), 'launcher exited']) {
+      const value = fixture(
+        `require('node:fs').writeFileSync(process.argv[1] + '.started', '');${ready}${keepAlive}`,
+        1500,
+      );
+      sandbox.wrapFailure = failure;
+      const rejection = request(value.session);
+      await expect(rejection).rejects.toBeInstanceOf(NativeRuntimeUnavailableError);
+      await expect(rejection).rejects.toThrow(/profile rejected|launcher exited/);
+      expect(existsSync(`${value.options.arguments[0]}.started`)).toBe(false);
+      expect(privateSession(value.session).child).toBeUndefined();
+      expect(value.session.generation).toBe(0);
+      // The next request retries the sandbox instead of remembering the failure.
+      sandbox.wrapFailure = undefined;
+      await expect(request(value.session)).rejects.toThrow(/timed out/);
+      expect(existsSync(`${value.options.arguments[0]}.started`)).toBe(true);
+      await value.session.cleanup();
+    }
+  }, 15_000);
+
+  it('should wrap only host-owned quoted arguments with the fixed capability profile', async () => {
+    const value = fixture(respondingWorker(`({protocolVersion:1,requestId:request.requestId,result:{}})`));
+    await request(value.session);
+    const [command, shell, policy, signal, workingDirectory, attribution] = sandbox.wrap.mock.calls[0]!;
+    const artifact = `'${value.options.artifactPath}'`;
+    expect(command).toBe(
+      `TMPDIR=${artifact} TEMP=${artifact} TMP=${artifact} exec '${value.options.executablePath}' '${value.options.arguments[0]}'`,
+    );
+    expect(shell).toBe('/bin/sh');
+    expect(signal).toBeUndefined();
+    expect(workingDirectory).toBe(value.options.workspacePath);
+    expect(attribution).toEqual({ commandId: 'Test native#1' });
+    expect(policy).toEqual(
+      nativeSandboxPolicy({
+        readablePaths: [value.root, value.options.workspacePath],
+        writablePath: value.artifactPath,
+      }),
+    );
+    await value.session.cleanup();
   });
 
   it('serializes chunked requests, validates results, redacts stderr, and shuts down gracefully', async () => {
@@ -381,8 +456,6 @@ readline.on('line',(line)=>{const request=JSON.parse(line);if(active)process.exi
     expect(second.value).toBe('1:2');
     expect(value.session.isGenerationValid(1)).toBe(true);
     expect(value.logger.debug).toHaveBeenCalledWith(expect.stringContaining('<private>'));
-    writeFileSync(value.trustFile, '{"version":1,"trusted":true,"refreshed":true}\n');
-    await delay(300);
     await expect(
       request(value.session, {
         parseResult: () => {
@@ -434,25 +507,7 @@ readline.on('line',(line)=>{const request=JSON.parse(line);if(active)process.exi
     await delay(10);
     expect(duplicate.session.isGenerationValid(1)).toBe(false);
     await duplicate.session.cleanup();
-  });
-
-  it('should preserve sibling trust revocation watches when one session is cleaned up', async () => {
-    const value = fixture(`${ready}${keepAlive}`);
-    const sibling = new NativeProcessSession<Issue>(value.options);
-    try {
-      await value.session.cleanup();
-      const operation = request(sibling);
-      const rejection = expect(operation).rejects.toThrow('Native-code trust was revoked.');
-      await vi.waitFor(() => {
-        expect(privateSession(sibling).pending.size).toBe(1);
-      });
-      unlinkSync(value.trustFile);
-      await rejection;
-    } finally {
-      await value.session.cleanup();
-      await sibling.cleanup();
-    }
-  });
+  }, 15_000);
 
   it('cancels cooperatively when a request names a cancel method, and kills when it cannot', async () => {
     // The worker answers the cancel notification itself; the process is never recycled.
@@ -473,8 +528,8 @@ ${keepAlive}`);
     while (privateSession(cooperative.session).pending.size === 0) {
       await delay(2);
     }
-    const generation = cooperative.session.generation;
-    const child = privateSession(cooperative.session).child;
+    const { generation } = cooperative.session;
+    const { child } = privateSession(cooperative.session);
     controller.abort(new Error('user edited again'));
     await expect(operation).rejects.toThrow(NativeWorkerReportedError);
     expect(cooperative.session.generation).toBe(generation);
@@ -485,8 +540,10 @@ ${keepAlive}`);
       expect(privateSession(cooperative.session).pending.size).toBe(1);
     });
     expect(privateSession(cooperative.session).child).toBe(child);
+    // Observe the rejection before cleanup settles it, or the settled promise reports as unhandled.
+    const nextRejection = expect(next).rejects.toThrow();
     await cooperative.session.cleanup();
-    await expect(next).rejects.toThrow();
+    await nextRejection;
 
     // Kill remains the fallback when the worker's input is gone.
     const unwritable = fixture(`${ready}${keepAlive}`);
@@ -501,7 +558,7 @@ ${keepAlive}`);
     await unwritable.session.cleanup();
   });
 
-  it('bounds the queue and handles abort, timeout, trust revocation, spawn, and write failures', async () => {
+  it('bounds the queue and handles abort, timeout, spawn, and write failures', async () => {
     const stalled = fixture(`${ready}${keepAlive}`, 5000);
     const operations = Array.from({ length: 16 }, async () => request(stalled.session));
     await expect(request(stalled.session)).rejects.toThrow(/queue exceeds/);
@@ -534,15 +591,6 @@ ${keepAlive}`);
     const handshakeTimeout = fixture(keepAlive, 20);
     await expect(request(handshakeTimeout.session)).rejects.toThrow(/handshake timed out/);
     await handshakeTimeout.session.cleanup();
-    const revoked = fixture(`${ready}${keepAlive}`);
-    const revocation = request(revoked.session);
-    while (privateSession(revoked.session).pending.size === 0) {
-      await delay(2);
-    }
-    unlinkSync(revoked.trustFile);
-    await expect(revocation).rejects.toThrow(/revoked/);
-    await revoked.session.cleanup();
-
     const writable = fixture(respondingWorker(`({protocolVersion:1,requestId:request.requestId,result:{}})`));
     await request(writable.session);
     const writableChild = privateSession(writable.session).child!;
@@ -557,6 +605,12 @@ ${keepAlive}`);
     chmodSync(spawnFailure.options.executablePath, 0o600);
     await expect(request(spawnFailure.session)).rejects.toThrow();
     await spawnFailure.session.cleanup();
+
+    const missingLauncher = fixture();
+    sandbox.launcher = join(missingLauncher.root, 'missing-sandbox-launcher');
+    await expect(request(missingLauncher.session)).rejects.toThrow(/ENOENT/);
+    sandbox.launcher = '/bin/sh';
+    await missingLauncher.session.cleanup();
 
     const writeFailure = fixture(respondingWorker(`({protocolVersion:1,requestId:request.requestId,result:{}})`));
     await request(writeFailure.session);
@@ -654,6 +708,11 @@ ${keepAlive}`);
     const environment = processEnvironment('/artifacts');
     expect(environment['LANG']).toBe('C.UTF-8');
     expect(environment['TMPDIR']).toBe('/artifacts');
+    expect(environment['HOME']).toBe('/artifacts');
+    expect(environment['PATH']).toBe('/usr/bin:/bin');
+    await withPlatform('win32', async () => {
+      expect(processEnvironment('/artifacts')).not.toHaveProperty('PATH');
+    });
   });
 });
 

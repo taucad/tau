@@ -9,7 +9,6 @@ const selected = plugin({
     default: {
       pythonExecutable: '/python',
       workerPath: '/worker.py',
-      trustFile: '/trust.json',
       pythonSha256: 'a'.repeat(64),
       workerSha256: 'b'.repeat(64),
       supportFiles: [

@@ -196,3 +196,54 @@ export const menuItemLayoutClass = 'flex items-center gap-2';
  */
 export const menuItemIconClass =
   "[&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5 [&_svg:not([class*='text-'])]:text-muted-foreground";
+
+/**
+ * Group heading styling for picker surfaces (command groups, virtualized list headers,
+ * hand-rolled suggestion menus). Kept tight so a heading sits close to the search field
+ * above it and the items below it.
+ *
+ * Must stay in sync with {@link menuGroupHeadingSelectorClass}, which applies the same
+ * spacing to cmdk-owned heading elements that cannot take a className directly.
+ *
+ * @public
+ *
+ * @example <caption>Render a picker group heading</caption>
+ * ```typescript
+ * import { menuGroupHeadingClass } from '@taucad/ui/components/menu.variants';
+ *
+ * export const className = menuGroupHeadingClass;
+ * ```
+ */
+export const menuGroupHeadingClass = 'px-2 py-0.5 text-xs font-medium text-muted-foreground';
+
+/**
+ * {@link menuGroupHeadingClass} expressed as child selectors for `[cmdk-group-heading]`,
+ * whose element is rendered by cmdk and cannot receive a className. Tailwind only emits
+ * utilities it can read statically, so the prefixed form is spelled out rather than derived.
+ *
+ * @public
+ *
+ * @example <caption>Style a cmdk group heading</caption>
+ * ```typescript
+ * import { menuGroupHeadingSelectorClass } from '@taucad/ui/components/menu.variants';
+ *
+ * export const className = menuGroupHeadingSelectorClass;
+ * ```
+ */
+export const menuGroupHeadingSelectorClass =
+  '[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-0.5 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground';
+
+/**
+ * Wrapper styling for a picker's search field. Its padding matches the list gutter so the
+ * field lines up with the items and stays close to the first group heading.
+ *
+ * @public
+ *
+ * @example <caption>Wrap a picker search field</caption>
+ * ```typescript
+ * import { menuSearchWrapperClass } from '@taucad/ui/components/menu.variants';
+ *
+ * export const className = menuSearchWrapperClass;
+ * ```
+ */
+export const menuSearchWrapperClass = 'relative flex items-center p-1';

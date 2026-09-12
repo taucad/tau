@@ -190,10 +190,8 @@ const main = async (): Promise<void> => {
   const privateRoot = realpathSync(mkdtempSync(join(tmpdir(), 'tau-picogk-soak-')));
   const workspacePath = join(privateRoot, 'workspace');
   const artifactPath = join(privateRoot, 'artifacts');
-  const trustFile = join(privateRoot, 'trust.json');
   mkdirSync(workspacePath);
   mkdirSync(artifactPath);
-  writeFileSync(trustFile, '{"version":1,"trusted":true}\n', { mode: 0o600 });
   const sourcePath = join(workspacePath, 'main.cs');
   writeFileSync(sourcePath, source(0));
   const session = new PicogkSession({
@@ -201,7 +199,6 @@ const main = async (): Promise<void> => {
     workerSha256: manifest.workerSha256,
     workspacePath,
     artifactPath,
-    trustFile,
     resourceFiles: manifest.resourceFiles.map(({ path, ...resource }) => ({
       ...resource,
       path: join(resourceRoot, path),

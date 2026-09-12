@@ -76,19 +76,38 @@ def _terminate_orphaned_process_tree(temporary_root: Path) -> None:
     os._exit(1)
 
 
+def _parent_is_alive(parent_pid: int) -> bool:
+    """Probe the supervising process without signalling it.
+
+    The sandbox reparents this worker through its wrapper chain, and denies signals to
+    processes outside the sandbox with EPERM; only ESRCH proves the supervisor is gone.
+    """
+    try:
+        os.kill(parent_pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
 def _watch_parent(
     parent_pid: int,
     temporary_root: Path,
-    current_parent: Any = os.getppid,
+    parent_is_alive: Any = _parent_is_alive,
     wait: Any = time.sleep,
     terminate: Any = _terminate_orphaned_process_tree,
 ) -> None:
-    while current_parent() == parent_pid:
+    while parent_is_alive(parent_pid):
         wait(0.25)
     terminate(temporary_root)
 
 
 def _start_parent_watchdog(parent_pid: int, temporary_root: Path) -> None:
+    if not _parent_is_alive(parent_pid):
+        # A PID namespace (Linux Bubblewrap) hides the supervisor entirely; there the sandbox
+        # itself dies with its parent, and a supervisor already gone closes stdin instead.
+        return
     threading.Thread(
         target=_watch_parent,
         args=(parent_pid, temporary_root),

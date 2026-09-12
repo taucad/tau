@@ -64,12 +64,20 @@ def compute_config() -> dict[str, object]:
 class WorkerTest(unittest.TestCase):
     def test_parent_watchdog_terminates_an_orphaned_worker_group(self) -> None:
         temporary_root = Path("/tmp/tau-build123d-test")
-        parents = iter((42, 42, 1))
+        liveness = iter((True, True, False))
         waits: list[float] = []
         terminations: list[Path] = []
-        worker._watch_parent(42, temporary_root, lambda: next(parents), waits.append, terminations.append)
+        worker._watch_parent(42, temporary_root, lambda _pid: next(liveness), waits.append, terminations.append)
         self.assertEqual(waits, [0.25, 0.25])
         self.assertEqual(terminations, [temporary_root])
+
+        with patch("worker.os.kill") as kill:
+            self.assertTrue(worker._parent_is_alive(42))
+            kill.assert_called_once_with(42, 0)
+        with patch("worker.os.kill", side_effect=PermissionError):
+            self.assertTrue(worker._parent_is_alive(42))
+        with patch("worker.os.kill", side_effect=ProcessLookupError):
+            self.assertFalse(worker._parent_is_alive(42))
 
         with (
             patch("worker.shutil.rmtree") as remove_tree,
@@ -99,7 +107,16 @@ class WorkerTest(unittest.TestCase):
         exit_process.assert_called_once_with(1)
 
         thread = MagicMock()
-        with patch("worker.threading.Thread", return_value=thread) as thread_type:
+        with (
+            patch("worker.threading.Thread", return_value=thread) as thread_type,
+            patch("worker._parent_is_alive", return_value=False),
+        ):
+            worker._start_parent_watchdog(42, temporary_root)
+        thread_type.assert_not_called()
+        with (
+            patch("worker.threading.Thread", return_value=thread) as thread_type,
+            patch("worker._parent_is_alive", return_value=True),
+        ):
             worker._start_parent_watchdog(42, temporary_root)
         thread_type.assert_called_once_with(
             target=worker._watch_parent,

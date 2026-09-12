@@ -76,21 +76,18 @@ const fixture = (workerBody = `${ready}${keepAlive}`, requestTimeout = 5000) => 
   const workerPath = join(root, 'worker.cjs');
   const analyzerPath = join(root, 'analyzer.py');
   const glbPath = join(root, 'glb.py');
-  const trustFile = join(root, 'trust.json');
   const executableBody = `#!/bin/sh\nexec "${process.execPath}" "$4" "$5" "$6" "$7" "$8" "$9" "$10"\n`;
   writeFileSync(executable, executableBody);
   chmodSync(executable, 0o700);
   writeFileSync(workerPath, workerBody);
   writeFileSync(analyzerPath, 'analyzer');
   writeFileSync(glbPath, 'glb');
-  writeFileSync(trustFile, '{"version":1,"trusted":true}\n');
   const logger = createMockLogger();
   const options = {
     pythonExecutable: executable,
     workerPath,
     workspacePath,
     artifactPath,
-    trustFile,
     pythonSha256: sha256(executableBody),
     workerSha256: sha256(workerBody),
     supportFiles: [
@@ -101,7 +98,7 @@ const fixture = (workerBody = `${ready}${keepAlive}`, requestTimeout = 5000) => 
     maxArtifactBytes: 32,
     logger,
   };
-  return { root, artifactPath, trustFile, logger, options, session: new PythonSession(options) };
+  return { root, artifactPath, logger, options, session: new PythonSession(options) };
 };
 
 const respondingWorker = (responseExpression: string): string => `${ready}
@@ -224,20 +221,14 @@ describe('PythonSession', () => {
     });
   });
 
-  it('reports worker issues and denies absent or malformed trust', async () => {
+  it('reports worker issues and rejects requests after closure', async () => {
     expect(new Build123dWorkerError([{ message: 'bad', code: 'X', type: 'runtime', severity: 'error' }])).toMatchObject(
       {
         name: 'Build123dWorkerError',
         message: 'bad',
       },
     );
-    const { session, trustFile } = fixture();
-    unlinkSync(trustFile);
-    await expect(session.assertTrusted()).rejects.toThrow(/not trusted/);
-    for (const marker of ['null', '{}', '{"version":2,"trusted":true}', '{"version":1,"trusted":false}']) {
-      writeFileSync(trustFile, marker);
-      await expect(session.assertTrusted()).rejects.toThrow(/invalid/);
-    }
+    const { session } = fixture();
     await session.cleanup();
     await session.cleanup();
     await nativeSession(session).recycle(new Error('already stopped'));
@@ -304,11 +295,6 @@ readline.on('line',(line)=>{
     session.release(built.handleId, session.generation);
     await delay(10);
     requestSpy.mockRestore();
-    writeFileSync(
-      (session as unknown as { options: { trustFile: string } }).options.trustFile,
-      '{"version":1,"trusted":true}\n',
-    );
-    await delay(300);
     expect(logger.debug).toHaveBeenCalledWith(expect.stringContaining('<private>'));
     await session.cleanup();
     expect(session.isHandleGenerationValid(session.generation)).toBe(false);
@@ -436,14 +422,6 @@ readline.on('line',(line)=>{const request=JSON.parse(line);if(request.method==='
       request(handshakeTimeout.session, { method: 'analyze', schema: build123dAnalysisSchema }),
     ).rejects.toThrow(/handshake timed out/);
     await handshakeTimeout.session.cleanup();
-
-    const revoked = fixture(`${ready}${keepAlive}`, 2000);
-    const revokedRequest = request(revoked.session, { method: 'analyze', schema: build123dAnalysisSchema });
-    setTimeout(() => {
-      unlinkSync(revoked.trustFile);
-    }, 20);
-    await expect(revokedRequest).rejects.toThrow(/revoked/);
-    await revoked.session.cleanup();
 
     const exited = fixture(`process.exit(7);`);
     await expect(request(exited.session, { method: 'analyze', schema: build123dAnalysisSchema })).rejects.toThrow(

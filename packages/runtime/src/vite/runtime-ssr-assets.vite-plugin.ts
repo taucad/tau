@@ -122,6 +122,9 @@ export const runtimeAssetsPlugin = (): Plugin => {
   return {
     name: 'taucad-runtime:assets',
     enforce: 'pre',
+    // Dev calls buildStart only for the client environment unless a plugin opts in, which would
+    // leave every other environment without the per-environment asset state this plugin keys on.
+    perEnvironmentStartEndDuringDev: true,
     config: () => ({ build: { ssrEmitAssets: true } }),
     configResolved(config: ResolvedConfig) {
       const consumer = 'consumer' in config ? config.consumer : undefined;

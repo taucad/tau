@@ -40,8 +40,6 @@ export type KernelConfiguration = {
   features: string[];
   /** Runtime capability required before this offering may be selected. */
   requiresRuntimeKernelId?: string;
-  /** Executing the project requires a separate native-code trust grant. */
-  requiresNativeCodeTrust?: boolean;
 };
 
 /** @public */
@@ -81,7 +79,6 @@ public static class Params
     tags: ['C#', 'PicoGK', 'OpenVDB', 'Voxels', 'Desktop'],
     features: ['CoreCLR JIT', 'Upstream PicoGK API', 'Interactive parameters', 'Topology-aware GLB'],
     requiresRuntimeKernelId: 'picogk',
-    requiresNativeCodeTrust: true,
   },
   {
     id: 'build123d',
@@ -111,7 +108,6 @@ def main(params: Params) -> Shape:
     tags: ['Python', 'OpenCascade', 'BRep', 'Desktop', 'Precision'],
     features: ['Native performance', 'Python CAD API', 'Topology-aware GLB', 'STEP export'],
     requiresRuntimeKernelId: 'build123d',
-    requiresNativeCodeTrust: true,
   },
   {
     id: 'openscad',

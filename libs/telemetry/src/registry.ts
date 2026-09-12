@@ -603,7 +603,12 @@ export const TauMetrics = {
     attributes: z.object({
       'deployment.environment': z.enum(['development', 'staging', 'prod-us', 'prod-eu']),
       'tau.billing.capacity_pool': z.enum(['primary', 'helper']),
-      'tau.billing.terminal.kind': z.enum(['final_usage', 'provider_rejected', 'absorbed_unknown']),
+      'tau.billing.terminal.kind': z.enum([
+        'final_usage',
+        'provider_rejected',
+        'absorbed_unknown',
+        'authorized_exhausted',
+      ]),
       'tau.billing.terminal.incomplete_reason': z.enum(['none', 'max_output_tokens', 'content_filter', 'other']),
     }),
   }),

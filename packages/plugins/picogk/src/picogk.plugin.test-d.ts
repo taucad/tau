@@ -10,7 +10,6 @@ const selected = plugin({
     default: {
       workerExecutable: '/worker',
       workerSha256: 'a'.repeat(64),
-      trustFile: '/trust.json',
       resourceFiles: [{ path: '/resource', sha256: 'b'.repeat(64), label: 'resource' }],
     },
   },

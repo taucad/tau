@@ -122,10 +122,8 @@ const workerResidentKilobytes = (workspacePath: string): number | undefined => {
 const privateRoot = realpathSync(mkdtempSync(join(tmpdir(), 'tau-build123d-benchmark-')));
 const workspacePath = join(privateRoot, 'workspace');
 const artifactPath = join(privateRoot, 'artifacts');
-const trustFile = join(privateRoot, 'trust.json');
 mkdirSync(workspacePath);
 mkdirSync(artifactPath);
-writeFileSync(trustFile, '{"version":1,"trusted":true}\n', { mode: 0o600 });
 writeFileSync(join(workspacePath, 'main.py'), source());
 const session = new PythonSession({
   pythonExecutable: resolve(resourceRoot, manifest.pythonRelativePath),
@@ -135,7 +133,6 @@ const session = new PythonSession({
   supportFiles: manifest.supportFiles.map(({ path, sha256 }) => ({ path: resolve(resourceRoot, path), sha256 })),
   workspacePath,
   artifactPath,
-  trustFile,
   requestTimeout: 120_000,
   maxArtifactBytes: 256 * 1024 * 1024,
   logger,

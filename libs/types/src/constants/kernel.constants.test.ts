@@ -8,7 +8,6 @@ describe('kernel configuration identity', () => {
       language: 'csharp',
       mainFile: 'main.cs',
       requiresRuntimeKernelId: 'picogk',
-      requiresNativeCodeTrust: true,
     });
     expect(configuration?.emptyCode).toContain('public static class Params');
     expect(configuration?.emptyCode).toContain('[Range(0.05, 5.0)]');

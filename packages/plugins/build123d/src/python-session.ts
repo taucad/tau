@@ -27,13 +27,17 @@ import type { Build123dIssue } from '#build123d.protocol.js';
 
 const brepMediaType = 'application/vnd.opencascade.brep';
 
-/** Host-owned paths, integrity evidence, and limits for one Python session. */
+/**
+ * Host-owned paths, integrity evidence, and limits for one Python session.
+ *
+ * The interpreter lives at `<runtime>/bin/python3`; that runtime root is the only host
+ * path the sandbox lets the worker read besides its workspace mirror.
+ */
 export type PythonSessionOptions = {
   readonly pythonExecutable: string;
   readonly workerPath: string;
   readonly workspacePath: string;
   readonly artifactPath: string;
-  readonly trustFile: string;
   readonly pythonSha256: string;
   readonly workerSha256: string;
   readonly supportFiles: ReadonlyArray<{ readonly path: string; readonly sha256: string }>;
@@ -113,9 +117,9 @@ export class PythonSession {
         '--parent-pid',
         String(process.pid),
       ],
+      runtimePath: resolve(dirname(options.pythonExecutable), '..'),
       workspacePath: options.workspacePath,
       artifactPath: options.artifactPath,
-      trustFile: options.trustFile,
       resources: [
         { path: options.workerPath, sha256: options.workerSha256, label: 'Build123d worker' },
         ...options.supportFiles.map((file) => ({ ...file, label: 'Build123d worker support files' })),
@@ -135,11 +139,6 @@ export class PythonSession {
   /** Current native worker generation. */
   public get generation(): number {
     return this.session.generation;
-  }
-
-  /** Verify that the project has explicitly trusted native execution. */
-  public async assertTrusted(): Promise<void> {
-    await this.session.assertTrusted();
   }
 
   /** Execute one validated request through the bounded worker protocol. */

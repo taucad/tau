@@ -57,7 +57,6 @@ const options = {
   workerSha256: 'a'.repeat(64),
   workspacePath: '/workspace',
   artifactPath: '/artifacts',
-  trustFile: '/trust',
   resourceFiles: [{ path: '/resource', sha256: 'b'.repeat(64), label: 'resource' }],
   requestTimeout: 100,
   maxArtifactBytes: 200,

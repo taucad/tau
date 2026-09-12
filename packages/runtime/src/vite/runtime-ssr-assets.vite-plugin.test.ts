@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'n
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { build } from 'vite';
+import { build, createServer } from 'vite';
 import type { Environment, Plugin, ResolvedConfig } from 'vite';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { runtimeAssetsPlugin } from '#vite/runtime-ssr-assets.vite-plugin.js';
@@ -393,5 +393,28 @@ describe('runtimeAssetsPlugin', () => {
       .join('\n');
     expect(outputCode).not.toContain('ROLLUP_FILE_URL');
     expect(outputCode).not.toContain('__TAUCAD_RUNTIME_ASSET__');
+  });
+  it('should transform a server-environment module in a dev server', async () => {
+    // Vite runs buildStart only for the client environment during dev unless a plugin opts in, so a
+    // server environment reaching the transform without its per-environment state is a real regression.
+    const fixtureDirectory = mkdtempSync(path.join(path.dirname(importer), '.tau-runtime-dev-assets-'));
+    temporaryDirectories.push(fixtureDirectory);
+    const source = `export const asset = new URL(import.meta.resolve('manifold-3d/manifold.wasm')).href;`;
+    writeFileSync(path.join(fixtureDirectory, 'entry.mjs'), source);
+
+    const server = await createServer({
+      configFile: false,
+      logLevel: 'silent',
+      root: fixtureDirectory,
+      plugins: [runtimeAssetsPlugin()],
+      server: { middlewareMode: true },
+    });
+    try {
+      await server.environments['ssr'].init();
+      const result = await server.environments['ssr'].transformRequest('/entry.mjs');
+      expect(result?.code).toContain('manifold.wasm');
+    } finally {
+      await server.close();
+    }
   });
 });

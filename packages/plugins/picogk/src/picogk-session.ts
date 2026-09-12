@@ -17,13 +17,19 @@ import {
 } from '#picogk.protocol.js';
 import type { PicogkIssue, PicogkPreparedCompute, PicogkSceneEvent } from '#picogk.protocol.js';
 
-/** Host-owned paths and bounds for a PicoGK worker session. @public */
+/**
+ * Host-owned paths and bounds for a PicoGK worker session.
+ *
+ * The worker's directory is the prepared runtime root; it is the only host path the
+ * sandbox lets the worker read besides its workspace mirror.
+ *
+ * @public
+ */
 export type PicogkSessionOptions = {
   readonly workerExecutable: string;
   readonly workerSha256: string;
   readonly workspacePath: string;
   readonly artifactPath: string;
-  readonly trustFile: string;
   readonly resourceFiles: ReadonlyArray<{ readonly path: string; readonly sha256: string; readonly label: string }>;
   readonly requestTimeout: number;
   readonly maxArtifactBytes: number;
@@ -88,9 +94,9 @@ export class PicogkSession {
         '--parent-pid',
         String(process.pid),
       ],
+      runtimePath: dirname(options.workerExecutable),
       workspacePath: options.workspacePath,
       artifactPath: options.artifactPath,
-      trustFile: options.trustFile,
       resources: options.resourceFiles,
       protocolVersion: picogkProtocolVersion,
       parseReady,

@@ -17,7 +17,6 @@ const renderOptions = { tessellation: { linearTolerance: 0.05, angularTolerance:
 const kernelOptions = {
   pythonExecutable: '/python',
   workerPath: '/worker.py',
-  trustFile: '/trust.json',
   pythonSha256: 'a'.repeat(64),
   workerSha256: 'b'.repeat(64),
   supportFiles: [

@@ -21,7 +21,7 @@ import {
 import { createNodeClient } from '@taucad/runtime/node';
 import type { ProgressiveSceneUpdate, WorkerState } from '@taucad/runtime/types';
 import { defineRuntime } from '@taucad/runtime/worker';
-import { afterAll, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { picogk } from '#index.js';
 import { picogkArtifactToGlb } from '#picogk-mesh.js';
@@ -38,9 +38,6 @@ type ResourceManifest = {
 const workspaceRoot = resolve(import.meta.dirname, '../../../..');
 const targetRoot = resolve(workspaceRoot, `apps/desktop/resources/picogk/${process.platform}-${process.arch}`);
 const manifest = JSON.parse(readFileSync(resolve(targetRoot, 'tau-runtime-manifest.json'), 'utf8')) as ResourceManifest;
-const trustRoot = mkdtempSync(join(tmpdir(), 'tau-picogk-native-test-'));
-const trustFile = join(trustRoot, 'trust.json');
-writeFileSync(trustFile, '{"version":1,"trusted":true}\n');
 
 const runtime = defineRuntime({
   plugins: [
@@ -50,7 +47,6 @@ const runtime = defineRuntime({
         default: {
           workerExecutable: resolve(targetRoot, manifest.workerPath),
           workerSha256: manifest.workerSha256,
-          trustFile,
           resourceFiles: manifest.resourceFiles.map(({ path, ...resource }) => ({
             ...resource,
             path: resolve(targetRoot, path),
@@ -185,10 +181,6 @@ const readTopology = (
   };
 };
 
-afterAll(() => {
-  rmSync(trustRoot, { recursive: true, force: true });
-});
-
 describe('PicoGK native C# kernel', () => {
   it('rehydrates component materialization across worker generations with byte-exact final GLB parity', async () => {
     const root = mkdtempSync(join(tmpdir(), 'tau-picogk-compute-native-'));
@@ -201,7 +193,6 @@ describe('PicoGK native C# kernel', () => {
       workerSha256: manifest.workerSha256,
       workspacePath: root,
       artifactPath: artifacts,
-      trustFile,
       resourceFiles: manifest.resourceFiles.map(({ path, ...resource }) => ({
         ...resource,
         path: resolve(targetRoot, path),
@@ -567,7 +558,8 @@ Library.Go(1f, () =>
 
   it('JIT-renders a standard PicoGK console program and exports retained GLB without system dotnet', async () => {
     const previousPath = process.env['PATH'];
-    process.env['PATH'] = '';
+    // Only the system directories the sandbox wrapper resolves `which` from: no user or tool PATH.
+    process.env['PATH'] = '/usr/bin:/bin';
     const client = createTestRuntimeClient({ runtime, files: { 'main.cs': sphereSource() } });
     const parameters = new Promise<{ readonly defaults: Record<string, unknown>; readonly schema: unknown }>(
       (resolve) => {

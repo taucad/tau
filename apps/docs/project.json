@@ -13,14 +13,25 @@
         }
       }
     },
+    "generate-collections": {
+      "executor": "nx:run-commands",
+      "outputs": ["{workspaceRoot}/node_modules/.cache/fumadocs/apps/docs"],
+      "metadata": {
+        "description": "Emit the fumadocs-mdx collection declarations that tsconfig.app.json maps onto node_modules/.cache/fumadocs/apps/docs."
+      },
+      "options": {
+        "cwd": "{workspaceRoot}",
+        "command": "node --import @oxc-node/core/register apps/docs/scripts/generate-collections.mts"
+      }
+    },
     "typecheck": {
-      "dependsOn": ["build"]
+      "dependsOn": ["generate-collections"]
     },
     "test": {
-      "dependsOn": ["build"]
+      "dependsOn": ["generate-collections"]
     },
     "lint": {
-      "dependsOn": ["build"],
+      "dependsOn": ["generate-collections"],
       "options": {
         "files": "app *.test.ts vite.config.ts vitest.config.ts react-router.config.ts vite-environment.d.ts"
       }

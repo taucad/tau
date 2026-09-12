@@ -1,8 +1,8 @@
 import { setup, assign, emit } from 'xstate';
 import type { FileWriteSource } from '@taucad/fs-client/file-write-source';
 import { hashString } from '@taucad/utils/hash';
+import { classify } from '@taucad/filesystem/path-registry';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
-import { isDesignPath } from '#lib/file-restore-timeline.js';
 import type { RestorePlan } from '#lib/file-restore-timeline.js';
 import type { PersistedRevisionState } from '#types/project.types.js';
 import type {
@@ -376,10 +376,10 @@ export const revisionMachine = setup({
     // PC9: a restore is risky (needs confirmation) if it deletes files or the
     // live FS has diverged from the head via a manual edit.
     isRisky: ({ context }) => (context.plan?.remove.size ?? 0) > 0 || context.dirty,
-    // H6/H10: a non-'machine' write to a design path diverges the FS. Restore's
-    // own 'machine' writes and parameter writes ('machine' + .tau/) are excluded.
+    // H6/H10: a non-'machine' write to a versioned path diverges the FS.
+    // Restore's own 'machine' writes are excluded, as are records and caches.
     isNonMachineDesignWrite: ({ event }) =>
-      event.type === 'FS_WRITE' && event.source !== 'machine' && isDesignPath(event.path),
+      event.type === 'FS_WRITE' && event.source !== 'machine' && classify(event.path).versioned,
     isFork: ({ event }) => event.type === 'NEW_USER_TURN' && event.abandonedTurnIds.length > 0,
     isTrackableTurn: ({ event }) => event.type === 'NEW_USER_TURN' && isTrackableTurn(event),
     canUndo: ({ context }) => context.fromHeadTurnId !== undefined,

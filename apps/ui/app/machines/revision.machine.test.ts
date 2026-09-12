@@ -370,14 +370,20 @@ describe('revisionMachine', () => {
     expect(persist).not.toHaveBeenCalled();
   });
 
-  it('RM-DIRTY-IGNORE-TAU: a write to a .tau/ path never sets dirty (H10)', () => {
+  it('RM-DIRTY-IGNORE-UNVERSIONED: a write to an unversioned path never sets dirty (H10)', () => {
+    for (const path of ['.tau/cache/geometry/hash.bin', 'exports/model.step', 'node_modules/replicad/index.js']) {
+      const { actor } = harness();
+      actor.send({ type: 'FS_WRITE', source: 'editor', path });
+      expect(actor.getSnapshot().context.dirty).toBe(false);
+    }
+  });
+
+  /* An authored `.tau` control is versioned, so editing a parameter diverges
+   * the tree; the blanket `.tau/` test this replaced hid that (Rule 16). */
+  it('RM-DIRTY-AUTHORED-TAU: a write to an authored .tau control sets dirty', () => {
     const { actor } = harness();
-    actor.send({
-      type: 'FS_WRITE',
-      source: 'editor',
-      path: '.tau/parameters/main.json',
-    });
-    expect(actor.getSnapshot().context.dirty).toBe(false);
+    actor.send({ type: 'FS_WRITE', source: 'editor', path: '.tau/parameters/main.json' });
+    expect(actor.getSnapshot().context.dirty).toBe(true);
   });
 
   it('RM-DIRTY-CLEAR: a clean restore clears a previously-dirty flag', async () => {

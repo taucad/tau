@@ -30,7 +30,6 @@ type DesktopShell = {
   readonly runtimeKernelIds?: readonly string[];
   readonly externalAgents?: readonly ExternalAgentDescriptor[];
   readonly revisions?: readonly ChatRevisionMode[];
-  readonly nativeCode?: DesktopBridge['nativeCode'];
   readonly compute?: DesktopBridge['compute'];
   readonly appIcon: { setTheme(theme: 'light' | 'dark'): void };
   readonly dialog: DesktopBridge['dialog'];
@@ -79,11 +78,6 @@ export type DesktopBridge = {
    * selector for this computer.
    */
   readonly revisions: readonly ChatRevisionMode[];
-  readonly nativeCode: {
-    isTrusted(projectRoot: string): Promise<boolean>;
-    grant(projectRoot: string): Promise<boolean>;
-    revoke(projectRoot: string): Promise<void>;
-  };
   readonly nodeFs: {
     /**
      * Absolute host directory backing the node Home workspace
@@ -190,11 +184,6 @@ export const desktopBridge = (): DesktopBridge | undefined => {
         .max(16)
         .safeParse(shell.externalAgents ?? []).data ?? [],
     revisions: shell.revisions ?? [],
-    nativeCode: shell.nativeCode ?? {
-      isTrusted: async () => false,
-      grant: async () => false,
-      revoke: async () => undefined,
-    },
     nodeFs: {
       homeRoot: shell.nodeFs.homeRoot,
       connect: async () => connectServices('nodeFs'),

@@ -14,13 +14,14 @@ import {
 } from '@taucad/ui/components/alert-dialog';
 import { Button } from '@taucad/ui/components/button';
 import type { ContentChangeEvent } from '@taucad/fs-client/file-content-service';
+import { classify } from '@taucad/filesystem/path-registry';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 import { useProject } from '#hooks/use-project.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useAnalytics } from '#hooks/use-analytics.js';
 import type { Chat } from '@taucad/chat';
-import { isDesignPath, migrateHeadTurnId, resolveRestore } from '#lib/file-restore-timeline.js';
+import { migrateHeadTurnId, resolveRestore } from '#lib/file-restore-timeline.js';
 import { applyRestorePlan } from '#lib/restore-apply.js';
 import { revisionMachine } from '#machines/revision.machine.js';
 import type { ApplyPlanInput, ComputePlanInput, PlanComputedEvent } from '#machines/revision.machine.js';
@@ -160,7 +161,7 @@ export function RevisionProvider({ children }: { readonly children: ReactNode })
       ) {
         const paths = event.type === 'batchWritten' ? event.paths : [event.path];
         for (const path of paths) {
-          if (isDesignPath(path)) {
+          if (classify(path).versioned) {
             actor.send({ type: 'FS_WRITE', source: event.source, path });
           }
         }

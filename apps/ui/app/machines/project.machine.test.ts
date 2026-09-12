@@ -122,12 +122,19 @@ describe('projectMachine', () => {
       ['', false],
       ['.', false],
       ['/', false],
-      ['.tau', false],
-      ['.tau/settings.json', false],
-      ['.cache', false],
-      ['.cache/render.bin', false],
+      // Project metadata, not work on the design.
+      ['tau.json', false],
+      // Records, cache and control plane are never content activity.
+      ['thumbnail.webp', false],
+      ['exports/model.step', false],
+      ['.tau/chats/chat-1/events.jsonl', false],
+      ['.tau/cache/render.bin', false],
+      ['.tau/revisions/HEAD', false],
       ['node_modules', false],
       ['node_modules/replicad/index.d.ts', false],
+      /* An authored `.tau` control *is* content: the blanket `.tau` exclusion
+       * this replaced swallowed parameter edits (Rule 16). */
+      ['.tau/parameters/main.json', true],
       ['main.ts', true],
       ['/main.ts', true],
       ['src', true],
@@ -393,7 +400,7 @@ describe('projectMachine', () => {
       actor.send({
         type: 'projectFileActivity',
         operation: 'batchWritten',
-        paths: ['', '.tau/project.json', '.cache/render.bin', 'node_modules/pkg/index.d.ts'],
+        paths: ['', 'tau.json', '.tau/cache/render.bin', '.tau/revisions/HEAD', 'node_modules/pkg/index.d.ts'],
       });
       expect(emitted).toEqual([]);
       actor.stop();

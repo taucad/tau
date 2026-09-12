@@ -6,7 +6,6 @@ import {
   buildTimeline,
   computeAbandonedTurnIds,
   extractOps,
-  isDesignPath,
   latestTurnHasDesignOps,
   materializeAt,
   migrateHeadTurnId,
@@ -106,19 +105,6 @@ const chat = (id: string, createdAt: number, messages: MyUIMessage[]): Chat =>
     updatedAt: createdAt,
   }) as unknown as Chat;
 
-// ===========================================================================
-// isDesignPath
-// ===========================================================================
-
-describe('isDesignPath', () => {
-  it('should exclude .tau/ internal state and include design files', () => {
-    expect(isDesignPath('main.ts')).toBe(true);
-    expect(isDesignPath('lib/part.ts')).toBe(true);
-    expect(isDesignPath('.tau/parameters/main.json')).toBe(false);
-    expect(isDesignPath('.tau/cache/x')).toBe(false);
-  });
-});
-
 describe('latestTurnHasDesignOps', () => {
   it('should qualify the latest turn only when it contains a committed design-file mutation', () => {
     const messages = [
@@ -136,8 +122,27 @@ describe('latestTurnHasDesignOps', () => {
     expect(
       latestTurnHasDesignOps([
         user('u1', 100),
-        assistant(101, [createPart('.tau/parameters/main.json', '{}'), editPart('main.ts', '', '')]),
+        assistant(101, [createPart('.tau/cache/geometry/hash.bin', '{}'), editPart('main.ts', '', '')]),
       ]),
+    ).toBe(false);
+  });
+
+  /* An authored `.tau` control is versioned, so editing a parameter *is* a
+   * design change; the blanket `.tau/` exclusion this replaced swallowed it. */
+  it('should accept an authored .tau control', () => {
+    expect(
+      latestTurnHasDesignOps([user('u2', 100), assistant(101, [createPart('.tau/parameters/main.json', '{"a":1}')])]),
+    ).toBe(true);
+  });
+
+  /* A revision covers versioned bytes only, and the path registry — not a
+   * `.tau/` prefix test — says which those are (W1 pin c). */
+  it('should reject a generated declaration and an exported artifact', () => {
+    expect(
+      latestTurnHasDesignOps([user('p1', 100), assistant(101, [createPart('.tau/types/kernel.d.ts', 'declare x;')])]),
+    ).toBe(false);
+    expect(
+      latestTurnHasDesignOps([user('p2', 200), assistant(201, [createPart('exports/model.step', 'ISO-10303;')])]),
     ).toBe(false);
   });
 });
@@ -208,10 +213,15 @@ describe('extractOps', () => {
     expect(extractOps(c)).toHaveLength(0);
   });
 
-  it('should exclude .tau/ paths (T-TAU-EXCLUDE / H10)', () => {
+  it('should exclude unversioned paths (T-TAU-EXCLUDE / H10)', () => {
     const c = chat('a', 100, [
       user('u1', 100),
-      assistant(101, [createPart('.tau/parameters/main.json', '{}'), createPart('main.ts', 'code')]),
+      assistant(101, [
+        createPart('.tau/cache/geometry/hash.bin', '{}'),
+        createPart('exports/model.step', 'ISO-10303;'),
+        createPart('node_modules/replicad/index.js', 'x'),
+        createPart('main.ts', 'code'),
+      ]),
     ]);
     const ops = extractOps(c);
     expect(ops).toHaveLength(1);
@@ -493,8 +503,8 @@ describe('buildRevisions', () => {
     expect(revs[0]!.changedPaths).toEqual(['a.ts']); // Derived — deduped.
   });
 
-  it('should produce no Revision for a turn that only touched .tau/ (T-TAU-EXCLUDE)', () => {
-    const c = chat('a', 0, [user('u1', 100), assistant(101, [createPart('.tau/parameters/main.json', '{}')])]);
+  it('should produce no Revision for a turn that only touched unversioned paths (T-TAU-EXCLUDE)', () => {
+    const c = chat('a', 0, [user('u1', 100), assistant(101, [createPart('.tau/cache/geometry/hash.bin', '{}')])]);
     const tl = buildTimeline([c]);
     expect(buildRevisions([c], tl)).toHaveLength(0);
   });

@@ -19,7 +19,6 @@ import { useFlushOnClose } from '#hooks/use-flush-on-close.js';
 // (see `apps/ui/app/components/global-chat-flush-guard.tsx`). The project
 // route only needs to flush its own project + editor machine state below.
 import { WebglContextTrackerProvider } from '#hooks/use-webgl-context-tracker.js';
-import { revokeDesktopNativeCodeTrust } from '#constants/desktop-kernel-options.js';
 import { useProjectKernelOptions } from '#hooks/use-project-kernel-options.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { useFocusedChatReadState } from '#hooks/use-focused-chat-read-state.js';
@@ -48,29 +47,6 @@ type ProjectRouteError = Readonly<{
 }>;
 
 const editorFlushTimeoutMilliseconds = 10_000;
-
-const NativeCodeIndicator = ({ projectId }: { readonly projectId: string }): React.ReactNode => {
-  const handleRevokeTrust = async (): Promise<void> => {
-    try {
-      await revokeDesktopNativeCodeTrust(projectId);
-      toast.success('Native-code trust revoked');
-    } catch {
-      toast.error('Tau could not revoke native-code trust');
-    }
-  };
-
-  return (
-    <div
-      className='border-amber-500/40 pointer-events-none fixed right-3 bottom-3 z-50 flex items-center gap-2 rounded-md border bg-background/95 px-3 py-2 text-xs shadow-sm backdrop-blur'
-      role='status'
-    >
-      <span>Native code enabled</span>
-      <Button size='sm' variant='outline' className='pointer-events-auto' onClick={handleRevokeTrust}>
-        Revoke
-      </Button>
-    </div>
-  );
-};
 
 function ProjectSession({
   children,
@@ -111,7 +87,6 @@ function ProjectSession({
                 <ProjectWorkspaceProvider>
                   <ProjectShareRouteIntent />
                   {children}
-                  {nativeKernelId && kernelSelection.isLocal ? <NativeCodeIndicator projectId={projectId} /> : null}
                 </ProjectWorkspaceProvider>
               </ChatWorkspaceAuthorityProvider>
             </RevisionProvider>
@@ -261,7 +236,7 @@ export function ProjectRouteGate({
             <div className='max-w-md space-y-2'>
               <h1 className='text-xl font-semibold'>{nativeRequirement.configuration.name} requires Tau Desktop</h1>
               <p className='text-sm text-muted-foreground'>
-                This project runs trusted native code, which is not included in the web runtime.
+                This project runs native code, which is not included in the web runtime.
               </p>
             </div>
           </div>

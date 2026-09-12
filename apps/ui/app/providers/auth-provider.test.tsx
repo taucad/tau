@@ -7,15 +7,25 @@ import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { AuthConfigLink, DesktopAuthBridge, desktopAuthAction } from '#providers/auth-provider.js';
+import {
+  AnonymousSessionPurge,
+  AuthConfigLink,
+  DesktopAuthBridge,
+  desktopAuthAction,
+} from '#providers/auth-provider.js';
 import type { TauDesktopAuthBridge } from '#providers/auth-provider.js';
 import { FinancialSessionProvider } from '#providers/financial-session-provider.js';
 
 const mocks = vi.hoisted(() => ({
   notify: vi.fn(),
   routerLink: vi.fn(),
+  resolvedAuth: vi.fn(() => 'indeterminate' as 'authed' | 'anonymous' | 'indeterminate'),
+  purgeSavedUsage: vi.fn(async () => undefined),
 }));
 const { routerLink } = mocks;
+
+vi.mock('#hooks/use-resolved-auth.js', () => ({ useResolvedAuth: mocks.resolvedAuth }));
+vi.mock('#db/billing-snapshot-store.js', () => ({ purgeSavedUsage: mocks.purgeSavedUsage }));
 
 vi.mock('react-router', () => ({
   Link: ({ to, children, ...rest }: { readonly to: string } & React.ComponentProps<'a'>) => {
@@ -125,6 +135,44 @@ describe('DesktopAuthBridge', () => {
     emit();
 
     expect(mocks.notify).toHaveBeenCalledWith('$sessionSignal');
+  });
+});
+
+describe('AnonymousSessionPurge', () => {
+  const renderPurge = (queryClient: QueryClient): void => {
+    render(
+      <QueryClientProvider client={queryClient}>
+        <FinancialSessionProvider>
+          <AnonymousSessionPurge />
+        </FinancialSessionProvider>
+      </QueryClientProvider>,
+    );
+  };
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('clears the local billing selection on a confirmed anonymous session', () => {
+    mocks.resolvedAuth.mockReturnValue('anonymous');
+    const queryClient = new QueryClient();
+    queryClient.setQueryData(['billing', 'usage'], { snapshot: 'old' });
+
+    renderPurge(queryClient);
+
+    expect(queryClient.getQueryData(['billing', 'usage'])).toBeUndefined();
+    expect(mocks.purgeSavedUsage).toHaveBeenCalledWith(undefined);
+  });
+
+  it.each(['indeterminate', 'authed'] as const)('keeps saved usage while the session is %s', (resolved) => {
+    mocks.resolvedAuth.mockReturnValue(resolved);
+    const queryClient = new QueryClient();
+    queryClient.setQueryData(['billing', 'usage'], { snapshot: 'kept' });
+
+    renderPurge(queryClient);
+
+    expect(queryClient.getQueryData(['billing', 'usage'])).toEqual({ snapshot: 'kept' });
+    expect(mocks.purgeSavedUsage).not.toHaveBeenCalled();
   });
 });
 

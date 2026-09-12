@@ -277,7 +277,7 @@ function BreadcrumbNav({
     <div className='flex items-center text-sm'>
       <OmniScroller
         ref={scrollContainerRef}
-        className='mx-2 flex flex-1 snap-x snap-mandatory [scrollbar-width:none] items-center gap-0.5 overscroll-x-none [&::-webkit-scrollbar]:hidden'
+        className='mx-1 flex flex-1 snap-x snap-mandatory [scrollbar-width:none] items-center gap-0.5 overscroll-x-none [&::-webkit-scrollbar]:hidden'
       >
         {/* "Files" root button - inside scrollable area */}
         <button
@@ -716,10 +716,7 @@ export function FileSelector({
   );
 
   const content = (
-    <Command
-      shouldFilter={false}
-      className='flex flex-col [&_[data-slot=command-input-wrapper]]:px-2 [&_[data-slot=command-input-wrapper]]:py-1'
-    >
+    <Command shouldFilter={false} className='flex flex-col'>
       <BreadcrumbNav currentPath={currentPath} onNavigate={handleNavigate} />
       <CommandInput placeholder={searchPlaceholder} value={searchQuery} onValueChange={setSearchQuery} />
       <CommandList className='max-h-[300px] scroll-shadows-y'>

@@ -3,6 +3,7 @@ import type { ActorRefFrom, AnyStateMachine } from 'xstate';
 import { produce } from 'immer';
 import type { FileParameterEntry, ProjectManifest } from '@taucad/types';
 import { assertRootedPath, normalizePath } from '@taucad/utils/path';
+import { classify } from '@taucad/filesystem/path-registry';
 import { isBrowser } from '#constants/browser.constants.js';
 import type { LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
 import type { PersistedRevisionState } from '#types/project.types.js';
@@ -121,24 +122,24 @@ export type ProjectFileActivityOperation =
   | 'deleted'
   | 'directoryDeleted';
 
+/**
+ * Whether a filesystem event is activity on the project's own content.
+ *
+ * The path registry answers it: authored bytes are content, records, caches
+ * and the control plane are not. `tau.json` is the one exception — it is
+ * authored, but it is the project's metadata, and a rename or a description
+ * edit is not work on the design.
+ *
+ * @param projectRelativePath - Path relative to the project root.
+ * @returns `true` when the path is authored project content.
+ */
 export function isProjectContentActivityPath(projectRelativePath: string): boolean {
   const normalized = normalizePath(projectRelativePath).replace(/^\/+/, '');
-  if (normalized === '' || normalized === '.') {
+  if (normalized === '' || normalized === '.' || normalized === 'tau.json') {
     return false;
   }
 
-  const firstSegment = normalized.split('/').find((segment) => segment.length > 0);
-  if (firstSegment === undefined) {
-    return false;
-  }
-
-  return (
-    normalized !== 'tau.json' &&
-    normalized !== 'thumbnail.webp' &&
-    firstSegment !== '.tau' &&
-    firstSegment !== '.cache' &&
-    firstSegment !== 'node_modules'
-  );
+  return classify(normalized).class === 'authored';
 }
 
 /**

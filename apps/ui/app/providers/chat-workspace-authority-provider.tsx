@@ -16,7 +16,6 @@ import type {
 import type { ChatExecutionTarget, ChatRevisionMode } from '@taucad/chat/schemas';
 import { generatePrefixedId, randomUuid } from '@taucad/utils/id';
 import { idPrefix } from '@taucad/types/constants';
-import { joinPath } from '@taucad/utils/path';
 import { fromFileSystemBridge } from '@taucad/runtime/filesystem';
 import type { RuntimeFileSystem } from '@taucad/runtime/filesystem';
 import type {
@@ -294,15 +293,23 @@ const conflictedChatWorkspaceSchema = z.strictObject({
   }),
 });
 
-type WorkspaceFileSystemBinding = {
+/** What one project's rooted view needs from the file-manager machine. @public */
+export type WorkspaceFileSystemBinding = {
   client: FileSystemClientFacade;
   rootDirectory: string;
   backend: string;
   providerIdentity?: unknown;
   capabilities?: ProviderCapabilities;
-  capabilitiesRequest?: Promise<ProviderCapabilities>;
-  loadCapabilities?: () => Promise<ProviderCapabilities>;
-  appendFile?: (path: string, data: Uint8Array<ArrayBuffer> | string) => Promise<void>;
+  /**
+   * The project's own rooted bridge connection, opened once and memoized.
+   *
+   * This is the whole of the direct-mode event plane (A11, blueprint S15): a
+   * rooted port carries its own origin, so a write through it reaches the UI's
+   * port as an ordinary change event instead of being suppressed as the UI's
+   * own.
+   */
+  connection?: Promise<FileSystemBridgeProxy>;
+  openConnection?: () => Promise<FileSystemBridgeProxy>;
 };
 
 /** Read the selected provider's capabilities from its rooted bridge hello. */
@@ -354,33 +361,51 @@ export const waitForRootedBridgeOpener = async (fileManagerRef: FileManagerRef):
   });
 };
 
-const ensureProviderCapabilities = async (binding: WorkspaceFileSystemBinding): Promise<void> => {
-  if (binding.capabilities !== undefined) {
-    return;
+/** Open the project's rooted connection once, and keep it for the life of the binding. */
+const connectRootedBridge = async (binding: WorkspaceFileSystemBinding): Promise<FileSystemBridgeProxy> => {
+  if (binding.openConnection === undefined) {
+    throw new Error('Rooted filesystem bridge is unavailable.');
   }
-  if (binding.loadCapabilities === undefined) {
-    throw new Error('Rooted filesystem provider capabilities are unavailable.');
-  }
-  const request = binding.capabilitiesRequest ?? binding.loadCapabilities();
-  binding.capabilitiesRequest = request;
+  const request = binding.connection ?? binding.openConnection();
+  binding.connection = request;
   try {
-    binding.capabilities = await request;
+    const proxy = await request;
+    const hello = proxy.hello.payload;
+    if (hello.state !== 'ready') {
+      throw new Error(`Rooted filesystem bridge is ${hello.state}`);
+    }
+    binding.capabilities = hello.capabilities;
+    return proxy;
   } catch (error) {
-    if (binding.capabilitiesRequest === request) {
-      binding.capabilitiesRequest = undefined;
+    if (binding.connection === request) {
+      binding.connection = undefined;
     }
     throw error;
   }
 };
 
-const createClientRootedFileSystem = (binding: WorkspaceFileSystemBinding): RootedFileSystem => {
-  const resolve = (path: string): string => joinPath(binding.rootDirectory, path);
+const ensureProviderCapabilities = async (binding: WorkspaceFileSystemBinding): Promise<void> => {
+  if (binding.capabilities !== undefined) {
+    return;
+  }
+  await connectRootedBridge(binding);
+};
+
+/**
+ * The project's working copy, over its own rooted bridge connection.
+ *
+ * Every path is already the checkout's: the port is rooted at the project, so
+ * there is no root to join on and no namespace to translate. `appendFile`,
+ * `rename` and `watch` are the authority's own, which is why the emulation
+ * this replaced could delete a change event it had no way to emit.
+ */
+export const createRootedBridgeFileSystem = (binding: WorkspaceFileSystemBinding): RootedFileSystem => {
+  const connect = async (): Promise<FileSystemBridgeProxy> => connectRootedBridge(binding);
   function readFile(path: string): Promise<Uint8Array<ArrayBuffer>>;
   function readFile(path: string, encoding: 'utf8'): Promise<string>;
   async function readFile(path: string, encoding?: 'utf8'): Promise<string | Uint8Array<ArrayBuffer>> {
-    return encoding === 'utf8'
-      ? binding.client.readFile(resolve(path), 'utf8')
-      : binding.client.readFile(resolve(path));
+    const proxy = await connect();
+    return encoding === 'utf8' ? proxy.readFile(path, 'utf8') : proxy.readFile(path);
   }
   return {
     id: 'chat-workspace-root:browser-authority',
@@ -391,42 +416,33 @@ const createClientRootedFileSystem = (binding: WorkspaceFileSystemBinding): Root
       return binding.capabilities;
     },
     readFile,
-    writeFile: async (path, data) => binding.client.writeFile(resolve(path), data),
-    appendFile: async (path, data) => {
-      const resolved = resolve(path);
-      if (binding.appendFile !== undefined) {
-        await binding.appendFile(resolved, data);
-        return;
-      }
-      let existing: Uint8Array<ArrayBuffer>;
-      try {
-        existing = await binding.client.readFile(resolved);
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-          throw error;
-        }
-        existing = new Uint8Array();
-      }
-      const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : new Uint8Array(data);
-      const combined = new Uint8Array(existing.byteLength + bytes.byteLength);
-      combined.set(existing);
-      combined.set(bytes, existing.byteLength);
-      await binding.client.writeFile(resolved, combined);
-    },
-    readdir: async (path) => binding.client.readdir(resolve(path)),
-    stat: async (path) => binding.client.stat(resolve(path)),
-    lstat: async (path) => binding.client.lstat(resolve(path)),
-    mkdir: async (path, options) => binding.client.mkdir(resolve(path), options),
+    writeFile: async (path, data) => (await connect()).writeFile(path, data),
+    appendFile: async (path, data) => (await connect()).appendFile(path, data),
+    readdir: async (path) => (await connect()).readdir(path),
+    stat: async (path) => (await connect()).stat(path),
+    lstat: async (path) => (await connect()).lstat(path),
+    mkdir: async (path, options) => (await connect()).mkdir(path, options),
     unlink: async (path) => {
-      await binding.client.unlink(resolve(path));
+      await (await connect()).unlink(path);
     },
-    rmdir: async (path) => binding.client.rmdir(resolve(path)),
-    rename: async (from, to) => {
-      await binding.client.move(resolve(from), resolve(to));
-    },
-    exists: async (path) => binding.client.exists(resolve(path)),
+    rmdir: async (path) => (await connect()).rmdir(path),
+    rename: async (from, to) => (await connect()).rename(from, to),
+    exists: async (path) => (await connect()).exists(path),
     dispose: () => undefined,
-    watch: () => () => undefined,
+    watch: (request, handler) => {
+      let stop: (() => void) | undefined;
+      let cancelled = false;
+      void connect().then((proxy) => {
+        if (cancelled) {
+          return;
+        }
+        stop = proxy.watch(request, handler);
+      });
+      return () => {
+        cancelled = true;
+        stop?.();
+      };
+    },
   };
 };
 
@@ -784,15 +800,14 @@ const getBrowserWorkspaceAuthority = (input: {
     existing.binding.rootDirectory = input.binding.rootDirectory;
     existing.binding.backend = input.binding.backend;
     existing.binding.providerIdentity = input.binding.providerIdentity;
-    existing.binding.loadCapabilities = input.binding.loadCapabilities;
-    existing.binding.appendFile = input.binding.appendFile;
+    existing.binding.openConnection = input.binding.openConnection;
     if (providerChanged) {
       existing.binding.capabilities = input.binding.capabilities;
-      existing.binding.capabilitiesRequest = undefined;
+      existing.binding.connection = undefined;
     }
     return existing;
   }
-  const rootedFileSystem = createClientRootedFileSystem(input.binding);
+  const rootedFileSystem = createRootedBridgeFileSystem(input.binding);
   const recorder = new TurnRevisionRecorder({ filesystem: rootedFileSystem });
   const created: BrowserWorkspaceAuthorityState = {
     projectId: input.projectId,
@@ -1022,17 +1037,13 @@ export function ChatWorkspaceAuthorityProvider({ children }: { readonly children
       rootDirectory,
       backend: fileManager.backendType,
       providerIdentity,
-      loadCapabilities: async () => {
+      openConnection: async () => {
         await fileManager.workspace.syncProjectRoots();
+        const { createFileSystemBridgeProxy } = await import('@taucad/fs-bridge');
         const { openFileSystemBridge } = await waitForRootedBridgeOpener(fileManager.fileManagerRef);
-        return readRootedBridgeCapabilities(() => openFileSystemBridge(rootDirectory));
-      },
-      appendFile: async (path, data) => {
-        const proxy = fileManager.fileManagerRef.getSnapshot().context.proxy as FileSystemBridgeProxy | undefined;
-        if (proxy === undefined) {
-          throw new Error('Filesystem bridge is unavailable.');
-        }
-        await proxy.appendFile(path, data);
+        const proxy = createFileSystemBridgeProxy(openFileSystemBridge(rootDirectory));
+        await proxy.ready;
+        return proxy;
       },
     },
   });

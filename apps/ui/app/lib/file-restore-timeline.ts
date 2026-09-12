@@ -1,3 +1,4 @@
+import { classify } from '@taucad/filesystem/path-registry';
 import type { Chat, MyMessagePart, MyUIMessage } from '@taucad/chat';
 
 /**
@@ -17,13 +18,6 @@ import type { Chat, MyMessagePart, MyUIMessage } from '@taucad/chat';
  * See docs/research/chat-restore-time-travel.md for the full design and the
  * H-numbered invariants referenced below.
  */
-
-/**
- * H10: project-internal state (parameters, cache, transcripts) is written
- * outside the chat tools; exclude it so restore never reverts it and a turn
- * that only touched it is not counted as a Revision.
- */
-export const isDesignPath = (path: string): boolean => !path.startsWith('.tau/');
 
 export type FileOp = {
   path: string;
@@ -151,7 +145,7 @@ export function latestTurnHasDesignOps(messages: readonly MyUIMessage[]): boolea
         order: (latestUserIndex + messageOffset) * 1e4 + partIndex,
         turnMessageId,
       });
-      if (op && isDesignPath(op.path)) {
+      if (op && classify(op.path).versioned) {
         return true;
       }
     }
@@ -163,7 +157,10 @@ export function latestTurnHasDesignOps(messages: readonly MyUIMessage[]): boolea
 /**
  * Extract the design-file ops from one chat, in message order. Assistant
  * op-time is the assistant `createdAt`, falling back to the preceding user
- * anchor for legacy messages (H2). `.tau/` paths are excluded (H10).
+ * anchor for legacy messages (H2). H10: only versioned bytes are a design
+ * change, and the path registry — not a `.tau/` prefix test — says which
+ * those are, so restore never reverts a record, a cache entry or a generated
+ * file and a turn that only touched one is not a Revision.
  */
 export function extractOps(chat: Chat): Array<Omit<FileOp, 'seq'>> {
   const ops: Array<Omit<FileOp, 'seq'>> = [];
@@ -184,7 +181,7 @@ export function extractOps(chat: Chat): Array<Omit<FileOp, 'seq'>> {
         order: messageIndex * 1e4 + partIndex,
         turnMessageId,
       });
-      if (op && isDesignPath(op.path)) {
+      if (op && classify(op.path).versioned) {
         ops.push(op);
       }
     }

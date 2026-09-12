@@ -1,6 +1,7 @@
 import { assign, assertEvent, setup, enqueueActions } from 'xstate';
 import type { FileEntry, FileSystemBackend } from '@taucad/types';
 import type { FileSystemBridgeConnection } from '@taucad/fs-bridge';
+import type { ComposedViewConsumer } from '@taucad/filesystem/composed-view';
 import type { ComputeBinding, ComputeStoreControl } from '@taucad/runtime';
 import { connectComputeStoreChannel } from '@taucad/runtime/host';
 import { safeDispose } from '@taucad/utils/dispose';
@@ -26,6 +27,7 @@ import { WorkerChangeChannel } from '@taucad/fs-client/worker-change-channel';
 import { WorkspacePathResolver } from '@taucad/fs-client/workspace-path-resolver';
 import { RefreshGenerationGuard } from '@taucad/fs-client/refresh-generation-guard';
 import { createDomVisibilityProvider } from '@taucad/fs-client/visibility-provider';
+import { createComposedViewClient } from '@taucad/fs-client/composed-view-client';
 import { bundledTypesWorkspaceRootSegment } from '#lib/bundled-types-tree.constants.js';
 import type { FileManagerProxy } from '#machines/file-manager.machine.types.js';
 import {
@@ -100,13 +102,14 @@ type FileManagerContext = {
   worker: Worker | undefined;
   proxy: (FileManagerProxy & { listen?: (event: string, handler: (data: unknown) => void) => () => void }) | undefined;
   bridgeDispose?: () => void;
-  openFileSystemBridge?: (root: string) => FileSystemBridgeConnection;
+  openFileSystemBridge?: (root: string, consumer?: ComposedViewConsumer) => FileSystemBridgeConnection;
   openComputeBinding?: (projectId: string) => { compute: ComputeBinding; dispose: () => void };
   openComputeStorePort?: (projectId: string) => MessagePort;
   computeControl?: ReturnType<typeof computeOpeners>['computeControl'];
   filePoolBuffer: SharedArrayBuffer | undefined;
   contentService: FileContentService | undefined;
   treeService: FileTreeService | undefined;
+  disposeComposedView?: () => void;
   workerChangeChannel: WorkerChangeChannel | undefined;
   error: Error | undefined;
   rootDirectory: string;
@@ -151,7 +154,7 @@ type WorkerConnectedEvent = {
   worker: Worker;
   proxy: FileManagerProxy & { listen?: (event: string, handler: (data: unknown) => void) => () => void };
   bridgeDispose: () => void;
-  openFileSystemBridge: (root: string) => FileSystemBridgeConnection;
+  openFileSystemBridge: (root: string, consumer?: ComposedViewConsumer) => FileSystemBridgeConnection;
   openComputeBinding: (projectId: string) => { compute: ComputeBinding; dispose: () => void };
   openComputeStorePort: (projectId: string) => MessagePort;
   computeControl: ReturnType<typeof computeOpeners>['computeControl'];
@@ -172,6 +175,8 @@ type WorkerInitializedEvent = {
   contentService: FileContentService;
   treeService: FileTreeService;
   workerChangeChannel: WorkerChangeChannel;
+  /** Releases the user's composed-view connection this init opened. */
+  disposeComposedView: () => void;
 };
 
 /**
@@ -195,6 +200,7 @@ const connectWorkerActor = fromSafeAsync<WorkerConnectedEvent, { context: FileMa
     context.contentService?.dispose();
     context.treeService?.dispose();
     context.workerChangeChannel?.dispose();
+    context.disposeComposedView?.();
 
     const { createFileSystemBridge, createFileSystemBridgeProxy, openFileSystemBridge, waitForWorkerReady } =
       await import('@taucad/fs-bridge');
@@ -324,7 +330,8 @@ const connectWorkerActor = fromSafeAsync<WorkerConnectedEvent, { context: FileMa
     const { dispose: bridgeDispose } = bridge;
     const proxy = createFileSystemBridgeProxy(bridge);
     await proxy.configureProjectRoots(await getProjectRootConfigs(context.onRootSkipped));
-    const openBridge = (root: string): FileSystemBridgeConnection => openFileSystemBridge(worker, { root });
+    const openBridge = (root: string, consumer?: ComposedViewConsumer): FileSystemBridgeConnection =>
+      openFileSystemBridge(worker, { root, ...(consumer === undefined ? {} : { consumer }) });
     worker.postMessage({ type: 'computeStoreAdmission', projectId: context.projectId });
     const { openComputeBinding, openComputeStorePort, computeControl } = computeOpeners(worker, context.projectId);
 
@@ -453,8 +460,24 @@ const initializeServicesActor = fromSafeAsync<
   });
   const visibilityProvider = createDomVisibilityProvider();
 
+  /*
+   * One composition, read by both consumers (charter D1). The user's view is a
+   * rooted bridge connection the file-manager worker composes; the agent's is
+   * the same function over its own rooted provider. Writes and workspace
+   * porcelain stay on the authority connection — see `createComposedViewClient`.
+   */
+  const { createFileSystemBridgeProxy } = await import('@taucad/fs-bridge');
+  const viewConnection = context.openFileSystemBridge!(context.rootDirectory, 'user');
+  const viewProxy = createFileSystemBridgeProxy(viewConnection);
+  const disposeComposedView = (): void => {
+    safeDispose(() => {
+      viewProxy.dispose();
+    });
+  };
+  const client = createComposedViewClient({ workspace: proxy, view: viewProxy, paths });
+
   const contentService = new FileContentService({
-    proxy,
+    proxy: client,
     paths,
     channel: workerChangeChannel,
     refreshGuard,
@@ -467,7 +490,7 @@ const initializeServicesActor = fromSafeAsync<
   });
 
   const treeService = new FileTreeService({
-    proxy,
+    proxy: client,
     paths,
     channel: workerChangeChannel,
     visibility: visibilityProvider,
@@ -503,6 +526,7 @@ const initializeServicesActor = fromSafeAsync<
     contentService,
     treeService,
     workerChangeChannel,
+    disposeComposedView,
   };
 });
 
@@ -583,12 +607,14 @@ export const fileManagerMachine = setup({
       context.contentService?.dispose();
       context.treeService?.dispose();
       context.workerChangeChannel?.dispose();
+      context.disposeComposedView?.();
     },
 
     destroyWorkerAndServices: assign(({ context }) => {
       context.contentService?.dispose();
       context.treeService?.dispose();
       context.workerChangeChannel?.dispose();
+      context.disposeComposedView?.();
       safeDispose(() => context.proxy?.dispose());
       safeDispose(context.bridgeDispose);
 
@@ -607,6 +633,7 @@ export const fileManagerMachine = setup({
         contentService: undefined,
         treeService: undefined,
         workerChangeChannel: undefined,
+        disposeComposedView: undefined,
       };
     }),
 
@@ -694,6 +721,10 @@ export const fileManagerMachine = setup({
       contentService({ event }) {
         assertEvent(event, 'workerInitialized');
         return event.contentService;
+      },
+      disposeComposedView({ event }) {
+        assertEvent(event, 'workerInitialized');
+        return event.disposeComposedView;
       },
       treeService({ event }) {
         assertEvent(event, 'workerInitialized');

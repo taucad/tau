@@ -10,6 +10,7 @@
 /* eslint-disable tau-lint/no-direct-indexeddb -- This worker is the browser compute-store authority. */
 
 import { exposeFileSystem, workerReadyMessageType } from '@taucad/fs-bridge';
+import { composeView } from '@taucad/filesystem/composed-view';
 import { createIndexedDbComputeEngine, exposeComputeStoreChannel } from '@taucad/runtime/host';
 
 import { populateBundledTypesMount } from '@taucad/filesystem/bundled-types-mount';
@@ -32,6 +33,7 @@ import { metaConfig } from '#constants/meta.constants.js';
 import { ensureBundledTypesMount } from '#machines/bundled-types-sentinel.js';
 import { homeBackendFromWorkerName } from '#machines/file-manager-worker-name.js';
 import { listWorkspaceDirectories } from '#machines/file-manager-sync-fs-adapter.js';
+import { systemSkillsOverlay } from '#workers/system-skills-overlay.js';
 
 /**
  * Handshake for the node filesystem backend (desktop only).
@@ -243,7 +245,18 @@ try {
 }
 
 exposeFileSystem(fileService, {
-  handlerForRoot: (root, context) => fileService.createRootedFileSystem(root, context),
+  /*
+   * A connection that names a consumer gets that consumer's composed view
+   * (architecture L4); one that does not gets the checkout itself, because the
+   * host's own capture, apply and language planes must read the working copy
+   * and never the overlays composed above it (V6).
+   */
+  handlerForRoot: (root, context, consumer) => {
+    const filesystem = fileService.createRootedFileSystem(root, context);
+    return consumer === undefined
+      ? filesystem
+      : composeView({ filesystem }, { consumer, overlays: [systemSkillsOverlay()] });
+  },
   changeEventBus: eventBus,
   createCoalescer: (deliver, coalescingWindow, onOverflow) =>
     new EventCoalescer(deliver, { coalescingWindow, onOverflow }),

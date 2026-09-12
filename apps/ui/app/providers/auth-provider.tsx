@@ -9,6 +9,7 @@ import { ENV } from '#environment.config.js';
 import { apiKeyPlugin } from '#utils/api-key-plugin.js';
 import { magicLinkPlugin } from '#utils/magic-link-plugin.js';
 import { useOptionalFinancialSession } from '#providers/financial-session-provider.js';
+import { useResolvedAuth } from '#hooks/use-resolved-auth.js';
 
 /**
  * The auth surface Electron's preload exposes to the renderer (batch A, item
@@ -49,7 +50,7 @@ const authQueryKeyPrefix = ['auth'] as const;
  * Keyed on better-auth-ui's default `basePaths.auth` + `viewPaths.auth`, which
  * `AuthConfigProvider` does not override.
  */
-type DesktopAuthAction = 'signIn' | 'signOut';
+export type DesktopAuthAction = 'signIn' | 'signOut';
 
 const desktopBridgedAuthPaths = new Map<string, DesktopAuthAction>([
   ['/auth/sign-in', 'signIn'],
@@ -86,6 +87,38 @@ function runDesktopAuthAction(to: string): boolean {
 
   void bridge[action]();
   return true;
+}
+
+/**
+ * Hands a bridged auth destination to the Electron shell instead of rendering it.
+ *
+ * The desktop window cannot host an OAuth flow itself. Main sends the provider
+ * navigation to the system browser, so the state cookie better-auth wrote into
+ * the renderer's session never reaches the callback and the provider returns
+ * `state_mismatch`. Email/password is no better: the credential would land in
+ * the renderer while main keeps injecting the bearer it still does not have.
+ *
+ * Intercepting navigation is not enough, because a plain `Link` built from
+ * {@link useAuthLinks}, a deep link, or a loader redirect all reach the view
+ * without passing through {@link AuthConfigLink}. Guarding the render covers
+ * every one of them.
+ *
+ * @param to - The auth destination, for example `/auth/sign-in`.
+ * @returns The bridge call the shell ran, or `undefined` to render the view.
+ */
+export function useShellAuthHandoff(to: string): DesktopAuthAction | undefined {
+  // `globalThis.window` is absent during SSR; the left operand is `undefined`
+  // in every web build, so the bridge read is never reached there.
+  const action = desktopAuthAction(to);
+  const owned = action !== undefined && globalThis.window.tauAuth !== undefined;
+
+  useEffect(() => {
+    if (owned) {
+      runDesktopAuthAction(to);
+    }
+  }, [owned, to]);
+
+  return owned ? action : undefined;
 }
 
 /**
@@ -168,6 +201,26 @@ export function DesktopAuthBridge(): undefined {
   }, [financialSession, queryClient]);
 }
 
+/**
+ * A **confirmed** anonymous session clears the local billing selection and this
+ * device's saved usage (B4 R5). An indeterminate session does not: that is the
+ * offline case, where the saved snapshot is exactly what the reader should see.
+ * Remote revocation cannot be learned while offline, and this profile grants no
+ * remote capability, so nothing is lost by waiting for a real 401.
+ *
+ * @returns Nothing — this component renders no markup.
+ */
+export function AnonymousSessionPurge(): undefined {
+  const financialSession = useOptionalFinancialSession();
+  const resolved = useResolvedAuth();
+
+  useEffect(() => {
+    if (resolved === 'anonymous') {
+      financialSession?.purge('logout');
+    }
+  }, [financialSession, resolved]);
+}
+
 export function AuthConfigProvider({ children }: { readonly children: React.ReactNode }): React.JSX.Element {
   const navigate = useNavigate();
 
@@ -190,6 +243,7 @@ export function AuthConfigProvider({ children }: { readonly children: React.Reac
       baseURL={ENV.TAU_FRONTEND_URL}
     >
       <DesktopAuthBridge />
+      <AnonymousSessionPurge />
       {children}
     </AuthProvider>
   );

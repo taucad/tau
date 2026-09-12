@@ -1830,7 +1830,11 @@ describe('external turns through the revision port', () => {
     await expect(readSessionTextFile(cwd, { path: '.tau/chats/chat-1/events.jsonl' })).resolves.toBe(
       '{"type":"run.lifecycle"}\n',
     );
-    await expect(readSessionTextFile(cwd, { path: '.tau/workspaces/note.txt' })).resolves.toBe('store\n');
+    /* The revision control plane is invisible, not merely read-only: a read is
+     * refused exactly as a write is (path registry `hidden`, north star S18). */
+    await expect(readSessionTextFile(cwd, { path: '.tau/workspaces/note.txt' })).rejects.toMatchObject({
+      code: 'WORKSPACE_MASKED_PATH',
+    });
     // A path that only *starts* like a masked one is ordinary authored content.
     await expect(writeSessionTextFile(cwd, { path: '.tau/chats-notes.md', content: 'mine' })).resolves.toBeUndefined();
   });

@@ -54,7 +54,7 @@ Which extensions and export routes exist remains owned by the plugin packages.
 
 ## PicoGK
 
-Point the CLI at a prepared, target-specific PicoGK payload to run C# entry points natively. The explicit `export` invocation grants trust only for that process; its private trust marker is removed when the command ends.
+Point the CLI at a prepared, target-specific PicoGK payload to run C# entry points natively. The worker runs inside the operating-system sandbox described by `@taucad/native-process-core`; the export fails with a native-runtime-unavailable error when that sandbox cannot start.
 
 ```bash
 TAU_PICOGK_RESOURCE_ROOT=/path/to/picogk-resources tau export model.cs --ext=3mf

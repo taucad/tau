@@ -1,25 +1,30 @@
 /**
- * The chat RPC filesystem over any `@taucad/filesystem` provider.
+ * The chat RPC filesystem over one composed view.
  *
- * Typed against the abstract `FileSystemProvider` rather than a concrete
- * backend, because the two hosts that need it differ only in which provider
- * they construct: `tau serve` roots a `NodeFsProvider` at its workspace, and
- * the Electron services utility roots one at the opened project. Both mutate
- * through the same per-path {@link ResourceQueue}, so two tool calls editing one
- * file serialize rather than racing.
+ * This is an adapter and nothing else: the view already decides what the agent
+ * may see and write and where each entry comes from (charter D1), so the only
+ * work left here is the RPC shape — canonical project-relative keys, the
+ * per-path {@link ResourceQueue} that keeps two tool calls on one file from
+ * racing, and the stale-read recovery `editFile` needs.
  *
- * The import is type-only, so this module stays browser-safe and the registry
+ * It takes a {@link ComposedView} rather than a bare provider on purpose. The
+ * registry mask used to live in this factory, which meant every future caller
+ * had to remember to build it; now a caller cannot construct an unfenced tool
+ * filesystem at all, because an unfenced provider does not answer
+ * `provenance`.
+ *
+ * The imports are type-only, so this module stays browser-safe and the registry
  * entry point does not drag a filesystem backend into a bundle.
  *
  * @module
  */
 
-import type { FileSystemProvider, ResourceQueue } from '@taucad/filesystem';
+import type { ResourceQueue } from '@taucad/filesystem';
+import type { ComposedView } from '@taucad/filesystem/composed-view';
 import { applyClientTextMutation, createExactReplacementPlan } from '@taucad/chat/rpc';
 import type { RpcDirectoryEntry, RpcFileStat, RpcFileSystem } from '@taucad/chat/rpc';
 import { getErrno } from '@taucad/utils/error';
 import { assertRootedPath } from '@taucad/utils/path';
-import { maskWorkspaceWrites } from '#registry/workspace-mask.js';
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder('utf-8', { fatal: true });
@@ -35,8 +40,8 @@ const assertNotAborted = (signal?: AbortSignal): void => {
 
 /** Options for {@link createProviderRpcFileSystem}. @public */
 export type ProviderRpcFileSystemOptions = {
-  /** The rooted provider every path is resolved against. */
-  readonly provider: FileSystemProvider;
+  /** The composed view every path is resolved against. */
+  readonly provider: ComposedView;
   /** Per-path mutation queue shared across every tool call on this host. */
   readonly mutations: ResourceQueue;
   /** Cancels the invocation this filesystem was built for. */
@@ -50,30 +55,28 @@ export type ProviderRpcFileSystemOptions = {
  * @returns The chat RPC filesystem the tool dispatcher consumes.
  * @public
  *
- * @example <caption>A daemon's file tools over its workspace root</caption>
+ * @example <caption>A daemon's file tools over its checkout</caption>
  * ```typescript
  * import { ResourceQueue } from '@taucad/filesystem';
+ * import { composeView } from '@taucad/filesystem/composed-view';
  * import { NodeFsProvider } from '@taucad/filesystem/backend/node';
  * import { createProviderRpcFileSystem } from '@taucad/agent-tools/registry';
  *
- * const provider = new NodeFsProvider(process.cwd());
- * const mutations = new ResourceQueue();
- * const fileSystem = createProviderRpcFileSystem({ provider, mutations });
+ * const view = composeView({ filesystem: new NodeFsProvider(process.cwd()) }, { consumer: 'agent' });
+ * const fileSystem = createProviderRpcFileSystem({ provider: view, mutations: new ResourceQueue() });
  * ```
  */
 export const createProviderRpcFileSystem = (options: ProviderRpcFileSystemOptions): RpcFileSystem => {
-  const { mutations, signal } = options;
-  /* Rule 16 / VI11, fenced once for both launchers: an agent may read Tau's own
-   * control metadata and may never write it, and this is the single provider
-   * every file tool, the MCP endpoint and `export_geometry` all mutate through. */
-  const provider = maskWorkspaceWrites(options.provider);
+  const { mutations, provider, signal } = options;
   const bytes = async (path: string): Promise<Uint8Array<ArrayBuffer>> =>
     new Uint8Array(await provider.readFile(assertRootedPath(path)));
   const stat = async (path: string): Promise<RpcFileStat> => {
-    const value = await provider.stat(assertRootedPath(path));
+    const target = assertRootedPath(path);
+    const value = await provider.stat(target);
+    const { provenance } = value;
     const date = new Date(value.mtimeMs).toISOString();
     if (value.type === 'dir') {
-      return { size: value.size, isDirectory: true, createdAt: date, modifiedAt: date };
+      return { size: value.size, isDirectory: true, createdAt: date, modifiedAt: date, provenance };
     }
     return value.contentKind === 'text'
       ? {
@@ -83,8 +86,16 @@ export const createProviderRpcFileSystem = (options: ProviderRpcFileSystemOption
           modifiedAt: date,
           contentKind: 'text',
           lineCount: value.lineCount,
+          provenance,
         }
-      : { size: value.size, isDirectory: false, createdAt: date, modifiedAt: date, contentKind: 'binary' };
+      : {
+          size: value.size,
+          isDirectory: false,
+          createdAt: date,
+          modifiedAt: date,
+          contentKind: 'binary',
+          provenance,
+        };
   };
   const writeIfUnchanged = async (
     path: string,
@@ -103,20 +114,29 @@ export const createProviderRpcFileSystem = (options: ProviderRpcFileSystemOption
       await provider.writeFile(path, new Uint8Array(replacement));
       return { status: 'committed', committedBytes: await bytes(path) } as const;
     });
-  const directoryEntry = async (parent: string, name: string): Promise<RpcDirectoryEntry> => {
-    const value = await provider.stat(assertRootedPath(parent ? `${parent}/${name}` : name));
-    const modifiedAt = value.mtimeMs > 0 ? new Date(value.mtimeMs).toISOString() : undefined;
-    if (value.type === 'dir') {
-      return { name, type: 'dir', size: value.size, ...(modifiedAt ? { modifiedAt } : {}) };
+  const directoryEntry = (row: Awaited<ReturnType<ComposedView['readdirWithStats']>>[number]): RpcDirectoryEntry => {
+    const { name, provenance } = row;
+    const modifiedAt = row.mtimeMs > 0 ? new Date(row.mtimeMs).toISOString() : undefined;
+    if (row.type === 'dir') {
+      return {
+        name,
+        type: 'dir',
+        size: row.size,
+        /* N9: an unscoped `grep` or `glob_search` walks the project, never a
+         * source composed above it. The view's own answer replaces the
+         * hand-set flag the skill overlay used to carry. */
+        ...(provenance !== undefined && provenance.source !== 'project' ? { traverseOnImplicitSearch: false } : {}),
+        ...(modifiedAt ? { modifiedAt } : {}),
+        ...(provenance ? { provenance } : {}),
+      };
     }
     return {
       name,
       type: 'file',
-      size: value.size,
-      ...(value.contentKind === 'text'
-        ? { contentKind: 'text', lineCount: value.lineCount }
-        : { contentKind: 'binary' }),
+      size: row.size,
+      ...(row.contentKind === 'text' ? { contentKind: 'text', lineCount: row.lineCount } : { contentKind: 'binary' }),
       ...(modifiedAt ? { modifiedAt } : {}),
+      ...(provenance ? { provenance } : {}),
     };
   };
 
@@ -149,9 +169,7 @@ export const createProviderRpcFileSystem = (options: ProviderRpcFileSystemOption
       });
     },
     async readdir(path) {
-      const parent = assertRootedPath(path);
-      const names = await provider.readdir(parent);
-      return Promise.all(names.map(async (name) => directoryEntry(parent, name)));
+      return (await provider.readdirWithStats(assertRootedPath(path))).map((row) => directoryEntry(row));
     },
     async exists(path) {
       return provider.exists(assertRootedPath(path));

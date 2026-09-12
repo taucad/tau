@@ -26,13 +26,21 @@ export type HostToolDefinition = {
 /** One normalized streaming event from the model transport. @public */
 export type ModelStreamEvent =
   | { readonly type: 'text-delta'; readonly text: string }
-  | { readonly type: 'thinking-delta'; readonly text: string; readonly signature?: string | undefined }
-  | { readonly type: 'message-metadata'; readonly metadata: NonNullable<ProviderMessage['metadata']> }
+  | {
+      readonly type: 'thinking-delta';
+      readonly text: string;
+      readonly signature?: string | undefined;
+    }
+  | {
+      readonly type: 'message-metadata';
+      readonly metadata: NonNullable<ProviderMessage['metadata']>;
+    }
   | {
       readonly type: 'tool-input';
       readonly toolCallId: string;
       readonly toolName: string;
       readonly input: JsonValue;
+      readonly thoughtSignature?: string | undefined;
     }
   | { readonly type: 'usage'; readonly usage: Usage }
   | { readonly type: 'completed'; readonly stopReason: StopReason };
@@ -193,6 +201,12 @@ export type HostRunFailure = {
   readonly message: string;
   /** HTTP status when the transport received one. */
   readonly status?: number | undefined;
+  /**
+   * Structured fields the refusal carried, such as an `INSUFFICIENT_CREDIT`
+   * denial's required and available credit atoms. Owned by the code, so it
+   * travels opaquely to whichever surface renders the refusal.
+   */
+  readonly details?: Record<string, unknown> | undefined;
 };
 
 /** Browser-safe snapshot returned by the run host. @public */
@@ -213,7 +227,10 @@ export type RunLifecycleCommands = {
       readonly message: Extract<ProviderMessage, { readonly role: 'user' }>;
     } & (
       | { readonly trigger: 'submit'; readonly retainedMessageIds?: never }
-      | { readonly trigger: Exclude<RunTrigger, 'submit'>; readonly retainedMessageIds: readonly string[] }
+      | {
+          readonly trigger: Exclude<RunTrigger, 'submit'>;
+          readonly retainedMessageIds: readonly string[];
+        }
     ),
   ): Promise<HostRun>;
   /** Add operator steering to an active run. */

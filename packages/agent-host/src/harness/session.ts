@@ -72,6 +72,15 @@ const zeroUsage: Usage = {
   cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 };
 
+// The catalog ceiling is the route's limit, not the size a call should ask for.
+// Requesting it on every call made the whole output term of the admission hold
+// phantom (billing-admission-hold-redesign Finding 2); the ratified default is
+// 16,384 with a per-call raise up to the route ceiling (Q2).
+const defaultRequestedMaxTokens = 16_384;
+
+const requestedMaxTokens = (ceiling: number, requested: number | undefined): number =>
+  Math.min(requested ?? defaultRequestedMaxTokens, ceiling);
+
 const modelFor = (options: AgentSessionModel): Model<Api> => ({
   id: options.id,
   name: options.id,
@@ -80,7 +89,9 @@ const modelFor = (options: AgentSessionModel): Model<Api> => ({
   // leave over the Responses wire, every OpenAI-compatible provider over
   // completions.
   api: options.api ?? (options.providerKind === 'openai' ? 'openai-responses' : 'openai-completions'),
-  provider: options.provider ?? 'tau-gateway',
+  // Pi drops signed replay metadata when history moves between providers; the
+  // gateway is execution placement, while providerKind is the model provider.
+  provider: options.provider ?? options.providerKind ?? 'tau-gateway',
   baseUrl: '',
   reasoning: true,
   input: ['text', 'image'],
@@ -183,9 +194,19 @@ export const createTransportStreamFunction =
         }
         const block = partial.content[active.index];
         if (active.kind === 'text' && block?.type === 'text') {
-          output.push({ type: 'text_end', contentIndex: active.index, content: block.text, partial });
+          output.push({
+            type: 'text_end',
+            contentIndex: active.index,
+            content: block.text,
+            partial,
+          });
         } else if (active.kind === 'thinking' && block?.type === 'thinking') {
-          output.push({ type: 'thinking_end', contentIndex: active.index, content: block.thinking, partial });
+          output.push({
+            type: 'thinking_end',
+            contentIndex: active.index,
+            content: block.thinking,
+            partial,
+          });
         }
         active = undefined;
       };
@@ -210,7 +231,13 @@ export const createTransportStreamFunction =
           ...(funded
             ? {
                 onInvocationBound: async (binding: ModelInvocationBinding) => {
-                  invocationMetadata = { tauInternal: { kind: 'billing-invocation', attemptId, ...binding } };
+                  invocationMetadata = {
+                    tauInternal: {
+                      kind: 'billing-invocation',
+                      attemptId,
+                      ...binding,
+                    },
+                  };
                   await options.bindInvocation?.(attemptId, invocationMetadata);
                 },
               }
@@ -218,7 +245,7 @@ export const createTransportStreamFunction =
           modelId: model.id,
           modelCost: model.cost,
           providerKind: options.providerKind,
-          maxTokens: model.maxTokens,
+          maxTokens: requestedMaxTokens(model.maxTokens, streamOptions?.maxTokens),
           contextWindow: model.contextWindow,
           systemPrompt: committedContext?.systemPrompt ?? context.systemPrompt ?? '',
           systemPromptBlocks: committedContext?.systemPromptBlocks ?? options.systemPromptBlocks?.(),
@@ -249,14 +276,22 @@ export const createTransportStreamFunction =
             }
             const block = partial.content[active.index];
             if (block?.type === 'text') {
-              updateBlock(active.index, { ...block, text: block.text + event.text });
+              updateBlock(active.index, {
+                ...block,
+                text: block.text + event.text,
+              });
               await options.onLiveDelta?.({
                 type: 'text-delta',
                 messageId,
                 contentIndex: active.index,
                 delta: event.text,
               });
-              output.push({ type: 'text_delta', contentIndex: active.index, delta: event.text, partial });
+              output.push({
+                type: 'text_delta',
+                contentIndex: active.index,
+                delta: event.text,
+                partial,
+              });
             }
             continue;
           }
@@ -270,7 +305,11 @@ export const createTransportStreamFunction =
                 thinking: '',
                 ...(event.signature === undefined ? {} : { thinkingSignature: event.signature }),
               });
-              output.push({ type: 'thinking_start', contentIndex: index, partial });
+              output.push({
+                type: 'thinking_start',
+                contentIndex: index,
+                partial,
+              });
             }
             const block = partial.content[active.index];
             if (block?.type === 'thinking') {
@@ -285,7 +324,12 @@ export const createTransportStreamFunction =
                 contentIndex: active.index,
                 delta: event.text,
               });
-              output.push({ type: 'thinking_delta', contentIndex: active.index, delta: event.text, partial });
+              output.push({
+                type: 'thinking_delta',
+                contentIndex: active.index,
+                delta: event.text,
+                partial,
+              });
             }
             continue;
           }
@@ -297,11 +341,22 @@ export const createTransportStreamFunction =
               id: event.toolCallId,
               name: event.toolName,
               arguments: event.input as Record<string, unknown>,
+              ...(event.thoughtSignature === undefined ? {} : { thoughtSignature: event.thoughtSignature }),
             };
             output.push({ type: 'toolcall_start', contentIndex, partial });
             updateBlock(contentIndex, toolCall);
-            output.push({ type: 'toolcall_delta', contentIndex, delta: JSON.stringify(event.input), partial });
-            output.push({ type: 'toolcall_end', contentIndex, toolCall, partial });
+            output.push({
+              type: 'toolcall_delta',
+              contentIndex,
+              delta: JSON.stringify(event.input),
+              partial,
+            });
+            output.push({
+              type: 'toolcall_end',
+              contentIndex,
+              toolCall,
+              partial,
+            });
             continue;
           }
           if (event.type === 'usage') {
@@ -335,7 +390,13 @@ export const createTransportStreamFunction =
         }
         const durableMetadata: ProviderMessageMetadata | undefined =
           stopReason === 'aborted' && !usageSettled
-            ? { ...transportMetadata, usageUnsettled: { type: 'tau.usage-unsettled', reason: 'aborted' } }
+            ? {
+                ...transportMetadata,
+                usageUnsettled: {
+                  type: 'tau.usage-unsettled',
+                  reason: 'aborted',
+                },
+              }
             : transportMetadata;
         if (durableMetadata) {
           partial = {
@@ -371,7 +432,13 @@ export const createTransportStreamFunction =
         };
         const durableMetadata: ProviderMessageMetadata | undefined =
           reason === 'aborted' && !usageSettled
-            ? { ...transportMetadata, usageUnsettled: { type: 'tau.usage-unsettled', reason: 'aborted' } }
+            ? {
+                ...transportMetadata,
+                usageUnsettled: {
+                  type: 'tau.usage-unsettled',
+                  reason: 'aborted',
+                },
+              }
             : transportMetadata;
         if (durableMetadata) {
           failure.diagnostics = [
@@ -424,14 +491,18 @@ const compactionModelsWithTransport = (options: {
             ? {
                 onInvocationBound: async (binding: ModelInvocationBinding) =>
                   options.bindInvocation?.(attemptId, {
-                    tauInternal: { kind: 'billing-invocation', attemptId, ...binding },
+                    tauInternal: {
+                      kind: 'billing-invocation',
+                      attemptId,
+                      ...binding,
+                    },
                   }),
               }
             : {}),
           modelId: model.id,
           modelCost: model.cost,
           providerKind: options.providerKind,
-          maxTokens: streamOptions?.maxTokens ?? model.maxTokens,
+          maxTokens: requestedMaxTokens(model.maxTokens, streamOptions?.maxTokens),
           contextWindow: model.contextWindow,
           systemPrompt: context.systemPrompt ?? '',
           messages: providerHistory(context.messages as AgentMessage[], options),
@@ -587,7 +658,10 @@ const appendAgentEvent = async (options: {
 }): Promise<void> => {
   const { event, record } = options;
   if (event.type === 'message_end') {
-    await record.append({ type: 'message.appended', message: piMessageToProvider(event.message, record.messages) });
+    await record.append({
+      type: 'message.appended',
+      message: piMessageToProvider(event.message, record.messages),
+    });
     return;
   }
   if (event.type === 'tool_execution_start') {
@@ -687,7 +761,12 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
         safeguardId: decision.signature,
         action: 'nudge',
         reason: decision.reminder,
-        message: { id, role: 'user', content: toJsonValue(reminder.content), metadata },
+        message: {
+          id,
+          role: 'user',
+          content: toJsonValue(reminder.content),
+          metadata,
+        },
       });
     },
   });
@@ -708,7 +787,13 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
     invoke: async (invocation) =>
       selectedTools.has(invocation.toolName)
         ? options.toolRegistry.invoke(invocation)
-        : { content: { errorCode: 'TOOL_NOT_FOUND', message: `Unknown tool: ${invocation.toolName}` }, isError: true },
+        : {
+            content: {
+              errorCode: 'TOOL_NOT_FOUND',
+              message: `Unknown tool: ${invocation.toolName}`,
+            },
+            isError: true,
+          },
   };
   const tools = createAgentTools({
     registry: toolRegistry,
@@ -782,7 +867,12 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
       }
     }
     const attemptId = createId();
-    await record.append({ type: 'model.invocation-prepared', attemptId, purpose, modelId });
+    await record.append({
+      type: 'model.invocation-prepared',
+      attemptId,
+      purpose,
+      modelId,
+    });
     return attemptId;
   };
   let restoreRecentSkillContent = false;
@@ -797,7 +887,12 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
     usePostCompactionContext: () => restoreRecentSkillContent,
     systemPromptBlocks: () => options.systemPromptBlocks,
     onLiveDelta: options.onLiveEvent
-      ? async (event) => options.onLiveEvent?.({ ...event, chatId: options.chatId, runId: options.runId })
+      ? async (event) =>
+          options.onLiveEvent?.({
+            ...event,
+            chatId: options.chatId,
+            runId: options.runId,
+          })
       : undefined,
   });
   const agent = new Agent({
@@ -855,7 +950,9 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
     return safeguarded.length === messages.length ? compacted : [...compacted, ...safeguarded.slice(messages.length)];
   };
   agent.streamFunction = composeModelCallMiddleware(base, [
-    createToolResultTrimmerMiddleware({ allowImageBlocks: options.allowImageBlocks }),
+    createToolResultTrimmerMiddleware({
+      allowImageBlocks: options.allowImageBlocks,
+    }),
     asMiddleware(safeguards.wrapStreamFn),
     latexDelimiterMiddleware,
     asMiddleware(compaction.wrapStreamFn),
@@ -882,7 +979,11 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
     // and its message were stranded on the assistant message's diagnostics, and
     // every client could render was a generic host-failure string.
     const detail = state === 'failed' ? await runFailureDetail(final, record) : undefined;
-    await record.append({ type: 'run.lifecycle', state, ...(detail === undefined ? {} : { detail }) });
+    await record.append({
+      type: 'run.lifecycle',
+      state,
+      ...(detail === undefined ? {} : { detail }),
+    });
     terminalRecorded = true;
   });
 
@@ -962,7 +1063,11 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
       await agent.continue();
     },
     steer: (message) => {
-      agent.steer({ role: 'user', content: message, timestamp: now().getTime() });
+      agent.steer({
+        role: 'user',
+        content: message,
+        timestamp: now().getTime(),
+      });
     },
     abort: () => {
       abortRequested = true;

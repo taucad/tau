@@ -18,7 +18,7 @@ import type {
   ResolveSkillRpcResult,
 } from '#schemas/rpc.schema.js';
 import type { DiffStatsWithContent } from '#schemas/tools/diff.schema.js';
-import type { ExportFile, FileContentMetadata } from '@taucad/types';
+import type { ExportFile, FileContentMetadata, FileProvenance } from '@taucad/types';
 
 /** Local execution metadata that never enters an RPC payload or durable record. @public */
 export type RpcInvocationContext = Readonly<{
@@ -39,12 +39,16 @@ export type RpcDirectoryEntry =
       modifiedAt?: string;
       /** False for virtual directories that recursive project-wide search must skip. */
       traverseOnImplicitSearch?: boolean;
+      /** What the composed view says about this entry. */
+      provenance?: FileProvenance;
     }
   | ({
       name: string;
       type: 'file';
       size: number;
       modifiedAt?: string;
+      /** What the composed view says about this entry. */
+      provenance?: FileProvenance;
     } & FileContentMetadata);
 
 /**
@@ -109,12 +113,16 @@ export type RpcFileStat =
       isDirectory: true;
       createdAt: string;
       modifiedAt: string;
+      /** What the composed view says about this path. */
+      provenance?: FileProvenance;
     }
   | ({
       size: number;
       isDirectory: false;
       createdAt: string;
       modifiedAt: string;
+      /** What the composed view says about this path. */
+      provenance?: FileProvenance;
     } & FileContentMetadata);
 
 /**

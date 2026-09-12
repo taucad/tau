@@ -1,4 +1,5 @@
 import { ResourceQueue } from '@taucad/filesystem';
+import { composeView } from '@taucad/filesystem/composed-view';
 import { MemoryProvider } from '@taucad/filesystem/backend';
 import { beforeEach, describe, expect, it } from 'vitest';
 
@@ -9,7 +10,11 @@ const decoder = new TextDecoder();
 let provider: MemoryProvider;
 
 const fileSystemFor = (signal?: AbortSignal) =>
-  createProviderRpcFileSystem({ provider, mutations: new ResourceQueue(), ...(signal ? { signal } : {}) });
+  createProviderRpcFileSystem({
+    provider: composeView({ filesystem: provider }, { consumer: 'agent' }),
+    mutations: new ResourceQueue(),
+    ...(signal ? { signal } : {}),
+  });
 
 beforeEach(async () => {
   provider = new MemoryProvider();
@@ -35,22 +40,24 @@ describe('createProviderRpcFileSystem', () => {
     expect(await fileSystem.readFile('log.txt')).toBe('first\nsecond\n');
   });
 
-  /* Rule 16 / VI11: one fence inside this factory serves both launchers — the
-   * Node host's `NodeFsProvider` and the browser worker's relayed provider —
-   * because a fence at either construction site alone leaves the other open. */
+  /* Rule 16 / VI11: the fence is the composed view both launchers build — the
+   * Node host over a `NodeFsProvider`, the browser worker over its relayed
+   * provider — and an unfenced provider cannot construct this filesystem at all
+   * (it does not answer `provenance`). These cases prove the refusals survive
+   * the RPC adapter. */
   it('refuses every write under Tau\u2019s own control metadata and still serves the read', async () => {
     await provider.mkdir('.tau/chats/chat-1', { recursive: true });
     await provider.writeFile('.tau/chats/chat-1/events.jsonl', '{"type":"run.lifecycle"}\n');
     const fileSystem = fileSystemFor();
 
     await expect(fileSystem.writeFile('.tau/chats/chat-1/events.jsonl', 'forged\n')).rejects.toMatchObject({
-      code: 'EPERM',
+      code: 'EROFS',
       reason: 'WORKSPACE_MASKED_PATH',
     });
     /* The append-only transcript is the most attractive target for the one
      * mutation a fence forgets, so it is guarded too (3-review S5). */
     await expect(fileSystem.appendFile('.tau/chats/chat-1/events.jsonl', 'forged\n')).rejects.toMatchObject({
-      code: 'EPERM',
+      code: 'EROFS',
     });
     await expect(fileSystem.writeFile('.tau/workspaces/trun-1/identity.json', '{}')).rejects.toMatchObject({
       code: 'EPERM',

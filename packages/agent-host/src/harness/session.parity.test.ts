@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { Usage } from '@earendil-works/pi-ai';
+import type { Api, Model, Usage } from '@earendil-works/pi-ai';
 import type { AgentLogEvent, LogEventBase, ProviderMessage } from '#log/event-types.js';
 import { parseEventLog, serializeLogEvent } from '#log/serialization.js';
 import { reduceEventLog } from '#log/reducer.js';
@@ -7,7 +7,11 @@ import type { ModelStreamEvent, ModelStreamRequest, ModelTransport, ToolRegistry
 import { createMemoryEventLog, createMemoryEventLogFile, stubModel } from '#harness/harness.fixture.js';
 import { MessageIdentities, providerMessageToPi } from '#harness/session-record.js';
 import { createAgentSession, createTransportStreamFunction } from '#harness/session.js';
-import { createCachedSystemPromptBlocks, GatewayModelTransportError } from '#transport/gateway-model-transport.js';
+import {
+  createCachedSystemPromptBlocks,
+  createGatewayModelTransport,
+  GatewayModelTransportError,
+} from '#transport/gateway-model-transport.js';
 
 const usage = (input: number, output: number): Usage => ({
   input,
@@ -32,7 +36,14 @@ const seedHistory = (): AgentLogEvent[] => {
     const assistant: ProviderMessage = {
       id: `old-assistant-${index}`,
       role: 'assistant',
-      content: [{ type: 'toolCall', id: toolCallId, name: 'read_file', arguments: { targetFile: 'main.ts' } }],
+      content: [
+        {
+          type: 'toolCall',
+          id: toolCallId,
+          name: 'read_file',
+          arguments: { targetFile: 'main.ts' },
+        },
+      ],
       metadata: {
         api: 'openai-responses',
         provider: 'stub',
@@ -152,13 +163,25 @@ describe('pi full-turn parity fixture', () => {
         runId: 'run-lost-result',
         leaderEpoch: 'epoch-1',
         systemPrompt: 'system',
-        model: { id: 'stub-model', contextWindow: 8192, providerKind: 'openai' },
-        modelTransport: { usesBillingAttempt: () => true, lookupAttempt, stream },
+        model: {
+          id: 'stub-model',
+          contextWindow: 8192,
+          providerKind: 'openai',
+        },
+        modelTransport: {
+          usesBillingAttempt: () => true,
+          lookupAttempt,
+          stream,
+        },
         toolRegistry: { list: () => [], invoke: vi.fn() },
         eventLog: resumedLog,
       });
 
-      await session.prompt({ id: `user-lost-result-${suffix}`, role: 'user', content: 'continue' });
+      await session.prompt({
+        id: `user-lost-result-${suffix}`,
+        role: 'user',
+        content: 'continue',
+      });
     };
     await resume(log, 'first');
     const firstEvents = await log.read();
@@ -190,12 +213,20 @@ describe('pi full-turn parity fixture', () => {
       leaderEpoch: 'epoch-1',
       systemPrompt: 'system',
       model: { id: 'stub-model', contextWindow: 8192, providerKind: 'openai' },
-      modelTransport: { usesBillingAttempt: () => true, lookupAttempt: async () => undefined, stream },
+      modelTransport: {
+        usesBillingAttempt: () => true,
+        lookupAttempt: async () => undefined,
+        stream,
+      },
       toolRegistry: { list: () => [], invoke: vi.fn() },
       eventLog,
     });
 
-    await session.prompt({ id: 'user-append-failure', role: 'user', content: 'continue' });
+    await session.prompt({
+      id: 'user-append-failure',
+      role: 'user',
+      content: 'continue',
+    });
 
     expect(stream).not.toHaveBeenCalled();
     const storedEvents = await stored.read();
@@ -212,9 +243,17 @@ describe('pi full-turn parity fixture', () => {
       async *stream(request) {
         attempts.push(request.attemptId);
         calls++;
-        await request.onInvocationBound?.({ operationId: `operation-${calls}`, status: 'pending' });
+        await request.onInvocationBound?.({
+          operationId: `operation-${calls}`,
+          status: 'pending',
+        });
         if (calls === 1) {
-          yield { type: 'tool-input', toolCallId: 'call-1', toolName: 'inspect', input: {} };
+          yield {
+            type: 'tool-input',
+            toolCallId: 'call-1',
+            toolName: 'inspect',
+            input: {},
+          };
           yield { type: 'completed', stopReason: 'toolUse' };
           return;
         }
@@ -230,12 +269,22 @@ describe('pi full-turn parity fixture', () => {
       model: { id: 'stub-model', contextWindow: 8192, providerKind: 'openai' },
       modelTransport: funded,
       toolRegistry: {
-        list: () => [{ name: 'inspect', description: 'Inspect.', inputSchema: { type: 'object' } }],
+        list: () => [
+          {
+            name: 'inspect',
+            description: 'Inspect.',
+            inputSchema: { type: 'object' },
+          },
+        ],
         invoke: async () => ({ content: {}, isError: false }),
       },
       eventLog: fundedLog,
     });
-    await fundedSession.prompt({ id: 'user-funded-steps', role: 'user', content: 'inspect' });
+    await fundedSession.prompt({
+      id: 'user-funded-steps',
+      role: 'user',
+      content: 'inspect',
+    });
     expect(new Set(attempts).size).toBe(2);
     const fundedEvents = await fundedLog.read();
     expect(fundedEvents.filter((event) => event.type === 'model.invocation-bound')).toHaveLength(2);
@@ -259,7 +308,11 @@ describe('pi full-turn parity fixture', () => {
       toolRegistry: { list: () => [], invoke: vi.fn() },
       eventLog: localLog,
     });
-    await localSession.prompt({ id: 'user-local', role: 'user', content: 'local' });
+    await localSession.prompt({
+      id: 'user-local',
+      role: 'user',
+      content: 'local',
+    });
     expect(localRequests[0]?.onInvocationBound).toBeUndefined();
     const localEvents = await localLog.read();
     expect(localEvents.some((event) => event.type.startsWith('model.invocation-'))).toBe(false);
@@ -268,7 +321,10 @@ describe('pi full-turn parity fixture', () => {
   it('drives middleware, substituted tools, and byte-identical A1 replay through one real pi turn', async () => {
     const log = await createMemoryEventLog(seedHistory());
     const transport = new DeterministicToolCallingTransport();
-    const invoke = vi.fn(async () => ({ content: { source: 'real' }, isError: false }));
+    const invoke = vi.fn(async () => ({
+      content: { source: 'real' },
+      isError: false,
+    }));
     const tools: ToolRegistry = {
       list: () => [
         {
@@ -309,7 +365,11 @@ describe('pi full-turn parity fixture', () => {
       },
     });
 
-    await session.prompt({ id: 'turn-1', role: 'user', content: 'Read the cached file and finish.' });
+    await session.prompt({
+      id: 'turn-1',
+      role: 'user',
+      content: 'Read the cached file and finish.',
+    });
 
     const events = await log.read();
     const snapshot = await session.snapshot();
@@ -333,7 +393,10 @@ describe('pi full-turn parity fixture', () => {
     expect(JSON.stringify(healedAssistant?.content)).toContain('"targetFile":"cached.ts"');
     expect(JSON.stringify(replayedAssistant?.content)).toContain('"targetFile":"cached.ts"');
     expect(JSON.stringify(replayedAssistant?.content)).not.toContain('"targetFile":"/cached.ts"');
-    expect(toolOutput).toMatchObject({ content: { source: 'cache' }, isError: false });
+    expect(toolOutput).toMatchObject({
+      content: { source: 'cache' },
+      isError: false,
+    });
     expect(JSON.stringify(toolOutput?.content)).toContain('cached.ts');
     expect(JSON.stringify(final?.content)).toContain('Finished $x$.');
     const safeguardEvents = events.filter((event) => event.type === 'safeguard.recorded');
@@ -367,7 +430,12 @@ describe('pi full-turn parity fixture', () => {
     expect(snapshot.messages.some((message) => message.role === 'tool-input')).toBe(true);
     expect(snapshot.messages.some((message) => message.role === 'tool-output')).toBe(true);
     expect(JSON.stringify(replay)).toBe(JSON.stringify(snapshot.messages));
-    expect(snapshot).toMatchObject({ chatId: 'chat-1', runId: 'run-1', turnId: 'turn-1', state: 'completed' });
+    expect(snapshot).toMatchObject({
+      chatId: 'chat-1',
+      runId: 'run-1',
+      turnId: 'turn-1',
+      state: 'completed',
+    });
     await session.close();
   });
 
@@ -382,7 +450,10 @@ describe('pi full-turn parity fixture', () => {
         yield { type: 'completed', stopReason: 'stop' };
       },
     });
-    const noTools: ToolRegistry = { list: () => [], invoke: async () => ({ content: null, isError: false }) };
+    const noTools: ToolRegistry = {
+      list: () => [],
+      invoke: async () => ({ content: null, isError: false }),
+    };
     const first = await createAgentSession({
       chatId: 'chat-consecutive',
       runId: 'run-1',
@@ -416,7 +487,12 @@ describe('pi full-turn parity fixture', () => {
     const priorTimestamp = requests[1]?.messages[1]?.metadata?.timestamp;
     expect(typeof priorTimestamp).toBe('number');
     expect(requests[1]?.messages).toEqual([
-      { id: 'turn-1', role: 'user', content: 'first turn', metadata: { timestamp: 0 } },
+      {
+        id: 'turn-1',
+        role: 'user',
+        content: 'first turn',
+        metadata: { timestamp: 0 },
+      },
       {
         id: 'run-1-message-0',
         role: 'assistant',
@@ -431,13 +507,24 @@ describe('pi full-turn parity fixture', () => {
             cacheRead: 0,
             cacheWrite: 0,
             totalTokens: 4,
-            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+            cost: {
+              input: 0,
+              output: 0,
+              cacheRead: 0,
+              cacheWrite: 0,
+              total: 0,
+            },
           },
           stopReason: 'stop',
           timestamp: priorTimestamp,
         },
       },
-      { id: 'turn-2', role: 'user', content: 'second turn', metadata: { timestamp: 0 } },
+      {
+        id: 'turn-2',
+        role: 'user',
+        content: 'second turn',
+        metadata: { timestamp: 0 },
+      },
     ]);
     await second.close();
     const reopened = await file.open();
@@ -467,13 +554,20 @@ describe('pi full-turn parity fixture', () => {
           throw failure;
         },
       },
-      toolRegistry: { list: () => [], invoke: async () => ({ content: null, isError: false }) },
+      toolRegistry: {
+        list: () => [],
+        invoke: async () => ({ content: null, isError: false }),
+      },
       eventLog: log,
       createId: () => 'run-failed-message-0',
       now: () => new Date('2026-09-01T00:00:00.000Z'),
     });
 
-    await session.prompt({ id: 'turn-failed', role: 'user', content: 'build a drone' });
+    await session.prompt({
+      id: 'turn-failed',
+      role: 'user',
+      content: 'build a drone',
+    });
     const events = await log.read();
     const terminal = events.findLast((event) => event.type === 'run.lifecycle' && event.state === 'failed');
 
@@ -506,13 +600,20 @@ describe('pi full-turn parity fixture', () => {
           yield { type: 'completed', stopReason: 'aborted' };
         },
       },
-      toolRegistry: { list: () => [], invoke: async () => ({ content: null, isError: false }) },
+      toolRegistry: {
+        list: () => [],
+        invoke: async () => ({ content: null, isError: false }),
+      },
       eventLog: log,
       createId: () => 'run-cancelled-message-0',
       now: () => new Date('2026-09-01T00:00:00.000Z'),
     });
 
-    const pending = session.prompt({ id: 'turn-cancelled', role: 'user', content: 'build a drone' });
+    const pending = session.prompt({
+      id: 'turn-cancelled',
+      role: 'user',
+      content: 'build a drone',
+    });
     await new Promise<void>((resolve) => {
       setTimeout(resolve, 0);
     });
@@ -544,10 +645,19 @@ describe('pi full-turn parity fixture', () => {
           yield { type: 'completed', stopReason: 'stop' };
         },
       },
-      toolRegistry: { list: () => [], invoke: async () => ({ content: null, isError: false }) },
+      toolRegistry: {
+        list: () => [],
+        invoke: async () => ({ content: null, isError: false }),
+      },
       eventLog: log,
       clientContext: {
-        skills: [{ name: 'brep', description: 'Build native BRep geometry', fingerprint: 'skill-v1' }],
+        skills: [
+          {
+            name: 'brep',
+            description: 'Build native BRep geometry',
+            fingerprint: 'skill-v1',
+          },
+        ],
         memory: { 'AGENTS.md': 'Use millimetres.' },
       },
       recentSkills: {
@@ -562,7 +672,11 @@ describe('pi full-turn parity fixture', () => {
       },
       now: () => new Date('2026-09-01T00:00:00.000Z'),
     });
-    await session.prompt({ id: 'turn-context', role: 'user', content: 'Build it.' });
+    await session.prompt({
+      id: 'turn-context',
+      role: 'user',
+      content: 'Build it.',
+    });
 
     const events = await log.read();
     const projectionIndex = events.findIndex((event) => event.type === 'turn.history-projection-committed');
@@ -631,7 +745,11 @@ describe('pi full-turn parity fixture', () => {
         type: 'turn.history-projection-committed',
         sequence: 1,
         retainedMessageIds: [],
-        message: { id: 'committed-turn', role: 'user', content: 'continue committed turn' },
+        message: {
+          id: 'committed-turn',
+          role: 'user',
+          content: 'continue committed turn',
+        },
         context: {
           version: 1,
           systemPrompt: 'committed system',
@@ -656,7 +774,10 @@ describe('pi full-turn parity fixture', () => {
           yield { type: 'completed', stopReason: 'stop' };
         },
       },
-      toolRegistry: { list: () => [], invoke: async () => ({ content: null, isError: false }) },
+      toolRegistry: {
+        list: () => [],
+        invoke: async () => ({ content: null, isError: false }),
+      },
       eventLog: log,
     });
     await session.agent.continue();
@@ -664,7 +785,12 @@ describe('pi full-turn parity fixture', () => {
     expect(requests[0]?.systemPrompt).toBe('committed system');
     expect(requests[0]?.messages).toEqual([
       contextMessage,
-      { id: 'committed-turn', role: 'user', content: 'continue committed turn', metadata: { timestamp: 0 } },
+      {
+        id: 'committed-turn',
+        role: 'user',
+        content: 'continue committed turn',
+        metadata: { timestamp: 0 },
+      },
     ]);
     expect(JSON.stringify(requests[0])).not.toContain('ambient replacement');
     await session.close();
@@ -683,10 +809,19 @@ describe('pi full-turn parity fixture', () => {
         ...base,
         type: 'message.appended',
         sequence,
-        message: { id: `history-${sequence}`, role: 'user', content: String(sequence).repeat(4000) },
+        message: {
+          id: `history-${sequence}`,
+          role: 'user',
+          content: String(sequence).repeat(4000),
+        },
       }),
     );
-    const durableCost = { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 };
+    const durableCost = {
+      input: 3,
+      output: 15,
+      cacheRead: 0.3,
+      cacheWrite: 3.75,
+    };
     const log = await createMemoryEventLog([
       ...history,
       { ...base, type: 'run.lifecycle', sequence: 8, state: 'admitted' },
@@ -697,7 +832,11 @@ describe('pi full-turn parity fixture', () => {
         retainedMessageIds: history.map((event) =>
           event.type === 'message.appended' ? event.message.id : 'unreachable',
         ),
-        message: { id: 'durable-turn', role: 'user', content: 'resume this turn' },
+        message: {
+          id: 'durable-turn',
+          role: 'user',
+          content: 'resume this turn',
+        },
         context: {
           version: 1,
           systemPrompt: 'durable system',
@@ -720,7 +859,12 @@ describe('pi full-turn parity fixture', () => {
       runId: 'durable-model-run',
       leaderEpoch: 'durable-model-epoch',
       systemPrompt: 'ambient system',
-      model: { id: 'ambient-openai-model', providerKind: 'openai', contextWindow: 200_000, maxTokens: 8192 },
+      model: {
+        id: 'ambient-openai-model',
+        providerKind: 'openai',
+        contextWindow: 200_000,
+        maxTokens: 8192,
+      },
       modelTransport: {
         async *stream(request): AsyncGenerator<ModelStreamEvent> {
           requests.push(request);
@@ -730,7 +874,10 @@ describe('pi full-turn parity fixture', () => {
           yield { type: 'completed', stopReason: 'stop' };
         },
       },
-      toolRegistry: { list: () => [], invoke: async () => ({ content: null, isError: false }) },
+      toolRegistry: {
+        list: () => [],
+        invoke: async () => ({ content: null, isError: false }),
+      },
       eventLog: log,
       createId: (() => {
         let next = 0;
@@ -768,7 +915,11 @@ describe('pi full-turn parity fixture', () => {
       recordedAt: '2026-09-01T00:00:00.000Z',
       runId: 'history-run',
       type: 'message.appended',
-      message: { id: `history-${sequence}`, role: 'user', content: String(sequence).repeat(4000) },
+      message: {
+        id: `history-${sequence}`,
+        role: 'user',
+        content: String(sequence).repeat(4000),
+      },
     }));
     const log = await createMemoryEventLog(initial);
     const requests: ModelStreamRequest[] = [];
@@ -783,7 +934,10 @@ describe('pi full-turn parity fixture', () => {
         lookupAttempt: async () => undefined,
         async *stream(request): AsyncGenerator<ModelStreamEvent> {
           requests.push(request);
-          await request.onInvocationBound?.({ operationId: `operation-${request.attemptId}`, status: 'pending' });
+          await request.onInvocationBound?.({
+            operationId: `operation-${request.attemptId}`,
+            status: 'pending',
+          });
           if (request.systemPrompt.startsWith('Summarize the conversation')) {
             yield { type: 'text-delta', text: 'partial summary' };
             yield { type: 'completed', stopReason: 'length' };
@@ -792,12 +946,19 @@ describe('pi full-turn parity fixture', () => {
           yield { type: 'completed', stopReason: 'stop' };
         },
       },
-      toolRegistry: { list: () => [], invoke: async () => ({ content: null, isError: false }) },
+      toolRegistry: {
+        list: () => [],
+        invoke: async () => ({ content: null, isError: false }),
+      },
       eventLog: log,
     });
 
     await expect(
-      session.prompt({ id: 'summary-turn', role: 'user', content: 'continue after summary' }),
+      session.prompt({
+        id: 'summary-turn',
+        role: 'user',
+        content: 'continue after summary',
+      }),
     ).rejects.toThrow('Compaction summary must complete exactly once with stop');
     const snapshot = await session.snapshot();
     const events = await log.read();
@@ -831,7 +992,12 @@ describe('transport stream state', () => {
   it('should preserve interleaved text, tool, and thinking blocks in arrival order', async () => {
     const stream = await streamFor([
       { type: 'text-delta', text: 'before' },
-      { type: 'tool-input', toolCallId: 'call-1', toolName: 'read_file', input: { targetFile: 'main.ts' } },
+      {
+        type: 'tool-input',
+        toolCallId: 'call-1',
+        toolName: 'read_file',
+        input: { targetFile: 'main.ts' },
+      },
       { type: 'text-delta', text: 'after' },
       { type: 'thinking-delta', text: 'consider' },
       { type: 'text-delta', text: 'final' },
@@ -845,7 +1011,12 @@ describe('transport stream state', () => {
 
     expect(result.content).toEqual([
       { type: 'text', text: 'before' },
-      { type: 'toolCall', id: 'call-1', name: 'read_file', arguments: { targetFile: 'main.ts' } },
+      {
+        type: 'toolCall',
+        id: 'call-1',
+        name: 'read_file',
+        arguments: { targetFile: 'main.ts' },
+      },
       { type: 'text', text: 'after' },
       { type: 'thinking', thinking: 'consider' },
       { type: 'text', text: 'final' },
@@ -871,6 +1042,31 @@ describe('transport stream state', () => {
     ]);
   });
 
+  it('should preserve a tool-call thought signature in pi content', async () => {
+    const stream = await streamFor([
+      {
+        type: 'tool-input',
+        toolCallId: 'call-signed',
+        toolName: 'read_file',
+        input: { targetFile: 'main.ts' },
+        thoughtSignature: 'opaque-Gemini+/=signature',
+      },
+      { type: 'completed', stopReason: 'toolUse' },
+    ]);
+
+    await expect(stream.result()).resolves.toMatchObject({
+      content: [
+        {
+          type: 'toolCall',
+          id: 'call-signed',
+          name: 'read_file',
+          arguments: { targetFile: 'main.ts' },
+          thoughtSignature: 'opaque-Gemini+/=signature',
+        },
+      ],
+    });
+  });
+
   it('should reject transport events emitted after completion', async () => {
     const live: string[] = [];
     const stream = await streamFor(
@@ -890,6 +1086,59 @@ describe('transport stream state', () => {
     expect(live).toEqual(['complete']);
   });
 
+  const sizedModel: Model<Api> = {
+    id: 'fixture-model',
+    name: 'fixture-model',
+    api: 'openai-completions',
+    provider: 'vertexai',
+    baseUrl: '',
+    reasoning: true,
+    input: ['text'],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: 200_000,
+    maxTokens: 128_000,
+  };
+
+  // Reads the completions wire's own output-maximum field (`max_completion_tokens`)
+  // out of the serialized request body, so the assertion is on the bytes the
+  // gateway receives rather than on the harness's internal request record.
+  const wireMaxTokensFor = async (streamOptions?: { readonly maxTokens: number }): Promise<unknown> => {
+    let body: Record<string, unknown> = {};
+    const transport = createGatewayModelTransport({
+      baseUrl: 'https://gateway.example',
+      fetch: vi.fn(async (_input, init) => {
+        body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        return new Response(
+          'data: {"id":"sized","choices":[{"delta":{"content":"ok"}}]}\n\n' +
+            'data: {"id":"sized","choices":[{"delta":{},"finish_reason":"stop"}]}\n\n' +
+            'data: [DONE]\n\n',
+          { status: 200, headers: { 'content-type': 'text/event-stream' } },
+        );
+      }),
+    });
+    const stream = await createTransportStreamFunction({
+      transport,
+      providerKind: 'vertexai',
+      identities: new MessageIdentities(() => 'sized-message'),
+      toolInputIds: new Map(),
+      createId: () => 'sized-id',
+    })(sizedModel, { messages: [] }, streamOptions);
+    for await (const event of stream) {
+      void event;
+    }
+    await stream.result();
+    return body['max_completion_tokens'];
+  };
+
+  it('should request the ratified output maximum instead of the catalog ceiling', async () => {
+    await expect(wireMaxTokensFor()).resolves.toBe(16_384);
+  });
+
+  it('should honour an explicit per-call output maximum up to the catalog ceiling', async () => {
+    await expect(wireMaxTokensFor({ maxTokens: 65_536 })).resolves.toBe(65_536);
+    await expect(wireMaxTokensFor({ maxTokens: 256_000 })).resolves.toBe(128_000);
+  });
+
   it('rehydrates a persisted deferred stop without coercing it to stop', () => {
     const hydrated = providerMessageToPi(
       {
@@ -902,6 +1151,9 @@ describe('transport stream state', () => {
       new MessageIdentities(() => 'unused'),
     );
 
-    expect(hydrated).toMatchObject({ role: 'assistant', stopReason: 'deferred' });
+    expect(hydrated).toMatchObject({
+      role: 'assistant',
+      stopReason: 'deferred',
+    });
   });
 });

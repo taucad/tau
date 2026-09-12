@@ -9,7 +9,7 @@ export {
   userProviderMessageSchema,
 } from '#log/event-schema.js';
 export { createAgentSession, createTransportStreamFunction } from '#harness/session.js';
-export { createTauAgentHost } from '#host/tau-agent-host.js';
+export { createTauAgentHost, isResumableRunFailure } from '#host/tau-agent-host.js';
 /* The daemon channel vocabulary. Zod only — the WebSocket client half validates
  * against these same schemas inside a browser bundle, so they must not ride the
  * Node-only `/node-launcher` subpath. */

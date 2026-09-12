@@ -85,7 +85,8 @@ import type {
 import { spawnAcpAdapter } from '#acp/spawn.js';
 import type { AcpWireFrame } from '#acp/spawn.js';
 import type { AcpAdapter } from '#acp/registry.js';
-import { isMaskedPath, maskedPathCode } from '@taucad/agent-tools/registry';
+import { maskedPathCode } from '@taucad/agent-tools/registry';
+import { classify } from '@taucad/filesystem/path-registry';
 
 /** ACP protocol version this client speaks. */
 const protocolVersion = 1;
@@ -171,13 +172,19 @@ const textOf = (content: ContentBlock): string =>
   content.type === 'text' ? content.text : `[${content.type}] ${JSON.stringify(content)}`;
 
 /**
- * A path is inside the session's own directory, and writable there, or it is refused.
+ * A path is inside the session's own directory, and reachable there at the
+ * intended access, or it is refused.
+ *
+ * The path registry answers both intents: the revision control plane is
+ * `hidden`, so a read of it is refused exactly as a write is, and the host's
+ * records are `read-only`, so the agent may read back the account of its own
+ * turn and never author it.
  *
  * @param cwd - Absolute session working directory.
  * @param path - Path the agent asked for.
  * @param intent - Whether the agent is reading or writing.
  * @returns The resolved absolute path.
- * @throws When the path escapes the working directory, or a write lands under a masked directory.
+ * @throws When the path escapes the working directory, or the registry refuses that access.
  */
 const confine = (cwd: string, path: string, intent: 'read' | 'write'): string => {
   const resolved = resolve(cwd, path);
@@ -188,7 +195,11 @@ const confine = (cwd: string, path: string, intent: 'read' | 'write'): string =>
     .slice(cwd.length + 1)
     .split(sep)
     .join('/');
-  if (intent === 'write' && isMaskedPath(relative)) {
+  const { agentAccess } = classify(relative);
+  if (agentAccess === 'hidden') {
+    throw Object.assign(new Error(`No path under ${relative} exists for this agent.`), { code: maskedPathCode });
+  }
+  if (intent === 'write' && agentAccess !== 'read-write') {
     throw Object.assign(new Error(`This agent may read but not write ${relative}; Tau records that itself.`), {
       code: maskedPathCode,
     });

@@ -2,7 +2,31 @@
 import z from 'zod';
 
 /**
+ * Durable identifier minted by the funded-invocation boundary.
+ *
+ * Bounded exactly as the gateway transport bounds it before it reaches a
+ * receipt lookup, so a persisted transcript cannot widen the identity a later
+ * authenticated request is built from.
+ */
+const billingIdentifierSchema = z
+  .string()
+  .min(1)
+  .max(128)
+  .regex(/^[\u0021-\u007E]+$/u);
+
+/** Status the funded boundary had bound when the turn was recorded. @public */
+export const billingInvocationStatusSchema = z.enum(['pending', 'terminal', 'unavailable']);
+
+/** @public */
+export type BillingInvocationStatus = z.infer<typeof billingInvocationStatusSchema>;
+
+/**
  * Schema for per-turn usage data.
+ *
+ * Tokens are local provider telemetry and explain a turn; they never price it.
+ * The charge belongs to the account-scoped operation named by `operationId` and
+ * is read from its authoritative receipt, so no credit or currency amount is
+ * carried — or computed — here.
  * @public
  */
 export const usageDataSchema = z.object({
@@ -11,22 +35,24 @@ export const usageDataSchema = z.object({
   model: z.string(),
   inputTokens: z.number(),
   outputTokens: z.number(),
-  reasoningTokens: z.number(),
+  /** Absent when the provider reported no reasoning count; a measured zero is `0`. */
+  reasoningTokens: z.number().optional(),
   cacheReadTokens: z.number(),
   cacheWriteTokens: z.number(),
-  inputTokensCost: z.number(),
-  outputTokensCost: z.number(),
-  cacheReadTokensCost: z.number(),
-  cacheWriteTokensCost: z.number(),
-  totalCost: z.number(),
   /**
    * External agent that reported this usage, when Tau did not run the turn.
    *
    * Attribution is durable truth: the transcript has to be able to say *whose*
-   * tokens these were, and the cost fields above are zero for an external turn
-   * because Tau did not price it. Absent for Tau's own turns.
+   * tokens these were, and an external turn carries no Tau operation because
+   * Tau neither funded nor priced it. Absent for Tau's own turns.
    */
   agent: z.string().optional(),
+  /** Funded Tau operation whose receipt is the only source of this turn's credits. */
+  operationId: billingIdentifierSchema.optional(),
+  /** The invocation attempt the operation was bound to; a support reference. */
+  attemptId: billingIdentifierSchema.optional(),
+  /** Dispatch status recorded at bind time; the receipt supersedes it. */
+  billingStatus: billingInvocationStatusSchema.optional(),
 });
 
 /** @public */

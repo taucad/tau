@@ -91,7 +91,13 @@ const fixtureResponse = (): Response => {
         controller.close();
       },
     }),
-    { status: 200, headers: { 'content-type': 'text/event-stream', 'x-tau-operation-id': 'operation-fixture-1' } },
+    {
+      status: 200,
+      headers: {
+        'content-type': 'text/event-stream',
+        'x-tau-operation-id': 'operation-fixture-1',
+      },
+    },
   );
 };
 
@@ -106,7 +112,13 @@ const byteSplitResponse = (frames: readonly string[]): Response => {
         controller.close();
       },
     }),
-    { status: 200, headers: { 'content-type': 'text/event-stream', 'x-tau-operation-id': 'operation-fixture-1' } },
+    {
+      status: 200,
+      headers: {
+        'content-type': 'text/event-stream',
+        'x-tau-operation-id': 'operation-fixture-1',
+      },
+    },
   );
 };
 
@@ -121,7 +133,13 @@ const responseFromChunks = (chunks: readonly string[], contentType = 'text/event
         controller.close();
       },
     }),
-    { status: 200, headers: { 'content-type': contentType, 'x-tau-operation-id': 'operation-fixture-1' } },
+    {
+      status: 200,
+      headers: {
+        'content-type': contentType,
+        'x-tau-operation-id': 'operation-fixture-1',
+      },
+    },
   );
 };
 
@@ -141,7 +159,10 @@ describe('createGatewayModelTransport', () => {
     });
 
     const events = await collect(
-      createGatewayModelTransport({ baseUrl: 'https://gateway.example', fetch: fetchSpy }).stream(
+      createGatewayModelTransport({
+        baseUrl: 'https://gateway.example',
+        fetch: fetchSpy,
+      }).stream(
         request({
           onInvocationBound: async (binding) => {
             bindings.push(binding);
@@ -164,13 +185,125 @@ describe('createGatewayModelTransport', () => {
     expect(events).toEqual([
       { type: 'thinking-delta', text: 'think' },
       { type: 'thinking-delta', text: '', signature: 'reasoning_content' },
-      { type: 'tool-input', toolCallId: 'call-1', toolName: 'read_file', input: { targetFile: 'main.ts' } },
+      {
+        type: 'tool-input',
+        toolCallId: 'call-1',
+        toolName: 'read_file',
+        input: { targetFile: 'main.ts' },
+      },
       {
         type: 'usage',
         usage: usage(7, 4, { cacheRead: 5, reasoning: 0 }),
       },
       { type: 'completed', stopReason: 'toolUse' },
     ]);
+  });
+
+  it('should preserve a Vertex tool-call thought signature through durable replay', async () => {
+    const signature = 'opaque-Gemini+/=signature';
+    const bodies: unknown[] = [];
+    let invocation = 0;
+    const transport = createGatewayModelTransport({
+      baseUrl: 'https://gateway.example',
+      fetch: vi.fn(async (_input, init) => {
+        bodies.push(JSON.parse(String(init?.body)));
+        invocation++;
+        return invocation === 1
+          ? responseFromChunks([
+              `data: {"id":"chatcmpl-signed","model":"fixture-model","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call-signed","type":"function","function":{"name":"read_file","arguments":"{\\"targetFile\\":\\"main.ts\\"}"},"extra_content":{"google":{"thought_signature":"${signature}"}}}]}}]}\n\n`,
+              'data: {"id":"chatcmpl-signed","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}\n\n',
+              'data: [DONE]\n\n',
+            ])
+          : responseFromChunks([
+              'data: {"id":"chatcmpl-done","choices":[{"index":0,"delta":{"content":"done"}}]}\n\n',
+              'data: {"id":"chatcmpl-done","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n',
+              'data: [DONE]\n\n',
+            ]);
+      }),
+    });
+    const file = createMemoryEventLogFile();
+    let id = 0;
+    const createId = (): string => `signed-${id++}`;
+    const createSession = async (runId: string) =>
+      createAgentSession({
+        chatId: 'chat-signed',
+        runId,
+        leaderEpoch: `epoch-${runId}`,
+        systemPrompt: 'system',
+        model: {
+          id: 'fixture-model',
+          providerKind: 'vertexai',
+          contextWindow: 200_000,
+        },
+        modelTransport: transport,
+        toolRegistry: {
+          list: () => [
+            {
+              name: 'read_file',
+              description: 'Read a file.',
+              inputSchema: {
+                type: 'object',
+                properties: { targetFile: { type: 'string' } },
+              },
+            },
+          ],
+          invoke: async () => ({ content: 'source', isError: false }),
+        },
+        eventLog: await file.open(),
+        createId,
+      });
+
+    const first = await createSession('run-signed-1');
+    await first.prompt({
+      id: 'turn-signed-1',
+      role: 'user',
+      content: 'read the file',
+    });
+    const firstSnapshot = await first.snapshot();
+    expect(firstSnapshot.messages.find((message) => message.role === 'assistant')).toMatchObject({
+      role: 'assistant',
+      content: [
+        {
+          type: 'toolCall',
+          id: 'call-signed',
+          name: 'read_file',
+          arguments: { targetFile: 'main.ts' },
+          thoughtSignature: signature,
+        },
+      ],
+    });
+    await first.close();
+
+    const second = await createSession('run-signed-2');
+    await second.prompt({
+      id: 'turn-signed-2',
+      role: 'user',
+      content: 'continue',
+    });
+    await second.close();
+
+    for (const body of bodies.slice(1)) {
+      const { messages } = body as {
+        readonly messages?: ReadonlyArray<Record<string, unknown>>;
+      };
+      const assistant = messages?.find((message) => message['role'] === 'assistant');
+      const calls = assistant?.['tool_calls'];
+      const signedCall = Array.isArray(calls)
+        ? (calls as unknown[]).find(
+            (candidate) =>
+              typeof candidate === 'object' &&
+              candidate !== null &&
+              'id' in candidate &&
+              candidate.id === 'call-signed',
+          )
+        : undefined;
+      expect(signedCall).toMatchObject({
+        id: 'call-signed',
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- Vertex's OpenAI-compatible wire uses snake_case.
+        extra_content: { google: { thought_signature: signature } },
+      });
+    }
+    expect(bodies).toHaveLength(3);
   });
 
   /*
@@ -188,7 +321,9 @@ describe('createGatewayModelTransport', () => {
       type: 'completed',
       stopReason: 'toolUse',
     });
-    await expect(collect(modelless.stream(request()))).rejects.toMatchObject({ code: 'INVALID_REQUEST' });
+    await expect(collect(modelless.stream(request()))).rejects.toMatchObject({
+      code: 'INVALID_REQUEST',
+    });
   });
 
   it('looks up an ambiguous attempt without posting it again', async () => {
@@ -196,11 +331,20 @@ describe('createGatewayModelTransport', () => {
       expect(new URL(input instanceof Request ? input.url : input).pathname).toBe(
         '/v1/billing/attempts/gateway/attempt-fixture-1',
       );
-      return new Response(JSON.stringify({ state: 'terminal', operationId: 'operation-fixture-1' }), {
-        headers: { 'content-type': 'application/json' },
-      });
+      return new Response(
+        JSON.stringify({
+          state: 'terminal',
+          operationId: 'operation-fixture-1',
+        }),
+        {
+          headers: { 'content-type': 'application/json' },
+        },
+      );
     });
-    const transport = createGatewayModelTransport({ baseUrl: 'https://gateway.example', fetch: fetchSpy });
+    const transport = createGatewayModelTransport({
+      baseUrl: 'https://gateway.example',
+      fetch: fetchSpy,
+    });
 
     await expect(transport.lookupAttempt?.('attempt-fixture-1', new AbortController().signal)).resolves.toEqual({
       operationId: 'operation-fixture-1',
@@ -226,9 +370,10 @@ describe('createGatewayModelTransport', () => {
     });
 
     const events = await collect(
-      createGatewayModelTransport({ baseUrl: 'https://gateway.example', fetch: fetchSpy }).stream(
-        request({ providerKind: 'openai' }),
-      ),
+      createGatewayModelTransport({
+        baseUrl: 'https://gateway.example',
+        fetch: fetchSpy,
+      }).stream(request({ providerKind: 'openai' })),
     );
 
     expect(path).toBe('/v1/llm/openai/v1/responses');
@@ -261,7 +406,12 @@ describe('createGatewayModelTransport', () => {
       ],
     });
     expect(events).toEqual([
-      { type: 'tool-input', toolCallId: 'call-1|fc_1', toolName: 'read_file', input: { targetFile: 'main.ts' } },
+      {
+        type: 'tool-input',
+        toolCallId: 'call-1|fc_1',
+        toolName: 'read_file',
+        input: { targetFile: 'main.ts' },
+      },
       { type: 'message-metadata', metadata: { responseId: 'resp-fixture' } },
       { type: 'usage', usage: usage(7, 4, { cacheRead: 5, reasoning: 0 }) },
       { type: 'completed', stopReason: 'toolUse' },
@@ -277,7 +427,11 @@ describe('createGatewayModelTransport', () => {
     const auth = vi.fn(async () => 'session-token');
 
     await collect(
-      createGatewayModelTransport({ auth, baseUrl: 'https://gateway.example', fetch: fetchSpy }).stream(request()),
+      createGatewayModelTransport({
+        auth,
+        baseUrl: 'https://gateway.example',
+        fetch: fetchSpy,
+      }).stream(request()),
     );
 
     expect(auth).toHaveBeenCalledOnce();
@@ -341,9 +495,10 @@ describe('createGatewayModelTransport', () => {
     });
 
     const events = await collect(
-      createGatewayModelTransport({ baseUrl: 'https://gateway.example', fetch: fetchSpy }).stream(
-        request({ providerKind: 'anthropic' }),
-      ),
+      createGatewayModelTransport({
+        baseUrl: 'https://gateway.example',
+        fetch: fetchSpy,
+      }).stream(request({ providerKind: 'anthropic' })),
     );
 
     expect(path).toBe('/v1/llm/anthropic/v1/messages');
@@ -358,7 +513,12 @@ describe('createGatewayModelTransport', () => {
     expect(events).toEqual([
       { type: 'thinking-delta', text: 'think' },
       { type: 'thinking-delta', text: '', signature: 'sig-fixture' },
-      { type: 'tool-input', toolCallId: 'call-1', toolName: 'read_file', input: { targetFile: 'main.ts' } },
+      {
+        type: 'tool-input',
+        toolCallId: 'call-1',
+        toolName: 'read_file',
+        input: { targetFile: 'main.ts' },
+      },
       { type: 'message-metadata', metadata: { responseId: 'msg-fixture' } },
       {
         type: 'usage',
@@ -388,7 +548,11 @@ describe('createGatewayModelTransport', () => {
           // Exactly what the browser chat client emits when a project has no
           // workspace prompt: an empty middle block that still carries a breakpoint.
           systemPromptBlocks: [
-            { type: 'text', text: 'static', cacheControl: { type: 'ephemeral' } },
+            {
+              type: 'text',
+              text: 'static',
+              cacheControl: { type: 'ephemeral' },
+            },
             { type: 'text', text: '', cacheControl: { type: 'ephemeral' } },
             { type: 'text', text: 'dynamic' },
           ],
@@ -462,7 +626,13 @@ describe('createGatewayModelTransport', () => {
       fetch: vi.fn(
         async () =>
           new Response(
-            JSON.stringify({ type: 'error', error: { type: 'MODEL_NOT_IN_CATALOG', message: 'Not available.' } }),
+            JSON.stringify({
+              type: 'error',
+              error: {
+                type: 'MODEL_NOT_IN_CATALOG',
+                message: 'Not available.',
+              },
+            }),
             { status: 400, headers: { 'content-type': 'application/json' } },
           ),
       ),
@@ -498,7 +668,9 @@ describe('createGatewayModelTransport', () => {
       ),
     );
 
-    expect(body).toMatchObject({ system: [{ text: 'static�prompt' }, { text: 'workspace' }, { text: 'dynamic' }] });
+    expect(body).toMatchObject({
+      system: [{ text: 'static�prompt' }, { text: 'workspace' }, { text: 'dynamic' }],
+    });
   });
 
   it('persists pi usage cost and reasoning through the session record and reducer', async () => {
@@ -529,13 +701,20 @@ describe('createGatewayModelTransport', () => {
         cost,
       },
       modelTransport: transport,
-      toolRegistry: { list: () => [], invoke: async () => ({ content: null, isError: false }) },
+      toolRegistry: {
+        list: () => [],
+        invoke: async () => ({ content: null, isError: false }),
+      },
       eventLog: log,
       createId: () => 'assistant-priced',
       now: () => new Date('2026-09-01T00:00:00.000Z'),
     });
 
-    await session.prompt({ id: 'turn-priced', role: 'user', content: 'price this turn' });
+    await session.prompt({
+      id: 'turn-priced',
+      role: 'user',
+      content: 'price this turn',
+    });
 
     const assistant = reduceEventLog(await log.read()).findLast((message) => message.role === 'assistant');
     expect(assistant?.metadata?.usage).toMatchObject({
@@ -571,7 +750,11 @@ describe('createGatewayModelTransport', () => {
       });
       const { port } = server.address() as AddressInfo;
       await expect(
-        collect(createGatewayModelTransport({ baseUrl: `http://127.0.0.1:${port}` }).stream(request())),
+        collect(
+          createGatewayModelTransport({
+            baseUrl: `http://127.0.0.1:${port}`,
+          }).stream(request()),
+        ),
       ).resolves.toContainEqual({ type: 'completed', stopReason: 'toolUse' });
     } finally {
       await new Promise<void>((resolve) => {
@@ -594,10 +777,16 @@ describe('createGatewayModelTransport', () => {
       baseUrl: 'https://gateway.example',
       fetch: vi.fn(
         async () =>
-          new Response(JSON.stringify({ type: 'error', error: { type: code, message: `fixture ${code}` } }), {
-            status,
-            headers: { 'content-type': 'application/json' },
-          }),
+          new Response(
+            JSON.stringify({
+              type: 'error',
+              error: { type: code, message: `fixture ${code}` },
+            }),
+            {
+              status,
+              headers: { 'content-type': 'application/json' },
+            },
+          ),
       ),
     });
 
@@ -609,9 +798,39 @@ describe('createGatewayModelTransport', () => {
     });
   });
 
+  it('carries a credit denial shortfall off the 402 body', async () => {
+    const details = {
+      requiredCreditAtoms: '4244000',
+      availableCreditAtoms: '300000',
+      routeId: 'anthropic-claude-astra-5',
+    };
+    const transport = createGatewayModelTransport({
+      baseUrl: 'https://gateway.example',
+      fetch: vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              type: 'error',
+              error: { type: 'INSUFFICIENT_CREDIT', message: 'Insufficient Tau credit.', details },
+            }),
+            { status: 402, headers: { 'content-type': 'application/json' } },
+          ),
+      ),
+    });
+
+    await expect(collect(transport.stream(request()))).rejects.toMatchObject({
+      code: 'INSUFFICIENT_CREDIT',
+      status: 402,
+      details,
+    });
+  });
+
   it('refuses a catalog-resolved provider whose wire is unsupported before fetch', async () => {
     const fetchSpy = vi.fn();
-    const transport = createGatewayModelTransport({ baseUrl: 'https://gateway.example', fetch: fetchSpy });
+    const transport = createGatewayModelTransport({
+      baseUrl: 'https://gateway.example',
+      fetch: fetchSpy,
+    });
 
     await expect(collect(transport.stream(request({ providerKind: 'ollama' })))).rejects.toMatchObject({
       code: 'MODEL_PROVIDER_UNSUPPORTED',
@@ -641,7 +860,11 @@ describe('createGatewayModelTransport', () => {
               id: 'assistant-1',
               role: 'assistant',
               content: [
-                { type: 'thinking', thinking: 'prior', thinkingSignature: 'reasoning_content' },
+                {
+                  type: 'thinking',
+                  thinking: 'prior',
+                  thinkingSignature: 'reasoning_content',
+                },
                 { type: 'text', text: 'previous' },
               ],
             },
@@ -650,7 +873,9 @@ describe('createGatewayModelTransport', () => {
       ),
     );
 
-    expect(body).toMatchObject({ messages: [expect.anything(), { role: 'assistant' }] });
+    expect(body).toMatchObject({
+      messages: [expect.anything(), { role: 'assistant' }],
+    });
     const assistantWire = (body as { readonly messages: ReadonlyArray<Record<string, unknown>> }).messages[1];
     expect(assistantWire?.['reasoning_content']).toBe('prior');
     expect(events).toContainEqual({
@@ -658,7 +883,11 @@ describe('createGatewayModelTransport', () => {
       metadata: { responseId: 'chatcmpl-2', responseModel: 'upstream-model' },
     });
     expect(events).toContainEqual({ type: 'thinking-delta', text: 'think' });
-    expect(events).toContainEqual({ type: 'thinking-delta', text: '', signature: 'reasoning_content' });
+    expect(events).toContainEqual({
+      type: 'thinking-delta',
+      text: '',
+      signature: 'reasoning_content',
+    });
   });
 
   it('round-trips Anthropic thinking signatures and native tool blocks on the next request', async () => {
@@ -684,9 +913,18 @@ describe('createGatewayModelTransport', () => {
               id: 'assistant-1',
               role: 'assistant',
               content: [
-                { type: 'thinking', thinking: 'prior', thinkingSignature: 'sig-1' },
+                {
+                  type: 'thinking',
+                  thinking: 'prior',
+                  thinkingSignature: 'sig-1',
+                },
                 { type: 'text', text: 'checking' },
-                { type: 'toolCall', id: 'call-1', name: 'read_file', arguments: { targetFile: 'main.ts' } },
+                {
+                  type: 'toolCall',
+                  id: 'call-1',
+                  name: 'read_file',
+                  arguments: { targetFile: 'main.ts' },
+                },
               ],
             },
             {
@@ -716,7 +954,12 @@ describe('createGatewayModelTransport', () => {
           content: [
             { type: 'thinking', thinking: 'prior', signature: 'sig-1' },
             { type: 'text', text: 'checking' },
-            { type: 'tool_use', id: 'call-1', name: 'read_file', input: { targetFile: 'main.ts' } },
+            {
+              type: 'tool_use',
+              id: 'call-1',
+              name: 'read_file',
+              input: { targetFile: 'main.ts' },
+            },
           ],
         },
         {
@@ -790,8 +1033,12 @@ describe('createGatewayModelTransport', () => {
       fetch: vi.fn(async () => responseFromChunks(['data: {"choices":[{"delta":{"content":"partial"}}]}\n\n'])),
     });
 
-    await expect(collect(wrongType.stream(request()))).rejects.toMatchObject({ code: 'MALFORMED_RESPONSE' });
-    await expect(collect(truncated.stream(request()))).rejects.toMatchObject({ code: 'MALFORMED_RESPONSE' });
+    await expect(collect(wrongType.stream(request()))).rejects.toMatchObject({
+      code: 'MALFORMED_RESPONSE',
+    });
+    await expect(collect(truncated.stream(request()))).rejects.toMatchObject({
+      code: 'MALFORMED_RESPONSE',
+    });
   });
 
   it('wraps response-body failures as NETWORK_ERROR without rewriting an abort', async () => {
@@ -805,11 +1052,16 @@ describe('createGatewayModelTransport', () => {
       fetch: vi.fn(
         async () =>
           new Response(failedBody, {
-            headers: { 'content-type': 'text/event-stream', 'x-tau-operation-id': 'operation-fixture-1' },
+            headers: {
+              'content-type': 'text/event-stream',
+              'x-tau-operation-id': 'operation-fixture-1',
+            },
           }),
       ),
     });
-    await expect(collect(network.stream(request()))).rejects.toMatchObject({ code: 'NETWORK_ERROR' });
+    await expect(collect(network.stream(request()))).rejects.toMatchObject({
+      code: 'NETWORK_ERROR',
+    });
 
     const operation = new AbortController();
     const abortedBody = new ReadableStream<Uint8Array<ArrayBuffer>>({
@@ -824,7 +1076,10 @@ describe('createGatewayModelTransport', () => {
       fetch: vi.fn(
         async () =>
           new Response(abortedBody, {
-            headers: { 'content-type': 'text/event-stream', 'x-tau-operation-id': 'operation-fixture-1' },
+            headers: {
+              'content-type': 'text/event-stream',
+              'x-tau-operation-id': 'operation-fixture-1',
+            },
           }),
       ),
     });
@@ -866,7 +1121,10 @@ describe('createGatewayModelTransport', () => {
       fetch: vi.fn(
         async () =>
           new Response(body, {
-            headers: { 'content-type': 'text/event-stream', 'x-tau-operation-id': 'operation-fixture-1' },
+            headers: {
+              'content-type': 'text/event-stream',
+              'x-tau-operation-id': 'operation-fixture-1',
+            },
           }),
       ),
     });
@@ -891,10 +1149,16 @@ describe('createGatewayModelTransport', () => {
       baseUrl: 'https://gateway.example',
       fetch: vi.fn(
         async () =>
-          new Response(JSON.stringify({ type: 'error', error: { type: 'NEW_GATEWAY_CODE', message: 'new' } }), {
-            status: 403,
-            headers: { 'content-type': 'application/json' },
-          }),
+          new Response(
+            JSON.stringify({
+              type: 'error',
+              error: { type: 'NEW_GATEWAY_CODE', message: 'new' },
+            }),
+            {
+              status: 403,
+              headers: { 'content-type': 'application/json' },
+            },
+          ),
       ),
     });
 
@@ -908,9 +1172,15 @@ describe('createGatewayModelTransport', () => {
       baseUrl: 'https://gateway.example',
       fetch: vi.fn(
         async () =>
-          new Response(JSON.stringify({ type: 'error', error: { type: 'ORIGIN_NOT_ALLOWED', message: 'origin' } }), {
-            status: 403,
-          }),
+          new Response(
+            JSON.stringify({
+              type: 'error',
+              error: { type: 'ORIGIN_NOT_ALLOWED', message: 'origin' },
+            }),
+            {
+              status: 403,
+            },
+          ),
       ),
     });
     await expect(collect(origin.stream(request()))).rejects.toMatchObject({

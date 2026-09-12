@@ -238,6 +238,146 @@ describe('createTauAgentHost', () => {
     await host.close();
   });
 
+  it('records the credit denial shortfall on the in-process terminal run record', async () => {
+    const details = {
+      requiredCreditAtoms: '4244000',
+      availableCreditAtoms: '300000',
+      routeId: 'anthropic-claude-astra-5',
+    };
+    const file = createMemoryLogFile();
+    const host = createTauAgentHost(
+      hostOptions({
+        openEventLog: file.open,
+        transport: {
+          stream: () => ({
+            [Symbol.asyncIterator]: () => ({
+              next: async (): Promise<IteratorResult<ModelStreamEvent>> => {
+                throw new GatewayModelTransportError({
+                  code: 'INSUFFICIENT_CREDIT',
+                  status: 402,
+                  message: 'Insufficient Tau credit for this model request.',
+                  details,
+                });
+              },
+            }),
+          }),
+        },
+        toolRegistry: tools(async () => ({ content: null, isError: false })),
+        idPrefix: 'denied',
+      }),
+    );
+
+    await host.admit({
+      chatId: 'chat-denied',
+      runId: 'run-denied',
+      trigger: 'submit',
+      message: { id: 'turn-denied', role: 'user', content: 'Spend credit I do not have.' },
+    });
+    const eventLog = await file.open();
+    const events = await eventLog.read();
+    const failed = events.flatMap((event) =>
+      event.type === 'run.lifecycle' && event.state === 'failed' ? [event.detail] : [],
+    );
+
+    expect(failed).toEqual([
+      {
+        message: 'Insufficient Tau credit for this model request.',
+        code: 'INSUFFICIENT_CREDIT',
+        status: 402,
+        details,
+      },
+    ]);
+    await host.close();
+  });
+
+  it.each([
+    ['INSUFFICIENT_CREDIT', 402, true],
+    ['MODEL_NOT_IN_CATALOG', 400, false],
+  ] as const)('resumes a %s refusal at the blocked step only when it is retryable', async (code, status, retryable) => {
+    const file = createMemoryLogFile();
+    const requests: ModelStreamRequest[] = [];
+    const invoke = vi.fn(async () => ({ content: 'fixture-main', isError: false }));
+    let call = 0;
+    const host = createTauAgentHost(
+      hostOptions({
+        openEventLog: file.open,
+        transport: {
+          async *stream(request): AsyncGenerator<ModelStreamEvent> {
+            requests.push(request);
+            call++;
+            if (call === 1) {
+              yield {
+                type: 'tool-input',
+                toolCallId: 'refused-call-read',
+                toolName: 'read_file',
+                input: { targetFile: 'main.ts' },
+              };
+              yield { type: 'completed', stopReason: 'toolUse' };
+              return;
+            }
+            if (call === 2) {
+              throw new GatewayModelTransportError({
+                code,
+                status,
+                message: `fixture ${code}`,
+                details: { requiredCreditAtoms: '4244000', availableCreditAtoms: '300000', routeId: 'route' },
+              });
+            }
+            yield { type: 'text-delta', text: 'Finished after the account was funded.' };
+            yield { type: 'completed', stopReason: 'stop' };
+          },
+        },
+        toolRegistry: tools(invoke),
+        idPrefix: `refused-${code}`,
+      }),
+    );
+
+    await host.admit({
+      chatId: `chat-refused-${code}`,
+      runId: `run-refused-${code}`,
+      trigger: 'submit',
+      message: { id: `turn-refused-${code}`, role: 'user', content: 'Read main.ts, then answer.' },
+    });
+    const refused = await host.snapshot(`chat-refused-${code}`);
+    const resumed = await host.resume(`chat-refused-${code}`);
+    const eventLog = await file.open();
+    const events = await eventLog.read();
+    const lifecycle = events.flatMap((event) => (event.type === 'run.lifecycle' ? [event.state] : []));
+
+    expect(refused.state).toBe('failed');
+    expect(refused.failure).toMatchObject({ code, status });
+    // One tool call, whoever resumed: the settled result is replayed from the
+    // log, never paid for twice.
+    expect(invoke).toHaveBeenCalledTimes(1);
+    if (!retryable) {
+      expect(requests).toHaveLength(2);
+      expect(lifecycle).toEqual(['admitted', 'running', 'failed']);
+      expect(resumed).toEqual(refused.messages);
+      await host.close();
+      return;
+    }
+    // A new attempt on the same run, from the same context the refusal was
+    // built from: the prior tool result intact, the user turn appearing once,
+    // and no rewind of the turn itself.
+    expect(lifecycle).toEqual(['admitted', 'running', 'failed', 'running', 'completed']);
+    expect(requests).toHaveLength(3);
+    expect(requests[2]?.messages.map((message) => `${message.role}:${message.id}`)).toEqual(
+      requests[1]?.messages.map((message) => `${message.role}:${message.id}`),
+    );
+    expect(requests[2]?.messages.filter((message) => message.role === 'user')).toHaveLength(1);
+    expect(requests[2]?.messages.at(-1)).toMatchObject({
+      role: 'tool-output',
+      toolCallId: 'refused-call-read',
+      isError: false,
+    });
+    expect(resumed.at(-1)).toMatchObject({ role: 'assistant', content: [{ type: 'text' }] });
+    expect(await host.snapshot(`chat-refused-${code}`)).toMatchObject({
+      runId: `run-refused-${code}`,
+      state: 'completed',
+    });
+    await host.close();
+  });
+
   it('executes tool and steady-state turns, then cold-rebuilds the completed transcript', async () => {
     const file = createMemoryLogFile();
     const invoke = vi.fn(async () => ({ content: 'fixture-main', isError: false }));

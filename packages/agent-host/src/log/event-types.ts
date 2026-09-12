@@ -308,9 +308,10 @@ export type TurnModelConfig = {
 /**
  * The one durable shape every terminal-run reason uses.
  *
- * A coded transport refusal fills all three fields; a host-level throw carries
- * only `message`. Older logs recorded either nothing or a bare `{ message }`,
- * both of which still parse.
+ * A coded transport refusal fills `code` and `status` too, and `details` when
+ * the gateway attached structured fields; a host-level throw carries only
+ * `message`. Older logs recorded either nothing or a bare `{ message }`, both
+ * of which still parse.
  *
  * @public
  */
@@ -321,6 +322,11 @@ export type RunFailureDetail = {
   readonly code?: string | undefined;
   /** HTTP status when the transport received one. */
   readonly status?: number | undefined;
+  /**
+   * Structured fields the coded refusal carried, such as an
+   * `INSUFFICIENT_CREDIT` denial's required and available credit atoms.
+   */
+  readonly details?: Record<string, unknown> | undefined;
 };
 
 /** Records a run lifecycle transition. @public */

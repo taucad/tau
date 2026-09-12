@@ -41,7 +41,6 @@ const taucadImports = (source: string): string[] => [
 const picogkOptions = {
   workerExecutable: '/picogk/Tau.PicoGK.Worker',
   workerSha256: 'a'.repeat(64),
-  trustFile: '/picogk/trust.json',
   resourceFiles: [{ path: '/picogk/PicoGK.dll', sha256: 'b'.repeat(64), label: 'PicoGK' }],
   requestTimeout: 120_000,
   maxArtifactBytes: 512 * 1024 * 1024,

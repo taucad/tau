@@ -1,3 +1,4 @@
+import { util as zodUtility } from 'zod';
 import { createAgentSession } from '#harness/session.js';
 import { createPortableId, transportFailureFromProviderMessages } from '#harness/session-record.js';
 import { reduceEventLog } from '#log/reducer.js';
@@ -9,6 +10,7 @@ import type {
   JsonValue,
   LogEventBase,
   ProviderMessage,
+  RunFailureDetail,
   RunTrigger,
   RunLifecycleState,
   UserProviderMessage,
@@ -158,6 +160,31 @@ const externalStopDetail = new Map<string, string>([
   ['refusal', 'The agent declined to answer this turn.'],
   ['max_turn_requests', 'The agent used its whole request budget for this turn.'],
 ]);
+
+/**
+ * The durable terminal record for a throw that escaped the session.
+ *
+ * A coded refusal (`GatewayModelTransportError`, an external runner's error)
+ * reaches here only when it was raised outside the model stream — the stream's
+ * own wrapper turns a refusal into an assistant diagnostic the session reads
+ * back. Record whatever code, status and structured `details` the throw carries
+ * so this record is never poorer than that one.
+ *
+ * @param error - Whatever ended the run.
+ * @returns The failure detail to persist.
+ */
+const codedFailureDetail = (error: unknown): RunFailureDetail => {
+  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- reading optional own properties off a thrown value.
+  const fields = error !== null && typeof error === 'object' ? (error as Record<string, unknown>) : undefined;
+  const status = typeof fields?.['status'] === 'number' ? fields['status'] : undefined;
+  const details = zodUtility.isObject(fields?.['details']) ? fields['details'] : undefined;
+  return {
+    message: error instanceof Error ? error.message : String(error),
+    ...(typeof fields?.['code'] === 'string' ? { code: fields['code'] } : {}),
+    ...(status === undefined ? {} : { status }),
+    ...(details === undefined ? {} : { details }),
+  };
+};
 
 /**
  * The typed refusal one thrown error carries, if it carries one.
@@ -570,6 +597,37 @@ const pendingToolInputs = (messages: readonly ProviderMessage[]) => {
 const terminalStates = new Set<RunLifecycleState>(['completed', 'failed', 'cancelled']);
 
 /**
+ * Failure codes whose run can be continued at the step it stopped on.
+ *
+ * A refused *admission* never reached the provider, so the turn's history is
+ * whole: every tool that ran is settled, nothing is half applied, and the only
+ * thing missing is the model call the gateway would not fund. Once the account
+ * can fund it, re-issuing that one call is the entire recovery — no rewind of
+ * the turn, and no second charge for tool work the customer already paid for.
+ * Every other failure ends the run for good and is dispatched afresh.
+ *
+ * One set, read by the host's own `resume` and by the surfaces that decide
+ * whether to offer Resume at all.
+ */
+const resumableRunFailureCodes = new Set<string>(['INSUFFICIENT_CREDIT']);
+
+/**
+ * Whether a failed run's recorded failure code can be resumed at its blocked step.
+ *
+ * @param code - `RunFailureDetail.code` from the run's terminal record.
+ * @returns `true` when `resume` will continue this run rather than replay it.
+ * @public
+ */
+export const isResumableRunFailure = (code: string | undefined): boolean =>
+  code !== undefined && resumableRunFailureCodes.has(code);
+
+/* Whether this run's terminal record is a refusal {@link isResumableRunFailure} covers. */
+const refusedResumably = (events: readonly AgentLogEvent[], runId: string): boolean => {
+  const last = events.findLast((event) => event.runId === runId && event.type === 'run.lifecycle');
+  return last?.type === 'run.lifecycle' && last.state === 'failed' && isResumableRunFailure(last.detail?.code);
+};
+
+/**
  * Assemble Tau's portable run lifecycle over the pi adapter and W1-W5 ports.
  *
  * @param options - Browser-safe host dependencies.
@@ -828,7 +886,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
           {
             type: 'run.lifecycle',
             state: 'failed',
-            detail: { message: error instanceof Error ? error.message : String(error) },
+            detail: codedFailureDetail(error),
           },
         ],
       });
@@ -1374,7 +1432,32 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
         const { runId } = last;
         const state = lifecycleFor(events, runId);
         if (terminalStates.has(state)) {
-          return reduceEventLog(events);
+          if (!refusedResumably(events, runId)) {
+            return reduceEventLog(events);
+          }
+          /* The stream wrapper records a refusal as an assistant message
+           * carrying the transport-failure diagnostic and no model output. It
+           * is a failure marker, not a turn: left in place, pi refuses to
+           * continue from an assistant tail and the recovery reminder would
+           * tell the model a network drop cancelled tools that in fact all
+           * settled. Retracting it restores the exact context the refused call
+           * was built from, so the resume re-issues that one call. */
+          const refused = reduceEventLog(events);
+          if (refused.at(-1)?.role === 'assistant') {
+            await append({
+              chatId,
+              log,
+              runId,
+              events: [
+                {
+                  type: 'history.rewound',
+                  trigger: 'retry',
+                  retainedMessageIds: refused.slice(0, -1).map((message) => message.id),
+                },
+              ],
+            });
+            events = await log.read();
+          }
         }
         if (externalTurnOf(events)) {
           /* An external run has no `AgentSession` to continue — its runner

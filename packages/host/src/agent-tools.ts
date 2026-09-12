@@ -24,6 +24,7 @@
 import { readFile, readdir, stat } from 'node:fs/promises';
 
 import { ResourceQueue } from '@taucad/filesystem';
+import { composeView } from '@taucad/filesystem/composed-view';
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
 
 import { rpcClientErrorCode } from '@taucad/chat';
@@ -32,8 +33,8 @@ import type { RpcGeoSpecClient, RpcSkillResolver } from '@taucad/chat/rpc';
 import {
   createChatToolRegistry,
   createProviderRpcFileSystem,
+  createSkillBundleOverlay,
   createSkillBundleRegistry,
-  createSkillResourceFileSystem,
 } from '@taucad/agent-tools/registry';
 import type { ReadSkillResource } from '@taucad/agent-tools/registry';
 import { createSkillResolver } from '@taucad/agent-tools/skills';
@@ -256,6 +257,8 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
     input.signal?.throwIfAborted();
     return bytes;
   };
+  const skillOverlay =
+    skillRegistry === undefined ? undefined : createSkillBundleOverlay(skillRegistry, readSkillResource);
 
   /**
    * Every tool this host serves, over one absolute root.
@@ -264,10 +267,15 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
    * @returns The registry for that tree.
    */
   const registryFor = (workspaceRoot: string): ToolRegistry => {
-    /* Unmasked here on purpose: the fence now lives inside
-     * `createProviderRpcFileSystem`, which is the only mutating consumer of this
-     * provider — the skill resolver below only reads. */
+    /* The fence and the skill overlay are one function on every host (charter
+     * D1): this provider is the checkout, and what the agent sees over it is
+     * the composed view. The skill resolver below reads the disk directly and
+     * mutates nothing. */
     const provider = new NodeFsProvider(workspaceRoot);
+    const view = composeView(
+      { filesystem: provider },
+      { consumer: 'agent', ...(skillOverlay === undefined ? {} : { overlays: [skillOverlay] }) },
+    );
     const mutations = new ResourceQueue();
     const { runtimeClient } = options;
 
@@ -375,12 +383,7 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
     };
 
     return createChatToolRegistry({
-      fileSystemFor: (signal) => {
-        const upper = createProviderRpcFileSystem({ provider, mutations, signal });
-        return skillRegistry === undefined
-          ? upper
-          : createSkillResourceFileSystem({ upper, registry: skillRegistry, readResource: readSkillResource, signal });
-      },
+      fileSystemFor: (signal) => createProviderRpcFileSystem({ provider: view, mutations, signal }),
       ...(runtimeClient === undefined ? {} : { kernelClient, graphics, images }),
       ...(geospec === undefined ? {} : { geospec }),
       skillResolver,

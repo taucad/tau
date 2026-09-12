@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { contextCompactionDataSchema, contextUsageDataSchema } from '#schemas/message-data.schema.js';
+import { contextCompactionDataSchema, contextUsageDataSchema, usageDataSchema } from '#schemas/message-data.schema.js';
 
 describe('contextCompactionDataSchema', () => {
   it('should accept the enriched compaction cursor fields', () => {
@@ -93,5 +93,49 @@ describe('contextUsageDataSchema', () => {
       scheduledTriggerReason: 'previous_usage',
       scheduledInputTokens: 180_000,
     });
+  });
+});
+
+describe('usageDataSchema', () => {
+  const tokens = {
+    type: 'usage',
+    id: 'dat_usage',
+    model: 'openai-gpt-5.5',
+    inputTokens: 10,
+    outputTokens: 4,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+  } as const;
+
+  it('should accept the bounded funded-operation projection', () => {
+    expect(
+      usageDataSchema.parse({
+        ...tokens,
+        reasoningTokens: 3,
+        operationId: 'op_01JABCDEF',
+        attemptId: 'att_01JABCDEF',
+        billingStatus: 'terminal',
+      }),
+    ).toMatchObject({ operationId: 'op_01JABCDEF', attemptId: 'att_01JABCDEF', billingStatus: 'terminal' });
+  });
+
+  it('should keep an unfunded turn valid and leave reasoning unreported', () => {
+    expect(usageDataSchema.parse({ ...tokens, agent: 'codex' })).toEqual({ ...tokens, agent: 'codex' });
+  });
+
+  /* A persisted transcript is untrusted input that a later authenticated
+   * receipt request is built from, so the identity it can carry is bounded
+   * exactly as the gateway transport bounds it. */
+  it('should refuse an oversized, empty, or non-printable operation identity', () => {
+    expect(usageDataSchema.safeParse({ ...tokens, operationId: 'o'.repeat(129) }).success).toBe(false);
+    expect(usageDataSchema.safeParse({ ...tokens, operationId: '' }).success).toBe(false);
+    expect(usageDataSchema.safeParse({ ...tokens, attemptId: 'att 1' }).success).toBe(false);
+    expect(usageDataSchema.safeParse({ ...tokens, billingStatus: 'settled' }).success).toBe(false);
+  });
+
+  /* B4 R2: a turn carries no price, so a persisted legacy cost field is dropped
+   * rather than read back as a charge. */
+  it('should drop the retired local cost fields', () => {
+    expect(usageDataSchema.parse({ ...tokens, totalCost: 0.24, inputTokensCost: 0.12 })).toEqual(tokens);
   });
 });

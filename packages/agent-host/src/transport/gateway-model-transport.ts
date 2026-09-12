@@ -19,7 +19,9 @@ const openAiGatewayPath = 'v1/llm/openai/v1';
 const anthropicGatewayPath = 'v1/llm/anthropic';
 // Pi validates provider auth before invoking custom fetch; this sentinel is
 // stripped at the wire boundary so cookie-authenticated requests emit no key header.
-const piCookieAuthValidationHeaders = { authorization: 'cookie-authenticated' } as const;
+const piCookieAuthValidationHeaders = {
+  authorization: 'cookie-authenticated',
+} as const;
 
 /** Stable gateway failures surfaced across the W3 transport boundary. @public */
 export const gatewayModelErrorCodes = [
@@ -48,12 +50,20 @@ export class GatewayModelTransportError extends Error {
   public readonly code: GatewayModelErrorCode;
   public readonly status?: number | undefined;
   public readonly rawType?: string | undefined;
+  /**
+   * Structured refusal fields the gateway attached to the coded error, such as
+   * an `INSUFFICIENT_CREDIT` denial's required and available credit atoms. The
+   * shape belongs to the code, so it is carried opaquely to the surface that
+   * renders it.
+   */
+  public readonly details?: Record<string, unknown> | undefined;
 
   public constructor(options: {
     readonly code: GatewayModelErrorCode;
     readonly message: string;
     readonly status?: number | undefined;
     readonly rawType?: string | undefined;
+    readonly details?: Record<string, unknown> | undefined;
     readonly cause?: unknown;
   }) {
     super(options.message, { cause: options.cause });
@@ -61,6 +71,7 @@ export class GatewayModelTransportError extends Error {
     this.code = options.code;
     this.status = options.status;
     this.rawType = options.rawType;
+    this.details = options.details;
   }
 }
 
@@ -181,6 +192,9 @@ type PiTool = NonNullable<Context['tools']>[number];
 const readString = (value: WireRecord, key: string): string | undefined =>
   typeof value[key] === 'string' ? value[key] : undefined;
 
+const readDetails = (value: WireRecord): Record<string, unknown> | undefined =>
+  zodUtility.isObject(value['details']) ? value['details'] : undefined;
+
 const gatewayErrorCode = (value: unknown, status: number): GatewayModelErrorCode => {
   if (typeof value === 'string' && gatewayModelErrorCodes.some((code) => code === value)) {
     return value as GatewayModelErrorCode;
@@ -218,11 +232,13 @@ const gatewayEnvelopeError = (
   }
   const rawType = readString(envelope, 'type');
   const code = gatewayErrorCode(rawType, status);
+  const details = readDetails(envelope);
   return new GatewayModelTransportError({
     code,
     message: readString(envelope, 'message') ?? fallback,
     status,
     ...(rawType && code === 'UNKNOWN_GATEWAY_ERROR' ? { rawType } : {}),
+    ...(details === undefined ? {} : { details }),
   });
 };
 
@@ -238,10 +254,12 @@ const flattenedGatewayError = (payload: WireRecord, status: number): GatewayMode
   if (code === undefined || !gatewayModelErrorCodes.some((known) => known === code)) {
     return undefined;
   }
+  const details = readDetails(payload);
   return new GatewayModelTransportError({
     code: code as GatewayModelErrorCode,
     message: readString(payload, 'message') ?? readString(payload, 'error') ?? code,
     status,
+    ...(details === undefined ? {} : { details }),
   });
 };
 
@@ -389,7 +407,12 @@ const authenticatedFetch =
           body = JSON.stringify({ ...payload, system });
         }
       }
-      const response = await options.fetch(input, { ...init, body, credentials: 'include', headers });
+      const response = await options.fetch(input, {
+        ...init,
+        body,
+        credentials: 'include',
+        headers,
+      });
       if (!response.ok) {
         const failure = await responseError(response);
         options.state.failure = failure;
@@ -417,7 +440,11 @@ const authenticatedFetch =
         options.state.failure = failure;
         throw failure;
       }
-      return guardedResponse({ response, state: options.state, signal: options.signal });
+      return guardedResponse({
+        response,
+        state: options.state,
+        signal: options.signal,
+      });
     } catch (error) {
       if (error instanceof GatewayModelTransportError || options.signal.aborted) {
         throw error;
@@ -551,6 +578,7 @@ const streamPiEvents = async function* (options: {
         toolCallId: event.toolCall.id,
         toolName: event.toolCall.name,
         input: event.toolCall.arguments,
+        ...(event.toolCall.thoughtSignature === undefined ? {} : { thoughtSignature: event.toolCall.thoughtSignature }),
       };
       continue;
     }

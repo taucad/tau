@@ -54,6 +54,8 @@ export const createTransportFailureDiagnostic = (
   const message =
     error instanceof Error ? error.message : typeof error['message'] === 'string' ? error['message'] : error['code'];
   const status = typeof error['status'] === 'number' && Number.isFinite(error['status']) ? error['status'] : undefined;
+  const refusal = zodUtility.isObject(error['details']) ? error['details'] : undefined;
+  const details = { ...(status === undefined ? {} : { status }), ...(refusal === undefined ? {} : { refusal }) };
   return {
     type: transportFailureDiagnosticType,
     timestamp,
@@ -62,7 +64,7 @@ export const createTransportFailureDiagnostic = (
       message,
       code: error['code'],
     },
-    ...(status === undefined ? {} : { details: { status } }),
+    ...(Object.keys(details).length === 0 ? {} : { details }),
   };
 };
 
@@ -122,10 +124,12 @@ export const transportFailureFromProviderMessages = (
       }
       const details = zodUtility.isObject(candidate['details']) ? candidate['details'] : undefined;
       const status = details && typeof details['status'] === 'number' ? details['status'] : undefined;
+      const refusal = details && zodUtility.isObject(details['refusal']) ? details['refusal'] : undefined;
       return {
         code: error['code'],
         message: error['message'],
         ...(status === undefined ? {} : { status }),
+        ...(refusal === undefined ? {} : { details: refusal }),
       };
     }
   }

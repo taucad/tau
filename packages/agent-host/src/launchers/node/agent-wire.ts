@@ -359,7 +359,14 @@ const hostRunSnapshotSchema = z.strictObject({
   state: z.enum(['admitted', 'running', 'paused', 'completed', 'failed', 'cancelled']),
   messages: z.array(providerMessageSchema),
   failure: z
-    .strictObject({ code: nonEmptyString, message: z.string(), status: z.number().int().optional() })
+    .strictObject({
+      code: nonEmptyString,
+      message: z.string(),
+      status: z.number().int().optional(),
+      /* The refusal's own fields, opaque on the wire: the code owns the shape
+       * and the surface that renders it owns the schema. @see HostRunFailure */
+      details: z.record(z.string(), z.unknown()).optional(),
+    })
     .optional(),
 });
 

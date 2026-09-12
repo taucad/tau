@@ -169,7 +169,7 @@ describe('exportCommand', () => {
     expect(terminate).not.toHaveBeenCalled();
   });
 
-  it('loads PicoGK resources for an explicit CLI export and removes its ephemeral trust marker', async () => {
+  it('loads PicoGK resources for an explicit CLI export', async () => {
     const target = `${process.platform}-${process.arch}`;
     const targetRoot = join(workspace, target);
     const digest = 'a'.repeat(64);
@@ -197,15 +197,11 @@ describe('exportCommand', () => {
       }),
     );
     vi.stubEnv('TAU_PICOGK_RESOURCE_ROOT', workspace);
-    let trustFile: string | undefined;
+    let workerExecutable: string | undefined;
     exportFunction.mockImplementationOnce(async () => {
       const { createCliRuntime } = await importedCliRuntime();
-      const options = createCliRuntime.mock.calls.at(-1)?.[0] as {
-        picogk: { trustFile: string; workerExecutable: string };
-      };
-      trustFile = options.picogk.trustFile;
-      await expect(readFile(trustFile, 'utf8')).resolves.toBe('{"version":1,"trusted":true}\n');
-      expect(options.picogk.workerExecutable.endsWith(`${target}/Tau.PicoGK.Worker`)).toBe(true);
+      const options = createCliRuntime.mock.calls.at(-1)?.[0] as { picogk: { workerExecutable: string } };
+      workerExecutable = options.picogk.workerExecutable;
       return buildSuccessResult(new Uint8Array([1]));
     });
     const command = await importExportCommand();
@@ -214,8 +210,7 @@ describe('exportCommand', () => {
       rawArgs: [inputPath, '--ext=glb', `--output=${join(workspace, 'picogk.glb')}`],
     });
 
-    expect(trustFile).toBeDefined();
-    await expect(readFile(trustFile!)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(workerExecutable?.endsWith(`${target}/Tau.PicoGK.Worker`)).toBe(true);
   });
 
   it('should write a gap-free CLI ledger and normalized runtime telemetry profile', async () => {

@@ -1,8 +1,7 @@
 import { defineCommand } from 'citty';
 import { resolve, basename, dirname, extname, join } from 'node:path';
-import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, stat, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
-import { tmpdir } from 'node:os';
 import { fileExtensionSet } from '@taucad/runtime/types';
 import type { ExportResult } from '@taucad/runtime';
 import type { FileExtension, TelemetryEntry } from '@taucad/runtime/types';
@@ -170,186 +169,177 @@ export const exportCommand = defineCommand({
 
     const projectRoot = process.cwd();
     const picogkResourceRoot = process.env['TAU_PICOGK_RESOURCE_ROOT'];
-    const nativeTrustDirectory = picogkResourceRoot ? await mkdtemp(join(tmpdir(), 'tau-cli-native-')) : undefined;
+    let picogk: PicogkKernelOptions | undefined;
+    if (picogkResourceRoot) {
+      const { loadPicogkKernelOptions } = await import('@taucad/picogk');
+      picogk = loadPicogkKernelOptions({ resourceRoot: resolve(picogkResourceRoot) });
+    }
+    const runtime = await loadCliRuntime({
+      projectRoot,
+      plugin: args.plugin,
+      config: args.config,
+      ...(picogk ? { picogk } : {}),
+    });
+    profileLedger?.checkpoint('cli.load-configured-plugins');
+    profileLedger?.checkpoint('cli.create-runtime');
+    const client = await createNodeClient({ runtime, projectPath: inputDirectory });
+    profileLedger?.checkpoint('runtime.create-client');
+    const telemetryEntries: TelemetryEntry[] = [];
+
+    client.on('log', (entry) => {
+      const level = entry.level as 'info' | 'warn' | 'error' | 'debug';
+      if (level in output) {
+        output[level](sanitize(entry.message));
+      }
+    });
+    if (telemetryPath) {
+      client.on('telemetry', (entries) => telemetryEntries.push(...entries));
+    }
+
+    let runtimeExportPhase: CliProfilePhase | undefined;
+    let profileArtifacts: Array<{ name: string; path: string; bytes: number }> = [];
+    /*
+     * Without these handlers the default signal disposition kills the process before
+     * the worker is drained, so an interrupted export leaks its in-process runtime.
+     */
+    const stopped = Promise.withResolvers<NodeJS.Signals>();
+    const onSignal = (signal: NodeJS.Signals): void => {
+      stopped.resolve(signal);
+    };
+    process.once('SIGINT', onSignal);
+    process.once('SIGTERM', onSignal);
     try {
-      let picogk: PicogkKernelOptions | undefined;
-      if (picogkResourceRoot && nativeTrustDirectory) {
-        const trustFile = join(nativeTrustDirectory, 'trust.json');
-        await writeFile(trustFile, '{"version":1,"trusted":true}\n', { encoding: 'utf8', mode: 0o600 });
-        const { loadPicogkKernelOptions } = await import('@taucad/picogk');
-        picogk = loadPicogkKernelOptions({ resourceRoot: resolve(picogkResourceRoot), trustFile });
-      }
-      const runtime = await loadCliRuntime({
-        projectRoot,
-        plugin: args.plugin,
-        config: args.config,
-        ...(picogk ? { picogk } : {}),
+      const exportOutcome = async (): Promise<{ readonly type: 'result'; readonly value: ExportResult }> => ({
+        type: 'result',
+        value: await client.export(format, {
+          source: { path: inputFilename },
+          parameters,
+          ...(exportOptions === undefined ? {} : { exportOptions }),
+          ...(content === undefined ? {} : { content }),
+        }),
       });
-      profileLedger?.checkpoint('cli.load-configured-plugins');
-      profileLedger?.checkpoint('cli.create-runtime');
-      const client = await createNodeClient({ runtime, projectPath: inputDirectory });
-      profileLedger?.checkpoint('runtime.create-client');
-      const telemetryEntries: TelemetryEntry[] = [];
-
-      client.on('log', (entry) => {
-        const level = entry.level as 'info' | 'warn' | 'error' | 'debug';
-        if (level in output) {
-          output[level](sanitize(entry.message));
-        }
+      const signalOutcome = async (): Promise<{ readonly type: 'signal'; readonly signal: NodeJS.Signals }> => ({
+        type: 'signal',
+        signal: await stopped.promise,
       });
-      if (telemetryPath) {
-        client.on('telemetry', (entries) => telemetryEntries.push(...entries));
+      // Promise.race subscribes to both, so a late export failure is never unhandled.
+      const outcome = await Promise.race([exportOutcome(), signalOutcome()]);
+      if (outcome.type === 'signal') {
+        throw cliError(
+          'EXPORT_CANCELLED',
+          `Export cancelled by ${outcome.signal}; no artifact written`,
+          outcome.signal === 'SIGINT' ? exitCodes.interrupted : exitCodes.terminated,
+        );
+      }
+      const result = outcome.value;
+      runtimeExportPhase = profileLedger?.checkpoint('runtime.export');
+
+      if (!result.success) {
+        const messages = result.issues
+          .map((issue) =>
+            issue.code === 'KERNEL_CAPABILITY_MISSING'
+              ? `${issue.message} — or rerun with --plugin <package>`
+              : issue.message,
+          )
+          .join('\n  ');
+        throw cliError(
+          result.issues.find((issue) => issue.severity === 'error')?.code ?? 'EXPORT_FAILED',
+          `Export failed:\n  ${sanitize(messages)}`,
+          result.issues.some((issue) => capabilityMissingCodes.has(issue.code)) ? exitCodes.refused : exitCodes.error,
+        );
       }
 
-      let runtimeExportPhase: CliProfilePhase | undefined;
-      let profileArtifacts: Array<{ name: string; path: string; bytes: number }> = [];
-      /*
-       * Without these handlers the default signal disposition kills the process before
-       * the worker is drained, so an interrupted export leaks its in-process runtime.
-       */
-      const stopped = Promise.withResolvers<NodeJS.Signals>();
-      const onSignal = (signal: NodeJS.Signals): void => {
-        stopped.resolve(signal);
-      };
-      process.once('SIGINT', onSignal);
-      process.once('SIGTERM', onSignal);
-      try {
-        const exportOutcome = async (): Promise<{ readonly type: 'result'; readonly value: ExportResult }> => ({
-          type: 'result',
-          value: await client.export(format, {
-            source: { path: inputFilename },
-            parameters,
-            ...(exportOptions === undefined ? {} : { exportOptions }),
-            ...(content === undefined ? {} : { content }),
-          }),
-        });
-        const signalOutcome = async (): Promise<{ readonly type: 'signal'; readonly signal: NodeJS.Signals }> => ({
-          type: 'signal',
-          signal: await stopped.promise,
-        });
-        // Promise.race subscribes to both, so a late export failure is never unhandled.
-        const outcome = await Promise.race([exportOutcome(), signalOutcome()]);
-        if (outcome.type === 'signal') {
-          throw cliError(
-            'EXPORT_CANCELLED',
-            `Export cancelled by ${outcome.signal}; no artifact written`,
-            outcome.signal === 'SIGINT' ? exitCodes.interrupted : exitCodes.terminated,
-          );
+      for (const issue of result.issues) {
+        if (issue.severity === 'warning') {
+          output.warn(sanitize(issue.message));
         }
-        const result = outcome.value;
-        runtimeExportPhase = profileLedger?.checkpoint('runtime.export');
+      }
 
-        if (!result.success) {
-          const messages = result.issues
-            .map((issue) =>
-              issue.code === 'KERNEL_CAPABILITY_MISSING'
-                ? `${issue.message} — or rerun with --plugin <package>`
-                : issue.message,
-            )
-            .join('\n  ');
-          throw cliError(
-            result.issues.find((issue) => issue.severity === 'error')?.code ?? 'EXPORT_FAILED',
-            `Export failed:\n  ${sanitize(messages)}`,
-            result.issues.some((issue) => capabilityMissingCodes.has(issue.code)) ? exitCodes.refused : exitCodes.error,
-          );
-        }
+      if (streamToStdout && result.data.length !== 1) {
+        throw cliError(
+          'OUTPUT_STREAM_AMBIGUOUS',
+          `--output - streams one artifact, but this export produced ${result.data.length}. Pass a file path instead.`,
+          exitCodes.usage,
+        );
+      }
 
-        for (const issue of result.issues) {
-          if (issue.severity === 'warning') {
-            output.warn(sanitize(issue.message));
-          }
-        }
-
-        if (streamToStdout && result.data.length !== 1) {
-          throw cliError(
-            'OUTPUT_STREAM_AMBIGUOUS',
-            `--output - streams one artifact, but this export produced ${result.data.length}. Pass a file path instead.`,
-            exitCodes.usage,
-          );
-        }
-
-        const outputDirectory = dirname(outputPath);
-        const targetPaths = streamToStdout
-          ? ['-']
-          : result.data.map((file, index) => {
-              if (!isSafeRelativePath(file.name)) {
-                throw new Error(`Export returned an unsafe relative artifact path: ${file.name}`);
-              }
-              return index === 0 ? outputPath : resolve(outputDirectory, file.name);
-            });
-        if (!streamToStdout) {
-          if (new Set(targetPaths).size !== targetPaths.length) {
-            throw new Error(`Export artifact paths collide under ${outputDirectory}`);
-          }
-          if (telemetryPath && targetPaths.includes(telemetryPath)) {
-            throw new Error(`Telemetry output path collides with an export artifact: ${telemetryPath}`);
-          }
-        }
-        profileArtifacts = result.data.map((file, index) => ({
-          name: file.name,
-          path: targetPaths[index]!,
-          bytes: file.bytes.byteLength,
-        }));
-        profileLedger?.checkpoint('cli.validate-artifacts');
-
-        if (streamToStdout) {
-          const [file] = result.data;
-          await writeStdout(file!.bytes);
-          output.success(`Wrote ${file!.bytes.byteLength} bytes → stdout`);
-        } else {
-          for (const [index, file] of result.data.entries()) {
-            const targetPath = targetPaths[index]!;
-            // oxlint-disable-next-line no-await-in-loop -- Preflight completes before ordered filesystem writes begin.
-            await mkdir(dirname(targetPath), { recursive: true });
-            // oxlint-disable-next-line no-await-in-loop -- Ordered writes preserve producer artifact order in logs.
-            await writeFile(targetPath, file.bytes);
-            output.success(`Wrote ${file.bytes.byteLength} bytes → ${targetPath}`);
-          }
-        }
-        profileLedger?.checkpoint('cli.write-artifacts');
-
-        if (args.json) {
-          await emit({
-            kind: 'export',
-            ok: true,
-            input: inputPath,
-            format,
-            artifacts: result.data.map((file, index) => ({
-              name: file.name,
-              path: targetPaths[index]!,
-              bytes: file.bytes.byteLength,
-              ext: extname(file.name).slice(1) || format,
-              sha256: createHash('sha256').update(file.bytes).digest('hex'),
-            })),
+      const outputDirectory = dirname(outputPath);
+      const targetPaths = streamToStdout
+        ? ['-']
+        : result.data.map((file, index) => {
+            if (!isSafeRelativePath(file.name)) {
+              throw new Error(`Export returned an unsafe relative artifact path: ${file.name}`);
+            }
+            return index === 0 ? outputPath : resolve(outputDirectory, file.name);
           });
+      if (!streamToStdout) {
+        if (new Set(targetPaths).size !== targetPaths.length) {
+          throw new Error(`Export artifact paths collide under ${outputDirectory}`);
         }
-      } finally {
-        process.off('SIGINT', onSignal);
-        process.off('SIGTERM', onSignal);
-        await client.shutdown({ drain: true });
-        profileLedger?.checkpoint('runtime.shutdown');
+        if (telemetryPath && targetPaths.includes(telemetryPath)) {
+          throw new Error(`Telemetry output path collides with an export artifact: ${telemetryPath}`);
+        }
       }
+      profileArtifacts = result.data.map((file, index) => ({
+        name: file.name,
+        path: targetPaths[index]!,
+        bytes: file.bytes.byteLength,
+      }));
+      profileLedger?.checkpoint('cli.validate-artifacts');
 
-      if (telemetryPath && profileLedger && runtimeExportPhase) {
-        const profile = buildExportProfile({
-          phases: profileLedger.phases,
-          telemetry: telemetryEntries,
-          runtimeExportPhase,
-          workload: {
-            inputPath,
-            outputPath,
-            format,
-            artifacts: profileArtifacts,
-          },
+      if (streamToStdout) {
+        const [file] = result.data;
+        await writeStdout(file!.bytes);
+        output.success(`Wrote ${file!.bytes.byteLength} bytes → stdout`);
+      } else {
+        for (const [index, file] of result.data.entries()) {
+          const targetPath = targetPaths[index]!;
+          // oxlint-disable-next-line no-await-in-loop -- Preflight completes before ordered filesystem writes begin.
+          await mkdir(dirname(targetPath), { recursive: true });
+          // oxlint-disable-next-line no-await-in-loop -- Ordered writes preserve producer artifact order in logs.
+          await writeFile(targetPath, file.bytes);
+          output.success(`Wrote ${file.bytes.byteLength} bytes → ${targetPath}`);
+        }
+      }
+      profileLedger?.checkpoint('cli.write-artifacts');
+
+      if (args.json) {
+        await emit({
+          kind: 'export',
+          ok: true,
+          input: inputPath,
+          format,
+          artifacts: result.data.map((file, index) => ({
+            name: file.name,
+            path: targetPaths[index]!,
+            bytes: file.bytes.byteLength,
+            ext: extname(file.name).slice(1) || format,
+            sha256: createHash('sha256').update(file.bytes).digest('hex'),
+          })),
         });
-        await mkdir(dirname(telemetryPath), { recursive: true });
-        await writeFile(telemetryPath, `${JSON.stringify(profile, undefined, 2)}\n`, 'utf8');
-        output.info(`Wrote telemetry profile → ${telemetryPath}`);
       }
     } finally {
-      if (nativeTrustDirectory) {
-        await rm(nativeTrustDirectory, { recursive: true, force: true });
-      }
+      process.off('SIGINT', onSignal);
+      process.off('SIGTERM', onSignal);
+      await client.shutdown({ drain: true });
+      profileLedger?.checkpoint('runtime.shutdown');
+    }
+
+    if (telemetryPath && profileLedger && runtimeExportPhase) {
+      const profile = buildExportProfile({
+        phases: profileLedger.phases,
+        telemetry: telemetryEntries,
+        runtimeExportPhase,
+        workload: {
+          inputPath,
+          outputPath,
+          format,
+          artifacts: profileArtifacts,
+        },
+      });
+      await mkdir(dirname(telemetryPath), { recursive: true });
+      await writeFile(telemetryPath, `${JSON.stringify(profile, undefined, 2)}\n`, 'utf8');
+      output.info(`Wrote telemetry profile → ${telemetryPath}`);
     }
   },
 });

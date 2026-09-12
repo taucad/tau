@@ -162,13 +162,6 @@ export class BillingAccountClosureService {
     return row === undefined ? undefined : project(row, input.authUserId);
   }
 
-  public async markAuthDeleted(input: { readonly closureId: string; readonly accountId: string }): Promise<void> {
-    await this.databaseService.database
-      .update(billingAccountClosure)
-      .set({ authDeletedAt: new Date(), updatedAt: new Date() })
-      .where(and(eq(billingAccountClosure.id, input.closureId), eq(billingAccountClosure.accountId, input.accountId)));
-  }
-
   public async reconcile(input: {
     readonly closureId: string;
     readonly accountId: string;

@@ -32,7 +32,24 @@ const record = (value: unknown): Record<string, unknown> | undefined => {
   return parsed.success ? parsed.data : undefined;
 };
 
-const usageFrom = (wire: BillableProviderWire, value: unknown): Usage | undefined => {
+const outputUsageFrom = (
+  wire: BillableProviderWire,
+  providerId: string,
+  usage: Record<string, unknown>,
+): Pick<Usage, 'output' | 'reasoning'> => {
+  const outputDetails = record(usage['output_tokens_details']) ?? record(usage['completion_tokens_details']);
+  const output = integer(usage['output_tokens']) ?? integer(usage['completion_tokens']);
+  const reasoning = integer(outputDetails?.['reasoning_tokens']);
+  return {
+    output:
+      wire === 'openai-completions' && providerId === 'vertexai' && output !== undefined
+        ? output + (reasoning ?? 0n)
+        : output,
+    reasoning,
+  };
+};
+
+const usageFrom = (wire: BillableProviderWire, providerId: string, value: unknown): Usage | undefined => {
   const root = record(value);
   if (!root) {
     return undefined;
@@ -52,14 +69,14 @@ const usageFrom = (wire: BillableProviderWire, value: unknown): Usage | undefine
     };
   }
   const inputDetails = record(usage['input_tokens_details']) ?? record(usage['prompt_tokens_details']);
-  const outputDetails = record(usage['output_tokens_details']) ?? record(usage['completion_tokens_details']);
   const incompleteDetails = record(response['incomplete_details']);
   return {
     input: integer(usage['input_tokens']) ?? integer(usage['prompt_tokens']),
-    cacheRead: integer(inputDetails?.['cached_tokens']),
+    // Vertex omits `prompt_tokens_details` entirely on a cache miss while the Gemini tariff pins
+    // `cache_read`, so an absent cached count there is a reported zero, not unknown usage.
+    cacheRead: integer(inputDetails?.['cached_tokens']) ?? (providerId === 'vertexai' ? 0n : undefined),
     cacheWrite: integer(inputDetails?.['cache_write_tokens']),
-    output: integer(usage['output_tokens']) ?? integer(usage['completion_tokens']),
-    reasoning: integer(outputDetails?.['reasoning_tokens']),
+    ...outputUsageFrom(wire, providerId, usage),
     requestId: typeof response['id'] === 'string' ? response['id'] : undefined,
     terminalReason: typeof incompleteDetails?.['reason'] === 'string' ? incompleteDetails['reason'] : undefined,
     costUsdTicks: integer(usage['cost_in_usd_ticks']),
@@ -111,10 +128,23 @@ const isTerminalEvent = (wire: BillableProviderWire, value: unknown): boolean =>
   return choices.success && choices.data.some((choice) => typeof choice['finish_reason'] === 'string');
 };
 
+const isVertexFinalUsageEvent = (value: unknown): boolean => {
+  const root = record(value);
+  const choices = z.array(recordSchema).safeParse(root?.['choices']);
+  const usage = record(root?.['usage']);
+  return (
+    choices.success &&
+    choices.data.length === 0 &&
+    integer(usage?.['prompt_tokens']) !== undefined &&
+    integer(usage?.['completion_tokens']) !== undefined
+  );
+};
+
 /** Creates an exact protocol usage collector over preserved provider response bytes. */
 export const createBillableModelEvidenceCollector = (
   wire: BillableProviderWire,
   expectedDimensions: ReadonlySet<string>,
+  providerId: string,
 ): BillableInvocationEvidenceCollector => {
   const chunks: Array<Uint8Array<ArrayBuffer>> = [];
 
@@ -132,7 +162,7 @@ export const createBillableModelEvidenceCollector = (
     const events = parseEvents(joined);
     let latest: Usage | undefined;
     for (const event of events) {
-      const next = usageFrom(wire, event);
+      const next = usageFrom(wire, providerId, event);
       if (next) {
         latest =
           wire === 'anthropic'
@@ -152,7 +182,10 @@ export const createBillableModelEvidenceCollector = (
     const terminalEvent = events.some((event) => isTerminalEvent(wire, event));
     const terminal =
       wire === 'openai-completions'
-        ? terminalEvent && /(?:^|\r?\n)data:\s*\[DONE\](?:\r?\n|$)/u.test(new TextDecoder().decode(joined))
+        ? (terminalEvent && /(?:^|\r?\n)data:\s*\[DONE\](?:\r?\n|$)/u.test(new TextDecoder().decode(joined))) ||
+          // Vertex's OpenAI-compatible stream can close after a choice-less final
+          // usage envelope without repeating the optional sentinel.
+          (providerId === 'vertexai' && events.some((event) => isVertexFinalUsageEvent(event)))
         : terminalEvent;
     const cacheRead = expectedDimensions.has('cache_read') ? latest?.cacheRead : undefined;
     const cacheWrite = expectedDimensions.has('cache_write') ? latest?.cacheWrite : undefined;
@@ -174,7 +207,13 @@ export const createBillableModelEvidenceCollector = (
           ]),
       ...(cacheRead === undefined
         ? []
-        : [{ dimension: 'cache_read', tier: null, quantity: cacheRead } satisfies NormalizedMeterItem]),
+        : [
+            {
+              dimension: 'cache_read',
+              tier: null,
+              quantity: cacheRead,
+            } satisfies NormalizedMeterItem,
+          ]),
       ...(cacheWrite === undefined
         ? []
         : [
@@ -186,24 +225,36 @@ export const createBillableModelEvidenceCollector = (
           ]),
       ...(latest?.output === undefined
         ? []
-        : [{ dimension: 'output', tier: null, quantity: latest.output } satisfies NormalizedMeterItem]),
+        : [
+            {
+              dimension: 'output',
+              tier: null,
+              quantity: latest.output,
+            } satisfies NormalizedMeterItem,
+          ]),
     ];
+    // A provider-reported reason wins; otherwise the gateway's own reason is retained, because
+    // `executionStatus` alone cannot separate a client abort from a deadline or a ceiling cut.
+    const terminalReason = latest?.terminalReason ?? failure;
     const history =
-      latest === undefined
+      latest === undefined && terminalReason === undefined
         ? {}
         : {
-            ...(latest.reasoning === undefined ? {} : { reasoningTokens: latest.reasoning }),
+            ...(latest?.reasoning === undefined ? {} : { reasoningTokens: latest.reasoning }),
             normalizationEvidence: {
               version: 'provider-usage-v1',
-              ...(latest.requestId === undefined ? {} : { providerRequestId: latest.requestId }),
-              ...(latest.terminalReason === undefined ? {} : { terminalReason: latest.terminalReason }),
+              ...(latest?.requestId === undefined ? {} : { providerRequestId: latest.requestId }),
+              ...(terminalReason === undefined ? {} : { terminalReason }),
               fields: {
-                ...(latest.input === undefined ? {} : { input: latest.input.toString() }),
-                ...(latest.output === undefined ? {} : { output: latest.output.toString() }),
-                ...(latest.costUsdTicks === undefined ? {} : { costUsdTicks: latest.costUsdTicks.toString() }),
+                ...(latest?.input === undefined ? {} : { input: latest.input.toString() }),
+                ...(latest?.output === undefined ? {} : { output: latest.output.toString() }),
+                ...(latest?.costUsdTicks === undefined ? {} : { costUsdTicks: latest.costUsdTicks.toString() }),
               },
             },
           };
+    /* A cut at the authorized ceiling is the designed outcome of an in-stream control (R8),
+     * not a fault, so it keeps its own terminal kind instead of absorbing the turn at zero. */
+    const incompleteKind = failure === 'authorized_exhausted' ? 'authorized_exhausted' : 'absorbed_unknown';
     if (
       latest?.input === undefined ||
       latest.output === undefined ||
@@ -211,17 +262,20 @@ export const createBillableModelEvidenceCollector = (
       (expectedDimensions.has('cache_write') && latest.cacheWrite === undefined)
     ) {
       return {
-        kind: 'absorbed_unknown',
+        kind: incompleteKind,
         executionStatus: failure ? 'cancelled' : 'unknown',
         ...(knownItems.length === 0 ? {} : { usageOccurredAt: new Date(), meterItems: knownItems }),
         ...history,
       };
     }
     if (invalidCache) {
-      return { kind: 'absorbed_unknown', executionStatus: 'unknown' };
+      return {
+        kind: incompleteKind,
+        executionStatus: incompleteKind === 'authorized_exhausted' ? 'cancelled' : 'unknown',
+      };
     }
     return {
-      kind: Boolean(failure) || !terminal ? 'absorbed_unknown' : 'final_usage',
+      kind: failure === undefined && terminal ? 'final_usage' : incompleteKind,
       usageOccurredAt: new Date(),
       meterItems: knownItems,
       executionStatus: failure ? 'cancelled' : terminal ? 'succeeded' : 'unknown',

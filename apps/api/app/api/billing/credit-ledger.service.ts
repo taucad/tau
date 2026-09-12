@@ -3,11 +3,14 @@ import { cashBlockingFinancialCaseKinds } from '#api/billing/billing-cash-reconc
 import {
   paymentOfferSnapshotSchema,
   paidPaymentEvidenceSchema,
+  cashProjectionCoversRetained,
   cashProjectionEvidenceSchema,
   cashProjectionDigest,
 } from '#api/billing/billing-payment-contract.js';
 import { maximumMeterCharge } from '#api/billing/billable-model-bound.js';
 import { calculatePreliminarySupplierCost } from '#api/billing/billable-model-cost.js';
+import { routeSkuFamily } from '#api/billing/billable-model-qualification.js';
+import { resolvePolicyRoute, validateCommercialPolicy } from '#api/billing/billing-policy.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { ConflictException, Inject, Injectable } from '@nestjs/common';
 import { and, asc, desc, eq, gt, inArray, lt, ne, notInArray, sql } from 'drizzle-orm';
@@ -30,6 +33,7 @@ import {
   billingOperationException,
   billingOwnerBinding,
   billingPeriod,
+  billingPolicy,
   billingPromotionIssuance,
   billingPurchase,
   billingReloadWork,
@@ -164,7 +168,7 @@ const invocationSchema = z
         createRequestDigest: z.string().regex(/^sha256:[a-f0-9]{64}$/u),
         countRequestDigest: z.string().regex(/^sha256:[a-f0-9]{64}$/u),
         inputTokens: rationalUnsignedIntegerStringSchema,
-        liability: z.literal('controlled-local-zero'),
+        liability: z.enum(['controlled-local-zero', 'openai-input-tokens-v1']),
       })
       .strict()
       .optional(),
@@ -173,7 +177,7 @@ const invocationSchema = z
   .strict();
 const persistedInvocationEvidenceSchema = terminalHistorySchema
   .extend({
-    kind: z.enum(['final_usage', 'provider_rejected', 'absorbed_unknown']),
+    kind: z.enum(['final_usage', 'provider_rejected', 'absorbed_unknown', 'authorized_exhausted']),
     usageOccurredAt: z.iso.datetime().optional(),
     reasoningTokens: rationalUnsignedIntegerStringSchema.optional(),
     meterItems: z
@@ -258,6 +262,33 @@ export const allocateSources = (account: AccountSnapshot, amount: bigint): Sourc
       ? remaining
       : account.purchasedAtoms - account.purchasedHeldAtoms;
   return remaining - purchasedAtoms === 0n ? { promoAtoms, planAtoms, purchasedAtoms } : undefined;
+};
+
+/** Spendable credit left after holds and debt: a credit denial's `availableCreditAtoms`. */
+export const availableAtoms = (account: AccountSnapshot): bigint =>
+  account.promoAtoms +
+  account.planAtoms +
+  account.purchasedAtoms -
+  account.debtAtoms -
+  account.promoHeldAtoms -
+  account.planHeldAtoms -
+  account.purchasedHeldAtoms;
+
+/**
+ * A refused admission, with the shortfall a credit denial must carry.
+ *
+ * The blueprint's UI contract needs the amounts alongside the reason so the
+ * client can say how much is missing (`billing-admission-hold-redesign.md`,
+ * Architecture C). Declared here rather than widening `AdmissionResult` because
+ * only the admission path produces them.
+ */
+export type AdmissionDenied = {
+  status: 'denied';
+  reason: AdmissionDenial;
+  /** Credit the refused call would have authorized. */
+  requiredCreditAtoms?: bigint;
+  /** Spendable credit the account had when it was refused. */
+  availableCreditAtoms?: bigint;
 };
 
 /** Applies incoming credit to explicit debt before creating a spendable asset. */
@@ -472,9 +503,7 @@ export class CreditLedgerService {
     executionTimeout: number;
     minimumOutput: bigint;
     minimumSupplierPicoUsd: bigint;
-  }): Promise<
-    { status: 'eligible'; executionDeadline: Date; remaining: number } | { status: 'denied'; reason: AdmissionDenial }
-  > {
+  }): Promise<{ status: 'eligible'; executionDeadline: Date; remaining: number } | AdmissionDenied> {
     const effective = await this.policyService.selectEffectivePolicyRoute(input);
     const [bound] = await this.databaseService.database
       .select({ account: creditAccount })
@@ -490,9 +519,6 @@ export class CreditLedgerService {
     if (!bound || bound.account.environment !== input.environment || bound.account.status !== 'open') {
       return { status: 'denied', reason: 'account_restricted' };
     }
-    if (bound.account.debtAtoms !== 0n) {
-      return { status: 'denied', reason: 'debt' };
-    }
     const minimumAtoms = maximumMeterCharge(
       effective.rates.map((rate) => ({
         dimension: rate.dimension,
@@ -501,8 +527,17 @@ export class CreditLedgerService {
         denominator: BigInt(rate.publicDenominatorUnits),
       })),
     );
+    // Both refusals are a shortfall the client has to be able to name, so the
+    // minimum this call would authorize is computed before either is returned.
+    const shortfall = {
+      requiredCreditAtoms: minimumAtoms,
+      availableCreditAtoms: availableAtoms(snapshot(bound.account)),
+    };
+    if (bound.account.debtAtoms !== 0n) {
+      return { status: 'denied', reason: 'debt', ...shortfall };
+    }
     if (!allocateSources(snapshot(bound.account), minimumAtoms)) {
-      return { status: 'denied', reason: 'insufficient_credit' };
+      return { status: 'denied', reason: 'insufficient_credit', ...shortfall };
     }
     const capacity = classifyFundedLlmCapacity(input.activity);
     const pending = await this.databaseService.database
@@ -516,7 +551,12 @@ export class CreditLedgerService {
     const [paused] = await this.databaseService.database
       .select({ sku: billingRoutePause.sku })
       .from(billingRoutePause)
-      .where(and(eq(billingRoutePause.environment, input.environment), eq(billingRoutePause.sku, input.sku)));
+      .where(
+        and(
+          eq(billingRoutePause.environment, input.environment),
+          eq(billingRoutePause.sku, routeSkuFamily(input.sku)[0]),
+        ),
+      );
     if (paused) {
       return { status: 'denied', reason: 'policy_unavailable' };
     }
@@ -554,14 +594,17 @@ export class CreditLedgerService {
   }
 
   /** Places source and budget holds transactionally before any external dispatch. */
-  public async admitOperation(input: QualifiedAdmissionInput): Promise<AdmissionResult> {
+  public async admitOperation(
+    input: QualifiedAdmissionInput,
+  ): Promise<Exclude<AdmissionResult, { status: 'denied' }> | AdmissionDenied> {
     const history = admissionHistorySchema.parse(input);
     const invocation = input.invocation === undefined ? undefined : invocationSchema.parse(input.invocation);
     const capacity = classifyFundedLlmCapacity(input.activity);
     if (
       invocation?.inputCount &&
-      (input.environment !== 'development' ||
-        invocation.inputCount.environment !== input.environment ||
+      /* Counting is qualified in every environment (R11). The binding below, not the environment,
+       * is what makes counted evidence admissible: it must be this operation's own count. */
+      (invocation.inputCount.environment !== input.environment ||
         invocation.inputCount.credentialAccount !== invocation.credentialAccount ||
         invocation.inputCount.modelId !== input.modelId ||
         input.providerId !== 'openai' ||
@@ -712,7 +755,12 @@ export class CreditLedgerService {
         const [paused] = await tx
           .select()
           .from(billingRoutePause)
-          .where(and(eq(billingRoutePause.environment, input.environment), eq(billingRoutePause.sku, input.sku)));
+          .where(
+            and(
+              eq(billingRoutePause.environment, input.environment),
+              eq(billingRoutePause.sku, routeSkuFamily(input.sku)[0]),
+            ),
+          );
         if (paused) {
           return { status: 'denied', reason: 'policy_unavailable' };
         }
@@ -828,8 +876,14 @@ export class CreditLedgerService {
         if (account.status !== 'open') {
           return { status: 'denied', reason: 'account_closed' };
         }
+        // The shortfall the 402 carries: what this call would have authorized,
+        // against what the account can still spend.
+        const shortfall = {
+          requiredCreditAtoms: authorizedAtoms,
+          availableCreditAtoms: availableAtoms(snapshot(account)),
+        };
         if (account.debtAtoms !== 0n) {
-          return { status: 'denied', reason: 'debt' };
+          return { status: 'denied', reason: 'debt', ...shortfall };
         }
         if (input.category === 'llm' && invocation !== undefined) {
           const pending = await tx
@@ -848,7 +902,7 @@ export class CreditLedgerService {
             reasonAttemptKey: input.attemptKey,
             reasonRequestDigest: input.requestDigest,
           });
-          return { status: 'denied', reason: 'insufficient_credit' };
+          return { status: 'denied', reason: 'insufficient_credit', ...shortfall };
         }
         const operationId = randomUUID();
         const spendHoldId = randomUUID();
@@ -1008,6 +1062,13 @@ export class CreditLedgerService {
     return eligible?.remaining ?? 0;
   }
 
+  /**
+   * Records that the supplier answered, separating work in flight from work abandoned.
+   *
+   * Observability only: the caller has a provider response in hand and must not
+   * abandon it when the transition loses to recovery, so the boolean says
+   * whether the row was still live, not whether the stream may continue.
+   */
   public async markDispatchAccepted(operationId: string, generation: bigint): Promise<boolean> {
     const rows = await this.databaseService.database
       .update(creditOperation)
@@ -1236,8 +1297,11 @@ export class CreditLedgerService {
     let resolved = 0;
     for (const claim of claims) {
       try {
-        const [operation] = await this.databaseService.database
-          .select()
+        const [claimed] = await this.databaseService.database
+          .select({
+            operation: creditOperation,
+            graceExpired: sql<boolean>`transaction_timestamp() >= ${creditOperation.dueAt} + make_interval(mins => ${recoveryGraceMinutes})`,
+          })
           .from(creditOperation)
           .where(
             and(
@@ -1246,9 +1310,10 @@ export class CreditLedgerService {
               eq(creditOperation.customerState, 'pending'),
             ),
           );
-        if (!operation) {
+        if (!claimed) {
           continue;
         }
+        const { operation } = claimed;
         const [observation] = await this.databaseService.database
           .select()
           .from(billingInvocationEvidence)
@@ -1259,6 +1324,12 @@ export class CreditLedgerService {
             desc(billingInvocationEvidence.id),
           )
           .limit(1);
+        if (!observation && operation.dispatchIntentAt !== null && !claimed.graceExpired) {
+          // A dispatched turn with no retained evidence keeps its holds until the
+          // grace expires, so a stream that outlived `due_at` can still settle.
+          await this.deferRecovery(operation.id, claim.generation);
+          continue;
+        }
         let evidence: TerminalEvidence;
         if (operation.dispatchIntentAt === null) {
           evidence = { kind: 'provider_rejected', executionStatus: 'rejected' };
@@ -1292,6 +1363,12 @@ export class CreditLedgerService {
           evidence = {
             kind: 'absorbed_unknown',
             executionStatus: operation.cancellationRequestedAt === null ? 'unknown' : 'cancelled',
+            // Distinguishes an expired deadline from a client abort after the fact.
+            normalizationEvidence: {
+              version: 'recovery-terminal-v1',
+              terminalReason: operation.cancellationRequestedAt === null ? 'recovery_expired' : 'client_abort',
+              fields: {},
+            },
           };
         }
         await this.recordInvocationEvidence({ ...claim, evidence });
@@ -1376,16 +1453,37 @@ export class CreditLedgerService {
             });
           }
         }
+        // Time to live: the turn reported nothing at all, so it writes off revenue and
+        // no supplier cost can ever be attributed. The spend hold is finalized in the
+        // terminalizer's own transaction and an operator owns the row. An absorbed turn
+        // that did retain evidence keeps its spend hold for supplier reconciliation.
+        const expired = !observation && operation.dispatchIntentAt !== null;
+        // The live path may have terminalized this operation since the claim was read; opening a
+        // case for a turn that settled normally would leave an operator chasing nothing.
+        const [stillPending] = expired
+          ? await this.databaseService.database
+              .select({ id: creditOperation.id })
+              .from(creditOperation)
+              .where(and(eq(creditOperation.id, operation.id), eq(creditOperation.customerState, 'pending')))
+          : [];
+        if (stillPending) {
+          await this.openRecoveryCase(operation, {
+            reason: 'time_to_live',
+            detail: `Expired ${recoveryGraceMinutes} minutes after due_at with no retained evidence`,
+          });
+        }
         await this.terminalizeOperation({
           ...claim,
           expectedGeneration: claim.generation,
           evidence,
           resolvedAt: new Date(),
+          expireSpendHold: expired,
         });
         resolved += 1;
-      } catch {
-        // The durable lease expires for another bounded claim; never retry provider execution.
+      } catch (error) {
+        // Never retry provider execution: classify, then either back off or absorb this claim.
         failedOperationIds.push(claim.operationId);
+        await this.resolveRecoveryFailure(claim, error);
       }
     }
     return {
@@ -1450,7 +1548,8 @@ export class CreditLedgerService {
           throw new Error('Invocation evidence must be durably recorded before resolution');
         }
       }
-      const priced = this.charge(operation, input.evidence);
+      const settlementTariff = await this.settlementTariff(tx, operation, input.evidence);
+      const priced = this.charge(operation, input.evidence, settlementTariff);
       if (new Set(meterItems.map(({ dimension, tier }) => `${dimension}:${tier ?? ''}`)).size !== meterItems.length) {
         throw new Error('Terminal meter quantities contain duplicate dimensions');
       }
@@ -1476,7 +1575,14 @@ export class CreditLedgerService {
             ? 'absorbed'
             : 'settled';
       if (customerState === 'absorbed') {
-        await this.absorbRiskHold(tx, operation);
+        await this.absorbHold(tx, operation.riskBudgetHoldId, 'absorbed');
+      }
+      /* No supplier evidence will arrive: the reserved spend is charged to the budget rather than
+       * left held, and later evidence still corrects it through finalizeSupplier. A ceiling cut is
+       * its own such proof — the stream was severed, so nothing further can ever price it — which is
+       * why it expires the hold on the settled side too rather than reserving it forever (R7/P6). */
+      if (input.expireSpendHold === true || input.evidence.kind === 'authorized_exhausted') {
+        await this.absorbHold(tx, operation.spendBudgetHoldId, 'unresolved');
       }
       await tx
         .update(creditAccount)
@@ -1524,6 +1630,8 @@ export class CreditLedgerService {
           meteringStatus:
             input.evidence.kind === 'final_usage' ? 'complete' : meterItems.length > 0 ? 'partial' : 'unavailable',
           reasoningTokens: input.evidence.reasoningTokens,
+          // Retains `terminalReason`: `execution_status` alone cannot separate a
+          // client abort from an expired deadline once the turn is over.
           normalizationEvidence: history.normalizationEvidence,
           supplierState:
             priced.overrun ||
@@ -1536,7 +1644,9 @@ export class CreditLedgerService {
           meterItems:
             meterItems.length > 0
               ? meterItems.map((item) => {
-                  const rate = operation.pinnedTariff.find(
+                  // The rate the item was actually charged at, which is the pin unless the observed
+                  // input settled the operation back at its base tier.
+                  const rate = settlementTariff.find(
                     ({ dimension, tier }) => dimension === item.dimension && tier === item.tier,
                   );
                   if (!rate) {
@@ -1587,7 +1697,7 @@ export class CreditLedgerService {
           .insert(billingRoutePause)
           .values({
             environment: operation.environment,
-            sku: operation.sku,
+            sku: routeSkuFamily(operation.sku)[0],
             operationId: operation.id,
             reason: 'retail_overrun',
           })
@@ -1611,11 +1721,27 @@ export class CreditLedgerService {
           .insert(billingRoutePause)
           .values({
             environment: operation.environment,
-            sku: operation.sku,
+            sku: routeSkuFamily(operation.sku)[0],
             operationId: operation.id,
             reason: 'input_bound_exceeded',
           })
           .onConflictDoNothing();
+      }
+      if (input.evidence.kind === 'authorized_exhausted') {
+        /* The byte ceiling is sized from an unmeasured bytes-per-output-token constant, and its
+         * failure mode is a truncated answer. The operator gets the two numbers that measure the
+         * constant, on a case kind that blocks neither cash nor the route. */
+        const authorizedOutput =
+          operation.maximumQuantities.find(({ dimension }) => dimension === 'output')?.quantity ?? 'unknown';
+        const responseBytes = history.normalizationEvidence?.fields['responseBytes'] ?? 'unknown';
+        await this.openRecoveryCase(
+          operation,
+          {
+            reason: 'authorized_exhausted',
+            detail: `Response reached its authorized byte ceiling after ${responseBytes} bytes with ${authorizedOutput} authorized output tokens`,
+          },
+          tx,
+        );
       }
       return {
         operationId: operation.id,
@@ -1703,7 +1829,7 @@ export class CreditLedgerService {
             .insert(billingRoutePause)
             .values({
               environment: context.operation.environment,
-              sku: context.operation.sku,
+              sku: routeSkuFamily(context.operation.sku)[0],
               operationId: context.operation.id,
               reason: 'supplier_bound_exceeded',
             })
@@ -1807,7 +1933,7 @@ export class CreditLedgerService {
           .insert(billingRoutePause)
           .values({
             environment: operation.environment,
-            sku: operation.sku,
+            sku: routeSkuFamily(operation.sku)[0],
             operationId: operation.id,
             reason: 'supplier_bound_exceeded',
           })
@@ -1984,6 +2110,13 @@ export class CreditLedgerService {
         cashCase.projectionDigest !== input.projectionDigest)
     ) {
       throw new Error('Cash projection does not match its canonical source evidence');
+    }
+    if (
+      cashCase?.projectionEvidence !== null &&
+      cashCase?.projectionEvidence !== undefined &&
+      !cashProjectionCoversRetained(cashCase.projectionEvidence, projection)
+    ) {
+      throw new Error('Cash projection omits retained source identities');
     }
     const principal = BigInt(paid.principalMinor);
     const tax = BigInt(paid.taxMinor);
@@ -2399,6 +2532,174 @@ export class CreditLedgerService {
     });
   }
 
+  /**
+   * Decides what a failed recovery claim does next, and never throws.
+   *
+   * Retained evidence is immutable, so the failures of Finding 6 recur on every
+   * attempt: they absorb immediately. Anything else retries on an exponential
+   * lease from one minute and absorbs once the attempt budget is spent, so no
+   * operation can hold credit forever behind a silent loop.
+   */
+  private async resolveRecoveryFailure(claim: OperationClaim, error: unknown): Promise<void> {
+    const message = error instanceof Error ? error.message : String(error);
+    const unresolvable = unresolvableRecoveryFailures.has(message);
+    // The claim bumped `generation`, which counts every attempt this operation has had.
+    const attempt = Number(claim.generation - 1n);
+    try {
+      if (!unresolvable && attempt < maximumRecoveryAttempts) {
+        await this.databaseService.database
+          .update(creditOperation)
+          .set({
+            leaseUntil: sql`transaction_timestamp() + make_interval(mins => ${2 ** Math.max(0, attempt - 1)})`,
+          })
+          .where(
+            and(
+              eq(creditOperation.id, claim.operationId),
+              eq(creditOperation.generation, claim.generation),
+              eq(creditOperation.customerState, 'pending'),
+            ),
+          );
+        return;
+      }
+      await this.absorbUnresolvableOperation(claim, {
+        reason: unresolvable ? 'unresolvable_failure' : 'retries_exhausted',
+        detail: `${message} (attempt ${attempt})`,
+      });
+    } catch {
+      // The one-minute claim lease expires and the next pass re-classifies the same failure.
+    }
+  }
+
+  /**
+   * Fences an operation recovery cannot price into a terminal absorbed state.
+   *
+   * The retained evidence stays exactly as recorded; a content-free terminal
+   * marker is what the transactional terminalizer prices at zero, so the
+   * customer keeps their credit, the risk hold is absorbed and the unproved
+   * supplier spend is finalized under an operator case.
+   */
+  private async absorbUnresolvableOperation(
+    claim: OperationClaim,
+    cause: { reason: RecoveryCaseReason; detail: string },
+  ): Promise<void> {
+    const [operation] = await this.databaseService.database
+      .select()
+      .from(creditOperation)
+      .where(
+        and(
+          eq(creditOperation.id, claim.operationId),
+          eq(creditOperation.generation, claim.generation),
+          eq(creditOperation.customerState, 'pending'),
+        ),
+      );
+    if (!operation) {
+      return;
+    }
+    await this.openRecoveryCase(operation, cause);
+    const evidence: TerminalEvidence = {
+      kind: 'absorbed_unknown',
+      executionStatus: operation.cancellationRequestedAt === null ? 'failed' : 'cancelled',
+      normalizationEvidence: { version: 'recovery-terminal-v1', terminalReason: 'recovery_unresolvable', fields: {} },
+    };
+    await this.recordInvocationEvidence({ ...claim, evidence });
+    await this.terminalizeOperation({
+      ...claim,
+      expectedGeneration: claim.generation,
+      evidence,
+      resolvedAt: new Date(),
+      expireSpendHold: true,
+    });
+  }
+
+  /** Holds the claim for a bounded grace so late supplier evidence can still settle it. */
+  private async deferRecovery(operationId: string, generation: bigint): Promise<void> {
+    await this.databaseService.database
+      .update(creditOperation)
+      .set({ leaseUntil: sql`${creditOperation.dueAt} + make_interval(mins => ${recoveryGraceMinutes})` })
+      .where(
+        and(
+          eq(creditOperation.id, operationId),
+          eq(creditOperation.generation, generation),
+          eq(creditOperation.customerState, 'pending'),
+        ),
+      );
+  }
+
+  /**
+   * Opens the operator's case for one recovered operation, idempotently.
+   *
+   * The kind is deliberately outside the cash- and supplier-blocking sets: an
+   * absorbed turn is Tau's loss to reconcile, not a reason to restrict the
+   * account or pause the route for every other caller.
+   *
+   * @param operation - The operation the case is about; its id is the dedupe key.
+   * @param cause - Why the case exists, in the operator's own words.
+   * @param transaction - Commits the case with the settlement that caused it; a
+   *   recovery pass opens its case before the terminalizer instead.
+   */
+  private async openRecoveryCase(
+    operation: typeof creditOperation.$inferSelect,
+    cause: { reason: RecoveryCaseReason; detail: string },
+    transaction?: Tx,
+  ): Promise<void> {
+    const database = transaction ?? this.databaseService.database;
+    const [customer] = await database
+      .select({ stripeAccountId: billingStripeCustomer.stripeAccountId, livemode: billingStripeCustomer.livemode })
+      .from(billingStripeCustomer)
+      .where(
+        and(
+          eq(billingStripeCustomer.accountId, operation.accountId),
+          eq(billingStripeCustomer.environment, operation.environment),
+        ),
+      )
+      .limit(1);
+    const evidence = {
+      version: 'llm-recovery-v1',
+      reason: cause.reason,
+      detail: cause.detail,
+      attempts: (operation.generation - 1n).toString(),
+      dispatchIntentAt: operation.dispatchIntentAt?.toISOString() ?? null,
+      dueAt: operation.dueAt.toISOString(),
+      authorizedAtoms: operation.authorizedAtoms.toString(),
+      modelId: operation.modelId,
+      sku: operation.sku,
+    };
+    await database
+      .insert(billingFinancialCase)
+      .values({
+        id: randomUUID(),
+        environment: operation.environment,
+        stripeAccountId: customer?.stripeAccountId ?? '',
+        livemode: customer?.livemode ?? false,
+        kind: recoveryFinancialCaseKind,
+        dedupeKey: operation.id,
+        accountId: operation.accountId,
+        sourceType: 'credit_operation',
+        sourceId: operation.id,
+        evidence,
+        owner: 'billing-operations',
+        nextStep: 'price_the_retained_evidence_or_write_off_the_supplier_cost',
+        firstEffectiveAt: operation.dueAt,
+      })
+      .onConflictDoUpdate({
+        target: [
+          billingFinancialCase.environment,
+          billingFinancialCase.stripeAccountId,
+          billingFinancialCase.livemode,
+          billingFinancialCase.kind,
+          billingFinancialCase.dedupeKey,
+        ],
+        // `firstEffectiveAt` stays where the case first landed; the protected trigger refuses to postpone it.
+        set: {
+          state: 'open',
+          lastSeenAt: sql`clock_timestamp()`,
+          resolvedAt: null,
+          resolutionEvidence: null,
+          evidence,
+        },
+      });
+  }
+
   private async dueLlmRecoveryState(input: {
     environment: BillingEnvironment;
     accountId?: string;
@@ -2658,9 +2959,70 @@ export class CreditLedgerService {
     return { receiptId, grantedAtoms: atoms, revision };
   }
 
+  /**
+   * The tariff a settlement prices at.
+   *
+   * A long-context pin is taken on an upper bound, so it can be premium for a turn
+   * whose real input never reaches the threshold. The hold stays where the proof
+   * put it; the charge follows the tier the observed input actually reached, priced
+   * from the base sku of the operation's own policy, which is never dearer than the
+   * pin and so is still covered by the authorization.
+   *
+   * @param tx - The terminalizing transaction.
+   * @param operation - The locked operation row.
+   * @param evidence - Its terminal evidence.
+   * @returns The pinned tariff, or the base sku's retail rates when the pin was never reached.
+   */
+  private async settlementTariff(
+    tx: Tx,
+    operation: typeof creditOperation.$inferSelect,
+    evidence: TerminalEvidence,
+  ): Promise<typeof operation.pinnedTariff> {
+    const minimum = operation.invocation?.supplierValuation?.longContextMinimumInputTokens;
+    const [baseSku, longContextSku] = routeSkuFamily(operation.sku);
+    const meterItems = evidence.kind === 'provider_rejected' ? [] : (evidence.meterItems ?? []);
+    if (minimum === undefined || minimum === null || operation.sku !== longContextSku || meterItems.length === 0) {
+      return operation.pinnedTariff;
+    }
+    const observedInput = meterItems
+      .filter((item) => item.dimension !== 'output')
+      .reduce((total, item) => total + item.quantity, 0n);
+    if (observedInput >= BigInt(minimum)) {
+      return operation.pinnedTariff;
+    }
+    const [row] = await tx
+      .select({ canonicalContent: billingPolicy.canonicalContent })
+      .from(billingPolicy)
+      .where(eq(billingPolicy.id, operation.policyId));
+    const base =
+      row === undefined
+        ? undefined
+        : resolvePolicyRoute(validateCommercialPolicy(row.canonicalContent).policy, baseSku);
+    if (base === undefined) {
+      return operation.pinnedTariff;
+    }
+    const downgraded = operation.pinnedTariff.map((pinned) => {
+      const rate = base.rates.find(({ dimension, tier }) => dimension === pinned.dimension && tier === pinned.tier);
+      return rate === undefined ||
+        /* The base schedule must cover every pinned dimension and may never exceed the pin, or the
+         * settlement could charge above what the authorization proved; then the pin stands. */
+        BigInt(rate.numeratorCreditAtoms) * BigInt(pinned.denominatorUnits) >
+          BigInt(pinned.numeratorCreditAtoms) * BigInt(rate.publicDenominatorUnits)
+        ? undefined
+        : {
+            ...pinned,
+            rateId: rate.rateId,
+            numeratorCreditAtoms: rate.numeratorCreditAtoms,
+            denominatorUnits: rate.publicDenominatorUnits,
+          };
+    });
+    return downgraded.every((rate) => rate !== undefined) ? downgraded : operation.pinnedTariff;
+  }
+
   private charge(
     operation: typeof creditOperation.$inferSelect,
     evidence: TerminalEvidence,
+    tariff: typeof operation.pinnedTariff,
   ): {
     chargedAtoms: bigint;
     // oxlint-disable-next-line typescript/no-restricted-types -- a non-usage terminal has no retail observation
@@ -2669,21 +3031,28 @@ export class CreditLedgerService {
     overrun: boolean;
     inputOverflow?: { observed: bigint; maximum: bigint };
   } {
-    if (evidence.kind !== 'final_usage') {
+    if (evidence.kind !== 'final_usage' && evidence.kind !== 'authorized_exhausted') {
       return { chargedAtoms: 0n, actualRetailAtoms: null, reportedRetailAtoms: 0n, overrun: false };
     }
-    const quantities = new Map(
-      evidence.meterItems.map((item) => [`${item.dimension}:${item.tier ?? ''}`, item.quantity]),
-    );
-    if (
-      quantities.size !== evidence.meterItems.length ||
-      quantities.size !== operation.pinnedTariff.length ||
-      [...quantities.values()].some((quantity) => quantity < 0n)
-    ) {
+    const meterItems = evidence.meterItems ?? [];
+    const quantities = new Map(meterItems.map((item) => [`${item.dimension}:${item.tier ?? ''}`, item.quantity]));
+    const sized =
+      quantities.size === meterItems.length &&
+      quantities.size === tariff.length &&
+      [...quantities.values()].every((quantity) => quantity >= 0n);
+    const priceable = sized && tariff.every((rate) => quantities.has(`${rate.dimension}:${rate.tier ?? ''}`));
+    if (evidence.kind === 'authorized_exhausted' && !priceable) {
+      /* The cut stops the supplier spend; it proves nothing about what was delivered. Charging the
+       * authorization here would bill the maximum for a truncated answer on the wires that report
+       * usage only in their final event, so the customer pays what the stream proved: nothing.
+       * The operator's case (opened by the terminalizer) is where a mis-sized ceiling surfaces. */
+      return { chargedAtoms: 0n, actualRetailAtoms: null, reportedRetailAtoms: 0n, overrun: false };
+    }
+    if (!sized) {
       throw new Error('Terminal meter quantities do not match the pinned tariff');
     }
     const computedRetailAtoms = roundHalfUpUnbounded(
-      operation.pinnedTariff.map((rate) => {
+      tariff.map((rate) => {
         const quantity = quantities.get(`${rate.dimension}:${rate.tier ?? ''}`);
         if (quantity === undefined) {
           throw new Error('Terminal meter dimension is not pinned');
@@ -2695,15 +3064,27 @@ export class CreditLedgerService {
       }),
     );
     const inputMaximum = operation.invocation?.jointInputMaximum;
-    const observedInput = evidence.meterItems
+    const observedInput = meterItems
       .filter((item) => item.dimension !== 'output')
       .reduce((total, item) => total + item.quantity, 0n);
     const inputOverflow =
       inputMaximum !== undefined && observedInput > BigInt(inputMaximum.quantity)
         ? { observed: observedInput, maximum: BigInt(inputMaximum.quantity) }
         : undefined;
+    const chargedAtoms =
+      computedRetailAtoms < operation.authorizedAtoms ? computedRetailAtoms : operation.authorizedAtoms;
+    if (evidence.kind === 'authorized_exhausted') {
+      // Usage the provider reported before the cut only ever lowers the charge; the cut itself is
+      // the authorization being spent, so it raises no exception and pauses no route.
+      return {
+        chargedAtoms,
+        actualRetailAtoms: computedRetailAtoms.toString().length <= 78 ? computedRetailAtoms : null,
+        reportedRetailAtoms: chargedAtoms,
+        overrun: false,
+      };
+    }
     return {
-      chargedAtoms: computedRetailAtoms < operation.authorizedAtoms ? computedRetailAtoms : operation.authorizedAtoms,
+      chargedAtoms,
       actualRetailAtoms: computedRetailAtoms.toString().length <= 78 ? computedRetailAtoms : null,
       reportedRetailAtoms: computedRetailAtoms,
       overrun: computedRetailAtoms > operation.authorizedAtoms || inputOverflow !== undefined,
@@ -2749,12 +3130,9 @@ export class CreditLedgerService {
     return { assets: next, debtAtoms: debt };
   }
 
-  private async absorbRiskHold(tx: Tx, operation: typeof creditOperation.$inferSelect): Promise<void> {
-    const [hold] = await tx
-      .select()
-      .from(billingBudgetHold)
-      .where(eq(billingBudgetHold.id, operation.riskBudgetHoldId))
-      .for('update');
+  /** Charges what a hold still reserves to its budget; capacity is never handed back on absorption. */
+  private async absorbHold(tx: Tx, holdId: string, finalityState: 'absorbed' | 'unresolved'): Promise<void> {
+    const [hold] = await tx.select().from(billingBudgetHold).where(eq(billingBudgetHold.id, holdId)).for('update');
     if (!hold || hold.remainingHeld === 0n) {
       return;
     }
@@ -2781,7 +3159,7 @@ export class CreditLedgerService {
       .set({
         remainingHeld: 0n,
         consumed: hold.consumed + hold.remainingHeld,
-        finalityState: 'absorbed',
+        finalityState,
       })
       .where(eq(billingBudgetHold.id, hold.id));
   }
@@ -2913,4 +3291,34 @@ export class CreditLedgerService {
     };
   }
 }
+
+/** Minutes after `due_at` that a dispatched turn keeps its holds while late evidence may arrive (Q4). */
+export const recoveryGraceMinutes = 5;
+
+/** Transient recovery attempts before the operation is absorbed, counted by `generation` (Q5). */
+export const maximumRecoveryAttempts = 5;
+
+/** The operator case one absorbed recovery opens; deliberately neither cash- nor supplier-blocking. */
+export const recoveryFinancialCaseKind = 'llm_recovery_absorbed';
+
+type RecoveryCaseReason = 'time_to_live' | 'unresolvable_failure' | 'retries_exhausted' | 'authorized_exhausted';
+
+/**
+ * Recovery failures that recur on every attempt.
+ *
+ * Retained evidence is immutable and supplier evidence is append-only, so each
+ * of these is a property of the stored row rather than of the attempt: retrying
+ * holds the customer's credit forever (Finding 6).
+ */
+const unresolvableRecoveryFailures = new Set([
+  'Terminal meter quantities do not match the pinned tariff',
+  'Terminal meter dimension is not pinned',
+  'Terminal meter quantities contain duplicate dimensions',
+  'Reasoning tokens must be a reported subset of output',
+  'Too many terminal meter quantities',
+  'Conflicting recovered supplier evidence',
+  'Conflicting no-dispatch proof',
+  'Conflicting supplier evidence',
+  'Stored complete usage lacks required evidence',
+]);
 /* eslint-enable no-await-in-loop, max-lines, complexity -- financial mutations execute sequentially in one lock order */

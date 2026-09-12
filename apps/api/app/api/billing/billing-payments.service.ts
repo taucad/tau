@@ -18,7 +18,9 @@ import { qualifiedMeterContracts } from '#api/billing/billing-policy.js';
 import type { FinancialEnvironment } from '#api/billing/billing-policy.js';
 import type { BillingPolicyService } from '#api/billing/billing-policy.service.js';
 import { BillingTaxService } from '#api/billing/billing-tax.service.js';
+import type { QualifiedCashTaxCorrection } from '#api/billing/billing-tax.service.js';
 import {
+  cashOccurredAt,
   checkoutExpiryEvidenceSchema,
   noChargeEvidenceSchema,
   paidPaymentEvidenceSchema,
@@ -141,6 +143,7 @@ export type CashQualificationResult =
       readonly taxLossMinor: bigint;
       readonly grossLossMinor: bigint;
       readonly evidence: Record<string, unknown>;
+      readonly taxCorrectionEvidence?: QualifiedCashTaxCorrection['taxCorrectionEvidence'];
     }
   | { readonly status: 'pending' | 'attention'; readonly reason: string };
 
@@ -250,40 +253,27 @@ export class BillingPaymentsService {
     if (input.taxLocationRevision !== undefined && input.taxLocationRevision !== location.revision) {
       throw new ConflictException({ code: 'tax_location_changed' });
     }
-    const taxLegId = randomUUID();
     const taxReference = `reload:${input.requestId}`;
-    const taxRequest: Record<string, unknown> = {
-      kind: 'tax_calculation',
-      customerId: binding.stripeCustomerId,
-      productId: this.config.collection.topupProductId,
-      principalMinor: Number(controls.principalMinor),
-      reference: taxReference,
-      locationRevision: location.revision,
-    };
-    await this.databaseService.database.insert(billingProviderLeg).values({
-      id: taxLegId,
+    // The durable leg owns the single Tax Calculation POST; the consent record is written only afterwards.
+    const calculationId = await this.claimReloadTaxCalculation({
       accountId: owner.accountId,
-      environment: this.config.environment,
       customerBindingId: binding.id,
-      kind: 'tax_calculation',
-      requestId: input.requestId,
-      requestHash: digest(taxRequest),
-      request: taxRequest,
-      idempotencyKey: `tau:${taxLegId}`,
-      state: 'dispatched',
-      dispatchStartedAt: new Date(),
-      nextAttemptAt: new Date(),
-    });
-    const calculation = await createStripeReloadTaxCalculationOnce(this.stripe, {
-      idempotencyKey: `tau:${taxLegId}`,
       customerId: binding.stripeCustomerId,
-      productId: this.config.collection.topupProductId,
+      reloadConsentId: null,
+      requestId: `reload-consent-tax:${digest({
+        accountId: owner.accountId,
+        customerBindingId: binding.id,
+        requestId: input.requestId,
+        principalMinor: controls.principalMinor,
+        locationRevision: location.revision,
+      })}`,
       reference: taxReference,
       principalMinor: Number(controls.principalMinor),
+      productId: this.config.collection.topupProductId,
+      locationRevision: location.revision,
     });
-    if (calculation.id === null) throw new ServiceUnavailableException('stripe_tax_identity_missing');
     const taxSource = await fetchStripeTaxCalculationEvidence(this.sourceStripe, {
-      calculationId: calculation.id,
+      calculationId,
       maximumLinePages: 10,
     });
     const qualified = qualifyReloadTaxCalculation({
@@ -369,10 +359,6 @@ export class BillingPaymentsService {
         minimumCadenceSeconds: controls.minimumCadenceSeconds,
         terminalFailureLimit: controls.terminalFailureLimit,
       });
-      await tx
-        .update(billingProviderLeg)
-        .set({ providerObjectId: qualified.calculationId, state: 'known' })
-        .where(and(eq(billingProviderLeg.id, taxLegId), eq(billingProviderLeg.state, 'dispatched')));
     });
     return this.getReloadConsentAction(owner, consentId);
   }
@@ -641,12 +627,35 @@ export class BillingPaymentsService {
       owned.offerSnapshot === null
     )
       throw new ConflictException({ code: 'renewal_source_missing' });
+    await this.assertOpenCollectionScope(input.accountId);
+    const current = paymentOfferSnapshotSchema.parse(owned.offerSnapshot);
+    const customer = await this.ownedCustomer(input.accountId, owned.customerBindingId);
     const remote = await this.sourceStripe.subscriptions.retrieve(owned.stripeSubscriptionId);
     const item = remote.items.data.length === 1 ? remote.items.data[0] : undefined;
     if (item === undefined || item.current_period_end * 1000 !== input.effectivePeriodStart.getTime()) {
       throw new ConflictException({ code: 'renewal_boundary_mismatch' });
     }
-    const current = paymentOfferSnapshotSchema.parse(owned.offerSnapshot);
+    // The disclosed boundary alone is not lineage: bind the owned Customer, scope, item and current price.
+    const [priorItem] = await this.databaseService.database
+      .select({ id: billingSubscriptionOffer.stripeSubscriptionItemId })
+      .from(billingSubscriptionOffer)
+      .where(
+        and(
+          eq(billingSubscriptionOffer.subscriptionId, input.subscriptionId),
+          eq(billingSubscriptionOffer.accountId, input.accountId),
+        ),
+      )
+      .orderBy(desc(billingSubscriptionOffer.effectivePeriodStart))
+      .limit(1);
+    if (
+      remote.id !== owned.stripeSubscriptionId ||
+      remote.livemode !== this.config.livemode ||
+      stripeObjectId(remote.customer) !== customer.stripeCustomerId ||
+      stripeObjectId(item.price) !== current.stripePriceId ||
+      (priorItem !== undefined && priorItem.id !== item.id)
+    ) {
+      throw new ConflictException({ code: 'renewal_source_tuple_mismatch' });
+    }
     const snapshot = paymentOfferSnapshotSchema.parse({
       ...current,
       policyId: effective.policyId,
@@ -661,21 +670,35 @@ export class BillingPaymentsService {
       stripeProductId: null,
     });
     const id = randomUUID();
-    const evidence = { requestId: input.requestId, disclosureEvidence: input.disclosureEvidence };
-    await this.databaseService.database.insert(billingSubscriptionOffer).values({
-      id,
-      accountId: input.accountId,
-      environment: input.environment,
-      subscriptionId: input.subscriptionId,
-      effectivePeriodStart: input.effectivePeriodStart,
-      disclosedAt: input.disclosedAt,
-      policyId: input.policyId,
-      offerSnapshot: snapshot,
-      termsDigest: digest({ snapshot, ...evidence }),
-      sourceEvidence: evidence,
-      stripePriceId: snapshot.stripePriceId ?? '',
-      stripeProductId: snapshot.stripeProductId ?? '',
-      stripeSubscriptionItemId: item.id,
+    const evidence = {
+      requestId: input.requestId,
+      disclosureEvidence: input.disclosureEvidence,
+      source: {
+        stripeAccountId: this.config.stripeAccountId,
+        livemode: remote.livemode,
+        customerId: customer.stripeCustomerId,
+        subscriptionId: remote.id,
+        subscriptionItemId: item.id,
+        currentPriceId: current.stripePriceId,
+      },
+    };
+    await this.databaseService.database.transaction(async (tx) => {
+      await this.assertOpenCollectionScope(input.accountId, tx);
+      await tx.insert(billingSubscriptionOffer).values({
+        id,
+        accountId: input.accountId,
+        environment: input.environment,
+        subscriptionId: input.subscriptionId,
+        effectivePeriodStart: input.effectivePeriodStart,
+        disclosedAt: input.disclosedAt,
+        policyId: input.policyId,
+        offerSnapshot: snapshot,
+        termsDigest: digest({ snapshot, ...evidence }),
+        sourceEvidence: evidence,
+        stripePriceId: snapshot.stripePriceId ?? '',
+        stripeProductId: snapshot.stripeProductId ?? '',
+        stripeSubscriptionItemId: item.id,
+      });
     });
     return {
       effectivePeriodStart: input.effectivePeriodStart.toISOString(),
@@ -1955,6 +1978,9 @@ export class BillingPaymentsService {
           and(
             eq(paymentLeg.environment, this.config.environment),
             sql`${paymentLeg.nextAttemptAt} <= clock_timestamp()`,
+            // Tax Calculation legs are owned by `claimReloadTaxCalculation`: the generic recovery has no
+            // source query for them and would re-claim a stuck one forever as `provider_source_unknown`.
+            ne(paymentLeg.kind, 'tax_calculation'),
             or(
               and(
                 eq(paymentLeg.state, 'prepared'),
@@ -2038,8 +2064,13 @@ export class BillingPaymentsService {
           .returning();
       }
       if (leg === undefined) throw new Error('Renewal provider leg missing');
+      // A reused leg may only authorize the exact frozen request it recorded.
+      if (leg.requestHash !== digest(request) || requestDigest(leg.request) !== requestDigest(request))
+        throw new ConflictException({ code: 'renewal_leg_request_conflict' });
       if (leg.providerObjectId !== null) return { ...leg, mayDispatch: false };
       const mayDispatch = leg.state === 'prepared';
+      // Closure or a paused cash scope blocks a new schedule dispatch; recovering an unknown outcome stays allowed.
+      if (mayDispatch) await this.assertOpenCollectionScope(offer.accountId, tx);
       const [claimed] = await tx
         .update(billingProviderLeg)
         .set({
@@ -2085,6 +2116,93 @@ export class BillingPaymentsService {
       )
       .returning({ id: billingProviderLeg.id });
     if (finished === undefined) throw new ConflictException({ code: 'stale_renewal_leg' });
+  }
+
+  /**
+   * Wins one immutable tax-calculation leg per request identity before any Stripe I/O and returns its
+   * calculation identity. A dispatched leg whose identity was never persisted stays unknown and never POSTs again.
+   */
+  private async claimReloadTaxCalculation(input: {
+    readonly accountId: string;
+    readonly customerBindingId: string;
+    readonly customerId: string;
+    // oxlint-disable-next-line typescript/no-restricted-types -- the consent leg has no consent row yet.
+    readonly reloadConsentId: string | null;
+    readonly requestId: string;
+    readonly reference: string;
+    readonly principalMinor: number;
+    readonly productId: string;
+    readonly locationRevision: string;
+  }): Promise<string> {
+    const request: Record<string, unknown> = {
+      kind: 'tax_calculation',
+      customerId: input.customerId,
+      productId: input.productId,
+      principalMinor: input.principalMinor,
+      reference: input.reference,
+      locationRevision: input.locationRevision,
+    };
+    const owned = and(
+      eq(billingProviderLeg.accountId, input.accountId),
+      eq(billingProviderLeg.kind, 'tax_calculation'),
+      eq(billingProviderLeg.requestId, input.requestId),
+    );
+    const intent = await this.databaseService.database.transaction(async (tx) => {
+      await this.lockPaymentAccount(tx, input.accountId);
+      const existing = await tx.select().from(billingProviderLeg).where(owned).limit(1).for('update');
+      let leg = existing[0];
+      if (leg === undefined) {
+        const legId = randomUUID();
+        [leg] = await tx
+          .insert(billingProviderLeg)
+          .values({
+            id: legId,
+            accountId: input.accountId,
+            environment: this.config.environment,
+            customerBindingId: input.customerBindingId,
+            reloadConsentId: input.reloadConsentId,
+            kind: 'tax_calculation',
+            requestId: input.requestId,
+            requestHash: digest(request),
+            request,
+            idempotencyKey: `tau:${legId}`,
+            nextAttemptAt: new Date(),
+          })
+          .onConflictDoNothing()
+          .returning();
+        if (leg === undefined) [leg] = await tx.select().from(billingProviderLeg).where(owned).limit(1).for('update');
+      }
+      if (leg === undefined || leg.requestHash !== digest(request))
+        throw new ConflictException({ code: 'reload_tax_request_conflict' });
+      if (leg.providerObjectId !== null) return { leg, dispatch: false };
+      if (leg.state !== 'prepared') throw new ConflictException({ code: 'reload_tax_outcome_unknown' });
+      const [claimed] = await tx
+        .update(billingProviderLeg)
+        .set({ state: 'dispatched', dispatchStartedAt: new Date() })
+        .where(and(eq(billingProviderLeg.id, leg.id), eq(billingProviderLeg.state, 'prepared')))
+        .returning();
+      if (claimed === undefined) throw new ConflictException({ code: 'reload_tax_outcome_unknown' });
+      return { leg: claimed, dispatch: true };
+    });
+    if (!intent.dispatch) {
+      if (intent.leg.providerObjectId === null) throw new ConflictException({ code: 'reload_tax_outcome_unknown' });
+      return intent.leg.providerObjectId;
+    }
+    const created = await createStripeReloadTaxCalculationOnce(this.stripe, {
+      idempotencyKey: intent.leg.idempotencyKey,
+      customerId: input.customerId,
+      productId: input.productId,
+      reference: input.reference,
+      principalMinor: input.principalMinor,
+    });
+    if (created.id === null) throw new ServiceUnavailableException('stripe_tax_identity_missing');
+    const updated = await this.databaseService.database
+      .update(billingProviderLeg)
+      .set({ providerObjectId: created.id, state: 'known', errorCode: null })
+      .where(and(eq(billingProviderLeg.id, intent.leg.id), eq(billingProviderLeg.state, 'dispatched')))
+      .returning({ id: billingProviderLeg.id });
+    if (updated[0] === undefined) throw new ConflictException({ code: 'reload_tax_result_stale' });
+    return created.id;
   }
 
   private async createAutomaticPurchase(accountId: string, generation: bigint): Promise<boolean> {
@@ -2211,95 +2329,18 @@ export class BillingPaymentsService {
       reasonRequestDigest: eligibleWork.reasonRequestDigest,
       observedAccountRevision: eligibleWork.observedAccountRevision.toString(),
     })}`;
-    const taxLegId = randomUUID();
     const reference = `automatic:${taxRequestId}`;
-    const request: Record<string, unknown> = {
-      kind: 'tax_calculation',
+    const calculationId = await this.claimReloadTaxCalculation({
+      accountId,
+      customerBindingId: consent.customerBindingId,
       customerId: customer.stripeCustomerId,
-      productId: this.config.collection.topupProductId,
-      principalMinor: Number(consent.principalMinor),
+      reloadConsentId: consent.id,
+      requestId: taxRequestId,
       reference,
+      principalMinor: Number(consent.principalMinor),
+      productId: this.config.collection.topupProductId,
       locationRevision: location.revision,
-    };
-    const taxIntent = await this.databaseService.database.transaction(async (tx) => {
-      await this.lockPaymentAccount(tx, accountId);
-      const existing = await tx
-        .select()
-        .from(billingProviderLeg)
-        .where(
-          and(
-            eq(billingProviderLeg.accountId, accountId),
-            eq(billingProviderLeg.kind, 'tax_calculation'),
-            eq(billingProviderLeg.requestId, taxRequestId),
-          ),
-        )
-        .limit(1)
-        .for('update');
-      let leg = existing[0];
-      if (leg === undefined) {
-        [leg] = await tx
-          .insert(billingProviderLeg)
-          .values({
-            id: taxLegId,
-            accountId,
-            environment: this.config.environment,
-            customerBindingId: consent.customerBindingId,
-            reloadConsentId: consent.id,
-            kind: 'tax_calculation',
-            requestId: taxRequestId,
-            requestHash: digest(request),
-            request,
-            idempotencyKey: `tau:${taxLegId}`,
-            nextAttemptAt: new Date(),
-          })
-          .onConflictDoNothing()
-          .returning();
-        if (leg === undefined) {
-          [leg] = await tx
-            .select()
-            .from(billingProviderLeg)
-            .where(
-              and(
-                eq(billingProviderLeg.accountId, accountId),
-                eq(billingProviderLeg.kind, 'tax_calculation'),
-                eq(billingProviderLeg.requestId, taxRequestId),
-              ),
-            )
-            .limit(1)
-            .for('update');
-        }
-      }
-      if (leg === undefined || leg.requestHash !== digest(request))
-        throw new ConflictException({ code: 'reload_tax_request_conflict' });
-      if (leg.providerObjectId !== null) return { leg, dispatch: false };
-      if (leg.state !== 'prepared') throw new ConflictException({ code: 'reload_tax_outcome_unknown' });
-      const [claimed] = await tx
-        .update(billingProviderLeg)
-        .set({ state: 'dispatched', dispatchStartedAt: new Date() })
-        .where(and(eq(billingProviderLeg.id, leg.id), eq(billingProviderLeg.state, 'prepared')))
-        .returning();
-      if (claimed === undefined) throw new ConflictException({ code: 'reload_tax_outcome_unknown' });
-      return { leg: claimed, dispatch: true };
     });
-    let calculationId = taxIntent.leg.providerObjectId;
-    if (taxIntent.dispatch) {
-      const createdTax = await createStripeReloadTaxCalculationOnce(this.stripe, {
-        idempotencyKey: taxIntent.leg.idempotencyKey,
-        customerId: customer.stripeCustomerId,
-        productId: this.config.collection.topupProductId,
-        reference,
-        principalMinor: Number(consent.principalMinor),
-      });
-      if (createdTax.id === null) throw new Error('Automatic tax calculation identity missing');
-      const updated = await this.databaseService.database
-        .update(billingProviderLeg)
-        .set({ providerObjectId: createdTax.id, state: 'known', errorCode: null })
-        .where(and(eq(billingProviderLeg.id, taxIntent.leg.id), eq(billingProviderLeg.state, 'dispatched')))
-        .returning({ id: billingProviderLeg.id });
-      if (updated[0] === undefined) throw new ConflictException({ code: 'reload_tax_result_stale' });
-      calculationId = createdTax.id;
-    }
-    if (calculationId === null) throw new ConflictException({ code: 'reload_tax_outcome_unknown' });
     const taxSource = await fetchStripeTaxCalculationEvidence(this.sourceStripe, {
       calculationId,
       maximumLinePages: 10,
@@ -2486,22 +2527,17 @@ export class BillingPaymentsService {
     consentId: string,
     purchaseId: string,
     legId: string,
-    request: unknown,
+    request: Record<string, unknown>,
     workGeneration: bigint,
   ): Promise<void> {
     const allowed = await this.databaseService.database.transaction(async (tx) => {
       await this.lockPaymentAccount(tx, accountId);
       await this.cash.assertNewCollectionScope(accountId, tx);
+      // Read the consent in any state: a revoked one is the permanent reason that must close the purchase below.
       const [consent] = await tx
         .select()
         .from(billingReloadConsent)
-        .where(
-          and(
-            eq(billingReloadConsent.id, consentId),
-            eq(billingReloadConsent.accountId, accountId),
-            eq(billingReloadConsent.state, 'enabled'),
-          ),
-        )
+        .where(and(eq(billingReloadConsent.id, consentId), eq(billingReloadConsent.accountId, accountId)))
         .for('update');
       const [account] = await tx
         .select()
@@ -2518,8 +2554,49 @@ export class BillingPaymentsService {
         .from(billingReloadWork)
         .where(and(eq(billingReloadWork.accountId, accountId), eq(billingReloadWork.generation, workGeneration)))
         .for('update');
+      // Closes a never-dispatched attempt so it stops holding the account's single automatic slot and its ceiling
+      // in the monthly cap sum. No provider evidence exists because nothing was dispatched; `dispatch_started_at
+      // IS NULL` is what `billing_provider_no_charge` accepts as the proof, and the cancellation pair satisfies
+      // `billing_provider_leg_state`. Every permanent refusal below closes through here.
+      const closeUncharged = async (errorCode: string): Promise<undefined> => {
+        const abandoned = await tx
+          .update(billingProviderLeg)
+          .set({
+            state: 'no_charge',
+            cancellationRequestedAt: sql`coalesce(${billingProviderLeg.cancellationRequestedAt}, clock_timestamp())`,
+            cancellationConfirmedAt: sql`coalesce(${billingProviderLeg.cancellationConfirmedAt}, clock_timestamp())`,
+            errorCode,
+          })
+          .where(
+            and(
+              eq(billingProviderLeg.id, legId),
+              eq(billingProviderLeg.accountId, accountId),
+              eq(billingProviderLeg.purchaseId, purchaseId),
+              eq(billingProviderLeg.state, 'prepared'),
+            ),
+          )
+          .returning({ id: billingProviderLeg.id });
+        if (abandoned[0] !== undefined)
+          await tx
+            .update(billingPurchase)
+            .set({
+              state: 'failed',
+              automaticTerminalOutcome: 'no_charge_failure',
+              automaticTerminalAt: sql`clock_timestamp()`,
+              updatedAt: new Date(),
+            })
+            .where(
+              and(
+                eq(billingPurchase.id, purchaseId),
+                eq(billingPurchase.accountId, accountId),
+                eq(billingPurchase.state, 'prepared'),
+                isNull(billingPurchase.automaticTerminalOutcome),
+              ),
+            );
+        return undefined;
+      };
       if (
-        consent === undefined ||
+        consent?.state !== 'enabled' ||
         account?.status !== 'open' ||
         account.debtAtoms !== 0n ||
         purchase?.state !== 'prepared' ||
@@ -2527,8 +2604,35 @@ export class BillingPaymentsService {
         purchase.automaticStartedAt === null ||
         consent.lastAutomaticStartedAt?.getTime() !== purchase.automaticStartedAt.getTime() ||
         work?.state !== 'done'
-      )
-        return false;
+      ) {
+        // A superseded wake can never confirm this purchase again: the work generation, the consent version and
+        // `lastAutomaticStartedAt` only move forward, and a revoked consent never returns (re-consent is a new
+        // row). The remaining fence clauses (closed account, outstanding debt) are transient and leave the
+        // purchase alone for the next recovery pass.
+        const revoked = consent?.state === 'revoked';
+        if (
+          purchase?.state === 'prepared' &&
+          (revoked ||
+            work?.state !== 'done' ||
+            (consent !== undefined &&
+              (purchase.reloadConsentVersion !== consent.version ||
+                consent.lastAutomaticStartedAt?.getTime() !== purchase.automaticStartedAt?.getTime())))
+        )
+          return closeUncharged(revoked ? 'automatic_consent_revoked' : 'automatic_wake_superseded');
+        return undefined;
+      }
+      // The purchase was prepared against one Tax Calculation and may only be charged while that calculation is
+      // live. Confirm never re-quotes: a new calculation is a provider call the wake path owns, so an expired (or
+      // unreadable) quote is permanent here and closes the purchase; a fresh wake then re-prepares it with a fresh
+      // calculation. The frozen value is compared against the same database clock as every other fence above.
+      const frozenExpiry = purchase.taxEvidence?.['expiresAt'];
+      const quotedUntil = typeof frozenExpiry === 'string' ? new Date(frozenExpiry) : undefined;
+      if (quotedUntil === undefined || Number.isNaN(quotedUntil.getTime()))
+        return closeUncharged('automatic_tax_calculation_expired');
+      const [quote] = await tx.execute<{ expired: boolean }>(
+        sql`select ${quotedUntil.toISOString()}::timestamptz <= clock_timestamp() as expired`,
+      );
+      if (quote?.expired !== false) return closeUncharged('automatic_tax_calculation_expired');
       const available =
         account.promoAtoms +
         account.planAtoms +
@@ -2537,7 +2641,7 @@ export class BillingPaymentsService {
         account.promoHeldAtoms -
         account.planHeldAtoms -
         account.purchasedHeldAtoms;
-      if (available >= consent.thresholdAtoms) return false;
+      if (available >= consent.thresholdAtoms) return undefined;
       const sums = await tx
         .select({
           total: sql<string>`coalesce(sum(case when ${billingPurchase.automaticSourceAcceptedAt} is null then ${billingPurchase.automaticGrossCeilingMinor} else (${billingPurchase.offerSnapshot}->>'grossMinor')::numeric end), 0)::text`,
@@ -2553,7 +2657,44 @@ export class BillingPaymentsService {
             ),
           ),
         );
-      if (BigInt(sums[0]?.total ?? '0') > consent.monthlyGrossCapMinor) return false;
+      if (BigInt(sums[0]?.total ?? '0') > consent.monthlyGrossCapMinor) {
+        // The cap counts accepted purchases that only roll off at the UTC month boundary, so the refusal cannot
+        // change before then: park the still-`prepared` leg there instead of letting recovery re-claim it every 30 s.
+        await tx
+          .update(billingProviderLeg)
+          .set({
+            nextAttemptAt: sql`(date_trunc('month', clock_timestamp() at time zone 'UTC') + interval '1 month') at time zone 'UTC'`,
+            errorCode: 'automatic_monthly_cap_reached',
+          })
+          .where(
+            and(
+              eq(billingProviderLeg.id, legId),
+              eq(billingProviderLeg.accountId, accountId),
+              eq(billingProviderLeg.purchaseId, purchaseId),
+              eq(billingProviderLeg.state, 'prepared'),
+            ),
+          );
+        return undefined;
+      }
+      // The frozen request is compared independently of JSONB key ordering; a recovered leg carries the stored shape.
+      const [leg] = await tx
+        .select()
+        .from(billingProviderLeg)
+        .where(
+          and(
+            eq(billingProviderLeg.id, legId),
+            eq(billingProviderLeg.accountId, accountId),
+            eq(billingProviderLeg.purchaseId, purchaseId),
+            eq(billingProviderLeg.reloadConsentId, consentId),
+            eq(billingProviderLeg.state, 'prepared'),
+          ),
+        )
+        .for('update');
+      // A leg that is no longer `prepared` belongs to another writer; a frozen request that no longer matches the
+      // canonical one can never match again, so it closes like a superseded wake.
+      if (leg === undefined) return undefined;
+      if (requestDigest(leg.request) !== requestDigest(request))
+        return closeUncharged('automatic_request_digest_mismatch');
       const changed = await tx
         .update(billingPurchase)
         .set({ state: 'creating', updatedAt: new Date() })
@@ -2565,24 +2706,21 @@ export class BillingPaymentsService {
           ),
         )
         .returning({ id: billingPurchase.id });
-      if (changed[0] === undefined) return false;
+      if (changed[0] === undefined) return undefined;
       const dispatched = await tx
         .update(billingProviderLeg)
         .set({ state: 'dispatched', dispatchStartedAt: new Date() })
         .where(
           and(
-            eq(billingProviderLeg.id, legId),
-            eq(billingProviderLeg.accountId, accountId),
-            eq(billingProviderLeg.purchaseId, purchaseId),
-            eq(billingProviderLeg.reloadConsentId, consentId),
-            eq(billingProviderLeg.requestHash, digest(request)),
+            eq(billingProviderLeg.id, leg.id),
+            eq(billingProviderLeg.requestHash, leg.requestHash),
             eq(billingProviderLeg.state, 'prepared'),
           ),
         )
         .returning({ id: billingProviderLeg.id });
-      return dispatched[0] !== undefined;
+      return dispatched[0] === undefined ? undefined : leg.requestHash;
     });
-    if (!allowed) return;
+    if (allowed === undefined) return;
     const result = await dispatchStripeLegOnce(this.stripe, parseStripeCreateLeg(request));
     if (result.kind !== 'payment_intent') throw new Error('Automatic payment leg produced the wrong object kind');
     await this.databaseService.database.transaction(async (tx) => {
@@ -2595,7 +2733,7 @@ export class BillingPaymentsService {
             eq(billingProviderLeg.id, legId),
             eq(billingProviderLeg.accountId, accountId),
             eq(billingProviderLeg.purchaseId, purchaseId),
-            eq(billingProviderLeg.requestHash, digest(request)),
+            eq(billingProviderLeg.requestHash, allowed),
             eq(billingProviderLeg.state, 'dispatched'),
           ),
         )
@@ -3150,7 +3288,7 @@ export class BillingPaymentsService {
             causeId: periodId,
             source: 'plan',
             ...cash,
-            occurredAt: new Date(qualification.evidence.paidAt),
+            occurredAt: cashOccurredAt(cash, qualification.evidence.paidAt),
           },
           tx,
         );
@@ -3628,7 +3766,7 @@ export class BillingPaymentsService {
               causeId: purchaseId,
               source: 'purchased',
               ...cash,
-              occurredAt: new Date(evidence.paidAt),
+              occurredAt: cashOccurredAt(cash, evidence.paidAt),
             },
             tx,
           );
@@ -3739,7 +3877,9 @@ export class BillingPaymentsService {
             .update(billingProviderLeg)
             .set({
               state: 'no_charge',
-              cancellationConfirmedAt: new Date(),
+              // A provider-side cancellation closes the same lifecycle the constraint requires to be opened first.
+              cancellationRequestedAt: sql`coalesce(${billingProviderLeg.cancellationRequestedAt}, clock_timestamp())`,
+              cancellationConfirmedAt: sql`coalesce(${billingProviderLeg.cancellationConfirmedAt}, clock_timestamp())`,
               noChargeEvidence,
               errorCode: null,
             })
@@ -3902,7 +4042,7 @@ export class BillingPaymentsService {
             causeId: purchaseId,
             source: 'purchased',
             ...cash,
-            occurredAt: new Date(qualification.evidence.paidAt),
+            occurredAt: cashOccurredAt(cash, qualification.evidence.paidAt),
           },
           tx,
         );
@@ -4254,6 +4394,25 @@ export class BillingPaymentsService {
     if (rows[0] === undefined) throw new ConflictException({ code: 'stale_provider_leg_claim' });
   }
 
+  /** Locks the account and refuses new collection for a closed account or an unresolved cash-integrity case. */
+  private async assertOpenCollectionScope(accountId: string, transaction?: Transaction): Promise<void> {
+    const gate = async (tx: Transaction): Promise<void> => {
+      await this.lockPaymentAccount(tx, accountId);
+      const rows = await tx
+        .select({ status: creditAccount.status })
+        .from(creditAccount)
+        .where(and(eq(creditAccount.id, accountId), eq(creditAccount.environment, this.config.environment)))
+        .limit(1);
+      if (rows[0]?.status !== 'open') throw new ConflictException({ code: 'payment_account_not_open' });
+      await this.cash.assertNewCollectionScope(accountId, tx);
+    };
+    if (transaction === undefined) {
+      await this.databaseService.database.transaction(gate);
+      return;
+    }
+    await gate(transaction);
+  }
+
   private async lockPaymentAccount(tx: Transaction, accountId: string): Promise<void> {
     const rows = await tx
       .select({ id: creditAccount.id })
@@ -4496,8 +4655,27 @@ function digest(value: unknown): string {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
 
+/** Digests a persisted provider request independently of JSONB key ordering. */
+function requestDigest(value: unknown): string {
+  return digest(canonicalRequest(value));
+}
+
+function canonicalRequest(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map((item) => canonicalRequest(item));
+  if (typeof value !== 'object' || value === null) return value;
+  return Object.entries(value)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, nested]) => [key, canonicalRequest(nested)]);
+}
+
+/** Reads the frozen card from a flat manual leg or from an automatic leg's nested provider request. */
 function paymentMethodId(request: Readonly<Record<string, unknown>>): string | undefined {
-  return typeof request['payment_method'] === 'string' ? request['payment_method'] : undefined;
+  const nested = request['request'];
+  const source =
+    typeof nested === 'object' && nested !== null && !Array.isArray(nested)
+      ? (nested as Readonly<Record<string, unknown>>)
+      : request;
+  return typeof source['payment_method'] === 'string' ? source['payment_method'] : undefined;
 }
 
 function automaticWorkGeneration(request: Readonly<Record<string, unknown>>): bigint | undefined {

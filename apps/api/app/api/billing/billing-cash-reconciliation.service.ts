@@ -29,6 +29,8 @@ import {
   retrieveStripePaymentIntent,
 } from '#api/billing/billing-cash-stripe.js';
 import { paidPaymentEvidenceSchema } from '#api/billing/billing-payment-contract.js';
+import { journalBlockingFinancialCaseKinds } from '#api/billing/billing-journal-reconciliation.service.js';
+import { purchaseBlockingFinancialCaseKinds } from '#api/billing/billing-purchase-reconciliation.service.js';
 
 type Scan = typeof billingCashScan.$inferSelect;
 type StreamName = 'balance' | 'paymentIntent' | 'charge' | 'refund';
@@ -42,6 +44,10 @@ export const cashBlockingFinancialCaseKinds: readonly string[] = [
   'paid_unfulfilled_recovery',
   'refund_unresolved',
   'dispute_unresolved',
+  // Purchase and entitlement reconciliation opens account-scoped cases through the same stop.
+  ...purchaseBlockingFinancialCaseKinds,
+  // Journal conservation cases always name their own account, so the same stop pauses only that account.
+  ...journalBlockingFinancialCaseKinds,
 ];
 
 export async function assertNewCollectionCashScope(
@@ -196,7 +202,7 @@ export class BillingCashReconciliationService {
             eq(billingCashScan.state, 'incomplete'),
             eq(billingCashScan.state, 'running'),
           ),
-          sql`${billingCashScan.leaseUntil} IS NULL OR ${billingCashScan.leaseUntil} <= clock_timestamp()`,
+          sql`(${billingCashScan.leaseUntil} IS NULL OR ${billingCashScan.leaseUntil} <= clock_timestamp())`,
         ),
       )
       .returning();

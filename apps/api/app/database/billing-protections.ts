@@ -29,7 +29,10 @@ export async function installBillingProtections(client: postgres.Sql): Promise<v
     await transaction`GRANT INSERT ON billing.billing_reload_consent, billing.billing_reload_work,
       billing.billing_subscription_offer, billing.billing_account_closure, billing.billing_refund_intent,
       billing.billing_cash_scan, billing.billing_cash_fact, billing.billing_cash_scan_fact, billing.billing_financial_case,
-      billing.billing_tax_fact, billing.billing_recovery_notice TO tau_billing_runtime`;
+      billing.billing_tax_fact, billing.billing_recovery_notice, billing.billing_journal_checkpoint TO tau_billing_runtime`;
+    await transaction`GRANT UPDATE (incremental_occurred_at, incremental_transaction_id, sweep_account_id,
+      sweep_cycles, generation, lease_until, last_completed_at)
+      ON billing.billing_journal_checkpoint TO tau_billing_runtime`;
     await transaction`GRANT UPDATE (checkout_session_id, setup_intent_id, payment_method_id, payment_method,
       consented_at, state, consecutive_terminal_failures, last_automatic_started_at, updated_at)
       ON billing.billing_reload_consent TO tau_billing_runtime`;

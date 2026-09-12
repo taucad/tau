@@ -7,6 +7,11 @@ import { CreditLedgerService } from '#api/billing/credit-ledger.service.js';
 import { BillingPaymentsService } from '#api/billing/billing-payments.service.js';
 import { BillingCashService } from '#api/billing/billing-cash.service.js';
 import { BillingCashReconciliationService } from '#api/billing/billing-cash-reconciliation.service.js';
+import {
+  BillingSupplierReconciliationService,
+  operatorSupplierInvoiceSchema,
+} from '#api/billing/billing-supplier-reconciliation.service.js';
+import { BillingPurchaseReconciliationService } from '#api/billing/billing-purchase-reconciliation.service.js';
 import { BillingAccountClosureService } from '#api/billing/billing-account-closure.service.js';
 import { recoverAndCancelStripeClosure } from '#api/billing/billing-account-closure-stripe.js';
 import { BillingTaxService } from '#api/billing/billing-tax.service.js';
@@ -63,6 +68,28 @@ const requestSchema = z.discriminatedUnion('operation', [
   z.object({ operation: z.literal('run-cash-scan'), environment, scanId: id, maximumPagesPerStream: limit }).strict(),
   z.object({ operation: z.literal('recover-closure'), environment, accountId: id, closureId: id }).strict(),
   z.object({ operation: z.literal('monitor-tax'), environment, asOf: date }).strict(),
+  z
+    .object({
+      operation: z.literal('sweep-supplier'),
+      environment,
+      pageSize: limit,
+      /** Milliseconds. */
+      unresolvedMaximumAge: z.number().int().min(0).max(2_592_000_000),
+    })
+    .strict(),
+  z
+    .object({ operation: z.literal('reconcile-supplier-invoice'), environment, invoice: operatorSupplierInvoiceSchema })
+    .strict(),
+  z
+    .object({
+      operation: z.literal('run-purchase-scan'),
+      environment,
+      scanId: id,
+      maximumObligations: limit,
+      maximumGrants: limit,
+      maximumSubscriptions: limit,
+    })
+    .strict(),
 ]);
 
 /** Strict protected-job composition; provider mutations remain restricted to an isolated local fixture. */
@@ -110,6 +137,8 @@ export async function runBillingLifecycleCommand(input: {
     cash,
   );
   const reconciliation = new BillingCashReconciliationService(input.database, input.sourceStripe, config);
+  const supplier = new BillingSupplierReconciliationService(input.database, config);
+  const purchases = new BillingPurchaseReconciliationService(input.database, input.sourceStripe, config);
   switch (request.operation) {
     case 'reload-work': {
       return payments.processReloadWork(request);
@@ -145,6 +174,15 @@ export async function runBillingLifecycleCommand(input: {
     }
     case 'run-cash-scan': {
       return reconciliation.runScan(request);
+    }
+    case 'sweep-supplier': {
+      return supplier.sweepSupplierUsage(request);
+    }
+    case 'reconcile-supplier-invoice': {
+      return supplier.reconcileInvoiceTotal(request.invoice);
+    }
+    case 'run-purchase-scan': {
+      return purchases.runScan(request);
     }
     case 'monitor-tax': {
       return new BillingTaxService(input.database).evaluateRegistration({ ...request, ...config });

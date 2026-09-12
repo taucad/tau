@@ -15,7 +15,7 @@ import { Test } from '@nestjs/testing';
 import type { Auth } from 'better-auth';
 import { afterAll, describe, expect, it } from 'vitest';
 import { mockDeep } from 'vitest-mock-extended';
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, inArray, ne, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import * as schema from '#database/schema.js';
@@ -23,6 +23,7 @@ import {
   billingBudget,
   billingBudgetFunding,
   billingBudgetHold,
+  billingFinancialCase,
   supplierCostEvidence,
   billingPromotionIssuance,
   creditAccount,
@@ -43,6 +44,7 @@ import { BillingController } from '#api/billing/billing.controller.js';
 import { BillingService } from '#api/billing/billing.service.js';
 import { BillingPaymentsService } from '#api/billing/billing-payments.service.js';
 import { BillingUsageService } from '#api/billing/billing-usage.service.js';
+import { BillingEstimatesService } from '#api/billing/billing-estimates.service.js';
 import { ChatController } from '#api/chat/chat.controller.js';
 import { ChatService } from '#api/chat/chat.service.js';
 import { CodeCompletionController } from '#api/code-completion/code-completion.controller.js';
@@ -151,13 +153,17 @@ const kill = async (child: ReturnType<typeof fork>): Promise<void> => {
   await exited;
 };
 
-const createFixture = async (options: { promotion?: boolean } = {}) => {
+const createFixture = async (options: { promotion?: boolean; longContextPremium?: boolean } = {}) => {
   registerBillableModelMeterContracts();
   const suffix = randomUUID();
   const environment = 'development';
   const authUserId = `invocation-${suffix}`;
   const meterContractId = 'model-meter-v1:openai-gpt-5.6-luna';
   const sku = 'model:openai-gpt-5.6-luna';
+  /* A tiered route funds one meter contract per pinned tariff, so a body whose proved input bound
+   * reaches the premium threshold resolves the `:long-context` sibling instead of the base sku. */
+  const longContextMeterContractId = `${meterContractId}:long-context`;
+  const longContextSku = `${sku}:long-context`;
   const spendBudgetId = `invocation-spend-${suffix}`;
   const riskBudgetId = `invocation-risk-${suffix}`;
   const promotionProgramId = `invocation-promotion-${suffix}`;
@@ -223,41 +229,59 @@ const createFixture = async (options: { promotion?: boolean } = {}) => {
         ]
       : []),
   ]);
-  qualifiedMeterContracts.set(
-    meterContractId,
-    new Set(['uncached_input:', 'cache_read:', 'cache_write:30m', 'output:']),
-  );
+  for (const contractId of [meterContractId, longContextMeterContractId]) {
+    qualifiedMeterContracts.set(contractId, new Set(['uncached_input:', 'cache_read:', 'cache_write:30m', 'output:']));
+  }
   const tokenUnit = 'token';
-  // oxlint-disable-next-line typescript/no-restricted-types -- financial meter tiers use explicit null
-  const rate = (dimension: 'uncached_input' | 'cache_read' | 'cache_write' | 'output', tier: string | null) => ({
-    rateId: `${dimension}-${tier ?? 'none'}-${suffix}`,
-    meterContractId,
+  const rate = (
+    contractId: string,
+    dimension: 'uncached_input' | 'cache_read' | 'cache_write' | 'output',
+    // oxlint-disable-next-line typescript/no-restricted-types -- financial meter tiers use explicit null
+    tier: string | null,
+  ) => ({
+    rateId: `${dimension}-${tier ?? 'none'}-${contractId}-${suffix}`,
+    meterContractId: contractId,
     dimension,
     tier,
     unit: tokenUnit,
     referenceNumeratorPicoUsd: '1',
     denominatorUnits: '1',
-    retailOverride: { numeratorCreditAtoms: '1', denominatorUnits: '1' },
+    retailOverride: {
+      // The premium sibling is dearer only where a test needs the two tiers to be distinguishable.
+      numeratorCreditAtoms:
+        options.longContextPremium === true && contractId === longContextMeterContractId ? '2' : '1',
+      denominatorUnits: '1',
+    },
   });
-  const rates = [
-    rate('uncached_input', null),
-    rate('cache_read', null),
-    rate('cache_write', '30m'),
-    rate('output', null),
+  const tariff = (contractId: string) => [
+    rate(contractId, 'uncached_input', null),
+    rate(contractId, 'cache_read', null),
+    rate(contractId, 'cache_write', '30m'),
+    rate(contractId, 'output', null),
   ];
+  const rates = [...tariff(meterContractId), ...tariff(longContextMeterContractId)];
   const validated = validateCommercialPolicy({
     schemaVersion: 1,
     environment,
     policyVersion: suffix,
     markupBps: 0,
-    fleet: { minimumSchemaVersion: 1, meterContractIds: [meterContractId] },
+    fleet: { minimumSchemaVersion: 1, meterContractIds: [meterContractId, longContextMeterContractId] },
     rates,
     routes: [
       {
         routeId: `route-${suffix}`,
         sku,
         meterContractId,
-        rateIds: rates.map(({ rateId }) => rateId),
+        rateIds: tariff(meterContractId).map(({ rateId }) => rateId),
+        enabled: true,
+        spendBudgetId,
+        riskBudgetId,
+      },
+      {
+        routeId: `route-long-context-${suffix}`,
+        sku: longContextSku,
+        meterContractId: longContextMeterContractId,
+        rateIds: tariff(longContextMeterContractId).map(({ rateId }) => rateId),
         enabled: true,
         spendBudgetId,
         riskBudgetId,
@@ -333,6 +357,8 @@ const createOwner = (
     }),
     // eslint-disable-next-line @typescript-eslint/naming-convention -- environment key
     new ConfigService({ BILLING_REQUEST_DIGEST_SECRET: 'c04-foundation-request-digest-secret' }),
+    undefined,
+    { database },
   );
 };
 
@@ -905,6 +931,7 @@ describe('funded invocation HTTP boundary', () => {
             { provide: BillableModelInvocationService, useValue: owner },
             { provide: BillingUsageService, useValue: usage },
             { provide: BillingService, useValue: {} },
+            { provide: BillingEstimatesService, useValue: mockDeep<BillingEstimatesService>() },
             { provide: BillingPaymentsService, useValue: mockDeep<BillingPaymentsService>() },
             { provide: BillingAccountClosureService, useValue: mockDeep<BillingAccountClosureService>() },
             LlmGatewayService,
@@ -1003,8 +1030,9 @@ describe('funded invocation HTTP boundary', () => {
             .select()
             .from(billingBudgetHold)
             .where(eq(billingBudgetHold.id, countedOperation!.spendBudgetHoldId));
-          // One joint input at max($0.4,$0.04,$0.5)/million plus one output at $1.8/million.
-          expect(hold?.initialBound).toBe(2_300_000n);
+          // The counted body cannot reach the premium threshold, so the base tariff is pinned: one
+          // joint input at max($0.2,$0.02,$0.25)/million plus one output at $1.2/million.
+          expect(hold?.initialBound).toBe(1_450_000n);
         }
 
         const replay = await fetch(`${base}/v1/llm/openai/v1/responses`, {
@@ -1183,10 +1211,19 @@ describe('funded invocation HTTP boundary', () => {
   );
 });
 
+/* The pinned tariff follows the request's own proved input bound: only a body that can reach the
+ * premium threshold is held, valued and charged at it, so each sample carries the body its tier needs. */
 it.each([
-  { input: 1, cacheKnown: true, numerator: 7n, denominator: 5_000_000n },
-  { input: 272_001, cacheKnown: true, numerator: 544_011n, denominator: 5_000_000n },
-  { input: 1, cacheKnown: false, numerator: 0n, denominator: 1n },
+  { input: 1, cacheKnown: true, numerator: 7n, denominator: 5_000_000n, longContextMinimum: null },
+  {
+    input: 272_001,
+    cacheKnown: true,
+    numerator: 544_011n,
+    denominator: 5_000_000n,
+    longContextMinimum: '272001',
+    body: 'a'.repeat(268_000),
+  },
+  { input: 1, cacheKnown: false, numerator: 0n, denominator: 1n, longContextMinimum: null },
 ])('values actual owner usage with pinned context tariff: $input / cache known $cacheKnown', async (sample) => {
   let requests = 0;
   const server = createServer((_request, response) => {
@@ -1244,7 +1281,12 @@ it.each([
       }
       expect(requests).toBe(0);
     }
-    const result = await invoke({ owner, authUserId: fixture.authUserId, attemptKey });
+    const result = await invoke({
+      owner,
+      authUserId: fixture.authUserId,
+      attemptKey,
+      ...(sample.body === undefined ? {} : { body: sample.body }),
+    });
     if (result.state !== 'streaming') {
       throw new Error('Expected stream');
     }
@@ -1255,7 +1297,11 @@ it.each([
       .select()
       .from(supplierCostEvidence)
       .where(eq(supplierCostEvidence.operationId, result.operationId));
-    expect(operation?.invocation?.supplierValuation?.longContextMinimumInputTokens).toBe('272001');
+    // A base pin proves the premium tier unreachable, so its valuation carries the base schedule alone.
+    expect(operation?.invocation?.supplierValuation?.longContextMinimumInputTokens).toBe(sample.longContextMinimum);
+    expect(operation?.sku).toBe(
+      sample.longContextMinimum === null ? 'model:openai-gpt-5.6-luna' : 'model:openai-gpt-5.6-luna:long-context',
+    );
     if (sample.cacheKnown) {
       expect(costs).toHaveLength(1);
       expect(costs[0]).toMatchObject({
@@ -1287,10 +1333,149 @@ it.each([
     expect(holds.find((hold) => hold.id === operation?.spendBudgetHoldId)?.remainingHeld).toBe(
       holds.find((hold) => hold.id === operation?.spendBudgetHoldId)?.initialBound,
     );
-    const replay = await invoke({ owner, authUserId: fixture.authUserId, attemptKey });
+    const replay = await invoke({
+      owner,
+      authUserId: fixture.authUserId,
+      attemptKey,
+      ...(sample.body === undefined ? {} : { body: sample.body }),
+    });
     expect(replay.state).toBe('terminal');
     expect(requests).toBe(1);
   } finally {
+    const closed = once(server, 'close');
+    server.close();
+    await closed;
+  }
+});
+
+/* The premium pin is taken on an upper bound. When the observed input lands below the threshold the
+ * premium tier was provably never reached, so the settlement prices the base sku's retail rates. */
+it('settles a long-context pin at the base tariff when the observed input never reached it', async () => {
+  const server = createServer((_request, response) => {
+    response.writeHead(200, { 'content-type': 'text/event-stream' });
+    /* eslint-disable @typescript-eslint/naming-convention -- controlled endpoint emits native OpenAI usage keys */
+    const usage = {
+      input_tokens: 70_000,
+      output_tokens: 1,
+      input_tokens_details: { cached_tokens: 0, cache_write_tokens: 0 },
+    };
+    /* eslint-enable @typescript-eslint/naming-convention -- remaining fixture code uses local names */
+    response.end(
+      `data: ${JSON.stringify({
+        type: 'response.completed',
+        response: { id: 'tier-request', status: 'completed', usage },
+      })}\n\ndata: [DONE]\n\n`,
+    );
+  });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  try {
+    const address = server.address();
+    if (!address || typeof address === 'string') {
+      throw new Error('Missing local provider address');
+    }
+    const owner = createOwner(`http://127.0.0.1:${address.port}`);
+    const fixture = await createFixture({ longContextPremium: true });
+    const result = await invoke({
+      owner,
+      authUserId: fixture.authUserId,
+      attemptKey: `tier-${randomUUID()}`,
+      body: 'a'.repeat(300_000),
+    });
+    if (result.state !== 'streaming') {
+      throw new Error('Expected stream');
+    }
+    await result.response.arrayBuffer();
+    await result.completion;
+
+    const [operation] = await database.select().from(creditOperation).where(eq(creditOperation.id, result.operationId));
+    // The hold stays where the proof put it: the bound could have reached the premium threshold.
+    expect(operation?.sku).toBe('model:openai-gpt-5.6-luna:long-context');
+    expect(operation?.invocation?.supplierValuation?.longContextMinimumInputTokens).toBe('272001');
+    // 70,000 input + 1 output at the base schedule, not 140,002 at the premium one.
+    expect(operation?.chargedAtoms).toBe(70_001n);
+    expect(operation?.chargedAtoms).toBeLessThanOrEqual(operation!.authorizedAtoms);
+    expect(operation).toMatchObject({ customerState: 'settled', meteringStatus: 'complete' });
+    // The persisted meter items carry the rate the items were actually charged at.
+    expect(
+      operation?.meterItems?.map(({ dimension, numeratorCreditAtoms }) => [dimension, numeratorCreditAtoms]),
+    ).toEqual(
+      expect.arrayContaining([
+        ['uncached_input', '1'],
+        ['output', '1'],
+      ]),
+    );
+    expect(
+      await database
+        .select()
+        .from(schema.billingRoutePause)
+        .where(eq(schema.billingRoutePause.operationId, result.operationId)),
+    ).toHaveLength(0);
+  } finally {
+    const closed = once(server, 'close');
+    server.close();
+    await closed;
+  }
+});
+
+/* A tiered route publishes two skus. A safety control keyed on one of them would leave the other
+ * serving traffic, so every pause is taken on the route, addressed by its base sku. */
+it('pauses the whole route, not one tier, when a long-context settlement overruns its authorization', async () => {
+  const server = createServer((_request, response) => {
+    response.writeHead(200, { 'content-type': 'text/event-stream' });
+    /* eslint-disable @typescript-eslint/naming-convention -- controlled endpoint emits native OpenAI usage keys */
+    const usage = {
+      input_tokens: 400_000,
+      output_tokens: 1,
+      input_tokens_details: { cached_tokens: 0, cache_write_tokens: 0 },
+    };
+    /* eslint-enable @typescript-eslint/naming-convention -- remaining fixture code uses local names */
+    response.end(
+      `data: ${JSON.stringify({
+        type: 'response.completed',
+        response: { id: 'overrun-request', status: 'completed', usage },
+      })}\n\ndata: [DONE]\n\n`,
+    );
+  });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  try {
+    const address = server.address();
+    if (!address || typeof address === 'string') {
+      throw new Error('Missing local provider address');
+    }
+    const owner = createOwner(`http://127.0.0.1:${address.port}`);
+    const fixture = await createFixture({ longContextPremium: true });
+    const result = await invoke({
+      owner,
+      authUserId: fixture.authUserId,
+      attemptKey: `overrun-${randomUUID()}`,
+      body: 'a'.repeat(300_000),
+    });
+    if (result.state !== 'streaming') {
+      throw new Error('Expected stream');
+    }
+    await result.response.arrayBuffer();
+    await result.completion;
+
+    const [operation] = await database.select().from(creditOperation).where(eq(creditOperation.id, result.operationId));
+    expect(operation?.sku).toBe('model:openai-gpt-5.6-luna:long-context');
+    expect(operation?.chargedAtoms).toBe(operation?.authorizedAtoms);
+    const [paused] = await database
+      .select()
+      .from(schema.billingRoutePause)
+      .where(eq(schema.billingRoutePause.operationId, result.operationId));
+    expect(paused?.sku).toBe('model:openai-gpt-5.6-luna');
+    // The base tier is the one that was never named, and it is closed too.
+    await expect(
+      invoke({ owner, authUserId: fixture.authUserId, attemptKey: `after-overrun-${randomUUID()}` }),
+    ).rejects.toThrow();
+  } finally {
+    /* A pause is keyed on (environment, sku) alone, so it outlives this test's own account and would
+     * close the route for every later case in this file. */
+    await database
+      .delete(schema.billingRoutePause)
+      .where(eq(schema.billingRoutePause.sku, 'model:openai-gpt-5.6-luna'));
     const closed = once(server, 'close');
     server.close();
     await closed;
@@ -1399,8 +1584,10 @@ it('bounds selected count I/O, denies ineligible owners, fences contention and r
       }),
     ).rejects.toThrow();
     await database.update(creditAccount).set({ purchasedAtoms: 100n }).where(eq(creditAccount.id, fixture.accountId));
+    /* Below the eligibility minimum the base tariff prices for one output token ($1.2/million), so the
+     * refusal lands before a supplier count call is spent. */
     for (const budgetId of [fixture.spendBudgetId, fixture.riskBudgetId]) {
-      await database.update(billingBudget).set({ approvedCap: 1_799_999n }).where(eq(billingBudget.id, budgetId));
+      await database.update(billingBudget).set({ approvedCap: 1_199_999n }).where(eq(billingBudget.id, budgetId));
       await expect(call()).rejects.toThrow();
       await database
         .update(billingBudget)
@@ -1408,7 +1595,7 @@ it('bounds selected count I/O, denies ineligible owners, fences contention and r
         .where(eq(billingBudget.id, budgetId));
       await database
         .update(billingBudgetFunding)
-        .set({ fundedLifetime: 1_799_999n })
+        .set({ fundedLifetime: 1_199_999n })
         .where(eq(billingBudgetFunding.id, `${budgetId}-funding`));
       await expect(call()).rejects.toThrow();
       await database
@@ -1578,3 +1765,236 @@ it('bounds selected count I/O, denies ineligible owners, fences contention and r
 }, 60_000);
 
 /* eslint-enable no-await-in-loop -- sequential endpoint fixture complete */
+
+/* B7 I3 / R8: the in-stream ceiling stops the supplier spend. It proves nothing was delivered, so
+ * the customer is charged what the stream proved and an operator owns the mis-sized ceiling. */
+it('charges nothing when a stream passes its ceiling, opens its case, and leaves the route open', async () => {
+  let exhaust = true;
+  const server = createServer((_request, response) => {
+    response.on('error', () => {
+      /* The gateway cancels this response mid-flight; a reset socket is the expected end. */
+    });
+    response.writeHead(200, { 'content-type': 'text/event-stream' });
+    if (!exhaust) {
+      response.end(
+        'data: {"type":"response.completed","response":{"id":"after-ceiling","status":"completed","usage":{"input_tokens":1,"output_tokens":1,"input_tokens_details":{"cached_tokens":0,"cache_write_tokens":0}}}}\n\ndata: [DONE]\n\n',
+      );
+      return;
+    }
+    // The qualified ceiling is 64 bytes per authorized output token plus 1 MiB; this asks for one token.
+    response.end(`data: ${'x'.repeat(1_100_000)}\n\n`);
+  });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  try {
+    const address = server.address();
+    if (!address || typeof address === 'string') {
+      throw new Error('Missing local provider address');
+    }
+    const owner = createOwner(`http://127.0.0.1:${address.port}`);
+    const fixture = await createFixture();
+    const result = await invoke({ owner, authUserId: fixture.authUserId, attemptKey: `ceiling-${randomUUID()}` });
+    if (result.state !== 'streaming') {
+      throw new Error('Expected stream');
+    }
+    await expect(result.response.arrayBuffer()).rejects.toThrow('authorized ceiling');
+    await result.completion;
+
+    const [operation] = await database.select().from(creditOperation).where(eq(creditOperation.id, result.operationId));
+    expect(operation).toMatchObject({ customerState: 'settled', executionStatus: 'cancelled' });
+    expect(operation?.normalizationEvidence?.terminalReason).toBe('authorized_exhausted');
+    /* The cut is not a delivery receipt: no usage reached us, so nothing is charged. Charging the
+     * authorization here would bill the maximum for a truncated answer on every wire that reports
+     * usage only in its final event. */
+    expect(operation?.chargedAtoms).toBe(0n);
+    expect(operation?.authorizedAtoms).toBeGreaterThan(0n);
+    const [evidence] = await database
+      .select()
+      .from(schema.billingInvocationEvidence)
+      .where(eq(schema.billingInvocationEvidence.operationId, result.operationId));
+    expect(evidence?.evidence.kind).toBe('authorized_exhausted');
+    // Nothing further can ever price this operation, so its spend hold does not stay reserved (R7/P6).
+    const [spendHold] = await database
+      .select()
+      .from(schema.billingBudgetHold)
+      .where(eq(schema.billingBudgetHold.id, operation!.spendBudgetHoldId));
+    expect(spendHold).toMatchObject({ remainingHeld: 0n, finalityState: 'unresolved' });
+    expect(
+      await database
+        .select()
+        .from(schema.billingOperationException)
+        .where(eq(schema.billingOperationException.operationId, result.operationId)),
+    ).toHaveLength(0);
+    // The two numbers that measure the ceiling's bytes-per-output-token constant reach an operator.
+    const [ceilingCase] = await database
+      .select()
+      .from(billingFinancialCase)
+      .where(eq(billingFinancialCase.sourceId, result.operationId));
+    expect(ceilingCase?.kind).toBe('llm_recovery_absorbed');
+    expect(ceilingCase?.evidence).toMatchObject({ reason: 'authorized_exhausted' });
+    expect(String(ceilingCase?.evidence['detail'])).toMatch(
+      /^Response reached its authorized byte ceiling after \d+ bytes with \d+ authorized output tokens$/u,
+    );
+    expect(
+      await database
+        .select()
+        .from(schema.billingRoutePause)
+        .where(eq(schema.billingRoutePause.operationId, result.operationId)),
+    ).toHaveLength(0);
+
+    exhaust = false;
+    const next = await invoke({ owner, authUserId: fixture.authUserId, attemptKey: `after-ceiling-${randomUUID()}` });
+    if (next.state !== 'streaming') {
+      throw new Error('The ceiling paused its route');
+    }
+    await next.response.arrayBuffer();
+    await next.completion;
+  } finally {
+    server.closeAllConnections();
+    const closed = once(server, 'close');
+    server.close();
+    await closed;
+  }
+});
+
+it('persists the provider incomplete reason as the operation terminal reason', async () => {
+  const server = createServer((_request, response) => {
+    response.writeHead(200, { 'content-type': 'text/event-stream' });
+    response.end(
+      'data: {"type":"response.incomplete","response":{"id":"incomplete-request","status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},"usage":{"input_tokens":1,"output_tokens":1,"input_tokens_details":{"cached_tokens":0,"cache_write_tokens":0}}}}\n\ndata: [DONE]\n\n',
+    );
+  });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  try {
+    const address = server.address();
+    if (!address || typeof address === 'string') {
+      throw new Error('Missing local provider address');
+    }
+    const owner = createOwner(`http://127.0.0.1:${address.port}`);
+    const fixture = await createFixture();
+    const result = await invoke({ owner, authUserId: fixture.authUserId, attemptKey: `incomplete-${randomUUID()}` });
+    if (result.state !== 'streaming') {
+      throw new Error('Expected stream');
+    }
+    await result.response.arrayBuffer();
+    await result.completion;
+
+    const [operation] = await database.select().from(creditOperation).where(eq(creditOperation.id, result.operationId));
+    expect(operation).toMatchObject({ customerState: 'settled', executionStatus: 'succeeded' });
+    expect(operation?.normalizationEvidence?.terminalReason).toBe('max_output_tokens');
+  } finally {
+    const closed = once(server, 'close');
+    server.close();
+    await closed;
+  }
+});
+
+/* B7 R7 / S3: an open supplier case pauses its own route before dispatch. */
+it('pauses only the route an open supplier case names', async () => {
+  let requests = 0;
+  const server = createServer((_request, response) => {
+    requests += 1;
+    response.writeHead(200, { 'content-type': 'text/event-stream' });
+    response.end(
+      'data: {"type":"response.completed","response":{"id":"paused-route","status":"completed","usage":{"input_tokens":1,"output_tokens":1,"input_tokens_details":{"cached_tokens":0,"cache_write_tokens":0}}}}\n\ndata: [DONE]\n\n',
+    );
+  });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const openCases: string[] = [];
+  const caseRow = (kind: string, sourceType: string, sourceId: string) => {
+    const id = `c13a-${randomUUID()}`;
+    openCases.push(id);
+    return {
+      id,
+      environment: 'development',
+      stripeAccountId: 'acct_c13a',
+      livemode: false,
+      kind,
+      dedupeKey: id,
+      sourceType,
+      sourceId,
+      evidence: { version: 'supplier-usage-reconciliation-v1' },
+      owner: 'billing_operations',
+      nextStep: 'qualify_provider_identity_before_trusting_the_cost',
+      firstEffectiveAt: new Date(),
+    };
+  };
+  const settle = async (attemptKey: string) => {
+    const result = await invoke({ owner, authUserId: fixture.authUserId, attemptKey });
+    if (result.state !== 'streaming') {
+      throw new Error('Expected stream');
+    }
+    await result.response.arrayBuffer();
+    await result.completion;
+    return result.operationId;
+  };
+  const address = server.address();
+  if (!address || typeof address === 'string') {
+    throw new Error('Missing local provider address');
+  }
+  const owner = createOwner(`http://127.0.0.1:${address.port}`);
+  const fixture = await createFixture();
+  try {
+    const operationId = await settle(`pause-seed-${randomUUID()}`);
+    expect(requests).toBe(1);
+
+    // Aggregate and environment-level supplier cases are operator work, not a route fault.
+    await database
+      .insert(billingFinancialCase)
+      .values([
+        caseRow('supplier_charge_unmatched', 'supplier_cost_evidence', operationId),
+        caseRow('supplier_invoice_total_mismatch', 'supplier_invoice', operationId),
+      ]);
+    await settle(`pause-aggregate-${randomUUID()}`);
+    expect(requests).toBe(2);
+
+    const paused = caseRow('supplier_evidence_mismatched', 'credit_operation', operationId);
+    await database.insert(billingFinancialCase).values([paused]);
+    const deniedKey = `pause-denied-${randomUUID()}`;
+    await expect(invoke({ owner, authUserId: fixture.authUserId, attemptKey: deniedKey })).rejects.toSatisfy(
+      (error: unknown) =>
+        error instanceof LlmGatewayError &&
+        error.getStatus() === 503 &&
+        (error.getResponse() as { error?: { message?: string } }).error?.message ===
+          'This model route is paused while Tau reconciles its supplier evidence.',
+    );
+    expect(requests).toBe(2);
+    expect(await database.select().from(creditOperation).where(eq(creditOperation.attemptKey, deniedKey))).toHaveLength(
+      0,
+    );
+
+    // A different route reaches admission instead of the pause.
+    await expect(
+      owner.invoke({
+        environment: 'development',
+        authUserId: fixture.authUserId,
+        surface: 'gateway',
+        attempt: { version: 1, key: `pause-other-route-${randomUUID()}` },
+        providerWire: 'openai-responses',
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- native OpenAI ceiling field
+        body: { model: 'openai-gpt-5.5', stream: true, max_output_tokens: 1, input: 'fixture' },
+        priceHeaders: {},
+        activity: 'agent',
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toThrow('billing policy route is unavailable for SKU model:openai-gpt-5.5');
+
+    await database
+      .update(billingFinancialCase)
+      .set({ state: 'resolved', resolvedAt: new Date(), resolutionEvidence: { version: 'c13a-test' } })
+      .where(eq(billingFinancialCase.id, paused.id));
+    await settle(`pause-lifted-${randomUUID()}`);
+    expect(requests).toBe(3);
+  } finally {
+    // Financial cases are undeletable evidence; resolve them so no later fixture inherits the pause.
+    await database
+      .update(billingFinancialCase)
+      .set({ state: 'resolved', resolvedAt: new Date(), resolutionEvidence: { version: 'c13a-test' } })
+      .where(and(inArray(billingFinancialCase.id, openCases), ne(billingFinancialCase.state, 'resolved')));
+    const closed = once(server, 'close');
+    server.close();
+    await closed;
+  }
+});

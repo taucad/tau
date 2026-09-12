@@ -8,10 +8,11 @@ import { Test } from '@nestjs/testing';
 import type { Auth } from 'better-auth';
 import { describe, expect, it } from 'vitest';
 import { mock, mockDeep } from 'vitest-mock-extended';
-import { wireUsageSnapshotSchema } from '@taucad/billing';
+import { wireOpenHoldsSchema, wireUsageSnapshotSchema } from '@taucad/billing';
 import { BillingController } from '#api/billing/billing.controller.js';
 import { BillingService } from '#api/billing/billing.service.js';
 import { BillingUsageService } from '#api/billing/billing-usage.service.js';
+import { BillingEstimatesService } from '#api/billing/billing-estimates.service.js';
 import { AuthGuard } from '#auth/auth.guard.js';
 import { HttpExceptionFilter } from '#filters/http-exception.filter.js';
 import { authInstanceKey } from '#constants/auth.constant.js';
@@ -69,6 +70,23 @@ const emptyUsage = wireUsageSnapshotSchema.parse({
   rows: { items: [], nextCursor: null, complete: true },
 });
 
+const openHolds = wireOpenHoldsSchema.parse({
+  environment: 'development',
+  ownerId: owner.id,
+  holds: [
+    {
+      operationId: 'operation-a',
+      model: { id: 'gpt-6-astra', displayName: 'Astra', providerId: 'openai' },
+      heldCreditAtoms: '3084332',
+      admittedAt: instant.toISOString(),
+      dueAt: '2026-09-05T12:10:00.000Z',
+      releaseAfter: '2026-09-05T12:15:00.000Z',
+      dispatchState: 'accepted',
+      customerState: 'pending',
+    },
+  ],
+});
+
 describe('billing authenticated reporting endpoints', () => {
   it('should authenticate before reporting, bind the session owner and keep collection closed', async () => {
     const billing = mock<BillingService>();
@@ -78,6 +96,7 @@ describe('billing authenticated reporting endpoints', () => {
     auth.api.getSession.mockResolvedValue(null);
     usage.getUsage.mockResolvedValue(emptyUsage);
     usage.getAttemptReceipt.mockResolvedValue({ state: 'not_found' });
+    usage.getOpenHolds.mockResolvedValue(openHolds);
     const module = await Test.createTestingModule({
       controllers: [BillingController],
       providers: [
@@ -88,6 +107,7 @@ describe('billing authenticated reporting endpoints', () => {
         { provide: BillingUsageService, useValue: usage },
         { provide: BillingPaymentsService, useValue: payments },
         { provide: BillingAccountClosureService, useValue: mock<BillingAccountClosureService>() },
+        { provide: BillingEstimatesService, useValue: mock<BillingEstimatesService>() },
       ],
     }).compile();
     const app = module.createNestApplication<NestFastifyApplication>(new FastifyAdapter());
@@ -107,6 +127,9 @@ describe('billing authenticated reporting endpoints', () => {
       });
       expect(unauthorizedAttempt.statusCode).toBe(401);
       expect(usage.getAttemptReceipt).not.toHaveBeenCalled();
+      const unauthorizedHolds = await app.inject({ method: 'GET', url: '/v1/billing/holds' });
+      expect(unauthorizedHolds.statusCode).toBe(401);
+      expect(usage.getOpenHolds).not.toHaveBeenCalled();
       const topup = {
         requestId: 'request-a',
         returnPath: '/',
@@ -271,6 +294,12 @@ describe('billing authenticated reporting endpoints', () => {
         attemptKey: 'attempt-a',
         rawQuery: {},
       });
+      const holds = await app.inject({ method: 'GET', url: '/v1/billing/holds?accountId=other' });
+      expect(holds.statusCode).toBe(200);
+      expect(holds.json()).toEqual(openHolds);
+      expect(holds.headers['cache-control']).toBe('private, no-store');
+      /* The route takes no query: a caller-supplied selector cannot widen it. */
+      expect(usage.getOpenHolds).toHaveBeenCalledWith({ authUserId: owner.id });
       const gated = await app.inject({
         method: 'POST',
         url: '/v1/billing/topup-session',
@@ -292,6 +321,7 @@ describe('billing authenticated reporting endpoints', () => {
       mock<BillingUsageService>(),
       payments,
       mock<BillingAccountClosureService>(),
+      mock<BillingEstimatesService>(),
     );
     await expect(
       controller.prepareTopup(

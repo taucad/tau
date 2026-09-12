@@ -17,7 +17,11 @@ const dataImageUrlSchema = boundedString.refine((value) => {
 }, 'Invalid image data URL');
 
 const textSchema = z
-  .object({ type: z.literal('text'), text: boundedString, cache_control: cacheControlSchema.optional() })
+  .object({
+    type: z.literal('text'),
+    text: boundedString,
+    cache_control: cacheControlSchema.optional(),
+  })
   .strict();
 const completionsTextSchema = z.object({ type: z.literal('text'), text: boundedString }).strict();
 const inputTextSchema = z.object({ type: z.literal('input_text'), text: boundedString }).strict();
@@ -29,17 +33,30 @@ const inputImageSchema = z
   })
   .strict();
 const imageUrlSchema = z
-  .object({ type: z.literal('image_url'), image_url: z.object({ url: dataImageUrlSchema }).strict() })
+  .object({
+    type: z.literal('image_url'),
+    image_url: z.object({ url: dataImageUrlSchema }).strict(),
+  })
   .strict();
 const anthropicImageSchema = z
   .object({
     type: z.literal('image'),
-    source: z.object({ type: z.literal('base64'), media_type: imageMediaTypeSchema, data: base64Schema }).strict(),
+    source: z
+      .object({
+        type: z.literal('base64'),
+        media_type: imageMediaTypeSchema,
+        data: base64Schema,
+      })
+      .strict(),
     cache_control: cacheControlSchema.optional(),
   })
   .strict();
 const thinkingSchema = z
-  .object({ type: z.literal('thinking'), thinking: boundedString, signature: boundedString.optional() })
+  .object({
+    type: z.literal('thinking'),
+    thinking: boundedString,
+    signature: boundedString.optional(),
+  })
   .strict();
 const redactedThinkingSchema = z.object({ type: z.literal('redacted_thinking'), data: boundedString }).strict();
 const toolUseSchema = z
@@ -59,6 +76,9 @@ const toolResultSchema = z
     is_error: z.boolean().optional(),
     cache_control: cacheControlSchema.optional(),
   })
+  .strict();
+const googleToolCallExtraContentSchema = z
+  .object({ google: z.object({ thought_signature: boundedString }).strict() })
   .strict();
 const contentSchema = z.union([
   boundedString,
@@ -90,7 +110,13 @@ const messageSchema = z
           .object({
             id: z.string().min(1).max(256),
             type: z.literal('function'),
-            function: z.object({ name: z.string().min(1).max(128), arguments: boundedString }).strict(),
+            function: z
+              .object({
+                name: z.string().min(1).max(128),
+                arguments: boundedString,
+              })
+              .strict(),
+            extra_content: googleToolCallExtraContentSchema.optional(),
           })
           .strict(),
       )
@@ -137,7 +163,11 @@ const responseMessageSchema = z
       .array(
         z.union([
           z
-            .object({ type: z.literal('output_text'), text: boundedString, annotations: z.array(z.unknown()).max(512) })
+            .object({
+              type: z.literal('output_text'),
+              text: boundedString,
+              annotations: z.array(z.unknown()).max(512),
+            })
             .strict(),
           z.object({ type: z.literal('refusal'), refusal: boundedString }).strict(),
         ]),
@@ -191,7 +221,12 @@ export const billableModelRequestSchema = z
     tool_choice: z
       .union([
         z.enum(['auto', 'none', 'required']),
-        z.object({ type: z.literal('function'), name: z.string().min(1).max(128) }).strict(),
+        z
+          .object({
+            type: z.literal('function'),
+            name: z.string().min(1).max(128),
+          })
+          .strict(),
         z.object({ type: z.enum(['auto', 'any']) }).strict(),
         z.object({ type: z.literal('tool'), name: z.string().min(1).max(128) }).strict(),
       ])
@@ -334,7 +369,12 @@ const anthropicAssistantContentSchema = z.union([
 ]);
 const anthropicMessageSchema = z.union([
   z.object({ role: z.literal('user'), content: anthropicUserContentSchema }).strict(),
-  z.object({ role: z.literal('assistant'), content: anthropicAssistantContentSchema }).strict(),
+  z
+    .object({
+      role: z.literal('assistant'),
+      content: anthropicAssistantContentSchema,
+    })
+    .strict(),
 ]);
 const anthropicWireSchema = z
   .object({
@@ -387,6 +427,7 @@ const completionsMessageSchema = z
             id: z.string(),
             type: z.literal('function'),
             function: z.object({ name: z.string(), arguments: boundedString }).strict(),
+            extra_content: googleToolCallExtraContentSchema.optional(),
           })
           .strict(),
       )
@@ -471,6 +512,113 @@ export const billableModelOutputMaximum = (body: BillableModelRequest): bigint |
     (value): value is number => value !== undefined,
   );
   return values.length === 1 ? BigInt(values[0]!) : undefined;
+};
+
+/* Q1 overhead constants, ratified 2026-09-12 with the byte-bound reserve promise. */
+const perMessageTokens = 64n;
+const perRouteTokens = 4096n;
+const perImageTokens = 3000n;
+const imageElementTypes = new Set(['image', 'image_url', 'input_image']);
+/* Every `type` literal `billableModelRequestSchema` admits outside an image element.
+ * A request element whose type is absent here has no documented token bound and
+ * fails the whole request closed onto the provider's context limit. */
+const boundedElementTypes = new Set([
+  'adaptive',
+  'any',
+  'auto',
+  'ephemeral',
+  'function',
+  'function_call',
+  'function_call_output',
+  'message',
+  'none',
+  'output_text',
+  'reasoning',
+  'reasoning_text',
+  'redacted_thinking',
+  'refusal',
+  'required',
+  'summary_text',
+  'text',
+  'input_text',
+  'thinking',
+  'tool',
+  'tool_result',
+  'tool_use',
+]);
+/* Free-form JSON the caller supplies: tool schemas, tool-call arguments and provider
+ * annotations. Their bytes are inside the serialized bound, and their own `type`
+ * members are JSON-Schema vocabulary rather than request elements, so they are not
+ * matched against the element registry. */
+const freeFormMembers = new Set(['annotations', 'input_schema', 'parameters']);
+const freeFormMember = (elementType: string | undefined, key: string): boolean =>
+  freeFormMembers.has(key) || (elementType === 'tool_use' && key === 'input');
+
+const utf8Bytes = (value: string): bigint => BigInt(new TextEncoder().encode(value).byteLength);
+
+const conversationLength = (body: BillableModelRequest): bigint => {
+  const count = (value: unknown): number => (Array.isArray(value) ? value.length : value === undefined ? 0 : 1);
+  return BigInt(count(body.input) + count(body.messages) + count(body.system) + count(body.instructions));
+};
+
+/**
+ * Upper bound on the input tokens a qualified request can be billed for.
+ *
+ * Every tokenizer these routes use — byte-level BPE, SentencePiece and unigram —
+ * has a vocabulary of non-empty byte sequences, so a token never spans fewer than
+ * one byte of the text it encodes. The serialized request is therefore a hard
+ * bound on its own text tokens, and it is the exact payload the gateway forwards,
+ * so JSON punctuation, member names and tool schemas are all inside the bound.
+ * Image bytes are not a bound on image tokens, so each image element is removed
+ * from the byte total and replaced by its documented per-image maximum. Chat
+ * template and provider-injected system tokens are covered by the per-message and
+ * per-route constants ratified in Q1.
+ *
+ * @param body - The parsed native provider request.
+ * @returns The bound in tokens, or `undefined` when an element carries no documented bound.
+ */
+export const billableModelInputBound = (body: BillableModelRequest): bigint | undefined => {
+  let images = 0n;
+  let imageBytes = 0n;
+  const unbounded: string[] = [];
+  const visit = (node: unknown): void => {
+    if (Array.isArray(node)) {
+      for (const item of node) {
+        visit(item);
+      }
+      return;
+    }
+    if (node === null || typeof node !== 'object') {
+      return;
+    }
+    const declared = (node as { type?: unknown }).type;
+    const elementType = typeof declared === 'string' ? declared : undefined;
+    if (elementType !== undefined && imageElementTypes.has(elementType)) {
+      images += 1n;
+      imageBytes += utf8Bytes(JSON.stringify(node));
+      return;
+    }
+    if (elementType !== undefined && !boundedElementTypes.has(elementType)) {
+      unbounded.push(elementType);
+      return;
+    }
+    for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
+      if (!freeFormMember(elementType, key)) {
+        visit(value);
+      }
+    }
+  };
+  visit(body);
+  if (unbounded.length > 0) {
+    return undefined;
+  }
+  const textBytes = utf8Bytes(JSON.stringify(body)) - imageBytes;
+  return (
+    (textBytes < 0n ? 0n : textBytes) +
+    conversationLength(body) * perMessageTokens +
+    perRouteTokens +
+    images * perImageTokens
+  );
 };
 
 /** Whether a qualified native request carries an image. */

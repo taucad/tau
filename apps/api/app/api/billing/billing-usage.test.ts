@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/naming-convention -- PostgreSQL result aliases are intentionally snake case */
 import { BadRequestException, ServiceUnavailableException } from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
+import { PgDialect } from 'drizzle-orm/pg-core';
 import type postgres from 'postgres';
 import { mock, mockDeep } from 'vitest-mock-extended';
 import { describe, expect, it } from 'vitest';
@@ -176,5 +177,98 @@ describe('BillingUsageService query admission', () => {
 
     expect(result.availability).toEqual({ state: 'partial', reason: 'source_incomplete' });
     expect(result.coverage).toMatchObject({ complete: true, detailComplete: false });
+  });
+});
+
+describe('BillingUsageService open holds', () => {
+  const holdRow = {
+    operation_id: 'operation_2',
+    model_id: 'gpt-6-astra',
+    model_display_name: 'Astra',
+    provider_id: 'openai',
+    dispatch_state: 'accepted',
+    held_atoms: '3084332',
+    admitted_at: '2026-09-12T08:00:00.000000Z',
+    due_at: '2026-09-12T08:10:00.000000Z',
+    release_after: '2026-09-12T08:15:00.000000Z',
+  };
+
+  it('publishes the caller-owned pending holds with the grace their release waits for', async () => {
+    const { databaseService, service } = createService();
+    const transaction = mockDeep<Tx>();
+    databaseService.database.transaction.mockImplementation(async (callback) => callback(transaction));
+    transaction.execute.mockResolvedValueOnce(queryRows([])).mockResolvedValueOnce(
+      queryRows([
+        holdRow,
+        {
+          ...holdRow,
+          operation_id: 'operation_1',
+          model_id: 'gpt-5.6-luna',
+          model_display_name: null,
+          provider_id: null,
+          dispatch_state: 'admitted',
+          held_atoms: '65947',
+          admitted_at: null,
+        },
+      ]),
+    );
+
+    const result = await service.getOpenHolds({ authUserId: 'user_1' });
+
+    expect(result).toEqual({
+      environment: 'staging',
+      ownerId: 'user_1',
+      holds: [
+        {
+          operationId: 'operation_2',
+          model: { id: 'gpt-6-astra', displayName: 'Astra', providerId: 'openai' },
+          heldCreditAtoms: '3084332',
+          admittedAt: '2026-09-12T08:00:00.000000Z',
+          dueAt: '2026-09-12T08:10:00.000000Z',
+          releaseAfter: '2026-09-12T08:15:00.000000Z',
+          dispatchState: 'accepted',
+          customerState: 'pending',
+        },
+        {
+          operationId: 'operation_1',
+          model: { id: 'gpt-5.6-luna', displayName: null, providerId: null },
+          heldCreditAtoms: '65947',
+          admittedAt: null,
+          dueAt: '2026-09-12T08:10:00.000000Z',
+          releaseAfter: '2026-09-12T08:15:00.000000Z',
+          dispatchState: 'admitted',
+          customerState: 'pending',
+        },
+      ],
+    });
+
+    const [query] = transaction.execute.mock.calls[1]!;
+    if (typeof query === 'string') {
+      throw new TypeError('Expected a parameterized open-holds query');
+    }
+    const compiled = new PgDialect().sqlToQuery(query.getSQL());
+    /* Ownership is the session's binding, never a caller-supplied account; only
+     * open holds are listed, and the page is bounded. */
+    expect(compiled.sql).toContain('b.auth_user_id = $3');
+    expect(compiled.sql).toContain("o.customer_state = 'pending'");
+    expect(compiled.sql).toContain('order by o.admitted_at desc nulls last, o.id desc limit $4');
+    expect(compiled.params).toEqual([5, 'staging', 'user_1', 200]);
+  });
+
+  it('refuses to publish a hold whose amount is not a canonical unsigned atom string', async () => {
+    const { databaseService, service } = createService();
+    const transaction = mockDeep<Tx>();
+    databaseService.database.transaction.mockImplementation(async (callback) => callback(transaction));
+    transaction.execute
+      .mockResolvedValueOnce(queryRows([]))
+      .mockResolvedValueOnce(queryRows([{ ...holdRow, held_atoms: '-1' }]));
+
+    await expect(service.getOpenHolds({ authUserId: 'user_1' })).rejects.toThrow();
+  });
+
+  it('fails closed when the server billing environment is invalid', async () => {
+    const { databaseService, service } = createService('invalid');
+    await expect(service.getOpenHolds({ authUserId: 'user_1' })).rejects.toBeInstanceOf(ServiceUnavailableException);
+    expect(databaseService.database.transaction).not.toHaveBeenCalled();
   });
 });

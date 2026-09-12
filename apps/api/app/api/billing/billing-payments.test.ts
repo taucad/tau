@@ -8,6 +8,7 @@ import {
   qualifyReloadTaxCalculation,
   qualifySubscriptionInvoice,
 } from '#api/billing/billing-payments.recovery.js';
+import { cashOccurredAt } from '#api/billing/billing-payment-contract.js';
 import type { PaymentOfferSnapshot } from '#api/billing/billing-payment-contract.js';
 
 /* eslint-disable @typescript-eslint/naming-convention -- Stripe source fixtures preserve provider response field names. */
@@ -486,3 +487,23 @@ describe('subscription invoice source qualification', () => {
   });
 });
 /* eslint-enable @typescript-eslint/naming-convention -- End Stripe provider response fixtures. */
+
+describe('cash disposition time', () => {
+  const paidAt = '2026-09-06T00:00:00.000Z';
+  const effectiveAt = '2026-09-08T12:00:00.000Z';
+
+  it('dates a loss at the correction movement and an untouched payment at its own acceptance', () => {
+    expect(cashOccurredAt({ grossLossMinor: 0n }, paidAt).toISOString()).toBe(paidAt);
+    expect(cashOccurredAt({ grossLossMinor: 537n, taxCorrectionEvidence: { effectiveAt } }, paidAt).toISOString()).toBe(
+      effectiveAt,
+    );
+    expect(cashOccurredAt({ grossLossMinor: 0n, taxCorrectionEvidence: { effectiveAt } }, paidAt).toISOString()).toBe(
+      effectiveAt,
+    );
+  });
+
+  it('refuses a loss without a provider movement time and an unusable time', () => {
+    expect(() => cashOccurredAt({ grossLossMinor: 537n }, paidAt)).toThrow('cash_effective_time_missing');
+    expect(() => cashOccurredAt({ grossLossMinor: 0n }, 'not-a-time')).toThrow('cash_effective_time_invalid');
+  });
+});

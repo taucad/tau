@@ -6,6 +6,10 @@ import type { Stripe } from 'stripe';
 import { financialEnvironmentSchema } from '@taucad/billing';
 import { DatabaseService } from '#database/database.service.js';
 import { BillingCashService } from '#api/billing/billing-cash.service.js';
+import { BillingSupplierReconciliationService } from '#api/billing/billing-supplier-reconciliation.service.js';
+import { BillingRecoveryScheduler, recoveryPassLimit } from '#api/billing/billing-recovery.scheduler.js';
+import { BillingJournalReconciliationService } from '#api/billing/billing-journal-reconciliation.service.js';
+import { MetricsService } from '#telemetry/metrics.js';
 import { BillingPaymentsService } from '#api/billing/billing-payments.service.js';
 import { createBillingStripeClient } from '#api/billing/billing-stripe.js';
 import { DatabaseModule } from '#database/database.module.js';
@@ -16,13 +20,17 @@ import { BillingService } from '#api/billing/billing.service.js';
 import { BillingPolicyService } from '#api/billing/billing-policy.service.js';
 import { CreditLedgerService } from '#api/billing/credit-ledger.service.js';
 import { BillingUsageService } from '#api/billing/billing-usage.service.js';
+import { BillingEstimatesService } from '#api/billing/billing-estimates.service.js';
 import { BillableModelInvocationService } from '#api/billing/billable-model-invocation.service.js';
 import { billableModelQualificationResolverKey } from '#api/billing/billable-model-invocation.types.js';
 import {
   CodeOwnedBillableModelQualificationResolver,
   registerBillableModelMeterContracts,
 } from '#api/billing/billable-model-qualification.js';
-import { createBillableModelProviderAdapters } from '#api/billing/billable-model-provider.js';
+import {
+  createBillableModelInputCounters,
+  createBillableModelProviderAdapters,
+} from '#api/billing/billable-model-provider.js';
 import { stripeClientKey, stripeReadClientKey } from '#api/billing/billing.constants.js';
 import type { Environment } from '#config/environment.config.js';
 
@@ -121,6 +129,49 @@ const providerUpstreamFetch =
       },
     },
     {
+      provide: BillingSupplierReconciliationService,
+      inject: [DatabaseService, ConfigService],
+      useFactory(
+        database: DatabaseService,
+        config: ConfigService<Environment, true>,
+      ): BillingSupplierReconciliationService {
+        const environment = financialEnvironmentSchema.safeParse(config.get('BILLING_ENVIRONMENT', { infer: true }));
+        return new BillingSupplierReconciliationService(database, {
+          environment: environment.success ? environment.data : 'development',
+          stripeAccountId: config.get('STRIPE_ACCOUNT_ID', { infer: true }),
+          livemode: config.get('STRIPE_LIVEMODE', { infer: true }),
+        });
+      },
+    },
+    {
+      provide: BillingRecoveryScheduler,
+      inject: [CreditLedgerService, ConfigService],
+      useFactory(ledger: CreditLedgerService, config: ConfigService<Environment, true>): BillingRecoveryScheduler {
+        const environment = financialEnvironmentSchema.safeParse(config.get('BILLING_ENVIRONMENT', { infer: true }));
+        return new BillingRecoveryScheduler(ledger, {
+          environment: environment.success ? environment.data : 'development',
+          intervalMilliseconds: config.get('BILLING_RECOVERY_INTERVAL_MS', { infer: true }),
+          limit: recoveryPassLimit,
+        });
+      },
+    },
+    {
+      provide: BillingJournalReconciliationService,
+      inject: [DatabaseService, MetricsService, ConfigService],
+      useFactory(
+        database: DatabaseService,
+        metrics: MetricsService,
+        config: ConfigService<Environment, true>,
+      ): BillingJournalReconciliationService {
+        const environment = financialEnvironmentSchema.safeParse(config.get('BILLING_ENVIRONMENT', { infer: true }));
+        return new BillingJournalReconciliationService(database, metrics, {
+          environment: environment.success ? environment.data : 'development',
+          stripeAccountId: config.get('STRIPE_ACCOUNT_ID', { infer: true }),
+          livemode: config.get('STRIPE_LIVEMODE', { infer: true }),
+        });
+      },
+    },
+    {
       provide: BillingPaymentsService,
       inject: [
         DatabaseService,
@@ -170,6 +221,7 @@ const providerUpstreamFetch =
     CreditLedgerService,
     BillingPolicyService,
     BillingUsageService,
+    BillingEstimatesService,
     BillableModelInvocationService,
     {
       provide: billableModelQualificationResolverKey,
@@ -179,12 +231,20 @@ const providerUpstreamFetch =
         const accounts = config.get('BILLING_PROVIDER_ACCOUNTS', { infer: true });
         const credentialAccounts = new Map(Object.entries(accounts));
         const upstream = config.get('TAU_LLM_PROVIDER_UPSTREAM_URL', { infer: true });
+        const environment = financialEnvironmentSchema.safeParse(config.get('BILLING_ENVIRONMENT', { infer: true }));
         return new CodeOwnedBillableModelQualificationResolver({
           adapters: createBillableModelProviderAdapters(
             config,
             upstream === undefined ? undefined : providerUpstreamFetch(upstream),
           ),
           credentialAccounts,
+          // Configuration alone selects exact counting; an unresolved environment supplies none.
+          inputCounters: createBillableModelInputCounters({
+            enabled: environment.success && config.get('BILLING_EXACT_INPUT_COUNT', { infer: true }),
+            environment: environment.success ? environment.data : 'development',
+            apiKey: config.get('OPENAI_API_KEY', { infer: true }),
+            credentialAccount: credentialAccounts.get('openai'),
+          }),
           executionTimeout: config.get('BILLING_INVOCATION_DEADLINE', { infer: true }),
         });
       },
@@ -199,6 +259,7 @@ const providerUpstreamFetch =
     CreditLedgerService,
     BillingPolicyService,
     BillableModelInvocationService,
+    BillingSupplierReconciliationService,
   ],
 })
 export class BillingModule {}

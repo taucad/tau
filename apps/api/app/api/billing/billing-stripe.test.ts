@@ -238,6 +238,47 @@ describe('billing Stripe transport', () => {
     expect(fixture.requests).toHaveLength(2);
   });
 
+  it('dispatches the automatic reload metadata the service writes and rejects an unknown key', async () => {
+    const fixture = await createFixture({
+      '/v1/payment_intents': { id: 'pi_reload', object: 'payment_intent', status: 'succeeded', latest_charge: null },
+    });
+    const metadata = {
+      tau_purchase_id: 'purchase_1',
+      tau_customer_binding_id: 'binding_1',
+      tau_provider_leg_id: 'leg_1',
+      tau_reload_consent_id: 'consent_1',
+      tau_reload_consent_version: '3',
+      tau_reload_work_generation: '7',
+    };
+    const leg = {
+      kind: 'payment_intent',
+      idempotencyKey: 'tau:leg_1',
+      automaticReload: true,
+      request: {
+        amount: 2500,
+        currency: 'usd',
+        customer: 'cus_1',
+        payment_method: 'pm_1',
+        confirm: true,
+        off_session: true,
+        metadata,
+      },
+    } as const;
+    await expect(dispatchStripeLegOnce(fixture.stripe, parseStripeCreateLeg(leg))).resolves.toMatchObject({
+      object: { id: 'pi_reload' },
+    });
+    await expect(
+      dispatchStripeLegOnce(
+        fixture.stripe,
+        parseStripeCreateLeg({
+          ...leg,
+          request: { ...leg.request, metadata: { ...metadata, tau_unknown_key: 'x' } },
+        }),
+      ),
+    ).rejects.toThrow('metadata');
+    expect(fixture.requests).toHaveLength(1);
+  });
+
   it('parses persisted create JSON without a type assertion', () => {
     expect(
       parseStripeCreateLeg({

@@ -7,7 +7,8 @@ export type InputCountEvidence = {
   createRequestDigest: string;
   countRequestDigest: string;
   inputTokens: string;
-  liability: 'controlled-local-zero';
+  /** Liability of the count call itself: the controlled loopback stub, or the supplier's counter. */
+  liability: 'controlled-local-zero' | 'openai-input-tokens-v1';
 };
 
 export type SupplierValuation = {
@@ -136,6 +137,14 @@ export type TerminalHistoryEvidence = {
   normalizationEvidence?: {
     version: string;
     providerRequestId?: string;
+    /**
+     * Why the turn ended, retained on the operation and in its evidence.
+     *
+     * `executionStatus` alone cannot separate a client abort from an expired
+     * deadline, so a terminal without a provider-reported reason carries its
+     * own: `client_abort`, `deadline`, `malformed_response`,
+     * `authorized_exhausted`, `recovery_expired` or `recovery_unresolvable`.
+     */
     terminalReason?: string;
     fields: Record<string, string>;
   };
@@ -149,6 +158,14 @@ export type TerminalEvidence = TerminalHistoryEvidence &
         meterItems: readonly NormalizedMeterItem[];
       }
     | { kind: 'provider_rejected'; usageOccurredAt?: never }
+    /**
+     * The stream was cut at the ceiling the authorization funds (R8).
+     *
+     * It is the designed outcome of an in-stream control, not a fault: the
+     * operation settles at the authorized amount, clipped by the provider's own
+     * usage when it reported complete usage before the cut.
+     */
+    | { kind: 'authorized_exhausted'; usageOccurredAt?: Date; meterItems?: readonly NormalizedMeterItem[] }
     | { kind: 'absorbed_unknown'; usageOccurredAt?: Date; meterItems?: readonly NormalizedMeterItem[] }
   );
 
@@ -159,6 +176,15 @@ export type TerminalizeInput = {
   expectedGeneration: bigint;
   evidence: TerminalEvidence;
   resolvedAt: Date;
+  /**
+   * Finalize the supplier spend hold as `unresolved` in the same transaction.
+   *
+   * Recovery sets it when an absorbed expiry proves no further supplier
+   * evidence is coming, so the hold stops pinning budget. The live gateway
+   * never sets it: its operations either settle or keep the hold for
+   * reconciliation.
+   */
+  expireSpendHold?: boolean;
 };
 
 export type TerminalReceipt = {

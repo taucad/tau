@@ -931,6 +931,7 @@ function assertMetadata(metadata: Stripe.MetadataParam): void {
     'tau_purchase_id',
     'tau_reload_consent_id',
     'tau_reload_consent_version',
+    'tau_reload_work_generation',
     'tau_subscription_id',
     'tau_subscription_offer_id',
   ]);

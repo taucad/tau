@@ -4,7 +4,10 @@ import postgres from 'postgres';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import type { WireAccountClosure } from '@taucad/billing';
 import { BillingAccountClosureService } from '#api/billing/billing-account-closure.service.js';
-import type { ClosureCancellationAdapter } from '#api/billing/billing-account-closure.service.js';
+import type {
+  ClosureCancellationAdapter,
+  ClosureCancellationResult,
+} from '#api/billing/billing-account-closure.service.js';
 import type { DatabaseService } from '#database/database.service.js';
 import type { billingAccountClosure, billingOwnerBinding } from '#database/schema.js';
 import * as schema from '#database/schema.js';
@@ -149,6 +152,9 @@ describe.runIf(databaseUrl !== undefined)('account closure PostgreSQL lease foun
         values (${closureId},${accountId},${bindingId},'development','request','hash','closed',clock_timestamp(),clock_timestamp(),clock_timestamp(),clock_timestamp())`;
       const database = drizzle(client, { schema });
       const service = new BillingAccountClosureService({ database }, { recoverAndCancel }, 'development');
+      const seeded = await database.query.billingAccountClosure.findFirst({
+        where: (table, operators) => operators.eq(table.id, closureId),
+      });
 
       await expect(service.reconcile({ closureId, accountId })).resolves.toBe('processed');
       expect(recoverAndCancel).toHaveBeenCalledWith(expect.objectContaining({ subscriptionId, closureId, accountId }));
@@ -157,6 +163,7 @@ describe.runIf(databaseUrl !== undefined)('account closure PostgreSQL lease foun
       });
       expect(closure?.state).toBe('closed');
       expect(closure?.closedAt).toBeInstanceOf(Date);
+      expect(closure?.closedAt).toEqual(seeded?.closedAt);
     } finally {
       await client.end();
     }
@@ -207,6 +214,191 @@ describe.runIf(databaseUrl !== undefined)('account closure PostgreSQL lease foun
       release();
       await locker;
       await expect(reconcile).resolves.toBe('processed');
+    } finally {
+      await Promise.all([first.end(), second.end()]);
+    }
+  });
+  it('claims and applies on database time despite a regressed and an advanced worker clock', async () => {
+    const client = postgres(databaseUrl!, { max: 1, prepare: false });
+    const suffix = crypto.randomUUID();
+    const userId = `skew-user-${suffix}`;
+    const accountId = `skew-account-${suffix}`;
+    const bindingId = `skew-binding-${suffix}`;
+    const closureId = `skew-closure-${suffix}`;
+    const realNow = Date.now();
+    try {
+      await client`insert into public."user" (id,name,email,email_verified,allows_ai_training,created_at,updated_at)
+        values (${userId},'Skew fixture',${`${suffix}@example.invalid`},false,true,now(),now())`;
+      await client`insert into billing.credit_account (id,environment,status) values (${accountId},'staging','closing')`;
+      await client`insert into billing.billing_owner_binding (id,account_id,environment,auth_user_id,revoked_at)
+        values (${bindingId},${accountId},'staging',${userId},now())`;
+      await client`insert into billing.billing_account_closure
+        (id,account_id,binding_id,environment,request_id,request_hash,state,binding_revoked_at,obligations_frozen_at,lease_until)
+        values (${closureId},${accountId},${bindingId},'staging','request','hash','ready_for_auth_deletion',now(),now(),clock_timestamp()-interval '1 second')`;
+      const service = new BillingAccountClosureService(
+        { database: drizzle(client, { schema }) },
+        { recoverAndCancel: vi.fn() },
+        'staging',
+      );
+      vi.useFakeTimers({ toFake: ['Date'], shouldAdvanceTime: true });
+      // A worker whose clock lags cannot refuse an expired lease, and one that runs ahead cannot discard its own live lease.
+      vi.setSystemTime(new Date(realNow - 3_600_000));
+      await expect(service.reconcile({ closureId, accountId })).resolves.toBe('processed');
+      vi.setSystemTime(new Date(realNow + 7_200_000));
+      await expect(service.reconcile({ closureId, accountId })).resolves.toBe('processed');
+      vi.useRealTimers();
+      const [applied] =
+        await client`select generation::text as generation, lease_until is null as released, state from billing.billing_account_closure where id=${closureId}`;
+      expect(applied).toMatchObject({ generation: '2', released: true, state: 'ready_for_auth_deletion' });
+    } finally {
+      vi.useRealTimers();
+      await client.end();
+    }
+  });
+
+  it('lets exactly one of two concurrent closure workers apply its claim', async () => {
+    const first = postgres(databaseUrl!, { max: 1, prepare: false });
+    const second = postgres(databaseUrl!, { max: 1, prepare: false });
+    const suffix = crypto.randomUUID();
+    const accountId = `race-account-${suffix}`;
+    const bindingId = `race-binding-${suffix}`;
+    const customerBindingId = `race-customer-${suffix}`;
+    const closureId = `race-closure-${suffix}`;
+    const subscriptionId = `race-subscription-${suffix}`;
+    let admitLoser!: () => void;
+    let releaseWinner!: () => void;
+    const dispatched = new Promise<void>((resolve) => {
+      admitLoser = resolve;
+    });
+    const gate = new Promise<void>((resolve) => {
+      releaseWinner = resolve;
+    });
+    const recoverAndCancel = vi.fn(async (): Promise<ClosureCancellationResult> => {
+      admitLoser();
+      await gate;
+      return { status: 'canceled', providerObjectId: `sub_${suffix}` };
+    });
+    try {
+      await first`insert into billing.credit_account (id,environment,status) values (${accountId},'staging','closing')`;
+      await first`insert into billing.billing_owner_binding (id,account_id,environment,revoked_at)
+        values (${bindingId},${accountId},'staging',clock_timestamp())`;
+      await first`insert into billing.billing_stripe_customer
+        (id,account_id,environment,stripe_account_id,livemode,stripe_customer_id)
+        values (${customerBindingId},${accountId},'staging',${`acct_${suffix}`},false,${`cus_${suffix}`})`;
+      await first`insert into public.subscription
+        (id,plan,reference_id,status,account_id,environment,customer_binding_id,request_id,request_hash,offer_snapshot,slot_state)
+        values (${subscriptionId},'pro',${`ref-${suffix}`},'active',${accountId},'staging',${customerBindingId},'request','hash','{}'::jsonb,'current')`;
+      await first`insert into billing.billing_account_closure
+        (id,account_id,binding_id,environment,request_id,request_hash,state,binding_revoked_at,obligations_frozen_at)
+        values (${closureId},${accountId},${bindingId},'staging','request','hash','ready_for_auth_deletion',now(),now())`;
+      const [winner, loser] = [first, second].map(
+        (client) =>
+          new BillingAccountClosureService({ database: drizzle(client, { schema }) }, { recoverAndCancel }, 'staging'),
+      );
+      const winning = winner!.reconcile({ closureId, accountId });
+      await dispatched;
+      // The second worker arrives while the first still owns a live lease on the same generation.
+      const losing = await loser!.reconcile({ closureId, accountId });
+      releaseWinner();
+      expect([await winning, losing].filter((result) => result === 'processed')).toHaveLength(1);
+      expect(losing).toBe('pending');
+      expect(recoverAndCancel).toHaveBeenCalledTimes(1);
+      const [claimed] =
+        await first`select generation::text as generation, lease_until is null as released from billing.billing_account_closure where id=${closureId}`;
+      expect(claimed).toMatchObject({ generation: '1', released: true });
+    } finally {
+      releaseWinner();
+      await Promise.all([first.end(), second.end()]);
+    }
+  });
+
+  it('keeps the account closing when a stale claimant reaches the final closed write', async () => {
+    const first = postgres(databaseUrl!, { max: 1, prepare: false });
+    const second = postgres(databaseUrl!, { max: 1, prepare: false });
+    const suffix = crypto.randomUUID();
+    const accountId = `stale-account-${suffix}`;
+    const bindingId = `stale-binding-${suffix}`;
+    const customerBindingId = `stale-customer-${suffix}`;
+    const closureId = `stale-closure-${suffix}`;
+    const subscriptionId = `stale-subscription-${suffix}`;
+    // The provider leg succeeds, but the worker's lease expires (from another connection) before it
+    // returns, so the final closed write must find no live claim. Closure-row-first ordering means the
+    // account status is never touched by a stale claimant; account-first ordering would commit 'closed'.
+    const recoverAndCancel = vi.fn(async (): Promise<ClosureCancellationResult> => {
+      await second`update billing.billing_account_closure set lease_until = clock_timestamp() - interval '1 second' where id = ${closureId}`;
+      return { status: 'canceled', providerObjectId: `sub_${suffix}` };
+    });
+    try {
+      await first`insert into billing.credit_account (id,environment,status) values (${accountId},'staging','closing')`;
+      await first`insert into billing.billing_owner_binding (id,account_id,environment,revoked_at)
+        values (${bindingId},${accountId},'staging',clock_timestamp())`;
+      await first`insert into billing.billing_stripe_customer
+        (id,account_id,environment,stripe_account_id,livemode,stripe_customer_id)
+        values (${customerBindingId},${accountId},'staging',${`acct_${suffix}`},false,${`cus_${suffix}`})`;
+      await first`insert into public.subscription
+        (id,plan,reference_id,status,account_id,environment,customer_binding_id,request_id,request_hash,offer_snapshot,slot_state)
+        values (${subscriptionId},'pro',${`ref-${suffix}`},'active',${accountId},'staging',${customerBindingId},'request','hash','{}'::jsonb,'current')`;
+      await first`insert into billing.billing_account_closure
+        (id,account_id,binding_id,environment,request_id,request_hash,state,binding_revoked_at,obligations_frozen_at,auth_deleted_at)
+        values (${closureId},${accountId},${bindingId},'staging','request','hash','ready_for_auth_deletion',now(),now(),clock_timestamp())`;
+      const service = new BillingAccountClosureService(
+        { database: drizzle(first, { schema }) },
+        { recoverAndCancel },
+        'staging',
+      );
+      expect(await service.reconcile({ closureId, accountId })).toBe('pending');
+      expect(recoverAndCancel).toHaveBeenCalledTimes(1);
+      const [closure] =
+        await first`select state, closed_at is null as open from billing.billing_account_closure where id=${closureId}`;
+      expect(closure).toMatchObject({ state: 'ready_for_auth_deletion', open: true });
+      const [account] = await first`select status from billing.credit_account where id=${accountId}`;
+      expect(account).toMatchObject({ status: 'closing' });
+    } finally {
+      await Promise.all([first.end(), second.end()]);
+    }
+  });
+
+  it('rejects preparation when the discovered owner is withdrawn before the account lock is granted', async () => {
+    const first = postgres(databaseUrl!, { max: 1, prepare: false });
+    const second = postgres(databaseUrl!, { max: 1, prepare: false });
+    const suffix = crypto.randomUUID();
+    const userId = `owner-user-${suffix}`;
+    const accountId = `owner-account-${suffix}`;
+    const bindingId = `owner-binding-${suffix}`;
+    try {
+      await first`insert into public."user" (id,name,email,email_verified,allows_ai_training,created_at,updated_at)
+        values (${userId},'Owner fixture',${`${suffix}@example.invalid`},false,true,now(),now())`;
+      await first`insert into billing.credit_account (id,environment,status) values (${accountId},'staging','open')`;
+      await first`insert into billing.billing_owner_binding (id,account_id,environment,auth_user_id)
+        values (${bindingId},${accountId},'staging',${userId})`;
+      let release!: () => void;
+      let reportLocked!: () => void;
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const locked = new Promise<void>((resolve) => {
+        reportLocked = resolve;
+      });
+      const withdraw = first.begin(async (transaction) => {
+        await transaction`select id from billing.credit_account where id=${accountId} for update`;
+        await transaction`update billing.billing_owner_binding set auth_user_id = null where id=${bindingId}`;
+        reportLocked();
+        await held;
+      });
+      await locked;
+      const service = new BillingAccountClosureService(
+        { database: drizzle(second, { schema }) },
+        { recoverAndCancel: vi.fn() },
+        'staging',
+      );
+      const prepare = service.prepare({ authUserId: userId, requestId: `withdrawn-${suffix}` });
+      await new Promise((resolve) => {
+        setTimeout(resolve, 150);
+      });
+      release();
+      await withdraw;
+      await expect(prepare).rejects.toThrow('billing_owner_changed');
+      expect(await first`select id from billing.billing_account_closure where account_id=${accountId}`).toHaveLength(0);
     } finally {
       await Promise.all([first.end(), second.end()]);
     }

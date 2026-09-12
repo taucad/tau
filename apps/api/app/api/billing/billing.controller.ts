@@ -34,12 +34,15 @@ import type {
   WirePaymentAction,
   WireUsageSnapshot,
   WireBalanceExplanation,
+  WireModelEstimates,
+  WireOpenHolds,
   WireOperationReceipt,
 } from '@taucad/billing';
 import { serializeEntitlements } from '@taucad/billing';
 import type { AuthUser } from '#auth/auth.type.js';
 import { UseAuth, User } from '#auth/decorators/auth.decorator.js';
 import { BillingService } from '#api/billing/billing.service.js';
+import { BillingEstimatesService } from '#api/billing/billing-estimates.service.js';
 import { BillingUsageService } from '#api/billing/billing-usage.service.js';
 
 @UseAuth()
@@ -51,6 +54,7 @@ export class BillingController {
     private readonly usageService: BillingUsageService,
     private readonly paymentsService: BillingPaymentsService,
     private readonly closureService: BillingAccountClosureService,
+    private readonly estimatesService: BillingEstimatesService,
   ) {}
 
   @Get('entitlements')
@@ -63,6 +67,18 @@ export class BillingController {
   @Header('Cache-Control', 'private, no-store')
   public async getCredits(@User() user: AuthUser, @Query() rawQuery: unknown): Promise<WireBalanceExplanation> {
     return this.usageService.getBalance({ authUserId: user.id, rawQuery });
+  }
+
+  @Get('model-estimates')
+  @Header('Cache-Control', 'private, no-store')
+  public async getModelEstimates(@User() user: AuthUser): Promise<WireModelEstimates> {
+    return this.estimatesService.getModelEstimates({ authUserId: user.id });
+  }
+
+  @Get('holds')
+  @Header('Cache-Control', 'private, no-store')
+  public async getOpenHolds(@User() user: AuthUser): Promise<WireOpenHolds> {
+    return this.usageService.getOpenHolds({ authUserId: user.id });
   }
 
   @Get('usage')

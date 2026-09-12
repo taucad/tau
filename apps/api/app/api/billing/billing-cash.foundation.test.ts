@@ -7,7 +7,7 @@ import { and, eq, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import * as schema from '#database/schema.js';
-import { cashProjectionDigest } from '#api/billing/billing-payment-contract.js';
+import { cashOccurredAt, cashProjectionDigest } from '#api/billing/billing-payment-contract.js';
 import type {
   CashProjectionEvidence,
   PaidPaymentEvidence,
@@ -15,6 +15,8 @@ import type {
 } from '#api/billing/billing-payment-contract.js';
 import { BillingPolicyService } from '#api/billing/billing-policy.service.js';
 import { BillingCashService } from '#api/billing/billing-cash.service.js';
+import type { QualifiedCashSource } from '#api/billing/billing-cash.service.js';
+import { BillingTaxService } from '#api/billing/billing-tax.service.js';
 import { BillingCashReconciliationService } from '#api/billing/billing-cash-reconciliation.service.js';
 import { createBillingStripeClient } from '#api/billing/billing-stripe.js';
 import { CreditLedgerService } from '#api/billing/credit-ledger.service.js';
@@ -32,6 +34,7 @@ const ledger = new CreditLedgerService(
   { database: runtimeDatabase },
   new BillingPolicyService({ database: runtimeDatabase }),
 );
+const tax = new BillingTaxService({ database: runtimeDatabase });
 let stripeOrigin = '';
 const cashStripeAccountId = 'acct_cash_foundation';
 let refundFixture:
@@ -46,12 +49,15 @@ let refundFixture:
   | undefined;
 let refundPosts = 0;
 let serveRefund = false;
+let refundStatus: 'succeeded' | 'failed' = 'succeeded';
+let refundCreated: number | undefined;
 let serveDispute = false;
 let disputeReturned = false;
 let disputeCreated = 1;
 let listCashSources = false;
 let invalidBalance = false;
 let failPaymentIntentRead = false;
+let lostPaymentIntentId = '';
 
 const cashClaimId = (chargeId: string): string =>
   createHash('sha256')
@@ -71,11 +77,11 @@ const server = createServer((request, response) => {
     balance_transaction: 'txn_refund_process',
     charge: value.chargeId,
     currency: 'usd',
-    created: Math.floor(Date.now() / 1000),
+    created: refundCreated ?? Math.floor(Date.now() / 1000),
     customer: value.customerId,
     metadata: { tau_refund_intent_id: value.intentId, tau_reversal_case_id: value.reversalCaseId },
     payment_intent: value.paymentIntentId,
-    status: 'succeeded',
+    status: refundStatus,
   };
   response.setHeader('Content-Type', 'application/json');
   if (request.method === 'POST' && url.pathname === '/v1/refunds') {
@@ -128,10 +134,15 @@ const server = createServer((request, response) => {
       amount_received: 500,
       created: Math.floor(Date.now() / 1000),
     };
+    const lostPaymentIntent = {
+      ...paymentIntent,
+      id: lostPaymentIntentId,
+      latest_charge: `ch_lost_${lostPaymentIntentId}`,
+    };
     response.end(
       JSON.stringify({
         object: 'list',
-        data: listCashSources ? [paymentIntent] : [],
+        data: listCashSources ? [paymentIntent, ...(lostPaymentIntentId === '' ? [] : [lostPaymentIntent])] : [],
         has_more: false,
         url: '/v1/payment_intents',
       }),
@@ -188,10 +199,22 @@ const server = createServer((request, response) => {
       status: 'available',
       created: Math.floor(Date.now() / 1000),
     };
+    const canceling = [
+      { ...balance, id: `txn_lost_charge_${lostPaymentIntentId}`, source: `ch_lost_${lostPaymentIntentId}`, net: 470 },
+      {
+        ...balance,
+        id: `txn_lost_reversal_${lostPaymentIntentId}`,
+        source: `ch_lost_${lostPaymentIntentId}`,
+        type: 'refund',
+        amount: -500,
+        fee: -30,
+        net: -470,
+      },
+    ];
     response.end(
       JSON.stringify({
         object: 'list',
-        data: listCashSources ? [balance] : [],
+        data: listCashSources ? [balance, ...(lostPaymentIntentId === '' ? [] : canceling)] : [],
         has_more: false,
         url: '/v1/balance_transactions',
       }),
@@ -451,6 +474,35 @@ async function apply(input: Awaited<ReturnType<typeof fixture>>, projection: Cas
   });
 }
 
+/** Mirrors the production cash application: ledger disposition, tax correction, then the claim finish. */
+async function applyQualified(
+  input: Awaited<ReturnType<typeof fixture>>,
+  qualified: QualifiedCashSource,
+): Promise<void> {
+  await runtimeDatabase.transaction(async (tx) => {
+    await ledger.applyCashDisposition(
+      {
+        accountId: input.accountId,
+        causeId: input.purchase.purchaseId,
+        source: 'purchased',
+        ...qualified,
+        occurredAt: cashOccurredAt(qualified, input.purchase.proof.paidAt),
+      },
+      tx,
+    );
+    await tax.observeQualifiedCashCorrection({
+      transaction: tx,
+      causeId: input.purchase.purchaseId,
+      source: 'purchased',
+      qualified,
+    });
+    await tx
+      .update(schema.billingStripeSource)
+      .set({ state: 'done', leaseUntil: null, errorCode: null })
+      .where(eq(schema.billingStripeSource.id, input.claimId));
+  });
+}
+
 async function reclaim(input: Awaited<ReturnType<typeof fixture>>, generation: bigint): Promise<void> {
   await database
     .update(schema.billingStripeSource)
@@ -460,6 +512,28 @@ async function reclaim(input: Awaited<ReturnType<typeof fixture>>, generation: b
       leaseUntil: sql`clock_timestamp() + interval '30 seconds'`,
     })
     .where(eq(schema.billingStripeSource.id, input.claimId));
+}
+
+function cashService(secretKey: string): BillingCashService {
+  const stripe = createBillingStripeClient({ secretKey, fixtureUrl: stripeOrigin, requestTimeout: 500 });
+  return new BillingCashService({ database: runtimeDatabase }, stripe, stripe, ledger, {
+    environment: 'development',
+    stripeAccountId: cashStripeAccountId,
+    livemode: false,
+  });
+}
+
+async function reversalCaseOf(
+  input: Awaited<ReturnType<typeof fixture>>,
+): Promise<typeof schema.billingReversalCase.$inferSelect> {
+  const [cashCase] = await database
+    .select()
+    .from(schema.billingReversalCase)
+    .where(eq(schema.billingReversalCase.purchaseId, input.purchase.purchaseId));
+  if (cashCase === undefined) {
+    throw new Error('Cash reversal case was not created');
+  }
+  return cashCase;
 }
 
 describe('cash disposition foundation', () => {
@@ -822,6 +896,81 @@ describe('cash disposition foundation', () => {
     expect(intent).toMatchObject({ state: 'succeeded', holdState: 'applied' });
   });
 
+  it('should date a zero-loss reviewed refund at the provider refund time', async () => {
+    const value = await fixture();
+    await apply(value, evidence(value, '0'));
+    await database
+      .update(schema.billingStripeSource)
+      .set({ state: 'done', leaseUntil: null })
+      .where(eq(schema.billingStripeSource.id, value.claimId));
+    const cashCase = await reversalCaseOf(value);
+    const cash = cashService('sk_test_cash_zero_loss');
+    const prepared = await cash.prepareReviewedRefund({
+      environment: 'development',
+      accountId: value.accountId,
+      reversalCaseId: cashCase.id,
+      requestedPrincipalMinor: '250',
+      requestedTaxMinor: '0',
+      approvedMaximumGrossMinor: '250',
+      reviewActorId: 'operator_fixture',
+      reviewedAt: new Date('2020-01-02T03:04:05.000Z'),
+      reason: 'refund the provider never moved',
+      requestId: randomUUID(),
+    });
+    const failedRefund = {
+      customerId: value.purchase.proof.paidEvidence.customerId,
+      paymentIntentId: value.purchase.proof.paymentIntentId,
+      chargeId: value.purchase.proof.chargeId,
+      refundId: `re_${randomUUID()}`,
+      intentId: prepared.intentId,
+      reversalCaseId: cashCase.id,
+    };
+    refundFixture = failedRefund;
+    serveRefund = true;
+    refundStatus = 'failed';
+    refundCreated = Math.floor(Date.now() / 1000) - 600;
+    try {
+      await expect(
+        cash.executeReviewedRefund({
+          environment: 'development',
+          intentId: prepared.intentId,
+          reviewActorId: 'operator_fixture',
+          capability: {
+            qualification: 'controlled-local-protected-refund',
+            environment: 'development',
+            stripeAccountId: cashStripeAccountId,
+            livemode: false,
+          },
+        }),
+      ).rejects.toThrow();
+      const recovered = await cash.recoverRefundIntent({
+        environment: 'development',
+        intentId: prepared.intentId,
+        maximumPages: 3,
+      });
+      expect(recovered).toMatchObject({ status: 'applied', refundId: failedRefund.refundId });
+      const [applied] = await database
+        .select()
+        .from(schema.billingReversalCase)
+        .where(eq(schema.billingReversalCase.id, cashCase.id));
+      expect(applied?.projectionObservedAt).toEqual(new Date(refundCreated * 1000));
+      const [intent] = await database
+        .select()
+        .from(schema.billingRefundIntent)
+        .where(eq(schema.billingRefundIntent.id, prepared.intentId));
+      expect(intent).toMatchObject({ state: 'failed', holdState: 'released' });
+      const [account] = await database
+        .select()
+        .from(schema.creditAccount)
+        .where(eq(schema.creditAccount.id, value.accountId));
+      expect(account).toMatchObject({ purchasedAtoms: 1000n, purchasedHeldAtoms: 0n, debtAtoms: 0n });
+    } finally {
+      serveRefund = false;
+      refundStatus = 'succeeded';
+      refundCreated = undefined;
+    }
+  });
+
   it('converges a late dispute withdrawal and reinstatement after account closure', async () => {
     const value = await fixture();
     await apply(value, evidence(value, '0'));
@@ -889,13 +1038,7 @@ describe('cash disposition foundation', () => {
     if (withdrawn.status !== 'qualified') {
       throw new Error(`Withdrawal was not qualified: ${withdrawn.reason}`);
     }
-    await cash.applyQualifiedSource({
-      accountId: value.accountId,
-      causeId: value.purchase.purchaseId,
-      source: 'purchased',
-      qualified: withdrawn,
-      occurredAt: new Date(),
-    });
+    await applyQualified(value, withdrawn);
     let [account] = await database
       .select()
       .from(schema.creditAccount)
@@ -912,13 +1055,7 @@ describe('cash disposition foundation', () => {
     if (restored.status !== 'qualified') {
       throw new Error(`Restoration was not qualified: ${restored.reason}`);
     }
-    await cash.applyQualifiedSource({
-      accountId: value.accountId,
-      causeId: value.purchase.purchaseId,
-      source: 'purchased',
-      qualified: restored,
-      occurredAt: new Date(),
-    });
+    await applyQualified(value, restored);
     [account] = await database.select().from(schema.creditAccount).where(eq(schema.creditAccount.id, value.accountId));
     expect(account).toMatchObject({ status: 'closed', purchasedAtoms: 0n, debtAtoms: 0n });
     const [source] = await database
@@ -1033,5 +1170,299 @@ describe('cash disposition foundation', () => {
       .from(schema.billingCashScanFact)
       .where(eq(schema.billingCashScanFact.scanId, scanId));
     expect(links).toHaveLength(2);
+  });
+
+  it('freezes one reviewed refund intent per request and reserves only unheld refundable value', async () => {
+    const value = await fixture();
+    await apply(value, evidence(value, '0'));
+    const cashCase = await reversalCaseOf(value);
+    const cash = cashService('sk_test_cash_prepare');
+    const request = {
+      environment: 'development',
+      accountId: value.accountId,
+      reversalCaseId: cashCase.id,
+      requestedPrincipalMinor: '250',
+      requestedTaxMinor: '0',
+      approvedMaximumGrossMinor: '250',
+      reviewActorId: 'operator_prepare',
+      reviewedAt: new Date(),
+      reason: 'reviewed refund',
+      requestId: randomUUID(),
+    } as const;
+    const first = await cash.prepareReviewedRefund(request);
+    expect(await cash.prepareReviewedRefund(request)).toEqual(first);
+    await expect(
+      cash.prepareReviewedRefund({ ...request, requestedPrincipalMinor: '200', approvedMaximumGrossMinor: '200' }),
+    ).rejects.toThrow('refund_replay_mismatch');
+    const second = await cash.prepareReviewedRefund({
+      ...request,
+      requestId: randomUUID(),
+      requestedPrincipalMinor: '150',
+      approvedMaximumGrossMinor: '150',
+    });
+    const intents = await database
+      .select()
+      .from(schema.billingRefundIntent)
+      .where(eq(schema.billingRefundIntent.reversalCaseId, cashCase.id));
+    expect(intents).toHaveLength(2);
+    expect(intents.find((intent) => intent.id === first.intentId)).toMatchObject({ holdAtoms: 500n });
+    expect(intents.find((intent) => intent.id === second.intentId)).toMatchObject({ holdAtoms: 300n });
+    let [account] = await database
+      .select()
+      .from(schema.creditAccount)
+      .where(eq(schema.creditAccount.id, value.accountId));
+    expect(account).toMatchObject({ purchasedAtoms: 1000n, purchasedHeldAtoms: 800n });
+    await expect(cash.prepareReviewedRefund({ ...request, requestId: randomUUID() })).rejects.toThrow(
+      'refund_principal_exceeds_source',
+    );
+    const spent = await fixture();
+    await apply(spent, evidence(spent, '0'));
+    const spentCase = await reversalCaseOf(spent);
+    await database
+      .update(schema.creditAccount)
+      .set({ purchasedAtoms: 100n })
+      .where(eq(schema.creditAccount.id, spent.accountId));
+    await expect(
+      cash.prepareReviewedRefund({
+        ...request,
+        accountId: spent.accountId,
+        reversalCaseId: spentCase.id,
+        requestId: randomUUID(),
+      }),
+    ).rejects.toThrow('refund_hold_insufficient');
+    [account] = await database.select().from(schema.creditAccount).where(eq(schema.creditAccount.id, spent.accountId));
+    expect(account).toMatchObject({ purchasedAtoms: 100n, purchasedHeldAtoms: 0n });
+    const unreserved = await database
+      .select()
+      .from(schema.billingRefundIntent)
+      .where(eq(schema.billingRefundIntent.reversalCaseId, spentCase.id));
+    expect(unreserved).toHaveLength(0);
+  });
+
+  it('rejects a canonical source claim outside its configured scope or another charge lease', async () => {
+    const value = await fixture();
+    await apply(value, evidence(value, '0'));
+    const cashCase = await reversalCaseOf(value);
+    const input = {
+      environment: 'development',
+      accountId: value.accountId,
+      reversalCaseId: cashCase.id,
+      maximumRefundPages: 3,
+    } as const;
+    const stripe = createBillingStripeClient({ secretKey: 'sk_test_cash_scope', fixtureUrl: stripeOrigin });
+    const foreign = new BillingCashService({ database: runtimeDatabase }, stripe, stripe, ledger, {
+      environment: 'development',
+      stripeAccountId: 'acct_cash_other',
+      livemode: false,
+    });
+    await expect(foreign.qualifyChargeSource(input)).rejects.toThrow('cash_source_scope');
+    const live = new BillingCashService({ database: runtimeDatabase }, stripe, stripe, ledger, {
+      environment: 'development',
+      stripeAccountId: cashStripeAccountId,
+      livemode: true,
+    });
+    await expect(live.qualifyChargeSource(input)).rejects.toThrow('cash_source_scope');
+    await expect(
+      cashService('sk_test_cash_scope').qualifyChargeSource({ ...input, environment: 'staging' }),
+    ).rejects.toThrow('cash_source_scope');
+    const [source] = await database
+      .select()
+      .from(schema.billingStripeSource)
+      .where(eq(schema.billingStripeSource.id, value.claimId));
+    expect(source).toMatchObject({ generation: 1n });
+    const other = await fixture();
+    await database
+      .update(schema.billingStripeSource)
+      .set({ state: 'pending', leaseUntil: sql`clock_timestamp() - interval '1 second'` })
+      .where(eq(schema.billingStripeSource.id, other.claimId));
+    await expect(cashService('sk_test_cash_scope').qualifyChargeSource(input)).rejects.toThrow('cash_source_claimed');
+    const [untouched] = await database
+      .select()
+      .from(schema.billingStripeSource)
+      .where(eq(schema.billingStripeSource.id, other.claimId));
+    expect(untouched).toMatchObject({ state: 'pending', generation: 1n });
+  });
+
+  it('does not accept a shrunken dispute listing as returned cash', async () => {
+    const value = await fixture();
+    await apply(value, evidence(value, '0'));
+    await database
+      .update(schema.billingStripeSource)
+      .set({ state: 'done', leaseUntil: null })
+      .where(eq(schema.billingStripeSource.id, value.claimId));
+    refundFixture = {
+      customerId: value.purchase.proof.paidEvidence.customerId,
+      paymentIntentId: value.purchase.proof.paymentIntentId,
+      chargeId: value.purchase.proof.chargeId,
+      refundId: `re_${randomUUID()}`,
+      intentId: randomUUID(),
+      reversalCaseId: randomUUID(),
+    };
+    serveRefund = false;
+    serveDispute = true;
+    disputeReturned = false;
+    disputeCreated = Math.floor(Date.now() / 1000) - 10;
+    const cash = cashService('sk_test_cash_shrunken');
+    const cashCase = await reversalCaseOf(value);
+    const input = {
+      environment: 'development',
+      accountId: value.accountId,
+      reversalCaseId: cashCase.id,
+      maximumRefundPages: 3,
+    } as const;
+    const withdrawn = await cash.qualifyChargeSource(input);
+    if (withdrawn.status !== 'qualified') {
+      throw new Error(`Withdrawal was not qualified: ${withdrawn.reason}`);
+    }
+    await applyQualified(value, withdrawn);
+    serveDispute = false;
+    await expect(cash.qualifyChargeSource(input)).resolves.toEqual({
+      status: 'attention',
+      reason: 'cash_source_coverage_regression',
+    });
+    const [account] = await database
+      .select()
+      .from(schema.creditAccount)
+      .where(eq(schema.creditAccount.id, value.accountId));
+    const [retained] = await database
+      .select()
+      .from(schema.billingReversalCase)
+      .where(eq(schema.billingReversalCase.id, cashCase.id));
+    expect(account).toMatchObject({ purchasedAtoms: 0n, debtAtoms: 0n });
+    expect(retained).toMatchObject({ cumulativePrincipalLossMinor: 500n, netAppliedAtoms: 1000n });
+  });
+
+  it('reaches the same bounded entitlement from split and single full refunds', async () => {
+    const split = await fixture();
+    await apply(split, evidence(split, '300'));
+    await reclaim(split, 2n);
+    await apply(split, evidence(split, '500'), 2n);
+    const single = await fixture();
+    const receipt = await apply(single, evidence(single, '500'));
+    const [splitAccount] = await database
+      .select()
+      .from(schema.creditAccount)
+      .where(eq(schema.creditAccount.id, split.accountId));
+    const [singleAccount] = await database
+      .select()
+      .from(schema.creditAccount)
+      .where(eq(schema.creditAccount.id, single.accountId));
+    expect(splitAccount).toMatchObject({ purchasedAtoms: 0n, debtAtoms: 0n });
+    expect(singleAccount).toMatchObject({ purchasedAtoms: 0n, debtAtoms: 0n });
+    const splitCase = await reversalCaseOf(split);
+    const singleCase = await reversalCaseOf(single);
+    expect(splitCase).toMatchObject({
+      originalAtoms: 1000n,
+      initialIssuedAtoms: 400n,
+      deferredIssuedAtoms: 0n,
+      netAppliedAtoms: 400n,
+    });
+    expect(singleCase).toMatchObject({
+      originalAtoms: 1000n,
+      initialIssuedAtoms: 0n,
+      withheldAtoms: 1000n,
+      deferredIssuedAtoms: 0n,
+      netAppliedAtoms: 0n,
+    });
+    expect(receipt.grantedAtoms).toBe(0n);
+    expect(singleCase.canonicalReceiptId).toBe(receipt.receiptId);
+  });
+
+  it('detects a lost journal whose balance movements cancel internally', async () => {
+    const value = await fixture();
+    refundFixture = {
+      customerId: value.purchase.proof.paidEvidence.customerId,
+      paymentIntentId: value.purchase.proof.paymentIntentId,
+      chargeId: value.purchase.proof.chargeId,
+      refundId: `re_${randomUUID()}`,
+      intentId: randomUUID(),
+      reversalCaseId: randomUUID(),
+    };
+    serveRefund = false;
+    serveDispute = false;
+    listCashSources = true;
+    invalidBalance = false;
+    const lostPaymentIntent = `pi_lost_${randomUUID()}`;
+    lostPaymentIntentId = lostPaymentIntent;
+    const stripe = createBillingStripeClient({ secretKey: 'sk_test_cash_lost', fixtureUrl: stripeOrigin });
+    const reconciliation = new BillingCashReconciliationService({ database: runtimeDatabase }, stripe, {
+      environment: 'development',
+      stripeAccountId: cashStripeAccountId,
+      livemode: false,
+    });
+    const now = new Date();
+    const scanId = await reconciliation.createScan({
+      environment: 'development',
+      currency: 'usd',
+      lookbackStart: new Date(now.getTime() - 60_000),
+      windowStart: new Date(now.getTime() - 30_000),
+      windowEnd: new Date(now.getTime() + 60_000),
+    });
+    await expect(reconciliation.runScan({ scanId, maximumPagesPerStream: 3 })).resolves.toEqual({ status: 'complete' });
+    const cases = await database
+      .select()
+      .from(schema.billingFinancialCase)
+      .where(eq(schema.billingFinancialCase.environment, 'development'));
+    lostPaymentIntentId = '';
+    listCashSources = false;
+    expect(cases).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: 'missing_local_payment', sourceId: lostPaymentIntent, state: 'open' }),
+        expect.objectContaining({
+          kind: 'paid_unfulfilled_recovery',
+          sourceId: value.purchase.proof.paymentIntentId,
+          state: 'open',
+        }),
+      ]),
+    );
+    expect(
+      cases.filter(
+        (value_) => value_.kind === 'missing_local_payment' && value_.sourceId === value.purchase.proof.paymentIntentId,
+      ),
+    ).toHaveLength(0);
+    expect(
+      cases.filter(
+        (value_) =>
+          value_.kind === 'gross_fee_net_mismatch' &&
+          (value_.sourceId === `txn_lost_charge_${lostPaymentIntent}` ||
+            value_.sourceId === `txn_lost_reversal_${lostPaymentIntent}`),
+      ),
+    ).toHaveLength(0);
+  });
+
+  it('reclaims an expired running scan owned by the configured provider account', async () => {
+    const stripe = createBillingStripeClient({ secretKey: 'sk_test_cash_reclaim', fixtureUrl: stripeOrigin });
+    const reconciliation = new BillingCashReconciliationService({ database: runtimeDatabase }, stripe, {
+      environment: 'development',
+      stripeAccountId: cashStripeAccountId,
+      livemode: false,
+    });
+    listCashSources = false;
+    const scanId = await reconciliation.createScan({
+      environment: 'development',
+      currency: 'usd',
+      lookbackStart: new Date('2020-01-01T00:00:00Z'),
+      windowStart: new Date('2020-01-02T00:00:00Z'),
+      windowEnd: new Date('2020-01-03T00:00:00Z'),
+    });
+    await database
+      .update(schema.billingCashScan)
+      .set({ state: 'running', generation: 7n, leaseUntil: sql`clock_timestamp() - interval '1 second'` })
+      .where(eq(schema.billingCashScan.id, scanId));
+    const [forced] = await database.select().from(schema.billingCashScan).where(eq(schema.billingCashScan.id, scanId));
+    expect(forced).toMatchObject({ stripeAccountId: cashStripeAccountId, state: 'running', generation: 7n });
+    const foreign = new BillingCashReconciliationService({ database: runtimeDatabase }, stripe, {
+      environment: 'development',
+      stripeAccountId: 'acct_cash_other',
+      livemode: false,
+    });
+    await expect(foreign.runScan({ scanId, maximumPagesPerStream: 3 })).rejects.toThrow('cash_scan_claimed');
+    let [scan] = await database.select().from(schema.billingCashScan).where(eq(schema.billingCashScan.id, scanId));
+    expect(scan).toMatchObject({ state: 'running', generation: 7n, attempts: 0 });
+    await expect(reconciliation.runScan({ scanId, maximumPagesPerStream: 3 })).resolves.toEqual({
+      status: 'complete',
+    });
+    [scan] = await database.select().from(schema.billingCashScan).where(eq(schema.billingCashScan.id, scanId));
+    expect(scan).toMatchObject({ state: 'complete', generation: 8n, attempts: 1 });
   });
 });

@@ -321,6 +321,73 @@ describe('commercial policy', () => {
     }).not.toThrow();
   });
 
+  it('should judge a tier split and every sku rename against the parent sku a customer already paid', () => {
+    const announcedAt = new Date('2026-09-05T00:00:00.000Z');
+    const rate = (
+      rateId: string,
+      referenceNumeratorPicoUsd: string,
+      meterContractId = 'meter-v1',
+    ): CommercialPolicy['rates'][number] => ({
+      rateId,
+      meterContractId,
+      dimension: 'output',
+      tier: null,
+      unit: 'token',
+      referenceNumeratorPicoUsd,
+      denominatorUnits: '3',
+      retailOverride: null,
+    });
+    const route = (routeId: string, sku: string, rateIds: string[]): CommercialPolicy['routes'][number] => ({
+      routeId,
+      sku,
+      meterContractId: 'meter-v1',
+      rateIds,
+      enabled: true,
+      spendBudgetId: 'spend-budget-v1',
+      riskBudgetId: 'risk-budget-v1',
+    });
+    // The premium tariff every call was held and charged at before the split.
+    const previous: CommercialPolicy = {
+      ...launchPolicy(),
+      rates: [rate('rate-p1', '9')],
+      routes: [route('route-v1', 'sku-v1', ['rate-p1'])],
+    };
+    // W1's split: the base sku drops to a third, and the premium sibling carries exactly the old rate.
+    const split: CommercialPolicy = {
+      ...previous,
+      policyVersion: 'P2',
+      rates: [rate('rate-base', '3'), rate('rate-long-context', '9')],
+      routes: [
+        route('route-v1', 'sku-v1', ['rate-base']),
+        route('route-v1-long-context', 'sku-v1:long-context', ['rate-long-context']),
+      ],
+    };
+    // Re-pointing the route id at a dearer sibling is the same repricing by another name.
+    const repointed: CommercialPolicy = {
+      ...previous,
+      policyVersion: 'P2',
+      rates: [rate('rate-p1', '9'), rate('rate-v2', '27')],
+      routes: [route('route-v1', 'sku-v1', ['rate-p1']), route('route-v1-v2', 'sku-v1:v2', ['rate-v2'])],
+    };
+    // So is bumping the meter contract id, which used to make every term of every route new at once.
+    const remetered: CommercialPolicy = {
+      ...previous,
+      policyVersion: 'P2',
+      rates: [rate('rate-p2', '27', 'meter-v2')],
+      routes: [{ ...route('route-v1', 'sku-v1', ['rate-p2']), meterContractId: 'meter-v2' }],
+    };
+
+    expect(() => {
+      validatePolicyActivationNotice({ previous, next: split, announcedAt, effectiveAt: announcedAt });
+    }).not.toThrow();
+    expect(() => {
+      validatePolicyActivationNotice({ previous, next: repointed, announcedAt, effectiveAt: announcedAt });
+    }).toThrow('30 days');
+    expect(() => {
+      validatePolicyActivationNotice({ previous, next: remetered, announcedAt, effectiveAt: announcedAt });
+    }).toThrow('30 days');
+  });
+
   it('should apply default or SKU markup once without changing an old policy pin', () => {
     const base = launchPolicy();
     const p1: CommercialPolicy = {

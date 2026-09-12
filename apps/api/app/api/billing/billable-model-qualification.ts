@@ -5,6 +5,7 @@ import { qualifiedMeterContracts } from '#api/billing/billing-policy.js';
 import { maximumMeterCharge } from '#api/billing/billable-model-bound.js';
 import { createBillableModelEvidenceCollector } from '#api/billing/billable-model-evidence.js';
 import {
+  billableModelInputBound,
   billableModelOutputMaximum,
   billableModelRequestContainsImage,
   safeParseBillableModelRequest,
@@ -18,7 +19,11 @@ import type {
 } from '#api/billing/billable-model-invocation.types.js';
 import type { JointInputMaximum, MeterQuantity, SupplierValuation } from '#api/billing/credit-ledger.types.js';
 
-type Rate = { dimension: MeterQuantity['dimension']; tier: MeterQuantity['tier']; numeratorPicoUsd: bigint };
+type Rate = {
+  dimension: MeterQuantity['dimension'];
+  tier: MeterQuantity['tier'];
+  numeratorPicoUsd: bigint;
+};
 type Route = {
   routeId: string;
   providerId: string;
@@ -52,7 +57,13 @@ const rates = (
   { dimension: 'cache_read', tier: null, numeratorPicoUsd: picoUsd(read) },
   ...(write === undefined
     ? []
-    : [{ dimension: 'cache_write', tier: writeTier, numeratorPicoUsd: picoUsd(write) } as const]),
+    : [
+        {
+          dimension: 'cache_write',
+          tier: writeTier,
+          numeratorPicoUsd: picoUsd(write),
+        } as const,
+      ]),
   { dimension: 'output', tier: null, numeratorPicoUsd: picoUsd(output) },
 ];
 const inputOutputRates = (input: string, output: string): readonly Rate[] => [
@@ -267,7 +278,11 @@ const routes = [
     196_608,
     196_608,
     inputOutputRates('.279', '1.2'),
-    { allowsImage: false, combinedMaximum: 196_608n, outputParameter: 'max_tokens' },
+    {
+      allowsImage: false,
+      combinedMaximum: 196_608n,
+      outputParameter: 'max_tokens',
+    },
   ),
   route('xai', 'grok-4.6', 'Grok 4.6', 'openai-completions', 500_000, 64_000, rates('4', '1', undefined, '12')),
 ] as const;
@@ -282,7 +297,31 @@ const tieredValuations = new Map<string, { minimum: bigint; baseRates: readonly 
   ['grok-4.6', { minimum: 200_000n, baseRates: rates('2', '.5', undefined, '6') }],
 ]);
 const jointInputProviders = new Set(['anthropic', 'openai', 'morph', 'xai']);
-const observedValuationProviders = new Set(['anthropic', 'openai', 'morph', 'xai']);
+const observedValuationProviders = new Set(['anthropic', 'openai', 'morph', 'vertexai', 'xai']);
+
+/* A tiered route funds two meter contracts: its own id carries the base tariff every
+ * request that provably cannot reach the threshold is held and charged at, and the
+ * `:long-context` sibling carries the premium tariff. One contract per pinned tariff
+ * keeps the pinned retail rate, the supplier pin and the terminal meter items in the
+ * single-tariff shape the ledger settles. */
+const longContextSuffix = ':long-context';
+const contractRouteId = (routeId: string, longContext: boolean): string =>
+  longContext ? `${routeId}${longContextSuffix}` : routeId;
+
+/**
+ * Every sku one route serves, base tier first.
+ *
+ * A route-level control — a pause, a supplier-bound breach, a settlement tier —
+ * covers the whole route. Keying one on a single sku would leave the route's
+ * other tier serving traffic, which is half a safety control.
+ *
+ * @param sku - Any sku the route publishes.
+ * @returns The route's base sku and its long-context sibling.
+ */
+export const routeSkuFamily = (sku: string): readonly [string, string] => {
+  const base = sku.endsWith(longContextSuffix) ? sku.slice(0, -longContextSuffix.length) : sku;
+  return [base, `${base}${longContextSuffix}`];
+};
 
 const sourceRevision = (routeId: string): string => `official-pricing:2026-09-06:${routeId}`;
 const valuationRates = (entries: readonly Rate[]) =>
@@ -292,6 +331,43 @@ const valuationRates = (entries: readonly Rate[]) =>
     numeratorPicoUsd: entry.numeratorPicoUsd.toString(),
     denominatorUnits: million.toString(),
   }));
+
+/**
+ * Pins the tariff a request's own input bound can reach.
+ *
+ * A base pin is a proof, not a preference: the bound has ruled the threshold out,
+ * so the base schedule is the maximum tariff and the valuation may carry no
+ * schedule above it, which is what the ledger's pinned-tariff check requires.
+ *
+ * @param selected - The qualified route.
+ * @param routeRates - The route's premium tariff, which is also its only tariff when untiered.
+ * @param maximumInput - The pinned input bound in tokens.
+ * @returns The pinned tariff, whether it is the premium tier, and the observed valuation.
+ */
+const pinTariff = (
+  selected: Pick<Route, 'modelId' | 'providerId' | 'routeId'>,
+  routeRates: readonly Rate[],
+  maximumInput: bigint,
+): { longContext: boolean; rates: readonly Rate[]; valuation?: SupplierValuation } => {
+  const tiered = tieredValuations.get(selected.modelId);
+  const longContext = tiered !== undefined && maximumInput >= tiered.minimum;
+  const rates = longContext ? routeRates : (tiered?.baseRates ?? routeRates);
+  return {
+    longContext,
+    rates,
+    ...(observedValuationProviders.has(selected.providerId)
+      ? {
+          valuation: {
+            version: 'supplier-valuation-v1',
+            sourceRevision: sourceRevision(selected.routeId),
+            longContextMinimumInputTokens: longContext ? tiered.minimum.toString() : null,
+            baseRates: valuationRates(longContext ? tiered.baseRates : rates),
+            longContextRates: longContext ? valuationRates(routeRates) : null,
+          } satisfies SupplierValuation,
+        }
+      : {}),
+  };
+};
 
 /** Every static cloud catalog route retained by the funded qualification boundary. */
 export const billableModelRouteIds = routes.map((entry) => entry.routeId);
@@ -313,11 +389,20 @@ export type BillableModelQualificationDependencies = {
  * Read-only projection of every funded route's meter contract and supplier tariff.
  * The development policy generator reads it; it owns no behaviour of its own.
  */
-export const billableModelRouteMeters = routes.flatMap((entry) =>
-  entry.rates === undefined
-    ? []
-    : [{ routeId: entry.routeId, meterContractId: `model-meter-v1:${entry.routeId}`, rates: entry.rates }],
-);
+export const billableModelRouteMeters = routes.flatMap((entry) => {
+  if (entry.rates === undefined) {
+    return [];
+  }
+  const tiered = tieredValuations.get(entry.modelId);
+  const meter = (routeId: string, rates: readonly Rate[]) => ({
+    routeId,
+    meterContractId: `model-meter-v1:${routeId}`,
+    rates,
+  });
+  return tiered === undefined
+    ? [meter(entry.routeId, entry.rates)]
+    : [meter(entry.routeId, tiered.baseRates), meter(contractRouteId(entry.routeId, true), entry.rates)];
+});
 
 /* The replica declares this process's whole fleet, matching the publisher and payment
  * paths. Declaring only the requested route rejects any policy that enables another. */
@@ -398,11 +483,18 @@ export class CodeOwnedBillableModelQualificationResolver implements BillableMode
     ) {
       throw new BadRequestException('Exactly one bounded output-token maximum is required');
     }
-    const maximumInput = (selected.combinedMaximum ?? selected.contextMaximum) - maximumOutput;
-    if (maximumInput < 0n) {
+    const contextBound = (selected.combinedMaximum ?? selected.contextMaximum) - maximumOutput;
+    if (contextBound < 0n) {
       throw new BadRequestException('Output maximum exceeds the provider context');
     }
-    const quantities = selected.rates.map(
+    /* The request's own bound, falling closed onto the provider context whenever an
+     * element carries no documented token bound. */
+    const requestBound = billableModelInputBound(parsed.data);
+    const maximumInput = requestBound === undefined || requestBound > contextBound ? contextBound : requestBound;
+    /* The threshold is priced against the bound, not the body, so the whole-context
+     * fallback still pins the premium tariff. */
+    const pinned = pinTariff(selected, selected.rates, maximumInput);
+    const quantities = pinned.rates.map(
       (rateEntry): MeterQuantity => ({
         dimension: rateEntry.dimension,
         tier: rateEntry.tier,
@@ -413,7 +505,7 @@ export class CodeOwnedBillableModelQualificationResolver implements BillableMode
       ? { version: 'joint-input-v1', quantity: maximumInput.toString() }
       : undefined;
     const supplierMaximumPicoUsd = maximumMeterCharge(
-      selected.rates.map((rateEntry) => ({
+      pinned.rates.map((rateEntry) => ({
         dimension: rateEntry.dimension,
         quantity: rateEntry.dimension === 'output' ? maximumOutput : maximumInput,
         numerator: rateEntry.numeratorPicoUsd,
@@ -430,44 +522,45 @@ export class CodeOwnedBillableModelQualificationResolver implements BillableMode
     if (selectedCount && selected.providerId !== 'openai') {
       throw new BadRequestException('Exact input counting is not qualified for this route');
     }
-    const meterContractId = `model-meter-v1:${selected.routeId}`;
-    const tieredValuation = tieredValuations.get(selected.modelId);
-    const baseRates = tieredValuation?.baseRates ?? selected.rates;
-    const supplierValuation: SupplierValuation | undefined = observedValuationProviders.has(selected.providerId)
-      ? {
-          version: 'supplier-valuation-v1',
-          sourceRevision: sourceRevision(selected.routeId),
-          longContextMinimumInputTokens: tieredValuation?.minimum.toString() ?? null,
-          baseRates: valuationRates(baseRates),
-          longContextRates: tieredValuation === undefined ? null : valuationRates(selected.rates),
-        }
-      : undefined;
+    const contractId = contractRouteId(selected.routeId, pinned.longContext);
+    const meterContractId = `model-meter-v1:${contractId}`;
     return {
-      ...(selectedCount ? { inputCount: { capability: this.dependencies.inputCounters?.get(selected.routeId) } } : {}),
+      ...(selectedCount
+        ? {
+            inputCount: {
+              capability: this.dependencies.inputCounters?.get(selected.routeId),
+            },
+          }
+        : {}),
       routeId: selected.routeId,
       surface: intent.surface,
       providerWire: selected.wire,
       modelId: selected.modelId,
       modelDisplayName: selected.modelDisplayName,
       providerId: selected.providerId,
-      sku: `model:${selected.routeId}`,
+      sku: `model:${contractId}`,
       meterContractId,
       maximumQuantities: quantities,
       supplierMaximumPicoUsd,
-      maximumResponseBytes: Number(maximumOutput) * 64 + 1_048_576,
-      replica: { schemaVersion: 1, meterContractIds: [...qualifiedMeterContracts.keys()] },
+      // Streamed SSE costs 110-200 bytes per output token; 256 keeps a legitimate full-length answer
+      // under the authorized_exhausted ceiling (W9) while the provider's own max-output cap bounds tokens.
+      maximumResponseBytes: Number(maximumOutput) * 256 + 1_048_576,
+      replica: {
+        schemaVersion: 1,
+        meterContractIds: [...qualifiedMeterContracts.keys()],
+      },
       invocation: {
         contractVersion:
           selected.validThrough === undefined ? 'model-route-v1' : `model-route-v1:through:${selected.validThrough}`,
         supplierRatesValidUntil: selected.validThrough ?? null,
         credentialAccount,
-        supplierRates: selected.rates.map((rateEntry) => ({
+        supplierRates: pinned.rates.map((rateEntry) => ({
           dimension: rateEntry.dimension,
           tier: rateEntry.tier,
           numeratorPicoUsd: rateEntry.numeratorPicoUsd.toString(),
           denominatorUnits: million.toString(),
         })),
-        ...(supplierValuation === undefined ? {} : { supplierValuation }),
+        ...(pinned.valuation === undefined ? {} : { supplierValuation: pinned.valuation }),
         ...(jointInputMaximum === undefined ? {} : { jointInputMaximum }),
         executionTimeout: this.dependencies.executionTimeout,
       },
@@ -494,5 +587,6 @@ export const withBillableEvidenceCollector = (
     createBillableModelEvidenceCollector(
       wire,
       new Set(qualification.invocation.supplierRates.map((rateEntry) => rateEntry.dimension)),
+      qualification.providerId,
     ),
 });

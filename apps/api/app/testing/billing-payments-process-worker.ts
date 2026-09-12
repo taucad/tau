@@ -9,6 +9,7 @@ import { createBillingStripeClient } from '#api/billing/billing-stripe.js';
 
 type Command =
   | { readonly stripeUrl: string; readonly operation: 'recover'; readonly limit: number }
+  | { readonly stripeUrl: string; readonly operation: 'reload'; readonly limit: number }
   | {
       readonly stripeUrl: string;
       readonly operation: 'confirm' | 'recover-action';
@@ -28,19 +29,19 @@ const command = await new Promise<Command>((resolve) => {
       typeof value.stripeUrl !== 'string' ||
       !value.stripeUrl.startsWith('http://127.0.0.1:') ||
       !('operation' in value) ||
-      !['recover', 'confirm', 'recover-action'].includes(String(value.operation))
+      !['recover', 'reload', 'confirm', 'recover-action'].includes(String(value.operation))
     ) {
       throw new Error('Invalid payment process command');
     }
     if (
-      value.operation === 'recover' &&
+      (value.operation === 'recover' || value.operation === 'reload') &&
       'limit' in value &&
       typeof value.limit === 'number' &&
       Number.isSafeInteger(value.limit) &&
       value.limit >= 1 &&
       value.limit <= 100
     ) {
-      resolve({ stripeUrl: value.stripeUrl, operation: 'recover', limit: value.limit });
+      resolve({ stripeUrl: value.stripeUrl, operation: value.operation, limit: value.limit });
       return;
     }
     if (
@@ -95,11 +96,13 @@ const service = new BillingPaymentsService(
 send('ready');
 try {
   const result =
-    command.operation === 'recover'
-      ? await service.recoverPayments({ environment: 'development', limit: command.limit })
-      : command.operation === 'confirm'
-        ? await service.confirmAction(command.userId, command.actionId)
-        : await service.recoverAction(command.userId, command.actionId);
+    command.operation === 'reload'
+      ? await service.processReloadWork({ environment: 'development', limit: command.limit })
+      : command.operation === 'recover'
+        ? await service.recoverPayments({ environment: 'development', limit: command.limit })
+        : command.operation === 'confirm'
+          ? await service.confirmAction(command.userId, command.actionId)
+          : await service.recoverAction(command.userId, command.actionId);
   send('complete', result);
 } catch (error) {
   send('failed', error instanceof Error ? error.message : String(error));

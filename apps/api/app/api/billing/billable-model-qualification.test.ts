@@ -70,25 +70,39 @@ describe('CodeOwnedBillableModelQualificationResolver', () => {
       messages: [{ role: 'user', content: 'hello' }],
       max_completion_tokens: 16,
     });
-    expect(result.invocation.supplierValuation).toBeUndefined();
     expect(result.invocation.jointInputMaximum).toBeUndefined();
   });
 
-  it('should derive conservative full-context maxima and ceil the aggregate supplier rational once', () => {
+  it('should bound the input by the request itself and ceil the aggregate supplier rational once', () => {
     const result = resolver.resolve(
       intent({ model: 'openai-gpt-5.6-luna', input: 'hello', max_output_tokens: 100, stream: true }),
     );
 
+    /* 85 serialized bytes, one conversation element and the per-route overhead. */
     expect(result.maximumQuantities).toEqual([
-      { dimension: 'uncached_input', tier: null, quantity: 1_049_900n },
-      { dimension: 'cache_read', tier: null, quantity: 1_049_900n },
-      { dimension: 'cache_write', tier: '30m', quantity: 1_049_900n },
+      { dimension: 'uncached_input', tier: null, quantity: 4245n },
+      { dimension: 'cache_read', tier: null, quantity: 4245n },
+      { dimension: 'cache_write', tier: '30m', quantity: 4245n },
       { dimension: 'output', tier: null, quantity: 100n },
     ]);
-    expect(result.supplierMaximumPicoUsd).toBe(525_130_000_000n);
-    expect(result.invocation.jointInputMaximum).toEqual({ version: 'joint-input-v1', quantity: '1049900' });
+    expect(result.supplierMaximumPicoUsd).toBe(1_181_250_000n);
+    expect(result.invocation.jointInputMaximum).toEqual({ version: 'joint-input-v1', quantity: '4245' });
     expect(result.invocation.supplierRatesValidUntil).toBeNull();
     expect(result.normalizedRequest).not.toHaveProperty('billing');
+  });
+
+  it('should fall closed onto the provider context partition when the bound exceeds it', () => {
+    const result = resolver.resolve(
+      intent({
+        model: 'openai-gpt-5.6-luna',
+        input: 'x'.repeat(1_100_000),
+        max_output_tokens: 100,
+        stream: true,
+      }),
+    );
+
+    expect(result.maximumQuantities[0]).toEqual({ dimension: 'uncached_input', tier: null, quantity: 1_049_900n });
+    expect(result.sku).toBe('model:openai-gpt-5.6-luna:long-context');
   });
 
   it('should reject uncontracted provider options before returning admission data', () => {
@@ -247,9 +261,48 @@ describe('CodeOwnedBillableModelQualificationResolver', () => {
       intent({ model: 'openai-gpt-5.6-sol', input: 'hello', max_output_tokens: 100, stream: true }),
     );
     expect(result.invocation.supplierRatesValidUntil).toBe('2026-11-21T23:59:59.999Z');
+    /* The bound proves the premium threshold unreachable, so the base tariff is the
+     * pinned maximum and the valuation may carry no schedule above it. */
+    expect(result.sku).toBe('model:openai-gpt-5.6-sol');
+    expect(result.invocation.supplierRates).toEqual([
+      { dimension: 'uncached_input', tier: null, numeratorPicoUsd: '4000000000000', denominatorUnits: '1000000' },
+      { dimension: 'cache_read', tier: null, numeratorPicoUsd: '400000000000', denominatorUnits: '1000000' },
+      { dimension: 'cache_write', tier: '30m', numeratorPicoUsd: '5000000000000', denominatorUnits: '1000000' },
+      { dimension: 'output', tier: null, numeratorPicoUsd: '20000000000000', denominatorUnits: '1000000' },
+    ]);
     expect(result.invocation.supplierValuation).toMatchObject({
       version: 'supplier-valuation-v1',
       sourceRevision: 'official-pricing:2026-09-06:openai-gpt-5.6-sol',
+      longContextMinimumInputTokens: null,
+      longContextRates: null,
+      baseRates: [
+        { dimension: 'uncached_input', numeratorPicoUsd: '4000000000000' },
+        { dimension: 'cache_read', numeratorPicoUsd: '400000000000' },
+        { dimension: 'cache_write', tier: '30m', numeratorPicoUsd: '5000000000000' },
+        { dimension: 'output', numeratorPicoUsd: '20000000000000' },
+      ],
+    });
+  });
+
+  it('should pin the premium tariff and both valuation tables once the bound reaches the threshold', () => {
+    const result = resolver.resolve(
+      intent({
+        model: 'openai-gpt-5.6-sol',
+        input: 'x'.repeat(280_000),
+        max_output_tokens: 100,
+        stream: true,
+      }),
+    );
+
+    expect(result.sku).toBe('model:openai-gpt-5.6-sol:long-context');
+    expect(result.meterContractId).toBe('model-meter-v1:openai-gpt-5.6-sol:long-context');
+    expect(result.invocation.supplierRates[0]).toEqual({
+      dimension: 'uncached_input',
+      tier: null,
+      numeratorPicoUsd: '8000000000000',
+      denominatorUnits: '1000000',
+    });
+    expect(result.invocation.supplierValuation).toMatchObject({
       longContextMinimumInputTokens: '272001',
       baseRates: [
         { dimension: 'uncached_input', numeratorPicoUsd: '4000000000000' },
@@ -270,7 +323,7 @@ describe('CodeOwnedBillableModelQualificationResolver', () => {
     const result = resolver.resolve({
       ...intent({
         model: 'xai-grok-4.6',
-        messages: [{ role: 'user', content: 'hello' }],
+        messages: [{ role: 'user', content: 'x'.repeat(210_000) }],
         max_completion_tokens: 16,
         stream: true,
       }),
@@ -282,6 +335,30 @@ describe('CodeOwnedBillableModelQualificationResolver', () => {
         { dimension: 'uncached_input', numeratorPicoUsd: '2000000000000' },
         { dimension: 'cache_read', numeratorPicoUsd: '500000000000' },
         { dimension: 'output', numeratorPicoUsd: '6000000000000' },
+      ],
+    });
+  });
+
+  it('should carry a supplier valuation for Vertex operations so Gemini spend can settle', () => {
+    const result = resolver.resolve({
+      ...intent({
+        model: 'google-gemini-3.5-flash',
+        messages: [{ role: 'user', content: 'hello' }],
+        max_completion_tokens: 16,
+        stream: true,
+      }),
+      providerWire: 'openai-completions',
+    });
+
+    expect(result.invocation.supplierValuation).toEqual({
+      version: 'supplier-valuation-v1',
+      sourceRevision: 'official-pricing:2026-09-06:google-gemini-3.5-flash',
+      longContextMinimumInputTokens: null,
+      longContextRates: null,
+      baseRates: [
+        { dimension: 'uncached_input', tier: null, numeratorPicoUsd: '1500000000000', denominatorUnits: '1000000' },
+        { dimension: 'cache_read', tier: null, numeratorPicoUsd: '150000000000', denominatorUnits: '1000000' },
+        { dimension: 'output', tier: null, numeratorPicoUsd: '9000000000000', denominatorUnits: '1000000' },
       ],
     });
   });
@@ -298,10 +375,10 @@ describe('CodeOwnedBillableModelQualificationResolver', () => {
     });
 
     expect(result.maximumQuantities).toEqual([
-      { dimension: 'uncached_input', tier: null, quantity: 196_096n },
+      { dimension: 'uncached_input', tier: null, quantity: 4268n },
       { dimension: 'output', tier: null, quantity: 512n },
     ]);
-    expect(result.supplierMaximumPicoUsd).toBe(55_325_184_000n);
+    expect(result.supplierMaximumPicoUsd).toBe(1_805_172_000n);
   });
 });
 

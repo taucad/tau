@@ -225,6 +225,13 @@
       "when": 1788998320002,
       "tag": "0032_fancy_the_anarchist",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1789164248057,
+      "tag": "0033_giant_dreaming_celestial",
+      "breakpoints": true
     }
   ]
 }

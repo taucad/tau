@@ -359,21 +359,32 @@ export const validatePolicyActivationNotice = (input: {
     return;
   }
 
+  /* The key is the customer-visible term alone. `meterContractId` is deliberately absent: it is a
+   * code-owned versioning handle, and keying on it let an ordinary `model-meter-v1` -> `v2` rename
+   * make every term of every route new at once and silently void the notice gate for the catalogue. */
   const activeTerms = (policy: CommercialPolicy) =>
     policy.routes.flatMap((route) => {
       const resolved = resolvePolicyRoute(policy, route.sku);
       return resolved === undefined
         ? []
         : resolved.rates.map((rate) => ({
-            key: `${route.sku}:${route.meterContractId}:${rate.dimension}:${rate.tier ?? ''}:${rate.unit}`,
+            sku: route.sku,
+            term: `${rate.dimension}:${rate.tier ?? ''}:${rate.unit}`,
             rate,
           }));
     });
-  const previousRates = new Map(activeTerms(input.previous).map(({ key, rate }) => [key, rate]));
-  const hasIncrease = activeTerms(input.next).some(({ key, rate }) => {
-    const prior = previousRates.get(key);
+  const previousRates = new Map(activeTerms(input.previous).map(({ sku, term, rate }) => [`${sku}:${term}`, rate]));
+  /* Q3 governs increases to terms customers already consume. A sku the previous policy never
+   * published is judged against its parent sku — `model:X:long-context` against the old `model:X`,
+   * which carried the premium rates the sibling now carries — so a tier split activates
+   * immediately while re-pointing a route at `model:X:v2` for more money still buys no notice. */
+  const hasIncrease = activeTerms(input.next).some(({ sku, term, rate }) => {
+    const parent = sku.lastIndexOf(':');
+    const prior =
+      previousRates.get(`${sku}:${term}`) ??
+      (parent <= 0 ? undefined : previousRates.get(`${sku.slice(0, parent)}:${term}`));
     return (
-      prior === undefined ||
+      prior !== undefined &&
       BigInt(rate.numeratorCreditAtoms) * BigInt(prior.publicDenominatorUnits) >
         BigInt(prior.numeratorCreditAtoms) * BigInt(rate.publicDenominatorUnits)
     );

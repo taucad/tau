@@ -8,7 +8,8 @@ import { once } from 'node:events';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import postgres from 'postgres';
-import { afterAll, describe, expect, it } from 'vitest';
+import { setTimeout as wait } from 'node:timers/promises';
+import { afterAll, describe, expect, it, onTestFinished } from 'vitest';
 import { installBillingProtections } from '#database/billing-protections.js';
 
 const databaseUrl = process.env['BILLING_TEST_DATABASE_URL'];
@@ -365,6 +366,213 @@ describe('billing database protections and real command', () => {
       }
     } finally {
       await Promise.all([runtime.end(), publisher.end()]);
+    }
+  });
+});
+
+describe('funded LLM recovery worker under a mid-run database outage', () => {
+  it('should keep retrying and terminalize the due operation exactly once without changing money', async () => {
+    const applicationName = `tau-billing-i5-${randomUUID()}`;
+    const [databaseIdentity] = await client`SELECT quote_ident(current_database()) AS name`;
+    const databaseIdentifier = String(databaseIdentity?.['name']);
+    // PostgreSQL refuses to disallow connections for the session's own database, so drive the outage from another one.
+    const controlUrl = new URL(databaseUrl);
+    controlUrl.pathname = '/postgres';
+    const control = postgres(controlUrl.toString(), { max: 1 });
+    const allowConnections = async (allowed: boolean): Promise<void> => {
+      await control.unsafe(`ALTER DATABASE ${databaseIdentifier} WITH ALLOW_CONNECTIONS ${String(allowed)}`);
+    };
+    const observed: Array<{ stream: 'stdout' | 'stderr'; at: number; line: string }> = [];
+    const collect = (stream: 'stdout' | 'stderr', readable: NodeJS.ReadableStream): void => {
+      let buffered = '';
+      readable.setEncoding('utf8');
+      readable.on('data', (chunk: string) => {
+        buffered += chunk;
+        let index = buffered.indexOf('\n');
+        while (index >= 0) {
+          const line = buffered.slice(0, index).trim();
+          buffered = buffered.slice(index + 1);
+          if (line !== '') {
+            observed.push({ stream, at: Date.now(), line });
+          }
+          index = buffered.indexOf('\n');
+        }
+      });
+    };
+    const batches = (stream: 'stdout' | 'stderr'): Array<{ at: number; batch: Record<string, unknown> }> =>
+      observed
+        .filter((entry) => entry.stream === stream)
+        .flatMap((entry) => {
+          try {
+            // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the worker emits one JSON object per line
+            return [{ at: entry.at, batch: JSON.parse(entry.line) as Record<string, unknown> }];
+          } catch {
+            return [];
+          }
+        });
+    const failures = (): Array<{ at: number; batch: Record<string, unknown> }> =>
+      batches('stderr').filter(({ batch }) => batch['outcome'] === 'failed');
+    const settle = async (
+      label: string,
+      predicate: () => Promise<boolean> | boolean,
+      timeoutMilliseconds = 60_000,
+    ): Promise<void> => {
+      const deadline = Date.now() + timeoutMilliseconds;
+      // oxlint-disable-next-line no-await-in-loop -- the probe intentionally polls a live worker and database
+      while (!(await predicate())) {
+        if (Date.now() > deadline) {
+          throw new Error(`Timed out waiting for ${label}: ${JSON.stringify(observed)}`);
+        }
+        // oxlint-disable-next-line no-await-in-loop -- the probe intentionally polls a live worker and database
+        await wait(25);
+      }
+    };
+
+    const account = randomUUID();
+    const policy = randomUUID();
+    const activation = randomUUID();
+    const operation = randomUUID();
+    const spendHold = `${operation}-spend-hold`;
+    const riskHold = `${operation}-risk-hold`;
+    const childEnvironment: Record<string, string | undefined> = {};
+    childEnvironment['PATH'] = process.env['PATH'];
+    childEnvironment['BILLING_DATABASE_URL'] = databaseUrl;
+    childEnvironment['BILLING_ENVIRONMENT'] = 'prod-eu';
+    childEnvironment['OTEL_METRICS_PORT'] = '0';
+    // Names the worker's backend so the outage terminates exactly that session.
+    childEnvironment['PGAPPNAME'] = applicationName;
+    const child = spawn(
+      process.execPath,
+      [
+        resolve(import.meta.dirname, '../../dist/billing-command.js'),
+        'recover-llm-worker',
+        '--environment',
+        'prod-eu',
+        '--limit',
+        '100',
+        '--poll-milliseconds',
+        '50',
+      ],
+      {
+        // No Redis, application or model-provider credentials are available to this process.
+        env: childEnvironment as NodeJS.ProcessEnv,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      },
+    );
+    collect('stdout', child.stdout);
+    collect('stderr', child.stderr);
+    // A timed-out test never reaches its own finally, so restore the cluster from a hook the runner always calls.
+    onTestFinished(async () => {
+      if (child.exitCode === null && child.signalCode === null) {
+        child.kill('SIGKILL');
+      }
+      await allowConnections(true);
+      await control.end();
+    });
+    try {
+      await settle('the first healthy recovery batch', () => batches('stdout').length > 0);
+
+      // Interrupt the database for the worker only; this session keeps its established connection.
+      await allowConnections(false);
+      const terminated =
+        await client`SELECT pg_terminate_backend(pid) AS terminated FROM pg_stat_activity WHERE application_name = ${applicationName}`;
+      expect(terminated.length).toBeGreaterThan(0);
+
+      // The due operation arrives while the worker cannot reach the database at all.
+      await client`INSERT INTO billing.credit_account(id,environment) VALUES (${account},'prod-eu')`;
+      await client`INSERT INTO billing.billing_policy(id,environment,policy_version,schema_version,content_hash,canonical_content)
+        VALUES (${policy},'prod-eu',${policy},1,${policy},'{}')`;
+      await client`INSERT INTO billing.billing_policy_activation(id,environment,policy_id,job_key,request_hash,announced_at,effective_at)
+        VALUES (${activation},'prod-eu',${policy},${activation},${activation},now(),now())`;
+      await client.begin(async (transaction) => {
+        await Promise.all(
+          ['spend', 'risk'].map(async (kind) => {
+            const funding = `${operation}-${kind}-funding`;
+            const budget = `${operation}-${kind}-budget`;
+            await transaction`INSERT INTO billing.billing_budget_funding(id,environment,kind,scope,funded_lifetime)
+              VALUES (${funding},'prod-eu',${kind},${operation},0)`;
+            await transaction`INSERT INTO billing.billing_budget(id,environment,funding_id,kind,scope,period_start,period_end,quantum,approved_cap)
+              VALUES (${budget},'prod-eu',${funding},${kind},${operation},now(),now()+interval '1 day','pico_usd',0)`;
+          }),
+        );
+        await transaction`INSERT INTO billing.credit_operation(id,account_id,environment,surface,attempt_key,request_digest,request_key_version,
+          category,model_id,sku,pinned_tariff,maximum_quantities,activity,policy_id,activation_id,meter_contract_id,authorized_atoms,promo_held_atoms,plan_held_atoms,
+          purchased_held_atoms,spend_budget_hold_id,risk_budget_hold_id,due_at)
+          VALUES (${operation},${account},'prod-eu','fixture',${operation},'digest',1,'llm','fixture','fixture','[]','[]','test',${policy},${activation},
+          'fixture',0,0,0,0,${spendHold},${riskHold},now())`;
+        await transaction`INSERT INTO billing.billing_budget_hold(id,budget_id,operation_id,initial_bound,remaining_held)
+          VALUES (${spendHold},${`${operation}-spend-budget`},${operation},0,0),(${riskHold},${`${operation}-risk-budget`},${operation},0,0)`;
+      });
+
+      // The worker survives the outage, reports every failed batch and never hot-loops.
+      await settle('four failed recovery batches', () => {
+        // A worker that died instead of backing off must fail this case immediately.
+        expect(child.exitCode ?? child.signalCode).toBeNull();
+        return failures().length >= 4;
+      });
+      const failed = failures();
+      expect(failed[0]?.batch).toMatchObject({ event: 'billing.llm_recovery_batch', environment: 'prod-eu' });
+      expect(failed.map(({ batch }) => batch['pool'])).toContain('primary');
+      expect(Number(failed.at(3)?.at) - Number(failed[0]?.at)).toBeGreaterThanOrEqual(100);
+      expect(child.exitCode ?? child.signalCode).toBeNull();
+      const duringOutage = await client`SELECT customer_state FROM billing.credit_operation WHERE id = ${operation}`;
+      expect(duringOutage[0]?.['customer_state']).toBe('pending');
+
+      const restoredAt = Date.now();
+      await allowConnections(true);
+      await settle('the recovered operation to reach a terminal state', async () => {
+        expect(child.exitCode ?? child.signalCode).toBeNull();
+        const [row] = await client`SELECT resolved_at FROM billing.credit_operation WHERE id = ${operation}`;
+        return row?.['resolved_at'] !== null && row?.['resolved_at'] !== undefined;
+      });
+      const recoveredWallMilliseconds = Date.now() - restoredAt;
+
+      const [resolvedOperation] =
+        await client`SELECT customer_state, resolved_at IS NOT NULL AS resolved, dispatch_state,
+          extract(epoch FROM (resolved_at - due_at)) * 1000 AS due_to_terminal_milliseconds
+          FROM billing.credit_operation WHERE id = ${operation}`;
+      expect(resolvedOperation?.['resolved']).toBe(true);
+      expect(resolvedOperation?.['customer_state']).not.toBe('pending');
+      console.log(
+        JSON.stringify({
+          observation: 'billing.i5.due_to_terminal_latency',
+          note: 'local disposable cluster with an injected outage; not an SLO measurement',
+          dueToTerminalMilliseconds: Number(resolvedOperation?.['due_to_terminal_milliseconds']),
+          databaseRestoredToTerminalMilliseconds: recoveredWallMilliseconds,
+          observedFailedBatches: failures().length,
+        }),
+      );
+
+      // Exactly one terminal resolution, no duplicate money effect and no provider execution.
+      const resolutions =
+        await client`SELECT id FROM billing.credit_transaction WHERE operation_id = ${operation} AND kind = 'operation_resolution'`;
+      expect(resolutions).toHaveLength(1);
+      const [balances] = await client`SELECT promo_atoms AS "promoAtoms", plan_atoms AS "planAtoms",
+        purchased_atoms AS "purchasedAtoms", debt_atoms AS "debtAtoms", promo_held_atoms AS "promoHeldAtoms",
+        plan_held_atoms AS "planHeldAtoms", purchased_held_atoms AS "purchasedHeldAtoms"
+        FROM billing.credit_account WHERE id = ${account}`;
+      expect(balances).toEqual({
+        promoAtoms: '0',
+        planAtoms: '0',
+        purchasedAtoms: '0',
+        debtAtoms: '0',
+        promoHeldAtoms: '0',
+        planHeldAtoms: '0',
+        purchasedHeldAtoms: '0',
+      });
+      const supplier =
+        await client`SELECT source_revision FROM billing.supplier_cost_evidence WHERE operation_id = ${operation}`;
+      expect(supplier.map((row) => String(row['source_revision']))).toEqual(['proved_no_dispatch_v1']);
+      const healthy = batches('stdout');
+      expect(healthy.every(({ batch }) => batch['providerExecutions'] === 0)).toBe(true);
+      expect(healthy.reduce((total, { batch }) => total + Number(batch['resolved'] ?? 0), 0)).toBe(1);
+      expect(healthy.some(({ batch }) => batch['resolved'] === 1 && batch['failed'] === 0)).toBe(true);
+
+      child.kill('SIGTERM');
+      const [code, signal] = (await once(child, 'close')) as unknown[];
+      expect({ code, signal }).toEqual({ code: 0, signal: null });
+    } finally {
+      await allowConnections(true);
     }
   });
 });

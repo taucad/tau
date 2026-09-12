@@ -79,7 +79,9 @@ export type BillableModelQualificationResolver = {
 export type BillableInvocationEvidenceCollector = {
   accept(chunk: Uint8Array<ArrayBuffer>): void;
   complete(): TerminalEvidence;
-  failed(reason: 'client_abort' | 'deadline' | 'malformed_response' | 'provider_rejected'): TerminalEvidence;
+  failed(
+    reason: 'client_abort' | 'deadline' | 'malformed_response' | 'provider_rejected' | 'authorized_exhausted',
+  ): TerminalEvidence;
 };
 
 export type SupplierFinalityClassification = {

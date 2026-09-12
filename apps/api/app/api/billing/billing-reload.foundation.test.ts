@@ -4,7 +4,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { eq } from 'drizzle-orm';
+import { and, eq, isNull, ne } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import type { Stripe } from 'stripe';
@@ -178,25 +178,30 @@ const databaseUrl = process.env['BILLING_TEST_DATABASE_URL'];
 if (!databaseUrl) {
   throw new Error('BILLING_TEST_DATABASE_URL is required');
 }
-const adminClient = postgres(databaseUrl, { max: 2, prepare: false });
+const adminClient = postgres(databaseUrl, { max: 4, prepare: false });
 const runtimeClient = postgres(databaseUrl, {
-  max: 2,
+  max: 4,
   prepare: false,
   connection: { role: 'tau_billing_runtime' },
 });
 const database = drizzle(adminClient, { schema });
 const runtimeDatabase = drizzle(runtimeClient, { schema });
 const stripeAccountId = 'acct_reload_foundation';
-let customerMetadata: Record<string, string> = {};
-let setupMetadata: Record<string, string> = {};
-let taxReference = '';
-let taxCalculationId = 'taxcalc_reload_initial';
+
+/** Each account owns a distinct remote Customer; the remote identity slot is unique per Stripe account. */
+const customers = new Map<string, Record<string, string>>();
+const sessions = new Map<string, { metadata: Record<string, string>; customerId: string }>();
+const calculations = new Map<string, { reference: string; customerId: string }>();
+const paymentIntents = new Map<string, Record<string, unknown>>();
+let payments: BillingPaymentsService;
+let sequence = 0;
+let taxPostCount = 0;
 let setupPostCount = 0;
-let automaticPaymentPostCount = 0;
-let automaticPaymentIntentId = 'pi_reload_sca';
-let automaticPaymentIntent: Record<string, unknown> | undefined;
-let enabledUserId: string | undefined;
-let enabledConsentId: string | undefined;
+let paymentPostCount = 0;
+let checkoutPaymentPostCount = 0;
+let dropTaxResponse = false;
+let taxHook: { readonly customerId: string; readonly run: () => Promise<void> } | undefined;
+let paymentStatus: 'requires_action' | 'canceled' = 'requires_action';
 
 const stripeServer = createServer((request, response) => {
   const url = new URL(request.url ?? '/', 'http://127.0.0.1');
@@ -204,52 +209,97 @@ const stripeServer = createServer((request, response) => {
     response.writeHead(200, { 'content-type': 'application/json' });
     response.end(JSON.stringify(body));
   };
-  const readForm = (callback: (form: URLSearchParams) => void): void => {
+  const readForm = (callback: (form: URLSearchParams) => void | Promise<void>): void => {
     const chunks: string[] = [];
     request.setEncoding('utf8');
     request.on('data', (chunk: string) => chunks.push(chunk));
-    request.on('end', () => {
-      callback(new URLSearchParams(chunks.join('')));
+    request.on('end', async () => {
+      await callback(new URLSearchParams(chunks.join('')));
     });
   };
   if (request.method === 'POST' && url.pathname === '/v1/customers') {
     readForm((form) => {
-      customerMetadata = {
+      sequence += 1;
+      const id = `cus_reload_${sequence}`;
+      const metadata = {
         tau_account_id: form.get('metadata[tau_account_id]') ?? '',
         tau_customer_binding_id: form.get('metadata[tau_customer_binding_id]') ?? '',
       };
-      send({ id: 'cus_reload_native', object: 'customer', livemode: false, metadata: customerMetadata });
+      customers.set(id, metadata);
+      send({ id, object: 'customer', livemode: false, metadata });
     });
     return;
   }
   if (request.method === 'POST' && url.pathname === '/v1/tax/calculations') {
-    readForm((form) => {
-      taxReference = form.get('line_items[0][reference]') ?? '';
-      taxCalculationId = `taxcalc_${createHash('sha256').update(taxReference).digest('hex').slice(0, 24)}`;
-      send(taxCalculation());
+    readForm(async (form) => {
+      taxPostCount += 1;
+      const reference = form.get('line_items[0][reference]') ?? '';
+      const id = `taxcalc_${createHash('sha256').update(reference).digest('hex').slice(0, 24)}`;
+      const customerId = form.get('customer') ?? '';
+      calculations.set(id, { reference, customerId });
+      if (dropTaxResponse) {
+        dropTaxResponse = false;
+        response.destroy();
+        return;
+      }
+      const hook = taxHook;
+      if (hook === undefined || hook.customerId !== customerId) {
+        send(taxCalculation(id));
+        return;
+      }
+      taxHook = undefined;
+      try {
+        await hook.run();
+      } catch {
+        response.destroy();
+        return;
+      }
+      send(taxCalculation(id));
     });
     return;
   }
   if (request.method === 'POST' && url.pathname === '/v1/checkout/sessions') {
     readForm((form) => {
+      sequence += 1;
+      const customerId = form.get('customer') ?? '';
+      if (form.get('mode') === 'payment') {
+        checkoutPaymentPostCount += 1;
+        send({
+          id: `cs_replacement_${sequence}`,
+          object: 'checkout.session',
+          client_reference_id: form.get('client_reference_id'),
+          customer: customerId,
+          livemode: false,
+          metadata: {},
+          mode: 'payment',
+          status: 'open',
+          expires_at: 2_000_000_000,
+          url: 'http://127.0.0.1:3000/settings/billing',
+        });
+        return;
+      }
       setupPostCount += 1;
-      setupMetadata = {
-        tau_reload_consent_id: form.get('metadata[tau_reload_consent_id]') ?? '',
-        tau_reload_consent_version: form.get('metadata[tau_reload_consent_version]') ?? '',
-        tau_provider_leg_id: form.get('metadata[tau_provider_leg_id]') ?? '',
-      };
+      const id = `cs_reload_${sequence}`;
+      sessions.set(id, {
+        customerId,
+        metadata: {
+          tau_reload_consent_id: form.get('metadata[tau_reload_consent_id]') ?? '',
+          tau_reload_consent_version: form.get('metadata[tau_reload_consent_version]') ?? '',
+          tau_provider_leg_id: form.get('metadata[tau_provider_leg_id]') ?? '',
+        },
+      });
       setTimeout(() => {
-        send(setupSession());
+        send(setupSession(id));
       }, 25);
     });
     return;
   }
   if (request.method === 'POST' && url.pathname === '/v1/payment_intents') {
     readForm((form) => {
-      automaticPaymentPostCount += 1;
-      automaticPaymentIntentId = `pi_${form.get('metadata[tau_provider_leg_id]') ?? automaticPaymentPostCount}`;
-      automaticPaymentIntent = {
-        id: automaticPaymentIntentId,
+      paymentPostCount += 1;
+      const id = `pi_${form.get('metadata[tau_provider_leg_id]') ?? paymentPostCount}`;
+      const intent = {
+        id,
         object: 'payment_intent',
         amount: Number(form.get('amount')),
         amount_capturable: 0,
@@ -267,61 +317,72 @@ const stripeServer = createServer((request, response) => {
           tau_reload_consent_version: form.get('metadata[tau_reload_consent_version]'),
         },
         payment_method: form.get('payment_method'),
-        status: 'requires_action',
+        status: paymentStatus,
       };
-      send(automaticPaymentIntent);
+      paymentIntents.set(id, intent);
+      send(intent);
     });
     return;
   }
+  const cancelled = /^\/v1\/payment_intents\/(?<id>[^/]+)\/cancel$/u.exec(url.pathname)?.groups?.['id'];
+  if (request.method === 'POST' && cancelled !== undefined) {
+    const intent = paymentIntents.get(cancelled);
+    if (intent !== undefined) {
+      intent['status'] = 'canceled';
+      intent['amount_received'] = 0;
+      intent['amount_capturable'] = 0;
+    }
+    send(intent ?? { error: { type: 'invalid_request_error', message: cancelled } });
+    return;
+  }
+  const sessionId = /^\/v1\/checkout\/sessions\/(?<id>cs_reload_\d+)$/u.exec(url.pathname)?.groups?.['id'];
+  const setupIntentId = /^\/v1\/setup_intents\/(?<id>seti_reload_\d+)$/u.exec(url.pathname)?.groups?.['id'];
+  const paymentMethodId = /^\/v1\/payment_methods\/(?<id>pm_reload_\d+)$/u.exec(url.pathname)?.groups?.['id'];
+  const customerId = /^\/v1\/customers\/(?<id>cus_reload_\d+)$/u.exec(url.pathname)?.groups?.['id'];
+  const calculationId = /^\/v1\/tax\/calculations\/(?<id>taxcalc_[\da-f]+)(?:\/line_items)?$/u.exec(url.pathname)
+    ?.groups?.['id'];
+  const paymentIntentId = /^\/v1\/payment_intents\/(?<id>pi_[\w-]+)$/u.exec(url.pathname)?.groups?.['id'];
   const body =
-    automaticPaymentIntent !== undefined && url.pathname === `/v1/payment_intents/${automaticPaymentIntentId}`
-      ? automaticPaymentIntent
-      : url.pathname === '/v1/customers/cus_reload_native'
-        ? {
-            id: 'cus_reload_native',
-            object: 'customer',
-            deleted: false,
-            livemode: false,
-            metadata: customerMetadata,
-            address,
-          }
-        : url.pathname === `/v1/tax/calculations/${taxCalculationId}`
-          ? taxCalculation()
-          : url.pathname === `/v1/tax/calculations/${taxCalculationId}/line_items`
-            ? { object: 'list', data: [taxLine()], has_more: false, url: url.pathname }
-            : url.pathname === '/v1/checkout/sessions/cs_reload_native'
-              ? setupSession()
-              : url.pathname === '/v1/setup_intents/seti_reload_native'
-                ? {
-                    id: 'seti_reload_native',
-                    object: 'setup_intent',
-                    customer: 'cus_reload_native',
-                    livemode: false,
-                    metadata: setupMetadata,
-                    payment_method: 'pm_reload_native',
-                    status: 'succeeded',
-                    usage: 'off_session',
-                  }
-                : url.pathname === '/v1/payment_methods/pm_reload_native'
-                  ? {
-                      id: 'pm_reload_native',
-                      object: 'payment_method',
-                      customer: 'cus_reload_native',
-                      type: 'card',
-                      card: { brand: 'visa', last4: '4242' },
-                    }
-                  : { error: { type: 'invalid_request_error', message: `Missing fixture ${url.pathname}` } };
-  response.writeHead('error' in body ? 404 : 200, { 'content-type': 'application/json' });
+    sessionId !== undefined && sessions.has(sessionId)
+      ? setupSession(sessionId)
+      : setupIntentId !== undefined && sessions.has(setupIntentId.replace('seti_', 'cs_'))
+        ? setupIntent(setupIntentId)
+        : paymentMethodId !== undefined && sessions.has(paymentMethodId.replace('pm_', 'cs_'))
+          ? {
+              id: paymentMethodId,
+              object: 'payment_method',
+              customer: sessions.get(paymentMethodId.replace('pm_', 'cs_'))?.customerId,
+              type: 'card',
+              card: { brand: 'visa', last4: '4242' },
+            }
+          : customerId !== undefined && customers.has(customerId)
+            ? {
+                id: customerId,
+                object: 'customer',
+                deleted: false,
+                livemode: false,
+                metadata: customers.get(customerId),
+                address,
+              }
+            : calculationId !== undefined && calculations.has(calculationId)
+              ? url.pathname.endsWith('/line_items')
+                ? { object: 'list', data: [taxLine(calculationId)], has_more: false, url: url.pathname }
+                : taxCalculation(calculationId)
+              : paymentIntentId !== undefined && paymentIntents.has(paymentIntentId)
+                ? paymentIntents.get(paymentIntentId)
+                : { error: { type: 'invalid_request_error', message: `Missing fixture ${url.pathname}` } };
+  const missing = typeof body === 'object' && 'error' in body;
+  response.writeHead(missing ? 404 : 200, { 'content-type': 'application/json' });
   response.end(JSON.stringify(body));
 });
 
-function taxCalculation() {
+function taxCalculation(id: string) {
   return {
-    id: taxCalculationId,
+    id,
     object: 'tax.calculation',
     amount_total: 2875,
     currency: 'usd',
-    customer: 'cus_reload_native',
+    customer: calculations.get(id)?.customerId,
     customer_details: { address, address_source: 'billing' },
     expires_at: 2_000_000_000,
     livemode: false,
@@ -330,7 +391,7 @@ function taxCalculation() {
   };
 }
 
-function taxLine() {
+function taxLine(id: string) {
   return {
     id: 'tax_li_reload_native',
     object: 'tax.calculation_line_item',
@@ -339,30 +400,43 @@ function taxLine() {
     livemode: false,
     product: 'prod_reload',
     quantity: 1,
-    reference: taxReference,
+    reference: calculations.get(id)?.reference,
     tax_behavior: 'exclusive',
   };
 }
 
-function setupSession() {
+function setupSession(id: string) {
+  const stored = sessions.get(id);
   return {
-    id: 'cs_reload_native',
+    id,
     object: 'checkout.session',
-    client_reference_id: setupMetadata['tau_reload_consent_id'],
-    customer: 'cus_reload_native',
+    client_reference_id: stored?.metadata['tau_reload_consent_id'],
+    customer: stored?.customerId,
     livemode: false,
-    metadata: setupMetadata,
+    metadata: stored?.metadata,
     mode: 'setup',
-    setup_intent: 'seti_reload_native',
+    setup_intent: id.replace('cs_', 'seti_'),
     status: 'complete',
     expires_at: 2_000_000_000,
     url: 'http://127.0.0.1:3000/settings/billing',
   };
 }
 
-describe('billing reload native service foundation', { concurrent: false }, () => {
-  let payments: BillingPaymentsService;
+function setupIntent(id: string) {
+  const stored = sessions.get(id.replace('seti_', 'cs_'));
+  return {
+    id,
+    object: 'setup_intent',
+    customer: stored?.customerId,
+    livemode: false,
+    metadata: stored?.metadata,
+    payment_method: id.replace('seti_', 'pm_'),
+    status: 'succeeded',
+    usage: 'off_session',
+  };
+}
 
+describe('billing reload native service foundation', { concurrent: false }, () => {
   beforeAll(async () => {
     await new Promise<void>((resolve) => {
       stripeServer.listen(0, '127.0.0.1', resolve);
@@ -398,6 +472,11 @@ describe('billing reload native service foundation', { concurrent: false }, () =
       ledger,
       cash,
     );
+    // Reload work is claimed globally by due order; retire every foreign wake so this fixture owns the queue.
+    await database
+      .update(billingReloadWork)
+      .set({ state: 'done', leaseUntil: null, nextAttemptAt: new Date('9999-12-31T00:00:00Z') })
+      .where(ne(billingReloadWork.state, 'done'));
   });
 
   afterAll(async () => {
@@ -419,53 +498,43 @@ describe('billing reload native service foundation', { concurrent: false }, () =
     await expect(
       payments.prepareReloadConsent(userId, { requestId: randomUUID(), returnPath: '/settings/billing' }),
     ).rejects.toMatchObject({ response: { code: 'automatic_reload_unavailable' } });
+    await seedPolicy(controls());
   });
 
   it('quotes first, then explicitly confirms and enables an owned off-session SetupIntent', async () => {
-    await seedPolicy({
-      enabled: true,
-      thresholdAtoms: '100',
-      principalMinor: '2500',
-      monthlyGrossCapMinor: '10000',
-      minimumCadenceSeconds: 3600,
-      terminalFailureLimit: 2,
-    });
     const userId = await seedUser();
+    const posts = setupPostCount;
     const prepared = await payments.prepareReloadConsent(userId, {
       requestId: randomUUID(),
       returnPath: '/settings/billing',
     });
     expect(prepared.state).toBe('prepared');
-    const actionId: unknown = prepared.actionId;
-    if (typeof actionId !== 'string') {
-      throw new TypeError('Prepared reload action identity missing');
-    }
     const confirmed = await Promise.allSettled([
-      payments.confirmAction(userId, actionId),
-      payments.confirmAction(userId, actionId),
+      payments.confirmAction(userId, prepared.actionId),
+      payments.confirmAction(userId, prepared.actionId),
     ]);
-    expect(confirmed).toHaveLength(2);
     expect(confirmed.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
-    expect(confirmed.filter((result) => result.status === 'rejected')).toHaveLength(1);
     expect(confirmed.find((result) => result.status === 'fulfilled')).toMatchObject({
       value: { state: 'redirect_required' },
     });
     expect(confirmed.find((result) => result.status === 'rejected')).toMatchObject({
       reason: { response: { code: 'reload_setup_outcome_unknown' } },
     });
-    expect(setupPostCount).toBe(1);
-    await payments.recoverPayments({ environment: 'development', limit: 10 });
-    const enabled = await payments.getReloadConsent(userId);
-    expect(enabled).toMatchObject({ state: 'enabled', paymentMethod: { brand: 'visa', last4: '4242' } });
-    const rows = await database.select().from(billingReloadConsent);
-    expect(rows.find((row) => row.id === actionId)).toMatchObject({
+    expect(setupPostCount).toBe(posts + 1);
+
+    await payments.recoverPayments({ environment: 'development', limit: 50 });
+    await expect(payments.getReloadConsent(userId)).resolves.toMatchObject({
+      state: 'enabled',
+      paymentMethod: { brand: 'visa', last4: '4242' },
+    });
+    expect(await consentRow(prepared.actionId)).toMatchObject({
       consentedAt: expect.any(Date),
-      setupIntentId: 'seti_reload_native',
-      paymentMethodId: 'pm_reload_native',
+      setupIntentId: expect.stringMatching(/^seti_reload_\d+$/u),
+      paymentMethodId: expect.stringMatching(/^pm_reload_\d+$/u),
       state: 'enabled',
     });
     const setupLeg = await database.query.billingProviderLeg.findFirst({
-      where: eq(billingProviderLeg.reloadConsentId, actionId),
+      where: eq(billingProviderLeg.reloadConsentId, prepared.actionId),
     });
     if (setupLeg?.expiresAt === null || setupLeg?.expiresAt === undefined) {
       throw new Error('Known setup expiry missing');
@@ -473,251 +542,79 @@ describe('billing reload native service foundation', { concurrent: false }, () =
     await expect(
       runtimeClient`update billing.billing_provider_leg set expires_at=${new Date(setupLeg.expiresAt.getTime() + 1000).toISOString()}::timestamptz where id=${setupLeg.id}`,
     ).rejects.toMatchObject({ code: '23514' });
-    const consent = rows.find((row) => row.id === actionId);
-    if (consent === undefined) {
-      throw new Error('Enabled reload fixture missing');
-    }
-    enabledUserId = userId;
-    enabledConsentId = consent.id;
-    await database
-      .update(billingReloadConsent)
-      .set({ lastAutomaticStartedAt: new Date() })
-      .where(eq(billingReloadConsent.id, consent.id));
-    await database.insert(billingReloadWork).values({
-      accountId: consent.accountId,
-      environment: 'development',
-      reasonKind: 'insufficient_funds',
-      observedAccountRevision: 0n,
-    });
-
-    await expect(payments.processReloadWork({ environment: 'development', limit: 1 })).resolves.toEqual({
-      processed: [],
-      pending: [consent.accountId],
-      failed: [],
-    });
-    expect(
-      await database.select().from(billingPurchase).where(eq(billingPurchase.reloadConsentId, consent.id)),
-    ).toHaveLength(0);
-
-    const cappedPurchaseId = randomUUID();
-    await database.insert(billingPurchase).values({
-      id: cappedPurchaseId,
-      accountId: consent.accountId,
-      sourceIdentity: `purchase:${cappedPurchaseId}`,
-      offerSnapshot: { ...consent.offerSnapshot, grossMinor: '8000' },
-      creditAtoms: 1n,
-      state: 'paid',
-      customerBindingId: consent.customerBindingId,
-      requestId: cappedPurchaseId,
-      requestHash: 'cap-fixture',
-      purpose: 'automatic',
-      reloadConsentId: consent.id,
-      reloadConsentVersion: consent.version,
-      automaticStartedAt: new Date(),
-      automaticGrossCeilingMinor: 8000n,
-      stripeAccountId,
-      livemode: false,
-    });
-    await database
-      .update(billingReloadConsent)
-      .set({ lastAutomaticStartedAt: null })
-      .where(eq(billingReloadConsent.id, consent.id));
-    await database
-      .update(billingReloadWork)
-      .set({ state: 'pending', nextAttemptAt: new Date(), leaseUntil: null })
-      .where(eq(billingReloadWork.accountId, consent.accountId));
-    await expect(payments.processReloadWork({ environment: 'development', limit: 1 })).resolves.toEqual({
-      processed: [],
-      pending: [consent.accountId],
-      failed: [],
-    });
-    expect(
-      await database.select().from(billingPurchase).where(eq(billingPurchase.reloadConsentId, consent.id)),
-    ).toHaveLength(1);
-    await database
-      .update(billingPurchase)
-      .set({ state: 'failed', automaticTerminalOutcome: 'no_charge_failure', automaticTerminalAt: new Date() })
-      .where(eq(billingPurchase.id, cappedPurchaseId));
-
-    await database
-      .update(billingReloadConsent)
-      .set({ lastAutomaticStartedAt: null })
-      .where(eq(billingReloadConsent.id, consent.id));
-    await database.update(creditAccount).set({ debtAtoms: 1n }).where(eq(creditAccount.id, consent.accountId));
-    await database
-      .update(billingReloadWork)
-      .set({ state: 'pending', nextAttemptAt: new Date(), leaseUntil: null })
-      .where(eq(billingReloadWork.accountId, consent.accountId));
-    await expect(payments.processReloadWork({ environment: 'development', limit: 1 })).resolves.toEqual({
-      processed: [],
-      pending: [consent.accountId],
-      failed: [],
-    });
-    expect(
-      await database.select().from(billingPurchase).where(eq(billingPurchase.reloadConsentId, consent.id)),
-    ).toHaveLength(1);
-
-    await database.update(creditAccount).set({ debtAtoms: 0n }).where(eq(creditAccount.id, consent.accountId));
-    await database
-      .update(billingReloadWork)
-      .set({ state: 'pending', nextAttemptAt: new Date(), leaseUntil: null })
-      .where(eq(billingReloadWork.accountId, consent.accountId));
-    await expect(payments.processReloadWork({ environment: 'development', limit: 1 })).resolves.toEqual({
-      processed: [consent.accountId],
-      pending: [],
-      failed: [],
-    });
-    await payments.recoverPayments({ environment: 'development', limit: 10 });
-    const automatic = await database.query.billingPurchase.findFirst({
-      where: (table, operators) =>
-        operators.and(operators.eq(table.reloadConsentId, consent.id), operators.eq(table.state, 'attention')),
-    });
-    if (automatic === undefined) {
-      throw new Error('Automatic SCA purchase fixture missing');
-    }
-    await expect(payments.getAction(userId, automatic.id)).resolves.toMatchObject({
-      state: 'attention_required',
-      attention: { reason: 'authentication_required', action: 'continue_hosted' },
-    });
-
-    await database
-      .update(billingPurchase)
-      .set({ state: 'failed', automaticTerminalOutcome: 'no_charge_failure', automaticTerminalAt: new Date() })
-      .where(eq(billingPurchase.id, automatic.id));
   });
 
-  it('recovers one seeded prepared automatic payment without a duplicate dispatch', async () => {
-    if (enabledUserId === undefined || enabledConsentId === undefined) {
-      throw new Error('Enabled reload scenario did not run');
-    }
-    const consent = await database.query.billingReloadConsent.findFirst({
-      where: eq(billingReloadConsent.id, enabledConsentId),
-    });
-    const work = await database.query.billingReloadWork.findFirst({
-      where: eq(billingReloadWork.accountId, consent?.accountId ?? ''),
-    });
-    if (consent === undefined || work === undefined || consent.paymentMethodId === null) {
-      throw new Error('Prepared automatic recovery fixture missing');
-    }
-    const startedAt = new Date();
-    const purchaseId = randomUUID();
-    const legId = randomUUID();
-    const request = {
-      kind: 'payment_intent',
-      idempotencyKey: `tau:${legId}`,
-      automaticReload: true,
-      request: {
-        amount: Number(consent.grossCeilingMinor),
-        currency: 'usd',
-        customer: 'cus_reload_native',
-        payment_method: consent.paymentMethodId,
-        confirm: true,
-        off_session: true,
-        metadata: {
-          tau_purchase_id: purchaseId,
-          tau_customer_binding_id: consent.customerBindingId,
-          tau_provider_leg_id: legId,
-          tau_reload_consent_id: consent.id,
-          tau_reload_consent_version: String(consent.version),
-          tau_reload_work_generation: String(work.generation),
-        },
-      },
-    };
-    await database
-      .update(billingReloadConsent)
-      .set({ lastAutomaticStartedAt: startedAt })
-      .where(eq(billingReloadConsent.id, consent.id));
-    await database
-      .update(billingReloadWork)
-      .set({ state: 'done', leaseUntil: null, nextAttemptAt: new Date('9999-12-31T00:00:00Z') })
-      .where(eq(billingReloadWork.accountId, consent.accountId));
-    await database.insert(billingPurchase).values({
-      id: purchaseId,
-      accountId: consent.accountId,
-      sourceIdentity: `purchase:${purchaseId}`,
-      offerSnapshot: consent.offerSnapshot,
-      creditAtoms: BigInt(consent.offerSnapshot.creditAtoms),
-      state: 'prepared',
-      customerBindingId: consent.customerBindingId,
-      requestId: purchaseId,
-      requestHash: createHash('sha256').update(JSON.stringify(request)).digest('hex'),
-      purpose: 'automatic',
-      reloadConsentId: consent.id,
-      reloadConsentVersion: consent.version,
-      automaticStartedAt: startedAt,
-      automaticGrossCeilingMinor: consent.grossCeilingMinor,
-      stripeAccountId,
-      livemode: false,
-    });
-    await database.insert(billingProviderLeg).values({
-      id: legId,
-      accountId: consent.accountId,
-      environment: 'development',
-      customerBindingId: consent.customerBindingId,
-      purchaseId,
-      reloadConsentId: consent.id,
-      kind: 'payment_intent',
-      requestId: purchaseId,
-      requestHash: createHash('sha256').update(JSON.stringify(request)).digest('hex'),
-      request,
-      idempotencyKey: `tau:${legId}`,
-    });
-    const postsBeforeRecovery = automaticPaymentPostCount;
+  it('never repeats the consent Tax Calculation after a lost response and recovers the known quote', async () => {
+    const userId = await seedUser();
+    const requestId = randomUUID();
+    const posts = taxPostCount;
 
-    await expect(payments.recoverPayments({ environment: 'development', limit: 10 })).resolves.toMatchObject({
-      processed: expect.arrayContaining([legId]),
-    });
-    await payments.recoverPayments({ environment: 'development', limit: 10 });
+    // Killed after Stripe accepted the calculation but before the local identity update.
+    dropTaxResponse = true;
+    await expect(
+      payments.prepareReloadConsent(userId, { requestId, returnPath: '/settings/billing' }),
+    ).rejects.toBeDefined();
+    expect(taxPostCount).toBe(posts + 1);
+    const accountId = await accountFor(userId);
+    const legs = await database
+      .select()
+      .from(billingProviderLeg)
+      .where(and(eq(billingProviderLeg.accountId, accountId), eq(billingProviderLeg.kind, 'tax_calculation')));
+    expect(legs).toHaveLength(1);
+    expect(legs[0]).toMatchObject({ state: 'dispatched', providerObjectId: null });
 
-    expect(automaticPaymentPostCount).toBe(postsBeforeRecovery + 1);
-    await expect(payments.getAction(enabledUserId, purchaseId)).resolves.toMatchObject({
-      actionId: purchaseId,
-      state: 'attention_required',
-      attention: { reason: 'authentication_required', action: 'continue_hosted' },
+    // The same request repeats without a second POST and stays a visible unknown.
+    await expect(
+      payments.prepareReloadConsent(userId, { requestId, returnPath: '/settings/billing' }),
+    ).rejects.toMatchObject({ response: { code: 'reload_tax_outcome_unknown' } });
+    expect(taxPostCount).toBe(posts + 1);
+    expect(
+      await database.select().from(billingReloadConsent).where(eq(billingReloadConsent.accountId, accountId)),
+    ).toHaveLength(0);
+
+    // The generic recovery pass has no source query for a Tax Calculation: it must leave the stuck leg
+    // alone instead of re-claiming it every batch as `provider_source_unknown`.
+    await payments.recoverPayments({ environment: 'development', limit: 50 });
+    const [untouched] = await database
+      .select()
+      .from(billingProviderLeg)
+      .where(and(eq(billingProviderLeg.accountId, accountId), eq(billingProviderLeg.kind, 'tax_calculation')));
+    expect(untouched).toMatchObject({ state: 'dispatched', providerObjectId: null, errorCode: null });
+    expect(taxPostCount).toBe(posts + 1);
+  });
+
+  it('reuses a known consent quote when the final consent transaction fails', async () => {
+    const blocking = await enableConsent();
+    const requestId = randomUUID();
+    const posts = taxPostCount;
+
+    // An already active consent fails the final transaction only after the calculation is known.
+    await expect(
+      payments.prepareReloadConsent(blocking.userId, { requestId, returnPath: '/settings/billing' }),
+    ).rejects.toMatchObject({ response: { code: 'reload_consent_already_active' } });
+    expect(taxPostCount).toBe(posts + 1);
+
+    await payments.revokeReloadConsent(blocking.userId, blocking.consentId);
+    const replay = await payments.prepareReloadConsent(blocking.userId, {
+      requestId,
+      returnPath: '/settings/billing',
     });
+    expect(taxPostCount).toBe(posts + 1);
+    expect(await consentRow(replay.actionId)).toMatchObject({ state: 'pending_setup', requestId });
   });
 
   it('revokes without a new automatic purchase and never repeats a lost setup dispatch', async () => {
-    if (enabledUserId === undefined || enabledConsentId === undefined) {
-      throw new Error('Enabled reload scenario did not run');
-    }
-    const userId = enabledUserId;
-    const consent = await database.query.billingReloadConsent.findFirst({
-      where: eq(billingReloadConsent.id, enabledConsentId),
-    });
-    if (consent === undefined) {
-      throw new Error('Enabled reload consent missing');
-    }
-    const purchases = await database
-      .select()
-      .from(billingPurchase)
-      .where(eq(billingPurchase.reloadConsentId, consent.id));
-    const purchaseCount = purchases.length;
-
-    await database
-      .update(billingReloadWork)
-      .set({ state: 'pending', nextAttemptAt: new Date(), leaseUntil: null })
-      .where(eq(billingReloadWork.accountId, consent.accountId));
-    await payments.revokeReloadConsent(userId, consent.id);
-    await expect(payments.processReloadWork({ environment: 'development', limit: 1 })).resolves.toEqual({
-      processed: [],
-      pending: [consent.accountId],
-      failed: [],
-    });
-    expect(
-      await database.select().from(billingPurchase).where(eq(billingPurchase.reloadConsentId, consent.id)),
-    ).toHaveLength(purchaseCount);
+    const { userId, consentId, accountId } = await enableConsent();
+    await queueReloadWork(accountId);
+    await payments.revokeReloadConsent(userId, consentId);
+    expect(await reloadOutcome(accountId)).toEqual(declined);
+    expect(await automaticPurchases(accountId)).toHaveLength(0);
 
     const replacement = await payments.prepareReloadConsent(userId, {
       requestId: randomUUID(),
       returnPath: '/settings/billing',
     });
-    const replacementConsent = await database.query.billingReloadConsent.findFirst({
-      where: eq(billingReloadConsent.id, replacement.actionId),
-    });
-    if (replacementConsent === undefined) {
-      throw new Error('Replacement reload consent fixture missing');
-    }
+    const replacementConsent = await consentRow(replacement.actionId);
     const lostLegId = randomUUID();
     const lostReturnUrl = `http://127.0.0.1:3000/settings/billing?payment_action=${replacementConsent.id}`;
     const lostRequest = {
@@ -742,13 +639,786 @@ describe('billing reload native service foundation', { concurrent: false }, () =
       state: 'dispatched',
       dispatchStartedAt: new Date(),
     });
-    const postsBeforeLostReplay = setupPostCount;
+    const posts = setupPostCount;
     await expect(payments.confirmAction(userId, replacement.actionId)).rejects.toMatchObject({
       response: { code: 'reload_setup_outcome_unknown' },
     });
-    expect(setupPostCount).toBe(postsBeforeLostReplay);
+    expect(setupPostCount).toBe(posts);
+  });
+
+  it('triggers strictly below the frozen threshold and never at it', async () => {
+    const { accountId } = await enableConsent();
+    await setAvailable(accountId, 100n);
+    await queueReloadWork(accountId);
+    expect(await reloadOutcome(accountId)).toEqual(declined);
+    expect(await automaticPurchases(accountId)).toHaveLength(0);
+
+    await setAvailable(accountId, 99n);
+    await queueReloadWork(accountId);
+    expect(await reloadOutcome(accountId)).toEqual(created);
+    expect(await automaticPurchases(accountId)).toHaveLength(1);
+  });
+
+  it('revalidates balance, consent and work generation at the locked dispatch boundary', async () => {
+    // The hook runs while the quote is in flight: after the pre-lock eligibility read, before the locked dispatch.
+    const replenished = await enableConsent();
+    await queueReloadWork(replenished.accountId);
+    taxHook = {
+      customerId: await customerFor(replenished.accountId),
+      run: async () => {
+        await setAvailable(replenished.accountId, 5000n);
+      },
+    };
+    expect(await reloadOutcome(replenished.accountId)).toEqual(declined);
+    expect(taxHook).toBeUndefined();
+
+    const revoked = await enableConsent();
+    await queueReloadWork(revoked.accountId);
+    taxHook = {
+      customerId: await customerFor(revoked.accountId),
+      run: async () => {
+        await payments.revokeReloadConsent(revoked.userId, revoked.consentId);
+      },
+    };
+    expect(await reloadOutcome(revoked.accountId)).toEqual(declined);
+    expect(taxHook).toBeUndefined();
+
+    const expired = await enableConsent();
+    await queueReloadWork(expired.accountId);
+    const posts = paymentPostCount;
+    taxHook = {
+      customerId: await customerFor(expired.accountId),
+      run: async () => {
+        await database
+          .update(billingReloadWork)
+          .set({ state: 'pending', generation: 99n, leaseUntil: null })
+          .where(eq(billingReloadWork.accountId, expired.accountId));
+      },
+    };
+    const wake = await runReloadWork();
+    expect(wake.pending).toContain(expired.accountId);
+    expect(taxHook).toBeUndefined(); // The bumped generation leaves the wake row for the cleanup below.
+    expect(await automaticPurchases(expired.accountId)).toHaveLength(0);
+    expect(paymentPostCount).toBe(posts);
+    await database
+      .update(billingReloadWork)
+      .set({ state: 'done', leaseUntil: null, nextAttemptAt: new Date('9999-12-31T00:00:00Z') })
+      .where(eq(billingReloadWork.accountId, expired.accountId));
+  });
+
+  it('serializes two concurrent workers into one automatic purchase within the remaining cap slot', async () => {
+    const { accountId, consent } = await enableConsent();
+    await seedAcceptedAutomatic({ accountId, consent, grossMinor: 7000n, acceptedAt: new Date() });
+    await queueReloadWork(accountId);
+    const posts = paymentPostCount;
+
+    const [first, second] = await Promise.all([runReloadWork(), runReloadWork()]);
+    expect(
+      [...first.processed, ...second.processed, ...first.failed, ...second.failed].filter((id) => id === accountId),
+    ).toEqual([accountId]);
+    expect([...first.failed, ...second.failed]).not.toContain(accountId);
+    expect(await automaticPurchases(accountId)).toHaveLength(1);
+    expect(paymentPostCount).toBe(posts + 1);
+  });
+
+  it('counts accepted gross in the source month only and blocks the step that exceeds the cap', async () => {
+    const capped = await enableConsent();
+    await seedAcceptedAutomatic({
+      accountId: capped.accountId,
+      consent: capped.consent,
+      grossMinor: 7500n,
+      acceptedAt: new Date(),
+    });
+    await queueReloadWork(capped.accountId);
+    expect(await reloadOutcome(capped.accountId)).toEqual(declined);
+    expect(await automaticPurchases(capped.accountId)).toHaveLength(0);
+
+    const carried = await enableConsent();
+    const lastMonth = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), 1) - 86_400_000);
+    await seedAcceptedAutomatic({
+      accountId: carried.accountId,
+      consent: carried.consent,
+      grossMinor: 9000n,
+      acceptedAt: lastMonth,
+    });
+    await queueReloadWork(carried.accountId);
+    expect(await reloadOutcome(carried.accountId)).toEqual(created);
+    expect(await automaticPurchases(carried.accountId)).toHaveLength(1);
+  });
+
+  it('keeps an SCA replacement inside the same automatic purchase and capacity', async () => {
+    const { userId, accountId } = await enableConsent();
+    await queueReloadWork(accountId);
+    expect(await reloadOutcome(accountId)).toEqual(created);
+    await payments.recoverPayments({ environment: 'development', limit: 50 });
+    const [automatic] = await automaticPurchases(accountId);
+    if (automatic === undefined) {
+      throw new Error('Automatic purchase fixture missing');
+    }
+    await expect(payments.getAction(userId, automatic.id)).resolves.toMatchObject({
+      state: 'attention_required',
+      attention: { reason: 'authentication_required', action: 'continue_hosted' },
+    });
+
+    const replacements = checkoutPaymentPostCount;
+    const recovered = await payments.recoverAction(userId, automatic.id);
+    expect(recovered.actionId).toBe(automatic.id);
+    expect(checkoutPaymentPostCount).toBe(replacements + 1);
+    expect(await automaticPurchases(accountId)).toHaveLength(1);
+    const legs = await database
+      .select()
+      .from(billingProviderLeg)
+      .where(eq(billingProviderLeg.purchaseId, automatic.id));
+    expect(legs.filter((leg) => leg.state === 'no_charge')).toHaveLength(1);
+    expect(legs.filter((leg) => leg.kind === 'checkout_payment')).toHaveLength(1);
+  });
+
+  it('disables the consent after exactly the configured number of conclusive terminal failures', async () => {
+    const { accountId, consentId } = await enableConsent();
+    paymentStatus = 'canceled';
+    try {
+      await queueReloadWork(accountId);
+      expect(await reloadOutcome(accountId)).toEqual(created);
+      await expireLegLeases(accountId);
+      expect(await terminalFailure(accountId)).toEqual({
+        purchase: 'failed',
+        outcome: 'no_charge_failure',
+        legs: [['no_charge', null]],
+      });
+      expect(await consentRow(consentId)).toMatchObject({ state: 'enabled', consecutiveTerminalFailures: 1 });
+
+      await database
+        .update(billingReloadConsent)
+        .set({ lastAutomaticStartedAt: new Date(Date.now() - 7_200_000) })
+        .where(eq(billingReloadConsent.id, consentId));
+      await queueReloadWork(accountId);
+      expect(await reloadOutcome(accountId)).toEqual(created);
+      await expireLegLeases(accountId);
+      expect(await terminalFailure(accountId)).toEqual({
+        purchase: 'failed',
+        outcome: 'no_charge_failure',
+        legs: [['no_charge', null]],
+      });
+      expect(await consentRow(consentId)).toMatchObject({
+        state: 'disabled_failures',
+        consecutiveTerminalFailures: 2,
+      });
+    } finally {
+      paymentStatus = 'requires_action';
+    }
+  });
+
+  it('closes a never-dispatched automatic purchase whose wake moved on and returns its monthly capacity', async () => {
+    const { accountId, consent } = await enableConsent();
+    const startedAt = new Date(Date.now() - 7_200_000);
+    const seeded = await seedSupersededAutomatic({
+      accountId,
+      consent,
+      startedAt,
+      purchaseState: 'prepared',
+      legState: 'prepared',
+    });
+    await seedAcceptedAutomatic({ accountId, consent, grossMinor: 7000n, acceptedAt: new Date() });
+    // The account's own wake row has already moved past the generation frozen in the seeded leg.
+    await queueReloadWork(accountId);
+    const posts = paymentPostCount;
+
+    await payments.recoverPayments({ environment: 'development', limit: 50 });
+    const orphan = await database.query.billingPurchase.findFirst({ where: eq(billingPurchase.id, seeded.purchaseId) });
+    const leg = await database.query.billingProviderLeg.findFirst({ where: eq(billingProviderLeg.id, seeded.legId) });
+    expect({
+      purchase: orphan?.state ?? null,
+      outcome: orphan?.automaticTerminalOutcome ?? null,
+      leg: leg?.state ?? null,
+      errorCode: leg?.errorCode ?? null,
+      dispatched: leg?.dispatchStartedAt ?? null,
+      posts: paymentPostCount - posts,
+    }).toEqual({
+      purchase: 'failed',
+      outcome: 'no_charge_failure',
+      leg: 'no_charge',
+      errorCode: 'automatic_wake_superseded',
+      dispatched: null,
+      posts: 0,
+    });
+    expect(leg?.cancellationConfirmedAt).toBeInstanceOf(Date);
+
+    // The released ceiling is what the next wake needs: 7000 accepted this month plus one more ceiling still fits.
+    expect(await reloadOutcome(accountId)).toEqual(created);
+    expect(await automaticPurchases(accountId)).toHaveLength(1);
+  });
+
+  it('closes a prepared automatic purchase whose consent was revoked before its wake confirmed', async () => {
+    const { userId, consentId, accountId, consent } = await enableConsent();
+    const startedAt = new Date(Date.now() - 7_200_000);
+    const seeded = await seedSupersededAutomatic({
+      accountId,
+      consent,
+      startedAt,
+      purchaseState: 'prepared',
+      legState: 'prepared',
+    });
+    // The wake row still sits at the generation frozen in the leg: only the consent moved, and it never returns.
+    await parkReloadWork(accountId);
+    await payments.revokeReloadConsent(userId, consentId);
+    const posts = paymentPostCount;
+
+    await payments.recoverPayments({ environment: 'development', limit: 50 });
+    const orphan = await database.query.billingPurchase.findFirst({ where: eq(billingPurchase.id, seeded.purchaseId) });
+    const leg = await database.query.billingProviderLeg.findFirst({ where: eq(billingProviderLeg.id, seeded.legId) });
+    expect({
+      purchase: orphan?.state ?? null,
+      outcome: orphan?.automaticTerminalOutcome ?? null,
+      leg: leg?.state ?? null,
+      errorCode: leg?.errorCode ?? null,
+      dispatched: leg?.dispatchStartedAt ?? null,
+      posts: paymentPostCount - posts,
+    }).toEqual({
+      purchase: 'failed',
+      outcome: 'no_charge_failure',
+      leg: 'no_charge',
+      errorCode: 'automatic_consent_revoked',
+      dispatched: null,
+      posts: 0,
+    });
+    // The account's single automatic slot is free again for the consent that replaces this one.
+    expect(await automaticPurchases(accountId)).toHaveLength(0);
+  });
+
+  it('closes a prepared automatic purchase whose frozen request no longer matches the canonical one', async () => {
+    const { consentId, accountId, consent } = await enableConsent();
+    const startedAt = new Date(Date.now() - 7_200_000);
+    const seeded = await seedSupersededAutomatic({
+      accountId,
+      consent,
+      startedAt,
+      purchaseState: 'prepared',
+      legState: 'prepared',
+    });
+    await parkReloadWork(accountId);
+    const posts = paymentPostCount;
+
+    // Every fence clause passes, so the caller's canonical request is the only refusal left; a frozen request
+    // that disagrees with it can never agree with it later, which is why this closes instead of retrying.
+    await (payments as unknown as AutomaticConfirm).confirmAutomaticPurchase(
+      accountId,
+      consentId,
+      seeded.purchaseId,
+      seeded.legId,
+      { kind: 'payment_intent', idempotencyKey: `tau:${seeded.legId}`, request: { amount: 1 } },
+      99n,
+    );
+
+    const orphan = await database.query.billingPurchase.findFirst({ where: eq(billingPurchase.id, seeded.purchaseId) });
+    const leg = await database.query.billingProviderLeg.findFirst({ where: eq(billingProviderLeg.id, seeded.legId) });
+    expect({
+      purchase: orphan?.state ?? null,
+      outcome: orphan?.automaticTerminalOutcome ?? null,
+      leg: leg?.state ?? null,
+      errorCode: leg?.errorCode ?? null,
+      dispatched: leg?.dispatchStartedAt ?? null,
+      posts: paymentPostCount - posts,
+    }).toEqual({
+      purchase: 'failed',
+      outcome: 'no_charge_failure',
+      leg: 'no_charge',
+      errorCode: 'automatic_request_digest_mismatch',
+      dispatched: null,
+      posts: 0,
+    });
+    expect(await automaticPurchases(accountId)).toHaveLength(0);
+  });
+
+  it('keeps a prepared automatic purchase retryable when funds arrived before its wake confirmed', async () => {
+    const { accountId, consent } = await enableConsent();
+    const startedAt = new Date(Date.now() - 7_200_000);
+    const seeded = await seedSupersededAutomatic({
+      accountId,
+      consent,
+      startedAt,
+      purchaseState: 'prepared',
+      legState: 'prepared',
+    });
+    await parkReloadWork(accountId);
+    await setAvailable(accountId, 5000n);
+    const posts = paymentPostCount;
+
+    await payments.recoverPayments({ environment: 'development', limit: 50 });
+    const refused = await database.query.billingPurchase.findFirst({
+      where: eq(billingPurchase.id, seeded.purchaseId),
+    });
+    const waiting = await database.query.billingProviderLeg.findFirst({
+      where: eq(billingProviderLeg.id, seeded.legId),
+    });
+    expect({
+      purchase: refused?.state ?? null,
+      outcome: refused?.automaticTerminalOutcome ?? null,
+      leg: waiting?.state ?? null,
+      errorCode: waiting?.errorCode ?? null,
+      posts: paymentPostCount - posts,
+    }).toEqual({ purchase: 'prepared', outcome: null, leg: 'prepared', errorCode: null, posts: 0 });
+    // The claim paced the refusal: the leg is not re-claimable until its lease expires, so no pass busy-loops it.
+    expect(waiting?.nextAttemptAt.getTime() ?? 0).toBeGreaterThan(Date.now());
+
+    // The same prepared purchase still dispatches once the balance falls below the frozen threshold again.
+    await setAvailable(accountId, 0n);
+    await expireLegLeases(accountId);
+    await payments.recoverPayments({ environment: 'development', limit: 50 });
+    const completed = await database.query.billingPurchase.findFirst({
+      where: eq(billingPurchase.id, seeded.purchaseId),
+    });
+    const dispatched = await database.query.billingProviderLeg.findFirst({
+      where: eq(billingProviderLeg.id, seeded.legId),
+    });
+    expect({
+      purchase: completed?.state ?? null,
+      leg: dispatched?.state ?? null,
+      object: dispatched?.providerObjectId ?? null,
+      posts: paymentPostCount - posts,
+    }).toEqual({ purchase: 'pending', leg: 'known', object: expect.stringMatching(/^pi_/u), posts: 1 });
+  });
+
+  it('closes a prepared automatic purchase whose frozen Tax Calculation expired before it dispatched', async () => {
+    const { accountId, consent } = await enableConsent();
+    const seeded = await seedSupersededAutomatic({
+      accountId,
+      consent,
+      startedAt: new Date(Date.now() - 7_200_000),
+      purchaseState: 'prepared',
+      legState: 'prepared',
+      taxExpiresAt: new Date(Date.now() - 60_000),
+    });
+    // Every other fence passes, so the frozen quote is the only refusal left.
+    await parkReloadWork(accountId);
+    const posts = paymentPostCount;
+
+    await payments.recoverPayments({ environment: 'development', limit: 50 });
+    const orphan = await database.query.billingPurchase.findFirst({ where: eq(billingPurchase.id, seeded.purchaseId) });
+    const leg = await database.query.billingProviderLeg.findFirst({ where: eq(billingProviderLeg.id, seeded.legId) });
+    expect({
+      purchase: orphan?.state ?? null,
+      outcome: orphan?.automaticTerminalOutcome ?? null,
+      leg: leg?.state ?? null,
+      errorCode: leg?.errorCode ?? null,
+      dispatched: leg?.dispatchStartedAt ?? null,
+      posts: paymentPostCount - posts,
+    }).toEqual({
+      purchase: 'failed',
+      outcome: 'no_charge_failure',
+      leg: 'no_charge',
+      errorCode: 'automatic_tax_calculation_expired',
+      dispatched: null,
+      posts: 0,
+    });
+
+    // Confirm never re-quotes: the next wake is what re-prepares the purchase against a fresh calculation.
+    await queueReloadWork(accountId);
+    expect(await reloadOutcome(accountId)).toEqual(created);
+  });
+
+  it('dispatches a prepared automatic purchase whose frozen Tax Calculation is still live', async () => {
+    const { accountId, consent } = await enableConsent();
+    const seeded = await seedSupersededAutomatic({
+      accountId,
+      consent,
+      startedAt: new Date(Date.now() - 7_200_000),
+      purchaseState: 'prepared',
+      legState: 'prepared',
+      taxExpiresAt: new Date(Date.now() + 3_600_000),
+    });
+    await parkReloadWork(accountId);
+    const posts = paymentPostCount;
+
+    await payments.recoverPayments({ environment: 'development', limit: 50 });
+    const purchase = await database.query.billingPurchase.findFirst({
+      where: eq(billingPurchase.id, seeded.purchaseId),
+    });
+    const leg = await database.query.billingProviderLeg.findFirst({ where: eq(billingProviderLeg.id, seeded.legId) });
+    expect({
+      purchase: purchase?.state ?? null,
+      leg: leg?.state ?? null,
+      object: leg?.providerObjectId ?? null,
+      posts: paymentPostCount - posts,
+    }).toEqual({ purchase: 'pending', leg: 'known', object: expect.stringMatching(/^pi_/u), posts: 1 });
+  });
+
+  it('parks a cap-refused automatic payment leg at the next UTC month boundary', async () => {
+    const { accountId, consent } = await enableConsent();
+    const seeded = await seedSupersededAutomatic({
+      accountId,
+      consent,
+      startedAt: new Date(Date.now() - 7_200_000),
+      purchaseState: 'prepared',
+      legState: 'prepared',
+    });
+    await parkReloadWork(accountId);
+    // Accepted this month, so the confirm-side sum (this purchase's ceiling plus the accepted gross) exceeds the cap.
+    await seedAcceptedAutomatic({
+      accountId,
+      consent,
+      grossMinor: consent.monthlyGrossCapMinor,
+      acceptedAt: new Date(),
+    });
+    const posts = paymentPostCount;
+
+    await payments.recoverPayments({ environment: 'development', limit: 50 });
+    const purchase = await database.query.billingPurchase.findFirst({
+      where: eq(billingPurchase.id, seeded.purchaseId),
+    });
+    const leg = await database.query.billingProviderLeg.findFirst({ where: eq(billingProviderLeg.id, seeded.legId) });
+    const now = new Date();
+    const boundary = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+    expect({
+      purchase: purchase?.state ?? null,
+      outcome: purchase?.automaticTerminalOutcome ?? null,
+      leg: leg?.state ?? null,
+      errorCode: leg?.errorCode ?? null,
+      // The refusal cannot change before the accepted purchase rolls off, so the leg waits exactly that long.
+      nextAttemptAt: leg?.nextAttemptAt.toISOString() ?? null,
+      posts: paymentPostCount - posts,
+    }).toEqual({
+      purchase: 'prepared',
+      outcome: null,
+      leg: 'prepared',
+      errorCode: 'automatic_monthly_cap_reached',
+      nextAttemptAt: boundary.toISOString(),
+      posts: 0,
+    });
+  });
+
+  it('leaves a dispatched automatic payment leg to provider recovery', async () => {
+    const { accountId, consent } = await enableConsent();
+    const startedAt = new Date(Date.now() - 7_200_000);
+    const seeded = await seedSupersededAutomatic({
+      accountId,
+      consent,
+      startedAt,
+      purchaseState: 'creating',
+      legState: 'dispatched',
+    });
+    const posts = paymentPostCount;
+
+    await payments.recoverPayments({ environment: 'development', limit: 50 });
+    const purchase = await database.query.billingPurchase.findFirst({
+      where: eq(billingPurchase.id, seeded.purchaseId),
+    });
+    const leg = await database.query.billingProviderLeg.findFirst({ where: eq(billingProviderLeg.id, seeded.legId) });
+    expect({
+      purchase: purchase?.state ?? null,
+      outcome: purchase?.automaticTerminalOutcome ?? null,
+      leg: leg?.state ?? null,
+      cancelled: leg?.cancellationConfirmedAt ?? null,
+      posts: paymentPostCount - posts,
+    }).toEqual({ purchase: 'creating', outcome: null, leg: 'dispatched', cancelled: null, posts: 0 });
   });
 });
+
+/** The private confirm step, called directly where the caller's canonical request is the state under test. */
+type AutomaticConfirm = {
+  confirmAutomaticPurchase(
+    accountId: string,
+    consentId: string,
+    purchaseId: string,
+    legId: string,
+    request: Record<string, unknown>,
+    workGeneration: bigint,
+  ): Promise<void>;
+};
+
+type EnabledConsent = {
+  readonly userId: string;
+  readonly consentId: string;
+  readonly accountId: string;
+  readonly consent: typeof billingReloadConsent.$inferSelect;
+};
+
+async function enableConsent(): Promise<EnabledConsent> {
+  const userId = await seedUser();
+  const prepared = await payments.prepareReloadConsent(userId, {
+    requestId: randomUUID(),
+    returnPath: '/settings/billing',
+  });
+  await payments.confirmAction(userId, prepared.actionId);
+  await payments.recoverPayments({ environment: 'development', limit: 50 });
+  const consent = await consentRow(prepared.actionId);
+  if (consent.state !== 'enabled') {
+    throw new Error(`Reload consent did not enable: ${consent.state}`);
+  }
+  return { userId, consentId: consent.id, accountId: consent.accountId, consent };
+}
+
+async function consentRow(consentId: string): Promise<typeof billingReloadConsent.$inferSelect> {
+  const row = await database.query.billingReloadConsent.findFirst({
+    where: eq(billingReloadConsent.id, consentId),
+  });
+  if (row === undefined) {
+    throw new Error('Reload consent fixture missing');
+  }
+  return row;
+}
+
+async function automaticPurchases(accountId: string) {
+  return database
+    .select()
+    .from(billingPurchase)
+    .where(
+      and(
+        eq(billingPurchase.accountId, accountId),
+        eq(billingPurchase.purpose, 'automatic'),
+        isNull(billingPurchase.automaticTerminalOutcome),
+      ),
+    );
+}
+
+/** A wake-up row is claimed globally, so every assertion scopes itself to the account under test. */
+async function runReloadWork() {
+  return payments.processReloadWork({ environment: 'development', limit: 100 });
+}
+
+/** Reports the worker outcome together with the durable state it left, so a failure names its own cause. */
+async function reloadOutcome(accountId: string): Promise<Record<string, unknown>> {
+  const before = paymentPostCount;
+  const outcome = await runReloadWork();
+  const work = await database.query.billingReloadWork.findFirst({
+    where: eq(billingReloadWork.accountId, accountId),
+  });
+  const [purchase] = await automaticPurchases(accountId);
+  const leg =
+    purchase === undefined
+      ? undefined
+      : await database.query.billingProviderLeg.findFirst({
+          where: and(eq(billingProviderLeg.purchaseId, purchase.id), eq(billingProviderLeg.kind, 'payment_intent')),
+        });
+  return {
+    processed: outcome.processed.includes(accountId),
+    pending: outcome.pending.includes(accountId),
+    failed: outcome.failed.includes(accountId),
+    errorCode: work?.errorCode ?? null,
+    purchase: purchase?.state ?? null,
+    leg: leg === undefined ? null : { state: leg.state, object: leg.providerObjectId, errorCode: leg.errorCode },
+    posts: paymentPostCount - before,
+  };
+}
+
+const created = {
+  processed: true,
+  pending: false,
+  failed: false,
+  errorCode: null,
+  purchase: 'pending',
+  leg: { state: 'known', object: expect.stringMatching(/^pi_/u), errorCode: null },
+  posts: 1,
+};
+const declined = {
+  processed: false,
+  pending: true,
+  failed: false,
+  errorCode: null,
+  purchase: null,
+  leg: null,
+  posts: 0,
+};
+
+async function queueReloadWork(accountId: string): Promise<void> {
+  await database
+    .insert(billingReloadWork)
+    .values({
+      accountId,
+      environment: 'development',
+      reasonKind: 'insufficient_funds',
+      observedAccountRevision: 0n,
+    })
+    .onConflictDoUpdate({
+      target: billingReloadWork.accountId,
+      set: { state: 'pending', leaseUntil: null, nextAttemptAt: new Date(), errorCode: null },
+    });
+}
+
+/** Parks the wake row `done` at the generation frozen in a seeded leg, leaving only the reason under test. */
+async function parkReloadWork(accountId: string): Promise<void> {
+  await database
+    .insert(billingReloadWork)
+    .values({
+      accountId,
+      environment: 'development',
+      reasonKind: 'insufficient_funds',
+      observedAccountRevision: 0n,
+      state: 'done',
+      generation: 99n,
+    })
+    .onConflictDoUpdate({
+      target: billingReloadWork.accountId,
+      set: { state: 'done', generation: 99n, leaseUntil: null },
+    });
+}
+
+async function accountFor(userId: string): Promise<string> {
+  const binding = await database.query.billingOwnerBinding.findFirst({
+    where: (table, operators) => operators.eq(table.authUserId, userId),
+  });
+  if (binding === undefined) {
+    throw new Error('Reload owner binding missing');
+  }
+  return binding.accountId;
+}
+
+async function customerFor(accountId: string): Promise<string> {
+  const binding = await database.query.billingStripeCustomer.findFirst({
+    where: (table, operators) => operators.eq(table.accountId, accountId),
+  });
+  if (binding?.stripeCustomerId === null || binding?.stripeCustomerId === undefined) {
+    throw new Error('Reload Customer binding missing');
+  }
+  return binding.stripeCustomerId;
+}
+
+/** Runs one recovery pass and reports how the pending automatic purchase and its payment leg concluded. */
+async function terminalFailure(accountId: string): Promise<Record<string, unknown>> {
+  const [target] = await automaticPurchases(accountId);
+  if (target === undefined) {
+    throw new Error('Automatic purchase fixture missing');
+  }
+  await payments.recoverPayments({ environment: 'development', limit: 50 });
+  const purchase = await database.query.billingPurchase.findFirst({ where: eq(billingPurchase.id, target.id) });
+  const legs = await database
+    .select()
+    .from(billingProviderLeg)
+    .where(and(eq(billingProviderLeg.purchaseId, target.id), eq(billingProviderLeg.kind, 'payment_intent')));
+  return {
+    purchase: purchase?.state ?? null,
+    outcome: purchase?.automaticTerminalOutcome ?? null,
+    legs: legs.map((leg) => [leg.state, leg.errorCode]),
+  };
+}
+
+/** Retires the lease a dispatch just took so the next recovery pass claims the leg without waiting it out. */
+async function expireLegLeases(accountId: string): Promise<void> {
+  await database
+    .update(billingProviderLeg)
+    .set({ nextAttemptAt: new Date(Date.now() - 1000) })
+    .where(and(eq(billingProviderLeg.accountId, accountId), ne(billingProviderLeg.state, 'no_charge')));
+}
+
+async function setAvailable(accountId: string, atoms: bigint): Promise<void> {
+  await database.update(creditAccount).set({ purchasedAtoms: atoms }).where(eq(creditAccount.id, accountId));
+}
+
+/** A terminal accepted automatic purchase consumes capacity in the UTC month of its source acceptance. */
+async function seedAcceptedAutomatic(input: {
+  readonly accountId: string;
+  readonly consent: typeof billingReloadConsent.$inferSelect;
+  readonly grossMinor: bigint;
+  readonly acceptedAt: Date;
+}): Promise<void> {
+  const { accountId, consent, grossMinor, acceptedAt } = input;
+  const id = randomUUID();
+  await database.insert(billingPurchase).values({
+    id,
+    accountId,
+    sourceIdentity: `purchase:${id}`,
+    offerSnapshot: { ...consent.offerSnapshot, grossMinor: grossMinor.toString() },
+    creditAtoms: 1n,
+    state: 'paid',
+    customerBindingId: consent.customerBindingId,
+    requestId: id,
+    requestHash: 'accepted-capacity-fixture',
+    purpose: 'automatic',
+    reloadConsentId: consent.id,
+    reloadConsentVersion: consent.version,
+    automaticStartedAt: acceptedAt,
+    automaticGrossCeilingMinor: grossMinor,
+    automaticSourceAcceptedAt: acceptedAt,
+    automaticTerminalOutcome: 'paid',
+    automaticTerminalAt: acceptedAt,
+    stripeAccountId,
+    livemode: false,
+  });
+}
+
+/**
+ * Reproduces the durable state a worker leaves between the prepared automatic commit and its provider dispatch,
+ * with a wake generation the account's work row has already moved past.
+ */
+async function seedSupersededAutomatic(input: {
+  readonly accountId: string;
+  readonly consent: typeof billingReloadConsent.$inferSelect;
+  readonly startedAt: Date;
+  readonly purchaseState: 'prepared' | 'creating';
+  readonly legState: 'prepared' | 'dispatched';
+  /** The Tax Calculation the purchase was prepared against; live an hour from now unless a case expires it. */
+  readonly taxExpiresAt?: Date;
+}): Promise<{ purchaseId: string; legId: string }> {
+  const { accountId, consent, startedAt, purchaseState, legState, taxExpiresAt } = input;
+  const purchaseId = randomUUID();
+  const legId = randomUUID();
+  await database.insert(billingPurchase).values({
+    id: purchaseId,
+    accountId,
+    sourceIdentity: `purchase:${purchaseId}`,
+    offerSnapshot: { ...consent.offerSnapshot, grossMinor: consent.grossCeilingMinor.toString() },
+    creditAtoms: 1n,
+    state: purchaseState,
+    customerBindingId: consent.customerBindingId,
+    requestId: purchaseId,
+    requestHash: 'superseded-wake-fixture',
+    purpose: 'automatic',
+    returnPath: consent.returnPath,
+    reloadConsentId: consent.id,
+    reloadConsentVersion: consent.version,
+    automaticStartedAt: startedAt,
+    automaticGrossCeilingMinor: consent.grossCeilingMinor,
+    taxEvidence: {
+      version: 'stripe-reload-tax-v1',
+      calculationId: `taxcalc_${purchaseId}`,
+      locationRevision: consent.taxEvidence['locationRevision'],
+      sourceDigest: 'superseded-wake-fixture',
+      expiresAt: (taxExpiresAt ?? new Date(Date.now() + 3_600_000)).toISOString(),
+    },
+    stripeAccountId,
+    livemode: false,
+  });
+  await database.insert(billingProviderLeg).values({
+    id: legId,
+    accountId,
+    environment: 'development',
+    customerBindingId: consent.customerBindingId,
+    purchaseId,
+    reloadConsentId: consent.id,
+    kind: 'payment_intent',
+    requestId: purchaseId,
+    requestHash: 'superseded-wake-fixture',
+    request: {
+      kind: 'payment_intent',
+      idempotencyKey: `tau:${legId}`,
+      automaticReload: true,
+      request: {
+        amount: Number(consent.grossCeilingMinor),
+        currency: 'usd',
+        customer: await customerFor(accountId),
+        payment_method: consent.paymentMethodId,
+        confirm: true,
+        off_session: true,
+        metadata: {
+          tau_purchase_id: purchaseId,
+          tau_customer_binding_id: consent.customerBindingId,
+          tau_provider_leg_id: legId,
+          tau_reload_consent_id: consent.id,
+          tau_reload_consent_version: String(consent.version),
+          tau_reload_work_generation: '99',
+        },
+      },
+    },
+    idempotencyKey: `tau:${legId}`,
+    state: legState,
+    dispatchStartedAt: legState === 'dispatched' ? startedAt : null,
+    nextAttemptAt: new Date(Date.now() - 1000),
+  });
+  await database
+    .update(billingReloadConsent)
+    .set({ lastAutomaticStartedAt: startedAt })
+    .where(eq(billingReloadConsent.id, consent.id));
+  return { purchaseId, legId };
+}
 
 async function seedUser(): Promise<string> {
   const id = randomUUID();
@@ -756,6 +1426,17 @@ async function seedUser(): Promise<string> {
     .insert(user)
     .values({ id, name: 'Reload Foundation', email: `${id}@test.invalid`, emailVerified: true });
   return id;
+}
+
+function controls() {
+  return {
+    enabled: true,
+    thresholdAtoms: '100',
+    principalMinor: '2500',
+    monthlyGrossCapMinor: '10000',
+    minimumCadenceSeconds: 3600,
+    terminalFailureLimit: 2,
+  };
 }
 
 async function seedPolicy(

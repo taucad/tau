@@ -56,6 +56,21 @@ const forgeCapability = (values: Record<string, string>): InputCountCapability =
   }
   return forged;
 };
+const supplierCapability: InputCountCapability = {
+  qualification: 'openai-input-tokens-v1',
+  environment: 'prod-us',
+  credentialAccount: 'fixture-account',
+  sourceRevision: 'openai-input-tokens-v1:2026-09-12',
+  url: 'https://api.openai.com/v1/responses/input_tokens',
+  apiKey: 'fixture-openai-key',
+};
+const supplierRequest = (overrides: Partial<CountInput> = {}): CountInput =>
+  request({ capability: supplierCapability, environment: 'prod-us', ...overrides });
+const withoutKey = (): InputCountCapability => {
+  const forged = { ...supplierCapability };
+  Reflect.deleteProperty(forged, 'apiKey');
+  return forged;
+};
 const invalidCapabilities: ReadonlyArray<readonly [string, Partial<CountInput>]> = [
   ['production', { environment: 'prod-us' }],
   ['forged qualification', { capability: forgeCapability({ qualification: 'unqualified' }) }],
@@ -65,6 +80,22 @@ const invalidCapabilities: ReadonlyArray<readonly [string, Partial<CountInput>]>
   ['non-loopback URL', { capability: { ...capability, url: 'https://api.openai.com/v1/responses/input_tokens' } }],
   ['query-bearing URL', { capability: { ...capability, url: `${capability.url}?credential=forbidden` } }],
   ['wrong path', { capability: { ...capability, url: 'http://127.0.0.1:43199/v1/responses' } }],
+  ['keyless supplier', { capability: withoutKey(), environment: 'prod-us' }],
+  [
+    'loopback supplier',
+    {
+      capability: { ...supplierCapability, url: capability.url },
+      environment: 'prod-us',
+    } satisfies Partial<CountInput>,
+  ],
+  [
+    'foreign-host supplier',
+    {
+      capability: { ...supplierCapability, url: 'https://proxy.example.com/v1/responses/input_tokens' },
+      environment: 'prod-us',
+    } satisfies Partial<CountInput>,
+  ],
+  ['cross-environment supplier', { capability: supplierCapability, environment: 'prod-eu' }],
 ];
 
 describe('countBillableModelInput', () => {
@@ -109,6 +140,62 @@ describe('countBillableModelInput', () => {
       });
     },
   );
+
+  it('counts a production request through the supplier and records its own liability', async () => {
+    let target = '';
+    let headers: Record<string, string> = {};
+    const evidence = await countBillableModelInput(
+      supplierRequest({
+        fetchOnce: async (url, init) => {
+          target = url instanceof URL ? url.href : 'not-a-url';
+          headers = { ...(init?.headers as Record<string, string>) };
+          return jsonResponse({ object: 'response.input_tokens', input_tokens: 4096 });
+        },
+      }),
+    );
+    expect(target).toBe('https://api.openai.com/v1/responses/input_tokens');
+    expect(headers['authorization']).toBe('Bearer fixture-openai-key');
+    expect(evidence).toMatchObject({
+      environment: 'prod-us',
+      sourceRevision: 'openai-input-tokens-v1:2026-09-12',
+      inputTokens: '4096',
+      liability: 'openai-input-tokens-v1',
+    });
+  });
+
+  it('never sends a credential to the controlled loopback stub', async () => {
+    let headers: Record<string, string> = {};
+    await countBillableModelInput(
+      request({
+        fetchOnce: async (_url, init) => {
+          headers = { ...(init?.headers as Record<string, string>) };
+          return jsonResponse({ object: 'response.input_tokens', input_tokens: 1 });
+        },
+      }),
+    );
+    expect(Object.keys(headers)).toEqual(['content-type']);
+  });
+
+  it('refuses a supplier count above the proved byte bound rather than clamping it', async () => {
+    await expect(
+      countBillableModelInput(
+        supplierRequest({
+          maximumInput: 4095n,
+          fetchOnce: async () => jsonResponse({ object: 'response.input_tokens', input_tokens: 4096 }),
+        }),
+      ),
+    ).rejects.toThrow('exceeds');
+  });
+
+  it('keeps a supplier count that shrinks the byte bound', async () => {
+    const evidence = await countBillableModelInput(
+      supplierRequest({
+        maximumInput: 124_269n,
+        fetchOnce: async () => jsonResponse({ object: 'response.input_tokens', input_tokens: 30_000 }),
+      }),
+    );
+    expect(BigInt(evidence.inputTokens)).toBeLessThan(124_269n);
+  });
 
   it('preserves an actual zero count distinctly', async () => {
     const evidence = await countBillableModelInput(

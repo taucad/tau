@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   classifyTaxEvidence,
   earliestRollingCrossing,
+  paidTaxSourceIncompleteness,
   projectPaidTaxEvidence,
   taxFactEvidenceSchema,
 } from '#api/billing/billing-tax.service.js';
@@ -140,6 +141,7 @@ describe('paid tax source projection', () => {
       customer_address: { country: 'FR' },
       customer_tax_ids: [],
       automatic_tax: { status: 'complete' },
+      total_taxes: [{ amount: 200 }],
     } as unknown as Stripe.Invoice;
     const projected = await projectPaidTaxEvidence({
       paidEvidence,
@@ -164,9 +166,85 @@ describe('paid tax source projection', () => {
       customer_address: { country: 'FR' },
       customer_tax_ids: [{ type: 'eu_vat', value: 'FR123' }],
       automatic_tax: { status: 'complete' },
+      total_taxes: [{ amount: 200 }],
     } as unknown as Stripe.Invoice;
     const projected = await projectPaidTaxEvidence({ paidEvidence, invoice });
     expect(projected).toMatchObject({ customerType: 'business', vat: { validation: 'unverified' } });
+    expect(classifyTaxEvidence(projected!)).toBe('unknown');
+  });
+
+  it('refuses a complete fact unless Stripe Tax completed and retained the paid tax amount', async () => {
+    const complete = {
+      id: 'in_1',
+      customer_address: { country: 'FR' },
+      customer_tax_ids: [],
+      automatic_tax: { status: 'complete' },
+      total_taxes: [{ amount: 150 }, { amount: 50 }],
+    } as unknown as Stripe.Invoice;
+    const incomplete = (invoice: Record<string, unknown>): Stripe.Invoice =>
+      ({ ...complete, ...invoice }) as unknown as Stripe.Invoice;
+    expect(paidTaxSourceIncompleteness({ paidEvidence, invoice: complete })).toBeUndefined();
+    expect(paidTaxSourceIncompleteness({ paidEvidence })).toBe('missing_immutable_paid_snapshot');
+    expect(paidTaxSourceIncompleteness({ paidEvidence, invoice: incomplete({ automatic_tax: undefined }) })).toBe(
+      'automatic_tax_status:absent',
+    );
+    expect(
+      paidTaxSourceIncompleteness({
+        paidEvidence,
+        invoice: incomplete({ automatic_tax: { status: 'requires_location_inputs' } }),
+      }),
+    ).toBe('automatic_tax_status:requires_location_inputs');
+    expect(
+      paidTaxSourceIncompleteness({ paidEvidence, invoice: incomplete({ automatic_tax: { status: 'failed' } }) }),
+    ).toBe('automatic_tax_status:failed');
+    expect(paidTaxSourceIncompleteness({ paidEvidence, invoice: incomplete({ total_taxes: null }) })).toBe(
+      'missing_retained_tax_amount',
+    );
+    expect(paidTaxSourceIncompleteness({ paidEvidence, invoice: incomplete({ total_taxes: [{ amount: 199 }] }) })).toBe(
+      'retained_tax_amount_mismatch',
+    );
+    await expect(
+      projectPaidTaxEvidence({ paidEvidence, invoice: incomplete({ automatic_tax: { status: 'failed' } }) }),
+    ).resolves.toBeUndefined();
+    await expect(
+      projectPaidTaxEvidence({ paidEvidence, invoice: incomplete({ total_taxes: [{ amount: 199 }] }) }),
+    ).resolves.toBeUndefined();
+    expect(classifyTaxEvidence((await projectPaidTaxEvidence({ paidEvidence, invoice: complete }))!)).toBe('eu_b2c');
+  });
+
+  it('requires a completed Checkout and never treats a zero tax total as exemption', async () => {
+    const zeroTaxPaid = { ...paidEvidence, taxMinor: '0', grossMinor: '1000', invoiceId: null };
+    const session = {
+      id: 'cs_1',
+      status: 'complete',
+      customer_details: { address: { country: 'DE' } },
+      automatic_tax: { status: 'complete' },
+      total_details: { amount_tax: 0 },
+    } as unknown as Stripe.Checkout.Session;
+    expect(
+      paidTaxSourceIncompleteness({
+        paidEvidence: zeroTaxPaid,
+        checkout: { ...session, status: 'open' } as unknown as Stripe.Checkout.Session,
+      }),
+    ).toBe('checkout_status:open');
+    const projected = await projectPaidTaxEvidence({ paidEvidence: zeroTaxPaid, checkout: session });
+    expect(projected).toMatchObject({ countryCode: 'DE', countryEvidenceSource: 'checkout', taxMinor: '0' });
+    expect(classifyTaxEvidence(projected!)).toBe('eu_b2c');
+  });
+
+  it('leaves an immutable snapshot without a customer country in unknown review', async () => {
+    const session = {
+      id: 'cs_1',
+      status: 'complete',
+      customer_details: null,
+      automatic_tax: { status: 'complete' },
+      total_details: { amount_tax: 200 },
+    } as unknown as Stripe.Checkout.Session;
+    const projected = await projectPaidTaxEvidence({
+      paidEvidence: { ...paidEvidence, invoiceId: null },
+      checkout: session,
+    });
+    expect(projected).toMatchObject({ countryCode: null });
     expect(classifyTaxEvidence(projected!)).toBe('unknown');
   });
 

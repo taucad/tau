@@ -810,7 +810,7 @@ export const billingInvocationEvidence = billing.table(
     payloadDigest: text('payload_digest').notNull(),
     evidence: jsonb('evidence')
       .$type<{
-        kind: 'final_usage' | 'provider_rejected' | 'absorbed_unknown';
+        kind: 'final_usage' | 'provider_rejected' | 'absorbed_unknown' | 'authorized_exhausted';
         usageOccurredAt?: string;
         executionStatus?: 'succeeded' | 'cancelled' | 'failed' | 'rejected' | 'unknown';
         reasoningTokens?: string;
@@ -2132,6 +2132,43 @@ export const billingFinancialCase = billing.table(
     check(
       'billing_financial_case_state',
       sql`${table.state} IN ('open','attention','resolved') AND (${table.state} <> 'resolved' OR (${table.resolvedAt} IS NOT NULL AND ${table.resolutionEvidence} IS NOT NULL))`,
+    ),
+  ],
+);
+
+/**
+ * Durable account-journal reconciliation cursors, one row per financial scope.
+ *
+ * The incremental keyset covers journal change markers and the sweep keyset covers accounts;
+ * both advance only inside the transaction that commits the batch's own case effects, so a
+ * crash re-reads the same batch instead of skipping it.
+ */
+export const billingJournalCheckpoint = billing.table(
+  'billing_journal_checkpoint',
+  {
+    id: text('id').primaryKey(),
+    environment: text('environment').notNull(),
+    stripeAccountId: text('stripe_account_id').notNull(),
+    livemode: boolean('livemode').notNull(),
+    /** Journal change marker `(occurred_at, id)` verified by the incremental pass. */
+    incrementalOccurredAt: timestamp('incremental_occurred_at', { withTimezone: true }),
+    incrementalTransactionId: text('incremental_transaction_id'),
+    /** Keyset over `credit_account.id`; null restarts the bounded full sweep. */
+    sweepAccountId: text('sweep_account_id'),
+    sweepCycles: bigint('sweep_cycles', { mode: 'bigint' })
+      .notNull()
+      .default(sql`0`),
+    generation: bigint('generation', { mode: 'bigint' })
+      .notNull()
+      .default(sql`0`),
+    leaseUntil: timestamp('lease_until', { withTimezone: true }),
+    lastCompletedAt: timestamp('last_completed_at', { withTimezone: true }),
+  },
+  (table) => [
+    unique('billing_journal_checkpoint_scope').on(table.environment, table.stripeAccountId, table.livemode),
+    check(
+      'billing_journal_checkpoint_bounds',
+      sql`${table.generation} >= 0 AND ${table.sweepCycles} >= 0 AND num_nonnulls(${table.incrementalOccurredAt}, ${table.incrementalTransactionId}) <> 1`,
     ),
   ],
 );

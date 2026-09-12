@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/naming-convention -- OpenAI's native count response uses snake_case. */
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
+import { financialEnvironmentSchema } from '@taucad/billing';
 import { safeParseBillableModelRequest } from '#api/billing/billable-model-request.js';
 import type { BillingEnvironment, InputCountEvidence } from '#api/billing/credit-ledger.types.js';
 
@@ -19,29 +20,41 @@ const createFields = new Set([
   'include',
 ]);
 const projectedFields = ['model', 'input', 'instructions', 'reasoning', 'tools', 'tool_choice'] as const;
-const capabilitySchema = z
-  .object({
-    qualification: z.literal('controlled-local-zero'),
-    environment: z.literal('development'),
-    credentialAccount: z.string().min(1),
-    sourceRevision: z.string().min(1),
-    url: z.string().min(1),
-  })
-  .strict();
+/* Two qualifications only, each strict, so an unrecognised `qualification` is refused by the
+ * discriminated union before any network call. `controlled-local-zero` is the synthetic
+ * development stub (loopback, no credential, no supplier liability); `openai-input-tokens-v1`
+ * is OpenAI's own counter, valid in any billing environment once an operator configures it. */
+const capabilitySchema = z.discriminatedUnion('qualification', [
+  z
+    .object({
+      qualification: z.literal('controlled-local-zero'),
+      environment: z.literal('development'),
+      credentialAccount: z.string().min(1),
+      sourceRevision: z.string().min(1),
+      url: z.string().min(1),
+    })
+    .strict(),
+  z
+    .object({
+      qualification: z.literal('openai-input-tokens-v1'),
+      environment: financialEnvironmentSchema,
+      credentialAccount: z.string().min(1),
+      sourceRevision: z.string().min(1),
+      url: z.string().min(1),
+      /** Supplier credential for the count call. Never digested, persisted or logged. */
+      apiKey: z.string().min(1),
+    })
+    .strict(),
+]);
+const countPathname = '/v1/responses/input_tokens';
 const responseSchema = z
   .object({ object: z.literal('response.input_tokens'), input_tokens: z.number().int().nonnegative() })
   .strict();
 const maximumResponseBytes = 1024;
 const countTimeoutMilliseconds = 5000;
 
-/** Explicitly qualified synthetic local input-count capability. */
-export type InputCountCapability = {
-  readonly qualification: 'controlled-local-zero';
-  readonly environment: 'development';
-  readonly credentialAccount: string;
-  readonly sourceRevision: string;
-  readonly url: string;
-};
+/** Explicitly qualified input-count capability: the synthetic local stub, or OpenAI's own counter. */
+export type InputCountCapability = z.infer<typeof capabilitySchema>;
 
 type CountInput = {
   readonly body: unknown;
@@ -55,29 +68,33 @@ type CountInput = {
 
 const digest = (serialized: string): string => `sha256:${createHash('sha256').update(serialized).digest('hex')}`;
 
-const assertCapability = (input: CountInput): URL => {
-  const capability = capabilitySchema.safeParse(input.capability);
+const assertCapability = (input: CountInput): { url: URL; capability: InputCountCapability } => {
+  const parsed = capabilitySchema.safeParse(input.capability);
   if (
-    !capability.success ||
-    input.environment !== 'development' ||
+    !parsed.success ||
     input.credentialAccount.length === 0 ||
-    capability.data.credentialAccount !== input.credentialAccount
+    parsed.data.credentialAccount !== input.credentialAccount ||
+    parsed.data.environment !== input.environment
   ) {
     throw new Error('Input count capability does not match the invocation scope.');
   }
-  const url = new URL(capability.data.url);
+  const capability = parsed.data;
+  const url = new URL(capability.url);
+  const origin =
+    capability.qualification === 'controlled-local-zero'
+      ? url.protocol === 'http:' && ['127.0.0.1', '[::1]'].includes(url.hostname)
+      : url.protocol === 'https:' && url.hostname === 'api.openai.com';
   if (
-    url.protocol !== 'http:' ||
-    !['127.0.0.1', '[::1]'].includes(url.hostname) ||
+    !origin ||
     url.username !== '' ||
     url.password !== '' ||
-    url.pathname !== '/v1/responses/input_tokens' ||
+    url.pathname !== countPathname ||
     url.search !== '' ||
     url.hash !== ''
   ) {
-    throw new Error('Input count capability URL is not a controlled loopback endpoint.');
+    throw new Error('Input count capability URL is not a qualified count endpoint.');
   }
-  return url;
+  return { url, capability };
 };
 
 const readBoundedJson = async (response: Response): Promise<unknown> => {
@@ -118,9 +135,9 @@ const readBoundedJson = async (response: Response): Promise<unknown> => {
   return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
 };
 
-/** Count a validated OpenAI Responses request through an explicitly qualified local capability. */
+/** Count a validated OpenAI Responses request through an explicitly qualified capability. */
 export const countBillableModelInput = async (input: CountInput): Promise<InputCountEvidence> => {
-  const url = assertCapability(input);
+  const { url, capability } = assertCapability(input);
   if (input.maximumInput < 0n) {
     throw new Error('Input maximum must be nonnegative.');
   }
@@ -141,7 +158,10 @@ export const countBillableModelInput = async (input: CountInput): Promise<InputC
   const signal = AbortSignal.any([input.signal, deadline]);
   const response = await (input.fetchOnce ?? fetch)(url, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: {
+      'content-type': 'application/json',
+      ...(capability.qualification === 'controlled-local-zero' ? {} : { authorization: `Bearer ${capability.apiKey}` }),
+    },
     body: countJson,
     redirect: 'error',
     signal,
@@ -152,13 +172,15 @@ export const countBillableModelInput = async (input: CountInput): Promise<InputC
   }
   return {
     version: 'openai-input-count-v1',
-    sourceRevision: input.capability.sourceRevision,
+    sourceRevision: capability.sourceRevision,
     environment: input.environment,
     credentialAccount: input.credentialAccount,
     modelId: parsed.data.model,
     createRequestDigest: digest(createJson),
     countRequestDigest: digest(countJson),
     inputTokens: String(result.input_tokens),
-    liability: 'controlled-local-zero',
+    /* The liability of the count call itself, recorded per operation: zero for the controlled
+     * loopback stub, and the supplier's own unpriced counter otherwise (see W10 liability review). */
+    liability: capability.qualification,
   };
 };

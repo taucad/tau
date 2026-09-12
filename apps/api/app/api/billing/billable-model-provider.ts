@@ -3,6 +3,8 @@ import { withBillableEvidenceCollector } from '#api/billing/billable-model-quali
 import { calculatePreliminarySupplierCost } from '#api/billing/billable-model-cost.js';
 import { invocationEvidenceDigest, serializeInvocationEvidence } from '#api/billing/credit-ledger.service.js';
 import type { BillableModelProviderAdapter } from '#api/billing/billable-model-invocation.types.js';
+import type { InputCountCapability } from '#api/billing/billable-model-input-count.js';
+import type { BillingEnvironment } from '#api/billing/credit-ledger.types.js';
 
 const providerTargets = {
   anthropic: { key: 'ANTHROPIC_API_KEY', url: 'https://api.anthropic.com/v1/messages' },
@@ -80,6 +82,42 @@ const vertexToken = async (
     throw new Error('Vertex credential exchange was invalid');
   }
   return payload.access_token;
+};
+
+/* Pinned with the endpoint contract this counter was qualified against; it is recorded on every
+ * counted operation's evidence, so it changes only when the supplier's counter contract does. */
+const inputCountRevision = 'openai-input-tokens-v1:2026-09-12';
+
+/**
+ * Route-keyed exact input counters, empty unless an operator enables them.
+ * Every OpenAI route is covered in every environment; the byte bound stays the ceiling the
+ * count is compared against, so a counter can only shrink an operation's hold.
+ */
+export const createBillableModelInputCounters = (input: {
+  enabled: boolean;
+  environment: BillingEnvironment;
+  apiKey: unknown;
+  credentialAccount: string | undefined;
+}): ReadonlyMap<string, InputCountCapability> => {
+  const { apiKey, credentialAccount } = input;
+  if (!input.enabled || typeof apiKey !== 'string' || apiKey.length === 0 || credentialAccount === undefined) {
+    return new Map();
+  }
+  return new Map(
+    [...routeProvider]
+      .filter(([, provider]) => provider === 'openai')
+      .map(([routeId]) => [
+        routeId,
+        {
+          qualification: 'openai-input-tokens-v1',
+          environment: input.environment,
+          credentialAccount,
+          sourceRevision: inputCountRevision,
+          url: 'https://api.openai.com/v1/responses/input_tokens',
+          apiKey,
+        } satisfies InputCountCapability,
+      ]),
+  );
 };
 
 /** Creates the route-keyed, single-attempt production transport adapters. */

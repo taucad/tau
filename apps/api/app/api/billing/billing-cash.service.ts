@@ -8,7 +8,11 @@ import { z } from 'zod';
 import type { FinancialEnvironment } from '#api/billing/billing-policy.js';
 import type { CreditLedgerService } from '#api/billing/credit-ledger.service.js';
 import { BillingTaxService } from '#api/billing/billing-tax.service.js';
-import { cashProjectionDigest } from '#api/billing/billing-payment-contract.js';
+import {
+  cashOccurredAt,
+  cashProjectionCoversRetained,
+  cashProjectionDigest,
+} from '#api/billing/billing-payment-contract.js';
 import type { CashProjectionEvidence } from '#api/billing/billing-payment-contract.js';
 import { assertNewCollectionCashScope } from '#api/billing/billing-cash-reconciliation.service.js';
 import type { DatabaseService } from '#database/database.service.js';
@@ -455,6 +459,11 @@ export class BillingCashService {
       await this.releaseClaim(claim, result.reason);
       return result;
     }
+    const retained = await this.retainedProjection(input.source, input.causeId);
+    if (retained !== undefined && !cashProjectionCoversRetained(retained, result.evidence)) {
+      await this.releaseClaim(claim, 'cash_source_coverage_regression');
+      return { status: 'attention', reason: 'cash_source_coverage_regression' };
+    }
     const taxEvidence = taxCorrectionEvidence(result, refunds.refunds, disputes);
     if (taxEvidence === 'missing') {
       await this.releaseClaim(claim, 'cash_effective_time_missing');
@@ -769,53 +778,6 @@ export class BillingCashService {
     return this.qualifyChargeSourceClaimed(input);
   }
 
-  public async applyQualifiedSource(input: {
-    readonly accountId: string;
-    readonly causeId: string;
-    readonly source: 'plan' | 'purchased';
-    readonly qualified: QualifiedCashSource;
-    readonly occurredAt: Date;
-  }): Promise<unknown> {
-    return this.databaseService.database.transaction(async (tx) => {
-      const receipt = await this.ledger.applyCashDisposition(
-        {
-          accountId: input.accountId,
-          causeId: input.causeId,
-          source: input.source,
-          sourceClaimId: input.qualified.sourceClaimId,
-          sourceGeneration: input.qualified.sourceGeneration,
-          projectionDigest: input.qualified.projectionDigest,
-          principalLossMinor: input.qualified.principalLossMinor,
-          taxLossMinor: input.qualified.taxLossMinor,
-          grossLossMinor: input.qualified.grossLossMinor,
-          evidence: input.qualified.evidence,
-          occurredAt: qualifiedCashOccurredAt(input.qualified, input.occurredAt),
-        },
-        tx,
-      );
-      await this.tax.observeQualifiedCashCorrection({
-        transaction: tx,
-        causeId: input.causeId,
-        source: input.source,
-        qualified: input.qualified,
-      });
-      const [finished] = await tx
-        .update(billingStripeSource)
-        .set({ state: 'done', leaseUntil: null, errorCode: null })
-        .where(
-          and(
-            eq(billingStripeSource.id, input.qualified.sourceClaimId),
-            eq(billingStripeSource.generation, input.qualified.sourceGeneration),
-            eq(billingStripeSource.state, 'processing'),
-            sql`${billingStripeSource.leaseUntil} > clock_timestamp()`,
-          ),
-        )
-        .returning({ id: billingStripeSource.id });
-      if (finished === undefined) throw new ServiceUnavailableException('cash_source_finish_fence');
-      return receipt;
-    });
-  }
-
   public async releaseQualifiedClaim(input: {
     readonly environment: FinancialEnvironment;
     readonly stripeAccountId: string;
@@ -880,6 +842,8 @@ export class BillingCashService {
       refundMetadata['tau_refund_intent_id'] !== stored.intent.id ||
       refundMetadata['tau_reversal_case_id'] !== stored.reversal.id ||
       !isSafeMinor(refund.amount) ||
+      !Number.isSafeInteger(refund.created) ||
+      refund.created < 1 ||
       idOf(refund.charge) !== stored.reversal.chargeId ||
       BigInt(refund.amount) !== stored.intent.requestedGrossMinor
     ) {
@@ -960,7 +924,7 @@ export class BillingCashService {
             taxLossMinor: qualified.taxLossMinor,
             grossLossMinor: qualified.grossLossMinor,
             evidence: qualified.evidence,
-            occurredAt: qualifiedCashOccurredAt(qualified, stored.intent.reviewedAt),
+            occurredAt: cashOccurredAt(qualified, new Date(refund.created * 1000)),
           },
           tx,
         );
@@ -1111,6 +1075,11 @@ export class BillingCashService {
       disputes,
     });
     if (result.status !== 'qualified') return stop(result);
+    if (
+      reversal.projectionEvidence !== null &&
+      !cashProjectionCoversRetained(reversal.projectionEvidence, result.evidence)
+    )
+      return stop({ status: 'attention', reason: 'cash_source_coverage_regression' });
     const taxEvidence = taxCorrectionEvidence(
       result,
       pages.refunds,
@@ -1129,6 +1098,19 @@ export class BillingCashService {
       evidence: result.evidence,
       taxCorrectionEvidence: taxEvidence,
     };
+  }
+
+  /** Reads the identities a prior qualified projection already proved for this cause. */
+  private async retainedProjection(
+    source: 'plan' | 'purchased',
+    causeId: string,
+  ): Promise<Record<string, unknown> | undefined> {
+    const causeColumn = source === 'plan' ? billingReversalCase.periodId : billingReversalCase.purchaseId;
+    const [existing] = await this.databaseService.database
+      .select({ evidence: billingReversalCase.projectionEvidence })
+      .from(billingReversalCase)
+      .where(eq(causeColumn, causeId));
+    return existing?.evidence ?? undefined;
   }
 
   private async claimCanonicalSource(input: {
@@ -1185,7 +1167,7 @@ export class BillingCashService {
           eq(billingStripeSource.livemode, this.config.livemode),
           eq(billingStripeSource.sourceType, 'cash_charge'),
           eq(billingStripeSource.sourceId, chargeId),
-          sql`${billingStripeSource.leaseUntil} IS NULL OR ${billingStripeSource.leaseUntil} <= clock_timestamp()`,
+          sql`(${billingStripeSource.leaseUntil} IS NULL OR ${billingStripeSource.leaseUntil} <= clock_timestamp())`,
         ),
       )
       .returning();
@@ -1303,17 +1285,6 @@ function qualifiedFrom(
     evidence: result.evidence,
     taxCorrectionEvidence: taxEvidence,
   };
-}
-
-function qualifiedCashOccurredAt(qualified: QualifiedCashSource, fallback: Date): Date {
-  const effectiveAt = qualified.taxCorrectionEvidence?.effectiveAt;
-  if (effectiveAt === undefined) {
-    if (qualified.grossLossMinor !== 0n) throw new Error('cash_effective_time_missing');
-    return fallback;
-  }
-  const occurredAt = new Date(effectiveAt);
-  if (!Number.isFinite(occurredAt.getTime())) throw new Error('cash_effective_time_invalid');
-  return occurredAt;
 }
 
 function digest(value: unknown): string {

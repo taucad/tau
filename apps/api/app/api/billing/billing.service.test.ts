@@ -69,11 +69,11 @@ afterEach(() => {
 describe('owned paid access deadlines', () => {
   it('does not use legacy identity or an active label without an earned deadline', async () => {
     const unbound = createService([row()], false);
-    expect(await unbound.service.getEntitlements('user-a')).toMatchObject({ tier: 'free', aiEnabled: true });
+    expect(await unbound.service.getEntitlements('user-a')).toMatchObject({ tier: 'free' });
     expect(unbound.database.database.query.subscription.findMany).not.toHaveBeenCalled();
     expect(vi.mocked(resolveDefaultCard)).not.toHaveBeenCalled();
     const expired = createService([row({ paidThrough: new Date('2026-08-01T00:00:00Z') })]);
-    expect(await expired.service.getEntitlements('user-a')).toMatchObject({ tier: 'free', aiEnabled: true });
+    expect(await expired.service.getEntitlements('user-a')).toMatchObject({ tier: 'free' });
   });
 
   it('retains earned access after cancellation and despite an unavailable saved card', async () => {
@@ -135,7 +135,6 @@ describe('owned paid access deadlines', () => {
     expect(await service.getEntitlements('user-a')).toMatchObject({
       tier: 'free',
       trainingConsent: true,
-      aiEnabled: true,
     });
   });
 });

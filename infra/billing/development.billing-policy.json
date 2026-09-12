@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "environment": "development",
-  "policyVersion": "development-v1",
+  "policyVersion": "development-v2",
   "markupBps": 3000,
   "fleet": {
     "minimumSchemaVersion": 1,
@@ -14,18 +14,25 @@
       "model-meter-v1:anthropic-claude-sonnet-4.6",
       "model-meter-v1:anthropic-claude-haiku-4.5",
       "model-meter-v1:openai-gpt-6-astra",
+      "model-meter-v1:openai-gpt-6-astra:long-context",
       "model-meter-v1:openai-gpt-5.6-sol",
+      "model-meter-v1:openai-gpt-5.6-sol:long-context",
       "model-meter-v1:openai-gpt-5.6-terra",
+      "model-meter-v1:openai-gpt-5.6-terra:long-context",
       "model-meter-v1:openai-gpt-5.6-luna",
+      "model-meter-v1:openai-gpt-5.6-luna:long-context",
       "model-meter-v1:openai-gpt-5.5",
+      "model-meter-v1:openai-gpt-5.5:long-context",
       "model-meter-v1:google-gemini-3.1-pro",
+      "model-meter-v1:google-gemini-3.1-pro:long-context",
       "model-meter-v1:google-gemini-3.7-flash",
       "model-meter-v1:google-gemini-3.5-flash-lite",
       "model-meter-v1:google-gemini-3.5-flash",
       "model-meter-v1:together-kimi-k3",
       "model-meter-v1:together-glm-5.2",
       "model-meter-v1:morph-minimax-m2.7",
-      "model-meter-v1:xai-grok-4.6"
+      "model-meter-v1:xai-grok-4.6",
+      "model-meter-v1:xai-grok-4.6:long-context"
     ]
   },
   "rates": [
@@ -315,7 +322,7 @@
       "dimension": "uncached_input",
       "tier": null,
       "unit": "token",
-      "referenceNumeratorPicoUsd": "20000000000000",
+      "referenceNumeratorPicoUsd": "10000000000000",
       "denominatorUnits": "1000000",
       "retailOverride": null
     },
@@ -325,7 +332,7 @@
       "dimension": "cache_read",
       "tier": null,
       "unit": "token",
-      "referenceNumeratorPicoUsd": "2000000000000",
+      "referenceNumeratorPicoUsd": "1000000000000",
       "denominatorUnits": "1000000",
       "retailOverride": null
     },
@@ -335,13 +342,53 @@
       "dimension": "cache_write",
       "tier": "30m",
       "unit": "token",
-      "referenceNumeratorPicoUsd": "25000000000000",
+      "referenceNumeratorPicoUsd": "12500000000000",
       "denominatorUnits": "1000000",
       "retailOverride": null
     },
     {
       "rateId": "openai-gpt-6-astra:output:none",
       "meterContractId": "model-meter-v1:openai-gpt-6-astra",
+      "dimension": "output",
+      "tier": null,
+      "unit": "token",
+      "referenceNumeratorPicoUsd": "50000000000000",
+      "denominatorUnits": "1000000",
+      "retailOverride": null
+    },
+    {
+      "rateId": "openai-gpt-6-astra:long-context:uncached-input:none",
+      "meterContractId": "model-meter-v1:openai-gpt-6-astra:long-context",
+      "dimension": "uncached_input",
+      "tier": null,
+      "unit": "token",
+      "referenceNumeratorPicoUsd": "20000000000000",
+      "denominatorUnits": "1000000",
+      "retailOverride": null
+    },
+    {
+      "rateId": "openai-gpt-6-astra:long-context:cache-read:none",
+      "meterContractId": "model-meter-v1:openai-gpt-6-astra:long-context",
+      "dimension": "cache_read",
+      "tier": null,
+      "unit": "token",
+      "referenceNumeratorPicoUsd": "2000000000000",
+      "denominatorUnits": "1000000",
+      "retailOverride": null
+    },
+    {
+      "rateId": "openai-gpt-6-astra:long-context:cache-write:30m",
+      "meterContractId": "model-meter-v1:openai-gpt-6-astra:long-context",
+      "dimension": "cache_write",
+      "tier": "30m",
+      "unit": "token",
+      "referenceNumeratorPicoUsd": "25000000000000",
+      "denominatorUnits": "1000000",
+      "retailOverride": null
+    },
+    {
+      "rateId": "openai-gpt-6-astra:long-context:output:none",
+      "meterContractId": "model-meter-v1:openai-gpt-6-astra:long-context",
       "dimension": "output",
       "tier": null,
       "unit": "token",
@@ -355,7 +402,7 @@
       "dimension": "uncached_input",
       "tier": null,
       "unit": "token",
-      "referenceNumeratorPicoUsd": "8000000000000",
+      "referenceNumeratorPicoUsd": "4000000000000",
       "denominatorUnits": "1000000",
       "retailOverride": null
     },
@@ -365,7 +412,7 @@
       "dimension": "cache_read",
       "tier": null,
       "unit": "token",
-      "referenceNumeratorPicoUsd": "800000000000",
+      "referenceNumeratorPicoUsd": "400000000000",
       "denominatorUnits": "1000000",
       "retailOverride": null
     },
@@ -375,13 +422,53 @@
       "dimension": "cache_write",
       "tier": "30m",
       "unit": "token",
-      "referenceNumeratorPicoUsd": "10000000000000",
+      "referenceNumeratorPicoUsd": "5000000000000",
       "denominatorUnits": "1000000",
       "retailOverride": null
     },
     {
       "rateId": "openai-gpt-5.6-sol:output:none",
       "meterContractId": "model-meter-v1:openai-gpt-5.6-sol",
+      "dimension": "output",
+      "tier": null,
+      "unit": "token",
+      "referenceNumeratorPicoUsd": "20000000000000",
+      "denominatorUnits": "1000000",
+      "retailOverride": null
+    },
+    {
+      "rateId": "openai-gpt-5.6-sol:long-context:uncached-input:none",
+      "meterContractId": "model-meter-v1:openai-gpt-5.6-sol:long-context",
+      "dimension": "uncached_input",
+      "tier": null,
+      "unit": "token",
+      "referenceNumeratorPicoUsd": "8000000000000",
+      "denominatorUnits": "1000000",
+      "retailOverride": null
+    },
+    {
+      "rateId": "openai-gpt-5.6-sol:long-context:cache-read:none",
+      "meterContractId": "model-meter-v1:openai-gpt-5.6-sol:long-context",
+      "dimension": "cache_read",
+      "tier": null,
+      "unit": "token",
+      "referenceNumeratorPicoUsd": "800000000000",
+      "denominatorUnits": "1000000",
+      "retailOverride": null
+    },
+    {
+      "rateId": "openai-gpt-5.6-sol:long-context:cache-write:30m",
+      "meterContractId": "model-meter-v1:openai-gpt-5.6-sol:long-context",
+      "dimension": "cache_write",
+      "tier": "30m",
+      "unit": "token",
+      "referenceNumeratorPicoUsd": "10000000000000",
+      "denominatorUnits": "1000000",
+      "retailOverride": null
+    },
+    {
+      "rateId": "openai-gpt-5.6-sol:long-context:output:none",
+      "meterContractId": "model-meter-v1:openai-gpt-5.6-sol:long-context",
       "dimension": "output",
       "tier": null,
       "unit": "token",
@@ -395,7 +482,7 @@
       "dimension": "uncached_input",
       "tier": null,
       "unit": "token",
-      "referenceNumeratorPicoUsd": "4000000000000",
+      "referenceNumeratorPicoUsd": "2000000000000",
       "denominatorUnits": "1000000",
       "retailOverride": null
     },
@@ -405,7 +492,7 @@
       "dimension": "cache_read",
       "tier": null,
       "unit": "token",
-      "referenceNumeratorPicoUsd": "400000000000",
+      "referenceNumeratorPicoUsd": "200000000000",
       "denominatorUnits": "1000000",
       "retailOverride": null
     },
@@ -415,13 +502,53 @@
       "dimension": "cache_write",
       "tier": "30m",
       "unit": "token",
-      "referenceNumeratorPicoUsd": "5000000000000",
+      "referenceNumeratorPicoUsd": "2500000000000",
       "denominatorUnits": "1000000",
       "retailOverride": null
     },
     {
       "rateId": "openai-gpt-5.6-terra:output:none",
       "meterContractId": "model-meter-v1:openai-gpt-5.6-terra",
+      "dimension": "output",
+      "tier": null,
+      "unit": "token",
+      "referenceNumeratorPicoUsd": "12000000000000",
+      "denominatorUnits": "1000000",
+      "retailOverride": null
+    },
+    {
+      "rateId": "openai-gpt-5.6-terra:long-context:uncached-input:none",
+      "meterContractId": "model-meter-v1:openai-gpt-5.6-terra:long-context",
+      "dimension": "uncached_input",
+      "tier": null,
+      "unit": "token",
+      "referenceNumeratorPicoUsd": "4000000000000",
+      "denominatorUnits": "1000000",
+      "retailOverride": null
+    },
+    {
+      "rateId": "openai-gpt-5.6-terra:long-context:cache-read:none",
+      "meterContractId": "model-meter-v1:openai-gpt-5.6-terra:long-context",
+      "dimension": "cache_read",
+      "tier": null,
+      "unit": "token",
+      "referenceNumeratorPicoUsd": "400000000000",
+      "denominatorUnits": "1000000",
+      "retailOverride": null
+    },
+    {
+      "rateId": "openai-gpt-5.6-terra:long-context:cache-write:30m",
+      "meterContractId": "model-meter-v1:openai-gpt-5.6-terra:long-context",
+      "dimension": "cache_write",
+      "tier": "30m",
+      "unit": "token",
+      "referenceNumeratorPicoUsd": "5000000000000",
+      "denominatorUnits": "1000000",
+      "retailOverride": null
+    },
+    {
+      "rateId": "openai-gpt-5.6-terra:long-context:output:none",
+      "meterContractId": "model-meter-v1:openai-gpt-5.6-terra:long-context",
       "dimension": "output",
       "tier": null,
       "unit": "token",
@@ -435,7 +562,7 @@
       "dimension": "uncached_input",
       "tier": null,
       "unit": "token",
-      "referenceNumeratorPicoUsd": "400000000000",
+      "referenceNumeratorPicoUsd": "200000000000",
       "denominatorUnits": "1000000",
       "retailOverride": null
     },
@@ -445,7 +572,7 @@
       "dimension": "cache_read",
       "tier": null,
       "unit": "token",
-      "referenceNumeratorPicoUsd": "40000000000",
+      "referenceNumeratorPicoUsd": "20000000000",
       "denominatorUnits": "1000000",
       "retailOverride": null
     },
@@ -455,13 +582,53 @@
       "dimension": "cache_write",
       "tier": "30m",
       "unit": "token",
-      "referenceNumeratorPicoUsd": "500000000000",
+      "referenceNumeratorPicoUsd": "250000000000",
       "denominatorUnits": "1000000",
       "retailOverride": null
     },
     {
       "rateId": "openai-gpt-5.6-luna:output:none",
       "meterContractId": "model-meter-v1:openai-gpt-5.6-luna",
+      "dimension": "output",
+      "tier": null,
+      "unit": "token",
+      "referenceNumeratorPicoUsd": "1200000000000",
+      "denominatorUnits": "1000000",
+      "retailOverride": null
+    },
+    {
+      "rateId": "openai-gpt-5.6-luna:long-context:uncached-input:none",
+      "meterContractId": "model-meter-v1:openai-gpt-5.6-luna:long-context",
+      "dimension": "uncached_input",
+      "tier": null,
+      "unit": "token",
+      "referenceNumeratorPicoUsd": "400000000000",
+      "denominatorUnits": "1000000",
+      "retailOverride": null
+    },
+    {
+      "rateId": "openai-gpt-5.6-luna:long-context:cache-read:none",
+      "meterContractId": "model-meter-v1:openai-gpt-5.6-luna:long-context",
+      "dimension": "cache_read",
+      "tier": null,
+      "unit": "token",
+      "referenceNumeratorPicoUsd": "40000000000",
+      "denominatorUnits": "1000000",
+      "retailOverride": null
+    },
+    {
+      "rateId": "openai-gpt-5.6-luna:long-context:cache-write:30m",
+      "meterContractId": "model-meter-v1:openai-gpt-5.6-luna:long-context",
+      "dimension": "cache_write",
+      "tier": "30m",
+      "unit": "token",
+      "referenceNumeratorPicoUsd": "500000000000",
+      "denominatorUnits": "1000000",
+      "retailOverride": null
+    },
+    {
+      "rateId": "openai-gpt-5.6-luna:long-context:output:none",
+      "meterContractId": "model-meter-v1:openai-gpt-5.6-luna:long-context",
       "dimension": "output",
       "tier": null,
       "unit": "token",
@@ -475,7 +642,7 @@
       "dimension": "uncached_input",
       "tier": null,
       "unit": "token",
-      "referenceNumeratorPicoUsd": "10000000000000",
+      "referenceNumeratorPicoUsd": "5000000000000",
       "denominatorUnits": "1000000",
       "retailOverride": null
     },
@@ -485,13 +652,43 @@
       "dimension": "cache_read",
       "tier": null,
       "unit": "token",
-      "referenceNumeratorPicoUsd": "1000000000000",
+      "referenceNumeratorPicoUsd": "500000000000",
       "denominatorUnits": "1000000",
       "retailOverride": null
     },
     {
       "rateId": "openai-gpt-5.5:output:none",
       "meterContractId": "model-meter-v1:openai-gpt-5.5",
+      "dimension": "output",
+      "tier": null,
+      "unit": "token",
+      "referenceNumeratorPicoUsd": "30000000000000",
+      "denominatorUnits": "1000000",
+      "retailOverride": null
+    },
+    {
+      "rateId": "openai-gpt-5.5:long-context:uncached-input:none",
+      "meterContractId": "model-meter-v1:openai-gpt-5.5:long-context",
+      "dimension": "uncached_input",
+      "tier": null,
+      "unit": "token",
+      "referenceNumeratorPicoUsd": "10000000000000",
+      "denominatorUnits": "1000000",
+      "retailOverride": null
+    },
+    {
+      "rateId": "openai-gpt-5.5:long-context:cache-read:none",
+      "meterContractId": "model-meter-v1:openai-gpt-5.5:long-context",
+      "dimension": "cache_read",
+      "tier": null,
+      "unit": "token",
+      "referenceNumeratorPicoUsd": "1000000000000",
+      "denominatorUnits": "1000000",
+      "retailOverride": null
+    },
+    {
+      "rateId": "openai-gpt-5.5:long-context:output:none",
+      "meterContractId": "model-meter-v1:openai-gpt-5.5:long-context",
       "dimension": "output",
       "tier": null,
       "unit": "token",
@@ -505,7 +702,7 @@
       "dimension": "uncached_input",
       "tier": null,
       "unit": "token",
-      "referenceNumeratorPicoUsd": "4000000000000",
+      "referenceNumeratorPicoUsd": "2000000000000",
       "denominatorUnits": "1000000",
       "retailOverride": null
     },
@@ -515,13 +712,43 @@
       "dimension": "cache_read",
       "tier": null,
       "unit": "token",
-      "referenceNumeratorPicoUsd": "400000000000",
+      "referenceNumeratorPicoUsd": "200000000000",
       "denominatorUnits": "1000000",
       "retailOverride": null
     },
     {
       "rateId": "google-gemini-3.1-pro:output:none",
       "meterContractId": "model-meter-v1:google-gemini-3.1-pro",
+      "dimension": "output",
+      "tier": null,
+      "unit": "token",
+      "referenceNumeratorPicoUsd": "12000000000000",
+      "denominatorUnits": "1000000",
+      "retailOverride": null
+    },
+    {
+      "rateId": "google-gemini-3.1-pro:long-context:uncached-input:none",
+      "meterContractId": "model-meter-v1:google-gemini-3.1-pro:long-context",
+      "dimension": "uncached_input",
+      "tier": null,
+      "unit": "token",
+      "referenceNumeratorPicoUsd": "4000000000000",
+      "denominatorUnits": "1000000",
+      "retailOverride": null
+    },
+    {
+      "rateId": "google-gemini-3.1-pro:long-context:cache-read:none",
+      "meterContractId": "model-meter-v1:google-gemini-3.1-pro:long-context",
+      "dimension": "cache_read",
+      "tier": null,
+      "unit": "token",
+      "referenceNumeratorPicoUsd": "400000000000",
+      "denominatorUnits": "1000000",
+      "retailOverride": null
+    },
+    {
+      "rateId": "google-gemini-3.1-pro:long-context:output:none",
+      "meterContractId": "model-meter-v1:google-gemini-3.1-pro:long-context",
       "dimension": "output",
       "tier": null,
       "unit": "token",
@@ -705,7 +932,7 @@
       "dimension": "uncached_input",
       "tier": null,
       "unit": "token",
-      "referenceNumeratorPicoUsd": "4000000000000",
+      "referenceNumeratorPicoUsd": "2000000000000",
       "denominatorUnits": "1000000",
       "retailOverride": null
     },
@@ -715,13 +942,43 @@
       "dimension": "cache_read",
       "tier": null,
       "unit": "token",
-      "referenceNumeratorPicoUsd": "1000000000000",
+      "referenceNumeratorPicoUsd": "500000000000",
       "denominatorUnits": "1000000",
       "retailOverride": null
     },
     {
       "rateId": "xai-grok-4.6:output:none",
       "meterContractId": "model-meter-v1:xai-grok-4.6",
+      "dimension": "output",
+      "tier": null,
+      "unit": "token",
+      "referenceNumeratorPicoUsd": "6000000000000",
+      "denominatorUnits": "1000000",
+      "retailOverride": null
+    },
+    {
+      "rateId": "xai-grok-4.6:long-context:uncached-input:none",
+      "meterContractId": "model-meter-v1:xai-grok-4.6:long-context",
+      "dimension": "uncached_input",
+      "tier": null,
+      "unit": "token",
+      "referenceNumeratorPicoUsd": "4000000000000",
+      "denominatorUnits": "1000000",
+      "retailOverride": null
+    },
+    {
+      "rateId": "xai-grok-4.6:long-context:cache-read:none",
+      "meterContractId": "model-meter-v1:xai-grok-4.6:long-context",
+      "dimension": "cache_read",
+      "tier": null,
+      "unit": "token",
+      "referenceNumeratorPicoUsd": "1000000000000",
+      "denominatorUnits": "1000000",
+      "retailOverride": null
+    },
+    {
+      "rateId": "xai-grok-4.6:long-context:output:none",
+      "meterContractId": "model-meter-v1:xai-grok-4.6:long-context",
       "dimension": "output",
       "tier": null,
       "unit": "token",
@@ -844,6 +1101,20 @@
       "riskBudgetId": "development-risk"
     },
     {
+      "routeId": "openai-gpt-6-astra:long-context",
+      "sku": "model:openai-gpt-6-astra:long-context",
+      "meterContractId": "model-meter-v1:openai-gpt-6-astra:long-context",
+      "rateIds": [
+        "openai-gpt-6-astra:long-context:uncached-input:none",
+        "openai-gpt-6-astra:long-context:cache-read:none",
+        "openai-gpt-6-astra:long-context:cache-write:30m",
+        "openai-gpt-6-astra:long-context:output:none"
+      ],
+      "enabled": true,
+      "spendBudgetId": "development-spend",
+      "riskBudgetId": "development-risk"
+    },
+    {
       "routeId": "openai-gpt-5.6-sol",
       "sku": "model:openai-gpt-5.6-sol",
       "meterContractId": "model-meter-v1:openai-gpt-5.6-sol",
@@ -852,6 +1123,20 @@
         "openai-gpt-5.6-sol:cache-read:none",
         "openai-gpt-5.6-sol:cache-write:30m",
         "openai-gpt-5.6-sol:output:none"
+      ],
+      "enabled": true,
+      "spendBudgetId": "development-spend",
+      "riskBudgetId": "development-risk"
+    },
+    {
+      "routeId": "openai-gpt-5.6-sol:long-context",
+      "sku": "model:openai-gpt-5.6-sol:long-context",
+      "meterContractId": "model-meter-v1:openai-gpt-5.6-sol:long-context",
+      "rateIds": [
+        "openai-gpt-5.6-sol:long-context:uncached-input:none",
+        "openai-gpt-5.6-sol:long-context:cache-read:none",
+        "openai-gpt-5.6-sol:long-context:cache-write:30m",
+        "openai-gpt-5.6-sol:long-context:output:none"
       ],
       "enabled": true,
       "spendBudgetId": "development-spend",
@@ -872,6 +1157,20 @@
       "riskBudgetId": "development-risk"
     },
     {
+      "routeId": "openai-gpt-5.6-terra:long-context",
+      "sku": "model:openai-gpt-5.6-terra:long-context",
+      "meterContractId": "model-meter-v1:openai-gpt-5.6-terra:long-context",
+      "rateIds": [
+        "openai-gpt-5.6-terra:long-context:uncached-input:none",
+        "openai-gpt-5.6-terra:long-context:cache-read:none",
+        "openai-gpt-5.6-terra:long-context:cache-write:30m",
+        "openai-gpt-5.6-terra:long-context:output:none"
+      ],
+      "enabled": true,
+      "spendBudgetId": "development-spend",
+      "riskBudgetId": "development-risk"
+    },
+    {
       "routeId": "openai-gpt-5.6-luna",
       "sku": "model:openai-gpt-5.6-luna",
       "meterContractId": "model-meter-v1:openai-gpt-5.6-luna",
@@ -880,6 +1179,20 @@
         "openai-gpt-5.6-luna:cache-read:none",
         "openai-gpt-5.6-luna:cache-write:30m",
         "openai-gpt-5.6-luna:output:none"
+      ],
+      "enabled": true,
+      "spendBudgetId": "development-spend",
+      "riskBudgetId": "development-risk"
+    },
+    {
+      "routeId": "openai-gpt-5.6-luna:long-context",
+      "sku": "model:openai-gpt-5.6-luna:long-context",
+      "meterContractId": "model-meter-v1:openai-gpt-5.6-luna:long-context",
+      "rateIds": [
+        "openai-gpt-5.6-luna:long-context:uncached-input:none",
+        "openai-gpt-5.6-luna:long-context:cache-read:none",
+        "openai-gpt-5.6-luna:long-context:cache-write:30m",
+        "openai-gpt-5.6-luna:long-context:output:none"
       ],
       "enabled": true,
       "spendBudgetId": "development-spend",
@@ -895,6 +1208,19 @@
       "riskBudgetId": "development-risk"
     },
     {
+      "routeId": "openai-gpt-5.5:long-context",
+      "sku": "model:openai-gpt-5.5:long-context",
+      "meterContractId": "model-meter-v1:openai-gpt-5.5:long-context",
+      "rateIds": [
+        "openai-gpt-5.5:long-context:uncached-input:none",
+        "openai-gpt-5.5:long-context:cache-read:none",
+        "openai-gpt-5.5:long-context:output:none"
+      ],
+      "enabled": true,
+      "spendBudgetId": "development-spend",
+      "riskBudgetId": "development-risk"
+    },
+    {
       "routeId": "google-gemini-3.1-pro",
       "sku": "model:google-gemini-3.1-pro",
       "meterContractId": "model-meter-v1:google-gemini-3.1-pro",
@@ -902,6 +1228,19 @@
         "google-gemini-3.1-pro:uncached-input:none",
         "google-gemini-3.1-pro:cache-read:none",
         "google-gemini-3.1-pro:output:none"
+      ],
+      "enabled": true,
+      "spendBudgetId": "development-spend",
+      "riskBudgetId": "development-risk"
+    },
+    {
+      "routeId": "google-gemini-3.1-pro:long-context",
+      "sku": "model:google-gemini-3.1-pro:long-context",
+      "meterContractId": "model-meter-v1:google-gemini-3.1-pro:long-context",
+      "rateIds": [
+        "google-gemini-3.1-pro:long-context:uncached-input:none",
+        "google-gemini-3.1-pro:long-context:cache-read:none",
+        "google-gemini-3.1-pro:long-context:output:none"
       ],
       "enabled": true,
       "spendBudgetId": "development-spend",
@@ -986,6 +1325,19 @@
       "sku": "model:xai-grok-4.6",
       "meterContractId": "model-meter-v1:xai-grok-4.6",
       "rateIds": ["xai-grok-4.6:uncached-input:none", "xai-grok-4.6:cache-read:none", "xai-grok-4.6:output:none"],
+      "enabled": true,
+      "spendBudgetId": "development-spend",
+      "riskBudgetId": "development-risk"
+    },
+    {
+      "routeId": "xai-grok-4.6:long-context",
+      "sku": "model:xai-grok-4.6:long-context",
+      "meterContractId": "model-meter-v1:xai-grok-4.6:long-context",
+      "rateIds": [
+        "xai-grok-4.6:long-context:uncached-input:none",
+        "xai-grok-4.6:long-context:cache-read:none",
+        "xai-grok-4.6:long-context:output:none"
+      ],
       "enabled": true,
       "spendBudgetId": "development-spend",
       "riskBudgetId": "development-risk"

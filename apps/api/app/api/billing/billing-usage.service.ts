@@ -12,12 +12,15 @@ import {
   financialActivityKindSchema,
   financialEnvironmentSchema,
   financialIdentitySchema,
+  maximumOpenHolds,
   unsignedIntegerStringSchema,
   wireBalanceExplanationSchema,
+  wireOpenHoldsSchema,
   wireOperationReceiptSchema,
   wireUsageSnapshotSchema,
 } from '@taucad/billing';
-import type { WireBalanceExplanation, WireOperationReceipt, WireUsageSnapshot } from '@taucad/billing';
+import type { WireBalanceExplanation, WireOpenHolds, WireOperationReceipt, WireUsageSnapshot } from '@taucad/billing';
+import { recoveryGraceMinutes } from '#api/billing/credit-ledger.service.js';
 import { DatabaseService } from '#database/database.service.js';
 import type { DatabaseType } from '#database/database.service.js';
 
@@ -82,6 +85,18 @@ type AuthorityRow = {
   pending_issuance_atoms: string;
   revoked_at: string | null;
   as_of: string;
+};
+
+type OpenHoldRow = {
+  operation_id: string;
+  model_id: string;
+  model_display_name: string | null;
+  provider_id: string | null;
+  held_atoms: string;
+  admitted_at: string | null;
+  due_at: string;
+  release_after: string;
+  dispatch_state: string;
 };
 
 type TotalRow = {
@@ -272,20 +287,19 @@ const meterItems = (row: EventRow): unknown[] => {
     if (!rate) {
       throw new Error('Immutable meter item has no pinned public rate');
     }
+    // The item carries the rate it was actually charged at, which is the pin unless the observed
+    // input settled the operation back at its base tier; the pin only supplies the rate identity.
+    const charged = { numeratorCreditAtoms: item.numeratorCreditAtoms, denominatorUnits: item.denominatorUnits };
     return {
       dimension: item.dimension,
       kind: item.dimension,
       ...(item.tier === null ? {} : { tier: item.tier }),
       quantity: item.quantity,
       unit: 'token',
-      rate: {
-        rateId: rate.rateId,
-        numeratorCreditAtoms: rate.numeratorCreditAtoms,
-        denominatorUnits: rate.denominatorUnits,
-      },
+      rate: { rateId: rate.rateId, ...charged },
       exactContribution: {
-        numeratorCreditAtoms: (BigInt(item.quantity) * BigInt(rate.numeratorCreditAtoms)).toString(),
-        denominator: rate.denominatorUnits,
+        numeratorCreditAtoms: (BigInt(item.quantity) * BigInt(charged.numeratorCreditAtoms)).toString(),
+        denominator: charged.denominatorUnits,
       },
     };
   });
@@ -751,6 +765,55 @@ export class BillingUsageService {
   }
 
   /** Recovers the ordinary receipt identity when a caller lost the admission header. */
+  /**
+   * Lists the customer holds still open on the caller's account, newest first.
+   *
+   * A hold is an authorized reserve, never a charge: `heldCreditAtoms` is the
+   * operation's `authorized_atoms`, which the ledger's own `credit_operation_amounts`
+   * constraint proves equals the promo, plan and purchased amounts it took out of the
+   * balance. `releaseAfter` is `due_at` plus the recovery grace — the instant recovery
+   * may resolve the hold without further supplier evidence — and is computed by the
+   * database so the clock is the server's, not the reader's.
+   */
+  public async getOpenHolds(input: { authUserId: string }): Promise<WireOpenHolds> {
+    const environment = this.configuredEnvironment();
+    const holds = await this.databaseService.database.transaction(
+      async (transaction) => {
+        await transaction.execute(sql`select set_config('statement_timeout', ${statementTimeout.toString()}, true)`);
+        return rows<OpenHoldRow>(
+          transaction,
+          sql`
+        select o.id operation_id, o.model_id, o.model_display_name, o.provider_id, o.dispatch_state,
+          o.authorized_atoms::text held_atoms,
+          to_char(o.admitted_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') admitted_at,
+          to_char(o.due_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') due_at,
+          to_char((o.due_at + make_interval(mins => ${recoveryGraceMinutes})) at time zone 'UTC',
+            'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') release_after
+        from billing.credit_operation o
+        join billing.billing_owner_binding b on b.account_id = o.account_id and b.environment = o.environment
+        where b.environment = ${environment} and b.auth_user_id = ${input.authUserId} and b.revoked_at is null
+          and o.customer_state = 'pending'
+        order by o.admitted_at desc nulls last, o.id desc limit ${maximumOpenHolds}`,
+        );
+      },
+      { isolationLevel: 'repeatable read', accessMode: 'read only' },
+    );
+    return wireOpenHoldsSchema.parse({
+      environment,
+      ownerId: input.authUserId,
+      holds: holds.map((row) => ({
+        operationId: row.operation_id,
+        model: { id: row.model_id, displayName: row.model_display_name, providerId: row.provider_id },
+        heldCreditAtoms: row.held_atoms,
+        admittedAt: row.admitted_at,
+        dueAt: row.due_at,
+        releaseAfter: row.release_after,
+        dispatchState: row.dispatch_state,
+        customerState: 'pending',
+      })),
+    });
+  }
+
   public async getAttemptReceipt(input: {
     authUserId: string;
     surface: string;

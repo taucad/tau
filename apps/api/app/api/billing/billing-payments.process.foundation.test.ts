@@ -2,7 +2,7 @@
 import { fork } from 'node:child_process';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { eq, sql } from 'drizzle-orm';
@@ -17,6 +17,7 @@ import type {
   PaymentOfferSnapshot,
 } from '#api/billing/billing-payment-contract.js';
 import { seedBillingFixturePolicy } from '#testing/billing-policy.fixture.js';
+import { qualifyReloadCustomerLocation } from '#api/billing/billing-payments.recovery.js';
 
 if (process.env['BILLING_TEST_DATABASE_URL'] === undefined || process.env['BILLING_TEST_OWNED'] === undefined) {
   throw new Error('Use the isolated billing launcher');
@@ -30,6 +31,7 @@ const childDiagnostics = new WeakMap<ReturnType<typeof fork>, string>();
 const requests: string[] = [];
 const databaseUrl = process.env['BILLING_TEST_DATABASE_URL'];
 const adminClient = postgres(databaseUrl, { max: 2, prepare: false });
+const batonClient = postgres(databaseUrl, { max: 2, prepare: false });
 const runtimeClient = postgres(databaseUrl, { max: 2, prepare: false, connection: { role: 'tau_billing_runtime' } });
 const database = drizzle(adminClient, { schema });
 const runtimeDatabase = drizzle(runtimeClient, { schema });
@@ -48,6 +50,41 @@ let sourcePayment:
       readonly chargeId: string;
     }
   | undefined;
+const reloadAddress = {
+  city: 'Wellington',
+  country: 'NZ',
+  line1: '1 Willis Street',
+  line2: null,
+  postal_code: '6011',
+  state: null,
+};
+const reloadCustomers = new Map<string, { accountId: string; bindingId: string }>();
+const reloadCalculations = new Map<string, { reference: string; customerId: string }>();
+const reloadPaymentIntents = new Map<string, Record<string, unknown>>();
+let reloadPaymentPosts = 0;
+const reloadCalculation = (id: string) => ({
+  id,
+  object: 'tax.calculation',
+  amount_total: 2500,
+  currency: 'usd',
+  customer: reloadCalculations.get(id)?.customerId,
+  customer_details: { address: reloadAddress, address_source: 'billing' },
+  expires_at: 2_000_000_000,
+  livemode: false,
+  tax_amount_exclusive: 0,
+  tax_amount_inclusive: 0,
+});
+const reloadLine = (id: string) => ({
+  id: 'tax_li_process',
+  object: 'tax.calculation_line_item',
+  amount: 2500,
+  amount_tax: 0,
+  livemode: false,
+  product: 'prod_topup',
+  quantity: 1,
+  reference: reloadCalculations.get(id)?.reference,
+  tax_behavior: 'exclusive',
+});
 let holdNextSearch = false;
 let releaseSearch: (() => void) | undefined;
 let searchArrived: (() => void) | undefined;
@@ -56,6 +93,87 @@ let searchResponded: (() => void) | undefined;
 const stripeFixture = createServer((request, response) => {
   requests.push(`${request.method ?? ''} ${request.url ?? ''}`);
   const url = new URL(request.url ?? '/', 'http://127.0.0.1');
+  const json = (body: unknown): void => {
+    response.writeHead(200, { 'content-type': 'application/json' });
+    response.end(JSON.stringify(body));
+  };
+  const readForm = (callback: (form: URLSearchParams) => void): void => {
+    const chunks: string[] = [];
+    request.setEncoding('utf8');
+    request.on('data', (chunk: string) => chunks.push(chunk));
+    request.on('end', () => {
+      callback(new URLSearchParams(chunks.join('')));
+    });
+  };
+  const reloadCustomer = /^\/v1\/customers\/(?<id>cus_reload_[\w-]+)$/u.exec(url.pathname)?.groups?.['id'];
+  if (reloadCustomer !== undefined && reloadCustomers.has(reloadCustomer)) {
+    json({
+      id: reloadCustomer,
+      object: 'customer',
+      deleted: false,
+      livemode: false,
+      metadata: {
+        tau_account_id: reloadCustomers.get(reloadCustomer)?.accountId,
+        tau_customer_binding_id: reloadCustomers.get(reloadCustomer)?.bindingId,
+      },
+      address: reloadAddress,
+    });
+    return;
+  }
+  if (request.method === 'POST' && url.pathname === '/v1/tax/calculations') {
+    readForm((form) => {
+      const reference = form.get('line_items[0][reference]') ?? '';
+      const id = `taxcalc_${createHash('sha256').update(reference).digest('hex').slice(0, 24)}`;
+      reloadCalculations.set(id, { reference, customerId: form.get('customer') ?? '' });
+      json(reloadCalculation(id));
+    });
+    return;
+  }
+  const reloadCalculationId = /^\/v1\/tax\/calculations\/(?<id>taxcalc_[\da-f]+)(?:\/line_items)?$/u.exec(url.pathname)
+    ?.groups?.['id'];
+  if (reloadCalculationId !== undefined && reloadCalculations.has(reloadCalculationId)) {
+    json(
+      url.pathname.endsWith('/line_items')
+        ? { object: 'list', data: [reloadLine(reloadCalculationId)], has_more: false, url: url.pathname }
+        : reloadCalculation(reloadCalculationId),
+    );
+    return;
+  }
+  if (request.method === 'POST' && url.pathname === '/v1/payment_intents' && reloadCustomers.size > 0) {
+    readForm((form) => {
+      reloadPaymentPosts += 1;
+      const id = `pi_${form.get('metadata[tau_provider_leg_id]') ?? reloadPaymentPosts}`;
+      const intent = {
+        id,
+        object: 'payment_intent',
+        amount: Number(form.get('amount')),
+        amount_capturable: 0,
+        amount_received: 0,
+        created: 1_788_650_000,
+        currency: 'usd',
+        customer: form.get('customer'),
+        latest_charge: null,
+        livemode: false,
+        metadata: {
+          tau_purchase_id: form.get('metadata[tau_purchase_id]'),
+          tau_customer_binding_id: form.get('metadata[tau_customer_binding_id]'),
+          tau_provider_leg_id: form.get('metadata[tau_provider_leg_id]'),
+          tau_reload_consent_id: form.get('metadata[tau_reload_consent_id]'),
+          tau_reload_consent_version: form.get('metadata[tau_reload_consent_version]'),
+        },
+        payment_method: form.get('payment_method'),
+        status: 'requires_action',
+      };
+      reloadPaymentIntents.set(id, intent);
+      json(intent);
+    });
+    return;
+  }
+  const reloadIntentId = /^\/v1\/payment_intents\/(?<id>pi_[\w-]+)$/u.exec(url.pathname)?.groups?.['id'];
+  if (reloadIntentId !== undefined && reloadPaymentIntents.has(reloadIntentId)) {
+    json(reloadPaymentIntents.get(reloadIntentId));
+    return;
+  }
   if (request.method === 'GET' && ['/v1/refunds', '/v1/disputes'].includes(url.pathname)) {
     response.writeHead(200, { 'content-type': 'application/json' });
     response.end(JSON.stringify({ object: 'list', data: [], has_more: false, url: url.pathname }));
@@ -441,7 +559,7 @@ const kill = async (child: ReturnType<typeof fork>): Promise<void> => {
   await exited;
 };
 
-const startRecovery = async () => {
+const startRecovery = async (operation: 'recover' | 'reload' = 'recover') => {
   const childEnvironment = Object.fromEntries(
     [
       ['PATH', process.env['PATH']],
@@ -461,7 +579,7 @@ const startRecovery = async () => {
   trackChild(child);
   children.add(child);
   child.once('exit', () => children.delete(child));
-  child.send({ operation: 'recover', stripeUrl, limit: 100 });
+  child.send({ operation, stripeUrl, limit: 100 });
   await waitFor(child, 'ready');
   return child;
 };
@@ -534,6 +652,74 @@ const holdPurchaseRow = async (purchaseId: string) => {
   activeRowReleases.add(release);
   return { release, transaction };
 };
+/**
+ * Queues one exclusive account-row request without awaiting it. Postgres grants row locks in request order, so a
+ * queued request always overtakes a later one from the worker.
+ */
+const queueAccountLock = (accountId: string) => {
+  let unlock = (): void => {
+    /* Replaced below. */
+  };
+  let locked = (): void => {
+    /* Replaced below. */
+  };
+  const acquired = new Promise<void>((resolve) => {
+    locked = resolve;
+  });
+  const released = new Promise<void>((resolve) => {
+    unlock = resolve;
+  });
+  const transaction = batonClient.begin(async (tx) => {
+    await tx`select id from billing.credit_account where id = ${accountId} for update`;
+    locked();
+    await released;
+  });
+  const release = (): void => {
+    unlock();
+    activeRowReleases.delete(release);
+  };
+  activeRowReleases.add(release);
+  return { acquired, release, transaction };
+};
+const waitForBlockedBackend = async (): Promise<void> => {
+  /* oxlint-disable no-await-in-loop -- polling observes another backend's lock wait. */
+  for (let attempt = 0; attempt < 600; attempt += 1) {
+    const [row] = await adminClient<Array<{ waiting: number }>>`select count(*)::int as waiting from pg_locks
+      where not granted`;
+    if ((row?.waiting ?? 0) > 0) {
+      return;
+    }
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 10);
+    });
+  }
+  /* oxlint-enable no-await-in-loop */
+  throw new Error('Timed out waiting for a blocked worker transaction');
+};
+/**
+ * Hands the account lock to the worker one transaction at a time and stops holding it as soon as `reached` observes
+ * the committed state, so the worker's next locked transaction is still blocked.
+ */
+const advanceAccountLock = async (accountId: string, reached: () => Promise<boolean>) => {
+  let holder = queueAccountLock(accountId);
+  await holder.acquired;
+  /* oxlint-disable no-await-in-loop -- the baton deliberately serializes one worker transaction per iteration. */
+  for (let step = 0; step < 12; step += 1) {
+    await waitForBlockedBackend();
+    const next = queueAccountLock(accountId);
+    holder.release();
+    await holder.transaction;
+    await next.acquired;
+    holder = next;
+    if (await reached()) {
+      return holder;
+    }
+  }
+  /* oxlint-enable no-await-in-loop */
+  holder.release();
+  throw new Error('Worker never reached the expected committed state');
+};
+
 const waitForLegLease = async (legId: string): Promise<void> => {
   /* oxlint-disable no-await-in-loop -- polling observes an externally committed child-process lease. */
   for (let attempt = 0; attempt < 100; attempt += 1) {
@@ -1027,6 +1213,91 @@ const seedPreparedManual = async () => {
   return { ...base, purchaseId, legId };
 };
 
+/** Seeds a verified off-session consent and one due wake so a real worker can prepare an automatic purchase. */
+const seedEnabledReload = async () => {
+  const base = await seedOwnerBinding();
+  const customerId = `cus_reload_${randomUUID()}`;
+  reloadCustomers.set(customerId, { accountId: base.accountId, bindingId: base.bindingId });
+  await database
+    .update(schema.billingStripeCustomer)
+    .set({ stripeCustomerId: customerId })
+    .where(eq(schema.billingStripeCustomer.id, base.bindingId));
+  const location = qualifyReloadCustomerLocation({
+    accountId: base.accountId,
+    customerBindingId: base.bindingId,
+    customerId,
+    livemode: false,
+    customer: {
+      id: customerId,
+      object: 'customer',
+      address: reloadAddress,
+      livemode: false,
+      metadata: { tau_account_id: base.accountId, tau_customer_binding_id: base.bindingId },
+    },
+  });
+  if (location === undefined) {
+    throw new Error('Reload location fixture is incomplete');
+  }
+  const consentId = randomUUID();
+  const offer: PaymentOfferSnapshot = {
+    version: 'payment-offer-v1',
+    policyId: 'process-policy',
+    offerId: 'top-up',
+    environment: 'development',
+    accountId: base.accountId,
+    stripeAccountId: 'acct_fixture',
+    livemode: false,
+    currency: 'usd',
+    principalMinor: '2500',
+    taxMinor: '0',
+    grossMinor: '2500',
+    maximumGrossMinor: '2500',
+    creditAtoms: '25000000',
+    ceilingCreditAtoms: null,
+    stripePriceId: null,
+    stripeProductId: 'prod_topup',
+    quantity: 1,
+    term: 'one_time',
+    taxBasis: 'stripe_tax',
+    paymentMethod: { id: 'pm_reload_process', brand: 'visa', last4: '4242' },
+  };
+  await database.insert(schema.billingReloadConsent).values({
+    id: consentId,
+    accountId: base.accountId,
+    environment: 'development',
+    version: 1,
+    requestId: randomUUID(),
+    requestHash: 'd'.repeat(64),
+    returnPath: '/settings/billing',
+    customerBindingId: base.bindingId,
+    policyId: 'process-policy',
+    termsDigest: 'e'.repeat(64),
+    offerSnapshot: offer,
+    taxEvidence: { version: 'stripe-reload-tax-v1', locationRevision: location.revision },
+    currency: 'usd',
+    principalMinor: 2500n,
+    quotedTaxMinor: 0n,
+    grossCeilingMinor: 2500n,
+    thresholdAtoms: 100n,
+    monthlyGrossCapMinor: 10_000n,
+    minimumCadenceSeconds: 3600,
+    terminalFailureLimit: 2,
+    checkoutSessionId: `cs_${consentId}`,
+    setupIntentId: `seti_${consentId}`,
+    paymentMethodId: 'pm_reload_process',
+    paymentMethod: { id: 'pm_reload_process', brand: 'visa', last4: '4242' },
+    consentedAt: new Date(),
+    state: 'enabled',
+  });
+  await database.insert(schema.billingReloadWork).values({
+    accountId: base.accountId,
+    environment: 'development',
+    reasonKind: 'insufficient_funds',
+    observedAccountRevision: 0n,
+  });
+  return { ...base, consentId, customerId };
+};
+
 beforeAll(async () => {
   stripeFixture.listen(0, '127.0.0.1');
   await once(stripeFixture, 'listening');
@@ -1080,7 +1351,7 @@ afterEach(() => {
 
 afterAll(async () => {
   await Promise.all([...children].map(async (child) => kill(child)));
-  await Promise.all([adminClient.end(), runtimeClient.end()]);
+  await Promise.all([adminClient.end(), batonClient.end(), runtimeClient.end()]);
   await new Promise<void>((resolve, reject) => {
     stripeFixture.close((error) => {
       if (error === undefined) {
@@ -1447,5 +1718,115 @@ describe('billing payment process recovery foundation', () => {
     ).toHaveLength(1);
     expect(requests.filter((item) => item.startsWith('POST /v1/checkout/sessions'))).toHaveLength(1);
     cancelPayment = undefined;
+  });
+
+  it('kills a real reload worker after its prepared automatic commit and charges exactly once', async () => {
+    const fixture = await seedEnabledReload();
+    const worker = await startRecovery('reload');
+    const held = await advanceAccountLock(fixture.accountId, async () => {
+      const rows = await database
+        .select()
+        .from(schema.billingPurchase)
+        .where(eq(schema.billingPurchase.accountId, fixture.accountId));
+      return rows.length === 1;
+    });
+    const [prepared] = await database
+      .select()
+      .from(schema.billingPurchase)
+      .where(eq(schema.billingPurchase.accountId, fixture.accountId));
+    const [preparedLeg] = await database
+      .select()
+      .from(schema.billingProviderLeg)
+      .where(eq(schema.billingProviderLeg.purchaseId, prepared?.id ?? ''));
+    expect({ purchase: prepared?.state, leg: preparedLeg?.state, posts: reloadPaymentPosts }).toEqual({
+      purchase: 'prepared',
+      leg: 'prepared',
+      posts: 0,
+    });
+    await kill(worker);
+    held.release();
+    await held.transaction;
+
+    const recovery = await startRecovery();
+    await waitFor(recovery, 'complete');
+    const [charged] = await database
+      .select()
+      .from(schema.billingPurchase)
+      .where(eq(schema.billingPurchase.accountId, fixture.accountId));
+    const legs = await database
+      .select()
+      .from(schema.billingProviderLeg)
+      .where(eq(schema.billingProviderLeg.purchaseId, prepared?.id ?? ''));
+    const purchases = await database
+      .select()
+      .from(schema.billingPurchase)
+      .where(eq(schema.billingPurchase.accountId, fixture.accountId));
+    expect({
+      purchases: purchases.length,
+      purchase: charged?.state,
+      legs: legs.length,
+      leg: legs[0]?.state,
+      object: legs[0]?.providerObjectId,
+      posts: reloadPaymentPosts,
+    }).toEqual({
+      purchases: 1,
+      purchase: 'pending',
+      legs: 1,
+      leg: 'known',
+      object: `pi_${preparedLeg?.id ?? ''}`,
+      posts: 1,
+    });
+
+    const repeat = await startRecovery();
+    await waitFor(repeat, 'complete');
+    expect(reloadPaymentPosts).toBe(1);
+  });
+
+  it('refuses a killed prepared automatic reload whose wake generation moved on and closes it uncharged', async () => {
+    const fixture = await seedEnabledReload();
+    const worker = await startRecovery('reload');
+    const held = await advanceAccountLock(fixture.accountId, async () => {
+      const rows = await database
+        .select()
+        .from(schema.billingPurchase)
+        .where(eq(schema.billingPurchase.accountId, fixture.accountId));
+      return rows.length === 1;
+    });
+    const posts = reloadPaymentPosts;
+    await kill(worker);
+    held.release();
+    await held.transaction;
+    await database
+      .update(schema.billingReloadWork)
+      .set({ generation: 99n, state: 'pending', leaseUntil: null })
+      .where(eq(schema.billingReloadWork.accountId, fixture.accountId));
+
+    const recovery = await startRecovery();
+    await waitFor(recovery, 'complete');
+    const [prepared] = await database
+      .select()
+      .from(schema.billingPurchase)
+      .where(eq(schema.billingPurchase.accountId, fixture.accountId));
+    const legs = await database
+      .select()
+      .from(schema.billingProviderLeg)
+      .where(eq(schema.billingProviderLeg.purchaseId, prepared?.id ?? ''));
+    expect({
+      purchase: prepared?.state,
+      outcome: prepared?.automaticTerminalOutcome,
+      leg: legs[0]?.state,
+      errorCode: legs[0]?.errorCode,
+      posts: reloadPaymentPosts,
+    }).toEqual({
+      purchase: 'failed',
+      outcome: 'no_charge_failure',
+      leg: 'no_charge',
+      errorCode: 'automatic_wake_superseded',
+      posts,
+    });
+    // The refusal proves itself: the leg was cancelled without ever having been dispatched, so the wake row it
+    // orphaned needs no hand-restoring to keep the rest of the file from spinning on it.
+    expect(legs[0]?.dispatchStartedAt).toBeNull();
+    expect(legs[0]?.cancellationConfirmedAt).toBeInstanceOf(Date);
   });
 });

@@ -145,8 +145,6 @@ export class BillingService {
       ...overrides,
       tier,
       status,
-      // The shared funded admission checks credit and policy for every subscription tier.
-      aiEnabled: true,
       // AD15: paid tiers carry the no-train guarantee; Free reflects the user's
       // privacy-settings opt-in (the existing `allowsAiTraining` surface).
       trainingConsent: tier === 'free' ? (userRow?.allowsAiTraining ?? false) : false,

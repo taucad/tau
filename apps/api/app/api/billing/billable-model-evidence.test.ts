@@ -8,6 +8,7 @@ describe('createBillableModelEvidenceCollector', () => {
     const collector = createBillableModelEvidenceCollector(
       'openai-responses',
       new Set(['uncached_input', 'cache_read', 'cache_write', 'output']),
+      'openai',
     );
     collector.accept(
       bytes(
@@ -37,6 +38,7 @@ describe('createBillableModelEvidenceCollector', () => {
     const collector = createBillableModelEvidenceCollector(
       'openai-responses',
       new Set(['uncached_input', 'cache_read', 'output']),
+      'openai',
     );
     collector.accept(bytes('{"id":"resp_2","usage":{"input_tokens":"20","output_tokens":"7"}}'));
 
@@ -51,6 +53,7 @@ describe('createBillableModelEvidenceCollector', () => {
     const collector = createBillableModelEvidenceCollector(
       'openai-responses',
       new Set(['uncached_input', 'cache_read', 'output']),
+      'openai',
     );
     collector.accept(
       bytes(
@@ -67,7 +70,10 @@ describe('createBillableModelEvidenceCollector', () => {
         { dimension: 'cache_read', quantity: 5n },
         { dimension: 'output', quantity: 64n },
       ],
-      normalizationEvidence: { providerRequestId: 'resp_incomplete', terminalReason: 'max_output_tokens' },
+      normalizationEvidence: {
+        providerRequestId: 'resp_incomplete',
+        terminalReason: 'max_output_tokens',
+      },
     });
   });
 
@@ -75,6 +81,7 @@ describe('createBillableModelEvidenceCollector', () => {
     const collector = createBillableModelEvidenceCollector(
       'openai-responses',
       new Set(['uncached_input', 'cache_read', 'output']),
+      'openai',
     );
     collector.accept(
       bytes(
@@ -86,7 +93,10 @@ describe('createBillableModelEvidenceCollector', () => {
       kind: 'absorbed_unknown',
       executionStatus: 'unknown',
       meterItems: [{ dimension: 'output', quantity: 64n }],
-      normalizationEvidence: { providerRequestId: 'resp_partial', terminalReason: 'max_output_tokens' },
+      normalizationEvidence: {
+        providerRequestId: 'resp_partial',
+        terminalReason: 'max_output_tokens',
+      },
     });
   });
 
@@ -94,6 +104,7 @@ describe('createBillableModelEvidenceCollector', () => {
     const collector = createBillableModelEvidenceCollector(
       'anthropic',
       new Set(['uncached_input', 'cache_read', 'cache_write', 'output']),
+      'anthropic',
     );
     collector.accept(
       bytes(
@@ -116,6 +127,7 @@ describe('createBillableModelEvidenceCollector', () => {
     const collector = createBillableModelEvidenceCollector(
       'openai-responses',
       new Set(['uncached_input', 'cache_read', 'output']),
+      'openai',
     );
     collector.accept(
       bytes(
@@ -135,6 +147,7 @@ describe('createBillableModelEvidenceCollector', () => {
     const collector = createBillableModelEvidenceCollector(
       'openai-responses',
       new Set(['uncached_input', 'cache_read', 'output']),
+      'openai',
     );
     collector.accept(
       bytes(
@@ -149,6 +162,7 @@ describe('createBillableModelEvidenceCollector', () => {
     const collector = createBillableModelEvidenceCollector(
       'openai-responses',
       new Set(['uncached_input', 'cache_read', 'output']),
+      'openai',
     );
     collector.accept(
       bytes(
@@ -156,19 +170,27 @@ describe('createBillableModelEvidenceCollector', () => {
       ),
     );
 
-    expect(collector.complete()).toMatchObject({ kind: 'absorbed_unknown', executionStatus: 'unknown' });
+    expect(collector.complete()).toMatchObject({
+      kind: 'absorbed_unknown',
+      executionStatus: 'unknown',
+    });
   });
 
   it('should price every Morph prompt token as uncached input', () => {
-    const collector = createBillableModelEvidenceCollector('openai-completions', new Set(['uncached_input', 'output']));
+    const collector = createBillableModelEvidenceCollector(
+      'openai-completions',
+      new Set(['uncached_input', 'output']),
+      'morph',
+    );
     collector.accept(
       bytes(
-        'data: {"id":"req_morph","choices":[{"finish_reason":"stop"}],"usage":{"prompt_tokens":20,"completion_tokens":2,"prompt_tokens_details":{"cached_tokens":19}}}\n\ndata: [DONE]\n\n',
+        'data: {"id":"req_morph","choices":[{"finish_reason":"stop"}],"usage":{"prompt_tokens":20,"completion_tokens":2,"prompt_tokens_details":{"cached_tokens":19},"completion_tokens_details":{"reasoning_tokens":1}}}\n\ndata: [DONE]\n\n',
       ),
     );
 
     expect(collector.complete()).toMatchObject({
       kind: 'final_usage',
+      reasoningTokens: 1n,
       meterItems: [
         { dimension: 'uncached_input', quantity: 20n },
         { dimension: 'output', quantity: 2n },
@@ -176,10 +198,165 @@ describe('createBillableModelEvidenceCollector', () => {
     });
   });
 
+  it('should not settle a non-Vertex completions stream truncated before its sentinel', () => {
+    const collector = createBillableModelEvidenceCollector(
+      'openai-completions',
+      new Set(['uncached_input', 'output']),
+      'morph',
+    );
+    collector.accept(
+      bytes(
+        'data: {"id":"req_morph_truncated","choices":[{"finish_reason":"stop"}],"usage":{"prompt_tokens":20,"completion_tokens":2}}\n\n',
+      ),
+    );
+
+    expect(collector.complete()).toMatchObject({
+      kind: 'absorbed_unknown',
+      executionStatus: 'unknown',
+      meterItems: [
+        { dimension: 'uncached_input', quantity: 20n },
+        { dimension: 'output', quantity: 2n },
+      ],
+    });
+  });
+
+  it('should settle complete Vertex usage at EOF without optional terminal markers', () => {
+    const collector = createBillableModelEvidenceCollector(
+      'openai-completions',
+      new Set(['uncached_input', 'output']),
+      'vertexai',
+    );
+    collector.accept(
+      bytes(
+        'data: {"id":"req_vertex","choices":[],"usage":{"prompt_tokens":10,"completion_tokens":21,"completion_tokens_details":{"reasoning_tokens":78}}}\n\n',
+      ),
+    );
+
+    expect(collector.complete()).toMatchObject({
+      kind: 'final_usage',
+      reasoningTokens: 78n,
+      meterItems: [
+        { dimension: 'uncached_input', quantity: 10n },
+        { dimension: 'output', quantity: 99n },
+      ],
+      normalizationEvidence: { fields: { output: '99' } },
+    });
+  });
+
+  it('should not settle a truncated Vertex content event that happens to carry usage', () => {
+    const collector = createBillableModelEvidenceCollector(
+      'openai-completions',
+      new Set(['uncached_input', 'output']),
+      'vertexai',
+    );
+    collector.accept(
+      bytes(
+        'data: {"id":"req_vertex_partial","choices":[{"delta":{"content":"unfinished"},"finish_reason":null}],"usage":{"prompt_tokens":10,"completion_tokens":21,"completion_tokens_details":{"reasoning_tokens":78}}}\n\n',
+      ),
+    );
+
+    expect(collector.complete()).toMatchObject({
+      kind: 'absorbed_unknown',
+      executionStatus: 'unknown',
+      reasoningTokens: 78n,
+      meterItems: [
+        { dimension: 'uncached_input', quantity: 10n },
+        { dimension: 'output', quantity: 99n },
+      ],
+    });
+  });
+
+  /* Live Vertex envelope observed on 2026-09-11 (prompt 7, completion 1, reasoning 74, total 82):
+   * `completion_tokens` excludes thought tokens, so output is the sum and reasoning stays informational.
+   * Source: docs/research/artifacts/gemini-portable-agent-host-replay-and-billing-blueprint/runs/2026-09-11-execution/reviews/final/report.md:21. */
+  it('should meter the live Vertex envelope as completion plus reasoning', () => {
+    const collector = createBillableModelEvidenceCollector(
+      'openai-completions',
+      new Set(['uncached_input', 'output']),
+      'vertexai',
+    );
+    collector.accept(
+      bytes(
+        'data: {"id":"req_vertex_live","choices":[],"usage":{"prompt_tokens":7,"completion_tokens":1,"completion_tokens_details":{"reasoning_tokens":74},"total_tokens":82}}\n\n',
+      ),
+    );
+
+    expect(collector.complete()).toMatchObject({
+      kind: 'final_usage',
+      reasoningTokens: 74n,
+      meterItems: [
+        { dimension: 'uncached_input', quantity: 7n },
+        { dimension: 'output', quantity: 75n },
+      ],
+    });
+  });
+
+  /* Production pins `cache_read` on every Gemini route (`rates('.75', '.075', undefined, '3.75')`), and Vertex
+   * omits `prompt_tokens_details` on a cache miss; the same live envelope must still settle. */
+  it('should meter a Vertex cache miss as zero cache read when the tariff pins it', () => {
+    const collector = createBillableModelEvidenceCollector(
+      'openai-completions',
+      new Set(['uncached_input', 'cache_read', 'output']),
+      'vertexai',
+    );
+    collector.accept(
+      bytes(
+        'data: {"id":"req_vertex_live","choices":[],"usage":{"prompt_tokens":7,"completion_tokens":1,"completion_tokens_details":{"reasoning_tokens":74},"total_tokens":82}}\n\n',
+      ),
+    );
+
+    expect(collector.complete()).toMatchObject({
+      kind: 'final_usage',
+      executionStatus: 'succeeded',
+      reasoningTokens: 74n,
+      meterItems: [
+        { dimension: 'uncached_input', quantity: 7n },
+        { dimension: 'cache_read', quantity: 0n },
+        { dimension: 'output', quantity: 75n },
+      ],
+    });
+  });
+
+  it('should subtract a reported Vertex cache hit from uncached input', () => {
+    const collector = createBillableModelEvidenceCollector(
+      'openai-completions',
+      new Set(['uncached_input', 'cache_read', 'output']),
+      'vertexai',
+    );
+    collector.accept(
+      bytes(
+        'data: {"id":"req_vertex_hit","choices":[],"usage":{"prompt_tokens":11383,"completion_tokens":12,"prompt_tokens_details":{"cached_tokens":11000}}}\n\n',
+      ),
+    );
+
+    expect(collector.complete()).toMatchObject({
+      kind: 'final_usage',
+      meterItems: [
+        { dimension: 'uncached_input', quantity: 383n },
+        { dimension: 'cache_read', quantity: 11_000n },
+        { dimension: 'output', quantity: 12n },
+      ],
+    });
+  });
+
+  it('should not settle a Vertex stream cut before any usage envelope', () => {
+    const collector = createBillableModelEvidenceCollector(
+      'openai-completions',
+      new Set(['uncached_input', 'output']),
+      'vertexai',
+    );
+    collector.accept(
+      bytes('data: {"id":"req_vertex_cut","choices":[{"delta":{"content":"unfinished"},"finish_reason":null}]}\n\n'),
+    );
+
+    expect(collector.complete()).toEqual({ kind: 'absorbed_unknown', executionStatus: 'unknown' });
+  });
+
   it('should retain known partial usage and identity without claiming success', () => {
     const collector = createBillableModelEvidenceCollector(
       'openai-responses',
       new Set(['uncached_input', 'cache_read', 'output']),
+      'openai',
     );
     collector.accept(
       bytes(
@@ -194,7 +371,10 @@ describe('createBillableModelEvidenceCollector', () => {
         { dimension: 'uncached_input', quantity: 5n },
         { dimension: 'cache_read', quantity: 2n },
       ],
-      normalizationEvidence: { providerRequestId: 'req_partial', fields: { input: '7' } },
+      normalizationEvidence: {
+        providerRequestId: 'req_partial',
+        fields: { input: '7' },
+      },
     });
   });
 
@@ -202,6 +382,7 @@ describe('createBillableModelEvidenceCollector', () => {
     const collector = createBillableModelEvidenceCollector(
       'openai-responses',
       new Set(['uncached_input', 'cache_read', 'output']),
+      'openai',
     );
     collector.accept(
       bytes(
@@ -218,7 +399,48 @@ describe('createBillableModelEvidenceCollector', () => {
       kind: 'absorbed_unknown',
       executionStatus: 'unknown',
       meterItems: [{ dimension: 'output', quantity: 3n }],
-      normalizationEvidence: { providerRequestId: 'req_cumulative', fields: { input: '8', output: '3' } },
+      normalizationEvidence: {
+        providerRequestId: 'req_cumulative',
+        fields: { input: '8', output: '3' },
+      },
+    });
+  });
+  /* B7 I3 / R8 + W4: `executionStatus` alone cannot separate a ceiling cut from an abort. */
+  it.each([
+    ['authorized_exhausted', 'authorized_exhausted'],
+    ['client_abort', 'absorbed_unknown'],
+    ['deadline', 'absorbed_unknown'],
+  ] as const)('should retain %s as the terminal reason of a %s terminal', (reason, kind) => {
+    const collector = createBillableModelEvidenceCollector('openai-responses', new Set(['uncached_input']), 'openai');
+    collector.accept(bytes('data: {"type":"response.output_text.delta","delta":"partial"}\n\n'));
+
+    expect(collector.failed(reason)).toEqual({
+      kind,
+      executionStatus: 'cancelled',
+      normalizationEvidence: { version: 'provider-usage-v1', terminalReason: reason, fields: {} },
+    });
+  });
+
+  it('should keep the provider incomplete reason ahead of the gateway reason', () => {
+    const collector = createBillableModelEvidenceCollector(
+      'openai-responses',
+      new Set(['uncached_input', 'output']),
+      'openai',
+    );
+    collector.accept(
+      bytes(
+        'data: {"type":"response.incomplete","response":{"id":"resp_cut","status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},"usage":{"input_tokens":4,"output_tokens":2}}}\n\n',
+      ),
+    );
+
+    expect(collector.failed('authorized_exhausted')).toMatchObject({
+      kind: 'authorized_exhausted',
+      executionStatus: 'cancelled',
+      meterItems: [
+        { dimension: 'uncached_input', quantity: 4n },
+        { dimension: 'output', quantity: 2n },
+      ],
+      normalizationEvidence: { terminalReason: 'max_output_tokens' },
     });
   });
 });

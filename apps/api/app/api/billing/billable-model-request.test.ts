@@ -5,7 +5,8 @@ import { createGatewayModelTransport } from '../../../../../packages/agent-host/
 // oxlint-disable-next-line no-restricted-imports -- fixture messages use the codec owner's exact public wire types.
 import type { ModelProviderKind, ProviderMessage } from '../../../../../packages/agent-host/src/log/event-types.js';
 import { CodeOwnedBillableModelQualificationResolver } from '#api/billing/billable-model-qualification.js';
-import { safeParseBillableModelRequest } from '#api/billing/billable-model-request.js';
+import { billableModelInputBound, safeParseBillableModelRequest } from '#api/billing/billable-model-request.js';
+import type { BillableModelRequest } from '#api/billing/billable-model-request.js';
 import type {
   BillableModelProviderAdapter,
   BillableProviderWire,
@@ -39,10 +40,15 @@ const capture = async (input: {
         throw new TypeError('Expected the installed codec to emit a JSON string body.');
       }
       body = JSON.parse(init.body);
-      return new Response(JSON.stringify({ error: { type: 'fixture_stop', message: 'captured' } }), {
-        status: 400,
-        headers: { 'content-type': 'application/json' },
-      });
+      return new Response(
+        JSON.stringify({
+          error: { type: 'fixture_stop', message: 'captured' },
+        }),
+        {
+          status: 400,
+          headers: { 'content-type': 'application/json' },
+        },
+      );
     },
   });
   await expect(async () => {
@@ -54,7 +60,13 @@ const capture = async (input: {
       maxTokens: 16,
       systemPrompt: 'fixture-system',
       messages: input.messages,
-      tools: [{ name: 'screenshot', description: 'Capture CAD.', inputSchema: { type: 'object' } }],
+      tools: [
+        {
+          name: 'screenshot',
+          description: 'Capture CAD.',
+          inputSchema: { type: 'object' },
+        },
+      ],
       signal: new AbortController().signal,
     })) {
       // Controlled fetch stops immediately after recording the installed codec output.
@@ -98,7 +110,11 @@ const qualify = (input: {
 };
 
 const initialMessages: readonly ProviderMessage[] = [
-  { id: 'user-initial', role: 'user', content: [{ type: 'text', text: 'fixture' }, image] },
+  {
+    id: 'user-initial',
+    role: 'user',
+    content: [{ type: 'text', text: 'fixture' }, image],
+  },
 ];
 
 const followupMessages = (input: {
@@ -148,26 +164,51 @@ const followupMessages = (input: {
 
 describe('billable model request contract', () => {
   it.each([
-    ['Responses', 'openai', 'openai-gpt-5.6-luna', 'gpt-5.6-luna'],
-    ['Anthropic', 'anthropic', 'anthropic-claude-sonnet-5', 'claude-sonnet-5'],
-    ['Completions', 'vertexai', 'google-gemini-3.5-flash', 'google/gemini-3.5-flash'],
+    { name: 'Responses', providerKind: 'openai', modelId: 'openai-gpt-5.6-luna', supplierModelId: 'gpt-5.6-luna' },
+    {
+      name: 'Anthropic',
+      providerKind: 'anthropic',
+      modelId: 'anthropic-claude-sonnet-5',
+      supplierModelId: 'claude-sonnet-5',
+    },
+    {
+      name: 'Completions',
+      providerKind: 'vertexai',
+      modelId: 'google-gemini-3.5-flash',
+      supplierModelId: 'google/gemini-3.5-flash',
+    },
   ] as const)(
-    'accepts genuine installed Pi %s initial and synthetic screenshot-shaped follow-up requests',
-    async (_name, providerKind, modelId, supplierModelId) => {
-      const initial = await capture({ providerKind, modelId, messages: initialMessages });
-      const followup = await capture({ providerKind, modelId, messages: followupMessages({ providerKind, modelId }) });
+    'accepts genuine installed Pi $name initial and synthetic screenshot-shaped follow-up requests',
+    async ({ providerKind, modelId, supplierModelId }) => {
+      const initial = await capture({
+        providerKind,
+        modelId,
+        messages: initialMessages,
+      });
+      const followup = await capture({
+        providerKind,
+        modelId,
+        messages: followupMessages({ providerKind, modelId }),
+      });
 
       const providerWire = providerWireFor(providerKind);
       expect(safeParseBillableModelRequest(initial, providerWire).success).toBe(true);
       expect(safeParseBillableModelRequest(followup, providerWire).success).toBe(true);
-      const forwarded = (body: unknown) => ({ ...(body as Record<string, unknown>), model: supplierModelId });
+      const forwarded = (body: unknown) => ({
+        ...(body as Record<string, unknown>),
+        model: supplierModelId,
+      });
       expect(qualify({ providerKind, modelId, body: initial }).normalizedRequest.body).toEqual(forwarded(initial));
       expect(qualify({ providerKind, modelId, body: followup }).normalizedRequest.body).toEqual(forwarded(followup));
     },
   );
 
   it('rejects unsupported chargeable fields and non-data image URLs', () => {
-    const base = { model: 'gpt-5.6-luna', stream: true, max_output_tokens: 16 } as const;
+    const base = {
+      model: 'gpt-5.6-luna',
+      stream: true,
+      max_output_tokens: 16,
+    } as const;
     expect(safeParseBillableModelRequest({ ...base, service_tier: 'priority' }, 'openai-responses').success).toBe(
       false,
     );
@@ -202,7 +243,13 @@ describe('billable model request contract', () => {
           messages: [
             {
               role: 'user',
-              content: [{ type: 'text', text: 'fixture', cache_control: { type: 'ephemeral', ttl: '1h' } }],
+              content: [
+                {
+                  type: 'text',
+                  text: 'fixture',
+                  cache_control: { type: 'ephemeral', ttl: '1h' },
+                },
+              ],
             },
           ],
         },
@@ -216,7 +263,13 @@ describe('billable model request contract', () => {
           input: [
             {
               role: 'user',
-              content: [{ type: 'input_image', detail: 'auto', image_url: 'https://example.test/a.png' }],
+              content: [
+                {
+                  type: 'input_image',
+                  detail: 'auto',
+                  image_url: 'https://example.test/a.png',
+                },
+              ],
             },
           ],
         },
@@ -228,7 +281,12 @@ describe('billable model request contract', () => {
   it('rejects aggregate UTF-8 bytes and depth before schema traversal', () => {
     expect(
       safeParseBillableModelRequest(
-        { model: 'gpt-5.6-luna', stream: true, max_output_tokens: 16, instructions: 'é'.repeat(2_000_001) },
+        {
+          model: 'gpt-5.6-luna',
+          stream: true,
+          max_output_tokens: 16,
+          instructions: 'é'.repeat(2_000_001),
+        },
         'openai-responses',
       ).success,
     ).toBe(false);
@@ -240,7 +298,12 @@ describe('billable model request contract', () => {
   });
 
   it('accepts native Responses string inputs, string message content, instructions, and encrypted reasoning inclusion', () => {
-    const base = { model: 'gpt-5.6-luna', stream: true, store: false, max_output_tokens: 64 };
+    const base = {
+      model: 'gpt-5.6-luna',
+      stream: true,
+      store: false,
+      max_output_tokens: 64,
+    };
     expect(
       safeParseBillableModelRequest({ ...base, input: 'fixture', instructions: 'Respond briefly.' }, 'openai-responses')
         .success,
@@ -268,12 +331,144 @@ describe('billable model request contract', () => {
           stream: true,
           max_completion_tokens: 16,
           messages: [
-            { role: 'user', content: [{ type: 'text', text: 'fixture', cache_control: { type: 'ephemeral' } }] },
+            {
+              role: 'user',
+              content: [
+                {
+                  type: 'text',
+                  text: 'fixture',
+                  cache_control: { type: 'ephemeral' },
+                },
+              ],
+            },
           ],
         },
         'openai-completions',
       ).success,
     ).toBe(false);
+  });
+
+  it('should admit only the bounded Google thought-signature extension for Completions tool calls', () => {
+    const body = (extraContent: unknown) => ({
+      model: 'google-gemini-3.5-flash',
+      stream: true,
+      max_completion_tokens: 16,
+      messages: [
+        {
+          role: 'assistant',
+          content: null,
+          tool_calls: [
+            {
+              id: 'call-fixture',
+              type: 'function',
+              function: { name: 'screenshot', arguments: '{}' },
+              extra_content: extraContent,
+            },
+          ],
+        },
+      ],
+    });
+    const accepted = body({
+      google: { thought_signature: 'sentinel-signature' },
+    });
+
+    expect(safeParseBillableModelRequest(accepted, 'openai-completions').success).toBe(true);
+    expect(
+      qualify({
+        providerKind: 'vertexai',
+        modelId: accepted.model,
+        body: accepted,
+      }).normalizedRequest.body,
+    ).toEqual({ ...accepted, model: 'google/gemini-3.5-flash' });
+    expect(
+      safeParseBillableModelRequest(
+        body({ google: { thought_signature: 'sentinel', other: true } }),
+        'openai-completions',
+      ).success,
+    ).toBe(false);
+    expect(
+      safeParseBillableModelRequest(body({ google: { thought_signature: 1 } }), 'openai-completions').success,
+    ).toBe(false);
+    expect(
+      safeParseBillableModelRequest(
+        body({
+          google: { thought_signature: 'sentinel' },
+          other: { thought_signature: 'sentinel' },
+        }),
+        'openai-completions',
+      ).success,
+    ).toBe(false);
+    expect(
+      safeParseBillableModelRequest(
+        body({ google: { thought_signature: 'x'.repeat(4_000_001) } }),
+        'openai-completions',
+      ).success,
+    ).toBe(false);
+  });
+
+  it('should keep the Google thought signature inside the funded request bound', () => {
+    const signed = (signature: string) => ({
+      model: 'google-gemini-3.5-flash',
+      stream: true,
+      max_completion_tokens: 16,
+      messages: [
+        {
+          role: 'assistant',
+          content: null,
+          tool_calls: [
+            {
+              id: 'call-fixture',
+              type: 'function',
+              function: { name: 'screenshot', arguments: '{}' },
+              extra_content: { google: { thought_signature: signature } },
+            },
+          ],
+        },
+      ],
+    });
+    const unsigned = {
+      model: 'google-gemini-3.5-flash',
+      stream: true,
+      max_completion_tokens: 16,
+      messages: [
+        {
+          role: 'assistant',
+          content: null,
+          tool_calls: [{ id: 'call-fixture', type: 'function', function: { name: 'screenshot', arguments: '{}' } }],
+        },
+      ],
+    };
+
+    /* The per-field ceiling counts UTF-16 code units, so a multi-byte signature
+     * under it still has to be refused by the aggregate UTF-8 body bound. */
+    const multiByte = 'é'.repeat(2_000_001);
+    expect(multiByte.length).toBeLessThan(4_000_000);
+    expect(new TextEncoder().encode(multiByte).byteLength).toBeGreaterThan(4_000_000);
+    expect(safeParseBillableModelRequest(signed(multiByte), 'openai-completions').success).toBe(false);
+
+    /* Admitted signature bytes are billable input text, so they raise the priced
+     * maximum by exactly their own UTF-8 length and by nothing else. */
+    const signature = 'sentinel-signature';
+    const withSignature = qualify({
+      providerKind: 'vertexai',
+      modelId: 'google-gemini-3.5-flash',
+      body: signed(signature),
+    });
+    const withoutSignature = qualify({
+      providerKind: 'vertexai',
+      modelId: 'google-gemini-3.5-flash',
+      body: unsigned,
+    });
+    const inputOf = (qualification: typeof withSignature): bigint =>
+      qualification.maximumQuantities.find((meter) => meter.dimension === 'uncached_input')!.quantity;
+    const signatureBytes = BigInt(
+      new TextEncoder().encode(JSON.stringify({ google: { thought_signature: signature } })).byteLength,
+    );
+    /* `extra_content` and its member name enter the serialized request alongside the value. */
+    expect(inputOf(withSignature) - inputOf(withoutSignature)).toBe(
+      signatureBytes + BigInt('"extra_content":,'.length),
+    );
+    expect(withSignature.invocation.jointInputMaximum).toBeUndefined();
   });
 
   it('rejects mixed native envelopes and foreign content before adapter execution', async () => {
@@ -305,7 +500,10 @@ describe('billable model request contract', () => {
       qualify({
         providerKind: 'anthropic',
         modelId: 'anthropic-claude-sonnet-5',
-        body: { ...(anthropic as Record<string, unknown>), instructions: 'foreign' },
+        body: {
+          ...(anthropic as Record<string, unknown>),
+          instructions: 'foreign',
+        },
       }),
     ).toThrow();
     expect(() =>
@@ -316,5 +514,69 @@ describe('billable model request contract', () => {
       }),
     ).toThrow();
     expect(adapterExecutions).toBe(0);
+  });
+});
+
+const boundOf = (body: unknown): bigint | undefined => {
+  const parsed = safeParseBillableModelRequest(body, 'openai-responses');
+  expect(parsed.success).toBe(true);
+  return billableModelInputBound((parsed as Extract<typeof parsed, { success: true }>).data);
+};
+
+const utf8 = (value: unknown): bigint => BigInt(new TextEncoder().encode(JSON.stringify(value)).byteLength);
+
+describe('billableModelInputBound', () => {
+  it('bounds a text request by its own serialized bytes plus the ratified overheads', () => {
+    const body = {
+      model: 'openai-gpt-5.6-luna',
+      input: [{ role: 'user', content: 'hello' }],
+      max_output_tokens: 16,
+      stream: true,
+    };
+
+    expect(boundOf(body)).toBe(utf8(body) + 64n + 4096n);
+  });
+
+  it('replaces image bytes with the documented per-image maximum', () => {
+    const element = { type: 'input_image', image_url: `data:image/png;base64,${validPng}` };
+    const body = {
+      model: 'openai-gpt-5.6-luna',
+      input: [{ role: 'user', content: [{ type: 'input_text', text: 'hello' }, element] }],
+      max_output_tokens: 16,
+      stream: true,
+    };
+
+    /* A compressed image is not bounded by its own base64 length, so its bytes leave
+     * the total and the per-route image maximum takes their place. */
+    expect(boundOf(body)).toBe(utf8(body) - utf8(element) + 3000n + 64n + 4096n);
+  });
+
+  it('bounds free-form tool schemas by bytes without reading their JSON-Schema types', () => {
+    const body = {
+      model: 'openai-gpt-5.6-luna',
+      input: 'hello',
+      max_output_tokens: 16,
+      stream: true,
+      tools: [
+        {
+          type: 'function',
+          name: 'read_file',
+          parameters: { type: 'object', properties: { path: { type: 'string' } } },
+        },
+      ],
+    };
+
+    expect(boundOf(body)).toBe(utf8(body) + 64n + 4096n);
+  });
+
+  it('fails closed on a request element that carries no documented bound', () => {
+    const body = {
+      model: 'openai-gpt-5.6-luna',
+      input: [{ role: 'user', content: [{ type: 'input_audio', audio: 'AAAA' }] }],
+      max_output_tokens: 16,
+      stream: true,
+    } as unknown as BillableModelRequest;
+
+    expect(billableModelInputBound(body)).toBeUndefined();
   });
 });

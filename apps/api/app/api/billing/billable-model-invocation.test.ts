@@ -7,12 +7,14 @@ import {
   CodeOwnedBillableModelQualificationResolver,
 } from '#api/billing/billable-model-qualification.js';
 import { createBillableModelProviderAdapters } from '#api/billing/billable-model-provider.js';
+import { createBillableModelEvidenceCollector } from '#api/billing/billable-model-evidence.js';
 import type {
   BillableInvocationIntent,
   BillableProviderWire,
   BillableModelQualificationResolver,
   QualifiedBillableInvocation,
 } from '#api/billing/billable-model-invocation.types.js';
+import type { InputCountCapability } from '#api/billing/billable-model-input-count.js';
 import type { CreditLedgerService } from '#api/billing/credit-ledger.service.js';
 import type { MetricsService } from '#telemetry/metrics.js';
 
@@ -270,6 +272,181 @@ describe('BillableModelInvocationService', () => {
     expect(invocationTimeout).toHaveBeenCalledWith(qualified.invocation.executionTimeout);
   });
 
+  /* B7 I3 / R8: the in-stream ceiling cuts the supplier off and keeps the turn settleable. */
+  it('cancels upstream and retains authorized_exhausted evidence when the stream passes its ceiling', async () => {
+    const qualified = qualification();
+    let cancelledWith: unknown;
+    qualified.adapter.createEvidenceCollector = () =>
+      createBillableModelEvidenceCollector('openai-responses', new Set(['uncached_input']), 'openai');
+    qualified.adapter.executeOnce = vi.fn(
+      async () =>
+        new Response(
+          new ReadableStream<Uint8Array<ArrayBuffer>>({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode('x'.repeat(qualified.maximumResponseBytes + 1)));
+            },
+            cancel(reason) {
+              cancelledWith = reason;
+            },
+          }),
+        ),
+    );
+    const metrics = { billingFundedOperationTerminals: { add: vi.fn() } };
+    const row = {
+      ...qualified,
+      id: 'operation',
+      accountId: 'account',
+      environment: 'development',
+      activity: 'agent',
+      requestDigest: '',
+      customerState: 'pending',
+      dueAt: new Date(Date.now() + 30_000),
+    };
+    const ledger = {
+      getOperationForAttempt: vi
+        .fn()
+        .mockResolvedValueOnce(undefined)
+        .mockImplementation(async () => row),
+      issueCurrentPromotion: vi.fn(),
+      admitOperation: vi.fn(async () => ({ status: 'admitted', operationId: 'operation', generation: 0n })),
+      markDispatchIntent: vi.fn(async () => true),
+      markDispatchAccepted: vi.fn(async () => true),
+      getDispatchTimeRemaining: vi.fn(async () => 30_000),
+      recordInvocationEvidence: vi.fn(),
+      terminalizeOperation: vi.fn(),
+    };
+    const service = new BillableModelInvocationService(
+      ledger as unknown as CreditLedgerService,
+      { resolve: () => qualified },
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- environment key
+      new ConfigService({ BILLING_REQUEST_DIGEST_SECRET: 'x'.repeat(32) }),
+      metrics as unknown as MetricsService,
+    );
+    row.requestDigest = (
+      service as unknown as {
+        requestDigest(value: ReturnType<typeof intent>, pins: QualifiedBillableInvocation): string;
+      }
+    ).requestDigest(intent(), qualified);
+
+    const result = await service.invoke(intent());
+    if (result.state !== 'streaming') {
+      throw new Error('Ceiling invocation did not stream');
+    }
+    await expect(result.response.text()).rejects.toThrow('authorized ceiling');
+    await result.completion;
+
+    expect(cancelledWith).toBe('authorized_exhausted');
+    expect(ledger.recordInvocationEvidence).toHaveBeenCalledWith({
+      operationId: 'operation',
+      accountId: 'account',
+      requestDigest: row.requestDigest,
+      evidence: {
+        kind: 'authorized_exhausted',
+        executionStatus: 'cancelled',
+        normalizationEvidence: {
+          version: 'provider-usage-v1',
+          terminalReason: 'authorized_exhausted',
+          // The observed bytes are what makes the ceiling's bytes-per-token constant measurable.
+          fields: { responseBytes: '129' },
+        },
+      },
+    });
+    // Settled through the one terminalizer: an absorbed kind would return before it.
+    expect(ledger.terminalizeOperation).toHaveBeenCalledOnce();
+    expect(metrics.billingFundedOperationTerminals.add).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({ 'tau.billing.terminal.kind': 'authorized_exhausted' }),
+    );
+  });
+
+  it('admits at the byte bound when the input counter fails instead of refusing the call', async () => {
+    // A capability no qualification admits: the same shape a schema drift, a revoked
+    // credential or a counter outage presents at the boundary.
+    const drifted: Record<string, string> = { qualification: 'drifted' };
+    const qualified: QualifiedBillableInvocation = {
+      ...qualification(),
+      inputCount: { capability: drifted as unknown as InputCountCapability },
+      maximumQuantities: [
+        { dimension: 'uncached_input', tier: null, quantity: 10n },
+        { dimension: 'output', tier: null, quantity: 4n },
+      ],
+      invocation: {
+        ...qualification().invocation,
+        supplierRates: [
+          { dimension: 'uncached_input', tier: null, numeratorPicoUsd: '1', denominatorUnits: '1' },
+          { dimension: 'output', tier: null, numeratorPicoUsd: '2', denominatorUnits: '1' },
+        ],
+        jointInputMaximum: { version: 'joint-input-v1', quantity: '10' },
+      },
+    };
+    const metrics = { billingFundedOperationTerminals: { add: vi.fn() } };
+    const row = {
+      ...qualified,
+      id: 'operation',
+      accountId: 'account',
+      environment: 'development',
+      requestDigest: '',
+      customerState: 'pending',
+      dueAt: new Date(Date.now() + 30_000),
+    };
+    const ledger = {
+      getOperationForAttempt: vi
+        .fn()
+        .mockResolvedValueOnce(undefined)
+        .mockImplementation(async () => row),
+      issueCurrentPromotion: vi.fn(),
+      inputCountEligibility: vi.fn(async () => ({
+        status: 'eligible',
+        executionDeadline: new Date(Date.now() + 30_000),
+        remaining: 30_000,
+      })),
+      admitOperation: vi.fn(async () => ({ status: 'admitted', operationId: 'operation', generation: 0n })),
+      markDispatchIntent: vi.fn(async () => true),
+      markDispatchAccepted: vi.fn(async () => true),
+      getDispatchTimeRemaining: vi.fn(async () => 30_000),
+      recordInvocationEvidence: vi.fn(),
+      terminalizeOperation: vi.fn(),
+    };
+    const service = new BillableModelInvocationService(
+      ledger as unknown as CreditLedgerService,
+      { resolve: () => qualified },
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- environment key
+      new ConfigService({ BILLING_REQUEST_DIGEST_SECRET: 'x'.repeat(32) }),
+      metrics as unknown as MetricsService,
+    );
+    row.requestDigest = (
+      service as unknown as {
+        requestDigest(value: ReturnType<typeof intent>, pins: QualifiedBillableInvocation): string;
+      }
+    ).requestDigest(intent(), qualified);
+
+    const result = await service.invoke(intent());
+    if (result.state !== 'streaming') {
+      throw new Error('Uncounted invocation did not stream');
+    }
+    await result.response.text();
+    await result.completion;
+
+    const [admitted] = ledger.admitOperation.mock.calls as unknown as Array<
+      [
+        {
+          executionDeadline?: Date;
+          maximumQuantities: unknown;
+          invocation: { inputCount?: unknown; jointInputMaximum?: { quantity: string } };
+        },
+      ]
+    >;
+    if (!admitted) {
+      throw new Error('The uncounted invocation was never admitted');
+    }
+    // No count evidence, no counted deadline, and the hold still stands on the proved byte bound.
+    expect(admitted[0].invocation.inputCount).toBeUndefined();
+    expect(admitted[0].executionDeadline).toBeUndefined();
+    expect(admitted[0].invocation.jointInputMaximum?.quantity).toBe('10');
+    expect(admitted[0].maximumQuantities).toStrictEqual(qualified.maximumQuantities);
+    expect(qualified.adapter.executeOnce).toHaveBeenCalledOnce();
+  });
+
   it('recovers an expired owner pool and retries the same admission once before dispatch', async () => {
     const qualified = qualification();
     const metrics = {
@@ -305,6 +482,7 @@ describe('BillableModelInvocationService', () => {
         failedOperationIds: [],
       })),
       markDispatchIntent: vi.fn(async () => true),
+      markDispatchAccepted: vi.fn(async () => true),
       getDispatchTimeRemaining: vi.fn(async () => 30_000),
       recordInvocationEvidence: vi.fn(),
       terminalizeOperation: vi.fn(),
@@ -389,6 +567,51 @@ describe('BillableModelInvocationService', () => {
       'tau.billing.capacity_pool': activity === 'title' ? 'helper' : 'primary',
       'tau.billing.denial.reason': 'genuine_saturation',
     });
+  });
+
+  it.each([
+    ['insufficient_credit', '4244000', '300000'],
+    ['debt', '4244000', '-1200'],
+  ] as const)('answers a %s refusal with the 402 shortfall the client renders', async (reason, required, available) => {
+    const qualified = qualification();
+    const ledger = {
+      getOperationForAttempt: vi.fn(async () => undefined),
+      issueCurrentPromotion: vi.fn(),
+      admitOperation: vi.fn(async () => ({
+        status: 'denied',
+        reason,
+        requiredCreditAtoms: BigInt(required),
+        availableCreditAtoms: BigInt(available),
+      })),
+      recoverDueLlmOperationsForOwner: vi.fn(),
+    };
+    const service = new BillableModelInvocationService(
+      ledger as unknown as CreditLedgerService,
+      { resolve: () => qualified },
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- environment key
+      new ConfigService({ BILLING_REQUEST_DIGEST_SECRET: 'x'.repeat(32) }),
+    );
+
+    const refusal = await service.invoke(intent()).catch((error: unknown) => error);
+
+    if (!(refusal instanceof LlmGatewayError)) {
+      throw new TypeError('Expected a typed gateway refusal');
+    }
+    expect(refusal.getStatus()).toBe(402);
+    expect(refusal.getResponse()).toEqual({
+      type: 'error',
+      error: {
+        type: 'INSUFFICIENT_CREDIT',
+        message: 'Insufficient Tau credit for this model request.',
+        details: {
+          requiredCreditAtoms: required,
+          availableCreditAtoms: available,
+          routeId: qualified.routeId,
+        },
+      },
+    });
+    expect(ledger.recoverDueLlmOperationsForOwner).not.toHaveBeenCalled();
+    expect(qualified.adapter.executeOnce).not.toHaveBeenCalled();
   });
 
   it('returns recovery-unavailable while another claimant owns an expired operation', async () => {

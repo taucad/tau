@@ -163,7 +163,7 @@ export type TaxSourceClaim = {
   readonly generation: bigint;
   readonly digest: string;
 };
-export type TaxObservation = {
+type TaxObservation = {
   readonly claim: TaxSourceClaim;
   readonly accountId?: string;
   readonly effectiveAt: Date;
@@ -216,7 +216,17 @@ export class BillingTaxService {
     if (projected === undefined) {
       const existing = await this.currentFactForSource({ claim: input.claim, accountId: input.accountId });
       if (existing !== undefined) return existing;
-      await this.recordObservationGap({ claim: input.claim, effectiveAt, reason: 'incomplete_source' });
+      const detail = paidTaxSourceIncompleteness({
+        paidEvidence: input.paidEvidence,
+        checkout: input.checkout,
+        invoice: input.invoice,
+      });
+      await this.recordObservationGap({
+        claim: input.claim,
+        effectiveAt,
+        reason: 'incomplete_source',
+        ...(detail === undefined ? {} : { detail }),
+      });
       return undefined;
     }
     return this.observe({ claim: input.claim, accountId: input.accountId, effectiveAt, evidence: projected });
@@ -348,6 +358,13 @@ export class BillingTaxService {
       return undefined;
     }
     const predecessorEvidence = taxFactEvidenceSchema.parse(withoutEvidenceDigest(predecessor.evidence));
+    if (
+      predecessorEvidence.currency !== projection.currency ||
+      BigInt(predecessorEvidence.principalMinor) !== reversal.originalPrincipalMinor ||
+      BigInt(predecessorEvidence.taxMinor) !== reversal.originalTaxMinor
+    ) {
+      throw new Error('tax_cash_original_components_mismatch');
+    }
     if (predecessor.sourceDigest === input.qualified.projectionDigest) {
       return {
         factId: predecessor.id,
@@ -392,143 +409,12 @@ export class BillingTaxService {
     );
   }
 
-  public observeCheckout(input: TaxObservation): Promise<TaxObservationResult> {
-    return this.observe(input);
-  }
-
-  public observeInvoice(input: TaxObservation): Promise<TaxObservationResult> {
-    return this.observe(input);
-  }
-
-  public observeCorrection(input: TaxObservation): Promise<TaxObservationResult> {
-    if (input.supersedesFactId === undefined) throw new Error('tax_correction_requires_predecessor');
-    return this.observe(input);
-  }
-
-  public async observe(input: TaxObservation, transaction?: DatabaseTransaction): Promise<TaxObservationResult> {
-    const evidence = taxFactEvidenceSchema.parse(input.evidence);
-    const classification = classifyTaxEvidence(evidence);
-    const qualifyingRevenue = BigInt(evidence.principalMinor) - BigInt(evidence.cumulativeRefundPrincipalMinor);
-    const requiresReportingFx = classification === 'eu_b2c' || classification === 'uk_b2c';
-    const reportingRevenueMinor =
-      !requiresReportingFx || evidence.fx === null
-        ? null
-        : (qualifyingRevenue * BigInt(evidence.fx.numerator)) / BigInt(evidence.fx.denominator);
-    const factId = randomUUID();
-    const evidenceDigest = digest(evidence);
-    const persist = async (tx: DatabaseTransaction): Promise<TaxObservationResult> => {
-      await tx.execute(sql`select id from billing.billing_stripe_source where id = ${input.claim.id} for update`);
-      const current = await tx.query.billingStripeSource.findFirst({
-        where: and(
-          eq(billingStripeSource.id, input.claim.id),
-          eq(billingStripeSource.environment, input.claim.environment),
-          eq(billingStripeSource.stripeAccountId, input.claim.stripeAccountId),
-          eq(billingStripeSource.livemode, input.claim.livemode),
-          eq(billingStripeSource.sourceType, input.claim.sourceType),
-          eq(billingStripeSource.sourceId, input.claim.sourceId),
-          eq(billingStripeSource.generation, input.claim.generation),
-          eq(billingStripeSource.state, 'processing'),
-          sql`${billingStripeSource.leaseUntil} > clock_timestamp()`,
-        ),
-      });
-      if (current === undefined) throw new Error('stale_tax_source_generation');
-      const replay = await tx.query.billingTaxFact.findFirst({
-        where: and(
-          eq(billingTaxFact.environment, input.claim.environment),
-          eq(billingTaxFact.stripeAccountId, input.claim.stripeAccountId),
-          eq(billingTaxFact.livemode, input.claim.livemode),
-          eq(billingTaxFact.sourceType, input.claim.sourceType),
-          eq(billingTaxFact.sourceId, input.claim.sourceId),
-          eq(billingTaxFact.sourceDigest, input.claim.digest),
-        ),
-      });
-      if (replay !== undefined) {
-        const replayEvidence = replay.evidence as { evidenceDigest?: unknown };
-        if (
-          replayEvidence.evidenceDigest !== evidenceDigest ||
-          replay.effectiveAt.getTime() !== input.effectiveAt.getTime() ||
-          replay.accountId !== (input.accountId ?? null) ||
-          replay.supersedesFactId !== (input.supersedesFactId ?? null)
-        )
-          throw new Error('tax_source_replay_payload_mismatch');
-        return {
-          factId: replay.id,
-          classification: replay.classification as TaxObservationResult['classification'],
-          reportingRevenueMinor: replay.reportingRevenueMinor,
-        };
-      }
-      if (input.supersedesFactId === undefined) {
-        const prior = await tx.query.billingTaxFact.findFirst({
-          where: and(
-            eq(billingTaxFact.environment, input.claim.environment),
-            eq(billingTaxFact.stripeAccountId, input.claim.stripeAccountId),
-            eq(billingTaxFact.livemode, input.claim.livemode),
-            eq(billingTaxFact.sourceType, input.claim.sourceType),
-            eq(billingTaxFact.sourceId, input.claim.sourceId),
-          ),
-        });
-        if (prior !== undefined) throw new Error('tax_source_changed_without_supersession');
-      }
-      if (input.supersedesFactId !== undefined) {
-        const predecessor = await tx.query.billingTaxFact.findFirst({
-          where: and(
-            eq(billingTaxFact.id, input.supersedesFactId),
-            eq(billingTaxFact.environment, input.claim.environment),
-            eq(billingTaxFact.stripeAccountId, input.claim.stripeAccountId),
-            eq(billingTaxFact.livemode, input.claim.livemode),
-            eq(billingTaxFact.sourceType, input.claim.sourceType),
-            eq(billingTaxFact.sourceId, input.claim.sourceId),
-          ),
-        });
-        if (predecessor === undefined) throw new Error('tax_predecessor_source_mismatch');
-      }
-      await tx.insert(billingTaxFact).values({
-        id: factId,
-        environment: input.claim.environment,
-        stripeAccountId: input.claim.stripeAccountId,
-        livemode: input.claim.livemode,
-        accountId: input.accountId,
-        sourceType: input.claim.sourceType,
-        sourceId: input.claim.sourceId,
-        sourceClaimId: input.claim.id,
-        sourceGeneration: input.claim.generation,
-        sourceDigest: input.claim.digest,
-        supersedesFactId: input.supersedesFactId,
-        effectiveAt: input.effectiveAt,
-        classification,
-        reportingRevenueMinor,
-        evidence: { ...evidence, evidenceDigest },
-      });
-      if (classification === 'unknown')
-        await this.upsertCase(
-          tx,
-          input.claim,
-          'tax_classification_unknown',
-          `classification:${input.claim.sourceType}:${input.claim.sourceId}`,
-          input.effectiveAt,
-          null,
-          { factId },
-        );
-      else if (requiresReportingFx && evidence.fx === null)
-        await this.upsertCase(
-          tx,
-          input.claim,
-          'tax_fx_missing',
-          `fx:${input.claim.sourceType}:${input.claim.sourceId}`,
-          input.effectiveAt,
-          null,
-          { factId },
-        );
-      return { factId, classification, reportingRevenueMinor };
-    };
-    return transaction === undefined ? this.databaseService.database.transaction(persist) : persist(transaction);
-  }
-
   public async recordObservationGap(
     input: {
       readonly claim: TaxSourceClaim;
       readonly effectiveAt: Date;
       readonly reason: 'incomplete_source' | 'missing_amounts' | 'missing_fx' | 'unknown_classification';
+      readonly detail?: string;
     },
     transaction?: DatabaseTransaction,
   ): Promise<void> {
@@ -555,7 +441,11 @@ export class BillingTaxService {
         `${input.reason}:${input.claim.sourceType}:${input.claim.sourceId}`,
         input.effectiveAt,
         null,
-        { reason: input.reason, sourceGeneration: input.claim.generation.toString() },
+        {
+          reason: input.reason,
+          sourceGeneration: input.claim.generation.toString(),
+          ...(input.detail === undefined ? {} : { detail: input.detail }),
+        },
       );
     };
     await (transaction === undefined ? this.databaseService.database.transaction(persist) : persist(transaction));
@@ -778,6 +668,130 @@ export class BillingTaxService {
     });
   }
 
+  /**
+   * Appends one immutable tax fact from evidence a caller declares complete. It is private because it does not
+   * consult `paidTaxSourceIncompleteness`: only `observePaidSource` and `observeQualifiedCashCorrection`, which
+   * fence the source first, may reach it.
+   */
+  private async observe(input: TaxObservation, transaction?: DatabaseTransaction): Promise<TaxObservationResult> {
+    const evidence = taxFactEvidenceSchema.parse(input.evidence);
+    const classification = classifyTaxEvidence(evidence);
+    const qualifyingRevenue = BigInt(evidence.principalMinor) - BigInt(evidence.cumulativeRefundPrincipalMinor);
+    const requiresReportingFx = classification === 'eu_b2c' || classification === 'uk_b2c';
+    const reportingRevenueMinor =
+      !requiresReportingFx || evidence.fx === null
+        ? null
+        : (qualifyingRevenue * BigInt(evidence.fx.numerator)) / BigInt(evidence.fx.denominator);
+    const factId = randomUUID();
+    const evidenceDigest = digest(evidence);
+    const persist = async (tx: DatabaseTransaction): Promise<TaxObservationResult> => {
+      await tx.execute(sql`select id from billing.billing_stripe_source where id = ${input.claim.id} for update`);
+      const current = await tx.query.billingStripeSource.findFirst({
+        where: and(
+          eq(billingStripeSource.id, input.claim.id),
+          eq(billingStripeSource.environment, input.claim.environment),
+          eq(billingStripeSource.stripeAccountId, input.claim.stripeAccountId),
+          eq(billingStripeSource.livemode, input.claim.livemode),
+          eq(billingStripeSource.sourceType, input.claim.sourceType),
+          eq(billingStripeSource.sourceId, input.claim.sourceId),
+          eq(billingStripeSource.generation, input.claim.generation),
+          eq(billingStripeSource.state, 'processing'),
+          sql`${billingStripeSource.leaseUntil} > clock_timestamp()`,
+        ),
+      });
+      if (current === undefined) throw new Error('stale_tax_source_generation');
+      const replay = await tx.query.billingTaxFact.findFirst({
+        where: and(
+          eq(billingTaxFact.environment, input.claim.environment),
+          eq(billingTaxFact.stripeAccountId, input.claim.stripeAccountId),
+          eq(billingTaxFact.livemode, input.claim.livemode),
+          eq(billingTaxFact.sourceType, input.claim.sourceType),
+          eq(billingTaxFact.sourceId, input.claim.sourceId),
+          eq(billingTaxFact.sourceDigest, input.claim.digest),
+        ),
+      });
+      if (replay !== undefined) {
+        const replayEvidence = replay.evidence as { evidenceDigest?: unknown };
+        if (
+          replayEvidence.evidenceDigest !== evidenceDigest ||
+          replay.effectiveAt.getTime() !== input.effectiveAt.getTime() ||
+          replay.accountId !== (input.accountId ?? null) ||
+          replay.supersedesFactId !== (input.supersedesFactId ?? null)
+        )
+          throw new Error('tax_source_replay_payload_mismatch');
+        return {
+          factId: replay.id,
+          classification: replay.classification as TaxObservationResult['classification'],
+          reportingRevenueMinor: replay.reportingRevenueMinor,
+        };
+      }
+      if (input.supersedesFactId === undefined) {
+        const prior = await tx.query.billingTaxFact.findFirst({
+          where: and(
+            eq(billingTaxFact.environment, input.claim.environment),
+            eq(billingTaxFact.stripeAccountId, input.claim.stripeAccountId),
+            eq(billingTaxFact.livemode, input.claim.livemode),
+            eq(billingTaxFact.sourceType, input.claim.sourceType),
+            eq(billingTaxFact.sourceId, input.claim.sourceId),
+          ),
+        });
+        if (prior !== undefined) throw new Error('tax_source_changed_without_supersession');
+      }
+      if (input.supersedesFactId !== undefined) {
+        const predecessor = await tx.query.billingTaxFact.findFirst({
+          where: and(
+            eq(billingTaxFact.id, input.supersedesFactId),
+            eq(billingTaxFact.environment, input.claim.environment),
+            eq(billingTaxFact.stripeAccountId, input.claim.stripeAccountId),
+            eq(billingTaxFact.livemode, input.claim.livemode),
+            eq(billingTaxFact.sourceType, input.claim.sourceType),
+            eq(billingTaxFact.sourceId, input.claim.sourceId),
+          ),
+        });
+        if (predecessor === undefined) throw new Error('tax_predecessor_source_mismatch');
+      }
+      await tx.insert(billingTaxFact).values({
+        id: factId,
+        environment: input.claim.environment,
+        stripeAccountId: input.claim.stripeAccountId,
+        livemode: input.claim.livemode,
+        accountId: input.accountId,
+        sourceType: input.claim.sourceType,
+        sourceId: input.claim.sourceId,
+        sourceClaimId: input.claim.id,
+        sourceGeneration: input.claim.generation,
+        sourceDigest: input.claim.digest,
+        supersedesFactId: input.supersedesFactId,
+        effectiveAt: input.effectiveAt,
+        classification,
+        reportingRevenueMinor,
+        evidence: { ...evidence, evidenceDigest },
+      });
+      if (classification === 'unknown')
+        await this.upsertCase(
+          tx,
+          input.claim,
+          'tax_classification_unknown',
+          `classification:${input.claim.sourceType}:${input.claim.sourceId}`,
+          input.effectiveAt,
+          null,
+          { factId },
+        );
+      else if (requiresReportingFx && evidence.fx === null)
+        await this.upsertCase(
+          tx,
+          input.claim,
+          'tax_fx_missing',
+          `fx:${input.claim.sourceType}:${input.claim.sourceId}`,
+          input.effectiveAt,
+          null,
+          { factId },
+        );
+      return { factId, classification, reportingRevenueMinor };
+    };
+    return transaction === undefined ? this.databaseService.database.transaction(persist) : persist(transaction);
+  }
+
   // eslint-disable-next-line max-params-no-constructor/max-params-no-constructor -- case identity, source fence, amount, and evidence remain explicit at this private boundary
   private async upsertCase(
     tx: Parameters<Parameters<DatabaseService['database']['transaction']>[0]>[0],
@@ -800,7 +814,7 @@ export class BillingTaxService {
         dedupeKey,
         sourceType: claim.sourceType,
         sourceId: claim.sourceId,
-        currency: knownAmountMinor === null ? null : 'eur',
+        currency: kind === 'tax_registration_review' || knownAmountMinor !== null ? 'eur' : null,
         knownAmountMinor,
         evidence: { triggers: [evidence] },
         owner: 'finance',
@@ -823,7 +837,8 @@ export class BillingTaxService {
           firstEffectiveAt: sql`least(${billingFinancialCase.firstEffectiveAt}, excluded.first_effective_at)`,
           deadlineAt: sql`least(coalesce(${billingFinancialCase.deadlineAt}, excluded.deadline_at), excluded.deadline_at)`,
           lastSeenAt: now,
-          knownAmountMinor,
+          // Currency is immutable case identity; a later trigger with no amount must not erase the crossing total.
+          knownAmountMinor: sql`coalesce(excluded.known_amount_minor, ${billingFinancialCase.knownAmountMinor})`,
           evidence: sql`case
             when coalesce(${billingFinancialCase.evidence}->'triggers', '[]'::jsonb)
               @> (excluded.evidence->'triggers')
@@ -858,6 +873,7 @@ export async function projectPaidTaxEvidence(input: {
   if (source === undefined) return undefined;
   if (input.invoice && input.paidEvidence.invoiceId !== input.invoice.id)
     throw new Error('tax_invoice_identity_mismatch');
+  if (paidTaxSourceIncompleteness(input) !== undefined) return undefined;
   const invoiceTaxIds = input.invoice?.customer_tax_ids ?? [];
   const checkoutDetails = input.checkout?.customer_details as
     | { address?: { country?: string | null } | null; tax_ids?: Array<{ type?: string; value?: string }> | null }
@@ -920,6 +936,44 @@ export async function projectPaidTaxEvidence(input: {
       canonicalSourceId: input.invoice?.id ?? input.checkout?.id ?? input.paidEvidence.paymentIntentIds[0]!,
     },
   });
+}
+
+/**
+ * Names why a paid snapshot is not yet complete tax evidence; `undefined` only when Stripe Tax completed and the
+ * source itself retains the exact tax amount the paid proof carries. A zero result is a taxed-at-zero fact, never
+ * an exemption, so only an unsupported status or missing/contradicting lineage becomes a gap.
+ */
+export function paidTaxSourceIncompleteness(input: {
+  readonly paidEvidence: PaidPaymentEvidence;
+  readonly checkout?: Stripe.Checkout.Session;
+  readonly invoice?: Stripe.Invoice;
+}): string | undefined {
+  const source = input.invoice ?? input.checkout;
+  if (source === undefined) return 'missing_immutable_paid_snapshot';
+  if (input.invoice === undefined && input.checkout?.status !== 'complete')
+    return `checkout_status:${input.checkout?.status ?? 'absent'}`;
+  const automaticTaxStatus = (source.automatic_tax as { status?: string | null } | undefined)?.status ?? null;
+  if (automaticTaxStatus !== 'complete') return `automatic_tax_status:${automaticTaxStatus ?? 'absent'}`;
+  const retainedTaxMinor =
+    input.invoice === undefined ? checkoutTaxMinor(input.checkout) : invoiceTaxMinor(input.invoice);
+  if (retainedTaxMinor === undefined) return 'missing_retained_tax_amount';
+  return retainedTaxMinor === BigInt(input.paidEvidence.taxMinor) ? undefined : 'retained_tax_amount_mismatch';
+}
+
+function invoiceTaxMinor(invoice: Stripe.Invoice): bigint | undefined {
+  const totals = invoice.total_taxes;
+  if (!Array.isArray(totals)) return undefined;
+  let retained = 0n;
+  for (const total of totals) {
+    if (!Number.isSafeInteger(total.amount) || total.amount < 0) return undefined;
+    retained += BigInt(total.amount);
+  }
+  return retained;
+}
+
+function checkoutTaxMinor(session: Stripe.Checkout.Session | undefined): bigint | undefined {
+  const amount = session?.total_details?.amount_tax;
+  return amount !== undefined && Number.isSafeInteger(amount) && amount >= 0 ? BigInt(amount) : undefined;
 }
 
 export function earliestRollingCrossing(

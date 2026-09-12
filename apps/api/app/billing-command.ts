@@ -11,9 +11,11 @@ import { drizzle } from 'drizzle-orm/postgres-js';
 import { financialEnvironmentSchema } from '@taucad/billing';
 import { BillingPolicyService } from '#api/billing/billing-policy.service.js';
 import { CreditLedgerService } from '#api/billing/credit-ledger.service.js';
+import { BillingJournalReconciliationService } from '#api/billing/billing-journal-reconciliation.service.js';
 import { registerBillableModelMeterContracts } from '#api/billing/billable-model-qualification.js';
 import { runBillingPolicyCommand } from '#api/billing/billing-policy.command.js';
 import { installBillingProtections } from '#database/billing-protections.js';
+import { runMigrationJob } from '#database/database-migration.js';
 import * as schema from '#database/schema.js';
 import { MetricsService } from '#telemetry/metrics.js';
 
@@ -34,7 +36,31 @@ async function main(): Promise<void> {
   if (args[0] !== 'protect' && (environmentIndex === -1 || args[environmentIndex + 1] !== environment)) {
     throw new Error('Command environment must match the protected deployment environment');
   }
-  const client = postgres(databaseUrl, { max: 1, prepare: false });
+  /* The de-privileged role is a startup parameter, not a one-off `SET ROLE`: postgres.js opens a
+   * fresh session on every reconnect and a fresh session starts as the login role, so the long-running
+   * worker would otherwise finish its life outside `tau_billing_runtime` after the first outage.
+   * `protect` and `migrate` keep the login role on purpose (they own DDL). */
+  const runtimeRoles: Record<string, string> = {
+    lifecycle: 'tau_billing_runtime',
+    'recover-payments': 'tau_billing_runtime',
+    'recover-llm': 'tau_billing_runtime',
+    'recover-llm-worker': 'tau_billing_runtime',
+    'reconcile-journal': 'tau_billing_runtime',
+  };
+  const command = args[0] ?? '';
+  const role =
+    command === 'protect' || command === 'migrate'
+      ? undefined
+      : (runtimeRoles[command] ?? 'tau_billing_policy_publisher');
+  const client = postgres(databaseUrl, {
+    max: 1,
+    prepare: false,
+    // Bounded reconnect: the worker loop owns retry pacing, the driver must not park it for up to 20 s + 30 s.
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- postgres.js option name
+    connect_timeout: 10,
+    backoff: () => 1,
+    ...(role === undefined ? {} : { connection: { role } }),
+  });
   try {
     switch (args[0]) {
       case 'lifecycle': {
@@ -58,7 +84,6 @@ async function main(): Promise<void> {
         ) {
           throw new Error('Protected mutation key requires a complete development loopback fixture');
         }
-        await client`SET ROLE tau_billing_runtime`;
         const result = await runBillingLifecycleCommand({
           database: { database: drizzle(client, { schema }) },
           sourceStripe,
@@ -86,6 +111,15 @@ async function main(): Promise<void> {
         console.log('Billing database protections installed');
         break;
       }
+      case 'migrate': {
+        if (args.length !== 3 || args[1] !== '--environment') {
+          throw new Error('Usage: migrate --environment ENVIRONMENT');
+        }
+        // Protected one-shot DDL identity on its own `max: 1` connection; API replicas never migrate.
+        const migration = await runMigrationJob(databaseUrl);
+        console.log(JSON.stringify(migration));
+        break;
+      }
       case 'recover-payments': {
         if (
           args.length !== 5 ||
@@ -106,7 +140,6 @@ async function main(): Promise<void> {
           secretKey,
           fixtureUrl: process.env['BILLING_STRIPE_FIXTURE_URL'],
         });
-        await client`SET ROLE tau_billing_runtime`;
         const database = { database: drizzle(client, { schema }) };
         const policy = new BillingPolicyService(database);
         const ledger = new CreditLedgerService(database, policy);
@@ -155,7 +188,6 @@ async function main(): Promise<void> {
         if (limit > 100) {
           throw new Error('Recovery limit must not exceed 100');
         }
-        await client`SET ROLE tau_billing_runtime`;
         const database = { database: drizzle(client, { schema }) };
         const ledger = new CreditLedgerService(database, new BillingPolicyService(database));
         const result = await ledger.recoverDueLlmOperations({
@@ -165,6 +197,38 @@ async function main(): Promise<void> {
         console.log(JSON.stringify(result));
         if (result.failedOperationIds.length > 0) {
           process.exitCode = 1;
+        }
+        break;
+      }
+      case 'reconcile-journal': {
+        if (args.length !== 3 || args[1] !== '--environment') {
+          throw new Error('Usage: reconcile-journal --environment ENVIRONMENT');
+        }
+        const stripeAccountId = process.env.STRIPE_ACCOUNT_ID;
+        const livemode = String(process.env.STRIPE_LIVEMODE);
+        if (!stripeAccountId || (livemode !== 'true' && livemode !== 'false')) {
+          throw new Error('Financial case scope requires the Stripe account and an explicit mode');
+        }
+        // No provider client: the sweep reads and writes only the local financial authority.
+        const { sdk } = await import('#telemetry/otel.js');
+        const reconciliation = new BillingJournalReconciliationService(
+          { database: drizzle(client, { schema }) },
+          new MetricsService(),
+          {
+            environment: financialEnvironmentSchema.parse(environment),
+            stripeAccountId,
+            livemode: livemode === 'true',
+          },
+        );
+        try {
+          // One bounded incremental batch and one bounded sweep batch; the scheduler repeats it.
+          const report = await reconciliation.runSweep({ batchLimit: 200 });
+          console.log(JSON.stringify({ event: 'billing.journal_reconciliation', environment, ...report }));
+          if (report.driftedAccounts > 0) {
+            process.exitCode = 1;
+          }
+        } finally {
+          await sdk.shutdown();
         }
         break;
       }
@@ -186,7 +250,6 @@ async function main(): Promise<void> {
         const limit = Number(args[4]);
         const pollMilliseconds = Number(args[6]);
         const billingEnvironment = financialEnvironmentSchema.parse(environment);
-        await client`SET ROLE tau_billing_runtime`;
         const database = { database: drizzle(client, { schema }) };
         const ledger = new CreditLedgerService(database, new BillingPolicyService(database));
         const { sdk } = await import('#telemetry/otel.js');
@@ -311,7 +374,6 @@ async function main(): Promise<void> {
         break;
       }
       default: {
-        await client`SET ROLE tau_billing_policy_publisher`;
         const service = new BillingPolicyService({ database: drizzle(client, { schema }) });
         const result = await runBillingPolicyCommand(service, args);
         const [published] = await client`

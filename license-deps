@@ -23,7 +23,7 @@ Distributions that exclude `@taucad/openscad` carry no GPL obligation.
 
 By using Tau, you agree to comply with the license terms of all included dependencies.
 
-*Generated on 2026-08-26*
+*Generated on 2026-09-13*
 
 ## Summary
 
@@ -43,9 +43,9 @@ By using Tau, you agree to comply with the license terms of all included depende
 | MPL-2.0 | 1 |
 | SEE LICENSE IN LICENSE | 1 |
 | SIL OPEN FONT LICENSE | 1 |
-| UNKNOWN | 5 |
+| UNKNOWN | 4 |
 | Unlicense | 2 |
-| MIT | 251 |
+| MIT | 252 |
 
 ## (MIT OR GPL-3.0-or-later)
 
@@ -179,7 +179,6 @@ By using Tau, you agree to comply with the license terms of all included depende
 - **@better-auth-ui/core** v1.6.15 — [Repository](https://github.com/better-auth-ui/better-auth-ui)
 - **@better-auth-ui/react** v1.6.15 — [Repository](https://github.com/better-auth-ui/better-auth-ui)
 - **@taucad/chat** v0.1.0
-- **@taucad/kcl-wasm-lib** v0.1.148 — [Repository](https://github.com/taucad/modeling-app)
 - **@taucad/oxlint** v0.1.0
 
 ## Unlicense
@@ -271,6 +270,7 @@ By using Tau, you agree to comply with the license terms of all included depende
 - **@tanstack/react-virtual** v3.13.26 — [Repository](https://github.com/TanStack/virtual)
 - **@taucad/filesystem** v0.1.0-beta.0 — [Repository](https://github.com/taucad/tau)
 - **@taucad/json-schema** v0.1.0-beta.0 — [Repository](https://github.com/taucad/tau)
+- **@taucad/kcl-wasm-lib** v0.1.184 — [Repository](https://github.com/taucad/modeling-app)
 - **@taucad/replicad** v0.23.3-beta.1 — [Repository](https://github.com/taucad/replicad)
 - **@taucad/replicad-opencascadejs** v0.23.0-beta.0 — [Repository](https://github.com/taucad/replicad)
 - **@taucad/runtime** v0.1.0-beta.1 — [Repository](https://github.com/taucad/tau)

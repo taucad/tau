@@ -25,15 +25,14 @@ import { createNodeAgentLauncher } from '@taucad/agent-host/node-launcher';
 import type { NodeAgentLauncher } from '@taucad/agent-host/node-launcher';
 import type { AgentChannelAdmissionConfig, AgentLogEvent, ProviderMessage, ToolRegistry } from '@taucad/agent-host';
 
-import { mainRevisionBranch, TurnRevisionRecorder, turnRevisionBranch } from '@taucad/revisions';
-import type { RevisionBranchName } from '@taucad/revisions';
+import { createIsomorphicGitRevisionPort } from '@taucad/revisions';
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
 
 import { acpCapabilityRenewalMargin, createAcpExternalAgentPort } from '#acp/run.js';
 import { openAcpSession, readSessionTextFile, writeSessionTextFile } from '#acp/session.js';
 import type { AcpPromptTurn } from '#acp/session.js';
-import { sweepTurnWorkspaces, withTurnRevisions } from '#revisions.js';
-import type { TurnCheckout, TurnRevisionOutcome } from '#revisions.js';
+import { createProjectRevisions } from '#revisions.js';
+import type { TurnCheckout, TurnFinalizedEvent } from '#revisions.js';
 import { spawnAcpAdapter } from '#acp/spawn.js';
 import type { AcpWireFrame } from '#acp/spawn.js';
 import { sampleTcpPeers } from '#acp/tcp-peers.js';
@@ -125,7 +124,7 @@ type Harness = {
   /** Every ACP frame both ways, so the *protocol* is the assertion (V2). */
   readonly frames: AcpWireFrame[];
   /** Every settlement the recorder reported, in order; empty without `revisions`. */
-  readonly settlements: TurnRevisionOutcome[];
+  readonly settlements: TurnFinalizedEvent[];
 };
 
 /** How many times the client sent one ACP method. */
@@ -163,10 +162,10 @@ const startHarness = async (
   closers.push(async () => server.close());
 
   const frames: AcpWireFrame[] = [];
-  /* The daemon's own composition: one map, written by the recorder when it
-   * prepares the turn and read by the port when it opens the session (V19). */
+  /* The daemon's own composition: one map, written when the turn is placed and
+   * read by the port when it opens the session (V19). */
   const checkouts = new Map<string, TurnCheckout>();
-  const settlements: TurnRevisionOutcome[] = [];
+  const settlements: TurnFinalizedEvent[] = [];
   const plain = createNodeAgentLauncher({
     workspaceRoot,
     gatewayBaseUrl: `http://127.0.0.1:${String(api.port)}/`,
@@ -189,11 +188,18 @@ const startHarness = async (
     }),
   });
   const launcher = options.revisions
-    ? withTurnRevisions(plain, {
+    ? createProjectRevisions({
         workspaceRoot,
         checkouts,
-        onSettled: (outcome) => settlements.push(outcome),
-      })
+        /* The test construction (W3a R7): `isomorphic-git` over the same root,
+         * so this suite needs no `git` on PATH. A daemon takes the native port. */
+        port: createIsomorphicGitRevisionPort({ filesystem: new NodeFsProvider(workspaceRoot) }),
+        events: (event) => {
+          if (event.type === 'turn.finalized') {
+            settlements.push(event);
+          }
+        },
+      }).record(plain)
     : plain;
   launcherRef.current = launcher;
   closers.push(async () => launcher.close());
@@ -211,8 +217,6 @@ const runTurn = async (
     readonly agentId?: string;
     /** Admission context this turn carries beyond the agent selection (V12). */
     readonly config?: Partial<AgentChannelAdmissionConfig>;
-    /** How the host records this turn; absent means `direct` (V19). */
-    readonly mode?: 'direct' | 'candidate';
   },
 ): Promise<void> => {
   await harness.launcher.execute({
@@ -221,7 +225,6 @@ const runTurn = async (
     chatId: input.chatId,
     runId: input.runId,
     message: { id: input.messageId ?? `user-${input.runId}`, role: 'user', content: input.text },
-    ...(input.mode === undefined ? {} : { mode: input.mode }),
     config: {
       agent: { kind: 'acp', id: input.agentId ?? 'codex' },
       systemPrompt: '',
@@ -1593,22 +1596,19 @@ describe('external turns through the revision port', () => {
   };
 
   /**
-   * The revision this turn recorded, read back through a second recorder.
+   * The revision this turn recorded, read back through a second port.
    *
-   * A fresh recorder over the same root is what the next process sees, which is
-   * the only reading that proves the turn is durable rather than in memory.
+   * A fresh port over the same root is what the next process sees, which is the
+   * only reading that proves the turn is durable rather than in memory.
    *
    * @param workspaceRoot - The host's own root.
-   * @param chatId - The chat whose lane holds the turn's branch.
-   * @param branch - Where the turn recorded: its lane by default, and the trunk
-   *   for a direct turn, which records onto the branch the live tree tracks
-   *   (operator decisions 2026-09-09, question 11).
+   * @param branch - The branch the turn recorded onto; the trunk by default,
+   *   because placement is non-branching (D7/I18).
    * @returns The finalized revision, or `undefined` when none was recorded.
    */
   const recordedRevision = async (
     workspaceRoot: string,
-    chatId: string,
-    branch: RevisionBranchName = turnRevisionBranch(chatId),
+    branch = 'main',
   ): Promise<
     | {
         readonly id: string;
@@ -1618,203 +1618,98 @@ describe('external turns through the revision port', () => {
       }
     | undefined
   > => {
-    const reopened = new TurnRevisionRecorder({ filesystem: new NodeFsProvider(workspaceRoot) });
-    await reopened.revisions.ready;
-    const head = reopened.revisions.getBranchHead(branch);
-    const revision = head === undefined ? undefined : reopened.revisions.getRevision(head);
-    if (!revision) {
+    const port = createIsomorphicGitRevisionPort({ filesystem: new NodeFsProvider(workspaceRoot) });
+    const head = await port.readRef(branch);
+    const revision = head === undefined ? undefined : await port.readRevision(head);
+    const tree = head === undefined ? undefined : await port.readTree(head);
+    if (revision === undefined || tree === undefined) {
       return undefined;
     }
     const decoder = new TextDecoder();
     return {
       id: revision.id,
       parents: revision.parents,
-      tree: new Map(revision.tree.entries().map(({ path, content }) => [path, decoder.decode(content)])),
+      tree: new Map(tree.entries().map(({ path, content }) => [path, decoder.decode(content)])),
       provenance: revision.provenance,
     };
   };
 
-  it('records one finalized revision for a direct-mode external turn', async () => {
+  it('records one finalized revision for an external turn on the live checkout', async () => {
     const harness = await startHarness({ revisions: true });
 
     await runTurn(harness, { chatId: 'chat-rev-direct', runId: 'run-rev-direct', text: 'noask direct turn' });
     await until(async () => harness.settlements.length > 0, 'the turn to settle its revision');
 
-    /* Direct mode: the agent worked in the project itself, so the write is in
-     * the live tree and the revision is a record of it, not a copy of it. */
+    /* Non-branching placement (D7/I18): the agent worked in the project itself,
+     * so the write is in the live tree and the revision is a record of it, not
+     * a copy of it. */
     expect(openedCwd(harness.frames)).toBe(harness.workspaceRoot);
     expect(await readFile(join(harness.workspaceRoot, 'hello.txt'), 'utf8')).toBe('noask direct turn');
     expect(harness.settlements[0]).toMatchObject({
+      type: 'turn.finalized',
       chatId: 'chat-rev-direct',
       runId: 'run-rev-direct',
-      status: 'recorded',
+      branch: 'main',
       changedPaths: ['hello.txt'],
+      trigger: 'turn',
+      runIds: ['run-rev-direct'],
     });
 
-    const revision = await recordedRevision(harness.workspaceRoot, 'chat-rev-direct', mainRevisionBranch);
+    const revision = await recordedRevision(harness.workspaceRoot);
     expect(revision?.tree.get('hello.txt')).toBe('noask direct turn');
     expect(revision?.provenance).toMatchObject({ source: 'agent', runId: 'run-rev-direct' });
 
-    /* V19: no per-run copy, in either namespace — the pre-V2 hand copy and the
-     * authority's own turn workspace are both gone once the turn is recorded.
-     * There is also no second store: revisions live only in the recorder's
-     * content-addressed objects, never in a `workspaces/revisions` copy. */
-    await expect(readdir(join(harness.workspaceRoot, '.tau', 'workspaces'))).resolves.toEqual([]);
-  }, 60_000);
-
-  it('runs two candidate turns of one chat in one stable checkout, on one session', async () => {
-    const harness = await startHarness({ revisions: true });
-    /* Per chat, not per run (R-W4a §6.1): the checkout's absolute path is the
-     * vendor session's `cwd`, and a session whose `cwd` moved is closed and
-     * reopened. One path per chat is what makes `session/new` a once. */
-    const checkout = join(harness.workspaceRoot, '.tau', 'workspaces', 'tchat-rev-cand', 'tree');
-
-    await runTurn(harness, {
-      chatId: 'chat-rev-cand',
-      runId: 'run-rev-candidate',
-      text: 'noask candidate turn',
-      mode: 'candidate',
-    });
-    await until(async () => harness.settlements.length > 0, 'the turn to settle its revision');
-
-    /* The isolation claim, proved where it is decided: the agent was rooted in
-     * the checkout, so every path it wrote resolved inside that tree and the
-     * project root could not be touched during the turn. (Observing the root
-     * mid-write instead would be a race against the fixture's own speed.) */
-    expect(openedCwd(harness.frames)).toBe(checkout);
-
-    expect(harness.settlements[0]).toMatchObject({
-      chatId: 'chat-rev-cand',
-      runId: 'run-rev-candidate',
-      status: 'recorded',
-      changedPaths: ['hello.txt'],
-    });
-    const first = await recordedRevision(harness.workspaceRoot, 'chat-rev-cand');
-    expect(first?.tree.get('hello.txt')).toBe('noask candidate turn');
-    expect(first?.provenance).toMatchObject({ source: 'agent', runId: 'run-rev-candidate' });
-
-    /* Finalization merges the candidate back into the live tree, and the
-     * checkout is given back: nothing under `.tau/workspaces` survives it. */
-    expect(await readFile(join(harness.workspaceRoot, 'hello.txt'), 'utf8')).toBe('noask candidate turn');
-    await expect(readdir(join(harness.workspaceRoot, '.tau', 'workspaces'))).resolves.toEqual([]);
-
-    await runTurn(harness, {
-      chatId: 'chat-rev-cand',
-      runId: 'run-rev-candidate-2',
-      text: 'noask second candidate turn',
-      mode: 'candidate',
-    });
-    await until(async () => harness.settlements.length > 1, 'the second turn to settle its revision');
-
-    /* The whole point of a stable checkout: the second turn resumes the vendor
-     * session the first one opened, and its revision is a second revision on
-     * the chat's one branch rather than a second lineage. */
-    expect(sent(harness.frames, 'session/new')).toBe(1);
-    expect(openedCwd(harness.frames)).toBe(checkout);
-    const second = await recordedRevision(harness.workspaceRoot, 'chat-rev-cand');
-    expect(second?.tree.get('hello.txt')).toBe('noask second candidate turn');
-    expect(second?.id).not.toBe(first?.id);
-    expect(second?.parents).toEqual([first?.id]);
-    await expect(readdir(join(harness.workspaceRoot, '.tau', 'workspaces'))).resolves.toEqual([]);
-  }, 60_000);
-
-  /* 3-review S1's fence, still the host's own: `hostRevisionModes` now carries
-     both wire modes, so the only start this can refuse is one no schema minted
-     — a hand-written channel command, which is exactly the caller the guard
-     exists for. The advertisement is enforced where it is honoured, not only at
-     the client. */
-  it('refuses a mode it does not advertise, before it prepares anything', async () => {
-    const harness = await startHarness({ revisions: true });
-
-    await expect(
-      harness.launcher.execute({
-        type: 'start',
-        trigger: 'submit',
-        chatId: 'chat-rev-refused',
-        runId: 'run-rev-refused',
-        mode: 'archive' as 'candidate',
-        message: { id: 'user-run-rev-refused', role: 'user', content: 'noask' },
-        config: { agent: { kind: 'acp', id: 'codex' }, systemPrompt: '', toolChoice: 'auto' },
-      }),
-    ).rejects.toMatchObject({ code: 'REVISION_MODE_UNSUPPORTED' });
-
-    /* Refused before `prepare`: no workspace, no anchor, no turn to settle. */
+    /* The turn's lease is retired with it, and no directory is left behind:
+     * `.tau/runs` is the only place a turn ever wrote outside the tree (S7). */
+    await expect(readdir(join(harness.workspaceRoot, '.tau', 'runs'))).resolves.toEqual([]);
     await expect(readdir(join(harness.workspaceRoot, '.tau', 'workspaces'))).rejects.toMatchObject({
       code: 'ENOENT',
     });
-    expect(harness.settlements).toEqual([]);
   }, 60_000);
 
-  it('sweeps orphaned turn workspaces once at start and preserves a live owner', async () => {
-    const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-acp-sweep-'));
-    roots.push(workspaceRoot);
-    const workspaces = join(workspaceRoot, '.tau', 'workspaces');
-    /* One pre-V2 hand copy, one recorder workspace, one revision store and one
-     * directory a live run still owns. */
-    await mkdir(join(workspaces, 'orphan-run', 'tree'), { recursive: true });
-    await mkdir(join(workspaces, 'tstale-run'), { recursive: true });
-    await mkdir(join(workspaces, 'revisions', 'nodes'), { recursive: true });
-    await mkdir(join(workspaces, 'tlive-run', 'tree'), { recursive: true });
-    await writeFile(join(workspaces, 'orphan-run', 'tree', 'main.scad'), 'cube(1);\n', 'utf8');
-    /* And one this host knows nothing about: the browser authority sharing this
-     * disk root claims its live workspaces by record, not by name (4-review B3).
-     * The unreadable record beside it must protect nothing and break nothing. */
-    await mkdir(join(workspaces, 'tclaimed-run', 'tree'), { recursive: true });
-    await mkdir(join(workspaces, 'claims'), { recursive: true });
-    await writeFile(
-      join(workspaces, 'claims', 'chat-7.json'),
-      JSON.stringify({
-        version: 1,
-        chatId: 'chat-7',
-        projectId: 'project-1',
-        workspaceId: 'tclaimed-run',
-        baseRevisionId: 'rev-1',
-        admitted: true,
-        cancelled: false,
-      }),
-      'utf8',
-    );
-    await writeFile(join(workspaces, 'claims', 'broken.json'), '{ not json', 'utf8');
-    /* And a conflicted settlement: its claim is gone, its bytes are the
-     * evidence the operator resolves from (I-CONF), and only the conflict
-     * record beside them says so (6-review M6). */
-    await mkdir(join(workspaces, 'tconflicted', 'tree'), { recursive: true });
-    await mkdir(join(workspaces, 'conflicts'), { recursive: true });
-    await writeFile(join(workspaces, 'conflicts', 'tconflicted.json'), '{}', 'utf8');
-    /* A record for a workspace already gone and one undecodable name: neither
-     * may error the sweep or drop the protection above (7-review S1/N6). */
-    await writeFile(join(workspaces, 'conflicts', 'tgone.json'), '{}', 'utf8');
-    await writeFile(join(workspaces, 'conflicts', '%.json'), '{}', 'utf8');
+  it('runs two turns of one chat on one session, each revision parented on the last', async () => {
+    const harness = await startHarness({ revisions: true });
 
-    const sweep = await sweepTurnWorkspaces({ workspaceRoot, liveChatIds: ['live-run'] });
-
-    expect(sweep).toEqual({ removed: 2, preserved: 6 });
-    const remaining = await readdir(workspaces);
-    expect(remaining.toSorted()).toEqual([
-      'claims',
-      'conflicts',
-      'revisions',
-      'tclaimed-run',
-      'tconflicted',
-      'tlive-run',
-    ]);
-
-    /* Once: a second pass finds nothing left to remove and still keeps all three. */
-    await expect(sweepTurnWorkspaces({ workspaceRoot, liveChatIds: ['live-run'] })).resolves.toEqual({
-      removed: 0,
-      preserved: 6,
+    await runTurn(harness, {
+      chatId: 'chat-rev-second',
+      runId: 'run-rev-second-1',
+      text: 'noask first turn',
     });
-  });
+    await until(async () => harness.settlements.length > 0, 'the first turn to settle its revision');
+    const first = await recordedRevision(harness.workspaceRoot);
+    expect(first?.tree.get('hello.txt')).toBe('noask first turn');
+
+    await runTurn(harness, {
+      chatId: 'chat-rev-second',
+      runId: 'run-rev-second-2',
+      text: 'noask second turn',
+    });
+    await until(async () => harness.settlements.length > 1, 'the second turn to settle its revision');
+
+    /* One checkout, so one `cwd` and one vendor session for both turns, and the
+     * second revision is the next step on the trunk rather than a lineage of
+     * its own. */
+    expect(sent(harness.frames, 'session/new')).toBe(1);
+    expect(openedCwd(harness.frames)).toBe(harness.workspaceRoot);
+    const second = await recordedRevision(harness.workspaceRoot);
+    expect(second?.tree.get('hello.txt')).toBe('noask second turn');
+    expect(second?.id).not.toBe(first?.id);
+    expect(second?.parents).toEqual([first?.id]);
+    expect(harness.settlements[1]).toMatchObject({
+      revisionId: second?.id,
+      changedPaths: ['hello.txt'],
+    });
+  }, 60_000);
 
   it('refuses an agent write under Tau’s own control metadata and still serves the read', async () => {
     const cwd = await mkdtemp(join(tmpdir(), 'tau-acp-mask-'));
     roots.push(cwd);
     await mkdir(join(cwd, '.tau', 'chats', 'chat-1'), { recursive: true });
-    await mkdir(join(cwd, '.tau', 'workspaces'), { recursive: true });
+    await mkdir(join(cwd, '.tau', 'revisions'), { recursive: true });
     await writeFile(join(cwd, '.tau', 'chats', 'chat-1', 'events.jsonl'), '{"type":"run.lifecycle"}\n', 'utf8');
-    await writeFile(join(cwd, '.tau', 'workspaces', 'note.txt'), 'store\n', 'utf8');
+    await writeFile(join(cwd, '.tau', 'revisions', 'note.txt'), 'store\n', 'utf8');
 
-    for (const path of ['.tau/chats/chat-1/events.jsonl', '.tau/workspaces/note.txt', '.tau/chats']) {
+    for (const path of ['.tau/chats/chat-1/events.jsonl', '.tau/revisions/note.txt', '.tau/chats']) {
       // oxlint-disable-next-line no-await-in-loop -- one refusal at a time is the assertion.
       await expect(writeSessionTextFile(cwd, { path, content: 'forged' })).rejects.toMatchObject({
         code: 'WORKSPACE_MASKED_PATH',
@@ -1832,11 +1727,15 @@ describe('external turns through the revision port', () => {
     );
     /* The revision control plane is invisible, not merely read-only: a read is
      * refused exactly as a write is (path registry `hidden`, north star S18). */
-    await expect(readSessionTextFile(cwd, { path: '.tau/workspaces/note.txt' })).rejects.toMatchObject({
+    await expect(readSessionTextFile(cwd, { path: '.tau/revisions/note.txt' })).rejects.toMatchObject({
       code: 'WORKSPACE_MASKED_PATH',
     });
-    // A path that only *starts* like a masked one is ordinary authored content.
-    await expect(writeSessionTextFile(cwd, { path: '.tau/chats-notes.md', content: 'mine' })).resolves.toBeUndefined();
+    /* Inside `.tau` a path that only *starts* like a masked one is still Tau's
+     * (P13); the authored controls are the rows that stay the agent's. */
+    await expect(writeSessionTextFile(cwd, { path: '.tau/chats-notes.md', content: 'mine' })).rejects.toMatchObject({
+      code: 'WORKSPACE_MASKED_PATH',
+    });
+    await expect(writeSessionTextFile(cwd, { path: '.tau/AGENTS.md', content: 'mine' })).resolves.toBeUndefined();
   });
 
   it('serves the line window an agent asked for and creates the parent a write implies', async () => {

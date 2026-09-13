@@ -133,12 +133,6 @@ export type AgentServerOptions = {
    * client reads them off the `ready` frame.
    */
   readonly externalAgents?: readonly ExternalAgentDescriptor[] | undefined;
-  /**
-   * Revision modes this host records a turn in (V17 / VSC5); published on
-   * {@link hostDescriptorPath}. A same-origin page reads its placement's modes
-   * from here, exactly as a paired client reads them off the `ready` frame.
-   */
-  readonly revisions?: ReadonlyArray<'direct' | 'candidate'> | undefined;
   /** Bounded host-authority controls; absent when this host has no durable store. */
   readonly computeControl?: ComputeStoreControl;
 };
@@ -265,7 +259,6 @@ export const startAgentServer = (options: AgentServerOptions): AgentServerHandle
       label: options.label ?? hostname(),
       workspaceRoot: options.workspaceRoot,
       ...(options.externalAgents?.length ? { externalAgents: [...options.externalAgents] } : {}),
-      ...(options.revisions?.length ? { revisions: [...options.revisions] } : {}),
     });
     response.writeHead(200, {
       ...isolationHeaders,

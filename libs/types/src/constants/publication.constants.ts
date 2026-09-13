@@ -25,6 +25,8 @@ export const publicationApiCode = {
   INVALID_VIEW_COOKIE: 'INVALID_VIEW_COOKIE',
   /** The caller's billing tier does not include the requested capability (e.g. private publications are Pro-gated) */
   ENTITLEMENT_REQUIRED: 'ENTITLEMENT_REQUIRED',
+  /** The named version points at a different revision than the publish claimed */
+  REVISION_MOVED: 'REVISION_MOVED',
 } as const;
 /* eslint-enable @typescript-eslint/naming-convention -- CONSTANT_CASE publicationApiCode ends here */
 
@@ -42,10 +44,6 @@ export const publicationMaxUserFiles = 200;
 /** Canonical root files that do not count against the user-file limit. */
 /** @public */
 export const publicationSystemArtifactPaths = ['tau.json', 'thumbnail.webp'] as const;
-
-/** Multipart transport ceiling including both canonical system artifacts. */
-/** @public */
-export const publicationMaxMultipartFiles = publicationMaxUserFiles + publicationSystemArtifactPaths.length;
 
 /** Return whether a normalized publication path is a canonical system artifact. */
 /** @public */
@@ -100,14 +98,3 @@ export function isPublishableTauPath(normalizedPath: string): boolean {
 
   return normalizedPath.length > publishableTauSubdirectory.length;
 }
-
-/**
- * Client-side publish collection failures aligned with {@link publicationApiCode} upload validation.
- *
- * @public
- */
-export type PublicationCollectFailureCode =
-  | typeof publicationApiCode.MISSING_ENTRY_PATH
-  | typeof publicationApiCode.TOO_MANY_FILES
-  | typeof publicationApiCode.FILE_TOO_LARGE
-  | typeof publicationApiCode.PAYLOAD_TOO_LARGE;

@@ -39,6 +39,12 @@ export const projectManifestSchema = z
         main: projectAssetSchema,
       })
       .strict(),
+    /* Absent means on. A project that should stay files-only carries
+     * `"syncChats": false` and no `refs/tau/chats/*` is ever written for it, so
+     * nothing exists for a push to offer (D25, A30, W17). It lives here rather
+     * than in a host store because it is a property of the project: a clone
+     * inherits the decision instead of quietly re-enabling it. */
+    syncChats: z.boolean().optional(),
   })
   .strict();
 
@@ -167,6 +173,7 @@ export const projectToManifest = (project: Omit<ProjectManifest, '$schema'> | Pr
       ...(project.assets.main.thumbnail === undefined ? {} : { thumbnail: project.assets.main.thumbnail }),
     },
   },
+  ...(project.syncChats === undefined ? {} : { syncChats: project.syncChats }),
 });
 
 /** Validate and deterministically encode a project manifest. @public */

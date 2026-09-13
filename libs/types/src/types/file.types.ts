@@ -117,7 +117,14 @@ export type FileProvenance = Readonly<{
   source: FileProvenanceSource;
   /** Whether the bytes enter a revision. */
   versioned: boolean;
-  access: 'read-write' | 'read-only';
+  /**
+   * What the **agent** may do with the bytes, from the path registry.
+   *
+   * Deliberately not the user's access: the host UI edits records the agent
+   * may only read. A user surface gates refusal on `source !== 'project'` and
+   * dims on `versioned === false`.
+   */
+  agentAccess: 'read-write' | 'read-only';
   /** Stable identity of the serving source: a checkout id, or an overlay unit such as `skill:<slug>@<version>#<fingerprint>`. */
   identity?: string;
   /** Identity of the overlay unit a project entry replaces wholesale. */

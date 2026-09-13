@@ -141,7 +141,7 @@ export type AcpExternalAgentPortOptions = {
   /**
    * Where the host prepared each admitted turn to run (V19).
    *
-   * The same map `withTurnRevisions` writes: direct mode publishes the
+   * The same map the project's revision tree writes: a live-checkout turn publishes the
    * workspace root, candidate mode the revision checkout the authority
    * materialized for this run. Absent — or missing this run — falls back to
    * {@link AcpExternalAgentPortOptions.workspaceRoot}, which is the direct-mode

@@ -38,8 +38,26 @@ export type { AgentServerHandle, AgentServerOptions } from '#agent-server.js';
 export { startRunReporter } from '#run-reporter.js';
 export type { RunReporter, RunReporterOptions } from '#run-reporter.js';
 export type { HostRunState } from '#host.schemas.js';
-export { hostRevisionModes, hostTurnCaptureExclusions, sweepTurnWorkspaces, withTurnRevisions } from '#revisions.js';
-export type { TurnCheckout, TurnRevisionOptions, TurnRevisionOutcome, TurnWorkspaceSweep } from '#revisions.js';
+export { hostRevisionActor } from '#revision-actor.js';
+export {
+  createProjectRevisionPort,
+  createProjectRevisions,
+  openProjectRevisions,
+  requireRevisionToolchain,
+} from '#revisions.js';
+export type {
+  HostRevisionEvent,
+  ProjectRevisionVerbs,
+  ProjectRevisions,
+  ProjectRevisionsOptions,
+  RevisionDiscardOutcome,
+  RevisionPublishOutcome,
+  RevisionSwitchOutcome,
+  TurnCheckout,
+  TurnConflictedEvent,
+  TurnFailedEvent,
+  TurnFinalizedEvent,
+} from '#revisions.js';
 export { isolationHeaders, serveStaticUi } from '#static-ui.js';
 export type { StaticUiHandler, StaticUiOptions } from '#static-ui.js';
 export { createHostToolRegistry } from '#agent-tools.js';

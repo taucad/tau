@@ -105,14 +105,14 @@ describe('startAgentServer', () => {
       expect(response.headers.get('set-cookie')).toBeNull();
     });
 
-    it('publishes the revision modes this host records a turn in (V17)', async () => {
-      /* The composer offers the revision selector from the placement's modes and
-         nothing else, so a descriptor that omitted them would silently take the
-         choice away from a same-origin page. */
-      server = startAgentServer({ launcher: stubLauncher(), token, workspaceRoot, revisions: ['direct'] });
+    it('publishes no revision modes, because a turn no longer names one', async () => {
+      /* The descriptor carried a `revisions` array while a turn could choose a
+         mode. Placement is the host's own decision now (D7/I18), so the field
+         is gone from the wire rather than published empty. */
+      server = startAgentServer({ launcher: stubLauncher(), token, workspaceRoot });
       await server.ready;
       const response = await fetch(new URL('/.well-known/tau-host', server.url()));
-      await expect(response.json()).resolves.toMatchObject({ revisions: ['direct'] });
+      await expect(response.json()).resolves.not.toHaveProperty('revisions');
     });
 
     it('publishes the canonical agent descriptor, refusals included (VSC1)', async () => {

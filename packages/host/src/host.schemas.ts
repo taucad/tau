@@ -61,12 +61,6 @@ export type HostCapabilities = {
      * runs only.
      */
     readonly externalAgents?: readonly ExternalAgentDescriptor[];
-    /**
-     * Revision modes this host records a turn in (N26 / V17). Absent means the
-     * host has no revision port, and a turn that names a mode is refused rather
-     * than run unrecorded.
-     */
-    readonly revisions?: ReadonlyArray<'direct' | 'candidate'>;
   };
 };
 

@@ -1,4 +1,7 @@
+import { readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { z } from 'zod';
 import {
   parseAdoptableProjectManifestBytes,
   parseProjectManifestBytes,
@@ -19,10 +22,33 @@ const manifest: ProjectManifest = projectToManifest({
 
 const encode = (value: unknown): Uint8Array<ArrayBuffer> => new TextEncoder().encode(JSON.stringify(value));
 
+/** The file `projectManifestSchemaUrl` is served from, relative to this test. */
+const publishedSchemaPath = '../../../../apps/ui/public/schemas/tau-schema-v1.json';
+
+const publishedSchemaShape = z.object({ properties: z.record(z.string(), z.record(z.string(), z.unknown())) });
+
 describe('project manifest schema', () => {
   it('round-trips the strict v1 contract', () => {
     const parsed = parseProjectManifestBytes(serializeProjectManifest(manifest));
     expect(parsed).toEqual({ success: true, data: manifest });
+  });
+
+  /* The toggle W17 put in the manifest, both halves: the strict Zod schema
+   * accepts it, and the published JSON Schema every `tau.json` declares knows
+   * it too — a project that authors the only field that turns chat sync off
+   * must not be invalid against its own `$schema` (Manifest Policy Rule 4,
+   * a1 review R5). */
+  it('carries the optional syncChats toggle, in the Zod and published schemas alike', async () => {
+    const off = { ...manifest, syncChats: false };
+    expect(parseProjectManifestBytes(serializeProjectManifest(off))).toEqual({ success: true, data: off });
+    expect(projectToManifest(off).syncChats).toBe(false);
+    // Absent means on: nothing is written for a project that never set it.
+    expect('syncChats' in projectToManifest(manifest)).toBe(false);
+
+    const text = await readFile(fileURLToPath(new URL(publishedSchemaPath, import.meta.url)), 'utf8');
+    const parsed: unknown = JSON.parse(text);
+    const published = publishedSchemaShape.parse(parsed);
+    expect(published.properties['syncChats']?.['type']).toBe('boolean');
   });
 
   it('rejects unknown top-level and nested properties', () => {
@@ -76,10 +102,10 @@ describe('project manifest schema', () => {
   });
 
   it('serializes only explicit manifest fields', () => {
-    const localView = { ...manifest, deletedAt: 1, revisionState: { dirty: true } };
+    const localView = { ...manifest, deletedAt: 1, localOnlyField: { dirty: true } };
     expect(new TextDecoder().decode(serializeProjectManifest(projectToManifest(localView)))).not.toContain('deletedAt');
     expect(new TextDecoder().decode(serializeProjectManifest(projectToManifest(localView)))).not.toContain(
-      'revisionState',
+      'localOnlyField',
     );
   });
 

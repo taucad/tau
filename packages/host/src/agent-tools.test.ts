@@ -191,7 +191,14 @@ describe('createHostToolRegistry', () => {
     expect(read.isError).toBe(false);
     expect(JSON.stringify(read.content)).toContain('seq');
 
-    const authored = await invoke(registry, 'create_file', { targetFile: '.tau/chats-notes.md', content: 'ok\n' });
+    /* Inside `.tau` an unlisted path is Tau's, not the agent's (P13): a near
+     * miss is refused rather than treated as authored content. */
+    const nearMiss = await invoke(registry, 'create_file', { targetFile: '.tau/chats-notes.md', content: 'ok\n' });
+    expect(nearMiss.isError).toBe(true);
+
+    /* The authored `.tau` controls keep their own rows, so the agent still
+     * writes the file it is asked to keep. */
+    const authored = await invoke(registry, 'create_file', { targetFile: '.tau/AGENTS.md', content: 'ok\n' });
     expect(authored.isError).toBe(false);
   });
 

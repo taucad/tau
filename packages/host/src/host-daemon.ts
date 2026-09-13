@@ -28,7 +28,8 @@ import type { HostCredential } from '#credential-store.js';
 import { spliceFrameSockets } from '#frame-splice.js';
 import type { FrameSpliceCloseResult, FrameSpliceHandle } from '#frame-splice.js';
 import type { HostJobWorkerFactory, HostJobWorkerHandle } from '#job-worker.js';
-import { hostRevisionModes, sweepTurnWorkspaces, withTurnRevisions } from '#revisions.js';
+import { hostRevisionActor } from '#revision-actor.js';
+import { createProjectRevisions } from '#revisions.js';
 import type { TurnCheckout } from '#revisions.js';
 import { startRuntimeChild } from '#runtime-child-supervisor.js';
 import type { RuntimeChildHandle } from '#runtime-child-supervisor.js';
@@ -101,6 +102,7 @@ export type HostDaemonEvent =
         /* The turn ran and is durable in its own log; only its revision is
          * missing (V17). Retriable in the sense that the next turn records. */
         | 'REVISION_NOT_RECORDED'
+        | 'REVISION_UNAVAILABLE'
         /* Housekeeping, reported because it deletes: turn workspaces a previous
          * host left behind were removed at start (V19, SR4). */
         | 'TURN_WORKSPACES_SWEPT';
@@ -505,8 +507,8 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
       /**
        * Give back the checkout's runtime client with the checkout.
        *
-       * The map *is* the checkout lifecycle — `withTurnRevisions` sets an entry
-       * at admission and deletes it at release — and `agentRuntimes` is keyed by
+       * The map *is* the checkout lifecycle — the revision tree sets an entry
+       * at placement and deletes it at settlement — and `agentRuntimes` is keyed by
        * root, so nothing else would ever evict a candidate turn's client: it
        * would hold a live socket to the child over a tree that no longer exists,
        * one per turn, for the life of the daemon (5-review S4). The desktop
@@ -533,9 +535,46 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
         return super.delete(runId);
       }
     })();
+    /* Before the tool registry, because the registry hands the agent this
+     * project's read-only history (S28) — and before the launcher, because the
+     * tree wraps it. */
+    const revisions = createProjectRevisions({
+      workspaceRoot: agent.workspaceRoot,
+      checkouts,
+      /* AC15: the person this machine belongs to, as Git already knows them —
+       * a daemon serves one machine, and `tau-host` in a clone's `git log` is
+       * an opaque id nobody outside Tau can read. */
+      actor: hostRevisionActor(),
+      /* A turn that ran but could not be recorded is a warning, never a fatal:
+       * the run itself is already durable in its own log, and a host that
+       * stopped answering over a settlement failure would lose the next turn
+       * too. W5 puts `turn.finalized` on the wire for the client. */
+      events: (event) => {
+        if (event.type === 'turn.finalized') {
+          return;
+        }
+        if (event.type === 'revision.unavailable') {
+          /* A fact about the machine, not about one turn: this host will record
+           * nothing at all until the named binaries are installed (OQ-B8). */
+          emit({ type: 'warning', code: 'REVISION_UNAVAILABLE', message: event.reason });
+          return;
+        }
+        emit({
+          type: 'warning',
+          code: 'REVISION_NOT_RECORDED',
+          message:
+            event.type === 'turn.conflicted'
+              ? `Chat ${event.chatId} run ${event.runId}: the turn's writes conflicted with the live workspace.`
+              : event.type === 'turn.failed'
+                ? `Chat ${event.chatId} run ${event.runId}: the turn recorded no revision — ${event.reason}`
+                : `The ${event.operation} of a checkout failed: ${event.reason}`,
+        });
+      },
+    });
     const toolRegistry = createHostToolRegistry({
       workspaceRoot: agent.workspaceRoot,
       checkouts,
+      revisions: revisions.history,
       ...(options.systemSkillBundles === undefined ? {} : { systemSkillBundles: options.systemSkillBundles }),
       /* Per root, not per host: a candidate turn's kernel must read the tree
        * that turn is writing, which is its checkout and not the project. */
@@ -556,21 +595,11 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
       discovery.agents.length > 0
         ? createHostMcpEndpoint({ secret: randomBytes(32).toString('base64url'), registry: toolRegistry })
         : undefined;
-    /* Once, before the first turn: a daemon that died mid-turn — or that ran
-     * before V2 deleted the per-run tree copy — left workspaces nothing reads
-     * again. No live owner exists yet at this point, which is what makes start
-     * the safe moment (SR4). */
-    const sweep = await sweepTurnWorkspaces({ workspaceRoot: agent.workspaceRoot });
-    if (sweep.removed > 0) {
-      emit({
-        type: 'warning',
-        code: 'TURN_WORKSPACES_SWEPT',
-        message: `Removed ${String(sweep.removed)} orphaned turn workspace(s) under ${agent.workspaceRoot}.`,
-      });
-    }
-    /* V17 / I-EDIT: the host records the turn, so the recorder wraps the
-     * launcher rather than sitting beside it — the base tree has to be captured
-     * before the launcher admits anything. */
+    /* V17 / I-EDIT: the host records the turn, so the revision tree wraps the
+     * launcher rather than sitting beside it — the turn has to be placed and
+     * leased before the launcher admits anything. Leases a dead daemon left
+     * behind are retired by the registry's own open sweep (F13); nothing
+     * sweeps a directory any more, because a turn no longer has one. */
     const base = createNodeAgentLauncher({
       workspaceRoot: agent.workspaceRoot,
       gatewayBaseUrl: agent.gatewayBaseUrl,
@@ -600,27 +629,7 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
           }
         : {}),
     });
-    const launcher = withTurnRevisions(base, {
-      workspaceRoot: agent.workspaceRoot,
-      checkouts,
-      /* A turn that ran but could not be recorded is a warning, never a
-       * fatal: the run itself is already durable in its own log, and a host
-       * that stopped answering over a settlement failure would lose the next
-       * turn too. */
-      onSettled: ({ chatId, runId, status, error }) => {
-        if (status === 'recorded') {
-          return;
-        }
-        emit({
-          type: 'warning',
-          code: 'REVISION_NOT_RECORDED',
-          message:
-            status === 'conflicted'
-              ? `Chat ${chatId} run ${runId}: the turn's writes conflicted with the live workspace.`
-              : `Chat ${chatId} run ${runId}: ${error instanceof Error ? error.message : JSON.stringify(error)}`,
-        });
-      },
-    });
+    const launcher = revisions.record(base);
     const externalAgents = externalAgentDescriptors(discovery);
     const server = startAgentServer({
       launcher,
@@ -632,7 +641,6 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
       ...(agent.allowedOrigins ? { allowedOrigins: agent.allowedOrigins } : {}),
       ...(mcp ? { mcp } : {}),
       ...(externalAgents.length > 0 ? { externalAgents } : {}),
-      revisions: hostRevisionModes,
       ...(agent.computeControl ? { computeControl: agent.computeControl } : {}),
     });
     try {
@@ -1014,10 +1022,6 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
         ? {
             workspaceRoot: options.agent.workspaceRoot,
             ...(agentExternalAgents.length > 0 ? { externalAgents: agentExternalAgents } : {}),
-            /* V17 / VSC5: what this host can record a turn in. The composer
-             * offers the selector from this and nothing else, so a daemon that
-             * omitted it would silently lose the choice. */
-            revisions: hostRevisionModes,
           }
         : undefined;
     sendControl({

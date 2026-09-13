@@ -53,6 +53,8 @@ import type { RuntimeClient } from '@taucad/runtime/client';
 
 import type { ToolRegistry } from '@taucad/agent-host';
 
+import type { ProjectRevisions } from '#revisions.js';
+
 /** Runtime surface accepted by the host's GeoSpec model loader. @public */
 export type HostGeoSpecRuntimeClient = GeoSpecRuntimeClient;
 
@@ -209,7 +211,7 @@ export type HostToolRegistryOptions = {
    */
   readonly geospecRunner?: ((workspaceRoot: string) => Promise<GeoSpecRunner>) | false | undefined;
   /**
-   * Where each admitted run works, by run id — the map {@link withTurnRevisions}
+   * Where each admitted run works, by run id — the map `createProjectRevisions`
    * publishes (V19).
    *
    * One registry serves every concurrent run, and a candidate turn works in its
@@ -222,6 +224,14 @@ export type HostToolRegistryOptions = {
   readonly checkouts?: ReadonlyMap<string, { readonly cwd: string }> | undefined;
   /** Package-owned skills supplied by the embedding application. */
   readonly systemSkillBundles?: readonly HostSystemSkillBundle[] | undefined;
+  /**
+   * The read-only revision history the `revisions` tool answers from (S28).
+   *
+   * `createProjectRevisions(...).history` on a disk host. Omit it and the tool
+   * is not offered rather than offered-and-failing — the same rule every other
+   * client here follows.
+   */
+  readonly revisions?: ProjectRevisions['history'] | undefined;
 };
 
 /**
@@ -386,6 +396,7 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
       fileSystemFor: (signal) => createProviderRpcFileSystem({ provider: view, mutations, signal }),
       ...(runtimeClient === undefined ? {} : { kernelClient, graphics, images }),
       ...(geospec === undefined ? {} : { geospec }),
+      ...(options.revisions === undefined ? {} : { revisions: options.revisions }),
       skillResolver,
       testingEnabled: geospec !== undefined,
     });

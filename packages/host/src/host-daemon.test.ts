@@ -12,7 +12,6 @@ import { WebSocket, WebSocketServer } from 'ws';
 import { startHostDaemon } from '#host-daemon.js';
 import type { HostDaemonEvent } from '#host-daemon.js';
 import { writeHostCredential } from '#credential-store.js';
-import { hostRevisionModes } from '#revisions.js';
 import * as revisions from '#revisions.js';
 import * as agentTools from '#agent-tools.js';
 import type { HostJobWorkerFactory } from '#job-worker.js';
@@ -20,9 +19,9 @@ import type { HostJobWorkerFactory } from '#job-worker.js';
 /* Observe the tool-surface decision the daemon forwards, without changing it. */
 const registrySpy = vi.spyOn(agentTools, 'createHostToolRegistry');
 /* Captured before the spy replaces it: a case that counts subscriptions still
- * has to build the real recorder around the real launcher. */
-const realWithTurnRevisions = revisions.withTurnRevisions;
-const revisionsSpy = vi.spyOn(revisions, 'withTurnRevisions');
+ * has to build the real revision tree around the real launcher. */
+const realCreateProjectRevisions = revisions.createProjectRevisions;
+const revisionsSpy = vi.spyOn(revisions, 'createProjectRevisions');
 
 let temporaryDirectory: string | undefined;
 const originalWorkingDirectory = process.cwd();
@@ -302,13 +301,14 @@ describe('startHostDaemon', () => {
     });
     const controlSocket = await control.promise;
     const [readyFrame] = (await once(controlSocket, 'message')) as [Uint8Array<ArrayBuffer>];
-    expect(JSON.parse(Buffer.from(readyFrame).toString())).toMatchObject({
+    const ready = Buffer.from(readyFrame).toString();
+    expect(JSON.parse(ready)).toMatchObject({
       type: 'ready',
-      /* V17 / VSC5: a paired client reads its placement's revision modes off
-         this frame, so the capability has to ride the same relay the workspace
-         root does. */
-      capabilities: { agent: { workspaceRoot: agent.workspaceRoot, revisions: [...hostRevisionModes] } },
+      capabilities: { agent: { workspaceRoot: agent.workspaceRoot } },
     });
+    /* Placement is not a mode any more (S11): the client learns where its chat
+       works from the checkout registry, never from a capability array. */
+    expect(ready).not.toContain('"revisions"');
 
     await daemon.close();
   }, 20_000);
@@ -336,11 +336,11 @@ describe('startHostDaemon', () => {
     if (!registryOptions?.checkouts || !runtimeClient) {
       throw new TypeError('Expected the daemon to build its tool registry over a checkout map.');
     }
-    /* The registry only reads the map; `withTurnRevisions` is what writes it,
-       and this case stands in for it. */
+    /* The registry only reads the map; the revision tree's placement is what
+       writes it, and this case stands in for it. */
     // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the daemon's own map, taken from the call it made.
     const checkouts = registryOptions.checkouts as Map<string, { cwd: string; mode: string }>;
-    const checkout = join(temporaryDirectory, 'workspace', '.tau', 'workspaces', 'trun-1', 'tree');
+    const checkout = join(temporaryDirectory, 'checkouts', 'workspace', 'checkout-1');
     await mkdir(checkout, { recursive: true });
     checkouts.set('run-1', { cwd: checkout, mode: 'candidate' });
     const first = await runtimeClient(checkout);
@@ -372,30 +372,38 @@ describe('startHostDaemon', () => {
     process.chdir(fileURLToPath(new URL('../../..', import.meta.url)));
     const relay = await startRelay();
     const subscriptions = { launcher: 0, recorded: 0 };
-    revisionsSpy.mockImplementationOnce((launcher, options) => {
-      const events = launcher.events.bind(launcher);
-      /* Patched in place, not wrapped: the daemon holds this very object, and
-       * counting subscriptions on a copy would not see the ones it makes. */
-      Object.assign(launcher, {
-        events: (signal: AbortSignal) => {
-          subscriptions.launcher += 1;
-          return events(signal);
-        },
-      });
-      const recorded = realWithTurnRevisions(launcher, options);
+    revisionsSpy.mockImplementationOnce((options) => {
+      const tree = realCreateProjectRevisions(options);
       return {
-        ...recorded,
-        events: (signal: AbortSignal) => {
-          subscriptions.recorded += 1;
-          return recorded.events(signal);
+        ...tree,
+        record: (launcher) => {
+          const events = launcher.events.bind(launcher);
+          /* Patched in place, not wrapped: the daemon holds this very object,
+           * and counting subscriptions on a copy would not see the ones it
+           * makes. */
+          Object.assign(launcher, {
+            events: (signal: AbortSignal) => {
+              subscriptions.launcher += 1;
+              return events(signal);
+            },
+          });
+          const recorded = tree.record(launcher);
+          return {
+            ...recorded,
+            events: (signal: AbortSignal) => {
+              subscriptions.recorded += 1;
+              return recorded.events(signal);
+            },
+          };
         },
       };
     });
 
     const daemon = await startPairedAgentDaemon(temporaryDirectory, relay, []);
     await daemon.ready;
-    /* Two on the launcher — the recorder's own settlement watch and the run
-     * reporter — and none on the recorder, which no client is listening to yet. */
+    /* Two on the launcher — the revision tree's own terminal-marker watch and
+     * the run reporter — and none on the wrapper, which no client is listening
+     * to yet. */
     expect(subscriptions).toEqual({ launcher: 2, recorded: 0 });
 
     await daemon.close();

@@ -326,6 +326,7 @@ const runWarmup = async (
 };
 
 const runCell = async (row: BrowserRow): Promise<CellResult> => {
+  const { registryVersion } = jsonRecord(JSON.parse(row.ingest.requestUtf8) as unknown, 'ingest request');
   const cell: CellResult = { cohort: row.cohort, id: row.id, passed: false };
   let engine: Engine | undefined;
   let handle: unknown;
@@ -359,7 +360,7 @@ const runCell = async (row: BrowserRow): Promise<CellResult> => {
             canonicalProfile: 'geospec-jcs-v1',
             method: 'subjectHandle',
             protocolVersion: 3,
-            registryVersion: 4,
+            registryVersion,
             requestId: `handle:${row.id}`,
             subjectHash: row.subjectHash,
           }),
@@ -469,7 +470,7 @@ const runCell = async (row: BrowserRow): Promise<CellResult> => {
                 canonicalProfile: 'geospec-jcs-v1',
                 method: 'releaseSubject',
                 protocolVersion: 3,
-                registryVersion: 4,
+                registryVersion,
                 requestId: `release:${row.id}`,
                 subjectHandle: handle,
               }),

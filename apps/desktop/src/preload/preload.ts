@@ -74,7 +74,6 @@ contextBridge.exposeInMainWorld('tau', {
   nodeFs: { homeRoot: bootstrap.homeRoot },
   runtimeKernelIds: bootstrap.runtimeKernelIds,
   externalAgents: bootstrap.externalAgents,
-  revisions: bootstrap.revisions,
   compute: {
     inspect: async (projectRoot: string) =>
       (await ipcRenderer.invoke(computeControlChannels.inspect, projectRoot)) as unknown,

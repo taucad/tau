@@ -111,7 +111,6 @@ vi.mock('@taucad/runtime/electron/main', () => ({
 vi.mock('@taucad/host', () => ({
   discoverAcpAgents: vi.fn(async () => ({ agents: [], refused: [] })),
   externalAgentDescriptors: vi.fn(() => []),
-  hostRevisionModes: [],
 }));
 vi.mock('#tau/kernel-host?modulePath', () => ({ default: '/kernel-host.js' }));
 vi.mock('#tau/services-host?modulePath', () => ({ default: '/services-host.js' }));
@@ -165,7 +164,7 @@ vi.mock('#main/services-broker.js', () => ({
     connect: vi.fn(),
     dispose: state.servicesDispose,
     computeProjectRoot: (root: string) =>
-      root.includes('/.tau/workspaces/') ? root.slice(0, root.indexOf('/.tau/workspaces/')) : undefined,
+      root.includes('/.tau/checkouts/') ? root.slice(0, root.indexOf('/.tau/checkouts/')) : undefined,
   })),
 }));
 vi.mock('#main/utility-environment.js', () => ({
@@ -242,7 +241,7 @@ describe('desktop main compute owner', () => {
 
     const direct = state.resolveFork!({ projectRoot: `${projectRoot}/.`, computeMode: 'durable' });
     const candidate = state.resolveFork!({
-      projectRoot: join(projectRoot, '.tau/workspaces/run/tree'),
+      projectRoot: join(projectRoot, '.tau/checkouts/run'),
       computeMode: 'durable',
     });
     expect((candidate.compute as { store: unknown }).store).toBe((direct.compute as { store: unknown }).store);

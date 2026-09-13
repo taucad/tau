@@ -34,8 +34,8 @@ import type { NodeAgentLauncher } from '@taucad/agent-host/node-launcher';
 import {
   createAcpExternalAgentPort,
   createHostMcpEndpoint,
-  sweepTurnWorkspaces,
-  withTurnRevisions,
+  createProjectRevisions,
+  hostRevisionActor,
 } from '@taucad/host';
 import type { AcpAdapter, HostMcpEndpoint, TurnCheckout } from '@taucad/host';
 import { createHostGeoSpecRunner, createHostToolRegistry } from '@taucad/host/agent-tools';
@@ -105,6 +105,30 @@ export type ServicesHostOptions = {
    * tree while its file tools write the checkout (V19).
    */
   readonly runtimeContext?: (action: 'register' | 'release', checkoutRoot: string, projectRoot: string) => void;
+  /**
+   * The `git` and `git-lfs` this app records with (OQ-B8).
+   *
+   * Absent, both come from `PATH` — which on a Finder launch is
+   * `/usr/bin:/bin:/usr/sbin:/sbin` and holds no Homebrew `git-lfs`. Main
+   * passes the binaries the bundle ships once it ships them.
+   */
+  readonly gitExecutable?: string | undefined;
+  readonly gitLfsExecutable?: string | undefined;
+  /**
+   * Answer main's `quiesce` control frame once every project is settled (W19).
+   *
+   * Quit used to kill this utility outright: `services-broker.dispose()` calls
+   * `utility.kill()` and `ServicesHost.dispose()` is synchronous
+   * fire-and-forget, so a launcher's `close()` — which is what records the
+   * close revision and waits for `awaitSyncSettled` — never ran to completion.
+   * Main now asks first and waits, bounded, for this reply.
+   */
+  readonly quiesced?: () => void;
+  /** Tell main this project can record nothing, so a person is told (W5). */
+  readonly onRevisionsUnavailable?: (
+    workspaceRoot: string,
+    event: Readonly<{ reason: string; missing: readonly string[] }>,
+  ) => void;
 };
 
 /** The services host, seen by its entry and by tests. */
@@ -115,6 +139,15 @@ export type ServicesHost = {
   isTrustedRoot(root: string): boolean;
   /** Main's agent configuration, once it has sent the frame. */
   agentHostConfig(): AgentHostConfig | undefined;
+  /**
+   * Settle every project this utility serves, then resolve (W19, D31).
+   *
+   * Each launcher wraps its project's revision actor tree (`revisions.record`),
+   * so closing it takes the `close` cut and then awaits W13's `awaitSyncSettled`
+   * through `ProjectRevisions.release()`. This never reimplements that wait; it
+   * is the one place that lets it finish before the process goes.
+   */
+  quiesce(): Promise<void>;
   /** Release project runtimes when the owning utility exits. */
   dispose(): void;
 };
@@ -132,7 +165,8 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
       // oxlint-disable-next-line no-console -- forwarded to userData/logs through main's stdio
       console.log(`[services] ${event}${detail === undefined ? '' : ` ${JSON.stringify(detail)}`}`);
     });
-  const { requestRuntimePort, runtimeContext } = options;
+  const { gitExecutable, gitLfsExecutable, onRevisionsUnavailable, quiesced, requestRuntimePort, runtimeContext } =
+    options;
   const serve = options.serve ?? serveNodeFsProvider;
 
   const trustedRoots = new Set<string>();
@@ -245,6 +279,20 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
         log('credential-updated', { present: authToken !== undefined });
         return;
       }
+      case 'quiesce': {
+        /* One round trip: main asks, every launcher closes (cut, then W13's
+         * `awaitSyncSettled`), and only then does main let the process die.
+         * Main owns the bound; this end never cuts its own wait short. */
+        // async-iife: bootstrap -- a control frame has no caller to return to.
+        void quiesce().then(
+          () => quiesced?.(),
+          (error: unknown) => {
+            log('quiesce-failed', error instanceof Error ? error.message : String(error));
+            quiesced?.();
+          },
+        );
+        return;
+      }
       case 'agentHost': {
         agentHostConfig = frame['config'] as AgentHostConfig;
         /* Bound here rather than at the first connection: the URL is only known
@@ -347,12 +395,12 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
         throw error;
       }
     };
-    /* Written by the recorder, read by the Tau tool registry and the external
-     * port: candidate mode roots both the agent's session and Tau's own file
-     * tools in the checkout this turn was prepared in (V19).
+    /* Written when a turn is placed, read by the Tau tool registry and the
+     * external port: both root the turn's agent in the checkout the placement
+     * resolved (V19).
      *
-     * The map *is* the checkout lifecycle — `withTurnRevisions` sets an entry at
-     * admission and deletes it at release — so main's runtime-context
+     * The map *is* the checkout lifecycle — the revision tree sets an entry at
+     * placement and deletes it at settlement — so main's runtime-context
      * registration hangs off it rather than off a second bookkeeping seam. */
     const checkouts = new (class extends Map<string, TurnCheckout> {
       public override set(runId: string, checkout: TurnCheckout): this {
@@ -375,82 +423,97 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
         return super.delete(runId);
       }
     })();
-    const toolRegistry = createHostToolRegistry({
-      workspaceRoot,
-      checkouts,
-      systemSkillBundles,
-      /* Rooted per run, exactly as the daemon does it: a candidate turn's kernel
-       * and GeoSpec tools read the checkout its file tools write, because the
-       * checkout was registered with main as a runtime context above. */
-      runtimeClient: async (root) => runtimeClient(root),
-      geospecRunner: async (root) => {
-        const client = await runtimeClient(root);
-        /* GeoSpec's deliberately wide export-format carrier accepts every
-         * plugin format, while this concrete desktop recipe exposes the
-         * actual narrower set. Its loader requests only formats supported
-         * by that recipe; bridge the generic variance at this boundary. */
-        return createHostGeoSpecRunner(root, client as unknown as HostGeoSpecRuntimeClient);
-      },
-    });
     const existing = launchers.get(workspaceRoot);
-    if (!existing) {
-      /* Once per root, when its launcher is first built: workspaces a previous
-       * window — or a pre-V2 external run — left behind are removed, and a root
-       * already serving keeps whatever its live turns hold (SR4, V19).
-       *
-       * async-iife: bootstrap -- this connection must be served synchronously,
-       * and the sweep's orphan list is a `readdir` issued before this root has a
-       * launcher at all, so no workspace a live turn owns can be in it. */
-      void (async (): Promise<void> => {
-        const sweep = await sweepTurnWorkspaces({ workspaceRoot });
-        if (sweep.removed > 0) {
-          log('agent-host.turn-workspaces-swept', { workspaceRoot, removed: sweep.removed });
-        }
-      })();
-    }
+    /* Only when this window is actually creating a launcher: a reconnect to a
+     * project this host already serves must not start a second revision tree
+     * over the same directory. */
     const launcher =
       existing ??
-      /* V17 / I-EDIT: launcher 2 records the turn the same way launcher 1 does —
-       * the daemon's own wrapper, over this root's own `.tau/workspaces`. */
-      withTurnRevisions(
-        createNodeAgentLauncher({
-          workspaceRoot,
-          gatewayBaseUrl: agentHostConfig.gatewayBaseUrl,
-          systemPrompt: agentHostConfig.systemPrompt,
-          toolRegistry,
-          /* Resolved per request, never captured: main refreshes the bearer and a
-           * captured string would pin this host to a stale one. */
-          auth: () => authToken,
-          /* The adapters main resolved, wired through the daemon's own port —
-           * same factory, same branch confinement, same refusal for an agent this
-           * machine cannot start, and the same `tau` MCP server over this
-           * utility's own loopback endpoint (V7). Mounted here, in the branch
-           * that actually creates a launcher, so a second window on the same
-           * project reuses the endpoint its first one mounted. */
-          ...(agentHostConfig.externalAgents?.length
-            ? {
-                externalAgents: createAcpExternalAgentPort({
-                  agents: agentHostConfig.externalAgents,
-                  workspaceRoot,
-                  checkouts,
-                  mcp: mountMcp(toolRegistry),
-                }),
-              }
-            : {}),
-        }),
-        {
+      (() => {
+        /* Before the tool registry, because the registry hands the agent this
+         * project's read-only history (S28), and before the launcher it wraps.
+         * V17 / I-EDIT: launcher 2 records the turn the same way launcher 1 does —
+         * the same revision actor tree over this root. Leases a previous window
+         * left behind are retired by the registry's own open sweep (F13). */
+        const revisions = createProjectRevisions({
           workspaceRoot,
           checkouts,
-          onSettled: ({ chatId, runId, status }) => {
+          ...(gitExecutable === undefined ? {} : { gitExecutable }),
+          ...(gitLfsExecutable === undefined ? {} : { gitLfsExecutable }),
+          /* AC15: who this window records for. The desktop's own signed-in
+           * session is W13's to pass here; until it does, the identity the
+           * person already keeps on this machine is the truthful answer. */
+          actor: hostRevisionActor(),
+          events: (event) => {
             /* Reported, never fatal: the run is already durable in its own log,
              * and a window that stopped serving over a settlement failure would
              * lose the next turn too. */
-            if (status !== 'recorded') {
-              log('agent-host.revision-not-recorded', { workspaceRoot, chatId, runId, status });
+            if (event.type === 'turn.finalized') {
+              return;
             }
+            if (event.type === 'revision.unavailable') {
+              /* Not one turn's failure but this machine's: without `git` and
+               * `git-lfs` the app records no history at all (OQ-B8). It is
+               * named here as its own fact — reason and missing binaries — and
+               * reaches the person's window when W5 puts host revision events
+               * on the wire, beside `turn.failed`. */
+              log('agent-host.revisions-unavailable', {
+                workspaceRoot,
+                reason: event.reason,
+                missing: event.missing,
+              });
+              onRevisionsUnavailable?.(workspaceRoot, event);
+              return;
+            }
+            log('agent-host.revision-not-recorded', { workspaceRoot, event: event.type });
           },
-        },
-      );
+        });
+        const toolRegistry = createHostToolRegistry({
+          workspaceRoot,
+          checkouts,
+          systemSkillBundles,
+          revisions: revisions.history,
+          /* Rooted per run, exactly as the daemon does it: a candidate turn's kernel
+           * and GeoSpec tools read the checkout its file tools write, because the
+           * checkout was registered with main as a runtime context above. */
+          runtimeClient: async (root) => runtimeClient(root),
+          geospecRunner: async (root) => {
+            const client = await runtimeClient(root);
+            /* GeoSpec's deliberately wide export-format carrier accepts every
+             * plugin format, while this concrete desktop recipe exposes the
+             * actual narrower set. Its loader requests only formats supported
+             * by that recipe; bridge the generic variance at this boundary. */
+            return createHostGeoSpecRunner(root, client as unknown as HostGeoSpecRuntimeClient);
+          },
+        });
+        return revisions.record(
+          createNodeAgentLauncher({
+            workspaceRoot,
+            gatewayBaseUrl: agentHostConfig.gatewayBaseUrl,
+            systemPrompt: agentHostConfig.systemPrompt,
+            toolRegistry,
+            /* Resolved per request, never captured: main refreshes the bearer and a
+             * captured string would pin this host to a stale one. */
+            auth: () => authToken,
+            /* The adapters main resolved, wired through the daemon's own port —
+             * same factory, same branch confinement, same refusal for an agent this
+             * machine cannot start, and the same `tau` MCP server over this
+             * utility's own loopback endpoint (V7). Mounted here, in the branch
+             * that actually creates a launcher, so a second window on the same
+             * project reuses the endpoint its first one mounted. */
+            ...(agentHostConfig.externalAgents?.length
+              ? {
+                  externalAgents: createAcpExternalAgentPort({
+                    agents: agentHostConfig.externalAgents,
+                    workspaceRoot,
+                    checkouts,
+                    mcp: mountMcp(toolRegistry),
+                  }),
+                }
+              : {}),
+          }),
+        );
+      })();
     launchers.set(workspaceRoot, launcher);
     /* The handle owns only this connection — disposing it would end this
      * client's streams and nothing else. It needs no explicit teardown here:
@@ -460,11 +523,37 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     log('agent-host-served', { workspaceRoot, reused: existing !== undefined });
   };
 
+  /**
+   * Close every launcher and wait for each one.
+   *
+   * `dispose()` below fires the same closes and waits for none, because it is
+   * the window going away and nothing is left to record into. Quit is the other
+   * case: the bytes on disk are the person's, and the close revision is how
+   * they survive.
+   *
+   * @returns Once every project this utility serves has settled.
+   */
+  const quiesce = async (): Promise<void> => {
+    const closing = [...launchers.values()].map(async (launcher) => launcher.close());
+    launchers.clear();
+    await Promise.allSettled(closing);
+    log('quiesced', { projects: closing.length });
+  };
+
   return {
     isTrustedRoot,
     agentHostConfig: () => agentHostConfig,
+    quiesce,
     dispose() {
       disposed = true;
+      /* The launchers first: each one owns a revision actor tree over a served
+       * root, and a disposed host must stop writing into a project it no longer
+       * serves. Fire-and-forget like the endpoints below — `dispose` is the
+       * window closing, and nothing waits on it. */
+      for (const launcher of launchers.values()) {
+        void launcher.close();
+      }
+      launchers.clear();
       for (const endpoint of mcpEndpoints.values()) {
         void endpoint.close();
       }

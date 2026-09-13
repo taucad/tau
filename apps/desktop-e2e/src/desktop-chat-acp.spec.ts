@@ -238,26 +238,32 @@ const candidateMarker = '// candidate';
 /** One chat's durable log as text, empty until the appender has created it. */
 const readLog = (logPath: string): string => (existsSync(logPath) ? readFileSync(logPath, 'utf8') : '');
 
-/** One `revision.finalized` record as the durable log carries it. */
-type FinalizedRevision = {
-  readonly revisionId: string;
-  readonly baseRevisionId: string;
-  readonly treeId: string;
-  readonly branchName: string;
+/**
+ * One `turn.finalized` record as the durable log carries it (north star S9, W5).
+ *
+ * One schema on every host: the same object the browser worker emits on its
+ * revision port is the record this Node host appends to the chat's own log.
+ */
+type FinalizedTurn = {
+  readonly turnId: string;
+  readonly runId: string;
+  readonly revisionId?: string;
+  readonly treeId?: string;
+  readonly branch?: string;
   readonly changedPaths: readonly string[];
-  readonly provenance: { readonly actorId: string; readonly source: string };
+  readonly runIds: readonly string[];
 };
 
 /**
- * Every revision one chat's durable log has finalized, in order.
+ * Every turn one chat's durable log has settled, in order.
  *
  * Parsed rather than pattern-matched because the *identity* is the evidence
  * this cell owes: the revision ids in order, and the branch each landed on.
  *
  * @param logPath - The chat's `events.jsonl`.
- * @returns The finalized revisions, oldest first.
+ * @returns The settled turns, oldest first.
  */
-const finalizedRevisions = (logPath: string): readonly FinalizedRevision[] =>
+const finalizedRevisions = (logPath: string): readonly FinalizedTurn[] =>
   (existsSync(logPath) ? readFileSync(logPath, 'utf8') : '').split('\n').flatMap((line) => {
     if (line.trim().length === 0) {
       return [];
@@ -265,7 +271,7 @@ const finalizedRevisions = (logPath: string): readonly FinalizedRevision[] =>
     try {
       const event = JSON.parse(line) as { readonly type?: string };
       // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the discriminant is checked.
-      return event.type === 'revision.finalized' ? [event as unknown as FinalizedRevision] : [];
+      return event.type === 'turn.finalized' ? [event as unknown as FinalizedTurn] : [];
     } catch {
       /* An appender flushing its last line mid-read is the next poll's problem. */
       return [];
@@ -359,7 +365,7 @@ test.skipIf(!codexAvailable)(
       expect(seededSource).toContain('difference()');
       /* A direct turn records onto the trunk the live tree tracks, and creates
        * it on a project's first turn (operator decisions 2026-09-09, Q11). */
-      expect(directRevision.branchName).toBe('main');
+      expect(directRevision.branch).toBe('main');
 
       /* 3. A second chat is the candidate's own lane, and therefore its own
        * branch. Created before anything is spent: a failure here costs no quota. */
@@ -400,9 +406,13 @@ test.skipIf(!codexAvailable)(
         .first()
         .click();
       await parkPointer(page);
-      await page.locator('[data-slot="chat-revision-selector"]').first().click();
+      /* The composer picker replaced the deleted revision-mode selector (W7): a
+         branch is made by name, and the chip then names it. */
+      await page.locator('[data-slot="chat-branch-picker"]').first().click();
       await page.getByText('New branch', { exact: true }).first().click();
-      await expectVisible(page.locator('[aria-label="Work in: New branch"]'), 30_000);
+      await page.getByLabel('Name for the new branch').fill('isolated-run');
+      await page.getByRole('button', { name: 'Create' }).first().click();
+      await expectVisible(page.locator('[aria-label="Work in isolated-run. Choose a branch."]'), 30_000);
 
       /* 4. The isolation claim, sampled rather than inferred. */
       const samples: Array<{ readonly live: string; readonly settled: boolean }> = [];
@@ -443,7 +453,7 @@ test.skipIf(!codexAvailable)(
         .poll(() => finalizedRevisions(logOf(candidateChatId)).length, { timeout: 120_000 })
         .toBeGreaterThan(0);
       const candidateRevision = finalizedRevisions(logOf(candidateChatId)).at(-1)!;
-      expect(candidateRevision.branchName).toBe(candidateBranch);
+      expect(candidateRevision.branch).toBe(candidateBranch);
       expect(candidateRevision.changedPaths).toContain('main.scad');
       const candidateSource = liveSource();
       expect(candidateSource, 'the candidate turn wrote nothing to distinguish it from the seed').not.toBe(
@@ -471,7 +481,7 @@ test.skipIf(!codexAvailable)(
       const listedText = await branchesSection(page).innerText();
       const listed = listedText.trim();
       expect(listed).toContain(candidateBranch);
-      expect(listed).toContain(directRevision.branchName);
+      expect(listed).toContain(directRevision.branch ?? 'main');
       await session.capture('rev-branches-list');
 
       /* 6. Switch to the candidate: the live folder takes the candidate's bytes,
@@ -528,12 +538,12 @@ test.skipIf(!codexAvailable)(
           directChatId,
           candidateChatId,
           revisionsInOrder: [directRevision, candidateRevision, directSecondRevision].map((revision) => ({
+            turnId: revision.turnId,
             revisionId: revision.revisionId,
-            baseRevisionId: revision.baseRevisionId,
             treeId: revision.treeId,
-            branchName: revision.branchName,
+            branch: revision.branch,
             changedPaths: revision.changedPaths,
-            actorId: revision.provenance.actorId,
+            runIds: revision.runIds,
           })),
           candidateBranch,
           mergeResult,

@@ -59,7 +59,6 @@ export type DesktopBootstrap = {
    * lifetime as {@link DesktopBootstrap.externalAgents}: a capability of the
    * host main starts, known before the window existed.
    */
-  readonly revisions: ReadonlyArray<'direct' | 'candidate'>;
 };
 
 /**
@@ -71,7 +70,7 @@ export type DesktopBootstrap = {
 export const readBootstrap = (argv: readonly string[]): DesktopBootstrap => {
   const argument = argv.find((entry) => entry.startsWith(bootstrapArgumentPrefix));
   if (!argument) {
-    return { env: {}, homeRoot: '', runtimeKernelIds: [], externalAgents: [], revisions: [] };
+    return { env: {}, homeRoot: '', runtimeKernelIds: [], externalAgents: [] };
   }
   try {
     const parsed = JSON.parse(argument.slice(bootstrapArgumentPrefix.length)) as Partial<DesktopBootstrap>;
@@ -80,11 +79,10 @@ export const readBootstrap = (argv: readonly string[]): DesktopBootstrap => {
       homeRoot: parsed.homeRoot ?? '',
       runtimeKernelIds: parsed.runtimeKernelIds ?? [],
       externalAgents: parsed.externalAgents ?? [],
-      revisions: parsed.revisions ?? [],
     };
   } catch {
     /* A malformed payload is a shell bug, not a renderer input; boot with
      * nothing so the renderer's own `Missing TAU_API_URL` names the failure. */
-    return { env: {}, homeRoot: '', runtimeKernelIds: [], externalAgents: [], revisions: [] };
+    return { env: {}, homeRoot: '', runtimeKernelIds: [], externalAgents: [] };
   }
 };

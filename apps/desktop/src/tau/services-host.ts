@@ -74,6 +74,11 @@ const host = createServicesHost({
   runtimeContext: (action, workspaceRoot, projectRoot) => {
     parentPort.postMessage({ type: `runtime-context-${action}`, workspaceRoot, projectRoot });
   },
+  /* The reply half of main's quit hold (W19): every project this utility serves
+   * has taken its close cut and settled its sync. */
+  quiesced: () => {
+    parentPort.postMessage({ type: 'quiesced' });
+  },
   ...(diagnostics === undefined
     ? {}
     : {

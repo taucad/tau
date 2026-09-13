@@ -1,4 +1,6 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MessageChannel } from 'node:worker_threads';
@@ -208,7 +210,14 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
     acpPortCalls.length = 0;
     toolRegistryCalls.length = 0;
     runtimeClientCalls.length = 0;
-    await Promise.all(workspaces.splice(0).map(async (root) => rm(root, { recursive: true, force: true })));
+    /* `dispose` closes each launcher without waiting, and a revision store that
+       is still finishing its own creation holds the directory: retry rather than
+       fail the test on the teardown of a host that is already going away. */
+    await Promise.all(
+      workspaces
+        .splice(0)
+        .map(async (root) => rm(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 })),
+    );
   });
 
   /** Hosts to dispose, so the utility's loopback listener never outlives a test. */
@@ -413,60 +422,80 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
     });
 
     /* Read off disk rather than through the launcher: the utility keeps its
-       launchers private, and the store the revision lands in is the one a later
-       process — the next window, or R-W4's candidate porcelain — reopens. */
-    const store = join(workspaceRoot, '.tau', 'workspaces', 'revisions');
-    const branch = join(store, 'branches', 'agent%2Fchat-revision.json');
-    const headParents = async (): Promise<readonly string[] | undefined> => {
+       launchers private, and the store the revision lands in is the project's
+       own — the one the next window reopens. No branch is created for the chat
+       (S11): the turn attaches to the live checkout and records on `main`. */
+    const head = async (): Promise<string | undefined> => {
       try {
-        const { head } = JSON.parse(await readFile(branch, 'utf8')) as { head: string };
-        const node = JSON.parse(
-          await readFile(join(store, 'nodes', encodeURIComponent(head), 'metadata.json'), 'utf8'),
-        ) as { parents: readonly string[] };
-        return node.parents;
+        const reference = await readFile(join(workspaceRoot, '.git', 'refs', 'heads', 'main'), 'utf8');
+        return reference.trim();
       } catch {
         return undefined;
       }
     };
-    /* The branch opens at the base (no parent) and moves to the turn revision
-       under a CAS at settlement, so the head worth waiting for is the one that
-       descends from that base. */
-    await expect.poll(headParents, { timeout: 10_000 }).toHaveLength(1);
+    await expect.poll(head, { timeout: 10_000 }).toMatch(/^[\da-f]{40}$/u);
+    /* The turn held a lease while it ran and the settlement retired it, so the
+       next window's open sweep finds nothing of this run. */
+    const leases = async (): Promise<readonly string[]> => {
+      try {
+        return await readdir(join(workspaceRoot, '.tau', 'runs'));
+      } catch {
+        return [];
+      }
+    };
+    await expect.poll(leases, { timeout: 10_000 }).toEqual([]);
+    await expect(readdir(join(workspaceRoot, '.tau', 'workspaces'))).rejects.toThrow();
   }, 20_000);
 
-  it('registers a candidate turn checkout with main as a runtime context, and releases it at settlement', async () => {
-    const runtimeContext = vi.fn();
-    const { host, workspaceRoot } = await configuredHost({}, { runtimeContext });
-    const client = connect(host, workspaceRoot);
+  /* Review a1 R1: the desktop performs the early named refusal too. A packaged app
+   * launched from Finder has `/usr/bin:/bin:/usr/sbin:/sbin` on PATH, and
+   * Homebrew's `git-lfs` is not on it. */
+  it('names the binaries it is missing, and records with the ones main gives it', async () => {
+    const unavailable: Array<{ readonly reason: string; readonly missing: readonly string[] }> = [];
+    const previousPath = process.env['PATH'] ?? '';
+    process.env['PATH'] = '';
+    try {
+      const { host, workspaceRoot } = await configuredHost(
+        {},
+        {
+          onRevisionsUnavailable: (_root, event) => {
+            unavailable.push(event);
+          },
+        },
+      );
+      connect(host, workspaceRoot);
+      await expect.poll(() => unavailable.length, { timeout: 10_000 }).toBe(1);
+      expect(unavailable[0]?.missing).toEqual(['git', 'git-lfs']);
+      expect(unavailable[0]?.reason).toContain('git-lfs');
+      expect(existsSync(join(workspaceRoot, '.git'))).toBe(false);
+    } finally {
+      process.env['PATH'] = previousPath;
+    }
 
-    /* The gateway is unreachable, so the turn is admitted and then fails — and
-       the checkout's whole lifetime still runs: prepared at admission, released
-       at settlement. */
-    await client.execute({
-      type: 'start',
-      trigger: 'submit',
-      chatId: 'chat-candidate',
-      runId: 'run-candidate',
-      mode: 'candidate',
-      message: { id: 'message-1', role: 'user', content: 'Model a bracket.' },
-      config: {
-        systemPrompt: 'You are Tau.',
-        toolChoice: 'auto',
-        model: { id: 'fixture-model', providerKind: 'vertexai', contextWindow: 200_000 },
-      },
-    });
-
-    const checkout = join(workspaceRoot, '.tau', 'workspaces', 'tchat-candidate', 'tree');
-    /* Main answers `requestRuntimePort` only for a registered context, so this
-       pair is what lets a candidate turn's kernel and GeoSpec tools read the
-       tree its file tools write — and stops answering when the tree is gone. */
-    await expect
-      .poll(() => runtimeContext.mock.calls, { timeout: 10_000 })
-      .toEqual([
-        ['register', checkout, workspaceRoot],
-        ['release', checkout, workspaceRoot],
-      ]);
-  }, 20_000);
+    /* Environment names, not identifiers: assigned rather than spelled as keys. */
+    const searchPath: NodeJS.ProcessEnv = {};
+    searchPath['PATH'] = previousPath;
+    const git = execFileSync('which', ['git'], { encoding: 'utf8', env: searchPath }).trim();
+    const gitLfs = execFileSync('which', ['git-lfs'], { encoding: 'utf8', env: searchPath }).trim();
+    process.env['PATH'] = '';
+    try {
+      const bundled = await configuredHost(
+        {},
+        {
+          gitExecutable: git,
+          gitLfsExecutable: gitLfs,
+          onRevisionsUnavailable: (_root, event) => {
+            unavailable.push(event);
+          },
+        },
+      );
+      connect(bundled.host, bundled.workspaceRoot);
+      await expect.poll(() => existsSync(join(bundled.workspaceRoot, '.git')), { timeout: 10_000 }).toBe(true);
+      expect(unavailable).toHaveLength(1);
+    } finally {
+      process.env['PATH'] = previousPath;
+    }
+  }, 30_000);
 
   it('leaves a direct turn to the project context main already registered', async () => {
     const runtimeContext = vi.fn();

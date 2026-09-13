@@ -28,7 +28,7 @@ import type { IpcMainInvokeEvent } from 'electron';
 import { installElectronRuntimeHeaders, registerElectronRuntimeMain } from '@taucad/runtime/electron/main';
 import { connectSqliteComputeStoreWorker } from '@taucad/runtime/node';
 import type { ComputeBinding } from '@taucad/runtime/types';
-import { discoverAcpAgents, externalAgentDescriptors, hostRevisionModes } from '@taucad/host';
+import { discoverAcpAgents, externalAgentDescriptors } from '@taucad/host';
 
 import kernelUtilityEntry from '#tau/kernel-host?modulePath';
 import servicesUtilityEntry from '#tau/services-host?modulePath';
@@ -117,6 +117,15 @@ app.on('open-file', (event, path) => {
   enqueueOpenFiles([path]);
 });
 enqueueOpenFiles(process.argv.slice(1));
+
+/**
+ * How long quit waits for every served project to settle (W19, D31).
+ *
+ * Long enough for a close cut plus W13's `closeFlushMilliseconds` sync wait on
+ * several projects, short enough that a wedged utility never holds the app
+ * open: after it the durable queue is the guarantee (D28).
+ */
+const quitQuiesceMilliseconds = 20_000;
 
 const ownsSingleInstanceLock = app.requestSingleInstanceLock();
 app.on('second-instance', (_event, argv) => {
@@ -611,7 +620,6 @@ const bootstrapElectronApp = async (): Promise<void> => {
             homeRoot,
             runtimeKernelIds: desktopNativeKernelIds,
             externalAgents: acpDescriptors,
-            revisions: hostRevisionModes,
           })}`,
         ],
       },
@@ -712,6 +720,22 @@ const bootstrapElectronApp = async (): Promise<void> => {
           }
           quickLookControllers.clear();
           auth.dispose();
+        } catch (error) {
+          log.log('error', 'main.shutdown', error);
+        }
+        /*
+         * The quit hold (D31, W19).
+         *
+         * Every project the services utility serves takes its close cut and
+         * waits for W13's `awaitSyncSettled` before this process ends. Without
+         * this round trip `services.dispose()` killed the utility outright —
+         * `ServicesHost.dispose()` is synchronous fire-and-forget — so the last
+         * edits of a quit were recorded by nothing. After the bound the durable
+         * queue is the guarantee (D28) and quit proceeds regardless.
+         */
+        try {
+          const outcome = await services.quiesce(quitQuiesceMilliseconds);
+          log.log('info', 'main.quiesce', { outcome });
         } catch (error) {
           log.log('error', 'main.shutdown', error);
         }

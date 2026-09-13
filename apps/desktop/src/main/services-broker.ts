@@ -66,6 +66,19 @@ export type ServicesBroker = {
   post(message: unknown): void;
   /** Original project identity retained for an admitted execution root. */
   computeProjectRoot(executionRoot: string): string | undefined;
+  /**
+   * Ask the utility to settle every project it serves, and wait (W19, D31).
+   *
+   * Quit used to reach `dispose()` directly, which kills the utility: the
+   * launcher closes that record the close revision and await W13's
+   * `awaitSyncSettled` never finished. This is the one round trip that lets
+   * them. Main owns the bound; a utility that does not answer inside it is
+   * killed anyway, and the durable queue is the guarantee (D28).
+   *
+   * @param boundMilliseconds - How long to wait before cutting.
+   * @returns What ended the wait.
+   */
+  quiesce(boundMilliseconds: number): Promise<'quiesced' | 'timeout' | 'no-utility'>;
   /** Terminate the utility. */
   dispose(): Promise<void>;
 };
@@ -154,11 +167,21 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
     checkoutContexts.add(canonicalWorkspaceRoot);
   };
 
+  /** Resolvers waiting for the utility's `quiesced` reply. */
+  const quiesceWaiters = new Set<() => void>();
+
   const handleUtilityMessage = (spawned: UtilityProcess, frame: unknown): void => {
     if (!frame || typeof frame !== 'object') {
       return;
     }
     const { requestId, type, workspaceRoot } = frame as Record<string, unknown>;
+    if (type === 'quiesced') {
+      for (const resolveWaiter of [...quiesceWaiters]) {
+        resolveWaiter();
+      }
+      quiesceWaiters.clear();
+      return;
+    }
     if (type === 'runtime-context-register' || type === 'runtime-context-release') {
       if (utility === spawned) {
         applyRuntimeContextFrame(type, frame as Record<string, unknown>);
@@ -275,6 +298,36 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
     },
     computeProjectRoot(executionRoot) {
       return runtimeContexts.get(resolve(executionRoot))?.['computeProjectRoot'];
+    },
+    async quiesce(boundMilliseconds) {
+      const spawned = utility;
+      if (!spawned) {
+        return 'no-utility';
+      }
+      const settled = Promise.withResolvers<'quiesced'>();
+      const resolveWaiter = (): void => settled.resolve('quiesced');
+      quiesceWaiters.add(resolveWaiter);
+      /* A utility that dies mid-quiesce has nothing left to settle. */
+      spawned.on('exit', resolveWaiter);
+      try {
+        spawned.postMessage({ type: 'quiesce' });
+      } catch {
+        quiesceWaiters.delete(resolveWaiter);
+        return 'no-utility';
+      }
+      let bound: ReturnType<typeof setTimeout> | undefined;
+      const cut = new Promise<'timeout'>((resolveCut) => {
+        bound = setTimeout(() => resolveCut('timeout'), boundMilliseconds);
+        bound.unref();
+      });
+      try {
+        return await Promise.race([settled.promise, cut]);
+      } finally {
+        if (bound !== undefined) {
+          clearTimeout(bound);
+        }
+        quiesceWaiters.delete(resolveWaiter);
+      }
     },
     async dispose() {
       const closures = [...runtimeLeaseClosures.values()];

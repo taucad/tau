@@ -207,7 +207,7 @@ fn claim(engine: &Engine, subject: Value, capability: &str, payload: Value) -> V
         "method": "submitClaims",
         "requestId": "projection",
         "protocolVersion": 3,
-        "registryVersion": 4,
+        "registryVersion": 5,
         "canonicalProfile": "geospec-jcs-v1",
         "plan": {
             "subjects": [subject],
@@ -239,11 +239,11 @@ fn should_project_analyze_mesh_stats_into_the_source_operation_envelope() {
         .map(|index| u8::from_str_radix(&hex[index..index + 2], 16).unwrap())
         .collect::<Vec<_>>();
     let mut engine = Engine::new();
+    let mut ingest_request: Value =
+        serde_json::from_str(fixture["ingestRequestUtf8"].as_str().unwrap()).unwrap();
+    ingest_request["registryVersion"] = json!(5);
     engine
-        .ingest_mesh(
-            fixture["ingestRequestUtf8"].as_str().unwrap().as_bytes(),
-            &bytes,
-        )
+        .ingest_mesh(&serde_json::to_vec(&ingest_request).unwrap(), &bytes)
         .unwrap();
 
     let response = claim(
@@ -281,7 +281,7 @@ fn should_refuse_requested_validity_measurements_that_are_absent() {
         "method": "ingestSubject",
         "requestId": "admit",
         "protocolVersion": 3,
-        "registryVersion": 4,
+        "registryVersion": 5,
         "canonicalProfile": "geospec-jcs-v1",
         "format": "step",
         "frame": {"coordinateSystem": "z-up", "sourceUnit": "auto", "outputUnit": "mm"},

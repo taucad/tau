@@ -2,9 +2,11 @@ use geospec_engine_native_core::backend::BackendErrorKind;
 use geospec_engine_native_occt::{Document, PmiKind, SurfaceFacts, TopologyCounts};
 use std::path::PathBuf;
 
-// Preserve the six original fixture expectations. The later compounds field
-// has no independent expectation in these historical fixture controls.
-fn legacy_topology_counts(value: TopologyCounts) -> [usize; 6] {
+// The bridge reports TopExp_Explorer traversal multiplicities. Each closed box
+// has six one-wire faces, four edge uses per face, and two endpoint uses per
+// edge use. Historical unique-entity evidence was 12 edges and 8 vertices per
+// box; those counts describe a different topology profile.
+fn topology_multiplicities(value: TopologyCounts) -> [usize; 6] {
     [
         value.solids,
         value.shells,
@@ -13,6 +15,12 @@ fn legacy_topology_counts(value: TopologyCounts) -> [usize; 6] {
         value.edges,
         value.vertices,
     ]
+}
+
+fn box_topology_multiplicities(boxes: usize) -> [usize; 6] {
+    let faces = boxes * 6;
+    let edge_uses = faces * 4;
+    [boxes, boxes, faces, faces, edge_uses, edge_uses * 2]
 }
 
 fn fixture(name: &str) -> Vec<u8> {
@@ -53,8 +61,8 @@ fn ap242_box_retains_shape_face_and_mesh_facts() {
     close3(facts.shape.bounds.max, [5.0, 10.0, 15.0], 1e-8);
     close3(facts.shape.center_of_mass, [0.0, 0.0, 0.0], 1e-8);
     assert_eq!(
-        legacy_topology_counts(facts.shape.topology),
-        [1, 1, 6, 6, 12, 8]
+        topology_multiplicities(facts.shape.topology),
+        box_topology_multiplicities(1)
     );
     assert_eq!(facts.faces.len(), 6);
     assert_eq!(
@@ -63,7 +71,7 @@ fn ap242_box_retains_shape_face_and_mesh_facts() {
             .iter()
             .map(|face| face.index)
             .collect::<Vec<_>>(),
-        vec![1, 2, 3, 4, 5, 6]
+        vec![0, 1, 2, 3, 4, 5]
     );
     assert!(facts
         .faces
@@ -79,12 +87,12 @@ fn ap242_box_retains_shape_face_and_mesh_facts() {
     // Raw query SHA256: f8a814833cd6f9365fa46f0ad4f574f73bf10640101dbe966ca349c8a7f276d7
     // Freeze SHA256: 4fcc2801d218bb949545ff87f501e0605daf8fd3915f0f9fd55ef29a1898ec3a
     let expected_face_areas = vec![
-        (1, 0x4082_c000_0000_0000_u64),
-        (2, 0x4082_c000_0000_0000),
+        (0, 0x4082_c000_0000_0000_u64),
+        (1, 0x4082_c000_0000_0000),
+        (2, 0x4072_c000_0000_0000),
         (3, 0x4072_c000_0000_0000),
-        (4, 0x4072_c000_0000_0000),
+        (4, 0x4068_ffff_ffff_ffff),
         (5, 0x4068_ffff_ffff_ffff),
-        (6, 0x4068_ffff_ffff_ffff),
     ];
     assert_eq!(
         facts
@@ -172,8 +180,8 @@ fn inch_cube_preserves_declared_units_and_converted_geometry() {
     close3(facts.shape.bounds.max, [25.4, 25.4, 25.4], 1e-8);
     close3(facts.shape.center_of_mass, [12.7, 12.7, 12.7], 1e-8);
     assert_eq!(
-        legacy_topology_counts(facts.shape.topology),
-        [1, 1, 6, 6, 12, 8]
+        topology_multiplicities(facts.shape.topology),
+        box_topology_multiplicities(1)
     );
     assert_eq!(facts.faces.len(), 6);
     assert!(facts
@@ -196,8 +204,8 @@ fn assembly_retains_occurrence_references_composed_placements_and_bounds() {
     close3(facts.shape.bounds.max, [35.0, 5.0, 5.0], 1e-8);
     close3(facts.shape.center_of_mass, [15.0, 0.0, 0.0], 1e-8);
     assert_eq!(
-        legacy_topology_counts(facts.shape.topology),
-        [2, 2, 12, 12, 24, 16]
+        topology_multiplicities(facts.shape.topology),
+        box_topology_multiplicities(2)
     );
     assert_eq!(facts.occurrences.len(), 2);
     assert!(facts.occurrences.iter().all(|occurrence| facts

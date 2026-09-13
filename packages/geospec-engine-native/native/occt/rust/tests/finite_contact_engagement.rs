@@ -6,6 +6,9 @@ use geospec_engine_native_occt::{BrepEntity, BrepSubject, Document, OcctConnecto
 use serde_json::{json, Value};
 use std::path::PathBuf;
 
+mod support;
+use support::current_profile::{bind_claim, bind_ingest};
+
 fn fixture_root() -> PathBuf {
     std::env::var_os("GEOSPEC_FINITE_CONTACT_INPUTS")
         .map(PathBuf::from)
@@ -59,30 +62,17 @@ fn claim_result(json: &str) -> Value {
     results[0].clone()
 }
 
-fn rebind_subject(request: &str, admission: &str) -> Result<String, String> {
-    let mut request: Value = serde_json::from_str(request).map_err(|e| e.to_string())?;
-    let admission: Value = serde_json::from_str(admission).map_err(|e| e.to_string())?;
-    let subjects = request["plan"]["subjects"]
-        .as_array_mut()
-        .ok_or("subjects absent")?;
-    if subjects.len() != 1 || !subjects[0]["subjectHash"].is_string() {
-        return Err("Expected exactly one original subject identity".into());
-    }
-    let hash = admission["result"]["subject"]["subjectHash"]
-        .as_str()
-        .ok_or("admitted subject identity absent")?;
-    subjects[0]["subjectHash"] = Value::String(hash.into());
-    serde_json::to_string(&request).map_err(|e| e.to_string())
-}
-
 #[test]
 fn claim_status_ignores_nested_statuses_and_rebinds_only_subject_slot() {
     let response = r#"{"result":{"results":[{"status":"refused","diagnostics":[{"status":"passed"}],"evidence":{"status":"failed"}}]}}"#;
     assert_eq!(claim_result(response)["status"], "refused");
-    let request = r#"{"plan":{"subjects":[{"slot":"subject","subjectHash":"old"}],"claims":[{"payload":{"subjectHash":"old"}}]}}"#;
+    let request = r#"{"canonicalProfile":"geospec-jcs-v1","method":"submitClaims","plan":{"subjects":[{"slot":"subject","subjectHash":"old"}],"claims":[{"payload":{"subjectHash":"old"}}]},"protocolVersion":3,"registryVersion":4,"requestId":"control"}"#;
     let admission = r#"{"result":{"subject":{"subjectHash":"new"}},"subjectHash":"decoy"}"#;
-    let rebound: Value =
-        serde_json::from_str(&rebind_subject(request, admission).unwrap()).unwrap();
+    let bound = bind_claim(request, admission.as_bytes());
+    let rebound: Value = serde_json::from_str(&bound.json).unwrap();
+    assert_eq!(bound.original_subject_hash, "old");
+    assert_eq!(bound.effective_subject_hash, "new");
+    assert_eq!(rebound["registryVersion"], 5);
     assert_eq!(rebound["plan"]["subjects"][0]["subjectHash"], "new");
     assert_eq!(
         rebound["plan"]["claims"][0]["payload"]["subjectHash"],
@@ -106,14 +96,19 @@ fn finite_contact_local_engagement_negative_and_budget_controls() {
     let admitted = String::from_utf8(
         engine
             .ingest_subject(
-                f[3].as_bytes(),
+                &bind_ingest(f[3].as_bytes()),
                 std::fs::read(input.join(f[2])).unwrap(),
                 vec![],
             )
             .unwrap(),
     )
     .unwrap();
-    let original = rebind_subject(f[4], &admitted).unwrap();
+    let bound = bind_claim(f[4], admitted.as_bytes());
+    eprintln!(
+        "FINITE_ENGAGEMENT_SUBJECT_BINDING original={} effective={}",
+        bound.original_subject_hash, bound.effective_subject_hash
+    );
+    let original = bound.json;
     // Separate requests, not edits to the original table/fixtures. Opposite
     // radial fit reverses the two genuinely admitted faces, not their labels
     // inside any candidate algorithm.
@@ -295,12 +290,17 @@ fn finite_contact_engagement_original44_capture_before_assertions() {
                 );
                 let admission = String::from_utf8(
                     engine
-                        .ingest_subject(f[3].as_bytes(), bytes, vec![])
+                        .ingest_subject(&bind_ingest(f[3].as_bytes()), bytes, vec![])
                         .map_err(|e| e.to_string())?,
                 )
                 .map_err(|e| e.to_string())?;
                 eprintln!("FINITE_CONTACT_ADMISSION {index} {admission}");
-                let effective = rebind_subject(f[4], &admission)?;
+                let bound = bind_claim(f[4], admission.as_bytes());
+                eprintln!(
+                    "FINITE_CONTACT_SUBJECT_BINDING {index} original={} effective={}",
+                    bound.original_subject_hash, bound.effective_subject_hash
+                );
+                let effective = bound.json;
                 eprintln!("FINITE_CONTACT_REQUEST {index} {effective}");
                 String::from_utf8(
                     engine

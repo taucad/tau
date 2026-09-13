@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "copies": [
+    {
+      "path": "effective-defaults.json",
+      "origin": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lanes/matcher-full-effective-defaults-oracle-a1/canonical-controls.json",
+      "sha256": "7cf3e4674e827c0baa8edc5546d8adca8d6eaabd7a32597be55385af95eb13a9"
+    },
+    {
+      "path": "f1-budget-batch.json",
+      "origin": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/matcher-full-entry/f1-budget-batch-b80/controls.json",
+      "sha256": "c46c089b0d5097e862e606ed2866dea53dd25a6df207c044c3172d6dc9e100c4"
+    },
+    {
+      "path": "f1-engine-fullwire.json",
+      "origin": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/matcher-full-entry/f1-engine-harness-b72/consumer-corpus.json",
+      "sha256": "b1b605506f72304ccec2484506a39786f203d89e793eaab5e0125d246388d5a3"
+    },
+    {
+      "path": "f1-verifier-controls.json",
+      "origin": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/matcher-full-entry/f1-verifier-check-b64/controls.json",
+      "sha256": "ac9c8237b8b46bf3af12cfb3db8761eef29c30bfe67ab5e5fb589c7c047f5e84"
+    },
+    {
+      "path": "relationship-scalars.json",
+      "origin": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lanes/matcher-full-relationship-scalars-a1/oracle.stdout.json",
+      "sha256": "00bafc084df907d00ce008466ab7b0eb933cd38eed5df6d6569165c738bc6dd4"
+    }
+  ]
+}

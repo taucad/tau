@@ -63,7 +63,7 @@ fn ingest(engine: &mut Engine, primary: Vec<u8>, buffer: Vec<u8>) -> String {
         "method": "ingestSubject",
         "requestId": "admit",
         "protocolVersion": 3,
-        "registryVersion": 4,
+        "registryVersion": 5,
         "canonicalProfile": "geospec-jcs-v1",
         "format": "gltf",
         "frame": {"coordinateSystem": "z-up", "sourceUnit": "mm", "outputUnit": "mm"},
@@ -92,7 +92,7 @@ fn claim(engine: &Engine, subject_hash: &str, capability: &str, payload: Value) 
         "method": "submitClaims",
         "requestId": "query",
         "protocolVersion": 3,
-        "registryVersion": 4,
+        "registryVersion": 5,
         "canonicalProfile": "geospec-jcs-v1",
         "plan": {
             "subjects": [{"slot": "part", "subjectHash": subject_hash}],
@@ -116,6 +116,7 @@ fn claim(engine: &Engine, subject_hash: &str, capability: &str, payload: Value) 
 
 fn analyze(engine: &Engine, subject_hash: &str) -> Value {
     claim(engine, subject_hash, "analyzeMesh", Value::Null)["result"]["results"][0]["evidence"]
+        ["stats"]
         .clone()
 }
 

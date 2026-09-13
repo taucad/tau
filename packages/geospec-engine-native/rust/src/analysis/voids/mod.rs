@@ -1,5 +1,7 @@
 //! Exact CSG, decomposition, winding-number, and section void proof.
 
+pub(crate) mod nominal_bore;
+
 use crate::{
     backend::{
         brep::{Bounds, BrepEntity, TessellationProfile},

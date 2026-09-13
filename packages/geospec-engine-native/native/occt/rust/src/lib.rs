@@ -13,7 +13,7 @@ pub use geospec_engine_native_core::backend::brep::{
     EdgeTreatmentLabel, EdgeTreatmentMaterialSide, EdgeTreatmentReason, EdgeTreatmentResidual,
     EdgeTreatmentResidualKind, EdgeTreatmentRow, EdgeTreatmentSupport, Extrema, FaceFacts,
     LocatedFace, NominalCylindricalBand, OccurrenceFacts, PmiFacts, PmiKind, PointState, ProductFacts,
-    RegularSolidContainment, ReportedBrepBundle, ResolvedSourceFace, SelectedContinuousDomain,
+    RegularSolidContainment, ReportedBrepBundle, ResolvedSourceFace, SelectedContinuousDomain, SelectedBoreVoid,
     SemanticDatumFacts, ShapeFacts, SourceFaceKey, StepSubjectMetadata, SubshapeFacts,
     SubshapeType, SurfaceFacts, TessellationProfile, TopologyCounts, ValidityFacts, WallOptions,
     WallSupport, WallThickness, WallThicknessOutcome, MAX_CIRCULAR_BORE_CANDIDATES,
@@ -291,6 +291,34 @@ impl BrepSubject for Document {
             }
         }
         nominal_cylindrical_band(value)
+    }
+
+    fn selected_bore_void(&self, face: BrepEntity) -> Result<SelectedBoreVoid, BackendError> {
+        self.validate_entity(face)?;
+        let BrepEntity::Face { occurrence, face: query_face } = face else {
+            return Err(unsupported("Selected bore requires an occurrence face."));
+        };
+        let mut band = ffi::NominalCylindricalBand::default();
+        let mut clear = ffi::CircularBoreCandidate::default();
+        let mut error = ErrorBuffer::new();
+        unsafe {
+            check(ffi::geospec_occt_selected_bore_void_query(
+                self.raw.as_ptr(), face.into(), &mut band, &mut clear, error.raw()), &error)?;
+        }
+        let count = unsafe { ffi::geospec_occt_occurrence_face_count(self.raw.as_ptr(), occurrence) };
+        let topology = circular_bore_topology(&clear, count)?;
+        let band = nominal_cylindrical_band(band)?;
+        if band.occurrence != occurrence || band.private_query_face != query_face ||
+            band.public_face_ordinal != clear.public_face_ordinal ||
+            clear.private_query_face != query_face || clear.disposition != 0 ||
+            topology.owning_solid_ordinal != 0 || !band.transferred_reversed ||
+            topology.ends.iter().any(|e| e.termination != CircularBoreTermination::Mouth) ||
+            topology.band.origin != band.origin || topology.band.axis != band.axis ||
+            topology.band.radius != band.radius || topology.band.from != band.from || topology.band.to != band.to {
+            return Err(backend_error("Selected bore transfer has inconsistent scope or band."));
+        }
+        Ok(SelectedBoreVoid { band, ends: topology.ends,
+            maximum_topology_tolerance_mm: topology.maximum_topology_tolerance_mm })
     }
 
     fn circular_bores(&self, max_candidates: usize) -> Result<CircularBoreInventory, BackendError> {
@@ -3311,6 +3339,11 @@ mod ffi {
     }
 
     unsafe extern "C" {
+        pub fn geospec_occt_selected_bore_void_query(
+            document: *const Document, face: Entity,
+            band: *mut NominalCylindricalBand, clear: *mut CircularBoreCandidate,
+            error: *mut StringBuffer,
+        ) -> i32;
         pub fn geospec_occt_nominal_cylindrical_band_query(
             document: *const Document,
             face: Entity,

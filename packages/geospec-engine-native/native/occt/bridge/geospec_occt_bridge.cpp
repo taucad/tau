@@ -2418,7 +2418,7 @@ bool append_residual(EdgeTreatmentCertificateData& certificate, int kind,
 bool collect_edge_treatment_boundary(
     const TopoDS_Face& face, BoreSolidContext& owner,
     std::vector<EdgeTreatmentUseData>& output, uint32_t& wire_count,
-    int& reason) {
+    int& reason, bool require_single_wire = true) {
   wire_count = 0;
   for (TopExp_Explorer wires(face, TopAbs_WIRE); wires.More(); wires.Next()) {
     if (wire_count == std::numeric_limits<uint32_t>::max()) {
@@ -2539,7 +2539,7 @@ bool collect_edge_treatment_boundary(
     }
     ++wire_count;
   }
-  if (wire_count != 1 || output.empty()) {
+  if ((require_single_wire && wire_count != 1) || output.empty()) {
     reason = GEOSPEC_OCCT_EDGE_TREATMENT_UNSUPPORTED_TRIM;
     return false;
   }
@@ -2763,8 +2763,10 @@ EdgeTreatmentDispositionData classify_planar_chamfer(
   std::vector<EdgeTreatmentUseData> uses;
   uint32_t wire_count = 0;
   int reason = 0;
+  // Complete bounded multiwire collection permits necessary-rail exclusion;
+  // it does not admit a perforated transition as a qualified chamfer.
   if (!collect_edge_treatment_boundary(view.shape, owner, uses, wire_count,
-                                       reason)) {
+                                       reason, false)) {
     return unqualified_edge_treatment(reason);
   }
   const std::vector<size_t> candidates = rails_with_support_type(
@@ -2815,7 +2817,7 @@ EdgeTreatmentDispositionData classify_planar_chamfer(
           parallel_residual(BRepAdaptor_Curve(uses[second].edge).Line().Direction(),
                             intersection.Direction(), uses[second].value.curve.length) >
               uses[second].maximum_tolerance) continue;
-      if (uses.size() != 4 || (first + 2) % 4 != second) {
+      if (wire_count != 1 || uses.size() != 4 || (first + 2) % 4 != second) {
         return unqualified_edge_treatment(
             GEOSPEC_OCCT_EDGE_TREATMENT_UNSUPPORTED_TRIM);
       }
@@ -6382,6 +6384,67 @@ int geospec_occt_nominal_cylindrical_band_query(
     }
     *output = candidate;
     return GEOSPEC_OCCT_OK;
+  });
+}
+
+int geospec_occt_selected_bore_void_query(
+    const geospec_occt_document* document, geospec_occt_entity face,
+    geospec_occt_nominal_cylindrical_band* band,
+    geospec_occt_circular_bore_candidate* clear_interior,
+    geospec_occt_string* error) noexcept {
+  if (document == nullptr || band == nullptr || clear_interior == nullptr) {
+    return fail(GEOSPEC_OCCT_INVALID_ARGUMENT, "Selected bore output/document is null.", error);
+  }
+  *band = {};
+  *clear_interior = {};
+  return guarded(error, [&]() -> int {
+    geospec_occt_nominal_cylindrical_band associated{};
+    const int status = geospec_occt_nominal_cylindrical_band_query(
+        document, face, &associated, error);
+    if (status != GEOSPEC_OCCT_OK) return status;
+    const auto& occurrence = document->occurrences[face.occurrence];
+    TopoDS_Solid solid;
+    std::string message;
+    if (!regular_solid_operand(occurrence.shape, solid, message)) {
+      return fail(GEOSPEC_OCCT_UNSUPPORTED,
+                  "Selected bore requires one complete regular material solid: " + message, error);
+    }
+    if (occurrence.public_faces.size() > 4096) {
+      return fail(GEOSPEC_OCCT_UNSUPPORTED, "Selected bore material has too many faces.", error);
+    }
+    // A scoped view reuses A7 without changing its document-local semantics.
+    // Its sole solid is the ENTIRE selected material, never just a face owner.
+    geospec_occt_document scoped;
+    scoped.shape = occurrence.shape;
+    scoped.public_faces = occurrence.public_faces;
+    std::vector<geospec_occt_circular_bore_candidate> candidates;
+    bool native_error = false;
+    if (!build_circular_bores(scoped, 4096, 0, 0, candidates, message, native_error)) {
+      return fail(native_error ? GEOSPEC_OCCT_NATIVE_ERROR : GEOSPEC_OCCT_UNSUPPORTED,
+                  message, error);
+    }
+    for (const auto& candidate : candidates) {
+      if (candidate.public_face_ordinal != associated.public_face_ordinal ||
+          candidate.private_query_face != face.face) continue;
+      if (candidate.disposition != GEOSPEC_OCCT_CIRCULAR_BORE_QUALIFIED ||
+          candidate.owning_solid_ordinal != 0 ||
+          candidate.interior_residual_solid_count != 0 ||
+          candidate.ends[0].termination != GEOSPEC_OCCT_CIRCULAR_BORE_MOUTH ||
+          candidate.ends[1].termination != GEOSPEC_OCCT_CIRCULAR_BORE_MOUTH) {
+        return fail(GEOSPEC_OCCT_UNSUPPORTED,
+                    "Selected material does not certify a clear two-mouth bore.", error);
+      }
+      if (candidate.band.radius != associated.radius || candidate.band.from != associated.from ||
+          candidate.band.to != associated.to ||
+          !std::equal(candidate.band.origin, candidate.band.origin + 3, associated.origin) ||
+          !std::equal(candidate.band.axis, candidate.band.axis + 3, associated.axis)) {
+        return fail(GEOSPEC_OCCT_UNSUPPORTED, "Selected bore and source band disagree.", error);
+      }
+      *band = associated;
+      *clear_interior = candidate;
+      return GEOSPEC_OCCT_OK;
+    }
+    return fail(GEOSPEC_OCCT_UNSUPPORTED, "Selected bore face has no complete material certificate.", error);
   });
 }
 

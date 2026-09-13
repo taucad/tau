@@ -4,13 +4,24 @@
 //! It does not infer exact geometry from reporting bounds or tessellation.
 
 mod clearance;
+mod box_interference;
 mod cylindrical_band;
 mod domain;
 mod exact;
+mod nominal_analytic;
 mod insertion;
 mod topology;
 
 use crate::codec::Json;
+pub(crate) use box_interference::{box_interference,BoxInterferenceRequest,BoxInterferenceEvidence,BOX_INTERFERENCE_RESERVATION_BYTES};
+#[cfg(test)]
+pub(crate) use box_interference::nominal_analytic_box_tests::box_domain as nominal_analytic_box_control;
+
+pub(crate) use nominal_analytic::{
+    nominal_analytic, AnalyticKind, NominalAnalyticRequest, NominalSupport, SupportKind,
+    NOMINAL_ANALYTIC_RESERVATION_BYTES, NOMINAL_ANALYTIC_UNITS,
+    NOMINAL_ANALYTIC_OUTPUT_BYTES,
+};
 
 pub(crate) use clearance::{clearance, ClearanceRequest, CLEARANCE_PAIR_UNITS};
 pub(crate) use cylindrical_band::{

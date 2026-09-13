@@ -1,16 +1,19 @@
 //! Exact BRep spatial-relationship matcher family.
 
+use std::rc::Rc;
+
 use crate::analysis::node24_hypot3;
 #[cfg(test)]
 use crate::backend::brep::PointState;
 use crate::{
+    analysis::continuous::{self, InsertionRequest, Outcome},
     analysis::selection::{
         resolve_budgeted_with_brep, Cardinality, EcmaRegexEngine, EcmaRegexError, Entity,
         EntityFacts, Query, Selection, SelectionStatus, Selector, SelectorIndex, Stability,
         TextPattern,
     },
     backend::{
-        brep::{Bounds, BrepEntity, BrepSubject, CylinderAxialExtent},
+        brep::{Bounds, BrepEntity, BrepSubject, CylinderAxialExtent, NominalCylindricalBand},
         BackendError, BackendErrorKind,
     },
     codec::{encode, Json},
@@ -507,6 +510,177 @@ struct Proof {
     diagnostics: Vec<Diagnostic>,
 }
 
+fn clearance_byte_sum(values: impl IntoIterator<Item = u64>) -> u64 {
+    values
+        .into_iter()
+        .try_fold(0u64, u64::checked_add)
+        .unwrap_or(u64::MAX)
+}
+
+fn clearance_diagnostic_bytes(value: &Diagnostic) -> u64 {
+    clearance_byte_sum([
+        std::mem::size_of::<Diagnostic>() as u64,
+        value.code.capacity() as u64,
+        value.message.capacity() as u64,
+        value
+            .suggestion
+            .as_ref()
+            .map_or(0, |value| value.capacity() as u64),
+        value.details.as_ref().map_or(0, super::json_owned_bytes),
+        value.spatial.as_ref().map_or(0, super::json_owned_bytes),
+    ])
+}
+
+// Reserve the caller's fixed wrappers and copied authored strings BEFORE
+// queries/projection. Per relationship: 128 object/array slots cover final,
+// broad phase, two selection projections, diagnostic and result envelopes;
+// 2048 bytes cover their finite literal keys/messages. Dynamic authored values,
+// entity strings and endpoint facts are added separately, with four live copies
+// for row, diagnostic, normalized expectation and construction/finish overlap.
+fn clearance_caller_reservation(prepared: &Prepared, context: &EvaluationContext<'_>) -> u64 {
+    let slot = (std::mem::size_of::<(String, Json)>() + std::mem::size_of::<Json>()) as u64;
+    let mut bytes = clearance_byte_sum([2048, 32 * slot, context.claim_id.len() as u64]);
+    for relationship in &prepared.relationships {
+        let mut row =
+            clearance_byte_sum([128 * slot, 2048, super::json_owned_bytes(&relationship.raw)]);
+        if let Some((subject, target)) = &relationship.resolved {
+            for entity in subject.entities.iter().chain(&target.entities) {
+                row = clearance_byte_sum([
+                    row,
+                    std::mem::size_of::<Endpoint>() as u64,
+                    8 * slot,
+                    entity.id.len() as u64,
+                    entity
+                        .occurrence_path
+                        .as_ref()
+                        .map_or(0, |value| value.len() as u64),
+                    entity
+                        .facts
+                        .surface_type
+                        .as_ref()
+                        .map_or(0, |value| value.len() as u64),
+                    entity
+                        .facts
+                        .product_name
+                        .as_ref()
+                        .map_or(0, |value| value.len() as u64),
+                ]);
+            }
+        }
+        // The fixed 128-slot/2048-literal allowance already covers all four
+        // phases; multiply only the dynamic payload and endpoint storage.
+        let dynamic = row.checked_sub(128 * slot + 2048).unwrap_or(u64::MAX);
+        bytes = clearance_byte_sum([bytes, 128 * slot, 2048, dynamic, dynamic, dynamic, dynamic]);
+    }
+    bytes
+}
+
+fn clearance_live_rows(rows: &Vec<Json>, diagnostics: &Vec<Diagnostic>) -> u64 {
+    clearance_byte_sum([
+        (rows.capacity() * std::mem::size_of::<Json>()) as u64,
+        (diagnostics.capacity() * std::mem::size_of::<Diagnostic>()) as u64,
+        clearance_byte_sum(rows.iter().map(super::json_owned_bytes)),
+        clearance_byte_sum(diagnostics.iter().map(clearance_diagnostic_bytes)),
+    ])
+}
+
+fn clearance_quoted_bytes(value: &str) -> u64 {
+    clearance_byte_sum(
+        std::iter::once(2).chain(value.bytes().map(|byte| match byte {
+            b'"' | b'\\' | b'\x08' | b'\x0c' | b'\n' | b'\r' | b'\t' => 2,
+            0..=31 => 6,
+            _ => 1,
+        })),
+    )
+}
+
+// No encoding/allocation is performed by this preflight. The first component
+// bounds payload bytes (25 per finite binary64); the second covers every
+// canonical object-sort pointer buffer, conservatively even across siblings.
+fn clearance_encoding_bound(value: &Json) -> [u64; 2] {
+    match value {
+        Json::Null | Json::Bool(_) => [5, 0],
+        Json::Number(_) => [25, 0],
+        Json::String(value) => [clearance_quoted_bytes(value), 0],
+        Json::Array(values) => values.iter().fold([2, 0], |[payload, scratch], value| {
+            let [next, sort] = clearance_encoding_bound(value);
+            [
+                clearance_byte_sum([payload, 1, next]),
+                clearance_byte_sum([scratch, sort]),
+            ]
+        }),
+        Json::Object(fields) => fields
+            .iter()
+            .fold([2, 0], |[payload, scratch], (key, value)| {
+                let [next, sort] = clearance_encoding_bound(value);
+                [
+                    clearance_byte_sum([payload, 2, clearance_quoted_bytes(key), next]),
+                    clearance_byte_sum([
+                        scratch,
+                        std::mem::size_of::<&(String, Json)>() as u64,
+                        sort,
+                    ]),
+                ]
+            }),
+    }
+}
+
+fn clearance_finish_reservation(
+    prepared: &Prepared,
+    context: &EvaluationContext<'_>,
+    rows: &[Json],
+    diagnostics: &[Diagnostic],
+) -> u64 {
+    // Outer result/family/polarity/negative-diagnostic literals are < 2048
+    // encoded bytes. Each authored relationship occurs again in normalized
+    // expected; measured values are copied once into the family measurement.
+    let mut payload = clearance_byte_sum([2048, clearance_quoted_bytes(context.claim_id)]);
+    let mut scratch = 0;
+    let mut copies = 0;
+    for value in prepared
+        .relationships
+        .iter()
+        .map(|row| &row.raw)
+        .chain(rows)
+    {
+        let [bytes, sort] = clearance_encoding_bound(value);
+        payload = clearance_byte_sum([payload, bytes]);
+        scratch = clearance_byte_sum([scratch, sort]);
+    }
+    for row in rows {
+        if let Some(measured) =
+            json_field_ref(row, "final").and_then(|value| json_field_ref(value, "measured"))
+        {
+            copies = clearance_byte_sum([copies, super::json_owned_bytes(measured)]);
+            let [bytes, sort] = clearance_encoding_bound(measured);
+            payload = clearance_byte_sum([payload, bytes]);
+            scratch = clearance_byte_sum([scratch, sort]);
+        }
+    }
+    for diagnostic in diagnostics {
+        let owned = clearance_diagnostic_bytes(diagnostic);
+        // finish may hold a selected diagnostic plus its to_json clone.
+        copies = clearance_byte_sum([copies, owned, owned]);
+        payload = clearance_byte_sum([
+            payload,
+            128,
+            clearance_quoted_bytes(&diagnostic.code),
+            clearance_quoted_bytes(&diagnostic.message),
+            diagnostic
+                .suggestion
+                .as_deref()
+                .map_or(0, clearance_quoted_bytes),
+        ]);
+        for value in diagnostic.details.iter().chain(&diagnostic.spatial) {
+            let [bytes, sort] = clearance_encoding_bound(value);
+            payload = clearance_byte_sum([payload, bytes]);
+            scratch = clearance_byte_sum([scratch, sort]);
+        }
+    }
+    // Vec's growing encoding capacity is at most twice this payload bound.
+    clearance_byte_sum([copies, payload, payload, scratch])
+}
+
 pub(crate) fn evaluate(prepared: &Prepared, context: &mut EvaluationContext<'_>) -> Evaluation {
     if let Err(evaluation) = context.brep_facts() {
         return evaluation;
@@ -538,17 +712,40 @@ pub(crate) fn evaluate(prepared: &Prepared, context: &mut EvaluationContext<'_>)
             diagnostics: selection_diagnostics,
         };
     }
-    if prepared
-        .relationships
-        .iter()
-        .any(|relationship| relationship.kind == Kind::Insertion)
-    {
-        return sampled_insertion_refusal();
-    }
+    let band_claim = prepared.relationships.iter().any(|relationship| {
+        relationship.kind == Kind::Clearance
+            && relationship
+                .resolved
+                .as_ref()
+                .is_some_and(|(subject, target)| {
+                    subject
+                        .entities
+                        .iter()
+                        .chain(&target.entities)
+                        .any(|entity| matches!(entity.face, Some(BrepEntity::Face { .. })))
+                })
+    });
+    let caller_reservation = if band_claim {
+        let bytes = clearance_caller_reservation(prepared, context);
+        if let Err(error) = context.set_cylindrical_band_output_bytes(bytes) {
+            return error;
+        }
+        bytes
+    } else {
+        0
+    };
     let mut positive = true;
     let mut diagnostics = Vec::new();
     let mut rows = Vec::with_capacity(prepared.relationships.len());
     for (index, relationship) in prepared.relationships.iter().enumerate() {
+        if band_claim {
+            if let Err(error) = context.set_cylindrical_band_output_bytes(clearance_byte_sum([
+                caller_reservation,
+                clearance_live_rows(&rows, &diagnostics),
+            ])) {
+                return error;
+            }
+        }
         let Some((subject_selection, target_selection)) = &relationship.resolved else {
             return phase_two_refusal();
         };
@@ -565,11 +762,61 @@ pub(crate) fn evaluate(prepared: &Prepared, context: &mut EvaluationContext<'_>)
         };
         let proof = match prove(relationship, &subject, &target, context) {
             Ok(value) => value,
-            Err(ProofError::Backend(error)) => return backend_refusal(error),
-            Err(ProofError::Budget(evaluation)) | Err(ProofError::Refused(evaluation)) => {
-                return evaluation
+            Err(error) => {
+                let mut evaluation = match error {
+                    ProofError::Backend(error) => backend_refusal(error),
+                    ProofError::Budget(value) | ProofError::Refused(value) => value,
+                };
+                if relationship.kind == Kind::Containment
+                    || (band_claim && relationship.kind == Kind::Clearance)
+                {
+                    if let Evaluation::Refused { diagnostics } = &mut evaluation {
+                        for diagnostic in diagnostics {
+                            let details = diagnostic.details.get_or_insert_with(empty_object);
+                            if let Json::Object(fields) = details {
+                                fields.extend([
+                                    (
+                                        "relationship".into(),
+                                        effective_relationship_copy(relationship),
+                                    ),
+                                    ("subject".into(), selection_json(subject_selection)),
+                                    ("target".into(), selection_json(target_selection)),
+                                ]);
+                            }
+                            diagnostic.suggestion.get_or_insert_with(|| {
+                                if relationship.kind == Kind::Containment {
+                                    "Use validated regular closed solids for set containment, or a qualified cylindrical bore for radial fit; inspect the reported source operands."
+                                } else {
+                                    "Inspect the selected source-face association and cylindrical-band profile; unsupported evidence is not a geometric mismatch."
+                                }.into()
+                            });
+                        }
+                    }
+                }
+                return evaluation;
             }
         };
+        if band_claim {
+            let proof_bytes = clearance_byte_sum([
+                super::json_owned_bytes(&proof.broad_phase),
+                super::json_owned_bytes(&proof.final_evidence),
+                clearance_byte_sum(proof.diagnostics.iter().map(clearance_diagnostic_bytes)),
+            ]);
+            // Each projected diagnostic can clone both final evidence and its
+            // witness array. Reserve those before constructing the projection.
+            let projections = if is_cylindrical_band_proof(&proof) {
+                0 // Compact diagnostic refers to the single full result certificate.
+            } else {
+                proof_bytes
+                    .checked_mul(proof.diagnostics.len() as u64)
+                    .and_then(|bytes| bytes.checked_mul(2))
+                    .unwrap_or(u64::MAX)
+            };
+            if let Err(error) = context.check_cylindrical_band_capacity(&[proof_bytes, projections])
+            {
+                return error;
+            }
+        }
         positive &= proof.positive;
         for diagnostic in &proof.diagnostics {
             diagnostics.push(project_relationship_diagnostic(
@@ -589,6 +836,24 @@ pub(crate) fn evaluate(prepared: &Prepared, context: &mut EvaluationContext<'_>)
             ("final", proof.final_evidence),
         ]));
     }
+    if band_claim {
+        if let Err(error) = context
+            .set_cylindrical_band_output_bytes(clearance_byte_sum([
+                caller_reservation,
+                clearance_live_rows(&rows, &diagnostics),
+            ]))
+            .and_then(|()| {
+                context.check_cylindrical_band_capacity(&[clearance_finish_reservation(
+                    prepared,
+                    context,
+                    &rows,
+                    &diagnostics,
+                )])
+            })
+        {
+            return error;
+        }
+    }
     Evaluation::Geometric {
         positive_satisfied: positive,
         diagnostics,
@@ -599,9 +864,10 @@ pub(crate) fn evaluate(prepared: &Prepared, context: &mut EvaluationContext<'_>)
                 rows.iter()
                     .map(|row| {
                         let final_evidence =
-                            json_field(row, "final").expect("complete relationship proof");
-                        json_field(&final_evidence, "measured")
+                            json_field_ref(row, "final").expect("complete relationship proof");
+                        json_field_ref(final_evidence, "measured")
                             .expect("complete relationship measurement")
+                            .clone()
                     })
                     .collect(),
             ),
@@ -625,6 +891,40 @@ fn project_relationship_diagnostic(
         relationship_label(index, relationship),
         source.message
     );
+    if is_cylindrical_band_proof(proof) {
+        // The complete C1/C2/C3 certificate occurs once in the relationship
+        // result. Duplicating it in both diagnostic.final and witnesses would
+        // defeat the bounded projection. Keep identities and measurements here
+        // with an unambiguous index into that unchanged full evidence row.
+        diagnostic.details = Some(Json::object([
+            ("relationship", effective_relationship_copy(relationship)),
+            ("subject", selection_json(subject)),
+            ("target", selection_json(target)),
+            (
+                "measured",
+                json_field(&proof.final_evidence, "measured").unwrap_or_else(empty_object),
+            ),
+            (
+                "expected",
+                json_field(&proof.final_evidence, "expected").unwrap_or_else(empty_object),
+            ),
+            (
+                "evidence",
+                Json::object([
+                    (
+                        "profile",
+                        Json::string("geospec-nominal-cylindrical-band-clearance-v1"),
+                    ),
+                    ("relationshipIndex", Json::Number(index as f64)),
+                    (
+                        "path",
+                        Json::string("evidence.witnesses.relationships[relationshipIndex].final"),
+                    ),
+                ]),
+            ),
+        ]));
+        return diagnostic;
+    }
     diagnostic.details = Some(Json::object([
         ("relationship", effective_relationship_copy(relationship)),
         ("subject", selection_json(subject)),
@@ -651,6 +951,11 @@ fn project_relationship_diagnostic(
         ),
     ]));
     diagnostic
+}
+
+fn is_cylindrical_band_proof(proof: &Proof) -> bool {
+    matches!(json_field_ref(&proof.final_evidence, "method"),
+        Some(Json::String(method)) if method == "exact-nominal-cylindrical-band-clearance")
 }
 
 fn endpoints(
@@ -715,7 +1020,7 @@ fn prove(
             prove_direction_angle(relationship, subject, target)
         }
         Kind::Containment => prove_containment(relationship, subject, target, context),
-        Kind::Insertion => Err(ProofError::Refused(sampled_insertion_refusal())),
+        Kind::Insertion => prove_continuous_insertion(relationship, subject, target, context),
         Kind::Interference => prove_interference(relationship, subject, target, context),
     }
 }
@@ -857,45 +1162,123 @@ fn planar_contact_seating(
     }))
 }
 
+/// Preserve the selector's public ordinal and its separately resolved private
+/// query address. Neither ordinal arithmetic nor a whole-shape fallback can
+/// recover an absent association.
+fn cylindrical_band_face(endpoint: &Endpoint) -> Result<(BrepEntity, u32), ProofError> {
+    let BrepEntity::Face { occurrence, face } = endpoint.entity else {
+        return Err(ProofError::Refused(relationship_unsupported(
+            "Nominal cylindrical-band clearance requires a selected occurrence face.",
+            "Select the authored cylindrical face on each endpoint; whole-shape and nearest-face fallbacks are not qualified.",
+        )));
+    };
+    let Some(public_face_ordinal) = endpoint.facts.face_index else {
+        return Err(ProofError::Refused(relationship_unsupported(
+            "The selected cylindrical face has no public face ordinal.",
+            "Preserve the selector's public/private face association from the same STEP subject.",
+        )));
+    };
+    if endpoint.occurrence != Some(occurrence) || face == 0 {
+        return Err(ProofError::Refused(relationship_unsupported(
+            "The selected cylindrical face has an inconsistent occurrence query address.",
+            "Preserve the selector's public/private face association from the same STEP subject.",
+        )));
+    }
+    Ok((endpoint.entity, public_face_ordinal))
+}
+
+fn selected_cylindrical_band_pair(
+    subject: &Endpoint,
+    target: &Endpoint,
+    context: &mut EvaluationContext<'_>,
+) -> Result<(Rc<NominalCylindricalBand>, Rc<NominalCylindricalBand>), ProofError> {
+    // Validate both selector addresses before the first private query. Each
+    // distinct demand then pays before querying; a repeated face shares only
+    // this claim's already-paid record, including when it fills both roles.
+    let (subject_face, subject_ordinal) = cylindrical_band_face(subject)?;
+    let (target_face, target_ordinal) = cylindrical_band_face(target)?;
+    let subject = context
+        .nominal_cylindrical_band(subject_face, subject_ordinal)
+        .map_err(ProofError::Refused)?;
+    let target = context
+        .nominal_cylindrical_band(target_face, target_ordinal)
+        .map_err(ProofError::Refused)?;
+    charge(context, continuous::CLEARANCE_PAIR_UNITS)?;
+    Ok((subject, target))
+}
+
 fn prove_clearance(
     relationship: &Relationship,
     subject: &[Endpoint],
     target: &[Endpoint],
     context: &mut EvaluationContext<'_>,
 ) -> Result<Proof, ProofError> {
+    let ([subject_endpoint], [target_endpoint]) = (subject, target) else {
+        return Err(ProofError::Refused(nominal_box_clearance_refusal()));
+    };
+    if matches!(subject_endpoint.entity, BrepEntity::Face { .. })
+        || matches!(target_endpoint.entity, BrepEntity::Face { .. })
+    {
+        return prove_cylindrical_band_clearance(relationship, subject, target, context);
+    }
+    let (BrepEntity::Occurrence(subject_id), BrepEntity::Occurrence(target_id)) =
+        (subject_endpoint.entity, target_endpoint.entity)
+    else {
+        return Err(ProofError::Refused(nominal_box_clearance_refusal()));
+    };
+    let subject_domain = context
+        .selected_continuous_domain(subject_id)
+        .map_err(ProofError::Refused)?;
+    let target_domain = context
+        .selected_continuous_domain(target_id)
+        .map_err(ProofError::Refused)?;
+    charge(context, continuous::CLEARANCE_PAIR_UNITS)?;
     let band = relationship.tolerance.unwrap_or(0.0);
-    let low = relationship.min.unwrap_or(f64::NEG_INFINITY) - band;
-    let high = relationship.max.unwrap_or(f64::INFINITY) + band;
-    let margin = if high.is_finite() {
-        high
-    } else {
-        DEFAULT_LINEAR_TOLERANCE
+    let (positive, evidence) = match continuous::clearance(continuous::ClearanceRequest {
+        subject: &subject_domain,
+        target: &target_domain,
+        minimum: relationship.min,
+        maximum: relationship.max,
+        tolerance: band,
+    }) {
+        Outcome::Decided { positive, evidence } => (positive, evidence),
+        Outcome::Unsupported { reason, .. } => {
+            return Err(ProofError::Refused(relationship_unsupported(
+                &reason.message,
+                "Use two qualified complete nominal box occurrences; general BRep clearance remains unqualified.",
+            )))
+        }
     };
-    let broad = broad_phase(subject, target, margin);
-    let Some(extrema) = nearest_extrema(subject, target, context)? else {
-        return Err(ProofError::Refused(relationship_unsupported(
-            "The exact OCCT extrema computation for clearance did not converge.",
-            "Repair or re-export the geometry: an exact minimum-distance proof needs valid BRep faces on both endpoints.",
-        )));
-    };
+    let typed_bytes = evidence.owned_bytes() as u64;
+    context
+        .check_continuous_output(typed_bytes)
+        .map_err(ProofError::Refused)?;
     let expected = optional_numbers(&[
         ("min", relationship.min),
         ("max", relationship.max),
         ("tolerance", relationship.tolerance),
     ]);
     let final_evidence = final_json(
-        "extrema",
-        Json::object([("distance", Json::Number(extrema.distance))]),
+        "exact-nominal-box-clearance",
+        Json::object([("distance", Json::Number(evidence.distance))]),
         expected.clone(),
-        vec![
-            point_witness(extrema.point_a),
-            point_witness(extrema.point_b),
-        ],
+        vec![Json::object([
+            ("kind", Json::string("nominal-box-clearance")),
+            ("value", evidence.to_json()),
+        ])],
     );
-    let positive = extrema.distance >= low && extrema.distance <= high;
+    context
+        .check_continuous_output(
+            typed_bytes.saturating_add(super::json_owned_bytes(&final_evidence)),
+        )
+        .map_err(ProofError::Refused)?;
     let diagnostics = (!positive)
         .then(|| {
-            let direction = if extrema.distance < low { "too tight" } else { "too loose" };
+            let direction = if evidence.below_minimum {
+                "too tight"
+            } else {
+                "too loose"
+            };
             mismatch(
                 format!(
                     "Clearance between '{}' and '{}' is {direction} for the declared band {}.",
@@ -903,19 +1286,136 @@ fn prove_clearance(
                     selector_label(&relationship.target_raw),
                     json_string(&expected)
                 ),
-                if direction == "too tight" {
+                if evidence.below_minimum {
                     "Open the fit, or lower the declared minimum if the tighter clearance is intended."
                 } else {
                     "Close the fit, or raise the declared maximum if the looser clearance is intended."
                 },
-                Some(midpoint(extrema.point_a, extrema.point_b)),
+                Some(evidence.diagnostic_point),
             )
         })
         .into_iter()
         .collect();
+    let margin = relationship
+        .max
+        .map(|maximum| maximum + band)
+        .filter(|value| value.is_finite())
+        .unwrap_or(DEFAULT_LINEAR_TOLERANCE);
     Ok(Proof {
         positive,
-        broad_phase: broad,
+        broad_phase: broad_phase(subject, target, margin),
+        final_evidence,
+        diagnostics,
+    })
+}
+
+fn nominal_box_clearance_refusal() -> Evaluation {
+    relationship_unsupported(
+        "Clearance requires one qualified nominal box occurrence or selected cylindrical band on each endpoint.",
+        "Select two complete nominal boxes or two qualified occurrence-local cylindrical faces; mixed-domain, edge and multi-endpoint clearance remains unqualified.",
+    )
+}
+
+fn prove_cylindrical_band_clearance(
+    relationship: &Relationship,
+    subject: &[Endpoint],
+    target: &[Endpoint],
+    context: &mut EvaluationContext<'_>,
+) -> Result<Proof, ProofError> {
+    let ([a], [b]) = (subject, target) else {
+        return Err(ProofError::Refused(nominal_box_clearance_refusal()));
+    };
+    let (a, b) = selected_cylindrical_band_pair(a, b, context)?;
+    context
+        .check_cylindrical_band_capacity(&[
+            continuous::CYLINDRICAL_BAND_PREDICATE_RESERVATION_BYTES as u64,
+        ])
+        .map_err(ProofError::Refused)?;
+    let band = relationship.tolerance.unwrap_or(0.0);
+    let (positive, evidence) = match continuous::cylindrical_band_clearance(
+        continuous::CylindricalBandClearanceRequest {
+            subject: &a,
+            target: &b,
+            minimum: relationship.min,
+            maximum: relationship.max,
+            tolerance: band,
+        },
+    ) {
+        Outcome::Decided { positive, evidence } => (positive, evidence),
+        Outcome::Unsupported { reason, .. } => {
+            return Err(ProofError::Refused(relationship_unsupported(
+                &reason.message,
+                "Use C1-qualified selected cylindrical bands within the exact predicate's declared frame and resource domain; no alternate-face or extrema fallback is used.",
+            )))
+        }
+    };
+    let typed_bytes = evidence.owned_bytes() as u64;
+    if typed_bytes > continuous::CYLINDRICAL_BAND_EVIDENCE_RESERVATION_BYTES as u64
+        || !evidence.distance.is_finite()
+        || !evidence.diagnostic_point.into_iter().all(f64::is_finite)
+    {
+        return Err(ProofError::Refused(relationship_unsupported(
+            "The cylindrical-band predicate returned evidence outside its frozen output contract.",
+            "Inspect the predicate output contract; invalid evidence is not an invertible geometric result.",
+        )));
+    }
+    // Invocation scratch has ended. The returned value replaces that charge;
+    // its to_json clone reserves separately. Encoding starts only after the
+    // typed value is dropped, and receives its own reservation below.
+    context
+        .check_cylindrical_band_capacity(&[
+            typed_bytes,
+            continuous::CYLINDRICAL_BAND_EVIDENCE_RESERVATION_BYTES as u64,
+        ])
+        .map_err(ProofError::Refused)?;
+    let distance = evidence.distance;
+    let below_minimum = evidence.below_minimum;
+    let diagnostic_point = evidence.diagnostic_point;
+    let raw_evidence = evidence.to_json();
+    drop(evidence);
+    let expected = optional_numbers(&[
+        ("min", relationship.min),
+        ("max", relationship.max),
+        ("tolerance", relationship.tolerance),
+    ]);
+    let final_evidence = final_json(
+        "exact-nominal-cylindrical-band-clearance",
+        Json::object([("distance", Json::Number(distance))]),
+        expected,
+        vec![Json::object([
+            ("kind", Json::string("nominal-cylindrical-band-clearance")),
+            ("value", raw_evidence),
+        ])],
+    );
+    context
+        .check_cylindrical_band_capacity(&[
+            super::json_owned_bytes(&final_evidence),
+            continuous::CYLINDRICAL_BAND_ENCODING_RESERVATION_BYTES as u64,
+        ])
+        .map_err(ProofError::Refused)?;
+    let diagnostics = (!positive).then(|| {
+        let mut diagnostic = mismatch(
+            if below_minimum {
+                "Selected cylindrical-band clearance is below the declared inclusive band."
+            } else {
+                "Selected cylindrical-band clearance is above the declared inclusive band."
+            }.into(),
+            "Inspect the measured clearance and declared limits; the displayed source origin is diagnostic only, not a closest or intersection point.",
+            Some(diagnostic_point),
+        );
+        if let Some(Json::Object(fields)) = &mut diagnostic.spatial {
+            fields.push(("role".into(), Json::string("diagnostic-source-origin")));
+        }
+        diagnostic
+    }).into_iter().collect();
+    let margin = relationship
+        .max
+        .map(|value| value + band)
+        .filter(|value| value.is_finite())
+        .unwrap_or(DEFAULT_LINEAR_TOLERANCE);
+    Ok(Proof {
+        positive,
+        broad_phase: broad_phase(subject, target, margin),
         final_evidence,
         diagnostics,
     })
@@ -1056,7 +1556,7 @@ fn prove_containment(
     relationship: &Relationship,
     subject: &[Endpoint],
     target: &[Endpoint],
-    _context: &mut EvaluationContext<'_>,
+    context: &mut EvaluationContext<'_>,
 ) -> Result<Proof, ProofError> {
     let broad = broad_phase(subject, target, DEFAULT_LINEAR_TOLERANCE);
     if target.len() == 1 {
@@ -1064,7 +1564,122 @@ fn prove_containment(
             return prove_containment_in_bore(relationship, subject, bore, broad);
         }
     }
-    Err(ProofError::Refused(sampled_containment_refusal()))
+    // W3-CONTAINMENT-SET-01: each target is tested against the complete group.
+    // Retain only the best target's per-subject residuals and per-target counts,
+    // not a quadratic matrix. Ties retain the first target in selection order.
+    let mut best = Vec::new();
+    let mut current = Vec::with_capacity(subject.len());
+    let mut best_inside = 0;
+    let mut best_target = 0;
+    let mut targets = Vec::with_capacity(target.len());
+    for (target_index, b) in target.iter().enumerate() {
+        current.clear();
+        let mut inside = 0;
+        for (subject_index, a) in subject.iter().enumerate() {
+            let value = context
+                .regular_solid_containment(a.entity, b.entity)
+                .map_err(|mut evaluation| {
+                    if let Evaluation::Refused { diagnostics } = &mut evaluation {
+                        for diagnostic in diagnostics {
+                            let details = diagnostic.details.get_or_insert_with(empty_object);
+                            if let Json::Object(fields) = details {
+                                fields.extend([
+                                    ("method".into(), Json::string("boolean-difference")),
+                                    ("subjectIndex".into(), Json::Number(subject_index as f64)),
+                                    ("targetIndex".into(), Json::Number(target_index as f64)),
+                                ]);
+                            }
+                        }
+                    }
+                    ProofError::Refused(evaluation)
+                })?;
+            inside += usize::from(value.residual_solid_count == 0);
+            current.push(value);
+        }
+        targets.push(Json::object([
+            ("targetIndex", Json::Number(target_index as f64)),
+            ("containedSubjects", Json::Number(inside as f64)),
+            (
+                "outsideSubjects",
+                Json::Number((subject.len() - inside) as f64),
+            ),
+        ]));
+        if target_index == 0 || inside > best_inside {
+            best_inside = inside;
+            best_target = target_index;
+            std::mem::swap(&mut best, &mut current);
+        }
+    }
+    drop(current);
+    let outside = subject.len() - best_inside;
+    let center = best
+        .iter()
+        .filter(|row| !row.contained)
+        .find_map(|row| row.residual_center_of_mass);
+    let residuals = best
+        .iter()
+        .enumerate()
+        .map(|(index, row)| {
+            Json::object([
+                ("subjectIndex", Json::Number(index as f64)),
+                ("contained", Json::Bool(row.contained)),
+                (
+                    "residualSolidCount",
+                    Json::Number(f64::from(row.residual_solid_count)),
+                ),
+                ("residualVolume", Json::Number(row.residual_volume)),
+                (
+                    "residualBounds",
+                    row.residual_bounds.map_or(Json::Null, |bounds| {
+                        Json::object([
+                            ("min", point_json(bounds.min)),
+                            ("max", point_json(bounds.max)),
+                        ])
+                    }),
+                ),
+                (
+                    "residualCenterOfMass",
+                    row.residual_center_of_mass.map_or(Json::Null, point_json),
+                ),
+            ])
+        })
+        .collect();
+    let final_evidence = final_json(
+        "boolean-difference",
+        Json::object([
+            (
+                "criterion",
+                Json::string("one-single-target-contains-all-subjects"),
+            ),
+            ("ruling", Json::string("W3-CONTAINMENT-SET-01")),
+            ("containedSubjects", Json::Number(best_inside as f64)),
+            ("outsideSubjects", Json::Number(outside as f64)),
+            ("targetIndex", Json::Number(best_target as f64)),
+            ("subjects", Json::Number(subject.len() as f64)),
+            ("targets", Json::Array(targets)),
+            ("residuals", Json::Array(residuals)),
+        ]),
+        Json::object([("outsideSubjects", Json::Number(0.0))]),
+        // A residual centroid need not belong to a concave/disconnected solid.
+        // Keep it in measured diagnostics, never as a certified point witness.
+        vec![],
+    );
+    let mut diagnostics: Vec<_> = (outside != 0).then(|| mismatch(
+        format!("'{}' is not contained by any single target in '{}': {outside} of {} subjects leave solid residue against the best target (selection index {best_target}).", selector_label(&relationship.subject_raw), selector_label(&relationship.target_raw), subject.len()),
+        "Re-position the reported subjects or repair the target's residual region; separate targets are not implicitly united.",
+        center,
+    )).into_iter().collect();
+    for diagnostic in &mut diagnostics {
+        if let Some(Json::Object(fields)) = &mut diagnostic.spatial {
+            fields.push(("role".into(), Json::string("diagnostic-residual-centroid")));
+        }
+    }
+    Ok(Proof {
+        positive: outside == 0,
+        broad_phase: broad,
+        final_evidence,
+        diagnostics,
+    })
 }
 
 fn prove_containment_in_bore(
@@ -1111,20 +1726,6 @@ fn prove_containment_in_bore(
     })
 }
 
-fn sampled_containment_refusal() -> Evaluation {
-    let mut diagnostic = Diagnostic::error("GEOSPEC_EVIDENCE_UNSUPPORTED", "The containment profile has only finite point samples; continuous solid containment is not qualified.");
-    diagnostic.suggestion = Some("Use a qualified regular-solid containment query; sampled points do not prove that the complete subject is contained.".into());
-    diagnostic.details = Some(Json::object([
-        ("matcher", Json::string("toHaveSpatialRelationships")),
-        ("kind", Json::string("containment")),
-        ("profile", Json::string("geospec-containment-sampled-v1")),
-        ("continuousContainmentQualified", Json::Bool(false)),
-    ]));
-    Evaluation::Refused {
-        diagnostics: vec![diagnostic],
-    }
-}
-
 fn sampled_insertion_refusal() -> Evaluation {
     let mut diagnostic = Diagnostic::error("GEOSPEC_EVIDENCE_UNSUPPORTED",
         "The insertion profile has only 64-station sampled depth; continuous insertion depth is not qualified.");
@@ -1139,6 +1740,93 @@ fn sampled_insertion_refusal() -> Evaluation {
     Evaluation::Refused {
         diagnostics: vec![diagnostic],
     }
+}
+
+fn prove_continuous_insertion(
+    relationship: &Relationship,
+    subject: &[Endpoint],
+    target: &[Endpoint],
+    context: &mut EvaluationContext<'_>,
+) -> Result<Proof, ProofError> {
+    let ([subject_endpoint], [target_endpoint], Some(axis)) = (subject, target, relationship.axis)
+    else {
+        return Err(ProofError::Refused(sampled_insertion_refusal()));
+    };
+    let (BrepEntity::Occurrence(subject_id), BrepEntity::Occurrence(target_id)) =
+        (subject_endpoint.entity, target_endpoint.entity)
+    else {
+        return Err(ProofError::Refused(sampled_insertion_refusal()));
+    };
+    let subject_domain = context
+        .selected_continuous_domain(subject_id)
+        .map_err(ProofError::Refused)?;
+    let target_domain = context
+        .selected_continuous_domain(target_id)
+        .map_err(ProofError::Refused)?;
+    let units = continuous::insertion_units(if subject_id == target_id { 1 } else { 2 }).map_err(
+        |error| {
+            ProofError::Refused(relationship_unsupported(
+                &error.message,
+                "Use the declared finite nominal box insertion domain.",
+            ))
+        },
+    )?;
+    context.budget.charge(units).map_err(|error| {
+        ProofError::Budget(Evaluation::budget_exceeded(context.capability, error))
+    })?;
+    let (positive, evidence) = match continuous::insertion(InsertionRequest {
+        subject: &subject_domain,
+        target: &target_domain,
+        axis,
+        minimum: relationship.min.unwrap_or(0.0),
+        maximum: relationship.max,
+    }) {
+        Outcome::Decided { positive, evidence } => (positive, evidence),
+        Outcome::Unsupported { reason, .. } => {
+            return Err(ProofError::Refused(relationship_unsupported(
+                &reason.message,
+                "Use two qualified complete nominal boxes and an explicit Cartesian insertion axis.",
+            )))
+        }
+    };
+    let mut expected = Vec::new();
+    if let Some(minimum) = relationship.min {
+        expected.push(("min".into(), Json::Number(minimum)));
+    }
+    if let Some(maximum) = relationship.max {
+        expected.push(("max".into(), Json::Number(maximum)));
+    }
+    let final_evidence = final_json(
+        "continuous-centerline",
+        Json::object([("depth", Json::Number(evidence.depth.display))]),
+        Json::Object(expected),
+        vec![Json::object([
+            ("kind", Json::string("nominal-continuous-insertion")),
+            ("value", evidence.to_json()),
+        ])],
+    );
+    let diagnostics = (!positive)
+        .then(|| {
+            mismatch(
+                format!(
+                    "Insertion of '{}' into '{}' is outside the declared engagement band (exact depth {}/{} mm).",
+                    selector_label(&relationship.subject_raw),
+                    selector_label(&relationship.target_raw),
+                    evidence.depth.numerator,
+                    evidence.depth.denominator,
+                ),
+                "Seat the part deeper, or adjust the declared engagement band.",
+                Some(evidence.centerline.each_ref().map(|value| value.display)),
+            )
+        })
+        .into_iter()
+        .collect();
+    Ok(Proof {
+        positive,
+        broad_phase: broad_phase(subject, target, DEFAULT_LINEAR_TOLERANCE),
+        final_evidence,
+        diagnostics,
+    })
 }
 
 fn prove_interference(
@@ -1467,14 +2155,17 @@ fn optional_numbers(values: &[(&str, Option<f64>)]) -> Json {
 fn empty_object() -> Json {
     Json::Object(Vec::new())
 }
-fn json_field(value: &Json, key: &str) -> Option<Json> {
+fn json_field_ref<'a>(value: &'a Json, key: &str) -> Option<&'a Json> {
     let Json::Object(fields) = value else {
         return None;
     };
     fields
         .iter()
         .find(|(name, _)| name == key)
-        .map(|(_, value)| value.clone())
+        .map(|(_, value)| value)
+}
+fn json_field(value: &Json, key: &str) -> Option<Json> {
+    json_field_ref(value, key).cloned()
 }
 fn json_string(value: &Json) -> String {
     String::from_utf8(encode(value).unwrap_or_default()).unwrap_or_default()
@@ -1621,6 +2312,14 @@ fn entity_json(entity: &Entity) -> Json {
 #[cfg(test)]
 #[path = "relationship_scalar_tests.rs"]
 pub(crate) mod relationship_scalar_tests;
+
+#[cfg(test)]
+#[path = "../../tests/regular_set_containment.rs"]
+mod regular_set_containment;
+
+#[cfg(test)]
+#[path = "../../tests/cylindrical_band_core.rs"]
+mod cylindrical_band_core;
 
 #[cfg(test)]
 mod tests {

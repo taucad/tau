@@ -123,12 +123,44 @@ pub struct CylinderVertex {
     pub point: [f64; 3],
 }
 
+/// Original Part21 face identity and its complete root-to-leaf occurrence route.
+/// The route contains at most 32 original NAUO entity labels, never XDE names.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SourceFaceKey {
+    pub source_face_entity: u32,
+    pub occurrence_route: Vec<u32>,
+}
+
+/// Forward transfer association for independently source-derived geometry.
+/// Private query addresses must never become public canonical face identities.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ResolvedSourceFace {
+    pub key: SourceFaceKey,
+    pub occurrence: u32,
+    pub public_face_ordinal: u32,
+    pub private_query_face: u32,
+    /// Original Part21 `ADVANCED_FACE.same_sense`.
+    pub source_same_sense: bool,
+    /// Whether the located transferred face has `TopAbs_REVERSED` orientation.
+    pub transferred_reversed: bool,
+}
+
 /// Cheap retained XDE admission metadata; obtaining it must not tessellate.
 #[derive(Clone, Debug, PartialEq)]
 pub struct BrepAdmissionFacts {
     pub source_length_unit: String,
     pub source_unit_to_millimeters: f64,
     pub occurrence_count: usize,
+}
+
+/// Bounded public-subject metadata captured by the same successful STEP read.
+/// Returning this record declares support for the native STEP subject profile.
+#[derive(Clone, Debug, PartialEq)]
+pub struct StepSubjectMetadata {
+    pub schema: Option<String>,
+    pub source_byte_length: usize,
+    pub free_shape_count: usize,
+    pub native_read_stream: bool,
 }
 
 /// One coherent fixed-profile report. The core owns its successful retention;
@@ -501,6 +533,361 @@ pub struct CylinderAxialExtent {
     pub to: f64,
 }
 
+/// Associated closed lateral band under the nominal reconstruction profile.
+/// Raw axis/frame values are retained; the nominal axis is mathematically
+/// normalized. Tolerance-qualified attachment is not source-exact STEP or an
+/// exact-real assertion about the stored periodic span. No caps are included.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NominalCylindricalBand {
+    pub profile: CylindricalBandProfile,
+    pub occurrence: u32,
+    pub public_face_ordinal: u32,
+    pub private_query_face: u32,
+    pub source_face_entity: u32,
+    pub source_route_count: u32,
+    /// The first source_route_count entries are the original NAUO route.
+    pub source_route: [u32; 32],
+    pub source_same_sense: bool,
+    pub transferred_reversed: bool,
+    pub origin: [f64; 3],
+    pub axis: [f64; 3],
+    pub phase_x: [f64; 3],
+    pub phase_y: [f64; 3],
+    pub radius: f64,
+    pub from: f64,
+    pub to: f64,
+    /// Raw U0,U1,V0,V1, without snapping or replacing the stored period.
+    pub parameter_bounds: [f64; 4],
+    pub surface_period: f64,
+    /// Ordered by nominal lower/upper station. Edge IDs are face-local 1..3.
+    pub rims: [CylindricalBandRim; 2],
+    pub seam_edge_index: u32,
+    pub seam_origin: [f64; 3],
+    pub seam_axis: [f64; 3],
+    pub seam_curve_range: [f64; 2],
+    pub seam_vertex_indices: [u32; 2],
+    pub boundary: [CylinderBoundaryUse; 4],
+    /// Complete face-local vertex inventory, one-based IDs 1..2.
+    pub vertices: [CylinderVertex; 2],
+    pub face_tolerance_mm: f64,
+    pub edge_tolerances_mm: [f64; 3],
+    pub vertex_tolerances_mm: [f64; 2],
+    /// Radius times absolute raw U-span minus stored surface period.
+    pub period_residual_mm: f64,
+    pub boundary_residuals: [CylindricalBandBoundaryResidual; 4],
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+pub enum CylindricalBandProfile {
+    #[serde(rename = "geospec-nominal-cylindrical-band-clearance-v1")]
+    NominalV1,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CylindricalBandRim {
+    pub edge_index: u32,
+    pub center: [f64; 3],
+    pub axis: [f64; 3],
+    pub phase_x: [f64; 3],
+    pub phase_y: [f64; 3],
+    pub radius: f64,
+    pub curve_range: [f64; 2],
+    pub curve_period: f64,
+    pub vertex_indices: [u32; 2],
+}
+
+/// Admission residuals in millimetres, not downstream predicate error bounds.
+/// The limit is the maximum tolerance of this face, edge and its vertices.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CylindricalBandBoundaryResidual {
+    pub parameter_coverage_mm: f64,
+    pub curve_surface_mm: f64,
+    pub vertex_attachment_mm: f64,
+    pub limit_mm: f64,
+}
+
+/// Fixed entry limits for the kernel-model straight-bore inventory. These do
+/// not bound kernel temporary memory or elapsed work.
+pub const MAX_CIRCULAR_BORE_CANDIDATES: usize = 4096;
+pub const MAX_CIRCULAR_BORE_OWNED_BYTES: u64 = 1024 * 1024;
+
+/// Fixed limits for the complete per-face edge-treatment inventory. They bound
+/// retained transfer and Rust-owned evidence, not transient kernel work.
+pub const MAX_EDGE_TREATMENT_ROWS: usize = 4096;
+pub const MAX_EDGE_TREATMENT_BOUNDARY_USES: usize = 8;
+pub const MAX_EDGE_TREATMENT_RESIDUALS: usize = 16;
+pub const MAX_EDGE_TREATMENT_OWNED_BYTES: u64 = 1024 * 1024;
+
+/// One nonplanar public Explorer face, including unsupported representations.
+/// Every candidate must return a disposition; an omitted row is not absence.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CircularBoreCandidate {
+    pub public_face_ordinal: u32,
+    pub private_query_face: u32,
+    pub disposition: CircularBoreDisposition,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum CircularBoreDisposition {
+    Qualified(CircularBoreTopology),
+    NonMember(CircularBoreNonMember),
+    Unqualified(CircularBoreUnqualified),
+}
+
+/// Complete local bore evidence from one actual located regular solid. This is
+/// a kernel-model topology record, not an exact-real source certificate.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CircularBoreTopology {
+    /// Zero-based unique solid ordinal in the nominal whole document.
+    pub owning_solid_ordinal: u32,
+    pub band: CylinderAxialExtent,
+    /// Ordered by the band's finite from/to stations.
+    pub ends: [CircularBoreEnd; 2],
+    pub maximum_topology_tolerance_mm: f64,
+    /// Successful valid Common may contain shared boundary topology. Its solid
+    /// count must be zero; measured volume is never the membership criterion.
+    pub interior_residual_solid_count: u32,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CircularBoreEnd {
+    /// One-based edge ordinal in this owning solid's unique topology map.
+    pub owning_solid_edge_ordinal: u32,
+    pub adjacent_public_face_ordinal: u32,
+    pub termination: CircularBoreTermination,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CircularBoreTermination {
+    Mouth,
+    PlanarDiskBottom,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CircularBoreNonMember {
+    ExteriorCylinder,
+    SealedCavity,
+    ObstructedInterior,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CircularBoreUnqualified {
+    UnsupportedSurface,
+    UnsupportedOrientation,
+    AmbiguousOwnership,
+    InvalidSolid,
+    IncompleteBand,
+    UnsupportedTermination,
+    AmbiguousAssociation,
+}
+
+/// Core-retained successful inventory; adapters retain no copy or Boolean
+/// intermediates. Capacity, not only length, participates in owned accounting.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CircularBoreInventory {
+    pub candidates: Vec<CircularBoreCandidate>,
+}
+
+impl CircularBoreInventory {
+    pub fn owned_bytes(&self) -> u64 {
+        (std::mem::size_of::<Self>() as u64).saturating_add(
+            (self.candidates.capacity() as u64)
+                .saturating_mul(std::mem::size_of::<CircularBoreCandidate>() as u64),
+        )
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct EdgeTreatmentCounts {
+    pub public_face_count: u32,
+    pub candidate_edge_use_count: u32,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct EdgeTreatmentInventory {
+    pub counts: EdgeTreatmentCounts,
+    pub rows: Vec<EdgeTreatmentRow>,
+}
+
+impl EdgeTreatmentInventory {
+    pub fn owned_bytes(&self) -> u64 {
+        let mut bytes = (std::mem::size_of::<Self>() as u64).saturating_add(
+            (self.rows.capacity() as u64)
+                .saturating_mul(std::mem::size_of::<EdgeTreatmentRow>() as u64),
+        );
+        for row in &self.rows {
+            bytes = bytes
+                .saturating_add(row.occurrence_path.capacity() as u64)
+                .saturating_add(
+                    row.source_face_key
+                        .as_ref()
+                        .map_or(0, |value| value.capacity() as u64),
+                )
+                .saturating_add(match &row.label {
+                    EdgeTreatmentLabel::Unique(value) => value.capacity() as u64,
+                    EdgeTreatmentLabel::Absent | EdgeTreatmentLabel::Ambiguous => 0,
+                })
+                .saturating_add(row.chamfer.owned_bytes())
+                .saturating_add(row.fillet.owned_bytes());
+        }
+        bytes
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct EdgeTreatmentRow {
+    pub occurrence: Option<u32>,
+    pub occurrence_path: String,
+    pub public_face_ordinal: u32,
+    pub private_query_face: u32,
+    pub owning_solid_ordinal: Option<u32>,
+    pub source_face_key: Option<String>,
+    pub source_same_sense: Option<bool>,
+    pub transferred_reversed: bool,
+    pub label: EdgeTreatmentLabel,
+    pub chamfer: EdgeTreatmentDisposition,
+    pub fillet: EdgeTreatmentDisposition,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum EdgeTreatmentLabel {
+    Unique(String),
+    Absent,
+    Ambiguous,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum EdgeTreatmentDisposition {
+    Qualified(Box<EdgeTreatmentCertificate>),
+    NonMember(EdgeTreatmentReason),
+    Unqualified(EdgeTreatmentReason),
+}
+
+impl EdgeTreatmentDisposition {
+    fn owned_bytes(&self) -> u64 {
+        match self {
+            Self::Qualified(certificate) => certificate.owned_bytes(),
+            Self::NonMember(_) | Self::Unqualified(_) => 0,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum EdgeTreatmentReason {
+    UnsupportedSurface,
+    UnsupportedTrim,
+    UnsupportedOrientation,
+    AmbiguousOwnership,
+    InvalidSolid,
+    AmbiguousAssociation,
+    IncompleteBoundary,
+    DegenerateSupport,
+    OutsideTopology,
+    OutsideMaterialBranch,
+    NonTangentSupport,
+    UnequalOffsets,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct EdgeTreatmentCertificate {
+    pub kind: EdgeTreatmentKind,
+    pub metric_value_mm: f64,
+    pub surface: SurfaceFacts,
+    pub parameter_bounds: [f64; 4],
+    pub supports: [EdgeTreatmentSupport; 2],
+    pub boundary_uses: Vec<EdgeTreatmentBoundaryUse>,
+    pub residuals: Vec<EdgeTreatmentResidual>,
+    pub wire_count: u32,
+    pub maximum_topology_tolerance_mm: f64,
+    pub material_side: EdgeTreatmentMaterialSide,
+    pub full_u: bool,
+    pub sweep_interval: [f64; 2],
+}
+
+impl EdgeTreatmentCertificate {
+    fn owned_bytes(&self) -> u64 {
+        (std::mem::size_of::<Self>() as u64)
+            .saturating_add(
+                (self.boundary_uses.capacity() as u64)
+                    .saturating_mul(std::mem::size_of::<EdgeTreatmentBoundaryUse>() as u64),
+            )
+            .saturating_add(
+                (self.residuals.capacity() as u64)
+                    .saturating_mul(std::mem::size_of::<EdgeTreatmentResidual>() as u64),
+            )
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum EdgeTreatmentKind {
+    PlanarChamfer,
+    ConicalChamfer,
+    CylindricalFillet,
+    ToroidalFillet,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct EdgeTreatmentSupport {
+    pub public_face_ordinal: u32,
+    pub private_query_face: u32,
+    pub surface: SurfaceFacts,
+    pub parameter_bounds: [f64; 4],
+    pub transferred_reversed: bool,
+    pub maximum_topology_tolerance_mm: f64,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct EdgeTreatmentBoundaryUse {
+    pub owning_solid_edge_ordinal: u32,
+    pub wire_ordinal: u32,
+    pub reversed: bool,
+    pub seam: bool,
+    pub role: EdgeTreatmentBoundaryRole,
+    pub curve: CurveFacts,
+    pub parameter_range: [f64; 2],
+    pub start: [f64; 3],
+    pub end: [f64; 3],
+    pub length_mm: f64,
+    pub edge_tolerance_mm: f64,
+    pub vertex_tolerances_mm: [f64; 2],
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum EdgeTreatmentBoundaryRole {
+    Rail0,
+    Rail1,
+    End,
+    Seam,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EdgeTreatmentResidual {
+    pub kind: EdgeTreatmentResidualKind,
+    pub value_mm: f64,
+    pub limit_mm: f64,
+    pub scale_mm: f64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum EdgeTreatmentResidualKind {
+    RailCoincidence,
+    AxisCoincidence,
+    ParallelDirection,
+    TangentDirection,
+    EqualOffsets,
+    RailStation,
+    MaterialBranch,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum EdgeTreatmentMaterialSide {
+    Convex,
+    Concave,
+}
+
 /// Semantic admission profiles supplied by the selected connector. Artifact
 /// source/build receipts qualify these names; a name alone is not certification.
 #[derive(Clone, Copy, Debug)]
@@ -524,6 +911,10 @@ pub trait BrepSubject {
         })
     }
 
+    fn step_subject_metadata(&self) -> Result<Option<StepSubjectMetadata>, BackendError> {
+        Ok(None)
+    }
+
     fn reported_facts_and_mesh(&self) -> Result<ReportedBrepBundle, BackendError> {
         Err(BackendError {
             kind: super::BackendErrorKind::Unsupported,
@@ -539,6 +930,46 @@ pub trait BrepSubject {
         Err(BackendError {
             kind: super::BackendErrorKind::Unsupported,
             message: "The BRep connector has no qualified trimmed-cylinder axial extent.".into(),
+        })
+    }
+
+    /// Complete associated nominal lateral band for one occurrence face.
+    /// The caller charges the distinct face before this uncached query.
+    /// Missing/ambiguous source or trim evidence is Unsupported, never absence.
+    fn nominal_cylindrical_band(
+        &self,
+        _face: BrepEntity,
+    ) -> Result<NominalCylindricalBand, BackendError> {
+        Err(BackendError {
+            kind: super::BackendErrorKind::Unsupported,
+            message: "The BRep connector has no associated nominal cylindrical-band query.".into(),
+        })
+    }
+
+    /// Complete bounded dispositions for nonplanar whole-document Explorer
+    /// faces. Unsupported/split trims remain visible. The caller charges the
+    /// inventory plus all candidate requests before this query or cache lookup.
+    fn circular_bores(
+        &self,
+        _max_candidates: usize,
+    ) -> Result<CircularBoreInventory, BackendError> {
+        Err(BackendError {
+            kind: super::BackendErrorKind::Unsupported,
+            message: "The BRep connector has no qualified circular-bore topology query.".into(),
+        })
+    }
+
+    fn edge_treatment_counts(&self) -> Result<EdgeTreatmentCounts, BackendError> {
+        Err(BackendError {
+            kind: super::BackendErrorKind::Unsupported,
+            message: "The BRep connector has no qualified edge-treatment count route.".into(),
+        })
+    }
+
+    fn edge_treatments(&self, _max_rows: usize) -> Result<EdgeTreatmentInventory, BackendError> {
+        Err(BackendError {
+            kind: super::BackendErrorKind::Unsupported,
+            message: "The BRep connector has no qualified edge-treatment topology query.".into(),
         })
     }
 
@@ -577,6 +1008,19 @@ pub trait BrepSubject {
         Err(BackendError {
             kind: super::BackendErrorKind::Unsupported,
             message: "The BRep connector has no qualified selected continuous domain query.".into(),
+        })
+    }
+
+    /// Resolve original source entities forward through this actual document's
+    /// transfer graph. Missing or ambiguous associations cannot use name,
+    /// nearest-placement, or reverse first-match fallbacks.
+    fn resolve_source_face(
+        &self,
+        _key: &SourceFaceKey,
+    ) -> Result<ResolvedSourceFace, BackendError> {
+        Err(BackendError {
+            kind: super::BackendErrorKind::Unsupported,
+            message: "The BRep connector has no qualified source-face transfer association.".into(),
         })
     }
 

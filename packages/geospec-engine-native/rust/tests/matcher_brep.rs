@@ -1,9 +1,10 @@
-use std::rc::Rc;
+use std::{cell::Cell, rc::Rc};
 
 use super::*;
 use crate::backend::{
     brep::{
-        BrepEntity, CommonVolume, EdgeFacts, Extrema, FaceFacts, LocatedFace, OccurrenceFacts,
+        BrepEntity, CircularBoreCandidate, CircularBoreEnd, CircularBoreTopology, CommonVolume,
+        CylinderAxialExtent, EdgeFacts, Extrema, FaceFacts, LocatedFace, OccurrenceFacts,
         PointState, ProductFacts, ShapeFacts, TessellationProfile, ValidityCheck, WallOptions,
         WallThicknessOutcome,
     },
@@ -29,7 +30,7 @@ fn face(
     LocatedFace {
         entity: BrepEntity::WholeFace(index),
         facts: FaceFacts {
-            index,
+            index: index - 1,
             parameter_bounds: [0.0; 4],
             area: 20.0,
             center_of_mass: center,
@@ -160,6 +161,7 @@ struct RetainedBrep {
     facts: Rc<DocumentFacts>,
     faces: Rc<[LocatedFace]>,
     validity: Rc<ValidityFacts>,
+    bore_queries: Rc<Cell<usize>>,
 }
 
 impl RetainedBrep {
@@ -167,6 +169,7 @@ impl RetainedBrep {
         Self {
             facts: Rc::new(retained_facts()),
             faces: Rc::from(retained_faces()),
+            bore_queries: Rc::new(Cell::new(0)),
             validity: Rc::new(ValidityFacts {
                 valid: true,
                 checks: Some(vec![ValidityCheck {
@@ -197,6 +200,91 @@ fn unused() -> BackendError {
 }
 
 impl BrepSubject for RetainedBrep {
+    fn edge_treatment_counts(
+        &self,
+    ) -> Result<crate::backend::brep::EdgeTreatmentCounts, BackendError> {
+        Ok(crate::backend::brep::EdgeTreatmentCounts {
+            public_face_count: 0,
+            candidate_edge_use_count: 0,
+        })
+    }
+
+    fn edge_treatments(
+        &self,
+        _: usize,
+    ) -> Result<crate::backend::brep::EdgeTreatmentInventory, BackendError> {
+        Ok(crate::backend::brep::EdgeTreatmentInventory {
+            counts: crate::backend::brep::EdgeTreatmentCounts {
+                public_face_count: 0,
+                candidate_edge_use_count: 0,
+            },
+            rows: Vec::new(),
+        })
+    }
+
+    fn circular_bores(&self, max_candidates: usize) -> Result<CircularBoreInventory, BackendError> {
+        self.bore_queries.set(self.bore_queries.get() + 1);
+        // Opaque authored connector outcomes for core contract tests only.
+        // These synthetic faces do not constitute a kernel topology proof.
+        let candidates: Vec<_> = self
+            .faces
+            .iter()
+            .filter_map(|face| {
+                if matches!(face.facts.surface, SurfaceFacts::Plane { .. }) {
+                    return None;
+                }
+                let disposition = match face.facts.surface {
+                    SurfaceFacts::Cylinder {
+                        origin,
+                        axis,
+                        radius,
+                    } if face.reversed => {
+                        CircularBoreDisposition::Qualified(CircularBoreTopology {
+                            owning_solid_ordinal: 0,
+                            band: CylinderAxialExtent {
+                                origin,
+                                axis,
+                                radius,
+                                from: 0.0,
+                                to: 10.0,
+                            },
+                            ends: [
+                                CircularBoreEnd {
+                                    owning_solid_edge_ordinal: 1,
+                                    adjacent_public_face_ordinal: 0,
+                                    termination: CircularBoreTermination::Mouth,
+                                },
+                                CircularBoreEnd {
+                                    owning_solid_edge_ordinal: 2,
+                                    adjacent_public_face_ordinal: 1,
+                                    termination: CircularBoreTermination::Mouth,
+                                },
+                            ],
+                            maximum_topology_tolerance_mm: 0.001,
+                            interior_residual_solid_count: 0,
+                        })
+                    }
+                    SurfaceFacts::Cylinder { .. } => {
+                        CircularBoreDisposition::NonMember(CircularBoreNonMember::ExteriorCylinder)
+                    }
+                    _ => CircularBoreDisposition::Unqualified(
+                        CircularBoreUnqualified::UnsupportedSurface,
+                    ),
+                };
+                let BrepEntity::WholeFace(private_query_face) = face.entity else {
+                    unreachable!()
+                };
+                Some(CircularBoreCandidate {
+                    public_face_ordinal: face.facts.index,
+                    private_query_face,
+                    disposition,
+                })
+            })
+            .collect();
+        assert!(candidates.len() <= max_candidates);
+        Ok(CircularBoreInventory { candidates })
+    }
+
     fn reported_facts_and_mesh(
         &self,
     ) -> Result<crate::backend::brep::ReportedBrepBundle, BackendError> {
@@ -582,7 +670,8 @@ fn retained_neutral_facts_drive_all_eleven_positive_predicates() {
         .positive
     );
 
-    let features = derive_features(&brep, &facts, false).unwrap();
+    let mut features = derive_features(&brep).unwrap();
+    populate_bores(&mut features, &brep, &brep.circular_bores(4096).unwrap()).unwrap();
     assert!(
         expected_planar(&PlanarExpectation {
             normal: [Some(0.0), Some(0.0), Some(1.0)],
@@ -621,37 +710,49 @@ fn retained_neutral_facts_drive_all_eleven_positive_predicates() {
         })(&features)
         .positive
     );
-    assert!(
-        expected_chamfer(&FeatureExpectation {
-            value: 2.0,
-            selection: None,
-            tolerance: 0.02
-        })(&features)
-        .positive
-    );
-    assert!(
-        expected_fillet(&FeatureExpectation {
-            value: 0.5,
-            selection: None,
-            tolerance: 0.02
-        })(&features)
-        .positive
-    );
+    // Edge treatments no longer derive membership from face/AABB heuristics;
+    // typed-inventory predicates are covered by edge_treatment_core.rs.
 }
 
 #[test]
 fn evaluation_context_drives_all_eleven_matcher_families_with_one_brep_unit() {
     let retained = RetainedBrep::complete();
-    let source_evidence = brep_evidence(&retained, &retained.facts).unwrap();
+    let empty_edge_treatments = crate::backend::brep::EdgeTreatmentInventory {
+        counts: crate::backend::brep::EdgeTreatmentCounts {
+            public_face_count: 0,
+            candidate_edge_use_count: 0,
+        },
+        rows: Vec::new(),
+    };
+    let source_evidence = brep_evidence(
+        &retained,
+        &retained.facts,
+        &retained.circular_bores(4096).unwrap(),
+        &empty_edge_treatments,
+    )
+    .unwrap();
     let mut subject = retained_subject();
     subject.brep = Some(Box::new(retained));
     let subjects = [Rc::new(subject)];
 
-    for (capability, expected) in valid_expectations() {
+    for (capability, expected) in valid_expectations().into_iter().filter(|(capability, _)| {
+        !matches!(
+            capability,
+            Capability::ToHaveChamferFeature | Capability::ToHaveFilletFeature
+        )
+    }) {
         let prepared = prepared(capability, expected);
         let expected = prepared.expected_json();
         let normalized = prepared.normalized_payload();
-        let mut budget = Budget::new(1);
+        let expected_units = if matches!(
+            capability,
+            Capability::ToHaveCircularHole | Capability::ToHaveCircularHolePattern
+        ) {
+            7
+        } else {
+            1
+        };
+        let mut budget = Budget::new(expected_units);
         let mut context = EvaluationContext::new(
             &subjects,
             capability,
@@ -840,16 +941,12 @@ fn evaluation_context_drives_all_eleven_matcher_families_with_one_brep_unit() {
                     Capability::ToHavePlanarFace
                     | Capability::ToHaveCylindricalFace
                     | Capability::ToHaveCircularHole
-                    | Capability::ToHaveCircularHolePattern
-                    | Capability::ToHaveChamferFeature
-                    | Capability::ToHaveFilletFeature => {
+                    | Capability::ToHaveCircularHolePattern => {
                         let (key, match_count) = match capability {
                             Capability::ToHavePlanarFace => ("planarFaces", 1),
                             Capability::ToHaveCylindricalFace => ("cylindricalFaces", 4),
                             Capability::ToHaveCircularHole => ("circularHoles", 4),
                             Capability::ToHaveCircularHolePattern => ("circularHolePatterns", 1),
-                            Capability::ToHaveChamferFeature => ("chamferFeatures", 1),
-                            Capability::ToHaveFilletFeature => ("filletFeatures", 1),
                             _ => unreachable!(),
                         };
                         assert_eq!(
@@ -883,7 +980,7 @@ fn evaluation_context_drives_all_eleven_matcher_families_with_one_brep_unit() {
         drop(context);
         assert_eq!(
             budget.used(),
-            1,
+            expected_units,
             "{} charged the wrong work",
             capability.name()
         );
@@ -919,7 +1016,8 @@ fn mismatch_diagnostics_retain_source_details_and_inventory() {
     );
 
     let brep = RetainedBrep::complete();
-    let features = derive_features(&brep, &brep.facts, false).unwrap();
+    let mut features = derive_features(&brep).unwrap();
+    populate_bores(&mut features, &brep, &brep.circular_bores(4096).unwrap()).unwrap();
     let expected = PlanarExpectation {
         normal: [Some(0.0), Some(0.0), Some(1.0)],
         offset: 99.0,
@@ -958,7 +1056,7 @@ fn analyze_brep_projects_all_available_source_evidence() {
     subject.brep = Some(Box::new(RetainedBrep::complete()));
     let subjects = [Rc::new(subject)];
     let normalized = Json::Null;
-    let mut budget = Budget::new(1);
+    let mut budget = Budget::new(8);
     let mut context = EvaluationContext::new(
         &subjects,
         Capability::AnalyzeBrep,
@@ -996,6 +1094,8 @@ fn analyze_brep_projects_all_available_source_evidence() {
             "cylindricalFaces",
             "circularHoles",
             "circularHolePatterns",
+            "circularBoreTopology",
+            "edgeTreatmentTopology",
             "chamferFeatures",
             "filletFeatures",
         ]
@@ -1023,8 +1123,8 @@ fn analyze_brep_projects_all_available_source_evidence() {
         ("cylindricalFaces", 5),
         ("circularHoles", 4),
         ("circularHolePatterns", 1),
-        ("chamferFeatures", 1),
-        ("filletFeatures", 1),
+        ("chamferFeatures", 0),
+        ("filletFeatures", 0),
     ] {
         assert_eq!(
             object_field(brep, key),
@@ -1035,7 +1135,7 @@ fn analyze_brep_projects_all_available_source_evidence() {
     }
     assert!(object_field(brep, "minimumWallThickness").is_none());
     drop(context);
-    assert_eq!(budget.used(), 1);
+    assert_eq!(budget.used(), 8);
 }
 
 #[test]
@@ -1144,7 +1244,8 @@ fn retained_neutral_facts_drive_all_eleven_negative_predicates() {
         .positive
     );
 
-    let features = derive_features(&brep, &facts, false).unwrap();
+    let mut features = derive_features(&brep).unwrap();
+    populate_bores(&mut features, &brep, &brep.circular_bores(4096).unwrap()).unwrap();
     assert!(
         !expected_planar(&PlanarExpectation {
             normal: [Some(0.0), Some(0.0), Some(1.0)],
@@ -1183,29 +1284,16 @@ fn retained_neutral_facts_drive_all_eleven_negative_predicates() {
         })(&features)
         .positive
     );
-    assert!(
-        !expected_chamfer(&FeatureExpectation {
-            value: 99.0,
-            selection: None,
-            tolerance: 0.02,
-        })(&features)
-        .positive
-    );
-    assert!(
-        !expected_fillet(&FeatureExpectation {
-            value: 99.0,
-            selection: None,
-            tolerance: 0.02,
-        })(&features)
-        .positive
-    );
+    // Edge-treatment mismatch semantics are exercised against typed
+    // dispositions in edge_treatment_core.rs.
 }
 
 #[test]
 fn numeric_matcher_boundaries_are_inclusive() {
     let brep = RetainedBrep::complete();
     let facts = brep.facts().unwrap();
-    let features = derive_features(&brep, &facts, false).unwrap();
+    let mut features = derive_features(&brep).unwrap();
+    populate_bores(&mut features, &brep, &brep.circular_bores(4096).unwrap()).unwrap();
     assert!(
         evaluate_topology(
             &TopologyExpectation {
@@ -1257,30 +1345,14 @@ fn numeric_matcher_boundaries_are_inclusive() {
         })(&features)
         .positive
     );
-    let chamfer = features.chamfers[0].value;
-    assert!(
-        expected_chamfer(&FeatureExpectation {
-            value: chamfer + 0.125,
-            selection: None,
-            tolerance: 0.125,
-        })(&features)
-        .positive
-    );
-    assert!(
-        expected_fillet(&FeatureExpectation {
-            value: 0.625,
-            selection: None,
-            tolerance: 0.125,
-        })(&features)
-        .positive
-    );
 }
 
 #[test]
 fn negative_measured_empty_and_missing_validity_are_distinct() {
     let mut brep = RetainedBrep::complete();
     brep.faces = Rc::from(Vec::<LocatedFace>::new());
-    let features = derive_features(&brep, &brep.facts, false).unwrap();
+    let mut features = derive_features(&brep).unwrap();
+    populate_bores(&mut features, &brep, &brep.circular_bores(4096).unwrap()).unwrap();
     let measured_empty = expected_hole(&HoleExpectation {
         diameter: 2.0,
         through: None,
@@ -1318,7 +1390,8 @@ fn negative_measured_empty_and_missing_validity_are_distinct() {
 #[test]
 fn point_normalization_failure_details_use_the_canonical_expectation() {
     let brep = RetainedBrep::complete();
-    let features = derive_features(&brep, &brep.facts, false).unwrap();
+    let mut features = derive_features(&brep).unwrap();
+    populate_bores(&mut features, &brep, &brep.circular_bores(4096).unwrap()).unwrap();
     for (capability, raw, point_key) in [
         (
             Capability::ToHavePlanarFace,
@@ -1399,7 +1472,8 @@ fn product_structure_preserves_path_and_row_major_placement_witness() {
 #[test]
 fn nominal_feature_metrics_preserve_authored_thresholds_without_enclosures() {
     let brep = RetainedBrep::complete();
-    let features = derive_features(&brep, &brep.facts, false).unwrap();
+    let mut features = derive_features(&brep).unwrap();
+    populate_bores(&mut features, &brep, &brep.circular_bores(4096).unwrap()).unwrap();
     let next_radius = f64::from_bits(1.0_f64.to_bits() + 1);
     let mut cylinder = CylindricalExpectation {
         radius: next_radius,
@@ -1477,7 +1551,8 @@ fn nominal_axis_label_does_not_assert_exact_alignment() {
     if let SurfaceFacts::Cylinder { axis, .. } = &mut cylinder.facts.surface {
         *axis = [0.6, 0.0, 0.8];
     }
-    let features = derive_features(&brep, &brep.facts, false).unwrap();
+    let mut features = derive_features(&brep).unwrap();
+    populate_bores(&mut features, &brep, &brep.circular_bores(4096).unwrap()).unwrap();
     let outcome = expected_cylinder(&CylindricalExpectation {
         radius: 0.5,
         axis: Axis::Z,
@@ -1493,4 +1568,183 @@ fn nominal_axis_label_does_not_assert_exact_alignment() {
     );
     assert_eq!(Axis::dominant([1.0, -1.0, 1.0]), Axis::X);
     assert_eq!(Axis::dominant([0.0, -1.0, 1.0]), Axis::Y);
+}
+
+#[test]
+fn bore_inventory_reuses_success_with_identical_cold_warm_debits() {
+    let retained = RetainedBrep::complete();
+    let queries = Rc::clone(&retained.bore_queries);
+    let mut subject = retained_subject();
+    subject.brep = Some(Box::new(retained));
+    let subjects = [Rc::new(subject)];
+    let prepared = prepared(
+        Capability::ToHaveCircularHole,
+        Json::object([
+            ("diameter", Json::Number(2.0)),
+            ("through", Json::Bool(true)),
+        ]),
+    );
+    let normalized = prepared.normalized_payload();
+    let mut first = None;
+    for limit in [6, 7, 7, 6] {
+        let budget = Budget::new(limit);
+        let mut context = EvaluationContext::new(
+            &subjects,
+            Capability::ToHaveCircularHole,
+            "bore",
+            &normalized,
+            &budget,
+            None,
+        );
+        let value = crate::result::finish(
+            "bore",
+            Capability::ToHaveCircularHole,
+            crate::result::Polarity::Positive,
+            evaluate(&prepared, &mut context),
+        )
+        .unwrap();
+        assert_eq!(budget.used(), 7);
+        if limit == 6 {
+            assert_eq!(
+                object_field(&value, "status"),
+                Some(&Json::string("refused"))
+            );
+            let diagnostic = &array_values(object_field(&value, "diagnostics").unwrap())[0];
+            assert_eq!(
+                object_field(diagnostic, "code"),
+                Some(&Json::string("MATCHER_TIMEOUT"))
+            );
+        } else {
+            assert_eq!(
+                object_field(&value, "status"),
+                Some(&Json::string("passed"))
+            );
+            if let Some(first) = &first {
+                assert_eq!(&value, first);
+            } else {
+                first = Some(value);
+            }
+        }
+        assert_eq!(queries.get(), usize::from(first.is_some()));
+    }
+}
+
+#[test]
+fn bore_unknowns_preserve_existential_witness_and_refuse_absence_or_pattern() {
+    let mut retained = RetainedBrep::complete();
+    // An ordinary unsupported curved surface is a candidate, not an omitted
+    // hole. This tests propagation of a typed connector disposition only.
+    Rc::make_mut(&mut retained.faces)[2].facts.surface = SurfaceFacts::Sphere {
+        center: [0.0, 0.0, 5.0],
+        radius: 0.5,
+    };
+    let mut subject = retained_subject();
+    subject.brep = Some(Box::new(retained));
+    let subjects = [Rc::new(subject)];
+    for (capability, expected, positive_status, negative_status) in [
+        (
+            Capability::ToHaveCircularHole,
+            Json::object([("diameter", Json::Number(2.0))]),
+            "passed",
+            "failed",
+        ),
+        (
+            Capability::ToHaveCircularHole,
+            Json::object([("diameter", Json::Number(99.0))]),
+            "refused",
+            "refused",
+        ),
+        (
+            Capability::ToHaveCircularHolePattern,
+            Json::object([
+                ("count", Json::Number(4.0)),
+                ("holeDiameter", Json::Number(2.0)),
+            ]),
+            "refused",
+            "refused",
+        ),
+    ] {
+        let prepared = prepared(capability, expected);
+        let normalized = prepared.normalized_payload();
+        for (polarity, status) in [
+            (crate::result::Polarity::Positive, positive_status),
+            (crate::result::Polarity::Negative, negative_status),
+        ] {
+            let budget = Budget::new(7);
+            let mut context =
+                EvaluationContext::new(&subjects, capability, "bore", &normalized, &budget, None);
+            let value = crate::result::finish(
+                "bore",
+                capability,
+                polarity,
+                evaluate(&prepared, &mut context),
+            )
+            .unwrap();
+            assert_eq!(object_field(&value, "status"), Some(&Json::string(status)));
+            assert_eq!(budget.used(), 7);
+            if status == "refused" {
+                let diagnostic = &array_values(object_field(&value, "diagnostics").unwrap())[0];
+                let topology = object_field(
+                    object_field(diagnostic, "details").unwrap(),
+                    "circularBoreTopology",
+                )
+                .unwrap();
+                assert_eq!(object_field(topology, "complete"), Some(&Json::Bool(false)));
+                assert_eq!(
+                    array_values(object_field(topology, "candidates").unwrap()).len(),
+                    5
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn analyze_brep_exposes_partial_bore_inventory_without_fabricated_pattern() {
+    let mut retained = RetainedBrep::complete();
+    Rc::make_mut(&mut retained.faces)[2].facts.surface = SurfaceFacts::Sphere {
+        center: [0.0, 0.0, 5.0],
+        radius: 0.5,
+    };
+    let mut subject = retained_subject();
+    subject.brep = Some(Box::new(retained));
+    let subjects = [Rc::new(subject)];
+    let normalized = Json::Null;
+    let budget = Budget::new(8);
+    let mut context = EvaluationContext::new(
+        &subjects,
+        Capability::AnalyzeBrep,
+        "analyze",
+        &normalized,
+        &budget,
+        None,
+    );
+    let Evaluation::Ancillary {
+        success,
+        value,
+        diagnostics,
+    } = evaluate_brep(&mut context)
+    else {
+        panic!("expected partial ancillary report")
+    };
+    assert!(success);
+    assert_eq!(diagnostics.len(), 1);
+    assert_eq!(diagnostics[0].severity, Severity::Warning);
+    assert_eq!(
+        object_field(&value, "diagnostics"),
+        Some(&Json::Array(vec![diagnostics[0].to_json()]))
+    );
+    let brep = object_field(&value, "brep").unwrap();
+    assert_eq!(
+        array_values(object_field(brep, "circularHoles").unwrap()).len(),
+        4
+    );
+    assert!(array_values(object_field(brep, "circularHolePatterns").unwrap()).is_empty());
+    assert_eq!(
+        object_field(
+            object_field(brep, "circularBoreTopology").unwrap(),
+            "complete"
+        ),
+        Some(&Json::Bool(false))
+    );
 }

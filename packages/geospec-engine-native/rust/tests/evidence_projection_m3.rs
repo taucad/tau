@@ -1,0 +1,347 @@
+use std::rc::Rc;
+
+use geospec_engine_native_core::{
+    backend::{
+        brep::{
+            Bounds, BrepAdmissionFacts, BrepConnector, BrepEntity, BrepIdentityProfile,
+            BrepSubject, CommonVolume, DocumentFacts, EdgeFacts, Extrema, LocatedFace, PointState,
+            ReportedBrepBundle, ShapeFacts, StepSubjectMetadata, TessellationProfile,
+            TopologyCounts, ValidityFacts, WallOptions, WallThicknessOutcome,
+        },
+        csg::{
+            BooleanOp, CsgConnector, FillRule, MeshExport, Section, SectionOp, SolidId,
+            SolidProperties,
+        },
+        BackendError, TriangleMesh,
+    },
+    Engine, EngineConfig,
+};
+use serde_json::{json, Value};
+
+fn unsupported() -> BackendError {
+    unreachable!("projection-only mock does not call geometry operations")
+}
+
+struct ProjectionBrepConnector;
+
+impl BrepConnector for ProjectionBrepConnector {
+    fn identity_profile(&self) -> BrepIdentityProfile {
+        BrepIdentityProfile {
+            ingest_profile: "projection-test-step-v1",
+            backend_profile: "projection-test-brep-v1",
+        }
+    }
+
+    fn open_step(&self, _: &[u8]) -> Result<Box<dyn BrepSubject>, BackendError> {
+        Ok(Box::new(ProjectionBrep))
+    }
+}
+
+struct ProjectionBrep;
+
+impl BrepSubject for ProjectionBrep {
+    fn step_subject_metadata(&self) -> Result<Option<StepSubjectMetadata>, BackendError> {
+        Ok(Some(StepSubjectMetadata {
+            schema: Some("AP242".into()),
+            source_byte_length: b"projection-only STEP mock".len(),
+            free_shape_count: 0,
+            native_read_stream: true,
+        }))
+    }
+
+    fn reported_facts_and_mesh(&self) -> Result<ReportedBrepBundle, BackendError> {
+        // The current report seam supplies already-declared mock facts only;
+        // this test does not exercise mesh or kernel geometry.
+        Ok(ReportedBrepBundle {
+            facts: self.facts()?,
+            whole_faces: Rc::from(Vec::<LocatedFace>::new()),
+            occurrence_faces: Vec::new(),
+            mesh: Rc::new(TriangleMesh {
+                positions: Vec::new(),
+                triangles: Vec::new(),
+            }),
+        })
+    }
+
+    fn admission_facts(&self) -> Result<BrepAdmissionFacts, BackendError> {
+        Ok(BrepAdmissionFacts {
+            source_length_unit: "millimetre".into(),
+            source_unit_to_millimeters: 1.0,
+            occurrence_count: 0,
+        })
+    }
+
+    fn facts(&self) -> Result<Rc<DocumentFacts>, BackendError> {
+        Ok(Rc::new(DocumentFacts {
+            source_length_unit: "millimetre".into(),
+            source_unit_to_millimeters: 1.0,
+            products: Vec::new(),
+            occurrences: Vec::new(),
+            shape: ShapeFacts {
+                valid: true,
+                bounds: Bounds {
+                    min: [0.0; 3],
+                    max: [1.0; 3],
+                },
+                volume: 1.0,
+                surface_area: 6.0,
+                center_of_mass: [0.5; 3],
+                topology: TopologyCounts {
+                    compounds: 1,
+                    solids: 1,
+                    shells: 1,
+                    faces: 6,
+                    wires: 6,
+                    edges: 12,
+                    vertices: 8,
+                },
+            },
+            faces: Vec::new(),
+            pmi: Vec::new(),
+            subshapes: Vec::new(),
+            datum_placements: Vec::new(),
+            semantic_datums: Vec::new(),
+        }))
+    }
+
+    fn faces(&self) -> Result<Rc<[LocatedFace]>, BackendError> {
+        Err(unsupported())
+    }
+    fn occurrence_faces(&self, _: u32) -> Result<Rc<[LocatedFace]>, BackendError> {
+        Err(unsupported())
+    }
+    fn occurrence_edges(&self, _: u32) -> Result<Rc<[EdgeFacts]>, BackendError> {
+        Err(unsupported())
+    }
+    fn validity(&self) -> Result<Rc<ValidityFacts>, BackendError> {
+        Ok(Rc::new(ValidityFacts {
+            valid: true,
+            checks: None,
+            max_tolerance: None,
+            free_bounds: None,
+            small_edges: None,
+            same_parameter: None,
+            closed_shells: None,
+            closed_solids: Some(true),
+            solid_count: Some(1),
+            invalid_solid_count: Some(0),
+            open_edge_count: Some(0),
+            closed_wires: None,
+            reason: None,
+        }))
+    }
+    fn extrema(&self, _: BrepEntity, _: BrepEntity) -> Result<Extrema, BackendError> {
+        Err(unsupported())
+    }
+    fn classify_points(&self, _: u32, _: &[[f64; 3]]) -> Result<Vec<PointState>, BackendError> {
+        Err(unsupported())
+    }
+    fn common_volume(&self, _: u32, _: u32) -> Result<CommonVolume, BackendError> {
+        Err(unsupported())
+    }
+    fn classify_face_points(
+        &self,
+        _: BrepEntity,
+        _: &[[f64; 3]],
+        _: f64,
+    ) -> Result<Vec<PointState>, BackendError> {
+        Err(unsupported())
+    }
+    fn minimum_wall_thickness(
+        &self,
+        _: &WallOptions,
+    ) -> Result<WallThicknessOutcome, BackendError> {
+        Err(unsupported())
+    }
+    fn tessellate(
+        &self,
+        _: BrepEntity,
+        _: TessellationProfile,
+    ) -> Result<Rc<TriangleMesh>, BackendError> {
+        Err(unsupported())
+    }
+}
+
+struct UnusedCsg;
+
+impl CsgConnector for UnusedCsg {
+    fn release(&mut self, _: SolidId) -> Result<(), BackendError> {
+        Err(unsupported())
+    }
+    fn admit(&mut self, _: &TriangleMesh, _: &[[u32; 2]]) -> Result<SolidId, BackendError> {
+        Err(unsupported())
+    }
+    fn boolean(&mut self, _: BooleanOp, _: &[SolidId]) -> Result<SolidId, BackendError> {
+        Err(unsupported())
+    }
+    fn transform(&mut self, _: SolidId, _: [f64; 12]) -> Result<SolidId, BackendError> {
+        Err(unsupported())
+    }
+    fn decompose(&mut self, _: SolidId) -> Result<Vec<SolidId>, BackendError> {
+        Err(unsupported())
+    }
+    fn properties(&self, _: SolidId) -> Result<SolidProperties, BackendError> {
+        Err(unsupported())
+    }
+    fn export(&self, _: SolidId) -> Result<MeshExport, BackendError> {
+        Err(unsupported())
+    }
+    fn slice(&self, _: SolidId, _: f64) -> Result<Section, BackendError> {
+        Err(unsupported())
+    }
+    fn section(&self, _: &[Vec<[f64; 2]>], _: FillRule) -> Result<Section, BackendError> {
+        Err(unsupported())
+    }
+    fn section_boolean(
+        &self,
+        _: SectionOp,
+        _: &Section,
+        _: &Section,
+    ) -> Result<Section, BackendError> {
+        Err(unsupported())
+    }
+}
+
+fn claim(engine: &Engine, subject: Value, capability: &str, payload: Value) -> Value {
+    let request = json!({
+        "method": "submitClaims",
+        "requestId": "projection",
+        "protocolVersion": 3,
+        "registryVersion": 4,
+        "canonicalProfile": "geospec-jcs-v1",
+        "plan": {
+            "subjects": [subject],
+            "claims": [{
+                "claimId": "projection",
+                "capability": capability,
+                "subjectSlots": ["subject"],
+                "payload": payload,
+                "polarity": "positive",
+                "workUnitBudget": 8_000_000
+            }]
+        }
+    });
+    serde_json::from_slice(
+        &engine
+            .process_request(&serde_json::to_vec(&request).unwrap())
+            .unwrap(),
+    )
+    .unwrap()
+}
+
+#[test]
+fn should_project_analyze_mesh_stats_into_the_source_operation_envelope() {
+    let manifest: Value = serde_json::from_str(include_str!("fixtures/mesh-entry.json")).unwrap();
+    let fixture = &manifest["fixtures"][0];
+    let hex = fixture["hex"].as_str().unwrap();
+    let bytes = (0..hex.len())
+        .step_by(2)
+        .map(|index| u8::from_str_radix(&hex[index..index + 2], 16).unwrap())
+        .collect::<Vec<_>>();
+    let mut engine = Engine::new();
+    engine
+        .ingest_mesh(
+            fixture["ingestRequestUtf8"].as_str().unwrap().as_bytes(),
+            &bytes,
+        )
+        .unwrap();
+
+    let response = claim(
+        &engine,
+        json!({"slot": "subject", "contentHash": fixture["hash"]}),
+        "analyzeMesh",
+        Value::Null,
+    );
+    let evidence = &response["result"]["results"][0]["evidence"];
+    assert_eq!(evidence["success"], true);
+    assert_eq!(evidence["subject"]["kind"], "geometry-subject");
+    assert_eq!(evidence["subject"]["mesh"]["format"], "mesh-buffer");
+    assert_eq!(evidence["subject"]["diagnostics"], json!([]));
+    assert!(evidence["subject"].get("step").is_none());
+    assert_eq!(
+        evidence["subject"]["mesh"]["stats"]["vertexCount"],
+        evidence["stats"]["vertexCount"]
+    );
+    assert_eq!(evidence["diagnostics"], json!([]));
+    assert!(evidence["stats"].get("meshQuality").is_some());
+    assert!(evidence["stats"].get("boundingBox").is_some());
+    assert!(evidence["stats"].get("watertightAnalysis").is_none());
+    assert!(evidence.get("meshQuality").is_none());
+}
+
+#[test]
+fn should_refuse_requested_validity_measurements_that_are_absent() {
+    let mut engine = Engine::with_backends(
+        EngineConfig::entry(),
+        Box::new(ProjectionBrepConnector),
+        Box::new(UnusedCsg),
+    );
+    let bytes = b"projection-only STEP mock".to_vec();
+    let request = json!({
+        "method": "ingestSubject",
+        "requestId": "admit",
+        "protocolVersion": 3,
+        "registryVersion": 4,
+        "canonicalProfile": "geospec-jcs-v1",
+        "format": "step",
+        "frame": {"coordinateSystem": "z-up", "sourceUnit": "auto", "outputUnit": "mm"},
+        "ingestOptions": {},
+        "primaryByteLength": bytes.len(),
+        "resources": []
+    });
+    let admitted: Value = serde_json::from_slice(
+        &engine
+            .ingest_subject(&serde_json::to_vec(&request).unwrap(), bytes, Vec::new())
+            .unwrap(),
+    )
+    .unwrap();
+    let subject = admitted["result"]["subject"]["subjectHash"]
+        .as_str()
+        .unwrap();
+    let analyzed = claim(
+        &engine,
+        json!({"slot": "subject", "subjectHash": subject}),
+        "analyzeMesh",
+        Value::Null,
+    );
+    let evidence = &analyzed["result"]["results"][0]["evidence"];
+    assert_eq!(analyzed["result"]["results"][0]["status"], "passed");
+    assert_eq!(evidence["subject"]["step"]["unit"], "mm");
+    assert_eq!(evidence["subject"]["step"]["schema"], "AP242");
+    assert_eq!(evidence["subject"]["step"]["productStructure"], json!([]));
+    assert_eq!(
+        evidence["subject"]["step"]["readStrategy"],
+        json!({
+            "strategy": "native-stream", "inputKind": "bytes",
+            "bytesRead": b"projection-only STEP mock".len(),
+            "nativeReadStream": true, "copiedToEmscriptenFs": false
+        })
+    );
+    assert_eq!(evidence["subject"]["step"]["xde"]["freeShapeCount"], 0);
+    assert!(evidence["subject"]["step"]["xde"]
+        .get("datumSystems")
+        .is_none());
+    let response = claim(
+        &engine,
+        json!({"slot": "subject", "subjectHash": subject}),
+        "toBeValidBrep",
+        json!({
+            "kind": "validBrep",
+            "expected": {
+                "maxTolerance": 1,
+                "freeBounds": {"count": 0},
+                "minEdgeLength": 1,
+                "sameParameter": true,
+                "closedShells": true,
+                "closedWires": true
+            }
+        }),
+    );
+    let result = &response["result"]["results"][0];
+    assert_eq!(result["status"], "refused");
+    assert_eq!(
+        result["diagnostics"][0]["code"],
+        "GEOSPEC_EVIDENCE_UNSUPPORTED"
+    );
+    assert_eq!(result["diagnostics"][0]["message"], "expectGeo(...).toBeValidBrep() needs exact BRep evidence (The validity facet did not measure maximum tolerance, free-bound count, small-edge census, same-parameter state, closed-shell state, closed-wire state.), which this subject does not carry.");
+}

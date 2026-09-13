@@ -7,3 +7,6 @@ pub mod rational_plate;
 
 pub(crate) mod definition;
 pub(crate) mod engine;
+
+pub(crate) mod parallel_plane;
+pub(crate) mod parallel_plane_definition;

@@ -6,12 +6,16 @@ use crate::{
         DuplicateFace, IrregularEdgeCluster, IrregularEdgeKind, IrregularEdgeSample, MeshAnalysis,
         MeshQuality, NonFiniteVertex, PrimitiveRecord, Watertight, WatertightPrimitiveBreakdown,
     },
+    backend::{
+        brep::{DocumentFacts, OccurrenceFacts, SubshapeType},
+        BackendError, BackendErrorKind,
+    },
     codec::Json,
     prepared::{self, AnalysisDemand, NumericExpectation, DEFAULT_LINEAR_TOLERANCE},
     protocol::{field, invalid_claim, object, optional_field, require_fields},
     registry::Capability,
     result::{Diagnostic, Evaluation},
-    subject::EvaluationContext,
+    subject::{backend_refusal, EvaluationContext, Subject, SubjectFormat},
     ProtocolError,
 };
 
@@ -1155,16 +1159,352 @@ fn evaluate_center(
 }
 
 pub(crate) fn analyze_mesh(context: &mut EvaluationContext<'_>) -> Evaluation {
-    let (_, diagnostics) = subject_meta(context);
     let analysis = match context.mesh_analysis() {
         Ok(value) => value,
         Err(result) => return result,
     };
+    let facts = if context.subject().format == SubjectFormat::Step {
+        match context.brep_facts() {
+            Ok(value) => value,
+            Err(result) => return result,
+        }
+    } else {
+        None
+    };
+    let subject = match analysis_subject_json(context.subject(), &analysis, facts.as_deref()) {
+        Ok(value) => value,
+        Err(error) => return backend_refusal(error),
+    };
     Evaluation::Ancillary {
         success: true,
-        value: analysis_json(&analysis),
-        diagnostics,
+        value: Json::object([
+            ("success", Json::Bool(true)),
+            ("subject", subject),
+            ("stats", analysis_json(&analysis)),
+            ("diagnostics", Json::Array(Vec::new())),
+        ]),
+        diagnostics: Vec::new(),
     }
+}
+
+fn analysis_subject_json(
+    subject: &Subject,
+    analysis: &MeshAnalysis,
+    facts: Option<&DocumentFacts>,
+) -> Result<Json, BackendError> {
+    let format = match subject.format {
+        SubjectFormat::MeshBufferV1 | SubjectFormat::Step => "mesh-buffer",
+        SubjectFormat::Glb => "glb",
+        SubjectFormat::Gltf => "gltf",
+        SubjectFormat::RationalPlate => {
+            return Err(BackendError {
+                kind: BackendErrorKind::Unsupported,
+                message: "The rational certificate subject has no public mesh format.".into(),
+            });
+        }
+    };
+    let step = if subject.format == SubjectFormat::Step {
+        let metadata = subject
+            .step_subject_metadata()?
+            .ok_or_else(|| BackendError {
+                kind: BackendErrorKind::Unsupported,
+                message: "The STEP connector has no source-backed subject metadata.".into(),
+            })?;
+        if !metadata.native_read_stream {
+            return Err(BackendError {
+                kind: BackendErrorKind::Unsupported,
+                message: "The STEP connector did not establish native stream ingestion.".into(),
+            });
+        }
+        Some(step_subject_json(
+            metadata,
+            facts.ok_or_else(|| BackendError {
+                kind: BackendErrorKind::Unsupported,
+                message: "The STEP subject has no source-backed report metadata.".into(),
+            })?,
+        ))
+    } else {
+        None
+    };
+    let mut fields = vec![
+        ("kind".into(), Json::string("geometry-subject")),
+        (
+            "mesh".into(),
+            Json::object([
+                ("format", Json::string(format)),
+                (
+                    "stats",
+                    Json::object([
+                        (
+                            "vertexCount",
+                            Json::Number(f64::from(analysis.vertex_count)),
+                        ),
+                        ("meshCount", Json::Number(f64::from(analysis.mesh_count))),
+                        (
+                            "triangleCount",
+                            Json::Number(f64::from(analysis.triangle_count)),
+                        ),
+                    ]),
+                ),
+            ]),
+        ),
+        (
+            "capabilities".into(),
+            subject_capabilities(subject.format == SubjectFormat::Step),
+        ),
+        (
+            "diagnostics".into(),
+            Json::Array(
+                subject
+                    .diagnostics
+                    .iter()
+                    .map(Diagnostic::to_json)
+                    .collect(),
+            ),
+        ),
+    ];
+    if let Some(step) = step {
+        fields.push(("step".into(), step));
+    }
+    Ok(Json::Object(fields))
+}
+
+fn subject_capabilities(step: bool) -> Json {
+    let mut values = Vec::new();
+    if step {
+        for feature in ["schema", "units", "product-structure", "reader-provenance"] {
+            values.push(capability_json("step", feature));
+        }
+        for feature in [
+            "validity",
+            "topology-counts",
+            "bounding-box",
+            "mass-properties",
+            "planar-faces",
+            "cylindrical-faces",
+            "circular-holes",
+            "circular-hole-patterns",
+            "chamfer-features",
+            "fillet-features",
+            "wall-thickness",
+        ] {
+            values.push(capability_json("brep", feature));
+        }
+    }
+    for feature in [
+        "triangles",
+        "bounding-box",
+        "connected-components",
+        "watertightness",
+        "surface-area",
+        "volume",
+        "center-of-mass",
+        "distance",
+        "component-overlap",
+    ] {
+        values.push(capability_json("mesh", feature));
+    }
+    Json::Array(values)
+}
+
+fn capability_json(kind: &str, feature: &str) -> Json {
+    Json::object([
+        ("kind", Json::string(kind)),
+        ("feature", Json::string(feature)),
+    ])
+}
+
+fn step_subject_json(
+    metadata: &crate::backend::brep::StepSubjectMetadata,
+    facts: &DocumentFacts,
+) -> Json {
+    let mut fields = Vec::new();
+    if let Some(schema) = &metadata.schema {
+        fields.push(("schema".into(), Json::string(schema)));
+    }
+    fields.extend([
+        // The applied profile admits output millimeters only. The original
+        // source unit remains bound separately in the semantic descriptor.
+        ("unit".into(), Json::string("mm")),
+        (
+            "productStructure".into(),
+            Json::Array(
+                facts
+                    .occurrences
+                    .iter()
+                    .map(|occurrence| {
+                        Json::object([
+                            ("name", Json::string(&occurrence.path)),
+                            ("path", Json::string(&occurrence.path)),
+                            ("transform", transform_json(occurrence)),
+                        ])
+                    })
+                    .collect(),
+            ),
+        ),
+        (
+            "readStrategy".into(),
+            Json::object([
+                ("strategy", Json::string("native-stream")),
+                ("inputKind", Json::string("bytes")),
+                (
+                    "bytesRead",
+                    Json::Number(metadata.source_byte_length as f64),
+                ),
+                ("nativeReadStream", Json::Bool(true)),
+                ("copiedToEmscriptenFs", Json::Bool(false)),
+            ]),
+        ),
+        ("capabilities".into(), step_capabilities()),
+        ("xde".into(), xde_json(metadata, facts)),
+    ]);
+    Json::Object(fields)
+}
+
+fn step_capabilities() -> Json {
+    Json::Array(vec![
+        Json::object([
+            ("feature", Json::string("product-structure")),
+            ("supported", Json::Bool(true)),
+        ]),
+        Json::object([
+            ("feature", Json::string("color")),
+            ("supported", Json::Bool(false)),
+        ]),
+        Json::object([
+            ("feature", Json::string("material")),
+            ("supported", Json::Bool(false)),
+        ]),
+        Json::object([
+            ("feature", Json::string("geometric-tolerance")),
+            ("supported", Json::Bool(false)),
+            (
+                "reason",
+                Json::string("GeoSpec P0 reports unsupported AP242 PMI/GD&T evidence explicitly."),
+            ),
+        ]),
+    ])
+}
+
+fn xde_json(metadata: &crate::backend::brep::StepSubjectMetadata, facts: &DocumentFacts) -> Json {
+    Json::object([
+        (
+            "occurrences",
+            Json::Array(facts.occurrences.iter().map(occurrence_json).collect()),
+        ),
+        (
+            "subshapeNames",
+            Json::Array(
+                facts
+                    .subshapes
+                    .iter()
+                    .map(|row| {
+                        Json::object([
+                            ("occurrencePath", Json::string(&row.occurrence_path)),
+                            ("name", Json::string(&row.name)),
+                            (
+                                "shapeType",
+                                Json::string(match row.shape_type {
+                                    SubshapeType::Face => "face",
+                                    SubshapeType::Edge => "edge",
+                                    SubshapeType::Vertex => "vertex",
+                                    SubshapeType::Solid => "solid",
+                                }),
+                            ),
+                            (
+                                "faceIndex",
+                                Json::Number(row.face_index.map_or(-1.0, f64::from)),
+                            ),
+                        ])
+                    })
+                    .collect(),
+            ),
+        ),
+        (
+            "datumPlacements",
+            Json::Array(
+                facts
+                    .datum_placements
+                    .iter()
+                    .map(|row| {
+                        Json::object([
+                            ("occurrencePath", Json::string(&row.occurrence_path)),
+                            ("name", Json::string(&row.name)),
+                            ("origin", point_json(row.origin)),
+                            ("xAxis", point_json(row.x_axis)),
+                            ("zAxis", point_json(row.z_axis)),
+                        ])
+                    })
+                    .collect(),
+            ),
+        ),
+        (
+            "semanticDatums",
+            Json::Array(
+                facts
+                    .semantic_datums
+                    .iter()
+                    .map(|row| {
+                        let mut fields = vec![
+                            ("occurrencePath".into(), Json::string(&row.occurrence_path)),
+                            ("label".into(), Json::string(&row.label)),
+                            (
+                                "faceIndexes".into(),
+                                Json::Array(
+                                    row.face_indices
+                                        .iter()
+                                        .map(|value| Json::Number(f64::from(*value)))
+                                        .collect(),
+                                ),
+                            ),
+                        ];
+                        if let Some(name) = &row.feature_name {
+                            fields.push(("featureName".into(), Json::string(name)));
+                        }
+                        Json::Object(fields)
+                    })
+                    .collect(),
+            ),
+        ),
+        (
+            "freeShapeCount",
+            Json::Number(metadata.free_shape_count as f64),
+        ),
+    ])
+}
+
+fn occurrence_json(occurrence: &OccurrenceFacts) -> Json {
+    let mut fields = vec![
+        ("path".into(), Json::string(&occurrence.path)),
+        ("productName".into(), Json::string(&occurrence.product_name)),
+        ("transform".into(), transform_json(occurrence)),
+        (
+            "shapeIndex".into(),
+            Json::Number(f64::from(occurrence.product)),
+        ),
+        (
+            "bounds".into(),
+            Json::object([
+                ("min", point_json(occurrence.bounds.min)),
+                ("max", point_json(occurrence.bounds.max)),
+            ]),
+        ),
+    ];
+    if let Some(name) = &occurrence.instance_name {
+        fields.push(("instanceName".into(), Json::string(name)));
+    }
+    Json::Object(fields)
+}
+
+fn transform_json(occurrence: &OccurrenceFacts) -> Json {
+    Json::Array(
+        occurrence
+            .placement
+            .into_iter()
+            .chain([0.0, 0.0, 0.0, 1.0])
+            .map(Json::Number)
+            .collect(),
+    )
 }
 
 fn point_failures(measured: [f64; 3], expected: [Option<f64>; 3], tolerance: f64) -> Vec<Json> {
@@ -1581,7 +1921,6 @@ fn analysis_json(value: &MeshAnalysis) -> Json {
         ),
         ("meshQuality", quality_json(&quality, true)),
         ("watertight", Json::Bool(watertight.watertight)),
-        ("watertightAnalysis", watertight_json(&watertight)),
         (
             "boundingBox",
             Json::object([

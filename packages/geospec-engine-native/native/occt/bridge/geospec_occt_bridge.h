@@ -79,6 +79,89 @@ enum geospec_occt_subshape_type {
   GEOSPEC_OCCT_SUBSHAPE_SOLID = 3
 };
 
+enum geospec_occt_circular_bore_disposition {
+  GEOSPEC_OCCT_CIRCULAR_BORE_QUALIFIED = 0,
+  GEOSPEC_OCCT_CIRCULAR_BORE_NON_MEMBER = 1,
+  GEOSPEC_OCCT_CIRCULAR_BORE_UNQUALIFIED = 2
+};
+
+enum geospec_occt_circular_bore_non_member {
+  GEOSPEC_OCCT_CIRCULAR_BORE_EXTERIOR_CYLINDER = 0,
+  GEOSPEC_OCCT_CIRCULAR_BORE_SEALED_CAVITY = 1,
+  GEOSPEC_OCCT_CIRCULAR_BORE_OBSTRUCTED_INTERIOR = 2
+};
+
+enum geospec_occt_circular_bore_unqualified {
+  GEOSPEC_OCCT_CIRCULAR_BORE_UNSUPPORTED_SURFACE = 0,
+  GEOSPEC_OCCT_CIRCULAR_BORE_UNSUPPORTED_ORIENTATION = 1,
+  GEOSPEC_OCCT_CIRCULAR_BORE_AMBIGUOUS_OWNERSHIP = 2,
+  GEOSPEC_OCCT_CIRCULAR_BORE_INVALID_SOLID = 3,
+  GEOSPEC_OCCT_CIRCULAR_BORE_INCOMPLETE_BAND = 4,
+  GEOSPEC_OCCT_CIRCULAR_BORE_UNSUPPORTED_TERMINATION = 5,
+  GEOSPEC_OCCT_CIRCULAR_BORE_AMBIGUOUS_ASSOCIATION = 6
+};
+
+enum geospec_occt_circular_bore_termination {
+  GEOSPEC_OCCT_CIRCULAR_BORE_MOUTH = 0,
+  GEOSPEC_OCCT_CIRCULAR_BORE_PLANAR_DISK_BOTTOM = 1
+};
+
+enum geospec_occt_edge_treatment_disposition {
+  GEOSPEC_OCCT_EDGE_TREATMENT_QUALIFIED = 0,
+  GEOSPEC_OCCT_EDGE_TREATMENT_NON_MEMBER = 1,
+  GEOSPEC_OCCT_EDGE_TREATMENT_UNQUALIFIED = 2
+};
+
+enum geospec_occt_edge_treatment_reason {
+  GEOSPEC_OCCT_EDGE_TREATMENT_UNSUPPORTED_SURFACE = 0,
+  GEOSPEC_OCCT_EDGE_TREATMENT_UNSUPPORTED_TRIM = 1,
+  GEOSPEC_OCCT_EDGE_TREATMENT_UNSUPPORTED_ORIENTATION = 2,
+  GEOSPEC_OCCT_EDGE_TREATMENT_AMBIGUOUS_OWNERSHIP = 3,
+  GEOSPEC_OCCT_EDGE_TREATMENT_INVALID_SOLID = 4,
+  GEOSPEC_OCCT_EDGE_TREATMENT_AMBIGUOUS_ASSOCIATION = 5,
+  GEOSPEC_OCCT_EDGE_TREATMENT_INCOMPLETE_BOUNDARY = 6,
+  GEOSPEC_OCCT_EDGE_TREATMENT_DEGENERATE_SUPPORT = 7,
+  GEOSPEC_OCCT_EDGE_TREATMENT_OUTSIDE_TOPOLOGY = 8,
+  GEOSPEC_OCCT_EDGE_TREATMENT_OUTSIDE_MATERIAL_BRANCH = 9,
+  GEOSPEC_OCCT_EDGE_TREATMENT_NON_TANGENT_SUPPORT = 10,
+  GEOSPEC_OCCT_EDGE_TREATMENT_UNEQUAL_OFFSETS = 11
+};
+
+enum geospec_occt_edge_treatment_kind {
+  GEOSPEC_OCCT_EDGE_TREATMENT_PLANAR_CHAMFER = 0,
+  GEOSPEC_OCCT_EDGE_TREATMENT_CONICAL_CHAMFER = 1,
+  GEOSPEC_OCCT_EDGE_TREATMENT_CYLINDRICAL_FILLET = 2,
+  GEOSPEC_OCCT_EDGE_TREATMENT_TOROIDAL_FILLET = 3
+};
+
+enum geospec_occt_edge_treatment_label {
+  GEOSPEC_OCCT_EDGE_TREATMENT_LABEL_UNIQUE = 0,
+  GEOSPEC_OCCT_EDGE_TREATMENT_LABEL_ABSENT = 1,
+  GEOSPEC_OCCT_EDGE_TREATMENT_LABEL_AMBIGUOUS = 2
+};
+
+enum geospec_occt_edge_treatment_material_side {
+  GEOSPEC_OCCT_EDGE_TREATMENT_CONVEX = 0,
+  GEOSPEC_OCCT_EDGE_TREATMENT_CONCAVE = 1
+};
+
+enum geospec_occt_edge_treatment_boundary_role {
+  GEOSPEC_OCCT_EDGE_TREATMENT_RAIL0 = 0,
+  GEOSPEC_OCCT_EDGE_TREATMENT_RAIL1 = 1,
+  GEOSPEC_OCCT_EDGE_TREATMENT_END = 2,
+  GEOSPEC_OCCT_EDGE_TREATMENT_SEAM = 3
+};
+
+enum geospec_occt_edge_treatment_residual_kind {
+  GEOSPEC_OCCT_EDGE_TREATMENT_RAIL_COINCIDENCE = 0,
+  GEOSPEC_OCCT_EDGE_TREATMENT_AXIS_COINCIDENCE = 1,
+  GEOSPEC_OCCT_EDGE_TREATMENT_PARALLEL_DIRECTION = 2,
+  GEOSPEC_OCCT_EDGE_TREATMENT_TANGENT_DIRECTION = 3,
+  GEOSPEC_OCCT_EDGE_TREATMENT_EQUAL_OFFSETS = 4,
+  GEOSPEC_OCCT_EDGE_TREATMENT_RAIL_STATION = 5,
+  GEOSPEC_OCCT_EDGE_TREATMENT_MATERIAL_BRANCH = 6
+};
+
 // Fact strings report required length. Error strings report copied length and
 // preserve a NUL terminator; oversized diagnostics use a bounded prefix plus "...".
 typedef struct geospec_occt_string {
@@ -117,6 +200,7 @@ typedef struct geospec_occt_occurrence_facts {
 
 typedef struct geospec_occt_face_facts {
   uint32_t index;
+  uint32_t query_index;
   int surface_type;
   double parameter_bounds[4];
   double area;
@@ -228,6 +312,90 @@ typedef struct geospec_occt_cylinder_axial_extent_result {
   double to;
 } geospec_occt_cylinder_axial_extent_result;
 
+typedef struct geospec_occt_circular_bore_end {
+  uint32_t owning_solid_edge_ordinal;
+  uint32_t adjacent_public_face_ordinal;
+  int termination;
+} geospec_occt_circular_bore_end;
+
+typedef struct geospec_occt_circular_bore_candidate {
+  uint32_t public_face_ordinal;
+  uint32_t private_query_face;
+  int disposition;
+  int reason;
+  uint32_t owning_solid_ordinal;
+  geospec_occt_cylinder_axial_extent_result band;
+  geospec_occt_circular_bore_end ends[2];
+  double maximum_topology_tolerance_mm;
+  uint32_t interior_residual_solid_count;
+} geospec_occt_circular_bore_candidate;
+
+typedef struct geospec_occt_edge_treatment_counts {
+  uint32_t public_face_count;
+  uint32_t candidate_edge_use_count;
+} geospec_occt_edge_treatment_counts;
+
+typedef struct geospec_occt_edge_treatment_support {
+  uint32_t public_face_ordinal;
+  uint32_t private_query_face;
+  geospec_occt_face_facts surface;
+  int transferred_reversed;
+  double maximum_topology_tolerance_mm;
+} geospec_occt_edge_treatment_support;
+
+typedef struct geospec_occt_edge_treatment_boundary_use {
+  uint32_t owning_solid_edge_ordinal;
+  uint32_t wire_ordinal;
+  int reversed;
+  int seam;
+  int role;
+  geospec_occt_edge_facts curve;
+  double parameter_range[2];
+  double start[3];
+  double end[3];
+  double edge_tolerance_mm;
+  double vertex_tolerances_mm[2];
+} geospec_occt_edge_treatment_boundary_use;
+
+typedef struct geospec_occt_edge_treatment_residual {
+  int kind;
+  double value_mm;
+  double limit_mm;
+  double scale_mm;
+} geospec_occt_edge_treatment_residual;
+
+typedef struct geospec_occt_edge_treatment_certificate {
+  int kind;
+  double metric_value_mm;
+  geospec_occt_face_facts surface;
+  geospec_occt_edge_treatment_support supports[2];
+  size_t boundary_use_count;
+  size_t residual_count;
+  uint32_t wire_count;
+  double maximum_topology_tolerance_mm;
+  int material_side;
+  int full_u;
+  double sweep_interval[2];
+} geospec_occt_edge_treatment_certificate;
+
+typedef struct geospec_occt_edge_treatment_row {
+  int has_occurrence;
+  uint32_t occurrence;
+  uint32_t public_face_ordinal;
+  uint32_t private_query_face;
+  int has_owning_solid_ordinal;
+  uint32_t owning_solid_ordinal;
+  int has_source_face_key;
+  int has_source_same_sense;
+  int source_same_sense;
+  int transferred_reversed;
+  int label;
+  int chamfer_disposition;
+  int chamfer_reason;
+  int fillet_disposition;
+  int fillet_reason;
+} geospec_occt_edge_treatment_row;
+
 typedef struct geospec_occt_wall_options {
   uint64_t work_unit_budget;
   double mesh_linear_tolerance_mm;
@@ -284,6 +452,61 @@ typedef struct geospec_occt_cylinder_vertex {
   double point[3];
 } geospec_occt_cylinder_vertex;
 
+typedef struct geospec_occt_cylindrical_band_rim {
+  uint32_t edge_index;
+  double center[3];
+  double axis[3];
+  double phase_x[3];
+  double phase_y[3];
+  double radius;
+  double curve_range[2];
+  double curve_period;
+  uint32_t vertex_indices[2];
+} geospec_occt_cylindrical_band_rim;
+
+typedef struct geospec_occt_cylindrical_band_boundary_residual {
+  double parameter_coverage_mm;
+  double curve_surface_mm;
+  double vertex_attachment_mm;
+  double limit_mm;
+} geospec_occt_cylindrical_band_boundary_residual;
+
+/* Fixed-size, uncached nominal lateral-band certificate. Profile 0 is
+ * geospec-nominal-cylindrical-band-clearance-v1, not PhaseZeroV1. */
+typedef struct geospec_occt_nominal_cylindrical_band {
+  int32_t profile;
+  uint32_t occurrence;
+  uint32_t public_face_ordinal;
+  uint32_t private_query_face;
+  uint32_t source_face_entity;
+  uint32_t source_route_count;
+  uint32_t source_route[32];
+  int32_t source_same_sense;
+  int32_t transferred_reversed;
+  double origin[3];
+  double axis[3];
+  double phase_x[3];
+  double phase_y[3];
+  double radius;
+  double from;
+  double to;
+  double parameter_bounds[4];
+  double surface_period;
+  geospec_occt_cylindrical_band_rim rims[2];
+  uint32_t seam_edge_index;
+  double seam_origin[3];
+  double seam_axis[3];
+  double seam_curve_range[2];
+  uint32_t seam_vertex_indices[2];
+  geospec_occt_cylinder_boundary_use boundary[4];
+  geospec_occt_cylinder_vertex vertices[2];
+  double face_tolerance_mm;
+  double edge_tolerances_mm[3];
+  double vertex_tolerances_mm[2];
+  double period_residual_mm;
+  geospec_occt_cylindrical_band_boundary_residual boundary_residuals[4];
+} geospec_occt_nominal_cylindrical_band;
+
 /* Owned fixed-size certificate; kind 0 is box, kind 1 is cylinder. */
 typedef struct geospec_occt_continuous_wall_domain {
   int32_t kind;
@@ -331,6 +554,14 @@ typedef struct geospec_occt_selected_continuous_domain_result {
   uint32_t edge_map[12];
 } geospec_occt_selected_continuous_domain_result;
 
+typedef struct geospec_occt_resolved_source_face {
+  uint32_t occurrence;
+  uint32_t public_face_ordinal;
+  uint32_t private_query_face;
+  int source_same_sense;
+  int transferred_reversed;
+} geospec_occt_resolved_source_face;
+
 int geospec_occt_continuous_wall(
     const geospec_occt_document* document,
     geospec_occt_continuous_wall_domain* output,
@@ -354,6 +585,10 @@ int geospec_occt_admission_facts(
     const geospec_occt_document* document,
     double* out_source_unit_to_millimeters, size_t* out_occurrence_count,
     geospec_occt_string* source_unit,
+    geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
+int geospec_occt_step_subject_metadata(
+    const geospec_occt_document* document, size_t* out_source_byte_length,
+    size_t* out_free_shape_count, geospec_occt_string* schema,
     geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
 
 int geospec_occt_report_prepare(
@@ -414,6 +649,8 @@ int geospec_occt_occurrence_ordinal(
     uint32_t* ordinal, geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
 
 size_t geospec_occt_face_count(const geospec_occt_document* document) GEOSPEC_OCCT_NOEXCEPT;
+size_t geospec_occt_query_face_count(
+    const geospec_occt_document* document) GEOSPEC_OCCT_NOEXCEPT;
 int geospec_occt_face(const geospec_occt_document* document, size_t index,
                       geospec_occt_face_facts* out_face,
                       geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
@@ -465,6 +702,14 @@ int geospec_occt_datum_placement(
 
 size_t geospec_occt_occurrence_face_count(
     const geospec_occt_document* document, uint32_t occurrence) GEOSPEC_OCCT_NOEXCEPT;
+size_t geospec_occt_occurrence_query_face_count(
+    const geospec_occt_document* document,
+    uint32_t occurrence) GEOSPEC_OCCT_NOEXCEPT;
+int geospec_occt_resolve_source_face(
+    const geospec_occt_document* document, uint32_t source_face_entity,
+    const uint32_t* occurrence_route, size_t occurrence_route_count,
+    geospec_occt_resolved_source_face* out_face,
+    geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
 int geospec_occt_occurrence_face(
     const geospec_occt_document* document, uint32_t occurrence, size_t index,
     geospec_occt_located_face_facts* out_face,
@@ -510,6 +755,52 @@ int geospec_occt_cylinder_axial_extent(
     const geospec_occt_document* document, geospec_occt_entity face,
     geospec_occt_cylinder_axial_extent_result* out_extent,
     geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
+
+int geospec_occt_nominal_cylindrical_band_query(
+    const geospec_occt_document* document, geospec_occt_entity face,
+    geospec_occt_nominal_cylindrical_band* output,
+    geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
+int geospec_occt_circular_bores_prepare(
+    const geospec_occt_document* document, size_t max_candidates,
+    size_t retained_candidate_size, size_t retained_inventory_size,
+    size_t* out_count,
+    geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
+int geospec_occt_circular_bore(
+    const geospec_occt_document* document, size_t index,
+    geospec_occt_circular_bore_candidate* out_candidate,
+    geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
+void geospec_occt_circular_bores_discard(
+    const geospec_occt_document* document) GEOSPEC_OCCT_NOEXCEPT;
+int geospec_occt_edge_treatment_counts_get(
+    const geospec_occt_document* document,
+    geospec_occt_edge_treatment_counts* out_counts,
+    geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
+int geospec_occt_edge_treatments_prepare(
+    const geospec_occt_document* document, size_t max_rows,
+    geospec_occt_edge_treatment_counts* out_counts, size_t* out_transfer_bytes,
+    geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
+int geospec_occt_edge_treatment(
+    const geospec_occt_document* document, size_t row,
+    geospec_occt_edge_treatment_row* out_row,
+    geospec_occt_string* occurrence_path,
+    geospec_occt_string* source_face_key,
+    geospec_occt_string* label,
+    geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
+int geospec_occt_edge_treatment_certificate_get(
+    const geospec_occt_document* document, size_t row, int feature,
+    geospec_occt_edge_treatment_certificate* out_certificate,
+    geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
+int geospec_occt_edge_treatment_boundary_use_get(
+    const geospec_occt_document* document, size_t row, int feature,
+    size_t boundary_use,
+    geospec_occt_edge_treatment_boundary_use* out_boundary_use,
+    geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
+int geospec_occt_edge_treatment_residual_get(
+    const geospec_occt_document* document, size_t row, int feature,
+    size_t residual, geospec_occt_edge_treatment_residual* out_residual,
+    geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
+void geospec_occt_edge_treatments_discard(
+    const geospec_occt_document* document) GEOSPEC_OCCT_NOEXCEPT;
 int geospec_occt_classify_face_points(
     const geospec_occt_document* document, geospec_occt_entity face,
     const double* points, size_t point_count, double tolerance,

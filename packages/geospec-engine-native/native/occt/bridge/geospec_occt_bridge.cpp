@@ -15,6 +15,7 @@
 #include <BRepExtrema_SupportType.hxx>
 #include <BRepGProp.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
+#include <BRepPrimAPI_MakeCylinder.hxx>
 #include <IMeshData_Status.hxx>
 #include <BRepTools_WireExplorer.hxx>
 #include <BRepTools.hxx>
@@ -24,6 +25,7 @@
 #include <GProp_GProps.hxx>
 #include <GeomAPI_ProjectPointOnSurf.hxx>
 #include <Geom2dAdaptor_Curve.hxx>
+#include <HeaderSection_FileSchema.hxx>
 #include <IFSelect_ReturnStatus.hxx>
 #include <Interface_EntityIterator.hxx>
 #include <Interface_Graph.hxx>
@@ -34,6 +36,7 @@
 #include <Poly_Triangulation.hxx>
 #include <Precision.hxx>
 #include <STEPCAFControl_Reader.hxx>
+#include <STEPConstruct_Tool.hxx>
 #include <STEPConstruct_ExternRefs.hxx>
 #include <STEPConstruct_UnitContext.hxx>
 #include <Standard_Failure.hxx>
@@ -50,6 +53,7 @@
 #include <StepAP242_DraughtingModelItemAssociation.hxx>
 #include <StepAP242_ItemIdentifiedRepresentationUsage.hxx>
 #include <StepRepr_GlobalUnitAssignedContext.hxx>
+#include <StepRepr_NextAssemblyUsageOccurrence.hxx>
 #include <StepRepr_ProductDefinitionShape.hxx>
 #include <StepRepr_Representation.hxx>
 #include <StepRepr_RepresentationContext.hxx>
@@ -59,6 +63,8 @@
 #include <StepRepr_ShapeAspectRelationship.hxx>
 #include <StepRepr_ConstructiveGeometryRepresentation.hxx>
 #include <StepShape_ShapeDefinitionRepresentation.hxx>
+#include <StepShape_AdvancedFace.hxx>
+#include <StepData_StepModel.hxx>
 #include <TCollection_AsciiString.hxx>
 #include <TCollection_ExtendedString.hxx>
 #include <TCollection_HAsciiString.hxx>
@@ -140,6 +146,11 @@ struct EdgeFacts {
   geospec_occt_edge_facts facts{};
 };
 
+struct FaceView {
+  uint32_t query_index = 0;
+  TopoDS_Face shape;
+};
+
 struct OccurrenceFacts {
   std::string label;
   std::string product_label;
@@ -149,13 +160,23 @@ struct OccurrenceFacts {
   std::string instance_name;
   bool has_instance_name = false;
   std::vector<uint32_t> ordinal_path;
+  std::vector<uint32_t> source_route;
+  TDF_Label source_label;
+  bool source_transfer_valid = false;
   int parent = -1;
   size_t product = 0;
   TopoDS_Shape shape;
   gp_Trsf transform;
   geospec_occt_occurrence_facts facts{};
   std::vector<LocatedFaceFacts> faces;
+  std::vector<FaceView> public_faces;
   std::vector<EdgeFacts> edges;
+};
+
+struct SourceFaceFacts {
+  uint32_t entity = 0;
+  bool same_sense = false;
+  TopoDS_Face shape;
 };
 
 struct FaceFacts {
@@ -228,6 +249,8 @@ struct ReportData {
   MeshData mesh;
 };
 
+struct EdgeTreatmentTransferData;
+
 int write_string(const std::string& value, geospec_occt_string* output) noexcept {
   if (output == nullptr) return GEOSPEC_OCCT_OK;
   output->length = value.size();
@@ -285,6 +308,18 @@ std::string label_name(const TDF_Label& label) {
 
 std::string hascii(const occ::handle<TCollection_HAsciiString>& value) {
   return value.IsNull() ? std::string{} : value->ToCString();
+}
+
+std::string step_schema(STEPCAFControl_Reader& reader) {
+  const auto session = reader.ChangeReader().WS();
+  if (session.IsNull() || session->Model().IsNull()) return {};
+  const auto model = occ::down_cast<StepData_StepModel>(session->Model());
+  if (model.IsNull()) return {};
+  const auto schema = occ::down_cast<HeaderSection_FileSchema>(
+      model->HeaderEntity(STANDARD_TYPE(HeaderSection_FileSchema)));
+  return schema.IsNull() || schema->NbSchemaIdentifiers() == 0
+             ? std::string{}
+             : hascii(schema->SchemaIdentifiersValue(1));
 }
 
 std::string product_name(
@@ -527,13 +562,15 @@ int surface_type(GeomAbs_SurfaceType type) {
   return GEOSPEC_OCCT_SURFACE_OTHER;
 }
 
-FaceFacts face_facts(const TopoDS_Face& face, uint32_t index) {
+FaceFacts face_facts(const TopoDS_Face& face, uint32_t index,
+                     uint32_t query_index) {
   BRepAdaptor_Surface surface(face);
   FaceFacts result;
   result.shape = face;
   result.bounds = bounds(face);
   result.reversed = face.Orientation() == TopAbs_REVERSED ? 1 : 0;
   result.facts.index = index;
+  result.facts.query_index = query_index;
   result.facts.surface_type = surface_type(surface.GetType());
   result.facts.parameter_bounds[0] = surface.FirstUParameter();
   result.facts.parameter_bounds[1] = surface.LastUParameter();
@@ -604,6 +641,51 @@ FaceFacts face_facts(const TopoDS_Face& face, uint32_t index) {
   return result;
 }
 
+template <typename Face>
+int exact_face_index(const std::vector<Face>& faces,
+                     const TopoDS_Shape& shape) {
+  int match = 0;
+  for (size_t index = 0; index < faces.size(); ++index) {
+    if (!faces[index].shape.IsEqual(shape)) continue;
+    if (match != 0) return 0;
+    match = static_cast<int>(index + 1);
+  }
+  return match;
+}
+
+template <typename Face>
+int exact_mapped_face_index(
+    const NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher>& map,
+    const std::vector<Face>& faces, const TopoDS_Shape& shape) {
+  const int index = map.FindIndex(shape);
+  return index > 0 &&
+                 faces[static_cast<size_t>(index - 1)].shape.IsEqual(shape)
+             ? index
+             : 0;
+}
+
+int located_public_face_index(const TopoDS_Shape& product,
+                              const TopoDS_Shape& attached,
+                              const OccurrenceFacts& occurrence) {
+  TopoDS_Shape product_face;
+  for (TopExp_Explorer explorer(product, TopAbs_FACE); explorer.More();
+       explorer.Next()) {
+    if (!explorer.Current().IsSame(attached)) continue;
+    if (!product_face.IsNull()) return -1;
+    product_face = explorer.Current();
+  }
+  if (product_face.IsNull()) return -1;
+
+  TopoDS_Shape located = product_face;
+  located.Location(occurrence.shape.Location() * product.Location().Inverted() *
+                   product_face.Location());
+  const int face = exact_face_index(occurrence.public_faces, located);
+  if (face == 0) return -1;
+  return occurrence.public_faces[static_cast<size_t>(face - 1)].query_index == 0
+             ? -1
+             : face - 1;
+}
+
 int curve_type(GeomAbs_CurveType type) {
   switch (type) {
     case GeomAbs_Line: return GEOSPEC_OCCT_CURVE_LINE;
@@ -670,8 +752,9 @@ void populate_occurrence_geometry(OccurrenceFacts& occurrence) {
     const TopoDS_Face face = TopoDS::Face(faces(index));
     LocatedFaceFacts located;
     located.shape = face;
-    located.facts.face =
-        face_facts(face, static_cast<uint32_t>(index)).facts;
+    located.facts.face = face_facts(face, static_cast<uint32_t>(index),
+                                   static_cast<uint32_t>(index))
+                             .facts;
     located.facts.bounds = bounds(face);
     located.facts.reversed = face.Orientation() == TopAbs_REVERSED ? 1 : 0;
 
@@ -686,6 +769,15 @@ void populate_occurrence_geometry(OccurrenceFacts& occurrence) {
     }
     located.facts.edge_count = located.edge_indices.size();
     occurrence.faces.push_back(std::move(located));
+  }
+
+  for (TopExp_Explorer explorer(occurrence.shape, TopAbs_FACE);
+       explorer.More(); explorer.Next()) {
+    const TopoDS_Face face = TopoDS::Face(explorer.Current());
+    const int query_index =
+        exact_mapped_face_index(faces, occurrence.faces, face);
+    occurrence.public_faces.push_back(
+        {query_index > 0 ? static_cast<uint32_t>(query_index) : 0, face});
   }
 }
 
@@ -713,6 +805,7 @@ void append_free_shape_occurrence(
   occurrence.path = path;
   occurrence.product = product_index(products, occurrence.product_label);
   occurrence.ordinal_path.push_back(static_cast<uint32_t>(ordinal));
+  occurrence.source_label = root;
   occurrence.shape = shape_tool->GetShape(root);
   const TopLoc_Location location = XCAFDoc_ShapeTool::GetLocation(root);
   occurrence.shape.Location(location);
@@ -783,6 +876,7 @@ void append_occurrences(const occ::handle<XCAFDoc_ShapeTool>& shape_tool,
     occurrence.ordinal_path = ordinal_prefix;
     occurrence.ordinal_path.push_back(
         static_cast<uint32_t>(component_index + 1));
+    occurrence.source_label = component;
     occurrence.shape = placed;
     occurrence.transform = composed.Transformation();
     placement(occurrence.facts.placement, composed);
@@ -799,6 +893,110 @@ void append_occurrences(const occ::handle<XCAFDoc_ShapeTool>& shape_tool,
                        output[static_cast<size_t>(occurrence_index)].ordinal_path,
                        occurrence_index, identity, products, output);
     ++component_index;
+  }
+}
+
+void prepare_source_associations(
+    STEPCAFControl_Reader& reader,
+    const occ::handle<XCAFDoc_ShapeTool>& shape_tool,
+    std::vector<OccurrenceFacts>& occurrences,
+    std::vector<SourceFaceFacts>& source_faces) {
+  constexpr size_t kMaxSourceFaces = 8192;
+  constexpr size_t kMaxRoute = 32;
+  const auto session = reader.ChangeReader().WS();
+  if (session.IsNull() || session->Model().IsNull() ||
+      session->TransferReader().IsNull() ||
+      session->TransferReader()->TransientProcess().IsNull()) {
+    return;
+  }
+  const auto model = occ::down_cast<StepData_StepModel>(session->Model());
+  if (model.IsNull()) return;
+  const auto process = session->TransferReader()->TransientProcess();
+  const STEPConstruct_Tool tool(session);
+  std::vector<uint32_t> source_nauo(occurrences.size(), 0);
+  std::vector<bool> ambiguous_nauo(occurrences.size(), false);
+
+  for (int index = 1; index <= model->NbEntities(); ++index) {
+    const auto entity = model->Value(index);
+    const auto nauo =
+        occ::down_cast<StepRepr_NextAssemblyUsageOccurrence>(entity);
+    if (!nauo.IsNull()) {
+      const int source_id = model->IdentLabel(nauo);
+      if (source_id <= 0) continue;
+      const TDF_Label label = STEPCAFControl_Reader::FindInstance(
+          nauo, shape_tool, tool, reader.GetShapeLabelMap());
+      if (label.IsNull()) continue;
+      size_t found = occurrences.size();
+      size_t count = 0;
+      for (size_t occurrence = 0; occurrence < occurrences.size(); ++occurrence) {
+        if (occurrences[occurrence].source_label.IsEqual(label)) {
+          found = occurrence;
+          ++count;
+        }
+      }
+      if (count != 1 || ambiguous_nauo[found]) continue;
+      if (source_nauo[found] != 0) {
+        source_nauo[found] = 0;
+        occurrences[found].source_transfer_valid = false;
+        ambiguous_nauo[found] = true;
+        continue;
+      }
+      const TopoDS_Shape transferred = TransferBRep::ShapeResult(process, nauo);
+      if (transferred.IsNull() ||
+          !transferred.IsSame(occurrences[found].shape) ||
+          transferred.Orientation() != occurrences[found].shape.Orientation()) {
+        continue;
+      }
+      source_nauo[found] = static_cast<uint32_t>(source_id);
+      occurrences[found].source_transfer_valid = true;
+      continue;
+    }
+
+    const auto face = occ::down_cast<StepShape_AdvancedFace>(entity);
+    if (face.IsNull()) continue;
+    if (source_faces.size() == kMaxSourceFaces) {
+      source_faces.clear();
+      return;
+    }
+    const int source_id = model->IdentLabel(face);
+    const TopoDS_Shape transferred = TransferBRep::ShapeResult(process, face);
+    if (source_id <= 0 || transferred.IsNull() ||
+        transferred.ShapeType() != TopAbs_FACE) {
+      continue;
+    }
+    source_faces.push_back({static_cast<uint32_t>(source_id), face->SameSense(),
+                            TopoDS::Face(transferred)});
+  }
+
+  for (size_t occurrence = 0; occurrence < occurrences.size(); ++occurrence) {
+    if (!occurrences[occurrence].source_transfer_valid) continue;
+    std::vector<uint32_t> route;
+    int current = static_cast<int>(occurrence);
+    while (current >= 0 && route.size() < kMaxRoute) {
+      const uint32_t source_id = source_nauo[static_cast<size_t>(current)];
+      if (source_id == 0) {
+        route.clear();
+        break;
+      }
+      route.push_back(source_id);
+      current = occurrences[static_cast<size_t>(current)].parent;
+    }
+    if (current >= 0 || route.empty()) {
+      occurrences[occurrence].source_transfer_valid = false;
+      continue;
+    }
+    std::reverse(route.begin(), route.end());
+    occurrences[occurrence].source_route = std::move(route);
+  }
+  for (size_t left = 0; left < occurrences.size(); ++left) {
+    if (!occurrences[left].source_transfer_valid) continue;
+    for (size_t right = left + 1; right < occurrences.size(); ++right) {
+      if (occurrences[right].source_transfer_valid &&
+          occurrences[left].source_route == occurrences[right].source_route) {
+        occurrences[left].source_transfer_valid = false;
+        occurrences[right].source_transfer_valid = false;
+      }
+    }
   }
 }
 
@@ -833,7 +1031,8 @@ int subshape_type(TopAbs_ShapeEnum type) {
 void append_subshapes(const occ::handle<XCAFDoc_ShapeTool>& shape_tool,
                       const NCollection_Sequence<TDF_Label>& product_labels,
                       std::vector<OccurrenceFacts>& occurrences,
-                      std::vector<FaceFacts>& whole_faces,
+                      std::vector<FaceFacts>& whole_query_faces,
+                      const std::vector<FaceView>& whole_faces,
                       std::vector<SubshapeFacts>& output) {
   for (int product_index = 1; product_index <= product_labels.Length();
        ++product_index) {
@@ -841,8 +1040,6 @@ void append_subshapes(const occ::handle<XCAFDoc_ShapeTool>& shape_tool,
     NCollection_Sequence<TDF_Label> labels;
     if (!XCAFDoc_ShapeTool::GetSubShapes(product, labels)) continue;
     const TopoDS_Shape product_shape = shape_tool->GetShape(product);
-    NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> product_faces;
-    TopExp::MapShapes(product_shape, TopAbs_FACE, product_faces);
 
     std::vector<int> owners;
     for (size_t occurrence = 0; occurrence < occurrences.size(); ++occurrence) {
@@ -858,10 +1055,21 @@ void append_subshapes(const occ::handle<XCAFDoc_ShapeTool>& shape_tool,
       const TopoDS_Shape shape = XCAFDoc_ShapeTool::GetShape(label);
       const int type = shape.IsNull() ? -1 : subshape_type(shape.ShapeType());
       if (name.empty() || type < 0) continue;
-      const int face = shape.ShapeType() == TopAbs_FACE
-                           ? product_faces.FindIndex(shape)
-                           : 0;
       for (const int owner : owners) {
+        int face = -1;
+        if (shape.ShapeType() == TopAbs_FACE) {
+          if (owner >= 0) {
+            face = located_public_face_index(
+                product_shape, shape,
+                occurrences[static_cast<size_t>(owner)]);
+          } else {
+            const int matched = exact_face_index(whole_faces, shape);
+            if (matched > 0 &&
+                whole_faces[static_cast<size_t>(matched - 1)].query_index > 0) {
+              face = matched - 1;
+            }
+          }
+        }
         SubshapeFacts record;
         record.occurrence = owner;
         if (owner >= 0) {
@@ -870,24 +1078,33 @@ void append_subshapes(const occ::handle<XCAFDoc_ShapeTool>& shape_tool,
         }
         record.name = name;
         record.shape_type = type;
-        record.has_face_index = face > 0;
-        record.face_index = face > 0 ? static_cast<uint32_t>(face) : 0;
+        record.has_face_index = face >= 0;
+        record.face_index =
+            face >= 0 ? static_cast<uint32_t>(face) : 0;
         record.shape_label = label_entry(label);
         output.push_back(record);
-        if (face > 0) {
-          for (FaceFacts& whole_face : whole_faces) {
-            if (whole_face.shape.IsSame(shape)) {
-              whole_face.shape_label = record.shape_label;
-              break;
-            }
+        if (face < 0) continue;
+        if (owner < 0) {
+          const uint32_t query_index =
+              whole_faces[static_cast<size_t>(face)].query_index;
+          if (query_index > 0) {
+            whole_query_faces[static_cast<size_t>(query_index - 1)]
+                .shape_label = record.shape_label;
           }
+          continue;
         }
-        if (owner >= 0 && face > 0 &&
-            static_cast<size_t>(face) <=
-                occurrences[static_cast<size_t>(owner)].faces.size()) {
+        const FaceView& located =
+            occurrences[static_cast<size_t>(owner)]
+                .public_faces[static_cast<size_t>(face)];
+        if (located.query_index > 0) {
           occurrences[static_cast<size_t>(owner)]
-              .faces[static_cast<size_t>(face - 1)]
+              .faces[static_cast<size_t>(located.query_index - 1)]
               .shape_label = record.shape_label;
+        }
+        const int whole = exact_face_index(whole_query_faces, located.shape);
+        if (whole > 0) {
+          whole_query_faces[static_cast<size_t>(whole - 1)].shape_label =
+              record.shape_label;
         }
       }
     }
@@ -912,7 +1129,7 @@ void append_semantic_datums(
     const occ::handle<XCAFDoc_ShapeTool>& shape_tool,
     const NCollection_Sequence<TDF_Label>& product_labels,
     const std::vector<OccurrenceFacts>& occurrences,
-    const std::vector<FaceFacts>& whole_faces,
+    const std::vector<FaceView>& whole_faces,
     std::vector<SemanticDatumFacts>& output) {
   const auto session = reader.ChangeReader().WS();
   if (session.IsNull() || session->Model().IsNull()) return;
@@ -1025,11 +1242,10 @@ void append_semantic_datums(
   for (const auto& [letter, attached_faces] : faces_by_letter) {
     auto& whole_indices = whole_face_indices_by_letter[letter];
     for (const TopoDS_Shape& attached : attached_faces) {
-      for (size_t face = 0; face < whole_faces.size(); ++face) {
-        if (whole_faces[face].shape.IsSame(attached)) {
-          whole_indices.push_back(static_cast<uint32_t>(face + 1));
-          break;
-        }
+      const int face = exact_face_index(whole_faces, attached);
+      if (face > 0 &&
+          whole_faces[static_cast<size_t>(face - 1)].query_index > 0) {
+        whole_indices.push_back(static_cast<uint32_t>(face - 1));
       }
     }
     std::sort(whole_indices.begin(), whole_indices.end());
@@ -1047,13 +1263,10 @@ void append_semantic_datums(
           product_labels.Value(static_cast<int>(occurrence.product + 1)));
       std::vector<uint32_t> indices;
       for (const TopoDS_Shape& attached : attached_faces) {
-        uint32_t face_index = 1;
-        for (TopExp_Explorer explorer(product_shape, TopAbs_FACE); explorer.More();
-             explorer.Next(), ++face_index) {
-          if (explorer.Current().IsSame(attached)) {
-            indices.push_back(face_index);
-            break;
-          }
+        const int face =
+            located_public_face_index(product_shape, attached, occurrence);
+        if (face >= 0) {
+          indices.push_back(static_cast<uint32_t>(face));
         }
       }
       if (!indices.empty()) {
@@ -1238,18 +1451,26 @@ int guarded(geospec_occt_string* error, Function&& function) noexcept {
 struct geospec_occt_document {
   occ::handle<TDocStd_Document> document;
   TopoDS_Shape shape;
+  std::string schema;
+  size_t source_byte_length = 0;
+  size_t free_shape_count = 0;
   std::string source_length_unit;
   double source_unit_to_millimeters = 1.0;
   geospec_occt_shape_facts shape_facts{};
   std::vector<ProductFacts> products;
   std::vector<OccurrenceFacts> occurrences;
+  std::vector<SourceFaceFacts> source_faces;
   std::vector<FaceFacts> faces;
+  std::vector<FaceView> public_faces;
   std::vector<PmiFacts> pmi;
   std::vector<SubshapeFacts> subshapes;
   std::vector<SemanticDatumFacts> semantic_datums;
   std::vector<DatumPlacementFacts> datum_placements;
   mutable std::optional<ReportData> report;
   mutable std::optional<std::pair<MeshKey, MeshData>> transfer_mesh;
+  mutable std::optional<std::vector<geospec_occt_circular_bore_candidate>>
+      circular_bores;
+  mutable std::unique_ptr<EdgeTreatmentTransferData> edge_treatments;
 };
 
 namespace {
@@ -1283,9 +1504,7 @@ bool resolve_entity(const geospec_occt_document& document,
     message = "Face entity is invalid or out of range.";
     return false;
   }
-  NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> faces;
-  TopExp::MapShapes(occurrence.shape, TopAbs_FACE, faces);
-  output = faces(static_cast<int>(entity.face));
+  output = occurrence.faces[static_cast<size_t>(entity.face - 1)].shape;
   return true;
 }
 
@@ -1478,6 +1697,2112 @@ bool qualified_cylinder_axial_extent(
   output.from = std::min(rims[0], rims[1]);
   output.to = std::max(rims[0], rims[1]);
   return true;
+}
+
+using ShapeAncestors =
+    NCollection_IndexedDataMap<TopoDS_Shape, NCollection_List<TopoDS_Shape>,
+                               TopTools_ShapeMapHasher>;
+
+struct BoreSolidContext {
+  TopoDS_Solid solid;
+  bool valid = false;
+  double maximum_tolerance = 0.0;
+  NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> edges;
+  ShapeAncestors edge_faces;
+};
+
+bool maximum_topology_tolerance(const TopoDS_Shape& shape, double& maximum) {
+  maximum = 0.0;
+  for (TopAbs_ShapeEnum kind : {TopAbs_FACE, TopAbs_EDGE, TopAbs_VERTEX}) {
+    NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> members;
+    TopExp::MapShapes(shape, kind, members);
+    for (int index = 1; index <= members.Extent(); ++index) {
+      double tolerance = 0.0;
+      if (kind == TopAbs_FACE) {
+        tolerance = BRep_Tool::Tolerance(TopoDS::Face(members(index)));
+      } else if (kind == TopAbs_EDGE) {
+        tolerance = BRep_Tool::Tolerance(TopoDS::Edge(members(index)));
+      } else {
+        tolerance = BRep_Tool::Tolerance(TopoDS::Vertex(members(index)));
+      }
+      if (!std::isfinite(tolerance) || tolerance < 0.0) return false;
+      maximum = std::max(maximum, tolerance);
+    }
+  }
+  return true;
+}
+
+bool directed_edge_use(const TopoDS_Face& face, const TopoDS_Edge& edge,
+                       TopAbs_Orientation& orientation) {
+  size_t matches = 0;
+  for (TopExp_Explorer wires(face, TopAbs_WIRE); wires.More(); wires.Next()) {
+    const TopoDS_Wire wire = TopoDS::Wire(wires.Current());
+    for (BRepTools_WireExplorer uses(wire, face); uses.More(); uses.Next()) {
+      if (!uses.Current().IsSame(edge)) continue;
+      orientation = uses.Current().Orientation();
+      ++matches;
+    }
+  }
+  return matches == 1 &&
+         (orientation == TopAbs_FORWARD || orientation == TopAbs_REVERSED);
+}
+
+int indexed_public_face(
+    const NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher>& map,
+    const std::vector<std::vector<size_t>>& ordinals,
+    const std::vector<FaceView>& faces, const TopoDS_Face& face) {
+  const int mapped = map.FindIndex(face);
+  if (mapped <= 0) return 0;
+  int match = 0;
+  for (const size_t ordinal : ordinals[static_cast<size_t>(mapped - 1)]) {
+    if (!faces[ordinal].shape.IsEqual(face)) continue;
+    if (match != 0) return 0;
+    match = static_cast<int>(ordinal + 1);
+  }
+  return match;
+}
+
+int circular_bore_end(
+    const geospec_occt_document& document, const TopoDS_Face& band,
+    const TopoDS_Edge& rim, const gp_Pnt& rim_center, const gp_Dir& axis,
+    const NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher>&
+        public_face_map,
+    const std::vector<std::vector<size_t>>& public_face_ordinals,
+    BoreSolidContext& owner, geospec_occt_circular_bore_end& output) {
+  const int edge_ordinal = owner.edges.FindIndex(rim);
+  const int incidence = owner.edge_faces.FindIndex(rim);
+  if (edge_ordinal <= 0 || incidence <= 0) {
+    return GEOSPEC_OCCT_CIRCULAR_BORE_INCOMPLETE_BAND;
+  }
+
+  const NCollection_List<TopoDS_Shape>& faces =
+      owner.edge_faces.FindFromIndex(incidence);
+  if (faces.Extent() != 2) {
+    return GEOSPEC_OCCT_CIRCULAR_BORE_INCOMPLETE_BAND;
+  }
+  TopoDS_Face adjacent;
+  size_t band_count = 0;
+  for (NCollection_List<TopoDS_Shape>::Iterator iterator(faces);
+       iterator.More(); iterator.Next()) {
+    const TopoDS_Face face = TopoDS::Face(iterator.Value());
+    if (face.IsEqual(band)) {
+      ++band_count;
+    } else if (adjacent.IsNull()) {
+      adjacent = face;
+    } else {
+      return GEOSPEC_OCCT_CIRCULAR_BORE_INCOMPLETE_BAND;
+    }
+  }
+  if (band_count != 1 || adjacent.IsNull()) {
+    return GEOSPEC_OCCT_CIRCULAR_BORE_INCOMPLETE_BAND;
+  }
+  TopAbs_Orientation band_use = TopAbs_EXTERNAL;
+  TopAbs_Orientation adjacent_use = TopAbs_EXTERNAL;
+  if (!directed_edge_use(band, rim, band_use) ||
+      !directed_edge_use(adjacent, rim, adjacent_use) ||
+      band_use == adjacent_use) {
+    return GEOSPEC_OCCT_CIRCULAR_BORE_INCOMPLETE_BAND;
+  }
+
+  const BRepAdaptor_Surface surface(adjacent);
+  if (surface.GetType() != GeomAbs_Plane) {
+    return GEOSPEC_OCCT_CIRCULAR_BORE_UNSUPPORTED_TERMINATION;
+  }
+  const gp_Pln plane = surface.Plane();
+  if (!plane.Axis().Direction().IsParallel(axis, Precision::Angular()) ||
+      plane.Distance(rim_center) > owner.maximum_tolerance) {
+    return GEOSPEC_OCCT_CIRCULAR_BORE_UNSUPPORTED_TERMINATION;
+  }
+
+  TopoDS_Wire containing;
+  size_t containing_count = 0;
+  size_t wire_count = 0;
+  for (TopExp_Explorer wires(adjacent, TopAbs_WIRE); wires.More();
+       wires.Next()) {
+    const TopoDS_Wire wire = TopoDS::Wire(wires.Current());
+    ++wire_count;
+    size_t children = 0;
+    size_t matches = 0;
+    for (TopoDS_Iterator child(wire); child.More(); child.Next()) {
+      if (child.Value().ShapeType() != TopAbs_EDGE) {
+        return GEOSPEC_OCCT_CIRCULAR_BORE_UNSUPPORTED_TERMINATION;
+      }
+      ++children;
+    }
+    size_t visited = 0;
+    for (BRepTools_WireExplorer use(wire, adjacent); use.More(); use.Next()) {
+      ++visited;
+      if (use.Current().IsSame(rim)) ++matches;
+    }
+    if (visited != children) {
+      throw Standard_Failure("Circular bore boundary traversal is incomplete.");
+    }
+    if (matches == 0) continue;
+    if (matches != 1 || children != 1) {
+      return GEOSPEC_OCCT_CIRCULAR_BORE_UNSUPPORTED_TERMINATION;
+    }
+    containing = wire;
+    ++containing_count;
+  }
+  if (containing_count != 1) {
+    return GEOSPEC_OCCT_CIRCULAR_BORE_UNSUPPORTED_TERMINATION;
+  }
+
+  const TopoDS_Wire outer = BRepTools::OuterWire(adjacent);
+  if (outer.IsNull()) {
+    return GEOSPEC_OCCT_CIRCULAR_BORE_UNSUPPORTED_TERMINATION;
+  }
+  if (containing.IsSame(outer)) {
+    if (wire_count != 1) {
+      return GEOSPEC_OCCT_CIRCULAR_BORE_UNSUPPORTED_TERMINATION;
+    }
+    output.termination = GEOSPEC_OCCT_CIRCULAR_BORE_PLANAR_DISK_BOTTOM;
+  } else {
+    output.termination = GEOSPEC_OCCT_CIRCULAR_BORE_MOUTH;
+  }
+
+  const int public_face = indexed_public_face(
+      public_face_map, public_face_ordinals, document.public_faces, adjacent);
+  if (public_face == 0) {
+    return GEOSPEC_OCCT_CIRCULAR_BORE_AMBIGUOUS_ASSOCIATION;
+  }
+  output.owning_solid_edge_ordinal = static_cast<uint32_t>(edge_ordinal);
+  output.adjacent_public_face_ordinal =
+      static_cast<uint32_t>(public_face - 1);
+  return -1;
+}
+
+bool build_circular_bores(
+    const geospec_occt_document& document, size_t max_candidates,
+    size_t retained_candidate_size, size_t retained_inventory_size,
+    std::vector<geospec_occt_circular_bore_candidate>& output,
+    std::string& message, bool& native_error) {
+  constexpr size_t kMaximumCandidates = 4096;
+  constexpr size_t kMaximumOwnedBytes = 1024 * 1024;
+  const size_t limit = std::min(max_candidates, kMaximumCandidates);
+  size_t count = 0;
+  for (const FaceView& view : document.public_faces) {
+    if (BRepAdaptor_Surface(view.shape).GetType() != GeomAbs_Plane) ++count;
+  }
+  if (count > limit) {
+    message = "Circular bore candidate count exceeds the requested bound.";
+    return false;
+  }
+  if (retained_candidate_size > kMaximumOwnedBytes ||
+      retained_inventory_size > kMaximumOwnedBytes ||
+      count > (kMaximumOwnedBytes - retained_inventory_size) /
+                  (sizeof(geospec_occt_circular_bore_candidate) +
+                   retained_candidate_size)) {
+    message = "Circular bore owned transfer exceeds one mebibyte.";
+    return false;
+  }
+
+  NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> solids;
+  TopExp::MapShapes(document.shape, TopAbs_SOLID, solids);
+  ShapeAncestors face_solids;
+  TopExp::MapShapesAndAncestors(document.shape, TopAbs_FACE, TopAbs_SOLID,
+                                face_solids);
+  NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher>
+      public_face_map;
+  std::vector<std::vector<size_t>> public_face_ordinals;
+  for (size_t ordinal = 0; ordinal < document.public_faces.size(); ++ordinal) {
+    const int mapped = public_face_map.Add(document.public_faces[ordinal].shape);
+    if (static_cast<size_t>(mapped) > public_face_ordinals.size()) {
+      public_face_ordinals.emplace_back();
+    }
+    public_face_ordinals[static_cast<size_t>(mapped - 1)].push_back(ordinal);
+  }
+  std::vector<std::unique_ptr<BoreSolidContext>> contexts(
+      static_cast<size_t>(solids.Extent()));
+  output.reserve(count);
+  if (output.capacity() >
+      (kMaximumOwnedBytes - retained_inventory_size -
+       count * retained_candidate_size) /
+          sizeof(geospec_occt_circular_bore_candidate)) {
+    message = "Circular bore owned transfer capacity exceeds one mebibyte.";
+    return false;
+  }
+
+  for (size_t public_ordinal = 0;
+       public_ordinal < document.public_faces.size(); ++public_ordinal) {
+    const FaceView& view = document.public_faces[public_ordinal];
+    const BRepAdaptor_Surface surface(view.shape);
+    if (surface.GetType() == GeomAbs_Plane) continue;
+    if (public_ordinal > std::numeric_limits<uint32_t>::max()) {
+      native_error = true;
+      message = "Circular bore public face ordinal exceeds the transfer type.";
+      return false;
+    }
+
+    geospec_occt_circular_bore_candidate candidate{};
+    candidate.public_face_ordinal = static_cast<uint32_t>(public_ordinal);
+    candidate.private_query_face = view.query_index;
+    candidate.disposition = GEOSPEC_OCCT_CIRCULAR_BORE_UNQUALIFIED;
+    if (surface.GetType() != GeomAbs_Cylinder) {
+      candidate.reason = GEOSPEC_OCCT_CIRCULAR_BORE_UNSUPPORTED_SURFACE;
+      output.push_back(candidate);
+      continue;
+    }
+    if (view.shape.Orientation() != TopAbs_FORWARD &&
+        view.shape.Orientation() != TopAbs_REVERSED) {
+      candidate.reason = GEOSPEC_OCCT_CIRCULAR_BORE_UNSUPPORTED_ORIENTATION;
+      output.push_back(candidate);
+      continue;
+    }
+
+    const int ownership = face_solids.FindIndex(view.shape);
+    int owner_ordinal = 0;
+    if (ownership > 0 && face_solids.FindKey(ownership).IsEqual(view.shape)) {
+      for (NCollection_List<TopoDS_Shape>::Iterator iterator(
+               face_solids.FindFromIndex(ownership));
+           iterator.More(); iterator.Next()) {
+        const int ordinal = solids.FindIndex(iterator.Value());
+        if (ordinal <= 0 || (owner_ordinal != 0 && owner_ordinal != ordinal)) {
+          owner_ordinal = -1;
+          break;
+        }
+        owner_ordinal = ordinal;
+      }
+    }
+    if (owner_ordinal <= 0) {
+      candidate.reason = GEOSPEC_OCCT_CIRCULAR_BORE_AMBIGUOUS_OWNERSHIP;
+      output.push_back(candidate);
+      continue;
+    }
+
+    std::unique_ptr<BoreSolidContext>& slot =
+        contexts[static_cast<size_t>(owner_ordinal - 1)];
+    if (!slot) {
+      slot = std::make_unique<BoreSolidContext>();
+      std::string qualification;
+      TopoDS_Solid qualified;
+      slot->valid = regular_solid_operand(solids(owner_ordinal), qualified,
+                                          qualification) &&
+                    maximum_topology_tolerance(
+                        solids(owner_ordinal), slot->maximum_tolerance);
+      if (slot->valid) {
+        slot->solid = qualified;
+        TopExp::MapShapes(slot->solid, TopAbs_EDGE, slot->edges);
+        TopExp::MapShapesAndAncestors(slot->solid, TopAbs_EDGE, TopAbs_FACE,
+                                      slot->edge_faces);
+      }
+    }
+    BoreSolidContext& owner = *slot;
+    if (!owner.valid) {
+      candidate.reason = GEOSPEC_OCCT_CIRCULAR_BORE_INVALID_SOLID;
+      output.push_back(candidate);
+      continue;
+    }
+    candidate.owning_solid_ordinal = static_cast<uint32_t>(owner_ordinal - 1);
+    if (view.query_index == 0) {
+      candidate.reason = GEOSPEC_OCCT_CIRCULAR_BORE_AMBIGUOUS_ASSOCIATION;
+      output.push_back(candidate);
+      continue;
+    }
+    if (view.shape.Orientation() == TopAbs_FORWARD) {
+      candidate.disposition = GEOSPEC_OCCT_CIRCULAR_BORE_NON_MEMBER;
+      candidate.reason = GEOSPEC_OCCT_CIRCULAR_BORE_EXTERIOR_CYLINDER;
+      output.push_back(candidate);
+      continue;
+    }
+
+    if (!qualified_cylinder_axial_extent(view.shape, candidate.band, message)) {
+      candidate.reason = GEOSPEC_OCCT_CIRCULAR_BORE_INCOMPLETE_BAND;
+      output.push_back(candidate);
+      continue;
+    }
+    const gp_Pnt origin(candidate.band.origin[0], candidate.band.origin[1],
+                        candidate.band.origin[2]);
+    const gp_Dir axis(candidate.band.axis[0], candidate.band.axis[1],
+                      candidate.band.axis[2]);
+    const gp_Vec axis_vector(axis);
+    std::array<TopoDS_Edge, 2> rims;
+    std::array<gp_Pnt, 2> centers;
+    std::array<bool, 2> found{};
+    bool invalid_rims = false;
+    TopoDS_Edge seam;
+    std::array<TopAbs_Orientation, 2> seam_uses{};
+    size_t seam_count = 0;
+    TopoDS_Wire wire;
+    for (TopExp_Explorer wires(view.shape, TopAbs_WIRE); wires.More();
+         wires.Next()) {
+      wire = TopoDS::Wire(wires.Current());
+    }
+    for (BRepTools_WireExplorer edges(wire, view.shape); edges.More();
+         edges.Next()) {
+      const TopoDS_Edge edge = edges.Current();
+      if (BRep_Tool::IsClosed(edge, view.shape)) {
+        if (seam_count == seam_uses.size() ||
+            (!seam.IsNull() && !seam.IsSame(edge)) ||
+            (edge.Orientation() != TopAbs_FORWARD &&
+             edge.Orientation() != TopAbs_REVERSED)) {
+          invalid_rims = true;
+          break;
+        }
+        if (seam.IsNull()) seam = edge;
+        seam_uses[seam_count++] = edge.Orientation();
+        continue;
+      }
+      const gp_Pnt center = BRepAdaptor_Curve(edge).Circle().Location();
+      const double station = gp_Vec(origin, center).Dot(axis_vector);
+      const size_t end = station == candidate.band.from ? 0 : 1;
+      if (found[end] || (end == 1 && station != candidate.band.to)) {
+        candidate.reason = GEOSPEC_OCCT_CIRCULAR_BORE_INCOMPLETE_BAND;
+        invalid_rims = true;
+        break;
+      }
+      rims[end] = edge;
+      centers[end] = center;
+      found[end] = true;
+    }
+    if (invalid_rims || !found[0] || !found[1] || seam_count != 2 ||
+        seam_uses[0] == seam_uses[1]) {
+      candidate.reason = GEOSPEC_OCCT_CIRCULAR_BORE_INCOMPLETE_BAND;
+      output.push_back(candidate);
+      continue;
+    }
+
+    int endpoint_reason = -1;
+    for (size_t end = 0; end < 2; ++end) {
+      endpoint_reason = circular_bore_end(
+          document, view.shape, rims[end], centers[end], axis, public_face_map,
+          public_face_ordinals, owner, candidate.ends[end]);
+      if (endpoint_reason >= 0) break;
+    }
+    if (endpoint_reason >= 0) {
+      candidate.reason = endpoint_reason;
+      output.push_back(candidate);
+      continue;
+    }
+    candidate.maximum_topology_tolerance_mm = owner.maximum_tolerance;
+
+    if (candidate.ends[0].termination ==
+            GEOSPEC_OCCT_CIRCULAR_BORE_PLANAR_DISK_BOTTOM &&
+        candidate.ends[1].termination ==
+            GEOSPEC_OCCT_CIRCULAR_BORE_PLANAR_DISK_BOTTOM) {
+      candidate.disposition = GEOSPEC_OCCT_CIRCULAR_BORE_NON_MEMBER;
+      candidate.reason = GEOSPEC_OCCT_CIRCULAR_BORE_SEALED_CAVITY;
+      output.push_back(candidate);
+      continue;
+    }
+
+    const gp_Pnt start = origin.Translated(
+        axis_vector.Multiplied(candidate.band.from));
+    BRepPrimAPI_MakeCylinder cylinder(gp_Ax2(start, axis),
+                                     candidate.band.radius,
+                                     candidate.band.to - candidate.band.from);
+    cylinder.Build();
+    if (!cylinder.IsDone()) {
+      native_error = true;
+      message = "OCCT failed to construct the finite circular bore cylinder.";
+      return false;
+    }
+    const TopoDS_Shape cylinder_shape = cylinder.Shape();
+    if (cylinder_shape.IsNull()) {
+      native_error = true;
+      message = "OCCT returned no finite circular bore cylinder.";
+      return false;
+    }
+    NCollection_List<TopoDS_Shape> arguments;
+    arguments.Append(owner.solid);
+    NCollection_List<TopoDS_Shape> tools;
+    tools.Append(cylinder_shape);
+    BRepAlgoAPI_Common common;
+    common.SetArguments(arguments);
+    common.SetTools(tools);
+    common.SetNonDestructive(true);
+    common.SetRunParallel(false);
+    common.Build();
+    if (!common.IsDone() || common.HasErrors()) {
+      std::ostringstream details;
+      common.DumpErrors(details);
+      native_error = true;
+      message = details.str().empty()
+                    ? "OCCT circular bore Common failed."
+                    : "OCCT circular bore Common failed: " + details.str();
+      return false;
+    }
+    const TopoDS_Shape residual = common.Shape();
+    if (residual.IsNull() || !BRepCheck_Analyzer(residual, true).IsValid()) {
+      native_error = true;
+      message = "OCCT circular bore Common returned null or invalid topology.";
+      return false;
+    }
+    NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher>
+        residual_solids;
+    TopExp::MapShapes(residual, TopAbs_SOLID, residual_solids);
+    if (static_cast<uint64_t>(residual_solids.Extent()) >
+        std::numeric_limits<uint32_t>::max()) {
+      native_error = true;
+      message = "OCCT circular bore Common returned too many residual solids.";
+      return false;
+    }
+    candidate.interior_residual_solid_count =
+        static_cast<uint32_t>(residual_solids.Extent());
+    if (!residual_solids.IsEmpty()) {
+      candidate.disposition = GEOSPEC_OCCT_CIRCULAR_BORE_NON_MEMBER;
+      candidate.reason = GEOSPEC_OCCT_CIRCULAR_BORE_OBSTRUCTED_INTERIOR;
+    } else {
+      candidate.disposition = GEOSPEC_OCCT_CIRCULAR_BORE_QUALIFIED;
+      candidate.reason = 0;
+    }
+    output.push_back(candidate);
+  }
+  return true;
+}
+
+constexpr size_t kMaximumEdgeTreatmentRows = 4096;
+constexpr size_t kMaximumEdgeTreatmentBoundaryUses = 8;
+constexpr size_t kMaximumEdgeTreatmentResiduals = 16;
+constexpr size_t kMaximumEdgeTreatmentOwnedBytes = 1024 * 1024;
+
+struct EdgeTreatmentCertificateData {
+  geospec_occt_edge_treatment_certificate value{};
+  std::vector<geospec_occt_edge_treatment_boundary_use> boundary_uses;
+  std::vector<geospec_occt_edge_treatment_residual> residuals;
+};
+
+struct EdgeTreatmentDispositionData {
+  int disposition = GEOSPEC_OCCT_EDGE_TREATMENT_UNQUALIFIED;
+  int reason = GEOSPEC_OCCT_EDGE_TREATMENT_UNSUPPORTED_SURFACE;
+  std::unique_ptr<EdgeTreatmentCertificateData> certificate;
+};
+
+struct EdgeTreatmentRowData {
+  geospec_occt_edge_treatment_row value{};
+  std::string occurrence_path;
+  std::string source_face_key;
+  std::string label;
+  EdgeTreatmentDispositionData chamfer;
+  EdgeTreatmentDispositionData fillet;
+};
+
+struct EdgeTreatmentTransferData {
+  geospec_occt_edge_treatment_counts counts{};
+  std::vector<EdgeTreatmentRowData> rows;
+  size_t owned_bytes = 0;
+};
+
+struct EdgeTreatmentUseData {
+  geospec_occt_edge_treatment_boundary_use value{};
+  TopoDS_Edge edge;
+  TopoDS_Face adjacent;
+  double maximum_tolerance = 0.0;
+};
+
+struct EdgeTreatmentScope {
+  std::optional<uint32_t> occurrence;
+  std::string occurrence_path;
+  const TopoDS_Shape* shape = nullptr;
+  const std::vector<FaceView>* faces = nullptr;
+};
+
+bool transition_surface(const TopoDS_Face& face) {
+  const GeomAbs_SurfaceType type = BRepAdaptor_Surface(face).GetType();
+  return type == GeomAbs_Plane || type == GeomAbs_Cone ||
+         type == GeomAbs_Cylinder || type == GeomAbs_Torus;
+}
+
+bool checked_add_size(size_t value, size_t& total) {
+  if (value > std::numeric_limits<size_t>::max() - total) return false;
+  total += value;
+  return true;
+}
+
+bool checked_product_size(size_t count, size_t width, size_t& output) {
+  if (count != 0 && width > std::numeric_limits<size_t>::max() / count) {
+    return false;
+  }
+  output = count * width;
+  return true;
+}
+
+std::vector<EdgeTreatmentScope> edge_treatment_scopes(
+    const geospec_occt_document& document) {
+  std::vector<EdgeTreatmentScope> scopes;
+  if (document.occurrences.empty()) {
+    scopes.push_back({std::nullopt, {}, &document.shape, &document.public_faces});
+    return scopes;
+  }
+  scopes.reserve(document.occurrences.size());
+  for (size_t index = 0; index < document.occurrences.size(); ++index) {
+    const OccurrenceFacts& occurrence = document.occurrences[index];
+    scopes.push_back({static_cast<uint32_t>(index), occurrence.path,
+                      &occurrence.shape, &occurrence.public_faces});
+  }
+  return scopes;
+}
+
+bool count_edge_treatments(
+    const geospec_occt_document& document,
+    geospec_occt_edge_treatment_counts& output, std::string& message) {
+  uint64_t faces = 0;
+  uint64_t uses = 0;
+  for (const EdgeTreatmentScope& scope : edge_treatment_scopes(document)) {
+    faces += scope.faces->size();
+    if (faces > std::numeric_limits<uint32_t>::max()) {
+      message = "Edge-treatment public face count exceeds the transfer type.";
+      return false;
+    }
+    for (const FaceView& view : *scope.faces) {
+      if (!transition_surface(view.shape)) continue;
+      for (TopExp_Explorer wires(view.shape, TopAbs_WIRE); wires.More();
+           wires.Next()) {
+        const TopoDS_Wire wire = TopoDS::Wire(wires.Current());
+        size_t children = 0;
+        for (TopoDS_Iterator child(wire); child.More(); child.Next()) {
+          if (child.Value().ShapeType() != TopAbs_EDGE) {
+            message = "Edge-treatment boundary contains a non-edge child.";
+            return false;
+          }
+          ++children;
+        }
+        size_t visited = 0;
+        for (BRepTools_WireExplorer edge(wire, view.shape); edge.More();
+             edge.Next()) {
+          ++visited;
+        }
+        if (visited != children) {
+          message = "Edge-treatment boundary traversal is incomplete.";
+          return false;
+        }
+        uses += visited;
+        if (uses > std::numeric_limits<uint32_t>::max()) {
+          message = "Edge-treatment boundary-use count exceeds the transfer type.";
+          return false;
+        }
+      }
+    }
+  }
+  output.public_face_count = static_cast<uint32_t>(faces);
+  output.candidate_edge_use_count = static_cast<uint32_t>(uses);
+  return true;
+}
+
+gp_Pnt midpoint(const geospec_occt_edge_treatment_boundary_use& use) {
+  return {(use.start[0] + use.end[0]) / 2.0,
+          (use.start[1] + use.end[1]) / 2.0,
+          (use.start[2] + use.end[2]) / 2.0};
+}
+
+bool natural_surface_normal(const TopoDS_Face& face, const gp_Pnt& at,
+                            gp_Dir& output) {
+  const BRepAdaptor_Surface surface(face);
+  gp_Vec normal;
+  switch (surface.GetType()) {
+    case GeomAbs_Plane:
+      output = surface.Plane().Axis().Direction();
+      break;
+    case GeomAbs_Cylinder: {
+      const gp_Cylinder cylinder = surface.Cylinder();
+      const gp_Vec axis(cylinder.Axis().Direction());
+      const gp_Vec delta(cylinder.Location(), at);
+      normal = delta - axis.Multiplied(delta.Dot(axis));
+      if (normal.SquareMagnitude() <= 0.0) return false;
+      output = gp_Dir(normal);
+      break;
+    }
+    case GeomAbs_Cone: {
+      const gp_Cone cone = surface.Cone();
+      const gp_Vec axis(cone.Axis().Direction());
+      const gp_Vec delta(cone.Location(), at);
+      gp_Vec radial = delta - axis.Multiplied(delta.Dot(axis));
+      if (radial.SquareMagnitude() <= 0.0) return false;
+      radial.Normalize();
+      normal = radial.Multiplied(std::cos(cone.SemiAngle())) -
+               axis.Multiplied(std::sin(cone.SemiAngle()));
+      if (normal.SquareMagnitude() <= 0.0) return false;
+      output = gp_Dir(normal);
+      break;
+    }
+    case GeomAbs_Torus: {
+      const gp_Torus torus = surface.Torus();
+      const gp_Vec axis(torus.Axis().Direction());
+      const gp_Vec delta(torus.Location(), at);
+      gp_Vec radial = delta - axis.Multiplied(delta.Dot(axis));
+      if (radial.SquareMagnitude() <= 0.0) return false;
+      radial.Normalize();
+      const gp_Pnt tube_center =
+          torus.Location().Translated(radial.Multiplied(torus.MajorRadius()));
+      normal = gp_Vec(tube_center, at);
+      if (normal.SquareMagnitude() <= 0.0) return false;
+      output = gp_Dir(normal);
+      break;
+    }
+    default: return false;
+  }
+  if (face.Orientation() == TopAbs_REVERSED) output.Reverse();
+  return face.Orientation() == TopAbs_FORWARD ||
+         face.Orientation() == TopAbs_REVERSED;
+}
+
+double surface_distance(const TopoDS_Face& face, const gp_Pnt& point_value) {
+  const BRepAdaptor_Surface surface(face);
+  switch (surface.GetType()) {
+    case GeomAbs_Plane: return surface.Plane().Distance(point_value);
+    case GeomAbs_Cylinder: {
+      const gp_Cylinder cylinder = surface.Cylinder();
+      return std::abs(gp_Lin(cylinder.Axis()).Distance(point_value) -
+                      cylinder.Radius());
+    }
+    case GeomAbs_Cone: {
+      const gp_Cone cone = surface.Cone();
+      const gp_Vec axis(cone.Axis().Direction());
+      const gp_Vec delta(cone.Location(), point_value);
+      const double along = delta.Dot(axis);
+      const double radial =
+          (delta - axis.Multiplied(along)).Magnitude();
+      const double expected =
+          cone.RefRadius() + along * std::tan(cone.SemiAngle());
+      return std::abs(radial - expected) *
+             std::abs(std::cos(cone.SemiAngle()));
+    }
+    case GeomAbs_Torus: {
+      const gp_Torus torus = surface.Torus();
+      const gp_Vec axis(torus.Axis().Direction());
+      const gp_Vec delta(torus.Location(), point_value);
+      gp_Vec radial = delta - axis.Multiplied(delta.Dot(axis));
+      if (radial.SquareMagnitude() <= 0.0) {
+        return std::numeric_limits<double>::infinity();
+      }
+      radial.Normalize();
+      const gp_Pnt tube_center =
+          torus.Location().Translated(radial.Multiplied(torus.MajorRadius()));
+      return std::abs(tube_center.Distance(point_value) -
+                      torus.MinorRadius());
+    }
+    default: return std::numeric_limits<double>::infinity();
+  }
+}
+
+double parallel_residual(const gp_Dir& left, const gp_Dir& right,
+                         double scale) {
+  return gp_Vec(left).Crossed(gp_Vec(right)).Magnitude() * scale;
+}
+
+double axis_distance(const gp_Ax1& left, const gp_Ax1& right) {
+  const gp_Vec offset(left.Location(), right.Location());
+  return offset.Crossed(gp_Vec(left.Direction())).Magnitude();
+}
+
+bool plane_intersection(const gp_Pln& left, const gp_Pln& right,
+                        gp_Lin& output) {
+  const gp_Vec left_normal(left.Axis().Direction());
+  const gp_Vec right_normal(right.Axis().Direction());
+  const gp_Vec direction_value = left_normal.Crossed(right_normal);
+  const double denominator = direction_value.SquareMagnitude();
+  if (!std::isfinite(denominator) || denominator <= 0.0) return false;
+  // Solve relative to one source plane, avoiding subtraction of two large
+  // world-origin offsets after a located occurrence has been translated.
+  const double offset = right_normal.Dot(
+      gp_Vec(left.Location(), right.Location()));
+  const gp_Pnt location = left.Location().Translated(
+      direction_value.Crossed(left_normal).Multiplied(offset / denominator));
+  if (!std::isfinite(location.X()) || !std::isfinite(location.Y()) ||
+      !std::isfinite(location.Z())) return false;
+  output = gp_Lin(location, gp_Dir(direction_value));
+  return true;
+}
+
+bool append_residual(EdgeTreatmentCertificateData& certificate, int kind,
+                     double value, double limit, double scale) {
+  if (!std::isfinite(value) || value < 0.0 || !std::isfinite(limit) ||
+      limit < 0.0 || !std::isfinite(scale) || scale <= 0.0 ||
+      certificate.residuals.size() == kMaximumEdgeTreatmentResiduals) {
+    return false;
+  }
+  certificate.residuals.push_back({kind, value, limit, scale});
+  return true;
+}
+
+bool collect_edge_treatment_boundary(
+    const TopoDS_Face& face, BoreSolidContext& owner,
+    std::vector<EdgeTreatmentUseData>& output, uint32_t& wire_count,
+    int& reason) {
+  wire_count = 0;
+  for (TopExp_Explorer wires(face, TopAbs_WIRE); wires.More(); wires.Next()) {
+    if (wire_count == std::numeric_limits<uint32_t>::max()) {
+      reason = GEOSPEC_OCCT_EDGE_TREATMENT_UNSUPPORTED_TRIM;
+      return false;
+    }
+    const TopoDS_Wire wire = TopoDS::Wire(wires.Current());
+    size_t children = 0;
+    for (TopoDS_Iterator child(wire); child.More(); child.Next()) {
+      if (child.Value().ShapeType() != TopAbs_EDGE) {
+        reason = GEOSPEC_OCCT_EDGE_TREATMENT_INCOMPLETE_BOUNDARY;
+        return false;
+      }
+      ++children;
+    }
+    size_t visited = 0;
+    for (BRepTools_WireExplorer edges(wire, face); edges.More(); edges.Next()) {
+      ++visited;
+      if (output.size() == kMaximumEdgeTreatmentBoundaryUses) {
+        reason = GEOSPEC_OCCT_EDGE_TREATMENT_UNSUPPORTED_TRIM;
+        return false;
+      }
+      const TopoDS_Edge edge = edges.Current();
+      if ((edge.Orientation() != TopAbs_FORWARD &&
+           edge.Orientation() != TopAbs_REVERSED) ||
+          BRep_Tool::Degenerated(edge)) {
+        reason = GEOSPEC_OCCT_EDGE_TREATMENT_DEGENERATE_SUPPORT;
+        return false;
+      }
+      const int edge_ordinal = owner.edges.FindIndex(edge);
+      const int incidence = owner.edge_faces.FindIndex(edge);
+      if (edge_ordinal <= 0 || incidence <= 0) {
+        reason = GEOSPEC_OCCT_EDGE_TREATMENT_INCOMPLETE_BOUNDARY;
+        return false;
+      }
+      TopoDS_Face adjacent;
+      size_t candidate_count = 0;
+      size_t adjacent_count = 0;
+      for (NCollection_List<TopoDS_Shape>::Iterator iterator(
+               owner.edge_faces.FindFromIndex(incidence));
+           iterator.More(); iterator.Next()) {
+        const TopoDS_Face member = TopoDS::Face(iterator.Value());
+        if (member.IsSame(face)) {
+          ++candidate_count;
+        } else if (adjacent.IsNull() || adjacent.IsSame(member)) {
+          adjacent = member;
+          ++adjacent_count;
+        } else {
+          ++adjacent_count;
+        }
+      }
+      const bool seam = BRep_Tool::IsClosed(edge, face);
+      if ((!seam && (candidate_count != 1 || adjacent_count != 1)) ||
+          (seam && (candidate_count != 2 || adjacent_count != 0))) {
+        reason = GEOSPEC_OCCT_EDGE_TREATMENT_INCOMPLETE_BOUNDARY;
+        return false;
+      }
+      if (!seam) {
+        TopAbs_Orientation adjacent_use;
+        if (!directed_edge_use(adjacent, edge, adjacent_use) ||
+            adjacent_use == edge.Orientation()) {
+          reason = GEOSPEC_OCCT_EDGE_TREATMENT_UNSUPPORTED_ORIENTATION;
+          return false;
+        }
+      }
+
+      BRepAdaptor_Curve curve(edge);
+      const double first = curve.FirstParameter();
+      const double last = curve.LastParameter();
+      GProp_GProps properties;
+      BRepGProp::LinearProperties(edge, properties);
+      const double length = properties.Mass();
+      TopoDS_Vertex start;
+      TopoDS_Vertex end;
+      TopExp::Vertices(edge, start, end, true);
+      if (start.IsNull() || end.IsNull() || !std::isfinite(first) ||
+          !std::isfinite(last) || first >= last || !std::isfinite(length) ||
+          length <= 0.0) {
+        reason = GEOSPEC_OCCT_EDGE_TREATMENT_DEGENERATE_SUPPORT;
+        return false;
+      }
+      const double edge_tolerance = BRep_Tool::Tolerance(edge);
+      const double start_tolerance = BRep_Tool::Tolerance(start);
+      const double end_tolerance = BRep_Tool::Tolerance(end);
+      if (!std::isfinite(edge_tolerance) || edge_tolerance < 0.0 ||
+          !std::isfinite(start_tolerance) || start_tolerance < 0.0 ||
+          !std::isfinite(end_tolerance) || end_tolerance < 0.0) {
+        reason = GEOSPEC_OCCT_EDGE_TREATMENT_DEGENERATE_SUPPORT;
+        return false;
+      }
+      EdgeTreatmentUseData use;
+      use.edge = edge;
+      use.adjacent = adjacent;
+      use.value.owning_solid_edge_ordinal =
+          static_cast<uint32_t>(edge_ordinal);
+      use.value.wire_ordinal = wire_count;
+      use.value.reversed = edge.Orientation() == TopAbs_REVERSED ? 1 : 0;
+      use.value.seam = seam ? 1 : 0;
+      use.value.role = seam ? GEOSPEC_OCCT_EDGE_TREATMENT_SEAM
+                            : GEOSPEC_OCCT_EDGE_TREATMENT_END;
+      use.value.curve = edge_facts(edge, static_cast<uint32_t>(edge_ordinal)).facts;
+      use.value.parameter_range[0] = first;
+      use.value.parameter_range[1] = last;
+      point(use.value.start, BRep_Tool::Pnt(start));
+      point(use.value.end, BRep_Tool::Pnt(end));
+      use.value.curve.length = length;
+      use.value.edge_tolerance_mm = edge_tolerance;
+      use.value.vertex_tolerances_mm[0] = start_tolerance;
+      use.value.vertex_tolerances_mm[1] = end_tolerance;
+      use.maximum_tolerance =
+          std::max({BRep_Tool::Tolerance(face), edge_tolerance,
+                    start_tolerance, end_tolerance,
+                    adjacent.IsNull() ? 0.0 : BRep_Tool::Tolerance(adjacent)});
+      output.push_back(std::move(use));
+    }
+    if (visited != children) {
+      throw Standard_Failure("Edge-treatment boundary traversal is incomplete.");
+    }
+    ++wire_count;
+  }
+  if (wire_count != 1 || output.empty()) {
+    reason = GEOSPEC_OCCT_EDGE_TREATMENT_UNSUPPORTED_TRIM;
+    return false;
+  }
+  return true;
+}
+
+bool support_transfer(
+    const std::vector<FaceView>& public_faces,
+    const NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher>&
+        public_face_map,
+    const std::vector<std::vector<size_t>>& public_face_ordinals,
+    const TopoDS_Face& face, double maximum_tolerance,
+    geospec_occt_edge_treatment_support& output) {
+  const int public_face = indexed_public_face(
+      public_face_map, public_face_ordinals, public_faces, face);
+  if (public_face <= 0) return false;
+  const FaceView& view = public_faces[static_cast<size_t>(public_face - 1)];
+  if (view.query_index == 0) return false;
+  output.public_face_ordinal = static_cast<uint32_t>(public_face - 1);
+  output.private_query_face = view.query_index;
+  output.surface = face_facts(face, output.public_face_ordinal,
+                              output.private_query_face)
+                       .facts;
+  output.transferred_reversed =
+      face.Orientation() == TopAbs_REVERSED ? 1 : 0;
+  output.maximum_topology_tolerance_mm = maximum_tolerance;
+  return true;
+}
+
+bool valid_full_u(const BRepAdaptor_Surface& surface, bool expected_full,
+                  double tolerance, double scale, double& span) {
+  span = surface.LastUParameter() - surface.FirstUParameter();
+  if (!std::isfinite(span) || span <= 0.0 || !std::isfinite(tolerance) ||
+      tolerance < 0.0 || !std::isfinite(scale) || scale <= 0.0) return false;
+  if (!surface.IsUPeriodic()) return !expected_full;
+  const double period = surface.UPeriod();
+  if (!std::isfinite(period) || period <= 0.0) return false;
+  const bool full = std::abs(span - period) * scale <= tolerance;
+  return expected_full ? full : span < period && !full;
+}
+
+bool valid_full_seam(const std::vector<EdgeTreatmentUseData>& uses) {
+  std::vector<const EdgeTreatmentUseData*> seams;
+  for (const EdgeTreatmentUseData& use : uses) {
+    if (use.value.seam != 0) seams.push_back(&use);
+  }
+  return seams.size() == 2 && seams[0]->edge.IsSame(seams[1]->edge) &&
+         seams[0]->value.reversed != seams[1]->value.reversed;
+}
+
+std::vector<size_t> rails_with_support_type(
+    const std::vector<EdgeTreatmentUseData>& uses, GeomAbs_SurfaceType type,
+    GeomAbs_CurveType curve_type_value) {
+  std::vector<size_t> result;
+  for (size_t index = 0; index < uses.size(); ++index) {
+    const EdgeTreatmentUseData& use = uses[index];
+    if (use.value.seam != 0 || use.adjacent.IsNull()) continue;
+    if (BRepAdaptor_Surface(use.adjacent).GetType() == type &&
+        BRepAdaptor_Curve(use.edge).GetType() == curve_type_value) {
+      result.push_back(index);
+    }
+  }
+  return result;
+}
+
+void assign_rail_roles(std::vector<EdgeTreatmentUseData>& uses,
+                       size_t first, size_t second) {
+  uses[first].value.role = GEOSPEC_OCCT_EDGE_TREATMENT_RAIL0;
+  uses[second].value.role = GEOSPEC_OCCT_EDGE_TREATMENT_RAIL1;
+}
+
+std::unique_ptr<EdgeTreatmentCertificateData> certificate_base(
+    int kind, const FaceView& view, uint32_t public_ordinal,
+    uint32_t wire_count, double maximum_tolerance,
+    const geospec_occt_edge_treatment_support& first,
+    const geospec_occt_edge_treatment_support& second,
+    const std::vector<EdgeTreatmentUseData>& uses) {
+  auto result = std::make_unique<EdgeTreatmentCertificateData>();
+  result->value.kind = kind;
+  result->value.surface =
+      face_facts(view.shape, public_ordinal, view.query_index).facts;
+  result->value.supports[0] = first;
+  result->value.supports[1] = second;
+  result->value.wire_count = wire_count;
+  result->value.maximum_topology_tolerance_mm = maximum_tolerance;
+  result->boundary_uses.reserve(uses.size());
+  for (const EdgeTreatmentUseData& use : uses) {
+    result->boundary_uses.push_back(use.value);
+  }
+  return result;
+}
+
+EdgeTreatmentDispositionData unqualified_edge_treatment(int reason) {
+  return {GEOSPEC_OCCT_EDGE_TREATMENT_UNQUALIFIED, reason, nullptr};
+}
+
+EdgeTreatmentDispositionData nonmember_edge_treatment(int reason) {
+  return {GEOSPEC_OCCT_EDGE_TREATMENT_NON_MEMBER, reason, nullptr};
+}
+
+EdgeTreatmentDispositionData qualified_edge_treatment(
+    std::unique_ptr<EdgeTreatmentCertificateData> certificate) {
+  certificate->value.boundary_use_count = certificate->boundary_uses.size();
+  certificate->value.residual_count = certificate->residuals.size();
+  return {GEOSPEC_OCCT_EDGE_TREATMENT_QUALIFIED, 0,
+          std::move(certificate)};
+}
+
+// Four straight pcurves prove the complete selected rectangle, including both
+// ends or both seam uses. Endpoint agreement alone is not a curved-trim proof.
+bool rectangular_edge_treatment_trim(
+    const TopoDS_Face& face, const std::vector<EdgeTreatmentUseData>& uses,
+    bool rails_on_u, double u_scale, double v_scale,
+    EdgeTreatmentCertificateData& certificate) {
+  if (uses.size() != 4 || !std::isfinite(u_scale) || u_scale <= 0.0 ||
+      !std::isfinite(v_scale) || v_scale <= 0.0) return false;
+  const BRepAdaptor_Surface surface(face);
+  const double u[2] = {surface.FirstUParameter(), surface.LastUParameter()};
+  const double v[2] = {surface.FirstVParameter(), surface.LastVParameter()};
+  if (!std::isfinite(u[0]) || !std::isfinite(u[1]) || u[0] >= u[1] ||
+      !std::isfinite(v[0]) || !std::isfinite(v[1]) || v[0] >= v[1]) return false;
+  unsigned sides = 0;
+  for (const EdgeTreatmentUseData& use : uses) {
+    BRepAdaptor_Curve2d trim(use.edge, face);
+    if (trim.GetType() != GeomAbs_Line ||
+        !std::isfinite(trim.FirstParameter()) ||
+        !std::isfinite(trim.LastParameter()) ||
+        trim.FirstParameter() >= trim.LastParameter()) return false;
+    gp_Pnt2d a = trim.Value(trim.FirstParameter());
+    gp_Pnt2d b = trim.Value(trim.LastParameter());
+    if (use.value.reversed) std::swap(a, b);
+    if (!std::isfinite(a.X()) || !std::isfinite(a.Y()) ||
+        !std::isfinite(b.X()) || !std::isfinite(b.Y())) return false;
+    const auto distance = [&](const gp_Pnt2d& p, double x, double y) {
+      return std::abs(p.X() - x) * u_scale + std::abs(p.Y() - y) * v_scale;
+    };
+    int matched = -1;
+    double residual = 0.0;
+    for (int side = 0; side < 4; ++side) {
+      const bool constant_u = side < 2;
+      const int endpoint = side % 2;
+      const double x0 = constant_u ? u[endpoint] : u[0];
+      const double x1 = constant_u ? u[endpoint] : u[1];
+      const double y0 = constant_u ? v[0] : v[endpoint];
+      const double y1 = constant_u ? v[1] : v[endpoint];
+      const double error = std::min(
+          std::max(distance(a, x0, y0), distance(b, x1, y1)),
+          std::max(distance(b, x0, y0), distance(a, x1, y1)));
+      if (error <= use.maximum_tolerance) {
+        if (matched >= 0) return false;
+        matched = side;
+        residual = error;
+      }
+    }
+    if (matched < 0 || (sides & (1u << matched))) return false;
+    sides |= 1u << matched;
+    const bool rail = use.value.role == GEOSPEC_OCCT_EDGE_TREATMENT_RAIL0 ||
+                      use.value.role == GEOSPEC_OCCT_EDGE_TREATMENT_RAIL1;
+    if (rail != ((matched < 2) == rails_on_u)) return false;
+    const gp_Pnt start(use.value.start[0], use.value.start[1], use.value.start[2]);
+    const gp_Pnt end(use.value.end[0], use.value.end[1], use.value.end[2]);
+    residual = std::max({residual, surface.Value(a.X(), a.Y()).Distance(start),
+                         surface.Value(b.X(), b.Y()).Distance(end)});
+    const BRepAdaptor_Curve curve(use.edge);
+    if (matched >= 2) {
+      // Constant V is a circle for each admitted revolution surface. Verify
+      // the whole analytic circle and its angular span, not only the seam point.
+      if (curve.GetType() != GeomAbs_Circle) return false;
+      const gp_Ax1 axis = surface.GetType() == GeomAbs_Cylinder
+                              ? surface.Cylinder().Axis()
+                              : surface.GetType() == GeomAbs_Cone
+                                    ? surface.Cone().Axis() : surface.Torus().Axis();
+      const gp_Circ circle = curve.Circle();
+      const gp_Pnt p = surface.Value(u[0], v[matched - 2]);
+      const gp_Vec d(axis.Location(), p);
+      const gp_Vec axis_vector(axis.Direction());
+      const gp_Pnt center = axis.Location().Translated(
+          axis_vector.Multiplied(d.Dot(axis_vector)));
+      const double radius = center.Distance(p);
+      residual = std::max({residual, center.Distance(circle.Location()),
+          std::abs(radius - circle.Radius()),
+          parallel_residual(axis.Direction(), circle.Axis().Direction(),
+                            use.value.curve.length),
+          std::abs((curve.LastParameter() - curve.FirstParameter()) -
+                   (u[1] - u[0])) * radius});
+    } else if (surface.GetType() != GeomAbs_Torus) {
+      if (curve.GetType() != GeomAbs_Line) return false;
+    } else {
+      if (curve.GetType() != GeomAbs_Circle) return false;
+      const gp_Torus torus = surface.Torus();
+      const gp_Pnt p = surface.Value(u[matched], v[0]);
+      const gp_Vec axis(torus.Axis().Direction());
+      const gp_Vec d(torus.Location(), p);
+      gp_Vec radial = d - axis.Multiplied(d.Dot(axis));
+      if (radial.SquareMagnitude() <= 0.0) return false;
+      radial.Normalize();
+      const gp_Pnt center = torus.Location().Translated(
+          radial.Multiplied(torus.MajorRadius()));
+      const gp_Circ circle = curve.Circle();
+      residual = std::max({residual, center.Distance(circle.Location()),
+          std::abs(circle.Radius() - torus.MinorRadius()),
+          parallel_residual(gp_Dir(axis.Crossed(radial)),
+                            circle.Axis().Direction(), use.value.curve.length),
+          std::abs((curve.LastParameter() - curve.FirstParameter()) -
+                   (v[1] - v[0])) * torus.MinorRadius()});
+    }
+    if (!append_residual(certificate, GEOSPEC_OCCT_EDGE_TREATMENT_RAIL_STATION,
+                         residual, use.maximum_tolerance, 1.0) ||
+        residual > use.maximum_tolerance) return false;
+  }
+  return sides == 15;
+}
+
+EdgeTreatmentDispositionData classify_planar_chamfer(
+    const FaceView& view, uint32_t public_ordinal,
+    const std::vector<FaceView>& public_faces,
+    const NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher>&
+        public_face_map,
+    const std::vector<std::vector<size_t>>& public_face_ordinals,
+    BoreSolidContext& owner) {
+  std::vector<EdgeTreatmentUseData> uses;
+  uint32_t wire_count = 0;
+  int reason = 0;
+  if (!collect_edge_treatment_boundary(view.shape, owner, uses, wire_count,
+                                       reason)) {
+    return unqualified_edge_treatment(reason);
+  }
+  const std::vector<size_t> candidates = rails_with_support_type(
+      uses, GeomAbs_Plane, GeomAbs_Line);
+  // Absence of necessary straight/planar rails can decide elementary caps
+  // before the stricter four-use admission gate. A spline/unknown boundary or
+  // support is not an analytic exclusion, even if no recognized pair remains.
+  int unresolved = 0;
+  for (const EdgeTreatmentUseData& use : uses) {
+    const GeomAbs_CurveType curve = BRepAdaptor_Curve(use.edge).GetType();
+    if (curve == GeomAbs_BezierCurve || curve == GeomAbs_BSplineCurve ||
+        curve == GeomAbs_OtherCurve) {
+      unresolved = GEOSPEC_OCCT_EDGE_TREATMENT_UNSUPPORTED_TRIM;
+    }
+    if (!use.adjacent.IsNull() && !transition_surface(use.adjacent)) {
+      unresolved = GEOSPEC_OCCT_EDGE_TREATMENT_UNSUPPORTED_SURFACE;
+    }
+  }
+  std::vector<size_t> rails;
+  for (size_t first : candidates) {
+    for (size_t second : candidates) {
+      if (second <= first ||
+          uses[first].adjacent.IsSame(uses[second].adjacent)) continue;
+      const gp_Pln first_plane = BRepAdaptor_Surface(uses[first].adjacent).Plane();
+      const gp_Pln second_plane = BRepAdaptor_Surface(uses[second].adjacent).Plane();
+      const double scale = std::min(uses[first].value.curve.length,
+                                    uses[second].value.curve.length);
+      const double tolerance = std::max(uses[first].maximum_tolerance,
+                                        uses[second].maximum_tolerance);
+      if (scale <= tolerance) {
+        unresolved = GEOSPEC_OCCT_EDGE_TREATMENT_DEGENERATE_SUPPORT;
+        continue;
+      }
+      // In the declared nominal profile, parallel supports cannot bound a
+      // nondegenerate sharp edge. Test this before dividing by |n0 x n1|^2;
+      // round-trip rotation noise must not invent a remote intersection.
+      if (parallel_residual(first_plane.Axis().Direction(),
+                            second_plane.Axis().Direction(), scale) <=
+          tolerance) continue;
+      gp_Lin intersection;
+      if (!plane_intersection(first_plane, second_plane, intersection)) {
+        unresolved = GEOSPEC_OCCT_EDGE_TREATMENT_DEGENERATE_SUPPORT;
+        continue;
+      }
+      if (parallel_residual(BRepAdaptor_Curve(uses[first].edge).Line().Direction(),
+                            intersection.Direction(), uses[first].value.curve.length) >
+              uses[first].maximum_tolerance ||
+          parallel_residual(BRepAdaptor_Curve(uses[second].edge).Line().Direction(),
+                            intersection.Direction(), uses[second].value.curve.length) >
+              uses[second].maximum_tolerance) continue;
+      if (uses.size() != 4 || (first + 2) % 4 != second) {
+        return unqualified_edge_treatment(
+            GEOSPEC_OCCT_EDGE_TREATMENT_UNSUPPORTED_TRIM);
+      }
+      if (!rails.empty()) return unqualified_edge_treatment(
+          GEOSPEC_OCCT_EDGE_TREATMENT_AMBIGUOUS_ASSOCIATION);
+      rails = {first, second};
+    }
+  }
+  if (unresolved) {
+    return unqualified_edge_treatment(unresolved);
+  }
+  if (rails.size() != 2) {
+    return nonmember_edge_treatment(
+        GEOSPEC_OCCT_EDGE_TREATMENT_OUTSIDE_TOPOLOGY);
+  }
+  geospec_occt_edge_treatment_support supports[2]{};
+  if (!support_transfer(public_faces, public_face_map, public_face_ordinals,
+                        uses[rails[0]].adjacent,
+                        uses[rails[0]].maximum_tolerance, supports[0]) ||
+      !support_transfer(public_faces, public_face_map, public_face_ordinals,
+                        uses[rails[1]].adjacent,
+                        uses[rails[1]].maximum_tolerance, supports[1])) {
+    return unqualified_edge_treatment(
+        GEOSPEC_OCCT_EDGE_TREATMENT_AMBIGUOUS_ASSOCIATION);
+  }
+  if (supports[1].public_face_ordinal < supports[0].public_face_ordinal) {
+    std::swap(rails[0], rails[1]);
+    std::swap(supports[0], supports[1]);
+  }
+  assign_rail_roles(uses, rails[0], rails[1]);
+  const gp_Pln planes[2] = {
+      BRepAdaptor_Surface(uses[rails[0]].adjacent).Plane(),
+      BRepAdaptor_Surface(uses[rails[1]].adjacent).Plane()};
+  gp_Lin sharp;
+  if (!plane_intersection(planes[0], planes[1], sharp)) {
+    return unqualified_edge_treatment(
+        GEOSPEC_OCCT_EDGE_TREATMENT_DEGENERATE_SUPPORT);
+  }
+  const gp_Pnt rail_points[2] = {midpoint(uses[rails[0]].value),
+                                 midpoint(uses[rails[1]].value)};
+  const double offsets[2] = {sharp.Distance(rail_points[0]),
+                             sharp.Distance(rail_points[1])};
+  const double limit = std::max(uses[rails[0]].maximum_tolerance,
+                                uses[rails[1]].maximum_tolerance);
+  if (!std::isfinite(offsets[0]) || !std::isfinite(offsets[1]) ||
+      offsets[0] <= limit || offsets[1] <= limit) {
+    return unqualified_edge_treatment(
+        GEOSPEC_OCCT_EDGE_TREATMENT_DEGENERATE_SUPPORT);
+  }
+  auto certificate = certificate_base(
+      GEOSPEC_OCCT_EDGE_TREATMENT_PLANAR_CHAMFER, view, public_ordinal,
+      wire_count, owner.maximum_tolerance, supports[0], supports[1], uses);
+  const gp_Dir sharp_direction = sharp.Direction();
+  for (size_t index = 0; index < 2; ++index) {
+    const EdgeTreatmentUseData& rail = uses[rails[index]];
+    const BRepAdaptor_Curve curve(rail.edge);
+    const double scale = rail.value.curve.length;
+    const double direction_value = parallel_residual(
+        curve.Line().Direction(), sharp_direction, scale);
+    const gp_Pnt start(rail.value.start[0], rail.value.start[1],
+                       rail.value.start[2]);
+    const gp_Pnt end(rail.value.end[0], rail.value.end[1],
+                     rail.value.end[2]);
+    const double coincidence =
+        std::max({surface_distance(view.shape, start),
+                  surface_distance(view.shape, end),
+                  surface_distance(rail.adjacent, start),
+                  surface_distance(rail.adjacent, end)});
+    const double station = std::max(std::abs(sharp.Distance(start) - offsets[index]),
+                                    std::abs(sharp.Distance(end) - offsets[index]));
+    if (!append_residual(*certificate,
+                         GEOSPEC_OCCT_EDGE_TREATMENT_RAIL_COINCIDENCE,
+                         coincidence, rail.maximum_tolerance, 1.0) ||
+        !append_residual(*certificate,
+                         GEOSPEC_OCCT_EDGE_TREATMENT_PARALLEL_DIRECTION,
+                         direction_value, rail.maximum_tolerance, scale) ||
+        !append_residual(*certificate,
+                         GEOSPEC_OCCT_EDGE_TREATMENT_RAIL_STATION, station,
+                         rail.maximum_tolerance, 1.0)) {
+      return unqualified_edge_treatment(
+          GEOSPEC_OCCT_EDGE_TREATMENT_DEGENERATE_SUPPORT);
+    }
+    if (coincidence > rail.maximum_tolerance ||
+        direction_value > rail.maximum_tolerance ||
+        station > rail.maximum_tolerance) {
+      return nonmember_edge_treatment(
+          GEOSPEC_OCCT_EDGE_TREATMENT_OUTSIDE_TOPOLOGY);
+    }
+  }
+  const double equal_offsets = std::abs(offsets[0] - offsets[1]);
+  if (!append_residual(*certificate,
+                       GEOSPEC_OCCT_EDGE_TREATMENT_EQUAL_OFFSETS,
+                       equal_offsets, limit, 1.0)) {
+    return unqualified_edge_treatment(
+        GEOSPEC_OCCT_EDGE_TREATMENT_DEGENERATE_SUPPORT);
+  }
+  if (equal_offsets > limit) {
+    return nonmember_edge_treatment(
+        GEOSPEC_OCCT_EDGE_TREATMENT_UNEQUAL_OFFSETS);
+  }
+  gp_Dir candidate_normal;
+  gp_Dir support_normals[2];
+  if (!natural_surface_normal(view.shape, rail_points[0], candidate_normal) ||
+      !natural_surface_normal(uses[rails[0]].adjacent, rail_points[0],
+                              support_normals[0]) ||
+      !natural_surface_normal(uses[rails[1]].adjacent, rail_points[1],
+                              support_normals[1])) {
+    return unqualified_edge_treatment(
+        GEOSPEC_OCCT_EDGE_TREATMENT_UNSUPPORTED_ORIENTATION);
+  }
+  gp_Vec bisector = gp_Vec(support_normals[0]) + gp_Vec(support_normals[1]);
+  if (bisector.SquareMagnitude() <= 0.0) {
+    return unqualified_edge_treatment(
+        GEOSPEC_OCCT_EDGE_TREATMENT_DEGENERATE_SUPPORT);
+  }
+  bisector.Normalize();
+  const double material_dot = candidate_normal.Dot(gp_Dir(bisector));
+  const double material_scale =
+      std::min(uses[rails[0]].value.curve.length,
+               uses[rails[1]].value.curve.length);
+  const double material_residual =
+      parallel_residual(candidate_normal, gp_Dir(bisector), material_scale);
+  if (!append_residual(*certificate,
+                       GEOSPEC_OCCT_EDGE_TREATMENT_MATERIAL_BRANCH,
+                       material_residual, limit, material_scale)) {
+    return unqualified_edge_treatment(
+        GEOSPEC_OCCT_EDGE_TREATMENT_UNSUPPORTED_ORIENTATION);
+  }
+  if (material_residual > limit || material_dot <= 0.0) {
+    return nonmember_edge_treatment(
+        GEOSPEC_OCCT_EDGE_TREATMENT_OUTSIDE_MATERIAL_BRANCH);
+  }
+  const double material_offsets[2] = {
+      gp_Vec(planes[1].Location(), rail_points[0]).Dot(gp_Vec(support_normals[1])),
+      gp_Vec(planes[0].Location(), rail_points[1]).Dot(gp_Vec(support_normals[0]))};
+  if (std::abs(material_offsets[0]) <= limit ||
+      std::abs(material_offsets[1]) <= limit ||
+      (material_offsets[0] > 0.0) != (material_offsets[1] > 0.0)) {
+    return unqualified_edge_treatment(
+        GEOSPEC_OCCT_EDGE_TREATMENT_OUTSIDE_MATERIAL_BRANCH);
+  }
+  // The two straight ends must join matching axial stations of both rails.
+  // Together with the complete four-use wire this excludes tapered/crossed trims.
+  for (const EdgeTreatmentUseData& end_use : uses) {
+    if (end_use.value.role != GEOSPEC_OCCT_EDGE_TREATMENT_END) continue;
+    if (BRepAdaptor_Curve(end_use.edge).GetType() != GeomAbs_Line) {
+      return unqualified_edge_treatment(GEOSPEC_OCCT_EDGE_TREATMENT_UNSUPPORTED_TRIM);
+    }
+    const gp_Pnt a(end_use.value.start[0], end_use.value.start[1], end_use.value.start[2]);
+    const gp_Pnt b(end_use.value.end[0], end_use.value.end[1], end_use.value.end[2]);
+    const double residual = std::max({surface_distance(view.shape, a),
+        surface_distance(view.shape, b),
+        std::abs(gp_Vec(a, b).Dot(gp_Vec(sharp_direction)))});
+    if (!append_residual(*certificate, GEOSPEC_OCCT_EDGE_TREATMENT_RAIL_STATION,
+                         residual, end_use.maximum_tolerance, 1.0) ||
+        residual > end_use.maximum_tolerance) {
+      return unqualified_edge_treatment(GEOSPEC_OCCT_EDGE_TREATMENT_UNSUPPORTED_TRIM);
+    }
+  }
+  const gp_Vec transverse =
+      gp_Vec(candidate_normal).Crossed(gp_Vec(sharp_direction));
+  if (transverse.SquareMagnitude() <= 0.0) {
+    return unqualified_edge_treatment(
+        GEOSPEC_OCCT_EDGE_TREATMENT_DEGENERATE_SUPPORT);
+  }
+  const gp_Dir transverse_direction(transverse);
+  const double stations[2] = {
+      gp_Vec(rail_points[0].X(), rail_points[0].Y(), rail_points[0].Z())
+          .Dot(gp_Vec(transverse_direction)),
+      gp_Vec(rail_points[1].X(), rail_points[1].Y(), rail_points[1].Z())
+          .Dot(gp_Vec(transverse_direction))};
+  certificate->value.metric_value_mm = offsets[0];
+  certificate->value.material_side =
+      material_offsets[0] < 0.0 ? GEOSPEC_OCCT_EDGE_TREATMENT_CONVEX
+                                : GEOSPEC_OCCT_EDGE_TREATMENT_CONCAVE;
+  certificate->value.full_u = 0;
+  certificate->value.sweep_interval[0] = std::min(stations[0], stations[1]);
+  certificate->value.sweep_interval[1] = std::max(stations[0], stations[1]);
+  return qualified_edge_treatment(std::move(certificate));
+}
+
+EdgeTreatmentDispositionData classify_conical_chamfer(
+    const FaceView& view, uint32_t public_ordinal,
+    const std::vector<FaceView>& public_faces,
+    const NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher>& map,
+    const std::vector<std::vector<size_t>>& ordinals,
+    BoreSolidContext& owner) {
+  const BRepAdaptor_Surface candidate(view.shape);
+  double u_span = 0.0;
+  std::vector<EdgeTreatmentUseData> uses;
+  uint32_t wire_count = 0;
+  int reason = 0;
+  if (!collect_edge_treatment_boundary(view.shape, owner, uses, wire_count,
+                                       reason)) {
+    return unqualified_edge_treatment(reason);
+  }
+  const std::vector<size_t> plane =
+      rails_with_support_type(uses, GeomAbs_Plane, GeomAbs_Circle);
+  const std::vector<size_t> cylinder =
+      rails_with_support_type(uses, GeomAbs_Cylinder, GeomAbs_Circle);
+  if (uses.size() != 4 || plane.size() != 1 || cylinder.size() != 1 ||
+      !valid_full_seam(uses)) {
+    return nonmember_edge_treatment(
+        GEOSPEC_OCCT_EDGE_TREATMENT_OUTSIDE_TOPOLOGY);
+  }
+  size_t rails[2] = {plane[0], cylinder[0]};
+  geospec_occt_edge_treatment_support supports[2]{};
+  if (!support_transfer(public_faces, map, ordinals, uses[rails[0]].adjacent,
+                        uses[rails[0]].maximum_tolerance, supports[0]) ||
+      !support_transfer(public_faces, map, ordinals, uses[rails[1]].adjacent,
+                        uses[rails[1]].maximum_tolerance, supports[1])) {
+    return unqualified_edge_treatment(
+        GEOSPEC_OCCT_EDGE_TREATMENT_AMBIGUOUS_ASSOCIATION);
+  }
+  if (supports[1].public_face_ordinal < supports[0].public_face_ordinal) {
+    std::swap(rails[0], rails[1]);
+    std::swap(supports[0], supports[1]);
+  }
+  assign_rail_roles(uses, rails[0], rails[1]);
+  const gp_Cone cone = candidate.Cone();
+  const gp_Ax1 axis = cone.Axis();
+  const gp_Pln support_plane =
+      BRepAdaptor_Surface(uses[plane[0]].adjacent).Plane();
+  const gp_Cylinder support_cylinder =
+      BRepAdaptor_Surface(uses[cylinder[0]].adjacent).Cylinder();
+  const gp_Circ plane_circle = BRepAdaptor_Curve(uses[plane[0]].edge).Circle();
+  const gp_Circ cylinder_circle =
+      BRepAdaptor_Curve(uses[cylinder[0]].edge).Circle();
+  const gp_Vec axis_vector(axis.Direction());
+  const double plane_station =
+      gp_Vec(axis.Location(), plane_circle.Location()).Dot(axis_vector);
+  const double cylinder_station =
+      gp_Vec(axis.Location(), cylinder_circle.Location()).Dot(axis_vector);
+  const double metric = std::abs(cylinder_station - plane_station);
+  const double radial_change =
+      std::abs(cylinder_circle.Radius() - plane_circle.Radius());
+  const double scale = std::min(uses[plane[0]].value.curve.length,
+                                uses[cylinder[0]].value.curve.length);
+  const double limit = std::max(uses[plane[0]].maximum_tolerance,
+                                uses[cylinder[0]].maximum_tolerance);
+  if (!valid_full_u(candidate, true, limit, scale, u_span) ||
+      !std::isfinite(metric) || !std::isfinite(radial_change) ||
+      metric <= limit || scale <= 0.0) {
+    return unqualified_edge_treatment(
+        GEOSPEC_OCCT_EDGE_TREATMENT_DEGENERATE_SUPPORT);
+  }
+  auto certificate = certificate_base(
+      GEOSPEC_OCCT_EDGE_TREATMENT_CONICAL_CHAMFER, view, public_ordinal,
+      wire_count, owner.maximum_tolerance, supports[0], supports[1], uses);
+  const double axis_gap = axis_distance(axis, support_cylinder.Axis());
+  const double axis_direction = parallel_residual(
+      axis.Direction(), support_cylinder.Axis().Direction(), scale);
+  const double plane_direction = parallel_residual(
+      axis.Direction(), support_plane.Axis().Direction(), scale);
+  const double cone_angle =
+      std::abs(std::abs(cone.SemiAngle()) - std::acos(-1.0) / 4.0);
+  const double angle_residual = std::abs(std::sin(cone_angle)) * scale;
+  const double equal_offsets = std::abs(metric - radial_change);
+  const double plane_residual = support_plane.Distance(plane_circle.Location());
+  const double cylinder_residual =
+      std::max(axis_distance(axis, support_cylinder.Axis()),
+               std::abs(cylinder_circle.Radius() -
+                        support_cylinder.Radius()));
+  if (!append_residual(*certificate,
+                       GEOSPEC_OCCT_EDGE_TREATMENT_AXIS_COINCIDENCE,
+                       axis_gap, limit, 1.0) ||
+      !append_residual(*certificate,
+                       GEOSPEC_OCCT_EDGE_TREATMENT_PARALLEL_DIRECTION,
+                       axis_direction, limit, scale) ||
+      !append_residual(*certificate,
+                       GEOSPEC_OCCT_EDGE_TREATMENT_PARALLEL_DIRECTION,
+                       plane_direction, limit, scale) ||
+      !append_residual(*certificate,
+                       GEOSPEC_OCCT_EDGE_TREATMENT_PARALLEL_DIRECTION,
+                       angle_residual, limit, scale) ||
+      !append_residual(*certificate,
+                       GEOSPEC_OCCT_EDGE_TREATMENT_RAIL_STATION,
+                       plane_residual, uses[plane[0]].maximum_tolerance,
+                       1.0) ||
+      !append_residual(*certificate,
+                       GEOSPEC_OCCT_EDGE_TREATMENT_RAIL_STATION,
+                       cylinder_residual,
+                       uses[cylinder[0]].maximum_tolerance, 1.0) ||
+      !append_residual(*certificate,
+                       GEOSPEC_OCCT_EDGE_TREATMENT_EQUAL_OFFSETS,
+                       equal_offsets, limit, 1.0)) {
+    return unqualified_edge_treatment(
+        GEOSPEC_OCCT_EDGE_TREATMENT_DEGENERATE_SUPPORT);
+  }
+  if (equal_offsets > limit) {
+    return nonmember_edge_treatment(
+        GEOSPEC_OCCT_EDGE_TREATMENT_UNEQUAL_OFFSETS);
+  }
+  if (axis_gap > limit || axis_direction > limit || plane_direction > limit ||
+      angle_residual > limit || plane_residual > uses[plane[0]].maximum_tolerance ||
+      cylinder_residual > uses[cylinder[0]].maximum_tolerance) {
+    return nonmember_edge_treatment(
+        GEOSPEC_OCCT_EDGE_TREATMENT_OUTSIDE_TOPOLOGY);
+  }
+  gp_Dir candidate_normal;
+  gp_Dir plane_normal;
+  gp_Dir cylinder_normal;
+  // Compare normals at the same angular phase; independently transferred
+  // circular rails need not choose the same seam vertex.
+  const gp_Pnt plane_point = BRepAdaptor_Curve(uses[plane[0]].edge).Value(
+      BRepAdaptor_Curve(uses[plane[0]].edge).FirstParameter());
+  gp_Vec radial(axis.Location(), plane_point);
+  radial -= axis_vector.Multiplied(radial.Dot(axis_vector));
+  if (radial.SquareMagnitude() <= 0.0) {
+    return unqualified_edge_treatment(GEOSPEC_OCCT_EDGE_TREATMENT_DEGENERATE_SUPPORT);
+  }
+  radial.Normalize();
+  const gp_Pnt cylinder_point = cylinder_circle.Location().Translated(
+      radial.Multiplied(cylinder_circle.Radius()));
+  if (!natural_surface_normal(view.shape, plane_point, candidate_normal) ||
+      !natural_surface_normal(uses[plane[0]].adjacent, plane_point,
+                              plane_normal) ||
+      !natural_surface_normal(uses[cylinder[0]].adjacent, cylinder_point,
+                              cylinder_normal)) {
+    return unqualified_edge_treatment(
+        GEOSPEC_OCCT_EDGE_TREATMENT_UNSUPPORTED_ORIENTATION);
+  }
+  gp_Vec bisector = gp_Vec(plane_normal) + gp_Vec(cylinder_normal);
+  if (bisector.SquareMagnitude() <= 0.0) {
+    return unqualified_edge_treatment(
+        GEOSPEC_OCCT_EDGE_TREATMENT_DEGENERATE_SUPPORT);
+  }
+  bisector.Normalize();
+  const double material_dot = candidate_normal.Dot(gp_Dir(bisector));
+  const double material_residual =
+      parallel_residual(candidate_normal, gp_Dir(bisector), scale);
+  if (!append_residual(*certificate,
+                       GEOSPEC_OCCT_EDGE_TREATMENT_MATERIAL_BRANCH,
+                       material_residual, limit, scale)) {
+    return unqualified_edge_treatment(
+        GEOSPEC_OCCT_EDGE_TREATMENT_UNSUPPORTED_ORIENTATION);
+  }
+  if (material_residual > limit || material_dot <= 0.0) {
+    return nonmember_edge_treatment(
+        GEOSPEC_OCCT_EDGE_TREATMENT_OUTSIDE_MATERIAL_BRANCH);
+  }
+  const double signed_plane = gp_Vec(support_plane.Location(), cylinder_point)
+                                  .Dot(gp_Vec(plane_normal));
+  const double signed_cylinder = (plane_circle.Radius() - support_cylinder.Radius()) *
+                                 radial.Dot(gp_Vec(cylinder_normal));
+  if (std::abs(signed_plane) <= limit || std::abs(signed_cylinder) <= limit ||
+      (signed_plane > 0.0) != (signed_cylinder > 0.0)) {
+    return unqualified_edge_treatment(GEOSPEC_OCCT_EDGE_TREATMENT_OUTSIDE_MATERIAL_BRANCH);
+  }
+  certificate->value.metric_value_mm = metric;
+  certificate->value.material_side =
+      signed_plane < 0.0 ? GEOSPEC_OCCT_EDGE_TREATMENT_CONVEX
+                          : GEOSPEC_OCCT_EDGE_TREATMENT_CONCAVE;
+  certificate->value.full_u = 1;
+  certificate->value.sweep_interval[0] = candidate.FirstVParameter();
+  certificate->value.sweep_interval[1] = candidate.LastVParameter();
+  if (!rectangular_edge_treatment_trim(view.shape, uses, false,
+          std::max(plane_circle.Radius(), cylinder_circle.Radius()), 1.0,
+          *certificate)) {
+    return unqualified_edge_treatment(GEOSPEC_OCCT_EDGE_TREATMENT_UNSUPPORTED_TRIM);
+  }
+  return qualified_edge_treatment(std::move(certificate));
+}
+
+EdgeTreatmentDispositionData classify_cylindrical_fillet(
+    const FaceView& view, uint32_t public_ordinal,
+    const std::vector<FaceView>& public_faces,
+    const NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher>& map,
+    const std::vector<std::vector<size_t>>& ordinals,
+    BoreSolidContext& owner) {
+  const BRepAdaptor_Surface candidate(view.shape);
+  double u_span = 0.0;
+  std::vector<EdgeTreatmentUseData> uses;
+  uint32_t wire_count = 0;
+  int reason = 0;
+  if (!collect_edge_treatment_boundary(view.shape, owner, uses, wire_count,
+                                       reason)) {
+    return unqualified_edge_treatment(reason);
+  }
+  std::vector<size_t> rails = rails_with_support_type(
+      uses, GeomAbs_Plane, GeomAbs_Line);
+  if (uses.size() != 4 || rails.size() != 2 ||
+      uses[rails[0]].adjacent.IsSame(uses[rails[1]].adjacent)) {
+    return nonmember_edge_treatment(
+        GEOSPEC_OCCT_EDGE_TREATMENT_OUTSIDE_TOPOLOGY);
+  }
+  geospec_occt_edge_treatment_support supports[2]{};
+  if (!support_transfer(public_faces, map, ordinals, uses[rails[0]].adjacent,
+                        uses[rails[0]].maximum_tolerance, supports[0]) ||
+      !support_transfer(public_faces, map, ordinals, uses[rails[1]].adjacent,
+                        uses[rails[1]].maximum_tolerance, supports[1])) {
+    return unqualified_edge_treatment(
+        GEOSPEC_OCCT_EDGE_TREATMENT_AMBIGUOUS_ASSOCIATION);
+  }
+  if (supports[1].public_face_ordinal < supports[0].public_face_ordinal) {
+    std::swap(rails[0], rails[1]);
+    std::swap(supports[0], supports[1]);
+  }
+  assign_rail_roles(uses, rails[0], rails[1]);
+  const gp_Cylinder cylinder = candidate.Cylinder();
+  const double radius = cylinder.Radius();
+  const double limit = std::max(uses[rails[0]].maximum_tolerance,
+                                uses[rails[1]].maximum_tolerance);
+  const double scale = std::min(uses[rails[0]].value.curve.length,
+                                uses[rails[1]].value.curve.length);
+  if (!valid_full_u(candidate, false, limit, scale, u_span) ||
+      u_span >= std::acos(-1.0) ||
+      !std::isfinite(radius) || radius <= limit) {
+    return unqualified_edge_treatment(
+        GEOSPEC_OCCT_EDGE_TREATMENT_DEGENERATE_SUPPORT);
+  }
+  auto certificate = certificate_base(
+      GEOSPEC_OCCT_EDGE_TREATMENT_CYLINDRICAL_FILLET, view,
+      public_ordinal, wire_count, owner.maximum_tolerance, supports[0],
+      supports[1], uses);
+  double offsets[2]{};
+  double worst_material = 0.0;
+  for (size_t index = 0; index < 2; ++index) {
+    const EdgeTreatmentUseData& rail = uses[rails[index]];
+    const gp_Pln plane = BRepAdaptor_Surface(rail.adjacent).Plane();
+    const BRepAdaptor_Curve curve(rail.edge);
+    const double scale = rail.value.curve.length;
+    offsets[index] = plane.Distance(cylinder.Location());
+    const double direction_value = parallel_residual(
+        curve.Line().Direction(), cylinder.Axis().Direction(), scale);
+    const double plane_direction =
+        std::abs(plane.Axis().Direction().Dot(cylinder.Axis().Direction())) *
+        scale;
+    const gp_Pnt at = midpoint(rail.value);
+    gp_Dir candidate_normal;
+    gp_Dir support_normal;
+    if (!natural_surface_normal(view.shape, at, candidate_normal) ||
+        !natural_surface_normal(rail.adjacent, at, support_normal)) {
+      return unqualified_edge_treatment(
+          GEOSPEC_OCCT_EDGE_TREATMENT_UNSUPPORTED_ORIENTATION);
+    }
+    const double dot = candidate_normal.Dot(support_normal);
+    const double tangent =
+        parallel_residual(candidate_normal, support_normal, scale);
+    const double material = std::max(0.0, -dot) * scale;
+    worst_material = std::max(worst_material, material);
+    const gp_Pnt start(rail.value.start[0], rail.value.start[1],
+                       rail.value.start[2]);
+    const gp_Pnt end(rail.value.end[0], rail.value.end[1],
+                     rail.value.end[2]);
+    const double coincidence =
+        std::max({surface_distance(view.shape, start),
+                  surface_distance(view.shape, end),
+                  surface_distance(rail.adjacent, start),
+                  surface_distance(rail.adjacent, end)});
+    const double station = std::abs(offsets[index] - radius);
+    if (!append_residual(*certificate,
+                         GEOSPEC_OCCT_EDGE_TREATMENT_RAIL_COINCIDENCE,
+                         coincidence, rail.maximum_tolerance, 1.0) ||
+        !append_residual(*certificate,
+                         GEOSPEC_OCCT_EDGE_TREATMENT_PARALLEL_DIRECTION,
+                         direction_value, rail.maximum_tolerance, scale) ||
+        !append_residual(*certificate,
+                         GEOSPEC_OCCT_EDGE_TREATMENT_PARALLEL_DIRECTION,
+                         plane_direction, rail.maximum_tolerance, scale) ||
+        !append_residual(*certificate,
+                         GEOSPEC_OCCT_EDGE_TREATMENT_TANGENT_DIRECTION,
+                         tangent, rail.maximum_tolerance, scale) ||
+        !append_residual(*certificate,
+                         GEOSPEC_OCCT_EDGE_TREATMENT_RAIL_STATION, station,
+                         rail.maximum_tolerance, 1.0)) {
+      return unqualified_edge_treatment(
+          GEOSPEC_OCCT_EDGE_TREATMENT_DEGENERATE_SUPPORT);
+    }
+    if (tangent > rail.maximum_tolerance) {
+      return nonmember_edge_treatment(
+          GEOSPEC_OCCT_EDGE_TREATMENT_NON_TANGENT_SUPPORT);
+    }
+    if (material > rail.maximum_tolerance) {
+      return nonmember_edge_treatment(
+          GEOSPEC_OCCT_EDGE_TREATMENT_OUTSIDE_MATERIAL_BRANCH);
+    }
+    if (coincidence > rail.maximum_tolerance ||
+        direction_value > rail.maximum_tolerance ||
+        plane_direction > rail.maximum_tolerance ||
+        station > rail.maximum_tolerance) {
+      return nonmember_edge_treatment(
+          GEOSPEC_OCCT_EDGE_TREATMENT_OUTSIDE_TOPOLOGY);
+    }
+  }
+  const double equal_offsets = std::abs(offsets[0] - offsets[1]);
+  if (!append_residual(*certificate,
+                       GEOSPEC_OCCT_EDGE_TREATMENT_EQUAL_OFFSETS,
+                       equal_offsets, limit, 1.0) ||
+      !append_residual(*certificate,
+                       GEOSPEC_OCCT_EDGE_TREATMENT_MATERIAL_BRANCH,
+                       worst_material, limit,
+                       std::min(uses[rails[0]].value.curve.length,
+                                uses[rails[1]].value.curve.length))) {
+    return unqualified_edge_treatment(
+        GEOSPEC_OCCT_EDGE_TREATMENT_DEGENERATE_SUPPORT);
+  }
+  if (equal_offsets > limit) {
+    return nonmember_edge_treatment(
+        GEOSPEC_OCCT_EDGE_TREATMENT_UNEQUAL_OFFSETS);
+  }
+  certificate->value.metric_value_mm = radius;
+  certificate->value.material_side =
+      view.shape.Orientation() == TopAbs_REVERSED
+          ? GEOSPEC_OCCT_EDGE_TREATMENT_CONCAVE
+          : GEOSPEC_OCCT_EDGE_TREATMENT_CONVEX;
+  certificate->value.full_u = 0;
+  certificate->value.sweep_interval[0] = candidate.FirstUParameter();
+  certificate->value.sweep_interval[1] = candidate.LastUParameter();
+  if (!rectangular_edge_treatment_trim(view.shape, uses, true, radius, 1.0,
+                                      *certificate)) {
+    return unqualified_edge_treatment(GEOSPEC_OCCT_EDGE_TREATMENT_UNSUPPORTED_TRIM);
+  }
+  return qualified_edge_treatment(std::move(certificate));
+}
+
+EdgeTreatmentDispositionData classify_toroidal_fillet(
+    const FaceView& view, uint32_t public_ordinal,
+    const std::vector<FaceView>& public_faces,
+    const NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher>& map,
+    const std::vector<std::vector<size_t>>& ordinals,
+    BoreSolidContext& owner) {
+  const BRepAdaptor_Surface candidate(view.shape);
+  double u_span = 0.0;
+  std::vector<EdgeTreatmentUseData> uses;
+  uint32_t wire_count = 0;
+  int reason = 0;
+  if (!collect_edge_treatment_boundary(view.shape, owner, uses, wire_count,
+                                       reason)) {
+    return unqualified_edge_treatment(reason);
+  }
+  const std::vector<size_t> plane =
+      rails_with_support_type(uses, GeomAbs_Plane, GeomAbs_Circle);
+  const std::vector<size_t> cylinder =
+      rails_with_support_type(uses, GeomAbs_Cylinder, GeomAbs_Circle);
+  if (uses.size() != 4 || plane.size() != 1 || cylinder.size() != 1 ||
+      !valid_full_seam(uses)) {
+    return nonmember_edge_treatment(
+        GEOSPEC_OCCT_EDGE_TREATMENT_OUTSIDE_TOPOLOGY);
+  }
+  size_t rails[2] = {plane[0], cylinder[0]};
+  geospec_occt_edge_treatment_support supports[2]{};
+  if (!support_transfer(public_faces, map, ordinals, uses[rails[0]].adjacent,
+                        uses[rails[0]].maximum_tolerance, supports[0]) ||
+      !support_transfer(public_faces, map, ordinals, uses[rails[1]].adjacent,
+                        uses[rails[1]].maximum_tolerance, supports[1])) {
+    return unqualified_edge_treatment(
+        GEOSPEC_OCCT_EDGE_TREATMENT_AMBIGUOUS_ASSOCIATION);
+  }
+  if (supports[1].public_face_ordinal < supports[0].public_face_ordinal) {
+    std::swap(rails[0], rails[1]);
+    std::swap(supports[0], supports[1]);
+  }
+  assign_rail_roles(uses, rails[0], rails[1]);
+  const gp_Torus torus = candidate.Torus();
+  const gp_Pln support_plane =
+      BRepAdaptor_Surface(uses[plane[0]].adjacent).Plane();
+  const gp_Cylinder support_cylinder =
+      BRepAdaptor_Surface(uses[cylinder[0]].adjacent).Cylinder();
+  const gp_Circ plane_circle = BRepAdaptor_Curve(uses[plane[0]].edge).Circle();
+  const gp_Circ cylinder_circle =
+      BRepAdaptor_Curve(uses[cylinder[0]].edge).Circle();
+  const double scale = std::min(uses[plane[0]].value.curve.length,
+                                uses[cylinder[0]].value.curve.length);
+  const double limit = std::max(uses[plane[0]].maximum_tolerance,
+                                uses[cylinder[0]].maximum_tolerance);
+  const double v_span =
+      candidate.LastVParameter() - candidate.FirstVParameter();
+  if (!valid_full_u(candidate, true, limit, scale, u_span) ||
+      !std::isfinite(torus.MinorRadius()) || torus.MinorRadius() <= limit ||
+      !std::isfinite(torus.MajorRadius()) ||
+      torus.MajorRadius() - torus.MinorRadius() <= limit ||
+      !std::isfinite(v_span) || v_span <= 0.0 || scale <= 0.0) {
+    return unqualified_edge_treatment(
+        GEOSPEC_OCCT_EDGE_TREATMENT_DEGENERATE_SUPPORT);
+  }
+  auto certificate = certificate_base(
+      GEOSPEC_OCCT_EDGE_TREATMENT_TOROIDAL_FILLET, view, public_ordinal,
+      wire_count, owner.maximum_tolerance, supports[0], supports[1], uses);
+  const double axis_gap =
+      axis_distance(torus.Axis(), support_cylinder.Axis());
+  const double axis_direction = parallel_residual(
+      torus.Axis().Direction(), support_cylinder.Axis().Direction(), scale);
+  const double plane_direction = parallel_residual(
+      torus.Axis().Direction(), support_plane.Axis().Direction(), scale);
+  const double sweep_residual =
+      std::abs(v_span - std::acos(-1.0) / 2.0) * scale;
+  const double plane_station =
+      std::abs(gp_Vec(torus.Location(), plane_circle.Location())
+                   .Dot(gp_Vec(torus.Axis().Direction())));
+  const double plane_residual =
+      std::max(support_plane.Distance(plane_circle.Location()),
+               std::abs(plane_station - torus.MinorRadius()));
+  const double cylinder_residual = std::max(
+      std::abs(cylinder_circle.Radius() - support_cylinder.Radius()),
+      std::abs(std::abs(cylinder_circle.Radius() - torus.MajorRadius()) -
+               torus.MinorRadius()));
+  if (!append_residual(*certificate,
+                       GEOSPEC_OCCT_EDGE_TREATMENT_AXIS_COINCIDENCE,
+                       axis_gap, limit, 1.0) ||
+      !append_residual(*certificate,
+                       GEOSPEC_OCCT_EDGE_TREATMENT_PARALLEL_DIRECTION,
+                       axis_direction, limit, scale) ||
+      !append_residual(*certificate,
+                       GEOSPEC_OCCT_EDGE_TREATMENT_PARALLEL_DIRECTION,
+                       plane_direction, limit, scale) ||
+      !append_residual(*certificate,
+                       GEOSPEC_OCCT_EDGE_TREATMENT_RAIL_STATION,
+                       sweep_residual, limit, scale) ||
+      !append_residual(*certificate,
+                       GEOSPEC_OCCT_EDGE_TREATMENT_RAIL_STATION,
+                       plane_residual, uses[plane[0]].maximum_tolerance,
+                       1.0) ||
+      !append_residual(*certificate,
+                       GEOSPEC_OCCT_EDGE_TREATMENT_RAIL_STATION,
+                       cylinder_residual,
+                       uses[cylinder[0]].maximum_tolerance, 1.0)) {
+    return unqualified_edge_treatment(
+        GEOSPEC_OCCT_EDGE_TREATMENT_DEGENERATE_SUPPORT);
+  }
+  if (axis_gap > limit || axis_direction > limit || plane_direction > limit ||
+      sweep_residual > limit ||
+      plane_residual > uses[plane[0]].maximum_tolerance ||
+      cylinder_residual > uses[cylinder[0]].maximum_tolerance) {
+    return nonmember_edge_treatment(
+        GEOSPEC_OCCT_EDGE_TREATMENT_OUTSIDE_TOPOLOGY);
+  }
+  double worst_tangent = 0.0;
+  double worst_material = 0.0;
+  for (size_t rail : {plane[0], cylinder[0]}) {
+    const gp_Pnt at = midpoint(uses[rail].value);
+    gp_Dir candidate_normal;
+    gp_Dir support_normal;
+    if (!natural_surface_normal(view.shape, at, candidate_normal) ||
+        !natural_surface_normal(uses[rail].adjacent, at, support_normal)) {
+      return unqualified_edge_treatment(
+          GEOSPEC_OCCT_EDGE_TREATMENT_UNSUPPORTED_ORIENTATION);
+    }
+    const double dot = candidate_normal.Dot(support_normal);
+    const double rail_scale = uses[rail].value.curve.length;
+    const double tangent =
+        parallel_residual(candidate_normal, support_normal, rail_scale);
+    const double material = std::max(0.0, -dot) * rail_scale;
+    worst_tangent = std::max(worst_tangent, tangent);
+    worst_material = std::max(worst_material, material);
+    const gp_Pnt start(uses[rail].value.start[0], uses[rail].value.start[1],
+                       uses[rail].value.start[2]);
+    const gp_Pnt end(uses[rail].value.end[0], uses[rail].value.end[1],
+                     uses[rail].value.end[2]);
+    const double coincidence =
+        std::max({surface_distance(view.shape, start),
+                  surface_distance(view.shape, end),
+                  surface_distance(uses[rail].adjacent, start),
+                  surface_distance(uses[rail].adjacent, end)});
+    if (!append_residual(*certificate,
+                         GEOSPEC_OCCT_EDGE_TREATMENT_RAIL_COINCIDENCE,
+                         coincidence, uses[rail].maximum_tolerance, 1.0)) {
+      return unqualified_edge_treatment(
+          GEOSPEC_OCCT_EDGE_TREATMENT_DEGENERATE_SUPPORT);
+    }
+    if (coincidence > uses[rail].maximum_tolerance) {
+      return nonmember_edge_treatment(
+          GEOSPEC_OCCT_EDGE_TREATMENT_OUTSIDE_TOPOLOGY);
+    }
+  }
+  if (!append_residual(*certificate,
+                       GEOSPEC_OCCT_EDGE_TREATMENT_TANGENT_DIRECTION,
+                       worst_tangent, limit, scale) ||
+      !append_residual(*certificate,
+                       GEOSPEC_OCCT_EDGE_TREATMENT_MATERIAL_BRANCH,
+                       worst_material, limit, scale)) {
+    return unqualified_edge_treatment(
+        GEOSPEC_OCCT_EDGE_TREATMENT_DEGENERATE_SUPPORT);
+  }
+  if (worst_tangent > limit) {
+    return nonmember_edge_treatment(
+        GEOSPEC_OCCT_EDGE_TREATMENT_NON_TANGENT_SUPPORT);
+  }
+  if (worst_material > limit) {
+    return nonmember_edge_treatment(
+        GEOSPEC_OCCT_EDGE_TREATMENT_OUTSIDE_MATERIAL_BRANCH);
+  }
+  certificate->value.metric_value_mm = torus.MinorRadius();
+  certificate->value.material_side =
+      view.shape.Orientation() == TopAbs_REVERSED
+          ? GEOSPEC_OCCT_EDGE_TREATMENT_CONCAVE
+          : GEOSPEC_OCCT_EDGE_TREATMENT_CONVEX;
+  certificate->value.full_u = 1;
+  certificate->value.sweep_interval[0] = candidate.FirstVParameter();
+  certificate->value.sweep_interval[1] = candidate.LastVParameter();
+  if (!rectangular_edge_treatment_trim(view.shape, uses, false,
+          torus.MajorRadius() + torus.MinorRadius(), torus.MinorRadius(),
+          *certificate)) {
+    return unqualified_edge_treatment(GEOSPEC_OCCT_EDGE_TREATMENT_UNSUPPORTED_TRIM);
+  }
+  return qualified_edge_treatment(std::move(certificate));
+}
+
+size_t edge_treatment_certificate_bytes(
+    const EdgeTreatmentDispositionData& disposition) {
+  if (!disposition.certificate) return 0;
+  size_t total = sizeof(EdgeTreatmentCertificateData);
+  size_t bytes = 0;
+  if (!checked_product_size(disposition.certificate->boundary_uses.capacity(),
+                            sizeof(geospec_occt_edge_treatment_boundary_use),
+                            bytes) ||
+      !checked_add_size(bytes, total) ||
+      !checked_product_size(disposition.certificate->residuals.capacity(),
+                            sizeof(geospec_occt_edge_treatment_residual),
+                            bytes) ||
+      !checked_add_size(bytes, total)) {
+    return std::numeric_limits<size_t>::max();
+  }
+  return total;
+}
+
+bool edge_treatment_transfer_bytes(const EdgeTreatmentTransferData& transfer,
+                                   size_t& output) {
+  output = sizeof(EdgeTreatmentTransferData);
+  size_t rows = 0;
+  if (!checked_product_size(transfer.rows.capacity(),
+                            sizeof(EdgeTreatmentRowData), rows) ||
+      !checked_add_size(rows, output)) {
+    return false;
+  }
+  for (const EdgeTreatmentRowData& row : transfer.rows) {
+    for (const std::string* text :
+         {&row.occurrence_path, &row.source_face_key, &row.label}) {
+      if (!checked_add_size(text->capacity(), output) ||
+          !checked_add_size(1, output)) return false;
+    }
+    const size_t chamfer = edge_treatment_certificate_bytes(row.chamfer);
+    const size_t fillet = edge_treatment_certificate_bytes(row.fillet);
+    if (chamfer == std::numeric_limits<size_t>::max() ||
+        fillet == std::numeric_limits<size_t>::max() ||
+        !checked_add_size(chamfer, output) ||
+        !checked_add_size(fillet, output)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+void source_face_identity(const geospec_occt_document& document,
+                          const EdgeTreatmentScope& scope,
+                          const TopoDS_Face& face,
+                          EdgeTreatmentRowData& row) {
+  const SourceFaceFacts* match = nullptr;
+  for (const SourceFaceFacts& source : document.source_faces) {
+    if (!face.IsPartner(source.shape)) continue;
+    TopoDS_Shape expected = source.shape;
+    if (scope.occurrence.has_value()) {
+      expected = source.shape.Moved(scope.shape->Location());
+    }
+    if (!expected.Location().IsEqual(face.Location())) continue;
+    if (match != nullptr) {
+      match = nullptr;
+      return;
+    }
+    match = &source;
+  }
+  if (match == nullptr) return;
+  std::ostringstream key;
+  key << '#' << match->entity;
+  if (scope.occurrence.has_value()) {
+    const OccurrenceFacts& occurrence =
+        document.occurrences[*scope.occurrence];
+    if (!occurrence.source_transfer_valid || occurrence.source_route.size() > 32) return;
+    for (uint32_t entity : occurrence.source_route) key << "/#" << entity;
+  }
+  row.source_face_key = key.str();
+  row.value.has_source_face_key = 1;
+  row.value.has_source_same_sense = 1;
+  row.value.source_same_sense = match->same_sense ? 1 : 0;
+}
+
+const std::string* edge_treatment_label(const geospec_occt_document& document,
+                          const EdgeTreatmentScope& scope,
+                          uint32_t public_ordinal,
+                          EdgeTreatmentRowData& row) {
+  size_t matches = 0;
+  const std::string* label = nullptr;
+  for (const SubshapeFacts& subshape : document.subshapes) {
+    const int expected_occurrence =
+        scope.occurrence.has_value() ? static_cast<int>(*scope.occurrence) : -1;
+    if (subshape.shape_type != GEOSPEC_OCCT_SUBSHAPE_FACE ||
+        !subshape.has_face_index || subshape.occurrence != expected_occurrence ||
+        subshape.face_index != public_ordinal) {
+      continue;
+    }
+    ++matches;
+    if (matches == 1) label = &subshape.name;
+  }
+  if (matches == 0) {
+    row.value.label = GEOSPEC_OCCT_EDGE_TREATMENT_LABEL_ABSENT;
+  } else if (matches == 1) {
+    row.value.label = GEOSPEC_OCCT_EDGE_TREATMENT_LABEL_UNIQUE;
+  } else {
+    row.value.label = GEOSPEC_OCCT_EDGE_TREATMENT_LABEL_AMBIGUOUS;
+  }
+  return matches == 1 ? label : nullptr;
+}
+
+bool build_edge_treatments(const geospec_occt_document& document,
+                           size_t max_rows, EdgeTreatmentTransferData& output,
+                           std::string& message) {
+  if (!count_edge_treatments(document, output.counts, message)) return false;
+  const size_t limit = std::min(max_rows, kMaximumEdgeTreatmentRows);
+  if (output.counts.public_face_count > limit) {
+    message = "Edge-treatment row count exceeds the requested bound.";
+    return false;
+  }
+  size_t fixed_rows = 0;
+  size_t fixed_total = sizeof(EdgeTreatmentTransferData);
+  if (!checked_product_size(output.counts.public_face_count,
+                            sizeof(EdgeTreatmentRowData), fixed_rows) ||
+      !checked_add_size(fixed_rows, fixed_total) ||
+      fixed_total > kMaximumEdgeTreatmentOwnedBytes) {
+    message = "Edge-treatment transfer exceeds one mebibyte.";
+    return false;
+  }
+  output.rows.reserve(output.counts.public_face_count);
+  if (!edge_treatment_transfer_bytes(output, output.owned_bytes) ||
+      output.owned_bytes > kMaximumEdgeTreatmentOwnedBytes) {
+    message = "Edge-treatment row capacity exceeds one mebibyte.";
+    return false;
+  }
+  for (const EdgeTreatmentScope& scope : edge_treatment_scopes(document)) {
+    NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> solids;
+    TopExp::MapShapes(*scope.shape, TopAbs_SOLID, solids);
+    ShapeAncestors face_solids;
+    TopExp::MapShapesAndAncestors(*scope.shape, TopAbs_FACE, TopAbs_SOLID,
+                                  face_solids);
+    NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> public_map;
+    std::vector<std::vector<size_t>> public_ordinals;
+    for (size_t ordinal = 0; ordinal < scope.faces->size(); ++ordinal) {
+      const int mapped = public_map.Add((*scope.faces)[ordinal].shape);
+      if (static_cast<size_t>(mapped) > public_ordinals.size()) {
+        public_ordinals.emplace_back();
+      }
+      public_ordinals[static_cast<size_t>(mapped - 1)].push_back(ordinal);
+    }
+    std::vector<std::unique_ptr<BoreSolidContext>> owners(
+        static_cast<size_t>(solids.Extent()));
+    for (size_t public_ordinal = 0; public_ordinal < scope.faces->size();
+         ++public_ordinal) {
+      const FaceView& view = (*scope.faces)[public_ordinal];
+      EdgeTreatmentRowData row;
+      row.value.has_occurrence = scope.occurrence.has_value() ? 1 : 0;
+      row.value.occurrence = scope.occurrence.value_or(0);
+      row.value.public_face_ordinal = static_cast<uint32_t>(public_ordinal);
+      row.value.private_query_face = view.query_index;
+      if (scope.occurrence_path.size() > kMaximumEdgeTreatmentOwnedBytes) {
+        message = "Edge-treatment occurrence path exceeds one mebibyte.";
+        return false;
+      }
+      row.value.transferred_reversed =
+          view.shape.Orientation() == TopAbs_REVERSED ? 1 : 0;
+      source_face_identity(document, scope, view.shape, row);
+      const std::string* label = edge_treatment_label(document, scope,
+                           static_cast<uint32_t>(public_ordinal), row);
+      size_t text_bytes = output.owned_bytes;
+      if (!checked_add_size(scope.occurrence_path.size(), text_bytes) ||
+          !checked_add_size(row.source_face_key.capacity(), text_bytes) ||
+          !checked_add_size(label == nullptr ? 0 : label->size(), text_bytes) ||
+          !checked_add_size(3, text_bytes) ||
+          text_bytes > kMaximumEdgeTreatmentOwnedBytes) {
+        message = "Edge-treatment source text exceeds one mebibyte.";
+        return false;
+      }
+      row.occurrence_path = scope.occurrence_path;
+      if (label != nullptr) row.label = *label;
+
+      const GeomAbs_SurfaceType type = BRepAdaptor_Surface(view.shape).GetType();
+      if (!transition_surface(view.shape)) {
+        row.chamfer = unqualified_edge_treatment(
+            GEOSPEC_OCCT_EDGE_TREATMENT_UNSUPPORTED_SURFACE);
+        row.fillet = unqualified_edge_treatment(
+            GEOSPEC_OCCT_EDGE_TREATMENT_UNSUPPORTED_SURFACE);
+      } else if ((view.shape.Orientation() != TopAbs_FORWARD &&
+                  view.shape.Orientation() != TopAbs_REVERSED) ||
+                 view.query_index == 0) {
+        const int qualification =
+            view.query_index == 0
+                ? GEOSPEC_OCCT_EDGE_TREATMENT_AMBIGUOUS_ASSOCIATION
+                : GEOSPEC_OCCT_EDGE_TREATMENT_UNSUPPORTED_ORIENTATION;
+        row.chamfer = unqualified_edge_treatment(qualification);
+        row.fillet = unqualified_edge_treatment(qualification);
+      } else {
+        const int ownership = face_solids.FindIndex(view.shape);
+        int owner_ordinal = 0;
+        if (ownership > 0 && face_solids.FindKey(ownership).IsSame(view.shape)) {
+          for (NCollection_List<TopoDS_Shape>::Iterator iterator(
+                   face_solids.FindFromIndex(ownership));
+               iterator.More(); iterator.Next()) {
+            const int ordinal = solids.FindIndex(iterator.Value());
+            if (ordinal <= 0 ||
+                (owner_ordinal != 0 && owner_ordinal != ordinal)) {
+              owner_ordinal = -1;
+              break;
+            }
+            owner_ordinal = ordinal;
+          }
+        }
+        if (owner_ordinal <= 0) {
+          row.chamfer = unqualified_edge_treatment(
+              GEOSPEC_OCCT_EDGE_TREATMENT_AMBIGUOUS_OWNERSHIP);
+          row.fillet = unqualified_edge_treatment(
+              GEOSPEC_OCCT_EDGE_TREATMENT_AMBIGUOUS_OWNERSHIP);
+        } else {
+          row.value.has_owning_solid_ordinal = 1;
+          row.value.owning_solid_ordinal =
+              static_cast<uint32_t>(owner_ordinal - 1);
+          std::unique_ptr<BoreSolidContext>& owner =
+              owners[static_cast<size_t>(owner_ordinal - 1)];
+          if (!owner) {
+            owner = std::make_unique<BoreSolidContext>();
+            std::string qualification;
+            TopoDS_Solid solid;
+            owner->valid =
+                regular_solid_operand(solids(owner_ordinal), solid,
+                                      qualification) &&
+                maximum_topology_tolerance(solids(owner_ordinal),
+                                           owner->maximum_tolerance);
+            if (owner->valid) {
+              owner->solid = solid;
+              TopExp::MapShapes(owner->solid, TopAbs_EDGE, owner->edges);
+              TopExp::MapShapesAndAncestors(owner->solid, TopAbs_EDGE,
+                                            TopAbs_FACE, owner->edge_faces);
+            }
+          }
+          if (!owner->valid) {
+            row.chamfer = unqualified_edge_treatment(
+                GEOSPEC_OCCT_EDGE_TREATMENT_INVALID_SOLID);
+            row.fillet = unqualified_edge_treatment(
+                GEOSPEC_OCCT_EDGE_TREATMENT_INVALID_SOLID);
+          } else {
+            row.chamfer =
+                type == GeomAbs_Plane
+                    ? classify_planar_chamfer(
+                          view, static_cast<uint32_t>(public_ordinal),
+                          *scope.faces, public_map, public_ordinals, *owner)
+                    : type == GeomAbs_Cone
+                          ? classify_conical_chamfer(
+                                view, static_cast<uint32_t>(public_ordinal),
+                                *scope.faces, public_map, public_ordinals,
+                                *owner)
+                          : nonmember_edge_treatment(
+                                GEOSPEC_OCCT_EDGE_TREATMENT_UNSUPPORTED_SURFACE);
+            row.fillet =
+                type == GeomAbs_Cylinder
+                    ? classify_cylindrical_fillet(
+                          view, static_cast<uint32_t>(public_ordinal),
+                          *scope.faces, public_map, public_ordinals, *owner)
+                    : type == GeomAbs_Torus
+                          ? classify_toroidal_fillet(
+                                view, static_cast<uint32_t>(public_ordinal),
+                                *scope.faces, public_map, public_ordinals,
+                                *owner)
+                          : nonmember_edge_treatment(
+                                GEOSPEC_OCCT_EDGE_TREATMENT_UNSUPPORTED_SURFACE);
+          }
+        }
+      }
+      row.value.chamfer_disposition = row.chamfer.disposition;
+      row.value.chamfer_reason = row.chamfer.reason;
+      row.value.fillet_disposition = row.fillet.disposition;
+      row.value.fillet_reason = row.fillet.reason;
+      output.rows.push_back(std::move(row));
+      if (!edge_treatment_transfer_bytes(output, output.owned_bytes) ||
+          output.owned_bytes > kMaximumEdgeTreatmentOwnedBytes) {
+        message = "Edge-treatment owned transfer exceeds one mebibyte.";
+        return false;
+      }
+    }
+  }
+  return output.rows.size() == output.counts.public_face_count &&
+         edge_treatment_transfer_bytes(output, output.owned_bytes) &&
+         output.owned_bytes <= kMaximumEdgeTreatmentOwnedBytes;
+}
+
+const EdgeTreatmentDispositionData* edge_treatment_disposition(
+    const EdgeTreatmentTransferData& transfer, size_t row, int feature) {
+  if (row >= transfer.rows.size()) return nullptr;
+  if (feature == 0) return &transfer.rows[row].chamfer;
+  if (feature == 1) return &transfer.rows[row].fillet;
+  return nullptr;
 }
 
 using ShapeIndex = NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher>;
@@ -1908,6 +4233,225 @@ bool continuous_cylinder(const ShapeIndex& faces, const ShapeIndex& edges,
   return true;
 }
 
+// Nominal full-band reconstruction is deliberately separate from the exact
+// stored-coordinate PhaseZeroV1 whole-solid classifier above.
+bool nominal_cylindrical_band(
+    const TopoDS_Face& face, geospec_occt_nominal_cylindrical_band& output,
+    std::string& message) {
+  message = "Nominal cylindrical band requires a valid complete analytic face.";
+  if ((face.Orientation() != TopAbs_FORWARD &&
+       face.Orientation() != TopAbs_REVERSED) ||
+      !BRepCheck_Analyzer(face, true).IsValid()) return false;
+  BRepAdaptor_Surface surface(face);
+  if (surface.GetType() != GeomAbs_Cylinder || !surface.IsUPeriodic()) return false;
+  const gp_Cylinder cylinder = surface.Cylinder();
+  const gp_Ax3 frame = cylinder.Position();
+  const double radius = cylinder.Radius();
+  const double u0 = surface.FirstUParameter(), u1 = surface.LastUParameter();
+  const double v0 = surface.FirstVParameter(), v1 = surface.LastVParameter();
+  const double period = surface.UPeriod();
+  const auto finite = [](double value) { return std::isfinite(value); };
+  const auto tolerance = [&](double value) { return finite(value) && value >= 0; };
+  const auto accepted = [&](double value, double limit) {
+    return tolerance(value) && tolerance(limit) && value <= limit;
+  };
+  const auto maximum_residual = [&](std::initializer_list<double> values) {
+    double maximum = 0;
+    for (double value : values) {
+      if (!tolerance(value)) return std::numeric_limits<double>::infinity();
+      maximum = std::max(maximum, value);
+    }
+    return maximum;
+  };
+  output.face_tolerance_mm = BRep_Tool::Tolerance(face);
+  if (!frame.Direct() || !finite(radius) || radius <= 0 ||
+      !finite(u0) || !finite(u1) || !finite(v0) || !finite(v1) ||
+      !finite(u1 - u0) || !finite(v1 - v0) || u0 >= u1 || v0 >= v1 ||
+      !finite(period) || period <= 0 || !tolerance(output.face_tolerance_mm)) return false;
+  point(output.origin, cylinder.Location());
+  direction(output.axis, frame.Direction());
+  direction(output.phase_x, frame.XDirection());
+  direction(output.phase_y, frame.YDirection());
+  for (int k = 0; k < 3; ++k) {
+    if (!finite(output.origin[k]) || !finite(output.axis[k]) ||
+        !finite(output.phase_x[k]) || !finite(output.phase_y[k])) return false;
+  }
+  output.radius = radius;
+  output.from = v0;
+  output.to = v1;
+  output.parameter_bounds[0] = u0;
+  output.parameter_bounds[1] = u1;
+  output.parameter_bounds[2] = v0;
+  output.parameter_bounds[3] = v1;
+  output.surface_period = period;
+  output.period_residual_mm = radius * std::abs((u1 - u0) - period);
+  message = "Nominal cylindrical band does not cover one stored analytic period.";
+  if (!accepted(output.period_residual_mm, output.face_tolerance_mm)) return false;
+
+  std::vector<TopoDS_Edge> cycle;
+  message = "Nominal cylindrical band requires one complete four-use outer wire.";
+  if (!outer_cycle(face, 4, cycle)) return false;
+  ShapeIndex edges, vertices;
+  TopExp::MapShapes(face, TopAbs_EDGE, edges);
+  TopExp::MapShapes(face, TopAbs_VERTEX, vertices);
+  if (edges.Extent() != 3 || vertices.Extent() != 2) return false;
+  for (int i = 1; i <= 3; ++i) {
+    output.edge_tolerances_mm[i - 1] = BRep_Tool::Tolerance(TopoDS::Edge(edges(i)));
+    if (!tolerance(output.edge_tolerances_mm[i - 1])) return false;
+  }
+  for (int i = 1; i <= 2; ++i) {
+    const auto vertex = TopoDS::Vertex(vertices(i));
+    output.vertices[i - 1].vertex_index = static_cast<uint32_t>(i);
+    point(output.vertices[i - 1].point, BRep_Tool::Pnt(vertex));
+    output.vertex_tolerances_mm[i - 1] = BRep_Tool::Tolerance(vertex);
+    if (!tolerance(output.vertex_tolerances_mm[i - 1]) ||
+        !std::all_of(std::begin(output.vertices[i - 1].point),
+                     std::end(output.vertices[i - 1].point), finite)) return false;
+  }
+  std::array<int, 4> side_uses{};
+  int seam_direction = 0;
+  for (size_t i = 0; i < cycle.size(); ++i) {
+    const TopoDS_Edge edge = cycle[i];
+    const int edge_id = edges.FindIndex(edge);
+    BRepAdaptor_Curve curve(edge);
+    double first = 0, last = 0;
+    bool stored = false;
+    const auto pcurve = BRep_Tool::CurveOnSurface(edge, face, first, last, &stored);
+    message = "Nominal band requires stored affine pcurves with identical complete curve ranges.";
+    if (edge_id == 0 || pcurve.IsNull() || !stored ||
+        !BRep_Tool::SameRange(edge) || !BRep_Tool::SameParameter(edge) ||
+        !finite(first) || !finite(last) || first >= last ||
+        first != curve.FirstParameter() || last != curve.LastParameter()) return false;
+    Geom2dAdaptor_Curve trim(pcurve, first, last);
+    if (trim.GetType() != GeomAbs_Line) return false;
+    const gp_Lin2d line = trim.Line();
+    const gp_Pnt2d a = trim.Value(first), b = trim.Value(last);
+    if (!finite(a.X()) || !finite(a.Y()) || !finite(b.X()) || !finite(b.Y()) ||
+        !finite(line.Location().X()) || !finite(line.Location().Y())) return false;
+    TopoDS_Vertex start, end;
+    TopExp::Vertices(TopoDS::Edge(edge.Oriented(TopAbs_FORWARD)), start, end, true);
+    const int start_id = vertices.FindIndex(start), end_id = vertices.FindIndex(end);
+    if (start.IsNull() || end.IsNull() || start_id == 0 || end_id == 0) return false;
+    auto& residual = output.boundary_residuals[i];
+    residual.limit_mm = std::max({output.face_tolerance_mm,
+        output.edge_tolerances_mm[edge_id - 1],
+        output.vertex_tolerances_mm[start_id - 1],
+        output.vertex_tolerances_mm[end_id - 1]});
+    const bool seam = BRep_Tool::IsClosed(edge, face);
+    if (seam ? (curve.GetType() != GeomAbs_Line || line.Direction().X() != 0 ||
+                std::abs(line.Direction().Y()) != 1)
+             : (curve.GetType() != GeomAbs_Circle || line.Direction().Y() != 0 ||
+                std::abs(line.Direction().X()) != 1 || !curve.IsClosed())) return false;
+
+    // Each affine UV segment must cover exactly one rectangle side up to the
+    // participating model tolerances. More than one matching side is ambiguous.
+    int side = -1;
+    for (int candidate = seam ? 0 : 2; candidate < (seam ? 2 : 4); ++candidate) {
+      const double fixed = candidate == 0 ? u0 : candidate == 1 ? u1
+                           : candidate == 2 ? v0 : v1;
+      const double error = seam
+          ? maximum_residual({radius * std::abs(a.X() - fixed), radius * std::abs(b.X() - fixed),
+                      std::abs(std::min(a.Y(), b.Y()) - v0),
+                      std::abs(std::max(a.Y(), b.Y()) - v1)})
+          : maximum_residual({std::abs(a.Y() - fixed), std::abs(b.Y() - fixed),
+                      radius * std::abs(std::min(a.X(), b.X()) - u0),
+                      radius * std::abs(std::max(a.X(), b.X()) - u1)});
+      if (!accepted(error, residual.limit_mm)) continue;
+      if (side >= 0) return false;
+      side = candidate;
+      residual.parameter_coverage_mm = error;
+    }
+    message = "Nominal band pcurve does not unambiguously cover a complete rectangle side.";
+    if (side < 0 || ++side_uses[side] != 1) return false;
+    auto& use = output.boundary[i];
+    use.edge_index = static_cast<uint32_t>(edge_id);
+    use.orientation = edge.Orientation() == TopAbs_FORWARD ? 0 : 1;
+    use.side = side;
+    use.curve_range[0] = first;
+    use.curve_range[1] = last;
+    use.pcurve_stored = 1;
+    use.parameter_endpoints[0][0] = a.X();
+    use.parameter_endpoints[0][1] = a.Y();
+    use.parameter_endpoints[1][0] = b.X();
+    use.parameter_endpoints[1][1] = b.Y();
+    if (seam) {
+      if (start_id == end_id || (output.seam_edge_index != 0 &&
+          output.seam_edge_index != static_cast<uint32_t>(edge_id))) return false;
+      output.seam_edge_index = static_cast<uint32_t>(edge_id);
+      seam_direction += edge.Orientation() == TopAbs_FORWARD ? 1 : -1;
+      point(output.seam_origin, curve.Line().Location());
+      direction(output.seam_axis, curve.Line().Direction());
+      output.seam_curve_range[0] = first;
+      output.seam_curve_range[1] = last;
+      output.seam_vertex_indices[0] = static_cast<uint32_t>(start_id);
+      output.seam_vertex_indices[1] = static_cast<uint32_t>(end_id);
+      // Both maps are affine on this complete interval (constant U).
+      residual.curve_surface_mm = maximum_residual({
+          curve.Value(first).Distance(surface.Value(a.X(), a.Y())),
+          curve.Value(last).Distance(surface.Value(b.X(), b.Y()))});
+    } else {
+      if (start_id != end_id || !finite(curve.Period()) || curve.Period() <= 0) return false;
+      const gp_Circ circle = curve.Circle();
+      const double circle_radius = circle.Radius();
+      if (!finite(circle_radius) || circle_radius <= 0) return false;
+      residual.parameter_coverage_mm = maximum_residual({residual.parameter_coverage_mm,
+          radius * std::abs((last - first) - curve.Period()),
+          radius * std::abs(curve.Period() - period)});
+      // A full circle is C + X*cos(t) + Y*sin(t). Its horizontal
+      // affine pcurve supplies the corresponding surface coefficients, so
+      // this triangle-inequality bound covers all t, not sampled locations.
+      const double phase = line.Location().X();
+      const gp_Vec x(frame.XDirection()), y(frame.YDirection());
+      const gp_Vec expected_x =
+          (x.Multiplied(std::cos(phase)) + y.Multiplied(std::sin(phase))).Multiplied(radius);
+      const gp_Vec expected_y =
+          (y.Multiplied(std::cos(phase)) - x.Multiplied(std::sin(phase)))
+              .Multiplied(radius * line.Direction().X());
+      const gp_Pnt expected_center = cylinder.Location().Translated(
+          gp_Vec(frame.Direction()).Multiplied(line.Location().Y()));
+      residual.curve_surface_mm = circle.Location().Distance(expected_center) +
+          (gp_Vec(circle.Position().XDirection()).Multiplied(circle_radius) - expected_x).Magnitude() +
+          (gp_Vec(circle.Position().YDirection()).Multiplied(circle_radius) - expected_y).Magnitude();
+      auto& rim = output.rims[side - 2];
+      rim.edge_index = static_cast<uint32_t>(edge_id);
+      point(rim.center, circle.Location());
+      direction(rim.axis, circle.Axis().Direction());
+      direction(rim.phase_x, circle.Position().XDirection());
+      direction(rim.phase_y, circle.Position().YDirection());
+      rim.radius = circle_radius;
+      rim.curve_range[0] = first;
+      rim.curve_range[1] = last;
+      rim.curve_period = curve.Period();
+      rim.vertex_indices[0] = static_cast<uint32_t>(start_id);
+      rim.vertex_indices[1] = static_cast<uint32_t>(end_id);
+    }
+    residual.vertex_attachment_mm = maximum_residual({
+        BRep_Tool::Pnt(start).Distance(curve.Value(first)),
+        BRep_Tool::Pnt(end).Distance(curve.Value(last)),
+        BRep_Tool::Pnt(start).Distance(surface.Value(a.X(), a.Y())),
+        BRep_Tool::Pnt(end).Distance(surface.Value(b.X(), b.Y()))});
+    message = "Nominal band analytic attachment exceeds participating topology tolerances.";
+    if (!accepted(residual.parameter_coverage_mm, residual.limit_mm) ||
+        !accepted(residual.curve_surface_mm, residual.limit_mm) ||
+        !accepted(residual.vertex_attachment_mm, residual.limit_mm)) return false;
+  }
+  message = "Nominal band requires opposite uses of one seam and two distinct attached closed rims.";
+  if (seam_direction != 0 || output.seam_edge_index == 0 ||
+      output.rims[0].edge_index == output.rims[1].edge_index ||
+      output.rims[0].vertex_indices[0] == output.rims[1].vertex_indices[0] ||
+      std::any_of(side_uses.begin(), side_uses.end(), [](int n) { return n != 1; })) return false;
+  // Side endpoints establish the station assignment independently of face sense.
+  for (const auto& use : output.boundary) {
+    if (use.side > 1) continue;
+    for (int endpoint = 0; endpoint < 2; ++endpoint) {
+      const int station = use.parameter_endpoints[0][1] < use.parameter_endpoints[1][1]
+          ? endpoint : 1 - endpoint;
+      if (output.seam_vertex_indices[endpoint] != output.rims[station].vertex_indices[0]) return false;
+    }
+  }
+  return true;
+}
+
 bool classify_continuous_wall(
     const TopoDS_Shape& shape,
     geospec_occt_continuous_wall_domain& output,
@@ -2148,8 +4692,9 @@ bool mapped_copy_shape(const BRepBuilderAPI_Copy& copy,
 }
 
 geospec_occt_located_face_facts reported_face(
-    const TopoDS_Face& face, uint32_t index, size_t edge_count) {
-  FaceFacts value = face_facts(face, index);
+    const TopoDS_Face& face, uint32_t index, uint32_t query_index,
+    size_t edge_count) {
+  FaceFacts value = face_facts(face, index, query_index);
   // The source XDE face report explicitly excludes triangulation. Whole-shape
   // reporting retains its separate triangulation-enabled source rule.
   Bnd_Box box;
@@ -2201,34 +4746,49 @@ bool build_report(const geospec_occt_document& document,
     report.occurrences.push_back(occurrence);
 
     std::vector<geospec_occt_located_face_facts> mapped_faces;
-    mapped_faces.reserve(source_occurrence.faces.size());
-    for (const LocatedFaceFacts& source_face : source_occurrence.faces) {
+    mapped_faces.reserve(source_occurrence.public_faces.size());
+    for (size_t public_index = 0;
+         public_index < source_occurrence.public_faces.size(); ++public_index) {
+      const FaceView& source_face =
+          source_occurrence.public_faces[public_index];
+      if (source_face.query_index == 0) {
+        message = "Occurrence public face has no unique private query address.";
+        return false;
+      }
+      const LocatedFaceFacts& query_face =
+          source_occurrence.faces[static_cast<size_t>(source_face.query_index - 1)];
       TopoDS_Shape mapped;
       if (!mapped_copy_shape(
               copy, source_face.shape, TopAbs_FACE,
               "occurrence " + std::to_string(occurrence_index) + " face " +
-                  std::to_string(source_face.facts.face.index),
+                  std::to_string(public_index),
               mapped, message)) {
         return false;
       }
       mapped_faces.push_back(reported_face(
-          TopoDS::Face(mapped), source_face.facts.face.index,
-          source_face.edge_indices.size()));
+          TopoDS::Face(mapped), static_cast<uint32_t>(public_index),
+          source_face.query_index, query_face.edge_indices.size()));
     }
     report.occurrence_faces.push_back(std::move(mapped_faces));
   }
 
-  report.whole_faces.reserve(document.faces.size());
-  for (const FaceFacts& source_face : document.faces) {
+  report.whole_faces.reserve(document.public_faces.size());
+  for (size_t public_index = 0; public_index < document.public_faces.size();
+       ++public_index) {
+    const FaceView& source_face = document.public_faces[public_index];
+    if (source_face.query_index == 0) {
+      message = "Public face has no unique private query address.";
+      return false;
+    }
     TopoDS_Shape mapped;
     if (!mapped_copy_shape(copy, source_face.shape, TopAbs_FACE,
-                           "whole face " +
-                               std::to_string(source_face.facts.index),
+                           "whole face " + std::to_string(public_index),
                            mapped, message)) {
       return false;
     }
     report.whole_faces.push_back(reported_face(
-        TopoDS::Face(mapped), source_face.facts.index, 0));
+        TopoDS::Face(mapped), static_cast<uint32_t>(public_index),
+        source_face.query_index, 0));
   }
   return true;
 }
@@ -2701,6 +5261,8 @@ int geospec_occt_open_step(const uint8_t* bytes, size_t length,
     }
 
     auto result = std::make_unique<geospec_occt_document>();
+    result->schema = step_schema(reader);
+    result->source_byte_length = length;
     result->document = new TDocStd_Document("BinXCAF");
     XCAFDoc_DocumentTool::Set(result->document->Main());
 
@@ -2739,6 +5301,12 @@ int geospec_occt_open_step(const uint8_t* bytes, size_t length,
     NCollection_Sequence<TDF_Label> roots;
     shape_tool->GetFreeShapes(roots);
     if (roots.IsEmpty()) return fail(GEOSPEC_OCCT_NO_SHAPE, "STEP has no free shape.", error);
+    for (const TDF_Label& root : roots) {
+      TopExp_Explorer faces(shape_tool->GetShape(root), TopAbs_FACE);
+      if (!XCAFDoc_ShapeTool::IsAssembly(root) && faces.More()) {
+        ++result->free_shape_count;
+      }
+    }
     result->shape = shape_tool->GetOneShape();
     if (result->shape.IsNull()) return fail(GEOSPEC_OCCT_NO_SHAPE, "STEP has no shape.", error);
     result->shape_facts = shape_facts(result->shape);
@@ -2782,14 +5350,28 @@ int geospec_occt_open_step(const uint8_t* bytes, size_t length,
                          result->occurrences);
       ++root_index;
     }
+    prepare_source_associations(reader, shape_tool, result->occurrences,
+                                result->source_faces);
     NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> faces;
     TopExp::MapShapes(result->shape, TopAbs_FACE, faces);
     result->faces.reserve(static_cast<size_t>(faces.Extent()));
     for (int index = 1; index <= faces.Extent(); ++index) {
-      result->faces.push_back(face_facts(TopoDS::Face(faces(index)), static_cast<uint32_t>(index)));
+      result->faces.push_back(face_facts(
+          TopoDS::Face(faces(index)), static_cast<uint32_t>(index),
+          static_cast<uint32_t>(index)));
+    }
+    result->public_faces.reserve(result->shape_facts.faces);
+    for (TopExp_Explorer explorer(result->shape, TopAbs_FACE); explorer.More();
+         explorer.Next()) {
+      const TopoDS_Face face = TopoDS::Face(explorer.Current());
+      const int query_index =
+          exact_mapped_face_index(faces, result->faces, face);
+      result->public_faces.push_back(
+          {query_index > 0 ? static_cast<uint32_t>(query_index) : 0, face});
     }
     append_subshapes(shape_tool, products, result->occurrences,
-                     result->faces, result->subshapes);
+                     result->faces, result->public_faces,
+                     result->subshapes);
 
     const auto pmi_tool = XCAFDoc_DocumentTool::DimTolTool(result->document->Main());
     NCollection_Sequence<TDF_Label> dimensions;
@@ -2803,7 +5385,7 @@ int geospec_occt_open_step(const uint8_t* bytes, size_t length,
     append_pmi(tolerances, GEOSPEC_OCCT_PMI_GEOMETRIC_TOLERANCE, result->pmi);
     append_pmi(datums, GEOSPEC_OCCT_PMI_DATUM, result->pmi);
     append_semantic_datums(reader, shape_tool, products, result->occurrences,
-                           result->faces, result->semantic_datums);
+                           result->public_faces, result->semantic_datums);
     append_datum_placements(reader, result->occurrences,
                             result->datum_placements);
 
@@ -2888,6 +5470,20 @@ int geospec_occt_admission_facts(
   *unit_to_millimeters = document->source_unit_to_millimeters;
   *occurrence_count = document->occurrences.size();
   return write_string(document->source_length_unit, source_unit);
+}
+
+int geospec_occt_step_subject_metadata(
+    const geospec_occt_document* document, size_t* source_byte_length,
+    size_t* free_shape_count, geospec_occt_string* schema,
+    geospec_occt_string* error) noexcept {
+  if (document == nullptr || source_byte_length == nullptr ||
+      free_shape_count == nullptr) {
+    return fail(GEOSPEC_OCCT_INVALID_ARGUMENT,
+                "Document/STEP metadata output is null.", error);
+  }
+  *source_byte_length = document->source_byte_length;
+  *free_shape_count = document->free_shape_count;
+  return write_string(document->schema, schema);
 }
 
 int geospec_occt_report_prepare(
@@ -3123,16 +5719,29 @@ int geospec_occt_occurrence_ordinal(
 }
 
 size_t geospec_occt_face_count(const geospec_occt_document* document) noexcept {
+  return document == nullptr ? 0 : document->public_faces.size();
+}
+
+size_t geospec_occt_query_face_count(
+    const geospec_occt_document* document) noexcept {
   return document == nullptr ? 0 : document->faces.size();
 }
 
 int geospec_occt_face(const geospec_occt_document* document, size_t index,
                       geospec_occt_face_facts* face,
                       geospec_occt_string* error) noexcept {
-  if (document == nullptr || face == nullptr || index >= document->faces.size()) {
+  if (document == nullptr || face == nullptr ||
+      index >= document->public_faces.size()) {
     return fail(GEOSPEC_OCCT_INVALID_ARGUMENT, "Face index/output is invalid.", error);
   }
-  *face = document->faces[index].facts;
+  const uint32_t query_index = document->public_faces[index].query_index;
+  if (query_index == 0) {
+    return fail(GEOSPEC_OCCT_UNSUPPORTED,
+                "Public face has no unique private query address.", error);
+  }
+  *face = document->faces[static_cast<size_t>(query_index - 1)].facts;
+  face->index = static_cast<uint32_t>(index);
+  face->query_index = query_index;
   return GEOSPEC_OCCT_OK;
 }
 
@@ -3141,23 +5750,37 @@ int geospec_occt_face_location(const geospec_occt_document* document,
                                int* out_reversed,
                                geospec_occt_string* error) noexcept {
   if (document == nullptr || out_bounds == nullptr || out_reversed == nullptr ||
-      index >= document->faces.size()) {
+      index >= document->public_faces.size()) {
     return fail(GEOSPEC_OCCT_INVALID_ARGUMENT,
                 "Face location index/output is invalid.", error);
   }
-  *out_bounds = document->faces[index].bounds;
-  *out_reversed = document->faces[index].reversed;
+  const uint32_t query_index = document->public_faces[index].query_index;
+  if (query_index == 0) {
+    return fail(GEOSPEC_OCCT_UNSUPPORTED,
+                "Public face has no unique private query address.", error);
+  }
+  const FaceFacts& query_face =
+      document->faces[static_cast<size_t>(query_index - 1)];
+  *out_bounds = query_face.bounds;
+  *out_reversed = query_face.reversed;
   return GEOSPEC_OCCT_OK;
 }
 
 int geospec_occt_face_label(const geospec_occt_document* document,
                             size_t index, geospec_occt_string* shape_label,
                             geospec_occt_string* error) noexcept {
-  if (document == nullptr || index >= document->faces.size()) {
+  if (document == nullptr || index >= document->public_faces.size()) {
     return fail(GEOSPEC_OCCT_INVALID_ARGUMENT,
                 "Face-label index is invalid.", error);
   }
-  return write_string(document->faces[index].shape_label, shape_label);
+  const uint32_t query_index = document->public_faces[index].query_index;
+  if (query_index == 0) {
+    return fail(GEOSPEC_OCCT_UNSUPPORTED,
+                "Public face has no unique private query address.", error);
+  }
+  return write_string(
+      document->faces[static_cast<size_t>(query_index - 1)].shape_label,
+      shape_label);
 }
 
 size_t geospec_occt_pmi_count(const geospec_occt_document* document) noexcept {
@@ -3279,7 +5902,110 @@ size_t geospec_occt_occurrence_face_count(
     const geospec_occt_document* document, uint32_t occurrence) noexcept {
   return document == nullptr || occurrence >= document->occurrences.size()
              ? 0
+             : document->occurrences[occurrence].public_faces.size();
+}
+
+size_t geospec_occt_occurrence_query_face_count(
+    const geospec_occt_document* document, uint32_t occurrence) noexcept {
+  return document == nullptr || occurrence >= document->occurrences.size()
+             ? 0
              : document->occurrences[occurrence].faces.size();
+}
+
+int geospec_occt_resolve_source_face(
+    const geospec_occt_document* document, uint32_t source_face_entity,
+    const uint32_t* occurrence_route, size_t occurrence_route_count,
+    geospec_occt_resolved_source_face* output,
+    geospec_occt_string* error) noexcept {
+  if (document == nullptr || source_face_entity == 0 ||
+      occurrence_route == nullptr || occurrence_route_count == 0 ||
+      occurrence_route_count > 32 || output == nullptr) {
+    return fail(GEOSPEC_OCCT_INVALID_ARGUMENT,
+                "Source face key/output is invalid.", error);
+  }
+  *output = {};
+  return guarded(error, [&]() -> int {
+    const OccurrenceFacts* occurrence = nullptr;
+    uint32_t occurrence_index = 0;
+    for (size_t index = 0; index < document->occurrences.size(); ++index) {
+      const OccurrenceFacts& candidate = document->occurrences[index];
+      if (!candidate.source_transfer_valid ||
+          candidate.source_route.size() != occurrence_route_count ||
+          !std::equal(candidate.source_route.begin(), candidate.source_route.end(),
+                      occurrence_route)) {
+        continue;
+      }
+      if (occurrence != nullptr) {
+        return fail(GEOSPEC_OCCT_UNSUPPORTED,
+                    "Source occurrence route is ambiguous after transfer.", error);
+      }
+      occurrence = &candidate;
+      occurrence_index = static_cast<uint32_t>(index);
+    }
+    if (occurrence == nullptr) {
+      return fail(GEOSPEC_OCCT_UNSUPPORTED,
+                  "Source occurrence route has no qualified forward transfer.", error);
+    }
+
+    const SourceFaceFacts* source = nullptr;
+    for (const SourceFaceFacts& candidate : document->source_faces) {
+      if (candidate.entity != source_face_entity) continue;
+      if (source != nullptr) {
+        return fail(GEOSPEC_OCCT_UNSUPPORTED,
+                    "Source face entity is ambiguous after transfer.", error);
+      }
+      source = &candidate;
+    }
+    if (source == nullptr) {
+      return fail(GEOSPEC_OCCT_UNSUPPORTED,
+                  "Source face entity has no qualified forward transfer.", error);
+    }
+
+    size_t private_index = occurrence->faces.size();
+    size_t private_count = 0;
+    for (size_t index = 0; index < occurrence->faces.size(); ++index) {
+      if (occurrence->faces[index].shape.IsPartner(source->shape)) {
+        private_index = index;
+        ++private_count;
+      }
+    }
+    if (private_count != 1) {
+      return fail(GEOSPEC_OCCT_UNSUPPORTED,
+                  "Source face does not have one occurrence-face partner.", error);
+    }
+    const TopoDS_Face& transferred = occurrence->faces[private_index].shape;
+    const TopoDS_Shape expected = source->shape.Moved(occurrence->shape.Location());
+    if (!expected.Location().IsEqual(transferred.Location()) ||
+        (transferred.Orientation() != TopAbs_FORWARD &&
+         transferred.Orientation() != TopAbs_REVERSED) ||
+        (expected.Orientation() != TopAbs_FORWARD &&
+         expected.Orientation() != TopAbs_REVERSED)) {
+      return fail(GEOSPEC_OCCT_UNSUPPORTED,
+                  "Source face location/orientation is not qualified.", error);
+    }
+
+    size_t public_index = occurrence->public_faces.size();
+    size_t public_count = 0;
+    for (size_t index = 0; index < occurrence->public_faces.size(); ++index) {
+      const FaceView& candidate = occurrence->public_faces[index];
+      if (candidate.query_index == private_index + 1 &&
+          candidate.shape.IsEqual(transferred)) {
+        public_index = index;
+        ++public_count;
+      }
+    }
+    if (public_count != 1) {
+      return fail(GEOSPEC_OCCT_UNSUPPORTED,
+                  "Source face has no unique public/private face association.", error);
+    }
+    output->occurrence = occurrence_index;
+    output->public_face_ordinal = static_cast<uint32_t>(public_index);
+    output->private_query_face = static_cast<uint32_t>(private_index + 1);
+    output->source_same_sense = source->same_sense ? 1 : 0;
+    output->transferred_reversed =
+        transferred.Orientation() == TopAbs_REVERSED ? 1 : 0;
+    return GEOSPEC_OCCT_OK;
+  });
 }
 
 int geospec_occt_occurrence_face(
@@ -3288,11 +6014,20 @@ int geospec_occt_occurrence_face(
     geospec_occt_string* error) noexcept {
   if (document == nullptr || face == nullptr ||
       occurrence >= document->occurrences.size() ||
-      index >= document->occurrences[occurrence].faces.size()) {
+      index >= document->occurrences[occurrence].public_faces.size()) {
     return fail(GEOSPEC_OCCT_INVALID_ARGUMENT,
                 "Occurrence face index/output is invalid.", error);
   }
-  *face = document->occurrences[occurrence].faces[index].facts;
+  const OccurrenceFacts& value = document->occurrences[occurrence];
+  const uint32_t query_index = value.public_faces[index].query_index;
+  if (query_index == 0) {
+    return fail(GEOSPEC_OCCT_UNSUPPORTED,
+                "Occurrence public face has no unique private query address.",
+                error);
+  }
+  *face = value.faces[static_cast<size_t>(query_index - 1)].facts;
+  face->face.index = static_cast<uint32_t>(index);
+  face->face.query_index = query_index;
   return GEOSPEC_OCCT_OK;
 }
 
@@ -3301,12 +6036,20 @@ int geospec_occt_occurrence_face_label(
     geospec_occt_string* shape_label,
     geospec_occt_string* error) noexcept {
   if (document == nullptr || occurrence >= document->occurrences.size() ||
-      index >= document->occurrences[occurrence].faces.size()) {
+      index >= document->occurrences[occurrence].public_faces.size()) {
     return fail(GEOSPEC_OCCT_INVALID_ARGUMENT,
                 "Occurrence face-label index is invalid.", error);
   }
+  const OccurrenceFacts& value = document->occurrences[occurrence];
+  const uint32_t query_index = value.public_faces[index].query_index;
+  if (query_index == 0) {
+    return fail(GEOSPEC_OCCT_UNSUPPORTED,
+                "Occurrence public face has no unique private query address.",
+                error);
+  }
   return write_string(
-      document->occurrences[occurrence].faces[index].shape_label, shape_label);
+      value.faces[static_cast<size_t>(query_index - 1)].shape_label,
+      shape_label);
 }
 
 int geospec_occt_occurrence_face_edge(
@@ -3315,15 +6058,24 @@ int geospec_occt_occurrence_face_edge(
     geospec_occt_string* error) noexcept {
   if (document == nullptr || edge == nullptr ||
       occurrence >= document->occurrences.size() ||
-      face_index >= document->occurrences[occurrence].faces.size() ||
-      edge_index >=
-          document->occurrences[occurrence].faces[face_index].edge_indices.size()) {
+      face_index >= document->occurrences[occurrence].public_faces.size()) {
     return fail(GEOSPEC_OCCT_INVALID_ARGUMENT,
                 "Occurrence face-edge index/output is invalid.", error);
   }
-  *edge = document->occurrences[occurrence]
-              .faces[face_index]
-              .edge_indices[edge_index];
+  const OccurrenceFacts& value = document->occurrences[occurrence];
+  const uint32_t query_index = value.public_faces[face_index].query_index;
+  if (query_index == 0) {
+    return fail(GEOSPEC_OCCT_UNSUPPORTED,
+                "Occurrence public face has no unique private query address.",
+                error);
+  }
+  const std::vector<uint32_t>& edge_indices =
+      value.faces[static_cast<size_t>(query_index - 1)].edge_indices;
+  if (edge_index >= edge_indices.size()) {
+    return fail(GEOSPEC_OCCT_INVALID_ARGUMENT,
+                "Occurrence face-edge index/output is invalid.", error);
+  }
+  *edge = edge_indices[edge_index];
   return GEOSPEC_OCCT_OK;
 }
 
@@ -3568,6 +6320,242 @@ int geospec_occt_cylinder_axial_extent(
     }
     return GEOSPEC_OCCT_OK;
   });
+}
+
+int geospec_occt_nominal_cylindrical_band_query(
+    const geospec_occt_document* document, geospec_occt_entity face_entity,
+    geospec_occt_nominal_cylindrical_band* output,
+    geospec_occt_string* error) noexcept {
+  if (document == nullptr || output == nullptr) {
+    return fail(GEOSPEC_OCCT_INVALID_ARGUMENT, "Nominal band document/output is null.", error);
+  }
+  *output = {};
+  if (face_entity.kind == GEOSPEC_OCCT_ENTITY_WHOLE_FACE) {
+    return fail(GEOSPEC_OCCT_UNSUPPORTED,
+                "Nominal band requires a selected occurrence-face source route.", error);
+  }
+  if (face_entity.kind != GEOSPEC_OCCT_ENTITY_FACE) {
+    return fail(GEOSPEC_OCCT_INVALID_ARGUMENT, "Nominal band requires a face entity.", error);
+  }
+  return guarded(error, [&]() -> int {
+    TopoDS_Shape shape;
+    std::string message;
+    if (!resolve_entity(*document, face_entity, shape, message)) {
+      return fail(GEOSPEC_OCCT_INVALID_ARGUMENT, message, error);
+    }
+    const auto& occurrence = document->occurrences[face_entity.occurrence];
+    if (!occurrence.source_transfer_valid || occurrence.source_route.empty() ||
+        occurrence.source_route.size() > 32) {
+      return fail(GEOSPEC_OCCT_UNSUPPORTED, "Nominal band occurrence has no qualified source route.", error);
+    }
+    const SourceFaceFacts* source = nullptr;
+    for (const auto& candidate : document->source_faces) {
+      if (!shape.IsPartner(candidate.shape) ||
+          !candidate.shape.Moved(occurrence.shape.Location()).Location().IsEqual(shape.Location())) continue;
+      if (source != nullptr) {
+        return fail(GEOSPEC_OCCT_UNSUPPORTED, "Nominal band source face association is ambiguous.", error);
+      }
+      source = &candidate;
+    }
+    if (source == nullptr) {
+      return fail(GEOSPEC_OCCT_UNSUPPORTED, "Nominal band has no associated source AdvancedFace.", error);
+    }
+    geospec_occt_resolved_source_face association{};
+    const int status = geospec_occt_resolve_source_face(document, source->entity,
+        occurrence.source_route.data(), occurrence.source_route.size(), &association, error);
+    if (status != GEOSPEC_OCCT_OK) return status;
+    if (association.occurrence != face_entity.occurrence ||
+        association.private_query_face != face_entity.face) {
+      return fail(GEOSPEC_OCCT_UNSUPPORTED, "Nominal band forward association differs from selected face.", error);
+    }
+    geospec_occt_nominal_cylindrical_band candidate{};
+    candidate.occurrence = association.occurrence;
+    candidate.public_face_ordinal = association.public_face_ordinal;
+    candidate.private_query_face = association.private_query_face;
+    candidate.source_face_entity = source->entity;
+    candidate.source_route_count = static_cast<uint32_t>(occurrence.source_route.size());
+    std::copy(occurrence.source_route.begin(), occurrence.source_route.end(), candidate.source_route);
+    candidate.source_same_sense = association.source_same_sense;
+    candidate.transferred_reversed = association.transferred_reversed;
+    if (!nominal_cylindrical_band(TopoDS::Face(shape), candidate, message)) {
+      return fail(GEOSPEC_OCCT_UNSUPPORTED, message, error);
+    }
+    *output = candidate;
+    return GEOSPEC_OCCT_OK;
+  });
+}
+
+int geospec_occt_circular_bores_prepare(
+    const geospec_occt_document* document, size_t max_candidates,
+    size_t retained_candidate_size, size_t retained_inventory_size,
+    size_t* count, geospec_occt_string* error) noexcept {
+  if (document == nullptr || count == nullptr) {
+    return fail(GEOSPEC_OCCT_INVALID_ARGUMENT,
+                "Document/circular bore count output is null.", error);
+  }
+  document->circular_bores.reset();
+  return guarded(error, [&]() -> int {
+    std::vector<geospec_occt_circular_bore_candidate> candidates;
+    std::string message;
+    bool native_error = false;
+    if (!build_circular_bores(*document, max_candidates,
+                              retained_candidate_size,
+                              retained_inventory_size, candidates, message,
+                              native_error)) {
+      return fail(native_error ? GEOSPEC_OCCT_NATIVE_ERROR
+                               : GEOSPEC_OCCT_UNSUPPORTED,
+                  message, error);
+    }
+    *count = candidates.size();
+    document->circular_bores.emplace(std::move(candidates));
+    return GEOSPEC_OCCT_OK;
+  });
+}
+
+int geospec_occt_circular_bore(
+    const geospec_occt_document* document, size_t index,
+    geospec_occt_circular_bore_candidate* candidate,
+    geospec_occt_string* error) noexcept {
+  if (document == nullptr || candidate == nullptr ||
+      !document->circular_bores.has_value() ||
+      index >= document->circular_bores->size()) {
+    return fail(GEOSPEC_OCCT_INVALID_ARGUMENT,
+                "Circular bore transfer is absent or out of range.", error);
+  }
+  *candidate = (*document->circular_bores)[index];
+  return GEOSPEC_OCCT_OK;
+}
+
+void geospec_occt_circular_bores_discard(
+    const geospec_occt_document* document) noexcept {
+  if (document != nullptr) document->circular_bores.reset();
+}
+
+int geospec_occt_edge_treatment_counts_get(
+    const geospec_occt_document* document,
+    geospec_occt_edge_treatment_counts* counts,
+    geospec_occt_string* error) noexcept {
+  if (document == nullptr || counts == nullptr) {
+    return fail(GEOSPEC_OCCT_INVALID_ARGUMENT,
+                "Document/edge-treatment count output is null.", error);
+  }
+  return guarded(error, [&]() -> int {
+    std::string message;
+    *counts = {};
+    if (!count_edge_treatments(*document, *counts, message)) {
+      return fail(GEOSPEC_OCCT_UNSUPPORTED, message, error);
+    }
+    return GEOSPEC_OCCT_OK;
+  });
+}
+
+int geospec_occt_edge_treatments_prepare(
+    const geospec_occt_document* document, size_t max_rows,
+    geospec_occt_edge_treatment_counts* counts, size_t* transfer_bytes,
+    geospec_occt_string* error) noexcept {
+  if (document == nullptr || counts == nullptr || transfer_bytes == nullptr) {
+    return fail(GEOSPEC_OCCT_INVALID_ARGUMENT,
+                "Document/edge-treatment transfer output is null.", error);
+  }
+  document->edge_treatments.reset();
+  return guarded(error, [&]() -> int {
+    auto transfer = std::make_unique<EdgeTreatmentTransferData>();
+    std::string message;
+    if (!build_edge_treatments(*document, max_rows, *transfer, message)) {
+      return fail(GEOSPEC_OCCT_UNSUPPORTED, message, error);
+    }
+    *counts = transfer->counts;
+    *transfer_bytes = transfer->owned_bytes;
+    document->edge_treatments = std::move(transfer);
+    return GEOSPEC_OCCT_OK;
+  });
+}
+
+int geospec_occt_edge_treatment(
+    const geospec_occt_document* document, size_t row,
+    geospec_occt_edge_treatment_row* output,
+    geospec_occt_string* occurrence_path,
+    geospec_occt_string* source_face_key, geospec_occt_string* label,
+    geospec_occt_string* error) noexcept {
+  if (document == nullptr || output == nullptr ||
+      !document->edge_treatments ||
+      row >= document->edge_treatments->rows.size()) {
+    return fail(GEOSPEC_OCCT_INVALID_ARGUMENT,
+                "Edge-treatment transfer is absent or out of range.", error);
+  }
+  const EdgeTreatmentRowData& value = document->edge_treatments->rows[row];
+  *output = value.value;
+  return copy_result(
+      copy_result(write_string(value.occurrence_path, occurrence_path),
+                  write_string(value.source_face_key, source_face_key)),
+      write_string(value.label, label));
+}
+
+int geospec_occt_edge_treatment_certificate_get(
+    const geospec_occt_document* document, size_t row, int feature,
+    geospec_occt_edge_treatment_certificate* output,
+    geospec_occt_string* error) noexcept {
+  if (document == nullptr || output == nullptr ||
+      !document->edge_treatments) {
+    return fail(GEOSPEC_OCCT_INVALID_ARGUMENT,
+                "Edge-treatment certificate transfer is absent.", error);
+  }
+  const EdgeTreatmentDispositionData* disposition =
+      edge_treatment_disposition(*document->edge_treatments, row, feature);
+  if (disposition == nullptr || !disposition->certificate) {
+    return fail(GEOSPEC_OCCT_INVALID_ARGUMENT,
+                "Edge-treatment certificate is absent or out of range.",
+                error);
+  }
+  *output = disposition->certificate->value;
+  return GEOSPEC_OCCT_OK;
+}
+
+int geospec_occt_edge_treatment_boundary_use_get(
+    const geospec_occt_document* document, size_t row, int feature,
+    size_t boundary_use,
+    geospec_occt_edge_treatment_boundary_use* output,
+    geospec_occt_string* error) noexcept {
+  if (document == nullptr || output == nullptr ||
+      !document->edge_treatments) {
+    return fail(GEOSPEC_OCCT_INVALID_ARGUMENT,
+                "Edge-treatment boundary transfer is absent.", error);
+  }
+  const EdgeTreatmentDispositionData* disposition =
+      edge_treatment_disposition(*document->edge_treatments, row, feature);
+  if (disposition == nullptr || !disposition->certificate ||
+      boundary_use >= disposition->certificate->boundary_uses.size()) {
+    return fail(GEOSPEC_OCCT_INVALID_ARGUMENT,
+                "Edge-treatment boundary use is absent or out of range.",
+                error);
+  }
+  *output = disposition->certificate->boundary_uses[boundary_use];
+  return GEOSPEC_OCCT_OK;
+}
+
+int geospec_occt_edge_treatment_residual_get(
+    const geospec_occt_document* document, size_t row, int feature,
+    size_t residual, geospec_occt_edge_treatment_residual* output,
+    geospec_occt_string* error) noexcept {
+  if (document == nullptr || output == nullptr ||
+      !document->edge_treatments) {
+    return fail(GEOSPEC_OCCT_INVALID_ARGUMENT,
+                "Edge-treatment residual transfer is absent.", error);
+  }
+  const EdgeTreatmentDispositionData* disposition =
+      edge_treatment_disposition(*document->edge_treatments, row, feature);
+  if (disposition == nullptr || !disposition->certificate ||
+      residual >= disposition->certificate->residuals.size()) {
+    return fail(GEOSPEC_OCCT_INVALID_ARGUMENT,
+                "Edge-treatment residual is absent or out of range.", error);
+  }
+  *output = disposition->certificate->residuals[residual];
+  return GEOSPEC_OCCT_OK;
+}
+
+void geospec_occt_edge_treatments_discard(
+    const geospec_occt_document* document) noexcept {
+  if (document != nullptr) document->edge_treatments.reset();
 }
 
 int geospec_occt_classify_face_points(

@@ -1,4 +1,4 @@
 //! Frozen verifier definition; actual compiled-artifact hashes are separate receipts.
 //! Regenerate after any included owner/archive changes; this generated literal is excluded.
 pub(crate) const VERIFIER_SOURCE_HASH: &str =
-    "cbf1df63a329f71fdc772938eb3a8a16f42d52983f82ccaf6966ea4182f4542c";
+    "406d6363a07252339349ff29e443fefa23df0f46d8f3ee67425bb8140bae6fdc";

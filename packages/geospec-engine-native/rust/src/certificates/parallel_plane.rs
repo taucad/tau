@@ -24,6 +24,10 @@ pub(crate) struct SourceProof {
 }
 
 impl SourceProof {
+    pub(crate) fn source_bytes(&self) -> &[u8] {
+        &self.source
+    }
+
     pub(crate) fn new(source: Vec<u8>) -> Self {
         Self {
             source,

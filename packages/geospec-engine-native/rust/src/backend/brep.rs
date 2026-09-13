@@ -307,6 +307,8 @@ pub struct PmiFacts {
     pub name: String,
     pub kind: PmiKind,
     pub shape_labels: Vec<String>,
+    /// Ordered first group is the prefix; ordered second group is the suffix.
+    pub first_association_count: usize,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
@@ -1131,6 +1133,17 @@ pub trait BrepSubject {
     }
 
     fn facts(&self) -> Result<Rc<DocumentFacts>, BackendError>;
+    /// All uniquely forward-transferred public faces for an original source face.
+    /// Empty/missing and ambiguous bindings remain typed inventory states.
+    fn pmi_source_faces(
+        &self,
+        _source_face_id: u32,
+    ) -> Result<super::pmi::PmiField<Vec<super::pmi::PmiFaceAssociation>>, BackendError> {
+        Ok(super::pmi::PmiField::unavailable(
+            super::pmi::PmiFieldStatus::Unsupported,
+            "Connector has no PMI forward-association inventory.",
+        ))
+    }
     /// Located faces in the whole retained shape, including flat STEP documents.
     fn faces(&self) -> Result<Rc<[LocatedFace]>, BackendError>;
     fn occurrence_faces(&self, occurrence: u32) -> Result<Rc<[LocatedFace]>, BackendError>;

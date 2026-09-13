@@ -62,6 +62,8 @@ pub(crate) struct Subject {
     pub source_unit: String,
     pub rational_plate: Option<crate::certificates::engine::RationalSubject>,
     pub parallel_plane: Option<crate::certificates::parallel_plane::SourceProof>,
+    /// Original STEP bytes above the F2 source ceiling; never inferred from XDE doubles.
+    pub pmi_source: Option<Vec<u8>>,
     pub display_name: String,
     pub diagnostics: Vec<Diagnostic>,
     pub retention_limits: crate::backend::AnalysisRetentionLimits,
@@ -122,6 +124,7 @@ impl Subject {
             source_unit,
             rational_plate: None,
             parallel_plane: None,
+            pmi_source: None,
             display_name: "step".into(),
             diagnostics: Vec::new(),
             retention_limits: crate::EngineConfig::entry().analysis,
@@ -700,6 +703,18 @@ impl Subject {
         self.parallel_plane
             .as_ref()
             .map_or(0, |value| value.owned_bytes())
+            .saturating_add(
+                self.pmi_source
+                    .as_ref()
+                    .map_or(0, |source| source.capacity() as u64),
+            )
+    }
+
+    pub(crate) fn pmi_source_bytes(&self) -> Option<&[u8]> {
+        self.parallel_plane
+            .as_ref()
+            .map(|source| source.source_bytes())
+            .or(self.pmi_source.as_deref())
     }
 
     fn step_metadata_owned_bytes(&self) -> u64 {

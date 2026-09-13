@@ -28,6 +28,7 @@ pub use geospec_engine_native_core::backend::brep::{
     MAX_EDGE_TREATMENT_ROWS,
 };
 use geospec_engine_native_core::backend::{BackendError, BackendErrorKind, TriangleMesh};
+use geospec_engine_native_core::backend::pmi::{PmiField, PmiFieldStatus, PmiFaceAssociation};
 use std::{
     cell::{OnceCell, RefCell},
     collections::{BTreeMap, HashMap},
@@ -122,6 +123,30 @@ impl BrepConnector for OcctConnector {
 }
 
 impl BrepSubject for Document {
+    fn pmi_source_faces(&self, source_face_id: u32) -> Result<PmiField<Vec<PmiFaceAssociation>>, BackendError> {
+        if source_face_id == 0 { return Err(invalid_input("PMI source face ID must be positive.")); }
+        let mut output = vec![ffi::PmiSourceFace::default(); 4096];
+        let mut count = 0;
+        let mut status = 0;
+        let mut error = ErrorBuffer::new();
+        check(unsafe { ffi::geospec_occt_pmi_source_faces(self.raw.as_ptr(), source_face_id, output.as_mut_ptr(), output.len(), &mut count, &mut status, error.raw()) }, &error)?;
+        if count > output.len() || !(0..=3).contains(&status) { return Err(backend_error("Invalid PMI association transfer count/status.")); }
+        let mut associations = Vec::with_capacity(count);
+        for row in &output[..count] {
+            if row.route_count > 32 || row.occurrence < -1 { return Err(backend_error("Invalid PMI occurrence route.")); }
+            let occurrence = if row.occurrence < 0 { None } else { Some(u32::try_from(row.occurrence).map_err(|_| backend_error("PMI occurrence overflow."))?) };
+            let face_count = unsafe { match occurrence {
+                Some(occurrence) => ffi::geospec_occt_occurrence_face_count(self.raw.as_ptr(), occurrence),
+                None => ffi::geospec_occt_face_count(self.raw.as_ptr()),
+            }};
+            if row.public_face_ordinal as usize >= face_count || occurrence.is_some() != (row.route_count > 0) {
+                return Err(backend_error("PMI source association is outside its public scope."));
+            }
+            associations.push(PmiFaceAssociation { source_face_id, occurrence, public_face_ordinal: row.public_face_ordinal, occurrence_route: row.route[..row.route_count].to_vec() });
+        }
+        let status = match status { 0 => PmiFieldStatus::Supported, 1 => PmiFieldStatus::Missing, 2 => PmiFieldStatus::Ambiguous, _ => PmiFieldStatus::Unsupported };
+        Ok(PmiField { status, value: Some(associations), reason: (status != PmiFieldStatus::Supported).then(|| "Source face transfer is missing, ambiguous or unqualified; retained bindings are partial.".into()) })
+    }
     fn continuous_wall_domain(
         &self,
         entity: BrepEntity,
@@ -1241,6 +1266,9 @@ unsafe fn facts(raw: *const ffi::Document, reported: bool) -> Result<DocumentFac
             ffi::geospec_occt_pmi(raw, index, &mut output, std::ptr::null_mut(), name, error)
         })?;
         let mut shape_labels = Vec::with_capacity(output.association_count);
+        if output.first_association_count > output.association_count {
+            return Err(backend_error("PMI ordered role boundary exceeds association count."));
+        }
         for association in 0..output.association_count {
             shape_labels.push(copied_string(|label, error| {
                 ffi::geospec_occt_pmi_association(raw, index, association, label, error)
@@ -1251,6 +1279,7 @@ unsafe fn facts(raw: *const ffi::Document, reported: bool) -> Result<DocumentFac
             name,
             kind: pmi_kind(output.kind)?,
             shape_labels,
+            first_association_count: output.first_association_count,
         });
     }
 
@@ -2360,27 +2389,31 @@ unsafe fn edge_treatment_certificate(
     })
 }
 
-unsafe fn edge_treatment_disposition(
+struct EdgeTreatmentDispositionContext<'a> {
     raw: *const ffi::Document,
     row: usize,
+    public_face_count: usize,
+    private_face_count: usize,
+    owned_bytes: &'a mut u64,
+    error: &'a mut ErrorBuffer,
+}
+
+unsafe fn edge_treatment_disposition(
+    context: &mut EdgeTreatmentDispositionContext<'_>,
     feature: i32,
     disposition: i32,
     reason: i32,
-    public_face_count: usize,
-    private_face_count: usize,
-    owned_bytes: &mut u64,
-    error: &mut ErrorBuffer,
 ) -> Result<EdgeTreatmentDisposition, BackendError> {
     match disposition {
         0 if reason == 0 => Ok(EdgeTreatmentDisposition::Qualified(Box::new(
             edge_treatment_certificate(
-                raw,
-                row,
+                context.raw,
+                context.row,
                 feature,
-                public_face_count,
-                private_face_count,
-                owned_bytes,
-                error,
+                context.public_face_count,
+                context.private_face_count,
+                context.owned_bytes,
+                context.error,
             )?,
         ))),
         0 => Err(backend_error(
@@ -2568,27 +2601,25 @@ unsafe fn edge_treatments(
                 ))
             }
         };
-        let chamfer = edge_treatment_disposition(
+        let mut disposition_context = EdgeTreatmentDispositionContext {
             raw,
-            index,
+            row: index,
+            public_face_count,
+            private_face_count,
+            owned_bytes: &mut owned_bytes,
+            error: &mut error,
+        };
+        let chamfer = edge_treatment_disposition(
+            &mut disposition_context,
             0,
             value.chamfer_disposition,
             value.chamfer_reason,
-            public_face_count,
-            private_face_count,
-            &mut owned_bytes,
-            &mut error,
         )?;
         let fillet = edge_treatment_disposition(
-            raw,
-            index,
+            &mut disposition_context,
             1,
             value.fillet_disposition,
             value.fillet_reason,
-            public_face_count,
-            private_face_count,
-            &mut owned_bytes,
-            &mut error,
         )?;
         rows.push(EdgeTreatmentRow {
             occurrence,
@@ -3110,6 +3141,7 @@ mod ffi {
     pub struct PmiFacts {
         pub kind: i32,
         pub association_count: usize,
+        pub first_association_count: usize,
     }
 
     #[derive(Clone, Copy, Default)]
@@ -3506,6 +3538,15 @@ mod ffi {
         pub transferred_reversed: i32,
     }
 
+    #[derive(Clone, Copy, Default)]
+    #[repr(C)]
+    pub struct PmiSourceFace {
+        pub occurrence: i64,
+        pub public_face_ordinal: u32,
+        pub route: [u32; 32],
+        pub route_count: usize,
+    }
+
     unsafe extern "C" {
         pub fn geospec_occt_selected_interference_material_query(
             document: *const Document,
@@ -3514,6 +3555,7 @@ mod ffi {
             kind: *mut u32,
             error: *mut StringBuffer,
         ) -> i32;
+        pub fn geospec_occt_pmi_source_faces(document: *const Document, source_face_id: u32, output: *mut PmiSourceFace, capacity: usize, count: *mut usize, status: *mut i32, error: *mut StringBuffer) -> i32;
         pub fn geospec_occt_selected_bore_void_query(
             document: *const Document,
             face: Entity,

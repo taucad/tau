@@ -341,6 +341,11 @@ impl Engine {
                     retained.parallel_plane = Some(
                         crate::certificates::parallel_plane::SourceProof::new(primary),
                     );
+                } else if primary.len()
+                    <= crate::analysis::parallel_plane_distance::inventory::MAX_SOURCE_BYTES
+                    && primary.capacity() as u64 <= self.config.analysis.max_mesh_bytes
+                {
+                    retained.pmi_source = Some(primary);
                 }
                 retained
             }

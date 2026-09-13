@@ -32,6 +32,7 @@ pub enum Capability {
     AnalyzeMeshOverlap,
     ToSatisfyRationalPlate,
     ToSatisfyParallelPlaneDistance,
+    QueryPmi,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -42,7 +43,7 @@ pub enum ExpectedShape {
     True,
 }
 
-pub const CAPABILITIES: [&str; 30] = [
+pub const CAPABILITIES: [&str; 31] = [
     "toHaveBoundingBox",
     "toHaveConnectedComponents",
     "toBeWatertight",
@@ -73,10 +74,11 @@ pub const CAPABILITIES: [&str; 30] = [
     "analyzeMeshOverlap",
     "toSatisfyRationalPlate",
     "toSatisfyParallelPlaneDistance",
+    "queryPmi",
 ];
 
 impl Capability {
-    pub const ALL: [Self; 30] = [
+    pub const ALL: [Self; 31] = [
         Self::ToHaveBoundingBox,
         Self::ToHaveConnectedComponents,
         Self::ToBeWatertight,
@@ -107,6 +109,7 @@ impl Capability {
         Self::AnalyzeMeshOverlap,
         Self::ToSatisfyRationalPlate,
         Self::ToSatisfyParallelPlaneDistance,
+        Self::QueryPmi,
     ];
 
     pub fn from_name(name: &str) -> Option<Self> {
@@ -145,6 +148,7 @@ impl Capability {
             Self::AnalyzeMeshOverlap => "analyzeMeshOverlap",
             Self::ToSatisfyRationalPlate => "toSatisfyRationalPlate",
             Self::ToSatisfyParallelPlaneDistance => "toSatisfyParallelPlaneDistance",
+            Self::QueryPmi => "queryPmi",
         }
     }
 
@@ -155,6 +159,7 @@ impl Capability {
                 | Self::AnalyzeMesh
                 | Self::InspectGeometry
                 | Self::AnalyzeMeshOverlap
+                | Self::QueryPmi
         )
     }
 
@@ -190,6 +195,7 @@ impl Capability {
             Self::AnalyzeMeshOverlap => None,
             Self::ToSatisfyRationalPlate => None,
             Self::ToSatisfyParallelPlaneDistance => None,
+            Self::QueryPmi => None,
         }
     }
 
@@ -225,6 +231,7 @@ impl Capability {
             Self::AnalyzeMeshOverlap => ExpectedShape::First,
             Self::ToSatisfyRationalPlate => ExpectedShape::First,
             Self::ToSatisfyParallelPlaneDistance => ExpectedShape::First,
+            Self::QueryPmi => ExpectedShape::First,
         }
     }
 }

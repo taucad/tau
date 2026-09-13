@@ -201,7 +201,7 @@ class GeoSpecEngine:
                         "method": "initialize",
                         "requestId": "python-initialize",
                         "protocolVersion": 3,
-                        "registryVersion": 4,
+                        "registryVersion": 5,
                         "canonicalProfile": "geospec-jcs-v1",
                     }
                 )
@@ -487,7 +487,7 @@ class GeoSpecEngine:
         """Return a complete positive query report, including refusals or failures."""
 
         if capability not in (
-            "analyzeMesh", "analyzeBrep", "inspectGeometry", "analyzeMeshOverlap"
+            "analyzeMesh", "analyzeBrep", "inspectGeometry", "analyzeMeshOverlap", "queryPmi"
         ):
             raise ValueError(f"GeoSpec capability '{capability}' is not a query.")
         return self._evaluate_payload(

@@ -358,7 +358,7 @@ mod point_normalization_tests {
         let canonical = |capability: &str, kind: &str, expected: Value, polarity: &str| {
             crate::Engine::new().canonical_plan(&serde_json::to_vec(&json!({
                 "method":"submitClaims", "requestId":"point-control", "protocolVersion":3,
-                "registryVersion":4, "canonicalProfile":"geospec-jcs-v1",
+                "registryVersion":5, "canonicalProfile":"geospec-jcs-v1",
                 "plan":{"subjects":[{"slot":"subject", "subjectHash":"0".repeat(64)}],
                     "claims":[{"claimId":"point-control", "capability":capability,
                         "subjectSlots":["subject"], "polarity":polarity, "workUnitBudget":100,

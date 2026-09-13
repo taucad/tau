@@ -52,10 +52,12 @@ impl PreparedFamily {
                 proofs::prepare(capability, payload).map(Self::Proofs)
             }
             ToHaveNoDiagnostics => diagnostics::prepare(capability, payload).map(Self::Diagnostics),
-            ToSatisfyRationalPlate | ToSatisfyParallelPlaneDistance
+            ToSatisfyRationalPlate
+            | ToSatisfyParallelPlaneDistance
             | AnalyzeBrep
             | AnalyzeMesh
             | InspectGeometry
+            | QueryPmi
             | AnalyzeMeshOverlap => Err(ProtocolError::new(
                 ErrorKind::InvalidClaim,
                 "Ancillary operations require query preparation rather than a matcher payload.",

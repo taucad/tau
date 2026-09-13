@@ -1,6 +1,7 @@
 //! Engine-owned observation operations; positive-only query polarity.
 
 pub(crate) mod inspection;
+pub(crate) mod pmi;
 
 use crate::{
     analysis::selection::{EcmaRegexEngine, EcmaRegexError},
@@ -21,6 +22,7 @@ use inspection::PreparedInspection;
 pub(crate) enum PreparedQuery {
     Mesh,
     Brep,
+    Pmi(pmi::PreparedPmi),
     Inspection(PreparedInspection),
     Overlap(PreparedFamily),
 }
@@ -28,6 +30,7 @@ pub(crate) enum PreparedQuery {
 impl PreparedQuery {
     pub(crate) fn prepare(capability: Capability, payload: &Json) -> Result<Self, ProtocolError> {
         match capability {
+            Capability::QueryPmi => pmi::PreparedPmi::prepare(payload).map(Self::Pmi),
             Capability::AnalyzeMesh | Capability::AnalyzeBrep => {
                 if *payload != Json::Null {
                     return invalid_claim(format!(
@@ -68,6 +71,7 @@ impl PreparedQuery {
 
     pub(crate) fn normalized_payload(&self) -> Json {
         match self {
+            Self::Pmi(value) => value.normalized_payload(),
             Self::Mesh | Self::Brep => Json::Null,
             Self::Inspection(value) => value.normalized_payload(),
             Self::Overlap(value) => {
@@ -84,6 +88,7 @@ impl PreparedQuery {
 
     pub(crate) fn demand(&self) -> AnalysisDemand {
         match self {
+            Self::Pmi(_) => AnalysisDemand::default(),
             Self::Mesh => AnalysisDemand {
                 mesh: true,
                 ..AnalysisDemand::default()
@@ -108,7 +113,7 @@ impl PreparedQuery {
         match self {
             Self::Inspection(value) => value.validate_regexes(regex),
             Self::Overlap(value) => value.validate_regexes(regex),
-            Self::Mesh | Self::Brep => Ok(()),
+            Self::Mesh | Self::Brep | Self::Pmi(_) => Ok(()),
         }
     }
 
@@ -136,12 +141,13 @@ impl PreparedQuery {
                 }
             }
             Self::Overlap(_) => unreachable!("overlap query uses proof preparation"),
-            Self::Mesh | Self::Brep => Ok(()),
+            Self::Mesh | Self::Brep | Self::Pmi(_) => Ok(()),
         }
     }
 
     pub(crate) fn evaluate(&self, context: &mut EvaluationContext<'_>) -> Evaluation {
         match self {
+            Self::Pmi(value) => value.evaluate(context),
             Self::Mesh => mesh::analyze_mesh(context),
             Self::Brep => brep::evaluate_brep(context),
             Self::Inspection(value) => value.evaluate(),

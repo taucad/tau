@@ -29,12 +29,12 @@ class Native:
         self.initializations += 1
         return encoded({"result": {
             "protocolVersion": 3,
-            "registryVersion": 4,
+            "registryVersion": 5,
             "canonicalProfile": "geospec-jcs-v1",
             "configuration": {"defaultWorkUnitBudget": 12345},
             "capabilities": [
                 "analyzeMesh", "analyzeBrep", "inspectGeometry",
-                "analyzeMeshOverlap", "toHaveNoComponentInterference",
+                "analyzeMeshOverlap", "queryPmi", "toHaveNoComponentInterference",
             ],
         }})
 
@@ -66,13 +66,14 @@ def subject_and_native():
 
 
 class QueryTests(unittest.TestCase):
-    def test_four_queries_send_raw_payload_and_positive_claim(self):
+    def test_five_queries_send_raw_payload_and_positive_claim(self):
         subject, native = subject_and_native()
         for capability, payload in (
             ("analyzeMesh", None),
             ("analyzeBrep", None),
             ("inspectGeometry", {"selectors": ["housing.bore"], "evidence": ["bounds"]}),
             ("analyzeMeshOverlap", {"pairs": [{"left": "A", "right": "B"}]}),
+            ("queryPmi", {"maxRecords": 7, "maxOutputBytes": 10000}),
         ):
             with self.subTest(capability=capability):
                 query_geo(subject, capability, payload, claim_id="chosen")
@@ -80,7 +81,7 @@ class QueryTests(unittest.TestCase):
                     "method": "submitClaims",
                     "requestId": "python-chosen",
                     "protocolVersion": 3,
-                    "registryVersion": 4,
+                    "registryVersion": 5,
                     "canonicalProfile": "geospec-jcs-v1",
                     "plan": {
                         "subjects": [subject.plan_entry()],

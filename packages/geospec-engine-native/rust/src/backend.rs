@@ -5,6 +5,7 @@ use std::{error::Error, fmt};
 pub mod brep;
 pub mod csg;
 pub mod csg_scope;
+pub mod pmi;
 pub mod resources;
 
 /// Explicit retention limits, separate from control or binary input lengths.

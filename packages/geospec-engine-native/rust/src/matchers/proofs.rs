@@ -539,84 +539,148 @@ fn evaluate_interference(
         Err(error) => return backend_refusal(error),
     };
     let count = selected.as_ref().map_or_else(
-        || identities.len().saturating_mul(identities.len().saturating_sub(1))/2,
-        Vec::len);
-    let reservation = bounded::RESERVATION_BYTES.saturating_add(count.saturating_mul(64*1024));
-    if let Err(error) = context.check_continuous_output(reservation as u64) { return error; }
+        || {
+            identities
+                .len()
+                .saturating_mul(identities.len().saturating_sub(1))
+                / 2
+        },
+        Vec::len,
+    );
+    let reservation = bounded::RESERVATION_BYTES.saturating_add(count.saturating_mul(64 * 1024));
+    if let Err(error) = context.check_continuous_output(reservation as u64) {
+        return error;
+    }
     let mut pairs = Vec::with_capacity(count);
     if let Some(selected) = selected {
-        pairs.extend(selected.iter().map(|p| (p.left,p.right)));
+        pairs.extend(selected.iter().map(|p| (p.left, p.right)));
     } else {
-        for (i,left) in identities.iter().enumerate() {
-            for right in &identities[i+1..] { pairs.push((left.id,right.id)); }
+        for (i, left) in identities.iter().enumerate() {
+            for right in &identities[i + 1..] {
+                pairs.push((left.id, right.id));
+            }
         }
     }
     let mut results = Vec::new();
-    for (left,right) in pairs {
-        let key=(left.min(right),left.max(right));
-        let Some(index)=allowance_by_pair.get(&key) else {
+    for (left, right) in pairs {
+        let key = (left.min(right), left.max(right));
+        let Some(index) = allowance_by_pair.get(&key) else {
             return continuous_refusal(crate::analysis::continuous::ContinuousError::unsupported(
                 "This selected component pair has no bounded complete-material noninterference certificate."));
         };
-        let Some(maximum)=prepared.allowances[*index].max_volume else {
+        let Some(maximum) = prepared.allowances[*index].max_volume else {
             // The authored allowance explicitly has no upper limit. This does
             // not certify zero overlap or invent a volume observation.
             results.push(Json::object([
-                ("leftComponentId",Json::Number(left as f64)),
-                ("rightComponentId",Json::Number(right as f64)),
-                ("allowanceIndex",Json::Number(*index as f64)),
-                ("criterion",Json::string("explicit-unbounded-allowance")),
+                ("leftComponentId", Json::Number(left as f64)),
+                ("rightComponentId", Json::Number(right as f64)),
+                ("allowanceIndex", Json::Number(*index as f64)),
+                ("criterion", Json::string("explicit-unbounded-allowance")),
             ]));
             continue;
         };
-        let a=match context.interference_materials(left){Ok(v)=>v,Err(e)=>return e};
-        let b=match context.interference_materials(right){Ok(v)=>v,Err(e)=>return e};
-        let pairing=if let ([BoreSlab(h)],[FiniteCylinder(s)])=(a.as_slice(),b.as_slice()){
-            Some((h,s))
-        }else if let ([FiniteCylinder(s)],[BoreSlab(h)])=(a.as_slice(),b.as_slice()){
-            Some((h,s))
-        }else{None};
-        let Some((housing,shaft))=pairing else {
+        let a = match context.interference_materials(left) {
+            Ok(v) => v,
+            Err(e) => return e,
+        };
+        let b = match context.interference_materials(right) {
+            Ok(v) => v,
+            Err(e) => return e,
+        };
+        let pairing = if let ([BoreSlab(h)], [FiniteCylinder(s)]) = (a.as_slice(), b.as_slice()) {
+            Some((h, s))
+        } else if let ([FiniteCylinder(s)], [BoreSlab(h)]) = (a.as_slice(), b.as_slice()) {
+            Some((h, s))
+        } else {
+            None
+        };
+        let Some((housing, shaft)) = pairing else {
             return continuous_refusal(crate::analysis::continuous::ContinuousError::unsupported(
                 "Selected pair lacks unambiguous complete bore-slab and finite-cylinder material admission."));
         };
-        let bound=match bounded::bound(housing,shaft,maximum,context.budget){
-            Ok(value)=>value,
-            Err(bounded::Error::Domain(error))=>return continuous_refusal(error),
-            Err(bounded::Error::Budget(error))=>return Evaluation::budget_exceeded(context.capability,error),
+        let bound = match bounded::bound(housing, shaft, maximum, context.budget) {
+            Ok(value) => value,
+            Err(bounded::Error::Domain(error)) => return continuous_refusal(error),
+            Err(bounded::Error::Budget(error)) => {
+                return Evaluation::budget_exceeded(context.capability, error)
+            }
         };
-        let source=|band:&crate::backend::brep::NominalCylindricalBand| Json::object([
-            ("occurrence",Json::Number(band.occurrence as f64)),
-            ("publicFaceOrdinal",Json::Number(band.public_face_ordinal as f64)),
-            ("privateQueryFace",Json::Number(band.private_query_face as f64)),
-            ("sourceFaceEntity",Json::Number(band.source_face_entity as f64)),
-            ("sourceRoute",Json::Array(band.source_route[..band.source_route_count as usize].iter()
-                .map(|n|Json::Number(*n as f64)).collect())),
-            ("materialScope",Json::string("entire-single-selected-regular-solid")),
-            ("domain",Json::string(if band.transferred_reversed {
-                "clear-nominal-bore-with-entire-material-in-end-slab"
-            }else{"complete-nominal-cylinder-with-two-attached-filled-disks"})),
-            ("origin",point_json(band.origin)),("rawAxis",point_json(band.axis)),
-            ("radius",Json::Number(band.radius)),("from",Json::Number(band.from)),
-            ("to",Json::Number(band.to)),
-        ]);
+        let source = |band: &crate::backend::brep::NominalCylindricalBand| {
+            Json::object([
+                ("occurrence", Json::Number(band.occurrence as f64)),
+                (
+                    "publicFaceOrdinal",
+                    Json::Number(band.public_face_ordinal as f64),
+                ),
+                (
+                    "privateQueryFace",
+                    Json::Number(band.private_query_face as f64),
+                ),
+                (
+                    "sourceFaceEntity",
+                    Json::Number(band.source_face_entity as f64),
+                ),
+                (
+                    "sourceRoute",
+                    Json::Array(
+                        band.source_route[..band.source_route_count as usize]
+                            .iter()
+                            .map(|n| Json::Number(*n as f64))
+                            .collect(),
+                    ),
+                ),
+                (
+                    "materialScope",
+                    Json::string("entire-single-selected-regular-solid"),
+                ),
+                (
+                    "domain",
+                    Json::string(if band.transferred_reversed {
+                        "clear-nominal-bore-with-entire-material-in-end-slab"
+                    } else {
+                        "complete-nominal-cylinder-with-two-attached-filled-disks"
+                    }),
+                ),
+                ("origin", point_json(band.origin)),
+                ("rawAxis", point_json(band.axis)),
+                ("radius", Json::Number(band.radius)),
+                ("from", Json::Number(band.from)),
+                ("to", Json::Number(band.to)),
+            ])
+        };
         results.push(Json::object([
-            ("leftComponentId",Json::Number(left as f64)),
-            ("rightComponentId",Json::Number(right as f64)),
-            ("allowanceIndex",Json::Number(*index as f64)),
-            ("maximumVolume",Json::Number(maximum)),
-            ("bound",bound.to_json()),("housing",source(housing)),("shaft",source(shaft)),
+            ("leftComponentId", Json::Number(left as f64)),
+            ("rightComponentId", Json::Number(right as f64)),
+            ("allowanceIndex", Json::Number(*index as f64)),
+            ("maximumVolume", Json::Number(maximum)),
+            ("bound", bound.to_json()),
+            ("housing", source(housing)),
+            ("shaft", source(shaft)),
         ]));
     }
     Evaluation::Geometric {
-        positive_satisfied:true, diagnostics:Vec::new(),
-        evidence:family_evidence(&subject.content_hash, normalized,
-            Json::object([("checkedPairs",Json::Number(results.len() as f64)),
-                ("pairs",Json::Array(results))]),
-            Json::object([("representation",Json::string("complete-selected-nominal-material")),
-                ("comparison",Json::string("inclusive-upper-bound-no-scalar-fallback")),
-                ("tolerance",Json::Number(prepared.tolerance))])),
-        negated_diagnostic:None,
+        positive_satisfied: true,
+        diagnostics: Vec::new(),
+        evidence: family_evidence(
+            &subject.content_hash,
+            normalized,
+            Json::object([
+                ("checkedPairs", Json::Number(results.len() as f64)),
+                ("pairs", Json::Array(results)),
+            ]),
+            Json::object([
+                (
+                    "representation",
+                    Json::string("complete-selected-nominal-material"),
+                ),
+                (
+                    "comparison",
+                    Json::string("inclusive-upper-bound-no-scalar-fallback"),
+                ),
+                ("tolerance", Json::Number(prepared.tolerance)),
+            ]),
+        ),
+        negated_diagnostic: None,
     }
 }
 
@@ -1202,7 +1266,11 @@ fn evaluate_void(prepared: &Void, context: &mut EvaluationContext<'_>) -> Evalua
     {
         return evaluate_nominal_void(claim, context);
     }
-    if prepared.path.iter().all(|point| matches!(point, VoidWaypoint::Point(_))) {
+    if prepared
+        .path
+        .iter()
+        .all(|point| matches!(point, VoidWaypoint::Point(_)))
+    {
         return evaluate_bore_void(claim, context);
     }
     if prepared.min_cross_section.is_some() {
@@ -1272,21 +1340,28 @@ fn evaluate_void(prepared: &Void, context: &mut EvaluationContext<'_>) -> Evalua
 
 fn evaluate_bore_void(claim: &VoidClaim, context: &mut EvaluationContext<'_>) -> Evaluation {
     use crate::analysis::voids::nominal_bore;
-    let refuse = |message: &str| Evaluation::Refused {
+    let refuse = |message: &str| {
+        Evaluation::Refused {
         diagnostics: void_unsupported(message,
             "Use a complete selected single-solid straight bore with an axial path; unresolved bounds do not prove failure.", None),
+    }
     };
     let [material] = claim.materials.as_slice() else {
         return refuse("Nominal bore void requires exactly one selected material.");
     };
-    if !claim.isolated_from.is_empty() || !(2..=nominal_bore::MAX_WAYPOINTS).contains(&claim.waypoints.len()) {
-        return refuse("Nominal bore void requires 2..16 points and no unproved isolation constraint.");
+    if !claim.isolated_from.is_empty()
+        || !(2..=nominal_bore::MAX_WAYPOINTS).contains(&claim.waypoints.len())
+    {
+        return refuse(
+            "Nominal bore void requires 2..16 points and no unproved isolation constraint.",
+        );
     }
     if let Err(error) = context.check_continuous_output(nominal_bore::RESERVATION_BYTES) {
         return error;
     }
     let bores = match context.selected_bore_voids(*material) {
-        Ok(value) => value, Err(error) => return error,
+        Ok(value) => value,
+        Err(error) => return error,
     };
     for bore in &bores {
         // Fixed bounded rational expression schedule; charged even on failure.
@@ -1295,13 +1370,21 @@ fn evaluate_bore_void(claim: &VoidClaim, context: &mut EvaluationContext<'_>) ->
             return Evaluation::budget_exceeded(context.capability, error);
         }
         if let Ok(proof) = nominal_bore::prove(claim, bore) {
-            let evidence = family_evidence(&context.subject().content_hash,
-                normalized_expected(context), proof.clone(), Json::object([("proof", proof)]));
+            let evidence = family_evidence(
+                &context.subject().content_hash,
+                normalized_expected(context),
+                proof.clone(),
+                Json::object([("proof", proof)]),
+            );
             if let Err(error) = context.check_continuous_output(json_owned_bytes(&evidence)) {
                 return error;
             }
-            return Evaluation::Geometric { positive_satisfied: true, diagnostics: Vec::new(),
-                evidence, negated_diagnostic: None };
+            return Evaluation::Geometric {
+                positive_satisfied: true,
+                diagnostics: Vec::new(),
+                evidence,
+                negated_diagnostic: None,
+            };
         }
     }
     refuse("No complete selected-material bore certificate proves the full path and requested section lower bound.")

@@ -43,9 +43,6 @@ impl Budget {
     pub(crate) fn used(&self) -> u64 {
         self.used.get()
     }
-    pub(crate) fn remaining(&self) -> u64 {
-        self.limit.saturating_sub(self.used())
-    }
 
     pub(crate) fn limit(&self) -> u64 {
         self.limit

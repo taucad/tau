@@ -649,13 +649,6 @@ fn bounds_spatial(bounds: Bounds) -> Json {
     ])
 }
 
-fn bounds_json(bounds: Bounds) -> Json {
-    Json::object([
-        ("min", point_json(bounds.min)),
-        ("max", point_json(bounds.max)),
-    ])
-}
-
 pub(crate) fn evidence_json(evidence: &Evidence) -> Json {
     let mut fields = vec![
         ("profile".into(), Json::string("M3-CSG-OBSERVATION-01")),
@@ -701,47 +694,6 @@ pub(crate) fn evidence_json(evidence: &Evidence) -> Json {
     Json::Object(fields)
 }
 
-pub(crate) fn measured_json(evidence: &Evidence) -> Json {
-    Json::object([
-        ("checkedPairs", Json::Number(evidence.checked_pairs as f64)),
-        (
-            "overlaps",
-            Json::Array(evidence.overlaps.iter().map(overlap_json).collect()),
-        ),
-    ])
-}
-
-pub(crate) fn witnesses_json(
-    evidence: &Evidence,
-    unexplained: &[Overlap],
-    allowances: Json,
-) -> Json {
-    Json::object([
-        (
-            "components",
-            Json::Array(
-                evidence
-                    .components
-                    .iter()
-                    .map(|component| {
-                        Json::object([
-                            ("id", Json::Number(component.id as f64)),
-                            ("label", Json::string(&component.label)),
-                            ("bounds", bounds_json(component.bounds)),
-                        ])
-                    })
-                    .collect(),
-            ),
-        ),
-        ("tolerance", Json::Number(evidence.tolerance)),
-        (
-            "unexplained",
-            Json::Array(unexplained.iter().map(overlap_json).collect()),
-        ),
-        ("allowances", allowances),
-    ])
-}
-
 pub(crate) fn overlap_json(overlap: &Overlap) -> Json {
     let mut fields = vec![
         (
@@ -758,7 +710,10 @@ pub(crate) fn overlap_json(overlap: &Overlap) -> Json {
             "intersectionVolume".into(),
             Json::Number(overlap.intersection_volume),
         ),
-        ("penetration".into(), Json::string("observed-positive-polyhedral-volume")),
+        (
+            "penetration".into(),
+            Json::string("observed-positive-polyhedral-volume"),
+        ),
     ];
     if let Some(point) = overlap.witness_point {
         fields.push(("diagnosticPoint".into(), point_json(point)));

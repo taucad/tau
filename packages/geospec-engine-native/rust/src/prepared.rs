@@ -6,7 +6,7 @@ pub(crate) mod regexp;
 
 use crate::{
     codec::{encode, Json},
-    protocol::{array, field, invalid_claim, object, optional_field, require_fields, string_field},
+    protocol::{array, invalid_claim, object, optional_field, require_fields, string_field},
     registry::{Capability, ExpectedShape},
     ProtocolError,
 };
@@ -294,10 +294,6 @@ pub(crate) fn normalized_point(value: [Option<f64>; 3]) -> Json {
                 .collect(),
         )
     }
-}
-
-pub(crate) fn required_number(fields: &[(String, Json)], key: &str) -> Result<f64, ProtocolError> {
-    finite(field(fields, key)?, key)
 }
 
 #[cfg(test)]

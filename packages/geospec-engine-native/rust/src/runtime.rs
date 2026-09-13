@@ -98,9 +98,7 @@ fn decimal_u64(value: &str, name: &str) -> Result<u64, ProtocolError> {
     Ok(parsed)
 }
 
-fn subject_key<'a>(
-    fields: &'a [(String, Json)],
-) -> Result<(String, &'static str, &'a str), ProtocolError> {
+fn subject_key(fields: &[(String, Json)]) -> Result<(String, &'static str, &str), ProtocolError> {
     let (field, identity, prefix) = match (
         optional_field(fields, "subjectHash"),
         optional_field(fields, "contentHash"),

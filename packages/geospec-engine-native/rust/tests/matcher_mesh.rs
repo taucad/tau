@@ -196,14 +196,14 @@ fn assert_positive(
     batch: Option<&BatchAnalysis>,
 ) -> u64 {
     let normalized = prepared.normalized_payload();
-    let mut budget = Budget::new(10_000);
+    let budget = Budget::new(10_000);
     {
         let context = EvaluationContext::new(
             subjects,
             prepared.capability(),
             "mesh-a1",
             &normalized,
-            &mut budget,
+            &budget,
             None,
         );
         let mut context = if let Some(batch) = batch {
@@ -475,13 +475,13 @@ fn mass_without_density_refuses_instead_of_reusing_volume_as_mass() {
     )
     .unwrap();
     let normalized = prepared.normalized_payload();
-    let mut budget = Budget::new(100);
+    let budget = Budget::new(100);
     let mut context = EvaluationContext::new(
         &subjects,
         Capability::ToHaveMass,
         "no-density",
         &normalized,
-        &mut budget,
+        &budget,
         None,
     );
     match evaluate(&prepared, &mut context) {

@@ -490,15 +490,9 @@ fn all_eleven_refuse_absent_brep_evidence_without_spending_work() {
             SubjectFormat::Step,
             "mm".into(),
         ))];
-        let mut budget = Budget::new(1);
-        let mut context = EvaluationContext::new(
-            &subjects,
-            capability,
-            "missing",
-            &normalized,
-            &mut budget,
-            None,
-        );
+        let budget = Budget::new(1);
+        let mut context =
+            EvaluationContext::new(&subjects, capability, "missing", &normalized, &budget, None);
         match evaluate(&prepared, &mut context) {
             Evaluation::Refused { diagnostics } => {
                 let facet = match capability {
@@ -752,15 +746,9 @@ fn evaluation_context_drives_all_eleven_matcher_families_with_one_brep_unit() {
         } else {
             1
         };
-        let mut budget = Budget::new(expected_units);
-        let mut context = EvaluationContext::new(
-            &subjects,
-            capability,
-            "claim",
-            &normalized,
-            &mut budget,
-            None,
-        );
+        let budget = Budget::new(expected_units);
+        let mut context =
+            EvaluationContext::new(&subjects, capability, "claim", &normalized, &budget, None);
         match evaluate(&prepared, &mut context) {
             Evaluation::Geometric {
                 positive_satisfied,
@@ -1056,13 +1044,13 @@ fn analyze_brep_projects_all_available_source_evidence() {
     subject.brep = Some(Box::new(RetainedBrep::complete()));
     let subjects = [Rc::new(subject)];
     let normalized = Json::Null;
-    let mut budget = Budget::new(8);
+    let budget = Budget::new(8);
     let mut context = EvaluationContext::new(
         &subjects,
         Capability::AnalyzeBrep,
         "analysis",
         &normalized,
-        &mut budget,
+        &budget,
         None,
     );
     let (value, diagnostics) = match evaluate_brep(&mut context) {
@@ -1146,13 +1134,13 @@ fn analyze_brep_reports_the_source_unavailable_diagnostic() {
         "mm".into(),
     ))];
     let normalized = Json::Null;
-    let mut budget = Budget::new(1);
+    let budget = Budget::new(1);
     let mut context = EvaluationContext::new(
         &subjects,
         Capability::AnalyzeBrep,
         "analysis",
         &normalized,
-        &mut budget,
+        &budget,
         None,
     );
     match evaluate_brep(&mut context) {

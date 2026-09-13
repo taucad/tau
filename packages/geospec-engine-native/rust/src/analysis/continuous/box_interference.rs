@@ -89,12 +89,12 @@ fn evaluate(
     let b = DomainBox::new(r.target)?;
     let mut volume = Rat::one();
     let mut center = [Rat::zero(), Rat::zero(), Rat::zero()];
-    for axis in 0..3 {
+    for (axis, coordinate) in center.iter_mut().enumerate() {
         let lo = std::cmp::max(&a.minimum[axis], &b.minimum[axis]);
         let hi = std::cmp::min(&a.maximum[axis], &b.maximum[axis]);
         let width = stored(exact::subtract(hi, lo)?)?.max(Rat::zero());
         volume = stored(exact::multiply(&volume, &width)?)?;
-        center[axis] = stored(exact::midpoint(lo, hi)?)?;
+        *coordinate = stored(exact::midpoint(lo, hi)?)?;
     }
     let positive = volume >= minimum && volume <= maximum;
     let center = if volume.is_zero() {

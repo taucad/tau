@@ -344,7 +344,7 @@ fn initialize(engine: &Engine, request: &[(String, Json)]) -> Result<Vec<u8>, Pr
                             .iter()
                             .map(|name| {
                                 let mut entry = Json::object([
-                                    ("name", Json::string(*name)),
+                                    ("name", Json::string(name)),
                                     ("registryVersion", Json::Number(REGISTRY_VERSION)),
                                     ("scope", Json::string("declared-subject-profile")),
                                     ("implementation", Json::string("partial")),

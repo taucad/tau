@@ -15,71 +15,14 @@ use crate::{
 };
 use inspection::PreparedInspection;
 
+// Preserve inline prepared payloads; boxing adds a per-query allocation and
+// changes retained-request layout solely to equalize variant sizes.
+#[allow(clippy::large_enum_variant)]
 pub(crate) enum PreparedQuery {
     Mesh,
     Brep,
     Inspection(PreparedInspection),
     Overlap(PreparedFamily),
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::{
-        analysis::mesh::{MeshAnalysisRecord, Primitive},
-        budget::Budget,
-        prepared::regexp::SelectorRegex,
-        result::{finish, Polarity},
-        subject::SubjectFormat,
-    };
-    use std::rc::Rc;
-
-    #[test]
-    fn overlap_query_preserves_required_pair_diagnostic_context() {
-        // Ordinary named admission facts suffice for phase-two selection. No
-        // geometry predicate or backend call occurs for the unmatched pair.
-        let subject = Subject::new("0".repeat(64), SubjectFormat::MeshBufferV1, "mm".into());
-        subject
-            .mesh_record
-            .set(Rc::new(MeshAnalysisRecord {
-                positions: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
-                triangles: vec![[0, 1, 2], [0, 1, 2]],
-                triangle_primitives: vec![0, 1],
-                primitives: ["A", "B"]
-                    .into_iter()
-                    .map(|name| Primitive {
-                        name: name.into(),
-                        vertex_start: 0,
-                        vertex_count: 3,
-                    })
-                    .collect(),
-            }))
-            .unwrap();
-        let payload =
-            crate::codec::decode(br#"{"pairs":[{"left":"A","right":"absent"}]}"#).unwrap();
-        let mut query = PreparedQuery::prepare(Capability::AnalyzeMeshOverlap, &payload).unwrap();
-        let refusal = match query.resolve_selectors(
-            &subject,
-            &SelectorRegex::default(),
-            &Budget::new(1000),
-        ) {
-            Err(refusal) => refusal,
-            Ok(()) => panic!("a required unmatched pair must refuse before computation"),
-        };
-        let result = finish(
-            "required-pair",
-            Capability::AnalyzeMeshOverlap,
-            Polarity::Positive,
-            refusal,
-        )
-        .unwrap();
-        // REQUIRED-PAIR-01 source-family diagnostic, reused by the query.
-        let expected = br#"{"claimId":"required-pair","diagnostics":[{"code":"GEOSPEC_SELECTOR_UNMATCHED","details":{"matcher":"toHaveNoComponentInterference","pair":{"left":"A","right":"absent"},"pairIndex":0},"message":"Requested component pair at index 0 did not match two distinct components.","severity":"error"}],"status":"refused"}"#;
-        assert_eq!(
-            String::from_utf8(crate::codec::encode(&result).unwrap()).unwrap(),
-            std::str::from_utf8(expected).unwrap()
-        );
-    }
 }
 
 impl PreparedQuery {
@@ -205,5 +148,65 @@ impl PreparedQuery {
             Self::Overlap(PreparedFamily::Proofs(value)) => value.evaluate_as_overlap(context),
             Self::Overlap(_) => unreachable!("overlap query uses the typed overlap preparation"),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        analysis::mesh::{MeshAnalysisRecord, Primitive},
+        budget::Budget,
+        prepared::regexp::SelectorRegex,
+        result::{finish, Polarity},
+        subject::SubjectFormat,
+    };
+    use std::rc::Rc;
+
+    #[test]
+    fn overlap_query_preserves_required_pair_diagnostic_context() {
+        // Ordinary named admission facts suffice for phase-two selection. No
+        // geometry predicate or backend call occurs for the unmatched pair.
+        let subject = Subject::new("0".repeat(64), SubjectFormat::MeshBufferV1, "mm".into());
+        subject
+            .mesh_record
+            .set(Rc::new(MeshAnalysisRecord {
+                positions: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+                triangles: vec![[0, 1, 2], [0, 1, 2]],
+                triangle_primitives: vec![0, 1],
+                primitives: ["A", "B"]
+                    .into_iter()
+                    .map(|name| Primitive {
+                        name: name.into(),
+                        vertex_start: 0,
+                        vertex_count: 3,
+                    })
+                    .collect(),
+            }))
+            .unwrap();
+        let payload =
+            crate::codec::decode(br#"{"pairs":[{"left":"A","right":"absent"}]}"#).unwrap();
+        let mut query = PreparedQuery::prepare(Capability::AnalyzeMeshOverlap, &payload).unwrap();
+        let refusal = match query.resolve_selectors(
+            &subject,
+            &SelectorRegex::default(),
+            &Budget::new(1000),
+        ) {
+            Err(refusal) => refusal,
+            Ok(()) => panic!("a required unmatched pair must refuse before computation"),
+        };
+        let result = finish(
+            "required-pair",
+            Capability::AnalyzeMeshOverlap,
+            Polarity::Positive,
+            refusal,
+        )
+        .unwrap();
+        // REQUIRED-PAIR-01 source-family diagnostic, reused by the query.
+        let expected = br#"{"claimId":"required-pair","diagnostics":[{"code":"GEOSPEC_SELECTOR_UNMATCHED","details":{"matcher":"toHaveNoComponentInterference","pair":{"left":"A","right":"absent"},"pairIndex":0},"message":"Requested component pair at index 0 did not match two distinct components.","severity":"error"}],"status":"refused"}"#;
+        assert_eq!(
+            String::from_utf8(crate::codec::encode(&result).unwrap()).unwrap(),
+            std::str::from_utf8(expected).unwrap()
+        );
     }
 }

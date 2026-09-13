@@ -33,19 +33,15 @@ pub(crate) use nominal_analytic::{
 
 pub(crate) use clearance::{clearance, ClearanceRequest, CLEARANCE_PAIR_UNITS};
 pub(crate) use cylindrical_band::{
-    cylindrical_band_clearance, CylindricalBandClearanceEvidence, CylindricalBandClearanceRequest,
+    cylindrical_band_clearance, CylindricalBandClearanceRequest,
     CYLINDRICAL_BAND_ENCODING_RESERVATION_BYTES, CYLINDRICAL_BAND_EVIDENCE_RESERVATION_BYTES,
     CYLINDRICAL_BAND_INPUT_PAIR_BYTES, CYLINDRICAL_BAND_PREDICATE_RESERVATION_BYTES,
 };
 pub(crate) use domain::DomainEvidence;
 pub(crate) use insertion::{
-    band_engagement, insertion, insertion_units, BandEngagementRequest, ClipEvent,
-    InsertionEvidence, InsertionRequest,
+    band_engagement, insertion, insertion_units, BandEngagementRequest, InsertionRequest,
 };
-pub(crate) use topology::{
-    GridPlan, PointEvidence, PointMembership, PointRequest, SectionEvidence, SectionRequest,
-    SectionStratum, Topology,
-};
+pub(crate) use topology::{GridPlan, PointEvidence, PointRequest, SectionRequest, Topology};
 
 pub(crate) const PROFILE: &str = "geospec-nominal-orthogonal-continuous-v1";
 pub(crate) const REPRESENTATION: &str = "selected-continuous-domain-axis-aligned-box";

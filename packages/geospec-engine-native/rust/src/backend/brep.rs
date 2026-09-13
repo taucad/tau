@@ -499,6 +499,9 @@ pub struct WallThickness {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+// Preserve the inline connector return contract; boxing adds a per-query
+// allocation and changes callers outside the core quality scope.
+#[allow(clippy::large_enum_variant)]
 pub enum WallThicknessOutcome {
     Measured(WallThickness),
     Empty {
@@ -1042,9 +1045,14 @@ pub trait BrepSubject {
     }
 
     /// Certify complete bore-slab or finite-cylinder material for a selected face.
-    fn selected_interference_material(&self, _face: BrepEntity) -> Result<SelectedInterferenceMaterial, BackendError> {
-        Err(BackendError { kind: super::BackendErrorKind::Unsupported,
-            message: "Complete selected interference material is unavailable.".into() })
+    fn selected_interference_material(
+        &self,
+        _face: BrepEntity,
+    ) -> Result<SelectedInterferenceMaterial, BackendError> {
+        Err(BackendError {
+            kind: super::BackendErrorKind::Unsupported,
+            message: "Complete selected interference material is unavailable.".into(),
+        })
     }
 
     /// One actual occurrence face, complete single-solid material, two mouths,

@@ -439,6 +439,9 @@ impl Topology {
             .saturating_add(self.component_ids.capacity() * std::mem::size_of::<u32>())
     }
 
+    // Return partial evidence inline on refusal; boxing would add an allocation
+    // to this bounded, already-accounted evidence transfer.
+    #[allow(clippy::result_large_err)]
     fn point_evidence(
         &self,
         request: PointRequest<'_>,
@@ -859,9 +862,9 @@ impl Topology {
             .collect::<Result<Vec<_>, _>>()?;
         let mut coordinate_planes: [Vec<ExactScalar>; 3] =
             std::array::from_fn(|axis| Vec::with_capacity(self.planes[axis].len()));
-        for axis in 0..3 {
+        for (axis, coordinates) in coordinate_planes.iter_mut().enumerate() {
             for bits in &self.planes[axis] {
-                coordinate_planes[axis].push(exact::scalar(&from_bits(*bits)?)?);
+                coordinates.push(exact::scalar(&from_bits(*bits)?)?);
             }
         }
         let cells = self

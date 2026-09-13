@@ -3,6 +3,9 @@
 //! shaft.journal C1 query (cylindrical-band-query-a1/attempt-1/row-map.json, row 0).
 //! Association corruptions in individual controls are mock transport faults only.
 
+// Preserve the recorded OCCT periods and independently rounded trim bounds;
+// these binary64 source values are test evidence, not mathematical TAU.
+#[allow(clippy::approx_constant)]
 fn raw_certificate() -> NominalCylindricalBand {
     NominalCylindricalBand {
         axis: [0.0, -0.043619387365333794, 0.9990482215818579],
@@ -133,6 +136,9 @@ fn raw_certificate() -> NominalCylindricalBand {
 }
 
 // Untouched original shaft-bore-radial-positive shaft.journal certificate.
+// Preserve the recorded OCCT periods and independently rounded trim bounds;
+// these binary64 source values are test evidence, not mathematical TAU.
+#[allow(clippy::approx_constant)]
 fn cartesian_certificate() -> NominalCylindricalBand {
     NominalCylindricalBand {
         axis: [0.0, 0.0, 1.0],
@@ -263,6 +269,9 @@ fn cartesian_certificate() -> NominalCylindricalBand {
 }
 
 // Untouched aabb-gap-false-positive housing.bore certificate (row 0 target).
+// Preserve the recorded OCCT periods and independently rounded trim bounds;
+// these binary64 source values are test evidence, not mathematical TAU.
+#[allow(clippy::approx_constant)]
 fn target_certificate() -> NominalCylindricalBand {
     NominalCylindricalBand {
         axis: [0.0, 0.0, 1.0],

@@ -355,13 +355,13 @@ fn subject(brep: EdgeTreatmentBrep) -> Rc<Subject> {
 fn evaluate_subject(prepared: &Prepared, subject: &Rc<Subject>, limit: u64) -> (Evaluation, u64) {
     let subjects = [Rc::clone(subject)];
     let normalized = prepared.normalized_payload();
-    let mut budget = Budget::new(limit);
+    let budget = Budget::new(limit);
     let mut context = EvaluationContext::new(
         &subjects,
         prepared.capability(),
         "edge-treatment",
         &normalized,
-        &mut budget,
+        &budget,
         None,
     );
     let evaluation = evaluate(prepared, &mut context);

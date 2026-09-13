@@ -421,6 +421,19 @@ const config = [
       'no-restricted-syntax': [
         'error',
         {
+          // The materialized-workspace directory the north star deleted (W3d).
+          // A residual one is inert — `reservedTauPathClassification` keeps any
+          // unlisted `.tau` member out of revisions and out of the agent's
+          // hands (P13) — but nothing in the product may name it again.
+          // Both halves: a plain string and a template literal's text, which is
+          // how the e2e specs spell it.
+          selector: 'Literal[value=/\\.tau\\/workspaces/], TemplateElement[value.raw=/\\.tau\\/workspaces/]',
+          message:
+            "`.tau/workspaces` is retired. A turn is placed on its chat's checkout; leases live " +
+            'at `.tau/runs/<runId>.json` and the store at `.tau/revisions`. ' +
+            'See docs/architecture/workspace-filesystem-and-revisions.md (A38).',
+        },
+        {
           selector: 'TSAsExpression > TSNeverKeyword',
           message:
             '`as never` erases all type information and masks underlying type errors. ' +
@@ -473,8 +486,37 @@ const config = [
             'algebraNativeDarwinArm64Sha256',
             'resolveAlgebraArtifact',
             'algebraArtifactEnvironmentVariable',
-            // Conflict-marker rendering had no source left once the algebra went (W10 re-adds it).
-            'MaterializeConflictInput',
+            // The turn recorder and its branch-per-chat placement (D7, I18, W3c):
+            // a turn attaches to a checkout through `turn.machine` and never
+            // creates one, and the effects behind it are `createRevisionActors`.
+            'TurnRevisionRecorder',
+            'TurnRevisionMode',
+            'turnRevisionBranch',
+            'defaultTurnCaptureExclusions',
+            'withTurnRevisions',
+            'sweepTurnWorkspaces',
+            'hostRevisionModes',
+            'hostTurnCaptureExclusions',
+            // The materialized workspace and its claim file (D7, A38, W3d): a
+            // turn is placed on a checkout the revision root already holds,
+            // there is no second copy of the tree and no claim beside it.
+            'MaterializedWorkspace',
+            'MaterializedWorkspaceAuthority',
+            'MaterializedWorkspaceError',
+            'MaterializedWorkspaceId',
+            'MaterializedWorkspaceIdentity',
+            'MaterializedWorkspaceMetrics',
+            'MaterializedWorkspaceMode',
+            'materializedWorkspaceId',
+            'WorkspaceClaim',
+            'PersistedChatWorkspaceClaim',
+            // Revision *mode* as a wire word (D7, I18, P12): placement is
+            // non-branching by default, so nothing picks one.
+            'ChatRevisionMode',
+            'chatRevisionModeSchema',
+            'useChatRevisionMode',
+            'revisionMode',
+            'placementRevisionModes',
           ].join('|')})$/]`,
           message:
             'This identifier is retired. Path classification is `classify` from ' +
@@ -482,7 +524,12 @@ const config = [
             'wrapper, the bundle transport, the hand-rolled browser codec and the wasm revision ' +
             'algebra are deleted — the browser store is `createIsomorphicGitRevisionPort` and the ' +
             'disk host is `createNativeGitRevisionPort`. Do not reintroduce a shim or alias. ' +
-            'See docs/research/workspace-filesystem-revisions-charter.md (D2, D3, D30, EQ12, EQ14).',
+            'The turn recorder, its `agent/<chat>` branches and the Node revision modes are ' +
+            'replaced by `projectRevisionsMachine` over `createRevisionActors`. ' +
+            'The materialized workspace, its `.tau/workspaces` claim file and the revision-mode ' +
+            "wire word are gone with it: a turn is placed on its chat's checkout and the host " +
+            'records the revision. ' +
+            'See docs/research/workspace-filesystem-revisions-charter.md (D2, D3, D7, D30, EQ12, EQ14).',
         },
       ],
       'import-x/no-extraneous-dependencies': [
@@ -890,6 +937,18 @@ const config = [
           ],
         },
       ],
+    },
+  },
+  {
+    /* The one end-to-end spec that still reads publications out of a
+     * pre-north-star serve tree. W18 rewrites it with the publication path;
+     * until then the pin would red a file its owner cannot see. Everything
+     * else — product code, unit tests, e2e support — is pinned, template
+     * literals included. (`external-agent.spec.ts` was the second file here
+     * until W5 dropped its two retired-layout assertions.) */
+    files: ['apps/ui-e2e/src/browser-agent-host.spec.ts'],
+    rules: {
+      'no-restricted-syntax': 'off',
     },
   },
 ];

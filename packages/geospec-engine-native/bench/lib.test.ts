@@ -1,7 +1,18 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { analyzeControls, decodeMesh, projectLegacyBoundingBox, shuffled, xorshift32 } from '#bench/lib';
+import {
+  analyzeControls,
+  decodeMesh,
+  projectLegacyBoundingBox,
+  shuffled,
+  verifyBroadFixtures,
+  xorshift32,
+} from '#bench/lib';
 import type { ControlObservation } from '#bench/lib';
+
+await test('should leave the early harness without a broad receipt when optional inputs are absent', async () => {
+  assert.equal(await verifyBroadFixtures(), undefined);
+});
 
 await test('detects a planted delay while accepting a stable A/A control', () => {
   const observations: ControlObservation[] = [];

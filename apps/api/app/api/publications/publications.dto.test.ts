@@ -9,129 +9,83 @@ import {
   invitePublicationAccessSchema,
   publicationVisibilityUpdateSchema,
   publishResponseSchema,
-  publishUploadSchema,
+  publishRequestSchema,
   storedPublicationManifestSchema,
   updatePublicationVisibilitySchema,
 } from '#api/publications/publications.dto.js';
 
-describe('publishUploadSchema', () => {
-  const emptyFiles = new Map<string, Uint8Array<ArrayBuffer>>();
-  const validManifestJson = JSON.stringify({
+describe('publishRequestSchema', () => {
+  const valid = {
     projectId: 'proj',
     projectName: 'Demo',
+    tag: 'v1',
+    revisionId: 'a'.repeat(40),
     entryPath: 'main.ts',
     visibility: 'private',
     title: 'T',
-  });
+  };
 
-  it('rejects missing manifest field', () => {
-    const result = publishUploadSchema.safeParse({ files: emptyFiles });
-    expect(result.success).toBe(false);
-    if (result.success) {
-      throw new Error('expected parse failure');
-    }
-
-    expect(result.error.issues.some((issue) => issue.path.includes('manifest'))).toBe(true);
-    expect(result.error.issues.some((issue) => issue.message.includes('Missing multipart field manifest'))).toBe(true);
-  });
-
-  it('rejects non-JSON manifest string', () => {
-    const result = publishUploadSchema.safeParse({ manifest: '{', files: emptyFiles });
-    expect(result.success).toBe(false);
-    if (result.success) {
-      throw new Error('expected parse failure');
-    }
-
-    expect(result.error.issues.some((issue) => issue.message.includes('Manifest is not valid JSON'))).toBe(true);
-  });
-
-  it('rejects manifest missing entryPath', () => {
-    const manifestJson = JSON.stringify({
-      projectId: 'proj',
-      projectName: 'Demo',
-      visibility: 'private',
-      title: 'T',
-    });
-    const result = publishUploadSchema.safeParse({ manifest: manifestJson, files: emptyFiles });
-    expect(result.success).toBe(false);
-  });
-
-  it('rejects bad visibility literal', () => {
-    const manifestJson = JSON.stringify({
-      projectId: 'proj',
-      projectName: 'Demo',
-      entryPath: 'main.ts',
-      visibility: 'secret',
-      title: 'T',
-    });
-    const result = publishUploadSchema.safeParse({ manifest: manifestJson, files: emptyFiles });
-    expect(result.success).toBe(false);
-  });
-
-  it('rejects empty title', () => {
-    const manifestJson = JSON.stringify({
-      projectId: 'proj',
-      projectName: 'Demo',
-      entryPath: 'main.ts',
-      visibility: 'private',
-      title: '',
-    });
-    const result = publishUploadSchema.safeParse({ manifest: manifestJson, files: emptyFiles });
-    expect(result.success).toBe(false);
-  });
-
-  it('parses valid multipart-shaped payload', () => {
-    const files = new Map<string, Uint8Array<ArrayBuffer>>([['main.ts', new Uint8Array([47])]]);
-    const result = publishUploadSchema.safeParse({ manifest: validManifestJson, files });
+  it('parses a pointer into the graph', () => {
+    const result = publishRequestSchema.safeParse(valid);
     expect(result.success).toBe(true);
     if (result.success) {
-      expect(result.data.manifest.entryPath).toBe('main.ts');
-      expect(result.data.files.get('main.ts')).toBeDefined();
+      expect(result.data.tag).toBe('v1');
+      expect(result.data.revisionId).toBe('a'.repeat(40));
     }
   });
 
-  it('normalizes and deduplicates shared emails for private manifests', () => {
-    const manifestJson = JSON.stringify({
-      projectId: 'proj',
-      projectName: 'Demo',
-      entryPath: 'main.ts',
-      visibility: 'private',
-      title: 'T',
+  it('rejects a request with no named version', () => {
+    const { tag: _tag, ...withoutTag } = valid;
+    const result = publishRequestSchema.safeParse(withoutTag);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.some((issue) => issue.path.includes('tag'))).toBe(true);
+    }
+  });
+
+  it('rejects a request with no revision', () => {
+    const { revisionId: _revisionId, ...withoutRevision } = valid;
+    expect(publishRequestSchema.safeParse(withoutRevision).success).toBe(false);
+  });
+
+  it('rejects a request missing entryPath', () => {
+    const { entryPath: _entryPath, ...withoutEntry } = valid;
+    expect(publishRequestSchema.safeParse(withoutEntry).success).toBe(false);
+  });
+
+  it('rejects a bad visibility literal', () => {
+    expect(publishRequestSchema.safeParse({ ...valid, visibility: 'secret' }).success).toBe(false);
+  });
+
+  it('rejects an empty title', () => {
+    expect(publishRequestSchema.safeParse({ ...valid, title: '' }).success).toBe(false);
+  });
+
+  it('normalizes and deduplicates shared emails for private publications', () => {
+    const result = publishRequestSchema.safeParse({
+      ...valid,
       sharedEmails: [' Friend@Example.com ', 'friend@example.com', 'TEAM@example.com'],
     });
-
-    const result = publishUploadSchema.safeParse({ manifest: manifestJson, files: emptyFiles });
     expect(result.success).toBe(true);
     if (result.success) {
-      expect(result.data.manifest.sharedEmails).toEqual(['friend@example.com', 'team@example.com']);
+      expect(result.data.sharedEmails).toEqual(['friend@example.com', 'team@example.com']);
     }
   });
 
-  it('rejects shared emails for public manifests', () => {
-    const manifestJson = JSON.stringify({
-      projectId: 'proj',
-      projectName: 'Demo',
-      entryPath: 'main.ts',
+  it('rejects shared emails on a public publication', () => {
+    const result = publishRequestSchema.safeParse({
+      ...valid,
       visibility: 'public',
-      title: 'T',
       sharedEmails: ['friend@example.com'],
     });
-
-    const result = publishUploadSchema.safeParse({ manifest: manifestJson, files: emptyFiles });
     expect(result.success).toBe(false);
   });
 
   it('rejects more than 50 shared emails', () => {
-    const manifestJson = JSON.stringify({
-      projectId: 'proj',
-      projectName: 'Demo',
-      entryPath: 'main.ts',
-      visibility: 'private',
-      title: 'T',
+    const result = publishRequestSchema.safeParse({
+      ...valid,
       sharedEmails: Array.from({ length: 51 }, (_, index) => `friend${index.toString()}@example.com`),
     });
-
-    const result = publishUploadSchema.safeParse({ manifest: manifestJson, files: emptyFiles });
     expect(result.success).toBe(false);
   });
 });
@@ -191,6 +145,8 @@ describe('publicationRowSchema', () => {
   const baseRow: PublicationWireRow = {
     id: 'pub_1',
     projectId: 'proj',
+    tag: 'v1',
+    revisionId: 'a'.repeat(40),
     ownerId: 'user_1',
     parentPublicationId: null,
     visibility: 'public',
@@ -325,6 +281,8 @@ describe('publicationViewResponseSchema', () => {
       publication: {
         id: 'pub',
         projectId: 'proj',
+        tag: 'v1',
+        revisionId: 'a'.repeat(40),
         ownerId: 'u',
         parentPublicationId: null,
         visibility: 'public',

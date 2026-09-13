@@ -548,6 +548,7 @@ describe('chatTurnRequestSchema JSON Schema contract (R13)', () => {
                       "get_kernel_result",
                       "export_geometry",
                       "screenshot",
+                      "revisions",
                     ],
                     "type": "string",
                   },

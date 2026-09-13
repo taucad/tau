@@ -14,15 +14,9 @@ import { APP_FILTER, APP_INTERCEPTOR, APP_PIPE, Reflector } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { FastifyAdapter } from '@nestjs/platform-fastify';
-import multipart from '@fastify/multipart';
 import cookie from '@fastify/cookie';
 import { ZodSerializerInterceptor, ZodValidationPipe } from 'nestjs-zod';
-import {
-  idPrefix,
-  publicationApiCode,
-  publicationMaxMultipartFiles,
-  publicationViewCookieName,
-} from '@taucad/types/constants';
+import { idPrefix, publicationApiCode, publicationViewCookieName } from '@taucad/types/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { ProjectShareController } from '#api/publications/project-share.controller.js';
 import { PublicationsController } from '#api/publications/publications.controller.js';
@@ -70,7 +64,7 @@ class PublicationsHttpTestAuthGuard implements CanActivate {
     {
       provide: PublicationsService,
       useValue: {
-        publishFromUpload: vi.fn(),
+        publishFromRevision: vi.fn(),
         getPublicationForViewer: vi.fn(),
         getProjectShareEnvelope: vi.fn(),
         listAccessGrants: vi.fn(),
@@ -115,7 +109,7 @@ describe('Publications HTTP integration', () => {
   let app: NestFastifyApplication;
   let baseUrl: string;
   let publicationService: {
-    publishFromUpload: ReturnType<typeof vi.fn>;
+    publishFromRevision: ReturnType<typeof vi.fn>;
     getPublicationForViewer: ReturnType<typeof vi.fn>;
     getProjectShareEnvelope: ReturnType<typeof vi.fn>;
     listAccessGrants: ReturnType<typeof vi.fn>;
@@ -128,7 +122,7 @@ describe('Publications HTTP integration', () => {
   };
 
   beforeEach(() => {
-    publicationService.publishFromUpload.mockClear();
+    publicationService.publishFromRevision.mockClear();
     publicationService.getPublicationForViewer.mockClear();
     publicationService.getProjectShareEnvelope.mockClear();
     publicationService.listAccessGrants.mockClear();
@@ -163,14 +157,6 @@ describe('Publications HTTP integration', () => {
       hook: 'onRequest',
     });
 
-    await app.register(multipart, {
-      limits: {
-        fieldSize: 1024 * 1024,
-        fileSize: 25 * 1024 * 1024,
-        files: publicationMaxMultipartFiles,
-      },
-    });
-
     await app.init();
     await app.getHttpAdapter().getInstance().ready();
     await app.listen(0);
@@ -187,7 +173,7 @@ describe('Publications HTTP integration', () => {
   });
 
   it('POST /v1/publications returns 201 and strips extra keys from serialized body', async () => {
-    publicationService.publishFromUpload.mockResolvedValue({
+    publicationService.publishFromRevision.mockResolvedValue({
       id: 'pub_integration',
       urls: {
         view: 'https://app.example/s/tau~pub_integration',
@@ -198,16 +184,46 @@ describe('Publications HTTP integration', () => {
       extraLeak: 'must-not-serialize',
     });
 
-    const manifest = {
-      projectId: 'proj_integration',
-      projectName: 'Integration',
-      entryPath: 'main.ts',
-      visibility: 'public',
-      title: 'Hello',
-    };
+    const response = await fetch(`${baseUrl}/v1/publications`, {
+      method: 'POST',
+      headers: { Authorization: 'Bearer owner-token', 'content-type': 'application/json' },
+      body: JSON.stringify({
+        projectId: 'proj_integration',
+        projectName: 'Integration',
+        tag: 'v1',
+        revisionId: 'a'.repeat(40),
+        entryPath: 'main.ts',
+        visibility: 'public',
+        title: 'Hello',
+      }),
+    });
 
+    expect(response.status).toBe(201);
+    const body = (await response.json()) as Record<string, unknown>;
+    expect(body['id']).toBe('pub_integration');
+    expect(body['extraLeak']).toBeUndefined();
+    expect(publicationService.publishFromRevision).toHaveBeenCalled();
+  });
+
+  /*
+   * Red pin (a): the JSON pointer is the only shape this route accepts.
+   *
+   * A multipart publish is not "the old path, refused politely" — there is no
+   * multipart parser, no `files` field and no decorator left, so Fastify
+   * answers the content type itself and the service is never reached (AC19).
+   */
+  it('POST /v1/publications refuses a multipart upload and never reaches the service', async () => {
     const form = new FormData();
-    form.append('manifest', JSON.stringify(manifest));
+    form.append(
+      'manifest',
+      JSON.stringify({
+        projectId: 'proj_integration',
+        projectName: 'Integration',
+        entryPath: 'main.ts',
+        visibility: 'public',
+        title: 'Hello',
+      }),
+    );
     form.append('main.ts', new Blob(['export default () => {}']), 'main.ts');
 
     const response = await fetch(`${baseUrl}/v1/publications`, {
@@ -216,52 +232,68 @@ describe('Publications HTTP integration', () => {
       body: form,
     });
 
-    expect(response.status).toBe(201);
-    const body = (await response.json()) as Record<string, unknown>;
-    expect(body['id']).toBe('pub_integration');
-    expect(body['extraLeak']).toBeUndefined();
-    expect(publicationService.publishFromUpload).toHaveBeenCalled();
+    expect(response.status).toBeGreaterThanOrEqual(400);
+    expect(publicationService.publishFromRevision).not.toHaveBeenCalled();
   });
 
-  it('POST /v1/publications returns VALIDATION_ERROR when manifest field is missing', async () => {
-    const form = new FormData();
-    form.append('main.ts', new Blob(['//']), 'main.ts');
+  /*
+   * R1: a traversal `projectId` is refused at the boundary, so nothing composes
+   * a repository path from it. The service-side guard lives in
+   * `GitRepositoryService.repositoryPath`, which every caller routes through.
+   */
+  it.each([['../../tmp/evil'], ['proj_1/../../escape'], ['']])(
+    'POST /v1/publications refuses projectId %j without reaching the service',
+    async (projectId) => {
+      const response = await fetch(`${baseUrl}/v1/publications`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer owner-token' },
+        body: JSON.stringify({
+          projectId,
+          projectName: 'Integration',
+          tag: 'v1',
+          revisionId: 'a'.repeat(40),
+          entryPath: 'main.ts',
+          visibility: 'public',
+          title: 'Hello',
+        }),
+      });
 
+      expect(response.status).toBe(400);
+      expect(publicationService.publishFromRevision).not.toHaveBeenCalled();
+    },
+  );
+
+  it('POST /v1/publications returns VALIDATION_ERROR when the named version is missing', async () => {
     const response = await fetch(`${baseUrl}/v1/publications`, {
       method: 'POST',
-      headers: { Authorization: 'Bearer owner-token' },
-      body: form,
+      headers: { Authorization: 'Bearer owner-token', 'content-type': 'application/json' },
+      body: JSON.stringify({
+        projectId: 'proj_integration',
+        projectName: 'Integration',
+        entryPath: 'main.ts',
+        visibility: 'public',
+        title: 'Hello',
+      }),
     });
 
     expect(response.status).toBe(400);
-    const body = (await response.json()) as {
-      code: string;
-      message: string[];
-      requestId?: string;
-    };
+    const body = (await response.json()) as { code: string; message: string[]; requestId?: string };
     expect(body.code).toBe('VALIDATION_ERROR');
     expect(Array.isArray(body.message)).toBe(true);
-    expect(body.message.some((line) => line.includes('manifest'))).toBe(true);
+    expect(body.message.some((line) => line.includes('tag'))).toBe(true);
     expect(body.requestId).toBeDefined();
-    expect(publicationService.publishFromUpload).not.toHaveBeenCalled();
+    expect(publicationService.publishFromRevision).not.toHaveBeenCalled();
   });
 
-  it('POST /v1/publications returns VALIDATION_ERROR when manifest JSON is invalid', async () => {
-    const form = new FormData();
-    form.append('manifest', '{');
-    form.append('main.ts', new Blob(['//']), 'main.ts');
-
+  it('POST /v1/publications returns VALIDATION_ERROR when the body is not JSON', async () => {
     const response = await fetch(`${baseUrl}/v1/publications`, {
       method: 'POST',
-      headers: { Authorization: 'Bearer owner-token' },
-      body: form,
+      headers: { Authorization: 'Bearer owner-token', 'content-type': 'application/json' },
+      body: '{',
     });
 
     expect(response.status).toBe(400);
-    const body = (await response.json()) as { code: string; message: string[] };
-    expect(body.code).toBe('VALIDATION_ERROR');
-    expect(body.message.some((line) => line.includes('Manifest is not valid JSON'))).toBe(true);
-    expect(publicationService.publishFromUpload).not.toHaveBeenCalled();
+    expect(publicationService.publishFromRevision).not.toHaveBeenCalled();
   });
 
   it('GET /v1/publications/:id passes undefined viewer without Authorization', async () => {
@@ -269,6 +301,8 @@ describe('Publications HTTP integration', () => {
       publication: {
         id: 'pub_view',
         projectId: 'proj',
+        tag: 'v1',
+        revisionId: 'a'.repeat(40),
         ownerId: 'owner',
         parentPublicationId: null,
         visibility: 'public',
@@ -343,6 +377,8 @@ describe('Publications HTTP integration', () => {
       publication: {
         id: 'pub_auth',
         projectId: 'proj',
+        tag: 'v1',
+        revisionId: 'a'.repeat(40),
         ownerId: 'owner',
         parentPublicationId: null,
         visibility: 'public',
@@ -687,130 +723,5 @@ describe('Publications HTTP integration', () => {
     expect(response.status).toBe(429);
     const body = (await response.json()) as { code: string };
     expect(body.code).toBe(publicationApiCode.RATE_LIMITED);
-  });
-});
-
-type BarePublicationsServiceDeps = ConstructorParameters<typeof PublicationsService>;
-
-@Module({
-  controllers: [PublicationsController],
-  providers: [
-    Reflector,
-    {
-      provide: PublicationsService,
-      useFactory: (): PublicationsService =>
-        new PublicationsService(
-          {} as BarePublicationsServiceDeps[0],
-          {} as BarePublicationsServiceDeps[1],
-          {} as BarePublicationsServiceDeps[2],
-          {} as BarePublicationsServiceDeps[3],
-          {} as BarePublicationsServiceDeps[4],
-          {} as BarePublicationsServiceDeps[5],
-          {} as BarePublicationsServiceDeps[6],
-          {
-            getEntitlements: async () => ({ canCreatePrivateShares: true }),
-          } as unknown as BarePublicationsServiceDeps[7],
-        ),
-    },
-    {
-      provide: ConfigService,
-      useValue: {
-        get: (key: string): string => {
-          if (key === 'TAU_VIEW_COOKIE_SECRET') {
-            return 'integration-test-cookie-secret-32-chars';
-          }
-
-          if (key === 'NODE_ENV') {
-            return 'test';
-          }
-
-          return '';
-        },
-      },
-    },
-    {
-      provide: MetricsService,
-      useValue: { publicationFileRequestsTotal: { add: vi.fn() } },
-    },
-    ViewerIdentityService,
-    ViewerIdentityInterceptor,
-    { provide: APP_PIPE, useClass: ZodValidationPipe },
-    { provide: APP_INTERCEPTOR, useClass: ZodSerializerInterceptor },
-    { provide: APP_FILTER, useClass: HttpExceptionFilter },
-  ],
-})
-class PublicationsHttpPublishForbiddenPathTestModule {}
-
-describe('Publications HTTP integration publish multipart path rules', () => {
-  let app: NestFastifyApplication;
-  let publishForbiddenPathsBaseUrl: string;
-
-  beforeAll(async () => {
-    const moduleRef = await Test.createTestingModule({
-      imports: [PublicationsHttpPublishForbiddenPathTestModule],
-    })
-      .overrideGuard(AuthGuard)
-      .useClass(PublicationsHttpTestAuthGuard)
-      .compile();
-
-    app = moduleRef.createNestApplication<NestFastifyApplication>(
-      new FastifyAdapter({
-        genReqId: () => generatePrefixedId(idPrefix.request),
-      }),
-    );
-
-    app.enableVersioning({
-      type: VersioningType.URI,
-    });
-
-    await app.register(cookie, {
-      secret: 'integration-test-cookie-secret-32-chars',
-      hook: 'onRequest',
-    });
-
-    await app.register(multipart, {
-      limits: {
-        fieldSize: 1024 * 1024,
-        fileSize: 25 * 1024 * 1024,
-        files: publicationMaxMultipartFiles,
-      },
-    });
-
-    await app.init();
-    await app.getHttpAdapter().getInstance().ready();
-    await app.listen(0);
-
-    const address = app.getHttpServer().address();
-    const port = typeof address === 'string' ? 0 : address?.port;
-    publishForbiddenPathsBaseUrl = `http://127.0.0.1:${port}`;
-  });
-
-  afterAll(async () => {
-    await app.close();
-  });
-
-  it('POST /v1/publications rejects multipart payloads that include `.tau/artifacts` paths', async () => {
-    const manifest = {
-      projectId: 'proj_path_rules',
-      projectName: 'PathRules',
-      entryPath: 'main.ts',
-      visibility: 'private',
-      title: 'Hello',
-    };
-
-    const form = new FormData();
-    form.append('manifest', JSON.stringify(manifest));
-    form.append('main.ts', new Blob(['export default () => {}']), 'main.ts');
-    form.append('.tau/artifacts/cache.glb', new Blob([Uint8Array.from([1])]), '.tau/artifacts/cache.glb');
-
-    const response = await fetch(`${publishForbiddenPathsBaseUrl}/v1/publications`, {
-      method: 'POST',
-      headers: { Authorization: 'Bearer owner-token' },
-      body: form,
-    });
-
-    expect(response.status).toBe(400);
-    const body = (await response.json()) as { code: string };
-    expect(body.code).toBe(publicationApiCode.FORBIDDEN_PATH);
   });
 });

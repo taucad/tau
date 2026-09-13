@@ -22,15 +22,14 @@ import { ZodSerializerDto } from 'nestjs-zod';
 import { AuthGuard } from '#auth/auth.guard.js';
 import { OptionalAuth, OptionalUser, UseAuth, User } from '#auth/decorators/auth.decorator.js';
 import { MetricsService } from '#telemetry/metrics.js';
-import { PublishMultipart } from '#api/publications/publish-multipart.decorator.js';
 import {
   InvitePublicationAccessDto,
   PublicationAccessGrantDto,
   PublicationAccessListDto,
   PublicationViewResponseDto,
   PublicationVisibilityUpdateDto,
+  PublishRequestDto,
   PublishResponseDto,
-  PublishUploadDto,
   UpdatePublicationVisibilityDto,
 } from '#api/publications/publications.dto.js';
 import { PublicationsService } from '#api/publications/publications.service.js';
@@ -79,15 +78,8 @@ export class PublicationsController {
   @HttpCode(HttpStatus.CREATED)
   @UseAuth()
   @ZodSerializerDto(PublishResponseDto)
-  public async publish(
-    @User('id') ownerId: string,
-    @PublishMultipart() upload: PublishUploadDto,
-  ): Promise<PublishResponseDto> {
-    return this.publicationsService.publishFromUpload({
-      ownerId,
-      manifest: upload.manifest,
-      files: upload.files,
-    });
+  public async publish(@User('id') ownerId: string, @Body() body: PublishRequestDto): Promise<PublishResponseDto> {
+    return this.publicationsService.publishFromRevision({ ownerId, request: body });
   }
 
   @Get(':id')

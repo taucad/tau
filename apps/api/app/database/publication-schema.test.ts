@@ -78,6 +78,8 @@ describe.skipIf(!publicationSchemaDbReachable)('publication schema (integration)
     await db.insert(schema.publication).values({
       id: publicationId,
       projectId,
+      tag: `v-${publicationId}`,
+      revisionId: 'a'.repeat(40),
       ownerId,
       visibility: 'private',
       manifestKey: `manifests/${publicationId}.json`,
@@ -120,6 +122,8 @@ describe.skipIf(!publicationSchemaDbReachable)('publication schema (integration)
     await db.insert(schema.publication).values({
       id: publicationId,
       projectId,
+      tag: `v-${publicationId}`,
+      revisionId: 'a'.repeat(40),
       ownerId,
       visibility: 'private',
       manifestKey: `manifests/${publicationId}.json`,
@@ -197,6 +201,8 @@ describe.skipIf(!publicationSchemaDbReachable)('publication schema (integration)
       await tx.insert(schema.publication).values({
         id: publicationId,
         projectId,
+        tag: `v-${publicationId}`,
+        revisionId: 'a'.repeat(40),
         ownerId,
         visibility: 'private',
         manifestKey: `manifests/${publicationId}.json`,
@@ -247,6 +253,8 @@ describe.skipIf(!publicationSchemaDbReachable)('publication schema (integration)
     await db.insert(schema.publication).values({
       id: publicationId,
       projectId,
+      tag: `v-${publicationId}`,
+      revisionId: 'a'.repeat(40),
       ownerId,
       visibility: 'private',
       manifestKey: `manifests/${publicationId}.json`,
@@ -291,6 +299,8 @@ describe.skipIf(!publicationSchemaDbReachable)('publication schema (integration)
     await db.insert(schema.publication).values({
       id: publicationId,
       projectId,
+      tag: `v-${publicationId}`,
+      revisionId: 'a'.repeat(40),
       ownerId,
       visibility: 'private',
       manifestKey: `manifests/${publicationId}.json`,

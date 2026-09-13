@@ -1,5 +1,6 @@
 import { createZodDto } from 'nestjs-zod';
 import { z } from 'zod';
+import { isProjectRepositoryId } from '#api/git/git.constants.js';
 
 const maxPublicationAccessRecipients = 50;
 
@@ -10,57 +11,44 @@ export const sharedPublicationEmailsSchema = z
   .max(maxPublicationAccessRecipients)
   .transform((emails) => [...new Set(emails)]);
 
-export const publishManifestSchema = z
+/**
+ * `POST /v1/publications` — a publication is a pointer into the synced graph
+ * (D11, A21): `{ projectId, tag, revisionId }` plus the three things only a
+ * person decides (who may see it, what it is called, who it is shared with).
+ * Nothing is uploaded: the bytes arrived with the push and the server
+ * materializes the tagged tree.
+ */
+export const publishRequestSchema = z
   .object({
-    projectId: z.string().min(1),
+    /* The same shape the git routes require, so a traversal id is a 400 here
+       rather than a refusal further in (review R1). */
+    projectId: z.string().refine(isProjectRepositoryId, 'projectId must be a project id'),
     projectName: z.string().min(1),
+    /** The named version, without `refs/tags/`. */
+    tag: z.string().min(1).max(200),
+    /** The revision that name points at, as the client observed it. */
+    revisionId: z.string().min(1).max(64),
     entryPath: z.string().min(1),
     visibility: z.enum(['private', 'public']),
     title: z.string().min(1),
     description: z.string().optional(),
-    parameters: z.record(z.string(), z.unknown()).optional(),
     sharedEmails: sharedPublicationEmailsSchema.optional(),
     notifyRecipients: z.boolean().optional(),
   })
-  .superRefine((manifest, context) => {
-    if (manifest.visibility === 'public' && (manifest.sharedEmails?.length ?? 0) > 0) {
+  .superRefine((request, context) => {
+    if (request.visibility === 'public' && (request.sharedEmails?.length ?? 0) > 0) {
       context.addIssue({
         code: 'custom',
         message: 'sharedEmails can only be used with private publications',
         path: ['sharedEmails'],
       });
     }
-  });
-
-export type PublishManifest = z.infer<typeof publishManifestSchema>;
-
-const filesMapSchema = z.custom<Map<string, Uint8Array<ArrayBuffer>>>((value) => value instanceof Map, {
-  message: 'Expected multipart files map',
-});
-
-export const publishUploadSchema = z
-  .object({
-    manifest: z
-      .string({ message: 'Missing multipart field manifest' })
-      .min(1, 'Missing multipart field manifest')
-      .transform((raw, context) => {
-        try {
-          return JSON.parse(raw) as unknown;
-        } catch {
-          context.addIssue({
-            code: 'custom',
-            message: 'Manifest is not valid JSON',
-            path: ['manifest'],
-          });
-          return z.NEVER;
-        }
-      })
-      .pipe(publishManifestSchema),
-    files: filesMapSchema,
   })
-  .meta({ id: 'PublishUpload' });
+  .meta({ id: 'PublishRequest' });
 
-export class PublishUploadDto extends createZodDto(publishUploadSchema) {}
+export type PublishRequest = z.infer<typeof publishRequestSchema>;
+
+export class PublishRequestDto extends createZodDto(publishRequestSchema) {}
 
 export const storedPublicationManifestSchema = z.object({
   version: z.literal(1),
@@ -89,6 +77,8 @@ export const publicationRowSchema = z
   .object({
     id: z.string(),
     projectId: z.string(),
+    tag: z.string(),
+    revisionId: z.string(),
     ownerId: z.string(),
     parentPublicationId: z.string().nullable(),
     visibility: publicationVisibilitySchema,

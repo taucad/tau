@@ -20,7 +20,7 @@ const generatorBody = (profile: 'project_name' | 'commit_name'): ChatTurnRequest
 const cadBody = (): ChatTurnRequest => ({
   id: 'chat_1',
   projectId: 'proj_1',
-  execution: { hostId: 'host_1', mode: 'direct', workspaceId: 'workspace_1', baseRevisionId: 'rev_1' },
+  execution: { hostId: 'host_1', workspaceId: 'workspace_1', baseRevisionId: 'rev_1' },
   admission: { version: 1, idempotencyKey: 'request_chat_1_00000000' },
   messages: [{ id: 'msg_1', role: 'user', parts: [{ type: 'text', text: 'hello' }] }],
   agent: {

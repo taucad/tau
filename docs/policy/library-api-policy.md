@@ -3,7 +3,7 @@ title: 'Library API Policy'
 description: 'Design rules for world-class JavaScript/TypeScript library APIs: factories, defineX, flat options, max 3 params, naming, subpath exports, events, plugins, lazy init, escape hatches.'
 status: active
 created: '2026-02-23'
-updated: '2026-04-22'
+updated: '2026-05-17'
 related:
   - docs/policy/api-evolution-policy.md
   - docs/policy/resource-cleanup-policy.md
@@ -822,3 +822,57 @@ Three signals that one of these antipatterns has crept in:
 ### Why this matters for library DX
 
 Internal callers can usually work around these patterns. **Downstream consumers cannot.** A consumer who imports `RuntimeClient` and writes their own tests inherits every microtask drain, every IIFE schedule, every wire-primitive coupling. The blast radius of a sync-void-callback-with-async-body is the entire ecosystem of consumers who try to test against your API. Fixing the contract once eliminates the class.
+
+## 23. Plugin-Layer Values Are Plain-Data Specs
+
+Plugin-layer values produced by factories like `fromMemoryFs(...)`, `fromNodeFs(...)`, `fromBrowserFs(...)`, `fromFsLike(...)`, `inProcessTransport({...})`, `webWorkerTransport({...})`, `replicad()`, `manifold()`, `esbuild()`, and `parameterCache()` are **plain-data specs**, not live instances. They describe **how to materialise** a live binding when a `RuntimeClient` is constructed. Each call to `createRuntimeClient(spec)` runs the spec's `materialize()` factory **once per client lifetime**, producing a fresh, isolated live binding (filesystem adapter, transport bridge, kernel handle).
+
+This shape is what allows the same option object — including the same `fromMemoryFs(seed)` value — to feed an arbitrary number of clients without leaking state across them. The contract is: **specs are immutable plain data; instances are per-client and ephemeral**.
+
+### Rule: declare static specs at module scope
+
+If the spec value does not depend on per-render input, declare it at module scope and pass it directly to `createRuntimeClient` (or to the helper that builds your options). This dogfoods the multi-client-from-one-spec contract on every cold module load.
+
+```typescript
+// CORRECT: module-scope spec, multi-client safe
+import { createRuntimeClient, createRuntimeClientOptions, fromMemoryFs, presets } from '@taucad/runtime';
+import { inProcessTransport } from '@taucad/runtime/transport/in-process';
+
+const replicadReferenceClientOptions = createRuntimeClientOptions({
+  ...presets.all(),
+  transport: inProcessTransport({ fileSystem: fromMemoryFs() }),
+});
+
+export const ReplicadReference = ({ code }: { code: Record<string, string> }) => {
+  // Each <KernelModelView /> instance produces its own materialised filesystem,
+  // transport, and kernel — even though the spec object is shared.
+  return <KernelModelView clientOptions={replicadReferenceClientOptions} code={code} />;
+};
+```
+
+### Antipattern: wrapping static specs in `useMemo`
+
+`useMemo(() => createRuntimeClientOptions({...}), [])` is the React-flavoured way of pretending a plain-data spec has component-scope ownership. It does not. The spec is referentially identical across every render of the component **and** across every component instance — `useMemo` adds runtime overhead and reader confusion without changing the behaviour. The same critique applies to `useState(() => createRuntimeClientOptions({...}))`.
+
+```typescript
+// INCORRECT: useMemo over a static spec
+const ReplicadReference = ({ code }: Props) => {
+  const clientOptions = useMemo(
+    () =>
+      createRuntimeClientOptions({
+        ...presets.all(),
+        transport: inProcessTransport({ fileSystem: fromMemoryFs() }),
+      }),
+    [],
+  );
+  return <KernelModelView clientOptions={clientOptions} code={code} />;
+};
+```
+
+`useMemo` is only legitimate when a spec **depends on per-render inputs** (props, route parameters, user-selected paths). In that case the dependency array reflects the genuine inputs and `useMemo` is doing real work.
+
+### Why this matters
+
+When specs are declared at module scope, every multi-instance render path automatically exercises the multi-client-from-one-spec invariant. If a `from*` factory ever regresses to capturing shared mutable state (e.g. an inline filesystem instance instead of a `create()` factory), the failure surfaces immediately — a single hot-reload of the docs page will produce two `RuntimeClient`s that read each other's writes. By contrast, ad-hoc inline `createRuntimeClient({...})` calls inside components mask the regression because most components only ever produce one client per page.
+
+**Fail loudly, dogfood the contract, keep static specs at module scope.**

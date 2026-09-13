@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
-import { Scene, PerspectiveCamera, AmbientLight, DirectionalLight, Box3, Vector3 } from 'three';
+import { Scene, PerspectiveCamera, AmbientLight, DirectionalLight, Box3, Vector3, Object3D } from 'three';
 import type { Group } from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
@@ -72,14 +72,21 @@ export function KernelModelView({ code, className }: KernelModelViewProps): Reac
 
   // Scene + camera setup
   useEffect(() => {
+    // Geometry from `gltfCoordinateTransform` middleware is Z-up (CAD convention).
+    // Three.js defaults to Y-up; align the camera/OrbitControls to Z-up so models
+    // render right-side-up and orbit around the vertical axis correctly.
+    const zUp = new Vector3(0, 0, 1);
+    Object3D.DEFAULT_UP.copy(zUp);
+
     const scene = new Scene();
     const camera = new PerspectiveCamera(50, 1, 0.1, 10_000);
-    camera.position.set(150, 150, 150);
+    camera.up.copy(zUp);
+    camera.position.set(150, -150, 150);
     camera.lookAt(0, 0, 0);
 
     const ambient = new AmbientLight(0xff_ff_ff, 0.8);
     const directional = new DirectionalLight(0xff_ff_ff, 1.2);
-    directional.position.set(100, 200, 150);
+    directional.position.set(100, -150, 200);
     scene.add(ambient, directional);
 
     sceneRef.current = scene;
@@ -170,7 +177,7 @@ export function KernelModelView({ code, className }: KernelModelViewProps): Reac
       const maxDim = Math.max(size.x, size.y, size.z);
       const distance = maxDim * 2;
 
-      camera.position.set(center.x + distance * 0.7, center.y + distance * 0.5, center.z + distance * 0.7);
+      camera.position.set(center.x + distance * 0.7, center.y - distance * 0.7, center.z + distance * 0.5);
       camera.lookAt(center);
       camera.near = distance * 0.01;
       camera.far = distance * 10;

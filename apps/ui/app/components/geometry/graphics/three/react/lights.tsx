@@ -18,6 +18,12 @@ import { Theme, useTheme } from '#hooks/use-theme.js';
 /** Environment cubemap resolution (px). Higher = sharper specular reflections. */
 const envResolution = 512;
 
+/** Reused every frame — avoid allocating a fresh object for screenshot `userData` consumers. */
+const scratchSceneLightingUserData: SceneLightingConfig = {
+  sceneRadius: 1,
+  upDirection: 'z',
+};
+
 // Studio preset Lightformer intensities ──────────────────────────────────────
 // Asymmetric camera-space rig matching Onshape's observed pattern.
 // Key upper-left, fill right, top overhead, ground below, back-fill behind.
@@ -33,16 +39,12 @@ const studioGroundIntensity = 1.5;
 /** Specular highlight panel (upper-right for bottom face) -- creates focused off-center specular on flat faces. */
 const studioBackFillIntensity = 8;
 
-// Neutral preset Lightformer intensities ─────────────────────────────────────
-const neutralKeyIntensity = 0.6;
-const neutralGroundIntensity = 0.2;
-
 type UpDirection = 'x' | 'y' | 'z';
 
 type LightsProperties = {
   readonly enableMatcap?: boolean;
   readonly sceneRadius?: number;
-  readonly environmentPreset?: 'studio' | 'neutral' | 'soft' | 'performance';
+  readonly environmentPreset?: 'studio' | 'performance';
   readonly upDirection?: UpDirection;
 };
 
@@ -74,7 +76,7 @@ type LightsProperties = {
 export function Lights({
   enableMatcap = false,
   sceneRadius = 0,
-  environmentPreset = 'studio',
+  environmentPreset = 'performance',
   upDirection = 'z',
 }: LightsProperties): React.JSX.Element {
   const { camera, scene } = useThree();
@@ -100,11 +102,10 @@ export function Lights({
   useFrame(() => {
     // Persist lighting config on scene.userData so the screenshot capture
     // system can read it from a cloned scene without prop-drilling.
-    scene.userData[lightingUserDataKeys.config] = {
-      sceneRadius: radiusRef.current,
-      upDirection,
-      themeIntensityScale,
-    } satisfies SceneLightingConfig;
+    scratchSceneLightingUserData.sceneRadius = radiusRef.current;
+    scratchSceneLightingUserData.upDirection = upDirection;
+    scratchSceneLightingUserData.themeIntensityScale = themeIntensityScale;
+    scene.userData[lightingUserDataKeys.config] = scratchSceneLightingUserData;
 
     applyLightingForCamera({
       scene,
@@ -124,9 +125,7 @@ export function Lights({
     });
   });
 
-  const showEnvironment = useDeferredValue(
-    !enableMatcap && (environmentPreset === 'studio' || environmentPreset === 'neutral'),
-  );
+  const showEnvironment = useDeferredValue(!enableMatcap && environmentPreset === 'studio');
 
   return (
     <>
@@ -147,92 +146,66 @@ export function Lights({
 
       {showEnvironment ? (
         <Environment resolution={envResolution} near={clampedSceneRadius * 0.01} far={clampedSceneRadius * 20}>
-          {environmentPreset === 'studio' ? (
-            <>
-              {/* ── Key panel (right-upper in camera space) ── */}
-              {/* Brightest side light. Positioned primarily to the right of the
+          <>
+            {/* ── Key panel (right-upper in camera space) ── */}
+            {/* Brightest side light. Positioned primarily to the right of the
                   camera with moderate upward offset. Creates the NE-bright
                   gradient (NNE, ENE lit) while keeping NNW dark. */}
-              <Lightformer
-                form='rect'
-                intensity={studioKeyIntensity}
-                position={[clampedSceneRadius * 4, clampedSceneRadius * 1.5, clampedSceneRadius]}
-                rotation={[Math.PI / 8, -Math.PI / 3, 0]}
-                scale={[clampedSceneRadius * 4, clampedSceneRadius * 4, 1]}
-              />
-              {/* ── Left-upper fill (left-upper in camera space) ── */}
-              {/* Illuminates left-facing L sections (WNW = NW-left) that the
+            <Lightformer
+              form='rect'
+              intensity={studioKeyIntensity}
+              position={[clampedSceneRadius * 4, clampedSceneRadius * 1.5, clampedSceneRadius]}
+              rotation={[Math.PI / 8, -Math.PI / 3, 0]}
+              scale={[clampedSceneRadius * 4, clampedSceneRadius * 4, 1]}
+            />
+            {/* ── Left-upper fill (left-upper in camera space) ── */}
+            {/* Illuminates left-facing L sections (WNW = NW-left) that the
                   rightward key cannot reach. Env_x dominant negative with moderate
                   +env_y so WNW (env_y=0.38) gets more than WSW (env_y=-0.38). */}
-              <Lightformer
-                form='rect'
-                intensity={studioLeftFillIntensity}
-                position={[-clampedSceneRadius * 3, clampedSceneRadius, clampedSceneRadius * 0.5]}
-                rotation={[Math.PI / 8, Math.PI / 3, 0]}
-                scale={[clampedSceneRadius * 4, clampedSceneRadius * 4, 1]}
-              />
-              {/* ── Top panel (overhead in camera space) ── */}
-              {/* Reduced overhead accent — kept low to avoid over-brightening
+            <Lightformer
+              form='rect'
+              intensity={studioLeftFillIntensity}
+              position={[-clampedSceneRadius * 3, clampedSceneRadius, clampedSceneRadius * 0.5]}
+              rotation={[Math.PI / 8, Math.PI / 3, 0]}
+              scale={[clampedSceneRadius * 4, clampedSceneRadius * 4, 1]}
+            />
+            {/* ── Top panel (overhead in camera space) ── */}
+            {/* Reduced overhead accent — kept low to avoid over-brightening
                   NNW (D section) which has high env_y normal component. */}
-              <Lightformer
-                form='rect'
-                intensity={studioTopIntensity}
-                position={[0, clampedSceneRadius * 3, 0]}
-                rotation={[Math.PI / 2, 0, 0]}
-                scale={[clampedSceneRadius * 3, clampedSceneRadius * 3, 1]}
-              />
-              {/* ── Ground panel (below-right in camera space) ── */}
-              {/* Bright ground for bottom-view luminosity. Offset in +X so that
+            <Lightformer
+              form='rect'
+              intensity={studioTopIntensity}
+              position={[0, clampedSceneRadius * 3, 0]}
+              rotation={[Math.PI / 2, 0, 0]}
+              scale={[clampedSceneRadius * 3, clampedSceneRadius * 3, 1]}
+            />
+            {/* ── Ground panel (below-right in camera space) ── */}
+            {/* Bright ground for bottom-view luminosity. Offset in +X so that
                   the bottom-face specular shifts toward the right (matching the
                   asymmetric rig's "brighter on right" pattern). */}
-              <Lightformer
-                form='rect'
-                intensity={studioGroundIntensity}
-                position={[clampedSceneRadius * 2, -clampedSceneRadius * 3, 0]}
-                rotation={[-Math.PI / 2, 0, 0]}
-                scale={[clampedSceneRadius * 6, clampedSceneRadius * 6, 1]}
-              />
-              {/* ── Specular highlight panel (upper-right in camera space) ── */}
-              {/* Positioned in the (+X, -Y, +Z) octant to create a focused specular
+            <Lightformer
+              form='rect'
+              intensity={studioGroundIntensity}
+              position={[clampedSceneRadius * 2, -clampedSceneRadius * 3, 0]}
+              rotation={[-Math.PI / 2, 0, 0]}
+              scale={[clampedSceneRadius * 6, clampedSceneRadius * 6, 1]}
+            />
+            {/* ── Specular highlight panel (upper-right in camera space) ── */}
+            {/* Positioned in the (+X, -Y, +Z) octant to create a focused specular
                   highlight in the upper-right area of bottom-facing surfaces when
                   viewed from below. In Z-up screen coords for the bottom face:
                   +X → screen right, -Y → screen top, +Z → close to the reflection
                   pole. Equal X and -Y offsets place the specular at 45° toward the
                   top-right corner. Negligible contribution to front/side face
                   speculars (~61° from front reflection direction). */}
-              <Lightformer
-                form='rect'
-                intensity={studioBackFillIntensity}
-                position={[clampedSceneRadius * 2, -clampedSceneRadius * 3, clampedSceneRadius * 4]}
-                scale={[clampedSceneRadius * 2, clampedSceneRadius * 2, 1]}
-              />
-            </>
-          ) : (
-            <>
-              {/* Neutral preset: reduced intensity, minimal reflections */}
-              <Lightformer
-                form='rect'
-                intensity={neutralKeyIntensity}
-                position={[0, clampedSceneRadius * 3, 0]}
-                rotation={[Math.PI / 2, 0, 0]}
-                scale={[clampedSceneRadius * 6, clampedSceneRadius * 6, 1]}
-              />
-              <Lightformer
-                form='rect'
-                intensity={neutralGroundIntensity}
-                position={[0, -clampedSceneRadius * 3, 0]}
-                rotation={[-Math.PI / 2, 0, 0]}
-                scale={[clampedSceneRadius * 6, clampedSceneRadius * 6, 1]}
-              />
-            </>
-          )}
+            <Lightformer
+              form='rect'
+              intensity={studioBackFillIntensity}
+              position={[clampedSceneRadius * 2, -clampedSceneRadius * 3, clampedSceneRadius * 4]}
+              scale={[clampedSceneRadius * 2, clampedSceneRadius * 2, 1]}
+            />
+          </>
         </Environment>
-      ) : null}
-
-      {/* Soft preset: hemisphere + ambient only, no environment map */}
-      {!enableMatcap && environmentPreset === 'soft' ? (
-        // oxlint-disable-next-line tau-lint/no-hardcoded-color -- Three.js light color
-        <hemisphereLight args={['#ffffff', '#444444', 0.8 * themeIntensityScale]} />
       ) : null}
 
       {/* Performance preset: minimal lights, no environment (equivalent to legacy setup) */}

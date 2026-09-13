@@ -76,4 +76,56 @@ describe('WorkerChangeChannel', () => {
     expect(b).not.toHaveBeenCalled();
     channel.dispose();
   });
+
+  it('should not skip sibling handlers when one self-unsubscribes during dispatch', () => {
+    const listen = vi.fn().mockReturnValue(vi.fn());
+    const { channel, wire } = createTestChannel(listen);
+    const sibling = vi.fn();
+    let unsubscribeSelf: (() => void) | undefined;
+
+    unsubscribeSelf = channel.onFileWritten({
+      handler: () => {
+        unsubscribeSelf?.();
+      },
+    });
+    channel.onFileWritten({ handler: sibling });
+
+    wire({ type: 'fileWritten', path: '/project/a.ts', backend: 'indexeddb' });
+
+    expect(sibling).toHaveBeenCalledOnce();
+    channel.dispose();
+  });
+
+  it('should continue delivery when a handler throws', () => {
+    const listen = vi.fn().mockReturnValue(vi.fn());
+    const { channel, wire } = createTestChannel(listen);
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const failing = vi.fn(() => {
+      throw new Error('boom');
+    });
+    const succeeding = vi.fn();
+
+    channel.onFileWritten({ handler: failing });
+    channel.onFileWritten({ handler: succeeding });
+    wire({ type: 'fileWritten', path: '/project/a.ts', backend: 'indexeddb' });
+
+    expect(failing).toHaveBeenCalledOnce();
+    expect(succeeding).toHaveBeenCalledOnce();
+    consoleErrorSpy.mockRestore();
+    channel.dispose();
+  });
+
+  it('should unsubscribe when AbortSignal aborts after subscribe', () => {
+    const listen = vi.fn().mockReturnValue(vi.fn());
+    const { channel, wire } = createTestChannel(listen);
+    const handler = vi.fn();
+    const controller = new AbortController();
+
+    channel.onFileWritten({ handler, signal: controller.signal });
+    controller.abort();
+    wire({ type: 'fileWritten', path: '/project/a.ts', backend: 'indexeddb' });
+
+    expect(handler).not.toHaveBeenCalled();
+    channel.dispose();
+  });
 });

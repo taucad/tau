@@ -240,7 +240,7 @@ function DocsSidebarFrameworkSelector({ className }: { readonly className?: stri
         </div>
       )}
       getValue={(section) => section.id}
-      defaultValue={currentSection}
+      value={currentSection}
       title='Select Section'
       description='Choose which documentation section to view'
       popoverProperties={{

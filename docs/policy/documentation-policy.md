@@ -1,9 +1,9 @@
 ---
 title: 'Documentation Policy'
-description: 'Standards for writing and maintaining Tau documentation: content types, templates, AI discoverability, API reference, and cross-linking. Applies to apps/ui/content/docs/ and docs/.'
+description: 'Standards for writing and maintaining Tau documentation: content types, templates, AI discoverability, API reference, sidebar navigation, and cross-linking. Applies to apps/ui/content/docs/ and docs/.'
 status: active
 created: '2026-02-23'
-updated: '2026-05-04'
+updated: '2026-05-21'
 ---
 
 # Documentation Policy
@@ -403,3 +403,144 @@ Within a section, order pages from simple to advanced. The `meta.json` page orde
 - Use kebab-case for all MDX filenames: `custom-middleware.mdx`, not `customMiddleware.mdx`.
 - Use descriptive titles. Prefer "Kernels Overview" over "Overview". Prefer "Create Custom Middleware" over "Middleware".
 - Folder names match their purpose: `getting-started/`, `guides/`, `concepts/`, `api/`.
+
+## 9. Sidebar Navigation Structure
+
+The sidebar is the docs' primary wayfinding surface. A clear, stutter-free
+structure is as important as the prose on each page — readers form their
+mental model of the product from what they scan in the sidebar before they
+open any page.
+
+### Rationale (May 2026 best practices)
+
+Reviewed practice across Stripe, Vercel/Next.js, Cloudflare, Mintlify, and
+the Fumadocs reference docs:
+
+- **No label repetition.** A section name appears once: either as a separator
+  heading (non-collapsible, always-visible) or as a collapsible group label
+  — never both. The "Guides / Guides" stutter is the most common
+  anti-pattern on Fumadocs sites and is purely a configuration accident.
+- **Maximum 2–3 levels of depth.** Beyond that, click fatigue and
+  orientation cost dominate. If you need a fourth level, you're better off
+  splitting into a separate doc site or a tabbed top-level switcher.
+- **Top-level sections always visible.** Primary section contents (Getting
+  Started, Guides, Concepts, Reference, Examples) should not be hidden behind
+  an extra click. The collapsible-group pattern is reserved for nested
+  sub-groupings (e.g. "OCJS package API" inside Reference) and for
+  auto-generated trees too large to inline (e.g. the 5000-class OCJS API
+  Reference).
+- **Section separators carry the section name.** This is the Stripe/Vercel
+  pattern: each top-level section gets a non-clickable heading that fences
+  its pages visually. The pages below it are direct children, not items
+  inside a re-stating collapsible.
+
+### Required structure for Fumadocs sites
+
+The root `meta.json` MUST use one of these two stutter-free patterns:
+
+**Pattern A (preferred)** — extract folder contents inline with the
+`...folder-name` syntax. The folder's own `meta.json` owns the page order;
+the root just composes sections.
+
+```json
+{
+  "title": "Documentation",
+  "pages": [
+    "index",
+    "---Getting Started---",
+    "...getting-started",
+    "---Guides---",
+    "...guides",
+    "---Concepts---",
+    "...concepts",
+    "---Reference---",
+    "...reference",
+    "api",
+    "---Examples---",
+    "...examples"
+  ]
+}
+```
+
+This produces an always-visible flat list of pages under each separator
+heading. The folder's own `meta.json` title (e.g. `"title": "Guides"`) is
+preserved for cases where the folder _is_ rendered as a group elsewhere
+(breadcrumbs, sub-trees) but does not double-render in the root sidebar.
+
+**Pattern B (acceptable)** — explicit page paths under separators. Use this
+when you need cross-folder interleaving or want absolute control over which
+pages surface at the root level.
+
+```json
+{
+  "pages": [
+    "index",
+    "---Getting Started---",
+    "getting-started/installation",
+    "getting-started/quick-start",
+    "---Guides---",
+    "guides/choosing-a-kernel",
+    "guides/live-rendering"
+  ]
+}
+```
+
+This is the pattern Tau's runtime docs (`apps/ui/content/docs/runtime/meta.json`) use.
+
+### Forbidden pattern
+
+The combination of a separator heading **and** the folder name as the next
+entry (which Fumadocs renders as a collapsible re-stating the section name)
+is forbidden:
+
+```json
+// WRONG — produces a "Guides / Guides" stutter in the sidebar
+{
+  "pages": ["---Guides---", "guides"]
+}
+```
+
+If you see a section name appearing twice in adjacent sidebar slots, this is
+the bug. Convert to Pattern A by changing `"guides"` to `"...guides"`.
+
+### When to use collapsible groups
+
+A collapsible (folder rendered as a group with its title) is the right
+choice in three cases:
+
+1. **Auto-generated trees too large to inline** (e.g. 5000-class API
+   references). Set `defaultOpen: false` in the folder's `meta.json` so the
+   sidebar isn't drowned by it at first paint.
+2. **Nested sub-groupings inside a primary section** (e.g. `OCJS package
+API` inside `Reference`). One level of nesting under a primary section
+   is fine; two or more is not.
+3. **Optional / advanced material gated behind explicit interest** (e.g. a
+   "Build pipeline (maintainers)" subgroup that consumer-track readers
+   shouldn't have to scan past).
+
+### Inline sub-separators
+
+Within an inlined section, sub-separators (`---Build pipeline
+(maintainers)---` etc.) are permitted and render as a visual fence inside
+the parent section. Use them sparingly — at most one or two per section —
+to fence audience-specific subgroups.
+
+### Sidebar depth budget
+
+- **Level 1:** Top-level separator (e.g. "Concepts").
+- **Level 2:** Pages directly under the separator OR a single nested
+  collapsible group.
+- **Level 3:** Pages inside that nested collapsible.
+
+Three levels is the hard ceiling for human navigation. Four-level structures
+must be split across multiple top-level sections, tabs, or doc sites.
+
+### Verification
+
+When adding or restructuring sidebar entries:
+
+1. Build the site (`pnpm build`) and visually scan the sidebar for adjacent
+   identical labels.
+2. Confirm every primary section heading is followed by pages (not by a
+   collapsible re-stating the section name).
+3. Confirm collapsibles only appear for the three cases above.

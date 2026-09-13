@@ -430,7 +430,7 @@ describe('WatchRegistry', () => {
       expect(failing).toHaveBeenCalledTimes(1);
       expect(passing).toHaveBeenCalledTimes(1);
       expect(passing).toHaveBeenCalledWith(expect.objectContaining({ type: 'reset' }));
-      expect(consoleErrorSpy).toHaveBeenCalledWith('[WatchRegistry] Handler error on reset:', expect.any(Error));
+      expect(consoleErrorSpy).toHaveBeenCalledWith('[WatchRegistry] Handler error:', expect.any(Error));
 
       consoleErrorSpy.mockRestore();
     });
@@ -497,7 +497,7 @@ describe('WatchRegistry', () => {
       expect(failing).toHaveBeenCalledTimes(1);
       expect(passing).toHaveBeenCalledTimes(1);
       expect(passing).toHaveBeenCalledWith(expect.objectContaining({ type: 'overflow' }));
-      expect(consoleErrorSpy).toHaveBeenCalledWith('[WatchRegistry] Handler error on overflow:', expect.any(Error));
+      expect(consoleErrorSpy).toHaveBeenCalledWith('[WatchRegistry] Handler error:', expect.any(Error));
 
       consoleErrorSpy.mockRestore();
       overflowRegistry.dispose();
@@ -542,6 +542,38 @@ describe('WatchRegistry', () => {
 
       kernelRegistry.dispose();
       uiRegistry.dispose();
+    });
+  });
+
+  describe('Topic-backed handler dispatch', () => {
+    it('should not skip sibling handlers when one self-unsubscribes during delivery', () => {
+      const sibling = vi.fn();
+      let unsubscribeSelf: (() => void) | undefined;
+
+      unsubscribeSelf = registry.watch({ paths: ['/src'] }, () => {
+        unsubscribeSelf?.();
+      });
+      registry.watch({ paths: ['/src'] }, sibling);
+
+      emitAndFlush(written('/src/file.txt'));
+
+      expect(sibling).toHaveBeenCalledOnce();
+    });
+
+    it('should continue delivery when a handler throws', () => {
+      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      const failing = vi.fn(() => {
+        throw new Error('boom');
+      });
+      const succeeding = vi.fn();
+
+      registry.watch({ paths: ['/src'] }, failing);
+      registry.watch({ paths: ['/src'] }, succeeding);
+      emitAndFlush(written('/src/file.txt'));
+
+      expect(failing).toHaveBeenCalledOnce();
+      expect(succeeding).toHaveBeenCalledOnce();
+      consoleErrorSpy.mockRestore();
     });
   });
 });

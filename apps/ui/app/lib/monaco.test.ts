@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { completionLanguages } from '#lib/monaco.lib.js';
+import { completionLanguages } from '#lib/monaco.lib.client.js';
 import { monacoLanguages } from '#lib/monaco.constants.js';
 
 describe('completionLanguages', () => {

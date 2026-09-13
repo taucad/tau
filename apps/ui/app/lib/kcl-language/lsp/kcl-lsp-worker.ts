@@ -11,6 +11,9 @@
 import type { JSONRPCRequest, JSONRPCResponse } from 'json-rpc-2.0';
 import init, { LspServerConfig, lsp_run_kcl } from '@taucad/kcl-wasm-lib';
 import wasmPath from '@taucad/kcl-wasm-lib/kcl.wasm?url';
+import { attachLanguageFsClient } from '@taucad/lsp-fs/client';
+import { joinPath } from '@taucad/utils/path';
+import { URI, Utils } from 'vscode-uri';
 import { Queue } from '#lib/kcl-language/lsp/codec/queue.js';
 import { StreamDemuxer } from '#lib/kcl-language/lsp/codec/stream-demuxer.js';
 import { createKclLogger } from '#lib/kcl-language/lsp/kcl-logs.js';
@@ -18,45 +21,64 @@ import { lspWorkerEventType, kclWorkerType } from '#lib/kcl-language/lsp/kcl-lsp
 import type {
   KclLspWorkerOptions,
   LspWorkerEvent,
-  FileReadResponse,
-  FileExistsResponse,
-  FileListResponse,
+  SetDocumentContextPayload,
 } from '#lib/kcl-language/lsp/kcl-lsp-types.js';
 import { encodeMessage, decodeMessage } from '#lib/kcl-language/lsp/codec/utils.js';
+import type { LanguageFsClient } from '@taucad/lsp-fs/client';
 
 const log = createKclLogger('LSP Worker');
 
+type WorkerFsState = Readonly<{
+  workspaceRootPath: string;
+  documentUri: string | undefined;
+}>;
+
+let workerFsState: WorkerFsState = { workspaceRootPath: '', documentUri: undefined };
+
+const pendingLanguageFsResponses = new Map<
+  string | number,
+  { resolve: (value: JSONRPCResponse) => void; reject: (reason: Error) => void }
+>();
+
+let languageFs: LanguageFsClient | undefined;
+
+function wasmPathToFileUri(rawPath: string): string {
+  if (rawPath.startsWith('file://')) {
+    return URI.parse(rawPath).toString();
+  }
+
+  if (rawPath.startsWith('/')) {
+    return URI.file(rawPath).toString();
+  }
+
+  const documentUriForJoin = workerFsState.documentUri
+    ? URI.parse(workerFsState.documentUri)
+    : URI.file(workerFsState.workspaceRootPath);
+  const baseDirectoryForJoin = Utils.joinPath(documentUriForJoin, '..');
+  return Utils.joinPath(baseDirectoryForJoin, rawPath).toString();
+}
+
+function ensureLanguageFs(): LanguageFsClient {
+  if (!languageFs) {
+    throw new Error('lsp-fs client not initialized');
+  }
+
+  return languageFs;
+}
+
 /**
- * FileSystemBridge provides filesystem access to the WASM LSP by
- * forwarding requests to the main thread where the fileManager lives.
+ * FileSystemBridge provides filesystem access to the WASM LSP — backed by
+ * {@link attachLanguageFsClient} + main-thread `serveLanguageFileSystemRequests`.
  */
-type PendingReadRequest = { resolve: (data: Uint8Array<ArrayBuffer>) => void; reject: (error: Error) => void };
-type PendingExistsRequest = { resolve: (exists: boolean) => void; reject: (error: Error) => void };
-// The inner resolve is called with files[], but it's wrapped in getAllFiles to JSON.stringify
-type PendingListRequest = { resolve: (files: string[]) => void; reject: (error: Error) => void };
-
 class FileSystemBridge {
-  private nextRequestId = 1;
-  private readonly pendingReadRequests = new Map<number, PendingReadRequest>();
-  private readonly pendingExistsRequests = new Map<number, PendingExistsRequest>();
-  private readonly pendingListRequests = new Map<number, PendingListRequest>();
-
   /**
    * Called from WASM to read a file.
    */
   public async readFile(path: string): Promise<Uint8Array<ArrayBuffer>> {
     log.debug('FileSystem.readFile called:', path);
-    const requestId = this.nextRequestId++;
-
-    return new Promise((resolve, reject) => {
-      this.pendingReadRequests.set(requestId, { resolve, reject });
-
-      globalThis.postMessage({
-        worker: kclWorkerType,
-        eventType: lspWorkerEventType.fileReadRequest,
-        eventData: { requestId, path },
-      });
-    });
+    const uri = wasmPathToFileUri(path);
+    const data = await ensureLanguageFs().readFile(uri);
+    return data;
   }
 
   /**
@@ -64,17 +86,13 @@ class FileSystemBridge {
    */
   public async exists(path: string): Promise<boolean> {
     log.debug('FileSystem.exists called:', path);
-    const requestId = this.nextRequestId++;
-
-    return new Promise((resolve, reject) => {
-      this.pendingExistsRequests.set(requestId, { resolve, reject });
-
-      globalThis.postMessage({
-        worker: kclWorkerType,
-        eventType: lspWorkerEventType.fileExistsRequest,
-        eventData: { requestId, path },
-      });
-    });
+    const uri = wasmPathToFileUri(path);
+    try {
+      await ensureLanguageFs().stat(uri);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   /**
@@ -83,90 +101,10 @@ class FileSystemBridge {
    */
   public async getAllFiles(path: string): Promise<string> {
     log.debug('FileSystem.getAllFiles called:', path);
-    const requestId = this.nextRequestId++;
-
-    return new Promise((resolve, reject) => {
-      this.pendingListRequests.set(requestId, {
-        resolve(files: string[]) {
-          // WASM expects JSON stringified array
-          resolve(JSON.stringify(files));
-        },
-        reject,
-      });
-
-      globalThis.postMessage({
-        worker: kclWorkerType,
-        eventType: lspWorkerEventType.fileListRequest,
-        eventData: { requestId, path },
-      });
-    });
-  }
-
-  /**
-   * Handle file read response from main thread.
-   */
-  public handleFileReadResponse(response: FileReadResponse): void {
-    const pending = this.pendingReadRequests.get(response.requestId);
-    if (!pending) {
-      log.debug('No pending read request for id:', response.requestId);
-      return;
-    }
-
-    this.pendingReadRequests.delete(response.requestId);
-
-    if (response.error) {
-      log.debug('File read error:', response.error);
-      pending.reject(new Error(response.error));
-    } else if (response.data) {
-      log.debug('File read success, bytes:', response.data.length);
-      pending.resolve(response.data);
-    } else {
-      log.debug('File not found');
-      // Return empty array for files that don't exist (WASM expects this)
-      pending.resolve(new Uint8Array());
-    }
-  }
-
-  /**
-   * Handle file exists response from main thread.
-   */
-  public handleFileExistsResponse(response: FileExistsResponse): void {
-    const pending = this.pendingExistsRequests.get(response.requestId);
-    if (!pending) {
-      log.debug('No pending exists request for id:', response.requestId);
-      return;
-    }
-
-    this.pendingExistsRequests.delete(response.requestId);
-
-    if (response.error) {
-      log.debug('File exists error:', response.error);
-      pending.reject(new Error(response.error));
-    } else {
-      log.debug('File exists result:', response.exists);
-      pending.resolve(response.exists);
-    }
-  }
-
-  /**
-   * Handle file list response from main thread.
-   */
-  public handleFileListResponse(response: FileListResponse): void {
-    const pending = this.pendingListRequests.get(response.requestId);
-    if (!pending) {
-      log.debug('No pending list request for id:', response.requestId);
-      return;
-    }
-
-    this.pendingListRequests.delete(response.requestId);
-
-    if (response.error) {
-      log.debug('File list error:', response.error);
-      pending.reject(new Error(response.error));
-    } else {
-      log.debug('File list result:', response.files.length, 'files');
-      pending.resolve(response.files);
-    }
+    const uri = wasmPathToFileUri(path);
+    const entries = await ensureLanguageFs().readDirectory(uri);
+    const names = entries.map((entry) => entry[0]);
+    return JSON.stringify(names);
   }
 }
 
@@ -175,9 +113,6 @@ const fromServer = new StreamDemuxer();
 const fileSystemBridge = new FileSystemBridge();
 let isWasmReady = false;
 
-// Initialize wasmReadyPromise and resolveWasmReady at declaration to ensure
-// resolveWasmReady is always defined when called (lines 204, 213, 238).
-// handleInitEvent will replace these with fresh instances.
 let resolveWasmReady: () => void = () => {
   // Placeholder - replaced by handleInitEvent
 };
@@ -229,12 +164,41 @@ async function runKclLsp(token: string, apiBaseUrl: string): Promise<void> {
   }
 }
 
+function initLanguageFsBridge(init: KclLspWorkerOptions): void {
+  workerFsState = { workspaceRootPath: init.workspaceRootPath, documentUri: undefined };
+
+  languageFs = attachLanguageFsClient({
+    filePoolBuffer: init.filePoolBuffer,
+    absolutePathForUri(uri: string): string {
+      const fsPath = URI.parse(uri).path;
+      const relative = fsPath.startsWith('/') ? fsPath.slice(1) : fsPath;
+      return joinPath(workerFsState.workspaceRootPath, relative);
+    },
+    sendJsonRpc: async (payload) => {
+      return new Promise<JSONRPCResponse>((resolve, reject) => {
+        const request = payload;
+        const { id } = request;
+        if (id === null || id === undefined) {
+          reject(new Error('lsp-fs: missing JSON-RPC id'));
+          return;
+        }
+
+        pendingLanguageFsResponses.set(id, { resolve, reject });
+        globalThis.postMessage({
+          worker: kclWorkerType,
+          eventType: lspWorkerEventType.languageFsJsonRpc,
+          eventData: request,
+        });
+      });
+    },
+  });
+}
+
 async function handleInitEvent(eventData: KclLspWorkerOptions): Promise<void> {
   const { wasmUrl, token, apiBaseUrl } = eventData;
   const actualWasmUrl = wasmUrl || wasmPath;
   log.debug('Init event received, wasmUrl:', actualWasmUrl);
 
-  // Create the ready promise
   wasmReadyPromise = new Promise((resolve) => {
     resolveWasmReady = resolve;
   });
@@ -242,6 +206,7 @@ async function handleInitEvent(eventData: KclLspWorkerOptions): Promise<void> {
   try {
     await initializeWasm(actualWasmUrl);
     log.debug('WASM module loaded, starting LSP...');
+    initLanguageFsBridge(eventData);
     // Don't await - let it run in background
     void runKclLsp(token, apiBaseUrl);
     // Wait for the LSP to be ready before processing more messages
@@ -295,6 +260,22 @@ async function handleCallEvent(data: Uint8Array<ArrayBuffer>): Promise<void> {
   }
 }
 
+function handleLanguageFsJsonRpcResponse(payload: JSONRPCResponse): void {
+  const { id } = payload;
+  if (typeof id !== 'string' && typeof id !== 'number') {
+    return;
+  }
+
+  const pending = pendingLanguageFsResponses.get(id);
+  if (!pending) {
+    log.debug('No pending lsp-fs response for id:', id);
+    return;
+  }
+
+  pendingLanguageFsResponses.delete(id);
+  pending.resolve(payload);
+}
+
 function handleMessage(event: MessageEvent): void {
   const { eventType, eventData } = event.data as LspWorkerEvent;
   log.debug('Message received, type:', eventType);
@@ -310,18 +291,14 @@ function handleMessage(event: MessageEvent): void {
       break;
     }
 
-    case lspWorkerEventType.fileReadResponse: {
-      fileSystemBridge.handleFileReadResponse(eventData as FileReadResponse);
+    case lspWorkerEventType.setDocumentContext: {
+      const { documentUri } = eventData as SetDocumentContextPayload;
+      workerFsState = { workspaceRootPath: workerFsState.workspaceRootPath, documentUri };
       break;
     }
 
-    case lspWorkerEventType.fileExistsResponse: {
-      fileSystemBridge.handleFileExistsResponse(eventData as FileExistsResponse);
-      break;
-    }
-
-    case lspWorkerEventType.fileListResponse: {
-      fileSystemBridge.handleFileListResponse(eventData as FileListResponse);
+    case lspWorkerEventType.languageFsJsonRpc: {
+      handleLanguageFsJsonRpcResponse(eventData as JSONRPCResponse);
       break;
     }
 

@@ -13,73 +13,73 @@ import { TauMetrics } from '@taucad/telemetry';
 
 @Injectable()
 export class MetricsService {
-  private readonly meter = metrics.getMeter('tau-api');
+  private readonly apiMeter = metrics.getMeter('tau-api');
   private readonly clientMeter = metrics.getMeter('tau-client');
 
   // WebSocket / RPC
-  public readonly rpcCallDuration = this.meter.createHistogram(TauMetrics.rpcCallDuration.name, {
+  public readonly rpcCallDuration = this.apiMeter.createHistogram(TauMetrics.rpcCallDuration.name, {
     description: TauMetrics.rpcCallDuration.description,
     unit: TauMetrics.rpcCallDuration.unit,
     advice: { explicitBucketBoundaries: [...TauMetrics.rpcCallDuration.buckets] },
   });
 
-  public readonly rpcActiveCalls = this.meter.createUpDownCounter(TauMetrics.rpcActiveCalls.name, {
+  public readonly rpcActiveCalls = this.apiMeter.createUpDownCounter(TauMetrics.rpcActiveCalls.name, {
     description: TauMetrics.rpcActiveCalls.description,
     unit: TauMetrics.rpcActiveCalls.unit,
   });
 
-  public readonly wsActiveConnections = this.meter.createUpDownCounter(TauMetrics.wsActiveConnections.name, {
+  public readonly wsActiveConnections = this.apiMeter.createUpDownCounter(TauMetrics.wsActiveConnections.name, {
     description: TauMetrics.wsActiveConnections.description,
     unit: TauMetrics.wsActiveConnections.unit,
   });
 
-  public readonly wsDisconnections = this.meter.createCounter(TauMetrics.wsDisconnections.name, {
+  public readonly wsDisconnections = this.apiMeter.createCounter(TauMetrics.wsDisconnections.name, {
     description: TauMetrics.wsDisconnections.description,
     unit: TauMetrics.wsDisconnections.unit,
   });
 
-  public readonly wsMessageSize = this.meter.createHistogram(TauMetrics.wsMessageSize.name, {
+  public readonly wsMessageSize = this.apiMeter.createHistogram(TauMetrics.wsMessageSize.name, {
     description: TauMetrics.wsMessageSize.description,
     unit: TauMetrics.wsMessageSize.unit,
     advice: { explicitBucketBoundaries: [...TauMetrics.wsMessageSize.buckets] },
   });
 
   // AI / LLM (GenAI semantic conventions)
-  public readonly genAiTokenUsage = this.meter.createHistogram(TauMetrics.genAiTokenUsage.name, {
+  public readonly genAiTokenUsage = this.apiMeter.createHistogram(TauMetrics.genAiTokenUsage.name, {
     description: TauMetrics.genAiTokenUsage.description,
     unit: TauMetrics.genAiTokenUsage.unit,
     advice: { explicitBucketBoundaries: [...TauMetrics.genAiTokenUsage.buckets] },
   });
 
-  public readonly genAiOperationDuration = this.meter.createHistogram(TauMetrics.genAiOperationDuration.name, {
+  public readonly genAiOperationDuration = this.apiMeter.createHistogram(TauMetrics.genAiOperationDuration.name, {
     description: TauMetrics.genAiOperationDuration.description,
     unit: TauMetrics.genAiOperationDuration.unit,
     advice: { explicitBucketBoundaries: [...TauMetrics.genAiOperationDuration.buckets] },
   });
 
-  public readonly genAiTimeToFirstToken = this.meter.createHistogram(TauMetrics.genAiTimeToFirstToken.name, {
+  public readonly genAiTimeToFirstToken = this.apiMeter.createHistogram(TauMetrics.genAiTimeToFirstToken.name, {
     description: TauMetrics.genAiTimeToFirstToken.description,
     unit: TauMetrics.genAiTimeToFirstToken.unit,
     advice: { explicitBucketBoundaries: [...TauMetrics.genAiTimeToFirstToken.buckets] },
   });
 
-  public readonly genAiCost = this.meter.createCounter(TauMetrics.genAiCost.name, {
+  public readonly genAiCost = this.apiMeter.createCounter(TauMetrics.genAiCost.name, {
     description: TauMetrics.genAiCost.description,
     unit: TauMetrics.genAiCost.unit,
   });
 
-  public readonly genAiToolInvocations = this.meter.createCounter(TauMetrics.genAiToolInvocations.name, {
+  public readonly genAiToolInvocations = this.apiMeter.createCounter(TauMetrics.genAiToolInvocations.name, {
     description: TauMetrics.genAiToolInvocations.description,
     unit: TauMetrics.genAiToolInvocations.unit,
   });
 
-  public readonly genAiAgentIterations = this.meter.createHistogram(TauMetrics.genAiAgentIterations.name, {
+  public readonly genAiAgentIterations = this.apiMeter.createHistogram(TauMetrics.genAiAgentIterations.name, {
     description: TauMetrics.genAiAgentIterations.description,
     unit: TauMetrics.genAiAgentIterations.unit,
     advice: { explicitBucketBoundaries: [...TauMetrics.genAiAgentIterations.buckets] },
   });
 
-  public readonly genAiAgentSafeguardInterventions = this.meter.createCounter(
+  public readonly genAiAgentSafeguardInterventions = this.apiMeter.createCounter(
     TauMetrics.genAiAgentSafeguardInterventions.name,
     {
       description: TauMetrics.genAiAgentSafeguardInterventions.description,
@@ -87,7 +87,7 @@ export class MetricsService {
     },
   );
 
-  public readonly genAiInterruptRecoveryReminders = this.meter.createCounter(
+  public readonly genAiInterruptRecoveryReminders = this.apiMeter.createCounter(
     TauMetrics.genAiInterruptRecoveryReminders.name,
     {
       description: TauMetrics.genAiInterruptRecoveryReminders.description,
@@ -95,26 +95,44 @@ export class MetricsService {
     },
   );
 
-  public readonly genAiPromptSectionSize = this.meter.createHistogram(TauMetrics.genAiPromptSectionSize.name, {
+  public readonly chatToolResultOffloaded = this.apiMeter.createCounter(TauMetrics.chatToolResultOffloaded.name, {
+    description: TauMetrics.chatToolResultOffloaded.description,
+    unit: TauMetrics.chatToolResultOffloaded.unit,
+  });
+
+  public readonly genAiPromptSectionSize = this.apiMeter.createHistogram(TauMetrics.genAiPromptSectionSize.name, {
     description: TauMetrics.genAiPromptSectionSize.description,
     unit: TauMetrics.genAiPromptSectionSize.unit,
     advice: { explicitBucketBoundaries: [...TauMetrics.genAiPromptSectionSize.buckets] },
   });
 
   // Infrastructure
-  public readonly redisConnectionState = this.meter.createGauge(TauMetrics.redisConnectionState.name, {
+  public readonly redisConnectionState = this.apiMeter.createGauge(TauMetrics.redisConnectionState.name, {
     description: TauMetrics.redisConnectionState.description,
   });
 
-  public readonly sseActiveConnections = this.meter.createUpDownCounter(TauMetrics.sseActiveConnections.name, {
+  public readonly sseActiveConnections = this.apiMeter.createUpDownCounter(TauMetrics.sseActiveConnections.name, {
     description: TauMetrics.sseActiveConnections.description,
     unit: TauMetrics.sseActiveConnections.unit,
   });
 
-  public readonly sseEvents = this.meter.createCounter(TauMetrics.sseEvents.name, {
+  public readonly sseEvents = this.apiMeter.createCounter(TauMetrics.sseEvents.name, {
     description: TauMetrics.sseEvents.description,
     unit: TauMetrics.sseEvents.unit,
   });
+
+  public readonly publicationViewsTotal = this.apiMeter.createCounter(TauMetrics.publicationViewsTotal.name, {
+    description: TauMetrics.publicationViewsTotal.description,
+    unit: TauMetrics.publicationViewsTotal.unit,
+  });
+
+  public readonly publicationViewsRejectedTotal = this.apiMeter.createCounter(
+    TauMetrics.publicationViewsRejectedTotal.name,
+    {
+      description: TauMetrics.publicationViewsRejectedTotal.description,
+      unit: TauMetrics.publicationViewsRejectedTotal.unit,
+    },
+  );
 
   // Client-reported metrics (ingested via TelemetryController)
   public readonly kernelExecutionDuration = this.clientMeter.createHistogram(TauMetrics.kernelExecutionDuration.name, {

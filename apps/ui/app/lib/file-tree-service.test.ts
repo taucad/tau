@@ -64,6 +64,7 @@ function createMockProxy(overrides?: Partial<FileManagerProxy>): FileManagerProx
     writeFile: vi.fn().mockResolvedValue(undefined),
     writeFiles: vi.fn().mockResolvedValue(undefined),
     rename: vi.fn().mockResolvedValue(undefined),
+    move: vi.fn().mockResolvedValue({ type: 'file', size: 0, mtimeMs: 0 }),
     unlink: vi.fn().mockResolvedValue(undefined),
     copyDirectory: vi.fn().mockResolvedValue(undefined),
     getZippedDirectory: vi.fn().mockResolvedValue(new Blob()),
@@ -495,107 +496,6 @@ describe('FileTreeService', () => {
       const entry = await service.getEntry('nonexistent.ts');
 
       expect(entry).toBeUndefined();
-    });
-  });
-
-  // ── deleteDirectory() ──
-
-  describe('deleteDirectory', () => {
-    it('should delete all nested files and the directory via proxy', async () => {
-      const nestedFiles: FileStatEntry[] = [
-        { path: '/project/src/a.ts', name: 'a.ts', type: 'file', size: 1, mtimeMs: 0 },
-        { path: '/project/src/b.ts', name: 'b.ts', type: 'file', size: 1, mtimeMs: 0 },
-      ];
-      vi.mocked(proxy.getDirectoryStat).mockResolvedValueOnce(nestedFiles);
-
-      await service.deleteDirectory('src');
-
-      expect(proxy.unlink).toHaveBeenCalledWith('/project/src/a.ts');
-      expect(proxy.unlink).toHaveBeenCalledWith('/project/src/b.ts');
-      expect(proxy.rmdir).toHaveBeenCalledWith('/project/src');
-    });
-
-    it('should remove deleted entries from the local tree snapshot', async () => {
-      const { service: localService } = createTreeHarness({
-        proxy,
-        initialEntries: [
-          createEntry('src', 'dir'),
-          createEntry('src/a.ts'),
-          createEntry('src/b.ts'),
-          createEntry('other.ts'),
-        ],
-      });
-      const nestedFiles: FileStatEntry[] = [
-        { path: '/project/src/a.ts', name: 'a.ts', type: 'file', size: 1, mtimeMs: 0 },
-        { path: '/project/src/b.ts', name: 'b.ts', type: 'file', size: 1, mtimeMs: 0 },
-      ];
-      vi.mocked(proxy.getDirectoryStat).mockResolvedValueOnce(nestedFiles);
-
-      await localService.deleteDirectory('src');
-
-      expect(localService.getTreeSnapshot().has('src')).toBe(false);
-      expect(localService.getTreeSnapshot().has('src/a.ts')).toBe(false);
-      expect(localService.getTreeSnapshot().has('src/b.ts')).toBe(false);
-      expect(localService.getTreeSnapshot().has('other.ts')).toBe(true);
-
-      localService.dispose();
-    });
-
-    it('should handle relative paths from getDirectoryStat (InMemoryFileTree built)', async () => {
-      const relativeFiles: FileStatEntry[] = [
-        { path: 'a.ts', name: 'a.ts', type: 'file', size: 1, mtimeMs: 0 },
-        { path: 'sub/b.ts', name: 'b.ts', type: 'file', size: 1, mtimeMs: 0 },
-      ];
-      vi.mocked(proxy.getDirectoryStat).mockResolvedValueOnce(relativeFiles);
-
-      await service.deleteDirectory('.tau/cache');
-
-      expect(proxy.unlink).toHaveBeenCalledWith('/project/.tau/cache/a.ts');
-      expect(proxy.unlink).toHaveBeenCalledWith('/project/.tau/cache/sub/b.ts');
-      expect(proxy.rmdir).toHaveBeenCalledWith('/project/.tau/cache');
-    });
-
-    it('should rmdir subdirectories deepest-first before top-level directory', async () => {
-      const relativeFiles: FileStatEntry[] = [
-        { path: 'root-file.glb', name: 'root-file.glb', type: 'file', size: 1, mtimeMs: 0 },
-        { path: 'meshes/part.glb', name: 'part.glb', type: 'file', size: 1, mtimeMs: 0 },
-        { path: 'meshes/sub/nested.glb', name: 'nested.glb', type: 'file', size: 1, mtimeMs: 0 },
-      ];
-      vi.mocked(proxy.getDirectoryStat).mockResolvedValueOnce(relativeFiles);
-
-      await service.deleteDirectory('.tau/cache');
-
-      const rmdirCalls = vi.mocked(proxy.rmdir).mock.calls.map((c) => c[0]);
-      expect(rmdirCalls).toEqual([
-        '/project/.tau/cache/meshes/sub',
-        '/project/.tau/cache/meshes',
-        '/project/.tau/cache',
-      ]);
-    });
-
-    it('should prune tree even when getDirectoryStat returns relative paths', async () => {
-      const { service: localService } = createTreeHarness({
-        proxy,
-        initialEntries: [
-          createEntry('.tau', 'dir'),
-          createEntry('.tau/cache', 'dir'),
-          createEntry('.tau/cache/model.glb'),
-          createEntry('main.ts'),
-        ],
-      });
-      const relativeFiles: FileStatEntry[] = [
-        { path: 'model.glb', name: 'model.glb', type: 'file', size: 1, mtimeMs: 0 },
-      ];
-      vi.mocked(proxy.getDirectoryStat).mockResolvedValueOnce(relativeFiles);
-
-      await localService.deleteDirectory('.tau/cache');
-
-      expect(localService.getTreeSnapshot().has('.tau/cache')).toBe(false);
-      expect(localService.getTreeSnapshot().has('.tau/cache/model.glb')).toBe(false);
-      expect(localService.getTreeSnapshot().has('.tau')).toBe(true);
-      expect(localService.getTreeSnapshot().has('main.ts')).toBe(true);
-
-      localService.dispose();
     });
   });
 

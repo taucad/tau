@@ -31,6 +31,10 @@ export const metaConfig = {
    */
   githubUrl: 'https://github.com/taucad/tau',
   /**
+   * The invite URL for the community Discord server.
+   */
+  discordUrl: 'https://discord.gg/6pfSAN3t7A',
+  /**
    * The description of the app. Used for SEO and other metadata such as PWA and app store descriptions.
    */
   description: 'Tau: The AI-native CAD platform for the web.',

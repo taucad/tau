@@ -34,6 +34,7 @@ import {
   MeshMatcapMaterial,
   LineDashedMaterial,
 } from 'three';
+import { topMostRenderOrder } from '#components/geometry/graphics/three/utils/render-order.utils.js';
 import translationArrowSvg from '#components/geometry/graphics/three/icons/translation-arrow.svg?raw';
 import rotationArrowSvg from '#components/geometry/graphics/three/icons/rotation-arrow.svg?raw';
 import { SvgGeometry } from '#components/geometry/graphics/three/geometries/svg-geometry.js';
@@ -835,11 +836,11 @@ class TransformControlsGizmo extends Object3D {
 
     const matLabelBackground = gizmoMaterial.clone();
     matLabelBackground.color.set(0xff_ff_ff);
-    matLabelBackground.visible = false; // TODO: Show label text, update text as transform changes
+    matLabelBackground.visible = false; // Label chrome: visibility can track transform updates later
 
     const matLabelText = gizmoMaterial.clone();
     matLabelText.color.set(0x00_00_00);
-    matLabelText.visible = false; // TODO: Show label text, update text as transform changes
+    matLabelText.visible = false; // Label chrome: visibility can track transform updates later
 
     const matRed = gizmoMaterial.clone();
     matRed.color.set(0xef_44_44);
@@ -1400,7 +1401,7 @@ class TransformControlsGizmo extends Object3D {
             object.computeLineDistances();
           }
 
-          object.renderOrder = Infinity;
+          object.renderOrder = topMostRenderOrder;
 
           object.position.set(0, 0, 0);
           object.rotation.set(0, 0, 0);
@@ -1494,7 +1495,7 @@ class TransformControlsGizmo extends Object3D {
 
       handle.scale.set(1, 1, 1).multiplyScalar((factor * this.size) / 7);
 
-      // TODO: simplify helpers and consider decoupling from gizmo
+      // Note: Helper scaling could be split from gizmo core later
 
       if (handle.tag === 'helper') {
         handle.visible = false;

@@ -5,6 +5,7 @@ import { HoverCard, HoverCardContent, HoverCardTrigger } from '#components/ui/ho
 import { Badge } from '#components/ui/badge.js';
 import { SvgIcon } from '#components/icons/svg-icon.js';
 import { cn } from '#utils/ui.utils.js';
+import { KernelTierBadge } from '#components/tier-badge.js';
 
 export type KernelSelectorProperties = {
   readonly selectedKernel: KernelProvider;
@@ -18,7 +19,7 @@ export function KernelSelector({
   onClose,
 }: KernelSelectorProperties): React.JSX.Element {
   return (
-    <div className="flex flex-wrap gap-3 max-md:-mx-4 max-md:snap-x max-md:snap-mandatory max-md:scroll-px-4 max-md:flex-nowrap max-md:overflow-x-auto max-md:pb-2 max-md:pl-4 max-md:[-webkit-overflow-scrolling:touch] max-md:[scrollbar-width:none] max-md:after:block max-md:after:w-1 max-md:after:shrink-0 max-md:after:content-[''] max-md:[&::-webkit-scrollbar]:hidden">
+    <div className="flex flex-wrap gap-3 max-md:-mx-4 max-md:snap-x max-md:snap-mandatory max-md:scroll-px-4 max-md:[scrollbar-width:none] max-md:flex-nowrap max-md:overflow-x-auto max-md:pb-2 max-md:pl-4 max-md:[-webkit-overflow-scrolling:touch] max-md:after:block max-md:after:w-1 max-md:after:shrink-0 max-md:after:content-[''] max-md:[&::-webkit-scrollbar]:hidden">
       {kernelConfigurations.map((option) => (
         <HoverCard key={option.id}>
           <HoverCardTrigger asChild>
@@ -38,7 +39,10 @@ export function KernelSelector({
             >
               <div className='flex items-center gap-2'>
                 <SvgIcon id={option.id} className='size-4 sm:size-5' />
-                <span className='text-xs font-medium sm:text-sm'>{option.name}</span>
+                <span className='flex items-center gap-1.5 text-xs font-medium sm:text-sm'>
+                  {option.name}
+                  <KernelTierBadge kernelId={option.id} />
+                </span>
               </div>
             </Button>
           </HoverCardTrigger>
@@ -47,7 +51,10 @@ export function KernelSelector({
               <div className='flex items-start gap-4'>
                 <SvgIcon id={option.id} className='size-12 min-w-12 rounded-lg bg-muted p-2' />
                 <div>
-                  <h3 className='text-lg font-semibold'>{option.name}</h3>
+                  <h3 className='flex items-center gap-1.5 text-lg font-semibold'>
+                    {option.name}
+                    <KernelTierBadge kernelId={option.id} />
+                  </h3>
                   <p className='text-sm text-wrap text-muted-foreground italic'>{option.description}</p>
                 </div>
               </div>

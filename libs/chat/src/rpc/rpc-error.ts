@@ -1,3 +1,4 @@
+import { getErrno } from '@taucad/utils/error';
 import type { RpcClientErrorCode } from '#schemas/rpc.schema.js';
 import { rpcClientErrorCode } from '#schemas/rpc.schema.js';
 import type { RpcHandlerError } from '#rpc/rpc-dependencies.js';
@@ -29,7 +30,7 @@ export function getErrorMessage(error: unknown): string {
 /** @public */
 export function getErrorCode(error: unknown): RpcClientErrorCode {
   if (error instanceof Error) {
-    const errno = (error as { code?: string }).code;
+    const errno = getErrno(error);
     if (errno && errno in errnoToRpcCode) {
       return errnoToRpcCode[errno]!;
     }

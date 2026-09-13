@@ -7,7 +7,7 @@
  */
 
 /** Debounce delay for parameter-change re-renders. Milliseconds. */
-export const parameterDebounce = 200;
+export const parameterDebounce = 0;
 
 /** Debounce delay for file-change re-renders. Milliseconds. */
 export const fileChangeDebounce = 200;

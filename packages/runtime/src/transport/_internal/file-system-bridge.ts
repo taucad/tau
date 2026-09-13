@@ -30,7 +30,12 @@ export const buildFileSystemBridge = (fs: RuntimeFileSystem | undefined): Resolv
   }
   const handle = resolveRuntimeFileSystem(fs);
   if (handle.kind === 'inline') {
-    const bridge = createBridgePort(handle.fs as unknown as Record<string, unknown>);
+    /* Mint a fresh `RuntimeFileSystemBase` per bridge build. Each
+     * `web-worker-client` / `node-worker-client` materialise() invocation
+     * calls this once, so each `RuntimeClient` owns an isolated inline
+     * filesystem instance — no shared mutable state across clients
+     * built from the same `inProcessTransport({ fileSystem })` plugin. */
+    const bridge = createBridgePort(handle.create());
     return {
       port: bridge.port,
       kind: 'inline',

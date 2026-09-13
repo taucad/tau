@@ -3,7 +3,7 @@ import { isEqual, keys, xor } from '#to-json-schema/to-json-schema.utils.js';
 import { formatRegexps, types } from '#to-json-schema/json-schema-helpers.js';
 
 /** All recognized JSON Schema string format names (date-time, email, uri, etc.). */
-export const stringFormats = Object.keys(formatRegexps);
+export const stringFormats: string[] = Object.keys(formatRegexps);
 
 /** Ordered list of JSON Schema type keywords used for value type detection. */
 export const typeNames = [

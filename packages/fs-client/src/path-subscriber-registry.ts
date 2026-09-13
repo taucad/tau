@@ -4,9 +4,12 @@
  *
  * @public
  */
+import { Topic } from '@taucad/events';
+
 export class PathSubscriberRegistry<E = undefined> {
-  private readonly pathSubscribers = new Map<string, Set<(event: E) => void>>();
-  private readonly globalSubscribers = new Set<(event: E) => void>();
+  readonly #pathTopics = new Map<string, Topic<E>>();
+  readonly #pathCallbackUnsubs = new Map<string, Map<(event: E) => void, () => void>>();
+  readonly #globalTopic = new Topic<E>({ name: 'PathSubscriberRegistry.global' });
 
   /**
    * Subscribe to notifications for a single path key.
@@ -15,18 +18,34 @@ export class PathSubscriberRegistry<E = undefined> {
    * @returns Unsubscribe function that removes `callback` from `path`.
    */
   public subscribePath(path: string, callback: (event: E) => void): () => void {
-    let pathSet = this.pathSubscribers.get(path);
-    if (!pathSet) {
-      pathSet = new Set();
-      this.pathSubscribers.set(path, pathSet);
+    let callbackMap = this.#pathCallbackUnsubs.get(path);
+    if (!callbackMap) {
+      callbackMap = new Map();
+      this.#pathCallbackUnsubs.set(path, callbackMap);
     }
-    pathSet.add(callback);
-    return () => {
-      pathSet.delete(callback);
-      if (pathSet.size === 0) {
-        this.pathSubscribers.delete(path);
+    const existing = callbackMap.get(callback);
+    if (existing) {
+      return existing;
+    }
+
+    let topic = this.#pathTopics.get(path);
+    if (!topic) {
+      topic = new Topic<E>({ name: `PathSubscriberRegistry[${path}]` });
+      this.#pathTopics.set(path, topic);
+    }
+    const unsubscribe = topic.subscribe(callback);
+    const wrappedUnsubscribe = (): void => {
+      unsubscribe();
+      callbackMap.delete(callback);
+      if (callbackMap.size === 0) {
+        this.#pathCallbackUnsubs.delete(path);
+      }
+      if (topic.size === 0) {
+        this.#pathTopics.delete(path);
       }
     };
+    callbackMap.set(callback, wrappedUnsubscribe);
+    return wrappedUnsubscribe;
   }
 
   /**
@@ -35,10 +54,7 @@ export class PathSubscriberRegistry<E = undefined> {
    * @returns Unsubscribe function that removes `callback`.
    */
   public subscribeGlobal(callback: (event: E) => void): () => void {
-    this.globalSubscribers.add(callback);
-    return () => {
-      this.globalSubscribers.delete(callback);
-    };
+    return this.#globalTopic.subscribe(callback);
   }
 
   /**
@@ -47,14 +63,7 @@ export class PathSubscriberRegistry<E = undefined> {
    * @param event - Payload passed to each subscriber callback.
    */
   public notifyPath(path: string, event: E): void {
-    const set = this.pathSubscribers.get(path);
-    if (!set) {
-      return;
-    }
-    const subscribers = [...set];
-    for (const callback of subscribers) {
-      callback(event);
-    }
+    this.#pathTopics.get(path)?.emit(event);
   }
 
   /**
@@ -62,18 +71,19 @@ export class PathSubscriberRegistry<E = undefined> {
    * @param event - Payload passed to each global callback.
    */
   public notifyGlobal(event: E): void {
-    const subscribers = [...this.globalSubscribers];
-    for (const callback of subscribers) {
-      callback(event);
-    }
+    this.#globalTopic.emit(event);
   }
 
   /**
    * Drop all registered subscribers.
    */
   public clear(): void {
-    this.pathSubscribers.clear();
-    this.globalSubscribers.clear();
+    for (const topic of this.#pathTopics.values()) {
+      topic.dispose();
+    }
+    this.#pathTopics.clear();
+    this.#pathCallbackUnsubs.clear();
+    this.#globalTopic.dispose();
   }
 
   /**
@@ -82,8 +92,8 @@ export class PathSubscriberRegistry<E = undefined> {
    */
   public get pathSubscriberCount(): number {
     let count = 0;
-    for (const set of this.pathSubscribers.values()) {
-      count += set.size;
+    for (const topic of this.#pathTopics.values()) {
+      count += topic.size;
     }
     return count;
   }
@@ -94,7 +104,7 @@ export class PathSubscriberRegistry<E = undefined> {
    * @returns `true` when the path has at least one subscriber.
    */
   public hasPathSubscribers(path: string): boolean {
-    return (this.pathSubscribers.get(path)?.size ?? 0) > 0;
+    return (this.#pathTopics.get(path)?.size ?? 0) > 0;
   }
 
   /**
@@ -102,6 +112,6 @@ export class PathSubscriberRegistry<E = undefined> {
    * @returns Copy of active path keys with subscribers.
    */
   public subscribedPaths(): string[] {
-    return [...this.pathSubscribers.keys()];
+    return [...this.#pathTopics.keys()];
   }
 }

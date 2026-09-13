@@ -1,6 +1,6 @@
 {
   "name": "@taucad/testing",
-  "version": "0.0.1",
+  "version": "0.1.0-beta.0",
   "description": "Geometry analysis, grading, and test utilities for @taucad packages",
   "type": "module",
   "private": false,
@@ -52,8 +52,8 @@
     }
   },
   "dependencies": {
-    "@gltf-transform/core": "^4.1.1",
-    "@gltf-transform/functions": "^4.1.1"
+    "@gltf-transform/core": "^4.3.0",
+    "@gltf-transform/functions": "^4.3.0"
   },
   "devDependencies": {
     "@taucad/openscad": "workspace:*",

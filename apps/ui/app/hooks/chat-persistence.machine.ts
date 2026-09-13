@@ -42,12 +42,34 @@ export type ChatPersistenceMachineInput = {
  *   this into AI SDK's private `Chat.makeRequest({ trigger: 'submit-message' })`
  *   so `chat.messages` stays untouched.
  */
+/**
+ * Per-request body the chat-client composes from `useCadAgentConfig` and
+ * forwards through the persistence machine to the chat-session-store
+ * `dispatchRequest` listener. The listener merges this object into the
+ * `chat.sendMessage` / `chat.regenerate` call so the wire body always carries
+ * an `agent` block — never the cookie-bleed-prone per-message metadata path.
+ *
+ * Optional because the legacy hydration-driven `regenerate` (auto-fired on
+ * pending-tail load) still runs before the chat-client mounts; the
+ * `regenerateTail` chat-client verb is what eventually replaces that
+ * untyped path (see t17).
+ *
+ * @public
+ */
+export type ChatRequestBody = Readonly<Record<string, unknown>>;
+
 export type ChatRequest =
-  | { kind: 'send'; message: MyUIMessage }
-  | { kind: 'regenerate' }
-  | { kind: 'edit'; messageId: string; content: string; model: string; imageUrls?: string[] }
-  | { kind: 'retry'; messageId: string; modelId?: string }
-  | { kind: 'continue' };
+  | { kind: 'send'; message: MyUIMessage; body?: ChatRequestBody }
+  | { kind: 'regenerate'; body?: ChatRequestBody }
+  | {
+      kind: 'edit';
+      messageId: string;
+      content: string;
+      imageUrls?: string[];
+      body?: ChatRequestBody;
+    }
+  | { kind: 'retry'; messageId: string; body?: ChatRequestBody }
+  | { kind: 'continue'; body?: ChatRequestBody };
 
 /**
  * Why the in-flight chat request ended, forwarded to `finalizeInterruptedToolParts`
@@ -182,7 +204,73 @@ type ChatPersistenceMachineEmitted =
   | { type: 'dispatchStop' }
   | { type: 'applyFinishedRequest'; messages: MyUIMessage[]; cause: RequestTerminationCause }
   | { type: 'applyStoppedRequest'; messages: MyUIMessage[]; cause: 'user_stop' }
+  /**
+   * User-initiated stop that landed before any assistant content streamed
+   * in. The store listener lifts `userMessage` back into the composer draft
+   * (via `draftMachine.loadDraftFromMessage`) and replaces `chat.messages`
+   * with `truncatedMessages` so the cancelled turn disappears from the
+   * transcript entirely. `chat-history.tsx` also subscribes to refocus the
+   * composer in the same frame.
+   *
+   * The split from `applyStoppedRequest` lets the machine pre-compute the
+   * trim and surface a single typed payload — the store does no message
+   * shape work, mirroring how `applyResumedRequest` already carries its
+   * derived `pendingRequest`.
+   */
+  | {
+      type: 'restoreCancelledDraft';
+      userMessage: MyUIMessage;
+      truncatedMessages: MyUIMessage[];
+      cause: 'user_stop';
+    }
   | { type: 'applyResumedRequest'; messages: MyUIMessage[]; pendingRequest: ChatRequest; cause: 'preempt' };
+
+/**
+ * Discriminator for the empty-cancel restore path. Returns `true` when no
+ * assistant content has streamed in for the current turn — either the
+ * trailing message is still the user's prompt (assistant placeholder not
+ * yet appended by AI SDK), or the assistant message exists but holds zero
+ * parts. Strict zero-parts check keeps the predicate conservative: any
+ * surfaced text/tool/reasoning part flips this back to the stay-in-transcript
+ * branch so partial output is never silently discarded.
+ */
+function hasNoAssistantContent(messages: readonly MyUIMessage[]): boolean {
+  const last = messages.at(-1);
+  if (!last) {
+    return true;
+  }
+  if (last.role === 'user') {
+    return true;
+  }
+  return last.role === 'assistant' && last.parts.length === 0;
+}
+
+/**
+ * Build the `restoreCancelledDraft` emit payload from the in-flight
+ * messages array. The trailing zero-part assistant placeholder (if any)
+ * and the trailing user message are sliced off; the user message itself
+ * is forwarded so the listener can hand it to `draftMachine.loadDraftFromMessage`.
+ *
+ * Caller guarantees `hasNoAssistantContent(messages) === true`, so the
+ * walk lands on a user message within at most two steps from the tail.
+ */
+function buildRestoreCancelledDraftEmit(messages: MyUIMessage[]): {
+  type: 'restoreCancelledDraft';
+  userMessage: MyUIMessage;
+  truncatedMessages: MyUIMessage[];
+  cause: 'user_stop';
+} {
+  const last = messages.at(-1);
+  const trimmedTail = last?.role === 'assistant' && last.parts.length === 0 ? messages.slice(0, -1) : messages;
+  const userMessage = trimmedTail.at(-1)!;
+  const truncatedMessages = trimmedTail.slice(0, -1);
+  return {
+    type: 'restoreCancelledDraft',
+    userMessage,
+    truncatedMessages,
+    cause: 'user_stop',
+  };
+}
 
 const loadChatActor = fromSafeAsync<ChatRetrievedEvent, { chatId: string }>(async () => {
   throw new Error('loadChatActor not provided');
@@ -561,6 +649,15 @@ export const chatPersistenceMachine = setup({
                   })),
                   assign({ pendingRequest: undefined }),
                 ],
+              },
+              // Empty-cancel: the user stopped before any assistant content
+              // streamed in. Emit the restore variant so the store listener
+              // lifts the user message back into the composer draft and
+              // truncates `chat.messages` — see `restoreCancelledDraft`.
+              {
+                guard: ({ event }) => hasNoAssistantContent(event.messages),
+                target: 'idle',
+                actions: emit(({ event }) => buildRestoreCancelledDraftEmit(event.messages)),
               },
               {
                 target: 'idle',

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { resolveKernel } from '@taucad/types/constants';
 import type { CreateProjectOptions } from '#hooks/use-project-manager.js';
 import ChatStart from '#routes/_index/route.js';
 
@@ -70,11 +71,38 @@ vi.mock('#hooks/use-chat.js', () => ({
       clearDraft: vi.fn(),
     };
   },
+  useDraftActions() {
+    return {
+      clearDraft: vi.fn(),
+    };
+  },
 }));
 
+// Single composer-context mock. `HomepageChatInput` now reads modelId,
+// kernelId and draftActorRef off the unified contract (`useChatComposer()`),
+// so this one mock replaces both the legacy `useActiveChatModel` mock and
+// the bespoke `useChatComposer` stub.
 vi.mock('#hooks/active-chat-provider.js', () => ({
   ActiveChatProvider({ children }: { readonly children: React.ReactNode }) {
     return <div data-testid='active-chat-provider'>{children}</div>;
+  },
+  ChatComposerProvider({ children }: { readonly children: React.ReactNode }) {
+    return <div data-testid='chat-composer-provider'>{children}</div>;
+  },
+  useChatComposer() {
+    return {
+      draftActorRef: { send: vi.fn() },
+      model: {
+        modelId: 'gpt-5-test-id',
+        model: { id: 'gpt-5-test-id', name: 'Test GPT' },
+        setActiveModel: vi.fn(),
+      },
+      kernel: { kernelId: 'openscad', kernel: resolveKernel('openscad'), setActiveKernel: vi.fn() },
+      status: 'ready',
+      stop: () => undefined,
+      contextUsage: undefined,
+      session: undefined,
+    };
   },
 }));
 
@@ -82,12 +110,7 @@ vi.mock('#components/chat/chat-textarea.js', () => ({
   ChatTextarea({
     onSubmit,
   }: {
-    readonly onSubmit: (input: {
-      content: string;
-      model: string;
-      metadata?: { toolChoice?: string; mode?: 'agent' | 'plan' };
-      imageUrls?: string[];
-    }) => Promise<void>;
+    readonly onSubmit: (input: { content: string; imageUrls?: string[] }) => Promise<void>;
   }) {
     return (
       <button
@@ -96,8 +119,6 @@ vi.mock('#components/chat/chat-textarea.js', () => ({
         onClick={() =>
           void onSubmit({
             content: 'design a bracket',
-            model: 'mock-model',
-            metadata: { mode: 'agent' },
             imageUrls: ['data:image/png;base64,mock'],
           })
         }
@@ -243,7 +264,10 @@ describe('ChatStart', () => {
     );
   });
 
-  it('should pass cookie kernel and per-message model to createProject so the seeded chat owns them', async () => {
+  // `Chat.activeModel` is seeded so pending-tail hydration auto-regenerate runs
+  // with the picker model; the agent payload comes from `useCadChatClient` /
+  // `latestAgentBody` — not message metadata.
+  it('should pass kernel, cookie/chat-scoped model id as activeModel, and minimal initialMessage to createProject', async () => {
     mockCreateProject.mockResolvedValue({ id: 'project_123' });
 
     render(<ChatStart />);
@@ -256,8 +280,13 @@ describe('ChatStart', () => {
     const [firstCallArgs] = mockCreateProject.mock.calls[0] ?? [];
     expect(firstCallArgs).toMatchObject({
       kernel: 'openscad',
+      activeModel: 'gpt-5-test-id',
+      initialMessage: {
+        content: 'design a bracket',
+        imageUrls: ['data:image/png;base64,mock'],
+      },
     });
-    expect(firstCallArgs?.initialMessage?.model).toBe('mock-model');
+    expect((firstCallArgs?.initialMessage as Record<string, unknown> | undefined)?.['model']).toBeUndefined();
   });
 
   it('should not clear draft when project creation fails', async () => {

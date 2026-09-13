@@ -55,17 +55,32 @@ function createMonacoUri(monaco: typeof Monaco, relativePath: string): Monaco.Ur
 
 /**
  * Params passed to each editor panel via Dockview.
+ *
+ * `paneId` is the stable identity of the editor pane and matches both
+ * `OpenFile.paneId` in the editor machine and the Dockview panel id. The
+ * `filePath` is the *current* path of the file the pane is showing —
+ * mutated in place by the rename participant without disturbing
+ * `paneId`, which is what lets the `FileEditor` survive a rename.
  */
 type EditorPanelParameters = {
   filePath: string;
+  paneId?: string;
+  readOnly?: boolean;
 };
 
 /**
  * Single file editor panel rendered inside each Dockview panel.
  */
 function EditorPanel(properties: IDockviewPanelProps<EditorPanelParameters>): React.JSX.Element {
-  const { filePath } = properties.params;
-  return <FileEditor filePath={filePath} panelApi={properties.api} />;
+  const { filePath, readOnly, paneId } = properties.params;
+  return (
+    <FileEditor
+      paneId={paneId ?? properties.api.id}
+      filePath={filePath}
+      readOnly={readOnly}
+      panelApi={properties.api}
+    />
+  );
 }
 
 const components = {
@@ -74,13 +89,21 @@ const components = {
 
 /**
  * FileEditor - renders a Monaco editor for a single file.
- * Each Dockview panel gets its own instance.
+ *
+ * Each Dockview panel gets its own instance. The component keys
+ * everything off the stable `paneId` (Dockview panel id) rather than the
+ * file path so a rename does not unmount the editor — it just shifts
+ * the live `filePath` lookup to the new path in `openFiles`.
  */
 export const FileEditor = memo(function ({
-  filePath,
+  paneId,
+  filePath: filePathFromParams,
+  readOnly: readOnlyFromParams,
   panelApi,
 }: {
+  readonly paneId: string;
   readonly filePath: string;
+  readonly readOnly?: boolean;
   readonly panelApi: IDockviewPanelProps['api'];
 }): React.JSX.Element {
   const monaco = useMonaco();
@@ -90,6 +113,14 @@ export const FileEditor = memo(function ({
   const { contentService } = fileManager;
   const { modelService, markerService } = useMonacoServices();
   const planModeEnabled = useFeature('planMode');
+  const openFiles = useSelector(editorRef, (state) => state.context.openFiles);
+  // Resolve the live path via the stable paneId. The path param the
+  // panel was created with is a starting hint only — once the panel is
+  // mounted, the rename participant updates `openFiles[i].path` in
+  // place and this selector picks the fresh path.
+  const liveEntry = openFiles.find((file) => file.paneId === paneId);
+  const filePath = liveEntry?.path ?? filePathFromParams;
+  const readOnly = readOnlyFromParams ?? liveEntry?.readOnly ?? false;
 
   // Kernel diagnostics
   const { handleValidate } = useKernelDiagnostics({
@@ -133,12 +164,27 @@ export const FileEditor = memo(function ({
 
   const handleCodeChange = useCallback(
     (value: ComponentProps<typeof CodeEditor>['value']) => {
+      if (readOnly) {
+        return;
+      }
+      // Resolve the live path again at write time via `paneId`. This
+      // closes the rename-race window: if the user types into the
+      // editor between a rename completing and the panel parameters
+      // being patched, the write must still target the *new* path.
+      // When the tab no longer exists in `openFiles` (closed mid-keystroke)
+      // the write is suppressed — re-creating the file silently would
+      // resurrect a deleted/closed file (F20).
+      const snapshot = editorRef.getSnapshot();
+      const liveEntry = snapshot.context.openFiles.find((file) => file.paneId === paneId);
+      if (!liveEntry) {
+        return;
+      }
       const encoded = encodeTextFile(value ?? '');
-      void fileManager.writeFile(filePath, encoded, {
+      void fileManager.writeFile(liveEntry.path, encoded, {
         source: 'editor',
       });
     },
-    [fileManager, filePath],
+    [readOnly, fileManager, paneId, editorRef],
   );
 
   // Acquire/release ref-counted editor model hold
@@ -196,14 +242,20 @@ export const FileEditor = memo(function ({
       const language = languageFromExtension[getFileExtension(name) as keyof typeof languageFromExtension];
       const editorContent = decodeTextFile(result.content);
       const ViewerComponent = resolveViewer({ path: filePath, name }, { planModeEnabled });
+      // `key={paneId}` enforces that React never remounts the viewer on a
+      // rename — `paneId` is the stable identity of the tab, while
+      // `filePath` is a mutable property updated in place by the
+      // rename participant.
       return (
-        <div className='flex h-full flex-col bg-background'>
+        <div className='flex h-full flex-col bg-background' key={paneId}>
           <ViewerComponent
+            paneId={paneId}
             filePath={filePath}
             content={editorContent}
             language={language}
             onChange={handleCodeChange}
             onValidate={handleValidate}
+            readOnly={readOnly}
           />
         </div>
       );
@@ -308,10 +360,14 @@ export const EditorDockview = memo(function (): React.JSX.Element {
   const monaco = useMonaco();
   const [api, setApi] = useState<DockviewApi>();
   const isRestoringLayout = useRef(false);
-  const isSyncingFromMachine = useRef(false);
 
   // Read persisted layout from editor machine
   const editorLayout = useSelector(editorRef, (state) => state.context.editorLayout);
+  // Reconciler inputs: the open-tab set and active tab from the machine.
+  // The editor machine is the single source of truth — Dockview is a
+  // pure reconciler that diffs its current panels against this state.
+  const openFiles = useSelector(editorRef, (state) => state.context.openFiles);
+  const activePaneId = useSelector(editorRef, (state) => state.context.activePaneId);
 
   // Save layout to editor machine on layout changes
   useEffect(() => {
@@ -332,90 +388,130 @@ export const EditorDockview = memo(function (): React.JSX.Element {
     };
   }, [api, editorRef]);
 
-  // Two-way sync: editor machine -> Dockview
+  // ─────────────────────────────────────────────────────────────────
+  // Reconciler: editor machine state → Dockview panels
+  //
+  // The reconciler is idempotent: each pass diffs `openFiles` against
+  // `api.panels` and issues add/remove/updateParameters/setTitle/
+  // setActive calls only where they differ. Because it converges on
+  // each render of the source state, no re-entry guard is needed
+  // (replacing the old `isSyncingFromMachine` ref pattern).
+  // ─────────────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!api || isRestoringLayout.current) {
+      return;
+    }
+
+    const desired = new Map(openFiles.map((file) => [file.paneId, file]));
+    const present = new Map(api.panels.map((panel) => [panel.id, panel]));
+
+    // Remove panels no longer in openFiles
+    for (const [panelId, panel] of present) {
+      if (!desired.has(panelId)) {
+        api.removePanel(panel);
+      }
+    }
+
+    // Add or update panels
+    for (const [paneId, file] of desired) {
+      const existing = present.get(paneId);
+      if (!existing) {
+        const fileName = file.path.split('/').pop() ?? file.path;
+        api.addPanel({
+          id: paneId,
+          component: 'editor',
+          title: fileName,
+          params: { filePath: file.path, paneId, readOnly: file.readOnly },
+          inactive: paneId !== activePaneId,
+        });
+        continue;
+      }
+      // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- params field is structurally typed in dockview-react as Record<string, unknown>
+      const currentParameters = existing.params as EditorPanelParameters;
+      if (currentParameters.filePath !== file.path || currentParameters.readOnly !== file.readOnly) {
+        existing.api.updateParameters({ filePath: file.path, paneId, readOnly: file.readOnly });
+        const fileName = file.path.split('/').pop() ?? file.path;
+        existing.api.setTitle(fileName);
+      }
+    }
+
+    // Sync active panel
+    if (activePaneId !== undefined && api.activePanel?.id !== activePaneId) {
+      const target = api.panels.find((panel) => panel.id === activePaneId);
+      if (target) {
+        target.api.setActive();
+      }
+    }
+  }, [api, openFiles, activePaneId]);
+
+  // Side-effects bound to fileOpened (line-nav + open-editor-on-user-action).
+  // These were tangled into the old sync effect; they stay event-driven
+  // because they encode user intent ("the user just opened a file"),
+  // not state convergence.
   useEffect(() => {
     if (!api) {
       return;
     }
-
-    // Listen for editor machine events to sync panels
     const openFileSub = editorRef.on('fileOpened', (event) => {
-      if (isSyncingFromMachine.current) {
-        return;
+      if (event.source === 'user') {
+        setIsEditorOpen(true);
       }
-
-      isSyncingFromMachine.current = true;
-      try {
-        const existingPanel = api.panels.find((p) => p.id === event.path);
-        if (existingPanel) {
-          existingPanel.api.setActive();
-        } else {
-          const fileName = event.path.split('/').pop() ?? event.path;
-          api.addPanel({
-            id: event.path,
-            component: 'editor',
-            title: fileName,
-            params: { filePath: event.path },
-          });
-        }
-
-        // Only open the editor panel when the file was opened by user action
-        if (event.source === 'user') {
-          setIsEditorOpen(true);
-        }
-
-        // Handle line number navigation
-        if (monaco && event.lineNumber) {
+      if (monaco && event.lineNumber) {
+        requestAnimationFrame(() => {
           requestAnimationFrame(() => {
-            requestAnimationFrame(() => {
-              const uri = createMonacoUri(monaco, event.path);
-              const model = monaco.editor.getModel(uri);
-              if (model) {
-                const editors = monaco.editor.getEditors();
-                // oxlint-disable-next-line max-nested-callbacks -- monaco editor lookup
-                const targetEditor = editors.find((ed) => ed.getModel() === model);
-                if (targetEditor) {
-                  const position = new monaco.Position(event.lineNumber!, event.column ?? 1);
-                  targetEditor.setPosition(position);
-                  targetEditor.revealPositionInCenter(position);
-                  targetEditor.focus();
-                }
+            const uri = createMonacoUri(monaco, event.path);
+            const model = monaco.editor.getModel(uri);
+            if (model) {
+              const editors = monaco.editor.getEditors();
+              // oxlint-disable-next-line max-nested-callbacks -- monaco editor lookup
+              const targetEditor = editors.find((ed) => ed.getModel() === model);
+              if (targetEditor) {
+                const position = new monaco.Position(event.lineNumber!, event.column ?? 1);
+                targetEditor.setPosition(position);
+                targetEditor.revealPositionInCenter(position);
+                targetEditor.focus();
               }
-            });
+            }
           });
-        }
-      } finally {
-        isSyncingFromMachine.current = false;
+        });
       }
     });
-
     return () => {
       openFileSub.unsubscribe();
     };
   }, [api, editorRef, monaco, setIsEditorOpen]);
 
-  // Two-way sync: Dockview -> editor machine
+  // ─────────────────────────────────────────────────────────────────
+  // Reverse channel: user-initiated Dockview events → machine intents
+  //
+  // Because the reconciler is idempotent, no guard ref is needed: when
+  // the machine receives `closeFile` it removes the entry, the
+  // reconciler re-runs, sees the panel is already gone in
+  // `api.panels`, and skips the redundant remove. Same applies to
+  // `setActiveFile`.
+  // ─────────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!api) {
       return;
     }
 
     const activeDisposable = api.onDidActivePanelChange((event) => {
-      if (isSyncingFromMachine.current || !event) {
+      if (!event) {
         return;
       }
-
-      const filePath = event.id;
-      editorRef.send({ type: 'setActiveFile', path: filePath });
+      // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- panel params are typed as Record<string, unknown>
+      const filePath = (event.params as EditorPanelParameters | undefined)?.filePath;
+      if (filePath !== undefined) {
+        editorRef.send({ type: 'setActiveFile', path: filePath });
+      }
     });
 
     const removeDisposable = api.onDidRemovePanel((event) => {
-      if (isSyncingFromMachine.current) {
-        return;
+      // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- panel params are typed as Record<string, unknown>
+      const filePath = (event.params as EditorPanelParameters | undefined)?.filePath;
+      if (filePath !== undefined) {
+        editorRef.send({ type: 'closeFile', path: filePath });
       }
-
-      const filePath = event.id;
-      editorRef.send({ type: 'closeFile', path: filePath });
     });
 
     return () => {
@@ -467,62 +563,47 @@ export const EditorDockview = memo(function (): React.JSX.Element {
     };
   }, [api]);
 
-  // Handle ready event: restore layout or seed default
+  // Handle ready event: restore layout, then let the reconciler take over.
+  //
+  // For a persisted layout, `fromJSON` rebuilds the full Dockview tree
+  // synchronously. Any legacy persisted layout blob is rejected by
+  // dockview-react and the catch below clears the layout, letting the
+  // reconciler converge from the machine's `openFiles` on the next
+  // effect pass.
+  //
+  // For a fresh load with no openFiles, we dispatch an `openFile`
+  // intent for `mainEntryFile` — the reconciler then creates the
+  // panel on the next effect pass, ensuring openFiles and Dockview
+  // panels never diverge.
   const onReady = useCallback(
     (event: DockviewReadyEvent) => {
       const dockApi = event.api;
       setApi(dockApi);
 
       isRestoringLayout.current = true;
-
       try {
         if (editorLayout) {
           dockApi.fromJSON(editorLayout);
-        } else {
-          // Seed from editor machine's current open files
-          const snapshot = editorRef.getSnapshot();
-          const { openFiles, activeFilePath } = snapshot.context;
-
-          if (openFiles.length > 0) {
-            for (const file of openFiles) {
-              const fileName = file.path.split('/').pop() ?? file.path;
-              dockApi.addPanel({
-                id: file.path,
-                component: 'editor',
-                title: fileName,
-                params: { filePath: file.path },
-                inactive: file.path !== activeFilePath,
-              });
-            }
-          } else if (mainEntryFile) {
-            // Seed with main entry file
-            const fileName = mainEntryFile.split('/').pop() ?? mainEntryFile;
-            dockApi.addPanel({
-              id: mainEntryFile,
-              component: 'editor',
-              title: fileName,
-              params: { filePath: mainEntryFile },
-            });
-          }
         }
+        // Without a persisted layout we leave Dockview empty; the
+        // reconciler effect (above) will add panels for the machine's
+        // current `openFiles`. The mainEntryFile fallback is handled
+        // by `chat-editor-file-tree.tsx`'s `tryOpenMainFile` flow at
+        // editor mount, which dispatches `openFile` through the
+        // machine — so we no longer mirror that here.
       } catch {
-        // Corrupt layout -- seed from current state
+        // Corrupt persisted layout — clear and let reconciler converge
+        // from the machine state on the next effect pass.
         dockApi.clear();
-        const snapshot = editorRef.getSnapshot();
-        const { openFiles, activeFilePath } = snapshot.context;
-
-        for (const file of openFiles) {
-          const fileName = file.path.split('/').pop() ?? file.path;
-          dockApi.addPanel({
-            id: file.path,
-            component: 'editor',
-            title: fileName,
-            params: { filePath: file.path },
-            inactive: file.path !== activeFilePath,
-          });
-        }
       } finally {
         isRestoringLayout.current = false;
+      }
+
+      // If we have no openFiles AND no persisted layout, seed via the
+      // machine so it stays the single source of truth.
+      const snapshot = editorRef.getSnapshot();
+      if (snapshot.context.openFiles.length === 0 && !editorLayout && mainEntryFile) {
+        editorRef.send({ type: 'openFile', path: mainEntryFile, source: 'machine' });
       }
     },
     [editorLayout, editorRef, mainEntryFile],

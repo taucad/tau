@@ -1,0 +1,916 @@
+CADReasoner: Iterative Program Editing for CAD Reverse Engineering
+Soslan Kabisov1 Vsevolod Kirichuk1 Andrey Volkov1 Marina Barannikov2
+Gennadiy Savrasov1 Anton Konushin1 Andrey Kuznetsov34 Dmitrii Zhemchuzhnikov1†
+1 Lomonosov Moscow State University; 2 Universit´e Paris Dauphine;
+3 Innopolis University; 4 FusionBrain Lab, AXXX
+Abstract
+Computer-Aided Design (CAD) powers modern engineer-
+ing, yet producing high-quality parts still demands substan-
+tial expert effort. Many AI systems tackle CAD reverse en-
+gineering, but most are single-pass and miss fine geometric
+details. In contrast, human engineers compare the input
+shape with the reconstruction and iteratively make changes
+in the design based on the remaining differences. Agent-
+based methods mimic this loop with frozen VLMs, but weak
+3D grounding of current foundation models limits reliabil-
+ity and efficiency. We introduce CADReasoner, a model
+trained to iteratively refine its prediction based on the ge-
+ometric discrepancy between the input and the predicted
+shape. The model outputs a runnable CadQuery Python
+program, feeding its rendered mesh back to the next step.
+CADReasoner fuses multi-view renders and point clouds
+as complementary modalities. To bridge the realism gap,
+we propose a scan-simulation protocol applied during both
+training and evaluation. Across DeepCAD, Fusion 360,
+and MCB benchmarks, CADReasoner attains state-of-the-
+art results on clean and scan-sim tracks. Code and the
+model are available at GitHub and Hugging Face model.
+1. Introduction
+Recovering precise CAD models from raw 3D scan data
+is a fundamental yet challenging problem in computer vi-
+sion and graphics [3, 29, 34]. Scanned 3D data (e.g., point
+clouds or meshes obtained via LiDAR or RGB-D sensors)
+typically capture real-world objects with noise and miss-
+ing regions, whereas CAD models are clean, parametric
+representations with exact surfaces and structures. Bridg-
+†Corresponding author: zhemchuzhnikovds@my.msu.ru
+ing this gap requires algorithms that can interpret imper-
+fect scan data and produce accurate, realistic CAD models.
+Existing approaches in AI-based CAD reconstruction often
+either rely on single-shot predictions or simple alignment
+techniques that lack the ability to iteratively refine errors.
+As a result, they may output CAD models that deviate from
+the true geometry or miss important details, especially when
+faced with noisy or incomplete scans.
+A key limitation of many prior methods is the absence
+of an effective mechanism for iterative inference and self-
+correction. In contrast, human engineers naturally refine de-
+signs by repeatedly comparing the evolving part against the
+target and correcting discrepancies. Some recent systems
+mimic this loop with frozen VLM/LLM backbones [1, 27],
+but their 3D grounding is limited and the backbone does not
+learn from its own errors. Other works incorporate geom-
+etry in the RL fine-tuning stage [11, 21, 50], typically as
+scalar rewards, which provides a coarse signal that departs
+from how practitioners reason; moreover, emerging analy-
+ses suggest RL fine-tuning largely reweights existing behav-
+iors rather than injecting new task knowledge [42, 60]. By
+contrast, we put geometry at the center of SFT: the editor
+is trained to refine its own prediction from cross-modal dis-
+crepancy evidence (multi-view overlays and nearest-surface
+offsets) together with the previous program, aligning super-
+vision with real-world, iterative reverse-engineering prac-
+tice. In this view, self-editing becomes a minimal, learnable
+implementation of the 3D reasoning loop an engineer per-
+forms when inspecting and revising a design.
+A second challenge is realism. Public datasets are syn-
+thetic: B-Rep objects come from CAD corpora, and inputs
+are rendered views or point clouds (PCs) sampled from B-
+Reps rather than raw scans [5, 7, 41, 51, 52]. Real reverse
+engineering starts from physical parts: scans exhibit noise,
+occlusions and missing patches, extra or missing holes,
+and mild mis-registration. We therefore introduce a scan-
+1
+arXiv:2603.29847v1 [cs.GR] 18 Feb 2026
+
+-- 1 of 11 --
+
+CADReasoner
+Linear Layer 	Visual encoder 	Text Tokenizer
+<s>
+<e>
+(a) Input mesh
+Point clouds diff 	Multi-view overlay 	Predicted code
+Point cloud
+Predicted mesh
+(b) Scan
+simulation
+(c) Modalities extraction 	(f) Modalities extraction
+(d) Inference
+Multi-view image
+(e) Decoding and rendering
+Point cloud	Multi-view image
+Figure 1. CADReasoner: scan-to-CAD self-editing loop. (a–c) From a (simulated) scanned mesh we extract target evidence: multi-view
+images and a point cloud. (d) CADReasoner consumes this evidence together with the current program Ct−1 and autoregressively predicts
+an updated CadQuery script Ct. (e–f) The script is executed to render a new mesh, from which modalities are re-extracted, closing the
+geometry-driven self-correction loop.
+simulation pipeline and apply it during training and evalua-
+tion, so the editor learns on scan-like inputs and is evaluated
+under the same conditions.
+To summarize, our contributions are as follows:
+• We introduce CADReasoner, a novel framework for AI-
+based CAD reconstruction that performs iterative infer-
+ence and self-correction, enabling progressively refined
+alignment between CAD models and the input.
+• We bring scan realism to CAD reconstruction by apply-
+ing a scan-simulation regime for both training and evalu-
+ation, better reflecting real reverse-engineering pipelines.
+• We demonstrate through extensive experiments that
+CADReasoner achieves state-of-the-art results on on
+DeepCAD, Fusion360, and MCB outperforming exist-
+ing methods in terms of reconstruction accuracy and real-
+ism. Our approach shows especially strong improvements
+in challenging scenario with scan defects.
+2. Related Work
+CAD generation. Prior work on CAD generation can be
+categorized by target representation:: CSG trees, B-reps,
+and program (sequence) models. CSG composes primi-
+tives with boolean ops, but struggles with intricate, real-
+world geometry and diverges from how designers actually
+build parts [8–10, 16, 38, 39, 46, 57, 58]. B-reps encode
+faces,edges and vertices with strict topological validity,
+making generation brittle and subsequent editing cumber-
+some [12, 14, 22, 26, 28, 30, 31, 43, 45, 47, 49, 56]. In con-
+trast, program or sequence formulations (sketch–extrude,
+feature histories, or Python code) align with industrial
+workflows and preserve editability [4, 6, 7, 13, 18, 19, 23,
+25, 32, 35, 40, 48, 52, 54, 55, 59, 61]. Among these, re-
+cent methods that emit concise, executable CadQuery [2]
+programs achieve state-of-the-art performance on multiple
+benchmarks [21, 41, 50], so we likewise adopt CadQuery
+as our target representation.
+Multi-view and point-cloud conditioning. AI-based
+CAD reverse engineering has largely been single-
+modality. Methods conditioned on point clouds—e.g.,
+DeepCAD, CAD-Recode, CAD-SIGNet—predict pro-
+grams from surfaces sampled on B-Reps[18, 41, 52].
+Image-conditioned approaches—CADCrafter, CADCoder,
+GACO-CAD—operate on rendered views[5, 7, 50]. Mul-
+timodal models are only now emerging: cadrille accepts
+either views or clouds, while CAD-MLLM fuses both[21,
+53]. We regard these as complementary shape representa-
+tions—views expose global inconsistencies , clouds provide
+metric nearest-surface distances—and use them as feedback
+to drive iterative program editing.
+Iterative refinement and code editing. Outside CAD, it-
+erative self-correction for reasoning uses self-feedback or
+verbal RL without weight updates (Self-Refine; Reflexion)
+and RL with unit-test signals (CodeRL), but none provides
+geometric supervision[24, 33, 44]. Jones et al. propose
+Learning to Edit Visual Programs with Self-Supervision,
+which iteratively refines visual programs via predicted lo-
+cal edit operations from rendered feedback[15]. In con-
+trast, we focus on CAD reverse engineering with exe-
+cutable CadQuery, use geometry discrepancy encodings
+(multi-view overlays + nearest-surface offsets), support im-
+ages and point clouds, and refine by directly rewriting the
+program with a single trained model (no explicit edit vo-
+cabulary/findEdits or separate edit network). Within
+CAD, agentic pipelines keep the backbone frozen: Seek-
+2
+
+-- 2 of 11 --
+
+Table 1. Image-only, clean surfaces, greedy decoding. Median CD↓ (×103), mean IoU↑ (%), IR↓ (%). Best-so-far at t ∈ {1, 5}.
+CADReasoner delivers superior performance: it achieves the best CD/IoU/IR on DeepCAD and Fusion360 already by t=5, and on
+MCB it markedly improves IoU/IR over cadrille while remaining competitive in CD.
+DeepCAD Fusion360 MCB
+Method CD IoU IR CD IoU IR CD IoU IR
+CADCrafter – – – 0.26 – 3.6 – – –
+cadrille 0.18 86.1 1.5 0.20 77.6 3.2 1.21 40.2 8.6
+CADReasoner (t=1) 0.17 88.7 1.4 0.16 81.1 3.5 3.5 39.6 21.9
+CADReasoner (t=5) 0.16 90.0 0.5 0.15 83.1 0.7 1.67 42.7 4.0
+CAD runs a training-free loop with DeepSeek-R1 using
+visual feedback from Gemini-2.0; VideoCAD targets UI-
+interaction learning and uses DINOv2 descriptors for qual-
+ity validation; CADCodeVerify prompts a VLM to validate
+render–target similarity and suggest fixes, again without a
+trained self-editing refiner[1, 27, 36]. cadrille introduced
+large-scale SFT followed by RL driven by geometry-based
+rewards. We instead use geometrical feedback to train the
+model to refine its predictions on the SFT stage.
+Scan-based reverse engineering. In practical reverse en-
+gineering the source is a physical part; we acquire a 3D
+scan whose geometry is imperfect (noise, missing patches,
+extra or missing holes, mild mis-registration). A large
+body of work consumes point clouds and predicts struc-
+tured CAD: CSG or primitive assemblies (InverseCSG;
+UCSG-Net; CAPRI-Net; D2CSG), B-rep surfaces/topology
+(Point2CAD), or full CAD programs (DeepCAD; CAD-
+Recode; CAD-SIGNet)[8, 16, 18, 31, 41, 52, 57, 58]. Al-
+though close to the scan setting (a scan is also a point set),
+these inputs are typically sampled from the ideal 3d model
+surfaces rather than captured by sensors. Some program-
+induction works inject Gaussian jitter on points (e.g., CAD-
+Recode; cadrille), but this does not capture characteris-
+tic scan defects [21, 41]. We therefore introduce a scan-
+simulation pipeline that explicitly models such defects and
+apply it during training and evaluation, so the editor learns
+to operate on scan-like inputs and is evaluated under the
+same conditions. A notable step toward realism is the CC3D
+dataset, which virtually scans CAD models with a propri-
+etary pipeline to produce paired scan–surface data exhibit-
+ing protrusions, smoothing, and missing regions [34].1
+3. Method
+3.1. Problem Setup
+Let T be the target shape (triangulated B-rep or scan) and
+let R maps a parametric CAD program C (in our case, a
+runnable CadQuery [2] Python script) to a mesh S =
+R(C). The goal is to deliver a program C⋆:
+C⋆ ∈ arg min
+C∈Cvalid
+D T, R(C),
+where D is the task-native geometric discrepancy and Cvalid
+contains scripts that compile and yield a non-degenerate
+solid.
+Rather than one-shot prediction, we exploit that geom-
+etry feedback is intrinsic: given any candidate C, we can
+execute R(C) and compare to T . We therefore cast reverse
+engineering as closed-loop program editing. At iteration t,
+Ct = fθ
+ E(T, St−1), Ct−1, St−1 = R(Ct−1),
+where E(T, St−1) encodes the pair (multi-view overlays
+and point-set features) and fθ is a learned editor that emits
+an updated CadQuery script. After each step we retain the
+best-so-far program by D and stop when improvement falls
+below a threshold or a step budget is reached.
+3.2. CADReasoner Architecture
+CADReasoner accepts three inputs per iteration: (i) multi-
+view image obtained by overlaying the target and the pre-
+vious render (G/R channels), encoded by a shared visual
+backbone; (ii) a point-cloud branch where per-point fea-
+tures are projected by a linear layer and aggregated by a
+set encoder; and (iii) the previous program Ct−1, tokenized
+as text. Tokens from geometry branches form a geometry
+memory that conditions the code decoder. The decoder gen-
+erates the updated script Ct; a execute gate produces St that
+is fed to the model on the next step. The CADReasoner ar-
+chitecture is illustrated by Figure 1.
+1We requested access to CC3D but were unable to obtain it; hence we
+report results on public benchmarks and our reproducible scan-simulation
+track.
+3
+
+-- 3 of 11 --
+
+DeepCad 	Fusion 360 	MCB
+cadrille
+CADReasoner
+Target shape
+Figure 2. Qualitative comparisons on clean surfaces (multi-view, greedy). Nine examples (three each from DeepCAD, Fusion360,
+MCB). Each panel shows Target, cadrille-SFT, and CADReasoner at t=5 (best-so-far). Across datasets, CADReasoner produces more
+accurate reconstructions, recovering small features and correct topology that cadrille often misses or distorts.
+Table 2. Point-cloud, clean surfaces, greedy decoding. Median CD↓ (×103), mean IoU↑ (%), IR↓ (%). Best-so-far at t ∈ {1, 5}.
+CADReasoner achieves superior performance to cadrille across all three benchmarks by t=5 (lower CD/IR, higher IoU). A dash (–)
+denotes numbers not reported by the original work.
+DeepCAD Fusion360 MCB
+Method CD IoU IR CD IoU IR CD IoU IR
+CAD-SIGNet 0.28 77.6 0.9 0.56 65.6 1.6 - - -
+MiCADangelo 0.20 80.6 2.6 0.48 68.7 3.2 - - -
+CAD-Recode 0.18 87.1 3.1 0.19 79.1 5.0 0.75 44.3 12.5
+cadrille 0.18 87.1 2.1 0.19 79.8 2.8 0.82 45.7 4.0
+CADReasoner (t=1) 0.21 86.1 1.5 0.22 77.3 3.2 1.03 41.3 16.2
+CADReasoner (t=5) 0.17 89.2 0.2 0.16 83.1 0.7 0.52 49.1 3.1
+3.3. Geometry Encodings
+Multi-view image. We use 8 canonical views: six ortho-
+graphic projections and two isometric. Since all meshes in
+the CAD-Recode dataset lie within the cube
+{(x, y, z) ∈ R3 | −100 ≤ x, y, z ≤ 100}
+for each projection plane an image of this region with the
+rendered mesh is captured and represented with a resolution
+of 238 × 238 pixels. For orthographic views, the depth of
+the mesh points along the view axis is encoded by the color
+intensity. Additionally, the −Z, +Y , +X projections are
+mirrored from left to right so that, for each projection plane,
+the axes are aligned in the same direction on both images.
+The projection images are combined into 2 columns and 4
+rows . For each view v the image of the target mesh T and
+the predicted mesh St−1 are stored in the Green and Red
+channels of an RGB image respectively: Iv = [ Rv , Gv , 0 ],
+where Gv = Dv (Πv (T )) and Rv = Dv (Πv (St−1)), Πv –
+orthographic projection and Dv – depth to color mapping.
+Visually, green marks geometry present in T , red marks ge-
+ometry present in St−1, and their overlap appears yellow.
+Figure 3 shows an example of multi-view image that de-
+picts the input image of the first step (when the predicted
+shape is absent) .
+Point clouds. At iteration t we form two clouds: PT =
+{pi}NT
+i=1 sampled on the target T and PS = {qj }NS
+j=1 sam-
+pled on the previous render St−1. Both are expressed in
+a common frame: we normalize T to [−1, 1]3 and isotrop-
+ically scale the prediction domain [−100, 100]3 by 1/100
+before computing cross-shape relations. Prior to construct-
+ing PT and PS , we draw a dense set of ∼ 30 000 surface
+samples from each mesh. Let NNX (y) be the nearest point
+to y on surface X. We select 128 points from each mesh by
+choosing those with the largest distances to the other mesh.
+For each sample we attach a cross-shape offset
+∆pi = NNSt−1 (pi) − pi, ∆qj = NNT (qj ) − qj ,
+so every point is encoded by (x, y, z, ∆x, ∆y, ∆z); i.e.,
+a point together with the vector toward the nearest lo-
+cation on the opposite mesh. the set encoder consumes
+4
+
+-- 4 of 11 --
+
+Figure 3. Multi-view visualization (MCB). We render eight
+fixed views—six orthographic (±X, ±Y, ±Z) and two isomet-
+ric—using parallel projection and flat shading; intensity encodes
+depth. The views are arranged in a 2 × 4 grid with consistent axis
+orientation.
+{(pi, ∆pi)} ∪ {(qj , ∆qj )} to produce zpc. Offsets act as a
+local, metric error signal-magnitude measures discrepancy;
+direction indicates how the prediction should move.
+Initialization (t=1). With no prior render we adopt a null
+prediction at the origin while keeping the interface identical
+to later steps. We sample PT on T and set ∆pi = −pi.
+For the second cloud we take PS = {0}NS and pair each
+qj = 0 with a distinct target sample via a permutation π,
+setting ∆qj = pπ(j). This yields informative, nonidentical
+offsets at t=1 without special tokens or modality changes.
+3.4. Scan-Simulation
+To simulate the process of real camera-based scanning we
+developed a virtual 3D scanning algorithm. We uniformly
+sample 100,000 surface points from the CAD model while
+preserving the original normals. A virtual camera then
+moves along a spherical trajectory around the object, and
+visible points are extracted at five distinct viewpoints using
+visibility criteria [37]. All visible points are merged, and
+the combined point cloud is converted into a mesh using
+Screened Poisson Surface Reconstruction [17]. As a result,
+typical scanning artifacts – such as incomplete surface cov-
+erage and smoothed edges – are preserved. Finally, random
+holes are added to simulate missing regions produced by
+scanning markers.
+3.5. Training
+Backbone and single-model setup. Our editor fθ is in-
+stantiated as Qwen2-VL 2B. We fine-tune this single model
+via SFT on the CAD-Recode corpus (with the curriculum
+below). Importantly, we use one shared checkpoint for all
+iterations: the same model performs initialization (t=1) and
+subsequent refinement steps (t>1).
+SFT with curriculum. Training t=1 on the full CAD-
+Recode corpus can lead to train-set overfitting (CAD-
+Recode is relatively simple), producing overly strong one-
+shot predictions on seen shapes and leaving little signal to
+learn refinement. We therefore use disjoint data splits and
+on-policy rollouts so refinement examples come from im-
+perfect predicted programs on unseen targets.
+Stage A (seed, t=1 on D1). We train the editor by su-
+pervised cross-entropy to predict the ground-truth program
+C⋆ from E(T, ∅) (no prior render/code). At the end model
+reliably emits valid but yet inaccurate CadQuery scripts.
+Rollout B. Using the Stage-A checkpoint, we generate
+one-step predictions C1 for every T ∈ D2, rendering S1 =
+R(C1).
+Stage B (learn to refine). We now train on a mixture
+of (t=1) and (t=2) examples: for t=1, inputs are E(T, ∅);
+for t=2, inputs are E(T, S1) with context C1, and the target
+remains C⋆. Thus the model learns to (i) generate from
+scratch and (ii) refine its own first-step predictions.
+Rollout C. With the Stage-B checkpoint, we produce
+two-step rollouts on D3: C1 → S1 and then C2 =
+fθ (E(T, S1), C1) with S2 = R(C2).
+Stage C (extend horizon). We train on t ∈ {1, 2, 3},
+conditioning t=2 on (C1, S1) and t=3 on (C2, S2), always
+supervising toward C⋆. Batches sample t uniformly.
+This curriculum keeps supervision on-policy: each re-
+finement step sees the distribution of errors produced by the
+current model, preventing collapse to trivial t=1 behavior
+and yielding a robust editor that can both initialize and self-
+correct.
+3.6. Inference and Selection
+We use two decoding regimes.
+Greedy (single path). At each iteration t the editor de-
+codes deterministically (argmax), compiles Ct, renders
+St = R(Ct), and updates the best-so-far program C≤t =
+arg mini≤t D T, R(Ci). Complexity is O(s) renders for
+s steps.
+Stochastic, geometry-guided beam. We run a stochastic
+beam with geometry pruning. At t=1, sample N candi-
+dates {C1
+k }N
+k=1, compile and render them, rank by the pri-
+mary metric D (invalid generations are discarded), and keep
+5
+
+-- 5 of 11 --
+
+Table 3. Cross-modality (images + PCs), clean surfaces, greedy decoding. Median CD↓ (×103), mean IoU↑ (%), IR↓ (%). Best-so-far
+at t ∈ {1, 5}. CADReasoner fuses complementary cues—global silhouette/topology from multi-view images and metric nearest-surface
+offsets from point sets. On DeepCAD/Fusion360, cross-modal is on par with image-only (images already suffice), while on MCB fusion
+is decisive: it lowers IR and lifts IoU relative to single branches, approaching the PC branch’s best CD. Overall, cross-modal CADReasoner
+attains the lowest invalidity at t=5 across datasets, with competitive or best CD/IoU.
+DeepCAD Fusion360 MCB
+Method CD IoU IR CD IoU IR CD IoU IR
+CADReasoner - img (t=1) 0.17 88.5 1.6 0.17 82.3 4.0 2.48 39.6 21.9
+CADReasoner - pc (t=1) 0.21 86.1 1.5 0.22 77.3 3.2 1.03 41.3 16.2
+CADReasoner - cross-modal (t=1) 0.17 88.3 1.5 0.17 82.4 4.0 1.32 39.7 15.4
+CADReasoner - img (t=5) 0.16 89.4 0.6 0.16 84.2 0.9 1.67 42.7 4.0
+CADReasoner - pc (t=5) 0.17 89.2 0.2 0.18 83.1 0.7 0.52 49.1 3.1
+CADReasoner - cross-modal (t=5) 0.16 89.4 0.3 0.16 84.1 0.8 0.71 48.2 2.8
+the top N survivors. For t>1, from each survivor generate
+N children (at most N 2 candidates per step), render and
+score all, then retain the top N for the next iteration. We
+always maintain and report the best-so-far program over
+all evaluated candidates. The total number of renders is
+N + (s − 1)N 2.
+Evaluation and scoring protocol (both regimes). At
+evaluation step s we always report the best-so-far program
+C≤s = arg min
+i≤s D Teval, R(Ci),
+i.e., metrics at step s are computed on mini≤s D (not only
+on i=s).
+For clean experiments Teval = Tclean (input is a triangu-
+lated B-Rep ). For the scan track we never use the oracle
+clean mesh: all ranking, pruning, tie-breaking, and report-
+ing use the scan evidence as the target, i.e., Teval = Tscan.
+Thus candidate selection in the stochastic beam and the
+greedy updates are driven by the scan, ensuring the proce-
+dure does not access ground truth unavailable at inference.
+4. Experiments
+4.1. Datasets
+Training set. We use the procedurally generated CAD-
+Recode corpus [41] (∼ 1M CadQuery programs) , an or-
+der of magnitude larger than DeepCAD, to pretrain the edi-
+tor .
+Evaluation sets.
+1. DeepCAD [52] test split: 8,046 parts authored by users
+of Onshape.
+2. Fusion360 [51] provides a smaller (1,725 samples)
+but geometrically richer benchmark of real design
+sequences.
+3. MCB (5k subset) [20] We evaluate on a curated 5k-
+shape subset of MCB, stratified by ISO part categories
+with approximately uniform sampling per category
+(equal quotas per ISO class). Parts are filtered for
+watertightness and moderate geometric complexity, and
+the splits preserve the category balance.
+For all evaluation datasets we prepare two tracks: clean
+(original meshes) and scan-sim produced by our simulator;
+the same simulator is optionally applied at train time.
+4.2. Metrics
+All meshes are rigid-aligned and normalized to [0, 1]3. Fol-
+lowing [21, 41] we report: (i) Chamfer Distance (CD) on
+8,192 vs 8,192 points (CD values are multiplied by 103); (ii)
+volumetric IoU (%); (iii) Invalid Rate (IR): percentage of
+generations that fail to compile or yield a degenerate solid.
+To reduce bias from invalids, we report median CD instead
+of mean.
+Selection vs reporting. On the clean track, both selection
+and reporting use the clean target. On the scan-sim track,
+candidate selection uses CD against the scan to avoid oracle
+access, while final reported metrics are computed against
+the corresponding clean surface, so scores are comparable
+across tracks.
+4.3. Results
+Multi-view images (clean, greedy). We evaluate
+CADReasoner without an RL stage and therefore compare
+to supervised-only baselines (notably cadrille-SFT). The
+question is whether iterative self-editing improves quality
+as the step count t increases. We start from the simplest
+setting: clean meshes, multi-view overlays, and greedy
+decoding (no sampling). The editor runs for t steps; we
+report best-so-far at t ∈ {1, 5}. Table 1 shows that on
+DeepCAD and Fusion360 CADReasoner already beats
+the baselines at t = 1 and improves further at t = 5
+6
+
+-- 6 of 11 --
+
+Table 4. Stochastic sampling (N =5 per step). Median CD↓ (×103), mean IoU↑ (%), IR↓ (%) at t ∈ {1, 5}; best-so-far selection per step
+under an equal sampling budget. CADReasoner achieves state-of-the-art performance in this regime: by t=5 it attains the best (or tied-
+best) CD on DeepCAD (0.15) and Fusion360 (0.13), zero invalidity (IR= 0) across modalities/datasets, and competitive IoU, surpassing
+both supervised and RL-finetuned baselines overall. On MCB, the PC branch reaches the lowest CD (0.40) with IR= 0.
+DeepCAD Fusion360 MCB
+Method CD IoU IR CD IoU IR CD IoU IR
+CAD-Recode (pc) 0.17 89.2 0.5 0.16 80.4 0.9 0.62 46 6.5
+cadrille-SFT (img) 0.17 87.7 0.2 0.18 78.9 1.0 0.90 41.8 6.6
+cadrille-SFT (pc) 0.17 89.1 0.4 0.17 80.8 0.6 0.60 47 6.1
+cadrille-RL (img) 0.16 92.8 0.0 0.16 85.5 0.17 0.70 48.7 2.6
+cadrille-RL (pc) 0.16 92.1 0.1 0.15 87.4 0.5 0.40 55.2 2.9
+CADReasoner (img) (t=1) 0.16 90.7 0.1 0.15 83.4 0.0 1.47 42.7 0.0
+CADReasoner (pc) (t=1) 0.2 87.5 0.0 0.22 79.3 0.1 0.84 45.6 0.0
+CADReasoner (cross-modal) (t=1) 0.16 91.1 0.1 0.15 84.0 0.2 1.47 42.1 1.3
+CADReasoner (img) (t=5) 0.15 92.6 0.0 0.13 87.0 0.0 0.54 49.9 0.0
+CADReasoner (pc) (t=5) 0.16 92.1 0.0 0.2 85.5 0.0 0.40 53.4 0.0
+CADReasoner (cross-modal) (t=5) 0.15 92.9 0.0 0.13 86.5 0.0 0.55 48.8 0.0
+Iteration: 1 	Iteration: 2 	Iteration: 3 	Iteration: 4 	Iteration: 5 	Target shape
+Figure 4. Qualitative evolution on clean surfaces (sampling). CADReasoner’s iterative self-editing under the sampling regime (N =5
+per step). Columns show t=1 − 5 and the target. Predictions progressively repair topology and recover small features.
+(lower CD/IR, higher IoU), likely helped by our 8-view
+overlays (vs. 4 in cadrille). On MCB, t = 1 trails due to
+higher geometric complexity, but five iterations yield large
+gains that surpass cadrille-SFT on IoU and IR. Figure 2
+(nine cases; three per dataset) illustrates more accurate
+reconstructions: CADReasoner recovers small features and
+7
+
+-- 7 of 11 --
+
+Table 5. Simulated-scan results (sampling, N =5) — Main Table. Selection uses CD against the scan; final metrics are computed against
+the corresponding clean surfaces. CADReasoner achieves state-of-the-art robustness under scan artifacts on DeepCAD, Fusion360, and
+MCB, outperforming both supervised and RL-finetuned baselines (e.g., cadrille-RL) at t=5 while maintaining IR= 0 across modalities.
+Best CD is obtained by the PC branch on MCB (0.49) and by the cross-modal branch on DeepCAD/Fusion360 (0.16/0.15).
+DeepCAD Fusion360 MCB
+Method CD IoU IR CD IoU IR CD IoU IR
+CAD-Recode (pc) 0.28 71.2 1.2 0.27 65.0 0.8 1.03 38.9 7.3
+cadrille-SFT (img) 1.14 45.5 2.5 1.10 38.7 2.4 2.01 24.3 9.2
+cadrille-SFT (pc) 0.26 75.0 0.6 0.25 69 0.9 0.88 49.3 6.4
+cadrille-RL (img) 0.47 64.4 0.3 0.49 58.3 0.2 1.44 36.8 2.7
+cadrille-RL (pc) 0.21 83.7 0.2 0.19 79.2 0.2 0.55 50.7 2.7
+CADReasoner (img) (t=1) 0.17 88.0 0.1 0.16 81.9 0.1 1.04 46.4 0.2
+CADReasoner (pc) (t=1) 0.20 85.8 0.0 0.22 78.3 0.1 0.72 47.4 0.0
+CADReasoner (cross-modal) (t=1) 0.17 88.2 0.0 0.16 81.2 0.0 1.10 46.4 0.0
+CADReasoner (img) (t=5) 0.17 89.2 0.0 0.15 83.4 0.0 0.55 50.5 0.0
+CADReasoner (pc) (t=5) 0.18 86.6 0.0 0.18 79.8 0.0 0.49 50.8 0.0
+CADReasoner (cross-modal) (t=5) 0.16 88.8 0.0 0.15 83.3 0.0 0.56 51.3 0.0
+Table 6. Train–test cross-generalization under scan-simulation
+(CADReasoner, greedy decoding, iteration t = 5, MCB subset:
+1000 samples. Selection uses scan CD when Test: scan; final
+metrics are always computed on the corresponding clean surface
+for comparability. Median CD↓ (×103), mean IoU↑ (%), IR↓ (%).
+Train set Test set CD ↓ IoU ↑ IR ↓
+clean clean 1.43 41.0 0.0
+clean scan 4.42 17.8 0.1
+scan clean 1.01 47.4 0.0
+scan scan 1.14 46.4 0.0
+correct topology that cadrille-SFT often misses.
+Point clouds (clean, greedy). We then train and evaluate
+the point-set branch alone, comparing to CAD-SIGNet, Mi-
+CADangelo, CAD-Recode, and cadrille-SFT (Table 2). At
+t = 1 our model is on par or slightly below the strongest SFT
+baselines (e.g., CD 0.21 vs. 0.18 on DeepCAD), consistent
+with the weaker global cues in a single point set. After
+self-editing to t = 5, CADReasoner exceeds cadrille-SFT
+across all three benchmarks and sharply reduces invalidity-
+e.g., MCB IR 16.2 → 3.1-indicating that nearest-surface
+offsets guide effective code repairs while tightening local
+geometry.
+Cross-modal (images + point clouds, clean, greedy).
+Because test inputs originate from meshes, both evidences
+are available; we therefore evaluate cross-modality of multi-
+view overlays and point sets. Table 3 contrasts CADRea-
+soner with image-only, PC-only, and fused inputs, report-
+ing best-so-far at t ∈ {1, 5}. On DeepCAD and Fu-
+sion360, cross-modal learning largely matches image-only
+on CD/IoU and consistently reduces IR, indicating that met-
+ric offsets from PCs help the editor avoid brittle code paths
+even when silhouette cues already suffice. On MCB, it im-
+proves robustness, achieving the lowest IR at both t = 1 and
+t = 5, while PC-only attains the best CD (and slightly higher
+IoU) at t = 5.
+4.4. Sampling
+Greedy decoding can be suboptimal after SFT because the
+training objective is next-token likelihood (conditioned on
+discrepancy evidence), not direct geometric matching. In
+practice, multiple plausible edits may exist at a step, and
+the greedy choice can miss higher-quality trajectories. We
+therefore evaluate stochastic decoding: at each step we draw
+N =5 candidates per parent and retain the best-by-CD can-
+didate (best-so-far over steps), under a fixed inference bud-
+get.
+Table 4 compares CADReasoner (image / PC / cross-
+modal) to CAD-Recode (PC), cadrille-SFT (img/pc), and
+cadrille-RL (img/pc) with the same sampling budget. De-
+spite using SFT only, CADReasoner + sampling already
+matches or exceeds cadrille-RL on DeepCAD and Fu-
+sion360 at t=1, and widens the margin by t=5. On MCB,
+CADReasoner(PC) reaches the lowest CD and IR at t=5.
+Overall, iterative self-editing with stochastic evaluation reli-
+ably outperforms RL-fine-tuned baselines under equal com-
+pute, by exploring diverse edits and selecting trajectories
+that sharpen small features while repairing invalid code.
+Figure 4 illustrates typical sampled trajectories over itera-
+tions.
+8
+
+-- 8 of 11 --
+
+4.5. Results on scans
+We repeat the sampling experiment on the scan-sim track
+(Sec. §3.4) . Selection uses CD computed against the
+scan; final reporting uses the corresponding clean surface so
+scores remain comparable across tracks. Table 5 shows that
+CAD-Recode and cadrille degrade substantially under scan
+artifacts, while CADReasoner-trained with scan simulation-
+retains performance close to the clean setting. On Deep-
+CAD and Fusion360, CADReasoner (image/cross-modal)
+attains near-clean CD with IR = 0 by t = 5; on MCB, the
+PC branch achieves the best CD (and IR = 0), and cross-
+modality gives the highest IoU. These results indicate that
+the editor learns to use scan-specific signals (occlusions,
+missing patches) without overfitting to artifacts.
+To probe generalization across domains, Table 6 com-
+pares four train/test combinations. Training on scans im-
+proves transfer in both directions: compared to training on
+clean data, it reduces CD on clean test and boosts IoU. In
+short, scan-simulation acts as a robust curriculum that yields
+models strong on scans and at least as strong on clean sur-
+faces.
+5. Conclusion
+We introduced CADReasoner, a closed-loop editor that
+reconstructs parametric CAD by iteratively self-editing
+its CadQuery program using explicit geometry feedback.
+Treating multi-view overlays and point sets as complemen-
+tary evidence, the model conditions on the target and the
+previous render to propose improved code at step t, with
+best-so-far selection by CD. To bridge realism, we proposed
+a scan-simulation regime applied during training and eval-
+uation. On DeepCAD, Fusion360, and MCB, CADRea-
+soner establishes state-of-the-art results on clean and scan-
+sim tracks, substantially reducing CD and IR while increas-
+ing IoU, and recovering fine geometric details over itera-
+tions.
+References
+[1] Kamel Alrashedy, Pradyumna Tambwekar, Zulfiqar Haider
+Zaidi, Megan Langwasser, Wei Xu, and Matthew Gombo-
+lay. Generating cad code with vision-language models for
+3d designs. In The Thirteenth International Conference on
+Learning Representations. 1, 3
+[2] CadQuery Authors. Cadquery/cadquery: Cadquery 2.4.0,
+2024. 2, 3
+[3] Armen Avetisyan, Manuel Dahnert, Angela Dai, Manolis
+Savva, Angel X Chang, and Matthias Nießner. Scan2cad:
+Learning cad model alignment in rgb-d scans. In Proceed-
+ings of the IEEE/CVF Conference on computer vision and
+pattern recognition, pages 2614–2623, 2019. 1
+[4] Akshay Badagabettu, Sai Sravan Yarlagadda, and
+Amir Barati Farimani. Query2cad: Generating cad
+models using natural language queries. arXiv preprint
+arXiv:2406.00144, 2024. 2
+[5] Cheng Chen, Jiacheng Wei, Tianrun Chen, Chi Zhang, Xi-
+aofeng Yang, Shangzhan Zhang, Bingchen Yang, Chuan-
+Sheng Foo, Guosheng Lin, Qixing Huang, et al. Cad-
+crafter: Generating computer-aided design models from un-
+constrained images. In Proceedings of the IEEE/CVF Con-
+ference on Computer Vision and Pattern Recognition, 2025.
+1, 2
+[6] Tianrun Chen, Chunan Yu, Yuanqi Hu, Jing Li, Tao Xu, Run-
+long Cao, Lanyun Zhu, Ying Zang, Yong Zhang, Zejian Li,
+et al. Img2cad: Conditioned 3d cad model generation from
+single image with structured visual geometry. arXiv preprint
+arXiv:2410.03417, 2024. 2
+[7] Anna C Doris, Md Ferdous Alam, Amin Heyrani Nobari, and
+Faez Ahmed. Cad-coder: An open-source vision-language
+model for computer-aided design code generation. arXiv
+preprint arXiv:2505.14646, 2025. 1, 2
+[8] Tao Du, Jeevana Priya Inala, Yewen Pu, Andrew Spielberg,
+Adriana Schulz, Daniela Rus, Armando Solar-Lezama, and
+Wojciech Matusik. Inversecsg: Automatic conversion of 3d
+models to csg trees. ACM Transactions on Graphics (TOG),
+37(6):1–16, 2018. 2, 3
+[9] Kevin Ellis, Maxwell Nye, Yewen Pu, Felix Sosa, Josh
+Tenenbaum, and Armando Solar-Lezama. Write, execute,
+assess: Program synthesis with a repl. Advances in Neural
+Information Processing Systems, 32, 2019.
+[10] Markus Friedrich, Pierre-Alain Fayolle, Thomas Gabor, and
+Claudia Linnhoff-Popien. Optimizing evolutionary csg tree
+extraction. In Proceedings of the Genetic and Evolutionary
+Computation Conference, pages 1183–1191, 2019. 2
+[11] Yandong Guan, Xilin Wang, Xingxi Ming, Jing Zhang,
+Dong Xu, and Qian Yu. Cad-coder: Text-to-cad generation
+with chain-of-thought and geometric reward. arXiv preprint
+arXiv:2505.19713, 2025. 1
+[12] Haoxiang Guo, Shilin Liu, Hao Pan, Yang Liu, Xin Tong,
+and Baining Guo. Complexgen: Cad reconstruction by b-rep
+chain complex generation. ACM Transactions on Graphics
+(TOG), 41(4):1–18, 2022. 2
+[13] Changqi He, Shuhan Zhang, Liguo Zhang, and Jiajun Miao.
+Cad-coder: Text-guided cad files code generation. arXiv
+preprint arXiv:2505.08686, 2025. 2
+[14] Pradeep Kumar Jayaraman, Joseph G Lambourne, Nishkrit
+Desai, Karl DD Willis, Aditya Sanghi, and Nigel JW Morris.
+Solidgen: An autoregressive model for direct b-rep synthe-
+sis. Transactions on Machine Learning Research, 2023. 2
+[15] R Kenny Jones, Renhao Zhang, Aditya Ganeshan, and
+Daniel Ritchie. Learning to edit visual programs with self-
+supervision. Advances in Neural Information Processing
+Systems, 37:109407–109429, 2024. 2
+[16] Kacper Kania, Maciej Zieba, and Tomasz Kajdanowicz.
+Ucsg-net-unsupervised discovering of constructive solid ge-
+ometry tree. Advances in neural information processing sys-
+tems, 33:8776–8786, 2020. 2, 3
+[17] Michael Kazhdan and Hugues Hoppe. Screened poisson sur-
+face reconstruction. ACM Transactions on Graphics (ToG),
+32(3):1–13, 2013. 5
+9
+
+-- 9 of 11 --
+
+[18] Mohammad Sadil Khan, Elona Dupont, Sk Aziz Ali,
+Kseniya Cherenkova, Anis Kacem, and Djamila Aouada.
+Cad-signet: Cad language inference from point clouds using
+layer-wise sketch instance guided attention. In Proceedings
+of the IEEE/CVF Conference on Computer Vision and Pat-
+tern Recognition, pages 4713–4722, 2024. 2, 3
+[19] Mohammad Sadil Khan, Sankalp Sinha, Talha Uddin, Di-
+dier Stricker, Sk Aziz Ali, and Muhammad Zeshan Afzal.
+Text2cad: Generating sequential cad designs from beginner-
+to-expert level text prompts. Advances in Neural Information
+Processing Systems, 37:7552–7579, 2024. 2
+[20] Sangpil Kim, Hyung-gun Chi, Xiao Hu, Qixing Huang, and
+Karthik Ramani. A large-scale annotated mechanical com-
+ponents benchmark for classification and retrieval tasks with
+deep neural networks. In Proceedings of 16th European Con-
+ference on Computer Vision (ECCV), 2020. 6
+[21] Maksim Kolodiazhnyi, Denis Tarasov, Dmitrii Zhem-
+chuzhnikov, Alexander Nikulin, Ilya Zisman, Anna
+Vorontsova, Anton Konushin, Vladislav Kurenkov, and
+Danila Rukhovich. cadrille: Multi-modal cad reconstruc-
+tion with online reinforcement learning. arXiv preprint
+arXiv:2505.22914, 2025. 1, 2, 3, 6
+[22] Joseph G Lambourne, Karl DD Willis, Pradeep Kumar
+Jayaraman, Aditya Sanghi, Peter Meltzer, and Hooman
+Shayani. Brepnet: A topological message passing system for
+solid models. In Proceedings of the IEEE/CVF conference
+on computer vision and pattern recognition, pages 12773–
+12782, 2021. 2
+[23] Joseph George Lambourne, Karl Willis, Pradeep Kumar Ja-
+yaraman, Longfei Zhang, Aditya Sanghi, and Kamal Rahimi
+Malekshan. Reconstructing editable prismatic cad from
+rounded voxel models. In SIGGRAPH Asia 2022 Confer-
+ence Papers, pages 1–9, 2022. 2
+[24] Hung Le, Yue Wang, Akhilesh Deepak Gotmare, Silvio
+Savarese, and Steven Chu Hong Hoi. Coderl: Mastering
+code generation through pretrained models and deep rein-
+forcement learning. Advances in Neural Information Pro-
+cessing Systems, 35:21314–21328, 2022. 2
+[25] Jiahao Li, Weijian Ma, Xueyang Li, Yunzhong Lou, Guichun
+Zhou, and Xiangdong Zhou. Cad-llama: leveraging large
+language models for computer-aided design parametric 3d
+model generation. In Proceedings of the Computer Vision
+and Pattern Recognition Conference, pages 18563–18573,
+2025. 2
+[26] Lingxiao Li, Minhyuk Sung, Anastasia Dubrovina, Li Yi,
+and Leonidas J Guibas. Supervised fitting of geometric prim-
+itives to 3d point clouds. In Proceedings of the IEEE/CVF
+Conference on Computer Vision and Pattern Recognition,
+pages 2652–2660, 2019. 2
+[27] Xueyang Li, Jiahao Li, Yu Song, Yunzhong Lou, and Xiang-
+dong Zhou. Seek-cad: A self-refined generative modeling for
+3d parametric cad using local inference via deepseek. arXiv
+preprint arXiv:2505.17702, 2025. 1, 3
+[28] Yuan Li, Cheng Lin, Yuan Liu, Xiaoxiao Long, Chenxu
+Zhang, Ningna Wang, Xin Li, Wenping Wang, and Xiaohu
+Guo. Caddreamer: Cad object generation from single-view
+images. In Proceedings of the IEEE/CVF International Con-
+ference on Computer Vision, 2025. 2
+[29] Ruiquan Lin, Yunwei Ji, Wanting Ding, Tianxiang Wu,
+Yaosheng Zhu, and Mengxi Jiang. A survey on deep learning
+in 3d cad reconstruction. Applied Sciences (2076-3417), 15
+(12), 2025. 1
+[30] Yilin Liu, Jiale Chen, Shanshan Pan, Daniel Cohen-Or, Hao
+Zhang, and Hui Huang. Split-and-fit: Learning b-reps via
+structure-aware voronoi partitioning. ACM Transactions on
+Graphics (TOG), 43(4):1–13, 2024. 2
+[31] Yujia Liu, Anton Obukhov, Jan Dirk Wegner, and Konrad
+Schindler. Point2cad: Reverse engineering cad models from
+3d point clouds. In Proceedings of the IEEE/CVF Confer-
+ence on Computer Vision and Pattern Recognition, pages
+3763–3772, 2024. 2, 3
+[32] Weijian Ma, Shuaiqi Chen, Yunzhong Lou, Xueyang Li, and
+Xiangdong Zhou. Draw step by step: Reconstructing cad
+construction sequences from point clouds via multimodal
+diffusion. In Proceedings of the IEEE/CVF Conference on
+Computer Vision and Pattern Recognition, pages 27154–
+27163, 2024. 2
+[33] Aman Madaan, Niket Tandon, Prakhar Gupta, Skyler Hal-
+linan, Luyu Gao, Sarah Wiegreffe, Uri Alon, Nouha Dziri,
+Shrimai Prabhumoye, Yiming Yang, et al. Self-refine: It-
+erative refinement with self-feedback. Advances in Neural
+Information Processing Systems, 36:46534–46594, 2023. 2
+[34] Dimitrios Mallis, Ali Sk Aziz, Elona Dupont, Kseniya
+Cherenkova, Ahmet Serdar Karadeniz, Mohammad Sadil
+Khan, Anis Kacem, Gleb Gusev, and Djamila Aouada. Sharp
+challenge 2023: Solving cad history and parameters recov-
+ery from point clouds and 3d scans. overview, datasets, met-
+rics, and baselines. In Proceedings of the IEEE/CVF Inter-
+national Conference on Computer Vision, pages 1786–1795,
+2023. 1, 3
+[35] Dimitrios Mallis, Ahmet Serdar Karadeniz, Sebastian
+Cavada, Danila Rukhovich, Niki Foteinopoulou, Kseniya
+Cherenkova, Anis Kacem, and Djamila Aouada. Cad-
+assistant: Tool-augmented vllms as generic cad task solvers?
+arXiv preprint arXiv:2412.13810, 2024. 2
+[36] Brandon Man, Ghadi Nehme, Md Ferdous Alam, and Faez
+Ahmed. Videocad: A large-scale video dataset for learning
+ui interactions and 3d reasoning from cad software. arXiv
+preprint arXiv:2505.24838, 2025. 3
+[37] Ravish Mehra, Pushkar Tripathi, Alla Sheffer, and Niloy J
+Mitra. Visibility of noisy point cloud data. Computers &
+Graphics, 34(3):219–230, 2010. 5
+[38] Chandrakana Nandi, James R Wilcox, Pavel Panchekha,
+Taylor Blau, Dan Grossman, and Zachary Tatlock.
+Functional programming for compiling and decompiling
+computer-aided design. Proceedings of the ACM on Pro-
+gramming Languages, 2(ICFP):1–31, 2018. 2
+[39] Daxuan Ren, Jianmin Zheng, Jianfei Cai, Jiatong Li,
+Haiyong Jiang, Zhongang Cai, Junzhe Zhang, Liang Pan,
+Mingyuan Zhang, Haiyu Zhao, et al. Csg-stump: A learn-
+ing friendly csg-like representation for interpretable shape
+parsing. In Proceedings of the IEEE/CVF international con-
+ference on computer vision, pages 12478–12487, 2021. 2
+[40] Daxuan Ren, Jianmin Zheng, Jianfei Cai, Jiatong Li, and
+Junzhe Zhang. Extrudenet: Unsupervised inverse sketch-
+10
+
+-- 10 of 11 --
+
+and-extrude for shape parsing. In European Conference on
+Computer Vision, pages 482–498. Springer, 2022. 2
+[41] Danila Rukhovich, Elona Dupont, Dimitrios Mallis, Kseniya
+Cherenkova, Anis Kacem, and Djamila Aouada. Cad-recode:
+Reverse engineering cad code from point clouds. arXiv
+preprint arXiv:2412.14042, 2024. 1, 2, 3, 6
+[42] Rulin Shao, Shuyue Stella Li, Rui Xin, Scott Geng, Yip-
+ing Wang, Sewoong Oh, Simon Shaolei Du, Nathan Lam-
+bert, Sewon Min, Ranjay Krishna, et al. Spurious re-
+wards: Rethinking training signals in rlvr. arXiv preprint
+arXiv:2506.10947, 2025. 1
+[43] Gopal Sharma, Difan Liu, Subhransu Maji, Evangelos
+Kalogerakis, Siddhartha Chaudhuri, and Radom´ır Mˇech.
+Parsenet: A parametric surface fitting network for 3d point
+clouds. In Computer Vision–ECCV 2020: 16th European
+Conference, Glasgow, UK, August 23–28, 2020, Proceed-
+ings, Part VII 16, pages 261–276. Springer, 2020. 2
+[44] Noah Shinn, Federico Cassano, Ashwin Gopinath, Karthik
+Narasimhan, and Shunyu Yao. Reflexion: Language agents
+with verbal reinforcement learning. Advances in Neural In-
+formation Processing Systems, 36:8634–8652, 2023. 2
+[45] Dmitriy Smirnov, Mikhail Bessmeltsev, and Justin Solomon.
+Learning manifold patch-based representations of man-made
+shapes. In International Conference on Learning Represen-
+tations, 2021. 2
+[46] Yonglong Tian, Andrew Luo, Xingyuan Sun, Kevin Ellis,
+William T. Freeman, Joshua B. Tenenbaum, and Jiajun Wu.
+Learning to infer and execute 3d shape programs. In Inter-
+national Conference on Learning Representations, 2019. 2
+[47] Kehan Wang, Jia Zheng, and Zihan Zhou. Neural face iden-
+tification in a 2d wireframe projection of a manifold object.
+In Proceedings of the IEEE/CVF Conference on Computer
+Vision and Pattern Recognition, pages 1622–1631, 2022. 2
+[48] Siyu Wang, Cailian Chen, Xinyi Le, Qimin Xu, Lei Xu,
+Yanzhou Zhang, and Jie Yang. Cad-gpt: Synthesising cad
+construction sequence with spatial reasoning-enhanced mul-
+timodal llms. In Proceedings of the AAAI Conference on
+Artificial Intelligence, pages 7880–7888, 2025. 2
+[49] Xiaogang Wang, Yuelang Xu, Kai Xu, Andrea Tagliasac-
+chi, Bin Zhou, Ali Mahdavi-Amiri, and Hao Zhang. Pie-net:
+Parametric inference of point cloud edges. Advances in neu-
+ral information processing systems, 33:20167–20178, 2020.
+2
+[50] Yinghui Wang, Xinyu Zhang, and Peng Du. Gaco-
+cad: Geometry-augmented and conciseness-optimized cad
+model generation from single image. arXiv preprint
+arXiv:2510.17157, 2025. 1, 2
+[51] Karl DD Willis, Yewen Pu, Jieliang Luo, Hang Chu, Tao
+Du, Joseph G Lambourne, Armando Solar-Lezama, and Wo-
+jciech Matusik. Fusion 360 gallery: A dataset and environ-
+ment for programmatic cad construction from human design
+sequences. ACM Transactions on Graphics (TOG), 40(4):
+1–24, 2021. 1, 6
+[52] Rundi Wu, Chang Xiao, and Changxi Zheng. Deepcad: A
+deep generative network for computer-aided design models.
+In Proceedings of the IEEE/CVF International Conference
+on Computer Vision, pages 6772–6782, 2021. 1, 2, 3, 6
+[53] Jingwei Xu, Chenyu Wang, Zibo Zhao, Wen Liu, Yi Ma,
+and Shenghua Gao. Cad-mllm: Unifying multimodality-
+conditioned cad generation with mllm. arXiv preprint
+arXiv:2411.04954, 2024. 2
+[54] Xiang Xu, Karl DD Willis, Joseph G Lambourne, Chin-Yi
+Cheng, Pradeep Kumar Jayaraman, and Yasutaka Furukawa.
+Skexgen: Autoregressive generation of cad construction se-
+quences with disentangled codebooks. In International Con-
+ference on Machine Learning, pages 24698–24724. PMLR,
+2022. 2
+[55] Xiang Xu, Pradeep Kumar Jayaraman, Joseph G Lambourne,
+Karl DD Willis, and Yasutaka Furukawa. Hierarchical neu-
+ral coding for controllable cad model generation. In Inter-
+national Conference on Machine Learning, pages 38443–
+38461, 2023. 2
+[56] Xiang Xu, Joseph Lambourne, Pradeep Jayaraman,
+Zhengqing Wang, Karl Willis, and Yasutaka Furukawa.
+Brepgen: A b-rep generative diffusion model with structured
+latent geometry. ACM Transactions on Graphics (TOG), 43
+(4):1–14, 2024. 2
+[57] Fenggen Yu, Zhiqin Chen, Manyi Li, Aditya Sanghi,
+Hooman Shayani, Ali Mahdavi-Amiri, and Hao Zhang.
+Capri-net: Learning compact cad shapes with adaptive prim-
+itive assembly. In Proceedings of the IEEE/CVF conference
+on computer vision and pattern recognition, pages 11768–
+11778, 2022. 2, 3
+[58] Fenggen Yu, Qimin Chen, Maham Tanveer, Ali Mah-
+davi Amiri, and Hao Zhang. D2csg: Unsupervised learning
+of compact csg trees with dual complements and dropouts.
+Advances in Neural Information Processing Systems, 36:
+22807–22819, 2023. 2, 3
+[59] Yu Yuan, Shizhao Sun, Qi Liu, and Jiang Bian. Cad-
+editor: A locate-then-infill framework with automated train-
+ing data synthesis for text-based cad editing. arXiv preprint
+arXiv:2502.03997, 2025. 2
+[60] Yang Yue, Zhiqi Chen, Rui Lu, Andrew Zhao, Zhaokai
+Wang, Shiji Song, and Gao Huang. Does reinforcement
+learning really incentivize reasoning capacity in llms beyond
+the base model? arXiv preprint arXiv:2504.13837, 2025. 1
+[61] Zhanwei Zhang, Shizhao Sun, Wenxiao Wang, Deng Cai,
+and Jiang Bian. Flexcad: Unified and versatile controllable
+cad generation with fine-tuned large language models. In-
+ternational Conference on Learning Representations, 2025.
+2
+11
+
+-- 11 of 11 --
+

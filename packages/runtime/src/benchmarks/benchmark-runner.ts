@@ -44,6 +44,8 @@ export type BenchmarkResult = {
 export type WasmSizeInfo = {
   singleWasmBytes: number;
   singleJsBytes: number;
+  multiWasmBytes?: number;
+  multiJsBytes?: number;
 };
 
 /** Build provenance metadata linking benchmark results to build configuration. */
@@ -74,9 +76,16 @@ export type BenchmarkRunResult = {
 export type BenchmarkRunnerOptions = {
   iterations: number;
   ocTracing?: 'off' | 'summary' | 'per-call';
-  /** WASM variant or custom config. Defaults to `'single'`. */
-  wasm?: 'single' | { wasmUrl: string; wasmBindingsUrl: string };
+  /** WASM variant or custom config. Defaults to `'auto'` (multi when supported, else single). */
+  wasm?: 'auto' | 'single' | 'multi' | { wasmUrl: string; wasmBindingsUrl: string };
   onProgress?: (completed: number, total: number, caseName: string) => void;
+  onIterationProgress?: (progress: {
+    caseName: string;
+    iteration: number;
+    totalRuns: number;
+    warmupRuns: number;
+    elapsed: number;
+  }) => void;
   /** Enable V8 CPU profiling for per-function timing breakdown. */
   cpuProfile?: boolean;
   /** CPU profiler sampling interval in microseconds (default: 100). */
@@ -171,8 +180,9 @@ export async function runBenchmarks(
   const {
     iterations,
     ocTracing = 'summary',
-    wasm = 'single',
+    wasm = 'auto',
     onProgress,
+    onIterationProgress,
     cpuProfile: enableCpuProfile = false,
     cpuProfileInterval = 100,
   } = options;
@@ -204,6 +214,15 @@ export async function runBenchmarks(
 
     client.on('telemetry', (entries) => {
       telemetryBatches.push(entries);
+    });
+    client.on('log', (entry) => {
+      // Surface kernel-side info/warn lines (e.g. WASM auto-selection log,
+      // OCCT parallel activation summary) to the benchmark CLI. Skip debug/trace
+      // (very chatty under per-call OC tracing) and the `info` rubber-band.
+      if (entry.level === 'info' || entry.level === 'warn' || entry.level === 'error') {
+        const stream = entry.level === 'error' ? console.error : console.log;
+        stream(`  [${entry.level.padEnd(5)}] ${entry.message}`);
+      }
     });
 
     const warmupRuns = 3;
@@ -237,6 +256,13 @@ export async function runBenchmarks(
         parameters: {},
       });
       const elapsed = performance.now() - start;
+      onIterationProgress?.({
+        caseName: benchCase.name,
+        iteration: iter + 1,
+        totalRuns,
+        warmupRuns,
+        elapsed,
+      });
 
       if (!exportResult.success) {
         const messages = exportResult.issues.map((issue) => issue.message).join('; ');
@@ -310,10 +336,12 @@ async function collectWasmSizes(): Promise<WasmSizeInfo | undefined> {
       return undefined;
     }
 
+    const multiWasm = stat('replicad_multi.wasm');
+
     const jsDirectory = resolve(dirname(toFilePath(import.meta.url)), 'kernels', 'replicad');
     const jsSize = (name: string): number => {
       try {
-        return statSync(resolve(jsDirectory, '..', '..', '..', 'node_modules', 'replicad-opencascadejs', 'src', name))
+        return statSync(resolve(jsDirectory, '..', '..', '..', 'node_modules', 'replicad-opencascadejs', 'dist', name))
           .size;
       } catch {
         return 0;
@@ -323,6 +351,8 @@ async function collectWasmSizes(): Promise<WasmSizeInfo | undefined> {
     return {
       singleWasmBytes: singleWasm,
       singleJsBytes: jsSize('replicad_single.js'),
+      multiWasmBytes: multiWasm,
+      multiJsBytes: multiWasm ? jsSize('replicad_multi.js') : undefined,
     };
   } catch {
     return undefined;

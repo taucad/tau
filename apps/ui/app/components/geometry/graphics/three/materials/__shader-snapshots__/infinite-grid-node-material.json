@@ -1,0 +1,52 @@
+{
+  "blendColor": 0,
+  "color": 16777215,
+  "depthWrite": false,
+  "envMapRotation": [0, 0, 0, "XYZ"],
+  "inputNodes": {
+    "colorNode": "<nodeRef>",
+    "vertexNode": "<nodeRef>"
+  },
+  "metadata": {
+    "generator": "Material.toJSON",
+    "type": "Material",
+    "version": 4.7
+  },
+  "nodes": [
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "shaderNode": "<nodeRef>"
+      },
+      "type": "Node"
+    },
+    {
+      "type": "Node"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "shaderNode": "<nodeRef>"
+      },
+      "type": "Node"
+    },
+    {
+      "type": "Node"
+    }
+  ],
+  "reflectivity": 1,
+  "refractionRatio": 0.98,
+  "side": 2,
+  "transparent": true,
+  "type": "MeshBasicNodeMaterial"
+}

@@ -1,0 +1,59 @@
+{
+  "name": "@taucad/lsp",
+  "version": "0.0.1",
+  "description": "Monaco LSP bindings and language filesystem bridge for the web editor",
+  "type": "module",
+  "private": true,
+  "exports": {
+    "./in-process-jsonrpc": {
+      "types": "./src/in-process-jsonrpc.ts",
+      "import": "./src/in-process-jsonrpc.ts",
+      "default": "./src/in-process-jsonrpc.ts"
+    },
+    "./language-fs-bridge": {
+      "types": "./src/language-fs-bridge.ts",
+      "import": "./src/language-fs-bridge.ts",
+      "default": "./src/language-fs-bridge.ts"
+    },
+    "./language-fs-sync-host": {
+      "types": "./src/language-fs-sync-host.ts",
+      "import": "./src/language-fs-sync-host.ts",
+      "default": "./src/language-fs-sync-host.ts"
+    },
+    "./monaco-lsp-binding": {
+      "types": "./src/monaco-lsp-binding.ts",
+      "import": "./src/monaco-lsp-binding.ts",
+      "default": "./src/monaco-lsp-binding.ts"
+    },
+    "./monaco-ts-worker/lsp-diagnostic": {
+      "types": "./src/monaco-ts-worker/lsp-diagnostic.ts",
+      "import": "./src/monaco-ts-worker/lsp-diagnostic.ts",
+      "default": "./src/monaco-ts-worker/lsp-diagnostic.ts"
+    },
+    "./monaco-ts-worker/tau-sync-ts-worker": {
+      "types": "./src/monaco-ts-worker/tau-sync-ts-worker.ts",
+      "import": "./src/monaco-ts-worker/tau-sync-ts-worker.ts",
+      "default": "./src/monaco-ts-worker/tau-sync-ts-worker.ts"
+    },
+    "./monaco-ts-worker-entry": {
+      "types": "./src/monaco-ts-worker/monaco-ts-worker.entry.ts",
+      "import": "./src/monaco-ts-worker/monaco-ts-worker.entry.ts",
+      "default": "./src/monaco-ts-worker/monaco-ts-worker.entry.ts"
+    }
+  },
+  "dependencies": {
+    "@taucad/fs-client": "workspace:*",
+    "@taucad/lsp-fs": "workspace:*",
+    "@taucad/memory": "workspace:*",
+    "@taucad/types": "workspace:*",
+    "@taucad/utils": "workspace:*",
+    "json-rpc-2.0": "^1.7.1",
+    "monaco-editor": "^0.55.1",
+    "vscode-languageserver-protocol": "^3.17.5",
+    "vscode-uri": "catalog:",
+    "zod": "catalog:"
+  },
+  "imports": {
+    "#*": "./src/*"
+  }
+}

@@ -1,84 +1,18 @@
 import * as THREE from 'three';
+import type { ResolvedGraphicsBackend } from '#constants/editor.constants.js';
+import { createInfiniteGridNodeMaterial } from '#components/geometry/graphics/three/materials/infinite-grid-material.node.js';
+import type {
+  InfiniteGridMaterialHandle,
+  InfiniteGridMaterialProperties,
+  InfiniteGridVisualOverrides,
+} from '#components/geometry/graphics/three/materials/infinite-grid-material.types.js';
 
-export type InfiniteGridMaterialProperties = {
-  /**
-   * The distance between the lines of the small grid.
-   * Increasing makes the small grid lines more sparse/farther apart.
-   */
-  readonly smallSize?: number;
-  /**
-   * The thickness of the lines of the small grid in screen pixels.
-   * Increasing makes small grid lines thicker and more prominent.
-   * @default 1.25
-   */
-  readonly smallThickness?: number;
-  /**
-   * The distance between the lines of the large grid.
-   * Increasing makes large grid lines more sparse/farther apart.
-   */
-  readonly largeSize?: number;
-  /**
-   * The thickness of the lines of the large grid in screen pixels.
-   * Increasing makes large grid lines thicker and more prominent.
-   * @default 2
-   */
-  readonly largeThickness?: number;
-  /**
-   * The color of the grid.
-   * Use darker colors for better visibility against light backgrounds.
-   * Use lighter colors for better visibility against dark backgrounds.
-   */
-  readonly color?: THREE.Color;
-  /**
-   * The axes to use for the grid.
-   * Defines the plane orientation of the grid.
-   * - 'xyz': Grid on XY plane with Z as normal (standard top-down view)
-   * - 'xzy': Grid on XZ plane with Y as normal (standard front view)
-   * - 'zyx': Grid on ZY plane with X as normal (standard side view)
-   * @default 'xyz'
-   */
-  readonly axes?: 'xyz' | 'xzy' | 'zyx';
-  /**
-   * The base opacity of the grid lines.
-   * Increasing makes the entire grid more visible/opaque.
-   * @default 0.3
-   */
-  readonly lineOpacity?: number;
-  /**
-   * Minimum grid distance to ensure visibility.
-   * Increasing ensures grid is always drawn at least this far from camera.
-   * @default 10
-   */
-  readonly minGridDistance?: number;
-  /**
-   * Controls how far the grid extends from the camera.
-   * Increasing extends the grid farther from the camera, creating a larger visible area.
-   * @default 10
-   */
-  readonly gridDistanceMultiplier?: number;
-  /**
-   * Alpha threshold for fragment discard (transparency cutoff).
-   * Increasing makes semi-transparent areas of the grid fully transparent.
-   * @default 0.01
-   */
-  readonly alphaThreshold?: number;
-  /**
-   * The fade start value for grid smoothstep (0-1). Lower values start fading closer to the camera.
-   * @default 0.05
-   */
-  readonly fadeStart?: number;
-  /**
-   * The fade end value for grid smoothstep (0-1). Higher values end fading further from the camera.
-   * @default 0.2
-   */
-  readonly fadeEnd?: number;
-  /**
-   * Offset applied to the grid along its normal axis to prevent z-fighting with other geometry.
-   * Increasing this value pushes the grid further away from the plane.
-   * @default 0.001
-   */
-  readonly normalOffset?: number;
-};
+/* oxlint-disable no-barrel-files/no-barrel-files -- `infinite-grid-material.ts` façade re-exports public types beside implementations */
+export type {
+  InfiniteGridMaterialHandle,
+  InfiniteGridMaterialProperties,
+} from '#components/geometry/graphics/three/materials/infinite-grid-material.types.js';
+/* oxlint-enable no-barrel-files/no-barrel-files */
 
 /**
  * Maps string-based axes to numeric indices for the shader uniform.
@@ -93,12 +27,14 @@ function mapAxesToIndex(axes: 'xyz' | 'xzy' | 'zyx'): 0 | 1 | 2 {
   return mapping[axes];
 }
 
-// Original Author: Fyrestar https://mevedia.com (https://github.com/Fyrestar/THREE.InfiniteGridHelper)
-// Modified by @rifont to:
-// - use varying thickness and enhanced distance falloff
-// - work correctly with logarithmic depth buffer
-// - use secure uniform-based axis configuration instead of string interpolation
-export function infiniteGridMaterial(properties?: InfiniteGridMaterialProperties): THREE.ShaderMaterial {
+/**
+ * WebGL infinite grid: mutate `uniforms` via {@link InfiniteGridMaterialHandle.applyVisualOverrides} instead of recreating the material.
+ *
+ * Custom `ShaderMaterial` must `#include <colorspace_fragment>` after writing `gl_FragColor` (before the fragment exit). Three.js only auto-injects that chunk into bundled `ShaderLib/*` materials; without it, WebGL skips the linear-to-sRGB encode that WebGPU `NodeMaterial` applies automatically via `ColorSpaceNode`, causing a perceptual-brightness mismatch between backends (e.g. light-mode grid near-invisible on WebGPU).
+ */
+export function createInfiniteGridGlMaterial(
+  properties?: InfiniteGridMaterialProperties,
+): InfiniteGridMaterialHandle & { material: THREE.ShaderMaterial } {
   const {
     smallSize = 1,
     largeSize = 100,
@@ -335,14 +271,53 @@ export function infiniteGridMaterial(properties?: InfiniteGridMaterialProperties
         // compositing and produces correct brightness at intersections.
         float grid = mix(gridSmall, 1.0, gridLarge);
         
-        // Apply final color with basic opacity
+        // Apply final color with basic opacity (linear working space)
         gl_FragColor = vec4(uColor.rgb, grid * fadeFactor * uLineOpacity);
         
         // Use a simple alpha threshold
         if (gl_FragColor.a < uAlphaThreshold) discard;
+        
+        #include <colorspace_fragment>
       }
       `,
   });
 
-  return material;
+  const applyVisualOverrides = (overrides: InfiniteGridVisualOverrides): void => {
+    if (overrides.smallSize !== undefined) {
+      material.uniforms['uSmallSize']!.value = overrides.smallSize;
+    }
+
+    if (overrides.largeSize !== undefined) {
+      material.uniforms['uLargeSize']!.value = overrides.largeSize;
+    }
+
+    if (overrides.color !== undefined) {
+      material.uniforms['uColor']!.value = overrides.color;
+    }
+  };
+
+  return { material, applyVisualOverrides };
+}
+
+// Original Author: Fyrestar https://mevedia.com (https://github.com/Fyrestar/THREE.InfiniteGridHelper)
+// Modified by @rifont to:
+// - use varying thickness and enhanced distance falloff
+// - work correctly with logarithmic depth buffer
+// - use secure uniform-based axis configuration instead of string interpolation
+export function infiniteGridMaterial(properties?: InfiniteGridMaterialProperties): THREE.ShaderMaterial {
+  return createInfiniteGridGlMaterial(properties).material;
+}
+
+/**
+ * Dual-stack infinite grid factory. Returns a long-lived material + `applyVisualOverrides` for zoom-driven size/colour updates.
+ */
+export function infiniteGridMaterialForBackend(
+  backend: ResolvedGraphicsBackend,
+  properties?: InfiniteGridMaterialProperties,
+): InfiniteGridMaterialHandle {
+  if (backend === 'webgpu') {
+    return createInfiniteGridNodeMaterial(properties);
+  }
+
+  return createInfiniteGridGlMaterial(properties);
 }

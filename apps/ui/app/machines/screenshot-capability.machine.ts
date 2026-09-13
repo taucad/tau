@@ -1,12 +1,19 @@
 import { setup, sendTo, fromCallback, assertEvent, enqueueActions, assign } from 'xstate';
 import type { AnyActorRef } from 'xstate';
 import * as THREE from 'three';
-import type { ScreenshotOptions, CameraAngle, CompositeScreenshotOptions } from '@taucad/types';
+import type { ScreenshotOptions, ScreenshotOverlay, CameraAngle, CompositeScreenshotOptions } from '@taucad/types';
+import type { ResolvedGraphicsBackend } from '#constants/editor.constants.js';
+import { drawScreenshotOverlay } from '#machines/screenshot-overlay.utils.js';
 import {
   applyMatcapToClonedScene,
-  disposeClonedSceneMaterials,
+  disposeCloneOwnedMaterials,
 } from '#components/geometry/graphics/three/materials/gltf-matcap.js';
+import { applyEdgeMaterialsToClonedScene } from '#components/geometry/graphics/three/materials/gltf-edges.js';
 import { ensureMatcapTextureLoaded } from '#components/geometry/graphics/three/materials/matcap-material.js';
+import type { RendererInstance } from '#components/geometry/graphics/three/renderer.js';
+import { createRenderer } from '#components/geometry/graphics/three/renderer.js';
+import type { ViewportCadGl } from '#components/geometry/graphics/three/viewport-cad-renderer.js';
+import { isViewportWebGpu } from '#components/geometry/graphics/three/viewport-cad-renderer.js';
 import { calculateFovDistanceCompensation } from '#components/geometry/graphics/three/utils/math.utils.js';
 import { computeViewFittingZoom } from '#components/geometry/graphics/three/utils/camera.utils.js';
 import { defaultStageOptions } from '#components/geometry/graphics/three/stage.js';
@@ -18,7 +25,7 @@ type CaptureMode = 'threejs' | 'svg';
 // Context type
 type ScreenshotCapabilityContext = {
   graphicsRef: AnyActorRef;
-  gl?: THREE.WebGLRenderer;
+  gl?: ViewportCadGl;
   scene?: THREE.Scene;
   camera?: THREE.Camera;
   svgElement?: SVGSVGElement;
@@ -36,7 +43,7 @@ type ScreenshotCapabilityContext = {
 type ScreenshotCapabilityEvent =
   | {
       type: 'registerCapture';
-      gl: THREE.WebGLRenderer;
+      gl: ViewportCadGl;
       scene: THREE.Scene;
       camera: THREE.Camera;
     }
@@ -116,11 +123,20 @@ export function calculateOptimalGrid(
 }
 
 /**
- * Create composite image from multiple screenshots
+ * Create composite image from multiple screenshots.
+ *
+ * When `overlay` is supplied, the chip is stamped **once** on the assembled
+ * composite (top-left of the entire grid) — not per tile. The composite
+ * actor passes `suppressOverlay: true` to the per-angle `captureScreenshots`
+ * call so tiles arrive un-stamped, then this function stamps the chip on
+ * the final canvas. See `docs/research/screenshot-overlay-watermark-architecture.md`
+ * Finding 7 for the rationale (per-tile chips would compete with the
+ * existing angle labels).
  */
 async function createCompositeImage(
   screenshots: Array<{ label: string; dataUrl: string }>,
   options: CompositeScreenshotOptions = defaultCompositeOptions,
+  overlay?: ScreenshotOverlay,
 ): Promise<string> {
   const mergedOptions = {
     ...defaultCompositeOptions,
@@ -175,66 +191,94 @@ async function createCompositeImage(
   canvas.width = columns * imageWidth + (columns + 1) * effectivePadding;
   canvas.height = rows * (imageHeight + effectiveLabelHeight) + (rows + 1) * effectivePadding;
 
-  // Optimize canvas for performance
+  // Image-smoothing is intentionally function-scoped (no save/restore) — it
+  // applies to every `drawImage` in this composite, including the 16 px icon
+  // stamped by `drawScreenshotOverlay` further down, which benefits from the
+  // same smoothing. Every other state mutation below is wrapped in
+  // `save`/`restore` so blocks don't leak into each other.
   context.imageSmoothingEnabled = true;
   context.imageSmoothingQuality = 'low';
 
-  // Set background color (only if not transparent)
   const isTransparent = backgroundColor === 'transparent';
   if (!isTransparent) {
-    context.fillStyle = backgroundColor;
-    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.save();
+    try {
+      context.fillStyle = backgroundColor;
+      context.fillRect(0, 0, canvas.width, canvas.height);
+    } finally {
+      context.restore();
+    }
   }
 
-  // Set text properties (responsive font size)
-  if (showLabels) {
-    const fontSize = Math.max(12, Math.round(imageHeight * 0.06));
-    context.fillStyle = '#000000';
-    context.font = `bold ${fontSize}px Arial`;
-    context.textAlign = 'center';
-  }
-
-  // Draw images and labels in optimal grid layout
+  // Pass 1 — images. `drawImage` is stateless w.r.t. fill/stroke/text
+  // properties, so no save/restore wrapper needed.
   for (const [index, item] of images.entries()) {
     const col = index % columns;
     const row = Math.floor(index / columns);
-
     const x = effectivePadding + col * (imageWidth + effectivePadding);
     const y = effectivePadding + row * (imageHeight + effectiveLabelHeight + effectivePadding);
-
-    // Draw the scaled image
     context.drawImage(item.image, x, y, imageWidth, imageHeight);
+  }
 
-    // Draw the label below the image
-    if (showLabels) {
-      const labelX = x + imageWidth / 2;
-      const labelY = y + imageHeight + effectiveLabelHeight - 5;
-      context.fillText(item.label.toUpperCase(), labelX, labelY);
+  // Pass 2 — tile labels. State is scoped via save/restore so the divider
+  // stroke and overlay chip below see a clean context (chip needs
+  // textAlign='left' to render icon-then-text correctly).
+  if (showLabels) {
+    context.save();
+    try {
+      const fontSize = Math.max(12, Math.round(imageHeight * 0.06));
+      context.fillStyle = '#000000';
+      context.font = `bold ${fontSize}px Arial`;
+      context.textAlign = 'center';
+      context.textBaseline = 'alphabetic';
+      for (const [index, item] of images.entries()) {
+        const col = index % columns;
+        const row = Math.floor(index / columns);
+        const x = effectivePadding + col * (imageWidth + effectivePadding);
+        const y = effectivePadding + row * (imageHeight + effectiveLabelHeight + effectivePadding);
+        const labelX = x + imageWidth / 2;
+        const labelY = y + imageHeight + effectiveLabelHeight - 5;
+        context.fillText(item.label.toUpperCase(), labelX, labelY);
+      }
+    } finally {
+      context.restore();
     }
   }
 
-  // Draw divider lines based solely on showDividers setting
   if (dividerColor !== 'transparent') {
-    context.strokeStyle = dividerColor;
-    context.lineWidth = dividerWidth;
-
-    context.beginPath();
-    // Vertical dividers (between columns)
-    for (let col = 1; col < columns; col++) {
-      const dividerX = effectivePadding + col * (imageWidth + effectivePadding) - effectivePadding / 2;
-      context.moveTo(dividerX, effectivePadding);
-      context.lineTo(dividerX, canvas.height - effectivePadding);
+    context.save();
+    try {
+      context.strokeStyle = dividerColor;
+      context.lineWidth = dividerWidth;
+      context.beginPath();
+      for (let col = 1; col < columns; col++) {
+        const dividerX = effectivePadding + col * (imageWidth + effectivePadding) - effectivePadding / 2;
+        context.moveTo(dividerX, effectivePadding);
+        context.lineTo(dividerX, canvas.height - effectivePadding);
+      }
+      for (let row = 1; row < rows; row++) {
+        const dividerY =
+          effectivePadding + row * (imageHeight + effectiveLabelHeight + effectivePadding) - effectivePadding / 2;
+        context.moveTo(effectivePadding, dividerY);
+        context.lineTo(canvas.width - effectivePadding, dividerY);
+      }
+      context.stroke();
+    } finally {
+      context.restore();
     }
+  }
 
-    // Horizontal dividers (between rows)
-    for (let row = 1; row < rows; row++) {
-      const dividerY =
-        effectivePadding + row * (imageHeight + effectiveLabelHeight + effectivePadding) - effectivePadding / 2;
-      context.moveTo(effectivePadding, dividerY);
-      context.lineTo(canvas.width - effectivePadding, dividerY);
-    }
-
-    context.stroke();
+  if (overlay) {
+    // Composite canvas is drawn in device pixels (no DPR scale on `context`),
+    // so the overlay's internal `scale(pixelRatio)` is paired with `pixelRatio = 1`
+    // to keep the chip pinned to a 12 px CSS-equivalent margin in the
+    // composite's native coordinate space.
+    await drawScreenshotOverlay(context, {
+      canvasWidth: canvas.width,
+      canvasHeight: canvas.height,
+      pixelRatio: 1,
+      overlay,
+    });
   }
 
   // Convert canvas to blob with optimized settings for speed
@@ -329,8 +373,18 @@ function inlineSvgStyles(clone: Element, original: Element): void {
 /**
  * Core SVG screenshot capture logic.
  * Captures the current SVG view as a flat image (camera angles are ignored).
+ *
+ * When `options.overlay` is set and `suppressOverlay` is false, stamps the
+ * top-left chip via {@link drawScreenshotOverlay} on the existing 2D canvas
+ * between the SVG raster and the encode step. SVG composites use the same
+ * suppress-on-tile + stamp-on-composite contract as the Three.js path —
+ * see `docs/research/screenshot-overlay-watermark-architecture.md`.
  */
-async function captureSvgScreenshots(svgElement: SVGSVGElement, options?: ScreenshotOptions): Promise<string[]> {
+async function captureSvgScreenshots(
+  svgElement: SVGSVGElement,
+  options?: ScreenshotOptions,
+  suppressOverlay?: boolean,
+): Promise<string[]> {
   if (!svgElement.isConnected) {
     throw new Error('Screenshot attempted on disconnected SVG element');
   }
@@ -427,6 +481,25 @@ async function captureSvgScreenshots(svgElement: SVGSVGElement, options?: Screen
 
     context.drawImage(img, 0, 0, width, height);
 
+    if (!suppressOverlay && options?.overlay) {
+      // The SVG path has already applied `ctx.scale(pixelRatio, pixelRatio)`.
+      // Reset the transform around the overlay so its internal `scale(pixelRatio)`
+      // composes against an identity matrix, matching the Three.js path's
+      // expectations (overlay reasons in CSS pixels and DPR-scales internally).
+      context.save();
+      context.setTransform(1, 0, 0, 1, 0, 0);
+      try {
+        await drawScreenshotOverlay(context, {
+          canvasWidth: canvas.width,
+          canvasHeight: canvas.height,
+          pixelRatio,
+          overlay: options.overlay,
+        });
+      } finally {
+        context.restore();
+      }
+    }
+
     // Export as data URL via Blob → FileReader (consistent with Three.js path)
     const mimeType = config.output.format;
     const quality = mimeType === 'image/jpeg' || mimeType === 'image/webp' ? config.output.quality : undefined;
@@ -489,19 +562,74 @@ export function removeCloneUnsafeObjects(scene: THREE.Scene): void {
 }
 
 /**
+ * Encode a freshly-rendered 3D screenshot canvas to a dataURL, optionally
+ * stamping an overlay chip first. The 3D canvas already owns a WebGL or
+ * WebGPU context, so a 2D context cannot be acquired from it directly —
+ * we blit into a fresh 2D canvas, draw the overlay there, and encode from
+ * the 2D canvas. When `overlay` is undefined, we skip the blit entirely
+ * and return the 3D canvas's `toDataURL` to preserve the original encode
+ * path for non-overlay callers (zero behavioural change).
+ */
+async function encodeScreenshotCanvas(args: {
+  screenshotCanvas: HTMLCanvasElement;
+  format: string;
+  quality: number;
+  overlay: ScreenshotOverlay | undefined;
+  pixelRatio: number;
+}): Promise<string> {
+  const { screenshotCanvas, format, quality, overlay, pixelRatio } = args;
+  if (!overlay) {
+    return screenshotCanvas.toDataURL(format, quality);
+  }
+
+  const stampedCanvas = document.createElement('canvas');
+  stampedCanvas.width = screenshotCanvas.width;
+  stampedCanvas.height = screenshotCanvas.height;
+  try {
+    const stampedContext = stampedCanvas.getContext('2d');
+    if (!stampedContext) {
+      // Couldn't get a 2D context — fall back to the un-stamped capture so
+      // the screenshot pipeline never fails because of overlay setup.
+      return screenshotCanvas.toDataURL(format, quality);
+    }
+    stampedContext.drawImage(screenshotCanvas, 0, 0);
+    await drawScreenshotOverlay(stampedContext, {
+      canvasWidth: stampedCanvas.width,
+      canvasHeight: stampedCanvas.height,
+      pixelRatio,
+      overlay,
+    });
+    return stampedCanvas.toDataURL(format, quality);
+  } finally {
+    stampedCanvas.width = 0;
+    stampedCanvas.height = 0;
+  }
+}
+
+/**
  * Core screenshot capture logic.
  * Renders each camera angle into a temporary canvas and returns data URLs.
+ *
+ * When `options.overlay` is set and `suppressOverlay` is false (single-view
+ * path), each rendered frame is blitted into a fresh 2D canvas and stamped
+ * with a top-left chip via {@link drawScreenshotOverlay} before encoding.
+ * The composite path passes `suppressOverlay: true` so the chip is drawn
+ * once on the assembled grid instead of once per tile — see
+ * `docs/research/screenshot-overlay-watermark-architecture.md` Finding 7.
  */
+// oxlint-disable-next-line eslint(complexity) -- multi-angle capture composes camera fitting, cropping, DPI, cloning, matcap, and teardown in one tool entry point
 async function captureScreenshots({
   gl,
   scene,
   camera,
   options,
+  suppressOverlay,
 }: {
-  gl: THREE.WebGLRenderer;
+  gl: ViewportCadGl;
   scene: THREE.Scene;
   camera: THREE.Camera;
   options?: ScreenshotOptions;
+  suppressOverlay?: boolean;
 }): Promise<string[]> {
   if (!gl.domElement.isConnected) {
     throw new Error('Screenshot attempted on disconnected canvas - canvas may have been recreated');
@@ -550,16 +678,12 @@ async function captureScreenshots({
   screenshotCanvas.width = width;
   screenshotCanvas.height = height;
 
-  const screenshotRenderer = new THREE.WebGLRenderer({
-    canvas: screenshotCanvas,
-    alpha: true,
-    antialias: true,
-    logarithmicDepthBuffer: true,
-    preserveDrawingBuffer: true,
-    stencil: true,
-  });
+  let screenshotRenderer: RendererInstance | undefined;
 
   try {
+    const screenshotBackend: ResolvedGraphicsBackend = isViewportWebGpu(gl) ? 'webgpu' : 'webgl';
+    screenshotRenderer = await createRenderer('screenshot', screenshotBackend, screenshotCanvas);
+
     screenshotRenderer.setSize(width, height, false);
 
     const useHighDpi = config.cameraAngles.length === 1;
@@ -569,7 +693,9 @@ async function captureScreenshots({
     screenshotRenderer.outputColorSpace = gl.outputColorSpace;
     screenshotRenderer.toneMapping = THREE.NoToneMapping;
     screenshotRenderer.toneMappingExposure = 1;
-    screenshotRenderer.localClippingEnabled = gl.localClippingEnabled;
+    if (screenshotRenderer instanceof THREE.WebGLRenderer && gl instanceof THREE.WebGLRenderer) {
+      screenshotRenderer.localClippingEnabled = gl.localClippingEnabled;
+    }
 
     const dataUrls: string[] = [];
 
@@ -585,7 +711,24 @@ async function captureScreenshots({
     }
 
     const matcapTexture = await ensureMatcapTextureLoaded();
-    applyMatcapToClonedScene(screenshotScene, matcapTexture);
+
+    // Track every clone-owned material so we can dispose only the materials we
+    // allocated — never the live viewport's shared `Line2NodeMaterial` /
+    // matcap instances. See `docs/research/screenshot-viewport-shared-material-state-bleed.md`.
+    const cloneOwnedMaterials = new Set<THREE.Material>();
+    for (const material of applyMatcapToClonedScene(screenshotScene, matcapTexture, {
+      tint: 1,
+      backend: screenshotBackend,
+    })) {
+      cloneOwnedMaterials.add(material);
+    }
+    const screenshotResolution = new THREE.Vector2(width, height);
+    for (const material of applyEdgeMaterialsToClonedScene(screenshotScene, {
+      backend: screenshotBackend,
+      resolution: screenshotResolution,
+    })) {
+      cloneOwnedMaterials.add(material);
+    }
 
     screenshotScene.environment = null;
     screenshotScene.environmentIntensity = 0;
@@ -664,15 +807,28 @@ async function captureScreenshots({
 
       screenshotRenderer.render(screenshotScene, screenshotCamera);
 
-      dataUrls.push(screenshotCanvas.toDataURL(config.output.format, config.output.quality));
+      // oxlint-disable-next-line no-await-in-loop -- sequential await intentional: the shared `screenshotCanvas` is overwritten on every render, so the overlay blit must read it before the next loop iteration starts
+      const stampedDataUrl = await encodeScreenshotCanvas({
+        screenshotCanvas,
+        format: config.output.format,
+        quality: config.output.quality,
+        overlay: !suppressOverlay && options?.overlay ? options.overlay : undefined,
+        pixelRatio,
+      });
+      dataUrls.push(stampedDataUrl);
     }
 
-    disposeClonedSceneMaterials(screenshotScene);
+    disposeCloneOwnedMaterials(cloneOwnedMaterials);
 
     return dataUrls;
   } finally {
-    screenshotRenderer.dispose();
-    screenshotRenderer.forceContextLoss();
+    if (screenshotRenderer !== undefined) {
+      screenshotRenderer.dispose();
+      if (!isViewportWebGpu(screenshotRenderer)) {
+        screenshotRenderer.forceContextLoss();
+      }
+    }
+
     screenshotCanvas.width = 0;
     screenshotCanvas.height = 0;
   }
@@ -701,7 +857,7 @@ export const screenshotCapabilityMachine = setup({
       | { type: 'screenshotCompleted'; dataUrls: string[]; requestId: string }
       | { type: 'screenshotFailed'; error: string; requestId: string },
       {
-        gl: THREE.WebGLRenderer;
+        gl: ViewportCadGl;
         scene: THREE.Scene;
         camera: THREE.Camera;
         options?: ScreenshotOptions;
@@ -728,7 +884,7 @@ export const screenshotCapabilityMachine = setup({
       | { type: 'screenshotCompleted'; dataUrls: string[]; requestId: string }
       | { type: 'screenshotFailed'; error: string; requestId: string },
       {
-        gl: THREE.WebGLRenderer;
+        gl: ViewportCadGl;
         scene: THREE.Scene;
         camera: THREE.Camera;
         options?: ScreenshotOptions;
@@ -739,7 +895,9 @@ export const screenshotCapabilityMachine = setup({
 
       (async () => {
         try {
-          const dataUrls = await captureScreenshots({ gl, scene, camera, options });
+          // Suppress per-tile overlay so the chip only appears once on the
+          // assembled composite (createCompositeImage stamps it below).
+          const dataUrls = await captureScreenshots({ gl, scene, camera, options, suppressOverlay: true });
           const compositeOptions = options?.composite ?? defaultCompositeOptions;
 
           const screenshots = dataUrls.map((dataUrl, index) => {
@@ -748,7 +906,7 @@ export const screenshotCapabilityMachine = setup({
             return { label, dataUrl };
           });
 
-          const compositeDataUrl = await createCompositeImage(screenshots, compositeOptions);
+          const compositeDataUrl = await createCompositeImage(screenshots, compositeOptions, options?.overlay);
 
           sendBack({
             type: 'screenshotCompleted',
@@ -804,7 +962,7 @@ export const screenshotCapabilityMachine = setup({
 
       (async () => {
         try {
-          const dataUrls = await captureSvgScreenshots(svgElement, options);
+          const dataUrls = await captureSvgScreenshots(svgElement, options, /* suppressOverlay */ true);
           const compositeOptions = options?.composite ?? defaultCompositeOptions;
 
           const screenshots = dataUrls.map((dataUrl) => ({
@@ -812,7 +970,7 @@ export const screenshotCapabilityMachine = setup({
             dataUrl,
           }));
 
-          const compositeDataUrl = await createCompositeImage(screenshots, compositeOptions);
+          const compositeDataUrl = await createCompositeImage(screenshots, compositeOptions, options?.overlay);
           sendBack({
             type: 'screenshotCompleted',
             dataUrls: [compositeDataUrl],

@@ -1,6 +1,8 @@
 import { createMiddleware } from 'langchain';
+import type { AgentMiddleware } from 'langchain';
 import { HumanMessage, AIMessage, ToolMessage } from '@langchain/core/messages';
 import type { BaseMessage, ContentBlock } from '@langchain/core/messages';
+import type { ProviderId } from '#api/providers/provider.schema.js';
 
 /**
  * Type for a content block with Anthropic cache control.
@@ -256,7 +258,7 @@ function addCacheBreakpoint(messages: BaseMessage[]): BaseMessage[] {
 }
 
 /**
- * Middleware that adds Anthropic cache control breakpoints to messages.
+ * Middleware that adds Anthropic cache-control breakpoints to messages.
  *
  * Uses the `wrapModelCall` hook to add `cache_control: { type: 'ephemeral' }`
  * to the last content block of the LAST message before each model call.
@@ -275,20 +277,40 @@ function addCacheBreakpoint(messages: BaseMessage[]): BaseMessage[] {
  * user messages. This enables caching within agent turns that have multiple
  * model calls with tool execution in between.
  *
+ * Provider gating: `cache_control` is an Anthropic-specific marker. Other
+ * providers either ignore it silently (historical OpenAI Chat Completions
+ * stringifying tool outputs) or actively reject it. In particular, OpenAI's
+ * Responses API rejects `cache_control` on typed `function_call_output.output`
+ * items (e.g. `input_image`) with `400 Unknown parameter`. Returning a no-op
+ * middleware for non-Anthropic targets keeps caching enabled for Claude while
+ * leaving every other provider untouched (OpenAI Responses already provides
+ * implicit prompt caching automatically).
+ *
  * @see https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching
  */
-export const promptCachingMiddleware = createMiddleware({
-  name: 'PromptCaching',
-
-  async wrapModelCall(request, handler) {
-    const { messages } = request;
-
-    // Add cache breakpoint to the last message (regardless of type)
-    const cachedMessages = addCacheBreakpoint(messages);
-
-    return handler({
-      ...request,
-      messages: cachedMessages,
+export const createPromptCachingMiddleware = (targetProvider: ProviderId): AgentMiddleware => {
+  if (targetProvider !== 'anthropic') {
+    return createMiddleware({
+      name: 'PromptCaching',
+      async wrapModelCall(request, handler) {
+        return handler(request);
+      },
     });
-  },
-});
+  }
+
+  return createMiddleware({
+    name: 'PromptCaching',
+
+    async wrapModelCall(request, handler) {
+      const { messages } = request;
+
+      // Add cache breakpoint to the last message (regardless of type)
+      const cachedMessages = addCacheBreakpoint(messages);
+
+      return handler({
+        ...request,
+        messages: cachedMessages,
+      });
+    },
+  });
+};

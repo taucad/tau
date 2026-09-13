@@ -117,8 +117,8 @@ vi.mock('#routes/projects_.$id/chat-interface-status.js', () => ({
   ChatInterfaceStatus: () => null,
 }));
 
-vi.mock('#routes/projects_.$id/chat-ar-button.js', () => ({
-  ChatArButton: () => null,
+vi.mock('#components/cad/ar-button.js', () => ({
+  ArButton: () => null,
 }));
 
 vi.mock('#components/panes/use-is-top-right-group.js', () => ({

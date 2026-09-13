@@ -3,7 +3,7 @@ import { createTestApp } from '#testing/create-test-app.js';
 import type { TestApp } from '#testing/create-test-app.js';
 import { collectStreamChunks } from '#testing/stream-consumer.js';
 import { expectChunkTypesInclude, expectNoErrors } from '#testing/stream-assertions.js';
-import { requiresEnv } from '#testing/skip-helpers.js';
+import { buildCadAgent, requiresEnv } from '#testing/skip-helpers.js';
 
 /**
  * Real-LLM integration coverage for interrupted tool calls with partial input.
@@ -22,7 +22,7 @@ import { requiresEnv } from '#testing/skip-helpers.js';
  * `vitest.integration.config.ts`).
  *
  * Last verified: all three providers (anthropic-claude-haiku-4.5,
- * google-gemini-3-flash, openai-gpt-5.3-codex) accepted the partial-input
+ * google-gemini-3.5-flash, openai-gpt-5.3-codex) accepted the partial-input
  * `output-error` history end-to-end, returning clean SSE streams with
  * `text-start` and no error chunks.
  */
@@ -85,6 +85,7 @@ describe.skipIf(requiresEnv('ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'GOOGLE_VERTE
           metadata: { model, kernel: 'replicad' },
         },
       ],
+      agent: buildCadAgent(model, 'replicad'),
     });
 
     const assertProviderTolerated = async (model: string) => {
@@ -109,8 +110,8 @@ describe.skipIf(requiresEnv('ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'GOOGLE_VERTE
       await assertProviderTolerated('anthropic-claude-haiku-4.5');
     }, 120_000);
 
-    it('should accept partial-input output-error history when streaming via Vertex Gemini Flash', async () => {
-      await assertProviderTolerated('google-gemini-3-flash');
+    it('should accept partial-input output-error history when streaming via Vertex Gemini 3.5 Flash', async () => {
+      await assertProviderTolerated('google-gemini-3.5-flash');
     }, 120_000);
 
     it('should accept partial-input output-error history when streaming via OpenAI GPT-5.3 Codex', async () => {

@@ -1,0 +1,16 @@
+{
+  "name": "@taucad/billing",
+  "version": "0.0.1",
+  "description": "Central source of truth for Tau billing tiers, entitlements, and feature gating",
+  "type": "module",
+  "private": true,
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "imports": {
+    "#*": "./src/*"
+  },
+  "dependencies": {
+    "@taucad/types": "workspace:*"
+  }
+}

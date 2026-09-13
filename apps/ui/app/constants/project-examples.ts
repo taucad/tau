@@ -39,7 +39,7 @@ const createProject = (model: Omit<Model, 'language'>, mainFile: string, kernel:
   };
 };
 
-export const replicadBuilds: ProjectsWithFiles[] = mockProjects.map((model) => {
+export const replicadProjects: ProjectsWithFiles[] = mockProjects.map((model) => {
   const mainFile = 'main.ts';
   const language = 'replicad';
   return createProject(model, mainFile, language);
@@ -62,25 +62,25 @@ const openScadModels: Model[] = [
   },
 ] as const;
 
-const openscadExampleBuilds: ProjectsWithFiles[] = openscadExamples.map((model) => {
+const openscadExampleProjects: ProjectsWithFiles[] = openscadExamples.map((model) => {
   const mainFile = 'main.scad';
   const language: KernelProvider = 'openscad';
   return createProject(model, mainFile, language);
 });
 
-export const openscadBuilds: ProjectsWithFiles[] = [
+export const openscadProjects: ProjectsWithFiles[] = [
   ...openScadModels.map((model) => {
     const mainFile = 'main.scad';
     const language = 'openscad';
     return createProject(model, mainFile, language);
   }),
-  ...openscadExampleBuilds,
+  ...openscadExampleProjects,
 ];
 
-const jscadBuilds: ProjectsWithFiles[] = jscadExamples.map((model) => {
+const jscadProjects: ProjectsWithFiles[] = jscadExamples.map((model) => {
   const mainFile = 'main.ts';
   const language: KernelProvider = 'jscad';
   return createProject(model, mainFile, language);
 });
 
-export const sampleProjects: ProjectsWithFiles[] = [...replicadBuilds, ...openscadBuilds, ...jscadBuilds];
+export const sampleProjects: ProjectsWithFiles[] = [...replicadProjects, ...openscadProjects, ...jscadProjects];

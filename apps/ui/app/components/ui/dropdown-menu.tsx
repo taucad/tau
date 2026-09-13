@@ -466,7 +466,7 @@ function DropdownMenuSelectItem<T>({
       <ComboBoxResponsive
         isNested
         groupedItems={groupedItems}
-        defaultValue={value}
+        value={value}
         getValue={getOptionValue}
         renderLabel={renderLabel}
         title={title}

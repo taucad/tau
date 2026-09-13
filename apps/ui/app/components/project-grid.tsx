@@ -12,12 +12,11 @@ import { useProjectManager } from '#hooks/use-project-manager.js';
 import { CadPreviewProvider } from '#hooks/use-cad-preview.js';
 import { CadPreviewViewer } from '#components/cad-preview.js';
 import type { ProjectsWithFiles } from '#constants/project-examples.js';
+import { KernelTierBadge } from '#components/tier-badge.js';
 
 export const communityGridClassName = 'grid grid-cols-2 gap-3 sm:gap-6 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5';
 
-type CommunityBuildCardProperties = ProjectsWithFiles;
-
-export type CommunityBuildGridProperties = {
+export type CommunityProjectGridProperties = {
   readonly projects: ProjectsWithFiles[];
   readonly hasMore?: boolean;
   readonly onLoadMore?: () => void;
@@ -29,7 +28,7 @@ export function CommunityProjectGrid({
   hasMore,
   onLoadMore,
   limit,
-}: CommunityBuildGridProperties): React.JSX.Element {
+}: CommunityProjectGridProperties): React.JSX.Element {
   const displayedProjects = limit ? projects.slice(0, limit) : projects;
 
   return (
@@ -60,7 +59,7 @@ function ProjectCard({
   tags,
   assets,
   files,
-}: CommunityBuildCardProperties): React.JSX.Element {
+}: ProjectsWithFiles): React.JSX.Element {
   const [activated, setActivated] = useState(false);
   const [visible, setVisible] = useState(false);
   const [isForking, setIsForking] = useState(false);
@@ -175,7 +174,10 @@ function ProjectCard({
                           </AvatarFallback>
                         </Avatar>
                       </TooltipTrigger>
-                      <TooltipContent>{kernelName}</TooltipContent>
+                      <TooltipContent className='flex items-center gap-1.5'>
+                        {kernelName}
+                        <KernelTierBadge kernelId={kernelConfiguration.id} />
+                      </TooltipContent>
                     </Tooltip>
                   );
                 })}

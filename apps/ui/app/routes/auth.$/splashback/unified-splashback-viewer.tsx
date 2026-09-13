@@ -1,8 +1,9 @@
-import { useRef, useState, useEffect, useCallback } from 'react';
+import { useRef, useState, useEffect, useCallback, useMemo } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
 import { Center, OrbitControls, PerspectiveCamera } from '@react-three/drei';
 import type { Group } from 'three';
 import type { Geometry } from '@taucad/types';
+import type { ResolvedGraphicsBackend } from '#constants/editor.constants.js';
 import { MorphingPoints } from '#routes/auth.$/splashback/morphing-points.js';
 import { SplitMorphingPoints } from '#routes/auth.$/splashback/split-morphing-points.js';
 import { PreviewLights } from '#routes/auth.$/splashback/preview-lights.js';
@@ -16,6 +17,13 @@ import {
   assemblySplitRatio as assemblySplitRatioConstant,
 } from '#routes/auth.$/splashback/auth-splashback.constants.js';
 import { cn } from '#utils/ui.utils.js';
+import {
+  probeWebGpuSupport,
+  mergeGraphicsBackendWithQueryOverride,
+  resolveGraphicsBackendPreference,
+} from '#components/geometry/graphics/graphics-backend.js';
+import { createTauR3fGlProp } from '#components/geometry/graphics/three/canvas-three-gl.js';
+import { ThreeGraphicsBackendProvider } from '#components/geometry/graphics/three/three-graphics-backend-context.js';
 
 // ============================================================================
 // Types
@@ -23,9 +31,15 @@ import { cn } from '#utils/ui.utils.js';
 
 /**
  * Phase of the splashback animation.
+ *
+ * The full cycle: `loading` (cached prep) -> `loadingMorphing` (atoms converge to gear12) ->
+ * `loadingCrossfading` (point cloud -> gear12 mesh) -> `gear12` -> existing gear12->gear8->assembly flow ->
+ * `unloadingCrossfading` (assembly meshes -> per-gear point clouds) -> `unloadingMorphing` (matter -> abyss).
  */
 export type SplashbackPhase =
   | 'loading'
+  | 'loadingMorphing'
+  | 'loadingCrossfading'
   | 'gear12'
   | 'preparingMorph'
   | 'morphing'
@@ -35,7 +49,8 @@ export type SplashbackPhase =
   | 'morphingToAssembly'
   | 'crossfadingToAssembly'
   | 'assembly'
-  | 'fading';
+  | 'unloadingCrossfading'
+  | 'unloadingMorphing';
 
 type UnifiedSplashbackViewerProperties = {
   /** Current phase of the animation */
@@ -44,9 +59,9 @@ type UnifiedSplashbackViewerProperties = {
   readonly gear12Geometry?: Geometry;
   /** Gear8 geometry (GLTF format) */
   readonly gear8Geometry?: Geometry;
-  /** Sampled points from gear12 for morphing */
+  /** Sampled points from gear12 for morphing (also reused as unloading source) */
   readonly gear12Points?: SampledPoints;
-  /** Sampled points from gear8 for morphing */
+  /** Sampled points from gear8 for morphing (also reused as unloading source) */
   readonly gear8Points?: SampledPoints;
   /** Sampled points for gear12 at assembly position (for split morph) */
   readonly assemblyGear12Points?: SampledPoints;
@@ -56,10 +71,22 @@ type UnifiedSplashbackViewerProperties = {
   readonly assemblySplitRatio?: number;
   /** Duration of crossfade animation in ms */
   readonly crossfadeDuration?: number;
+  /** Duration of morph animation in ms (used to fade unloading particle opacity to 0) */
+  readonly morphDuration?: number;
+  /** Scatter cloud (full size) used as the loading source — atoms converging into gear12 */
+  readonly loadingScatterPoints?: SampledPoints;
+  /** Scatter cloud slice consumed by the gear12 unload cloud as its outward target */
+  readonly unloadingScatterPointsA?: SampledPoints;
+  /** Scatter cloud slice consumed by the gear8 unload cloud as its outward target */
+  readonly unloadingScatterPointsB?: SampledPoints;
   /** Additional CSS classes */
   readonly className?: string;
   /** Called when user interacts with the viewer */
   readonly onInteraction?: () => void;
+  /** Called when the loading scatter -> gear12 morph completes */
+  readonly onLoadingMorphComplete?: () => void;
+  /** Called when the loading particle -> gear12 mesh crossfade completes */
+  readonly onLoadingCrossfadeComplete?: () => void;
   /** Called when morph animation completes (gear12 -> gear8) */
   readonly onMorphComplete?: () => void;
   /** Called when crossfade completes (gear12->gear8), with final rotation */
@@ -68,6 +95,10 @@ type UnifiedSplashbackViewerProperties = {
   readonly onMorph2Complete?: () => void;
   /** Called when phase transition animation completes */
   readonly onPhaseTransitionComplete?: () => void;
+  /** Called when the assembly mesh -> point cloud crossfade finishes */
+  readonly onUnloadingMeshFadedOut?: () => void;
+  /** Called when the unload outward morph reaches the abyss */
+  readonly onUnloadingMorphComplete?: () => void;
 };
 
 // ============================================================================
@@ -107,6 +138,7 @@ type PointCloudContentProperties = {
   readonly sourceColor: string;
   readonly targetColor: string;
   readonly isVisible: boolean;
+  readonly targetProgress?: number;
   readonly opacity?: number;
   readonly onMorphComplete?: (finalRotationY: number) => void;
 };
@@ -120,6 +152,7 @@ function PointCloudContent({
   sourceColor,
   targetColor,
   isVisible,
+  targetProgress = 1,
   opacity = 1,
   onMorphComplete,
 }: PointCloudContentProperties): React.JSX.Element | undefined {
@@ -131,7 +164,7 @@ function PointCloudContent({
     <MorphingPoints
       sourcePoints={sourcePoints}
       targetPoints={targetPoints}
-      targetProgress={1}
+      targetProgress={targetProgress}
       animationSpeed={1.5}
       sourceColor={sourceColor}
       targetColor={targetColor}
@@ -155,15 +188,23 @@ type SceneContentProperties = {
   readonly assemblyGear8Points?: SampledPoints;
   readonly assemblySplitRatio?: number;
   readonly crossfadeDuration: number;
+  readonly morphDuration: number;
+  readonly loadingScatterPoints?: SampledPoints;
+  readonly unloadingScatterPointsA?: SampledPoints;
+  readonly unloadingScatterPointsB?: SampledPoints;
   // Preloaded meshes (loaded eagerly, not phase-dependent)
   readonly gear12Mesh?: LoadedMesh;
   readonly gear8Mesh?: LoadedMesh;
   readonly assemblyGear12Mesh?: LoadedMesh;
   readonly assemblyGear8Mesh?: LoadedMesh;
+  readonly onLoadingMorphComplete?: () => void;
+  readonly onLoadingCrossfadeComplete?: () => void;
   readonly onMorphComplete?: () => void;
   readonly onCrossfadeComplete?: (finalRotationY: number) => void;
   readonly onMorph2Complete?: () => void;
   readonly onPhaseTransitionComplete?: () => void;
+  readonly onUnloadingMeshFadedOut?: () => void;
+  readonly onUnloadingMorphComplete?: () => void;
 };
 
 // oxlint-disable-next-line complexity -- complex logic
@@ -175,18 +216,35 @@ function SceneContent({
   assemblyGear8Points,
   assemblySplitRatio = assemblySplitRatioConstant,
   crossfadeDuration,
+  morphDuration,
+  loadingScatterPoints,
+  unloadingScatterPointsA,
+  unloadingScatterPointsB,
   // Preloaded meshes (already loaded, no async loading needed)
   gear12Mesh,
   gear8Mesh,
   assemblyGear12Mesh,
   assemblyGear8Mesh,
+  onLoadingMorphComplete,
+  onLoadingCrossfadeComplete,
   onMorphComplete,
   onCrossfadeComplete,
   onMorph2Complete,
   onPhaseTransitionComplete,
+  onUnloadingMeshFadedOut,
+  onUnloadingMorphComplete,
 }: SceneContentProperties): React.JSX.Element {
   const rotatingGroupRef = useRef<Group>(null);
   const currentRotationYaxisRef = useRef(0);
+
+  // Crossfade state refs (loading particles -> gear12 mesh)
+  const loadingCrossfadeProgressRef = useRef(0);
+  const loadingCrossfadeIsActiveRef = useRef(false);
+  const loadingCrossfadeHasSentCompleteRef = useRef(false);
+  const [loadingCrossfadeOpacity, setLoadingCrossfadeOpacity] = useState({
+    pointCloud: 1,
+    mesh: 0,
+  });
 
   // Crossfade state refs (gear12 -> gear8)
   const crossfadeProgressRef = useRef(0);
@@ -206,6 +264,15 @@ function SceneContent({
     mesh: 0,
   });
 
+  // Unloading crossfade state refs (assembly meshes -> per-gear point clouds)
+  const unloadingCrossfadeProgressRef = useRef(0);
+  const unloadingCrossfadeIsActiveRef = useRef(false);
+  const unloadingCrossfadeHasSentCompleteRef = useRef(false);
+  const [unloadingCrossfadeOpacity, setUnloadingCrossfadeOpacity] = useState({
+    mesh: 1,
+    pointCloud: 0,
+  });
+
   // Refs for counter-rotation of assembly meshes
   const assemblyGear12RotationRef = useRef<Group>(null);
   const assemblyGear8RotationRef = useRef<Group>(null);
@@ -218,21 +285,44 @@ function SceneContent({
   const splitMorphProgressRef = useRef(0);
   const splitTiltRef = useRef<Group>(null);
 
+  // Unload outward-morph progress (drives uOpacity 1 -> 0 across morphDuration)
+  const unloadingMorphProgressRef = useRef(0);
+  const [unloadingMorphOpacity, setUnloadingMorphOpacity] = useState(1);
+
   // Derive visibility from phase
-  const showGear12 = phase === 'gear12' || phase === 'preparingMorph';
+  const showGear12 = phase === 'gear12' || phase === 'preparingMorph' || phase === 'loadingCrossfading';
+  const showLoadingPointCloud =
+    phase === 'loadingMorphing' || phase === 'loadingCrossfading' || loadingCrossfadeIsActiveRef.current;
   const showPointCloud = phase === 'morphing' || phase === 'crossfading' || crossfadeIsActiveRef.current;
   const showGear8Mesh =
     phase === 'crossfading' || phase === 'gear8' || phase === 'preparingMorph2' || crossfadeIsActiveRef.current;
   const showSplitPointCloud =
     phase === 'morphingToAssembly' || phase === 'crossfadingToAssembly' || splitCrossfadeIsActiveRef.current;
-  // Assembly meshes shown during crossfade AND assembly phases (they become the permanent display)
+  // Assembly meshes shown during crossfade AND assembly phases AND while unloading meshes are still fading out
   const showAssemblyMeshes =
     phase === 'crossfadingToAssembly' ||
     phase === 'assembly' ||
-    phase === 'fading' ||
-    splitCrossfadeIsActiveRef.current;
-  // Track if we're in the counter-rotating assembly phase (not just crossfading)
-  const isAssemblyRotating = phase === 'assembly' || phase === 'fading';
+    phase === 'unloadingCrossfading' ||
+    splitCrossfadeIsActiveRef.current ||
+    unloadingCrossfadeIsActiveRef.current;
+  // Per-gear unloading point clouds visible during the unload crossfade and outward morph
+  const showUnloadingPointClouds =
+    phase === 'unloadingCrossfading' || phase === 'unloadingMorphing' || unloadingCrossfadeIsActiveRef.current;
+  // Track if we're in the counter-rotating assembly phase (auto-rotate continues through unload)
+  const isAssemblyRotating = phase === 'assembly' || phase === 'unloadingCrossfading' || phase === 'unloadingMorphing';
+
+  // Start loading crossfade when phase transitions to loadingCrossfading.
+  // Snap mesh opacity to 0 first so it doesn't flash at full opacity for one frame.
+  useEffect(() => {
+    if (gear12Mesh && phase === 'loadingCrossfading' && !loadingCrossfadeIsActiveRef.current) {
+      gear12Mesh.material.opacity = 0;
+      startCrossfade({
+        progressRef: loadingCrossfadeProgressRef,
+        isActiveRef: loadingCrossfadeIsActiveRef,
+        hasSentCompleteRef: loadingCrossfadeHasSentCompleteRef,
+      });
+    }
+  }, [gear12Mesh, phase]);
 
   // Start crossfade when phase transitions to crossfading (mesh is already preloaded)
   useEffect(() => {
@@ -260,6 +350,30 @@ function SceneContent({
       });
     }
   }, [assemblyGear12Mesh, assemblyGear8Mesh, phase]);
+
+  // Start unloading crossfade when phase enters unloadingCrossfading
+  useEffect(() => {
+    if (
+      assemblyGear12Mesh &&
+      assemblyGear8Mesh &&
+      phase === 'unloadingCrossfading' &&
+      !unloadingCrossfadeIsActiveRef.current
+    ) {
+      startCrossfade({
+        progressRef: unloadingCrossfadeProgressRef,
+        isActiveRef: unloadingCrossfadeIsActiveRef,
+        hasSentCompleteRef: unloadingCrossfadeHasSentCompleteRef,
+      });
+    }
+  }, [assemblyGear12Mesh, assemblyGear8Mesh, phase]);
+
+  // Reset unloading-morph progress when entering unloadingMorphing so each cycle starts fresh
+  useEffect(() => {
+    if (phase === 'unloadingMorphing') {
+      unloadingMorphProgressRef.current = 0;
+      setUnloadingMorphOpacity(1);
+    }
+  }, [phase]);
 
   // Handle morph complete
   const handleMorphComplete = useCallback(
@@ -293,6 +407,7 @@ function SceneContent({
   }, [phase]);
 
   // Animation loop
+  // oxlint-disable-next-line complexity -- shared frame loop
   useFrame((_, delta) => {
     if (!rotatingGroupRef.current) {
       return;
@@ -301,6 +416,30 @@ function SceneContent({
     // Auto-rotate the entire scene (including assembly)
     currentRotationYaxisRef.current += autoRotateSpeed * delta;
     rotatingGroupRef.current.rotation.y = currentRotationYaxisRef.current;
+
+    // Loading crossfade animation (atoms point cloud -> gear12 mesh)
+    const gear12Opacity = updateCrossfade({
+      state: {
+        progressRef: loadingCrossfadeProgressRef,
+        isActiveRef: loadingCrossfadeIsActiveRef,
+        hasSentCompleteRef: loadingCrossfadeHasSentCompleteRef,
+      },
+      delta,
+      duration: crossfadeDuration,
+      onComplete() {
+        onLoadingCrossfadeComplete?.();
+      },
+    });
+
+    if (gear12Opacity) {
+      setLoadingCrossfadeOpacity({
+        pointCloud: gear12Opacity.source,
+        mesh: gear12Opacity.target,
+      });
+      if (gear12Mesh) {
+        gear12Mesh.material.opacity = gear12Opacity.target;
+      }
+    }
 
     // Crossfade animation (gear12 -> gear8)
     const gear8Opacity = updateCrossfade({
@@ -354,8 +493,47 @@ function SceneContent({
       }
     }
 
-    // Accumulate rotation for assembly (both point cloud and meshes use this)
-    // Start accumulating once the split point cloud appears
+    // Unloading crossfade animation (assembly meshes -> per-gear point clouds)
+    const unloadingOpacity = updateCrossfade({
+      state: {
+        progressRef: unloadingCrossfadeProgressRef,
+        isActiveRef: unloadingCrossfadeIsActiveRef,
+        hasSentCompleteRef: unloadingCrossfadeHasSentCompleteRef,
+      },
+      delta,
+      duration: crossfadeDuration,
+      onComplete() {
+        onUnloadingMeshFadedOut?.();
+      },
+    });
+
+    if (unloadingOpacity) {
+      setUnloadingCrossfadeOpacity({
+        mesh: unloadingOpacity.source,
+        pointCloud: unloadingOpacity.target,
+      });
+      if (assemblyGear12Mesh) {
+        assemblyGear12Mesh.material.opacity = unloadingOpacity.source;
+      }
+
+      if (assemblyGear8Mesh) {
+        assemblyGear8Mesh.material.opacity = unloadingOpacity.source;
+      }
+    }
+
+    // Unloading outward morph: ramp particle opacity 1 -> 0 across morphDuration so atoms
+    // dissolve mid-flight into the abyss instead of snapping off at scatter positions.
+    if (phase === 'unloadingMorphing' && unloadingMorphProgressRef.current < 1) {
+      unloadingMorphProgressRef.current = Math.min(
+        1,
+        unloadingMorphProgressRef.current + (delta * 1000) / morphDuration,
+      );
+      const eased = unloadingMorphProgressRef.current;
+      setUnloadingMorphOpacity(1 - eased * eased);
+    }
+
+    // Accumulate rotation for assembly (point cloud, meshes, AND unload clouds use this)
+    // Start accumulating once the split point cloud appears; keep going through unload.
     const isAssemblyAnimating = showSplitPointCloud || isAssemblyRotating;
 
     if (isAssemblyAnimating) {
@@ -363,7 +541,7 @@ function SceneContent({
       assemblyRotationRef.current += rotationSpeed * delta;
     }
 
-    // Apply shared rotation to assembly meshes
+    // Apply shared rotation to assembly meshes (and the unloading point clouds nested inside them)
     if (assemblyGear12RotationRef.current && assemblyGear8RotationRef.current) {
       assemblyGear12RotationRef.current.rotation.z = assemblyRotationRef.current;
       assemblyGear8RotationRef.current.rotation.z = -assemblyRotationRef.current * gearRatio + phaseOffset8;
@@ -379,10 +557,41 @@ function SceneContent({
     }
   });
 
+  const loadingPointCloudOpacity = loadingCrossfadeIsActiveRef.current ? loadingCrossfadeOpacity.pointCloud : 1;
+  const unloadingPointCloudOpacity = unloadingCrossfadeIsActiveRef.current
+    ? unloadingCrossfadeOpacity.pointCloud
+    : phase === 'unloadingMorphing'
+      ? unloadingMorphOpacity
+      : 1;
+  const unloadingTargetProgress = phase === 'unloadingMorphing' ? 1 : 0;
+
   return (
     <group ref={rotatingGroupRef}>
-      {/* Coordinate system correction */}
+      {/* Coordinate system correction (gear12/gear8 share this frame) */}
       <group rotation={[Math.PI, 0, 0]}>
+        {/* Loading atoms-to-matter point cloud (scatter -> gear12) — nested here so it spins
+            with the gear12 mesh during the loading crossfade and the cross-handover is rotation-aligned.
+            onMorphComplete fires once when targetProgress hits 1 (i.e. atoms reach the gear12 surface);
+            MorphingPoints internally gates the callback via hasReachedTargetRef so it doesn't refire
+            during the trailing loadingCrossfading phase. */}
+        {showLoadingPointCloud && loadingScatterPoints && gear12Points ? (
+          <PointCloudContent
+            sourcePoints={loadingScatterPoints}
+            targetPoints={gear12Points}
+            sourceColor={gear12Color}
+            targetColor={gear12Color}
+            isVisible={showLoadingPointCloud}
+            opacity={loadingPointCloudOpacity}
+            onMorphComplete={
+              onLoadingMorphComplete
+                ? () => {
+                    onLoadingMorphComplete();
+                  }
+                : undefined
+            }
+          />
+        ) : undefined}
+
         {/* Gear12 mesh - preloaded, visibility controlled by phase */}
         {showGear12 && gear12Mesh ? <primitive object={gear12Mesh.scene} /> : undefined}
 
@@ -432,13 +641,28 @@ function SceneContent({
         </group>
       ) : undefined}
 
-      {/* Assembly meshes - preloaded, used for both crossfade and final display with counter-rotation */}
-      {showAssemblyMeshes && assemblyGear12Mesh && assemblyGear8Mesh ? (
+      {/* Assembly meshes + per-gear unloading point clouds - both inherit the counter-rotation
+          from assemblyGear*RotationRef so the mesh -> point handoff has zero rotation snap. */}
+      {(showAssemblyMeshes || showUnloadingPointClouds) && assemblyGear12Mesh && assemblyGear8Mesh ? (
         <group rotation={[initialXaxisRotation, initialYaxisRotation, 0]}>
           <group rotation={[Math.PI, 0, 0]}>
             {/* Gear 12 - positioned to the left, counter-rotates during assembly phase */}
             <group ref={assemblyGear12RotationRef} position={[-pitchRadius12 + centerOffset, 0, 0]}>
-              <primitive object={assemblyGear12Mesh.scene} />
+              {showAssemblyMeshes ? <primitive object={assemblyGear12Mesh.scene} /> : undefined}
+              {showUnloadingPointClouds && gear12Points && unloadingScatterPointsA ? (
+                <MorphingPoints
+                  sourcePoints={gear12Points}
+                  targetPoints={unloadingScatterPointsA}
+                  targetProgress={unloadingTargetProgress}
+                  animationSpeed={1.5}
+                  sourceColor={gear12Color}
+                  targetColor={gear12Color}
+                  pointSize={1.5}
+                  explosionStrength={3}
+                  opacity={unloadingPointCloudOpacity}
+                  onMorphComplete={onUnloadingMorphComplete}
+                />
+              ) : undefined}
             </group>
 
             {/* Gear 8 - positioned to the right with phase offset, counter-rotates during assembly phase */}
@@ -447,7 +671,20 @@ function SceneContent({
               position={[pitchRadius8 + centerOffset, 0, 0]}
               rotation={[0, 0, phaseOffset8]}
             >
-              <primitive object={assemblyGear8Mesh.scene} />
+              {showAssemblyMeshes ? <primitive object={assemblyGear8Mesh.scene} /> : undefined}
+              {showUnloadingPointClouds && gear8Points && unloadingScatterPointsB ? (
+                <MorphingPoints
+                  sourcePoints={gear8Points}
+                  targetPoints={unloadingScatterPointsB}
+                  targetProgress={unloadingTargetProgress}
+                  animationSpeed={1.5}
+                  sourceColor={gear8Color}
+                  targetColor={gear8Color}
+                  pointSize={1.5}
+                  explosionStrength={3}
+                  opacity={unloadingPointCloudOpacity}
+                />
+              ) : undefined}
             </group>
           </group>
         </group>
@@ -465,11 +702,14 @@ function SceneContent({
  *
  * Features:
  * - Single WebGL context for all phases
+ * - Atoms-to-matter loading: scatter -> gear12 morph -> mesh crossfade
  * - Seamless transitions between gear12 -> point cloud -> gear8 -> assembly
  * - Split point cloud morph from gear8 to assembly
+ * - Matter-to-abyss unloading: assembly meshes -> per-gear point clouds -> outward dispersal
  * - Shared rotation group for synchronized animation
  * - Phase-based visibility control
  */
+// oxlint-disable-next-line complexity -- thin pass-through over SceneContent
 export function UnifiedSplashbackViewer({
   phase,
   gear12Geometry,
@@ -480,14 +720,49 @@ export function UnifiedSplashbackViewer({
   assemblyGear8Points,
   assemblySplitRatio,
   crossfadeDuration = 50,
+  morphDuration = 1400,
+  loadingScatterPoints,
+  unloadingScatterPointsA,
+  unloadingScatterPointsB,
   className,
   onInteraction,
+  onLoadingMorphComplete,
+  onLoadingCrossfadeComplete,
   onMorphComplete,
   onCrossfadeComplete,
   onMorph2Complete,
   onPhaseTransitionComplete,
+  onUnloadingMeshFadedOut,
+  onUnloadingMorphComplete,
 }: UnifiedSplashbackViewerProperties): React.JSX.Element {
   const dpr = Math.min(globalThis.devicePixelRatio, 2);
+
+  const [splashGpuAvailable, setSplashGpuAvailable] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    // async-iife: bootstrap — WebGPU probe completes after first paint; splash path cannot block effect return
+    void (async (): Promise<void> => {
+      const available = await probeWebGpuSupport();
+      // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- effect cleanup can flip concurrently after probe resolves
+      if (!cancelled) {
+        setSplashGpuAvailable(available);
+      }
+    })();
+
+    return (): void => {
+      cancelled = true;
+    };
+  }, []);
+
+  const splashMachineResolved = useMemo((): ResolvedGraphicsBackend => {
+    return resolveGraphicsBackendPreference('webgpu', splashGpuAvailable);
+  }, [splashGpuAvailable]);
+
+  const splashGraphicsBackend = useMemo((): ResolvedGraphicsBackend => {
+    return mergeGraphicsBackendWithQueryOverride(splashMachineResolved, 'webgpu', splashGpuAvailable);
+  }, [splashGpuAvailable, splashMachineResolved]);
+
+  const splashGl = useMemo(() => createTauR3fGlProp(splashGraphicsBackend), [splashGraphicsBackend]);
 
   // Preload all meshes eagerly when geometries become available
   // These persist across animation loops and are ready before morph completes
@@ -497,40 +772,42 @@ export function UnifiedSplashbackViewer({
   });
 
   return (
-    <Canvas
-      gl={{
-        antialias: true,
-        alpha: true,
-        logarithmicDepthBuffer: true,
-      }}
-      dpr={dpr}
-      className={cn('bg-transparent', className)}
-    >
-      <PerspectiveCamera makeDefault position={[0, 0, 40]} fov={45} />
+    <Canvas key={splashGraphicsBackend} gl={splashGl} dpr={dpr} className={cn('bg-transparent', className)}>
+      <ThreeGraphicsBackendProvider value={splashGraphicsBackend}>
+        <PerspectiveCamera makeDefault position={[0, 0, 40]} fov={45} />
 
-      <PreviewLights />
+        <PreviewLights />
 
-      <Center>
-        <SceneContent
-          phase={phase}
-          gear12Points={gear12Points}
-          gear8Points={gear8Points}
-          assemblyGear12Points={assemblyGear12Points}
-          assemblyGear8Points={assemblyGear8Points}
-          assemblySplitRatio={assemblySplitRatio}
-          crossfadeDuration={crossfadeDuration}
-          gear12Mesh={gear12Mesh}
-          gear8Mesh={gear8Mesh}
-          assemblyGear12Mesh={assemblyGear12Mesh}
-          assemblyGear8Mesh={assemblyGear8Mesh}
-          onMorphComplete={onMorphComplete}
-          onCrossfadeComplete={onCrossfadeComplete}
-          onMorph2Complete={onMorph2Complete}
-          onPhaseTransitionComplete={onPhaseTransitionComplete}
-        />
-      </Center>
+        <Center>
+          <SceneContent
+            phase={phase}
+            gear12Points={gear12Points}
+            gear8Points={gear8Points}
+            assemblyGear12Points={assemblyGear12Points}
+            assemblyGear8Points={assemblyGear8Points}
+            assemblySplitRatio={assemblySplitRatio}
+            crossfadeDuration={crossfadeDuration}
+            morphDuration={morphDuration}
+            loadingScatterPoints={loadingScatterPoints}
+            unloadingScatterPointsA={unloadingScatterPointsA}
+            unloadingScatterPointsB={unloadingScatterPointsB}
+            gear12Mesh={gear12Mesh}
+            gear8Mesh={gear8Mesh}
+            assemblyGear12Mesh={assemblyGear12Mesh}
+            assemblyGear8Mesh={assemblyGear8Mesh}
+            onLoadingMorphComplete={onLoadingMorphComplete}
+            onLoadingCrossfadeComplete={onLoadingCrossfadeComplete}
+            onMorphComplete={onMorphComplete}
+            onCrossfadeComplete={onCrossfadeComplete}
+            onMorph2Complete={onMorph2Complete}
+            onPhaseTransitionComplete={onPhaseTransitionComplete}
+            onUnloadingMeshFadedOut={onUnloadingMeshFadedOut}
+            onUnloadingMorphComplete={onUnloadingMorphComplete}
+          />
+        </Center>
 
-      <OrbitControls enableZoom={false} enablePan={false} onChange={onInteraction} />
+        <OrbitControls enableZoom={false} enablePan={false} onChange={onInteraction} />
+      </ThreeGraphicsBackendProvider>
     </Canvas>
   );
 }

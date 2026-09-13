@@ -243,6 +243,29 @@ describe('DirectIdbProvider', () => {
       expect(content).toBe('content');
     });
 
+    it('should rename a directory and move every contained file under the new prefix', async () => {
+      await provider.mkdir('/src/utils', { recursive: true });
+      await provider.writeFile('/src/index.ts', 'export {}');
+      await provider.writeFile('/src/utils/helpers.ts', 'export {}');
+      await provider.writeFile('/src/utils/strings.ts', 'export {}');
+
+      await provider.rename('/src', '/lib');
+
+      expect(await provider.exists('/src')).toBe(false);
+      expect(await provider.exists('/src/index.ts')).toBe(false);
+      expect(await provider.exists('/lib')).toBe(true);
+      expect(await provider.exists('/lib/index.ts')).toBe(true);
+      expect(await provider.exists('/lib/utils/helpers.ts')).toBe(true);
+      expect(await provider.exists('/lib/utils/strings.ts')).toBe(true);
+    });
+
+    it('should rename an empty directory and keep the directory entry under the new prefix', async () => {
+      await provider.mkdir('/scratch');
+      await provider.rename('/scratch', '/temp');
+      expect(await provider.exists('/scratch')).toBe(false);
+      expect(await provider.exists('/temp')).toBe(true);
+    });
+
     it('should throw when source does not exist', async () => {
       await expect(provider.rename('/missing.txt', '/target.txt')).rejects.toThrow('ENOENT');
     });

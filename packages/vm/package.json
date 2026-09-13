@@ -1,0 +1,64 @@
+{
+  "name": "@taucad/vm",
+  "version": "0.0.1",
+  "description": "Environment-neutral ESM module VM substrate for Tau and GeoSpec",
+  "type": "module",
+  "private": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taucad/tau.git",
+    "directory": "packages/vm"
+  },
+  "main": "./dist/cjs/index.cjs",
+  "types": "./dist/esm/index.d.ts",
+  "module": "./dist/esm/index.js",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "keywords": [
+    "cad",
+    "typescript",
+    "vm",
+    "esm"
+  ],
+  "author": "Richard Fontein",
+  "license": "MIT",
+  "exports": {
+    ".": "./src/index.ts",
+    "./internal": "./src/internal.ts"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "require": {
+          "types": "./dist/esm/index.d.ts",
+          "default": "./dist/cjs/index.cjs"
+        },
+        "import": {
+          "types": "./dist/esm/index.d.ts",
+          "default": "./dist/esm/index.js"
+        }
+      },
+      "./internal": {
+        "require": {
+          "types": "./dist/esm/internal.d.ts",
+          "default": "./dist/cjs/internal.cjs"
+        },
+        "import": {
+          "types": "./dist/esm/internal.d.ts",
+          "default": "./dist/esm/internal.js"
+        }
+      }
+    }
+  },
+  "imports": {
+    "#*": "./src/*"
+  },
+  "dependencies": {
+    "@taucad/utils": "workspace:*",
+    "esbuild-wasm": "catalog:",
+    "uint8array-extras": "catalog:"
+  }
+}

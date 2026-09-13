@@ -1,6 +1,6 @@
 import { memo } from 'react';
 import type React from 'react';
-import { RefreshCcw, WifiOff } from 'lucide-react';
+import { Play, WifiOff } from 'lucide-react';
 import { Button } from '#components/ui/button.js';
 import { cn } from '#utils/ui.utils.js';
 import { useChatActions } from '#hooks/use-chat.js';
@@ -33,8 +33,8 @@ export const ChatErrorServiceUnavailable = memo(function ({
             continueChat();
           }}
         >
-          <RefreshCcw className='size-3.5' />
-          Retry
+          <Play className='size-3.5' />
+          Resume
         </Button>
       </div>
     </div>

@@ -8,12 +8,22 @@ import { allotmentPanelOrder } from '#constants/editor.constants.js';
 
 /**
  * Represents an open file tab in the editor.
+ *
+ * The `paneId` is the **stable identity** of the tab. The `path` is a
+ * mutable property of the tab (changes on rename/move). React keys,
+ * Dockview panel IDs, and all participants must key off `paneId`, never
+ * `path`, so a rename does not unmount the tab.
  */
 export type OpenFile = {
+  /** Stable pane identity. Minted once via `generatePrefixedId(idPrefix.pane)`. */
+  paneId: string;
+  /** Current file path (mutable — updated by rename/move participants). */
   path: string;
   name: string;
   /** Timestamp of last focus/access for LRU eviction. */
   lastAccessedAt: number;
+  /** Bundled kernel typings (`node_modules/…` workspace-relative) open read-only. */
+  readOnly?: boolean;
 };
 
 /**
@@ -110,8 +120,8 @@ export type EditorState = {
   projectId: string;
   /** Open files/tabs in the editor */
   openFiles: OpenFile[];
-  /** Currently active file path */
-  activeFilePath: string | undefined;
+  /** Currently active pane id (stable across renames) */
+  activePaneId: string | undefined;
   /** Currently focused chat ID (the chat the user is actively viewing) */
   focusedChatId: string | undefined;
   /** Panel layout state (open/close, sizes, mobile tab) */

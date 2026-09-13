@@ -225,11 +225,6 @@ export function createBridgeServer<T extends StringKeyedObject>(
     onUnwatch?: (watchId: string) => void;
     /** Writer-side shared file pool. Binary readFile results are stored here after successful reads. */
     filePool?: FilePool;
-    /**
-     * When returning non-`undefined`, the value is appended as the final argument
-     * to the handler invocation (e.g. `{ originClientId: portId }` for mutating FS calls).
-     */
-    methodContextProvider?: (methodName: string) => unknown;
   },
 ): BridgeServerHandle {
   const broadcastQueues = new Set<PushQueue<BroadcastFrame>>();
@@ -245,9 +240,7 @@ export function createBridgeServer<T extends StringKeyedObject>(
     if (!handlerFunction) {
       throw new Error(`Unknown method: ${name}`);
     }
-    const contextPayload = options?.methodContextProvider?.(name);
-    const callArgs = contextPayload === undefined ? args : [...args, contextPayload];
-    const result: unknown = await handlerFunction.call(handlers, ...callArgs);
+    const result: unknown = await handlerFunction.call(handlers, ...args);
 
     if (options?.filePool && name === 'readFile' && result instanceof Uint8Array) {
       const filePath = args[0] as string;

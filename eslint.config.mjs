@@ -207,6 +207,7 @@ const config = [
       '**/.source/**/*',
       '**/.netlify',
       '**/*.prompt.example.*',
+      '**/*.prompt.example-multifile/**',
       '**/*.cjs',
       '**/*.jscad.js',
       '**/content/docs/**/props/**',
@@ -444,7 +445,10 @@ const config = [
       '**/__tests__/**',
       'packages/runtime/src/testing/**',
     ],
+    plugins: { 'tau-lint': tauLintPlugin },
     rules: {
+      'tau-lint/no-monaco-create-model': 'error',
+      'tau-lint/no-handrolled-fanout': 'error',
       'no-restricted-imports': [
         'error',
         {
@@ -453,6 +457,103 @@ const config = [
               name: '@taucad/runtime/testing',
               message:
                 'Do not import `@taucad/runtime/testing` from non-test sources (it pulls Vitest into unrelated bundles). Prefer `@taucad/runtime/transport-internals` (`extractInlineFileSystem`) and opaque filesystem factories (`fromNodeFs`, `fromMemoryFs`, …).',
+            },
+          ],
+        },
+      ],
+    },
+  },
+
+  /**
+   * Restrict who may import the AI SDK raw `Chat` factory / shared transport.
+   *
+   * The blueprint (R9) collapses every UI site's per-call `body: { ... }` /
+   * `metadata: { ... }` literal into a single profile-scoped chat client. The
+   * raw `Chat` instance, the shared `DefaultChatTransport`, and the
+   * `useActiveChatInstance` accessor live under `chat-clients/_internal/`
+   * and may only be imported by:
+   *
+   *   1. The three profile-scoped clients (`use-cad-chat-client.ts`,
+   *      `use-project-name-client.ts`, `use-commit-name-client.ts`) — these
+   *      ARE the indirection layer.
+   *   2. Their sibling internal modules (e.g. `name-generator-client.ts`,
+   *      `shared-chat-transport.ts` itself, `use-active-chat-instance.ts`).
+   *   3. `services/chat-session-store.ts` — the session store owns the
+   *      live `Chat<MyUIMessage>` instances that clients consume, so it
+   *      needs the factory at construction time. The store does NOT compose
+   *      `body: { agent }` itself; that stays inside the chat clients.
+   *
+   * Any new UI site that wants to send a chat turn must add a chat-client
+   * verb, not bypass via `_internal`.
+   */
+  {
+    files: ['apps/ui/app/**/*.{ts,tsx}'],
+    ignores: [
+      'apps/ui/app/chat-clients/**',
+      'apps/ui/app/services/chat-session-store.ts',
+      '**/*.test.ts',
+      '**/*.test.tsx',
+      '**/*.spec.ts',
+      '**/*.spec.tsx',
+    ],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['**/chat-clients/_internal/*', '#chat-clients/_internal/*'],
+              message:
+                'Do not import from `chat-clients/_internal/*`. Reach the chat wire through a profile-scoped client verb instead (`useCadChatClient`, `useProjectNameClient`, `useCommitNameClient`). See docs/research/chat-metadata-first-class-architecture.md.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+
+  /**
+   * Quarantine `monaco-editor` runtime to `*.client.{ts,tsx}` modules.
+   *
+   * `monaco-editor/esm/*` transitively imports `codicon/codicon.css`, which
+   * Node's ESM loader cannot resolve during the React Router v7 SSR build
+   * (`react-router build` → Rolldown). The only way to keep that subgraph
+   * out of `build/server` is to confine every static value import of
+   * `monaco-editor` to a `*.client.{ts,tsx}` module — React Router v7
+   * replaces those modules with empty exports during the server build,
+   * terminating the static graph at the boundary.
+   *
+   * Type-only imports (`import type * as Monaco from 'monaco-editor'`) are
+   * erased at compile time and remain legal everywhere.
+   *
+   * See docs/policy/ssr-bundle-policy.md and docs/research/ssr-bundle-audit.md.
+   */
+  {
+    files: ['apps/ui/app/**/*.{ts,tsx}'],
+    ignores: [
+      'apps/ui/app/**/*.client.ts',
+      'apps/ui/app/**/*.client.tsx',
+      'apps/ui/app/**/*.worker.ts',
+      'apps/ui/app/**/*.test.ts',
+      'apps/ui/app/**/*.test.tsx',
+      'apps/ui/app/**/*.spec.ts',
+      'apps/ui/app/**/*.spec.tsx',
+      'apps/ui/app/**/*.test-d.ts',
+    ],
+    rules: {
+      // The `allowTypeImports` option is a `@typescript-eslint` extension to
+      // the core rule — keeping `import type * as Monaco from 'monaco-editor'`
+      // legal everywhere while banning value imports outside `.client` files.
+      'no-restricted-imports': 'off',
+      '@typescript-eslint/no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['monaco-editor', 'monaco-editor/*'],
+              allowTypeImports: true,
+              message:
+                'Static value imports of `monaco-editor` pull `languageFeatures.js` → `codicon.css` into the SSR build (Node ESM loader rejects `.css`). Put runtime monaco usage in a `*.client.ts`/`*.client.tsx` module so React Router v7 replaces it with empty exports on the server. See docs/policy/ssr-bundle-policy.md.',
             },
           ],
         },

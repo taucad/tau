@@ -6,6 +6,7 @@ import { getEventOrigin } from '@taucad/filesystem';
 import { safeDispose } from '@taucad/utils/dispose';
 import { wrapMessagePort } from '@taucad/rpc';
 import type { ChangeEvent } from '@taucad/types';
+import type { WorkspaceFileService, WorkspaceMutationContext } from '@taucad/filesystem';
 import type { StringKeyedObject } from '#types/bridge.types.js';
 import type { BridgeServerHandle, FileSystemBridge } from '#transport/_internal/runtime-filesystem-bridge.js';
 import type { RuntimeWatchRequest, RuntimeWatchEvent } from '#types/runtime-kernel.types.js';
@@ -14,17 +15,136 @@ import { filesystemBridgeConnectMessageType, workerReadyMessageType } from '#fra
 /** Milliseconds. */
 const defaultUiCoalescingWindow = 500;
 
-/** Filesystem bridge methods that receive `{ originClientId: portId }` from the server. */
-const mutatingFilesystemMethods: ReadonlySet<string> = new Set([
-  'writeFile',
-  'writeFiles',
-  'mkdir',
-  'rename',
-  'unlink',
-  'rmdir',
-  'duplicateFile',
-  'copyDirectory',
-]);
+/**
+ * The eight worker-side filesystem methods that receive a
+ * {@link WorkspaceMutationContext} for change-bus echo suppression.
+ *
+ * Hand-written union; see {@link MutationOverrideMap} below for the
+ * companion shape that pairs each name with the live service signature.
+ * The compile-time test in `filesystem-bridge.test-d.ts` asserts these
+ * two stay in lockstep.
+ */
+type MutationMethodName =
+  | 'writeFile'
+  | 'writeFiles'
+  | 'mkdir'
+  | 'rename'
+  | 'move'
+  | 'bulkMove'
+  | 'unlink'
+  | 'rmdir'
+  | 'duplicateFile'
+  | 'copyDirectory';
+
+/**
+ * Mutating-method projection of {@link WorkspaceFileService}. Derived via
+ * `Pick` so any signature drift on the live service surfaces as a TS
+ * error on the override-map row below — no hand-written mirror type to
+ * fall out of sync.
+ */
+type MutatingMethods = Pick<WorkspaceFileService, MutationMethodName>;
+
+/**
+ * Override-map type: each row must match the live service signature
+ * exactly. {@link bindMutationContextForPort} consumes this shape via
+ * `Partial<MutationOverrideMap>` so partial handlers (which don't
+ * implement every mutating method) remain valid call-sites of
+ * {@link exposeFileSystem}.
+ */
+type MutationOverrideMap = {
+  [K in MutationMethodName]: MutatingMethods[K];
+};
+
+/**
+ * Wrap `service` with a per-port mutation-context closure. Each mutating
+ * method on the resulting proxy injects `context` as the trailing
+ * argument on the way through to the underlying service; every other
+ * property — methods and data — passes through unchanged with
+ * prototype-resident functions bound to the real target so `this`
+ * never escapes to the proxy.
+ *
+ * Why per-port instead of per-call: `originClientId` is a property of
+ * the bridge connection, not of any individual RPC call. Binding it
+ * once at port-connect time eliminates the entire class of "where does
+ * the context argument live" questions that a per-call positional
+ * injection mechanism would force on every handler signature.
+ *
+ * Generic over `T extends StringKeyedObject` (not the mutating subset)
+ * so partial handler shapes — e.g. `{ readFile: vi.fn() }` from tests
+ * or {@link import('#types/runtime-kernel.types.js').RuntimeFileSystemBase}
+ * from kernel bridges — remain compatible. The proxy only intercepts a
+ * mutating method name when that method actually exists on `target`.
+ *
+ * @param service - The underlying handler object. Mutating methods are
+ *                  intercepted; other properties pass through.
+ * @param context - The mutation context to inject on every mutating
+ *                  call. Typically `{ originClientId: portId }` for the
+ *                  filesystem bridge.
+ * @returns A proxy with the same structural type as `service`.
+ * @public
+ */
+export function bindMutationContextForPort<T extends StringKeyedObject>(
+  service: T,
+  context: WorkspaceMutationContext,
+): T {
+  // Annotated as the *full* `MutationOverrideMap` (not `Partial`) so
+  // missing-method drift fails the build at this row. Each value's
+  // type is `WorkspaceFileService[Method]` — any signature change on
+  // the live service surfaces here. The `as MutatingMethods` cast is
+  // safe at runtime because the proxy `get` trap below only returns
+  // an override when the method actually exists on `target`.
+  const overrides: MutationOverrideMap = {
+    writeFile: async (path, data) => (service as unknown as MutatingMethods).writeFile(path, data, context),
+    writeFiles: async (files) => (service as unknown as MutatingMethods).writeFiles(files, context),
+    mkdir: async (path, options) => (service as unknown as MutatingMethods).mkdir(path, options, context),
+    rename: async (from, to) => (service as unknown as MutatingMethods).rename(from, to, context),
+    move: async (source, target, options) =>
+      (service as unknown as MutatingMethods).move(source, target, options, context),
+    bulkMove: async (edits, options) => (service as unknown as MutatingMethods).bulkMove(edits, options, context),
+    unlink: async (path, options) => (service as unknown as MutatingMethods).unlink(path, options, context),
+    rmdir: async (path, options) => (service as unknown as MutatingMethods).rmdir(path, options, context),
+    duplicateFile: async (sourcePath, destinationPath) =>
+      (service as unknown as MutatingMethods).duplicateFile(sourcePath, destinationPath, context),
+    copyDirectory: async (sourcePath, destinationPath) =>
+      (service as unknown as MutatingMethods).copyDirectory(sourcePath, destinationPath, context),
+  };
+
+  return new Proxy(service, {
+    get(target, property, _receiver) {
+      if (typeof property === 'string' && property in overrides && property in target) {
+        return (overrides as Record<string, unknown>)[property];
+      }
+      const value = Reflect.get(target, property, target);
+      // Bind functions to the real target, never the proxy. Critical
+      // if the service ever moves to JS `#private` fields (which throw
+      // on access via a proxy receiver) and necessary today because
+      // `createBridgeServer` invokes the resolved function with
+      // `this = handlers` — i.e. `this = proxy` without this `bind`.
+      if (typeof value === 'function') {
+        return (value as (...callArgs: unknown[]) => unknown).bind(target);
+      }
+      return value;
+    },
+  });
+}
+
+/**
+ * Re-exported solely so the type test in `filesystem-bridge.test-d.ts`
+ * can pin the override-map shape against {@link WorkspaceFileService}.
+ *
+ * @internal
+ * @public
+ */
+export type MutationOverrideMapInternal = MutationOverrideMap;
+
+/**
+ * Re-exported solely so the type test in `filesystem-bridge.test-d.ts`
+ * can assert exhaustive coverage of mutating methods.
+ *
+ * @internal
+ * @public
+ */
+export type MutationMethodNameInternal = MutationMethodName;
 
 /**
  * Minimal interface for an event coalescer that batches ChangeEvents
@@ -201,9 +321,8 @@ export function exposeFileSystem<T extends StringKeyedObject>(
         wrappedPort.start();
       }
 
-      const serverHandle = createBridgeServer(handlers, wrappedPort, {
-        methodContextProvider: (methodName) =>
-          mutatingFilesystemMethods.has(methodName) ? { originClientId: portId } : undefined,
+      const portBoundHandlers = bindMutationContextForPort(handlers, { originClientId: portId });
+      const serverHandle = createBridgeServer(portBoundHandlers, wrappedPort, {
         onDisconnect() {
           const watches = portWatches.get(port);
           if (watches) {

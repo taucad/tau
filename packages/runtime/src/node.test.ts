@@ -62,4 +62,44 @@ describe('createNodeClient', () => {
 
     client.terminate();
   });
+
+  it('settles repeated identical exports', { timeout: 10_000 }, async () => {
+    const client = await createNodeClient();
+    const input = {
+      code: {
+        'main.ts': `
+          import { makeBaseBox } from 'replicad';
+          export default function main() {
+            return makeBaseBox(10, 20, 30);
+          }
+        `,
+      },
+      file: 'main.ts',
+    };
+
+    const withSettlementLimit = async <T>(promise: Promise<T>): Promise<T> => {
+      let settlementTimer: ReturnType<typeof setTimeout> | undefined;
+      const limit = new Promise<never>((_, reject) => {
+        settlementTimer = setTimeout(() => {
+          reject(new Error('Repeated identical export did not settle'));
+        }, 2000);
+      });
+
+      try {
+        return await Promise.race([promise, limit]);
+      } finally {
+        if (settlementTimer) {
+          clearTimeout(settlementTimer);
+        }
+      }
+    };
+
+    const first = await withSettlementLimit(client.export('glb', input));
+    const second = await withSettlementLimit(client.export('glb', input));
+
+    expect(first.success).toBe(true);
+    expect(second.success).toBe(true);
+
+    client.terminate();
+  });
 });

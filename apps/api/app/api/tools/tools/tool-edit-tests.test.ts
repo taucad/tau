@@ -13,6 +13,9 @@ import { getKernelConfig } from '#api/chat/prompts/kernel-prompt-configs/kernel.
 type RpcResult = Awaited<ReturnType<ChatRpcConfigurable['chatRpcService']['sendRpcRequest']>>;
 type EditResult = Awaited<ReturnType<ChatRpcConfigurable['fileEditService']['applyFileEdit']>>;
 
+/** Mirrors on-disk test.json formatting; RPC readFile returns raw bytes (no cat-n gutter). */
+const realisticEmptyTestJson = JSON.stringify({}, null, 2);
+
 const allKernels: readonly KernelProvider[] = ['openscad', 'replicad', 'jscad', 'manifold', 'opencascadejs', 'zoo'];
 
 const callTool = async (kernel: KernelProvider, configurable: ChatRpcConfigurable, codeEdit = '// edit') => {
@@ -103,7 +106,12 @@ describe('createEditTestsTool', () => {
 
       vi.mocked(cfg.chatRpcService.sendRpcRequest).mockImplementation(async ({ rpcName: r }) => {
         if (r === rpcName.readFile) {
-          return { success: true, content: '{}' } as unknown as RpcResult;
+          return {
+            success: true,
+            content: realisticEmptyTestJson,
+            totalLines: 3,
+            startLine: 1,
+          } as unknown as RpcResult;
         }
         if (r === rpcName.createFile) {
           return { success: true } as unknown as RpcResult;
@@ -130,7 +138,9 @@ describe('createEditTestsTool', () => {
       const cfg = buildConfigurable();
       vi.mocked(cfg.chatRpcService.sendRpcRequest).mockResolvedValue({
         success: true,
-        content: '{}',
+        content: realisticEmptyTestJson,
+        totalLines: 3,
+        startLine: 1,
       } as unknown as RpcResult);
 
       vi.mocked(cfg.fileEditService.applyFileEdit).mockResolvedValue({
@@ -202,7 +212,9 @@ describe('createEditTestsTool', () => {
       const cfg = buildConfigurable();
       vi.mocked(cfg.chatRpcService.sendRpcRequest).mockResolvedValue({
         success: true,
-        content: '{}',
+        content: realisticEmptyTestJson,
+        totalLines: 3,
+        startLine: 1,
       } as unknown as RpcResult);
       vi.mocked(cfg.fileEditService.applyFileEdit).mockResolvedValue({
         success: false,

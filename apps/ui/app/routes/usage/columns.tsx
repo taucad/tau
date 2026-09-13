@@ -37,7 +37,7 @@ export const usageColumns: Array<ColumnDef<UsageRecord>> = [
   },
   {
     accessorKey: 'projectName',
-    header: ({ column }) => <DataTableColumnHeader column={column} title='Build' />,
+    header: ({ column }) => <DataTableColumnHeader column={column} title='Project' />,
     cell({ row }: { readonly row: Row<UsageRecord> }): ReactNode {
       return (
         <Link to={`/projects/${row.original.projectId}`} className='max-w-[200px] truncate hover:underline'>

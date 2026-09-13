@@ -1,5 +1,8 @@
 import * as THREE from 'three';
 import { Line2, LineGeometry, LineMaterial } from 'three/addons';
+import { Line2 as Line2WebGpu } from 'three/addons/lines/webgpu/Line2.js';
+import type { ResolvedGraphicsBackend } from '#constants/editor.constants.js';
+import { Line2NodeMaterial } from '#components/geometry/graphics/three/materials/line2.material.js';
 import { gizmoBaseDistance } from '#components/geometry/graphics/three/utils/math.utils.js';
 
 export type ViewportGizmoCubeAxesProps = {
@@ -17,6 +20,7 @@ export type ViewportGizmoCubeAxesProps = {
   readonly zLabelColor?: string;
   readonly lineOpacity?: number;
   readonly lineWidth?: number;
+  readonly renderingBackend?: ResolvedGraphicsBackend;
 };
 
 export const createViewportGizmoCubeAxes = ({
@@ -30,6 +34,7 @@ export const createViewportGizmoCubeAxes = ({
   zLabelColor = 'blue',
   lineOpacity = 0.6,
   lineWidth = 1.5,
+  renderingBackend = 'webgl',
 }: ViewportGizmoCubeAxesProps): THREE.Group => {
   const axesLines = [
     {
@@ -66,15 +71,25 @@ export const createViewportGizmoCubeAxes = ({
     const geometry = new LineGeometry();
     geometry.setPositions(positions);
 
-    const material = new LineMaterial({
-      color: line.lineColor,
-      linewidth: lineWidth,
-      opacity: lineOpacity,
-      resolution: new THREE.Vector2(rendererSize, rendererSize),
-    });
-
-    const lineObject = new Line2(geometry, material);
-    axes.add(lineObject);
+    if (renderingBackend === 'webgpu') {
+      const material = new Line2NodeMaterial({
+        color: new THREE.Color(line.lineColor),
+        linewidth: lineWidth,
+        worldUnits: false,
+        transparent: true,
+        opacity: lineOpacity,
+      });
+      axes.add(new Line2WebGpu(geometry, material));
+    } else {
+      const material = new LineMaterial({
+        color: line.lineColor,
+        linewidth: lineWidth,
+        opacity: lineOpacity,
+        resolution: new THREE.Vector2(rendererSize, rendererSize),
+        transparent: true,
+      });
+      axes.add(new Line2(geometry, material));
+    }
 
     // Add text label at the end of each axis
     const endPoint = line.points[1]!;

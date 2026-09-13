@@ -42,9 +42,15 @@ export type MergeCheckpointTailInput = {
 };
 
 /**
- * When the UI sends a stale tail (e.g. in-flight tool parts) but Postgres already
+ * When the UI sends a stale assistant turn (e.g. in-flight tool parts whose
+ * tool execution already completed on the server) but Postgres already
  * recorded {@link ToolMessage} results for matching `tool_call_id`s, splice
  * `output-available` tool parts from the checkpoint before `toBaseMessages`.
+ *
+ * Scans for the most recent assistant message in the request — chat conversations
+ * always end with a user turn (the turn that drives the current request), so the
+ * assistant whose stale tool parts need splicing sits just before that trailing
+ * user message.
  */
 export function mergeCheckpointTail(input: MergeCheckpointTailInput): MyUIMessage[] {
   const { requestMessages, checkpointMessages } = input;
@@ -54,13 +60,13 @@ export function mergeCheckpointTail(input: MergeCheckpointTailInput): MyUIMessag
     return [...requestMessages];
   }
 
-  const lastIndex = requestMessages.length - 1;
-  const last = requestMessages[lastIndex];
-  if (last?.role !== 'assistant') {
+  const assistantIndex = requestMessages.findLastIndex((message) => message.role === 'assistant');
+  if (assistantIndex === -1) {
     return [...requestMessages];
   }
+  const assistant = requestMessages[assistantIndex]!;
 
-  const newParts = last.parts.map((part) => {
+  const newParts = assistant.parts.map((part) => {
     if (!isToolPart(part)) {
       return part;
     }
@@ -84,10 +90,12 @@ export function mergeCheckpointTail(input: MergeCheckpointTailInput): MyUIMessag
     } as MyUIMessage['parts'][number];
   });
 
-  const tailChanged = newParts.some((part, index) => part !== last.parts[index]);
-  if (!tailChanged) {
+  const assistantChanged = newParts.some((part, index) => part !== assistant.parts[index]);
+  if (!assistantChanged) {
     return [...requestMessages];
   }
 
-  return [...requestMessages.slice(0, lastIndex), { ...last, parts: newParts }];
+  const merged = [...requestMessages];
+  merged[assistantIndex] = { ...assistant, parts: newParts };
+  return merged;
 }

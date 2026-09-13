@@ -1,6 +1,7 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useActorRef, useSelector } from '@xstate/react';
+import type { SnapshotFrom } from 'xstate';
 import { Check } from 'lucide-react';
 import type { Geometry } from '@taucad/types';
 import { createRuntimeClientOptions } from '@taucad/runtime';
@@ -13,13 +14,14 @@ import { authSplashbackMachine, timing as machineTiming } from '#routes/auth.$/s
 import { UnifiedSplashbackViewer } from '#routes/auth.$/splashback/unified-splashback-viewer.js';
 import type { SplashbackPhase } from '#routes/auth.$/splashback/unified-splashback-viewer.js';
 import { useSampledPoints } from '#routes/auth.$/splashback/use-sampled-points.js';
+import { generateScatterPoints, sliceSampledPoints } from '#routes/auth.$/splashback/scatter-points.js';
 import { Loader } from '#components/ui/loader.js';
 import { useRender } from '@taucad/react';
-import type { RenderStatus } from '@taucad/react';
 import gearJscad from '#routes/auth.$/splashback/gear.jscad.js?raw';
 import {
   morphPointCount,
   assemblySplitRatio as defaultAssemblySplitRatio,
+  loadingScatterRadius,
 } from '#routes/auth.$/splashback/auth-splashback.constants.js';
 
 // eslint-disable-next-line @typescript-eslint/naming-convention -- file path key
@@ -44,7 +46,6 @@ const tagline3Text = 'Bring your designs to life';
 const timing = {
   typingDelay: 500,
   typingDuration: 1800,
-  fadeDuration: 800,
 };
 
 function Cursor(): React.JSX.Element {
@@ -307,51 +308,75 @@ type DerivedState = {
   isPrompt3EnterKey: boolean;
   isPrompt3Spinner: boolean;
   isPrompt3Complete: boolean;
-  // Morph states
+  // Loading states (atoms-to-matter)
+  isLoadingPreparing: boolean;
+  isLoadingMorphing: boolean;
+  isLoadingCrossfading: boolean;
+  // Morph states (gear12 -> gear8)
   isPreparingMorph: boolean;
   isMorphingToGear8: boolean;
   isGear8WaitingForMesh: boolean;
+  // Morph states (gear8 -> assembly)
   isPreparingMorph2: boolean;
   isMorphingToAssembly: boolean;
   isAssemblyWaitingForMesh: boolean;
+  // Unloading states (matter-to-abyss)
+  isUnloadingCrossfading: boolean;
+  isUnloadingMorphing: boolean;
   // Current phase for unified viewer
   currentPhase: SplashbackPhase;
 };
 
-type AuthSplashbackState = ReturnType<typeof authSplashbackMachine.transition>;
+type AuthSplashbackState = SnapshotFrom<typeof authSplashbackMachine>;
 
 /**
  * Derives all visibility and phase state from the XState machine state.
  * This centralizes state derivation to avoid repeated state.matches() calls in the component.
  */
-// oxlint-disable-next-line complexity -- refactor
+// oxlint-disable-next-line complexity -- centralised state derivation
 function deriveVisibilityState(state: AuthSplashbackState): DerivedState {
-  // === Morph transition states ===
+  // === Loading sub-states (atoms-to-matter pipeline) ===
+  const isLoadingPreparing = state.matches('loadingPreparing');
+  const isLoadingMorphing = state.matches('loadingMorphing');
+  const isLoadingCrossfading = state.matches('loadingCrossfading');
+  const isLoadingPhase = isLoadingPreparing || isLoadingMorphing || isLoadingCrossfading;
+
+  // === Morph transition states (gear12 -> gear8) ===
   const isPreparingMorph = state.matches('preparingMorph');
   const isMorphingToGear8 = state.matches('morphingToGear8');
   const isGear8WaitingForMesh = state.matches('gear8WaitingForMesh');
+
+  // === Morph transition states (gear8 -> assembly) ===
   const isPreparingMorph2 = state.matches('preparingMorph2');
   const isMorphingToAssembly = state.matches('morphingToAssembly');
   const isAssemblyWaitingForMesh = state.matches('assemblyWaitingForMesh');
+
+  // === Unloading sub-states (matter-to-abyss pipeline) ===
+  const isUnloadingCrossfading = state.matches('unloadingCrossfading');
+  const isUnloadingMorphing = state.matches('unloadingMorphing');
+  const isUnloadingPhase = isUnloadingCrossfading || isUnloadingMorphing;
 
   // Group morph states for convenience
   const isMorphingToGear8Phase = isPreparingMorph || isMorphingToGear8 || isGear8WaitingForMesh;
   const isMorphingToAssemblyPhase = isPreparingMorph2 || isMorphingToAssembly || isAssemblyWaitingForMesh;
 
   // === Basic visibility states ===
-  const showLoading = state.matches('loading');
+  const showLoading = isLoadingPhase;
   const showGear12 = state.matches('gear12');
   const showGear8 =
     state.matches({ gear8: 'animatingIn' }) ||
     state.matches({ gear8: 'displaying' }) ||
     state.matches({ gear8: 'prompt3' });
   const showAssembly = state.matches('assembly');
-  const isFading = state.matches('fading');
+  // `isFading` drives the container/prompt opacity fade. Scoped to unloadingMorphing only so
+  // particles dissolve mid-flight while the container is still visible — during
+  // unloadingCrossfading the container stays opaque so the eye sees the mesh->points handoff.
+  const isFading = isUnloadingMorphing;
 
   // === Prompt visibility (each prompt stays visible through its associated transitions) ===
   const showPrompt1 =
     state.matches('prompt1') ||
-    showLoading ||
+    isLoadingPhase ||
     state.matches({ gear12: 'animatingIn' }) ||
     state.matches({ gear12: 'displaying' });
 
@@ -362,22 +387,23 @@ function deriveVisibilityState(state: AuthSplashbackState): DerivedState {
     state.matches({ gear8: 'animatingIn' }) ||
     state.matches({ gear8: 'displaying' });
 
-  const showPrompt3 = state.matches({ gear8: 'prompt3' }) || isMorphingToAssemblyPhase || showAssembly || isFading;
+  const showPrompt3 =
+    state.matches({ gear8: 'prompt3' }) || isMorphingToAssemblyPhase || showAssembly || isUnloadingPhase;
 
   // Container stays mounted during all visible states and transitions
   const showContainer =
-    showLoading ||
+    isLoadingPhase ||
     showGear12 ||
     showGear8 ||
     showAssembly ||
-    isFading ||
+    isUnloadingPhase ||
     isMorphingToGear8Phase ||
     isMorphingToAssemblyPhase;
 
   // === Prompt 1 status icon states ===
   const isPrompt1Typing = state.matches({ prompt1: 'typing' });
   const isPrompt1EnterKey = state.matches({ prompt1: 'enterKey' });
-  const isPrompt1Spinner = showLoading;
+  const isPrompt1Spinner = isLoadingPhase;
   const isPrompt1Complete =
     state.matches({ gear12: 'animatingIn' }) ||
     state.matches({ gear12: 'displaying' }) ||
@@ -394,21 +420,24 @@ function deriveVisibilityState(state: AuthSplashbackState): DerivedState {
   const isPrompt3EnterKey = state.matches({ gear8: { prompt3: 'enterKey' } });
   const isPrompt3Spinner = isMorphingToAssemblyPhase;
   const isPrompt3Complete =
-    state.matches({ assembly: 'animatingIn' }) || state.matches({ assembly: 'displaying' }) || isFading;
+    state.matches({ assembly: 'animatingIn' }) || state.matches({ assembly: 'displaying' }) || isUnloadingPhase;
 
   // === Current phase for unified viewer ===
   const currentPhase = deriveCurrentPhase({
-    showLoading,
+    isLoadingPreparing,
+    isLoadingMorphing,
+    isLoadingCrossfading,
     showGear12,
     showGear8,
     showAssembly,
-    isFading,
     isPreparingMorph,
     isMorphingToGear8,
     isGear8WaitingForMesh,
     isPreparingMorph2,
     isMorphingToAssembly,
     isAssemblyWaitingForMesh,
+    isUnloadingCrossfading,
+    isUnloadingMorphing,
   });
 
   return {
@@ -433,40 +462,58 @@ function deriveVisibilityState(state: AuthSplashbackState): DerivedState {
     isPrompt3EnterKey,
     isPrompt3Spinner,
     isPrompt3Complete,
+    isLoadingPreparing,
+    isLoadingMorphing,
+    isLoadingCrossfading,
     isPreparingMorph,
     isMorphingToGear8,
     isGear8WaitingForMesh,
     isPreparingMorph2,
     isMorphingToAssembly,
     isAssemblyWaitingForMesh,
+    isUnloadingCrossfading,
+    isUnloadingMorphing,
     currentPhase,
   };
 }
 
 type PhaseFlags = {
-  showLoading: boolean;
+  isLoadingPreparing: boolean;
+  isLoadingMorphing: boolean;
+  isLoadingCrossfading: boolean;
   showGear12: boolean;
   showGear8: boolean;
   showAssembly: boolean;
-  isFading: boolean;
   isPreparingMorph: boolean;
   isMorphingToGear8: boolean;
   isGear8WaitingForMesh: boolean;
   isPreparingMorph2: boolean;
   isMorphingToAssembly: boolean;
   isAssemblyWaitingForMesh: boolean;
+  isUnloadingCrossfading: boolean;
+  isUnloadingMorphing: boolean;
 };
 
 /**
  * Derives the current phase for the unified splashback viewer.
  * Priority order matters - more specific states checked first.
  */
+// oxlint-disable-next-line complexity -- linear priority dispatch
 function deriveCurrentPhase(flags: PhaseFlags): SplashbackPhase {
-  // Transition states have highest priority
-  if (flags.showLoading) {
+  // Loading pipeline (atoms -> matter)
+  if (flags.isLoadingPreparing) {
     return 'loading';
   }
 
+  if (flags.isLoadingMorphing) {
+    return 'loadingMorphing';
+  }
+
+  if (flags.isLoadingCrossfading) {
+    return 'loadingCrossfading';
+  }
+
+  // Gear12 -> gear8 transitions
   if (flags.isPreparingMorph) {
     return 'preparingMorph';
   }
@@ -479,6 +526,7 @@ function deriveCurrentPhase(flags: PhaseFlags): SplashbackPhase {
     return 'crossfading';
   }
 
+  // Gear8 -> assembly transitions
   if (flags.isPreparingMorph2) {
     return 'preparingMorph2';
   }
@@ -491,13 +539,18 @@ function deriveCurrentPhase(flags: PhaseFlags): SplashbackPhase {
     return 'crossfadingToAssembly';
   }
 
+  // Unloading pipeline (matter -> abyss)
+  if (flags.isUnloadingCrossfading) {
+    return 'unloadingCrossfading';
+  }
+
+  if (flags.isUnloadingMorphing) {
+    return 'unloadingMorphing';
+  }
+
   // Display states
   if (flags.showAssembly) {
     return 'assembly';
-  }
-
-  if (flags.isFading) {
-    return 'fading';
   }
 
   if (flags.showGear8) {
@@ -514,20 +567,24 @@ function deriveCurrentPhase(flags: PhaseFlags): SplashbackPhase {
 type AuthSplashbackSend = ReturnType<typeof useActorRef<typeof authSplashbackMachine>>['send'];
 
 type AuthSplashbackContentProperties = {
-  readonly state: ReturnType<typeof authSplashbackMachine.transition>;
+  readonly state: AuthSplashbackState;
   readonly send: AuthSplashbackSend;
   readonly derivedState: DerivedState;
   readonly geometries: Geometry[];
-  readonly cadStatus: RenderStatus;
+  readonly loadingScatterPoints: ReturnType<typeof generateScatterPoints>;
+  readonly unloadingScatterPointsA: ReturnType<typeof sliceSampledPoints>;
+  readonly unloadingScatterPointsB: ReturnType<typeof sliceSampledPoints>;
 };
 
-// oxlint-disable-next-line complexity -- refactor
+// oxlint-disable-next-line complexity -- top-level scene composition
 function AuthSplashbackContent({
   state,
   send,
   derivedState,
   geometries,
-  cadStatus,
+  loadingScatterPoints,
+  unloadingScatterPointsA,
+  unloadingScatterPointsB,
 }: AuthSplashbackContentProperties): React.JSX.Element {
   const {
     showPrompt1,
@@ -548,12 +605,15 @@ function AuthSplashbackContent({
     isPrompt3EnterKey,
     isPrompt3Spinner,
     isPrompt3Complete,
+    isLoadingPreparing,
     isPreparingMorph,
     isMorphingToGear8,
     isGear8WaitingForMesh,
     isPreparingMorph2,
     isMorphingToAssembly,
     isAssemblyWaitingForMesh,
+    isUnloadingCrossfading,
+    isUnloadingMorphing,
     showGear8,
     showAssembly,
     currentPhase,
@@ -573,7 +633,8 @@ function AuthSplashbackContent({
 
   const isMorphingToAssemblyPhase = isPreparingMorph2 || isMorphingToAssembly || isAssemblyWaitingForMesh;
   const isMorphingToGear8Phase = isPreparingMorph || isMorphingToGear8 || isGear8WaitingForMesh;
-  const isAssemblyMode = showAssembly || isFading;
+  const isUnloadingPhase = isUnloadingCrossfading || isUnloadingMorphing;
+  const isAssemblyMode = showAssembly || isUnloadingPhase;
   const is8TeethMode = showGear8 || isMorphingToAssemblyPhase;
   const is12TeethMode = showLoading || isMorphingToGear8Phase;
   const currentTagline = isAssemblyMode
@@ -596,6 +657,17 @@ function AuthSplashbackContent({
     send({ type: 'userInteraction' });
   }, [send]);
 
+  // Fire loadingReady once every input the loading pipeline needs is in memory.
+  // After the first cycle these are all cached, so the event fires within one frame
+  // of entering loadingPreparing — no perceptible loading flicker on cycle restart.
+  // (`loadingScatterPoints` is generated synchronously at component mount, so the
+  // gate only watches the async geometry/points pipeline.)
+  useEffect(() => {
+    if (isLoadingPreparing && gear12Points && gear12Geometry) {
+      send({ type: 'loadingReady' });
+    }
+  }, [isLoadingPreparing, gear12Points, gear12Geometry, send]);
+
   useEffect(() => {
     if (isPreparingMorph && gear12Points && gear8Points) {
       send({ type: 'geometriesReady' });
@@ -607,6 +679,14 @@ function AuthSplashbackContent({
       send({ type: 'geometriesReady' });
     }
   }, [isPreparingMorph2, gear8Points, assemblyGear12Points, assemblyGear8Points, send]);
+
+  const handleLoadingMorphComplete = useCallback(() => {
+    send({ type: 'loadingMorphComplete' });
+  }, [send]);
+
+  const handleLoadingCrossfadeComplete = useCallback(() => {
+    send({ type: 'gear12MeshReady' });
+  }, [send]);
 
   const handleMorphComplete = useCallback(() => {
     send({ type: 'morphComplete' });
@@ -629,15 +709,23 @@ function AuthSplashbackContent({
     }
   }, [send, isAssemblyWaitingForMesh]);
 
+  const handleUnloadingMeshFadedOut = useCallback(() => {
+    send({ type: 'unloadingMeshFadedOut' });
+  }, [send]);
+
+  const handleUnloadingMorphComplete = useCallback(() => {
+    send({ type: 'unloadingMorphComplete' });
+  }, [send]);
+
   return (
     <div className='relative flex size-full items-center justify-center overflow-hidden bg-muted' aria-hidden='true'>
       <GridPattern />
 
-      <motion.div
-        className='relative z-10 flex flex-col items-center gap-4 md:gap-5'
-        animate={{ opacity: isFading ? 0 : 1 }}
-        transition={{ duration: timing.fadeDuration / 1000 }}
-      >
+      {/* Outer wrapper stays at opacity 1 throughout the unload so the canvas remains visible
+          for the per-gear particle dispersal. Per-element opacity (prompt3, tagline, container)
+          drives narrative dissolution; the container itself fades during `resetting` via
+          showContainer toggling false. */}
+      <motion.div className='relative z-10 flex flex-col items-center gap-4 md:gap-5'>
         {/* Prompt Bubbles */}
         <div className='flex min-h-[52px] items-center justify-center px-6'>
           <AnimatePresence mode='wait'>
@@ -704,30 +792,18 @@ function AuthSplashbackContent({
           </AnimatePresence>
         </div>
 
-        {/* Visualization Container */}
+        {/* Visualization Container — opacity tracks `showContainer` only so the canvas stays
+            fully visible during the entire unload sequence (the gears scatter into the void
+            inside the canvas itself). After particles disperse, `showContainer` flips false in
+            the resetting state and the existing 400ms transition fades the empty box out. */}
         <motion.div
           className={`flex items-center justify-center overflow-hidden rounded-xl border bg-background/90 backdrop-blur-sm transition-opacity duration-400 ${
             showContainer ? 'opacity-100' : 'pointer-events-none opacity-0'
           }`}
-          animate={{ opacity: isFading ? 0 : showContainer ? 1 : 0 }}
+          animate={{ opacity: showContainer ? 1 : 0 }}
           transition={{ duration: 0.4, ease: 'easeOut' }}
         >
           <div className='relative size-72 md:size-80 lg:size-128'>
-            <AnimatePresence>
-              {showLoading || cadStatus === 'loading' ? (
-                <motion.div
-                  key='loading'
-                  className='absolute inset-0 z-10 flex items-center justify-center bg-background/50'
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  initial={{ opacity: 0 }}
-                  transition={{ duration: 0.3 }}
-                >
-                  <Loader className='size-16' />
-                </motion.div>
-              ) : undefined}
-            </AnimatePresence>
-
             {showContainer && gear12Geometry && gear8Geometry ? (
               <UnifiedSplashbackViewer
                 phase={currentPhase}
@@ -739,12 +815,20 @@ function AuthSplashbackContent({
                 assemblyGear8Points={assemblyGear8Points}
                 assemblySplitRatio={assemblySplitRatio}
                 crossfadeDuration={machineTiming.crossfadeDuration}
+                morphDuration={machineTiming.morphDuration}
+                loadingScatterPoints={loadingScatterPoints}
+                unloadingScatterPointsA={unloadingScatterPointsA}
+                unloadingScatterPointsB={unloadingScatterPointsB}
                 className='size-full'
                 onInteraction={handleInteraction}
+                onLoadingMorphComplete={handleLoadingMorphComplete}
+                onLoadingCrossfadeComplete={handleLoadingCrossfadeComplete}
                 onMorphComplete={handleMorphComplete}
                 onCrossfadeComplete={handleCrossfadeComplete}
                 onMorph2Complete={handleMorph2Complete}
                 onPhaseTransitionComplete={handlePhaseTransitionComplete}
+                onUnloadingMeshFadedOut={handleUnloadingMeshFadedOut}
+                onUnloadingMorphComplete={handleUnloadingMorphComplete}
               />
             ) : undefined}
           </div>
@@ -778,11 +862,31 @@ export function AuthSplashback(): React.JSX.Element {
   const { send } = actorRef;
   const derivedState = useSelector(actorRef, deriveVisibilityState);
 
-  const { geometries, status } = useRender({
+  // `useRender` runs unconditionally on mount: kernel + middleware caches keep subsequent
+  // calls free, and status never flickers back to 'loading' once primed. The previous
+  // `enabled: showContainer` gate caused a re-render storm on every cycle restart that
+  // briefly re-displayed the loading spinner over the still-rendered assembly.
+  const { geometries } = useRender({
     clientOptions: splashbackKernelClientOptions,
     code: gearCode,
-    enabled: derivedState.showContainer,
   });
+
+  // Generate the alpha-and-omega scatter cloud once per component lifetime. It is the
+  // morph source for loading and the dispersal target for unloading, sliced into A/B
+  // halves matching the assembly split ratio.
+  const loadingScatterPoints = useMemo(() => generateScatterPoints(morphPointCount, loadingScatterRadius), []);
+
+  const splitCount = Math.round(morphPointCount * defaultAssemblySplitRatio);
+
+  const unloadingScatterPointsA = useMemo(
+    () => sliceSampledPoints(loadingScatterPoints, 0, splitCount),
+    [loadingScatterPoints, splitCount],
+  );
+
+  const unloadingScatterPointsB = useMemo(
+    () => sliceSampledPoints(loadingScatterPoints, splitCount, morphPointCount),
+    [loadingScatterPoints, splitCount],
+  );
 
   return (
     <AuthSplashbackContent
@@ -790,7 +894,9 @@ export function AuthSplashback(): React.JSX.Element {
       send={send}
       derivedState={derivedState}
       geometries={geometries}
-      cadStatus={status}
+      loadingScatterPoints={loadingScatterPoints}
+      unloadingScatterPointsA={unloadingScatterPointsA}
+      unloadingScatterPointsB={unloadingScatterPointsB}
     />
   );
 }

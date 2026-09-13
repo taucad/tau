@@ -223,9 +223,7 @@ export function ChatMessageToolTestModel({
     }
 
     case 'output-error': {
-      return (
-        <ChatToolError errorText={part.errorText} fallbackIcon={FlaskConical} fallbackTitle='Failed to run tests' />
-      );
+      return <ChatToolError errorText={part.errorText} icon={FlaskConical} noun='model test' />;
     }
 
     case 'approval-requested':

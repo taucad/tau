@@ -241,7 +241,7 @@ The target keeps two facades (split-by-concern) but moves them onto a shared inf
 │  ┌────────────────────────────────────────────────────────────────────────────────┐    │
 │  │ Shared Workspace Client Infrastructure  (@taucad/filesystem/src/client/)       │    │
 │  │                                                                                │    │
-│  │ • WorkerChangeChannel       — single proxy.listen subscriber + dispatcher      │    │
+│  │ • WorkerChangeChannel       — single proxy.listen subscriber; 10 typed Topic<E> fan-outs      │    │
 │  │                               • routes by event type to typed handlers         │    │
 │  │                               • per-handler `interestedIn` scope predicate     │    │
 │  │                               • NO suppression logic (bridge already filtered) │    │

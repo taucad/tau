@@ -164,12 +164,19 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
   }
 
   /**
-   * Move the file at `from` to `to` via copy + unlink (the FS Access API has no native rename).
+   * Move the file or directory at `from` to `to`. Files are copied + unlinked
+   * (the FS Access API has no native rename); directories are walked
+   * recursively and re-created under the new path.
    *
    * @param from - Source absolute path.
    * @param to - Destination absolute path.
    */
   public async rename(from: string, to: string): Promise<void> {
+    const sourceStat = await this.stat(from);
+    if (sourceStat.type === 'dir') {
+      await this._renameDirectory(from, to);
+      return;
+    }
     const data = await this.readFileRaw(from);
     await this.writeFile(to, data);
     await this.unlink(from);
@@ -373,6 +380,61 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
     for (const key of this._handleCache.keys()) {
       if (key === path || key.startsWith(prefix)) {
         this._handleCache.delete(key);
+      }
+    }
+  }
+
+  /**
+   * Recursively copy every entry under the source directory to the
+   * destination, then remove the source. Order matters: contents must be
+   * written before the source is removed.
+   *
+   * @param from - Source absolute directory path.
+   * @param to   - Destination absolute directory path.
+   */
+  private async _renameDirectory(from: string, to: string): Promise<void> {
+    await this._copyDirectoryContents(from, to);
+
+    const segments = this._splitPath(from);
+    if (segments.length === 0) {
+      throw new Error(`Cannot rename the filesystem root`);
+    }
+    const parentHandle = await this._resolveDirectoryHandle('/' + segments.slice(0, -1).join('/'));
+    const name = segments.at(-1)!;
+    await parentHandle.removeEntry(name, { recursive: true });
+    this._invalidateHandleCachePrefix(from);
+  }
+
+  /**
+   * Copy every entry from `source` to `destination`, creating any missing
+   * destination directories on the way.
+   *
+   * @param source      - Absolute source directory path.
+   * @param destination - Absolute destination directory path.
+   */
+  private async _copyDirectoryContents(source: string, destination: string): Promise<void> {
+    const sourceHandle = await this._resolveDirectoryHandle(source);
+
+    const destinationSegments = this._splitPath(destination);
+    let destinationHandle = this._rootHandle;
+    for (const segment of destinationSegments) {
+      // oxlint-disable-next-line no-await-in-loop -- Sequential directory creation required
+      destinationHandle = await destinationHandle.getDirectoryHandle(segment, { create: true });
+    }
+
+    for await (const [entryName, entryHandle] of sourceHandle.entries()) {
+      if (entryHandle.kind === 'directory') {
+        await this._copyDirectoryContents(`${source}/${entryName}`, `${destination}/${entryName}`);
+      } else {
+        const file = await entryHandle.getFile();
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        const destinationFile = await destinationHandle.getFileHandle(entryName, { create: true });
+        const writable = await destinationFile.createWritable();
+        try {
+          await writable.write(bytes);
+        } finally {
+          await writable.close();
+        }
       }
     }
   }

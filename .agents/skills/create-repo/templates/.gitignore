@@ -1,0 +1,12 @@
+.DS_Store
+.ci-tools/
+.nx/*
+!.nx/version-plans/
+!.nx/version-plans/*.md
+coverage/
+dist/
+docs-site/.next/
+docs-site/out/
+node_modules/
+*.tsbuildinfo
+rust/target/

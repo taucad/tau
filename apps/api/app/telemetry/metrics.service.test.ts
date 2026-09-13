@@ -84,6 +84,18 @@ describe('MetricsService', () => {
     });
   });
 
+  describe('Publication metrics', () => {
+    it('should create publicationViewsTotal counter', () => {
+      expect(service.publicationViewsTotal).toBeDefined();
+      expect(() => service.publicationViewsTotal.add(1, { deduped: 'unique' })).not.toThrow();
+    });
+
+    it('should create publicationViewsRejectedTotal counter', () => {
+      expect(service.publicationViewsRejectedTotal).toBeDefined();
+      expect(() => service.publicationViewsRejectedTotal.add(1, { reason: 'cap_exceeded' })).not.toThrow();
+    });
+  });
+
   describe('Client-reported metrics', () => {
     it('should create kernelExecutionDuration histogram', () => {
       expect(service.kernelExecutionDuration).toBeDefined();
@@ -109,6 +121,8 @@ describe('MetricsService', () => {
       expect(() => service.wsDisconnections.add(1)).not.toThrow();
       expect(() => service.genAiCost.add(0.01)).not.toThrow();
       expect(() => service.kernelExecutions.add(1)).not.toThrow();
+      expect(() => service.publicationViewsTotal.add(1)).not.toThrow();
+      expect(() => service.publicationViewsRejectedTotal.add(1)).not.toThrow();
     });
 
     it('should add/subtract values on up-down counters without error', () => {

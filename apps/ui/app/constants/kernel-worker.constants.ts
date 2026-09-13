@@ -21,7 +21,7 @@ import type { KernelOptionsFactory } from '#types/runtime-client.alias.js';
 export const defaultKernels = [
   openscad(),
   zoo({ baseUrl: `${ENV.TAU_WEBSOCKET_URL}/v1/kernels/zoo` }),
-  replicad({ withBrepEdges: true }),
+  replicad({ wasm: 'auto', withBrepEdges: true }),
   opencascade(),
   manifold(),
   jscad(),
@@ -81,6 +81,7 @@ export const createDebugKernelOptions: KernelOptionsFactory = (deps) =>
   createRuntimeClientOptions(createDefaultKernelOptions(deps), {
     kernels: [
       replicad({
+        wasm: 'auto',
         withBrepEdges: true,
         withSourceMapping: true,
       }),

@@ -1,36 +1,23 @@
 import { memo, useState } from 'react';
 import { RefreshCw } from 'lucide-react';
-import { messageRole, messageStatus } from '@taucad/chat/constants';
 import { getRandomExamples } from '#constants/chat-prompt-examples.js';
 import type { ChatExample } from '#constants/chat-prompt-examples.js';
 import { Button } from '#components/ui/button.js';
-import { useChatActions } from '#hooks/use-chat.js';
-import { useActiveChatModel } from '#hooks/use-active-chat-model.js';
-import { createMessage } from '#utils/chat.utils.js';
+import { useCadChatClient } from '#chat-clients/use-cad-chat-client.js';
 import { EmptyItems } from '#components/ui/empty-items.js';
-import { useChatSnapshot } from '#hooks/use-chat-snapshot.js';
 
 export const ChatExamples = memo(function () {
-  // Use lazy initialization to ensure consistent examples across renders
+  // Lazy initialization to ensure consistent examples across renders.
   const [examples, setExamples] = useState(() => getRandomExamples(3));
-  const { sendMessage } = useChatActions();
-  // Stamp messages with the chat-scoped model so quickly-clicked examples
-  // respect the chat's pinned selection rather than a stale cookie that may
-  // have shifted in another tab.
-  const { modelId } = useActiveChatModel();
-  const snapshot = useChatSnapshot();
+  // The chat-client composes the per-request `agent` payload (model, kernel,
+  // mode, toolChoice, testingEnabled, snapshot, contextPayload) from
+  // `useCadAgentConfig`. The originally-broken kernel / testingEnabled fields
+  // now flow through the same chat-client all submit sites use, so this
+  // quick-start path can no longer drift from the chat-history textarea path.
+  const cadChat = useCadChatClient();
 
   const handleExampleClick = (example: ChatExample) => {
-    const userMessage = createMessage({
-      content: example.prompt,
-      role: messageRole.user,
-      metadata: {
-        model: modelId,
-        status: messageStatus.pending,
-        snapshot,
-      },
-    });
-    sendMessage(userMessage);
+    cadChat.submit({ text: example.prompt });
   };
 
   const handleRefreshExamples = () => {

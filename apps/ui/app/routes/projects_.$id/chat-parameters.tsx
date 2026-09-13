@@ -10,7 +10,7 @@ import {
   MoreHorizontal,
   X as CloseIcon,
   Download,
-  Eye,
+  Box,
   FileCode,
 } from 'lucide-react';
 import { useCallback, memo, useState, useMemo, useRef, useEffect } from 'react';
@@ -354,7 +354,7 @@ function ParameterGroupSelector({
         groupedItems={groupedItems}
         renderLabel={renderLabel}
         getValue={getItemValue}
-        defaultValue={selectedItem}
+        value={selectedItem}
         placeholder='Select a parameter group'
         searchPlaceHolder='Search groups...'
         title='Parameter Groups'
@@ -371,7 +371,7 @@ function ParameterGroupSelector({
           <button
             type='button'
             aria-label='Parameter groups'
-            className='hover:text-accent-foreground flex h-5 max-w-24 items-center gap-0.5 rounded-sm px-1 text-[10px] text-muted-foreground transition-colors hover:bg-accent'
+            className='hover:text-accent-foreground flex h-5 max-w-28 items-center gap-0.5 rounded-sm px-1.5 text-[11px] text-muted-foreground transition-colors hover:bg-accent'
           >
             <span className='truncate'>{activeGroup}</span>
             <ChevronDown className='size-2.5 shrink-0 opacity-60' />
@@ -543,7 +543,7 @@ function ParametersPanelHeader({
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align='end' side='bottom'>
                   <DropdownMenuItem onSelect={handleOpenInViewer}>
-                    <Eye />
+                    <Box />
                     <span>Open in viewer</span>
                   </DropdownMenuItem>
                   <DropdownMenuItem onSelect={handleOpenInEditor}>
@@ -582,7 +582,7 @@ function ParametersPanelHeader({
       </ContextMenuTrigger>
       <ContextMenuContent>
         <ContextMenuItem onSelect={handleOpenInViewer}>
-          <Eye />
+          <Box />
           <span>Open in viewer</span>
         </ContextMenuItem>
         <ContextMenuItem onSelect={handleOpenInEditor}>

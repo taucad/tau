@@ -18,7 +18,7 @@ todos:
     content: Register opencascadeTypes in apps/ui/app/lib/javascript-contribution.ts staticTypes array
     status: completed
   - id: update-skill
-    content: Add Monaco IntelliSense types step (3.9) to .cursor/skills/new-kernel/SKILL.md
+    content: Add Monaco IntelliSense types step (3.9) to .agent/skills/new-kernel/SKILL.md
     status: completed
   - id: verify
     content: Run typecheck and lint on api-extractor and ui projects
@@ -121,7 +121,7 @@ Note: We only need `packageName: 'opencascade.js'` (not a separate entry for `'o
 
 ### 6. Update new-kernel skill
 
-**File:** [.cursor/skills/new-kernel/SKILL.md](.cursor/skills/new-kernel/SKILL.md)
+**File:** [.agent/skills/new-kernel/SKILL.md](.agent/skills/new-kernel/SKILL.md)
 
 Add a new step **3.9 Monaco IntelliSense types** in the "Wire Into System" section (after 3.8 Catalog metadata):
 

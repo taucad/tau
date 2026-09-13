@@ -39,7 +39,6 @@ export const listDirectoryTool: ChatTool<
   assertRpcSuccess(result, {
     toolName: toolName.listDirectory,
     toolCallId,
-    clientErrorMessage: `Cannot list directory "${args.path}"`,
   });
 
   // Return success output

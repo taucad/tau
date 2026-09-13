@@ -84,7 +84,7 @@ export const allotmentPanelOrder = [
  * These settings are stored per-build-per-view in EditorState and used to
  * initialize GraphicsMachine instances for each viewer panel.
  */
-export type EnvironmentPreset = 'studio' | 'neutral' | 'soft' | 'performance';
+export type EnvironmentPreset = 'studio' | 'performance';
 
 /**
  * A measurement that the user has explicitly pinned for persistence.
@@ -96,6 +96,12 @@ export type PinnedMeasurement = {
   distance: number;
   name?: string;
 };
+
+/** User preference for CAD viewer rendering API. */
+export type GraphicsBackendPreference = 'webgl' | 'webgpu';
+
+/** Resolved active backend passed to THREE renderers (matches preference 1:1; `webgpu` falls back to `webgl` when unsupported). */
+export type ResolvedGraphicsBackend = 'webgl' | 'webgpu';
 
 export type GraphicsViewSettings = {
   enableSurfaces: boolean;
@@ -113,11 +119,18 @@ export type GraphicsViewSettings = {
   /** Persisted pinned measurements -- optional so legacy data deserializes cleanly */
   pinnedMeasurements?: PinnedMeasurement[];
   /**
+   * Graphics API preference. Added in schema v3.
+   * @default 'webgl'
+   */
+  graphicsBackend?: GraphicsBackendPreference;
+  /**
    * Settings schema version. Absent / `1` = legacy seconds-based renderTimeout
    * persisted before the milliseconds-only migration; values are multiplied
-   * by 1000 on parse. `2` = milliseconds-only contract (current).
+   * by 1000 on parse. `2` = milliseconds-only + no graphics backend column.
+   * `3` = adds persisted `graphicsBackend` with `'auto' | 'webgl' | 'webgpu'`.
+   * `4` = drops `'auto'`; persisted `'auto'` migrates to `'webgl'`.
    */
-  schemaVersion?: 2;
+  schemaVersion?: 2 | 3 | 4;
 };
 
 // ============================================================================
@@ -146,13 +159,16 @@ export const graphicsViewSettingsSchema = z.object({
   cameraFovAngle: z.number(),
   /** Render timeout. Milliseconds. */
   renderTimeout: z.number(),
-  environmentPreset: z.enum(['studio', 'neutral', 'soft', 'performance']),
+  environmentPreset: z.enum(['studio', 'performance']),
   pinnedMeasurements: z.array(pinnedMeasurementSchema).optional(),
+  graphicsBackend: z.enum(['auto', 'webgl', 'webgpu']).optional(),
   /**
    * Settings schema version. Absent / `1` = legacy seconds-based renderTimeout;
    * `2` = milliseconds-only contract.
+   * `3` = adds persisted `graphicsBackend` with `'auto' | 'webgl' | 'webgpu'`.
+   * `4` = drops `'auto'`; persisted `'auto'` migrates to `'webgl'`.
    */
-  schemaVersion: z.literal(2).optional(),
+  schemaVersion: z.union([z.literal(2), z.literal(3), z.literal(4)]).optional(),
 });
 
 /**
@@ -172,14 +188,35 @@ export function parseGraphicsViewSettings(raw: unknown): GraphicsViewSettings {
   }
 
   const parsed = result.data;
+  if (parsed.schemaVersion === 4) {
+    const persistedBackend = parsed.graphicsBackend;
+    return {
+      ...parsed,
+      graphicsBackend: persistedBackend === 'webgpu' ? 'webgpu' : 'webgl',
+    };
+  }
+
+  if (parsed.schemaVersion === 3) {
+    return {
+      ...parsed,
+      graphicsBackend: parsed.graphicsBackend === 'webgpu' ? 'webgpu' : 'webgl',
+      schemaVersion: 4,
+    };
+  }
+
   if (parsed.schemaVersion === 2) {
-    return parsed;
+    return {
+      ...parsed,
+      graphicsBackend: 'webgl',
+      schemaVersion: 4,
+    };
   }
 
   return {
     ...parsed,
     renderTimeout: parsed.renderTimeout * 1000,
-    schemaVersion: 2,
+    graphicsBackend: 'webgl',
+    schemaVersion: 4,
   };
 }
 
@@ -194,12 +231,13 @@ export const defaultGraphicsSettings: GraphicsViewSettings = {
   enableGrid: true,
   enableAxes: true,
   enableMatcap: false,
-  enablePostProcessing: true,
+  enablePostProcessing: false,
   upDirection: 'z',
   cameraFovAngle: 60,
   renderTimeout: 30_000,
-  environmentPreset: 'studio',
-  schemaVersion: 2,
+  environmentPreset: 'performance',
+  graphicsBackend: 'webgl',
+  schemaVersion: 4,
 };
 
 // ============================================================================

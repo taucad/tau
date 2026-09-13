@@ -15,19 +15,78 @@ describe('getCadSystemPrompt', () => {
       expect(result.static).toContain('</constraints>');
     });
 
-    it('should forbid adding unrequested features', async () => {
+    it('should scope anti-gold-plating to code, not geometry', async () => {
       const result = await getCadSystemPrompt('openscad');
-      expect(result.static).toMatch(/do not add features.*beyond what was asked/i);
+      const block = result.static.slice(
+        result.static.indexOf('<constraints>'),
+        result.static.indexOf('</constraints>'),
+      );
+      expect(block).toMatch(/anti-gold-plating applies to code, not to geometry/i);
+      expect(block).toMatch(/do not add unrelated code features/i);
+      expect(block).toMatch(/implicit ask for a CAD deliverable/i);
+      expect(block).toMatch(/modelling a real fastener, fillet, or sub-component is the task/i);
     });
 
-    it('should forbid unnecessary error handling', async () => {
+    it('should forbid unnecessary code-level error handling', async () => {
       const result = await getCadSystemPrompt('openscad');
-      expect(result.static).toMatch(/do not add error handling.*cannot happen/i);
+      expect(result.static).toMatch(/do not add code-level error handling.*cannot happen/i);
     });
 
     it('should forbid premature abstractions', async () => {
       const result = await getCadSystemPrompt('openscad');
       expect(result.static).toMatch(/do not create helpers.*one-time/i);
+    });
+  });
+
+  // ===================================================================
+  // Production-grade role / quality bar
+  //   Closes deferred R11/F9 from docs/research/system-prompt-audit.md
+  //   and Finding 6 of docs/research/complex-task-agent-gap-analysis.md
+  //   ("Anti-Gold-Plating Rules Conflict with Engineering Detail").
+  // ===================================================================
+
+  describe('production-grade <role>', () => {
+    const extractRole = (prompt: string) => prompt.slice(prompt.indexOf('<role>'), prompt.indexOf('</role>'));
+
+    it('should name the target audience (architects / engineers / product designers / manufacturing)', async () => {
+      const result = await getCadSystemPrompt('openscad');
+      const block = extractRole(result.static);
+      expect(block).toMatch(/architects/i);
+      expect(block).toMatch(/engineers/i);
+      expect(block).toMatch(/product designers/i);
+      expect(block).toMatch(/manufacturing/i);
+    });
+
+    it('should set a production-grade quality bar and reject toy/hobbyist defaults', async () => {
+      const result = await getCadSystemPrompt('openscad');
+      const block = extractRole(result.static);
+      expect(block).toMatch(/production-grade/i);
+      expect(block).toMatch(/not a hobbyist sketch/i);
+      expect(block).toMatch(/real engineering deliverable/i);
+      expect(block).toMatch(/dimensionally faithful/i);
+      expect(block).toMatch(/manufacturable as-is/i);
+    });
+
+    it('should instruct the agent to model visible engineering features rather than picking the simplest path', async () => {
+      const result = await getCadSystemPrompt('openscad');
+      const block = extractRole(result.static);
+      expect(block).toMatch(/visible feature would exist on the real part/i);
+      expect(block).toMatch(/simplest path that compiles/i);
+      expect(block).toMatch(/omit detail "for simplicity"/i);
+    });
+
+    it('should NOT contain the old terse "CAD expert ... Create parametric 3D models for manufacturing" wording', async () => {
+      const result = await getCadSystemPrompt('openscad');
+      const block = extractRole(result.static);
+      expect(block).not.toMatch(/Create parametric 3D models for manufacturing\./);
+    });
+
+    it('should keep the LaTeX formatting instruction', async () => {
+      const result = await getCadSystemPrompt('openscad');
+      const block = extractRole(result.static);
+      expect(block).toMatch(/LaTeX/);
+      expect(block).toContain('$...$');
+      expect(block).toContain('$$...$$');
     });
   });
 
@@ -156,50 +215,6 @@ describe('getCadSystemPrompt', () => {
   });
 
   // ===================================================================
-  // Git status injection
-  // ===================================================================
-
-  describe('git status injection', () => {
-    it('should include git status in dynamic section when provided', async () => {
-      const result = await getCadSystemPrompt('openscad', 'agent', true, {
-        chatId: 'test',
-        gitStatus: 'M src/main.scad\nA src/lib/component.scad',
-      });
-      expect(result.dynamic).toContain('<git_status>');
-      expect(result.dynamic).toContain('M src/main.scad');
-    });
-
-    it('should truncate git status at 2000 chars', async () => {
-      const longStatus = 'M '.padEnd(2500, 'x');
-      const result = await getCadSystemPrompt('openscad', 'agent', true, {
-        chatId: 'test',
-        gitStatus: longStatus,
-      });
-      const gitStatusSection = /<git_status>([\S\s]*?)<\/git_status>/.exec(result.dynamic)?.[1] ?? '';
-      expect(gitStatusSection.length).toBeLessThanOrEqual(2200);
-      expect(result.dynamic).toContain('Truncated');
-    });
-
-    it('should show git-aware fallback text when truncated', async () => {
-      const longStatus = 'M '.padEnd(2500, 'x');
-      const result = await getCadSystemPrompt('openscad', 'agent', true, {
-        chatId: 'test',
-        gitStatus: longStatus,
-      });
-      expect(result.dynamic).toContain('git status');
-      expect(result.dynamic).not.toContain('list_directory');
-    });
-
-    it('should NOT include git status in static section', async () => {
-      const result = await getCadSystemPrompt('openscad', 'agent', true, {
-        chatId: 'test',
-        gitStatus: 'M unique-file.scad',
-      });
-      expect(result.static).not.toContain('unique-file.scad');
-    });
-  });
-
-  // ===================================================================
   // Anti-vague-reference instruction
   // ===================================================================
 
@@ -231,7 +246,6 @@ describe('getCadSystemPrompt', () => {
       modelId: 'test-model',
       contextWindow: 200_000,
       knowledgeCutoff: '2025-08',
-      gitStatus: 'M main.scad',
     } as const;
 
     it('should contain all expected static sections', async () => {
@@ -254,12 +268,16 @@ describe('getCadSystemPrompt', () => {
         '</visual_inspection>',
         '<code_standards>',
         '</code_standards>',
+        '<topology_hints>',
+        '</topology_hints>',
         '<error_handling>',
         '</error_handling>',
         '<system_rules>',
         '</system_rules>',
         '<safety>',
         '</safety>',
+        '<geometry_fidelity>',
+        '</geometry_fidelity>',
         '<canonical_example>',
         '</canonical_example>',
         '<research_capabilities>',
@@ -279,8 +297,6 @@ describe('getCadSystemPrompt', () => {
       expect(result.dynamic).toContain('.tau/transcripts/golden-test.jsonl');
       expect(result.dynamic).toContain('<environment>');
       expect(result.dynamic).toContain('knowledge cutoff: 2025-08');
-      expect(result.dynamic).toContain('<git_status>');
-      expect(result.dynamic).toContain('M main.scad');
     });
 
     it('should place dynamic sections in correct order', async () => {
@@ -288,10 +304,8 @@ describe('getCadSystemPrompt', () => {
 
       const transcriptIndex = result.dynamic.indexOf('.tau/transcripts/');
       const envIndex = result.dynamic.indexOf('<environment>');
-      const gitIndex = result.dynamic.indexOf('<git_status>');
 
       expect(transcriptIndex).toBeLessThan(envIndex);
-      expect(envIndex).toBeLessThan(gitIndex);
     });
 
     it('should not have triple+ blank lines in output', async () => {
@@ -490,6 +504,81 @@ describe('getCadSystemPrompt', () => {
   });
 
   // ===================================================================
+  // Multi-file pattern guidance (per-kernel idiomatic library imports)
+  //   Source: dollhouse `include`-duplicate smoking gun — `include <…>`
+  //   re-emits every top-level invocation in the imported file, so a
+  //   standalone `dollhouse_base()` call inside `lib/base.scad` renders
+  //   alongside the assembled house. Each kernel ships a minimal
+  //   multi-file canonical example so the agent mirrors the correct
+  //   import token rather than guessing.
+  // ===================================================================
+
+  describe('<multi_file_pattern> for every kernel', () => {
+    const allKernels: readonly KernelProvider[] = ['openscad', 'replicad', 'jscad', 'manifold', 'opencascadejs', 'zoo'];
+
+    describe.each(allKernels)('%s', (kernel) => {
+      it('should embed a <multi_file_pattern> section in the static prompt', async () => {
+        const result = await getCadSystemPrompt(kernel, 'agent', true);
+        expect(result.static).toContain('<multi_file_pattern>');
+        expect(result.static).toContain('</multi_file_pattern>');
+      });
+
+      it('should embed each declared file path verbatim', async () => {
+        const config = getKernelConfig(kernel);
+        const example = config.multiFileExample;
+        if (!example) {
+          throw new Error(`${kernel} must ship multiFileExample`);
+        }
+        const result = await getCadSystemPrompt(kernel, 'agent', true);
+        const block = result.static.slice(
+          result.static.indexOf('<multi_file_pattern>'),
+          result.static.indexOf('</multi_file_pattern>'),
+        );
+        for (const file of example.files) {
+          expect(block).toContain(`\`${file.path}\``);
+        }
+      });
+
+      it('should NOT leak into the dynamic prompt', async () => {
+        const result = await getCadSystemPrompt(kernel, 'agent', true);
+        expect(result.dynamic).not.toContain('<multi_file_pattern>');
+      });
+    });
+
+    it('should render OpenSCAD with `use <…>` and never `include <…>` (regression guard)', async () => {
+      const result = await getCadSystemPrompt('openscad', 'agent', true);
+      const block = result.static.slice(
+        result.static.indexOf('<multi_file_pattern>'),
+        result.static.indexOf('</multi_file_pattern>'),
+      );
+      expect(block).toMatch(/use\s*</);
+      expect(block).not.toMatch(/include\s*</);
+    });
+
+    it("should render TS-based kernels with `from './lib/<name>.js'` ESM relative imports", async () => {
+      const tsKernels = ['replicad', 'jscad', 'manifold', 'opencascadejs'] as const;
+      const results = await Promise.all(tsKernels.map(async (k) => getCadSystemPrompt(k, 'agent', true)));
+      for (const result of results) {
+        const block = result.static.slice(
+          result.static.indexOf('<multi_file_pattern>'),
+          result.static.indexOf('</multi_file_pattern>'),
+        );
+        expect(block).toMatch(/from\s+["']\.\/lib\/[\w-]+\.js["']/);
+      }
+    });
+
+    it('should render KCL flat (no `lib/`) with the `import … from "…"` idiom', async () => {
+      const result = await getCadSystemPrompt('zoo', 'agent', true);
+      const block = result.static.slice(
+        result.static.indexOf('<multi_file_pattern>'),
+        result.static.indexOf('</multi_file_pattern>'),
+      );
+      expect(block).not.toContain('lib/');
+      expect(block).toMatch(/import\s+\w+\s+from\s+"[^"]+\.kcl"/);
+    });
+  });
+
+  // ===================================================================
   // Screenshot frequency cap in <visual_inspection>
   // ===================================================================
 
@@ -542,6 +631,37 @@ describe('getCadSystemPrompt', () => {
         result.static.indexOf('</tool_usage_policy>'),
       );
       expect(block).toMatch(/never use placeholders/i);
+    });
+
+    it('should direct the agent to prefer offset and limit for large source reads', async () => {
+      const result = await getCadSystemPrompt('openscad');
+      const block = result.static.slice(
+        result.static.indexOf('<tool_usage_policy>'),
+        result.static.indexOf('</tool_usage_policy>'),
+      );
+      expect(block).toMatch(/prefer `offset` \+ `limit`/);
+      expect(block).toMatch(/>2000 lines/);
+    });
+
+    it('should direct the agent to use narrow grep + headLimit before read_file on dense generated code', async () => {
+      const result = await getCadSystemPrompt('openscad');
+      const block = result.static.slice(
+        result.static.indexOf('<tool_usage_policy>'),
+        result.static.indexOf('</tool_usage_policy>'),
+      );
+      expect(block).toMatch(/narrow regex/);
+      expect(block).toMatch(/headLimit/);
+      expect(block).toMatch(/most-relevant ranges/);
+    });
+
+    it('should NOT steer the agent into node_modules via <tool_usage_policy>', async () => {
+      const result = await getCadSystemPrompt('openscad');
+      const block = result.static.slice(
+        result.static.indexOf('<tool_usage_policy>'),
+        result.static.indexOf('</tool_usage_policy>'),
+      );
+      expect(block).not.toMatch(/node_modules/);
+      expect(block).not.toMatch(/canonical location/);
     });
 
     it('should NOT appear in dynamic section', async () => {
@@ -655,6 +775,234 @@ describe('getCadSystemPrompt', () => {
     it('should NOT appear in dynamic section', async () => {
       const result = await getCadSystemPrompt('openscad');
       expect(result.dynamic).not.toContain('<safety>');
+    });
+  });
+
+  // ===================================================================
+  // Global <geometry_fidelity> static section
+  //   Closes the helical-gear `involuteSamples=9` smoking gun per
+  //   docs/research/code-cad-topology-best-practices.md F1, F3-F5, F9.
+  // ===================================================================
+
+  describe('<geometry_fidelity> static section', () => {
+    const extractBlock = (prompt: string) =>
+      prompt.slice(prompt.indexOf('<geometry_fidelity>'), prompt.indexOf('</geometry_fidelity>'));
+
+    it('should include a <geometry_fidelity> static section', async () => {
+      const result = await getCadSystemPrompt('openscad');
+      expect(result.static).toContain('<geometry_fidelity>');
+      expect(result.static).toContain('</geometry_fidelity>');
+    });
+
+    it('should anchor on the smallest-topology universal principle', async () => {
+      const result = await getCadSystemPrompt('openscad');
+      const block = extractBlock(result.static);
+      expect(block).toMatch(/smallest topology that captures the user's intent/i);
+      expect(block).toMatch(/topology is the deliverable/i);
+    });
+
+    it('should name the closed-form curve families (F1)', async () => {
+      const result = await getCadSystemPrompt('openscad');
+      const block = extractBlock(result.static);
+      expect(block).toMatch(/curves with a closed form/i);
+      expect(block).toMatch(/involutes/i);
+      expect(block).toMatch(/ellipses/i);
+      expect(block).toMatch(/helices/i);
+      expect(block).toMatch(/single analytical primitive/i);
+    });
+
+    it('should call out engineering profiles as analytical edges (F1)', async () => {
+      const result = await getCadSystemPrompt('openscad');
+      const block = extractBlock(result.static);
+      expect(block).toMatch(/engineering profiles/i);
+      expect(block).toMatch(/its own analytical edge/i);
+    });
+
+    it('should prefer one revolve/loft/sweep over a stack of unioned primitives (F3)', async () => {
+      const result = await getCadSystemPrompt('openscad');
+      const block = extractBlock(result.static);
+      expect(block).toMatch(/revolve/i);
+      expect(block).toMatch(/loft/i);
+      expect(block).toMatch(/sweep/i);
+      expect(block).toMatch(/stack of primitives unioned together/i);
+    });
+
+    it('should encode boolean ordering hygiene (F4)', async () => {
+      const result = await getCadSystemPrompt('openscad');
+      const block = extractBlock(result.static);
+      expect(block).toMatch(/bottom-up additive, top-down subtractive/i);
+      expect(block).toMatch(/fewer, larger booleans/i);
+      expect(block).toMatch(/epsilon past the boundary/i);
+    });
+
+    it('should encode fillet ordering (F5)', async () => {
+      const result = await getCadSystemPrompt('openscad');
+      const block = extractBlock(result.static);
+      expect(block).toMatch(/largest, most stable features first/i);
+      expect(block).toMatch(/part-vs-part shared boundary last/i);
+    });
+
+    it('should surface the for-loop self-detection heuristic (F9)', async () => {
+      const result = await getCadSystemPrompt('openscad');
+      const block = extractBlock(result.static);
+      expect(block).toMatch(/`for`-loop pushing points into an array/i);
+      expect(block).toMatch(/closed form/i);
+      expect(block).toMatch(/switch to the analytical primitive/i);
+    });
+
+    it('should point the agent at <topology_hints> for kernel-specific vocabulary', async () => {
+      const result = await getCadSystemPrompt('openscad');
+      const block = extractBlock(result.static);
+      expect(block).toMatch(/<topology_hints>/);
+    });
+
+    it('should NOT appear in dynamic section', async () => {
+      const result = await getCadSystemPrompt('openscad');
+      expect(result.dynamic).not.toContain('<geometry_fidelity>');
+    });
+  });
+
+  // ===================================================================
+  // Per-kernel <topology_hints> static section
+  //   Maps the global <geometry_fidelity> principle to each kernel's
+  //   primitive vocabulary per docs/research/code-cad-topology-best-practices.md
+  //   Kernel Capability Matrix.
+  // ===================================================================
+
+  describe('<topology_hints> static section', () => {
+    const extractBlock = (prompt: string) =>
+      prompt.slice(prompt.indexOf('<topology_hints>'), prompt.indexOf('</topology_hints>'));
+
+    const allKernels: readonly KernelProvider[] = ['openscad', 'replicad', 'jscad', 'manifold', 'opencascadejs', 'zoo'];
+
+    describe.each(allKernels)('%s', (kernel) => {
+      it('should include a <topology_hints> static section', async () => {
+        const result = await getCadSystemPrompt(kernel);
+        expect(result.static).toContain('<topology_hints>');
+        expect(result.static).toContain('</topology_hints>');
+      });
+
+      it('should not be empty', async () => {
+        const result = await getCadSystemPrompt(kernel);
+        const block = extractBlock(result.static).replace('<topology_hints>', '').trim();
+        expect(block.length).toBeGreaterThan(40);
+      });
+
+      it('should NOT appear in dynamic section', async () => {
+        const result = await getCadSystemPrompt(kernel);
+        expect(result.dynamic).not.toContain('<topology_hints>');
+      });
+    });
+
+    describe('kernel-specific vocabulary', () => {
+      it('replicad should name drawSplineCurve / drawArc', async () => {
+        const result = await getCadSystemPrompt('replicad');
+        const block = extractBlock(result.static);
+        expect(block).toMatch(/drawSplineCurve/);
+        expect(block).toMatch(/drawArc/);
+      });
+
+      it('opencascadejs should name Geom2dAPI_PointsToBSpline and GC_MakeArcOfCircle', async () => {
+        const result = await getCadSystemPrompt('opencascadejs');
+        const block = extractBlock(result.static);
+        expect(block).toMatch(/Geom2dAPI_PointsToBSpline/);
+        expect(block).toMatch(/GC_MakeArcOfCircle/);
+      });
+
+      it('zoo (KCL) should name tangentialArc and bezierCurve', async () => {
+        const result = await getCadSystemPrompt('zoo');
+        const block = extractBlock(result.static);
+        expect(block).toMatch(/tangentialArc/);
+        expect(block).toMatch(/bezierCurve/);
+      });
+
+      it('manifold should encode the segment-count heuristic', async () => {
+        const result = await getCadSystemPrompt('manifold');
+        const block = extractBlock(result.static);
+        expect(block).toMatch(/segment count, not curve form/i);
+        expect(block).toMatch(/Manifold\.cylinder/);
+      });
+
+      it('jscad should encode the segment-count heuristic and extrudeRotate', async () => {
+        const result = await getCadSystemPrompt('jscad');
+        const block = extractBlock(result.static);
+        expect(block).toMatch(/segment count, not curve form/i);
+        expect(block).toMatch(/extrudeRotate/);
+      });
+
+      it('openscad should prefer $fa/$fs over $fn and warn on hull/minkowski misuse', async () => {
+        const result = await getCadSystemPrompt('openscad');
+        const block = extractBlock(result.static);
+        expect(block).toMatch(/\$fa/);
+        expect(block).toMatch(/\$fs/);
+        expect(block).toMatch(/hull\(\)/);
+        expect(block).toMatch(/minkowski\(\)/);
+        expect(block).toMatch(/render\(\)/);
+      });
+    });
+
+    describe('cross-kernel contamination guard', () => {
+      it('replicad <topology_hints> should not leak OpenSCAD-only vocabulary', async () => {
+        const result = await getCadSystemPrompt('replicad');
+        const block = extractBlock(result.static);
+        expect(block).not.toMatch(/\$fa/);
+        expect(block).not.toMatch(/\$fs/);
+        expect(block).not.toMatch(/\$fn/);
+        expect(block).not.toMatch(/hull\(\)/);
+      });
+
+      it('opencascadejs <topology_hints> should not leak Replicad-only vocabulary', async () => {
+        const result = await getCadSystemPrompt('opencascadejs');
+        const block = extractBlock(result.static);
+        expect(block).not.toMatch(/drawSplineCurve/);
+        expect(block).not.toMatch(/drawArc/);
+      });
+
+      it('openscad <topology_hints> should not leak B-rep curve vocabulary', async () => {
+        const result = await getCadSystemPrompt('openscad');
+        const block = extractBlock(result.static);
+        expect(block).not.toMatch(/drawSplineCurve/);
+        expect(block).not.toMatch(/Geom2dAPI_PointsToBSpline/);
+        expect(block).not.toMatch(/tangentialArc/);
+      });
+
+      it('manifold <topology_hints> should not leak B-rep curve vocabulary', async () => {
+        const result = await getCadSystemPrompt('manifold');
+        const block = extractBlock(result.static);
+        expect(block).not.toMatch(/drawSplineCurve/);
+        expect(block).not.toMatch(/Geom2dAPI_PointsToBSpline/);
+        expect(block).not.toMatch(/tangentialArc/);
+      });
+    });
+  });
+
+  // ===================================================================
+  // <error_handling> fillet root-cause extension (F5)
+  // ===================================================================
+
+  describe('<error_handling> fillet root-cause extension', () => {
+    const extractBlock = (prompt: string) =>
+      prompt.slice(prompt.indexOf('<error_handling>'), prompt.indexOf('</error_handling>'));
+
+    it('should name polyline kinks and oversized radius as the two root causes', async () => {
+      const result = await getCadSystemPrompt('replicad');
+      const block = extractBlock(result.static);
+      expect(block).toMatch(/Fillet failures/);
+      expect(block).toMatch(/polyline kink upstream/i);
+      expect(block).toMatch(/radius larger than local material thickness/i);
+    });
+
+    it('should cross-reference <geometry_fidelity>', async () => {
+      const result = await getCadSystemPrompt('replicad');
+      const block = extractBlock(result.static);
+      expect(block).toMatch(/<geometry_fidelity>/);
+    });
+
+    it('should encode largest-fillets-first ordering', async () => {
+      const result = await getCadSystemPrompt('replicad');
+      const block = extractBlock(result.static);
+      expect(block).toMatch(/Largest fillets first/i);
+      expect(block).toMatch(/part-vs-part shared boundary last/i);
     });
   });
 
@@ -975,16 +1323,16 @@ describe('getCadSystemPrompt', () => {
         onSectionResolved,
         chatId: 'chat-r23',
         modelId: 'm-r23',
-        gitStatus: 'M file.ts',
+        contextWindow: 200_000,
       });
 
       const calls = onSectionResolved.mock.calls.map(([resolved]) => resolved as { name: string; cacheBreak: boolean });
       const role = calls.find((c) => c.name === 'role');
-      const gitStatus = calls.find((c) => c.name === 'git_status');
+      const environment = calls.find((c) => c.name === 'environment');
       const transcriptPath = calls.find((c) => c.name === 'transcript_path');
 
       expect(role?.cacheBreak).toBe(false);
-      expect(gitStatus?.cacheBreak).toBe(true);
+      expect(environment?.cacheBreak).toBe(true);
       expect(transcriptPath?.cacheBreak).toBe(true);
     });
 

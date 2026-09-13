@@ -2,6 +2,8 @@ import { useRef, useMemo, useEffect } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import type { Points, Group } from 'three';
+import { useThreeGraphicsBackend } from '#components/geometry/graphics/three/three-graphics-backend-context.js';
+import { createMorphingPointsNodeMaterial } from '#routes/auth.$/splashback/morphing-points-material.node.js';
 import {
   createMorphingPointsMaterial,
   updateMorphProgress,
@@ -163,6 +165,14 @@ export function SplitMorphingPoints({
   onMorphComplete,
   onProgressChange,
 }: SplitMorphingPointsProperties): React.JSX.Element {
+  const backend = useThreeGraphicsBackend();
+  const gear12NodeHandlesRef = useRef<ReturnType<typeof createMorphingPointsNodeMaterial>['handles'] | undefined>(
+    undefined,
+  );
+  const gear8NodeHandlesRef = useRef<ReturnType<typeof createMorphingPointsNodeMaterial>['handles'] | undefined>(
+    undefined,
+  );
+
   const gear12PointsRef = useRef<Points>(null);
   const gear8PointsRef = useRef<Points>(null);
   const gear12RotationRef = useRef<Group>(null);
@@ -242,22 +252,46 @@ export function SplitMorphingPoints({
 
   // Create materials for each group
   const gear12Material = useMemo(() => {
+    if (backend === 'webgpu') {
+      const built = createMorphingPointsNodeMaterial({
+        color: sourceColor,
+        targetColor: targetColorA,
+        pointSize,
+        explosionStrength,
+      });
+      gear12NodeHandlesRef.current = built.handles;
+      return built.material;
+    }
+
+    gear12NodeHandlesRef.current = undefined;
     return createMorphingPointsMaterial({
       color: sourceColor,
       targetColor: targetColorA,
       pointSize,
       explosionStrength,
     });
-  }, [sourceColor, targetColorA, pointSize, explosionStrength]);
+  }, [backend, explosionStrength, pointSize, sourceColor, targetColorA]);
 
   const gear8Material = useMemo(() => {
+    if (backend === 'webgpu') {
+      const built = createMorphingPointsNodeMaterial({
+        color: sourceColor,
+        targetColor: targetColorB,
+        pointSize,
+        explosionStrength,
+      });
+      gear8NodeHandlesRef.current = built.handles;
+      return built.material;
+    }
+
+    gear8NodeHandlesRef.current = undefined;
     return createMorphingPointsMaterial({
       color: sourceColor,
       targetColor: targetColorB,
       pointSize,
       explosionStrength,
     });
-  }, [sourceColor, targetColorB, pointSize, explosionStrength]);
+  }, [backend, explosionStrength, pointSize, sourceColor, targetColorB]);
 
   // Reset hasReachedTarget when target changes
   useEffect(() => {
@@ -300,14 +334,21 @@ export function SplitMorphingPoints({
     // Notify parent of progress change (for animating assembly tilt)
     onProgressChange?.(progress);
 
-    // Update shader uniforms for both materials
-    updateMorphProgress(gear12Material, progress);
-    updateMorphTime(gear12Material, state.clock.elapsedTime);
-    updateMorphOpacity(gear12Material, opacity);
+    if (gear12NodeHandlesRef.current && gear8NodeHandlesRef.current) {
+      for (const handles of [gear12NodeHandlesRef.current, gear8NodeHandlesRef.current]) {
+        handles.uProgress.value = progress;
+        handles.uTime.value = state.clock.elapsedTime;
+        handles.uOpacity.value = opacity;
+      }
+    } else {
+      updateMorphProgress(gear12Material as THREE.ShaderMaterial, progress);
+      updateMorphTime(gear12Material as THREE.ShaderMaterial, state.clock.elapsedTime);
+      updateMorphOpacity(gear12Material as THREE.ShaderMaterial, opacity);
 
-    updateMorphProgress(gear8Material, progress);
-    updateMorphTime(gear8Material, state.clock.elapsedTime);
-    updateMorphOpacity(gear8Material, opacity);
+      updateMorphProgress(gear8Material as THREE.ShaderMaterial, progress);
+      updateMorphTime(gear8Material as THREE.ShaderMaterial, state.clock.elapsedTime);
+      updateMorphOpacity(gear8Material as THREE.ShaderMaterial, opacity);
+    }
 
     // Animate group positions and rotations based on progress
     // At progress=0, both groups are at origin (source gear8 position)

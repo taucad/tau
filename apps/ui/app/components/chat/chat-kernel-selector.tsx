@@ -7,7 +7,8 @@ import { kernelConfigurations } from '@taucad/types/constants';
 import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
 import { SvgIcon } from '#components/icons/svg-icon.js';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '#components/ui/hover-card.js';
-import { useActiveChatKernel } from '#hooks/use-active-chat-kernel.js';
+import { useChatComposer } from '#hooks/active-chat-provider.js';
+import { KernelTierBadge } from '#components/tier-badge.js';
 
 function formatKernelDimensions(dimensions: KernelConfiguration['dimensions']): string {
   return dimensions.map((d) => `${d}D`).join(' & ');
@@ -36,7 +37,7 @@ function formatKernelLanguage(language: KernelConfiguration['language']): string
 type ChatKernelSelectorProps = Omit<React.HTMLAttributes<HTMLDivElement>, 'children' | 'onSelect'> & {
   readonly onSelect?: (kernelId: KernelProvider) => void;
   readonly onClose?: () => void;
-  readonly children: (props: { selectedKernel?: (typeof kernelConfigurations)[number] }) => ReactNode;
+  readonly children: (props: { selectedKernel: (typeof kernelConfigurations)[number] }) => ReactNode;
   readonly popoverProperties?: React.ComponentProps<typeof ComboBoxResponsive>['popoverProperties'];
   readonly isNested?: boolean;
 };
@@ -48,11 +49,13 @@ export const ChatKernelSelector = memo(function ({
   isNested,
   ...properties
 }: ChatKernelSelectorProps): React.JSX.Element {
-  // Read AND write through the chat-scoped resolver so a kernel switch
-  // inside chat A patches `Chat.activeKernel` for A *and* updates the
-  // cookie default for future new chats. The selector no longer touches
-  // `useKernel` directly.
-  const { kernel: selectedKernel, setActiveKernel } = useActiveChatKernel();
+  // Read AND write through the unified composer context. The active
+  // provider's strategy (composer-cookie vs session dual-write) decides
+  // whether the patch hits the chat row, the cookie, or both. The selector
+  // never touches `useKernel` directly.
+  const {
+    kernel: { kernel: selectedKernel, setActiveKernel },
+  } = useChatComposer();
 
   const handleSelectKernel = useCallback(
     (item: string) => {
@@ -88,7 +91,10 @@ export const ChatKernelSelector = memo(function ({
               <div className='flex min-w-0 flex-1 items-center gap-2'>
                 <SvgIcon id={item.id} className='shrink-0' />
                 <div className='flex min-w-0 flex-col'>
-                  <span className='truncate'>{item.name}</span>
+                  <span className='flex min-w-0 items-center gap-1.5 truncate'>
+                    {item.name}
+                    <KernelTierBadge kernelId={item.id} />
+                  </span>
                   <span className='truncate text-xs text-muted-foreground'>{item.description}</span>
                 </div>
               </div>
@@ -99,7 +105,10 @@ export const ChatKernelSelector = memo(function ({
             <div className='space-y-2'>
               <div className='flex items-center gap-2'>
                 <SvgIcon id={item.id} className='size-5 shrink-0' />
-                <h4 className='text-sm font-semibold'>{item.name}</h4>
+                <h4 className='flex items-center gap-1.5 text-sm font-semibold'>
+                  {item.name}
+                  <KernelTierBadge kernelId={item.id} />
+                </h4>
               </div>
               <p className='text-sm text-muted-foreground'>{item.longDescription}</p>
               <p className='text-xs text-muted-foreground'>Best for: {item.recommended}</p>
@@ -112,7 +121,7 @@ export const ChatKernelSelector = memo(function ({
       )}
       getValue={(item) => item.id}
       placeholder='Select a kernel'
-      defaultValue={selectedKernel}
+      value={selectedKernel}
       isNested={isNested}
       onSelect={handleSelectKernel}
       onClose={onClose}

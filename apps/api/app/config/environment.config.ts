@@ -49,6 +49,11 @@ const environmentSchema = z.object({
   GOOGLE_CLIENT_ID: z.string().optional(),
   GOOGLE_CLIENT_SECRET: z.string().optional(),
 
+  // Email delivery
+  RESEND_API_KEY: z.string().default(''),
+  TAU_EMAIL_FROM: z.string().default('Tau <identity@taucad.dev>'),
+  TAU_EMAIL_REPLY_TO: z.email().default('identity@taucad.dev'),
+
   // Local Model Providers
   OLLAMA_ENABLED: z.coerce.boolean().default(false).describe('Enable Ollama local model provider'),
 

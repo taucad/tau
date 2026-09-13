@@ -302,9 +302,22 @@ describe('TypeAcquisitionService', () => {
       const tsDefaults = mockMonaco.monaco.typescript.typescriptDefaults;
       const jsDefaults = mockMonaco.monaco.typescript.javascriptDefaults;
 
-      // Each static type should be registered on both TS and JS defaults
-      expect(tsDefaults.addExtraLib).toHaveBeenCalledTimes(2);
-      expect(jsDefaults.addExtraLib).toHaveBeenCalledTimes(2);
+      // Each static type: index.d.ts + package.json on both defaults
+      expect(tsDefaults.addExtraLib).toHaveBeenCalledTimes(4);
+      expect(jsDefaults.addExtraLib).toHaveBeenCalledTimes(4);
+    });
+
+    it('should register synthetic package.json for each static package on typescriptDefaults', () => {
+      service.initialize(mockMonaco.monaco, {
+        staticTypes: [staticReplicad],
+      });
+
+      const tsDefaults = mockMonaco.monaco.typescript.typescriptDefaults;
+      const packageCall = tsDefaults.addExtraLib.mock.calls.find(
+        (call) => call[1] === 'file:///node_modules/replicad/package.json',
+      );
+      expect(packageCall).toBeDefined();
+      expect(JSON.parse(packageCall![0] as string)).toEqual({ name: 'replicad', types: 'index.d.ts' });
     });
 
     it('should wrap content in declare module format', () => {
@@ -829,8 +842,8 @@ describe('TypeAcquisitionService', () => {
 
       // Types should NOT have been injected (epoch mismatch)
       const tsDefaults = mockMonaco.monaco.typescript.typescriptDefaults;
-      // Only the static replicad type should be registered, not lodash
-      expect(tsDefaults.addExtraLib).toHaveBeenCalledTimes(1); // Only replicad static
+      // Only the static replicad registrations (index + package.json), not lodash
+      expect(tsDefaults.addExtraLib).toHaveBeenCalledTimes(2); // Only replicad static
     });
 
     it('should dispose dynamic types on session change', async () => {
@@ -857,10 +870,16 @@ describe('TypeAcquisitionService', () => {
       await vi.advanceTimersByTimeAsync(50);
 
       // Get the disposables created for lodash
-      const tsDisposable = mockMonaco.monaco.typescript.typescriptDefaults.addExtraLib.mock.results[1]!
-        .value as MockDisposable;
-      const jsDisposable = mockMonaco.monaco.typescript.javascriptDefaults.addExtraLib.mock.results[1]!
-        .value as MockDisposable;
+      const tsDefaults = mockMonaco.monaco.typescript.typescriptDefaults;
+      const jsDefaults = mockMonaco.monaco.typescript.javascriptDefaults;
+      const lodashTsCallIndex = tsDefaults.addExtraLib.mock.calls.findIndex(
+        (call) => call[1] === 'file:///node_modules/lodash/index.d.ts',
+      );
+      const lodashJsCallIndex = jsDefaults.addExtraLib.mock.calls.findIndex(
+        (call) => call[1] === 'file:///node_modules/lodash/index.d.ts',
+      );
+      const tsDisposable = tsDefaults.addExtraLib.mock.results[lodashTsCallIndex]!.value as MockDisposable;
+      const jsDisposable = jsDefaults.addExtraLib.mock.results[lodashJsCallIndex]!.value as MockDisposable;
 
       // Session change
       service.onProjectSessionChange();

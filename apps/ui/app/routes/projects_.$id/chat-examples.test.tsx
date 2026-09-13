@@ -1,35 +1,53 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
+import { chatTurnRequestSchema } from '@taucad/chat/schemas';
+import type { CadAgentConfigInput, MyUIMessage } from '@taucad/chat';
 
-// Clicking a quick-start example must stamp the user message with the
-// chat-scoped model id from useActiveChatModel — never the raw cookie value
-// via useModels — so a cookie change in another tab cannot silently retag
-// the model used for one-click prompts.
+// Clicking a quick-start example must dispatch through the cad-chat-client
+// so the per-request `agent` payload (kernel / mode / toolChoice / testingEnabled
+// / snapshot / contextPayload) is sourced from useCadAgentConfig — never from
+// inline metadata stamping on the user message. This file is the regression
+// coverage for the original "Validation failed: messages.0.metadata.kernel"
+// bug — the chat-client owns the wire body, not chat-examples.
 
-const mockSendMessage = vi.fn();
-const activeModelState: { current: string } = { current: 'cookie-model' };
-
-vi.mock('#hooks/use-chat.js', () => ({
-  useChatActions: () => ({ sendMessage: mockSendMessage }),
+const submitMock = vi.fn();
+const cadAgent: CadAgentConfigInput = {
+  profile: 'cad',
+  model: 'openai-gpt-5.5',
+  kernel: 'replicad',
+  mode: 'agent',
+  toolChoice: 'auto',
+  testingEnabled: true,
+};
+vi.mock('#chat-clients/use-cad-chat-client.js', () => ({
+  useCadChatClient: () => ({
+    submit: submitMock,
+    agent: cadAgent,
+  }),
 }));
 
-vi.mock('#hooks/use-active-chat-model.js', () => ({
-  useActiveChatModel: () => ({
-    modelId: activeModelState.current,
-    model: { id: activeModelState.current, name: activeModelState.current, isResolved: true },
-    setActiveModel: vi.fn(),
-  }),
+// Sanity guards — these used to be consumed by chat-examples directly; any
+// regression that re-introduces them should fail loudly.
+vi.mock('#hooks/use-chat.js', () => ({
+  useChatActions: () => {
+    throw new Error('chat-examples should no longer call useChatActions — switch to useCadChatClient');
+  },
+  useChatSelector: () => {
+    throw new Error('chat-examples should no longer call useChatSelector — switch to useCadChatClient');
+  },
 }));
 
 vi.mock('#hooks/use-models.js', () => ({
   useModels: () => {
-    throw new Error('chat-examples should no longer call useModels — switch to useActiveChatModel');
+    throw new Error('chat-examples should no longer call useModels — switch to useCadChatClient');
   },
 }));
 
 vi.mock('#hooks/use-chat-snapshot.js', () => ({
-  useChatSnapshot: () => undefined,
+  useChatSnapshot: () => {
+    throw new Error('chat-examples should no longer call useChatSnapshot — switch to useCadChatClient');
+  },
 }));
 
 vi.mock('#constants/chat-prompt-examples.js', () => ({
@@ -37,10 +55,6 @@ vi.mock('#constants/chat-prompt-examples.js', () => ({
     { title: 'Cube', prompt: 'Make a cube' },
     { title: 'Sphere', prompt: 'Make a sphere' },
   ],
-}));
-
-vi.mock('#utils/chat.utils.js', () => ({
-  createMessage: (options: Record<string, unknown>) => ({ id: 'msg-test', ...options }),
 }));
 
 vi.mock('#components/ui/button.js', () => ({
@@ -57,19 +71,45 @@ vi.mock('#components/ui/empty-items.js', () => ({
 
 const { ChatExamples } = await import('#routes/projects_.$id/chat-examples.js');
 
-describe('ChatExamples — chat-scoped model stamp', () => {
+describe('ChatExamples — submit routes through useCadChatClient', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    activeModelState.current = 'cookie-model';
   });
 
-  it('stamps the chat-scoped model id onto the example user message', () => {
-    activeModelState.current = 'chat-local-model';
+  it('calls cadChat.submit with the example prompt as text', () => {
     render(<ChatExamples />);
     fireEvent.click(screen.getByText('Cube'));
 
-    expect(mockSendMessage).toHaveBeenCalledOnce();
-    const sent = mockSendMessage.mock.calls[0]?.[0] as { metadata: { model: string } };
-    expect(sent.metadata.model).toBe('chat-local-model');
+    expect(submitMock).toHaveBeenCalledTimes(1);
+    expect(submitMock).toHaveBeenCalledWith({ text: 'Make a cube' });
+  });
+
+  // Wire-format invariant — the captured agent identity must produce a body
+  // satisfying the shared chatTurnRequestSchema. Regression for the original
+  // "missing kernel / testingEnabled" bug that motivated this refactor.
+  it('produces a wire body satisfying chatTurnRequestSchema for the quick-start path', () => {
+    render(<ChatExamples />);
+    fireEvent.click(screen.getByText('Sphere'));
+
+    const userMessage: MyUIMessage = {
+      id: 'msg_test',
+      role: 'user',
+      parts: [{ type: 'text', text: 'Make a sphere' }],
+    };
+    const wireBody = {
+      id: 'chat_test',
+      messages: [userMessage],
+      agent: cadAgent,
+    };
+
+    expect(() => chatTurnRequestSchema.parse(wireBody)).not.toThrow();
+    const parsed = chatTurnRequestSchema.parse(wireBody);
+    if (parsed.agent.profile !== 'cad') {
+      throw new Error(`expected cad profile, got ${parsed.agent.profile}`);
+    }
+    expect(parsed.agent.kernel).toBe('replicad');
+    expect(parsed.agent.testingEnabled).toBe(true);
+    expect(parsed.agent.mode).toBe('agent');
+    expect(parsed.agent.toolChoice).toBe('auto');
   });
 });

@@ -44,7 +44,6 @@ export const globSearchTool: ChatTool<
   assertRpcSuccess(result, {
     toolName: toolName.globSearch,
     toolCallId,
-    clientErrorMessage: 'Glob search failed',
   });
 
   // Return success output

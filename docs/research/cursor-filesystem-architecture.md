@@ -65,7 +65,7 @@ Cursor's filesystem organizes into five distinct layers, each with a different s
 | **Global Config**       | `~/.cursor/*.json`                             | User-wide     | Permanent      | IDE process      |
 | **Extensions**          | `~/.cursor/extensions/`                        | User-wide     | Permanent      | Extension host   |
 | **Project Runtime**     | `~/.cursor/projects/<slug>/`                   | Per-workspace | Session-scoped | Agent + IDE      |
-| **Agent Memory**        | `~/.cursor/plans/`, `~/.cursor/skills*/`       | User-wide     | Accumulated    | Agent + plugins  |
+| **Agent Memory**        | `~/.cursor/plans/`, `~/.agent/skills*/`        | User-wide     | Accumulated    | Agent + plugins  |
 | **Workspace Isolation** | `~/.cursor/worktrees/`, `~/.cursor/snapshots/` | Per-task      | Ephemeral      | Best-of-N agents |
 
 ### Global Config Files
@@ -535,7 +535,7 @@ This appears to be a legacy chat storage format that has been superseded by the 
 | `~/.cursor/.gitignore`               | Text    | 1        | 922 B   | Agent visibility contract           | N/A           |
 | `~/.cursor/extensions/`              | Mixed   | 42       | ~500 MB | VS Code extensions                  | No            |
 | `~/.cursor/plans/`                   | YAML+MD | 1,170    | 10 MB   | Plan state machines                 | Yes           |
-| `~/.cursor/skills-cursor/`           | MD      | 6        | ~30 KB  | Built-in agent skills               | Yes           |
+| `~/.agent/skills-cursor/`            | MD      | 6        | ~30 KB  | Built-in agent skills               | Yes           |
 | `~/.cursor/plugins/`                 | Mixed   | 1 plugin | ~50 KB  | Plugin hooks + skills               | Yes           |
 | `~/.cursor/worktrees/`               | Git     | 13       | ~2 GB   | Isolated worktrees                  | No            |
 | `~/.cursor/snapshots/`               | Git     | 6        | ~10 MB  | Git checkpoints                     | No            |

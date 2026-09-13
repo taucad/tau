@@ -1,4 +1,3 @@
-import type { useChat } from '@ai-sdk/react';
 import type {
   MessageRole,
   MyMetadata,
@@ -12,20 +11,12 @@ import type {
 import { isToolPart } from '@taucad/chat';
 import { toolName } from '@taucad/chat/constants';
 import { idPrefix } from '@taucad/types/constants';
-import { DefaultChatTransport, getStaticToolName } from 'ai';
+import { getStaticToolName } from 'ai';
 import { generatePrefixedId } from '@taucad/utils/id';
-import { ENV } from '#environment.config.js';
 import { metaConfig } from '#constants/meta.constants.js';
 import { formatExportDate } from '#utils/date.utils.js';
 import { getRpcOutcome } from '#services/rpc-ledger.js';
 import type { RequestTerminationCause } from '#hooks/chat-persistence.machine.js';
-
-export const useChatConstants: Parameters<typeof useChat>[0] = {
-  transport: new DefaultChatTransport({
-    api: `${ENV.TAU_API_URL}/v1/chat`,
-    credentials: 'include',
-  }),
-};
 
 /**
  * Extract the mime type from a data URL

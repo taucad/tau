@@ -27,7 +27,7 @@ import { projectNameGenerationSystemPrompt } from '#api/chat/prompts/cad-name.pr
 import { commitMessageGenerationSystemPrompt } from '#api/chat/prompts/git-commit.prompt.js';
 import { getCadSystemPrompt } from '#api/chat/prompts/cad-agent.prompt.js';
 import { toolResultTrimmerMiddleware } from '#api/chat/middleware/tool-result-trimmer.middleware.js';
-import { promptCachingMiddleware } from '#api/chat/middleware/prompt-caching.middleware.js';
+import { createPromptCachingMiddleware } from '#api/chat/middleware/prompt-caching.middleware.js';
 import { messageContentSanitizerMiddleware } from '#api/chat/middleware/message-content-sanitizer.middleware.js';
 import { createCrossProviderContentNormalizerMiddleware } from '#api/chat/middleware/cross-provider-content-normalizer.middleware.js';
 import { latexDelimiterMiddleware } from '#api/chat/middleware/latex-delimiter.middleware.js';
@@ -36,9 +36,11 @@ import { createAgentSafeguardsMiddleware } from '#api/chat/middleware/agent-safe
 import { createInterruptRecoveryMiddleware } from '#api/chat/middleware/interrupt-recovery.middleware.js';
 import { createCompactionMiddleware } from '#api/chat/middleware/compaction.middleware.js';
 import { createToolOffloadingMiddleware } from '#api/chat/middleware/tool-offloading.middleware.js';
+import { createToolResultBudgetMiddleware } from '#api/chat/middleware/tool-result-budget.middleware.js';
 import { createTranscriptMiddleware } from '#api/chat/middleware/transcript.middleware.js';
 import { createContextUsageMiddleware } from '#api/chat/middleware/context-usage.middleware.js';
 import { CheckpointerService } from '#api/chat/checkpointer.service.js';
+import { StoreService } from '#api/chat/store.service.js';
 import { CompactionService } from '#api/chat/compaction.service.js';
 import { TauRpcBackendFactory } from '#api/chat/tau-rpc-backend.js';
 import { ChatRpcService } from '#api/chat/chat-rpc.service.js';
@@ -51,6 +53,7 @@ export class ChatService {
     private readonly modelService: ModelService,
     private readonly toolService: ToolService,
     private readonly checkpointerService: CheckpointerService,
+    private readonly storeService: StoreService,
     private readonly metricsService: MetricsService,
     private readonly compactionService: CompactionService,
     private readonly rpcBackendFactory: TauRpcBackendFactory,
@@ -62,19 +65,27 @@ export class ChatService {
     chatId: string;
     modelId: string;
     kernel: KernelProvider;
-    mode?: ChatMode;
+    /**
+     * Required. The controller resolves `mode` from the validated
+     * top-level `agent` block (see `chat.dto.ts` `chatTurnRequestSchema`);
+     * we do not silently default at this layer because that masks API
+     * contract drift one layer downstream.
+     */
+    mode: ChatMode;
     tools: {
       choice: ToolSelection;
-      testingEnabled?: boolean;
+      /** Required for the same reason as `mode`. */
+      testingEnabled: boolean;
     };
     contextPayload?: ContextPayload;
     eagerDispatchHandler?: EagerToolDispatchHandler;
   }): Promise<ReactAgent> {
-    const { chatId, modelId, kernel, mode = 'agent', contextPayload, eagerDispatchHandler } = options;
-    const { choice, testingEnabled = true } = options.tools;
+    const { chatId, modelId, kernel, mode, contextPayload, eagerDispatchHandler } = options;
+    const { choice, testingEnabled } = options.tools;
     const { tools } = this.toolService.getTools(choice, kernel);
 
     const checkpointer = this.checkpointerService.getCheckpointer();
+    const store = this.storeService.getStore();
 
     const { model } = this.modelService.buildModel(modelId);
 
@@ -110,7 +121,7 @@ export class ChatService {
     //   → cache_control: { type: 'ephemeral', scope: 'global' } (Anthropic only)
     // Block 2 (workspace): Skills + memory, injected by clientContextMiddleware
     //   → cache_control: { type: 'ephemeral' }
-    // Block 3 (dynamic): Per-request content (model info, git status, transcript path)
+    // Block 3 (dynamic): Per-request content (model info, transcript path)
     //   → No cache_control
     // Last message: Incremental conversation caching via promptCachingMiddleware
     //   → cache_control: { type: 'ephemeral' }
@@ -119,13 +130,11 @@ export class ChatService {
     // ==========================================================================
     const contextWindow = this.modelService.getContextWindow(modelId);
     const knowledgeCutoff = this.modelService.getKnowledgeCutoff(modelId);
-    const gitStatus = contextPayload?.gitStatus;
     const { static: staticPrompt, dynamic: dynamicPrompt } = await getCadSystemPrompt(kernel, mode, testingEnabled, {
       chatId,
       modelId,
       contextWindow,
       knowledgeCutoff,
-      gitStatus,
       // Per-section telemetry — record byte size of every non-empty section
       // so Grafana can show which sections dominate the static prefix and
       // which dynamic sections invalidate the cache the most.
@@ -148,6 +157,7 @@ export class ChatService {
       tools: allTools,
       systemPrompt,
       checkpointer,
+      store,
       middleware: [
         // --- Metrics and error handling ---
         createToolMetricsMiddleware(this.metricsService),
@@ -158,7 +168,8 @@ export class ChatService {
           : []),
 
         // --- Context prevention (offload large tool results before trimming) ---
-        createToolOffloadingMiddleware(this.rpcBackendFactory),
+        createToolOffloadingMiddleware(this.rpcBackendFactory, this.metricsService),
+        createToolResultBudgetMiddleware(this.rpcBackendFactory, this.metricsService),
         toolResultTrimmerMiddleware,
 
         // --- Context compaction ---
@@ -193,7 +204,7 @@ export class ChatService {
         latexDelimiterMiddleware,
 
         // --- Prompt caching (must follow compaction) ---
-        promptCachingMiddleware,
+        createPromptCachingMiddleware(providerId),
 
         // --- Logging and observability ---
         messageLoggingMiddleware,

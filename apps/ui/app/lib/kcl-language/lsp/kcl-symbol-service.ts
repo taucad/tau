@@ -7,7 +7,7 @@
 
 import type { Node } from '@taucad/kcl-wasm-lib/bindings/Node';
 import type { Program } from '@taucad/kcl-wasm-lib/bindings/Program';
-import type { KclValue } from '@taucad/kcl-wasm-lib/bindings/KclValue';
+import type { KclValueView } from '@taucad/kcl-wasm-lib/bindings/KclValueView';
 import type { BodyItem } from '@taucad/kcl-wasm-lib/bindings/BodyItem';
 import type { Parameter } from '@taucad/kcl-wasm-lib/bindings/Parameter';
 import type { LspFileManager } from '#lib/kcl-language/lsp/kcl-lsp-client.js';
@@ -46,7 +46,7 @@ export type KclSymbol = {
   /** Column number (1-based) */
   column: number;
   /** Runtime value from mock execution */
-  value: KclValue | undefined;
+  value: KclValueView | undefined;
   /** Whether the symbol is exported */
   isExported: boolean;
   /** For functions: parameter information */
@@ -69,7 +69,7 @@ type DocumentCache = {
   content: string;
   program: Node<Program> | undefined;
   symbols: KclSymbol[];
-  variables: Partial<Record<string, KclValue>>;
+  variables: Partial<Record<string, KclValueView>>;
   lineOffsets: number[];
 };
 
@@ -94,7 +94,7 @@ export type ModuleSource = {
  * Mock execution result interface - includes sourceFiles for stdlib
  */
 export type MockExecuteResult = {
-  variables: Partial<Record<string, KclValue>>;
+  variables: Partial<Record<string, KclValueView>>;
   errors: unknown[];
   sourceFiles?: Record<string | number, ModuleSource>;
 };
@@ -407,7 +407,7 @@ export class KclSymbolService {
   /**
    * Get the variable value from mock execution
    */
-  public getVariableValue(uri: string, name: string): KclValue | undefined {
+  public getVariableValue(uri: string, name: string): KclValueView | undefined {
     return this.cache.get(uri)?.variables[name];
   }
 
@@ -576,11 +576,11 @@ export class KclSymbolService {
     succeeded: boolean;
     program: Node<Program> | undefined;
     symbols: KclSymbol[];
-    variables: Partial<Record<string, KclValue>>;
+    variables: Partial<Record<string, KclValueView>>;
   }> {
     let program: Node<Program> | undefined;
     let symbols: KclSymbol[] = [];
-    let variables: Partial<Record<string, KclValue>> = {};
+    let variables: Partial<Record<string, KclValueView>> = {};
     let succeeded = false;
 
     if (!this.parseFunction) {
@@ -622,8 +622,8 @@ export class KclSymbolService {
     program: Node<Program>,
     uri: string,
     symbols: KclSymbol[],
-  ): Promise<Partial<Record<string, KclValue>>> {
-    let variables: Partial<Record<string, KclValue>> = {};
+  ): Promise<Partial<Record<string, KclValueView>>> {
+    let variables: Partial<Record<string, KclValueView>> = {};
 
     if (!this.mockExecuteFunction) {
       return variables;
@@ -647,10 +647,10 @@ export class KclSymbolService {
   /**
    * Extract variables from a mock execution error (partial results).
    */
-  private extractVariablesFromError(error: unknown): Partial<Record<string, KclValue>> {
+  private extractVariablesFromError(error: unknown): Partial<Record<string, KclValueView>> {
     if (error && typeof error === 'object' && 'variables' in error) {
       const errorWithVariables = error as {
-        variables?: Partial<Record<string, KclValue>>;
+        variables?: Partial<Record<string, KclValueView>>;
       };
       if (errorWithVariables.variables && typeof errorWithVariables.variables === 'object') {
         log.debug(
@@ -669,7 +669,7 @@ export class KclSymbolService {
   /**
    * Merge variable values into symbols.
    */
-  private mergeVariableValuesIntoSymbols(symbols: KclSymbol[], variables: Partial<Record<string, KclValue>>): void {
+  private mergeVariableValuesIntoSymbols(symbols: KclSymbol[], variables: Partial<Record<string, KclValueView>>): void {
     for (const symbol of symbols) {
       if (symbol.kind === 'variable' || symbol.kind === 'function') {
         const value = variables[symbol.name];
@@ -1149,7 +1149,7 @@ function extractImportSymbol(
 /**
  * Format a KclValue for display
  */
-export function formatKclValue(value: KclValue): string {
+export function formatKclValue(value: KclValueView): string {
   switch (value.type) {
     case 'Number': {
       return String(value.value);
@@ -1218,7 +1218,7 @@ export function formatKclValue(value: KclValue): string {
 /**
  * Get the type name for a KclValue
  */
-export function getKclValueType(value: KclValue): string {
+export function getKclValueType(value: KclValueView): string {
   switch (value.type) {
     case 'Number': {
       return 'number';

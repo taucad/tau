@@ -12,10 +12,17 @@ function createTestActor() {
 
 type TestActor = ReturnType<typeof createTestActor>;
 
-function advanceToGear8(actor: TestActor) {
+function advanceThroughLoading(actor: TestActor) {
   actor.send({ type: 'typingComplete' });
   actor.send({ type: 'enterComplete' });
-  vi.advanceTimersByTime(timing.loadingDuration + timing.gear12AnimateInDuration + timing.displayDuration);
+  actor.send({ type: 'loadingReady' });
+  actor.send({ type: 'loadingMorphComplete' });
+  actor.send({ type: 'gear12MeshReady' });
+}
+
+function advanceToGear8(actor: TestActor) {
+  advanceThroughLoading(actor);
+  vi.advanceTimersByTime(timing.gear12AnimateInDuration + timing.displayDuration);
   actor.send({ type: 'typingComplete' });
   actor.send({ type: 'enterComplete' });
   actor.send({ type: 'geometriesReady' });
@@ -66,28 +73,77 @@ describe('authSplashbackMachine', () => {
       actor.stop();
     });
 
-    it('should transition to loading on enterComplete', () => {
+    it('should transition to loadingPreparing on enterComplete', () => {
       const actor = createTestActor();
       actor.start();
       actor.send({ type: 'typingComplete' });
       actor.send({ type: 'enterComplete' });
-      expect(actor.getSnapshot().value).toBe('loading');
+      expect(actor.getSnapshot().value).toBe('loadingPreparing');
       actor.stop();
     });
   });
 
-  describe('loading', () => {
-    it('should transition to gear12.animatingIn after loading duration', () => {
+  describe('loading pipeline (atoms-to-matter)', () => {
+    it('should advance loadingPreparing -> loadingMorphing on loadingReady', () => {
+      const actor = createTestActor();
+      actor.start();
+      actor.send({ type: 'typingComplete' });
+      actor.send({ type: 'enterComplete' });
+      expect(actor.getSnapshot().value).toBe('loadingPreparing');
+
+      actor.send({ type: 'loadingReady' });
+      expect(actor.getSnapshot().value).toBe('loadingMorphing');
+      actor.stop();
+    });
+
+    it('should fall back from loadingPreparing after loadingPreparingFallback timeout', () => {
       vi.useFakeTimers();
       try {
         const actor = createTestActor();
         actor.start();
         actor.send({ type: 'typingComplete' });
         actor.send({ type: 'enterComplete' });
-        expect(actor.getSnapshot().value).toBe('loading');
+        expect(actor.getSnapshot().value).toBe('loadingPreparing');
 
-        vi.advanceTimersByTime(timing.loadingDuration);
-        expect(actor.getSnapshot().value).toEqual({ gear12: 'animatingIn' });
+        vi.advanceTimersByTime(timing.loadingPreparingFallback);
+        expect(actor.getSnapshot().value).toBe('loadingMorphing');
+        actor.stop();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('should advance loadingMorphing -> loadingCrossfading on loadingMorphComplete', () => {
+      const actor = createTestActor();
+      actor.start();
+      actor.send({ type: 'typingComplete' });
+      actor.send({ type: 'enterComplete' });
+      actor.send({ type: 'loadingReady' });
+      actor.send({ type: 'loadingMorphComplete' });
+      expect(actor.getSnapshot().value).toBe('loadingCrossfading');
+      actor.stop();
+    });
+
+    it('should advance loadingCrossfading -> gear12 on gear12MeshReady', () => {
+      const actor = createTestActor();
+      actor.start();
+      advanceThroughLoading(actor);
+      expect(actor.getSnapshot().value).toEqual({ gear12: 'animatingIn' });
+      actor.stop();
+    });
+
+    it('should fall back from loadingMorphing after morphDuration timeout', () => {
+      vi.useFakeTimers();
+      try {
+        const actor = createTestActor();
+        actor.start();
+        actor.send({ type: 'typingComplete' });
+        actor.send({ type: 'enterComplete' });
+        actor.send({ type: 'loadingReady' });
+        expect(actor.getSnapshot().value).toBe('loadingMorphing');
+
+        vi.advanceTimersByTime(timing.morphDuration + 500);
+        expect(actor.getSnapshot().value).toBe('loadingCrossfading');
         actor.stop();
       } finally {
         vi.useRealTimers();
@@ -101,9 +157,7 @@ describe('authSplashbackMachine', () => {
       try {
         const actor = createTestActor();
         actor.start();
-        actor.send({ type: 'typingComplete' });
-        actor.send({ type: 'enterComplete' });
-        vi.advanceTimersByTime(timing.loadingDuration);
+        advanceThroughLoading(actor);
         expect(actor.getSnapshot().value).toEqual({ gear12: 'animatingIn' });
 
         vi.advanceTimersByTime(timing.gear12AnimateInDuration);
@@ -122,9 +176,8 @@ describe('authSplashbackMachine', () => {
       try {
         const actor = createTestActor();
         actor.start();
-        actor.send({ type: 'typingComplete' });
-        actor.send({ type: 'enterComplete' });
-        vi.advanceTimersByTime(timing.loadingDuration + timing.gear12AnimateInDuration);
+        advanceThroughLoading(actor);
+        vi.advanceTimersByTime(timing.gear12AnimateInDuration);
         expect(actor.getSnapshot().value).toEqual({ gear12: 'displaying' });
 
         vi.advanceTimersByTime(timing.displayDuration - 100);
@@ -148,10 +201,8 @@ describe('authSplashbackMachine', () => {
       try {
         const actor = createTestActor();
         actor.start();
-        // Fast-forward to prompt2.enterKey
-        actor.send({ type: 'typingComplete' });
-        actor.send({ type: 'enterComplete' });
-        vi.advanceTimersByTime(timing.loadingDuration + timing.gear12AnimateInDuration + timing.displayDuration);
+        advanceThroughLoading(actor);
+        vi.advanceTimersByTime(timing.gear12AnimateInDuration + timing.displayDuration);
         expect(actor.getSnapshot().value).toEqual({ gear12: { prompt2: 'typing' } });
         actor.send({ type: 'typingComplete' });
         actor.send({ type: 'enterComplete' });
@@ -177,9 +228,8 @@ describe('authSplashbackMachine', () => {
       try {
         const actor = createTestActor();
         actor.start();
-        actor.send({ type: 'typingComplete' });
-        actor.send({ type: 'enterComplete' });
-        vi.advanceTimersByTime(timing.loadingDuration + timing.gear12AnimateInDuration + timing.displayDuration);
+        advanceThroughLoading(actor);
+        vi.advanceTimersByTime(timing.gear12AnimateInDuration + timing.displayDuration);
         actor.send({ type: 'typingComplete' });
         actor.send({ type: 'enterComplete' });
         actor.send({ type: 'geometriesReady' });
@@ -242,8 +292,8 @@ describe('authSplashbackMachine', () => {
     });
   });
 
-  describe('fading and reset', () => {
-    it('should transition through assembly → fading → resetting → prompt1', () => {
+  describe('unloading pipeline (matter-to-abyss)', () => {
+    it('should transition assembly -> unloadingCrossfading after display timer', () => {
       vi.useFakeTimers();
       try {
         const actor = createTestActor();
@@ -255,13 +305,78 @@ describe('authSplashbackMachine', () => {
         expect(actor.getSnapshot().value).toEqual({ assembly: 'displaying' });
 
         vi.advanceTimersByTime(timing.assemblyDisplayDuration);
-        expect(actor.getSnapshot().value).toBe('fading');
+        expect(actor.getSnapshot().value).toBe('unloadingCrossfading');
+        actor.stop();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
 
-        vi.advanceTimersByTime(timing.fadeDuration);
+    it('should advance unloadingCrossfading -> unloadingMorphing on unloadingMeshFadedOut', () => {
+      vi.useFakeTimers();
+      try {
+        const actor = createTestActor();
+        actor.start();
+        advanceToAssembly(actor);
+        vi.advanceTimersByTime(timing.assemblyAnimateInDuration + timing.assemblyDisplayDuration);
+        expect(actor.getSnapshot().value).toBe('unloadingCrossfading');
+
+        actor.send({ type: 'unloadingMeshFadedOut' });
+        expect(actor.getSnapshot().value).toBe('unloadingMorphing');
+        actor.stop();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('should advance unloadingMorphing -> resetting -> prompt1 on completion', () => {
+      vi.useFakeTimers();
+      try {
+        const actor = createTestActor();
+        actor.start();
+        advanceToAssembly(actor);
+        vi.advanceTimersByTime(timing.assemblyAnimateInDuration + timing.assemblyDisplayDuration);
+        actor.send({ type: 'unloadingMeshFadedOut' });
+        actor.send({ type: 'unloadingMorphComplete' });
+
         expect(actor.getSnapshot().value).toBe('resetting');
-
         vi.advanceTimersByTime(timing.resetDelay);
         expect(actor.getSnapshot().value).toEqual({ prompt1: 'typing' });
+        actor.stop();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('should fall back from unloadingCrossfading after crossfadeDuration timeout', () => {
+      vi.useFakeTimers();
+      try {
+        const actor = createTestActor();
+        actor.start();
+        advanceToAssembly(actor);
+        vi.advanceTimersByTime(timing.assemblyAnimateInDuration + timing.assemblyDisplayDuration);
+        expect(actor.getSnapshot().value).toBe('unloadingCrossfading');
+
+        vi.advanceTimersByTime(timing.crossfadeDuration + 500);
+        expect(actor.getSnapshot().value).toBe('unloadingMorphing');
+        actor.stop();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('should fall back from unloadingMorphing after morphDuration timeout', () => {
+      vi.useFakeTimers();
+      try {
+        const actor = createTestActor();
+        actor.start();
+        advanceToAssembly(actor);
+        vi.advanceTimersByTime(timing.assemblyAnimateInDuration + timing.assemblyDisplayDuration);
+        actor.send({ type: 'unloadingMeshFadedOut' });
+        expect(actor.getSnapshot().value).toBe('unloadingMorphing');
+
+        vi.advanceTimersByTime(timing.morphDuration + 500);
+        expect(actor.getSnapshot().value).toBe('resetting');
         actor.stop();
       } finally {
         vi.useRealTimers();

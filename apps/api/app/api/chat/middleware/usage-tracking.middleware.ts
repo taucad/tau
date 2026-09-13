@@ -72,14 +72,33 @@ export const createUsageTrackingMiddleware = (metricsService: MetricsService): A
           ...(otelProviderName ? { [AttributeKey.GEN_AI_PROVIDER_NAME]: otelProviderName } : {}),
           ...(responseModel ? { [AttributeKey.GEN_AI_RESPONSE_MODEL]: responseModel } : {}),
         };
-        metricsService.genAiTokenUsage.record(usage.input_tokens, {
+        // Provider-agnostic token-usage metrics. We record the **normalized**
+        // input count (cache-read tokens already subtracted; see
+        // `ModelService.normalizeUsageTokens`) so the prompt-cache hit rate
+        // formula `cache_read / (input + cache_read)` works identically across
+        // providers — including Anthropic and Vertex AI Gemini, both of which
+        // double-count cache reads inside the raw `input_tokens` field
+        // (see `Provider.inputTokensIncludesCacheReadTokens` in
+        // `apps/api/app/api/providers/provider.service.ts`).
+        //
+        // Splitting cache reads onto their own series is the precondition for
+        // the "Prompt cache hit rate" panel in
+        // `infra/grafana/dashboards/ai-agent.json` and the
+        // `GenAiPromptCacheHitRateLow` warning alert.
+        metricsService.genAiTokenUsage.record(normalizedUsage.inputTokens, {
           ...metricAttributes,
           [AttributeKey.GEN_AI_TOKEN_TYPE]: GenAiTokenType.INPUT,
         });
-        metricsService.genAiTokenUsage.record(usage.output_tokens, {
+        metricsService.genAiTokenUsage.record(normalizedUsage.outputTokens, {
           ...metricAttributes,
           [AttributeKey.GEN_AI_TOKEN_TYPE]: GenAiTokenType.OUTPUT,
         });
+        if (cacheReadTokens > 0) {
+          metricsService.genAiTokenUsage.record(cacheReadTokens, {
+            ...metricAttributes,
+            [AttributeKey.GEN_AI_TOKEN_TYPE]: GenAiTokenType.CACHE_READ,
+          });
+        }
         if (usageCost.totalCost) {
           metricsService.genAiCost.add(usageCost.totalCost, metricAttributes);
         }

@@ -6,50 +6,41 @@
  *
  * Key behaviors:
  * - Ref-counted editor holds for split-view readiness
- * - Single fileWritten/fileDeleted/fileRenamed subscriber (eliminates race)
- * - pushEditOperations for editor-held models (preserves undo), setValue for background
- * - Background JS/TS sync via requestIdleCallback
+ * - FileContentService subscription wired by host via {@link subscribeWorkspaceContentDispatch}
+ * - pushEditOperations for editor-held models (preserves undo), setValue for non-held models
  * - Session epoch gating for all async operations
- * - AbortController cancellation for background jobs
- * - Background model eviction (hard cap + TTL)
+ * - AbortController cancellation for load paths
+ *
+ * Workspace materialisation for `file://` URIs flows through {@link MonacoWorkspaceFs}.
  */
 
 import type * as Monaco from 'monaco-editor';
 import type { MonacoMarkerService } from '#lib/monaco-marker-service.js';
 import type { FileContentService, ContentChangeEvent } from '@taucad/fs-client/file-content-service';
-import type { FileTreeService } from '@taucad/fs-client/file-tree-service';
-import { isJsLikeFile, getMonacoLanguage } from '#lib/monaco.constants.js';
+import type { MonacoWorkspaceFs } from '#lib/monaco-workspace-fs/monaco-workspace-fs.types.js';
+import { workspaceRelativePathFromFileUri } from '#lib/monaco-workspace-fs/workspace-path-from-uri.js';
+import { getMonacoLanguage } from '#lib/monaco.constants.js';
 import { decodeTextFile } from '#utils/filesystem.utils.js';
 
 export type ModelServiceConfig = {
   monaco: typeof Monaco;
+  workspaceFs: MonacoWorkspaceFs;
   contentService: FileContentService;
-  treeService: FileTreeService;
   markerService: MonacoMarkerService;
 };
 
 export type ServiceDiagnostics = {
   totalModelsCreated: number;
   peakModelCount: number;
-  evictionCount: number;
   editorHeldCount: number;
   backgroundCount: number;
   currentModelCount: number;
 };
 
-/** Default maximum number of background models */
-const maxBackgroundModels = 200;
-
-/** Background model TTL (1 hour). Milliseconds. */
-const backgroundModelTtl = 60 * 60 * 1000;
-
-/** Eviction check interval (60 seconds). Milliseconds. */
-const evictionCheckInterval = 60 * 1000;
-
 export class MonacoModelService {
   private monaco: typeof Monaco | undefined;
+  private workspaceFs: MonacoWorkspaceFs | undefined;
   private contentService: FileContentService | undefined;
-  private treeService: FileTreeService | undefined;
   private markerService: MonacoMarkerService | undefined;
 
   /** Session epoch -- incremented on each project session change */
@@ -61,23 +52,16 @@ export class MonacoModelService {
   /** Ref-counted editor holds: path -> refCount */
   private readonly editorHolds = new Map<string, number>();
 
-  /** Background model access times for TTL eviction: path -> lastAccessTime */
+  /** Non-editor-held models (e.g. released from editor) for lifecycle / metrics */
   private readonly backgroundAccessTimes = new Map<string, number>();
 
-  /** Set of paths that have been synced in the current session */
+  /** Set of paths that have been touched in the current session */
   private readonly syncedPaths = new Set<string>();
-
-  /** Content change subscription unsubscribe fn */
-  private contentUnsubscribe: (() => void) | undefined;
-
-  /** Timer for eviction checks */
-  private evictionTimerId: ReturnType<typeof setInterval> | undefined;
 
   /** Dev-mode metrics */
   private readonly metrics = {
     totalModelsCreated: 0,
     peakModelCount: 0,
-    evictionCount: 0,
   };
 
   /**
@@ -85,23 +69,11 @@ export class MonacoModelService {
    */
   public initialize(config: ModelServiceConfig): void {
     this.monaco = config.monaco;
+    this.workspaceFs = config.workspaceFs;
     this.contentService = config.contentService;
-    this.treeService = config.treeService;
     this.markerService = config.markerService;
 
     this.abortController = new AbortController();
-
-    this.contentUnsubscribe = this.contentService.onDidContentChange((event) => {
-      this.handleContentChange(event);
-    });
-
-    // Start eviction timer
-    this.evictionTimerId = setInterval(() => {
-      this.evictStaleBackgroundModels();
-    }, evictionCheckInterval);
-
-    // Start background sync
-    this.startBackgroundSync();
   }
 
   /**
@@ -111,14 +83,6 @@ export class MonacoModelService {
     this.abortController?.abort();
     this.abortController = undefined;
 
-    if (this.evictionTimerId !== undefined) {
-      clearInterval(this.evictionTimerId);
-      this.evictionTimerId = undefined;
-    }
-
-    this.contentUnsubscribe?.();
-    this.contentUnsubscribe = undefined;
-
     this.disposeAllModels();
 
     this.editorHolds.clear();
@@ -126,35 +90,27 @@ export class MonacoModelService {
     this.syncedPaths.clear();
 
     this.monaco = undefined;
+    this.workspaceFs = undefined;
     this.contentService = undefined;
-    this.treeService = undefined;
     this.markerService = undefined;
   }
 
   /**
-   * Switch to a new project session. Aborts in-flight work, clears state, restarts sync.
+   * Switch to a new project session. Aborts in-flight work and clears state.
    */
   public setProjectSession(): void {
-    // Increment epoch
     this.epoch++;
 
-    // Abort previous session's async work
     this.abortController?.abort();
     this.abortController = new AbortController();
 
-    // Clear markers
     this.markerService?.clearAll();
 
-    // Dispose all models
     this.disposeAllModels();
 
-    // Reset tracking
     this.editorHolds.clear();
     this.backgroundAccessTimes.clear();
     this.syncedPaths.clear();
-
-    // Restart background sync
-    this.startBackgroundSync();
   }
 
   /**
@@ -169,7 +125,7 @@ export class MonacoModelService {
 
   /**
    * Release a ref-counted editor hold. When the last hold is released,
-   * the model transitions to the background pool (subject to TTL/cap eviction).
+   * the model remains (unless disposed by an explicit delete); it is tracked as background.
    */
   public releaseModel(path: string): void {
     this.unregisterEditorModel(path);
@@ -180,52 +136,35 @@ export class MonacoModelService {
    * Returns undefined if the file can't be loaded.
    */
   public async getOrEnsureModel(path: string): Promise<Monaco.editor.ITextModel | undefined> {
-    if (!this.monaco || !this.contentService) {
+    if (!this.monaco || !this.workspaceFs) {
       return undefined;
     }
 
     const uri = this.createUri(path);
-    const existing = this.monaco.editor.getModel(uri);
+    const before = this.monaco.editor.getModel(uri);
 
-    if (existing) {
-      // Update access time for background models
+    if (before) {
       if (!this.editorHolds.has(path)) {
         this.backgroundAccessTimes.set(path, Date.now());
       }
-
-      return existing;
+      return before;
     }
 
     const capturedEpoch = this.epoch;
 
     try {
-      const result = await this.contentService.resolve(path);
+      const model = await this.workspaceFs.openTextDocument(uri);
 
-      // Check epoch hasn't changed during async read
       if (this.epoch !== capturedEpoch || this.abortController?.signal.aborted) {
         return undefined;
       }
 
-      // Only text outcomes back a Monaco model. Binary, too-large, orphaned,
-      // and error outcomes intentionally return undefined so the editor falls
-      // back to its placeholder UI.
-      if (result.kind !== 'text') {
+      if (!model) {
         return undefined;
       }
 
-      // Re-check model (could have been created during async read)
-      const recheck = this.monaco.editor.getModel(uri);
-      if (recheck) {
-        return recheck;
-      }
-
-      const text = decodeTextFile(result.content);
-      const language = this.detectLanguage(path);
-      const model = this.monaco.editor.createModel(text, language, uri);
-
       this.trackModelCreated();
 
-      // Track as background model if not editor-held
       if (!this.editorHolds.has(path)) {
         this.backgroundAccessTimes.set(path, Date.now());
       }
@@ -233,9 +172,71 @@ export class MonacoModelService {
       this.syncedPaths.add(path);
       return model;
     } catch {
-      // Read error -- silently return undefined
       return undefined;
     }
+  }
+
+  /**
+   * Re-synchronise an open model with its backing resource (non-`file://` schemes, e.g. inmemory).
+   */
+  public async refreshContent(uri: Monaco.Uri): Promise<void> {
+    if (!this.monaco || !this.workspaceFs || !this.contentService || !this.markerService) {
+      return;
+    }
+
+    const model = this.monaco.editor.getModel(uri);
+    if (!model) {
+      return;
+    }
+
+    if (uri.scheme === 'file') {
+      const path = workspaceRelativePathFromFileUri(uri.path);
+      const result = await this.contentService.resolve(path);
+      if (result.kind !== 'text') {
+        model.dispose();
+        this.editorHolds.delete(path);
+        this.backgroundAccessTimes.delete(path);
+        this.syncedPaths.delete(path);
+        this.markerService.removeUri(uri.toString());
+        return;
+      }
+      const newContent = decodeTextFile(result.content);
+      this.applyNewContentToModel(model, newContent, this.editorHolds.has(path));
+      return;
+    }
+
+    const fsProvider = this.workspaceFs.getFileSystemProvider(uri.scheme);
+    if (fsProvider) {
+      try {
+        const text = await fsProvider.readText(uri);
+        const path = uri.scheme === 'file' ? workspaceRelativePathFromFileUri(uri.path) : '';
+        const held = path !== '' && this.editorHolds.has(path);
+        this.applyNewContentToModel(model, text, held);
+      } catch {
+        model.dispose();
+        this.markerService.removeUri(uri.toString());
+      }
+      return;
+    }
+
+    const contentProvider = this.workspaceFs.getTextDocumentProvider(uri.scheme);
+    if (contentProvider) {
+      try {
+        const text = await contentProvider.provideTextDocumentContent(uri);
+        this.applyNewContentToModel(model, text, false);
+      } catch {
+        model.dispose();
+        this.markerService.removeUri(uri.toString());
+      }
+    }
+  }
+
+  /**
+   * Workspace-wide filesystem notifications (`FileContentService`). Wired by
+   * {@link subscribeWorkspaceContentDispatch}.
+   */
+  public applyContentChange(event: ContentChangeEvent): void {
+    this.handleContentChange(event);
   }
 
   /**
@@ -254,7 +255,6 @@ export class MonacoModelService {
     const current = this.editorHolds.get(path) ?? 0;
     this.editorHolds.set(path, current + 1);
 
-    // Remove from background tracking since it's now editor-held
     this.backgroundAccessTimes.delete(path);
   }
 
@@ -262,15 +262,13 @@ export class MonacoModelService {
     const current = this.editorHolds.get(path) ?? 0;
     if (current <= 1) {
       this.editorHolds.delete(path);
-      // Move to background tracking
       this.backgroundAccessTimes.set(path, Date.now());
     } else {
       this.editorHolds.set(path, current - 1);
     }
   }
 
-  // ============ Content Event Handler ============
-
+  // oxlint-disable-next-line complexity -- single switch dispatches every filesystem→model sync kind
   private handleContentChange(event: ContentChangeEvent): void {
     if (!this.monaco) {
       return;
@@ -332,9 +330,58 @@ export class MonacoModelService {
         this.markerService?.migrateUri(oldUri.toString(), newUri.toString());
         break;
       }
+      case 'directoryDeleted': {
+        this.disposeModelsUnderPrefix(event.path);
+        break;
+      }
+      case 'directoryRenamed': {
+        this.migrateModelsUnderPrefix(event.oldPath, event.newPath);
+        break;
+      }
+      case 'directoryCreated':
       case 'read': {
         break;
       }
+    }
+  }
+
+  private disposeModelsUnderPrefix(directoryPath: string): void {
+    if (!this.monaco) {
+      return;
+    }
+    const prefix = directoryPath === '' ? '' : `${directoryPath}/`;
+    const paths: string[] = [];
+    for (const path of this.syncedPaths) {
+      if (path === directoryPath || path.startsWith(prefix)) {
+        paths.push(path);
+      }
+    }
+    for (const path of paths) {
+      const uri = this.createUri(path);
+      this.monaco.editor.getModel(uri)?.dispose();
+      this.editorHolds.delete(path);
+      this.backgroundAccessTimes.delete(path);
+      this.syncedPaths.delete(path);
+      this.markerService?.removeUri(uri.toString());
+    }
+  }
+
+  private migrateModelsUnderPrefix(oldDirectoryPath: string, newDirectoryPath: string): void {
+    if (!this.monaco) {
+      return;
+    }
+    const oldPrefix = oldDirectoryPath === '' ? '' : `${oldDirectoryPath}/`;
+    const newPrefix = newDirectoryPath === '' ? '' : `${newDirectoryPath}/`;
+    const affected: string[] = [];
+    for (const path of this.syncedPaths) {
+      if (path === oldDirectoryPath || path.startsWith(oldPrefix)) {
+        affected.push(path);
+      }
+    }
+    for (const oldPath of affected) {
+      const newPath =
+        oldPath === oldDirectoryPath ? newDirectoryPath : `${newPrefix}${oldPath.slice(oldPrefix.length)}`;
+      this.handleContentChange({ type: 'renamed', oldPath, newPath });
     }
   }
 
@@ -348,20 +395,7 @@ export class MonacoModelService {
     const existingModel = this.monaco.editor.getModel(uri);
 
     if (existingModel) {
-      const currentModelValue = existingModel.getValue();
-      if (currentModelValue !== newContent) {
-        if (this.editorHolds.has(path)) {
-          existingModel.pushStackElement();
-          existingModel.pushEditOperations(
-            [],
-            [{ range: existingModel.getFullModelRange(), text: newContent }],
-            () => null,
-          );
-          existingModel.pushStackElement();
-        } else {
-          existingModel.setValue(newContent);
-        }
-      }
+      this.applyNewContentToModel(existingModel, newContent, this.editorHolds.has(path));
     } else if (source === 'user') {
       const language = this.detectLanguage(path);
       if (language) {
@@ -384,6 +418,28 @@ export class MonacoModelService {
     }
   }
 
+  private applyNewContentToModel(
+    existingModel: Monaco.editor.ITextModel,
+    newContent: string,
+    editorHeld: boolean,
+  ): void {
+    const currentModelValue = existingModel.getValue();
+    if (currentModelValue === newContent) {
+      return;
+    }
+    if (editorHeld) {
+      existingModel.pushStackElement();
+      existingModel.pushEditOperations(
+        [],
+        [{ range: existingModel.getFullModelRange(), text: newContent }],
+        () => null,
+      );
+      existingModel.pushStackElement();
+    } else {
+      existingModel.setValue(newContent);
+    }
+  }
+
   /**
    * Create a root-level Monaco URI from a relative path.
    */
@@ -391,184 +447,10 @@ export class MonacoModelService {
     return this.monaco!.Uri.file(`/${relativePath}`);
   }
 
-  // ============ Background Sync ============
-
-  private startBackgroundSync(): void {
-    if (!this.contentService) {
-      return;
-    }
-
-    void this.syncAllInBackground();
-  }
-
-  private async syncAllInBackground(): Promise<void> {
-    if (!this.treeService || !this.monaco) {
-      return;
-    }
-
-    const capturedEpoch = this.epoch;
-    const signal = this.abortController?.signal;
-
-    try {
-      const tree = this.treeService.getTreeSnapshot();
-
-      if (this.epoch !== capturedEpoch || signal?.aborted) {
-        return;
-      }
-
-      const jsFiles = [...tree.values()].filter(
-        (entry) => entry.type === 'file' && isJsLikeFile(entry.path) && !entry.path.includes('node_modules'),
-      );
-
-      // Process files in batches during idle time
-      let index = 0;
-      const processNextBatch = (): void => {
-        if (this.epoch !== capturedEpoch || signal?.aborted) {
-          return;
-        }
-
-        const batchSize = 5;
-        const endIndex = Math.min(index + batchSize, jsFiles.length);
-
-        for (let i = index; i < endIndex; i++) {
-          void this.syncBackgroundFile(jsFiles[i]!.path, capturedEpoch);
-        }
-
-        index = endIndex;
-        if (index < jsFiles.length) {
-          if ('requestIdleCallback' in globalThis) {
-            requestIdleCallback(processNextBatch, { timeout: 1000 });
-          } else {
-            setTimeout(processNextBatch, 16);
-          }
-        }
-      };
-
-      if ('requestIdleCallback' in globalThis) {
-        requestIdleCallback(processNextBatch, { timeout: 1000 });
-      } else {
-        setTimeout(processNextBatch, 0);
-      }
-    } catch {
-      // Directory read failed -- silently ignore
-    }
-  }
-
-  private async syncBackgroundFile(filePath: string, capturedEpoch: number): Promise<void> {
-    if (!this.monaco || !this.contentService) {
-      return;
-    }
-
-    if (this.syncedPaths.has(filePath) || this.epoch !== capturedEpoch) {
-      return;
-    }
-
-    if (!isJsLikeFile(filePath) || filePath.includes('node_modules')) {
-      return;
-    }
-
-    const uri = this.createUri(filePath);
-
-    try {
-      const result = await this.contentService.resolve(filePath);
-
-      if (this.epoch !== capturedEpoch || this.abortController?.signal.aborted) {
-        return;
-      }
-
-      // Background model warm-up only applies to text content; binary,
-      // too-large, orphaned, and error outcomes do not produce models.
-      if (result.kind !== 'text') {
-        return;
-      }
-
-      const text = decodeTextFile(result.content);
-
-      // Check if model already exists (may have been recreated by the Editor
-      // component with stale content after setBuildSession disposed it).
-      const existingModel = this.monaco.editor.getModel(uri);
-      if (existingModel) {
-        // Update content if it differs from the filesystem (fixes stale model content)
-        if (existingModel.getValue() !== text) {
-          existingModel.setValue(text);
-
-          // Safety net: immediately clear TypeScript/JavaScript worker markers
-          // from the previous project. The TS worker will re-validate the updated
-          // content asynchronously and set fresh markers, but clearing now prevents
-          // stale errors from showing during the debounce window.
-          this.monaco.editor.setModelMarkers(existingModel, 'typescript', []);
-          this.monaco.editor.setModelMarkers(existingModel, 'javascript', []);
-        }
-
-        this.syncedPaths.add(filePath);
-        return;
-      }
-
-      if (this.backgroundAccessTimes.size >= maxBackgroundModels) {
-        return;
-      }
-
-      const language = getMonacoLanguage(filePath);
-      if (language) {
-        this.monaco.editor.createModel(text, language, uri);
-        this.trackModelCreated();
-        this.syncedPaths.add(filePath);
-        this.backgroundAccessTimes.set(filePath, Date.now());
-      }
-    } catch {
-      // File read failed -- silently ignore
-    }
-  }
-
-  // ============ Background Model Eviction ============
-
-  private evictStaleBackgroundModels(): void {
-    if (!this.monaco) {
-      return;
-    }
-
-    const now = Date.now();
-
-    // TTL eviction
-    for (const [path, lastAccess] of this.backgroundAccessTimes) {
-      if (now - lastAccess > backgroundModelTtl) {
-        const uri = this.createUri(path);
-        this.monaco.editor.getModel(uri)?.dispose();
-        this.backgroundAccessTimes.delete(path);
-        this.syncedPaths.delete(path);
-        this.metrics.evictionCount++;
-      }
-    }
-
-    // Hard cap eviction -- evict oldest first
-    if (this.backgroundAccessTimes.size > maxBackgroundModels) {
-      const sorted = [...this.backgroundAccessTimes.entries()].sort(([, a], [, b]) => a - b);
-      const toEvict = sorted.slice(0, this.backgroundAccessTimes.size - maxBackgroundModels);
-
-      for (const [path] of toEvict) {
-        const uri = this.createUri(path);
-        this.monaco.editor.getModel(uri)?.dispose();
-        this.backgroundAccessTimes.delete(path);
-        this.syncedPaths.delete(path);
-        this.metrics.evictionCount++;
-      }
-    }
-  }
-
-  // ============ Helpers ============
-
-  /**
-   * Detect the Monaco language for a file path.
-   */
   private detectLanguage(path: string): string | undefined {
     return getMonacoLanguage(path);
   }
 
-  /**
-   * Dispose all Monaco models managed by this service.
-   * Only disposes models tracked by this service (editorHolds, backgroundAccessTimes, syncedPaths),
-   * leaving Monaco internals (TypeScript lib files, ATA-injected type declarations, etc.) intact.
-   */
   private disposeAllModels(): void {
     if (!this.monaco) {
       return;
@@ -586,9 +468,6 @@ export class MonacoModelService {
     }
   }
 
-  /**
-   * Track that a model was created (for metrics).
-   */
   private trackModelCreated(): void {
     this.metrics.totalModelsCreated++;
     const currentCount = this.monaco?.editor.getModels().length ?? 0;

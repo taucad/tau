@@ -7,7 +7,7 @@ import {
   FolderPlus,
   MoreHorizontal,
   Search,
-  Eye,
+  Box,
   Folder,
   FolderOpen,
   CopyMinus,
@@ -48,6 +48,7 @@ import {
   FloatingPanelMenuButton,
   FloatingPanelButtonGroup,
   FloatingPanelContentTitle,
+  useFloatingPanel,
 } from '#components/ui/floating-panel.js';
 import {
   AlertDialog,
@@ -75,6 +76,7 @@ import {
   ContextMenuSeparator,
 } from '#components/ui/context-menu.js';
 import { useProject } from '#hooks/use-project.js';
+import { mountFileOperationParticipants } from '#filesystem/file-operation-participants.js';
 import { EmptyItems } from '#components/ui/empty-items.js';
 import { HighlightText } from '#components/highlight-text.js';
 import { FileExtensionIcon, getIconIdFromExtension } from '#components/icons/file-extension-icon.js';
@@ -89,6 +91,11 @@ import { parentDirectory } from '@taucad/utils/path';
 
 import type { TreeItemData } from '#routes/projects_.$id/chat-editor-file-tree.utils.js';
 import { getItemData, isPathFolder } from '#routes/projects_.$id/chat-editor-file-tree.utils.js';
+import { isBundledTypesWorkspacePath } from '#lib/bundled-types-tree.constants.js';
+import { isWorkspaceMutationErrorLike, workspaceMutationErrorCopy } from '#filesystem/workspace-errors.js';
+import type { WorkspaceMutationErrorLike } from '#filesystem/workspace-errors.js';
+import { OverwriteConfirmDialog } from '#components/filesystem/overwrite-confirm-dialog.js';
+import type { OverwriteConfirmResult } from '#components/filesystem/overwrite-confirm-dialog.js';
 
 const rootId = '';
 
@@ -196,11 +203,25 @@ export const ChatEditorFileTree = memo(function ({
   // It's necessary to opt out of React Compiler auto-memoization for this component due to:
   // https://headless-tree.lukasbach.com/guides/react-compiler/
   'use no memo'; // Opt out of React Compiler memoization
+  const { open: openPanel } = useFloatingPanel();
   const { projectRef, editorRef } = useProject();
   const projectId = useSelector(projectRef, (state) => state.context.projectId);
   const fileManager = useFileManager();
-  const { contentService, readFile, writeFile, renameFile, duplicateFile, deleteFile, getZippedDirectory } =
-    fileManager;
+  const {
+    contentService,
+    readFile,
+    writeFile,
+    renameFile,
+    duplicateFile,
+    deleteFile,
+    getZippedDirectory,
+    mkdir,
+    rmdir,
+    bulkMove,
+    canMove,
+    canRename,
+    canDelete,
+  } = fileManager;
 
   useEffect(() => {
     // Editor → FileManager coordination (reading file content for the editor)
@@ -242,43 +263,31 @@ export const ChatEditorFileTree = memo(function ({
 
     // Editor state loaded → Store Editor state and try to open main file
     const editorStateLoadedSub = editorRef.on('editorStateLoaded', (event) => {
+      const persistedActivePaneId = event.editorState?.activePaneId;
+      const persistedActiveFilePath = persistedActivePaneId
+        ? event.editorState?.openFiles.find((f) => f.paneId === persistedActivePaneId)?.path
+        : undefined;
       loadedEditorState = {
         loaded: true,
-        activeFilePath: event.editorState?.activeFilePath,
+        activeFilePath: persistedActiveFilePath,
       };
       tryOpenMainFile();
     });
 
-    // Event-driven toasts for file operations via ContentService
-    const contentChangeSub = contentService?.onDidContentChange((event) => {
-      if (event.type === 'renamed') {
-        const oldName = event.oldPath.split('/').pop() ?? event.oldPath;
-        const newName = event.newPath.split('/').pop() ?? event.newPath;
-        if (oldName === newName) {
-          toast.success(`Moved: ${newName}`);
-        } else {
-          toast.success(`Renamed: ${oldName} → ${newName}`);
-        }
-      } else if (event.type === 'deleted' && event.source === 'user') {
-        const fileName = event.path.split('/').pop() ?? event.path;
-        toast.success(`Deleted: ${fileName}`);
-      } else if (event.type === 'written' && event.source === 'user') {
-        const fileName = event.path.split('/').pop() ?? event.path;
-        if (fileName === '.gitkeep') {
-          const folderPath = event.path.replace('/.gitkeep', '');
-          const folderName = folderPath.split('/').pop() ?? folderPath;
-          toast.success(`Created folder: ${folderName}`);
-        } else {
-          toast.success(`Created: ${fileName}`);
-        }
-      }
-    });
+    // Mount file-operation participants. This is the single funnel
+    // that propagates rename/delete events into editor + project
+    // machine intents. UI components must NOT dispatch
+    // renameFile/closeFile in response to filesystem mutations — the
+    // participant does it once, centrally.
+    const participantDispose = contentService
+      ? mountFileOperationParticipants({ contentService, editorRef, projectRef })
+      : undefined;
 
     return () => {
       fileOpenedSub.unsubscribe();
       projectLoadedSub.unsubscribe();
       editorStateLoadedSub.unsubscribe();
-      contentChangeSub?.();
+      participantDispose?.();
     };
   }, [projectRef, editorRef, contentService, projectId, readFile]);
 
@@ -300,8 +309,14 @@ export const ChatEditorFileTree = memo(function ({
     }));
   }, [fileTreeMap]);
 
-  const activeFilePath = useSelector(editorRef, (state) => state.context.activeFilePath);
   const openFiles = useSelector(editorRef, (state) => state.context.openFiles);
+  const activeFilePath = useSelector(editorRef, (state) => {
+    const id = state.context.activePaneId;
+    if (id === undefined) {
+      return undefined;
+    }
+    return state.context.openFiles.find((f) => f.paneId === id)?.path;
+  });
 
   // Tree state management
   const [expandedItems, setExpandedItemsRaw] = useState<string[]>(() => [rootId]);
@@ -345,6 +360,56 @@ export const ChatEditorFileTree = memo(function ({
   const pendingFileInputRef = useRef<HTMLInputElement>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [itemsToDelete, setItemsToDelete] = useState<string[]>([]);
+
+  /**
+   * Overwrite-confirm dialog state. We surface the dialog from
+   * `onDrop` / `onRename` when the worker reports `NAME_EXISTS` via
+   * the `canMove` / `canRename` preflight; the resolver re-issues the
+   * mutation with `{ overwrite: true }` when the user picks "Replace".
+   *
+   * `sessionRememberRef.current` is the "Do not ask again for this
+   * session" affordance — once the user opts in for a multi-drag we
+   * skip the dialog for the rest of the component lifetime. The ref
+   * intentionally does NOT persist across reloads.
+   */
+  const [overwritePrompt, setOverwritePrompt] = useState<
+    | {
+        targetPaths: readonly string[];
+        resolve: (result: OverwriteConfirmResult) => void;
+      }
+    | undefined
+  >(undefined);
+  const sessionRememberRef = useRef(false);
+
+  const requestOverwriteConfirm = useCallback(
+    async (targetPaths: readonly string[]): Promise<OverwriteConfirmResult> => {
+      if (sessionRememberRef.current) {
+        return { choice: 'overwrite', rememberChoice: true };
+      }
+      return new Promise<OverwriteConfirmResult>((resolve) => {
+        setOverwritePrompt({
+          targetPaths,
+          resolve: (result) => {
+            if (result.choice === 'overwrite' && result.rememberChoice) {
+              sessionRememberRef.current = true;
+            }
+            setOverwritePrompt(undefined);
+            resolve(result);
+          },
+        });
+      });
+    },
+    [],
+  );
+
+  const surfacePreflightError = useCallback((error: WorkspaceMutationErrorLike): void => {
+    const copy = workspaceMutationErrorCopy[error.code];
+    if (typeof copy === 'function') {
+      toast.error(copy({ path: error.path, target: error.target }));
+      return;
+    }
+    toast.error(`'${error.path}' failed: ${error.code}`);
+  }, []);
 
   // Reveal active file by expanding all parent directories (VSCode-style)
   // Also triggers listDirectory for unloaded ancestor directories.
@@ -488,82 +553,146 @@ export const ChatEditorFileTree = memo(function ({
     canReorder: true,
     indent: 16,
     async onDrop(draggedItems, target) {
-      // Handle drag-and-drop by renaming files to new paths
+      // Handle drag-and-drop by moving items into the target folder.
+      // R6 preflight + R7 bulkMove + R8 overwrite dialog in one path:
+      //   1. Compute the (source → target) edit set, skipping bundled-types and no-ops.
+      //   2. Preflight every edit via `canMove`. Any non-`NAME_EXISTS` error aborts the
+      //      whole batch with a toast (consistent with VS Code's drag-validation pattern).
+      //   3. Collect every `NAME_EXISTS` collision and raise a single overwrite-confirm
+      //      dialog naming all targets so the user only acts once for a multi-drag.
+      //   4. Issue one atomic `bulkMove` with `{ overwrite }` set per the dialog result.
+      //      The resulting `directoryRenamed` / `fileRenamed` ContentChangeEvents flow
+      //      through `file-operation-participants.ts` and update every consumer machine.
       const targetPath = target.item.getId();
 
-      // Determine target folder based on drop type
       let targetFolder = '';
       if (targetPath === rootId) {
-        // Dropping on root folder
         targetFolder = '';
       } else if (target.item.isFolder()) {
         targetFolder = targetPath;
       } else {
-        // Dropped on a file, use its parent folder
         const parts = targetPath.split('/');
         parts.pop();
         targetFolder = parts.join('/');
       }
 
-      // Move each dragged item
+      const edits: Array<{ source: string; target: string }> = [];
       for (const item of draggedItems) {
         const oldPath = item.getId();
+        if (oldPath === rootId || isBundledTypesWorkspacePath(oldPath)) {
+          continue;
+        }
         const fileName = oldPath.split('/').pop() ?? oldPath;
         const newPath = targetFolder ? `${targetFolder}/${fileName}` : fileName;
-
         if (oldPath === newPath) {
           continue;
         }
+        edits.push({ source: oldPath, target: newPath });
+      }
 
-        // Move file/folder in fileManager - awaits worker call
-        // oxlint-disable-next-line no-await-in-loop -- Sequential rename required for consistency
-        await renameFile(oldPath, newPath);
+      if (edits.length === 0) {
+        return;
+      }
 
-        // Update file explorer paths atomically (no close/open to avoid fallback behavior)
-        editorRef.send({ type: 'renameFile', oldPath, newPath });
+      const collisions: string[] = [];
+      const preflightResults = await Promise.all(edits.map(async (edit) => canMove(edit.source, edit.target)));
+      for (const [index, result] of preflightResults.entries()) {
+        if (result === true) {
+          continue;
+        }
+        if (isWorkspaceMutationErrorLike(result) && result.code === 'NAME_EXISTS') {
+          const edit = edits[index];
+          if (edit !== undefined) {
+            collisions.push(edit.target);
+          }
+          continue;
+        }
+        surfacePreflightError(result as WorkspaceMutationErrorLike);
+        return;
+      }
+
+      let overwriteApproved = false;
+      if (collisions.length > 0) {
+        const decision = await requestOverwriteConfirm(collisions);
+        if (decision.choice !== 'overwrite') {
+          return;
+        }
+        overwriteApproved = true;
+      }
+
+      try {
+        const result = await bulkMove(edits, overwriteApproved ? { overwrite: true } : undefined);
+        if (result.failed.length > 0) {
+          const first = result.failed[0];
+          if (first !== undefined && isWorkspaceMutationErrorLike(first.error)) {
+            surfacePreflightError(first.error);
+          } else {
+            toast.error('One or more items could not be moved.');
+          }
+          return;
+        }
+      } catch (error) {
+        toast.error(`Move failed: ${error instanceof Error ? error.message : String(error)}`);
       }
     },
     onRename(item, newName) {
       const oldPath = item.getId();
-      if (oldPath === rootId) {
+      if (oldPath === rootId || isBundledTypesWorkspacePath(oldPath)) {
         return;
       }
 
       const parts = oldPath.split('/');
       parts[parts.length - 1] = newName;
       const newPath = parts.join('/');
+      const wasExpanded = item.isFolder() && item.isExpanded();
 
-      if (item.isFolder()) {
-        // Remember if folder was expanded
-        const wasExpanded = item.isExpanded();
-
-        // Rename the folder directly - LightningFS supports directory rename natively
-        void renameFile(oldPath, newPath);
-
-        // Update file explorer paths atomically (no close/open to avoid fallback behavior)
-        editorRef.send({ type: 'renameFile', oldPath, newPath });
-
-        // Keep folder expanded after rename
-        if (wasExpanded) {
-          setExpandedItems((previous) => {
-            const withoutOld = previous.filter((p) => p !== oldPath);
-            return [...withoutOld, newPath];
-          });
+      // R6 preflight: `canRename` validates `newName` + collision against the
+      // worker's authoritative view before mutating. On `NAME_EXISTS` we route
+      // through the R8 overwrite-confirm dialog; every other typed error is
+      // surfaced as a copy-registry toast and the rename aborts.
+      void (async () => {
+        const preflight = await canRename(oldPath, newName);
+        let overwriteApproved = false;
+        if (preflight !== true) {
+          if (isWorkspaceMutationErrorLike(preflight) && preflight.code === 'NAME_EXISTS') {
+            const decision = await requestOverwriteConfirm([newPath]);
+            if (decision.choice !== 'overwrite') {
+              return;
+            }
+            overwriteApproved = true;
+          } else {
+            surfacePreflightError(preflight as WorkspaceMutationErrorLike);
+            return;
+          }
         }
-      } else {
-        // Rename file in fileManager - calls worker directly
-        void renameFile(oldPath, newPath);
 
-        // Update file explorer path atomically (no close/open to avoid fallback behavior)
-        editorRef.send({ type: 'renameFile', oldPath, newPath });
-      }
+        try {
+          if (overwriteApproved) {
+            const { contentService: cs } = await fileManager.whenServicesReady();
+            await cs.move(oldPath, newPath, { overwrite: true });
+          } else {
+            await renameFile(oldPath, newPath);
+          }
+          if (wasExpanded) {
+            setExpandedItems((previous) => {
+              const withoutOld = previous.filter((p) => p !== oldPath);
+              return [...withoutOld, newPath];
+            });
+          }
+        } catch (error) {
+          toast.error(`Rename failed: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      })();
     },
     onPrimaryAction(item) {
       if (!item.isFolder()) {
+        const path = item.getId();
+        const readOnly = isBundledTypesWorkspacePath(path);
         editorRef.send({
           type: 'openFile',
-          path: item.getId(),
+          path,
           source: 'user',
+          readOnly,
         });
       }
     },
@@ -614,6 +743,14 @@ export const ChatEditorFileTree = memo(function ({
         targetFolder = parts.join('/');
       }
 
+      if (isBundledTypesWorkspacePath(targetFolder)) {
+        return false;
+      }
+
+      if (draggedItems.some((item) => isBundledTypesWorkspacePath(item.getId()))) {
+        return false;
+      }
+
       // Check if ALL dragged items are already in the target folder
       // If so, disallow the drop (nothing would change)
       const allItemsAlreadyInTarget = draggedItems.every((item) => {
@@ -628,7 +765,7 @@ export const ChatEditorFileTree = memo(function ({
     },
     // Set custom data on the drag event so Dockview panels can receive file drops
     createForeignDragObject(items) {
-      const paths = items.map((item) => item.getId()).filter((id) => id !== rootId);
+      const paths = items.map((item) => item.getId()).filter((id) => id !== rootId && !isBundledTypesWorkspacePath(id));
       return {
         format: tauFileDragMime,
         data: JSON.stringify(paths),
@@ -637,6 +774,10 @@ export const ChatEditorFileTree = memo(function ({
     // Allow file drops from computer on folders, root, or root-level files
     canDropForeignDragObject(_dataTransfer, target) {
       const targetId = target.item.getId();
+      if (isBundledTypesWorkspacePath(targetId)) {
+        return false;
+      }
+
       const isRoot = targetId === rootId;
       const isFolder = target.item.isFolder();
       const isRootLevelFile = !targetId.includes('/') && !isFolder;
@@ -715,6 +856,9 @@ export const ChatEditorFileTree = memo(function ({
     const subscription = editorRef.on('fileRevealRequested', (event) => {
       const targetPath = event.path;
 
+      // Ensure the file-explorer panel is open before revealing the item
+      openPanel();
+
       // Expand all parent directories
       const parts = targetPath.split('/');
       parts.pop(); // Remove the filename
@@ -759,7 +903,7 @@ export const ChatEditorFileTree = memo(function ({
     return () => {
       subscription.unsubscribe();
     };
-  }, [editorRef, tree, setExpandedItems, setFocusedItem, setSelectedItems]);
+  }, [editorRef, openPanel, tree, setExpandedItems, setFocusedItem, setSelectedItems]);
 
   const handleCreateFile = useCallback(
     (template: KernelConfiguration | undefined) => {
@@ -814,7 +958,14 @@ export const ChatEditorFileTree = memo(function ({
   }, [focusedItem, tree]);
 
   const handleDelete = useCallback((items: Array<ItemInstance<TreeItemData>>) => {
-    setItemsToDelete(items.map((item) => item.getId()));
+    const paths = items
+      .map((item) => item.getId())
+      .filter((path) => path !== rootId && !isBundledTypesWorkspacePath(path));
+    if (paths.length === 0) {
+      return;
+    }
+
+    setItemsToDelete(paths);
     setDeleteDialogOpen(true);
   }, []);
 
@@ -822,7 +973,7 @@ export const ChatEditorFileTree = memo(function ({
     const deletedPaths = new Set<string>();
 
     for (const path of itemsToDelete) {
-      if (path === rootId) {
+      if (path === rootId || isBundledTypesWorkspacePath(path)) {
         continue;
       }
 
@@ -831,19 +982,37 @@ export const ChatEditorFileTree = memo(function ({
       const entry = fileTreeMap.get(path);
       const isFolder = entry?.type === 'dir';
 
-      if (isFolder && treeService) {
-        // Recursive delete via worker (has complete filesystem knowledge)
-        void treeService.deleteDirectory(path);
-        // Close any open files under this directory
+      // R6 preflight: `canDelete` validates against the worker's authoritative
+      // view (catches read-only mounts, races where the path disappeared
+      // between selection and confirmation). Failure surfaces a typed toast
+      // and skips the underlying mutation; success runs `rmdir`/`deleteFile`.
+      // The tab-close cascade is handled by `file-operation-participants.ts`
+      // via the `directoryDeleted` / `deleted` ContentChangeEvent.
+      void (async () => {
+        const preflight = await canDelete(path);
+        if (preflight !== true) {
+          surfacePreflightError(preflight as WorkspaceMutationErrorLike);
+          return;
+        }
+        try {
+          if (isFolder) {
+            await rmdir(path, { recursive: true });
+          } else {
+            await deleteFile(path, { source: 'user' });
+          }
+        } catch (error) {
+          toast.error(`Delete failed: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      })();
+
+      if (isFolder) {
+        // Track deleted descendant paths locally so the selection /
+        // focus-restore logic below can filter them out.
         for (const [key] of fileTreeMap) {
           if (key.startsWith(`${path}/`)) {
             deletedPaths.add(key);
-            editorRef.send({ type: 'closeFile', path: key });
           }
         }
-      } else {
-        void deleteFile(path, { source: 'user' });
-        editorRef.send({ type: 'closeFile', path });
       }
     }
 
@@ -854,7 +1023,7 @@ export const ChatEditorFileTree = memo(function ({
 
     const firstRemainingItem = tree.getItems().find((i) => i.getId() !== rootId && !deletedPaths.has(i.getId()));
     setFocusedItem(firstRemainingItem?.getId());
-  }, [editorRef, deleteFile, fileTreeMap, treeService, itemsToDelete, tree]);
+  }, [canDelete, deleteFile, fileTreeMap, itemsToDelete, rmdir, surfacePreflightError, tree]);
 
   const { formattedKeyCombination: confirmDeleteKeyLabel } = useKeybinding(confirmDeleteKeyCombination, confirmDelete, {
     enabled: deleteDialogOpen,
@@ -865,7 +1034,7 @@ export const ChatEditorFileTree = memo(function ({
     (items: Array<ItemInstance<TreeItemData>>) => {
       for (const item of items) {
         const originalPath = item.getId();
-        if (originalPath === rootId || item.isFolder()) {
+        if (originalPath === rootId || item.isFolder() || isBundledTypesWorkspacePath(originalPath)) {
           continue;
         }
 
@@ -910,7 +1079,8 @@ export const ChatEditorFileTree = memo(function ({
 
   const handleOpenInEditor = useCallback(
     (path: string) => {
-      editorRef.send({ type: 'openFile', path, source: 'user' });
+      const readOnly = isBundledTypesWorkspacePath(path);
+      editorRef.send({ type: 'openFile', path, source: 'user', readOnly });
     },
     [editorRef],
   );
@@ -1075,6 +1245,15 @@ export const ChatEditorFileTree = memo(function ({
         </AlertDialogContent>
       </AlertDialog>
 
+      <OverwriteConfirmDialog
+        open={overwritePrompt !== undefined}
+        targetPaths={overwritePrompt?.targetPaths ?? []}
+        showRememberChoice={(overwritePrompt?.targetPaths.length ?? 0) > 1}
+        onResolve={(result) => {
+          overwritePrompt?.resolve(result);
+        }}
+      />
+
       <FloatingPanelContent>
         <FloatingPanelContentHeader>
           <FloatingPanelContentTitle>Files</FloatingPanelContentTitle>
@@ -1186,10 +1365,16 @@ export const ChatEditorFileTree = memo(function ({
                   allPaths={allPaths}
                   level={0}
                   onSubmit={(name) => {
-                    const gitkeepPath = `${name}/.gitkeep`;
-                    void writeFile(gitkeepPath, encodeTextFile(''), {
-                      source: 'user',
-                    });
+                    void (async () => {
+                      try {
+                        await mkdir(name, { recursive: true });
+                      } catch (error) {
+                        toast.error(
+                          `Failed to create folder: ${error instanceof Error ? error.message : String(error)}`,
+                        );
+                        return;
+                      }
+                    })();
                     setPendingFolder(undefined);
                     setExpandedItems((previous) => [...previous, name]);
                   }}
@@ -1299,8 +1484,18 @@ export const ChatEditorFileTree = memo(function ({
                                 level={itemLevel + 1}
                                 onSubmit={(name) => {
                                   const folderPath = `${pendingFolder.parentPath}/${name}`;
-                                  const gitkeepPath = `${folderPath}/.gitkeep`;
-                                  void writeFile(gitkeepPath, encodeTextFile(''), { source: 'user' });
+                                  void (async () => {
+                                    try {
+                                      await mkdir(folderPath, { recursive: true });
+                                    } catch (error) {
+                                      toast.error(
+                                        `Failed to create folder: ${
+                                          error instanceof Error ? error.message : String(error)
+                                        }`,
+                                      );
+                                      return;
+                                    }
+                                  })();
                                   setPendingFolder(undefined);
                                   setExpandedItems((previous) => [...previous, folderPath]);
                                 }}
@@ -1557,7 +1752,7 @@ function TreeItem({
                     onOpenInViewer(item.getId());
                   }}
                 >
-                  <Eye />
+                  <Box />
                   <span>Open in Viewer</span>
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
@@ -1638,7 +1833,7 @@ function TreeItem({
                 onOpenInViewer(item.getId());
               }}
             >
-              <Eye />
+              <Box />
               <span>Open in Viewer</span>
             </ContextMenuItem>
             <ContextMenuSeparator />
@@ -1730,8 +1925,16 @@ function PendingFolderInput({
       if (!trimmedName) {
         return 'A file or folder name must be provided.';
       }
+      // R6: reject characters that would yield INVALID_NAME at the worker
+      // before the async submit round-trips.
+      if (trimmedName.includes('/') || trimmedName.includes('\\') || trimmedName === '.' || trimmedName === '..') {
+        return `'${trimmedName}' is not a valid name. Avoid '/', '\\', and reserved segments like '.' or '..'.`;
+      }
 
       const fullPath = parentPath ? `${parentPath}/${trimmedName}` : trimmedName;
+      if (isBundledTypesWorkspacePath(fullPath)) {
+        return `'${fullPath}' is inside the bundled @types workspace, which is read-only.`;
+      }
       if (allPaths.has(fullPath)) {
         return `A file or folder ${trimmedName} already exists at this location. Please choose a different name.`;
       }
@@ -1846,8 +2049,16 @@ function PendingFileInput({
       if (!trimmedName) {
         return 'A file name must be provided.';
       }
+      // R6: reject characters that would yield INVALID_NAME at the worker
+      // before the async submit round-trips.
+      if (trimmedName.includes('/') || trimmedName.includes('\\') || trimmedName === '.' || trimmedName === '..') {
+        return `'${trimmedName}' is not a valid name. Avoid '/', '\\', and reserved segments like '.' or '..'.`;
+      }
 
       const fullPath = parentPath ? `${parentPath}/${trimmedName}` : trimmedName;
+      if (isBundledTypesWorkspacePath(fullPath)) {
+        return `'${fullPath}' is inside the bundled @types workspace, which is read-only.`;
+      }
       if (allPaths.has(fullPath)) {
         return `A file ${trimmedName} already exists at this location. Please choose a different name.`;
       }

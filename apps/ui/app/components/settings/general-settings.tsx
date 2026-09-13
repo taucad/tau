@@ -84,7 +84,7 @@ export function GeneralSettings(): React.JSX.Element {
               description='Select your preferred color scheme'
               groupedItems={[{ name: 'Theme', items: themeOptions }]}
               getValue={(item) => String(item.id)}
-              defaultValue={currentOption}
+              value={currentOption}
               isSearchEnabled={false}
               renderLabel={(item, selectedItem) => (
                 <span className='flex w-full items-center justify-between gap-4'>
@@ -190,7 +190,7 @@ export function GeneralSettings(): React.JSX.Element {
                 description='Select how your data is used'
                 groupedItems={[{ name: 'Privacy Settings', items: privacyModes }]}
                 getValue={(item) => item.id}
-                defaultValue={currentMode}
+                value={currentMode}
                 isSearchEnabled={false}
                 renderLabel={(item, selectedItem) => (
                   <span className='flex w-full items-center justify-between gap-4'>

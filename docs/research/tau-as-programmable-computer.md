@@ -94,7 +94,7 @@ Status: required for Pillars 3 + 5 to be reproducible. Independent of Pillar 1 i
 
 **Doc**: [`tau-parts-registry-and-marketplace.md`](./tau-parts-registry-and-marketplace.md)
 
-A new `Parts` sidebar entry sits between `Community` and `Convert`. A new Postgres `part`/`part_version`/`part_install`/`part_review` schema mirrors `publication`. A new `/api/parts/*` API mirrors `/api/npm/*` (same content-addressed bucket, same lockfile, same Service Worker). A verification pipeline runs published parts through `@taucad/test-runtime` for watertight/manifold/parameter-robust badges. A creator marketplace adds Stripe Connect Express for paid parts.
+A new `Parts` sidebar entry sits between `Community` and `Convert`. A new Postgres `part`/`part_version`/`part_install`/`part_review` schema mirrors `publication`. A new `/api/parts/*` API mirrors `/api/npm/*` (same content-addressed bucket, same lockfile, same Service Worker). A verification pipeline runs published parts through GeoSpec via Tau's `@taucad/testing` adapter for watertight/manifold/parameter-robust badges. A creator marketplace adds Stripe Connect Express for paid parts.
 
 Status: depends on Pillars 1–4.
 

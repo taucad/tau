@@ -1,7 +1,7 @@
 import { HumanMessage, AIMessage, ToolMessage } from '@langchain/core/messages';
 import type { BaseMessage } from '@langchain/core/messages';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { promptCachingMiddleware } from '#api/chat/middleware/prompt-caching.middleware.js';
+import { createPromptCachingMiddleware } from '#api/chat/middleware/prompt-caching.middleware.js';
 import { invokeWrapModelCall } from '#testing/middleware-testing.utils.js';
 
 /**
@@ -12,6 +12,12 @@ type ContentBlockWithCacheControl = {
   text?: string;
   cache_control?: { type: 'ephemeral' };
 };
+
+// All existing assertions cover the Anthropic cache-write path, so resolve the
+// factory once with the Anthropic provider for backwards-compatibility with
+// the test suite. Dedicated provider-gating coverage lives at the bottom of
+// this file.
+const promptCachingMiddleware = createPromptCachingMiddleware('anthropic');
 
 describe('promptCachingMiddleware', () => {
   let handler: ReturnType<typeof vi.fn>;
@@ -508,6 +514,57 @@ describe('promptCachingMiddleware', () => {
 
       // Original message should still have string content
       expect(originalToolMessage.content).toBe('{"result": "success"}');
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Provider gating
+  //
+  // `cache_control` is an Anthropic-only marker. Other providers either ignore
+  // it (legacy OpenAI Chat Completions tool outputs that get JSON.stringify'd)
+  // or actively reject it: OpenAI's Responses API returns 400 "Unknown
+  // parameter" when `cache_control` lands on a typed `function_call_output`
+  // item such as `input_image`. The middleware therefore must be a no-op for
+  // every non-Anthropic target.
+  // ---------------------------------------------------------------------------
+
+  describe('non-Anthropic provider gating (no-op)', () => {
+    it.each(['openai', 'vertexai', 'cerebras', 'together', 'ollama'] as const)(
+      'leaves messages untouched for %s target (no cache_control added)',
+      async (provider) => {
+        const middleware = createPromptCachingMiddleware(provider);
+        const original = new HumanMessage('Hello');
+        const messages: BaseMessage[] = [original];
+
+        await invokeWrapModelCall(middleware, { messages }, handler);
+
+        const [request] = handler.mock.calls[0] as [{ messages: BaseMessage[] }];
+        expect(request.messages).toBe(messages);
+        expect(request.messages[0]).toBe(original);
+      },
+    );
+
+    it('does not add cache_control to ToolMessage typed-list content for openai target', async () => {
+      const middleware = createPromptCachingMiddleware('openai');
+      const tool = new ToolMessage({
+        content: [
+          { type: 'input_text', text: 'Captured 1 screenshot.' },
+          // eslint-disable-next-line @typescript-eslint/naming-convention -- OpenAI Responses API native shape uses snake_case
+          { type: 'input_image', image_url: 'data:image/png;base64,abc', detail: 'auto' },
+        ],
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
+        tool_call_id: 'call_screenshot',
+        name: 'screenshot',
+      });
+
+      await invokeWrapModelCall(middleware, { messages: [tool] }, handler);
+
+      const [request] = handler.mock.calls[0] as [{ messages: BaseMessage[] }];
+      const out = request.messages[0] as ToolMessage;
+      const blocks = out.content as ContentBlockWithCacheControl[];
+      for (const block of blocks) {
+        expect(block.cache_control).toBeUndefined();
+      }
     });
   });
 });

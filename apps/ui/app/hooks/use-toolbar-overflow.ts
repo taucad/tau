@@ -1,6 +1,4 @@
-import { useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { RefObject } from 'react';
-import { useResizeObserver } from '#hooks/use-resize-observer.js';
+import { useMemo } from 'react';
 
 /**
  * Configuration for a single toolbar item.
@@ -23,10 +21,7 @@ type ToolbarOverflowOptions = {
   readonly reservedWidth?: number;
 };
 
-type ToolbarOverflowResult = {
-  /** Ref to attach to the toolbar container element */
-  // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- React ref requires null
-  readonly containerRef: RefObject<HTMLDivElement | null>;
+export type ToolbarOverflowResult = {
   /** Set of item IDs that should be rendered inline */
   readonly visibleIds: Set<string>;
   /** Set of item IDs that should overflow into the dropdown */
@@ -36,11 +31,13 @@ type ToolbarOverflowResult = {
 };
 
 /**
- * Hook that computes which toolbar items are visible vs overflowed
- * based on the measured container width.
+ * Computes which toolbar items are visible vs overflowed from a measured layout width.
  *
- * Items are provided ordered by stickiness (first = last to overflow).
- * The algorithm:
+ * Pass a width that represents how much horizontal space the toolbar row is allowed to use
+ * (e.g. viewer layout width minus horizontal gutter from ResizeObserver), not the toolbar
+ * element's own width — the latter creates a feedback loop once items overflow and the toolbar shrinks.
+ *
+ * Items are provided ordered by stickiness (first = last to overflow). The algorithm:
  *   1. Try fitting all items at full width
  *   2. Try compacting compressible items
  *   3. Start overflowing items from the end (right-to-left)
@@ -48,41 +45,21 @@ type ToolbarOverflowResult = {
  */
 export function useToolbarOverflow(
   items: readonly ToolbarItemConfig[],
+  availableWidth: number | undefined,
   options?: ToolbarOverflowOptions,
 ): ToolbarOverflowResult {
   const { gap = 8, reservedWidth = 44 } = options ?? {};
 
-  const containerRef = useRef<HTMLDivElement>(null);
-  const { width: observedWidth } = useResizeObserver({ ref: containerRef });
-
-  // Synchronous initial measurement to prevent layout flicker.
-  // useLayoutEffect runs after DOM commit but before the browser paints,
-  // so we read the real container width and trigger a synchronous re-render.
-  // The first visible frame already has the correct overflow state.
-  // Once ResizeObserver reports (observedWidth), it takes over.
-  const [initialWidth, setInitialWidth] = useState<number | undefined>(undefined);
-  useLayoutEffect(() => {
-    if (initialWidth !== undefined || !containerRef.current) {
-      return;
-    }
-
-    setInitialWidth(containerRef.current.getBoundingClientRect().width);
-  }, [initialWidth]);
-
-  const containerWidth = observedWidth ?? initialWidth;
-
-  const { visibleIds, overflowIds, isCompact } = useMemo(
-    () => computeToolbarOverflow(items, containerWidth, gap, reservedWidth),
-    [items, containerWidth, gap, reservedWidth],
+  return useMemo(
+    () => computeToolbarOverflow(items, availableWidth, gap, reservedWidth),
+    [items, availableWidth, gap, reservedWidth],
   );
-
-  return { containerRef, visibleIds, overflowIds, isCompact };
 }
 
 /**
- * Pure computation extracted from `useToolbarOverflow` for testability.
+ * Pure computation extracted for testability.
  *
- * Given toolbar items, the measured container width, gap, and reserved width,
+ * Given toolbar items, the measured layout width, gap, and reserved width,
  * determines which items are visible vs overflowed and whether compact mode is active.
  */
 // oxlint-disable-next-line max-params -- pure function with 25+ test call sites; wrapping would add noise for simple numeric args

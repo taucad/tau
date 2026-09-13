@@ -5,7 +5,6 @@ import type { Route } from './+types/route.js';
 import { ChatInterface } from '#routes/projects_.$id/chat-interface.js';
 import { ProjectProvider, useProject } from '#hooks/use-project.js';
 import type { Handle } from '#types/matches.types.js';
-import { ActiveChatProvider } from '#hooks/active-chat-provider.js';
 import { ProjectChatRpcBindings } from '#routes/projects_.$id/project-chat-rpc-bindings.js';
 import { ProjectNameEditor } from '#routes/projects_.$id/project-name-editor.js';
 import { ViewContextProvider } from '#routes/projects_.$id/chat-interface-view-context.js';
@@ -28,7 +27,7 @@ function RouteProvider({ children }: { readonly children?: React.ReactNode }): R
   const { id } = useParams();
   return (
     <SharedWorkerGate>
-      <FileManagerProvider projectId={id} rootDirectory={`/projects/${id}`}>
+      <FileManagerProvider projectId={id} rootDirectory={`/projects/${id}`} initialBackend='indexeddb'>
         <ChatRpcSocketProvider>
           <WebglContextTrackerProvider>
             <ProjectProvider projectId={id!} kernelOptionsFactory={debugKernelOptions}>
@@ -83,17 +82,20 @@ function Chat(): React.JSX.Element {
 /**
  * Project route chat composition.
  *
- * - `<ActiveChatProvider>` binds the editor's `focusedChatId` so every UI
- *   hook (`useChatContext`, `useChatActions`, `useActiveChatId`) resolves
- *   to the visible chat by default. The provider acquires the matching
- *   `ChatSession` from the app-shell `ChatSessionStore`, which owns the
- *   AI SDK `Chat` instance, persistence actor, and draft actor for the
- *   lifetime of the chat — independent of any subtree mount cycle.
- * - `<ProjectChatRpcBindings>` iterates over every chatId currently live
- *   in the store and wires Socket.IO RPC join/leave per session. This
- *   makes background chats (future agents panel) RPC-connected without
- *   any extra plumbing — the store's membership is the single source of
- *   truth.
+ * - `<ChatInterface>` mounts the full editor layout (viewer, file tree,
+ *   parameters, editor, kernel, explorer, details, converter, and the
+ *   chat panel) unconditionally. The chat panel itself wraps its
+ *   `<ChatHistory>` child in `<ChatHistoryGate>` (see
+ *   [`focused-chat-gate.tsx`](./focused-chat-gate.tsx)), which is the
+ *   sole owner of `<ActiveChatProvider>` mounting + the
+ *   focused-chat skeleton/error UI. This keeps every non-chat pane
+ *   independent of the editor machine's chat lifecycle, restoring the
+ *   pre-fix elegant load behaviour (placeholder -> opacity fade-in).
+ * - `<ProjectChatRpcBindings>` reads chat ids from the app-shell
+ *   `ChatSessionStore` directly (no `<ActiveChatProvider>` dependency),
+ *   so RPC bindings persist across `focusedChatId` changes and across
+ *   `ensureFocusedChatActor` retries — no socket churn on editor-machine
+ *   transitions.
  *
  * Persistence + draft `flushNow` is dispatched centrally by
  * `<GlobalChatFlushGuard>` (mounted in `apps/ui/app/root.tsx`) — every
@@ -101,27 +103,24 @@ function Chat(): React.JSX.Element {
  * machine flushing remains route-scoped via `FlushOnCloseGuard` below.
  */
 function ChatWithProvider(): React.JSX.Element {
-  const { projectRef, editorRef } = useProject();
+  const { projectRef } = useProject();
   const name = useSelector(projectRef, (state) => state.context.project?.name);
   const description = useSelector(projectRef, (state) => state.context.project?.description);
-  const focusedChatId = useSelector(editorRef, (state) => state.context.focusedChatId);
 
   return (
     <ViewContextProvider>
-      <ActiveChatProvider chatId={focusedChatId}>
-        <ProjectChatRpcBindings />
-        {name ? <title>{name}</title> : null}
-        {description ? <meta name='description' content={description} /> : null}
-        <FlushOnCloseGuard />
-        <Chat />
-      </ActiveChatProvider>
+      {name ? <title>{name}</title> : null}
+      {description ? <meta name='description' content={description} /> : null}
+      <FlushOnCloseGuard />
+      <ProjectChatRpcBindings />
+      <Chat />
     </ViewContextProvider>
   );
 }
 
 /**
  * Inner component that wires up the flush-on-close handler.
- * Needs to be a child of both ProjectProvider and ChatProvider to access all refs.
+ * Needs to be a child of ProjectProvider to access project + editor refs.
  */
 function FlushOnCloseGuard(): React.JSX.Element {
   const { projectRef, editorRef } = useProject();

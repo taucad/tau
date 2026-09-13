@@ -58,4 +58,19 @@ describe('PathSubscriberRegistry', () => {
     unsub();
     expect(registry.hasPathSubscribers('a.ts')).toBe(false);
   });
+
+  it('contains handler throws and continues delivery to siblings', () => {
+    const registry = new PathSubscriberRegistry<number>();
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const failing = vi.fn(() => {
+      throw new Error('boom');
+    });
+    const succeeding = vi.fn();
+    registry.subscribePath('a.ts', failing);
+    registry.subscribePath('a.ts', succeeding);
+    registry.notifyPath('a.ts', 1);
+    expect(failing).toHaveBeenCalledOnce();
+    expect(succeeding).toHaveBeenCalledOnce();
+    consoleErrorSpy.mockRestore();
+  });
 });

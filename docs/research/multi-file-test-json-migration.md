@@ -3,9 +3,11 @@ title: 'Multi-File test.json Migration Blueprint'
 description: 'Migration plan for restructuring test.json from a flat requirements array to a per-file map keyed by source path so multiple compilation units can be tested concurrently.'
 status: active
 created: '2026-04-20'
-updated: '2026-04-20'
+updated: '2026-06-01'
 category: migration
 related:
+  - docs/research/geospec-standalone-cad-testing-blueprint.md
+  - docs/research/vitest-style-parameter-geometry-testing-blueprint.md
   - docs/research/visual-verification-prompt-engineering.md
   - docs/research/context-injection-architecture.md
   - docs/policy/vision-policy.md
@@ -29,6 +31,15 @@ This doc inventories every code, prompt, test, and doc touch-point and proposes 
 ```
 
 The change is **breaking with no backwards compatibility** (per user direction). The schema lives in **`packages/testing/src/schemas.ts`** and is consumed by exactly two tools (`test_model`, `edit_tests`) and one server-side runner (`GeometryAnalysisService`). The migration also requires extending the `fetch_geometry` RPC with a `targetFile` argument so each per-file run can render the correct CU's GLB — currently `fetchGeometry` is hard-wired to `mainEntryFile` and would silently test the wrong shape.
+
+## 2026-06-01 Target-State Alignment
+
+This migration is now a compatibility milestone, not the final testing architecture. The per-file lesson remains important: every geometry assertion needs an explicit source/compilation-unit owner. The target state is:
+
+- GeoSpec owns the standalone `*.test.ts`/Vitest-style execution API and geometry evidence analyzers.
+- `@taucad/testing` owns `test.json` to `*.test.ts` migration and preserves per-file ownership when generating test modules.
+- `test.json` remains useful as a legacy input and chat-tool compatibility shape during migration, but it is not the long-term authoring surface.
+- The `targetFile` RPC/evidence concept should survive as `GeometryArtifact.source`, so GeoSpec diagnostics always identify the model file or generated artifact under test.
 
 ## Problem Statement
 

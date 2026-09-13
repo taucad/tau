@@ -1,17 +1,24 @@
-import { memo, useCallback, useMemo } from 'react';
+import { memo, useCallback, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Check, Plus } from 'lucide-react';
 import type { Model } from '@taucad/chat';
 import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
-import { Button } from '#components/ui/button.js';
 import { Badge } from '#components/ui/badge.js';
+import { menuItemVariants } from '#components/ui/menu.variants.js';
 import { SvgIcon } from '#components/icons/svg-icon.js';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '#components/ui/hover-card.js';
 import { useModels } from '#hooks/use-models.js';
 import type { ResolvedModel } from '#hooks/use-models.js';
-import { useActiveChatModel } from '#hooks/use-active-chat-model.js';
+import { useChatComposer } from '#hooks/active-chat-provider.js';
+import { useKeybinding } from '#hooks/use-keyboard.js';
 import { openSettingsDialog } from '#hooks/use-settings-dialog.js';
+import type { KeyCombination } from '#utils/keys.utils.js';
 import { cn } from '#utils/ui.utils.js';
+
+export const openModelSelectorKeyCombination = {
+  key: '/',
+  modKey: true,
+} satisfies KeyCombination;
 
 type ChatModelSelectorProps = Omit<React.HTMLAttributes<HTMLDivElement>, 'children' | 'onSelect'> & {
   readonly onSelect?: (modelId: string) => void;
@@ -44,11 +51,21 @@ export const ChatModelSelector = memo(function ({
   isNested,
   ...properties
 }: ChatModelSelectorProps): React.JSX.Element {
-  // Write through the chat-scoped resolver so picking a model inside chat A
-  // patches `Chat.activeModel` for A and updates the cookie default for
-  // future new chats. Reads `data: models` from the global hook because the
-  // catalogue itself is not chat-scoped.
-  const { model: selectedModel, setActiveModel } = useActiveChatModel();
+  const [open, setOpen] = useState(false);
+
+  const handleOpenFromShortcut = useCallback(() => {
+    setOpen(true);
+  }, []);
+
+  useKeybinding(openModelSelectorKeyCombination, handleOpenFromShortcut);
+
+  // Write through the chat-scoped resolver populated by the active provider
+  // (composer-only → cookie; session-backed → chat row + cookie dual-write).
+  // Reads `data: models` from the global hook because the catalogue itself
+  // is not chat-scoped.
+  const {
+    model: { model: selectedModel, setActiveModel },
+  } = useChatComposer();
   const { data: allModels = [], availableModels } = useModels();
 
   const visibleModels = useMemo(() => {
@@ -59,6 +76,11 @@ export const ChatModelSelector = memo(function ({
 
     return availableModels;
   }, [allModels, availableModels, selectedModel.id]);
+
+  const comboboxSelectedModel = useMemo(
+    () => visibleModels.find((entry) => entry.id === selectedModel.id),
+    [visibleModels, selectedModel.id],
+  );
 
   const providerModelsMap = new Map<string, Model[]>();
   for (const model of visibleModels) {
@@ -138,25 +160,28 @@ export const ChatModelSelector = memo(function ({
       )}
       getValue={(item) => item.id}
       placeholder='Select a model'
-      defaultValue={selectedModel.model}
+      value={comboboxSelectedModel}
       isNested={isNested}
+      isOpen={open}
+      onOpenChange={setOpen}
       onSelect={handleSelectModel}
       onClose={onClose}
       footer={
-        <Button
-          type='button'
-          variant='ghost'
-          className={cn(
-            'h-auto w-full justify-start gap-2 rounded-t-none rounded-b-md border-t px-4 py-1 text-[13px] font-normal has-[>svg]:px-4',
-            '[&_svg]:-translate-y-[0.5px] [&_svg]:text-muted-foreground',
-          )}
-          onClick={() => {
-            openSettingsDialog('models');
-          }}
-        >
-          <Plus className='size-3.5 shrink-0' />
-          Add models
-        </Button>
+        <>
+          <div className='border-t' />
+          <div className='p-1'>
+            <button
+              type='button'
+              className={cn(menuItemVariants({ highlight: 'selected' }), 'h-auto w-full')}
+              onClick={() => {
+                openSettingsDialog('models');
+              }}
+            >
+              <Plus />
+              Add models
+            </button>
+          </div>
+        </>
       }
     >
       {children({ selectedModel })}

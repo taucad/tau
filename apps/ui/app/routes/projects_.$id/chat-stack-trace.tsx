@@ -11,17 +11,14 @@ import { MarkdownViewer } from '#components/markdown/markdown-viewer.js';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
 import { useProject } from '#hooks/use-project.js';
 import { useCad, useCadSelector } from '#hooks/use-cad.js';
-import { useChatActions } from '#hooks/use-chat.js';
 import { useChats } from '#hooks/use-chats.js';
+import { useCadChatClient } from '#chat-clients/use-cad-chat-client.js';
 import { useModifiers } from '#hooks/use-keyboard.js';
 import { formatKeyCombination } from '#utils/keys.utils.js';
 import { cn } from '#utils/ui.utils.js';
 import { createMessage } from '#utils/chat.utils.js';
 import { decodeTextFile } from '#utils/filesystem.utils.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
-import { useActiveChatModel } from '#hooks/use-active-chat-model.js';
-import { useActiveChatKernel } from '#hooks/use-active-chat-kernel.js';
-import { useChatSnapshot } from '#hooks/use-chat-snapshot.js';
 
 const shiftKey = formatKeyCombination({ key: 'Shift' });
 
@@ -454,14 +451,13 @@ export function ChatStackTrace({ entryFile, className, side, ...props }: ChatSta
   const rawErrors = useCadSelector((state) => state.context.kernelIssues.get(entryFile), undefined);
   const errors = isCadActorStale ? undefined : rawErrors;
 
-  const { sendMessage } = useChatActions();
-  // Read the model/kernel from the chat-scoped resolvers so the Fix-with-AI
-  // prompt always uses what the active chat is actually running on. The
-  // cookie default still wins on the homepage / before a chat is bound (the
-  // resolvers fall back to it transparently).
-  const { modelId: selectedModelId } = useActiveChatModel();
-  const { kernelId: kernel } = useActiveChatKernel();
-  const snapshot = useChatSnapshot();
+  // The chat-client composes the per-request `agent` payload (model, kernel,
+  // mode, toolChoice, testingEnabled, snapshot, contextPayload) from the
+  // current chat's active values. Fix-with-AI no longer stamps any of those
+  // fields onto the user message — the regression-coverage test asserts the
+  // captured wire body carries the full `agent` block via the chat-client.
+  const cadChat = useCadChatClient();
+  const { agent } = cadChat;
 
   const handleFixWithAi = useCallback(
     async (errorIndex: number, createNewChat: boolean) => {
@@ -474,68 +470,49 @@ export function ChatStackTrace({ entryFile, className, side, ...props }: ChatSta
         return;
       }
 
-      // Get the current code and project context
       const filePath = await getMainFilename();
       const fileContent = await fileManager.readFile(filePath);
       const code = decodeTextFile(fileContent);
 
-      // Format the error into a prompt
       const errorPrompt = formatErrorPrompt({
         error: targetError,
         filePath,
         code,
-        kernel,
+        kernel: agent.kernel,
       });
 
-      // Open the chat panel via editorMachine
       editorRef.send({
         type: 'setPanelState',
         panelState: { openPanels: { chat: true } },
       });
 
-      // Create the error fixing message
-      const message = createMessage({
-        content: errorPrompt,
-        role: messageRole.user,
-        metadata: {
-          model: selectedModelId,
-          status: messageStatus.pending,
-          kernel,
-          snapshot,
-        },
-      });
-
-      // Create a new chat if shift was held
       if (createNewChat) {
-        // Create the chat with the message already included.
-        // When ChatInstance loads this chat, it will see the pending user
-        // message and automatically trigger the AI response via regenerate().
-        // Seed activeModel + activeKernel on the new chat so cookie changes
-        // elsewhere never silently retarget this Fix-with-AI thread.
+        // Persist the pending user message and let the hydration auto-regen
+        // (chat-session-store#loadChatActor) fire the assistant turn through
+        // the chat-client once the new chat mounts. The seed message only
+        // needs the pending status — the wire body's `agent` payload is
+        // composed by the chat-client at regenerate time, not from this
+        // metadata block. Seeding `activeModel` / `activeKernel` on the
+        // chat row keeps the new chat pinned to the current selection.
+        const message = createMessage({
+          content: errorPrompt,
+          role: messageRole.user,
+          metadata: {
+            status: messageStatus.pending,
+          },
+        });
         const newChat = await createChat({
           name: 'New chat',
           messages: [message],
-          activeModel: selectedModelId,
-          activeKernel: kernel,
+          activeModel: agent.model,
+          activeKernel: agent.kernel,
         });
         setFocusedChatId(newChat.id);
       } else {
-        // Send to current chat
-        sendMessage(message);
+        cadChat.submit({ text: errorPrompt });
       }
     },
-    [
-      errors,
-      getMainFilename,
-      fileManager,
-      kernel,
-      editorRef,
-      createChat,
-      setFocusedChatId,
-      selectedModelId,
-      sendMessage,
-      snapshot,
-    ],
+    [errors, getMainFilename, fileManager, agent.kernel, agent.model, editorRef, createChat, setFocusedChatId, cadChat],
   );
 
   if (!errors || errors.length === 0) {
@@ -596,7 +573,7 @@ export function ChatStackTrace({ entryFile, className, side, ...props }: ChatSta
   );
 
   return (
-    <div {...props} className={cn('overflow-hidden rounded-md border border-border bg-sidebar/50', className)}>
+    <div {...props} className={cn('max-w-md overflow-hidden rounded-md border border-border bg-sidebar/50', className)}>
       <Collapsible open={isOpen} onOpenChange={setIsOpen}>
         {side === 'top' ? (
           <>

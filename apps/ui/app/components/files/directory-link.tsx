@@ -1,6 +1,7 @@
 import { useCallback } from 'react';
 import { Slot as SlotPrimitive } from 'radix-ui';
 import { useProject } from '#hooks/use-project.js';
+import { useIsMobile } from '#hooks/use-mobile.js';
 import { cn } from '#utils/ui.utils.js';
 
 type DirectoryLinkProps = {
@@ -26,10 +27,18 @@ type DirectoryLinkProps = {
  * fundamentally different semantics:
  *
  * - `FileLink` -> `openFile`: heavyweight, persisted, ref-counted; allocates
- *   an editor tab.
+ *   an editor tab. The downstream `fileOpened` listener in
+ *   `chat-editor-dockview.tsx` calls `setIsEditorOpen(true)` so the editor
+ *   pane becomes visible on desktop.
  * - `ViewerLink` -> `openInViewer`: opens a 3D viewer pane.
- * - `DirectoryLink` -> `revealFileInTree { expandTarget: true }`: pure UI cue
- *   (expansion + focus + scroll); never opens or persists anything.
+ * - `DirectoryLink` -> `setPanelState { openPanels: { files: true } }` +
+ *   `revealFileInTree { expandTarget: true }` on desktop; no-op on mobile.
+ *   The pane-open side-effect mirrors `FileLink`'s editor-pane-open path so
+ *   that clicking a folder row in a chat tool surfaces the tree expansion
+ *   (otherwise the `files` Allotment pane is hidden by default and the
+ *   `fileRevealRequested` emit lands on a non-visible pane). Mobile is a
+ *   deliberate no-op because switching `mobileActiveTab` to `files` would
+ *   yank the user away from the chat they are reading.
  *
  * The `expandTarget: true` flag is what distinguishes a directory reveal from
  * the file-reveal flow used by the editor tab context menu (which expands
@@ -60,18 +69,23 @@ type DirectoryLinkProps = {
  */
 export function DirectoryLink({ path, className, children, asChild = false }: DirectoryLinkProps): React.JSX.Element {
   const project = useProject({ enableNoContext: true });
+  const isMobile = useIsMobile();
 
   const activate = useCallback(() => {
-    if (!project) {
+    if (!project || isMobile) {
       return;
     }
 
+    project.editorRef.send({
+      type: 'setPanelState',
+      panelState: { openPanels: { files: true } },
+    });
     project.editorRef.send({
       type: 'revealFileInTree',
       path,
       expandTarget: true,
     });
-  }, [project, path]);
+  }, [project, isMobile, path]);
 
   const handleClick = useCallback(
     (event: React.MouseEvent) => {

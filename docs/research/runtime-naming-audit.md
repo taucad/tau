@@ -3,7 +3,7 @@ title: 'Runtime Naming Audit and Critique'
 description: 'Audit of recently renamed symbols in @taucad/runtime, deep critique of RenderSettlement, and prioritised rename recommendations evaluated against library-api-policy.md.'
 status: draft
 created: '2026-04-22'
-updated: '2026-04-22'
+updated: '2026-05-08'
 category: audit
 related:
   - docs/policy/library-api-policy.md
@@ -120,7 +120,7 @@ function settlePriorWithGeometry(geometry): void { … }
 function settlePriorWithError(issues): void { … }
 function trackPendingIntent(): Promise<RenderSettlement> { … }
 
-// apps/ui/app/lib/await-fresh-render.ts
+// apps/ui/app/machines/await-fresh-render.ts
 const baselineIntentId = cadActor.getSnapshot().context.lastRequestedIntentId;
 
 // apps/ui/app/machines/cad.machine.ts

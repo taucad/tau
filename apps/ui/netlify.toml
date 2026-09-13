@@ -3,7 +3,7 @@
 #
 # This file is **build config only**: commands, `[dev]`, and `[[headers]]`.
 # Per-site `TAU_*`, `NODE_ENV`, and PostHog CLI secrets live in the Netlify
-# dashboard via Terraform (`repos/cloud-infra/stacks/cloud/{staging,prod-us}`).
+# dashboard via Terraform (`repos/tau-cloud/stacks/cloud/{staging,prod-us}`).
 # Pattern follows novuhq/novu: one `netlify.toml` shape, sites differ by dashboard env.
 #
 # Triggers:

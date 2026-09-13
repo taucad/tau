@@ -1,5 +1,5 @@
 import type { ContextUsageData } from '@taucad/chat';
-import { useChatSelector } from '#hooks/use-chat.js';
+import { useChatComposer } from '#hooks/active-chat-provider.js';
 import { formatNumberAbbreviation } from '#utils/number.utils.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 
@@ -86,27 +86,16 @@ export function ChatContextIndicatorDisplay({ data }: { readonly data: ContextUs
 }
 
 /**
- * Connected component that reads the latest context-usage data from chat state
- * and renders the indicator. Returns null when no usage data is available.
+ * Connected component that reads the latest context-usage data from the
+ * unified composer context and renders the indicator. Returns nothing when
+ * no usage data is available — the composer provider always reports
+ * `contextUsage: undefined` (no session, no message history), so the
+ * indicator naturally collapses on marketing routes.
  */
 export function ChatContextIndicator(): React.JSX.Element | undefined {
-  const usage = useChatSelector((state) => {
-    for (let i = state.messages.length - 1; i >= 0; i--) {
-      const message = state.messages[i]!;
-      for (let j = message.parts.length - 1; j >= 0; j--) {
-        const part = message.parts[j]!;
-        if (part.type === 'data-context-usage') {
-          return part.data;
-        }
-      }
-    }
-
-    return undefined;
-  });
-
-  if (!usage) {
+  const { contextUsage } = useChatComposer();
+  if (!contextUsage) {
     return undefined;
   }
-
-  return <ChatContextIndicatorDisplay data={usage} />;
+  return <ChatContextIndicatorDisplay data={contextUsage} />;
 }

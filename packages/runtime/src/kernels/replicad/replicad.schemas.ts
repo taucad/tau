@@ -61,9 +61,9 @@ export const replicadWasmConfigSchema = z.object({
  */
 export const replicadOptionsSchema = z.object({
   wasm: z
-    .union([z.enum(['single']), replicadWasmConfigSchema])
+    .union([z.enum(['auto', 'single', 'multi']), replicadWasmConfigSchema])
     .optional()
-    .default('single'),
+    .default('auto'),
   ocTracing: z.enum(['off', 'summary', 'per-call']).optional().default('summary'),
   withBrepEdges: z.boolean().optional().default(false),
   withSourceMapping: z.boolean().optional().default(false),

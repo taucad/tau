@@ -1,50 +1,13 @@
 import type { PartialDeep } from 'type-fest';
 import deepmerge from 'deepmerge';
 import type { Project } from '@taucad/types';
-import type { Chat, MyUIMessage } from '@taucad/chat';
+import type { Chat } from '@taucad/chat';
 import { idPrefix } from '@taucad/types/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
 import type { StorageProvider } from '#types/storage.types.js';
 import type { EditorState, EditorStateInput } from '#types/editor.types.js';
 import { metaConfig } from '#constants/meta.constants.js';
 import { KeyedMutex } from '#db/keyed-mutex.js';
-
-/**
- * Mutates `chat` in place to set `activeModel` / `activeKernel` derived from
- * the last user message metadata when the field is currently absent. Returns
- * `true` when at least one field was filled in so callers can skip writing
- * back unmodified rows. Used by the v4→v5 upgrade so existing chats inherit
- * a chat-scoped selection without further user interaction.
- */
-export function backfillActiveSelection(chat: Chat): boolean {
-  const lastUser = findLastUserMessage(chat.messages);
-  if (!lastUser) {
-    return false;
-  }
-  let mutated = false;
-  if (chat.activeModel === undefined && typeof lastUser.metadata?.model === 'string') {
-    chat.activeModel = lastUser.metadata.model;
-    mutated = true;
-  }
-  if (chat.activeKernel === undefined && lastUser.metadata?.kernel !== undefined) {
-    chat.activeKernel = lastUser.metadata.kernel;
-    mutated = true;
-  }
-  return mutated;
-}
-
-function findLastUserMessage(messages: readonly MyUIMessage[] | undefined): MyUIMessage | undefined {
-  if (!messages) {
-    return undefined;
-  }
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const message = messages[i];
-    if (message?.role === 'user') {
-      return message;
-    }
-  }
-  return undefined;
-}
 
 export class IndexedDbStorageProvider implements StorageProvider {
   /**
@@ -772,7 +735,6 @@ export class IndexedDbStorageProvider implements StorageProvider {
       request.onupgradeneeded = (event) => {
         const db = request.result;
         const { oldVersion } = event;
-        const { transaction } = request;
 
         // Version 1: Create projects store
         if (oldVersion < 1 && !db.objectStoreNames.contains(this.projectsStoreName)) {
@@ -790,30 +752,6 @@ export class IndexedDbStorageProvider implements StorageProvider {
         // Version 4+: Create editor store for transient Editor state
         if (oldVersion < 4 && !db.objectStoreNames.contains(this.editorStoreName)) {
           db.createObjectStore(this.editorStoreName, { keyPath: 'projectId' });
-        }
-
-        // Version 5: Backfill chat.activeModel / chat.activeKernel from the
-        // last user message metadata. After this migration every chat owns
-        // its model + kernel, so subsequent cookie changes never mutate the
-        // active selection of a hydrated chat. Walks the existing chats
-        // cursor inside the same upgrade transaction so the upgrade is
-        // atomic and observable to the next `getDb()` consumer.
-        if (oldVersion < 5 && oldVersion >= 2 && transaction) {
-          const chatsStore = transaction.objectStore(this.chatsStoreName);
-          const cursorRequest = chatsStore.openCursor();
-          // oxlint-disable-next-line unicorn/prefer-add-event-listener -- this is the preferred API for indexedDB
-          cursorRequest.onsuccess = () => {
-            const cursor = cursorRequest.result;
-            if (!cursor) {
-              return;
-            }
-            const chat = cursor.value as Chat;
-            const backfilled = backfillActiveSelection(chat);
-            if (backfilled) {
-              cursor.update(chat);
-            }
-            cursor.continue();
-          };
         }
       };
     });

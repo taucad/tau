@@ -73,17 +73,23 @@ describe('createUsageTrackingMiddleware', () => {
     });
   });
 
-  it('should record raw input tokens in OTEL histogram (not normalized)', () => {
+  it('should record NORMALIZED input tokens (cache reads excluded) so the cache-hit-rate formula is provider-agnostic', () => {
     const middleware = createUsageTrackingMiddleware(metricsService);
     const afterModel = resolveMiddlewareHook(middleware.afterModel);
 
-    const aiMessage = createAIMessageWithUsage({ inputTokens: 500, outputTokens: 200 });
+    // Anthropic-shape: raw input_tokens = 500 includes 100 cache reads. The
+    // normalized count drops cache reads down to 400 net input tokens.
+    const aiMessage = createAIMessageWithUsage({
+      inputTokens: 500,
+      outputTokens: 200,
+      cacheRead: 100,
+    });
 
     mockModelService.normalizeUsageTokens.mockReturnValue({
-      inputTokens: 300,
+      inputTokens: 400,
       outputTokens: 200,
       reasoningTokens: 0,
-      cacheReadTokens: 0,
+      cacheReadTokens: 100,
       cacheWriteTokens: 0,
     });
 
@@ -103,8 +109,69 @@ describe('createUsageTrackingMiddleware', () => {
       (call: unknown) => (call as MetricCall)[1][AttributeKey.GEN_AI_TOKEN_TYPE] === GenAiTokenType.OUTPUT,
     ) as MetricCall | undefined;
 
-    expect(inputCall?.[0]).toBe(500);
+    expect(inputCall?.[0]).toBe(400);
     expect(outputCall?.[0]).toBe(200);
+  });
+
+  it('should record cache_read tokens as a third token-type series when cache reads occurred', () => {
+    mockModelService.normalizeUsageTokens.mockImplementation((_id, usage) => ({
+      inputTokens: usage.inputTokens - usage.cacheReadTokens - usage.cacheWriteTokens,
+      outputTokens: usage.outputTokens,
+      reasoningTokens: usage.reasoningTokens,
+      cacheReadTokens: usage.cacheReadTokens,
+      cacheWriteTokens: usage.cacheWriteTokens,
+    }));
+
+    const middleware = createUsageTrackingMiddleware(metricsService);
+    const afterModel = resolveMiddlewareHook(middleware.afterModel);
+
+    const aiMessage = createAIMessageWithUsage({
+      inputTokens: 130_000,
+      outputTokens: 800,
+      cacheRead: 100_000,
+    });
+
+    afterModel(
+      // oxlint-disable-next-line @typescript-eslint/no-explicit-any -- Partial mock state/runtime for middleware testing
+      { messages: [aiMessage] } as any,
+      // oxlint-disable-next-line @typescript-eslint/no-explicit-any -- Partial mock state/runtime for middleware testing
+      { context: { modelId: 'anthropic-claude-opus-4.8', modelService: mockModelService }, writer } as any,
+    );
+
+    const { calls } = (metricsService.genAiTokenUsage.record as ReturnType<typeof vi.fn>).mock;
+    type MetricCall = [number, Record<string, string>];
+    const cacheReadCall = calls.find(
+      (call: unknown) => (call as MetricCall)[1][AttributeKey.GEN_AI_TOKEN_TYPE] === GenAiTokenType.CACHE_READ,
+    ) as MetricCall | undefined;
+
+    expect(cacheReadCall, 'cache_read series must be recorded when cache hits occur').toBeDefined();
+    expect(cacheReadCall?.[0]).toBe(100_000);
+  });
+
+  it('should NOT record a cache_read series when cache reads were zero', () => {
+    const middleware = createUsageTrackingMiddleware(metricsService);
+    const afterModel = resolveMiddlewareHook(middleware.afterModel);
+
+    const aiMessage = createAIMessageWithUsage({
+      inputTokens: 1000,
+      outputTokens: 200,
+      cacheRead: 0,
+    });
+
+    afterModel(
+      // oxlint-disable-next-line @typescript-eslint/no-explicit-any -- Partial mock state/runtime for middleware testing
+      { messages: [aiMessage] } as any,
+      // oxlint-disable-next-line @typescript-eslint/no-explicit-any -- Partial mock state/runtime for middleware testing
+      { context: { modelId: 'claude-3.5-sonnet', modelService: mockModelService }, writer } as any,
+    );
+
+    const { calls } = (metricsService.genAiTokenUsage.record as ReturnType<typeof vi.fn>).mock;
+    type MetricCall = [number, Record<string, string>];
+    const cacheReadCall = calls.find(
+      (call: unknown) => (call as MetricCall)[1][AttributeKey.GEN_AI_TOKEN_TYPE] === GenAiTokenType.CACHE_READ,
+    ) as MetricCall | undefined;
+
+    expect(cacheReadCall, 'cache_read series must not be emitted when no cache hits occurred').toBeUndefined();
   });
 
   it('should populate response_model from response_metadata.model (Anthropic)', () => {
@@ -233,7 +300,7 @@ describe('createUsageTrackingMiddleware', () => {
       // oxlint-disable-next-line @typescript-eslint/no-explicit-any -- Partial mock state/runtime for middleware testing
       { messages: [aiMessage] } as any,
       // oxlint-disable-next-line @typescript-eslint/no-explicit-any -- Partial mock state/runtime for middleware testing
-      { context: { modelId: 'anthropic-claude-opus-4.7', modelService: mockModelService }, writer } as any,
+      { context: { modelId: 'anthropic-claude-opus-4.8', modelService: mockModelService }, writer } as any,
     );
 
     expect(writer).toHaveBeenCalledWith(

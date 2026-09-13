@@ -36,10 +36,10 @@ const keyCombinationEditor = {
  */
 function FileSystemInfo({
   backendType,
-  connectedDirectoryName,
+  activeWorkspaceName,
 }: {
   readonly backendType: FileSystemBackend;
-  readonly connectedDirectoryName: string | undefined;
+  readonly activeWorkspaceName: string | undefined;
 }): React.JSX.Element {
   const meta = filesystemBackendMeta[backendType];
   const Icon = backendIcons[backendType];
@@ -51,8 +51,8 @@ function FileSystemInfo({
         <Icon className='size-4 shrink-0 text-muted-foreground' />
         <div className='flex flex-col gap-0.5'>
           <span className='text-sm font-medium'>{meta.label}</span>
-          {backendType === 'webaccess' && connectedDirectoryName ? (
-            <span className='text-xs text-muted-foreground'>{connectedDirectoryName}</span>
+          {backendType === 'webaccess' && activeWorkspaceName ? (
+            <span className='text-xs text-muted-foreground'>{activeWorkspaceName}</span>
           ) : (
             <span className='text-xs text-muted-foreground'>{meta.description}</span>
           )}
@@ -99,7 +99,7 @@ export function ChatDetails({
   const projectDescription = useSelector(projectRef, (state) => state.context.project?.description ?? '');
   const projectTags = useSelector(projectRef, (state) => state.context.project?.tags ?? []);
   const mainFile = useSelector(projectRef, (state) => state.context.project?.assets.mechanical?.main ?? '');
-  const { fileManagerRef, connectedDirectoryName } = useFileManager();
+  const { fileManagerRef, activeWorkspaceName } = useFileManager();
   const backendType = useSelector(fileManagerRef, (state) => state.context.backendType);
 
   const toggleDetails = (): void => {
@@ -195,7 +195,7 @@ export function ChatDetails({
             </div>
 
             {/* Filesystem Info */}
-            <FileSystemInfo backendType={backendType} connectedDirectoryName={connectedDirectoryName} />
+            <FileSystemInfo backendType={backendType} activeWorkspaceName={activeWorkspaceName} />
 
             {/* Usage Statistics */}
             <ChatDetailsUsage />

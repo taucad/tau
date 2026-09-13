@@ -8,6 +8,7 @@ import { matcapMaterial } from '#components/geometry/graphics/three/materials/ma
 import { FontGeometry } from '#components/geometry/graphics/three/geometries/font-geometry.js';
 import { RoundedRectangleGeometry } from '#components/geometry/graphics/three/geometries/rounded-rectangle-geometry.js';
 import { adjustHexColorBrightness } from '#utils/color.utils.js';
+import { topMostRenderOrder } from '#components/geometry/graphics/three/utils/render-order.utils.js';
 
 // Module-scope scratch vectors for PlaneSelector useFrame (avoids per-frame allocations)
 // oxlint-disable-next-line unicorn-js/prevent-abbreviations -- dir refers to direction vector, not directory
@@ -374,7 +375,7 @@ function PlaneSelector({
   const actualColor = displayedHover ? darkenedColor : slightlyDarkenedColor;
 
   return (
-    <group ref={groupRef} renderOrder={Infinity} position={position} rotation={rotation}>
+    <group ref={groupRef} renderOrder={topMostRenderOrder} position={position} rotation={rotation}>
       <mesh onClick={handleClick} onPointerOver={handlePointerOver} onPointerOut={handlePointerOut}>
         <primitive object={roundedRectangleGeometry} />
         <meshMatcapMaterial

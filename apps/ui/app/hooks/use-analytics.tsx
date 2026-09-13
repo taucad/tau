@@ -1,6 +1,7 @@
 import { PostHogProvider, usePostHog } from 'posthog-js/react';
 import type { PostHog } from 'posthog-js/react';
-import { useAuthenticate } from '@daveyplate/better-auth-ui';
+import { useSession } from '@better-auth-ui/react';
+import { authClient } from '#lib/auth-client.js';
 import { useEffect, useRef } from 'react';
 import { posthogConfig } from '#lib/posthog.lib.js';
 import { useCookie } from '#hooks/use-cookie.js';
@@ -62,7 +63,8 @@ export function useCookieConsent(): [ConsentStatus, (status: ConsentStatus) => v
  */
 function AnalyticsIdentifier({ children }: { readonly children: React.ReactNode }): React.ReactNode {
   const analytics = useAnalytics();
-  const { user } = useAuthenticate({ enabled: false });
+  const { data: sessionData } = useSession(authClient);
+  const user = sessionData?.user;
   const [consentStatus] = useCookieConsent();
   const previousUserIdRef = useRef<string | undefined>(undefined);
 

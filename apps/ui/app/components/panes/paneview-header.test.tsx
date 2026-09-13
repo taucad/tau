@@ -163,7 +163,9 @@ describe('PaneviewHeaderTitle', () => {
 
     const title = screen.getByText('custom-title.ts');
     expect(title.classList.contains('truncate')).toBe(true);
-    expect(title.classList.contains('text-xs')).toBe(true);
+    // 13px matches `--dv-tabs-and-actions-container-font-size` in dockview.tsx
+    // so paneview header titles render at the same font-size as dockview tabs.
+    expect(title.classList.contains('text-[13px]')).toBe(true);
   });
 
   it('applies custom className', () => {

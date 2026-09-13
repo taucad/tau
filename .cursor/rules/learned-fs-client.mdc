@@ -1,0 +1,21 @@
+---
+description: Auto-curated learned facts and preferences for the `fs-client` package (packages/fs-client)
+globs:
+  - "packages/fs-client/**"
+alwaysApply: false
+---
+
+# Learned: fs-client
+
+Auto-maintained by the `agents-memory-updater` subagent. New bullets are
+capped at 200 chars and 12 bullets per section.
+
+## Learned User Preferences
+
+- Avoid `fs` as a facade name in `@taucad/fs-client` — it is overloaded with the adjacent FS RPC methods and reads ambiguously to humans; the chosen split is typed `client` (generic RPC) + `workspace` (mount/unmount/lifecycle).
+- Reject `*Scoped` duplicate-method surfaces (e.g. `readFileScoped`, `readDirScoped`) on `FileSystemClient`/`FileContentService` — every new method would need a parallel scoped twin; collapse via a typed facade where scope is a context dimension, not a method axis.
+
+## Learned Workspace Facts
+
+- `packages/fs-client` exposes two typed facades: `client` for generic file-system RPC (read/write/stat/list) and `workspace` for mount-table/workspace-binding lifecycle; consumer code addresses scoping by picking the right facade, not by calling `*Scoped` variants.
+- `WorkspacePathEscapeError` class-of-bug: project IDs like `proj_X` must be resolved through the workspace-aware `client` facade (it dispatches to the project's bound workspace/backend), never by composing `/projects/${id}` and feeding it to a single-root resolver — projects may live under different backends/workspaces, so `toAbsoluteWorkspacePath` against `/` throws when the project's true mount sits elsewhere.

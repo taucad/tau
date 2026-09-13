@@ -121,6 +121,37 @@
         "service": "tau-api",
         "component": "api"
       }
+    },
+    {
+      "uid": "gen-ai-prompt-cache-hit-rate-low",
+      "title": "GenAiPromptCacheHitRateLow: Prompt cache hit rate below 40% (cost bleed)",
+      "condition": "cache_hit_rate_low",
+      "data": [
+        {
+          "refId": "cache_hit_rate_low",
+          "queryType": "",
+          "relativeTimeRange": { "from": 1800, "to": 0 },
+          "datasourceUid": "prometheus",
+          "model": {
+            "expr": "(\n  sum by (gen_ai_request_model, gen_ai_provider_name) (rate(gen_ai_client_token_usage_sum{service_name=\"tau-api\", gen_ai_token_type=\"cache_read\"}[30m]))\n  /\n  (\n    sum by (gen_ai_request_model, gen_ai_provider_name) (rate(gen_ai_client_token_usage_sum{service_name=\"tau-api\", gen_ai_token_type=\"cache_read\"}[30m]))\n    +\n    sum by (gen_ai_request_model, gen_ai_provider_name) (rate(gen_ai_client_token_usage_sum{service_name=\"tau-api\", gen_ai_token_type=\"input\"}[30m]))\n  )\n) < 0.4\nand\nsum by (gen_ai_request_model, gen_ai_provider_name) (increase(gen_ai_client_token_usage_sum{service_name=\"tau-api\", gen_ai_token_type=\"input\"}[30m])) >= 200000",
+            "intervalMs": 15000,
+            "maxDataPoints": 20,
+            "refId": "cache_hit_rate_low"
+          }
+        }
+      ],
+      "noDataState": "OK",
+      "execErrState": "OK",
+      "for": "30m",
+      "annotations": {
+        "summary": "Prompt cache hit rate <40% sustained for 30m on a model with non-trivial volume.",
+        "description": "Provider-side prompt caches (Gemini implicit, Anthropic incremental, OpenAI prompt) are not hitting on {{ $labels.gen_ai_provider_name }}/{{ $labels.gen_ai_request_model }} despite >=200K input tokens billed in the last 30m. This is a cost-bleed signal, not a user-facing failure. Common causes: per-turn-mutating prefix bytes (token-usage reminders, dynamic system-prompt fields), tool-list churn, or LangChain integration regressions. See docs/research/gemini-prompt-cache-busting.md for the diagnosis playbook."
+      },
+      "labels": {
+        "severity": "warning",
+        "service": "tau-api",
+        "component": "ai"
+      }
     }
   ]
 }

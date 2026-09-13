@@ -48,6 +48,7 @@ export function useViewSettingsSync({
   const upDirection = useSelector(graphicsRef, (s) => s.context.upDirection);
   const cameraFovAngle = useSelector(graphicsRef, (s) => s.context.cameraFovAngle);
   const environmentPreset = useSelector(graphicsRef, (s) => s.context.environmentPreset);
+  const graphicsBackendPreference = useSelector(graphicsRef, (s) => s.context.graphicsBackendPreference);
 
   // Pinned measurements for persistence
   const measurements = useSelector(graphicsRef, (s) => s.context.measurements);
@@ -78,8 +79,10 @@ export function useViewSettingsSync({
       upDirection,
       cameraFovAngle,
       environmentPreset,
+      graphicsBackend: graphicsBackendPreference,
       pinnedMeasurements,
       renderTimeout,
+      schemaVersion: 4,
     };
 
     // Skip the very first emission to avoid overwriting restored state
@@ -116,6 +119,7 @@ export function useViewSettingsSync({
     upDirection,
     cameraFovAngle,
     environmentPreset,
+    graphicsBackendPreference,
     measurements,
     renderTimeout,
   ]);

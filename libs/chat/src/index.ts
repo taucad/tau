@@ -16,6 +16,8 @@ export * from '#schemas/tools/transfer-tool.schema.js';
 export * from '#schemas/tools/transfer-to-cad-expert.tool.schema.js';
 export * from '#schemas/tools/transfer-to-research-expert.tool.schema.js';
 export * from '#schemas/tools/transfer-back-to-supervisor.tool.schema.js';
+export * from '#schemas/agent-config.schema.js';
+export * from '#schemas/chat-turn-request.schema.js';
 export * from '#schemas/context-payload.schema.js';
 export * from '#schemas/metadata.schema.js';
 export * from '#schemas/message.schema.js';

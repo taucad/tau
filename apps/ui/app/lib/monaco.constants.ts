@@ -2,7 +2,7 @@
  * Monaco Editor Constants
  *
  * Centralized constants for Monaco language IDs, file extensions, and URI prefixes.
- * Follows pattern from @libs/types/src/constants/code.constants.ts
+ * Follows pattern from @packages/types/src/constants/code.constants.ts
  */
 
 export const monacoLanguages = {

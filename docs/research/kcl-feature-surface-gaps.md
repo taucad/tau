@@ -8,7 +8,7 @@ category: audit
 related:
   - docs/research/zoo-kcl-148-integration-audit.md
   - docs/research/zoo-kcl-std-prelude-load-failure.md
-  - .cursor/skills/rebuild-kcl-wasm-lib/SKILL.md
+  - .agent/skills/rebuild-kcl-wasm-lib/SKILL.md
 ---
 
 # KCL feature surface gaps (Tau vs modeling-app)
@@ -45,4 +45,4 @@ The engine bridge rewrite (`ZooWebSocketTransport`, `ZooEngineBridge`, `ZooEngin
 ## References
 
 - [`zoo-kcl-148-integration-audit.md`](./zoo-kcl-148-integration-audit.md) — historical ABI drift and remediation.
-- [Rebuild kcl-wasm-lib skill](../.cursor/skills/rebuild-kcl-wasm-lib/SKILL.md) — rebuild checklist and WASM ABI audit.
+- [Rebuild kcl-wasm-lib skill](../.agent/skills/rebuild-kcl-wasm-lib/SKILL.md) — rebuild checklist and WASM ABI audit.

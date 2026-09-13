@@ -21,14 +21,21 @@ type GroupedItems<T> = {
   items: T[];
 };
 
-type ComboBoxResponsiveProperties<T> = Omit<React.HTMLAttributes<HTMLDivElement>, 'defaultValue' | 'onSelect'> & {
+type ComboBoxResponsiveProperties<T> = Omit<
+  React.HTMLAttributes<HTMLDivElement>,
+  'defaultValue' | 'onSelect' | 'value'
+> & {
   readonly groupedItems: Array<GroupedItems<T>>;
   readonly renderLabel: (item: T, selectedItem: T | undefined) => ReactNode;
   readonly children: ReactNode;
   readonly getValue: (item: T) => string;
-  readonly defaultValue: T | undefined;
+  /** Controlled selection (`selectedItem` in `renderLabel` + checkmark alignment). Mirrors parent source of truth — no internal snapshot stalemate. */
+  readonly value?: T | undefined;
   readonly onSelect?: (value: string) => void;
   readonly onClose?: () => void;
+  /** Controlled open state. When provided, parent owns open/close. */
+  readonly isOpen?: boolean;
+  readonly onOpenChange?: (open: boolean) => void;
   /**
    * The className for the popover/drawer content.
    */
@@ -68,9 +75,11 @@ export function ComboBoxResponsive<T>({
   renderLabel,
   children,
   getValue,
-  defaultValue,
+  value,
   onSelect,
   onClose,
+  isOpen: isOpenProperty,
+  onOpenChange,
   className,
   popoverProperties,
   drawerProperties,
@@ -92,22 +101,33 @@ export function ComboBoxResponsive<T>({
   footer,
   ...properties
 }: ComboBoxResponsiveProperties<T>): React.JSX.Element {
-  const [open, setOpen] = React.useState(false);
+  const [uncontrolledOpen, setUncontrolledOpen] = React.useState(false);
+  const isControlled = isOpenProperty !== undefined;
+  const open = isControlled ? isOpenProperty : uncontrolledOpen;
   const isMobile = useIsMobile();
-  const [selectedItem, setSelectedItem] = React.useState<T | undefined>(defaultValue);
   const selectionMadeReference = React.useRef(false);
 
-  const handleSelect = (item: T) => {
-    const value = getValue(item);
-    const shouldClose = shouldCloseOnSelect?.(value) ?? true;
+  const setOpen = React.useCallback(
+    (next: boolean) => {
+      if (!isControlled) {
+        setUncontrolledOpen(next);
+      }
 
-    setSelectedItem(item);
+      onOpenChange?.(next);
+    },
+    [isControlled, onOpenChange],
+  );
+
+  const handleSelect = (item: T) => {
+    const resolved = getValue(item);
+    const shouldClose = shouldCloseOnSelect?.(resolved) ?? true;
+
     if (shouldClose) {
       selectionMadeReference.current = true;
       setOpen(false);
     }
 
-    onSelect?.(value);
+    onSelect?.(resolved);
   };
 
   const handleOpenChange = (isOpen: boolean) => {
@@ -146,8 +166,8 @@ export function ComboBoxResponsive<T>({
           <>
             <ItemList
               groupedItems={groupedItems}
-              setSelectedItem={handleSelect}
-              selectedItem={selectedItem}
+              onPick={handleSelect}
+              selectedItem={value}
               renderLabel={renderLabel}
               getValue={getValue}
               searchPlaceHolder={searchPlaceHolder}
@@ -179,8 +199,8 @@ export function ComboBoxResponsive<T>({
         <>
           <ItemList
             groupedItems={groupedItems}
-            setSelectedItem={handleSelect}
-            selectedItem={selectedItem}
+            onPick={handleSelect}
+            selectedItem={value}
             renderLabel={renderLabel}
             getValue={getValue}
             searchPlaceHolder={searchPlaceHolder}
@@ -203,7 +223,7 @@ export function ComboBoxResponsive<T>({
 
 function ItemList<T>({
   groupedItems,
-  setSelectedItem,
+  onPick,
   selectedItem,
   renderLabel,
   getValue,
@@ -219,7 +239,7 @@ function ItemList<T>({
   onLoadMore,
 }: {
   readonly groupedItems: Array<GroupedItems<T>>;
-  readonly setSelectedItem: (item: T) => void;
+  readonly onPick: (item: T) => void;
   readonly selectedItem: T | undefined;
   readonly renderLabel: (item: T, selectedItem: T | undefined) => ReactNode;
   readonly getValue: (item: T) => string;
@@ -309,14 +329,14 @@ function ItemList<T>({
           className={cn(labelClassName)}
           disabled={isDisabled?.(item)}
           onSelect={() => {
-            setSelectedItem(item);
+            onPick(item);
           }}
         >
           {renderLabel(item, selectedItem)}
         </CommandItem>
       );
     },
-    [filteredItems, labelAsChild, labelClassName, isDisabled, renderLabel, selectedItem, setSelectedItem],
+    [filteredItems, labelAsChild, labelClassName, isDisabled, renderLabel, selectedItem, onPick],
   );
 
   if (withVirtualization) {
@@ -374,7 +394,7 @@ function ItemList<T>({
                   className={cn(labelClassName)}
                   disabled={isDisabled?.(item)}
                   onSelect={() => {
-                    setSelectedItem(item);
+                    onPick(item);
                   }}
                 >
                   {renderLabel(item, selectedItem)}

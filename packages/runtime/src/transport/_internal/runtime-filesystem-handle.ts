@@ -25,9 +25,19 @@ import { filesystemBridgeConnectMessageType } from '#framework/runtime-framework
 
 /**
  * Internal discriminated filesystem handle. The transport plane reads this
- * to decide whether the FS lives in the same isolate (`inline` — pass the
- * raw `RuntimeFileSystemBase` to the host) or behind a `MessagePort`
- * bridge (`channel` — wire it through `createBridgeServer` in the host).
+ * to decide whether the FS lives in the same isolate (`inline` — invoke
+ * `create()` to mint a fresh `RuntimeFileSystemBase` per binding) or
+ * behind a `MessagePort` bridge (`channel` — wire it through
+ * `createBridgeServer` in the host).
+ *
+ * The inline arm is a **per-binding factory**, not a captured live
+ * instance. Mirroring the v6 transport callable-plugin contract: the
+ * opaque `RuntimeFileSystem` value held in module-level options is a
+ * plain-data spec; each `RuntimeClient` materialisation invokes
+ * `handle.create()` once to produce its own isolated
+ * `RuntimeFileSystemBase`. This eliminates the cross-`RuntimeClient`
+ * mutable-state aliasing class of bugs by construction (see
+ * `docs/research/runtime-filesystem-spec-instance-harmonisation.md`).
  *
  * Transports never construct these directly — they call
  * {@link resolveRuntimeFileSystem} on a consumer-provided opaque
@@ -36,21 +46,12 @@ import { filesystemBridgeConnectMessageType } from '#framework/runtime-framework
  * @internal
  */
 export type RuntimeFileSystemHandle =
-  | { readonly kind: 'inline'; readonly fs: RuntimeFileSystemBase }
+  | { readonly kind: 'inline'; readonly create: () => RuntimeFileSystemBase }
   | {
       readonly kind: 'channel';
       readonly port: MessagePort;
       readonly dispose?: () => void;
     };
-
-/**
- * Internal factory: tag a `RuntimeFileSystemBase` as the inline arm. Used
- * by the bundled `from-X-fs` factories before they wrap the result via
- * {@link wrapAsRuntimeFileSystem}.
- *
- * @internal
- */
-export const inlineHandle = (fs: RuntimeFileSystemBase): RuntimeFileSystemHandle => ({ kind: 'inline', fs });
 
 /**
  * Internal factory: bridge a `Worker` that already serves the FS bridge
@@ -151,5 +152,5 @@ export const extractInlineFileSystem = (fs: RuntimeFileSystem | undefined): Runt
   if (handle.kind !== 'inline') {
     throw new TypeError(`extractInlineFileSystem: expected inline fs, received '${handle.kind}'`);
   }
-  return handle.fs;
+  return handle.create();
 };

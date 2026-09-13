@@ -84,7 +84,7 @@ export function ChatMessageToolGlobSearch({
     }
 
     case 'output-error': {
-      return <ChatToolError errorText={part.errorText} fallbackIcon={Files} fallbackTitle='Failed to search files' />;
+      return <ChatToolError errorText={part.errorText} icon={Files} noun='file search' />;
     }
 
     case 'approval-requested':

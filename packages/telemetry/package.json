@@ -1,6 +1,6 @@
 {
   "name": "@taucad/telemetry",
-  "version": "0.0.1",
+  "version": "0.1.0-beta.0",
   "description": "Canonical telemetry metric registry, typed reporter, observability middleware, and ingest schemas",
   "type": "module",
   "private": false,

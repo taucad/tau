@@ -12,10 +12,10 @@ import type { FileSystemBackend } from '@taucad/types';
 import type { FileSystemProvider } from '#types.js';
 
 /**
- * Caller-facing options for {@link MountTable.mount}.
+ * Common option fields shared by every {@link MountConfig} variant.
  * @public
  */
-export type MountOptions = {
+export type MountConfigCommon = {
   /**
    * When true, the full absolute path is passed to the provider unchanged
    * instead of stripping the mount prefix. Use for mounts where the provider
@@ -26,13 +26,43 @@ export type MountOptions = {
 };
 
 /**
- * Configuration for mounting a provider, combining the backend identifier
- * with optional mount options.
+ * Discriminated mount configuration. The compiler enforces that
+ * `webaccess` mounts carry an explicit `directoryHandle` and stable
+ * `workspaceId`, eliminating ambient handle state from the mount API.
+ *
+ * Non-webaccess mounts carry no workspace identity because their
+ * persistence is bound to the origin (IndexedDB / OPFS) or to the
+ * process lifetime (memory).
+ *
  * @public
  */
-export type MountConfig = {
-  readonly backend: FileSystemBackend;
-} & MountOptions;
+export type MountConfig =
+  | (MountConfigCommon & {
+      readonly backend: 'webaccess';
+      readonly directoryHandle: FileSystemDirectoryHandle;
+      readonly workspaceId: string;
+    })
+  | (MountConfigCommon & {
+      readonly backend: 'indexeddb' | 'opfs' | 'memory';
+    });
+
+/**
+ * Workspace scope passed to standalone-provider operations via the
+ * `{ scope }` options bag on `readFile`, `unlink`, `rmdir`,
+ * `getZippedDirectory`, and `readShallowDirectory`. Mirrors
+ * {@link MountConfig} but without mount-only options.
+ *
+ * @public
+ */
+export type WorkspaceScope =
+  | {
+      readonly backend: 'webaccess';
+      readonly directoryHandle: FileSystemDirectoryHandle;
+      readonly workspaceId: string;
+    }
+  | {
+      readonly backend: 'indexeddb' | 'opfs' | 'memory';
+    };
 
 /**
  * A single mount entry mapping a path prefix to a provider.
@@ -43,6 +73,13 @@ export type MountEntry = {
   readonly provider: FileSystemProvider;
   readonly backend: FileSystemBackend;
   readonly preservePath?: boolean;
+  /**
+   * Workspace identity for `webaccess` mounts only. Stable id minted from
+   * `generatePrefixedId(idPrefix.workspace)`; identifies the workspace
+   * row whose handle backs this mount. `undefined` for IDB / OPFS /
+   * memory mounts.
+   */
+  readonly workspaceId?: string;
 };
 
 /**
@@ -94,16 +131,27 @@ export class MountTable {
 
     const existingIndex = this._mounts.findIndex((m) => m.prefix === normalized);
     if (existingIndex !== -1) {
-      this._mounts[existingIndex]!.provider.dispose();
+      const existing = this._mounts[existingIndex]!;
+      existing.provider.dispose();
       this._mounts.splice(existingIndex, 1);
     }
 
-    this._mounts.push({ prefix: normalized, provider, backend: config.backend, preservePath: config.preservePath });
+    const workspaceId = config.backend === 'webaccess' ? config.workspaceId : undefined;
+    this._mounts.push({
+      prefix: normalized,
+      provider,
+      backend: config.backend,
+      preservePath: config.preservePath,
+      workspaceId,
+    });
     this._mounts.sort((a, b) => b.prefix.length - a.prefix.length);
   }
 
   /**
-   * Remove a mount point.
+   * Remove a mount point. Does not dispose the provider —
+   * `WorkspaceFileService.unmount` owns disposal. Subsequent reads under
+   * the prefix fall through to whichever broader mount covers the path
+   * (typically the root mount), matching POSIX-like `umount` semantics.
    *
    * @param prefix - Mount prefix to remove.
    */
@@ -156,6 +204,16 @@ export class MountTable {
     } catch {
       return undefined;
     }
+  }
+
+  /**
+   * All mount entries, longest-prefix-first (same order as internal resolution).
+   *
+   * @returns Mount table entries sorted longest-prefix-first.
+   * @public
+   */
+  public listMounts(): readonly MountEntry[] {
+    return this._mounts;
   }
 
   /**

@@ -9,6 +9,16 @@
       "types": "./src/index.ts",
       "import": "./src/index.ts",
       "default": "./src/index.ts"
+    },
+    "./kernel-types": {
+      "types": "./src/kernel-types.ts",
+      "import": "./src/kernel-types.ts",
+      "default": "./src/kernel-types.ts"
+    },
+    "./kcl-reference": {
+      "types": "./src/kcl-reference.ts",
+      "import": "./src/kcl-reference.ts",
+      "default": "./src/kcl-reference.ts"
     }
   },
   "imports": {

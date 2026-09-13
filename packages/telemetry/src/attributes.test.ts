@@ -39,9 +39,10 @@ describe('GenAiToolStatus', () => {
 });
 
 describe('GenAiTokenType', () => {
-  it('should define input and output values', () => {
+  it('should define input, output, and cache_read values', () => {
     expect(GenAiTokenType.INPUT).toBe('input');
     expect(GenAiTokenType.OUTPUT).toBe('output');
+    expect(GenAiTokenType.CACHE_READ).toBe('cache_read');
   });
 });
 

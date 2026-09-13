@@ -17,10 +17,10 @@ export function isModelListEntryEnabled(entry: ModelListEntry): boolean {
 
 export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListEntry>> = {
   anthropic: {
-    'claude-4.7-opus': {
-      id: 'anthropic-claude-opus-4.7',
-      name: 'Opus 4.7',
-      slug: 'claude-opus-4.7',
+    'claude-4.8-opus': {
+      id: 'anthropic-claude-opus-4.8',
+      name: 'Opus 4.8',
+      slug: 'claude-opus-4.8',
       recommended: true,
       description:
         "Anthropic's most powerful model with adaptive reasoning and 1M context, great for designing complex multi-part assemblies.",
@@ -28,7 +28,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
         id: 'anthropic',
         name: 'Anthropic',
       },
-      model: 'claude-opus-4-7',
+      model: 'claude-opus-4-8',
       support: {
         toolChoice: false,
       },
@@ -149,7 +149,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       slug: 'gpt-5.5',
       recommended: true,
       description:
-        "OpenAI's newest frontier model for complex professional work — reasoning, coding, and a 1M+ context window.",
+        "OpenAI's frontier model with agentic reasoning and a 1M+ context window, strong at planning multi-part assemblies and verifying its own work.",
       provider: {
         id: 'openai',
         name: 'OpenAI',
@@ -182,7 +182,8 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       name: 'GPT-5.3 Codex',
       slug: 'gpt-5.3-codex',
       recommended: true,
-      description: 'Agentic coding model optimized for code generation and multi-step programming tasks.',
+      description:
+        "OpenAI's state-of-the-art coding model, ideal for generating and refactoring CAD scripts across many files.",
       provider: {
         id: 'openai',
         name: 'OpenAI',
@@ -215,7 +216,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       name: 'GPT-4.1',
       slug: 'gpt-4.1',
       recommended: true,
-      description: 'Reliable and cost-effective for general-purpose design tasks.',
+      description: 'Reliable and cost-effective generalist with a 1M context window, good for everyday design tasks.',
       provider: {
         id: 'openai',
         name: 'OpenAI',
@@ -245,7 +246,8 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       name: 'Gemini 3.1 Pro',
       slug: 'gemini-3.1-pro',
       recommended: true,
-      description: "Google's most advanced Pro-tier model with deep reasoning and parallel tool call streaming.",
+      description:
+        "Google's flagship with sharpened 3D spatial reasoning and parallel tool streaming, excellent for complex modelling work.",
       provider: {
         id: 'vertexai',
         name: 'Google',
@@ -270,17 +272,18 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
         thinkingLevel: 'HIGH',
       },
     },
-    'gemini-3-flash': {
-      id: 'google-gemini-3-flash',
-      name: 'Gemini 3 Flash',
-      slug: 'gemini-3-flash',
+    'gemini-3.5-flash': {
+      id: 'google-gemini-3.5-flash',
+      name: 'Gemini 3.5 Flash',
+      slug: 'gemini-3.5-flash',
       recommended: true,
-      description: 'Fast and efficient, great for quick design tasks or small changes.',
+      description:
+        'Frontier intelligence at Flash speed with sharpened agentic coding, ideal for rapid design iterations and small changes.',
       provider: {
         id: 'vertexai',
         name: 'Google',
       },
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-3.5-flash',
       details: {
         family: 'gemini',
         families: ['gemini'],
@@ -288,15 +291,14 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
         maxTokens: 65_536,
         knowledgeCutoff: '2025-01',
         cost: {
-          inputTokens: 0.5,
-          outputTokens: 3,
-          cacheReadTokens: 0.05,
+          inputTokens: 1.5,
+          outputTokens: 9,
+          cacheReadTokens: 0.15,
           cacheWriteTokens: 0,
         },
       },
       configuration: {
         streaming: true,
-        temperature: 1,
         thinkingLevel: 'MEDIUM',
       },
     },

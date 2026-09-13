@@ -1,8 +1,7 @@
 import { Plus, Pencil, Trash, History, AlertCircle } from 'lucide-react';
 import { useState, useRef, useCallback, useMemo } from 'react';
 import type { ReactNode } from 'react';
-import { useChat } from '@ai-sdk/react';
-import type { Chat, MyUIMessage } from '@taucad/chat';
+import type { Chat } from '@taucad/chat';
 import { useSelector } from '@xstate/react';
 import { ChatHistorySettings } from '#routes/projects_.$id/chat-history-settings.js';
 import { Button } from '#components/ui/button.js';
@@ -10,7 +9,7 @@ import { useProject } from '#hooks/use-project.js';
 import { useChats } from '#hooks/use-chats.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 import { cn } from '#utils/ui.utils.js';
-import { useChatConstants } from '#utils/chat.utils.js';
+import { useProjectNameClient } from '#chat-clients/use-project-name-client.js';
 import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
 import { formatRelativeTime } from '#utils/date.utils.js';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '#components/ui/dialog.js';
@@ -47,7 +46,7 @@ export function ChatHistorySelector({
   const { status: connectionStatus, error: connectionError } = useChatRpcStatus();
   const isDisconnected = connectionStatus === 'disconnected' || connectionStatus === 'error';
 
-  const isBuildLoading = useSelector(projectRef, (state) => state.context.isLoading);
+  const isProjectLoading = useSelector(projectRef, (state) => state.context.isLoading);
   const activeChatId = useSelector(editorRef, (state) => state.context.focusedChatId) ?? '';
 
   // Derive activeChat and groupedChats from chats
@@ -75,26 +74,41 @@ export function ChatHistorySelector({
 
   const { formattedKeyCombination } = useKeybinding(newChatKeyCombination, handleAddChat);
 
-  const { sendMessage } = useChat({
-    ...useChatConstants,
-    onFinish({ message }) {
-      if (!activeChatId) {
-        return;
-      }
+  const projectNameClient = useProjectNameClient();
 
-      const textPart = message.parts.find((part) => part.type === 'text');
-      if (textPart) {
-        void handleUpdateChatName(activeChatId, textPart.text);
+  const handleUpdateChatName = useCallback(
+    async (chatId: string, name: string) => {
+      await updateChatName(chatId, name);
+    },
+    [updateChatName],
+  );
+
+  const generateAndApplyChatName = useCallback(
+    async (chatId: string, promptText: string): Promise<void> => {
+      try {
+        const generatedName = await projectNameClient.generate(promptText);
+        if (generatedName.trim().length > 0) {
+          await handleUpdateChatName(chatId, generatedName.trim());
+        }
+      } catch (error) {
+        console.error('Failed to generate chat name:', error);
+      } finally {
         setIsGeneratingName(false);
       }
     },
-  });
+    [projectNameClient, handleUpdateChatName],
+  );
 
-  // Generate name for new chats when activeChat changes and has messages but default name
+  // Generate a name for new chats when the active chat has its first user
+  // message but still carries the default "New chat" label. Routes through
+  // the `project_name` profile-scoped chat-client so the wire body's
+  // `agent` block is `{ profile: 'project_name' }` — the controller's
+  // `switch (body.agent.profile)` dispatches it to the name-generator
+  // handler. No `metadata.model = 'name-generator'` stamping survives.
   const previousActiveChatIdRef = useRef<string | undefined>(undefined);
   if (
     activeChat &&
-    !isBuildLoading &&
+    !isProjectLoading &&
     !isChatsLoading &&
     activeChat.name === 'New chat' &&
     activeChat.messages[0] &&
@@ -104,22 +118,11 @@ export function ChatHistorySelector({
     previousActiveChatIdRef.current = activeChatId;
     setIsGeneratingName(true);
 
-    // Create and send message for name generation
-    const nameGenMessage = {
-      ...activeChat.messages[0],
-      metadata: {
-        model: 'name-generator',
-      },
-    } as const satisfies MyUIMessage;
-    void sendMessage(nameGenMessage);
+    const firstMessage = activeChat.messages[0];
+    const firstText = firstMessage.parts.find((part) => part.type === 'text');
+    const promptText = firstText?.type === 'text' ? firstText.text : '';
+    void generateAndApplyChatName(activeChatId, promptText);
   }
-
-  const handleUpdateChatName = useCallback(
-    async (chatId: string, name: string) => {
-      await updateChatName(chatId, name);
-    },
-    [updateChatName],
-  );
 
   const handleRenameChat = (chatId: string, currentName: string): void => {
     setChatToRename(chatId);
@@ -261,7 +264,7 @@ export function ChatHistorySelector({
               groupedItems={groupedChats}
               renderLabel={renderChatLabel}
               getValue={getChatValue}
-              defaultValue={activeChat}
+              value={activeChat}
               placeholder='Select a chat'
               searchPlaceHolder='Search chats...'
               title='Chats'

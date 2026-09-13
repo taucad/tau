@@ -160,16 +160,24 @@ const telemetryEntrySchema = z
 
 // ---------- Memory handle (transport-supplied attachments) ----------
 
+const sharedArrayBufferSchema = z.custom<SharedArrayBuffer>(
+  (value) => typeof SharedArrayBuffer !== 'undefined' && value instanceof SharedArrayBuffer,
+);
+
+const messagePortSchema = z.custom<MessagePort>(
+  (value) => typeof MessagePort !== 'undefined' && value instanceof MessagePort,
+);
+
 export const runtimeInitializeMemoryHandleSchema = z
   .object({
-    signalBuffer: z.instanceof(SharedArrayBuffer).optional(),
-    geometryPoolBuffer: z.instanceof(SharedArrayBuffer).optional(),
-    filePoolBuffer: z.instanceof(SharedArrayBuffer).optional(),
+    signalBuffer: sharedArrayBufferSchema.optional(),
+    geometryPoolBuffer: sharedArrayBufferSchema.optional(),
+    filePoolBuffer: sharedArrayBufferSchema.optional(),
     /* `MessagePort` is the global DOM type in browser/Worker contexts
      * and resolves to the structurally-equivalent worker_threads
      * `MessagePort` in Node. Either backs the runtime FS bridge so the
      * schema accepts the global form. */
-    fileSystemPort: z.instanceof(MessagePort).optional(),
+    fileSystemPort: messagePortSchema.optional(),
   })
   .strict();
 

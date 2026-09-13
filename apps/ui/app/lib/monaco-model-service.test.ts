@@ -11,6 +11,7 @@ import type * as Monaco from 'monaco-editor';
 import { MonacoModelService } from '#lib/monaco-model-service.js';
 import type { ModelServiceConfig } from '#lib/monaco-model-service.js';
 import type { ContentChangeEvent, FileContentResult } from '@taucad/fs-client/file-content-service';
+import { createMonacoWorkspaceFs, createWorkspaceFileSystemProvider } from '#lib/monaco-workspace-fs/index.js';
 
 function textResult(text: string): FileContentResult {
   return { kind: 'text', content: new TextEncoder().encode(text) };
@@ -58,6 +59,7 @@ type MockMonaco = {
     getModel: (uri: { toString: () => string }) => MockModel | undefined;
     createModel: ReturnType<typeof vi.fn>;
     setModelMarkers: ReturnType<typeof vi.fn>;
+    onWillDisposeModel: ReturnType<typeof vi.fn>;
   };
   Uri: {
     file: (path: string) => { toString: () => string; path: string };
@@ -65,7 +67,11 @@ type MockMonaco = {
 };
 
 function createMockModel(uriPath: string, content = ''): MockModel {
-  const uri = { toString: () => `file://${uriPath}`, path: uriPath };
+  const uri = {
+    scheme: 'file',
+    toString: () => `file://${uriPath}`,
+    path: uriPath,
+  };
   return {
     uri,
     dispose: vi.fn(),
@@ -105,10 +111,15 @@ function createMockMonaco(): {
         return model;
       }),
       setModelMarkers: vi.fn(),
+      onWillDisposeModel: vi.fn(() => ({ dispose: vi.fn() })),
     },
     // eslint-disable-next-line @typescript-eslint/naming-convention -- Monaco API uses PascalCase
     Uri: {
-      file: (path: string) => ({ toString: () => `file://${path}`, path }),
+      file: (path: string) => ({
+        scheme: 'file',
+        toString: () => `file://${path}`,
+        path,
+      }),
     },
   };
 
@@ -134,11 +145,8 @@ type MockContentService = {
   onDidContentChange: ReturnType<typeof vi.fn>;
   resolve: ReturnType<typeof vi.fn>;
   peek: ReturnType<typeof vi.fn>;
+  peekOutcome: ReturnType<typeof vi.fn>;
   _handler?: (event: ContentChangeEvent) => void;
-};
-
-type MockTreeService = {
-  getTreeSnapshot: ReturnType<typeof vi.fn>;
 };
 
 function createMockContentService(): MockContentService {
@@ -151,14 +159,9 @@ function createMockContentService(): MockContentService {
     }),
     resolve: vi.fn(async (): Promise<FileContentResult> => textResult('')),
     peek: vi.fn(() => undefined),
+    peekOutcome: vi.fn(() => ({ kind: 'loading' })),
   };
   return mock;
-}
-
-function createMockTreeService(): MockTreeService {
-  return {
-    getTreeSnapshot: vi.fn(() => new Map()),
-  };
 }
 
 describe('MonacoModelService', () => {
@@ -166,24 +169,39 @@ describe('MonacoModelService', () => {
   let monaco: typeof Monaco & MockMonaco;
   let models: Map<string, MockModel>;
   let contentService: MockContentService;
-  let treeService: MockTreeService;
   let markerService: MockMarkerService;
 
   beforeEach(() => {
-    vi.useFakeTimers();
-
     service = new MonacoModelService();
     ({ monaco, models } = createMockMonaco());
     contentService = createMockContentService();
-    treeService = createMockTreeService();
     markerService = createMockMarkerService();
+
+    const workspaceFs = createMonacoWorkspaceFs(monaco);
+    workspaceFs.registerFileSystemProvider(
+      createWorkspaceFileSystemProvider({
+        monaco,
+        contentService: contentService as unknown as ModelServiceConfig['contentService'],
+      }),
+    );
 
     // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- mock<T>() proxy not assignable to ModelServiceConfig types
     service.initialize({
       monaco,
+      workspaceFs,
       contentService: contentService as unknown as ModelServiceConfig['contentService'],
-      treeService: treeService as unknown as ModelServiceConfig['treeService'],
       markerService: markerService as unknown as ModelServiceConfig['markerService'],
+    });
+
+    // Mirror `use-monaco-model-service`: content notifications + refresh bridge for workspace `onDidChange`.
+    const subscribeContentChanges = contentService.onDidContentChange as unknown as (
+      handler: (event: ContentChangeEvent) => void,
+    ) => () => void;
+    subscribeContentChanges((event: ContentChangeEvent) => {
+      service.applyContentChange(event);
+    });
+    workspaceFs.bindModelService({
+      refreshContent: async (uri) => service.refreshContent(uri),
     });
   });
 

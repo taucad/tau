@@ -80,7 +80,7 @@ export function ChatMessageToolFileEdit({
     }
 
     case 'output-error': {
-      return <ChatToolError errorText={part.errorText} fallbackIcon={Pencil} fallbackTitle='Failed to edit file' />;
+      return <ChatToolError errorText={part.errorText} icon={Pencil} noun='file edit' />;
     }
 
     case 'approval-requested':

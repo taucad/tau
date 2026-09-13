@@ -1,11 +1,20 @@
-import { assign, assertEvent, setup, emit, enqueueActions } from 'xstate';
+import { assign, assertEvent, setup, emit, enqueueActions, fromPromise } from 'xstate';
 import type { AnyActorRef } from 'xstate';
 import type { GridSizes, ScreenshotOptions, Geometry } from '@taucad/types';
 import { idPrefix } from '@taucad/types/constants';
 import type { LengthSymbol, UnitSystem } from '@taucad/units';
 import { standardInternationalBaseUnits } from '@taucad/units/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
-import type { EnvironmentPreset, PinnedMeasurement } from '#constants/editor.constants.js';
+import type {
+  EnvironmentPreset,
+  GraphicsBackendPreference,
+  PinnedMeasurement,
+  ResolvedGraphicsBackend,
+} from '#constants/editor.constants.js';
+import {
+  probeWebGpuSupport,
+  resolveGraphicsBackendPreference,
+} from '#components/geometry/graphics/graphics-backend.js';
 
 // Context type definition
 export type GraphicsContext = {
@@ -66,6 +75,13 @@ export type GraphicsContext = {
   enablePostProcessing: boolean;
   upDirection: 'x' | 'y' | 'z';
   environmentPreset: EnvironmentPreset;
+
+  /** User preference (`auto` uses runtime GPU probe). */
+  graphicsBackendPreference: GraphicsBackendPreference;
+  /** Probe result cached after startup (invoked probe). */
+  webGpuAvailable: boolean;
+  /** Active rendering backend consumed by `@react-three/fiber`. */
+  resolvedGraphicsBackend: ResolvedGraphicsBackend;
 
   // Clipping plane state
   isSectionViewActive: boolean;
@@ -146,6 +162,7 @@ export type GraphicsEvent =
   | { type: 'setPostProcessingVisibility'; payload: boolean }
   | { type: 'setUpDirection'; payload: 'x' | 'y' | 'z' }
   | { type: 'setEnvironmentPreset'; payload: EnvironmentPreset }
+  | { type: 'setGraphicsBackendPreference'; payload: GraphicsBackendPreference }
   // Clipping plane events
   | { type: 'setSectionViewActive'; payload: boolean }
   | { type: 'selectSectionView'; payload: 'xy' | 'xz' | 'yz' | undefined }
@@ -235,6 +252,7 @@ export type GraphicsInput = {
   environmentPreset?: EnvironmentPreset;
   /** Saved pinned measurements to restore */
   pinnedMeasurements?: PinnedMeasurement[];
+  graphicsBackendPreference?: GraphicsBackendPreference;
 };
 
 type LengthUnitData = {
@@ -456,6 +474,9 @@ function roundTranslationToUnitDecimals(valueInBase: number, unitFactor: number,
  * once at the operational parent level to avoid duplication.
  */
 export const graphicsMachine = setup({
+  actors: {
+    probeWebGpu: fromPromise(async () => probeWebGpuSupport()),
+  },
   types: {
     // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
     context: {} as GraphicsContext,
@@ -807,6 +828,36 @@ export const graphicsMachine = setup({
       },
     }),
 
+    setGraphicsBackendPreference: assign({
+      graphicsBackendPreference({ event }) {
+        assertEvent(event, 'setGraphicsBackendPreference');
+        return event.payload;
+      },
+      resolvedGraphicsBackend({ context, event }) {
+        assertEvent(event, 'setGraphicsBackendPreference');
+        return resolveGraphicsBackendPreference(event.payload, context.webGpuAvailable);
+      },
+    }),
+
+    recordWebGpuProbeResult: enqueueActions(({ enqueue, context, event }) => {
+      const probeEvent = event as Record<string, unknown>;
+      const outputCandidate = probeEvent['output'];
+      const output = typeof outputCandidate === 'boolean' ? outputCandidate : false;
+
+      enqueue.assign({
+        webGpuAvailable: output,
+        resolvedGraphicsBackend: resolveGraphicsBackendPreference(context.graphicsBackendPreference, output),
+      });
+    }),
+
+    /** Probe actor rejected / threw — pessimistic fallback. */
+    recordWebGpuProbeFailure: enqueueActions(({ enqueue, context }) => {
+      enqueue.assign({
+        webGpuAvailable: false,
+        resolvedGraphicsBackend: resolveGraphicsBackendPreference(context.graphicsBackendPreference, false),
+      });
+    }),
+
     setSectionViewActive: assign({
       isSectionViewActive({ event }) {
         assertEvent(event, 'setSectionViewActive');
@@ -1084,100 +1135,118 @@ export const graphicsMachine = setup({
   },
 }).createMachine({
   id: 'graphics',
-  context: ({ input }) => ({
-    // Grid state
-    gridSizes: { smallSize: 1, largeSize: 10 },
-    gridSizesComputed: { smallSize: 1, largeSize: 10 },
-    isGridSizeLocked: false,
-    graphicsUnits: {
-      length: {
-        symbol: 'mm',
-        factor: 1e-3,
-        system: 'si',
+
+  invoke: [
+    {
+      src: 'probeWebGpu',
+      id: 'probeWebGpuInvocation',
+      onDone: { actions: 'recordWebGpuProbeResult' },
+      onError: { actions: 'recordWebGpuProbeFailure' },
+    },
+  ],
+
+  context: ({ input }) => {
+    const preference = input.graphicsBackendPreference ?? 'webgl';
+
+    return {
+      // Grid state
+      gridSizes: { smallSize: 1, largeSize: 10 },
+      gridSizesComputed: { smallSize: 1, largeSize: 10 },
+      isGridSizeLocked: false,
+      graphicsUnits: {
+        length: {
+          symbol: 'mm',
+          factor: 1e-3,
+          system: 'si',
+        },
       },
-    },
-    cadUnits: {
-      length: {
-        symbol: 'mm', // Default to mm
-        factor: 1e-3,
+      cadUnits: {
+        length: {
+          symbol: 'mm', // Default to mm
+          factor: 1e-3,
+        },
       },
-    },
-    // Relative units = display units / CAD units
-    // When both are mm: 1 / 1 = 1
-    units: {
-      length: {
-        symbol: 'mm',
-        factor: 1, // 1 / 1 = 1
-        system: 'si',
+      // Relative units = display units / CAD units
+      // When both are mm: 1 / 1 = 1
+      units: {
+        length: {
+          symbol: 'mm',
+          factor: 1, // 1 / 1 = 1
+          system: 'si',
+        },
       },
-    },
 
-    // Camera state
-    cameraFovAngle: input.defaultCameraFovAngle ?? 60,
-    cameraFovAngleComputed: 75,
-    cameraPosition: 1000,
-    currentZoom: 1,
-    geometryRadius: 0,
-    sceneRadius: undefined,
+      // Camera state
+      cameraFovAngle: input.defaultCameraFovAngle ?? 60,
+      cameraFovAngleComputed: 75,
+      cameraPosition: 1000,
+      currentZoom: 1,
+      geometryRadius: 0,
+      sceneRadius: undefined,
 
-    // Visibility state (from per-view settings or defaults)
-    enableSurfaces: input.enableSurfaces ?? true,
-    enableLines: input.enableLines ?? true,
-    enableGizmo: input.enableGizmo ?? true,
-    enableGrid: input.enableGrid ?? true,
-    enableAxes: input.enableAxes ?? true,
-    enableMatcap: input.enableMatcap ?? false,
-    enablePostProcessing: input.enablePostProcessing ?? true,
-    upDirection: input.upDirection ?? 'z',
-    environmentPreset: input.environmentPreset ?? 'studio',
+      // Visibility state (from per-view settings or defaults)
+      enableSurfaces: input.enableSurfaces ?? true,
+      enableLines: input.enableLines ?? true,
+      enableGizmo: input.enableGizmo ?? true,
+      enableGrid: input.enableGrid ?? true,
+      enableAxes: input.enableAxes ?? true,
+      enableMatcap: input.enableMatcap ?? false,
+      enablePostProcessing: input.enablePostProcessing ?? false,
+      upDirection: input.upDirection ?? 'z',
+      environmentPreset: input.environmentPreset ?? 'performance',
 
-    // Clipping plane state
-    isSectionViewActive: false,
-    availableSectionViews: [
-      { id: 'xy', normal: [0, 0, 1], constant: 0 },
-      { id: 'xz', normal: [0, 1, 0], constant: 0 },
-      { id: 'yz', normal: [1, 0, 0], constant: 0 },
-    ],
-    selectedSectionViewId: undefined,
-    planeName: 'face',
-    hoveredSectionViewId: undefined,
-    sectionViewVisualization: {
-      stripeColor: '#00ff00',
-      stripeSpacing: 10,
-      stripeWidth: 1,
-    },
-    sectionViewTranslation: 0,
-    sectionViewRotation: [0, 0, 0],
-    sectionViewDirection: -1,
-    sectionViewPivot: [0, 0, 0],
-    enableClippingLines: true,
-    enableClippingMesh: true,
+      graphicsBackendPreference: preference,
+      webGpuAvailable: false,
+      resolvedGraphicsBackend: resolveGraphicsBackendPreference(preference, false),
 
-    // Measure state
-    isMeasureActive: false,
-    measurements: (input.pinnedMeasurements ?? []).map((m) => ({
-      ...m,
-      isPinned: true,
-    })),
-    currentMeasurementStart: undefined,
-    measureSnapDistance: input.measureSnapDistance ?? 40,
-    hoveredMeasurementId: undefined,
+      // Clipping plane state
+      isSectionViewActive: false,
+      availableSectionViews: [
+        { id: 'xy', normal: [0, 0, 1], constant: 0 },
+        { id: 'xz', normal: [0, 1, 0], constant: 0 },
+        { id: 'yz', normal: [1, 0, 0], constant: 0 },
+      ],
+      selectedSectionViewId: undefined,
+      planeName: 'face',
+      hoveredSectionViewId: undefined,
+      sectionViewVisualization: {
+        stripeColor: '#00ff00',
+        stripeSpacing: 10,
+        stripeWidth: 1,
+      },
+      sectionViewTranslation: 0,
+      sectionViewRotation: [0, 0, 0],
+      sectionViewDirection: -1,
+      sectionViewPivot: [0, 0, 0],
+      enableClippingLines: true,
+      enableClippingMesh: true,
 
-    // Capabilities
-    screenshotCapability: undefined,
-    cameraCapability: undefined,
+      // Measure state
+      isMeasureActive: false,
+      measurements: (input.pinnedMeasurements ?? []).map((m) => ({
+        ...m,
+        isPinned: true,
+      })),
+      currentMeasurementStart: undefined,
+      measureSnapDistance: input.measureSnapDistance ?? 40,
+      hoveredMeasurementId: undefined,
 
-    // State flags
-    isScreenshotReady: false,
-    isCameraReady: false,
+      // Capabilities
+      screenshotCapability: undefined,
+      cameraCapability: undefined,
 
-    // Active operations
-    activeScreenshotRequest: undefined,
+      // State flags
+      isScreenshotReady: false,
+      isCameraReady: false,
 
-    // Shapes
-    geometries: [],
-    geometryKey: '',
-  }),
+      // Active operations
+      activeScreenshotRequest: undefined,
+
+      // Shapes
+      geometries: [],
+      geometryKey: '',
+    };
+  },
   initial: 'operational',
   states: {
     operational: {
@@ -1232,6 +1301,9 @@ export const graphicsMachine = setup({
         },
         setEnvironmentPreset: {
           actions: 'setEnvironmentPreset',
+        },
+        setGraphicsBackendPreference: {
+          actions: 'setGraphicsBackendPreference',
         },
 
         // Plane naming and hover are global in operational state

@@ -14,7 +14,7 @@ import { cadMaterialDefaults, createExportFile } from '@taucad/types/constants';
 import { jsonSchemaFromJson } from '@taucad/utils/schema';
 import { asBuffer } from '@taucad/utils/file';
 import { defineKernel } from '#types/runtime-kernel.types.js';
-import type { KernelRuntime } from '#types/runtime-kernel.types.js';
+import type { KernelRuntime, RuntimeLogger } from '#types/runtime-kernel.types.js';
 import {
   opencascadeOptionsSchema,
   opencascadeRenderSchema,
@@ -30,8 +30,9 @@ import {
 } from '#kernels/kernel-module-helpers.js';
 import type { RuntimeModuleExports } from '#kernels/kernel-module-helpers.js';
 import { createKernelError, createKernelSuccess } from '#kernels/kernel-helpers.js';
-import { initOpenCascade } from '#kernels/opencascade/init-opencascade.js';
-import type { OpenCascadeModule } from '#kernels/opencascade/init-opencascade.js';
+import { initOcct } from '#kernels/occt/oc-init.js';
+import type { OcctModuleFactory } from '#kernels/occt/oc-init.js';
+import { detectMultiThreadSupport, activateOccParallelism } from '#kernels/occt/oc-threading.js';
 import { meshShapesToGltf, parseHexColor } from '#kernels/opencascade/opencascade-mesh.js';
 import type { ShapeEntry } from '#kernels/opencascade/opencascade.types.js';
 import { formatOcRuntimeError } from '#kernels/occt/oc-error-formatter.js';
@@ -42,7 +43,11 @@ import type { KernelIssue } from '#types/runtime.types.js';
 
 import type { OpenCascadeInstance, TopoDS_Shape } from '#kernels/opencascade/wasm/opencascade_full.js';
 
+// WASM URLs using the universal pattern for browsers and bundlers. Static
+// string literals so bundlers detect and copy the assets at build time.
+// @see https://web.dev/articles/bundling-non-js-resources#universal_pattern_for_browsers_and_bundlers
 const fullWasmUrl = new URL('wasm/opencascade_full.wasm', import.meta.url).href;
+const multiWasmUrl = new URL('wasm/opencascade_full_multi.wasm', import.meta.url).href;
 
 // =============================================================================
 // Types
@@ -65,10 +70,21 @@ export type OpenCascadeOptions = {
   /**
    * WASM build variant or custom build configuration.
    *
-   * - `'full'` (default) -- exceptions-enabled full opencascade.js build
-   * - `OpenCascadeWasmConfig` -- custom WASM/JS URLs for runtime injection
+   * - `'full'` (default) -- single-threaded, exceptions-enabled full opencascade.js build.
+   * - `'multi'` -- pthread-enabled full build; requires `SharedArrayBuffer` + cross-origin
+   *   isolation (Node 22+, or browsers with `crossOriginIsolated=true`). Loads bindings from
+   *   the `opencascade.js/multi` subpath and activates OCCT global parallelism after init.
+   * - `'auto'` -- pick `'multi'` when `SharedArrayBuffer` is usable, otherwise fall back to `'full'`.
+   * - `OpenCascadeWasmConfig` -- custom WASM/JS URLs for runtime injection.
+   *
+   * Defaults to `'full'`: the multi-threaded WASM binary is served from a local asset copy
+   * that is populated by the runtime `copy-assets` step. Until that asset ships, `'auto'`
+   * would still resolve to the (unavailable) `'multi'` binary in Node, so `'full'` stays the
+   * default and `'multi'`/`'auto'` are opt-in.
+   *
+   * @default 'full'
    */
-  wasm?: 'full' | OpenCascadeWasmConfig;
+  wasm?: 'auto' | 'full' | 'multi' | OpenCascadeWasmConfig;
   /** OC API call tracing mode. `'summary'` (default) emits aggregated stats, `'per-call'` emits individual spans. */
   ocTracing?: 'off' | 'summary' | 'per-call';
 };
@@ -86,20 +102,73 @@ type OpenCascadeContext = {
 // WASM resolution
 // =============================================================================
 
-async function resolveWasm(wasm: 'full' | OpenCascadeWasmConfig): Promise<{
+/** Concrete WASM build variant the kernel runs against. */
+type OpenCascadeWasmVariant = 'full' | 'multi';
+
+/** Emscripten module factory returning the OpenCascade instance. */
+type OpenCascadeModuleFactory = OcctModuleFactory<OpenCascadeInstance>;
+
+type ResolvedWasm = {
   wasmUrl: string;
-  moduleExports: OpenCascadeModule;
-}> {
-  if (wasm === 'full') {
-    const moduleExports = await import('#kernels/opencascade/wasm/opencascade_full.js');
-    return { wasmUrl: fullWasmUrl, moduleExports };
+  bindingsFactory: OpenCascadeModuleFactory;
+  variant: OpenCascadeWasmVariant | 'custom';
+};
+
+/**
+ * Resolve the WASM option into a concrete URL and loaded bindings factory.
+ *
+ * - **`'auto'`**: pick `'multi'` when `SharedArrayBuffer` + cross-origin isolation
+ *   are available, otherwise fall back to `'full'`.
+ * - **`'full'`** / **`'multi'`**: pin the variant explicitly. The multi build's
+ *   bindings load from the published `opencascade.js/multi` subpath (static
+ *   specifier so bundlers can code-split it); the matching pthread `.wasm` is
+ *   served from the local asset copy (`wasm/opencascade_full_multi.wasm`)
+ *   populated by the runtime `copy-assets` step — mirroring how the
+ *   single-threaded build and the Replicad kernel resolve their binaries.
+ * - **Custom config** (`{ wasmUrl, wasmBindingsUrl }`): variable `import()` with
+ *   `@vite-ignore` to bypass bundler analysis. Works in Node for any module format.
+ *
+ * @param wasm - variant tag or custom URL pair
+ * @param logger - kernel logger (used for the auto-selection log line)
+ * @returns the resolved WASM URL, bindings factory, and concrete variant.
+ */
+async function resolveWasm(
+  wasm: 'auto' | 'full' | 'multi' | OpenCascadeWasmConfig,
+  logger: RuntimeLogger,
+): Promise<ResolvedWasm> {
+  if (typeof wasm !== 'string') {
+    // oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- dynamic import() with variable URL returns any
+    const module_: Record<string, unknown> = await import(/* @vite-ignore */ wasm.wasmBindingsUrl);
+    return {
+      wasmUrl: wasm.wasmUrl,
+      bindingsFactory: (module_['default'] ?? module_) as OpenCascadeModuleFactory,
+      variant: 'custom',
+    };
   }
 
-  // oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- dynamic import with variable URL
-  const moduleExports: Record<string, unknown> = await import(/* @vite-ignore */ wasm.wasmBindingsUrl);
+  let variant: OpenCascadeWasmVariant;
+  if (wasm === 'auto') {
+    const detection = detectMultiThreadSupport();
+    variant = detection.supported ? 'multi' : 'full';
+    logger.log(`OpenCascade WASM variant auto-selected: ${variant} (${detection.reason})`);
+  } else {
+    variant = wasm;
+  }
+
+  if (variant === 'multi') {
+    const moduleExports = await import('opencascade.js/multi');
+    return {
+      wasmUrl: multiWasmUrl,
+      bindingsFactory: moduleExports.default,
+      variant: 'multi',
+    };
+  }
+
+  const moduleExports = await import('#kernels/opencascade/wasm/opencascade_full.js');
   return {
-    wasmUrl: wasm.wasmUrl,
-    moduleExports: moduleExports as unknown as OpenCascadeModule,
+    wasmUrl: fullWasmUrl,
+    bindingsFactory: moduleExports.default,
+    variant: 'full',
   };
 }
 
@@ -306,9 +375,23 @@ export default defineKernel({
     );
 
     const span = tracer.startSpan('opencascade.wasm-init');
-    const resolved = await resolveWasm(options.wasm);
-    let oc = (await initOpenCascade(resolved.wasmUrl, resolved.moduleExports, { tracer })) as OpenCascadeInstance;
+    const resolved = await resolveWasm(options.wasm, logger);
+    let oc = await initOcct<OpenCascadeInstance>(resolved.wasmUrl, resolved.bindingsFactory, {
+      tracer,
+      print: (text) => {
+        logger.trace('OCJS stdout', { data: { text } });
+      },
+      printErr: (text) => {
+        logger.warn('OCJS stderr', { data: { text } });
+      },
+    });
     span.end();
+
+    if (resolved.variant === 'multi') {
+      activateOccParallelism(oc, logger);
+    } else {
+      logger.log(`OpenCascade OCCT initialised: variant=${resolved.variant} (single-threaded)`);
+    }
 
     let tracingSummary: OcTracingSummary | undefined;
     if (ocTracing === 'summary' || ocTracing === 'per-call') {

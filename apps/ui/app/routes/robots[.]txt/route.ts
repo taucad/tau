@@ -25,7 +25,6 @@ Disallow: /workflows
 Disallow: /convert
 Disallow: /import/
 Disallow: /i/
-Disallow: /v/*?token=
 Disallow: /*?utm_
 
 Sitemap: ${sitemapUrl.href}

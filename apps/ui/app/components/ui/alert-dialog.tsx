@@ -98,6 +98,16 @@ function AlertDialogDescription({
   );
 }
 
+function AlertDialogMedia({ className, ...props }: React.ComponentProps<'div'>): React.JSX.Element {
+  return (
+    <div
+      data-slot='alert-dialog-media'
+      className={cn('mb-4 flex size-12 items-center justify-center rounded-full bg-muted', className)}
+      {...props}
+    />
+  );
+}
+
 function AlertDialogAction({
   className,
   ...props
@@ -122,6 +132,7 @@ export {
   AlertDialogFooter,
   AlertDialogTitle,
   AlertDialogDescription,
+  AlertDialogMedia,
   AlertDialogAction,
   AlertDialogCancel,
 };

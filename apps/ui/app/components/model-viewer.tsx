@@ -141,6 +141,7 @@ const ModelViewerWithOwnGraphics = memo(function ModelViewerWithOwnGraphics(
       enablePostProcessing: defaultGraphicsSettings.enablePostProcessing,
       upDirection: defaultGraphicsSettings.upDirection,
       environmentPreset: defaultGraphicsSettings.environmentPreset,
+      graphicsBackendPreference: defaultGraphicsSettings.graphicsBackend ?? 'webgl',
     },
   });
 

@@ -1,16 +1,22 @@
 ---
 title: 'Prod + Staging UI Deployment Status'
 description: 'Cross-document audit of remaining scriptable and manual deployment tasks for the Tau UI (Netlify) and supporting API (Fly.io) across staging and production, consolidating outstanding recommendations from every deployment-related research document.'
-status: active
+status: superseded
 created: '2026-04-20'
-updated: '2026-04-20'
+updated: '2026-05-14'
+category: audit
+superseded_by: docs/research/tau-cloud-activation-status.md
 changelog:
+  - date: '2026-05-14'
+    note: 'Superseded by `tau-cloud-activation-status.md`. Tau Cloud activation residuals (M1–M14) absorbed; orthogonal observability/Docker/COI scriptable tasks remain tracked by `production-observability-readiness.md`, `observability-implementation-status.md`, `api-docker-build-optimization.md`, and `runtime-cross-origin-isolation-distribution.md`.'
+  - date: '2026-05-05'
+    note: 'Netlify/DNS recommendation rows (R1/R10 of `netlify-ui-deployment-strategy.md`) adjusted for `repos/tau-cloud` ownership + registrar→Cloudflare NS migration; superseded provisioning-script narrative removed from matrices.'
   - date: '2026-04-20'
     note: 'S2 (`.dockerignore` exclusion of `tarballs/{experiments,comparisons,package,active}`) landed; verified that the four root `tarballs/*.tgz` referenced by `package.json` `file:` deps remain inside the Docker build context.'
   - date: '2026-04-20'
     note: 'S5 (R6 OCJS smoke trail third gate) landed: `probeGltfScene` now also warns with `byteLength` + `childrenCount` + `bbox` when GLTFLoader produces a scene whose world bbox is non-finite (NaN/Infinity), closing the coordinate-transform-regression branch from staging-audit Finding 7. S18 (`scripts/src/repos/` `--branch` arg ordering) closed out separately in a sibling change.'
-category: audit
 related:
+  - docs/research/tau-cloud-activation-status.md
   - docs/research/staging-cors-coep-safari-rendering-audit.md
   - docs/research/netlify-ui-deployment-strategy.md
   - docs/research/production-observability-readiness.md
@@ -22,13 +28,15 @@ related:
   - docs/research/socketio-production-resilience.md
 ---
 
+> **Superseded.** Tau Cloud activation residuals (M1–M14 in the prior body) are consolidated into [`docs/research/tau-cloud-activation-status.md`](tau-cloud-activation-status.md). The orthogonal scriptable tasks catalogued here (observability instrumentation S1/S3/S4/S11–S13, Docker S2/S19/S20, COI S6–S9) remain tracked by their parent research docs: `production-observability-readiness.md`, `observability-implementation-status.md`, `api-docker-build-optimization.md`, `runtime-cross-origin-isolation-distribution.md`. Treat the body below as a historical scorecard.
+
 # Prod + Staging UI Deployment Status
 
 Consolidated, evidence-based audit of every deployment-related research document in `docs/research/`, reconciled against the current state of the codebase, infrastructure config, and CI workflows. The goal is a single source of truth for "what still needs to happen for Tau's prod + staging UI deployment to be considered fully landed", separating tasks that can be solved with code/config changes inside this repo from one-time human operations that can never be scripted.
 
 ## Executive Summary
 
-The Netlify-fronted UI and Fly.io-fronted API are **operationally green on both staging (`taucad.dev` → `api.taucad.dev`) and production (`tau.new` → `api.tau.new`)**. The migration recommended by [`netlify-ui-deployment-strategy.md`](./netlify-ui-deployment-strategy.md) is code-complete, the staging incident root-caused in [`staging-cors-coep-safari-rendering-audit.md`](./staging-cors-coep-safari-rendering-audit.md) is closed (Pino structured logging, pre-migration probe, Loki log-content alert, post-deploy CORS smoke test, `api.taucad.dev` cert moved off prod), and the API Docker rewrite from [`api-docker-build-optimization.md`](./api-docker-build-optimization.md) shipped (R1–R6 + R11–R12 of that doc).
+The Netlify-fronted UI and Fly.io-fronted API are **green on staging (`taucad.dev`) and production (`tau.new`) with respect to deployed application codepaths**, **while DNS sovereignty is mid-migration**: Terraform shells + record declarations live in **`repos/tau-cloud`**, gated by registrar nameserver flips tracked in **`repos/tau-cloud/docs/dns-migration-plan.md`**. The staging incident root-caused in [`staging-cors-coep-safari-rendering-audit.md`](./staging-cors-coep-safari-rendering-audit.md) remains closed, and [`netlify-ui-deployment-strategy.md`](./netlify-ui-deployment-strategy.md) stays the functional reference for CI workflows even as Netlify/dashboard operations shift into Terraform modules.
 
 What remains is a long tail of **observability gaps, defense-in-depth follow-ups, and inherently manual operator tasks**:
 
@@ -36,7 +44,7 @@ What remains is a long tail of **observability gaps, defense-in-depth follow-ups
 2. ~~**`.dockerignore` does not yet exclude `tarballs/{experiments,comparisons,package,active}`**~~ — **landed**. The four entries are now present in `.dockerignore`; verified via a `busybox`/`COPY tarballs/` scratch build that the four root-level `*.tgz` referenced by `package.json` `file:` deps survive the filter and the four subdirectories do not. See [Verification Evidence](#verification-evidence).
 3. **Client-side telemetry instrumentation for 4 of 6 ingest events never wired** — the API ingest schema, validation, and metric recording are complete for `WEBSOCKET_RECONNECTION`, `EDITOR_LOAD`, `WASM_MODULE_LOAD`, and `INDEXEDDB_OPERATION`; no `apps/ui/` code POSTs to `/v1/telemetry/ingest` for any of them.
 4. **Cross-origin-isolation distribution is partial** — `@taucad/runtime/cross-origin-isolation` Tier 1+2 shipped (used by Vite plugin and React Router adapter); the Tier 3 service-worker fallback and the public docs page never landed.
-5. **Manual operator tasks** — five categories (Netlify PAT minting, Google/GitHub OAuth redirect-URI verification, registrar DNS, Let's Encrypt provisioning wait, human smoke test) are inherent to OAuth and registrar APIs and cannot be automated inside this repo.
+5. **Manual operator tasks** — Netlify PAT minting remains interactive; registrar **nameserver** delegation toggles authoritative DNS toward Cloudflare; OAuth URI verification / Let's Encrypt wait / subjective smoke judgement remain inherently human paced.
 
 The remaining work is sized small and prioritised in [Recommendations](#recommendations) below.
 
@@ -105,24 +113,24 @@ Per-document scorecard. Status legend: ✅ DONE • 🟡 PARTIAL • ⏳ OUTSTAN
 
 ### `netlify-ui-deployment-strategy.md`
 
-| #   | Recommendation                                                                              | Status | Evidence                                                                                              |
-| --- | ------------------------------------------------------------------------------------------- | ------ | ----------------------------------------------------------------------------------------------------- |
-| R1  | Provision `taucad-prod` Netlify site                                                        | ✅     | Provisioned via `scripts/netlify-provision-prod.sh`; site live, custom domain `tau.new` attached      |
-| R2  | Repair env vars on existing `taucad` site (consistent staging endpoints)                    | ✅     | Netlify dashboard env aligned with `netlify.toml`                                                     |
-| R3  | Configure env vars on `taucad-prod` (production endpoints)                                  | ✅     | `apps/ui/netlify.prod.toml` + Netlify dashboard env                                                   |
-| R4  | Verify per-PR deploy previews still work on `taucad`                                        | ✅     | Confirmed via PR deploy history                                                                       |
-| R5  | Add `.github/workflows/prod-deploy-ui.yml` (workflow_dispatch, environment: production)     | ✅     | File present; uses `netlify-cli` with `--prod --site $NETLIFY_PROD_SITE_ID`                           |
-| R6  | Pin `netlify-cli` version in CI                                                             | ✅     | Pinned in `prod-deploy-ui.yml`                                                                        |
-| R7  | Update `apps/api/fly.staging.toml` `ADDITIONAL_CORS_ORIGINS` (Netlify default + main alias) | ✅     | `["https://deploy-preview-*--taucad.netlify.app","https://taucad.netlify.app"]`                       |
-| R8  | Update `apps/api/fly.prod.toml` `ADDITIONAL_CORS_ORIGINS`                                   | ✅     | `["https://deploy-preview-*--taucad-prod.netlify.app","https://taucad-prod.netlify.app"]`             |
-| R9  | Audit Helmet `crossOriginResourcePolicy: 'cross-origin'`                                    | ✅     | `apps/api/app/main.ts:78-80` uses `apiHeaders['Cross-Origin-Resource-Policy']`                        |
-| R10 | Attach custom domains (`taucad.dev`, `tau.new`) to Netlify sites + DNS cutover              | ✅     | Live; both apex domains resolve to Netlify                                                            |
-| R11 | Decommission redundant Fly UI deploys (`apps/ui/fly.*.toml`, `deploy-ui-staging`)           | ⏳     | Files still present; Fly UI machines may still serve traffic for the same hostname (verify + cleanup) |
-| R12 | Update `review.yml` (drop UI half if Netlify deploy previews fully replace `tau-ui-pr-*`)   | ⏳     | Pending verification with R11                                                                         |
-| R13 | Add `NETLIFY_AUTH_TOKEN` + `NETLIFY_PROD_SITE_ID` to GitHub `production` env                | ✅     | Secrets configured; workflow consumes them                                                            |
-| R14 | Sanity-test Better Auth callback URLs for Netlify origins                                   | ✅     | Auth flows live on both `taucad.dev` and `tau.new`                                                    |
-| R15 | File follow-up bug: `scripts/src/repos/` `--branch` arg ordering                            | ⏳     | Not filed yet                                                                                         |
-| R16 | Document deployment topology under `docs/architecture/`                                     | ✅     | `docs/architecture/ui-deployment-topology.md` exists                                                  |
+| #   | Recommendation                                                                              | Status | Evidence                                                                                                                                                                                                  |
+| --- | ------------------------------------------------------------------------------------------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| R1  | Provision `taucad-prod` Netlify site                                                        | 🟡     | Operational site + domain pairing continues; infra-of-record is **`repos/tau-cloud`** (`modules/netlify-site` + **`repos/tau-cloud/docs/dns-migration-plan.md`**), superseding ad-hoc shell bootstrapping |
+| R2  | Repair env vars on existing `taucad` site (consistent staging endpoints)                    | ✅     | Netlify dashboard env aligned with `netlify.toml`                                                                                                                                                         |
+| R3  | Configure env vars on `taucad-prod` (production endpoints)                                  | ✅     | `apps/ui/netlify.prod.toml` + Netlify dashboard env                                                                                                                                                       |
+| R4  | Verify per-PR deploy previews still work on `taucad`                                        | ✅     | Confirmed via PR deploy history                                                                                                                                                                           |
+| R5  | Add `.github/workflows/prod-deploy-ui.yml` (workflow_dispatch, environment: production)     | ✅     | File present; uses `netlify-cli` with `--prod --site $NETLIFY_PROD_SITE_ID`                                                                                                                               |
+| R6  | Pin `netlify-cli` version in CI                                                             | ✅     | Pinned in `prod-deploy-ui.yml`                                                                                                                                                                            |
+| R7  | Update `apps/api/fly.staging.toml` `ADDITIONAL_CORS_ORIGINS` (Netlify default + main alias) | ✅     | `["https://deploy-preview-*--taucad.netlify.app","https://taucad.netlify.app"]`                                                                                                                           |
+| R8  | Update `apps/api/fly.prod.toml` `ADDITIONAL_CORS_ORIGINS`                                   | ✅     | `["https://deploy-preview-*--taucad-prod.netlify.app","https://taucad-prod.netlify.app"]`                                                                                                                 |
+| R9  | Audit Helmet `crossOriginResourcePolicy: 'cross-origin'`                                    | ✅     | `apps/api/app/main.ts:78-80` uses `apiHeaders['Cross-Origin-Resource-Policy']`                                                                                                                            |
+| R10 | Attach custom domains (`taucad.dev`, `tau.new`) to Netlify sites + DNS cutover              | 🟡     | Netlify attachments live; apex DNS authoritative migration executes via **`repos/tau-cloud/docs/dns-migration-plan.md`**                                                                                  |
+| R11 | Decommission redundant Fly UI deploys (`apps/ui/fly.*.toml`, `deploy-ui-staging`)           | ⏳     | Files still present; Fly UI machines may still serve traffic for the same hostname (verify + cleanup)                                                                                                     |
+| R12 | Update `review.yml` (drop UI half if Netlify deploy previews fully replace `tau-ui-pr-*`)   | ⏳     | Pending verification with R11                                                                                                                                                                             |
+| R13 | Add `NETLIFY_AUTH_TOKEN` + `NETLIFY_PROD_SITE_ID` to GitHub `production` env                | ✅     | Secrets configured; workflow consumes them                                                                                                                                                                |
+| R14 | Sanity-test Better Auth callback URLs for Netlify origins                                   | ✅     | Auth flows live on both `taucad.dev` and `tau.new`                                                                                                                                                        |
+| R15 | File follow-up bug: `scripts/src/repos/` `--branch` arg ordering                            | ⏳     | Not filed yet                                                                                                                                                                                             |
+| R16 | Document deployment topology under `docs/architecture/`                                     | ✅     | `docs/architecture/ui-deployment-topology.md` exists                                                                                                                                                      |
 
 ### `production-observability-readiness.md`
 
@@ -346,6 +354,6 @@ $ rg -n 'crossOriginResourcePolicy' apps/api/app/main.ts
 - [`websocket-resilience.md`](./websocket-resilience.md)
 - [`socketio-production-resilience.md`](./socketio-production-resilience.md)
 - Architecture: [`docs/architecture/ui-deployment-topology.md`](../architecture/ui-deployment-topology.md)
-- Provisioning: `scripts/netlify-provision-prod.sh`, `scripts/src/smoke-cors.sh`
+- Provisioning / DNS: **`repos/tau-cloud`** (Terraform — `pnpm repos sync`); **`scripts/src/smoke-cors.sh`**
 - Workflows: `.github/workflows/{ci,deploy,prod-deploy-ui,review}.yml`
 - Infra: `apps/api/fly.{prod,staging}.toml`, `apps/ui/netlify{,.prod}.toml`, `apps/api/Dockerfile`, `.dockerignore`, `infra/grafana/`

@@ -22,6 +22,16 @@ groups:
       - ForgeCAD
       - tinyusdz
       - SysML-v2-Release
+      - rhino3dm
+      - ammo.js
+      - box2d-wasm
+      - draco
+      - occt-import-js
+      - skia
+      - opencv
+      - build123d
+      - FreeCAD
+      - OCCT-Light
   slicers:
     description: 3D printer slicer applications
     repos:
@@ -43,6 +53,9 @@ groups:
       - novu
       - atopile
       - props
+      - pi
+      - text-to-cad
+      - codex
   3d:
     description: 3D rendering and visualization
     repos:
@@ -54,6 +67,8 @@ groups:
       - glTF-Transform
       - assimpjs
       - three-viewport-gizmo
+      - three-mesh-bvh
+      - three-cad-viewer
   dev-tools:
     description: Development tools and frameworks
     repos:
@@ -87,6 +102,7 @@ groups:
       - drizzle-orm
       - elysia
       - VSCode_SysML_Extension
+      - vscode-wasm
   tscircuit:
     description: tscircuit EDA ecosystem
     repos:
@@ -114,7 +130,7 @@ groups:
   infra:
     description: Cloud infrastructure-as-code (Terraform/Fly.io/Netlify/Supabase)
     repos:
-      - cloud-infra
+      - tau-cloud
       - terraform-provider-netlify
 repos:
   langchainjs:
@@ -450,13 +466,63 @@ repos:
     upstream: Fennec-hub/three-viewport-gizmo
     description: Three Viewport Gizmo - interactive three.js view helper
     fork: taucad/three-viewport-gizmo
-    commit: 3c22fb7b4da17aa5aaa33b169f144d1d3e2254dc
+    commit: bbad36f3e1a2b80650a9d31831c8b1bb7443eefb
   terraform-provider-netlify:
     upstream: netlify/terraform-provider-netlify
-    description: Netlify Terraform provider source (schema/release reference for Tau cloud-infra stacks).
-  cloud-infra:
-    upstream: taucad/cloud-infra
+    description: Netlify Terraform provider source (schema/release reference for tau-cloud stacks).
+  tau-cloud:
+    upstream: taucad/tau-cloud
     description: Tau cloud infrastructure as code.
   VSCode_SysML_Extension:
     upstream: daltskin/VSCode_SysML_Extension
     description: SysML v2 extension for VS Code
+  vscode-wasm:
+    upstream: microsoft/vscode-wasm
+    description: A WASI implementation that uses VS Code's extension host as the implementing API
+  three-mesh-bvh:
+    upstream: gkjohnson/three-mesh-bvh
+    description: BVH-accelerated geometry queries for three.js incl. clippedEdges section-view example
+  three-cad-viewer:
+    upstream: bernhard-42/three-cad-viewer
+    description: TypeScript CAD viewer on three.js with clipping and section view
+  rhino3dm:
+    upstream: mcneel/rhino3dm
+    description: Rhino 3D geometry library — OpenNURBS C++ via Python embind codegen
+  ammo.js:
+    upstream: kripken/ammo.js
+    description: Bullet Physics WASM port — WebIDL Binder bindgen, not embind
+  box2d-wasm:
+    upstream: Birch-san/box2d-wasm
+    description: Box2D WebAssembly bindings — embind, modern reference
+  draco:
+    upstream: google/draco
+    description: Draco 3D geometry compression — embind reference, Google quality
+  occt-import-js:
+    upstream: kovacsv/occt-import-js
+    description: OCCT STEP/IGES importer — direct OCJS peer, hand-written embind
+  skia:
+    upstream: google/skia
+    description: Skia 2D graphics — CanvasKit WASM under modules/canvaskit, largest hand-written embind binding
+  opencv:
+    upstream: opencv/opencv
+    description: OpenCV — modules/js Python codegen → embind, largest C++ codebase with auto-gen JS bindings
+  pi:
+    upstream: earendil-works/pi
+    description: Pi agent harness — coding agent CLI, unified LLM API, TUI/web UI
+  build123d:
+    upstream: gumyr/build123d
+    description: A python CAD programming library
+  FreeCAD:
+    upstream: FreeCAD/FreeCAD
+    description: FreeCAD - parametric 3D CAD modeler with feature tree caching
+  OCCT-Light:
+    upstream: Open-Cascade-SAS/OCCT-Light
+    branch: prototype-1
+    description: 'OCCT-Light: C ABI wrapper around OCCT with BRepGraph as canonical topology, by Open Cascade SAS — prototype-1 branch'
+  text-to-cad:
+    upstream: earthtojake/text-to-cad
+    description: A collection of agent skills for CAD, robotics and hardware design
+  codex:
+    upstream: openai/codex
+    branch: main
+    description: OpenAI Codex - terminal coding agent (Rust core in codex-rs + TS SDK)

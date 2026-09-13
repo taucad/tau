@@ -1,20 +1,30 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { GLTFLoader, LineSegments2 } from 'three/addons';
+import { GLTFLoader } from 'three/addons';
 import type { GLTF } from 'three/addons/loaders/GLTFLoader.js';
-import type { Group, Object3D, Material, BufferGeometry, Mesh, Texture } from 'three';
+import type { Camera, Group, Object3D, Material, BufferGeometry, Mesh, Texture } from 'three';
 import { Vector2, Box3 } from 'three';
 import { useThree } from '@react-three/fiber';
 import { applyMatcap } from '#components/geometry/graphics/three/materials/gltf-matcap.js';
 import {
   applyFatLineSegments,
+  updateGltfEdgeColor,
   updateLineMaterialResolution,
 } from '#components/geometry/graphics/three/materials/gltf-edges.js';
+import {
+  gltfEdgeColorDarkMode,
+  gltfEdgeColorLightMode,
+} from '#components/geometry/graphics/three/overlay-colors.constants.js';
 import { Theme, useTheme } from '#hooks/use-theme.js';
 import { darkModeIntensityScale } from '#components/geometry/graphics/three/utils/lights.utils.js';
+import { useThreeGraphicsBackend } from '#components/geometry/graphics/three/three-graphics-backend-context.js';
 
 // Module-scoped GLTFLoader instance. GLTFLoader is stateless and fully reusable,
 // so creating a fresh instance per parse wastes initialization overhead and GC pressure.
 const gltfLoader = new GLTFLoader();
+
+function isFatLineSegmentsMesh(child: Object3D): boolean {
+  return child.type === 'LineSegments2';
+}
 
 /**
  * Snapshot of the three OCJS rendering smoke-trail probe values:
@@ -145,7 +155,7 @@ function disposeSceneResources(object: Object3D): void {
 function saveOriginalMaterials(scene: Group): Map<number, Material | Material[]> {
   const saved = new Map<number, Material | Material[]>();
   scene.traverse((child) => {
-    if ('isMesh' in child && child.isMesh && !(child instanceof LineSegments2)) {
+    if ('isMesh' in child && child.isMesh && !isFatLineSegmentsMesh(child)) {
       const mesh = child as Mesh;
       if (Array.isArray(mesh.material)) {
         saved.set(
@@ -166,7 +176,7 @@ function saveOriginalMaterials(scene: Group): Map<number, Material | Material[]>
  */
 function restoreOriginalMaterials(scene: Group, saved: Map<number, Material | Material[]>): void {
   scene.traverse((child) => {
-    if ('isMesh' in child && child.isMesh && !(child instanceof LineSegments2)) {
+    if ('isMesh' in child && child.isMesh && !isFatLineSegmentsMesh(child)) {
       const mesh = child as Mesh;
       const original = saved.get(mesh.id);
       if (!original) {
@@ -257,7 +267,7 @@ type GltfMeshDisplayProperties = {
 function updateVisibility(scene: Group, enableSurfaces: boolean, enableLines: boolean): void {
   scene.traverse((object) => {
     // Check line types first (LineSegments2 has custom type)
-    if (object.type === 'LineSegments' || object instanceof LineSegments2) {
+    if (object.type === 'LineSegments' || isFatLineSegmentsMesh(object)) {
       object.visible = enableLines;
     } else if ('isMesh' in object && object.isMesh) {
       // `isMesh` is true for Mesh, SkinnedMesh, InstancedMesh, etc.
@@ -294,12 +304,13 @@ export function GltfMesh({
   enableSurfaces = true,
   enableLines = true,
 }: GltfMeshDisplayProperties): React.JSX.Element | undefined {
+  const graphicsBackendThree = useThreeGraphicsBackend();
   // The "base scene" is the parsed GLTF with line segments converted but no material overrides.
   // It serves as the template from which material modes (matcap/original) are derived.
   const [baseScene, setBaseScene] = useState<Group | undefined>(undefined);
   // The rendered scene has material mode applied and is what <primitive> displays.
   const [scene, setScene] = useState<Group | undefined>(undefined);
-  const { size, invalidate } = useThree();
+  const { size, invalidate, gl, camera } = useThree();
   const { theme } = useTheme();
   const matcapTint = theme === Theme.DARK ? darkModeIntensityScale : 1;
 
@@ -333,13 +344,21 @@ export function GltfMesh({
   // Parses the GLTF, converts line segments, and saves original materials.
   // Does not apply matcap or any material overrides -- that is handled by Effect 2.
   useEffect(() => {
-    let cancelled = false;
+    // Object-wrapped cancellation token (mirrors `viewport-gizmo-cube.tsx`'s
+    // `warmupCancellation` shape). The function-call indirection through
+    // `isCancelled()` defeats TS's flow-narrowing across the second await-then-check
+    // pair: without it TS pins `cancellation.cancelled` to `false` along every branch
+    // following an `if (cancellation.cancelled) return` early-return, and the
+    // post-`compileAsync` re-check would be flagged as a useless conditional even
+    // though the cleanup function mutates the property outside TS's view.
+    const cancellation = { cancelled: false };
+    const isCancelled = (): boolean => cancellation.cancelled;
 
     const loadGltf = async (): Promise<void> => {
       try {
         const gltf = await gltfLoader.parseAsync(gltfFile.buffer, '');
 
-        if (cancelled) {
+        if (isCancelled()) {
           disposeSceneResources(gltf.scene);
           return;
         }
@@ -347,16 +366,41 @@ export function GltfMesh({
         probeGltfScene(gltf, gltfFile.byteLength);
 
         // Convert LineSegments to LineSegments2 for fat line rendering
-        applyFatLineSegments(gltf, resolutionRef.current);
+        const edgeColor = theme === Theme.DARK ? gltfEdgeColorDarkMode : gltfEdgeColorLightMode;
+        applyFatLineSegments(gltf, resolutionRef.current, graphicsBackendThree, edgeColor);
 
         // Save clones of the original materials before any overrides
         disposeSavedMaterials(originalMaterialsRef.current);
         originalMaterialsRef.current = saveOriginalMaterials(gltf.scene);
 
+        // R4: pipeline pre-warm. The `Line2NodeMaterial` for edges (and the surface mesh
+        // pipelines) would otherwise pay `createRenderPipelineAsync` latency on the first
+        // visible frame, producing the "skipped frames on model load" artifact documented
+        // in `docs/research/gltf-edges-fat-line-performance.md` (Finding 5). Mirror the
+        // viewport-gizmo-cube.tsx precedent: capture `compileAsync` to a local for TS
+        // narrowing, call via `compile.call(renderer, ...)`, and re-check cancellation
+        // after the await so a teardown mid-warmup is a no-op. On WebGL `compileAsync`
+        // is absent, so the guard skips the call entirely.
+        const renderer = gl as unknown as {
+          compileAsync?: (scene: Object3D, camera: Camera) => Promise<unknown>;
+        };
+        const compile = renderer.compileAsync;
+        if (typeof compile === 'function') {
+          try {
+            await compile.call(renderer, gltf.scene, camera);
+          } catch (error) {
+            console.error('GLTF pipeline warm-up failed', error);
+          }
+          if (isCancelled()) {
+            disposeSceneResources(gltf.scene);
+            return;
+          }
+        }
+
         setBaseScene(gltf.scene);
         invalidate();
       } catch (error) {
-        if (!cancelled) {
+        if (!isCancelled()) {
           console.error('Failed to load GLTF:', error);
         }
       }
@@ -375,9 +419,20 @@ export function GltfMesh({
     void loadGltf();
 
     return () => {
-      cancelled = true;
+      cancellation.cancelled = true;
     };
-  }, [gltfFile, invalidate]);
+  }, [gltfFile, graphicsBackendThree, invalidate, gl, camera]);
+
+  // Theme-aware edge tint without re-parsing the GLTF binary.
+  useEffect(() => {
+    if (!scene) {
+      return;
+    }
+
+    const edgeColor = theme === Theme.DARK ? gltfEdgeColorDarkMode : gltfEdgeColorLightMode;
+    updateGltfEdgeColor(scene, edgeColor);
+    invalidate();
+  }, [scene, theme, invalidate]);
 
   // Cleanup on unmount: dispose base scene and saved materials
   useEffect(
@@ -395,12 +450,12 @@ export function GltfMesh({
   const applyMaterials = useCallback(
     (targetScene: Group): void => {
       if (enableMatcap) {
-        void applyMatcap({ scene: targetScene } as GLTF, matcapTint);
+        void applyMatcap({ scene: targetScene } as GLTF, matcapTint, graphicsBackendThree);
       } else {
         restoreOriginalMaterials(targetScene, originalMaterialsRef.current);
       }
     },
-    [enableMatcap, matcapTint],
+    [enableMatcap, graphicsBackendThree, matcapTint],
   );
 
   useEffect(() => {

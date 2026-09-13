@@ -92,7 +92,7 @@ function createMockFileManager() {
   };
 }
 
-function createMockBuildRef(options?: { geometryUnits?: Map<string, unknown>; mainEntryFile?: string }) {
+function createMockProjectRef(options?: { geometryUnits?: Map<string, unknown>; mainEntryFile?: string }) {
   return {
     getSnapshot: vi.fn().mockReturnValue({
       context: {
@@ -146,7 +146,7 @@ let lastTreeService: MockTreeService | undefined;
 function buildDeps(overrides?: {
   fileManager?: ReturnType<typeof createMockFileManager>;
   fileTree?: Map<string, FileEntry>;
-  projectRef?: ReturnType<typeof createMockBuildRef>;
+  projectRef?: ReturnType<typeof createMockProjectRef>;
   resolveGraphicsForFile?: ResolveGraphicsForFile;
   screenshotQuality?: number;
   treeService?: MockTreeService;
@@ -162,7 +162,7 @@ function buildDeps(overrides?: {
   createRpcHandlers({
     chatId: 'chat_rpc_handlers_test_deps',
     fileManager: mockFm as RpcHandlerDependencies['fileManager'],
-    projectRef: (overrides?.projectRef ?? createMockBuildRef()) as unknown as RpcHandlerDependencies['projectRef'],
+    projectRef: (overrides?.projectRef ?? createMockProjectRef()) as unknown as RpcHandlerDependencies['projectRef'],
     resolveGraphicsForFile: overrides?.resolveGraphicsForFile,
     screenshotQuality: overrides?.screenshotQuality ?? 0.8,
   });
@@ -445,7 +445,7 @@ describe('rpc-handlers', () => {
           geometries: [{ format: 'gltf', content: glbContent, hash: 'abc123' }],
         });
         const geometryUnits = new Map<string, unknown>([['main.scad', cadUnit]]);
-        const projectRef = createMockBuildRef({ geometryUnits });
+        const projectRef = createMockProjectRef({ geometryUnits });
         mockWaitFor.mockResolvedValue(cadSnapshotWith([{ format: 'gltf', content: glbContent, hash: 'abc123' }]));
         const deps = buildDeps({ projectRef, resolveGraphicsForFile: stubResolver });
         const graphics = deps.graphics!;
@@ -467,7 +467,7 @@ describe('rpc-handlers', () => {
         });
         const emptyUnits = new Map<string, unknown>();
         const populatedUnits = new Map<string, unknown>([['lib/main_rotor.scad', cadUnit]]);
-        const projectRef = createMockBuildRef({ geometryUnits: emptyUnits });
+        const projectRef = createMockProjectRef({ geometryUnits: emptyUnits });
         projectRef.getSnapshot
           .mockReturnValueOnce({ context: { geometryUnits: emptyUnits, mainEntryFile: 'main.scad' } })
           .mockReturnValue({ context: { geometryUnits: populatedUnits, mainEntryFile: 'main.scad' } });
@@ -491,7 +491,7 @@ describe('rpc-handlers', () => {
       });
 
       it('should return UNKNOWN with bootstrap-failure message when geometry unit bootstrap fails', async () => {
-        const projectRef = createMockBuildRef({ geometryUnits: new Map<string, unknown>() });
+        const projectRef = createMockProjectRef({ geometryUnits: new Map<string, unknown>() });
         const deps = buildDeps({ projectRef, resolveGraphicsForFile: stubResolver });
         const graphics = deps.graphics!;
 
@@ -515,7 +515,7 @@ describe('rpc-handlers', () => {
         const cadUnit = createMockCadUnit({ geometries: [] });
         const emptyUnits = new Map<string, unknown>();
         const populatedUnits = new Map<string, unknown>([['lib/main_rotor.scad', cadUnit]]);
-        const projectRef = createMockBuildRef({ geometryUnits: emptyUnits });
+        const projectRef = createMockProjectRef({ geometryUnits: emptyUnits });
         projectRef.getSnapshot
           .mockReturnValueOnce({ context: { geometryUnits: emptyUnits, mainEntryFile: 'main.scad' } })
           .mockReturnValue({ context: { geometryUnits: populatedUnits, mainEntryFile: 'main.scad' } });
@@ -536,7 +536,7 @@ describe('rpc-handlers', () => {
       it('should return NO_TOP_LEVEL_GEOMETRY when an existing geometry unit settles idle without GLTF', async () => {
         const cadUnit = createMockCadUnit({ geometries: [] });
         const geometryUnits = new Map<string, unknown>([['main.scad', cadUnit]]);
-        const projectRef = createMockBuildRef({ geometryUnits });
+        const projectRef = createMockProjectRef({ geometryUnits });
         mockWaitFor.mockResolvedValue(cadSnapshotWith([]));
 
         const deps = buildDeps({ projectRef, resolveGraphicsForFile: stubResolver });
@@ -554,7 +554,7 @@ describe('rpc-handlers', () => {
       it('should return FILE_NOT_FOUND when the kernel surfaces an ENOENT-class kernelIssue', async () => {
         const cadUnit = createMockCadUnit({ geometries: [] });
         const geometryUnits = new Map<string, unknown>([['lib/missing.scad', cadUnit]]);
-        const projectRef = createMockBuildRef({ geometryUnits });
+        const projectRef = createMockProjectRef({ geometryUnits });
         const issues = new Map<string, Array<{ message: string; type: string; severity: string }>>([
           [
             'lib/missing.scad',
@@ -587,7 +587,7 @@ describe('rpc-handlers', () => {
       it('should return FILE_NOT_FOUND for a "does not exist"-style kernelIssue', async () => {
         const cadUnit = createMockCadUnit({ geometries: [] });
         const geometryUnits = new Map<string, unknown>([['lib/typo.ts', cadUnit]]);
-        const projectRef = createMockBuildRef({ geometryUnits });
+        const projectRef = createMockProjectRef({ geometryUnits });
         const issues = new Map<string, Array<{ message: string; type: string; severity: string }>>([
           ['lib/typo.ts', [{ message: "Path does not exist: 'lib/typo.ts'", type: 'kernel', severity: 'error' }]],
         ]);
@@ -610,7 +610,7 @@ describe('rpc-handlers', () => {
       it('should fall back to UNKNOWN for non-ENOENT compile errors so the agent can read the kernel diagnostic', async () => {
         const cadUnit = createMockCadUnit({ geometries: [] });
         const geometryUnits = new Map<string, unknown>([['main.scad', cadUnit]]);
-        const projectRef = createMockBuildRef({ geometryUnits });
+        const projectRef = createMockProjectRef({ geometryUnits });
         const issues = new Map<string, Array<{ message: string; type: string; severity: string }>>([
           ['main.scad', [{ message: 'syntax error at line 4', type: 'compilation', severity: 'error' }]],
         ]);
@@ -639,7 +639,7 @@ describe('rpc-handlers', () => {
           ],
         });
         const geometryUnits = new Map<string, unknown>([['main.scad', cadUnit]]);
-        const projectRef = createMockBuildRef({ geometryUnits });
+        const projectRef = createMockProjectRef({ geometryUnits });
         mockWaitFor.mockResolvedValue(
           cadSnapshotWith([
             { format: 'svg', content: new Uint8Array(), hash: 'svg1' },
@@ -666,7 +666,7 @@ describe('rpc-handlers', () => {
           ['main.ts', mainUnit],
           ['pen.ts', penUnit],
         ]);
-        const projectRef = createMockBuildRef({ geometryUnits, mainEntryFile: 'main.ts' });
+        const projectRef = createMockProjectRef({ geometryUnits, mainEntryFile: 'main.ts' });
         mockWaitFor
           .mockResolvedValueOnce(cadSnapshotWith([{ format: 'gltf', content: mainGlb, hash: 'm' }]))
           .mockResolvedValueOnce(cadSnapshotWith([{ format: 'gltf', content: penGlb, hash: 'p' }]));
@@ -687,8 +687,8 @@ describe('rpc-handlers', () => {
       it('should map AwaitFreshRenderTimeoutError to errorCode RENDER_TIMEOUT', async () => {
         const cadUnit = createMockCadUnit();
         const geometryUnits = new Map<string, unknown>([['main.scad', cadUnit]]);
-        const projectRef = createMockBuildRef({ geometryUnits });
-        const awaitFreshRenderModule = await import('#lib/await-fresh-render.js');
+        const projectRef = createMockProjectRef({ geometryUnits });
+        const awaitFreshRenderModule = await import('#machines/await-fresh-render.js');
         mockWaitFor.mockRejectedValue(new awaitFreshRenderModule.AwaitFreshRenderTimeoutError(5000, 0));
 
         const deps = buildDeps({ projectRef, resolveGraphicsForFile: stubResolver });
@@ -707,7 +707,7 @@ describe('rpc-handlers', () => {
       it('should return UNKNOWN when waitFor rejects during geometry unit resolution', async () => {
         const cadUnit = createMockCadUnit();
         const geometryUnits = new Map<string, unknown>([['main.scad', cadUnit]]);
-        const projectRef = createMockBuildRef({ geometryUnits });
+        const projectRef = createMockProjectRef({ geometryUnits });
         mockWaitFor.mockRejectedValue(new Error('Actor stopped'));
 
         const deps = buildDeps({ projectRef, resolveGraphicsForFile: stubResolver });
@@ -726,7 +726,7 @@ describe('rpc-handlers', () => {
       });
 
       it('should handle getSnapshot throwing by returning UNKNOWN error', async () => {
-        const projectRef = createMockBuildRef();
+        const projectRef = createMockProjectRef();
         projectRef.getSnapshot.mockImplementation(() => {
           throw new Error('Actor not running');
         });
@@ -773,7 +773,7 @@ describe('rpc-handlers', () => {
           kernelClient,
         });
         const geometryUnits = new Map<string, unknown>([['main.scad', cadUnit]]);
-        const projectRef = createMockBuildRef({ geometryUnits });
+        const projectRef = createMockProjectRef({ geometryUnits });
         mockWaitFor.mockResolvedValue(cadSnapshotForExport(kernelClient));
 
         const deps = buildDeps({ projectRef, resolveGraphicsForFile: stubResolver });
@@ -794,7 +794,7 @@ describe('rpc-handlers', () => {
           geometries: [{ format: 'gltf', content: glbContent, hash: 'h1' }],
         });
         const geometryUnits = new Map<string, unknown>([['main.scad', cadUnit]]);
-        const projectRef = createMockBuildRef({ geometryUnits });
+        const projectRef = createMockProjectRef({ geometryUnits });
 
         mockWaitFor.mockResolvedValue({
           value: 'idle',
@@ -828,7 +828,7 @@ describe('rpc-handlers', () => {
           kernelClient,
         });
         const geometryUnits = new Map<string, unknown>([['main.scad', cadUnit]]);
-        const projectRef = createMockBuildRef({ geometryUnits });
+        const projectRef = createMockProjectRef({ geometryUnits });
         mockWaitFor.mockResolvedValue(cadSnapshotForExport(kernelClient));
 
         const deps = buildDeps({ projectRef, resolveGraphicsForFile: stubResolver });
@@ -846,7 +846,7 @@ describe('rpc-handlers', () => {
     describe('captureScreenshot / captureObservations resolver gating', () => {
       it('should error UNKNOWN_GEOMETRY_UNIT when no panel displays the targetFile', async () => {
         const resolver: ResolveGraphicsForFile = vi.fn(() => undefined);
-        const projectRef = createMockBuildRef();
+        const projectRef = createMockProjectRef();
         const deps = buildDeps({ projectRef, resolveGraphicsForFile: resolver });
         const graphics = deps.graphics!;
 
@@ -878,7 +878,7 @@ describe('rpc-handlers', () => {
       it('should return ready status when cad unit is idle with no errors', async () => {
         const cadUnit = createMockCadUnit({ value: 'idle' });
         const geometryUnits = new Map<string, unknown>([['main.scad', cadUnit]]);
-        const projectRef = createMockBuildRef({ geometryUnits });
+        const projectRef = createMockProjectRef({ geometryUnits });
         mockWaitFor.mockResolvedValue({
           value: 'idle',
           context: { kernelIssues: new Map<string, unknown[]>() },
@@ -899,7 +899,7 @@ describe('rpc-handlers', () => {
         const kernelIssues = new Map([['main.scad', issues]]);
         const cadUnit = createMockCadUnit({ value: 'idle', kernelIssues });
         const geometryUnits = new Map<string, unknown>([['main.scad', cadUnit]]);
-        const projectRef = createMockBuildRef({ geometryUnits });
+        const projectRef = createMockProjectRef({ geometryUnits });
         mockWaitFor.mockResolvedValue({
           value: 'idle',
           context: { kernelIssues },
@@ -918,7 +918,7 @@ describe('rpc-handlers', () => {
       it('should return error status when cad unit machine is in error state', async () => {
         const cadUnit = createMockCadUnit({ value: 'error' });
         const geometryUnits = new Map<string, unknown>([['main.scad', cadUnit]]);
-        const projectRef = createMockBuildRef({ geometryUnits });
+        const projectRef = createMockProjectRef({ geometryUnits });
         mockWaitFor.mockResolvedValue({
           value: 'error',
           context: { kernelIssues: new Map<string, unknown[]>() },
@@ -939,7 +939,7 @@ describe('rpc-handlers', () => {
         const kernelIssues = new Map([['main.scad', issues]]);
         const cadUnit = createMockCadUnit({ value: 'idle', kernelIssues });
         const geometryUnits = new Map<string, unknown>([['main.scad', cadUnit]]);
-        const projectRef = createMockBuildRef({ geometryUnits });
+        const projectRef = createMockProjectRef({ geometryUnits });
         mockWaitFor.mockResolvedValue({
           value: 'idle',
           context: { kernelIssues },
@@ -959,7 +959,7 @@ describe('rpc-handlers', () => {
         const cadUnit = createMockCadUnit({ value: 'idle' });
         const emptyUnits = new Map<string, unknown>();
         const populatedUnits = new Map<string, unknown>([['new-file.scad', cadUnit]]);
-        const projectRef = createMockBuildRef({ geometryUnits: emptyUnits });
+        const projectRef = createMockProjectRef({ geometryUnits: emptyUnits });
         projectRef.getSnapshot
           .mockReturnValueOnce({ context: { geometryUnits: emptyUnits, mainEntryFile: 'main.scad' } })
           .mockReturnValue({ context: { geometryUnits: populatedUnits, mainEntryFile: 'main.scad' } });
@@ -979,7 +979,7 @@ describe('rpc-handlers', () => {
       });
 
       it('should return error when geometry unit cannot be created', async () => {
-        const projectRef = createMockBuildRef({ geometryUnits: new Map<string, unknown>() });
+        const projectRef = createMockProjectRef({ geometryUnits: new Map<string, unknown>() });
 
         const deps = buildDeps({ projectRef });
         const result = await deps.kernelClient.getKernelResult('impossible.scad');
@@ -994,7 +994,7 @@ describe('rpc-handlers', () => {
       it('should return error when waitFor rejects', async () => {
         const cadUnit = createMockCadUnit();
         const geometryUnits = new Map<string, unknown>([['main.scad', cadUnit]]);
-        const projectRef = createMockBuildRef({ geometryUnits });
+        const projectRef = createMockProjectRef({ geometryUnits });
         mockWaitFor.mockRejectedValue(new Error('Actor stopped'));
 
         const deps = buildDeps({ projectRef });
@@ -1033,7 +1033,7 @@ describe('rpc-handlers', () => {
       const handlers = createRpcHandlers({
         chatId: 'chat_ledger_ok',
         fileManager: mockFm as RpcHandlerDependencies['fileManager'],
-        projectRef: createMockBuildRef() as unknown as RpcHandlerDependencies['projectRef'],
+        projectRef: createMockProjectRef() as unknown as RpcHandlerDependencies['projectRef'],
         resolveGraphicsForFile: undefined,
         screenshotQuality: 0.8,
       });
@@ -1061,7 +1061,7 @@ describe('rpc-handlers', () => {
       const handlers = createRpcHandlers({
         chatId: 'chat_ledger_err',
         fileManager: mockFm as RpcHandlerDependencies['fileManager'],
-        projectRef: createMockBuildRef() as unknown as RpcHandlerDependencies['projectRef'],
+        projectRef: createMockProjectRef() as unknown as RpcHandlerDependencies['projectRef'],
         resolveGraphicsForFile: undefined,
         screenshotQuality: 0.8,
       });
@@ -1094,7 +1094,7 @@ describe('rpc-handlers', () => {
       const handlers = createRpcHandlers({
         chatId: 'chat_ledger_numeric',
         fileManager: mockFm as RpcHandlerDependencies['fileManager'],
-        projectRef: createMockBuildRef() as unknown as RpcHandlerDependencies['projectRef'],
+        projectRef: createMockProjectRef() as unknown as RpcHandlerDependencies['projectRef'],
         resolveGraphicsForFile: undefined,
         screenshotQuality: 0.8,
       });
@@ -1125,7 +1125,7 @@ describe('rpc-handlers', () => {
       const handlers = createRpcHandlers({
         chatId: 'chat_ledger_nocode',
         fileManager: mockFm as RpcHandlerDependencies['fileManager'],
-        projectRef: createMockBuildRef() as unknown as RpcHandlerDependencies['projectRef'],
+        projectRef: createMockProjectRef() as unknown as RpcHandlerDependencies['projectRef'],
         resolveGraphicsForFile: undefined,
         screenshotQuality: 0.8,
       });
@@ -1158,7 +1158,7 @@ describe('rpc-handlers', () => {
       const handlers = createRpcHandlers({
         chatId: 'chat_ledger_strcode',
         fileManager: mockFm as RpcHandlerDependencies['fileManager'],
-        projectRef: createMockBuildRef() as unknown as RpcHandlerDependencies['projectRef'],
+        projectRef: createMockProjectRef() as unknown as RpcHandlerDependencies['projectRef'],
         resolveGraphicsForFile: undefined,
         screenshotQuality: 0.8,
       });
@@ -1191,7 +1191,7 @@ describe('rpc-handlers', () => {
       const handlers = createRpcHandlers({
         chatId: 'chat_ledger_readonly',
         fileManager: mockFm as RpcHandlerDependencies['fileManager'],
-        projectRef: createMockBuildRef() as unknown as RpcHandlerDependencies['projectRef'],
+        projectRef: createMockProjectRef() as unknown as RpcHandlerDependencies['projectRef'],
         resolveGraphicsForFile: undefined,
         screenshotQuality: 0.8,
       });
@@ -1218,7 +1218,7 @@ describe('rpc-handlers', () => {
     });
 
     it('should provide graphics when resolveGraphicsForFile is defined', () => {
-      const projectRef = createMockBuildRef();
+      const projectRef = createMockProjectRef();
       const deps = buildDeps({ projectRef, resolveGraphicsForFile: vi.fn() });
 
       expect(deps.graphics).toBeDefined();
@@ -1232,7 +1232,7 @@ describe('rpc-handlers', () => {
       const handlers = createRpcHandlers({
         chatId: 'chat_rpc_handlers_factory_test',
         fileManager: mockFm as RpcHandlerDependencies['fileManager'],
-        projectRef: createMockBuildRef() as unknown as RpcHandlerDependencies['projectRef'],
+        projectRef: createMockProjectRef() as unknown as RpcHandlerDependencies['projectRef'],
         resolveGraphicsForFile: undefined,
         screenshotQuality: 0.8,
       });

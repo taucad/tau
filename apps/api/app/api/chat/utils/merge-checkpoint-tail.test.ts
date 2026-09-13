@@ -6,11 +6,22 @@ import { toolName } from '@taucad/chat/constants';
 import { mergeCheckpointTail } from '#api/chat/utils/merge-checkpoint-tail.js';
 
 describe('mergeCheckpointTail', () => {
-  const userTurn: MyUIMessage = {
-    id: 'm_user',
+  // Request shape mirrors the wire contract enforced by `chatTurnRequestSchema`:
+  // an optional historical user turn (kicking off the conversation), the
+  // assistant turn whose stale tool parts the splice repairs, and the
+  // trailing user turn that drives the current request.
+  const historicalUserTurn: MyUIMessage = {
+    id: 'm_user_history',
     role: 'user',
     parts: [{ type: 'text', text: 'go' }],
-    metadata: { model: 'gpt-5', createdAt: 1 },
+    metadata: { createdAt: 1 },
+  };
+
+  const trailingUserTurn: MyUIMessage = {
+    id: 'm_user_trailing',
+    role: 'user',
+    parts: [{ type: 'text', text: 'continue' }],
+    metadata: { createdAt: 3 },
   };
 
   it('returns a copy when checkpoint has no tool messages', () => {
@@ -25,15 +36,15 @@ describe('mergeCheckpointTail', () => {
           input: { targetFile: 'a.scad', content: 'x' },
         },
       ],
-      metadata: { model: 'gpt-5', createdAt: 2 },
+      metadata: { createdAt: 2 },
     };
-    const requestMessages = [userTurn, assistant];
+    const requestMessages = [historicalUserTurn, assistant, trailingUserTurn];
     const next = mergeCheckpointTail({ requestMessages, checkpointMessages: [] });
     expect(next).toEqual(requestMessages);
     expect(next).not.toBe(requestMessages);
   });
 
-  it('splices checkpoint tool results for matching ids on the trailing assistant message', () => {
+  it('splices checkpoint tool results for matching ids on the most recent assistant message', () => {
     const assistant: MyUIMessage = {
       id: 'm_asst',
       role: 'assistant',
@@ -51,7 +62,7 @@ describe('mergeCheckpointTail', () => {
           input: { targetFile: 'b.scad', content: 'sphere();' },
         },
       ],
-      metadata: { model: 'gpt-5', createdAt: 2 },
+      metadata: { createdAt: 2 },
     };
 
     const toolA = new ToolMessage({
@@ -64,13 +75,14 @@ describe('mergeCheckpointTail', () => {
     });
 
     const merged = mergeCheckpointTail({
-      requestMessages: [userTurn, assistant],
+      requestMessages: [historicalUserTurn, assistant, trailingUserTurn],
       checkpointMessages: [toolA, toolB],
     });
 
-    const last = merged.at(-1);
-    expect(last?.role).toBe('assistant');
-    const { parts } = last!;
+    expect(merged.at(-1)).toBe(trailingUserTurn);
+    const spliced = merged.find((message) => message.id === 'm_asst');
+    expect(spliced?.role).toBe('assistant');
+    const { parts } = spliced!;
 
     expect(parts[0]).toMatchObject({
       state: 'output-available',
@@ -102,7 +114,7 @@ describe('mergeCheckpointTail', () => {
           input: { targetFile: 'y.scad', content: '//' },
         },
       ],
-      metadata: { model: 'gpt-5', createdAt: 2 },
+      metadata: { createdAt: 2 },
     };
 
     const toolReady = new ToolMessage({
@@ -111,13 +123,17 @@ describe('mergeCheckpointTail', () => {
     });
 
     const merged = mergeCheckpointTail({
-      requestMessages: [userTurn, assistant],
+      requestMessages: [historicalUserTurn, assistant, trailingUserTurn],
       checkpointMessages: [toolReady],
     });
 
-    const lastParts = merged.at(-1)!.parts;
+    const splicedParts = merged.find((message) => message.id === 'm_asst')!.parts;
 
-    expect(lastParts[0]).toMatchObject({ state: 'output-available', toolCallId: 'tc_ready', output: { done: true } });
-    expect(lastParts[1]).toMatchObject({ state: 'input-available', toolCallId: 'tc_pending' });
+    expect(splicedParts[0]).toMatchObject({
+      state: 'output-available',
+      toolCallId: 'tc_ready',
+      output: { done: true },
+    });
+    expect(splicedParts[1]).toMatchObject({ state: 'input-available', toolCallId: 'tc_pending' });
   });
 });

@@ -3,45 +3,64 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from '@testing-library/react';
 import type { KernelConfiguration, KernelId } from '@taucad/types/constants';
 import { kernelConfigurations } from '@taucad/types/constants';
+import type { ChatComposerContextValue } from '#hooks/active-chat-provider.js';
 
-// The chat kernel selector must read AND write through
-// `useActiveChatKernel` so the chat row gets patched alongside the cookie
-// default. These tests capture the props the component hands to
-// ComboBoxResponsive and assert the chat-scoped resolver is the only kernel
-// state surface used.
+// The chat kernel selector reads AND writes through the unified composer
+// context (`useChatComposer().kernel`). The active provider's strategy
+// (composer-only → cookie; session-backed → chat row + cookie dual-write)
+// decides whether the patch hits the chat row. Tests here lock the
+// component's contract: it must never touch raw cookie state via
+// `useKernel` — a throwing mock guarantees a loud failure on regression.
 
 const stubKernel: KernelConfiguration = kernelConfigurations.find((k) => k.id === 'manifold')!;
 
 const chatKernelState: { current: KernelConfiguration | undefined } = { current: stubKernel };
 const setActiveKernel = vi.fn();
 
-const useActiveChatKernelMock = vi.fn(() => ({
-  kernelId: chatKernelState.current?.id as KernelId,
-  kernel: chatKernelState.current,
-  setActiveKernel,
-}));
+const useChatComposerMock = vi.fn(
+  (): ChatComposerContextValue =>
+    ({
+      draftActorRef: { send: vi.fn() },
+      model: { modelId: 'm', model: undefined, setActiveModel: vi.fn() },
+      kernel: {
+        kernelId: chatKernelState.current?.id as KernelId,
+        kernel: chatKernelState.current,
+        setActiveKernel,
+      },
+      status: 'ready',
+      stop: () => undefined,
+      contextUsage: undefined,
+      session: undefined,
+    }) as unknown as ChatComposerContextValue,
+);
 
-vi.mock('#hooks/use-active-chat-kernel.js', () => ({
-  useActiveChatKernel: () => useActiveChatKernelMock(),
+vi.mock('#hooks/active-chat-provider.js', () => ({
+  useChatComposer: () => useChatComposerMock(),
 }));
 
 // The selector must NOT import `useKernel` anymore — guard with a
 // throwing mock so any regression is caught at module load.
 vi.mock('#hooks/use-kernel.js', () => ({
   useKernel: () => {
-    throw new Error('chat-kernel-selector should no longer call useKernel — switch to useActiveChatKernel');
+    throw new Error('chat-kernel-selector should no longer call useKernel — switch to useChatComposer().kernel');
   },
 }));
 
-const capturedComboBox: { onSelect?: (id: string) => void; defaultValue?: unknown } = {};
+const capturedComboBox: {
+  onSelect?: (id: string) => void;
+  value?: unknown;
+  renderLabel?: (item: KernelConfiguration, selected?: KernelConfiguration) => React.ReactNode;
+} = {};
 vi.mock('#components/ui/combobox-responsive.js', () => ({
   ComboBoxResponsive: (properties: {
     readonly onSelect?: (id: string) => void;
-    readonly defaultValue?: unknown;
+    readonly value?: unknown;
     readonly children?: React.ReactNode;
+    readonly renderLabel?: (item: KernelConfiguration, selected?: KernelConfiguration) => React.ReactNode;
   }): React.JSX.Element => {
     capturedComboBox.onSelect = properties.onSelect;
-    capturedComboBox.defaultValue = properties.defaultValue;
+    capturedComboBox.value = properties.value;
+    capturedComboBox.renderLabel = properties.renderLabel;
     return <div data-testid='combobox'>{properties.children}</div>;
   },
 }));
@@ -55,7 +74,7 @@ const { ChatKernelSelector } = await import('#components/chat/chat-kernel-select
 function renderSelector(onSelect?: (id: KernelId) => void) {
   return render(
     <ChatKernelSelector onSelect={onSelect}>
-      {({ selectedKernel }) => <span data-testid='child'>{selectedKernel?.name ?? 'none'}</span>}
+      {({ selectedKernel }) => <span data-testid='child'>{selectedKernel.name}</span>}
     </ChatKernelSelector>,
   );
 }
@@ -65,20 +84,20 @@ describe('ChatKernelSelector — chat-scoped read + dual-write', () => {
     vi.clearAllMocks();
     chatKernelState.current = stubKernel;
     capturedComboBox.onSelect = undefined;
-    capturedComboBox.defaultValue = undefined;
+    capturedComboBox.value = undefined;
   });
 
-  it('renders the selected kernel from useActiveChatKernel (not useKernel)', () => {
+  it('renders the selected kernel from useChatComposer().kernel (not useKernel)', () => {
     renderSelector();
-    expect(useActiveChatKernelMock).toHaveBeenCalled();
-    expect(capturedComboBox.defaultValue).toBe(stubKernel);
+    expect(useChatComposerMock).toHaveBeenCalled();
+    expect(capturedComboBox.value).toBe(stubKernel);
   });
 
   it('reflects the chat-local active kernel when it diverges from the cookie default', () => {
     const chatLocal = kernelConfigurations.find((k) => k.id === 'jscad')!;
     chatKernelState.current = chatLocal;
     renderSelector();
-    expect(capturedComboBox.defaultValue).toBe(chatLocal);
+    expect(capturedComboBox.value).toBe(chatLocal);
   });
 
   it('routes the picked kernel id through setActiveKernel (dual-write to chat + cookie)', () => {
@@ -95,5 +114,30 @@ describe('ChatKernelSelector — chat-scoped read + dual-write', () => {
     renderSelector();
     capturedComboBox.onSelect?.('does-not-exist');
     expect(setActiveKernel).not.toHaveBeenCalled();
+  });
+});
+
+describe('ChatKernelSelector — pro tier badge', () => {
+  beforeEach(() => {
+    chatKernelState.current = stubKernel;
+    capturedComboBox.renderLabel = undefined;
+  });
+
+  it('renders KernelTierBadge for pro-tier kernels in the combobox label', () => {
+    const zooKernel = kernelConfigurations.find((k) => k.id === 'zoo')!;
+    render(<ChatKernelSelector>{() => null}</ChatKernelSelector>);
+
+    const label = capturedComboBox.renderLabel?.(zooKernel, undefined);
+    const { getByText } = render(<div>{label}</div>);
+    expect(getByText('Pro')).toBeInTheDocument();
+  });
+
+  it('does not render KernelTierBadge for free-tier kernels in the combobox label', () => {
+    const openscadKernel = kernelConfigurations.find((k) => k.id === 'openscad')!;
+    render(<ChatKernelSelector>{() => null}</ChatKernelSelector>);
+
+    const label = capturedComboBox.renderLabel?.(openscadKernel, undefined);
+    const { queryByText } = render(<div>{label}</div>);
+    expect(queryByText('Pro')).not.toBeInTheDocument();
   });
 });

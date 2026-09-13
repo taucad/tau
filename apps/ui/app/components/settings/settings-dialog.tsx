@@ -1,7 +1,9 @@
 import { useCallback } from 'react';
 import type { MouseEvent } from 'react';
-import { AccountView } from '@daveyplate/better-auth-ui';
 import { Bot, BrainCircuit, CreditCard, FlaskConical, HardDrive, Key, Lock, Settings2, User } from 'lucide-react';
+import { AccountSettings } from '#components/auth/settings/account/account-settings.js';
+import { SecuritySettings } from '#components/auth/settings/security/security-settings.js';
+import { ApiKeys } from '#components/auth/api-key/api-keys.js';
 import type { LucideIcon } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '#components/ui/dialog.js';
 import {
@@ -77,7 +79,7 @@ const pathToSection = Object.fromEntries(
 /** Map section id to label */
 const sectionToLabel = Object.fromEntries(sections.map((s) => [s.id, s.label])) as Record<SettingsSection, string>;
 
-const authSections: readonly SettingsSection[] = ['account', 'security', 'api-keys'];
+const settingsScrollClass = 'h-full overflow-y-auto p-6 pb-8';
 
 /**
  * Global settings dialog with responsive layout using ResponsiveTabs.
@@ -131,26 +133,21 @@ export function SettingsDialog(): React.JSX.Element {
 
         <div className='size-full min-h-0 overflow-hidden' onClickCapture={handleClickCapture}>
           <ResponsiveTabs tabs={settingsTabs} activeTab={activeTab} enableContentAnimation={false}>
-            {authSections.map((sectionId) => (
-              <TabsContent
-                key={sectionId}
-                enableAnimation={false}
-                value={sectionToLabel[sectionId]}
-                className='*:md:gap-0'
-              >
-                <SettingsAuthGate>
-                  <AccountView
-                    hideNav
-                    pathname={sectionPathMap[sectionId]}
-                    classNames={{
-                      cards: 'h-full',
-                      sidebar: { base: 'hidden' },
-                      base: 'h-full pb-6',
-                    }}
-                  />
-                </SettingsAuthGate>
-              </TabsContent>
-            ))}
+            <TabsContent enableAnimation={false} value='Account'>
+              <SettingsAuthGate>
+                <AccountSettings className={settingsScrollClass} />
+              </SettingsAuthGate>
+            </TabsContent>
+            <TabsContent enableAnimation={false} value='Security'>
+              <SettingsAuthGate>
+                <SecuritySettings className={settingsScrollClass} />
+              </SettingsAuthGate>
+            </TabsContent>
+            <TabsContent enableAnimation={false} value='API Keys'>
+              <SettingsAuthGate>
+                <ApiKeys className={settingsScrollClass} />
+              </SettingsAuthGate>
+            </TabsContent>
             <TabsContent enableAnimation={false} value='General'>
               <GeneralSettings />
             </TabsContent>

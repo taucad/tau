@@ -270,7 +270,7 @@ const agent = createDeepAgent({
 });
 ```
 
-**Relevance to Tau**: We already have a skills system in Cursor (`.cursor/skills/`). Deep Agents' skills middleware would let us expose CAD-specific skills (kernel workflows, geometry patterns, testing recipes) to the agent via the virtual filesystem. The progressive disclosure pattern — listing skills in the system prompt, loading full content only when activated — keeps context lean.
+**Relevance to Tau**: We already have a skills system in Cursor (`.agent/skills/`). Deep Agents' skills middleware would let us expose CAD-specific skills (kernel workflows, geometry patterns, testing recipes) to the agent via the virtual filesystem. The progressive disclosure pattern — listing skills in the system prompt, loading full content only when activated — keeps context lean.
 
 ## Finding 7: AGENTS.md Memory with Active Learning
 
@@ -328,7 +328,7 @@ VfsSandbox
 | `createFilesystemMiddleware`    | Custom `tool-create-file.ts`, `tool-read-file.ts`, etc. | Replace custom tools with middleware + `TauRpcBackend`     |
 | `createSummarizationMiddleware` | None (context-summarization-compaction.md planned)      | Adopt middleware, swap `createSummary()` for Morph Compact |
 | `createSubAgentMiddleware`      | Not implemented in Tau agent                            | Adopt directly for parallel geometry analysis              |
-| `createSkillsMiddleware`        | Skills in `.cursor/skills/` (IDE-level only)            | Expose CAD skills via virtual filesystem                   |
+| `createSkillsMiddleware`        | Skills in `.agent/skills/` (IDE-level only)             | Expose CAD skills via virtual filesystem                   |
 | `createMemoryMiddleware`        | AGENTS.md via Cursor continual-learning plugin          | Expose learned CAD preferences via virtual filesystem      |
 | `todoListMiddleware`            | Not implemented                                         | Adopt directly for task tracking                           |
 | `VfsSandbox`                    | ZenFS/IndexedDB via Chat RPC                            | Build `TauRpcBackend` (RPC-based, not VFS-based)           |

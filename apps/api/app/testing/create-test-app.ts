@@ -6,6 +6,7 @@ import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { FastifyAdapter } from '@nestjs/platform-fastify';
 import { ZodValidationPipe } from 'nestjs-zod';
 import { MemorySaver } from '@langchain/langgraph-checkpoint';
+import { InMemoryStore } from '@langchain/langgraph';
 import { createRuntimeFileSystem } from '@taucad/runtime/filesystem';
 // eslint-disable-next-line no-restricted-imports -- this is a test file.
 import { getTestFileSystem } from '@taucad/runtime/testing';
@@ -17,6 +18,7 @@ import { ChatController } from '#api/chat/chat.controller.js';
 import { ChatService } from '#api/chat/chat.service.js';
 import { ChatRpcService } from '#api/chat/chat-rpc.service.js';
 import { CheckpointerService } from '#api/chat/checkpointer.service.js';
+import { StoreService } from '#api/chat/store.service.js';
 import { ModelService } from '#api/models/model.service.js';
 import { ProviderService } from '#api/providers/provider.service.js';
 import { ToolService } from '#api/tools/tool.service.js';
@@ -39,6 +41,20 @@ class MemoryCheckpointerService {
 
   public getCheckpointer(): MemorySaver {
     return this.saver;
+  }
+}
+
+/**
+ * In-memory LangGraph `BaseStore` that replaces the Redis-backed
+ * {@link StoreService} during tests. Mirrors the
+ * {@link MemoryCheckpointerService} pattern so the `read_file` dedup cache
+ * exercises real `BaseStore` semantics without a Redis dependency.
+ */
+class MemoryStoreService {
+  private readonly store = new InMemoryStore();
+
+  public getStore(): InMemoryStore {
+    return this.store;
   }
 }
 
@@ -80,6 +96,7 @@ const mockAuthInstance = {
     MetricsService,
     TracerService,
     CheckpointerService,
+    StoreService,
     CompactionService,
     TauRpcBackendFactory,
     { provide: authInstanceKey, useValue: mockAuthInstance },
@@ -127,6 +144,8 @@ export async function createTestApp(options: CreateTestAppOptions = {}): Promise
     .useClass(HeadlessChatRpcService)
     .overrideProvider(CheckpointerService)
     .useClass(MemoryCheckpointerService)
+    .overrideProvider(StoreService)
+    .useClass(MemoryStoreService)
     .compile();
 
   const app = moduleRef.createNestApplication<NestFastifyApplication>(new FastifyAdapter());

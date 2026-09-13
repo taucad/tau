@@ -24,6 +24,57 @@ export class WorkspacePathEscapeError extends Error {
   }
 }
 
+/**
+ * Thrown by workspace-scoped facades (e.g. `FileContentService.write*` /
+ * `delete` / `rename`) when a caller passes a key that resolves outside the
+ * workspace root. The escape hatch for legitimate cross-workspace writes is
+ * the worker-namespace `FileSystemClient.writeFiles` (no resolver), which is
+ * what the project bootstrap mount-write-unmount transaction uses.
+ *
+ * Distinct from {@link WorkspacePathEscapeError} so subscribers can
+ * differentiate "agent supplied a bad path" from "scoped service contract
+ * violation".
+ *
+ * @public
+ */
+export class WorkspaceScopeViolationError extends Error {
+  public readonly method: string;
+  public readonly input: string;
+  public readonly root: string;
+
+  /**
+   * Captures the scoped-facade method and offending key for diagnostics.
+   * @param message - Human-readable explanation referencing the offending input.
+   * @param init - Facade method name, canonical input string, and normalized workspace root.
+   */
+  public constructor(message: string, init: { method: string; input: string; root: string }) {
+    super(message);
+    this.name = 'WorkspaceScopeViolationError';
+    this.method = init.method;
+    this.input = init.input;
+    this.root = init.root;
+  }
+}
+
+/**
+ * FM worker global OPFS mount for bundled kernel typings (`/node_modules/<pkg>/`).
+ * Workspace-relative keys use the same `node_modules/...` prefix as the UI file tree.
+ */
+const bundledTypesWorkspaceRootSegment = 'node_modules';
+
+function isWorkspaceRelativeGlobalNodeModules(relativePath: string): boolean {
+  return (
+    relativePath === bundledTypesWorkspaceRootSegment || relativePath.startsWith(`${bundledTypesWorkspaceRootSegment}/`)
+  );
+}
+
+function isAbsoluteGlobalNodeModules(absoluteNorm: string): boolean {
+  return (
+    absoluteNorm === `/${bundledTypesWorkspaceRootSegment}` ||
+    absoluteNorm.startsWith(`/${bundledTypesWorkspaceRootSegment}/`)
+  );
+}
+
 function resolvePathSegmentsUnderRoot(rootNorm: string, relativeSegments: string[], originalInput: string): string {
   const rootSegments = rootNorm.split('/').filter((segment) => segment.length > 0);
   const stack = [...rootSegments];
@@ -97,6 +148,9 @@ export class WorkspacePathResolver {
   public toRelativePath(absolutePath: string): string | undefined {
     const rootNorm = normalizePath(this.rootDirectory);
     const absNorm = normalizePath(absolutePath);
+    if (isAbsoluteGlobalNodeModules(absNorm)) {
+      return absNorm === `/${bundledTypesWorkspaceRootSegment}` ? bundledTypesWorkspaceRootSegment : absNorm.slice(1);
+    }
     if (absNorm === rootNorm) {
       return '';
     }
@@ -113,6 +167,9 @@ export class WorkspacePathResolver {
    * @returns Joined absolute path under the configured workspace root.
    */
   public toAbsolutePath(relativePath: string): string {
+    if (isWorkspaceRelativeGlobalNodeModules(relativePath)) {
+      return normalizePath(`/${relativePath}`);
+    }
     return joinPath(this.rootDirectory, relativePath);
   }
 
@@ -149,11 +206,18 @@ export class WorkspacePathResolver {
         return rootNorm;
       }
 
+      if (isWorkspaceRelativeGlobalNodeModules(trimmedRelative)) {
+        return normalizePath(`/${trimmedRelative}`);
+      }
+
       const segments = trimmedRelative.split('/').filter((s) => s.length > 0 && s !== '.');
       return resolvePathSegmentsUnderRoot(rootNorm, segments, input);
     }
 
     const absNormalized = normalizePath(trimmed);
+    if (isAbsoluteGlobalNodeModules(absNormalized)) {
+      return absNormalized;
+    }
     if (absNormalized === rootNorm || absNormalized.startsWith(`${rootNorm}/`)) {
       return absNormalized;
     }
@@ -208,5 +272,56 @@ export class WorkspacePathResolver {
    */
   public reset(rootDirectory: string): void {
     this.rootDirectory = rootDirectory;
+  }
+
+  /**
+   * Validate and normalize a caller-supplied key to its canonical
+   * workspace-relative form for use as an internal cache / subscriber key.
+   *
+   * Accepts:
+   * - Workspace-relative keys (`main.scad`, `src/a.ts`, `''`/`.`/`/` → root).
+   * - Absolute paths that lie under the workspace root (e.g.
+   *   `/projects/abc/main.scad` for root `/projects/abc`).
+   *
+   * Rejects (throws {@link WorkspaceScopeViolationError}):
+   * - Absolute paths foreign to the workspace root.
+   * - Relative paths whose `..` segments climb above the root.
+   *
+   * This is the boundary helper for scoped facades such as
+   * `FileContentService.write*` / `delete` / `rename` / `duplicate`. Cross-
+   * workspace writes belong on `FileSystemClient.writeFiles` (worker
+   * namespace, no resolver).
+   *
+   * @param method - Calling facade method name for diagnostics.
+   * @param input - Caller-supplied workspace path key.
+   * @returns Normalized workspace-relative key (`''` at root, no leading `/`).
+   * @throws {WorkspaceScopeViolationError} When the input escapes the workspace root.
+   * @public
+   */
+  public toWorkspaceRelativeKey(method: string, input: string): string {
+    try {
+      const absolute = this.toAbsoluteWorkspacePath(input);
+      const rootNorm = normalizePath(this.rootDirectory);
+      if (absolute === rootNorm) {
+        return '';
+      }
+      const prefix = this.rootPrefix;
+      if (!absolute.startsWith(prefix)) {
+        throw new WorkspaceScopeViolationError(
+          `${method}: key "${input}" resolved to "${absolute}" which is not under workspace root "${rootNorm}"`,
+          { method, input, root: rootNorm },
+        );
+      }
+      return absolute.slice(prefix.length);
+    } catch (error) {
+      if (error instanceof WorkspacePathEscapeError) {
+        throw new WorkspaceScopeViolationError(`${method}: key "${input}" escapes workspace root "${error.root}"`, {
+          method,
+          input,
+          root: error.root,
+        });
+      }
+      throw error;
+    }
   }
 }

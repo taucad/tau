@@ -767,7 +767,7 @@ describe('toolResultTrimmerMiddleware', () => {
     it('should not inject image blocks when dataUrl values are offloaded placeholders', async () => {
       const offloadedOutput = {
         images: [{ view: 'composite', dataUrl: '[offloaded: 50000 chars]' }],
-        _offloadedTo: '.tau/offloaded-tool-results/call_ss_offloaded.txt',
+        _offloadedTo: '.tau/tool-results/chat-1/call_ss_offloaded.txt',
       };
 
       const messages: BaseMessage[] = [

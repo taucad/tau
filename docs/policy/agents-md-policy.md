@@ -3,8 +3,9 @@ title: 'AGENTS.md Policy'
 description: 'Internal reference for maintaining AGENTS.md and the agent context hierarchy. Covers file location, context tiers, size budget, required sections, and continual learning integration.'
 status: active
 created: '2026-03-09'
-updated: '2026-03-09'
-related: []
+updated: '2026-05-13'
+related:
+  - docs/research/cursor-context-budget-audit.md
 ---
 
 # AGENTS.md Policy
@@ -26,11 +27,11 @@ Internal reference for maintaining `AGENTS.md` and the agent context hierarchy.
 
 The agent context system has three artifact types with different discovery mechanics and token costs:
 
-| Artifact                    | Purpose                       | Discovery                                      | Token Cost           |
-| --------------------------- | ----------------------------- | ---------------------------------------------- | -------------------- |
-| `AGENTS.md`                 | Project-wide conventions      | Always loaded at session start                 | Fixed per session    |
-| `.cursor/rules/*.mdc`       | Passive reference for editing | `alwaysApply`, `globs`, or description-matched | Varies by activation |
-| `.cursor/skills/*/SKILL.md` | Active multi-step workflows   | Description-matched on demand                  | Only when invoked    |
+| Artifact                   | Purpose                       | Discovery                                      | Token Cost           |
+| -------------------------- | ----------------------------- | ---------------------------------------------- | -------------------- |
+| `AGENTS.md`                | Project-wide conventions      | Always loaded at session start                 | Fixed per session    |
+| `.cursor/rules/*.mdc`      | Passive reference for editing | `alwaysApply`, `globs`, or description-matched | Varies by activation |
+| `.agent/skills/*/SKILL.md` | Active multi-step workflows   | Description-matched on demand                  | Only when invoked    |
 
 ### Rules: what/when (passive)
 
@@ -99,15 +100,28 @@ Terse description of the project structure. Pointers, not prose.
 
 ### 3. Skills
 
-Table of project skills in `.cursor/skills/` so the agent knows what guided workflows are available and when to use them. Keep the table updated when skills are added or removed.
+Table of project skills in `.agent/skills/` so the agent knows what guided workflows are available and when to use them. Keep the table updated when skills are added or removed.
 
 ### 4. Code Conventions
 
 Specific do's and don'ts with version-locked library references. Write like rules, not documentation.
 
-### 5. Learned Preferences (auto-maintained)
+### 5. Learned Preferences (auto-maintained, fallback buffer only)
 
-User corrections and durable workspace facts extracted from transcripts by the `continual-learning` skill. Plain bullet points only.
+`AGENTS.md` keeps `## Learned User Preferences` and `## Learned Workspace Facts` as **fallback buffers** for truly cross-cutting bullets the `agents-memory-updater` subagent cannot route to a project. Plain bullet points only, capped at 12 bullets / 200 chars each.
+
+Project-scoped learnings route into per-domain `.cursor/rules/learned-<project>.mdc` files (see Per-Project Learned Rules below). The buffer in `AGENTS.md` is for items with no project anchor — process/workflow notes, repo-wide reference lists, etc.
+
+## Per-Project Learned Rules
+
+Long-tail learned facts and preferences live in glob-scoped per-Nx-project rule files at `.cursor/rules/learned-<project>.mdc`. Each file:
+
+- Is `alwaysApply: false` and globs to its project root (e.g. `apps/ui/**`, `packages/runtime/**`)
+- Has only two H2 sections: `## Learned User Preferences`, `## Learned Workspace Facts`
+- Is auto-maintained by the `agents-memory-updater` subagent — do not hand-edit
+- Loads only when the agent is touching files matching the glob, so token cost is paid per-task, not per-session
+
+Rationale: a single always-on `AGENTS.md` containing every learning grew to 147KB / ~37K tokens before the May 2026 cleanup, dominating the context budget. Splitting by project keeps the always-on layer minimal while preserving every learning where it is most relevant.
 
 ## Writing Principles
 
@@ -168,22 +182,42 @@ The `related` field is the source of truth for cross-references. A `## Reference
 
 ## Continual Learning Integration
 
-The `continual-learning` skill maintains the `Learned User Preferences` and `Learned Workspace Facts` sections by mining agent transcripts:
+The `continual-learning` plugin's `agents-memory-updater` subagent maintains the learned sections by mining agent transcripts. The Tau workspace overrides the upstream subagent at `.cursor/agents/agents-memory-updater.md` with project-aware routing.
 
 - Plain bullet points only
-- At most 12 bullets per section
+- **Per-bullet length cap: 200 chars.** Split long learnings into multiple short bullets rather than emitting one long one. This cap is policy — the absence of it is what allowed the prior 138KB regression.
+- At most 12 bullets per section per file
 - Include only items that are actionable, stable across sessions, repeated in multiple transcripts or explicitly stated as broad rules, and non-sensitive
 - Update in place (merge, don't append-only)
 - Index file at `.cursor/hooks/state/continual-learning-index.json` tracks processed transcripts
+
+### Routing rules (single source of truth at `.cursor/agents/agents-memory-updater.md`)
+
+Each new bullet routes to the most-specific match:
+
+- **Project-scoped** (mentions a single project's directory, file path, or unambiguous component): write to `.cursor/rules/learned-<project>.mdc` (create with standard frontmatter if missing).
+- **Cross-project domain cluster** (e.g. graphics stack spanning ui+runtime+react): write to `.cursor/rules/learned-<topic>.mdc` (e.g. `learned-graphics-stack.mdc`).
+- **Truly cross-cutting** (no project anchor): write to the `AGENTS.md` fallback buffer.
+
+The full routing table — Nx project name, target file, glob root, trigger keywords — lives at the bottom of `.cursor/agents/agents-memory-updater.md`. That file is the single source of truth for the routing logic; this policy describes the architecture, not the table.
 
 ## Audit Checklist
 
 When editing `AGENTS.md`:
 
-- [ ] Total file under 150 lines
+- [ ] Total file under 150 lines (excluding the auto-managed Nx block)
 - [ ] Every instruction is verifiable by a command or concrete example
 - [ ] No duplication across tiers (AGENTS.md, rules, policies)
 - [ ] No prose paragraphs without actionable commands
 - [ ] No secrets, tokens, or transient details
-- [ ] Learned sections maintained only by `continual-learning` skill
-- [ ] Skills table reflects current `.cursor/skills/` contents
+- [ ] Learned sections maintained only by `agents-memory-updater` (not hand-edited)
+- [ ] Buffer sections respect the 12-bullet / 200-char-per-bullet cap
+- [ ] Skills table reflects current `.agent/skills/` contents
+
+When editing `.cursor/rules/learned-<project>.mdc`:
+
+- [ ] File is `alwaysApply: false` with project-scoped globs
+- [ ] Only H2 sections present: `## Learned User Preferences`, `## Learned Workspace Facts`
+- [ ] Each section ≤12 bullets
+- [ ] New bullets ≤200 chars
+- [ ] No process/workflow notes (those belong in the AGENTS.md fallback buffer)

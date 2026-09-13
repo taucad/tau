@@ -7,7 +7,8 @@
 import { describe, it, expect } from 'vitest';
 import { codeLanguages } from '@taucad/types/constants';
 import type { LanguageContribution } from '#lib/monaco-language-registry.js';
-import { jsTsContribution } from '#lib/javascript-contribution.js';
+import { jsContribution } from '#lib/javascript-contribution.js';
+import { tsContribution } from '#lib/typescript-contribution.js';
 import { kclContribution } from '#lib/kcl-language/kcl-register-language.js';
 import { openscadContribution } from '#lib/openscad-language/openscad-register-language.js';
 import { stepfileContribution } from '#lib/stepfile-language/stepfile-register-language.js';
@@ -21,9 +22,14 @@ const contributions: ReadonlyArray<{
   readonly expectedIds: readonly string[];
 }> = [
   {
-    name: 'jsTsContribution',
-    contribution: jsTsContribution,
-    expectedIds: ['typescript', 'javascript', 'typescriptreact', 'javascriptreact'],
+    name: 'tsContribution',
+    contribution: tsContribution,
+    expectedIds: ['typescript', 'typescriptreact'],
+  },
+  {
+    name: 'jsContribution',
+    contribution: jsContribution,
+    expectedIds: ['javascript', 'javascriptreact'],
   },
   {
     name: 'kclContribution',

@@ -10,6 +10,7 @@ import { KHRMaterialsUnlit } from '@gltf-transform/extensions';
 import type { GeometryGltf, GeometrySvg } from '@taucad/types';
 import type { KernelMiddlewareRuntime } from '#types/runtime-middleware.types.js';
 import { gltfEdgeDetectionMiddleware } from '#middleware/gltf-edge-detection.middleware.js';
+import { mergedEdgesNodeName } from '#utils/merge-gltf-edges.js';
 import {
   createMockCreateGeometryHandler,
   createMockRuntime,
@@ -351,7 +352,7 @@ function createEdgeDetectionContext(config?: EdgeDetectionOptions): {
 describe('gltfEdgeDetectionMiddleware', () => {
   describe('wrapCreateGeometry', () => {
     describe('meshes without existing line primitives', () => {
-      it('should add edge primitives to a cube mesh', async () => {
+      it('should detect edges and merge them into the tau-merged-edges mesh', async () => {
         const gltfData = await createCubeGltfWithoutLines();
         const handlerResult = createSuccessResult([{ format: 'gltf', content: gltfData }]);
         const { input, runtime } = createEdgeDetectionContext();
@@ -370,11 +371,18 @@ describe('gltfEdgeDetectionMiddleware', () => {
           expect(geometry.format).toBe('gltf');
 
           const meshes = await analyzeGltfPrimitives(geometry.content);
-          expect(meshes).toHaveLength(1);
+          // Source mesh (now triangles only) + merged-edges mesh.
+          expect(meshes).toHaveLength(2);
 
-          // Should have original triangle primitive + new line primitive
-          expect(meshes[0]!.triangleCount).toBe(1);
-          expect(meshes[0]!.lineCount).toBe(1);
+          const sourceMesh = meshes.find((m) => m.meshName !== mergedEdgesNodeName);
+          expect(sourceMesh).toBeDefined();
+          expect(sourceMesh!.triangleCount).toBe(1);
+          expect(sourceMesh!.lineCount).toBe(0);
+
+          const mergedMesh = meshes.find((m) => m.meshName === mergedEdgesNodeName);
+          expect(mergedMesh).toBeDefined();
+          expect(mergedMesh!.triangleCount).toBe(0);
+          expect(mergedMesh!.lineCount).toBe(1);
         }
       });
 
@@ -391,8 +399,10 @@ describe('gltfEdgeDetectionMiddleware', () => {
           const geometry = result.data[0] as GeometryGltf;
           const meshes = await analyzeGltfPrimitives(geometry.content);
 
-          // A cube has 12 edges, each edge has 2 vertices
-          const edgeVertexCount = meshes[0]!.linePrimitiveVertexCounts[0]!;
+          // A cube has 12 edges, each edge has 2 vertices, all in the merged primitive.
+          const mergedMesh = meshes.find((m) => m.meshName === mergedEdgesNodeName);
+          expect(mergedMesh).toBeDefined();
+          const edgeVertexCount = mergedMesh!.linePrimitiveVertexCounts[0]!;
           const edgeCount = edgeVertexCount / 2;
           expect(edgeCount).toBe(12);
         }
@@ -409,7 +419,7 @@ describe('gltfEdgeDetectionMiddleware', () => {
 
         if (result.success) {
           const geometry = result.data[0] as GeometryGltf;
-          // The content should be different from the original (re-serialized with edges)
+          // The content should be different from the original (re-serialized with merged edges)
           expect(geometry.content).not.toBe(gltfData);
           expect(geometry.content.byteLength).toBeGreaterThan(gltfData.byteLength);
         }
@@ -417,7 +427,7 @@ describe('gltfEdgeDetectionMiddleware', () => {
     });
 
     describe('meshes with existing line primitives', () => {
-      it('should skip edge detection for meshes that already have lines', async () => {
+      it('should skip detection but still merge pre-existing LINES into tau-merged-edges', async () => {
         const gltfData = await createCubeGltfWithLines();
         const handlerResult = createSuccessResult([{ format: 'gltf', content: gltfData }]);
         const { input, runtime } = createEdgeDetectionContext();
@@ -433,18 +443,26 @@ describe('gltfEdgeDetectionMiddleware', () => {
           expect(geometry.format).toBe('gltf');
 
           const meshes = await analyzeGltfPrimitives(geometry.content);
-          expect(meshes).toHaveLength(1);
+          // Source mesh (triangles only after merge) + merged-edges mesh.
+          expect(meshes).toHaveLength(2);
 
-          // Should still have only 1 line primitive (the original, no new ones added)
-          expect(meshes[0]!.triangleCount).toBe(1);
-          expect(meshes[0]!.lineCount).toBe(1);
+          const sourceMesh = meshes.find((m) => m.meshName !== mergedEdgesNodeName);
+          expect(sourceMesh).toBeDefined();
+          expect(sourceMesh!.triangleCount).toBe(1);
+          // The pre-existing LINE primitive moved into tau-merged-edges.
+          expect(sourceMesh!.lineCount).toBe(0);
 
-          // The existing line primitive should have 2 vertices (our single edge)
-          expect(meshes[0]!.linePrimitiveVertexCounts[0]).toBe(2);
+          const mergedMesh = meshes.find((m) => m.meshName === mergedEdgesNodeName);
+          expect(mergedMesh).toBeDefined();
+          expect(mergedMesh!.lineCount).toBe(1);
+          // The single pre-existing edge (2 vertices) survives the merge with identity transform.
+          expect(mergedMesh!.linePrimitiveVertexCounts[0]).toBe(2);
         }
       });
 
-      it('should return the original geometry object when no edges are added', async () => {
+      it('should re-serialize when only pre-existing LINES are present (merge runs)', async () => {
+        // Pre-merge behaviour returned the original geometry untouched when no detection
+        // ran; post-merge we still consolidate native LINES so the document is rewritten.
         const gltfData = await createCubeGltfWithLines();
         const originalGeometry: GeometryGltf = {
           format: 'gltf',
@@ -458,14 +476,16 @@ describe('gltfEdgeDetectionMiddleware', () => {
         const result = await wrapCreateGeometry!(input, handler, runtime);
 
         if (result.success) {
-          // Should be the exact same object reference (no re-serialization)
-          expect(result.data[0]).toBe(originalGeometry);
+          // A different object reference — the document was re-serialised after merging.
+          expect(result.data[0]).not.toBe(originalGeometry);
+          const geometry = result.data[0] as GeometryGltf;
+          expect(geometry.content).not.toBe(gltfData);
         }
       });
     });
 
     describe('mixed meshes', () => {
-      it('should add edges only to meshes without existing lines', async () => {
+      it('should merge detection-generated edges and pre-existing edges into one primitive', async () => {
         const gltfData = await createMixedMeshGltf();
         const handlerResult = createSuccessResult([{ format: 'gltf', content: gltfData }]);
         const { input, runtime } = createEdgeDetectionContext();
@@ -480,21 +500,23 @@ describe('gltfEdgeDetectionMiddleware', () => {
           const geometry = result.data[0] as GeometryGltf;
           const meshes = await analyzeGltfPrimitives(geometry.content);
 
-          expect(meshes).toHaveLength(2);
+          // 2 source meshes (triangles only) + 1 merged-edges mesh
+          expect(meshes).toHaveLength(3);
 
-          // Mesh 1 (with existing lines): should keep only its original line primitive
+          // Source meshes lost their LINE primitives during the merge.
           const meshWithLines = meshes.find((m) => m.meshName === 'MeshWithLines');
           expect(meshWithLines).toBeDefined();
-          expect(meshWithLines!.lineCount).toBe(1);
-          // Original line had 2 vertices (one edge)
-          expect(meshWithLines!.linePrimitiveVertexCounts[0]).toBe(2);
+          expect(meshWithLines!.lineCount).toBe(0);
 
-          // Mesh 2 (without lines): should get a new line primitive from edge detection
           const meshWithoutLines = meshes.find((m) => m.meshName === 'MeshWithoutLines');
           expect(meshWithoutLines).toBeDefined();
-          expect(meshWithoutLines!.lineCount).toBe(1);
-          // Edge detection on a cube should find 12 edges = 24 vertices
-          expect(meshWithoutLines!.linePrimitiveVertexCounts[0]).toBe(24);
+          expect(meshWithoutLines!.lineCount).toBe(0);
+
+          // The single merged primitive contains 2 (pre-existing) + 24 (detected) = 26 vertices.
+          const mergedMesh = meshes.find((m) => m.meshName === mergedEdgesNodeName);
+          expect(mergedMesh).toBeDefined();
+          expect(mergedMesh!.lineCount).toBe(1);
+          expect(mergedMesh!.linePrimitiveVertexCounts[0]).toBe(26);
         }
       });
 
@@ -509,7 +531,7 @@ describe('gltfEdgeDetectionMiddleware', () => {
 
         if (result.success) {
           const geometry = result.data[0] as GeometryGltf;
-          // Should be different from original (edges were added to mesh 2)
+          // Should be different from original (edges were added + merged).
           expect(geometry.content).not.toBe(gltfData);
         }
       });
@@ -625,7 +647,7 @@ describe('gltfEdgeDetectionMiddleware', () => {
     });
 
     describe('edge material properties', () => {
-      it('should use unlit material for detected edges', async () => {
+      it('should use unlit material for the merged edges primitive', async () => {
         const gltfData = await createCubeGltfWithoutLines();
         const handlerResult = createSuccessResult([{ format: 'gltf', content: gltfData }]);
         const { input, runtime } = createEdgeDetectionContext();
@@ -639,32 +661,79 @@ describe('gltfEdgeDetectionMiddleware', () => {
           const io = new NodeIO().registerExtensions([KHRMaterialsUnlit]);
           const document = await io.readBinary(geometry.content);
 
-          // Find the line primitive's material
+          const mergedMesh = document
+            .getRoot()
+            .listMeshes()
+            .find((m) => m.getName() === mergedEdgesNodeName);
+          expect(mergedMesh).toBeDefined();
+
+          const mergedPrimitive = mergedMesh!.listPrimitives().find((p) => p.getMode() === primitiveModeLines);
+          expect(mergedPrimitive).toBeDefined();
+
+          const material = mergedPrimitive!.getMaterial();
+          expect(material).not.toBeNull();
+          expect(material!.getName()).toBe('tau-edge-material');
+
+          const baseColor = material!.getBaseColorFactor();
+          expect(baseColor[0]).toBeCloseTo(0, 5);
+          expect(baseColor[1]).toBeCloseTo(0, 5);
+          expect(baseColor[2]).toBeCloseTo(0, 5);
+          expect(baseColor[3]).toBeCloseTo(1, 5);
+
+          const unlitExtension = material!.getExtension('KHR_materials_unlit');
+          expect(unlitExtension).not.toBeNull();
+        }
+      });
+    });
+
+    describe('merged-edges topology guarantees', () => {
+      it('emits exactly one LINES primitive across the entire document', async () => {
+        const gltfData = await createMixedMeshGltf();
+        const handlerResult = createSuccessResult([{ format: 'gltf', content: gltfData }]);
+        const { input, runtime } = createEdgeDetectionContext();
+        const handler = createMockCreateGeometryHandler(handlerResult);
+
+        const { wrapCreateGeometry } = gltfEdgeDetectionMiddleware;
+        const result = await wrapCreateGeometry!(input, handler, runtime);
+
+        expect(result.success).toBe(true);
+        if (result.success) {
+          const geometry = result.data[0] as GeometryGltf;
+          const io = new NodeIO().registerExtensions([KHRMaterialsUnlit]);
+          const document = await io.readBinary(geometry.content);
+
+          let lineCount = 0;
           for (const mesh of document.getRoot().listMeshes()) {
             for (const primitive of mesh.listPrimitives()) {
               if (primitive.getMode() === primitiveModeLines) {
-                const material = primitive.getMaterial();
-                expect(material).not.toBeNull();
-
-                // oxlint-disable-next-line max-depth -- .not.toBeNull should narrow, but it doesn't.
-                if (material) {
-                  // Should be named tau-edge-material
-                  expect(material.getName()).toBe('tau-edge-material');
-
-                  // Should be black
-                  const baseColor = material.getBaseColorFactor();
-                  expect(baseColor[0]).toBeCloseTo(0, 5);
-                  expect(baseColor[1]).toBeCloseTo(0, 5);
-                  expect(baseColor[2]).toBeCloseTo(0, 5);
-                  expect(baseColor[3]).toBeCloseTo(1, 5);
-
-                  // Should have unlit extension
-                  const unlitExtension = material.getExtension('KHR_materials_unlit');
-                  expect(unlitExtension).not.toBeNull();
-                }
+                lineCount++;
               }
             }
           }
+          expect(lineCount).toBe(1);
+        }
+      });
+
+      it('attaches the merged-edges node at the scene root with identity transform', async () => {
+        const gltfData = await createCubeGltfWithoutLines();
+        const handlerResult = createSuccessResult([{ format: 'gltf', content: gltfData }]);
+        const { input, runtime } = createEdgeDetectionContext();
+        const handler = createMockCreateGeometryHandler(handlerResult);
+
+        const { wrapCreateGeometry } = gltfEdgeDetectionMiddleware;
+        const result = await wrapCreateGeometry!(input, handler, runtime);
+
+        if (result.success) {
+          const geometry = result.data[0] as GeometryGltf;
+          const io = new NodeIO().registerExtensions([KHRMaterialsUnlit]);
+          const document = await io.readBinary(geometry.content);
+
+          const scene = document.getRoot().listScenes()[0]!;
+          const mergedNode = scene.listChildren().find((n) => n.getName() === mergedEdgesNodeName);
+          expect(mergedNode).toBeDefined();
+          expect(mergedNode!.getTranslation()).toEqual([0, 0, 0]);
+          expect(mergedNode!.getRotation()).toEqual([0, 0, 0, 1]);
+          expect(mergedNode!.getScale()).toEqual([1, 1, 1]);
         }
       });
     });

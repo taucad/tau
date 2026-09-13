@@ -5,17 +5,13 @@
  * 1. LSP server (future-proof for when KCL LSP adds definition support)
  * 2. Symbol Service (WASM AST-based, for local and imported symbols)
  *
- * On-demand model loading:
- * When returning a definition for an import path, this provider ensures
- * the target Monaco model exists. This is required for Monaco to show
- * the Cmd+hover underline (Monaco verifies the target exists before
- * displaying the link preview).
+ * Navigation targets are materialised by {@link MonacoWorkspaceFs} via the
+ * editor opener; this provider returns `Location` values only.
  */
 
-import { codeLanguages } from '@taucad/types/constants';
 import type * as Monaco from 'monaco-editor';
 import type * as LSP from 'vscode-languageserver-protocol';
-import type { KclLspClient, LspFileManager } from '#lib/kcl-language/lsp/kcl-lsp-client.js';
+import type { KclLspClient } from '#lib/kcl-language/lsp/kcl-lsp-client.js';
 import type { KclSymbolService } from '#lib/kcl-language/lsp/kcl-symbol-service.js';
 import { createKclLogger } from '#lib/kcl-language/lsp/kcl-logs.js';
 import { getImportPathAtPosition, isKclFileImport } from '#lib/kcl-language/lsp/utils/import-path-utils.js';
@@ -87,10 +83,6 @@ async function resolveImportDefinition(context: SymbolLookupContext): Promise<Mo
   const fileManager = client.getFileManager();
   log.debug('fileManager available:', Boolean(fileManager));
 
-  if (!fileManager) {
-    return undefined;
-  }
-
   try {
     const importedSymbol = await symbolService.resolveImportedSymbol(uri, word, fileManager);
     log.debug('resolveImportedSymbol result:', importedSymbol?.name, 'uri:', importedSymbol?.uri);
@@ -119,19 +111,14 @@ async function resolveImportDefinition(context: SymbolLookupContext): Promise<Mo
   }
 }
 
-/** Callback to ensure a Monaco model exists for a path. */
-export type GetOrEnsureModel = (path: string) => Promise<Monaco.editor.ITextModel | undefined>;
-
 /**
  * Create a Monaco definition provider that uses the LSP client.
  * Falls back to symbol service when LSP returns null.
  */
-// oxlint-disable-next-line max-params -- Factory function with optional provider dependencies
 export function createDefinitionProvider(
   monaco: typeof Monaco,
   client: KclLspClient,
   symbolService?: KclSymbolService,
-  getOrEnsureModel?: GetOrEnsureModel,
 ): Monaco.languages.DefinitionProvider {
   return {
     async provideDefinition(
@@ -166,10 +153,6 @@ export function createDefinitionProvider(
       // Remove this block when KCL LSP supports textDocument/definition
       // ════════════════════════════════════════════════════════════════════════
 
-      // Check if the word is a quoted import path (e.g., "car-wheel.kcl")
-      // The wordPattern includes quoted .kcl strings, so wordInfo.word may contain quotes
-      const fileManager = client.getFileManager();
-
       if (wordInfo) {
         const { word } = wordInfo;
         const quotedPathMatch = /^["'](.+\.kcl)["']$/.exec(word);
@@ -178,9 +161,6 @@ export function createDefinitionProvider(
           log.debug('Word is a quoted import path:', importPath);
           const targetUri = resolveImportPathToUri(uri, importPath);
           log.debug('Resolved import path to URI:', targetUri);
-
-          // Ensure target model exists for Monaco to show Cmd+hover underline
-          await ensureModelForUri(monaco, targetUri, fileManager, getOrEnsureModel);
 
           return {
             uri: monaco.Uri.parse(targetUri),
@@ -196,9 +176,6 @@ export function createDefinitionProvider(
         log.debug('Detected import path string:', importPathResult.path);
         const targetUri = resolveImportPathToUri(uri, importPathResult.path);
         log.debug('Resolved import path to URI:', targetUri);
-
-        // Ensure target model exists for Monaco to show Cmd+hover underline
-        await ensureModelForUri(monaco, targetUri, fileManager, getOrEnsureModel);
 
         return {
           uri: monaco.Uri.parse(targetUri),
@@ -279,68 +256,4 @@ function resolveImportPathToUri(currentFileUri: string, importPath: string): str
 
   // Join with the import path
   return `${directory}${importPath}`;
-}
-
-/**
- * Extract the file path from a Monaco URI for file reading.
- * Handles root-level URIs like "file:///main.kcl" → "main.kcl"
- */
-function extractFilePathFromUri(uri: string): string {
-  // Remove file:// prefix
-  let path = uri.replace(/^file:\/\//, '');
-
-  // Strip leading slash from root-level paths
-  // URI path: /main.kcl -> main.kcl
-  if (path.startsWith('/')) {
-    path = path.slice(1);
-  }
-
-  return path;
-}
-
-/**
- * Ensure a Monaco model exists for the given URI.
- * Delegates to the centralized model service when available, otherwise
- * falls back to direct model creation.
- *
- * This is required for Monaco to show Cmd+hover link underlines.
- */
-// oxlint-disable-next-line max-params -- Distinct required dependencies for model resolution
-async function ensureModelForUri(
-  monaco: typeof Monaco,
-  targetUri: string,
-  fileManager: LspFileManager | undefined,
-  getOrEnsureModelFunction?: GetOrEnsureModel,
-): Promise<void> {
-  // Fast path: model already exists
-  const monacoUri = monaco.Uri.parse(targetUri);
-  if (monaco.editor.getModel(monacoUri)) {
-    return;
-  }
-
-  // Use centralized model service if available
-  if (getOrEnsureModelFunction) {
-    const filePath = extractFilePathFromUri(targetUri);
-    await getOrEnsureModelFunction(filePath);
-    return;
-  }
-
-  // Fallback: direct model creation (only when model service not yet initialized)
-  if (!fileManager) {
-    log.debug('No file manager available, cannot create model for:', targetUri);
-    return;
-  }
-
-  try {
-    const filePath = extractFilePathFromUri(targetUri);
-    log.debug('Creating model on-demand (fallback) for:', targetUri, '(path:', filePath, ')');
-
-    const content = await fileManager.readFile(filePath);
-    const textContent = new TextDecoder().decode(content);
-
-    monaco.editor.createModel(textContent, codeLanguages.kcl, monacoUri);
-    log.debug('Model created successfully for:', targetUri);
-  } catch (error) {
-    log.debug('Failed to create model for:', targetUri, error);
-  }
 }

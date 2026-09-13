@@ -3,7 +3,7 @@ title: 'Filesystem Context Policy'
 description: 'Rules for the filesystem-backed context management pipeline: transcripts, tool offloading, skills, memory, compaction, and middleware ordering.'
 status: active
 created: '2026-03-24'
-updated: '2026-03-24'
+updated: '2026-05-12'
 related:
   - docs/policy/context-engineering-policy.md
   - docs/research/transcript-search-architecture.md
@@ -84,7 +84,7 @@ The system prompt includes a `<transcript_search>` section (`cad-agent.prompt.ts
 
 ### 4. Tool Result Offloading
 
-Large tool results are written to `.tau/tool-outputs/` via the tool offloading middleware, then replaced in-context with a file path reference.
+Large tool results are written to `.tau/tool-results/<chatId>/<toolCallId>.{json,txt}` via the tool offloading middleware, then replaced in-context with a generic `<persisted-output>` envelope that preserves the head of the original payload.
 
 **Why**: A 50KB tool result in-context wastes tokens on every subsequent model call. Written to a file, it costs zero tokens until needed.
 

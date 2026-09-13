@@ -121,14 +121,12 @@ export function createCompletionProvider(
 
           // 4. Get imported symbols (resolved to actual definitions)
           const fileManager = client.getFileManager();
-          if (fileManager) {
-            try {
-              const importedSymbols = await symbolService.getImportedSymbolsForCompletion(uri, fileManager);
-              log.debug('Symbol service returned', importedSymbols.length, 'imported symbols');
-              addSymbolsToSuggestions(importedSymbols, { isImported: true });
-            } catch (error) {
-              log.debug('Error getting imported symbols (non-fatal):', error);
-            }
+          try {
+            const importedSymbols = await symbolService.getImportedSymbolsForCompletion(uri, fileManager);
+            log.debug('Symbol service returned', importedSymbols.length, 'imported symbols');
+            addSymbolsToSuggestions(importedSymbols, { isImported: true });
+          } catch (error) {
+            log.debug('Error getting imported symbols (non-fatal):', error);
           }
         } catch (error) {
           // Symbol service error should not prevent returning whatever completions we have

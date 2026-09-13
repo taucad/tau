@@ -21,8 +21,11 @@ import {
   ComingSoonSkeleton,
   CtaSkeleton,
 } from '#routes/_index/section-skeletons.js';
-import { useChatActions, useChatContext } from '#hooks/use-chat.js';
-import { ActiveChatProvider } from '#hooks/active-chat-provider.js';
+import { useDraftActions } from '#hooks/use-chat.js';
+import { ActiveChatProvider, useChatComposer } from '#hooks/active-chat-provider.js';
+// `useKernel` + `setKernel` power the kernel pill strip below the
+// textarea — a cookie-only UI surface that intentionally lives outside
+// the chat composer context.
 // Chat draft / persistence flush is owned by `<GlobalChatFlushGuard>` at
 // the app shell — every live session in `ChatSessionStore` (including the
 // homepage's `chat_homepage_main`, which `<ActiveChatProvider>` acquires
@@ -173,16 +176,19 @@ function HomepageChatInput({
 }): React.JSX.Element {
   const navigate = useNavigate();
   const projectManager = useProjectManager();
-  const { clearDraft } = useChatActions();
-  const { draftActorRef } = useChatContext();
+  const {
+    model: { modelId },
+    draftActorRef,
+  } = useChatComposer();
+  const { clearDraft } = useDraftActions();
 
   const onSubmit: ChatTextareaProperties['onSubmit'] = useCallback(
-    async ({ content, model, metadata, imageUrls }) => {
+    async ({ content, imageUrls }) => {
       try {
         const createProject = await projectManager.createProject({
           kernel,
-          initialMessage: { content, model, metadata, imageUrls },
-          // Set initial panel state: chat open
+          activeModel: modelId,
+          initialMessage: { content, imageUrls },
           editorState: { panelState: { openPanels: { chat: true } } },
         });
 
@@ -194,7 +200,7 @@ function HomepageChatInput({
         toast.error('Failed to create project');
       }
     },
-    [clearDraft, draftActorRef, kernel, navigate, projectManager],
+    [clearDraft, draftActorRef, kernel, modelId, navigate, projectManager],
   );
 
   return (

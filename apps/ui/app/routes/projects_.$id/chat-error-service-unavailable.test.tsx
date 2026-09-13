@@ -45,12 +45,12 @@ describe('ChatErrorServiceUnavailable', () => {
     expect(screen.getByText('Unable to reach Tau')).toBeInTheDocument();
   });
 
-  it('Retry button calls continueChat (NOT regenerate) so partial assistant parts survive', async () => {
+  it('Resume button calls continueChat (NOT regenerate) so partial assistant parts survive', async () => {
     const user = userEvent.setup();
     render(<ChatErrorServiceUnavailable />);
 
-    const retry = screen.getByRole('button', { name: /retry/i });
-    await user.click(retry);
+    const resume = screen.getByRole('button', { name: /resume/i });
+    await user.click(resume);
 
     expect(continueChat).toHaveBeenCalledTimes(1);
     expect(regenerate).not.toHaveBeenCalled();

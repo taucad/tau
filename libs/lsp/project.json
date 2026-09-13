@@ -1,0 +1,7 @@
+{
+  "name": "lsp",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "libs/lsp",
+  "projectType": "library",
+  "tags": ["scope:shared", "type:lib"]
+}

@@ -7,6 +7,7 @@ import {
   FolderOpen,
   HardDrive,
   MoreHorizontal,
+  Plus,
   RefreshCw,
   Star,
   Trash2,
@@ -21,6 +22,7 @@ import { Tree, Folder, File } from '#components/magicui/file-tree.js';
 import type { TreeViewElement } from '#components/magicui/file-tree.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
+import { coerceFilesystemBackendCookie } from '#components/filesystem/backend-selector.js';
 import { useProjects } from '#hooks/use-projects.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { isFileSystemAccessSupported } from '#constants/browser.constants.js';
@@ -28,13 +30,23 @@ import type { Handle } from '#types/matches.types.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 import { cn } from '#utils/ui.utils.js';
 import {
-  getStoredDirectoryHandle,
-  storeDirectoryHandle,
   checkHandlePermission,
+  createWorkspace,
+  forgetWorkspace,
+  getWorkspace,
+  listProjectsForWorkspace,
+  listWorkspaces,
   requestHandlePermission,
+  setDefaultWorkspace,
+  updateWorkspaceHandle,
 } from '#filesystem/handle-store.js';
-import type { FileTreeNode } from '@taucad/filesystem';
-import { joinPath, parentDirectory } from '@taucad/utils/path';
+import type { Workspace } from '#filesystem/handle-store.js';
+import { WorkspaceDirectoryPanel } from '#components/filesystem/workspace-directory-panel.js';
+import type { WorkspaceDirectoryStatus } from '#constants/workspace-directory-copy.constants.js';
+import { toast } from '#components/ui/sonner.js';
+import { useWorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
+import type { FileTreeNode, WorkspaceScope } from '@taucad/filesystem';
+import { parentDirectory } from '@taucad/utils/path';
 
 export const handle: Handle = {
   breadcrumb() {
@@ -47,17 +59,18 @@ export const handle: Handle = {
 };
 
 /**
- * Backend column metadata.
+ * Column meta for non-webaccess backends. Webaccess columns are produced
+ * per-workspace (see `workspaceColumns` below).
  */
-type BackendColumnMeta = {
-  key: FileSystemBackend;
+type FixedColumnMeta = {
+  key: 'indexeddb' | 'opfs';
   label: string;
   icon: LucideIcon;
   description: string;
   isSupported: boolean;
 };
 
-const backendColumns: BackendColumnMeta[] = [
+const fixedColumns: FixedColumnMeta[] = [
   {
     key: 'indexeddb',
     label: 'IndexedDB',
@@ -72,18 +85,8 @@ const backendColumns: BackendColumnMeta[] = [
     description: 'Origin Private File System',
     isSupported: typeof navigator !== 'undefined' && 'storage' in navigator,
   },
-  {
-    key: 'webaccess',
-    label: 'File System',
-    icon: FolderOpen,
-    description: 'Local directory on your computer',
-    isSupported: isFileSystemAccessSupported,
-  },
 ];
 
-/**
- * Action type for ComboBoxResponsive
- */
 type ItemAction = {
   value: string;
   label: string;
@@ -91,17 +94,11 @@ type ItemAction = {
   variant?: 'default' | 'destructive';
 };
 
-/**
- * Available file actions
- */
 const fileActions: ItemAction[] = [
   { value: 'download', label: 'Download', icon: Download },
   { value: 'delete', label: 'Delete', icon: Trash2, variant: 'destructive' },
 ];
 
-/**
- * Available folder actions
- */
 const folderActions: ItemAction[] = [
   { value: 'download-zip', label: 'Download as ZIP', icon: FolderArchive },
   {
@@ -112,17 +109,16 @@ const folderActions: ItemAction[] = [
   },
 ];
 
-/**
- * Extract project ID from a path that is exactly "/projects/proj_xxx" (not subfolders)
- */
+/** Stable cache key for the loaded-directories map. */
+function makeBackendKey(backend: FileSystemBackend, workspaceId?: string): string {
+  return backend === 'webaccess' && workspaceId ? `webaccess:${workspaceId}` : backend;
+}
+
 function extractProjectId(path: string): string | undefined {
   const match = /^\/projects\/([^/]+)$/.exec(path);
   return match?.[1];
 }
 
-/**
- * Link to a project page that opens in a new tab
- */
 function ProjectLink({
   projectId,
   projectName,
@@ -150,9 +146,6 @@ function ProjectLink({
   );
 }
 
-/**
- * Trigger download of a blob with a filename
- */
 function downloadBlob(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
@@ -164,9 +157,6 @@ function downloadBlob(blob: Blob, filename: string): void {
   URL.revokeObjectURL(url);
 }
 
-/**
- * File actions component
- */
 function FileActions({
   path,
   onDelete,
@@ -190,7 +180,6 @@ function FileActions({
   return (
     <ComboBoxResponsive
       groupedItems={[{ name: 'Actions', items: fileActions }]}
-      defaultValue={undefined}
       getValue={(item) => item.value}
       renderLabel={(item) => (
         <div
@@ -222,9 +211,6 @@ function FileActions({
   );
 }
 
-/**
- * Folder actions component
- */
 function FolderActions({
   path,
   onDelete,
@@ -248,7 +234,6 @@ function FolderActions({
   return (
     <ComboBoxResponsive
       groupedItems={[{ name: 'Actions', items: folderActions }]}
-      defaultValue={undefined}
       getValue={(item) => item.value}
       renderLabel={(item) => (
         <div
@@ -280,9 +265,6 @@ function FolderActions({
   );
 }
 
-/**
- * Action handlers type for renderTree
- */
 type TreeActionHandlers = {
   onDeleteFile: (path: string) => Promise<void>;
   onDownloadFile: (path: string) => Promise<void>;
@@ -291,9 +273,6 @@ type TreeActionHandlers = {
   projectsMap: Map<string, Project>;
 };
 
-/**
- * Compose folder label with optional project link
- */
 function FolderLabel({ name, project }: { readonly name: string; readonly project?: Project }): React.JSX.Element {
   return (
     <span className='inline-flex items-center gap-2'>
@@ -303,13 +282,9 @@ function FolderLabel({ name, project }: { readonly name: string; readonly projec
   );
 }
 
-/**
- * Render tree elements recursively
- */
 function renderTree(elements: TreeViewElement[], handlers: TreeActionHandlers): React.ReactNode {
   return elements.map((element) => {
     if (element.children) {
-      // Check if this folder corresponds to a project
       const projectId = extractProjectId(element.id);
       const project = projectId ? handlers.projectsMap.get(projectId) : undefined;
 
@@ -345,9 +320,6 @@ function renderTree(elements: TreeViewElement[], handlers: TreeActionHandlers): 
   });
 }
 
-/**
- * Recursively count entries whose name starts with `proj_` (project directories).
- */
 function countProjects(elements: TreeViewElement[]): number {
   let count = 0;
   for (const element of elements) {
@@ -363,122 +335,114 @@ function countProjects(elements: TreeViewElement[]): number {
   return count;
 }
 
-// ============ WebAccess Directory State ============
+// ============ Workspace row state ============
 
-type WebAccessDirectoryState = {
-  directoryName: string | undefined;
-  isConnected: boolean;
-  /** Whether we need the user to re-grant permission (handle exists but expired) */
-  needsPermission: boolean;
+type WorkspaceColumnState = {
+  workspace: Workspace;
+  status: WorkspaceDirectoryStatus;
 };
 
-// ============ Backend Column Component ============
+// ============ Generic column shell ============
 
 /**
- * A single column in the 3-column grid showing a backend's file tree.
+ * Common column wrapper used by both fixed (indexeddb/opfs) and
+ * per-workspace columns. Owns the header, default-toggle, refresh
+ * button, and the file-tree area.
  */
-function BackendColumn({
-  meta,
+function ColumnShell({
+  icon: Icon,
+  title,
+  subtitle,
   isDefault,
-  treeActionHandlers,
+  defaultTooltip,
   fileTree,
   isLoading,
+  isDisabled,
+  emptyHint,
+  unsupportedHint,
+  treeActionHandlers,
+  topRight,
+  body,
   onRefresh,
   onSetDefault,
-  webAccessState,
-  onConnectDirectory,
-  onGrantAccess,
-  onChangeDirectory,
   onExpand,
 }: {
-  readonly meta: BackendColumnMeta;
+  readonly icon: LucideIcon;
+  readonly title: React.ReactNode;
+  readonly subtitle: React.ReactNode;
   readonly isDefault: boolean;
-  readonly treeActionHandlers: TreeActionHandlers;
+  readonly defaultTooltip: string;
   readonly fileTree: TreeViewElement[];
   readonly isLoading: boolean;
-  readonly onRefresh: () => void;
-  readonly onSetDefault: () => void;
-  readonly webAccessState?: WebAccessDirectoryState;
-  readonly onConnectDirectory?: () => void;
-  readonly onGrantAccess?: () => void;
-  readonly onChangeDirectory?: () => void;
+  readonly isDisabled: boolean;
+  readonly emptyHint?: string;
+  readonly unsupportedHint?: string;
+  readonly treeActionHandlers: TreeActionHandlers;
+  readonly topRight?: React.ReactNode;
+  readonly body?: React.ReactNode;
+  readonly onRefresh?: () => void;
+  readonly onSetDefault?: () => void;
   readonly onExpand?: (id: string) => void;
 }): React.JSX.Element {
-  const Icon = meta.icon;
-  const isDisabled = !meta.isSupported;
-
   return (
     <div className={cn('flex min-h-0 flex-col gap-3 rounded-lg border bg-card p-4', isDisabled && 'opacity-50')}>
-      {/* Column Header */}
       <div className='flex items-start justify-between gap-2'>
-        <div className='flex items-center gap-2'>
+        <div className='flex min-w-0 items-center gap-2'>
           <Icon className='size-4 shrink-0 text-muted-foreground' />
-          <div className='flex flex-col gap-0.5'>
+          <div className='flex min-w-0 flex-col gap-0.5'>
             <div className='flex items-center gap-2'>
-              <span className='text-sm font-medium'>{meta.label}</span>
+              <span className='truncate text-sm font-medium'>{title}</span>
               {countProjects(fileTree) > 0 ? (
                 <span className='rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground'>
                   {countProjects(fileTree)}
                 </span>
               ) : undefined}
             </div>
-            {meta.key === 'webaccess' && webAccessState?.directoryName ? (
-              <span className='inline-flex items-center gap-1 text-xs text-muted-foreground'>
-                {webAccessState.directoryName} -{' '}
-                <Button variant='link' size='xs' className='h-auto p-0 text-xs' onClick={onChangeDirectory}>
-                  Change Directory
-                </Button>
-              </span>
-            ) : (
-              <span className='text-xs text-muted-foreground'>{meta.description}</span>
-            )}
+            <span className='truncate text-xs text-muted-foreground'>{subtitle}</span>
           </div>
         </div>
         <div className='flex items-center gap-1'>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant='ghost'
-                size='icon'
-                className={cn('size-7', isDefault && 'text-primary')}
-                disabled={isDisabled}
-                onClick={onSetDefault}
-              >
-                <Star className={cn('size-3.5', isDefault && 'fill-primary')} />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{isDefault ? 'Default storage' : 'Set as default storage'}</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant='ghost'
-                size='icon'
-                className='size-7'
-                disabled={isLoading || isDisabled}
-                onClick={onRefresh}
-              >
-                <RefreshCw className={cn('size-3.5', isLoading && 'animate-spin')} />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Refresh</TooltipContent>
-          </Tooltip>
+          {topRight}
+          {onSetDefault ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant='ghost'
+                  size='icon'
+                  className={cn('size-7', isDefault && 'text-primary')}
+                  disabled={isDisabled}
+                  onClick={onSetDefault}
+                >
+                  <Star className={cn('size-3.5', isDefault && 'fill-primary')} />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{defaultTooltip}</TooltipContent>
+            </Tooltip>
+          ) : undefined}
+          {onRefresh ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant='ghost'
+                  size='icon'
+                  className='size-7'
+                  disabled={isLoading || isDisabled}
+                  onClick={onRefresh}
+                >
+                  <RefreshCw className={cn('size-3.5', isLoading && 'animate-spin')} />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Refresh</TooltipContent>
+            </Tooltip>
+          ) : undefined}
         </div>
       </div>
 
-      {/* WebAccess directory management */}
-      {meta.key === 'webaccess' && webAccessState ? (
-        <WebAccessDirectoryPanel
-          state={webAccessState}
-          onConnect={onConnectDirectory!}
-          onGrantAccess={onGrantAccess!}
-        />
-      ) : undefined}
+      {body}
 
-      {/* Unsupported banner */}
       {isDisabled ? (
         <div className='flex flex-1 items-center justify-center rounded-md border border-dashed p-6 text-sm text-muted-foreground'>
-          Not supported in this browser
+          {unsupportedHint ?? 'Not supported in this browser'}
         </div>
       ) : (
         <div className='min-h-0 flex-1 overflow-auto rounded-md border'>
@@ -487,7 +451,9 @@ function BackendColumn({
               <Loader className='size-6' />
             </div>
           ) : fileTree.length === 0 ? (
-            <div className='flex h-32 items-center justify-center text-sm text-muted-foreground'>No files found</div>
+            <div className='flex h-32 items-center justify-center text-sm text-muted-foreground'>
+              {emptyHint ?? 'No files found'}
+            </div>
           ) : (
             <Tree elements={fileTree} onExpand={onExpand}>
               {renderTree(fileTree, treeActionHandlers)}
@@ -499,119 +465,113 @@ function BackendColumn({
   );
 }
 
-/**
- * WebAccess directory management panel shown within the WebAccess column.
- */
-function WebAccessDirectoryPanel({
-  state,
-  onConnect,
-  onGrantAccess,
-}: {
-  readonly state: WebAccessDirectoryState;
-  readonly onConnect: () => void;
-  readonly onGrantAccess: () => void;
-}): React.JSX.Element | undefined {
-  if (state.directoryName === undefined) {
-    return (
-      <Button variant='outline' size='sm' className='gap-2' onClick={onConnect}>
-        <FolderOpen className='size-4' />
-        Connect Directory
-      </Button>
-    );
-  }
-
-  if (state.needsPermission) {
-    return (
-      <div className='border-amber-500/30 bg-amber-500/10 flex items-center justify-between gap-2 rounded-md border px-3 py-2'>
-        <div className='flex items-center gap-2'>
-          <FolderOpen className='text-amber-600 size-3.5 shrink-0' />
-          <span className='text-xs'>{state.directoryName}</span>
-        </div>
-        <Button size='sm' variant='outline' className='h-7 text-xs' onClick={onGrantAccess}>
-          Grant Access
-        </Button>
-      </div>
-    );
-  }
-
-  return undefined;
-}
-
 // ============ Main Route Component ============
 
 export default function FilesRoute(): React.JSX.Element {
-  const [backendCookie, setBackendCookie] = useCookie(cookieName.filesystemBackend, 'indexeddb' as FileSystemBackend);
-  const { fileManagerRef, readFile, deleteFile, getZippedDirectory, readShallowDirectory } = useFileManager();
+  const [rawBackendCookie, setBackendCookie] = useCookie(cookieName.filesystemBackend, 'indexeddb');
+  const backendCookie = coerceFilesystemBackendCookie(rawBackendCookie);
+  const { client, workspace } = useFileManager();
   const { projects } = useProjects();
 
-  // Loaded directories per backend: backend → (directoryPath → FileTreeNode[])
+  // Per-cache-key (backend | webaccess:<workspaceId>) loaded directories
   const [loadedDirectories, setLoadedDirectories] = useState<Record<string, Map<string, FileTreeNode[]>>>({});
   const [rootLoading, setRootLoading] = useState<Record<string, boolean>>({});
   const inflightRef = useRef<Set<string>>(new Set());
-  // WebAccess directory state
-  const [webAccessState, setWebAccessState] = useState<WebAccessDirectoryState>({
-    directoryName: undefined,
-    isConnected: false,
-    needsPermission: false,
-  });
 
-  // Create a lookup map for projects by ID
+  const [workspaceColumns, setWorkspaceColumns] = useState<WorkspaceColumnState[]>([]);
+  const [isLoadingWorkspaces, setIsLoadingWorkspaces] = useState(true);
+  const [busyWorkspaceId, setBusyWorkspaceId] = useState<string | undefined>(undefined);
+  const telemetry = useWorkspaceTelemetry();
+
   const projectsMap = useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects]);
 
-  // Check WebAccess handle status on mount
-  useEffect(() => {
-    const checkWebAccess = async (): Promise<void> => {
-      try {
-        const storedHandle = await getStoredDirectoryHandle();
-        if (storedHandle) {
-          const permission = await checkHandlePermission(storedHandle);
-          setWebAccessState({
-            directoryName: storedHandle.name,
-            isConnected: permission === 'granted',
-            needsPermission: permission !== 'granted',
-          });
-        }
-      } catch {
-        // Handle store might not be available
-      }
-    };
-
-    void checkWebAccess();
+  const reloadWorkspaceColumns = useCallback(async (): Promise<void> => {
+    try {
+      const workspaces = await listWorkspaces();
+      const built = await Promise.all(
+        workspaces.map(async (workspace): Promise<WorkspaceColumnState> => {
+          const entry = await getWorkspace(workspace.workspaceId);
+          let status: WorkspaceDirectoryStatus = 'missing';
+          if (entry) {
+            const permission = await checkHandlePermission(entry.handle);
+            status = permission === 'granted' ? 'connected' : 'permission';
+          }
+          return {
+            workspace,
+            status,
+          };
+        }),
+      );
+      setWorkspaceColumns(built);
+    } finally {
+      setIsLoadingWorkspaces(false);
+    }
   }, []);
 
-  // Load a directory lazily
+  useEffect(() => {
+    void reloadWorkspaceColumns();
+  }, [reloadWorkspaceColumns]);
+
+  /**
+   * Resolve the {@link WorkspaceScope} for a column. Returns `undefined`
+   * when the requested webaccess workspace isn't connected (the
+   * underlying provider call would throw `MissingWorkspaceHandleError`
+   * upstream — surface a typed nullable instead).
+   */
+  const resolveScope = useCallback(
+    async (backend: FileSystemBackend, workspaceId?: string): Promise<WorkspaceScope | undefined> => {
+      if (backend !== 'webaccess') {
+        return { backend };
+      }
+      if (!workspaceId) {
+        return undefined;
+      }
+      const entry = await getWorkspace(workspaceId);
+      if (!entry) {
+        return undefined;
+      }
+      return {
+        backend: 'webaccess',
+        directoryHandle: entry.handle,
+        workspaceId: entry.workspace.workspaceId,
+      };
+    },
+    [],
+  );
+
   const loadDirectory = useCallback(
-    async (backend: FileSystemBackend, directoryPath: string): Promise<void> => {
-      const inflightKey = `${backend}:${directoryPath}`;
+    async (backend: FileSystemBackend, directoryPath: string, workspaceId?: string): Promise<void> => {
+      const cacheKey = makeBackendKey(backend, workspaceId);
+      const inflightKey = `${cacheKey}:${directoryPath}`;
       if (inflightRef.current.has(inflightKey)) {
         return;
       }
       inflightRef.current.add(inflightKey);
 
       try {
-        const nodes = await readShallowDirectory(directoryPath, backend);
+        const scope = await resolveScope(backend, workspaceId);
+        const nodes = scope ? await client.readShallowDirectory(directoryPath, { scope }) : [];
         setLoadedDirectories((previous) => {
-          const backendDirectories = new Map(previous[backend] ?? []);
-          backendDirectories.set(directoryPath, nodes);
-          return { ...previous, [backend]: backendDirectories };
+          const directories = new Map(previous[cacheKey] ?? []);
+          directories.set(directoryPath, nodes);
+          return { ...previous, [cacheKey]: directories };
         });
       } catch {
         setLoadedDirectories((previous) => {
-          const backendDirectories = new Map(previous[backend] ?? []);
-          backendDirectories.set(directoryPath, []);
-          return { ...previous, [backend]: backendDirectories };
+          const directories = new Map(previous[cacheKey] ?? []);
+          directories.set(directoryPath, []);
+          return { ...previous, [cacheKey]: directories };
         });
       } finally {
         inflightRef.current.delete(inflightKey);
       }
     },
-    [readShallowDirectory],
+    [client, resolveScope],
   );
 
-  // Build a tree from loaded directories
-  const projectTreeFromDirectories = useCallback(
-    (backend: FileSystemBackend): TreeViewElement[] => {
-      const directories = loadedDirectories[backend];
+  const projectTreeForKey = useCallback(
+    (cacheKey: string): TreeViewElement[] => {
+      const directories = loadedDirectories[cacheKey];
       if (!directories) {
         return [];
       }
@@ -638,237 +598,385 @@ export default function FilesRoute(): React.JSX.Element {
     [loadedDirectories],
   );
 
-  // Handle folder expansion for lazy loading
   const handleExpand = useCallback(
-    (id: string, backend: FileSystemBackend) => {
-      const directories = loadedDirectories[backend];
+    (id: string, backend: FileSystemBackend, workspaceId?: string) => {
+      const cacheKey = makeBackendKey(backend, workspaceId);
+      const directories = loadedDirectories[cacheKey];
       if (directories?.has(id)) {
         return;
       }
-      void loadDirectory(backend, id);
+      void loadDirectory(backend, id, workspaceId);
     },
     [loadedDirectories, loadDirectory],
   );
 
-  // Load root trees on mount
   const loadColumnTree = useCallback(
-    async (backend: FileSystemBackend): Promise<void> => {
-      setRootLoading((previous) => ({ ...previous, [backend]: true }));
-      await loadDirectory(backend, '/');
-      setRootLoading((previous) => ({ ...previous, [backend]: false }));
+    async (backend: FileSystemBackend, workspaceId?: string): Promise<void> => {
+      const cacheKey = makeBackendKey(backend, workspaceId);
+      setRootLoading((previous) => ({ ...previous, [cacheKey]: true }));
+      await loadDirectory(backend, '/', workspaceId);
+      setRootLoading((previous) => ({ ...previous, [cacheKey]: false }));
     },
     [loadDirectory],
   );
 
-  // Handle refresh: clear inflight tracking and re-fetch all loaded paths
   const handleRefresh = useCallback(
-    (backend: FileSystemBackend) => {
-      // Clear inflight keys for this backend so they can be re-fetched
+    (backend: FileSystemBackend, workspaceId?: string) => {
+      const cacheKey = makeBackendKey(backend, workspaceId);
       for (const key of inflightRef.current) {
-        if (key.startsWith(`${backend}:`)) {
+        if (key.startsWith(`${cacheKey}:`)) {
           inflightRef.current.delete(key);
         }
       }
-      const directories = loadedDirectories[backend];
+      const directories = loadedDirectories[cacheKey];
       if (!directories || directories.size === 0) {
-        void loadColumnTree(backend);
+        void loadColumnTree(backend, workspaceId);
         return;
       }
       for (const directoryPath of directories.keys()) {
-        void loadDirectory(backend, directoryPath);
+        void loadDirectory(backend, directoryPath, workspaceId);
       }
     },
     [loadedDirectories, loadDirectory, loadColumnTree],
   );
 
-  // Load all column trees on mount
+  // Load fixed columns on mount; load each connected workspace column as
+  // permission flips to `connected`.
   useEffect(() => {
-    for (const column of backendColumns) {
+    for (const column of fixedColumns) {
       if (column.isSupported) {
-        if (column.key === 'webaccess' && !webAccessState.isConnected) {
-          continue;
-        }
         void loadColumnTree(column.key);
       }
     }
-  }, [loadColumnTree, webAccessState.isConnected]);
+  }, [loadColumnTree]);
+
+  useEffect(() => {
+    for (const column of workspaceColumns) {
+      if (column.status === 'connected') {
+        void loadColumnTree('webaccess', column.workspace.workspaceId);
+      }
+    }
+  }, [workspaceColumns, loadColumnTree]);
 
   // ============ Action Handlers ============
 
-  // Set default backend (just updates cookie, no directory picker prompt)
-  const handleSetDefault = useCallback(
+  const handleSetDefaultBackend = useCallback(
     (backend: FileSystemBackend) => {
+      if (backend === 'webaccess' && !workspaceColumns.some((column) => column.status === 'connected')) {
+        toast.error('Connect a workspace folder first.');
+        return;
+      }
       setBackendCookie(backend);
     },
-    [setBackendCookie],
+    [setBackendCookie, workspaceColumns],
   );
 
-  // Connect a new workspace directory for webaccess
-  const handleConnectDirectory = useCallback(async () => {
+  const handleAddWorkspace = useCallback(async () => {
+    if (!isFileSystemAccessSupported) {
+      return;
+    }
     try {
-      const newHandle = await globalThis.window.showDirectoryPicker({
+      const handle = await globalThis.window.showDirectoryPicker({
         id: 'tau-workspace',
         mode: 'readwrite',
       });
-
-      await storeDirectoryHandle(newHandle);
-      setWebAccessState({
-        directoryName: newHandle.name,
-        isConnected: true,
-        needsPermission: false,
-      });
-      // Reload webaccess tree
-      setLoadedDirectories((previous) => ({ ...previous, webaccess: new Map() }));
-      void loadColumnTree('webaccess');
+      const workspace = await createWorkspace(handle, { setDefault: workspaceColumns.length === 0 });
+      telemetry.workspaceCreated({ workspaceId: workspace.workspaceId, isDefault: workspaceColumns.length === 0 });
+      await reloadWorkspaceColumns();
+      toast.success(`Connected workspace "${handle.name}"`);
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') {
+        telemetry.workspaceOpenFailed({ workspaceId: undefined, reason: 'aborted' });
         return;
       }
-
+      telemetry.workspaceOpenFailed({ workspaceId: undefined, reason: 'unknown' });
+      toast.error('Failed to connect workspace.');
       throw error;
     }
-  }, [loadColumnTree]);
+  }, [reloadWorkspaceColumns, telemetry, workspaceColumns.length]);
 
-  // Grant permission on existing workspace handle
-  const handleGrantAccess = useCallback(async () => {
-    const storedHandle = await getStoredDirectoryHandle();
-    if (!storedHandle) {
-      return;
-    }
-
-    const granted = await requestHandlePermission(storedHandle);
-    if (granted) {
-      setWebAccessState((previous) => ({
-        ...previous,
-        isConnected: true,
-        needsPermission: false,
-      }));
-      setLoadedDirectories((previous) => ({ ...previous, webaccess: new Map() }));
-      void loadColumnTree('webaccess');
-    }
-  }, [loadColumnTree]);
-
-  // Change workspace directory (opens picker for a new directory)
-  const handleChangeDirectory = useCallback(async () => {
-    await handleConnectDirectory();
-  }, [handleConnectDirectory]);
-
-  const deleteDirectory = useCallback(
-    async (path: string): Promise<void> => {
-      const snapshot = fileManagerRef.getSnapshot();
-      const { proxy } = snapshot.context;
-      if (!proxy) {
-        throw new Error('Worker not ready');
+  const handleChangeWorkspaceFolder = useCallback(
+    async (workspaceId: string) => {
+      if (!isFileSystemAccessSupported) {
+        return;
       }
-
-      const deleteRecursive = async (directoryPath: string): Promise<void> => {
-        const entries = await proxy.readdir(directoryPath);
-        for (const entry of entries) {
-          const fullPath = joinPath(directoryPath, entry);
-          // oxlint-disable-next-line no-await-in-loop -- need sequential processing for correct deletion order
-          const stats = await proxy.stat(fullPath);
-          // oxlint-disable-next-line no-await-in-loop -- need sequential processing for correct deletion order
-          await (stats.type === 'dir' ? deleteRecursive(fullPath) : proxy.unlink(fullPath));
+      setBusyWorkspaceId(workspaceId);
+      try {
+        const handle = await globalThis.window.showDirectoryPicker({
+          id: `tau-workspace-${workspaceId}`,
+          mode: 'readwrite',
+        });
+        await updateWorkspaceHandle(workspaceId, handle);
+        // Drop both the worker-side standalone provider cache (keyed
+        // by `workspaceId`, Audit R6 / Finding 9) and the route-level
+        // tree cache for this workspace before reloading the column
+        // — otherwise the next read continues to use the stale handle.
+        await workspace.invalidateStandaloneProvider('webaccess', workspaceId);
+        telemetry.workspaceConnected({ workspaceId });
+        const invalidatedKey = makeBackendKey('webaccess', workspaceId);
+        setLoadedDirectories((previous) => {
+          const { [invalidatedKey]: _removed, ...rest } = previous;
+          return rest;
+        });
+        await reloadWorkspaceColumns();
+      } catch (error) {
+        if (error instanceof DOMException && error.name === 'AbortError') {
+          telemetry.workspaceOpenFailed({ workspaceId, reason: 'aborted' });
+          return;
         }
-
-        await proxy.rmdir(directoryPath);
-      };
-
-      await deleteRecursive(path);
-    },
-    [fileManagerRef],
-  );
-
-  // Handle file deletion — invalidate parent directory in all backends
-  const handleDeleteFile = useCallback(
-    async (path: string) => {
-      await deleteFile(path, { source: 'user' });
-      const parentPath = parentDirectory(path);
-      for (const column of backendColumns) {
-        if (column.isSupported) {
-          void loadDirectory(column.key, parentPath);
-        }
+        telemetry.workspaceOpenFailed({ workspaceId, reason: 'unknown' });
+        toast.error('Failed to change workspace folder.');
+        throw error;
+      } finally {
+        setBusyWorkspaceId(undefined);
       }
     },
-    [deleteFile, loadDirectory],
+    [reloadWorkspaceColumns, telemetry, workspace],
   );
 
-  // Handle file download
-  const handleDownloadFile = useCallback(
-    async (path: string) => {
-      const content = await readFile(path);
-      const filename = path.split('/').pop() ?? 'file';
-      const blob = new Blob([content]);
-      downloadBlob(blob, filename);
-    },
-    [readFile],
-  );
-
-  // Handle folder deletion — invalidate parent directory
-  const handleDeleteFolder = useCallback(
-    async (path: string) => {
-      await deleteDirectory(path);
-      const parentPath = parentDirectory(path);
-      for (const column of backendColumns) {
-        if (column.isSupported) {
-          void loadDirectory(column.key, parentPath);
+  const handleGrantWorkspaceAccess = useCallback(
+    async (workspaceId: string) => {
+      setBusyWorkspaceId(workspaceId);
+      try {
+        const entry = await getWorkspace(workspaceId);
+        if (!entry) {
+          return;
         }
+        const granted = await requestHandlePermission(entry.handle);
+        if (granted) {
+          telemetry.workspaceConnected({ workspaceId });
+        } else {
+          telemetry.workspaceOpenFailed({ workspaceId, reason: 'permission' });
+          toast.error('Permission was not granted.');
+        }
+        await reloadWorkspaceColumns();
+      } finally {
+        setBusyWorkspaceId(undefined);
       }
     },
-    [deleteDirectory, loadDirectory],
+    [reloadWorkspaceColumns, telemetry],
   );
 
-  // Handle folder download as ZIP
-  const handleDownloadFolderZip = useCallback(
-    async (path: string) => {
-      const blob = await getZippedDirectory(path);
-      const folderName = path.split('/').pop() ?? 'folder';
-      downloadBlob(blob, `${folderName}.zip`);
+  const handleForgetWorkspace = useCallback(
+    async (workspaceId: string) => {
+      setBusyWorkspaceId(workspaceId);
+      try {
+        const bound = await listProjectsForWorkspace(workspaceId);
+        if (bound.length > 0) {
+          toast.error(
+            `Cannot forget — ${bound.length} project${bound.length === 1 ? '' : 's'} still bound to this workspace.`,
+          );
+          return;
+        }
+        await forgetWorkspace(workspaceId);
+        await workspace.invalidateStandaloneProvider('webaccess', workspaceId);
+        const invalidatedKey = makeBackendKey('webaccess', workspaceId);
+        setLoadedDirectories((previous) => {
+          const { [invalidatedKey]: _removed, ...rest } = previous;
+          return rest;
+        });
+        await reloadWorkspaceColumns();
+      } finally {
+        setBusyWorkspaceId(undefined);
+      }
     },
-    [getZippedDirectory],
+    [reloadWorkspaceColumns, workspace],
   );
 
-  // Combine handlers for renderTree
-  const treeActionHandlers: TreeActionHandlers = {
-    onDeleteFile: handleDeleteFile,
-    onDownloadFile: handleDownloadFile,
-    onDeleteFolder: handleDeleteFolder,
-    onDownloadFolderZip: handleDownloadFolderZip,
-    projectsMap,
-  };
+  const handleSetDefaultWorkspace = useCallback(
+    async (workspaceId: string) => {
+      setBusyWorkspaceId(workspaceId);
+      try {
+        await setDefaultWorkspace(workspaceId);
+        await reloadWorkspaceColumns();
+      } finally {
+        setBusyWorkspaceId(undefined);
+      }
+    },
+    [reloadWorkspaceColumns],
+  );
+
+  /**
+   * Reload the parent directory inside the column whose scope owns the
+   * mutation, so the UI reflects the deletion without re-fetching the
+   * other columns. Cross-column staleness is acceptable because the
+   * other columns reference different storage backends entirely.
+   */
+  const invalidateColumn = useCallback(
+    (parentPath: string, backend: FileSystemBackend, workspaceId?: string) => {
+      void loadDirectory(backend, parentPath, workspaceId);
+    },
+    [loadDirectory],
+  );
+
+  const buildTreeActionHandlers = useCallback(
+    (backend: FileSystemBackend, workspaceId?: string): TreeActionHandlers => ({
+      projectsMap,
+      onDeleteFile: async (path: string) => {
+        const scope = await resolveScope(backend, workspaceId);
+        if (!scope) {
+          toast.error('Workspace is not connected.');
+          return;
+        }
+        await client.unlink(path, { scope });
+        invalidateColumn(parentDirectory(path), backend, workspaceId);
+      },
+      onDownloadFile: async (path: string) => {
+        const scope = await resolveScope(backend, workspaceId);
+        if (!scope) {
+          toast.error('Workspace is not connected.');
+          return;
+        }
+        const content = await client.readFile(path, { scope });
+        const filename = path.split('/').pop() ?? 'file';
+        downloadBlob(new Blob([content]), filename);
+      },
+      onDeleteFolder: async (path: string) => {
+        const scope = await resolveScope(backend, workspaceId);
+        if (!scope) {
+          toast.error('Workspace is not connected.');
+          return;
+        }
+        await client.rmdir(path, { scope, recursive: true });
+        invalidateColumn(parentDirectory(path), backend, workspaceId);
+      },
+      onDownloadFolderZip: async (path: string) => {
+        const scope = await resolveScope(backend, workspaceId);
+        if (!scope) {
+          toast.error('Workspace is not connected.');
+          return;
+        }
+        const blob = await client.getZippedDirectory(path, { scope });
+        const folderName = path.split('/').pop() ?? 'folder';
+        downloadBlob(blob, `${folderName}.zip`);
+      },
+    }),
+    [projectsMap, resolveScope, client, invalidateColumn],
+  );
+
+  const isWebAccessDefault = backendCookie === 'webaccess';
 
   return (
     <div className='flex h-full flex-col gap-4 px-6 py-8'>
-      {/* Header */}
       <div className='flex items-center justify-between gap-4'>
         <h1 className='shrink-0 text-3xl font-medium tracking-tight'>Files</h1>
       </div>
 
-      {/* 3-column grid */}
-      <div className='grid min-h-0 flex-1 grid-cols-1 grid-rows-[1fr] gap-4 overflow-hidden md:grid-cols-3'>
-        {backendColumns.map((column) => (
-          <BackendColumn
-            key={column.key}
-            meta={column}
-            isDefault={backendCookie === column.key}
-            treeActionHandlers={treeActionHandlers}
-            fileTree={projectTreeFromDirectories(column.key)}
-            isLoading={rootLoading[column.key] ?? false}
-            webAccessState={column.key === 'webaccess' ? webAccessState : undefined}
-            onRefresh={() => {
-              handleRefresh(column.key);
-            }}
-            onSetDefault={() => {
-              handleSetDefault(column.key);
-            }}
-            onConnectDirectory={column.key === 'webaccess' ? handleConnectDirectory : undefined}
-            onGrantAccess={column.key === 'webaccess' ? handleGrantAccess : undefined}
-            onChangeDirectory={column.key === 'webaccess' ? handleChangeDirectory : undefined}
-            onExpand={(id) => {
-              handleExpand(id, column.key);
-            }}
-          />
-        ))}
+      <div className='grid min-h-0 flex-1 auto-rows-fr grid-cols-1 gap-4 overflow-x-auto md:grid-cols-[repeat(auto-fit,minmax(280px,1fr))]'>
+        {fixedColumns.map((column) => {
+          const cacheKey = makeBackendKey(column.key);
+          return (
+            <ColumnShell
+              key={column.key}
+              icon={column.icon}
+              title={column.label}
+              subtitle={column.description}
+              isDefault={backendCookie === column.key}
+              defaultTooltip={backendCookie === column.key ? 'Default storage' : 'Set as default storage'}
+              fileTree={projectTreeForKey(cacheKey)}
+              isLoading={rootLoading[cacheKey] ?? false}
+              isDisabled={!column.isSupported}
+              treeActionHandlers={buildTreeActionHandlers(column.key)}
+              onRefresh={() => {
+                handleRefresh(column.key);
+              }}
+              onSetDefault={() => {
+                handleSetDefaultBackend(column.key);
+              }}
+              onExpand={(id) => {
+                handleExpand(id, column.key);
+              }}
+            />
+          );
+        })}
+
+        {isFileSystemAccessSupported ? (
+          isLoadingWorkspaces ? (
+            <div className='flex items-center justify-center rounded-lg border bg-card p-4'>
+              <Loader className='size-5' />
+            </div>
+          ) : (
+            <>
+              {workspaceColumns.map((column) => {
+                const cacheKey = makeBackendKey('webaccess', column.workspace.workspaceId);
+                return (
+                  <ColumnShell
+                    key={column.workspace.workspaceId}
+                    icon={FolderOpen}
+                    title={column.workspace.name}
+                    subtitle='Local folder on your computer'
+                    isDefault={isWebAccessDefault && column.workspace.isDefault}
+                    defaultTooltip={
+                      isWebAccessDefault && column.workspace.isDefault
+                        ? 'Default workspace'
+                        : 'Set as default workspace'
+                    }
+                    fileTree={projectTreeForKey(cacheKey)}
+                    isLoading={rootLoading[cacheKey] ?? false}
+                    isDisabled={column.status !== 'connected'}
+                    emptyHint='No projects yet'
+                    treeActionHandlers={buildTreeActionHandlers('webaccess', column.workspace.workspaceId)}
+                    body={
+                      column.status === 'connected' ? undefined : (
+                        <WorkspaceDirectoryPanel
+                          variant='banner'
+                          status={column.status}
+                          workspaceId={column.workspace.workspaceId}
+                          workspaceName={column.workspace.name}
+                          isBusy={busyWorkspaceId === column.workspace.workspaceId}
+                          onConnect={async () => {
+                            await handleChangeWorkspaceFolder(column.workspace.workspaceId);
+                          }}
+                          onGrantAccess={async () => {
+                            await handleGrantWorkspaceAccess(column.workspace.workspaceId);
+                          }}
+                        />
+                      )
+                    }
+                    topRight={
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant='ghost'
+                            size='icon'
+                            className='size-7'
+                            disabled={busyWorkspaceId === column.workspace.workspaceId}
+                            onClick={() => void handleForgetWorkspace(column.workspace.workspaceId)}
+                          >
+                            <Trash2 className='size-3.5' />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>Forget workspace</TooltipContent>
+                      </Tooltip>
+                    }
+                    onRefresh={() => {
+                      handleRefresh('webaccess', column.workspace.workspaceId);
+                    }}
+                    onSetDefault={() => {
+                      if (!isWebAccessDefault) {
+                        setBackendCookie('webaccess');
+                      }
+                      void handleSetDefaultWorkspace(column.workspace.workspaceId);
+                    }}
+                    onExpand={(id) => {
+                      handleExpand(id, 'webaccess', column.workspace.workspaceId);
+                    }}
+                  />
+                );
+              })}
+
+              <button
+                type='button'
+                className='flex min-h-0 flex-col items-center justify-center gap-2 rounded-lg border border-dashed bg-muted/30 p-4 text-sm text-muted-foreground transition-colors hover:bg-muted/50'
+                onClick={handleAddWorkspace}
+              >
+                <Plus className='size-5' />
+                <span className='font-medium'>Add Workspace</span>
+                <span className='text-xs'>Connect another folder on your computer</span>
+              </button>
+            </>
+          )
+        ) : undefined}
       </div>
     </div>
   );

@@ -62,26 +62,35 @@ import { createBridgePort } from '#transport/_internal/runtime-filesystem-bridge
 import { _fromMemoryFsHandle as fromMemoryFS } from '#transport/_internal/from-memory-fs-handle.js';
 
 let _testFileSystemHandle: ReturnType<typeof fromMemoryFS> | undefined;
+let _testFileSystemBase: RuntimeFileSystemBase | undefined;
 
 // =============================================================================
 // Test Filesystem Utilities
 // =============================================================================
 
 /**
- * Internal helper: extract the underlying `RuntimeFileSystemBase` from the
- * cached `RuntimeFileSystemHandle`. The value returned by `fromMemoryFS()`
- * is always inline-kind; this assertion documents and enforces that.
+ * Internal helper: materialise (and cache) the underlying
+ * `RuntimeFileSystemBase` from the cached `RuntimeFileSystemHandle`.
+ *
+ * Under the v6 spec/instance contract (see
+ * `docs/research/runtime-filesystem-spec-instance-harmonisation.md`)
+ * the inline handle is a per-binding factory — every `handle.create()`
+ * mints a fresh base. The test utility intentionally caches one
+ * materialised base so consecutive `getTestFileSystem()` calls return
+ * the same store; `seedTestFileSystem` / `clearTestFileSystem` reset
+ * both the spec and the cached base together.
  *
  * @internal
  *
- * @returns The underlying `RuntimeFileSystemBase` implementation.
+ * @returns The shared in-memory test filesystem implementation.
  */
 function unwrapTestFs(): RuntimeFileSystemBase {
   _testFileSystemHandle ??= fromMemoryFS();
   if (_testFileSystemHandle.kind !== 'inline') {
     throw new Error('Internal invariant: fromMemoryFS() must return the inline-kind handle.');
   }
-  return _testFileSystemHandle.fs;
+  _testFileSystemBase ??= _testFileSystemHandle.create();
+  return _testFileSystemBase;
 }
 
 /**
@@ -126,6 +135,7 @@ export function getTestFileSystemHandle(): ReturnType<typeof fromMemoryFS> {
  */
 export async function seedTestFileSystem(files: Record<string, string | Uint8Array<ArrayBuffer>>): Promise<void> {
   _testFileSystemHandle = fromMemoryFS();
+  _testFileSystemBase = undefined;
   const fs = unwrapTestFs();
 
   for (const [path, content] of Object.entries(files)) {
@@ -146,6 +156,7 @@ export async function seedTestFileSystem(files: Record<string, string | Uint8Arr
  */
 export async function clearTestFileSystem(): Promise<void> {
   _testFileSystemHandle = fromMemoryFS();
+  _testFileSystemBase = undefined;
 }
 
 // =============================================================================

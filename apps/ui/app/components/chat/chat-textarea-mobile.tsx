@@ -1,7 +1,6 @@
 import { memo, useState } from 'react';
 import { Plus, Wrench, Paperclip, ChevronRight } from 'lucide-react';
 import type { ToolSelection } from '@taucad/chat';
-import { useActiveChatKernel } from '#hooks/use-active-chat-kernel.js';
 import { Button } from '#components/ui/button.js';
 import { Textarea } from '#components/ui/textarea.js';
 import { SvgIcon } from '#components/icons/svg-icon.js';
@@ -160,11 +159,6 @@ export const ChatTextareaMobile = memo(function ({
 }: ChatTextareaMobileProperties): React.JSX.Element {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
 
-  // Chat-scoped kernel resolver — replaces the prior hardcoded
-  // `'openscad'` lookup so the mobile drawer label matches the chat's
-  // actual active kernel (and falls back to the cookie when unset).
-  const { kernel: selectedKernel } = useActiveChatKernel();
-
   const handleDrawerAddImage = (image: string): void => {
     handleAddImage(image);
     setIsDrawerOpen(false);
@@ -266,12 +260,9 @@ export const ChatTextareaMobile = memo(function ({
                         <div className={menuItemClassName}>
                           <span className='flex w-full items-center justify-between'>
                             <div className='flex items-center gap-2'>
-                              <SvgIcon
-                                id={kernel?.id ?? selectedKernel?.id ?? 'openscad'}
-                                className='size-4 grayscale'
-                              />
+                              <SvgIcon id={kernel.id} className='size-4 grayscale' />
                               <div className='flex flex-col items-start'>
-                                <span>{kernel?.name ?? selectedKernel?.name ?? 'OpenSCAD'}</span>
+                                <span className='flex items-center gap-1.5'>{kernel.name}</span>
                                 <span className='text-xs text-muted-foreground'>CAD kernel for code execution</span>
                               </div>
                             </div>

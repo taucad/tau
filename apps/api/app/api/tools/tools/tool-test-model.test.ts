@@ -51,7 +51,7 @@ const buildTestFileContent = (
       })),
     };
   }
-  return JSON.stringify(map);
+  return JSON.stringify(map, null, 2);
 };
 
 describe('createTestModelToolDefinition', () => {

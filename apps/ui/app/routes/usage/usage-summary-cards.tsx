@@ -16,7 +16,7 @@ type SummaryStats = {
   outputTokens: number;
   cacheTokens: number;
   uniqueModels: number;
-  uniqueBuilds: number;
+  uniqueProjects: number;
 };
 
 function calculateStats(records: UsageRecord[]): SummaryStats {
@@ -44,7 +44,7 @@ function calculateStats(records: UsageRecord[]): SummaryStats {
     outputTokens,
     cacheTokens,
     uniqueModels: modelSet.size,
-    uniqueBuilds: projectSet.size,
+    uniqueProjects: projectSet.size,
   };
 }
 
@@ -99,7 +99,7 @@ export function UsageSummaryCards({ records }: UsageSummaryCardsProps): React.JS
           <Folder className='size-4 text-muted-foreground' />
         </CardHeader>
         <CardContent>
-          <div className='text-2xl font-bold'>{stats.uniqueBuilds}</div>
+          <div className='text-2xl font-bold'>{stats.uniqueProjects}</div>
           <p className='text-xs text-muted-foreground'>Projects with usage</p>
         </CardContent>
       </Card>

@@ -3,12 +3,14 @@ title: 'Runtime Test Suite Quality Audit'
 description: 'Gap analysis of the @taucad/runtime test suite: strengths, weaknesses, policy violations, and patterns worth promoting to the testing policy.'
 status: active
 created: '2026-04-17'
-updated: '2026-04-17'
+updated: '2026-06-01'
 category: audit
 related:
   - docs/policy/testing-policy.md
   - docs/policy/react-testing-policy.md
   - docs/policy/typescript-policy.md
+  - docs/research/geospec-standalone-cad-testing-blueprint.md
+  - docs/research/vitest-style-parameter-geometry-testing-blueprint.md
 ---
 
 # Runtime Test Suite Quality Audit
@@ -26,6 +28,15 @@ The runtime test suite is **structurally healthy** but **inconsistently rigorous
 Strong, promotable patterns include round-trip oracles via `@gltf-transform/core`, spatial-binning cross-kernel parity, golden stack-frame demangling without snapshot files, and the centralized `MockKernelWorker` + `createMockRuntime` factories. **`mock<T>()` from `vitest-mock-extended` is mandated by policy but used in only 8 of 81 test files (10%).**
 
 The single highest-impact improvement is adopting `expectValidGltf` + `expectMeshCount` + `expectBoundingBoxSize` (already defined in `kernel-geometry-testing.utils.ts`) as the **default** for every kernel `createGeometry` and `exportGeometry` test — closing a regression gap that today allows tessellation, units, and orientation bugs to ship green.
+
+## 2026-06-01 Target-State Alignment
+
+This audit remains the runtime test-quality baseline. The target geometry oracle has moved from local helper functions toward GeoSpec:
+
+- Runtime kernel tests should gradually replace existence-only GLB/STL/STEP assertions with GeoSpec mesh/BRep/STEP evidence assertions.
+- `kernel-geometry-testing.utils.ts` remains a useful precursor, but new helpers should delegate to GeoSpec once `packages/geospec` exists.
+- Export tests should prefer round-trip evidence where possible: export, load through GeoSpec, and assert observable geometry, topology, units, and validity.
+- The runtime should emit `GeometryArtifact` evidence for tests and for Tau's `@taucad/testing` adapter, instead of forcing every test to rediscover source, units, parameters, and provenance from raw bytes.
 
 ## Table of Contents
 

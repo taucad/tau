@@ -283,9 +283,9 @@ export const benchmarkSuite: BenchmarkCase[] = [
 export const benchmarkCategories: string[] = [...new Set(benchmarkSuite.map((c) => c.category))];
 
 /**
- * Filters benchmark cases by category names. Returns all cases if no filter provided.
+ * Filters benchmark cases by category or benchmark names. Returns all cases if no filter provided.
  *
- * @param filter - Optional array of category names to include
+ * @param filter - Optional array of category or benchmark names to include
  * @returns The matching benchmark cases
  */
 export function filterBenchmarks(filter?: string[]): BenchmarkCase[] {
@@ -293,5 +293,5 @@ export function filterBenchmarks(filter?: string[]): BenchmarkCase[] {
     return benchmarkSuite;
   }
 
-  return benchmarkSuite.filter((c) => filter.includes(c.category));
+  return benchmarkSuite.filter((c) => filter.includes(c.category) || filter.includes(c.name));
 }

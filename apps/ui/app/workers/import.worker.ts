@@ -1,12 +1,10 @@
 import JSZip from 'jszip';
-import { DirectIdbProvider } from '@taucad/filesystem/backend';
 
 /**
  * Messages sent TO the import worker.
  */
 export type ImportWorkerRequest =
   | { type: 'startDownload'; url: string; headers?: Record<string, string> }
-  | { type: 'writeFiles'; storeName: string; projectId: string }
   | { type: 'cancel' };
 
 /**
@@ -21,8 +19,7 @@ export type ImportWorkerResponse =
       /** Same paths + contents so the main thread can populate `context.files` for the review UI and createProject. */
       files: Array<{ path: string; content: Uint8Array<ArrayBuffer> }>;
     }
-  | { type: 'writeComplete'; fileCount: number }
-  | { type: 'error'; message: string; phase: 'download' | 'extract' | 'write' };
+  | { type: 'error'; message: string; phase: 'download' | 'extract' };
 
 let extractedFiles: Map<string, Uint8Array<ArrayBuffer>> | undefined;
 let abortController: AbortController | undefined;
@@ -130,44 +127,12 @@ async function handleDownloadAndExtract(url: string, headers?: Record<string, st
   }
 }
 
-async function handleWriteFiles(storeName: string, projectId: string): Promise<void> {
-  if (!extractedFiles || extractedFiles.size === 0) {
-    postResponse({ type: 'error', message: 'No files to write', phase: 'write' });
-    return;
-  }
-
-  try {
-    const provider = new DirectIdbProvider(storeName);
-    await provider.initialize();
-
-    const prefixedFiles = new Map<string, Uint8Array<ArrayBuffer>>();
-    for (const [relativePath, content] of extractedFiles) {
-      prefixedFiles.set(`/projects/${projectId}/${relativePath}`, content);
-    }
-
-    await provider.bulkImport(prefixedFiles);
-
-    const fileCount = extractedFiles.size;
-    extractedFiles = undefined;
-    provider.dispose();
-
-    postResponse({ type: 'writeComplete', fileCount });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    postResponse({ type: 'error', message, phase: 'write' });
-  }
-}
-
 globalThis.addEventListener('message', (event: MessageEvent<ImportWorkerRequest>) => {
   const message = event.data;
 
   switch (message.type) {
     case 'startDownload': {
       void handleDownloadAndExtract(message.url, message.headers);
-      break;
-    }
-    case 'writeFiles': {
-      void handleWriteFiles(message.storeName, message.projectId);
       break;
     }
     case 'cancel': {

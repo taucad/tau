@@ -54,11 +54,21 @@ export const GenAiToolStatus = {
 
 /**
  * Token type values for GenAI token usage metrics.
+ *
+ * `INPUT` is recorded as the **net** prompt tokens (excluding cache reads), and
+ * `CACHE_READ` is recorded as the cache-hit prompt tokens, so the
+ * provider-agnostic prompt-cache hit rate is
+ * `cache_read / (input + cache_read)`. Without splitting cache reads out of
+ * `input` the ratio is skewed for providers that report cache reads inside the
+ * raw `input_tokens` count (Anthropic, Vertex AI Gemini); see
+ * `apps/api/app/api/providers/provider.service.ts` (`Provider.inputTokensIncludesCacheReadTokens`).
+ *
  * @public
  */
 export const GenAiTokenType = {
   INPUT: 'input',
   OUTPUT: 'output',
+  CACHE_READ: 'cache_read',
 } as const;
 
 /**

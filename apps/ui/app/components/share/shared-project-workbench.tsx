@@ -12,7 +12,6 @@ import { ProjectProvider, useProject } from '#hooks/use-project.js';
 import { MonacoModelServiceProvider } from '#hooks/use-monaco-model-service.js';
 import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import { WebglContextTrackerProvider } from '#hooks/use-webgl-context-tracker.js';
-import { RevisionProvider } from '#routes/w.$workspace.$project/revision-provider.js';
 import { ProjectWorkspaceProvider } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { ViewerDockview } from '#routes/w.$workspace.$project/chat-viewer-dockview.js';
 import { WorkbenchDockview } from '#routes/w.$workspace.$project/chat-workbench-dockview.js';
@@ -220,18 +219,16 @@ export const SharedProjectWorkbench = ({
         <WebglContextTrackerProvider>
           <ProjectProvider projectId={projectId} profile='shared'>
             <MonacoModelServiceProvider>
-              <RevisionProvider>
-                <ProjectWorkspaceProvider>
-                  <SharedProjectLayout
-                    publication={publication}
-                    files={files}
-                    archive={archive}
-                    shareUrl={shareUrl}
-                    sourceLabel={sourceLabel}
-                    managementActions={managementActions}
-                  />
-                </ProjectWorkspaceProvider>
-              </RevisionProvider>
+              <ProjectWorkspaceProvider>
+                <SharedProjectLayout
+                  publication={publication}
+                  files={files}
+                  archive={archive}
+                  shareUrl={shareUrl}
+                  sourceLabel={sourceLabel}
+                  managementActions={managementActions}
+                />
+              </ProjectWorkspaceProvider>
             </MonacoModelServiceProvider>
           </ProjectProvider>
         </WebglContextTrackerProvider>

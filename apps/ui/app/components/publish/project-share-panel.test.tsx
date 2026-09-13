@@ -7,11 +7,10 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { ReactElement } from 'react';
-import { publicationApiCode } from '@taucad/types/constants';
 import type { ShareProjectSnapshot } from '@taucad/share/snapshot';
-import { ProjectSharePanel, formatPublishError } from '#components/publish/project-share-panel.js';
-import { publishOversizedProjectId, publishStalledProjectId } from '#machines/publish.machine.ui-test-double.js';
-import * as publishMachineActual from '#machines/publish.machine.js';
+import type { RevisionTag } from '@taucad/revisions';
+import { ProjectSharePanel, nextVersionName } from '#components/publish/project-share-panel.js';
+import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
 import type * as useEntitlementsModule from '@taucad/billing/hooks/use-entitlements';
 import type * as useSettingsDialogModule from '#hooks/use-settings-dialog.js';
 import type * as shareProvidersModule from '#lib/share-providers.js';
@@ -59,15 +58,12 @@ vi.mock('#environment.config.js', () => ({
 }));
 /* eslint-enable @typescript-eslint/naming-convention -- end mocked environment exports. */
 
-vi.mock('#machines/publish.machine.js', async () => {
-  const actual = await vi.importActual<typeof publishMachineActual>('#machines/publish.machine.js');
-  const { publishMachineForUiTests } = await import('#machines/publish.machine.ui-test-double.js');
-  return { ...actual, publishMachine: publishMachineForUiTests };
+/* Publishing is the revision root's `publish` child (A38): the panel holds no
+   actor, so the suite scripts the same projection every revision surface reads. */
+vi.mock('#hooks/use-revision-status.js', async () => {
+  const harness = await import('#hooks/use-revision-status.test-harness.js');
+  return harness.revisionStatusMock();
 });
-
-vi.mock('#hooks/use-file-manager.js', () => ({
-  useFileManager: () => ({ fileManagerRef: {} }),
-}));
 
 // Pro entitlements by default so the pre-existing private-flow tests exercise
 // publish behaviour, not the tier gate; the gate suite flips this per-test.
@@ -83,7 +79,20 @@ vi.mock('#hooks/use-settings-dialog.js', async (importOriginal) => {
   return { ...actual, openSettingsDialog: openSettingsDialogMock };
 });
 
-const { PublishUploadError } = publishMachineActual;
+const tag = (name: string): RevisionTag => ({
+  name,
+  revisionId: `rev-${name}` as RevisionTag['revisionId'],
+  note: undefined,
+  actor: undefined,
+  createdAt: 1,
+});
+
+const publishFacet = (facet: Partial<(typeof revisionStatusHarness)['status']['publish']>): void => {
+  revisionStatusHarness.status = {
+    ...revisionStatusHarness.status,
+    publish: { ...revisionStatusHarness.status.publish, ...facet },
+  };
+};
 
 const toastSuccessMock = vi.fn();
 const toastErrorMock = vi.fn();
@@ -156,6 +165,7 @@ describe('ProjectSharePanel', () => {
   beforeEach(async () => {
     const { entitlementsFromTier } = await import('@taucad/billing');
     useEntitlementsMock.mockReturnValue(entitlementsFromTier('pro'));
+    revisionStatusHarness.reset();
     openSettingsDialogMock.mockClear();
     Element.prototype.scrollIntoView = vi.fn();
     Element.prototype.hasPointerCapture = vi.fn(() => false);
@@ -469,24 +479,65 @@ describe('ProjectSharePanel', () => {
     expect(screen.getByRole('textbox', { name: /description \(optional\)/iu })).toHaveValue('a beautiful model');
   });
 
-  it('publishes, copies the link, and transitions into manage-access state', async () => {
-    vi.mocked(globalThis.fetch)
-      .mockResolvedValueOnce(mockJsonResponse(unpublishedEnvelope))
-      .mockResolvedValueOnce(mockJsonResponse(publishedEnvelope));
-
+  it('publishes as one gesture carrying the named version and the draft', async () => {
     renderPanel(<ProjectSharePanel projectId='proj_ok' projectName='Demo' entryPath='main.ts' />);
 
     await userEvent.click(await screen.findByRole('button', { name: /publish and copy link/i }));
 
-    await waitFor(() => {
-      expect(navigator.clipboard.writeText).toHaveBeenCalledWith('https://tau.example/s/tau~proj_ok');
+    expect(revisionStatusHarness.commands.publishProject).toHaveBeenCalledExactlyOnceWith('v1');
+    expect(revisionStatusHarness.commands.confirmPublish).toHaveBeenCalledExactlyOnceWith({
+      tag: 'v1',
+      projectName: 'Demo',
+      entryPath: 'main.ts',
+      visibility: 'private',
+      title: 'Demo',
     });
-    await waitFor(() => {
-      expect(screen.getByText('People with access')).toBeInTheDocument();
-    });
+  });
 
+  it('names the next free version and offers the ones the project already has', async () => {
+    publishFacet({ tags: [tag('v1'), tag('v2')] });
+    renderPanel(<ProjectSharePanel projectId='proj_ok' projectName='Demo' entryPath='main.ts' />);
+
+    const field = await screen.findByRole('combobox', { name: /version name/i });
+    await waitFor(() => {
+      expect(field).toHaveValue('v3');
+    });
+    const options = [...document.querySelectorAll('#share-version-options option')].map((option) =>
+      option.getAttribute('value'),
+    );
+    expect(options).toStrictEqual(['v1', 'v2']);
+
+    await userEvent.clear(field);
+    await userEvent.type(field, 'v1');
+    await userEvent.click(screen.getByRole('button', { name: /publish and copy link/i }));
+
+    expect(revisionStatusHarness.commands.publishProject).toHaveBeenCalledExactlyOnceWith('v1');
+  });
+
+  it('refuses to publish without a version name', async () => {
+    renderPanel(<ProjectSharePanel projectId='proj_ok' projectName='Demo' entryPath='main.ts' />);
+
+    await userEvent.clear(await screen.findByRole('combobox', { name: /version name/i }));
+
+    expect(screen.getByRole('button', { name: /publish and copy link/i })).toBeDisabled();
+  });
+
+  it('copies the machine\u2019s share link once and releases the machine', async () => {
+    vi.mocked(globalThis.fetch)
+      .mockResolvedValueOnce(mockJsonResponse(unpublishedEnvelope))
+      .mockResolvedValueOnce(mockJsonResponse(publishedEnvelope));
+    publishFacet({ phase: 'success', shareUrl: 'https://tau.example/s/tau~proj_ok' });
+
+    renderPanel(<ProjectSharePanel projectId='proj_ok' projectName='Demo' entryPath='main.ts' />);
+
+    await waitFor(() => {
+      expect(navigator.clipboard.writeText).toHaveBeenCalledExactlyOnceWith('https://tau.example/s/tau~proj_ok');
+    });
+    await waitFor(() => {
+      expect(revisionStatusHarness.commands.resetPublish).toHaveBeenCalled();
+    });
+    expect(await screen.findByText('People with access')).toBeInTheDocument();
     expect(screen.getByText('friend@example.com')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /copy link/i })).toBeInTheDocument();
   });
 
   it('adds and revokes recipients from the editor Share panel', async () => {
@@ -630,53 +681,42 @@ describe('ProjectSharePanel', () => {
     expect(screen.getByRole('button', { name: /publish and copy link/i })).toBeDisabled();
   });
 
-  it('shows Publishing with spinner while publish is in flight', async () => {
-    renderPanel(<ProjectSharePanel projectId={publishStalledProjectId} projectName='Demo' entryPath='main.ts' />);
-
-    await userEvent.click(await screen.findByRole('button', { name: /publish and copy link/i }));
+  it('shows Publishing with a spinner while the machine is working', async () => {
+    publishFacet({ phase: 'working' });
+    renderPanel(<ProjectSharePanel projectId='proj_busy' projectName='Demo' entryPath='main.ts' />);
 
     const publishingButton = await screen.findByRole('button', { name: /publishing/iu });
     expect(publishingButton).toBeDisabled();
     expect(within(publishingButton).getByText(/publishing/i)).toBeInTheDocument();
   });
 
-  it('shows actionable copy when payload is too large', async () => {
-    renderPanel(<ProjectSharePanel projectId={publishOversizedProjectId} projectName='Huge' entryPath='main.ts' />);
+  it('presents the failure as the one sentence the machine wrote', async () => {
+    publishFacet({ phase: 'error', error: 'This version is larger than 50 MB. Remove some files and try again.' });
+    renderPanel(<ProjectSharePanel projectId='proj_huge' projectName='Huge' entryPath='main.ts' />);
 
-    await userEvent.click(await screen.findByRole('button', { name: /publish and copy link/i }));
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('This version is larger than 50 MB. Remove some files and try again.');
+    expect(within(alert).queryByRole('link', { name: /sign in/i })).not.toBeInTheDocument();
+  });
 
-    expect(await screen.findByText('Project too large')).toBeInTheDocument();
-    expect(screen.getByText(/total upload exceeds/i)).toBeInTheDocument();
+  it('offers sign-in only when the sentence asks for it', async () => {
+    publishFacet({ phase: 'error', error: 'Sign in to publish to Tau Cloud.' });
+    renderPanel(<ProjectSharePanel projectId='proj_signin' projectName='Demo' entryPath='main.ts' />);
+
+    const alert = await screen.findByRole('alert');
+    expect(within(alert).getByRole('link', { name: 'Sign in' })).toBeInTheDocument();
   });
 });
 
-describe('formatPublishError', () => {
-  it('maps PublishUploadError network fault', () => {
-    expect(formatPublishError(new PublishUploadError('x', { networkFault: true }))).toMatchObject({
-      headline: "Couldn't reach the server",
-      detail: 'Check your connection and try again.',
-    });
-  });
-
-  it('maps 401 with sign-in affordance', () => {
-    expect(formatPublishError(new PublishUploadError('x', { status: 401 }))).toMatchObject({
-      headline: 'Sign in to share',
-      showSignIn: true,
-    });
-  });
-
-  it('maps PROJECT_FORBIDDEN', () => {
-    expect(
-      formatPublishError(new PublishUploadError('x', { status: 403, apiCode: publicationApiCode.PROJECT_FORBIDDEN })),
-    ).toMatchObject({
-      headline: 'This project is owned by another user',
-    });
-  });
-
-  it('maps generic 400 share failures', () => {
-    expect(formatPublishError(new PublishUploadError('x', { status: 400 }))).toMatchObject({
-      headline: 'Share payload was invalid',
-    });
+describe('nextVersionName', () => {
+  it.each([
+    [[], 'v1'],
+    [['v1'], 'v2'],
+    [['v2'], 'v1'],
+    [['v1', 'v2', 'v3'], 'v4'],
+    [['release-1'], 'v1'],
+  ])('answers %j with %s', (names, expected) => {
+    expect(nextVersionName(names)).toBe(expected);
   });
 });
 

@@ -110,13 +110,167 @@ export const connectGithubGist = async ({
   }
 };
 
+/**
+ * Every GitHub authority Tau is allowed to ask the session for.
+ *
+ * An allow-set rather than a literal, because there are now two surfaces:
+ * sharing a Gist, and connecting a project to a GitHub repository (S34). It
+ * stays a *set* — never "whatever the caller asked for" — so a broker call that
+ * invented a scope is refused here rather than on GitHub's consent screen.
+ */
+const githubBrokerScopes = new Set(['gist', 'public_repo', 'repo']);
+
+/** Whether the repository being connected is a private one (S34). @public */
+export type GithubRemoteVisibility = 'public' | 'private';
+
+/**
+ * The one GitHub authority a repository of this visibility needs.
+ *
+ * `public_repo` writes to public repositories and cannot read a private one;
+ * `repo` is GitHub's only scope that can. There is no third option, which is
+ * why the private choice is a second consent rather than a bigger first one.
+ *
+ * @param visibility - What the person said about the repository.
+ * @returns The GitHub scope to ask for.
+ * @public
+ */
+export const githubRemoteScope = (visibility: GithubRemoteVisibility): string =>
+  visibility === 'private' ? 'repo' : 'public_repo';
+
+const githubScopesOnSession = async (): Promise<readonly string[] | undefined> => {
+  const result = await authClient.listAccounts();
+  if (result.error) {
+    return undefined;
+  }
+  return result.data.find(({ providerId }) => providerId === 'github')?.scopes;
+};
+
+/* Where GitHub sends the consent window when it is done. Nothing reads it: the
+ * opener notices the new scope on the session, which is the fact that matters,
+ * and closes the window.
+ * ponytail: the app root is a heavy landing page for a window that lives half a
+ * second; give it a static one when a second consent surface needs it. */
+const consentReturnUrl = (): string => `${globalThis.location.origin}/`;
+
+const consentPollMilliseconds = 500;
+const consentTimeoutMilliseconds = 5 * 60 * 1000;
+
+const delay = async (milliseconds: number): Promise<void> =>
+  new Promise((resolve) => {
+    globalThis.setTimeout(resolve, milliseconds);
+  });
+
+/**
+ * Wait until the session actually carries the scope, or the person closed the
+ * window without granting it.
+ *
+ * The session is the authority, not the window: `linkSocial` writes the new
+ * scope on the account, so asking `listAccounts` is asking the thing that the
+ * credential will be minted from.
+ *
+ * @param scope - The scope being granted.
+ * @param consent - The window GitHub's consent screen is in.
+ */
+const awaitGithubScope = async (scope: string, consent: Window): Promise<void> => {
+  try {
+    for (let waited = 0; waited <= consentTimeoutMilliseconds; waited += consentPollMilliseconds) {
+      // oxlint-disable-next-line no-await-in-loop -- polling is sequential by definition.
+      const scopes: readonly string[] | undefined = await githubScopesOnSession();
+      if (scopes?.includes(scope) === true) {
+        return;
+      }
+      if (consent.closed) {
+        break;
+      }
+      // oxlint-disable-next-line no-await-in-loop -- polling is sequential by definition.
+      await delay(consentPollMilliseconds);
+    }
+  } finally {
+    consent.close();
+  }
+  throw new ShareError('SHARE_PERMISSION_REQUIRED', 'GitHub permission was not granted.');
+};
+
+const requestGithubScope = async (scope: string, consent: Window | undefined, force: boolean): Promise<void> => {
+  const granted = await githubScopesOnSession();
+  if (!force && granted?.includes(scope) === true) {
+    return;
+  }
+  const result = await authClient.linkSocial({
+    provider: 'github',
+    scopes: [scope],
+    callbackURL: consentReturnUrl(),
+    errorCallbackURL: consentReturnUrl(),
+    disableRedirect: true,
+  });
+  const url = result.error ? '' : result.data.url;
+  if (url === '') {
+    throw new ShareError('SHARE_PROVIDER_UNAVAILABLE', 'GitHub authorization could not be started.');
+  }
+  if (consent === undefined) {
+    throw new ShareError('SHARE_PROVIDER_UNAVAILABLE', 'Allow pop-ups so Tau can ask GitHub for permission.');
+  }
+  consent.location.href = url;
+  await awaitGithubScope(scope, consent);
+};
+
+/**
+ * Get the authority a GitHub remote needs, asking for it if the session has not
+ * got it (S34, charter W12).
+ *
+ * Two consents, in this order, and never a pre-emptive one: `public_repo` when
+ * *Connect* is pressed, and `repo` only once the person has said the repository
+ * is private. A scope already on the session is not asked for again.
+ *
+ * The window is opened by the caller, inside the click, because a browser
+ * blocks a pop-up that is opened after an `await`.
+ *
+ * `reconnect` asks again for a scope the session already records, and asks for
+ * **the widest one it records**. That is the *Reconnect GitHub* row: an
+ * `AUTH_SECRET` rotation leaves the recorded scopes intact and the stored token
+ * unreadable, so a project connected to a *private* repository has to get `repo`
+ * back — re-asking for `public_repo` would silently downgrade it (review R4).
+ * The caller no longer knows which it was: the row survives a reload and the
+ * session does not record a per-project visibility, so the account's own scopes
+ * are the authority.
+ *
+ * The window is closed on every path, including the one where nothing is asked
+ * for at all (review R5).
+ *
+ * @param input - The repository's visibility, the window to run consent in, and whether to re-ask.
+ * @public
+ */
+export const authorizeGithubRemote = async (input: {
+  readonly visibility: GithubRemoteVisibility;
+  readonly consent: Window | undefined;
+  readonly reconnect?: boolean;
+}): Promise<void> => {
+  try {
+    if (input.reconnect === true) {
+      const recorded = await githubScopesOnSession();
+      /* `repo` implies `public_repo` on GitHub, so the widest recorded scope is
+       * one ask, not two. */
+      await requestGithubScope(recorded?.includes('repo') === true ? 'repo' : 'public_repo', input.consent, true);
+      return;
+    }
+    await requestGithubScope('public_repo', input.consent, false);
+    if (input.visibility === 'private') {
+      await requestGithubScope(githubRemoteScope('private'), input.consent, false);
+    }
+  } finally {
+    /* Closing a window `awaitGithubScope` already closed is a no-op; leaving an
+     * `about:blank` pop-up open because nothing needed asking is not. */
+    input.consent?.close();
+  }
+};
+
 export const githubShareCredentialBroker: ShareCredentialBroker = {
   async getAccessToken(request) {
     if (
       request.connectionId !== 'github' ||
       request.audience !== 'https://api.github.com' ||
       request.scopes.length !== 1 ||
-      request.scopes[0] !== 'gist'
+      !githubBrokerScopes.has(request.scopes[0] ?? '')
     ) {
       throw new ShareError('SHARE_PERMISSION_REQUIRED', 'The requested GitHub authority is not allowed.');
     }
@@ -134,6 +288,26 @@ export const githubShareCredentialBroker: ShareCredentialBroker = {
       ...(result.data.accessTokenExpiresAt ? { expiresAt: result.data.accessTokenExpiresAt } : {}),
     };
   },
+};
+
+/**
+ * The header value a request to a GitHub remote carries through Tau's proxy.
+ *
+ * Read through the same broker the Gist surface uses, so the allow-set is
+ * checked once and in one place; the token itself is never written anywhere
+ * (I8) and travels only in `x-tau-proxy-authorization`.
+ *
+ * @param visibility - What the person said about the repository.
+ * @returns The whole header value.
+ * @public
+ */
+export const githubRemoteAuthorization = async (visibility: GithubRemoteVisibility): Promise<string> => {
+  const credential = await githubShareCredentialBroker.getAccessToken({
+    connectionId: 'github',
+    audience: 'https://api.github.com',
+    scopes: [githubRemoteScope(visibility)],
+  });
+  return `Bearer ${credential.accessToken}`;
 };
 
 type BrowserShareProviderContext = ShareProviderContext & {

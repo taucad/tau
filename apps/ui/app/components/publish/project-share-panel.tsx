@@ -1,8 +1,6 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { NavLink, useLocation } from 'react-router';
-import { useActorRef, useSelector } from '@xstate/react';
 import { Check, ChevronDown, Link2, Loader2, RefreshCw, ShieldCheck } from 'lucide-react';
-import { publicationApiCode } from '@taucad/types/constants';
 import { sharePasswordLimits } from '@taucad/share/artifact';
 import { formatShareUrl } from '@taucad/share/locator';
 import { isShareError } from '@taucad/share/provider';
@@ -15,12 +13,10 @@ import { Textarea } from '@taucad/ui/components/textarea';
 import { Label } from '@taucad/ui/components/label';
 import { RadioGroup, RadioGroupItem } from '@taucad/ui/components/radio-group';
 import { toast } from '#components/ui/sonner.js';
-import { useFileManager } from '#hooks/use-file-manager.js';
 import { useAuthLinks } from '#hooks/use-auth-links.js';
 import { useTickAnimation } from '#hooks/use-tick-animation.js';
-import type { PublishVisibility } from '#machines/publish.machine.js';
-import { publishMachine, isPublishUploadError } from '#machines/publish.machine.js';
-import { publishMaxFiles, publishMaxFileBytes, publishMaxTotalBytes } from '#utils/publish.utils.js';
+import type { PublishDraft, PublishFacet, PublishVisibility } from '@taucad/revisions/publish-machine';
+import { useRevisionCommands, useRevisionStatus } from '#hooks/use-revision-status.js';
 import { PublicationEmailTagsField, getPublicationEmailTagsError } from '#components/publish/publication-email-tags.js';
 import { PublicationAccessPanel } from '#components/publish/publication-access-panel.js';
 import type { PublicationAccessGrant } from '#components/publish/publication-access-panel.js';
@@ -46,7 +42,6 @@ export type ProjectSharePanelProps = {
   readonly projectDescription?: string;
   readonly projectUpdatedAt?: Date | number | string;
   readonly entryPath: string;
-  readonly parameters?: Record<string, unknown>;
   readonly collectSnapshot?: (signal?: AbortSignal) => Promise<ShareProjectSnapshot>;
   readonly initialMethod?: ShareMethod;
   readonly githubAuthorizationOutcome?: 'returned' | 'cancelled' | 'failed';
@@ -96,94 +91,29 @@ type ProjectShareEnvelope = {
   };
 };
 
-type FormattedPublishError = {
-  headline: string;
-  detail?: string;
-  showSignIn?: boolean;
+/** Before the worker has answered, the dialog renders as an idle dialog. */
+const emptyPublishFacet: PublishFacet = {
+  phase: 'idle',
+  tags: [],
+  publicationId: undefined,
+  shareUrl: undefined,
+  error: undefined,
 };
 
-export function formatPublishError(error: Error | undefined): FormattedPublishError {
-  if (!error) {
-    return { headline: 'Something went wrong' };
+/**
+ * The next free `v<n>` for a project that already has some names.
+ *
+ * @param names - Names this project already uses.
+ * @returns A name nothing in the project holds.
+ */
+export const nextVersionName = (names: readonly string[]): string => {
+  const taken = new Set(names);
+  let index = 1;
+  while (taken.has(`v${String(index)}`)) {
+    index += 1;
   }
-
-  if (isPublishUploadError(error)) {
-    if (error.networkFault) {
-      return {
-        headline: "Couldn't reach the server",
-        detail: 'Check your connection and try again.',
-      };
-    }
-
-    if (error.message === 'INVALID_RESPONSE') {
-      return {
-        headline: 'Something went wrong on our end',
-        detail: 'Try again in a moment.',
-      };
-    }
-
-    if (error.status === 401) {
-      return {
-        headline: 'Sign in to share',
-        detail: 'You must be signed in to share this project.',
-        showSignIn: true,
-      };
-    }
-
-    if (error.status === 403 && error.apiCode === publicationApiCode.PROJECT_FORBIDDEN) {
-      return { headline: 'This project is owned by another user' };
-    }
-
-    if (error.status === 413) {
-      return {
-        headline: 'Project too large',
-        detail: `Total upload exceeds ${publishMaxTotalBytes / (1024 * 1024)} MiB.`,
-      };
-    }
-
-    if (error.status !== undefined && error.status >= 500) {
-      return {
-        headline: 'Something went wrong on our end',
-        detail: 'Try again in a moment.',
-      };
-    }
-
-    if (error.status === 400) {
-      return {
-        headline: 'Share payload was invalid',
-        detail: 'Reload the page and try again.',
-      };
-    }
-
-    return { headline: 'Sharing failed' };
-  }
-
-  const { message } = error;
-  const fileTooLargePrefix = `${publicationApiCode.FILE_TOO_LARGE}:`;
-  if (message.startsWith(fileTooLargePrefix)) {
-    const path = message.slice(fileTooLargePrefix.length);
-    return {
-      headline: 'File too large',
-      detail: path ? `Reduce size of ${path} (max ${publishMaxFileBytes / (1024 * 1024)} MiB per file).` : undefined,
-    };
-  }
-
-  if (message === publicationApiCode.PAYLOAD_TOO_LARGE) {
-    return {
-      headline: 'Project too large',
-      detail: `Total upload exceeds ${publishMaxTotalBytes / (1024 * 1024)} MiB.`,
-    };
-  }
-
-  if (message === publicationApiCode.TOO_MANY_FILES) {
-    return {
-      headline: 'Too many files',
-      detail: `Sharing allows up to ${publishMaxFiles} files.`,
-    };
-  }
-
-  return { headline: message };
-}
+  return `v${String(index)}`;
+};
 
 const parseProjectShareEnvelope = (value: unknown): ProjectShareEnvelope | undefined => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -717,7 +647,6 @@ function ProjectSharePanelBody(properties: ProjectSharePanelProps): React.JSX.El
     projectDescription = '',
     projectUpdatedAt,
     entryPath,
-    parameters,
     collectSnapshot,
     initialMethod,
     githubAuthorizationOutcome,
@@ -725,7 +654,6 @@ function ProjectSharePanelBody(properties: ProjectSharePanelProps): React.JSX.El
   const { pathname, search } = useLocation();
   const [shareMethod, setShareMethod] = useState<ShareMethod>(initialMethod ?? (collectSnapshot ? 'direct' : 'tau'));
   const [portableBusy, setPortableBusy] = useState(false);
-  const { fileManagerRef } = useFileManager();
   const signInReturnTo = useMemo(() => {
     const authorizationReturn = parseGithubGistAuthorizationReturn(search);
     const parameters = new URLSearchParams(authorizationReturn?.remainingSearch ?? search);
@@ -734,27 +662,17 @@ function ProjectSharePanelBody(properties: ProjectSharePanelProps): React.JSX.El
     return `${pathname}?${parameters.toString()}`;
   }, [pathname, search, shareMethod]);
   const { signIn } = useAuthLinks({ redirectTo: signInReturnTo });
-  const publishRef = useActorRef(publishMachine, {
-    input: {
-      fileManagerRef,
-      projectId,
-      projectName,
-      entryPath,
-      parameters,
-      ...(collectSnapshot
-        ? {
-            collectFiles: async (signal: AbortSignal) => {
-              const snapshot = await collectSnapshot(signal);
-              return new Map(snapshot.files.map((file) => [file.path, file.content]));
-            },
-          }
-        : {}),
-    },
-  });
-
-  const publishState = useSelector(publishRef, (state) => state.value);
-  const publishShareUrl = useSelector(publishRef, (state) => state.context.shareUrl);
-  const publishError = useSelector(publishRef, (state) => state.context.error);
+  /*
+   * Publishing is the project's own `publish.machine`, invoked by the revision
+   * root in the file-manager worker (A38, S32). This panel holds no actor: it
+   * sends the root's events and renders the facet the projection carries, so
+   * `tau publish` and this dialog are one implementation reached two ways.
+   */
+  const status = useRevisionStatus();
+  const publishFacet = status?.publish ?? emptyPublishFacet;
+  const commands = useRevisionCommands();
+  const publishShareUrl = publishFacet.shareUrl;
+  const publishError = publishFacet.error;
 
   const apiBaseUrl = useMemo(() => ENV.TAU_API_URL.replace(/\/$/u, ''), []);
   const [envelope, setEnvelope] = useState<ProjectShareEnvelope>();
@@ -766,6 +684,19 @@ function ProjectSharePanelBody(properties: ProjectSharePanelProps): React.JSX.El
   // Free tier publishes public-only (T4/T5/AD11); derived so an async
   // entitlements load never strands a locked selection in form state.
   const effectiveVisibility: PublishVisibility = canCreatePrivateShares ? visibility : 'public';
+  /*
+   * The named version this publication points at (S32, A21, D11).
+   *
+   * Defaulted to the next free `v<n>` so the common case is one click, and
+   * offered as a list of the project's existing names so re-publishing a name
+   * is a choice rather than a guess. A native `datalist` rather than a combobox
+   * widget: the field accepts a new name as readily as an existing one.
+   */
+  const existingNames = publishFacet.tags.map((tag: PublishFacet['tags'][number]) => tag.name);
+  /* Derived, not synchronized: the field shows the next free name until a person
+   * types one, so the names arriving from the worker never need an effect. */
+  const [chosenName, setChosenName] = useState<string>();
+  const versionName = chosenName ?? nextVersionName(existingNames);
   const [title, setTitle] = useState(projectName);
   const [description, setDescription] = useState(projectDescription);
   const [sharedEmails, setSharedEmails] = useState<string[]>([]);
@@ -801,7 +732,10 @@ function ProjectSharePanelBody(properties: ProjectSharePanelProps): React.JSX.El
 
   useEffect(() => {
     if (shareMethod === 'tau') {
-      queueMicrotask(() => void loadEnvelope());
+      queueMicrotask(() => {
+        // oxlint-disable-next-line no-void -- `loadEnvelope` reports its own failures into panel state.
+        void loadEnvelope();
+      });
     }
   }, [loadEnvelope, shareMethod]);
 
@@ -827,7 +761,7 @@ function ProjectSharePanelBody(properties: ProjectSharePanelProps): React.JSX.El
 
       if (!cancelled) {
         await loadEnvelope();
-        publishRef.send({ type: 'reset' });
+        commands.resetPublish();
       }
     };
 
@@ -836,12 +770,11 @@ function ProjectSharePanelBody(properties: ProjectSharePanelProps): React.JSX.El
     return () => {
       cancelled = true;
     };
-  }, [loadEnvelope, publishRef, publishShareUrl, triggerCopiedTick]);
+  }, [commands, loadEnvelope, publishShareUrl, triggerCopiedTick]);
 
-  const busy = publishState === 'collectingFiles' || publishState === 'uploading';
+  const busy = publishFacet.phase === 'working';
   const sharedEmailError = effectiveVisibility === 'private' ? getPublicationEmailTagsError(sharedEmails) : undefined;
-  const canPublish = title.trim().length > 0 && !sharedEmailError && !busy;
-  const formattedError = formatPublishError(publishError);
+  const canPublish = title.trim().length > 0 && versionName.trim().length > 0 && !sharedEmailError && !busy;
   const snapshotState = useMemo(
     () => (envelope ? getSnapshotState(envelope, projectUpdatedAt) : 'unpublished'),
     [envelope, projectUpdatedAt],
@@ -872,13 +805,28 @@ function ProjectSharePanelBody(properties: ProjectSharePanelProps): React.JSX.El
     );
   }
 
+  /**
+   * Publish is one gesture: open the dialog's machine on this project's names
+   * and confirm the draft. The machine holds the confirm until it has read the
+   * names, so nothing here waits.
+   *
+   * @param draft - Everything only a person decides.
+   */
+  const sendPublish = (draft: PublishDraft): void => {
+    commands.publishProject(draft.tag);
+    commands.confirmPublish(draft);
+  };
+
   const handlePublish = (): void => {
-    publishRef.send({
-      type: 'publish',
+    sendPublish({
+      tag: versionName.trim(),
+      projectName,
+      entryPath,
       visibility: effectiveVisibility,
       title: title.trim(),
       ...(description.trim() === '' ? {} : { description: description.trim() }),
       ...(effectiveVisibility === 'private' && sharedEmails.length > 0 ? { sharedEmails } : {}),
+      ...(effectiveVisibility === 'private' && sharedEmails.length > 0 ? { notifyRecipients: true } : {}),
     });
   };
 
@@ -922,8 +870,10 @@ function ProjectSharePanelBody(properties: ProjectSharePanelProps): React.JSX.El
       return;
     }
 
-    publishRef.send({
-      type: 'publish',
+    sendPublish({
+      tag: versionName.trim(),
+      projectName,
+      entryPath,
       visibility: publication.visibility,
       title: publication.title,
       ...(publication.description ? { description: publication.description } : {}),
@@ -961,7 +911,13 @@ function ProjectSharePanelBody(properties: ProjectSharePanelProps): React.JSX.El
                 <NavLink to={signIn}>Sign in</NavLink>
               </Button>
             ) : (
-              <Button type='button' onClick={() => void loadEnvelope()}>
+              <Button
+                type='button'
+                onClick={() => {
+                  // oxlint-disable-next-line no-void -- ditto.
+                  void loadEnvelope();
+                }}
+              >
                 Try again
               </Button>
             )}
@@ -1018,9 +974,7 @@ function ProjectSharePanelBody(properties: ProjectSharePanelProps): React.JSX.El
             />
           </div>
 
-          {publishState === 'error' && publishError ? (
-            <PublishErrorCallout formattedError={formattedError} signIn={signIn} />
-          ) : null}
+          {publishError === undefined ? null : <PublishErrorCallout message={publishError} signIn={signIn} />}
 
           <div className='flex justify-end'>
             <Button type='button' disabled={busy || visibilityMutating} onClick={handleRepublish}>
@@ -1045,10 +999,30 @@ function ProjectSharePanelBody(properties: ProjectSharePanelProps): React.JSX.El
       isDisabled={busy}
       onMethodChange={setShareMethod}
       isPortableEnabled={Boolean(collectSnapshot)}
-      description={`${getSnapshotCopy('unpublished')} Uploads up to ${publishMaxFiles} files (${publishMaxTotalBytes / (1024 * 1024)} MiB total, ${publishMaxFileBytes / (1024 * 1024)} MiB per file).`}
+      description={`${getSnapshotCopy('unpublished')} The version you name is backed up to the cloud and served from there.`}
     >
       <div className='flex flex-col gap-4'>
         <div className='flex flex-col gap-4'>
+          <div className='flex flex-col gap-2'>
+            <Label htmlFor='share-version'>Version name</Label>
+            <Input
+              id='share-version'
+              list='share-version-options'
+              value={versionName}
+              disabled={busy}
+              onChange={(event) => {
+                setChosenName(event.target.value);
+              }}
+            />
+            <datalist id='share-version-options'>
+              {existingNames.map((name: string) => (
+                <option key={name} value={name} />
+              ))}
+            </datalist>
+            <p className='text-xs text-muted-foreground'>
+              People who open your link see this version. Publishing again with the same name moves the link forward.
+            </p>
+          </div>
           <div className='flex flex-col gap-2'>
             <Label htmlFor='share-title'>Title</Label>
             <Input
@@ -1123,9 +1097,7 @@ function ProjectSharePanelBody(properties: ProjectSharePanelProps): React.JSX.El
           ) : null}
         </div>
 
-        {publishState === 'error' && publishError ? (
-          <PublishErrorCallout formattedError={formattedError} signIn={signIn} />
-        ) : null}
+        {publishError === undefined ? null : <PublishErrorCallout message={publishError} signIn={signIn} />}
 
         <div className='flex justify-end'>
           <Button type='button' disabled={!canPublish} onClick={handlePublish}>
@@ -1156,39 +1128,36 @@ export function ProjectSharePanel(properties: ProjectSharePanelProps): React.JSX
   );
 }
 
+/**
+ * One refusal, in the words the machine already put it in (A18).
+ *
+ * The panel no longer translates codes into copy: the sentence is written where
+ * the failure is known — the worker for an API refusal, the machine for a push
+ * or a name — so there is one place to read and one place to change.
+ *
+ * @param properties - The sentence, and where signing in leads.
+ * @returns The callout.
+ */
 function PublishErrorCallout({
-  formattedError,
+  message,
   signIn,
 }: {
-  readonly formattedError: FormattedPublishError;
+  readonly message: string;
   readonly signIn: string;
 }): React.JSX.Element {
+  const signInRequired = message.startsWith('Sign in');
   return (
     <div
+      role='alert'
       className={cn(
         'rounded-md border px-3 py-2 text-sm',
-        formattedError.showSignIn ? 'border-purple/30 bg-purple/10' : 'border-destructive/40 bg-destructive/10',
+        signInRequired ? 'border-purple/30 bg-purple/10' : 'border-destructive/40 bg-destructive/10',
       )}
     >
-      <div
-        className={cn(
-          'font-medium',
-          formattedError.showSignIn ? 'text-purple dark:text-purple/70' : 'text-destructive',
-        )}
-      >
-        {formattedError.headline}
+      <div className={cn('font-medium', signInRequired ? 'text-purple dark:text-purple/70' : 'text-destructive')}>
+        {message}
       </div>
-      {formattedError.detail ? (
-        <div
-          className={cn(
-            'mt-1',
-            formattedError.showSignIn ? 'text-purple/90 dark:text-purple/55' : 'text-muted-foreground',
-          )}
-        >
-          {formattedError.detail}
-        </div>
-      ) : null}
-      {formattedError.showSignIn ? (
+      {signInRequired ? (
         <Button asChild className='mt-3' size='sm'>
           <NavLink to={signIn}>Sign in</NavLink>
         </Button>

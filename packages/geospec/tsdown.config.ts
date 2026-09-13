@@ -4,6 +4,10 @@ import type { UserConfig } from 'tsdown';
 const packageConfig: UserConfig = {
   entry: [
     'src/index.ts',
+    'src/config/index.ts',
+    'src/config/node/index.ts',
+    'src/assertion-client/index.ts',
+    'src/vitest/index.ts',
     'src/brep/index.ts',
     'src/engine/index.ts',
     'src/inspection/index.ts',
@@ -25,7 +29,7 @@ const packageConfig: UserConfig = {
   unbundle: true,
   format: 'esm',
   outDir: 'dist',
-  external: ['@taucad/runtime', '@taucad/runtime/types', '@taucad/esbuild/vm', '@gltf-transform/core'],
+  external: ['@taucad/runtime', '@taucad/runtime/types', '@taucad/esbuild/vm', '@gltf-transform/core', 'vitest'],
 };
 
 export default defineConfig(packageConfig);

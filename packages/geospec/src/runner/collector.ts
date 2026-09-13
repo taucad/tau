@@ -12,8 +12,10 @@
  * @module
  */
 
-import { geoSpecMatcherDescriptors, normalizeGeoSpecExpected } from '#engine/matchers.js';
-import type { GeoSpecMatcherDescriptor, GeoSpecMatcherName } from '#engine/matchers.js';
+import { createGeoSpecMatcherMethods } from '#assertion-client/index.js';
+import type { GeoSpecAuthoringInvocation } from '#assertion-client/index.js';
+import { geoSpecMatcherDescriptors } from '#engine/matchers.js';
+import type { GeoSpecMatcherName } from '#engine/matchers.js';
 import {
   encodeGeoSpecCanonicalJson,
   geoSpecEngineProtocolVersion,
@@ -37,14 +39,6 @@ import {
 import type { GeoSpecAssertion, GeoSpecMatcher, GeoSpecTestCase } from '#runner/types.js';
 
 type GeoSpecTestFunction = () => unknown | PromiseLike<unknown>;
-type GeoSpecAuthoringInvocation = {
-  protocolVersion: number;
-  matcher: GeoSpecMatcherName;
-  kind: GeoSpecAssertion['kind'];
-  subject: unknown;
-  arguments: readonly unknown[];
-  expected: unknown;
-};
 
 /**
  * Collects suites, tests, assertions, and async completion state for one
@@ -417,60 +411,45 @@ export const createCollector = (options?: { matcherWallBackstop?: number; forens
     return assertion;
   };
 
-  /**
-   * One matcher method. Defined outside the per-name loop so each closure
-   * captures its own descriptor rather than a shared loop variable.
-   */
-  const createMatcherMethod =
-    (subject: unknown, name: GeoSpecMatcherName, descriptor: GeoSpecMatcherDescriptor) =>
-    (...callArguments: readonly unknown[]): GeoSpecAssertion => {
-      if (!isGeoSpecTestCase(activeTest)) {
-        throw new Error('expectGeo() must be called inside it().');
-      }
+  const recordInvocation = (invocation: GeoSpecAuthoringInvocation): GeoSpecAssertion => {
+    if (!isGeoSpecTestCase(activeTest)) {
+      throw new Error('expectGeo() must be called inside it().');
+    }
 
-      const assertion: GeoSpecAssertion = {
-        kind: descriptor.kind,
-        subject,
-        expected: normalizeGeoSpecExpected(descriptor.expected, callArguments),
-      };
-      activeTest.assertions.push(assertion);
-
-      const invocation: GeoSpecAuthoringInvocation = {
-        protocolVersion: geoSpecEngineProtocolVersion,
-        matcher: name,
-        kind: descriptor.kind,
-        subject,
-        arguments: callArguments,
-        expected: assertion.expected,
-      };
-
-      if (descriptor.mode === 'async') {
-        return recordAsyncAssertion(activeTest, assertion, async () => [
-          ...(await invokeMatcherWithBudget(invocation, execution)),
-        ]);
-      }
-
-      // R1/R13: the sync choke point stamps the duration and brackets the
-      // evaluation with the deterministic work-unit budget. The budget is
-      // verdict-bearing, so it stays in the substrate and applies
-      // identically to every engine.
-      const startedAt = performance.now();
-      try {
-        return recordAssertion(
-          assertion,
-          withMatcherBudget({
-            matcher: descriptor.kind,
-            wallBackstop: execution.matcherWallBackstop,
-            evaluate: () => {
-              const result = invokeMatcher(invocation, execution);
-              return isSettledDiagnostics(result) ? [...result] : [asyncFromSyncMatcherDiagnostic(name)];
-            },
-          }),
-        );
-      } finally {
-        assertion.durationMs = performance.now() - startedAt;
-      }
+    const assertion: GeoSpecAssertion = {
+      kind: invocation.kind,
+      subject: invocation.subject,
+      expected: invocation.expected,
     };
+    activeTest.assertions.push(assertion);
+    const descriptor = geoSpecMatcherDescriptors[invocation.matcher];
+
+    if (descriptor.mode === 'async') {
+      return recordAsyncAssertion(activeTest, assertion, async () => [
+        ...(await invokeMatcherWithBudget(invocation, execution)),
+      ]);
+    }
+
+    // R1/R13: the sync choke point stamps the duration and brackets the
+    // evaluation with the deterministic work-unit budget. The budget is
+    // verdict-bearing, so it stays in the legacy protocol-2 substrate.
+    const startedAt = performance.now();
+    try {
+      return recordAssertion(
+        assertion,
+        withMatcherBudget({
+          matcher: descriptor.kind,
+          wallBackstop: execution.matcherWallBackstop,
+          evaluate: () => {
+            const result = invokeMatcher(invocation, execution);
+            return isSettledDiagnostics(result) ? [...result] : [asyncFromSyncMatcherDiagnostic(invocation.matcher)];
+          },
+        }),
+      );
+    } finally {
+      assertion.durationMs = performance.now() - startedAt;
+    }
+  };
 
   return {
     describe(name, function_) {
@@ -528,11 +507,7 @@ export const createCollector = (options?: { matcherWallBackstop?: number; forens
     },
 
     expectGeo(subject) {
-      const matcher: Partial<Record<GeoSpecMatcherName, unknown>> = {};
-      for (const name of Object.keys(geoSpecMatcherDescriptors) as GeoSpecMatcherName[]) {
-        matcher[name] = createMatcherMethod(subject, name, geoSpecMatcherDescriptors[name]);
-      }
-      return matcher as GeoSpecMatcher;
+      return createGeoSpecMatcherMethods({ invoke: recordInvocation, polarity: 'positive', subject });
     },
 
     async waitForCompletion(testTimeout, testNamePattern) {

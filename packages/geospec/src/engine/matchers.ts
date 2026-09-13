@@ -90,6 +90,39 @@ export const geoSpecMatcherDescriptors: Readonly<Record<GeoSpecMatcherName, GeoS
   toHaveVoidContinuity: { kind: 'voidContinuity', expected: 'first', mode: 'sync' },
 });
 
+/** A fixed-contract matcher available only through native clients. @public */
+export type GeoSpecFixedNativeMatcherDescriptor = {
+  readonly contract: 'geospec.plate-two-windows/v1' | 'geospec.pmi.parallel-plane-distance/v1';
+  readonly expected: 'true';
+  readonly mode: 'async';
+};
+
+/**
+ * Native matcher view derived from the legacy 24 entries plus fixed-contract
+ * capabilities.
+ *
+ * @public
+ */
+export const geoSpecNativeMatcherDescriptors = Object.freeze({
+  ...geoSpecMatcherDescriptors,
+  toSatisfyRationalPlate: {
+    contract: 'geospec.plate-two-windows/v1',
+    expected: 'true',
+    mode: 'async',
+  } satisfies GeoSpecFixedNativeMatcherDescriptor,
+  toSatisfyParallelPlaneDistance: {
+    contract: 'geospec.pmi.parallel-plane-distance/v1',
+    expected: 'true',
+    mode: 'async',
+  } satisfies GeoSpecFixedNativeMatcherDescriptor,
+});
+
+/** Every matcher name exposed by a native `expectGeo(...)` client. @public */
+export type GeoSpecNativeMatcherName = keyof typeof geoSpecNativeMatcherDescriptors;
+
+/** Every fixed-contract matcher name exposed only by native clients. @public */
+export type GeoSpecFixedNativeMatcherName = Exclude<GeoSpecNativeMatcherName, GeoSpecMatcherName>;
+
 /**
  * Derive the `expected` value an assertion records from the call arguments.
  *

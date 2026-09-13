@@ -261,7 +261,10 @@ pub(super) fn finite_display(value: &BigRational) -> Result<f64, ContinuousError
     }
 }
 
-pub(super) fn checked_cmp(left: &BigRational, right: &BigRational) -> Result<Ordering, ContinuousError> {
+pub(super) fn checked_cmp(
+    left: &BigRational,
+    right: &BigRational,
+) -> Result<Ordering, ContinuousError> {
     exact::checked(left.clone())?;
     exact::checked(right.clone())?;
     let left_bits = left.numer().bits().saturating_add(right.denom().bits());

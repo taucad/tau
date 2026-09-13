@@ -223,6 +223,7 @@ typedef struct geospec_occt_face_facts {
 typedef struct geospec_occt_pmi_facts {
   int kind;
   size_t association_count;
+  size_t first_association_count;
 } geospec_occt_pmi_facts;
 
 typedef struct geospec_occt_subshape_facts {
@@ -561,6 +562,19 @@ typedef struct geospec_occt_resolved_source_face {
   int source_same_sense;
   int transferred_reversed;
 } geospec_occt_resolved_source_face;
+
+typedef struct geospec_occt_pmi_source_face {
+  int64_t occurrence;
+  uint32_t public_face_ordinal;
+  uint32_t route[32];
+  size_t route_count;
+} geospec_occt_pmi_source_face;
+
+// status:0 supported,1 missing,2 ambiguous,3 unsupported. No first-match fallback.
+int geospec_occt_pmi_source_faces(
+    const geospec_occt_document* document, uint32_t source_face_id,
+    geospec_occt_pmi_source_face* output, size_t capacity,
+    size_t* count, int* status, geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
 
 int geospec_occt_continuous_wall(
     const geospec_occt_document* document,

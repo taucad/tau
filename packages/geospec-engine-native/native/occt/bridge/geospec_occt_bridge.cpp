@@ -192,6 +192,7 @@ struct PmiFacts {
   std::string label;
   std::string name;
   std::vector<std::string> shape_labels;
+  size_t first_association_count = 0;
 };
 
 struct SubshapeFacts {
@@ -1012,6 +1013,7 @@ void append_pmi(const NCollection_Sequence<TDF_Label>& labels,
     NCollection_Sequence<TDF_Label> second;
     if (XCAFDoc_DimTolTool::GetRefShapeLabel(label, first, second)) {
       for (const TDF_Label& shape : first) record.shape_labels.push_back(label_entry(shape));
+      record.first_association_count = record.shape_labels.size();
       for (const TDF_Label& shape : second) record.shape_labels.push_back(label_entry(shape));
     }
     output.push_back(std::move(record));
@@ -5941,6 +5943,7 @@ int geospec_occt_pmi(const geospec_occt_document* document, size_t index,
   const PmiFacts& value = document->pmi[index];
   pmi->kind = value.kind;
   pmi->association_count = value.shape_labels.size();
+  pmi->first_association_count = value.first_association_count;
   return copy_result(write_string(value.label, label), write_string(value.name, name));
 }
 
@@ -5953,6 +5956,64 @@ int geospec_occt_pmi_association(const geospec_occt_document* document,
     return fail(GEOSPEC_OCCT_INVALID_ARGUMENT, "PMI association index is out of range.", error);
   }
   return write_string(document->pmi[pmi_index].shape_labels[association_index], shape_label);
+}
+
+int geospec_occt_pmi_source_faces(
+    const geospec_occt_document* document, uint32_t source_face_id,
+    geospec_occt_pmi_source_face* output, size_t capacity,
+    size_t* count, int* status, geospec_occt_string* error) noexcept {
+  if (!document || !source_face_id || !output || !count || !status || capacity > 4096) {
+    return fail(GEOSPEC_OCCT_INVALID_ARGUMENT, "Invalid PMI source-face output.", error);
+  }
+  *count = 0;
+  *status = 1;
+  return guarded(error, [&]() -> int {
+    const SourceFaceFacts* source = nullptr;
+    for (const auto& candidate : document->source_faces) {
+      if (candidate.entity != source_face_id) continue;
+      if (source) { *status = 2; return GEOSPEC_OCCT_OK; }
+      source = &candidate;
+    }
+    if (!source) return GEOSPEC_OCCT_OK;
+    if (document->occurrences.empty()) {
+      size_t found = 0;
+      for (size_t index = 0; index < document->public_faces.size(); ++index) {
+        const auto& candidate = document->public_faces[index];
+        if (!candidate.shape.IsEqual(source->shape)) continue;
+        if (++found > 1) { *count = 0; *status = 2; return GEOSPEC_OCCT_OK; }
+        if (capacity == 0) return fail(GEOSPEC_OCCT_UNSUPPORTED, "PMI output capacity exhausted.", error);
+        output[0] = {};
+        output[0].occurrence = -1;
+        output[0].public_face_ordinal = static_cast<uint32_t>(index);
+      }
+      *count = found;
+      *status = found ? 0 : 1;
+      return GEOSPEC_OCCT_OK;
+    }
+    bool unresolved = false;
+    for (size_t index = 0; index < document->occurrences.size(); ++index) {
+      const auto& occurrence = document->occurrences[index];
+      // Only occurrences containing the original source TShape are applicable.
+      size_t partners = 0;
+      for (const auto& face : occurrence.faces) if (face.shape.IsPartner(source->shape)) ++partners;
+      if (!partners) continue;
+      if (partners != 1) { *count = 0; *status = 2; return GEOSPEC_OCCT_OK; }
+      if (!occurrence.source_transfer_valid) { unresolved = true; continue; }
+      geospec_occt_resolved_source_face resolved{};
+      const int result = geospec_occt_resolve_source_face(document, source_face_id,
+          occurrence.source_route.data(), occurrence.source_route.size(), &resolved, error);
+      if (result != GEOSPEC_OCCT_OK) { unresolved = true; continue; }
+      if (*count == capacity) return fail(GEOSPEC_OCCT_UNSUPPORTED, "PMI output capacity exhausted.", error);
+      auto& value = output[(*count)++];
+      value = {};
+      value.occurrence = resolved.occurrence;
+      value.public_face_ordinal = resolved.public_face_ordinal;
+      value.route_count = occurrence.source_route.size();
+      std::copy(occurrence.source_route.begin(), occurrence.source_route.end(), value.route);
+    }
+    *status = unresolved ? 3 : (*count ? 0 : 1);
+    return GEOSPEC_OCCT_OK;
+  });
 }
 
 size_t geospec_occt_subshape_count(

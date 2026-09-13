@@ -1,5 +1,11 @@
 """Python assertions backed by the native GeoSpec engine."""
 
+from ._pmi import (
+    GeoSpecPmiField, GeoSpecPmiRawEntity, GeoSpecPmiNumber, GeoSpecPmiFaceAssociation,
+    GeoSpecPmiShapeReference, GeoSpecPmiLimits, GeoSpecPmiRecord, GeoSpecPmiInventory,
+    GeoSpecPmiQueryPayload, GeoSpecPmiQueryValue,
+)
+
 from ._api import (
     GeoSpecAssertionError,
     GeoSpecAssertionReport,
@@ -12,6 +18,9 @@ from ._api import (
 )
 
 __all__ = [
+    "GeoSpecPmiField", "GeoSpecPmiRawEntity", "GeoSpecPmiNumber", "GeoSpecPmiFaceAssociation",
+    "GeoSpecPmiShapeReference", "GeoSpecPmiLimits", "GeoSpecPmiRecord", "GeoSpecPmiInventory",
+    "GeoSpecPmiQueryPayload", "GeoSpecPmiQueryValue",
     "GeoSpecAssertionError",
     "GeoSpecAssertionReport",
     "GeoSpecEngine",

@@ -1,18 +1,18 @@
-pub mod backend;
-pub mod registry;
-pub mod certificates;
 mod analysis;
-mod subject;
-mod matchers;
+mod ancillary;
+pub mod backend;
 mod budget;
-mod prepared;
-mod result;
+pub mod certificates;
 mod codec;
 mod identity;
-mod ancillary;
+mod matchers;
 mod mesh;
+mod prepared;
 mod protocol;
+pub mod registry;
+mod result;
 mod runtime;
+mod subject;
 pub use runtime::EngineConfig;
 
 pub use protocol::Engine;

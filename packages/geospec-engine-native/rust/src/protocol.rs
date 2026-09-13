@@ -16,7 +16,7 @@ use crate::mesh::Mesh;
 use crate::{ErrorKind, ProtocolError};
 
 const PROTOCOL_VERSION: f64 = 3.0;
-const REGISTRY_VERSION: f64 = 4.0;
+const REGISTRY_VERSION: f64 = 5.0;
 const CANONICAL_PROFILE: &str = "geospec-jcs-v1";
 const MAX_SAFE_INTEGER: f64 = 9_007_199_254_740_991.0;
 
@@ -441,7 +441,9 @@ pub(crate) fn validate_versions(request: &[(String, Json)]) -> Result<(), Protoc
     if registry != REGISTRY_VERSION {
         return Err(ProtocolError::new(
             ErrorKind::UnsupportedVersion,
-            format!("GeoSpec registry version {registry} is incompatible with version 4."),
+            format!(
+                "GeoSpec registry version {registry} is incompatible with version {REGISTRY_VERSION}."
+            ),
         ));
     }
     let profile = string_field(request, "canonicalProfile")?;
@@ -607,7 +609,7 @@ mod batch_tests {
         let hash = "0".repeat(64);
         let (engine, retained) = fixture(&hash);
         let claim = json!({"claimId":"first","capability":"toHaveBoundingBox","subjectSlots":["part"],"polarity":"positive","workUnitBudget":100,"payload":{"kind":"boundingBox","expected":{"size":{"x":3}}}});
-        let request = json!({"method":"submitClaims","requestId":"transport","protocolVersion":3,"registryVersion":4,"canonicalProfile":"geospec-jcs-v1","plan":{"subjects":[{"slot":"part","contentHash":hash}],"claims":[claim]}});
+        let request = json!({"method":"submitClaims","requestId":"transport","protocolVersion":3,"registryVersion":5,"canonicalProfile":"geospec-jcs-v1","plan":{"subjects":[{"slot":"part","contentHash":hash}],"claims":[claim]}});
         let plan = engine
             .canonical_plan(&serde_json::to_vec(&request).unwrap())
             .unwrap();

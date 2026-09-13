@@ -5,9 +5,13 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
 pub(crate) fn oracle() -> Value {
-    let path = std::env::var_os("GEOSPEC_RELATIONSHIP_SCALAR_ORACLE")
-        .expect("Lead must supply the frozen Node24 scalar oracle in the copied closure");
-    let bytes = std::fs::read(path).unwrap();
+    let bytes = std::env::var_os("GEOSPEC_RELATIONSHIP_SCALAR_ORACLE").map_or_else(
+        || {
+            include_bytes!("../../tests/fixtures/portable-controls/relationship-scalars.json")
+                .to_vec()
+        },
+        |path| std::fs::read(path).unwrap(),
+    );
     assert_eq!(
         format!("{:x}", Sha256::digest(&bytes)),
         "00bafc084df907d00ce008466ab7b0eb933cd38eed5df6d6569165c738bc6dd4"

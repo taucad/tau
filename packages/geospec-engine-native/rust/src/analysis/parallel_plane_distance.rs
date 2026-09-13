@@ -1,5 +1,8 @@
 //! Exact source proof for the bounded parallel-plane distance profile.
 
+#[path = "parallel_plane_distance/inventory.rs"]
+pub(crate) mod inventory;
+
 use crate::{
     backend::brep::{ResolvedSourceFace, SourceFaceKey},
     codec::Json,
@@ -171,17 +174,17 @@ impl AdmittedDimension {
             source_same_sense: associations[index].source_same_sense,
             transferred_reversed: associations[index].transferred_reversed,
         });
-        for index in 0..2 {
-            if associations[index].key != self.roles[index].key {
+        for (association, role) in associations.iter().zip(&self.roles) {
+            if association.key != role.key {
                 return Err(F2Error::UnsupportedSource(format!(
                     "{} association does not match its source key.",
-                    self.roles[index].name
+                    role.name
                 )));
             }
-            if associations[index].source_same_sense != self.roles[index].plane.source_same_sense {
+            if association.source_same_sense != role.plane.source_same_sense {
                 return Err(F2Error::UnsupportedSource(format!(
                     "{} association disagrees with ADVANCED_FACE.same_sense.",
-                    self.roles[index].name
+                    role.name
                 )));
             }
         }
@@ -366,6 +369,11 @@ impl F2Evidence {
             + self.source_numbers.capacity() * size_of::<SourceLexeme>()
     }
 
+    #[cfg(test)]
+    #[allow(
+        dead_code,
+        reason = "Used by the source-inclusion integration target, not the library unit target."
+    )]
     pub(crate) fn work_counts(&self) -> WorkCounts {
         self.work.clone()
     }
@@ -390,7 +398,7 @@ fn number_bytes(value: &SourceNumber) -> usize {
     value.spelling.capacity() + ratio_bytes(&value.millimeters)
 }
 fn bigint_bytes(value: &BigInt) -> usize {
-    ((value.bits() + 7) / 8) as usize
+    value.bits().div_ceil(8) as usize
 }
 fn ratio_bytes(value: &BigRational) -> usize {
     size_of::<BigRational>() + bigint_bytes(value.numer()) + bigint_bytes(value.denom())
@@ -603,19 +611,34 @@ pub(crate) fn admit(source: &[u8], declaration: Option<u32>) -> Result<AdmittedD
 
 impl<'a> Graph<'a> {
     fn parse(source: &'a [u8]) -> Result<Self, F2Error> {
+        Self::parse_bounded(source, MAX_SOURCE, MAX_RECORDS, MAX_LIST)
+    }
+
+    fn parse_bounded(
+        source: &'a [u8],
+        max_source: usize,
+        max_records: usize,
+        max_list: usize,
+    ) -> Result<Self, F2Error> {
         if source.is_empty() {
             return Err(F2Error::InvalidInput("STEP input is empty.".into()));
         }
-        if source.len() > MAX_SOURCE {
-            return Err(limit("STEP input exceeds 1 MiB."));
+        if source.len() > max_source {
+            return Err(limit(if max_source == MAX_SOURCE {
+                "STEP input exceeds 1 MiB."
+            } else {
+                "STEP input exceeds the selected source-byte limit."
+            }));
         }
         std::str::from_utf8(source)
             .map_err(|_| F2Error::InvalidInput("STEP input is not UTF-8.".into()))?;
-        let spans = record_spans(source)?;
+        let spans = record_spans(source, max_records)?;
         let mut records = HashMap::with_capacity(spans.len());
         let mut list_items = 0u64;
         for span in spans {
-            let (id, record) = Cursor::new(source, span, &mut list_items).record()?;
+            let mut cursor = Cursor::new(source, span, &mut list_items);
+            cursor.max_list = max_list;
+            let (id, record) = cursor.record()?;
             if records.insert(id, record).is_some() {
                 return Err(unsupported("STEP entity labels must be unique."));
             }
@@ -1703,12 +1726,12 @@ fn apply_i8(
 ) -> Result<[BigRational; 3], F2Error> {
     let mut out = std::array::from_fn(|_| BigRational::zero());
     for i in 0..3 {
-        for j in 0..3 {
+        for (j, coordinate) in value.iter().enumerate() {
             if matrix[i][j] != 0 {
                 let term = if matrix[i][j] > 0 {
-                    value[j].clone()
+                    coordinate.clone()
                 } else {
-                    -value[j].clone()
+                    -coordinate.clone()
                 };
                 out[i] = add(&out[i], &term, arithmetic)?;
             }
@@ -1938,7 +1961,7 @@ fn collect_refs(nodes: &[Node], output: &mut Vec<u32>) {
     }
 }
 
-fn record_spans(source: &[u8]) -> Result<Vec<SourceSpan>, F2Error> {
+fn record_spans(source: &[u8], max_records: usize) -> Result<Vec<SourceSpan>, F2Error> {
     let mut spans = Vec::new();
     let mut start = None;
     let mut string = false;
@@ -1989,8 +2012,12 @@ fn record_spans(source: &[u8]) -> Result<Vec<SourceSpan>, F2Error> {
                     start: begin,
                     end: i + 1,
                 });
-                if spans.len() > MAX_RECORDS {
-                    return Err(limit("STEP input exceeds 8,192 entity records."));
+                if spans.len() > max_records {
+                    return Err(limit(if max_records == MAX_RECORDS {
+                        "STEP input exceeds 8,192 entity records."
+                    } else {
+                        "STEP input exceeds the selected entity-record limit."
+                    }));
                 }
             }
         }
@@ -2009,6 +2036,7 @@ struct Cursor<'a, 'b> {
     pos: usize,
     end: usize,
     list_items: &'b mut u64,
+    max_list: usize,
 }
 impl<'a, 'b> Cursor<'a, 'b> {
     fn new(source: &'a [u8], span: SourceSpan, list_items: &'b mut u64) -> Self {
@@ -2017,6 +2045,7 @@ impl<'a, 'b> Cursor<'a, 'b> {
             pos: span.start,
             end: span.end,
             list_items,
+            max_list: MAX_LIST,
         }
     }
     fn record(mut self) -> Result<(u32, Record), F2Error> {
@@ -2035,7 +2064,7 @@ impl<'a, 'b> Cursor<'a, 'b> {
                     break;
                 }
                 out.push(self.entity()?);
-                if out.len() > MAX_LIST {
+                if out.len() > self.max_list {
                     return Err(limit("Complex entity exceeds 32 components."));
                 }
             }
@@ -2071,7 +2100,7 @@ impl<'a, 'b> Cursor<'a, 'b> {
         loop {
             out.push(self.node(depth)?);
             *self.list_items += 1;
-            if out.len() > MAX_LIST {
+            if out.len() > self.max_list {
                 return Err(limit("STEP list exceeds 32 items."));
             }
             self.ws()?;

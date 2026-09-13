@@ -20,6 +20,14 @@ export const httpHeader = {
   // (allowlisted and validated in apps/api/app/api/llm/llm-gateway.headers.ts).
   anthropicVersion: 'anthropic-version',
   anthropicBeta: 'anthropic-beta',
+  /**
+   * The credential for a THIRD-PARTY git remote reached through
+   * `POST /v1/git/proxy` — never the Tau session, which travels in
+   * `authorization` on the same request and is never forwarded (I8).
+   */
+  // The key mirrors the value by the constants contract, so it keeps the
+  // `x-tau-` prefix of `x-tau-attempt-id` rather than RFC 6648's advice.
+  xTauProxyAuthorization: 'x-tau-proxy-authorization',
 } as const;
 
 /**

@@ -32,6 +32,9 @@ AUTH_URL = 'https://api.tau.new'
 # Browser-facing origin of this API, used to build authenticated publication file
 # proxy URLs. Required by the env schema with no default.
 TAU_API_URL = 'https://api.tau.new'
+# Bare repositories of the Tau Hosted Remote live on the volume below
+# (charter EQ13: volume + git binary).
+TAU_GIT_ROOT = '/data/git'
 LOG_SERVICE = 'fly'
 LOG_LEVEL = 'info'
 OTEL_METRICS_PORT = '9464'
@@ -48,6 +51,16 @@ ADDITIONAL_CORS_ORIGINS = '["https://taucad-prod-us.netlify.app"]'
 TAU_S3_PUBLIC_BASE_URL = 'https://cdn.tau.new'
 TAU_S3_REGION = 'auto'
 TAU_S3_FORCE_PATH_STYLE = 'false'
+
+# One Fly volume per app Machine: a volume attaches to exactly one Machine, so
+# the repositories a Machine serves are the repositories on its own disk. The
+# `app` process must stay single-Machine (or gain request routing by project)
+# until a shared-storage backend exists — see the W11a report's operator items.
+[[mounts]]
+source = 'tau_git_data'
+destination = '/data'
+initial_size = '10gb'
+processes = ['app']
 
 [http_service]
 internal_port = 3000

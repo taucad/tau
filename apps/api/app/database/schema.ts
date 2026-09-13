@@ -64,6 +64,26 @@ export const project = pgTable('project', {
     .notNull(),
 });
 
+/**
+ * Storage accounting for one project's bare repository on the Tau Hosted
+ * Remote (charter D15/D16, blueprint S25/S36). `storage_bytes` is the
+ * repository directory as the API measured it after the last push;
+ * `lfs_bytes` is the sum of that project's large objects in the private
+ * bucket. Both are counted against the plan allowance by `pre-receive` and by
+ * the LFS batch endpoint; a push over quota is refused whole (D17).
+ */
+export const projectGit = pgTable('project_git', {
+  projectId: text('project_id')
+    .primaryKey()
+    .references(() => project.id, { onDelete: 'cascade' }),
+  storageBytes: bigint('storage_bytes', { mode: 'number' }).notNull().default(0),
+  lfsBytes: bigint('lfs_bytes', { mode: 'number' }).notNull().default(0),
+  updatedAt: timestamp('updated_at', { withTimezone: true })
+    .defaultNow()
+    .$onUpdate(() => /* @__PURE__ */ new Date())
+    .notNull(),
+});
+
 export const publication = pgTable(
   'publication',
   {
@@ -75,6 +95,10 @@ export const publication = pgTable(
       .notNull()
       .references(() => user.id, { onDelete: 'cascade' }),
     parentPublicationId: text('parent_publication_id').references((): AnyPgColumn => publication.id),
+    /** The named version this publication points at: `refs/tags/<tag>` (D11, A21). */
+    tag: text('tag').notNull(),
+    /** The revision that name resolved to when the publication was recorded. */
+    revisionId: text('revision_id').notNull(),
     visibility: text('visibility').notNull(),
     manifestKey: text('manifest_key').notNull(),
     ogImageKey: text('og_image_key'),
@@ -93,6 +117,9 @@ export const publication = pgTable(
   },
   (table) => [
     index('publication_project_idx').on(table.projectId, desc(table.createdAt)),
+    /* One publication per named version: a re-publish of the same name
+       re-points the row it already has (AC13). */
+    uniqueIndex('publication_project_tag_idx').on(table.projectId, table.tag),
     index('publication_owner_idx').on(table.ownerId, desc(table.createdAt)),
     index('publication_public_visibility_idx')
       .on(table.visibility, desc(table.createdAt))

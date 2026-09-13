@@ -6,6 +6,7 @@ import type { HealthCheckResult } from '@nestjs/terminus';
 import { RedisHealthIndicator } from '#api/health/redis-health.indicator.js';
 import { DatabaseHealthIndicator } from '#api/health/database-health.indicator.js';
 import { S3HealthIndicator } from '#api/health/s3-health.indicator.js';
+import { GitToolchainHealthIndicator } from '#api/health/git-toolchain-health.indicator.js';
 
 /** Heap threshold: 80% of the 2GB VM allocation */
 const heapThresholdBytes = 2 * 1024 * 1024 * 1024 * 0.8;
@@ -18,6 +19,7 @@ export class HealthController {
     private readonly redisHealth: RedisHealthIndicator,
     private readonly databaseHealth: DatabaseHealthIndicator,
     private readonly s3Health: S3HealthIndicator,
+    private readonly gitToolchainHealth: GitToolchainHealthIndicator,
   ) {}
 
   /**
@@ -43,6 +45,7 @@ export class HealthController {
       async () => this.redisHealth.isHealthy(),
       async () => this.databaseHealth.isHealthy(),
       async () => this.s3Health.isHealthy(),
+      async () => this.gitToolchainHealth.isHealthy(),
       async () => this.memory.checkHeap('memory_heap', heapThresholdBytes),
     ]);
   }

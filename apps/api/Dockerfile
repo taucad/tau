@@ -69,10 +69,24 @@ FROM node:${NODE_VERSION}-slim AS runtime
 LABEL fly_launch_runtime="NestJS"
 WORKDIR /app
 
+# The Tau Hosted Remote is git's own binaries behind HTTP (charter EQ13/D15):
+# `git upload-pack|receive-pack --stateless-rpc` serve the bare repositories on
+# the volume, and `git-lfs` is present so a repository written by the API is one
+# a stock client can also maintain. Readiness fails by name when either is
+# missing (`git-toolchain-health.indicator.ts`).
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends git git-lfs && \
+    rm -rf /var/lib/apt/lists/*
+
 # Create non-root user before COPY so --chown can write directly into the
 # layer instead of doubling its size with a follow-up `chown -R`.
 RUN groupadd --system --gid 1001 nodejs && \
     useradd --system --uid 1001 --gid nodejs --home /app --shell /usr/sbin/nologin nestjs
+
+# Mount point for the repositories volume ([[mounts]] in fly.*.toml). Created
+# and owned here so the non-root runtime user can write into an empty volume on
+# its first attach.
+RUN mkdir -p /data/git && chown -R nestjs:nodejs /data
 COPY --from=pruned --chown=nestjs:nodejs /pruned /app
 USER nestjs
 

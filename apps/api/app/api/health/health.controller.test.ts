@@ -6,6 +6,7 @@ import { HealthController } from '#api/health/health.controller.js';
 import { RedisHealthIndicator } from '#api/health/redis-health.indicator.js';
 import { DatabaseHealthIndicator } from '#api/health/database-health.indicator.js';
 import { S3HealthIndicator } from '#api/health/s3-health.indicator.js';
+import { GitToolchainHealthIndicator } from '#api/health/git-toolchain-health.indicator.js';
 
 describe('HealthController', () => {
   let controller: HealthController;
@@ -34,6 +35,12 @@ describe('HealthController', () => {
             isHealthy: vi.fn().mockResolvedValue({ s3: { status: 'up', responseTimeMs: 3 } }),
           },
         },
+        {
+          provide: GitToolchainHealthIndicator,
+          useValue: {
+            isHealthy: vi.fn().mockResolvedValue({ git: { status: 'up', git: 'git version 2.55.0' } }),
+          },
+        },
       ],
     }).compile();
 
@@ -58,6 +65,7 @@ describe('HealthController', () => {
       expect(result.details).toHaveProperty('redis');
       expect(result.details).toHaveProperty('database');
       expect(result.details).toHaveProperty('s3');
+      expect(result.details).toHaveProperty('git');
       expect(result.details).toHaveProperty('memory_heap');
     });
 

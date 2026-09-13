@@ -5,11 +5,12 @@ import { HealthController } from '#api/health/health.controller.js';
 import { RedisHealthIndicator } from '#api/health/redis-health.indicator.js';
 import { DatabaseHealthIndicator } from '#api/health/database-health.indicator.js';
 import { S3HealthIndicator } from '#api/health/s3-health.indicator.js';
+import { GitToolchainHealthIndicator } from '#api/health/git-toolchain-health.indicator.js';
 
 @Module({
   imports: [TerminusModule, DatabaseModule],
   controllers: [HealthController],
   // StorageModule is @Global() so ObjectStorageService is available without an explicit import.
-  providers: [RedisHealthIndicator, DatabaseHealthIndicator, S3HealthIndicator],
+  providers: [RedisHealthIndicator, DatabaseHealthIndicator, S3HealthIndicator, GitToolchainHealthIndicator],
 })
 export class HealthModule {}

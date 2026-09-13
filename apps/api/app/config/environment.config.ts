@@ -209,6 +209,20 @@ const environmentSchemaBase = z.object({
       'Fail-closed bucket for private publications (blobs) and all publication manifests; no custom domain, no anonymous read — served only via the authenticated file proxy',
     ),
 
+  // Tau Hosted Remote (git server, charter D15/EQ13). The bare repositories
+  // live on the Fly volume mounted at this path; locally it is an ordinary
+  // directory the API creates on first push. Never inside a project.
+  TAU_GIT_ROOT: z
+    .string()
+    .default('.tau-git')
+    .describe('Directory holding one bare repository per project (<TAU_GIT_ROOT>/<projectId>.git)'),
+  TAU_GIT_BACKUP_INTERVAL_HOURS: z.coerce
+    .number()
+    .min(1)
+    .max(168)
+    .default(24)
+    .describe('Interval between `git bundle` disaster-recovery snapshots of every repository to the private bucket'),
+
   // OpenTelemetry
   OTEL_EXPORTER_OTLP_ENDPOINT: z.string().optional().describe('OTLP endpoint for traces and logs'),
   OTEL_EXPORTER_OTLP_HEADERS: z.string().optional().describe('OTLP auth headers (e.g., Grafana Cloud Basic auth)'),

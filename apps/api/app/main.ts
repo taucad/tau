@@ -9,9 +9,8 @@ import { ConfigService } from '@nestjs/config';
 import { Logger as PinoLogger } from 'nestjs-pino';
 import cookie from '@fastify/cookie';
 import helmet from '@fastify/helmet';
-import multipart from '@fastify/multipart';
 import { FastifyOtelInstrumentation } from '@fastify/otel';
-import { idPrefix, publicationMaxMultipartFiles } from '@taucad/types/constants';
+import { idPrefix } from '@taucad/types/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { AppModule } from '#app.module.js';
 import type { Environment } from '#config/environment.config.js';
@@ -69,14 +68,6 @@ async function createApiApp() {
   await fastifyInstance.register(cookie, {
     secret: viewCookieSecret,
     hook: 'onRequest',
-  });
-
-  await fastifyInstance.register(multipart, {
-    limits: {
-      fieldSize: 1024 * 1024,
-      fileSize: 25 * 1024 * 1024,
-      files: publicationMaxMultipartFiles,
-    },
   });
 
   return app;

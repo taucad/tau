@@ -3,6 +3,7 @@ import { HostsModule } from '#api/hosts/hosts.module.js';
 import { BillingModule } from '#api/billing/billing.module.js';
 import { ChatModule } from '#api/chat/chat.module.js';
 import { CodeCompletionModule } from '#api/code-completion/code-completion.module.js';
+import { GitModule } from '#api/git/git.module.js';
 import { HealthModule } from '#api/health/health.module.js';
 import { LlmModule } from '#api/llm/llm.module.js';
 import { KernelsModule } from '#api/kernels/kernels.module.js';
@@ -28,6 +29,7 @@ import { RepositoriesModule } from '#api/repositories/repositories.module.js';
     ChatModule,
     CodeCompletionModule,
     DurableEventsModule,
+    GitModule,
     HealthModule,
     JobsModule,
     KernelsModule,

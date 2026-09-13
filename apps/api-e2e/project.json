@@ -12,6 +12,24 @@
         "cwd": "{workspaceRoot}",
         "command": "vitest run --config apps/api-e2e/vitest.server-modes.config.ts"
       }
+    },
+    "test:git": {
+      "executor": "nx:run-commands",
+      "metadata": {
+        "description": "Tau Hosted Remote in a real process (W18): stock git and git-lfs against the built API on :4014, real Postgres, real MinIO, the hooks as installed. Docker and db-migrate run ahead of vitest, the same split desktop-e2e uses. No `dependsOn` on `api:build`: that chain reaches `runtime:build`, which is red on Node 24 for a tsdown config-loader bug, so the global setup runs `vite build` in apps/api itself — the same choice desktop-e2e made and documented."
+      },
+      "options": {
+        "cwd": "{workspaceRoot}/apps/api-e2e",
+        "parallel": false,
+        "commands": [
+          "docker-compose -f ../../infra/docker-compose.yml up -d postgres redis minio minio-bootstrap",
+          "pnpm --dir ../.. exec nx run api:db-migrate",
+          "../../node_modules/.bin/vitest run --config vitest.git.config.ts"
+        ],
+        "env": {
+          "TAU_E2E_API_URL": "http://localhost:4014"
+        }
+      }
     }
   }
 }

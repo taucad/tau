@@ -1,0 +1,16 @@
+{
+  "extends": "../../tsconfig.lib.json",
+  "compilerOptions": {
+    "composite": false,
+    "declaration": false,
+    "declarationMap": false,
+    "incremental": false,
+    "noEmit": true,
+    "paths": {
+      "@taucad/geospec-engine-native": ["../../../geospec-engine-native/src/index.ts"]
+    }
+  },
+  "files": ["app.ts"],
+  "include": [],
+  "references": []
+}

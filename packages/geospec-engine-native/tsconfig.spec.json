@@ -10,6 +10,7 @@
     "paths": {
       "#*": ["./src/*"]
     },
+    "allowImportingTsExtensions": true,
     "allowJs": true
   },
   "include": [
@@ -26,6 +27,7 @@
     "src/**/*.jsx",
     "vitest.node26.config.ts",
     "bindings/browser-conformance/**/*.ts",
-    "bindings/*/*.mjs"
+    "bindings/*/*.mjs",
+    "host-tests/authored-corpus-b19/*.mjs"
   ]
 }

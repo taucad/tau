@@ -7,8 +7,8 @@ import {
   agentApprovalToolName,
   projectAgentHostEvent,
   projectAgentHostLiveEvent,
-  projectAgentHostRevisionFinalized,
   projectAgentHostUserTurn,
+  projectTurnFinalized,
 } from '#services/agent-host-event-projection.js';
 import { parseErrorForPersistence } from '#utils/error.utils.js';
 import hexagonalNutLog from '#services/__fixtures__/daemon-reattach-hexnut.jsonl?raw';
@@ -587,61 +587,85 @@ describe('projectAgentHostEvent', () => {
   });
 });
 
-describe('projectAgentHostRevisionFinalized', () => {
-  /* Exactly what a host writes: `packages/host/src/revisions.ts` builds this
-     record from its own finalization, and `parseLogEvent` is what the client's
-     own log reader validates it with — so the fixture goes through it. */
+describe('projectTurnFinalized', () => {
+  /* Exactly what a host writes: `packages/host/src/revisions.ts` appends this
+     record to the chat's own log from its settlement, and `parseLogEvent` is
+     what the client's log reader validates it with — so the fixture goes
+     through it. The browser's worker root emits the same shape from the same
+     machines, which is what makes one projection serve both hosts (S9). */
   const record = parseLogEvent({
     ...base,
-    type: 'revision.finalized',
+    type: 'turn.finalized',
     turnId: 'user-turn-1',
-    workspaceId: 'trun-1',
-    revisionId: 'rev:trun-1',
-    baseRevisionId: 'rev:base-1',
-    treeId: 'rev:trun-1',
-    branchName: 'agent/chat-1/trun-1',
-    publication: {
-      status: 'updated',
-      branchName: 'agent/chat-1/trun-1',
-      expectedHeadRevisionId: 'rev:base-1',
-      previousHeadRevisionId: 'rev:base-1',
-      headRevisionId: 'rev:trun-1',
-    },
+    runId: 'run-1',
+    chatId: 'chat-1',
+    projectId: 'project-1',
+    checkoutId: 'live',
+    revisionId: 'rev-1',
+    branch: 'main',
     changedPaths: ['main.scad'],
-    provenance: { source: 'agent', actorId: 'tau-host', runId: 'run-1', createdAt: 1_788_220_800_000 },
-    generatedSummary: 'Agent turn run-1',
-    nativeGit: { status: 'not-configured' },
+    treeId: 'tree-1',
+    trigger: 'turn',
+    runIds: ['run-1', 'run-2'],
   });
 
-  it("becomes the finalization the revision graph takes from this tab's own authority", () => {
-    expect(projectAgentHostRevisionFinalized(record, 'chat-1')).toEqual({
+  it('becomes the card the turn on screen carries, in the one schema every host publishes', () => {
+    expect(projectTurnFinalized(record)).toEqual({
+      type: 'turn.finalized',
       turnId: 'user-turn-1',
-      revisionId: 'rev:trun-1',
-      baseRevisionId: 'rev:base-1',
-      treeId: 'rev:trun-1',
-      branchName: 'agent/chat-1/trun-1',
-      publication: {
-        status: 'updated',
-        branchName: 'agent/chat-1/trun-1',
-        expectedHeadRevisionId: 'rev:base-1',
-        previousHeadRevisionId: 'rev:base-1',
-        headRevisionId: 'rev:trun-1',
-      },
-      changedPaths: ['main.scad'],
-      provenance: { source: 'agent', actorId: 'tau-host', runId: 'run-1', createdAt: 1_788_220_800_000 },
-      generatedSummary: 'Agent turn run-1',
+      runId: 'run-1',
       chatId: 'chat-1',
-      jobIds: [],
-      workspaceId: 'trun-1',
-      nativeGit: { status: 'not-configured' },
+      projectId: 'project-1',
+      checkoutId: 'live',
+      revisionId: 'rev-1',
+      branch: 'main',
+      changedPaths: ['main.scad'],
+      treeId: 'tree-1',
+      trigger: 'turn',
+      runIds: ['run-1', 'run-2'],
     });
+  });
+
+  it('carries a turn that changed nothing without inventing a revision for it', () => {
+    const nothing = parseLogEvent({
+      ...base,
+      type: 'turn.finalized',
+      turnId: 'user-turn-2',
+      runId: 'run-3',
+      chatId: 'chat-1',
+      projectId: 'project-1',
+      changedPaths: [],
+      trigger: 'turn',
+      runIds: ['run-3'],
+    });
+    const card = projectTurnFinalized(nothing);
+    expect(card?.revisionId).toBeUndefined();
+    expect(card?.changedPaths).toEqual([]);
   });
 
   it('renders no transcript chunk of its own, and reads nothing out of another record', () => {
     expect(projectAgentHostEvent(record)).toEqual([]);
-    expect(projectAgentHostRevisionFinalized({ ...base, type: 'run.lifecycle', state: 'completed' }, 'chat-1')).toBe(
-      undefined,
-    );
+    expect(projectTurnFinalized({ ...base, type: 'run.lifecycle', state: 'completed' })).toBe(undefined);
+  });
+
+  it('renders no chunk for the two sibling outcomes either', () => {
+    const conflicted = parseLogEvent({
+      ...base,
+      type: 'turn.conflicted',
+      turnId: 'user-turn-3',
+      runId: 'run-4',
+      chatId: 'chat-1',
+    });
+    const failed = parseLogEvent({
+      ...base,
+      type: 'turn.failed',
+      turnId: 'user-turn-4',
+      runId: 'run-5',
+      chatId: 'chat-1',
+      reason: 'The turn ended before it recorded a revision.',
+    });
+    expect(projectAgentHostEvent(conflicted)).toEqual([]);
+    expect(projectAgentHostEvent(failed)).toEqual([]);
   });
 });
 

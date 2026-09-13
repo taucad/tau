@@ -29,13 +29,12 @@ import type { TauHostDescriptor } from '#lib/agent-host-placement.js';
 const workspaceHarness = vi.hoisted(() => ({
   current: undefined as
     | {
-        execution: { hostId: string; mode: 'direct' | 'candidate'; workspaceId: string; baseRevisionId: string };
+        execution: { hostId: string; workspaceId: string; baseRevisionId: string };
         admitted: boolean;
       }
     | undefined,
   listeners: new Set<() => void>(),
   admissionGate: undefined as Promise<void> | undefined,
-  revisionMode: 'direct' as 'direct' | 'candidate',
   prepare: vi.fn(),
 }));
 const browserHostHarness = vi.hoisted(() => ({
@@ -192,10 +191,6 @@ vi.mock('#providers/chat-workspace-authority-provider.js', () => ({
   useOptionalChatWorkspaceAuthority: () => ({
     get: () => workspaceHarness.current,
     prepare: workspaceHarness.prepare,
-    revisionMode: () => workspaceHarness.revisionMode,
-    setRevisionMode: (_chatId: string, mode: 'direct' | 'candidate') => {
-      workspaceHarness.revisionMode = mode;
-    },
     finalize: async () => undefined,
     discard: async () => undefined,
     markAdmitted: async () => {
@@ -279,28 +274,23 @@ const installActiveSession = (activeChatId: string): void => {
 };
 
 beforeEach(() => {
-  workspaceHarness.revisionMode = 'direct';
   vi.clearAllMocks();
   browserHostHarness.registration = undefined;
   browserHostHarness.run = undefined;
   workspaceHarness.listeners.clear();
   workspaceHarness.admissionGate = undefined;
   workspaceHarness.current = {
-    execution: { hostId: 'host_test', mode: 'direct', workspaceId: 'workspace_test', baseRevisionId: 'rev_test' },
+    execution: { hostId: 'host_test', workspaceId: 'workspace_test', baseRevisionId: 'rev_test' },
     admitted: false,
   };
-  // The real authority stamps the claim's own mode onto the target it hands
-  // back; the harness has to do the same or the wire assertion proves nothing.
+  // The placement the real authority answers with: the checkout the turn landed
+  // on and what it descends from — no revision mode, since there is none (W3d).
   const mintedClaim: NonNullable<typeof workspaceHarness.current> = {
-    execution: { hostId: 'host_test', mode: 'direct', workspaceId: 'workspace_test', baseRevisionId: 'rev_test' },
+    execution: { hostId: 'host_test', workspaceId: 'workspace_test', baseRevisionId: 'rev_test' },
     admitted: false,
   };
-  workspaceHarness.prepare.mockImplementation(async (_chatId: string, options?: { mode?: 'direct' | 'candidate' }) => {
-    const claim = workspaceHarness.current ?? mintedClaim;
-    workspaceHarness.current = {
-      ...claim,
-      execution: { ...claim.execution, mode: options?.mode ?? 'direct' },
-    };
+  workspaceHarness.prepare.mockImplementation(async () => {
+    workspaceHarness.current = workspaceHarness.current ?? mintedClaim;
     return workspaceHarness.current;
   });
   mountAgentMock(buildAgent());
@@ -333,7 +323,6 @@ describe('admission against the placement book a real discovery pass filled', ()
   it('admits a direct turn on a daemon that advertised only direct', async () => {
     await discoverHost(['direct']);
     mountAgentMock(buildAgent({ execution: { kind: 'tau', model: 'openai-gpt-5.5', hostId: 'origin' } }));
-    workspaceHarness.revisionMode = 'direct';
     const chat = mock<Chat<MyUIMessage>>();
     Object.defineProperty(chat, 'messages', { get: () => [] });
     useActiveChatInstanceMock.mockReturnValue(chat);
@@ -349,7 +338,7 @@ describe('admission against the placement book a real discovery pass filled', ()
       expect(actions.sendMessage).toHaveBeenCalled();
     });
     const body = actions.sendMessage.mock.calls[0]?.[1]?.body as Record<string, unknown>;
-    expect(body['execution']).toEqual({ hostId: 'origin', mode: 'direct' });
+    expect(body['execution']).toEqual({ hostId: 'origin' });
     expect(persistedErrors).toEqual([]);
   });
 
@@ -377,28 +366,5 @@ describe('admission against the placement book a real discovery pass filled', ()
     expect(workspaceHarness.prepare).not.toHaveBeenCalled();
     expect(chat.addToolApprovalResponse).not.toHaveBeenCalled();
     expect(browserHostHarness.resolveInterrupt).not.toHaveBeenCalled();
-  });
-
-  it('refuses a candidate turn on the same host, with the code the host itself refuses on', async () => {
-    await discoverHost(['direct']);
-    mountAgentMock(buildAgent({ execution: { kind: 'tau', model: 'openai-gpt-5.5', hostId: 'origin' } }));
-    workspaceHarness.revisionMode = 'candidate';
-    const chat = mock<Chat<MyUIMessage>>();
-    Object.defineProperty(chat, 'messages', { get: () => [] });
-    useActiveChatInstanceMock.mockReturnValue(chat);
-    const actions = buildActions();
-    installActions(actions);
-
-    const surfaced = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    const { result } = renderHook(() => useCadChatClient());
-    act(() => {
-      result.current.submit({ text: 'Build it.' });
-    });
-
-    await waitFor(() => {
-      expect(surfaced.mock.calls.at(-1)?.[1]).toMatchObject({ code: 'REVISION_MODE_UNSUPPORTED' });
-    });
-    expect(actions.sendMessage).not.toHaveBeenCalled();
-    surfaced.mockRestore();
   });
 });

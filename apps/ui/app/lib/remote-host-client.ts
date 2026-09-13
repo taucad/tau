@@ -1,5 +1,4 @@
 import { z } from 'zod';
-import { chatRevisionModeSchema } from '@taucad/chat/schemas';
 
 import { externalAgentDescriptorSchema } from '@taucad/agent-host';
 
@@ -24,8 +23,6 @@ const hostDeviceSchema = z.object({
       workspaceRoot: z.string(),
       /** External ACP agents this daemon knows about (W4-ACP); absent = Tau runs only. */
       externalAgents: z.array(externalAgentDescriptorSchema).max(16).optional(),
-      /** Revision modes this daemon records a turn in (V17); absent = no revision port. */
-      revisions: z.array(chatRevisionModeSchema).optional(),
     })
     .optional(),
   /**

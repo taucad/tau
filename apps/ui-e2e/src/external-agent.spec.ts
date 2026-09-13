@@ -153,10 +153,16 @@ describe('external agent (AV-5)', () => {
     const runId = events.at(-1)?.runId ?? '';
     expect(runId).not.toBe('');
 
-    /* V2: the agent works in the project's tree — its write lands at the root
-     * and no per-run copy exists. */
+    /* V2: the agent works in the project's tree — its write lands at the root,
+     * and nothing copies the tree per run beside it. The assertion is re-pointed
+     * rather than dropped (W5 review Q6, folded to W18): `.tau/workspaces` is
+     * gone from the product with W3, and `.tau/checkouts/<id>/…` is the layout
+     * that replaced it, so that is where a per-run copy would appear now. The
+     * lint pin and `path-registry` keep the old name out of source; this keeps
+     * the runtime half of V2 asserted. */
     await expect.poll(async () => target.readTauServeFile('hello.txt'), { timeout: 60_000 }).toContain('noask');
-    expect(await target.readTauServeFile(`.tau/workspaces/${runId}/tree/hello.txt`)).toBeUndefined();
+    expect(await target.readTauServeFile(`.tau/checkouts/${runId}/tree/hello.txt`)).toBeUndefined();
+    expect(await target.readTauServeFile('.tau/checkouts/hello.txt')).toBeUndefined();
 
     /* The thin projection: the turn's user message carries the external marker,
      * and the agent's own tool call is a `tool-input`/`tool-output` pair marked
@@ -248,7 +254,11 @@ describe('external agent (AV-5)', () => {
     }
 
     const events = await durableEvents();
-    const runId = events.at(-1)?.runId ?? '';
+    /* Named for the V2 re-point below, which asks whether a per-run copy of the
+     * tree exists under `.tau/checkouts/<run>`; every other assertion here reads
+     * the log, not the run. */
+    const approvedRunId = events.at(-1)?.runId ?? '';
+    expect(approvedRunId).not.toBe('');
     /* The approval is a request/resolution pair in the same log, and the run
      * moved through `paused` and back to `running` around it. */
     expect(
@@ -262,11 +272,12 @@ describe('external agent (AV-5)', () => {
       'completed',
     ]);
 
-    // The approved tool actually ran, in the project's tree (V2) and nowhere else.
+    // The approved tool actually ran, in the project's tree and nowhere else (V2).
     await expect
       .poll(async () => target.readTauServeFile('hello.txt'), { timeout: 60_000 })
       .toContain('external agent proof');
-    expect(await target.readTauServeFile(`.tau/workspaces/${runId}/tree/hello.txt`)).toBeUndefined();
+    expect(await target.readTauServeFile(`.tau/checkouts/${approvedRunId}/tree/hello.txt`)).toBeUndefined();
+    expect(await target.readTauServeFile('.tau/checkouts/hello.txt')).toBeUndefined();
 
     // PH19 again: resolving an approval is a daemon command, never an API call.
     const apiRequests = await target.readAgentHostApiRequests();

@@ -4,7 +4,7 @@ import type { AgentLiveEvent, AgentLogEvent } from '@taucad/agent-host';
 import type { BillingInvocationStatus, MyUIMessage } from '@taucad/chat';
 import { billingInvocationStatusSchema } from '@taucad/chat';
 import { errorCategoryTitles, httpStatusToCategory } from '@taucad/chat/utils';
-import type { AuthoritativeRevisionFinalization } from '#types/revision.types.js';
+import type { TurnFinalizedEvent } from '@taucad/revisions/revision-effects';
 import { isRecord } from '@taucad/utils/schema';
 
 type ProviderMessage = Extract<AgentLogEvent, { readonly type: 'message.appended' }>['message'];
@@ -273,39 +273,33 @@ export const projectAgentHostUserMessage = (message: UserProviderMessage, record
 };
 
 /**
- * Read back the revision a *host* recorded for one turn.
+ * Read back the turn settlement a *host* attested (S9, A4).
  *
- * A browser-placed turn's revision is finalized by the workspace authority in
- * this tab, so the finalization is already in hand. A host-placed turn's is
- * finalized on the host, which owns the files (VI11) — the only thing that
- * crosses to the client is this durable record, and it carries the whole
- * finalization so the graph node it becomes is identical either way.
+ * One schema on every host: the browser's revision root emits exactly this
+ * shape from the same `turn.machine`, and a Node host writes it into the chat's
+ * own durable log, so the revision card is projected from one shape wherever
+ * the turn ran. The card's `Rev N` is not here — it is the first-parent ordinal
+ * on the selected branch, derived from the graph at read time (I3).
  *
  * @param event - One durable log record.
- * @param chatId - The chat whose log carried it; the record does not repeat it.
- * @returns The finalization, or `undefined` for every other record.
+ * @returns The settlement, or `undefined` for every other record.
+ * @public
  */
-export const projectAgentHostRevisionFinalized = (
-  event: AgentLogEvent,
-  chatId: string,
-): AuthoritativeRevisionFinalization | undefined =>
-  event.type === 'revision.finalized'
+export const projectTurnFinalized = (event: AgentLogEvent): TurnFinalizedEvent | undefined =>
+  event.type === 'turn.finalized'
     ? {
+        type: 'turn.finalized',
         turnId: event.turnId,
-        revisionId: event.revisionId,
-        baseRevisionId: event.baseRevisionId,
-        treeId: event.treeId,
-        branchName: event.branchName,
-        publication: event.publication,
+        runId: event.runId,
+        chatId: event.chatId,
+        projectId: event.projectId,
+        checkoutId: event.checkoutId,
+        ...(event.revisionId === undefined ? {} : { revisionId: event.revisionId }),
+        ...(event.branch === undefined ? {} : { branch: event.branch }),
         changedPaths: event.changedPaths,
-        provenance: event.provenance,
-        generatedSummary: event.generatedSummary,
-        chatId,
-        /* The host runs no Tau jobs against a turn; a browser-placed turn's
-         * ids come from its own claim, which a host placement never mints. */
-        jobIds: [],
-        workspaceId: event.workspaceId,
-        nativeGit: event.nativeGit,
+        ...(event.treeId === undefined ? {} : { treeId: event.treeId }),
+        trigger: 'turn',
+        runIds: event.runIds,
       }
     : undefined;
 
@@ -598,11 +592,13 @@ export const projectAgentHostEvent = (
     case 'safeguard.recorded':
     case 'model.invocation-prepared':
     case 'model.invocation-bound':
-    case 'revision.finalized':
+    case 'turn.finalized':
+    case 'turn.conflicted':
+    case 'turn.failed':
     case 'turn.history-projection-committed': {
-      /* `revision.finalized` is a fact about the project's revision graph, not
-       * about the transcript: it is read by `projectAgentHostRevisionFinalized`
-       * and renders no chunk of its own. */
+      /* The three turn settlements are facts about the project's revision
+       * graph, not about the transcript: they are read by
+       * `projectTurnFinalized` and render no chunk of their own. */
       return [];
     }
     case 'interrupt.recorded': {

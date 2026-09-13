@@ -64,7 +64,6 @@ vi.mock('#providers/chat-workspace-authority-provider.js', () => ({
     get: () => ({
       execution: {
         hostId: 'host_integration',
-        mode: 'direct',
         workspaceId: 'workspace_integration',
         baseRevisionId: 'rev_integration',
       },
@@ -72,12 +71,10 @@ vi.mock('#providers/chat-workspace-authority-provider.js', () => ({
     prepare: async () => ({
       execution: {
         hostId: 'host_integration',
-        mode: 'direct',
         workspaceId: 'workspace_integration',
         baseRevisionId: 'rev_integration',
       },
     }),
-    revisionMode: () => 'direct',
     setRevisionMode: () => undefined,
     finalize: async () => undefined,
     discard: async () => undefined,

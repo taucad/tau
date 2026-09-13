@@ -2,10 +2,8 @@ import { z } from 'zod';
 import { packageVersion } from '@taucad/runtime/metadata';
 import { createAgentChannelClient } from '@taucad/agent-host/channel-client';
 import type { CadAgentExecution, TauAgentHostId } from '@taucad/chat';
-import { chatRevisionModeSchema } from '@taucad/chat/schemas';
 import { externalAgentDescriptorSchema } from '@taucad/agent-host';
 import type { AgentChannelClient, ExternalAgentDescriptor } from '@taucad/agent-host';
-import type { ChatRevisionMode } from '@taucad/chat/schemas';
 import { createRemoteHostSession, listRemoteHosts, RemoteHostApiError } from '#lib/remote-host-client.js';
 import { desktopBridge, isDesktopTarget, nodeHomeRoot } from '#filesystem/desktop-bridge.js';
 import type { DesktopBridge } from '#filesystem/desktop-bridge.js';
@@ -53,33 +51,7 @@ export const localAgentHostId = (): TauAgentHostId | undefined => (isDesktopTarg
 export const daemonPlacementOf = (execution: CadAgentExecution): TauAgentHostId | undefined =>
   execution.kind === 'tau' ? (execution.hostId ?? localAgentHostId()) : execution.hostId;
 
-/**
- * The browser worker's own revision capability.
- *
- * Not a discovery result: launcher 0 *is* the revision recorder (the workspace
- * authority provider runs `TurnRevisionRecorder` in this page), so it records
- * both modes by construction and there is nothing to advertise it over.
- */
-const browserRevisionModes: readonly ChatRevisionMode[] = ['direct', 'candidate'];
-
-const discoveredRevisionModes = new Map<TauAgentHostId, readonly ChatRevisionMode[]>();
-
-/**
- * The revision modes one placement advertised, as of the last discovery pass.
- *
- * Read synchronously by turn admission, which has already awaited that host's
- * availability — published by the same pass that fills this book. A host that
- * advertised nothing offers nothing, and a turn naming a mode on it is refused
- * rather than run unrecorded (VSC5).
- *
- * @param hostId - The placement, or `undefined` for this page's own worker.
- * @returns The advertised modes; empty when the host has no revision port.
- * @public
- */
-export const placementRevisionModes = (hostId: TauAgentHostId | undefined): readonly ChatRevisionMode[] =>
-  hostId === undefined ? browserRevisionModes : (discoveredRevisionModes.get(hostId) ?? []);
-
-/** Descriptors by agent id, as of the last discovery pass; filled beside {@link discoveredRevisionModes}. */
+/** Descriptors by agent id, as of the last discovery pass. */
 const discoveredAgents = new Map<string, ExternalAgentDescriptor>();
 
 /**
@@ -140,8 +112,6 @@ export const tauHostDescriptorSchema = z.strictObject({
   workspaceRoot: z.string().min(1),
   /** External ACP agents this daemon knows about (W4-ACP); absent = Tau runs only. */
   externalAgents: z.array(externalAgentDescriptorSchema).max(16).optional(),
-  /** Revision modes this daemon records a turn in (V17); absent = no revision port. */
-  revisions: z.array(chatRevisionModeSchema).optional(),
 });
 
 /** @public */
@@ -165,12 +135,6 @@ export type AgentHostPlacementTarget = {
    * and absent or empty means Tau's own runs only.
    */
   readonly externalAgents?: readonly ExternalAgentDescriptor[] | undefined;
-  /**
-   * Revision modes this host records a turn in (V17). Empty means the host has
-   * no revision port: the composer offers no revision selector for it, and a
-   * turn that names a mode is refused.
-   */
-  readonly revisions: readonly ChatRevisionMode[];
   /**
    * Set when this host is a cloud host (launcher 3) and names the project it was
    * provisioned for. A cloud host is a paired device in every other respect —
@@ -358,7 +322,6 @@ export const listAgentHostPlacements = async (
             label: 'This computer',
             workspaceRoot: '',
             online: true,
-            revisions: bridge?.revisions ?? [],
             ...(desktopAgents.length > 0 ? { externalAgents: desktopAgents } : {}),
           },
         ]
@@ -371,7 +334,6 @@ export const listAgentHostPlacements = async (
           label: origin.label,
           workspaceRoot: origin.workspaceRoot,
           online: true,
-          revisions: origin.revisions ?? [],
           ...(origin.externalAgents ? { externalAgents: origin.externalAgents } : {}),
         },
       ]
@@ -386,7 +348,6 @@ export const listAgentHostPlacements = async (
               label: device.label,
               workspaceRoot: device.agent.workspaceRoot,
               online: device.online,
-              revisions: device.agent.revisions ?? [],
               ...(device.agent.externalAgents ? { externalAgents: device.agent.externalAgents } : {}),
               ...(device.cloudProjectId ? { cloudProjectId: device.cloudProjectId } : {}),
             },
@@ -394,10 +355,8 @@ export const listAgentHostPlacements = async (
         : [],
   );
   const targets = [...desktopTarget, ...originTarget, ...pairedTargets];
-  discoveredRevisionModes.clear();
   discoveredAgents.clear();
   for (const target of targets) {
-    discoveredRevisionModes.set(target.hostId, target.revisions);
     for (const agent of target.externalAgents ?? []) {
       discoveredAgents.set(agent.id, agent);
     }

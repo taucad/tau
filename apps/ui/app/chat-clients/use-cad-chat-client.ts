@@ -34,12 +34,7 @@ import {
 import type { AgentHostClientOptions } from '#services/agent-host-client.js';
 import type { AgentChannelClient } from '@taucad/agent-host';
 import { createDaemonAgentHostTransport } from '#services/daemon-agent-host-client.js';
-import {
-  daemonPlacementOf,
-  desktopWorkspaceRoot,
-  openAgentHostChannel,
-  placementRevisionModes,
-} from '#lib/agent-host-placement.js';
+import { daemonPlacementOf, desktopWorkspaceRoot, openAgentHostChannel } from '#lib/agent-host-placement.js';
 import { getProjectFileSystemConfig } from '#filesystem/handle-store.js';
 import type { ProjectFileSystemConfig } from '#filesystem/handle-store.js';
 import { useOptionalFileManager } from '#hooks/use-file-manager.js';
@@ -542,7 +537,7 @@ export const useCadChatClient = (): CadChatClient => {
           const [prepared, storage, capabilities] = await Promise.all([
             // `admitWorkspace` already prepared this chat's claim in the picked
             // mode; this reuses it rather than choosing again.
-            workspaceAuthority.prepare(activeChatId, { mode: workspaceAuthority.revisionMode(activeChatId) }),
+            workspaceAuthority.prepare(activeChatId),
             resolveProjectStorage(),
             readRootedBridgeCapabilities(openProjectRootBridge),
           ]);
@@ -626,7 +621,6 @@ export const useCadChatClient = (): CadChatClient => {
       turnExecution: CadAgentExecution = agent.execution,
     ): Promise<ChatExecutionTarget> => {
       const daemonHostId = daemonPlacementOf(turnExecution);
-      const turnRevisionMode = workspaceAuthority?.revisionMode(activeChatId) ?? 'direct';
       // Every host placement waits out its own probe: a turn dispatched before
       // one answers must WAIT for it (the seeded first turn fires at chat load,
       // ahead of the probe), and an answered "unavailable" must refuse with its
@@ -677,26 +671,11 @@ export const useCadChatClient = (): CadChatClient => {
          * admission stays the authority, and a failed read never blocks a turn. */
         creditPreflight(turnExecution.model, resolved.name);
       }
-      /* V18: the mode is admitted against the *capability* of the host that
-       * will write, for Tau and ACP alike. A host with no revision port would
-       * run the turn unrecorded, which is the one outcome I-EDIT forbids — so
-       * it is refused here, before a body is composed, with one typed code. */
-      if (!placementRevisionModes(daemonHostId).includes(turnRevisionMode)) {
-        throw Object.assign(
-          new Error(
-            `${daemonHostId === undefined ? 'This browser' : 'That agent host'} cannot record a turn in ${
-              turnRevisionMode === 'direct' ? 'the project folder' : 'a new branch'
-            }.`,
-          ),
-          { code: 'REVISION_MODE_UNSUPPORTED' },
-        );
-      }
       if (daemonHostId !== undefined) {
-        /* No browser workspace claim: the daemon owns the files, mints its own
-         * base and records its own revision, so preparing or admitting one here
-         * would fence a workspace nothing writes to. The target still rides —
-         * naming the mode is the whole point of sending it (r7 W4). */
-        return { hostId: daemonHostId, mode: turnRevisionMode };
+        /* No browser turn: the daemon owns the files, mints its own base and
+         * records its own revision, so placing one here would lease a checkout
+         * nothing writes to. */
+        return { hostId: daemonHostId };
       }
       if (!workspaceAuthority) {
         throw new Error('The durable workspace authority is unavailable for this chat.');
@@ -729,7 +708,7 @@ export const useCadChatClient = (): CadChatClient => {
       }
       const prepared =
         workspaceAuthority.get(activeChatId) ??
-        (await workspaceAuthority.prepare(activeChatId, { mode: turnRevisionMode }));
+        (await workspaceAuthority.prepare(activeChatId, turnId === undefined ? undefined : { turnId }));
       await workspaceAuthority.markAdmitted(activeChatId, turnId);
       return prepared.execution;
     },
@@ -1045,10 +1024,12 @@ export const useCadChatClient = (): CadChatClient => {
       }
       // Re-admits this chat's own in-flight run rather than starting a new
       // turn, so it never waits on the admission its own claim already holds.
-      const prepared = await workspaceAuthority.prepare(activeChatId, {
-        mode: workspaceAuthority.revisionMode(activeChatId),
-      });
-      await workspaceAuthority.markAdmitted(activeChatId, userTurnIdAtOrBefore(messages));
+      const approvalTurnId = userTurnIdAtOrBefore(messages);
+      const prepared = await workspaceAuthority.prepare(
+        activeChatId,
+        approvalTurnId === undefined ? undefined : { turnId: approvalTurnId },
+      );
+      await workspaceAuthority.markAdmitted(activeChatId, approvalTurnId);
       const runBody = store.startRun(activeChatId, createRunBody({ agent, projectId, execution: prepared.execution }));
       try {
         await chat.addToolApprovalResponse({

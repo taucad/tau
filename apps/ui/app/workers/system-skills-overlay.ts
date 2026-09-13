@@ -23,7 +23,7 @@ const registry = createSkillBundleRegistry(systemSkillBundles);
  */
 export const systemSkillsOverlay = (): ComposedViewOverlay =>
   createSkillBundleOverlay(registry, async (resource, { signal }) => {
-    const response = await fetch(resource.url, { ...(signal ? { signal } : {}) });
+    const response = await fetch(resource.url, signal === undefined ? {} : { signal });
     if (!response.ok) {
       throw Object.assign(new Error(`Resource request failed with HTTP ${String(response.status)}.`), { code: 'EIO' });
     }

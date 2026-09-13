@@ -176,13 +176,14 @@ test('discards the isolated workspace when the production chat run is cancelled'
   const baselineSource = await openAndReadSource();
   const baselineGeoSpecState = await target.read(fileTreeItem('main.geospec.ts'));
   const baselineGeoSpecCount = baselineGeoSpecState.count;
-  /* Isolation is opt-in since the revision-mode ruling: `local` is the default
-   * and writes straight into the project folder, so only `branch` mode has an
-   * isolated tree to discard (chat-revision-mode-local-default-blueprint.md,
-   * "Revision mode vocabulary"). Selecting it is what keeps this a test of
-   * cancellation rather than of the default path. */
-  await target.click(selectors.getByCss('[data-slot="chat-revision-selector"]'));
+  /* Isolation is opt-in: non-branching is the default (A3) and writes straight
+   * into the project folder, so only a chat on a branch of its own has an
+   * isolated tree to discard. Making that branch from the composer picker is
+   * what keeps this a test of cancellation rather than of the default path. */
+  await target.click(selectors.getByCss('[data-slot="chat-branch-picker"]'));
   await target.click(selectors.getByText('New branch', { exact: true }));
+  await target.fill(selectors.getByLabelText('Name for the new branch'), 'isolated-run');
+  await target.click(selectors.getByRole('button', { name: 'Create' }));
   await submitPrompt();
   await target.expectVisible(selectors.getByText('main.geospec.ts', { exact: true }).first(), 60_000);
   await target.click(stopButton());

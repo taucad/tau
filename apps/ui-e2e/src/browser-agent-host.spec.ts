@@ -500,8 +500,12 @@ describe('durable log reattach after a reload', () => {
 describe('branch revision mode', () => {
   test('materializes an isolated run tree when the composer selects New branch', async () => {
     await prepareBrowserHost('home');
-    await target.click(selectors.getByCss('[data-slot="chat-revision-selector"]'));
+    /* The composer picker replaced the deleted revision-mode selector (W7): a
+       branch is made by name, not chosen as a mode. */
+    await target.click(selectors.getByCss('[data-slot="chat-branch-picker"]'));
     await target.click(selectors.getByText('New branch', { exact: true }));
+    await target.fill(selectors.getByLabelText('Name for the new branch'), 'isolated-run');
+    await target.click(selectors.getByRole('button', { name: 'Create' }));
     await submitAndWaitForPartial();
 
     await expect

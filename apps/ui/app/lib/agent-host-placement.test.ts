@@ -9,7 +9,6 @@ import {
   loopbackAdmissionRefusal,
   openAgentHostChannel,
   probeCloudPlacement,
-  placementRevisionModes,
   probeLoopbackAgentHost,
   shouldAutoOfferCloudPlacement,
 } from '#lib/agent-host-placement.js';
@@ -167,10 +166,9 @@ describe('listAgentHostPlacements', () => {
         label: 'studio-mini',
         workspaceRoot: descriptor.workspaceRoot,
         online: true,
-        revisions: [],
       },
-      { hostId: 'device-agent', rung: 2, label: 'workshop', workspaceRoot: '/srv/tau', online: true, revisions: [] },
-      { hostId: 'device-offline', rung: 2, label: 'laptop', workspaceRoot: '/home/tau', online: false, revisions: [] },
+      { hostId: 'device-agent', rung: 2, label: 'workshop', workspaceRoot: '/srv/tau', online: true },
+      { hostId: 'device-offline', rung: 2, label: 'laptop', workspaceRoot: '/home/tau', online: false },
     ]);
   });
 
@@ -208,10 +206,9 @@ describe('listAgentHostPlacements', () => {
         label: 'Tau Cloud',
         workspaceRoot: '/workspace',
         online: true,
-        revisions: [],
         cloudProjectId: 'project-a',
       },
-      { hostId: 'device-laptop', rung: 2, label: 'workshop', workspaceRoot: '/srv/tau', online: true, revisions: [] },
+      { hostId: 'device-laptop', rung: 2, label: 'workshop', workspaceRoot: '/srv/tau', online: true },
     ]);
   });
 
@@ -238,7 +235,6 @@ describe('listAgentHostPlacements', () => {
         label: 'studio-mini',
         workspaceRoot: descriptor.workspaceRoot,
         online: true,
-        revisions: [],
         externalAgents: [claudeAgent, codexAgent],
       },
       {
@@ -247,7 +243,6 @@ describe('listAgentHostPlacements', () => {
         label: 'workshop',
         workspaceRoot: '/srv/tau',
         online: true,
-        revisions: [],
         externalAgents: [codexAgent],
       },
     ]);
@@ -293,15 +288,15 @@ describe('listAgentHostPlacements', () => {
     ).resolves.toEqual([
       // The root belongs to the *project*, not to the host, so discovery names
       // none: `desktopWorkspaceRoot` resolves it at dial time.
-      { hostId: 'desktop', rung: 'in-process', label: 'This computer', workspaceRoot: '', online: true, revisions: [] },
+      { hostId: 'desktop', rung: 'in-process', label: 'This computer', workspaceRoot: '', online: true },
     ]);
   });
 
-  it('carries every host’s revision capability into the book turn admission reads', async () => {
-    await listAgentHostPlacements({
+  it('publishes every discovered placement, and no revision capability (W3d)', async () => {
+    const targets = await listAgentHostPlacements({
       desktop: true,
-      bridge: () => ({ externalAgents: [], revisions: ['direct'] }) as unknown as DesktopBridge,
-      discoverOrigin: async () => ({ ...descriptor, revisions: ['direct', 'candidate'] }),
+      bridge: () => ({ externalAgents: [] }) as unknown as DesktopBridge,
+      discoverOrigin: async () => descriptor,
       listHosts: async () => [
         {
           id: 'device-agent',
@@ -315,12 +310,10 @@ describe('listAgentHostPlacements', () => {
       ],
     });
 
-    expect(placementRevisionModes('origin')).toEqual(['direct', 'candidate']);
-    expect(placementRevisionModes('desktop')).toEqual(['direct']);
-    // A daemon that advertised nothing has no revision port, so it offers no mode.
-    expect(placementRevisionModes('device-agent')).toEqual([]);
-    // The browser worker records both by construction: it *is* the recorder.
-    expect(placementRevisionModes(undefined)).toEqual(['direct', 'candidate']);
+    /* W3d: a host advertises no revision *modes* any more — placement is
+     * non-branching by default, so there is nothing to choose and nothing to
+     * discover. What the pass still publishes is the placement itself. */
+    expect(targets.map((target) => target.hostId).toSorted()).toEqual(['desktop', 'device-agent', 'origin']);
   });
 
   it('carries the external agents main discovered onto the desktop row', async () => {
@@ -341,7 +334,6 @@ describe('listAgentHostPlacements', () => {
         label: 'This computer',
         workspaceRoot: '',
         online: true,
-        revisions: [],
         externalAgents: [claudeAgent, codexAgent],
       },
     ]);

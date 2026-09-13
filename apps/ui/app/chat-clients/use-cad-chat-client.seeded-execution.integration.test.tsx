@@ -69,7 +69,6 @@ const harness = vi.hoisted(() => {
     /** Browser workspace claim — present so the client publishes its factory. */
     workspaceExecution: {
       hostId: 'host_seeded',
-      mode: 'direct',
       workspaceId: 'workspace_seeded',
       baseRevisionId: 'revision_seeded',
     },
@@ -134,7 +133,6 @@ vi.mock('#providers/chat-workspace-authority-provider.js', () => ({
   useOptionalChatWorkspaceAuthority: () => ({
     get: () => undefined,
     prepare: async () => ({ execution: harness.workspaceExecution }),
-    revisionMode: () => 'direct',
     setRevisionMode: () => undefined,
     subscribe: () => () => undefined,
     markAdmitted: async () => undefined,
@@ -150,7 +148,6 @@ vi.mock('#providers/chat-workspace-authority-provider.js', () => ({
 vi.mock('#lib/agent-host-placement.js', () => ({
   localAgentHostId: () => undefined,
   daemonPlacementOf: (execution: { kind: string; hostId?: string }) => execution.hostId,
-  placementRevisionModes: () => ['direct', 'candidate'],
   listAgentHostPlacements: async () => [],
   hostDirectoryOutage: () => undefined,
   desktopWorkspaceRoot: async () => '/workspace',
@@ -259,7 +256,7 @@ describe('seeded first turn execution', () => {
     // An external agent is daemon-placed: the daemon owns the files, so no
     // browser workspace claim is prepared or fenced for this turn — but the
     // target still names the host and the mode it must record in (V18).
-    expect(body['execution']).toEqual({ hostId: 'desktop', mode: 'direct' });
+    expect(body['execution']).toEqual({ hostId: 'desktop' });
   });
 
   it('keeps the consumed row’s Tau host and model instead of rebuilding them from the cookie', async () => {

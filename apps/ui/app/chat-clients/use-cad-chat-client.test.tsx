@@ -18,13 +18,12 @@ import { useCadChatClient } from '#chat-clients/use-cad-chat-client.js';
 const workspaceHarness = vi.hoisted(() => ({
   current: undefined as
     | {
-        execution: { hostId: string; mode: 'direct' | 'candidate'; workspaceId: string; baseRevisionId: string };
+        execution: { hostId: string; workspaceId: string; baseRevisionId: string };
         admitted: boolean;
       }
     | undefined,
   listeners: new Set<() => void>(),
   admissionGate: undefined as Promise<void> | undefined,
-  revisionMode: 'direct' as 'direct' | 'candidate',
   prepare: vi.fn(),
 }));
 const browserHostHarness = vi.hoisted(() => ({
@@ -68,8 +67,6 @@ const creditPreflightHarness = vi.hoisted(() => ({
 }));
 const placementHarness = vi.hoisted(() => ({
   localHostId: undefined as 'desktop' | undefined,
-  /** What each placement advertised for revisions; `browser` is the page's own worker. */
-  revisions: new Map<string, ReadonlyArray<'direct' | 'candidate'>>(),
 }));
 
 vi.mock('#hooks/use-cad-agent-config.js', () => ({
@@ -184,7 +181,6 @@ vi.mock('#lib/agent-host-placement.js', () => ({
   localAgentHostId: () => placementHarness.localHostId,
   daemonPlacementOf: (execution: CadAgentExecution) =>
     execution.kind === 'tau' ? (execution.hostId ?? placementHarness.localHostId) : execution.hostId,
-  placementRevisionModes: (hostId: string | undefined) => placementHarness.revisions.get(hostId ?? 'browser') ?? [],
   openAgentHostChannel: browserHostHarness.openAgentHostChannel,
 }));
 vi.mock('#filesystem/handle-store.js', () => ({
@@ -207,10 +203,6 @@ vi.mock('#providers/chat-workspace-authority-provider.js', () => ({
   useOptionalChatWorkspaceAuthority: () => ({
     get: () => workspaceHarness.current,
     prepare: workspaceHarness.prepare,
-    revisionMode: () => workspaceHarness.revisionMode,
-    setRevisionMode: (_chatId: string, mode: 'direct' | 'candidate') => {
-      workspaceHarness.revisionMode = mode;
-    },
     finalize: async () => undefined,
     discard: async () => undefined,
     markAdmitted: async () => {
@@ -299,7 +291,7 @@ const expectAnyHostAdmission: unknown = expect.objectContaining({ config: expect
 const expectRunBody = (agent: CadAgentConfigInput = buildAgent()): Record<string, unknown> => ({
   agent,
   projectId: 'proj_test',
-  execution: { hostId: 'host_test', mode: 'direct', workspaceId: 'workspace_test', baseRevisionId: 'rev_test' },
+  execution: { hostId: 'host_test', workspaceId: 'workspace_test', baseRevisionId: 'rev_test' },
   admission: {
     version: 1,
     idempotencyKey: expect.stringMatching(/^req_/u) as unknown,
@@ -310,35 +302,25 @@ const expectRunBody = (agent: CadAgentConfigInput = buildAgent()): Record<string
 
 beforeEach(() => {
   placementHarness.localHostId = undefined;
-  placementHarness.revisions.clear();
   creditPreflightHarness.calls.length = 0;
   creditPreflightHarness.refuse = undefined;
-  // Every host in this suite records both modes unless a test says otherwise.
-  for (const key of ['browser', 'origin', 'desktop', 'device-1']) {
-    placementHarness.revisions.set(key, ['direct', 'candidate']);
-  }
-  workspaceHarness.revisionMode = 'direct';
   vi.clearAllMocks();
   browserHostHarness.registration = undefined;
   browserHostHarness.run = undefined;
   workspaceHarness.listeners.clear();
   workspaceHarness.admissionGate = undefined;
   workspaceHarness.current = {
-    execution: { hostId: 'host_test', mode: 'direct', workspaceId: 'workspace_test', baseRevisionId: 'rev_test' },
+    execution: { hostId: 'host_test', workspaceId: 'workspace_test', baseRevisionId: 'rev_test' },
     admitted: false,
   };
   // The real authority stamps the claim's own mode onto the target it hands
   // back; the harness has to do the same or the wire assertion proves nothing.
   const mintedClaim: NonNullable<typeof workspaceHarness.current> = {
-    execution: { hostId: 'host_test', mode: 'direct', workspaceId: 'workspace_test', baseRevisionId: 'rev_test' },
+    execution: { hostId: 'host_test', workspaceId: 'workspace_test', baseRevisionId: 'rev_test' },
     admitted: false,
   };
-  workspaceHarness.prepare.mockImplementation(async (_chatId: string, options?: { mode?: 'direct' | 'candidate' }) => {
-    const claim = workspaceHarness.current ?? mintedClaim;
-    workspaceHarness.current = {
-      ...claim,
-      execution: { ...claim.execution, mode: options?.mode ?? 'direct' },
-    };
+  workspaceHarness.prepare.mockImplementation(async () => {
+    workspaceHarness.current = workspaceHarness.current ?? mintedClaim;
     return workspaceHarness.current;
   });
   mountAgentMock(buildAgent());
@@ -509,7 +491,7 @@ describe('useCadChatClient', () => {
     expect(workspaceHarness.prepare).not.toHaveBeenCalled();
     // ...so the target names none — only the daemon that writes and the mode
     // it must record the turn in (V18).
-    expect(body['execution']).toEqual({ hostId: 'origin', mode: 'direct' });
+    expect(body['execution']).toEqual({ hostId: 'origin' });
     expect(body['agent']).toMatchObject({ execution: { kind: 'tau', hostId: 'origin' } });
   });
 
@@ -645,7 +627,7 @@ describe('useCadChatClient', () => {
     });
     const body = actions.sendMessage.mock.calls[0]?.[1]?.body as Record<string, unknown>;
     expect(workspaceHarness.prepare).not.toHaveBeenCalled();
-    expect(body['execution']).toEqual({ hostId: 'origin', mode: 'direct' });
+    expect(body['execution']).toEqual({ hostId: 'origin' });
     expect(body['agent']).toMatchObject({ execution: { kind: 'acp', hostId: 'origin', agentId: 'codex' } });
     // The admission names the agent and the CAD context the client composed —
     // and nothing a Tau turn negotiates: no model row, no prompt blocks, no
@@ -721,10 +703,11 @@ describe('useCadChatClient', () => {
     expect(reattachHostChat).not.toHaveBeenCalled();
   });
 
-  it('refuses a turn whose mode the placed host cannot record, with one typed code', async () => {
-    // V18/VSC5: a host with no revision port would run the turn unrecorded.
-    placementHarness.revisions.set('origin', ['direct']);
-    workspaceHarness.revisionMode = 'candidate';
+  it('admits a turn on a host that advertises nothing about revisions', async () => {
+    /* Every host records every turn through its own revision tree, and the
+       descriptor stopped carrying a mode array at all (W3c, W3d-a2). A client
+       that still read one would stop every desktop and daemon turn before a
+       body is composed. */
     mountAgentMock(buildAgent({ execution: { kind: 'tau', model: 'openai-gpt-5.5', hostId: 'origin' } }));
     const chat = mock<Chat<MyUIMessage>>();
     Object.defineProperty(chat, 'messages', { get: () => [] });
@@ -732,23 +715,14 @@ describe('useCadChatClient', () => {
     const actions = buildActions();
     installActions(actions);
 
-    // The banner's `ChatError` carries no code, so the typed refusal is read
-    // off the error the client surfaces — which is what a caller keys on.
-    const surfaced = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const { result } = renderHook(() => useCadChatClient());
     act(() => {
       result.current.submit({ text: 'Build it.' });
     });
 
     await waitFor(() => {
-      expect(surfaced.mock.calls.at(-1)?.[1]).toMatchObject({ code: 'REVISION_MODE_UNSUPPORTED' });
+      expect(actions.sendMessage).toHaveBeenCalledOnce();
     });
-    expect(persistedErrors.at(-1)).toMatchObject({
-      /* oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- `expect.stringContaining` is typed `any` by vitest. */
-      message: expect.stringContaining('cannot record a turn in a new branch'),
-    });
-    expect(actions.sendMessage).not.toHaveBeenCalled();
-    surfaced.mockRestore();
   });
 
   it('builds browser start config from the request agent and resolves retry-model metadata per admission', async () => {
@@ -1013,7 +987,7 @@ describe('useCadChatClient', () => {
   it('dispatches a retry selected while the prior workspace publication is settling', async () => {
     mountAgentMock(buildAgent({ execution: { kind: 'tau', model: 'openai-gpt-5.5' } }));
     workspaceHarness.current = {
-      execution: { hostId: 'host_test', mode: 'direct', workspaceId: 'workspace_old', baseRevisionId: 'rev_old' },
+      execution: { hostId: 'host_test', workspaceId: 'workspace_old', baseRevisionId: 'rev_old' },
       admitted: true,
     };
     const chat = mock<Chat<MyUIMessage>>();
@@ -1034,7 +1008,7 @@ describe('useCadChatClient', () => {
     expect(actions.retryMessage).not.toHaveBeenCalled();
 
     workspaceHarness.current = {
-      execution: { hostId: 'host_test', mode: 'direct', workspaceId: 'workspace_retry', baseRevisionId: 'rev_retry' },
+      execution: { hostId: 'host_test', workspaceId: 'workspace_retry', baseRevisionId: 'rev_retry' },
       admitted: false,
     };
     act(() => {
@@ -1062,7 +1036,6 @@ describe('useCadChatClient', () => {
     expect(messageId).toBe('assistant_retry');
     expect(options.body.execution).toEqual({
       hostId: 'host_test',
-      mode: 'direct',
       workspaceId: 'workspace_retry',
       baseRevisionId: 'rev_retry',
     });
@@ -1231,7 +1204,6 @@ describe('useCadChatClient', () => {
       workspaceHarness.current = {
         execution: {
           hostId: 'host_test',
-          mode: 'direct',
           workspaceId: 'workspace_second',
           baseRevisionId: 'rev_second',
         },
@@ -1244,7 +1216,6 @@ describe('useCadChatClient', () => {
 
     expect(body['execution']).toEqual({
       hostId: 'host_test',
-      mode: 'direct',
       workspaceId: 'workspace_second',
       baseRevisionId: 'rev_second',
     });
@@ -1356,7 +1327,7 @@ describe('useCadChatClient', () => {
     expect(actions.sendMessage).toHaveBeenCalledTimes(1);
 
     workspaceHarness.current = {
-      execution: { hostId: 'host_test', mode: 'direct', workspaceId: 'workspace_test', baseRevisionId: 'rev_test' },
+      execution: { hostId: 'host_test', workspaceId: 'workspace_test', baseRevisionId: 'rev_test' },
       admitted: false,
     };
     act(() => {
@@ -1373,8 +1344,7 @@ describe('useCadChatClient', () => {
     });
   });
 
-  it('forwards the composer’s revision mode to every prepare call site', async () => {
-    workspaceHarness.revisionMode = 'candidate';
+  it('places a turn through prepare at every call site (W3d)', async () => {
     mountAgentMock(buildAgent({ execution: { kind: 'tau', model: 'openai-gpt-5.5' } }));
     const chat = mock<Chat<MyUIMessage>>();
     Object.defineProperty(chat, 'messages', { get: () => [] });
@@ -1413,15 +1383,17 @@ describe('useCadChatClient', () => {
     // 4. the tool-approval resume path.
     await act(async () => result.current.respondToToolApproval('interrupt-1', true));
 
+    /* One `admitTurn` per call site, and no revision mode on any of them:
+     * placement is non-branching by default (D7/I18). */
     expect(workspaceHarness.prepare.mock.calls.length).toBeGreaterThanOrEqual(4);
     for (const call of workspaceHarness.prepare.mock.calls) {
-      expect(call).toEqual(['chat_test', { mode: 'candidate' }]);
+      expect(call[0]).toBe('chat_test');
+      expect(call[1] ?? {}).not.toHaveProperty('mode');
     }
   });
 
-  it('carries the mode on the execution target and never on the execution object', async () => {
-    workspaceHarness.revisionMode = 'candidate';
-    // No retained claim: this turn mints one in the picked mode.
+  it('carries the placement on the execution target and never on the execution object', async () => {
+    // No retained turn: this submit places one.
     workspaceHarness.current = undefined;
     mountAgentMock(buildAgent({ execution: { kind: 'tau', model: 'openai-gpt-5.5' } }));
     const chat = mock<Chat<MyUIMessage>>();
@@ -1442,17 +1414,17 @@ describe('useCadChatClient', () => {
       readonly execution: Record<string, unknown>;
     };
     expect(body.agent.execution).toEqual({ kind: 'tau', model: 'openai-gpt-5.5' });
-    expect(body.execution).toMatchObject({ mode: 'candidate' });
+    expect(body.execution).toMatchObject({ workspaceId: 'workspace_test' });
+    expect(body.execution).not.toHaveProperty('mode');
 
-    workspaceHarness.revisionMode = 'direct';
     mountAgentMock(buildAgent());
     workspaceHarness.current = undefined;
     rerender();
     act(() => {
-      result.current.submit({ text: 'default mode' });
+      result.current.submit({ text: 'second turn' });
     });
     await waitFor(() => {
-      expect(workspaceHarness.prepare.mock.calls.at(-1)).toEqual(['chat_test', { mode: 'direct' }]);
+      expect(workspaceHarness.prepare.mock.calls.at(-1)?.[0]).toBe('chat_test');
     });
   });
 });

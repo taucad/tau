@@ -9,7 +9,7 @@ import type { AgentHostClient } from '#services/agent-host-client.js';
 import {
   BrowserPlacementChatTransport,
   getBrowserAgentHostRun,
-  getHostFinalizedRevisions,
+  getHostFinalizedTurns,
   isBrowserAgentHostRunResumable,
   registerAgentHost,
   registerAgentHostRunReset,
@@ -276,7 +276,7 @@ describe('BrowserPlacementChatTransport', () => {
   /* The store is module-scoped and lives as long as the tab: a session that
      sees thousands of host-recorded turns must not retain every one of them,
      and the snapshot the graph reads is rebuilt on each arrival (5-review N6). */
-  it('keeps only the most recent host-recorded revisions this tab has seen', async () => {
+  it('keeps only the most recent host-attested turn settlements this tab has seen', async () => {
     installBrowserGlobals();
     const chatId = 'chat-host-finalized-cap';
     const runId = 'run-host-finalized-cap';
@@ -289,23 +289,17 @@ describe('BrowserPlacementChatTransport', () => {
         sequence: index + 1,
         recordedAt: '2026-09-01T00:00:01.000Z',
         runId,
-        type: 'revision.finalized',
+        type: 'turn.finalized',
         turnId: `user-${String(index)}`,
-        workspaceId: `trun-${String(index)}`,
-        revisionId: `rev:trun-${String(index)}`,
-        baseRevisionId: 'rev:base-1',
-        treeId: `rev:trun-${String(index)}`,
-        branchName: `agent/${chatId}/trun-${String(index)}`,
-        publication: {
-          status: 'updated',
-          branchName: `agent/${chatId}/trun-${String(index)}`,
-          expectedHeadRevisionId: 'rev:base-1',
-          headRevisionId: `rev:trun-${String(index)}`,
-        },
+        chatId,
+        projectId: 'project-cap',
+        checkoutId: 'live',
+        revisionId: `rev-${String(index)}`,
+        branch: 'main',
         changedPaths: ['main.scad'],
-        provenance: { source: 'agent', actorId: 'tau-host', runId, createdAt: 1_788_220_800_000 },
-        generatedSummary: `Agent turn ${String(index)}`,
-        nativeGit: { status: 'not-configured' },
+        treeId: `tree-${String(index)}`,
+        trigger: 'turn',
+        runIds: [runId],
       });
     let listener: Parameters<AgentHostClient['subscribe']>[0] | undefined;
     const client = clientFor(chatId, runId, {
@@ -353,10 +347,10 @@ describe('BrowserPlacementChatTransport', () => {
     });
     await drain(stream.getReader());
 
-    const kept = getHostFinalizedRevisions();
+    const kept = getHostFinalizedTurns();
     expect(kept).toHaveLength(256);
-    expect(kept.at(0)?.workspaceId).toBe(`trun-${String(recorded - 256)}`);
-    expect(kept.at(-1)?.workspaceId).toBe(`trun-${String(recorded - 1)}`);
+    expect(kept.at(0)?.revisionId).toBe(`rev-${String(recorded - 256)}`);
+    expect(kept.at(-1)?.revisionId).toBe(`rev-${String(recorded - 1)}`);
     unregister();
   });
 

@@ -14,11 +14,11 @@ import {
 import {
   projectAgentHostEvent,
   projectAgentHostLiveEvent,
-  projectAgentHostRevisionFinalized,
   projectAgentHostUserMessage,
   projectAgentHostUserTurn,
+  projectTurnFinalized,
 } from '#services/agent-host-event-projection.js';
-import type { AuthoritativeRevisionFinalization } from '#types/revision.types.js';
+import type { TurnFinalizedEvent } from '@taucad/revisions/revision-effects';
 import { Topic } from '@taucad/events';
 import { isResumableRunFailure } from '@taucad/agent-host';
 import type { MyUIMessage } from '@taucad/chat';
@@ -59,55 +59,63 @@ const clientSettlements = new Map<string, Promise<void>>();
 const requestedResumes = new Set<string>();
 
 /**
- * Revisions a *host* recorded, by workspace and revision.
+ * Turns a *host* settled, by turn id (S9, A4).
  *
- * A browser-placed turn's revision is finalized by this tab's workspace
- * authority, which publishes it itself. A host-placed turn's is finalized on
- * the host — the client never touches those files — and reaches this tab as one
- * durable `revision.finalized` record in the chat's log. Collected here because
- * this is the one place every durable record passes through, live and on
- * replay; `RevisionSeams` unions the two sources into the revision graph.
+ * A turn the browser placed settles in the file-manager worker's revision root
+ * and its settlement rides that port; a turn a daemon or desktop utility placed
+ * settles on the host, which owns the files (VI11), and reaches this tab as one
+ * durable `turn.finalized` record in the chat's log. Both are the **same
+ * schema**, so this is where every durable one passes through, live and on
+ * replay, and `useRevisions` reads one map.
  */
-const hostFinalizedRevisions = new Map<string, AuthoritativeRevisionFinalization>();
+const finalizedTurns = new Map<string, TurnFinalizedEvent>();
 /**
- * Host-recorded turns one tab keeps.
+ * Host-settled turns one tab keeps.
  *
- * The graph reads the turns on screen; a tab left open for days would otherwise
- * retain every record it ever saw, including other projects' (they are filtered
- * at read). FIFO by arrival, like the host's own `settledRunHistory`.
+ * The cards on screen are what a reader needs; a tab left open for days would
+ * otherwise retain every settlement it ever saw, including other projects'
+ * (they are filtered at read). FIFO by arrival, like the host's own
+ * `settledRunHistory`.
  */
-const hostFinalizedLimit = 256;
-let hostFinalizedSnapshot: readonly AuthoritativeRevisionFinalization[] = [];
-const hostFinalizedTopic = new Topic<void>({ name: 'host-finalized-revisions' });
+const finalizedTurnLimit = 256;
+let finalizedTurnSnapshot: readonly TurnFinalizedEvent[] = [];
+const finalizedTurnTopic = new Topic<void>({ name: 'host-finalized-turns' });
 
-/** Every host-recorded revision this tab has seen. @see hostFinalizedRevisions */
-export const getHostFinalizedRevisions = (): readonly AuthoritativeRevisionFinalization[] => hostFinalizedSnapshot;
+/** Every host-attested turn settlement this tab has seen. @see finalizedTurns */
+export const getHostFinalizedTurns = (): readonly TurnFinalizedEvent[] => finalizedTurnSnapshot;
 
-/** Wake a reader when a host records another turn. @see hostFinalizedRevisions */
-export const subscribeHostFinalizedRevisions = (listener: () => void): (() => void) =>
-  hostFinalizedTopic.subscribe(listener);
+/** Wake a reader when a host settles another turn. @see finalizedTurns */
+export const subscribeHostFinalizedTurns = (listener: () => void): (() => void) =>
+  finalizedTurnTopic.subscribe(listener);
 
-const recordHostFinalizedRevision = (chatId: string, event: AgentLogEvent | AgentLiveEvent): void => {
+/**
+ * Record one host-attested settlement, wherever it came from.
+ *
+ * @param event - The settlement, already in the one schema.
+ */
+export const recordHostFinalizedTurn = (event: TurnFinalizedEvent): void => {
+  if (finalizedTurns.get(event.turnId)?.revisionId === event.revisionId) {
+    return;
+  }
+  finalizedTurns.set(event.turnId, event);
+  for (const oldest of finalizedTurns.keys()) {
+    if (finalizedTurns.size <= finalizedTurnLimit) {
+      break;
+    }
+    finalizedTurns.delete(oldest);
+  }
+  finalizedTurnSnapshot = [...finalizedTurns.values()];
+  finalizedTurnTopic.emit();
+};
+
+const recordDurableTurnSettlement = (event: AgentLiveEvent | AgentLogEvent): void => {
   if (!('leaderEpoch' in event)) {
     return;
   }
-  const finalized = projectAgentHostRevisionFinalized(event, chatId);
-  if (finalized === undefined) {
-    return;
+  const finalized = projectTurnFinalized(event);
+  if (finalized !== undefined) {
+    recordHostFinalizedTurn(finalized);
   }
-  const identity = JSON.stringify([finalized.workspaceId, finalized.revisionId]);
-  if (hostFinalizedRevisions.has(identity)) {
-    return;
-  }
-  hostFinalizedRevisions.set(identity, finalized);
-  for (const oldest of hostFinalizedRevisions.keys()) {
-    if (hostFinalizedRevisions.size <= hostFinalizedLimit) {
-      break;
-    }
-    hostFinalizedRevisions.delete(oldest);
-  }
-  hostFinalizedSnapshot = [...hostFinalizedRevisions.values()];
-  hostFinalizedTopic.emit();
 };
 
 export const getBrowserAgentHostRun = (chatId: string): BrowserAgentHostRun | undefined => browserRuns.get(chatId);
@@ -281,6 +289,23 @@ const rebuildTranscript = async (
     const from = current.findIndex((message) => owned.has(message.id));
     return from === -1 ? [...current, ...rebuilt] : [...current.slice(0, from), ...rebuilt];
   };
+};
+
+/**
+ * The transcript one chat's log implies, for a chat opened from its files.
+ *
+ * The same derivation the reattach path runs, with no stream to splice into:
+ * `.tau/chats/<id>` is the whole of a chat (D25/A39), so `chat.json` carries no
+ * `messages` and the transcript is rebuilt from the merged segments on open
+ * (P26). One reducer, one home — this is {@link rebuildTranscript} applied to an
+ * empty transcript, not a second projection of the same events.
+ *
+ * @param events - Every record of the chat, already merged across devices.
+ * @returns The messages the log implies, oldest first.
+ */
+export const deriveChatTranscript = async (events: readonly AgentLogEvent[]): Promise<readonly MyUIMessage[]> => {
+  const rebuild = await rebuildTranscript(events, '');
+  return rebuild([]);
 };
 
 const registrationFor = async (chatId: string): Promise<BrowserAgentHostRegistration> => {
@@ -548,7 +573,7 @@ const createHostStream = <Message extends UIMessage>(input: {
       /* Before the run filter below: a reattach replays the whole log, and the
        * revisions of a chat's *earlier* turns are as much this project's graph
        * as the trailing run's. */
-      recordHostFinalizedRevision(input.chatId, event);
+      recordDurableTurnSettlement(event);
       projection = enqueueAfter(projection, event);
       void reportProjectionFailure(projection);
     };

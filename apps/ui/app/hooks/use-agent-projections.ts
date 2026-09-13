@@ -8,9 +8,8 @@ import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { useModels } from '#hooks/use-models.js';
 import type { ResolvedModel } from '#hooks/use-models.js';
 import { useProject } from '#hooks/use-project.js';
-import { useRevisionActor } from '#routes/w.$workspace.$project/revision-provider.js';
 import type { ChatSession, ChatSessionStore } from '#services/chat-session-store.js';
-import type { PersistedRevisionGraphState } from '#types/revision.types.js';
+import type { ChatSessionActorRef } from '#machines/chat-session.machine.js';
 
 export type AgentProjectionState = 'waiting' | 'running' | 'error' | 'idle';
 
@@ -71,7 +70,6 @@ type AgentProjectionInput = {
   readonly session?: ChatSession;
   readonly status?: ChatStatus;
   readonly lifecycle: AgentRequestLifecycle;
-  readonly persistedGraph?: PersistedRevisionGraphState;
   readonly focusedChatId?: string;
   readonly defaultModel: ResolvedModel;
   readonly resolveModel: (id: string) => ResolvedModel;
@@ -126,33 +124,58 @@ const usageOperationIds = (messages: readonly MyUIMessage[]): string[] => {
   return [...ids].sort();
 };
 
-const branchForChat = (
-  chatId: string,
-  messages: readonly MyUIMessage[],
-  persistedGraph: PersistedRevisionGraphState | undefined,
-): string => {
-  if (!persistedGraph) {
-    return 'main';
-  }
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index]!;
-    if (message.role !== 'user') {
-      continue;
-    }
-    const node = persistedGraph.nodes[message.id];
-    if (node?.chatId === chatId) {
-      return node.branchName;
-    }
-  }
-  return 'main';
-};
-
 const errorDetail = (input: Pick<AgentProjectionInput, 'chat' | 'session'>): string | undefined => {
   const runtimeError = input.session?.chat.error;
   if (runtimeError) {
     return runtimeError.message;
   }
   return input.session?.persistenceActorRef.getSnapshot().context.persistedError?.message ?? input.chat.error?.message;
+};
+
+/**
+ * The pane's four-state vocabulary, read off the chat's own machine (D32).
+ *
+ * The machine is the one derivation of what a chat is doing; this only folds
+ * its states into the coarser row the Agents pane draws. A chat with no live
+ * session — a parked row, or a jsdom unit that never opened one — falls back to
+ * the flags below.
+ *
+ * @param ref - The chat's state machine, when the project session owns one.
+ * @returns The row's state and detail, or `undefined` when there is no machine.
+ */
+const stateFromMachine = (
+  ref: ChatSessionActorRef | undefined,
+): { readonly state: AgentProjectionState; readonly detail?: string } | undefined => {
+  if (ref === undefined) {
+    return undefined;
+  }
+  const snapshot = ref.getSnapshot();
+  const { pendingApprovalCount, toolName, failureReason } = snapshot.context;
+  if (snapshot.matches({ run: { running: { waiting: 'approval' } } })) {
+    return {
+      state: 'waiting',
+      detail: `${pendingApprovalCount} approval${pendingApprovalCount === 1 ? '' : 's'} required`,
+    };
+  }
+  if (snapshot.matches({ run: { running: { waiting: 'input' } } })) {
+    return { state: 'waiting', detail: 'Waiting for input' };
+  }
+  if (snapshot.matches({ run: { running: 'reconnecting' } })) {
+    return { state: 'waiting', detail: 'Retrying connection' };
+  }
+  if (snapshot.matches({ run: { running: 'tool' } })) {
+    return { state: 'running', detail: toolName === undefined ? 'Running a tool' : `Running ${toolName}` };
+  }
+  if (snapshot.matches({ run: { running: 'generating' } })) {
+    return { state: 'running', detail: 'Streaming response' };
+  }
+  if (snapshot.matches({ run: 'queued' })) {
+    return { state: 'running', detail: 'Queued' };
+  }
+  if (snapshot.matches({ run: 'failed' })) {
+    return { state: 'error', detail: failureReason ?? 'Request failed' };
+  }
+  return { state: 'idle' };
 };
 
 const resolveState = ({
@@ -200,18 +223,8 @@ const resolveDetail = ({
 
 /** Pure projection builder used by the hook and contract tests. */
 export const buildAgentProjection = (input: AgentProjectionInput): AgentProjection => {
-  const {
-    chat,
-    session,
-    status,
-    lifecycle,
-    persistedGraph,
-    focusedChatId,
-    defaultModel,
-    resolveModel,
-    defaultWorkspace,
-    metadata,
-  } = input;
+  const { chat, session, status, lifecycle, focusedChatId, defaultModel, resolveModel, defaultWorkspace, metadata } =
+    input;
   const messages = session?.chat.messages ?? chat.messages;
   const pendingApprovalCount = countPendingApprovals(messages);
   const persistedSnapshot = session?.persistenceActorRef.getSnapshot();
@@ -219,14 +232,19 @@ export const buildAgentProjection = (input: AgentProjectionInput): AgentProjecti
   const activeModelId = activeExecution?.kind === 'tau' ? activeExecution.model : defaultModel.id;
   const model = activeModelId === defaultModel.id ? defaultModel : resolveModel(activeModelId);
   const failure = errorDetail(input);
-  const state = resolveState({
-    pendingApprovalCount,
-    lifecycle,
-    status,
-    hasError: failure !== undefined || status === 'error',
-  });
+  const fromMachine = stateFromMachine(session?.stateActorRef);
+  const state =
+    fromMachine?.state ??
+    resolveState({
+      pendingApprovalCount,
+      lifecycle,
+      status,
+      hasError: failure !== undefined || status === 'error',
+    });
   const lastActivityAt = lastMessageActivityAt(messages, chat.createdAt);
-  const detail = resolveDetail({ pendingApprovalCount, lifecycle, state, failure });
+  const detail = fromMachine
+    ? (fromMachine.detail ?? (state === 'error' ? (failure ?? 'Request failed') : undefined))
+    : resolveDetail({ pendingApprovalCount, lifecycle, state, failure });
 
   return {
     chatId: chat.id,
@@ -241,7 +259,10 @@ export const buildAgentProjection = (input: AgentProjectionInput): AgentProjecti
       provider: model.provider.name,
     },
     workspace: metadata?.workspace ?? defaultWorkspace,
-    branch: metadata?.branch ?? branchForChat(chat.id, messages, persistedGraph),
+    /* No chat has a branch of its own: turns attach to the chat's checkout and
+     * never create one (A29, S11). The row shows the checkout's branch, which
+     * the caller passes as metadata when it knows it. */
+    branch: metadata?.branch ?? 'main',
     pendingApprovalCount,
     operationIds: usageOperationIds(messages),
     unread: chat.id !== focusedChatId && chat.hasUnreadTurn === true,
@@ -284,6 +305,7 @@ const liveProjectionSnapshot = (store: ChatSessionStore, chatIds: readonly strin
         persistenceSnapshot.context.activeExecution,
         persistenceSnapshot.context.persistedError?.message,
         session.chat.error?.message,
+        session.stateActorRef?.getSnapshot().value,
       ];
     }),
   );
@@ -298,8 +320,6 @@ export const useAgentProjections = (options?: UseAgentProjectionsOptions): Agent
   const { chats, isLoading, error, retry } = useChats(projectId);
   const store = useChatSessionStore();
   const { selectedModel, resolveModel } = useModels();
-  const revisionActor = useRevisionActor();
-  const persistedGraph = useSelector(revisionActor, (state) => state.context.graph);
   const focusedChatId = useSelector(editorRef, (state) => state.context.focusedChatId);
   const chatIds = useMemo(() => chats.map((chat) => chat.id), [chats]);
   const metadataByChatId = options?.metadataByChatId ?? emptyMetadataByChatId;
@@ -320,9 +340,11 @@ export const useAgentProjections = (options?: UseAgentProjectionsOptions): Agent
             continue;
           }
           const actorSubscription = session.persistenceActorRef.subscribe(listener);
+          const stateSubscription = session.stateActorRef?.subscribe(listener);
           const unsubscribeChat = store.subscribeChat(chatId, listener);
           sessionCleanups.push(() => {
             actorSubscription.unsubscribe();
+            stateSubscription?.unsubscribe();
             unsubscribeChat();
           });
         }
@@ -356,7 +378,6 @@ export const useAgentProjections = (options?: UseAgentProjectionsOptions): Agent
             session,
             status: store.getStatus(chat.id),
             lifecycle: readLifecycle(session),
-            persistedGraph,
             focusedChatId,
             defaultModel: selectedModel,
             resolveModel,
@@ -365,17 +386,7 @@ export const useAgentProjections = (options?: UseAgentProjectionsOptions): Agent
           });
         }),
       ),
-    [
-      chats,
-      defaultWorkspace,
-      focusedChatId,
-      liveSnapshot,
-      metadataByChatId,
-      persistedGraph,
-      resolveModel,
-      selectedModel,
-      store,
-    ],
+    [chats, defaultWorkspace, focusedChatId, liveSnapshot, metadataByChatId, resolveModel, selectedModel, store],
   );
 
   return { agents, isLoading, error, retry };

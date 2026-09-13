@@ -11,7 +11,6 @@ import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { useModels } from '#hooks/use-models.js';
 import { useProject } from '#hooks/use-project.js';
 import type { ChatSession, ChatSessionStore } from '#services/chat-session-store.js';
-import type { PersistedRevisionGraphState } from '#types/revision.types.js';
 
 vi.mock('@xstate/react', () => ({
   useSelector: <Snapshot, Selection>(
@@ -23,9 +22,6 @@ vi.mock('#hooks/use-chats.js', () => ({ useChats: vi.fn() }));
 vi.mock('#hooks/chat-session-store-provider.js', () => ({ useChatSessionStore: vi.fn() }));
 vi.mock('#hooks/use-models.js', () => ({ useModels: vi.fn() }));
 vi.mock('#hooks/use-project.js', () => ({ useProject: vi.fn() }));
-vi.mock('#routes/w.$workspace.$project/revision-provider.js', () => ({
-  useRevisionActor: () => ({ getSnapshot: () => ({ context: { graph: graphRef.current } }) }),
-}));
 
 const defaultModel: ResolvedModel = {
   id: 'openai/gpt-default',
@@ -68,8 +64,6 @@ const chat = (id: string, updatedAt: number, messages: MyUIMessage[] = []): Chat
   updatedAt,
 });
 
-const graphRef: { current: PersistedRevisionGraphState | undefined } = { current: undefined };
-
 const buildSession = ({
   chatEntity,
   lifecycle,
@@ -111,7 +105,6 @@ const project = {
 };
 
 beforeEach(() => {
-  graphRef.current = undefined;
   vi.mocked(useProject).mockReturnValue(project as unknown as ReturnType<typeof useProject>);
   vi.mocked(useModels).mockReturnValue({ selectedModel: defaultModel, resolveModel } as unknown as ReturnType<
     typeof useModels
@@ -119,23 +112,9 @@ beforeEach(() => {
 });
 
 describe('buildAgentProjection', () => {
-  it('projects live focus, model/provider, revision branch, and running state', () => {
+  it('projects live focus, model/provider, the default branch, and running state', () => {
     const source = chat('chat-focused', 100, [message('turn-1', 200)]);
     source.hasUnreadTurn = true;
-    graphRef.current = {
-      activeBranch: 'experiment',
-      nodes: {
-        'turn-1': {
-          turnId: 'turn-1',
-          parentTurnIds: [],
-          branchName: 'loads-v2',
-          chatId: source.id,
-          jobIds: [],
-          status: 'complete',
-        },
-      },
-      branches: {},
-    };
     const session = buildSession({
       chatEntity: source,
       lifecycle: 'invoking',
@@ -148,7 +127,6 @@ describe('buildAgentProjection', () => {
       session,
       status: 'streaming',
       lifecycle: 'invoking',
-      persistedGraph: graphRef.current,
       focusedChatId: source.id,
       defaultModel,
       resolveModel,
@@ -161,7 +139,10 @@ describe('buildAgentProjection', () => {
       lastActivityAt: 200,
       model: { name: 'Claude Sonnet', provider: 'Anthropic' },
       workspace: 'tau',
-      branch: 'loads-v2',
+      /* No chat has a branch of its own — turns attach to the chat's checkout
+       * and never create one (A29, S11) — so a row with no metadata reads the
+       * default. */
+      branch: 'main',
       unread: false,
     });
   });

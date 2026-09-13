@@ -1,9 +1,9 @@
 import type { ArtifactGraph } from '@taucad/kcl-wasm-lib/bindings/Artifact';
 import type { CompilationIssue } from '@taucad/kcl-wasm-lib/bindings/CompilationIssue';
 import type { DefaultPlanes } from '@taucad/kcl-wasm-lib/bindings/DefaultPlanes';
-import type { KclValue } from '@taucad/kcl-wasm-lib/bindings/KclValue';
+import type { KclValueView } from '@taucad/kcl-wasm-lib/bindings/KclValueView';
 import type { ModulePath } from '@taucad/kcl-wasm-lib/bindings/ModulePath';
-import type { Operation } from '@taucad/kcl-wasm-lib/bindings/Operation';
+import type { OperationsByModule } from '@taucad/kcl-wasm-lib/bindings/OperationsByModule';
 
 /**
  * Outcome of executing a KCL program against the Zoo engine, containing the full modeling state.
@@ -11,8 +11,8 @@ import type { Operation } from '@taucad/kcl-wasm-lib/bindings/Operation';
  * @public
  */
 export type KclExecutionResult = {
-  variables: Partial<Record<string, KclValue>>;
-  operations: Operation[];
+  variables: Partial<Record<string, KclValueView>>;
+  operations: OperationsByModule;
   artifactGraph: ArtifactGraph;
   errors: CompilationIssue[];
   warnings: CompilationIssue[];

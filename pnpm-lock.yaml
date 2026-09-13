@@ -219,9 +219,6 @@ catalogs:
     '@tanstack/react-query':
       specifier: ^5.100.14
       version: 5.100.14
-    '@taucad/kcl-wasm-lib':
-      specifier: 0.1.148
-      version: 0.1.148
     '@testing-library/dom':
       specifier: ^10.4.1
       version: 10.4.1
@@ -584,6 +581,7 @@ overrides:
   '@langchain/google-common': file:tarballs/langchain-fork/langchain-google-common-2.1.33.tgz
   '@langchain/google-gauth': 2.1.30
   '@langchain/google-vertexai': file:tarballs/langchain-fork/langchain-google-vertexai-2.1.33.tgz
+  '@taucad/kcl-wasm-lib': file:tarballs/kcl-wasm-lib/taucad-kcl-wasm-lib-0.1.184.tgz
   '@types/express': ^5.0.0
   replicad-opencascadejs: npm:@taucad/replicad-opencascadejs@0.23.0-beta.0
   vitest: 4.1.5
@@ -850,8 +848,8 @@ importers:
         specifier: workspace:*
         version: link:packages/json-schema
       '@taucad/kcl-wasm-lib':
-        specifier: 'catalog:'
-        version: 0.1.148
+        specifier: file:tarballs/kcl-wasm-lib/taucad-kcl-wasm-lib-0.1.184.tgz
+        version: file:tarballs/kcl-wasm-lib/taucad-kcl-wasm-lib-0.1.184.tgz
       '@tiptap/core':
         specifier: 'catalog:'
         version: 3.24.0(@tiptap/pm@3.24.0)
@@ -2106,8 +2104,8 @@ importers:
         specifier: workspace:*
         version: link:../json-schema
       '@taucad/kcl-wasm-lib':
-        specifier: 'catalog:'
-        version: 0.1.148
+        specifier: file:../../tarballs/kcl-wasm-lib/taucad-kcl-wasm-lib-0.1.184.tgz
+        version: file:tarballs/kcl-wasm-lib/taucad-kcl-wasm-lib-0.1.184.tgz
       '@taucad/memory':
         specifier: workspace:*
         version: link:../memory
@@ -10765,8 +10763,9 @@ packages:
   '@taucad/assimpjs@0.0.19':
     resolution: {integrity: sha512-qpqOMWBsIinAnmCbpSIfPnC4XtdHJ7VZRD/8YyrqJ/3n1odQSJuOcXboMa+JuaWi+jI5GYlFha+x0sAvNyTghQ==}
 
-  '@taucad/kcl-wasm-lib@0.1.148':
-    resolution: {integrity: sha512-2SX3iuzBun7thhw6cq8hUWmkxRT01yEMA5Mot7qVVysoBVCzHv8Al17URjNh3UCyrRMtGZXorp6v1+ImFyZNAQ==}
+  '@taucad/kcl-wasm-lib@file:tarballs/kcl-wasm-lib/taucad-kcl-wasm-lib-0.1.184.tgz':
+    resolution: {integrity: sha512-9J9mtVzPAc1UKC6di50vICe9DBqU1uLgSUapdU0MKU2teG4mNRMhQFzdRknZCJOEOPTGUmjcPT4ka/w+NX7X9g==, tarball: file:tarballs/kcl-wasm-lib/taucad-kcl-wasm-lib-0.1.184.tgz}
+    version: 0.1.184
 
   '@taucad/opencascade.js@3.0.0-beta.3':
     resolution: {integrity: sha512-6ZOeP2Ke3cfJ9chA6CKSYl9MdKjC/L1lXpuRC/W2aswxfXSFHnl1kSsMJeqilKT1BGxqELYB7bfvrNMNtzC4kw==}
@@ -31901,7 +31900,7 @@ snapshots:
 
   '@taucad/assimpjs@0.0.19': {}
 
-  '@taucad/kcl-wasm-lib@0.1.148': {}
+  '@taucad/kcl-wasm-lib@file:tarballs/kcl-wasm-lib/taucad-kcl-wasm-lib-0.1.184.tgz': {}
 
   '@taucad/opencascade.js@3.0.0-beta.3': {}
 
@@ -45993,7 +45992,7 @@ snapshots:
     dependencies:
       ts-essentials: 10.1.1(typescript@5.9.3)
       typescript: 5.9.3
-      vitest: 4.1.5(@opentelemetry/api@1.9.1)(@types/node@25.9.0)(@vitest/coverage-v8@4.1.5)(@vitest/ui@4.1.5)(happy-dom@16.8.1)(jsdom@26.0.0(canvas@3.2.3))(vite@8.0.10(@types/node@25.9.0)(esbuild@0.28.0)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.97.3)(sass@1.97.3)(stylus@0.64.0)(terser@5.46.0)(tsx@4.22.3)(yaml@2.9.0))
+      vitest: 4.1.5(@opentelemetry/api@1.9.1)(@types/node@24.0.15)(@vitest/coverage-v8@4.1.5)(@vitest/ui@4.1.5)(happy-dom@16.8.1)(jsdom@26.0.0(canvas@3.2.3))(vite@8.0.10(@types/node@24.0.15)(esbuild@0.27.7)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.97.3)(sass@1.97.3)(stylus@0.64.0)(terser@5.46.0)(tsx@4.22.3)(yaml@2.9.0))
 
   vitest@4.1.5(@opentelemetry/api@1.9.1)(@types/node@24.0.15)(@vitest/coverage-v8@4.1.5)(@vitest/ui@4.1.5)(happy-dom@16.8.1)(jsdom@26.0.0(canvas@3.2.3))(vite@8.0.10(@types/node@24.0.15)(esbuild@0.27.7)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.97.3)(sass@1.97.3)(stylus@0.64.0)(terser@5.46.0)(tsx@4.22.3)(yaml@2.9.0)):
     dependencies:

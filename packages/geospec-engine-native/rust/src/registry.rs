@@ -31,6 +31,7 @@ pub enum Capability {
     InspectGeometry,
     AnalyzeMeshOverlap,
     ToSatisfyRationalPlate,
+    ToSatisfyParallelPlaneDistance,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -41,7 +42,7 @@ pub enum ExpectedShape {
     True,
 }
 
-pub const CAPABILITIES: [&str; 29] = [
+pub const CAPABILITIES: [&str; 30] = [
     "toHaveBoundingBox",
     "toHaveConnectedComponents",
     "toBeWatertight",
@@ -71,10 +72,11 @@ pub const CAPABILITIES: [&str; 29] = [
     "inspectGeometry",
     "analyzeMeshOverlap",
     "toSatisfyRationalPlate",
+    "toSatisfyParallelPlaneDistance",
 ];
 
 impl Capability {
-    pub const ALL: [Self; 29] = [
+    pub const ALL: [Self; 30] = [
         Self::ToHaveBoundingBox,
         Self::ToHaveConnectedComponents,
         Self::ToBeWatertight,
@@ -104,6 +106,7 @@ impl Capability {
         Self::InspectGeometry,
         Self::AnalyzeMeshOverlap,
         Self::ToSatisfyRationalPlate,
+        Self::ToSatisfyParallelPlaneDistance,
     ];
 
     pub fn from_name(name: &str) -> Option<Self> {
@@ -141,6 +144,7 @@ impl Capability {
             Self::InspectGeometry => "inspectGeometry",
             Self::AnalyzeMeshOverlap => "analyzeMeshOverlap",
             Self::ToSatisfyRationalPlate => "toSatisfyRationalPlate",
+            Self::ToSatisfyParallelPlaneDistance => "toSatisfyParallelPlaneDistance",
         }
     }
 
@@ -185,6 +189,7 @@ impl Capability {
             Self::InspectGeometry => None,
             Self::AnalyzeMeshOverlap => None,
             Self::ToSatisfyRationalPlate => None,
+            Self::ToSatisfyParallelPlaneDistance => None,
         }
     }
 
@@ -219,6 +224,7 @@ impl Capability {
             Self::InspectGeometry => ExpectedShape::First,
             Self::AnalyzeMeshOverlap => ExpectedShape::First,
             Self::ToSatisfyRationalPlate => ExpectedShape::First,
+            Self::ToSatisfyParallelPlaneDistance => ExpectedShape::First,
         }
     }
 }

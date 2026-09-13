@@ -1,9 +1,11 @@
 //! Component-interference, wall-thickness, and void-continuity matchers.
 
+use super::json_owned_bytes;
 use std::collections::BTreeMap;
 
 use crate::{
     analysis::{
+        continuous::{self, Outcome, PointEvidence, PointRequest, SectionRequest},
         interference::{
             self, Analysis as OverlapAnalysis, ComponentIdentity, SelectedPair,
             DEFAULT_TOLERANCE_MM,
@@ -23,7 +25,7 @@ use crate::{
     protocol::{array, field, invalid_claim, object, optional_field, require_fields},
     registry::Capability,
     result::{family_evidence, Diagnostic, Evaluation},
-    subject::{backend_refusal, EvaluationContext},
+    subject::{backend_refusal, continuous_refusal, EvaluationContext},
     ProtocolError,
 };
 
@@ -1192,6 +1194,14 @@ fn evaluate_void(prepared: &Void, context: &mut EvaluationContext<'_>) -> Evalua
             }
         }
     };
+    if prepared.bounds.is_some()
+        && prepared
+            .path
+            .iter()
+            .all(|point| matches!(point, VoidWaypoint::Point(_)))
+    {
+        return evaluate_nominal_void(claim, context);
+    }
     if prepared.min_cross_section.is_some() {
         let mut diagnostic = Diagnostic::error(
             "GEOSPEC_EVIDENCE_UNSUPPORTED",
@@ -1255,6 +1265,195 @@ fn evaluate_void(prepared: &Void, context: &mut EvaluationContext<'_>) -> Evalua
         }
         Err(error) => backend_refusal(error),
     }
+}
+
+fn evaluate_nominal_void(claim: &VoidClaim, context: &mut EvaluationContext<'_>) -> Evaluation {
+    let topology = match context.continuous_topology(&claim.materials, claim.region) {
+        Ok(value) => value,
+        Err(error) => return error,
+    };
+    let units = match topology.point_units(claim.waypoints.len(), claim.isolated_from.len()) {
+        Ok(value) => value,
+        Err(error) => return continuous_refusal(error),
+    };
+    if let Err(error) = context.budget.charge(units) {
+        return Evaluation::budget_exceeded(context.capability, error);
+    }
+    let (mut positive, points) = match topology.evaluate_points(PointRequest {
+        waypoints: &claim.waypoints,
+        isolated_from: &claim.isolated_from,
+    }) {
+        Outcome::Decided { positive, evidence } => (positive, evidence),
+        Outcome::Unsupported { reason, evidence } => {
+            return nominal_void_refusal(reason, evidence.as_ref(), context);
+        }
+    };
+    let mut diagnostics = if positive {
+        Vec::new()
+    } else {
+        nominal_point_mismatch(&points)
+    };
+    let mut typed_bytes = points.owned_bytes() as u64;
+    if let Err(error) = context.check_continuous_output(typed_bytes) {
+        return error;
+    }
+    let mut section_json = None;
+    if positive {
+        if let Some(minimum) = claim.min_cross_section {
+            // Axis inference is only from exact authored Cartesian coordinates;
+            // the kernel separately proves all segments and event sections.
+            let first = claim.waypoints[0];
+            let last = claim.waypoints[claim.waypoints.len() - 1];
+            let axes = (0..3)
+                .filter(|&axis| first[axis] != last[axis])
+                .collect::<Vec<_>>();
+            if axes.len() != 1 {
+                return nominal_void_refusal(
+                    continuous::ContinuousError::unsupported(
+                        "Continuous sections require a monotone Cartesian waypoint path.",
+                    ),
+                    Some(&points),
+                    context,
+                );
+            }
+            let axis_index = axes[0];
+            let mut axis = [0.0; 3];
+            axis[axis_index] = if last[axis_index] > first[axis_index] {
+                1.0
+            } else {
+                -1.0
+            };
+            let units = match topology.section_units(claim.waypoints.len(), axis_index) {
+                Ok(value) => value,
+                Err(error) => return continuous_refusal(error),
+            };
+            if let Err(error) = context.budget.charge(units) {
+                return Evaluation::budget_exceeded(context.capability, error);
+            }
+            match topology.evaluate_section(SectionRequest {
+                waypoints: &claim.waypoints,
+                axis,
+                minimum,
+                points: &points,
+            }) {
+                Outcome::Decided {
+                    positive: satisfied,
+                    evidence,
+                } => {
+                    positive = satisfied;
+                    typed_bytes = typed_bytes.saturating_add(evidence.owned_bytes() as u64);
+                    if !positive {
+                        let mut diagnostic = Diagnostic::error("GEOSPEC_VOID_CONTINUITY_MISMATCH", format!(
+                            "The continuous void cross-section {}/{} mm² is below the declared minimum.",
+                            evidence.minimum_area.numerator, evidence.minimum_area.denominator,
+                        ));
+                        diagnostic.suggestion = Some("Widen the limiting channel section.".into());
+                        diagnostics.push(diagnostic);
+                    }
+                    section_json = Some(evidence.to_json());
+                }
+                Outcome::Unsupported { reason, .. } => {
+                    return nominal_void_refusal(reason, Some(&points), context);
+                }
+            }
+        }
+    }
+    let mut fields = vec![("points".into(), points.to_json())];
+    if let Some(section) = section_json {
+        fields.push(("section".into(), section));
+    }
+    let proof = Json::Object(fields);
+    let evidence = family_evidence(
+        &context.subject().content_hash,
+        normalized_expected(context),
+        proof.clone(),
+        Json::object([("proof", proof)]),
+    );
+    let pending = typed_bytes.saturating_add(json_owned_bytes(&evidence));
+    if let Err(error) = context.check_continuous_output(pending) {
+        return error;
+    }
+    Evaluation::Geometric {
+        positive_satisfied: positive,
+        diagnostics,
+        evidence,
+        negated_diagnostic: None,
+    }
+}
+
+fn nominal_void_refusal(
+    reason: continuous::ContinuousError,
+    points: Option<&PointEvidence>,
+    context: &EvaluationContext<'_>,
+) -> Evaluation {
+    let mut result = continuous_refusal(reason);
+    if let (Some(points), Evaluation::Refused { diagnostics }) = (points, &mut result) {
+        let evidence = points.to_json();
+        if let Err(error) = context.check_continuous_output(
+            (points.owned_bytes() as u64).saturating_add(json_owned_bytes(&evidence)),
+        ) {
+            return error;
+        }
+        if let Some(diagnostic) = diagnostics.first_mut() {
+            diagnostic.details = Some(Json::object([("evidence", evidence)]));
+        }
+    }
+    result
+}
+
+fn nominal_point_mismatch(points: &PointEvidence) -> Vec<Diagnostic> {
+    let material = points
+        .waypoint_membership
+        .iter()
+        .find(|point| !point.material_occurrences.is_empty());
+    let disconnected = points
+        .waypoint_membership
+        .iter()
+        .find(|point| point.component != points.path_component);
+    let (message, suggestion, point, key) = if let Some(point) = material {
+        (
+            format!(
+                "Void waypoint {} at [{}] is inside material, not in the void.",
+                point.index,
+                joined_point(point.point.each_ref().map(|value| value.display))
+            ),
+            "Move the waypoint into the cavity, or correct the material set.",
+            point,
+            "waypoint",
+        )
+    } else if let Some(point) = disconnected {
+        (format!("The void path is broken: waypoint {} at [{}] lies in a different void body from waypoint 0.", point.index,
+            joined_point(point.point.each_ref().map(|value| value.display))),
+            "Open the passage between the waypoints, or assert the two voids separately.", point, "waypoint")
+    } else if let Some(point) = points
+        .isolation_membership
+        .iter()
+        .find(|point| point.component == points.path_component)
+    {
+        (
+            format!(
+                "Void isolation breached: [{}] is reachable from the declared path void.",
+                joined_point(point.point.each_ref().map(|value| value.display))
+            ),
+            "Seal the passage, or drop the isolation claim.",
+            point,
+            "probe",
+        )
+    } else {
+        return vec![Diagnostic::error(
+            "GEOSPEC_VOID_CONTINUITY_MISMATCH",
+            "The continuous void predicate is false.",
+        )];
+    };
+    let position = point.point.each_ref().map(|value| value.display);
+    let mut diagnostic = Diagnostic::error("GEOSPEC_VOID_CONTINUITY_MISMATCH", message);
+    diagnostic.suggestion = Some(suggestion.into());
+    diagnostic.details = Some(Json::object([
+        ("engine", Json::string("topological")),
+        (key, point_json(position)),
+    ]));
+    diagnostic.spatial = Some(Json::object([("center", point_json(position))]));
+    vec![diagnostic]
 }
 
 fn charge_overlap_mesh_base(context: &mut EvaluationContext<'_>) -> Result<(), Evaluation> {

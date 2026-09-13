@@ -1,4 +1,4 @@
-pub(crate) const NUMERIC_PROFILE: &str = "geospec-st-logical-requests-v2";
+pub(crate) const NUMERIC_PROFILE: &str = "geospec-st-logical-requests-v3";
 
 use crate::{
     backend::{brep::BrepConnector, csg::CsgConnector},
@@ -358,6 +358,14 @@ fn initialize(engine: &Engine, request: &[(String, Json)]) -> Result<Vec<u8>, Pr
                                         ));
                                     }
                                 }
+                                if *name == "toSatisfyParallelPlaneDistance" {
+                                    if let Json::Object(fields) = &mut entry {
+                                        fields.push((
+                                            "profile".into(),
+                                            crate::certificates::parallel_plane::profile(),
+                                        ));
+                                    }
+                                }
                                 entry
                             })
                             .collect(),
@@ -590,7 +598,7 @@ mod batch_tests {
         let mut engine = engine;
         engine
             .subjects
-            .insert(format!("mesh-f32-bounds-v1:{hash}"), Rc::clone(&retained));
+            .insert(retained.cache_identity().unwrap(), Rc::clone(&retained));
         (engine, retained)
     }
 

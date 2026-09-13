@@ -53,3 +53,11 @@ path = "tests/rational_plate_producer.rs"
 [[test]]
 name = "rational_plate_verifier"
 path = "tests/rational_plate_verifier.rs"
+
+[[test]]
+name = "parallel_plane_distance_source"
+path = "tests/parallel_plane_distance_source.rs"
+
+[[test]]
+name = "evidence_projection_m3"
+path = "tests/evidence_projection_m3.rs"

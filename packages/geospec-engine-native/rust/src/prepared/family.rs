@@ -52,7 +52,7 @@ impl PreparedFamily {
                 proofs::prepare(capability, payload).map(Self::Proofs)
             }
             ToHaveNoDiagnostics => diagnostics::prepare(capability, payload).map(Self::Diagnostics),
-            ToSatisfyRationalPlate
+            ToSatisfyRationalPlate | ToSatisfyParallelPlaneDistance
             | AnalyzeBrep
             | AnalyzeMesh
             | InspectGeometry

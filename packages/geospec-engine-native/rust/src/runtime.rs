@@ -13,7 +13,7 @@ use crate::{
         array, field, logical_id, number_field, object, optional_field, require_fields,
         string_field, validate_content_hash, validate_versions,
     },
-    subject::{Subject, SubjectFormat},
+    subject::{subject_cache_key, Subject, SubjectFormat},
     Engine, ErrorKind, ProtocolError,
 };
 
@@ -120,7 +120,7 @@ fn subject_key<'a>(
         }
     };
     validate_content_hash(identity).map_err(|error| invalid(error.to_string()))?;
-    Ok((format!("{prefix}:{identity}"), field, identity))
+    Ok((subject_cache_key(prefix, identity), field, identity))
 }
 
 impl Engine {
@@ -335,6 +335,15 @@ impl Engine {
                 let _ = retained.semantic_identity.set(identity);
                 retained.display_name = step_name.unwrap_or("step").into();
                 retained.brep = Some(document);
+                if primary.len() <= crate::certificates::parallel_plane::MAX_SOURCE_BYTES
+                    && primary.capacity() as u64 <= self.config.analysis.max_mesh_bytes
+                {
+                    // Hash and kernel admission already consumed the borrowed bytes.
+                    // Retain this allocation as the exact source owner, with no copy.
+                    retained.parallel_plane = Some(
+                        crate::certificates::parallel_plane::SourceProof::new(primary),
+                    );
+                }
                 retained
             }
             _ => {

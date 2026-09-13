@@ -278,3 +278,19 @@ fn reported_faces_preserve_oriented_surfaces_and_analytic_cap_bounds() {
     assert_eq!(cap.bounds.min[2], -1e-7);
     assert_eq!(cap.bounds.max[2], 1e-7);
 }
+
+#[test]
+fn should_retain_step_reader_metadata_from_the_original_input() {
+    let bytes = fixture("two-cube-assembly.step");
+    let document = Document::from_step(&bytes).unwrap();
+    let metadata = document.step_subject_metadata().unwrap().unwrap();
+    assert_eq!(metadata.source_byte_length, bytes.len());
+    assert_eq!(
+        metadata.schema.as_deref(),
+        Some("AP242_MANAGED_MODEL_BASED_3D_ENGINEERING_MIM_LF { 1 0 10303 442 3 1 4 }")
+    );
+    assert_eq!(metadata.free_shape_count, 0);
+    assert!(metadata.native_read_stream);
+    assert_eq!(document.step_subject_metadata().unwrap().unwrap(), metadata);
+    eprintln!("step-reader-metadata={metadata:?}");
+}

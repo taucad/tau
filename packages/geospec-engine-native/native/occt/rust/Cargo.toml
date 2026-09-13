@@ -28,3 +28,19 @@ path = "tests/set_containment.rs"
 [[test]]
 name = "report_bundle"
 path = "tests/report_bundle.rs"
+
+[[test]]
+name = "parallel_plane_distance_source"
+path = "tests/parallel_plane_distance_source.rs"
+
+[[test]]
+name = "circular_bores"
+path = "tests/circular_bores.rs"
+
+[[test]]
+name = "box_clearance_subjects"
+path = "tests/box_clearance_subjects.rs"
+
+[[test]]
+name = "edge_treatments"
+path = "tests/edge_treatments.rs"

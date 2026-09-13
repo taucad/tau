@@ -1,8 +1,10 @@
 //! Retained mesh records and neutral selector analysis owned by the Rust core.
 
 pub(crate) mod batch;
+pub(crate) mod continuous;
 pub(crate) mod interference;
 pub(crate) mod mesh;
+pub(crate) mod parallel_plane_distance;
 pub(crate) mod selection;
 pub(crate) mod voids;
 

@@ -17,7 +17,7 @@ use crate::{
     },
     registry::Capability,
     result::{self, Diagnostic, Evaluation, Polarity},
-    subject::Subject,
+    subject::{subject_cache_key, Subject},
     ErrorKind, ProtocolError,
 };
 
@@ -29,6 +29,7 @@ enum Payload {
     Matcher(PreparedFamily),
     Query(PreparedQuery),
     RationalPlate,
+    ParallelPlane,
 }
 
 impl Payload {
@@ -37,13 +38,14 @@ impl Payload {
             Self::Matcher(value) => value.normalized_payload(),
             Self::Query(value) => value.normalized_payload(),
             Self::RationalPlate => crate::certificates::engine::payload(),
+            Self::ParallelPlane => crate::certificates::parallel_plane::payload(),
         }
     }
     fn demand(&self) -> AnalysisDemand {
         match self {
             Self::Matcher(value) => value.demand(),
             Self::Query(value) => value.demand(),
-            Self::RationalPlate => AnalysisDemand::default(),
+            Self::RationalPlate | Self::ParallelPlane => AnalysisDemand::default(),
         }
     }
 }
@@ -126,7 +128,7 @@ impl PreparedPlan {
                 "geospec-subject-v1"
             };
             if bindings
-                .insert(slot, format!("{namespace}:{hash}"))
+                .insert(slot, subject_cache_key(namespace, hash))
                 .is_some()
             {
                 return invalid_claim(format!(
@@ -207,6 +209,9 @@ impl PreparedPlan {
             let payload = if capability == Capability::ToSatisfyRationalPlate {
                 crate::certificates::engine::prepare(supplied)?;
                 Payload::RationalPlate
+            } else if capability == Capability::ToSatisfyParallelPlaneDistance {
+                crate::certificates::parallel_plane::prepare(supplied)?;
+                Payload::ParallelPlane
             } else if capability.kind().is_some() {
                 Payload::Matcher(PreparedFamily::prepare(capability, supplied)?)
             } else {
@@ -215,7 +220,7 @@ impl PreparedPlan {
             let regex_result = match &payload {
                 Payload::Matcher(value) => value.validate_regexes(&regex),
                 Payload::Query(value) => value.validate_regexes(&regex),
-                Payload::RationalPlate => Ok(()),
+                Payload::RationalPlate | Payload::ParallelPlane => Ok(()),
             };
             let refusal = match regex_result {
                 Ok(()) => None,
@@ -275,11 +280,12 @@ impl PreparedPlan {
     ) -> Result<ResolvedPlan, ProtocolError> {
         // F1 binds the complete normalized envelope, shared by every claim.
         // Existing plans avoid this allocation when no certificate needs it.
-        let canonical_plan_hash = if self
-            .claims
-            .iter()
-            .any(|claim| matches!(claim.payload, Payload::RationalPlate))
-        {
+        let canonical_plan_hash = if self.claims.iter().any(|claim| {
+            matches!(
+                claim.payload,
+                Payload::RationalPlate | Payload::ParallelPlane
+            )
+        }) {
             use sha2::{Digest, Sha256};
             let bytes = crate::codec::encode(&crate::protocol::canonical_plan_envelope(
                 self.normalized_plan(),
@@ -336,7 +342,7 @@ impl PreparedPlan {
                 claim.report_paid = true;
             }
             let result = match &mut claim.payload {
-                Payload::RationalPlate => Ok(()),
+                Payload::RationalPlate | Payload::ParallelPlane => Ok(()),
                 Payload::Matcher(value) => {
                     value.resolve_selectors(subject, &self.regex, &claim.execution_budget)
                 }
@@ -429,6 +435,14 @@ impl ResolvedPlan {
                 let value = match claim.payload {
                     Payload::Matcher(value) => value.evaluate(&mut context),
                     Payload::Query(value) => value.evaluate(&mut context),
+                    Payload::ParallelPlane => match context.subject().parallel_plane.as_ref() {
+                        Some(proof) => {
+                            proof.evaluate(context.subject(), &self.canonical_plan_hash, &budget)
+                        }
+                        None => {
+                            crate::certificates::parallel_plane::outside_domain_request(&budget)
+                        }
+                    },
                     Payload::RationalPlate => match context.subject().rational_plate.as_ref() {
                         Some(plate) => plate.evaluate(
                             context

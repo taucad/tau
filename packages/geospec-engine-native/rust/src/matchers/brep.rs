@@ -5,7 +5,14 @@ use std::collections::HashSet;
 use crate::{
     analysis::selection::{EcmaRegexEngine, EcmaRegexError, TextPattern},
     backend::{
-        brep::{Bounds, BrepSubject, DocumentFacts, SurfaceFacts, TopologyCounts, ValidityFacts},
+        brep::{
+            Bounds, BrepSubject, CircularBoreDisposition, CircularBoreInventory,
+            CircularBoreNonMember, CircularBoreTermination, CircularBoreUnqualified, CurveFacts,
+            DocumentFacts, EdgeTreatmentBoundaryRole, EdgeTreatmentCertificate,
+            EdgeTreatmentDisposition, EdgeTreatmentInventory, EdgeTreatmentKind,
+            EdgeTreatmentLabel, EdgeTreatmentMaterialSide, EdgeTreatmentReason,
+            EdgeTreatmentResidualKind, SurfaceFacts, TopologyCounts, ValidityFacts,
+        },
         BackendError, BackendErrorKind,
     },
     codec::Json,
@@ -16,7 +23,7 @@ use crate::{
     },
     protocol::{array, field, invalid_claim, object, optional_field, require_fields},
     registry::Capability,
-    result::{family_evidence, Diagnostic, Evaluation},
+    result::{family_evidence, Diagnostic, Evaluation, Severity},
     subject::EvaluationContext,
     ProtocolError,
 };
@@ -24,7 +31,6 @@ use crate::{
 const BREP_SUGGESTION: &str =
     "Load the model as STEP (`loadModel({ file, format: \"step\" })`) so GeoSpec has exact BRep evidence.";
 const PAD_SEPARATION_GAP: f64 = 20.0;
-const MAX_PART_OCCURRENCES: usize = 8;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Axis {
@@ -774,6 +780,18 @@ pub(crate) fn evaluate(prepared: &Prepared, context: &mut EvaluationContext<'_>)
         }
         Err(evaluation) => return evaluation,
     };
+    if matches!(
+        prepared,
+        Prepared::CircularHole(_) | Prepared::CircularHolePattern(_)
+    ) {
+        return evaluate_bores(prepared, context);
+    }
+    if matches!(
+        prepared,
+        Prepared::ChamferFeature(_) | Prepared::FilletFeature(_)
+    ) {
+        return evaluate_edge_treatment(prepared, context);
+    }
     let subject = context.subject();
     let Some(brep) = subject.brep.as_deref() else {
         return refused(
@@ -800,24 +818,10 @@ pub(crate) fn evaluate(prepared: &Prepared, context: &mut EvaluationContext<'_>)
             Err(error) => return backend_refused(prepared.capability(), error),
         },
         Prepared::TopologyCounts(expected) => evaluate_topology(expected, facts.shape.topology),
-        Prepared::PlanarFace(expected) => {
-            evaluate_features(prepared, expected_planar(expected), brep, &facts)
-        }
-        Prepared::CylindricalFace(expected) => {
-            evaluate_features(prepared, expected_cylinder(expected), brep, &facts)
-        }
-        Prepared::CircularHole(expected) => {
-            evaluate_features(prepared, expected_hole(expected), brep, &facts)
-        }
-        Prepared::CircularHolePattern(expected) => {
-            evaluate_features(prepared, expected_pattern(expected), brep, &facts)
-        }
-        Prepared::ChamferFeature(expected) => {
-            evaluate_features(prepared, expected_chamfer(expected), brep, &facts)
-        }
-        Prepared::FilletFeature(expected) => {
-            evaluate_features(prepared, expected_fillet(expected), brep, &facts)
-        }
+        Prepared::PlanarFace(expected) => evaluate_features(expected_planar(expected), brep),
+        Prepared::CylindricalFace(expected) => evaluate_features(expected_cylinder(expected), brep),
+        Prepared::CircularHole(_) | Prepared::CircularHolePattern(_) => unreachable!(),
+        Prepared::ChamferFeature(_) | Prepared::FilletFeature(_) => unreachable!(),
     };
     match outcome {
         Ok(outcome) => geometric(prepared, subject.content_hash.as_str(), outcome),
@@ -832,9 +836,12 @@ pub(crate) fn evaluate(prepared: &Prepared, context: &mut EvaluationContext<'_>)
 pub(crate) fn brep_evidence(
     brep: &dyn BrepSubject,
     facts: &DocumentFacts,
+    bores: &CircularBoreInventory,
+    edge_treatments: &EdgeTreatmentInventory,
 ) -> Result<Json, BackendError> {
     let validity = brep.validity()?;
-    let features = derive_features(brep, facts, true)?;
+    let mut features = derive_features(brep)?;
+    populate_bores(&mut features, brep, bores)?;
     let bounds = facts.shape.bounds;
     let size = std::array::from_fn(|axis| bounds.max[axis] - bounds.min[axis]);
     let center = std::array::from_fn(|axis| (bounds.min[axis] + bounds.max[axis]) / 2.0);
@@ -874,25 +881,18 @@ pub(crate) fn brep_evidence(
             "circularHolePatterns",
             Json::Array(features.patterns.iter().map(pattern_json).collect()),
         ),
+        ("circularBoreTopology", bore_inventory_json(bores)),
+        (
+            "edgeTreatmentTopology",
+            edge_treatment_inventory_json(edge_treatments),
+        ),
         (
             "chamferFeatures",
-            Json::Array(
-                features
-                    .chamfers
-                    .iter()
-                    .map(|feature| feature_json(feature, true))
-                    .collect(),
-            ),
+            qualified_edge_features_json(edge_treatments, true),
         ),
         (
             "filletFeatures",
-            Json::Array(
-                features
-                    .fillets
-                    .iter()
-                    .map(|feature| feature_json(feature, false))
-                    .collect(),
-            ),
+            qualified_edge_features_json(edge_treatments, false),
         ),
     ]))
 }
@@ -904,19 +904,60 @@ pub(crate) fn evaluate_brep(context: &mut EvaluationContext<'_>) -> Evaluation {
         Ok(None) => return brep_evidence_unavailable(),
         Err(evaluation) => return evaluation,
     };
+    let bores = match context.circular_bores() {
+        Ok(value) => value,
+        Err(evaluation) => return evaluation,
+    };
+    let edge_treatments = match context.edge_treatments() {
+        Ok(value) => value,
+        Err(evaluation) => return evaluation,
+    };
     let Some(brep) = context.subject().brep.as_deref() else {
         return brep_evidence_unavailable();
     };
-    match brep_evidence(brep, &facts) {
-        Ok(brep) => Evaluation::Ancillary {
-            success: true,
-            value: Json::object([
+    match brep_evidence(brep, &facts, &bores, &edge_treatments) {
+        Ok(brep) => {
+            let mut diagnostics = if bore_inventory_is_partial(&bores) {
+                let mut diagnostic = bore_uncertainty(context.capability, &bores);
+                diagnostic.severity = Severity::Warning;
+                vec![diagnostic]
+            } else {
+                Vec::new()
+            };
+            if edge_treatment_inventory_is_partial(&edge_treatments, true)
+                || edge_treatment_inventory_is_partial(&edge_treatments, false)
+            {
+                let mut diagnostic = edge_treatment_uncertainty(
+                    context.capability,
+                    "Edge-treatment topology is unqualified for one or more faces.",
+                    None,
+                );
+                diagnostic.severity = Severity::Warning;
+                diagnostics.push(diagnostic);
+            }
+            let value = Json::object([
                 ("success", Json::Bool(true)),
                 ("brep", brep),
-                ("diagnostics", Json::Array(Vec::new())),
-            ]),
-            diagnostics: Vec::new(),
-        },
+                (
+                    "diagnostics",
+                    Json::Array(diagnostics.iter().map(Diagnostic::to_json).collect()),
+                ),
+            ]);
+            let bytes =
+                diagnostics
+                    .iter()
+                    .fold(super::json_owned_bytes(&value), |sum, diagnostic| {
+                        sum.saturating_add(super::json_owned_bytes(&diagnostic.to_json()))
+                    });
+            if let Err(evaluation) = context.check_continuous_output(bytes) {
+                return evaluation;
+            }
+            Evaluation::Ancillary {
+                success: true,
+                value,
+                diagnostics,
+            }
+        }
         Err(error) => {
             let mut diagnostic = Diagnostic::error(
                 match error.kind {
@@ -1455,7 +1496,6 @@ struct CylinderFace {
     center: [f64; 3],
     axis_min: f64,
     axis_max: f64,
-    reversed: bool,
 }
 
 #[derive(Clone)]
@@ -1477,47 +1517,26 @@ struct HolePattern {
     center: [f64; 3],
 }
 
-#[derive(Clone)]
-struct Feature {
-    value: f64,
-    selection: Option<String>,
-}
-
 struct Features {
     planar: Vec<PlanarFace>,
     cylinders: Vec<CylinderFace>,
     holes: Vec<Hole>,
     patterns: Vec<HolePattern>,
-    chamfers: Vec<Feature>,
-    fillets: Vec<Feature>,
 }
 
 type FeatureDecision = Box<dyn FnOnce(&Features) -> MatchOutcome>;
 
 fn evaluate_features(
-    prepared: &Prepared,
     decide: FeatureDecision,
     brep: &dyn BrepSubject,
-    facts: &DocumentFacts,
 ) -> Result<MatchOutcome, BackendError> {
-    derive_features(brep, facts, matches!(prepared, Prepared::ChamferFeature(_)))
-        .map(|features| decide(&features))
+    derive_features(brep).map(|features| decide(&features))
 }
 
-fn derive_features(
-    brep: &dyn BrepSubject,
-    facts: &DocumentFacts,
-    include_revolved_chamfers: bool,
-) -> Result<Features, BackendError> {
+fn derive_features(brep: &dyn BrepSubject) -> Result<Features, BackendError> {
     let whole_faces = brep.faces()?;
     let mut planar = Vec::new();
     let mut cylinders = Vec::new();
-    let mut chamfers = Vec::new();
-    let mut fillets = Vec::new();
-    let extent = std::array::from_fn::<_, 3, _>(|axis| {
-        facts.shape.bounds.max[axis] - facts.shape.bounds.min[axis]
-    });
-    let min_extent = extent.into_iter().fold(f64::INFINITY, f64::min);
     for face in whole_faces.iter() {
         match &face.facts.surface {
             SurfaceFacts::Plane { origin, normal } => {
@@ -1532,15 +1551,6 @@ fn derive_features(
                     area: face.facts.area,
                     center: face.facts.center_of_mass,
                 };
-                if !axis_aligned(normal) {
-                    let distance = estimate_chamfer(&row, facts.shape.bounds);
-                    if distance > 1e-6 {
-                        chamfers.push(Feature {
-                            value: distance,
-                            selection: None,
-                        });
-                    }
-                }
                 planar.push(row);
             }
             SurfaceFacts::Cylinder { axis, radius, .. } => {
@@ -1551,77 +1561,192 @@ fn derive_features(
                     center: face.facts.center_of_mass,
                     axis_min: face.bounds.min[principal.index()],
                     axis_max: face.bounds.max[principal.index()],
-                    reversed: face.reversed,
                 };
-                if !face.reversed && *radius > 0.0 && *radius < min_extent / 2.0 {
-                    fillets.push(Feature {
-                        value: *radius,
-                        selection: None,
-                    });
-                }
                 cylinders.push(row);
             }
             _ => {}
         }
     }
 
-    if include_revolved_chamfers {
-        let mut revolved_seen = Vec::new();
-        for occurrence in 0..facts.occurrences.len().min(MAX_PART_OCCURRENCES) {
-            let faces = brep.occurrence_faces(occurrence as u32)?;
-            for face in faces.iter() {
-                if let SurfaceFacts::Cone { axis, .. } = &face.facts.surface {
-                    let principal = Axis::dominant(*axis);
-                    let span = std::array::from_fn::<_, 3, _>(|axis| {
-                        face.bounds.max[axis] - face.bounds.min[axis]
-                    });
-                    let axial = span[principal.index()];
-                    let radial = span
-                        .into_iter()
-                        .enumerate()
-                        .filter(|(axis, _)| *axis != principal.index())
-                        .map(|(_, value)| value)
-                        .fold(0.0_f64, f64::max)
-                        / 2.0;
-                    if axial > 0.0 && axial <= radial && axial <= PAD_SEPARATION_GAP {
-                        let distance = round3(axial);
-                        if !revolved_seen.contains(&distance.to_bits()) {
-                            revolved_seen.push(distance.to_bits());
-                            chamfers.push(Feature {
-                                value: distance,
-                                selection: Some(format!(
-                                    "revolved chamfer (axis {})",
-                                    principal.as_str()
-                                )),
-                            });
-                        }
-                    }
-                }
-            }
-        }
-    }
-    let holes: Vec<_> = cylinders
-        .iter()
-        .filter(|face| face.reversed)
-        .map(|face| Hole {
-            diameter: face.radius * 2.0,
-            through: face.axis_min <= facts.shape.bounds.min[face.axis.index()] + 0.1
-                && face.axis_max >= facts.shape.bounds.max[face.axis.index()] - 0.1,
-            axis: face.axis,
-            center: face.center,
-            axis_min: face.axis_min,
-            axis_max: face.axis_max,
-        })
-        .collect();
-    let patterns = derive_patterns(&holes);
     Ok(Features {
         planar,
         cylinders,
-        holes,
-        patterns,
-        chamfers,
-        fillets,
+        // Only the qualified owning-solid query populates these inventories.
+        holes: Vec::new(),
+        patterns: Vec::new(),
     })
+}
+
+fn evaluate_bores(prepared: &Prepared, context: &mut EvaluationContext<'_>) -> Evaluation {
+    let bores = match context.circular_bores() {
+        Ok(value) => value,
+        Err(evaluation) => return evaluation,
+    };
+    let subject = context.subject();
+    let Some(brep) = subject.brep.as_deref() else {
+        return brep_evidence_unavailable();
+    };
+    let features = derive_features(brep).and_then(|mut features| {
+        populate_bores(&mut features, brep, &bores)?;
+        Ok(features)
+    });
+    let features = match features {
+        Ok(value) => value,
+        Err(error) => return backend_refused(prepared.capability(), error),
+    };
+    let mut outcome = match prepared {
+        Prepared::CircularHole(expected) => expected_hole(expected)(&features),
+        Prepared::CircularHolePattern(expected) => expected_pattern(expected)(&features),
+        _ => unreachable!(),
+    };
+    // One qualified hole is an existential witness. Pattern membership/counts
+    // need a complete relevant inventory and cannot discard unknown members.
+    if bore_inventory_is_partial(&bores)
+        && (!outcome.positive || matches!(prepared, Prepared::CircularHolePattern(_)))
+    {
+        return Evaluation::Refused {
+            diagnostics: vec![bore_uncertainty(prepared.capability(), &bores)],
+        };
+    }
+    if let Json::Object(fields) = &mut outcome.witnesses {
+        fields.push(("circularBoreTopology".into(), bore_inventory_json(&bores)));
+    }
+    geometric(prepared, &subject.content_hash, outcome)
+}
+
+fn populate_bores(
+    features: &mut Features,
+    brep: &dyn BrepSubject,
+    bores: &CircularBoreInventory,
+) -> Result<(), BackendError> {
+    let faces = brep.faces()?;
+    for candidate in &bores.candidates {
+        let CircularBoreDisposition::Qualified(topology) = &candidate.disposition else {
+            continue;
+        };
+        let face = faces
+            .get(candidate.public_face_ordinal as usize)
+            .filter(|face| face.facts.index == candidate.public_face_ordinal)
+            .ok_or_else(|| BackendError {
+                kind: BackendErrorKind::ComputationFailed,
+                message: "Qualified circular bore has no corresponding reported face.".into(),
+            })?;
+        let SurfaceFacts::Cylinder { radius, axis, .. } = face.facts.surface else {
+            return Err(BackendError {
+                kind: BackendErrorKind::ComputationFailed,
+                message: "Qualified circular bore does not correspond to an analytic cylinder."
+                    .into(),
+            });
+        };
+        let principal = Axis::dominant(axis);
+        features.holes.push(Hole {
+            diameter: radius * 2.0,
+            through: topology
+                .ends
+                .iter()
+                .all(|end| end.termination == CircularBoreTermination::Mouth),
+            axis: principal,
+            center: face.facts.center_of_mass,
+            // Retained nominal display values; never used to qualify topology.
+            axis_min: face.bounds.min[principal.index()],
+            axis_max: face.bounds.max[principal.index()],
+        });
+    }
+    if !bore_inventory_is_partial(bores) {
+        features.patterns = derive_patterns(&features.holes);
+    }
+    Ok(())
+}
+
+fn bore_inventory_is_partial(bores: &CircularBoreInventory) -> bool {
+    bores.candidates.iter().any(|candidate| {
+        matches!(
+            candidate.disposition,
+            CircularBoreDisposition::Unqualified(_)
+        )
+    })
+}
+
+fn bore_uncertainty(capability: Capability, bores: &CircularBoreInventory) -> Diagnostic {
+    let mut diagnostic = Diagnostic::error(
+        "GEOSPEC_UNSUPPORTED_EVIDENCE",
+        "Circular-bore topology is unqualified for one or more relevant faces.",
+    );
+    diagnostic.suggestion = Some(
+        "Inspect the candidate dispositions; unsupported trims or terminations cannot establish hole absence or a complete pattern."
+            .into(),
+    );
+    diagnostic.details = Some(Json::object([
+        ("matcher", Json::string(capability.name())),
+        ("circularBoreTopology", bore_inventory_json(bores)),
+    ]));
+    diagnostic
+}
+
+fn bore_inventory_json(bores: &CircularBoreInventory) -> Json {
+    Json::object([
+        ("profile", Json::string("geospec-circular-bore-topology-v1")),
+        ("grade", Json::string("kernel-model-topology")),
+        ("scope", Json::string("local-owning-solid-straight-bore")),
+        ("complete", Json::Bool(!bore_inventory_is_partial(bores))),
+        (
+            "candidates",
+            Json::Array(
+                bores.candidates.iter().map(|candidate| {
+                    let mut fields = vec![
+                        ("publicFaceOrdinal".into(), Json::Number(candidate.public_face_ordinal as f64)),
+                        ("privateQueryFace".into(), Json::Number(candidate.private_query_face as f64)),
+                    ];
+                    match &candidate.disposition {
+                        CircularBoreDisposition::NonMember(reason) => {
+                            fields.push(("status".into(), Json::string("nonmember")));
+                            fields.push(("reason".into(), Json::string(match reason {
+                                CircularBoreNonMember::ExteriorCylinder => "exterior-cylinder",
+                                CircularBoreNonMember::SealedCavity => "sealed-cavity",
+                                CircularBoreNonMember::ObstructedInterior => "obstructed-interior",
+                            })));
+                        }
+                        CircularBoreDisposition::Unqualified(reason) => {
+                            fields.push(("status".into(), Json::string("unqualified")));
+                            fields.push(("reason".into(), Json::string(match reason {
+                                CircularBoreUnqualified::UnsupportedSurface => "unsupported-surface",
+                                CircularBoreUnqualified::UnsupportedOrientation => "unsupported-orientation",
+                                CircularBoreUnqualified::AmbiguousOwnership => "ambiguous-ownership",
+                                CircularBoreUnqualified::InvalidSolid => "invalid-solid",
+                                CircularBoreUnqualified::IncompleteBand => "incomplete-band",
+                                CircularBoreUnqualified::UnsupportedTermination => "unsupported-termination",
+                                CircularBoreUnqualified::AmbiguousAssociation => "ambiguous-association",
+                            })));
+                        }
+                        CircularBoreDisposition::Qualified(topology) => {
+                            fields.extend([
+                                ("status".into(), Json::string("qualified")),
+                                ("owningSolidOrdinal".into(), Json::Number(topology.owning_solid_ordinal as f64)),
+                                ("band".into(), Json::object([
+                                    ("origin", point_json(topology.band.origin)),
+                                    ("axis", point_json(topology.band.axis)),
+                                    ("radius", Json::Number(topology.band.radius)),
+                                    ("from", Json::Number(topology.band.from)),
+                                    ("to", Json::Number(topology.band.to)),
+                                ])),
+                                ("ends".into(), Json::Array(topology.ends.iter().map(|end| Json::object([
+                                    ("owningSolidEdgeOrdinal", Json::Number(end.owning_solid_edge_ordinal as f64)),
+                                    ("adjacentPublicFaceOrdinal", Json::Number(end.adjacent_public_face_ordinal as f64)),
+                                    ("termination", Json::string(match end.termination {
+                                        CircularBoreTermination::Mouth => "mouth",
+                                        CircularBoreTermination::PlanarDiskBottom => "planar-disk-bottom",
+                                    })),
+                                ])).collect())),
+                                ("maximumTopologyToleranceMm".into(), Json::Number(topology.maximum_topology_tolerance_mm)),
+                                ("interiorResidualSolidCount".into(), Json::Number(topology.interior_residual_solid_count as f64)),
+                            ]);
+                        }
+                    }
+                    Json::Object(fields)
+                }).collect(),
+            ),
+        ),
+    ])
 }
 
 fn expected_planar(expected: &PlanarExpectation) -> FeatureDecision {
@@ -1765,63 +1890,554 @@ fn expected_pattern(expected: &PatternExpectation) -> FeatureDecision {
     })
 }
 
-fn expected_chamfer(expected: &FeatureExpectation) -> FeatureDecision {
-    expected_feature(expected, true)
-}
-
-fn expected_fillet(expected: &FeatureExpectation) -> FeatureDecision {
-    expected_feature(expected, false)
-}
-
-fn expected_feature(expected: &FeatureExpectation, chamfer: bool) -> FeatureDecision {
-    let expected = expected.clone();
-    Box::new(move |features| {
-        let rows = if chamfer {
-            &features.chamfers
+fn evaluate_edge_treatment(prepared: &Prepared, context: &mut EvaluationContext<'_>) -> Evaluation {
+    let inventory = match context.edge_treatments() {
+        Ok(value) => value,
+        Err(evaluation) => return evaluation,
+    };
+    let (expected, chamfer) = match prepared {
+        Prepared::ChamferFeature(expected) => (expected, true),
+        Prepared::FilletFeature(expected) => (expected, false),
+        _ => unreachable!(),
+    };
+    let mut matches = Vec::new();
+    let mut membership_unknown = false;
+    let mut label_unknown = false;
+    let mut selector_mismatch = false;
+    for row in &inventory.rows {
+        let disposition = if chamfer { &row.chamfer } else { &row.fillet };
+        match disposition {
+            EdgeTreatmentDisposition::Qualified(certificate)
+                if (certificate.metric_value_mm - expected.value).abs() <= expected.tolerance =>
+            {
+                match (&expected.selection, &row.label) {
+                    (None, _) => matches.push(edge_treatment_row_json(row)),
+                    (Some(expected), EdgeTreatmentLabel::Unique(actual)) if expected == actual => {
+                        matches.push(edge_treatment_row_json(row));
+                    }
+                    (Some(_), EdgeTreatmentLabel::Unique(_)) => selector_mismatch = true,
+                    (Some(_), EdgeTreatmentLabel::Absent | EdgeTreatmentLabel::Ambiguous) => {
+                        label_unknown = true;
+                    }
+                }
+            }
+            EdgeTreatmentDisposition::Unqualified(_) => membership_unknown = true,
+            EdgeTreatmentDisposition::Qualified(_) | EdgeTreatmentDisposition::NonMember(_) => {}
+        }
+    }
+    let topology = edge_treatment_inventory_json(&inventory);
+    if matches.is_empty() && (membership_unknown || label_unknown) {
+        let message = if label_unknown {
+            "A metric-qualified edge treatment lacks the unique source label required by the selector."
         } else {
-            &features.fillets
+            "Edge-treatment membership is unqualified for one or more relevant faces."
         };
-        let matches = rows
-            .iter()
-            .filter(|feature| {
-                (feature.value - expected.value).abs() <= expected.tolerance
-                    && expected
-                        .selection
-                        .as_ref()
-                        .is_none_or(|selection| feature.selection.as_ref() == Some(selection))
-            })
-            .map(|row| feature_json(row, chamfer))
-            .collect::<Vec<_>>();
-        let (matcher, noun, key, suggestion) = if chamfer {
-            (
-                "toHaveChamferFeature",
-                "chamfer",
-                "chamferFeatures",
-                "Check the declared chamfer distance against the export, or widen the tolerance.",
-            )
+        let diagnostic = edge_treatment_uncertainty(prepared.capability(), message, Some(topology));
+        let bytes = super::json_owned_bytes(&diagnostic.to_json());
+        if let Err(evaluation) = context.check_continuous_output(bytes) {
+            return evaluation;
+        }
+        return Evaluation::Refused {
+            diagnostics: vec![diagnostic],
+        };
+    }
+
+    let (matcher, noun, key) = if chamfer {
+        ("toHaveChamferFeature", "chamfer", "distance")
+    } else {
+        ("toHaveFilletFeature", "fillet", "radius")
+    };
+    let positive = !matches.is_empty();
+    let diagnostics = if positive {
+        Vec::new()
+    } else {
+        let mismatch_kind = if selector_mismatch {
+            "selectorMismatch"
         } else {
-            (
-                "toHaveFilletFeature",
-                "fillet",
-                "filletFeatures",
-                "Check the declared fillet radius against the export, or widen the tolerance.",
-            )
+            "geometricMismatch"
         };
-        feature_outcome(
+        vec![feature_mismatch(
             matcher,
-            format!(
-                "No {noun} feature has {} {} within {} mm.",
-                if chamfer { "distance" } else { "radius" },
-                number(expected.value),
-                number(expected.tolerance)
-            ),
-            suggestion,
-            key,
-            Json::Array(rows.iter().map(|row| feature_json(row, chamfer)).collect()),
-            matches,
-            expected.to_json(if chamfer { "distance" } else { "radius" }),
+            if selector_mismatch {
+                format!(
+                    "No metric-qualified {noun} has the exact requested source label; this is a selector mismatch, not geometric absence."
+                )
+            } else {
+                format!(
+                    "No qualified {noun} has {key} {} within {} mm.",
+                    number(expected.value),
+                    number(expected.tolerance)
+                )
+            },
+            "Check the source-owned selection and nominal metric against the export, or widen the tolerance.",
+            Json::object([
+                ("expected", expected.to_json(key)),
+                ("mismatchKind", Json::string(mismatch_kind)),
+            ]),
+        )]
+    };
+    let outcome = MatchOutcome {
+        positive,
+        measured: Json::object([("matchCount", Json::Number(matches.len() as f64))]),
+        witnesses: Json::object([
+            ("edgeTreatmentTopology", topology),
+            ("matches", Json::Array(matches)),
+            ("measurementContract", feature_measurement_contract(false)),
+        ]),
+        diagnostics,
+    };
+    let evaluation = geometric(prepared, &context.subject().content_hash, outcome);
+    if let Evaluation::Geometric {
+        evidence,
+        diagnostics,
+        ..
+    } = &evaluation
+    {
+        let bytes = diagnostics
+            .iter()
+            .fold(super::json_owned_bytes(evidence), |sum, value| {
+                sum.saturating_add(super::json_owned_bytes(&value.to_json()))
+            });
+        if let Err(evaluation) = context.check_continuous_output(bytes) {
+            return evaluation;
+        }
+    }
+    evaluation
+}
+
+fn edge_treatment_inventory_is_partial(inventory: &EdgeTreatmentInventory, chamfer: bool) -> bool {
+    inventory.rows.iter().any(|row| {
+        matches!(
+            if chamfer { &row.chamfer } else { &row.fillet },
+            EdgeTreatmentDisposition::Unqualified(_)
         )
     })
+}
+
+fn edge_treatment_uncertainty(
+    capability: Capability,
+    message: &str,
+    topology: Option<Json>,
+) -> Diagnostic {
+    let mut diagnostic = Diagnostic::error("GEOSPEC_UNSUPPORTED_EVIDENCE", message);
+    diagnostic.suggestion = Some(
+        "Inspect the typed dispositions and source associations; unresolved membership or labels cannot establish either polarity."
+            .into(),
+    );
+    let mut details = vec![("matcher".into(), Json::string(capability.name()))];
+    if let Some(topology) = topology {
+        details.push(("edgeTreatmentTopology".into(), topology));
+    }
+    diagnostic.details = Some(Json::Object(details));
+    diagnostic
+}
+
+fn edge_treatment_inventory_json(inventory: &EdgeTreatmentInventory) -> Json {
+    Json::object([
+        (
+            "profile",
+            Json::string("geospec-owning-solid-edge-treatment-v1"),
+        ),
+        (
+            "assurance",
+            Json::string("nominal-kernel-model-analytic-transition"),
+        ),
+        (
+            "complete",
+            Json::Bool(
+                !edge_treatment_inventory_is_partial(inventory, true)
+                    && !edge_treatment_inventory_is_partial(inventory, false),
+            ),
+        ),
+        (
+            "counts",
+            Json::object([
+                (
+                    "publicFaceCount",
+                    Json::Number(inventory.counts.public_face_count as f64),
+                ),
+                (
+                    "candidateEdgeUseCount",
+                    Json::Number(inventory.counts.candidate_edge_use_count as f64),
+                ),
+            ]),
+        ),
+        (
+            "rows",
+            Json::Array(inventory.rows.iter().map(edge_treatment_row_json).collect()),
+        ),
+    ])
+}
+
+fn edge_treatment_row_json(row: &crate::backend::brep::EdgeTreatmentRow) -> Json {
+    Json::object([
+        ("occurrence", option_u32_json(row.occurrence)),
+        ("occurrencePath", Json::string(&row.occurrence_path)),
+        (
+            "publicFaceOrdinal",
+            Json::Number(row.public_face_ordinal as f64),
+        ),
+        (
+            "privateQueryFace",
+            Json::Number(row.private_query_face as f64),
+        ),
+        (
+            "owningSolidOrdinal",
+            option_u32_json(row.owning_solid_ordinal),
+        ),
+        (
+            "sourceFaceKey",
+            row.source_face_key
+                .as_deref()
+                .map_or(Json::Null, Json::string),
+        ),
+        (
+            "sourceSameSense",
+            row.source_same_sense.map_or(Json::Null, Json::Bool),
+        ),
+        ("transferredReversed", Json::Bool(row.transferred_reversed)),
+        ("label", edge_treatment_label_json(&row.label)),
+        ("chamfer", edge_treatment_disposition_json(&row.chamfer)),
+        ("fillet", edge_treatment_disposition_json(&row.fillet)),
+    ])
+}
+
+fn option_u32_json(value: Option<u32>) -> Json {
+    value.map_or(Json::Null, |value| Json::Number(value as f64))
+}
+
+fn edge_treatment_label_json(label: &EdgeTreatmentLabel) -> Json {
+    match label {
+        EdgeTreatmentLabel::Unique(value) => Json::object([
+            ("status", Json::string("unique")),
+            ("value", Json::string(value)),
+        ]),
+        EdgeTreatmentLabel::Absent => Json::object([("status", Json::string("absent"))]),
+        EdgeTreatmentLabel::Ambiguous => Json::object([("status", Json::string("ambiguous"))]),
+    }
+}
+
+fn edge_treatment_disposition_json(disposition: &EdgeTreatmentDisposition) -> Json {
+    match disposition {
+        EdgeTreatmentDisposition::Qualified(certificate) => Json::object([
+            ("status", Json::string("qualified")),
+            ("certificate", edge_treatment_certificate_json(certificate)),
+        ]),
+        EdgeTreatmentDisposition::NonMember(reason) => Json::object([
+            ("status", Json::string("nonmember")),
+            ("reason", Json::string(edge_treatment_reason(*reason))),
+        ]),
+        EdgeTreatmentDisposition::Unqualified(reason) => Json::object([
+            ("status", Json::string("unqualified")),
+            ("reason", Json::string(edge_treatment_reason(*reason))),
+        ]),
+    }
+}
+
+fn edge_treatment_certificate_json(certificate: &EdgeTreatmentCertificate) -> Json {
+    Json::object([
+        ("kind", Json::string(edge_treatment_kind(certificate.kind))),
+        ("metricValueMm", Json::Number(certificate.metric_value_mm)),
+        ("surface", surface_facts_json(&certificate.surface)),
+        (
+            "parameterBounds",
+            numbers_json(certificate.parameter_bounds),
+        ),
+        (
+            "supports",
+            Json::Array(
+                certificate
+                    .supports
+                    .iter()
+                    .map(|support| {
+                        Json::object([
+                            (
+                                "publicFaceOrdinal",
+                                Json::Number(support.public_face_ordinal as f64),
+                            ),
+                            (
+                                "privateQueryFace",
+                                Json::Number(support.private_query_face as f64),
+                            ),
+                            ("surface", surface_facts_json(&support.surface)),
+                            ("parameterBounds", numbers_json(support.parameter_bounds)),
+                            (
+                                "transferredReversed",
+                                Json::Bool(support.transferred_reversed),
+                            ),
+                            (
+                                "maximumTopologyToleranceMm",
+                                Json::Number(support.maximum_topology_tolerance_mm),
+                            ),
+                        ])
+                    })
+                    .collect(),
+            ),
+        ),
+        (
+            "boundaryUses",
+            Json::Array(
+                certificate
+                    .boundary_uses
+                    .iter()
+                    .map(|edge| {
+                        Json::object([
+                            (
+                                "owningSolidEdgeOrdinal",
+                                Json::Number(edge.owning_solid_edge_ordinal as f64),
+                            ),
+                            ("wireOrdinal", Json::Number(edge.wire_ordinal as f64)),
+                            ("reversed", Json::Bool(edge.reversed)),
+                            ("seam", Json::Bool(edge.seam)),
+                            ("role", Json::string(edge_treatment_role(edge.role))),
+                            ("curve", curve_facts_json(&edge.curve)),
+                            ("parameterRange", numbers_json(edge.parameter_range)),
+                            ("start", point_json(edge.start)),
+                            ("end", point_json(edge.end)),
+                            ("lengthMm", Json::Number(edge.length_mm)),
+                            ("edgeToleranceMm", Json::Number(edge.edge_tolerance_mm)),
+                            (
+                                "vertexTolerancesMm",
+                                numbers_json(edge.vertex_tolerances_mm),
+                            ),
+                        ])
+                    })
+                    .collect(),
+            ),
+        ),
+        (
+            "residuals",
+            Json::Array(
+                certificate
+                    .residuals
+                    .iter()
+                    .map(|residual| {
+                        Json::object([
+                            ("kind", Json::string(edge_treatment_residual(residual.kind))),
+                            ("valueMm", Json::Number(residual.value_mm)),
+                            ("limitMm", Json::Number(residual.limit_mm)),
+                            ("scaleMm", Json::Number(residual.scale_mm)),
+                        ])
+                    })
+                    .collect(),
+            ),
+        ),
+        ("wireCount", Json::Number(certificate.wire_count as f64)),
+        (
+            "maximumTopologyToleranceMm",
+            Json::Number(certificate.maximum_topology_tolerance_mm),
+        ),
+        (
+            "materialSide",
+            Json::string(match certificate.material_side {
+                EdgeTreatmentMaterialSide::Convex => "convex",
+                EdgeTreatmentMaterialSide::Concave => "concave",
+            }),
+        ),
+        ("fullU", Json::Bool(certificate.full_u)),
+        ("sweepInterval", numbers_json(certificate.sweep_interval)),
+    ])
+}
+
+fn surface_facts_json(surface: &SurfaceFacts) -> Json {
+    match surface {
+        SurfaceFacts::Plane { origin, normal } => Json::object([
+            ("kind", Json::string("plane")),
+            ("origin", point_json(*origin)),
+            ("normal", point_json(*normal)),
+        ]),
+        SurfaceFacts::Cylinder {
+            origin,
+            axis,
+            radius,
+        } => Json::object([
+            ("kind", Json::string("cylinder")),
+            ("origin", point_json(*origin)),
+            ("axis", point_json(*axis)),
+            ("radius", Json::Number(*radius)),
+        ]),
+        SurfaceFacts::Cone {
+            origin,
+            axis,
+            reference_radius,
+            semi_angle,
+        } => Json::object([
+            ("kind", Json::string("cone")),
+            ("origin", point_json(*origin)),
+            ("axis", point_json(*axis)),
+            ("referenceRadius", Json::Number(*reference_radius)),
+            ("semiAngle", Json::Number(*semi_angle)),
+        ]),
+        SurfaceFacts::Sphere { center, radius } => Json::object([
+            ("kind", Json::string("sphere")),
+            ("center", point_json(*center)),
+            ("radius", Json::Number(*radius)),
+        ]),
+        SurfaceFacts::Torus {
+            center,
+            axis,
+            major_radius,
+            minor_radius,
+        } => Json::object([
+            ("kind", Json::string("torus")),
+            ("center", point_json(*center)),
+            ("axis", point_json(*axis)),
+            ("majorRadius", Json::Number(*major_radius)),
+            ("minorRadius", Json::Number(*minor_radius)),
+        ]),
+        SurfaceFacts::Bezier {
+            u_degree,
+            v_degree,
+            u_poles,
+            v_poles,
+        } => Json::object([
+            ("kind", Json::string("bezier")),
+            ("uDegree", Json::Number(*u_degree as f64)),
+            ("vDegree", Json::Number(*v_degree as f64)),
+            ("uPoles", Json::Number(*u_poles as f64)),
+            ("vPoles", Json::Number(*v_poles as f64)),
+        ]),
+        SurfaceFacts::Bspline {
+            u_degree,
+            v_degree,
+            u_poles,
+            v_poles,
+            u_knots,
+            v_knots,
+            u_rational,
+            v_rational,
+        } => Json::object([
+            ("kind", Json::string("bspline")),
+            ("uDegree", Json::Number(*u_degree as f64)),
+            ("vDegree", Json::Number(*v_degree as f64)),
+            ("uPoles", Json::Number(*u_poles as f64)),
+            ("vPoles", Json::Number(*v_poles as f64)),
+            ("uKnots", Json::Number(*u_knots as f64)),
+            ("vKnots", Json::Number(*v_knots as f64)),
+            ("uRational", Json::Bool(*u_rational)),
+            ("vRational", Json::Bool(*v_rational)),
+        ]),
+        SurfaceFacts::Revolution => Json::object([("kind", Json::string("revolution"))]),
+        SurfaceFacts::Extrusion => Json::object([("kind", Json::string("extrusion"))]),
+        SurfaceFacts::Offset => Json::object([("kind", Json::string("offset"))]),
+        SurfaceFacts::Other => Json::object([("kind", Json::string("other"))]),
+    }
+}
+
+fn curve_facts_json(curve: &CurveFacts) -> Json {
+    match curve {
+        CurveFacts::Line { origin, direction } => Json::object([
+            ("kind", Json::string("line")),
+            ("origin", point_json(*origin)),
+            ("direction", point_json(*direction)),
+        ]),
+        CurveFacts::Circle {
+            center,
+            axis,
+            radius,
+        } => Json::object([
+            ("kind", Json::string("circle")),
+            ("center", point_json(*center)),
+            ("axis", point_json(*axis)),
+            ("radius", Json::Number(*radius)),
+        ]),
+        CurveFacts::Ellipse {
+            center,
+            axis,
+            major_radius,
+            minor_radius,
+        } => Json::object([
+            ("kind", Json::string("ellipse")),
+            ("center", point_json(*center)),
+            ("axis", point_json(*axis)),
+            ("majorRadius", Json::Number(*major_radius)),
+            ("minorRadius", Json::Number(*minor_radius)),
+        ]),
+        CurveFacts::Bspline => Json::object([("kind", Json::string("bspline"))]),
+        CurveFacts::Other => Json::object([("kind", Json::string("other"))]),
+    }
+}
+
+fn numbers_json<const N: usize>(values: [f64; N]) -> Json {
+    Json::Array(values.into_iter().map(Json::Number).collect())
+}
+
+fn edge_treatment_kind(kind: EdgeTreatmentKind) -> &'static str {
+    match kind {
+        EdgeTreatmentKind::PlanarChamfer => "planarChamfer",
+        EdgeTreatmentKind::ConicalChamfer => "conicalChamfer",
+        EdgeTreatmentKind::CylindricalFillet => "cylindricalFillet",
+        EdgeTreatmentKind::ToroidalFillet => "toroidalFillet",
+    }
+}
+
+fn edge_treatment_reason(reason: EdgeTreatmentReason) -> &'static str {
+    match reason {
+        EdgeTreatmentReason::UnsupportedSurface => "unsupportedSurface",
+        EdgeTreatmentReason::UnsupportedTrim => "unsupportedTrim",
+        EdgeTreatmentReason::UnsupportedOrientation => "unsupportedOrientation",
+        EdgeTreatmentReason::AmbiguousOwnership => "ambiguousOwnership",
+        EdgeTreatmentReason::InvalidSolid => "invalidSolid",
+        EdgeTreatmentReason::AmbiguousAssociation => "ambiguousAssociation",
+        EdgeTreatmentReason::IncompleteBoundary => "incompleteBoundary",
+        EdgeTreatmentReason::DegenerateSupport => "degenerateSupport",
+        EdgeTreatmentReason::OutsideTopology => "outsideTopology",
+        EdgeTreatmentReason::OutsideMaterialBranch => "outsideMaterialBranch",
+        EdgeTreatmentReason::NonTangentSupport => "nonTangentSupport",
+        EdgeTreatmentReason::UnequalOffsets => "unequalOffsets",
+    }
+}
+
+fn edge_treatment_role(role: EdgeTreatmentBoundaryRole) -> &'static str {
+    match role {
+        EdgeTreatmentBoundaryRole::Rail0 => "rail0",
+        EdgeTreatmentBoundaryRole::Rail1 => "rail1",
+        EdgeTreatmentBoundaryRole::End => "end",
+        EdgeTreatmentBoundaryRole::Seam => "seam",
+    }
+}
+
+fn edge_treatment_residual(kind: EdgeTreatmentResidualKind) -> &'static str {
+    match kind {
+        EdgeTreatmentResidualKind::RailCoincidence => "railCoincidence",
+        EdgeTreatmentResidualKind::AxisCoincidence => "axisCoincidence",
+        EdgeTreatmentResidualKind::ParallelDirection => "parallelDirection",
+        EdgeTreatmentResidualKind::TangentDirection => "tangentDirection",
+        EdgeTreatmentResidualKind::EqualOffsets => "equalOffsets",
+        EdgeTreatmentResidualKind::RailStation => "railStation",
+        EdgeTreatmentResidualKind::MaterialBranch => "materialBranch",
+    }
+}
+
+fn qualified_edge_features_json(inventory: &EdgeTreatmentInventory, chamfer: bool) -> Json {
+    Json::Array(
+        inventory
+            .rows
+            .iter()
+            .filter_map(|row| {
+                let disposition = if chamfer { &row.chamfer } else { &row.fillet };
+                let EdgeTreatmentDisposition::Qualified(certificate) = disposition else {
+                    return None;
+                };
+                let mut fields = vec![
+                    (
+                        if chamfer { "distance" } else { "radius" }.into(),
+                        Json::Number(certificate.metric_value_mm),
+                    ),
+                    ("occurrence".into(), option_u32_json(row.occurrence)),
+                    ("occurrencePath".into(), Json::string(&row.occurrence_path)),
+                    (
+                        "publicFaceOrdinal".into(),
+                        Json::Number(row.public_face_ordinal as f64),
+                    ),
+                ];
+                if let EdgeTreatmentLabel::Unique(label) = &row.label {
+                    fields.push(("selection".into(), Json::string(label)));
+                }
+                Some(Json::Object(fields))
+            })
+            .collect(),
+    )
 }
 
 fn feature_outcome(
@@ -1953,39 +2569,6 @@ fn derive_patterns(holes: &[Hole]) -> Vec<HolePattern> {
         }
     }
     patterns
-}
-
-fn axis_aligned(normal: [f64; 3]) -> bool {
-    normal
-        .into_iter()
-        .filter(|value| value.abs() > 1e-4)
-        .count()
-        <= 1
-}
-
-fn estimate_chamfer(face: &PlanarFace, bounds: Bounds) -> f64 {
-    let mut extreme_offset = 0.0;
-    let mut max_normal = 0.0_f64;
-    let mut active_axes = 0;
-    for axis in 0..3 {
-        let value = face.normal[axis];
-        if value.abs() < 1e-4 {
-            continue;
-        }
-        active_axes += 1;
-        max_normal = max_normal.max(value.abs());
-        extreme_offset += value
-            * if value >= 0.0 {
-                bounds.max[axis]
-            } else {
-                bounds.min[axis]
-            };
-    }
-    if active_axes < 2 || max_normal <= 0.0 {
-        0.0
-    } else {
-        (extreme_offset - face.offset).abs() / max_normal
-    }
 }
 
 fn point_holds(measured: [f64; 3], expected: [Option<f64>; 3], tolerance: f64) -> bool {
@@ -2196,17 +2779,10 @@ fn pattern_json(value: &HolePattern) -> Json {
     ])
 }
 
-fn feature_json(value: &Feature, chamfer: bool) -> Json {
-    let mut fields = vec![(
-        if chamfer { "distance" } else { "radius" }.into(),
-        Json::Number(value.value),
-    )];
-    if let Some(value) = &value.selection {
-        fields.push(("selection".into(), Json::string(value)));
-    }
-    Json::Object(fields)
-}
-
 #[cfg(test)]
 #[path = "../../tests/matcher_brep.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "../../tests/edge_treatment_core.rs"]
+mod edge_treatment_core_tests;

@@ -9,6 +9,7 @@ use std::{
 use crate::{
     analysis::{
         batch::BatchAnalysis,
+        continuous::{self, GridPlan, Topology},
         mesh::{
             analyze, analyze_indexed, ConnectedComponents, MeshAnalysis, MeshAnalysisRecord,
             Primitive,
@@ -17,8 +18,12 @@ use crate::{
     },
     backend::{
         brep::{
-            BrepEntity, BrepSubject, ContinuousWallDomain, DocumentFacts, ReportedBrepBundle,
-            TessellationProfile,
+            Bounds, BrepEntity, BrepSubject, CircularBoreDisposition, CircularBoreInventory,
+            CircularBoreTermination, ContinuousWallDomain, ContinuousWallShape, DocumentFacts,
+            EdgeTreatmentCounts, EdgeTreatmentDisposition, EdgeTreatmentInventory,
+            EdgeTreatmentKind, LocatedFace, NominalCylindricalBand, RegularSolidContainment,
+            ReportedBrepBundle, SelectedContinuousDomain, StepSubjectMetadata, SurfaceFacts,
+            TessellationProfile, MAX_CIRCULAR_BORE_CANDIDATES, MAX_CIRCULAR_BORE_OWNED_BYTES,
         },
         csg_scope::CsgScope,
         BackendError, BackendErrorKind, TriangleMesh,
@@ -39,6 +44,14 @@ pub(crate) enum SubjectFormat {
     RationalPlate,
 }
 
+/// Internal retention namespace; public subject identities remain unchanged.
+pub(crate) fn subject_cache_key(namespace: &str, identity: &str) -> String {
+    format!(
+        "{}:{namespace}:{identity}",
+        crate::protocol::NUMERIC_PROFILE
+    )
+}
+
 /// One immutable source/profile identity. Heavy facts remain explicitly lazy.
 pub(crate) struct Subject {
     pub content_hash: String,
@@ -48,6 +61,7 @@ pub(crate) struct Subject {
     pub format: SubjectFormat,
     pub source_unit: String,
     pub rational_plate: Option<crate::certificates::engine::RationalSubject>,
+    pub parallel_plane: Option<crate::certificates::parallel_plane::SourceProof>,
     pub display_name: String,
     pub diagnostics: Vec<Diagnostic>,
     pub retention_limits: crate::backend::AnalysisRetentionLimits,
@@ -58,7 +72,13 @@ pub(crate) struct Subject {
     mesh_analysis: OnceCell<Rc<MeshAnalysis>>,
     report_bundle: OnceCell<Rc<ReportedBrepBundle>>,
     report_bytes: OnceCell<u64>,
+    circular_bores: OnceCell<Rc<CircularBoreInventory>>,
+    edge_treatment_counts: OnceCell<EdgeTreatmentCounts>,
+    edge_treatments: OnceCell<Rc<EdgeTreatmentInventory>>,
+    step_metadata: OnceCell<StepSubjectMetadata>,
     continuous_wall: OnceCell<Rc<ContinuousWallDomain>>,
+    selected_continuous: RefCell<[Option<Rc<SelectedContinuousDomain>>; 16]>,
+    continuous_topology: RefCell<Option<RetainedContinuousTopology>>,
     pub binary_limits: crate::backend::resources::BinaryAdmissionLimits,
     selector_index: OnceCell<Rc<SelectorIndex>>,
     tessellations: RefCell<Vec<RetainedTessellation>>,
@@ -73,6 +93,26 @@ struct RetainedTessellation {
     bytes: u64,
 }
 
+/// One successful topology demand per immutable subject/profile. Authored
+/// material order remains part of the witness identity; no numeric/name alias.
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct ContinuousTopologyKey {
+    occurrences: [u32; 16],
+    count: usize,
+    region: [u64; 6],
+}
+
+struct RetainedContinuousTopology {
+    key: ContinuousTopologyKey,
+    value: Rc<Topology>,
+}
+
+impl RetainedContinuousTopology {
+    fn owned_bytes(&self) -> u64 {
+        (size_of::<Self>() + 2 * size_of::<usize>()) as u64 + self.value.owned_bytes() as u64
+    }
+}
+
 impl Subject {
     pub(crate) fn new(content_hash: String, format: SubjectFormat, source_unit: String) -> Self {
         Self {
@@ -81,6 +121,7 @@ impl Subject {
             format,
             source_unit,
             rational_plate: None,
+            parallel_plane: None,
             display_name: "step".into(),
             diagnostics: Vec::new(),
             retention_limits: crate::EngineConfig::entry().analysis,
@@ -91,7 +132,13 @@ impl Subject {
             mesh_analysis: OnceCell::new(),
             report_bundle: OnceCell::new(),
             report_bytes: OnceCell::new(),
+            circular_bores: OnceCell::new(),
+            edge_treatment_counts: OnceCell::new(),
+            edge_treatments: OnceCell::new(),
+            step_metadata: OnceCell::new(),
             continuous_wall: OnceCell::new(),
+            selected_continuous: RefCell::new(std::array::from_fn(|_| None)),
+            continuous_topology: RefCell::new(None),
             binary_limits: crate::EngineConfig::entry().binary,
             selector_index: OnceCell::new(),
             tessellations: RefCell::new(Vec::new()),
@@ -155,7 +202,11 @@ impl Subject {
         let total = retained.iter().fold(
             bytes
                 .saturating_add(self.report_bytes.get().copied().unwrap_or(0))
-                .saturating_add(self.continuous_wall_bytes()),
+                .saturating_add(self.continuous_owned_bytes())
+                .saturating_add(self.f2_owned_bytes())
+                .saturating_add(self.circular_bore_owned_bytes())
+                .saturating_add(self.edge_treatment_owned_bytes())
+                .saturating_add(self.step_metadata_owned_bytes()),
             |sum, entry| sum.saturating_add(entry.bytes),
         );
         if total > self.retention_limits.max_mesh_bytes {
@@ -209,10 +260,10 @@ impl Subject {
 
     pub(crate) fn cache_identity(&self) -> Result<String, BackendError> {
         if let Some(identity) = self.semantic_identity.get() {
-            return Ok(format!("geospec-subject-v1:{}", identity.hash()));
+            return Ok(subject_cache_key("geospec-subject-v1", identity.hash()));
         }
         if self.format == SubjectFormat::MeshBufferV1 {
-            return Ok(format!("mesh-f32-bounds-v1:{}", self.content_hash));
+            return Ok(subject_cache_key("mesh-f32-bounds-v1", &self.content_hash));
         }
         Err(BackendError {
             kind: BackendErrorKind::ComputationFailed,
@@ -258,7 +309,11 @@ impl Subject {
             .fold(0_u64, |sum, entry| sum.saturating_add(entry.bytes));
         if bytes
             .saturating_add(existing)
-            .saturating_add(self.continuous_wall_bytes())
+            .saturating_add(self.continuous_owned_bytes())
+            .saturating_add(self.f2_owned_bytes())
+            .saturating_add(self.circular_bore_owned_bytes())
+            .saturating_add(self.edge_treatment_owned_bytes())
+            .saturating_add(self.step_metadata_owned_bytes())
             > self.retention_limits.max_mesh_bytes
         {
             return Err(report_limit());
@@ -312,6 +367,191 @@ impl Subject {
         Ok(self.report_bundle()?.map(|bundle| Rc::clone(&bundle.facts)))
     }
 
+    /// Success-only inventory for this immutable subject/profile. The context
+    /// owns the request debit; a warm result never removes that debit.
+    fn circular_bores(
+        &self,
+        faces: &[LocatedFace],
+        solid_count: usize,
+        edge_count: usize,
+    ) -> Result<Rc<CircularBoreInventory>, BackendError> {
+        self.cache_identity()?;
+        if let Some(value) = self.circular_bores.get() {
+            return Ok(Rc::clone(value));
+        }
+        let count = faces
+            .iter()
+            .filter(|face| !matches!(face.facts.surface, SurfaceFacts::Plane { .. }))
+            .count();
+        if count > MAX_CIRCULAR_BORE_CANDIDATES {
+            return Err(report_limit());
+        }
+        let brep = self.brep.as_deref().ok_or_else(|| BackendError {
+            kind: BackendErrorKind::Unsupported,
+            message: "The retained subject has no circular-bore topology connector.".into(),
+        })?;
+        let pending_rust = (size_of::<CircularBoreInventory>() + 2 * size_of::<usize>()) as u64
+            + (count as u64)
+                .saturating_mul(size_of::<crate::backend::brep::CircularBoreCandidate>() as u64);
+        // The adapter's bounded transfer may coexist with the receiving Rust
+        // vector. Reserve its full declared ceiling, then check actual Rust
+        // capacity after transfer. Kernel Boolean scratch is a separate limit.
+        self.check_f2_pending(pending_rust.saturating_add(MAX_CIRCULAR_BORE_OWNED_BYTES))?;
+        let value = brep.circular_bores(count)?;
+        validate_bore_inventory(&value, faces, solid_count, edge_count)?;
+        let bytes = value
+            .owned_bytes()
+            .saturating_add((2 * size_of::<usize>()) as u64);
+        // Include the pending transfer before publishing it. No second copy is
+        // retained in the adapter; Rc references share this one inventory.
+        if bytes > MAX_CIRCULAR_BORE_OWNED_BYTES {
+            return Err(report_limit());
+        }
+        self.check_f2_pending(bytes)?;
+        let value = Rc::new(value);
+        let _ = self.circular_bores.set(Rc::clone(&value));
+        Ok(value)
+    }
+
+    fn circular_bore_owned_bytes(&self) -> u64 {
+        self.circular_bores.get().map_or(0, |value| {
+            value
+                .owned_bytes()
+                .saturating_add((2 * size_of::<usize>()) as u64)
+        })
+    }
+
+    /// Lightweight counts are cached only after their complete scope agrees
+    /// with the already charged report. Geometry classification remains lazy.
+    fn edge_treatment_counts(
+        &self,
+        bundle: &ReportedBrepBundle,
+    ) -> Result<EdgeTreatmentCounts, BackendError> {
+        self.cache_identity()?;
+        if let Some(value) = self.edge_treatment_counts.get() {
+            return Ok(*value);
+        }
+        let brep = self
+            .brep
+            .as_deref()
+            .ok_or_else(edge_treatment_unavailable)?;
+        let value = brep.edge_treatment_counts()?;
+        let face_count = if bundle.facts.occurrences.is_empty() {
+            bundle.whole_faces.len()
+        } else {
+            bundle
+                .occurrence_faces
+                .iter()
+                .try_fold(0_usize, |sum, faces| {
+                    sum.checked_add(faces.len()).ok_or_else(report_limit)
+                })?
+        };
+        if face_count != value.public_face_count as usize {
+            return Err(edge_treatment_invalid());
+        }
+        if face_count > MAX_EDGE_TREATMENT_ROWS {
+            return Err(report_limit());
+        }
+        self.check_f2_pending(size_of::<EdgeTreatmentCounts>() as u64)?;
+        let _ = self.edge_treatment_counts.set(value);
+        Ok(value)
+    }
+
+    /// The caller debits F+U before either a hit or a new bounded transfer.
+    /// The adapter releases scratch during transfer; Subject owns the only
+    /// successful retained inventory, with no arbitrary profile-key growth.
+    fn edge_treatments(
+        &self,
+        counts: EdgeTreatmentCounts,
+        bundle: &ReportedBrepBundle,
+    ) -> Result<Rc<EdgeTreatmentInventory>, BackendError> {
+        self.cache_identity()?;
+        if let Some(value) = self.edge_treatments.get() {
+            return Ok(Rc::clone(value));
+        }
+        let brep = self
+            .brep
+            .as_deref()
+            .ok_or_else(edge_treatment_unavailable)?;
+        // Reserve the declared combined adapter/Rust transfer ceiling before
+        // starting it, including the later Rc allocation. This conservatively
+        // refuses when a configured lower aggregate ceiling cannot fit it.
+        self.check_f2_pending(
+            MAX_EDGE_TREATMENT_OWNED_BYTES.saturating_add((2 * size_of::<usize>()) as u64),
+        )?;
+        let value = brep.edge_treatments(counts.public_face_count as usize)?;
+        validate_edge_treatments(&value, counts, bundle)?;
+        let bytes = value
+            .owned_bytes()
+            .saturating_add((2 * size_of::<usize>()) as u64);
+        if bytes > MAX_EDGE_TREATMENT_OWNED_BYTES {
+            return Err(report_limit());
+        }
+        self.check_f2_pending(bytes)?;
+        let value = Rc::new(value);
+        let _ = self.edge_treatments.set(Rc::clone(&value));
+        Ok(value)
+    }
+
+    fn edge_treatment_owned_bytes(&self) -> u64 {
+        let counts = self
+            .edge_treatment_counts
+            .get()
+            .map_or(0, |_| size_of::<EdgeTreatmentCounts>() as u64);
+        counts.saturating_add(self.edge_treatments.get().map_or(0, |value| {
+            value
+                .owned_bytes()
+                .saturating_add((2 * size_of::<usize>()) as u64)
+        }))
+    }
+
+    pub(crate) fn step_subject_metadata(
+        &self,
+    ) -> Result<Option<&StepSubjectMetadata>, BackendError> {
+        if self.format != SubjectFormat::Step {
+            return Ok(None);
+        }
+        if let Some(value) = self.step_metadata.get() {
+            return Ok(Some(value));
+        }
+        self.cache_identity()?;
+        let Some(metadata) = self
+            .brep
+            .as_deref()
+            .ok_or_else(|| BackendError {
+                kind: BackendErrorKind::Unsupported,
+                message: "The retained STEP subject has no BRep metadata connector.".into(),
+            })?
+            .step_subject_metadata()?
+        else {
+            return Ok(None);
+        };
+        if metadata.source_byte_length as u64 > self.binary_limits.max_subject_bytes
+            || metadata.free_shape_count as u64 > u64::from(self.binary_limits.max_occurrences)
+            || metadata
+                .schema
+                .as_ref()
+                .is_some_and(|schema| schema.len() > 4 * 1024)
+        {
+            return Err(report_limit());
+        }
+        let bytes = step_metadata_owned_bytes(&metadata);
+        let total = self.tessellations.borrow().iter().fold(
+            bytes
+                .saturating_add(self.report_bytes.get().copied().unwrap_or(0))
+                .saturating_add(self.continuous_owned_bytes())
+                .saturating_add(self.f2_owned_bytes())
+                .saturating_add(self.circular_bore_owned_bytes())
+                .saturating_add(self.edge_treatment_owned_bytes()),
+            |sum, entry| sum.saturating_add(entry.bytes),
+        );
+        if total > self.retention_limits.max_mesh_bytes {
+            return Err(report_limit());
+        }
+        let _ = self.step_metadata.set(metadata);
+        Ok(self.step_metadata.get())
+    }
+
     /// One fixed-profile owned certificate. The caller charges the logical
     /// request before this lookup, so retained and fresh results cost equally.
     pub(crate) fn continuous_wall_domain(&self) -> Result<Rc<ContinuousWallDomain>, BackendError> {
@@ -327,7 +567,13 @@ impl Subject {
         // growth. Include its Rc counters in the shared derived-data ceiling.
         let bytes = continuous_wall_owned_bytes();
         let retained = self.tessellations.borrow().iter().fold(
-            bytes.saturating_add(self.report_bytes.get().copied().unwrap_or(0)),
+            bytes
+                .saturating_add(self.report_bytes.get().copied().unwrap_or(0))
+                .saturating_add(self.selected_continuous_bytes())
+                .saturating_add(self.f2_owned_bytes())
+                .saturating_add(self.circular_bore_owned_bytes())
+                .saturating_add(self.edge_treatment_owned_bytes())
+                .saturating_add(self.step_metadata_owned_bytes()),
             |sum, entry| sum.saturating_add(entry.bytes),
         );
         if retained > self.retention_limits.max_mesh_bytes {
@@ -338,12 +584,168 @@ impl Subject {
         Ok(value)
     }
 
-    fn continuous_wall_bytes(&self) -> u64 {
-        if self.continuous_wall.get().is_some() {
+    /// The caller charges one logical request per distinct occurrence before
+    /// every lookup. Only successful associated certificates are retained.
+    pub(crate) fn selected_continuous_domain(
+        &self,
+        occurrence: u32,
+    ) -> Result<Rc<SelectedContinuousDomain>, BackendError> {
+        self.cache_identity()?;
+        if let Some(value) = self
+            .selected_continuous
+            .borrow()
+            .iter()
+            .flatten()
+            .find(|value| value.occurrence == occurrence)
+        {
+            return Ok(Rc::clone(value));
+        }
+        let brep = self.brep.as_deref().ok_or_else(|| BackendError {
+            kind: BackendErrorKind::Unsupported,
+            message: "The retained subject has no selected continuous domain connector.".into(),
+        })?;
+        let value = brep.selected_continuous_domain(occurrence)?;
+        let (faces, edges) = match &value.domain.domain {
+            ContinuousWallShape::AxisAlignedBox { .. } => (6, 12),
+            ContinuousWallShape::RightCircularCylinder { .. } => (3, 3),
+        };
+        if value.occurrence != occurrence
+            || !complete_query_map(&value.domain_face_to_occurrence_face, faces)
+            || !complete_query_map(&value.domain_edge_to_occurrence_edge, edges)
+        {
+            return Err(BackendError {
+                kind: BackendErrorKind::ComputationFailed,
+                message: "Selected continuous domain association is inconsistent.".into(),
+            });
+        }
+        // The transferred result is pending owned output even when all sixteen
+        // retained cells are occupied. Count actual vector capacities, not just
+        // certificate cardinalities, before publishing or retaining that output.
+        let bytes = selected_continuous_owned_bytes(&value);
+        let continuous = self.continuous_owned_bytes().saturating_add(bytes);
+        let total = self.tessellations.borrow().iter().fold(
+            continuous
+                .saturating_add(self.report_bytes.get().copied().unwrap_or(0))
+                .saturating_add(self.f2_owned_bytes())
+                .saturating_add(self.circular_bore_owned_bytes())
+                .saturating_add(self.edge_treatment_owned_bytes())
+                .saturating_add(self.step_metadata_owned_bytes()),
+            |sum, entry| sum.saturating_add(entry.bytes),
+        );
+        if continuous > 32 * 1024 * 1024 || total > self.retention_limits.max_mesh_bytes {
+            return Err(report_limit());
+        }
+        let value = Rc::new(value);
+        if let Some(cell) = self
+            .selected_continuous
+            .borrow_mut()
+            .iter_mut()
+            .find(|cell| cell.is_none())
+        {
+            *cell = Some(Rc::clone(&value));
+        }
+        Ok(value)
+    }
+
+    fn check_selected_transfers(
+        &self,
+        transfers: &[Rc<SelectedContinuousDomain>],
+        reference_capacity: usize,
+    ) -> Result<(), BackendError> {
+        self.check_continuous_pending(transfers, reference_capacity, 0)
+    }
+
+    fn check_continuous_pending(
+        &self,
+        transfers: &[Rc<SelectedContinuousDomain>],
+        reference_capacity: usize,
+        extra_bytes: u64,
+    ) -> Result<(), BackendError> {
+        let retained = self.selected_continuous.borrow();
+        let pending = transfers.iter().fold(
+            (reference_capacity as u64)
+                .saturating_mul(size_of::<Rc<SelectedContinuousDomain>>() as u64),
+            |sum, value| {
+                if retained
+                    .iter()
+                    .flatten()
+                    .any(|cached| Rc::ptr_eq(cached, value))
+                {
+                    sum
+                } else {
+                    sum.saturating_add(selected_continuous_owned_bytes(value))
+                }
+            },
+        );
+        let continuous = self
+            .continuous_owned_bytes()
+            .saturating_add(pending)
+            .saturating_add(extra_bytes);
+        let total = self.tessellations.borrow().iter().fold(
+            continuous
+                .saturating_add(self.report_bytes.get().copied().unwrap_or(0))
+                .saturating_add(self.f2_owned_bytes())
+                .saturating_add(self.circular_bore_owned_bytes())
+                .saturating_add(self.edge_treatment_owned_bytes())
+                .saturating_add(self.step_metadata_owned_bytes()),
+            |sum, entry| sum.saturating_add(entry.bytes),
+        );
+        if continuous > 32 * 1024 * 1024 || total > self.retention_limits.max_mesh_bytes {
+            return Err(report_limit());
+        }
+        Ok(())
+    }
+
+    fn f2_owned_bytes(&self) -> u64 {
+        self.parallel_plane
+            .as_ref()
+            .map_or(0, |value| value.owned_bytes())
+    }
+
+    fn step_metadata_owned_bytes(&self) -> u64 {
+        self.step_metadata
+            .get()
+            .map_or(0, step_metadata_owned_bytes)
+    }
+
+    pub(crate) fn check_f2_pending(&self, pending: u64) -> Result<(), BackendError> {
+        let total = self.tessellations.borrow().iter().fold(
+            pending
+                .saturating_add(self.f2_owned_bytes())
+                .saturating_add(self.circular_bore_owned_bytes())
+                .saturating_add(self.edge_treatment_owned_bytes())
+                .saturating_add(self.continuous_owned_bytes())
+                .saturating_add(self.report_bytes.get().copied().unwrap_or(0))
+                .saturating_add(self.step_metadata_owned_bytes()),
+            |sum, entry| sum.saturating_add(entry.bytes),
+        );
+        if total > self.retention_limits.max_mesh_bytes {
+            return Err(report_limit());
+        }
+        Ok(())
+    }
+
+    fn selected_continuous_bytes(&self) -> u64 {
+        self.selected_continuous.borrow().iter().flatten().fold(
+            size_of::<[Option<Rc<SelectedContinuousDomain>>; 16]>() as u64,
+            |sum, value| sum.saturating_add(selected_continuous_owned_bytes(value)),
+        )
+    }
+
+    fn continuous_owned_bytes(&self) -> u64 {
+        let whole = if self.continuous_wall.get().is_some() {
             continuous_wall_owned_bytes()
         } else {
             0
-        }
+        };
+        whole
+            .saturating_add(self.selected_continuous_bytes())
+            .saturating_add(
+                self.continuous_topology
+                    .borrow()
+                    .as_ref()
+                    .map_or(0, RetainedContinuousTopology::owned_bytes),
+            )
     }
 
     /// One index for the immutable retained BRep, shared by every prepared claim.
@@ -389,8 +791,222 @@ impl Subject {
     }
 }
 
+const MAX_EDGE_TREATMENT_ROWS: usize = 4096;
+const MAX_EDGE_TREATMENT_OWNED_BYTES: u64 = 1024 * 1024;
+
+fn edge_treatment_unavailable() -> BackendError {
+    BackendError {
+        kind: BackendErrorKind::Unsupported,
+        message: "The retained subject has no owning-solid edge-treatment connector.".into(),
+    }
+}
+
+fn edge_treatment_invalid() -> BackendError {
+    BackendError {
+        kind: BackendErrorKind::ComputationFailed,
+        message: "Edge-treatment inventory has incomplete or inconsistent scoped associations."
+            .into(),
+    }
+}
+
+fn validate_edge_treatments(
+    value: &EdgeTreatmentInventory,
+    counts: EdgeTreatmentCounts,
+    bundle: &ReportedBrepBundle,
+) -> Result<(), BackendError> {
+    if value.counts != counts
+        || value.rows.len() != counts.public_face_count as usize
+        || value.rows.len() > MAX_EDGE_TREATMENT_ROWS
+    {
+        return Err(edge_treatment_invalid());
+    }
+    let mut rows = value.rows.iter();
+    let mut validate_scope = |occurrence: Option<u32>, path: &str, faces: &[LocatedFace]| {
+        for face in faces {
+            let row = rows.next().ok_or_else(edge_treatment_invalid)?;
+            let private = match (occurrence, face.entity) {
+                (None, BrepEntity::WholeFace(index)) => index,
+                (
+                    Some(occurrence),
+                    BrepEntity::Face {
+                        occurrence: actual,
+                        face,
+                    },
+                ) if occurrence == actual => face,
+                _ => return Err(edge_treatment_invalid()),
+            };
+            if row.occurrence != occurrence
+                || row.occurrence_path != path
+                || row.public_face_ordinal != face.facts.index
+                || row.private_query_face != private
+                || private == 0
+                || row.transferred_reversed != face.reversed
+            {
+                return Err(edge_treatment_invalid());
+            }
+            for (is_chamfer, disposition) in [(true, &row.chamfer), (false, &row.fillet)] {
+                let EdgeTreatmentDisposition::Qualified(certificate) = disposition else {
+                    continue;
+                };
+                if row.owning_solid_ordinal.is_none()
+                    || is_chamfer
+                        != matches!(
+                            certificate.kind,
+                            EdgeTreatmentKind::PlanarChamfer | EdgeTreatmentKind::ConicalChamfer
+                        )
+                    || !certificate.metric_value_mm.is_finite()
+                    || certificate.metric_value_mm <= 0.0
+                    || certificate.boundary_uses.len() > 8
+                    || certificate.boundary_uses.is_empty()
+                    || certificate.residuals.len() > 16
+                    || certificate.residuals.is_empty()
+                    || certificate.wire_count == 0
+                {
+                    return Err(edge_treatment_invalid());
+                }
+                for support in &certificate.supports {
+                    let actual = faces
+                        .get(support.public_face_ordinal as usize)
+                        .ok_or_else(edge_treatment_invalid)?;
+                    let expected = match occurrence {
+                        Some(occurrence) => BrepEntity::Face {
+                            occurrence,
+                            face: support.private_query_face,
+                        },
+                        None => BrepEntity::WholeFace(support.private_query_face),
+                    };
+                    if support.public_face_ordinal == row.public_face_ordinal
+                        || support.private_query_face == 0
+                        || actual.facts.index != support.public_face_ordinal
+                        || actual.entity != expected
+                        || actual.reversed != support.transferred_reversed
+                    {
+                        return Err(edge_treatment_invalid());
+                    }
+                }
+                if certificate.supports[0].public_face_ordinal
+                    == certificate.supports[1].public_face_ordinal
+                {
+                    return Err(edge_treatment_invalid());
+                }
+            }
+        }
+        Ok(())
+    };
+    if bundle.facts.occurrences.is_empty() {
+        validate_scope(None, "", &bundle.whole_faces)?;
+    } else {
+        if bundle.occurrence_faces.len() != bundle.facts.occurrences.len() {
+            return Err(edge_treatment_invalid());
+        }
+        for (index, (occurrence, faces)) in bundle
+            .facts
+            .occurrences
+            .iter()
+            .zip(&bundle.occurrence_faces)
+            .enumerate()
+        {
+            validate_scope(Some(index as u32), &occurrence.path, faces)?;
+        }
+    }
+    if rows.next().is_some() {
+        return Err(edge_treatment_invalid());
+    }
+    Ok(())
+}
+
+fn validate_bore_inventory(
+    value: &CircularBoreInventory,
+    faces: &[LocatedFace],
+    solid_count: usize,
+    edge_count: usize,
+) -> Result<(), BackendError> {
+    let invalid = || BackendError {
+        kind: BackendErrorKind::ComputationFailed,
+        message: "Circular-bore topology transfer has incomplete or inconsistent associations."
+            .into(),
+    };
+    let candidates = faces
+        .iter()
+        .filter(|face| !matches!(face.facts.surface, SurfaceFacts::Plane { .. }));
+    if value.candidates.len() > MAX_CIRCULAR_BORE_CANDIDATES
+        || value.candidates.len() != candidates.clone().count()
+    {
+        return Err(invalid());
+    }
+    for (actual, expected) in value.candidates.iter().zip(candidates) {
+        if actual.public_face_ordinal != expected.facts.index
+            || expected.entity != BrepEntity::WholeFace(actual.private_query_face)
+            || actual.private_query_face == 0
+        {
+            return Err(invalid());
+        }
+        let CircularBoreDisposition::Qualified(topology) = &actual.disposition else {
+            continue;
+        };
+        let band = &topology.band;
+        if topology.owning_solid_ordinal as usize >= solid_count
+            || !matches!(expected.facts.surface, SurfaceFacts::Cylinder { .. })
+            || !expected.reversed
+            || !band.origin.into_iter().all(f64::is_finite)
+            || !band.axis.into_iter().all(f64::is_finite)
+            || !band.axis.into_iter().any(|component| component != 0.0)
+            || !band.radius.is_finite()
+            || band.radius <= 0.0
+            || !band.from.is_finite()
+            || !band.to.is_finite()
+            || band.from >= band.to
+            || !topology.maximum_topology_tolerance_mm.is_finite()
+            || topology.maximum_topology_tolerance_mm < 0.0
+            || topology.interior_residual_solid_count != 0
+            || !topology
+                .ends
+                .iter()
+                .any(|end| end.termination == CircularBoreTermination::Mouth)
+            || topology.ends[0].owning_solid_edge_ordinal
+                == topology.ends[1].owning_solid_edge_ordinal
+            || topology.ends[0].adjacent_public_face_ordinal
+                == topology.ends[1].adjacent_public_face_ordinal
+        {
+            return Err(invalid());
+        }
+        for end in topology.ends {
+            let adjacent = faces
+                .get(end.adjacent_public_face_ordinal as usize)
+                .ok_or_else(invalid)?;
+            if end.owning_solid_edge_ordinal == 0
+                || end.owning_solid_edge_ordinal as usize > edge_count
+                || adjacent.facts.index != end.adjacent_public_face_ordinal
+                || !matches!(adjacent.facts.surface, SurfaceFacts::Plane { .. })
+            {
+                return Err(invalid());
+            }
+        }
+    }
+    Ok(())
+}
+
 fn continuous_wall_owned_bytes() -> u64 {
     (size_of::<ContinuousWallDomain>() + 2 * size_of::<usize>()) as u64
+}
+
+fn selected_continuous_owned_bytes(value: &SelectedContinuousDomain) -> u64 {
+    (size_of::<SelectedContinuousDomain>() + 2 * size_of::<usize>()) as u64
+        + (value.domain_face_to_occurrence_face.capacity() as u64)
+            .saturating_mul(size_of::<u32>() as u64)
+        + (value.domain_edge_to_occurrence_edge.capacity() as u64)
+            .saturating_mul(size_of::<u32>() as u64)
+}
+
+fn step_metadata_owned_bytes(value: &StepSubjectMetadata) -> u64 {
+    size_of::<StepSubjectMetadata>() as u64
+        + value.schema.as_ref().map_or(0, |schema| schema.capacity()) as u64
+}
+
+fn complete_query_map(values: &[u32], count: usize) -> bool {
+    values.len() == count
+        && (1..=count as u32)
+            .all(|index| values.iter().filter(|value| **value == index).count() == 1)
 }
 
 fn report_limit() -> BackendError {
@@ -504,6 +1120,9 @@ pub(crate) struct EvaluationContext<'a> {
     pub csg: Option<CsgScope<'a>>,
     mesh_charged: bool,
     brep_charged: bool,
+    selected_domains: Vec<Rc<SelectedContinuousDomain>>,
+    cylindrical_bands: Vec<Rc<NominalCylindricalBand>>,
+    cylindrical_band_output_bytes: u64,
     batch: Option<&'a BatchAnalysis>,
 }
 
@@ -525,6 +1144,9 @@ impl<'a> EvaluationContext<'a> {
             csg,
             mesh_charged: false,
             brep_charged: false,
+            selected_domains: Vec::new(),
+            cylindrical_bands: Vec::new(),
+            cylindrical_band_output_bytes: 0,
             batch: None,
         }
     }
@@ -604,6 +1226,384 @@ impl<'a> EvaluationContext<'a> {
         }
         self.subject().brep_facts().map_err(backend_refusal)
     }
+
+    pub(crate) fn circular_bores(&mut self) -> Result<Rc<CircularBoreInventory>, Evaluation> {
+        self.brep_facts()?;
+        let subject = self.subject();
+        let bundle = subject
+            .report_bundle()
+            .map_err(backend_refusal)?
+            .ok_or_else(|| {
+                backend_refusal(BackendError {
+                    kind: BackendErrorKind::Unsupported,
+                    message: "Circular-bore topology requires retained BRep faces.".into(),
+                })
+            })?;
+        let count = bundle
+            .whole_faces
+            .iter()
+            .filter(|face| !matches!(face.facts.surface, SurfaceFacts::Plane { .. }))
+            .count();
+        self.budget
+            .charge(1_u64.saturating_add(count as u64))
+            .map_err(|error| Evaluation::budget_exceeded(self.capability, error))?;
+        subject
+            .circular_bores(
+                &bundle.whole_faces,
+                bundle.facts.shape.topology.solids,
+                bundle.facts.shape.topology.edges,
+            )
+            .map_err(backend_refusal)
+    }
+
+    /// One requested regular-solid difference, charged before any connector
+    /// query or connector-owned lookup. No core result cache is introduced.
+    pub(crate) fn regular_solid_containment(
+        &mut self,
+        subject: BrepEntity,
+        target: BrepEntity,
+    ) -> Result<RegularSolidContainment, Evaluation> {
+        self.brep_facts()?;
+        self.budget
+            .charge(1)
+            .map_err(|error| Evaluation::budget_exceeded(self.capability, error))?;
+        let brep = self.subject().brep.as_deref().ok_or_else(|| {
+            backend_refusal(BackendError {
+                kind: BackendErrorKind::Unsupported,
+                message: "Regular-solid containment requires BRep evidence.".into(),
+            })
+        })?;
+        let value = brep
+            .regular_solid_containment(subject, target)
+            .map_err(backend_refusal)?;
+        // Topology is authoritative. Volume and location are diagnostics, not
+        // an epsilon-based emptiness test. Reject inconsistent transport facts.
+        let empty = value.residual_solid_count == 0;
+        if value.contained != empty
+            || !value.residual_volume.is_finite()
+            || if empty {
+                value.residual_volume != 0.0
+                    || value.residual_bounds.is_some()
+                    || value.residual_center_of_mass.is_some()
+            } else {
+                value.residual_volume <= 0.0
+            }
+            || value.residual_bounds.is_some_and(|bounds| {
+                (0..3).any(|axis| {
+                    !bounds.min[axis].is_finite()
+                        || !bounds.max[axis].is_finite()
+                        || bounds.min[axis] > bounds.max[axis]
+                })
+            })
+            || value
+                .residual_center_of_mass
+                .is_some_and(|point| !point.into_iter().all(f64::is_finite))
+        {
+            return Err(backend_refusal(BackendError {
+                kind: BackendErrorKind::ComputationFailed,
+                message: "The BRep connector returned inconsistent regular-solid residual facts."
+                    .into(),
+            }));
+        }
+        Ok(value)
+    }
+
+    /// Claim-local distinct-face demand. An entry can exist only after its
+    /// debit and validated query succeed; reusing that paid demand is not a
+    /// persistent cache hit. A new demand is charged before report/query lookup.
+    pub(crate) fn nominal_cylindrical_band(
+        &mut self,
+        entity: BrepEntity,
+        public_face_ordinal: u32,
+    ) -> Result<Rc<NominalCylindricalBand>, Evaluation> {
+        let BrepEntity::Face { occurrence, face } = entity else {
+            return Err(cylindrical_band_refusal(
+                "Cylindrical-band clearance requires a selected occurrence face.",
+            ));
+        };
+        if face == 0 {
+            return Err(cylindrical_band_refusal(
+                "Cylindrical-band clearance requires a one-based private query face.",
+            ));
+        }
+        if let Some(value) = self
+            .cylindrical_bands
+            .iter()
+            .find(|value| value.occurrence == occurrence && value.private_query_face == face)
+        {
+            if value.public_face_ordinal != public_face_ordinal {
+                return Err(cylindrical_band_refusal(
+                    "A repeated private face has a different public association.",
+                ));
+            }
+            return Ok(Rc::clone(value));
+        }
+        self.budget
+            .charge(1)
+            .map_err(|error| Evaluation::budget_exceeded(self.capability, error))?;
+        // Fixed C1 result plus Rc allocation, ABI/Rust transfer and possible
+        // Vec growth. Account capacity, including allocator over-reservation.
+        let record = (size_of::<NominalCylindricalBand>() + 2 * size_of::<usize>()) as u64;
+        // The frozen adapter has one fixed ABI record, conversion arrays and
+        // one Rust return value. Two Rust pairs conservatively cover those
+        // payloads, including the ABI's wider enum/bool slots and padding.
+        // Compiler machine frames and kernel work are outside this contract.
+        let transfer = 2 * continuous::CYLINDRICAL_BAND_INPUT_PAIR_BYTES as u64;
+        // During growth the old pointer buffer may coexist with the new one.
+        self.check_cylindrical_band_capacity(&[
+            record,
+            transfer,
+            ((self.cylindrical_bands.capacity() + 1) * size_of::<Rc<NominalCylindricalBand>>())
+                as u64,
+        ])?;
+        self.cylindrical_bands.try_reserve_exact(1).map_err(|_| {
+            cylindrical_band_refusal("Cylindrical-band claim-local retention allocation failed.")
+        })?;
+        self.check_cylindrical_band_capacity(&[record, transfer])?;
+        let bundle = self
+            .subject()
+            .report_bundle()
+            .map_err(backend_refusal)?
+            .ok_or_else(|| {
+                cylindrical_band_refusal(
+                    "Cylindrical-band clearance needs retained occurrence-face evidence.",
+                )
+            })?;
+        let selected = bundle.occurrence_faces.get(occurrence as usize)
+            .and_then(|faces| faces.get(public_face_ordinal as usize))
+            .filter(|selected| selected.facts.index == public_face_ordinal && selected.entity == entity)
+            .ok_or_else(|| cylindrical_band_refusal("The selected public face does not map to its private occurrence query address."))?;
+        let brep = self.subject().brep.as_deref().ok_or_else(|| {
+            cylindrical_band_refusal("Cylindrical-band clearance requires BRep evidence.")
+        })?;
+        let value = brep
+            .nominal_cylindrical_band(entity)
+            .map_err(backend_refusal)?;
+        if value.occurrence != occurrence
+            || value.public_face_ordinal != public_face_ordinal
+            || value.private_query_face != face
+            || value.transferred_reversed != selected.reversed
+            || value.source_face_entity == 0
+            || !(1..=value.source_route.len() as u32).contains(&value.source_route_count)
+            || value.source_route[..value.source_route_count as usize].contains(&0)
+            || value.source_route[value.source_route_count as usize..]
+                .iter()
+                .any(|label| *label != 0)
+        {
+            return Err(cylindrical_band_refusal(
+                "C1 returned a mismatched or incomplete source-face association.",
+            ));
+        }
+        let value = Rc::new(value);
+        self.cylindrical_bands.push(Rc::clone(&value));
+        Ok(value)
+    }
+
+    /// Additional requested payload capacity, not allocator/RSS or machine
+    /// stack accounting. The shared report/kernel storage is already admitted.
+    /// Count ALL retained C1 records, not merely the current borrowed pair.
+    pub(crate) fn check_cylindrical_band_capacity(
+        &self,
+        pending: &[u64],
+    ) -> Result<(), Evaluation> {
+        let other_domains = self.selected_domains.iter().fold(
+            (self.selected_domains.capacity() as u64)
+                .checked_mul(size_of::<Rc<SelectedContinuousDomain>>() as u64),
+            |total, domain| {
+                total.and_then(|bytes| {
+                    bytes
+                        .checked_add(
+                            (size_of::<SelectedContinuousDomain>() + 2 * size_of::<usize>()) as u64,
+                        )?
+                        .checked_add(
+                            (domain.domain_face_to_occurrence_face.capacity() as u64)
+                                .checked_mul(size_of::<u32>() as u64)?,
+                        )?
+                        .checked_add(
+                            (domain.domain_edge_to_occurrence_edge.capacity() as u64)
+                                .checked_mul(size_of::<u32>() as u64)?,
+                        )
+                })
+            },
+        );
+        let records = (self.cylindrical_bands.len() as u64)
+            .checked_mul((size_of::<NominalCylindricalBand>() + 2 * size_of::<usize>()) as u64);
+        let retained = (self.cylindrical_bands.capacity() as u64)
+            .checked_mul(size_of::<Rc<NominalCylindricalBand>>() as u64)
+            .and_then(|pointers| pointers.checked_add(records?))
+            .and_then(|bytes| {
+                bytes.checked_add(size_of::<Vec<Rc<NominalCylindricalBand>>>() as u64)
+            })
+            .and_then(|bytes| bytes.checked_add(self.cylindrical_band_output_bytes));
+        let requested = retained
+            .and_then(|bytes| bytes.checked_add(other_domains?))
+            .and_then(|retained| {
+                pending
+                    .iter()
+                    .try_fold(retained, |total, value| total.checked_add(*value))
+            });
+        if requested.is_none_or(|requested| requested > 256 * 1024) {
+            return Err(cylindrical_band_refusal(
+                "Simultaneous cylindrical-band clearance capacity exceeds 256 KiB.",
+            ));
+        }
+        Ok(())
+    }
+
+    /// Replace the previous live caller charge as proofs move into result
+    /// rows. Predicate scratch is a call-local pending reservation, never a
+    /// retained charge that leaks into the next phase or the next claim.
+    pub(crate) fn set_cylindrical_band_output_bytes(
+        &mut self,
+        bytes: u64,
+    ) -> Result<(), Evaluation> {
+        self.cylindrical_band_output_bytes = bytes;
+        self.check_cylindrical_band_capacity(&[])
+    }
+
+    /// One inventory request plus F+U logical work before counts/result lookup.
+    /// Report demand is shared with other family needs in this claim. Repeated
+    /// claims replay these debits even though they share one successful result.
+    pub(crate) fn edge_treatments(&mut self) -> Result<Rc<EdgeTreatmentInventory>, Evaluation> {
+        self.brep_facts()?;
+        self.budget
+            .charge(1)
+            .map_err(|error| Evaluation::budget_exceeded(self.capability, error))?;
+        let subject = self.subject();
+        let bundle = subject
+            .report_bundle()
+            .map_err(backend_refusal)?
+            .ok_or_else(|| backend_refusal(edge_treatment_unavailable()))?;
+        let counts = subject
+            .edge_treatment_counts(&bundle)
+            .map_err(backend_refusal)?;
+        self.budget
+            .charge(
+                u64::from(counts.public_face_count) + u64::from(counts.candidate_edge_use_count),
+            )
+            .map_err(|error| Evaluation::budget_exceeded(self.capability, error))?;
+        subject
+            .edge_treatments(counts, &bundle)
+            .map_err(backend_refusal)
+    }
+
+    /// One domain request per distinct primary-subject occurrence in this
+    /// claim. Record the debit only after it succeeds, before retained lookup.
+    pub(crate) fn selected_continuous_domain(
+        &mut self,
+        occurrence: u32,
+    ) -> Result<Rc<SelectedContinuousDomain>, Evaluation> {
+        if let Some(value) = self
+            .selected_domains
+            .iter()
+            .find(|value| value.occurrence == occurrence)
+        {
+            return Ok(Rc::clone(value));
+        }
+        self.budget
+            .charge(1)
+            .map_err(|error| Evaluation::budget_exceeded(self.capability, error))?;
+        let value = self
+            .subject()
+            .selected_continuous_domain(occurrence)
+            .map_err(backend_refusal)?;
+        self.selected_domains.push(Rc::clone(&value));
+        // A claim may use entirely different occurrences after the subject's
+        // sixteen retained cells fill. Hold and count every live transfer until
+        // this ST evaluation ends; repeated roles reuse the same owned record.
+        self.subject()
+            .check_selected_transfers(&self.selected_domains, self.selected_domains.capacity())
+            .map_err(backend_refusal)?;
+        Ok(value)
+    }
+    /// Grid debit is calculated from the same bounded plan on cold and warm
+    /// calls, before inspecting the retained topology cell. No Boolean or flood
+    /// fill runs on a hit. A miss evicts the previous cell before construction.
+    pub(crate) fn continuous_topology(
+        &mut self,
+        occurrences: &[u32],
+        region: Bounds,
+    ) -> Result<Rc<Topology>, Evaluation> {
+        let mut key = ContinuousTopologyKey {
+            occurrences: [0; 16],
+            count: 0,
+            region: [
+                region.min[0],
+                region.min[1],
+                region.min[2],
+                region.max[0],
+                region.max[1],
+                region.max[2],
+            ]
+            .map(|value| if value == 0.0 { 0 } else { value.to_bits() }),
+        };
+        for &occurrence in occurrences {
+            if key.occurrences[..key.count].contains(&occurrence) {
+                continue;
+            }
+            if key.count == key.occurrences.len() {
+                return Err(continuous_refusal(continuous::ContinuousError::unsupported(
+                    "The nominal continuous void profile accepts at most 16 distinct materials.",
+                )));
+            }
+            key.occurrences[key.count] = occurrence;
+            key.count += 1;
+        }
+        let mut materials = Vec::with_capacity(key.count);
+        for &occurrence in &key.occurrences[..key.count] {
+            materials.push((*self.selected_continuous_domain(occurrence)?).clone());
+        }
+        let material_bytes = (materials.capacity() * size_of::<SelectedContinuousDomain>()) as u64
+            + materials
+                .iter()
+                .map(|value| {
+                    ((value.domain_face_to_occurrence_face.capacity()
+                        + value.domain_edge_to_occurrence_edge.capacity())
+                        * size_of::<u32>()) as u64
+                })
+                .sum::<u64>();
+        let plan = GridPlan::new(&materials, region).map_err(continuous_refusal)?;
+        self.check_continuous_output(material_bytes.saturating_add(plan.owned_bytes() as u64))?;
+        let units = plan.grid_units().map_err(continuous_refusal)?;
+        self.budget
+            .charge(units)
+            .map_err(|error| Evaluation::budget_exceeded(self.capability, error))?;
+        if let Some(value) = self
+            .subject()
+            .continuous_topology
+            .borrow()
+            .as_ref()
+            .filter(|cell| cell.key == key)
+        {
+            return Ok(Rc::clone(&value.value));
+        }
+        self.subject().continuous_topology.borrow_mut().take();
+        let build_bytes = plan
+            .projected_owned_build_bytes()
+            .map_err(continuous_refusal)?;
+        self.check_continuous_output(material_bytes.saturating_add(build_bytes as u64))?;
+        drop(materials);
+        let value = Rc::new(plan.build().map_err(continuous_refusal)?);
+        let cell = RetainedContinuousTopology {
+            key,
+            value: Rc::clone(&value),
+        };
+        self.check_continuous_output(cell.owned_bytes())?;
+        *self.subject().continuous_topology.borrow_mut() = Some(cell);
+        Ok(value)
+    }
+
+    /// Count typed and projected witness output while the current claim still
+    /// holds uncached selected transfers. This is owned payload, not RSS.
+    pub(crate) fn check_continuous_output(&self, bytes: u64) -> Result<(), Evaluation> {
+        self.subject()
+            .check_continuous_pending(
+                &self.selected_domains,
+                self.selected_domains.capacity(),
+                bytes,
+            )
+            .map_err(backend_refusal)
+    }
 }
 
 pub(crate) fn backend_refusal(error: BackendError) -> Evaluation {
@@ -617,5 +1617,35 @@ pub(crate) fn backend_refusal(error: BackendError) -> Evaluation {
             },
             error.message,
         )],
+    }
+}
+
+fn cylindrical_band_refusal(message: &str) -> Evaluation {
+    let mut diagnostic = Diagnostic::error("GEOSPEC_EVIDENCE_UNSUPPORTED", message);
+    diagnostic.suggestion = Some(
+        "Select qualified occurrence-local cylindrical faces and keep the simultaneous clearance evidence within 256 KiB; no whole-shape or nearest-face fallback is used.".into(),
+    );
+    diagnostic.details = Some(Json::object([
+        (
+            "profile",
+            Json::string("geospec-nominal-cylindrical-band-clearance-v1"),
+        ),
+        ("capacityBytes", Json::Number(256.0 * 1024.0)),
+    ]));
+    Evaluation::Refused {
+        diagnostics: vec![diagnostic],
+    }
+}
+
+/// Preserve inability to establish the declared domain as noninvertible.
+pub(crate) fn continuous_refusal(error: continuous::ContinuousError) -> Evaluation {
+    let code = match error.kind {
+        continuous::ContinuousErrorKind::InvalidInput => "GEOSPEC_INVALID_EVIDENCE",
+        continuous::ContinuousErrorKind::UnsupportedDomain => "GEOSPEC_EVIDENCE_UNSUPPORTED",
+        continuous::ContinuousErrorKind::ArithmeticLimit
+        | continuous::ContinuousErrorKind::ResourceLimit => "GEOSPEC_UNSUPPORTED_EVIDENCE",
+    };
+    Evaluation::Refused {
+        diagnostics: vec![Diagnostic::error(code, error.message)],
     }
 }

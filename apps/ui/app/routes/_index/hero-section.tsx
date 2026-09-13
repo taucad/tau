@@ -1,8 +1,14 @@
+import { lazy, Suspense } from 'react';
 import { NavLink } from 'react-router';
 import { InteractiveHoverButton } from '#components/magicui/interactive-hover-button.js';
 import { Loader } from '#components/ui/loader.js';
+import { ClientOnly } from '#components/ui/utils/client-only.js';
 import { MarketingComposer } from '#routes/_index/marketing-composer.js';
-import { HeroVisual } from '#routes/_index/hero-visual.js';
+
+const AuthSplashbackLazy = lazy(async () => {
+  const m = await import('#components/geometry/splash/auth-splashback.js');
+  return { default: m.AuthSplashback };
+});
 
 /**
  * Marketing hero: verification-led headline, the live chat composer as the
@@ -45,7 +51,13 @@ export function HeroSection(): React.JSX.Element {
           </div>
         </div>
 
-        <HeroVisual className='aspect-square w-full lg:aspect-auto lg:h-[520px]' />
+        <div className='aspect-square w-full overflow-hidden rounded-2xl lg:aspect-auto lg:h-[520px]'>
+          <ClientOnly>
+            <Suspense fallback={null}>
+              <AuthSplashbackLazy />
+            </Suspense>
+          </ClientOnly>
+        </div>
       </div>
     </section>
   );

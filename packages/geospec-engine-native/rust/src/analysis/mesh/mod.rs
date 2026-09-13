@@ -2,8 +2,6 @@
 
 mod gltf;
 
-#[cfg(test)]
-use gltf::MeshDecodeErrorKind;
 pub use gltf::{decode_glb, decode_gltf};
 
 use std::{

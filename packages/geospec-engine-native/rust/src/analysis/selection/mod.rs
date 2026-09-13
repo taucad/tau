@@ -178,15 +178,6 @@ impl Cardinality {
             _ => invalid_claim("Selector cardinality must be one, many, {exactly}, or {atLeast}."),
         }
     }
-
-    fn to_json(&self) -> Json {
-        match self {
-            Self::One => Json::string("one"),
-            Self::Many => Json::string("many"),
-            Self::Exactly(value) => Json::object([("exactly", Json::Number(*value as f64))]),
-            Self::AtLeast(value) => Json::object([("atLeast", Json::Number(*value as f64))]),
-        }
-    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -231,6 +222,9 @@ pub(crate) enum Pick {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+// Keep parsed queries inline: boxing each query adds a heap allocation to
+// selector preparation and cloning without changing the selection work.
+#[allow(clippy::large_enum_variant)]
 pub(crate) enum Selector {
     Path(String),
     Occurrence {
@@ -373,38 +367,40 @@ fn parse_query(value: &Json, depth: usize) -> Result<Query, ProtocolError> {
         "not",
     ];
     require_fields(fields, &allowed, &[], "selector query")?;
-    let mut query = Query::default();
-    query.surface_type = optional_field(fields, "surfaceType")
-        .map(|value| match value {
-            Json::String(value)
-                if matches!(
-                    value.as_str(),
-                    "plane" | "cylinder" | "cone" | "sphere" | "torus" | "bspline" | "other"
-                ) =>
-            {
-                Ok(value.clone())
-            }
-            Json::String(value) => {
-                invalid_claim(format!("Unknown selector surfaceType '{value}'."))
-            }
-            _ => invalid_claim("surfaceType must be a string."),
-        })
-        .transpose()?;
-    query.normal = optional_field(fields, "normal")
-        .map(|value| direction(value, "normal"))
-        .transpose()?;
-    query.axis = optional_field(fields, "axis")
-        .map(|value| direction(value, "axis"))
-        .transpose()?;
-    query.radius = optional_field(fields, "radius")
-        .map(|value| range(value, "radius"))
-        .transpose()?;
-    query.area = optional_field(fields, "area")
-        .map(|value| range(value, "area"))
-        .transpose()?;
-    query.offset = optional_field(fields, "offset")
-        .map(|value| range(value, "offset"))
-        .transpose()?;
+    let mut query = Query {
+        surface_type: optional_field(fields, "surfaceType")
+            .map(|value| match value {
+                Json::String(value)
+                    if matches!(
+                        value.as_str(),
+                        "plane" | "cylinder" | "cone" | "sphere" | "torus" | "bspline" | "other"
+                    ) =>
+                {
+                    Ok(value.clone())
+                }
+                Json::String(value) => {
+                    invalid_claim(format!("Unknown selector surfaceType '{value}'."))
+                }
+                _ => invalid_claim("surfaceType must be a string."),
+            })
+            .transpose()?,
+        normal: optional_field(fields, "normal")
+            .map(|value| direction(value, "normal"))
+            .transpose()?,
+        axis: optional_field(fields, "axis")
+            .map(|value| direction(value, "axis"))
+            .transpose()?,
+        radius: optional_field(fields, "radius")
+            .map(|value| range(value, "radius"))
+            .transpose()?,
+        area: optional_field(fields, "area")
+            .map(|value| range(value, "area"))
+            .transpose()?,
+        offset: optional_field(fields, "offset")
+            .map(|value| range(value, "offset"))
+            .transpose()?,
+        ..Query::default()
+    };
     if let Some(value) = optional_field(fields, "near") {
         let near = object(value, "near")?;
         require_fields(near, &["x", "y", "z", "tolerance"], &[], "near")?;
@@ -653,12 +649,16 @@ fn validate_query_kind(kind: EntityType, query: &Query) -> Result<(), ProtocolEr
             kind.as_str()
         ));
     }
-    let valid_order = match (kind, query.order_by.as_deref()) {
-        (_, None) | (EntityType::Face, Some("area" | "radius" | "offsetAlong")) => true,
-        (EntityType::Axis, Some("radius" | "offsetAlong")) => true,
-        (EntityType::Plane | EntityType::Body, Some("area" | "offsetAlong")) => true,
-        _ => false,
-    };
+    let valid_order = matches!(
+        (kind, query.order_by.as_deref()),
+        (_, None)
+            | (EntityType::Face, Some("area" | "radius" | "offsetAlong"))
+            | (EntityType::Axis, Some("radius" | "offsetAlong"))
+            | (
+                EntityType::Plane | EntityType::Body,
+                Some("area" | "offsetAlong")
+            )
+    );
     if !valid_order {
         return invalid_claim(format!(
             "orderBy '{}' is not valid for a {} selector query.",
@@ -1095,7 +1095,8 @@ fn group_member(name: &str) -> Option<(&str, u32)> {
 }
 
 fn build_groups(interfaces: &[NamedRow]) -> Vec<NamedRow> {
-    let mut groups: Vec<(String, String, String, Vec<(u32, Entity)>)> = Vec::new();
+    type IndexedGroup = (String, String, String, Vec<(u32, Entity)>);
+    let mut groups: Vec<IndexedGroup> = Vec::new();
     for row in interfaces {
         let Some((prefix, index)) = group_member(&row.name) else {
             continue;
@@ -1220,15 +1221,22 @@ pub(crate) fn face_entity(path: &str, ordinal: &[u32], face: &LocatedFace) -> En
                     public_ordinal: face.facts.index,
                     kind: super::continuous::SupportKind::Plane,
                     origin: *origin,
-                    direction: if face.reversed { normal.map(|v| -v) } else { *normal },
+                    direction: if face.reversed {
+                        normal.map(|v| -v)
+                    } else {
+                        *normal
+                    },
                 }),
-                SurfaceFacts::Cylinder { origin, axis, .. } | SurfaceFacts::Cone { origin, axis, .. } => Some(super::continuous::NominalSupport {
-                    entity: face.entity,
-                    public_ordinal: face.facts.index,
-                    kind: super::continuous::SupportKind::Axis,
-                    origin: *origin,
-                    direction: *axis,
-                }),
+                SurfaceFacts::Cylinder { origin, axis, .. }
+                | SurfaceFacts::Cone { origin, axis, .. } => {
+                    Some(super::continuous::NominalSupport {
+                        entity: face.entity,
+                        public_ordinal: face.facts.index,
+                        kind: super::continuous::SupportKind::Axis,
+                        origin: *origin,
+                        direction: *axis,
+                    })
+                }
                 _ => None,
             },
             surface_type: Some(surface_type.into()),
@@ -1518,6 +1526,9 @@ fn ray_parameters(entity: &Entity, origin: [f64; 3], direction: [f64; 3]) -> Opt
     }
 }
 
+// A probe transfers at most one entity. Keep that bounded return inline rather
+// than allocating a box for every successful ray hit.
+#[allow(clippy::large_enum_variant)]
 enum RayProbeOutcome {
     Hit(Entity),
     None,
@@ -1700,6 +1711,7 @@ fn query_pool(kind: EntityType, index: &SelectorIndex) -> Vec<Entity> {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn resolve(
     selector: &Selector,
     index: &SelectorIndex,
@@ -1708,6 +1720,7 @@ pub(crate) fn resolve(
     resolve_with_brep(selector, index, regex, None)
 }
 
+#[cfg(test)]
 pub(crate) fn resolve_with_brep(
     selector: &Selector,
     index: &SelectorIndex,

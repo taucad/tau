@@ -167,7 +167,9 @@ fn directed_brackets_and_arithmetic_limits_are_not_tolerance_fits() {
             ..
         })
     ));
-    assert!(NOMINAL_ANALYTIC_RESERVATION_BYTES < 256 * 1024);
+    const {
+        assert!(NOMINAL_ANALYTIC_RESERVATION_BYTES < 256 * 1024);
+    }
 }
 
 #[test]

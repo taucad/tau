@@ -1,5 +1,8 @@
 use super::*;
 use crate::backend::brep::*;
+// Preserve the recorded OCCT periods and independently rounded trim bounds;
+// these binary64 source values are test evidence, not mathematical TAU.
+#[allow(clippy::approx_constant)]
 fn cartesian_certificate() -> NominalCylindricalBand {
     NominalCylindricalBand {
         axis: [0.0, 0.0, 1.0],

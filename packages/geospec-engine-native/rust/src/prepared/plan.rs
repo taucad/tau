@@ -409,16 +409,13 @@ impl ResolvedPlan {
                 let payload = claim.payload.normalized();
                 let subjects = [subject];
                 let scope = if claim.payload.demand().csg {
-                    match connector {
-                        Some(ref mut connector) => Some(
-                            match retained.as_deref_mut() {
-                                Some(cache) => CsgScope::with_retained(&mut **connector, cache),
-                                None => CsgScope::new(&mut **connector),
-                            }
-                            .with_budget(&budget),
-                        ),
-                        None => None,
-                    }
+                    connector.as_mut().map(|connector| {
+                        match retained.as_deref_mut() {
+                            Some(cache) => CsgScope::with_retained(&mut **connector, cache),
+                            None => CsgScope::new(&mut **connector),
+                        }
+                        .with_budget(&budget)
+                    })
                 } else {
                     None
                 };

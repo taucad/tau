@@ -959,9 +959,12 @@ fn project_relationship_diagnostic(
                 Json::object([
                     (
                         "profile",
-                        if matches!(json_field_ref(&proof.final_evidence,"method"), Some(Json::String(method)) if method=="exact-nominal-cylindrical-band-clearance") {
+                        if matches!(json_field_ref(&proof.final_evidence,"method"), Some(Json::String(method)) if method=="exact-nominal-cylindrical-band-clearance")
+                        {
                             Json::string("geospec-nominal-cylindrical-band-clearance-v1")
-                        } else {json_field(&proof.final_evidence, "method").unwrap_or(Json::Null)},
+                        } else {
+                            json_field(&proof.final_evidence, "method").unwrap_or(Json::Null)
+                        },
                     ),
                     ("relationshipIndex", Json::Number(index as f64)),
                     (
@@ -1093,9 +1096,12 @@ fn is_nominal_analytic(kind: Kind) -> bool {
 
 fn finite_face_identity(f: &crate::backend::brep::FiniteContactFace) -> Json {
     Json::object([
-        ("origin",point_json(f.origin)),("normal",point_json(f.normal)),
-        ("wireCount",Json::Number(f.wire_count as f64)),("edgeUseCount",Json::Number(f.edge_use_count as f64)),
-        ("attachmentResidual",Json::Number(f.attachment_residual)),("attachmentLimit",Json::Number(f.tolerance)),
+        ("origin", point_json(f.origin)),
+        ("normal", point_json(f.normal)),
+        ("wireCount", Json::Number(f.wire_count as f64)),
+        ("edgeUseCount", Json::Number(f.edge_use_count as f64)),
+        ("attachmentResidual", Json::Number(f.attachment_residual)),
+        ("attachmentLimit", Json::Number(f.tolerance)),
         ("occurrence", Json::Number(f.occurrence as f64)),
         (
             "publicFaceOrdinal",
@@ -2242,43 +2248,11 @@ fn box_interference_refusal() -> Evaluation {
     )
 }
 
-fn nearest_extrema(
-    subject: &[Endpoint],
-    target: &[Endpoint],
-    context: &mut EvaluationContext<'_>,
-) -> Result<Option<crate::backend::brep::Extrema>, ProofError> {
-    let mut best = None;
-    for a in subject {
-        for b in target {
-            charge(context, 1)?;
-            let measured = brep(context)?.extrema(a.entity, b.entity)?;
-            if best
-                .as_ref()
-                .is_none_or(|best: &crate::backend::brep::Extrema| {
-                    measured.distance < best.distance
-                })
-            {
-                best = Some(measured);
-            }
-        }
-    }
-    Ok(best)
-}
-
 fn charge(context: &mut EvaluationContext<'_>, units: u64) -> Result<(), ProofError> {
     context.budget().charge(units).map_err(|error| {
         ProofError::Budget(Evaluation::budget_exceeded(
             Capability::ToHaveSpatialRelationships,
             error,
-        ))
-    })
-}
-
-fn brep<'a>(context: &'a EvaluationContext<'_>) -> Result<&'a dyn BrepSubject, ProofError> {
-    context.subject().brep.as_deref().ok_or_else(|| {
-        ProofError::Refused(missing_brep(
-            "exact BRep evidence with an AP242 assembly structure",
-            BREP_SUGGESTION,
         ))
     })
 }
@@ -2401,6 +2375,7 @@ fn union_bounds(endpoints: &[Endpoint]) -> Option<Bounds> {
             })
         })
 }
+#[cfg(test)]
 fn bounds_corners(bounds: Bounds) -> Vec<[f64; 3]> {
     let mut result = Vec::with_capacity(8);
     for x in [bounds.min[0], bounds.max[0]] {
@@ -2411,15 +2386,6 @@ fn bounds_corners(bounds: Bounds) -> Vec<[f64; 3]> {
         }
     }
     result
-}
-fn axis_of(facts: &EntityFacts) -> Option<([f64; 3], [f64; 3])> {
-    Some((
-        facts.axis_origin.or(facts.origin)?,
-        facts.axis_direction.or(facts.z_axis)?,
-    ))
-}
-fn direction_of(facts: &EntityFacts) -> Option<[f64; 3]> {
-    facts.axis_direction.or(facts.normal).or(facts.z_axis)
 }
 fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
@@ -2439,9 +2405,7 @@ fn length(a: [f64; 3]) -> f64 {
 fn dot_length(a: [f64; 3]) -> f64 {
     dot(a, a).sqrt()
 }
-fn distance(a: [f64; 3], b: [f64; 3]) -> f64 {
-    length(subtract(a, b))
-}
+#[cfg(test)]
 fn unit(a: [f64; 3]) -> [f64; 3] {
     let length = length(a);
     if length == 0.0 {
@@ -2449,9 +2413,6 @@ fn unit(a: [f64; 3]) -> [f64; 3] {
     } else {
         [a[0] / length, a[1] / length, a[2] / length]
     }
-}
-fn midpoint(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
-    scale(add(a, b), 0.5)
 }
 fn folded_angle(a: [f64; 3], b: [f64; 3]) -> f64 {
     let lengths = length(a) * length(b);
@@ -2482,28 +2443,6 @@ fn point_witness(point: [f64; 3]) -> Json {
     Json::object([
         ("kind", Json::string("point")),
         ("value", point_json(point)),
-    ])
-}
-fn axis_witness(origin: [f64; 3], direction: [f64; 3]) -> Json {
-    let mut value = origin.to_vec();
-    value.extend(direction);
-    Json::object([
-        ("kind", Json::string("axis")),
-        (
-            "value",
-            Json::Array(value.into_iter().map(Json::Number).collect()),
-        ),
-    ])
-}
-fn plane_witness(normal: [f64; 3], offset: f64) -> Json {
-    let mut value = normal.to_vec();
-    value.push(offset);
-    Json::object([
-        ("kind", Json::string("plane")),
-        (
-            "value",
-            Json::Array(value.into_iter().map(Json::Number).collect()),
-        ),
     ])
 }
 fn optional_numbers(values: &[(&str, Option<f64>)]) -> Json {
@@ -2693,15 +2632,53 @@ mod tests {
 
     #[test]
     fn finite_contact_compact_projection_preserves_existing_c1_profile() {
-        let relationship=parse_relationship(&crate::codec::decode(br#"{"kind":"clearance","subject":"left","target":"right"}"#).unwrap(),0).unwrap();
-        let selected=Selection{status:SelectionStatus::Resolved,entities:vec![],expected:crate::analysis::selection::Cardinality::One,
-            stability:Stability::Authored,candidates:vec![],diagnostics:vec![]};
-        let proof=Proof{positive:false,broad_phase:empty_object(),final_evidence:final_json("exact-nominal-cylindrical-band-clearance",empty_object(),empty_object(),vec![]),diagnostics:vec![]};
-        let source=Diagnostic::error("GEOSPEC_SPATIAL_RELATIONSHIP_MISMATCH","Existing C1 control.");
-        let diagnostic=project_relationship_diagnostic(0,&relationship,&selected,&selected,&proof,&source);
-        let actual:serde_json::Value=serde_json::from_slice(&crate::codec::encode(&diagnostic.to_json()).unwrap()).unwrap();
-        assert_eq!(actual["details"]["evidence"]["profile"],"geospec-nominal-cylindrical-band-clearance-v1");
-        assert_eq!(actual["details"]["evidence"]["path"],"evidence.witnesses.relationships[relationshipIndex].final");
+        let relationship = parse_relationship(
+            &crate::codec::decode(br#"{"kind":"clearance","subject":"left","target":"right"}"#)
+                .unwrap(),
+            0,
+        )
+        .unwrap();
+        let selected = Selection {
+            status: SelectionStatus::Resolved,
+            entities: vec![],
+            expected: crate::analysis::selection::Cardinality::One,
+            stability: Stability::Authored,
+            candidates: vec![],
+            diagnostics: vec![],
+        };
+        let proof = Proof {
+            positive: false,
+            broad_phase: empty_object(),
+            final_evidence: final_json(
+                "exact-nominal-cylindrical-band-clearance",
+                empty_object(),
+                empty_object(),
+                vec![],
+            ),
+            diagnostics: vec![],
+        };
+        let source = Diagnostic::error(
+            "GEOSPEC_SPATIAL_RELATIONSHIP_MISMATCH",
+            "Existing C1 control.",
+        );
+        let diagnostic = project_relationship_diagnostic(
+            0,
+            &relationship,
+            &selected,
+            &selected,
+            &proof,
+            &source,
+        );
+        let actual: serde_json::Value =
+            serde_json::from_slice(&crate::codec::encode(&diagnostic.to_json()).unwrap()).unwrap();
+        assert_eq!(
+            actual["details"]["evidence"]["profile"],
+            "geospec-nominal-cylindrical-band-clearance-v1"
+        );
+        assert_eq!(
+            actual["details"]["evidence"]["path"],
+            "evidence.witnesses.relationships[relationshipIndex].final"
+        );
         assert!(actual["details"]["evidence"].get("final").is_none());
     }
 

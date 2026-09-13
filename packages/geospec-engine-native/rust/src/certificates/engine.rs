@@ -262,7 +262,8 @@ fn evaluation(analysis: &PlateAnalysis, binding: &VerificationBinding) -> Evalua
             Json::Array(
                 ids.iter()
                     .zip(analysis.predicates)
-                    .filter_map(|(id, holds)| (!holds).then(|| Json::string(*id)))
+                    .filter(|(_, holds)| !holds)
+                    .map(|(id, _)| Json::string(id))
                     .collect(),
             ),
         ),
@@ -292,7 +293,7 @@ fn evaluation(analysis: &PlateAnalysis, binding: &VerificationBinding) -> Evalua
                 ),
                 (
                     "predicates",
-                    Json::Array(ids.iter().map(|id| Json::string(*id)).collect()),
+                    Json::Array(ids.iter().map(|id| Json::string(id)).collect()),
                 ),
             ]),
         ),
@@ -338,7 +339,7 @@ fn evaluation(analysis: &PlateAnalysis, binding: &VerificationBinding) -> Evalua
                             .zip(analysis.predicates)
                             .map(|(id, holds)| {
                                 Json::object([
-                                    ("id", Json::string(*id)),
+                                    ("id", Json::string(id)),
                                     ("satisfied", Json::Bool(holds)),
                                 ])
                             })

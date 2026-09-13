@@ -226,6 +226,9 @@ impl Pair {
     }
 }
 
+// Fixed bounded proof payload is covered by the existing arithmetic reservation;
+// boxing changes its allocation behavior without reducing predicate work.
+#[allow(clippy::large_enum_variant)]
 enum Proof {
     Coaxial {
         radial_gap: Rational,
@@ -509,10 +512,9 @@ fn polynomial(coefficients: &[Pair; 3], t: &Pair, n: &Rational) -> Result<Pair, 
         .add(&coefficients[2])
 }
 
-fn generator(
-    frame: &Frame,
-    ordinal: usize,
-) -> Result<Option<([Pair; 3], [Pair; 2], Pair, Pair, [Pair; 2])>, ContinuousError> {
+type GeneratorCandidate = ([Pair; 3], [Pair; 2], Pair, Pair, [Pair; 2]);
+
+fn generator(frame: &Frame, ordinal: usize) -> Result<Option<GeneratorCandidate>, ContinuousError> {
     let derived_u = ordinal < 2;
     let epsilon = rat(if ordinal % 2 == 0 { 1.0 } else { -1.0 })?;
     let signed_r = mul(&epsilon, &frame.r)?;
@@ -1324,18 +1326,22 @@ mod tests {
             CYLINDRICAL_BAND_PREDICATE_RESERVATION_BYTES,
             ARITHMETIC_RESERVATION.max(OUTPUT_RESERVATION)
         );
-        assert!(
-            CYLINDRICAL_BAND_PREDICATE_RESERVATION_BYTES
-                + CYLINDRICAL_BAND_INPUT_PAIR_BYTES
-                + CYLINDRICAL_BAND_EVIDENCE_RESERVATION_BYTES
-                <= CLEARANCE_MAX_OWNED_BYTES
-        );
-        assert!(
-            2 * CYLINDRICAL_BAND_EVIDENCE_RESERVATION_BYTES
-                + CYLINDRICAL_BAND_ENCODING_RESERVATION_BYTES
-                + CYLINDRICAL_BAND_INPUT_PAIR_BYTES
-                <= CLEARANCE_MAX_OWNED_BYTES
-        );
+        const {
+            assert!(
+                CYLINDRICAL_BAND_PREDICATE_RESERVATION_BYTES
+                    + CYLINDRICAL_BAND_INPUT_PAIR_BYTES
+                    + CYLINDRICAL_BAND_EVIDENCE_RESERVATION_BYTES
+                    <= CLEARANCE_MAX_OWNED_BYTES
+            );
+        }
+        const {
+            assert!(
+                2 * CYLINDRICAL_BAND_EVIDENCE_RESERVATION_BYTES
+                    + CYLINDRICAL_BAND_ENCODING_RESERVATION_BYTES
+                    + CYLINDRICAL_BAND_INPUT_PAIR_BYTES
+                    <= CLEARANCE_MAX_OWNED_BYTES
+            );
+        }
         let mut source = band(1.0, [0.0, 3.0, 4.0], [0.125, 0.0625, 0.125], [0.0, 3.0]);
         source.source_route_count = 32;
         source.source_route = [u32::MAX; 32];

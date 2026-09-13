@@ -24,8 +24,8 @@ export type GeoSpecAxisExpectation = {
 export type GeoSpecBoundingBoxExpectation = {
   min?: Vec3 | GeoSpecAxisExpectation;
   max?: Vec3 | GeoSpecAxisExpectation;
-  size?: GeoSpecAxisExpectation;
-  center?: GeoSpecAxisExpectation;
+  size?: Vec3 | GeoSpecAxisExpectation;
+  center?: Vec3 | GeoSpecAxisExpectation;
   tolerance?: number;
 };
 
@@ -66,7 +66,7 @@ export type GeoSpecComponentInterferencePairExpectation = {
  * @public
  */
 export type GeoSpecComponentInterferenceAllowance = {
-  kind: 'intentionalInterference';
+  kind?: 'intentionalInterference';
   left: GeoSpecComponentSelector;
   right: GeoSpecComponentSelector;
   maxVolume?: number;
@@ -189,7 +189,7 @@ export type GeoSpecCircularHoleExpectation = {
   diameter: number;
   through?: boolean;
   axis?: 'x' | 'y' | 'z';
-  center?: GeoSpecAxisExpectation;
+  center?: GeoSpecPointExpectation;
   tolerance?: number;
 };
 
@@ -303,7 +303,7 @@ export type GeoSpecCircularHolePatternExpectation = {
   holeDiameter: number;
   boltCircleDiameter?: number;
   axis?: 'x' | 'y' | 'z';
-  center?: GeoSpecAxisExpectation;
+  center?: GeoSpecPointExpectation;
   tolerance?: number;
 };
 

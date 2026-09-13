@@ -44,7 +44,11 @@
     "./runner/worker": "./src/runner/worker/index.ts",
     "./selector": "./src/selector/index.ts",
     "./step": "./src/step/index.ts",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./assertion-client": "./src/assertion-client/index.ts",
+    "./vitest": "./src/vitest/index.ts",
+    "./config": "./src/config/index.ts",
+    "./config/node": "./src/config/node/index.ts"
   },
   "publishConfig": {
     "access": "public",
@@ -114,7 +118,25 @@
         "import": "./dist/step/index.mjs",
         "default": "./dist/step/index.mjs"
       },
-      "./package.json": "./package.json"
+      "./package.json": "./package.json",
+      "./assertion-client": {
+        "types": "./dist/assertion-client/index.d.mts",
+        "import": "./dist/assertion-client/index.mjs",
+        "default": "./dist/assertion-client/index.mjs"
+      },
+      "./vitest": {
+        "types": "./dist/vitest/index.d.mts",
+        "import": "./dist/vitest/index.mjs",
+        "default": "./dist/vitest/index.mjs"
+      },
+      "./config": {
+        "types": "./dist/config/index.d.mts"
+      },
+      "./config/node": {
+        "types": "./dist/config/node/index.d.mts",
+        "import": "./dist/config/node/index.mjs",
+        "default": "./dist/config/node/index.mjs"
+      }
     },
     "imports": {}
   },
@@ -129,5 +151,13 @@
   },
   "devDependencies": {
     "@gltf-transform/core": "^4.4.0"
+  },
+  "peerDependencies": {
+    "vitest": "^4.1.11"
+  },
+  "peerDependenciesMeta": {
+    "vitest": {
+      "optional": true
+    }
   }
 }

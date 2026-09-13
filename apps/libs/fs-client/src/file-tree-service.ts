@@ -1293,7 +1293,7 @@ export class FileTreeService {
       current.mtimeMs !== next.mtimeMs ||
       current.contentKind !== next.contentKind ||
       current.provenance?.source !== next.provenance?.source ||
-      current.provenance?.access !== next.provenance?.access ||
+      current.provenance?.agentAccess !== next.provenance?.agentAccess ||
       (current.contentKind === 'text' && next.contentKind === 'text' && current.lineCount !== next.lineCount)
     );
   }

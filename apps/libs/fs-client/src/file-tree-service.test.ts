@@ -195,7 +195,7 @@ describe('FileTreeService composed-view provenance (north star W2)', () => {
       expect(entries.map(({ name }) => name)).toStrictEqual(['SKILL.md']);
       expect(harness.tree.getTreeSnapshot().get('.agents/skills/cad-replicad/SKILL.md')?.provenance).toMatchObject({
         source: 'system-skills',
-        access: 'read-only',
+        agentAccess: 'read-only',
         versioned: false,
       });
     } finally {
@@ -210,7 +210,7 @@ describe('FileTreeService composed-view provenance (north star W2)', () => {
 
       expect(harness.tree.getTreeSnapshot().get('main.ts')?.provenance).toMatchObject({
         source: 'project',
-        access: 'read-write',
+        agentAccess: 'read-write',
         versioned: true,
       });
     } finally {

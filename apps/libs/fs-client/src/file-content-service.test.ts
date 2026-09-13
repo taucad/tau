@@ -1882,10 +1882,11 @@ describe('FileContentService over the composed view (north star W2)', () => {
     const harness = await composedHarness();
 
     expect(new TextDecoder().decode(await harness.service.resolveBytes(skillPath))).toBe(skillContents);
-    expect((await harness.proxy.stat(`/projects/abc/${skillPath}`)).provenance).toStrictEqual({
+    const stat = await harness.proxy.stat(`/projects/abc/${skillPath}`);
+    expect(stat.provenance).toStrictEqual({
       source: 'system-skills',
       versioned: false,
-      access: 'read-only',
+      agentAccess: 'read-only',
       identity,
     });
     harness.disposeChannel();

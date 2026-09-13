@@ -1,0 +1,7 @@
+{
+  "name": "jobs-hatchet",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "packages/jobs-hatchet",
+  "projectType": "library",
+  "tags": ["scope:shared", "type:package"]
+}

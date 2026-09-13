@@ -11,6 +11,15 @@
 
 import { exposeFileSystem, workerReadyMessageType } from '@taucad/fs-bridge';
 import { composeView } from '@taucad/filesystem/composed-view';
+import {
+  createGitRemoteTransport,
+  createIsomorphicGitRevisionPort,
+  createRevisionHttpClient,
+  recordLastPush,
+  sendKeepalivePush,
+} from '@taucad/revisions';
+import type { PushRecorder } from '@taucad/revisions';
+import { randomUuid } from '@taucad/utils/id';
 import { createIndexedDbComputeEngine, exposeComputeStoreChannel } from '@taucad/runtime/host';
 
 import { populateBundledTypesMount } from '@taucad/filesystem/bundled-types-mount';
@@ -33,6 +42,11 @@ import { metaConfig } from '#constants/meta.constants.js';
 import { ensureBundledTypesMount } from '#machines/bundled-types-sentinel.js';
 import { homeBackendFromWorkerName } from '#machines/file-manager-worker-name.js';
 import { listWorkspaceDirectories } from '#machines/file-manager-sync-fs-adapter.js';
+import {
+  createCheckoutRoutes,
+  createWorkerRevisionRegistry,
+  versionedChangePaths,
+} from '#machines/file-manager.worker.revisions.js';
 import { systemSkillsOverlay } from '#workers/system-skills-overlay.js';
 
 /**
@@ -262,10 +276,110 @@ exposeFileSystem(fileService, {
     new EventCoalescer(deliver, { coalescingWindow, onOverflow }),
 });
 
+/**
+ * One revision root per opened project (A38).
+ *
+ * The page opens a `MessagePort` per project route and reads the
+ * `RevisionStatus` projection over it; the tree itself — `projectRevisionsMachine`
+ * and its children over `createIsomorphicGitRevisionPort` — runs here, where the
+ * mount table can give each checkout route its own rooted provider and where
+ * every content change is already observed.
+ *
+ * The authority epoch is the **project session's** identity (W19, W3c review
+ * R4): a lease written under any other epoch belongs to a session that no
+ * longer owns the project — another document, or an earlier session of this
+ * one — and `sweepLeases` retires it on open (N3). Only the session that owns
+ * a project's revisions actor system may sweep its leases, which is what makes
+ * the rule hold across processes and not merely across documents.
+ *
+ * The page sends its session's epoch with `revisionsConnect`; a connection
+ * that names none falls back to this document's, so a host that has no session
+ * layer still gets the old per-document guarantee.
+ */
+const documentAuthorityEpoch = randomUuid();
+const projectAuthorityEpochs = new Map<string, string>();
+/* One place a linked checkout's files live, for the port that creates them
+ * (W7 review R2/P24). Without it `capabilities.checkouts` is false and no
+ * browser project can hold a second branch at all. */
+const checkoutRoutes = createCheckoutRoutes({ mountTable, fileService });
+/*
+ * The last push each project made, kept so `pagehide` can offer it again under
+ * `keepalive` (W13, A32). The recorder wraps the *client*, so it is built here
+ * beside the client and read back by project id.
+ */
+const pushRecorders = new Map<string, PushRecorder>();
+const revisionRegistry = createWorkerRevisionRegistry({
+  /*
+   * P31: one project, one store.
+   *
+   * On a host-served project the Node host serves the filesystem *and* owns the
+   * revisions actor system over the project's own `.git/`. A browser revision
+   * port here would create a second store (`.tau/revisions/`) in the same
+   * directory, recording the same bytes twice and agreeing with neither side —
+   * the two-store ceiling W5 §9 recorded. The session injects the host kind at
+   * `revisionsConnect`; a host-served project gets no port at all, and its
+   * `RevisionStatus` projection comes from the Node side.
+   */
+  hostServesRevisions: (projectId) => hostServedProjects.has(projectId),
+  createPort: (projectId, credential) => {
+    const recorder = recordLastPush(
+      createRevisionHttpClient({ credentials: 'include', ...createGitRemoteTransport(credential) }),
+    );
+    pushRecorders.set(projectId, recorder);
+    return createIsomorphicGitRevisionPort({
+      filesystem: fileService.createRootedFileSystem(`/projects/${projectId}`),
+      checkouts: checkoutRoutes(projectId),
+      /* The page's session is a cookie on the API's origin, so `include` is the
+       * whole of "this browser is signed in" (I8, S24). The worker never holds
+       * a token and never puts one in a URL. A *third-party* remote is reached
+       * through the API's git proxy instead, carrying that remote's own
+       * credential and never the Tau session — which is the whole of
+       * `createGitRemoteTransport` (S34, P17, W12). */
+      http: recorder.client,
+    });
+  },
+  /* The same credential rules as any push: the session cookie for Tau's own
+   * origin, and nothing at all for a remote the page never credited. */
+  keepalive: async (projectId) => sendKeepalivePush(pushRecorders.get(projectId)?.last(), { credentials: 'include' }),
+  /* Which POST the re-send above may carry: the history set's, marked by the
+   * scheduler at the moment it pushes it (W13 review 2 R3/P35). */
+  recordHistoryPush: (projectId) => pushRecorders.get(projectId)?.record,
+  /* A recorded pack is as big as the push was; it goes when the project does. */
+  released: (projectId) => {
+    pushRecorders.delete(projectId);
+  },
+  filesystem: (root) => fileService.createRootedFileSystem(root),
+  observe: (projectId, onChanged) =>
+    eventBus.subscribe((event) => {
+      const paths = versionedChangePaths(event, `/projects/${projectId}`);
+      if (paths.length > 0) {
+        onChanged(paths);
+      }
+    }),
+  authorityEpoch: (projectId) => projectAuthorityEpochs.get(projectId) ?? documentAuthorityEpoch,
+});
+
 let languageFsSyncDispose: { dispose(): void } | undefined;
 let computeStore: ReturnType<typeof createIndexedDbComputeEngine> | undefined;
-let admittedComputeProjectId: string | undefined;
-const computeChannels = new Set<ReturnType<typeof exposeComputeStoreChannel>>();
+/*
+ * Compute admission is per **live project**, not per active route (S44).
+ *
+ * Several projects run agents at once, so one admitted id was the bug: opening
+ * B disposed A's channels while A's turn was still computing. The session
+ * admits its project on `open` and releases it on `close`, and a project's
+ * channels are disposed only by its own release.
+ */
+const admittedComputeProjectIds = new Set<string>();
+const computeChannels = new Map<string, Set<ReturnType<typeof exposeComputeStoreChannel>>>();
+/** Projects whose filesystem is served by a host that owns their revisions (P31). */
+const hostServedProjects = new Set<string>();
+
+const disposeComputeChannels = (projectId: string, reason: string): void => {
+  for (const channel of computeChannels.get(projectId) ?? []) {
+    channel.dispose(reason);
+  }
+  computeChannels.delete(projectId);
+};
 
 const rejectComputePort = (port: MessagePort, message: string): void => {
   port.postMessage({ error: message });
@@ -277,12 +391,12 @@ const openComputeChannel = async (port: MessagePort, projectId: unknown): Promis
     if (typeof projectId !== 'string' || projectId.length === 0) {
       throw new Error('Compute project identity is required.');
     }
-    if (projectId !== admittedComputeProjectId) {
-      throw new Error('Compute store project authority does not match the active project.');
+    if (!admittedComputeProjectIds.has(projectId)) {
+      throw new Error('Compute store project authority does not match a live project.');
     }
     computeStore ??= createIndexedDbComputeEngine({ factory: globalThis.indexedDB });
     const control = await computeStore.control({ workspace: projectId });
-    if (projectId !== admittedComputeProjectId) {
+    if (!admittedComputeProjectIds.has(projectId)) {
       throw new Error('Compute store project authority changed while opening the channel.');
     }
     const channel = exposeComputeStoreChannel({
@@ -294,8 +408,10 @@ const openComputeChannel = async (port: MessagePort, projectId: unknown): Promis
         return report.generation;
       },
     });
-    computeChannels.add(channel);
-    channel.onClose(() => computeChannels.delete(channel));
+    const channels = computeChannels.get(projectId) ?? new Set();
+    channels.add(channel);
+    computeChannels.set(projectId, channels);
+    channel.onClose(() => channels.delete(channel));
   } catch (error) {
     rejectComputePort(port, error instanceof Error ? error.message : String(error));
   }
@@ -312,8 +428,8 @@ const runComputeControl = async (data: {
     if (typeof data.projectId !== 'string' || data.projectId.length === 0) {
       throw new Error('Compute project identity is required.');
     }
-    if (data.projectId !== admittedComputeProjectId) {
-      throw new Error('Compute control project authority does not match the active project.');
+    if (!admittedComputeProjectIds.has(data.projectId)) {
+      throw new Error('Compute control project authority does not match a live project.');
     }
     if (data.action !== 'inspect' && data.action !== 'clear' && data.action !== 'collect') {
       throw new Error('Compute control action is invalid.');
@@ -329,7 +445,7 @@ const runComputeControl = async (data: {
     }
     computeStore ??= createIndexedDbComputeEngine({ factory: globalThis.indexedDB });
     const control = await computeStore.control({ workspace: data.projectId });
-    if (data.projectId !== admittedComputeProjectId) {
+    if (!admittedComputeProjectIds.has(data.projectId)) {
       throw new Error('Compute control project authority changed while opening the store.');
     }
     let result;
@@ -362,6 +478,8 @@ self.addEventListener(
       arenaSab?: SharedArrayBuffer;
       rootDirectory?: string;
       projectId?: unknown;
+      hostServesRevisions?: unknown;
+      sessionEpoch?: unknown;
       action?: unknown;
       budget?: unknown;
       cursor?: unknown;
@@ -369,20 +487,38 @@ self.addEventListener(
   ) => {
     const { data } = event;
     if (data.type === 'computeStoreAdmission') {
-      const projectId = typeof data.projectId === 'string' ? data.projectId : undefined;
-      if (projectId === admittedComputeProjectId) {
-        return;
+      if (typeof data.projectId === 'string' && data.projectId.length > 0) {
+        admittedComputeProjectIds.add(data.projectId);
       }
-      admittedComputeProjectId = projectId;
-      for (const channel of computeChannels) {
-        channel.dispose('compute project admission changed');
+      return;
+    }
+    if (data.type === 'computeStoreRelease') {
+      if (typeof data.projectId === 'string' && data.projectId.length > 0) {
+        admittedComputeProjectIds.delete(data.projectId);
+        disposeComputeChannels(data.projectId, 'project closed');
       }
-      computeChannels.clear();
       return;
     }
     if (data.type === 'filePool' && data.buffer instanceof SharedArrayBuffer) {
       fileService.setFilePool(new SharedPool(data.buffer));
       console.debug('[FM-Worker] filePool attached');
+      return;
+    }
+
+    if (data.type === 'revisionsConnect' && data.port instanceof MessagePort) {
+      if (typeof data.projectId === 'string' && data.projectId.length > 0) {
+        if (data.hostServesRevisions === true) {
+          hostServedProjects.add(data.projectId);
+        } else {
+          hostServedProjects.delete(data.projectId);
+        }
+        if (typeof data.sessionEpoch === 'string' && data.sessionEpoch.length > 0) {
+          projectAuthorityEpochs.set(data.projectId, data.sessionEpoch);
+        }
+        revisionRegistry.connect(data.port, data.projectId);
+      } else {
+        data.port.close();
+      }
       return;
     }
 

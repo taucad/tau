@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { Chat } from '@taucad/chat';
-import type { StorageProvider } from '#types/storage.types.js';
+import type { ChatStorage } from '#types/storage.types.js';
 import { ensureFocusedChatForProject } from '#hooks/use-project.js';
 
 const makeChat = (overrides: Partial<Chat> & { id: string }): Chat => ({
@@ -14,8 +14,8 @@ const makeChat = (overrides: Partial<Chat> & { id: string }): Chat => ({
 
 describe('ensureFocusedChatForProject', () => {
   it('should create a missing empty chat without bumping parent project recency', async () => {
-    const getChatsForResource = vi.fn<StorageProvider['getChatsForResource']>().mockResolvedValue([]);
-    const createNavigationRepairChat = vi.fn<StorageProvider['createNavigationRepairChat']>().mockResolvedValue(
+    const getChatsForResource = vi.fn<ChatStorage['getChatsForResource']>().mockResolvedValue([]);
+    const createNavigationRepairChat = vi.fn<ChatStorage['createNavigationRepairChat']>().mockResolvedValue(
       makeChat({
         id: 'chat_created',
         resourceId: 'project_test',
@@ -43,10 +43,8 @@ describe('ensureFocusedChatForProject', () => {
   it('prefers a valid requested chat over the persisted selection', async () => {
     const requested = makeChat({ id: 'chat_requested' });
     const persisted = makeChat({ id: 'chat_persisted' });
-    const getChatsForResource = vi
-      .fn<StorageProvider['getChatsForResource']>()
-      .mockResolvedValue([persisted, requested]);
-    const createNavigationRepairChat = vi.fn<StorageProvider['createNavigationRepairChat']>();
+    const getChatsForResource = vi.fn<ChatStorage['getChatsForResource']>().mockResolvedValue([persisted, requested]);
+    const createNavigationRepairChat = vi.fn<ChatStorage['createNavigationRepairChat']>();
 
     const result = await ensureFocusedChatForProject({
       projectId: 'project_test',
@@ -70,8 +68,8 @@ describe('ensureFocusedChatForProject', () => {
       requestedChatId: id,
       persistedChatId: persisted.id,
       worker: {
-        getChatsForResource: vi.fn<StorageProvider['getChatsForResource']>().mockResolvedValue([persisted]),
-        createNavigationRepairChat: vi.fn<StorageProvider['createNavigationRepairChat']>(),
+        getChatsForResource: vi.fn<ChatStorage['getChatsForResource']>().mockResolvedValue([persisted]),
+        createNavigationRepairChat: vi.fn<ChatStorage['createNavigationRepairChat']>(),
       },
     });
 
@@ -91,8 +89,8 @@ describe('ensureFocusedChatForProject', () => {
       requestedChatId: 'chat_missing',
       persistedChatId: 'chat_stale',
       worker: {
-        getChatsForResource: vi.fn<StorageProvider['getChatsForResource']>().mockResolvedValue(chats),
-        createNavigationRepairChat: vi.fn<StorageProvider['createNavigationRepairChat']>(),
+        getChatsForResource: vi.fn<ChatStorage['getChatsForResource']>().mockResolvedValue(chats),
+        createNavigationRepairChat: vi.fn<ChatStorage['createNavigationRepairChat']>(),
       },
     });
     const deterministicTie = await ensureFocusedChatForProject({
@@ -100,8 +98,8 @@ describe('ensureFocusedChatForProject', () => {
       requestedChatId: undefined,
       persistedChatId: undefined,
       worker: {
-        getChatsForResource: vi.fn<StorageProvider['getChatsForResource']>().mockResolvedValue(chats.slice(0, 3)),
-        createNavigationRepairChat: vi.fn<StorageProvider['createNavigationRepairChat']>(),
+        getChatsForResource: vi.fn<ChatStorage['getChatsForResource']>().mockResolvedValue(chats.slice(0, 3)),
+        createNavigationRepairChat: vi.fn<ChatStorage['createNavigationRepairChat']>(),
       },
     });
 

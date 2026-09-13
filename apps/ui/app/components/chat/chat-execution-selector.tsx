@@ -174,9 +174,6 @@ const useExecutionTargets = (): {
           label: hostId,
           workspaceRoot: '',
           online: false,
-          /* A placeholder for a host the ladder has not described yet: it has
-           * advertised nothing, so it offers no revision modes either. */
-          revisions: [],
         })
       );
     }
@@ -190,7 +187,6 @@ const useExecutionTargets = (): {
           label: hostId,
           workspaceRoot: '',
           online: false,
-          revisions: [],
         },
         unknownAgent(agentId),
       )

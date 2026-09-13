@@ -1,50 +1,46 @@
 import { RevisionMarker } from '#routes/w.$workspace.$project/revision-marker.js';
-import { useVisibleRevisions } from '#hooks/use-revisions.js';
+import { useRevisionChanges, useRevisions } from '#hooks/use-revisions.js';
 import { useRestoreToPoint } from '#hooks/use-restore-to-point.js';
 
 /**
- * Binds a turn's `RevisionMarker` to live state. Given the user message that
- * anchors a turn, it looks up that turn's Revision and renders the shared card
- * as the last assistant message's `footer` — after its content, before its
- * action row (copy/retry/cost); a non-mutating turn (no Revision — RV1)
- * renders nothing.
+ * Binds a turn's `RevisionMarker` to the host-attested graph.
+ *
+ * Given the user message that anchors a turn, it looks up the revision that
+ * turn recorded — attested by the settling host and carried on the revision
+ * itself (`provenance.turnId`), so the card survives a reload with no second
+ * store — and renders the shared card as the last assistant message's `footer`.
+ * A turn that changed nothing recorded no revision and renders nothing (RV1).
  *
  * The active revision's card carries the "Modified" + Discard affordances when
  * the live FS has diverged from it via a manual edit (dirty). Restoring and
- * discarding both dispatch a restore of this marker's own revision — for an
- * older card that moves the head back; for the active card it re-materializes
- * the current revision, clearing the divergence (the risky-restore confirm
- * warns that unsaved edits will be overwritten).
+ * discarding both restore this card's own revision — for an older card that
+ * moves the head back; for the active card it re-applies the current revision,
+ * clearing the divergence (the risky-restore confirmation warns that unsaved
+ * edits will be overwritten).
  */
 export function ChatRevisionMarker({
   userMessageId,
 }: {
   readonly userMessageId: string;
 }): React.JSX.Element | undefined {
-  const { byMessageId, headRevision, isDirty, graph } = useVisibleRevisions();
+  const { byTurnId, headRevisionId, isDirty } = useRevisions();
   const { restore, isBusy } = useRestoreToPoint();
+  const revision = byTurnId.get(userMessageId);
+  const changes = useRevisionChanges(revision);
 
-  const revision = byMessageId.get(userMessageId);
   if (!revision) {
     return undefined;
   }
 
-  const isActive = headRevision?.n === revision.n;
-  // The projected node for this turn, when the revision store holds one: a
-  // restore of an authoritative node is a checkout, not a transcript replay.
-  const node = graph.byTurnId.get(revision.messageId);
+  const isActive = headRevisionId !== undefined && headRevisionId === revision.revisionId;
   const restoreThis = (): void => {
-    restore({
-      messageId: revision.messageId,
-      anchor: revision.anchor,
-      ...(node === undefined ? {} : { identitySource: node.identitySource }),
-      ...(node?.identitySource === 'authoritative' ? { revisionId: node.id } : {}),
-    });
+    restore(revision.revisionId);
   };
 
   return (
     <RevisionMarker
       revision={revision}
+      changes={changes}
       isActive={isActive}
       isModified={isActive && isDirty}
       isBusy={isBusy}

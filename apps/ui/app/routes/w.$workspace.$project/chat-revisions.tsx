@@ -1,5 +1,5 @@
-import { GitBranch, History, RotateCcw, XIcon } from 'lucide-react';
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { AlertTriangle, Cloud, GitBranch, History, Pencil, RotateCcw, XIcon } from 'lucide-react';
 import {
   FloatingPanel,
   FloatingPanelClose,
@@ -11,28 +11,31 @@ import {
 } from '#components/ui/floating-panel.js';
 import { Button } from '@taucad/ui/components/button';
 import { RevisionMarker } from '#routes/w.$workspace.$project/revision-marker.js';
-import { useVisibleRevisions } from '#hooks/use-revisions.js';
-import { useRestoreToPoint } from '#hooks/use-restore-to-point.js';
-import { PanelEmptyState } from '#components/ui/panel-empty-state.js';
-import { Input } from '@taucad/ui/components/input';
-import { useRevisionGraphActions } from '#hooks/use-revision-graph.js';
-import type { RevisionGraphNode } from '#lib/revision-graph.js';
 import { RevisionBranches } from '#routes/w.$workspace.$project/revision-branches.js';
-import { useOptionalChatWorkspaceAuthority } from '#providers/chat-workspace-authority-provider.js';
-import type { BranchMergeResult, RevisionBranchSummary } from '#providers/chat-workspace-authority-provider.js';
+import type { ConflictMaterialization } from '#routes/w.$workspace.$project/revision-branches.js';
+import { RevisionSyncRegion } from '#routes/w.$workspace.$project/revision-sync-region.js';
+import { useRevisionChanges, useRevisions } from '#hooks/use-revisions.js';
+import type { RevisionCard } from '#hooks/use-revisions.js';
+import { useRestoreToPoint } from '#hooks/use-restore-to-point.js';
+import { useRevisionClient, useRevisionCommands, useRevisionStatus } from '#hooks/use-revision-status.js';
+import { clearTurnOutcome, useLatestTurnOutcome } from '#routes/w.$workspace.$project/revision-outcomes.js';
+import { useChats } from '#hooks/use-chats.js';
+import { useProject } from '#hooks/use-project.js';
+import { PanelEmptyState } from '#components/ui/panel-empty-state.js';
 
 /**
- * The Revisions pane (R13) — the primary, discoverable cross-chat time-travel
- * surface. Every chat-backed revision is projected into its branch, parent,
- * fork point, immutable tree identity, publication, and conflict metadata.
- * Active-line revisions retain the existing restore path; abandoned branch
- * nodes remain inspectable instead of being erased.
+ * The Revisions pane (S26, A18, A29).
+ *
+ * Four regions, each revealed only when it has something to say: *Where you
+ * are* and *History* always, *Branches* once a second branch exists, *Sync*
+ * once a remote does. A hobbyist sees one region; an engineer sees four.
+ *
+ * Everything here reads two hooks — `useRevisions()` for the graph and
+ * `useRevisionStatus()` for the projection — and sends the machine's own verbs
+ * back. No surface derives a revision number, a "Current", or a dirty flag of
+ * its own (I3).
  *
  * A mobile `FloatingPanel` wrapper around the shared Workbench body.
- *
- * ponytail: baseline (Revision 0) restore and the expandable per-row DiffViewer
- * preview are deferred — the list + click-to-restore is the load-bearing R13
- * value.
  */
 export function ChatRevisions({
   isExpanded = true,
@@ -41,20 +44,12 @@ export function ChatRevisions({
   readonly isExpanded?: boolean;
   readonly setIsExpanded?: (value: boolean | ((current: boolean) => boolean)) => void;
 }): React.JSX.Element {
-  const { canReturnToLatest } = useVisibleRevisions();
-  const { returnToLatest, isBusy } = useRestoreToPoint();
   return (
     <FloatingPanel isOpen={isExpanded} side='right' onOpenChange={setIsExpanded}>
       <FloatingPanelContent>
         <FloatingPanelContentHeader>
           <FloatingPanelContentTitle>Revisions</FloatingPanelContentTitle>
           <FloatingPanelContentHeaderActions>
-            {canReturnToLatest ? (
-              <Button size='xs' variant='ghost' className='h-6 gap-1 px-1.5' disabled={isBusy} onClick={returnToLatest}>
-                <RotateCcw className='size-3' />
-                Return to latest
-              </Button>
-            ) : null}
             <FloatingPanelClose
               icon={XIcon}
               tooltipContent={(isOpen) => (
@@ -71,285 +66,287 @@ export function ChatRevisions({
   );
 }
 
-export function RevisionsPanelBody(): React.JSX.Element {
-  const { graph, isDirty } = useVisibleRevisions();
-  const { restore, isBusy } = useRestoreToPoint();
-  const { editSummary } = useRevisionGraphActions();
+/**
+ * *Where you are* — the region that is always shown (S26).
+ *
+ * One line for the branch, the revision the checkout reflects, and whether it
+ * has been written to since; the verbs that act on *now* sit beside it.
+ * *Save revision* is W6's (`Mod+S` and the `save` trigger), so what is here is
+ * the state and the two restore verbs, which exist today.
+ */
+function WhereYouAre(): React.JSX.Element {
+  const { branch, headRevisionId, revisions, isDirty, canReturnToLatest } = useRevisions();
+  const status = useRevisionStatus();
+  const { returnToLatest, restore, isBusy } = useRestoreToPoint();
+  const outcome = useLatestTurnOutcome();
+  const head = revisions.find((revision) => revision.revisionId === headRevisionId);
+  const revisionName = head?.n === undefined ? undefined : `Rev ${String(head.n)}`;
 
   return (
-    <div data-slot='revisions-panel-body' className='size-full min-h-0 overflow-hidden bg-sidebar'>
-      <RevisionBranchesSection />
-      <div className='size-full scroll-shadows-y overflow-y-auto p-2 [--scroll-fade-end:transparent] [--scroll-fade-size:28px]'>
-        {graph.nodes.length === 0 ? (
-          <PanelEmptyState
-            icon={History}
-            title='No revisions yet'
-            description='Agent changes will appear here.'
-            className='m-0 min-h-full rounded-xl border bg-card'
-          />
-        ) : (
-          <ol aria-label='Revision branch graph' className='flex min-h-full list-none flex-col gap-2'>
-            {[...graph.nodes].reverse().map((node) => {
-              const { revision } = node;
-              const isActive = graph.headId === node.id;
-              const restoreThis = (): void => {
-                restore({
-                  messageId: revision.messageId,
-                  anchor: revision.anchor,
-                  identitySource: node.identitySource,
-                  ...(node.identitySource === 'authoritative' ? { revisionId: node.id } : {}),
-                });
-              };
-              return (
-                <li key={node.id} className='rounded-xl border border-border/70 bg-card'>
-                  <RevisionGraphMetadata
-                    node={node}
-                    isBranchHead={graph.branches.some((branch) => branch.headId === node.id)}
-                    onEditSummary={editSummary}
-                  />
-                  <RevisionMarker
-                    revision={revision}
-                    isActive={isActive}
-                    isModified={isActive && isDirty}
-                    isBusy={isBusy || (!node.isRestorable && node.identitySource === 'transcript')}
-                    onRestore={restoreThis}
-                    onDiscard={restoreThis}
-                  />
-                  {/* The gate is about *replaying chat evidence*: a node the
-                      revision store holds is restored by checking it out, so a
-                      superseded branch is inspect-only only when that is the
-                      only route it has. */}
-                  {node.isRestorable || node.identitySource === 'authoritative' ? null : (
-                    <p className='px-3 pb-2 text-xs text-muted-foreground'>Historical branch · inspect only</p>
-                  )}
-                </li>
-              );
-            })}
-          </ol>
+    <section aria-labelledby='revision-where-heading' className='flex flex-col gap-2'>
+      <h3 id='revision-where-heading' className='sr-only'>
+        Where you are
+      </h3>
+      <div className='flex flex-wrap items-center gap-2'>
+        <GitBranch aria-hidden className='size-3.5 shrink-0 text-muted-foreground' />
+        <span className='truncate text-sm font-medium'>{branch ?? 'Not on a branch yet'}</span>
+        {revisionName === undefined ? null : (
+          <>
+            <span aria-hidden className='text-muted-foreground'>
+              ·
+            </span>
+            <span className='font-mono text-sm'>{revisionName}</span>
+          </>
         )}
+        {/* ponytail: no second "Current" badge here. This line *is* where you
+            are, and the History row of the revision it names carries the word
+            (A29: one surface says one thing once). */}
       </div>
-    </div>
+
+      {isDirty ? (
+        <div className='flex items-center justify-between gap-2'>
+          <span className='flex items-center gap-1.5 text-xs text-warning'>
+            <Pencil aria-hidden className='size-3' />
+            {revisionName === undefined ? 'Modified' : `Modified since ${revisionName}`}
+          </span>
+          {headRevisionId === undefined ? null : (
+            <Button
+              size='xs'
+              variant='ghost'
+              disabled={isBusy}
+              onClick={() => {
+                restore(headRevisionId);
+              }}
+            >
+              Discard changes
+            </Button>
+          )}
+        </div>
+      ) : null}
+
+      {canReturnToLatest ? (
+        <Button size='sm' variant='outline' className='gap-1.5 self-start' disabled={isBusy} onClick={returnToLatest}>
+          <RotateCcw aria-hidden className='size-3' />
+          Return to latest
+        </Button>
+      ) : null}
+
+      {/* `attention` is the whole "needs you" count (S46) and a conflict is now
+          part of it — but a conflicted merge saved everything it was asked to,
+          on the source branch, so counting it as a failed save says the opposite
+          of what happened (review R5). The two are named separately. */}
+      {status !== undefined && status.attention - status.conflicts.length > 0 ? (
+        <p role='alert' className='flex items-center gap-2 text-xs text-destructive'>
+          <AlertTriangle aria-hidden className='size-3.5 shrink-0' />
+          <span>
+            {status.attention - status.conflicts.length === 1
+              ? 'One change could not be saved. Try again from the file that failed.'
+              : `${String(status.attention - status.conflicts.length)} changes could not be saved.`}
+          </span>
+        </p>
+      ) : null}
+
+      {status !== undefined && status.conflicts.length > 0 ? (
+        <p role='alert' className='text-amber-600 flex items-center gap-2 text-xs'>
+          <AlertTriangle aria-hidden className='size-3.5 shrink-0' />
+          <span>
+            {status.conflicts.length === 1
+              ? `${status.conflicts[0]?.branch ?? 'A branch'} needs resolution. Nothing else changed.`
+              : `${String(status.conflicts.length)} branches need resolution. Nothing else changed.`}
+          </span>
+        </p>
+      ) : null}
+
+      {/* W5 review R5: a turn that recorded nothing used to end in silence. */}
+      {outcome === undefined ? null : (
+        <div role='alert' className='flex items-start gap-2 text-xs text-destructive'>
+          <AlertTriangle aria-hidden className='mt-0.5 size-3.5 shrink-0' />
+          <span className='flex-1'>
+            {outcome.kind === 'conflicted'
+              ? 'The last change needs your attention: two versions changed the same files.'
+              : `Nothing was saved for the last change.${outcome.reason === undefined ? '' : ` ${outcome.reason}`}`}
+          </span>
+          <Button size='xs' variant='ghost' onClick={clearTurnOutcome}>
+            Dismiss
+          </Button>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function HistoryRow({
+  revision,
+  isActive,
+  isModified,
+  isBusy,
+  onRestore,
+}: {
+  readonly revision: RevisionCard;
+  readonly isActive: boolean;
+  readonly isModified: boolean;
+  readonly isBusy: boolean;
+  readonly onRestore: () => void;
+}): React.JSX.Element {
+  const changes = useRevisionChanges(revision);
+  return (
+    <li className='rounded-xl border border-border/70 bg-card'>
+      <div className='border-b border-border/60 px-3 py-2 text-xs text-muted-foreground'>
+        <p className='text-sm text-foreground'>{revision.summary}</p>
+        <p className='mt-0.5'>
+          {revision.actor}
+          {revision.conflicted ? ' · Needs resolution' : ''}
+        </p>
+      </div>
+      <RevisionMarker
+        revision={revision}
+        changes={changes}
+        isActive={isActive}
+        isModified={isModified}
+        isBusy={isBusy}
+        /* S38's second half (W5 review R4): on the revision the checkout sits
+         * on, with changes that are not in a revision yet, *Compare* answers
+         * "what have I changed since this" instead of repeating what the
+         * revision itself changed. */
+        compareAgainst={isActive && isModified ? 'checkout' : 'parent'}
+        onRestore={onRestore}
+        onDiscard={onRestore}
+      />
+    </li>
   );
 }
 
 /**
- * The DT1 branch porcelain, wired to the workspace authority, with "Current"
- * read from the store's head reference.
+ * The marker text the worker materialized, by revision and path.
  *
- * Optional authority on purpose: the Revisions pane also renders in profiles
- * that never mount one (the generic chat client), and a branch list is an
- * addition to that pane, never a precondition for it.
+ * *Open* is a request, not a render: `resolution.machine` reads the three terms
+ * out of the graph and renders the markers where the trees are, then says so
+ * once. No checkout and no machine context ever holds those bytes (A22, I29),
+ * so the one place they can live is here, for as long as the pane is open.
  *
- * Not from the graph head: a checkout moves where the live tree is without
- * recording a turn, so labelling the newest turn's branch "Current" mislabelled
- * the folder after every Switch and left a candidate that happened to be the
- * newest revision with no verb at all (operator decisions 2026-09-09, question
- * 11). A store with no head reference yet labels nothing current, which is what
- * the transcript-fallback guard used to do.
+ * @returns A lookup keyed `<revisionId>\u0000<path>`.
  */
-function RevisionBranchesSection(): React.ReactNode {
-  const authority = useOptionalChatWorkspaceAuthority();
-  const activeBranch = useSyncExternalStore(
-    authority?.subscribe ?? noBranchSubscription,
-    authority?.headBranch ?? noHeadBranch,
-    authority?.headBranch ?? noHeadBranch,
-  );
-  const [merge, setMerge] = useState<{ readonly source: string; readonly result: BranchMergeResult }>();
-  const [isBusy, setIsBusy] = useState(false);
-  const branches = useSyncExternalStore(
-    authority?.subscribe ?? noBranchSubscription,
-    authority?.listBranches ?? noBranches,
-    authority?.listBranches ?? noBranches,
-  );
-  if (!authority) {
-    return null;
-  }
-  const activeHead =
-    activeBranch === undefined ? undefined : branches.find((branch) => branch.name === activeBranch)?.headRevisionId;
-  const run = (operation: () => Promise<unknown>): void => {
-    setIsBusy(true);
-    // async-iife: bootstrap -- a click cannot await; failures reach the console sink.
-    void (async () => {
-      try {
-        await operation();
-      } catch (error) {
-        console.error('[RevisionBranches] branch operation failed', error);
-      } finally {
-        setIsBusy(false);
+function useConflictTexts(): Readonly<Record<string, ConflictMaterialization>> {
+  const client = useRevisionClient();
+  const [texts, setTexts] = useState<Readonly<Record<string, ConflictMaterialization>>>({});
+
+  useEffect(() => {
+    if (client === undefined) {
+      return undefined;
+    }
+    return client.subscribeToasts((entry) => {
+      if (entry.type !== 'conflictText') {
+        return;
       }
-    })();
-  };
-  return (
-    <RevisionBranches
-      branches={branches}
-      {...(activeBranch === undefined ? {} : { activeBranch })}
-      isBusy={isBusy}
-      {...(merge === undefined ? {} : { mergeResult: merge })}
-      diff={(branch) =>
-        activeHead === undefined ? [] : authority.diffRevisions({ from: activeHead, to: branch.headRevisionId })
-      }
-      onSwitch={(branch) => {
-        run(async () => authority.checkout(branch.headRevisionId));
-      }}
-      onMerge={(branch) => {
-        if (activeBranch === undefined) {
-          return;
-        }
-        run(async () => {
-          const result = await authority.mergeBranch({
-            source: branch.name,
-            target: activeBranch,
-            actorId: 'user',
-          });
-          setMerge({ source: branch.name, result });
-        });
-      }}
-      onDiscard={(branch) => {
-        /* The ref goes; every revision it reached stays in the object store and
-         * stays reachable by id, so the evidence survives the name. */
-        run(async () => authority.deleteBranch(branch.name));
-      }}
-    />
-  );
+      setTexts((current) => ({
+        ...current,
+        [`${entry.revisionId}\u0000${entry.path}`]: { text: entry.text, ours: entry.ours, theirs: entry.theirs },
+      }));
+    });
+  }, [client]);
+
+  return texts;
 }
 
-const noBranches = (): readonly RevisionBranchSummary[] => emptyBranches;
-const noHeadBranch = (): string | undefined => undefined;
-const emptyBranches: readonly RevisionBranchSummary[] = [];
-const noBranchSubscription = (): (() => void) => () => undefined;
-
-function RevisionGraphMetadata({
-  node,
-  isBranchHead,
-  onEditSummary,
-}: {
-  readonly node: RevisionGraphNode;
-  readonly isBranchHead: boolean;
-  readonly onEditSummary: (turnId: string, summary: string) => void;
-}): React.JSX.Element {
-  const displayedSummary = node.summary.edited ?? node.summary.generated;
-  const [summary, setSummary] = useState(displayedSummary);
-  useEffect(() => {
-    queueMicrotask(() => {
-      setSummary(displayedSummary);
-    });
-  }, [displayedSummary]);
+export function RevisionsPanelBody(): React.JSX.Element {
+  const { projectId } = useProject();
+  const { revisions, headRevisionId, isDirty, branch } = useRevisions();
+  const status = useRevisionStatus();
+  const commands = useRevisionCommands();
+  const { restore, isBusy } = useRestoreToPoint();
+  const { chats } = useChats(projectId);
+  /* A29: *Sync* appears when a remote exists, or when the person opens it. */
+  const [isConnectOpen, setIsConnectOpen] = useState(false);
+  const chatNames = useMemo(() => Object.fromEntries(chats.map((chat) => [chat.id, chat.name])), [chats]);
+  const branches = status?.branches ?? [];
+  const conflictTexts = useConflictTexts();
 
   return (
-    <div className='border-b border-border/60 px-3 py-2'>
-      <div className='flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground'>
-        <GitBranch aria-hidden='true' className='size-3' />
-        <span className='font-medium text-foreground'>{node.branch}</span>
-        {isBranchHead ? <span className='rounded bg-primary/10 px-1.5 py-0.5 text-primary'>Branch head</span> : null}
-        {node.identitySource === 'authoritative' ? (
-          <span className='rounded bg-primary/10 px-1.5 py-0.5 text-primary'>Finalized</span>
-        ) : null}
-        {node.forkPointTurnId === undefined ? null : <span>forked from {node.forkPointTurnId}</span>}
-        {node.conflict === undefined ? null : (
-          <span role='status' className='rounded bg-destructive/10 px-1.5 py-0.5 text-destructive'>
-            {node.conflict.type === 'stale-head' ? 'Stale head conflict' : `${node.conflict.kind} conflict`}
-          </span>
-        )}
-        {node.publication === undefined ? null : (
-          <span className='rounded bg-muted px-1.5 py-0.5'>
-            {node.publication.status === 'updated' ? 'Head published' : 'Head publication rejected'}
-          </span>
-        )}
-        {node.nativeGit?.status === 'stored' ? (
-          <span className='rounded bg-muted px-1.5 py-0.5'>Native Git stored</span>
-        ) : null}
-      </div>
-      <p className='mt-1 text-sm text-foreground'>{displayedSummary}</p>
-      <details className='mt-1.5 text-xs text-muted-foreground'>
-        <summary className='cursor-pointer select-none'>Inspect revision metadata</summary>
-        <dl className='mt-2 grid grid-cols-[auto_1fr] gap-x-2 gap-y-1 break-all'>
-          <dt>Revision</dt>
-          <dd>
-            {/* A 40-hex commit id is unreadable in a 240px pane; twelve is what
-                every engine's own porcelain shows, and the full id is one hover
-                (or one copy) away. */}
-            <code title={node.id}>{node.id.slice(0, 12)}</code>
-          </dd>
-          <dt>Tree</dt>
-          <dd>
-            <code title={node.treeId}>{node.treeId.slice(0, 12)}</code>
-          </dd>
-          <dt>Identity</dt>
-          <dd>{node.identitySource === 'authoritative' ? 'Workspace finalizer' : 'Transcript fallback'}</dd>
-          <dt>Base revision</dt>
-          <dd>
-            {node.baseRevisionId === undefined ? (
-              'Not recorded'
-            ) : (
-              <code title={node.baseRevisionId}>{node.baseRevisionId.slice(0, 12)}</code>
-            )}
-          </dd>
-          <dt>Chat</dt>
-          <dd>
-            {node.chatName} · <code>{node.chatId}</code>
-          </dd>
-          <dt>Parents</dt>
-          <dd>
-            {node.parentTurnIds.length === 0
-              ? 'Root'
-              : node.parentTurnIds
-                  .map((turnId, index) => `${turnId} → ${node.parents[index] ?? 'unresolved'}`)
-                  .join(', ')}{' '}
-            ({node.parentSource})
-          </dd>
-          <dt>Changed paths</dt>
-          <dd>{node.diff.changedPaths.length === 0 ? 'None' : node.diff.changedPaths.join(', ')}</dd>
-          <dt>Provenance</dt>
-          <dd>
-            {node.provenance.source} · <code>{node.provenance.actorId}</code>
-          </dd>
-          <dt>Run</dt>
-          <dd>{node.provenance.runId ?? 'None'}</dd>
-          <dt>Workspace</dt>
-          <dd>{node.workspaceId ?? 'Not recorded'}</dd>
-          <dt>Jobs</dt>
-          <dd>{node.jobIds.length === 0 ? 'None' : node.jobIds.join(', ')}</dd>
-          <dt>Publication</dt>
-          <dd>
-            {node.publication === undefined
-              ? 'Pending finalization'
-              : node.publication.status === 'updated'
-                ? `${node.publication.expectedHeadRevisionId} → ${node.publication.headRevisionId}`
-                : `${node.publication.expectedHeadRevisionId} rejected; actual ${node.publication.actualHeadRevisionId ?? 'missing'}`}
-          </dd>
-          <dt>Native Git</dt>
-          <dd>
-            {node.nativeGit === undefined || node.nativeGit.status === 'not-configured'
-              ? 'Not configured'
-              : node.nativeGit.status === 'stored'
-                ? `${node.nativeGit.objectFormat} ${node.nativeGit.commitId}`
-                : `Failed · ${node.nativeGit.errorCode}`}
-          </dd>
-        </dl>
-        <form
-          className='mt-2 flex gap-1.5'
-          onSubmit={(event) => {
-            event.preventDefault();
-            onEditSummary(node.turnId, summary);
-          }}
-        >
-          <label className='sr-only' htmlFor={`revision-summary-${node.id}`}>
-            Edit revision summary
-          </label>
-          <Input
-            id={`revision-summary-${node.id}`}
-            value={summary}
-            onChange={(event) => {
-              setSummary(event.target.value);
-            }}
-            aria-label={`Summary for Revision ${node.revision.n}`}
-            className='h-7 text-xs'
+    <div data-slot='revisions-panel-body' className='size-full min-h-0 overflow-hidden bg-sidebar'>
+      <div className='flex size-full scroll-shadows-y flex-col gap-3 overflow-y-auto p-3 [--scroll-fade-end:transparent] [--scroll-fade-size:28px]'>
+        <WhereYouAre />
+
+        {/* A29: one branch is not a choice, so the region does not exist yet. */}
+        {branches.length > 1 ? (
+          <RevisionBranches
+            branches={branches}
+            currentBranch={branch}
+            chatNames={chatNames}
+            /* A verb waiting on a person is still in flight: re-enabling the
+               rows while its question is open invites a second verb on top of
+               the first (review R4). */
+            isBusy={(status?.branchVerb.busy ?? false) || (status?.branchVerb.asking ?? false)}
+            conflicts={status?.conflicts ?? []}
+            onSwitch={commands.switchTo}
+            onMerge={commands.mergeBranch}
+            onDiscard={commands.discardBranch}
+            onCreate={commands.createBranch}
+            onRename={commands.renameBranch}
+            onKeepSide={commands.resolveFile}
+            onOpenConflict={commands.openConflictInEditor}
+            onAskChat={commands.askChatToResolve}
+            onFinishResolution={commands.finishResolution}
+            onResolveInEditor={commands.resolveFileInEditor}
+            conflictTexts={conflictTexts}
           />
-          <Button type='submit' size='xs' variant='outline'>
-            Save summary
+        ) : null}
+
+        <section aria-labelledby='revision-history-heading' className='flex min-h-0 flex-col gap-2'>
+          <h3 id='revision-history-heading' className='text-xs font-medium text-muted-foreground'>
+            History
+          </h3>
+          {revisions.length === 0 ? (
+            <PanelEmptyState
+              icon={History}
+              title='No revisions yet'
+              description='Agent changes will appear here.'
+              className='m-0 rounded-xl border bg-card'
+            />
+          ) : (
+            <ol aria-label='Revision history' className='flex list-none flex-col gap-2'>
+              {revisions.map((revision) => {
+                const isActive = headRevisionId === revision.revisionId;
+                return (
+                  <HistoryRow
+                    key={revision.revisionId}
+                    revision={revision}
+                    isActive={isActive}
+                    isModified={isActive && isDirty}
+                    isBusy={isBusy}
+                    onRestore={() => {
+                      restore(revision.revisionId);
+                    }}
+                  />
+                );
+              })}
+            </ol>
+          )}
+        </section>
+
+        {/* A29/D26: *Sync* appears once a remote does. The region is W11b/W13's;
+            the pane only composes it. */}
+        {status !== undefined && (status.remote.kind !== 'none' || isConnectOpen) ? (
+          <RevisionSyncRegion
+            remote={status.remote}
+            sync={status.sync}
+            onConnect={commands.connectRemote}
+            onDisconnect={commands.disconnectRemote}
+            onCancel={commands.cancelRemote}
+          />
+        ) : (
+          <Button
+            size='sm'
+            variant='outline'
+            className='gap-1.5 self-start'
+            onClick={() => {
+              setIsConnectOpen(true);
+            }}
+          >
+            <Cloud aria-hidden className='size-3.5' />
+            Back up to Tau Cloud
           </Button>
-        </form>
-      </details>
+        )}
+      </div>
     </div>
   );
 }

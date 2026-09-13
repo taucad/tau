@@ -326,6 +326,7 @@ const mockPrepareProjectCreation = vi.fn<
 });
 const mockResumeResources = vi.fn(async () => {
   phaseOrder.push('resources');
+  return [];
 });
 const mockCompletePending = vi.fn(async () => {
   phaseOrder.push('complete');
@@ -381,6 +382,34 @@ const mockPatchChat = vi.fn(async () => ({ ...activityChat, name: 'Patched' }));
 const mockTouchProjectActivity = vi.fn(async (projectId: string, activityAt?: number) => ({
   projectId,
   lastActivityAt: activityAt ?? 10,
+}));
+
+/* A chat is files, not an object-store row (W17): the chat half of the manager
+ * talks to `createChatFileStore`, so the doubles that used to sit on the worker
+ * sit on the store. */
+const mockPutChatRecord = vi.fn(async () => undefined);
+vi.mock('#db/chat-file-storage.js', () => ({
+  createChatFileStore: () => ({
+    touchChatRecency: mockTouchChatRecency,
+    setChatUnreadState: mockSetChatUnreadState,
+    patchChat: mockPatchChat,
+    putChatRecord: mockPutChatRecord,
+    getChatsForResource: vi.fn(async () => []),
+    getAllChats: vi.fn(async () => []),
+    getChat: vi.fn(async () => undefined),
+    createChat: vi.fn(async () => activityChat),
+    createNavigationRepairChat: vi.fn(async () => activityChat),
+    updateChat: vi.fn(async () => undefined),
+    applyGeneratedChatName: vi.fn(async () => undefined),
+    consumeChatStartupRequest: vi.fn(async () => undefined),
+    commitCancelledDraftRestore: vi.fn(async () => undefined),
+    setMessageEdit: vi.fn(async () => undefined),
+    clearMessageEdit: vi.fn(async () => undefined),
+    softDeleteChat: vi.fn(async () => undefined),
+    deleteChat: vi.fn(async () => undefined),
+    duplicateChat: vi.fn(async () => activityChat),
+    duplicateResourceChats: vi.fn(async () => ({})),
+  }),
 }));
 
 vi.mock('#chat-clients/use-project-name-client.js', () => ({

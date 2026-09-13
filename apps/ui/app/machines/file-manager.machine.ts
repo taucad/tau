@@ -28,6 +28,7 @@ import { WorkspacePathResolver } from '@taucad/fs-client/workspace-path-resolver
 import { RefreshGenerationGuard } from '@taucad/fs-client/refresh-generation-guard';
 import { createDomVisibilityProvider } from '@taucad/fs-client/visibility-provider';
 import { createComposedViewClient } from '@taucad/fs-client/composed-view-client';
+import type { ComposedViewClient } from '@taucad/fs-client/composed-view-client';
 import { bundledTypesWorkspaceRootSegment } from '#lib/bundled-types-tree.constants.js';
 import type { FileManagerProxy } from '#machines/file-manager.machine.types.js';
 import {
@@ -109,6 +110,8 @@ type FileManagerContext = {
   filePoolBuffer: SharedArrayBuffer | undefined;
   contentService: FileContentService | undefined;
   treeService: FileTreeService | undefined;
+  /** The one composed client the file services and the Files pane both use. */
+  viewClient: ComposedViewClient | undefined;
   disposeComposedView?: () => void;
   workerChangeChannel: WorkerChangeChannel | undefined;
   error: Error | undefined;
@@ -174,6 +177,7 @@ type WorkerInitializedEvent = {
   initialEntries: FileEntry[];
   contentService: FileContentService;
   treeService: FileTreeService;
+  viewClient: ComposedViewClient;
   workerChangeChannel: WorkerChangeChannel;
   /** Releases the user's composed-view connection this init opened. */
   disposeComposedView: () => void;
@@ -525,6 +529,7 @@ const initializeServicesActor = fromSafeAsync<
     initialEntries,
     contentService,
     treeService,
+    viewClient: client,
     workerChangeChannel,
     disposeComposedView,
   };
@@ -632,6 +637,7 @@ export const fileManagerMachine = setup({
         worker: context.sharedWorker ? context.worker : undefined,
         contentService: undefined,
         treeService: undefined,
+        viewClient: undefined,
         workerChangeChannel: undefined,
         disposeComposedView: undefined,
       };
@@ -730,6 +736,10 @@ export const fileManagerMachine = setup({
         assertEvent(event, 'workerInitialized');
         return event.treeService;
       },
+      viewClient({ event }) {
+        assertEvent(event, 'workerInitialized');
+        return event.viewClient;
+      },
       workerChangeChannel({ event }) {
         assertEvent(event, 'workerInitialized');
         return event.workerChangeChannel;
@@ -819,6 +829,7 @@ export const fileManagerMachine = setup({
     filePoolBuffer: input.sharedFilePoolBuffer,
     contentService: undefined,
     treeService: undefined,
+    viewClient: undefined,
     workerChangeChannel: undefined,
     error: undefined,
     rootDirectory: input.rootDirectory,

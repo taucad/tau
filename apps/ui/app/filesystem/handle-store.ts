@@ -36,7 +36,12 @@
 import { idPrefix } from '@taucad/types/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { assertRootedPath } from '@taucad/utils/path';
-import type { ProjectRootConfig, ProjectRootConfiguration, StorageRootConfig } from '@taucad/filesystem';
+import type {
+  CheckoutRootConfig,
+  ProjectRootConfig,
+  ProjectRootConfiguration,
+  StorageRootConfig,
+} from '@taucad/filesystem';
 import type { WorkspaceMarker } from '@taucad/types';
 import {
   parseWorkspaceMarker,
@@ -1454,6 +1459,35 @@ function reportWorkspaceRootSkip(
   onSkip?.({ workspaceId, reason });
 }
 
+/*
+ * Linked-checkout routes for the open project (charter D4, blueprint S27, W2
+ * review R4). The registry inside the revision tree is the only writer of
+ * checkouts, and it lives in a worker with no access to this store, so the
+ * surface that reads its projection hands the rows here. They are held rather
+ * than persisted because they are *derived*: `.tau/checkouts/<projectId>/<id>`
+ * beside the project, from records the tree already owns. Keeping them here
+ * rather than at one call site means every path that re-issues the
+ * configuration — a workspace reconnect, a repoint, a route change — keeps the
+ * checkout routes mounted instead of dropping them.
+ */
+let checkoutRoutes: readonly CheckoutRootConfig[] = [];
+
+/**
+ * Publish the linked-checkout routes of the project the workbench has open.
+ *
+ * @param routes - The rows, replacing the previous set; empty removes them.
+ * @returns Whether the set changed, so a caller can skip a needless re-issue.
+ */
+export function setCheckoutRootConfigs(routes: readonly CheckoutRootConfig[]): boolean {
+  const key = (rows: readonly CheckoutRootConfig[]): string =>
+    rows.map((row) => `${row.projectId}/${row.checkoutId}/${row.providerBasePath}`).join('\u0000');
+  if (key(routes) === key(checkoutRoutes)) {
+    return false;
+  }
+  checkoutRoutes = routes;
+  return true;
+}
+
 /**
  * Resolve the complete cloneable project-route set for the filesystem worker.
  *
@@ -1530,7 +1564,11 @@ export async function getProjectRootConfigs(
       }),
     ),
   ];
-  return { projects, roots };
+  /* A checkout of a project this configuration no longer routes has nothing to
+   * ride: its route would resolve against a storage root that is gone. */
+  const routed = new Set(projects.map((config) => config.projectId));
+  const checkouts = checkoutRoutes.filter((config) => routed.has(config.projectId));
+  return { projects, roots, ...(checkouts.length === 0 ? {} : { checkouts }) };
 }
 
 function isProjectFileSystemConfig(value: unknown): value is ProjectFileSystemConfig {

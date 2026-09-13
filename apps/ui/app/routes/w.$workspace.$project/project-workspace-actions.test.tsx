@@ -18,11 +18,6 @@ const state = vi.hoisted(() => ({
     workbenchWidth: 420,
     compactAuxiliary: 'chat' as 'chat' | 'workbench',
   },
-  revisions: {
-    canReturnToLatest: false,
-    headRevision: undefined as { n: number } | undefined,
-    isDirty: false,
-  },
 }));
 
 const openPanel = vi.hoisted(() => vi.fn());
@@ -38,7 +33,11 @@ vi.mock('#hooks/use-project.js', () => ({
     projectRef: { getSnapshot: () => ({ context: { project: { name: 'Rotor housing' } } }) },
   }),
 }));
-vi.mock('#hooks/use-revisions.js', () => ({ useVisibleRevisions: () => state.revisions }));
+/* The chip is always on and has its own suite (`revision-status-action.test.tsx`);
+ * here it only has to be in the cluster, and only on desktop (S29). */
+vi.mock('#routes/w.$workspace.$project/revision-status-action.js', () => ({
+  RevisionStatusAction: () => <span data-testid='revision-status-chip' />,
+}));
 vi.mock('#components/panes/use-is-top-right-group.js', () => ({
   useIsTopRightGroup: () => state.isTopRight,
 }));
@@ -93,7 +92,6 @@ describe('ProjectWorkspaceActions', () => {
       workbenchWidth: 420,
       compactAuxiliary: 'chat',
     };
-    state.revisions = { canReturnToLatest: false, headRevision: undefined, isDirty: false };
     vi.clearAllMocks();
   });
 
@@ -150,13 +148,9 @@ describe('ProjectWorkspaceActions', () => {
     expect(screen.queryByTestId('workbench-toggle-slot')).not.toBeInTheDocument();
   });
 
-  it('shows historical revision status only while away from latest', async () => {
-    const user = userEvent.setup();
-    state.revisions = { canReturnToLatest: true, headRevision: { n: 7 }, isDirty: true };
+  it('carries the revision chip at all times, not only while away from latest (S29)', () => {
     renderActions();
 
-    await user.click(screen.getByRole('button', { name: 'Open historical revision status: Revision 7 · modified' }));
-    expect(openPanel).toHaveBeenCalledExactlyOnceWith('revisions');
-    expect(screen.getByText('Revision 7 · modified')).toBeInTheDocument();
+    expect(screen.getByTestId('revision-status-chip')).toBeInTheDocument();
   });
 });

@@ -26,7 +26,7 @@ const createCompactionData = (overrides?: Partial<ContextCompactionData>): Conte
   tokensAfterCompaction: 5000,
   compressionRatio: 0.1,
   messagesEvicted: 15,
-  transcriptFilePath: '.tau/transcripts/chat-1.jsonl',
+  transcriptFilePath: '.tau/chats/chat-1/events.jsonl',
   ...overrides,
 });
 
@@ -96,14 +96,14 @@ describe('ChatMessageContextCompaction', () => {
   it('should show transcript file path when present', async () => {
     render(
       <ChatMessageContextCompaction
-        data={createCompactionData({ transcriptFilePath: '.tau/transcripts/test.jsonl' })}
+        data={createCompactionData({ transcriptFilePath: '.tau/chats/test/events.jsonl' })}
       />,
     );
 
     const badge = screen.getByText('Summarized');
     await userEvent.hover(badge);
 
-    expect(await screen.findByText('.tau/transcripts/test.jsonl')).toBeInTheDocument();
+    expect(await screen.findByText('.tau/chats/test/events.jsonl')).toBeInTheDocument();
   });
 
   it('should not show transcript file path when null', async () => {

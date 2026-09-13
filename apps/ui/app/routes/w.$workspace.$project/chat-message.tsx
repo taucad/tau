@@ -52,6 +52,7 @@ import { ChatMessageToolGrep } from '#routes/w.$workspace.$project/chat-message-
 import { ChatMessageToolGlobSearch } from '#routes/w.$workspace.$project/chat-message-tool-glob-search.js';
 import { ChatMessageToolGetKernelResult } from '#routes/w.$workspace.$project/chat-message-tool-get-kernel-result.js';
 import { ChatMessageToolScreenshot } from '#routes/w.$workspace.$project/chat-message-tool-screenshot.js';
+import { ChatMessageToolRevisions } from '#routes/w.$workspace.$project/chat-message-tool-revisions.js';
 import { ChatMessageToolExportGeometry } from '#routes/w.$workspace.$project/chat-message-tool-export-geometry.js';
 import { ChatMessagePartUnknown } from '#routes/w.$workspace.$project/chat-message-tool-unknown.js';
 import { ChatMessageToolExternal } from '#routes/w.$workspace.$project/chat-message-tool-external.js';
@@ -273,6 +274,10 @@ function renderAssistantPart(
 
     case 'tool-screenshot': {
       return <ChatMessageToolScreenshot key={part.toolCallId} part={part} />;
+    }
+
+    case 'tool-revisions': {
+      return <ChatMessageToolRevisions key={part.toolCallId} part={part} />;
     }
 
     case 'tool-export_geometry': {

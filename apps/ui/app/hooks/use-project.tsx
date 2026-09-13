@@ -28,7 +28,7 @@ import { serializeModelComponentDisplayState } from '#machines/model-interaction
 import { inspect } from '#machines/inspector.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import type { LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
-import type { StorageProvider } from '#types/storage.types.js';
+import type { ChatStorage } from '#types/storage.types.js';
 import { localKernelOptions } from '#constants/local-kernel-options.js';
 import { joinPath } from '@taucad/utils/path';
 import { parseParameterEntry, createDefaultEntry, serializeParameterEntry } from '#utils/parameter-config.utils.js';
@@ -66,7 +66,7 @@ type ProjectContextType = {
 
 const ProjectContext = createContext<ProjectContextType | undefined>(undefined);
 
-type FocusedChatWorker = Pick<StorageProvider, 'getChatsForResource' | 'createNavigationRepairChat'>;
+type FocusedChatWorker = Pick<ChatStorage, 'getChatsForResource' | 'createNavigationRepairChat'>;
 
 export async function ensureFocusedChatForProject({
   projectId,
@@ -237,12 +237,9 @@ export function ProjectProvider({
             }
           }
 
-          const library =
-            profile === 'editor' ? await projectManager.getProjectLibraryState(input.projectId) : undefined;
           return {
             type: 'projectRetrieved',
             project,
-            revisionState: library?.revisionState,
             parameterEntries,
           };
         }),
@@ -322,12 +319,13 @@ export function ProjectProvider({
           if (profile === 'shared') {
             return { type: 'focusedChatEnsured', focusedChatId: `shared:${input.projectId}` };
           }
-          const worker = await getReadiedWorker();
           return ensureFocusedChatForProject({
             projectId: input.projectId,
             requestedChatId: input.requestedChatId,
             persistedChatId: input.persistedChatId,
-            worker,
+            /* Chats are files now (W17): the project manager owns the store,
+             * and the object-store worker knows nothing about them. */
+            worker: projectManager,
             onCreatedChat: () => {
               // Surface the new chat through TanStack Query so `useChats`
               // refetches and the history selector picks it up immediately.
@@ -432,12 +430,8 @@ export function ProjectProvider({
       await projectManager.touchProject(projectId);
       await queryClient.invalidateQueries({ queryKey: ['projects'] });
     });
-    const revision = actorRef.on('revisionStateUpdated', (event) => {
-      void projectManager.setProjectRevisionState(projectId, event.revisionState);
-    });
     return () => {
       activity.unsubscribe();
-      revision.unsubscribe();
     };
   }, [actorRef, profile, projectId, projectManager, queryClient]);
 

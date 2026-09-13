@@ -17,13 +17,13 @@ const harness = {
   finalize: vi.fn(),
   discard: vi.fn(),
   retireClaim: vi.fn(),
-  listFinalized: vi.fn(),
   reclaimAll: vi.fn(),
   releaseDurableRun: vi.fn(),
   retainDurableRun: vi.fn(),
   reconcileDurableUserMessage: vi.fn(),
   clearBrowserAgentHostRun: vi.fn(),
-  revisionSend: vi.fn(),
+  /** What the settling host attested on the wire, as this tab holds it (W5). */
+  finalizedTurns: [] as ReadonlyArray<{ runId: string }>,
 };
 
 const workspace = {
@@ -64,19 +64,15 @@ vi.mock('#providers/chat-workspace-authority-provider.js', () => ({
   useChatWorkspaceAuthority: () => ({
     reclaimAll: harness.reclaimAll,
     retireClaim: harness.retireClaim,
-    listFinalized: harness.listFinalized,
     finalize: harness.finalize,
     discard: harness.discard,
   }),
   usePreparedChatWorkspace: () => harness.workspace,
 }));
 
-vi.mock('#routes/w.$workspace.$project/revision-provider.js', () => ({
-  useRevisionActor: () => ({ send: harness.revisionSend }),
-}));
-
 vi.mock('#chat-clients/_internal/browser-agent-host-transport.js', () => ({
   getBrowserAgentHostRun: () => harness.browserRun,
+  getHostFinalizedTurns: () => harness.finalizedTurns,
   clearBrowserAgentHostRun: (chatId: string): void => {
     harness.clearBrowserAgentHostRun(chatId);
   },
@@ -91,13 +87,8 @@ describe('ProjectChatRunSettlement', () => {
     harness.durableRunState = 'terminal';
     harness.browserRun = { runId: 'run_1', state: 'completed', eventCount: 3, turnId: 'turn_1' };
     harness.reclaimAll.mockResolvedValue([]);
-    harness.listFinalized.mockReturnValue([]);
-    harness.finalize.mockResolvedValue({
-      status: 'published',
-      chatId: 'chat_1',
-      turnId: 'turn_1',
-      branchName: 'agent/chat_1',
-    });
+    harness.finalizedTurns = [];
+    harness.finalize.mockResolvedValue(undefined);
     harness.discard.mockResolvedValue(undefined);
     harness.retireClaim.mockResolvedValue(undefined);
   });
@@ -110,12 +101,7 @@ describe('ProjectChatRunSettlement', () => {
     render(<ProjectChatRunSettlement />);
 
     await waitFor(() => {
-      expect(harness.finalize).toHaveBeenCalledWith('chat_1', {
-        actorId: 'tau-browser-agent-host',
-        summary: 'Completed chat chat_1',
-        turnId: 'turn_1',
-        runId: 'run_1',
-      });
+      expect(harness.finalize).toHaveBeenCalledWith('chat_1');
     });
     expect(harness.releaseDurableRun).toHaveBeenCalledWith({ chatId: 'chat_1', runId: 'run_1' });
     expect(harness.clearBrowserAgentHostRun).toHaveBeenCalledWith('chat_1');
@@ -131,7 +117,6 @@ describe('ProjectChatRunSettlement', () => {
       expect(harness.discard).toHaveBeenCalledWith('chat_1');
     });
     expect(harness.finalize).not.toHaveBeenCalled();
-    expect(harness.revisionSend).toHaveBeenCalledWith({ type: 'DISCARD_PENDING_TURN', turnId: 'turn_1' });
     expect(harness.releaseDurableRun).toHaveBeenCalledWith({ chatId: 'chat_1', runId: 'run_1' });
   });
 
@@ -145,6 +130,24 @@ describe('ProjectChatRunSettlement', () => {
     });
     expect(harness.finalize).not.toHaveBeenCalled();
     expect(harness.releaseDurableRun).toHaveBeenCalledWith({ chatId: 'chat_1', runId: 'run_1' });
+  });
+
+  /**
+   * The settling host attested this run on the wire (W5): the turn is recorded
+   * and the root has already let its lease go, so asking for a second
+   * settlement would record the reader's newer live edits as that turn's work.
+   */
+  it('releases a run the host already attested instead of settling it twice', async () => {
+    harness.finalizedTurns = [{ runId: 'run_1' }];
+
+    render(<ProjectChatRunSettlement />);
+
+    await waitFor(() => {
+      expect(harness.discard).toHaveBeenCalledWith('chat_1');
+    });
+    expect(harness.finalize).not.toHaveBeenCalled();
+    expect(harness.releaseDurableRun).toHaveBeenCalledWith({ chatId: 'chat_1', runId: 'run_1' });
+    expect(harness.clearBrowserAgentHostRun).toHaveBeenCalledWith('chat_1');
   });
 
   it('leaves a still-running host run active instead of settling it', async () => {
@@ -204,7 +207,7 @@ describe('ProjectChatRunSettlement', () => {
     expect(harness.releaseDurableRun).not.toHaveBeenCalled();
     expect(harness.clearBrowserAgentHostRun).not.toHaveBeenCalled();
 
-    harness.finalize.mockResolvedValue({ status: 'finalized' });
+    harness.finalize.mockResolvedValue(undefined);
     harness.workspace = { ...workspace };
     view.rerender(<ProjectChatRunSettlement />);
 

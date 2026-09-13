@@ -1,7 +1,10 @@
 import type { ReactNode } from 'react';
 import { Fragment, useCallback, useMemo } from 'react';
-import { ChevronRight } from 'lucide-react';
+import { ChevronRight, Lock } from 'lucide-react';
+import { Badge } from '@taucad/ui/components/badge';
 import { useProject } from '#hooks/use-project.js';
+import { useFileTreeEntry } from '#hooks/use-file-tree.js';
+import { fileProvenanceLabel } from '#lib/file-provenance-labels.js';
 import { FileExtensionIcon } from '#components/icons/file-extension-icon.js';
 import { FileSelector } from '#components/files/file-selector.js';
 import { OmniScroller } from '#components/ui/omni-scroller.js';
@@ -14,6 +17,9 @@ type ChatEditorBreadcrumbsProperties = {
 
 export function ChatEditorBreadcrumbs({ filePath, children }: ChatEditorBreadcrumbsProperties): ReactNode {
   const { editorRef } = useProject();
+  const entry = useFileTreeEntry(filePath);
+  const provenance = entry?.provenance;
+  const label = fileProvenanceLabel(provenance, filePath);
 
   // Derive breadcrumb data from the panel's own file path
   const activeFile = useMemo(
@@ -75,6 +81,24 @@ export function ChatEditorBreadcrumbs({ filePath, children }: ChatEditorBreadcru
           <span className='opacity-0'>placeholder</span>
         )}
       </OmniScroller>
+      {/* Provenance sits beside the breadcrumb, and never at the breadcrumb's
+       * expense: a badge says it in one word and the full line is the hover and
+       * the accessible text, so a narrow pane still shows the path. */}
+      {label.description ? (
+        <span className='ml-1 flex shrink-0 items-center gap-1 text-xs text-muted-foreground' title={label.description}>
+          {label.glyph === 'lock' ? <Lock aria-hidden data-provenance-glyph='lock' className='size-3' /> : null}
+          {label.badge ? (
+            <>
+              <Badge variant='secondary' className='px-1.5 py-0 font-normal'>
+                {label.badge}
+              </Badge>
+              <span className='sr-only'>{label.description}</span>
+            </>
+          ) : (
+            <span className='max-w-40 truncate'>{label.description}</span>
+          )}
+        </span>
+      ) : null}
       {children}
     </div>
   );

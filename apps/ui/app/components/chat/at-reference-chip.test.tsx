@@ -121,15 +121,15 @@ describe('AtReferenceChip', () => {
   it('should render chat chip for valid transcript path', () => {
     const chats = createChats([{ id: 'chat-123', name: 'Design Discussion' }]);
 
-    renderChip('.tau/transcripts/chat-123.jsonl', createMockTreeService(), chats);
+    renderChip('.tau/chats/chat-123/events.jsonl', createMockTreeService(), chats);
 
     expect(screen.getByText('Design Discussion')).toBeInTheDocument();
   });
 
   it('should render plain text for unknown transcript path', () => {
-    renderChip('.tau/transcripts/missing-chat.jsonl', createMockTreeService());
+    renderChip('.tau/chats/missing-chat/events.jsonl', createMockTreeService());
 
-    expect(screen.getByText('@.tau/transcripts/missing-chat.jsonl')).toBeInTheDocument();
+    expect(screen.getByText('@.tau/chats/missing-chat/events.jsonl')).toBeInTheDocument();
     expect(screen.queryByTestId('file-link')).not.toBeInTheDocument();
   });
 

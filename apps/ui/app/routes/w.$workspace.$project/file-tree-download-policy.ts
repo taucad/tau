@@ -1,4 +1,4 @@
-import { isBundledTypesWorkspacePath } from '#lib/bundled-types-tree.constants.js';
+import type { FileProvenance } from '@taucad/types';
 
 export type FileTreeDownloadPolicy =
   | { readonly allowed: true }
@@ -32,8 +32,18 @@ export class FileTreeDownloadError extends Error {
   }
 }
 
-export function getFileTreeDownloadPolicy(path: string): FileTreeDownloadPolicy {
-  if (isBundledTypesWorkspacePath(path)) {
+/**
+ * Whether a row may be downloaded.
+ *
+ * Dependency bytes are the application's own build output, not the user's, and
+ * have never been downloadable; the rule now reads the row's provenance instead
+ * of its spelling.
+ *
+ * @param provenance - What the composed view (or the dependency mount) says about the row.
+ * @returns Allowed, or the refusal with its user-facing message.
+ */
+export function getFileTreeDownloadPolicy(provenance: FileProvenance | undefined): FileTreeDownloadPolicy {
+  if (provenance?.source === 'dependencies') {
     return {
       allowed: false,
       code: 'dependency-read-only',

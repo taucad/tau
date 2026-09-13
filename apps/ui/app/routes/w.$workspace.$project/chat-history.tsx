@@ -7,8 +7,6 @@ import { messageRole } from '@taucad/chat/constants';
 import { ChatMessage } from '#routes/w.$workspace.$project/chat-message.js';
 import { ChatRevisionMarker } from '#routes/w.$workspace.$project/chat-revision-marker.js';
 import { buildTurnGroups } from '#routes/w.$workspace.$project/chat-turn-groups.js';
-import { RevisionSeams } from '#routes/w.$workspace.$project/revision-seams.js';
-import { ForkDivider } from '#routes/w.$workspace.$project/fork-divider.js';
 import { ScrollDownButton } from '#routes/w.$workspace.$project/scroll-down-button.js';
 import { ChatError } from '#routes/w.$workspace.$project/chat-error.js';
 import type { ChatTextareaProperties, ChatTextareaHandle } from '#components/chat/chat-textarea-types.js';
@@ -252,8 +250,6 @@ export const ChatHistory = memo(function (props: {
         )}
       >
         {/* Chat-restore time-travel: wire the store seams + surface a fork marker. */}
-        <RevisionSeams />
-        <ForkDivider />
         {/* Header with chat selector */}
         <FloatingPanelContentHeader>
           <ChatTitleBar

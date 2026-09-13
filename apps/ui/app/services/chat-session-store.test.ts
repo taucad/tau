@@ -221,7 +221,6 @@ const testRunBody = Object.freeze({
   projectId: 'project_test',
   execution: Object.freeze({
     hostId: 'host_test',
-    mode: 'direct',
     workspaceId: 'workspace_test',
     baseRevisionId: 'revision_test',
   }),
@@ -1688,7 +1687,6 @@ describe('ChatSessionStore', () => {
         projectId: 'project_startup',
         execution: {
           hostId: 'host_startup',
-          mode: 'direct',
           workspaceId: 'workspace_startup',
           baseRevisionId: 'revision_startup',
         },

@@ -1,0 +1,114 @@
+/**
+ * One scriptable stand-in for the page's revision client.
+ *
+ * Every revision surface reads the same two hooks (`useRevisionStatus` and
+ * `useRevisionClient`), so their suites share one harness rather than each
+ * re-deriving a client mock — which is how two surfaces end up asserting
+ * different shapes of the same projection.
+ *
+ * @see apps/ui/app/hooks/use-revision-status.ts
+ */
+
+import { vi } from 'vitest';
+import type { RevisionStatusProjection } from '@taucad/revisions/project-revisions-machine';
+import type { RevisionDiffEntry, RevisionRow } from '@taucad/revisions';
+import type { RevisionToast, RevisionFileComparison } from '#machines/file-manager.worker.revisions.js';
+
+const emptyStatus = (): RevisionStatusProjection => ({
+  projectId: 'p',
+  checkoutId: 'live',
+  checkoutRoot: '/projects/p',
+  branch: 'main',
+  dirty: false,
+  minting: false,
+  headRevisionId: undefined,
+  follow: 'chat',
+  attention: 0,
+  restore: { asking: false, busy: false, removedPathCount: 0, dirty: false, revisionNumber: undefined },
+  remote: { kind: 'none', url: undefined, phase: 'none', storage: undefined, overQuota: [], error: undefined },
+  branches: [{ name: 'main', head: undefined, checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: [] }],
+  branchVerb: { busy: false, asking: false, operation: undefined, branch: undefined, question: undefined },
+  publish: { phase: 'idle', tags: [], publicationId: undefined, shareUrl: undefined, error: undefined },
+  sync: { state: 'noRemote', pendingCount: 0, online: true, conflictRef: undefined, error: undefined },
+  conflicts: [],
+});
+
+const emptyComparison = (): RevisionFileComparison => ({ original: '', modified: '' });
+
+/** What the scripted client answers, and what the surface under test sent it. */
+export const revisionStatusHarness = {
+  status: emptyStatus(),
+  /* The frame before the worker has answered at all, which a surface must
+   * render as nothing rather than as an empty project. */
+  connected: true,
+  rows: [] as readonly RevisionRow[],
+  diff: [] as readonly RevisionDiffEntry[],
+  comparison: emptyComparison(),
+  toasts: new Set<(toast: RevisionToast) => void>(),
+  commands: {
+    restore: vi.fn<(revisionId: string) => void>(),
+    returnToLatest: vi.fn(),
+    undo: vi.fn(),
+    confirm: vi.fn(),
+    cancel: vi.fn(),
+    switchTo: vi.fn<(branch: string) => void>(),
+    createBranch: vi.fn<(name: string, from?: string) => void>(),
+    discardBranch: vi.fn<(branch: string, checkoutId?: string) => void>(),
+    mergeBranch: vi.fn<(branch: string) => void>(),
+    renameBranch: vi.fn<(branch: string, name: string) => void>(),
+    confirmBranch: vi.fn(),
+    cancelBranch: vi.fn(),
+    resolveFile: vi.fn<(revisionId: string, path: string, side: 'mine' | 'theirs') => void>(),
+    openConflictInEditor: vi.fn<(revisionId: string, path: string) => void>(),
+    resolveFileInEditor: vi.fn<(revisionId: string, path: string, content: string) => void>(),
+    finishResolution: vi.fn<(revisionId: string) => void>(),
+    abandonResolution: vi.fn<(revisionId: string) => void>(),
+    askChatToResolve: vi.fn<(revisionId: string) => void>(),
+    followChat: vi.fn<(chatId: string) => void>(),
+    pinTo: vi.fn<(checkoutId: string) => void>(),
+    connectRemote: vi.fn<(kind: 'none' | 'tau' | 'git', url?: string) => void>(),
+    publishProject: vi.fn<(tag?: string) => void>(),
+    confirmPublish: vi.fn(),
+    cancelPublish: vi.fn(),
+    resetPublish: vi.fn(),
+    disconnectRemote: vi.fn(),
+    cancelRemote: vi.fn(),
+  },
+  reset(): void {
+    this.status = emptyStatus();
+    this.connected = true;
+    this.rows = [];
+    this.diff = [];
+    this.comparison = emptyComparison();
+    this.toasts.clear();
+    for (const command of Object.values(this.commands)) {
+      command.mockClear();
+    }
+  },
+};
+
+/**
+ * The module factory `vi.mock('#hooks/use-revision-status.js', …)` returns.
+ *
+ * @returns The hook surface, backed by {@link revisionStatusHarness}.
+ */
+export const revisionStatusMock = (): Record<string, unknown> => ({
+  useRevisionStatus: () => (revisionStatusHarness.connected ? revisionStatusHarness.status : undefined),
+  useRevisionCommands: () => revisionStatusHarness.commands,
+  useRevisionClient: () => ({
+    status: () => revisionStatusHarness.status,
+    subscribe: () => () => undefined,
+    subscribeEvents: () => () => undefined,
+    subscribeToasts: (listener: (toast: RevisionToast) => void) => {
+      revisionStatusHarness.toasts.add(listener);
+      return () => revisionStatusHarness.toasts.delete(listener);
+    },
+    admitTurn: async () => ({ checkoutId: 'live', root: '/projects/p', baseRevisionId: '' }),
+    log: async () => revisionStatusHarness.rows,
+    diff: async () => revisionStatusHarness.diff,
+    compare: async () => revisionStatusHarness.comparison,
+    send: () => undefined,
+    open: () => undefined,
+    close: () => undefined,
+  }),
+});

@@ -61,7 +61,6 @@ function createTestActor(options?: {
         return {
           type: 'projectRetrieved',
           project,
-          revisionState: undefined,
           parameterEntries: parameterEntries ?? new Map<string, FileParameterEntry>(),
         };
       }),
@@ -170,7 +169,6 @@ describe('projectMachine', () => {
             return {
               type: 'projectRetrieved',
               project: stubProject,
-              revisionState: undefined,
               parameterEntries: new Map(),
             };
           }),
@@ -353,20 +351,6 @@ describe('projectMachine', () => {
       const actor = await startAndLoad();
       actor.send({ type: 'updateDescription', description: 'New desc' });
       expect(actor.getSnapshot().context.project?.description).toBe('New desc');
-      actor.stop();
-    });
-
-    it('should keep revisionState outside the manifest and emit a field-scoped persistence event', async () => {
-      const actor = await startAndLoad();
-      const emitted: unknown[] = [];
-      actor.on('revisionStateUpdated', (event) => emitted.push(event.revisionState));
-
-      const revisionState = { headTurnId: 'u5', supersededTurnIds: ['u2'], dirty: false };
-      actor.send({ type: 'updateRevisionState', revisionState });
-
-      expect(actor.getSnapshot().context.revisionState).toEqual(revisionState);
-      expect(actor.getSnapshot().context.project).toEqual(stubProject);
-      expect(emitted).toEqual([revisionState]);
       actor.stop();
     });
 

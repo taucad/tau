@@ -32,7 +32,9 @@ import { HomeFileManagerProvider } from '#hooks/use-file-manager.js';
 import { AnalyticsProvider } from '#hooks/use-analytics.js';
 import { KeyboardProvider } from '#hooks/use-keyboard.js';
 import { UnloadProvider } from '#hooks/use-flush-on-close.js';
+import { RevisionActorIdentity } from '#components/revision-actor-identity.js';
 import { ChatSessionStoreProvider } from '#hooks/chat-session-store-provider.js';
+import { SessionsProvider } from '#hooks/use-sessions.js';
 import { GlobalChatFlushGuard } from '#components/global-chat-flush-guard.js';
 import { SvgSpriteMount } from '#components/icons/svg-sprite-mount.js';
 import { BuildSkewBanner } from '#components/build-skew-banner.js';
@@ -176,8 +178,12 @@ export function Layout({ children }: { readonly children: ReactNode }): React.JS
           <KeyboardProvider>
             <UnloadProvider>
               <ChatSessionStoreProvider>
-                <GlobalChatFlushGuard />
-                {children}
+                {/* A35: liveness is owned by the registry, not by a route. */}
+                <SessionsProvider>
+                  <GlobalChatFlushGuard />
+                  <RevisionActorIdentity />
+                  {children}
+                </SessionsProvider>
               </ChatSessionStoreProvider>
             </UnloadProvider>
           </KeyboardProvider>

@@ -1,418 +1,228 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { renderHook } from '@testing-library/react';
-import { createActor } from 'xstate';
-import { parseLogEvent } from '@taucad/agent-host';
-import { projectAgentHostRevisionFinalized } from '#services/agent-host-event-projection.js';
-import { revisionMachine } from '#machines/revision.machine.js';
-import { mock } from 'vitest-mock-extended';
-import type { Chat, MyUIMessage } from '@taucad/chat';
-import type { PersistedRevisionGraphNode, PersistedRevisionGraphState } from '#types/revision.types.js';
-import { useRevisions, useVisibleRevisions } from '#hooks/use-revisions.js';
-import type { ChatSession, ChatSessionStore } from '#services/chat-session-store.js';
-import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
+/**
+ * `useRevisions` reads the host-attested graph and nothing else (S10, I3).
+ *
+ * The number, "Current", dirty and *Return to latest* are all answers the
+ * revision root already gave — the first-parent ordinal on the selected branch,
+ * the checkout's head, the checkout machine's own state — so this suite scripts
+ * that root and asserts what the hook makes of its answers.
+ */
 
-// ---------------------------------------------------------------------------
-// useRevisions head-derivation regression: the stale "Revision 0 · baseline"
-// top-bar chip while a Revision demonstrably exists (bug report img3).
-//
-// `useRevisions` matches the head by TIMESTAMP EQUALITY:
-//   headRevision = revisions.find((r) => r.anchor === restorePoint)
-//                  ?? (restorePoint === 0 ? latest : undefined)
-// `restorePoint` is persisted by Seam 2 (`TURN_COMPLETED`) from a LIVE snapshot
-// (`revisions.at(-1).anchor`). If the anchor basis later drifts — e.g. the
-// reloaded user messages lack `createdAt`, so every turn collapses onto
-// `chat.createdAt` — no revision's anchor equals the persisted `restorePoint`,
-// so the head resolves to `undefined` and the chip reads "Revision 0 ·
-// baseline" even though Revisions exist and "Return to latest" is offered.
-// ---------------------------------------------------------------------------
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { renderHook, waitFor } from '@testing-library/react';
+import type { ReactNode } from 'react';
+import type { RevisionRow } from '@taucad/revisions';
+import type { TurnFinalizedEvent } from '@taucad/revisions/revision-effects';
+import { useRevisionChanges, useRevisionFileComparison, useRevisions } from '#hooks/use-revisions.js';
+import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
 
-const actorContext: {
-  headTurnId: string;
-  supersededTurnIds: string[];
-  dirty: boolean;
-  graph: PersistedRevisionGraphState;
-} = { headTurnId: '', supersededTurnIds: [], dirty: false, graph: { activeBranch: 'main', nodes: {}, branches: {} } };
-
-vi.mock('@xstate/react', () => ({
-  useSelector: (actor: { getSnapshot: () => unknown } | undefined, selector: (state: unknown) => unknown) =>
-    selector(actor?.getSnapshot()),
-}));
-
-vi.mock('#hooks/use-project.js', () => ({
-  useProject: () => ({ projectId: 'p' }),
-}));
-
-const chatsRef: { current: Chat[] } = { current: [] };
-vi.mock('#hooks/use-chats.js', () => ({
-  useChats: () => ({ chats: chatsRef.current }),
-}));
-
-vi.mock('#hooks/chat-session-store-provider.js', () => ({
-  useChatSessionStore: vi.fn(),
-}));
-
-vi.mock('#routes/w.$workspace.$project/revision-provider.js', () => ({
-  useRevisionActor: () => ({ getSnapshot: () => ({ context: actorContext }) }),
-}));
-
-// --- fixtures ---------------------------------------------------------------
-
-const createPart = (targetFile: string, content: string): MyUIMessage['parts'][number] =>
-  ({
-    type: 'tool-create_file',
-    toolCallId: `c-${targetFile}`,
-    state: 'output-available',
-    input: { targetFile, content },
-    output: {
-      diffStats: { linesAdded: 1, linesRemoved: 0, originalContent: '', modifiedContent: content },
-    },
-  }) as unknown as MyUIMessage['parts'][number];
-
-const editPart = (targetFile: string, before: string, after: string): MyUIMessage['parts'][number] =>
-  ({
-    type: 'tool-edit_file',
-    toolCallId: `e-${targetFile}-${after.length}`,
-    state: 'output-available',
-    input: { targetFile, codeEdit: after },
-    output: {
-      diffStats: { linesAdded: 1, linesRemoved: 1, originalContent: before, modifiedContent: after },
-    },
-  }) as unknown as MyUIMessage['parts'][number];
-
-const user = (id: string, createdAt?: number): MyUIMessage =>
-  ({
-    id,
-    role: 'user',
-    parts: [{ type: 'text', text: 'p' }],
-    ...(createdAt === undefined ? {} : { metadata: { createdAt } }),
-  }) as unknown as MyUIMessage;
-
-const assistant = (createdAt: number, parts: MyUIMessage['parts']): MyUIMessage =>
-  ({ id: `a-${createdAt}`, role: 'assistant', parts, metadata: { createdAt } }) as unknown as MyUIMessage;
-
-const chat = (createdAt: number, messages: MyUIMessage[], id = 'chatA'): Chat =>
-  ({
-    id,
-    resourceId: 'p',
-    name: 'Initial design',
-    messages,
-    createdAt,
-    updatedAt: createdAt,
-  }) as unknown as Chat;
-
-const sessions = new Map<string, ChatSession>();
-const sessionStore = mock<ChatSessionStore>();
-
-const authorizeTurns = (...turnIds: string[]): void => {
-  actorContext.graph = {
-    activeBranch: 'main',
-    nodes: Object.fromEntries(
-      turnIds.map((turnId) => [
-        turnId,
-        {
-          turnId,
-          parentTurnIds: [],
-          branchName: 'main',
-          chatId: 'chatA',
-          jobIds: [],
-          status: 'complete',
-          revisionId: `rev-${turnId}`,
-        } satisfies PersistedRevisionGraphNode,
-      ]),
-    ),
-    branches: {},
-  };
-};
-
-const installSession = (
-  chatId: string,
-  messages: MyUIMessage[],
-  options: {
-    requestLifecycle: 'idle' | 'invoking' | 'retrying' | 'stopping';
-    status?: 'ready' | 'submitted' | 'streaming' | 'error';
-  },
-): void => {
-  const { requestLifecycle, status = requestLifecycle === 'idle' ? 'ready' : 'streaming' } = options;
-  const persistenceActorRef = mock<ChatSession['persistenceActorRef']>();
-  const snapshot = {
-    context: {
-      isLoadingChat: false,
-      retryAttempt: requestLifecycle === 'retrying' ? 1 : 0,
-    },
-    matches: (value: unknown) =>
-      typeof value === 'object' &&
-      value !== null &&
-      'requestLifecycle' in value &&
-      value.requestLifecycle === requestLifecycle,
-  } as unknown as ReturnType<ChatSession['persistenceActorRef']['getSnapshot']>;
-  persistenceActorRef.getSnapshot.mockReturnValue(snapshot);
-  persistenceActorRef.subscribe.mockReturnValue({ unsubscribe: vi.fn() });
-  const liveChat = { messages, status } as unknown as ChatSession['chat'];
-  sessions.set(chatId, { chatId, chat: liveChat, persistenceActorRef } as unknown as ChatSession);
-};
-
-const live: Array<{ stop: () => void }> = [];
-afterEach(() => {
-  for (const actor of live.splice(0)) {
-    actor.stop();
-  }
+vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ projectId: 'p' }) }));
+vi.mock('#hooks/use-revision-status.js', async () => {
+  const harness = await import('#hooks/use-revision-status.test-harness.js');
+  return harness.revisionStatusMock();
 });
+
+const settlements: TurnFinalizedEvent[] = [];
+vi.mock('#chat-clients/_internal/browser-agent-host-transport.js', () => ({
+  getHostFinalizedTurns: () => settlements,
+  subscribeHostFinalizedTurns: () => () => undefined,
+}));
+
+const row = (over: Partial<RevisionRow> & Pick<RevisionRow, 'revisionId'>): RevisionRow => ({
+  revisionNumber: undefined,
+  changeId: `change-${over.revisionId}`,
+  actor: 'tau-browser-agent-host',
+  source: 'agent',
+  createdAt: 1_788_220_800_000,
+  summary: 'Agent turn u1',
+  conflicted: false,
+  turnId: undefined,
+  tags: [],
+  ...over,
+});
+
+const wrapper = ({ children }: { readonly children: ReactNode }): React.JSX.Element => (
+  <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+    {children}
+  </QueryClientProvider>
+);
 
 beforeEach(() => {
-  sessions.clear();
-  actorContext.graph = { activeBranch: 'main', nodes: {}, branches: {} };
-  sessionStore.get.mockImplementation((chatId) => sessions.get(chatId));
-  sessionStore.subscribeMembership.mockReturnValue(() => undefined);
-  sessionStore.subscribeChat.mockReturnValue(() => undefined);
-  vi.mocked(useChatSessionStore).mockReturnValue(sessionStore);
+  revisionStatusHarness.reset();
+  settlements.length = 0;
 });
 
-// The "Cube Design" session, as it looks AFTER a reload that dropped the user
-// messages' `createdAt`: two mutating turns, both anchoring onto chat.createdAt.
-const collapsedCubeSession = (): Chat[] => [
-  chat(50, [
-    user('u1' /* createdAt dropped */),
-    assistant(200, [createPart('main.scad', 'a\nb\nc')]),
-    user('u2' /* createdAt dropped */),
-    assistant(400, [editPart('main.scad', 'a\nb', 'a\nB')]),
-  ]),
-];
+describe('useRevisions', () => {
+  it('reads the branch, its history and the head the projection reports', async () => {
+    revisionStatusHarness.rows = [
+      row({ revisionId: 'rev-2', revisionNumber: 2, turnId: 'u2' }),
+      row({ revisionId: 'rev-1', revisionNumber: 1, turnId: 'u1' }),
+    ];
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, branch: 'main', headRevisionId: 'rev-2' };
 
-// The same session with intact, distinct user `createdAt` — buildRevisions
-// yields two clean Revisions (isolating the head-derivation bug from the
-// anchor-collapse bug).
-const intactCubeSession = (): Chat[] => [
-  chat(50, [
-    user('u1', 100),
-    assistant(200, [createPart('main.scad', 'a\nb\nc')]),
-    user('u2', 300),
-    assistant(400, [editPart('main.scad', 'a\nb', 'a\nB')]),
-  ]),
-];
+    const { result } = renderHook(() => useRevisions(), { wrapper });
 
-describe('useRevisions — stale head derivation (REGRESSION)', () => {
-  it('T-REV-HEAD-DRIFT: an unresolvable head id falls back to the latest Revision, never baseline', () => {
-    // The collapsed session (dropped createdAt) still builds two Revisions after
-    // the ownership fix; a head id that no longer resolves (the drift the old
-    // anchor-equality match stranded) must fall back to the latest, not baseline.
-    chatsRef.current = collapsedCubeSession();
-    actorContext.headTurnId = 'stale-drifted-id';
-    actorContext.supersededTurnIds = [];
-    actorContext.dirty = false;
-    authorizeTurns('u1', 'u2');
-
-    const { result } = renderHook(() => useRevisions());
-
-    expect(result.current.maxRevision).toBeGreaterThan(0);
-    expect(result.current.headRevision).toBeDefined(); // Never "Revision 0 · baseline".
-    expect(result.current.headRevision?.n).toBe(result.current.maxRevision);
-  });
-
-  it('T-REV-HEAD-RETURN-TO-LATEST: an unresolvable head must not offer a phantom "Return to latest"', () => {
-    chatsRef.current = intactCubeSession();
-    actorContext.headTurnId = 'does-not-exist';
-    actorContext.supersededTurnIds = [];
-    actorContext.dirty = false;
-    authorizeTurns('u1', 'u2');
-
-    const { result } = renderHook(() => useRevisions());
-
-    expect(result.current.maxRevision).toBe(2);
-    expect(result.current.headRevision?.n).toBe(2);
+    await waitFor(() => {
+      expect(result.current.revisions).toHaveLength(2);
+    });
+    expect(result.current.branch).toBe('main');
+    expect(result.current.headRevisionId).toBe('rev-2');
+    expect(result.current.revisions.map((revision) => revision.n)).toEqual([2, 1]);
+    expect(result.current.byTurnId.get('u1')?.revisionId).toBe('rev-1');
+    /* The head *is* the newest revision on the branch, so there is nothing to
+     * return to — the control stays hidden rather than offering a no-op. */
     expect(result.current.canReturnToLatest).toBe(false);
   });
 
-  it('T-REV-HEAD-TIP: the tip sentinel ("") resolves to the newest Revision', () => {
-    chatsRef.current = intactCubeSession();
-    actorContext.headTurnId = '';
-    actorContext.supersededTurnIds = [];
-    actorContext.dirty = false;
-    authorizeTurns('u1', 'u2');
+  it('offers Return to latest only while the checkout sits behind the branch tip', async () => {
+    revisionStatusHarness.rows = [
+      row({ revisionId: 'rev-2', revisionNumber: 2 }),
+      row({ revisionId: 'rev-1', revisionNumber: 1 }),
+    ];
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, branch: 'main', headRevisionId: 'rev-1' };
 
-    const { result } = renderHook(() => useRevisions());
+    const { result } = renderHook(() => useRevisions(), { wrapper });
 
-    expect(result.current.headRevision?.n).toBe(2);
-    expect(result.current.canReturnToLatest).toBe(false);
+    await waitFor(() => {
+      expect(result.current.canReturnToLatest).toBe(true);
+    });
   });
 
-  it('T-REV-HEAD-PARKED: a valid non-tip head id resolves to that Revision and offers "Return to latest"', () => {
-    chatsRef.current = intactCubeSession();
-    actorContext.headTurnId = 'u1'; // Parked at the first Revision.
-    actorContext.supersededTurnIds = [];
-    actorContext.dirty = false;
-    authorizeTurns('u1', 'u2');
+  it('takes dirty from the checkout machine rather than recomputing it', async () => {
+    revisionStatusHarness.rows = [row({ revisionId: 'rev-1', revisionNumber: 1 })];
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      branch: 'main',
+      headRevisionId: 'rev-1',
+      dirty: true,
+    };
 
-    const { result } = renderHook(() => useRevisions());
+    const { result } = renderHook(() => useRevisions(), { wrapper });
 
-    expect(result.current.headRevision?.messageId).toBe('u1');
-    expect(result.current.headRevision?.n).toBe(1);
-    expect(result.current.canReturnToLatest).toBe(true);
+    await waitFor(() => {
+      expect(result.current.isDirty).toBe(true);
+    });
   });
-});
 
-describe('useVisibleRevisions — turn completion visibility', () => {
-  it('should keep a cancelled partial file mutation out of committed and current revisions', () => {
-    const messages = [user('u1', 100), assistant(200, [createPart('main.scad', 'partial')])];
-    chatsRef.current = [chat(50, messages)];
-    actorContext.graph = { activeBranch: 'main', nodes: {}, branches: {} };
-    installSession('chatA', messages, { requestLifecycle: 'idle', status: 'error' });
+  it('carries a card for a turn a remote host settled, which this graph does not hold', async () => {
+    settlements.push({
+      type: 'turn.finalized',
+      turnId: 'u9',
+      runId: 'run-9',
+      chatId: 'chat-1',
+      projectId: 'p',
+      checkoutId: 'live',
+      revisionId: 'rev-remote',
+      branch: 'main',
+      changedPaths: ['main.scad'],
+      trigger: 'turn',
+      runIds: ['run-9'],
+    });
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, branch: 'main', headRevisionId: 'rev-remote' };
 
-    const { result } = renderHook(() => useVisibleRevisions());
+    const { result } = renderHook(() => useRevisions(), { wrapper });
+
+    await waitFor(() => {
+      expect(result.current.byTurnId.get('u9')?.revisionId).toBe('rev-remote');
+    });
+    /* No row names it on this branch, so it carries no number rather than
+     * inventing a position. */
+    expect(result.current.byTurnId.get('u9')?.n).toBeUndefined();
+  });
+
+  it('prefers the graph row over a settlement for the same turn, because the row has its number', async () => {
+    settlements.push({
+      type: 'turn.finalized',
+      turnId: 'u1',
+      runId: 'run-1',
+      chatId: 'chat-1',
+      projectId: 'p',
+      checkoutId: 'live',
+      revisionId: 'rev-1',
+      changedPaths: ['main.scad'],
+      trigger: 'turn',
+      runIds: ['run-1'],
+    });
+    revisionStatusHarness.rows = [row({ revisionId: 'rev-1', revisionNumber: 1, turnId: 'u1' })];
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, branch: 'main', headRevisionId: 'rev-1' };
+
+    const { result } = renderHook(() => useRevisions(), { wrapper });
+
+    await waitFor(() => {
+      expect(result.current.byTurnId.get('u1')?.n).toBe(1);
+    });
+  });
+
+  it('reads nothing at all until the root has answered with a branch', () => {
+    const { result } = renderHook(() => useRevisions(), { wrapper });
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, branch: undefined };
 
     expect(result.current.revisions).toEqual([]);
-    expect(result.current.headRevision).toBeUndefined();
-    expect(result.current.maxRevision).toBe(0);
+    expect(result.current.canReturnToLatest).toBe(false);
   });
+});
 
-  it.each(['invoking', 'retrying', 'stopping'] as const)(
-    'should withhold the latest mutating turn while its request lifecycle is %s',
-    (requestLifecycle) => {
-      const messages = [
-        user('u1', 100),
-        assistant(200, [createPart('main.scad', 'a')]),
-        user('u2', 300),
-        assistant(400, [editPart('main.scad', 'a', 'b')]),
-      ];
-      chatsRef.current = [chat(50, messages)];
-      authorizeTurns('u1');
-      installSession('chatA', messages, {
-        requestLifecycle,
-        status: requestLifecycle === 'retrying' ? 'error' : 'streaming',
-      });
-
-      const { result } = renderHook(() => useVisibleRevisions());
-
-      expect(result.current.revisions.map((revision) => revision.messageId)).toEqual(['u1']);
-      expect(result.current.byMessageId.has('u2')).toBe(false);
-      expect(result.current.maxRevision).toBe(1);
-      expect(result.current.headRevision?.messageId).toBe('u1');
-    },
-  );
-
-  it('should reveal a terminal mutating turn only after authoritative finalization', () => {
-    const messages = [user('u1', 100), assistant(200, [createPart('main.scad', 'a')])];
-    chatsRef.current = [chat(50, messages)];
-    authorizeTurns('u1');
-    installSession('chatA', messages, { requestLifecycle: 'idle', status: 'error' });
-
-    const { result } = renderHook(() => useVisibleRevisions());
-
-    expect(result.current.revisions.map((revision) => revision.messageId)).toEqual(['u1']);
-    expect(result.current.headRevision?.messageId).toBe('u1');
-  });
-
-  it('should withhold in-progress turns from background chats and keep completed-only numbering contiguous', () => {
-    const firstMessages = [user('u1', 100), assistant(200, [createPart('a.scad', 'a')])];
-    const secondMessages = [user('u2', 300), assistant(400, [createPart('b.scad', 'b')])];
-    chatsRef.current = [chat(50, firstMessages, 'chatA'), chat(60, secondMessages, 'chatB')];
-    authorizeTurns('u1');
-    installSession('chatB', secondMessages, { requestLifecycle: 'invoking' });
-
-    const { result } = renderHook(() => useVisibleRevisions());
-
-    expect(result.current.revisions.map(({ messageId, n }) => ({ messageId, n }))).toEqual([{ messageId: 'u1', n: 1 }]);
-    expect(result.current.maxRevision).toBe(1);
-  });
-
-  it('should preserve a contiguous sequence when multiple concurrent turns are hidden', () => {
-    const chatA = [user('u1', 100), assistant(110, [createPart('a.scad', 'a')])];
-    const chatB = [user('u2', 200), assistant(210, [createPart('b.scad', 'b')])];
-    const chatC = [user('u3', 300), assistant(310, [createPart('c.scad', 'c')])];
-    const chatD = [user('u4', 400), assistant(410, [createPart('d.scad', 'd')])];
-    chatsRef.current = [
-      chat(50, chatA, 'chatA'),
-      chat(60, chatB, 'chatB'),
-      chat(70, chatC, 'chatC'),
-      chat(80, chatD, 'chatD'),
+describe('useRevisionChanges', () => {
+  it('asks the graph which paths a revision changed', async () => {
+    revisionStatusHarness.diff = [
+      { path: 'main.scad', kind: 'modified' },
+      { path: 'part.scad', kind: 'added' },
     ];
-    authorizeTurns('u1', 'u3');
-    installSession('chatB', chatB, { requestLifecycle: 'invoking' });
-    installSession('chatD', chatD, { requestLifecycle: 'stopping' });
-
-    const { result } = renderHook(() => useVisibleRevisions());
-
-    expect(result.current.revisions.map(({ messageId, n }) => ({ messageId, n }))).toEqual([
-      { messageId: 'u1', n: 1 },
-      { messageId: 'u3', n: 2 },
-    ]);
-    expect(result.current.maxRevision).toBe(2);
-  });
-
-  it('should retain pending graph evidence while withholding an unfinalized transcript revision', () => {
-    const messages = [user('u1', 100), assistant(200, [createPart('main.scad', 'a')])];
-    chatsRef.current = [chat(50, messages)];
-    actorContext.graph = {
-      activeBranch: 'main',
-      nodes: {
-        u1: {
-          turnId: 'u1',
-          parentTurnIds: [],
-          branchName: 'main',
-          chatId: 'chatA',
-          jobIds: [],
-          status: 'pending',
-        },
-      },
-      branches: {},
-    };
-    installSession('chatA', messages, { requestLifecycle: 'invoking' });
-
-    const raw = renderHook(() => useRevisions());
-    const visible = renderHook(() => useVisibleRevisions());
-
-    expect(raw.result.current.revisions).toEqual([]);
-    expect(visible.result.current.revisions).toEqual([]);
-    expect(raw.result.current.graph.byTurnId.has('u1')).toBe(true);
-    expect(visible.result.current.graph.byTurnId.has('u1')).toBe(false);
-  });
-  /* The host half of the same chain (V17/G-REV-HOST): a turn a daemon or the
-     desktop utility ran is finalized on the host, reaches this tab as one
-     durable `revision.finalized` record, and must produce the same Revision —
-     the one `ChatRevisionMarker` reads as "Current" — as a browser-placed turn.
-     Driven through the real projection and the real machine so a record that
-     names the wrong turn, or loses its revision id, cannot pass. */
-  it('shows a host-recorded turn as the current Revision', () => {
-    const messages = [user('u1', 100), assistant(200, [createPart('main.scad', 'cube(10);')])];
-    chatsRef.current = [chat(50, messages)];
-    const record = parseLogEvent({
-      version: 1,
-      leaderEpoch: 'leader-1',
-      sequence: 7,
-      recordedAt: '2026-09-08T00:00:00.000Z',
-      runId: 'run-host-1',
-      type: 'revision.finalized',
+    const card = {
+      revisionId: 'rev-1',
+      n: 1,
+      createdAt: 0,
+      summary: '',
+      actor: '',
       turnId: 'u1',
-      workspaceId: 'trun-host-1',
-      revisionId: 'rev:trun-host-1',
-      baseRevisionId: 'rev:base-1',
-      treeId: 'rev:trun-host-1',
-      branchName: 'agent/chatA/trun-host-1',
-      publication: {
-        status: 'updated',
-        branchName: 'agent/chatA/trun-host-1',
-        expectedHeadRevisionId: 'rev:base-1',
-        headRevisionId: 'rev:trun-host-1',
-      },
-      changedPaths: ['main.scad'],
-      provenance: { source: 'agent', actorId: 'tau-host', runId: 'run-host-1', createdAt: 100 },
-      generatedSummary: 'Agent turn run-host-1',
-      nativeGit: { status: 'not-configured' },
+      conflicted: false,
+    };
+
+    const { result } = renderHook(() => useRevisionChanges(card), { wrapper });
+
+    await waitFor(() => {
+      expect(result.current).toHaveLength(2);
     });
-    const result = projectAgentHostRevisionFinalized(record, 'chatA');
-    expect(result).toBeDefined();
-    const actor = createActor(revisionMachine, {
-      input: { projectId: 'p', initial: { headTurnId: '', supersededTurnIds: [], dirty: false }, persist: vi.fn() },
-    }).start();
-    live.push(actor);
-    actor.send({ type: 'authoritativeRevisionFinalized', result: result! });
-    actorContext.graph = actor.getSnapshot().context.graph;
-    installSession('chatA', messages, { requestLifecycle: 'idle' });
+    expect(result.current[1]).toEqual({ path: 'part.scad', kind: 'added' });
+  });
 
-    const { result: view } = renderHook(() => useVisibleRevisions());
+  it('re-reads the working side every time it is opened, not only after a save (review R7)', async () => {
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, dirty: true, headRevisionId: 'rev-1' };
+    revisionStatusHarness.comparison = { original: 'one', modified: 'first edit' };
 
-    expect(view.current.revisions.map(({ messageId, n }) => ({ messageId, n }))).toEqual([{ messageId: 'u1', n: 1 }]);
-    expect(view.current.byMessageId.get('u1')).toBeDefined();
-    expect(view.current.headRevision?.n).toBe(view.current.byMessageId.get('u1')?.n);
+    const first = renderHook(() => useRevisionFileComparison('rev-1', 'main.scad', 'checkout'), { wrapper });
+    await waitFor(() => {
+      expect(first.result.current.modified).toBe('first edit');
+    });
+    first.unmount();
+
+    /* A second edit inside the same dirty window: the head has not moved, which
+     * is exactly the case a cached answer could not see. */
+    revisionStatusHarness.comparison = { original: 'one', modified: 'second edit' };
+
+    const second = renderHook(() => useRevisionFileComparison('rev-1', 'main.scad', 'checkout'), { wrapper });
+
+    await waitFor(() => {
+      expect(second.result.current.modified).toBe('second edit');
+    });
+  });
+
+  it('serves a remote settlement from the paths its host attested, without asking a graph that lacks it', async () => {
+    revisionStatusHarness.diff = [{ path: 'never-read.scad', kind: 'modified' }];
+    const card = {
+      revisionId: 'rev-remote',
+      n: undefined,
+      createdAt: 0,
+      summary: '',
+      actor: '',
+      turnId: 'u9',
+      conflicted: false,
+      changedPaths: ['main.scad'],
+    };
+
+    const { result } = renderHook(() => useRevisionChanges(card), { wrapper });
+
+    expect(result.current).toEqual([{ path: 'main.scad', kind: 'modified' }]);
   });
 });

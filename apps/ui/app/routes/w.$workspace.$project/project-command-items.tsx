@@ -1,6 +1,8 @@
 import {
   Activity,
   Clipboard,
+  Cloud,
+  CloudOff,
   Download,
   FileBox,
   Files,
@@ -24,7 +26,8 @@ import type { CommandPaletteItem } from '#components/layout/command-palette.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useFileTreeMap } from '#hooks/use-file-tree.js';
 import { useThumbnailGenerator } from '#hooks/use-thumbnail-generator.js';
-import { useVisibleRevisions } from '#hooks/use-revisions.js';
+import { useRevisions } from '#hooks/use-revisions.js';
+import { useRevisionCommands, useRevisionStatus } from '#hooks/use-revision-status.js';
 import { useRestoreToPoint } from '#hooks/use-restore-to-point.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { useFeature } from '#flags/use-feature.js';
@@ -56,7 +59,23 @@ export function ProjectCommandPaletteItems({ match }: { readonly match: UIMatch 
 
   // Chat-restore time-travel (R13) — keyboard-first discovery of the pane + redo.
   const { returnToLatest } = useRestoreToPoint();
-  const { canReturnToLatest } = useVisibleRevisions();
+  const { canReturnToLatest } = useRevisions();
+
+  /* The Sync region is the surface; the palette is the keyboard path to it
+   * (DESIGN: a feature that only exists behind a pointer gesture is
+   * unfinished). Where Tau Cloud is comes from `useRevisionCommands`, the one
+   * page-side place that knows (S34). */
+  const revisionStatus = useRevisionStatus();
+  const { connectRemote, disconnectRemote } = useRevisionCommands();
+  const isRemoteConnected = revisionStatus?.remote.kind !== undefined && revisionStatus.remote.kind !== 'none';
+  const handleConnectTauCloud = useCallback(() => {
+    if (project === undefined) {
+      return;
+    }
+    /* Connecting is asynchronous now that a Git remote takes consent first
+     * (W12); the palette entry fires it and the Sync row reports the outcome. */
+    void connectRemote('tau');
+  }, [connectRemote, project]);
 
   const handleOpenExporter = useCallback(() => {
     openPanel('export');
@@ -160,6 +179,25 @@ export function ProjectCommandPaletteItems({ match }: { readonly match: UIMatch 
   useCommandPaletteItems(
     match.id,
     (): CommandPaletteItem[] => [
+      ...(isRemoteConnected
+        ? [
+            {
+              id: 'disconnect-remote',
+              label: 'Disconnect remote',
+              group: 'Sync',
+              icon: <CloudOff />,
+              action: disconnectRemote,
+            },
+          ]
+        : [
+            {
+              id: 'connect-tau-cloud',
+              label: 'Connect Tau Cloud',
+              group: 'Sync',
+              icon: <Cloud />,
+              action: handleConnectTauCloud,
+            },
+          ]),
       {
         id: 'share-project',
         label: 'Share project',
@@ -295,6 +333,9 @@ export function ProjectCommandPaletteItems({ match }: { readonly match: UIMatch 
       handleOpenExporter,
       handleDownloadZip,
       fileCount,
+      isRemoteConnected,
+      disconnectRemote,
+      handleConnectTauCloud,
     ],
   );
 

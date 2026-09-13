@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useSelector } from '@xstate/react';
 import type { ChatSnapshot } from '@taucad/chat';
-import type { FileTreeEntry } from '@taucad/types';
+import type { FileEntry, FileTreeEntry } from '@taucad/types';
 import { useProject } from '#hooks/use-project.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useCookie } from '#hooks/use-cookie.js';
@@ -33,7 +33,14 @@ export function useChatSnapshot(): ChatSnapshot | undefined {
     }
 
     const sync = (): void => {
-      const items = treeService.getCachedFileItems();
+      /* The snapshot tells the model what the *project* holds. The pane composes
+       * read-only overlays into the same tree (W2), and advertising several
+       * hundred built-in bundle files as project context is exactly the noise the
+       * Exclusion Matrix keeps out, so the rows are filtered on provenance. */
+      const items = [...treeService.getTreeSnapshot().values()].filter(
+        (entry): entry is Extract<FileEntry, { type: 'file' }> =>
+          entry.type === 'file' && (entry.provenance === undefined || entry.provenance.source === 'project'),
+      );
       setFileTree(
         items.map((item): FileTreeEntry => {
           const name = item.path.split('/').pop() ?? item.path;

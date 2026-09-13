@@ -1,10 +1,19 @@
 import { useCallback } from 'react';
 import { Slot as SlotPrimitive } from 'radix-ui';
+import type { FileProvenance } from '@taucad/types';
 import { useProject } from '#hooks/use-project.js';
 import { cn } from '@taucad/ui/utils/cn';
 
 type FileLinkProps = {
   readonly path: string;
+  /**
+   * What the composed view says about the linked bytes, when the caller knows.
+   *
+   * A link into anything but the project opens read-only and reveals the row in
+   * Files, so the pane and the tab agree about a path the chat can name (V1, V7).
+   * `agentAccess` is never read here — the user's access is `source` (P10).
+   */
+  readonly provenance?: FileProvenance;
   readonly lineNumber?: number;
   readonly column?: number;
   readonly className?: string;
@@ -61,6 +70,7 @@ type FileLinkProps = {
  */
 export function FileLink({
   path,
+  provenance,
   lineNumber,
   column,
   className,
@@ -74,14 +84,19 @@ export function FileLink({
       return;
     }
 
+    const readOnly = provenance !== undefined && provenance.source !== 'project';
     project.editorRef.send({
       type: 'openFile',
       path,
       source: 'user',
       lineNumber: lineNumber ?? 1,
       column: column ?? 1,
+      ...(readOnly ? { readOnly: true } : {}),
     });
-  }, [project, path, lineNumber, column]);
+    if (readOnly) {
+      project.editorRef.send({ type: 'revealFileInTree', path });
+    }
+  }, [project, path, provenance, lineNumber, column]);
 
   const handleClick = useCallback(
     (event: React.MouseEvent) => {

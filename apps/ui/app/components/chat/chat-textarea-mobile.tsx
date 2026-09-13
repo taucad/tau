@@ -11,7 +11,6 @@ import { ChatAgentModelSelector } from '#components/chat/chat-agent-model-select
 import { ChatModelSelector } from '#components/chat/chat-model-selector.js';
 import { ChatExecutionSelector, formatChatAgentActivity } from '#components/chat/chat-execution-selector.js';
 import { ChatKernelSelector } from '#components/chat/chat-kernel-selector.js';
-import { ChatRevisionSelector, useChatRevisionPlacement } from '#components/chat/chat-revision-selector.js';
 import { ChatToolSelector } from '#components/chat/chat-tool-selector.js';
 import { ChatContextActions } from '#components/chat/chat-context-actions.js';
 import { ChatTextareaBorderBeam } from '#components/chat/chat-textarea-border-beam.js';
@@ -179,7 +178,6 @@ export const ChatTextareaMobile = memo(function ({
     execution: { execution },
     session,
   } = useChatComposer();
-  const { isOffered: isRevisionSelectorOffered } = useChatRevisionPlacement();
 
   useEffect(() => {
     if (!closeOptionsRef) {
@@ -351,31 +349,6 @@ export const ChatTextareaMobile = memo(function ({
                   )}
 
                   {creationLocationControl}
-
-                  {/* Revision Selector — offered by host capability, never by execution kind (V18). */}
-                  {isRevisionSelectorOffered ? (
-                    <ChatRevisionSelector
-                      isNested
-                      data-chat-textarea-focustrap={focusTrapAttribute}
-                      popoverProperties={{ align: 'start' }}
-                      onSelect={() => {
-                        setIsDrawerOpen(false);
-                        focusInput();
-                      }}
-                    >
-                      {({ currentConfig }) => (
-                        <div className={menuItemClassName} data-slot='chat-revision-selector'>
-                          <span className='flex w-full items-center justify-between'>
-                            <div className='flex flex-col items-start'>
-                              <span>{currentConfig.label}</span>
-                              <span className='text-xs text-muted-foreground'>{currentConfig.description}</span>
-                            </div>
-                            <ChevronRight className='size-4 text-muted-foreground' />
-                          </span>
-                        </div>
-                      )}
-                    </ChatRevisionSelector>
-                  ) : null}
 
                   {/* Kernel Selector */}
                   {enableKernelSelector ? (

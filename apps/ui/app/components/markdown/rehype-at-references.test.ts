@@ -119,7 +119,7 @@ describe('rehypeAtReferences', () => {
   });
 
   it('should preserve mark element content with @path text', () => {
-    const root = tree(element('p', text('see @.tau/transcripts/abc-123.jsonl')));
+    const root = tree(element('p', text('see @.tau/chats/abc-123/events.jsonl')));
 
     runPlugin(root);
 
@@ -127,7 +127,7 @@ describe('rehypeAtReferences', () => {
     const mark = p.children[1] as ElementNode;
     expect(mark.tagName).toBe('mark');
     const markText = mark.children[0] as TextNode;
-    expect(markText.value).toBe('@.tau/transcripts/abc-123.jsonl');
+    expect(markText.value).toBe('@.tau/chats/abc-123/events.jsonl');
   });
 
   it('should leave /command text untouched in markdown without catalog context', () => {

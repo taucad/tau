@@ -53,6 +53,7 @@ import type {
   WorkspaceBindingRepairResult,
   WorkspaceEntry,
 } from '#filesystem/handle-store.js';
+import { createChatFileStore } from '#db/chat-file-storage.js';
 import { isBuildSuperseded } from '#filesystem/build-skew.js';
 import { WorkspaceDirectoryRequiredError } from '#filesystem/workspace-errors.js';
 import { directoryPicker } from '#constants/browser.constants.js';
@@ -180,10 +181,6 @@ type ProjectManagerContextType = {
   getProject: (projectId: string) => Promise<ProjectManifest | undefined>;
   getProjectRouteAccess: (projectId: string) => Promise<ProjectRouteAccess>;
   getProjectLibraryState: (projectId: string) => Promise<ProjectLibraryState | undefined>;
-  setProjectRevisionState: (
-    projectId: string,
-    revisionState: NonNullable<ProjectLibraryState['revisionState']>,
-  ) => Promise<ProjectLibraryState | undefined>;
   restoreProject: (projectId: string) => Promise<boolean>;
   /** @returns whether a library row was actually trashed — a vanished row is not a success (DF3). */
   deleteProject: (projectId: string) => Promise<boolean>;
@@ -497,6 +494,29 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
   const actorRef = useActorRef(projectManagerMachine);
   const fileManager = useFileManager();
   const queryClient = useQueryClient();
+  /**
+   * A chat is files in its project (D25, A30, W17): `.tau/chats/<id>/chat.json`
+   * read and written through the same worker filesystem client the rest of this
+   * provider uses. The browser object store holds no chat.
+   *
+   * Finding *which* project a chat id is in is the one thing the object store's
+   * single table gave for free. The inventory comes from the listing this
+   * provider already publishes into the query cache, rather than from a second
+   * discovery pass: a chat read for a known project never needs it at all, and
+   * the global chat inventory is a surface that only exists once the project
+   * list has rendered.
+   */
+  const chatStore = useMemo(
+    () =>
+      createChatFileStore({
+        client: fileManager.client,
+        projectIds: async () =>
+          (queryClient.getQueryData<ProjectListing>(['projects', { includeDeleted: true }])?.projects ?? []).map(
+            (entry) => entry.manifest.id,
+          ),
+      }),
+    [fileManager.client, queryClient],
+  );
   const workspaceTelemetry = useWorkspaceTelemetry();
   const projectNameClient = useProjectNameClient();
   const discoveryReadinessRef = useRef<Promise<void> | undefined>(undefined);
@@ -708,13 +728,16 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       try {
         await setProjectFileSystemConfig(pendingStorageToConfig(operation.manifest.id, operation));
         await fileManager.workspace.syncProjectRoots();
-        await worker.resumePendingProjectOperationResources(operation.operationId);
+        /* The project's root is mounted by the line above, so the chats this
+         * operation carries can be written where they live: files inside it. */
+        const chats = await worker.resumePendingProjectOperationResources(operation.operationId);
+        await Promise.all(chats.map(async (chat) => chatStore.putChatRecord(chat)));
         await worker.completePendingProjectOperation(operation.operationId);
       } catch (error) {
         throw new PendingProjectRecoveryError('local-state-error', { cause: error });
       }
     },
-    [assertProjectAbsentAfterDelete, fileManager, getReadiedWorker, queryClient],
+    [assertProjectAbsentAfterDelete, chatStore, fileManager, getReadiedWorker, queryClient],
   );
 
   const createProject = useCallback(
@@ -1241,6 +1264,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
   const getProjectRouteAccess = useCallback(
     async (projectId: string): Promise<ProjectRouteAccess> => {
       await ensureDiscoveryReady();
+      const worker = await getReadiedWorker();
       const recovery = [...recoveriesRef.current.values()].find((entry) => entry.projectId === projectId);
       if (recovery?.status === 'recovering') {
         return { status: 'recovering', recovery };
@@ -1254,7 +1278,6 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
           entry.status === 'valid' && entry.manifest.id === projectId,
       );
       if (valid) {
-        const worker = await getReadiedWorker();
         const library = await ensureProjectLibraryState(worker, projectId);
         return library.deletedAt === undefined
           ? { status: 'ready', project: valid.manifest }
@@ -1316,18 +1339,6 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
     [ensureDiscoveryReady, getReadiedWorker],
   );
 
-  const setProjectRevisionState = useCallback(
-    async (
-      projectId: string,
-      revisionState: NonNullable<ProjectLibraryState['revisionState']>,
-    ): Promise<ProjectLibraryState | undefined> => {
-      await ensureDiscoveryReady();
-      const worker = await getReadiedWorker();
-      return worker.setProjectRevisionState(projectId, revisionState);
-    },
-    [ensureDiscoveryReady, getReadiedWorker],
-  );
-
   const duplicateProject = useCallback(
     async (projectId: string): Promise<CreatedProject> => {
       await ensureDiscoveryReady();
@@ -1376,11 +1387,12 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
         targetManifest,
         files: sourceFiles,
         storage,
+        sourceChats: await chatStore.getChatsForResource(projectId),
       });
       await resumePendingProjectOperation(operation, worker);
       return { ...operation.manifest, slugs: { workspaceSlug, projectSlug: directorySlug(providerBasePath) } };
     },
-    [ensureDiscoveryReady, getProject, getReadiedWorker, resumePendingProjectOperation],
+    [chatStore, ensureDiscoveryReady, getProject, getReadiedWorker, resumePendingProjectOperation],
   );
   // (getProjectFileSystemConfig / getWorkspace are stable module-level
   // bindings — intentionally omitted from the dep array.)
@@ -1875,55 +1887,49 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
         id?: string;
       },
     ): Promise<Chat> => {
-      const worker = await getReadiedWorker();
-      const chat = await worker.createChat(resourceId, chatData);
+      const chat = await chatStore.createChat(resourceId, chatData);
       await touchProject(resourceId);
       invalidateProjectsList();
       return chat;
     },
-    [getReadiedWorker, invalidateProjectsList, touchProject],
+    [chatStore, invalidateProjectsList, touchProject],
   );
 
   const createNavigationRepairChat = useCallback(
     async (resourceId: string): Promise<Chat> => {
-      const worker = await getReadiedWorker();
-      return worker.createNavigationRepairChat(resourceId);
+      return chatStore.createNavigationRepairChat(resourceId);
     },
-    [getReadiedWorker],
+    [chatStore],
   );
 
   const updateChat = useCallback(
     async (chatId: string, update: PartialDeep<Chat>): Promise<Chat | undefined> => {
-      const worker = await getReadiedWorker();
-      return worker.updateChat(chatId, update);
+      return chatStore.updateChat(chatId, update);
     },
-    [getReadiedWorker],
+    [chatStore],
   );
 
   const applyGeneratedChatName = useCallback(
     async (chatId: string, name: string): Promise<Chat | undefined> => {
-      const worker = await getReadiedWorker();
-      return worker.applyGeneratedChatName(chatId, name);
+      return chatStore.applyGeneratedChatName(chatId, name);
     },
-    [getReadiedWorker],
+    [chatStore],
   );
 
   const patchChat = useCallback(
     async <K extends keyof Chat>(chatId: string, key: K, value: Chat[K]): Promise<Chat | undefined> => {
-      const worker = await getReadiedWorker();
-      const result = await worker.patchChat(chatId, key, value);
+      const result = await chatStore.patchChat(chatId, key, value);
       if (result) {
         invalidateChatQueries(result.resourceId, chatId);
       }
       return result;
     },
-    [getReadiedWorker, invalidateChatQueries],
+    [chatStore, invalidateChatQueries],
   );
 
   const touchChatRecency = useCallback(
     async (chatId: string, requestedAt: number): Promise<Chat | undefined> => {
-      const worker = await getReadiedWorker();
-      const result = await worker.touchChatRecency(chatId, requestedAt);
+      const result = await chatStore.touchChatRecency(chatId, requestedAt);
       if (!result) {
         return undefined;
       }
@@ -1933,35 +1939,32 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       invalidateProjectsList();
       return result;
     },
-    [getReadiedWorker, invalidateChatQueries, invalidateProjectsList, touchProject],
+    [chatStore, invalidateChatQueries, invalidateProjectsList, touchProject],
   );
 
   const setChatUnreadState = useCallback(
     async (chatId: string, hasUnreadTurn: boolean): Promise<Chat | undefined> => {
-      const worker = await getReadiedWorker();
-      const result = await worker.setChatUnreadState(chatId, hasUnreadTurn);
+      const result = await chatStore.setChatUnreadState(chatId, hasUnreadTurn);
       if (result) {
         invalidateChatQueries(result.resourceId, chatId);
       }
       return result;
     },
-    [getReadiedWorker, invalidateChatQueries],
+    [chatStore, invalidateChatQueries],
   );
 
   const consumeChatStartupRequest = useCallback(
     async (chatId: string, requestId: string): Promise<Chat | undefined> => {
-      const worker = await getReadiedWorker();
-      return worker.consumeChatStartupRequest(chatId, requestId);
+      return chatStore.consumeChatStartupRequest(chatId, requestId);
     },
-    [getReadiedWorker],
+    [chatStore],
   );
 
   const commitCancelledDraftRestore = useCallback(
     async (chatId: string, input: CommitCancelledDraftRestoreInput): Promise<Chat | undefined> => {
-      const worker = await getReadiedWorker();
-      return worker.commitCancelledDraftRestore(chatId, input);
+      return chatStore.commitCancelledDraftRestore(chatId, input);
     },
-    [getReadiedWorker],
+    [chatStore],
   );
 
   const setMessageEdit = useCallback(
@@ -1970,24 +1973,21 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       messageId: string,
       draft: NonNullable<Chat['messageEdits']>[string],
     ): Promise<Chat | undefined> => {
-      const worker = await getReadiedWorker();
-      return worker.setMessageEdit(chatId, messageId, draft);
+      return chatStore.setMessageEdit(chatId, messageId, draft);
     },
-    [getReadiedWorker],
+    [chatStore],
   );
 
   const clearMessageEdit = useCallback(
     async (chatId: string, messageId: string): Promise<Chat | undefined> => {
-      const worker = await getReadiedWorker();
-      return worker.clearMessageEdit(chatId, messageId);
+      return chatStore.clearMessageEdit(chatId, messageId);
     },
-    [getReadiedWorker],
+    [chatStore],
   );
 
   const softDeleteChat = useCallback(
     async (chatId: string): Promise<Chat | undefined> => {
-      const worker = await getReadiedWorker();
-      const result = await worker.softDeleteChat(chatId);
+      const result = await chatStore.softDeleteChat(chatId);
       if (result) {
         await touchProject(result.resourceId);
         invalidateProjectsList();
@@ -1995,55 +1995,50 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
 
       return result;
     },
-    [getReadiedWorker, invalidateProjectsList, touchProject],
+    [chatStore, invalidateProjectsList, touchProject],
   );
 
   const duplicateChat = useCallback(
     async (chatId: string): Promise<Chat> => {
-      const worker = await getReadiedWorker();
-      const chat = await worker.duplicateChat(chatId);
+      const chat = await chatStore.duplicateChat(chatId);
       await touchProject(chat.resourceId);
       invalidateProjectsList();
       return chat;
     },
-    [getReadiedWorker, invalidateProjectsList, touchProject],
+    [chatStore, invalidateProjectsList, touchProject],
   );
 
   const getChatsForResource = useCallback(
     async (resourceId: string, options?: { includeDeleted?: boolean }): Promise<Chat[]> => {
-      const worker = await getReadiedWorker();
-      return worker.getChatsForResource(resourceId, options);
+      return chatStore.getChatsForResource(resourceId, options);
     },
-    [getReadiedWorker],
+    [chatStore],
   );
 
   const getAllChats = useCallback(
     async (options?: { includeDeleted?: boolean }): Promise<Chat[]> => {
-      const worker = await getReadiedWorker();
-      return worker.getAllChats(options);
+      return chatStore.getAllChats(options);
     },
-    [getReadiedWorker],
+    [chatStore],
   );
 
   const getChat = useCallback(
     async (chatId: string): Promise<Chat | undefined> => {
-      const worker = await getReadiedWorker();
-      return worker.getChat(chatId);
+      return chatStore.getChat(chatId);
     },
-    [getReadiedWorker],
+    [chatStore],
   );
 
   const deleteChat = useCallback(
     async (chatId: string): Promise<void> => {
-      const worker = await getReadiedWorker();
-      const chat = await worker.getChat(chatId);
-      await worker.deleteChat(chatId);
+      const chat = await chatStore.getChat(chatId);
+      await chatStore.deleteChat(chatId);
       if (chat) {
         await touchProject(chat.resourceId);
       }
       invalidateProjectsList();
     },
-    [getReadiedWorker, invalidateProjectsList, touchProject],
+    [chatStore, invalidateProjectsList, touchProject],
   );
 
   const value = useMemo<ProjectManagerContextType>(() => {
@@ -2065,7 +2060,6 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       getProject,
       getProjectRouteAccess,
       getProjectLibraryState,
-      setProjectRevisionState,
       deleteProject,
       restoreProject,
       permanentlyDeleteProject,
@@ -2110,7 +2104,6 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
     getProject,
     getProjectRouteAccess,
     getProjectLibraryState,
-    setProjectRevisionState,
     deleteProject,
     restoreProject,
     permanentlyDeleteProject,

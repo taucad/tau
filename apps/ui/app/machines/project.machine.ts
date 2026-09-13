@@ -6,7 +6,6 @@ import { assertRootedPath, normalizePath } from '@taucad/utils/path';
 import { classify } from '@taucad/filesystem/path-registry';
 import { isBrowser } from '#constants/browser.constants.js';
 import type { LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
-import type { PersistedRevisionState } from '#types/project.types.js';
 import type { GraphicsViewSettings } from '#constants/editor.constants.js';
 import { defaultGraphicsSettings } from '#constants/editor.constants.js';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
@@ -30,7 +29,6 @@ import {
 export type ProjectContext = {
   projectId: string;
   project: ProjectManifest | undefined;
-  revisionState: PersistedRevisionState | undefined;
   error: Error | undefined;
   isLoading: boolean;
   shouldLoadModelOnStart: boolean;
@@ -70,7 +68,6 @@ export type ProjectLoadInput = { readonly projectId: string };
 export type ProjectRetrievedEvent = {
   readonly type: 'projectRetrieved';
   readonly project: ProjectManifest;
-  readonly revisionState: PersistedRevisionState | undefined;
   readonly parameterEntries: Map<string, FileParameterEntry>;
 };
 
@@ -150,7 +147,6 @@ type ProjectEventInternal =
   | { type: 'updateName'; name: string }
   | { type: 'updateDescription'; description: string }
   | { type: 'updateTags'; tags: string[] }
-  | { type: 'updateRevisionState'; revisionState: PersistedRevisionState }
   | {
       type: 'updateCodeParameters';
       files: Record<string, { content: Uint8Array<ArrayBuffer> }>;
@@ -194,7 +190,6 @@ type ProjectEmitted =
   | { type: 'error'; error: Error }
   | { type: 'projectUpdated'; project: ProjectManifest }
   | { type: 'projectActivity' }
-  | { type: 'revisionStateUpdated'; revisionState: PersistedRevisionState }
   | { type: 'viewerFileRequested'; entryPath: string };
 
 /**
@@ -252,10 +247,6 @@ export const projectMachine = setup({
         assertEvent(event, 'projectRetrieved');
         return event.parameterEntries;
       },
-      revisionState({ event }) {
-        assertEvent(event, 'projectRetrieved');
-        return event.revisionState;
-      },
       isLoading: false,
     }),
     clearProject: assign({
@@ -294,10 +285,6 @@ export const projectMachine = setup({
         draft.project!.tags = uniqueTags;
         // Don't update updatedAt for tags - they're metadata
       });
-    }),
-    updateRevisionState: assign(({ event }) => {
-      assertEvent(event, 'updateRevisionState');
-      return { revisionState: event.revisionState };
     }),
     updateCodeParametersInContext: enqueueActions(({ enqueue, context, event }) => {
       assertEvent(event, 'updateCodeParameters');
@@ -793,10 +780,6 @@ export const projectMachine = setup({
       type: 'projectUpdated',
       project: context.project!,
     })),
-    emitRevisionStateUpdated: emit(({ event }) => {
-      assertEvent(event, 'updateRevisionState');
-      return { type: 'revisionStateUpdated', revisionState: event.revisionState };
-    }),
   },
   guards: {
     isNotBrowser() {
@@ -848,7 +831,6 @@ export const projectMachine = setup({
     return {
       projectId,
       project: undefined,
-      revisionState: undefined,
       error: undefined,
       isLoading: true,
       shouldLoadModelOnStart,
@@ -960,9 +942,6 @@ export const projectMachine = setup({
             },
             updateTags: {
               actions: ['updateTags'],
-            },
-            updateRevisionState: {
-              actions: ['updateRevisionState', 'emitRevisionStateUpdated'],
             },
             updateCodeParameters: {
               actions: ['updateCodeParametersInContext'],

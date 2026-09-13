@@ -4,12 +4,26 @@ import { render, screen } from '@testing-library/react';
 import type React from 'react';
 import type { ToolInvocation } from '@taucad/chat';
 import type { toolName } from '@taucad/chat/constants';
+import { systemSkillBundles } from '@taucad/skills/resources';
+import type { FileProvenance } from '@taucad/types';
 import { ChatMessageToolUseSkill } from '#routes/w.$workspace.$project/chat-message-tool-use-skill.js';
 
 type UseSkillInvocation = ToolInvocation<typeof toolName.useSkill>;
 
+/** What the card handed the link, so the wire record it mints is observable. */
+const linked = vi.hoisted(() => [] as Array<{ path: string; provenance: FileProvenance | undefined }>);
+
 vi.mock('#components/files/file-link.js', () => ({
-  FileLink({ children, path }: { readonly children: React.ReactNode; readonly path: string }) {
+  FileLink({
+    children,
+    path,
+    provenance,
+  }: {
+    readonly children: React.ReactNode;
+    readonly path: string;
+    readonly provenance?: FileProvenance;
+  }) {
+    linked.push({ path, provenance });
     return <a href={`#${path}`}>{children}</a>;
   },
 }));
@@ -31,7 +45,7 @@ describe('ChatMessageToolUseSkill', () => {
   });
 
   it.each([
-    { source: 'system', skillPath: undefined, suffix: ' system' },
+    { source: 'system', skillPath: undefined, suffix: 'Built-in' },
     { source: 'user', skillPath: '.agents/skills/woodworking/SKILL.md', suffix: '' },
     { source: 'tau-store', skillPath: undefined, suffix: '' },
     { source: 'legacy-source', skillPath: undefined, suffix: '' },
@@ -60,6 +74,42 @@ describe('ChatMessageToolUseSkill', () => {
     } else {
       expect(screen.queryByRole('link')).not.toBeInTheDocument();
     }
+  });
+
+  /*
+   * Review R2 of a1: `identity` is the wire's overlay-unit key
+   * (`skill:<slug>@<version>#<fingerprint>`), the shape `composeView` mints and
+   * the shape an override records as `overrides`. A bare fingerprint is not it.
+   */
+  it('mints the overlay unit identity the composed view uses', () => {
+    const bundle = systemSkillBundles[0]!;
+    linked.length = 0;
+    render(
+      <ChatMessageToolUseSkill
+        part={{
+          toolCallId: 'skill',
+          state: 'output-available',
+          input: { skillName: bundle.slug },
+          output: {
+            skillName: bundle.slug,
+            resourceUri: `system:skills/${bundle.slug}/SKILL.md`,
+            skillPath: `.agents/skills/${bundle.slug}/SKILL.md`,
+            source: 'system',
+            fingerprint: bundle.fingerprint,
+            frontmatter: {},
+            content: bundle.body,
+            supportingFiles: [],
+          },
+        }}
+      />,
+    );
+
+    expect(linked.at(-1)?.provenance).toEqual({
+      source: 'system-skills',
+      versioned: false,
+      agentAccess: 'read-only',
+      identity: `skill:${bundle.slug}@${bundle.version}#${bundle.fingerprint}`,
+    });
   });
 
   it('renders read errors through the shared error disclosure', () => {

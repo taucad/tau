@@ -1,34 +1,49 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { RevisionMarker } from '#routes/w.$workspace.$project/revision-marker.js';
 import type { RevisionMarkerProps } from '#routes/w.$workspace.$project/revision-marker.js';
-import type { Revision } from '#lib/file-restore-timeline.js';
+import type { RevisionDiffEntry } from '@taucad/revisions';
+import type { RevisionCard } from '#hooks/use-revisions.js';
+import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
 
 const editorSend = vi.hoisted(() => vi.fn());
 
 vi.mock('#hooks/use-project.js', () => ({
-  useProject: () => ({ editorRef: { send: editorSend } }),
+  useProject: () => ({ projectId: 'p', editorRef: { send: editorSend } }),
+}));
+vi.mock('#hooks/use-revision-status.js', async () => {
+  const harness = await import('#hooks/use-revision-status.test-harness.js');
+  return harness.revisionStatusMock();
+});
+vi.mock('#components/code/diff-viewer.js', () => ({
+  DiffViewer: ({ originalContent, modifiedContent }: { originalContent: string; modifiedContent: string }) => (
+    <pre data-testid='diff'>{`${originalContent}|${modifiedContent}`}</pre>
+  ),
 }));
 
 beforeEach(() => {
   editorSend.mockReset();
+  revisionStatusHarness.reset();
 });
 
-const revision = (over: Partial<Revision> = {}): Revision => ({
+const anchor = new Date('2026-07-09T14:14:00').getTime();
+
+const revision = (over: Partial<RevisionCard> = {}): RevisionCard => ({
+  revisionId: 'rev-2',
   n: 2,
-  chatId: 'a',
-  messageId: 'u1',
-  anchor: new Date('2026-07-09T14:14:00').getTime(),
-  cutoffSeq: 1,
-  files: [
-    { path: 'main.geospec.ts', linesAdded: 42, linesRemoved: 3 },
-    { path: 'bracket.scad', linesAdded: 11, linesRemoved: 0 },
-  ],
-  changedPaths: ['main.geospec.ts', 'bracket.scad'],
-  linesAdded: 53,
-  linesRemoved: 3,
+  createdAt: anchor,
+  summary: 'Agent turn u1',
+  actor: 'tau-browser-agent-host',
+  turnId: 'u1',
+  conflicted: false,
   ...over,
 });
+
+const changes: readonly RevisionDiffEntry[] = [
+  { path: 'main.geospec.ts', kind: 'modified' },
+  { path: 'bracket.scad', kind: 'added' },
+];
 
 const renderMarker = (
   props: Partial<RevisionMarkerProps> = {},
@@ -36,32 +51,48 @@ const renderMarker = (
   const onRestore = vi.fn();
   const onDiscard = vi.fn();
   render(
-    <RevisionMarker
-      revision={revision()}
-      isActive={false}
-      isModified={false}
-      isBusy={false}
-      onRestore={onRestore}
-      onDiscard={onDiscard}
-      {...props}
-    />,
+    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+      <RevisionMarker
+        revision={revision()}
+        changes={changes}
+        isActive={false}
+        isModified={false}
+        isBusy={false}
+        onRestore={onRestore}
+        onDiscard={onDiscard}
+        {...props}
+      />
+    </QueryClientProvider>,
   );
   return { onRestore, onDiscard };
 };
 
 describe('RevisionMarker', () => {
-  it('T-RM-FILES: lists each changed file with its own colored line counts', () => {
+  it('T-RM-FILES: lists each changed path with how it changed', () => {
     renderMarker();
     expect(screen.getByText('main.geospec.ts')).not.toBeNull();
     expect(screen.getByText('bracket.scad')).not.toBeNull();
-    expect(screen.getByText('+42')).not.toBeNull();
-    expect(screen.getByText('-3')).not.toBeNull();
-    expect(screen.getByText('+11')).not.toBeNull(); // Second file, additions only.
+    expect(screen.getByText('Changed')).not.toBeNull();
+    expect(screen.getByText('Added')).not.toBeNull();
+  });
+
+  it('T-RM-COMPARE: a file row opens the shared diff viewer over the revision and its parent (S38)', async () => {
+    revisionStatusHarness.comparison = { original: 'before', modified: 'after' };
+    renderMarker();
+    fireEvent.click(screen.getByRole('button', { name: 'Compare main.geospec.ts' }));
+    const diff = await screen.findByTestId('diff');
+    expect(diff.textContent).toBe('before|after');
+  });
+
+  it('T-RM-UNNUMBERED: a revision this branch does not number says so instead of inventing one', () => {
+    renderMarker({ revision: revision({ n: undefined }) });
+    expect(screen.getAllByText('Revision').length).toBeGreaterThan(0);
+    expect(screen.queryByText(/Rev \d/)).toBeNull();
   });
 
   it('T-RM-DATE: switches from time-only to date + time at the component-width breakpoint', () => {
     renderMarker();
-    const date = new Date(revision().anchor);
+    const date = new Date(anchor);
     const time = screen.getByText(date.toLocaleTimeString(undefined, { timeStyle: 'short' }));
     const timestamp = screen.getByText(date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }));
     expect(time.className).toContain('@[22rem]:hidden');
@@ -92,7 +123,7 @@ describe('RevisionMarker', () => {
   });
 
   it('T-RM-MODIFIED: an active + modified revision reads Modified and offers Discard (firing it)', () => {
-    const { onDiscard } = renderMarker({ isActive: true, isModified: true });
+    const { onDiscard } = renderMarker({ isActive: true, isModified: true, changes: [] });
     expect(screen.getByText('Modified')).not.toBeNull();
     fireEvent.click(screen.getByRole('button', { name: /Discard changes/ }));
     expect(onDiscard).toHaveBeenCalledOnce();
@@ -118,7 +149,7 @@ describe('RevisionMarker', () => {
 
   it('T-RM-FILE-OPEN: clicking a file row opens it in the editor', () => {
     renderMarker();
-    fireEvent.click(screen.getByRole('button', { name: /main\.geospec\.ts/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'main.geospec.ts' }));
     expect(editorSend).toHaveBeenCalledWith({
       type: 'openFile',
       path: 'main.geospec.ts',
@@ -128,15 +159,11 @@ describe('RevisionMarker', () => {
     });
   });
 
-  const manyFiles = (count: number): Revision['files'] =>
-    Array.from({ length: count }, (_unused, index) => ({
-      path: `file-${index}.ts`,
-      linesAdded: 1,
-      linesRemoved: 0,
-    }));
+  const manyFiles = (count: number): readonly RevisionDiffEntry[] =>
+    Array.from({ length: count }, (_unused, index) => ({ path: `file-${index}.ts`, kind: 'modified' }) as const);
 
   it('T-RM-FILES-LIMIT: shows only the first 3 files by default, with a trigger for the rest', () => {
-    renderMarker({ revision: revision({ files: manyFiles(5) }) });
+    renderMarker({ changes: manyFiles(5) });
     expect(screen.getByText('file-0.ts')).not.toBeNull();
     expect(screen.getByText('file-2.ts')).not.toBeNull();
     expect(screen.queryByText('file-3.ts')).toBeNull();
@@ -145,12 +172,12 @@ describe('RevisionMarker', () => {
   });
 
   it('T-RM-FILES-NO-TRIGGER: no expand trigger when 3 or fewer files changed', () => {
-    renderMarker({ revision: revision({ files: manyFiles(3) }) });
+    renderMarker({ changes: manyFiles(3) });
     expect(screen.queryByRole('button', { name: /Show .* more file/ })).toBeNull();
   });
 
   it('T-RM-FILES-EXPAND: expands to reveal the rest, then collapses back', () => {
-    renderMarker({ revision: revision({ files: manyFiles(4) }) });
+    renderMarker({ changes: manyFiles(4) });
     fireEvent.click(screen.getByRole('button', { name: 'Show 1 more file' }));
     expect(screen.getByText('file-3.ts')).not.toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Collapse files' }));

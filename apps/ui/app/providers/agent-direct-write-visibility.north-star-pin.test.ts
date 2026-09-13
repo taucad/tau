@@ -19,18 +19,9 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
-import {
-  ChangeEventBus,
-  MaterializedWorkspaceAuthority,
-  MountTable,
-  ProviderRegistry,
-  ResourceQueue,
-  WorkspaceFileService,
-  materializedWorkspaceId,
-} from '@taucad/filesystem';
+import { ChangeEventBus, MountTable, ProviderRegistry, ResourceQueue, WorkspaceFileService } from '@taucad/filesystem';
 import type { FileSystemClientFacade } from '#hooks/use-file-manager.js';
 import { MemoryProvider } from '@taucad/filesystem/backend';
-import { ImmutableRevisionTree, revisionId } from '@taucad/filesystem/revisions';
 import { createFileSystemBridgeProxy, exposeFileSystem, openFileSystemBridge } from '@taucad/fs-bridge';
 import type { FileSystemBridgeProxy } from '@taucad/fs-bridge';
 import { composeView } from '@taucad/filesystem/composed-view';
@@ -159,14 +150,12 @@ const createAgentFileSystem = async (worker: {
       return proxy;
     },
   });
-  const workspaces = new MaterializedWorkspaceAuthority({ filesystem: rooted });
-  const workspace = await workspaces.bindInPlace({
-    workspaceId: materializedWorkspaceId('run_north_star_w0_pin'),
-    baseRevisionId: revisionId('rev-north-star-w0-pin'),
-    tree: new ImmutableRevisionTree([['main.scad', 'cube(1);']]),
-    filesystem: rooted,
-  });
-  const prepared = await createPreparedWorkspaceFileSystems(workspace.filesystem);
+  /* W3d: there is no materialized workspace to bind. A turn writes the project's
+   * live checkout, so the agent's filesystem *is* the project's rooted one — which
+   * is exactly what this pin is about. One read opens the lazy connection, so the
+   * bridge port below has the provider's capabilities to announce. */
+  await rooted.exists('');
+  const prepared = await createPreparedWorkspaceFileSystems(rooted);
   const connection = prepared.openFileSystemBridge();
   const agentClient = createFileSystemBridgeProxy(connection);
   await agentClient.ready;

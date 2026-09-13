@@ -1,353 +1,469 @@
+// @vitest-environment jsdom
+/**
+ * The Revisions pane's four regions, driven by a scripted projection (S26, A29).
+ *
+ * Every region reads the same two hooks the product does, mocked through the
+ * one revision harness, so "what a person sees for this projection" is what is
+ * asserted — no worker, no actor, no network.
+ */
+
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, within } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { act, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
-import { ChatRevisions } from '#routes/w.$workspace.$project/chat-revisions.js';
-import { useVisibleRevisions } from '#hooks/use-revisions.js';
-import type { RevisionsView } from '#hooks/use-revisions.js';
-import { useRestoreToPoint } from '#hooks/use-restore-to-point.js';
-import type { Revision } from '#lib/file-restore-timeline.js';
-import { ImmutableRevisionTree, revisionId } from '@taucad/filesystem';
-import { revisionBranchName } from '@taucad/revisions';
-import type { RevisionGraph, RevisionGraphNode } from '#lib/revision-graph.js';
+import type { RevisionRow } from '@taucad/revisions';
+import { RevisionsPanelBody } from '#routes/w.$workspace.$project/chat-revisions.js';
+import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
 
-vi.mock('#components/ui/floating-panel.js', () => ({
-  FloatingPanel: ({ children, isOpen }: { children: ReactNode; isOpen: boolean }) =>
-    isOpen ? <div>{children}</div> : null,
-  FloatingPanelContent: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-  FloatingPanelContentHeader: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-  FloatingPanelContentHeaderActions: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-  FloatingPanelContentTitle: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-  FloatingPanelContentBody: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-  FloatingPanelClose: () => <button type='button'>close</button>,
+vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ projectId: 'p' }) }));
+/* Monaco and Shiki are the editor's, not this pane's: the conflict rows are
+ * asserted by their verbs and the bytes they hand back (P43). */
+vi.mock('#components/code/code-editor.client.js', () => ({
+  CodeEditor: ({ value }: { readonly value?: string }) => <pre data-testid='conflict-buffer'>{value}</pre>,
 }));
-vi.mock('#hooks/use-revisions.js', () => ({ useVisibleRevisions: vi.fn() }));
-/* The branch section reads the workspace authority; mounting the real provider
- * hangs a jsdom mount (see `revision-branches.test.tsx`), and every read it
- * makes is a snapshot function, so a stub authority is the whole seam. */
-let authority: ReturnType<typeof stubAuthority> | undefined;
-vi.mock('#providers/chat-workspace-authority-provider.js', () => ({
-  useOptionalChatWorkspaceAuthority: () => authority,
+vi.mock('#components/code/diff-viewer.js', () => ({
+  DiffViewer: ({ originalContent, modifiedContent }: { originalContent: string; modifiedContent: string }) => (
+    <pre data-testid='conflict-diff'>{`${originalContent}|${modifiedContent}`}</pre>
+  ),
 }));
-vi.mock('#hooks/use-restore-to-point.js', () => ({ useRestoreToPoint: vi.fn() }));
-const editSummary = vi.fn();
-vi.mock('#hooks/use-revision-graph.js', () => ({
-  useRevisionGraphActions: () => ({ editSummary }),
+vi.mock('#hooks/use-revision-status.js', async () => {
+  const harness = await import('#hooks/use-revision-status.test-harness.js');
+  return harness.revisionStatusMock();
+});
+/* One stable array: `useSyncExternalStore` re-renders forever when its snapshot
+ * is a new reference on every read. */
+const settlements: readonly never[] = [];
+vi.mock('#chat-clients/_internal/browser-agent-host-transport.js', () => ({
+  getHostFinalizedTurns: () => settlements,
+  subscribeHostFinalizedTurns: () => () => undefined,
 }));
+const chats = [{ id: 'chat-1', name: 'Optimize bracket' }];
+vi.mock('#hooks/use-chats.js', () => ({ useChats: () => ({ chats }) }));
 
-const rev = (over: Partial<Revision> = {}): Revision => ({
-  n: 1,
-  chatId: 'a',
-  messageId: 'u1',
-  anchor: 100,
-  cutoffSeq: 1,
-  files: [{ path: 'main.ts', linesAdded: 2, linesRemoved: 1 }],
-  changedPaths: ['main.ts'],
-  linesAdded: 2,
-  linesRemoved: 1,
+const row = (over: Partial<RevisionRow> & Pick<RevisionRow, 'revisionId'>): RevisionRow => ({
+  revisionNumber: undefined,
+  changeId: `change-${over.revisionId}`,
+  actor: 'You',
+  source: 'user',
+  createdAt: 1_788_220_800_000,
+  summary: 'Thicker base',
+  conflicted: false,
+  turnId: undefined,
+  tags: [],
   ...over,
 });
 
-const rev1 = rev({ n: 1, messageId: 'u1', anchor: 100 });
-const rev2 = rev({ n: 2, messageId: 'u2', anchor: 200 });
+const wrapper = ({ children }: { readonly children: ReactNode }): React.JSX.Element => (
+  <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+    {children}
+  </QueryClientProvider>
+);
 
-const restore = vi.fn();
-const returnToLatest = vi.fn();
-
-const graphNode = (revision: Revision, over: Partial<RevisionGraphNode> = {}): RevisionGraphNode => {
-  const id = revisionId(`rev:${revision.messageId}`);
-  const tree = new ImmutableRevisionTree(revision.changedPaths.map((path) => [path, 'content'] as const));
-  return {
-    id,
-    identitySource: 'authoritative',
-    turnId: revision.messageId,
-    parents: [],
-    parentTurnIds: [],
-    parentSource: 'recorded',
-    branch: revisionBranchName('main'),
-    tree,
-    treeId: revisionId(`tree:${revision.messageId}`),
-    provenance: { source: 'agent', actorId: revision.chatId, runId: revision.messageId, createdAt: revision.anchor },
-    summary: { generated: `Changed ${revision.changedPaths.length} file` },
-    diff: {
-      changedPaths: revision.changedPaths,
-      filesChanged: revision.changedPaths.length,
-      linesAdded: revision.linesAdded,
-      linesRemoved: revision.linesRemoved,
-    },
-    chatId: revision.chatId,
-    chatName: 'Design chat',
-    jobIds: [],
-    revision,
-    isRestorable: true,
-    ...over,
-  };
-};
-
-const graphFor = (revisions: readonly Revision[], head: Revision | undefined): RevisionGraph => {
-  const nodes = revisions.map((revision) => graphNode(revision));
-  const byId = new Map(nodes.map((node) => [node.id, node]));
-  const byTurnId = new Map(nodes.map((node) => [node.turnId, node]));
-  const headId = head === undefined ? undefined : byTurnId.get(head.messageId)?.id;
-  return {
-    nodes,
-    byId,
-    byTurnId,
-    branches: [
-      { name: revisionBranchName('main'), ...(headId === undefined ? {} : { headId, headTurnId: head!.messageId }) },
-    ],
-    ...(headId === undefined ? {} : { headId }),
-  };
-};
-
-const branchSummary = (
-  name: string,
-): { name: string; headRevisionId: string; summary: string; actorId: string; source: 'agent'; createdAt: number } => ({
-  name,
-  headRevisionId: `head-${name}`,
-  summary: `${name} head`,
-  actorId: 'tau-host',
-  source: 'agent',
-  createdAt: 1,
-});
-
-/** A workspace authority whose head reference is `head`, and nothing else. */
-const stubAuthority = (head: string | undefined) => {
-  const branches = [branchSummary('main'), branchSummary('agent/chat_b')];
-  return {
-    subscribe: () => () => undefined,
-    listBranches: () => branches,
-    headBranch: () => head,
-    diffRevisions: () => [],
-    checkout: vi.fn(),
-    mergeBranch: vi.fn(),
-    deleteBranch: vi.fn(),
-  };
-};
-
-const setRevisions = (view: Partial<RevisionsView>): void => {
-  const revisions = view.revisions ?? [rev1, rev2];
-  const headRevision =
-    view.headRevision === undefined && 'headRevision' in view ? undefined : (view.headRevision ?? rev2);
-  vi.mocked(useVisibleRevisions).mockReturnValue({
-    revisions,
-    byMessageId: view.byMessageId ?? new Map<string, Revision>(),
-    headRevision,
-    maxRevision: view.maxRevision ?? 2,
-    headTurnId: view.headTurnId ?? '',
-    isDirty: view.isDirty ?? false,
-    canReturnToLatest: view.canReturnToLatest ?? false,
-    graph: view.graph ?? graphFor(revisions, headRevision),
-  });
+const renderPane = (): void => {
+  render(<RevisionsPanelBody />, { wrapper });
 };
 
 beforeEach(() => {
-  authority = undefined;
-  restore.mockClear();
-  returnToLatest.mockClear();
-  editSummary.mockClear();
-  vi.mocked(useRestoreToPoint).mockReturnValue({
-    restore,
-    returnToLatest,
-    undo: vi.fn(),
-    isDirty: false,
-    isBusy: false,
-  });
-  setRevisions({});
+  revisionStatusHarness.reset();
 });
 
-describe('ChatRevisions', () => {
-  it('renders a bounded invitation when no revisions exist', () => {
-    setRevisions({ revisions: [], headRevision: undefined, maxRevision: 0 });
-
-    render(<ChatRevisions isExpanded setIsExpanded={vi.fn()} />);
-
-    expect(screen.getByText('No revisions yet')).not.toBeNull();
-    expect(screen.getByText('Agent changes will appear here.')).not.toBeNull();
-  });
-
-  it('T-PANE-LIST: lists every Revision newest-first with the head marked current', () => {
-    render(<ChatRevisions isExpanded setIsExpanded={vi.fn()} />);
-    const headers = screen.getAllByText(/^Revision \d+$/);
-    expect(headers.map((element) => element.textContent)).toEqual(['Revision 2', 'Revision 1']);
-    expect(screen.getByText('Current')).not.toBeNull();
-  });
-
-  it('T-PANE-CURRENT: "Current" is the head reference’s branch, not the newest revision’s (Q11)', () => {
-    // The newest revision is on the candidate branch, and the live tree is on
-    // the trunk — the exact state a candidate turn leaves behind.
-    const graph = graphFor([rev1, rev2], rev2);
-    const candidate = { ...graph.nodes[1]!, branch: revisionBranchName('agent/chat_b') };
-    const nodes = [graph.nodes[0]!, candidate];
-    setRevisions({ graph: { ...graph, nodes, byId: new Map(nodes.map((node) => [node.id, node])) } });
-    authority = stubAuthority('main');
-
-    const view = render(<ChatRevisions isExpanded setIsExpanded={vi.fn()} />);
-    const rowOf = (name: string): HTMLElement =>
-      within(screen.getByRole('region', { name: 'Revision branches' }))
-        .getByText(name)
-        .closest('li')!;
-
-    expect(rowOf('main')).toHaveTextContent('Current');
-    expect(rowOf('agent/chat_b')).not.toHaveTextContent('Current');
-    // A candidate that is the graph head is still a branch you can act on.
-    expect(within(rowOf('agent/chat_b')).getByRole('button', { name: 'Switch' })).toBeVisible();
-    expect(within(rowOf('agent/chat_b')).getByRole('button', { name: /Merge into main/u })).toBeVisible();
-    expect(within(rowOf('agent/chat_b')).getByRole('button', { name: /Discard/u })).toBeVisible();
-
-    // And the label follows a Switch, which moves the head reference.
-    authority = stubAuthority('agent/chat_b');
-    view.rerender(<ChatRevisions isExpanded setIsExpanded={vi.fn()} />);
-    expect(rowOf('agent/chat_b')).toHaveTextContent('Current');
-    expect(within(rowOf('agent/chat_b')).queryByRole('button', { name: 'Switch' })).toBeNull();
-    expect(within(rowOf('main')).getByRole('button', { name: 'Switch' })).toBeVisible();
-  });
-
-  it('T-PANE-RESTORE: a Restore click restores that Revision by messageId + anchor', () => {
-    render(<ChatRevisions isExpanded setIsExpanded={vi.fn()} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Restore to Revision 1' }));
-    expect(restore).toHaveBeenCalledWith({
-      messageId: 'u1',
-      anchor: 100,
-      identitySource: 'authoritative',
-      revisionId: revisionId('rev:u1'),
-    });
-  });
-
-  it('T-PANE-HEAD: the current (head) Revision reads Current and offers no Restore', () => {
-    render(<ChatRevisions isExpanded setIsExpanded={vi.fn()} />);
-    expect(screen.getByText('Current')).not.toBeNull();
-    expect(screen.queryByRole('button', { name: 'Restore to Revision 2' })).toBeNull();
-  });
-
-  it('T-PANE-MODIFIED: the head Revision reads Modified with a Discard action when dirty', () => {
-    setRevisions({ headRevision: rev2, isDirty: true });
-    render(<ChatRevisions isExpanded setIsExpanded={vi.fn()} />);
-    expect(screen.getByText('Modified')).not.toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: /Discard changes/ }));
-    expect(restore).toHaveBeenCalledWith({
-      messageId: 'u2',
-      anchor: 200,
-      identitySource: 'authoritative',
-      revisionId: revisionId('rev:u2'),
-    });
-  });
-
-  it('renders nothing when the pane is collapsed', () => {
-    const { container } = render(<ChatRevisions isExpanded={false} setIsExpanded={vi.fn()} />);
-    expect(container.textContent).toBe('');
-  });
-
-  it('exposes "Return to latest" only when behind the tip', () => {
-    setRevisions({ headRevision: rev1, canReturnToLatest: true });
-    render(<ChatRevisions isExpanded setIsExpanded={vi.fn()} />);
-    fireEvent.click(screen.getByRole('button', { name: /Return to latest/ }));
-    expect(returnToLatest).toHaveBeenCalledOnce();
-  });
-
-  it('renders the branch, fork point, conflict, publication, and inspect-only state', () => {
-    const historical = graphNode(rev1, {
-      // Transcript identity is what makes a superseded branch inspect-only: an
-      // authoritative node is restored by checking its revision out.
-      identitySource: 'transcript',
-      branch: revisionBranchName('explore/lightweight'),
-      parentTurnIds: ['u0'],
-      forkPointTurnId: 'u0',
-      conflict: { type: 'merge', kind: 'text', paths: ['main.ts'] },
-      publication: {
-        status: 'conflicted',
-        branchName: 'explore/lightweight',
-        expectedHeadRevisionId: 'rev-u0',
-        actualHeadRevisionId: 'rev-u9',
-        proposedHeadRevisionId: 'rev-u1',
-      },
-      isRestorable: false,
-    });
-    const graph: RevisionGraph = {
-      nodes: [historical],
-      byId: new Map([[historical.id, historical]]),
-      byTurnId: new Map([[historical.turnId, historical]]),
-      branches: [{ name: historical.branch, headTurnId: 'u0' }],
+describe('Revisions pane', () => {
+  it('renders exactly one "Current" for a projection with two branches', async () => {
+    revisionStatusHarness.rows = [
+      row({ revisionId: 'rev-4', revisionNumber: 4 }),
+      row({ revisionId: 'rev-3', revisionNumber: 3 }),
+    ];
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      branch: 'main',
+      headRevisionId: 'rev-4',
+      branches: [
+        { name: 'main', head: 'rev-4', checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: [] },
+        {
+          name: 'bracket-fillet',
+          head: 'rev-3',
+          checkoutId: 'co-2',
+          checkoutRoot: '/checkouts/co-2',
+          leaseChatIds: ['chat-1'],
+        },
+      ],
     };
-    setRevisions({ revisions: [rev1], headRevision: undefined, graph });
 
-    render(<ChatRevisions isExpanded setIsExpanded={vi.fn()} />);
+    renderPane();
 
-    expect(screen.getByRole('list', { name: 'Revision branch graph' })).not.toBeNull();
-    expect(screen.getByText('explore/lightweight')).not.toBeNull();
-    expect(screen.getByText('forked from u0')).not.toBeNull();
-    expect(screen.getByRole('status')).toHaveTextContent('text conflict');
-    expect(screen.getByText('Head publication rejected')).not.toBeNull();
-    expect(screen.getByText('Historical branch · inspect only')).not.toBeNull();
-    expect(screen.queryByRole('button', { name: 'Restore to Revision 1' })).toBeDisabled();
+    await waitFor(() => {
+      expect(screen.getAllByRole('listitem').length).toBeGreaterThan(0);
+    });
+    /* *Where you are* names the branch and the revision, the branch row is
+     * marked, and the History row of that revision is the one place the word
+     * itself appears. */
+    await waitFor(() => {
+      expect(screen.getAllByText('Current')).toHaveLength(1);
+    });
+    expect(screen.getByRole('listitem', { current: true })).toHaveTextContent('main');
   });
 
-  it('M2: restores a superseded branch the revision store still holds', () => {
-    // Same node, authoritative identity: `isRestorable` is about replaying chat
-    // evidence, and a stored revision needs none of it.
-    const superseded = graphNode(rev1, {
-      branch: revisionBranchName('explore/lightweight'),
-      isRestorable: false,
-    });
-    const graph: RevisionGraph = {
-      nodes: [superseded],
-      byId: new Map([[superseded.id, superseded]]),
-      byTurnId: new Map([[superseded.turnId, superseded]]),
-      branches: [{ name: superseded.branch, headTurnId: 'u1' }],
+  it('shows the branch region only once a second branch exists', async () => {
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, branch: 'main' };
+
+    const { rerender } = render(<RevisionsPanelBody />, { wrapper });
+    expect(screen.queryByRole('list', { name: 'Branches' })).not.toBeInTheDocument();
+
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      branches: [
+        { name: 'main', head: undefined, checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: [] },
+        {
+          name: 'bracket-fillet',
+          head: undefined,
+          checkoutId: 'co-2',
+          checkoutRoot: '/checkouts/co-2',
+          leaseChatIds: ['chat-1'],
+        },
+      ],
     };
-    setRevisions({ revisions: [rev1], headRevision: undefined, graph });
+    rerender(<RevisionsPanelBody />);
 
-    render(<ChatRevisions isExpanded setIsExpanded={vi.fn()} />);
+    await waitFor(() => {
+      expect(screen.getByRole('list', { name: 'Branches' })).toBeInTheDocument();
+    });
+    /* The chips say who is working where, by the chat's own name. */
+    expect(screen.getByText('Optimize bracket')).toBeInTheDocument();
+  });
 
-    expect(screen.queryByText('Historical branch · inspect only')).toBeNull();
-    const button = screen.getByRole('button', { name: 'Restore to Revision 1' });
-    expect(button).not.toBeDisabled();
-    fireEvent.click(button);
-    expect(restore).toHaveBeenCalledWith({
-      messageId: 'u1',
-      anchor: 100,
-      identitySource: 'authoritative',
-      revisionId: revisionId('rev:u1'),
+  /* W10 red pin (d): a conflicted head is a *Needs resolution* card on that
+   * branch's row, and every per-file choice is one machine verb. Nothing here
+   * touches main — the card says so, because that is AC14's promise to a
+   * person. */
+  it('renders a Needs resolution card for a conflicted branch head', async () => {
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      branch: 'main',
+      branches: [
+        { name: 'main', head: undefined, checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: [] },
+        {
+          name: 'bracket-fillet',
+          head: 'rev-c',
+          checkoutId: 'co-2',
+          checkoutRoot: '/checkouts/co-2',
+          leaseChatIds: [],
+        },
+      ],
+      conflicts: [
+        {
+          revisionId: 'rev-c',
+          branch: 'bracket-fillet',
+          labels: { ours: 'main', theirs: 'bracket-fillet' },
+          paths: [
+            { path: 'src/bracket.ts', openable: true, side: undefined },
+            { path: 'params/wall.json', openable: false, side: undefined },
+          ],
+          busy: false,
+          ready: false,
+        },
+      ],
+    };
+
+    renderPane();
+
+    expect(await screen.findByText('Needs resolution')).toBeInTheDocument();
+    expect(screen.getByText('src/bracket.ts')).toBeInTheDocument();
+    /* AC14's promise, in the one sentence a person reads first. */
+    expect(screen.getByText(/main is untouched until you choose/u)).toBeInTheDocument();
+    /* A22: a parametric file has no markers to read, so it is choose-one only. */
+    expect(screen.getByRole('button', { name: 'Open src/bracket.ts' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Open params/wall.json' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Compare params/wall.json' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Merge into main' })).toBeDisabled();
+  });
+
+  it('finishes the merge only once every file has a side', async () => {
+    const user = userEvent.setup();
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      branch: 'main',
+      branches: [
+        { name: 'main', head: undefined, checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: [] },
+        {
+          name: 'bracket-fillet',
+          head: 'rev-c',
+          checkoutId: 'co-2',
+          checkoutRoot: '/checkouts/co-2',
+          leaseChatIds: [],
+        },
+      ],
+      conflicts: [
+        {
+          revisionId: 'rev-c',
+          branch: 'bracket-fillet',
+          labels: { ours: 'main', theirs: 'bracket-fillet' },
+          paths: [{ path: 'src/bracket.ts', openable: true, side: 'theirs' }],
+          busy: false,
+          ready: true,
+        },
+      ],
+    };
+
+    renderPane();
+    expect(await screen.findByRole('button', { name: 'Keep theirs in src/bracket.ts' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Ask chat to resolve' }));
+    await user.click(screen.getByRole('button', { name: 'Merge into main' }));
+
+    expect(revisionStatusHarness.commands.askChatToResolve).toHaveBeenCalledWith('rev-c');
+    expect(revisionStatusHarness.commands.finishResolution).toHaveBeenCalledWith('rev-c');
+  });
+
+  it('sends one machine verb for the side a person keeps', async () => {
+    const user = userEvent.setup();
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      branch: 'main',
+      branches: [
+        { name: 'main', head: undefined, checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: [] },
+        {
+          name: 'bracket-fillet',
+          head: 'rev-c',
+          checkoutId: 'co-2',
+          checkoutRoot: '/checkouts/co-2',
+          leaseChatIds: [],
+        },
+      ],
+      conflicts: [
+        {
+          revisionId: 'rev-c',
+          branch: 'bracket-fillet',
+          labels: { ours: 'main', theirs: 'bracket-fillet' },
+          paths: [{ path: 'src/bracket.ts', openable: true, side: undefined }],
+          busy: false,
+          ready: false,
+        },
+      ],
+    };
+
+    renderPane();
+    await user.click(await screen.findByRole('button', { name: 'Keep mine in src/bracket.ts' }));
+
+    expect(revisionStatusHarness.commands.resolveFile).toHaveBeenCalledWith('rev-c', 'src/bracket.ts', 'mine');
+  });
+
+  /* The materialized text needs one product consumer, or the marker renderer
+   * is a path nothing walks. *Open* asks for it; the card shows the hunks a
+   * person is choosing between (W10; the editable editor mode is the editor
+   * lane's, and `resolvedInEditor` is already the verb it will send). */
+  it('shows the conflicting lines the worker materialized', async () => {
+    const user = userEvent.setup();
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      branch: 'main',
+      branches: [
+        { name: 'main', head: undefined, checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: [] },
+        {
+          name: 'bracket-fillet',
+          head: 'rev-c',
+          checkoutId: 'co-2',
+          checkoutRoot: '/checkouts/co-2',
+          leaseChatIds: [],
+        },
+      ],
+      conflicts: [
+        {
+          revisionId: 'rev-c',
+          branch: 'bracket-fillet',
+          labels: { ours: 'main', theirs: 'bracket-fillet' },
+          paths: [{ path: 'src/bracket.ts', openable: true, side: undefined }],
+          busy: false,
+          ready: false,
+        },
+      ],
+    };
+
+    renderPane();
+    await user.click(await screen.findByRole('button', { name: 'Open src/bracket.ts' }));
+
+    expect(revisionStatusHarness.commands.openConflictInEditor).toHaveBeenCalledWith('rev-c', 'src/bracket.ts');
+
+    act(() => {
+      for (const listener of revisionStatusHarness.toasts) {
+        listener({
+          type: 'conflictText',
+          revisionId: 'rev-c',
+          path: 'src/bracket.ts',
+          text: '<<<<<<< main\nthick = 4\n=======\nthick = 6\n>>>>>>> bracket-fillet\n',
+          ours: 'thick = 4\n',
+          theirs: 'thick = 6\n',
+        });
+      }
+    });
+
+    expect(await screen.findByTestId('conflict-buffer')).toHaveTextContent('thick = 6');
+
+    /* P43: the block's two verbs rewrite the buffer, and *Mark resolved* is
+       refused until no marker is left — handing back a buffer that still held
+       `<<<<<<<` would write the markers into the tree (A22). */
+    expect(screen.getByRole('button', { name: 'Mark src/bracket.ts resolved' })).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: 'Keep theirs in change 1 of src/bracket.ts' }));
+    expect(screen.getByTestId('conflict-buffer')).toHaveTextContent('thick = 6');
+    expect(screen.getByTestId('conflict-buffer')).not.toHaveTextContent('<<<<<<<');
+
+    await user.click(screen.getByRole('button', { name: 'Mark src/bracket.ts resolved' }));
+    expect(revisionStatusHarness.commands.resolveFileInEditor).toHaveBeenCalledWith(
+      'rev-c',
+      'src/bracket.ts',
+      'thick = 6\n',
+    );
+
+    /* A27/D19's third *Compare* surface, on the conflict row (review R9). */
+    await user.click(screen.getByRole('button', { name: 'Compare src/bracket.ts' }));
+    expect(screen.getByTestId('conflict-diff').textContent).toBe('thick = 4\n|thick = 6\n');
+  });
+
+  it('switches to a branch the person picked', async () => {
+    const user = userEvent.setup();
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      branch: 'main',
+      branches: [
+        { name: 'main', head: undefined, checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: [] },
+        {
+          name: 'bracket-fillet',
+          head: undefined,
+          checkoutId: 'co-2',
+          checkoutRoot: '/checkouts/co-2',
+          leaseChatIds: [],
+        },
+      ],
+    };
+
+    renderPane();
+    await user.click(screen.getByRole('button', { name: 'Switch' }));
+
+    expect(revisionStatusHarness.commands.switchTo).toHaveBeenCalledWith('bracket-fillet');
+  });
+
+  it('creates a branch through the branch verb, not a checkout of its own', async () => {
+    const user = userEvent.setup();
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      branch: 'main',
+      branches: [
+        { name: 'main', head: undefined, checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: [] },
+        {
+          name: 'bracket-fillet',
+          head: undefined,
+          checkoutId: 'co-2',
+          checkoutRoot: '/checkouts/co-2',
+          leaseChatIds: [],
+        },
+      ],
+    };
+
+    renderPane();
+    await user.click(screen.getByRole('button', { name: 'New branch' }));
+    await user.type(screen.getByRole('textbox', { name: 'Name for the new branch' }), 'enclosure-v2');
+    await user.click(screen.getByRole('button', { name: 'Create' }));
+
+    expect(revisionStatusHarness.commands.createBranch).toHaveBeenCalledWith('enclosure-v2');
+  });
+
+  it('says the checkout has changes that are not in a revision yet, and offers to drop them', async () => {
+    const user = userEvent.setup();
+    revisionStatusHarness.rows = [row({ revisionId: 'rev-4', revisionNumber: 4 })];
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      branch: 'main',
+      headRevisionId: 'rev-4',
+      dirty: true,
+    };
+
+    renderPane();
+
+    await waitFor(() => {
+      expect(screen.getByText('Modified since Rev 4')).toBeInTheDocument();
+    });
+    await user.click(screen.getAllByRole('button', { name: 'Discard changes' })[0]!);
+    expect(revisionStatusHarness.commands.restore).toHaveBeenCalledWith('rev-4');
+  });
+
+  it('offers Return to latest only while the checkout sits behind the branch tip', async () => {
+    revisionStatusHarness.rows = [
+      row({ revisionId: 'rev-4', revisionNumber: 4 }),
+      row({ revisionId: 'rev-3', revisionNumber: 3 }),
+    ];
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, branch: 'main', headRevisionId: 'rev-3' };
+
+    renderPane();
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Return to latest' })).toBeInTheDocument();
     });
   });
 
-  it('exposes exact revision/tree/path/job metadata and saves an accessible edited summary', () => {
-    const node = graphNode(rev1, {
-      parentTurnIds: ['u0'],
-      jobIds: ['job-fea-2'],
-      summary: { generated: 'Changed one file' },
-      baseRevisionId: revisionId('rev-base'),
-      workspaceId: 'workspace-1',
-      nativeGit: { status: 'stored', commitId: 'abc123', objectFormat: 'sha1' },
-      publication: {
-        status: 'updated',
-        branchName: 'main',
-        expectedHeadRevisionId: 'rev-base',
-        previousHeadRevisionId: 'rev-base',
-        headRevisionId: 'rev-u1',
-      },
-    });
-    const graph: RevisionGraph = {
-      nodes: [node],
-      byId: new Map([[node.id, node]]),
-      byTurnId: new Map([[node.turnId, node]]),
-      branches: [{ name: node.branch, headId: node.id, headTurnId: node.turnId }],
-      headId: node.id,
+  it('shows the Sync region only once a remote exists, and offers to open it otherwise', async () => {
+    const user = userEvent.setup();
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, branch: 'main' };
+
+    renderPane();
+    expect(screen.queryByRole('radio', { name: 'Tau Cloud' })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Back up to Tau Cloud' }));
+
+    expect(screen.getByRole('radio', { name: 'Tau Cloud' })).toBeInTheDocument();
+  });
+
+  it('names no git word in what a person reads (A18, I12)', async () => {
+    revisionStatusHarness.rows = [row({ revisionId: 'rev-4', revisionNumber: 4 })];
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      branch: 'main',
+      headRevisionId: 'rev-4',
+      branches: [
+        { name: 'main', head: 'rev-4', checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: [] },
+        {
+          name: 'bracket-fillet',
+          head: undefined,
+          checkoutId: 'co-2',
+          checkoutRoot: '/checkouts/co-2',
+          leaseChatIds: [],
+        },
+      ],
     };
-    setRevisions({ revisions: [rev1], headRevision: rev1, maxRevision: 1, graph });
-    render(<ChatRevisions isExpanded setIsExpanded={vi.fn()} />);
 
-    fireEvent.click(screen.getByText('Inspect revision metadata'));
-    expect(screen.getByText(String(node.id))).not.toBeNull();
-    expect(screen.getByText(String(node.treeId))).not.toBeNull();
-    expect(screen.getByText(String(node.baseRevisionId))).not.toBeNull();
-    expect(screen.getAllByText('main.ts')).toHaveLength(2);
-    expect(screen.getByText('job-fea-2')).not.toBeNull();
-    expect(screen.getByText('sha1 abc123')).not.toBeNull();
-    expect(screen.getByText('rev-base → rev-u1')).not.toBeNull();
+    const { container } = render(<RevisionsPanelBody />, { wrapper });
+    await waitFor(() => {
+      expect(screen.getAllByText(/Rev 4/u).length).toBeGreaterThan(0);
+    });
 
-    const input = screen.getByRole('textbox', { name: 'Summary for Revision 1' });
-    fireEvent.change(input, { target: { value: 'FEA-ready bracket' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save summary' }));
-    expect(editSummary).toHaveBeenCalledWith('u1', 'FEA-ready bracket');
+    expect(container.textContent).not.toMatch(/checkout|worktree|lease|\bHEAD\b|\bref\b/iu);
+  });
+  it('renames a branch in place, the one verb whose effect has landed (review R3)', async () => {
+    const user = userEvent.setup();
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      branch: 'main',
+      branches: [
+        { name: 'main', head: undefined, checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: [] },
+        {
+          name: 'bracket-fillet',
+          head: undefined,
+          checkoutId: 'co-2',
+          checkoutRoot: '/checkouts/co-2',
+          leaseChatIds: [],
+        },
+      ],
+    };
+
+    render(<RevisionsPanelBody />, { wrapper });
+    await user.click(screen.getByRole('button', { name: 'Rename bracket-fillet' }));
+    const field = screen.getByRole('textbox', { name: 'New name for bracket-fillet' });
+    await user.clear(field);
+    await user.type(field, 'enclosure-v2');
+    await user.click(screen.getByRole('button', { name: 'Rename bracket-fillet' }));
+
+    expect(revisionStatusHarness.commands.renameBranch).toHaveBeenCalledWith('bracket-fillet', 'enclosure-v2');
   });
 });

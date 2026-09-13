@@ -106,11 +106,17 @@ vi.mock('#hooks/use-file-content.js', () => ({
   useFileContent: (path: string | undefined) => mockUseFileContent(path),
 }));
 
+const mockFileManager = {
+  contentService: { resolve: mockResolve, readRawBytes: mockReadRawBytes, saveEditor: mockContentSaveEditor },
+  writeFile: mockWriteFile,
+};
+
 vi.mock('#hooks/use-file-manager.js', () => ({
-  useFileManager: () => ({
-    contentService: { resolve: mockResolve, readRawBytes: mockReadRawBytes, saveEditor: mockContentSaveEditor },
-    writeFile: mockWriteFile,
-  }),
+  useFileManager: () => mockFileManager,
+  /* The pane's read-only answer reads the file tree's provenance, and the tree
+   * reader takes the *optional* manager so presentation-only surfaces can render
+   * outside a provider. */
+  useOptionalFileManager: () => mockFileManager,
 }));
 
 const editorMachineSnapshot = {

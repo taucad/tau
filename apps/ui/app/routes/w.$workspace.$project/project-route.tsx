@@ -10,11 +10,15 @@ import { ProjectWorkspaceProvider } from '#routes/w.$workspace.$project/project-
 import { ProjectShareRouteIntent } from '#routes/w.$workspace.$project/project-share-action.js';
 import { useKeybinding } from '#hooks/use-keyboard.js';
 import { ProjectCommandPaletteItems } from '#routes/w.$workspace.$project/project-command-items.js';
-import { HomeFileManagerProvider, SharedWorkerGate } from '#hooks/use-file-manager.js';
+import { HomeFileManagerProvider, SharedWorkerGate, useFileManager } from '#hooks/use-file-manager.js';
 import { MonacoModelServiceProvider } from '#hooks/use-monaco-model-service.js';
-import { RevisionProvider } from '#routes/w.$workspace.$project/revision-provider.js';
+import { RevisionConflictChat } from '#routes/w.$workspace.$project/revision-conflict-chat.js';
+import { RevisionRestore } from '#routes/w.$workspace.$project/revision-restore.js';
+import { WorkbenchCheckoutRoot } from '#routes/w.$workspace.$project/workbench-checkout-root.js';
+import { RevisionOutcomes } from '#routes/w.$workspace.$project/revision-outcomes.js';
 import { ChatWorkspaceAuthorityProvider } from '#providers/chat-workspace-authority-provider.js';
 import { useFlushOnClose } from '#hooks/use-flush-on-close.js';
+import { RevisionSaveShortcut } from '#routes/w.$workspace.$project/revision-save-shortcut.js';
 // Chat persistence + draft flush is handled centrally by `<GlobalChatFlushGuard>`
 // (see `apps/ui/app/components/global-chat-flush-guard.tsx`). The project
 // route only needs to flush its own project + editor machine state below.
@@ -28,6 +32,10 @@ import { Button } from '@taucad/ui/components/button';
 import { ProjectNotFound } from '#routes/w.$workspace.$project/project-not-found.js';
 import { ProjectLoadError } from '#routes/w.$workspace.$project/project-load-error.js';
 import { isKernelAvailable, nativeKernelRequirementForEntryPath } from '#constants/available-kernel-configurations.js';
+import { useLiveProjectIds, useProjectSession, useSessions } from '#hooks/use-sessions.js';
+import { forgetProjectRegions, registerProjectSessionServices, reportRegionReady } from '#services/sessions-store.js';
+import { useRevisionClient } from '#hooks/use-revision-status.js';
+import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 
 type ResolvedProjectRouteAccess = {
   readonly projectId: string;
@@ -48,9 +56,137 @@ type ProjectRouteError = Readonly<{
 
 const editorFlushTimeoutMilliseconds = 10_000;
 
+/* A retained project has no route flush to register: the route's flush gate is
+ * about the project the person is leaving, and the session's own `closing` is
+ * what flushes a project that is actually going away (S44). */
+const noFlushRegistration = (): void => undefined;
+
+/**
+ * The session's half of a project subtree (S44).
+ *
+ * The registry decides *whether* a project is live; this reports whether its
+ * resources came up, and hands the session the four things `closing` has to do.
+ * It is mounted inside the project's providers, which is the only place that
+ * can reach them.
+ */
+function ProjectSessionBinding({
+  projectId,
+  isFocused,
+}: {
+  readonly projectId: string;
+  readonly isFocused: boolean;
+}): React.JSX.Element {
+  const { fileManagerRef } = useFileManager();
+  const { projectRef } = useProject();
+  const client = useRevisionClient();
+  const chatSessions = useChatSessionStore();
+  const session = useProjectSession(projectId);
+  const viewsReady = useSelector(fileManagerRef, (state) => state.matches('ready'));
+  const runtimeReady = useSelector(projectRef, (state) => state.context.project !== undefined);
+  const sync = useSelector(
+    useSessions(),
+    () => client?.status()?.sync,
+    (left, right) => left?.state === right?.state && left?.pendingCount === right?.pendingCount,
+  );
+
+  useEffect(() => {
+    if (viewsReady) {
+      reportRegionReady(projectId, 'views');
+    }
+  }, [projectId, viewsReady]);
+
+  useEffect(() => {
+    if (runtimeReady) {
+      reportRegionReady(projectId, 'runtime');
+      /*
+       * Ponytail: the browser agent host still registers per request.
+       * The session owns the attachment's *lifetime* today — it dies with the
+       * project — but `agent-host-client.ts`'s 10 s `initializationTimeout` is
+       * still the route's race. Upgrade path: a session-owned registration
+       * child, reported here instead of assumed.
+       */
+      reportRegionReady(projectId, 'agentHost');
+    }
+  }, [projectId, runtimeReady]);
+
+  /* What a policy close is allowed to touch (I24, I25), from the one place that
+   * knows: the project's own revision projection. The *session* owns these
+   * facts and tells the registry; the route never reports over its head. */
+  useEffect(() => {
+    const status = client?.status();
+    if (status === undefined || session === undefined) {
+      return;
+    }
+    session.send({
+      type: 'revisionState',
+      dirty: status.dirty,
+      pushed: status.sync.state === 'noRemote' || status.sync.state === 'backedUp',
+      sync: status.sync.state === 'conflicted' ? 'conflicted' : status.dirty ? 'pending' : 'synced',
+    });
+  }, [client, session, sync]);
+
+  useEffect(() => {
+    return registerProjectSessionServices(projectId, {
+      /*
+       * P34: a thin wait on `sync.machine`'s facet leaving `checking`. The three
+       * exits are the machine's; this only stops waiting when it has answered.
+       */
+      awaitPull: async () => {
+        if (client?.status()?.sync.state !== 'checking') {
+          return;
+        }
+        await new Promise<void>((resolve) => {
+          const unsubscribe = client.subscribe(() => {
+            if (client.status()?.sync.state !== 'checking') {
+              unsubscribe();
+              resolve();
+            }
+          });
+        });
+      },
+      /* W13's seam, called: the worker's `release()` takes the close cut and
+       * awaits `awaitSyncSettled` before it answers this. */
+      flushSync: async () => {
+        await client?.quiesce();
+      },
+      cancelRuns: async (chatIds) => {
+        await Promise.allSettled(chatIds.map(async (chatId) => chatSessions.get(chatId)?.chat.stop()));
+      },
+      /* The leases go with the root: `release()` retires every one this
+       * session's turns took, inside the flush above. Kept as its own step
+       * because a host whose leases outlive its tree has one to implement. */
+      releaseLeases: async () => undefined,
+    });
+  }, [chatSessions, client, projectId]);
+
+  /* The chat machines belong to the session of the project the person is in
+   * (I23). A retained project keeps its own agents running; it does not own
+   * the chat store, which follows the route. */
+  useEffect(() => {
+    if (!isFocused || session === undefined) {
+      return;
+    }
+    chatSessions.setProjectSession(session);
+    return () => {
+      chatSessions.setProjectSession(undefined);
+    };
+  }, [chatSessions, isFocused, session]);
+
+  useEffect(
+    () => () => {
+      forgetProjectRegions(projectId);
+    },
+    [projectId],
+  );
+
+  // oxlint-disable-next-line react/jsx-no-useless-fragment -- Headless component
+  return <></>;
+}
+
 function ProjectSession({
   children,
   projectId,
+  isFocused,
   nativeKernelId,
   requestedChatId,
   createdChatId,
@@ -59,6 +195,7 @@ function ProjectSession({
 }: {
   readonly children?: React.ReactNode;
   readonly projectId: string;
+  readonly isFocused?: boolean;
   readonly nativeKernelId?: string;
   readonly requestedChatId?: string;
   readonly createdChatId?: string;
@@ -81,15 +218,23 @@ function ProjectSession({
           kernelOptionsFactory={kernelSelection.kernelOptionsFactory}
         >
           <ProjectPersistenceGuard projectId={projectId} onFlushRegistration={onFlushRegistration} />
+          <ProjectSessionBinding projectId={projectId} isFocused={isFocused === true} />
+          <RevisionSaveShortcut />
           <MonacoModelServiceProvider>
-            <RevisionProvider>
-              <ChatWorkspaceAuthorityProvider>
-                <ProjectWorkspaceProvider>
-                  <ProjectShareRouteIntent />
-                  {children}
-                </ProjectWorkspaceProvider>
-              </ChatWorkspaceAuthorityProvider>
-            </RevisionProvider>
+            <ChatWorkspaceAuthorityProvider>
+              <ProjectWorkspaceProvider>
+                <ProjectShareRouteIntent />
+                <RevisionRestore />
+                {/* AC14: *Ask chat to resolve* seeds one chat, bound to the
+                    conflict its turn is being started for. */}
+                <RevisionConflictChat />
+                {/* S27: the workbench follows the selected checkout's route. */}
+                <WorkbenchCheckoutRoot />
+                {/* A4: the two outcomes that record no revision are not silent. */}
+                <RevisionOutcomes />
+                {children}
+              </ProjectWorkspaceProvider>
+            </ChatWorkspaceAuthorityProvider>
           </MonacoModelServiceProvider>
         </ProjectProvider>
       </WebglContextTrackerProvider>
@@ -111,6 +256,12 @@ export function ProjectRouteGate({
   readonly createdChatId?: string;
 }): React.ReactNode {
   const projectManager = useProjectManager();
+  const sessions = useSessions();
+  const liveProjectIds = useLiveProjectIds();
+  /* What a retained project's subtree needs to keep running. Recorded when the
+   * project was the requested one; a project can only be opened through a
+   * resolved route, so nothing here is ever guessed. */
+  const [retainedKernels, setRetainedKernels] = useState<Readonly<Record<string, string | undefined>>>({});
   const latestRequestedProjectIdRef = useRef(requestedProjectId);
   const latestRequestedChatIdRef = useRef(requestedChatId);
   const activeSessionFlushRef = useRef<ProjectSessionFlushRegistration | undefined>(undefined);
@@ -161,6 +312,16 @@ export function ProjectRouteGate({
           return;
         }
         setRouteError(undefined);
+        if (access.status === 'ready') {
+          /* What a retained subtree needs to keep running after the person
+           * navigates on: recorded the once, from the resolved route. */
+          const requirement = nativeKernelRequirementForEntryPath(access.project.assets.main.entryPath);
+          setRetainedKernels((prior) =>
+            Object.hasOwn(prior, requestedProjectId)
+              ? prior
+              : { ...prior, [requestedProjectId]: requirement?.runtimeKernelId },
+          );
+        }
         setResolved({
           projectId: requestedProjectId,
           access,
@@ -181,6 +342,23 @@ export function ProjectRouteGate({
       controller.abort();
     };
   }, [requestedProjectId, projectManager, loadAttempt]);
+
+  /*
+   * Liveness is orthogonal to navigation (A35, I22).
+   *
+   * Arriving at a project opens it if it is closed and touches it otherwise;
+   * *leaving* sends nothing at all. The retained subtrees below are what makes
+   * that true in the tree as well as in the registry: a project the user
+   * navigated away from keeps its file manager, its kernel and its revision
+   * port, so a running agent settles and returning is instant.
+   */
+  useEffect(() => {
+    if (resolved?.access.status !== 'ready' || resolved.projectId !== requestedProjectId) {
+      return;
+    }
+    sessions.send({ type: 'open', projectId: requestedProjectId });
+    sessions.send({ type: 'touch', projectId: requestedProjectId });
+  }, [requestedProjectId, resolved, sessions]);
 
   const handleRetryLoad = (): void => {
     setRouteError(undefined);
@@ -247,6 +425,7 @@ export function ProjectRouteGate({
         <ProjectSession
           key={projectId}
           projectId={projectId}
+          isFocused
           nativeKernelId={nativeRequirement?.runtimeKernelId}
           requestedChatId={pending ? resolved.requestedChatId : requestedChatId}
           createdChatId={pending ? undefined : createdChatId}
@@ -321,6 +500,23 @@ export function ProjectRouteGate({
       <div className='contents' inert={pending || undefined} aria-busy={pending}>
         {content}
       </div>
+      {/*
+        The other live projects (V21, I22).
+        Each keeps its own resources — file manager, kernel, revision port,
+        watchers — and renders no chrome, because the person is looking at one
+        project at a time. The registry decides who is in this list; the route
+        never removes anybody from it.
+      */}
+      {liveProjectIds
+        .filter((liveProjectId) => liveProjectId !== projectId && Object.hasOwn(retainedKernels, liveProjectId))
+        .map((liveProjectId) => (
+          <ProjectSession
+            key={liveProjectId}
+            projectId={liveProjectId}
+            nativeKernelId={retainedKernels[liveProjectId]}
+            onFlushRegistration={noFlushRegistration}
+          />
+        ))}
       {pending && routeError?.projectId !== requestedProjectId ? (
         <div
           className='pointer-events-none fixed inset-0 z-50 flex items-center justify-center'

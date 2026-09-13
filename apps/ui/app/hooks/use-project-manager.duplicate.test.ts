@@ -157,6 +157,7 @@ vi.mock('xstate', async (importOriginal) => {
           prepareProjectDuplicate: mockDuplicate,
           resumePendingProjectOperationResources: vi.fn(async () => {
             phases.push('resources');
+            return [];
           }),
           completePendingProjectOperation: vi.fn(async () => {
             phases.push('complete');

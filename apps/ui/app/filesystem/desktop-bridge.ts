@@ -12,7 +12,6 @@
  * `@taucad/runtime/electron/renderer`, whose same-window guard is the tree's
  * one relay-acceptance predicate.
  */
-import type { ChatRevisionMode } from '@taucad/chat/schemas';
 import type { ComputeStoreControl } from '@taucad/runtime/types';
 import { z } from 'zod';
 import { externalAgentDescriptorSchema } from '@taucad/agent-host';
@@ -29,7 +28,6 @@ type DesktopShell = {
   readonly nodeFs: { readonly homeRoot: string };
   readonly runtimeKernelIds?: readonly string[];
   readonly externalAgents?: readonly ExternalAgentDescriptor[];
-  readonly revisions?: readonly ChatRevisionMode[];
   readonly compute?: DesktopBridge['compute'];
   readonly appIcon: { setTheme(theme: 'light' | 'dark'): void };
   readonly dialog: DesktopBridge['dialog'];
@@ -71,13 +69,6 @@ export type DesktopBridge = {
    * page repeats; empty means Tau's own runs only.
    */
   readonly externalAgents: readonly ExternalAgentDescriptor[];
-  /**
-   * Revision modes launcher 2 records a turn in (V17), published by main
-   * exactly as the daemon publishes its own on `/.well-known/tau-host`. Empty
-   * means the utility has no revision port and the composer offers no revision
-   * selector for this computer.
-   */
-  readonly revisions: readonly ChatRevisionMode[];
   readonly nodeFs: {
     /**
      * Absolute host directory backing the node Home workspace
@@ -183,7 +174,6 @@ export const desktopBridge = (): DesktopBridge | undefined => {
         .array(externalAgentDescriptorSchema)
         .max(16)
         .safeParse(shell.externalAgents ?? []).data ?? [],
-    revisions: shell.revisions ?? [],
     nodeFs: {
       homeRoot: shell.nodeFs.homeRoot,
       connect: async () => connectServices('nodeFs'),

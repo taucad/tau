@@ -249,6 +249,19 @@ const toolSerializers: { [Name in keyof MyTools]: ToolSerializer<Name> } = {
     input: (input) => `mode: ${input.mode}`,
     output: (output) => `Captured ${output.images.length} image(s)`,
   },
+  [toolName.revisions]: {
+    input: (input) => `action: ${input.action}`,
+    /* The `where` line first, because it is the answer every action carries. */
+    output: (output) =>
+      [
+        output.where,
+        output.revisions === undefined ? undefined : `${String(output.revisions.length)} revision(s)`,
+        output.changes === undefined ? undefined : `${String(output.changes.length)} changed file(s)`,
+        output.branches === undefined ? undefined : `${String(output.branches.length)} branch(es)`,
+      ]
+        .filter((field) => field !== undefined)
+        .join(' · '),
+  },
 };
 
 const serializeToolPart = <Name extends keyof MyTools>(part: ToolPartFor<Name>): string => {

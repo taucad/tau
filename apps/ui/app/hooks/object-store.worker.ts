@@ -5,9 +5,9 @@ import { idPrefix } from '@taucad/types/constants';
 import type { Chat } from '@taucad/chat';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { IndexedDbStorageProvider } from '#db/indexeddb-storage.js';
-import type { AppUiPreferences, CommitCancelledDraftRestoreInput } from '#types/storage.types.js';
+import type { AppUiPreferences } from '#types/storage.types.js';
 import type { EditorState, EditorStateInput, OpenFile } from '#types/editor.types.js';
-import type { PersistedRevisionState, ProjectLibraryState } from '#types/project.types.js';
+import type { ProjectLibraryState } from '#types/project.types.js';
 import type {
   PendingCreateProjectOperation,
   PendingDuplicateProjectOperation,
@@ -169,10 +169,12 @@ const objectStoreWorker = {
     targetManifest: ProjectManifest;
     files: Record<string, { content: Uint8Array<ArrayBuffer> }>;
     storage: PendingProjectStorage;
+    /** The source project's chats, read from its files by the caller (W17). */
+    sourceChats: readonly Chat[];
   }): Promise<PendingDuplicateProjectOperation> {
     const timestamp = Date.now();
     const newProject = options.targetManifest;
-    const sourceChats = await storage.getChatsForResource(options.sourceManifest.id);
+    const { sourceChats } = options;
     const chatIdMapping: Record<string, string> = {};
     const clonedChats = sourceChats.map((chat): Chat => {
       const id = generatePrefixedId(idPrefix.chat);
@@ -236,17 +238,27 @@ const objectStoreWorker = {
     });
   },
 
-  async resumePendingProjectOperationResources(operationId: string): Promise<void> {
+  /**
+   * Replay one pending operation's browser-store rows.
+   *
+   * The chats it carries are *returned* rather than written: a chat is
+   * `.tau/chats/<id>/chat.json` inside the project, and this worker has no
+   * filesystem — the caller, which has just mounted the project's root, writes
+   * them (W17).
+   *
+   * @param operationId - The operation to replay.
+   * @returns The chats whose records the caller still has to write.
+   */
+  async resumePendingProjectOperationResources(operationId: string): Promise<readonly Chat[]> {
     const operation = await storage.getPendingProjectOperation(operationId);
     if (!operation || operation.kind === 'permanent-delete') {
-      return;
+      return [];
     }
-    const chats = operation.kind === 'create' ? [operation.chat] : operation.chats;
     await storage.createProjectLibraryState(operation.library);
-    await Promise.all(chats.map(async (chat) => storage.putChatRecord(chat)));
     if (operation.editorState) {
       await storage.putEditorStateRecord(operation.editorState);
     }
+    return operation.kind === 'create' ? [operation.chat] : operation.chats;
   },
 
   async completePendingProjectOperation(operationId: string): Promise<void> {
@@ -264,9 +276,8 @@ const objectStoreWorker = {
     return operationId;
   },
 
+  /* The project's chats go with its directory: they are files inside it (W17). */
   async deleteProjectResources(projectId: string): Promise<void> {
-    const chats = await storage.getChatsForResource(projectId, { includeDeleted: true });
-    await Promise.all(chats.map(async (chat) => storage.deleteChatRecord(chat.id)));
     await storage.deleteEditorState(projectId);
     await storage.deleteProjectLibraryState(projectId);
   },
@@ -297,99 +308,6 @@ const objectStoreWorker = {
 
   async restoreProject(projectId: string): Promise<ProjectLibraryState | undefined> {
     return storage.restoreProject(projectId);
-  },
-
-  async setProjectRevisionState(
-    projectId: string,
-    revisionState: PersistedRevisionState,
-  ): Promise<ProjectLibraryState | undefined> {
-    return storage.setProjectRevisionState(projectId, revisionState);
-  },
-
-  // ============================================================================
-  // Chat Methods
-  // ============================================================================
-
-  async createChat(
-    resourceId: string,
-    chat: Omit<Chat, 'id' | 'resourceId' | 'createdAt' | 'updatedAt' | 'recencyAt' | 'hasUnreadTurn'> & { id?: string },
-  ): Promise<Chat> {
-    return storage.createChat(resourceId, chat);
-  },
-
-  async createNavigationRepairChat(resourceId: string): Promise<Chat> {
-    return storage.createNavigationRepairChat(resourceId);
-  },
-
-  async updateChat(chatId: string, update: PartialDeep<Chat>): Promise<Chat | undefined> {
-    return storage.updateChat(chatId, update);
-  },
-
-  async applyGeneratedChatName(chatId: string, name: string): Promise<Chat | undefined> {
-    return storage.applyGeneratedChatName(chatId, name);
-  },
-
-  async patchChat<K extends keyof Chat>(chatId: string, key: K, value: Chat[K]): Promise<Chat | undefined> {
-    return storage.patchChat(chatId, key, value);
-  },
-
-  async touchChatRecency(chatId: string, requestedAt: number): Promise<Chat | undefined> {
-    return storage.touchChatRecency(chatId, requestedAt);
-  },
-
-  async setChatUnreadState(chatId: string, hasUnreadTurn: boolean): Promise<Chat | undefined> {
-    return storage.setChatUnreadState(chatId, hasUnreadTurn);
-  },
-
-  async consumeChatStartupRequest(chatId: string, requestId: string): Promise<Chat | undefined> {
-    return storage.consumeChatStartupRequest(chatId, requestId);
-  },
-
-  async commitCancelledDraftRestore(
-    chatId: string,
-    input: CommitCancelledDraftRestoreInput,
-  ): Promise<Chat | undefined> {
-    return storage.commitCancelledDraftRestore(chatId, input);
-  },
-
-  async setMessageEdit(
-    chatId: string,
-    messageId: string,
-    draft: NonNullable<Chat['messageEdits']>[string],
-  ): Promise<Chat | undefined> {
-    return storage.setMessageEdit(chatId, messageId, draft);
-  },
-
-  async clearMessageEdit(chatId: string, messageId: string): Promise<Chat | undefined> {
-    return storage.clearMessageEdit(chatId, messageId);
-  },
-
-  async softDeleteChat(chatId: string): Promise<Chat | undefined> {
-    return storage.softDeleteChat(chatId);
-  },
-
-  async getChat(chatId: string): Promise<Chat | undefined> {
-    return storage.getChat(chatId);
-  },
-
-  async getAllChats(options?: { includeDeleted?: boolean }): Promise<Chat[]> {
-    return storage.getAllChats(options);
-  },
-
-  async getChatsForResource(resourceId: string, options?: { includeDeleted?: boolean }): Promise<Chat[]> {
-    return storage.getChatsForResource(resourceId, options);
-  },
-
-  async deleteChat(chatId: string): Promise<void> {
-    return storage.deleteChat(chatId);
-  },
-
-  async duplicateChat(chatId: string): Promise<Chat> {
-    return storage.duplicateChat(chatId);
-  },
-
-  async duplicateResourceChats(sourceResourceId: string, targetResourceId: string): Promise<Record<string, string>> {
-    return storage.duplicateResourceChats(sourceResourceId, targetResourceId);
   },
 
   // ============================================================================

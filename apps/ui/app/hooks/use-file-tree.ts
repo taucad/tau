@@ -1,6 +1,6 @@
 import { useCallback, useSyncExternalStore } from 'react';
 import type { FileEntry } from '@taucad/types';
-import { useFileManager } from '#hooks/use-file-manager.js';
+import { useOptionalFileManager } from '#hooks/use-file-manager.js';
 
 const noop = (): void => {
   /* Intentional no-op when subscribe is unavailable (useSyncExternalStore fallback). */
@@ -14,7 +14,10 @@ const emptyTree = new Map<string, FileEntry>();
  * every machine event.
  */
 export function useFileTreeMap(): Map<string, FileEntry> {
-  const { treeService } = useFileManager();
+  /* Optional on purpose: the hook already degrades to an empty tree when the
+   * service is unbound, and the tree is now read by presentation-only surfaces
+   * (the pane breadcrumb) that must render outside a FileManagerProvider. */
+  const treeService = useOptionalFileManager()?.treeService;
 
   return useSyncExternalStore(
     useCallback((callback: () => void) => treeService?.subscribeTree(callback) ?? noop, [treeService]),

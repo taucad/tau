@@ -1,113 +1,85 @@
 // @vitest-environment jsdom
 /**
- * Red pin for the workspace-filesystem north star, wave W0.
+ * Red pin for the workspace-filesystem north star, wave W0 — flipped in W5.
  *
- * The assertion states the target behaviour, so it fails today. It is wrapped
- * in `it.fails` (execution-queue ruling P2) to keep the suite green while the
- * defect stands; the wave that fixes it removes `.fails`.
+ * The number a card shows is the **first-parent ordinal on the selected
+ * branch**, answered by the graph at read time (I3, AC3). Chat membership is
+ * not an input to it at all, which is what makes it stable when a chat is gone:
+ * the hook asks the revision root, and nothing in that answer knows how many
+ * chats this project has.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { renderHook } from '@testing-library/react';
-import type { Chat, MyUIMessage } from '@taucad/chat';
-import type { PersistedRevisionGraphNode, PersistedRevisionGraphState } from '#types/revision.types.js';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { renderHook, waitFor } from '@testing-library/react';
+import type { ReactNode } from 'react';
+import type { Chat } from '@taucad/chat';
+import type { RevisionRow } from '@taucad/revisions';
 import { useRevisions } from '#hooks/use-revisions.js';
+import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
 
-const actorContext: {
-  headTurnId: string;
-  supersededTurnIds: string[];
-  dirty: boolean;
-  graph: PersistedRevisionGraphState;
-} = { headTurnId: '', supersededTurnIds: [], dirty: false, graph: { activeBranch: 'main', nodes: {}, branches: {} } };
+vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ projectId: 'p' }) }));
+vi.mock('#hooks/use-revision-status.js', async () => {
+  const harness = await import('#hooks/use-revision-status.test-harness.js');
+  return harness.revisionStatusMock();
+});
 
-vi.mock('@xstate/react', () => ({
-  useSelector: (actor: { getSnapshot: () => unknown } | undefined, selector: (state: unknown) => unknown) =>
-    selector(actor?.getSnapshot()),
-}));
+const chatsRef: { current: readonly Chat[] } = { current: [] };
+vi.mock('#hooks/use-chats.js', () => ({ useChats: () => ({ chats: chatsRef.current }) }));
 
-vi.mock('#hooks/use-project.js', () => ({
-  useProject: () => ({ projectId: 'p' }),
-}));
+const chat = (id: string): Chat =>
+  ({ id, resourceId: 'p', name: id, messages: [], createdAt: 0, updatedAt: 0 }) satisfies Partial<Chat> as Chat;
 
-const chatsRef: { current: Chat[] } = { current: [] };
-vi.mock('#hooks/use-chats.js', () => ({
-  useChats: () => ({ chats: chatsRef.current }),
-}));
+/**
+ * Two turns on one branch, one per chat: `u1` is the branch's first revision
+ * and `u2` descends from it, so the ordinals are 1 and 2.
+ */
+const row = (turnId: string, revisionId: string, parentOrdinal: number): RevisionRow => ({
+  revisionNumber: parentOrdinal,
+  revisionId,
+  changeId: `change-${turnId}`,
+  actor: 'tau-browser-agent-host',
+  source: 'agent',
+  createdAt: 1000 * parentOrdinal,
+  summary: `Agent turn ${turnId}`,
+  conflicted: false,
+  turnId,
+  tags: [],
+});
 
-vi.mock('#routes/w.$workspace.$project/revision-provider.js', () => ({
-  useRevisionActor: () => ({ getSnapshot: () => ({ context: actorContext }) }),
-}));
-
-const createPart = (targetFile: string, content: string): MyUIMessage['parts'][number] =>
-  ({
-    type: 'tool-create_file',
-    toolCallId: `c-${targetFile}`,
-    state: 'output-available',
-    input: { targetFile, content },
-    output: {
-      diffStats: { linesAdded: 1, linesRemoved: 0, originalContent: '', modifiedContent: content },
-    },
-  }) as unknown as MyUIMessage['parts'][number];
-
-const user = (id: string, createdAt: number): MyUIMessage =>
-  ({ id, role: 'user', parts: [{ type: 'text', text: 'p' }], metadata: { createdAt } }) as unknown as MyUIMessage;
-
-const assistant = (createdAt: number, parts: MyUIMessage['parts']): MyUIMessage =>
-  ({ id: `a-${createdAt}`, role: 'assistant', parts, metadata: { createdAt } }) as unknown as MyUIMessage;
-
-const chat = (id: string, createdAt: number, messages: MyUIMessage[]): Chat =>
-  ({
-    id,
-    resourceId: 'p',
-    name: id,
-    messages,
-    createdAt,
-    updatedAt: createdAt,
-  }) as unknown as Chat;
-
-/** The first chat's turn, then a second chat's turn whose first parent is it. */
-const firstChat = (): Chat => chat('chat_first', 50, [user('u1', 100), assistant(200, [createPart('a.scad', 'a')])]);
-const secondChat = (): Chat =>
-  chat('chat_second', 1000, [user('u2', 1100), assistant(1200, [createPart('b.scad', 'b')])]);
-
-const node = (turnId: string, chatId: string, parentTurnIds: string[]): PersistedRevisionGraphNode =>
-  ({
-    turnId,
-    parentTurnIds,
-    branchName: 'main',
-    chatId,
-    jobIds: [],
-    status: 'complete',
-    revisionId: `rev-${turnId}`,
-  }) satisfies PersistedRevisionGraphNode;
+const wrapper = ({ children }: { readonly children: ReactNode }): React.JSX.Element => (
+  <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+    {children}
+  </QueryClientProvider>
+);
 
 beforeEach(() => {
-  actorContext.headTurnId = '';
-  actorContext.supersededTurnIds = [];
-  actorContext.dirty = false;
-  // Both revisions stay in the stored graph; only the chat is removed.
-  actorContext.graph = {
-    activeBranch: 'main',
-    nodes: {
-      u1: node('u1', 'chat_first', []),
-      u2: node('u2', 'chat_second', ['u1']),
-    },
-    branches: {},
-  };
-  chatsRef.current = [firstChat(), secondChat()];
+  revisionStatusHarness.reset();
+  revisionStatusHarness.rows = [row('u2', 'rev-u2', 2), row('u1', 'rev-u1', 1)];
+  revisionStatusHarness.status = { ...revisionStatusHarness.status, branch: 'main', headRevisionId: 'rev-u2' };
+  chatsRef.current = [chat('chat_first'), chat('chat_second')];
 });
 
 describe('revision numbering across chat deletion (north star W0)', () => {
-  // oxlint-disable-next-line eslint/capitalized-comments -- the pin header is the exact wording the W0 brief specifies
-  // north-star W0 pin 3: `Rev N` changes when a chat is deleted because the number is a positional index over chat-derived timeline nodes instead of the first-parent ordinal on the stored graph; turns green in W5; remove .fails then.
-  it.fails('should keep a revision number stable when another chat is deleted', () => {
-    const { result, rerender } = renderHook(() => useRevisions());
-    const before = result.current.byMessageId.get('u2')?.n;
-    expect(before).toBe(2);
+  it('should read Rev N as the first-parent ordinal the graph answered', async () => {
+    const { result } = renderHook(() => useRevisions(), { wrapper });
 
-    chatsRef.current = [secondChat()];
+    await waitFor(() => {
+      expect(result.current.byTurnId.get('u2')?.n).toBe(2);
+    });
+    expect(result.current.byTurnId.get('u1')?.n).toBe(1);
+  });
+
+  it('should keep a revision number stable when another chat is deleted', async () => {
+    const { result, rerender } = renderHook(() => useRevisions(), { wrapper });
+    await waitFor(() => {
+      expect(result.current.byTurnId.get('u2')?.n).toBe(2);
+    });
+    const before = result.current.byTurnId.get('u2')?.n;
+
+    chatsRef.current = [chat('chat_second')];
     rerender();
 
-    expect(result.current.byMessageId.get('u2')?.n).toBe(before);
+    expect(result.current.byTurnId.get('u2')?.n).toBe(before);
   });
 });

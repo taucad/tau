@@ -194,6 +194,10 @@ export const listViewerSelectableFiles = (
 ): ViewerSelectableFile[] =>
   [...fileTree.values()]
     .filter((entry) => entry.type === 'file')
+    /* The viewer renders the project's own geometry; a read-only overlay or a
+     * dependency is never a render target (Exclusion Matrix). A row no view
+     * stamped keeps its place so nothing disappears when provenance is absent. */
+    .filter((entry) => entry.provenance === undefined || entry.provenance.source === 'project')
     .filter((entry) => {
       const path = entry.path.toLowerCase();
       return !viewerExcludedSourceSuffixes.some((suffix) => path.endsWith(suffix));

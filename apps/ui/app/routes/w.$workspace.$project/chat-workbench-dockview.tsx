@@ -60,6 +60,8 @@ import { ChatEditorTooLargeWarning } from '#routes/w.$workspace.$project/chat-ed
 import { ChatEditorErrorPlaceholder } from '#routes/w.$workspace.$project/chat-editor-error-placeholder.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useFileContent } from '#hooks/use-file-content.js';
+import { useFileTreeEntry } from '#hooks/use-file-tree.js';
+import type { FileProvenance } from '@taucad/types';
 import { useMonacoServices } from '#hooks/use-monaco-model-service.js';
 import { useKernelDiagnostics } from '#hooks/use-kernel-diagnostics.js';
 import { useFeature } from '#flags/use-feature.js';
@@ -87,7 +89,7 @@ import type {
   WorkbenchUtilityPanelId,
 } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
-import { useVisibleRevisions } from '#hooks/use-revisions.js';
+import { useRevisions } from '#hooks/use-revisions.js';
 import type { OpenFile } from '#types/editor.types.js';
 import { PaneButton } from '#components/ui/pane-button.js';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
@@ -1083,6 +1085,18 @@ function FileWorkbenchPane({
  * file path so a rename does not unmount the editor — it just shifts
  * the live `filePath` lookup to the new path in `openFiles`.
  */
+/**
+ * Whether this pane may not be edited.
+ *
+ * The dispatch that opened the pane is a hint; the composed view's own answer is
+ * the rule, so a file reached through the breadcrumb selector or a restored
+ * layout is as read-only as one opened from a chat link. The user's access is
+ * `source`, never `agentAccess` (ruling P10).
+ */
+function isPaneReadOnly(fromDispatch: boolean | undefined, provenance: FileProvenance | undefined): boolean {
+  return (fromDispatch ?? false) || (provenance !== undefined && provenance.source !== 'project');
+}
+
 export const FileEditor = memo(function ({
   paneId,
   filePath: filePathFromParams,
@@ -1113,7 +1127,7 @@ export const FileEditor = memo(function ({
   // place and this selector picks the fresh path.
   const liveEntry = openFiles.find((file) => file.paneId === paneId);
   const filePath = liveEntry?.path ?? filePathFromParams;
-  const readOnly = readOnlyFromParams ?? liveEntry?.readOnly ?? false;
+  const readOnly = isPaneReadOnly(readOnlyFromParams ?? liveEntry?.readOnly, useFileTreeEntry(filePath)?.provenance);
   const paneParameters = parameters ?? { filePath: filePathFromParams, readOnly: readOnlyFromParams };
 
   // Kernel diagnostics
@@ -1492,7 +1506,8 @@ export const WorkbenchDockview = memo(function ({
   const { connectWorkbench, setWorkbenchOpen } = useProjectWorkspace();
   const isMobile = useIsMobile();
   const isTauDebugEnabled = useFeature('tauDebug');
-  const { canReturnToLatest, headRevision, isDirty } = useVisibleRevisions();
+  const { canReturnToLatest, headRevisionId, isDirty, revisions } = useRevisions();
+  const headRevisionNumber = revisions.find((revision) => revision.revisionId === headRevisionId)?.n;
   const monaco = useMonaco();
   const [api, setApi] = useState<DockviewApi>();
   const isRestoringLayout = useRef(false);
@@ -1759,7 +1774,8 @@ export const WorkbenchDockview = memo(function ({
       if (!revisionsPanel) {
         return;
       }
-      const marker = headRevision ? `R${headRevision.n}${isDirty ? '*' : ''}` : 'Baseline';
+      const marker =
+        headRevisionNumber === undefined ? 'Baseline' : `R${String(headRevisionNumber)}${isDirty ? '*' : ''}`;
       revisionsPanel.api.setTitle(canReturnToLatest ? `Revisions · ${marker}` : 'Revisions');
     };
 
@@ -1768,7 +1784,7 @@ export const WorkbenchDockview = memo(function ({
     return () => {
       disposable.dispose();
     };
-  }, [api, canReturnToLatest, headRevision, isDirty]);
+  }, [api, canReturnToLatest, headRevisionNumber, isDirty]);
 
   useEffect(() => {
     if (!api) {

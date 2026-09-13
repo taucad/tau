@@ -61,7 +61,11 @@ const failEditorFlush = (error: Error): void => {
     observer.error?.(error);
   }
 };
-const projectRef = { send: projectSend };
+const projectRef = {
+  send: projectSend,
+  getSnapshot: () => ({ context: { project: undefined } }),
+  subscribe: () => ({ unsubscribe: () => undefined }),
+};
 
 vi.mock('#hooks/use-project-manager.js', () => ({
   useProjectManager: () => projectManager,
@@ -89,7 +93,7 @@ vi.mock('#hooks/use-file-manager.js', () => ({
   },
   useFileManager: () => ({
     fileManagerRef: {
-      getSnapshot: () => ({ context: {} }),
+      getSnapshot: () => ({ context: {}, matches: () => false }),
       subscribe: () => ({ unsubscribe: () => undefined }),
     },
   }),
@@ -110,6 +114,21 @@ vi.mock('#hooks/use-project.js', () => ({
   useProject: () => ({ projectRef, editorRef }),
 }));
 vi.mock('#hooks/use-flush-on-close.js', () => ({ useFlushOnClose: () => undefined }));
+/* The session binding is headless and has its own suites; this route suite is
+ * about which subtrees are mounted, so its two app-level handles are stubs. */
+vi.mock('#hooks/use-revision-status.js', () => ({
+  useRevisionClient: () => undefined,
+  useRevisionStatus: () => undefined,
+  useRevisionCommands: () => ({}),
+}));
+vi.mock('#hooks/chat-session-store-provider.js', () => ({
+  useChatSessionStore: () => ({ get: () => undefined, setProjectSession: () => undefined }),
+}));
+/* The `Mod+S` registration needs the application root's `KeyboardProvider`,
+ * which this route-level suite does not mount; the shortcut has its own test. */
+vi.mock('#routes/w.$workspace.$project/revision-save-shortcut.js', () => ({
+  RevisionSaveShortcut: () => null,
+}));
 vi.mock('#hooks/use-monaco-model-service.js', () => ({
   MonacoModelServiceProvider: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
 }));
@@ -131,6 +150,9 @@ vi.mock('#routes/w.$workspace.$project/project-workspace-context.js', () => ({
   ProjectWorkspaceProvider: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
 }));
 vi.mock('#routes/w.$workspace.$project/chat-interface.js', () => ({ ChatInterface: () => null }));
+/* W10's conflict chat reads `useChats`, which needs the root `QueryClient`
+ * this route-level suite does not mount; it has its own tests. */
+vi.mock('#routes/w.$workspace.$project/revision-conflict-chat.js', () => ({ RevisionConflictChat: () => null }));
 vi.mock('#routes/w.$workspace.$project/project-not-found.js', () => ({
   ProjectNotFound: () => <div>Project Not Found</div>,
 }));

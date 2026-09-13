@@ -157,7 +157,7 @@ describe('buildContextItems', () => {
         label: 'Chat 1',
         chipType: 'chat',
         sortKey: 5000,
-        path: '.tau/transcripts/c1.jsonl',
+        path: '.tau/chats/c1/events.jsonl',
       }),
     );
   });
@@ -257,6 +257,58 @@ describe('buildContextItems', () => {
     expect(ids).toContain('src/cache-utils.ts');
   });
 
+  it('should offer a project override but never the built-in bundle it replaces', () => {
+    const fileTree = new Map<string, FileEntry>([
+      [
+        '.agents/skills/cad-openscad/SKILL.md',
+        {
+          ...createFileEntry({ path: '.agents/skills/cad-openscad/SKILL.md', name: 'SKILL.md' }),
+          provenance: { source: 'system-skills', versioned: false, agentAccess: 'read-only' },
+        },
+      ],
+      [
+        '.agents/skills/my-fixtures/SKILL.md',
+        {
+          ...createFileEntry({ path: '.agents/skills/my-fixtures/SKILL.md', name: 'SKILL.md' }),
+          provenance: {
+            source: 'project',
+            versioned: true,
+            agentAccess: 'read-write',
+            overrides: 'skill:my-fixtures@1.0.0#abc',
+          },
+        },
+      ],
+    ]);
+
+    const ids = buildContextItems({ fileTree, chats: [] }).map((item) => item.id);
+
+    expect(ids).not.toContain('.agents/skills/cad-openscad/SKILL.md');
+    expect(ids).toContain('.agents/skills/my-fixtures/SKILL.md');
+  });
+
+  /*
+   * Review R1 of a1: the Exclusion Matrix row is *project*, not *versioned
+   * project*. An exported STL or the project thumbnail is the user's own and
+   * is exactly what a user points the agent at.
+   */
+  it('should offer the project artifacts the registry does not version', () => {
+    const fileTree = new Map<string, FileEntry>([
+      [
+        'exports/part.stl',
+        {
+          ...createFileEntry({ path: 'exports/part.stl', name: 'part.stl' }),
+          provenance: { source: 'project', versioned: false, agentAccess: 'read-only' },
+        },
+      ],
+      ['thumbnail.webp', createFileEntry({ path: 'thumbnail.webp', name: 'thumbnail.webp' })],
+    ]);
+
+    const ids = buildContextItems({ fileTree, chats: [] }).map((item) => item.id);
+
+    expect(ids).toContain('exports/part.stl');
+    expect(ids).toContain('thumbnail.webp');
+  });
+
   it('should not filter chat items with .tau transcript paths', () => {
     const chats = [createChat({ id: 'chat-1', name: 'My Chat', updatedAt: 5000 })];
 
@@ -267,7 +319,7 @@ describe('buildContextItems', () => {
     expect(chatItems[0]).toEqual(
       expect.objectContaining({
         id: 'chat-1',
-        path: '.tau/transcripts/chat-1.jsonl',
+        path: '.tau/chats/chat-1/events.jsonl',
         group: pastChatsGroup,
       }),
     );

@@ -24,10 +24,10 @@ import { useCallback, useEffect, useSyncExternalStore } from 'react';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import type { ChatSessionStore } from '#services/chat-session-store.js';
 import { useChatWorkspaceAuthority, usePreparedChatWorkspace } from '#providers/chat-workspace-authority-provider.js';
-import { useRevisionActor } from '#routes/w.$workspace.$project/revision-provider.js';
 import {
   clearBrowserAgentHostRun,
   getBrowserAgentHostRun,
+  getHostFinalizedTurns,
 } from '#chat-clients/_internal/browser-agent-host-transport.js';
 
 const missingAuthoritativeTurn = (chatId: string, runId: string): Error =>
@@ -156,7 +156,6 @@ function SingleChatRunSettlement({ chatId }: { readonly chatId: string }): React
   );
   const workspace = usePreparedChatWorkspace(chatId);
   const workspaceAuthority = useChatWorkspaceAuthority();
-  const revisionActor = useRevisionActor();
   const mutatingRunActive =
     status === 'submitted' ||
     status === 'streaming' ||
@@ -178,11 +177,6 @@ function SingleChatRunSettlement({ chatId }: { readonly chatId: string }): React
     let disposed = false;
     const lastUserTurnId = (): string | undefined =>
       store.get(chatId)?.chat.messages.findLast((message) => message.role === 'user')?.id;
-    const discardPendingTurn = (turnId: string | undefined): void => {
-      if (turnId) {
-        revisionActor.send({ type: 'DISCARD_PENDING_TURN', turnId });
-      }
-    };
     /**
      * Handles every outcome that ends the run without publishing, and returns
      * the completed local run when — and only when — one still needs to be
@@ -192,15 +186,11 @@ function SingleChatRunSettlement({ chatId }: { readonly chatId: string }): React
     const settleOrTakeCompletedRun = async (
       authoritativeRunId: string,
     ): Promise<ReturnType<typeof getBrowserAgentHostRun>> => {
-      if (
-        workspaceAuthority
-          .listFinalized()
-          .some((publication) => publication.workspaceId === workspace.execution.workspaceId)
-      ) {
-        // Finalization already wrote this workspace's publication and only its
-        // discard half failed (see the `.crswap` note in the authority). Never
-        // re-merge an already-published agent tree over newer live edits —
-        // release the claim and let the run go.
+      if (getHostFinalizedTurns().some((settlement) => settlement.runId === workspace.runId)) {
+        /* The host already attested this run's settlement, so the turn is
+         * recorded and the root has let its lease go. Never ask for a second
+         * settlement over newer live edits — release the claim and let the run
+         * go (the `turn.finalized` record is the fact, not this page). */
         await workspaceAuthority.discard(chatId);
         store.releaseDurableRun({ chatId, runId: authoritativeRunId });
         clearBrowserAgentHostRun(chatId);
@@ -216,12 +206,10 @@ function SingleChatRunSettlement({ chatId }: { readonly chatId: string }): React
           store,
           retireClaim: workspaceAuthority.retireClaim,
         });
-        discardPendingTurn(lastUserTurnId());
         return undefined;
       }
       if (localRun.state === 'failed' || localRun.state === 'cancelled') {
         await workspaceAuthority.discard(chatId);
-        discardPendingTurn(localRun.turnId ?? workspace.turnId ?? lastUserTurnId());
         store.releaseDurableRun({ chatId, runId: authoritativeRunId });
         clearBrowserAgentHostRun(chatId);
         return undefined;
@@ -251,24 +239,12 @@ function SingleChatRunSettlement({ chatId }: { readonly chatId: string }): React
       if (!turnId) {
         throw missingAuthoritativeTurn(chatId, authoritativeRunId);
       }
-      const finalization = await workspaceAuthority.finalize(chatId, {
-        actorId: 'tau-browser-agent-host',
-        summary: `Completed chat ${chatId}`,
-        turnId,
-        runId: authoritativeRunId,
-      });
-      if (finalization === undefined) {
-        throw new Error(`Workspace finalization was unavailable for chat ${chatId}.`);
-      }
-      if (finalization.status === 'conflicted') {
-        revisionActor.send({
-          type: 'SET_REVISION_CONFLICT',
-          turnId: finalization.turnId,
-          chatId: finalization.chatId,
-          branchName: finalization.branchName,
-          conflict: finalization.conflict,
-        });
-      }
+      /* The turn's end, handed to the worker's revision root: it settles the
+       * turn and records the revision. Nothing comes back — the settlement is
+       * the host's fact, and it reaches the page as `turn.finalized` (or
+       * `turn.conflicted`) on the revision port, never as this call's return
+       * value. */
+      await workspaceAuthority.finalize(chatId);
       store.releaseDurableRun({ chatId, runId: authoritativeRunId });
       clearBrowserAgentHostRun(chatId);
     };
@@ -324,7 +300,6 @@ function SingleChatRunSettlement({ chatId }: { readonly chatId: string }): React
     durableRunState,
     isLoadingChat,
     mutatingRunActive,
-    revisionActor,
     status,
     store,
     workspace,

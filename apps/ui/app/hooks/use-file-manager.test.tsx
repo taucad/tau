@@ -56,6 +56,12 @@ const mockProxyRmdir = vi.fn<(path: string, options?: { recursive?: boolean }) =
 const mockProxyWriteFile = vi.fn<(path: string, data: unknown, options?: unknown) => Promise<void>>(
   async () => undefined,
 );
+const mockProxyCanDelete = vi.fn<(path: string) => Promise<unknown>>(async () => true);
+const mockProxyMove = vi.fn<(source: string, target: string) => Promise<unknown>>(async () => ({
+  type: 'file',
+  size: 0,
+  mtimeMs: 0,
+}));
 const mockWaitForWorkerReady = vi.fn<() => Promise<void>>();
 const mockListProjectManifests = vi.fn<() => Promise<{ roots: readonly unknown[]; entries: readonly unknown[] }>>();
 const mockCreateFileSystemBridge = vi.fn(() => ({
@@ -83,6 +89,16 @@ vi.mock('@taucad/fs-bridge', () => ({
     getDirectoryStat: vi.fn(async () => []),
     readShallowDirectory: vi.fn(async () => []),
     readDirectory: vi.fn(async () => []),
+    readdirWithStats: vi.fn(async () => []),
+    canDelete: mockProxyCanDelete,
+    move: mockProxyMove,
+    /* The rooted half of the same proxy: the file services read the project
+       through its composed view, and a mutation asks it who owns the path. */
+    provenance: vi.fn(async (path: string) =>
+      path.startsWith('.agents/skills/')
+        ? { source: 'system-skills', versioned: false, agentAccess: 'read-only', identity: 'skill:demo@1.0.0#f' }
+        : { source: 'project', versioned: true, agentAccess: 'read-write' },
+    ),
     listProjectManifests: mockListProjectManifests,
     mkdir: mockProxyMkdir,
     rmdir: mockProxyRmdir,
@@ -551,6 +567,30 @@ describe('FileManagerProvider — client + workspace facades', () => {
     });
 
     expect(mockProxyRmdir).toHaveBeenCalledExactlyOnceWith('/projects/root/subtree', { recursive: true });
+  });
+
+  /*
+   * A1 review R1: the Files pane's own facade must get the view's answer. The
+   * authority has never heard of an overlay path, so asking it yields
+   * `NOT_FOUND` where the row is really read-only, and a move onto a bundle
+   * silently shadows the whole unit (V8).
+   */
+  it('refuses a Files-pane delete of a built-in skill file as read-only, without asking the authority', async () => {
+    const { result } = renderProvider();
+
+    await expect(result.current.client.canDelete('/projects/root/.agents/skills/demo/SKILL.md')).resolves.toMatchObject(
+      { code: 'READ_ONLY_MOUNT' },
+    );
+    expect(mockProxyCanDelete).not.toHaveBeenCalled();
+  });
+
+  it('refuses a Files-pane move of a project file onto a built-in skill path', async () => {
+    const { result } = renderProvider();
+
+    await expect(
+      result.current.client.move('/projects/root/main.ts', '/projects/root/.agents/skills/demo/SKILL.md'),
+    ).rejects.toMatchObject({ code: 'EROFS' });
+    expect(mockProxyMove).not.toHaveBeenCalled();
   });
 
   it('rotates the opaque runtime filesystem when replacement services become authoritative', async () => {

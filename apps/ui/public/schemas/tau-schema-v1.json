@@ -47,6 +47,10 @@
       },
       "required": ["main"],
       "additionalProperties": false
+    },
+    "syncChats": {
+      "description": "Whether this project's chats sync with its remotes. Absent means on; false keeps the project files-only, and no refs/tau/chats/* is written for it.",
+      "type": "boolean"
     }
   },
   "required": ["$schema", "id", "name", "description", "tags", "assets"],

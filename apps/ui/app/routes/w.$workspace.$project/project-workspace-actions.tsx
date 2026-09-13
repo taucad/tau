@@ -1,5 +1,5 @@
 import type { IDockviewHeaderActionsProps } from 'dockview-react';
-import { History, MessageCircle, PanelLeft, PanelRight } from 'lucide-react';
+import { MessageCircle, PanelLeft, PanelRight } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useSelector } from '@xstate/react';
 import { Button } from '@taucad/ui/components/button';
@@ -7,7 +7,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/t
 import { SidebarTrigger, useSidebar } from '#components/ui/sidebar.js';
 import { useIsTopRightGroup } from '#components/panes/use-is-top-right-group.js';
 import { useProject } from '#hooks/use-project.js';
-import { useVisibleRevisions } from '#hooks/use-revisions.js';
+import { RevisionStatusAction } from '#routes/w.$workspace.$project/revision-status-action.js';
 import { ProjectShareAction } from '#routes/w.$workspace.$project/project-share-action.js';
 import { ProjectExportAction } from '#routes/w.$workspace.$project/project-export-action.js';
 import {
@@ -61,11 +61,10 @@ export const WorkbenchToggleSlot = (): React.JSX.Element => (
 export function ProjectWorkspaceActions(properties: IDockviewHeaderActionsProps): React.JSX.Element | undefined {
   const isTopRight = useIsTopRightGroup(properties.group, properties.containerApi);
   const { editorRef, projectRef } = useProject();
-  const { setChatOpen, openPanel } = useProjectWorkspace();
+  const { setChatOpen } = useProjectWorkspace();
   const { isMobile, openMobile } = useSidebar();
   const desktopLayout = useSelector(editorRef, (snapshot) => snapshot.context.panelState.desktopLayout);
   const projectName = useSelector(projectRef, (snapshot) => snapshot.context.project?.name) ?? 'Project';
-  const { canReturnToLatest, headRevision, isDirty } = useVisibleRevisions();
 
   if (!isTopRight) {
     return undefined;
@@ -79,8 +78,6 @@ export function ProjectWorkspaceActions(properties: IDockviewHeaderActionsProps)
   };
   const chatVisible = getLaneVisibility('chat');
   const workbenchVisible = getLaneVisibility('workbench');
-  const revisionStatus = headRevision ? `Revision ${headRevision.n}${isDirty ? ' · modified' : ''}` : 'Baseline';
-
   return (
     <div className='flex h-full items-center gap-1'>
       {isMobile && !openMobile ? (
@@ -111,25 +108,12 @@ export function ProjectWorkspaceActions(properties: IDockviewHeaderActionsProps)
         </Tooltip>
       )}
 
-      {!isMobile && canReturnToLatest ? (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant='ghost'
-              size='sm'
-              className='gap-1.5 px-2'
-              aria-label={`Open historical revision status: ${revisionStatus}`}
-              onClick={() => {
-                openPanel('revisions');
-              }}
-            >
-              <History aria-hidden className='size-3.5' />
-              <span className='hidden @xl/viewer:inline'>{revisionStatus}</span>
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>Open historical revision status</TooltipContent>
-        </Tooltip>
-      ) : null}
+      {/* S29/A19: always on — not only while the checkout sits behind its
+          branch (the chat may be working somewhere else at any time), and not
+          only on a wide window: the chip collapses to its glyph rather than
+          disappearing, because it is the one place outside the pane that says
+          where you are (review R10). */}
+      <RevisionStatusAction />
 
       <ProjectShareAction />
       <ProjectExportAction />

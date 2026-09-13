@@ -5,6 +5,7 @@ import type { FileEntry } from '@taucad/types';
 import type { FileTreeService } from '@taucad/fs-client/file-tree-service';
 import { ChatModelSelector, openModelSelectorKeyCombination } from '#components/chat/chat-model-selector.js';
 import { ChatAgentModelSelector, useChatAgentModel } from '#components/chat/chat-agent-model-selector.js';
+import { ChatBranchPicker } from '#components/chat/chat-branch-picker.js';
 import {
   ChatExecutionSelector,
   formatChatAgentActivity,
@@ -12,7 +13,6 @@ import {
 } from '#components/chat/chat-execution-selector.js';
 import { CreditBalanceChip } from '#components/billing/credit-estimate.js';
 import { ChatKernelSelector } from '#components/chat/chat-kernel-selector.js';
-import { ChatRevisionSelector, useChatRevisionPlacement } from '#components/chat/chat-revision-selector.js';
 import { ChatToolSelector } from '#components/chat/chat-tool-selector.js';
 import { ChatAgentSelector, toggleModeKeyCombination } from '#components/chat/chat-mode-selector.js';
 import { Button } from '@taucad/ui/components/button';
@@ -422,13 +422,14 @@ export const ChatTextareaLeftControls = memo(function ({
     agentActivity,
     session,
   } = useChatComposer();
-  const { isOffered: isRevisionSelectorOffered } = useChatRevisionPlacement();
   const { isOffered: isAgentSelectorOffered, label: selectedAgentLabel } = useChatAgentSelection();
   const { selectedModel: selectedAgentModel } = useChatAgentModel();
 
   return (
     <div className='absolute bottom-2 left-2 flex flex-row items-center gap-1 text-muted-foreground'>
       <ChatTextareaModeControl />
+      {/* S23: present at one branch, because it is where the second is made. */}
+      <ChatBranchPicker />
       {session && isAgentSelectorOffered ? (
         <Tooltip>
           <ChatExecutionSelector
@@ -525,32 +526,6 @@ export const ChatTextareaLeftControls = memo(function ({
        * creation-location control so that control stays adjacent to the model
        * selector, as its own test pins. */}
       {execution.kind === 'tau' ? <CreditBalanceChip /> : null}
-      {/* Revision selector — offered by host capability, never by execution kind (V18). */}
-      {isRevisionSelectorOffered ? (
-        <Tooltip>
-          <ChatRevisionSelector
-            data-chat-textarea-focustrap
-            popoverProperties={{ align: 'start' }}
-            onSelect={focusEditor}
-            onClose={focusEditor}
-          >
-            {({ currentConfig }) => (
-              <TooltipTrigger asChild>
-                <Button
-                  data-slot='chat-revision-selector'
-                  variant='outline'
-                  size='sm'
-                  aria-label={`Work in: ${currentConfig.label}`}
-                  className='h-7 cursor-pointer! rounded-full text-muted-foreground hover:text-foreground @xs:max-w-fit'
-                >
-                  <span className='truncate text-xs'>{currentConfig.label}</span>
-                </Button>
-              </TooltipTrigger>
-            )}
-          </ChatRevisionSelector>
-          <TooltipContent>Select where this chat writes</TooltipContent>
-        </Tooltip>
-      ) : null}
       {/* Kernel selector */}
       {enableKernelSelector ? (
         <Tooltip>

@@ -3,6 +3,7 @@ import { useSelector } from '@xstate/react';
 import { useChats } from '#hooks/use-chats.js';
 import { useProject } from '#hooks/use-project.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
+import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 
 const isDocumentActive = (): boolean => {
   if (typeof document === 'undefined') {
@@ -17,14 +18,17 @@ export function useFocusedChatReadState(): void {
   const focusedChatId = useSelector(editorRef, (state) => state.context.focusedChatId);
   const { chats } = useChats(projectId);
   const { setChatUnreadState } = useProjectManager();
+  const chatSessions = useChatSessionStore();
   const focusedChat = chats.find((chat) => chat.id === focusedChatId);
 
   const clearUnread = useCallback(() => {
     if (!focusedChat?.hasUnreadTurn || !isDocumentActive()) {
       return;
     }
+    /* The chat's own machine owns `read`/`unread` (S45); the record follows. */
+    chatSessions.markViewed(focusedChat.id);
     void setChatUnreadState(focusedChat.id, false);
-  }, [focusedChat, setChatUnreadState]);
+  }, [chatSessions, focusedChat, setChatUnreadState]);
 
   useEffect(clearUnread, [clearUnread]);
 

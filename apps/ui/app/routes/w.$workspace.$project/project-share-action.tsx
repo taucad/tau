@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { Share2 } from 'lucide-react';
 import { useSelector } from '@xstate/react';
 import { waitFor } from 'xstate';
 import type { ShareProjectSnapshot, ShareSnapshotFileRole } from '@taucad/share/snapshot';
-import { getActiveGroupValues, parameterEntryPath, projectToManifest, serializeProjectManifest } from '@taucad/types';
+import { parameterEntryPath, projectToManifest, serializeProjectManifest } from '@taucad/types';
 import { Button } from '@taucad/ui/components/button';
 import { ProjectSharePanel } from '#components/publish/project-share-panel.js';
 import type { ShareMethod } from '#components/publish/project-share-panel.js';
@@ -173,10 +173,6 @@ export function ProjectShareWorkbenchPanel(): React.JSX.Element {
   );
 
   const entryPath = project?.assets.main.entryPath ?? '';
-  const parameters = useMemo(
-    () => getActiveGroupValues(parameterEntries.get(entryPath)),
-    [entryPath, parameterEntries],
-  );
 
   return (
     <ProjectSharePanel
@@ -186,7 +182,6 @@ export function ProjectShareWorkbenchPanel(): React.JSX.Element {
       projectDescription={project?.description ?? ''}
       projectUpdatedAt={projectUpdatedAt}
       entryPath={entryPath}
-      parameters={parameters}
       collectSnapshot={collectSnapshot}
       initialMethod={navigationIntent.initialMethod}
       githubAuthorizationOutcome={navigationIntent.githubAuthorizationOutcome}

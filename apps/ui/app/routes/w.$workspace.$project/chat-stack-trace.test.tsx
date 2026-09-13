@@ -310,7 +310,7 @@ describe('ChatStackTrace — in-place (shift not held) path', () => {
       messages: [userMessage],
       agent: mockAgent,
       admission: { version: 1, idempotencyKey: 'request_0000000001' },
-      execution: { hostId: 'host_test', mode: 'direct', workspaceId: 'workspace_test', baseRevisionId: 'rev_test' },
+      execution: { hostId: 'host_test', workspaceId: 'workspace_test', baseRevisionId: 'rev_test' },
     };
 
     const parsed = chatTurnRequestSchema.parse(wireBody);

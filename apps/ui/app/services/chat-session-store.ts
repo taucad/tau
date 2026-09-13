@@ -40,6 +40,8 @@ import { isAnyToolPart } from '@taucad/chat';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { idPrefix } from '@taucad/types/constants';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
+import type { ChatSessionActorRef } from '#machines/chat-session.machine.js';
+import type { ProjectSessionActorRef } from '#machines/project-session.machine.js';
 import { chatPersistenceMachine } from '#hooks/chat-persistence.machine.js';
 import type { ChatRequest } from '#hooks/chat-persistence.machine.js';
 import { draftMachine } from '#hooks/draft.machine.js';
@@ -98,6 +100,16 @@ export type ChatSession = {
   readonly chat: Chat<MyUIMessage>;
   readonly persistenceActorRef: ActorRefFrom<typeof chatPersistenceMachine>;
   readonly draftActorRef: ActorRefFrom<typeof draftMachine>;
+  /**
+   * This chat's state in the agent-state vocabulary (D32, S45).
+   *
+   * The store keeps the AI SDK `Chat`, its transport and its persistence; the
+   * machine is the one derivation of what the person is told — every row of
+   * the architecture's agent-state table is one of its states. The sidebar
+   * (W20) and the Agents pane read this, never the flags behind it.
+   */
+  /* Not readonly: the owner changes when a project session opens or closes. */
+  stateActorRef: ChatSessionActorRef | undefined;
 };
 
 // ---------------------------------------------------------------------------
@@ -213,6 +225,36 @@ function countPersistMilestones(message: MyUIMessage): number {
   return count;
 }
 
+/**
+ * The whole tool picture of one chat, in one pass.
+ *
+ * The `chat-session` machine takes tool state batched per transport event
+ * (F8) — one frame for a fifty-part turn, never one per delta — so this is
+ * what the store hands it.
+ *
+ * @param messages - The chat's transcript.
+ * @returns How many tool parts are running and how many wait for approval.
+ */
+function countToolParts(messages: readonly MyUIMessage[]): { inFlight: number; approvals: number; toolName?: string } {
+  let inFlight = 0;
+  let approvals = 0;
+  let toolName: string | undefined;
+  for (const message of messages) {
+    for (const part of message.parts) {
+      if (!isAnyToolPart(part)) {
+        continue;
+      }
+      if (part.state === 'approval-requested') {
+        approvals += 1;
+      } else if (part.state === 'input-streaming' || part.state === 'input-available') {
+        inFlight += 1;
+        toolName = 'type' in part ? part.type.replace(/^tool-/u, '') : toolName;
+      }
+    }
+  }
+  return { inFlight, approvals, ...(toolName === undefined ? {} : { toolName }) };
+}
+
 function hasPendingApproval(messages: readonly MyUIMessage[]): boolean {
   return messages.some((message) =>
     message.parts.some((part) => isAnyToolPart(part) && part.state === 'approval-requested'),
@@ -266,12 +308,36 @@ type InternalSession = ChatSession & {
   latestAgentBody: LatestAgentBodyFactory | undefined;
   /** Bodyless startup/continue dispatches waiting for the profile client to publish its body factory. */
   latestAgentBodyWaiters: Set<(compose: LatestAgentBodyFactory | undefined) => void>;
+  /** What was last handed to `stateActorRef`, so nothing is sent twice. */
+  lastState: { phase?: ChatRunPhase; inFlight: number; approvals: number; durable?: string; lifecycle?: string };
   /** Cleanups for the per-chat subscriptions wired up at session creation. */
   dispose: () => void;
 };
 
+/** The run phases the store can read off an AI SDK `ChatStatus`. */
+type ChatRunPhase = 'admitted' | 'running' | 'completed' | 'failed';
+
+const runPhaseOf = (status: ChatStatus): ChatRunPhase | undefined => {
+  switch (status) {
+    case 'submitted': {
+      return 'admitted';
+    }
+    case 'streaming': {
+      return 'running';
+    }
+    case 'error': {
+      return 'failed';
+    }
+    default: {
+      return undefined;
+    }
+  }
+};
+
 export class ChatSessionStore {
   readonly #sessions = new Map<string, InternalSession>();
+  /** The live project session that owns this route's chat machines (I23). */
+  #projectSession: ProjectSessionActorRef | undefined;
   readonly #membershipTopic = new Topic<void>({ name: 'ChatSessionStore.membership' });
   readonly #chatTopics = new Map<string, Topic<void>>();
   readonly #statusTopics = new Map<string, Topic<void>>();
@@ -577,6 +643,36 @@ export class ChatSessionStore {
   // -------------------------------------------------------------------------
   // Internals
   // -------------------------------------------------------------------------
+
+  /**
+   * Name the project session that owns the chat machines from now on.
+   *
+   * Called by the project route's session binding while a project is live; the
+   * store never creates a `chat-session` actor itself.
+   *
+   * @param ref - The live session, or `undefined` when the route unmounts.
+   * @public
+   */
+  public setProjectSession(ref: ProjectSessionActorRef | undefined): void {
+    this.#projectSession = ref;
+    if (ref === undefined) {
+      for (const session of this.#sessions.values()) {
+        session.stateActorRef = undefined;
+      }
+      return;
+    }
+    for (const session of this.#sessions.values()) {
+      ref.send({ type: 'openChat', chatId: session.chatId });
+      session.stateActorRef = ref.getSnapshot().context.chatRefs[session.chatId];
+      session.lastState = { inFlight: 0, approvals: 0 };
+      this.#syncChatState(session);
+    }
+  }
+
+  /** Tell a chat the person is looking at it, so `unread` clears (S45). @public */
+  public markViewed(chatId: string): void {
+    this.#sessions.get(chatId)?.stateActorRef?.send({ type: 'viewed' });
+  }
 
   #createSession(chatId: string): InternalSession {
     // Defensive aliases so closures bound to the AI SDK's internal scheduler
@@ -1029,6 +1125,7 @@ export class ChatSessionStore {
         }
       }
 
+      this.#syncChatState(session);
       this.#chatTopics.get(chatId)?.emit();
     });
     const unregisterStatus = chat['~registerStatusCallback'](() => {
@@ -1043,11 +1140,20 @@ export class ChatSessionStore {
         }
         this.#statusTopics.get(chatId)?.emit();
       }
+      this.#syncChatState(session);
       this.#chatTopics.get(chatId)?.emit();
     });
     const unregisterError = chat['~registerErrorCallback'](() => {
+      this.#syncChatState(session);
       this.#chatTopics.get(chatId)?.emit();
     });
+
+    /* The chat's state machine is a child of the *project session*, never of
+     * this store: every project-scoped resource dies with its session (I23).
+     * Absent a live session — the home route has chats too — the store keeps
+     * its flags and nothing subscribes to a state row. */
+    this.#projectSession?.send({ type: 'openChat', chatId });
+    const stateActorRef = this.#projectSession?.getSnapshot().context.chatRefs[chatId];
 
     persistenceActorRef.start();
     draftActorRef.start();
@@ -1058,6 +1164,8 @@ export class ChatSessionStore {
     session = {
       chatId,
       chat,
+      stateActorRef,
+      lastState: { inFlight: 0, approvals: 0 },
       persistenceActorRef,
       draftActorRef,
       viewRefcount: 1,
@@ -1090,6 +1198,7 @@ export class ChatSessionStore {
     };
 
     lifecycleSubscription = persistenceActorRef.subscribe((snapshot) => {
+      this.#syncChatState(session);
       const idle = snapshot.matches({ requestLifecycle: 'idle' });
       if (!idle) {
         requestLifecycleWasActive = true;
@@ -1108,6 +1217,60 @@ export class ChatSessionStore {
     persistenceActorRef.send({ type: 'setActiveChatId', chatId });
 
     return session;
+  }
+
+  /**
+   * Hand the chat's machine what changed, and only what changed.
+   *
+   * One place reads the store's facts; the machine owns what they mean. Token
+   * deltas never get here — the message callback fires per part, and what it
+   * sends is a batched count (F8, A38).
+   *
+   * @param session - The chat whose facts moved.
+   */
+  #syncChatState(session: InternalSession): void {
+    const { lastState, stateActorRef } = session;
+    if (stateActorRef === undefined) {
+      return;
+    }
+    const tools = countToolParts(session.chat.messages);
+    if (tools.inFlight !== lastState.inFlight || tools.approvals !== lastState.approvals) {
+      lastState.inFlight = tools.inFlight;
+      lastState.approvals = tools.approvals;
+      stateActorRef.send({ type: 'toolParts', ...tools });
+    }
+    const phase = runPhaseOf(session.status);
+    const settled = session.status === 'ready' && (lastState.phase === 'admitted' || lastState.phase === 'running');
+    const next = settled ? 'completed' : phase;
+    if (next !== undefined && next !== lastState.phase) {
+      lastState.phase = next;
+      /* The session counts runs so *Close* knows to ask (A35, I24). */
+      this.#projectSession?.send({
+        type: next === 'admitted' || next === 'running' ? 'runStarted' : 'runSettled',
+        chatId: session.chatId,
+      });
+      stateActorRef.send({
+        type: 'runLifecycle',
+        phase: next,
+        ...(next === 'failed' && session.chat.error ? { reason: session.chat.error.message } : {}),
+      });
+    }
+    if (session.durableRunState !== lastState.durable) {
+      lastState.durable = session.durableRunState;
+      if (session.durableRunState !== undefined) {
+        stateActorRef.send({ type: 'durableRunState', state: session.durableRunState });
+      }
+    }
+    const snapshot = session.persistenceActorRef.getSnapshot();
+    const lifecycle = (['invoking', 'retrying', 'stopping'] as const).find((phaseName) =>
+      snapshot.matches({ requestLifecycle: phaseName }),
+    );
+    if (lifecycle !== lastState.lifecycle) {
+      lastState.lifecycle = lifecycle;
+      if (lifecycle !== undefined) {
+        stateActorRef.send({ type: 'requestLifecycle', phase: lifecycle });
+      }
+    }
   }
 
   #withAdmission(body: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> {
@@ -1157,6 +1320,8 @@ export class ChatSessionStore {
     session.dispose();
     session.persistenceActorRef.stop();
     session.draftActorRef.stop();
+    /* The session owns the chat machine; asking it to let go is what stops it. */
+    this.#projectSession?.send({ type: 'chatClosed', chatId: session.chatId });
     this.#sessions.delete(session.chatId);
     clearLedger(session.chatId);
     this.#disposeChatTopics(session.chatId);

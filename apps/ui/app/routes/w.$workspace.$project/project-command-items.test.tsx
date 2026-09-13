@@ -90,8 +90,15 @@ vi.mock('#hooks/use-file-tree.js', () => ({
   useFileTreeMap: () => new Map([['main.ts', {}]]),
 }));
 
+/* Every revision surface's suite scripts the one client through this harness,
+ * so two surfaces cannot assert different shapes of the same projection. */
+vi.mock('#hooks/use-revision-status.js', async () => {
+  const harness = await import('#hooks/use-revision-status.test-harness.js');
+  return harness.revisionStatusMock();
+});
+
 vi.mock('#hooks/use-revisions.js', () => ({
-  useVisibleRevisions: () => ({ canReturnToLatest: false }),
+  useRevisions: () => ({ canReturnToLatest: false, revisions: [], headRevisionId: undefined, isDirty: false }),
 }));
 
 vi.mock('#hooks/use-thumbnail-generator.js', () => ({

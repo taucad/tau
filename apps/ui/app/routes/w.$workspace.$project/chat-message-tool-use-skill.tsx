@@ -1,6 +1,9 @@
 import { Wrench } from 'lucide-react';
 import type { ToolInvocation } from '@taucad/chat';
 import { toolName } from '@taucad/chat/constants';
+import { systemSkillBundles } from '@taucad/skills/resources';
+import type { FileProvenance } from '@taucad/types';
+import { Badge } from '@taucad/ui/components/badge';
 import {
   ChatToolCard,
   ChatToolCardHeader,
@@ -29,16 +32,54 @@ function LoadingSkillRow({ skillName }: { readonly skillName: string }): React.J
   );
 }
 
+/**
+ * The bytes the tool read are the built-in bundle's, so the row links with that
+ * provenance: the click opens the read-only tab and reveals the composed row,
+ * and the catalog — not this component — owns the word on the badge.
+ *
+ * `identity` is the overlay unit key `skill:<slug>@<version>#<fingerprint>` the
+ * composed view mints for the same bundle, so an override can be keyed on it
+ * (a1 review R2); it names the bundle the pane serves today, which the notice
+ * below is what flags when the chat read an older one.
+ */
+const builtInSkillProvenance = (skillName: string): FileProvenance => {
+  const bundle = systemSkillBundles.find((candidate) => candidate.slug === skillName);
+  return {
+    source: 'system-skills',
+    versioned: false,
+    agentAccess: 'read-only',
+    ...(bundle === undefined ? {} : { identity: `skill:${bundle.slug}@${bundle.version}#${bundle.fingerprint}` }),
+  };
+};
+
+/** Whether the bundle shipped today differs from the one this chat read. */
+const hasBundleChanged = (skillName: string, fingerprint: string | undefined): boolean => {
+  if (fingerprint === undefined) {
+    return false;
+  }
+  const current = systemSkillBundles.find((bundle) => bundle.slug === skillName)?.fingerprint;
+  return current !== undefined && current !== fingerprint;
+};
+
 function ReadSkillRow({
   skillName,
   skillPath,
   source,
+  fingerprint,
 }: {
   readonly skillName: string;
   readonly skillPath?: string;
   readonly source: string;
+  readonly fingerprint?: string;
 }): React.JSX.Element {
-  const label = skillPath ? <FileLink path={skillPath}>{skillName}</FileLink> : <span>{skillName}</span>;
+  const isBuiltIn = source === 'system';
+  const label = skillPath ? (
+    <FileLink path={skillPath} provenance={isBuiltIn ? builtInSkillProvenance(skillName) : undefined}>
+      {skillName}
+    </FileLink>
+  ) : (
+    <span>{skillName}</span>
+  );
 
   return (
     <ChatToolCard variant='minimal' status='ready' isCollapsible={false}>
@@ -49,7 +90,14 @@ function ReadSkillRow({
             <ChatToolDescription>
               {label}
               {' skill'}
-              {source === 'system' && <span> system</span>}
+              {isBuiltIn && (
+                <Badge variant='secondary' className='ml-1.5 px-1.5 py-0 font-normal'>
+                  Built-in
+                </Badge>
+              )}
+              {isBuiltIn && hasBundleChanged(skillName, fingerprint) && (
+                <span className='ml-1.5 text-muted-foreground'>This bundle changed since the chat read it</span>
+              )}
             </ChatToolDescription>
           </ChatToolLabel>
         </ChatToolCardTitle>
@@ -67,7 +115,12 @@ export function ChatMessageToolUseSkill({ part }: { readonly part: UseSkillInvoc
 
     case 'output-available': {
       return (
-        <ReadSkillRow skillName={part.output.skillName} skillPath={part.output.skillPath} source={part.output.source} />
+        <ReadSkillRow
+          skillName={part.output.skillName}
+          skillPath={part.output.skillPath}
+          source={part.output.source}
+          fingerprint={part.output.fingerprint}
+        />
       );
     }
 

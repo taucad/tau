@@ -7,6 +7,7 @@ import type { FileSystemBackend, FileStatEntry, FileStat } from '@taucad/types';
 import { fileManagerMachine } from '#machines/file-manager.machine.js';
 import type { FileWriteSource } from '@taucad/fs-client/file-write-source';
 import type { BulkMoveEdit, BulkMoveResult, FileSystemClient } from '@taucad/fs-client/file-system-client';
+import type { ComposedViewClient } from '@taucad/fs-client/composed-view-client';
 import type { FileManagerRef, FileManagerProxy } from '#machines/file-manager.machine.types.js';
 import type { MountConfig, WorkspaceMutationError } from '@taucad/filesystem';
 import {
@@ -151,7 +152,7 @@ type DeleteFileOptions = {
  * @public
  */
 export type FileSystemClientFacade = Pick<
-  FileSystemClient,
+  ComposedViewClient,
   | 'readFile'
   | 'writeFile'
   | 'writeFiles'
@@ -179,6 +180,9 @@ export type FileSystemClientFacade = Pick<
   | 'commitPendingProjectDirectory'
   | 'permanentlyDeleteProjectDirectory'
   | 'adoptProjectDirectory'
+  /* The one write allowed under a read-only overlay: place a whole bundle so
+   * the project owns it (ruling P11). The guard keeps it whole. */
+  | 'overrideUnit'
 >;
 
 /**
@@ -354,6 +358,19 @@ export function useHomeStorageBackend(): HomeStorageBackend {
  * FileManagerProviders from creating duplicate workers during the window
  * between root mount and root worker initialization.
  */
+/**
+ * The one file-manager worker this document runs, once the root mount has it.
+ *
+ * The sessions registry needs it to admit and release a project's compute
+ * (S44), and it is app-level: every project mount shares this worker.
+ *
+ * @returns The shared worker, or `undefined` before the root mount has one.
+ * @public
+ */
+export function useSharedFileManagerWorker(): Worker | undefined {
+  return useContext(SharedWorkerContext);
+}
+
 export function SharedWorkerGate({ children }: { readonly children: ReactNode }): React.ReactNode | undefined {
   const worker = useContext(SharedWorkerContext);
 
@@ -570,6 +587,27 @@ export function FileManagerProvider({
     return proxy;
   }, [fileManagerRef]);
 
+  /** The composed client the FM machine builds once the services are up. */
+  const getReadiedClient = useCallback(async (): Promise<FileSystemClientFacade> => {
+    const snapshot = await waitForWithTimeout({
+      fileManagerRef,
+      predicate: createErrorAwareWaitPredicate(
+        (state) => state.matches('ready') && state.context.viewClient !== undefined,
+      ),
+      readyTimeout: fileManagerReadyTimeout,
+      reason: 'proxy-timeout',
+    });
+
+    assertNotErrorState(snapshot);
+
+    const { viewClient } = snapshot.context;
+    if (!viewClient) {
+      throw new FileManagerNotReadyError('proxy-timeout');
+    }
+
+    return viewClient;
+  }, [fileManagerRef]);
+
   const whenServicesReady = useCallback(async () => {
     return waitForFileManagerServices(fileManagerRef);
   }, [fileManagerRef]);
@@ -767,10 +805,14 @@ export function FileManagerProvider({
   );
 
   const client = useMemo<FileSystemClientFacade>(() => {
+    /* The Files pane reads and mutates the one composed view the editor and
+     * the agent read (charter D1): an overlay or records row answers
+     * read-only here instead of `NOT_FOUND` from an authority that has never
+     * held the path. Everything the view does not own it forwards unchanged. */
     const gated = <K extends keyof FileSystemClientFacade>(method: K): FileSystemClientFacade[K] =>
       // oxlint-disable-next-line @typescript-eslint/no-explicit-any -- pass-through gate, runtime types preserved by FileSystemClientFacade
       (async (...args: unknown[]) => {
-        const proxy = await getReadiedProxy();
+        const proxy = await getReadiedClient();
         // oxlint-disable-next-line @typescript-eslint/no-explicit-any -- forward through to the typed proxy method
         return (proxy[method] as (...rest: unknown[]) => unknown)(...args);
       }) as FileSystemClientFacade[K];
@@ -803,8 +845,9 @@ export function FileManagerProvider({
       commitPendingProjectDirectory: gated('commitPendingProjectDirectory'),
       permanentlyDeleteProjectDirectory: gated('permanentlyDeleteProjectDirectory'),
       adoptProjectDirectory: gated('adoptProjectDirectory'),
+      overrideUnit: gated('overrideUnit'),
     };
-  }, [getReadiedProxy]);
+  }, [getReadiedClient]);
 
   const workspace = useMemo<WorkspaceFacade>(() => {
     const configurePersistedRoots = async (): Promise<void> => {

@@ -1,6 +1,8 @@
 export { EventLogError } from '#log/event-log-error.js';
 export { parseEventLog, serializeLogEvent } from '#log/serialization.js';
 export { reduceEventLog } from '#log/reducer.js';
+export { mergeLogSegments } from '#log/segments.js';
+export type { ChatLogSegment } from '#log/segments.js';
 export {
   agentLogEventSchema,
   jsonValueSchema,
@@ -84,8 +86,9 @@ export type {
   ModelInvocationPreparedEvent,
   ProviderMessage,
   ProviderMessageMetadata,
-  RevisionFinalizedEvent,
-  RevisionPublicationRecord,
+  TurnConflictedLogEvent,
+  TurnFailedLogEvent,
+  TurnFinalizedLogEvent,
   RunLifecycleEvent,
   RunTrigger,
   RunLifecycleState,

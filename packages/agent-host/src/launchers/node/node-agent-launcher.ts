@@ -27,7 +27,12 @@ import { createGatewayModelTransport } from '#transport/gateway-model-transport.
 import { createTauAgentHost } from '#host/tau-agent-host.js';
 import { createNodeEventLog } from '#node.js';
 import { createPortableId } from '#harness/session-record.js';
-import type { AgentLogEvent, RevisionFinalizedEvent } from '#log/event-types.js';
+import type {
+  AgentLogEvent,
+  TurnConflictedLogEvent,
+  TurnFailedLogEvent,
+  TurnFinalizedLogEvent,
+} from '#log/event-types.js';
 import type {
   AgentLiveEvent,
   DurableEventLog,
@@ -240,7 +245,14 @@ export type NodeAgentLauncherOptions = {
  * true of this variant and of no other. Widen it when a second host-authored
  * fact earns the same treatment.
  */
-export type HostAuthoredLogEvent = Omit<RevisionFinalizedEvent, 'version' | 'leaderEpoch' | 'sequence' | 'recordedAt'>;
+type WithoutLogPosition<Event> = Event extends unknown
+  ? Omit<Event, 'version' | 'leaderEpoch' | 'sequence' | 'recordedAt'>
+  : never;
+
+/** One host-attested turn record, before the log stamps its position. @public */
+export type HostAuthoredLogEvent = WithoutLogPosition<
+  TurnConflictedLogEvent | TurnFailedLogEvent | TurnFinalizedLogEvent
+>;
 
 /** A running Node agent launcher. @public */
 export type NodeAgentLauncher = {
@@ -261,7 +273,7 @@ export type NodeAgentLauncher = {
    * @param event - The record, without its log position.
    * @returns The record as it was written.
    */
-  append(chatId: string, event: HostAuthoredLogEvent): Promise<RevisionFinalizedEvent>;
+  append(chatId: string, event: HostAuthoredLogEvent): Promise<AgentLogEvent>;
   /** Durable event stream for every chat this launcher owns. */
   events(signal: AbortSignal): AsyncIterable<AgentChannelEvent>;
   /** Ephemeral model-delta stream for every chat this launcher owns. */
@@ -638,7 +650,7 @@ export const createNodeAgentLauncher = (options: NodeAgentLauncherOptions): Node
       const leaderEpoch = generationFor(chatId);
       const recorded = await log.read();
       const tail = recorded.at(-1);
-      const stamped: RevisionFinalizedEvent = {
+      const stamped: AgentLogEvent = {
         ...event,
         version: 1,
         leaderEpoch,

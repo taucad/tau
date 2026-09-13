@@ -21,6 +21,7 @@ import type {
   RpcGeoSpecClient,
   RpcGraphicsClient,
   RpcImageClient,
+  RpcRevisionsClient,
   RpcRuntimeClient,
   RpcSkillResolver,
 } from '@taucad/chat/rpc';
@@ -30,7 +31,7 @@ import { z } from 'zod';
 import type { HostToolDefinition, JsonObject, JsonValue, ToolRegistry } from '@taucad/agent-host';
 
 /** The optional dispatcher client one tool needs beyond the filesystem. */
-type ToolClientKey = 'kernelClient' | 'graphics' | 'images' | 'geospec' | 'skillResolver';
+type ToolClientKey = 'kernelClient' | 'graphics' | 'images' | 'geospec' | 'skillResolver' | 'revisions';
 
 /**
  * Every servable tool, its RPC, and the client that must be present for it.
@@ -49,6 +50,7 @@ const rpcForTool: Readonly<Record<string, { readonly rpc: RpcName; readonly need
   [toolName.screenshot]: { rpc: rpcName.captureImages, needs: 'images' },
   [toolName.testModel]: { rpc: rpcName.runGeoSpecTests, needs: 'geospec' },
   [toolName.useSkill]: { rpc: rpcName.resolveSkill, needs: 'skillResolver' },
+  [toolName.revisions]: { rpc: rpcName.readRevisions, needs: 'revisions' },
 };
 
 const codedErrorSchema = z.object({ code: z.string() });
@@ -95,6 +97,8 @@ export type ChatToolRegistryOptions = {
   readonly geospec?: RpcGeoSpecClient | undefined;
   /** Backs `use_skill`. */
   readonly skillResolver?: RpcSkillResolver | undefined;
+  /** Backs the read-only `revisions` tool; a host without a revision graph omits it. */
+  readonly revisions?: RpcRevisionsClient | undefined;
   /** `test_model`'s independent policy gate in `@taucad/chat`. */
   readonly testingEnabled: boolean;
 };
@@ -167,6 +171,7 @@ export const createChatToolRegistry = (options: ChatToolRegistryOptions): ToolRe
           ...(options.images === undefined ? {} : { images: options.images }),
           ...(options.geospec === undefined ? {} : { geospec: options.geospec }),
           ...(options.skillResolver === undefined ? {} : { skillResolver: options.skillResolver }),
+          ...(options.revisions === undefined ? {} : { revisions: options.revisions }),
         });
         const aborted = Promise.withResolvers<never>();
         /* Tracked so a rejection that lands after the race is already won is

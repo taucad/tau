@@ -110,7 +110,7 @@ describe('the tool filesystem over a composed view', () => {
       isDirectory: false,
       contentKind: 'text',
       lineCount: 3,
-      provenance: { source: 'system-skills', access: 'read-only' },
+      provenance: { source: 'system-skills', agentAccess: 'read-only' },
     });
     expect(reads).not.toHaveBeenCalled();
     expect(await tools.readFile('.agents/skills/demo/api-index.md')).toBe(contents['api-index.md']);

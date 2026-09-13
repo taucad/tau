@@ -307,16 +307,16 @@ Use \`${toolName.webSearch}\` for external information, then \`${toolName.webBro
     name: 'transcript_search',
     cacheBreak: false,
     compute: () => `<transcript_search>
-Your conversation transcript is stored at \`.tau/transcripts/{chatId}.jsonl\`.
-Each line is a JSON object with a \`role\` field ("user", "assistant", "tool", or "compaction").
+Your conversation log is stored at \`.tau/chats/{chatId}/events.jsonl\`.
+Each line is a JSON object with a \`type\` field; the message lines are
+\`message.appended\` and carry \`message.role\` ("user", "assistant", "tool-input", or "tool-output").
 
 When you need to recall earlier context from the current conversation:
 1. **Grep first**: Search for keywords (task names, file paths, error messages, tool names)
 2. **Read a window**: Read 5–10 lines around each match to reconstruct context
-3. **Never scan linearly**: Transcript files can be large; do not read end-to-end
+3. **Never scan linearly**: Log files can be large; do not read end-to-end
 
 Full user and assistant message text is available for keyword search.
-Tool results are stored as metadata only (name + content length, not full output).
 </transcript_search>`,
   });
 
@@ -339,7 +339,7 @@ Tool results are stored as metadata only (name + content length, not full output
   registry.register({
     name: 'transcript_path',
     cacheBreak: true,
-    compute: () => `Your transcript path: \`.tau/transcripts/${options.chatId ?? '{chatId}'}.jsonl\``,
+    compute: () => `Your conversation log: \`.tau/chats/${options.chatId ?? '{chatId}'}/events.jsonl\``,
   });
 
   registry.register({

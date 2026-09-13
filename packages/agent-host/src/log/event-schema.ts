@@ -162,32 +162,6 @@ const runFailureDetailSchema = z
   })
   .catchall(jsonValueSchema);
 
-const revisionPublicationSchema = z.discriminatedUnion('status', [
-  z.strictObject({
-    status: z.literal('updated'),
-    branchName: nonEmptyString,
-    expectedHeadRevisionId: nonEmptyString,
-    previousHeadRevisionId: nonEmptyString.optional(),
-    headRevisionId: nonEmptyString,
-  }),
-  z.strictObject({
-    status: z.literal('conflicted'),
-    branchName: nonEmptyString,
-    expectedHeadRevisionId: nonEmptyString,
-    actualHeadRevisionId: nonEmptyString.optional(),
-    proposedHeadRevisionId: nonEmptyString,
-  }),
-]);
-const revisionNativeGitSchema = z.discriminatedUnion('status', [
-  z.strictObject({ status: z.literal('not-configured') }),
-  z.strictObject({
-    status: z.literal('stored'),
-    commitId: nonEmptyString,
-    objectFormat: z.enum(['sha1', 'sha256']),
-  }),
-  z.strictObject({ status: z.literal('failed'), errorCode: nonEmptyString }),
-]);
-
 /* Every variant below is loose for the reason `runFailureDetailSchema` states:
  * a field a newer writer adds is retained rather than rejected, so one
  * unreadable record never costs an older reader the whole chat (D14). */
@@ -242,23 +216,35 @@ const knownLogEventSchema = z.union([
   }),
   z.looseObject({
     ...eventBase,
-    type: z.literal('revision.finalized'),
+    type: z.literal('turn.finalized'),
     turnId: nonEmptyString,
-    workspaceId: nonEmptyString,
-    revisionId: nonEmptyString,
-    baseRevisionId: nonEmptyString,
-    treeId: nonEmptyString,
-    branchName: nonEmptyString,
-    publication: revisionPublicationSchema,
+    runId: nonEmptyString,
+    chatId: nonEmptyString,
+    projectId: nonEmptyString,
+    checkoutId: nonEmptyString.optional(),
+    revisionId: nonEmptyString.optional(),
+    branch: nonEmptyString.optional(),
     changedPaths: z.array(z.string()),
-    provenance: z.strictObject({
-      source: z.enum(['user', 'agent', 'merge', 'restore', 'import']),
-      actorId: nonEmptyString,
-      runId: nonEmptyString.optional(),
-      createdAt: z.number(),
-    }),
-    generatedSummary: z.string(),
-    nativeGit: revisionNativeGitSchema,
+    treeId: nonEmptyString.optional(),
+    trigger: z.literal('turn'),
+    runIds: z.array(nonEmptyString),
+  }),
+  z.looseObject({
+    ...eventBase,
+    type: z.literal('turn.conflicted'),
+    turnId: nonEmptyString,
+    runId: nonEmptyString,
+    chatId: nonEmptyString,
+    checkoutId: nonEmptyString.optional(),
+  }),
+  z.looseObject({
+    ...eventBase,
+    type: z.literal('turn.failed'),
+    turnId: nonEmptyString,
+    runId: nonEmptyString,
+    chatId: nonEmptyString,
+    checkoutId: nonEmptyString.optional(),
+    reason: z.string(),
   }),
   z.looseObject({
     ...eventBase,

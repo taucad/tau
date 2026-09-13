@@ -14,6 +14,7 @@ export const toolName = {
   getKernelResult: 'get_kernel_result',
   exportGeometry: 'export_geometry',
   screenshot: 'screenshot',
+  revisions: 'revisions',
 } as const satisfies Record<string, string>;
 
 /** @public */

@@ -15,6 +15,7 @@ import type { GlobSearchInput, GlobSearchOutput } from '#schemas/tools/glob-sear
 import type { GetKernelResultInput, GetKernelResultOutput } from '#schemas/tools/get-kernel-result.tool.schema.js';
 import type { ExportGeometryInput, ExportGeometryOutput } from '#schemas/tools/export-geometry.tool.schema.js';
 import type { ScreenshotInput, ScreenshotOutput } from '#schemas/tools/screenshot.tool.schema.js';
+import type { RevisionsInput, RevisionsOutput } from '#schemas/tools/revisions.tool.schema.js';
 
 // =============================================================================
 // Tool Error Types
@@ -203,6 +204,7 @@ export type MyTools = InferUITools<{
   [toolName.getKernelResult]: AiTool<GetKernelResultInput, GetKernelResultOutput>;
   [toolName.exportGeometry]: AiTool<ExportGeometryInput, ExportGeometryOutput>;
   [toolName.screenshot]: AiTool<ScreenshotInput, ScreenshotOutput>;
+  [toolName.revisions]: AiTool<RevisionsInput, RevisionsOutput>;
 }>;
 
 /**

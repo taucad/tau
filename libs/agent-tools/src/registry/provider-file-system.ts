@@ -169,7 +169,8 @@ export const createProviderRpcFileSystem = (options: ProviderRpcFileSystemOption
       });
     },
     async readdir(path) {
-      return (await provider.readdirWithStats(assertRootedPath(path))).map((row) => directoryEntry(row));
+      const rows = await provider.readdirWithStats(assertRootedPath(path));
+      return rows.map((row) => directoryEntry(row));
     },
     async exists(path) {
       return provider.exists(assertRootedPath(path));

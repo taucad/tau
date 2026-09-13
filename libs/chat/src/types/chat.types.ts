@@ -18,7 +18,7 @@ export type ChatStartupRequest = {
   id: string;
   kind: 'regenerate-tail';
   messageId: string;
-  source: 'homepage-initial-message' | 'fix-with-ai-new-chat';
+  source: 'homepage-initial-message' | 'fix-with-ai-new-chat' | 'resolve-conflict-new-chat';
   createdAt: number;
 };
 

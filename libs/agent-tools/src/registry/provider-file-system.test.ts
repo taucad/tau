@@ -59,8 +59,11 @@ describe('createProviderRpcFileSystem', () => {
     await expect(fileSystem.appendFile('.tau/chats/chat-1/events.jsonl', 'forged\n')).rejects.toMatchObject({
       code: 'EROFS',
     });
-    await expect(fileSystem.writeFile('.tau/workspaces/trun-1/identity.json', '{}')).rejects.toMatchObject({
-      code: 'EPERM',
+    /* A turn's lease is a *record*: the agent may read the account of its own
+     * run and may never write it (the retired `.tau/workspaces` claim file was
+     * hidden; `.tau/runs` is read-only, W3d). */
+    await expect(fileSystem.writeFile('.tau/runs/trun-1.json', '{}')).rejects.toMatchObject({
+      code: 'EROFS',
     });
     /* The browser port's object store is revision evidence (RC6 S5 gate 15):
      * an agent that could write it could forge the account of its own turn. */

@@ -23,34 +23,34 @@ export const chatRunAdmissionSchema = z
   .meta({ id: 'ChatRunAdmission' });
 
 /**
- * How the host records this turn's writes (north star N26).
+ * Immutable execution target for one CAD turn: which host writes it.
  *
- * `direct` writes the host's live workspace tree; `candidate` writes an
- * isolated checkout that merges back at settlement. The UI may label these
- * anything it likes ("Locally" / "New branch"); the wire says `direct` and
- * `candidate`.
+ * There is no revision *mode*: placement is non-branching by default (north
+ * star D7/I18) — a turn lands on its chat's checkout, and the host that owns
+ * that tree records the revision. `workspaceId` names the checkout a *browser*
+ * turn was placed on and `baseRevisionId` what it descends from; both are
+ * absent for a host-placed turn, which resolves its own.
  *
- * @public
- */
-export const chatRevisionModeSchema = z.enum(['direct', 'candidate']).meta({ id: 'ChatRevisionMode' });
-
-/**
- * Immutable execution target for one CAD turn: which host writes, and how it
- * records what it wrote.
- *
- * `mode` is required on every placement, because the host that owns the tree is
- * the one that has to be told (r7 W4). `workspaceId` and `baseRevisionId` name
- * a *browser* workspace claim and are therefore absent for a host-placed turn,
- * where the host owns its own workspace and mints its own base.
+ * `conflict` is present only for a turn started by *Ask chat to resolve*: the
+ * conflicted revision it descends from and the paths still without a side. It
+ * rides here rather than in the message text because it is a fact about where
+ * the turn lands, and the agent must be able to read the three terms back from
+ * the graph (A22) rather than parse them out of a prompt.
  *
  * @public
  */
 export const chatExecutionTargetSchema = z
   .object({
     hostId: z.string().min(1).max(128),
-    mode: chatRevisionModeSchema,
     workspaceId: z.string().min(1).max(128).optional(),
     baseRevisionId: z.string().min(1).max(256).optional(),
+    conflict: z
+      .object({
+        revisionId: z.string().min(1).max(256),
+        paths: z.array(z.string().min(1).max(1024)).min(1).max(1000),
+      })
+      .strict()
+      .optional(),
   })
   .strict()
   .meta({ id: 'ChatExecutionTarget' });
@@ -107,9 +107,6 @@ export type ChatRunAdmissionInput = z.input<typeof chatRunAdmissionSchema>;
 
 /** Immutable execution target for one CAD turn. @public */
 export type ChatExecutionTarget = z.infer<typeof chatExecutionTargetSchema>;
-
-/** How the host records this turn's writes. @public */
-export type ChatRevisionMode = z.infer<typeof chatRevisionModeSchema>;
 
 /** Wire-shape (input) of a chat-turn request. @public */
 export type ChatTurnRequestInput = z.input<typeof chatTurnRequestSchema>;

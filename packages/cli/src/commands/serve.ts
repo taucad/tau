@@ -13,6 +13,9 @@ import type { OpenFoamSolverVersion } from '@taucad/jobs-solvers';
 import { defineCommand } from 'citty';
 import { consola } from 'consola';
 
+// eslint-disable-next-line import-x/no-extraneous-dependencies -- package-private import-map alias, not a package dependency.
+import { requireGitToolchain } from '#commands/revisions.js';
+
 const runtimeChildModulePath = (): string =>
   fileURLToPath(
     new URL(import.meta.url.endsWith('.ts') ? '../host-runtime-child.ts' : './host-runtime-child.mjs', import.meta.url),
@@ -315,6 +318,10 @@ export const serveCommand = defineCommand({
         'tau serve is experimental and requires --trust-projects. Remote project code executes on this machine.',
       );
     }
+    /* Before anything is served: this daemon records every turn into a native
+     * Git store, so a machine without the binaries is told which one is missing
+     * now rather than at the first turn (OQ-B8, S12). */
+    await requireGitToolchain();
     const maxSessions = parsePositiveInteger('--max-sessions', args.maxSessions);
     if (args.computeMode !== 'off' && args.computeMode !== 'memory' && args.computeMode !== 'durable') {
       throw new TypeError('--compute-mode must be off, memory, or durable');

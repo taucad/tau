@@ -217,66 +217,57 @@ export type InterruptRecordedEvent = LogEventBase & {
 };
 
 /**
- * Where one turn's recorded revision landed on its branch. @public
- *
- * The expected-old CAS either moved the branch head or refused to, and the
- * refusal names what it found — the reader needs both halves to say whether the
- * turn is on the branch or beside it.
- */
-export type RevisionPublicationRecord =
-  | {
-      readonly status: 'updated';
-      readonly branchName: string;
-      readonly expectedHeadRevisionId: string;
-      readonly previousHeadRevisionId?: string;
-      readonly headRevisionId: string;
-    }
-  | {
-      readonly status: 'conflicted';
-      readonly branchName: string;
-      readonly expectedHeadRevisionId: string;
-      readonly actualHeadRevisionId?: string;
-      readonly proposedHeadRevisionId: string;
-    };
-
-/**
- * The revision a host recorded for one turn (V17, VI11).
+ * The host-attested settlement of one turn, as the chat's own log carries it
+ * (A4, D9, S9).
  *
  * The host — never the agent and never the client — records what a turn wrote,
- * so the fact has to reach the client the same way every other durable fact
- * does: as one record in the chat's own log, replayed on every reattach. It
- * carries the whole finalization rather than an id, because a client that has
- * no access to the host's revision store must still be able to render the
- * turn's revision, its branch and its changed paths from this record alone.
+ * so the fact reaches the client the way every other durable fact does: one
+ * record in the chat's log, replayed on every reattach. **One schema on every
+ * host**: `turn.machine` emits the same settlement in the browser worker, the
+ * daemon, the Electron utility and the cloud, so a revision card is projected
+ * from one shape wherever the turn ran.
  *
  * @public
  */
-export type RevisionFinalizedEvent = LogEventBase & {
-  readonly type: 'revision.finalized';
+export type TurnFinalizedLogEvent = LogEventBase & {
+  readonly type: 'turn.finalized';
   /** Stable user-message id of the turn this revision records. */
   readonly turnId: string;
-  /** Turn workspace the host prepared for the run. */
-  readonly workspaceId: string;
-  readonly revisionId: string;
-  readonly baseRevisionId: string;
-  /** Object id of the recorded **tree**, not of the revision that carries it. */
-  readonly treeId: string;
-  readonly branchName: string;
-  readonly publication: RevisionPublicationRecord;
-  /** Paths that differ between the turn's base tree and its recorded tree. */
+  readonly runId: string;
+  readonly chatId: string;
+  readonly projectId: string;
+  /** The checkout the turn ran on; absent when the host could not name one. */
+  readonly checkoutId?: string | undefined;
+  /** Absent when the turn changed nothing, so nothing was minted (I5). */
+  readonly revisionId?: string | undefined;
+  /** The branch the checkout tracks, absent when it is detached. */
+  readonly branch?: string | undefined;
+  /** Paths that differ between the revision's first parent and the revision. */
   readonly changedPaths: readonly string[];
-  readonly provenance: {
-    readonly source: 'user' | 'agent' | 'merge' | 'restore' | 'import';
-    readonly actorId: string;
-    readonly runId?: string;
-    /** Milliseconds since the Unix epoch. */
-    readonly createdAt: number;
-  };
-  readonly generatedSummary: string;
-  readonly nativeGit:
-    | { readonly status: 'not-configured' }
-    | { readonly status: 'stored'; readonly commitId: string; readonly objectFormat: 'sha1' | 'sha256' }
-    | { readonly status: 'failed'; readonly errorCode: string };
+  /** Object id of the recorded **tree**, not of the revision that carries it. */
+  readonly treeId?: string | undefined;
+  readonly trigger: 'turn';
+  /** Every lease on the checkout when the turn was placed (AC9). */
+  readonly runIds: readonly string[];
+};
+
+/** A turn whose writes could not be merged into the checkout it ran on. @public */
+export type TurnConflictedLogEvent = LogEventBase & {
+  readonly type: 'turn.conflicted';
+  readonly turnId: string;
+  readonly runId: string;
+  readonly chatId: string;
+  readonly checkoutId?: string | undefined;
+};
+
+/** A turn that ran and ended without a revision: no outcome is silent. @public */
+export type TurnFailedLogEvent = LogEventBase & {
+  readonly type: 'turn.failed';
+  readonly turnId: string;
+  readonly runId: string;
+  readonly chatId: string;
+  readonly checkoutId?: string | undefined;
+  readonly reason: string;
 };
 
 /** A durable run lifecycle state. @public */
@@ -393,7 +384,9 @@ export type AgentLogEvent =
   | SnapshotContextRefreshedEvent
   | SafeguardRecordedEvent
   | InterruptRecordedEvent
-  | RevisionFinalizedEvent
+  | TurnFinalizedLogEvent
+  | TurnConflictedLogEvent
+  | TurnFailedLogEvent
   | RunLifecycleEvent
   | ModelInvocationPreparedEvent
   | ModelInvocationBoundEvent

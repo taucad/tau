@@ -152,8 +152,8 @@ const slugOf = (path: string): string | undefined =>
  *
  * @example <caption>The daemon's agent view</caption>
  * ```typescript
- * import { composeView } from '@taucad/filesystem/composed-view';
  * import { createSkillBundleOverlay, createSkillBundleRegistry } from '@taucad/agent-tools/registry';
+ * import type { ReadSkillResource, SystemSkillBundle } from '@taucad/agent-tools/registry';
  *
  * export function exampleOverlay(bundles: readonly SystemSkillBundle[], read: ReadSkillResource) {
  *   return createSkillBundleOverlay(createSkillBundleRegistry(bundles), read);
@@ -193,9 +193,9 @@ export const createSkillBundleOverlay = (
     },
     read: async (path: string, options?: { readonly signal?: AbortSignal }) => {
       const node = registry.node(path);
-      if (node === undefined || node.type !== 'file') {
+      if (node?.type !== 'file') {
         throw Object.assign(new Error(`ENOENT: ${path}`), { code: 'ENOENT' });
       }
-      return readResource(node.resource, options?.signal ? { signal: options.signal } : {});
+      return readResource(node.resource, options?.signal === undefined ? {} : { signal: options.signal });
     },
   });

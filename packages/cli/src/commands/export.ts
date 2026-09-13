@@ -1,5 +1,5 @@
 import { defineCommand } from 'citty';
-import { resolve, basename, dirname, extname, join } from 'node:path';
+import { resolve, basename, dirname, extname } from 'node:path';
 import { mkdir, stat, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { fileExtensionSet } from '@taucad/runtime/types';

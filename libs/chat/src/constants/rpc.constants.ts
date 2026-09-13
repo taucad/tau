@@ -25,6 +25,7 @@ export const rpcName = {
   appendFile: 'append_file',
   editFile: 'edit_file',
   resolveSkill: 'resolve_skill',
+  readRevisions: 'read_revisions',
 } as const satisfies Record<string, string>;
 
 /**
@@ -74,6 +75,7 @@ export const readOnlyRpcNames = new Set<(typeof rpcName)[keyof typeof rpcName]>(
   rpcName.runGeoSpecTests,
   rpcName.exportGeometry,
   rpcName.resolveSkill,
+  rpcName.readRevisions,
 ]);
 
 /**

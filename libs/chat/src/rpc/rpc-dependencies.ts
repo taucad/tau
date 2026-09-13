@@ -7,6 +7,7 @@
  * - Node.js headless (via enhanced RuntimeFileSystem in the worker, runtime kernel)
  * - Workers or other JS runtimes
  */
+import type { RevisionChangeOutput, RevisionRowOutput } from '#schemas/tools/revisions.tool.schema.js';
 import type {
   CaptureImagesRpcResult,
   CaptureImagesRpcInput,
@@ -193,6 +194,32 @@ export type RpcSkillResolver = {
 };
 
 /**
+ * The read half of a project's revision graph (S28).
+ *
+ * Read-only on purpose: an agent sees where it is and what changed, and every
+ * verb that *moves* anything — branch, merge, restore, discard, sync — belongs
+ * to a person (I10). The host satisfies this with the same functions the
+ * Revisions pane and `tau revisions` call, so the three cannot disagree.
+ *
+ * @public
+ */
+export type RpcRevisionsClient = {
+  log(
+    request: Readonly<{ branch?: string | undefined; limit?: number | undefined }>,
+  ): Promise<readonly RevisionRowOutput[]>;
+  diff(from: string | undefined, to: string): Promise<readonly RevisionChangeOutput[]>;
+  describe(): Promise<
+    Readonly<{
+      branch: string | undefined;
+      revisionNumber: number | undefined;
+      revisionId: string | undefined;
+      branches: ReadonlyArray<Readonly<{ name: string; revisionNumber: number; revisionId: string }>>;
+      line: string;
+    }>
+  >;
+};
+
+/**
  * Dependencies required by RPC handlers.
  * `graphics` is optional -- headless mode omits it, and handlers
  * return an error if a graphics operation is requested without it.
@@ -205,6 +232,7 @@ export type RpcDependencies = {
   images?: RpcImageClient;
   geospec?: RpcGeoSpecClient;
   skillResolver?: RpcSkillResolver;
+  revisions?: RpcRevisionsClient;
 };
 
 /**

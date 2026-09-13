@@ -6,7 +6,7 @@ import type { MyUIMessage } from '#types/message.types.js';
 const request = (messages: unknown[]) => ({
   id: 'chat_1',
   projectId: 'project_1',
-  execution: { hostId: 'host_1', mode: 'direct', workspaceId: 'workspace_1', baseRevisionId: 'revision_1' },
+  execution: { hostId: 'host_1', workspaceId: 'workspace_1', baseRevisionId: 'revision_1' },
   admission: { version: 1, idempotencyKey: 'request_0000000001' },
   messages,
   agent: {
@@ -40,32 +40,38 @@ describe('parseChatTurnRequest', () => {
 describe('chatExecutionTargetSchema', () => {
   const validRequest = () => request([{ id: 'message_1', role: 'user', parts: [{ type: 'text', text: 'hello' }] }]);
 
-  it('requires the revision mode on every execution target', () => {
-    const { mode: _mode, ...withoutMode } = validRequest().execution;
+  it('requires nothing of a target but the host that writes', () => {
+    // W3d/D7: placement is non-branching by default, so there is no revision
+    // mode to name — the host that owns the tree records the turn either way.
+    const verdict = chatTurnRequestSchema.safeParse({ ...validRequest(), execution: { hostId: 'origin' } });
 
-    // V18/VSC5: the host that owns the tree is the one that has to be told how
-    // to record the turn, so a target without a mode is not a target.
-    const verdict = chatTurnRequestSchema.safeParse({ ...validRequest(), execution: withoutMode });
-
-    expect(verdict.success).toBe(false);
-    expect(verdict.error?.issues.at(0)?.path).toEqual(['execution', 'mode']);
+    expect(verdict.success).toBe(true);
   });
 
-  it('accepts a host-placed target that names no browser workspace', () => {
-    // A daemon owns its own workspace and mints its own base; only the mode
-    // and the host it rides to are the client's to say.
+  it('carries the conflict a resolution turn is being asked about (W10)', () => {
+    // *Ask chat to resolve* seeds a turn from the conflicted revision itself,
+    // so the paths still without a side ride the placement, not the prompt.
     const verdict = chatTurnRequestSchema.safeParse({
       ...validRequest(),
-      execution: { hostId: 'origin', mode: 'candidate' },
+      execution: { ...validRequest().execution, conflict: { revisionId: 'revision_9', paths: ['src/bracket.ts'] } },
     });
 
     expect(verdict.success).toBe(true);
   });
 
-  it('rejects a mode the wire does not speak', () => {
+  it('rejects a conflict with no path to decide', () => {
     const verdict = chatTurnRequestSchema.safeParse({
       ...validRequest(),
-      execution: { ...validRequest().execution, mode: 'branch' },
+      execution: { ...validRequest().execution, conflict: { revisionId: 'revision_9', paths: [] } },
+    });
+
+    expect(verdict.success).toBe(false);
+  });
+
+  it('rejects a revision mode the wire no longer speaks', () => {
+    const verdict = chatTurnRequestSchema.safeParse({
+      ...validRequest(),
+      execution: { ...validRequest().execution, mode: 'candidate' },
     });
 
     expect(verdict.success).toBe(false);

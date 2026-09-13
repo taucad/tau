@@ -54,6 +54,7 @@ export const tauToolKinds = new Map<string, string>([
   ['test_model', 'execute'],
   ['export_geometry', 'execute'],
   ['screenshot', 'other'],
+  ['revisions', 'read'],
   ['use_skill', 'other'],
 ]);
 

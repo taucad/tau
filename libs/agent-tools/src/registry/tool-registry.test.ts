@@ -137,6 +137,15 @@ describe('createChatToolRegistry listing', () => {
     );
   });
 
+  /* Review a1 R15: the read-only history tool is listed exactly where a client
+   * for it is attached — a disk host today, the browser when W11 wires its
+   * worker — and silently absent elsewhere, which is the right degradation and
+   * the thing nothing asserted. */
+  it('lists the revisions tool only where a revisions client is attached', () => {
+    expect(listOf({})).not.toContain('revisions');
+    expect(listOf({ revisions: { log: vi.fn(), diff: vi.fn(), describe: vi.fn() } })).toContain('revisions');
+  });
+
   it('publishes a draft-7 input schema with no $schema key', () => {
     const definition = build()
       .list()

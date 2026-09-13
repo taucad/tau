@@ -16,6 +16,7 @@ import {
 import { screenshotInputSchema, screenshotOutputSchema } from '#schemas/tools/screenshot.tool.schema.js';
 import { exportGeometryInputSchema, exportGeometryOutputSchema } from '#schemas/tools/export-geometry.tool.schema.js';
 import { testModelInputSchema, testModelOutputSchema } from '#schemas/tools/test-model.tool.schema.js';
+import { revisionsInputSchema, revisionsOutputSchema } from '#schemas/tools/revisions.tool.schema.js';
 import { toolName } from '#constants/tool.constants.js';
 import type { ToolName } from '#types/tool.types.js';
 
@@ -55,6 +56,7 @@ export const uiMessageTools = {
   [toolName.getKernelResult]: { inputSchema: getKernelResultInputSchema, outputSchema: getKernelResultOutputSchema },
   [toolName.exportGeometry]: { inputSchema: exportGeometryInputSchema, outputSchema: exportGeometryOutputSchema },
   [toolName.screenshot]: { inputSchema: screenshotInputSchema, outputSchema: screenshotOutputSchema },
+  [toolName.revisions]: { inputSchema: revisionsInputSchema, outputSchema: revisionsOutputSchema },
 } as const;
 
 /** Static tool-part input schemas used by lifecycle normalization. @public */

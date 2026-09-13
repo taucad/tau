@@ -1,4 +1,5 @@
 export * from '#schemas/agent-config.schema.js';
+export * from '#schemas/chat-record.schema.js';
 export * from '#schemas/chat-turn-request.schema.js';
 export * from '#schemas/context-payload.schema.js';
 export * from '#schemas/file-metadata.schema.js';

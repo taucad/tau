@@ -34,6 +34,7 @@ import { exportGeometryInputSchema, exportGeometryOutputSchema } from '#schemas/
 import { screenshotInputSchema, screenshotOutputSchema } from '#schemas/tools/screenshot.tool.schema.js';
 import { editFileInputSchema, editFileOutputSchema } from '#schemas/tools/edit-file.tool.schema.js';
 import { useSkillInputSchema, useSkillOutputSchema } from '#schemas/tools/use-skill.tool.schema.js';
+import { revisionsInputSchema, revisionsOutputSchema } from '#schemas/tools/revisions.tool.schema.js';
 import { binaryFileContentMetadataSchema, textFileContentMetadataSchema } from '#schemas/file-metadata.schema.js';
 
 // =============================================================================
@@ -255,6 +256,11 @@ const resolveSkillRpc = defineRpc({
   }),
 });
 
+const readRevisionsRpc = defineRpc({
+  input: revisionsInputSchema,
+  success: revisionsOutputSchema,
+});
+
 // =============================================================================
 // RPC Schemas Registry
 // =============================================================================
@@ -283,6 +289,7 @@ export type RpcSchemasRegistry = {
   [rpcName.appendFile]: RpcSchemaEntry<AppendFileRpcInput, AppendFileRpcResult>;
   [rpcName.editFile]: RpcSchemaEntry<EditFileRpcInput, EditFileRpcResult>;
   [rpcName.resolveSkill]: RpcSchemaEntry<ResolveSkillRpcInput, ResolveSkillRpcResult>;
+  [rpcName.readRevisions]: RpcSchemaEntry<ReadRevisionsRpcInput, ReadRevisionsRpcResult>;
 };
 
 /**
@@ -342,6 +349,10 @@ export const rpcSchemasRegistry: RpcSchemasRegistry = {
   [rpcName.resolveSkill]: {
     inputSchema: resolveSkillRpc.inputSchema,
     resultSchema: resolveSkillRpc.resultSchema,
+  },
+  [rpcName.readRevisions]: {
+    inputSchema: readRevisionsRpc.inputSchema,
+    resultSchema: readRevisionsRpc.resultSchema,
   },
 };
 
@@ -511,3 +522,10 @@ export type ResolveSkillRpcInput = z.infer<typeof resolveSkillRpc.inputSchema>;
 export type ResolveSkillRpcSuccess = z.infer<typeof resolveSkillRpc.successSchema>;
 /** @public */
 export type ResolveSkillRpcResult = z.infer<typeof resolveSkillRpc.resultSchema>;
+
+/** @public */
+export type ReadRevisionsRpcInput = z.infer<typeof readRevisionsRpc.inputSchema>;
+/** @public */
+export type ReadRevisionsRpcSuccess = z.infer<typeof readRevisionsRpc.successSchema>;
+/** @public */
+export type ReadRevisionsRpcResult = z.infer<typeof readRevisionsRpc.resultSchema>;

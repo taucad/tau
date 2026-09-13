@@ -1,20 +1,46 @@
 {
   "status": "prospective-source-derived-controls-before-candidate-execution",
   "basisCorpusSha256": "b1b605506f72304ccec2484506a39786f203d89e793eaab5e0125d246388d5a3",
-  "basisIds": ["f1-target-positive", "f1-target-negative"],
+  "basisIds": [
+    "f1-target-positive",
+    "f1-target-negative"
+  ],
   "primaryUtf8": "{\"frame\":\"artifact-xyz\",\"plate\":{\"max\":[\"10/1\",\"10/1\",\"2/1\"],\"min\":[\"0/1\",\"0/1\",\"0/1\"]},\"schema\":\"geospec.rational-orthogonal-plate/v1\",\"unit\":\"mm\",\"windows\":[{\"max\":[\"5/2\",\"5/2\",\"2/1\"],\"min\":[\"3/2\",\"3/2\",\"0/1\"]},{\"max\":[\"17/2\",\"17/2\",\"2/1\"],\"min\":[\"15/2\",\"15/2\",\"0/1\"]}]}",
   "primarySha256": "e8f81bc96be92adb804d4805d95226654813c819d5e2e5689b4076072c115e29",
   "ingestRequestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"format\":\"rational-plate\",\"frame\":{\"coordinateSystem\":\"z-up\",\"outputUnit\":\"mm\",\"sourceUnit\":\"mm\"},\"ingestOptions\":{},\"method\":\"ingestSubject\",\"primaryByteLength\":272,\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"f1-ingest-target\",\"resources\":[]}",
   "admissionUtf8": "{\"requestId\":\"f1-ingest-target\",\"result\":{\"subject\":{\"descriptor\":{\"backendProfile\":\"portable-rational-plate-v1\",\"format\":\"rational-plate\",\"frame\":{\"coordinateSystem\":\"z-up\",\"outputUnit\":\"mm\",\"sourceUnit\":\"mm\",\"uniformScale\":1},\"ingestOptions\":{},\"ingestProfile\":\"geospec-rational-orthogonal-plate-v1\",\"primary\":{\"byteLength\":272,\"sha256\":\"e8f81bc96be92adb804d4805d95226654813c819d5e2e5689b4076072c115e29\"},\"resources\":[],\"schema\":\"geospec-subject-v1\"},\"format\":\"rational-plate\",\"subjectHash\":\"3419006b2f24e82260808012e5692df6f5e2fceadc5f41a11c44aa0a87fbf736\"}}}",
   "derivation": {
     "planes": [
-      ["0", "3/2", "5/2", "15/2", "17/2", "10"],
-      ["0", "3/2", "5/2", "15/2", "17/2", "10"],
-      ["0", "2"]
+      [
+        "0",
+        "3/2",
+        "5/2",
+        "15/2",
+        "17/2",
+        "10"
+      ],
+      [
+        "0",
+        "3/2",
+        "5/2",
+        "15/2",
+        "17/2",
+        "10"
+      ],
+      [
+        "0",
+        "2"
+      ]
     ],
     "cellCount": 25,
     "windowCount": 2,
-    "charges": [1, 25, 1, 25, 6],
+    "charges": [
+      1,
+      25,
+      1,
+      25,
+      6
+    ],
     "total": 58,
     "successResults": "Only claimId and complete-envelope planHash changed from independent A2 target polarity rows. Geometry/certificate/diagnostics otherwise untouched.",
     "refusals": "Existing accepted logical-budget result spelling and source projection; no engine actuals."

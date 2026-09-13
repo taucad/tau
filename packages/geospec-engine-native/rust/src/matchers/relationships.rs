@@ -711,20 +711,28 @@ pub(crate) fn evaluate(prepared: &Prepared, context: &mut EvaluationContext<'_>)
             diagnostics: selection_diagnostics,
         };
     }
-    let analytic_claim = prepared.relationships.iter().any(|r| is_nominal_analytic(r.kind) || r.kind == Kind::Interference);
-    let analytic_caller = if analytic_claim { clearance_caller_reservation(prepared, context) } else { 0 };
+    let analytic_claim = prepared
+        .relationships
+        .iter()
+        .any(|r| is_nominal_analytic(r.kind) || r.kind == Kind::Interference);
+    let analytic_caller = if analytic_claim {
+        clearance_caller_reservation(prepared, context)
+    } else {
+        0
+    };
     let band_claim = prepared.relationships.iter().any(|relationship| {
-        relationship.kind == Kind::Clearance
-            && relationship
-                .resolved
-                .as_ref()
-                .is_some_and(|(subject, target)| {
-                    subject
-                        .entities
-                        .iter()
-                        .chain(&target.entities)
-                        .any(|entity| matches!(entity.face, Some(BrepEntity::Face { .. })))
-                })
+        matches!(relationship.kind, Kind::Contact | Kind::Insertion)
+            || (relationship.kind == Kind::Clearance
+                && relationship
+                    .resolved
+                    .as_ref()
+                    .is_some_and(|(subject, target)| {
+                        subject
+                            .entities
+                            .iter()
+                            .chain(&target.entities)
+                            .any(|entity| matches!(entity.face, Some(BrepEntity::Face { .. })))
+                    }))
     });
     let caller_reservation = if band_claim {
         let bytes = clearance_caller_reservation(prepared, context);
@@ -741,21 +749,31 @@ pub(crate) fn evaluate(prepared: &Prepared, context: &mut EvaluationContext<'_>)
     for (index, relationship) in prepared.relationships.iter().enumerate() {
         if analytic_claim {
             let box_pending = if relationship.kind == Kind::Interference {
-                relationship.resolved.as_ref().and_then(|(a,b)| a.entities.len().checked_mul(b.entities.len()))
+                relationship
+                    .resolved
+                    .as_ref()
+                    .and_then(|(a, b)| a.entities.len().checked_mul(b.entities.len()))
                     .and_then(|pairs| (pairs as u64).checked_add(1))
-                    .and_then(|pairs| pairs.checked_mul(8 * continuous::BOX_INTERFERENCE_RESERVATION_BYTES as u64))
+                    .and_then(|pairs| {
+                        pairs.checked_mul(8 * continuous::BOX_INTERFERENCE_RESERVATION_BYTES as u64)
+                    })
                     .unwrap_or(u64::MAX)
-            } else { 0 };
+            } else {
+                0
+            };
             // Current arithmetic plus the proof, diagnostic projection (two
             // certificate copies), measured projection and encoding/copy growth.
             // Eight output slots bound these six live copies with Vec growth.
             // Prior rows and borrowed prepared/selection data are separate.
             if let Err(error) = context.check_continuous_output(clearance_byte_sum([
-                analytic_caller, clearance_live_rows(&rows, &diagnostics),
+                analytic_caller,
+                clearance_live_rows(&rows, &diagnostics),
                 continuous::NOMINAL_ANALYTIC_RESERVATION_BYTES as u64,
                 8 * continuous::NOMINAL_ANALYTIC_OUTPUT_BYTES as u64,
                 box_pending,
-            ])) { return error; }
+            ])) {
+                return error;
+            }
         }
         if band_claim {
             if let Err(error) = context.set_cylindrical_band_output_bytes(clearance_byte_sum([
@@ -823,7 +841,7 @@ pub(crate) fn evaluate(prepared: &Prepared, context: &mut EvaluationContext<'_>)
             ]);
             // Each projected diagnostic can clone both final evidence and its
             // witness array. Reserve those before constructing the projection.
-            let projections = if is_cylindrical_band_proof(&proof) {
+            let projections = if is_compact_nominal_proof(&proof) {
                 0 // Compact diagnostic refers to the single full result certificate.
             } else {
                 proof_bytes
@@ -875,9 +893,12 @@ pub(crate) fn evaluate(prepared: &Prepared, context: &mut EvaluationContext<'_>)
     }
     if analytic_claim {
         if let Err(error) = context.check_continuous_output(clearance_byte_sum([
-            analytic_caller, clearance_live_rows(&rows, &diagnostics),
+            analytic_caller,
+            clearance_live_rows(&rows, &diagnostics),
             clearance_finish_reservation(prepared, context, &rows, &diagnostics),
-        ])) { return error; }
+        ])) {
+            return error;
+        }
     }
     Evaluation::Geometric {
         positive_satisfied: positive,
@@ -916,7 +937,7 @@ fn project_relationship_diagnostic(
         relationship_label(index, relationship),
         source.message
     );
-    if is_cylindrical_band_proof(proof) {
+    if is_compact_nominal_proof(proof) {
         // The complete C1/C2/C3 certificate occurs once in the relationship
         // result. Duplicating it in both diagnostic.final and witnesses would
         // defeat the bounded projection. Keep identities and measurements here
@@ -938,7 +959,9 @@ fn project_relationship_diagnostic(
                 Json::object([
                     (
                         "profile",
-                        Json::string("geospec-nominal-cylindrical-band-clearance-v1"),
+                        if matches!(json_field_ref(&proof.final_evidence,"method"), Some(Json::String(method)) if method=="exact-nominal-cylindrical-band-clearance") {
+                            Json::string("geospec-nominal-cylindrical-band-clearance-v1")
+                        } else {json_field(&proof.final_evidence, "method").unwrap_or(Json::Null)},
                     ),
                     ("relationshipIndex", Json::Number(index as f64)),
                     (
@@ -978,9 +1001,9 @@ fn project_relationship_diagnostic(
     diagnostic
 }
 
-fn is_cylindrical_band_proof(proof: &Proof) -> bool {
+fn is_compact_nominal_proof(proof: &Proof) -> bool {
     matches!(json_field_ref(&proof.final_evidence, "method"),
-        Some(Json::String(method)) if method == "exact-nominal-cylindrical-band-clearance")
+        Some(Json::String(method)) if matches!(method.as_str(), "exact-nominal-cylindrical-band-clearance" | "exact-nominal-finite-contact" | "exact-local-band-engagement"))
 }
 
 fn endpoints(
@@ -1038,7 +1061,8 @@ fn prove(
 ) -> Result<Proof, ProofError> {
     if is_nominal_analytic(relationship.kind) {
         charge(context, continuous::NOMINAL_ANALYTIC_UNITS)?;
-        context.check_continuous_output(continuous::NOMINAL_ANALYTIC_RESERVATION_BYTES as u64)
+        context
+            .check_continuous_output(continuous::NOMINAL_ANALYTIC_RESERVATION_BYTES as u64)
             .map_err(ProofError::Refused)?;
     }
     match relationship.kind {
@@ -1056,144 +1080,224 @@ fn prove(
 }
 
 fn is_nominal_analytic(kind: Kind) -> bool {
-    matches!(kind, Kind::Coaxial | Kind::Concentric | Kind::Coplanar | Kind::Parallel | Kind::Perpendicular | Kind::Angle)
+    matches!(
+        kind,
+        Kind::Coaxial
+            | Kind::Concentric
+            | Kind::Coplanar
+            | Kind::Parallel
+            | Kind::Perpendicular
+            | Kind::Angle
+    )
 }
 
+fn finite_face_identity(f: &crate::backend::brep::FiniteContactFace) -> Json {
+    Json::object([
+        ("origin",point_json(f.origin)),("normal",point_json(f.normal)),
+        ("wireCount",Json::Number(f.wire_count as f64)),("edgeUseCount",Json::Number(f.edge_use_count as f64)),
+        ("attachmentResidual",Json::Number(f.attachment_residual)),("attachmentLimit",Json::Number(f.tolerance)),
+        ("occurrence", Json::Number(f.occurrence as f64)),
+        (
+            "publicFaceOrdinal",
+            Json::Number(f.public_face_ordinal as f64),
+        ),
+        (
+            "privateQueryFace",
+            Json::Number(f.private_query_face as f64),
+        ),
+        ("sourceFace", Json::Number(f.source_face_entity as f64)),
+        (
+            "sourceRoute",
+            Json::Array(
+                f.source_route[..f.source_route_count as usize]
+                    .iter()
+                    .map(|n| Json::Number(*n as f64))
+                    .collect(),
+            ),
+        ),
+        ("sourceSameSense", Json::Bool(f.source_same_sense == 1)),
+        (
+            "transferredReversed",
+            Json::Bool(f.transferred_reversed == 1),
+        ),
+    ])
+}
+fn finite_contact_failure(reason: &str) -> ProofError {
+    ProofError::Refused(relationship_unsupported(reason,
+        "Use qualified finite nominal planes/circular boundaries or complete boxes; missing evidence cannot be inverted."))
+}
+fn contact_proof(
+    positive: bool,
+    certificate: Json,
+    relationship: &Relationship,
+    subject: &[Endpoint],
+    target: &[Endpoint],
+) -> Proof {
+    Proof {
+        positive,
+        broad_phase: broad_phase(
+            subject,
+            target,
+            relationship.tolerance.unwrap_or(DEFAULT_LINEAR_TOLERANCE),
+        ),
+        final_evidence: final_json(
+            "exact-nominal-finite-contact",
+            empty_object(),
+            optional_numbers(&[
+                ("tolerance", relationship.tolerance),
+                (
+                    "angularToleranceDegrees",
+                    relationship.angular_tolerance_degrees,
+                ),
+            ]),
+            vec![certificate],
+        ),
+        diagnostics: if positive {
+            vec![]
+        } else {
+            vec![mismatch(
+            format!("Finite contact between '{}' and '{}' violates the exact seating or separation bound.",
+                selector_label(&relationship.subject_raw),selector_label(&relationship.target_raw)),
+            "Align opposing face normals and close the certified finite gap.",None)]
+        },
+    }
+}
 fn prove_contact(
     relationship: &Relationship,
     subject: &[Endpoint],
     target: &[Endpoint],
     context: &mut EvaluationContext<'_>,
 ) -> Result<Proof, ProofError> {
-    let tolerance = relationship.tolerance.unwrap_or(DEFAULT_LINEAR_TOLERANCE);
-    let broad = broad_phase(subject, target, tolerance);
-    if let Some(proof) = planar_contact_seating(relationship, subject, target, broad.clone())? {
-        return Ok(proof);
-    }
-    let Some(extrema) = nearest_extrema(subject, target, context)? else {
-        return Err(ProofError::Refused(relationship_unsupported(
-            "The exact OCCT extrema computation for contact did not converge.",
-            "Repair or re-export the geometry: an exact minimum-distance proof needs valid BRep faces on both endpoints.",
-        )));
+    let ([a], [b]) = (subject, target) else {
+        return Err(finite_contact_failure(
+            "Finite contact requires one resolved operand per endpoint.",
+        ));
     };
-    let final_evidence = final_json(
-        "extrema",
-        Json::object([("distance", Json::Number(extrema.distance))]),
-        Json::object([("tolerance", Json::Number(tolerance))]),
-        vec![
-            point_witness(extrema.point_a),
-            point_witness(extrema.point_b),
-        ],
-    );
-    let positive = extrema.distance <= tolerance;
-    let diagnostics = (!positive)
-        .then(|| mismatch(
-            format!(
-                "Contact between '{}' and '{}' measured {:.4} mm, over the {tolerance} mm tolerance.",
-                selector_label(&relationship.subject_raw),
-                selector_label(&relationship.target_raw),
-                extrema.distance
-            ),
-            "Close the joint, or widen the contact tolerance if the stand-off is intended.",
-            Some(midpoint(extrema.point_a, extrema.point_b)),
-        ))
-        .into_iter()
-        .collect();
-    Ok(Proof {
-        positive,
-        broad_phase: broad,
-        final_evidence,
-        diagnostics,
-    })
-}
-
-fn planar_contact_seating(
-    relationship: &Relationship,
-    subject: &[Endpoint],
-    target: &[Endpoint],
-    broad_phase: Json,
-) -> Result<Option<Proof>, ProofError> {
-    if subject.len() != 1 || target.len() != 1 {
-        return Ok(None);
-    }
-    let a = &subject[0].facts;
-    let b = &target[0].facts;
-    if a.surface_type.as_deref() != Some("plane") || b.surface_type.as_deref() != Some("plane") {
-        return Ok(None);
-    }
-    let (
-        Some(a_normal),
-        Some(b_normal),
-        Some(centroid),
-        Some(bounds),
-        Some(area),
-        Some(target_offset),
-    ) = (a.normal, b.normal, a.centroid, a.bounds, a.area, b.offset)
-    else {
-        return Err(ProofError::Refused(relationship_unsupported(
-            "A planar face contact needs a positive-area subject face with analytic centroid, bounds, normal and target-plane offset.",
-            "Re-export the STEP artifact with complete analytic face facts before asserting face contact.",
-        )));
-    };
-    if area <= 0.0 {
-        return Err(ProofError::Refused(relationship_unsupported(
-            "A planar face contact needs a positive-area subject face with analytic centroid, bounds, normal and target-plane offset.",
-            "Re-export the STEP artifact with complete analytic face facts before asserting face contact.",
-        )));
-    }
-    let subject_normal = unit(a_normal);
-    let target_normal = unit(b_normal);
-    let cosine = dot(subject_normal, target_normal).clamp(-1.0, 1.0);
-    let normal_angle = relationship_degrees((-cosine).acos());
-    let tangent = (1.0 - cosine * cosine).max(0.0).sqrt();
-    let radius = bounds_corners(bounds)
-        .into_iter()
-        .map(|corner| distance(corner, centroid))
-        .fold(0.0, f64::max);
-    let centroid_separation = (dot(target_normal, centroid) - target_offset).abs();
-    let max_separation_bound = centroid_separation + radius * tangent;
     let tolerance = relationship.tolerance.unwrap_or(DEFAULT_LINEAR_TOLERANCE);
-    let angular = relationship
-        .angular_tolerance_degrees
-        .unwrap_or(DEFAULT_ANGULAR_TOLERANCE_DEGREES);
-    if normal_angle <= angular
-        && (centroid_separation > tolerance || max_separation_bound <= tolerance)
-    {
-        return Ok(None);
+    charge(context, continuous::FINITE_CONTACT_UNITS)?;
+    context
+        .check_cylindrical_band_capacity(&[
+            continuous::FINITE_CONTACT_RESERVATION_BYTES as u64,
+            2 * continuous::FINITE_CONTACT_OUTPUT_BYTES as u64,
+        ])
+        .map_err(ProofError::Refused)?;
+    if let (BrepEntity::Occurrence(ai), BrepEntity::Occurrence(bi)) = (a.entity, b.entity) {
+        let da = context
+            .selected_continuous_domain(ai)
+            .map_err(ProofError::Refused)?;
+        let db = context
+            .selected_continuous_domain(bi)
+            .map_err(ProofError::Refused)?;
+        return match continuous::clearance(continuous::ClearanceRequest {
+            subject: &da,
+            target: &db,
+            minimum: None,
+            maximum: Some(tolerance),
+            tolerance: 0.,
+        }) {
+            Outcome::Decided { positive, evidence } => Ok(contact_proof(
+                positive,
+                evidence.to_json(),
+                relationship,
+                subject,
+                target,
+            )),
+            Outcome::Unsupported { reason, .. } => Err(finite_contact_failure(&reason.message)),
+        };
     }
-    let final_evidence = final_json(
-        "analytic",
-        Json::object([
-            ("distance", Json::Number(centroid_separation)),
-            ("maxSeparationBound", Json::Number(max_separation_bound)),
-            ("normalAngle", Json::Number(normal_angle)),
-            ("faceArea", Json::Number(area)),
-        ]),
-        Json::object([
-            ("tolerance", Json::Number(tolerance)),
-            ("angularToleranceDegrees", Json::Number(angular)),
-        ]),
-        vec![
-            plane_witness(
-                subject_normal,
-                a.offset.unwrap_or(dot(subject_normal, centroid)),
-            ),
-            plane_witness(target_normal, target_offset),
-        ],
-    );
-    Ok(Some(Proof {
-        positive: false,
-        broad_phase,
-        final_evidence,
-        diagnostics: vec![mismatch(
-            format!(
-                "Planar contact between '{}' and '{}' has {:.4}° normal-opposition error and a {:.4} mm full-face separation bound, outside the {angular}° / {tolerance} mm seating band.",
-                selector_label(&relationship.subject_raw), selector_label(&relationship.target_raw), normal_angle, max_separation_bound
-            ),
-            "Align the face normals and seat the full interface; a single near-zero edge witness is not face contact.",
-            Some(centroid),
-        )],
-    }))
+    let ao = a
+        .facts
+        .face_index
+        .ok_or_else(|| finite_contact_failure("Contact source has no public face identity."))?;
+    let af = context
+        .finite_contact_face(a.entity, ao)
+        .map_err(ProofError::Refused)?;
+    // A target occurrence may contribute a real boundary face, never an
+    // unrelated infinite support. Keep enumeration tied to its retained source
+    // inventory, precharge all rows before testing, and bound it to 64 faces.
+    let bundle = context.subject().report_bundle()?.ok_or_else(|| {
+        finite_contact_failure("Contact needs the actual located-face inventory.")
+    })?;
+    let mut targets = Vec::new();
+    if let BrepEntity::Occurrence(occurrence) = b.entity {
+        if af.kind != 1 {
+            return Err(finite_contact_failure(
+                "Only attached conical rims admit a face-to-occurrence contact witness.",
+            ));
+        }
+        let faces = bundle
+            .occurrence_faces
+            .get(occurrence as usize)
+            .ok_or_else(|| {
+                finite_contact_failure("Target occurrence face inventory is missing.")
+            })?;
+        if faces.len() > 64 {
+            return Err(finite_contact_failure(
+                "Finite contact target inventory exceeds 64 faces.",
+            ));
+        }
+        charge(context, faces.len() as u64)?;
+        targets
+            .try_reserve_exact(faces.len())
+            .map_err(|_| finite_contact_failure("Contact target reservation failed."))?;
+        for f in faces.iter() {
+            if matches!(
+                f.facts.surface,
+                crate::backend::brep::SurfaceFacts::Cone { .. }
+            ) {
+                targets.push((f.entity, f.facts.index));
+            }
+        }
+    } else {
+        targets.push((
+            b.entity,
+            b.facts.face_index.ok_or_else(|| {
+                finite_contact_failure("Contact target has no public face identity.")
+            })?,
+        ));
+    }
+    for (entity, ordinal) in targets {
+        let bf = context
+            .finite_contact_face(entity, ordinal)
+            .map_err(ProofError::Refused)?;
+        context
+            .check_cylindrical_band_capacity(&[
+                continuous::FINITE_CONTACT_RESERVATION_BYTES as u64,
+                2 * continuous::FINITE_CONTACT_OUTPUT_BYTES as u64,
+            ])
+            .map_err(ProofError::Refused)?;
+        match continuous::finite_contact(continuous::FiniteContactRequest {
+            subject: &af,
+            target: &bf,
+            tolerance,
+            angular_tolerance_degrees: relationship
+                .angular_tolerance_degrees
+                .unwrap_or(DEFAULT_ANGULAR_TOLERANCE_DEGREES),
+        }) {
+            Outcome::Decided { positive, evidence } => {
+                let certificate = Json::object([
+                    ("subjectSource", finite_face_identity(&af)),
+                    ("targetSource", finite_face_identity(&bf)),
+                    ("decision", evidence.to_json()),
+                ]);
+                return Ok(contact_proof(
+                    positive,
+                    certificate,
+                    relationship,
+                    subject,
+                    target,
+                ));
+            }
+            Outcome::Unsupported { reason, .. } => {
+                if !matches!(b.entity, BrepEntity::Occurrence(_)) {
+                    return Err(finite_contact_failure(&reason.message));
+                }
+            }
+        }
+    }
+    Err(finite_contact_failure(
+        "No attached circular witness was established on the selected target occurrence.",
+    ))
 }
 
 /// Preserve the selector's public ordinal and its separately resolved private
@@ -1455,19 +1559,48 @@ fn prove_cylindrical_band_clearance(
     })
 }
 
-fn prove_coaxial(relationship: &Relationship, subject: &[Endpoint], target: &[Endpoint]) -> Result<Proof, ProofError> {
-    prove_nominal_analytic(relationship, subject, target, continuous::AnalyticKind::Axis)
+fn prove_coaxial(
+    relationship: &Relationship,
+    subject: &[Endpoint],
+    target: &[Endpoint],
+) -> Result<Proof, ProofError> {
+    prove_nominal_analytic(
+        relationship,
+        subject,
+        target,
+        continuous::AnalyticKind::Axis,
+    )
 }
 
-fn prove_coplanar(relationship: &Relationship, subject: &[Endpoint], target: &[Endpoint]) -> Result<Proof, ProofError> {
-    prove_nominal_analytic(relationship, subject, target, continuous::AnalyticKind::Plane)
+fn prove_coplanar(
+    relationship: &Relationship,
+    subject: &[Endpoint],
+    target: &[Endpoint],
+) -> Result<Proof, ProofError> {
+    prove_nominal_analytic(
+        relationship,
+        subject,
+        target,
+        continuous::AnalyticKind::Plane,
+    )
 }
 
-fn prove_direction_angle(relationship: &Relationship, subject: &[Endpoint], target: &[Endpoint]) -> Result<Proof, ProofError> {
-    prove_nominal_analytic(relationship, subject, target, continuous::AnalyticKind::Direction)
+fn prove_direction_angle(
+    relationship: &Relationship,
+    subject: &[Endpoint],
+    target: &[Endpoint],
+) -> Result<Proof, ProofError> {
+    prove_nominal_analytic(
+        relationship,
+        subject,
+        target,
+        continuous::AnalyticKind::Direction,
+    )
 }
 
-fn admitted_analytic_support(endpoint: &Endpoint) -> Result<continuous::NominalSupport, ProofError> {
+fn admitted_analytic_support(
+    endpoint: &Endpoint,
+) -> Result<continuous::NominalSupport, ProofError> {
     let support = endpoint.facts.nominal_support.ok_or_else(|| ProofError::Refused(relationship_unsupported(
         "The analytic endpoint has no associated placed raw support.",
         "Select an analytic face or its derived axis/plane from the same AP242 face inventory; labels and datum reporting facts are not support certificates.",
@@ -1495,7 +1628,13 @@ fn nominal_support_json(s: continuous::NominalSupport) -> Json {
         _ => unreachable!("admitted support face"),
     };
     Json::object([
-        ("kind", Json::string(match s.kind { continuous::SupportKind::Axis => "axis", continuous::SupportKind::Plane => "plane" })),
+        (
+            "kind",
+            Json::string(match s.kind {
+                continuous::SupportKind::Axis => "axis",
+                continuous::SupportKind::Plane => "plane",
+            }),
+        ),
         ("occurrence", occurrence),
         ("publicFaceOrdinal", Json::Number(s.public_ordinal.into())),
         ("privateQueryFace", Json::Number(private.into())),
@@ -1519,20 +1658,35 @@ fn prove_nominal_analytic(
     let a = admitted_analytic_support(a)?;
     let b = admitted_analytic_support(b)?;
     let tolerance = relationship.tolerance.unwrap_or(DEFAULT_LINEAR_TOLERANCE);
-    let angular = relationship.angular_tolerance_degrees.unwrap_or(DEFAULT_ANGULAR_TOLERANCE_DEGREES);
-    let expected_angle = if relationship.kind == Kind::Perpendicular { 90.0 }
-        else if matches!(kind, continuous::AnalyticKind::Direction) { relationship.angle_degrees.unwrap_or(0.0) }
-        else { 0.0 };
-    let (positive, evidence) = match continuous::nominal_analytic(continuous::NominalAnalyticRequest {
-        kind, subject: a, target: b, tolerance, angle_degrees: expected_angle, angular_tolerance_degrees: angular,
-    }) {
+    let angular = relationship
+        .angular_tolerance_degrees
+        .unwrap_or(DEFAULT_ANGULAR_TOLERANCE_DEGREES);
+    let expected_angle = if relationship.kind == Kind::Perpendicular {
+        90.0
+    } else if matches!(kind, continuous::AnalyticKind::Direction) {
+        relationship.angle_degrees.unwrap_or(0.0)
+    } else {
+        0.0
+    };
+    let (positive, evidence) = match continuous::nominal_analytic(
+        continuous::NominalAnalyticRequest {
+            kind,
+            subject: a,
+            target: b,
+            tolerance,
+            angle_degrees: expected_angle,
+            angular_tolerance_degrees: angular,
+        },
+    ) {
         Outcome::Decided { positive, evidence } => (positive, evidence),
         Outcome::Unsupported { reason, .. } => {
             let mut refusal = relationship_unsupported(&reason.message,
                 "Inspect the raw AP242 support, exact arithmetic domain and authored limits; unresolved evidence cannot be inverted.");
             if reason.kind == continuous::ContinuousErrorKind::InvalidInput {
                 if let Evaluation::Refused { diagnostics } = &mut refusal {
-                    for diagnostic in diagnostics { diagnostic.code = "GEOSPEC_INVALID_EVIDENCE".into(); }
+                    for diagnostic in diagnostics {
+                        diagnostic.code = "GEOSPEC_INVALID_EVIDENCE".into();
+                    }
                 }
             }
             return Err(ProofError::Refused(refusal));
@@ -1541,29 +1695,50 @@ fn prove_nominal_analytic(
     // Legacy floating expressions remain diagnostic only. The exact predicate
     // above already decided; neither acos nor these display values select truth.
     let angle = folded_angle(a.direction, b.direction);
-    let display = |value: f64| if value.is_finite() { Json::Number(value) } else { Json::Null };
+    let display = |value: f64| {
+        if value.is_finite() {
+            Json::Number(value)
+        } else {
+            Json::Null
+        }
+    };
     let mut measured = vec![("angle".into(), display(angle))];
     match kind {
         continuous::AnalyticKind::Axis => {
-            let offset = subtract(b.origin,a.origin);
-            let along = dot(offset,a.direction)/dot(a.direction,a.direction);
-            measured.push(("radialOffset".into(),display(length(subtract(offset,scale(a.direction,along))))));
+            let offset = subtract(b.origin, a.origin);
+            let along = dot(offset, a.direction) / dot(a.direction, a.direction);
+            measured.push((
+                "radialOffset".into(),
+                display(length(subtract(offset, scale(a.direction, along)))),
+            ));
         }
         continuous::AnalyticKind::Plane => {
-            measured.push(("offsetDelta".into(),evidence.distance_squared.as_ref().map_or(Json::Null, |d| display(d.display.sqrt()))));
+            measured.push((
+                "offsetDelta".into(),
+                evidence
+                    .distance_squared
+                    .as_ref()
+                    .map_or(Json::Null, |d| display(d.display.sqrt())),
+            ));
         }
-        continuous::AnalyticKind::Direction => measured.push(("deviation".into(),display((angle-expected_angle).abs()))),
+        continuous::AnalyticKind::Direction => {
+            measured.push(("deviation".into(), display((angle - expected_angle).abs())))
+        }
     }
-    measured.push(("displayRole".into(),Json::string("diagnostic-only")));
+    measured.push(("displayRole".into(), Json::string("diagnostic-only")));
     let final_evidence = final_json(
         "exact-nominal-analytic-support",
         Json::Object(measured),
-        Json::object([("tolerance",Json::Number(tolerance)),("angleDegrees",Json::Number(expected_angle)),("angularToleranceDegrees",Json::Number(angular))]),
+        Json::object([
+            ("tolerance", Json::Number(tolerance)),
+            ("angleDegrees", Json::Number(expected_angle)),
+            ("angularToleranceDegrees", Json::Number(angular)),
+        ]),
         vec![Json::object([
-            ("kind",Json::string("nominal-analytic-support")),
-            ("value",evidence.to_json()),
-            ("subject",nominal_support_json(a)),
-            ("target",nominal_support_json(b)),
+            ("kind", Json::string("nominal-analytic-support")),
+            ("value", evidence.to_json()),
+            ("subject", nominal_support_json(a)),
+            ("target", nominal_support_json(b)),
         ])],
     );
     let diagnostics = (!positive).then(|| mismatch(
@@ -1571,7 +1746,12 @@ fn prove_nominal_analytic(
         "Inspect the exact support certificate and authored limits; displayed angles and distances are diagnostic only.",
         Some(a.origin),
     )).into_iter().collect();
-    Ok(Proof { positive, broad_phase:broad_phase(subject,target,tolerance), final_evidence, diagnostics })
+    Ok(Proof {
+        positive,
+        broad_phase: broad_phase(subject, target, tolerance),
+        final_evidence,
+        diagnostics,
+    })
 }
 
 fn prove_containment(
@@ -1764,6 +1944,111 @@ fn sampled_insertion_refusal() -> Evaluation {
     }
 }
 
+fn prove_local_band_engagement(
+    relationship: &Relationship,
+    subject: &[Endpoint],
+    target: &[Endpoint],
+    context: &mut EvaluationContext<'_>,
+) -> Result<Proof, ProofError> {
+    charge(context, continuous::FINITE_CONTACT_UNITS)?;
+    let (a, b) = selected_cylindrical_band_pair(
+        subject
+            .first()
+            .ok_or_else(|| finite_contact_failure("Missing engagement subject."))?,
+        target
+            .first()
+            .ok_or_else(|| finite_contact_failure("Missing engagement target."))?,
+        context,
+    )?;
+    let axis = relationship
+        .axis
+        .ok_or_else(|| finite_contact_failure("Local engagement requires the authored axis."))?;
+    context
+        .check_cylindrical_band_capacity(&[
+            continuous::FINITE_CONTACT_RESERVATION_BYTES as u64,
+            2 * continuous::FINITE_CONTACT_OUTPUT_BYTES as u64,
+        ])
+        .map_err(ProofError::Refused)?;
+    let (positive, evidence) =
+        match continuous::band_engagement(continuous::BandEngagementRequest {
+            subject: &a,
+            target: &b,
+            axis,
+            minimum: relationship.min.unwrap_or(0.),
+            maximum: relationship.max,
+            tolerance: relationship.tolerance.unwrap_or(DEFAULT_LINEAR_TOLERANCE),
+            angular_tolerance_degrees: relationship
+                .angular_tolerance_degrees
+                .unwrap_or(DEFAULT_ANGULAR_TOLERANCE_DEGREES),
+        }) {
+            Outcome::Decided { positive, evidence } => (positive, evidence),
+            Outcome::Unsupported { reason, .. } => {
+                return Err(finite_contact_failure(&reason.message))
+            }
+        };
+    let source = |f: &crate::backend::brep::NominalCylindricalBand| {
+        Json::object([
+            ("occurrence", Json::Number(f.occurrence as f64)),
+            (
+                "publicFaceOrdinal",
+                Json::Number(f.public_face_ordinal as f64),
+            ),
+            (
+                "privateQueryFace",
+                Json::Number(f.private_query_face as f64),
+            ),
+            ("sourceFace", Json::Number(f.source_face_entity as f64)),
+            (
+                "sourceRoute",
+                Json::Array(
+                    f.source_route[..f.source_route_count as usize]
+                        .iter()
+                        .map(|v| Json::Number(*v as f64))
+                        .collect(),
+                ),
+            ),
+            ("origin", point_json(f.origin)),
+            ("axis", point_json(f.axis)),
+            ("radius", Json::Number(f.radius)),
+            ("from", Json::Number(f.from)),
+            ("to", Json::Number(f.to)),
+        ])
+    };
+    let final_evidence = final_json(
+        "exact-local-band-engagement",
+        Json::object([
+            ("depth", Json::Number(evidence.depth.display)),
+            ("displayRole", Json::string("diagnostic-only")),
+        ]),
+        optional_numbers(&[
+            ("min", relationship.min),
+            ("max", relationship.max),
+            ("tolerance", relationship.tolerance),
+        ]),
+        vec![Json::object([
+            ("subjectSource", source(&a)),
+            ("targetSource", source(&b)),
+            ("decision", evidence.to_json()),
+        ])],
+    );
+    Ok(Proof {
+        positive,
+        broad_phase: broad_phase(
+            subject,
+            target,
+            relationship.tolerance.unwrap_or(DEFAULT_LINEAR_TOLERANCE),
+        ),
+        final_evidence,
+        diagnostics: if positive {
+            vec![]
+        } else {
+            vec![mismatch(
+            "The selected finite thread/bore axial engagement or radial fit is outside the authored band.".into(),
+            "Adjust the selected thread/bore alignment, radial fit or insertion depth; this is not whole-part collision evidence.",None)]
+        },
+    })
+}
+
 fn prove_continuous_insertion(
     relationship: &Relationship,
     subject: &[Endpoint],
@@ -1774,6 +2059,11 @@ fn prove_continuous_insertion(
     else {
         return Err(ProofError::Refused(sampled_insertion_refusal()));
     };
+    if matches!(subject_endpoint.entity, BrepEntity::Face { .. })
+        && matches!(target_endpoint.entity, BrepEntity::Face { .. })
+    {
+        return prove_local_band_engagement(relationship, subject, target, context);
+    }
     let (BrepEntity::Occurrence(subject_id), BrepEntity::Occurrence(target_id)) =
         (subject_endpoint.entity, target_endpoint.entity)
     else {
@@ -1852,27 +2142,43 @@ fn prove_continuous_insertion(
 }
 
 fn prove_interference(
-    relationship: &Relationship, subject: &[Endpoint], target: &[Endpoint],
+    relationship: &Relationship,
+    subject: &[Endpoint],
+    target: &[Endpoint],
     context: &mut EvaluationContext<'_>,
 ) -> Result<Proof, ProofError> {
-    let pair_count = subject.len().checked_mul(target.len()).ok_or_else(|| ProofError::Refused(box_interference_refusal()))?;
+    let pair_count = subject
+        .len()
+        .checked_mul(target.len())
+        .ok_or_else(|| ProofError::Refused(box_interference_refusal()))?;
     let minimum = relationship.min_volume.unwrap_or(0.0);
     let maximum = relationship.max_volume.unwrap_or(0.0);
-    let reservation = (pair_count as u64).checked_add(1)
+    let reservation = (pair_count as u64)
+        .checked_add(1)
         .and_then(|n| n.checked_mul(8 * continuous::BOX_INTERFERENCE_RESERVATION_BYTES as u64))
         .unwrap_or(u64::MAX);
     // Reserve all pair certificates and later projection/encoding copies before
     // allocating their Vec or invoking a predicate. No general OCCT fallback.
-    context.check_continuous_output(reservation).map_err(ProofError::Refused)?;
+    context
+        .check_continuous_output(reservation)
+        .map_err(ProofError::Refused)?;
     let mut pairs = Vec::with_capacity(pair_count);
     let mut best: Option<(bool, continuous::BoxInterferenceEvidence)> = None;
     let mut best_index = 0;
     for a in subject {
-        let BrepEntity::Occurrence(a_id) = a.entity else { return Err(ProofError::Refused(box_interference_refusal())); };
+        let BrepEntity::Occurrence(a_id) = a.entity else {
+            return Err(ProofError::Refused(box_interference_refusal()));
+        };
         for b in target {
-            let BrepEntity::Occurrence(b_id) = b.entity else { return Err(ProofError::Refused(box_interference_refusal())); };
-            let a_domain = context.selected_continuous_domain(a_id).map_err(ProofError::Refused)?;
-            let b_domain = context.selected_continuous_domain(b_id).map_err(ProofError::Refused)?;
+            let BrepEntity::Occurrence(b_id) = b.entity else {
+                return Err(ProofError::Refused(box_interference_refusal()));
+            };
+            let a_domain = context
+                .selected_continuous_domain(a_id)
+                .map_err(ProofError::Refused)?;
+            let b_domain = context
+                .selected_continuous_domain(b_id)
+                .map_err(ProofError::Refused)?;
             charge(context, 1)?;
             let (positive, evidence) = match continuous::box_interference(continuous::BoxInterferenceRequest {
                 subject: &a_domain, target: &b_domain, minimum, maximum,
@@ -1882,31 +2188,51 @@ fn prove_interference(
                     &reason.message, "Interference is qualified only for admitted complete nominal boxes; incomplete/non-box domains are noninvertible, without general Boolean fallback.",
                 ))),
             };
-            let greater = best.as_ref().is_none_or(|(_,current)| evidence.greater_than(current));
+            let greater = best
+                .as_ref()
+                .is_none_or(|(_, current)| evidence.greater_than(current));
             pairs.push(evidence.to_json());
-            if greater { best_index=pairs.len()-1; best=Some((positive,evidence)); }
+            if greater {
+                best_index = pairs.len() - 1;
+                best = Some((positive, evidence));
+            }
         }
     }
-    let (positive,best)=best.ok_or_else(||ProofError::Refused(box_interference_refusal()))?;
-    let volume=best.volume.display;
-    let centroid=best.center.as_ref().map(|c|c.each_ref().map(|v|v.display));
-    let final_evidence=final_json(
+    let (positive, best) = best.ok_or_else(|| ProofError::Refused(box_interference_refusal()))?;
+    let volume = best.volume.display;
+    let centroid = best
+        .center
+        .as_ref()
+        .map(|c| c.each_ref().map(|v| v.display));
+    let final_evidence = final_json(
         "exact-nominal-box-interference",
         Json::object([
-            ("volume",Json::Number(volume)), ("exactVolume",best.volume.to_json()),
-            ("criterion",Json::string("maximum-selected-pair-volume")),
-            ("maximumPairIndex",Json::Number(best_index as f64)),
-            ("checkedPairs",Json::Number(pair_count as f64)),
+            ("volume", Json::Number(volume)),
+            ("exactVolume", best.volume.to_json()),
+            ("criterion", Json::string("maximum-selected-pair-volume")),
+            ("maximumPairIndex", Json::Number(best_index as f64)),
+            ("checkedPairs", Json::Number(pair_count as f64)),
         ]),
-        Json::object([("minVolume",Json::Number(minimum)),("maxVolume",Json::Number(maximum))]),
-        vec![Json::object([("kind",Json::string("complete-box-intersections")),("pairs",Json::Array(pairs))])],
+        Json::object([
+            ("minVolume", Json::Number(minimum)),
+            ("maxVolume", Json::Number(maximum)),
+        ]),
+        vec![Json::object([
+            ("kind", Json::string("complete-box-intersections")),
+            ("pairs", Json::Array(pairs)),
+        ])],
     );
     let diagnostics=(!positive).then(||mismatch(
         format!("Maximum admitted box-pair intersection volume {volume} mm³ is outside the inclusive {minimum}–{maximum} mm³ allowance."),
         "Inspect the exact volume and complete source-box certificates; no numerical epsilon is applied.",
         centroid,
     )).into_iter().collect();
-    Ok(Proof {positive,broad_phase:broad_phase(subject,target,DEFAULT_LINEAR_TOLERANCE),final_evidence,diagnostics})
+    Ok(Proof {
+        positive,
+        broad_phase: broad_phase(subject, target, DEFAULT_LINEAR_TOLERANCE),
+        final_evidence,
+        diagnostics,
+    })
 }
 
 fn box_interference_refusal() -> Evaluation {
@@ -2364,6 +2690,20 @@ mod nominal_analytic_relationships;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn finite_contact_compact_projection_preserves_existing_c1_profile() {
+        let relationship=parse_relationship(&crate::codec::decode(br#"{"kind":"clearance","subject":"left","target":"right"}"#).unwrap(),0).unwrap();
+        let selected=Selection{status:SelectionStatus::Resolved,entities:vec![],expected:crate::analysis::selection::Cardinality::One,
+            stability:Stability::Authored,candidates:vec![],diagnostics:vec![]};
+        let proof=Proof{positive:false,broad_phase:empty_object(),final_evidence:final_json("exact-nominal-cylindrical-band-clearance",empty_object(),empty_object(),vec![]),diagnostics:vec![]};
+        let source=Diagnostic::error("GEOSPEC_SPATIAL_RELATIONSHIP_MISMATCH","Existing C1 control.");
+        let diagnostic=project_relationship_diagnostic(0,&relationship,&selected,&selected,&proof,&source);
+        let actual:serde_json::Value=serde_json::from_slice(&crate::codec::encode(&diagnostic.to_json()).unwrap()).unwrap();
+        assert_eq!(actual["details"]["evidence"]["profile"],"geospec-nominal-cylindrical-band-clearance-v1");
+        assert_eq!(actual["details"]["evidence"]["path"],"evidence.witnesses.relationships[relationshipIndex].final");
+        assert!(actual["details"]["evidence"].get("final").is_none());
+    }
 
     struct TrimControl(std::cell::Cell<u32>);
 

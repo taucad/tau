@@ -3,35 +3,43 @@
 //! This module accepts only connector-certified, actual located complete boxes.
 //! It does not infer exact geometry from reporting bounds or tessellation.
 
-mod clearance;
 mod box_interference;
+mod clearance;
 mod cylindrical_band;
 mod domain;
 mod exact;
-mod nominal_analytic;
+mod finite_contact;
+pub(crate) use finite_contact::{
+    finite_contact, FiniteContactRequest, FINITE_CONTACT_OUTPUT_BYTES,
+    FINITE_CONTACT_RESERVATION_BYTES, FINITE_CONTACT_UNITS,
+};
 mod insertion;
+mod nominal_analytic;
 mod topology;
 
 use crate::codec::Json;
-pub(crate) use box_interference::{box_interference,BoxInterferenceRequest,BoxInterferenceEvidence,BOX_INTERFERENCE_RESERVATION_BYTES};
 #[cfg(test)]
 pub(crate) use box_interference::nominal_analytic_box_tests::box_domain as nominal_analytic_box_control;
+pub(crate) use box_interference::{
+    box_interference, BoxInterferenceEvidence, BoxInterferenceRequest,
+    BOX_INTERFERENCE_RESERVATION_BYTES,
+};
 
 pub(crate) use nominal_analytic::{
     nominal_analytic, AnalyticKind, NominalAnalyticRequest, NominalSupport, SupportKind,
-    NOMINAL_ANALYTIC_RESERVATION_BYTES, NOMINAL_ANALYTIC_UNITS,
-    NOMINAL_ANALYTIC_OUTPUT_BYTES,
+    NOMINAL_ANALYTIC_OUTPUT_BYTES, NOMINAL_ANALYTIC_RESERVATION_BYTES, NOMINAL_ANALYTIC_UNITS,
 };
 
 pub(crate) use clearance::{clearance, ClearanceRequest, CLEARANCE_PAIR_UNITS};
 pub(crate) use cylindrical_band::{
     cylindrical_band_clearance, CylindricalBandClearanceEvidence, CylindricalBandClearanceRequest,
-    CYLINDRICAL_BAND_PREDICATE_RESERVATION_BYTES, CYLINDRICAL_BAND_INPUT_PAIR_BYTES,
-    CYLINDRICAL_BAND_EVIDENCE_RESERVATION_BYTES, CYLINDRICAL_BAND_ENCODING_RESERVATION_BYTES,
+    CYLINDRICAL_BAND_ENCODING_RESERVATION_BYTES, CYLINDRICAL_BAND_EVIDENCE_RESERVATION_BYTES,
+    CYLINDRICAL_BAND_INPUT_PAIR_BYTES, CYLINDRICAL_BAND_PREDICATE_RESERVATION_BYTES,
 };
 pub(crate) use domain::DomainEvidence;
 pub(crate) use insertion::{
-    insertion, insertion_units, ClipEvent, InsertionEvidence, InsertionRequest,
+    band_engagement, insertion, insertion_units, BandEngagementRequest, ClipEvent,
+    InsertionEvidence, InsertionRequest,
 };
 pub(crate) use topology::{
     GridPlan, PointEvidence, PointMembership, PointRequest, SectionEvidence, SectionRequest,

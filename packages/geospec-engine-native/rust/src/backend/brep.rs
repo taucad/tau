@@ -913,7 +913,70 @@ pub trait BrepConnector {
 }
 
 /// Retained synchronous owner-thread queries, deliberately without Send/Sync.
+/// Bounded source-associated nominal finite face. Kind 0 is a planar region;
+/// kind 1 exposes attached full circular rims only, never the cone interior.
+/// Raw coordinates are retained; nominal plane membership projects attached
+/// vertices/centers onto the raw support. Residuals qualify this mapping.
+#[derive(Clone, Copy, Debug, Default)]
+#[repr(C)]
+pub struct FiniteContactCircle {
+    pub edge_index: u32,
+    pub outer: u32,
+    pub center: [f64; 3],
+    pub axis: [f64; 3],
+    pub radius: f64,
+    pub range: [f64; 2],
+    pub period: f64,
+    pub attachment_residual: f64,
+    pub tolerance: f64,
+}
+#[derive(Clone, Copy, Debug, Default)]
+#[repr(C)]
+pub struct FiniteContactFace {
+    pub occurrence: u32,
+    pub public_face_ordinal: u32,
+    pub private_query_face: u32,
+    pub source_face_entity: u32,
+    pub source_route_count: u32,
+    pub source_route: [u32; 32],
+    pub source_same_sense: u32,
+    pub transferred_reversed: u32,
+    pub kind: u32,
+    pub origin: [f64; 3],
+    pub normal: [f64; 3],
+    pub vertex_count: u32,
+    pub vertices: [[f64; 3]; 8],
+    pub lines: [FiniteContactLine; 8],
+    pub circle_count: u32,
+    pub circles: [FiniteContactCircle; 8],
+    pub wire_count: u32,
+    pub edge_use_count: u32,
+    pub attachment_residual: f64,
+    pub tolerance: f64,
+    pub face_tolerance: f64,
+}
+#[derive(Clone, Copy, Debug, Default)]
+#[repr(C)]
+pub struct FiniteContactLine {
+    pub edge_index: u32,
+    pub start_vertex: u32,
+    pub end_vertex: u32,
+    pub reversed: u32,
+    pub origin: [f64; 3],
+    pub direction: [f64; 3],
+    pub range: [f64; 2],
+    pub attachment_residual: f64,
+    pub edge_tolerance: f64,
+    pub vertex_tolerances: [f64; 2],
+}
 pub trait BrepSubject {
+    /// Complete bounded plane region or source-attached circular rim evidence.
+    fn finite_contact_face(&self, _face: BrepEntity) -> Result<FiniteContactFace, BackendError> {
+        Err(BackendError {
+            kind: super::BackendErrorKind::Unsupported,
+            message: "The connector has no qualified finite-contact face admission.".into(),
+        })
+    }
     fn admission_facts(&self) -> Result<BrepAdmissionFacts, BackendError> {
         Err(BackendError {
             kind: super::BackendErrorKind::Unsupported,

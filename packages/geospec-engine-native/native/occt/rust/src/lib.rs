@@ -1,5 +1,11 @@
 //! Safe, owned Rust adapter for the private OCCT bridge.
 
+#[cfg(test)]
+extern crate self as geospec_engine_native_occt;
+#[cfg(test)]
+#[path = "../tests/finite_contact_engagement.rs"]
+mod finite_contact_engagement_tests;
+
 pub use geospec_engine_native_core::backend::brep::{
     Bounds, BrepAdmissionFacts, BrepConnector, BrepEntity, BrepSubject, CircularBoreCandidate,
     CircularBoreDisposition, CircularBoreEnd, CircularBoreInventory, CircularBoreNonMember,
@@ -12,13 +18,14 @@ pub use geospec_engine_native_core::backend::brep::{
     EdgeTreatmentCounts, EdgeTreatmentDisposition, EdgeTreatmentInventory, EdgeTreatmentKind,
     EdgeTreatmentLabel, EdgeTreatmentMaterialSide, EdgeTreatmentReason, EdgeTreatmentResidual,
     EdgeTreatmentResidualKind, EdgeTreatmentRow, EdgeTreatmentSupport, Extrema, FaceFacts,
-    LocatedFace, NominalCylindricalBand, OccurrenceFacts, PmiFacts, PmiKind, PointState, ProductFacts,
-    RegularSolidContainment, ReportedBrepBundle, ResolvedSourceFace, SelectedContinuousDomain, SelectedBoreVoid,
-    SemanticDatumFacts, ShapeFacts, SourceFaceKey, StepSubjectMetadata, SubshapeFacts,
-    SubshapeType, SurfaceFacts, TessellationProfile, TopologyCounts, ValidityFacts, WallOptions,
-    WallSupport, WallThickness, WallThicknessOutcome, MAX_CIRCULAR_BORE_CANDIDATES,
-    MAX_CIRCULAR_BORE_OWNED_BYTES, MAX_EDGE_TREATMENT_BOUNDARY_USES,
-    MAX_EDGE_TREATMENT_OWNED_BYTES, MAX_EDGE_TREATMENT_RESIDUALS, MAX_EDGE_TREATMENT_ROWS,
+    FiniteContactCircle, FiniteContactFace, LocatedFace, NominalCylindricalBand, OccurrenceFacts,
+    PmiFacts, PmiKind, PointState, ProductFacts, RegularSolidContainment, ReportedBrepBundle,
+    ResolvedSourceFace, SelectedBoreVoid, SelectedContinuousDomain, SemanticDatumFacts, ShapeFacts,
+    SourceFaceKey, StepSubjectMetadata, SubshapeFacts, SubshapeType, SurfaceFacts,
+    TessellationProfile, TopologyCounts, ValidityFacts, WallOptions, WallSupport, WallThickness,
+    WallThicknessOutcome, MAX_CIRCULAR_BORE_CANDIDATES, MAX_CIRCULAR_BORE_OWNED_BYTES,
+    MAX_EDGE_TREATMENT_BOUNDARY_USES, MAX_EDGE_TREATMENT_OWNED_BYTES, MAX_EDGE_TREATMENT_RESIDUALS,
+    MAX_EDGE_TREATMENT_ROWS,
 };
 use geospec_engine_native_core::backend::{BackendError, BackendErrorKind, TriangleMesh};
 use std::{
@@ -262,12 +269,55 @@ impl BrepSubject for Document {
         unsafe { cylinder_axial_extent(self.raw.as_ptr(), face) }
     }
 
+    fn finite_contact_face(&self, face: BrepEntity) -> Result<FiniteContactFace, BackendError> {
+        self.validate_entity(face)?;
+        let BrepEntity::Face {
+            occurrence,
+            face: query,
+        } = face
+        else {
+            return Err(unsupported(
+                "Finite contact requires an associated occurrence face.",
+            ));
+        };
+        let mut value = FiniteContactFace::default();
+        let mut error = ErrorBuffer::new();
+        unsafe {
+            check(
+                ffi::geospec_occt_finite_contact_face_query(
+                    self.raw.as_ptr(),
+                    face.into(),
+                    &mut value,
+                    error.raw(),
+                ),
+                &error,
+            )?;
+        }
+        if value.occurrence != occurrence
+            || value.private_query_face != query
+            || value.source_face_entity == 0
+            || !(1..=32).contains(&value.source_route_count)
+            || value.kind > 1
+            || value.vertex_count > 8
+            || value.circle_count > 8
+        {
+            return Err(backend_error(
+                "Finite-contact source/shape transfer is inconsistent.",
+            ));
+        }
+        Ok(value)
+    }
+
     fn nominal_cylindrical_band(
         &self,
         face: BrepEntity,
     ) -> Result<NominalCylindricalBand, BackendError> {
         self.validate_entity(face)?;
-        let BrepEntity::Face { occurrence, face: query_face } = face else {
+        let BrepEntity::Face {
+            occurrence,
+            face: query_face,
+        } = face
+        else {
             return Err(if matches!(face, BrepEntity::WholeFace(_)) {
                 unsupported("Nominal band requires a selected occurrence-face source route.")
             } else {
@@ -279,15 +329,21 @@ impl BrepSubject for Document {
         unsafe {
             check(
                 ffi::geospec_occt_nominal_cylindrical_band_query(
-                    self.raw.as_ptr(), face.into(), &mut value, error.raw(),
+                    self.raw.as_ptr(),
+                    face.into(),
+                    &mut value,
+                    error.raw(),
                 ),
                 &error,
             )?;
-            if value.occurrence != occurrence || value.private_query_face != query_face ||
-                value.public_face_ordinal as usize >=
-                    ffi::geospec_occt_occurrence_face_count(self.raw.as_ptr(), occurrence)
+            if value.occurrence != occurrence
+                || value.private_query_face != query_face
+                || value.public_face_ordinal as usize
+                    >= ffi::geospec_occt_occurrence_face_count(self.raw.as_ptr(), occurrence)
             {
-                return Err(backend_error("OCCT nominal band has an inconsistent selected face association."));
+                return Err(backend_error(
+                    "OCCT nominal band has an inconsistent selected face association.",
+                ));
             }
         }
         nominal_cylindrical_band(value)
@@ -295,30 +351,58 @@ impl BrepSubject for Document {
 
     fn selected_bore_void(&self, face: BrepEntity) -> Result<SelectedBoreVoid, BackendError> {
         self.validate_entity(face)?;
-        let BrepEntity::Face { occurrence, face: query_face } = face else {
+        let BrepEntity::Face {
+            occurrence,
+            face: query_face,
+        } = face
+        else {
             return Err(unsupported("Selected bore requires an occurrence face."));
         };
         let mut band = ffi::NominalCylindricalBand::default();
         let mut clear = ffi::CircularBoreCandidate::default();
         let mut error = ErrorBuffer::new();
         unsafe {
-            check(ffi::geospec_occt_selected_bore_void_query(
-                self.raw.as_ptr(), face.into(), &mut band, &mut clear, error.raw()), &error)?;
+            check(
+                ffi::geospec_occt_selected_bore_void_query(
+                    self.raw.as_ptr(),
+                    face.into(),
+                    &mut band,
+                    &mut clear,
+                    error.raw(),
+                ),
+                &error,
+            )?;
         }
-        let count = unsafe { ffi::geospec_occt_occurrence_face_count(self.raw.as_ptr(), occurrence) };
+        let count =
+            unsafe { ffi::geospec_occt_occurrence_face_count(self.raw.as_ptr(), occurrence) };
         let topology = circular_bore_topology(&clear, count)?;
         let band = nominal_cylindrical_band(band)?;
-        if band.occurrence != occurrence || band.private_query_face != query_face ||
-            band.public_face_ordinal != clear.public_face_ordinal ||
-            clear.private_query_face != query_face || clear.disposition != 0 ||
-            topology.owning_solid_ordinal != 0 || !band.transferred_reversed ||
-            topology.ends.iter().any(|e| e.termination != CircularBoreTermination::Mouth) ||
-            topology.band.origin != band.origin || topology.band.axis != band.axis ||
-            topology.band.radius != band.radius || topology.band.from != band.from || topology.band.to != band.to {
-            return Err(backend_error("Selected bore transfer has inconsistent scope or band."));
+        if band.occurrence != occurrence
+            || band.private_query_face != query_face
+            || band.public_face_ordinal != clear.public_face_ordinal
+            || clear.private_query_face != query_face
+            || clear.disposition != 0
+            || topology.owning_solid_ordinal != 0
+            || !band.transferred_reversed
+            || topology
+                .ends
+                .iter()
+                .any(|e| e.termination != CircularBoreTermination::Mouth)
+            || topology.band.origin != band.origin
+            || topology.band.axis != band.axis
+            || topology.band.radius != band.radius
+            || topology.band.from != band.from
+            || topology.band.to != band.to
+        {
+            return Err(backend_error(
+                "Selected bore transfer has inconsistent scope or band.",
+            ));
         }
-        Ok(SelectedBoreVoid { band, ends: topology.ends,
-            maximum_topology_tolerance_mm: topology.maximum_topology_tolerance_mm })
+        Ok(SelectedBoreVoid {
+            band,
+            ends: topology.ends,
+            maximum_topology_tolerance_mm: topology.maximum_topology_tolerance_mm,
+        })
     }
 
     fn circular_bores(&self, max_candidates: usize) -> Result<CircularBoreInventory, BackendError> {
@@ -1601,28 +1685,50 @@ unsafe fn cylinder_axial_extent(
 fn nominal_cylindrical_band(
     value: ffi::NominalCylindricalBand,
 ) -> Result<NominalCylindricalBand, BackendError> {
-    let invalid = || backend_error("OCCT returned an invalid nominal cylindrical-band certificate.");
+    let invalid =
+        || backend_error("OCCT returned an invalid nominal cylindrical-band certificate.");
     let finite = |values: &[f64]| values.iter().all(|v| v.is_finite());
     let direction = |values: &[f64; 3]| finite(values) && values.iter().any(|v| *v != 0.0);
     let residual = |v: f64, limit: f64| v.is_finite() && v >= 0.0 && v <= limit;
-    if value.profile != 0 || value.source_face_entity == 0 || value.private_query_face == 0 ||
-        !(1..=32).contains(&value.source_route_count) ||
-        value.source_route[..value.source_route_count as usize].contains(&0) ||
-        value.source_route[value.source_route_count as usize..].iter().any(|v| *v != 0) ||
-        !finite(&value.origin) || !direction(&value.axis) || !direction(&value.phase_x) ||
-        !direction(&value.phase_y) || !value.radius.is_finite() || value.radius <= 0.0 ||
-        !finite(&value.parameter_bounds) || value.parameter_bounds[0] >= value.parameter_bounds[1] ||
-        value.from != value.parameter_bounds[2] || value.to != value.parameter_bounds[3] ||
-        value.from >= value.to || !(value.to - value.from).is_finite() ||
-        !value.surface_period.is_finite() || value.surface_period <= 0.0 ||
-        !value.face_tolerance_mm.is_finite() || value.face_tolerance_mm < 0.0 ||
-        !residual(value.period_residual_mm, value.face_tolerance_mm) ||
-        !finite(&value.seam_origin) || !direction(&value.seam_axis) ||
-        !finite(&value.seam_curve_range) || value.seam_curve_range[0] >= value.seam_curve_range[1] ||
-        !(1..=3).contains(&value.seam_edge_index) ||
-        value.seam_vertex_indices.iter().any(|v| !(1..=2).contains(v)) ||
-        value.seam_vertex_indices[0] == value.seam_vertex_indices[1] ||
-        value.edge_tolerances_mm.iter().chain(value.vertex_tolerances_mm.iter())
+    if value.profile != 0
+        || value.source_face_entity == 0
+        || value.private_query_face == 0
+        || !(1..=32).contains(&value.source_route_count)
+        || value.source_route[..value.source_route_count as usize].contains(&0)
+        || value.source_route[value.source_route_count as usize..]
+            .iter()
+            .any(|v| *v != 0)
+        || !finite(&value.origin)
+        || !direction(&value.axis)
+        || !direction(&value.phase_x)
+        || !direction(&value.phase_y)
+        || !value.radius.is_finite()
+        || value.radius <= 0.0
+        || !finite(&value.parameter_bounds)
+        || value.parameter_bounds[0] >= value.parameter_bounds[1]
+        || value.from != value.parameter_bounds[2]
+        || value.to != value.parameter_bounds[3]
+        || value.from >= value.to
+        || !(value.to - value.from).is_finite()
+        || !value.surface_period.is_finite()
+        || value.surface_period <= 0.0
+        || !value.face_tolerance_mm.is_finite()
+        || value.face_tolerance_mm < 0.0
+        || !residual(value.period_residual_mm, value.face_tolerance_mm)
+        || !finite(&value.seam_origin)
+        || !direction(&value.seam_axis)
+        || !finite(&value.seam_curve_range)
+        || value.seam_curve_range[0] >= value.seam_curve_range[1]
+        || !(1..=3).contains(&value.seam_edge_index)
+        || value
+            .seam_vertex_indices
+            .iter()
+            .any(|v| !(1..=2).contains(v))
+        || value.seam_vertex_indices[0] == value.seam_vertex_indices[1]
+        || value
+            .edge_tolerances_mm
+            .iter()
+            .chain(value.vertex_tolerances_mm.iter())
             .any(|v| !v.is_finite() || *v < 0.0)
     {
         return Err(invalid());
@@ -1633,53 +1739,76 @@ fn nominal_cylindrical_band(
         }
     }
     for rim in &value.rims {
-        if !(1..=3).contains(&rim.edge_index) || rim.edge_index == value.seam_edge_index ||
-            !finite(&rim.center) || !direction(&rim.axis) || !direction(&rim.phase_x) ||
-            !direction(&rim.phase_y) || !rim.radius.is_finite() || rim.radius <= 0.0 ||
-            !finite(&rim.curve_range) || rim.curve_range[0] >= rim.curve_range[1] ||
-            !rim.curve_period.is_finite() || rim.curve_period <= 0.0 ||
-            !(1..=2).contains(&rim.vertex_indices[0]) ||
-            rim.vertex_indices[0] != rim.vertex_indices[1]
+        if !(1..=3).contains(&rim.edge_index)
+            || rim.edge_index == value.seam_edge_index
+            || !finite(&rim.center)
+            || !direction(&rim.axis)
+            || !direction(&rim.phase_x)
+            || !direction(&rim.phase_y)
+            || !rim.radius.is_finite()
+            || rim.radius <= 0.0
+            || !finite(&rim.curve_range)
+            || rim.curve_range[0] >= rim.curve_range[1]
+            || !rim.curve_period.is_finite()
+            || rim.curve_period <= 0.0
+            || !(1..=2).contains(&rim.vertex_indices[0])
+            || rim.vertex_indices[0] != rim.vertex_indices[1]
         {
             return Err(invalid());
         }
     }
-    if value.rims[0].edge_index == value.rims[1].edge_index ||
-        value.rims[0].vertex_indices[0] == value.rims[1].vertex_indices[0]
+    if value.rims[0].edge_index == value.rims[1].edge_index
+        || value.rims[0].vertex_indices[0] == value.rims[1].vertex_indices[0]
     {
         return Err(invalid());
     }
     let mut sides = [false; 4];
     let mut seam_direction = 0;
     for (boundary, measured) in value.boundary.iter().zip(&value.boundary_residuals) {
-        if !(0..=3).contains(&boundary.side) || !(0..=1).contains(&boundary.orientation) ||
-            boundary.pcurve_stored != 1 || !finite(&boundary.curve_range) ||
-            boundary.curve_range[0] >= boundary.curve_range[1] ||
-            boundary.parameter_endpoints.iter().any(|v| !finite(v)) ||
-            !measured.limit_mm.is_finite() || measured.limit_mm < 0.0 ||
-            !residual(measured.parameter_coverage_mm, measured.limit_mm) ||
-            !residual(measured.curve_surface_mm, measured.limit_mm) ||
-            !residual(measured.vertex_attachment_mm, measured.limit_mm)
+        if !(0..=3).contains(&boundary.side)
+            || !(0..=1).contains(&boundary.orientation)
+            || boundary.pcurve_stored != 1
+            || !finite(&boundary.curve_range)
+            || boundary.curve_range[0] >= boundary.curve_range[1]
+            || boundary.parameter_endpoints.iter().any(|v| !finite(v))
+            || !measured.limit_mm.is_finite()
+            || measured.limit_mm < 0.0
+            || !residual(measured.parameter_coverage_mm, measured.limit_mm)
+            || !residual(measured.curve_surface_mm, measured.limit_mm)
+            || !residual(measured.vertex_attachment_mm, measured.limit_mm)
         {
             return Err(invalid());
         }
         let side = boundary.side as usize;
-        if std::mem::replace(&mut sides[side], true) { return Err(invalid()); }
+        if std::mem::replace(&mut sides[side], true) {
+            return Err(invalid());
+        }
         let (edge, vertices, range) = if side < 2 {
             seam_direction += if boundary.orientation == 0 { 1 } else { -1 };
-            (value.seam_edge_index, value.seam_vertex_indices, value.seam_curve_range)
+            (
+                value.seam_edge_index,
+                value.seam_vertex_indices,
+                value.seam_curve_range,
+            )
         } else {
             let rim = &value.rims[side - 2];
             (rim.edge_index, rim.vertex_indices, rim.curve_range)
         };
-        let limit = value.face_tolerance_mm.max(value.edge_tolerances_mm[edge as usize - 1])
+        let limit = value
+            .face_tolerance_mm
+            .max(value.edge_tolerances_mm[edge as usize - 1])
             .max(value.vertex_tolerances_mm[vertices[0] as usize - 1])
             .max(value.vertex_tolerances_mm[vertices[1] as usize - 1]);
-        if boundary.edge_index != edge || boundary.curve_range != range || measured.limit_mm != limit {
+        if boundary.edge_index != edge
+            || boundary.curve_range != range
+            || measured.limit_mm != limit
+        {
             return Err(invalid());
         }
     }
-    if seam_direction != 0 || sides.contains(&false) { return Err(invalid()); }
+    if seam_direction != 0 || sides.contains(&false) {
+        return Err(invalid());
+    }
     Ok(NominalCylindricalBand {
         profile: CylindricalBandProfile::NominalV1,
         occurrence: value.occurrence,
@@ -1700,9 +1829,14 @@ fn nominal_cylindrical_band(
         parameter_bounds: value.parameter_bounds,
         surface_period: value.surface_period,
         rims: value.rims.map(|rim| CylindricalBandRim {
-            edge_index: rim.edge_index, center: rim.center, axis: rim.axis,
-            phase_x: rim.phase_x, phase_y: rim.phase_y, radius: rim.radius,
-            curve_range: rim.curve_range, curve_period: rim.curve_period,
+            edge_index: rim.edge_index,
+            center: rim.center,
+            axis: rim.axis,
+            phase_x: rim.phase_x,
+            phase_y: rim.phase_y,
+            radius: rim.radius,
+            curve_range: rim.curve_range,
+            curve_period: rim.curve_period,
             vertex_indices: rim.vertex_indices,
         }),
         seam_edge_index: value.seam_edge_index,
@@ -1710,18 +1844,28 @@ fn nominal_cylindrical_band(
         seam_axis: value.seam_axis,
         seam_curve_range: value.seam_curve_range,
         seam_vertex_indices: value.seam_vertex_indices,
-        boundary: [cylinder_boundary_use(value.boundary[0])?,
-            cylinder_boundary_use(value.boundary[1])?, cylinder_boundary_use(value.boundary[2])?,
-            cylinder_boundary_use(value.boundary[3])?],
-        vertices: value.vertices.map(|v| CylinderVertex { vertex_index: v.vertex_index, point: v.point }),
+        boundary: [
+            cylinder_boundary_use(value.boundary[0])?,
+            cylinder_boundary_use(value.boundary[1])?,
+            cylinder_boundary_use(value.boundary[2])?,
+            cylinder_boundary_use(value.boundary[3])?,
+        ],
+        vertices: value.vertices.map(|v| CylinderVertex {
+            vertex_index: v.vertex_index,
+            point: v.point,
+        }),
         face_tolerance_mm: value.face_tolerance_mm,
         edge_tolerances_mm: value.edge_tolerances_mm,
         vertex_tolerances_mm: value.vertex_tolerances_mm,
         period_residual_mm: value.period_residual_mm,
-        boundary_residuals: value.boundary_residuals.map(|r| CylindricalBandBoundaryResidual {
-            parameter_coverage_mm: r.parameter_coverage_mm, curve_surface_mm: r.curve_surface_mm,
-            vertex_attachment_mm: r.vertex_attachment_mm, limit_mm: r.limit_mm,
-        }),
+        boundary_residuals: value
+            .boundary_residuals
+            .map(|r| CylindricalBandBoundaryResidual {
+                parameter_coverage_mm: r.parameter_coverage_mm,
+                curve_surface_mm: r.curve_surface_mm,
+                vertex_attachment_mm: r.vertex_attachment_mm,
+                limit_mm: r.limit_mm,
+            }),
     })
 }
 
@@ -3340,8 +3484,16 @@ mod ffi {
 
     unsafe extern "C" {
         pub fn geospec_occt_selected_bore_void_query(
-            document: *const Document, face: Entity,
-            band: *mut NominalCylindricalBand, clear: *mut CircularBoreCandidate,
+            document: *const Document,
+            face: Entity,
+            band: *mut NominalCylindricalBand,
+            clear: *mut CircularBoreCandidate,
+            error: *mut StringBuffer,
+        ) -> i32;
+        pub fn geospec_occt_finite_contact_face_query(
+            document: *const Document,
+            face: Entity,
+            output: *mut super::FiniteContactFace,
             error: *mut StringBuffer,
         ) -> i32;
         pub fn geospec_occt_nominal_cylindrical_band_query(

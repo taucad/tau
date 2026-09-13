@@ -806,6 +806,32 @@ int geospec_occt_edge_treatment_residual_get(
     geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
 void geospec_occt_edge_treatments_discard(
     const geospec_occt_document* document) GEOSPEC_OCCT_NOEXCEPT;
+typedef struct geospec_occt_finite_contact_circle {
+  uint32_t edge_index, outer;
+  double center[3], axis[3], radius, range[2], period;
+  double attachment_residual, tolerance;
+} geospec_occt_finite_contact_circle;
+typedef struct geospec_occt_finite_contact_line {
+  uint32_t edge_index, start_vertex, end_vertex, reversed;
+  double origin[3], direction[3], range[2], attachment_residual;
+  double edge_tolerance, vertex_tolerances[2];
+} geospec_occt_finite_contact_line;
+typedef struct geospec_occt_finite_contact_face {
+  uint32_t occurrence, public_face_ordinal, private_query_face, source_face_entity;
+  uint32_t source_route_count, source_route[32], source_same_sense, transferred_reversed, kind;
+  double origin[3], normal[3];
+  uint32_t vertex_count;
+  double vertices[8][3];
+  geospec_occt_finite_contact_line lines[8];
+  uint32_t circle_count;
+  geospec_occt_finite_contact_circle circles[8];
+  uint32_t wire_count, edge_use_count;
+  double attachment_residual, tolerance, face_tolerance;
+} geospec_occt_finite_contact_face;
+int geospec_occt_finite_contact_face_query(
+    const geospec_occt_document* document, geospec_occt_entity face,
+    geospec_occt_finite_contact_face* output, geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
+
 int geospec_occt_classify_face_points(
     const geospec_occt_document* document, geospec_occt_entity face,
     const double* points, size_t point_count, double tolerance,

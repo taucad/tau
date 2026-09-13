@@ -127,28 +127,28 @@ fn stored(value: Rat) -> Result<Rat, ContinuousError> {
     // Clone normalized limbs, not a preceding operation's unreduced capacity.
     Ok(value.clone())
 }
-fn rat(v: f64) -> Result<Rat, ContinuousError> {
+pub(super) fn rat(v: f64) -> Result<Rat, ContinuousError> {
     stored(exact::rational(v)?)
 }
-fn add(a: &Rat, b: &Rat) -> Result<Rat, ContinuousError> {
+pub(super) fn add(a: &Rat, b: &Rat) -> Result<Rat, ContinuousError> {
     stored(exact::add(a, b)?)
 }
-fn sub(a: &Rat, b: &Rat) -> Result<Rat, ContinuousError> {
+pub(super) fn sub(a: &Rat, b: &Rat) -> Result<Rat, ContinuousError> {
     stored(exact::subtract(a, b)?)
 }
-fn mul(a: &Rat, b: &Rat) -> Result<Rat, ContinuousError> {
+pub(super) fn mul(a: &Rat, b: &Rat) -> Result<Rat, ContinuousError> {
     stored(exact::multiply(a, b)?)
 }
-fn div(a: &Rat, b: &Rat) -> Result<Rat, ContinuousError> {
+pub(super) fn div(a: &Rat, b: &Rat) -> Result<Rat, ContinuousError> {
     stored(exact::divide(a, b)?)
 }
-fn square(a: &Rat) -> Result<Rat, ContinuousError> {
+pub(super) fn square(a: &Rat) -> Result<Rat, ContinuousError> {
     mul(a, a)
 }
-fn vector(v: [f64; 3]) -> Result<[Rat; 3], ContinuousError> {
+pub(super) fn vector(v: [f64; 3]) -> Result<[Rat; 3], ContinuousError> {
     Ok([rat(v[0])?, rat(v[1])?, rat(v[2])?])
 }
-fn dot(a: &[Rat; 3], b: &[Rat; 3]) -> Result<Rat, ContinuousError> {
+pub(super) fn dot(a: &[Rat; 3], b: &[Rat; 3]) -> Result<Rat, ContinuousError> {
     let mut sum = Rat::zero();
     for i in 0..3 {
         sum = add(&sum, &mul(&a[i], &b[i])?)?;
@@ -235,7 +235,7 @@ fn evaluate(r: NominalAnalyticRequest) -> Result<(bool, NominalAnalyticEvidence)
     ))
 }
 
-fn in_angle_band(q: &Rat, lo: &Rat, hi: &Rat) -> Result<bool, ContinuousError> {
+pub(super) fn in_angle_band(q: &Rat, lo: &Rat, hi: &Rat) -> Result<bool, ContinuousError> {
     let lower = cosine_squared(hi)?;
     let upper = cosine_squared(lo)?;
     if q < &lower.0 || q > &upper.1 {

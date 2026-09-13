@@ -174,12 +174,15 @@ describe('GlobalChatFlushGuard', () => {
     expect(b.draftSend).not.toHaveBeenCalledWith({ type: 'flushNow' });
   });
 
-  it('flushes on beforeunload as well as visibilitychange', () => {
+  /* A38's second phase. `pagehide` replaced `beforeunload`: it fires wherever
+   * that did, fires for the back/forward cache too, and never makes the browser
+   * consider a leave-site prompt. */
+  it('flushes on pagehide as well as visibilitychange', () => {
     const { store } = renderWithStore();
     const session = store.acquire('chat_alpha');
     const { persistenceSend, draftSend } = spyOnActorSends(session);
 
-    globalThis.dispatchEvent(new Event('beforeunload'));
+    globalThis.dispatchEvent(new Event('pagehide'));
 
     expect(persistenceSend).toHaveBeenCalledWith({ type: 'flushNow' });
     expect(draftSend).toHaveBeenCalledWith({ type: 'flushNow' });

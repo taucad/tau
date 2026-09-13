@@ -5,9 +5,21 @@ import type { ReactNode } from 'react';
 // Types
 // ---------------------------------------------------------------------------
 
+/**
+ * Which half of A38's two-phase unload is running.
+ *
+ * `hidden` is the real close in a browser: the document is still alive, so a
+ * callback can send, await and see an answer. `pagehide` is best-effort — the
+ * document is going away and nothing asynchronous will finish — so a callback
+ * that has one last thing to say says it there and expects no reply.
+ *
+ * @public
+ */
+export type FlushPhase = 'hidden' | 'pagehide';
+
 type FlushRegistration = {
   id: symbol;
-  callbackRef: React.RefObject<() => void>;
+  callbackRef: React.RefObject<(phase: FlushPhase) => void>;
 };
 
 type UnloadContextValue = {
@@ -28,10 +40,11 @@ const UnloadContext = createContext<UnloadContextValue | undefined>(undefined);
 /**
  * Global unload service provider.
  *
- * Attaches a single set of window-level listeners for `beforeunload` and
- * `visibilitychange` events. When either fires, all registered flush
- * callbacks are invoked synchronously. Must be placed near the root of
- * the React tree.
+ * Attaches one set of document-level listeners for A38's two-phase unload:
+ * `visibilitychange: hidden`, which is the real close and the phase that can
+ * still do work, and `pagehide`, which is best-effort. `beforeunload` is gone:
+ * `pagehide` fires wherever it did, fires for the back/forward cache too, and
+ * does not make the browser consider showing a leave-site prompt.
  *
  * Individual services register their flush callbacks via {@link useFlushOnClose}.
  */
@@ -53,23 +66,26 @@ export function UnloadProvider({ children }: { readonly children: ReactNode }): 
   }, []);
 
   useEffect(() => {
-    const flush = (): void => {
+    const flush = (phase: FlushPhase): void => {
       for (const reg of registryRef.current) {
-        reg.callbackRef.current();
+        reg.callbackRef.current(phase);
       }
     };
 
     const handleVisibilityChange = (): void => {
       if (document.visibilityState === 'hidden') {
-        flush();
+        flush('hidden');
       }
     };
+    const handlePageHide = (): void => {
+      flush('pagehide');
+    };
 
-    globalThis.addEventListener('beforeunload', flush);
+    globalThis.addEventListener('pagehide', handlePageHide);
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
-      globalThis.removeEventListener('beforeunload', flush);
+      globalThis.removeEventListener('pagehide', handlePageHide);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, []);
@@ -97,20 +113,23 @@ function useUnloadContext(): UnloadContextValue {
 }
 
 /**
- * Register a callback to be called when the page is about to unload or
- * becomes hidden. Useful for flushing debounced state to prevent data loss.
+ * Register a callback for both phases of the unload (A38).
+ *
+ * It receives the {@link FlushPhase}: `hidden` can still send and await,
+ * `pagehide` cannot. A callback that does not care about the difference ignores
+ * the argument and runs twice, which is what every existing flush wants.
  *
  * The callback is stored via ref -- it never causes re-registration when
  * the closure changes. Registration is effect-based and StrictMode-safe.
  *
  * @example
  * ```tsx
- * useFlushOnClose(() => {
- *   actorRef.send({ type: 'flushNow' });
+ * useFlushOnClose((phase) => {
+ *   actorRef.send({ type: phase === 'hidden' ? 'flushNow' : 'flushBestEffort' });
  * });
  * ```
  */
-export function useFlushOnClose(callback: () => void): void {
+export function useFlushOnClose(callback: (phase: FlushPhase) => void): void {
   const { register, unregister } = useUnloadContext();
 
   // Stable callback ref -- updated every render, read in handler

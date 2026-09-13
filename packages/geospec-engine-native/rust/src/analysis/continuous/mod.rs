@@ -3,6 +3,7 @@
 //! This module accepts only connector-certified, actual located complete boxes.
 //! It does not infer exact geometry from reporting bounds or tessellation.
 
+pub(crate) mod bore_slab_interference;
 mod box_interference;
 mod clearance;
 mod cylindrical_band;

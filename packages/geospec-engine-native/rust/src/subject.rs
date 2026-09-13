@@ -1258,6 +1258,55 @@ impl<'a> EvaluationContext<'a> {
             .map_err(backend_refusal)
     }
 
+    /// Complete-material queries are uncached and fully precharged, including
+    /// source association scans and refused candidates.
+    pub(crate) fn interference_materials(
+        &mut self, occurrence: u32,
+    ) -> Result<Vec<crate::backend::brep::SelectedInterferenceMaterial>, Evaluation> {
+        self.brep_facts()?;
+        let subject = self.subject();
+        let refusal = || backend_refusal(BackendError { kind: BackendErrorKind::Unsupported,
+            message: "Interference requires complete source-associated BRep materials.".into() });
+        // Named primary meshes are a different component partition. Never
+        // reinterpret their integer IDs as occurrence selectors.
+        if subject.mesh_record().is_some_and(|record|
+            crate::analysis::interference::build_component_labels(&subject).is_ok_and(|v| v.len() >= 2)
+            && record.primitives.len() >= 2) {
+            return Err(refusal());
+        }
+        let bundle = subject.report_bundle().map_err(backend_refusal)?.ok_or_else(refusal)?;
+        let faces = bundle.occurrence_faces.get(occurrence as usize).ok_or_else(refusal)?;
+        if faces.len() > 4096 || bundle.facts.shape.topology.edges > 16384 ||
+            bundle.facts.shape.topology.vertices > 16384 { return Err(refusal()); }
+        self.check_continuous_output(1024 * 1024)?;
+        let candidates: Vec<_> = faces.iter().filter(|face|
+            matches!(face.facts.surface, SurfaceFacts::Cylinder { .. })).take(17).collect();
+        if candidates.len() > 16 { return Err(refusal()); }
+        let brep = subject.brep.as_deref().ok_or_else(refusal)?;
+        let work = (faces.len() as u64 + 1)
+            .saturating_mul(bundle.whole_faces.len() as u64 + 1).saturating_add(16384);
+        let mut result = Vec::new();
+        for face in candidates {
+            self.budget.charge(work).map_err(|e| Evaluation::budget_exceeded(self.capability, e))?;
+            let material = match brep.selected_interference_material(face.entity) {
+                Ok(value) => value,
+                Err(error) if error.kind == BackendErrorKind::Unsupported => continue,
+                Err(error) => return Err(backend_refusal(error)),
+            };
+            use crate::backend::brep::SelectedInterferenceMaterial::*;
+            let band = match &material { BoreSlab(band) | FiniteCylinder(band) => band };
+            if band.source_route_count == 0 || band.source_route_count > 32 ||
+                band.source_face_entity == 0 ||
+                band.occurrence != occurrence || band.public_face_ordinal != face.facts.index ||
+                face.entity != (BrepEntity::Face { occurrence, face: band.private_query_face }) {
+                return Err(backend_refusal(BackendError { kind: BackendErrorKind::ComputationFailed,
+                    message: "Interference material association changed during transfer.".into() }));
+            }
+            result.push(material);
+        }
+        Ok(result)
+    }
+
     /// Uncached complete-selected-material bore demands. Charge all local
     /// inventory work before each adapter call, including refused candidates.
     pub(crate) fn selected_bore_voids(

@@ -524,103 +524,103 @@ fn evaluate_interference(
     prepared: &Interference,
     context: &mut EvaluationContext<'_>,
 ) -> Evaluation {
+    use crate::analysis::continuous::bore_slab_interference as bounded;
+    use crate::backend::brep::SelectedInterferenceMaterial::{BoreSlab, FiniteCylinder};
     let Some(selected) = &prepared.selected_pairs else {
         return phase_two_refusal(Capability::ToHaveNoComponentInterference);
     };
     let Some(allowance_by_pair) = &prepared.allowance_by_pair else {
         return phase_two_refusal(Capability::ToHaveNoComponentInterference);
     };
-    let normalized_expected = normalized_expected(context);
-    if let Err(evaluation) = charge_overlap_mesh_base(context) {
-        return evaluation;
-    }
     let subject = std::rc::Rc::clone(&context.subjects[0]);
-    let Some(csg) = context.csg.as_mut() else {
-        return csg_refusal(Capability::ToHaveNoComponentInterference);
+    let normalized = normalized_expected(context);
+    let identities = match interference::component_labels(&subject) {
+        Ok(value) => value,
+        Err(error) => return backend_refusal(error),
     };
-    let analysis =
-        match interference::analyze_overlap(&subject, csg, prepared.tolerance, selected.as_deref())
-        {
-            Ok(value) => value,
-            Err(error) => return backend_refusal(error),
-        };
-    let OverlapAnalysis::Complete(evidence) = analysis else {
-        let OverlapAnalysis::Refused(diagnostics) = analysis else {
-            unreachable!()
-        };
-        return Evaluation::Refused { diagnostics };
-    };
-    let unexplained: Vec<_> = evidence
-        .overlaps
-        .iter()
-        .filter(|overlap| {
-            let key = (
-                overlap.left_component_id.min(overlap.right_component_id),
-                overlap.left_component_id.max(overlap.right_component_id),
-            );
-            allowance_by_pair.get(&key).is_none_or(|index| {
-                prepared.allowances[*index]
-                    .max_volume
-                    .is_some_and(|maximum| overlap.intersection_volume > maximum)
-            })
-        })
-        .cloned()
-        .collect();
-    let positive = unexplained.is_empty();
-    let diagnostics = if positive {
-        Vec::new()
+    let count = selected.as_ref().map_or_else(
+        || identities.len().saturating_mul(identities.len().saturating_sub(1))/2,
+        Vec::len);
+    let reservation = bounded::RESERVATION_BYTES.saturating_add(count.saturating_mul(64*1024));
+    if let Err(error) = context.check_continuous_output(reservation as u64) { return error; }
+    let mut pairs = Vec::with_capacity(count);
+    if let Some(selected) = selected {
+        pairs.extend(selected.iter().map(|p| (p.left,p.right)));
     } else {
-        let mut diagnostic = Diagnostic::error(
-            "GEOSPEC_COMPONENT_INTERFERENCE_DETECTED",
-            format!(
-                "Unclassified component interference detected between {} component pair(s): {}.",
-                unexplained.len(),
-                unexplained
-                    .iter()
-                    .map(|overlap| format!(
-                        "{}/{} ({} mm³)",
-                        overlap.left_label,
-                        overlap.right_label,
-                        ryu_js::Buffer::new().format_finite(overlap.intersection_volume)
-                    ))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
-        );
-        diagnostic.suggestion = Some("Fix the assembly so the parts no longer share solid volume, or declare the overlap as an `allowances` entry with its reason and maximum volume.".into());
-        diagnostic.spatial = unexplained
-            .first()
-            .and_then(|overlap| overlap.witness_point)
-            .map(|center| Json::object([("center", point_json(center))]));
-        diagnostic.details = Some(Json::object([
-            ("matcher", Json::string("toHaveNoComponentInterference")),
-            (
-                "overlaps",
-                Json::Array(unexplained.iter().map(interference::overlap_json).collect()),
-            ),
-            ("checkedPairs", Json::Number(evidence.checked_pairs as f64)),
-            ("tolerance", Json::Number(evidence.tolerance)),
+        for (i,left) in identities.iter().enumerate() {
+            for right in &identities[i+1..] { pairs.push((left.id,right.id)); }
+        }
+    }
+    let mut results = Vec::new();
+    for (left,right) in pairs {
+        let key=(left.min(right),left.max(right));
+        let Some(index)=allowance_by_pair.get(&key) else {
+            return continuous_refusal(crate::analysis::continuous::ContinuousError::unsupported(
+                "This selected component pair has no bounded complete-material noninterference certificate."));
+        };
+        let Some(maximum)=prepared.allowances[*index].max_volume else {
+            // The authored allowance explicitly has no upper limit. This does
+            // not certify zero overlap or invent a volume observation.
+            results.push(Json::object([
+                ("leftComponentId",Json::Number(left as f64)),
+                ("rightComponentId",Json::Number(right as f64)),
+                ("allowanceIndex",Json::Number(*index as f64)),
+                ("criterion",Json::string("explicit-unbounded-allowance")),
+            ]));
+            continue;
+        };
+        let a=match context.interference_materials(left){Ok(v)=>v,Err(e)=>return e};
+        let b=match context.interference_materials(right){Ok(v)=>v,Err(e)=>return e};
+        let pairing=if let ([BoreSlab(h)],[FiniteCylinder(s)])=(a.as_slice(),b.as_slice()){
+            Some((h,s))
+        }else if let ([FiniteCylinder(s)],[BoreSlab(h)])=(a.as_slice(),b.as_slice()){
+            Some((h,s))
+        }else{None};
+        let Some((housing,shaft))=pairing else {
+            return continuous_refusal(crate::analysis::continuous::ContinuousError::unsupported(
+                "Selected pair lacks unambiguous complete bore-slab and finite-cylinder material admission."));
+        };
+        let bound=match bounded::bound(housing,shaft,maximum,context.budget){
+            Ok(value)=>value,
+            Err(bounded::Error::Domain(error))=>return continuous_refusal(error),
+            Err(bounded::Error::Budget(error))=>return Evaluation::budget_exceeded(context.capability,error),
+        };
+        let source=|band:&crate::backend::brep::NominalCylindricalBand| Json::object([
+            ("occurrence",Json::Number(band.occurrence as f64)),
+            ("publicFaceOrdinal",Json::Number(band.public_face_ordinal as f64)),
+            ("privateQueryFace",Json::Number(band.private_query_face as f64)),
+            ("sourceFaceEntity",Json::Number(band.source_face_entity as f64)),
+            ("sourceRoute",Json::Array(band.source_route[..band.source_route_count as usize].iter()
+                .map(|n|Json::Number(*n as f64)).collect())),
+            ("materialScope",Json::string("entire-single-selected-regular-solid")),
+            ("domain",Json::string(if band.transferred_reversed {
+                "clear-nominal-bore-with-entire-material-in-end-slab"
+            }else{"complete-nominal-cylinder-with-two-attached-filled-disks"})),
+            ("origin",point_json(band.origin)),("rawAxis",point_json(band.axis)),
+            ("radius",Json::Number(band.radius)),("from",Json::Number(band.from)),
+            ("to",Json::Number(band.to)),
+        ]);
+        results.push(Json::object([
+            ("leftComponentId",Json::Number(left as f64)),
+            ("rightComponentId",Json::Number(right as f64)),
+            ("allowanceIndex",Json::Number(*index as f64)),
+            ("maximumVolume",Json::Number(maximum)),
+            ("bound",bound.to_json()),("housing",source(housing)),("shaft",source(shaft)),
         ]));
-        vec![diagnostic]
-    };
+    }
     Evaluation::Geometric {
-        positive_satisfied: positive,
-        diagnostics,
-        evidence: family_evidence(
-            &subject.content_hash,
-            normalized_expected.clone(),
-            interference::measured_json(&evidence),
-            interference::witnesses_json(
-                &evidence,
-                &unexplained,
-                expected_member(&normalized_expected, "allowances", Json::Array(Vec::new())),
-            ),
-        ),
-        negated_diagnostic: None,
+        positive_satisfied:true, diagnostics:Vec::new(),
+        evidence:family_evidence(&subject.content_hash, normalized,
+            Json::object([("checkedPairs",Json::Number(results.len() as f64)),
+                ("pairs",Json::Array(results))]),
+            Json::object([("representation",Json::string("complete-selected-nominal-material")),
+                ("comparison",Json::string("inclusive-upper-bound-no-scalar-fallback")),
+                ("tolerance",Json::Number(prepared.tolerance))])),
+        negated_diagnostic:None,
     }
 }
 
-/// Lead-owned ancillary envelope calls this reusable exact analysis body.
+/// Ancillary envelope for approximate polyhedral observations only.
 pub(crate) fn evaluate_overlap(
     tolerance: f64,
     selected: Option<&[SelectedPair]>,

@@ -385,13 +385,15 @@ const callRecord = (operation, input, invoke, extra = {}) => {
   }
 };
 
+const campaignRegistryVersion = (row) => JSON.parse(row.sourceRow.transport.ingestRequestUtf8).registryVersion;
+
 const initializeCase = (nativeEngine, row) => {
   const input = Buffer.from(
     JSON.stringify({
       method: 'initialize',
       requestId: `installed-corpus-init:${row.id}`,
       protocolVersion: 3,
-      registryVersion: 4,
+      registryVersion: campaignRegistryVersion(row),
       canonicalProfile: CANONICAL_PROFILE,
     }),
   );
@@ -400,7 +402,7 @@ const initializeCase = (nativeEngine, row) => {
     const { result } = JSON.parse(Buffer.from(call.output).toString('utf8'));
     assert.equal(result.numericProfile, PROFILE);
     assert.equal(result.canonicalProfile, CANONICAL_PROFILE);
-    assert.equal(result.registryVersion, 4);
+    assert.equal(result.registryVersion, campaignRegistryVersion(row));
   }
   return call;
 };
@@ -427,7 +429,7 @@ const admitCase = (nativeEngine, row) => {
       method: 'subjectHandle',
       requestId: `installed-corpus-handle:${row.id}`,
       protocolVersion: 3,
-      registryVersion: 4,
+      registryVersion: campaignRegistryVersion(row),
       canonicalProfile: CANONICAL_PROFILE,
       [row.identityField]: actualIdentity,
     }),
@@ -452,7 +454,7 @@ const releaseCase = (nativeEngine, row, handle) => {
       method: 'releaseSubject',
       requestId: `installed-corpus-release:${row.id}`,
       protocolVersion: 3,
-      registryVersion: 4,
+      registryVersion: campaignRegistryVersion(row),
       canonicalProfile: CANONICAL_PROFILE,
       subjectHandle: handle,
     }),

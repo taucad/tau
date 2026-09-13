@@ -4,7 +4,15 @@ import { cpus, freemem, platform, release, totalmem } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 // eslint-disable-next-line import-x/no-extraneous-dependencies -- #bench/lib resolves to this package's own bench/lib.ts; includeInternal misclassifies the self-owned module as a dependency.
-import { analyzeComparableRoutes, analyzeControls, readHashed, sha256, shuffled, xorshift32 } from '#bench/lib';
+import {
+  analyzeComparableRoutes,
+  analyzeControls,
+  readHashed,
+  sha256,
+  shuffled,
+  verifyBroadFixtures,
+  xorshift32,
+} from '#bench/lib';
 // eslint-disable-next-line import-x/no-extraneous-dependencies -- #bench/lib resolves to this package's own bench/lib.ts; includeInternal misclassifies the self-owned module as a dependency.
 import type { BenchmarkConfig, Corpus, RouteName, WorkerSuccess, WorkerRow, Decision } from '#bench/lib';
 
@@ -25,7 +33,7 @@ const parseArguments = () => {
     if (key === undefined) {
       throw new Error('Missing argument name.');
     }
-    if (key === '--measure') {
+    if (key === '--measure' || key === '--verify-inputs-only') {
       values.set(key, 'true');
     } else {
       const value = process.argv[++index];
@@ -34,6 +42,9 @@ const parseArguments = () => {
       }
       values.set(key, value);
     }
+  }
+  if (values.has('--verify-inputs-only') && values.has('--measure')) {
+    throw new Error('Input verification cannot be combined with measurement.');
   }
   return values;
 };
@@ -175,7 +186,8 @@ const verifyConfig = async ({
   ) {
     throw new Error('Measurement requires a timing-eligible artifact handoff and quiet-window observation.');
   }
-  return { artifacts, configSha256: sha256(await readFile(configPath)) };
+  const broadFixtures = await verifyBroadFixtures(config.broadFixtures);
+  return { artifacts, configSha256: sha256(await readFile(configPath)), broadFixtures };
 };
 
 type Campaign = {
@@ -227,18 +239,48 @@ const preflightDisposition = (semanticMatch: boolean, exactNewBytes: boolean, ro
       ? 'preflight-passed-timing-not-run'
       : 'partial-preflight-passed-timing-not-run';
 
+const selectRoutes = (argumentsByName: Map<string, string>, config: BenchmarkConfig): RouteName[] => {
+  const selectedRoutes = argumentsByName.has('--routes')
+    ? requiredArgument(argumentsByName, '--routes').split(',')
+    : argumentsByName.has('--verify-inputs-only')
+      ? Object.keys(config.routes)
+      : ['reference', 'wasm', 'native'];
+  if (selectedRoutes.some((name) => !isRouteName(name))) {
+    throw new Error('Unknown route selection.');
+  }
+  return selectedRoutes.filter((name) => isRouteName(name));
+};
+
 const main = async () => {
   const argumentsByName = parseArguments();
   const configPath = resolve(requiredArgument(argumentsByName, '--config'));
   const outputPath = resolve(requiredArgument(argumentsByName, '--output'));
   const measure = argumentsByName.has('--measure');
+  const verifyInputsOnly = argumentsByName.has('--verify-inputs-only');
   const config = JSON.parse(await readFile(configPath, 'utf8')) as BenchmarkConfig;
-  const selectedRoutes = (argumentsByName.get('--routes') ?? 'reference,wasm,native').split(',');
-  if (selectedRoutes.some((name) => !isRouteName(name))) {
-    throw new Error('Unknown route selection.');
-  }
-  const routeNames = selectedRoutes.filter((name) => isRouteName(name));
+  const routeNames = selectRoutes(argumentsByName, config);
   const verified = await verifyConfig({ config, configPath, measure, routeNames });
+  if (verifyInputsOnly) {
+    const report = {
+      schemaVersion: 1,
+      source,
+      mode: 'verify-inputs-only',
+      disposition: 'inputs-verified-engine-correctness-and-timing-pending',
+      generatedAt: new Date().toISOString(),
+      config: { path: configPath, sha256: verified.configSha256 },
+      corpus: { ...config.corpus, records: 320, workloads: workloadIds },
+      artifacts: verified.artifacts,
+      ...(verified.broadFixtures === undefined ? {} : { broadFixtures: verified.broadFixtures }),
+      runtime: { node: process.version, toolchain: config.toolchain },
+      execution: { engineWorkersInvoked: 0, timerCalibrationInvoked: false, timingCampaignInvoked: false },
+    };
+    await mkdir(dirname(outputPath), { recursive: true });
+    await writeFile(outputPath, `${JSON.stringify(report, undefined, 2)}\n`);
+    process.stdout.write(
+      `${JSON.stringify({ output: outputPath, mode: report.mode, disposition: report.disposition })}\n`,
+    );
+    return;
+  }
   const preflight: WorkerRow[] = [];
   for (const workload of workloadIds) {
     for (const route of routeNames) {
@@ -258,6 +300,7 @@ const main = async () => {
     config: { path: configPath, sha256: verified.configSha256 },
     corpus: { ...config.corpus, records: 320, workloads: workloadIds },
     artifacts: verified.artifacts,
+    ...(verified.broadFixtures === undefined ? {} : { broadFixtures: verified.broadFixtures }),
     runtime: {
       node: process.version,
       versions: process.versions,

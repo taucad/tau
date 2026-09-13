@@ -15,8 +15,10 @@ const packageConfig: UserConfig = {
   ...baseConfig,
   format: 'esm',
   outDir: 'dist',
-  deps: { neverBundle: ['#native-binding', '#wasm-binding'] },
+  deps: { neverBundle: ['#native-binding', '#wasm-binding', '#mixed-wasm-binding'] },
   copy: [
+    { from: 'bindings/emscripten/generated/*.mjs', to: 'dist/bindings/mixed-wasm' },
+    { from: 'bindings/emscripten/generated/*.wasm', to: 'dist/bindings/mixed-wasm' },
     { from: 'bindings/node/generated/*.js', to: 'dist/native' },
     { from: 'bindings/node/generated/*.node', to: 'dist/native' },
     { from: 'bindings/wasm/generated/*.js', to: 'dist/wasm' },

@@ -20,7 +20,8 @@
     "dist",
     "LICENSE",
     "README.md",
-    "!dist/**/*.node"
+    "!dist/**/*.node",
+    "NOTICE"
   ],
   "keywords": [
     "cad",
@@ -63,7 +64,8 @@
       "#native-binding": {
         "node": "./dist/native/index.js"
       },
-      "#wasm-binding": "./dist/wasm/geospec_engine_native_wasm.js"
+      "#wasm-binding": "./dist/wasm/geospec_engine_native_wasm.js",
+      "#mixed-wasm-binding": "./dist/bindings/mixed-wasm/geospec_engine_native.mjs"
     }
   },
   "imports": {
@@ -74,7 +76,8 @@
       "node": "./bindings/node/generated/index.js"
     },
     "#wasm-binding": "./bindings/wasm/generated/geospec_engine_native_wasm.js",
-    "#bench/*": "./bench/*.ts"
+    "#bench/*": "./bench/*.ts",
+    "#mixed-wasm-binding": "./bindings/emscripten/generated/geospec_engine_native.mjs"
   },
   "devDependencies": {
     "@napi-rs/cli": "catalog:"

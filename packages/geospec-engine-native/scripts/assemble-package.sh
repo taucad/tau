@@ -25,7 +25,7 @@ tar -xzf "$ASSEMBLY_ROOT/source-pack.tgz" -C "$STAGED_ROOT" --strip-components=1
 pnpm --dir "$PACKAGE_ROOT" exec napi create-npm-dirs --cwd "$STAGED_ROOT" --npm-dir npm
 
 node --input-type=module - "$PACKAGE_ROOT" "$STAGED_ROOT" <<'JS'
-import { copyFileSync, readFileSync, readdirSync } from 'node:fs';
+import { copyFileSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 const [source, stage] = process.argv.slice(2);
 for (const directory of readdirSync(join(stage, 'npm'))) {
@@ -33,6 +33,9 @@ for (const directory of readdirSync(join(stage, 'npm'))) {
   const manifest = JSON.parse(readFileSync(join(target, 'package.json'), 'utf8'));
   copyFileSync(join(source, 'bindings/node/generated', manifest.main), join(target, manifest.main));
   copyFileSync(join(source, 'LICENSE'), join(target, 'LICENSE'));
+  copyFileSync(join(source, 'NOTICE'), join(target, 'NOTICE'));
+  manifest.files = [...new Set([...(manifest.files ?? ['*.node']), 'NOTICE'])];
+  writeFileSync(join(target, 'package.json'), `${JSON.stringify(manifest, null, 2)}\n`);
 }
 JS
 

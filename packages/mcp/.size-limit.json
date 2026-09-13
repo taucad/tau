@@ -1,0 +1,7 @@
+[
+  {
+    "name": "@taucad/mcp production bundle",
+    "path": "dist/**/*.mjs",
+    "limit": "100 kB"
+  }
+]

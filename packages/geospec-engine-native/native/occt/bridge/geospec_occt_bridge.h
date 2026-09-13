@@ -760,6 +760,12 @@ int geospec_occt_nominal_cylindrical_band_query(
     const geospec_occt_document* document, geospec_occt_entity face,
     geospec_occt_nominal_cylindrical_band* output,
     geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
+// kind 0: complete bore material in end slab; kind 1: complete capped cylinder.
+int geospec_occt_selected_interference_material_query(
+    const geospec_occt_document* document, geospec_occt_entity face,
+    geospec_occt_nominal_cylindrical_band* band, uint32_t* kind,
+    geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
+
 int geospec_occt_selected_bore_void_query(
     const geospec_occt_document* document, geospec_occt_entity face,
     geospec_occt_nominal_cylindrical_band* band,

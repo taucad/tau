@@ -701,6 +701,15 @@ pub struct SelectedBoreVoid {
     pub maximum_topology_tolerance_mm: f64,
 }
 
+/// Complete selected regular material, not a lateral-face approximation.
+/// The bore variant is enclosed by the band's end slab with clear bore
+/// interior; the cylinder variant is its complete nominal capped cylinder.
+#[derive(Clone, Debug, PartialEq)]
+pub enum SelectedInterferenceMaterial {
+    BoreSlab(NominalCylindricalBand),
+    FiniteCylinder(NominalCylindricalBand),
+}
+
 impl CircularBoreInventory {
     pub fn owned_bytes(&self) -> u64 {
         (std::mem::size_of::<Self>() as u64).saturating_add(
@@ -1030,6 +1039,12 @@ pub trait BrepSubject {
             kind: super::BackendErrorKind::Unsupported,
             message: "The BRep connector has no qualified circular-bore topology query.".into(),
         })
+    }
+
+    /// Certify complete bore-slab or finite-cylinder material for a selected face.
+    fn selected_interference_material(&self, _face: BrepEntity) -> Result<SelectedInterferenceMaterial, BackendError> {
+        Err(BackendError { kind: super::BackendErrorKind::Unsupported,
+            message: "Complete selected interference material is unavailable.".into() })
     }
 
     /// One actual occurrence face, complete single-solid material, two mouths,

@@ -6653,6 +6653,211 @@ int geospec_occt_selected_bore_void_query(
   });
 }
 
+int geospec_occt_selected_interference_material_query(
+    const geospec_occt_document* document, geospec_occt_entity face,
+    geospec_occt_nominal_cylindrical_band* output, uint32_t* kind,
+    geospec_occt_string* error) noexcept {
+  if (!document || !output || !kind) {
+    return fail(GEOSPEC_OCCT_INVALID_ARGUMENT, "Material output/document is null.", error);
+  }
+  *output = {};
+  *kind = UINT32_MAX;
+  return guarded(error, [&]() -> int {
+    geospec_occt_nominal_cylindrical_band band{};
+    int status = geospec_occt_nominal_cylindrical_band_query(document, face, &band, error);
+    if (status != GEOSPEC_OCCT_OK) return status;
+    const auto& occurrence = document->occurrences[face.occurrence];
+    auto refuse = [&](const char* message) {
+      return fail(GEOSPEC_OCCT_UNSUPPORTED, message, error);
+    };
+    TopoDS_Solid solid;
+    std::string message;
+    if (!regular_solid_operand(occurrence.shape, solid, message))
+      return refuse("Interference material requires exactly one complete regular solid.");
+    ShapeIndex faces, edges, vertices, shells;
+    TopExp::MapShapes(solid, TopAbs_FACE, faces);
+    TopExp::MapShapes(solid, TopAbs_EDGE, edges);
+    TopExp::MapShapes(solid, TopAbs_VERTEX, vertices);
+    TopExp::MapShapes(solid, TopAbs_SHELL, shells);
+    if (faces.Extent() > 4096 || edges.Extent() > 16384 || vertices.Extent() > 16384 ||
+        shells.Extent() != 1 || occurrence.public_faces.size() != static_cast<size_t>(faces.Extent()))
+      return refuse("Interference material exceeds its complete single-shell boundary domain.");
+    BRepClass3d_SolidClassifier classifier(solid);
+    classifier.PerformInfinitePoint(0);
+    if (classifier.State() != TopAbs_OUT)
+      return refuse("Interference material has reversed or ambiguous unbounded material.");
+    // Every selected boundary must have an unambiguous AP242 forward route.
+    for (const auto& view : occurrence.public_faces) {
+      const SourceFaceFacts* source = nullptr;
+      for (const auto& candidate : document->source_faces) {
+        if (!view.shape.IsPartner(candidate.shape) ||
+            !candidate.shape.Moved(occurrence.shape.Location()).Location().IsEqual(view.shape.Location())) continue;
+        if (source) return refuse("Interference boundary source association is ambiguous.");
+        source = &candidate;
+      }
+      if (!source) return refuse("Interference boundary lacks an AP242 source association.");
+      geospec_occt_resolved_source_face resolved{};
+      status = geospec_occt_resolve_source_face(document, source->entity,
+          occurrence.source_route.data(), occurrence.source_route.size(), &resolved, error);
+      if (status != GEOSPEC_OCCT_OK) return status;
+      if (resolved.occurrence != face.occurrence || resolved.private_query_face != view.query_index)
+        return refuse("Interference boundary forward source route disagrees.");
+    }
+    TopoDS_Shape selected;
+    if (!resolve_entity(*document, face, selected, message))
+      return refuse("Interference selected lateral face is missing.");
+    const TopoDS_Face lateral = TopoDS::Face(selected);
+    const gp_Dir axis(band.axis[0], band.axis[1], band.axis[2]);
+    const gp_Pnt origin(band.origin[0], band.origin[1], band.origin[2]);
+    if (band.transferred_reversed) {
+      geospec_occt_circular_bore_candidate clear{};
+      status = geospec_occt_selected_bore_void_query(document, face, &band, &clear, error);
+      if (status != GEOSPEC_OCCT_OK) return status;
+      // In this nominal domain the slab axis is exactly Cartesian. Every
+      // other face is a bounded plane, so linear height extrema occur on
+      // its complete boundary. Lines need endpoints; horizontal circles
+      // have constant height. No reporting box participates in this proof.
+      const int coordinate = cartesian_axis(axis);
+      if (coordinate < 0) return refuse("Bore slab needs a Cartesian nominal axis.");
+      const double lo = band.from, hi = band.to;
+      // Knuth TwoDiff residual: refuse rounded station construction, rather
+      // than using a rounded value as an exact slab-boundary predicate.
+      auto exact_difference = [](double a, double b, double& result) {
+        result = a - b;
+        const double bv = a - result, av = result + bv;
+        const double br = bv - b, ar = a - av;
+        return std::isfinite(a) && std::isfinite(b) && std::isfinite(result) &&
+            std::isfinite(bv) && std::isfinite(av) && std::isfinite(br) &&
+            std::isfinite(ar) && ar + br == 0.0;
+      };
+      auto in_slab = [&](const gp_Pnt& p) {
+        double difference = 0;
+        if (!exact_difference(p.Coord(coordinate + 1), origin.Coord(coordinate + 1), difference)) return false;
+        const double station = difference * axis.Coord(coordinate + 1);
+        return std::isfinite(station) && station >= lo && station <= hi;
+      };
+      for (int i = 1; i <= faces.Extent(); ++i) {
+        const TopoDS_Face boundary = TopoDS::Face(faces(i));
+        if (boundary.IsSame(lateral)) continue;
+        if (BRepAdaptor_Surface(boundary).GetType() != GeomAbs_Plane)
+          return refuse("Bore slab has an unsupported nonplanar additional boundary.");
+        size_t wire_count = 0;
+        for (TopExp_Explorer wires(boundary, TopAbs_WIRE); wires.More(); wires.Next()) {
+          ++wire_count;
+          const TopoDS_Wire wire = TopoDS::Wire(wires.Current());
+          size_t children = 0, visited = 0;
+          for (TopoDS_Iterator child(wire); child.More(); child.Next()) {
+            if (child.Value().ShapeType() != TopAbs_EDGE)
+              return refuse("Bore slab has an incomplete wire.");
+            ++children;
+          }
+          for (BRepTools_WireExplorer use(wire, boundary); use.More(); use.Next()) {
+            ++visited;
+            const TopoDS_Edge edge = use.Current();
+            BRepAdaptor_Curve curve(edge);
+            const double first = curve.FirstParameter(), last = curve.LastParameter();
+            if (!std::isfinite(first) || !std::isfinite(last) || first >= last ||
+                BRep_Tool::Degenerated(edge))
+              return refuse("Bore slab edge has no bounded analytic interval.");
+            if (curve.GetType() == GeomAbs_Line) {
+              const gp_Lin line = curve.Line();
+              const double slope = line.Direction().Coord(coordinate + 1);
+              // A height-constant or signed-unit-height line has exact
+              // parameter products; other slopes need a future directed trim
+              // certificate, not an unqualified Value() evaluation.
+              if (slope != 0.0 && slope != 1.0 && slope != -1.0)
+                return refuse("Bore slab line needs an exact nominal height parameterization.");
+              double a = 0, b = 0;
+              if (!exact_difference(line.Location().Coord(coordinate + 1), -slope * first, a) ||
+                  !exact_difference(line.Location().Coord(coordinate + 1), -slope * last, b))
+                return refuse("Bore slab endpoint height requires rounded arithmetic.");
+              gp_Pnt pa = line.Location(), pb = line.Location();
+              pa.SetCoord(coordinate + 1, a);
+              pb.SetCoord(coordinate + 1, b);
+              if (!in_slab(pa) || !in_slab(pb))
+                return refuse("Bore material extends outside the certified slab.");
+            } else if (curve.GetType() == GeomAbs_Circle) {
+              if (cartesian_axis(curve.Circle().Axis().Direction()) != coordinate ||
+                  !in_slab(curve.Circle().Location()))
+                return refuse("Bore slab circle is not a certified constant-height boundary.");
+            } else return refuse("Bore slab boundary curve is outside its analytic domain.");
+            double pf = 0, pl = 0;
+            const auto pc = BRep_Tool::CurveOnSurface(edge, boundary, pf, pl);
+            if (pc.IsNull() || !std::isfinite(pf) || !std::isfinite(pl) || pf >= pl)
+              return refuse("Bore slab boundary lacks its complete pcurve.");
+          }
+          if (children == 0 || visited != children)
+            return refuse("Bore slab wire traversal is incomplete.");
+        }
+        if (wire_count == 0 || BRepTools::OuterWire(boundary).IsNull())
+          return refuse("Bore slab plane is not bounded.");
+      }
+      *kind = 0;
+    } else {
+      if (faces.Extent() != 3 || edges.Extent() != 3 || vertices.Extent() != 2)
+        return refuse("Finite cylinder material needs exactly one band and two disks.");
+      std::vector<TopoDS_Edge> lateral_cycle;
+      if (!outer_cycle(lateral, 4, lateral_cycle))
+        return refuse("Finite cylinder lateral attachment is incomplete.");
+      std::array<TopoDS_Edge, 2> rims;
+      for (const auto& edge : lateral_cycle) {
+        if (BRep_Tool::IsClosed(edge, lateral)) continue;
+        BRepAdaptor_Curve curve(edge);
+        if (curve.GetType() != GeomAbs_Circle) return refuse("Cylinder rim is not circular.");
+        const gp_Pnt center = curve.Circle().Location();
+        const double station = gp_Vec(origin, center).Dot(gp_Vec(axis));
+        const int side = std::abs(station - band.from) <= std::abs(station - band.to) ? 0 : 1;
+        if (!rims[side].IsNull()) return refuse("Cylinder rim assignment is ambiguous.");
+        rims[side] = edge;
+      }
+      std::array<bool, 2> attached{};
+      for (int i = 1; i <= faces.Extent(); ++i) {
+        const TopoDS_Face cap = TopoDS::Face(faces(i));
+        if (cap.IsSame(lateral)) continue;
+        BRepAdaptor_Surface surface(cap);
+        std::vector<TopoDS_Edge> cycle;
+        if (surface.GetType() != GeomAbs_Plane || !outer_cycle(cap, 1, cycle))
+          return refuse("Cylinder cap must be one complete filled planar disk.");
+        const int side = !rims[0].IsNull() && cycle[0].IsSame(rims[0]) ? 0 :
+            !rims[1].IsNull() && cycle[0].IsSame(rims[1]) ? 1 : -1;
+        if (side < 0 || attached[side] || cycle[0].Orientation() == rims[side].Orientation())
+          return refuse("Cylinder cap does not share its complete oppositely directed rim.");
+        const gp_Pln plane = surface.Plane();
+        gp_Dir normal = plane.Axis().Direction();
+        if (cap.Orientation() == TopAbs_REVERSED) normal.Reverse();
+        else if (cap.Orientation() != TopAbs_FORWARD) return refuse("Cylinder cap sense is invalid.");
+        const double limit = std::max({BRep_Tool::Tolerance(cap),
+            BRep_Tool::Tolerance(cycle[0]), band.face_tolerance_mm});
+        const gp_Dir desired = side ? axis : axis.Reversed();
+        BRepAdaptor_Curve rim(rims[side]);
+        const gp_Circ circle = rim.Circle();
+        if (!std::isfinite(limit) || limit < 0 ||
+            gp_Vec(normal).Subtracted(gp_Vec(desired)).Magnitude() * band.radius > limit ||
+            plane.Distance(circle.Location()) > limit)
+          return refuse("Cylinder cap plane fails nominal rim attachment.");
+        double first = 0, last = 0;
+        const auto pc = BRep_Tool::CurveOnSurface(cycle[0], cap, first, last);
+        if (pc.IsNull()) return refuse("Cylinder cap has no pcurve.");
+        Geom2dAdaptor_Curve trim(pc, first, last);
+        if (trim.GetType() != GeomAbs_Circle || !std::isfinite(first) ||
+            !std::isfinite(last) || first >= last ||
+            std::abs((last - first) - trim.Period()) * band.radius > limit)
+          return refuse("Cylinder cap pcurve is not one complete nominal circle.");
+        const gp_Circ2d disk = trim.Circle();
+        const gp_Pnt2d uv = disk.Location();
+        if (std::abs(disk.Radius() - band.radius) > limit ||
+            surface.Value(uv.X(), uv.Y()).Distance(circle.Location()) > limit)
+          return refuse("Cylinder cap pcurve disagrees with its shared rim.");
+        attached[side] = true;
+      }
+      if (!attached[0] || !attached[1]) return refuse("Cylinder is missing a complete cap.");
+      *kind = 1;
+    }
+    *output = band;
+    return GEOSPEC_OCCT_OK;
+  });
+}
+
 int geospec_occt_circular_bores_prepare(
     const geospec_occt_document* document, size_t max_candidates,
     size_t retained_candidate_size, size_t retained_inventory_size,

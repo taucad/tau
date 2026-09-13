@@ -349,6 +349,30 @@ impl BrepSubject for Document {
         nominal_cylindrical_band(value)
     }
 
+    fn selected_interference_material(&self, face: BrepEntity) -> Result<geospec_engine_native_core::backend::brep::SelectedInterferenceMaterial, BackendError> {
+        self.validate_entity(face)?;
+        let BrepEntity::Face { occurrence, face: query_face } = face else {
+            return Err(unsupported("Interference material requires an occurrence face."));
+        };
+        let mut band = ffi::NominalCylindricalBand::default();
+        let mut kind = u32::MAX;
+        let mut error = ErrorBuffer::new();
+        unsafe {
+            check(ffi::geospec_occt_selected_interference_material_query(
+                self.raw.as_ptr(), face.into(), &mut band, &mut kind, error.raw()), &error)?;
+        }
+        let band = nominal_cylindrical_band(band)?;
+        if band.occurrence != occurrence || band.private_query_face != query_face {
+            return Err(backend_error("Interference material source route disagrees with selection."));
+        }
+        use geospec_engine_native_core::backend::brep::SelectedInterferenceMaterial;
+        match (kind, band.transferred_reversed) {
+            (0, true) => Ok(SelectedInterferenceMaterial::BoreSlab(band)),
+            (1, false) => Ok(SelectedInterferenceMaterial::FiniteCylinder(band)),
+            _ => Err(backend_error("Interference material kind/sense is invalid.")),
+        }
+    }
+
     fn selected_bore_void(&self, face: BrepEntity) -> Result<SelectedBoreVoid, BackendError> {
         self.validate_entity(face)?;
         let BrepEntity::Face {
@@ -3483,6 +3507,13 @@ mod ffi {
     }
 
     unsafe extern "C" {
+        pub fn geospec_occt_selected_interference_material_query(
+            document: *const Document,
+            face: Entity,
+            band: *mut NominalCylindricalBand,
+            kind: *mut u32,
+            error: *mut StringBuffer,
+        ) -> i32;
         pub fn geospec_occt_selected_bore_void_query(
             document: *const Document,
             face: Entity,

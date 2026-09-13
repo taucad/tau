@@ -1,4 +1,5 @@
-//! Exact positive-volume component-overlap analysis.
+//! Approximate observation of f32-merged polyhedral Boolean output.
+//! Neither the scalar nor the reporting cutoff is a material-overlap proof.
 
 use std::{
     cell::RefCell,
@@ -223,11 +224,11 @@ pub(crate) fn prepare_components(subject: &Subject) -> Result<PreparedComponents
             let mut diagnostic = Diagnostic::error(
                 "GEOSPEC_MANIFOLD_COMPONENT_INVALID",
                 format!(
-                    "Component '{}' is not a closed oriented solid, so no exact intersection volume exists.",
+                    "Component '{}' is not a closed oriented polyhedron, so the overlap observation is unavailable.",
                     component.label
                 ),
             );
-            diagnostic.suggestion = Some("Repair the source geometry so every component is a closed oriented solid; GeoSpec never substitutes an approximate backend for an exact interference verdict.".into());
+            diagnostic.suggestion = Some("Repair the operand mesh to a closed oriented polyhedron; this ancillary operation reports an approximate observation, not an interference verdict.".into());
             diagnostic.spatial = Some(bounds_spatial(component.bounds));
             diagnostic.details = Some(Json::object([
                 ("label", Json::string(&component.label)),
@@ -657,6 +658,15 @@ fn bounds_json(bounds: Bounds) -> Json {
 
 pub(crate) fn evidence_json(evidence: &Evidence) -> Json {
     let mut fields = vec![
+        ("profile".into(), Json::string("M3-CSG-OBSERVATION-01")),
+        ("assurance".into(), Json::string("approximate-polyhedral-observation")),
+        ("representation".into(), Json::string("legacy-f32-v1-merged-polyhedral-operands")),
+        ("conformanceBasis".into(), Json::string("pinned-Manifold-Rust-Boolean-output; source STEP tessellation or primary mesh")),
+        ("accuracyLimit".into(), Json::string("No certified source-material or Boolean-volume error bound; not an allowance proof.")),
+        ("volumeUnit".into(), Json::string("mm^3")),
+        ("reportingCutoff".into(), Json::Number(evidence.tolerance.powi(3).max(1e-12))),
+        ("cutoffMeaning".into(), Json::string("reporting-only; omitted pairs are not certified zero")),
+        ("diagnosticPointMeaning".into(), Json::string("output-bounds midpoint; not an interior witness")),
         ("componentSource".into(), Json::string("named")),
         (
             "componentCount".into(),
@@ -748,13 +758,17 @@ pub(crate) fn overlap_json(overlap: &Overlap) -> Json {
             "intersectionVolume".into(),
             Json::Number(overlap.intersection_volume),
         ),
-        ("penetration".into(), Json::string("positive-volume")),
+        ("penetration".into(), Json::string("observed-positive-polyhedral-volume")),
     ];
     if let Some(point) = overlap.witness_point {
-        fields.push(("witnessPoint".into(), point_json(point)));
+        fields.push(("diagnosticPoint".into(), point_json(point)));
     }
     Json::Object(fields)
 }
+
+#[cfg(test)]
+#[path = "../../../tests/overlap_observation.rs"]
+mod overlap_observation_tests;
 
 #[cfg(test)]
 mod tests {

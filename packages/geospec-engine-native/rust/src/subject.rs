@@ -1122,6 +1122,7 @@ pub(crate) struct EvaluationContext<'a> {
     brep_charged: bool,
     selected_domains: Vec<Rc<SelectedContinuousDomain>>,
     cylindrical_bands: Vec<Rc<NominalCylindricalBand>>,
+    finite_contact_faces: Vec<Rc<crate::backend::brep::FiniteContactFace>>,
     cylindrical_band_output_bytes: u64,
     batch: Option<&'a BatchAnalysis>,
 }
@@ -1146,6 +1147,7 @@ impl<'a> EvaluationContext<'a> {
             brep_charged: false,
             selected_domains: Vec::new(),
             cylindrical_bands: Vec::new(),
+            finite_contact_faces: Vec::new(),
             cylindrical_band_output_bytes: 0,
             batch: None,
         }
@@ -1259,20 +1261,29 @@ impl<'a> EvaluationContext<'a> {
     /// Uncached complete-selected-material bore demands. Charge all local
     /// inventory work before each adapter call, including refused candidates.
     pub(crate) fn selected_bore_voids(
-        &mut self, occurrence: u32,
+        &mut self,
+        occurrence: u32,
     ) -> Result<Vec<crate::backend::brep::SelectedBoreVoid>, Evaluation> {
         self.brep_facts()?;
         let subject = self.subject();
-        let bundle = subject.report_bundle().map_err(backend_refusal)?
-            .ok_or_else(|| backend_refusal(BackendError {
-                kind: BackendErrorKind::Unsupported,
-                message: "Selected bore void requires a BRep report.".into(),
-            }))?;
-        let faces = bundle.occurrence_faces.get(occurrence as usize)
-            .ok_or_else(|| backend_refusal(BackendError {
-                kind: BackendErrorKind::Unsupported,
-                message: "Selected material occurrence is missing.".into(),
-            }))?;
+        let bundle = subject
+            .report_bundle()
+            .map_err(backend_refusal)?
+            .ok_or_else(|| {
+                backend_refusal(BackendError {
+                    kind: BackendErrorKind::Unsupported,
+                    message: "Selected bore void requires a BRep report.".into(),
+                })
+            })?;
+        let faces = bundle
+            .occurrence_faces
+            .get(occurrence as usize)
+            .ok_or_else(|| {
+                backend_refusal(BackendError {
+                    kind: BackendErrorKind::Unsupported,
+                    message: "Selected material occurrence is missing.".into(),
+                })
+            })?;
         if faces.len() > 4096 {
             return Err(backend_refusal(BackendError {
                 kind: BackendErrorKind::Unsupported,
@@ -1280,33 +1291,51 @@ impl<'a> EvaluationContext<'a> {
             }));
         }
         self.check_continuous_output(256 * 1024)?;
-        let candidates: Vec<_> = faces.iter().filter(|face| face.reversed &&
-            matches!(face.facts.surface, SurfaceFacts::Cylinder { .. })).take(17).collect();
+        let candidates: Vec<_> = faces
+            .iter()
+            .filter(|face| {
+                face.reversed && matches!(face.facts.surface, SurfaceFacts::Cylinder { .. })
+            })
+            .take(17)
+            .collect();
         if candidates.len() > 16 {
             return Err(backend_refusal(BackendError {
                 kind: BackendErrorKind::Unsupported,
                 message: "Selected bore void exceeds its 16-bore domain.".into(),
             }));
         }
-        let work = 1 + faces.iter().filter(|face|
-            !matches!(face.facts.surface, SurfaceFacts::Plane { .. })).count() as u64;
-        let brep = subject.brep.as_deref().ok_or_else(|| backend_refusal(BackendError {
-            kind: BackendErrorKind::Unsupported, message: "Selected material has no BRep.".into(),
-        }))?;
+        let work = 1 + faces
+            .iter()
+            .filter(|face| !matches!(face.facts.surface, SurfaceFacts::Plane { .. }))
+            .count() as u64;
+        let brep = subject.brep.as_deref().ok_or_else(|| {
+            backend_refusal(BackendError {
+                kind: BackendErrorKind::Unsupported,
+                message: "Selected material has no BRep.".into(),
+            })
+        })?;
         let mut result = Vec::new();
         for face in candidates {
-            self.budget.charge(work).map_err(|e| Evaluation::budget_exceeded(self.capability, e))?;
+            self.budget
+                .charge(work)
+                .map_err(|e| Evaluation::budget_exceeded(self.capability, e))?;
             let value = match brep.selected_bore_void(face.entity) {
                 Ok(value) => value,
                 Err(error) if error.kind == BackendErrorKind::Unsupported => continue,
                 Err(error) => return Err(backend_refusal(error)),
             };
-            if value.band.occurrence != occurrence ||
-                value.band.public_face_ordinal != face.facts.index ||
-                face.entity != (BrepEntity::Face { occurrence, face: value.band.private_query_face }) {
+            if value.band.occurrence != occurrence
+                || value.band.public_face_ordinal != face.facts.index
+                || face.entity
+                    != (BrepEntity::Face {
+                        occurrence,
+                        face: value.band.private_query_face,
+                    })
+            {
                 return Err(backend_refusal(BackendError {
                     kind: BackendErrorKind::ComputationFailed,
-                    message: "Selected bore certificate does not bind the requested material face.".into(),
+                    message: "Selected bore certificate does not bind the requested material face."
+                        .into(),
                 }));
             }
             result.push(value);
@@ -1369,6 +1398,81 @@ impl<'a> EvaluationContext<'a> {
     /// Claim-local distinct-face demand. An entry can exist only after its
     /// debit and validated query succeed; reusing that paid demand is not a
     /// persistent cache hit. A new demand is charged before report/query lookup.
+    pub(crate) fn finite_contact_face(
+        &mut self,
+        entity: BrepEntity,
+        ordinal: u32,
+    ) -> Result<Rc<crate::backend::brep::FiniteContactFace>, Evaluation> {
+        use crate::backend::brep::FiniteContactFace;
+        let BrepEntity::Face { occurrence, face } = entity else {
+            return Err(cylindrical_band_refusal(
+                "Finite contact requires an occurrence-local face.",
+            ));
+        };
+        if let Some(v) = self
+            .finite_contact_faces
+            .iter()
+            .find(|v| v.occurrence == occurrence && v.private_query_face == face)
+        {
+            if v.public_face_ordinal != ordinal {
+                return Err(cylindrical_band_refusal(
+                    "Finite contact public/private association changed.",
+                ));
+            }
+            return Ok(Rc::clone(v));
+        }
+        self.budget
+            .charge(1)
+            .map_err(|e| Evaluation::budget_exceeded(self.capability, e))?;
+        // One ABI record, Rust return/copy and retained Rc; the bounded C++
+        // topology traversal has <=24 uses. OCCT internal machine allocations
+        // remain part of connector admission, not this requested-payload bound.
+        self.check_cylindrical_band_capacity(&[
+            (4 * size_of::<FiniteContactFace>() + 2 * size_of::<usize>()) as u64,
+            ((self.finite_contact_faces.capacity() + 1) * size_of::<Rc<FiniteContactFace>>())
+                as u64,
+        ])?;
+        self.finite_contact_faces
+            .try_reserve_exact(1)
+            .map_err(|_| cylindrical_band_refusal("Finite contact record reservation failed."))?;
+        let bundle = self
+            .subject()
+            .report_bundle()
+            .map_err(backend_refusal)?
+            .ok_or_else(|| {
+                cylindrical_band_refusal(
+                    "Finite contact requires a retained located-face inventory.",
+                )
+            })?;
+        let selected = bundle
+            .occurrence_faces
+            .get(occurrence as usize)
+            .and_then(|faces| faces.get(ordinal as usize))
+            .filter(|s| s.entity == entity && s.facts.index == ordinal)
+            .ok_or_else(|| {
+                cylindrical_band_refusal("Finite contact selected face is not source-associated.")
+            })?;
+        let value = self
+            .subject()
+            .brep
+            .as_deref()
+            .ok_or_else(|| cylindrical_band_refusal("Finite contact requires BRep evidence."))?
+            .finite_contact_face(entity)
+            .map_err(backend_refusal)?;
+        if value.occurrence != occurrence
+            || value.private_query_face != face
+            || value.public_face_ordinal != ordinal
+            || value.transferred_reversed != u32::from(selected.reversed)
+        {
+            return Err(cylindrical_band_refusal(
+                "Finite contact returned a different selected operand.",
+            ));
+        }
+        let value = Rc::new(value);
+        self.finite_contact_faces.push(Rc::clone(&value));
+        Ok(value)
+    }
+
     pub(crate) fn nominal_cylindrical_band(
         &mut self,
         entity: BrepEntity,
@@ -1494,6 +1598,15 @@ impl<'a> EvaluationContext<'a> {
             })
             .and_then(|bytes| bytes.checked_add(self.cylindrical_band_output_bytes));
         let requested = retained
+            .and_then(|bytes| {
+                bytes.checked_add(
+                    (self.finite_contact_faces.capacity()
+                        * size_of::<Rc<crate::backend::brep::FiniteContactFace>>()
+                        + self.finite_contact_faces.len()
+                            * (size_of::<crate::backend::brep::FiniteContactFace>()
+                                + 2 * size_of::<usize>())) as u64,
+                )
+            })
             .and_then(|bytes| bytes.checked_add(other_domains?))
             .and_then(|retained| {
                 pending

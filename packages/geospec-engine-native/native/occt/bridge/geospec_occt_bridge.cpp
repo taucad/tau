@@ -4237,6 +4237,148 @@ bool continuous_cylinder(const ShapeIndex& faces, const ShapeIndex& edges,
 
 // Nominal full-band reconstruction is deliberately separate from the exact
 // stored-coordinate PhaseZeroV1 whole-solid classifier above.
+bool finite_contact_face(const TopoDS_Face& face,
+                         geospec_occt_finite_contact_face& output,
+                         std::string& message) {
+  message = "Finite contact requires complete analytic planar wires or attached conical circular rims.";
+  if ((face.Orientation() != TopAbs_FORWARD && face.Orientation() != TopAbs_REVERSED) ||
+      !BRepCheck_Analyzer(face, true).IsValid()) return false;
+  BRepAdaptor_Surface surface(face);
+  const bool planar = surface.GetType() == GeomAbs_Plane;
+  if (!planar && surface.GetType() != GeomAbs_Cone) return false;
+  output.kind = planar ? 0 : 1;
+  output.tolerance = BRep_Tool::Tolerance(face);
+  output.face_tolerance = output.tolerance;
+  if (!std::isfinite(output.tolerance) || output.tolerance < 0) return false;
+  if (planar) {
+    const gp_Pln plane = surface.Plane();
+    point(output.origin, plane.Location());
+    gp_Dir n = plane.Axis().Direction();
+    if (face.Orientation() == TopAbs_REVERSED) n.Reverse();
+    direction(output.normal, n);
+  } else {
+    point(output.origin, surface.Cone().Location());
+    direction(output.normal, surface.Cone().Axis().Direction());
+  }
+  const TopoDS_Wire outer = BRepTools::OuterWire(face);
+  if (outer.IsNull()) return false;
+  ShapeIndex edges, vertices;
+  TopExp::MapShapes(face, TopAbs_EDGE, edges);
+  TopExp::MapShapes(face, TopAbs_VERTEX, vertices);
+  if (edges.Extent() > 16) return false;
+  uint32_t outer_count = 0;
+  for (TopExp_Explorer wires(face, TopAbs_WIRE); wires.More(); wires.Next()) {
+    if (++output.wire_count > 9) return false;
+    const TopoDS_Wire wire = TopoDS::Wire(wires.Current());
+    const bool is_outer = wire.IsSame(outer);
+    if (is_outer) ++outer_count;
+    size_t direct_count = 0, visited = 0, circles = 0, lines = 0;
+    for (TopoDS_Iterator it(wire); it.More(); it.Next()) {
+      if (it.Value().ShapeType() != TopAbs_EDGE || ++direct_count > 16) return false;
+    }
+    TopoDS_Vertex initial, previous;
+    for (BRepTools_WireExplorer uses(wire, face); uses.More(); uses.Next()) {
+      ++visited;
+      if (++output.edge_use_count > 24) return false;
+      const TopoDS_Edge edge = uses.Current();
+      if (BRep_Tool::Degenerated(edge) ||
+          (edge.Orientation() != TopAbs_FORWARD && edge.Orientation() != TopAbs_REVERSED)) return false;
+      TopoDS_Vertex start, end;
+      TopExp::Vertices(edge, start, end, true);
+      if (start.IsNull() || end.IsNull() || (!previous.IsNull() && !previous.IsSame(start))) return false;
+      if (initial.IsNull()) initial = start;
+      previous = end;
+      BRepAdaptor_Curve curve(edge);
+      const double first = curve.FirstParameter(), last = curve.LastParameter();
+      const double limit = std::max({output.face_tolerance, BRep_Tool::Tolerance(edge),
+          BRep_Tool::Tolerance(start), BRep_Tool::Tolerance(end)});
+      if (!std::isfinite(first) || !std::isfinite(last) || first >= last ||
+          !std::isfinite(limit) || limit < 0) return false;
+      const gp_Pnt a = curve.Value(first), b = curve.Value(last);
+      const gp_Pnt va = BRep_Tool::Pnt(start), vb = BRep_Tool::Pnt(end);
+      double residual = std::min(std::max(a.Distance(va), b.Distance(vb)),
+                                 std::max(a.Distance(vb), b.Distance(va)));
+      if (!planar && BRep_Tool::IsClosed(edge, face)) {
+        // Seam carries no contact witness. Both adjacent circles remain
+        // independently attached to this actual selected conical face.
+        if (curve.GetType() != GeomAbs_Line) return false;
+        continue;
+      }
+      if (curve.GetType() == GeomAbs_Line && planar && is_outer) {
+        ++lines;
+        if (output.vertex_count == 8) return false;
+        auto& out = output.lines[output.vertex_count];
+        out.edge_index = static_cast<uint32_t>(edges.FindIndex(edge));
+        out.start_vertex = static_cast<uint32_t>(vertices.FindIndex(start));
+        out.end_vertex = static_cast<uint32_t>(vertices.FindIndex(end));
+        out.reversed = edge.Orientation() == TopAbs_REVERSED ? 1 : 0;
+        point(out.origin, curve.Line().Location());
+        direction(out.direction, curve.Line().Direction());
+        out.range[0] = first; out.range[1] = last;
+        out.edge_tolerance = BRep_Tool::Tolerance(edge);
+        out.vertex_tolerances[0] = BRep_Tool::Tolerance(start);
+        out.vertex_tolerances[1] = BRep_Tool::Tolerance(end);
+        point(output.vertices[output.vertex_count++], va);
+        residual = std::max({residual, surface.Plane().Distance(a), surface.Plane().Distance(b)});
+        out.attachment_residual = residual;
+      } else if (curve.GetType() == GeomAbs_Circle) {
+        ++circles;
+        if (output.circle_count == 8 || !curve.IsClosed() || !start.IsSame(end)) return false;
+        const gp_Circ circle = curve.Circle();
+        auto& out = output.circles[output.circle_count++];
+        out.edge_index = static_cast<uint32_t>(edges.FindIndex(edge));
+        out.outer = is_outer ? 1 : 0;
+        point(out.center, circle.Location());
+        direction(out.axis, circle.Axis().Direction());
+        out.radius = circle.Radius();
+        out.range[0] = first; out.range[1] = last;
+        out.period = curve.Period();
+        if (!std::isfinite(out.radius) || out.radius <= 0 ||
+            !std::isfinite(out.period) || out.period <= 0) return false;
+        residual = std::max(residual, out.radius * std::abs((last-first)-out.period));
+        if (planar) {
+          // Whole-circle bound, not sampled attachment: center-plane gap
+          // plus the maximum normal excursion of the radius.
+          const gp_Dir n = surface.Plane().Axis().Direction();
+          const double excursion = out.radius * gp_Vec(n).Crossed(gp_Vec(circle.Axis().Direction())).Magnitude();
+          residual = std::max(residual, surface.Plane().Distance(circle.Location()) + excursion);
+        } else {
+          double pf = 0, pl = 0; bool stored = false;
+          const auto pc = BRep_Tool::CurveOnSurface(edge, face, pf, pl, &stored);
+          if (pc.IsNull() || !stored || !BRep_Tool::SameRange(edge) ||
+              !BRep_Tool::SameParameter(edge) || pf != first || pl != last) return false;
+          Geom2dAdaptor_Curve trim(pc, pf, pl);
+          if (trim.GetType() != GeomAbs_Line) return false;
+          const gp_Lin2d uv = trim.Line();
+          if (uv.Direction().Y() != 0 || std::abs(uv.Direction().X()) != 1) return false;
+          const gp_Cone cone = surface.Cone();
+          const gp_Ax3 frame = cone.Position();
+          const double v = uv.Location().Y(), phase = uv.Location().X();
+          const double radius = cone.RefRadius() + v * std::sin(cone.SemiAngle());
+          if (!std::isfinite(radius) || radius <= 0) return false;
+          const gp_Pnt center = cone.Location().Translated(gp_Vec(frame.Direction()).Multiplied(v * std::cos(cone.SemiAngle())));
+          const gp_Vec x(frame.XDirection()), y(frame.YDirection());
+          const gp_Vec cx = (x.Multiplied(std::cos(phase)) + y.Multiplied(std::sin(phase))).Multiplied(radius);
+          const gp_Vec cy = (y.Multiplied(std::cos(phase)) - x.Multiplied(std::sin(phase))).Multiplied(radius * uv.Direction().X());
+          // Uniform coefficient bound for every parameter on the stored rim.
+          residual = std::max(residual, circle.Location().Distance(center) +
+              (gp_Vec(circle.Position().XDirection()).Multiplied(out.radius)-cx).Magnitude() +
+              (gp_Vec(circle.Position().YDirection()).Multiplied(out.radius)-cy).Magnitude());
+        }
+        out.attachment_residual = residual; out.tolerance = limit;
+      } else return false;
+      if (!std::isfinite(residual) || residual > limit) return false;
+      output.attachment_residual = std::max(output.attachment_residual, residual);
+      output.tolerance = std::max(output.tolerance, limit);
+    }
+    if (visited != direct_count || visited == 0 || !previous.IsSame(initial)) return false;
+    if (planar && !((circles == 1 && lines == 0 && visited == 1) ||
+                    (is_outer && circles == 0 && lines >= 3))) return false;
+  }
+  return outer_count == 1 && (planar ? (output.vertex_count >= 3 || output.circle_count > 0)
+                                   : output.circle_count > 0);
+}
+
 bool nominal_cylindrical_band(
     const TopoDS_Face& face, geospec_occt_nominal_cylindrical_band& output,
     std::string& message) {
@@ -6320,6 +6462,69 @@ int geospec_occt_cylinder_axial_extent(
                                          message)) {
       return fail(GEOSPEC_OCCT_UNSUPPORTED, message, error);
     }
+    return GEOSPEC_OCCT_OK;
+  });
+}
+
+int geospec_occt_finite_contact_face_query(
+    const geospec_occt_document* document, geospec_occt_entity face_entity,
+    geospec_occt_finite_contact_face* output,
+    geospec_occt_string* error) noexcept {
+  if (document == nullptr || output == nullptr) {
+    return fail(GEOSPEC_OCCT_INVALID_ARGUMENT, "Finite contact document/output is null.", error);
+  }
+  *output = {};
+  if (face_entity.kind == GEOSPEC_OCCT_ENTITY_WHOLE_FACE) {
+    return fail(GEOSPEC_OCCT_UNSUPPORTED,
+                "Finite contact requires a selected occurrence-face source route.", error);
+  }
+  if (face_entity.kind != GEOSPEC_OCCT_ENTITY_FACE) {
+    return fail(GEOSPEC_OCCT_INVALID_ARGUMENT, "Finite contact requires a face entity.", error);
+  }
+  return guarded(error, [&]() -> int {
+    TopoDS_Shape shape;
+    std::string message;
+    if (!resolve_entity(*document, face_entity, shape, message)) {
+      return fail(GEOSPEC_OCCT_INVALID_ARGUMENT, message, error);
+    }
+    const auto& occurrence = document->occurrences[face_entity.occurrence];
+    if (!occurrence.source_transfer_valid || occurrence.source_route.empty() ||
+        occurrence.source_route.size() > 32) {
+      return fail(GEOSPEC_OCCT_UNSUPPORTED, "Finite contact occurrence has no qualified source route.", error);
+    }
+    const SourceFaceFacts* source = nullptr;
+    for (const auto& candidate : document->source_faces) {
+      if (!shape.IsPartner(candidate.shape) ||
+          !candidate.shape.Moved(occurrence.shape.Location()).Location().IsEqual(shape.Location())) continue;
+      if (source != nullptr) {
+        return fail(GEOSPEC_OCCT_UNSUPPORTED, "Finite contact source face association is ambiguous.", error);
+      }
+      source = &candidate;
+    }
+    if (source == nullptr) {
+      return fail(GEOSPEC_OCCT_UNSUPPORTED, "Finite contact has no associated source AdvancedFace.", error);
+    }
+    geospec_occt_resolved_source_face association{};
+    const int status = geospec_occt_resolve_source_face(document, source->entity,
+        occurrence.source_route.data(), occurrence.source_route.size(), &association, error);
+    if (status != GEOSPEC_OCCT_OK) return status;
+    if (association.occurrence != face_entity.occurrence ||
+        association.private_query_face != face_entity.face) {
+      return fail(GEOSPEC_OCCT_UNSUPPORTED, "Finite contact forward association differs from selected face.", error);
+    }
+    geospec_occt_finite_contact_face candidate{};
+    candidate.occurrence = association.occurrence;
+    candidate.public_face_ordinal = association.public_face_ordinal;
+    candidate.private_query_face = association.private_query_face;
+    candidate.source_face_entity = source->entity;
+    candidate.source_route_count = static_cast<uint32_t>(occurrence.source_route.size());
+    std::copy(occurrence.source_route.begin(), occurrence.source_route.end(), candidate.source_route);
+    candidate.source_same_sense = association.source_same_sense;
+    candidate.transferred_reversed = association.transferred_reversed;
+    if (!finite_contact_face(TopoDS::Face(shape), candidate, message)) {
+      return fail(GEOSPEC_OCCT_UNSUPPORTED, message, error);
+    }
+    *output = candidate;
     return GEOSPEC_OCCT_OK;
   });
 }

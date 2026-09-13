@@ -9,6 +9,146 @@ use super::{
     PROFILE, REPRESENTATION,
 };
 
+pub(crate) struct BandEngagementRequest<'a> {
+    pub subject: &'a crate::backend::brep::NominalCylindricalBand,
+    pub target: &'a crate::backend::brep::NominalCylindricalBand,
+    pub axis: [f64; 3],
+    pub minimum: f64,
+    pub maximum: Option<f64>,
+    pub tolerance: f64,
+    pub angular_tolerance_degrees: f64,
+}
+pub(crate) struct BandEngagementEvidence {
+    pub depth: ExactScalar,
+    pub radial_offset_squared: ExactScalar,
+    pub radial_allowance: ExactScalar,
+}
+impl BandEngagementEvidence {
+    pub(crate) fn to_json(&self) -> Json {
+        Json::object([
+            ("profile",Json::string("geospec-nominal-local-band-engagement-v1")),
+            ("depth",self.depth.to_json()),
+            ("radialOffsetSquared",self.radial_offset_squared.to_json()),
+            ("radialAllowance",self.radial_allowance.to_json()),
+            ("meaning",Json::string("local common axial span and radial fit; no whole-part collision or material-occupancy claim")),
+        ])
+    }
+}
+pub(crate) fn band_engagement(r: BandEngagementRequest<'_>) -> Outcome<BandEngagementEvidence> {
+    match band_engagement_inner(r) {
+        Ok((positive, evidence)) => Outcome::Decided { positive, evidence },
+        Err(reason) => Outcome::Unsupported {
+            reason,
+            evidence: None,
+        },
+    }
+}
+fn band_engagement_inner(
+    r: BandEngagementRequest<'_>,
+) -> Result<(bool, BandEngagementEvidence), ContinuousError> {
+    // Reuse the accepted C1 validation/arithmetic entry instead of inventing
+    // a weaker second interpretation of a cylindrical-band record. Its
+    // clearance certificate is dropped before engagement scratch is live.
+    match super::cylindrical_band_clearance(super::CylindricalBandClearanceRequest {
+        subject: r.subject,
+        target: r.target,
+        minimum: None,
+        maximum: None,
+        tolerance: 0.,
+    }) {
+        Outcome::Decided { .. } => {}
+        Outcome::Unsupported { reason, .. } => return Err(reason),
+    }
+    use super::nominal_analytic::{add, mul, rat, square, sub};
+    use num_traits::Signed;
+    fn axis(v: [f64; 3]) -> Result<(usize, f64), ContinuousError> {
+        if !v.iter().all(|v| v.is_finite()) || v.iter().filter(|v| **v != 0.).count() != 1 {
+            return Err(ContinuousError::unsupported(
+                "Local band engagement requires nonzero signed Cartesian axes.",
+            ));
+        }
+        let index = v.iter().position(|v| *v != 0.).unwrap();
+        Ok((index, if v[index] > 0. { 1. } else { -1. }))
+    }
+    let (index, sign) = axis(r.axis)?;
+    let (ai, asign) = axis(r.subject.axis)?;
+    let (bi, bsign) = axis(r.target.axis)?;
+    let tolerance = rat(r.tolerance)?;
+    let angular = rat(r.angular_tolerance_degrees)?;
+    let min = rat(r.minimum)?;
+    let max = r.maximum.map(rat).transpose()?;
+    if tolerance.is_negative()
+        || angular.is_negative()
+        || min.is_negative()
+        || max.as_ref().is_some_and(|m| m < &min)
+    {
+        return Err(ContinuousError::invalid(
+            "Local engagement needs ordered nonnegative limits/tolerances.",
+        ));
+    }
+    if ai != index || bi != index {
+        return Err(ContinuousError::unsupported(
+            "Local engagement needs coaxial Cartesian directions; skew finite fit is unqualified.",
+        ));
+    }
+    for f in [r.subject, r.target] {
+        if f.source_face_entity == 0
+            || f.private_query_face == 0
+            || !(1..=32).contains(&f.source_route_count)
+            || f.source_route[..f.source_route_count as usize].contains(&0)
+            || rat(f.radius)? <= BigRational::zero()
+            || rat(f.from)? >= rat(f.to)?
+        {
+            return Err(ContinuousError::unsupported(
+                "Local engagement needs complete associated C1 bands.",
+            ));
+        }
+    }
+    let span = |f: &crate::backend::brep::NominalCylindricalBand,
+                s: f64|
+     -> Result<[BigRational; 2], ContinuousError> {
+        let origin = mul(&rat(f.origin[index])?, &rat(sign)?)?;
+        let a = add(&origin, &mul(&rat(f.from)?, &rat(sign * s)?)?)?;
+        let b = add(&origin, &mul(&rat(f.to)?, &rat(sign * s)?)?)?;
+        Ok(if a <= b { [a, b] } else { [b, a] })
+    };
+    let a = span(r.subject, asign)?;
+    let b = span(r.target, bsign)?;
+    let depth = sub(
+        &a[1].clone().min(b[1].clone()),
+        &a[0].clone().max(b[0].clone()),
+    )?
+    .max(BigRational::zero());
+    let mut offset = BigRational::zero();
+    for k in 0..3 {
+        if k != index {
+            offset = add(
+                &offset,
+                &square(&sub(&rat(r.subject.origin[k])?, &rat(r.target.origin[k])?)?)?,
+            )?;
+        }
+    }
+    let allowance = add(
+        &sub(&rat(r.target.radius)?, &rat(r.subject.radius)?)?,
+        &tolerance,
+    )?;
+    let fit = !allowance.is_negative() && offset <= square(&allowance)?;
+    let positive = fit
+        && depth >= sub(&min, &tolerance)?
+        && match max {
+            Some(max) => depth <= add(&max, &tolerance)?,
+            None => true,
+        };
+    Ok((
+        positive,
+        BandEngagementEvidence {
+            depth: exact::scalar(&depth)?,
+            radial_offset_squared: exact::scalar(&offset)?,
+            radial_allowance: exact::scalar(&allowance)?,
+        },
+    ))
+}
+
 pub(crate) struct InsertionRequest<'a> {
     pub subject: &'a SelectedContinuousDomain,
     pub target: &'a SelectedContinuousDomain,

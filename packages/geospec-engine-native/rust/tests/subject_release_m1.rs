@@ -37,7 +37,7 @@ fn admit(engine: &mut Engine, seed: u32) -> String {
         "method": "ingestSubject",
         "requestId": format!("ingest-{seed}"),
         "protocolVersion": 3,
-        "registryVersion": 4,
+        "registryVersion": 5,
         "canonicalProfile": "geospec-jcs-v1",
         "contentHash": hash,
         "format": "mesh-buffer-v1",
@@ -56,7 +56,7 @@ fn handle(engine: &mut Engine, hash: &str, request_id: &str) -> Value {
             "method": "subjectHandle",
             "requestId": request_id,
             "protocolVersion": 3,
-            "registryVersion": 4,
+            "registryVersion": 5,
             "canonicalProfile": "geospec-jcs-v1",
             "contentHash": hash
         }),
@@ -72,7 +72,7 @@ fn release(engine: &mut Engine, subject_handle: &Value, request_id: &str) -> boo
             "method": "releaseSubject",
             "requestId": request_id,
             "protocolVersion": 3,
-            "registryVersion": 4,
+            "registryVersion": 5,
             "canonicalProfile": "geospec-jcs-v1",
             "subjectHandle": subject_handle
         }),
@@ -89,7 +89,7 @@ fn evaluate(engine: &Engine, hash: &str, claim_id: &str) {
                     "method": "submitClaims",
                     "requestId": claim_id,
                     "protocolVersion": 3,
-                    "registryVersion": 4,
+                    "registryVersion": 5,
                     "canonicalProfile": "geospec-jcs-v1",
                     "plan": {
                         "subjects": [{"slot": "subject", "contentHash": hash}],

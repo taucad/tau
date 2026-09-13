@@ -8,6 +8,9 @@ use geospec_engine_native_core::{
 use geospec_engine_native_occt::OcctConnector;
 use serde_json::Value;
 
+mod support;
+use support::current_profile::{bind_claim, bind_ingest};
+
 fn claim_result(json: &str) -> Value {
     let value: Value = serde_json::from_str(json).unwrap();
     let results = value["result"]["results"].as_array().unwrap();
@@ -116,18 +119,35 @@ fn component_interference_bound_original_both_polarities_no_csg() {
             Box::new(OcctConnector),
             Box::new(NoCsg),
         );
+        let frozen_ingest = std::fs::read(input().join("original.ingest.json")).unwrap();
+        let source = std::fs::read(input().join("original.step")).unwrap();
+        if i == 0 {
+            let error = engine
+                .ingest_subject(&frozen_ingest, source.clone(), vec![])
+                .unwrap_err();
+            assert_eq!(error.code(), "unsupported-version");
+        }
         let admission = engine
-            .ingest_subject(
-                &std::fs::read(input().join("original.ingest.json")).unwrap(),
-                std::fs::read(input().join("original.step")).unwrap(),
-                vec![],
-            )
+            .ingest_subject(&bind_ingest(&frozen_ingest), source, vec![])
             .unwrap();
         eprintln!(
             "COMPONENT_ADMISSION {i} {}",
-            String::from_utf8(admission).unwrap()
+            String::from_utf8_lossy(&admission)
         );
-        let request = std::fs::read_to_string(input().join(format!("{i}.request.json"))).unwrap();
+        let frozen_request =
+            std::fs::read_to_string(input().join(format!("{i}.request.json"))).unwrap();
+        if i == 0 {
+            let error = engine
+                .process_request(frozen_request.as_bytes())
+                .unwrap_err();
+            assert_eq!(error.code(), "unsupported-version");
+        }
+        let bound = bind_claim(&frozen_request, &admission);
+        eprintln!(
+            "COMPONENT_SUBJECT_BINDING original={} effective={}",
+            bound.original_subject_hash, bound.effective_subject_hash
+        );
+        let request = bound.json;
         let result =
             String::from_utf8(engine.process_request(request.as_bytes()).unwrap()).unwrap();
         eprintln!("COMPONENT_ORIGINAL {i} {result}");

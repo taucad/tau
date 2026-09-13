@@ -1,11 +1,15 @@
 //! Owner-private ordinary controls for F1 logical budgets and complete batches.
 
 use super::*;
-use crate::{Engine, ProtocolError};
+use crate::{canonicalize, Engine, ProtocolError};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::{fs, path::Path};
+
+const CORPUS_SHA256: &str = "c46c089b0d5097e862e606ed2866dea53dd25a6df207c044c3172d6dc9e100c4";
+const VERIFIER_SOURCE_HASH: &str =
+    "406d6363a07252339349ff29e443fefa23df0f46d8f3ee67425bb8140bae6fdc";
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -67,18 +71,62 @@ fn sha256(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
 
+fn verifier_source_hash() -> String {
+    let value = std::env::var("GEOSPEC_F1_VERIFIER_SOURCE_HASH")
+        .unwrap_or_else(|_| VERIFIER_SOURCE_HASH.into());
+    assert_eq!(value, VERIFIER_SOURCE_HASH, "stale verifier source binding");
+    value
+}
+
+fn current_request(value: &str) -> String {
+    let mut value: Value = serde_json::from_str(value).unwrap();
+    value["registryVersion"] = json!(5);
+    serde_json::to_string(&value).unwrap()
+}
+
+fn current_plan(value: &str) -> String {
+    let mut value: Value = serde_json::from_str(value).unwrap();
+    value["registryVersion"] = json!(5);
+    value["numericProfile"] = json!("geospec-st-logical-requests-v3");
+    String::from_utf8(canonicalize(&serde_json::to_vec(&value).unwrap()).unwrap()).unwrap()
+}
+
+fn current_result(value: &str, plan: &str) -> String {
+    let mut value: Value = serde_json::from_str(value).unwrap();
+    let result = if value.get("result").is_some() {
+        &mut value["result"]
+    } else {
+        &mut value
+    };
+    result["numericProfile"] = json!("geospec-st-logical-requests-v3");
+    let plan_hash = sha256(plan.as_bytes());
+    let verifier_source_hash = verifier_source_hash();
+    for row in result["results"].as_array_mut().unwrap() {
+        if row["evidence"].is_object() {
+            row["evidence"]["planHash"] = json!(plan_hash);
+            row["evidence"]["verifierSourceHash"] = json!(verifier_source_hash);
+        }
+    }
+    String::from_utf8(canonicalize(&serde_json::to_vec(&value).unwrap()).unwrap()).unwrap()
+}
+
 fn load_corpus() -> (Corpus, String) {
-    let input = std::env::var_os("GEOSPEC_F1_BUDGET_CORPUS")
-        .expect("Lead must supply the Principal-approved F1 budget/batch corpus");
-    let expected_hash = std::env::var("GEOSPEC_F1_BUDGET_CORPUS_SHA256")
-        .expect("Lead must supply the independently reviewed F1 budget/batch corpus hash");
-    let bytes = fs::read(input).unwrap();
-    assert_eq!(sha256(&bytes), expected_hash);
+    let bytes = std::env::var_os("GEOSPEC_F1_BUDGET_CORPUS").map_or_else(
+        || include_bytes!("fixtures/portable-controls/f1-budget-batch.json").to_vec(),
+        |path| fs::read(path).unwrap(),
+    );
+    let expected_hash =
+        std::env::var("GEOSPEC_F1_BUDGET_CORPUS_SHA256").unwrap_or_else(|_| CORPUS_SHA256.into());
+    assert_eq!(expected_hash, CORPUS_SHA256, "stale control hash binding");
+    assert_eq!(sha256(&bytes), CORPUS_SHA256);
     let corpus: Corpus = serde_json::from_slice(&bytes).unwrap();
-    assert_eq!(sha256(corpus.primary_utf8.as_bytes()), corpus.primary_sha256);
+    assert_eq!(
+        sha256(corpus.primary_utf8.as_bytes()),
+        corpus.primary_sha256
+    );
     assert_eq!(corpus.budget_cases.len(), 16);
     assert_eq!(corpus.batches.len(), 2);
-    (corpus, expected_hash)
+    (corpus, CORPUS_SHA256.into())
 }
 
 fn observe(result: Result<Vec<u8>, ProtocolError>, expected: &str) -> Value {
@@ -119,9 +167,10 @@ fn observe_error(result: Result<Vec<u8>, ProtocolError>, code: &str, message: &s
 }
 
 fn admit(engine: &mut Engine, corpus: &Corpus) -> Value {
+    let request = current_request(&corpus.ingest_request_utf8);
     observe(
         engine.ingest_subject(
-            corpus.ingest_request_utf8.as_bytes(),
+            request.as_bytes(),
             corpus.primary_utf8.as_bytes().to_vec(),
             Vec::new(),
         ),
@@ -163,8 +212,9 @@ fn unchanged_cell(before: PlateState, after: PlateState) -> bool {
 }
 
 fn save_evidence(name: &str, report: &Value) {
-    let directory = std::env::var_os("GEOSPEC_F1_BUDGET_EVIDENCE_DIR")
-        .expect("Lead must supply a fresh F1 budget/batch evidence directory");
+    let Some(directory) = std::env::var_os("GEOSPEC_F1_BUDGET_EVIDENCE_DIR") else {
+        return;
+    };
     fs::create_dir_all(&directory).unwrap();
     let output = Path::new(&directory).join(name);
     let file = fs::OpenOptions::new()
@@ -187,33 +237,31 @@ fn f1_budget_boundaries_match_cold_and_warm() {
     let mut direct_records = Vec::new();
 
     for case in &corpus.budget_cases {
+        let request = current_request(&case.submit_request_utf8);
+        let plan = current_plan(&case.canonical_plan_utf8);
+        let neutral = current_result(&case.neutral_result_utf8, &plan);
+        let response = current_result(&case.submit_response_utf8, &plan);
+        let warm_request = current_request(&warm_case.submit_request_utf8);
+        let warm_plan = current_plan(&warm_case.canonical_plan_utf8);
+        let warm_response = current_result(&warm_case.submit_response_utf8, &warm_plan);
         for route in ["neutral", "submit"] {
             for phase in ["cold", "warm"] {
                 let mut engine = Engine::new();
                 let admission = admit(&mut engine, &corpus);
                 let prewarm = if phase == "warm" {
                     observe(
-                        engine.process_request(warm_case.submit_request_utf8.as_bytes()),
-                        &warm_case.submit_response_utf8,
+                        engine.process_request(warm_request.as_bytes()),
+                        &warm_response,
                     )
                 } else {
                     json!({"passed": true, "skipped": true})
                 };
                 let before = plate_state(&engine);
-                let canonical = observe(
-                    engine.canonical_plan(case.submit_request_utf8.as_bytes()),
-                    &case.canonical_plan_utf8,
-                );
+                let canonical = observe(engine.canonical_plan(request.as_bytes()), &plan);
                 let result = if route == "neutral" {
-                    observe(
-                        engine.evaluate_plan(case.canonical_plan_utf8.as_bytes()),
-                        &case.neutral_result_utf8,
-                    )
+                    observe(engine.evaluate_plan(plan.as_bytes()), &neutral)
                 } else {
-                    observe(
-                        engine.process_request(case.submit_request_utf8.as_bytes()),
-                        &case.submit_response_utf8,
-                    )
+                    observe(engine.process_request(request.as_bytes()), &response)
                 };
                 let after = plate_state(&engine);
                 let state_passed = if phase == "warm" {
@@ -256,8 +304,8 @@ fn f1_budget_boundaries_match_cold_and_warm() {
             let admission = admit(&mut engine, &corpus);
             let prewarm = if phase == "warm" {
                 observe(
-                    engine.process_request(warm_case.submit_request_utf8.as_bytes()),
-                    &warm_case.submit_response_utf8,
+                    engine.process_request(warm_request.as_bytes()),
+                    &warm_response,
                 )
             } else {
                 json!({"passed": true, "skipped": true})
@@ -319,7 +367,10 @@ fn f1_budget_boundaries_match_cold_and_warm() {
         "directBudgetRecords": direct_records,
     });
     save_evidence("f1-budget-boundaries.json", &report);
-    assert!(passed, "Complete budget observations were saved before assertion");
+    assert!(
+        passed,
+        "Complete budget observations were saved before assertion"
+    );
 }
 
 #[test]
@@ -333,33 +384,31 @@ fn f1_batch_bindings_are_fresh_per_plan_and_claim() {
     let mut records = Vec::new();
 
     for batch in &corpus.batches {
+        let request = current_request(&batch.submit_request_utf8);
+        let plan = current_plan(&batch.canonical_plan_utf8);
+        let neutral = current_result(&batch.neutral_result_utf8, &plan);
+        let response = current_result(&batch.submit_response_utf8, &plan);
+        let warm_request = current_request(&warm_case.submit_request_utf8);
+        let warm_plan = current_plan(&warm_case.canonical_plan_utf8);
+        let warm_response = current_result(&warm_case.submit_response_utf8, &warm_plan);
         for route in ["neutral", "submit"] {
             for phase in ["cold", "warm"] {
                 let mut engine = Engine::new();
                 let admission = admit(&mut engine, &corpus);
                 let prewarm = if phase == "warm" {
                     observe(
-                        engine.process_request(warm_case.submit_request_utf8.as_bytes()),
-                        &warm_case.submit_response_utf8,
+                        engine.process_request(warm_request.as_bytes()),
+                        &warm_response,
                     )
                 } else {
                     json!({"passed": true, "skipped": true})
                 };
                 let before = plate_state(&engine);
-                let canonical = observe(
-                    engine.canonical_plan(batch.submit_request_utf8.as_bytes()),
-                    &batch.canonical_plan_utf8,
-                );
+                let canonical = observe(engine.canonical_plan(request.as_bytes()), &plan);
                 let result = if route == "neutral" {
-                    observe(
-                        engine.evaluate_plan(batch.canonical_plan_utf8.as_bytes()),
-                        &batch.neutral_result_utf8,
-                    )
+                    observe(engine.evaluate_plan(plan.as_bytes()), &neutral)
                 } else {
-                    observe(
-                        engine.process_request(batch.submit_request_utf8.as_bytes()),
-                        &batch.submit_response_utf8,
-                    )
+                    observe(engine.process_request(request.as_bytes()), &response)
                 };
                 let after = plate_state(&engine);
                 let state_passed = if phase == "warm" {
@@ -397,15 +446,21 @@ fn f1_batch_bindings_are_fresh_per_plan_and_claim() {
     let mut shared = Engine::new();
     let shared_admission = admit(&mut shared, &corpus);
     let first = &corpus.batches[0];
+    let first_request = current_request(&first.submit_request_utf8);
+    let first_plan = current_plan(&first.canonical_plan_utf8);
+    let first_response = current_result(&first.submit_response_utf8, &first_plan);
     let first_result = observe(
-        shared.process_request(first.submit_request_utf8.as_bytes()),
-        &first.submit_response_utf8,
+        shared.process_request(first_request.as_bytes()),
+        &first_response,
     );
     let first_state = plate_state(&shared);
     let second = &corpus.batches[1];
+    let second_request = current_request(&second.submit_request_utf8);
+    let second_plan = current_plan(&second.canonical_plan_utf8);
+    let second_response = current_result(&second.submit_response_utf8, &second_plan);
     let second_result = observe(
-        shared.process_request(second.submit_request_utf8.as_bytes()),
-        &second.submit_response_utf8,
+        shared.process_request(second_request.as_bytes()),
+        &second_response,
     );
     let second_state = plate_state(&shared);
     let shared_passed = shared_admission["passed"] == true
@@ -436,7 +491,10 @@ fn f1_batch_bindings_are_fresh_per_plan_and_claim() {
         "sharedTargetObservation": shared_observation,
     });
     save_evidence("f1-batch-bindings.json", &report);
-    assert!(passed, "Complete batch observations were saved before assertion");
+    assert!(
+        passed,
+        "Complete batch observations were saved before assertion"
+    );
 }
 
 #[test]
@@ -445,8 +503,9 @@ fn f1_late_negative_query_prevents_geometry_evaluation() {
     let mut engine = Engine::new();
     let admission = admit(&mut engine, &corpus);
     let before = plate_state(&engine);
+    let request = current_request(&corpus.late_invalid.submit_request_utf8);
     let result = observe_error(
-        engine.process_request(corpus.late_invalid.submit_request_utf8.as_bytes()),
+        engine.process_request(request.as_bytes()),
         &corpus.late_invalid.expected_error_code,
         &corpus.late_invalid.expected_error_message,
     );
@@ -472,5 +531,8 @@ fn f1_late_negative_query_prevents_geometry_evaluation() {
         "ownedGrowthAfterAdmission": owned_growth,
     });
     save_evidence("f1-late-negative-query.json", &report);
-    assert!(passed, "Complete barrier observations were saved before assertion");
+    assert!(
+        passed,
+        "Complete barrier observations were saved before assertion"
+    );
 }

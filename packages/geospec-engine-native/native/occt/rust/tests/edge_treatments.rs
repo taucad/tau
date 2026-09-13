@@ -871,7 +871,7 @@ fn should_qualify_four_edge_treatment_families_and_preserve_all_occurrence_evide
                 );
                 check.require(
                     row.source_same_sense == Some(*same_sense)
-                        && row.transferred_reversed == !same_sense,
+                        && row.transferred_reversed != *same_sense,
                     "source same-sense or placed orientation differs",
                 );
                 check.require(

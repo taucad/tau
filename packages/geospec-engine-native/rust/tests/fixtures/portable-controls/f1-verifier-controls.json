@@ -1,0 +1,311 @@
+{
+  "task": "F1-VERIFIER-A1",
+  "intentSha256": "941b1d72c3ec49c86ff6beae625b12204c50e8a6b33f75a568588e9f6a68c2c7",
+  "generatorSha256": "4772a409ac7fdb310b786eea60b813a13dbbe4b9a59ae593bb8461c68eaa4416",
+  "independence": "Own explicit intent only; no producer/verifier/third-party oracle execution or reads.",
+  "controls": [
+    {
+      "id": "target",
+      "primaryUtf8": "{\"frame\":\"artifact-xyz\",\"plate\":{\"max\":[\"10/1\",\"10/1\",\"2/1\"],\"min\":[\"0/1\",\"0/1\",\"0/1\"]},\"schema\":\"geospec.rational-orthogonal-plate/v1\",\"unit\":\"mm\",\"windows\":[{\"max\":[\"5/2\",\"5/2\",\"2/1\"],\"min\":[\"3/2\",\"3/2\",\"0/1\"]},{\"max\":[\"17/2\",\"17/2\",\"2/1\"],\"min\":[\"15/2\",\"15/2\",\"0/1\"]}]}",
+      "subjectContentHash": "e8f81bc96be92adb804d4805d95226654813c819d5e2e5689b4076072c115e29",
+      "descriptorUtf8": "{\"backendProfile\":\"portable-rational-plate-v1\",\"format\":\"rational-plate\",\"frame\":{\"coordinateSystem\":\"z-up\",\"outputUnit\":\"mm\",\"sourceUnit\":\"mm\",\"uniformScale\":1},\"ingestOptions\":{},\"ingestProfile\":\"geospec-rational-orthogonal-plate-v1\",\"primary\":{\"byteLength\":272,\"sha256\":\"e8f81bc96be92adb804d4805d95226654813c819d5e2e5689b4076072c115e29\"},\"resources\":[],\"schema\":\"geospec-subject-v1\"}",
+      "subjectHash": "3419006b2f24e82260808012e5692df6f5e2fceadc5f41a11c44aa0a87fbf736",
+      "plans": [
+        {
+          "claimId": "f1-verifier/target/positive",
+          "subjectSlot": "plate",
+          "polarity": "positive",
+          "canonicalPlanUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"numericProfile\":\"geospec-st-logical-requests-v2\",\"plan\":{\"claims\":[{\"capability\":\"toSatisfyRationalPlate\",\"claimId\":\"f1-verifier/target/positive\",\"payload\":{\"contract\":\"geospec.plate-two-windows/v1\"},\"polarity\":\"positive\",\"subjectSlots\":[\"plate\"],\"workUnitBudget\":10000}],\"subjects\":[{\"slot\":\"plate\",\"subjectHash\":\"3419006b2f24e82260808012e5692df6f5e2fceadc5f41a11c44aa0a87fbf736\"}]},\"protocolVersion\":3,\"registryVersion\":4}",
+          "planHash": "c24127818ee60d76973fc97b370c54d3e9a88e946c41dd2f7abaeea5aecb710a"
+        },
+        {
+          "claimId": "f1-verifier/target/negative",
+          "subjectSlot": "plate",
+          "polarity": "negative",
+          "canonicalPlanUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"numericProfile\":\"geospec-st-logical-requests-v2\",\"plan\":{\"claims\":[{\"capability\":\"toSatisfyRationalPlate\",\"claimId\":\"f1-verifier/target/negative\",\"payload\":{\"contract\":\"geospec.plate-two-windows/v1\"},\"polarity\":\"negative\",\"subjectSlots\":[\"plate\"],\"workUnitBudget\":10000}],\"subjects\":[{\"slot\":\"plate\",\"subjectHash\":\"3419006b2f24e82260808012e5692df6f5e2fceadc5f41a11c44aa0a87fbf736\"}]},\"protocolVersion\":3,\"registryVersion\":4}",
+          "planHash": "e3c5bc1cdb5df0a0804d3cf0fb9db2990bdb83c5219e7e7a142a991e81584590"
+        }
+      ],
+      "analysis": {
+        "windowCount": 2,
+        "cellCount": 25,
+        "measured": {
+          "bounds": {
+            "min": ["0/1", "0/1", "0/1"],
+            "max": ["10/1", "10/1", "2/1"]
+          },
+          "materialVolume": "196/1",
+          "materialInA": "0/1",
+          "materialInB": "0/1"
+        },
+        "predicates": [true, true, true, true],
+        "certificate": {
+          "planes": {
+            "x": ["0/1", "3/2", "5/2", "15/2", "17/2", "10/1"],
+            "y": ["0/1", "3/2", "5/2", "15/2", "17/2", "10/1"],
+            "z": ["0/1", "2/1"]
+          },
+          "occupiedCells": [0, 1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 19, 20, 21, 22, 23, 24],
+          "materialWitnesses": {
+            "a": null,
+            "b": null
+          }
+        }
+      }
+    },
+    {
+      "id": "mirrored-holes",
+      "primaryUtf8": "{\"frame\":\"artifact-xyz\",\"plate\":{\"max\":[\"10/1\",\"10/1\",\"2/1\"],\"min\":[\"0/1\",\"0/1\",\"0/1\"]},\"schema\":\"geospec.rational-orthogonal-plate/v1\",\"unit\":\"mm\",\"windows\":[{\"max\":[\"17/2\",\"5/2\",\"2/1\"],\"min\":[\"15/2\",\"3/2\",\"0/1\"]},{\"max\":[\"5/2\",\"17/2\",\"2/1\"],\"min\":[\"3/2\",\"15/2\",\"0/1\"]}]}",
+      "subjectContentHash": "950b8ed47fdb252df62dd2c5379e30a4457fd7daca586d0a2ef512f4e15e2bdf",
+      "descriptorUtf8": "{\"backendProfile\":\"portable-rational-plate-v1\",\"format\":\"rational-plate\",\"frame\":{\"coordinateSystem\":\"z-up\",\"outputUnit\":\"mm\",\"sourceUnit\":\"mm\",\"uniformScale\":1},\"ingestOptions\":{},\"ingestProfile\":\"geospec-rational-orthogonal-plate-v1\",\"primary\":{\"byteLength\":272,\"sha256\":\"950b8ed47fdb252df62dd2c5379e30a4457fd7daca586d0a2ef512f4e15e2bdf\"},\"resources\":[],\"schema\":\"geospec-subject-v1\"}",
+      "subjectHash": "2192774307d0c9c56357ca7e062e9b1ad77f9a2b23ba45f927292f06a944e5d6",
+      "plans": [
+        {
+          "claimId": "f1-verifier/mirrored-holes/positive",
+          "subjectSlot": "plate",
+          "polarity": "positive",
+          "canonicalPlanUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"numericProfile\":\"geospec-st-logical-requests-v2\",\"plan\":{\"claims\":[{\"capability\":\"toSatisfyRationalPlate\",\"claimId\":\"f1-verifier/mirrored-holes/positive\",\"payload\":{\"contract\":\"geospec.plate-two-windows/v1\"},\"polarity\":\"positive\",\"subjectSlots\":[\"plate\"],\"workUnitBudget\":10000}],\"subjects\":[{\"slot\":\"plate\",\"subjectHash\":\"2192774307d0c9c56357ca7e062e9b1ad77f9a2b23ba45f927292f06a944e5d6\"}]},\"protocolVersion\":3,\"registryVersion\":4}",
+          "planHash": "4736a3d7a0ff1bab3a9e4b95cbfc9ccbfc34915181322a0081758db2b4e91c76"
+        },
+        {
+          "claimId": "f1-verifier/mirrored-holes/negative",
+          "subjectSlot": "plate",
+          "polarity": "negative",
+          "canonicalPlanUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"numericProfile\":\"geospec-st-logical-requests-v2\",\"plan\":{\"claims\":[{\"capability\":\"toSatisfyRationalPlate\",\"claimId\":\"f1-verifier/mirrored-holes/negative\",\"payload\":{\"contract\":\"geospec.plate-two-windows/v1\"},\"polarity\":\"negative\",\"subjectSlots\":[\"plate\"],\"workUnitBudget\":10000}],\"subjects\":[{\"slot\":\"plate\",\"subjectHash\":\"2192774307d0c9c56357ca7e062e9b1ad77f9a2b23ba45f927292f06a944e5d6\"}]},\"protocolVersion\":3,\"registryVersion\":4}",
+          "planHash": "e128d972b1f9604e0cc2eef142d56d5e90e9994965e95b88cc6bca077248c81d"
+        }
+      ],
+      "analysis": {
+        "windowCount": 2,
+        "cellCount": 25,
+        "measured": {
+          "bounds": {
+            "min": ["0/1", "0/1", "0/1"],
+            "max": ["10/1", "10/1", "2/1"]
+          },
+          "materialVolume": "196/1",
+          "materialInA": "2/1",
+          "materialInB": "2/1"
+        },
+        "predicates": [true, true, false, false],
+        "certificate": {
+          "planes": {
+            "x": ["0/1", "3/2", "5/2", "15/2", "17/2", "10/1"],
+            "y": ["0/1", "3/2", "5/2", "15/2", "17/2", "10/1"],
+            "z": ["0/1", "2/1"]
+          },
+          "occupiedCells": [0, 1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12, 13, 14, 15, 17, 18, 19, 20, 21, 22, 23, 24],
+          "materialWitnesses": {
+            "a": ["2/1", "2/1", "1/1"],
+            "b": ["8/1", "8/1", "1/1"]
+          }
+        }
+      }
+    },
+    {
+      "id": "wide-equal-volume",
+      "primaryUtf8": "{\"frame\":\"artifact-xyz\",\"plate\":{\"max\":[\"11/1\",\"100/11\",\"2/1\"],\"min\":[\"0/1\",\"0/1\",\"0/1\"]},\"schema\":\"geospec.rational-orthogonal-plate/v1\",\"unit\":\"mm\",\"windows\":[{\"max\":[\"5/2\",\"5/2\",\"2/1\"],\"min\":[\"3/2\",\"3/2\",\"0/1\"]},{\"max\":[\"17/2\",\"17/2\",\"2/1\"],\"min\":[\"15/2\",\"15/2\",\"0/1\"]}]}",
+      "subjectContentHash": "53511679969b7e28cea94878c19130a15e866491998beac08de85c31ea36287d",
+      "descriptorUtf8": "{\"backendProfile\":\"portable-rational-plate-v1\",\"format\":\"rational-plate\",\"frame\":{\"coordinateSystem\":\"z-up\",\"outputUnit\":\"mm\",\"sourceUnit\":\"mm\",\"uniformScale\":1},\"ingestOptions\":{},\"ingestProfile\":\"geospec-rational-orthogonal-plate-v1\",\"primary\":{\"byteLength\":274,\"sha256\":\"53511679969b7e28cea94878c19130a15e866491998beac08de85c31ea36287d\"},\"resources\":[],\"schema\":\"geospec-subject-v1\"}",
+      "subjectHash": "47e9e04dbb8937a6543f8a0e4de8bc862f70fff163c9a7f7ecec796ef8dd8d51",
+      "plans": [
+        {
+          "claimId": "f1-verifier/wide-equal-volume/positive",
+          "subjectSlot": "plate",
+          "polarity": "positive",
+          "canonicalPlanUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"numericProfile\":\"geospec-st-logical-requests-v2\",\"plan\":{\"claims\":[{\"capability\":\"toSatisfyRationalPlate\",\"claimId\":\"f1-verifier/wide-equal-volume/positive\",\"payload\":{\"contract\":\"geospec.plate-two-windows/v1\"},\"polarity\":\"positive\",\"subjectSlots\":[\"plate\"],\"workUnitBudget\":10000}],\"subjects\":[{\"slot\":\"plate\",\"subjectHash\":\"47e9e04dbb8937a6543f8a0e4de8bc862f70fff163c9a7f7ecec796ef8dd8d51\"}]},\"protocolVersion\":3,\"registryVersion\":4}",
+          "planHash": "f69885fd34376db6c6f1d6be2a25c51019615aab43db4cc908f7b99466eea063"
+        },
+        {
+          "claimId": "f1-verifier/wide-equal-volume/negative",
+          "subjectSlot": "plate",
+          "polarity": "negative",
+          "canonicalPlanUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"numericProfile\":\"geospec-st-logical-requests-v2\",\"plan\":{\"claims\":[{\"capability\":\"toSatisfyRationalPlate\",\"claimId\":\"f1-verifier/wide-equal-volume/negative\",\"payload\":{\"contract\":\"geospec.plate-two-windows/v1\"},\"polarity\":\"negative\",\"subjectSlots\":[\"plate\"],\"workUnitBudget\":10000}],\"subjects\":[{\"slot\":\"plate\",\"subjectHash\":\"47e9e04dbb8937a6543f8a0e4de8bc862f70fff163c9a7f7ecec796ef8dd8d51\"}]},\"protocolVersion\":3,\"registryVersion\":4}",
+          "planHash": "182e577e5732b0638a27076fcde0a362597ed7819411eb97ee4ee643cc3f1886"
+        }
+      ],
+      "analysis": {
+        "windowCount": 2,
+        "cellCount": 25,
+        "measured": {
+          "bounds": {
+            "min": ["0/1", "0/1", "0/1"],
+            "max": ["11/1", "100/11", "2/1"]
+          },
+          "materialVolume": "196/1",
+          "materialInA": "0/1",
+          "materialInB": "0/1"
+        },
+        "predicates": [false, true, true, true],
+        "certificate": {
+          "planes": {
+            "x": ["0/1", "3/2", "5/2", "15/2", "17/2", "11/1"],
+            "y": ["0/1", "3/2", "5/2", "15/2", "17/2", "100/11"],
+            "z": ["0/1", "2/1"]
+          },
+          "occupiedCells": [0, 1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 19, 20, 21, 22, 23, 24],
+          "materialWitnesses": {
+            "a": null,
+            "b": null
+          }
+        }
+      }
+    },
+    {
+      "id": "third-window",
+      "primaryUtf8": "{\"frame\":\"artifact-xyz\",\"plate\":{\"max\":[\"10/1\",\"10/1\",\"2/1\"],\"min\":[\"0/1\",\"0/1\",\"0/1\"]},\"schema\":\"geospec.rational-orthogonal-plate/v1\",\"unit\":\"mm\",\"windows\":[{\"max\":[\"5/2\",\"5/2\",\"2/1\"],\"min\":[\"3/2\",\"3/2\",\"0/1\"]},{\"max\":[\"17/2\",\"17/2\",\"2/1\"],\"min\":[\"15/2\",\"15/2\",\"0/1\"]},{\"max\":[\"11/2\",\"11/2\",\"2/1\"],\"min\":[\"9/2\",\"9/2\",\"0/1\"]}]}",
+      "subjectContentHash": "d0e263bfc72c4d7bef5635b186c8d98404b461edbcf2dbd82f7b8c617737546c",
+      "descriptorUtf8": "{\"backendProfile\":\"portable-rational-plate-v1\",\"format\":\"rational-plate\",\"frame\":{\"coordinateSystem\":\"z-up\",\"outputUnit\":\"mm\",\"sourceUnit\":\"mm\",\"uniformScale\":1},\"ingestOptions\":{},\"ingestProfile\":\"geospec-rational-orthogonal-plate-v1\",\"primary\":{\"byteLength\":328,\"sha256\":\"d0e263bfc72c4d7bef5635b186c8d98404b461edbcf2dbd82f7b8c617737546c\"},\"resources\":[],\"schema\":\"geospec-subject-v1\"}",
+      "subjectHash": "f6cc18dcec382969d401864d6765f65b66246ed84aedce9d1df237408e8ef400",
+      "plans": [
+        {
+          "claimId": "f1-verifier/third-window/positive",
+          "subjectSlot": "plate",
+          "polarity": "positive",
+          "canonicalPlanUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"numericProfile\":\"geospec-st-logical-requests-v2\",\"plan\":{\"claims\":[{\"capability\":\"toSatisfyRationalPlate\",\"claimId\":\"f1-verifier/third-window/positive\",\"payload\":{\"contract\":\"geospec.plate-two-windows/v1\"},\"polarity\":\"positive\",\"subjectSlots\":[\"plate\"],\"workUnitBudget\":10000}],\"subjects\":[{\"slot\":\"plate\",\"subjectHash\":\"f6cc18dcec382969d401864d6765f65b66246ed84aedce9d1df237408e8ef400\"}]},\"protocolVersion\":3,\"registryVersion\":4}",
+          "planHash": "4b047be98460068d0dc64e35a7c53d56485d417118ca815d468ff7b92eb25d50"
+        },
+        {
+          "claimId": "f1-verifier/third-window/negative",
+          "subjectSlot": "plate",
+          "polarity": "negative",
+          "canonicalPlanUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"numericProfile\":\"geospec-st-logical-requests-v2\",\"plan\":{\"claims\":[{\"capability\":\"toSatisfyRationalPlate\",\"claimId\":\"f1-verifier/third-window/negative\",\"payload\":{\"contract\":\"geospec.plate-two-windows/v1\"},\"polarity\":\"negative\",\"subjectSlots\":[\"plate\"],\"workUnitBudget\":10000}],\"subjects\":[{\"slot\":\"plate\",\"subjectHash\":\"f6cc18dcec382969d401864d6765f65b66246ed84aedce9d1df237408e8ef400\"}]},\"protocolVersion\":3,\"registryVersion\":4}",
+          "planHash": "cf0b0d575a959453c407f330efb972f2f96e837375d4a7d393ffb0c3f6944ae9"
+        }
+      ],
+      "analysis": {
+        "windowCount": 3,
+        "cellCount": 49,
+        "measured": {
+          "bounds": {
+            "min": ["0/1", "0/1", "0/1"],
+            "max": ["10/1", "10/1", "2/1"]
+          },
+          "materialVolume": "194/1",
+          "materialInA": "0/1",
+          "materialInB": "0/1"
+        },
+        "predicates": [true, false, true, true],
+        "certificate": {
+          "planes": {
+            "x": ["0/1", "3/2", "5/2", "9/2", "11/2", "15/2", "17/2", "10/1"],
+            "y": ["0/1", "3/2", "5/2", "9/2", "11/2", "15/2", "17/2", "10/1"],
+            "z": ["0/1", "2/1"]
+          },
+          "occupiedCells": [
+            0, 1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 25, 26, 27, 28, 29, 30,
+            31, 32, 33, 34, 35, 36, 37, 38, 39, 41, 42, 43, 44, 45, 46, 47, 48
+          ],
+          "materialWitnesses": {
+            "a": null,
+            "b": null
+          }
+        }
+      }
+    },
+    {
+      "id": "moved-a",
+      "primaryUtf8": "{\"frame\":\"artifact-xyz\",\"plate\":{\"max\":[\"10/1\",\"10/1\",\"2/1\"],\"min\":[\"0/1\",\"0/1\",\"0/1\"]},\"schema\":\"geospec.rational-orthogonal-plate/v1\",\"unit\":\"mm\",\"windows\":[{\"max\":[\"9/2\",\"5/2\",\"2/1\"],\"min\":[\"7/2\",\"3/2\",\"0/1\"]},{\"max\":[\"17/2\",\"17/2\",\"2/1\"],\"min\":[\"15/2\",\"15/2\",\"0/1\"]}]}",
+      "subjectContentHash": "e46a0783d2aa512909e27bcb0674252b33324ec2be5abd345ab83f84d7ced87b",
+      "descriptorUtf8": "{\"backendProfile\":\"portable-rational-plate-v1\",\"format\":\"rational-plate\",\"frame\":{\"coordinateSystem\":\"z-up\",\"outputUnit\":\"mm\",\"sourceUnit\":\"mm\",\"uniformScale\":1},\"ingestOptions\":{},\"ingestProfile\":\"geospec-rational-orthogonal-plate-v1\",\"primary\":{\"byteLength\":272,\"sha256\":\"e46a0783d2aa512909e27bcb0674252b33324ec2be5abd345ab83f84d7ced87b\"},\"resources\":[],\"schema\":\"geospec-subject-v1\"}",
+      "subjectHash": "ff3506e2aa398f740d7baa9a2298dcf0ee53b3a1cc7c0a57c00d65477ef9d496",
+      "plans": [
+        {
+          "claimId": "f1-verifier/moved-a/positive",
+          "subjectSlot": "plate",
+          "polarity": "positive",
+          "canonicalPlanUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"numericProfile\":\"geospec-st-logical-requests-v2\",\"plan\":{\"claims\":[{\"capability\":\"toSatisfyRationalPlate\",\"claimId\":\"f1-verifier/moved-a/positive\",\"payload\":{\"contract\":\"geospec.plate-two-windows/v1\"},\"polarity\":\"positive\",\"subjectSlots\":[\"plate\"],\"workUnitBudget\":10000}],\"subjects\":[{\"slot\":\"plate\",\"subjectHash\":\"ff3506e2aa398f740d7baa9a2298dcf0ee53b3a1cc7c0a57c00d65477ef9d496\"}]},\"protocolVersion\":3,\"registryVersion\":4}",
+          "planHash": "df4adc63feb17bf0ba93a7cd170a610689b1d184e2f435dc47e43dd580aefafc"
+        },
+        {
+          "claimId": "f1-verifier/moved-a/negative",
+          "subjectSlot": "plate",
+          "polarity": "negative",
+          "canonicalPlanUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"numericProfile\":\"geospec-st-logical-requests-v2\",\"plan\":{\"claims\":[{\"capability\":\"toSatisfyRationalPlate\",\"claimId\":\"f1-verifier/moved-a/negative\",\"payload\":{\"contract\":\"geospec.plate-two-windows/v1\"},\"polarity\":\"negative\",\"subjectSlots\":[\"plate\"],\"workUnitBudget\":10000}],\"subjects\":[{\"slot\":\"plate\",\"subjectHash\":\"ff3506e2aa398f740d7baa9a2298dcf0ee53b3a1cc7c0a57c00d65477ef9d496\"}]},\"protocolVersion\":3,\"registryVersion\":4}",
+          "planHash": "ccf429c8d5b88e230afc7945dd6e9093db2c41afe7e27d90cc4b843b9ef41046"
+        }
+      ],
+      "analysis": {
+        "windowCount": 2,
+        "cellCount": 35,
+        "measured": {
+          "bounds": {
+            "min": ["0/1", "0/1", "0/1"],
+            "max": ["10/1", "10/1", "2/1"]
+          },
+          "materialVolume": "196/1",
+          "materialInA": "2/1",
+          "materialInB": "0/1"
+        },
+        "predicates": [true, true, false, true],
+        "certificate": {
+          "planes": {
+            "x": ["0/1", "3/2", "5/2", "7/2", "9/2", "15/2", "17/2", "10/1"],
+            "y": ["0/1", "3/2", "5/2", "15/2", "17/2", "10/1"],
+            "z": ["0/1", "2/1"]
+          },
+          "occupiedCells": [
+            0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 29, 30,
+            31, 32, 33, 34
+          ],
+          "materialWitnesses": {
+            "a": ["2/1", "2/1", "1/1"],
+            "b": null
+          }
+        }
+      }
+    },
+    {
+      "id": "moved-b",
+      "primaryUtf8": "{\"frame\":\"artifact-xyz\",\"plate\":{\"max\":[\"10/1\",\"10/1\",\"2/1\"],\"min\":[\"0/1\",\"0/1\",\"0/1\"]},\"schema\":\"geospec.rational-orthogonal-plate/v1\",\"unit\":\"mm\",\"windows\":[{\"max\":[\"5/2\",\"5/2\",\"2/1\"],\"min\":[\"3/2\",\"3/2\",\"0/1\"]},{\"max\":[\"13/2\",\"17/2\",\"2/1\"],\"min\":[\"11/2\",\"15/2\",\"0/1\"]}]}",
+      "subjectContentHash": "0f4a37a39a1530a1b8395660c9b8d8e29be14f22f2b81573b8667a7767489496",
+      "descriptorUtf8": "{\"backendProfile\":\"portable-rational-plate-v1\",\"format\":\"rational-plate\",\"frame\":{\"coordinateSystem\":\"z-up\",\"outputUnit\":\"mm\",\"sourceUnit\":\"mm\",\"uniformScale\":1},\"ingestOptions\":{},\"ingestProfile\":\"geospec-rational-orthogonal-plate-v1\",\"primary\":{\"byteLength\":272,\"sha256\":\"0f4a37a39a1530a1b8395660c9b8d8e29be14f22f2b81573b8667a7767489496\"},\"resources\":[],\"schema\":\"geospec-subject-v1\"}",
+      "subjectHash": "00b41306753873c45ae3938ba2295a97954c85e050d214e567aba48f340baa2a",
+      "plans": [
+        {
+          "claimId": "f1-verifier/moved-b/positive",
+          "subjectSlot": "plate",
+          "polarity": "positive",
+          "canonicalPlanUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"numericProfile\":\"geospec-st-logical-requests-v2\",\"plan\":{\"claims\":[{\"capability\":\"toSatisfyRationalPlate\",\"claimId\":\"f1-verifier/moved-b/positive\",\"payload\":{\"contract\":\"geospec.plate-two-windows/v1\"},\"polarity\":\"positive\",\"subjectSlots\":[\"plate\"],\"workUnitBudget\":10000}],\"subjects\":[{\"slot\":\"plate\",\"subjectHash\":\"00b41306753873c45ae3938ba2295a97954c85e050d214e567aba48f340baa2a\"}]},\"protocolVersion\":3,\"registryVersion\":4}",
+          "planHash": "c24fc3dc392b8ee8006cf6a5d9fcb3e984fb43562463050d7e63d772d8f2d9d7"
+        },
+        {
+          "claimId": "f1-verifier/moved-b/negative",
+          "subjectSlot": "plate",
+          "polarity": "negative",
+          "canonicalPlanUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"numericProfile\":\"geospec-st-logical-requests-v2\",\"plan\":{\"claims\":[{\"capability\":\"toSatisfyRationalPlate\",\"claimId\":\"f1-verifier/moved-b/negative\",\"payload\":{\"contract\":\"geospec.plate-two-windows/v1\"},\"polarity\":\"negative\",\"subjectSlots\":[\"plate\"],\"workUnitBudget\":10000}],\"subjects\":[{\"slot\":\"plate\",\"subjectHash\":\"00b41306753873c45ae3938ba2295a97954c85e050d214e567aba48f340baa2a\"}]},\"protocolVersion\":3,\"registryVersion\":4}",
+          "planHash": "d0bb2a53a67ede6209ffbeac46ac90ecdc5e8f42800eec177c7336158ecece6e"
+        }
+      ],
+      "analysis": {
+        "windowCount": 2,
+        "cellCount": 35,
+        "measured": {
+          "bounds": {
+            "min": ["0/1", "0/1", "0/1"],
+            "max": ["10/1", "10/1", "2/1"]
+          },
+          "materialVolume": "196/1",
+          "materialInA": "0/1",
+          "materialInB": "2/1"
+        },
+        "predicates": [true, true, true, false],
+        "certificate": {
+          "planes": {
+            "x": ["0/1", "3/2", "5/2", "11/2", "13/2", "15/2", "17/2", "10/1"],
+            "y": ["0/1", "3/2", "5/2", "15/2", "17/2", "10/1"],
+            "z": ["0/1", "2/1"]
+          },
+          "occupiedCells": [
+            0, 1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30,
+            31, 32, 33, 34
+          ],
+          "materialWitnesses": {
+            "a": null,
+            "b": ["8/1", "8/1", "1/1"]
+          }
+        }
+      }
+    }
+  ]
+}

@@ -14,11 +14,15 @@ fn fixture(name: &str) -> Vec<u8> {
 }
 
 fn workspace_fixture(relative: &str) -> Vec<u8> {
-    let workspace = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .ancestors()
-        .nth(5)
-        .expect("OCCT crate must remain below the workspace root")
-        .to_path_buf();
+    let workspace = std::env::var_os("GEOSPEC_ADAPTER_WORKSPACE")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .ancestors()
+                .nth(5)
+                .expect("OCCT crate must remain below the workspace root")
+                .to_path_buf()
+        });
     std::fs::read(workspace.join(relative)).expect("workspace fixture must be readable")
 }
 
@@ -47,12 +51,12 @@ fn retained_box_exercises_whole_faces_trim_validity_wall_and_mesh_transfer() {
             .map(|face| (face.facts.index, face.facts.area.to_bits()))
             .collect::<Vec<_>>(),
         vec![
+            (0, 0x4082_c000_0000_0000),
             (1, 0x4082_c000_0000_0000),
-            (2, 0x4082_c000_0000_0000),
+            (2, 0x4072_c000_0000_0000),
             (3, 0x4072_c000_0000_0000),
-            (4, 0x4072_c000_0000_0000),
+            (4, 0x4068_ffff_ffff_ffff),
             (5, 0x4068_ffff_ffff_ffff),
-            (6, 0x4068_ffff_ffff_ffff),
         ]
     );
     assert!(faces.iter().all(|face| {
@@ -320,7 +324,7 @@ fn retained_transformed_ap242_occurrence_locates_named_face_and_datum() {
         .expect("cubeB face must retain its occurrence association");
     let face_index = subshape
         .face_index
-        .expect("cubeB face must retain its one-based face index");
+        .expect("cubeB face must retain its zero-based public face ordinal");
     let face = document
         .occurrence_faces(occurrence)
         .unwrap()

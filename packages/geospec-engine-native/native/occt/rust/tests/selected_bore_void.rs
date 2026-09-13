@@ -8,6 +8,9 @@ use geospec_engine_native_core::{
 use geospec_engine_native_occt::OcctConnector;
 use serde_json::Value;
 
+mod support;
+use support::current_profile::{bind_claim, bind_ingest};
+
 fn claim_result(json: &str) -> Value {
     let value: Value = serde_json::from_str(json).unwrap();
     let results = value["result"]["results"].as_array().unwrap();
@@ -77,13 +80,22 @@ fn selected_bore_void_original_four_requests_and_budget_refusal() {
             Box::new(NoCsg),
         );
         let bytes = std::fs::read(input().join("guide.step")).unwrap();
-        let ingest = std::fs::read(input().join(format!("{i}.ingest.json"))).unwrap();
-        let admission = engine.ingest_subject(&ingest, bytes, vec![]).unwrap();
+        let frozen_ingest = std::fs::read(input().join(format!("{i}.ingest.json"))).unwrap();
+        let admission = engine
+            .ingest_subject(&bind_ingest(&frozen_ingest), bytes, vec![])
+            .unwrap();
         eprintln!(
             "BORE_VOID_ADMISSION {i} {}",
-            String::from_utf8(admission).unwrap()
+            String::from_utf8_lossy(&admission)
         );
-        let request = std::fs::read_to_string(input().join(format!("{i}.request.json"))).unwrap();
+        let frozen_request =
+            std::fs::read_to_string(input().join(format!("{i}.request.json"))).unwrap();
+        let bound = bind_claim(&frozen_request, &admission);
+        eprintln!(
+            "BORE_VOID_SUBJECT_BINDING {i} original={} effective={}",
+            bound.original_subject_hash, bound.effective_subject_hash
+        );
+        let request = bound.json;
         let submitted: Value = serde_json::from_str(&request).unwrap();
         let claims = submitted["plan"]["claims"].as_array().unwrap();
         assert_eq!(claims.len(), 1);

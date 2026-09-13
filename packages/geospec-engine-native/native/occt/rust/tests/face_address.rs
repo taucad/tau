@@ -13,11 +13,15 @@ fn fixture(name: &str) -> Vec<u8> {
 }
 
 fn workspace_fixture(relative: &str) -> Vec<u8> {
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let workspace = manifest_dir
-        .ancestors()
-        .nth(5)
-        .expect("OCCT crate must remain below the workspace root");
+    let workspace = std::env::var_os("GEOSPEC_ADAPTER_WORKSPACE")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .ancestors()
+                .nth(5)
+                .expect("OCCT crate must remain below the workspace root")
+                .to_path_buf()
+        });
     std::fs::read(workspace.join(relative)).expect("workspace fixture must be readable")
 }
 
@@ -129,17 +133,17 @@ fn report_copy_preserves_public_order_and_private_selected_domain_addresses() {
     ];
     let report = document.reported_facts_and_mesh().unwrap();
     assert_eq!(addresses(&whole), addresses(&report.whole_faces));
-    for occurrence in 0..2 {
+    for (occurrence, nominal_faces) in nominal.iter().enumerate() {
         assert_eq!(
-            addresses(&nominal[occurrence]),
+            addresses(nominal_faces),
             addresses(&report.occurrence_faces[occurrence])
         );
         assert_eq!(
-            nominal[occurrence]
+            nominal_faces
                 .iter()
                 .map(|face| face.facts.index)
                 .collect::<Vec<_>>(),
-            (0..nominal[occurrence].len() as u32).collect::<Vec<_>>()
+            (0..nominal_faces.len() as u32).collect::<Vec<_>>()
         );
 
         let selected = document

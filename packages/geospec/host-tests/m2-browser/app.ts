@@ -52,6 +52,7 @@ type BrowserRow = {
   ingest: { primary: Asset; requestUtf8: string; resources: Asset[] };
   invocation: Invocation;
   subjectHash: string;
+  warmup?: { expectedStatus: 'failed' | 'passed'; invocation: Invocation };
 };
 
 type Metadata = {
@@ -110,6 +111,15 @@ type CellResult = {
   passed: boolean;
   public?: ExpectedBytes & { calls: RecorderCall[]; diagnostics: unknown[]; error: ErrorRecord | null; status: string };
   runtimeFailure?: ErrorRecord & { phase: string };
+  warmup?: { direct?: WarmupResult; public?: WarmupResult };
+};
+
+type WarmupResult = {
+  calls: RecorderCall[];
+  error: ErrorRecord | null;
+  invocation: Invocation;
+  report?: ExpectedBytes & { diagnostics: unknown[]; status: string };
+  succeeded: boolean;
 };
 
 type Completion = { report: unknown } | { error: string };
@@ -266,6 +276,55 @@ const independentMap = (actual: ExpectedBytes, expected: IndependentBytes): Inde
 const allIndependent = (comparison: IndependentComparison): boolean =>
   comparison.canonicalPlanUtf8 === true && comparison.canonicalResultUtf8 !== false;
 
+const runWarmup = async (
+  engine: Engine,
+  subject: { subjectHash: string },
+  setup: NonNullable<BrowserRow['warmup']>,
+): Promise<WarmupResult> => {
+  const forwarding = recorder(engine);
+  const result: WarmupResult = {
+    calls: forwarding.calls,
+    error: null,
+    invocation: setup.invocation,
+    succeeded: false,
+  };
+  try {
+    const client = createGeoSpecAssertionClient({
+      canonicalize,
+      claimId: () => setup.invocation.claimId,
+      engine: forwarding.engine,
+      subjectSlot: setup.invocation.subjectSlot,
+      workUnitLimit: setup.invocation.workUnitBudget,
+    });
+    let report: GeoSpecCanonicalClaimReport;
+    try {
+      report = await invokePublic(client, subject, setup.invocation);
+    } catch (error) {
+      result.error = errorRecord(error);
+      if (!(error instanceof GeoSpecAssertionError)) {
+        return result;
+      }
+      report = error.report;
+    }
+    result.report = {
+      canonicalClaimUtf8: decoder.decode(report.canonicalClaim),
+      canonicalPlanUtf8: decoder.decode(report.canonicalPlan),
+      canonicalResultUtf8: decoder.decode(report.canonicalResult),
+      diagnostics: [...report.diagnostics],
+      status: report.status,
+    };
+    // A conclusive negative assertion can fail while its setup computation succeeds.
+    result.succeeded =
+      report.status === setup.expectedStatus &&
+      firstResult(result.report.canonicalResultUtf8).status === setup.expectedStatus &&
+      ((setup.expectedStatus === 'passed' && result.error === null) ||
+        (setup.expectedStatus === 'failed' && result.error?.assertionError === true));
+  } catch (error) {
+    result.error = errorRecord(error);
+  }
+  return result;
+};
+
 const runCell = async (row: BrowserRow): Promise<CellResult> => {
   const cell: CellResult = { cohort: row.cohort, id: row.id, passed: false };
   let engine: Engine | undefined;
@@ -312,6 +371,13 @@ const runCell = async (row: BrowserRow): Promise<CellResult> => {
     handle = jsonRecord(handleEnvelope['result'], 'handle result')['subjectHandle'];
     cell.cleanup = { closeCalled: false, handleResponse: await byteRecord(handleResponse), released: false };
 
+    if (row.warmup !== undefined) {
+      phase = 'warmup-direct';
+      cell.warmup = { direct: await runWarmup(engine, { subjectHash: row.subjectHash }, row.warmup) };
+      if (!cell.warmup.direct?.succeeded) {
+        throw new Error(`M2 direct warmup did not succeed for ${row.id}.`);
+      }
+    }
     phase = 'direct';
     const canonicalPlanBytes = Uint8Array.from(engine.canonicalPlan(encoder.encode(row.authoredRequestUtf8)));
     const directBytes: ExpectedBytes = {
@@ -322,6 +388,14 @@ const runCell = async (row: BrowserRow): Promise<CellResult> => {
     const directResult = firstResult(directBytes.canonicalResultUtf8);
     cell.direct = { ...directBytes, ...directResult };
 
+    if (row.warmup !== undefined) {
+      phase = 'warmup-public';
+      const warmup = await runWarmup(engine, { subjectHash: row.subjectHash }, row.warmup);
+      cell.warmup = { ...cell.warmup, public: warmup };
+      if (!warmup.succeeded) {
+        throw new Error(`M2 public warmup did not succeed for ${row.id}.`);
+      }
+    }
     phase = 'public';
     const forwarding = recorder(engine);
     const client = createGeoSpecAssertionClient({

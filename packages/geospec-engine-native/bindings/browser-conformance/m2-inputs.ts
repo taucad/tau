@@ -114,6 +114,8 @@ export type M2BrowserRow = {
   };
   invocation: M2Invocation;
   subjectHash: string;
+  /** Optional public setup repeated before each measured route on the admitted subject. */
+  warmup?: { expectedStatus: 'failed' | 'passed'; invocation: M2Invocation };
 };
 
 /** Metadata-only source and expected-row transport. */
@@ -228,7 +230,51 @@ const invocation = (authoredRequestUtf8: string): M2Invocation => {
   };
 };
 
+const assertWarmup = (value: unknown, rowId: string): void => {
+  if (value === undefined) {
+    return;
+  }
+  const message = `Supplemental browser row ${rowId} has an invalid warmup invocation or verdict.`;
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new TypeError(message);
+  }
+  const { expectedStatus, invocation: input } = value as Record<string, unknown>;
+  if (
+    (expectedStatus !== 'passed' && expectedStatus !== 'failed') ||
+    typeof input !== 'object' ||
+    input === null ||
+    Array.isArray(input)
+  ) {
+    throw new TypeError(message);
+  }
+  const {
+    arguments: invocationArguments,
+    capability,
+    claimId,
+    polarity,
+    subjectSlot,
+    workUnitBudget,
+  } = input as Record<string, unknown>;
+  if (
+    !Array.isArray(invocationArguments) ||
+    typeof capability !== 'string' ||
+    capability.length === 0 ||
+    typeof claimId !== 'string' ||
+    claimId.length === 0 ||
+    !Object.hasOwn(input, 'payload') ||
+    (polarity !== 'positive' && polarity !== 'negative') ||
+    typeof subjectSlot !== 'string' ||
+    subjectSlot.length === 0 ||
+    typeof workUnitBudget !== 'number' ||
+    !Number.isSafeInteger(workUnitBudget) ||
+    workUnitBudget < 0
+  ) {
+    throw new TypeError(message);
+  }
+};
+
 const assertCanonicalReportRow = (row: M2BrowserRow): void => {
+  assertWarmup(row.warmup, row.id);
   for (const key of ['canonicalClaimUtf8', 'canonicalPlanUtf8', 'canonicalResultUtf8'] as const) {
     if (typeof row.expected.bytes[key] !== 'string') {
       throw new TypeError(`Supplemental browser row ${row.id} has no canonical report field ${key}.`);

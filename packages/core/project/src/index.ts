@@ -1,4 +1,3 @@
-/* oxlint-disable no-barrel-files/no-barrel-files -- This private entrypoint forwards the public project manifest authority without duplicating schemas. */
 export {
   parseAdoptableProjectManifestBytes,
   parseProjectManifestBytes,
@@ -9,12 +8,11 @@ export {
   projectRelativePathSchema,
   projectToManifest,
   serializeProjectManifest,
-} from '@taucad/project-core';
+} from '#project-manifest.js';
 export type {
   AdoptableProjectManifest,
   AdoptableProjectManifestParseResult,
   ProjectManifest,
   ProjectManifestParseIssue,
   ProjectManifestParseResult,
-} from '@taucad/project-core';
-/* oxlint-enable no-barrel-files/no-barrel-files */
+} from '#project-manifest.js';

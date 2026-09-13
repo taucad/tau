@@ -3,7 +3,7 @@ title: 'npm Publishing Policy'
 description: 'Per-package rules for preparing @taucad/* libraries for npm publication: tsdown shape, dependency hygiene, exports map discipline, validation gates, README requirements.'
 status: active
 created: '2026-05-22'
-updated: '2026-09-05'
+updated: '2026-09-09'
 related:
   - docs/policy/compatibility-policy.md
   - docs/policy/release-policy.md
@@ -102,6 +102,8 @@ INCORRECT:
 ```
 
 Plugin and core packages have additional dependency rules:
+
+**Schema-only exception:** `@taucad/project-core` owns the portable Tau project-manifest schema and parser consumed by Runtime and GeoSpec. It must not import or declare `@taucad/runtime` in any dependency field; Runtime declares the public project-core dependency. The Runtime-peer rule below does not apply to this package. Its emitted Zod API still requires the literal Zod peer and catalog development dependency. This exception prevents the Runtime → private types → project-core → Runtime cycle; it grants no exception to plugin packages or other core packages.
 
 | Package class                                | Required dependency shape                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

@@ -243,6 +243,7 @@
   },
   "dependencies": {
     "@msgpack/msgpack": "catalog:",
+    "@taucad/project-core": "workspace:*",
     "@types/json-schema": "catalog:",
     "cdn-resolve": "catalog:",
     "deepmerge": "catalog:",
@@ -271,11 +272,11 @@
   },
   "devDependencies": {
     "@taucad/events": "workspace:*",
-    "@taucad/nx": "workspace:*",
     "@taucad/filesystem": "workspace:*",
     "@taucad/fs-bridge": "workspace:*",
     "@taucad/json-schema": "workspace:*",
     "@taucad/memory": "workspace:*",
+    "@taucad/nx": "workspace:*",
     "@taucad/rpc": "workspace:*",
     "@taucad/types": "workspace:*",
     "@taucad/utils": "workspace:*",

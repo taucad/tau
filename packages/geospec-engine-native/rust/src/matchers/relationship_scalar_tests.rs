@@ -80,6 +80,19 @@ fn endpoint(origin: [f64; 3], direction: [f64; 3]) -> Endpoint {
             face: 0,
         },
         facts: EntityFacts {
+            // Synthetic transport attachment for these display-expression
+            // controls, not evidence of actual AP242 source admission.
+            face_index: Some(0),
+            nominal_support: (direction != [0.0; 3]).then_some(continuous::NominalSupport {
+                entity: BrepEntity::Face {
+                    occurrence: 0,
+                    face: 0,
+                },
+                public_ordinal: 0,
+                kind: continuous::SupportKind::Axis,
+                origin,
+                direction,
+            }),
             axis_origin: Some(origin),
             axis_direction: Some(direction),
             ..EntityFacts::default()
@@ -143,15 +156,23 @@ fn relationship_scalar_orders_match_frozen_node24() {
             &relationship("parallel"),
             &[endpoint([0.0; 3], a)],
             &[endpoint([0.0; 3], b)],
-        )
-        .unwrap_or_else(|_| panic!("ordinary analytic directions must be measurable"));
-        observe(
-            &mut rows,
-            id,
-            "proof.angle",
-            &[measured(&proof, "angle")],
-            &expected["folded"],
         );
+        if a == [0.0; 3] || b == [0.0; 3] {
+            assert!(
+                matches!(proof, Err(ProofError::Refused(_))),
+                "successor refuses zero directions; raw display controls above remain unchanged"
+            );
+        } else {
+            let proof =
+                proof.unwrap_or_else(|_| panic!("ordinary analytic directions must be measurable"));
+            observe(
+                &mut rows,
+                id,
+                "proof.angle",
+                &[measured(&proof, "angle")],
+                &expected["folded"],
+            );
+        }
         // Diagnostic only: binary std hypot composition is not substituted for Math.hypot3.
         println!(
             "std-hypot-chain {id} a={:016x} b={:016x}",
@@ -191,15 +212,23 @@ fn coaxial_original_axis_intermediates_match_frozen_node24() {
             &relationship("coaxial"),
             &[endpoint(a, direction)],
             &[endpoint(b, direction)],
-        )
-        .unwrap_or_else(|_| panic!("ordinary analytic axes must be measurable"));
-        observe(
-            &mut rows,
-            id,
-            "proof.radialOffset",
-            &[measured(&proof, "radialOffset")],
-            &expected["radial"],
         );
+        if direction == [0.0; 3] {
+            assert!(
+                matches!(proof, Err(ProofError::Refused(_))),
+                "successor refuses zero axis; raw display controls above remain unchanged"
+            );
+        } else {
+            let proof =
+                proof.unwrap_or_else(|_| panic!("ordinary analytic axes must be measurable"));
+            observe(
+                &mut rows,
+                id,
+                "proof.radialOffset",
+                &[measured(&proof, "radialOffset")],
+                &expected["radial"],
+            );
+        }
     }
     finish("coaxial-original-axis", rows);
 }

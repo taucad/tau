@@ -1256,6 +1256,64 @@ impl<'a> EvaluationContext<'a> {
             .map_err(backend_refusal)
     }
 
+    /// Uncached complete-selected-material bore demands. Charge all local
+    /// inventory work before each adapter call, including refused candidates.
+    pub(crate) fn selected_bore_voids(
+        &mut self, occurrence: u32,
+    ) -> Result<Vec<crate::backend::brep::SelectedBoreVoid>, Evaluation> {
+        self.brep_facts()?;
+        let subject = self.subject();
+        let bundle = subject.report_bundle().map_err(backend_refusal)?
+            .ok_or_else(|| backend_refusal(BackendError {
+                kind: BackendErrorKind::Unsupported,
+                message: "Selected bore void requires a BRep report.".into(),
+            }))?;
+        let faces = bundle.occurrence_faces.get(occurrence as usize)
+            .ok_or_else(|| backend_refusal(BackendError {
+                kind: BackendErrorKind::Unsupported,
+                message: "Selected material occurrence is missing.".into(),
+            }))?;
+        if faces.len() > 4096 {
+            return Err(backend_refusal(BackendError {
+                kind: BackendErrorKind::Unsupported,
+                message: "Selected bore void exceeds its 4096-face/16-bore domain.".into(),
+            }));
+        }
+        self.check_continuous_output(256 * 1024)?;
+        let candidates: Vec<_> = faces.iter().filter(|face| face.reversed &&
+            matches!(face.facts.surface, SurfaceFacts::Cylinder { .. })).take(17).collect();
+        if candidates.len() > 16 {
+            return Err(backend_refusal(BackendError {
+                kind: BackendErrorKind::Unsupported,
+                message: "Selected bore void exceeds its 16-bore domain.".into(),
+            }));
+        }
+        let work = 1 + faces.iter().filter(|face|
+            !matches!(face.facts.surface, SurfaceFacts::Plane { .. })).count() as u64;
+        let brep = subject.brep.as_deref().ok_or_else(|| backend_refusal(BackendError {
+            kind: BackendErrorKind::Unsupported, message: "Selected material has no BRep.".into(),
+        }))?;
+        let mut result = Vec::new();
+        for face in candidates {
+            self.budget.charge(work).map_err(|e| Evaluation::budget_exceeded(self.capability, e))?;
+            let value = match brep.selected_bore_void(face.entity) {
+                Ok(value) => value,
+                Err(error) if error.kind == BackendErrorKind::Unsupported => continue,
+                Err(error) => return Err(backend_refusal(error)),
+            };
+            if value.band.occurrence != occurrence ||
+                value.band.public_face_ordinal != face.facts.index ||
+                face.entity != (BrepEntity::Face { occurrence, face: value.band.private_query_face }) {
+                return Err(backend_refusal(BackendError {
+                    kind: BackendErrorKind::ComputationFailed,
+                    message: "Selected bore certificate does not bind the requested material face.".into(),
+                }));
+            }
+            result.push(value);
+        }
+        Ok(result)
+    }
+
     /// One requested regular-solid difference, charged before any connector
     /// query or connector-owned lookup. No core result cache is introduced.
     pub(crate) fn regular_solid_containment(

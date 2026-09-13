@@ -680,6 +680,9 @@ fn validate_query_kind(kind: EntityType, query: &Query) -> Result<(), ProtocolEr
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct EntityFacts {
+    /// Typed raw support and address from the same placed face inventory.
+    /// Never reconstructed from a rounded plane offset or a selector label.
+    pub nominal_support: Option<super::continuous::NominalSupport>,
     pub surface_type: Option<String>,
     pub normal: Option<[f64; 3]>,
     pub offset: Option<f64>,
@@ -1211,6 +1214,23 @@ pub(crate) fn face_entity(path: &str, ordinal: &[u32], face: &LocatedFace) -> En
             face.facts.index
         )),
         facts: EntityFacts {
+            nominal_support: match &face.facts.surface {
+                SurfaceFacts::Plane { origin, normal } => Some(super::continuous::NominalSupport {
+                    entity: face.entity,
+                    public_ordinal: face.facts.index,
+                    kind: super::continuous::SupportKind::Plane,
+                    origin: *origin,
+                    direction: if face.reversed { normal.map(|v| -v) } else { *normal },
+                }),
+                SurfaceFacts::Cylinder { origin, axis, .. } | SurfaceFacts::Cone { origin, axis, .. } => Some(super::continuous::NominalSupport {
+                    entity: face.entity,
+                    public_ordinal: face.facts.index,
+                    kind: super::continuous::SupportKind::Axis,
+                    origin: *origin,
+                    direction: *axis,
+                }),
+                _ => None,
+            },
             surface_type: Some(surface_type.into()),
             normal,
             offset,

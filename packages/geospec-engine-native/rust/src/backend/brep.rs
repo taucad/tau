@@ -691,6 +691,16 @@ pub struct CircularBoreInventory {
     pub candidates: Vec<CircularBoreCandidate>,
 }
 
+/// Clear finite bore in one complete regular closed selected material solid.
+/// Unlike the whole-document A7 inventory, every face/edge address here is
+/// local to `band.occurrence`. Extra material in that occurrence is excluded.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SelectedBoreVoid {
+    pub band: NominalCylindricalBand,
+    pub ends: [CircularBoreEnd; 2],
+    pub maximum_topology_tolerance_mm: f64,
+}
+
 impl CircularBoreInventory {
     pub fn owned_bytes(&self) -> u64 {
         (std::mem::size_of::<Self>() as u64).saturating_add(
@@ -956,6 +966,16 @@ pub trait BrepSubject {
         Err(BackendError {
             kind: super::BackendErrorKind::Unsupported,
             message: "The BRep connector has no qualified circular-bore topology query.".into(),
+        })
+    }
+
+    /// One actual occurrence face, complete single-solid material, two mouths,
+    /// and empty regular-solid Common throughout its finite bore interior.
+    /// No fallback to the face's local owner within a composite occurrence.
+    fn selected_bore_void(&self, _face: BrepEntity) -> Result<SelectedBoreVoid, BackendError> {
+        Err(BackendError {
+            kind: super::BackendErrorKind::Unsupported,
+            message: "The connector has no complete selected-material bore query.".into(),
         })
     }
 

@@ -760,6 +760,11 @@ int geospec_occt_nominal_cylindrical_band_query(
     const geospec_occt_document* document, geospec_occt_entity face,
     geospec_occt_nominal_cylindrical_band* output,
     geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
+int geospec_occt_selected_bore_void_query(
+    const geospec_occt_document* document, geospec_occt_entity face,
+    geospec_occt_nominal_cylindrical_band* band,
+    geospec_occt_circular_bore_candidate* clear_interior,
+    geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
 int geospec_occt_circular_bores_prepare(
     const geospec_occt_document* document, size_t max_candidates,
     size_t retained_candidate_size, size_t retained_inventory_size,

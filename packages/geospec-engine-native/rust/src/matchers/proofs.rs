@@ -1202,6 +1202,9 @@ fn evaluate_void(prepared: &Void, context: &mut EvaluationContext<'_>) -> Evalua
     {
         return evaluate_nominal_void(claim, context);
     }
+    if prepared.path.iter().all(|point| matches!(point, VoidWaypoint::Point(_))) {
+        return evaluate_bore_void(claim, context);
+    }
     if prepared.min_cross_section.is_some() {
         let mut diagnostic = Diagnostic::error(
             "GEOSPEC_EVIDENCE_UNSUPPORTED",
@@ -1265,6 +1268,43 @@ fn evaluate_void(prepared: &Void, context: &mut EvaluationContext<'_>) -> Evalua
         }
         Err(error) => backend_refusal(error),
     }
+}
+
+fn evaluate_bore_void(claim: &VoidClaim, context: &mut EvaluationContext<'_>) -> Evaluation {
+    use crate::analysis::voids::nominal_bore;
+    let refuse = |message: &str| Evaluation::Refused {
+        diagnostics: void_unsupported(message,
+            "Use a complete selected single-solid straight bore with an axial path; unresolved bounds do not prove failure.", None),
+    };
+    let [material] = claim.materials.as_slice() else {
+        return refuse("Nominal bore void requires exactly one selected material.");
+    };
+    if !claim.isolated_from.is_empty() || !(2..=nominal_bore::MAX_WAYPOINTS).contains(&claim.waypoints.len()) {
+        return refuse("Nominal bore void requires 2..16 points and no unproved isolation constraint.");
+    }
+    if let Err(error) = context.check_continuous_output(nominal_bore::RESERVATION_BYTES) {
+        return error;
+    }
+    let bores = match context.selected_bore_voids(*material) {
+        Ok(value) => value, Err(error) => return error,
+    };
+    for bore in &bores {
+        // Fixed bounded rational expression schedule; charged even on failure.
+        let units = 64 + 16 * claim.waypoints.len() as u64;
+        if let Err(error) = context.budget.charge(units) {
+            return Evaluation::budget_exceeded(context.capability, error);
+        }
+        if let Ok(proof) = nominal_bore::prove(claim, bore) {
+            let evidence = family_evidence(&context.subject().content_hash,
+                normalized_expected(context), proof.clone(), Json::object([("proof", proof)]));
+            if let Err(error) = context.check_continuous_output(json_owned_bytes(&evidence)) {
+                return error;
+            }
+            return Evaluation::Geometric { positive_satisfied: true, diagnostics: Vec::new(),
+                evidence, negated_diagnostic: None };
+        }
+    }
+    refuse("No complete selected-material bore certificate proves the full path and requested section lower bound.")
 }
 
 fn evaluate_nominal_void(claim: &VoidClaim, context: &mut EvaluationContext<'_>) -> Evaluation {

@@ -17,6 +17,9 @@ serde = { version = "=1.0.219", features = ["derive"] }
 [build-dependencies]
 cc = "=1.4.4"
 
+[dev-dependencies]
+serde_json = { version = "=1.0.143", features = ["float_roundtrip"] }
+
 [[test]]
 name = "trimmed_cylinder"
 path = "tests/trimmed_cylinder.rs"

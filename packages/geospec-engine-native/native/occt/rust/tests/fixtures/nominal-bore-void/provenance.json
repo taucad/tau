@@ -1,0 +1,92 @@
+{
+  "schema": "nominal-bore-void-test-fixtures-v1",
+  "attribution": "Tau original AP242 guide/chamfer corpus and accepted independent OCCT controls.",
+  "bytePolicy": "Copied unchanged from accepted nominal-bore-void-a1 inputs; no regeneration or expectation changes.",
+  "runtimeDependency": "Files in this directory only; provenance paths are historical attribution and never read at runtime.",
+  "files": [
+    {
+      "file": "guide.step",
+      "sha256": "55192ed0a48e39b6d8f6315c5529a1fb88cc71902e416a6a00549f516a940940",
+      "bytes": 29381,
+      "provenance": "repos/tau-brain/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/nominal-bore-void-a1/inputs/guide.step"
+    },
+    {
+      "file": "original-chamfer.step",
+      "sha256": "c2990b3414ada63e504b3a8c8c6b729cc9bc3b8abd905dd96f04ccddca6ba0b2",
+      "bytes": 29458,
+      "provenance": "repos/tau-brain/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/nominal-bore-void-a1/inputs/original-chamfer.step"
+    },
+    {
+      "file": "obstructed.step",
+      "sha256": "3a3b71d2e00b1944c13c9a3b103b0dbed5b42c720c2b71799374f93dc71e14ad",
+      "bytes": 73342,
+      "provenance": "repos/tau-brain/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/nominal-bore-void-a1/inputs/obstructed.step"
+    },
+    {
+      "file": "extra-solid.step",
+      "sha256": "50c4cbc2dcf4da527f33b302fc13c033924aecc43feba23ff576526222ed7237",
+      "bytes": 34699,
+      "provenance": "repos/tau-brain/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/nominal-bore-void-a1/inputs/extra-solid.step"
+    },
+    {
+      "file": "chamfer-base.step",
+      "sha256": "1e3cf2bdd249ff3822746b2ef4dab0f12e17c1979ad15fcbdccb7eec3fb832df",
+      "bytes": 20781,
+      "provenance": "repos/tau-brain/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/nominal-bore-void-a1/inputs/chamfer-base.step"
+    },
+    {
+      "file": "chamfer-perforated.step",
+      "sha256": "bddd640c12d657622131a2c810812fa2fa6bf7db1ec45d641d9102fe454c8e8b",
+      "bytes": 26263,
+      "provenance": "repos/tau-brain/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/nominal-bore-void-a1/inputs/chamfer-perforated.step"
+    },
+    {
+      "file": "0.ingest.json",
+      "sha256": "cbc944d751f346363dc168be583866f4e998e08f8f0b04d5c43957786aad69cb",
+      "bytes": 358,
+      "provenance": "repos/tau-brain/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/nominal-bore-void-a1/inputs/0.ingest.json"
+    },
+    {
+      "file": "0.request.json",
+      "sha256": "1a4d0baa693f915879e037820f9cec3ddc8433adff9e88aed87fddb728e738e9",
+      "bytes": 513,
+      "provenance": "repos/tau-brain/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/nominal-bore-void-a1/inputs/0.request.json"
+    },
+    {
+      "file": "1.ingest.json",
+      "sha256": "cbc944d751f346363dc168be583866f4e998e08f8f0b04d5c43957786aad69cb",
+      "bytes": 358,
+      "provenance": "repos/tau-brain/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/nominal-bore-void-a1/inputs/1.ingest.json"
+    },
+    {
+      "file": "1.request.json",
+      "sha256": "ae9d9df0bdf8cb9d189b3dce4fb79c92f090dce9968e0e339d1ddf3c23320763",
+      "bytes": 513,
+      "provenance": "repos/tau-brain/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/nominal-bore-void-a1/inputs/1.request.json"
+    },
+    {
+      "file": "2.ingest.json",
+      "sha256": "ca619171f4795843147485381bd4c7a76a2ce8dd0a166c90cd30432235a460c0",
+      "bytes": 312,
+      "provenance": "repos/tau-brain/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/nominal-bore-void-a1/inputs/2.ingest.json"
+    },
+    {
+      "file": "2.request.json",
+      "sha256": "b923409b82bccceff76e149bbf898581bc0d4bef316c62125143ae4e836bf9a5",
+      "bytes": 585,
+      "provenance": "repos/tau-brain/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/nominal-bore-void-a1/inputs/2.request.json"
+    },
+    {
+      "file": "3.ingest.json",
+      "sha256": "ca619171f4795843147485381bd4c7a76a2ce8dd0a166c90cd30432235a460c0",
+      "bytes": 312,
+      "provenance": "repos/tau-brain/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/nominal-bore-void-a1/inputs/3.ingest.json"
+    },
+    {
+      "file": "3.request.json",
+      "sha256": "834e9585c4278f31befab173ef0bf9b9b7165853cc32de675c0ec4f105ef1600",
+      "bytes": 585,
+      "provenance": "repos/tau-brain/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/nominal-bore-void-a1/inputs/3.request.json"
+    }
+  ]
+}

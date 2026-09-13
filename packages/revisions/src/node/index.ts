@@ -5,9 +5,11 @@
 
 export { CommandAbortedError, runCommand, runGitCommand } from '#git-command.js';
 export type { CommandAbortReason, CommandBounds, GitCommandResult } from '#git-command.js';
+export { GitToolchainError, resolveGitToolchain } from '#git-toolchain.js';
+export type { GitToolchain, MissingGitTool } from '#git-toolchain.js';
 export { createNativeGitAdapter } from '#native-git-adapter.js';
 export { createNativeGitRevisionPort } from '#native-git-port.js';
-export type { NativeGitCheckoutOptions, NativeGitRevisionPortOptions } from '#native-git-port.js';
+export type { NativeGitCheckoutOptions, NativeGitRevisionPortOptions, TauApiCredential } from '#native-git-port.js';
 export { NativeGitError } from '#native-git.types.js';
 export type {
   BindNativeGitWorkspaceInput,

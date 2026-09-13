@@ -2,7 +2,8 @@ import { createActor } from 'xstate';
 import { describe, expect, it } from 'vitest';
 
 import * as machineModule from '#checkouts.machine.js';
-import { checkoutsMachine } from '#checkouts.machine.js';
+import { checkoutsMachine, selectLeaseSet } from '#checkouts.machine.js';
+import type { CheckoutRecord } from '#revision-port.js';
 import { createFakeParent, createFakePromiseActors, recordEmitted } from '#test/fake-actors.js';
 import type { FakePromiseActors } from '#test/fake-actors.js';
 
@@ -23,6 +24,17 @@ import type { FakePromiseActors } from '#test/fake-actors.js';
  * 12  `turnFinalized` retires the lease without removing the checkout (D17)
  * 13  `leaseStale { runId }` retires that lease
  * 14  two retirements in one burst are both served
+ * 15  `leaseWritten { checkoutId, runId }` appends the lease and re-announces,
+ *     arming the D10 switch guard and the A25/I9 removal guard (R1)
+ * 16  `turnFinalized` retires only that turn's own lease, so a second chat on
+ *     the same checkout keeps its lease (AC9, R2)
+ * 17  every registry fact the parent has to route reaches it, not just the
+ *     emit stream (R11)
+ * 18  a lease written before the registry finished loading is not dropped: it
+ *     is on the record once the load lands (R22)
+ * 19  a turn that ended without ever writing a lease retires nothing (R23)
+ * 20  a settlement or a stale-lease report that arrives before the registry
+ *     finished loading still retires its lease (R30)
  * --  a removable record offers removal; `open` rehydrates from records again;
  *     start and stop, serializable snapshot, one exported machine value
  */
@@ -41,8 +53,24 @@ type Harness = Readonly<{
   emitted: ReturnType<typeof recordEmitted>;
 }>;
 
-const live = { id: 'checkout-live', branch: 'main', leaseRunIds: [] };
-const linked = { id: 'checkout-b', branch: 'agent/b', leaseRunIds: ['run-7'] };
+const live: CheckoutRecord = {
+  id: 'checkout-live',
+  projectId: 'project-1',
+  root: '/projects/project-1',
+  kind: 'live',
+  branch: 'main',
+  leaseRunIds: [],
+  leaseChatIds: [],
+};
+const linked: CheckoutRecord = {
+  id: 'checkout-b',
+  projectId: 'project-1',
+  root: '/checkouts/checkout-b',
+  kind: 'linked',
+  branch: 'agent/b',
+  leaseRunIds: ['run-7'],
+  leaseChatIds: [],
+};
 
 const start = (): Harness => {
   const promises = createFakePromiseActors();
@@ -256,8 +284,10 @@ describe('checkoutsMachine', () => {
       turnId: 'turn-1',
       chatId: 'chat-1',
       checkoutId: 'checkout-b',
+      runId: 'run-7',
       revisionId: 'rev-2',
       trigger: 'turn',
+      branch: 'main',
       runIds: ['run-7'],
     });
 
@@ -297,7 +327,9 @@ describe('checkoutsMachine', () => {
     const harness = start();
     const { actor, promises } = harness;
 
-    await toReady(harness);
+    /* Both run ids are leases the registry actually knows: a retirement for a
+     * run id no record holds is left to `sweepLeases` (R23/R30). */
+    await toReady(harness, { checkouts: [live, { ...linked, leaseRunIds: ['run-7', 'run-8'] }] });
     actor.send({ type: 'leaseStale', runId: 'run-7' });
     actor.send({ type: 'leaseStale', runId: 'run-8' });
     promises.settle('retireLease', { output: undefined });
@@ -325,6 +357,193 @@ describe('checkoutsMachine', () => {
 
     expect(actor.getSnapshot().matches({ ready: 'idle' })).toBe(true);
     expect(types(emitted)).toContain('checkoutFailed');
+
+    actor.stop();
+  });
+
+  it('appends a lease a turn wrote and re-announces the registry', async () => {
+    const harness = start();
+    const { actor, promises, parent } = harness;
+
+    await toReady(harness);
+    const announcements = parent.events.filter((event) => event.type === 'checkoutsChanged').length;
+    actor.send({ type: 'leaseWritten', checkoutId: 'checkout-live', runId: 'run-9' });
+
+    /* D10: the switch guard reads this set, so it has to contain the lease. */
+    expect(selectLeaseSet(actor.getSnapshot())['checkout-live']).toEqual(['run-9']);
+    expect(parent.events.filter((event) => event.type === 'checkoutsChanged')).toHaveLength(announcements + 1);
+
+    /* A25/I9: the same lease now blocks removal. */
+    actor.send({ type: 'removeCheckout', id: 'checkout-live' });
+
+    expect(promises.inputsFor('removeCheckout')).toEqual([]);
+    expect(actor.getSnapshot().matches({ ready: 'idle' })).toBe(true);
+
+    actor.stop();
+  });
+
+  it('ignores a lease written for a checkout it does not know', async () => {
+    const harness = start();
+    const { actor, parent } = harness;
+
+    await toReady(harness);
+    const announcements = parent.events.filter((event) => event.type === 'checkoutsChanged').length;
+    actor.send({ type: 'leaseWritten', checkoutId: 'checkout-ghost', runId: 'run-9' });
+
+    expect(actor.getSnapshot().context.checkouts).toEqual([live, linked]);
+    expect(parent.events.filter((event) => event.type === 'checkoutsChanged')).toHaveLength(announcements);
+
+    actor.stop();
+  });
+
+  it('retires only the finalizing turn\u2019s own lease, leaving a second chat leased', async () => {
+    const harness = start();
+    const { actor, promises } = harness;
+    const shared: CheckoutRecord = { ...linked, leaseRunIds: ['run-a', 'run-b'] };
+
+    await toReady(harness, { checkouts: [live, shared] });
+    actor.send({
+      type: 'turnFinalized',
+      turnId: 'turn-a',
+      chatId: 'chat-a',
+      checkoutId: 'checkout-b',
+      runId: 'run-a',
+      revisionId: 'rev-2',
+      trigger: 'turn',
+      branch: 'main',
+      runIds: ['run-a', 'run-b'],
+    });
+    promises.settle('retireLease', { output: undefined });
+    await flush();
+
+    /* AC9: two chats share the checkout; chat B is still working in it. */
+    expect(promises.inputsFor('retireLease')).toEqual([{ projectId: 'project-1', runId: 'run-a' }]);
+    expect(selectLeaseSet(actor.getSnapshot())['checkout-b']).toEqual(['run-b']);
+    expect(actor.getSnapshot().matches({ ready: 'idle' })).toBe(true);
+
+    actor.stop();
+  });
+
+  it('sends every registry fact to the parent, not only to the emit stream', async () => {
+    const harness = start();
+    const { actor, promises, parent } = harness;
+
+    await toReady(harness, {
+      retired: ['run-0'],
+      checkouts: [live, { ...linked, leaseRunIds: [], removable: true }],
+    });
+    actor.send({ type: 'addCheckout', branch: 'main', from: 'rev-1' });
+
+    expect(types(parent.events)).toContain('leaseRetired');
+    expect(types(parent.events)).toContain('removalOffered');
+    expect(types(parent.events)).toContain('checkoutFailed');
+
+    expect(promises.inputsFor('addCheckout')).toEqual([]);
+
+    actor.stop();
+  });
+
+  it('keeps a lease written before the registry finished loading', async () => {
+    const harness = start();
+    const { actor, parent } = harness;
+
+    actor.send({ type: 'open' });
+    actor.send({ type: 'leaseWritten', checkoutId: 'checkout-live', runId: 'run-9' });
+    harness.promises.settle('sweepLeases', { output: { retiredRunIds: [] } });
+    await flush();
+    harness.promises.settle('listCheckouts', { output: { checkouts: [live, linked] } });
+    await flush();
+
+    /* R1's whole point is that a lease is never silently dropped; nothing
+     * orders `admitTurn` after the registry reaches `ready`. */
+    expect(selectLeaseSet(actor.getSnapshot())['checkout-live']).toEqual(['run-9']);
+    expect(parent.events.findLast((event) => event.type === 'checkoutsChanged')).toMatchObject({
+      checkouts: [{ id: 'checkout-live', leaseRunIds: ['run-9'] }, linked],
+    });
+
+    actor.stop();
+  });
+
+  it('retires nothing for a turn that never wrote a lease', async () => {
+    const harness = start();
+    const { actor, promises, emitted } = harness;
+
+    await toReady(harness);
+    actor.send({ type: 'turnReleased', turnId: 'turn-1', checkoutId: 'checkout-live', runId: 'run-never' });
+
+    /* R11 routes a retirement failure to the host, so retiring a lease that was
+     * never written would surface a failure nobody can act on. */
+    expect(actor.getSnapshot().matches({ ready: 'idle' })).toBe(true);
+    expect(promises.inputsFor('retireLease')).toEqual([]);
+    expect(types(emitted)).not.toContain('checkoutFailed');
+
+    actor.stop();
+  });
+
+  it('retires a lease whose settlement arrived before the registry loaded', async () => {
+    const harness = start();
+    const { actor, promises } = harness;
+
+    actor.send({ type: 'open' });
+    promises.settle('sweepLeases', { output: { retiredRunIds: [] } });
+    await flush();
+    actor.send({
+      type: 'turnFinalized',
+      turnId: 'turn-1',
+      chatId: 'chat-1',
+      checkoutId: 'checkout-b',
+      runId: 'run-7',
+      revisionId: 'rev-2',
+      trigger: 'turn',
+      branch: 'main',
+      runIds: ['run-7'],
+    });
+    promises.settle('listCheckouts', { output: { checkouts: [live, linked] } });
+    await flush();
+    promises.settle('retireLease', { output: undefined });
+    await flush();
+
+    expect(promises.inputsFor('retireLease')).toEqual([{ projectId: 'project-1', runId: 'run-7' }]);
+    expect(selectLeaseSet(actor.getSnapshot())['checkout-b']).toEqual([]);
+
+    actor.stop();
+  });
+
+  it('retires a lease reported stale before the registry loaded', async () => {
+    const harness = start();
+    const { actor, promises } = harness;
+
+    actor.send({ type: 'open' });
+    actor.send({ type: 'leaseStale', runId: 'run-7' });
+    promises.settle('sweepLeases', { output: { retiredRunIds: [] } });
+    await flush();
+    promises.settle('listCheckouts', { output: { checkouts: [live, linked] } });
+    await flush();
+    promises.settle('retireLease', { output: undefined });
+    await flush();
+
+    expect(promises.inputsFor('retireLease')).toEqual([{ projectId: 'project-1', runId: 'run-7' }]);
+
+    actor.stop();
+  });
+
+  it('cancels a buffered lease whose turn already ended', async () => {
+    const harness = start();
+    const { actor, promises } = harness;
+
+    actor.send({ type: 'open' });
+    actor.send({ type: 'leaseWritten', checkoutId: 'checkout-live', runId: 'run-9' });
+    actor.send({ type: 'turnReleased', turnId: 'turn-1', checkoutId: 'checkout-live', runId: 'run-9' });
+    promises.settle('sweepLeases', { output: { retiredRunIds: [] } });
+    await flush();
+    promises.settle('listCheckouts', { output: { checkouts: [live, linked] } });
+    await flush();
+
+    /* The registry never recorded that lease and the turn retired its own file,
+     * so nothing is left to retire and nothing is left holding the checkout. */
+    expect(selectLeaseSet(actor.getSnapshot())['checkout-live']).toEqual([]);
+    expect(promises.inputsFor('retireLease')).toEqual([]);
+    expect(actor.getSnapshot().matches({ ready: 'idle' })).toBe(true);
 
     actor.stop();
   });

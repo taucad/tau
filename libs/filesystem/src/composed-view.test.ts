@@ -98,7 +98,7 @@ describe('composeView overlays', () => {
     expect(await view.provenance(`${skillsRoot}/demo/SKILL.md`)).toStrictEqual({
       source: 'project',
       versioned: true,
-      access: 'read-write',
+      agentAccess: 'read-write',
       overrides: demoIdentity,
     });
     expect(reads).not.toHaveBeenCalled();
@@ -149,12 +149,119 @@ describe('composeView overlays', () => {
   });
 });
 
+/*
+ * A1 review R5: three optional provider members the mask wrapper forwarded and
+ * the view dropped. A bridge handler that loses `refresh` is a stale listing
+ * waiting to happen.
+ */
+/* A1 review R6: `ComposedViewOverlay.root` was declared and never read. */
+describe('composeView overlay root', () => {
+  it('should not ask an overlay about a path outside its root', async () => {
+    const projection = skillOverlay();
+    const unit = vi.fn(projection.unit);
+    const node = vi.fn(projection.node);
+    const view = composeView({ filesystem: provider }, { consumer: 'user', overlays: [{ ...projection, unit, node }] });
+
+    expect(await view.readFile('main.ts', 'utf8')).toBe('export {};\n');
+    expect(unit).not.toHaveBeenCalled();
+    expect(node).not.toHaveBeenCalled();
+    /* The directories above the root still merge, so they are still asked. */
+    expect(await view.readdir('.agents')).toContain('skills');
+    expect(node).toHaveBeenCalled();
+  });
+
+  /* A2 re-review R13: `''` is every path's ancestor, so an overlay composed at
+     the checkout root touches everything. */
+  it('should honour an overlay composed at the checkout root', async () => {
+    const view = composeView(
+      { filesystem: provider },
+      {
+        consumer: 'user',
+        overlays: [
+          {
+            root: '',
+            source: 'dependencies',
+            unit: (path) => (path === 'vendored.ts' ? { root: 'vendored.ts', identity: 'pkg@1.0.0' } : undefined),
+            node: (path) =>
+              path === ''
+                ? { type: 'dir', children: ['vendored.ts'] }
+                : { type: 'file', size: 3, contentKind: 'text', lineCount: 1 },
+            read: async () => encoder.encode('one'),
+          },
+        ],
+      },
+    );
+
+    expect(await view.readFile('vendored.ts', 'utf8')).toBe('one');
+    expect(await view.readdir('')).toContain('vendored.ts');
+  });
+});
+
+describe('composeView optional provider members', () => {
+  const streaming = () => {
+    const refresh = vi.fn(async (_prefixes?: readonly string[]) => undefined);
+    const base = Object.assign(Object.create(provider) as MemoryProvider, {
+      readFileStream: (path: string) =>
+        new ReadableStream<Uint8Array<ArrayBuffer>>({
+          async start(controller) {
+            controller.enqueue(await provider.readFile(path));
+            controller.close();
+          },
+        }),
+      refresh,
+    });
+    return { refresh, view: composeView({ filesystem: base }, { consumer: 'agent', overlays: [skillOverlay()] }) };
+  };
+
+  const collect = async (stream: ReadableStream<Uint8Array<ArrayBuffer>>): Promise<string> =>
+    new Response(stream).text();
+
+  it('should stream the project bytes and the overlay bytes through one reader', async () => {
+    const { view } = streaming();
+
+    expect(await collect(view.readFileStream!('main.ts'))).toBe('export {};\n');
+    expect(await collect(view.readFileStream!(`${skillsRoot}/demo/api-index.md`))).toBe(contents['api-index.md']);
+    /* The mask refuses before the stream exists — no I/O, nothing to cancel. */
+    expect(() => view.readFileStream!('.tau/revisions/HEAD')).toThrow(/exists in a composed view/u);
+  });
+
+  /* A2 re-review R12: the wrapper forwarded `position`/`length`/`signal` on one
+     branch and dropped them on the other, so a ranged read of an overlay path
+     answered the whole file. */
+  it('should serve a byte window and honour an abort signal on either route', async () => {
+    const { view } = streaming();
+
+    expect(await collect(view.readFileStream!(`${skillsRoot}/demo/api-index.md`, { position: 2, length: 5 }))).toBe(
+      contents['api-index.md'].slice(2, 7),
+    );
+    expect(await collect(view.readFileStream!('main.ts', { position: 7 }))).toBe('export {};\n'.slice(7));
+    await expect(collect(view.readFileStream!('main.ts', { signal: AbortSignal.abort() }))).rejects.toThrow();
+  });
+
+  it('should answer readdirEntries from the merged listing', async () => {
+    const { view } = streaming();
+
+    expect(await view.readdirEntries!(`${skillsRoot}/demo`)).toStrictEqual([
+      { name: 'SKILL.md', kind: 'file' },
+      { name: 'api-index.md', kind: 'file' },
+      { name: 'references', kind: 'dir' },
+    ]);
+  });
+
+  it('should forward refresh to the checkout it composes', async () => {
+    const { refresh, view } = streaming();
+
+    await view.refresh!(['src']);
+    expect(refresh).toHaveBeenCalledWith(['src']);
+  });
+});
+
 describe('composeView provenance', () => {
   it('should report the overlay source, identity and read-only access for an overlay entry', async () => {
     expect(await agentView().provenance(`${skillsRoot}/demo/SKILL.md`)).toStrictEqual({
       source: 'system-skills',
       versioned: false,
-      access: 'read-only',
+      agentAccess: 'read-only',
       identity: demoIdentity,
     });
   });
@@ -165,13 +272,13 @@ describe('composeView provenance', () => {
     expect(await view.provenance('main.ts')).toStrictEqual({
       source: 'project',
       versioned: true,
-      access: 'read-write',
+      agentAccess: 'read-write',
       identity: 'chk_live',
     });
     expect(await view.provenance('.tau/chats/chat-1/events.jsonl')).toStrictEqual({
       source: 'project',
       versioned: false,
-      access: 'read-only',
+      agentAccess: 'read-only',
       identity: 'chk_live',
     });
   });
@@ -184,9 +291,8 @@ describe('composeView provenance', () => {
       ['api-index.md', 'system-skills'],
       ['references', 'system-skills'],
     ]);
-    expect(await agentView().readdirWithStats('')).toContainEqual(
-      expect.objectContaining({ name: 'main.ts', provenance: expect.objectContaining({ source: 'project' }) }),
-    );
+    const projectRows = await agentView().readdirWithStats('');
+    expect(projectRows.find(({ name }) => name === 'main.ts')?.provenance?.source).toBe('project');
   });
 });
 
@@ -207,7 +313,8 @@ describe('composeView agent mask', () => {
   it('should hide the control plane from a listing and from a read, and keep records readable', async () => {
     const view = agentView();
 
-    expect((await view.readdir('.tau')).toSorted()).toStrictEqual(['chats', 'runs']);
+    const controlPlane = await view.readdir('.tau');
+    expect(controlPlane.toSorted()).toStrictEqual(['chats', 'runs']);
     await expect(view.readFile('.tau/revisions/HEAD')).rejects.toMatchObject({
       code: 'EPERM',
       reason: 'WORKSPACE_MASKED_PATH',
@@ -241,11 +348,13 @@ describe('composeView agent mask', () => {
     expect(await view.readFile('.tau/chats/chat-1/events.jsonl', 'utf8')).toBe('{"type":"run.lifecycle"}\n');
   });
 
-  it('should show the user consumer everything the agent may not see', async () => {
+  it('should show the user consumer the records the agent may not write, and no control plane (P30)', async () => {
     const view = userView();
 
-    expect((await view.readdir('.tau')).toSorted()).toStrictEqual(['binding.json', 'chats', 'revisions', 'runs']);
-    expect(await view.readFile('.tau/revisions/HEAD', 'utf8')).toBe('ref: refs/heads/main\n');
-    expect(await view.provenance('.tau/revisions/HEAD')).toMatchObject({ access: 'read-only', versioned: false });
+    const records = await view.readdir('.tau');
+    expect(records.toSorted()).toStrictEqual(['chats', 'runs']);
+    expect(await view.exists('.tau/revisions/HEAD')).toBe(false);
+    await expect(view.readFile('.tau/revisions/HEAD', 'utf8')).rejects.toMatchObject({ code: 'EPERM' });
+    await expect(view.writeFile('.tau/chats/chat-1/events.jsonl', '')).resolves.toBeUndefined();
   });
 });

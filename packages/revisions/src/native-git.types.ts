@@ -1,4 +1,5 @@
-import type { MaterializedWorkspaceId, RevisionId, RevisionTreeConflict } from '@taucad/filesystem/revisions';
+import type { RevisionId, RevisionTreeConflict } from '@taucad/filesystem/revisions';
+import type { Checkout } from '#revision-port.js';
 import type {
   BranchHeadUpdateResult,
   Revision,
@@ -50,7 +51,7 @@ export type NativeGitCapabilities = Readonly<{
 
 /** One Tau-owned detached linked Git worktree. Its path is host-local and is not a handoff identity. @public */
 export type NativeGitWorkspace = Readonly<{
-  workspaceId: MaterializedWorkspaceId;
+  workspaceId: Checkout['id'];
   runId: string;
   rootPath: string;
   baseRevisionId: RevisionId;
@@ -60,14 +61,14 @@ export type NativeGitWorkspace = Readonly<{
 
 /** Input for atomically binding one Tau run to a managed linked worktree. @public */
 export type BindNativeGitWorkspaceInput = Readonly<{
-  workspaceId: MaterializedWorkspaceId;
+  workspaceId: Checkout['id'];
   runId: string;
   baseRevision: Revision;
 }>;
 
 /** Input for reopening a worktree after host or process restart. @public */
 export type ReopenNativeGitWorkspaceInput = Readonly<{
-  workspaceId: MaterializedWorkspaceId;
+  workspaceId: Checkout['id'];
   runId: string;
 }>;
 

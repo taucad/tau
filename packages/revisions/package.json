@@ -1,7 +1,7 @@
 {
   "name": "@taucad/revisions",
   "version": "0.0.1",
-  "description": "Host-neutral revision port with native-Git and browser adapters for Tau",
+  "description": "Host-neutral revision port, isomorphic-git and native-Git backends, and the revision lifecycle machines for Tau",
   "type": "module",
   "sideEffects": false,
   "private": false,
@@ -36,11 +36,17 @@
     ".": "./src/index.ts",
     "./node": "./src/node/index.ts",
     "./package.json": "./package.json",
+    "./revision-effects": "./src/revision-effects.ts",
     "./project-revisions-machine": "./src/project-revisions.machine.ts",
     "./turn-machine": "./src/turn.machine.ts",
     "./checkout-machine": "./src/checkout.machine.ts",
     "./restore-machine": "./src/restore.machine.ts",
-    "./checkouts-machine": "./src/checkouts.machine.ts"
+    "./checkouts-machine": "./src/checkouts.machine.ts",
+    "./branch-machine": "./src/branch.machine.ts",
+    "./resolution-machine": "./src/resolution.machine.ts",
+    "./remote-machine": "./src/remote.machine.ts",
+    "./sync-machine": "./src/sync.machine.ts",
+    "./publish-machine": "./src/publish.machine.ts"
   },
   "publishConfig": {
     "access": "public",
@@ -56,6 +62,11 @@
         "default": "./dist/node/index.mjs"
       },
       "./package.json": "./package.json",
+      "./revision-effects": {
+        "types": "./dist/revision-effects.d.mts",
+        "import": "./dist/revision-effects.mjs",
+        "default": "./dist/revision-effects.mjs"
+      },
       "./project-revisions-machine": {
         "types": "./dist/project-revisions.machine.d.mts",
         "import": "./dist/project-revisions.machine.mjs",
@@ -80,6 +91,31 @@
         "types": "./dist/checkouts.machine.d.mts",
         "import": "./dist/checkouts.machine.mjs",
         "default": "./dist/checkouts.machine.mjs"
+      },
+      "./branch-machine": {
+        "types": "./dist/branch.machine.d.mts",
+        "import": "./dist/branch.machine.mjs",
+        "default": "./dist/branch.machine.mjs"
+      },
+      "./resolution-machine": {
+        "types": "./dist/resolution.machine.d.mts",
+        "import": "./dist/resolution.machine.mjs",
+        "default": "./dist/resolution.machine.mjs"
+      },
+      "./remote-machine": {
+        "types": "./dist/remote.machine.d.mts",
+        "import": "./dist/remote.machine.mjs",
+        "default": "./dist/remote.machine.mjs"
+      },
+      "./sync-machine": {
+        "types": "./dist/sync.machine.d.mts",
+        "import": "./dist/sync.machine.mjs",
+        "default": "./dist/sync.machine.mjs"
+      },
+      "./publish-machine": {
+        "types": "./dist/publish.machine.d.mts",
+        "import": "./dist/publish.machine.mjs",
+        "default": "./dist/publish.machine.mjs"
       }
     },
     "imports": {}

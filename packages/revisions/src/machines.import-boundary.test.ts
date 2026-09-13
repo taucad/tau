@@ -28,7 +28,7 @@ const importsOf = (file: string): readonly Import[] =>
 const importsXstate = (specifier: string): boolean => specifier === 'xstate' || specifier.startsWith('xstate/');
 const importsSiblingMachine = (specifier: string): boolean => /^#[a-z-]+\.machine\.js$/u.test(specifier);
 const importsPackageContract = (specifier: string): boolean =>
-  specifier === '#revision-port.js' || specifier === '#revision-authority.js';
+  specifier === '#revision-port.js' || specifier === '#revision-authority.js' || specifier === '#remotes.js';
 
 describe('revision machine import boundary', () => {
   it('finds every machine subpath module', () => {
@@ -37,10 +37,15 @@ describe('revision machine import boundary', () => {
         .map((file) => file.slice(sourceDirectory.length))
         .sort(),
     ).toEqual([
+      'branch.machine.ts',
       'checkout.machine.ts',
       'checkouts.machine.ts',
       'project-revisions.machine.ts',
+      'publish.machine.ts',
+      'remote.machine.ts',
+      'resolution.machine.ts',
       'restore.machine.ts',
+      'sync.machine.ts',
       'turn.machine.ts',
     ]);
   });

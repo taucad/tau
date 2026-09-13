@@ -44,7 +44,8 @@ type RunCommandOptions = CommandBounds &
     executable: string;
     cwd: string;
     args: readonly string[];
-    env?: Readonly<Record<string, string>>;
+    /** Overrides over the inherited environment; an `undefined` value unsets that variable. */
+    env?: Readonly<Record<string, string | undefined>>;
     input?: ReadonlyArray<Uint8Array<ArrayBuffer>>;
   }>;
 
@@ -53,6 +54,8 @@ type RunGitCommandOptions = CommandBounds &
     gitExecutable: string;
     cwd: string;
     args: readonly string[];
+    /** Overrides over the inherited environment; an `undefined` value unsets that variable. */
+    env?: Readonly<Record<string, string | undefined>>;
     input?: ReadonlyArray<Uint8Array<ArrayBuffer>>;
   }>;
 
@@ -184,6 +187,7 @@ export const runGitCommand = async (options: RunGitCommandOptions): Promise<GitC
     executable: options.gitExecutable,
     cwd: options.cwd,
     args: ['-C', options.cwd, ...options.args],
+    ...(options.env === undefined ? {} : { env: options.env }),
     ...(options.input === undefined ? {} : { input: options.input }),
     ...(options.deadline === undefined ? {} : { deadline: options.deadline }),
     ...(options.maxBuffer === undefined ? {} : { maxBuffer: options.maxBuffer }),

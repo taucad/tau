@@ -6,7 +6,7 @@
  * There used to be two stores. The recorder wrote content-addressed Git objects
  * under `.tau/revisions` (where identity came from) while the authority kept a
  * second, uncompressed copy of the same tree per revision under
- * `.tau/workspaces/revisions/nodes/<id>/tree` (where the pane read it) — a
+ * `.tau/revisions` objects (where the pane used to read a per-node tree) — a
  * whole-tree copy of the user's project on disk per turn, deduplicated on one
  * side and not the other. One store, and the index is a projection of it.
  */

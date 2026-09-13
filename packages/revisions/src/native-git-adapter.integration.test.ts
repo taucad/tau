@@ -5,12 +5,7 @@ import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import {
-  ImmutableRevisionTree,
-  materializedWorkspaceId,
-  mergeRevisionTrees,
-  revisionId,
-} from '@taucad/filesystem/revisions';
+import { ImmutableRevisionTree, mergeRevisionTrees, revisionId } from '@taucad/filesystem/revisions';
 import { RevisionAuthority, revisionBranchName } from '#revision-authority.js';
 import type { RevisionId } from '@taucad/filesystem/revisions';
 import type { Revision, RevisionProvenance } from '#revision-authority.js';
@@ -115,12 +110,12 @@ nativeGitIntegration('native Git adapter integration', () => {
 
     const [leftWorkspace, rightWorkspace] = await Promise.all([
       adapter.bindWorkspace({
-        workspaceId: materializedWorkspaceId('workspace-left'),
+        workspaceId: 'workspace-left',
         runId: 'run-left',
         baseRevision: base,
       }),
       adapter.bindWorkspace({
-        workspaceId: materializedWorkspaceId('workspace-right'),
+        workspaceId: 'workspace-right',
         runId: 'run-right',
         baseRevision: base,
       }),
@@ -148,7 +143,7 @@ nativeGitIntegration('native Git adapter integration', () => {
     const first = createNativeGitAdapter({ repositoryPath, worktreeRoot });
     const second = createNativeGitAdapter({ repositoryPath, worktreeRoot });
     const base = makeRevision({ id: 'ownership-base', entries: [['part.ts', 'base']] });
-    const workspaceId = materializedWorkspaceId('owned-workspace');
+    const workspaceId = 'owned-workspace';
     const outcomes = await Promise.allSettled([
       first.bindWorkspace({ workspaceId, runId: 'owner-a', baseRevision: base }),
       second.bindWorkspace({ workspaceId, runId: 'owner-b', baseRevision: base }),
@@ -321,7 +316,15 @@ nativeGitIntegration('native Git adapter integration', () => {
       `#!/bin/sh
 state=${stateDirectory}
 mkdir -p "$state"
-if [ "$3" = for-each-ref ]; then
+# The port pins configuration ahead of every subcommand, so the verb is found
+# by scanning the arguments rather than by its position.
+verb=
+for argument in "$@"; do
+  case "$argument" in
+    for-each-ref) verb=for-each-ref ;;
+  esac
+done
+if [ "$verb" = for-each-ref ]; then
   if mkdir "$state/first" 2>/dev/null; then
     git "$@" > "$state/captured"
     touch "$state/ready"
@@ -519,7 +522,7 @@ exec git "$@"
     await first.storeRevision(base);
     const storedResult = await first.storeRevision(result);
     const initial = await first.bindWorkspace({
-      workspaceId: materializedWorkspaceId('restart-workspace'),
+      workspaceId: 'restart-workspace',
       runId: 'restart-run',
       baseRevision: base,
     });
@@ -582,7 +585,7 @@ exec git "$@"
     });
     const stored = await adapter.storeRevision(revision);
     const workspace = await adapter.bindWorkspace({
-      workspaceId: materializedWorkspaceId('large-workspace'),
+      workspaceId: 'large-workspace',
       runId: 'large-run',
       baseRevision: revision,
     });
@@ -684,4 +687,164 @@ exec git "$@"
     await target.fetch({ remote: remotePath, refspecs: [`${chatRef}:${chatRef}`] });
     expect(await target.resolveRef(chatRef)).toBe(stored.commit);
   });
+
+  /* AC16, local half: a large file is a pointer in the tree and real bytes
+   * through the port, and the object lands where git-lfs looks for it. The
+   * pointer bytes are checked against the installed `git lfs` so this stays a
+   * measurement of the format rather than of our own encoder. */
+  it('records a 5 MiB STEP file as an LFS pointer and reads its bytes back', async () => {
+    const port = openPort();
+    await port.init({ author: { name: 'Tau', email: 'tau@example.com' } });
+    const content = randomBytes(5 * 1024 * 1024);
+    const bytes = Uint8Array.from(content);
+    const receipt = await port.writeRevision({
+      parents: [],
+      tree: new ImmutableRevisionTree([
+        ['models/bracket.step', bytes],
+        ['src/part.ts', 'export const part = 1;\n'],
+      ]),
+      provenance: { source: 'user', actorId: 'lfs', createdAt },
+      summary: { generated: 'Large object' },
+    });
+    const recorded = revisionId(receipt.commitId);
+
+    const pointer = await git(repositoryPath, 'show', `${recorded}:models/bracket.step`);
+    expect(pointer).toContain('version https://git-lfs.github.com/spec/v1');
+    const oid = /oid sha256:([\da-f]{64})/u.exec(pointer)?.[1] ?? '';
+    expect(oid).toBe(createHash('sha256').update(content).digest('hex'));
+    expect(pointer).toContain(`size ${String(content.byteLength)}`);
+    /* The engine's own verdict on the format. */
+    const pointerFile = join(temporaryRoot, 'bracket.pointer');
+    await writeFile(pointerFile, `${pointer}\n`);
+    const checked = await execute('git', ['-C', repositoryPath, 'lfs', 'pointer', '--check', '--file', pointerFile], {
+      encoding: 'utf8',
+    }).then(
+      () => true,
+      () => false,
+    );
+    expect(checked).toBe(true);
+    expect(await hashFile(join(repositoryPath, '.git/lfs/objects', oid.slice(0, 2), oid.slice(2, 4), oid))).toBe(oid);
+
+    // A small source file beside it is stored as itself.
+    expect(await git(repositoryPath, 'show', `${recorded}:src/part.ts`)).toBe('export const part = 1;');
+
+    const tree = await port.readTree(recorded);
+    expect(tree?.get('models/bracket.step')).toEqual(bytes);
+    expect(tree?.get('models/bracket.step')?.byteLength).toBe(5 * 1024 * 1024);
+
+    // The generated attributes file is what makes a stock clone resolve it.
+    expect(await readFile(join(repositoryPath, '.gitattributes'), 'utf8')).toContain(
+      '*.step filter=lfs diff=lfs merge=lfs -text',
+    );
+  }, 60_000);
+
+  /* P15: size never pointerises on its own. A big file whose family nothing
+   * tracks gets a line of its own in the same cut, so the clone that reads the
+   * pointer also reads the attribute that smudges it back. */
+  it('tracks a large file of an untracked family by name, and a stock clone reads its bytes', async () => {
+    const port = openPort();
+    await port.init({ author: { name: 'Tau', email: 'tau@example.com' } });
+    const notes = Uint8Array.from(randomBytes(2 * 1024 * 1024));
+    const model = Uint8Array.from(randomBytes(2 * 1024 * 1024));
+    const receipt = await port.writeRevision({
+      parents: [],
+      tree: new ImmutableRevisionTree([
+        ['.gitattributes', await readFile(join(repositoryPath, '.gitattributes'), 'utf8')],
+        ['notes.txt', notes],
+        ['models/big.step', model],
+        ['small.txt', 'a line\n'],
+      ]),
+      provenance: { source: 'user', actorId: 'lfs', createdAt },
+      summary: { generated: 'Large objects' },
+    });
+    const recorded = revisionId(receipt.commitId);
+    await port.updateRef({ name: 'main', expectedHead: undefined, head: recorded });
+    await port.setHead('main');
+
+    // Both are pointers in the tree; only the untracked family earned a line.
+    const attributes = await git(repositoryPath, 'show', `${recorded}:.gitattributes`);
+    expect(attributes).toContain('/notes.txt filter=lfs diff=lfs merge=lfs -text');
+    expect(attributes).not.toContain('/models/big.step ');
+    expect(attributes).toContain('*.step filter=lfs diff=lfs merge=lfs -text');
+    expect(await git(repositoryPath, 'show', `${recorded}:notes.txt`)).toContain('oid sha256:');
+    expect(await git(repositoryPath, 'show', `${recorded}:models/big.step`)).toContain('oid sha256:');
+    // A file below the threshold is still its own bytes.
+    expect(await git(repositoryPath, 'show', `${recorded}:small.txt`)).toBe('a line');
+
+    // What a person with a terminal gets: a stock clone, smudged by git-lfs.
+    const clonePath = join(temporaryRoot, 'clone');
+    await execute('git', ['clone', '--quiet', repositoryPath, clonePath]);
+    const listed = await git(clonePath, 'lfs', 'ls-files');
+    expect(listed).toContain('notes.txt');
+    expect(listed).toContain('models/big.step');
+    const clonedNotes = await stat(join(clonePath, 'notes.txt'));
+    const clonedModel = await stat(join(clonePath, 'models/big.step'));
+    expect(clonedNotes.size).toBe(2 * 1024 * 1024);
+    expect(clonedModel.size).toBe(2 * 1024 * 1024);
+  }, 120_000);
+
+  /* Review a1 R4: a checkout can hold un-smudged pointer text (no `git-lfs` on
+   * the machine, `GIT_LFS_SKIP_SMUDGE`, an unfetched clone). Recording it must
+   * not make a pointer to a pointer, which reads back as 132 bytes of text
+   * where the file should be. */
+  it('stores a tree entry that is already a pointer as itself', async () => {
+    const port = openPort();
+    await port.init({ author: { name: 'Tau', email: 'tau@example.com' } });
+    const bytes = Uint8Array.from(randomBytes(2 * 1024 * 1024));
+    const first = await port.writeRevision({
+      parents: [],
+      tree: new ImmutableRevisionTree([['models/bracket.step', bytes]]),
+      provenance: { source: 'user', actorId: 'lfs', createdAt },
+      summary: { generated: 'Large object' },
+    });
+    const pointerText = `${await git(repositoryPath, 'show', `${revisionId(first.commitId)}:models/bracket.step`)}\n`;
+
+    const second = await port.writeRevision({
+      parents: [revisionId(first.commitId)],
+      tree: new ImmutableRevisionTree([['models/bracket.step', pointerText]]),
+      provenance: { source: 'user', actorId: 'lfs', createdAt },
+      summary: { generated: 'Un-smudged checkout' },
+    });
+    const recorded = revisionId(second.commitId);
+    expect(`${await git(repositoryPath, 'show', `${recorded}:models/bracket.step`)}\n`).toBe(pointerText);
+    // And the object behind it is still the file, not the pointer's own text.
+    const reread = await port.readTree(recorded);
+    expect(reread?.get('models/bracket.step')).toEqual(bytes);
+  }, 60_000);
+
+  /* W3a review R43: the port pins its own configuration on every invocation, so
+   * a person's `core.autocrlf` or a repository hook cannot move a tree id or
+   * fail a checkout. Nothing else asserts the pin, and the symptom it prevents
+   * (one tree, two ids, on two machines) is the most expensive in the program. */
+  it('records the same bytes under a hostile core.autocrlf and hooksPath', async () => {
+    const hooks = join(temporaryRoot, 'hooks');
+    await execute('mkdir', ['-p', hooks]);
+    await writeFile(join(hooks, 'post-checkout'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+    await writeFile(join(hooks, 'pre-commit'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+    await git(repositoryPath, 'config', 'core.autocrlf', 'true');
+    await git(repositoryPath, 'config', 'core.hooksPath', hooks);
+
+    const port = createNativeGitRevisionPort({
+      repositoryPath,
+      checkouts: { projectId: 'project-1', directory: worktreeRoot },
+    });
+    await port.init({ author: { name: 'Tau', email: 'tau@example.com' } });
+    const crlf = 'first\r\nsecond\n';
+    const receipt = await port.writeRevision({
+      parents: [],
+      tree: new ImmutableRevisionTree([['mixed.txt', crlf]]),
+      provenance: { source: 'user', actorId: 'pin', createdAt },
+      summary: { generated: 'Line endings' },
+    });
+    const recorded = revisionId(receipt.commitId);
+    await port.updateRef({ name: 'main', expectedHead: undefined, head: recorded });
+    await port.setHead('main');
+
+    const stored = await port.readTree(recorded);
+    expect(new TextDecoder().decode(stored?.get('mixed.txt'))).toBe(crlf);
+    // The hook would fail the checkout if the pin were dropped.
+    await port.updateRef({ name: 'side', expectedHead: undefined, head: recorded });
+    const checkout = await port.addCheckout!({ branch: 'side' });
+    expect(await readFile(join(checkout.root, 'mixed.txt'), 'utf8')).toBe(crlf);
+  }, 60_000);
 });

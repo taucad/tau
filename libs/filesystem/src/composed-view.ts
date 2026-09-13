@@ -27,7 +27,7 @@
 import type { FileContentMetadata, FileProvenance, FileProvenanceSource, FileStat } from '@taucad/types';
 import { assertRootedPath, joinRelativePath } from '@taucad/utils/path';
 import { classify } from '#path-registry.js';
-import type { FileSystemProvider, WatchEvent, WatchRequest } from '#types.js';
+import type { DirectoryEntry, FileReadStreamOptions, FileSystemProvider, WatchEvent, WatchRequest } from '#types.js';
 
 /** Who a view is composed for. The set of paths is the same; the mask is not. @public */
 export type ComposedViewConsumer = 'agent' | 'user';
@@ -47,7 +47,15 @@ export type ComposedOverlayNode =
  * @public
  */
 export type ComposedViewOverlay = Readonly<{
-  /** Checkout-relative path the overlay is composed at, e.g. `.agents/skills`. */
+  /**
+   * Checkout-relative path the overlay is composed at, e.g. `.agents/skills`.
+   *
+   * Load-bearing, not decoration: `unit` and `node` are asked only about this
+   * path, its subtree, and the directories above it (those merge with the
+   * checkout's own children). An overlay that answers outside that set is not
+   * composed. `''` is every path's ancestor, so an overlay rooted there is
+   * asked about everything.
+   */
   root: string;
   source: Exclude<FileProvenanceSource, 'project'>;
   /**
@@ -117,10 +125,15 @@ const fileSystemError = (code: string, message: string, extra?: Record<string, u
  * answer acceptance 6 names.
  */
 const refuseHidden = (path: string): never =>
-  fileSystemError('EPERM', `No path under ${path} exists for this agent.`, { reason: maskedPathCode });
+  fileSystemError('EPERM', `No path under ${path} exists in a composed view.`, { reason: maskedPathCode });
 
-const refuseReadOnly = (path: string): never =>
-  fileSystemError('EROFS', `EROFS: ${path} is read-only in this view.`, { reason: maskedPathCode });
+const refuseRecords = (path: string): never =>
+  fileSystemError('EROFS', `EROFS: this agent may read but not write ${path}; Tau records that itself.`, {
+    reason: maskedPathCode,
+  });
+
+const refuseOverlay = (path: string): never =>
+  fileSystemError('EROFS', `EROFS: ${path} is served read-only by this view.`);
 
 /** Every proper ancestor of a checkout-relative path, shallowest first, excluding the root. */
 const ancestorsOf = (path: string): string[] => {
@@ -142,7 +155,7 @@ const ancestorsOf = (path: string): string[] => {
  * import { NodeFsProvider } from '@taucad/filesystem/backend/node';
  *
  * const view = composeView({ filesystem: new NodeFsProvider('/checkouts/main') }, { consumer: 'agent' });
- * await view.provenance('main.ts'); // { source: 'project', versioned: true, access: 'read-write' }
+ * await view.provenance('main.ts'); // { source: 'project', versioned: true, agentAccess: 'read-write' }
  * ```
  */
 export const composeView = (checkout: ComposedViewCheckout, options: ComposedViewOptions): ComposedView => {
@@ -150,20 +163,21 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
   const overlays = options.overlays ?? [];
   const masked = options.consumer === 'agent';
 
-  /** The registry's answer, refused before any provider I/O when the agent may not see it. */
+  /** The registry's answer, refused before any provider I/O: the control plane is in no view (A1, P30). */
   const readablePath = (path: string): string => {
-    if (masked && classify(path).agentAccess === 'hidden') {
+    if (classify(path).agentAccess === 'hidden') {
       refuseHidden(path);
     }
     return path;
   };
 
   const writablePath = (path: string): string => {
-    if (masked && classify(path).agentAccess !== 'read-write') {
-      if (classify(path).agentAccess === 'hidden') {
-        refuseHidden(path);
-      }
-      refuseReadOnly(path);
+    const { agentAccess } = classify(path);
+    if (agentAccess === 'hidden') {
+      refuseHidden(path);
+    }
+    if (masked && agentAccess !== 'read-write') {
+      refuseRecords(path);
     }
     return path;
   };
@@ -200,9 +214,25 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
     /** A directory both the checkout and an overlay contribute children to. */
     | Readonly<{ kind: 'merge'; overlays: readonly ComposedViewOverlay[] }>;
 
+  /**
+   * Whether an overlay can say anything about this path at all.
+   *
+   * Its own subtree, or one of the directories above it — those merge with the
+   * checkout's own children. Everything else skips the overlay's two probes.
+   */
+  const overlayTouches = (overlayRoot: string, path: string): boolean =>
+    overlayRoot === '' ||
+    path === '' ||
+    path === overlayRoot ||
+    path.startsWith(`${overlayRoot}/`) ||
+    overlayRoot.startsWith(`${path}/`);
+
   const routeFor = async (path: string): Promise<Route> => {
     const merging: ComposedViewOverlay[] = [];
     for (const overlay of overlays) {
+      if (!overlayTouches(overlay.root, path)) {
+        continue;
+      }
       const unit = overlay.unit(path);
       if (unit === undefined) {
         if (overlay.node(path) !== undefined) {
@@ -239,7 +269,7 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
     return {
       source: 'project',
       versioned,
-      access: agentAccess === 'read-write' ? 'read-write' : 'read-only',
+      agentAccess: agentAccess === 'read-write' ? 'read-write' : 'read-only',
       ...(checkout.id === undefined ? {} : { identity: checkout.id }),
       ...(overrides === undefined ? {} : { overrides }),
     };
@@ -248,7 +278,7 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
   const overlayProvenance = (source: ComposedViewOverlay['source'], identity: string): FileProvenance => ({
     source,
     versioned: false,
-    access: 'read-only',
+    agentAccess: 'read-only',
     identity,
   });
 
@@ -257,11 +287,11 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
       ? overlayProvenance(route.overlay.source, route.identity)
       : projectProvenance(path, route.kind === 'project' ? route.overrides : undefined);
 
-  /** Names the checkout contributes to a directory, hidden rows dropped for an agent. */
+  /** Names the checkout contributes to a directory, control-plane rows dropped for every consumer. */
   const upperNames = async (path: string, tolerateMissing: boolean): Promise<string[]> => {
     try {
       const names = await base.readdir(path);
-      return masked ? names.filter((name) => classify(joinRelativePath(path, name)).agentAccess !== 'hidden') : names;
+      return names.filter((name) => classify(joinRelativePath(path, name)).agentAccess !== 'hidden');
     } catch (error) {
       if (tolerateMissing) {
         return [];
@@ -311,14 +341,14 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
 
   /** The checkout's own rows of a directory, batched when the base offers it. */
   const upperEntries = async (path: string, tolerateMissing: boolean): Promise<Array<{ name: string } & FileStat>> => {
-    const visible = (name: string): boolean =>
-      !masked || classify(joinRelativePath(path, name)).agentAccess !== 'hidden';
+    const visible = (name: string): boolean => classify(joinRelativePath(path, name)).agentAccess !== 'hidden';
     try {
       const batched = await base.readdirWithStats?.(path);
       if (batched !== undefined) {
         return batched.filter(({ name }) => visible(name));
       }
-      const names = (await base.readdir(path)).filter((name) => visible(name));
+      const entries = await base.readdir(path);
+      const names = entries.filter((name) => visible(name));
       return await Promise.all(
         names.map(async (name) => ({ name, ...(await base.stat(joinRelativePath(path, name))) })),
       );
@@ -351,10 +381,40 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
     return encoding === 'utf8' ? new TextDecoder('utf-8', { fatal: true }).decode(bytes) : bytes;
   }
 
+  const readdirWithStats = async (path: string): Promise<Array<{ name: string } & FileStat>> => {
+    const target = readablePath(canonical(path));
+    const route = await routeFor(target);
+    const rows: Array<{ name: string } & FileStat> =
+      route.kind === 'overlay'
+        ? overlayNames(route.overlay, target).map((name) => ({
+            name,
+            ...overlayStat(overlayNode(route.overlay, joinRelativePath(target, name))),
+          }))
+        : await upperEntries(target, route.kind === 'merge');
+    if (route.kind === 'merge') {
+      const seen = new Set(rows.map(({ name }) => name));
+      for (const overlay of route.overlays) {
+        for (const name of overlayNames(overlay, target)) {
+          if (!seen.has(name)) {
+            seen.add(name);
+            rows.push({ name, ...overlayStat(overlayNode(overlay, joinRelativePath(target, name))) });
+          }
+        }
+      }
+    }
+    return Promise.all(
+      rows.map(async (row) => {
+        const childPath = joinRelativePath(target, row.name);
+        return { ...row, provenance: provenanceForRoute(childPath, await routeFor(childPath)) };
+      }),
+    );
+  };
+
   const mutate = async <T>(path: string, apply: (target: string) => Promise<T>): Promise<T> => {
     const target = writablePath(canonical(path));
-    if ((await routeFor(target)).kind === 'overlay') {
-      refuseReadOnly(target);
+    const route = await routeFor(target);
+    if (route.kind === 'overlay') {
+      refuseOverlay(target);
     }
     return apply(target);
   };
@@ -362,7 +422,9 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
   return {
     id: `composed-view:${options.consumer}`,
     capabilities: base.capabilities,
-    dispose: () => base.dispose(),
+    dispose: () => {
+      base.dispose();
+    },
     readFile,
     async provenance(path) {
       const target = readablePath(canonical(path));
@@ -372,34 +434,7 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
       const target = readablePath(canonical(path));
       return namesFor(target, await routeFor(target));
     },
-    async readdirWithStats(path) {
-      const target = readablePath(canonical(path));
-      const route = await routeFor(target);
-      const rows: Array<{ name: string } & FileStat> =
-        route.kind === 'overlay'
-          ? overlayNames(route.overlay, target).map((name) => ({
-              name,
-              ...overlayStat(overlayNode(route.overlay, joinRelativePath(target, name))),
-            }))
-          : await upperEntries(target, route.kind === 'merge');
-      if (route.kind === 'merge') {
-        const seen = new Set(rows.map(({ name }) => name));
-        for (const overlay of route.overlays) {
-          for (const name of overlayNames(overlay, target)) {
-            if (!seen.has(name)) {
-              seen.add(name);
-              rows.push({ name, ...overlayStat(overlayNode(overlay, joinRelativePath(target, name))) });
-            }
-          }
-        }
-      }
-      return Promise.all(
-        rows.map(async (row) => {
-          const childPath = joinRelativePath(target, row.name);
-          return { ...row, provenance: provenanceForRoute(childPath, await routeFor(childPath)) };
-        }),
-      );
-    },
+    readdirWithStats,
     async stat(path) {
       const target = readablePath(canonical(path));
       const route = await routeFor(target);
@@ -413,7 +448,7 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
     },
     async exists(path) {
       const target = canonical(path);
-      if (masked && classify(target).agentAccess === 'hidden') {
+      if (classify(target).agentAccess === 'hidden') {
         /* A boolean that threw would announce the path it is hiding. */
         return false;
       }
@@ -447,5 +482,47 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
     ...(base.watch === undefined
       ? {}
       : { watch: (request: WatchRequest, handler: (event: WatchEvent) => void) => base.watch!(request, handler) }),
+    ...(base.readFileStream === undefined
+      ? {}
+      : {
+          readFileStream: (path: string, streamOptions?: FileReadStreamOptions) => {
+            /*
+             * One stream for both routes: `readFile` already resolves the route,
+             * the mask and the overlay's declared length, so the requested
+             * window is a slice of what it answers. The mask itself still
+             * refuses synchronously, before any stream exists.
+             *
+             * ponytail: a project file is buffered whole instead of keeping the
+             * base's chunking. No consumer of a composed view streams yet; give
+             * the project route back to `base.readFileStream` when one does.
+             */
+            const target = readablePath(canonical(path));
+            return new ReadableStream<Uint8Array<ArrayBuffer>>({
+              async start(controller) {
+                streamOptions?.signal?.throwIfAborted();
+                const bytes = await readFile(target);
+                streamOptions?.signal?.throwIfAborted();
+                const from = streamOptions?.position ?? 0;
+                controller.enqueue(
+                  bytes.subarray(from, streamOptions?.length === undefined ? undefined : from + streamOptions.length),
+                );
+                controller.close();
+              },
+            });
+          },
+        }),
+    ...(base.readdirEntries === undefined
+      ? {}
+      : {
+          /* Present when the base can answer kinds cheaply; the rows are the
+           * view's merged ones, never the base's raw listing. */
+          readdirEntries: async (path: string): Promise<DirectoryEntry[]> => {
+            const rows = await readdirWithStats(path);
+            return rows.map(({ name, type }) => ({ name, kind: type }));
+          },
+        }),
+    ...(base.refresh === undefined
+      ? {}
+      : { refresh: async (prefixes?: readonly string[]): Promise<void> => base.refresh!(prefixes) }),
   };
 };

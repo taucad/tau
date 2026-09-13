@@ -1,6 +1,6 @@
 # @taucad/revisions
 
-Host-neutral revision port with native-Git and browser adapters for Tau
+Host-neutral revision port with a native-Git and an `isomorphic-git` implementation
 
 A revision is an immutable, content-addressed snapshot of one workspace tree with
 its parents and provenance. Its identity **is** its Git commit id, so the same
@@ -13,7 +13,15 @@ tree and the same headers name the same revision on every host.
 | `createNativeGitRevisionPort`     | the `git` binary: objects, refs, worktrees   | Node hosts with `git` on `PATH` |
 | `createIsomorphicGitRevisionPort` | `isomorphic-git` over a `FileSystemProvider` | the page, the worker, anywhere  |
 
-Both write a real Git repository, and both write the _commit_ object with this
+`./node` also still exports `createNativeGitAdapter`, the workspace-shaped
+adapter this package started from: the port above is built over the same
+primitives (`fast-import`, `update-ref`, `worktree`) and imports its transport
+parsers, and its 655-line integration suite is the only coverage those
+primitives have. It is a third export, not a third port — nothing outside this
+package constructs it — and it leaves when W3c moves the last native consumer
+onto the port.
+
+Both ports write a real Git repository, and both write the _commit_ object with this
 package's own encoder: every revision carries a `change-id` from creation and a
 conflicted one carries `jj:conflict-labels` and `jj:trees` in Jujutsu's exact
 header order, none of which `git commit-tree` or `isomorphic-git`'s

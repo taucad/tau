@@ -422,10 +422,10 @@ describe('WorkspaceFileService', () => {
         ),
       );
       const configuration = {
-        projects: [{ projectId, backend: 'indexeddb' as const, providerBasePath: projectId }],
-        checkouts: [{ checkoutId, projectId, backend: 'indexeddb' as const, providerBasePath: checkoutBasePath }],
-        roots: [{ backend: 'indexeddb' as const }],
-      };
+        projects: [{ projectId, backend: 'indexeddb', providerBasePath: projectId }],
+        checkouts: [{ checkoutId, projectId, backend: 'indexeddb', providerBasePath: checkoutBasePath }],
+        roots: [{ backend: 'indexeddb' }],
+      } as const;
       await service.configureProjectRoots(configuration);
 
       const view = service.createRootedFileSystem(`/checkouts/${checkoutId}`);
@@ -437,6 +437,25 @@ describe('WorkspaceFileService', () => {
 
       await service.configureProjectRoots({ ...configuration, checkouts: [] });
       await expect(view.readFile('main.ts')).rejects.toMatchObject({ code: 'ESTALE' });
+    });
+
+    /* A1 review R4 nit: `/checkouts/a/b` canonicalizes to itself, so a slashed
+       id would install a route nested under another checkout's prefix. */
+    it('should refuse a checkout id that is more than one path segment', async () => {
+      await expect(
+        service.configureProjectRoots({
+          projects: [{ projectId, backend: 'indexeddb', providerBasePath: projectId }],
+          checkouts: [
+            {
+              checkoutId: `${checkoutId}/nested`,
+              projectId,
+              backend: 'indexeddb',
+              providerBasePath: `${checkoutBasePath}/nested`,
+            },
+          ],
+          roots: [{ backend: 'indexeddb' }],
+        } as const),
+      ).rejects.toThrow('one path segment');
     });
   });
 
@@ -1489,7 +1508,7 @@ describe('WorkspaceFileService', () => {
     // update; `writeFile` is the replace primitive. Guards the real semantics
     // that the UI's `writePersistedRecord` depends on.
     it('should replace a persisted record in place across repeated updates', async () => {
-      const path = '/.tau/workspaces/claims/chat_1.json';
+      const path = '/.tau/runs/run_1.json';
       await service.writeFile(path, '{"admitted":false}');
       await service.writeFile(path, '{"admitted":true}');
       await service.writeFile(path, '{"admitted":true,"turnId":"turn_2"}');

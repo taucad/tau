@@ -22,7 +22,7 @@ import { assertObjectFormat, bytesToHex, concatBytes, digest, objectIdByteLength
 import type { ObjectFormat } from '#object-hash.js';
 
 /** Git object kinds Tau writes. @public */
-export type GitObjectType = 'blob' | 'tree' | 'commit';
+export type GitObjectType = 'blob' | 'tree' | 'commit' | 'tag';
 
 /** Stable failure categories emitted by the Git commit codec. @public */
 export type GitObjectErrorCode =
@@ -112,7 +112,7 @@ const assertFormat = (format: ObjectFormat): ObjectFormat => {
   }
 };
 
-const objectTypes = new Set<string>(['blob', 'tree', 'commit']);
+const objectTypes = new Set<string>(['blob', 'tree', 'commit', 'tag']);
 
 const assertType = (type: GitObjectType): GitObjectType => {
   if (!objectTypes.has(type)) {
@@ -260,6 +260,88 @@ const encodeHeader = (name: string, value: Uint8Array<ArrayBuffer>): Uint8Array<
     parts.push(Uint8Array.of(0x0a));
   }
   return concatBytes(...parts);
+};
+
+/** Everything a Tau annotated tag object carries (S31). @public */
+export type TagInput = Readonly<{
+  objectFormat: ObjectFormat;
+  /** The object the tag names — always a commit here. */
+  object: string;
+  /** The tag's own name, as it appears under `refs/tags/`. */
+  tag: string;
+  tagger: GitSignature;
+  message: string;
+}>;
+
+/** An annotated tag object read back from its bytes. @public */
+export type DecodedTag = Readonly<{
+  object: string;
+  type: string;
+  tag: string;
+  tagger: GitSignature;
+  message: string;
+}>;
+
+/**
+ * Encode one annotated tag object.
+ *
+ * Git's own header order — `object`, `type`, `tag`, `tagger` — so a tag Tau
+ * wrote is a tag every git client reads (`git tag -n`, `git show`).
+ *
+ * @param input - The named revision, the name, and who named it.
+ * @returns The tag object and its id.
+ * @public
+ */
+export const encodeTag = (input: TagInput): EncodedGitObject => {
+  assertFormat(input.objectFormat);
+  if (input.tag.includes('\n') || input.tag === '') {
+    throw new GitObjectError('INVALID_COMMIT', 'Tag name is malformed.');
+  }
+  const parts: Array<Uint8Array<ArrayBuffer>> = [
+    encodeHeader('object', textEncoder.encode(assertObjectId(input.objectFormat, input.object))),
+    encodeHeader('type', textEncoder.encode('commit')),
+    encodeHeader('tag', textEncoder.encode(input.tag)),
+    encodeHeader('tagger', encodeSignature(input.tagger)),
+    Uint8Array.of(0x0a),
+    textEncoder.encode(input.message),
+  ];
+  return encodeObject(input.objectFormat, 'tag', concatBytes(...parts));
+};
+
+/**
+ * Decode one annotated tag object body.
+ *
+ * @param body - Tag payload without the loose-object frame.
+ * @returns The named object, the name, the tagger and the message.
+ * @public
+ */
+export const decodeTag = (body: Uint8Array<ArrayBuffer>): DecodedTag => {
+  const text = textDecoder.decode(body);
+  const separator = text.indexOf('\n\n');
+  if (separator === -1) {
+    throw new GitObjectError('INVALID_COMMIT', 'Tag object has no message separator.');
+  }
+  const headers = new Map<string, string>();
+  for (const line of text.slice(0, separator).split('\n')) {
+    const space = line.indexOf(' ');
+    if (space === -1) {
+      throw new GitObjectError('INVALID_COMMIT', 'Tag header line is malformed.');
+    }
+    headers.set(line.slice(0, space), line.slice(space + 1));
+  }
+  const object = headers.get('object');
+  const tag = headers.get('tag');
+  const tagger = headers.get('tagger');
+  if (object === undefined || tag === undefined || tagger === undefined) {
+    throw new GitObjectError('INVALID_COMMIT', 'Tag object is missing a required header.');
+  }
+  return Object.freeze({
+    object,
+    type: headers.get('type') ?? 'commit',
+    tag,
+    tagger: parseSignature(tagger),
+    message: text.slice(separator + 2),
+  });
 };
 
 /**

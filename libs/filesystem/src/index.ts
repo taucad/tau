@@ -105,17 +105,5 @@ export type {
  * this library's export map can initialize a revision authority (RC8 work 10);
  * what an authority is built out of — trees, ids, merges, the resource queue —
  * stays here and is imported by it. */
-export {
-  captureRevisionTree,
-  MaterializedWorkspaceAuthority,
-  MaterializedWorkspaceError,
-} from '#materialized-workspace.js';
-export type {
-  MaterializedWorkspace,
-  MaterializedWorkspaceErrorCode,
-  MaterializedWorkspaceIdentity,
-  MaterializedWorkspaceMetrics,
-  MaterializedWorkspaceMode,
-} from '#materialized-workspace.js';
-export { materializedWorkspaceId } from '#workspace-identity.js';
-export type { MaterializedWorkspaceId } from '#workspace-identity.js';
+export { captureRevisionTree } from '#revision-capture.js';
+export type { CaptureRevisionTreeOptions } from '#revision-capture.js';

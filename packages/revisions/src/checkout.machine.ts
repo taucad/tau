@@ -14,8 +14,32 @@
 import { assign, enqueueActions, fromCallback, fromPromise, setup } from 'xstate';
 import type { AnyActorRef, AnyEventObject, SnapshotFrom } from 'xstate';
 
-/** What asked for a cut. `save`, `hidden`, `close` and `idle` are wired by W6. @public */
+/** What asked for a cut. @public */
 export type CheckoutCutTrigger = 'turn' | 'save' | 'idle' | 'hidden' | 'close' | 'merge' | 'restore' | 'switch';
+
+/**
+ * How long a checkout stays quiet before it mints an `idle` revision (S30).
+ *
+ * Five minutes, from the architecture's checkpoint table and S30. It is the
+ * default of {@link CheckoutMachineInput.idleWindow} rather than a constant the
+ * machine reads, because the window is policy: a host — and the operator's own
+ * ruling — revises it by passing a different value, never by editing a machine.
+ *
+ * @public
+ */
+export const checkoutIdleWindowMilliseconds = 5 * 60 * 1000;
+
+/**
+ * How many requests may wait behind one running mint.
+ *
+ * Trigger-only requests coalesce, so this bounds only turn-bearing ones, which
+ * cannot coalesce without a turn losing its answer. A host that produced more
+ * than this many concurrent turns on one checkout is already broken; refusing
+ * the excess is how it finds out (W3b review R13).
+ *
+ * @public
+ */
+export const checkoutQueuedCutLimit = 16;
 
 /** One outstanding request to mint a revision from this checkout. @public */
 export type CheckoutCutRequest = Readonly<{
@@ -38,6 +62,13 @@ export type CheckoutMachineInput = Readonly<{
   headRevisionId?: string;
   /** Tree object id of that head — the left-hand side of the I5 gate. */
   headTreeId?: string;
+  /**
+   * Quiet window before an `idle` revision, in milliseconds.
+   *
+   * Keyed by checkout because the timer lives in this actor: two tabs on one
+   * shared checkout run one window between them, not one each (S30).
+   */
+  idleWindow?: number;
   /** The `project-revisions` root, which routes outcomes back to the requester. */
   parentRef?: AnyActorRef;
 }>;
@@ -48,6 +79,8 @@ export type CheckoutMachineContext = Readonly<{
   branch: string | undefined;
   headRevisionId: string | undefined;
   headTreeId: string | undefined;
+  /** Quiet window before an `idle` revision, in milliseconds. */
+  idleWindow: number;
   parentRef: AnyActorRef | undefined;
   /** Monotonic counter of content-change events, supplied by the seam. */
   writeGeneration: number;
@@ -210,6 +243,9 @@ export const checkoutMachine = setup({
       return () => undefined;
     }),
   },
+  delays: {
+    idleWindow: ({ context }) => context.idleWindow,
+  },
   guards: {
     /* I5: a revision is minted only when the cut's tree differs from the head's. */
     treeUnchanged: ({ context }, params: Readonly<{ treeId: string }>) => params.treeId === context.headTreeId,
@@ -235,11 +271,47 @@ export const checkoutMachine = setup({
       revisionId: undefined,
       reason: undefined,
     }),
-    queueRequest: assign({
-      queued: ({ context, event }) => {
-        const request = requestFromEvent(event);
-        return request === undefined ? context.queued : [...context.queued, request];
-      },
+    /*
+     * R13: a burst of trigger-only requests is one request.
+     *
+     * `Mod+S` held down, an idle window that fires while the tab is being
+     * hidden, and `hidden` followed by `pagehide` all describe the same wish —
+     * "record what is on disk" — and the checkout can only honour it once. Two
+     * consecutive requests that no turn is waiting on therefore collapse, with
+     * the later trigger winning because it is the more specific one (`close`
+     * after `idle` is a close). A turn-bearing request never collapses: its
+     * requester is waiting for an answer addressed to its own turn id.
+     */
+    queueRequest: enqueueActions(({ context, enqueue, event }) => {
+      const request = requestFromEvent(event);
+      if (request === undefined) {
+        return;
+      }
+      const last = context.queued.at(-1);
+      if (request.turnId === undefined && last !== undefined && last.turnId === undefined) {
+        enqueue.assign({ queued: [...context.queued.slice(0, -1), request] });
+        return;
+      }
+      if (context.queued.length >= checkoutQueuedCutLimit) {
+        const fact = announcement({ ...context, pending: request }, { type: 'cutFailed', reason: 'queue-full' });
+        if (fact !== undefined) {
+          enqueue.emit(fact);
+          if (context.parentRef !== undefined) {
+            enqueue.sendTo(context.parentRef, fact);
+          }
+        }
+        return;
+      }
+      enqueue.assign({ queued: [...context.queued, request] });
+    }),
+    /* The idle window has no requester, so the request is synthesised here
+     * rather than read off an event (S30). */
+    takeIdleRequest: assign({
+      pending: (): CheckoutCutRequest => ({ trigger: 'idle', leaseIds: [] }),
+      cutId: undefined,
+      cutTreeId: undefined,
+      revisionId: undefined,
+      reason: undefined,
     }),
     takeQueuedRequest: assign({
       pending: ({ context }) => context.queued[0],
@@ -248,6 +320,27 @@ export const checkoutMachine = setup({
       cutTreeId: undefined,
       revisionId: undefined,
       reason: undefined,
+    }),
+    /* R4: a request that waited behind a failed mint is still a request; the
+     * queue is drained here, so nothing waits for a mint that will not run. */
+    failQueuedRequests: enqueueActions(({ context, enqueue }) => {
+      for (const request of context.queued) {
+        const fact = announcement(
+          { ...context, pending: request },
+          {
+            type: 'cutFailed',
+            reason: context.reason ?? 'The cut failed.',
+          },
+        );
+        if (fact === undefined) {
+          continue;
+        }
+        enqueue.emit(fact);
+        if (context.parentRef !== undefined) {
+          enqueue.sendTo(context.parentRef, fact);
+        }
+      }
+      enqueue.assign({ queued: [] });
     }),
     /* Send a settled status to the parent, which coalesces it into its projection. */
     reportStatus: enqueueActions(({ context, enqueue }, params: Readonly<{ status: CheckoutStatus }>) => {
@@ -270,6 +363,7 @@ export const checkoutMachine = setup({
     branch: input.branch,
     headRevisionId: input.headRevisionId,
     headTreeId: input.headTreeId,
+    idleWindow: input.idleWindow ?? checkoutIdleWindowMilliseconds,
     parentRef: input.parentRef,
     writeGeneration: 0,
     cutGeneration: 0,
@@ -303,6 +397,30 @@ export const checkoutMachine = setup({
       always: { guard: 'hasQueuedCut', target: 'minting', actions: 'takeQueuedRequest' },
       on: {
         cut: { target: 'minting', actions: 'takeRequest' },
+      },
+      initial: 'quiet',
+      states: {
+        /*
+         * S30's idle window, and the only timer in this machine.
+         *
+         * It is a child of `dirty` rather than `dirty`'s own `after` so a burst
+         * of writes restarts the window without re-entering `dirty` itself:
+         * re-entering the parent would re-run `reportStatus` and churn the
+         * projection on every keystroke (A38, F9). `reenter: true` is on this
+         * child transition alone, which is exactly what restarts the delay.
+         *
+         * The window is per checkout, so two clients on a shared checkout run
+         * one between them; the mint that follows still passes the I5 gate, so
+         * a quiet checkout whose tree equals its head records nothing.
+         */
+        quiet: {
+          after: {
+            idleWindow: { target: '#checkout.minting', actions: 'takeIdleRequest' },
+          },
+          on: {
+            changed: { target: 'quiet', reenter: true, actions: 'recordWrite' },
+          },
+        },
       },
     },
     minting: {
@@ -479,6 +597,7 @@ export const checkoutMachine = setup({
             enqueue.sendTo(context.parentRef, fact);
           }
         }),
+        'failQueuedRequests',
         { type: 'reportStatus', params: { status: 'failed' } },
       ],
       on: {
@@ -508,3 +627,14 @@ export const selectCheckoutDirty = (snapshot: SnapshotFrom<typeof checkoutMachin
  */
 export const selectCheckoutHead = (snapshot: SnapshotFrom<typeof checkoutMachine>): string | undefined =>
   snapshot.context.headRevisionId;
+
+/**
+ * The actor set a host provides for `checkoutMachine` (S37).
+ *
+ * Taken from the machine's own `provide` parameter so an implementation that
+ * drifts from an actor's input or output is a type error at the host, not a
+ * runtime surprise inside a state.
+ *
+ * @public
+ */
+export type CheckoutActors = NonNullable<Parameters<typeof checkoutMachine.provide>[0]['actors']>;

@@ -4,18 +4,19 @@ import type { AnyEventObject } from 'xstate';
 import { describe, expect, it } from 'vitest';
 
 import * as machineModule from '#checkout.machine.js';
-import { checkoutMachine } from '#checkout.machine.js';
+import { checkoutMachine, checkoutQueuedCutLimit } from '#checkout.machine.js';
 import type { CheckoutFenceActorInput } from '#checkout.machine.js';
 import {
   createFakeCallbackActors,
   createFakeParent,
   createFakePromiseActors,
+  createManualClock,
   recordEmitted,
 } from '#test/fake-actors.js';
-import type { FakeCallbackActors, FakePromiseActors } from '#test/fake-actors.js';
+import type { FakeCallbackActors, FakePromiseActors, ManualClock } from '#test/fake-actors.js';
 
 /*
- * Path table — `checkout.machine` (catalogue: 18).
+ * Path table — `checkout.machine` (catalogue: 24).
  *
  *  1  rehydrates from `input` and rests `clean`
  *  2  `changed` → `dirty` and bumps the write generation
@@ -31,10 +32,22 @@ import type { FakeCallbackActors, FakePromiseActors } from '#test/fake-actors.js
  * 12  `failed` is non-terminal: `cut` retries, `changed` returns to `dirty`
  * 13  a refused fence is an event, never `onError` → `failed` + `cutFailed`
  * 14  the fence is released when the mint leaves `minting`
- * 15  a `cut` arriving during a mint is served afterwards, so both requesters are answered
+ * 15  a `cut` arriving during a mint is served afterwards, so both requesters
+ *     are answered when the mint succeeds
  * 16  `headChanged` adopts a new head without leaving `clean`
  * 17  every outcome is both sent to the parent and emitted, with its trigger and turn id
  * 18  start and stop leak no child, the snapshot is serializable and holds no function
+ * 19  a mint that fails answers the waiting requests too, instead of stranding
+ *     them behind a queue nothing drains (R4)
+ * 20  the idle window mints one `idle` revision after the quiet period, and a
+ *     burst of `changed` restarts it without churning the parent (S30, A38)
+ * 21  the idle window survives a failed mint: re-entering `dirty` restarts it
+ * 22  a `save` on an unchanged tree mints nothing and answers `nothingToSave`
+ *     (I5, AC12)
+ * 23  consecutive trigger-only requests queued during a mint collapse into one,
+ *     turn-bearing requests keep their order (R13)
+ * 24  the queue is capped, and the request that does not fit is answered
+ *     `cutFailed { reason: 'queue-full' }` rather than dropped (R13)
  * --  `getSimplePaths` generates no state value the table above leaves unexercised
  */
 
@@ -47,12 +60,14 @@ type Harness = Readonly<{
   callbacks: FakeCallbackActors;
   parent: ReturnType<typeof createFakeParent>;
   emitted: ReturnType<typeof recordEmitted>;
+  clock: ManualClock;
 }>;
 
-const start = (options?: Readonly<{ headTreeId?: string; branch?: string }>): Harness => {
+const start = (options?: Readonly<{ headTreeId?: string; branch?: string; idleWindow?: number }>): Harness => {
   const promises = createFakePromiseActors();
   const callbacks = createFakeCallbackActors();
   const parent = createFakeParent();
+  const clock = createManualClock();
   const actor = createActor(
     checkoutMachine.provide({
       actors: {
@@ -64,18 +79,20 @@ const start = (options?: Readonly<{ headTreeId?: string; branch?: string }>): Ha
       },
     }),
     {
+      clock,
       input: {
         checkoutId: 'checkout-1',
         branch: options?.branch ?? 'main',
         headRevisionId: 'rev-1',
         headTreeId: options?.headTreeId ?? headTreeId,
+        ...(options?.idleWindow === undefined ? {} : { idleWindow: options.idleWindow }),
         parentRef: parent.ref,
       },
     },
   );
   const emitted = recordEmitted(actor);
   actor.start();
-  return { actor, promises, callbacks, parent, emitted };
+  return { actor, promises, callbacks, parent, emitted, clock };
 };
 
 /** Let every queued microtask and the actor's promise handlers run. */
@@ -375,6 +392,30 @@ describe('checkoutMachine', () => {
     actor.stop();
   });
 
+  it('answers every queued request when the mint fails', async () => {
+    const harness = start();
+    const { actor, promises, parent } = harness;
+
+    actor.send({ type: 'cut', trigger: 'turn', turnId: 'turn-1', leaseIds: [] });
+    harness.callbacks.sendBack('fence', { type: 'fenceGranted' });
+    actor.send({ type: 'cut', trigger: 'turn', turnId: 'turn-2', leaseIds: [] });
+    actor.send({ type: 'cut', trigger: 'restore', leaseIds: [] });
+    promises.settle('cut', { error: new Error('disk full') });
+    await flush();
+
+    expect(actor.getSnapshot().matches('failed')).toBe(true);
+    /* AC9: a turn waits on its answer with a bound; an unanswered request
+     * strands it until the timeout, and the queue never drains. */
+    const answered = parent.events.filter(
+      (event): event is AnyEventObject & { turnId?: string; trigger?: string } => event.type === 'cutFailed',
+    );
+    expect(answered.map((event) => event.turnId)).toEqual(['turn-1', 'turn-2', undefined]);
+    expect(answered.map((event) => event.trigger)).toEqual(['turn', 'turn', 'restore']);
+    expect(actor.getSnapshot().context.queued).toEqual([]);
+
+    actor.stop();
+  });
+
   it('adopts a new head without leaving clean', () => {
     const { actor } = start();
 
@@ -432,6 +473,135 @@ describe('checkoutMachine', () => {
     expect(Object.values(machineModule).filter((value) => isMachine(value))).toEqual([checkoutMachine]);
   });
 
+  it('mints one idle revision after the quiet window, restarted by every write', async () => {
+    const harness = start({ idleWindow: 1000 });
+    const { actor, clock, promises, emitted, parent } = harness;
+
+    actor.send({ type: 'changed', paths: ['a.ts'], generation: 1 });
+    expect(actor.getSnapshot().matches({ dirty: 'quiet' })).toBe(true);
+
+    /* A burst restarts the window; a checkout that is still being typed into
+     * is not quiet. */
+    for (let generation = 2; generation <= 25; generation += 1) {
+      clock.advance(900);
+      actor.send({ type: 'changed', paths: ['a.ts'], generation });
+      expect(actor.getSnapshot().matches({ dirty: 'quiet' })).toBe(true);
+    }
+    expect(actor.getSnapshot().context.writeGeneration).toBe(25);
+    /*
+     * And *without* churning the parent (A38): `matches({ dirty: 'quiet' })`
+     * alone would hold for a transition that re-entered `dirty` on every write.
+     * The self-transition's domain is `dirty` — the LCA of its source and
+     * target — so only `quiet` is re-entered and `dirty.entry`'s status send
+     * does not re-run. Twenty-five writes, one `dirty` on the wire.
+     */
+    expect(parent.events.filter((event) => event.type === 'checkoutStatusChanged')).toHaveLength(2);
+
+    clock.advance(1000);
+
+    expect(actor.getSnapshot().matches({ minting: 'acquiring' })).toBe(true);
+    expect(actor.getSnapshot().context.pending).toEqual({ trigger: 'idle', leaseIds: [] });
+
+    await mintToCas(harness);
+    promises.settle('casHead', { output: { status: 'updated', head: 'rev-2' } });
+    await flush();
+
+    expect(emitted.filter((event) => event.type === 'revisionMinted')).toEqual([
+      {
+        type: 'revisionMinted',
+        checkoutId: 'checkout-1',
+        trigger: 'idle',
+        revisionId: 'rev-2',
+      },
+    ]);
+
+    actor.stop();
+  });
+
+  it('restarts the idle window after a failed mint', async () => {
+    const harness = start({ idleWindow: 1000 });
+    const { actor, clock, callbacks } = harness;
+
+    actor.send({ type: 'cut', trigger: 'save', leaseIds: [] });
+    callbacks.sendBack('fence', { type: 'fenceRefused', reason: 'held' });
+    await flush();
+    expect(actor.getSnapshot().matches('failed')).toBe(true);
+
+    actor.send({ type: 'changed', paths: ['a.ts'], generation: 1 });
+    expect(actor.getSnapshot().matches({ dirty: 'quiet' })).toBe(true);
+
+    clock.advance(1000);
+
+    expect(actor.getSnapshot().matches({ minting: 'acquiring' })).toBe(true);
+    expect(actor.getSnapshot().context.pending?.trigger).toBe('idle');
+
+    actor.stop();
+  });
+
+  it('mints nothing for a save on a tree that equals the head (AC12)', async () => {
+    const harness = start();
+    const { actor, promises, emitted } = harness;
+
+    actor.send({ type: 'changed', paths: ['a.ts'], generation: 1 });
+    actor.send({ type: 'cut', trigger: 'save', leaseIds: [] });
+    harness.callbacks.sendBack('fence', { type: 'fenceGranted' });
+    promises.settle('cut', { output: { treeId: headTreeId, cutId: 'cut-1' } });
+    await flush();
+
+    expect(promises.inputsFor('writeRevision')).toEqual([]);
+    expect(emitted.filter((event) => event.type === 'nothingToSave')).toEqual([
+      { type: 'nothingToSave', checkoutId: 'checkout-1', trigger: 'save' },
+    ]);
+
+    actor.stop();
+  });
+
+  it('collapses consecutive trigger-only requests queued behind a mint', async () => {
+    const harness = start();
+    const { actor } = harness;
+
+    actor.send({ type: 'cut', trigger: 'turn', turnId: 'turn-1', leaseIds: ['run-1'] });
+    actor.send({ type: 'cut', trigger: 'save', leaseIds: [] });
+    actor.send({ type: 'cut', trigger: 'idle', leaseIds: [] });
+    actor.send({ type: 'cut', trigger: 'close', leaseIds: [] });
+    actor.send({ type: 'cut', trigger: 'turn', turnId: 'turn-2', leaseIds: ['run-2'] });
+    actor.send({ type: 'cut', trigger: 'hidden', leaseIds: [] });
+
+    /* Three trigger-only wishes are one cut, and the later trigger wins; the
+     * two turns keep their own places because each is waiting for an answer. */
+    expect(actor.getSnapshot().context.queued).toEqual([
+      { trigger: 'close', leaseIds: [] },
+      { trigger: 'turn', turnId: 'turn-2', leaseIds: ['run-2'] },
+      { trigger: 'hidden', leaseIds: [] },
+    ]);
+
+    actor.stop();
+  });
+
+  it('refuses a request that does not fit the queue instead of dropping it', () => {
+    const harness = start();
+    const { actor, emitted, parent } = harness;
+
+    actor.send({ type: 'cut', trigger: 'turn', turnId: 'turn-0', leaseIds: [] });
+    for (let index = 0; index < checkoutQueuedCutLimit; index += 1) {
+      actor.send({ type: 'cut', trigger: 'turn', turnId: `turn-${index + 1}`, leaseIds: [] });
+    }
+    actor.send({ type: 'cut', trigger: 'turn', turnId: 'turn-over', leaseIds: [] });
+
+    expect(actor.getSnapshot().context.queued).toHaveLength(checkoutQueuedCutLimit);
+    const refusal = {
+      type: 'cutFailed',
+      checkoutId: 'checkout-1',
+      trigger: 'turn',
+      turnId: 'turn-over',
+      reason: 'queue-full',
+    };
+    expect(emitted.find((event) => event.type === 'cutFailed')).toEqual(refusal);
+    expect(parent.events.find((event) => event.type === 'cutFailed')).toEqual(refusal);
+
+    actor.stop();
+  });
+
   it('exercises every state value xstate/graph can generate', () => {
     const paths = getSimplePaths(checkoutMachine, {
       events: [
@@ -449,7 +619,7 @@ describe('checkoutMachine', () => {
     });
     const exercised = new Set([
       '"clean"',
-      '"dirty"',
+      '{"dirty":"quiet"}',
       '"failed"',
       '"stale"',
       '"rereading"',

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ImmutableRevisionTree } from '#revision-tree.js';
-import { mergeRevisionTrees } from '#revision-merge.js';
+import { mergeRevisionTrees, renderConflictMarkers } from '#revision-merge.js';
 
 const tree = (files: Readonly<Record<string, string | Uint8Array<ArrayBuffer>>>): ImmutableRevisionTree =>
   new ImmutableRevisionTree(Object.entries(files));
@@ -59,9 +59,15 @@ describe('mergeRevisionTrees', () => {
     const ours = tree({ 'main.ts': 'ours\n' });
     const theirs = tree({ 'main.ts': 'theirs\n' });
 
-    expect(mergeRevisionTrees(base, ours, theirs)).toEqual({
-      status: 'conflicted',
-      conflicts: [
+    const result = mergeRevisionTrees(base, ours, theirs);
+
+    /* Exact, not `toMatchObject`: an extra field on a conflict is a field some
+       surface will start reading, and the point of the typed union is that the
+       set is closed (review R12). `merged` is asserted separately because it is
+       a tree, not data. */
+    expect(result.status).toBe('conflicted');
+    if (result.status === 'conflicted') {
+      expect(result.conflicts).toEqual([
         {
           type: 'text',
           path: 'main.ts',
@@ -70,8 +76,9 @@ describe('mergeRevisionTrees', () => {
           ours: 'ours\n',
           theirs: 'theirs\n',
         },
-      ],
-    });
+      ]);
+      expect(result.merged.entries()).toEqual([]);
+    }
   });
 
   it('classifies add/add conflicts with owned bytes', () => {
@@ -158,5 +165,115 @@ describe('mergeRevisionTrees', () => {
     if (result.status === 'conflicted') {
       expect(result.conflicts.map(({ path }) => path)).toEqual(['a.txt', 'z.txt', 'ä.txt']);
     }
+  });
+
+  it('returns a typed conflict when one side has a file where the other has a directory', () => {
+    const base = tree({ 'keep.txt': 'shared' });
+    const ours = tree({ 'keep.txt': 'shared', a: 'a file' });
+    const theirs = tree({ 'keep.txt': 'shared', 'a/b.txt': 'a directory' });
+
+    const result = mergeRevisionTrees(base, ours, theirs);
+
+    expect(result.status).toBe('conflicted');
+    if (result.status === 'conflicted') {
+      expect(result.conflicts).toEqual([
+        expect.objectContaining({ type: 'file-directory', path: 'a', directoryPath: 'a/b.txt' }),
+      ]);
+      /* The tree model refuses `a` beside `a/b.txt`, so neither survives into
+         the settled set — and nothing throws (W3a re-review). */
+      expect(result.merged.entries().map(({ path }) => path)).toEqual(['keep.txt']);
+    }
+  });
+
+  /* The asymmetric case the first pass missed: only one of the two colliding
+     paths settles, so a scan of the settled set alone sees no collision — and
+     a resolution that then chose *Keep mine* on `a` would compose `a` beside
+     `a/b.txt` and hit the tree model's `TypeError` with nowhere to say so
+     (review R4). The scan therefore runs over settled ∪ conflicted. */
+  it('returns a typed conflict when the colliding file is itself conflicted', () => {
+    const base = tree({ a: 'base' });
+    const ours = tree({ a: 'x' });
+    const theirs = tree({ 'a/b.txt': 'z' });
+
+    const result = mergeRevisionTrees(base, ours, theirs);
+
+    expect(result.status).toBe('conflicted');
+    if (result.status === 'conflicted') {
+      expect(result.conflicts).toEqual([
+        expect.objectContaining({ type: 'file-directory', path: 'a', directoryPath: 'a/b.txt', fileSide: 'ours' }),
+      ]);
+      /* And the `modify-delete` on `a` is gone: the shape is the conflict now,
+         so a person is not asked to choose content for a path that cannot
+         exist beside its own directory. */
+      expect(result.conflicts.filter(({ type }) => type === 'modify-delete')).toEqual([]);
+      expect(result.merged.entries().map(({ path }) => path)).toEqual([]);
+    }
+  });
+
+  it('reports the paths that settled beside the ones that did not', () => {
+    const base = tree({ 'clean.txt': 'base', 'fight.txt': 'base' });
+    const ours = tree({ 'clean.txt': 'ours', 'fight.txt': 'ours' });
+    const theirs = tree({ 'clean.txt': 'base', 'fight.txt': 'theirs' });
+
+    const result = mergeRevisionTrees(base, ours, theirs);
+
+    expect(result.status).toBe('conflicted');
+    if (result.status === 'conflicted') {
+      expect(result.conflicts.map(({ path }) => path)).toEqual(['fight.txt']);
+      expect(result.merged.entries().map(({ path }) => path)).toEqual(['clean.txt']);
+      expect(text(result.merged, 'clean.txt')).toBe('ours');
+    }
+  });
+});
+
+const bytes = (value: string): Uint8Array<ArrayBuffer> => new TextEncoder().encode(value);
+const labels = { ours: 'main', theirs: 'enclosure-v2' } as const;
+
+describe('renderConflictMarkers', () => {
+  it('marks only the lines that collided and keeps the rest merged', () => {
+    const rendered = renderConflictMarkers({
+      base: bytes('alpha\nbeta\ngamma\ndelta\nepsilon\n'),
+      ours: bytes('alpha\nOURS\ngamma\ndelta\nEPSILON\n'),
+      theirs: bytes('alpha\nTHEIRS\ngamma\ndelta\nepsilon\n'),
+      labels,
+    });
+
+    /* `epsilon` only one side touched rides through; `beta` both did. */
+    expect(rendered).toBe('alpha\n<<<<<<< main\nOURS\n=======\nTHEIRS\n>>>>>>> enclosure-v2\ngamma\ndelta\nEPSILON\n');
+  });
+
+  it('covers the whole span two sides rewrote together, the way a merge tool does', () => {
+    const rendered = renderConflictMarkers({
+      base: bytes('alpha\nbeta\ngamma\n'),
+      ours: bytes('alpha\nOURS\ngamma\n'),
+      theirs: bytes('alpha\nTHEIRS\nGAMMA\n'),
+      labels,
+    });
+
+    /* `theirs` rewrote `beta` and `gamma` as one run, so the block is the run —
+       splitting it would offer a choice neither side ever made. */
+    expect(rendered).toBe('alpha\n<<<<<<< main\nOURS\ngamma\n=======\nTHEIRS\nGAMMA\n>>>>>>> enclosure-v2\n');
+  });
+
+  it('renders a deleted side as an empty half rather than dropping the file', () => {
+    const rendered = renderConflictMarkers({
+      base: bytes('only\n'),
+      ours: bytes('mine\n'),
+      theirs: undefined,
+      labels,
+    });
+
+    expect(rendered).toBe('<<<<<<< main\nmine\n=======\n>>>>>>> enclosure-v2\n');
+  });
+
+  it('refuses to materialize a side it cannot decode, so a binary file stays choose-one', () => {
+    expect(
+      renderConflictMarkers({
+        base: new Uint8Array([0, 1, 2]),
+        ours: new Uint8Array([0, 1, 3]),
+        theirs: new Uint8Array([0, 1, 4]),
+        labels,
+      }),
+    ).toBeUndefined();
   });
 });

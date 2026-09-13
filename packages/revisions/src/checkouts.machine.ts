@@ -1,8 +1,8 @@
 /**
  * `checkouts.machine` — one actor per project, owning the checkout registry.
  *
- * It replaces the provider's `reclaim`/`reclaimAll` and the Node host's
- * `sweepTurnWorkspaces`. Records are the truth (I3): `open` sweeps stale leases
+ * It replaces the provider's `reclaim`/`reclaimAll` and the workspace sweep a
+ * Node host used to run at start. Records are the truth (I3): `open` sweeps stale leases
  * against the authority epoch and then rehydrates from `listCheckouts`, never
  * from a persisted snapshot. It enforces one checkout per branch, retires
  * leases without removing their checkouts (D17), and never removes a checkout a
@@ -12,29 +12,11 @@
 import { assign, enqueueActions, fromPromise, setup } from 'xstate';
 import type { AnyActorRef, SnapshotFrom } from 'xstate';
 
+import type { CheckoutRecord } from '#revision-port.js';
 import type { TurnSettlement } from '#turn.machine.js';
 
-/**
- * One row of the checkout registry, as this machine needs it.
- *
- * The structural minimum until `Checkout` lands on the revision port in W3a;
- * W3c unifies the two.
- *
- * @public
- */
-export type CheckoutRecord = Readonly<{
-  id: string;
-  /** The branch this checkout tracks; `undefined` when it is detached. */
-  branch: string | undefined;
-  headRevisionId?: string;
-  /** Run ids of the leases currently holding this checkout. */
-  leaseRunIds: readonly string[];
-  /** Set by the host when its policy would offer this checkout for removal. */
-  removable?: boolean;
-}>;
-
 /** What a registry operation was doing when it failed or was refused. @public */
-export type CheckoutOperation = 'add' | 'remove' | 'retire';
+export type CheckoutOperation = 'open' | 'add' | 'remove' | 'retire';
 
 /** Input accepted when creating the checkoutsMachine actor. @public */
 export type CheckoutsMachineInput = Readonly<{
@@ -48,6 +30,8 @@ export type CheckoutsMachineContext = Readonly<{
   checkouts: readonly CheckoutRecord[];
   /** Run ids awaiting retirement, served one at a time in arrival order. */
   pendingRetirements: readonly string[];
+  /** Leases reported before the registry had records to put them on (R22). */
+  pendingLeases: ReadonlyArray<Readonly<{ checkoutId: string | undefined; runId: string }>>;
   /** The checkout `removing` is dropping. */
   removingId: string | undefined;
   reason: string | undefined;
@@ -60,7 +44,10 @@ export type CheckoutsMachineEvent =
   | Readonly<{ type: 'addCheckout'; branch: string; from: string }>
   | Readonly<{ type: 'removeCheckout'; id: string }>
   | Readonly<{ type: 'leaseStale'; runId: string }>
-  | (Readonly<{ type: 'turnFinalized' }> & TurnSettlement);
+  | Readonly<{ type: 'leaseWritten'; checkoutId: string | undefined; runId: string }>
+  | (Readonly<{ type: 'turnFinalized' }> & TurnSettlement)
+  /* A turn that ended without a settlement still had a lease (R12). */
+  | Readonly<{ type: 'turnReleased'; turnId: string; checkoutId: string | undefined; runId: string }>;
 
 /** Facts checkoutsMachine emits, and sends to its parent when they change the registry. @public */
 export type CheckoutsMachineEmitted =
@@ -124,6 +111,27 @@ export const checkoutsMachine = setup({
     checkoutIsFree: ({ context }, params: Readonly<{ id: string }>) =>
       context.checkouts.some((checkout) => checkout.id === params.id && checkout.leaseRunIds.length === 0),
     hasPendingRetirement: ({ context }) => context.pendingRetirements.length > 0,
+    hasPendingLease: ({ context }) => context.pendingLeases.length > 0,
+    /* A lease naming no known record — or one whose turn has already ended —
+     * changes nothing, so it must not churn the host with a re-announcement. */
+    hasApplicableLease: ({ context }) =>
+      context.pendingLeases.some(
+        (lease) =>
+          !context.pendingRetirements.includes(lease.runId) &&
+          context.checkouts.some(
+            (checkout) => checkout.id === lease.checkoutId && !checkout.leaseRunIds.includes(lease.runId),
+          ),
+      ),
+    /* R23/R30: a turn can end before it ever wrote a lease, and a settlement can
+     * arrive before the registry has records to retire against. The test is
+     * therefore made at drain time, against records ∪ the lease buffer, not when
+     * the event is received. */
+    hasPhantomRetirement: ({ context }) =>
+      context.pendingRetirements.some(
+        (runId) =>
+          !context.checkouts.some((checkout) => checkout.leaseRunIds.includes(runId)) &&
+          !context.pendingLeases.some((lease) => lease.runId === runId),
+      ),
   },
   actions: {
     announceRegistry: enqueueActions(({ context, enqueue }) => {
@@ -134,25 +142,80 @@ export const checkoutsMachine = setup({
       }
       for (const checkout of context.checkouts) {
         if (checkout.removable === true) {
-          enqueue.emit({ type: 'removalOffered', checkoutId: checkout.id });
+          const offer: CheckoutsMachineEmitted = { type: 'removalOffered', checkoutId: checkout.id };
+          enqueue.emit(offer);
+          if (context.parentRef !== undefined) {
+            enqueue.sendTo(context.parentRef, offer);
+          }
         }
       }
     }),
     announceFailure: enqueueActions(
       ({ context, enqueue }, params: Readonly<{ operation: CheckoutOperation; reason?: string }>) => {
-        enqueue.emit({
+        const fact: CheckoutsMachineEmitted = {
           type: 'checkoutFailed',
           operation: params.operation,
           reason: params.reason ?? context.reason ?? 'The checkout operation failed.',
-        });
+        };
+        enqueue.emit(fact);
+        /* R11: the root routes this to the workbench; an emit alone never
+         * leaves this actor. */
+        if (context.parentRef !== undefined) {
+          enqueue.sendTo(context.parentRef, fact);
+        }
       },
     ),
     queueRetirements: assign({
       pendingRetirements: ({ context, event }) => {
-        const runIds = event.type === 'leaseStale' ? [event.runId] : event.type === 'turnFinalized' ? event.runIds : [];
+        /* R2: `runIds` is the provenance set — every lease the writer saw on
+         * the checkout. Retiring all of them takes the other chat's lease
+         * (AC9), so a settlement retires only its own `runId`. */
+        const runIds =
+          event.type === 'leaseStale' || event.type === 'turnFinalized' || event.type === 'turnReleased'
+            ? [event.runId]
+            : [];
         const added = runIds.filter((runId) => !context.pendingRetirements.includes(runId));
         return [...context.pendingRetirements, ...added];
       },
+    }),
+    /* R1: a lease written inside a turn is invisible to the `listCheckouts`
+     * output the registry loaded earlier, so the turn reports it. R22: it can
+     * arrive before there is any record to put it on, so it is always buffered
+     * and applied from one place. */
+    bufferLease: assign({
+      pendingLeases: ({ context, event }) =>
+        event.type === 'leaseWritten'
+          ? [...context.pendingLeases, { checkoutId: event.checkoutId, runId: event.runId }]
+          : context.pendingLeases,
+    }),
+    /*
+     * A lease for a checkout no record names is dropped here, exactly as one
+     * arriving while `ready` always was. R30: a lease whose retirement is
+     * already queued never lands at all — it is cancelled against that
+     * retirement, so no phantom run id can survive on a record.
+     */
+    applyLeases: assign(({ context }) => {
+      const retiring = new Set(context.pendingRetirements);
+      const landing = context.pendingLeases.filter((lease) => !retiring.has(lease.runId));
+      const cancelled = new Set(
+        context.pendingLeases.filter((lease) => retiring.has(lease.runId)).map((lease) => lease.runId),
+      );
+      return {
+        checkouts: context.checkouts.map((checkout) => {
+          const added = landing
+            .filter((lease) => lease.checkoutId === checkout.id && !checkout.leaseRunIds.includes(lease.runId))
+            .map((lease) => lease.runId);
+          return added.length === 0 ? checkout : { ...checkout, leaseRunIds: [...checkout.leaseRunIds, ...added] };
+        }),
+        pendingLeases: [],
+        pendingRetirements: context.pendingRetirements.filter((runId) => !cancelled.has(runId)),
+      };
+    }),
+    dropPhantomRetirements: assign({
+      pendingRetirements: ({ context }) =>
+        context.pendingRetirements.filter((runId) =>
+          context.checkouts.some((checkout) => checkout.leaseRunIds.includes(runId)),
+        ),
     }),
     dropRetiredLease: assign({
       checkouts: ({ context }) => {
@@ -169,7 +232,11 @@ export const checkoutsMachine = setup({
     completeRetirement: enqueueActions(({ context, enqueue }) => {
       const runId = context.pendingRetirements[0];
       if (runId !== undefined) {
-        enqueue.emit({ type: 'leaseRetired', runId });
+        const fact: CheckoutsMachineEmitted = { type: 'leaseRetired', runId };
+        enqueue.emit(fact);
+        if (context.parentRef !== undefined) {
+          enqueue.sendTo(context.parentRef, fact);
+        }
       }
       enqueue.assign({ pendingRetirements: context.pendingRetirements.slice(1) });
     }),
@@ -180,11 +247,24 @@ export const checkoutsMachine = setup({
     projectId: input.projectId,
     checkouts: [],
     pendingRetirements: [],
+    pendingLeases: [],
     removingId: undefined,
     reason: undefined,
     parentRef: input.parentRef,
   }),
   initial: 'idle',
+  /*
+   * R22/R30: the producer of a lease and its three consumers are buffered the
+   * same way, in every state. Anything conditional on being `ready` is dropped
+   * in the window between `open` and the first `listCheckouts`, and the two
+   * halves have to agree or a run id is left on a record whose turn is gone.
+   */
+  on: {
+    leaseWritten: { actions: 'bufferLease' },
+    leaseStale: { actions: 'queueRetirements' },
+    turnFinalized: { actions: 'queueRetirements' },
+    turnReleased: { actions: 'queueRetirements' },
+  },
   states: {
     idle: {
       on: { open: { target: 'recovering' } },
@@ -195,15 +275,22 @@ export const checkoutsMachine = setup({
         input: ({ context }) => ({ projectId: context.projectId }),
         onDone: {
           target: 'loading',
-          actions: enqueueActions(({ enqueue, event }) => {
+          actions: enqueueActions(({ context, enqueue, event }) => {
             for (const runId of event.output.retiredRunIds) {
-              enqueue.emit({ type: 'leaseRetired', runId });
+              const fact: CheckoutsMachineEmitted = { type: 'leaseRetired', runId };
+              enqueue.emit(fact);
+              if (context.parentRef !== undefined) {
+                enqueue.sendTo(context.parentRef, fact);
+              }
             }
           }),
         },
         onError: {
           target: 'failed',
-          actions: assign({ reason: ({ event }) => describeFailure(event.error) }),
+          actions: [
+            assign({ reason: ({ event }) => describeFailure(event.error) }),
+            { type: 'announceFailure', params: { operation: 'open' } },
+          ],
         },
       },
     },
@@ -215,9 +302,16 @@ export const checkoutsMachine = setup({
           target: 'ready',
           actions: [assign({ checkouts: ({ event }) => event.output.checkouts }), 'announceRegistry'],
         },
+        /* R2/W6: a registry that could not load used to rest here silently, so
+         * a host waiting on the first announcement waited out its whole bound
+         * with nothing to show a person. `failed` is still where it rests; it
+         * now says so on the way. */
         onError: {
           target: 'failed',
-          actions: assign({ reason: ({ event }) => describeFailure(event.error) }),
+          actions: [
+            assign({ reason: ({ event }) => describeFailure(event.error) }),
+            { type: 'announceFailure', params: { operation: 'open' } },
+          ],
         },
       },
     },
@@ -229,12 +323,17 @@ export const checkoutsMachine = setup({
       on: {
         /* Records are the truth, so a reopen re-reads them. */
         open: { target: 'loading' },
-        leaseStale: { actions: 'queueRetirements' },
-        turnFinalized: { actions: 'queueRetirements' },
       },
       states: {
         idle: {
-          always: { guard: 'hasPendingRetirement', target: 'retiring' },
+          /* Leases first, so a lease that just landed is not mistaken for a
+           * phantom; then the phantoms; then the retirement itself. */
+          always: [
+            { guard: 'hasApplicableLease', actions: ['applyLeases', 'announceRegistry'] },
+            { guard: 'hasPendingLease', actions: 'applyLeases' },
+            { guard: 'hasPhantomRetirement', actions: 'dropPhantomRetirements' },
+            { guard: 'hasPendingRetirement', target: 'retiring' },
+          ],
           on: {
             addCheckout: [
               {
@@ -362,3 +461,14 @@ export const selectLeaseSet = (
   snapshot: SnapshotFrom<typeof checkoutsMachine>,
 ): Readonly<Record<string, readonly string[]>> =>
   Object.fromEntries(snapshot.context.checkouts.map((checkout) => [checkout.id, checkout.leaseRunIds]));
+
+/**
+ * The actor set a host provides for `checkoutsMachine` (S37).
+ *
+ * Taken from the machine's own `provide` parameter so an implementation that
+ * drifts from an actor's input or output is a type error at the host, not a
+ * runtime surprise inside a state.
+ *
+ * @public
+ */
+export type CheckoutsActors = NonNullable<Parameters<typeof checkoutsMachine.provide>[0]['actors']>;

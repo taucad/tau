@@ -14,8 +14,9 @@
  */
 
 import type { ImmutableRevisionTree, RevisionId } from '@taucad/filesystem/revisions';
-import type { RevisionProvenance, RevisionSummary } from '#revision-authority.js';
+import type { RevisionActor, RevisionProvenance, RevisionSummary } from '#revision-authority.js';
 import type { ObjectFormat } from '#object-hash.js';
+import type { Remote } from '#remotes.js';
 
 /** Which implementation is behind one port. @public */
 export type RevisionEngine = 'isomorphic-git' | 'native-git' | 'remote';
@@ -37,6 +38,15 @@ export type RevisionEngineDescriptor = Readonly<{
   nWayMerge: boolean;
   /** Whether `listCheckouts`, `addCheckout` and `removeCheckout` are implemented. */
   checkouts: boolean;
+  /**
+   * Whether this store records a tracked large object as a git-LFS pointer.
+   *
+   * A caller that computes a tree id without writing it has to hash what the
+   * store will record, pointers included (I5) — so the cut asks rather than
+   * assumes. True on both legs since W11b: the decision is host-neutral
+   * (`lfs.ts`) and only the transport behind it differs.
+   */
+  largeObjects: boolean;
 }>;
 
 /** Durable storage evidence for one revision. `objectFormat` travels with it. @public */
@@ -139,6 +149,14 @@ export type WriteRevisionInput = Readonly<{
 
 /** Input for one expected-old ref publication. @public */
 export type UpdateRevisionRefInput = Readonly<{
+  /**
+   * A branch name (`main`), or any other ref in full (`refs/tau/chats/c1`).
+   *
+   * The record set the design pushes lives outside `refs/heads`, and a port that
+   * could only name branches could not address half of what its own `push`
+   * moves — so a name beginning `refs/` is taken literally and every other name
+   * is a branch (W17).
+   */
   name: string;
   /** `undefined` means "this ref must be unborn". */
   expectedHead: RevisionId | undefined;
@@ -183,11 +201,110 @@ export type RevisionDiffInput = Readonly<{
   to: RevisionId;
 }>;
 
-/** Generic transport request; the remote may be a name, URL or repository path. @public */
-export type RevisionTransportInput = Readonly<{
+/**
+ * One fully-qualified ref on a remote, as the server advertises it.
+ *
+ * Full names (`refs/heads/main`), not branch names: the record set the design
+ * pushes lives outside `refs/heads` (`refs/tau/chats/*`), so a transport that
+ * spoke in branch names could not name half of what it moves.
+ *
+ * @public
+ */
+export type RemoteRef = Readonly<{ name: string; head: RevisionId }>;
+
+/** What one leg fetches, and where it puts it. @public */
+export type RevisionFetchInput = Readonly<{
+  /** Remote name from the store's own remotes list. */
   remote: string;
-  refspecs: readonly string[];
+  /**
+   * Fully-qualified refs to fetch. Every advertised ref when absent.
+   *
+   * Each lands at `refs/remotes/<remote>/…` — the remote-tracking half of the
+   * store — so a fetch never moves a local branch and the merge that follows is
+   * the ordinary one (A22).
+   */
+  refs?: readonly string[];
+  /**
+   * Abandon this fetch when it fires (S24, F16's 10 s).
+   *
+   * The open pull is the one operation with a deadline of its own, and a bound
+   * the *caller* holds is the only one that can end the socket rather than just
+   * the caller's wait. Honoured by the engines that can: the browser leg passes
+   * it to every request the fetch makes; a leg that spawns `git` leaves the
+   * process to its own transport timeouts (W13 review 2 P36).
+   */
+  signal?: AbortSignal;
 }>;
+
+/** The remote-tracking refs one fetch wrote. @public */
+export type RevisionFetchResult = Readonly<{
+  /** `refs/remotes/<remote>/<name>` entries, as this store now holds them. */
+  refs: readonly RemoteRef[];
+}>;
+
+/** One ref a push offers the remote. @public */
+export type RevisionPushRef = Readonly<{
+  /** Fully-qualified local ref, e.g. `refs/heads/main` or `refs/tau/chats/c1`. */
+  name: string;
+  /** The receiving ref, when it differs from {@link RevisionPushRef.name}. */
+  remoteName?: string;
+  /**
+   * The lease: what this host last observed the *remote* ref to be (D14's
+   * `push(expected)`, A32, S24).
+   *
+   * Three states, and the difference between the last two matters:
+   *
+   * - **Absent** — no lease. The remote's own fast-forward rule decides, which
+   *   is what a first push and the record set want.
+   * - **A revision** — refuse unless the remote ref is still exactly there. A
+   *   rewritten history (restore, amend) is allowed *because* nothing moved
+   *   underneath it; a ref that moved is refused with `leaseLost` and left
+   *   alone, which is the conflict signal A22 works from.
+   * - **`undefined`** — refuse unless the ref does not exist yet.
+   */
+  expected?: RevisionId | undefined;
+}>;
+
+/**
+ * What one push asks of a remote.
+ *
+ * The caller splits the two sets (A39) and this is where the difference is
+ * expressed: the history set goes `atomic`, so `main` and its tags land
+ * together or not at all, and the record set does not, so a chat ref the server
+ * refuses never blocks a branch.
+ *
+ * @public
+ */
+export type RevisionPushInput = Readonly<{
+  remote: string;
+  refs: readonly RevisionPushRef[];
+  /** All-or-nothing across the listed refs. Default `false`. */
+  atomic?: boolean;
+}>;
+
+/** How one ref of a push ended. @public */
+export type RevisionPushRefStatus = 'updated' | 'upToDate' | 'rejected';
+
+/** One ref's outcome, which is the unit a push reports in. @public */
+export type RevisionPushRefResult = Readonly<{
+  /** The local ref that was offered. */
+  name: string;
+  status: RevisionPushRefStatus;
+  /** What the remote holds for this ref now, when the push moved it. */
+  head: RevisionId | undefined;
+  /**
+   * Why it was refused, when it was. Never a credential.
+   *
+   * The server's own words where there are any — git's `--porcelain` text on
+   * the native leg, the remote's per-ref error on the browser leg — and
+   * `leaseLost` where the client refused the push itself, because a lease it
+   * held no longer matched the advertisement and nothing was offered.
+   */
+  reason?: string;
+}>;
+
+/** Every offered ref's outcome, in the order they were offered. @public */
+export type RevisionPushResult = Readonly<{ refs: readonly RevisionPushRefResult[] }>;
 
 /** The conflicted term trees and labels recorded on one revision. @public */
 export type RevisionConflict = Readonly<{
@@ -215,6 +332,78 @@ export type Checkout = Readonly<{
   baseRevisionId: RevisionId | undefined;
 }>;
 
+/**
+ * One checkout as a project's registry holds it: the port's record, plus the
+ * two facts only a host knows.
+ *
+ * The port's `baseRevisionId` is the branch's head, and the registry calls it
+ * `headRevisionId`, so the rename happens here once instead of at every
+ * consumer. `leaseRunIds` comes from `.tau/runs` — the port knows nothing about
+ * leases — and `removable` from the host's clock and merged-branch policy.
+ *
+ * @public
+ */
+export type CheckoutRecord = Readonly<Omit<Checkout, 'baseRevisionId'>> &
+  Readonly<{
+    /** The revision this checkout's branch names, or `undefined` while unborn. */
+    headRevisionId?: string;
+    /** Tree object id of that head — the left-hand side of the I5 gate. */
+    headTreeId?: string;
+    /** Run ids of the leases currently holding this checkout. */
+    leaseRunIds: readonly string[];
+    /**
+     * Chat ids of those leases, deduplicated.
+     *
+     * A record, not a routing memory: the chips that say who is working where
+     * come from `.tau/runs/*.json` like every other lease fact, so a host that
+     * rehydrates from records alone rebuilds them (I3; W7 review R9).
+     */
+    leaseChatIds: readonly string[];
+    /** Set when the host's policy would offer this checkout for removal (A25). */
+    removable?: boolean;
+    /**
+     * Set when this branch's head is a conflicted revision (A22, W10).
+     *
+     * The head *is* the conflicted revision — a conflicted merge mints it on the
+     * branch a person merged from — so there is no second id to carry. One
+     * commit read per checkout answers it, and it is record-derived like every
+     * other field here, so *Needs resolution* survives a reload (I3).
+     */
+    conflicted?: boolean;
+  }>;
+
+/**
+ * One named version: an annotated tag on a revision (S31, A21).
+ *
+ * Annotated rather than lightweight, because a name has an author, a time and a
+ * reason of its own — and because an annotated tag is an object every git
+ * client and host already understands, so `refs/tags/*` transports with the
+ * history set (A39) and a clone shows the names without Tau.
+ *
+ * @public
+ */
+export type RevisionTag = Readonly<{
+  /** Unique per project. `refs/tags/<name>`. */
+  name: string;
+  revisionId: RevisionId;
+  /** Why this version has a name. */
+  note: string | undefined;
+  /** Who named it (S37). `undefined` on a tag this store did not write. */
+  actor: RevisionActor | undefined;
+  /** Milliseconds since the Unix epoch. */
+  createdAt: number;
+}>;
+
+/** Input for naming one revision. @public */
+export type CreateRevisionTagInput = Readonly<{
+  name: string;
+  revisionId: RevisionId;
+  note?: string;
+  actor?: RevisionActor;
+  /** Milliseconds since the Unix epoch. Defaults to the store's clock. */
+  createdAt?: number;
+}>;
+
 /** Input for adding one linked checkout. @public */
 export type AddCheckoutInput = Readonly<{
   /** The branch the new checkout tracks. One checkout per branch. */
@@ -239,21 +428,70 @@ export type RevisionPort = Readonly<{
   readRevision(id: RevisionId): Promise<RevisionRecord | undefined>;
   readTree(id: RevisionId): Promise<ImmutableRevisionTree | undefined>;
   writeRevision(input: WriteRevisionInput): Promise<RevisionReceipt>;
+  /** A branch by name, or any other ref spelled in full. */
   readRef(name: string): Promise<RevisionId | undefined>;
   updateRef(input: UpdateRevisionRefInput): Promise<UpdateRevisionRefResult>;
   /** The branch the live tree tracks, or `undefined` in a store that has none yet. */
   readHead(): Promise<RevisionHead | undefined>;
   /** Point the live tree's head at one branch, born or not. */
   setHead(branch: string): Promise<void>;
+  /**
+   * Named refs, answered in the vocabulary the prefix was asked in.
+   *
+   * No prefix, or a bare one, lists branch names as branch names; a prefix
+   * beginning `refs/` lists that namespace and reports full names, which is how
+   * the record set (`refs/tau/chats/*`) is enumerated (W17).
+   */
   listRefs(prefix?: string): Promise<readonly RevisionRef[]>;
+  /**
+   * The reachable graph in first-parent-first topological order, newest first.
+   *
+   * A revision appears only after every revision that names it as a parent, and
+   * among those eligible the one reached by following first parents comes
+   * first — so a merge is followed by its first-parent side, then the side it
+   * merged, then their common history. Every engine answers identically; `limit`
+   * cuts that order from the front and never reorders it (review 4 R12).
+   *
+   * Unbounded, that holds unconditionally. A *bounded* walk reads only what the
+   * order needs and assumes non-decreasing committer time from parent to child
+   * to know when it has read enough: under an inverted clock a bounded result
+   * may place a parent before a child (review 4 R39).
+   */
   log(input?: RevisionLogInput): Promise<readonly RevisionLogEntry[]>;
   diff(input: RevisionDiffInput): Promise<readonly RevisionDiffEntry[]>;
-  fetch(input: RevisionTransportInput): Promise<void>;
-  push(input: RevisionTransportInput): Promise<void>;
+  /** Every ref the remote advertises, without fetching an object. */
+  listRemoteRefs(remote: string): Promise<readonly RemoteRef[]>;
+  /** Bring the remote's refs into `refs/remotes/<remote>/…`; never moves a branch. */
+  fetch(input: RevisionFetchInput): Promise<RevisionFetchResult>;
+  /** Offer refs to the remote and report each one's outcome. */
+  push(input: RevisionPushInput): Promise<RevisionPushResult>;
+  /** Git's own remotes list for this store. */
+  listRemotes(): Promise<readonly Remote[]>;
+  /** Create or re-point one remote by name. */
+  setRemote(input: Readonly<{ name: string; url: string }>): Promise<void>;
+  /** Remove one remote. History and remote-tracking refs stay. */
+  removeRemote(name: string): Promise<void>;
+  /**
+   * Name one revision, replacing an existing name of the same spelling.
+   *
+   * Re-pointing is the same operation as creating: a name is a name for a head,
+   * exactly as a branch is, and *Rename* in the pane is a create plus a delete.
+   */
+  tag(input: CreateRevisionTagInput): Promise<RevisionTag>;
+  /** Every named version in this store, by name. */
+  listTags(): Promise<readonly RevisionTag[]>;
+  /** Remove one name. The revision it named stays, and stays reachable by id. */
+  deleteTag(name: string): Promise<void>;
   /** Rendered Jujutsu change id of one revision. */
   changeId?(id: RevisionId): Promise<string | undefined>;
-  /** Conflicted term trees and labels, or `undefined` when the revision is resolved. */
-  conflicts?(id: RevisionId): Promise<RevisionConflict | undefined>;
+  /**
+   * Conflicted term trees and labels, or `undefined` when the revision is resolved.
+   *
+   * Required since W10: a conflict is a value in this graph, and a host that
+   * could record one without being able to read it back would leave a person
+   * with a branch that says *Needs resolution* and nothing to resolve.
+   */
+  conflicts(id: RevisionId): Promise<RevisionConflict | undefined>;
   /** Every place this project's files are, live checkout first. */
   listCheckouts?(): Promise<readonly Checkout[]>;
   /** Add one linked checkout on its own branch. */
@@ -270,6 +508,16 @@ export type RevisionPortErrorCode =
   | 'ENGINE_UNAVAILABLE'
   | 'INVALID_REPOSITORY'
   | 'INVALID_TRANSPORT'
+  /**
+   * The push would carry large objects and the remote cannot hold them (P20).
+   *
+   * Raised by both legs, before any object or ref is offered, so a third-party
+   * remote never receives pointers whose bytes have nowhere to go. The message
+   * names the files.
+   */
+  | 'LFS_REMOTE_UNSUPPORTED'
+  /** A large object this revision references is not in this store, and cannot be fetched. */
+  | 'MISSING_LARGE_OBJECT'
   | 'UNKNOWN_REVISION'
   | 'UNSUPPORTED_OPERATION';
 

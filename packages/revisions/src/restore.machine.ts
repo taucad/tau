@@ -294,3 +294,14 @@ export const selectRestoreNeedsConfirmation = (snapshot: SnapshotFrom<typeof res
  */
 export const selectRestoreBusy = (snapshot: SnapshotFrom<typeof restoreMachine>): boolean =>
   snapshot.matches('planning') || snapshot.matches('applying');
+
+/**
+ * The actor set a host provides for `restoreMachine` (S37).
+ *
+ * Taken from the machine's own `provide` parameter so an implementation that
+ * drifts from an actor's input or output is a type error at the host, not a
+ * runtime surprise inside a state.
+ *
+ * @public
+ */
+export type RestoreActors = NonNullable<Parameters<typeof restoreMachine.provide>[0]['actors']>;

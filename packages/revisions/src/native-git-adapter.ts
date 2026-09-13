@@ -10,6 +10,8 @@ import {
   revisionId,
 } from '@taucad/filesystem/revisions';
 import { revisionBranchName } from '#revision-authority.js';
+// eslint-disable-next-line import-x/no-extraneous-dependencies -- package import map resolves this internal source file.
+import { refPatternIsHostLocal } from '#remotes.js';
 import type { RevisionId } from '@taucad/filesystem/revisions';
 import type { BranchHeadUpdateResult, Revision, RevisionProvenance, RevisionSummary } from '#revision-authority.js';
 // eslint-disable-next-line import-x/no-extraneous-dependencies -- package import map resolves this internal source file.
@@ -96,37 +98,16 @@ const transportValueSchema = z
   .string()
   .min(1)
   .refine((value) => !value.startsWith('-') && !hasControlCharacter(value));
-/**
- * The `refs/tau/*` namespaces that are host-local and never transport.
- *
- * `refs/tau/{chats,evidence,artifacts}` are deliberately absent: they are the
- * records the design pushes (D14, A15, A30), and a guard over the whole
- * namespace refused exactly them (review 3 F13).
+/*
+ * The host-local ref list moved to `#remotes.js` in W11b: both legs' transports
+ * have to refuse the same set, and this module is Node-only.
  */
-const hostLocalRefPrefixes: readonly string[] = Object.freeze([
-  'refs/tau/owners',
-  'refs/tau/workspaces',
-  'refs/tau/revisions',
-  'refs/tau/transactions',
-  'refs/tau/head',
-]);
-const isManagedRef = (ref: string): boolean =>
-  hostLocalRefPrefixes.some((prefix) => ref === prefix || ref.startsWith(`${prefix}/`));
-const refPatternIntersectsManagedReferences = (pattern: string): boolean => {
-  const wildcard = pattern.indexOf('*');
-  if (wildcard === -1) {
-    return isManagedRef(pattern);
-  }
-  // A wildcard is refused when anything it can expand into is host-local.
-  const prefix = pattern.slice(0, wildcard);
-  return hostLocalRefPrefixes.some((managed) => managed.startsWith(prefix) || prefix.startsWith(`${managed}/`));
-};
 const externalRefspecSchema = transportValueSchema.refine((refspec) => {
   const normalized = refspec.startsWith('+') || refspec.startsWith('^') ? refspec.slice(1) : refspec;
   const separator = normalized.indexOf(':');
   const source = separator === -1 ? normalized : normalized.slice(0, separator);
   const destination = separator === -1 ? '' : normalized.slice(separator + 1);
-  return [source, destination].every((ref) => ref.length === 0 || !refPatternIntersectsManagedReferences(ref));
+  return [source, destination].every((ref) => ref.length === 0 || !refPatternIsHostLocal(ref));
 });
 const revisionIdentifierSchema = z.string().refine((value) => {
   try {

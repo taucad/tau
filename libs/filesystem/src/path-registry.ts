@@ -13,9 +13,11 @@
  * needed to answer.
  *
  * A path no row names is authored, versioned, agent-writable and observed on
- * the UI plane — including `.tau/parameters/**`, `.tau/skills/**` and the rest
- * of the authored `.tau` controls, which a blanket `.tau` exclusion used to
- * swallow.
+ * the UI plane — except inside `.tau`, where the default is
+ * {@link reservedTauPathClassification} (P13). The authored `.tau` controls —
+ * `.tau/parameters/**`, `.tau/skills/**`, `.tau/AGENTS.md` — are rows of their
+ * own, which is what keeps that default from swallowing them the way a blanket
+ * `.tau` exclusion once did.
  *
  * @module
  */
@@ -51,8 +53,9 @@ export type PathRegistryRow = PathClassification &
 /**
  * What an unlisted path is.
  *
- * Sources, `tau.json`, `.gitignore`, `.gitattributes` and every authored
- * `.tau` control land here: they are the revision.
+ * Sources, `tau.json`, `.gitignore` and `.gitattributes` land here: they are
+ * the revision. The authored `.tau` controls answer the same, through their own
+ * rows — inside `.tau` the default is the reserved one below (P13).
  *
  * @public
  */
@@ -60,6 +63,31 @@ export const unlistedPathClassification: PathClassification = Object.freeze({
   class: 'authored',
   versioned: true,
   agentAccess: 'read-write',
+  watch: 'ui',
+});
+
+/**
+ * What an unlisted path *inside* `.tau` is (P13).
+ *
+ * `.tau` is Tau's own directory, so a member of it that no row names is either
+ * a residue of a retired layout — the `.tau/workspaces` trees no migration
+ * deletes (I15) — or a family this build does not know. Either way it is not
+ * the user's design: never versioned, never the agent's. Watched on the UI
+ * plane like the records rows, so the file tree still sees it move.
+ *
+ * It is the fallback rather than a row because a row would name `.tau` itself:
+ * the directory holds the authored controls too, and hiding the container hides
+ * their discovery. It stays out of {@link pathRegistry} for the same reason the
+ * generated ignore file must not carry `/.tau/` — git cannot re-include a path
+ * under an excluded directory, so that one pattern would un-version
+ * `.tau/parameters` in the user's own checkout.
+ *
+ * @public
+ */
+export const reservedTauPathClassification: PathClassification = Object.freeze({
+  class: 'records',
+  versioned: false,
+  agentAccess: 'hidden',
   watch: 'ui',
 });
 
@@ -105,6 +133,37 @@ export const pathRegistry: readonly PathRegistryRow[] = Object.freeze([
     directory: false,
   },
 
+  /* The authored `.tau` controls: the user's own bytes that happen to live in
+   * Tau's directory. They answer exactly the authored default and exist only to
+   * win over {@link reservedTauPathClassification}. */
+  {
+    prefix: '.tau/parameters',
+    class: 'authored',
+    versioned: true,
+    agentAccess: 'read-write',
+    watch: 'ui',
+    anchored: true,
+    directory: true,
+  },
+  {
+    prefix: '.tau/skills',
+    class: 'authored',
+    versioned: true,
+    agentAccess: 'read-write',
+    watch: 'ui',
+    anchored: true,
+    directory: true,
+  },
+  {
+    prefix: '.tau/AGENTS.md',
+    class: 'authored',
+    versioned: true,
+    agentAccess: 'read-write',
+    watch: 'ui',
+    anchored: true,
+    directory: false,
+  },
+
   /* Records: host-written bytes inside the project. Read-only to agents, never
    * versioned (they ship on their own refs when sync is on). */
   {
@@ -125,18 +184,12 @@ export const pathRegistry: readonly PathRegistryRow[] = Object.freeze([
     anchored: true,
     directory: true,
   },
-  /* Chat transcripts are host records like the event log they sit beside; the
-   * two UI classifiers this registry replaced excluded them at HEAD, so the row
-   * keeps that answer until W17 reconciles it with the chat file set. */
-  {
-    prefix: '.tau/transcripts',
-    class: 'records',
-    versioned: false,
-    agentAccess: 'read-only',
-    watch: 'ui',
-    anchored: true,
-    directory: true,
-  },
+  /* `.tau/transcripts` is *not* a row: W17's reconciliation (W1 review R3)
+   * found it is `.tau/chats` under an older name. Nothing has written it since
+   * `refactor(api)!: Remove the agent execution plane` deleted its only writer,
+   * and nothing ever read it from disk — the two remaining spellings were a
+   * synthetic @-mention path and a prompt line, both now pointing at the chat's
+   * real log. One records family, one row. */
   /* The agent's own `export_geometry` writes its artifacts through the agent's
    * provider, so these three stay writable until the host owns that write.
    * A9 ("records are read-only to agents") lands on them with that move. */
@@ -218,16 +271,6 @@ export const pathRegistry: readonly PathRegistryRow[] = Object.freeze([
     anchored: true,
     directory: true,
   },
-  // W3 removes this row with the candidate checkouts it names.
-  {
-    prefix: '.tau/workspaces',
-    class: 'control-plane',
-    versioned: false,
-    agentAccess: 'hidden',
-    watch: 'none',
-    anchored: true,
-    directory: true,
-  },
   {
     prefix: '.tau/binding.json',
     class: 'control-plane',
@@ -271,6 +314,19 @@ const covers = (row: PathRegistryRow, relative: string): boolean => {
 };
 
 /**
+ * Each row's answer alone, built once.
+ *
+ * A row carries its prefix and matching rules as well as its answer; callers
+ * (and equality in tests) get the answer, so the projection happens here rather
+ * than on every classified path.
+ */
+const rowClassifications: readonly PathClassification[] = Object.freeze(
+  pathRegistry.map(({ class: storageClass, versioned, agentAccess, watch }) =>
+    Object.freeze({ class: storageClass, versioned, agentAccess, watch }),
+  ),
+);
+
+/**
  * Classify one project-relative path.
  *
  * @param projectRelativePath - Path relative to the project root; a leading `/` is tolerated.
@@ -287,5 +343,9 @@ const covers = (row: PathRegistryRow, relative: string): boolean => {
  */
 export const classify = (projectRelativePath: string): PathClassification => {
   const relative = projectRelativePath.replace(/^\/+/u, '');
-  return pathRegistry.find((row) => covers(row, relative)) ?? unlistedPathClassification;
+  const index = pathRegistry.findIndex((row) => covers(row, relative));
+  return (
+    rowClassifications[index] ??
+    (relative.startsWith('.tau/') ? reservedTauPathClassification : unlistedPathClassification)
+  );
 };

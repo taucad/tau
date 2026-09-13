@@ -73,6 +73,20 @@ export class ImmutableRevisionTree {
       files.set(path, bytes);
       byteLength += bytes.byteLength;
     }
+    /* A path that is also a directory prefix is a shape Git cannot represent:
+     * `isomorphic-git` writes a tree `git fsck --strict` calls
+     * `duplicateEntries` and `git fast-import` writes a different tree from the
+     * same input, so the two engines would disagree on identity *and* one of
+     * them would hold a corrupt object. It fails closed here, the one place
+     * every writer passes through (review 4 R27). */
+    for (const path of files.keys()) {
+      for (let index = path.indexOf('/'); index !== -1; index = path.indexOf('/', index + 1)) {
+        const prefix = path.slice(0, index);
+        if (files.has(prefix)) {
+          throw new TypeError(`Revision tree path ${path} collides with the file ${prefix}.`);
+        }
+      }
+    }
     this.#files = files;
     this.#byteLength = byteLength;
   }

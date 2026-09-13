@@ -16,25 +16,36 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { readFile, writeFile } from 'node:fs/promises';
-import { basename, join } from 'node:path';
+import { mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
+import { basename, dirname, join } from 'node:path';
 import { ImmutableRevisionTree, ResourceQueue, revisionId } from '@taucad/filesystem/revisions';
 import type { RevisionId } from '@taucad/filesystem/revisions';
 import type { RevisionProvenance } from '#revision-authority.js';
-import { decodeCommit, encodeCommit } from '#git-objects.js';
-import type { DecodedCommit, GitSignature } from '#git-objects.js';
+import { decodeCommit, decodeTag, encodeCommit, encodeTag } from '#git-objects.js';
+import type { DecodedCommit } from '#git-objects.js';
 import { runGitCommand } from '#git-command.js';
 import type { GitCommandResult } from '#git-command.js';
-import { parseExternalRefspec, parseTransportValue, quoteFastImportPath } from '#native-git-adapter.js';
+import { parseTransportValue, quoteFastImportPath } from '#native-git-adapter.js';
 import { NativeGitError } from '#native-git.types.js';
 import { digestHex } from '#object-hash.js';
 import type { ObjectFormat } from '#object-hash.js';
-import { deriveChangeId, parseRevisionCommitMessage, revisionCommitMessage } from '#revision-headers.js';
+import {
+  deriveChangeId,
+  parseRevisionCommitMessage,
+  parseRevisionTagMessage,
+  revisionAuthorSignature,
+  revisionCommitMessage,
+  revisionCommitterSignature,
+  revisionTagMessage,
+  taggerSignature,
+} from '#revision-headers.js';
 import type { RevisionTrailer } from '#revision-headers.js';
+import { walkRevisionLog } from '#revision-log-order.js';
 import { RevisionPortError } from '#revision-port.js';
 import type {
   AddCheckoutInput,
   Checkout,
+  CreateRevisionTagInput,
   InitRevisionStoreInput,
   RevisionConflict,
   RevisionDiffEntry,
@@ -46,13 +57,35 @@ import type {
   RevisionPort,
   RevisionReceipt,
   RevisionRecord,
+  RevisionFetchInput,
+  RevisionFetchResult,
+  RevisionPushInput,
+  RevisionPushRef,
+  RevisionPushRefResult,
+  RevisionPushResult,
   RevisionRef,
-  RevisionTransportInput,
+  RevisionTag,
+  RemoteRef,
   UpdateRevisionRefInput,
   UpdateRevisionRefResult,
   WriteRevisionInput,
 } from '#revision-port.js';
-import { generatedIgnoreContent, generatedIgnorePath } from '#workspace-config.js';
+import { cleanLargeObjects, lfsObjectPath, readLfsPointer } from '#lfs.js';
+import {
+  isHostLocalRef,
+  isTauApiUrl,
+  lfsRemoteUnsupportedMessage,
+  remoteCarriesLargeObjects,
+  remoteOf,
+  remoteTrackingRef,
+} from '#remotes.js';
+import type { Remote } from '#remotes.js';
+import {
+  generatedGitattributesContent,
+  generatedGitattributesPath,
+  generatedIgnoreContent,
+  generatedIgnorePath,
+} from '#workspace-config.js';
 
 /** Where linked checkouts live, and which project they belong to. @public */
 export type NativeGitCheckoutOptions = Readonly<{
@@ -65,6 +98,24 @@ export type NativeGitCheckoutOptions = Readonly<{
   directory: string;
 }>;
 
+/**
+ * What authorizes this leg's requests to Tau's own git remotes (P40).
+ *
+ * The browser sends its session cookie; a terminal or a daemon has none, so the
+ * same session travels as a header this port passes to git per spawn. It is
+ * never written to disk: not into `.git/config`, not into a credential helper,
+ * and not into the remote URL — `git -c http.extraHeader=…` lives and dies with
+ * the child process.
+ *
+ * @public
+ */
+export type TauApiCredential = Readonly<{
+  /** Origin the Tau API is reachable at, which decides which remotes get it. */
+  apiBaseUrl: string;
+  /** The whole header value, e.g. `Bearer <session token>`. */
+  authorization: string;
+}>;
+
 /** Native-Git revision port configuration. @public */
 export type NativeGitRevisionPortOptions = Readonly<{
   /** The project directory. `init` creates the repository in it when absent. */
@@ -72,25 +123,64 @@ export type NativeGitRevisionPortOptions = Readonly<{
   gitExecutable?: string;
   /** Supplied, the port advertises and implements the `checkouts` capability. */
   checkouts?: NativeGitCheckoutOptions;
+  /**
+   * Read before every request to a remote, so a session that is refreshed or
+   * signed out takes effect on the next command rather than at the next open.
+   */
+  tauCredential?: () => TauApiCredential | undefined;
 }>;
 
+/**
+ * A lost lease, in the one word both legs answer with.
+ *
+ * `--force-with-lease` is refused by *git itself* — the summary is
+ * `[rejected] (stale info)` — while the browser leg refuses the same case in
+ * its own code and says `leaseLost`. A caller must not have to know which leg
+ * it is holding: `revision-effects` reads this word to tell somebody that the
+ * project moved in the cloud, and every other refusal keeps the server's own
+ * words (P38, D14).
+ *
+ * @param summary - git's `--porcelain` summary for a refused ref.
+ * @returns `leaseLost`, or the summary unchanged.
+ */
+const refusalReason = (summary: string): string => (/stale info/iu.test(summary) ? 'leaseLost' : summary);
+
 const branchRefPrefix = 'refs/heads';
+const tagRefPrefix = 'refs/tags';
 const symbolicRefPrefix = 'ref: ';
 const stagingRefPrefix = 'refs/tau/transactions/port';
 const initialBranch = 'main';
+/** The store this port owns, relative to the project directory. */
+const gitDirectoryName = '.git';
 const liveCheckoutId = 'live';
+/**
+ * Configuration this port pins on every command, ahead of the subcommand.
+ *
+ * The environment scrub takes care of `GIT_*`; these three reach git from the
+ * user's own `~/.gitconfig` instead, and each of them changes the bytes a
+ * checkout or a new repository ends up holding (W3a review R43):
+ *
+ * - `core.autocrlf` rewrites line endings on checkout, so a tree recorded on one
+ *   machine would materialize differently on another — and `treeId` is the
+ *   identity every host compares (I4).
+ * - `core.hooksPath` runs somebody else's scripts inside Tau's own plumbing. A
+ *   path that is not a directory disables hooks on every platform.
+ * - `init.templateDir` installs hooks and config into a repository this port
+ *   creates. Empty is git's own "no template", and it is silent.
+ */
+const pinnedConfiguration: readonly string[] = Object.freeze([
+  '-c',
+  'core.autocrlf=false',
+  '-c',
+  'core.hooksPath=/dev/null',
+  '-c',
+  'init.templateDir=',
+]);
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder('utf-8', { fatal: true });
 
 const frozenChange = (path: string, kind: RevisionDiffEntry['kind']): RevisionDiffEntry =>
   Object.freeze({ path, kind });
-
-const signature = (provenance: RevisionProvenance): GitSignature => ({
-  name: provenance.actorId,
-  email: `${provenance.source}@tau.invalid`,
-  seconds: Math.floor(provenance.createdAt / 1000),
-  offsetMinutes: 0,
-});
 
 /**
  * `diff-tree --name-status`' letter, as a port change kind.
@@ -140,13 +230,49 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
   const refQueue = new ResourceQueue();
   let objectFormat: ObjectFormat | undefined;
 
+  /**
+   * Every `GIT_*` variable the caller exported, unset.
+   *
+   * `runCommand` spreads `process.env` into the child, so one exported
+   * `GIT_DIR` re-points every command — `git init` included — at somebody
+   * else's repository, which is the R2 defect through another door (review 4
+   * R25). The two variables the port needs, it sets itself.
+   *
+   * @returns One `undefined` per inherited `GIT_*` name.
+   */
+  const clearedGitEnvironment = (): Record<string, string | undefined> =>
+    Object.fromEntries(
+      Object.keys(process.env)
+        .filter((name) => name.startsWith('GIT_'))
+        .map((name) => [name, undefined]),
+    );
+
+  /**
+   * The cleared environment, pinned to this project's own store and work tree.
+   *
+   * @returns The environment every command of this port runs under.
+   */
+  const gitEnvironment = (): Record<string, string | undefined> => {
+    const pinned = clearedGitEnvironment();
+    // Environment names, not identifiers: assigned rather than spelled as keys.
+    pinned['GIT_DIR'] = join(repositoryPath, gitDirectoryName);
+    pinned['GIT_WORK_TREE'] = repositoryPath;
+    return pinned;
+  };
+
   const run = async (
     args: readonly string[],
     input?: ReadonlyArray<Uint8Array<ArrayBuffer>>,
-    cwd = repositoryPath,
+    env: Record<string, string | undefined> = gitEnvironment(),
   ): Promise<GitCommandResult> => {
     try {
-      return await runGitCommand({ gitExecutable, cwd, args, ...(input === undefined ? {} : { input }) });
+      return await runGitCommand({
+        gitExecutable,
+        cwd: repositoryPath,
+        args: [...pinnedConfiguration, ...args],
+        env,
+        ...(input === undefined ? {} : { input }),
+      });
     } catch (error) {
       throw new RevisionPortError('ENGINE_UNAVAILABLE', `Native Git could not start ${args[0] ?? 'a command'}.`, {
         cause: error,
@@ -157,17 +283,37 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
   const output = async (
     args: readonly string[],
     input?: ReadonlyArray<Uint8Array<ArrayBuffer>>,
-    cwd = repositoryPath,
   ): Promise<Uint8Array<ArrayBuffer>> => {
-    const result = await run(args, input, cwd);
+    const result = await run(args, input);
     if (result.exitCode !== 0) {
       throw new RevisionPortError('ENGINE_FAILED', `Native Git failed ${args[0] ?? 'a command'}.`);
     }
     return result.stdout;
   };
 
-  const text = async (args: readonly string[], cwd = repositoryPath): Promise<string> =>
-    textDecoder.decode(await output(args, undefined, cwd)).trim();
+  const text = async (args: readonly string[]): Promise<string> => textDecoder.decode(await output(args)).trim();
+
+  /**
+   * The `-c http.extraHeader=…` a request to Tau's own git server carries (P40).
+   *
+   * Only for a remote on the API's origin: a header minted for Tau must never
+   * reach a third-party remote, which is the same rule the browser leg's
+   * transport applies to the cookie (W11b review Q2).
+   *
+   * @param remote - The remote a command is about to talk to.
+   * @returns The configuration arguments, or none.
+   */
+  const tauAuthorization = async (remote: string): Promise<readonly string[]> => {
+    const held = options.tauCredential?.();
+    if (held === undefined) {
+      return [];
+    }
+    const remotes = await port.listRemotes();
+    const url = remotes.find((entry) => entry.name === remote)?.url;
+    return url !== undefined && isTauApiUrl(held.apiBaseUrl, url)
+      ? ['-c', `http.extraHeader=Authorization: ${held.authorization}`]
+      : [];
+  };
 
   const format = async (): Promise<ObjectFormat> => {
     if (objectFormat === undefined) {
@@ -197,7 +343,13 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
 
   const entryOf = (id: RevisionId, commit: DecodedCommit): RevisionLogEntry => {
     const trailer = parseRevisionCommitMessage(commit.message);
-    const unattributed: RevisionProvenance = { source: 'import', actorId: 'unknown', createdAt: 0 };
+    /* A project Tau did not write carries no trailer, and its date is still the
+     * one git shows: the commit's own author time. */
+    const unattributed: RevisionProvenance = {
+      source: 'import',
+      actorId: 'unknown',
+      createdAt: commit.author.seconds * 1000,
+    };
     return Object.freeze({
       id,
       changeId: commit.changeId ?? '',
@@ -218,6 +370,88 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
     });
 
   /**
+   * Where one large object lives in this repository's own LFS store.
+   *
+   * @param oid - The pointer's object id.
+   * @returns The absolute path git-lfs reads and writes that object at.
+   */
+  const lfsObjectFile = (oid: string): string => join(repositoryPath, gitDirectoryName, lfsObjectPath(oid));
+
+  /**
+   * Put one large object in this repository's own LFS store.
+   *
+   * Content-addressed, so an object that is already stored is the same object:
+   * a second revision over the same bytes writes nothing.
+   *
+   * @param oid - The pointer's object id.
+   * @param content - The object's real bytes.
+   */
+  /**
+   * The large files a push would carry, by project-relative path (P20).
+   *
+   * `git lfs ls-files` is the disk leg's own answer to the question the browser
+   * leg answers by reading pointer blobs out of the offered trees: both name the
+   * LFS files reachable from the refs being offered, so the two legs refuse the
+   * same push with the same list. git-lfs is on the toolchain by the time a
+   * store exists (`resolveGitLfs`), so this asks the tool rather than
+   * re-implementing pointer detection here.
+   *
+   * @param references - The refs this push offers.
+   * @returns Their large files, deduplicated.
+   */
+  const largeObjectPaths = async (references: readonly RevisionPushRef[]): Promise<readonly string[]> => {
+    const paths = new Set<string>();
+    for (const reference of references) {
+      // oxlint-disable-next-line no-await-in-loop -- one tip per offered ref, on the pre-push check only.
+      const listed = await run(['lfs', 'ls-files', '--name-only', reference.name]).catch(() => undefined);
+      if (listed?.exitCode !== 0) {
+        continue;
+      }
+      for (const line of textDecoder.decode(listed.stdout).split('\n')) {
+        const path = line.trim();
+        if (path !== '') {
+          paths.add(path);
+        }
+      }
+    }
+    return [...paths];
+  };
+
+  const storeLfsObject = async (oid: string, content: Uint8Array<ArrayBuffer>): Promise<void> => {
+    const file = lfsObjectFile(oid);
+    await mkdir(dirname(file), { recursive: true });
+    await writeFile(file, content, { flag: 'wx' }).catch((error: unknown) => {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
+        // oxlint-disable-next-line @typescript-eslint/only-throw-error -- re-raising exactly what the write threw.
+        throw error;
+      }
+    });
+  };
+
+  /**
+   * One blob as a caller reads it: the pointer resolved back to its content.
+   *
+   * @param content - Bytes as the object store holds them.
+   * @returns The real bytes.
+   */
+  const smudged = async (content: Uint8Array<ArrayBuffer>): Promise<Uint8Array<ArrayBuffer>> => {
+    const pointer = readLfsPointer(content);
+    if (pointer === undefined) {
+      return content;
+    }
+    try {
+      const stored = await readFile(lfsObjectFile(pointer.oid));
+      return new Uint8Array(stored.buffer as ArrayBuffer, stored.byteOffset, stored.byteLength);
+    } catch (error) {
+      throw new RevisionPortError(
+        'UNKNOWN_REVISION',
+        'A large object this revision references is not on this machine yet.',
+        { cause: error },
+      );
+    }
+  };
+
+  /**
    * Write one tree through a single `fast-import`, then drop the staging ref.
    *
    * The commit `fast-import` writes is a throwaway: this port needs the *tree*
@@ -227,6 +461,12 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
    * @returns The root tree's object id.
    */
   const writeTreeObject = async (tree: ImmutableRevisionTree): Promise<string> => {
+    /* `fast-import` stores `inline` data verbatim, so git's own clean filter
+     * never runs on this path and the pointer decision is Tau's. It is made by
+     * the host-neutral cut (`lfs.ts`) that the cut's `treeId` is computed from,
+     * so the id this engine records is the id the host predicted. */
+    const recorded = cleanLargeObjects(tree);
+    await Promise.all([...recorded.objects].map(async ([oid, content]) => storeLfsObject(oid, content)));
     const stagingRef = `${stagingRefPrefix}-${randomUUID()}`;
     const chunks: Array<Uint8Array<ArrayBuffer>> = [
       textEncoder.encode(`commit ${stagingRef}\n`),
@@ -235,7 +475,7 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
       textEncoder.encode('data 0\n'),
       textEncoder.encode('deleteall\n'),
     ];
-    for (const entry of tree.entries()) {
+    for (const entry of recorded.tree.entries()) {
       chunks.push(
         textEncoder.encode(`M 100644 inline ${quoteFastImportPath(entry.path)}\n`),
         textEncoder.encode(`data ${entry.content.byteLength}\n`),
@@ -250,7 +490,44 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
     return treeId;
   };
 
-  const refOf = (name: string): string => `${branchRefPrefix}/${name}`;
+  /* A branch name is spelled short and everything else is spelled in full: the
+   * record set the design pushes lives outside `refs/heads` (`refs/tau/chats/*`,
+   * W17), so a port that could only name branches could not address half of what
+   * its own `push` moves. */
+  const refOf = (name: string): string => (name.startsWith('refs/') ? name : `${branchRefPrefix}/${name}`);
+
+  /**
+   * One named version, or `undefined` when the ref is gone.
+   *
+   * A lightweight tag — a valid git tag this store did not write — is still a
+   * name for a revision, so it is reported with no note and no actor rather
+   * than hidden.
+   *
+   * @param name - The tag name, without `refs/tags/`.
+   * @returns The named version.
+   */
+  const readTagRef = async (name: string): Promise<RevisionTag | undefined> => {
+    const ref = `${tagRefPrefix}/${name}`;
+    /* `resolve` peels (`^{commit}`), which is right everywhere else and wrong
+     * here: the tag object itself is what carries the note and the actor. */
+    const oid = await text(['for-each-ref', '--format=%(objectname)', ref]);
+    if (oid === '') {
+      return undefined;
+    }
+    const kind = await text(['cat-file', '-t', oid]);
+    if (kind !== 'tag') {
+      return Object.freeze({ name, revisionId: revisionId(oid), note: undefined, actor: undefined, createdAt: 0 });
+    }
+    const decoded = decodeTag(await output(['cat-file', 'tag', oid]));
+    const trailer = parseRevisionTagMessage(decoded.message);
+    return Object.freeze({
+      name,
+      revisionId: revisionId(decoded.object),
+      note: trailer.note,
+      actor: trailer.actor,
+      createdAt: decoded.tagger.seconds * 1000,
+    });
+  };
 
   const resolve = async (ref: string): Promise<string | undefined> => {
     const result = await run(['rev-parse', '--verify', '--quiet', `${ref}^{commit}`]);
@@ -327,15 +604,17 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
     return Object.freeze(collected);
   };
 
-  const transport = async (verb: 'fetch' | 'push', input: RevisionTransportInput): Promise<void> => {
+  /**
+   * Refuse a remote or ref that Git could read as an option, and any ref this
+   * host keeps to itself.
+   *
+   * @param value - The remote name or fully-qualified ref.
+   * @param label - What it names, for the diagnostic.
+   * @param ref - Whether the value is a ref and therefore subject to the host-local list.
+   */
+  const guardTransportValue = (value: string, label: string, ref = false): void => {
     try {
-      parseTransportValue(input.remote, 'remote');
-      if (input.refspecs.length === 0) {
-        throw new NativeGitError('INVALID_TRANSPORT', `${verb} requires at least one explicit refspec.`);
-      }
-      for (const refspec of input.refspecs) {
-        parseExternalRefspec(refspec);
-      }
+      parseTransportValue(value, label);
     } catch (error) {
       throw new RevisionPortError(
         'INVALID_TRANSPORT',
@@ -343,7 +622,107 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
         { cause: error },
       );
     }
-    await output([verb, ...(verb === 'fetch' ? ['--no-tags'] : []), '--', input.remote, ...input.refspecs]);
+    if (ref && isHostLocalRef(value)) {
+      throw new RevisionPortError('INVALID_TRANSPORT', `${label} names a ref that never leaves this host.`);
+    }
+  };
+
+  const listRemoteReferences = async (remote: string): Promise<readonly RemoteRef[]> => {
+    guardTransportValue(remote, 'remote');
+    const listing = await text([...(await tauAuthorization(remote)), 'ls-remote', '--refs', '--', remote]);
+    return Object.freeze(
+      listing
+        .split('\n')
+        .map((line) => line.split('\t'))
+        .filter((parts): parts is [string, string] => parts.length === 2 && parts[0] !== '' && parts[1] !== undefined)
+        .map(([oid, name]) => Object.freeze({ name, head: revisionId(oid) })),
+    );
+  };
+
+  /**
+   * One push's per-ref outcome, from `--porcelain`'s own table.
+   *
+   * `git push` writes one line per offered ref whether it succeeded or not, so
+   * a refused record ref is *data* here rather than a failed command — which is
+   * the whole point of the two push sets (A39).
+   *
+   * @param stdout - The command's `--porcelain` output.
+   * @param offered - The local refs, in the order they were offered.
+   * @returns One result per offered ref.
+   */
+  const parsePushPorcelain = async (
+    stdout: string,
+    offered: readonly string[],
+  ): Promise<readonly RevisionPushRefResult[]> => {
+    const rows = new Map<string, Readonly<{ flag: string; summary: string }>>();
+    for (const line of stdout.split('\n')) {
+      const parts = line.split('\t');
+      if (parts.length < 3 || parts[0] === undefined || parts[1] === undefined) {
+        continue;
+      }
+      const from = parts[1].split(':')[0] ?? '';
+      rows.set(from, Object.freeze({ flag: parts[0], summary: parts[2] ?? '' }));
+    }
+    return Object.freeze(
+      await Promise.all(
+        offered.map(async (name): Promise<RevisionPushRefResult> => {
+          const row = rows.get(name);
+          if (row === undefined || row.flag === '!') {
+            return Object.freeze({
+              name,
+              status: 'rejected',
+              head: undefined,
+              reason: row === undefined ? 'The remote did not report this ref.' : refusalReason(row.summary),
+            });
+          }
+          const local = await resolve(name);
+          return Object.freeze({
+            name,
+            status: row.flag === '=' ? 'upToDate' : 'updated',
+            head: local === undefined ? undefined : revisionId(local),
+          });
+        }),
+      ),
+    );
+  };
+
+  /**
+   * Whether this project directory *is* the top level of a repository.
+   *
+   * `rev-parse --git-dir` answers for the nearest enclosing repository, so a
+   * project nested inside one would adopt it and write its revisions there
+   * (review 4 R2). The question the port actually has is whether the store at
+   * this path is its own, which only `--show-toplevel` answers.
+   *
+   * @returns Whether a repository exists here and its top level is this path.
+   */
+  const ownsStore = async (): Promise<boolean> => {
+    /* Discovery, not the pinned store: the question is what is *already* at
+     * this path, so `GIT_DIR` must be absent here rather than pointed at the
+     * answer. Every `GIT_*` the caller exported is still stripped. */
+    const discovery = clearedGitEnvironment();
+    const bare = await run(['rev-parse', '--is-bare-repository'], undefined, discovery);
+    if (bare.exitCode === 0 && textDecoder.decode(bare.stdout).trim() === 'true') {
+      // Review 4 R26: a bare repository has no work tree to snapshot, and
+      // `--show-toplevel` below would call it "not a repository" and re-init it.
+      throw new RevisionPortError(
+        'INVALID_REPOSITORY',
+        'The project path is a bare repository; a revision store needs a work tree.',
+      );
+    }
+    const result = await run(['rev-parse', '--show-toplevel'], undefined, discovery);
+    if (result.exitCode !== 0) {
+      return false;
+    }
+    const reported = textDecoder.decode(result.stdout).trim();
+    if (reported.length === 0) {
+      return false;
+    }
+    try {
+      return (await realpath(reported)) === (await realpath(repositoryPath));
+    } catch {
+      return false;
+    }
   };
 
   const port: RevisionPort = Object.freeze({
@@ -358,19 +737,36 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
         transports: true,
         nWayMerge: false,
         checkouts: checkouts !== undefined,
+        largeObjects: true,
       });
     },
 
     init: async (input: InitRevisionStoreInput): Promise<void> => {
+      /* Asked first, and it throws for a bare repository: a path this port
+       * refuses is left exactly as it was, ignore file included (review 4 R40).
+       * The ordering that matters is the ignore file before `git init`, not
+       * before the question of what is already here. */
+      const owned = await ownsStore();
       const ignorePath = join(repositoryPath, generatedIgnorePath);
       const existing = await readFile(ignorePath, 'utf8').catch(() => undefined);
       await writeFile(ignorePath, generatedIgnoreContent(existing, input.additionalIgnores ?? []));
+      /* Beside the ignore file and versioned like it (D24): the two together are
+       * what a stock clone needs to read this project the way Tau wrote it. */
+      const attributesPath = join(repositoryPath, generatedGitattributesPath);
+      const attributes = await readFile(attributesPath, 'utf8').catch(() => undefined);
+      await writeFile(attributesPath, generatedGitattributesContent(attributes));
       // Only now: the repository is created after the file that decides what a
       // snapshot may ever contain already exists.
-      const attached = await run(['rev-parse', '--git-dir']);
-      if (attached.exitCode !== 0) {
+      if (!owned) {
         await output(['init', '--quiet', `--initial-branch=${initialBranch}`]);
       }
+      /* Pointers are Tau's (they must be identical on every host), but a *stock*
+       * checkout of this repository — `git worktree add` for a linked checkout,
+       * or somebody's own `git clone` — needs git-lfs's filters configured to
+       * resolve them. Best effort: a machine without the binary still records
+       * and reads revisions through this port, and `resolveGitLfs` is what tells
+       * an operator the transport half is missing. */
+      await run(['lfs', 'install', '--local']);
     },
 
     readRevision: async (id: RevisionId): Promise<RevisionRecord | undefined> => {
@@ -401,7 +797,7 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
         [...paths].map(
           async ([path, oid]): Promise<readonly [string, Uint8Array<ArrayBuffer>]> => [
             path,
-            await output(['cat-file', 'blob', oid]),
+            await smudged(await output(['cat-file', 'blob', oid])),
           ],
         ),
       );
@@ -419,8 +815,9 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
         objectFormat: await format(),
         tree: treeId,
         parents: [...input.parents],
-        author: signature(input.provenance),
-        committer: signature(input.provenance),
+        /* A26: the person wrote it, Tau recorded it — git's own split. */
+        author: revisionAuthorSignature(input.provenance),
+        committer: revisionCommitterSignature(input.provenance),
         message: revisionCommitMessage(trailer),
         changeId: deriveChangeId(await format(), { treeId, parents: input.parents, trailer }),
         ...(input.conflict === undefined
@@ -432,6 +829,62 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
         throw new RevisionPortError('ENGINE_FAILED', 'Native Git refused the revision commit object.');
       }
       return receiptOf(revisionId(textDecoder.decode(written.stdout).trim()), decodeCommit(commit.body));
+    },
+
+    /* S31: the same annotated tag bytes the browser leg writes, stored by
+     * `hash-object` for the same reason the commit is — `git tag -a` would take
+     * its tagger from the repository's config identity, not from the actor. */
+    tag: async (input: CreateRevisionTagInput): Promise<RevisionTag> => {
+      const named = await resolve(input.revisionId);
+      if (named === undefined) {
+        throw new RevisionPortError('UNKNOWN_REVISION', 'The revision this name would point at is not in the store.');
+      }
+      const createdAt = input.createdAt ?? Date.now();
+      const object = encodeTag({
+        objectFormat: await format(),
+        object: input.revisionId,
+        tag: input.name,
+        tagger: taggerSignature(input.actor, createdAt),
+        message: revisionTagMessage({ name: input.name, note: input.note, actor: input.actor }),
+      });
+      const written = await run(['hash-object', '-t', 'tag', '-w', '--stdin'], [object.body]);
+      if (written.exitCode !== 0) {
+        throw new RevisionPortError('ENGINE_FAILED', 'Native Git refused the named version tag object.');
+      }
+      const oid = textDecoder.decode(written.stdout).trim();
+      const updated = await run(['update-ref', `${tagRefPrefix}/${input.name}`, oid]);
+      if (updated.exitCode !== 0) {
+        throw new RevisionPortError('ENGINE_FAILED', `Native Git refused the tag ref ${input.name}.`);
+      }
+      return Object.freeze({
+        name: input.name,
+        revisionId: input.revisionId,
+        note: input.note,
+        actor: input.actor,
+        createdAt,
+      });
+    },
+
+    listTags: async (): Promise<readonly RevisionTag[]> => {
+      const records = await text(['for-each-ref', '--format=%(refname)%00%(objectname)', `${tagRefPrefix}/`]);
+      const names = records
+        .split('\n')
+        .filter((line) => line !== '')
+        .map((line) => line.split('\0')[0] ?? '')
+        .map((ref) => ref.slice(tagRefPrefix.length + 1))
+        .filter((name) => name !== '')
+        .toSorted();
+      const tags = await Promise.all(names.map(async (name) => readTagRef(name)));
+      return Object.freeze(tags.filter((entry) => entry !== undefined));
+    },
+
+    deleteTag: async (name: string): Promise<void> => {
+      const removed = await run(['update-ref', '-d', `${tagRefPrefix}/${name}`]);
+      /* Exit 1 is "no such ref": removing a name that is already gone is the
+       * outcome the caller asked for. */
+      if (removed.exitCode !== 0 && removed.exitCode !== 1) {
+        throw new RevisionPortError('ENGINE_FAILED', `Native Git refused to remove the tag ${name}.`);
+      }
     },
 
     readRef: async (name: string): Promise<RevisionId | undefined> => {
@@ -511,14 +964,19 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
     },
 
     listRefs: async (prefix?: string): Promise<readonly RevisionRef[]> => {
-      const records = await text(['for-each-ref', '--format=%(refname)%00%(objectname)', `${branchRefPrefix}/`]);
+      /* Answered in the vocabulary it was asked in: a `refs/`-qualified prefix
+       * names a namespace and gets full names back, a bare one filters branch
+       * names as it always has. */
+      const qualified = prefix?.startsWith('refs/') === true;
+      const namespace = qualified ? prefix.replace(/\/+$/u, '') : branchRefPrefix;
+      const records = await text(['for-each-ref', '--format=%(refname)%00%(objectname)', `${namespace}/`]);
       return Object.freeze(
         records
           .split('\n')
           .filter((record) => record !== '')
           .map((record) => {
             const [ref, head] = record.split('\0');
-            return { name: (ref ?? '').slice(branchRefPrefix.length + 1), head: head ?? '' };
+            return { name: qualified ? (ref ?? '') : (ref ?? '').slice(branchRefPrefix.length + 1), head: head ?? '' };
           })
           .filter((reference) => reference.name !== '' && (prefix === undefined || reference.name.startsWith(prefix)))
           .toSorted((left, right) => left.name.localeCompare(right.name))
@@ -531,27 +989,26 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
     log: async (input?: RevisionLogInput): Promise<readonly RevisionLogEntry[]> => {
       const references = input?.heads === undefined ? await port.listRefs() : undefined;
       const heads = [...(input?.heads ?? (references ?? []).map((reference) => reference.head))];
-      if (heads.length === 0) {
-        return Object.freeze([]);
-      }
-      const limit = input?.limit;
-      const walked = await text([
-        'rev-list',
-        '--topo-order',
-        ...(limit === undefined ? [] : [`--max-count=${limit}`]),
-        ...heads,
-      ]);
-      const entries = await Promise.all(
-        walked
-          .split('\n')
-          .filter((line) => line !== '')
-          .map(async (line) => {
-            const id = revisionId(line);
+      /* One `cat-file` per revision the order actually needs — ponytail:
+       * `cat-file --batch` is the upgrade when an unbounded log over a long
+       * history shows up in a profile. `rev-list` is gone: it answered a set,
+       * and the walk needs the set the promised order reaches, not git's. */
+      return Object.freeze(
+        await walkRevisionLog(
+          heads,
+          async (id) => {
             const commit = await readCommitObject(id);
-            return commit === undefined ? undefined : entryOf(id, commit);
-          }),
+            return commit === undefined
+              ? undefined
+              : {
+                  parents: commit.parents.map((parent) => revisionId(parent)),
+                  seconds: commit.committer.seconds,
+                  entry: entryOf(id, commit),
+                };
+          },
+          input?.limit,
+        ),
       );
-      return Object.freeze(entries.filter((entry) => entry !== undefined));
     },
 
     diff: async (input: RevisionDiffInput): Promise<readonly RevisionDiffEntry[]> => {
@@ -576,9 +1033,158 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
       return Object.freeze(changes.toSorted((left, right) => left.path.localeCompare(right.path)));
     },
 
-    fetch: async (input: RevisionTransportInput): Promise<void> => transport('fetch', input),
+    listRemoteRefs: listRemoteReferences,
 
-    push: async (input: RevisionTransportInput): Promise<void> => transport('push', input),
+    /**
+     * Bring the remote's refs into this store's remote-tracking half.
+     *
+     * A fetch never moves a branch: every ref lands under
+     * `refs/remotes/<remote>/…`, and the merge that follows is the ordinary one
+     * (A22). Unnamed, it takes everything the remote advertises that is not
+     * host-local — a remote may advertise whatever it likes, and the ones this
+     * host keeps to itself are simply not tracked.
+     *
+     * @param input - The remote, and optionally the refs to take.
+     * @returns The remote-tracking refs this store now holds.
+     */
+    fetch: async (input: RevisionFetchInput): Promise<RevisionFetchResult> => {
+      guardTransportValue(input.remote, 'remote');
+      const advertised = input.refs === undefined ? await listRemoteReferences(input.remote) : undefined;
+      const wanted =
+        advertised === undefined
+          ? (input.refs ?? [])
+          : advertised.map((reference) => reference.name).filter((ref) => !isHostLocalRef(ref));
+      for (const ref of wanted) {
+        guardTransportValue(ref, 'ref', true);
+      }
+      if (wanted.length === 0) {
+        return Object.freeze({ refs: Object.freeze([]) });
+      }
+      await output([
+        ...(await tauAuthorization(input.remote)),
+        'fetch',
+        '--no-tags',
+        '--',
+        input.remote,
+        ...wanted.map((ref) => `+${ref}:${remoteTrackingRef(input.remote, ref)}`),
+      ]);
+      const tracked = await Promise.all(
+        wanted.map(async (ref) => {
+          const name = remoteTrackingRef(input.remote, ref);
+          const head = await resolve(name);
+          return head === undefined ? undefined : Object.freeze({ name, head: revisionId(head) });
+        }),
+      );
+      return Object.freeze({ refs: Object.freeze(tracked.filter((reference) => reference !== undefined)) });
+    },
+
+    /**
+     * Offer refs to the remote and report every one's outcome.
+     *
+     * `--atomic` is the caller's choice because the two push sets differ in
+     * exactly that (A39): the history set lands together or not at all, and the
+     * record set does not, so a chat ref the server refuses leaves `main`
+     * pushed. The command's own non-zero exit on a partial refusal is therefore
+     * not an error here — the porcelain table is the answer.
+     *
+     * @param input - The remote, the refs, and whether they are atomic.
+     * @returns One result per offered ref, in the order offered.
+     */
+    push: async (input: RevisionPushInput): Promise<RevisionPushResult> => {
+      guardTransportValue(input.remote, 'remote');
+      if (input.refs.length === 0) {
+        throw new RevisionPortError('INVALID_TRANSPORT', 'push requires at least one ref.');
+      }
+      for (const ref of input.refs) {
+        guardTransportValue(ref.name, 'ref', true);
+        if (ref.remoteName !== undefined) {
+          guardTransportValue(ref.remoteName, 'remote ref', true);
+        }
+        if (ref.expected !== undefined) {
+          guardTransportValue(ref.expected, 'lease');
+        }
+      }
+      /*
+       * P20, before `git push` is spawned — which is also before git-lfs's own
+       * `pre-push` hook can run, since that hook is `git push`'s. So *this* is
+       * what decides, on both legs, and no `GIT_LFS_SKIP_PUSH` is needed: a
+       * remote that cannot hold large objects is refused by name with the
+       * files, rather than the disk leg quietly succeeding through git-lfs's
+       * own transfer while the browser leg fails (A15, W12 review R3).
+       */
+      if (!remoteCarriesLargeObjects(input.remote)) {
+        const large = await largeObjectPaths(input.refs);
+        if (large.length > 0) {
+          throw new RevisionPortError('LFS_REMOTE_UNSUPPORTED', lfsRemoteUnsupportedMessage(large));
+        }
+      }
+      /* The lease, per ref (A32, S24, D14). `--force-with-lease=<dst>:<expect>`
+       * allows the non-fast-forward a rewritten history needs *only* while the
+       * remote ref is exactly where this host last saw it; an empty `<expect>`
+       * leases "must not exist". A ref whose lease is stale comes back as one
+       * `!` row and the remote ref is not touched — never a plain `--force`,
+       * which would overwrite whatever moved. */
+      const leases = input.refs
+        .filter((ref) => 'expected' in ref)
+        .map((ref) => `--force-with-lease=${ref.remoteName ?? ref.name}:${ref.expected ?? ''}`);
+      const result = await run([
+        ...(await tauAuthorization(input.remote)),
+        'push',
+        '--porcelain',
+        ...(input.atomic === true ? ['--atomic'] : []),
+        ...leases,
+        '--',
+        input.remote,
+        ...input.refs.map((ref) => `${ref.name}:${ref.remoteName ?? ref.name}`),
+      ]);
+      const stdout = textDecoder.decode(result.stdout);
+      /* A push that never reached the remote reports no table at all; one the
+       * remote refused in part reports every row and exits non-zero. */
+      if (result.exitCode !== 0 && !stdout.includes('\t')) {
+        throw new RevisionPortError('ENGINE_FAILED', 'Native Git could not reach the remote.');
+      }
+      return Object.freeze({
+        refs: await parsePushPorcelain(
+          stdout,
+          input.refs.map((ref) => ref.name),
+        ),
+      });
+    },
+
+    listRemotes: async (): Promise<readonly Remote[]> => {
+      const result = await run(['config', '--get-regexp', String.raw`^remote\..*\.url$`]);
+      /* Exit code 1 is "no match", which is a project with no remote. */
+      if (result.exitCode !== 0) {
+        return Object.freeze([]);
+      }
+      return Object.freeze(
+        textDecoder
+          .decode(result.stdout)
+          .split('\n')
+          .map((line) => /^remote\.(?<name>.+)\.url (?<url>.+)$/u.exec(line.trim())?.groups)
+          .filter((groups) => groups?.['name'] !== undefined && groups['url'] !== undefined)
+          .map((groups) => remoteOf(groups!['name']!, groups!['url']!))
+          .toSorted((left, right) => left.name.localeCompare(right.name)),
+      );
+    },
+
+    setRemote: async (input: Readonly<{ name: string; url: string }>): Promise<void> => {
+      guardTransportValue(input.name, 'remote');
+      guardTransportValue(input.url, 'url');
+      const existing = await port.listRemotes();
+      await output([
+        'remote',
+        ...(existing.some((remote) => remote.name === input.name) ? ['set-url'] : ['add']),
+        input.name,
+        input.url,
+      ]);
+    },
+
+    removeRemote: async (name: string): Promise<void> => {
+      guardTransportValue(name, 'remote');
+      /* Idempotent: removing a remote a project never had is not a failure. */
+      await run(['remote', 'remove', name]);
+    },
 
     changeId: async (id: RevisionId): Promise<string | undefined> => {
       const commit = await readCommitObject(id);
@@ -640,6 +1246,12 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
       if (existing === undefined) {
         throw new RevisionPortError('CHECKOUT_CONFLICT', `No checkout is registered as ${id}.`);
       }
+      /* `--force` because git's own dirty check is meaningless here: Tau applies
+       * trees through the filesystem provider, never `git checkout`, so the
+       * index is always stale and an unforced remove would always refuse. The
+       * real gate is one layer up — `removeCheckout` in `revision-effects.ts`
+       * compares the checkout's head tree against a live capture and refuses
+       * work that is not in a revision yet (a1 review R7). */
       await output(['worktree', 'remove', '--force', existing.root]);
     },
   });

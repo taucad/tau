@@ -1,4 +1,4 @@
-import { ImmutableRevisionTree, materializedWorkspaceId, revisionId } from '@taucad/filesystem/revisions';
+import { ImmutableRevisionTree, revisionId } from '@taucad/filesystem/revisions';
 import type { Revision } from '#revision-authority.js';
 import { describe, expect, it } from 'vitest';
 import { createNativeGitAdapter } from '#native-git-adapter.js';
@@ -47,7 +47,7 @@ describe('native Git argument validation', () => {
   it.each(['', 'a'.repeat(257), 'run\nother', 'run\0other'])('rejects an unsafe run id', async (runId) => {
     await expect(
       adapter.bindWorkspace({
-        workspaceId: materializedWorkspaceId('workspace'),
+        workspaceId: 'workspace',
         runId,
         baseRevision: revision,
       }),

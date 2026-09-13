@@ -2282,6 +2282,11 @@ export class WorkspaceFileService {
 
     const stagedCheckoutPrefixes = new Set<string>();
     const stagedCheckoutInputs = (configuration.checkouts ?? []).map((config) => {
+      /* `/checkouts/a/b` canonicalizes to itself, so a slashed id would install
+       * a route nested under another checkout's prefix. */
+      if (config.checkoutId.includes('/')) {
+        throw new TypeError(`Checkout id must be one path segment: ${config.checkoutId}`);
+      }
       const prefix = `/checkouts/${config.checkoutId}`;
       if (resolveAuthorityPath(prefix) !== prefix || stagedCheckoutPrefixes.has(prefix)) {
         throw new Error(`Duplicate checkout route: ${prefix}`);

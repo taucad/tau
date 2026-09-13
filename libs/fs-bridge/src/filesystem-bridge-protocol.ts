@@ -215,7 +215,7 @@ const fileStatEntriesSchema: z.ZodType<FileStatEntry[]> = z.custom<FileStatEntry
 const fileProvenanceSchema: z.ZodType<FileProvenance> = z.looseObject({
   source: z.enum(['project', 'dependencies', 'system-skills']),
   versioned: z.boolean(),
-  access: z.enum(['read-write', 'read-only']),
+  agentAccess: z.enum(['read-write', 'read-only']),
   identity: z.string().optional(),
   overrides: z.string().optional(),
 });

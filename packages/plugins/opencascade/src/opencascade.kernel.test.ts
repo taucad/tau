@@ -401,15 +401,15 @@ export default function main() {
       const geometryFile = createGeometryFile('params.ts');
       const result = await readParameters(geometryFile);
       assertSuccess(result, 'getParameters');
-      expect(result.data.defaultParameters).toEqual({ width: 10, height: 20, depth: 30 });
-      expect(result.data.jsonSchema).toBeDefined();
+      expect(result.data.defaults).toEqual({ width: 10, height: 20, depth: 30 });
+      expect(result.data.schema).toBeDefined();
     });
 
     it('should return empty params when none defined', async () => {
       const geometryFile = createGeometryFile('no-params.ts');
       const result = await readParameters(geometryFile);
       assertSuccess(result, 'getParameters empty');
-      expect(result.data.defaultParameters).toEqual({});
+      expect(result.data.defaults).toEqual({});
     });
   });
 

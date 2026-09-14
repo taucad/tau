@@ -17,6 +17,7 @@ import type {
 } from '#log/event-types.js';
 import type {
   AgentLiveEvent,
+  AgentLiveEventPayload,
   DurableEventLog,
   HostRunSnapshot,
   InterruptApprovalPort,
@@ -107,6 +108,8 @@ export type ExternalAgentTurn = {
   readonly history: readonly AgentLogEvent[];
   /** Aborted by `cancel`, or by the host closing. */
   readonly signal: AbortSignal;
+  /** Publish one non-durable text/reasoning delta before its durable envelope settles. */
+  readonly publishLive?: ((event: AgentLiveEventPayload) => Promise<void>) | undefined;
   /** Append durable events; each publishes on the host's event stream. */
   append(events: readonly ExternalAgentLogEvent[]): Promise<void>;
   /** Persist state that must survive a restart. Merges into what is there. */
@@ -1152,6 +1155,9 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
           ...(input.config ? { config: input.config } : {}),
           history: await log.read(),
           append: appendEvents,
+          publishLive: async (event) => {
+            await options.onLiveEvent?.({ ...event, chatId: input.chatId, runId: input.runId });
+          },
           remember,
           approve,
           signal: controller.signal,

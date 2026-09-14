@@ -1,8 +1,8 @@
 import { z } from 'zod';
 import type { UIMessageChunk } from 'ai';
-import type { AgentLiveEvent, AgentLogEvent } from '@taucad/agent-host';
-import type { BillingInvocationStatus, MyUIMessage } from '@taucad/chat';
-import { billingInvocationStatusSchema } from '@taucad/chat';
+import type { AgentLiveEvent, AgentLogEvent, ProviderMessageMetadata } from '@taucad/agent-host';
+import type { AcpSessionData, BillingInvocationStatus, MyUIMessage } from '@taucad/chat';
+import { acpSessionDataSchema, billingInvocationStatusSchema } from '@taucad/chat';
 import { errorCategoryTitles, httpStatusToCategory } from '@taucad/chat/utils';
 import type { TurnFinalizedEvent } from '@taucad/revisions/revision-effects';
 import { isRecord } from '@taucad/utils/schema';
@@ -39,8 +39,32 @@ const errorText = (value: unknown, fallback: string): string => {
 const blockKey = (runId: string, messageId: string, contentIndex: number): string =>
   JSON.stringify([runId, messageId, contentIndex]);
 
-const blockId = (type: 'text-delta' | 'thinking-delta', messageId: string, contentIndex: number): string =>
-  `${messageId}:${type === 'text-delta' ? 'text' : 'thinking'}:${String(contentIndex)}`;
+const blockId = (type: 'text' | 'thinking', messageId: string, contentIndex: number): string =>
+  `${messageId}:${type}:${String(contentIndex)}`;
+
+/** Active model blocks retained until their durable assistant message arrives. */
+export type AgentHostLiveBlocks = Map<
+  string,
+  { readonly type: 'text' | 'thinking'; content: string; closed: boolean; startedAtMs?: number | undefined }
+>;
+
+const reasoningTiming = (
+  metadata: ProviderMessageMetadata | undefined,
+  contentIndex: number,
+): { startedAt: number; endedAt?: number | undefined } | undefined => {
+  const timings = metadata?.['reasoningTimings'];
+  if (!Array.isArray(timings)) {
+    return undefined;
+  }
+  const timing: unknown = timings.find((value) => isRecord(value) && value['contentIndex'] === contentIndex);
+  if (!isRecord(timing) || typeof timing['startedAtMs'] !== 'number') {
+    return undefined;
+  }
+  return {
+    startedAt: timing['startedAtMs'],
+    ...(typeof timing['endedAtMs'] === 'number' ? { endedAt: timing['endedAtMs'] } : {}),
+  };
+};
 
 /**
  * The funded-operation identity the harness stamped on a Tau turn.
@@ -103,9 +127,11 @@ const usageChunks = (message: AssistantProviderMessage): UIMessageChunk[] => {
 const assistantChunks = (
   message: AssistantProviderMessage,
   runId: string,
-  streamedBlocks?: Set<string>,
+  streamedBlocks?: AgentHostLiveBlocks,
 ): UIMessageChunk[] => {
   const { content: messageContent } = message;
+  const tauInternal = isRecord(message.metadata?.tauInternal) ? message.metadata.tauInternal : undefined;
+  const streamCheckpoint = tauInternal?.['streamState'] === 'checkpoint';
   const content: readonly JsonValue[] = Array.isArray(messageContent)
     ? messageContent
     : typeof messageContent === 'string'
@@ -123,33 +149,146 @@ const assistantChunks = (
     }
     if (value['type'] === 'text' && typeof value['text'] === 'string') {
       const id = `${message.id}:text:${String(index)}`;
-      chunks.push(
-        ...(streamedBlocks?.delete(blockKey(runId, message.id, index))
-          ? ([{ type: 'text-end', id }] as const)
-          : ([
-              { type: 'text-start', id },
-              { type: 'text-delta', id, delta: value['text'] },
-              { type: 'text-end', id },
-            ] as const)),
-      );
+      const key = blockKey(runId, message.id, index);
+      const streamed = streamedBlocks?.get(key);
+      if (streamed?.type === 'text') {
+        if (!streamed.closed) {
+          const suffix = value['text'].startsWith(streamed.content) ? value['text'].slice(streamed.content.length) : '';
+          if (suffix) {
+            chunks.push({ type: 'text-delta', id, delta: suffix });
+          }
+          streamed.content = value['text'];
+          if (!streamCheckpoint) {
+            chunks.push({ type: 'text-end', id });
+          }
+        }
+        if (!streamCheckpoint) {
+          streamedBlocks?.delete(key);
+        }
+      } else {
+        chunks.push({ type: 'text-start', id }, { type: 'text-delta', id, delta: value['text'] });
+        if (streamCheckpoint && streamedBlocks) {
+          streamedBlocks.set(key, { type: 'text', content: value['text'], closed: false });
+        } else {
+          chunks.push({ type: 'text-end', id });
+        }
+      }
       continue;
     }
     if (value['type'] === 'thinking' && typeof value['thinking'] === 'string') {
       const id = `${message.id}:thinking:${String(index)}`;
-      chunks.push(
-        ...(streamedBlocks?.delete(blockKey(runId, message.id, index))
-          ? ([{ type: 'reasoning-end', id }] as const)
-          : ([
-              { type: 'reasoning-start', id },
-              { type: 'reasoning-delta', id, delta: value['thinking'] },
-              { type: 'reasoning-end', id },
-            ] as const)),
-      );
+      const key = blockKey(runId, message.id, index);
+      const streamed = streamedBlocks?.get(key);
+      const timing = reasoningTiming(message.metadata, index);
+      if (streamed?.type === 'thinking') {
+        if (!streamed.closed) {
+          const suffix = value['thinking'].startsWith(streamed.content)
+            ? value['thinking'].slice(streamed.content.length)
+            : '';
+          if (suffix) {
+            chunks.push({ type: 'reasoning-delta', id, delta: suffix });
+          }
+          streamed.content = value['thinking'];
+          if (!streamCheckpoint) {
+            chunks.push({
+              type: 'reasoning-end',
+              id,
+              ...(timing === undefined && streamed.startedAtMs === undefined
+                ? {}
+                : {
+                    providerMetadata: {
+                      common: {
+                        reasoningStartedAtMs: timing?.startedAt ?? streamed.startedAtMs,
+                        ...(timing?.endedAt === undefined ? {} : { reasoningEndedAtMs: timing.endedAt }),
+                      },
+                    },
+                  }),
+            });
+          }
+        }
+        if (!streamCheckpoint) {
+          streamedBlocks?.delete(key);
+        }
+      } else {
+        chunks.push(
+          {
+            type: 'reasoning-start',
+            id,
+            ...(timing === undefined
+              ? {}
+              : { providerMetadata: { common: { reasoningStartedAtMs: timing.startedAt } } }),
+          },
+          { type: 'reasoning-delta', id, delta: value['thinking'] },
+        );
+        if (streamCheckpoint && streamedBlocks) {
+          streamedBlocks.set(key, {
+            type: 'thinking',
+            content: value['thinking'],
+            closed: false,
+            ...(timing === undefined ? {} : { startedAtMs: timing.startedAt }),
+          });
+        } else {
+          chunks.push({
+            type: 'reasoning-end',
+            id,
+            ...(timing === undefined
+              ? {}
+              : {
+                  providerMetadata: {
+                    common: {
+                      reasoningStartedAtMs: timing.startedAt,
+                      ...(timing.endedAt === undefined ? {} : { reasoningEndedAtMs: timing.endedAt }),
+                    },
+                  },
+                }),
+          });
+        }
+      }
+      continue;
+    }
+    if (
+      (value['type'] === 'image' || value['type'] === 'audio') &&
+      typeof value['mimeType'] === 'string' &&
+      typeof value['data'] === 'string'
+    ) {
+      chunks.push({
+        type: 'file',
+        mediaType: value['mimeType'],
+        url: `data:${value['mimeType']};base64,${value['data']}`,
+      });
+      continue;
+    }
+    if (value['type'] === 'resource_link' && typeof value['uri'] === 'string' && typeof value['name'] === 'string') {
+      chunks.push({
+        type: 'source-url',
+        sourceId: `${message.id}:source:${String(index)}`,
+        url: value['uri'],
+        title: typeof value['title'] === 'string' ? value['title'] : value['name'],
+      });
+      continue;
+    }
+    const embedded = value['type'] === 'resource' && isRecord(value['resource']) ? value['resource'] : undefined;
+    if (embedded && typeof embedded['uri'] === 'string') {
+      chunks.push({
+        type: 'source-document',
+        sourceId: `${message.id}:source:${String(index)}`,
+        mediaType: typeof embedded['mimeType'] === 'string' ? embedded['mimeType'] : 'application/octet-stream',
+        title: embedded['uri'],
+        filename: embedded['uri'],
+      });
+      continue;
+    }
+    if (value['type'] === 'acp-session') {
+      const id = `${message.id}:acp-session:${String(index)}`;
+      const parsed = acpSessionDataSchema.safeParse({ ...value, id });
+      if (parsed.success) {
+        chunks.push({ type: 'data-acp-session', id, data: parsed.data });
+      }
     }
     // Tool-call blocks are projected from their explicit tool-input log row.
   }
   chunks.push(...usageChunks(message));
-  if (!hasToolCall) {
+  if (!streamCheckpoint && !hasToolCall && chunks.some((chunk) => chunk.type !== 'data-acp-session')) {
     chunks.push({ type: 'finish-step' });
   }
   return chunks;
@@ -163,10 +302,9 @@ type ToolChunkMetadata = NonNullable<Extract<UIMessageChunk, { type: 'tool-input
 /**
  * The emitter's own tool-call facts, in the shape the AI SDK carries them.
  *
- * ACP is the boundary vocabulary (V3): an external agent's call becomes a
- * `dynamic-tool` part, so no `tool-${title}` type is ever minted and the
- * unknown-part fallback is unreachable for tool parts by construction rather
- * than by adding a branch per agent. `call` rides along as the part's `toolMetadata`
+ * ACP is the boundary vocabulary (V3): an unknown external call becomes a
+ * `dynamic-tool` part. A host-normalized Tau MCP call deliberately stays
+ * static so it reuses the existing CAD renderer. `call` rides along as the part's `toolMetadata`
  * under one `tau` namespace — Tau's own dispatch records the same field, so a
  * renderer reads one shape for both emitters.
  *
@@ -178,30 +316,35 @@ const toolChunkFacts = (
 ): { dynamic?: true; title?: string; toolMetadata?: ToolChunkMetadata } => {
   const tauInternal = isRecord(message.metadata?.tauInternal) ? message.metadata.tauInternal : undefined;
   const external = tauInternal?.['origin'] === 'external';
+  const dynamic = external && tauInternal['presentation'] !== 'tau-mcp';
   const { call } = message;
   const agentId = tauInternal?.['agentId'];
   /* The SDK carries a part's `toolMetadata` from the *input* chunk and reuses it
-   * for the result, so the emitter's `status` is deliberately not forwarded:
-   * frozen at `pending` it would contradict the part's own state, which is the
-   * one lifecycle a renderer should read. The durable log keeps it either way.
+   * for the result. Omit transient status, but retain a terminal replacement so
+   * the real SDK consumer sees the final ACP facts.
    *
    * The durable log's JSON and the SDK's `JSONValue` describe the same bytes and
    * differ only in array readonly-ness, so this asserts rather than re-copies. */
   const { status: _status, ...facts } = call ?? {};
   const durable = {
     ...facts,
+    ...(call?.status === 'completed' || call?.status === 'failed' ? { status: call.status } : {}),
     ...(external ? { origin: 'external' } : {}),
     ...(typeof agentId === 'string' ? { agentId } : {}),
   };
   const tau = durable as ToolChunkMetadata;
   return {
-    ...(external ? { dynamic: true } : {}),
+    ...(dynamic ? { dynamic: true } : {}),
     ...(call?.title === undefined ? {} : { title: call.title }),
     ...(Object.keys(tau).length === 0 ? {} : { toolMetadata: { tau } }),
   };
 };
 
-const messageChunks = (message: ProviderMessage, runId: string, streamedBlocks?: Set<string>): UIMessageChunk[] => {
+const messageChunks = (
+  message: ProviderMessage,
+  runId: string,
+  streamedBlocks?: AgentHostLiveBlocks,
+): UIMessageChunk[] => {
   switch (message.role) {
     case 'user': {
       return [];
@@ -233,6 +376,20 @@ const messageChunks = (message: ProviderMessage, runId: string, streamedBlocks?:
       return [output, { type: 'finish-step' }, { type: 'start-step' }];
     }
   }
+};
+
+/** Read the latest ACP session record for the selected agent from durable UI messages. @public */
+export const latestAcpSessionData = (messages: readonly MyUIMessage[], agentId: string): AcpSessionData | undefined => {
+  for (let messageIndex = messages.length - 1; messageIndex >= 0; messageIndex--) {
+    const parts = messages[messageIndex]?.parts ?? [];
+    for (let partIndex = parts.length - 1; partIndex >= 0; partIndex--) {
+      const part = parts[partIndex];
+      if (part?.type === 'data-acp-session' && part.data.agentId === agentId) {
+        return part.data;
+      }
+    }
+  }
+  return undefined;
 };
 
 /** Reconstruct one canonical user row without routing it through assistant stream chunks. */
@@ -317,19 +474,90 @@ export const projectAgentHostUserTurn = (event: AgentLogEvent): MyUIMessage | un
 /** Project one non-durable model delta while retaining its open content block. */
 export const projectAgentHostLiveEvent = (
   event: AgentLiveEvent,
-  streamedBlocks: Set<string>,
+  streamedBlocks: AgentHostLiveBlocks,
 ): readonly UIMessageChunk[] => {
-  const key = blockKey(event.runId, event.messageId, event.contentIndex);
-  const id = blockId(event.type, event.messageId, event.contentIndex);
-  const first = !streamedBlocks.has(key);
-  streamedBlocks.add(key);
-  if (event.type === 'text-delta') {
-    return [...(first ? ([{ type: 'text-start', id }] as const) : []), { type: 'text-delta', id, delta: event.delta }];
+  if (event.type === 'tool-input-start') {
+    return [{ type: 'tool-input-start', toolCallId: event.toolCallId, toolName: event.toolName }];
   }
-  return [
-    ...(first ? ([{ type: 'reasoning-start', id }] as const) : []),
-    { type: 'reasoning-delta', id, delta: event.delta },
-  ];
+  if (event.type === 'tool-input-delta') {
+    return [{ type: 'tool-input-delta', toolCallId: event.toolCallId, inputTextDelta: event.delta }];
+  }
+  if (event.type === 'tool-input-end') {
+    return [
+      {
+        type: 'tool-input-available',
+        toolCallId: event.toolCallId,
+        toolName: event.toolName,
+        input: event.input,
+      },
+    ];
+  }
+  if (event.type === 'tool-output-update') {
+    return [
+      event.isError
+        ? {
+            type: 'tool-output-error',
+            toolCallId: event.toolCallId,
+            errorText: errorText(event.output, `${event.toolName} failed`),
+          }
+        : { type: 'tool-output-available', toolCallId: event.toolCallId, output: event.output },
+    ];
+  }
+  const key = blockKey(event.runId, event.messageId, event.contentIndex);
+  const type = event.type.startsWith('text-') ? 'text' : 'thinking';
+  const id = blockId(type, event.messageId, event.contentIndex);
+  const current = streamedBlocks.get(key);
+  if (event.type === 'text-start' || event.type === 'thinking-start') {
+    if (current) {
+      return [];
+    }
+    streamedBlocks.set(key, {
+      type,
+      content: '',
+      closed: false,
+      ...(event.type === 'thinking-start' && event.timestamp !== undefined ? { startedAtMs: event.timestamp } : {}),
+    });
+    return [
+      {
+        type: type === 'text' ? 'text-start' : 'reasoning-start',
+        id,
+        ...(event.type === 'thinking-start' && event.timestamp !== undefined
+          ? { providerMetadata: { common: { reasoningStartedAtMs: event.timestamp } } }
+          : {}),
+      },
+    ];
+  }
+  const start: UIMessageChunk[] = current ? [] : [{ type: type === 'text' ? 'text-start' : 'reasoning-start', id }];
+  const block = current ?? { type, content: '', closed: false };
+  if (event.type === 'text-delta' || event.type === 'thinking-delta') {
+    block.content += event.delta;
+    streamedBlocks.set(key, block);
+    return [...start, { type: type === 'text' ? 'text-delta' : 'reasoning-delta', id, delta: event.delta }];
+  }
+  const { content } = event;
+  const suffix = content.startsWith(block.content) ? content.slice(block.content.length) : '';
+  block.content = content;
+  block.closed = true;
+  streamedBlocks.set(key, block);
+  const chunks: UIMessageChunk[] = [...start];
+  if (suffix) {
+    chunks.push({ type: type === 'text' ? 'text-delta' : 'reasoning-delta', id, delta: suffix });
+  }
+  chunks.push({
+    type: type === 'text' ? 'text-end' : 'reasoning-end',
+    id,
+    ...(event.type === 'thinking-end' && (block.startedAtMs !== undefined || event.timestamp !== undefined)
+      ? {
+          providerMetadata: {
+            common: {
+              ...(block.startedAtMs === undefined ? {} : { reasoningStartedAtMs: block.startedAtMs }),
+              ...(event.timestamp === undefined ? {} : { reasoningEndedAtMs: event.timestamp }),
+            },
+          },
+        }
+      : {}),
+  });
+  return chunks;
 };
 
 const lifecycleChunks = (
@@ -576,7 +804,7 @@ const approvalChunks = (
 /** Convert one durable browser-host event into the UI SDK chunk vocabulary used by API chat. */
 export const projectAgentHostEvent = (
   event: AgentLogEvent,
-  streamedBlocks?: Set<string>,
+  streamedBlocks?: AgentHostLiveBlocks,
 ): readonly UIMessageChunk[] => {
   switch (event.type) {
     case 'message.appended': {
@@ -585,7 +813,9 @@ export const projectAgentHostEvent = (
     case 'run.lifecycle': {
       return lifecycleChunks(event);
     }
-    case 'message.envelope-replaced':
+    case 'message.envelope-replaced': {
+      return messageChunks(event.replacement, event.runId, streamedBlocks);
+    }
     case 'history.rewound':
     case 'history.compacted':
     case 'snapshot-context.refreshed':

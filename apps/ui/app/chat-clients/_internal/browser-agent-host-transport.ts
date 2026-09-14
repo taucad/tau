@@ -238,7 +238,8 @@ export const registerAgentHostRunReset = (
 
 /** Replay one run's durable events into the message the live path built. */
 const readRunMessage = async (events: readonly AgentLogEvent[]): Promise<MyUIMessage | undefined> => {
-  const chunks = events.flatMap((event) => [...projectAgentHostEvent(event)]);
+  const streamedBlocks = new Map();
+  const chunks = events.flatMap((event) => [...projectAgentHostEvent(event, streamedBlocks)]);
   if (chunks.length === 0) {
     return undefined;
   }
@@ -502,9 +503,10 @@ const createHostStream = <Message extends UIMessage>(input: {
     let turnId: string | undefined;
     let durableUserMessage: MyUIMessage | undefined;
     let failure: HostRunSnapshot['failure'];
+    let externalToolRun = input.admission !== undefined && 'agent' in input.admission;
     let projection = Promise.resolve();
     const seen = new Set<string>();
-    const streamedBlocks = new Set<string>();
+    const streamedBlocks = new Map();
     const terminalEvent = Promise.withResolvers<void>();
     const publishRun = (): void => {
       if (runId === undefined) {
@@ -533,8 +535,22 @@ const createHostStream = <Message extends UIMessage>(input: {
         return;
       }
       if (!('leaderEpoch' in event)) {
+        /* ACP also publishes tool updates as durable rows carrying ToolKind and
+         * Tau MCP presentation. A metadata-poor live copy arriving first would
+         * permanently type the AI SDK part as `tool-${title}`. */
+        if (externalToolRun && event.type.startsWith('tool-')) {
+          return;
+        }
         await enqueueChunks(projectAgentHostLiveEvent(event, streamedBlocks));
         return;
+      }
+      if (
+        event.type === 'message.appended' &&
+        event.message.role === 'user' &&
+        isRecord(event.message.metadata?.tauInternal) &&
+        event.message.metadata.tauInternal['kind'] === 'external-agent'
+      ) {
+        externalToolRun = true;
       }
       const key = `${event.leaderEpoch}:${String(event.sequence)}`;
       if (seen.has(key)) {

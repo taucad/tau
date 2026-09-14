@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { parseLogEvent } from '@taucad/agent-host';
 import type { AgentLiveEvent, AgentLogEvent } from '@taucad/agent-host';
-import type { UIMessageChunk } from 'ai';
+import type { MyUIMessage } from '@taucad/chat';
+import { readUIMessageStream } from 'ai';
+import type { ReasoningUIPart, UIMessageChunk } from 'ai';
 import { isRecord } from '@taucad/utils/schema';
 import {
   agentApprovalToolName,
@@ -9,6 +11,7 @@ import {
   projectAgentHostLiveEvent,
   projectAgentHostUserTurn,
   projectTurnFinalized,
+  latestAcpSessionData,
 } from '#services/agent-host-event-projection.js';
 import { parseErrorForPersistence } from '#utils/error.utils.js';
 import hexagonalNutLog from '#services/__fixtures__/daemon-reattach-hexnut.jsonl?raw';
@@ -55,7 +58,7 @@ describe('projectAgentHostEvent', () => {
   });
 
   it('streams each block once and lets its matching durable message close it without replay', () => {
-    const streamedBlocks = new Set<string>();
+    const streamedBlocks = new Map();
     const live = {
       type: 'text-delta',
       chatId: 'chat-1',
@@ -102,7 +105,178 @@ describe('projectAgentHostEvent', () => {
       { type: 'reasoning-end', id: 'assistant-live:thinking:1' },
       { type: 'finish-step' },
     ]);
-    expect(streamedBlocks).toEqual(new Set());
+    expect(streamedBlocks).toEqual(new Map());
+  });
+
+  it('keeps an ACP checkpoint open and continues one block after an unseen prefix', () => {
+    const streamedBlocks = new Map();
+    const checkpoint = {
+      ...base,
+      type: 'message.appended',
+      message: {
+        id: 'assistant-acp',
+        role: 'assistant',
+        content: [{ type: 'text', text: 'prefix ' }],
+        metadata: { tauInternal: { origin: 'external', agentId: 'codex', streamState: 'checkpoint' } },
+      },
+    } as const satisfies AgentLogEvent;
+
+    expect(projectAgentHostEvent(checkpoint, streamedBlocks)).toEqual([
+      { type: 'text-start', id: 'assistant-acp:text:0' },
+      { type: 'text-delta', id: 'assistant-acp:text:0', delta: 'prefix ' },
+    ]);
+    expect(
+      projectAgentHostLiveEvent(
+        {
+          type: 'text-delta',
+          chatId: 'chat-1',
+          runId: 'run-1',
+          messageId: 'assistant-acp',
+          contentIndex: 0,
+          delta: 'suffix',
+        },
+        streamedBlocks,
+      ),
+    ).toEqual([{ type: 'text-delta', id: 'assistant-acp:text:0', delta: 'suffix' }]);
+  });
+
+  it('projects explicit reasoning, text, and partial tool lifecycle events', () => {
+    const streamedBlocks = new Map();
+    const event = {
+      chatId: 'chat-1',
+      runId: 'run-1',
+      messageId: 'assistant-live',
+      contentIndex: 0,
+    } as const;
+
+    expect(
+      [
+        { ...event, type: 'thinking-start', timestamp: 100 },
+        { ...event, type: 'thinking-delta', delta: 'Inspecting' },
+        { ...event, type: 'thinking-end', content: 'Inspecting.', timestamp: 2100 },
+        {
+          ...event,
+          type: 'tool-input-start',
+          contentIndex: 1,
+          toolCallId: 'call-live',
+          toolName: 'read_file',
+        },
+        {
+          ...event,
+          type: 'tool-input-delta',
+          contentIndex: 1,
+          toolCallId: 'call-live',
+          toolName: 'read_file',
+          delta: '{"target',
+        },
+        {
+          ...event,
+          type: 'tool-input-end',
+          contentIndex: 1,
+          toolCallId: 'call-live',
+          toolName: 'read_file',
+          input: { targetFile: 'main.ts' },
+        },
+        {
+          ...event,
+          type: 'tool-output-update',
+          contentIndex: 1,
+          toolCallId: 'call-live',
+          toolName: 'read_file',
+          output: { progress: 0.5 },
+          isError: false,
+        },
+      ].flatMap((live) => projectAgentHostLiveEvent(live as AgentLiveEvent, streamedBlocks)),
+    ).toEqual([
+      {
+        type: 'reasoning-start',
+        id: 'assistant-live:thinking:0',
+        providerMetadata: { common: { reasoningStartedAtMs: 100 } },
+      },
+      { type: 'reasoning-delta', id: 'assistant-live:thinking:0', delta: 'Inspecting' },
+      { type: 'reasoning-delta', id: 'assistant-live:thinking:0', delta: '.' },
+      {
+        type: 'reasoning-end',
+        id: 'assistant-live:thinking:0',
+        providerMetadata: { common: { reasoningStartedAtMs: 100, reasoningEndedAtMs: 2100 } },
+      },
+      { type: 'tool-input-start', toolCallId: 'call-live', toolName: 'read_file' },
+      { type: 'tool-input-delta', toolCallId: 'call-live', inputTextDelta: '{"target' },
+      {
+        type: 'tool-input-available',
+        toolCallId: 'call-live',
+        toolName: 'read_file',
+        input: { targetFile: 'main.ts' },
+      },
+      { type: 'tool-output-available', toolCallId: 'call-live', output: { progress: 0.5 } },
+    ]);
+  });
+
+  it('retains both reasoning timestamps through the AI SDK reducer', async () => {
+    const streamedBlocks = new Map();
+    const identity = {
+      chatId: 'chat-1',
+      runId: 'run-1',
+      messageId: 'assistant-live',
+      contentIndex: 0,
+    } as const;
+    const chunks = [
+      ...projectAgentHostLiveEvent({ ...identity, type: 'thinking-start', timestamp: 100 }, streamedBlocks),
+      ...projectAgentHostLiveEvent({ ...identity, type: 'thinking-delta', delta: 'Inspecting' }, streamedBlocks),
+      ...projectAgentHostLiveEvent(
+        { ...identity, type: 'thinking-end', content: 'Inspecting.', timestamp: 2100 },
+        streamedBlocks,
+      ),
+    ];
+    const stream = new ReadableStream<UIMessageChunk>({
+      start(controller) {
+        for (const chunk of chunks) {
+          controller.enqueue(chunk);
+        }
+        controller.close();
+      },
+    });
+    let part: ReasoningUIPart | undefined;
+    for await (const message of readUIMessageStream<MyUIMessage>({ stream })) {
+      part = message.parts.find((candidate): candidate is ReasoningUIPart => candidate.type === 'reasoning');
+    }
+
+    expect(part).toEqual({
+      type: 'reasoning',
+      text: 'Inspecting.',
+      state: 'done',
+      providerMetadata: { common: { reasoningStartedAtMs: 100, reasoningEndedAtMs: 2100 } },
+    });
+  });
+
+  it('projects rich external assistant content through native file and source parts', () => {
+    const message = {
+      id: 'assistant-rich',
+      role: 'assistant',
+      content: [
+        { type: 'image', mimeType: 'image/png', data: 'aW1hZ2U=' },
+        { type: 'audio', mimeType: 'audio/wav', data: 'YXVkaW8=' },
+        { type: 'resource_link', uri: 'tau://result', name: 'Kernel result' },
+        {
+          type: 'resource',
+          resource: { uri: 'tau://report', mimeType: 'text/markdown', text: '# Report' },
+        },
+      ],
+    } as const;
+
+    expect(projectAgentHostEvent({ ...base, type: 'message.appended', message })).toEqual([
+      { type: 'file', mediaType: 'image/png', url: 'data:image/png;base64,aW1hZ2U=' },
+      { type: 'file', mediaType: 'audio/wav', url: 'data:audio/wav;base64,YXVkaW8=' },
+      { type: 'source-url', sourceId: 'assistant-rich:source:2', url: 'tau://result', title: 'Kernel result' },
+      {
+        type: 'source-document',
+        sourceId: 'assistant-rich:source:3',
+        mediaType: 'text/markdown',
+        title: 'tau://report',
+        filename: 'tau://report',
+      },
+      { type: 'finish-step' },
+    ]);
   });
 
   it('projects text, thinking, usage, and tool calls from an assistant message', () => {
@@ -166,6 +340,51 @@ describe('projectAgentHostEvent', () => {
     });
   });
 
+  it('projects the latest ACP session presentation as a typed data part without a false step boundary', () => {
+    const chunks = projectAgentHostEvent({
+      ...base,
+      type: 'message.appended',
+      message: {
+        id: 'acp-session-1',
+        role: 'assistant',
+        content: [
+          {
+            type: 'acp-session',
+            agentId: 'codex',
+            sessionId: 'vendor-session-1',
+            commands: [{ name: '$brep-design', description: 'Design native BRep geometry' }],
+            configOptions: [],
+            plan: {
+              type: 'items',
+              planId: 'plan-1',
+              entries: [{ content: 'Inspect the model', priority: 'high', status: 'in_progress' }],
+            },
+          },
+        ],
+      },
+    });
+
+    expect(chunks).toEqual([
+      {
+        type: 'data-acp-session',
+        id: 'acp-session-1:acp-session:0',
+        data: {
+          type: 'acp-session',
+          id: 'acp-session-1:acp-session:0',
+          agentId: 'codex',
+          sessionId: 'vendor-session-1',
+          commands: [{ name: '$brep-design', description: 'Design native BRep geometry' }],
+          configOptions: [],
+          plan: {
+            type: 'items',
+            planId: 'plan-1',
+            entries: [{ content: 'Inspect the model', priority: 'high', status: 'in_progress' }],
+          },
+        },
+      },
+    ]);
+  });
+
   it('projects one complete tool interaction in stream order', () => {
     const events: readonly AgentLogEvent[] = [
       { ...base, type: 'run.lifecycle', state: 'running' },
@@ -226,6 +445,37 @@ describe('projectAgentHostEvent', () => {
       'text-end',
       'finish-step',
       'finish',
+    ]);
+  });
+
+  it('projects a replaced tool envelope onto the existing part identity', () => {
+    expect(
+      projectAgentHostEvent({
+        ...base,
+        type: 'message.envelope-replaced',
+        messageId: 'input-1',
+        replacement: {
+          id: 'input-1',
+          role: 'tool-input',
+          toolCallId: 'call-1',
+          toolName: 'applyPatch',
+          content: { patch: 'updated' },
+          call: { toolCallId: 'vendor-1', status: 'in_progress', title: 'Editing main.ts' },
+          metadata: { tauInternal: { kind: 'external-tool', origin: 'external', agentId: 'codex' } },
+        },
+      }),
+    ).toEqual([
+      {
+        type: 'tool-input-available',
+        toolCallId: 'call-1',
+        toolName: 'applyPatch',
+        input: { patch: 'updated' },
+        dynamic: true,
+        title: 'Editing main.ts',
+        toolMetadata: {
+          tau: { toolCallId: 'vendor-1', title: 'Editing main.ts', origin: 'external', agentId: 'codex' },
+        },
+      },
     ]);
   });
 
@@ -587,6 +837,52 @@ describe('projectAgentHostEvent', () => {
   });
 });
 
+describe('latestAcpSessionData', () => {
+  it('returns only the newest session record for the active agent', () => {
+    const messages: MyUIMessage[] = [
+      {
+        id: 'a1',
+        role: 'assistant',
+        parts: [
+          {
+            type: 'data-acp-session',
+            data: { type: 'acp-session', id: 's1', agentId: 'codex', commands: [], configOptions: [] },
+          },
+        ],
+      },
+      {
+        id: 'a2',
+        role: 'assistant',
+        parts: [
+          {
+            type: 'data-acp-session',
+            data: {
+              type: 'acp-session',
+              id: 's2',
+              agentId: 'codex',
+              commands: [{ name: '$brep-design', description: 'BRep' }],
+              configOptions: [],
+            },
+          },
+        ],
+      },
+      {
+        id: 'a3',
+        role: 'assistant',
+        parts: [
+          {
+            type: 'data-acp-session',
+            data: { type: 'acp-session', id: 's3', agentId: 'claude', commands: [], configOptions: [] },
+          },
+        ],
+      },
+    ];
+
+    expect(latestAcpSessionData(messages, 'codex')?.id).toBe('s2');
+    expect(latestAcpSessionData(messages, 'missing')).toBeUndefined();
+  });
+});
+
 describe('projectTurnFinalized', () => {
   /* Exactly what a host writes: `packages/host/src/revisions.ts` appends this
      record to the chat's own log from its settlement, and `parseLogEvent` is
@@ -744,6 +1040,36 @@ describe('external tool-call chunks', () => {
     expect(chunk).toMatchObject({ type: 'tool-input-available', toolName: 'list_directory' });
     expect(chunk).not.toHaveProperty('dynamic');
     expect(chunk).toMatchObject({ toolMetadata: { tau: { kind: 'read', nativeName: 'list_directory' } } });
+  });
+
+  it('renders a normalized external Tau MCP call through the native static tool part', () => {
+    const metadata = {
+      tauInternal: { kind: 'external-tool', origin: 'external', agentId: 'codex', presentation: 'tau-mcp' },
+    } as const;
+    const [input] = chunksOf({
+      id: 'tau-mcp-input',
+      role: 'tool-input',
+      toolCallId: 'call-mcp',
+      toolName: 'screenshot',
+      call: { toolCallId: 'vendor-call', kind: 'execute', nativeName: 'screenshot' },
+      content: { targetFile: 'main.ts', mode: 'single' },
+      metadata,
+    });
+    const [output] = chunksOf({
+      id: 'tau-mcp-output',
+      role: 'tool-output',
+      toolCallId: 'call-mcp',
+      toolName: 'screenshot',
+      content: { images: [{ view: 'isometric', dataUrl: 'data:image/webp;base64,AQ==' }] },
+      isError: false,
+      metadata,
+    });
+
+    expect(input).toMatchObject({ type: 'tool-input-available', toolName: 'screenshot' });
+    expect(input).not.toHaveProperty('dynamic');
+    expect(input).toMatchObject({ toolMetadata: { tau: { origin: 'external', agentId: 'codex' } } });
+    expect(output).toMatchObject({ type: 'tool-output-available', output: { images: [{ view: 'isometric' }] } });
+    expect(output).not.toHaveProperty('dynamic');
   });
 });
 

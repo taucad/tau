@@ -287,6 +287,14 @@ export type StorageDurabilityClass = (typeof storageDurabilityClasses)[number];
 /** Provider-visible tool selection committed with one admission. @public */
 export type AgentToolChoice = 'none' | 'auto' | 'any' | 'custom' | readonly string[];
 
+/** Provider reasoning controls frozen with one admitted model row. @public */
+export type ModelReasoningConfig = {
+  readonly effort?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | undefined;
+  readonly summary?: 'auto' | 'concise' | 'detailed' | undefined;
+  readonly display?: 'summarized' | 'omitted' | undefined;
+  readonly budgetTokens?: number | undefined;
+};
+
 /** Model selection committed with one admission so takeover can resume it exactly. @public */
 export type TurnModelConfig = {
   readonly id: string;
@@ -294,6 +302,7 @@ export type TurnModelConfig = {
   readonly maxTokens?: number | undefined;
   readonly providerKind?: ModelProviderKind | undefined;
   readonly cost?: ModelCostRates | undefined;
+  readonly reasoning?: ModelReasoningConfig | undefined;
 };
 
 /**

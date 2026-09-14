@@ -125,7 +125,12 @@ export type AgentHostWorkerInitializeRequest = {
  *
  * @public
  */
-export type AgentHostExternalAgent = { readonly kind: 'acp'; readonly id: string; readonly model?: string };
+export type AgentHostExternalAgent = {
+  readonly kind: 'acp';
+  readonly id: string;
+  readonly model?: string;
+  readonly config?: Readonly<Record<string, string | boolean>>;
+};
 
 /**
  * The CAD context an external turn carries (V12).
@@ -349,6 +354,7 @@ export const agentHostExternalAgentSchema = z.strictObject({
   kind: z.literal('acp'),
   id: nonEmptyString,
   model: nonEmptyString.optional(),
+  config: z.record(nonEmptyString, z.union([z.string(), z.boolean()])).optional(),
 });
 
 /**
@@ -502,14 +508,42 @@ export const eventLogBatchSchema = z
     message: 'before nextCursor',
   });
 
-export const agentLiveEventSchema = z.strictObject({
-  type: z.enum(['text-delta', 'thinking-delta']),
+const agentLiveEventBase = {
   chatId: nonEmptyString,
   runId: nonEmptyString,
   messageId: nonEmptyString,
   contentIndex: z.number().int().nonnegative(),
-  delta: z.string(),
-});
+};
+const agentLiveToolEventBase = {
+  ...agentLiveEventBase,
+  toolCallId: nonEmptyString,
+  toolName: nonEmptyString,
+};
+export const agentLiveEventSchema = z.discriminatedUnion('type', [
+  z.strictObject({ type: z.literal('text-start'), ...agentLiveEventBase }),
+  z.strictObject({
+    type: z.literal('thinking-start'),
+    ...agentLiveEventBase,
+    timestamp: z.number().int().nonnegative().optional(),
+  }),
+  z.strictObject({ type: z.enum(['text-delta', 'thinking-delta']), ...agentLiveEventBase, delta: z.string() }),
+  z.strictObject({ type: z.literal('text-end'), ...agentLiveEventBase, content: z.string() }),
+  z.strictObject({
+    type: z.literal('thinking-end'),
+    ...agentLiveEventBase,
+    content: z.string(),
+    timestamp: z.number().int().nonnegative().optional(),
+  }),
+  z.strictObject({ type: z.literal('tool-input-start'), ...agentLiveToolEventBase }),
+  z.strictObject({ type: z.literal('tool-input-delta'), ...agentLiveToolEventBase, delta: z.string() }),
+  z.strictObject({ type: z.literal('tool-input-end'), ...agentLiveToolEventBase, input: jsonValueSchema }),
+  z.strictObject({
+    type: z.literal('tool-output-update'),
+    ...agentLiveToolEventBase,
+    output: jsonValueSchema,
+    isError: z.boolean(),
+  }),
+]);
 const leadershipSchema = z.union([
   z.strictObject({ role: z.literal('leader'), generation: nonEmptyString }),
   z.strictObject({ role: z.literal('follower'), generation: z.string().optional() }),

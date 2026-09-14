@@ -3,12 +3,14 @@ import { openAICompletionsApi } from '@earendil-works/pi-ai/api/openai-completio
 import { openAIResponsesApi } from '@earendil-works/pi-ai/api/openai-responses.lazy';
 import type {
   Api,
+  AnthropicOptions,
   AssistantMessage,
   AssistantMessageEvent,
   Context,
   Model,
   ModelCostRates,
-  ProviderStreams,
+  OpenAICompletionsOptions,
+  OpenAIResponsesOptions,
 } from '@earendil-works/pi-ai';
 import { util as zodUtility } from 'zod';
 import { MessageIdentities, providerMessageToPi } from '#harness/session-record.js';
@@ -120,7 +122,7 @@ export const isGatewayProviderKind = (providerKind: string | undefined): boolean
  * @public
  */
 export const isOpenAiResponsesProviderKind = (providerKind: ModelProviderKind | undefined): boolean =>
-  providerKind === 'openai';
+  providerKind === 'openai' || providerKind === 'xai';
 
 /** Input matching Tau API's static/workspace/dynamic cache layout. @public */
 export type CachedSystemPromptOptions = {
@@ -493,6 +495,9 @@ const piModelFor = (options: {
         ...common,
         api: 'anthropic-messages',
         baseUrl: baseUrlFor(options.transport.baseUrl, anthropicGatewayPath),
+        ...(options.request.reasoning?.budgetTokens === undefined && options.request.reasoning !== undefined
+          ? { compat: { forceAdaptiveThinking: true } }
+          : {}),
       }
     : {
         ...common,
@@ -500,6 +505,7 @@ const piModelFor = (options: {
         // `/chat/completions` or `/responses` to it.
         api: isOpenAiResponsesProviderKind(options.request.providerKind) ? 'openai-responses' : 'openai-completions',
         baseUrl: baseUrlFor(options.transport.baseUrl, openAiGatewayPath),
+        ...(options.request.providerKind === 'vertexai' ? { compat: { supportsDeveloperRole: false } } : {}),
       };
 };
 
@@ -517,13 +523,6 @@ const piContextFor = (request: ModelStreamRequest, model: PiGatewayModel): Conte
   return { systemPrompt: request.systemPrompt, messages, tools };
 };
 
-const piApiFor = (providerKind: ModelProviderKind | undefined): ProviderStreams =>
-  providerKind === 'anthropic'
-    ? anthropicMessagesApi()
-    : isOpenAiResponsesProviderKind(providerKind)
-      ? openAIResponsesApi()
-      : openAICompletionsApi();
-
 const metadataFor = (message: AssistantMessage): JsonObject | undefined => {
   const metadata: JsonObject = {
     ...(message.responseId ? { responseId: message.responseId } : {}),
@@ -538,8 +537,21 @@ const signatureEvents = (message: AssistantMessage, emitted: Map<number, string>
       return [];
     }
     emitted.set(index, block.thinkingSignature);
-    return [{ type: 'thinking-delta', text: '', signature: block.thinkingSignature }];
+    return [{ type: 'thinking-signature', contentIndex: index, signature: block.thinkingSignature }];
   });
+
+const streamedToolCall = (
+  event: Extract<AssistantMessageEvent, { readonly type: 'toolcall_start' | 'toolcall_delta' }>,
+) => {
+  const block = event.partial.content[event.contentIndex];
+  if (block?.type !== 'toolCall') {
+    throw new GatewayModelTransportError({
+      code: 'MALFORMED_RESPONSE',
+      message: `pi-ai emitted ${event.type} without a tool call at content index ${event.contentIndex}.`,
+    });
+  }
+  return block;
+};
 
 const abortError = (signal: AbortSignal): Error =>
   signal.reason instanceof Error ? signal.reason : new DOMException('The operation was aborted.', 'AbortError');
@@ -560,21 +572,56 @@ const streamPiEvents = async function* (options: {
   const emittedSignatures = new Map<number, string>();
   let terminal = false;
   for await (const event of options.events) {
+    if (event.type === 'text_start') {
+      yield { type: 'text-start', contentIndex: event.contentIndex };
+      continue;
+    }
     if (event.type === 'text_delta') {
-      yield { type: 'text-delta', text: event.delta };
+      yield { type: 'text-delta', contentIndex: event.contentIndex, text: event.delta };
+      continue;
+    }
+    if (event.type === 'text_end') {
+      yield { type: 'text-end', contentIndex: event.contentIndex, content: event.content };
+      continue;
+    }
+    if (event.type === 'thinking_start') {
+      yield { type: 'thinking-start', contentIndex: event.contentIndex };
       continue;
     }
     if (event.type === 'thinking_delta') {
-      yield { type: 'thinking-delta', text: event.delta };
+      yield { type: 'thinking-delta', contentIndex: event.contentIndex, text: event.delta };
       continue;
     }
     if (event.type === 'thinking_end') {
+      yield { type: 'thinking-end', contentIndex: event.contentIndex, content: event.content };
       yield* signatureEvents(event.partial, emittedSignatures);
+      continue;
+    }
+    if (event.type === 'toolcall_start') {
+      const toolCall = streamedToolCall(event);
+      yield {
+        type: 'tool-input-start',
+        contentIndex: event.contentIndex,
+        toolCallId: toolCall.id,
+        toolName: toolCall.name,
+      };
+      continue;
+    }
+    if (event.type === 'toolcall_delta') {
+      const toolCall = streamedToolCall(event);
+      yield {
+        type: 'tool-input-delta',
+        contentIndex: event.contentIndex,
+        toolCallId: toolCall.id,
+        toolName: toolCall.name,
+        delta: event.delta,
+      };
       continue;
     }
     if (event.type === 'toolcall_end') {
       yield {
         type: 'tool-input',
+        contentIndex: event.contentIndex,
         toolCallId: event.toolCall.id,
         toolName: event.toolCall.name,
         input: event.toolCall.arguments,
@@ -685,9 +732,20 @@ export const createGatewayModelTransport = (options: GatewayModelTransportOption
         message: `The browser gateway transport does not speak the ${request.providerKind ?? 'unknown'} provider wire.`,
       });
     }
+    if (
+      request.providerKind === 'vertexai' &&
+      request.reasoning?.effort !== undefined &&
+      !['low', 'medium', 'high'].includes(request.reasoning.effort)
+    ) {
+      throw new GatewayModelTransportError({
+        code: 'INVALID_REQUEST',
+        message: `Vertex does not support ${request.reasoning.effort} reasoning effort.`,
+      });
+    }
     const model = piModelFor({ request, transport: options });
     const state: GatewayFetchState = {};
-    const events = piApiFor(request.providerKind).stream(model as Model<Api>, piContextFor(request, model), {
+    const context = piContextFor(request, model);
+    const commonOptions = {
       headers: piCookieAuthValidationHeaders,
       cacheRetention: 'short',
       fetch: authenticatedFetch({
@@ -705,7 +763,50 @@ export const createGatewayModelTransport = (options: GatewayModelTransportOption
       maxRetries: 0,
       ...(request.maxTokens === undefined ? {} : { maxTokens: request.maxTokens }),
       signal: request.signal,
-    });
+    } as const;
+    const { reasoning } = request;
+    const events =
+      request.providerKind === 'anthropic'
+        ? anthropicMessagesApi().stream(model as Model<'anthropic-messages'>, context, {
+            ...commonOptions,
+            ...(reasoning === undefined
+              ? {}
+              : {
+                  thinkingEnabled: true,
+                  ...(reasoning.budgetTokens === undefined ? {} : { thinkingBudgetTokens: reasoning.budgetTokens }),
+                  ...(reasoning.display === undefined ? {} : { thinkingDisplay: reasoning.display }),
+                  ...(reasoning.effort === undefined
+                    ? {}
+                    : { effort: reasoning.effort === 'minimal' ? 'low' : reasoning.effort }),
+                }),
+          } satisfies AnthropicOptions)
+        : isOpenAiResponsesProviderKind(request.providerKind)
+          ? openAIResponsesApi().stream(model as Model<'openai-responses'>, context, {
+              ...commonOptions,
+              ...(reasoning?.effort === undefined ? {} : { reasoningEffort: reasoning.effort }),
+              ...(reasoning?.summary === undefined ? {} : { reasoningSummary: reasoning.summary }),
+            } satisfies OpenAIResponsesOptions)
+          : openAICompletionsApi().stream(model as Model<'openai-completions'>, context, {
+              ...commonOptions,
+              ...(request.providerKind === 'vertexai' && reasoning?.effort !== undefined
+                ? {
+                    /* eslint-disable @typescript-eslint/naming-convention -- Upstream Gemini wire keys use snake_case. */
+                    samplingParams: {
+                      extra_body: {
+                        google: {
+                          thinking_config: {
+                            include_thoughts: true,
+                            thinking_level: reasoning.effort.toUpperCase(),
+                          },
+                          thought_tag_marker: 'think',
+                          stream_function_call_arguments: true,
+                        },
+                      },
+                    },
+                    /* eslint-enable @typescript-eslint/naming-convention -- End upstream Gemini payload. */
+                  }
+                : {}),
+            } satisfies OpenAICompletionsOptions);
     yield* streamPiEvents({ events, state, signal: request.signal });
   },
 });

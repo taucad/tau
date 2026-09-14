@@ -1,11 +1,18 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Api, Model, Usage } from '@earendil-works/pi-ai';
-import type { AgentLogEvent, LogEventBase, ProviderMessage } from '#log/event-types.js';
+import type { AgentLogEvent, JsonObject, LogEventBase, ProviderMessage } from '#log/event-types.js';
 import { parseEventLog, serializeLogEvent } from '#log/serialization.js';
 import { reduceEventLog } from '#log/reducer.js';
-import type { ModelStreamEvent, ModelStreamRequest, ModelTransport, ToolRegistry } from '#waist/ports.js';
+import type {
+  AgentLiveEvent,
+  HostToolInvocation,
+  ModelStreamEvent,
+  ModelStreamRequest,
+  ModelTransport,
+  ToolRegistry,
+} from '#waist/ports.js';
 import { createMemoryEventLog, createMemoryEventLogFile, stubModel } from '#harness/harness.fixture.js';
-import { MessageIdentities, providerMessageToPi } from '#harness/session-record.js';
+import { MessageIdentities, piMessageToProvider, providerMessageToPi } from '#harness/session-record.js';
 import { createAgentSession, createTransportStreamFunction } from '#harness/session.js';
 import {
   createCachedSystemPromptBlocks,
@@ -318,6 +325,153 @@ describe('pi full-turn parity fixture', () => {
     expect(localEvents.some((event) => event.type.startsWith('model.invocation-'))).toBe(false);
   });
 
+  it('starts a complete valid tool while a later tool input is still streaming', async () => {
+    const held = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    let calls = 0;
+    const live: AgentLiveEvent[] = [];
+    const invoke = vi.fn(async (invocation: HostToolInvocation) => {
+      invocation.onUpdate?.({ content: `${invocation.toolCallId}:halfway`, isError: false });
+      return { content: 'ok', isError: false };
+    });
+    const session = await createAgentSession({
+      chatId: 'eager-chat',
+      runId: 'eager-run',
+      leaderEpoch: 'eager-epoch',
+      systemPrompt: 'system',
+      model: { id: 'stub-model', contextWindow: 8192, providerKind: 'openai' },
+      modelTransport: {
+        async *stream(): AsyncGenerator<ModelStreamEvent> {
+          calls++;
+          if (calls > 1) {
+            yield { type: 'completed', stopReason: 'stop' };
+            return;
+          }
+          yield { type: 'tool-input-start', contentIndex: 0, toolCallId: 'call-a', toolName: 'read_file' };
+          yield {
+            type: 'tool-input',
+            contentIndex: 0,
+            toolCallId: 'call-a',
+            toolName: 'read_file',
+            input: { targetFile: 'a.ts' },
+          };
+          yield { type: 'tool-input-start', contentIndex: 1, toolCallId: 'call-b', toolName: 'read_file' };
+          held.resolve();
+          await release.promise;
+          yield {
+            type: 'tool-input',
+            contentIndex: 1,
+            toolCallId: 'call-b',
+            toolName: 'read_file',
+            input: { targetFile: 'b.ts' },
+          };
+          yield { type: 'completed', stopReason: 'toolUse' };
+        },
+      },
+      toolRegistry: {
+        list: () => [
+          {
+            name: 'read_file',
+            description: 'Read a file.',
+            inputSchema: {
+              type: 'object',
+              properties: { targetFile: { type: 'string' } },
+              required: ['targetFile'],
+              additionalProperties: false,
+            },
+          },
+        ],
+        invoke,
+      },
+      onLiveEvent: (event) => {
+        live.push(event);
+      },
+      eventLog: await createMemoryEventLog(),
+    });
+
+    const prompt = session.prompt({ id: 'eager-user', role: 'user', content: 'read both' });
+    await held.promise;
+    await vi.waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith(expect.objectContaining({ toolCallId: 'call-a' }));
+    });
+    expect(live).toContainEqual(
+      expect.objectContaining({
+        type: 'tool-output-update',
+        toolCallId: 'call-a',
+        toolName: 'read_file',
+        output: 'call-a:halfway',
+        isError: false,
+      }),
+    );
+    expect(invoke).not.toHaveBeenCalledWith(expect.objectContaining({ toolCallId: 'call-b' }));
+    release.resolve();
+    await prompt;
+
+    expect(invoke.mock.calls.map(([call]) => call.toolCallId)).toEqual(['call-a', 'call-b']);
+    const liveTypes = live.map((event) => event.type);
+    expect(liveTypes.indexOf('tool-output-update')).toBeGreaterThan(liveTypes.indexOf('tool-input-end'));
+    await session.close();
+  });
+
+  it('never eagerly invokes invalid arguments or work whose durable input append failed', async () => {
+    const definition = {
+      name: 'read_file',
+      description: 'Read a file.',
+      inputSchema: {
+        type: 'object',
+        properties: { targetFile: { type: 'string' } },
+        required: ['targetFile'],
+        additionalProperties: false,
+      },
+    } as const;
+    const run = async (input: JsonObject, eventLog?: Awaited<ReturnType<typeof createMemoryEventLog>>) => {
+      const invoke = vi.fn(async () => ({ content: 'source', isError: false }));
+      let calls = 0;
+      const log = eventLog ?? (await createMemoryEventLog());
+      const session = await createAgentSession({
+        chatId: `eager-guard-${JSON.stringify(input)}`,
+        runId: `eager-guard-${JSON.stringify(input)}`,
+        leaderEpoch: 'eager-guard',
+        systemPrompt: 'system',
+        model: { id: 'stub-model', contextWindow: 8192, providerKind: 'openai' },
+        modelTransport: {
+          async *stream() {
+            calls++;
+            if (calls === 1) {
+              yield { type: 'tool-input', toolCallId: 'guarded-call', toolName: 'read_file', input } as const;
+              yield { type: 'completed', stopReason: 'toolUse' } as const;
+              return;
+            }
+            yield { type: 'completed', stopReason: 'stop' } as const;
+          },
+        },
+        toolRegistry: { list: () => [definition], invoke },
+        eventLog: log,
+      });
+      await session.prompt({ id: 'guard-user', role: 'user', content: 'read' });
+      await session.close();
+      return invoke;
+    };
+
+    expect(await run({})).not.toHaveBeenCalled();
+
+    const stored = await createMemoryEventLog();
+    const failingLog = {
+      ...stored,
+      append: async (event: AgentLogEvent) => {
+        if (
+          event.type === 'message.appended' &&
+          event.message.role === 'assistant' &&
+          JSON.stringify(event.message.content).includes('guarded-call')
+        ) {
+          throw new Error('simulated eager input persistence failure');
+        }
+        return stored.append(event);
+      },
+    };
+    expect(await run({ targetFile: 'main.ts' }, failingLog)).not.toHaveBeenCalled();
+  });
+
   it('drives middleware, substituted tools, and byte-identical A1 replay through one real pi turn', async () => {
     const log = await createMemoryEventLog(seedHistory());
     const transport = new DeterministicToolCallingTransport();
@@ -416,7 +570,14 @@ describe('pi full-turn parity fixture', () => {
     expect(compactions).toContain('tool_result_clearing');
     expect(new Set(transport.requests.map((request) => request.attemptId)).size).toBe(transport.requests.length);
     expect(events.filter((event) => event.type === 'model.invocation-bound')).toHaveLength(transport.requests.length);
-    expect(events.filter((event) => event.type === 'message.envelope-replaced')).toHaveLength(2);
+    expect(
+      events.filter(
+        (event) =>
+          event.type === 'message.envelope-replaced' &&
+          event.replacement.role === 'tool-output' &&
+          event.replacement.content === '[Old tool result content cleared]',
+      ),
+    ).toHaveLength(2);
     expect(
       transport.requests[0]?.messages.some(
         (message) => message.role === 'tool-output' && message.content === '[Old tool result content cleared]',
@@ -846,6 +1007,7 @@ describe('pi full-turn parity fixture', () => {
             contextWindow: 4096,
             maxTokens: 1024,
             cost: durableCost,
+            reasoning: { effort: 'high', display: 'summarized' },
           },
           initialMessages: [],
           postCompactionMessages: [],
@@ -864,6 +1026,7 @@ describe('pi full-turn parity fixture', () => {
         providerKind: 'openai',
         contextWindow: 200_000,
         maxTokens: 8192,
+        reasoning: { effort: 'low', summary: 'concise' },
       },
       modelTransport: {
         async *stream(request): AsyncGenerator<ModelStreamEvent> {
@@ -900,7 +1063,9 @@ describe('pi full-turn parity fixture', () => {
           request.modelCost.input === durableCost.input &&
           request.modelCost.output === durableCost.output &&
           request.modelCost.cacheRead === durableCost.cacheRead &&
-          request.modelCost.cacheWrite === durableCost.cacheWrite,
+          request.modelCost.cacheWrite === durableCost.cacheWrite &&
+          request.reasoning?.effort === 'high' &&
+          request.reasoning.display === 'summarized',
       ),
     ).toBe(true);
     expect(requests.at(-1)?.maxTokens).toBe(1024);
@@ -1042,6 +1207,98 @@ describe('transport stream state', () => {
     ]);
   });
 
+  it('should preserve provider block identity, partial tool input, and terminal corrections', async () => {
+    const live: unknown[] = [];
+    const stream = await streamFor(
+      [
+        { type: 'text-start', contentIndex: 0 },
+        { type: 'text-delta', contentIndex: 0, text: 'be' },
+        {
+          type: 'tool-input-start',
+          contentIndex: 1,
+          toolCallId: 'call-streamed',
+          toolName: 'read_file',
+        },
+        { type: 'text-delta', contentIndex: 0, text: 'for' },
+        {
+          type: 'tool-input-delta',
+          contentIndex: 1,
+          toolCallId: 'call-streamed',
+          toolName: 'read_file',
+          delta: '{"target',
+        },
+        { type: 'text-end', contentIndex: 0, content: 'before' },
+        {
+          type: 'tool-input',
+          contentIndex: 1,
+          toolCallId: 'call-streamed',
+          toolName: 'read_file',
+          input: { targetFile: 'main.ts' },
+        },
+        { type: 'completed', stopReason: 'toolUse' },
+      ],
+      (event) => {
+        live.push(event);
+      },
+    );
+    const updates: unknown[] = [];
+    for await (const event of stream) {
+      updates.push(event);
+    }
+
+    await expect(stream.result()).resolves.toMatchObject({
+      content: [
+        { type: 'text', text: 'before' },
+        {
+          type: 'toolCall',
+          id: 'call-streamed',
+          name: 'read_file',
+          arguments: { targetFile: 'main.ts' },
+        },
+      ],
+    });
+    expect(live).toEqual([
+      { type: 'text-start', messageId: 'stream-id', contentIndex: 0 },
+      { type: 'text-delta', messageId: 'stream-id', contentIndex: 0, delta: 'be' },
+      {
+        type: 'tool-input-start',
+        messageId: 'stream-id',
+        contentIndex: 1,
+        toolCallId: 'call-streamed',
+        toolName: 'read_file',
+      },
+      { type: 'text-delta', messageId: 'stream-id', contentIndex: 0, delta: 'for' },
+      {
+        type: 'tool-input-delta',
+        messageId: 'stream-id',
+        contentIndex: 1,
+        toolCallId: 'call-streamed',
+        toolName: 'read_file',
+        delta: '{"target',
+      },
+      { type: 'text-end', messageId: 'stream-id', contentIndex: 0, content: 'before' },
+      {
+        type: 'tool-input-end',
+        messageId: 'stream-id',
+        contentIndex: 1,
+        toolCallId: 'call-streamed',
+        toolName: 'read_file',
+        input: { targetFile: 'main.ts' },
+      },
+    ]);
+    expect(updates).toMatchObject([
+      { type: 'start' },
+      { type: 'text_start', contentIndex: 0 },
+      { type: 'text_delta', contentIndex: 0, delta: 'be' },
+      { type: 'toolcall_start', contentIndex: 1 },
+      { type: 'text_delta', contentIndex: 0, delta: 'for' },
+      { type: 'toolcall_delta', contentIndex: 1, delta: '{"target' },
+      { type: 'text_end', contentIndex: 0, content: 'before' },
+      { type: 'toolcall_end', contentIndex: 1 },
+      { type: 'done' },
+    ]);
+  });
+
   it('should preserve a tool-call thought signature in pi content', async () => {
     const stream = await streamFor([
       {
@@ -1067,6 +1324,22 @@ describe('transport stream state', () => {
     });
   });
 
+  it('retains reasoning timing in the durable provider envelope', async () => {
+    const stream = await streamFor([
+      { type: 'thinking-start', contentIndex: 0 },
+      { type: 'thinking-delta', contentIndex: 0, text: 'inspect' },
+      { type: 'thinking-end', contentIndex: 0, content: 'inspect' },
+      { type: 'completed', stopReason: 'stop' },
+    ]);
+
+    const result = await stream.result();
+    const durable = piMessageToProvider(result, new MessageIdentities(() => 'durable-reasoning'));
+    const timing = (durable.metadata?.['reasoningTimings'] as Array<Record<string, unknown>> | undefined)?.[0];
+    expect(timing?.['contentIndex']).toBe(0);
+    expect(typeof timing?.['startedAtMs']).toBe('number');
+    expect(typeof timing?.['endedAtMs']).toBe('number');
+  });
+
   it('should reject transport events emitted after completion', async () => {
     const live: string[] = [];
     const stream = await streamFor(
@@ -1076,7 +1349,9 @@ describe('transport stream state', () => {
         { type: 'text-delta', text: 'too late' },
       ],
       (event) => {
-        live.push(event.delta);
+        if ('delta' in event) {
+          live.push(event.delta);
+        }
       },
     );
 
@@ -1154,6 +1429,35 @@ describe('transport stream state', () => {
     expect(hydrated).toMatchObject({
       role: 'assistant',
       stopReason: 'deferred',
+    });
+  });
+
+  it('repairs the historical Claude completions codec label during replay', () => {
+    const anthropicModel: Model<Api> = {
+      ...stubModel,
+      api: 'anthropic-messages',
+      provider: 'anthropic',
+    };
+    const hydrated = providerMessageToPi(
+      {
+        id: 'historical-claude',
+        role: 'assistant',
+        content: [{ type: 'thinking', thinking: 'prior', thinkingSignature: 'opaque-signature' }],
+        metadata: {
+          api: 'openai-completions',
+          provider: 'anthropic',
+          model: 'claude-sonnet-5',
+          stopReason: 'stop',
+        },
+      },
+      anthropicModel,
+      new MessageIdentities(() => 'unused'),
+    );
+
+    expect(hydrated).toMatchObject({
+      api: 'anthropic-messages',
+      provider: 'anthropic',
+      content: [{ type: 'thinking', thinkingSignature: 'opaque-signature' }],
     });
   });
 });

@@ -143,7 +143,89 @@ const responseFromChunks = (chunks: readonly string[], contentType = 'text/event
   );
 };
 
+const heldAnthropicResponse = () => {
+  const encoder = new TextEncoder();
+  const waiting = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  let sentStart = false;
+  const response = new Response(
+    new ReadableStream<Uint8Array<ArrayBuffer>>({
+      async pull(controller) {
+        if (!sentStart) {
+          sentStart = true;
+          controller.enqueue(
+            encoder.encode(
+              'event: message_start\ndata: {"type":"message_start","message":{"id":"msg-held","type":"message","role":"assistant","content":[],"model":"fixture-model","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":1,"output_tokens":0}}}\n\n' +
+                'event: content_block_start\ndata: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"call-held","name":"read_file","input":{}}}\n\n',
+            ),
+          );
+          return;
+        }
+        waiting.resolve();
+        await release.promise;
+        controller.enqueue(
+          encoder.encode(
+            'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\\"targetFile\\":\\"main.ts\\"}"}}\n\n' +
+              'event: content_block_stop\ndata: {"type":"content_block_stop","index":0}\n\n' +
+              'event: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null},"usage":{"output_tokens":1}}\n\n' +
+              'event: message_stop\ndata: {"type":"message_stop"}\n\n',
+          ),
+        );
+        controller.close();
+      },
+    }),
+    {
+      status: 200,
+      headers: {
+        'content-type': 'text/event-stream',
+        'x-tau-operation-id': 'operation-held-1',
+      },
+    },
+  );
+  return { response, release, waiting };
+};
+
 describe('createGatewayModelTransport', () => {
+  it('emits tool identity before held argument generation completes', async () => {
+    const held = heldAnthropicResponse();
+    const transport = createGatewayModelTransport({
+      baseUrl: 'https://gateway.example',
+      fetch: vi.fn(async () => held.response),
+    });
+    const iterator = transport.stream(request({ providerKind: 'anthropic' }))[Symbol.asyncIterator]();
+    const first = iterator.next();
+
+    try {
+      await held.waiting.promise;
+      await new Promise<void>((resolve) => {
+        setImmediate(resolve);
+      });
+      const observed = await Promise.race([
+        first.then((event) => ({ kind: 'event', event }) as const),
+        new Promise<{ readonly kind: 'blocked' }>((resolve) => {
+          setTimeout(() => {
+            resolve({ kind: 'blocked' });
+          }, 100);
+        }),
+      ]);
+      expect(observed).toEqual({
+        kind: 'event',
+        event: {
+          done: false,
+          value: {
+            type: 'tool-input-start',
+            contentIndex: 0,
+            toolCallId: 'call-held',
+            toolName: 'read_file',
+          },
+        },
+      });
+    } finally {
+      held.release.resolve();
+      await iterator.return?.();
+    }
+  });
+
   it('posts pi-ai OpenAI Chat Completions bytes and maps a fragmented gateway SSE stream', async () => {
     let body: BodyInit | undefined;
     let credentials: string | undefined;
@@ -180,13 +262,36 @@ describe('createGatewayModelTransport', () => {
     // OpenAI's system field has no per-block cache-control wire shape, so this
     // provider deliberately degrades to pi's blanket cacheRetention policy.
     expect(body).toBe(
-      String.raw`{"model":"fixture-model","messages":[{"role":"developer","content":"static\n\nworkspace\n\ndynamic"},{"role":"user","content":"hello"}],"stream":true,"stream_options":{"include_usage":true},"store":false,"max_completion_tokens":8192,"tools":[{"type":"function","function":{"name":"read_file","description":"Read a file.","parameters":{"type":"object","properties":{"targetFile":{"type":"string"}},"required":["targetFile"],"additionalProperties":false},"strict":false}}]}`,
+      String.raw`{"model":"fixture-model","messages":[{"role":"system","content":"static\n\nworkspace\n\ndynamic"},{"role":"user","content":"hello"}],"stream":true,"stream_options":{"include_usage":true},"store":false,"max_completion_tokens":8192,"tools":[{"type":"function","function":{"name":"read_file","description":"Read a file.","parameters":{"type":"object","properties":{"targetFile":{"type":"string"}},"required":["targetFile"],"additionalProperties":false},"strict":false}}]}`,
     );
     expect(events).toEqual([
-      { type: 'thinking-delta', text: 'think' },
-      { type: 'thinking-delta', text: '', signature: 'reasoning_content' },
+      { type: 'thinking-start', contentIndex: 0 },
+      { type: 'thinking-delta', contentIndex: 0, text: 'think' },
+      {
+        type: 'tool-input-start',
+        contentIndex: 1,
+        toolCallId: 'call-1',
+        toolName: 'read_file',
+      },
+      {
+        type: 'tool-input-delta',
+        contentIndex: 1,
+        toolCallId: 'call-1',
+        toolName: 'read_file',
+        delta: '{"target',
+      },
+      {
+        type: 'tool-input-delta',
+        contentIndex: 1,
+        toolCallId: 'call-1',
+        toolName: 'read_file',
+        delta: 'File":"main.ts"}',
+      },
+      { type: 'thinking-end', contentIndex: 0, content: 'think' },
+      { type: 'thinking-signature', contentIndex: 0, signature: 'reasoning_content' },
       {
         type: 'tool-input',
+        contentIndex: 1,
         toolCallId: 'call-1',
         toolName: 'read_file',
         input: { targetFile: 'main.ts' },
@@ -196,6 +301,49 @@ describe('createGatewayModelTransport', () => {
         usage: usage(7, 4, { cacheRead: 5, reasoning: 0 }),
       },
       { type: 'completed', stopReason: 'toolUse' },
+    ]);
+  });
+
+  it('maps Vertex thought-marked content to thinking events', async () => {
+    const transport = createGatewayModelTransport({
+      baseUrl: 'https://gateway.example',
+      fetch: vi.fn(async () =>
+        responseFromChunks([
+          'data: {"id":"chatcmpl-thought","choices":[{"index":0,"delta":{"content":"<think>\\nplan ","extra_content":{"google":{"thought":true}}}}]}\n\n',
+          'data: {"id":"chatcmpl-thought","choices":[{"index":0,"delta":{"content":"carefully","extra_content":{"google":{"thought":true}}}}]}\n\n',
+          'data: {"id":"chatcmpl-thought","choices":[{"index":0,"delta":{"content":"</think>answer"}}]}\n\n',
+          'data: {"id":"chatcmpl-thought","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n',
+          'data: [DONE]\n\n',
+        ]),
+      ),
+    });
+
+    const events = await collect(transport.stream(request()));
+
+    expect(
+      events
+        .filter((event) => event.type === 'thinking-delta')
+        .map((event) => event.text)
+        .join(''),
+    ).toBe('plan carefully');
+    expect(
+      events
+        .filter((event) => event.type === 'text-delta')
+        .map((event) => event.text)
+        .join(''),
+    ).toBe('answer');
+    expect(events.map((event) => event.type)).toEqual([
+      'thinking-start',
+      'thinking-delta',
+      'thinking-delta',
+      'text-start',
+      'text-delta',
+      'thinking-end',
+      'thinking-signature',
+      'text-end',
+      'message-metadata',
+      'usage',
+      'completed',
     ]);
   });
 
@@ -260,6 +408,7 @@ describe('createGatewayModelTransport', () => {
       content: 'read the file',
     });
     const firstSnapshot = await first.snapshot();
+    expect(JSON.stringify(bodies[0])).toContain('"role":"system","content":"system"');
     expect(firstSnapshot.messages.find((message) => message.role === 'assistant')).toMatchObject({
       role: 'assistant',
       content: [
@@ -407,7 +556,28 @@ describe('createGatewayModelTransport', () => {
     });
     expect(events).toEqual([
       {
+        type: 'tool-input-start',
+        contentIndex: 0,
+        toolCallId: 'call-1|fc_1',
+        toolName: 'read_file',
+      },
+      {
+        type: 'tool-input-delta',
+        contentIndex: 0,
+        toolCallId: 'call-1|fc_1',
+        toolName: 'read_file',
+        delta: '{"target',
+      },
+      {
+        type: 'tool-input-delta',
+        contentIndex: 0,
+        toolCallId: 'call-1|fc_1',
+        toolName: 'read_file',
+        delta: 'File":"main.ts"}',
+      },
+      {
         type: 'tool-input',
+        contentIndex: 0,
         toolCallId: 'call-1|fc_1',
         toolName: 'read_file',
         input: { targetFile: 'main.ts' },
@@ -417,6 +587,80 @@ describe('createGatewayModelTransport', () => {
       { type: 'completed', stopReason: 'toolUse' },
     ]);
   });
+
+  /* eslint-disable @typescript-eslint/naming-convention -- Frozen upstream provider wire keys use snake_case. */
+  it.each([
+    {
+      name: 'OpenAI Responses',
+      providerKind: 'openai',
+      reasoning: { effort: 'high', summary: 'auto' },
+      expectedPath: '/v1/llm/openai/v1/responses',
+      expectedBody: { reasoning: { effort: 'high', summary: 'auto' } },
+      response: authoritativeGatewayWireFixtures.openAiResponsesToolTurn,
+    },
+    {
+      name: 'Anthropic Messages',
+      providerKind: 'anthropic',
+      reasoning: { effort: 'high', display: 'summarized' },
+      expectedPath: '/v1/llm/anthropic/v1/messages',
+      expectedBody: { thinking: { type: 'adaptive', display: 'summarized' }, output_config: { effort: 'high' } },
+      response: authoritativeGatewayWireFixtures.anthropicToolTurn,
+    },
+    {
+      name: 'Gemini OpenAI compatibility',
+      providerKind: 'vertexai',
+      reasoning: { effort: 'medium' },
+      expectedPath: '/v1/llm/openai/v1/chat/completions',
+      expectedBody: {
+        extra_body: {
+          google: {
+            thinking_config: { include_thoughts: true, thinking_level: 'MEDIUM' },
+            thought_tag_marker: 'think',
+            stream_function_call_arguments: true,
+          },
+        },
+      },
+      response: authoritativeGatewayWireFixtures.toolTurn,
+    },
+    {
+      name: 'xAI Responses',
+      providerKind: 'xai',
+      reasoning: { effort: 'high', summary: 'auto' },
+      expectedPath: '/v1/llm/openai/v1/responses',
+      expectedBody: {
+        reasoning: { effort: 'high', summary: 'auto' },
+        include: ['reasoning.encrypted_content'],
+      },
+      response: authoritativeGatewayWireFixtures.openAiResponsesToolTurn,
+    },
+  ] as const)('sends the frozen $name reasoning and tool-stream controls', async (fixture) => {
+    let body: unknown;
+    let path: string | undefined;
+    const transport = createGatewayModelTransport({
+      baseUrl: 'https://gateway.example',
+      fetch: vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        path = new URL(input instanceof Request ? input.url : input).pathname;
+        if (typeof init?.body !== 'string') {
+          throw new TypeError('Expected a JSON request body.');
+        }
+        body = JSON.parse(init.body);
+        return byteSplitResponse(fixture.response);
+      }),
+    });
+
+    await collect(
+      transport.stream(
+        request({
+          providerKind: fixture.providerKind,
+          reasoning: fixture.reasoning,
+        } as Partial<ModelStreamRequest>),
+      ),
+    );
+
+    expect(path).toBe(fixture.expectedPath);
+    expect(body).toMatchObject(fixture.expectedBody);
+  });
+  /* eslint-enable @typescript-eslint/naming-convention -- End frozen provider wire fixture. */
 
   it('sends a bearer Authorization header when an auth provider is configured', async () => {
     let headers: Headers | undefined;
@@ -511,10 +755,33 @@ describe('createGatewayModelTransport', () => {
       String.raw`{"model":"fixture-model","messages":[{"role":"user","content":[{"type":"text","text":"hello","cache_control":{"type":"ephemeral"}}]}],"max_tokens":8192,"stream":true,"system":[{"type":"text","text":"static","cache_control":{"type":"ephemeral"}},{"type":"text","text":"workspace","cache_control":{"type":"ephemeral"}},{"type":"text","text":"dynamic"}],"tools":[{"name":"read_file","description":"Read a file.","eager_input_streaming":true,"input_schema":{"type":"object","properties":{"targetFile":{"type":"string"}},"required":["targetFile"]},"cache_control":{"type":"ephemeral"}}]}`,
     );
     expect(events).toEqual([
-      { type: 'thinking-delta', text: 'think' },
-      { type: 'thinking-delta', text: '', signature: 'sig-fixture' },
+      { type: 'thinking-start', contentIndex: 0 },
+      { type: 'thinking-delta', contentIndex: 0, text: 'think' },
+      { type: 'thinking-end', contentIndex: 0, content: 'think' },
+      { type: 'thinking-signature', contentIndex: 0, signature: 'sig-fixture' },
+      {
+        type: 'tool-input-start',
+        contentIndex: 1,
+        toolCallId: 'call-1',
+        toolName: 'read_file',
+      },
+      {
+        type: 'tool-input-delta',
+        contentIndex: 1,
+        toolCallId: 'call-1',
+        toolName: 'read_file',
+        delta: '{"target',
+      },
+      {
+        type: 'tool-input-delta',
+        contentIndex: 1,
+        toolCallId: 'call-1',
+        toolName: 'read_file',
+        delta: 'File":"main.ts"}',
+      },
       {
         type: 'tool-input',
+        contentIndex: 1,
         toolCallId: 'call-1',
         toolName: 'read_file',
         input: { targetFile: 'main.ts' },
@@ -838,6 +1105,16 @@ describe('createGatewayModelTransport', () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
+  it.each(['minimal', 'xhigh'] as const)('refuses unsupported Vertex %s reasoning before fetch', async (effort) => {
+    const fetchSpy = vi.fn();
+    const transport = createGatewayModelTransport({ baseUrl: 'https://gateway.example', fetch: fetchSpy });
+
+    await expect(
+      collect(transport.stream(request({ providerKind: 'vertexai', reasoning: { effort } }))),
+    ).rejects.toMatchObject({ code: 'INVALID_REQUEST' });
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
   it('round-trips pi-ai reasoning replay markers and provider response metadata', async () => {
     let body: unknown;
     const transport = createGatewayModelTransport({
@@ -882,10 +1159,10 @@ describe('createGatewayModelTransport', () => {
       type: 'message-metadata',
       metadata: { responseId: 'chatcmpl-2', responseModel: 'upstream-model' },
     });
-    expect(events).toContainEqual({ type: 'thinking-delta', text: 'think' });
+    expect(events).toContainEqual({ type: 'thinking-delta', contentIndex: 0, text: 'think' });
     expect(events).toContainEqual({
-      type: 'thinking-delta',
-      text: '',
+      type: 'thinking-signature',
+      contentIndex: 0,
       signature: 'reasoning_content',
     });
   });
@@ -980,7 +1257,9 @@ describe('createGatewayModelTransport', () => {
     });
 
     await expect(collect(transport.stream(request()))).resolves.toEqual([
-      { type: 'text-delta', text: 'ok' },
+      { type: 'text-start', contentIndex: 0 },
+      { type: 'text-delta', contentIndex: 0, text: 'ok' },
+      { type: 'text-end', contentIndex: 0, content: 'ok' },
       { type: 'usage', usage: usage(0, 0) },
       { type: 'completed', stopReason: 'stop' },
     ]);
@@ -1133,7 +1412,11 @@ describe('createGatewayModelTransport', () => {
       [Symbol.asyncIterator]();
     await expect(iterator.next()).resolves.toEqual({
       done: false,
-      value: { type: 'text-delta', text: 'partial' },
+      value: { type: 'text-start', contentIndex: 0 },
+    });
+    await expect(iterator.next()).resolves.toEqual({
+      done: false,
+      value: { type: 'text-delta', contentIndex: 0, text: 'partial' },
     });
     operation.abort();
 

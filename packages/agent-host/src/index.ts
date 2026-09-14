@@ -84,6 +84,7 @@ export type {
   MessageEnvelopeReplacedEvent,
   ModelInvocationBoundEvent,
   ModelInvocationPreparedEvent,
+  ModelReasoningConfig,
   ProviderMessage,
   ProviderMessageMetadata,
   TurnConflictedLogEvent,

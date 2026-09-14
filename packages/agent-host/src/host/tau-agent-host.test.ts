@@ -130,7 +130,15 @@ describe('createTauAgentHost', () => {
       message: { id: 'turn-live', role: 'user', content: 'Stream.' },
     });
 
-    expect(order).toEqual(['text-delta:live-0', 'thinking-delta:live-0', 'durable:live-0']);
+    expect(order).toEqual([
+      'text-start:live-0',
+      'text-delta:live-0',
+      'text-end:live-0',
+      'thinking-start:live-0',
+      'thinking-delta:live-0',
+      'thinking-end:live-0',
+      'durable:live-0',
+    ]);
     await host.close();
   });
 

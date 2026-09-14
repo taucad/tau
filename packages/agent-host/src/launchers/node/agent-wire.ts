@@ -18,6 +18,7 @@ import { z } from 'zod';
 import {
   agentLogEventSchema,
   jsonValueSchema,
+  modelReasoningConfigSchema,
   providerMessageSchema,
   userProviderMessageSchema,
 } from '#log/event-schema.js';
@@ -178,6 +179,7 @@ export const agentChannelModelSchema = z.strictObject({
   contextWindow: z.number().int().positive(),
   maxTokens: z.number().int().positive().optional(),
   cost: agentChannelModelCostSchema.optional(),
+  reasoning: modelReasoningConfigSchema.optional(),
 });
 
 /** How the turn may use tools: a mode, or an explicit allowlist. @public */
@@ -416,18 +418,65 @@ export type AgentChannelLiveEvent = { readonly chatId: string; readonly event: A
 
 /** Durable-event stream frame schema. @public */
 export const agentChannelEventSchema = z.strictObject({ chatId: nonEmptyString, event: agentLogEventSchema });
+const liveEventBase = {
+  chatId: nonEmptyString,
+  runId: nonEmptyString,
+  messageId: nonEmptyString,
+  contentIndex: z.number().int().nonnegative(),
+};
+const liveToolEventBase = {
+  ...liveEventBase,
+  toolCallId: nonEmptyString,
+  toolName: nonEmptyString,
+};
 
 /** Ephemeral-delta stream frame schema. @public */
 export const agentChannelLiveEventSchema = z.strictObject({
   chatId: nonEmptyString,
-  event: z.strictObject({
-    type: z.enum(['text-delta', 'thinking-delta']),
-    chatId: nonEmptyString,
-    runId: nonEmptyString,
-    messageId: nonEmptyString,
-    contentIndex: z.number().int().nonnegative(),
-    delta: z.string(),
-  }),
+  event: z.discriminatedUnion('type', [
+    z.strictObject({ type: z.literal('text-start'), ...liveEventBase }),
+    z.strictObject({
+      type: z.literal('thinking-start'),
+      ...liveEventBase,
+      timestamp: z.number().int().nonnegative().optional(),
+    }),
+    z.strictObject({
+      type: z.enum(['text-delta', 'thinking-delta']),
+      ...liveEventBase,
+      delta: z.string(),
+    }),
+    z.strictObject({
+      type: z.literal('text-end'),
+      ...liveEventBase,
+      content: z.string(),
+    }),
+    z.strictObject({
+      type: z.literal('thinking-end'),
+      ...liveEventBase,
+      content: z.string(),
+      timestamp: z.number().int().nonnegative().optional(),
+    }),
+    z.strictObject({
+      type: z.literal('tool-input-start'),
+      ...liveToolEventBase,
+    }),
+    z.strictObject({
+      type: z.literal('tool-input-delta'),
+      ...liveToolEventBase,
+      delta: z.string(),
+    }),
+    z.strictObject({
+      type: z.literal('tool-input-end'),
+      ...liveToolEventBase,
+      input: jsonValueSchema,
+    }),
+    z.strictObject({
+      type: z.literal('tool-output-update'),
+      ...liveToolEventBase,
+      output: jsonValueSchema,
+      isError: z.boolean(),
+    }),
+  ]),
 });
 
 /**

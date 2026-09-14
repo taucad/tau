@@ -1404,6 +1404,15 @@ describe('BrowserPlacementChatTransport', () => {
     );
     expect(assistantTexts(corrupted)).toHaveLength(58);
     expect(await reattach(corrupted)).toEqual(rebuilt);
+
+    const lossy = structuredClone(rebuilt);
+    const assistant = lossy.find((message) => message.role === 'assistant');
+    const text = assistant?.parts.find((part) => part.type === 'text');
+    if (text?.type === 'text') {
+      text.text = `${text.text.slice(0, 8)}${text.text.slice(-8)}`;
+    }
+    expect(lossy).not.toEqual(rebuilt);
+    expect(await reattach(lossy)).toEqual(rebuilt);
     unregister();
   });
 });

@@ -185,13 +185,13 @@ export const acpPlanSchema = z.discriminatedUnion('type', [
 export const acpCommandSchema = z.object({
   name: z.string().min(1),
   description: z.string(),
-  input: z.object({ hint: z.string() }).optional(),
+  input: z.object({ hint: z.string() }).nullish(),
 });
 
 const acpConfigValueSchema = z.object({
   value: z.string(),
   name: z.string(),
-  description: z.string().optional(),
+  description: z.string().nullish(),
 });
 
 const acpConfigValueGroupSchema = z.object({
@@ -206,8 +206,8 @@ export const acpConfigOptionSchema = z.discriminatedUnion('type', [
     type: z.literal('select'),
     id: z.string(),
     name: z.string(),
-    description: z.string().optional(),
-    category: z.string().optional(),
+    description: z.string().nullish(),
+    category: z.string().nullish(),
     currentValue: z.string(),
     options: z.union([z.array(acpConfigValueSchema), z.array(acpConfigValueGroupSchema)]),
   }),
@@ -215,8 +215,8 @@ export const acpConfigOptionSchema = z.discriminatedUnion('type', [
     type: z.literal('boolean'),
     id: z.string(),
     name: z.string(),
-    description: z.string().optional(),
-    category: z.string().optional(),
+    description: z.string().nullish(),
+    category: z.string().nullish(),
     currentValue: z.boolean(),
   }),
 ]);
@@ -227,11 +227,12 @@ export const acpSessionDataSchema = z.object({
   id: z.string(),
   agentId: z.string(),
   sessionId: z.string().optional(),
+  title: z.string().optional(),
   plan: acpPlanSchema.optional(),
   commands: z.array(acpCommandSchema),
   configOptions: z.array(acpConfigOptionSchema),
   modeId: z.string().optional(),
-  modes: z.array(z.object({ id: z.string(), name: z.string(), description: z.string().optional() })).optional(),
+  modes: z.array(z.object({ id: z.string(), name: z.string(), description: z.string().nullish() })).optional(),
 });
 
 /** @public */

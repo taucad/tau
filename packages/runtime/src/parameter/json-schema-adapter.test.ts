@@ -7,6 +7,18 @@ const identity = {
 } as const;
 
 describe('Draft-7 parameter declaration adapter', () => {
+  it('should omit empty schema maps so parameterless producers remain valid', () => {
+    const declaration = projectDraft7SchemaToParameterDeclaration({
+      ...identity,
+      defaults: {},
+      schema: { type: 'object', properties: {}, definitions: {}, additionalProperties: false },
+    });
+
+    expect(declaration.defaults).toEqual({});
+    expect(declaration.schema).not.toHaveProperty('properties');
+    expect(declaration.schema).not.toHaveProperty('definitions');
+  });
+
   it('should preserve admitted scalar, nested, array, reference, default, and quantity declarations', () => {
     const schema = {
       $schema: 'http://json-schema.org/draft-07/schema#',

@@ -22,6 +22,9 @@ export type Remote = Readonly<{
   name: string;
   url: string;
   kind: RemoteKind;
+  provider?: 'github';
+  repositoryId?: string;
+  fetchOnly?: boolean;
 }>;
 
 /**
@@ -69,7 +72,11 @@ export const tauRemoteUrl = (apiBaseUrl: string, projectId: string): string =>
  * @returns The record, with its kind derived from the name.
  * @public
  */
-export const remoteOf = (name: string, url: string): Remote => Object.freeze({ name, url, kind: remoteKindOf(name) });
+export const remoteOf = (
+  name: string,
+  url: string,
+  metadata?: Readonly<{ provider?: 'github'; repositoryId?: string; fetchOnly?: boolean }>,
+): Remote => Object.freeze({ name, url, kind: remoteKindOf(name), ...metadata });
 
 /**
  * The ref namespaces that are this host's own and never cross a wire.
@@ -87,6 +94,8 @@ const hostLocalRefPrefixes: readonly string[] = Object.freeze([
   'refs/tau/revisions',
   'refs/tau/transactions',
   'refs/tau/head',
+  /* Server-owned roots that keep revision ids embedded in record JSON alive. */
+  'refs/tau/retention',
   /* Fetch's own half of the store: a remote-tracking ref is what this host
    * last saw *of* a remote, so offering one back is meaningless. */
   'refs/remotes',
@@ -196,11 +205,11 @@ export const isTauApiUrl = (apiBaseUrl: string, url: string): boolean => {
  * @param apiBaseUrl - Origin the Tau API is reachable at, with or without a trailing slash.
  * @param url - The remote URL the client wants to reach.
  * @returns The proxy URL to request instead.
- * @public
+ * @internal
  *
  * @example <caption>Reaching GitHub from the page</caption>
  * ```typescript
- * import { gitProxyUrl } from '@taucad/revisions';
+ * import { gitProxyUrl } from '#remotes.js';
  *
  * gitProxyUrl('https://api.tau.new', 'https://github.com/o/r.git/info/refs?service=git-upload-pack');
  * // 'https://api.tau.new/v1/git/proxy?url=https%3A%2F%2Fgithub.com%2Fo%2Fr.git%2Finfo%2Frefs%3Fservice%3Dgit-upload-pack'
@@ -245,11 +254,21 @@ const blockedHostNames: readonly string[] = Object.freeze(['.localhost', '.inter
  * empty-path rule here has no counterpart there — so a `400` with a code is
  * still the last word (W12 review R8).
  *
+ * `allowPrivate` is ruling P50, and it is the host's to pass: the page cannot
+ * read the API's environment, so each host says what its own deployment allows
+ * (`TAU_GIT_REMOTE_ALLOW_PRIVATE=1` on the API relaxes the same two refusals on
+ * the wire). Omitted, nothing changes — a private address stays refused, which
+ * is what every caller that does not opt in gets.
+ *
  * @param url - What the person typed.
+ * @param options - `allowPrivate` relaxes the scheme and address refusals (P50).
  * @returns The reason it cannot be used, or `undefined` when it can.
  * @public
  */
-export const gitRemoteUrlProblem = (url: string): string | undefined => {
+export const gitRemoteUrlProblem = (
+  url: string,
+  options: Readonly<{ allowPrivate?: boolean }> = {},
+): string | undefined => {
   let parsed: URL;
   try {
     parsed = new URL(url);
@@ -257,7 +276,7 @@ export const gitRemoteUrlProblem = (url: string): string | undefined => {
     return 'Enter the full address of the repository, starting with https://';
   }
   const host = parsed.hostname.toLowerCase();
-  if (parsed.protocol !== 'https:') {
+  if (parsed.protocol !== 'https:' && !(options.allowPrivate === true && parsed.protocol === 'http:')) {
     return 'Only https addresses can be connected.';
   }
   if (parsed.username !== '' || parsed.password !== '') {
@@ -268,7 +287,10 @@ export const gitRemoteUrlProblem = (url: string): string | undefined => {
       return 'Remove the token from the address; Tau asks for permission instead.';
     }
   }
-  if (blockedHostNames.some((suffix) => host === suffix.slice(1) || host.endsWith(suffix))) {
+  if (
+    options.allowPrivate !== true &&
+    blockedHostNames.some((suffix) => host === suffix.slice(1) || host.endsWith(suffix))
+  ) {
     return 'That address is on this machine or a private network; Tau cannot reach it for you.';
   }
   if (parsed.pathname.replaceAll('/', '') === '') {
@@ -320,7 +342,8 @@ export const reauthorizationRequired = (message: string): Error =>
  * @returns `true` when large objects may be offered to it.
  * @public
  */
-export const remoteCarriesLargeObjects = (remote: string): boolean => remoteKindOf(remote) === 'tau';
+export const remoteCarriesLargeObjects = (remote: string | Remote): boolean =>
+  typeof remote === 'string' ? remoteKindOf(remote) === 'tau' : remote.kind === 'tau' || remote.provider === 'github';
 
 /**
  * What to tell a person whose project cannot be backed up to this remote (P20).
@@ -352,6 +375,8 @@ export type GitRemoteCredential = Readonly<{
   apiBaseUrl: string;
   /** The remote origin this credential was minted for, e.g. `https://github.com`. */
   origin?: string;
+  /** Exact repository base URL when the provider credential is repository-scoped. */
+  repositoryUrl?: string;
   /** The whole header value, e.g. `Bearer gho_…`. */
   authorization?: string;
   /** Why there is none, when the session could not mint one. */
@@ -409,7 +434,20 @@ export const createGitRemoteTransport = (credential: () => GitRemoteCredential |
       return undefined;
     }
     const origin = originOf(url);
-    return origin !== undefined && origin === held.origin ? held : undefined;
+    if (origin === undefined || origin !== held.origin) {
+      return undefined;
+    }
+    if (held.repositoryUrl === undefined) {
+      return held;
+    }
+    try {
+      const repository = new URL(held.repositoryUrl);
+      const target = new URL(url);
+      const base = repository.pathname.replace(/\/+$/u, '');
+      return target.pathname === base || target.pathname.startsWith(`${base}/`) ? held : undefined;
+    } catch {
+      return undefined;
+    }
   };
   return {
     proxyAuthorization: (url) => {

@@ -30,6 +30,7 @@
  * | 21 | `opening.fetching → onError → queued` | the fetch has a failure edge |
  * | 22 | `opening.fastForwarding → onError → queued` | so does the apply |
  * | 23 | `syncNow { pushId } → pushSettled { pushId, outcome }` | **the only form `Sync now` has** (the `publish.machine` row) |
+ * | 23b | `noRemote --syncNow { pushId, remote }--> pushing` | a first publish carries the remote it just created into the scheduler |
  * | 24 | `pushing → overQuota → parent quotaRefused` | the over-quota list is `remote.machine`'s, forwarded through the parent (P19) |
  * | 25 | `* --remoteDisconnected--> noRemote` | disconnecting stops the scheduler from any state |
  * | 26 | `noRemote --remoteConnected--> opening` | connecting starts it with a pull |
@@ -37,6 +38,7 @@
  * | 28 | a `close` revision minted offline survives an actor restart | **red pin (a)**: rehydration through the record, not a snapshot |
  * | 29 | startup/stop, serializable context, one exported machine | the `create-machine` verify list |
  * | 30 | the push lease is what was last fetched | P18: `expected` per ref is the remote head this host saw |
+ * | 35 | `backedUp --open--> opening` | a client reopening a retained native root fetches again |
  */
 
 import { createActor, fromPromise } from 'xstate';
@@ -49,6 +51,7 @@ import type {
   SyncActors,
   SyncFetchActorOutput,
   SyncMachineEmitted,
+  SyncMergeActorOutput,
   SyncPushActorOutput,
   SyncQueueRecord,
   SyncReadRemoteActorOutput,
@@ -68,7 +71,15 @@ const isMachine = (value: unknown): boolean =>
 
 const emptyQueue: SyncQueueRecord = { version: 1, entries: [] };
 const mainRef = 'refs/heads/main';
+const syncBranch = 'sync/tau/main';
+const syncRef = `refs/heads/${syncBranch}`;
 const chatRef = 'refs/tau/chats/c1';
+const mergeConflict = {
+  status: 'conflicted',
+  branch: syncBranch,
+  into: 'main',
+  paths: ['main.scad'],
+} satisfies SyncMergeActorOutput;
 
 type Harness = Readonly<{
   actor: Actor<typeof syncMachine>;
@@ -191,10 +202,33 @@ describe('syncMachine', () => {
     await vi.waitFor(() => {
       expect(harness.effects.running('fastForward')).toBe(1);
     });
-    harness.effects.settle('fastForward', { output: undefined });
+    harness.effects.settle('fastForward', {
+      output: { checkoutId: 'live', revisionId: 'remote-head', treeId: 'remote-tree' },
+    });
     await vi.waitFor(() => {
       expect(harness.actor.getSnapshot().matches('backedUp')).toBe(true);
     });
+    expect(harness.parent.events).toContainEqual({
+      type: 'checkoutChanged',
+      checkoutId: 'live',
+      revisionId: 'remote-head',
+      treeId: 'remote-tree',
+      branch: 'main',
+    });
+
+    harness.stop();
+  });
+
+  it('row 35: reopening a retained root fetches again', async () => {
+    const harness = start();
+    await openCleanly(harness);
+
+    harness.actor.send({ type: 'open' });
+
+    await vi.waitFor(() => {
+      expect(harness.effects.inputsFor('fetch')).toHaveLength(2);
+    });
+    expect(harness.actor.getSnapshot().matches('opening')).toBe(true);
 
     harness.stop();
   });
@@ -302,6 +336,28 @@ describe('syncMachine', () => {
     harness.stop();
   });
 
+  it('pushes a durable record written while the current push is in flight', async () => {
+    const harness = start();
+    await openCleanly(harness);
+
+    harness.actor.send({ type: 'syncNow' });
+    await vi.waitFor(() => {
+      expect(harness.effects.running('push')).toBe(1);
+    });
+    harness.actor.send({ type: 'recordsChanged' });
+    harness.effects.settle('push', { output: pushResult() });
+    await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().matches('pending')).toBe(true);
+    });
+
+    harness.clock.advance(2000);
+    await vi.waitFor(() => {
+      expect(harness.effects.running('push')).toBe(1);
+    });
+    harness.stop();
+  });
+
   it('row 10: a rejected main is the conflict signal and emits syncConflict', async () => {
     const harness = start();
     await openCleanly(harness);
@@ -314,13 +370,27 @@ describe('syncMachine', () => {
       output: pushResult({ name: mainRef, status: 'rejected', head: undefined, reason: 'leaseLost' }),
     });
     await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+    await settleWhenRunning(harness.effects, 'fetch', {
+      output: { leases: { [mainRef]: 'remote-head' }, integration: 'diverged' } satisfies SyncFetchActorOutput,
+    });
+    await settleWhenRunning(harness.effects, 'merge', { output: mergeConflict });
 
     await vi.waitFor(() => {
       expect(harness.actor.getSnapshot().matches('conflicted')).toBe(true);
     });
     expect(harness.emitted.filter((event) => event['type'] === 'syncConflict')).toEqual([
-      { type: 'syncConflict', ref: mainRef, reason: 'leaseLost' } satisfies SyncMachineEmitted,
+      {
+        type: 'syncConflict',
+        ref: syncRef,
+        reason: 'The remote and this device changed the same files.',
+      } satisfies SyncMachineEmitted,
     ]);
+    expect(harness.parent.events).toContainEqual({
+      type: 'mergeConflicted',
+      branch: syncBranch,
+      into: 'main',
+      paths: ['main.scad'],
+    });
 
     harness.stop();
   });
@@ -348,6 +418,9 @@ describe('syncMachine', () => {
     await vi.waitFor(() => {
       expect(harness.effects.running('push')).toBe(1);
     });
+    /* A thrown full-set push can fail before it reaches the record refs. Its
+     * synthetic history queue entry must therefore retry the full set. */
+    expect(harness.effects.inputsFor('push').at(-1)).not.toHaveProperty('refs');
     harness.effects.settle('push', {
       error: Object.assign(new Error('Reconnect GitHub'), { code: 'REMOTE_REAUTHORIZATION_REQUIRED' }),
     });
@@ -438,7 +511,7 @@ describe('syncMachine', () => {
     harness.stop();
   });
 
-  it('row 20: a diverged branch merges, and no merge actor is provided by this lane', async () => {
+  it('row 20: a diverged branch records and announces its conflict', async () => {
     const harness = start();
 
     await vi.waitFor(() => {
@@ -450,12 +523,18 @@ describe('syncMachine', () => {
     await vi.waitFor(() => {
       expect(harness.effects.running('merge')).toBe(1);
     });
-    harness.effects.settle('merge', { error: new Error('This host provided no merge actor.') });
+    harness.effects.settle('merge', { output: mergeConflict });
 
     await vi.waitFor(() => {
       expect(harness.actor.getSnapshot().matches('conflicted')).toBe(true);
     });
-    expect(selectSyncFacet(harness.actor.getSnapshot()).conflictRef).toBe('refs/heads/sync/tau/main');
+    expect(selectSyncFacet(harness.actor.getSnapshot()).conflictRef).toBe(syncRef);
+    expect(harness.parent.events).toContainEqual({
+      type: 'mergeConflicted',
+      branch: syncBranch,
+      into: 'main',
+      paths: ['main.scad'],
+    });
 
     harness.stop();
   });
@@ -507,6 +586,31 @@ describe('syncMachine', () => {
       { type: 'pushSettled', pushId: 'publish-1', outcome: 'backedUp' } satisfies SyncMachineEmitted,
     ]);
     expect(harness.actor.getSnapshot().context.pushId).toBeUndefined();
+
+    harness.stop();
+  });
+
+  it('row 23b: a first publish carries its new remote into the correlated push', async () => {
+    const harness = start({ remote: undefined });
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().matches('noRemote')).toBe(true);
+    });
+
+    harness.actor.send({ type: 'syncNow', pushId: 'publish-1', remote: 'tau' });
+    await vi.waitFor(() => {
+      expect(harness.effects.running('push')).toBe(1);
+    });
+    expect(harness.effects.inputsFor('push')).toEqual([{ remote: 'tau', branch: 'main', leases: {} }]);
+
+    harness.effects.settle('push', { output: pushResult({ name: mainRef, status: 'updated', head: 'h1' }) });
+    await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+    await vi.waitFor(() => {
+      expect(harness.parent.events).toContainEqual({
+        type: 'pushSettled',
+        pushId: 'publish-1',
+        outcome: 'backedUp',
+      });
+    });
 
     harness.stop();
   });
@@ -684,7 +788,7 @@ describe('syncMachine', () => {
       await settleWhenRunning(harness.effects, 'fetch', {
         output: { leases: {}, integration: 'diverged' } satisfies SyncFetchActorOutput,
       });
-      await settleWhenRunning(harness.effects, 'merge', { error: new Error('This host provided no merge actor.') });
+      await settleWhenRunning(harness.effects, 'merge', { output: mergeConflict });
       await vi.waitFor(() => {
         expect(harness.actor.getSnapshot().matches('conflicted')).toBe(true);
       });

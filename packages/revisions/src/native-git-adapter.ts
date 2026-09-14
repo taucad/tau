@@ -12,7 +12,7 @@ import {
 import { revisionBranchName } from '#revision-authority.js';
 // eslint-disable-next-line import-x/no-extraneous-dependencies -- package import map resolves this internal source file.
 import { refPatternIsHostLocal } from '#remotes.js';
-import type { RevisionId } from '@taucad/filesystem/revisions';
+import type { RevisionFileMode, RevisionId, RevisionTreeInput } from '@taucad/filesystem/revisions';
 import type { BranchHeadUpdateResult, Revision, RevisionProvenance, RevisionSummary } from '#revision-authority.js';
 // eslint-disable-next-line import-x/no-extraneous-dependencies -- package import map resolves this internal source file.
 import { runGitCommand } from '#git-command.js';
@@ -325,17 +325,7 @@ const freezeMergedRevision = (input: MergeNativeGitRevisionsInput, tree: Immutab
  *
  * @param options - Explicit repository and managed-worktree host locators.
  * @returns A lazy adapter; repository compatibility is checked by `inspect` or the first operation.
- * @public
- * @example <caption>Attach a native repository host</caption>
- * ```typescript
- * import { createNativeGitAdapter } from '@taucad/revisions/node';
- *
- * const git = createNativeGitAdapter({
- *   repositoryPath: '/srv/tau/project.git',
- *   worktreeRoot: '/srv/tau/worktrees',
- * });
- * await git.inspect();
- * ```
+ * @internal
  */
 export const createNativeGitAdapter = (options: NativeGitAdapterOptions): NativeGitAdapter => {
   if (options.repositoryPath.length === 0 || options.worktreeRoot.length === 0) {
@@ -535,7 +525,7 @@ export const createNativeGitAdapter = (options: NativeGitAdapterOptions): Native
     }
     chunks.push(textEncoder.encode('deleteall\n'));
     for (const entry of revision.tree.entries()) {
-      chunks.push(textEncoder.encode(`M 100644 inline ${quoteFastImportPath(entry.path)}\n`));
+      chunks.push(textEncoder.encode(`M ${entry.mode} inline ${quoteFastImportPath(entry.path)}\n`));
       chunks.push(textEncoder.encode(`data ${entry.content.byteLength}\n`));
       chunks.push(entry.content);
       chunks.push(textEncoder.encode('\n'));
@@ -604,16 +594,21 @@ export const createNativeGitAdapter = (options: NativeGitAdapterOptions): Native
     const output = await requireSuccess(repository.repositoryPath, ['ls-tree', '-rz', '--full-tree', commit]);
     const rawRecords = Buffer.from(output.subarray(0, -1)).toString('binary').split('\0').filter(Boolean);
     const entries = await Promise.all(
-      rawRecords.map(async (rawRecord): Promise<readonly [string, Uint8Array<ArrayBuffer>]> => {
+      rawRecords.map(async (rawRecord): Promise<RevisionTreeInput> => {
         const record = Buffer.from(rawRecord, 'binary');
         const tab = record.indexOf(0x09);
         const header = record.subarray(0, tab).toString('ascii').split(' ');
-        if (tab === -1 || header[0] !== '100644' || header[1] !== 'blob' || header[2] === undefined) {
+        if (
+          tab === -1 ||
+          (header[0] !== '100644' && header[0] !== '100755') ||
+          header[1] !== 'blob' ||
+          header[2] === undefined
+        ) {
           throw new NativeGitError('UNSUPPORTED_TREE', 'Git revision contains a non-file or unsupported file mode.');
         }
         const objectId = await asObjectId(header[2]);
         const path = decodePath(new Uint8Array(record.subarray(tab + 1)));
-        return [path, new Uint8Array(await readObject(objectId, 'blob'))];
+        return [path, new Uint8Array(await readObject(objectId, 'blob')), header[0] as RevisionFileMode];
       }),
     );
     return new ImmutableRevisionTree(entries);

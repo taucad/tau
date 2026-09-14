@@ -14,6 +14,7 @@
  * | 2 | **red pin (a)** | a `close` revision that could not be pushed is in `.tau/revisions/sync-pending`, and a fresh actor retries it first |
  * | 3 | **red pin (d)** | device B's open pull brings device A's file into B's checkout with no reload, and B renders before the pull answers |
  * | 4 | **red pin (e)** | a device that is merely *ahead* of the remote drains its durable queue on the next open, online, and never reports a conflict (review 2 R1) |
+ * | 6 | **W18-b red pin (c)** | a device that has never held the project materializes its tree *and* its `.tau/chats` projection from the remote, with no chat turn (W18 DEF-2) |
  *
  * Each row runs on both legs: `isomorphic-git` (the browser's port) and native
  * `git` (a disk host's), because A15 is that the two legs are one transport.
@@ -29,7 +30,7 @@ import { ImmutableRevisionTree, revisionId } from '@taucad/filesystem/revisions'
 import { createActor } from 'xstate';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 
-import { chatRecordsPath } from '#chat-ref.js';
+import { chatRecordsPath, chatSegmentPath } from '#chat-ref.js';
 import { createRevisionHttpClient } from '#http-client.js';
 import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
 import { createNativeGitRevisionPort } from '#native-git-port.js';
@@ -66,7 +67,10 @@ const temporaryRoot = async (label: string): Promise<string> => {
   return root;
 };
 
-type Leg = Readonly<{ name: string; port: (root: string, filesystem: RootedFileSystem) => RevisionPort }>;
+type Leg = Readonly<{
+  name: string;
+  port: (root: string, filesystem: RootedFileSystem, remoteUrl?: string) => RevisionPort;
+}>;
 
 const legs: readonly Leg[] = [
   {
@@ -75,11 +79,20 @@ const legs: readonly Leg[] = [
       createIsomorphicGitRevisionPort({
         filesystem,
         /* The browser leg reaches a remote only through a client (W11b §1.2). */
-        http: createRevisionHttpClient(),
+        http: createRevisionHttpClient({ authorization: () => 'Bearer session-token' }),
         checkouts: { projectId: 'project-1', root: () => filesystem },
       }),
   },
-  { name: 'native git', port: (root) => createNativeGitRevisionPort({ repositoryPath: root }) },
+  {
+    name: 'native git',
+    port: (root, _filesystem, remoteUrl) =>
+      createNativeGitRevisionPort({
+        repositoryPath: root,
+        ...(remoteUrl === undefined
+          ? {}
+          : { remoteCredential: () => ({ repositoryUrl: remoteUrl, authorization: 'Bearer session-token' }) }),
+      }),
+  },
 ];
 
 type Device = Readonly<{
@@ -106,6 +119,8 @@ const device = async (
     label: string;
     remoteUrl?: string;
     files?: Readonly<Record<string, string>>;
+    onChatsProjected?: (chatIds: readonly string[]) => void;
+    wrapFilesystem?: (filesystem: RootedFileSystem) => RootedFileSystem;
   }>,
 ): Promise<Device> => {
   const { leg, label, remoteUrl } = input;
@@ -116,7 +131,7 @@ const device = async (
     // oxlint-disable-next-line no-await-in-loop -- a handful of fixture files, in order.
     await filesystem.writeFile(path, content);
   }
-  const port = leg.port(root, filesystem);
+  const port = leg.port(root, filesystem, remoteUrl);
   await port.init({ author });
   if (remoteUrl !== undefined) {
     await port.setRemote({ name: 'tau', url: remoteUrl });
@@ -125,8 +140,9 @@ const device = async (
     port,
     projectId: 'project-1',
     authorityEpoch: `epoch-${label}`,
-    filesystem: () => filesystem,
+    filesystem: () => input.wrapFilesystem?.(filesystem) ?? filesystem,
     deviceId: () => `device-${label}`,
+    ...(input.onChatsProjected === undefined ? {} : { onChatsProjected: input.onChatsProjected }),
   });
   return {
     root,
@@ -150,6 +166,30 @@ const device = async (
 };
 
 const encoder = new TextEncoder();
+
+/** Run one injected promise actor the way its machine would. */
+const asError = (failure: unknown): Error => (failure instanceof Error ? failure : new Error(String(failure)));
+
+const run = async <Output>(actor: unknown, input: unknown): Promise<Output> =>
+  new Promise<Output>((resolve, reject) => {
+    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the actor logic is the machine's own; this drives it directly.
+    const running = createActor(actor as Parameters<typeof createActor>[0], { input });
+    running.subscribe({
+      next: (snapshot) => {
+        if (snapshot.status === 'done') {
+          // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the output type is the caller's contract.
+          resolve(snapshot.output as Output);
+        }
+        if (snapshot.status === 'error') {
+          reject(asError(snapshot.error));
+        }
+      },
+      error: (failure: unknown) => {
+        reject(asError(failure));
+      },
+    });
+    running.start();
+  });
 
 /** The project tree one revision records; `.tau/**` is records and never in it. */
 const projectTree = (files: Readonly<Record<string, string>>): ImmutableRevisionTree =>
@@ -272,10 +312,14 @@ describe.runIf(gitOnPath).each(legs)('W13 second-device flow over git http-backe
     /* A second life of the scheduler reads the record, not a snapshot (D29). */
     const second = one.scheduler({ online: false });
     second.start();
+    /* Both facts in the one wait (W18-b): `context.pending` is filled in
+       `reading`, one transition *before* the machine settles on `queued`, so
+       reading the facet after this wait raced the transition and answered
+       `checking` about one run in three — on either leg. */
     await vi.waitFor(() => {
       expect(second.getSnapshot().context.pending.map((entry) => entry.ref)).toEqual([mainRef]);
+      expect(selectSyncFacet(second.getSnapshot())).toMatchObject({ state: 'queued', pendingCount: 1 });
     });
-    expect(selectSyncFacet(second.getSnapshot())).toMatchObject({ state: 'queued', pendingCount: 1 });
     second.stop();
   }, 180_000);
 
@@ -316,6 +360,281 @@ describe.runIf(gitOnPath).each(legs)('W13 second-device flow over git http-backe
       expect(await two.port.readRef(mainRef)).toBe(head);
 
       scheduler.stop();
+    } finally {
+      await remote.close();
+    }
+  }, 180_000);
+
+  /*
+   * W18 DEF-2 red pin (c): the second device holds a project it has never seen.
+   *
+   * Device A backs a project up — history *and* its chat record ref — and
+   * device B is then a machine that has only the project's id and the remote:
+   * an empty directory, an unborn `main`, nothing on disk. Opening is the whole
+   * gesture. No chat turn runs on either device; the only thing B does is start
+   * its scheduler, which is what the project route does on mount.
+   */
+  it('row 6 (red pin c): a device that has never held the project materializes it from the remote', async () => {
+    const remoteRoot = await temporaryRoot('remote-only');
+    const remote = await startGitHttpBackend({ root: remoteRoot });
+    try {
+      const one = await device({
+        leg,
+        label: 'a-remote-only',
+        remoteUrl: remote.url,
+        files: {
+          'bracket.scad': 'cube([7, 7, 7]);\n',
+          'notes/readme.md': '# Bracket\n',
+          [`${chatRecordsPath(chatId)}/chat.json`]: '{"name":"Bracket"}\n',
+          [`${chatRecordsPath(chatId)}/events.jsonl`]: '{"type":"turn.start"}\n',
+        },
+      });
+      const head = await record({
+        device: one,
+        files: { 'bracket.scad': 'cube([7, 7, 7]);\n', 'notes/readme.md': '# Bracket\n' },
+        summary: 'Device A',
+      });
+      const namedVersion = await one.port.tag({
+        name: 'v1',
+        revisionId: revisionId(head),
+        note: 'Device A named version',
+        createdAt: 1_756_742_400_000,
+      });
+      const first = one.scheduler();
+      first.start();
+      first.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: head });
+      await vi.waitFor(
+        () => {
+          expect(selectSyncFacet(first.getSnapshot()).state).toBe('backedUp');
+        },
+        { timeout: 30_000 },
+      );
+      first.stop();
+      /* The remote now holds both sets: branch + named version, and the chat's own ref. */
+      expect(await remote.git(['rev-parse', mainRef])).toBe(head);
+      expect(await remote.git(['rev-parse', 'refs/tags/v1^{}'])).toBe(head);
+      expect(await remote.git(['rev-parse', chatRef])).not.toBe('');
+
+      const projectedChats: string[][] = [];
+      const two = await device({
+        leg,
+        label: 'b-remote-only',
+        remoteUrl: remote.url,
+        onChatsProjected: (chatIds) => projectedChats.push([...chatIds]),
+      });
+      expect(await two.port.readRef(mainRef)).toBeUndefined();
+      expect(await two.filesystem.exists('bracket.scad')).toBe(false);
+
+      const second = two.scheduler();
+      second.start();
+      await vi.waitFor(
+        () => {
+          expect(selectSyncFacet(second.getSnapshot()).state).toBe('backedUp');
+        },
+        { timeout: 30_000 },
+      );
+
+      /* B's branch is A's, and every path the revision records is on B's disk
+         with A's bytes — the live checkout, not only the graph. */
+      expect(await two.port.readRef(mainRef)).toBe(head);
+      expect(await two.port.listTags()).toEqual([namedVersion]);
+      const recorded = await two.port.readTree(revisionId(head));
+      expect(recorded?.entries().map(({ path }) => path)).toEqual(['bracket.scad', 'notes/readme.md']);
+      for (const { path } of recorded?.entries() ?? []) {
+        // oxlint-disable-next-line no-await-in-loop -- two files, compared in order.
+        expect(await two.filesystem.readFile(path, 'utf8')).toBe(await one.filesystem.readFile(path, 'utf8'));
+      }
+
+      /* And the chats came with it: the fetch path writes the projection (A39,
+         W17), so B has A's chat record and A's log segment under its own name. */
+      expect(await two.filesystem.readFile(`${chatRecordsPath(chatId)}/chat.json`, 'utf8')).toBe(
+        '{"name":"Bracket"}\n',
+      );
+      expect(
+        await two.filesystem.readFile(`${chatRecordsPath(chatId)}/${chatSegmentPath('device-a-remote-only')}`, 'utf8'),
+      ).toBe('{"type":"turn.start"}\n');
+      expect(projectedChats).toEqual([[chatId]]);
+
+      second.stop();
+    } finally {
+      await remote.close();
+    }
+  }, 180_000);
+
+  it('row 7: a successful chat projection notifies even when a sibling fails, and retry keeps both', async () => {
+    const remoteRoot = await temporaryRoot('remote-partial-chat');
+    const remote = await startGitHttpBackend({ root: remoteRoot });
+    const firstChatId = 'chat-a';
+    const secondChatId = 'chat-b';
+    try {
+      const one = await device({
+        leg,
+        label: 'a-partial-chat',
+        remoteUrl: remote.url,
+        files: {
+          'bracket.scad': 'cube([8, 8, 8]);\n',
+          [`${chatRecordsPath(firstChatId)}/chat.json`]: '{"name":"First"}\n',
+          [`${chatRecordsPath(firstChatId)}/events.jsonl`]: '{"type":"first"}\n',
+          [`${chatRecordsPath(secondChatId)}/chat.json`]: '{"name":"Second"}\n',
+          [`${chatRecordsPath(secondChatId)}/events.jsonl`]: '{"type":"second"}\n',
+        },
+      });
+      const head = await record({
+        device: one,
+        files: { 'bracket.scad': 'cube([8, 8, 8]);\n' },
+        summary: 'Two chats',
+      });
+      const source = one.scheduler();
+      source.start();
+      source.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: head });
+      await vi.waitFor(
+        () => {
+          expect(selectSyncFacet(source.getSnapshot()).state).toBe('backedUp');
+        },
+        { timeout: 30_000 },
+      );
+      source.stop();
+
+      const firstWritten = Promise.withResolvers<void>();
+      let firstWrites = 0;
+      let failSecond = true;
+      const projectedChats: string[][] = [];
+      const two = await device({
+        leg,
+        label: 'b-partial-chat',
+        remoteUrl: remote.url,
+        onChatsProjected: (chatIds) => projectedChats.push([...chatIds]),
+        wrapFilesystem: (filesystem) =>
+          Object.assign(Object.create(filesystem) as RootedFileSystem, {
+            writeFile: async (path: string, content: Parameters<RootedFileSystem['writeFile']>[1]) => {
+              if (path.startsWith(`${chatRecordsPath(secondChatId)}/`) && failSecond) {
+                await firstWritten.promise;
+                throw new Error('Second chat projection failed.');
+              }
+              await filesystem.writeFile(path, content);
+              if (path.startsWith(`${chatRecordsPath(firstChatId)}/`)) {
+                firstWrites += 1;
+                if (firstWrites === 2) {
+                  firstWritten.resolve();
+                }
+              }
+            },
+          }),
+      });
+
+      await expect(
+        run(two.actors.sync.fetch, { remote: 'tau', branch: 'main', deadlineMilliseconds: 25_000 }),
+      ).rejects.toThrow('Second chat projection failed.');
+      await vi.waitFor(() => {
+        expect(projectedChats).toEqual([[firstChatId]]);
+      });
+      expect(await two.filesystem.readFile(`${chatRecordsPath(firstChatId)}/chat.json`, 'utf8')).toBe(
+        '{"name":"First"}\n',
+      );
+      expect(await two.filesystem.exists(`${chatRecordsPath(secondChatId)}/chat.json`)).toBe(false);
+
+      failSecond = false;
+      await run(two.actors.sync.fetch, { remote: 'tau', branch: 'main', deadlineMilliseconds: 25_000 });
+      expect(projectedChats).toEqual([[firstChatId], [secondChatId]]);
+      expect(await two.filesystem.readFile(`${chatRecordsPath(firstChatId)}/chat.json`, 'utf8')).toBe(
+        '{"name":"First"}\n',
+      );
+      expect(await two.filesystem.readFile(`${chatRecordsPath(secondChatId)}/chat.json`, 'utf8')).toBe(
+        '{"name":"Second"}\n',
+      );
+    } finally {
+      await remote.close();
+    }
+  }, 180_000);
+
+  it('row 8: a fresh device discovers remote branches and can switch to their exact tree', async () => {
+    const remoteRoot = await temporaryRoot('remote-branches');
+    const remote = await startGitHttpBackend({ root: remoteRoot });
+    try {
+      const one = await device({ leg, label: 'a-branches', remoteUrl: remote.url, files: { 'main.ts': 'main\n' } });
+      const main = await record({ device: one, files: { 'main.ts': 'main\n' }, summary: 'Main' });
+      const feature = await one.port.writeRevision({
+        parents: [revisionId(main)],
+        tree: projectTree({ 'main.ts': 'feature\n', 'feature.ts': 'export const feature = true;\n' }),
+        provenance: { source: 'user', actorId: 'actor-w13', createdAt: Date.UTC(2026, 8, 13, 10) },
+        summary: { generated: 'Feature' },
+      });
+      await one.port.updateRef({
+        name: 'refs/heads/feature',
+        expectedHead: undefined,
+        head: revisionId(feature.commitId),
+      });
+      await one.port.push({ remote: 'tau', atomic: true, refs: [{ name: mainRef }, { name: 'refs/heads/feature' }] });
+
+      const two = await device({ leg, label: 'b-branches', remoteUrl: remote.url });
+      const fetched = await run<{ branches: ReadonlyArray<{ name: string; head: string }> }>(two.actors.sync.fetch, {
+        remote: 'tau',
+        branch: 'main',
+        deadlineMilliseconds: 25_000,
+      });
+      expect(fetched.branches).toEqual(
+        expect.arrayContaining([
+          { name: 'main', head: main },
+          { name: 'feature', head: feature.commitId },
+        ]),
+      );
+      await run(two.actors.branch.applySwitch, {
+        projectId: 'project-1',
+        branch: 'feature',
+        checkoutId: undefined,
+      });
+      expect(await two.filesystem.readFile('main.ts', 'utf8')).toBe('feature\n');
+      expect(await two.filesystem.readFile('feature.ts', 'utf8')).toBe('export const feature = true;\n');
+    } finally {
+      await remote.close();
+    }
+  }, 180_000);
+
+  it('row 9: generated exports stay off by default and an opted-in fresh device restores them without overwrite', async () => {
+    const remoteRoot = await temporaryRoot('remote-evidence');
+    const remote = await startGitHttpBackend({ root: remoteRoot });
+    const manifest = JSON.stringify({ syncLargeExports: true });
+    try {
+      const one = await device({
+        leg,
+        label: 'a-evidence',
+        remoteUrl: remote.url,
+        files: { 'main.ts': 'source\n', 'tau.json': manifest, 'exports/model.step': 'remote export\n' },
+      });
+      const main = await record({
+        device: one,
+        files: { 'main.ts': 'source\n', 'tau.json': manifest },
+        summary: 'Opt in exports',
+      });
+      const pushed = await run<{ refs: ReadonlyArray<{ name: string; status: string; reason?: string }> }>(
+        one.actors.sync.push,
+        { remote: 'tau', branch: 'main', leases: {} },
+      );
+      expect(pushed.refs).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ name: mainRef, status: 'updated' }),
+          expect.objectContaining({ name: 'refs/tau/evidence/exports', status: 'updated' }),
+        ]),
+      );
+      expect(await remote.git(['rev-parse', mainRef])).toBe(main);
+      await expect(remote.git(['rev-parse', 'refs/tau/evidence/exports'])).resolves.toMatch(/^[\da-f]{40}$/u);
+
+      const two = await device({ leg, label: 'b-evidence', remoteUrl: remote.url });
+      await run(two.actors.sync.fetch, { remote: 'tau', branch: 'main', deadlineMilliseconds: 25_000 });
+      expect(await two.filesystem.readFile('exports/model.step', 'utf8')).toBe('remote export\n');
+
+      await two.filesystem.writeFile('exports/model.step', 'local export\n');
+      await run(two.actors.sync.fetch, { remote: 'tau', branch: 'main', deadlineMilliseconds: 25_000 });
+      expect(await two.filesystem.readFile('exports/model.step', 'utf8')).toBe('local export\n');
+
+      const off = await device({
+        leg,
+        label: 'c-evidence-off',
+        remoteUrl: remote.url,
+        files: { 'tau.json': JSON.stringify({ syncLargeExports: false }) },
+      });
+      await run(off.actors.sync.fetch, { remote: 'tau', branch: 'main', deadlineMilliseconds: 25_000 });
+      expect(await off.filesystem.exists('exports/model.step')).toBe(false);
     } finally {
       await remote.close();
     }

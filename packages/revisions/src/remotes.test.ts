@@ -57,6 +57,7 @@ describe('remotes', () => {
       'refs/tau/workspaces/w1',
       'refs/tau/revisions/r1',
       'refs/tau/transactions/t1',
+      'refs/tau/retention/records/r1',
       'refs/tau/head',
       'refs/remotes/tau/main',
       'refs/heads/sync',
@@ -171,6 +172,24 @@ describe('remotes', () => {
     // Two more of the proxy's own refusals, brought forward (review R8).
     expect(gitRemoteUrlProblem('https://github.com/o/r.git?access_token=gho_x')).toContain('token');
     expect(gitRemoteUrlProblem('https://localhost/o/r.git')).toContain('private network');
+  });
+
+  /* Ruling P50 (W18 DEF-3): the operator relaxation moves the scheme and the
+     address, and nothing else. The default is the row above. */
+  it('accepts a local git http-backend only when the host allows private addresses', () => {
+    const local = 'http://127.0.0.1:5014/two-client.git';
+    expect(gitRemoteUrlProblem(local)).toContain('https');
+    expect(gitRemoteUrlProblem(local, {})).toContain('https');
+    expect(gitRemoteUrlProblem(local, { allowPrivate: false })).toContain('https');
+
+    expect(gitRemoteUrlProblem(local, { allowPrivate: true })).toBeUndefined();
+    expect(gitRemoteUrlProblem('http://dev.localhost:5014/o/r.git', { allowPrivate: true })).toBeUndefined();
+    // Everything refused for another reason stays refused.
+    expect(gitRemoteUrlProblem('http://user:token@127.0.0.1:5014/o/r.git', { allowPrivate: true })).toContain(
+      'password',
+    );
+    expect(gitRemoteUrlProblem('http://127.0.0.1:5014/', { allowPrivate: true })).toContain('repository');
+    expect(gitRemoteUrlProblem('ftp://127.0.0.1/o/r.git', { allowPrivate: true })).toContain('https');
   });
 
   it('lets only Tau Cloud carry a project’s large objects (P20)', () => {

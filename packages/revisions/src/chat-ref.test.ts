@@ -16,7 +16,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createMemoryProvider } from '@taucad/filesystem/backend';
 import { classify } from '@taucad/filesystem/path-registry';
-import { revisionId } from '@taucad/filesystem/revisions';
+import { ImmutableRevisionTree, revisionId } from '@taucad/filesystem/revisions';
 import type { FileSystemProvider } from '@taucad/filesystem';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
@@ -280,6 +280,86 @@ describe.each([
     expect(await readChatFile(target, chatSegmentPath('device-a'))).toBeUndefined();
   });
 
+  it.runIf(enabled)('rejects a malformed chat tree before changing any local record', async () => {
+    const target = await createMemoryProvider();
+    await target.writeFile(`${chatRecordsPath('malformed')}/chat.json`, '{"name":"local"}');
+    await target.writeFile(`${chatRecordsPath('malformed')}/events.jsonl`, 'local live log\n');
+    const malicious = await harness.port.writeRevision({
+      parents: [],
+      tree: new ImmutableRevisionTree([
+        ['chat.json', '{"name":"remote"}'],
+        ['events.jsonl', 'remote live log\n'],
+        ['events/device-a.jsonl', 'remote segment\n'],
+      ]),
+      provenance: { source: 'user', actorId, createdAt: now },
+      summary: { generated: 'Malformed chat' },
+    });
+
+    await expect(
+      projectChats({
+        port: harness.port,
+        filesystem: target,
+        deviceId: 'device-b',
+        refs: [{ name: chatRefName('malformed'), head: revisionId(malicious.commitId) }],
+      }),
+    ).rejects.toMatchObject({ code: 'UNSUPPORTED_OPERATION' });
+    expect(await readChatFile(target, 'chat.json', 'malformed')).toBe('{"name":"local"}');
+    expect(await readChatFile(target, 'events.jsonl', 'malformed')).toBe('local live log\n');
+    expect(await readChatFile(target, chatSegmentPath('device-a'), 'malformed')).toBeUndefined();
+  });
+
+  it.runIf(enabled)(
+    'keeps newer projected segments and local metadata when recording from a stale parent',
+    async () => {
+      const staleChat = `stale_${_engine}`;
+      const old = await harness.port.writeRevision({
+        parents: [],
+        tree: new ImmutableRevisionTree([
+          ['chat.json', '{"name":"old"}'],
+          ['events/other.jsonl', 'old remote segment\n'],
+        ]),
+        provenance: { source: 'user', actorId, createdAt: now },
+        summary: { generated: 'Old chat' },
+      });
+      const oldHead = revisionId(old.commitId);
+      await harness.port.updateRef({ name: chatRefName(staleChat), expectedHead: undefined, head: oldHead });
+      await writeChatFiles(
+        harness.checkout,
+        {
+          'chat.json': '{"name":"local edit"}',
+          'events.jsonl': 'mine\n',
+          'events/other.jsonl': 'new remote segment\n',
+        },
+        staleChat,
+      );
+
+      const written = await writeChatRef({
+        port: harness.port,
+        filesystem: harness.checkout,
+        deviceId: 'mine',
+        chatId: staleChat,
+        syncChats: true,
+        actorId,
+        now,
+      });
+      expect(written.status).toBe('updated');
+      expect(await readChatFile(harness.checkout, 'events/other.jsonl', staleChat)).toBe('new remote segment\n');
+      const union = await harness.port.readTree(written.head!);
+      expect(decoder.decode(union?.get('events/other.jsonl'))).toBe('new remote segment\n');
+      expect(decoder.decode(union?.get('chat.json'))).toBe('{"name":"local edit"}');
+
+      const projected = await createMemoryProvider();
+      await projected.writeFile(`${chatRecordsPath(staleChat)}/chat.json`, '{"name":"pending local edit"}');
+      await projectChats({
+        port: harness.port,
+        filesystem: projected,
+        deviceId: 'third',
+        refs: [{ name: chatRefName(staleChat), head: written.head! }],
+      });
+      expect(await readChatFile(projected, 'chat.json', staleChat)).toBe('{"name":"pending local edit"}');
+    },
+  );
+
   it.runIf(enabled)("replays a second device's segment onto a head it did not write, losing no record", async () => {
     const remoteHead = await harness.port.readRef(chatRefName(chatId));
 
@@ -454,15 +534,16 @@ describe.runIf(gitOnPath)('two devices, two stores, one remote', () => {
     expect(replayedRecord?.parents).toEqual([remoteHead]);
     expect(await deviceB.port.readRef(chatRefName(sharedChatId))).toBe(replayed.head);
 
-    /* Project before write: B never called `projectChats`, and the tree it
-     * published still carries A's segment — and so does B's own checkout. */
+    /* Recording never projects remote bytes: B's published union carries A's
+     * segment from the fetched base, while only the fetch projection owner may
+     * write that segment into B's checkout. */
     const union = await deviceB.port.readTree(replayed.head!);
     expect(union?.entries().map((entry) => entry.path)).toEqual([
       'chat.json',
       chatSegmentPath('device-a'),
       chatSegmentPath('device-b'),
     ]);
-    expect(await readChatFile(deviceB.checkout, chatSegmentPath('device-a'), sharedChatId)).toBe('A0\n');
+    expect(await readChatFile(deviceB.checkout, chatSegmentPath('device-a'), sharedChatId)).toBeUndefined();
     expect(await readChatFile(deviceB.checkout, 'events.jsonl', sharedChatId)).toBe('B0\n');
 
     /* P18: the push lease is the head B last fetched, never what the local

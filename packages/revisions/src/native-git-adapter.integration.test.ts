@@ -6,13 +6,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { ImmutableRevisionTree, mergeRevisionTrees, revisionId } from '@taucad/filesystem/revisions';
-import { RevisionAuthority, revisionBranchName } from '#revision-authority.js';
+import { revisionBranchName } from '#revision-authority.js';
 import type { RevisionId } from '@taucad/filesystem/revisions';
 import type { Revision, RevisionProvenance } from '#revision-authority.js';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createPortRevisionPersistence } from '#revision-persistence.js';
 import type { RevisionPort } from '#revision-port.js';
-import { createNativeGitAdapter, createNativeGitRevisionPort, NativeGitError } from '#node/index.js';
+import { createNativeGitAdapter } from '#native-git-adapter.js';
+import { createNativeGitRevisionPort } from '#node/index.js';
+import { NativeGitError } from '#native-git.types.js';
 
 const execute = promisify(execFile);
 const createdAt = Date.UTC(2026, 7, 28, 12, 0, 0);
@@ -227,86 +228,71 @@ nativeGitIntegration('native Git adapter integration', () => {
     expect(readResult[0]).toEqual({ status: 'fulfilled', value: undefined });
   });
 
-  /* The authority-over-a-port rehydration is covered with a memory provider in
-   * `revision-authority.test.ts`; what only a real repository can prove is that
-   * the *native* store rehydrates revisions, parents, trees and branch heads
-   * through the wrapped port, and that Git's own expected-old `update-ref`
-   * refuses a stale head (W1 falsified premise 2, S12). */
+  /* What only a real repository can prove is that the *native* store rehydrates
+   * revisions, parents, trees and branch heads through the wrapped port, and
+   * that Git's own expected-old `update-ref` refuses a stale head (W1 falsified
+   * premise 2, S12). Read through the port itself since P65 retired the
+   * in-memory authority: the store is the graph, and `readRevision` / `readTree`
+   * / `readRef` / `log` are how every reader in the tree reaches it. */
   const openPort = (executable?: string): RevisionPort =>
     createNativeGitRevisionPort({ repositoryPath, ...(executable === undefined ? {} : { gitExecutable: executable }) });
 
-  const record = async (
-    context: Readonly<{ authority: RevisionAuthority; port: RevisionPort }>,
+  const write = async (
+    port: RevisionPort,
     options: Readonly<{ label: string; parents: readonly RevisionId[]; content: string }>,
-  ): Promise<Revision> => {
-    const input = {
+  ): Promise<RevisionId> => {
+    const receipt = await port.writeRevision({
       parents: options.parents,
       tree: new ImmutableRevisionTree([['part.ts', options.content]]),
-      provenance: { source: 'agent', actorId: options.label, runId: `run-${options.label}`, createdAt } as const,
+      provenance: { source: 'agent', actorId: options.label, runId: `run-${options.label}`, createdAt },
       summary: { generated: `Revision ${options.label}` },
-    };
-    const receipt = await context.port.writeRevision(input);
-    return context.authority.createRevision({ id: revisionId(receipt.commitId), ...input });
+    });
+    return revisionId(receipt.commitId);
   };
 
-  it('rehydrates RevisionAuthority revisions, branch heads, and expected-old CAS from a real repository', async () => {
+  it('rehydrates revisions, branch heads, and expected-old CAS from a real repository', async () => {
     const port = openPort();
     await port.init({ author: { name: 'Tau', email: 'tau@example.com' } });
-    const first = new RevisionAuthority({ persistence: createPortRevisionPersistence({ port }) });
-    await first.ready;
-    const base = await record({ authority: first, port }, { label: 'authority-base', parents: [], content: 'base' });
-    const next = await record(
-      { authority: first, port },
-      { label: 'authority-next', parents: [base.id], content: 'next' },
-    );
+    const base = await write(port, { label: 'authority-base', parents: [], content: 'base' });
+    const next = await write(port, { label: 'authority-next', parents: [base], content: 'next' });
     const branch = revisionBranchName('authority/main');
-    await first.updateBranchHead({ branch, expectedHead: undefined, head: base.id });
+    await port.updateRef({ name: branch, expectedHead: undefined, head: base });
     /* A revision no ref reaches is unreferenced evidence in the object store,
      * so `next` is named by its own branch, exactly as the recorder names every
      * turn's head. */
-    await first.updateBranchHead({
-      branch: revisionBranchName('authority/next'),
-      expectedHead: undefined,
-      head: next.id,
-    });
+    await port.updateRef({ name: revisionBranchName('authority/next'), expectedHead: undefined, head: next });
 
-    const reopened = new RevisionAuthority({ persistence: createPortRevisionPersistence({ port: openPort() }) });
-    await reopened.ready;
+    /* A second port over the same directory: nothing of the first is in memory. */
+    const reopened = openPort();
 
-    expect(reopened.getRevision(next.id)?.parents).toEqual([base.id]);
-    expect(new TextDecoder().decode(reopened.getRevision(next.id)?.tree.get('part.ts'))).toBe('next');
-    expect(reopened.getBranchHead(branch)).toBe(base.id);
-    expect(reopened.getRevisionPersistence(next.id)).toMatchObject({
+    const record = await reopened.readRevision(next);
+    expect(record?.parents).toEqual([base]);
+    expect(record?.receipt).toMatchObject({
       engine: 'native-git',
-      commitId: next.id,
+      commitId: next,
       objectFormat: 'sha1',
       conflicted: false,
     });
-    await expect(reopened.updateBranchHead({ branch, expectedHead: undefined, head: next.id })).resolves.toEqual({
+    const tree = await reopened.readTree(next);
+    expect(new TextDecoder().decode(tree?.get('part.ts'))).toBe('next');
+    expect(await reopened.readRef(branch)).toBe(base);
+    await expect(reopened.updateRef({ name: branch, expectedHead: undefined, head: next })).resolves.toMatchObject({
       status: 'conflicted',
-      conflict: {
-        type: 'stale-head',
-        branch,
-        expectedHead: undefined,
-        actualHead: base.id,
-        proposedHead: next.id,
-      },
+      name: branch,
+      expectedHead: undefined,
+      actualHead: base,
+      proposedHead: next,
     });
   });
 
   it('rehydrates coherently when a publication interleaves the ref snapshot', async () => {
     const publisher = openPort();
     await publisher.init({ author: { name: 'Tau', email: 'tau@example.com' } });
-    const seeding = new RevisionAuthority({ persistence: createPortRevisionPersistence({ port: publisher }) });
-    await seeding.ready;
-    const base = await record(
-      { authority: seeding, port: publisher },
-      { label: 'snapshot-base', parents: [], content: 'base' },
-    );
+    const base = await write(publisher, { label: 'snapshot-base', parents: [], content: 'base' });
     const branch = revisionBranchName('snapshot/main');
-    await seeding.updateBranchHead({ branch, expectedHead: undefined, head: base.id });
+    await publisher.updateRef({ name: branch, expectedHead: undefined, head: base });
 
-    /* `load()` reads the refs, then walks the commits they name. The race this
+    /* A reader takes the refs, then walks the commits they name. The race this
      * pins is a publication landing between those two reads: the branch head the
      * snapshot carries must still be a revision the same snapshot holds. */
     const stateDirectory = join(temporaryRoot, 'snapshot-state');
@@ -338,19 +324,20 @@ exec git "$@"
       { mode: 0o755 },
     );
 
-    const loading = createPortRevisionPersistence({ port: openPort(wrapperPath) }).load();
+    const racing = openPort(wrapperPath);
+    const reading = (async () => {
+      const references = await racing.listRefs();
+      return { references, entries: await racing.log({ heads: references.map((reference) => reference.head) }) };
+    })();
     await waitForPath(join(stateDirectory, 'ready'));
-    const next = await record(
-      { authority: seeding, port: publisher },
-      { label: 'snapshot-next', parents: [base.id], content: 'next' },
-    );
-    await seeding.updateBranchHead({ branch, expectedHead: base.id, head: next.id });
+    const next = await write(publisher, { label: 'snapshot-next', parents: [base], content: 'next' });
+    await publisher.updateRef({ name: branch, expectedHead: base, head: next });
     await writeFile(join(stateDirectory, 'release'), '');
 
-    const snapshot = await loading;
-    const recoveredHead = snapshot.branchHeads.find((entry) => entry.branch === branch)?.head;
+    const snapshot = await reading;
+    const recoveredHead = snapshot.references.find((reference) => reference.name === branch)?.head;
     expect(recoveredHead).toBeDefined();
-    expect(snapshot.revisions.some((entry) => entry.revision.id === recoveredHead)).toBe(true);
+    expect(snapshot.entries.some((entry) => entry.id === recoveredHead)).toBe(true);
   });
 
   it('keeps a committed revision successful when staging cleanup fails and recovers the stale ref on load', async () => {

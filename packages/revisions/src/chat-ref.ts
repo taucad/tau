@@ -27,9 +27,10 @@
 
 import { ImmutableRevisionTree, revisionId } from '@taucad/filesystem/revisions';
 import type { FileSystemProvider } from '@taucad/filesystem';
-import type { RevisionId } from '@taucad/filesystem/revisions';
+import type { RevisionId, RevisionTreeInput } from '@taucad/filesystem/revisions';
 
 import type { RevisionActor, RevisionProvenance } from '#revision-authority.js';
+import { RevisionPortError } from '#revision-port.js';
 import type { RevisionPort, RevisionPushRef } from '#revision-port.js';
 
 /** Where one chat's records live inside a checkout. @public */
@@ -160,6 +161,7 @@ export type ProjectChatsInput = ChatRefContext &
   Readonly<{
     /** The refs a fetch just wrote, local or remote-tracking. */
     refs: ReadonlyArray<Readonly<{ name: string; head: RevisionId }>>;
+    signal?: AbortSignal;
   }>;
 
 const textDecoder = new TextDecoder();
@@ -242,14 +244,14 @@ const localChatEntries = async (input: ChatRefContext & Readonly<{ chatId: strin
  * @returns The tree to record.
  */
 const unionTree = (base: ImmutableRevisionTree | undefined, local: ChatTreeEntries): ImmutableRevisionTree => {
-  const files = new Map<string, Uint8Array<ArrayBuffer>>();
+  const files = new Map<string, RevisionTreeInput>();
   for (const entry of base?.entries() ?? []) {
-    files.set(entry.path, entry.content);
+    files.set(entry.path, [entry.path, entry.content, entry.mode]);
   }
   for (const [path, content] of local) {
-    files.set(path, content);
+    files.set(path, [path, content]);
   }
-  return new ImmutableRevisionTree(files);
+  return new ImmutableRevisionTree(files.values());
 };
 
 const sameBytes = (left: Uint8Array<ArrayBuffer>, right: Uint8Array<ArrayBuffer>): boolean =>
@@ -261,8 +263,27 @@ const sameTree = (left: ImmutableRevisionTree, right: ImmutableRevisionTree | un
   }
   return left.entries().every((entry) => {
     const other = right.get(entry.path);
-    return other !== undefined && sameBytes(other, entry.content);
+    return other !== undefined && right.mode(entry.path) === entry.mode && sameBytes(other, entry.content);
   });
+};
+
+/** Validate the complete, deliberately small schema of an incoming chat-ref tree. */
+const assertChatTree = (tree: ImmutableRevisionTree): void => {
+  for (const entry of tree.entries()) {
+    if (entry.mode !== '100644' || (entry.path !== chatRecordFileName && !/^events\/[^/]+\.jsonl$/u.test(entry.path))) {
+      throw new RevisionPortError('UNSUPPORTED_OPERATION', `Chat ref contains an unsupported record: ${entry.path}`);
+    }
+    if (entry.path === chatRecordFileName) {
+      try {
+        const record: unknown = JSON.parse(textDecoder.decode(entry.content));
+        if (typeof record !== 'object' || record === null || Array.isArray(record)) {
+          throw new TypeError('not an object');
+        }
+      } catch {
+        throw new RevisionPortError('UNSUPPORTED_OPERATION', 'Chat ref contains an invalid chat.json record.');
+      }
+    }
+  }
 };
 
 /**
@@ -271,23 +292,27 @@ const sameTree = (left: ImmutableRevisionTree, right: ImmutableRevisionTree | un
  * Idempotent on purpose: the watch plane sees one change per real change
  * (A38's "coalesce at the seam"), so a projection that re-ran changes nothing.
  *
- * @param filesystem - The checkout to write into.
- * @param directory - The chat's directory inside it.
- * @param entries - Tree entries, in the ref's own spelling.
+ * @param options - The checkout, chat directory, entries, and cancellation signal.
  * @returns Whether any byte on disk changed.
  */
 const writeEntries = async (
-  filesystem: FileSystemProvider,
-  directory: string,
-  entries: ReadonlyArray<Readonly<{ path: string; content: Uint8Array<ArrayBuffer> }>>,
+  options: Readonly<{
+    filesystem: FileSystemProvider;
+    directory: string;
+    entries: ReadonlyArray<Readonly<{ path: string; content: Uint8Array<ArrayBuffer> }>>;
+    signal?: AbortSignal;
+  }>,
 ): Promise<boolean> => {
+  const { filesystem, directory, entries, signal } = options;
   const written = await Promise.all(
     entries.map(async (entry) => {
+      signal?.throwIfAborted();
       const target = `${directory}/${entry.path}`;
       const current = await readFileOrUndefined(filesystem, target);
       if (current !== undefined && sameBytes(current, entry.content)) {
         return false;
       }
+      signal?.throwIfAborted();
       await filesystem.writeFile(target, entry.content);
       return true;
     }),
@@ -318,9 +343,8 @@ const chatProvenance = (input: WriteChatRefInput, now: number): RevisionProvenan
  * @example <caption>After a turn settles</caption>
  * ```typescript
  * import { replayChatSegment, writeChatRef } from '@taucad/revisions';
- * import type { WriteChatRefInput } from '@taucad/revisions';
  *
- * declare const input: WriteChatRefInput;
+ * declare const input: Parameters<typeof writeChatRef>[0];
  *
  * const written = await writeChatRef(input);
  * if (written.status === 'conflicted') {
@@ -361,9 +385,9 @@ export const writeChatRef = async (input: WriteChatRefInput): Promise<ChatRefWri
  * @example <caption>After a push the remote refused</caption>
  * ```typescript
  * import { chatRefName, projectChats, replayChatSegment } from '@taucad/revisions';
- * import type { ReplayChatSegmentInput, RevisionFetchResult } from '@taucad/revisions';
+ * import type { RevisionFetchResult } from '@taucad/revisions';
  *
- * declare const input: Omit<ReplayChatSegmentInput, 'onto'>;
+ * declare const input: Omit<Parameters<typeof replayChatSegment>[0], 'onto'>;
  * declare const fetched: RevisionFetchResult;
  *
  * const remoteHead = fetched.refs.find((reference) => reference.name.endsWith(chatRefName(input.chatId).slice(10)))?.head;
@@ -386,21 +410,7 @@ export const replayChatSegment = async (input: ReplayChatSegmentInput): Promise<
   }
   const base = input.onto === undefined ? undefined : await input.port.readTree(input.onto);
   if (base !== undefined) {
-    /* **Project before write.** A segment this device fetched but never wrote to
-     * disk is invisible to `localChatEntries`, so a write that skipped this step
-     * would publish a tree missing another device's records — and a push made
-     * under the lease it just fetched would land it. Merging the base's segments
-     * into the checkout first makes the tree content-complete whatever the
-     * caller did, and leaves `chat.json` alone: that path is the one both
-     * devices claim, and the local record is the one the person at this device
-     * just edited. */
-    await writeEntries(
-      input.filesystem,
-      chatRecordsPath(input.chatId),
-      base
-        .entries()
-        .filter((entry) => entry.path.startsWith('events/') && entry.path !== chatSegmentPath(input.deviceId)),
-    );
+    assertChatTree(base);
   }
   const tree = unionTree(base, await localChatEntries(input));
   const unchanged = Object.freeze({
@@ -469,11 +479,23 @@ export const projectChats = async (input: ProjectChatsInput): Promise<readonly s
       if (tree === undefined) {
         return undefined;
       }
-      const changed = await writeEntries(
-        input.filesystem,
-        chatRecordsPath(chatId),
-        tree.entries().filter((entry) => entry.path !== chatSegmentPath(input.deviceId)),
-      );
+      assertChatTree(tree);
+      input.signal?.throwIfAborted();
+      const directory = chatRecordsPath(chatId);
+      const localRecord = await readFileOrUndefined(input.filesystem, `${directory}/${chatRecordFileName}`);
+      const changed = await writeEntries({
+        filesystem: input.filesystem,
+        directory,
+        entries: tree
+          .entries()
+          .filter(
+            (entry) =>
+              entry.path !== chatSegmentPath(input.deviceId) &&
+              entry.path !== chatLogFileName &&
+              (entry.path !== chatRecordFileName || localRecord === undefined),
+          ),
+        signal: input.signal,
+      });
       return changed ? chatId : undefined;
     }),
   );

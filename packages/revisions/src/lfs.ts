@@ -20,6 +20,7 @@
  */
 
 import { ImmutableRevisionTree } from '@taucad/filesystem/revisions';
+import type { RevisionTreeInput } from '@taucad/filesystem/revisions';
 
 import { digestHex } from '#object-hash.js';
 import {
@@ -149,16 +150,16 @@ export const cleanLargeObjects = (
     .map((entry) => entry.path);
   const attributes = untracked.length === 0 ? existing : generatedGitattributesContent(existing, untracked);
   const objects = new Map<string, Uint8Array<ArrayBuffer>>();
-  const cleaned = entries.map((entry): readonly [string, Uint8Array<ArrayBuffer>] => {
+  const cleaned = entries.map((entry): RevisionTreeInput => {
     if (entry.path === generatedGitattributesPath && attributes !== existing) {
-      return [entry.path, textEncoder.encode(attributes)];
+      return [entry.path, textEncoder.encode(attributes), entry.mode];
     }
     if (!isTrackedLargeObjectPath(entry.path, attributes) || readLfsPointer(entry.content) !== undefined) {
-      return [entry.path, entry.content];
+      return [entry.path, entry.content, entry.mode];
     }
     const { pointer, bytes } = lfsPointerFor(entry.content);
     objects.set(pointer.oid, entry.content);
-    return [entry.path, bytes];
+    return [entry.path, bytes, entry.mode];
   });
   if (attributes !== existing && attributesEntry === undefined) {
     cleaned.push([generatedGitattributesPath, textEncoder.encode(attributes)]);

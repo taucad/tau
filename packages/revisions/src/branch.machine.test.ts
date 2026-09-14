@@ -252,7 +252,7 @@ describe('branchMachine', () => {
   });
 
   it('emits branchMerged when a merge settles', async () => {
-    const { actor, promises, emitted } = start();
+    const { actor, promises, parent, emitted } = start();
     promises.script('checkBranch', cleanCheck);
     promises.script('merge', { output: { status: 'merged', revisionId: 'rev-13' } });
 
@@ -264,7 +264,14 @@ describe('branchMachine', () => {
       { type: 'branchMerged', branch: 'bracket-fillet', into: 'main', revisionId: 'rev-13' },
       { type: 'toast.branch', operation: 'merge', branch: 'bracket-fillet' },
     ]);
+    expect(parent.events).toContainEqual({
+      type: 'branchMerged',
+      branch: 'bracket-fillet',
+      into: 'main',
+      revisionId: 'rev-13',
+    });
     actor.stop();
+    parent.stop();
   });
 
   it('emits mergeConflicted with the paths and moves no checkout', async () => {

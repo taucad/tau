@@ -34,11 +34,12 @@
  * | 25 | `authorizing → reconnectRequired` | the third `onError` edge into it, so all three are covered |
  * | 26 | `reconnectRequired --connect--> choosing` | the edge *Reconnect GitHub* actually takes |
  * | 27 | `reconnectRequired --disconnect--> disconnecting → none` | leaving a remote whose credential died |
+ * | 28 | `reading --connect--> choosing → … → connected` | an opening gesture is not lost behind config rehydration |
  *
  * With rows 25–27 every transition in the machine has a row (W12 review R6).
  */
 
-import { createActor, fromPromise } from 'xstate';
+import { createActor, fromPromise, setup } from 'xstate';
 import type { Actor, PromiseActorLogic } from 'xstate';
 import { describe, expect, it } from 'vitest';
 
@@ -130,6 +131,34 @@ const settle = async (): Promise<void> => {
 };
 
 describe('remoteMachine', () => {
+  it('tells its parent when the remote comes and goes, so a sibling scheduler starts on the fact (W18 review DEF-6b, P53)', async () => {
+    const received: Array<{ type: string }> = [];
+    const parent = createActor(
+      setup({}).createMachine({ on: { '*': { actions: ({ event }) => received.push(event) } } }),
+    ).start();
+    const actor = createActor(
+      remoteMachine.provide({ actors: start().actor.logic.implementations.actors as RemoteActors }),
+      {
+        input: { projectId: 'p1', parentRef: parent },
+      },
+    );
+    actor.start();
+    await settle();
+
+    actor.send({ type: 'connect', kind: 'tau' });
+    await settle();
+    expect(actor.getSnapshot().matches('connected')).toBe(true);
+    expect(received).toStrictEqual([
+      { type: 'remoteConnected', kind: 'tau', url: tauRemote.url, name: tauRemote.name },
+    ]);
+
+    actor.send({ type: 'disconnect' });
+    await settle();
+    expect(received.at(-1)).toStrictEqual({ type: 'remoteDisconnected' });
+    actor.stop();
+    parent.stop();
+  });
+
   it('1: starts disconnected when the project has no remote', async () => {
     const { actor } = start();
 
@@ -143,6 +172,9 @@ describe('remoteMachine', () => {
       storage: undefined,
       overQuota: [],
       error: undefined,
+      fetchOnly: false,
+      provider: undefined,
+      repositoryId: undefined,
     });
     actor.stop();
   });
@@ -168,6 +200,17 @@ describe('remoteMachine', () => {
 
     expect(actor.getSnapshot().matches('failed')).toBe(true);
     expect(selectRemoteFacet(actor.getSnapshot()).error).toBe('config unreadable');
+    actor.stop();
+  });
+
+  it('28: accepts a connect gesture while the initial remotes read is still pending', async () => {
+    const { actor } = start({ readRemote: pending() });
+
+    actor.send({ type: 'connect', kind: 'tau' });
+    expect(actor.getSnapshot().matches('choosing')).toBe(true);
+    await settle();
+
+    expect(actor.getSnapshot().matches('connected')).toBe(true);
     actor.stop();
   });
 
@@ -197,6 +240,9 @@ describe('remoteMachine', () => {
       storage: { used: 2_100_000_000, quota: 10_000_000_000 },
       overQuota: [],
       error: undefined,
+      fetchOnly: false,
+      provider: undefined,
+      repositoryId: undefined,
     });
     expect(emitted).toStrictEqual([
       { type: 'remoteConnected', kind: 'tau', url: tauRemote.url },

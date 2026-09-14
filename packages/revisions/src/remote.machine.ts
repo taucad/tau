@@ -23,8 +23,8 @@
  * requests reach the remote only through the API's git proxy (S34, P17).
  */
 
-import { assign, emit, fromPromise, raise, setup } from 'xstate';
-import type { SnapshotFrom } from 'xstate';
+import { assign, emit, enqueueActions, fromPromise, raise, setup } from 'xstate';
+import type { AnyActorRef, SnapshotFrom } from 'xstate';
 
 import type { RemoteKind, RemoteReauthorizationCode } from '#remotes.js';
 
@@ -40,21 +40,35 @@ export type RemoteFacet = Readonly<{
   overQuota: readonly string[];
   /** The last failure, already safe to render. */
   error: string | undefined;
+  /** True when this project may fetch but must never push to the remote. */
+  fetchOnly: boolean;
+  provider: 'github' | undefined;
+  repositoryId: string | undefined;
 }>;
 
 /** One remote as this machine records it. @public */
-export type RemoteRecord = Readonly<{ name: string; url: string; kind: RemoteKind }>;
+export type RemoteRecord = Readonly<{
+  name: string;
+  url: string;
+  kind: RemoteKind;
+  provider?: 'github';
+  repositoryId?: string;
+  fetchOnly?: boolean;
+}>;
 
 /** Input accepted when creating the remoteMachine actor. @public */
 export type RemoteMachineInput = Readonly<{
   projectId: string;
   /** The branch the initial sync pushes. Defaults to `main`. */
   branch?: string;
+  /** The root, so `sync` hears connect/disconnect through it (A38, P53). */
+  parentRef?: AnyActorRef;
 }>;
 
 /** Serializable state owned by remoteMachine. @public */
 export type RemoteMachineContext = Readonly<{
   projectId: string;
+  parentRef: AnyActorRef | undefined;
   branch: string;
   kind: RemoteKind | 'none';
   remote: RemoteRecord | undefined;
@@ -66,7 +80,14 @@ export type RemoteMachineContext = Readonly<{
 /** Events accepted by remoteMachine. @public */
 export type RemoteMachineEvent =
   /** The user picked a kind. `'none'` disconnects whatever is connected. */
-  | Readonly<{ type: 'connect'; kind: RemoteKind | 'none'; url?: string }>
+  | Readonly<{
+      type: 'connect';
+      kind: RemoteKind | 'none';
+      url?: string;
+      provider?: 'github';
+      repositoryId?: string;
+      fetchOnly?: boolean;
+    }>
   /**
    * A host whose authorization finished out of band says so (P22).
    *
@@ -103,7 +124,14 @@ export type RemoteMachineEmitted =
 export type RemoteReadActorOutput = Readonly<{ remote: RemoteRecord | undefined }>;
 
 /** What `writeRemote` is asked to record. @public */
-export type RemoteWriteActorInput = Readonly<{ projectId: string; kind: RemoteKind; url: string | undefined }>;
+export type RemoteWriteActorInput = Readonly<{
+  projectId: string;
+  kind: RemoteKind;
+  url: string | undefined;
+  provider?: 'github';
+  repositoryId?: string;
+  fetchOnly?: boolean;
+}>;
 
 /** What `writeRemote` answers: the remote as it was recorded. @public */
 export type RemoteWriteActorOutput = Readonly<{ remote: RemoteRecord }>;
@@ -207,6 +235,7 @@ export const remoteMachine = setup({
   id: 'remote',
   context: ({ input }) => ({
     projectId: input.projectId,
+    parentRef: input.parentRef,
     branch: input.branch ?? defaultBranch,
     kind: 'none',
     remote: undefined,
@@ -243,6 +272,15 @@ export const remoteMachine = setup({
           actions: { type: 'failWith', params: ({ event }) => ({ error: reason(event.error) }) },
         },
       },
+      /* A route can carry a connect gesture into the project before this
+       * first config read settles. The gesture is newer than the read, so it
+       * wins instead of being dropped. */
+      on: {
+        connect: [
+          { guard: { type: 'choseNone', params: ({ event }) => ({ kind: event.kind }) } },
+          { target: 'choosing', actions: assign({ kind: ({ event }) => event.kind, error: undefined }) },
+        ],
+      },
     },
 
     none: {
@@ -262,6 +300,9 @@ export const remoteMachine = setup({
           projectId: context.projectId,
           kind: context.kind === 'none' ? 'tau' : context.kind,
           url: event.type === 'connect' ? event.url : context.remote?.url,
+          ...(event.type === 'connect' && event.provider !== undefined ? { provider: event.provider } : {}),
+          ...(event.type === 'connect' && event.repositoryId !== undefined ? { repositoryId: event.repositoryId } : {}),
+          ...(event.type === 'connect' && event.fetchOnly === true ? { fetchOnly: true } : {}),
         }),
         onDone: { target: 'authorizing', actions: assign({ remote: ({ event }) => event.output.remote }) },
         onError: {
@@ -347,6 +388,18 @@ export const remoteMachine = setup({
                   url: context.remote?.url ?? '',
                 }),
               ),
+              enqueueActions(({ context, enqueue }) => {
+                /* Siblings hear it through the parent (A38): `sync` starts on
+                 * this fact, not on the next open (W18 review DEF-6b, P53). */
+                if (context.parentRef !== undefined && context.remote !== undefined) {
+                  enqueue.sendTo(context.parentRef, {
+                    type: 'remoteConnected',
+                    kind: context.remote.kind,
+                    url: context.remote.url,
+                    name: context.remote.name,
+                  });
+                }
+              }),
               emit(
                 ({ event }): RemoteMachineEmitted => ({
                   type: 'toast.error',
@@ -368,7 +421,27 @@ export const remoteMachine = setup({
                   url: context.remote?.url ?? '',
                 }),
               ),
-              emit((): RemoteMachineEmitted => ({ type: 'toast.info', message: 'This project is backed up.' })),
+              enqueueActions(({ context, enqueue }) => {
+                /* Siblings hear it through the parent (A38): `sync` starts on
+                 * this fact, not on the next open (W18 review DEF-6b, P53). */
+                if (context.parentRef !== undefined && context.remote !== undefined) {
+                  enqueue.sendTo(context.parentRef, {
+                    type: 'remoteConnected',
+                    kind: context.remote.kind,
+                    url: context.remote.url,
+                    name: context.remote.name,
+                  });
+                }
+              }),
+              emit(
+                ({ context }): RemoteMachineEmitted => ({
+                  type: 'toast.info',
+                  message:
+                    context.remote?.fetchOnly === true
+                      ? 'This project is linked read-only.'
+                      : 'This project is backed up.',
+                }),
+              ),
             ],
           },
         ],
@@ -421,6 +494,11 @@ export const remoteMachine = setup({
           actions: [
             assign({ remote: undefined, kind: 'none', storage: undefined, overQuota: [], error: undefined }),
             emit((): RemoteMachineEmitted => ({ type: 'remoteDisconnected' })),
+            enqueueActions(({ context, enqueue }) => {
+              if (context.parentRef !== undefined) {
+                enqueue.sendTo(context.parentRef, { type: 'remoteDisconnected' });
+              }
+            }),
           ],
         },
         onError: {
@@ -503,4 +581,7 @@ export const selectRemoteFacet = (snapshot: SnapshotFrom<typeof remoteMachine>):
   storage: snapshot.context.storage,
   overQuota: snapshot.context.overQuota,
   error: snapshot.context.error,
+  fetchOnly: snapshot.context.remote?.fetchOnly === true,
+  provider: snapshot.context.remote?.provider,
+  repositoryId: snapshot.context.remote?.repositoryId,
 });

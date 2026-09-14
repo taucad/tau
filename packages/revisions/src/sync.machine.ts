@@ -184,8 +184,12 @@ export type SyncMachineEvent =
       revisionId: string;
       turnId?: string;
     }>
+  /** A durable project record changed after the current push snapshot was built. */
+  | Readonly<{ type: 'recordsChanged' }>
   /** Push now, and — with a `pushId` — tell the requester how it ended. */
-  | Readonly<{ type: 'syncNow'; pushId?: string }>
+  | Readonly<{ type: 'syncNow'; pushId?: string; remote?: string }>
+  /** A client reopened a retained project root; fetch before it reads. */
+  | Readonly<{ type: 'open' }>
   /** The host is going away: flush while there is still a `then` to run. */
   | Readonly<{ type: 'close' }>
   | Readonly<{ type: 'remoteConnected'; remote: string }>
@@ -230,7 +234,7 @@ export type SyncReadPendingActorInput = Readonly<{ projectId: string }>;
 export type SyncWritePendingActorInput = Readonly<{ projectId: string; record: SyncQueueRecord }>;
 
 /** What `readRemote` answers: the remote git's own config already holds. @public */
-export type SyncReadRemoteActorOutput = Readonly<{ remote: string | undefined }>;
+export type SyncReadRemoteActorOutput = Readonly<{ remote: string | undefined; branch?: string }>;
 
 /** What one scheduled push offers, and under which leases. @public */
 export type SyncPushActorInput = Readonly<{
@@ -284,10 +288,22 @@ export type SyncFetchActorInput = Readonly<{
 export type SyncFetchActorOutput = Readonly<{
   leases: Readonly<Record<string, string>>;
   integration: 'upToDate' | 'fastForward' | 'diverged';
+  /** Local branch refs after remote branch reconciliation, including ref-only branches. */
+  branches?: ReadonlyArray<Readonly<{ name: string; head: string }>>;
 }>;
 
 /** What applying the fetched head is asked for. @public */
 export type SyncIntegrateActorInput = Readonly<{ remote: string; branch: string }>;
+
+/** What composing a diverged local and remote branch produced. @public */
+export type SyncMergeActorOutput =
+  | Readonly<{ status: 'merged' }>
+  | Readonly<{ status: 'conflicted'; branch: string; into: string; paths: readonly string[] }>;
+
+/** The checkout a successful open pull re-headed. @public */
+export type SyncFastForwardActorOutput =
+  | Readonly<{ checkoutId: string; revisionId: string; treeId: string }>
+  | undefined;
 
 const defaultBranch = 'main';
 const defaultDebounceMilliseconds = 2000;
@@ -321,13 +337,19 @@ const noConnectivity = fromCallback(() => () => undefined);
 const historyRefOf = (branch: string): string => `refs/heads/${branch}`;
 
 /**
- * The refs a retry narrows its offer to, or `undefined` for "both sets".
+ * The record refs a retry narrows its offer to, or `undefined` for "both sets".
+ * A queued history ref is the synthetic marker for a thrown full-set push,
+ * which may have failed before it reached any records, so it cannot narrow.
  *
  * @param context - Current context.
  * @returns The narrowed ref list, or `undefined` when nothing is owed.
  */
 const narrowedOffer = (context: SyncMachineContext): readonly string[] | undefined =>
-  context.pending.length > 0 && context.failure !== 'none' ? context.pending.map((entry) => entry.ref) : undefined;
+  context.pending.length > 0 &&
+  context.failure !== 'none' &&
+  context.pending.every((entry) => entry.ref !== historyRefOf(context.branch))
+    ? context.pending.map((entry) => entry.ref)
+    : undefined;
 
 /**
  * What the push that is running actually offered.
@@ -435,7 +457,7 @@ export const syncMachine = setup({
     readRemote: fromPromise<SyncReadRemoteActorOutput, Readonly<{ projectId: string }>>(unsupported),
     push: fromPromise<SyncPushActorOutput, SyncPushActorInput>(unsupported),
     fetch: fromPromise<SyncFetchActorOutput, SyncFetchActorInput>(unsupported),
-    fastForward: fromPromise<void, SyncIntegrateActorInput>(unsupported),
+    fastForward: fromPromise<SyncFastForwardActorOutput, SyncIntegrateActorInput>(unsupported),
     /**
      * Composing two diverged lines.
      *
@@ -444,7 +466,7 @@ export const syncMachine = setup({
      * default throws into this state's failure edge — a named refusal that lands
      * on `conflicted`, which is exactly where A22 wants it.
      */
-    merge: fromPromise<void, SyncIntegrateActorInput>(unsupported),
+    merge: fromPromise<SyncMergeActorOutput, SyncIntegrateActorInput>(unsupported),
     connectivity: noConnectivity,
   },
   delays: {
@@ -464,6 +486,7 @@ export const syncMachine = setup({
     flushesNow: (_, params: Readonly<{ trigger: string }>) => params.trigger === 'close' || params.trigger === 'hidden',
   },
   actions: {
+    markPending: assign({ pendingMint: true }),
     rememberHead: assign({
       localHead: ({ context, event }) => (event.type === 'revisionMinted' ? event.revisionId : context.localHead),
       pendingMint: ({ context, event }) => (event.type === 'revisionMinted' ? true : context.pendingMint),
@@ -479,6 +502,25 @@ export const syncMachine = setup({
       }
       enqueue.assign({ pushId: undefined });
     }),
+    reportFastForward: enqueueActions(({ context, enqueue }, output: SyncFastForwardActorOutput) => {
+      if (output === undefined) {
+        return;
+      }
+      if (context.parentRef !== undefined) {
+        enqueue.sendTo(context.parentRef, {
+          type: 'checkoutChanged',
+          ...output,
+          branch: context.branch,
+        });
+      }
+    }),
+    reportBranches: enqueueActions(
+      ({ context, enqueue }, branches: ReadonlyArray<Readonly<{ name: string; head: string }>> | undefined) => {
+        if (context.parentRef !== undefined && branches !== undefined) {
+          enqueue.sendTo(context.parentRef, { type: 'branchesFetched', branches });
+        }
+      },
+    ),
   },
 }).createMachine({
   id: 'sync',
@@ -515,13 +557,23 @@ export const syncMachine = setup({
      * states that have none — `reading`, `opening`, `recording` — so a cut is
      * never dropped for arriving at a busy moment. */
     revisionMinted: { actions: 'rememberHead' },
+    recordsChanged: { actions: 'markPending' },
     /* The same fallback, for the same reason (review 2 R7): `close` is handled
      * where it can push, and remembered where it cannot — `reading`, `opening`,
      * `recording` — so the state that finishes acts on it. */
     close: { actions: assign({ pendingMint: true }) },
+    open: [{ guard: 'hasRemote', target: '.opening', reenter: true }],
     remoteDisconnected: {
       target: '.noRemote',
-      actions: assign({ remote: undefined, error: undefined, conflictRef: undefined }),
+      actions: assign({
+        remote: undefined,
+        pending: [],
+        leases: {},
+        attempt: 0,
+        failure: 'none',
+        error: undefined,
+        conflictRef: undefined,
+      }),
     },
     /*
      * A push this machine did not make, settled (A32).
@@ -591,7 +643,13 @@ export const syncMachine = setup({
           invoke: {
             src: 'readRemote',
             input: ({ context }) => ({ projectId: context.projectId }),
-            onDone: { target: 'done', actions: assign({ remote: ({ event }) => event.output.remote }) },
+            onDone: {
+              target: 'done',
+              actions: assign({
+                remote: ({ event }) => event.output.remote,
+                branch: ({ context, event }) => event.output.branch ?? context.branch,
+              }),
+            },
             onError: { target: 'done' },
           },
         },
@@ -603,6 +661,14 @@ export const syncMachine = setup({
     /** No remote is not a failure, and nothing is queued against one. */
     noRemote: {
       on: {
+        syncNow: {
+          guard: ({ event }) => event.remote !== undefined,
+          target: 'pushing',
+          actions: assign({
+            pushId: ({ event }) => event.pushId,
+            remote: ({ event }) => event.remote,
+          }),
+        },
         remoteConnected: { target: 'opening', actions: assign({ remote: ({ event }) => event.remote }) },
       },
     },
@@ -642,14 +708,26 @@ export const syncMachine = setup({
               {
                 guard: ({ event }) => event.output.integration === 'fastForward',
                 target: 'fastForwarding',
-                actions: assign({ leases: ({ event }) => event.output.leases }),
+                actions: [
+                  assign({ leases: ({ event }) => event.output.leases }),
+                  { type: 'reportBranches', params: ({ event }) => event.output.branches },
+                ],
               },
               {
                 guard: ({ event }) => event.output.integration === 'diverged',
                 target: 'merging',
-                actions: assign({ leases: ({ event }) => event.output.leases }),
+                actions: [
+                  assign({ leases: ({ event }) => event.output.leases }),
+                  { type: 'reportBranches', params: ({ event }) => event.output.branches },
+                ],
               },
-              { target: 'done', actions: assign({ leases: ({ event }) => event.output.leases }) },
+              {
+                target: 'done',
+                actions: [
+                  assign({ leases: ({ event }) => event.output.leases }),
+                  { type: 'reportBranches', params: ({ event }) => event.output.branches },
+                ],
+              },
             ],
             onError: {
               target: '#sync.queued',
@@ -661,28 +739,47 @@ export const syncMachine = setup({
           invoke: {
             src: 'fastForward',
             input: ({ context }) => ({ remote: context.remote ?? '', branch: context.branch }),
-            onDone: { target: 'done' },
+            onDone: {
+              target: 'done',
+              actions: { type: 'reportFastForward', params: ({ event }) => event.output },
+            },
             onError: { target: '#sync.queued', actions: assign({ error: ({ event }) => reason(event.error) }) },
           },
         },
-        /**
-         * A dirty or diverged checkout merges by the ordinary rules (A2/A22).
-         *
-         * This lane provides no `merge` actor, so the default refusal lands on
-         * `conflicted` with `syncConflict` — which is W10's entry point and the
-         * honest state until it lands.
-         */
+        /** A dirty or diverged checkout merges by the ordinary rules (A2/A22). */
         merging: {
           invoke: {
             src: 'merge',
             input: ({ context }) => ({ remote: context.remote ?? '', branch: context.branch }),
-            onDone: { target: 'done' },
+            onDone: [
+              {
+                guard: ({ event }) => event.output.status === 'conflicted',
+                target: '#sync.conflicted',
+                actions: enqueueActions(({ context, enqueue, event }) => {
+                  if (event.output.status !== 'conflicted') {
+                    return;
+                  }
+                  const conflictRef = `refs/heads/${event.output.branch}`;
+                  enqueue.assign({
+                    conflictRef,
+                    error: 'The remote and this device changed the same files.',
+                  });
+                  if (context.parentRef !== undefined) {
+                    enqueue.sendTo(context.parentRef, {
+                      type: 'mergeConflicted',
+                      branch: event.output.branch,
+                      into: event.output.into,
+                      paths: event.output.paths,
+                    });
+                  }
+                  enqueue({ type: 'settlePush', params: { outcome: 'conflicted' } });
+                }),
+              },
+              { target: 'done' },
+            ],
             onError: {
-              target: '#sync.conflicted',
-              actions: assign({
-                error: ({ event }) => reason(event.error),
-                conflictRef: ({ context }) => `refs/heads/sync/${context.remote ?? ''}/${context.branch}`,
-              }),
+              target: '#sync.queued',
+              actions: assign({ error: ({ event }) => reason(event.error) }),
             },
           },
         },
@@ -840,8 +937,7 @@ export const syncMachine = setup({
         onDone: [
           {
             guard: ({ context }) => context.conflictRef !== undefined,
-            target: 'conflicted',
-            actions: { type: 'settlePush', params: { outcome: 'conflicted' } },
+            target: 'opening',
           },
           {
             guard: ({ context }) => context.failure === 'fatal',

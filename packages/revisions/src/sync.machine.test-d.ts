@@ -29,7 +29,7 @@ expectTypeOf<Omit<SyncMachineContext, 'parentRef'>>().not.toMatchObjectType<Reco
 
 /* `Sync now` exists only as the correlated pair `publish.machine` waits on. */
 expectTypeOf<Extract<SyncMachineEvent, { type: 'syncNow' }>>().toEqualTypeOf<
-  Readonly<{ type: 'syncNow'; pushId?: string }>
+  Readonly<{ type: 'syncNow'; pushId?: string; remote?: string }>
 >();
 expectTypeOf<SyncPushOutcome>().toEqualTypeOf<'backedUp' | 'queued' | 'conflicted' | 'failed'>();
 

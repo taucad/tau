@@ -116,12 +116,14 @@ export type RevisionHead = Readonly<{
   head: RevisionId | undefined;
 }>;
 
-/** Input for creating the repository, its generated ignore file and its engine config. @public */
+/** Input for creating a revision store and, for ordinary projects, its generated setup files. @public */
 export type InitRevisionStoreInput = Readonly<{
   /** Identity stamped on every revision this port writes. */
   author: Readonly<{ name: string; email: string }>;
   /** Extra generated ignore lines beyond the derived-content set. */
   additionalIgnores?: readonly string[];
+  /** `false` initializes only control-plane storage for a reviewed remote bootstrap. */
+  createSetupFiles?: boolean;
 }>;
 
 /** Input for recording one revision. @public */
@@ -221,7 +223,9 @@ export type RevisionFetchInput = Readonly<{
    *
    * Each lands at `refs/remotes/<remote>/…` — the remote-tracking half of the
    * store — so a fetch never moves a local branch and the merge that follows is
-   * the ordinary one (A22).
+   * the ordinary one (A22). A fetched tag also updates its same-named local tag
+   * when that name is unborn or still matches the previous remote-tracking
+   * value; an unpushed local tag move is preserved for leased publication.
    */
   refs?: readonly string[];
   /**
@@ -240,6 +244,17 @@ export type RevisionFetchInput = Readonly<{
 export type RevisionFetchResult = Readonly<{
   /** `refs/remotes/<remote>/<name>` entries, as this store now holds them. */
   refs: readonly RemoteRef[];
+}>;
+
+/** Nonsecret identity recorded with a Git remote. @public */
+export type SetRevisionRemoteInput = Readonly<{
+  name: string;
+  url: string;
+  provider?: 'github';
+  /** Stable decimal GitHub repository id. */
+  repositoryId?: string;
+  /** Fetch and display this relationship, but never offer it a ref. */
+  fetchOnly?: boolean;
 }>;
 
 /** One ref a push offers the remote. @public */
@@ -468,7 +483,7 @@ export type RevisionPort = Readonly<{
   /** Git's own remotes list for this store. */
   listRemotes(): Promise<readonly Remote[]>;
   /** Create or re-point one remote by name. */
-  setRemote(input: Readonly<{ name: string; url: string }>): Promise<void>;
+  setRemote(input: SetRevisionRemoteInput): Promise<void>;
   /** Remove one remote. History and remote-tracking refs stay. */
   removeRemote(name: string): Promise<void>;
   /**
@@ -518,6 +533,8 @@ export type RevisionPortErrorCode =
   | 'LFS_REMOTE_UNSUPPORTED'
   /** A large object this revision references is not in this store, and cannot be fetched. */
   | 'MISSING_LARGE_OBJECT'
+  /** A reviewed remote ref changed before it could be adopted locally. */
+  | 'REMOTE_REF_CONFLICT'
   | 'UNKNOWN_REVISION'
   | 'UNSUPPORTED_OPERATION';
 

@@ -94,6 +94,7 @@ export type ResolutionMachineEvent =
 
 /** Facts resolutionMachine emits, and sends to its parent when they move a branch. @public */
 export type ResolutionMachineEmitted =
+  | Readonly<{ type: 'resolutionChanged'; revisionId: string }>
   | Readonly<{ type: 'conflictResolved'; revisionId: string; branch: string | undefined }>
   /**
    * *Ask chat to resolve*: start a turn on this branch's checkout with the
@@ -213,6 +214,13 @@ export const resolutionMachine = setup({
       pending: undefined,
     }),
     failWith: assign({ reason: (_, params: Readonly<{ reason: string }>) => params.reason, pending: undefined }),
+    announceChange: enqueueActions(({ context, enqueue }) => {
+      const fact: ResolutionMachineEmitted = { type: 'resolutionChanged', revisionId: context.revisionId };
+      enqueue.emit(fact);
+      if (context.parentRef !== undefined) {
+        enqueue.sendTo(context.parentRef, fact);
+      }
+    }),
     announce: enqueueActions(({ context, enqueue }) => {
       const fact: ResolutionMachineEmitted = {
         type: 'conflictResolved',
@@ -255,12 +263,15 @@ export const resolutionMachine = setup({
             input: ({ context }) => ({ projectId: context.projectId, revisionId: context.revisionId }),
             onDone: {
               target: '#resolution.resolving',
-              actions: assign({
-                branch: ({ context, event }) => event.output.branch ?? context.branch,
-                labels: ({ event }) => event.output.labels,
-                paths: ({ event }) => event.output.paths,
-                reason: undefined,
-              }),
+              actions: [
+                assign({
+                  branch: ({ context, event }) => event.output.branch ?? context.branch,
+                  labels: ({ event }) => event.output.labels,
+                  paths: ({ event }) => event.output.paths,
+                  reason: undefined,
+                }),
+                'announceChange',
+              ],
             },
             onError: {
               target: 'failed',
@@ -271,12 +282,15 @@ export const resolutionMachine = setup({
         /* Not terminal: the store may have been mid-write, and *Retry* is one
            event. The failure edge every invoked effect has (I29). */
         failed: {
-          entry: emit(
-            ({ context }): ResolutionMachineEmitted => ({
-              type: 'toast.error',
-              message: context.reason ?? 'This conflict could not be read.',
-            }),
-          ),
+          entry: [
+            emit(
+              ({ context }): ResolutionMachineEmitted => ({
+                type: 'toast.error',
+                message: context.reason ?? 'This conflict could not be read.',
+              }),
+            ),
+            'announceChange',
+          ],
           on: { reload: { target: 'loading' } },
         },
       },
@@ -321,7 +335,7 @@ export const resolutionMachine = setup({
                  the bytes reach the effect without passing through context. */
               ...(event.type === 'resolvedInEditor' ? { content: event.content } : {}),
             }),
-            onDone: { target: 'idle', actions: 'record' },
+            onDone: { target: 'idle', actions: ['record', 'announceChange'] },
             onError: {
               target: 'failed',
               actions: assign({ reason: ({ event }) => describeFailure(event.error), pending: undefined }),
@@ -396,12 +410,15 @@ export const resolutionMachine = setup({
         /* Every choice a person already made is still recorded, so the next one
            carries on from here rather than starting over. */
         failed: {
-          entry: emit(
-            ({ context }): ResolutionMachineEmitted => ({
-              type: 'toast.error',
-              message: context.reason ?? 'That resolution step failed.',
-            }),
-          ),
+          entry: [
+            emit(
+              ({ context }): ResolutionMachineEmitted => ({
+                type: 'toast.error',
+                message: context.reason ?? 'That resolution step failed.',
+              }),
+            ),
+            'announceChange',
+          ],
           always: { target: 'idle' },
         },
       },

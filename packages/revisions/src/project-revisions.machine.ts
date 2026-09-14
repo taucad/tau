@@ -28,6 +28,7 @@ import { publishMachine, selectPublishFacet } from '#publish.machine.js';
 import type { PublishFacet, PublishMachineEvent } from '#publish.machine.js';
 import { remoteMachine, selectRemoteFacet } from '#remote.machine.js';
 import type { RemoteFacet, RemoteMachineEvent } from '#remote.machine.js';
+import type { RemoteKind } from '#remotes.js';
 import { resolutionMachine, selectResolutionFacet } from '#resolution.machine.js';
 import type { ResolutionMachineEvent, ResolutionSide } from '#resolution.machine.js';
 import { restoreMachine, selectRestoreBusy, selectRestoreNeedsConfirmation } from '#restore.machine.js';
@@ -62,6 +63,8 @@ export type RevisionStatusProjection = Readonly<{
    */
   checkoutRoot: string | undefined;
   branch: string | undefined;
+  /** Whether any checkout has work that is not safely recorded. */
+  projectDirty: boolean;
   dirty: boolean;
   minting: boolean;
   headRevisionId: string | undefined;
@@ -167,6 +170,8 @@ export type ProjectRevisionsMachineInput = Readonly<{
 export type ProjectRevisionsMachineContext = Readonly<{
   projectId: string;
   checkouts: readonly CheckoutRecord[];
+  /** Local branch refs learned from fetch that do not need a checkout yet. */
+  availableBranches: ReadonlyArray<Readonly<{ name: string; head: string }>>;
   checkoutStatus: Readonly<Record<string, CheckoutStatusEntry>>;
   liveCheckoutId: string | undefined;
   selectedCheckoutId: string | undefined;
@@ -201,6 +206,10 @@ export type ProjectRevisionsMachineContext = Readonly<{
 /** Events accepted by projectRevisionsMachine. @public */
 export type ProjectRevisionsMachineEvent =
   | Readonly<{ type: 'checkoutsChanged'; checkouts: readonly CheckoutRecord[] }>
+  | Readonly<{
+      type: 'branchesFetched';
+      branches: ReadonlyArray<Readonly<{ name: string; head: string }>>;
+    }>
   | Readonly<{
       type: 'checkoutStatusChanged';
       checkoutId: string;
@@ -280,20 +289,28 @@ export type ProjectRevisionsMachineEvent =
   /* W13's own verbs, routed the same way — a host holds only the root (A38). */
   | (Readonly<{ type: 'sync' }> & Readonly<{ event: SyncMachineEvent }>)
   /**
-   * One correlated push settled (W13 → W8).
+   * One push asked for, and its correlated settlement (W8 ↔ W13).
    *
-   * `sync.machine` sends it here rather than to `publish` directly, because
-   * siblings speak through the parent (A38); the root's only job is to hand it
-   * on to the machine that asked.
+   * The pair travels through the root in both directions, because siblings
+   * speak through the parent (A38): `publish.machine` asks for `syncNow`,
+   * `sync.machine` answers `pushSettled`, and the root's only job is to hand
+   * each on to the machine on the other side.
    */
+  | Readonly<{ type: 'syncNow'; pushId?: string; remote?: string }>
   | Readonly<{ type: 'pushSettled'; pushId: string; outcome: SyncPushOutcome }>
   /* The conflict card's verbs, addressed to one conflicted revision's child (S33). */
   | (Readonly<{ type: 'resolution'; revisionId: string }> & Readonly<{ event: ResolutionMachineEvent }>)
   /* `branch.machine` says a merge collided; the registry is stale and nothing
    * else would ever say so (W10 review R1, P41). */
   | Readonly<{ type: 'mergeConflicted'; branch: string; into: string; paths: readonly string[] }>
+  | Readonly<{ type: 'branchMerged'; branch: string; into: string; revisionId: string }>
   /* That child's own answers, routed up so the root can retire it. */
+  /* `remote.machine` says the remote came or went; `sync` is a sibling and hears
+   * it through the root (A38, W18 review DEF-6b, P53). */
+  | Readonly<{ type: 'remoteConnected'; kind: RemoteKind; url: string; name: string }>
+  | Readonly<{ type: 'remoteDisconnected' }>
   | Readonly<{ type: 'conflictResolved'; revisionId: string; branch: string | undefined }>
+  | Readonly<{ type: 'resolutionChanged'; revisionId: string }>
   | Readonly<{
       type: 'conflictMaterialized';
       revisionId: string;
@@ -501,6 +518,7 @@ export const projectRevisionsMachine = setup({
   context: ({ input }) => ({
     projectId: input.projectId,
     checkouts: [],
+    availableBranches: [],
     checkoutStatus: {},
     liveCheckoutId: input.liveCheckoutId,
     selectedCheckoutId: input.selectedCheckoutId ?? input.liveCheckoutId,
@@ -534,7 +552,7 @@ export const projectRevisionsMachine = setup({
     {
       id: 'remote',
       src: 'remote',
-      input: ({ context }) => ({ projectId: context.projectId }),
+      input: ({ context, self }) => ({ projectId: context.projectId, parentRef: self }),
       onSnapshot: { actions: [] },
     },
     {
@@ -549,7 +567,7 @@ export const projectRevisionsMachine = setup({
     {
       id: 'publish',
       src: 'publish',
-      input: ({ context }) => ({ projectId: context.projectId }),
+      input: ({ context, self }) => ({ projectId: context.projectId, parentRef: self }),
       onSnapshot: { actions: [] },
     },
     {
@@ -587,12 +605,27 @@ export const projectRevisionsMachine = setup({
   states: {
     ready: {
       on: {
+        branchesFetched: { actions: assign({ availableBranches: ({ event }) => event.branches }) },
         checkoutsChanged: {
           actions: enqueueActions(({ context, enqueue, event }) => {
             const known = new Set(event.checkouts.map((checkout) => checkout.id));
             for (const [id, ref] of Object.entries(context.checkoutRefs)) {
               if (!known.has(id)) {
                 enqueue.stopChild(ref);
+                continue;
+              }
+              const previous = context.checkouts.find((checkout) => checkout.id === id);
+              const next = event.checkouts.find((checkout) => checkout.id === id);
+              if (
+                previous?.headRevisionId !== next?.headRevisionId &&
+                next?.headRevisionId !== undefined &&
+                next.headTreeId !== undefined
+              ) {
+                enqueue.sendTo(ref, {
+                  type: 'headChanged',
+                  revisionId: next.headRevisionId,
+                  treeId: next.headTreeId,
+                });
               }
             }
             /* W3b's own correction, unexecuted until a consumer needed it: the
@@ -926,7 +959,17 @@ export const projectRevisionsMachine = setup({
         },
         /* The root routes, it does not interpret: a host sends one verb per
          * surface and the child owns what the verb means (A38). */
-        remote: { actions: sendTo('remote', ({ event }) => event.event) },
+        remote: {
+          actions: enqueueActions(({ enqueue, event }) => {
+            /* Replacing a destination first retires the old scheduler. An
+             * in-flight request may finish against the old remote, but no
+             * queued lease is allowed to wake up against the replacement. */
+            if (event.event.type === 'connect') {
+              enqueue.sendTo('sync', { type: 'remoteDisconnected' });
+            }
+            enqueue.sendTo('remote', event.event);
+          }),
+        },
         branch: { actions: sendTo('branch', ({ event }) => event.event) },
         publish: { actions: sendTo('publish', ({ event }) => event.event) },
         sync: { actions: sendTo('sync', ({ event }) => event.event) },
@@ -945,17 +988,25 @@ export const projectRevisionsMachine = setup({
             }
           }),
         },
+        resolutionChanged: { actions: [] },
         /* The merge moved the source branch onto a conflicted revision, so the
          * registry is re-read; `syncResolutions` then spawns the child and the
          * *Needs resolution* card exists without anyone reopening the project.
          * Re-emitted too, because a verb that changed nothing a person can see
          * has to say so (A25) — the card says the rest. */
+        remoteConnected: {
+          actions: sendTo('sync', ({ event }) => ({ type: 'remoteConnected', remote: event.name })),
+        },
+        remoteDisconnected: {
+          actions: sendTo('sync', { type: 'remoteDisconnected' }),
+        },
         mergeConflicted: {
           actions: enqueueActions(({ enqueue, event }) => {
             enqueue.emit(event);
             enqueue.sendTo('checkouts', { type: 'open' });
           }),
         },
+        branchMerged: { actions: sendTo('checkouts', { type: 'open' }) },
         /* The head moved off the conflicted revision, so the registry is re-read
          * and `syncResolutions` retires the child on the answer — one writer of
          * the ref table, exactly as `checkoutRefs` has one. */
@@ -983,6 +1034,17 @@ export const projectRevisionsMachine = setup({
         /* Verbatim to the machine that asked for the push, `outcome` included:
          * dropping it would let a failed or queued push publish a row for a
          * name the remote does not have (W8 review R3, P39). */
+        /* The other half of that pair: the dialog asks the scheduler for its
+         * push through here, because siblings speak through the parent (A38).
+         * Without this edge `publish` could only declare its own success and
+         * P39's three other outcomes were unreachable (W22 DEF-W22-2). */
+        syncNow: {
+          actions: sendTo('sync', ({ event }) => ({
+            type: 'syncNow',
+            pushId: event.pushId,
+            ...(event.remote === undefined ? {} : { remote: event.remote }),
+          })),
+        },
         pushSettled: {
           actions: sendTo('publish', ({ event }) => ({
             type: 'pushSettled',
@@ -1099,6 +1161,7 @@ export const selectRevisionStatus = (
     checkoutId: context.selectedCheckoutId,
     checkoutRoot: selected?.root,
     branch: selected?.branch,
+    projectDirty: Object.values(context.checkoutStatus).some((entry) => entry.status !== 'clean'),
     dirty: status !== undefined && status.status !== 'clean',
     minting: status?.status === 'minting',
     headRevisionId: status?.headRevisionId ?? selected?.headRevisionId,
@@ -1159,7 +1222,7 @@ const selectConflicts = (snapshot: SnapshotFrom<typeof projectRevisionsMachine>)
  */
 const selectBranches = (snapshot: SnapshotFrom<typeof projectRevisionsMachine>): readonly RevisionBranchFacet[] => {
   const { context } = snapshot;
-  return context.checkouts.flatMap((checkout) =>
+  const checkedOut = context.checkouts.flatMap((checkout) =>
     checkout.branch === undefined
       ? []
       : [
@@ -1175,6 +1238,19 @@ const selectBranches = (snapshot: SnapshotFrom<typeof projectRevisionsMachine>):
           },
         ],
   );
+  const known = new Set(checkedOut.map((branch) => branch.name));
+  return [
+    ...checkedOut,
+    ...context.availableBranches
+      .filter((branch) => !known.has(branch.name))
+      .map((branch) => ({
+        name: branch.name,
+        head: branch.head,
+        checkoutId: undefined,
+        checkoutRoot: undefined,
+        leaseChatIds: [],
+      })),
+  ];
 };
 
 /**
@@ -1204,7 +1280,17 @@ const selectBranchFacetOf = (
 const selectRemoteFacetOf = (snapshot: SnapshotFrom<typeof projectRevisionsMachine>): RemoteFacet => {
   const remote = snapshot.children.remote?.getSnapshot();
   return remote === undefined
-    ? { kind: 'none', url: undefined, phase: 'none', storage: undefined, overQuota: [], error: undefined }
+    ? {
+        kind: 'none',
+        url: undefined,
+        phase: 'none',
+        storage: undefined,
+        overQuota: [],
+        error: undefined,
+        fetchOnly: false,
+        provider: undefined,
+        repositoryId: undefined,
+      }
     : selectRemoteFacet(remote);
 };
 

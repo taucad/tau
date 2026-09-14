@@ -19,7 +19,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { ImmutableRevisionTree, ResourceQueue, revisionId } from '@taucad/filesystem/revisions';
-import type { RevisionId } from '@taucad/filesystem/revisions';
+import type { RevisionFileMode, RevisionId, RevisionTreeInput } from '@taucad/filesystem/revisions';
 import type { RevisionProvenance } from '#revision-authority.js';
 import { decodeCommit, decodeTag, encodeCommit, encodeTag } from '#git-objects.js';
 import type { DecodedCommit } from '#git-objects.js';
@@ -42,6 +42,7 @@ import {
 import type { RevisionTrailer } from '#revision-headers.js';
 import { walkRevisionLog } from '#revision-log-order.js';
 import { RevisionPortError } from '#revision-port.js';
+import { assertMaterializableRevisionTree } from '#portable-tree.js';
 import type {
   AddCheckoutInput,
   Checkout,
@@ -63,6 +64,7 @@ import type {
   RevisionPushRef,
   RevisionPushRefResult,
   RevisionPushResult,
+  SetRevisionRemoteInput,
   RevisionRef,
   RevisionTag,
   RemoteRef,
@@ -103,9 +105,8 @@ export type NativeGitCheckoutOptions = Readonly<{
  *
  * The browser sends its session cookie; a terminal or a daemon has none, so the
  * same session travels as a header this port passes to git per spawn. It is
- * never written to disk: not into `.git/config`, not into a credential helper,
- * and not into the remote URL — `git -c http.extraHeader=…` lives and dies with
- * the child process.
+ * never written to disk, the remote URL, or process arguments: Git reads the
+ * one-shot `http.extraHeader` from its child environment.
  *
  * @public
  */
@@ -113,6 +114,12 @@ export type TauApiCredential = Readonly<{
   /** Origin the Tau API is reachable at, which decides which remotes get it. */
   apiBaseUrl: string;
   /** The whole header value, e.g. `Bearer <session token>`. */
+  authorization: string;
+}>;
+
+/** In-memory credential for one exact non-Tau Git repository. @public */
+export type NativeGitRemoteCredential = Readonly<{
+  repositoryUrl: string;
   authorization: string;
 }>;
 
@@ -128,6 +135,8 @@ export type NativeGitRevisionPortOptions = Readonly<{
    * signed out takes effect on the next command rather than at the next open.
    */
   tauCredential?: () => TauApiCredential | undefined;
+  /** Read per network command and injected through the child environment, never argv or git config. */
+  remoteCredential?: () => NativeGitRemoteCredential | undefined;
 }>;
 
 /**
@@ -257,21 +266,25 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
     // Environment names, not identifiers: assigned rather than spelled as keys.
     pinned['GIT_DIR'] = join(repositoryPath, gitDirectoryName);
     pinned['GIT_WORK_TREE'] = repositoryPath;
+    pinned['GIT_TERMINAL_PROMPT'] = '0';
     return pinned;
   };
 
-  const run = async (
-    args: readonly string[],
-    input?: ReadonlyArray<Uint8Array<ArrayBuffer>>,
-    env: Record<string, string | undefined> = gitEnvironment(),
-  ): Promise<GitCommandResult> => {
+  type GitRunOptions = Readonly<{
+    input?: ReadonlyArray<Uint8Array<ArrayBuffer>>;
+    env?: Record<string, string | undefined>;
+    signal?: AbortSignal;
+  }>;
+
+  const run = async (args: readonly string[], options: GitRunOptions = {}): Promise<GitCommandResult> => {
     try {
       return await runGitCommand({
         gitExecutable,
         cwd: repositoryPath,
         args: [...pinnedConfiguration, ...args],
-        env,
-        ...(input === undefined ? {} : { input }),
+        env: options.env ?? gitEnvironment(),
+        ...(options.input === undefined ? {} : { input: options.input }),
+        ...(options.signal === undefined ? {} : { signal: options.signal }),
       });
     } catch (error) {
       throw new RevisionPortError('ENGINE_UNAVAILABLE', `Native Git could not start ${args[0] ?? 'a command'}.`, {
@@ -280,21 +293,24 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
     }
   };
 
-  const output = async (
-    args: readonly string[],
-    input?: ReadonlyArray<Uint8Array<ArrayBuffer>>,
-  ): Promise<Uint8Array<ArrayBuffer>> => {
-    const result = await run(args, input);
+  const output = async (args: readonly string[], options: GitRunOptions = {}): Promise<Uint8Array<ArrayBuffer>> => {
+    const result = await run(args, options);
     if (result.exitCode !== 0) {
       throw new RevisionPortError('ENGINE_FAILED', `Native Git failed ${args[0] ?? 'a command'}.`);
     }
     return result.stdout;
   };
 
-  const text = async (args: readonly string[]): Promise<string> => textDecoder.decode(await output(args)).trim();
+  const text = async (args: readonly string[], env?: Record<string, string | undefined>): Promise<string> =>
+    textDecoder.decode(await output(args, { env })).trim();
+
+  const optionalConfig = async (name: string): Promise<string> => {
+    const result = await run(['config', '--get', name]);
+    return result.exitCode === 0 ? textDecoder.decode(result.stdout).trim() : '';
+  };
 
   /**
-   * The `-c http.extraHeader=…` a request to Tau's own git server carries (P40).
+   * The one-shot child environment carrying URL-scoped credentials and LFS endpoint for this remote.
    *
    * Only for a remote on the API's origin: a header minted for Tau must never
    * reach a third-party remote, which is the same rule the browser leg's
@@ -303,16 +319,37 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
    * @param remote - The remote a command is about to talk to.
    * @returns The configuration arguments, or none.
    */
-  const tauAuthorization = async (remote: string): Promise<readonly string[]> => {
+  const remoteEnvironment = async (remote: string): Promise<Record<string, string | undefined>> => {
+    const env = gitEnvironment();
     const held = options.tauCredential?.();
-    if (held === undefined) {
-      return [];
-    }
     const remotes = await port.listRemotes();
     const url = remotes.find((entry) => entry.name === remote)?.url;
-    return url !== undefined && isTauApiUrl(held.apiBaseUrl, url)
-      ? ['-c', `http.extraHeader=Authorization: ${held.authorization}`]
-      : [];
+    const remoteHeld = options.remoteCredential?.();
+    const normalized = (value: string): string | undefined => {
+      try {
+        const parsed = new URL(value);
+        parsed.username = '';
+        parsed.password = '';
+        return parsed.toString().replace(/\/+$/u, '');
+      } catch {
+        return undefined;
+      }
+    };
+    const authorization =
+      held !== undefined && url !== undefined && isTauApiUrl(held.apiBaseUrl, url)
+        ? held.authorization
+        : remoteHeld !== undefined && url !== undefined && normalized(remoteHeld.repositoryUrl) === normalized(url)
+          ? remoteHeld.authorization
+          : undefined;
+    const normalizedUrl = url === undefined ? undefined : normalized(url);
+    if (authorization !== undefined && normalizedUrl !== undefined) {
+      env['GIT_CONFIG_COUNT'] = '2';
+      env['GIT_CONFIG_KEY_0'] = `http.${normalizedUrl}.extraHeader`;
+      env['GIT_CONFIG_VALUE_0'] = `Authorization: ${authorization}`;
+      env['GIT_CONFIG_KEY_1'] = 'lfs.url';
+      env['GIT_CONFIG_VALUE_1'] = `${normalizedUrl}/info/lfs`;
+    }
+    return env;
   };
 
   const format = async (): Promise<ObjectFormat> => {
@@ -477,14 +514,14 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
     ];
     for (const entry of recorded.tree.entries()) {
       chunks.push(
-        textEncoder.encode(`M 100644 inline ${quoteFastImportPath(entry.path)}\n`),
+        textEncoder.encode(`M ${entry.mode} inline ${quoteFastImportPath(entry.path)}\n`),
         textEncoder.encode(`data ${entry.content.byteLength}\n`),
         entry.content,
         textEncoder.encode('\n'),
       );
     }
     chunks.push(textEncoder.encode('done\n'));
-    await output(['fast-import', '--quiet', '--date-format=raw'], chunks);
+    await output(['fast-import', '--quiet', '--date-format=raw'], { input: chunks });
     const treeId = await text(['rev-parse', `${stagingRef}^{tree}`]);
     await run(['update-ref', '-d', stagingRef]);
     return treeId;
@@ -537,19 +574,26 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
     return textDecoder.decode(result.stdout).trim();
   };
 
-  const listTree = async (commit: string): Promise<ReadonlyMap<string, string>> => {
+  const listTree = async (
+    commit: string,
+  ): Promise<ReadonlyMap<string, Readonly<{ oid: string; mode: RevisionFileMode }>>> => {
     const stdout = await output(['ls-tree', '-rz', '--full-tree', commit]);
-    const paths = new Map<string, string>();
+    const paths = new Map<string, Readonly<{ oid: string; mode: RevisionFileMode }>>();
     for (const record of textDecoder.decode(stdout).split('\0')) {
       if (record === '') {
         continue;
       }
       const tab = record.indexOf('\t');
       const header = record.slice(0, tab).split(' ');
-      if (tab === -1 || header[1] !== 'blob' || header[2] === undefined) {
+      if (
+        tab === -1 ||
+        header[1] !== 'blob' ||
+        header[2] === undefined ||
+        (header[0] !== '100644' && header[0] !== '100755')
+      ) {
         throw new RevisionPortError('ENGINE_FAILED', 'A revision tree holds a non-file entry.');
       }
-      paths.set(record.slice(tab + 1), header[2]);
+      paths.set(record.slice(tab + 1), { oid: header[2], mode: header[0] });
     }
     return paths;
   };
@@ -629,7 +673,7 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
 
   const listRemoteReferences = async (remote: string): Promise<readonly RemoteRef[]> => {
     guardTransportValue(remote, 'remote');
-    const listing = await text([...(await tauAuthorization(remote)), 'ls-remote', '--refs', '--', remote]);
+    const listing = await text(['ls-remote', '--refs', '--', remote], await remoteEnvironment(remote));
     return Object.freeze(
       listing
         .split('\n')
@@ -701,7 +745,7 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
      * this path, so `GIT_DIR` must be absent here rather than pointed at the
      * answer. Every `GIT_*` the caller exported is still stripped. */
     const discovery = clearedGitEnvironment();
-    const bare = await run(['rev-parse', '--is-bare-repository'], undefined, discovery);
+    const bare = await run(['rev-parse', '--is-bare-repository'], { env: discovery });
     if (bare.exitCode === 0 && textDecoder.decode(bare.stdout).trim() === 'true') {
       // Review 4 R26: a bare repository has no work tree to snapshot, and
       // `--show-toplevel` below would call it "not a repository" and re-init it.
@@ -710,7 +754,7 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
         'The project path is a bare repository; a revision store needs a work tree.',
       );
     }
-    const result = await run(['rev-parse', '--show-toplevel'], undefined, discovery);
+    const result = await run(['rev-parse', '--show-toplevel'], { env: discovery });
     if (result.exitCode !== 0) {
       return false;
     }
@@ -747,14 +791,16 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
        * The ordering that matters is the ignore file before `git init`, not
        * before the question of what is already here. */
       const owned = await ownsStore();
-      const ignorePath = join(repositoryPath, generatedIgnorePath);
-      const existing = await readFile(ignorePath, 'utf8').catch(() => undefined);
-      await writeFile(ignorePath, generatedIgnoreContent(existing, input.additionalIgnores ?? []));
-      /* Beside the ignore file and versioned like it (D24): the two together are
-       * what a stock clone needs to read this project the way Tau wrote it. */
-      const attributesPath = join(repositoryPath, generatedGitattributesPath);
-      const attributes = await readFile(attributesPath, 'utf8').catch(() => undefined);
-      await writeFile(attributesPath, generatedGitattributesContent(attributes));
+      if (input.createSetupFiles !== false) {
+        const ignorePath = join(repositoryPath, generatedIgnorePath);
+        const existing = await readFile(ignorePath, 'utf8').catch(() => undefined);
+        await writeFile(ignorePath, generatedIgnoreContent(existing, input.additionalIgnores ?? []));
+        /* Beside the ignore file and versioned like it (D24): the two together are
+         * what a stock clone needs to read this project the way Tau wrote it. */
+        const attributesPath = join(repositoryPath, generatedGitattributesPath);
+        const attributes = await readFile(attributesPath, 'utf8').catch(() => undefined);
+        await writeFile(attributesPath, generatedGitattributesContent(attributes));
+      }
       // Only now: the repository is created after the file that decides what a
       // snapshot may ever contain already exists.
       if (!owned) {
@@ -795,9 +841,10 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
       const paths = await listTree(commit.tree);
       const entries = await Promise.all(
         [...paths].map(
-          async ([path, oid]): Promise<readonly [string, Uint8Array<ArrayBuffer>]> => [
+          async ([path, { oid, mode }]): Promise<RevisionTreeInput> => [
             path,
             await smudged(await output(['cat-file', 'blob', oid])),
+            mode,
           ],
         ),
       );
@@ -824,7 +871,7 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
           ? {}
           : { conflictedTrees: [...input.conflict.trees], conflictLabels: [...input.conflict.labels] }),
       });
-      const written = await run(['hash-object', '-t', 'commit', '-w', '--stdin'], [commit.body]);
+      const written = await run(['hash-object', '-t', 'commit', '-w', '--stdin'], { input: [commit.body] });
       if (written.exitCode !== 0) {
         throw new RevisionPortError('ENGINE_FAILED', 'Native Git refused the revision commit object.');
       }
@@ -847,7 +894,7 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
         tagger: taggerSignature(input.actor, createdAt),
         message: revisionTagMessage({ name: input.name, note: input.note, actor: input.actor }),
       });
-      const written = await run(['hash-object', '-t', 'tag', '-w', '--stdin'], [object.body]);
+      const written = await run(['hash-object', '-t', 'tag', '-w', '--stdin'], { input: [object.body] });
       if (written.exitCode !== 0) {
         throw new RevisionPortError('ENGINE_FAILED', 'Native Git refused the named version tag object.');
       }
@@ -1040,9 +1087,11 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
      *
      * A fetch never moves a branch: every ref lands under
      * `refs/remotes/<remote>/…`, and the merge that follows is the ordinary one
-     * (A22). Unnamed, it takes everything the remote advertises that is not
-     * host-local — a remote may advertise whatever it likes, and the ones this
-     * host keeps to itself are simply not tracked.
+     * (A22). Clean named versions are also materialized under `refs/tags/*`,
+     * while a locally moved tag is preserved for its leased push. Unnamed, it
+     * takes everything the remote advertises that is not host-local — a remote
+     * may advertise whatever it likes, and the ones this host keeps to itself
+     * are simply not tracked.
      *
      * @param input - The remote, and optionally the refs to take.
      * @returns The remote-tracking refs this store now holds.
@@ -1060,14 +1109,50 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
       if (wanted.length === 0) {
         return Object.freeze({ refs: Object.freeze([]) });
       }
-      await output([
-        ...(await tauAuthorization(input.remote)),
-        'fetch',
-        '--no-tags',
-        '--',
-        input.remote,
-        ...wanted.map((ref) => `+${ref}:${remoteTrackingRef(input.remote, ref)}`),
-      ]);
+      const rawRef = async (name: string): Promise<string | undefined> => {
+        const oid = await text(['for-each-ref', '--format=%(objectname)', name]);
+        return oid === '' ? undefined : oid;
+      };
+      const previousTags = await Promise.all(
+        wanted
+          .filter((ref) => ref.startsWith(`${tagRefPrefix}/`))
+          .map(async (ref) => {
+            const tracked = remoteTrackingRef(input.remote, ref);
+            return { local: ref, tracked, localHead: await rawRef(ref), remoteHead: await rawRef(tracked) };
+          }),
+      );
+      await output(
+        [
+          'fetch',
+          '--no-tags',
+          '--',
+          input.remote,
+          ...wanted.map((ref) => `+${ref}:${remoteTrackingRef(input.remote, ref)}`),
+        ],
+        { env: await remoteEnvironment(input.remote), signal: input.signal },
+      );
+      const configuredRemotes = await port.listRemotes();
+      const configuredRemote = configuredRemotes.find((remote) => remote.name === input.remote);
+      const fetchedReferences = wanted.map((ref) => remoteTrackingRef(input.remote, ref));
+      const fetchedLargeObjects = await largeObjectPaths(fetchedReferences.map((name) => ({ name })));
+      if (fetchedLargeObjects.length > 0 && remoteCarriesLargeObjects(configuredRemote ?? input.remote)) {
+        await output(['lfs', 'fetch', '--', input.remote, ...fetchedReferences], {
+          env: await remoteEnvironment(input.remote),
+          signal: input.signal,
+        });
+      }
+      await Promise.all(
+        previousTags.map(async ({ local, tracked, localHead, remoteHead }) => {
+          const fetchedHead = await rawRef(tracked);
+          if (fetchedHead === undefined || (localHead !== undefined && localHead !== remoteHead)) {
+            return;
+          }
+          const updated = await run(['update-ref', local, fetchedHead, localHead ?? (await zeroObjectId())]);
+          if (updated.exitCode !== 0 && (await rawRef(local)) === localHead) {
+            throw new RevisionPortError('ENGINE_FAILED', `Native Git could not materialize the fetched tag ${local}.`);
+          }
+        }),
+      );
       const tracked = await Promise.all(
         wanted.map(async (ref) => {
           const name = remoteTrackingRef(input.remote, ref);
@@ -1112,11 +1197,15 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
        * files, rather than the disk leg quietly succeeding through git-lfs's
        * own transfer while the browser leg fails (A15, W12 review R3).
        */
-      if (!remoteCarriesLargeObjects(input.remote)) {
-        const large = await largeObjectPaths(input.refs);
-        if (large.length > 0) {
-          throw new RevisionPortError('LFS_REMOTE_UNSUPPORTED', lfsRemoteUnsupportedMessage(large));
-        }
+      const configuredRemotes = await port.listRemotes();
+      const configuredRemote = configuredRemotes.find((remote) => remote.name === input.remote);
+      const large = await largeObjectPaths(input.refs);
+      if (!remoteCarriesLargeObjects(configuredRemote ?? input.remote) && large.length > 0) {
+        throw new RevisionPortError('LFS_REMOTE_UNSUPPORTED', lfsRemoteUnsupportedMessage(large));
+      } else if (large.length > 0) {
+        await output(['lfs', 'push', '--', input.remote, ...input.refs.map((ref) => ref.name)], {
+          env: await remoteEnvironment(input.remote),
+        });
       }
       /* The lease, per ref (A32, S24, D14). `--force-with-lease=<dst>:<expect>`
        * allows the non-fast-forward a rewritten history needs *only* while the
@@ -1127,16 +1216,18 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
       const leases = input.refs
         .filter((ref) => 'expected' in ref)
         .map((ref) => `--force-with-lease=${ref.remoteName ?? ref.name}:${ref.expected ?? ''}`);
-      const result = await run([
-        ...(await tauAuthorization(input.remote)),
-        'push',
-        '--porcelain',
-        ...(input.atomic === true ? ['--atomic'] : []),
-        ...leases,
-        '--',
-        input.remote,
-        ...input.refs.map((ref) => `${ref.name}:${ref.remoteName ?? ref.name}`),
-      ]);
+      const result = await run(
+        [
+          'push',
+          '--porcelain',
+          ...(input.atomic === true ? ['--atomic'] : []),
+          ...leases,
+          '--',
+          input.remote,
+          ...input.refs.map((ref) => `${ref.name}:${ref.remoteName ?? ref.name}`),
+        ],
+        { env: await remoteEnvironment(input.remote) },
+      );
       const stdout = textDecoder.decode(result.stdout);
       /* A push that never reached the remote reports no table at all; one the
        * remote refused in part reports every row and exits non-zero. */
@@ -1157,20 +1248,38 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
       if (result.exitCode !== 0) {
         return Object.freeze([]);
       }
-      return Object.freeze(
-        textDecoder
-          .decode(result.stdout)
-          .split('\n')
-          .map((line) => /^remote\.(?<name>.+)\.url (?<url>.+)$/u.exec(line.trim())?.groups)
-          .filter((groups) => groups?.['name'] !== undefined && groups['url'] !== undefined)
-          .map((groups) => remoteOf(groups!['name']!, groups!['url']!))
-          .toSorted((left, right) => left.name.localeCompare(right.name)),
+      const remotes = textDecoder
+        .decode(result.stdout)
+        .split('\n')
+        .map((line) => /^remote\.(?<name>.+)\.url (?<url>.+)$/u.exec(line.trim())?.groups)
+        .filter((groups) => groups?.['name'] !== undefined && groups['url'] !== undefined)
+        .map((groups) => ({ name: groups!['name']!, url: groups!['url']! }));
+      const records = await Promise.all(
+        remotes.map(async (remote) => {
+          const provider = await optionalConfig(`remote.${remote.name}.tauProvider`);
+          const repositoryId = await optionalConfig(`remote.${remote.name}.tauRepositoryId`);
+          const fetchOnly = await optionalConfig(`remote.${remote.name}.tauFetchOnly`);
+          return remoteOf(remote.name, remote.url, {
+            ...(provider === 'github' ? { provider } : {}),
+            ...(/^\d+$/u.test(repositoryId) ? { repositoryId } : {}),
+            ...(fetchOnly === 'true' ? { fetchOnly: true } : {}),
+          });
+        }),
       );
+      return Object.freeze(records.toSorted((left, right) => left.name.localeCompare(right.name)));
     },
 
-    setRemote: async (input: Readonly<{ name: string; url: string }>): Promise<void> => {
+    setRemote: async (input: SetRevisionRemoteInput): Promise<void> => {
       guardTransportValue(input.name, 'remote');
       guardTransportValue(input.url, 'url');
+      let githubRepositoryId: string | undefined;
+      if (input.provider === 'github') {
+        if (input.repositoryId !== undefined && /^\d+$/u.test(input.repositoryId)) {
+          githubRepositoryId = input.repositoryId;
+        } else {
+          throw new TypeError('A GitHub remote requires a decimal repository id.');
+        }
+      }
       const existing = await port.listRemotes();
       await output([
         'remote',
@@ -1178,6 +1287,16 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
         input.name,
         input.url,
       ]);
+      if (githubRepositoryId === undefined) {
+        await run(['config', '--unset-all', `remote.${input.name}.tauProvider`]);
+        await run(['config', '--unset-all', `remote.${input.name}.tauRepositoryId`]);
+      } else {
+        await output(['config', `remote.${input.name}.tauProvider`, 'github']);
+        await output(['config', `remote.${input.name}.tauRepositoryId`, githubRepositoryId]);
+      }
+      await (input.fetchOnly === true
+        ? output(['config', `remote.${input.name}.tauFetchOnly`, 'true'])
+        : run(['config', '--unset-all', `remote.${input.name}.tauFetchOnly`]));
     },
 
     removeRemote: async (name: string): Promise<void> => {
@@ -1224,6 +1343,11 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
           `Branch ${input.branch} is unborn; a checkout of it needs an explicit base revision.`,
         );
       }
+      const tree = await port.readTree(base);
+      if (tree === undefined) {
+        throw new RevisionPortError('UNKNOWN_REVISION', `The store holds no tree for revision ${base}.`);
+      }
+      assertMaterializableRevisionTree(tree);
       const id = await checkoutIdOf(input.branch);
       const root = join(directory, id);
       await output([

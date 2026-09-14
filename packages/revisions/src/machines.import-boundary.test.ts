@@ -50,6 +50,26 @@ describe('revision machine import boundary', () => {
     ]);
   });
 
+  /* S48(10) asks for the boundary of every machine *subpath*, not every machine
+   * file: a machine nothing exports is unreachable to a host, and a subpath
+   * that names a module which is not a machine is a boundary nobody checks. */
+  it('exports exactly one subpath per machine module', () => {
+    const manifest = JSON.parse(readFileSync(join(sourceDirectory, '../package.json'), 'utf8')) as Readonly<{
+      exports: Readonly<Record<string, string>>;
+    }>;
+    const subpaths = Object.entries(manifest.exports)
+      .filter(([subpath]) => subpath.endsWith('-machine'))
+      .map(([subpath, target]) => `${subpath} → ${target}`)
+      .toSorted();
+
+    expect(subpaths).toEqual(
+      machineFiles()
+        .map((file) => file.slice(sourceDirectory.length))
+        .map((name) => `./${name.replace('.machine.ts', '-machine')} → ./src/${name}`)
+        .toSorted(),
+    );
+  });
+
   it('imports only xstate, sibling machines and this package own types', () => {
     const offenders = machineFiles()
       .flatMap((file) => importsOf(file))

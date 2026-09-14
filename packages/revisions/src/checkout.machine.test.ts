@@ -428,6 +428,18 @@ describe('checkoutMachine', () => {
     actor.stop();
   });
 
+  it('adopts an applied head as clean', () => {
+    const { actor } = start();
+
+    actor.send({ type: 'changed', paths: ['a.ts'], generation: 1 });
+    actor.send({ type: 'headChanged', revisionId: 'rev-7', treeId: 'tree-7' });
+
+    expect(actor.getSnapshot().matches('clean')).toBe(true);
+    expect(actor.getSnapshot().context.headRevisionId).toBe('rev-7');
+
+    actor.stop();
+  });
+
   it('sends and emits the same minted outcome with its trigger and turn id', async () => {
     const harness = start();
     const { actor, promises, emitted, parent } = harness;

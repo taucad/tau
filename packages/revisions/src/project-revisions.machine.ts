@@ -627,6 +627,9 @@ export const projectRevisionsMachine = setup({
               return {
                 checkouts: event.checkouts,
                 checkoutRefs: kept,
+                chatCheckouts: Object.fromEntries(
+                  Object.entries(current.chatCheckouts).filter(([, checkoutId]) => known.has(checkoutId)),
+                ),
                 liveCheckoutId: liveId,
                 selectedCheckoutId: selected,
               };

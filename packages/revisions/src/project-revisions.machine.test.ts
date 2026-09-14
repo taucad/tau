@@ -411,6 +411,9 @@ describe('projectRevisionsMachine', () => {
     expect(harness.actor.getSnapshot().context.follow).toBe('chat');
     expect(harness.actor.getSnapshot().context.selectedCheckoutId).toBe('checkout-b');
 
+    registerCheckouts(harness, [live]);
+    expect(harness.actor.getSnapshot().context.chatCheckouts).toEqual({});
+
     harness.actor.send({ type: 'followChat', chatId: 'chat-unknown' });
     expect(harness.actor.getSnapshot().context.selectedCheckoutId).toBe('checkout-live');
 

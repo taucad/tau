@@ -330,7 +330,10 @@ export const manifoldKernel = defineKernel({
         data: { filePath: relativeFilePath },
       });
       const geometry = createEmptyGltfGeometry();
-      return finalizeRenderOutput({ artifacts: [geometry], nativeHandle: { glb: geometry.content } });
+      return finalizeRenderOutput({
+        artifacts: [geometry],
+        nativeHandle: { glb: geometry.content },
+      });
     }
 
     try {
@@ -342,7 +345,10 @@ export const manifoldKernel = defineKernel({
         sceneNamePolicy: 'clear-generated',
         sceneNameSource: 'external-generated',
       });
-      return finalizeRenderOutput({ artifacts: [{ format: 'gltf', content: glb }], nativeHandle: { glb } });
+      return finalizeRenderOutput({
+        artifacts: [{ format: 'gltf', content: glb }],
+        nativeHandle: { glb },
+      });
     } catch (error) {
       const stackFrames = parseStackTrace(error, {
         classifyFrame: createFrameClassifier(),

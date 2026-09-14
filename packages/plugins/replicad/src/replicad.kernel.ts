@@ -411,8 +411,14 @@ export const replicadKernel = defineKernel({
   exportFormats: {
     stl: { optionsSchema: replicadExportSchemas.stl },
     step: { optionsSchema: replicadExportSchemas.step },
-    glb: { optionsSchema: replicadExportSchemas.glb, content: ['includeEdges', 'includeTopology'] },
-    gltf: { optionsSchema: replicadExportSchemas.gltf, content: ['includeEdges', 'includeTopology'] },
+    glb: {
+      optionsSchema: replicadExportSchemas.glb,
+      content: ['includeEdges', 'includeTopology'],
+    },
+    gltf: {
+      optionsSchema: replicadExportSchemas.gltf,
+      content: ['includeEdges', 'includeTopology'],
+    },
   },
   async initialize(options, runtime) {
     const replicadLibrary = await import('replicad');
@@ -512,7 +518,10 @@ export const replicadKernel = defineKernel({
       version: 'replicad@0.23.4-beta.2|replicad-opencascadejs@0.23.0-beta.0|adapter@1',
       implementationAssets,
     };
-    const computeEnvironment = { wasmVariant: resolved.variant, lengthUnit: 'millimeter' };
+    const computeEnvironment = {
+      wasmVariant: resolved.variant,
+      lengthUnit: 'millimeter',
+    };
     const computeReuse = computeReuseEnabled
       ? createReplicadComputeReuse({
           library: replicadLibrary,
@@ -637,7 +646,10 @@ export const replicadKernel = defineKernel({
                   module: executeResult.value,
                   parameters,
                   ocInstance: context.openCascade,
-                  errorContext: buildErrorContext(context, { bundleSourceMap, entryUrl }),
+                  errorContext: buildErrorContext(context, {
+                    bundleSourceMap,
+                    entryUrl,
+                  }),
                   firstArg: getReplicadFirstArgument(),
                 }),
             });
@@ -659,7 +671,10 @@ export const replicadKernel = defineKernel({
           runtime.logger.warn('createGeometry returning empty: main-returned-undefined', {
             data: { filePath: relativeFilePath },
           });
-          return finalizeRenderOutput({ artifacts: [createEmptyGltfGeometry()], nativeHandle: [] });
+          return finalizeRenderOutput({
+            artifacts: [createEmptyGltfGeometry()],
+            nativeHandle: [],
+          });
         }
 
         const defaultName = extractDefaultName(executeResult.value);
@@ -786,7 +801,10 @@ export const replicadKernel = defineKernel({
             return convertReplicadGeometriesToGltf({
               geometries: includeEdges
                 ? shapes3d
-                : shapes3d.map((geometry) => ({ ...geometry, edges: { ...geometry.edges, lines: [] } })),
+                : shapes3d.map((geometry) => ({
+                    ...geometry,
+                    edges: { ...geometry.edges, lines: [] },
+                  })),
               format: 'glb',
               includeTauTopology: includeTopology,
               logger: runtime.logger,
@@ -854,7 +872,11 @@ export const replicadKernel = defineKernel({
             const { coordinateSystem, unit } = options;
             const namedShapes = nativeHandle.map((shapeConfig, index) => ({
               ...shapeConfig,
-              name: resolveShapeName({ index, name: shapeConfig.name, source: 'generated' }),
+              name: resolveShapeName({
+                index,
+                name: shapeConfig.name,
+                source: 'generated',
+              }),
             }));
             const renderedShapes = await tracedPhase(runtime.tracer, 'export.renderGlbTessellation', () =>
               render(namedShapes, {
@@ -941,7 +963,10 @@ export const replicadKernel = defineKernel({
 
             const shapes =
               coordinateSystem === 'y-up'
-                ? nativeHandle.map((s) => ({ ...s, shape: s.shape.clone().rotate(-90, [0, 0, 0], [1, 0, 0]) }))
+                ? nativeHandle.map((s) => ({
+                    ...s,
+                    shape: s.shape.clone().rotate(-90, [0, 0, 0], [1, 0, 0]),
+                  }))
                 : nativeHandle;
 
             const result = await Promise.all(
@@ -1001,7 +1026,11 @@ const serializeReplicadHandle = (nativeHandle: NativeHandleEntry[]) =>
 
 async function buildExportBytes(
   shape: AnyShape,
-  tessellation: { tolerance: number; angularTolerance: number; binary?: boolean },
+  tessellation: {
+    tolerance: number;
+    angularTolerance: number;
+    binary?: boolean;
+  },
 ): Promise<Uint8Array<ArrayBuffer>> {
   const blob = shape.blobSTL(tessellation.binary ? { ...tessellation, binary: true } : tessellation);
   return new Uint8Array(await blob.arrayBuffer());

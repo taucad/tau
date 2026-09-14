@@ -1,6 +1,7 @@
 import { once } from 'node:events';
 import { createServer } from 'node:http';
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { mkdir, mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -8,6 +9,9 @@ import { fileURLToPath } from 'node:url';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { WebSocket, WebSocketServer } from 'ws';
+import { NodeFsProviderClient } from '@taucad/filesystem/backend';
+import { acquireNodeAuthorityWriter } from '@taucad/filesystem/backend/node';
+import type { NodeFsWatchEvent } from '@taucad/filesystem/backend/node';
 
 import { startHostDaemon } from '#host-daemon.js';
 import type { HostDaemonEvent } from '#host-daemon.js';
@@ -171,7 +175,331 @@ const startPairedAgentDaemon = async (
   });
 };
 
+/** Arm the real host watch, including the macOS FSEvents liveness handshake. */
+const armDaemonWatch = async (
+  reader: NodeFsProviderClient,
+  writer: NodeFsProviderClient,
+): Promise<{ readonly events: NodeFsWatchEvent[]; readonly unsubscribe: () => void }> => {
+  const events: NodeFsWatchEvent[] = [];
+  const unsubscribe = await reader.watch({ paths: [''], recursive: true }, (event) => events.push(event));
+  const deadline = Date.now() + 10_000;
+  while (!events.some((event) => event.type === 'change' && event.path === '.authority-watch-probe')) {
+    if (Date.now() > deadline) {
+      throw new Error(`Daemon authority watch never became live: ${JSON.stringify(events)}`);
+    }
+    // oxlint-disable-next-line no-await-in-loop -- a real macOS watcher needs a delivered probe before the observed write.
+    await writer.writeFile('.authority-watch-probe', String(Date.now()));
+    // oxlint-disable-next-line no-await-in-loop -- liveness probing is deliberately paced.
+    await delay(100);
+  }
+  events.length = 0;
+  return { events, unsubscribe };
+};
+
+/** Return the real daemon composition captured by the two narrow observation spies. */
+const requiredDaemonComposition = () => {
+  const registryResult = registrySpy.mock.results.at(-1);
+  const revisionCall = revisionsSpy.mock.calls.at(-1)?.[0];
+  const filesystem = revisionCall?.filesystem;
+  const useFileSystem = revisionCall?.useFileSystem;
+  const checkoutMutation = revisionCall?.checkoutMutation;
+  const checkouts = revisionCall?.checkouts;
+  if (registryResult?.type !== 'return' || !filesystem || !useFileSystem || !checkoutMutation || !checkouts) {
+    throw new TypeError('Expected the daemon filesystem composition.');
+  }
+  return {
+    registry: registryResult.value,
+    filesystem,
+    useFileSystem,
+    checkoutMutation,
+    checkouts,
+  };
+};
+
+type ShutdownRuntimeClient = agentTools.HostRuntimeClient & {
+  shutdown(options?: { drain?: boolean }): Promise<void>;
+};
+
+/** Whether the tool-facing projection retains the daemon-owned shutdown method. */
+const isShutdownRuntimeClient = (client: agentTools.HostRuntimeClient): client is ShutdownRuntimeClient =>
+  'shutdown' in client && typeof client.shutdown === 'function';
+
+/** Narrow the tool-facing runtime projection back to the daemon-owned lifecycle handle. */
+const requireShutdownRuntimeClient = (client: agentTools.HostRuntimeClient): ShutdownRuntimeClient => {
+  if (!isShutdownRuntimeClient(client)) {
+    throw new TypeError('Expected the daemon runtime lifecycle handle.');
+  }
+  return client;
+};
+
 describe('startHostDaemon', () => {
+  it('should bind the real runtime child to the daemon filesystem authority', async () => {
+    temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-daemon-runtime-authority-'));
+    process.env['TAU_CONFIG_DIR'] = temporaryDirectory;
+    process.chdir(fileURLToPath(new URL('../../..', import.meta.url)));
+    const originalExecArgv = process.execArgv;
+    process.execArgv = [...originalExecArgv, '--import', 'tsx'];
+    registrySpy.mockClear();
+    const relay = await startRelay();
+    await writeHostCredential({
+      v: 1,
+      deviceId: 'device-1',
+      credential: 'secret-credential-value-that-never-enters-a-url',
+    });
+    const daemon = startHostDaemon({
+      relayUrl: relay.url,
+      runtimeHost: { modulePath: fileURLToPath(new URL('../../cli/src/host-runtime-child.ts', import.meta.url)) },
+      agent: { ...(await agentOptionsIn(temporaryDirectory)), testModel: false },
+    });
+
+    let outcome: Awaited<ReturnType<ReturnType<typeof agentTools.createHostToolRegistry>['invoke']>>;
+    try {
+      await daemon.ready;
+      const registryResult = registrySpy.mock.results.at(-1);
+      if (registryResult?.type !== 'return') {
+        throw new TypeError('Expected the daemon tool registry.');
+      }
+      const registry = registryResult.value;
+      const create = await registry.invoke({
+        toolCallId: 'runtime-authority-create',
+        toolName: 'create_file',
+        input: {
+          targetFile: 'main.scad',
+          content: 'difference(){ cylinder(d=34,h=14,$fn=6); cylinder(d=8,h=16,$fn=32); }\n',
+        },
+        signal: new AbortController().signal,
+      });
+      expect(create.isError).toBe(false);
+      outcome = await registry.invoke({
+        toolCallId: 'runtime-authority-render',
+        toolName: 'get_kernel_result',
+        input: { targetFile: 'main.scad' },
+        signal: new AbortController().signal,
+      });
+    } finally {
+      await daemon.close();
+      process.execArgv = originalExecArgv;
+    }
+
+    const serialized = JSON.stringify(outcome.content);
+    expect(outcome.isError, serialized).toBe(false);
+    expect(serialized).toContain('"success":true');
+    expect(serialized).toContain('"status":"ready"');
+  }, 120_000);
+
+  it('should keep tool and revision checkout writes on one daemon authority until close', async () => {
+    temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-daemon-authority-'));
+    process.env['TAU_CONFIG_DIR'] = temporaryDirectory;
+    process.chdir(fileURLToPath(new URL('../../..', import.meta.url)));
+    registrySpy.mockClear();
+    revisionsSpy.mockClear();
+    const relay = await startRelay();
+    const events: HostDaemonEvent[] = [];
+    const daemon = await startPairedAgentDaemon(temporaryDirectory, relay, events);
+    await daemon.ready;
+
+    const { registry, filesystem, useFileSystem, checkouts } = requiredDaemonComposition();
+    expect(filesystem).toBeTypeOf('function');
+    expect(useFileSystem).toBeTypeOf('function');
+    const agentConfiguration = await agentOptionsIn(temporaryDirectory);
+    const { workspaceRoot } = agentConfiguration;
+    const candidateRoot = join(temporaryDirectory, 'candidate');
+    await mkdir(candidateRoot);
+    const candidate = {
+      id: 'candidate-1',
+      projectId: 'workspace',
+      root: candidateRoot,
+      kind: 'linked',
+      branch: 'candidate',
+      baseRevisionId: undefined,
+    } as const;
+
+    await useFileSystem(candidate, async (provider) => {
+      await provider.writeFile('prepared.txt', 'prepared\n');
+    });
+    expect(await readFile(join(candidateRoot, 'prepared.txt'), 'utf8')).toBe('prepared\n');
+    expect(() => {
+      void filesystem(candidate);
+    }).toThrow(/unadmitted/u);
+
+    checkouts.set('run-candidate', {
+      cwd: candidateRoot,
+      mode: 'candidate',
+      baseRevisionId: '',
+    });
+    checkouts.set('run-candidate-2', {
+      cwd: candidateRoot,
+      mode: 'candidate',
+      baseRevisionId: '',
+    });
+    const candidateWrite = await registry.invoke({
+      toolCallId: 'candidate-write',
+      toolName: 'create_file',
+      input: { targetFile: 'agent.txt', content: 'candidate\n' },
+      runId: 'run-candidate',
+      signal: new AbortController().signal,
+    });
+    expect(candidateWrite.isError).toBe(false);
+    expect(await readFile(join(candidateRoot, 'agent.txt'), 'utf8')).toBe('candidate\n');
+    checkouts.delete('run-candidate');
+    expect(await Promise.resolve(filesystem(candidate))).toBeDefined();
+    checkouts.delete('run-candidate-2');
+    expect(() => {
+      void filesystem(candidate);
+    }).toThrow(/unadmitted/u);
+
+    const live = {
+      id: 'live',
+      projectId: 'workspace',
+      root: workspaceRoot,
+      kind: 'live',
+      branch: 'main',
+      baseRevisionId: undefined,
+    } as const;
+    const [first, second] = await Promise.all([Promise.resolve(filesystem(live)), Promise.resolve(filesystem(live))]);
+    expect(first).toBeInstanceOf(NodeFsProviderClient);
+    expect(second).toBeInstanceOf(NodeFsProviderClient);
+    if (!(first instanceof NodeFsProviderClient) || !(second instanceof NodeFsProviderClient)) {
+      throw new TypeError('Expected daemon authority clients.');
+    }
+    const expected = new TextEncoder().encode('before\n');
+    await first.writeFile('record.json', expected);
+    const { events: watchEvents, unsubscribe } = await armDaemonWatch(first, second);
+    const watchedWrite = await registry.invoke({
+      toolCallId: 'live-watch-write',
+      toolName: 'create_file',
+      input: { targetFile: 'watched.txt', content: 'watched\n' },
+      signal: new AbortController().signal,
+    });
+    expect(watchedWrite.isError).toBe(false);
+    await vi.waitFor(
+      () => {
+        expect(watchEvents).toContainEqual({ type: 'change', path: 'watched.txt', kind: 'file' });
+      },
+      { timeout: 10_000 },
+    );
+    unsubscribe();
+    const outcomes = await Promise.all([
+      first.writeFileChecked({
+        path: 'record.json',
+        data: 'first\n',
+        preconditions: [{ path: 'record.json', expected }],
+      }),
+      second.writeFileChecked({
+        path: 'record.json',
+        data: 'second\n',
+        preconditions: [{ path: 'record.json', expected }],
+      }),
+    ]);
+    expect(outcomes.map(({ status }) => status).sort()).toEqual(['applied', 'conflict']);
+    const committed = outcomes[0].status === 'applied' ? 'first\n' : 'second\n';
+
+    const canonicalWorkspaceRoot = await realpath(workspaceRoot);
+    const authorityRoot = join(
+      temporaryDirectory,
+      'filesystem-authority',
+      createHash('sha256').update(canonicalWorkspaceRoot).digest('hex'),
+    );
+    await expect(acquireNodeAuthorityWriter({ authorityRoot })).rejects.toMatchObject({
+      code: 'AUTHORITY_ALREADY_OWNED',
+    });
+
+    await daemon.close();
+    const replacement = await acquireNodeAuthorityWriter({ authorityRoot });
+    await replacement.release();
+    expect(await daemon.closed).toEqual({ cause: 'requested' });
+
+    await expect(first.readFile('record.json', 'utf8')).rejects.toBeInstanceOf(Error);
+    revisionsSpy.mockClear();
+    const restarted = await startPairedAgentDaemon(temporaryDirectory, relay, events);
+    await restarted.ready;
+    const restartedRevisionCall = revisionsSpy.mock.calls.at(-1)?.[0];
+    if (!restartedRevisionCall?.filesystem) {
+      throw new TypeError('Expected restarted daemon filesystem composition.');
+    }
+    const restartedProvider = await Promise.resolve(restartedRevisionCall.filesystem(live));
+    expect(await restartedProvider.readFile('record.json', 'utf8')).toBe(committed);
+    await restarted.close();
+    expect(await restarted.closed).toEqual({ cause: 'requested' });
+  }, 30_000);
+
+  it('should keep filesystem authority until revision shutdown settles', async () => {
+    temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-daemon-revision-drain-'));
+    process.env['TAU_CONFIG_DIR'] = temporaryDirectory;
+    process.chdir(fileURLToPath(new URL('../../..', import.meta.url)));
+    registrySpy.mockClear();
+    const revisionCloseEntered = Promise.withResolvers<void>();
+    const allowRevisionClose = Promise.withResolvers<void>();
+    revisionsSpy.mockImplementationOnce((options) => {
+      const tree = realCreateProjectRevisions(options);
+      return {
+        ...tree,
+        record: (launcher) => {
+          const recorded = tree.record(launcher);
+          return {
+            ...recorded,
+            close: async (): Promise<void> => {
+              revisionCloseEntered.resolve();
+              await allowRevisionClose.promise;
+              await recorded.close();
+              throw new Error('revision close failed after drain');
+            },
+          };
+        },
+      };
+    });
+    const relay = await startRelay();
+    const daemon = await startPairedAgentDaemon(temporaryDirectory, relay, []);
+
+    try {
+      await daemon.ready;
+      const registryResult = registrySpy.mock.results.at(-1);
+      if (registryResult?.type !== 'return') {
+        throw new TypeError('Expected the daemon tool registry.');
+      }
+      const write = await registryResult.value.invoke({
+        toolCallId: 'revision-drain-write',
+        toolName: 'create_file',
+        input: { targetFile: 'pending.txt', content: 'accepted\n' },
+        signal: new AbortController().signal,
+      });
+      expect(write.isError).toBe(false);
+
+      const closing = daemon.close();
+      await revisionCloseEntered.promise;
+      const observeClose = async (): Promise<'closed'> => {
+        await closing;
+        return 'closed';
+      };
+      await expect(Promise.race([observeClose(), delay(50, 'pending')])).resolves.toBe('pending');
+
+      const workspaceRoot = join(temporaryDirectory, 'workspace');
+      const authorityRoot = join(
+        temporaryDirectory,
+        'filesystem-authority',
+        createHash('sha256')
+          .update(await realpath(workspaceRoot))
+          .digest('hex'),
+      );
+      await expect(acquireNodeAuthorityWriter({ authorityRoot })).rejects.toMatchObject({
+        code: 'AUTHORITY_ALREADY_OWNED',
+      });
+      allowRevisionClose.resolve();
+      await closing;
+      const replacement = await acquireNodeAuthorityWriter({ authorityRoot });
+      await replacement.release();
+      const result = await daemon.closed;
+      expect(result.cause).toBe('fatal');
+      if (result.cause === 'fatal') {
+        expect(result.error).toBeInstanceOf(AggregateError);
+        expect(result.error.message).toBe('Tau Host shutdown did not release every accepted resource.');
+      }
+    } finally {
+      allowRevisionClose.resolve();
+      await daemon.close();
+    }
+  }, 30_000);
+
   /*
    * The agent channel is not a client of the compute child: it needs one only
    * for the geometry tools, which answer a typed refusal without it. A child
@@ -313,14 +641,7 @@ describe('startHostDaemon', () => {
     await daemon.close();
   }, 20_000);
 
-  /*
-   * Every candidate turn works in a checkout of its own — the recorder derives
-   * the workspace id from the run id — and the geometry tools need a runtime
-   * client rooted in it. `agentRuntimes` is keyed by root, and nothing but the
-   * checkout's own release can know that root is gone: without eviction the
-   * daemon keeps one live client, over a tree that no longer exists, per turn.
-   */
-  it('gives back a candidate turn checkout runtime client when the checkout is released', async () => {
+  it('should retain candidate admission across overlapping revision and runtime shutdown', async () => {
     temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-daemon-checkout-runtime-'));
     process.env['TAU_CONFIG_DIR'] = temporaryDirectory;
     process.chdir(fileURLToPath(new URL('../../..', import.meta.url)));
@@ -329,33 +650,55 @@ describe('startHostDaemon', () => {
     const daemon = await startPairedAgentDaemon(temporaryDirectory, relay, []);
     await daemon.ready;
 
-    /* The daemon's own map and its own runtime factory, taken from the call it
-       made rather than rebuilt here. */
     const registryOptions = registrySpy.mock.lastCall?.[0];
     const runtimeClient = registryOptions?.runtimeClient;
-    if (!registryOptions?.checkouts || !runtimeClient) {
-      throw new TypeError('Expected the daemon to build its tool registry over a checkout map.');
+    if (!runtimeClient) {
+      throw new TypeError('Expected the daemon to build its tool registry over a runtime client.');
     }
-    /* The registry only reads the map; the revision tree's placement is what
-       writes it, and this case stands in for it. */
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the daemon's own map, taken from the call it made.
-    const checkouts = registryOptions.checkouts as Map<string, { cwd: string; mode: string }>;
-    const checkout = join(temporaryDirectory, 'checkouts', 'workspace', 'checkout-1');
-    await mkdir(checkout, { recursive: true });
-    checkouts.set('run-1', { cwd: checkout, mode: 'candidate' });
-    const first = await runtimeClient(checkout);
-    expect(await runtimeClient(checkout)).toBe(first);
+    const { checkouts, filesystem, useFileSystem } = requiredDaemonComposition();
+    const root = join(temporaryDirectory, 'checkouts', 'workspace', 'checkout-1');
+    await mkdir(root, { recursive: true });
+    const checkout = {
+      id: 'checkout-1',
+      projectId: 'workspace',
+      root,
+      kind: 'linked',
+      branch: 'candidate',
+      baseRevisionId: undefined,
+    } as const;
+    checkouts.set('run-1', { cwd: root, mode: 'candidate', baseRevisionId: '' });
+    const provider = await Promise.resolve(filesystem(checkout));
+    const client = requireShutdownRuntimeClient(await runtimeClient(root));
+    expect(await runtimeClient(root)).toBe(client);
+    const shutdownEntered = Promise.withResolvers<void>();
+    const allowShutdown = Promise.withResolvers<void>();
+    const actualShutdown = client.shutdown.bind(client);
+    const shutdown = vi.spyOn(client, 'shutdown').mockImplementation(async (options) => {
+      shutdownEntered.resolve();
+      await allowShutdown.promise;
+      await actualShutdown(options);
+    });
 
-    checkouts.delete('run-1');
-    checkouts.set('run-2', { cwd: checkout, mode: 'candidate' });
-    expect(await runtimeClient(checkout)).not.toBe(first);
-    // Given back the same way, so this test leaves no live socket behind either.
-    checkouts.delete('run-2');
-    /* The eviction terminates the client a microtask later (it holds a promise,
-       not a client); let it land before the daemon takes the child down. */
-    await delay(0);
-
-    await daemon.close();
+    try {
+      checkouts.delete('run-1');
+      await shutdownEntered.promise;
+      await useFileSystem(checkout, async (temporaryProvider) => {
+        await temporaryProvider.writeFile('revision-settled-during-runtime-close.txt', 'settled\n');
+      });
+      expect(await readFile(join(root, 'revision-settled-during-runtime-close.txt'), 'utf8')).toBe('settled\n');
+      expect(await Promise.resolve(filesystem(checkout))).toBeDefined();
+      const closing = daemon.close();
+      await expect(Promise.race([closing.then(() => 'closed'), delay(50, 'pending')])).resolves.toBe('pending');
+      await provider.writeFile('during-runtime-close.txt', 'still admitted\n');
+      allowShutdown.resolve();
+      await closing;
+      expect(shutdown).toHaveBeenCalledOnce();
+      expect(await daemon.closed).toEqual({ cause: 'requested' });
+      await expect(provider.readFile('during-runtime-close.txt', 'utf8')).rejects.toBeInstanceOf(Error);
+    } finally {
+      allowShutdown.resolve();
+      await daemon.close();
+    }
   }, 20_000);
 
   /*

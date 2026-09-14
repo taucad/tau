@@ -163,7 +163,25 @@ import type {
  *
  * @public
  */
-export type CheckoutFileSystems = (checkout: Checkout) => RootedFileSystem | Promise<RootedFileSystem>;
+export type RevisionFileSystem = Omit<RootedFileSystem, 'watch'>;
+
+/** Open the revision read/write capability for one checkout. @public */
+export type CheckoutFileSystems = (checkout: Checkout) => RevisionFileSystem | Promise<RevisionFileSystem>;
+
+/**
+ * Run one checkout filesystem operation inside its host-owned admission lifetime.
+ *
+ * Disk hosts use this seam to admit a linked checkout before placement is
+ * published, then revoke that temporary reachability when the operation
+ * settles. Browser hosts may omit it and use {@link CheckoutFileSystems}
+ * directly.
+ *
+ * @public
+ */
+export type UseCheckoutFileSystem = <Result>(
+  checkout: Checkout,
+  operation: (filesystem: RevisionFileSystem) => Promise<Result>,
+) => Promise<Result>;
 
 /** One turn's lease record, as `.tau/runs/<runId>.json` holds it (S7). @public */
 export type TurnLease = Readonly<{
@@ -341,6 +359,8 @@ export type RevisionActorsOptions = Readonly<{
   /** The content-addressed store every revision id comes from. */
   port: RevisionPort;
   filesystem: CheckoutFileSystems;
+  /** Optional host-owned admission wrapper around checkout tree reads and writes. */
+  useFileSystem?: UseCheckoutFileSystem;
   projectId: string;
   /**
    * The authority this host holds the project under.
@@ -696,6 +716,8 @@ const caseCollisions = (tree: ImmutableRevisionTree): readonly string[] => {
 // oxlint-disable-next-line eslint/max-lines-per-function -- one closure over one project's port; splitting it would thread the same six values through every half.
 export const createRevisionActors = (options: RevisionActorsOptions): RevisionActors => {
   const { port, filesystem, projectId, authorityEpoch } = options;
+  const useFileSystem: UseCheckoutFileSystem =
+    options.useFileSystem ?? (async (checkout, operation) => operation(await filesystem(checkout)));
   const actorId = options.actorId ?? 'tau-host';
   /* A host that cannot re-send a push remembers none: the identity function. */
   const recordHistoryPush = options.recordHistoryPush ?? (async <Result>(run: () => Promise<Result>) => run());
@@ -837,9 +859,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     return place;
   };
 
-  /* The versioned tree of one checkout: every path the registry versions. */
-  const capture = async (place: Checkout): Promise<ImmutableRevisionTree> => {
-    const rooted = await filesystem(place);
+  /** Capture one already-open checkout filesystem. */
+  const captureFileSystem = async (rooted: RevisionFileSystem): Promise<ImmutableRevisionTree> => {
     const tree = await captureRevisionTree(rooted, {
       exclude: (path) => !classify(path).versioned,
     });
@@ -852,6 +873,10 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     }
     return tree;
   };
+
+  /* The versioned tree of one checkout: every path the registry versions. */
+  const capture = async (place: Checkout): Promise<ImmutableRevisionTree> =>
+    useFileSystem(place, async (rooted) => captureFileSystem(rooted));
 
   const headOf = async (place: Checkout): Promise<string | undefined> =>
     place.baseRevisionId ?? (place.branch === undefined ? undefined : await port.readRef(place.branch));
@@ -885,45 +910,45 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     place: Checkout,
     target: ImmutableRevisionTree,
     from: ImmutableRevisionTree,
-  ): Promise<readonly string[]> => {
-    const live = await filesystem(place);
-    const liveFiles = new Map(from.entries().map(({ path, content }) => [path, content]));
-    const targetFiles = new Map(target.entries().map(({ path, content }) => [path, content]));
-    const removedPaths = [...liveFiles.keys()]
-      .filter((path) => !targetFiles.has(path))
-      .sort((left, right) => right.length - left.length || right.localeCompare(left));
-    for (const path of removedPaths) {
-      // oxlint-disable-next-line no-await-in-loop -- ordered application keeps retries deterministic.
-      await live.unlink(path);
-    }
-    const writtenPaths: string[] = [];
-    for (const [path, content] of targetFiles) {
-      const current = liveFiles.get(path);
-      if (current !== undefined && equalBytes(current, content)) {
-        continue;
+  ): Promise<readonly string[]> =>
+    useFileSystem(place, async (live) => {
+      const liveFiles = new Map(from.entries().map(({ path, content }) => [path, content]));
+      const targetFiles = new Map(target.entries().map(({ path, content }) => [path, content]));
+      const removedPaths = [...liveFiles.keys()]
+        .filter((path) => !targetFiles.has(path))
+        .sort((left, right) => right.length - left.length || right.localeCompare(left));
+      for (const path of removedPaths) {
+        // oxlint-disable-next-line no-await-in-loop -- ordered application keeps retries deterministic.
+        await live.unlink(path);
       }
-      // oxlint-disable-next-line no-await-in-loop -- ordered application keeps retries deterministic.
-      await live.writeFile(path, content);
-      writtenPaths.push(path);
-    }
-    const reread = await capture(place);
-    const verified = new Map(reread.entries().map(({ path, content }) => [path, content]));
-    const unverified = [
-      ...removedPaths.filter((path) => verified.has(path)),
-      ...writtenPaths.filter((path) => {
-        const applied = verified.get(path);
-        const wanted = targetFiles.get(path);
-        return applied === undefined || wanted === undefined || !equalBytes(applied, wanted);
-      }),
-    ].sort();
-    if (unverified.length > 0) {
-      throw new RevisionPortError(
-        'ENGINE_FAILED',
-        `The checkout did not keep the paths this write applied: ${unverified.join(', ')}`,
-      );
-    }
-    return [...removedPaths, ...writtenPaths].sort();
-  };
+      const writtenPaths: string[] = [];
+      for (const [path, content] of targetFiles) {
+        const current = liveFiles.get(path);
+        if (current !== undefined && equalBytes(current, content)) {
+          continue;
+        }
+        // oxlint-disable-next-line no-await-in-loop -- ordered application keeps retries deterministic.
+        await live.writeFile(path, content);
+        writtenPaths.push(path);
+      }
+      const reread = await captureFileSystem(live);
+      const verified = new Map(reread.entries().map(({ path, content }) => [path, content]));
+      const unverified = [
+        ...removedPaths.filter((path) => verified.has(path)),
+        ...writtenPaths.filter((path) => {
+          const applied = verified.get(path);
+          const wanted = targetFiles.get(path);
+          return applied === undefined || wanted === undefined || !equalBytes(applied, wanted);
+        }),
+      ].sort();
+      if (unverified.length > 0) {
+        throw new RevisionPortError(
+          'ENGINE_FAILED',
+          `The checkout did not keep the paths this write applied: ${unverified.join(', ')}`,
+        );
+      }
+      return [...removedPaths, ...writtenPaths].sort();
+    });
 
   /**
    * Where this device records what the remote has not acknowledged.
@@ -1011,7 +1036,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
 
   /** What every chat-ref effect needs, or `undefined` on a host with no device id. */
   const chatContext = async (): Promise<
-    Readonly<{ port: RevisionPort; filesystem: RootedFileSystem; deviceId: string }> | undefined
+    Readonly<{ port: RevisionPort; filesystem: RevisionFileSystem; deviceId: string }> | undefined
   > => {
     const deviceId = options.deviceId?.();
     if (deviceId === undefined || deviceId === '') {
@@ -1194,7 +1219,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   const leasePathOf = (runId: string): string => `${leaseDirectory}/${encodeURIComponent(runId)}.json`;
 
   /* The project's own root: `.tau/runs` is a records row inside the project. */
-  const recordsFileSystem = async (): Promise<RootedFileSystem> => {
+  const recordsFileSystem = async (): Promise<RevisionFileSystem> => {
     const places = await listPlaces();
     const live = places.find((place) => place.kind === 'live') ?? places[0];
     if (live === undefined) {

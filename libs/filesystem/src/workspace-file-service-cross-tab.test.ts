@@ -51,9 +51,103 @@ afterEach(() => {
   for (const { service } of activeAuthorities.splice(0)) {
     service.dispose();
   }
+  vi.unstubAllGlobals();
 });
 
 describe('WorkspaceFileService cross-tab authority delivery', () => {
+  it('admits one real-provider checked writer and returns refreshed conflict bytes to the loser', async () => {
+    const tails = new Map<string, Promise<void>>();
+    vi.stubGlobal('navigator', {
+      locks: {
+        request: async (_name: string, _options: LockOptions, operation: () => Promise<unknown>) => {
+          const predecessor = tails.get(_name) ?? Promise.resolve();
+          const settled = Promise.withResolvers<void>();
+          tails.set(_name, settled.promise);
+          await predecessor;
+          try {
+            return await operation();
+          } finally {
+            settled.resolve();
+          }
+        },
+      },
+    });
+    const databasePrefix = `checked-winner-${databaseSequence++}`;
+    const first = await createAuthority(databasePrefix, { disableChannel: true });
+    const second = await createAuthority(databasePrefix, { disableChannel: true });
+    await first.service.writeFile('/target.txt', 'old');
+    await first.service.writeFile('/source.txt', 'source-v1');
+    const events: ChangeEvent[] = [];
+    const stop = first.eventBus.subscribe((event) => events.push(event));
+    const request = {
+      path: '/target.txt',
+      preconditions: [
+        { path: '/target.txt', expected: 'old' },
+        { path: '/source.txt', expected: 'source-v1' },
+      ],
+    } as const;
+
+    const [left, right] = await Promise.all([
+      first.service.writeFileChecked({ ...request, data: 'first' }),
+      second.service.writeFileChecked({ ...request, data: 'second' }),
+    ]);
+
+    const conflict = [left, right].find((result) => result.status === 'conflict');
+    expect([left.status, right.status].sort()).toEqual(['applied', 'conflict']);
+    expect(conflict).toMatchObject({ status: 'conflict', conflicts: [{ path: '/target.txt' }] });
+    expect(events.filter((event) => event.type === 'fileWritten' && event.path === '/target.txt')).toHaveLength(1);
+    const winner = await first.service.readFile('/target.txt');
+    const unchanged = await first.service.writeFileChecked({
+      path: '/target.txt',
+      data: winner,
+      preconditions: [
+        { path: '/target.txt', expected: winner },
+        { path: '/source.txt', expected: 'source-v1' },
+      ],
+    });
+    expect(unchanged.status).toBe('unchanged');
+    expect(events.filter((event) => event.type === 'fileWritten' && event.path === '/target.txt')).toHaveLength(1);
+    const abort = new AbortController();
+    abort.abort(new Error('cancel before admission'));
+    await expect(
+      first.service.writeFileChecked({
+        path: '/target.txt',
+        data: 'cancelled',
+        preconditions: [{ path: '/target.txt', expected: winner }],
+        signal: abort.signal,
+      }),
+    ).rejects.toThrow('cancel before admission');
+    await expect(first.service.readFile('/target.txt')).resolves.toEqual(winner);
+    expect(events.filter((event) => event.type === 'fileWritten' && event.path === '/target.txt')).toHaveLength(1);
+    await second.service.writeFile('/source.txt', 'source-v2');
+    await expect(
+      first.service.writeFileChecked({
+        path: '/target.txt',
+        data: 'stale-source-write',
+        preconditions: [
+          { path: '/target.txt', expected: winner },
+          { path: '/source.txt', expected: 'source-v1' },
+        ],
+      }),
+    ).resolves.toMatchObject({ status: 'conflict', conflicts: [{ path: '/source.txt' }] });
+    await expect(first.service.readFile('/target.txt')).resolves.toEqual(winner);
+    stop();
+    vi.unstubAllGlobals();
+  });
+
+  it('fails a checked write closed without browser locks', async () => {
+    vi.stubGlobal('navigator', {});
+    const authority = await createAuthority(`checked-unsupported-${databaseSequence++}`, { disableChannel: true });
+    await expect(
+      authority.service.writeFileChecked({
+        path: '/target.txt',
+        data: 'new',
+        preconditions: [{ path: '/target.txt', expected: null }],
+      }),
+    ).rejects.toMatchObject({ code: 'CHECKED_WRITE_UNSUPPORTED', applicationState: 'known-not-applied' });
+    vi.unstubAllGlobals();
+  });
+
   it('refreshes stale DirectIDB admission state under the mutation lock even without channel delivery', async () => {
     const databasePrefix = `stale-admission-${databaseSequence++}`;
     const stale = await createAuthority(databasePrefix, { disableChannel: true });

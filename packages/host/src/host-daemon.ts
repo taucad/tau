@@ -1,14 +1,19 @@
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
+import { mkdir, realpath } from 'node:fs/promises';
 import { hostname } from 'node:os';
+import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
+import { MessageChannel } from 'node:worker_threads';
 
 import { WebSocket } from 'ws';
 
 import { createNodeAgentLauncher } from '@taucad/agent-host/node-launcher';
 import type { NodeAgentLauncher } from '@taucad/agent-host/node-launcher';
 import type { AgentSessionModel, ExternalAgentDescriptor } from '@taucad/agent-host';
+import { NodeFsChannel, NodeFsProviderClient } from '@taucad/filesystem/backend';
+import { NodeFsAuthorityHost, serveNodeFsProvider, toNodeFsPort } from '@taucad/filesystem/backend/node';
 import { createRuntimeClient } from '@taucad/runtime';
-import { fromNodeFs } from '@taucad/runtime/filesystem/node';
+import { createFileSystemBridgePort, fromFileSystemBridge } from '@taucad/runtime/filesystem';
 import { webSocketTransport } from '@taucad/runtime/transport/websocket';
 import type { ComputeBinding, ComputeStoreControl } from '@taucad/runtime/types';
 
@@ -23,7 +28,12 @@ import { createHostToolRegistry } from '#agent-tools.js';
 import type { HostSystemSkillBundle } from '#agent-tools.js';
 import { hostControlInboundSchema, pairingResponseSchema, pairingTokenResponseSchema } from '#host.schemas.js';
 import type { HostControlInbound, HostControlOutbound } from '#host.schemas.js';
-import { readHostCredential, removeHostCredential, writeHostCredential } from '#credential-store.js';
+import {
+  defaultConfigDirectory,
+  readHostCredential,
+  removeHostCredential,
+  writeHostCredential,
+} from '#credential-store.js';
 import type { HostCredential } from '#credential-store.js';
 import { spliceFrameSockets } from '#frame-splice.js';
 import type { FrameSpliceCloseResult, FrameSpliceHandle } from '#frame-splice.js';
@@ -191,6 +201,12 @@ type ActiveSession = {
   /** True once this session has lost a route or been asked to close. */
   isDraining: () => boolean;
 };
+
+type AgentFileSystemAuthority = Readonly<{
+  channel: NodeFsChannel;
+  admittedRoots: Set<string>;
+  stopServer: () => Promise<void>;
+}>;
 
 /**
  * The relay's reap of a route no browser ever dialled.
@@ -379,6 +395,7 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
   const sessions = new Map<string, ActiveSession>();
   let controlSocket: WebSocket | undefined;
   let runtimeChild: RuntimeChildHandle | undefined;
+  let runtimeChildStart: Promise<RuntimeChildHandle> | undefined;
   let childObserver: Promise<void> | undefined;
   let jobWorker: HostJobWorkerHandle | undefined;
   let jobWorkerObserver: Promise<void> | undefined;
@@ -393,6 +410,7 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
   let agentMcp: HostMcpEndpoint | undefined;
   let agentExternalAgents: readonly ExternalAgentDescriptor[] = [];
   let agentRunReporter: RunReporter | undefined;
+  let agentFileSystem: AgentFileSystemAuthority | undefined;
   /**
    * The geometry tools' runtime client, one per root a turn works in.
    *
@@ -401,6 +419,8 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
    * the files the kernel reads are the ones that turn is writing.
    */
   const agentRuntimes = new Map<string, Promise<ReturnType<typeof createRuntimeClient>>>();
+  const agentRuntimeClosures = new Map<string, Set<Promise<void>>>();
+  const agentRuntimeCloseFailures: unknown[] = [];
 
   const emit = (event: HostDaemonEvent): void => {
     try {
@@ -423,26 +443,77 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
     }
   };
 
+  const providerForAgentRoot = (workspaceRoot: string): NodeFsProviderClient => {
+    const filesystem = agentFileSystem;
+    if (!filesystem || !filesystem.admittedRoots.has(workspaceRoot)) {
+      throw Object.assign(new Error(`Tau Host refused an unadmitted agent filesystem root: ${workspaceRoot}`), {
+        code: 'EACCES',
+      });
+    }
+    return new NodeFsProviderClient(filesystem.channel, workspaceRoot);
+  };
+
+  const closeAgentRuntime = (
+    workspaceRoot: string,
+    pending: Promise<ReturnType<typeof createRuntimeClient>> | undefined,
+    afterShutdown?: () => void,
+  ): void => {
+    if (!pending) {
+      afterShutdown?.();
+      return;
+    }
+    const shutdown = async (): Promise<void> => {
+      try {
+        const client = await pending;
+        await client.shutdown();
+      } catch (error) {
+        agentRuntimeCloseFailures.push(error);
+      } finally {
+        const closures = agentRuntimeClosures.get(workspaceRoot);
+        closures?.delete(closing);
+        if (closures?.size === 0) {
+          agentRuntimeClosures.delete(workspaceRoot);
+        }
+        afterShutdown?.();
+      }
+    };
+    const closing = shutdown();
+    const closures = agentRuntimeClosures.get(workspaceRoot) ?? new Set<Promise<void>>();
+    closures.add(closing);
+    agentRuntimeClosures.set(workspaceRoot, closures);
+  };
+
   const ensureRuntimeChild = async (): Promise<RuntimeChildHandle> => {
     if (runtimeChild) {
       return runtimeChild;
     }
-    const child = await startRuntimeChild(options.runtimeHost);
-    runtimeChild = child;
-    childObserver = (async () => {
-      await child.closed;
-      if (runtimeChild === child) {
-        runtimeChild = undefined;
-        /* The geometry tools' client is bound to *this* child's loopback port.
-         * Leaving it memoized outlives its child: the next child listens on a
-         * new port while every tool keeps dialling the dead one, so a render
-         * fails with a transport error that names nothing instead of the
-         * supervisor's real reason. */
-        agentRuntimes.clear();
-        closeSessions('CHILD_EXIT');
+    const pending = runtimeChildStart ?? startRuntimeChild(options.runtimeHost);
+    runtimeChildStart = pending;
+    try {
+      const child = await pending;
+      // oxlint-disable-next-line typescript/no-unnecessary-condition -- a concurrent waiter can assign the shared child while this await is suspended.
+      if (!runtimeChild) {
+        runtimeChild = child;
+        childObserver = (async () => {
+          await child.closed;
+          if (runtimeChild === child) {
+            runtimeChild = undefined;
+            /* The geometry tools' client is bound to *this* child's loopback port.
+             * Leaving it memoized outlives its child: the next child listens on a
+             * new port while every tool keeps dialling the dead one, so a render
+             * fails with a transport error that names nothing instead of the
+             * supervisor's real reason. */
+            agentRuntimes.clear();
+            closeSessions('CHILD_EXIT');
+          }
+        })();
       }
-    })();
-    return child;
+      return child;
+    } finally {
+      if (runtimeChildStart === pending) {
+        runtimeChildStart = undefined;
+      }
+    }
   };
 
   /**
@@ -477,7 +548,7 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
         return createRuntimeClient({
           transport: webSocketTransport({
             url: child.url,
-            fileSystem: fromNodeFs(workspaceRoot),
+            fileSystem: fromFileSystemBridge(() => createFileSystemBridgePort(providerForAgentRoot(workspaceRoot))),
             createSocket: (url) =>
               new WebSocket(url, { headers: { authorization: `Bearer ${child.authorizationToken}` } }),
             ...(options.agent?.compute
@@ -499,11 +570,53 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
    * @param agent - Workspace, gateway, model, admission secret, and binding.
    */
   const startAgent = async (agent: HostDaemonAgentOptions): Promise<void> => {
+    const canonicalWorkspaceRoot = await realpath(agent.workspaceRoot);
+    const authorityRoot = join(
+      defaultConfigDirectory(),
+      'filesystem-authority',
+      createHash('sha256').update(canonicalWorkspaceRoot).digest('hex'),
+    );
+    await mkdir(authorityRoot, { recursive: true, mode: 0o700 });
+    const authority = new NodeFsAuthorityHost({
+      authorityDirectory: () => authorityRoot,
+      /* Candidate checkouts belong to this project's writer. A second daemon
+       * over another workspace hashes to another stable authority directory. */
+      authorityIdentity: () => canonicalWorkspaceRoot,
+    });
+    const ports = new MessageChannel();
+    const admittedRoots = new Set([agent.workspaceRoot]);
+    const stopServer = serveNodeFsProvider(toNodeFsPort(ports.port1), {
+      authority,
+      allowRoot: (root) => admittedRoots.has(root),
+    });
+    agentFileSystem = {
+      channel: new NodeFsChannel(toNodeFsPort(ports.port2)),
+      admittedRoots,
+      stopServer,
+    };
     /* Where each admitted turn runs, written by the recorder and read by the
      * Tau tool registry and the external port alike: the port is built inside
      * the launcher the recorder wraps, so the three share the map rather than a
      * call (V19). */
+    const temporaryCandidateAdmissions = new Map<string, number>();
+    function releaseCandidateRootIfIdle(root: string): void {
+      if (
+        temporaryCandidateAdmissions.has(root) ||
+        agentRuntimeClosures.has(root) ||
+        [...checkouts.values()].some((candidate) => candidate.mode === 'candidate' && candidate.cwd === root)
+      ) {
+        return;
+      }
+      admittedRoots.delete(root);
+    }
     const checkouts = new (class extends Map<string, TurnCheckout> {
+      public override set(runId: string, checkout: TurnCheckout): this {
+        if (checkout.mode === 'candidate') {
+          admittedRoots.add(checkout.cwd);
+        }
+        return super.set(runId, checkout);
+      }
+
       /**
        * Give back the checkout's runtime client with the checkout.
        *
@@ -519,28 +632,58 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
        */
       public override delete(runId: string): boolean {
         const checkout = this.get(runId);
-        if (checkout?.mode === 'candidate') {
+        const deleted = super.delete(runId);
+        if (
+          deleted &&
+          checkout?.mode === 'candidate' &&
+          ![...this.values()].some((candidate) => candidate.mode === 'candidate' && candidate.cwd === checkout.cwd)
+        ) {
           const pending = agentRuntimes.get(checkout.cwd);
           agentRuntimes.delete(checkout.cwd);
-          // async-iife: bootstrap -- the map holds a promise; nothing waits for the client it gives back.
-          void (async (): Promise<void> => {
-            try {
-              const client = await pending;
-              client?.terminate();
-            } catch {
-              /* A client that never connected has nothing to give back. */
-            }
-          })();
+          closeAgentRuntime(checkout.cwd, pending, () => {
+            releaseCandidateRootIfIdle(checkout.cwd);
+          });
         }
-        return super.delete(runId);
+        return deleted;
       }
     })();
+    const useRevisionFileSystem = async <Result>(
+      checkout: Readonly<{ root: string; kind: 'live' | 'linked' }>,
+      operation: (provider: NodeFsProviderClient) => Promise<Result>,
+    ): Promise<Result> => {
+      const root = checkout.kind === 'live' ? agent.workspaceRoot : checkout.root;
+      if (checkout.kind === 'linked') {
+        temporaryCandidateAdmissions.set(root, (temporaryCandidateAdmissions.get(root) ?? 0) + 1);
+        admittedRoots.add(root);
+      }
+      try {
+        return await operation(providerForAgentRoot(root));
+      } finally {
+        if (checkout.kind === 'linked') {
+          const remaining = (temporaryCandidateAdmissions.get(root) ?? 1) - 1;
+          if (remaining === 0) {
+            temporaryCandidateAdmissions.delete(root);
+            releaseCandidateRootIfIdle(root);
+          } else {
+            temporaryCandidateAdmissions.set(root, remaining);
+          }
+        }
+      }
+    };
     /* Before the tool registry, because the registry hands the agent this
      * project's read-only history (S28) — and before the launcher, because the
      * tree wraps it. */
     const revisions = createProjectRevisions({
       workspaceRoot: agent.workspaceRoot,
       checkouts,
+      filesystem: (checkout) => providerForAgentRoot(checkout.kind === 'live' ? agent.workspaceRoot : checkout.root),
+      useFileSystem: useRevisionFileSystem,
+      /* Native Git derives the physical worktree target before this callback.
+       * Claiming its existing parent plus the absent/existing target excludes
+       * ordinary candidate writes; Git keeps its own repository metadata
+       * ordered with the same command while this daemon holds the writer. */
+      checkoutMutation: async (target, mutation) =>
+        authority.run({ root: target.parentRoot, paths: [target.targetPath] }, async () => mutation()),
       /* AC15: the person this machine belongs to, as Git already knows them —
        * a daemon serves one machine, and `tau-host` in a clone's `git log` is
        * an opaque id nobody outside Tau can read. */
@@ -579,6 +722,7 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
       /* Per root, not per host: a candidate turn's kernel must read the tree
        * that turn is writing, which is its checkout and not the project. */
       runtimeClient: async (root) => ensureAgentRuntime(root),
+      filesystem: (root) => providerForAgentRoot(root),
       /* The host's own decision, not a resolution accident: `false` withholds
        * `test_model` from an installation whose GeoSpec engine resolves. */
       geospecRunner: agent.testModel === false ? false : undefined,
@@ -676,22 +820,43 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
     resolveReady();
   };
 
-  /** Stop the channel first, then the runs: a client must never outlive its host. */
+  /** Stop admission, settle the runs, then release their shared filesystem authority. */
   const stopAgent = async (): Promise<void> => {
     const server = agentServer;
     const launcher = agentLauncher;
     const mcp = agentMcp;
+    const filesystem = agentFileSystem;
     agentRunReporter?.close();
     agentRunReporter = undefined;
     agentServer = undefined;
     agentLauncher = undefined;
     agentMcp = undefined;
     agentExternalAgents = [];
-    await server?.close();
-    await launcher?.close();
-    await mcp?.close();
+    const failures: unknown[] = [];
+    const settle = async (operation: Promise<unknown> | undefined): Promise<void> => {
+      try {
+        await operation;
+      } catch (error) {
+        failures.push(error);
+      }
+    };
+    await settle(server?.close());
+    await settle(launcher?.close());
+    for (const [root, pending] of agentRuntimes) {
+      closeAgentRuntime(root, pending);
+    }
+    agentRuntimes.clear();
+    await Promise.all([...agentRuntimeClosures.values()].flatMap((closures) => [...closures]));
+    failures.push(...agentRuntimeCloseFailures.splice(0));
+    await settle(mcp?.close());
+    agentFileSystem = undefined;
+    filesystem?.channel.close();
+    await settle(filesystem?.stopServer());
     if (server) {
       emit({ type: 'agent', state: 'stopped' });
+    }
+    if (failures.length > 0) {
+      throw new AggregateError(failures, 'Tau Host could not release every agent resource.');
     }
   };
 
@@ -1084,7 +1249,8 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
         });
       }
       try {
-        if (child) {
+        // oxlint-disable-next-line typescript/no-unnecessary-condition -- close can abort while ensureRuntimeChild awaits.
+        if (child && !shutdown.signal.aborted) {
           // oxlint-disable-next-line no-await-in-loop -- one control connection owns the current attempt.
           await runControlConnection(credential, child);
           reconnectAttempt = 0;
@@ -1141,12 +1307,28 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
       activeControlSocket?.terminate();
     }
     closeSessions('RELAY_CLOSED');
-    await Promise.all([...sessions.values()].map(async (session) => session.closed));
-    await stopAgent();
-    await stopJobWorker();
-    await jobWorkerObserver;
-    await runtimeChild?.close();
-    await childObserver;
+    const cleanupFailures: unknown[] = [];
+    const settleCleanup = async (operation: Promise<unknown> | undefined): Promise<void> => {
+      try {
+        await operation;
+      } catch (error) {
+        cleanupFailures.push(error);
+      }
+    };
+    await settleCleanup(Promise.all([...sessions.values()].map(async (session) => session.closed)));
+    await settleCleanup(stopAgent());
+    await settleCleanup(stopJobWorker());
+    await settleCleanup(jobWorkerObserver);
+    await settleCleanup(runtimeChild?.close());
+    await settleCleanup(childObserver);
+    if (cleanupFailures.length > 0) {
+      const cleanupError = new AggregateError(
+        result.cause === 'fatal' ? [result.error, ...cleanupFailures] : cleanupFailures,
+        'Tau Host shutdown did not release every accepted resource.',
+      );
+      result = { cause: 'fatal', error: cleanupError };
+      ready.reject(cleanupError);
+    }
     closed.resolve(result);
     return result;
   };

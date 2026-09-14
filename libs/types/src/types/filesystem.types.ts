@@ -13,6 +13,30 @@ import type { filesystemBackends } from '#constants/filesystem.constants.js';
  */
 export type FileSystemBackend = (typeof filesystemBackends)[number];
 
+/** One byte precondition for a checked whole-file replacement. `null` requires absence. @public */
+export type FileWritePrecondition = Readonly<{
+  path: string;
+  // oxlint-disable-next-line typescript/no-restricted-types -- `null` is the explicit wire-safe absent-file sentinel.
+  expected: Uint8Array<ArrayBuffer> | string | null;
+}>;
+
+/** Input for one checked whole-file replacement. @public */
+export type CheckedFileWrite = Readonly<{
+  path: string;
+  data: Uint8Array<ArrayBuffer> | string;
+  preconditions: readonly FileWritePrecondition[];
+  signal?: AbortSignal;
+}>;
+
+/** Result of a checked whole-file replacement. @public */
+export type CheckedFileWriteResult =
+  | Readonly<{ status: 'applied' | 'unchanged'; content: Uint8Array<ArrayBuffer> }>
+  | Readonly<{
+      status: 'conflict';
+      // oxlint-disable-next-line typescript/no-restricted-types -- `null` distinguishes an absent file from empty bytes.
+      conflicts: ReadonlyArray<Readonly<{ path: string; actual: Uint8Array<ArrayBuffer> | null }>>;
+    }>;
+
 /**
  * Filesystem backend configuration.
  * Used to define backend implementations with canHandle/create pattern.

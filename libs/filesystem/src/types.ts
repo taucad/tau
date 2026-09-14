@@ -9,7 +9,13 @@
  * - FileTreeNode: tree representation for /files route
  */
 
-import type { FileContentMetadata, FileProvenance, FileStat } from '@taucad/types';
+import type {
+  CheckedFileWrite,
+  CheckedFileWriteResult,
+  FileContentMetadata,
+  FileProvenance,
+  FileStat,
+} from '@taucad/types';
 
 // oxlint-disable-next-line no-barrel-files/no-barrel-files -- re-export for internal consumers that import from #types.js
 export type { ChangeEvent, FileStat, FileStatEntry } from '@taucad/types';
@@ -50,6 +56,8 @@ export type FileSystemProvider = {
   readFile(path: string, encoding: 'utf8'): Promise<string>;
   /** Persist a file, creating any missing parent directories. */
   writeFile(path: string, data: Uint8Array<ArrayBuffer> | string): Promise<void>;
+  /** Atomically check current bytes and replace one file when this provider owns a real authority fence. */
+  writeFileChecked?(input: Omit<CheckedFileWrite, 'signal'>): Promise<CheckedFileWriteResult>;
   /** Append bytes in enqueue order, creating the file and missing parent directories when absent. */
   appendFile?(path: string, data: Uint8Array<ArrayBuffer> | string): Promise<void>;
   readdir(path: string): Promise<string[]>;

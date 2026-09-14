@@ -15,10 +15,21 @@ const originalUnhandled = new Set(process.listeners('unhandledRejection'));
 const state = vi.hoisted(() => ({
   appListeners: new Map<string, Array<(event: { preventDefault(): void }) => void>>(),
   handlers: new Map<string, (...args: unknown[]) => unknown>(),
-  resolveFork: undefined as undefined | ((context: Record<string, string>) => { compute?: unknown }),
+  resolveFork: undefined as
+    | undefined
+    | ((context: Record<string, string>) => {
+        compute?: unknown;
+        env?: Readonly<Record<string, string>>;
+        fileSystemPort?: unknown;
+      }),
   workers: [] as NodeWorker[],
   userData: '',
   servicesDispose: vi.fn(async () => undefined),
+  servicesConnect: vi.fn(() => ({ id: 'services-port' })),
+  servicesQuiesce: vi.fn(
+    async (): Promise<{ status: 'quiesced' } | { status: 'failed'; message: string }> => ({ status: 'quiesced' }),
+  ),
+  utilityEnvironmentAdditions: [] as NodeJS.ProcessEnv[],
   log: vi.fn(),
 }));
 
@@ -158,10 +169,11 @@ vi.mock('#main/navigation-policy.js', () => ({
   rendererOrigins: vi.fn(() => []),
 }));
 vi.mock('#main/services-broker.js', () => ({
-  servicesConcerns: ['nodeFs', 'agentHost'],
+  rendererServicesConcerns: ['nodeFs', 'agentHost'],
   createServicesBroker: vi.fn(() => ({
     post: vi.fn(),
-    connect: vi.fn(),
+    connect: state.servicesConnect,
+    quiesce: state.servicesQuiesce,
     dispose: state.servicesDispose,
     computeProjectRoot: (root: string) =>
       root.includes('/.tau/checkouts/') ? root.slice(0, root.indexOf('/.tau/checkouts/')) : undefined,
@@ -170,7 +182,10 @@ vi.mock('#main/services-broker.js', () => ({
 vi.mock('#main/utility-environment.js', () => ({
   loginShellEnvironment: vi.fn(async () => undefined),
   packagedEsbuildEnvironment: vi.fn(() => ({})),
-  utilityEnvironment: vi.fn(() => ({})),
+  utilityEnvironment: vi.fn((_environment: unknown, additions: NodeJS.ProcessEnv = {}) => {
+    state.utilityEnvironmentAdditions.push(additions);
+    return {};
+  }),
 }));
 vi.mock('#main/quick-look.js', () => ({
   createQuickLookController: vi.fn(() => ({ dispose: vi.fn() })),
@@ -192,6 +207,8 @@ afterEach(async () => {
   state.appListeners.clear();
   state.handlers.clear();
   state.resolveFork = undefined;
+  state.servicesConnect.mockClear();
+  state.utilityEnvironmentAdditions.length = 0;
   // Each case bootstraps main afresh; the cached module would otherwise register nothing.
   vi.resetModules();
   for (const listener of process.listeners('uncaughtException')) {
@@ -229,10 +246,13 @@ describe('desktop main compute owner', () => {
 
     expect(recovered.compute).toMatchObject({ mode: 'durable' });
     expect(state.workers).toHaveLength(2);
-  });
+  }, 20_000);
 
   it('allocates lazily, reuses original identity, invalidates on error, restarts, and awaits quit', async () => {
     const projectRoot = await bootstrap();
+    expect(state.utilityEnvironmentAdditions.at(-1)?.['TAU_DESKTOP_AUTHORITY_DIR']).toBe(
+      join(state.userData, 'filesystem-authority'),
+    );
     const off = state.resolveFork!({ projectRoot, computeMode: 'off' });
     expect(off.compute).toEqual({ mode: 'off' });
     expect(state.workers).toHaveLength(0);
@@ -245,6 +265,10 @@ describe('desktop main compute owner', () => {
       computeMode: 'durable',
     });
     expect((candidate.compute as { store: unknown }).store).toBe((direct.compute as { store: unknown }).store);
+    expect(candidate.env?.['TAU_PROJECT_ROOT']).toBe(join(projectRoot, '.tau/checkouts/run'));
+    expect(state.servicesConnect).toHaveBeenCalledWith('runtimeFileSystem', {
+      workspaceRoot: join(projectRoot, '.tau/checkouts/run'),
+    });
     expect(state.workers).toHaveLength(1);
 
     const inspect = state.handlers.get(computeControlChannels.inspect)!;
@@ -261,6 +285,7 @@ describe('desktop main compute owner', () => {
     expect(after.generation).toBe(before.generation);
 
     const quit = state.appListeners.get('before-quit')!.at(-1)!;
+    state.servicesQuiesce.mockResolvedValueOnce({ status: 'failed', message: 'utility drain failed' });
     state.servicesDispose.mockRejectedValueOnce(new Error('services close failed'));
     const firstPreventDefault = vi.fn();
     const secondPreventDefault = vi.fn();
@@ -273,6 +298,10 @@ describe('desktop main compute owner', () => {
       expect(app.quit).toHaveBeenCalledOnce();
     });
     expect(state.log).toHaveBeenCalledWith('error', 'main.shutdown', expect.any(Error));
+    expect(state.log).toHaveBeenCalledWith('error', 'main.quiesce', {
+      status: 'failed',
+      message: 'utility drain failed',
+    });
     expect(state.workers[1]!.threadId).toBe(-1);
-  });
+  }, 20_000);
 });

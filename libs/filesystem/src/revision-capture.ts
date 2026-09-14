@@ -10,8 +10,11 @@
 
 import { assertRootedPath, joinRelativePath } from '@taucad/utils/path';
 import { bufferToStream } from '#backend/stream-utils.js';
-import type { RootedFileSystem } from '#workspace-file-service.js';
+import type { FileSystemProvider } from '#types.js';
 import { ImmutableRevisionTree } from '#revision-tree.js';
+
+/** Read capabilities required to capture one immutable revision tree. @public */
+export type RevisionCaptureFileSystem = Pick<FileSystemProvider, 'readFile' | 'readFileStream' | 'readdir' | 'stat'>;
 
 const isNotFoundError = (error: unknown): boolean =>
   typeof error === 'object' &&
@@ -60,7 +63,7 @@ const captureAbortError = (signal: AbortSignal): unknown =>
  * @public
  */
 export const captureRevisionTree = async (
-  filesystem: RootedFileSystem,
+  filesystem: RevisionCaptureFileSystem,
   options?: CaptureRevisionTreeOptions,
 ): Promise<ImmutableRevisionTree> => {
   const concurrency = assertCaptureLimit(options?.concurrency ?? defaultCaptureConcurrency, 'concurrency', 256);

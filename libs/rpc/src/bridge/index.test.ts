@@ -71,6 +71,182 @@ describe('@taucad/rpc/bridge', () => {
     client.dispose();
   });
 
+  it('keeps watch readiness pending until asynchronous registration settles and preserves queued event order', async () => {
+    const channel = new MessageChannel();
+    let finishRegistration!: (unsubscribe: () => void) => void;
+    const registration = new Promise<() => void>((resolve) => {
+      finishRegistration = resolve;
+    });
+    let emit!: (event: { path: string }) => void;
+    const unsubscribe = vi.fn();
+    createBridgeServer(
+      {
+        async watch(_request: unknown, handler: (event: { path: string }) => void): Promise<() => void> {
+          emit = handler;
+          return registration;
+        },
+      },
+      wrapBridgePort(channel.port1),
+    );
+    const client = createBridgeCall<unknown, { path: string }>(wrapBridgePort(channel.port2));
+    const events: Array<{ path: string }> = [];
+    const handle = client.watchReady({}, (event) => {
+      events.push(event);
+    });
+    await vi.waitFor(() => {
+      expect(emit).toBeTypeOf('function');
+    });
+    emit({ path: 'first' });
+    emit({ path: 'second' });
+    const pendingMarker = Symbol('pending');
+    expect(await Promise.race([handle.ready, Promise.resolve(pendingMarker)])).toBe(pendingMarker);
+    expect(events).toEqual([]);
+
+    finishRegistration(unsubscribe);
+    await handle.ready;
+    await vi.waitFor(() => {
+      expect(events).toEqual([{ path: 'first' }, { path: 'second' }]);
+    });
+
+    handle.unsubscribe();
+    await vi.waitFor(() => {
+      expect(unsubscribe).toHaveBeenCalledOnce();
+    });
+    client.dispose();
+  });
+
+  it('suppresses a late watch acknowledgement after cancellation and disposes the eventual registration once', async () => {
+    const channel = new MessageChannel();
+    let finishRegistration!: (unsubscribe: () => void) => void;
+    let emit!: (event: { path: string }) => void;
+    const unsubscribe = vi.fn();
+    createBridgeServer(
+      {
+        async watch(_request: unknown, handler: (event: { path: string }) => void): Promise<() => void> {
+          emit = handler;
+          return new Promise((resolve) => {
+            finishRegistration = resolve;
+          });
+        },
+      },
+      wrapBridgePort(channel.port1),
+    );
+    const client = createBridgeCall<unknown, { path: string }>(wrapBridgePort(channel.port2));
+    const handler = vi.fn();
+    const handle = client.watchReady({}, handler);
+
+    await vi.waitFor(() => {
+      expect(finishRegistration).toBeTypeOf('function');
+    });
+    handle.unsubscribe();
+    await expect(handle.ready).rejects.toThrow(/aborted|closed before registration/u);
+    emit({ path: 'late' });
+    finishRegistration(unsubscribe);
+
+    await vi.waitFor(() => {
+      expect(unsubscribe).toHaveBeenCalledOnce();
+    });
+    expect(handler).not.toHaveBeenCalled();
+    client.dispose();
+    expect(unsubscribe).toHaveBeenCalledOnce();
+  });
+
+  it('disposes an asynchronous watch that finishes registering after the server closes', async () => {
+    const channel = new MessageChannel();
+    let finishRegistration!: (unsubscribe: () => void) => void;
+    const unsubscribe = vi.fn();
+    const server = createBridgeServer(
+      {
+        async watch(): Promise<() => void> {
+          return new Promise((resolve) => {
+            finishRegistration = resolve;
+          });
+        },
+      },
+      wrapBridgePort(channel.port1),
+    );
+    const client = createBridgeCall(wrapBridgePort(channel.port2));
+    const handle = client.watchReady({}, vi.fn());
+
+    await vi.waitFor(() => {
+      expect(finishRegistration).toBeTypeOf('function');
+    });
+    server.dispose();
+    await expect(handle.ready).rejects.toThrow(/closed/u);
+    finishRegistration(unsubscribe);
+
+    await vi.waitFor(() => {
+      expect(unsubscribe).toHaveBeenCalledOnce();
+    });
+    client.dispose();
+    expect(unsubscribe).toHaveBeenCalledOnce();
+  });
+
+  it('cleans up rejected asynchronous registration without disturbing the next watch', async () => {
+    const channel = new MessageChannel();
+    const unsubscribe = vi.fn();
+    let attempt = 0;
+    createBridgeServer(
+      {
+        async watch(): Promise<() => void> {
+          attempt += 1;
+          if (attempt === 1) {
+            throw Object.assign(new Error('root rejected'), { code: 'EACCES' });
+          }
+          return unsubscribe;
+        },
+      },
+      wrapBridgePort(channel.port1),
+    );
+    const client = createBridgeCall(wrapBridgePort(channel.port2));
+
+    const rejected = client.watchReady({}, vi.fn());
+    await expect(rejected.ready).rejects.toMatchObject({ code: 'EACCES' });
+    const accepted = client.watchReady({}, vi.fn());
+    await accepted.ready;
+    accepted.unsubscribe();
+    await vi.waitFor(() => {
+      expect(unsubscribe).toHaveBeenCalledOnce();
+    });
+    client.dispose();
+  });
+
+  it('continues shutdown cleanup when one watch disposer throws', async () => {
+    const channel = new MessageChannel();
+    const secondUnsubscribe = vi.fn();
+    let attempt = 0;
+    const server = createBridgeServer(
+      {
+        watch(): () => void {
+          attempt += 1;
+          if (attempt === 1) {
+            return () => {
+              throw new Error('cleanup failed');
+            };
+          }
+          return secondUnsubscribe;
+        },
+      },
+      wrapBridgePort(channel.port1),
+      {
+        onDisconnect() {
+          throw new Error('disconnect observer failed');
+        },
+      },
+    );
+    const client = createBridgeCall(wrapBridgePort(channel.port2));
+    const first = client.watchReady({ path: 'first' }, vi.fn());
+    const second = client.watchReady({ path: 'second' }, vi.fn());
+    await Promise.all([first.ready, second.ready]);
+
+    server.dispose();
+
+    await vi.waitFor(() => {
+      expect(secondUnsubscribe).toHaveBeenCalledOnce();
+    });
+    client.dispose();
+  });
+
   it('should serialize thrown errors across the bridge', async () => {
     const channel = new MessageChannel();
     createBridgeServer(

@@ -20,8 +20,10 @@ import type { FSWatcher, Stats } from 'node:fs';
 import { realpathSync, statSync, watch as watchDirectory } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
+import type { CheckedFileWrite, CheckedFileWriteResult } from '@taucad/types';
 import { assertRootedPath, VirtualPathError } from '@taucad/utils/path';
 import { AbstractFileSystemProvider } from '#backend/abstract-provider.js';
+import type { NodeAuthorityWriter } from '#backend/node/authority-writer-lock.js';
 import { headSniffByteLength, seemsBinary, countLineBytes } from '#content-metadata.js';
 import type { FileReadStreamOptions, FileStat, ProviderCapabilities, WatchRequest } from '#types.js';
 import type { NodeFsWatchEvent } from '#backend/node/protocol.js';
@@ -37,6 +39,13 @@ const isContained = (base: string, target: string): boolean => {
 
 const bytesEqual = (left: Uint8Array<ArrayBuffer>, right: Uint8Array<ArrayBuffer>): boolean =>
   left.byteLength === right.byteLength && left.every((byte, index) => byte === right[index]);
+
+type AuthorityCheckedWrite = (
+  input: Omit<CheckedFileWrite, 'signal'>,
+  assertCurrent: () => Promise<void>,
+) => Promise<CheckedFileWriteResult>;
+
+const authorityCheckedWrites = new WeakMap<NodeFsProvider, AuthorityCheckedWrite>();
 
 /**
  * Normalize an `fs.watch` filename. Node types it as non-nullable, but the OS
@@ -88,6 +97,7 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
   public constructor(basePath: string) {
     super();
     this._base = path.resolve(basePath);
+    authorityCheckedWrites.set(this, async (input, assertCurrent) => this.#writeFileChecked(input, assertCurrent));
   }
 
   /**
@@ -125,7 +135,15 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
     }
     // Every other provider creates missing parents on write; `fromNodeFs` waives it.
     await fs.mkdir(path.dirname(target), { recursive: true });
-    await this._atomicWrite(path_, target, data);
+    await this._atomicWrite(path_, target, { data });
+  }
+
+  /** Direct providers do not own the cross-client authority needed for checked replacement. */
+  public async writeFileChecked(_input: CheckedFileWrite): Promise<CheckedFileWriteResult> {
+    throw Object.assign(new Error('Checked writes require a node filesystem authority owner.'), {
+      code: 'CHECKED_WRITE_UNSUPPORTED',
+      applicationState: 'known-not-applied',
+    });
   }
 
   public async readdir(path_: string): Promise<string[]> {
@@ -477,6 +495,19 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
     }
   }
 
+  // oxlint-disable-next-line typescript/no-restricted-types -- `null` is the public checked-write absence sentinel.
+  private async _readFileOrAbsent(path_: string): Promise<Uint8Array<ArrayBuffer> | null> {
+    try {
+      return await this.readFile(path_);
+    } catch (error) {
+      const { code } = error as NodeJS.ErrnoException;
+      if (code === 'ENOENT' || code === 'ENOTDIR') {
+        return null;
+      }
+      throw error;
+    }
+  }
+
   /** Sniff the head only; read in full solely to count lines of a text file. */
   private async _contentMetadata(
     absolute: string,
@@ -539,8 +570,9 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
   private async _atomicWrite(
     rootedPath: string,
     targetPath: string,
-    data: Uint8Array<ArrayBuffer> | string,
+    options: { data: Uint8Array<ArrayBuffer> | string; beforeReplace?: () => Promise<void> },
   ): Promise<void> {
+    const { data, beforeReplace } = options;
     const realBase = await this._realBase;
     const admittedDirectory = await fs.realpath(path.dirname(targetPath));
     if (!isContained(realBase, admittedDirectory)) {
@@ -558,6 +590,8 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
     }
     const existingMode = existing === undefined ? undefined : existing.mode % 0o1000;
 
+    let replaced = false;
+    let failure: unknown;
     try {
       const handle = await fs.open(temporaryPath, 'wx', existingMode ?? 0o666);
       try {
@@ -579,7 +613,9 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
         throw this._errno('ELOOP', 'refusing to replace symbolic link', rootedPath);
       }
 
+      await beforeReplace?.();
       await fs.rename(temporaryPath, admittedTarget);
+      replaced = true;
       const directoryHandle = await fs.open(admittedDirectory, 'r');
       try {
         await directoryHandle.sync();
@@ -591,12 +627,105 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
       if (!bytesEqual(committed, bytes)) {
         throw this._errno('WRITE_VERIFICATION_FAILED', 'committed bytes could not be verified', rootedPath);
       }
-    } finally {
-      await fs.unlink(temporaryPath).catch((error: unknown) => {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-          throw error;
-        }
-      });
+    } catch (error) {
+      failure = error;
+    }
+    try {
+      await fs.unlink(temporaryPath);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT' && failure === undefined) {
+        failure = error;
+      }
+    }
+    if (failure !== undefined) {
+      if (replaced && (failure as NodeJS.ErrnoException).code !== 'CHECKED_WRITE_POTENTIALLY_APPLIED') {
+        throw Object.assign(new Error('Checked write may have been applied.', { cause: failure }), {
+          code: 'CHECKED_WRITE_POTENTIALLY_APPLIED',
+        });
+      }
+      throw failure instanceof Error ? failure : new Error('Filesystem write failed with a non-Error rejection.');
     }
   }
+
+  /** Compare all expected bytes and replace one file inside the module-owned authority integration. */
+  readonly #writeFileChecked: AuthorityCheckedWrite = async (input, assertCurrent) => {
+    try {
+      this._assertRootedPath(input.path);
+      // oxlint-disable-next-line typescript/no-restricted-types -- `null` is the public checked-write absence sentinel.
+      const expectedByPath = new Map<string, Uint8Array<ArrayBuffer> | null>();
+      for (const precondition of input.preconditions) {
+        this._assertRootedPath(precondition.path);
+        const expected =
+          precondition.expected === null
+            ? null
+            : typeof precondition.expected === 'string'
+              ? new TextEncoder().encode(precondition.expected)
+              : new Uint8Array(precondition.expected);
+        const previous = expectedByPath.get(precondition.path);
+        if (
+          expectedByPath.has(precondition.path) &&
+          (previous === null ? expected !== null : expected === null || !bytesEqual(previous!, expected))
+        ) {
+          throw new TypeError(`Checked write aliases disagree for '${precondition.path}'.`);
+        }
+        expectedByPath.set(precondition.path, expected);
+      }
+      if (!expectedByPath.has(input.path)) {
+        throw new TypeError('Checked writes require a destination precondition.');
+      }
+      await assertCurrent();
+      const compared = await Promise.all(
+        [...expectedByPath].map(async ([candidatePath, expected]) => {
+          const actual = await this._readFileOrAbsent(candidatePath);
+          if (actual === null ? expected !== null : expected === null || !bytesEqual(actual, expected)) {
+            return { path: candidatePath, actual };
+          }
+          return undefined;
+        }),
+      );
+      const conflicts = compared.filter((conflict) => conflict !== undefined);
+      if (conflicts.length > 0) {
+        return { status: 'conflict', conflicts };
+      }
+      const bytes = typeof input.data === 'string' ? new TextEncoder().encode(input.data) : new Uint8Array(input.data);
+      const current = await this._readFileOrAbsent(input.path);
+      if (current !== null && bytesEqual(current, bytes)) {
+        return { status: 'unchanged', content: current };
+      }
+      const target = await this._resolve(input.path);
+      const existingEntry = await this._lstatOrUndefined(target);
+      if (existingEntry?.isDirectory() === true) {
+        throw this._eisdir(input.path);
+      }
+      await fs.mkdir(path.dirname(target), { recursive: true });
+      await this._atomicWrite(input.path, target, { data: bytes, beforeReplace: assertCurrent });
+      return { status: 'applied', content: bytes };
+    } catch (error) {
+      if ((error as { applicationState?: unknown }).applicationState !== undefined) {
+        throw error;
+      }
+      throw Object.assign(error instanceof Error ? error : new Error(String(error)), {
+        applicationState:
+          (error as NodeJS.ErrnoException | undefined)?.code === 'CHECKED_WRITE_POTENTIALLY_APPLIED'
+            ? 'potentially-applied'
+            : 'known-not-applied',
+      });
+    }
+  };
 }
+
+/** Execute checked replacement through the package-private Node authority integration. @internal */
+export const writeNodeFileCheckedWithAuthority = async (
+  provider: NodeFsProvider,
+  input: Omit<CheckedFileWrite, 'signal'>,
+  writer: NodeAuthorityWriter,
+): Promise<CheckedFileWriteResult> => {
+  const writeChecked = authorityCheckedWrites.get(provider);
+  if (writeChecked === undefined) {
+    throw Object.assign(new Error('Node filesystem provider has no checked-write implementation.'), {
+      code: 'CHECKED_WRITE_UNSUPPORTED',
+      applicationState: 'known-not-applied',
+    });
+  }
+  return writeChecked(input, async () => writer.assertCurrent());
+};

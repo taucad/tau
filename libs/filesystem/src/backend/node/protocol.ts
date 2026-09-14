@@ -10,10 +10,11 @@
  */
 
 import { z } from 'zod';
-import type { FileStat } from '#types.js';
+import type { CheckedFileWriteResult, FileStat } from '@taucad/types';
+import { assertRootedPath } from '@taucad/utils/path';
 
 /** Wire version. Bump on any incompatible request/response shape change. @public */
-export const nodeFsProtocolVersion = 1;
+export const nodeFsProtocolVersion = 2;
 
 /**
  * Watch event as it crosses the port. A superset of the library's
@@ -45,6 +46,18 @@ export class NodeFsProtocolVersionError extends Error {
 
 const bytesSchema = z.instanceof(Uint8Array);
 const dataSchema = z.union([bytesSchema, z.string()]);
+const maximumCheckedWritePreconditions = 32;
+const maximumCheckedWriteBytes = 8 * 1024 * 1024;
+const rootedPathSchema = z
+  .string()
+  .max(4096)
+  .refine((value) => {
+    try {
+      return assertRootedPath(value) === value;
+    } catch {
+      return false;
+    }
+  });
 
 const watchRequestSchema = z.object({
   paths: z.array(z.string()),
@@ -54,10 +67,39 @@ const watchRequestSchema = z.object({
 
 const versioned = { v: z.literal(nodeFsProtocolVersion), id: z.number().int() };
 const rooted = { ...versioned, root: z.string() };
+const checkedWriteRequestSchema = z
+  .object({
+    ...rooted,
+    op: z.literal('writeFileChecked'),
+    path: rootedPathSchema,
+    data: dataSchema,
+    preconditions: z
+      .array(z.object({ path: rootedPathSchema, expected: dataSchema.nullable() }))
+      .min(1)
+      .max(maximumCheckedWritePreconditions),
+  })
+  .refine(
+    (request) =>
+      [request.data, ...request.preconditions.map(({ expected }) => expected)].reduce(
+        (total, value) =>
+          total +
+          (value === null
+            ? 0
+            : typeof value === 'string'
+              ? new TextEncoder().encode(value).byteLength
+              : value.byteLength),
+        0,
+      ) <= maximumCheckedWriteBytes,
+    { message: 'Checked write request exceeds its byte budget.' },
+  )
+  .refine((request) => request.preconditions.some(({ path }) => path === request.path), {
+    message: 'Checked writes require a destination precondition.',
+  });
 
 export const nodeFsRequestSchema = z.discriminatedUnion('op', [
   z.object({ ...rooted, op: z.literal('readFile'), path: z.string() }),
   z.object({ ...rooted, op: z.literal('writeFile'), path: z.string(), data: dataSchema }),
+  checkedWriteRequestSchema,
   z.object({ ...rooted, op: z.literal('readdir'), path: z.string() }),
   z.object({ ...rooted, op: z.literal('stat'), path: z.string() }),
   z.object({ ...rooted, op: z.literal('mkdir'), path: z.string() }),
@@ -94,9 +136,23 @@ const watchEventSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('reset') }),
 ]) as z.ZodType<NodeFsWatchEvent>;
 
+const checkedWriteResultSchema = z.discriminatedUnion('status', [
+  z.object({ status: z.enum(['applied', 'unchanged']), content: bytesSchema }),
+  z.object({
+    status: z.literal('conflict'),
+    conflicts: z.array(z.object({ path: z.string(), actual: bytesSchema.nullable() })),
+  }),
+]) as z.ZodType<CheckedFileWriteResult>;
+
 export const nodeFsResponseSchema = z.discriminatedUnion('type', [
   z.object({ ...versioned, type: z.literal('result'), value: z.unknown() }),
-  z.object({ ...versioned, type: z.literal('error'), message: z.string(), code: z.string().optional() }),
+  z.object({
+    ...versioned,
+    type: z.literal('error'),
+    message: z.string(),
+    code: z.string().optional(),
+    applicationState: z.enum(['known-not-applied', 'potentially-applied']).optional(),
+  }),
   z.object({ ...versioned, type: z.literal('watch'), event: watchEventSchema }),
 ]);
 
@@ -107,6 +163,7 @@ export type NodeFsResponse = z.infer<typeof nodeFsResponseSchema>;
 export const nodeFsResultSchemas = {
   readFile: bytesSchema,
   writeFile: z.undefined(),
+  writeFileChecked: checkedWriteResultSchema,
   readdir: z.array(z.string()),
   stat: fileStatSchema,
   mkdir: z.undefined(),

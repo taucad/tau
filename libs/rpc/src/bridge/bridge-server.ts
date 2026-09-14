@@ -60,7 +60,7 @@ export function createBridgeServer<
   const broadcastQueues = new Set<PushQueue<BroadcastFrame>>();
   const broadcastBuffer: BroadcastFrame[] = [];
   const broadcastBufferLimit = 32;
-  const watchUnsubs = new Map<string, () => void>();
+  const watchRegistrations = new Map<string, { cancel(): void; isCancelled(): boolean }>();
   let watchIdCounter = 0;
 
   const dispatchHandler = async (name: string, args: unknown[]): Promise<unknown> => {
@@ -139,29 +139,55 @@ export function createBridgeServer<
       return;
     }
     const watchFunction = (handlers as Record<string, unknown>)['watch'] as
-      | ((watchRequest: WatchRequestPayload, handler: (event: WatchEventPayload) => void) => () => void)
+      | ((
+          watchRequest: WatchRequestPayload,
+          handler: (event: WatchEventPayload) => void,
+        ) => (() => void) | Promise<() => void>)
       | undefined;
     if (!watchFunction) {
       throw new Error('Bridge handlers do not implement watch()');
     }
 
     const watchId = `w_${watchIdCounter++}`;
-    options?.onWatch?.(watchId, request);
     const queue = createPushQueue<WatchEventPayload>();
-    const unsubscribe = watchFunction.call(handlers, request, (event: WatchEventPayload) => {
-      queue.push(event);
-    });
-    watchUnsubs.set(watchId, unsubscribe);
-    yield { [bridgeWatchReadyMarker]: true };
-
+    let unsubscribe: (() => void) | undefined;
+    let cancelled = false;
+    let unwatchNotified = false;
+    const registration = {
+      isCancelled(): boolean {
+        return cancelled;
+      },
+      cancel(): void {
+        if (cancelled) {
+          return;
+        }
+        cancelled = true;
+        if (watchRegistrations.get(watchId) === registration) {
+          watchRegistrations.delete(watchId);
+        }
+        const settledUnsubscribe = unsubscribe;
+        unsubscribe = undefined;
+        try {
+          settledUnsubscribe?.();
+        } catch {
+          // A failing disposer must not escape an AbortSignal listener.
+        } finally {
+          try {
+            if (!unwatchNotified) {
+              unwatchNotified = true;
+              options?.onUnwatch?.(watchId);
+            }
+          } catch {
+            // Observer cleanup cannot retain the watch queue.
+          } finally {
+            queue.close();
+          }
+        }
+      },
+    };
+    watchRegistrations.set(watchId, registration);
     const cleanup = (): void => {
-      const u = watchUnsubs.get(watchId);
-      if (u) {
-        u();
-        watchUnsubs.delete(watchId);
-      }
-      options?.onUnwatch?.(watchId);
-      queue.close();
+      registration.cancel();
     };
     if (signal) {
       if (signal.aborted) {
@@ -170,8 +196,23 @@ export function createBridgeServer<
         signal.addEventListener('abort', cleanup, { once: true });
       }
     }
+    if (registration.isCancelled()) {
+      return;
+    }
 
     try {
+      options?.onWatch?.(watchId, request);
+      const settledUnsubscribe = await watchFunction.call(handlers, request, (event: WatchEventPayload) => {
+        if (!registration.isCancelled()) {
+          queue.push(event);
+        }
+      });
+      if (registration.isCancelled()) {
+        settledUnsubscribe();
+        return;
+      }
+      unsubscribe = settledUnsubscribe;
+      yield { [bridgeWatchReadyMarker]: true };
       for await (const event of queue.iterable) {
         yield wrapAsTransferables<WatchEventPayload>(event);
       }
@@ -190,15 +231,23 @@ export function createBridgeServer<
     } catch {
       // Channel close errors are not actionable here.
     }
-    options?.onDisconnect?.();
+    try {
+      options?.onDisconnect?.();
+    } catch {
+      // A disconnect observer cannot prevent owned bridge cleanup.
+    }
     for (const queue of broadcastQueues) {
       queue.close();
     }
     broadcastQueues.clear();
-    for (const unsub of watchUnsubs.values()) {
-      unsub();
+    for (const registration of watchRegistrations.values()) {
+      try {
+        registration.cancel();
+      } catch {
+        // One failing disposer must not retain the remaining registrations.
+      }
     }
-    watchUnsubs.clear();
+    watchRegistrations.clear();
   })();
 
   function emit(eventName: string, eventData: unknown): void {

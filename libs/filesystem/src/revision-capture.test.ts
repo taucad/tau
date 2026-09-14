@@ -9,7 +9,7 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import { captureRevisionTree } from '#revision-capture.js';
-import type { RootedFileSystem } from '#workspace-file-service.js';
+import type { RevisionCaptureFileSystem } from '#revision-capture.js';
 import type { FileStat } from '#types.js';
 
 /**
@@ -21,12 +21,10 @@ import type { FileStat } from '#types.js';
 const vanishingFileSystem = (
   entries: Readonly<Record<string, readonly string[] | string>>,
   missing: ReadonlySet<string>,
-): RootedFileSystem => {
+): RevisionCaptureFileSystem => {
   const enoent = (path: string): Error => Object.assign(new Error(`ENOENT: ${path}`), { code: 'ENOENT' });
   const encoder = new TextEncoder();
   return {
-    id: 'vanishing',
-    capabilities: { persistent: false, writable: true, quotaBased: false, durability: 'ephemeral' },
     readFile: (async (path: string) => {
       if (missing.has(path)) {
         throw enoent(path);
@@ -36,7 +34,7 @@ const vanishingFileSystem = (
         throw enoent(path);
       }
       return encoder.encode(value);
-    }) as RootedFileSystem['readFile'],
+    }) as RevisionCaptureFileSystem['readFile'],
     readFileStream: (path: string) =>
       new ReadableStream<Uint8Array<ArrayBuffer>>({
         start(controller) {
@@ -73,7 +71,7 @@ const vanishingFileSystem = (
         ? { type: 'file', size: value.length, mtimeMs: 0, contentKind: 'text', lineCount: 1 }
         : { type: 'dir', size: 0, mtimeMs: 0 };
     },
-  } as unknown as RootedFileSystem;
+  };
 };
 
 describe('captureRevisionTree', () => {
@@ -101,7 +99,7 @@ describe('captureRevisionTree', () => {
     );
 
     // `stat` resolves before the sweep removes the directory, `readdir` does not.
-    const racing: RootedFileSystem = {
+    const racing: RevisionCaptureFileSystem = {
       ...filesystem,
       stat: async (path) => (path === 'run_a' ? { type: 'dir', size: 0, mtimeMs: 0 } : filesystem.stat(path)),
     };
@@ -133,7 +131,7 @@ describe('captureRevisionTree', () => {
   it('captures a rooted view that has no streaming read by buffering each file', async () => {
     // The browser's `createClientRootedFileSystem` wraps a `FileSystemClient`
     // with no streaming read; requiring one failed every browser-placed chat.
-    const filesystem: RootedFileSystem = {
+    const filesystem: RevisionCaptureFileSystem = {
       ...vanishingFileSystem(
         { '': ['main.ts', 'nested'], 'main.ts': 'kept', nested: ['keep.txt'], 'nested/keep.txt': 'nested kept' },
         new Set(),

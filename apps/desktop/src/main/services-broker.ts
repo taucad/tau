@@ -8,6 +8,7 @@
  * multiplexer, so a wedged filesystem stream cannot stall an agent run.
  */
 
+import { realpathSync } from 'node:fs';
 import { resolve, sep } from 'node:path';
 
 import type { MessageChannelMain, MessagePortMain, UtilityProcess } from 'electron';
@@ -107,6 +108,15 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
   const runtimeLeaseClosures = new Map<string, Promise<void>>();
   let utility: UtilityProcess | undefined;
 
+  const canonicalRoot = (root: string): string => {
+    const absolute = resolve(root);
+    try {
+      return realpathSync.native(absolute);
+    } catch {
+      return absolute;
+    }
+  };
+
   const releaseRuntimeLeases = (): void => {
     for (const lease of runtimeLeases.values()) {
       lease.dispose();
@@ -147,8 +157,8 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
     if (typeof workspaceRoot !== 'string' || typeof projectRoot !== 'string') {
       return;
     }
-    const canonicalWorkspaceRoot = resolve(workspaceRoot);
-    const canonicalProjectRoot = resolve(projectRoot);
+    const canonicalWorkspaceRoot = canonicalRoot(workspaceRoot);
+    const canonicalProjectRoot = canonicalRoot(projectRoot);
     if (type === 'runtime-context-release') {
       if (checkoutContexts.delete(canonicalWorkspaceRoot)) {
         runtimeContexts.delete(canonicalWorkspaceRoot);
@@ -205,7 +215,7 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
     ) {
       return;
     }
-    const context = runtimeContexts.get(resolve(workspaceRoot));
+    const context = runtimeContexts.get(canonicalRoot(workspaceRoot));
     if (!context || utility !== spawned) {
       spawned.postMessage({ type: 'runtime-port-refused', requestId });
       return;
@@ -273,7 +283,7 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
   return {
     connect(concern, context) {
       if (concern === 'agentHost' && context?.['workspaceRoot']) {
-        const projectRoot = resolve(context['workspaceRoot']);
+        const projectRoot = canonicalRoot(context['workspaceRoot']);
         runtimeContexts.set(projectRoot, {
           projectRoot,
           computeProjectRoot: projectRoot,
@@ -297,7 +307,7 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
       utility?.postMessage(message);
     },
     computeProjectRoot(executionRoot) {
-      return runtimeContexts.get(resolve(executionRoot))?.['computeProjectRoot'];
+      return runtimeContexts.get(canonicalRoot(executionRoot))?.['computeProjectRoot'];
     },
     async quiesce(boundMilliseconds) {
       const spawned = utility;

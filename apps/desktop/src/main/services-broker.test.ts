@@ -1,4 +1,7 @@
 /* eslint-disable @typescript-eslint/naming-convention -- environment names are SCREAMING_SNAKE */
+import { mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 
 import { createServicesBroker } from '#main/services-broker.js';
@@ -124,6 +127,27 @@ describe('createServicesBroker', () => {
       computeMode: 'durable',
       definition: 'default',
     });
+  });
+
+  it('should mint a runtime port when the execution root uses a symlink spelling', () => {
+    const canonical = mkdtempSync(join(tmpdir(), 'tau-services-root-'));
+    const alias = `${canonical}-alias`;
+    symlinkSync(canonical, alias, process.platform === 'win32' ? 'junction' : 'dir');
+    try {
+      const { broker, connectRuntime, spawns } = brokerHarness();
+      broker.connect('agentHost', { workspaceRoot: alias });
+      spawns[0]?.message({ type: 'runtime-port-request', requestId: 'runtime-1', workspaceRoot: alias });
+
+      expect(connectRuntime).toHaveBeenCalledExactlyOnceWith({
+        projectRoot: realpathSync.native(canonical),
+        computeProjectRoot: realpathSync.native(canonical),
+        computeMode: 'off',
+        definition: 'default',
+      });
+    } finally {
+      rmSync(alias, { force: true });
+      rmSync(canonical, { force: true, recursive: true });
+    }
   });
 
   it('retains one original identity across candidates while keeping projects separate', () => {

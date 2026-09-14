@@ -262,8 +262,8 @@ describe.skipIf(!liveEnabled)('a live ACP turn', () => {
       expect(toolMessages.some((message) => message.role === 'tool-input')).toBe(true);
       expect(toolMessages.some((message) => message.role === 'tool-output')).toBe(true);
       const liveTypes = live.map(({ event }) => event.type);
-      expect(liveTypes).toContain('tool-input-start');
-      expect(liveTypes).toContain('tool-input-end');
+      expect(liveTypes).not.toContain('tool-input-start');
+      expect(liveTypes).not.toContain('tool-input-end');
       expect(liveTypes.some((type) => type === 'thinking-delta' || type === 'text-delta')).toBe(true);
 
       /* The selection is durable: a replay reader can say which adapter

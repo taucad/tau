@@ -10,32 +10,51 @@
  * appears at `in_progress`, and reasoning.
  */
 
+import { randomUUID } from 'node:crypto';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import { describe, expect, it } from 'vitest';
 
 import type { SessionUpdate } from '@agentclientprotocol/sdk';
 import type { ExternalAgentLogEvent } from '@taucad/agent-host/node-launcher';
-import type { ProviderMessage } from '@taucad/agent-host';
+import { reduceEventLog } from '@taucad/agent-host';
+import type { AgentLogEvent, ProviderMessage } from '@taucad/agent-host';
 
-import { chooseOption, createTurnProjection } from '#acp/session.js';
+import { chooseOption, createTurnProjection, openAcpSession } from '#acp/session.js';
 import type { AcpPromptTurn } from '#acp/session.js';
+import type { AcpAdapter } from '#acp/registry.js';
 
 type MessageOf<Role extends ProviderMessage['role']> = Extract<ProviderMessage, { role: Role }>;
 
+const stubTurn = (appended: ExternalAgentLogEvent[] = []): AcpPromptTurn => ({
+  append: async (events) => {
+    appended.push(...events);
+  },
+  approve: async () => ({ interruptId: 'unused', outcome: 'cancelled' }),
+  publishLive: async () => undefined,
+  signal: new AbortController().signal,
+});
+
 // oxlint-disable-next-line eslint/max-params -- Keeps table-driven projection cases terse without a fixture-options wrapper.
-const project = async (
+const projectEvents = async (
   updates: readonly SessionUpdate[],
   agentId = 'codex',
   report?: Parameters<ReturnType<typeof createTurnProjection>['report']>[0],
   tauMcpServerName?: string,
-): Promise<ProviderMessage[]> => {
+): Promise<{ readonly appended: ExternalAgentLogEvent[]; readonly live: Array<Record<string, unknown>> }> => {
   const appended: ExternalAgentLogEvent[] = [];
+  const live: Array<Record<string, unknown>> = [];
   let nextId = 0;
   const turn: AcpPromptTurn = {
     append: async (events) => {
       appended.push(...events);
     },
     approve: async () => ({ interruptId: 'unused', outcome: 'cancelled' }),
-    publishLive: async () => undefined,
+    publishLive: async (event) => {
+      live.push(event);
+    },
     signal: new AbortController().signal,
   };
   const createId = (): string => {
@@ -55,7 +74,32 @@ const project = async (
     projection.report(report);
   }
   await projection.flush();
-  return appended.flatMap((event) => (event.type === 'message.appended' ? [event.message] : []));
+  return { appended, live };
+};
+
+// oxlint-disable-next-line eslint/max-params -- Test helper mirrors the four independent projection inputs.
+const project = async (
+  updates: readonly SessionUpdate[],
+  agentId = 'codex',
+  report?: Parameters<ReturnType<typeof createTurnProjection>['report']>[0],
+  tauMcpServerName?: string,
+): Promise<ProviderMessage[]> => {
+  const events = await projectEvents(updates, agentId, report, tauMcpServerName);
+  return [
+    ...reduceEventLog(
+      events.appended.map(
+        (event, sequence) =>
+          ({
+            ...event,
+            version: 1,
+            leaderEpoch: 'test',
+            sequence,
+            recordedAt: new Date(0).toISOString(),
+            runId: 'run-1',
+          }) as AgentLogEvent,
+      ),
+    ),
+  ];
 };
 
 /** The Codex `listFiles` pair, verbatim from the shape the adapter emits. */
@@ -179,7 +223,7 @@ describe('the ACP turn projection', () => {
       toolCallId: 'list-1',
       kind: 'read',
       title: 'List files',
-      status: 'pending',
+      status: 'completed',
       nativeName: 'listFiles',
     });
     expect(input.content).toEqual({ path: '.' });
@@ -193,7 +237,7 @@ describe('the ACP turn projection', () => {
     expect(output.content).toEqual({ formatted_output: 'tau.json\npackage.json', exit_code: 0 });
   });
 
-  it('publishes a complete ACP tool-input snapshot on the live channel', async () => {
+  it('does not duplicate a durable ACP tool-input on the live channel', async () => {
     const live: Array<Record<string, unknown>> = [];
     const projection = createTurnProjection({
       turn: {
@@ -214,23 +258,7 @@ describe('the ACP turn projection', () => {
     projection.update(listFilesCall);
     await projection.flush();
 
-    expect(live).toEqual([
-      {
-        type: 'tool-input-start',
-        messageId: 'id-2',
-        contentIndex: 0,
-        toolCallId: 'id-1',
-        toolName: 'listFiles',
-      },
-      {
-        type: 'tool-input-end',
-        messageId: 'id-2',
-        contentIndex: 0,
-        toolCallId: 'id-1',
-        toolName: 'listFiles',
-        input: { path: '.' },
-      },
-    ]);
+    expect(live).toEqual([]);
   });
 
   it("recovers Claude's native tool name from its own metadata, and keeps the metadata", async () => {
@@ -654,6 +682,124 @@ describe('the ACP turn projection', () => {
     expect(last?.metadata).toMatchObject({ responseModel: 'gpt-5.3-codex', usage: { totalTokens: 1500 } });
   });
 
+  it('retains context and vendor cost when no token report or text exists', async () => {
+    const messages = await project([
+      { sessionUpdate: 'usage_update', used: 17, size: 100, cost: { amount: 0.02, currency: 'USD' } },
+    ]);
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toMatchObject({
+      role: 'assistant',
+      content: [],
+      metadata: {
+        tauInternal: {
+          vendorContext: { used: 17, size: 100 },
+          vendorCost: { amount: 0.02, currency: 'USD', reportedBy: 'codex' },
+        },
+      },
+    });
+  });
+
+  it('promotes a qualified Tau MCP identity first supplied by a partial update', async () => {
+    const messages = await project(
+      [
+        { sessionUpdate: 'tool_call', toolCallId: 'late', title: 'Working', status: 'pending', kind: 'execute' },
+        {
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 'late',
+          status: 'in_progress',
+          rawInput: { server: 'tau', tool: 'get_kernel_result', arguments: { targetFile: 'main.ts' } },
+          _meta: { is_mcp_tool_call: true },
+        },
+        {
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 'late',
+          status: 'completed',
+          rawOutput: { result: { structuredContent: { status: 'ready' }, content: [] }, error: null },
+        },
+      ],
+      'codex',
+      undefined,
+      'tau',
+    );
+
+    expect(messages[0]).toMatchObject({
+      role: 'tool-input',
+      toolName: 'Working',
+      call: { nativeName: 'get_kernel_result', status: 'completed' },
+    });
+    expect(messages[1]).toMatchObject({
+      role: 'tool-output',
+      toolCallId: 'id-1',
+      toolName: 'Working',
+      call: { nativeName: 'get_kernel_result', status: 'completed' },
+      content: { status: 'ready' },
+      metadata: { tauInternal: { presentation: 'tau-mcp' } },
+    });
+  });
+
+  it('stores one equivalent screenshot payload after provisional rendering while retaining distinct content', async () => {
+    const payload = 'YXVkaXQtc2NyZWVuc2hvdC1ieXRlcw==';
+    const provisional = { mimeType: 'image/png', data: payload, type: 'image' } as const;
+    const { appended } = await projectEvents(
+      [
+        {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'image',
+          title: 'Screenshot',
+          status: 'pending',
+          kind: 'execute',
+          rawInput: { server: 'tau', tool: 'screenshot', arguments: { targetFile: 'main.ts', mode: 'single' } },
+          _meta: { is_mcp_tool_call: true },
+        },
+        {
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 'image',
+          status: 'in_progress',
+          content: [
+            { type: 'content', content: provisional },
+            { type: 'content', content: { type: 'text', text: 'distinct progress note' } },
+          ],
+        },
+        {
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 'image',
+          status: 'completed',
+          content: [
+            { type: 'content', content: { type: 'image', data: payload, mimeType: 'image/png' } },
+            { type: 'content', content: { type: 'text', text: 'distinct terminal note' } },
+          ],
+          rawOutput: {
+            result: {
+              content: [{ type: 'image', data: payload, mimeType: 'image/png' }],
+              structuredContent: { images: [{ view: 'isometric', dataUrl: `data:image/png;base64,${payload}` }] },
+            },
+            error: null,
+          },
+        },
+      ],
+      'codex',
+      undefined,
+      'tau',
+    );
+    const serialized = JSON.stringify(appended);
+
+    expect(serialized.split(payload)).toHaveLength(2);
+    expect(serialized).toContain('distinct progress note');
+    expect(serialized).toContain('distinct terminal note');
+  });
+
+  it('keeps one live segment when a stable message id resumes after a boundary', async () => {
+    const { live } = await projectEvents([
+      { sessionUpdate: 'agent_message_chunk', messageId: 'same', content: { type: 'text', text: 'Before ' } },
+      { sessionUpdate: 'plan', entries: [{ content: 'Inspect', priority: 'medium', status: 'in_progress' }] },
+      { sessionUpdate: 'agent_message_chunk', messageId: 'same', content: { type: 'text', text: 'after' } },
+    ]);
+    const types = live.filter((event) => event['messageId'] === 'id-1').map((event) => event['type']);
+
+    expect(types).toEqual(['text-start', 'text-delta', 'text-delta', 'text-end']);
+  });
+
   it('replaces one durable ACP session record as plans and commands change', async () => {
     const appended: ExternalAgentLogEvent[] = [];
     const turn: AcpPromptTurn = {
@@ -675,7 +821,7 @@ describe('the ACP turn projection', () => {
     }
     await projection.flush();
 
-    expect(appended).toHaveLength(3);
+    expect(appended).toHaveLength(4);
     expect(appended.at(-1)).toMatchObject({
       type: 'message.envelope-replaced',
       messageId: 'id-1',
@@ -687,6 +833,7 @@ describe('the ACP turn projection', () => {
             type: 'acp-session',
             agentId: 'codex',
             commands: [{ name: 'compact', description: 'Compact' }],
+            title: 'Fixture session',
           },
         ],
       },
@@ -694,6 +841,54 @@ describe('the ACP turn projection', () => {
     expect(JSON.stringify(appended.at(-1))).not.toContain('write hello.txt');
     expect(projection.title).toBe('Fixture session');
   });
+});
+
+describe('ACP usage durability', () => {
+  it('does not advance the cumulative baseline when its usage record was not stored', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'tau-acp-usage-durability-'));
+    const adapter: AcpAdapter = {
+      id: 'codex',
+      package: 'fixture',
+      version: '0.0.0',
+      configEnv: [],
+      displayName: 'Codex',
+      modulePath: new URL('fixtures/fake-agent.ts', import.meta.url).pathname,
+    };
+    const session = await openAcpSession({ adapter, cwd, createId: randomUUID });
+    const firstTurn: AcpPromptTurn = {
+      ...stubTurn(),
+      append: async (events) => {
+        if (
+          events.some(
+            (event) =>
+              event.type === 'message.appended' &&
+              event.message.role === 'assistant' &&
+              event.message.metadata?.usage !== undefined,
+          )
+        ) {
+          throw new Error('durable append failed');
+        }
+      },
+    };
+    const appended: ExternalAgentLogEvent[] = [];
+
+    try {
+      await expect(session.prompt('first noask', firstTurn)).rejects.toThrow('durable append failed');
+      await session.prompt('second noask', stubTurn(appended));
+
+      expect(
+        appended.find(
+          (event) =>
+            event.type === 'message.appended' &&
+            event.message.role === 'assistant' &&
+            event.message.metadata?.usage !== undefined,
+        ),
+      ).toMatchObject({ message: { metadata: { usage: { totalTokens: 3000 } } } });
+    } finally {
+      await session.close();
+      await rm(cwd, { recursive: true, force: true });
+    }
+  }, 30_000);
 });
 
 describe('ACP permission choices', () => {

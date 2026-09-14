@@ -51,8 +51,9 @@
  * is nowhere for a replayed update to go.
  */
 
-import { dirname, resolve, sep } from 'node:path';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { isAbsolute, relative, resolve, sep } from 'node:path';
+import { lstat, realpath } from 'node:fs/promises';
+import { isDeepStrictEqual } from 'node:util';
 
 import { CreateElicitationRequest as CreateElicitationRequestGuards, client } from '@agentclientprotocol/sdk';
 import type {
@@ -73,6 +74,7 @@ import type {
 
 import type { ExternalAgentTurn } from '@taucad/agent-host/node-launcher';
 import type {
+  ExternalAgentLogEvent,
   ExternalAgentLogin,
   JsonObject,
   JsonValue,
@@ -85,6 +87,7 @@ import { spawnAcpAdapter } from '#acp/spawn.js';
 import type { AcpWireFrame } from '#acp/spawn.js';
 import type { AcpAdapter } from '#acp/registry.js';
 import { maskedPathCode } from '@taucad/agent-tools/registry';
+import { NodeFsProvider } from '@taucad/filesystem/backend/node';
 import { classify } from '@taucad/filesystem/path-registry';
 import {
   exportGeometryInputSchema,
@@ -97,6 +100,8 @@ import {
   testModelOutputSchema,
 } from '@taucad/chat';
 import { toolName } from '@taucad/chat/constants';
+
+const maskedPath = (message: string): Error => Object.assign(new Error(message), { code: maskedPathCode });
 
 /** ACP protocol version this client speaks. */
 const protocolVersion = 1;
@@ -164,10 +169,12 @@ export type AcpTurnOutcome = {
   readonly title?: string | undefined;
   /** Session-cumulative vendor usage retained only to derive the next turn's delta. */
   readonly usage?: AcpUsage | undefined;
+  /** Non-model configuration values the session actually confirmed. */
+  readonly configuration: Readonly<Record<string, string | boolean>>;
 };
 
 /** The durable seams one turn needs; the session itself owns no chat state. @public */
-export type AcpPromptTurn = Pick<ExternalAgentTurn, 'append' | 'approve' | 'publishLive' | 'signal'>;
+export type AcpPromptTurn = Pick<ExternalAgentTurn, 'append' | 'appendSession' | 'approve' | 'publishLive' | 'signal'>;
 
 /**
  * Whether the agent advertised one capability.
@@ -197,25 +204,44 @@ const isPresent = <Value>(value: Value): value is NonNullable<Value> => value !=
  * @returns The resolved absolute path.
  * @throws When the path escapes the working directory, or the registry refuses that access.
  */
-const confine = (cwd: string, path: string, intent: 'read' | 'write'): string => {
+const confine = async (cwd: string, path: string, intent: 'read' | 'write'): Promise<string> => {
   const resolved = resolve(cwd, path);
   if (resolved !== cwd && !resolved.startsWith(cwd + sep)) {
-    throw Object.assign(new Error(`This agent may only read and write inside ${cwd}.`), { code: maskedPathCode });
+    throw maskedPath(`This agent may only read and write inside ${cwd}.`);
   }
-  const relative = resolved
-    .slice(cwd.length + 1)
-    .split(sep)
-    .join('/');
-  const { agentAccess } = classify(relative);
+
+  let existing = resolved;
+  for (;;) {
+    try {
+      // oxlint-disable-next-line eslint/no-await-in-loop -- Each failed probe identifies the only parent that can be probed next.
+      await lstat(existing);
+      break;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        throw error;
+      }
+      const parent = resolve(existing, '..');
+      if (parent === existing) {
+        throw error;
+      }
+      existing = parent;
+    }
+  }
+  const [backingRoot, backingExisting] = await Promise.all([realpath(cwd), realpath(existing)]);
+  const backing = resolve(backingExisting, relative(existing, resolved));
+  const backingRelative = relative(backingRoot, backing);
+  if (isAbsolute(backingRelative) || backingRelative === '..' || backingRelative.startsWith(`..${sep}`)) {
+    throw maskedPath(`This agent may only read and write inside ${cwd}.`);
+  }
+  const rootedPath = backingRelative.split(sep).join('/');
+  const { agentAccess } = classify(rootedPath);
   if (agentAccess === 'hidden') {
-    throw Object.assign(new Error(`No path under ${relative} exists for this agent.`), { code: maskedPathCode });
+    throw maskedPath(`No path under ${rootedPath} exists for this agent.`);
   }
   if (intent === 'write' && agentAccess !== 'read-write') {
-    throw Object.assign(new Error(`This agent may read but not write ${relative}; Tau records that itself.`), {
-      code: maskedPathCode,
-    });
+    throw maskedPath(`This agent may read but not write ${rootedPath}; Tau records that itself.`);
   }
-  return resolved;
+  return rootedPath;
 };
 
 /**
@@ -232,7 +258,8 @@ export const readSessionTextFile = async (
   cwd: string,
   params: { readonly path: string; readonly line?: unknown; readonly limit?: unknown },
 ): Promise<string> => {
-  const content = await readFile(confine(cwd, params.path, 'read'), 'utf8');
+  const provider = new NodeFsProvider(cwd);
+  const content = new TextDecoder().decode(await provider.readFile(await confine(cwd, params.path, 'read')));
   /* `unknown`, because ACP spells "no window" as an omitted field *and* as an
    * explicit JSON `null`, and a reader that trusted the declared type would
    * turn the second one into line zero and drop the file's first line. */
@@ -259,9 +286,8 @@ export const writeSessionTextFile = async (
   cwd: string,
   params: { readonly path: string; readonly content: string },
 ): Promise<void> => {
-  const resolved = confine(cwd, params.path, 'write');
-  await mkdir(dirname(resolved), { recursive: true });
-  await writeFile(resolved, params.content, 'utf8');
+  const provider = new NodeFsProvider(cwd);
+  await provider.writeFile(await confine(cwd, params.path, 'write'), params.content);
 };
 
 // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- an ACP payload is JSON by construction of its transport.
@@ -272,6 +298,21 @@ const asRecord = (value: unknown): Record<string, unknown> | undefined =>
     ? // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- a JSON object is a string-keyed record.
       (value as Record<string, unknown>)
     : undefined;
+
+/**
+ * Whether an ACP restore failure proves that only the old session is unavailable.
+ *
+ * @param error - Failure returned by `session/load` or `session/resume`.
+ * @returns Whether opening a fresh session is safe.
+ */
+const recoverableSessionLoss = (error: unknown): boolean => {
+  const code = asRecord(error)?.['code'];
+  return (
+    code === -32_002 ||
+    code === -32_601 ||
+    (code === -32_602 && error instanceof Error && /unknown session/iu.test(error.message))
+  );
+};
 
 /**
  * The command line a `terminal-auth` method wants the *user* to run.
@@ -447,6 +488,41 @@ const mcpResult = (
 };
 
 /**
+ * Remove rendered blocks already carried by the canonical MCP result.
+ *
+ * @param facts - Complete external tool-call projection.
+ * @param tool - Qualified Tau MCP identity, when present.
+ * @param rawOutput - Raw adapter result envelope.
+ * @returns The projection without byte-equivalent duplicate result blocks.
+ */
+const withoutDuplicateMcpContent = (
+  facts: NonNullable<ToolInputProviderMessage['call']>,
+  tool: NormalizedTauMcpCall | undefined,
+  rawOutput: unknown,
+): NonNullable<ToolInputProviderMessage['call']> => {
+  if (!tool || !Array.isArray(facts.content)) {
+    return facts;
+  }
+  const resultContent = asRecord(asRecord(rawOutput)?.['result'])?.['content'];
+  const canonical = Array.isArray(resultContent) ? resultContent : [];
+  const content = facts.content.filter((item) => {
+    const candidate: unknown = item;
+    const block = asRecord(candidate)?.['content'] ?? candidate;
+    if (canonical.some((resultBlock) => isDeepStrictEqual(resultBlock, block))) {
+      return false;
+    }
+    const rendered = asRecord(block);
+    return !(
+      rawOutput === undefined &&
+      tool.toolName === toolName.screenshot &&
+      (rendered?.['type'] === 'image' || rendered?.['type'] === 'audio')
+    );
+  });
+  const { content: _content, ...rest } = facts;
+  return content.length === 0 ? rest : { ...rest, content };
+};
+
+/**
  * Where the emitter's *programmatic* tool name is read from, in order.
  *
  * ACP's own `ToolCall.name` is experimental and neither shipping adapter sets
@@ -533,8 +609,12 @@ export type OpenAcpSessionOptions = {
   readonly acpSessionId?: string | undefined;
   /** Cumulative usage remembered with that session. */
   readonly priorUsage?: AcpUsage | undefined;
+  /** Existing durable ACP session-state envelope to replace across reconnects. */
+  readonly sessionMessageId?: string | undefined;
   readonly onFrame?: ((frame: AcpWireFrame) => void) | undefined;
   readonly createId: () => string;
+  /** Cancels session bootstrap before it becomes reusable. */
+  readonly signal?: AbortSignal | undefined;
 };
 
 /**
@@ -608,6 +688,7 @@ type TurnProjection = {
 /** Latest replaceable presentation facts for one ACP session. */
 type AcpSessionPresentation = {
   readonly sessionId?: string | undefined;
+  readonly title?: string | undefined;
   readonly plan?: JsonValue | undefined;
   readonly commands: readonly JsonValue[];
   readonly configOptions: readonly JsonValue[];
@@ -616,6 +697,19 @@ type AcpSessionPresentation = {
 };
 
 const emptySessionPresentation: AcpSessionPresentation = { commands: [], configOptions: [] };
+
+/** Non-model configuration values the session currently confirms. */
+const confirmedConfiguration = (
+  options: readonly SessionConfigOption[] | undefined,
+): Readonly<Record<string, string | boolean>> =>
+  Object.fromEntries(
+    (options ?? []).flatMap((option) =>
+      option.category !== 'model' &&
+      (typeof option.currentValue === 'string' || typeof option.currentValue === 'boolean')
+        ? [[option.id, option.currentValue]]
+        : [],
+    ),
+  );
 
 /**
  * Apply one ACP session-presentation update using the protocol's replacement semantics.
@@ -644,6 +738,9 @@ const presentationAfter = (state: AcpSessionPresentation, update: SessionUpdate)
     }
     case 'current_mode_update': {
       return { ...state, modeId: update.currentModeId };
+    }
+    case 'session_info_update': {
+      return typeof update.title === 'string' && update.title !== '' ? { ...state, title: update.title } : state;
     }
     default: {
       return state;
@@ -727,6 +824,8 @@ export const createTurnProjection = (options: {
   readonly priorUsage?: AcpUsage | undefined;
   /** Host-attested Tau MCP server name configured for this session. */
   readonly tauMcpServerName?: string | undefined;
+  /** Session-owned writer used to replace one state row across turns. */
+  readonly publishSessionState?: ((state: AcpSessionPresentation) => Promise<void>) | undefined;
 }): TurnProjection => {
   const { turn } = options;
   /**
@@ -747,6 +846,9 @@ export const createTurnProjection = (options: {
   };
   const assistantBlocks = new Map<string, AssistantBlock>();
   let pending: AssistantBlock | undefined;
+  let lastBlock: AssistantBlock | undefined;
+  let finalized = false;
+  let finalCarrierId: string | undefined;
   /**
    * Tool calls awaiting their result, with the fullest facts seen so far, so a
    * `tool_call_update` names its input and an `in_progress` refinement is not
@@ -827,6 +929,7 @@ export const createTurnProjection = (options: {
               {
                 contentIndex: 0,
                 startedAtMs: block.startedAtMs,
+                // oxlint-disable-next-line tau-lint/no-time-unit-suffix -- Canonical provider metadata uses this established key.
                 ...(block.endedAt === undefined ? {} : { endedAtMs: block.endedAt }),
               },
             ],
@@ -843,19 +946,19 @@ export const createTurnProjection = (options: {
   };
 
   let idleFlush: NodeJS.Timeout | undefined;
-  const flushBlock = async (final = false, checkpoint = false): Promise<void> => {
+  const flushBlock = async (
+    final = false,
+    checkpoint = false,
+    block: AssistantBlock | undefined = pending,
+  ): Promise<void> => {
     if (idleFlush) {
       clearTimeout(idleFlush);
       idleFlush = undefined;
     }
-    const block = pending;
-    if (!checkpoint) {
-      pending = undefined;
-    }
     if (!block || block.text === '') {
       return;
     }
-    if (!checkpoint) {
+    if (!checkpoint && block.endedAt === undefined) {
       block.endedAt = Date.now();
       await turn.publishLive?.({
         type: block.kind === 'text' ? 'text-end' : 'thinking-end',
@@ -879,11 +982,27 @@ export const createTurnProjection = (options: {
         : { type: 'message.appended', message },
     ]);
     block.committed = true;
+    if (!checkpoint && pending === block) {
+      pending = undefined;
+    }
+  };
+
+  /** Commit a resumable named block without ending its SDK stream. */
+  const flushBoundary = async (): Promise<void> => {
+    const block = pending;
+    await flushBlock(false, block?.sourceId !== 'anonymous', block);
+    if (block?.sourceId !== 'anonymous' && pending === block) {
+      pending = undefined;
+    }
   };
 
   /** Replace the turn's one ACP session-state row instead of appending every update. */
   const publishSessionState = async (): Promise<void> => {
-    await flushBlock();
+    await flushBoundary();
+    if (options.publishSessionState) {
+      await options.publishSessionState(sessionPresentation);
+      return;
+    }
     sessionMessageId ??= options.createId();
     const content = asJson({
       type: 'acp-session',
@@ -891,6 +1010,7 @@ export const createTurnProjection = (options: {
       commands: sessionPresentation.commands,
       configOptions: sessionPresentation.configOptions,
       ...(sessionPresentation.sessionId === undefined ? {} : { sessionId: sessionPresentation.sessionId }),
+      ...(sessionPresentation.title === undefined ? {} : { title: sessionPresentation.title }),
       ...(sessionPresentation.plan === undefined ? {} : { plan: sessionPresentation.plan }),
       ...(sessionPresentation.modeId === undefined ? {} : { modeId: sessionPresentation.modeId }),
       ...(sessionPresentation.modes === undefined ? {} : { modes: sessionPresentation.modes }),
@@ -916,7 +1036,7 @@ export const createTurnProjection = (options: {
    * @returns When the durable append has completed.
    */
   const publishRichBlock = async (content: ContentBlock): Promise<void> => {
-    await flushBlock();
+    await flushBoundary();
     await turn.append([
       {
         type: 'message.appended',
@@ -976,19 +1096,27 @@ export const createTurnProjection = (options: {
     if (!open) {
       return;
     }
-    const facts = { ...open.facts, ...callFacts(update) };
+    const mergedFacts = { ...open.facts, ...callFacts(update) };
     const rawOutput = update.rawOutput === undefined ? open.rawOutput : update.rawOutput;
     const updatedTauMcp = normalizedTauMcpCall(update, options.tauMcpServerName);
+    const tauMcp = open.tauMcp ?? updatedTauMcp;
+    const facts = withoutDuplicateMcpContent(mergedFacts, tauMcp, rawOutput);
     const input =
       update.rawInput === undefined
         ? open.input
-        : open.tauMcp === undefined
+        : tauMcp === undefined
           ? asJson(update.rawInput)
           : (updatedTauMcp?.arguments ?? open.input);
-    const inputMessage = { ...open.inputMessage, call: facts, content: input };
+    const inputMessage = {
+      ...open.inputMessage,
+      call: facts,
+      content: input,
+      metadata: tauMcp === undefined ? externalMetadata : tauMcpMetadata,
+    };
     if (update.status !== 'completed' && update.status !== 'failed') {
       openToolCalls.set(update.toolCallId, {
         ...open,
+        tauMcp,
         facts,
         input,
         inputMessage,
@@ -1016,9 +1144,7 @@ export const createTurnProjection = (options: {
       return;
     }
     openToolCalls.delete(update.toolCallId);
-    const normalized =
-      open.tauMcp === undefined ? undefined : mcpResult(rawOutput, open.tauMcp, update.status === 'failed');
-    const { content: _content, ...durableFacts } = facts;
+    const normalized = tauMcp === undefined ? undefined : mcpResult(rawOutput, tauMcp, update.status === 'failed');
     await turn.append([
       {
         type: 'message.envelope-replaced',
@@ -1032,17 +1158,17 @@ export const createTurnProjection = (options: {
           role: 'tool-output',
           toolCallId: open.callId,
           toolName: open.toolName,
-          call: open.tauMcp === undefined ? facts : durableFacts,
+          call: facts,
           content: normalized?.content ?? asJson(rawOutput ?? facts.content ?? { status: update.status }),
           isError: normalized?.isError ?? update.status === 'failed',
-          metadata: open.tauMcp === undefined ? externalMetadata : tauMcpMetadata,
+          metadata: tauMcp === undefined ? externalMetadata : tauMcpMetadata,
         },
       },
     ]);
   };
 
   const projectToolCall = async (update: Extract<SessionUpdate, { sessionUpdate: 'tool_call' }>): Promise<void> => {
-    await flushBlock();
+    await flushBoundary();
     const callId = options.createId();
     const inputMessageId = options.createId();
     const facts = callFacts(update);
@@ -1065,21 +1191,6 @@ export const createTurnProjection = (options: {
         message: inputMessage,
       },
     ]);
-    await turn.publishLive?.({
-      type: 'tool-input-start',
-      messageId: inputMessageId,
-      contentIndex: 0,
-      toolCallId: callId,
-      toolName: callToolName,
-    });
-    await turn.publishLive?.({
-      type: 'tool-input-end',
-      messageId: inputMessageId,
-      contentIndex: 0,
-      toolCallId: callId,
-      toolName: callToolName,
-      input,
-    });
     /* A call that arrives already finished gets no `tool_call_update`, and a
      * `tool-input` row with no `tool-output` is a part that hangs until the next
      * user message demotes it to an interruption the user never caused. */
@@ -1099,7 +1210,7 @@ export const createTurnProjection = (options: {
         const sourceId = update.messageId ?? 'anonymous';
         const key = `${kind}:${sourceId}`;
         if (pending && (pending.sourceId !== sourceId || pending.kind !== kind)) {
-          await flushBlock();
+          await flushBoundary();
         }
         const block = (update.messageId === undefined ? pending : assistantBlocks.get(key)) ?? {
           sourceId,
@@ -1113,7 +1224,8 @@ export const createTurnProjection = (options: {
           assistantBlocks.set(key, block);
         }
         const delta = update.content.text;
-        if (block.text === '') {
+        if (block.text === '' || block.endedAt !== undefined) {
+          block.endedAt = undefined;
           await turn.publishLive?.({
             type: kind === 'text' ? 'text-start' : 'thinking-start',
             messageId: block.durableId,
@@ -1123,6 +1235,7 @@ export const createTurnProjection = (options: {
         }
         block.text += delta;
         pending = block;
+        lastBlock = block;
         await turn.publishLive?.({
           type: kind === 'text' ? 'text-delta' : 'thinking-delta',
           messageId: block.durableId,
@@ -1172,9 +1285,12 @@ export const createTurnProjection = (options: {
         return;
       }
       case 'session_info_update': {
+        sessionPresentation = presentationAfter(sessionPresentation, update);
         if (typeof update.title === 'string' && update.title !== '') {
           reported.title = update.title;
         }
+        await publishSessionState();
+        break;
       }
       // No default: the remaining variants are the session's own, handled at the connection.
     }
@@ -1192,7 +1308,7 @@ export const createTurnProjection = (options: {
     },
     approve: async (request) => {
       await projection;
-      await flushBlock();
+      await flushBoundary();
       const payload = asRecord(request.payload);
       const requestedCall = asRecord(payload?.['toolCall']);
       const toolCallId = requestedCall?.['toolCallId'];
@@ -1222,10 +1338,30 @@ export const createTurnProjection = (options: {
       return reported.title;
     },
     flush: async () => {
+      if (finalized) {
+        return;
+      }
       await projection;
-      const carried = pending !== undefined && pending.text !== '';
-      await flushBlock(true);
-      if (carried || reported.usage === undefined) {
+      const open = [...assistantBlocks.values()].filter((block) => block.text !== '' && block.endedAt === undefined);
+      if (pending?.sourceId === 'anonymous' && pending.text !== '') {
+        open.push(pending);
+      }
+      const carrier = lastBlock && open.includes(lastBlock) ? lastBlock : open.at(-1);
+      for (const block of open) {
+        if (block !== carrier) {
+          await flushBlock(false, false, block);
+        }
+      }
+      const carried = carrier !== undefined;
+      await flushBlock(true, false, carrier);
+      if (
+        carried ||
+        (reported.usage === undefined &&
+          reported.model === undefined &&
+          reported.cost === undefined &&
+          reported.context === undefined)
+      ) {
+        finalized = true;
         return;
       }
       /* A turn whose last act was a tool call has no open block to stamp, and
@@ -1235,9 +1371,15 @@ export const createTurnProjection = (options: {
       await turn.append([
         {
           type: 'message.appended',
-          message: { id: options.createId(), role: 'assistant', content: [], metadata: messageMetadata(true) },
+          message: {
+            id: (finalCarrierId ??= options.createId()),
+            role: 'assistant',
+            content: [],
+            metadata: messageMetadata(true),
+          },
         },
       ]);
+      finalized = true;
     },
   };
 };
@@ -1316,6 +1458,7 @@ export const openAcpSession = async (options: OpenAcpSessionOptions): Promise<Ac
    */
   let { priorUsage } = options;
   let modeId: string | undefined;
+  const pendingElicitations = new Map<string, { readonly sessionId: string; readonly turn: AcpPromptTurn }>();
   /* Empty until `initialize` answers, so a handshake that fails with `-32000`
    * still refuses with the right code — just with no methods to offer. */
   let facts: AcpAgentFacts = {
@@ -1323,6 +1466,51 @@ export const openAcpSession = async (options: OpenAcpSessionOptions): Promise<Ac
     agentCapabilities: undefined,
     authMethods: [],
     agentInfo: undefined,
+  };
+  const sessionMessageId = options.sessionMessageId ?? options.createId();
+  let sessionCommitted = options.sessionMessageId !== undefined;
+  const persistSessionState = async (
+    append: (events: readonly ExternalAgentLogEvent[]) => Promise<void>,
+    state: AcpSessionPresentation,
+  ): Promise<void> => {
+    const message: ProviderMessage = {
+      id: sessionMessageId,
+      role: 'assistant',
+      content: [
+        asJson({
+          type: 'acp-session',
+          agentId: options.adapter.id,
+          commands: state.commands,
+          configOptions: state.configOptions,
+          ...(state.sessionId === undefined ? {} : { sessionId: state.sessionId }),
+          ...(state.title === undefined ? {} : { title: state.title }),
+          ...(state.plan === undefined ? {} : { plan: state.plan }),
+          ...(state.modeId === undefined ? {} : { modeId: state.modeId }),
+          ...(state.modes === undefined ? {} : { modes: state.modes }),
+        }),
+      ],
+      metadata: { tauInternal: { kind: 'external-agent-session', origin: 'external', agentId: options.adapter.id } },
+    };
+    await append([
+      sessionCommitted
+        ? { type: 'message.envelope-replaced', messageId: sessionMessageId, replacement: message }
+        : { type: 'message.appended', message },
+    ]);
+    sessionCommitted = true;
+  };
+  let sessionWriter: ((events: readonly ExternalAgentLogEvent[]) => Promise<void>) | undefined;
+  let sessionWrite = Promise.resolve();
+  let sessionWriteError: unknown;
+  const persistIdleSessionState = (state: AcpSessionPresentation): void => {
+    if (!sessionWriter) {
+      return;
+    }
+    const append = sessionWriter;
+    sessionWrite = sessionWrite
+      .then(async () => persistSessionState(append, state))
+      .catch((error: unknown) => {
+        sessionWriteError ??= error;
+      });
   };
 
   /**
@@ -1370,8 +1558,8 @@ export const openAcpSession = async (options: OpenAcpSessionOptions): Promise<Ac
    * @param login - The facts to render.
    * @param reason - The agent's own message, kept verbatim as the prompt.
    */
-  const recordLogin = async (login: ExternalAgentLogin, reason: string): Promise<void> => {
-    await activeTurn?.append([
+  const recordLogin = async (login: ExternalAgentLogin, reason: string, turn: AcpPromptTurn): Promise<void> => {
+    await turn.append([
       {
         type: 'interrupt.recorded',
         interruptId: login.elicitationId ?? options.createId(),
@@ -1395,7 +1583,11 @@ export const openAcpSession = async (options: OpenAcpSessionOptions): Promise<Ac
       if (params.update.sessionUpdate === 'current_mode_update') {
         modeId = params.update.currentModeId;
       }
-      active?.update(params.update);
+      if (active) {
+        active.update(params.update);
+      } else {
+        persistIdleSessionState(presentation);
+      }
     })
     .onRequest('session/request_permission', async ({ params }) => {
       if (params.sessionId !== acpSessionId) {
@@ -1439,7 +1631,13 @@ export const openAcpSession = async (options: OpenAcpSessionOptions): Promise<Ac
     })
     .onRequest('elicitation/create', async ({ params }) => {
       const login = urlLoginOf(options.adapter.id, params);
-      if (!login || !activeTurn) {
+      const promptTurn = activeTurn;
+      if (
+        !login ||
+        !promptTurn ||
+        promptTurn.signal.aborted ||
+        ('sessionId' in params && params.sessionId !== acpSessionId)
+      ) {
         /* A form Tau has no surface for, a mode a later protocol invents, or an
          * agent asking between turns with nobody watching: declining is the
          * honest answer, and the agent falls back to whatever it does for a
@@ -1447,16 +1645,30 @@ export const openAcpSession = async (options: OpenAcpSessionOptions): Promise<Ac
          * leave the user waiting on a login they were never shown. */
         return { action: 'decline' };
       }
-      await recordLogin(login, params.message);
+      if (!login.elicitationId) {
+        return { action: 'decline' };
+      }
+      pendingElicitations.set(login.elicitationId, { sessionId: acpSessionId, turn: promptTurn });
+      await recordLogin(login, params.message, promptTurn);
       /* Answered at once, and deliberately: the agent polls its own
        * verification endpoint and says so with `elicitation/complete`, so
        * holding this response open would stall the very flow it is waiting on. */
       return { action: 'accept' };
     })
     .onNotification('elicitation/complete', ({ params }) => {
+      const pending = pendingElicitations.get(params.elicitationId);
+      pendingElicitations.delete(params.elicitationId);
+      if (
+        !pending ||
+        pending.sessionId !== acpSessionId ||
+        pending.turn !== activeTurn ||
+        pending.turn.signal.aborted
+      ) {
+        return;
+      }
       /* async-iife: the agent is telling us, not asking; the turn continues
        * whether or not the resolution has landed yet. */
-      void activeTurn?.append([
+      void pending.turn.append([
         {
           type: 'interrupt.recorded',
           interruptId: params.elicitationId,
@@ -1466,12 +1678,33 @@ export const openAcpSession = async (options: OpenAcpSessionOptions): Promise<Ac
         },
       ]);
     })
-    .onRequest('fs/read_text_file', async ({ params }) => ({ content: await readSessionTextFile(cwd, params) }))
+    .onRequest('fs/read_text_file', async ({ params }) => {
+      if (params.sessionId !== acpSessionId || !activeTurn || activeTurn.signal.aborted) {
+        throw Object.assign(new Error('This ACP filesystem request has no active session turn.'), {
+          code: 'EXTERNAL_AGENT_INVALID_SESSION',
+        });
+      }
+      return { content: await readSessionTextFile(cwd, params) };
+    })
     .onRequest('fs/write_text_file', async ({ params }) => {
+      if (params.sessionId !== acpSessionId || !activeTurn || activeTurn.signal.aborted) {
+        throw Object.assign(new Error('This ACP filesystem request has no active session turn.'), {
+          code: 'EXTERNAL_AGENT_INVALID_SESSION',
+        });
+      }
       await writeSessionTextFile(cwd, params);
       return {};
     })
     .connect(adapter.stream);
+
+  const onBootstrapAbort = (): void => {
+    connection.close();
+    adapter.close();
+  };
+  options.signal?.addEventListener('abort', onBootstrapAbort, { once: true });
+  if (options.signal?.aborted) {
+    onBootstrapAbort();
+  }
 
   let contextLost = false;
   try {
@@ -1506,6 +1739,16 @@ export const openAcpSession = async (options: OpenAcpSessionOptions): Promise<Ac
         { code: 'EXTERNAL_AGENT_UNAVAILABLE' },
       );
     }
+    const mcpServers = [...(options.mcpServers ?? [])];
+    if (
+      mcpServers.some((server) => 'type' in server && server.type === 'http') &&
+      capabilities?.mcpCapabilities?.http !== true
+    ) {
+      throw Object.assign(new Error(`${options.adapter.id} does not support the HTTP MCP server required by Tau.`), {
+        code: 'EXTERNAL_AGENT_UNAVAILABLE',
+      });
+    }
+    const lifecycleDirectories = additionalDirectories.length === 0 ? {} : { additionalDirectories };
 
     /**
      * The prompt blocks this agent can actually receive (V12).
@@ -1551,8 +1794,6 @@ export const openAcpSession = async (options: OpenAcpSessionOptions): Promise<Ac
           : block,
       );
     };
-    const mcpServers = [...(options.mcpServers ?? [])];
-
     /* `resume` first: it restores the agent's own context without streaming the
      * transcript Tau already owns. `load` is the fallback for an adapter that
      * only advertises that one, and its replay lands with no turn open. */
@@ -1563,7 +1804,7 @@ export const openAcpSession = async (options: OpenAcpSessionOptions): Promise<Ac
             sessionId,
             cwd,
             mcpServers,
-            additionalDirectories,
+            ...lifecycleDirectories,
           });
           configOptions = resumed.configOptions ?? undefined;
           modeId = resumed.modes?.currentModeId ?? modeId;
@@ -1575,7 +1816,10 @@ export const openAcpSession = async (options: OpenAcpSessionOptions): Promise<Ac
             ...(isPresent(resumed.modes) ? { modes: resumed.modes.availableModes.map((mode) => asJson(mode)) } : {}),
           };
           return true;
-        } catch {
+        } catch (error) {
+          if (!recoverableSessionLoss(error)) {
+            throw error;
+          }
           /* The vendor lost it; try the other rung. */
         }
       }
@@ -1585,7 +1829,7 @@ export const openAcpSession = async (options: OpenAcpSessionOptions): Promise<Ac
             sessionId,
             cwd,
             mcpServers,
-            additionalDirectories,
+            ...lifecycleDirectories,
           });
           configOptions = loaded.configOptions ?? undefined;
           modeId = loaded.modes?.currentModeId ?? modeId;
@@ -1597,7 +1841,10 @@ export const openAcpSession = async (options: OpenAcpSessionOptions): Promise<Ac
             ...(isPresent(loaded.modes) ? { modes: loaded.modes.availableModes.map((mode) => asJson(mode)) } : {}),
           };
           return true;
-        } catch {
+        } catch (error) {
+          if (!recoverableSessionLoss(error)) {
+            throw error;
+          }
           /* Both rungs failed: the conversation is gone, and the caller says so. */
         }
       }
@@ -1607,7 +1854,7 @@ export const openAcpSession = async (options: OpenAcpSessionOptions): Promise<Ac
     if (acpSessionId === '' || !(await restore(acpSessionId))) {
       contextLost = acpSessionId !== '';
       priorUsage = undefined;
-      const created = await connection.agent.request('session/new', { cwd, mcpServers, additionalDirectories });
+      const created = await connection.agent.request('session/new', { cwd, mcpServers, ...lifecycleDirectories });
       acpSessionId = created.sessionId;
       configOptions = created.configOptions ?? undefined;
       modeId = created.modes?.currentModeId ?? modeId;
@@ -1621,6 +1868,37 @@ export const openAcpSession = async (options: OpenAcpSessionOptions): Promise<Ac
     }
 
     let closing: Promise<void> | undefined;
+    const waitForChildExit = async (): Promise<void> => {
+      if (adapter.child.exitCode !== null || adapter.child.signalCode !== null) {
+        return;
+      }
+      let timer: NodeJS.Timeout | undefined;
+      const exited = new Promise<void>((resolveExit) => {
+        adapter.child.once('exit', () => {
+          if (timer) {
+            clearTimeout(timer);
+          }
+          resolveExit();
+        });
+      });
+      await Promise.race([
+        exited,
+        new Promise<void>((resolveTimeout) => {
+          timer = setTimeout(resolveTimeout, sessionCloseTimeout);
+          timer.unref();
+        }),
+      ]);
+      if (adapter.child.exitCode === null && adapter.child.signalCode === null) {
+        adapter.child.kill('SIGKILL');
+        await exited;
+      }
+    };
+    const stopTransport = async (): Promise<void> => {
+      connection.close();
+      adapter.close();
+      await waitForChildExit();
+    };
+    options.signal?.removeEventListener('abort', onBootstrapAbort);
     return {
       acpSessionId,
       contextLost,
@@ -1646,13 +1924,17 @@ export const openAcpSession = async (options: OpenAcpSessionOptions): Promise<Ac
           } catch {
             /* A session the agent cannot end is still a child this host kills. */
           }
-          connection.close();
-          adapter.close();
+          await stopTransport();
         })();
         await closing;
       },
       // oxlint-disable-next-line eslint/max-params -- Mirrors the public ACP session port without a second options wrapper.
       prompt: async (prompt, turn, model, configuration) => {
+        await sessionWrite;
+        if (sessionWriteError !== undefined) {
+          throw failure(sessionWriteError);
+        }
+        sessionWriter = turn.appendSession;
         const projection = createTurnProjection({
           turn,
           createId: options.createId,
@@ -1660,24 +1942,44 @@ export const openAcpSession = async (options: OpenAcpSessionOptions): Promise<Ac
           ...(options.adapter.nativeToolName ? { nativeToolName: options.adapter.nativeToolName } : {}),
           ...(priorUsage === undefined ? {} : { priorUsage }),
           ...(mcpServers.some((server) => server.name === 'tau') ? { tauMcpServerName: 'tau' } : {}),
+          publishSessionState: async (state) => persistSessionState(turn.appendSession ?? turn.append, state),
         });
         active = projection;
         activeTurn = turn;
         projection.sessionState(presentation);
         /* Cancellation stops the *prompt* (D12): the connection, the child and
          * the vendor session all stay up for the next turn. */
-        const onAbort = (): void => {
+        const cancelled = Promise.withResolvers<never>();
+        // oxlint-disable-next-line promise/prefer-await-to-then -- A pending cancellation promise cannot be awaited during a successful turn.
+        const handledCancellation = cancelled.promise.catch(() => undefined);
+        void handledCancellation;
+        let outstandingRequest: Promise<unknown> | undefined;
+        const requestDuringTurn = async <Result>(request: Promise<Result>): Promise<Result> => {
+          outstandingRequest = request;
+          const clear = (): void => {
+            if (outstandingRequest === request) {
+              outstandingRequest = undefined;
+            }
+          };
+          void request.then(clear, clear);
+          return Promise.race([request, cancelled.promise]);
+        };
+        const cancellationError = (): Error =>
+          Object.assign(new Error('The external agent turn was cancelled.'), { code: 'EXTERNAL_AGENT_CANCELLED' });
+        const notifyCancel = (): void => {
           void connection.agent.notify('session/cancel', { sessionId: acpSessionId });
+        };
+        const onAbort = (): void => {
+          notifyCancel();
+          cancelled.reject(cancellationError());
         };
         try {
           /* Attached before any request, so a cancel during `set_config_option`
            * stops the turn instead of waiting for the agent (review 1-review S3). */
           turn.signal.addEventListener('abort', onAbort, { once: true });
           if (turn.signal.aborted) {
-            onAbort();
-            throw Object.assign(new Error('The external agent turn was cancelled.'), {
-              code: 'EXTERNAL_AGENT_CANCELLED',
-            });
+            notifyCancel();
+            throw cancellationError();
           }
           if (model !== undefined) {
             const choice = modelChoice(configOptions);
@@ -1693,11 +1995,13 @@ export const openAcpSession = async (options: OpenAcpSessionOptions): Promise<Ac
             }
             /* The session holds the selection, so it is set once and not per turn. */
             if (choice.currentValue !== model) {
-              const set = await connection.agent.request('session/set_config_option', {
-                sessionId: acpSessionId,
-                configId: choice.configId,
-                value: model,
-              });
+              const set = await requestDuringTurn(
+                connection.agent.request('session/set_config_option', {
+                  sessionId: acpSessionId,
+                  configId: choice.configId,
+                  value: model,
+                }),
+              );
               configOptions = set.configOptions;
               presentation = { ...presentation, configOptions: configOptions.map((option) => asJson(option)) };
               projection.sessionState(presentation);
@@ -1705,6 +2009,14 @@ export const openAcpSession = async (options: OpenAcpSessionOptions): Promise<Ac
           }
           for (const [configId, value] of Object.entries(configuration ?? {})) {
             const option = configOptions?.find((candidate) => candidate.id === configId);
+            if (option?.category === 'model' && model !== undefined && value !== model) {
+              throw Object.assign(
+                new Error(
+                  `${options.adapter.id} received conflicting model selections: ${model} and ${String(value)}.`,
+                ),
+                { code: 'EXTERNAL_AGENT_CONFIG_UNAVAILABLE' },
+              );
+            }
             const accepted =
               option?.type === 'boolean'
                 ? typeof value === 'boolean'
@@ -1725,37 +2037,68 @@ export const openAcpSession = async (options: OpenAcpSessionOptions): Promise<Ac
               continue;
             }
             // oxlint-disable-next-line no-await-in-loop -- each response replaces the complete option set used by the next selection.
-            const set = await connection.agent.request(
-              'session/set_config_option',
-              typeof value === 'boolean'
-                ? { sessionId: acpSessionId, configId: option.id, type: 'boolean', value }
-                : { sessionId: acpSessionId, configId: option.id, value },
+            const set = await requestDuringTurn(
+              connection.agent.request(
+                'session/set_config_option',
+                typeof value === 'boolean'
+                  ? { sessionId: acpSessionId, configId: option.id, type: 'boolean', value }
+                  : { sessionId: acpSessionId, configId: option.id, value },
+              ),
             );
             configOptions = set.configOptions;
             presentation = { ...presentation, configOptions: configOptions.map((entry) => asJson(entry)) };
             projection.sessionState(presentation);
           }
-          const answered = await connection.agent.request('session/prompt', {
-            sessionId: acpSessionId,
-            prompt: sendable(typeof prompt === 'string' ? [{ type: 'text', text: prompt }] : prompt),
-          });
+          const answered = await requestDuringTurn(
+            connection.agent.request('session/prompt', {
+              sessionId: acpSessionId,
+              prompt: sendable(typeof prompt === 'string' ? [{ type: 'text', text: prompt }] : prompt),
+            }),
+          );
           /* Read back, not echoed: `configOptions` has absorbed every
            * `config_option_update` the turn pushed, so this is the model the
            * agent actually finished on (V6). */
           const ran = modelChoice(configOptions)?.currentValue ?? model;
           projection.report({ usage: answered.usage ?? undefined, model: ran });
-          /* The vendor's counters run for the life of the session, so the next
-           * turn's share is measured from here (see `usageMetadata`). */
+          try {
+            await projection.flush();
+          } catch {
+            /* A stable final message identity makes one transient storage
+             * failure retryable without attributing the report twice. */
+            await projection.flush();
+          }
+          /* Advance only after the report is durable. Otherwise an append
+           * failure makes the next successful turn under-report usage. */
           priorUsage = answered.usage ?? priorUsage;
-          await projection.flush();
           return {
             stopReason: answered.stopReason,
             acpSessionId,
             model: ran,
             title: projection.title,
             ...(priorUsage === undefined ? {} : { usage: priorUsage }),
+            configuration: confirmedConfiguration(configOptions),
           };
         } catch (error) {
+          if (turn.signal.aborted && outstandingRequest) {
+            let settled = false;
+            await Promise.race([
+              outstandingRequest.then(
+                () => {
+                  settled = true;
+                },
+                () => {
+                  settled = true;
+                },
+              ),
+              new Promise<void>((resolveTimeout) => {
+                const timer = setTimeout(resolveTimeout, sessionCloseTimeout);
+                timer.unref();
+              }),
+            ]);
+            if (!settled) {
+              await stopTransport();
+            }
+          }
           try {
             await projection.flush();
           } catch {
@@ -1774,6 +2117,7 @@ export const openAcpSession = async (options: OpenAcpSessionOptions): Promise<Ac
       },
     };
   } catch (error) {
+    options.signal?.removeEventListener('abort', onBootstrapAbort);
     connection.close();
     adapter.close();
     throw failure(error);

@@ -4,6 +4,8 @@
  * the way to not being offered.
  */
 
+import { readFile } from 'node:fs/promises';
+
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -39,7 +41,7 @@ describe('resolveAcpAdapters', () => {
     expect(refused).toEqual([expect.objectContaining({ id: 'nope', code: 'ADAPTER_NOT_INSTALLED' })]);
   });
 
-  it('resolves the pinned adapters through their package bin entries', () => {
+  it('resolves the pinned adapters through their package bin entries', async () => {
     /* Resolved from the distributed daemon, where the adapters are declared —
      * `packages/host` deliberately does not depend on them. */
     const { agents, refused } = resolveAcpAdapters({
@@ -53,10 +55,18 @@ describe('resolveAcpAdapters', () => {
       expect(agent.modulePath.endsWith('.js')).toBe(true);
       expect(agent.modulePath.startsWith('/')).toBe(true);
     }
+    const codex = agents.find((agent) => agent.id === 'codex');
+    const installed = await readFile(codex?.modulePath ?? '', 'utf8');
+    /* The exact pin still receives additional directories for native skill
+     * discovery, but Tau's package skill root must not become trusted or
+     * workspace-writable in Codex's sandbox. */
+    expect(installed).toContain('const sessionRoots = [projectPath];');
+    expect(installed).toContain('const configWithWorkspaceRoots = mergedConfig;');
+    expect(installed).toContain('sandboxPolicy: agentMode.sandboxPolicy,');
   });
 
   it('honours an adapter override only under NODE_ENV=test', () => {
-    const environment = { NODE_ENV: 'test', [acpAdapterOverrideVariable]: `${fakeAgentPath}:codex` };
+    const environment = { ['NODE_ENV']: 'test', [acpAdapterOverrideVariable]: `${fakeAgentPath}:codex` };
     const { agents } = resolveAcpAdapters({ resolveFrom: import.meta.url, environment });
     const codex = agents.find((agent) => agent.id === 'codex');
 
@@ -69,7 +79,7 @@ describe('resolveAcpAdapters', () => {
      * credentials, so `codex` still resolves to the pinned adapter. */
     const production = resolveAcpAdapters({
       resolveFrom: new URL('../../../cli/src/commands/serve.ts', import.meta.url).href,
-      environment: { NODE_ENV: 'production', [acpAdapterOverrideVariable]: `${fakeAgentPath}:codex` },
+      environment: { ['NODE_ENV']: 'production', [acpAdapterOverrideVariable]: `${fakeAgentPath}:codex` },
     });
     expect(production.agents.find((agent) => agent.id === 'codex')?.modulePath).not.toBe(fakeAgentPath);
   });
@@ -115,7 +125,7 @@ const fixtureProfile = (mode?: string) => ({
   package: 'p',
   version: '1',
   configEnv: [],
-  ...(mode === undefined ? {} : { spawnEnv: { TAU_FAKE_AGENT_MODE: mode } }),
+  ...(mode === undefined ? {} : { spawnEnv: { ['TAU_FAKE_AGENT_MODE']: mode } }),
 });
 
 const fixtureAdapter = (mode?: string) => ({ ...fixtureProfile(mode), modulePath: fakeAgentPath });
@@ -173,7 +183,7 @@ describe('discoverAcpAgents', () => {
     const discovery = await discoverAcpAgents({
       resolveFrom: import.meta.url,
       pins: [fixtureProfile('silent')],
-      environment: { ...process.env, NODE_ENV: 'test', [acpAdapterOverrideVariable]: `${fakeAgentPath}:codex` },
+      environment: { ...process.env, ['NODE_ENV']: 'test', [acpAdapterOverrideVariable]: `${fakeAgentPath}:codex` },
       probeTimeout: 1500,
       modelProbeTimeout: 750,
     });
@@ -191,7 +201,7 @@ describe('externalAgentDescriptors', () => {
     const discovery = await discoverAcpAgents({
       resolveFrom: import.meta.url,
       pins: [fixtureProfile()],
-      environment: { ...process.env, NODE_ENV: 'test', [acpAdapterOverrideVariable]: `${fakeAgentPath}:codex` },
+      environment: { ...process.env, ['NODE_ENV']: 'test', [acpAdapterOverrideVariable]: `${fakeAgentPath}:codex` },
       modelProbeTimeout: 20_000,
     });
     const descriptors = externalAgentDescriptors(

@@ -229,6 +229,8 @@ describe('the Node host observes its own workspace', () => {
       await writeFile(join(workspaceRoot, '.tau', 'cache', 'x.bin'), 'noise');
 
       await expect.poll(() => raised.flat(), { timeout: 10_000 }).toContain('main.ts');
+      expect(raised.flat()).not.toContain('.gitignore');
+      expect(raised.flat()).not.toContain('.gitattributes');
       expect(raised.flat().filter((path) => path.startsWith('.tau/cache'))).toEqual([]);
     } finally {
       await revisions.release();

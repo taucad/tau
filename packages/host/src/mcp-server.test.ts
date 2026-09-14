@@ -9,6 +9,10 @@
  */
 
 import { randomBytes } from 'node:crypto';
+import { once } from 'node:events';
+import { createServer, request } from 'node:http';
+import type { IncomingMessage } from 'node:http';
+import type { AddressInfo } from 'node:net';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -120,6 +124,98 @@ describe('createHostMcpEndpoint capability', () => {
 });
 
 describe('the mounted /mcp route', () => {
+  it('never attributes a request admitted under one run to the next run', async () => {
+    const runIds: string[] = [];
+    endpoint = createHostMcpEndpoint({
+      secret,
+      registry: {
+        list: () => [],
+        invoke: async (invocation) => {
+          expect(invocation.runId).toBeDefined();
+          if (invocation.runId === undefined) {
+            throw new Error('missing run id');
+          }
+          runIds.push(invocation.runId);
+          return { content: { success: true, status: 'ready' }, isError: false };
+        },
+      },
+    });
+    const rawServer = createServer((incoming, response) => {
+      void endpoint?.handle(incoming, response);
+    });
+    rawServer.listen(0, '127.0.0.1');
+    await once(rawServer, 'listening');
+    const address = rawServer.address() as AddressInfo;
+    const url = `http://127.0.0.1:${String(address.port)}/mcp`;
+    const capability = endpoint.mint({ chatId: 'chat-1', runId: 'run-1' });
+    const headers = {
+      authorization: `Bearer ${capability.token}`,
+      'content-type': 'application/json',
+      accept: 'application/json, text/event-stream',
+    };
+    try {
+      const initialized = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 0,
+          method: 'initialize',
+          params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'test', version: '1' } },
+        }),
+      });
+      const mcpSessionId = initialized.headers.get('mcp-session-id');
+      await initialized.text();
+      expect(mcpSessionId).toBeTypeOf('string');
+
+      const releaseFirst = endpoint.activate({
+        token: capability.token,
+        runId: 'run-1',
+        chatId: 'chat-1',
+        signal: new AbortController().signal,
+      });
+      const admitted = once(rawServer, 'request');
+      const slow = request(url, { method: 'POST', headers: { ...headers, 'mcp-session-id': mcpSessionId ?? '' } });
+      const response = new Promise<IncomingMessage>((resolve) => {
+        slow.once('response', resolve);
+      });
+      slow.write(' ');
+      await admitted;
+      releaseFirst();
+      const releaseSecond = endpoint.activate({
+        token: capability.token,
+        runId: 'run-2',
+        chatId: 'chat-1',
+        signal: new AbortController().signal,
+      });
+      slow.end(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'tools/call',
+          params: { name: 'get_kernel_result', arguments: { targetFile: 'main.ts' } },
+        }),
+      );
+      const reply = await response;
+      reply.resume();
+      await once(reply, 'end');
+      releaseSecond();
+
+      expect(runIds).not.toContain('run-2');
+    } finally {
+      rawServer.closeAllConnections();
+      await new Promise<void>((resolve, reject) => {
+        rawServer.close((error) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+          resolve();
+        });
+      });
+    }
+  }, 30_000);
+
   it('dispatches a tool call into the daemon registry and refuses an unauthorized one', async () => {
     endpoint = createHostMcpEndpoint({ secret, registry });
     server = startAgentServer({

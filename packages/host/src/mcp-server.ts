@@ -191,7 +191,7 @@ const bearerOf = (authorization: string | undefined): string =>
 export const createHostMcpEndpoint = (options: HostMcpEndpointOptions): HostMcpEndpoint => {
   const now = options.now ?? Date.now;
   const handler = createTauMcpHttpHandler();
-  const active = new Map<string, { readonly runId: string; readonly signal: AbortSignal }>();
+  const active = new Map<string, { readonly runId: string; readonly signal: AbortSignal; abort(): void }>();
 
   const signature = (encodedClaims: string): Uint8Array<ArrayBuffer> =>
     Uint8Array.from(
@@ -267,7 +267,11 @@ export const createHostMcpEndpoint = (options: HostMcpEndpointOptions): HostMcpE
         runId: binding.runId,
         // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- `@taucad/mcp` validated these args against the tool's own schema.
         input: call.args as unknown as JsonValue,
-        signal: AbortSignal.any([binding.signal, dispatchOptions.signal ?? signal]),
+        signal: AbortSignal.any(
+          [binding.signal, dispatchOptions.signal, signal].filter(
+            (candidate): candidate is AbortSignal => candidate !== undefined,
+          ),
+        ),
       });
       // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the registry returns the canonical RPC result verbatim.
       return result.content as TauMcpRpcSuccess | TauMcpRpcFailure;
@@ -288,12 +292,20 @@ export const createHostMcpEndpoint = (options: HostMcpEndpointOptions): HostMcpE
       if (claims.chatId !== chatId || signal.aborted) {
         throw new HostMcpCapabilityError('Tau Host MCP capability does not match an active turn.');
       }
-      const binding = { runId, signal };
+      const bindingLifetime = new AbortController();
+      const binding = {
+        runId,
+        signal: AbortSignal.any([signal, bindingLifetime.signal]),
+        abort: (): void => {
+          bindingLifetime.abort();
+        },
+      };
       active.set(claims.sessionKey, binding);
       return () => {
         if (active.get(claims.sessionKey) === binding) {
           active.delete(claims.sessionKey);
         }
+        binding.abort();
       };
     },
     mint: ({ runId, chatId }) => {
@@ -325,6 +337,7 @@ export const createHostMcpEndpoint = (options: HostMcpEndpointOptions): HostMcpE
       response.on('close', () => {
         controller.abort();
       });
+      const binding = active.get(claims.sessionKey);
       let body: unknown;
       try {
         body = await readJsonBody(request);
@@ -336,11 +349,14 @@ export const createHostMcpEndpoint = (options: HostMcpEndpointOptions): HostMcpE
         request,
         response,
         body,
-        dispatch: dispatchFor(claims, active.get(claims.sessionKey), controller.signal),
+        dispatch: dispatchFor(claims, binding, controller.signal),
         authorityKey: authorityKey(claims),
       });
     },
     close: async () => {
+      for (const binding of active.values()) {
+        binding.abort();
+      }
       active.clear();
       await handler.close();
     },

@@ -16,6 +16,7 @@
  * | (turn 2 onward) | a second chunk naming the whole transcript, so a later turn provably recalls the earlier ones |
  * | `mcp` | calls `test_model` through the `tau` MCP server and reports the evidence |
  * | `escape` | tries `fs/write_text_file` above `cwd` and reports the refusal |
+ * | `wrong-session` | tries `fs/write_text_file` under another ACP session id and reports the refusal |
  * | `slow` | stops after the first chunk and waits to be cancelled |
  * | `noask` | writes without the permission round trip (the auto-approving mode a real CLI config produces — SP-4 Result 3) |
  * | `stop:<reason>` | ends the turn immediately with that ACP stop reason (`max_tokens`, `refusal`, …) |
@@ -38,9 +39,12 @@
  * | --- | --- |
  * | `grouped` | `configOptions` offers the models as `SessionConfigSelectGroup[]` rather than a flat list |
  * | `auth-required` | `initialize` advertises a `terminal-auth` method and `session/new` errors `-32000` |
+ * | `restore-auth` | restoring an existing session errors `-32000` instead of silently starting fresh |
  * | `images` | `promptCapabilities.image` is advertised; withheld otherwise |
  * | `protocol-2` | `initialize` answers a protocol version this client does not speak |
  * | `silent` | `initialize` is never answered at all |
+ * | `no-http` | HTTP MCP support is absent |
+ * | `no-additional-directories` | additional-directory support is absent |
  *
  * Sessions are persisted under `cwd`, so a respawned fixture can resume or load
  * one it created in an earlier process. `session/fork` and the compaction
@@ -344,6 +348,15 @@ const attemptEscape = async (sessionId: string, cwd: string): Promise<void> => {
   await textChunk(sessionId, `escape: ${answer.error ? answer.error.message : 'accepted'}`);
 };
 
+const attemptWrongSession = async (sessionId: string): Promise<void> => {
+  const answer = await request('fs/write_text_file', {
+    sessionId: `${sessionId}-foreign`,
+    path: 'wrong-session.txt',
+    content: 'foreign',
+  });
+  await textChunk(sessionId, `wrong-session: ${answer.error ? answer.error.message : 'accepted'}`);
+};
+
 /**
  * The `session/update` variants Tau projects as presentation, not history.
  *
@@ -531,6 +544,7 @@ const writeGatedFile = async (sessionId: string, session: SessionState, text: st
         toolCall: { toolCallId: 'write-1', title: 'write hello.txt' },
         options: [
           { optionId: 'allow', name: 'Allow', kind: 'allow_once' },
+          { optionId: 'allow-session', name: 'Allow for this session', kind: 'allow_always' },
           { optionId: 'allow-always', name: 'Always allow', kind: 'allow_always' },
           { optionId: 'reject', name: 'Reject', kind: 'reject_once' },
         ],
@@ -619,6 +633,9 @@ const runPrompt = async (sessionId: string, blocks: readonly unknown[]): Promise
   if (text.includes('escape')) {
     await attemptEscape(sessionId, session.cwd);
   }
+  if (text.includes('wrong-session')) {
+    await attemptWrongSession(sessionId);
+  }
   if (text.includes('abandon')) {
     /* Asked and then gone: the request is sent, never answered, and this process
      * dies with it outstanding — what an OOM, a crash or a dropped connection
@@ -690,7 +707,12 @@ const initializeResult = (): Record<string, unknown> => ({
   protocolVersion: mode === 'protocol-2' ? 2 : 1,
   agentCapabilities: {
     loadSession: true,
-    sessionCapabilities: { resume: {}, close: {}, additionalDirectories: {} },
+    sessionCapabilities: {
+      resume: {},
+      close: {},
+      ...(mode === 'no-additional-directories' ? {} : { additionalDirectories: {} }),
+    },
+    ...(mode === 'no-http' ? {} : { mcpCapabilities: { http: true } }),
     /* Both real pins advertise `image` too; the fixture withholds it unless the
      * `images` mode names it, so the refusal path has something to refuse. */
     promptCapabilities: { image: mode === 'images', embeddedContext: mode !== 'text-only' },
@@ -729,6 +751,16 @@ const promptResult = async (sessionId: string, blocks: readonly unknown[]): Prom
        * answered; the point of the keyword is the window *after* that. */
       await pause(250);
       await driveUrlLogin(sessionId);
+    })();
+  }
+  if (promptText(blocks).includes('late-state')) {
+    // async-iife: fixture -- this deliberately arrives after the prompt response.
+    void (async () => {
+      await pause(250);
+      await update(sessionId, {
+        sessionUpdate: 'available_commands_update',
+        availableCommands: [{ name: 'late-command', description: 'Reported between turns' }],
+      });
     })();
   }
   const turns = sessions.get(sessionId)?.prompts.length ?? 1;
@@ -777,12 +809,20 @@ const handle = async (message: JsonRpcMessage): Promise<void> => {
       return;
     }
     case 'session/resume': {
+      if (mode === 'restore-auth') {
+        fail(-32_000, 'Authentication required');
+        return;
+      }
       /* Resume restores nothing to the client by contract — the caller keeps
        * the transcript it already has. */
       reply({ configOptions: configOptionsOf(openSession(asString(params['sessionId']), params)) });
       return;
     }
     case 'session/load': {
+      if (mode === 'restore-auth') {
+        fail(-32_000, 'Authentication required');
+        return;
+      }
       const sessionId = asString(params['sessionId']);
       const session = openSession(sessionId, params);
       /* Load replays: one chunk per stored prompt, before the reply, which is

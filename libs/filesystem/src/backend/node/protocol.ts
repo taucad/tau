@@ -11,9 +11,10 @@
 
 import { z } from 'zod';
 import type { FileStat } from '#types.js';
+import type { RevisionFileMode } from '#revision-tree.js';
 
 /** Wire version. Bump on any incompatible request/response shape change. @public */
-export const nodeFsProtocolVersion = 1;
+export const nodeFsProtocolVersion = 2;
 
 /**
  * Watch event as it crosses the port. A superset of the library's
@@ -60,6 +61,8 @@ export const nodeFsRequestSchema = z.discriminatedUnion('op', [
   z.object({ ...rooted, op: z.literal('writeFile'), path: z.string(), data: dataSchema }),
   z.object({ ...rooted, op: z.literal('readdir'), path: z.string() }),
   z.object({ ...rooted, op: z.literal('stat'), path: z.string() }),
+  z.object({ ...rooted, op: z.literal('getFileMode'), path: z.string() }),
+  z.object({ ...rooted, op: z.literal('setFileMode'), path: z.string(), mode: z.enum(['100644', '100755']) }),
   z.object({ ...rooted, op: z.literal('mkdir'), path: z.string() }),
   z.object({ ...rooted, op: z.literal('unlink'), path: z.string() }),
   z.object({ ...rooted, op: z.literal('rmdir'), path: z.string() }),
@@ -87,6 +90,7 @@ const fileStatSchema = z.union([
     lineCount: z.number(),
   }),
 ]) as z.ZodType<FileStat>;
+const fileModeSchema = z.enum(['100644', '100755']) as z.ZodType<RevisionFileMode>;
 
 const watchEventSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('change'), path: z.string(), kind: z.enum(['file', 'dir']) }),
@@ -109,6 +113,8 @@ export const nodeFsResultSchemas = {
   writeFile: z.undefined(),
   readdir: z.array(z.string()),
   stat: fileStatSchema,
+  getFileMode: fileModeSchema,
+  setFileMode: z.undefined(),
   mkdir: z.undefined(),
   unlink: z.undefined(),
   rmdir: z.undefined(),

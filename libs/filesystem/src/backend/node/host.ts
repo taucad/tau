@@ -45,6 +45,12 @@ const runOperation = async (provider: NodeFsProvider, request: NodeFsRequest): P
     case 'stat': {
       return provider.stat(request.path);
     }
+    case 'getFileMode': {
+      return provider.getFileMode(request.path);
+    }
+    case 'setFileMode': {
+      return provider.setFileMode(request.path, request.mode);
+    }
     case 'mkdir': {
       return provider.mkdir(request.path);
     }

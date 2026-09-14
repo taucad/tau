@@ -22,6 +22,14 @@ describe('path registry', () => {
   });
 
   it.each([
+    '.tau/artifacts/export/model.stl',
+    '.tau/tool-results/chat/result.json',
+    '.tau/offloaded-tool-results/chat/result.json',
+  ])('keeps the host record %s read-only to agents', (path) => {
+    expect(classify(path)).toMatchObject({ class: 'records', agentAccess: 'read-only' });
+  });
+
+  it.each([
     'main.ts',
     'src/parts/bracket.ts',
     'tau.json',

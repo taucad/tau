@@ -12,6 +12,7 @@ import type { z } from 'zod';
 import { Topic } from '@taucad/events';
 import { AbstractFileSystemProvider } from '#backend/abstract-provider.js';
 import type { FileStat, ProviderCapabilities, WatchRequest } from '#types.js';
+import type { RevisionFileMode } from '#revision-tree.js';
 import type { NodeFsPort } from '#backend/node/port.js';
 import type { NodeFsRequest, NodeFsResponse, NodeFsWatchEvent } from '#backend/node/protocol.js';
 import {
@@ -287,6 +288,16 @@ export class NodeFsProviderClient extends AbstractFileSystemProvider {
   public async stat(path: string): Promise<FileStat> {
     this._assertRootedPath(path);
     return this._channel.request({ root: this._root, op: 'stat', path });
+  }
+
+  public async getFileMode(path: string): Promise<RevisionFileMode> {
+    this._assertRootedPath(path);
+    return this._channel.request({ root: this._root, op: 'getFileMode', path });
+  }
+
+  public async setFileMode(path: string, mode: RevisionFileMode): Promise<void> {
+    this._assertRootedPath(path);
+    await this._channel.request({ root: this._root, op: 'setFileMode', path, mode });
   }
 
   public async unlink(path: string): Promise<void> {

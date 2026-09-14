@@ -205,7 +205,10 @@ const pendingProjectScopeSchema = z
     }
   })
   .transform((scope): StorageRootConfig => scope as unknown as StorageRootConfig);
-const pendingProjectFileDescriptorSchema = z.object({ content: z.instanceof(Uint8Array) });
+const pendingProjectFileDescriptorSchema = z.object({
+  content: z.instanceof(Uint8Array),
+  mode: z.enum(['100644', '100755']).optional(),
+});
 
 /** Complete runtime boundary for direct and bridged pending-project commits. @public */
 export const pendingProjectCommitInputSchema: z.ZodType<CommitPendingProjectDirectoryInput> = z
@@ -607,6 +610,18 @@ export class WorkspaceFileService {
       const { resolution } = resolveLocal(path);
       return resolution.provider.stat(resolution.path);
     };
+    const getFileMode = captured.provider.getFileMode
+      ? async (path: string) => {
+          const { resolution } = resolveLocal(path);
+          return resolution.provider.getFileMode!(resolution.path);
+        }
+      : undefined;
+    const setFileMode = captured.provider.setFileMode
+      ? async (path: string, mode: '100644' | '100755') => {
+          const { resolution } = resolveLocal(path);
+          await resolution.provider.setFileMode!(resolution.path, mode);
+        }
+      : undefined;
     const writeFile = async (path: string, data: Uint8Array<ArrayBuffer> | string): Promise<void> => {
       const { authorityPath, resolution } = resolveLocal(path);
       await this._writeFileResolved({ path: authorityPath, resolution, data, context: mutationContext });
@@ -729,6 +744,8 @@ export class WorkspaceFileService {
       appendFile,
       readdir,
       stat,
+      getFileMode,
+      setFileMode,
       mkdir,
       unlink,
       rmdir,
@@ -2080,6 +2097,10 @@ export class WorkspaceFileService {
               data: descriptor.content,
               context,
             });
+            if (descriptor.mode !== undefined) {
+              // oxlint-disable-next-line no-await-in-loop -- mode belongs to the file just written.
+              await provider.setFileMode?.(providerPath, descriptor.mode);
+            }
           }
 
           await this._writeFileUnlocked({
@@ -4089,7 +4110,7 @@ export class WorkspaceFileService {
 
   private _validatePendingProjectCommit(input: CommitPendingProjectDirectoryInput): {
     path: string;
-    files: Array<readonly [string, { readonly content: Uint8Array<ArrayBuffer> }]>;
+    files: Array<readonly [string, { readonly content: Uint8Array<ArrayBuffer>; readonly mode?: '100644' | '100755' }]>;
     manifest: Uint8Array<ArrayBuffer>;
     scope: StorageRootConfig;
     storageRootKey: string;
@@ -4108,10 +4129,12 @@ export class WorkspaceFileService {
     const scope: StorageRootConfig = { ...parsedInput.data.scope };
     const storageRootKey = this._registry.resolveStorageRootKey(scope);
     const path = parsedInput.data.providerBasePath;
-    const files: Array<readonly [string, { readonly content: Uint8Array<ArrayBuffer> }]> = [];
-    for (const [relativePath, { content }] of Object.entries(parsedInput.data.files)) {
+    const files: Array<
+      readonly [string, { readonly content: Uint8Array<ArrayBuffer>; readonly mode?: '100644' | '100755' }]
+    > = [];
+    for (const [relativePath, { content, mode }] of Object.entries(parsedInput.data.files)) {
       const ownedContent = new Uint8Array(content);
-      files.push([relativePath, { content: ownedContent }]);
+      files.push([relativePath, { content: ownedContent, ...(mode === undefined ? {} : { mode }) }]);
     }
 
     return {

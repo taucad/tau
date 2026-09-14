@@ -1,5 +1,6 @@
 import { seemsBinary } from '#content-metadata.js';
 import { ImmutableRevisionTree } from '#revision-tree.js';
+import type { RevisionFileMode, RevisionTreeInput } from '#revision-tree.js';
 
 /** Conflicting additions of different bytes at the same absent base path. @public */
 export type AddAddConflict = Readonly<{
@@ -37,6 +38,14 @@ export type TextConflict = Readonly<{
   theirs: string;
 }>;
 
+/** Identical added bytes whose executable modes disagree. @public */
+export type ModeConflict = Readonly<{
+  type: 'mode';
+  path: string;
+  ours: RevisionFileMode;
+  theirs: RevisionFileMode;
+}>;
+
 /**
  * One side kept a file where the other grew a directory over the same name.
  *
@@ -63,6 +72,7 @@ export type RevisionTreeConflict =
   | ModifyDeleteConflict
   | BinaryConflict
   | TextConflict
+  | ModeConflict
   | FileDirectoryConflict;
 
 /** Deterministic result of a three-way revision-tree merge. @public */
@@ -143,6 +153,29 @@ const bytesEqual = (left: Uint8Array<ArrayBuffer> | undefined, right: Uint8Array
 
 const own = (bytes: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> => new Uint8Array(bytes);
 const comparePath = (left: string, right: string): number => (left < right ? -1 : left > right ? 1 : 0);
+
+const mergedMode = (
+  base: RevisionFileMode | undefined,
+  ours: RevisionFileMode | undefined,
+  theirs: RevisionFileMode | undefined,
+): RevisionFileMode | undefined => {
+  if (ours === theirs) {
+    return ours;
+  }
+  if (ours === base) {
+    return theirs;
+  }
+  if (theirs === base) {
+    return ours;
+  }
+  if (ours === undefined) {
+    return theirs;
+  }
+  if (theirs === undefined) {
+    return ours;
+  }
+  return undefined;
+};
 
 const splitLines = (text: string): string[] => {
   const lines: string[] = [];
@@ -354,7 +387,7 @@ const mergeChangedFile = (
  * @returns One conflict per colliding file, with the paths it withdraws.
  */
 const prefixCollisions = (
-  merged: ReadonlyArray<readonly [string, Uint8Array<ArrayBuffer>]>,
+  merged: readonly RevisionTreeInput[],
   conflicts: readonly RevisionTreeConflict[],
   ours: ImmutableRevisionTree,
 ): ReadonlyArray<Readonly<{ conflict: FileDirectoryConflict; paths: ReadonlySet<string> }>> => {
@@ -483,7 +516,7 @@ export const mergeRevisionTrees = (
     ...ours.entries().map(({ path }) => path),
     ...theirs.entries().map(({ path }) => path),
   ]);
-  const merged: Array<readonly [string, Uint8Array<ArrayBuffer>]> = [];
+  const merged: RevisionTreeInput[] = [];
   const conflicts: RevisionTreeConflict[] = [];
 
   for (const path of [...paths].sort(comparePath)) {
@@ -495,7 +528,12 @@ export const mergeRevisionTrees = (
     });
     if (structural.status === 'resolved') {
       if (structural.content !== undefined) {
-        merged.push([path, structural.content]);
+        const mode = mergedMode(base.mode(path), ours.mode(path), theirs.mode(path));
+        if (mode === undefined) {
+          conflicts.push({ type: 'mode', path, ours: ours.mode(path)!, theirs: theirs.mode(path)! });
+        } else {
+          merged.push([path, structural.content, mode]);
+        }
       }
       continue;
     }
@@ -508,7 +546,12 @@ export const mergeRevisionTrees = (
       conflicts.push(changed.conflict);
       continue;
     }
-    merged.push([path, changed.content]);
+    const mode = mergedMode(base.mode(path), ours.mode(path), theirs.mode(path));
+    if (mode === undefined) {
+      conflicts.push({ type: 'mode', path, ours: ours.mode(path)!, theirs: theirs.mode(path)! });
+    } else {
+      merged.push([path, changed.content, mode]);
+    }
   }
 
   const collisions = prefixCollisions(merged, conflicts, ours);

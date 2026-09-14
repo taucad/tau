@@ -6,7 +6,7 @@
 export { ResourceQueue } from '#resource-queue.js';
 export { revisionMetadataSchema } from '#revision-metadata.js';
 export { ImmutableRevisionTree, revisionId } from '#revision-tree.js';
-export type { RevisionId, RevisionTreeEntry } from '#revision-tree.js';
+export type { RevisionFileMode, RevisionId, RevisionTreeEntry, RevisionTreeInput } from '#revision-tree.js';
 export { mergeRevisionTrees, renderConflictMarkers } from '#revision-merge.js';
 export type {
   AddAddConflict,
@@ -14,6 +14,7 @@ export type {
   ConflictMarkerInput,
   ConflictMarkerLabels,
   FileDirectoryConflict,
+  ModeConflict,
   ModifyDeleteConflict,
   RevisionTreeConflict,
   RevisionTreeMergeResult,

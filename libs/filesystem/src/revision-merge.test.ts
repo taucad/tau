@@ -54,6 +54,27 @@ describe('mergeRevisionTrees', () => {
     }
   });
 
+  it('merges one-sided mode changes and conflicts on disagreeing added modes', () => {
+    const base = new ImmutableRevisionTree([['run.sh', 'echo run\n']]);
+    const ours = new ImmutableRevisionTree([['run.sh', 'echo run\n', '100755']]);
+    const unchanged = new ImmutableRevisionTree([['run.sh', 'echo run\n']]);
+    const merged = mergeRevisionTrees(base, ours, unchanged);
+    expect(merged.status).toBe('merged');
+    if (merged.status === 'merged') {
+      expect(merged.tree.mode('run.sh')).toBe('100755');
+    }
+
+    const conflicted = mergeRevisionTrees(
+      tree({}),
+      new ImmutableRevisionTree([['new.sh', 'echo run\n', '100755']]),
+      new ImmutableRevisionTree([['new.sh', 'echo run\n', '100644']]),
+    );
+    expect(conflicted.status).toBe('conflicted');
+    if (conflicted.status === 'conflicted') {
+      expect(conflicted.conflicts).toEqual([{ type: 'mode', path: 'new.sh', ours: '100755', theirs: '100644' }]);
+    }
+  });
+
   it('returns a typed text conflict for overlapping edits without writing conflict markers', () => {
     const base = tree({ 'main.ts': 'before\n' });
     const ours = tree({ 'main.ts': 'ours\n' });

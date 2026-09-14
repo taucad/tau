@@ -406,7 +406,9 @@ export const jscadKernel = defineKernel({
           content: jscadToGltf(renderableParts, { includeEdges: content?.includeEdges === true }, context.modeling),
         });
       } catch (error) {
-        runtime.logger.warn('Failed to convert JSCAD assembly to GLTF', { data: error });
+        runtime.logger.warn('Failed to convert JSCAD assembly to GLTF', {
+          data: error,
+        });
       }
     } else {
       artifacts.push(createEmptyGltfGeometry());
@@ -421,13 +423,25 @@ export const jscadKernel = defineKernel({
     return parts.map((part): JscadSerializedNativeHandleEntry => {
       const { shape } = part;
       if (geom3.isA(shape)) {
-        return { type: 'geom3', data: geom3.toCompactBinary(shape), name: part.name };
+        return {
+          type: 'geom3',
+          data: geom3.toCompactBinary(shape),
+          name: part.name,
+        };
       }
       if (geom2.isA(shape)) {
-        return { type: 'geom2', data: geom2.toCompactBinary(shape), name: part.name };
+        return {
+          type: 'geom2',
+          data: geom2.toCompactBinary(shape),
+          name: part.name,
+        };
       }
       if (path2.isA(shape)) {
-        return { type: 'path2', data: path2.toCompactBinary(shape), name: part.name };
+        return {
+          type: 'path2',
+          data: path2.toCompactBinary(shape),
+          name: part.name,
+        };
       }
       throw new Error(`Unsupported JSCAD geometry type for serialized handle at index ${part.index}.`);
     });
@@ -442,8 +456,16 @@ export const jscadKernel = defineKernel({
     const serializedEntries: unknown[] = serializedNativeHandle;
     return serializedEntries.map((rawEntry, index): JscadPartDescriptor => {
       const entry = parseSerializedNativeHandleEntry(rawEntry, index);
-      const compactBinary = normalizeCompactBinaryData({ data: entry.data, index, type: entry.type });
-      const name = resolveShapeName({ index, name: entry.name, source: 'authored' });
+      const compactBinary = normalizeCompactBinaryData({
+        data: entry.data,
+        index,
+        type: entry.type,
+      });
+      const name = resolveShapeName({
+        index,
+        name: entry.name,
+        source: 'authored',
+      });
       let shape: unknown;
       switch (entry.type) {
         case 'geom2': {

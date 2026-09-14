@@ -37,6 +37,11 @@ type SessionEvent = AgentLogEvent extends infer Event
     : never
   : never;
 
+type HostSettlementEvent = Extract<
+  SessionEvent,
+  { readonly type: 'turn.finalized' | 'turn.conflicted' | 'turn.failed' }
+>;
+
 /** One client-generated turn admitted to the portable host. @public */
 type TauAgentTurnRequestBase = {
   readonly chatId: string;
@@ -112,6 +117,15 @@ export type ExternalAgentTurn = {
   readonly publishLive?: ((event: AgentLiveEventPayload) => Promise<void>) | undefined;
   /** Append durable events; each publishes on the host's event stream. */
   append(events: readonly ExternalAgentLogEvent[]): Promise<void>;
+  /**
+   * Append replaceable session state after this turn settles.
+   *
+   * Unlike {@link append}, this capability may be retained by a session-scoped
+   * external runner. The host still owns chat fencing, ordering and event
+   * identity; the runner may use it only for state that ACP reports outside a
+   * prompt, such as commands, plans and configuration.
+   */
+  readonly appendSession?: ((events: readonly ExternalAgentLogEvent[]) => Promise<void>) | undefined;
   /** Persist state that must survive a restart. Merges into what is there. */
   remember(state: JsonObject): Promise<void>;
   /**
@@ -477,6 +491,12 @@ export type TauAgentHost = {
     /** Serialized-byte budget for the page; unbounded by bytes when absent. */
     readonly maxBytes?: number | undefined;
   }): Promise<EventLogBatch>;
+  /** Append one revision-authority settlement through this chat's fenced writer. */
+  recordSettlement(input: {
+    readonly chatId: string;
+    readonly runId: string;
+    readonly event: HostSettlementEvent;
+  }): Promise<void>;
   /** Bind one chat to the generation token minted by its current Web Lock lease. */
   assumeLeadership(chatId: string, generation: string): void;
   /** Abort one chat and close its cached appender after leadership loss. */
@@ -1155,6 +1175,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
           ...(input.config ? { config: input.config } : {}),
           history: await log.read(),
           append: appendEvents,
+          appendSession: appendEvents,
           publishLive: async (event) => {
             await options.onLiveEvent?.({ ...event, chatId: input.chatId, runId: input.runId });
           },
@@ -1655,6 +1676,10 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     readEvents: async ({ chatId, cursor, limit, maxBytes }) => {
       const log = await logFor(chatId);
       return log.readBatch({ cursor, limit, maxBytes });
+    },
+    recordSettlement: async ({ chatId, runId, event }) => {
+      assertOpen();
+      await appendExternal({ chatId, runId, log: await logFor(chatId), events: [event] });
     },
     assumeLeadership: (chatId, generation) => {
       assertOpen();

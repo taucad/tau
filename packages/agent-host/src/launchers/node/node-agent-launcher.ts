@@ -677,6 +677,13 @@ export const createNodeAgentLauncher = (options: NodeAgentLauncherOptions): Node
       closed = true;
       await host.close();
       await Promise.allSettled(background);
+      await Promise.allSettled(
+        [...logs.values()].map(async (opened) => {
+          const log = await opened;
+          await log.close();
+        }),
+      );
+      logs.clear();
       durable.close();
       live.close();
     },

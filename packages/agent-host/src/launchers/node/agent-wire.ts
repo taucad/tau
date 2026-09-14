@@ -26,7 +26,7 @@ import { modelProviderKinds } from '#log/event-types.js';
 import { isGatewayProviderKind } from '#transport/gateway-model-transport.js';
 import type { AgentLiveEvent, HostRunSnapshot, InterruptRequest, InterruptResolution } from '#waist/ports.js';
 import type { EventLogBatch } from '#log/event-log-appender.js';
-import type { AgentLogEvent, RunTrigger, UserProviderMessage } from '#log/event-types.js';
+import type { AgentLogEvent, JsonValue, RunTrigger, UserProviderMessage } from '#log/event-types.js';
 import type { TauAgentAdmissionConfig } from '#host/tau-agent-host.js';
 
 /** Maximum durable events transferred in one replay window. @public */
@@ -102,7 +102,12 @@ export const externalAgentDescriptorSchema = z.strictObject({
    * out — never a reason to drop the agent (EQ1 fallback B).
    */
   models: z
-    .array(z.strictObject({ id: z.string().min(1).max(128), name: z.string().min(1).max(128) }))
+    .array(
+      z.strictObject({
+        id: z.string().min(1).max(128),
+        name: z.string().min(1).max(128),
+      }),
+    )
     .max(64)
     .default([]),
   /** The select's `currentValue`: what a turn naming no model actually runs. */
@@ -161,7 +166,12 @@ export type ExternalAgentLogin = z.infer<typeof externalAgentLoginSchema>;
 export const agentChannelSystemPromptBlockSchema = z.strictObject({
   type: z.literal('text'),
   text: z.string(),
-  cacheControl: z.strictObject({ type: z.literal('ephemeral'), scope: z.literal('global').optional() }).optional(),
+  cacheControl: z
+    .strictObject({
+      type: z.literal('ephemeral'),
+      scope: z.literal('global').optional(),
+    })
+    .optional(),
 });
 
 /** Catalog pricing in dollars per million tokens. @public */
@@ -190,7 +200,13 @@ export const agentChannelToolChoiceSchema = z.union([z.enum(['none', 'auto', 'an
  * would reject real client payloads at admission. */
 const clientContextSchema = z.strictObject({
   skills: z
-    .array(z.looseObject({ name: nonEmptyString, description: z.string(), fingerprint: z.string().optional() }))
+    .array(
+      z.looseObject({
+        name: nonEmptyString,
+        description: z.string(),
+        fingerprint: z.string().optional(),
+      }),
+    )
     .optional(),
   memory: z.record(z.string(), z.string()).optional(),
 });
@@ -272,8 +288,17 @@ export const agentChannelCommandSchema = z.union([
     trigger: z.enum(['retry', 'edit', 'regenerate']),
     retainedMessageIds: z.array(nonEmptyString),
   }),
-  z.strictObject({ ...commandBase, type: z.literal('steer'), runId: nonEmptyString, message: z.string() }),
-  z.strictObject({ ...commandBase, type: z.literal('cancel'), runId: nonEmptyString }),
+  z.strictObject({
+    ...commandBase,
+    type: z.literal('steer'),
+    runId: nonEmptyString,
+    message: z.string(),
+  }),
+  z.strictObject({
+    ...commandBase,
+    type: z.literal('cancel'),
+    runId: nonEmptyString,
+  }),
   z.strictObject({ ...commandBase, type: z.literal('resume') }),
   /* Additive beside the browser vocabulary, never a replacement: a daemon runs
    * unattended, so something has to be able to *raise* the approval a later
@@ -313,7 +338,10 @@ type AgentChannelStartCommand = {
   readonly baseRevisionId?: string | undefined;
 } & (
   | { readonly trigger: 'submit'; readonly retainedMessageIds?: never }
-  | { readonly trigger: Exclude<RunTrigger, 'submit'>; readonly retainedMessageIds: readonly string[] }
+  | {
+      readonly trigger: Exclude<RunTrigger, 'submit'>;
+      readonly retainedMessageIds: readonly string[];
+    }
 );
 
 /** One bounded replay window a client may ask for. @public */
@@ -327,13 +355,37 @@ export type AgentChannelTailWindow = {
 /** One client command on the `/agent` channel. @public */
 export type AgentChannelCommand =
   | AgentChannelStartCommand
-  | { readonly type: 'steer'; readonly chatId: string; readonly runId: string; readonly message: string }
+  | {
+      readonly type: 'steer';
+      readonly chatId: string;
+      readonly runId: string;
+      readonly message: string;
+    }
   | { readonly type: 'cancel'; readonly chatId: string; readonly runId: string }
   | { readonly type: 'resume'; readonly chatId: string }
   | ({ readonly type: 'interrupt'; readonly chatId: string } & InterruptRequest)
-  | ({ readonly type: 'resolve-interrupt'; readonly chatId: string; readonly runId: string } & InterruptResolution)
-  | ({ readonly type: 'tail'; readonly chatId: string } & AgentChannelTailWindow)
-  | ({ readonly type: 'attach'; readonly chatId: string } & AgentChannelTailWindow);
+  | ({
+      readonly type: 'resolve-interrupt';
+      readonly chatId: string;
+      readonly runId: string;
+    } & InterruptResolution)
+  | ({
+      readonly type: 'tail';
+      readonly chatId: string;
+    } & AgentChannelTailWindow)
+  | ({
+      readonly type: 'attach';
+      readonly chatId: string;
+    } & AgentChannelTailWindow);
+
+/** One host-owned revision request carried beside agent commands. @public */
+export type AgentChannelRevisionCommand = {
+  readonly type: 'revision';
+  readonly request: JsonValue;
+};
+
+/** Every request accepted by the host channel. @public */
+export type AgentChannelRequest = AgentChannelCommand | AgentChannelRevisionCommand;
 
 /** Operations that answer with a run projection. @public */
 export type AgentChannelResultOperation = 'start' | 'steer' | 'cancel' | 'resume' | 'interrupt' | 'resolve-interrupt';
@@ -345,8 +397,16 @@ export type AgentChannelLeadership =
 
 /** One answer to an {@link AgentChannelCommand}. @public */
 export type AgentChannelResponse =
-  | { readonly type: 'result'; readonly operation: AgentChannelResultOperation; readonly snapshot: HostRunSnapshot }
-  | { readonly type: 'tail'; readonly chatId: string; readonly batch: EventLogBatch }
+  | {
+      readonly type: 'result';
+      readonly operation: AgentChannelResultOperation;
+      readonly snapshot: HostRunSnapshot;
+    }
+  | {
+      readonly type: 'tail';
+      readonly chatId: string;
+      readonly batch: EventLogBatch;
+    }
   | {
       readonly type: 'attach';
       readonly chatId: string;
@@ -354,6 +414,11 @@ export type AgentChannelResponse =
       readonly leadership: AgentChannelLeadership;
       readonly snapshot?: HostRunSnapshot | undefined;
       readonly takeover: boolean;
+    }
+  | {
+      readonly type: 'revision';
+      readonly result: JsonValue;
+      readonly status: JsonValue;
     };
 
 const hostRunSnapshotSchema = z.strictObject({
@@ -392,7 +457,10 @@ const eventLogBatchSchema = z
 
 const leadershipSchema = z.union([
   z.strictObject({ role: z.literal('leader'), generation: nonEmptyString }),
-  z.strictObject({ role: z.literal('follower'), generation: z.string().optional() }),
+  z.strictObject({
+    role: z.literal('follower'),
+    generation: z.string().optional(),
+  }),
 ]);
 
 /** Every answer a daemon may return on the `/agent` channel. @public */
@@ -402,7 +470,11 @@ export const agentChannelResponseSchema = z.union([
     operation: z.enum(['start', 'steer', 'cancel', 'resume', 'interrupt', 'resolve-interrupt']),
     snapshot: hostRunSnapshotSchema,
   }),
-  z.strictObject({ type: z.literal('tail'), chatId: nonEmptyString, batch: eventLogBatchSchema }),
+  z.strictObject({
+    type: z.literal('tail'),
+    chatId: nonEmptyString,
+    batch: eventLogBatchSchema,
+  }),
   z.strictObject({
     type: z.literal('attach'),
     chatId: nonEmptyString,
@@ -411,15 +483,42 @@ export const agentChannelResponseSchema = z.union([
     snapshot: hostRunSnapshotSchema.optional(),
     takeover: z.boolean(),
   }),
+  z.strictObject({
+    type: z.literal('revision'),
+    result: jsonValueSchema,
+    status: jsonValueSchema,
+  }),
 ]);
 
+/** One revision-root projection or page-facing outcome. @public */
+export type AgentChannelRevisionEvent = {
+  readonly kind: 'status' | 'event' | 'toast';
+  readonly value: JsonValue;
+};
+
+/** Revision event validation stays transport-neutral and bounded to JSON. @public */
+export const agentChannelRevisionEventSchema = z.strictObject({
+  kind: z.enum(['status', 'event', 'toast']),
+  value: jsonValueSchema,
+});
+
 /** One durable event, addressed to its chat. @public */
-export type AgentChannelEvent = { readonly chatId: string; readonly event: AgentLogEvent };
+export type AgentChannelEvent = {
+  readonly chatId: string;
+  readonly event: AgentLogEvent;
+};
 /** One ephemeral model delta, addressed to its chat. @public */
-export type AgentChannelLiveEvent = { readonly chatId: string; readonly event: AgentLiveEvent };
+export type AgentChannelLiveEvent = {
+  readonly chatId: string;
+  readonly event: AgentLiveEvent;
+};
 
 /** Durable-event stream frame schema. @public */
-export const agentChannelEventSchema = z.strictObject({ chatId: nonEmptyString, event: agentLogEventSchema });
+export const agentChannelEventSchema = z.strictObject({
+  chatId: nonEmptyString,
+  event: agentLogEventSchema,
+});
+
 const liveEventBase = {
   chatId: nonEmptyString,
   runId: nonEmptyString,
@@ -431,7 +530,6 @@ const liveToolEventBase = {
   toolCallId: nonEmptyString,
   toolName: nonEmptyString,
 };
-
 /** Ephemeral-delta stream frame schema. @public */
 export const agentChannelLiveEventSchema = z.strictObject({
   chatId: nonEmptyString,
@@ -491,33 +589,67 @@ export const agentChannelLiveEventSchema = z.strictObject({
  */
 export type AgentChannelProtocol = {
   readonly calls: {
-    readonly request: { readonly args: AgentChannelCommand; readonly result: AgentChannelResponse };
+    readonly request: {
+      readonly args: AgentChannelRequest;
+      readonly result: AgentChannelResponse;
+    };
   };
   readonly notifies: Record<never, never>;
   readonly listens: {
-    readonly events: { readonly args: undefined; readonly wireArgs: unknown; readonly event: AgentChannelEvent };
+    readonly events: {
+      readonly args: undefined;
+      readonly wireArgs: unknown;
+      readonly event: AgentChannelEvent;
+    };
     readonly liveEvents: {
       readonly args: undefined;
       readonly wireArgs: unknown;
       readonly event: AgentChannelLiveEvent;
+    };
+    readonly revisionEvents: {
+      readonly args: undefined;
+      readonly wireArgs: unknown;
+      readonly event: AgentChannelRevisionEvent;
     };
   };
 };
 
 /** Wire validators for {@link AgentChannelProtocol}, ready for `protocolSchemas`. @public */
 export const agentChannelProtocolSchemas = {
-  calls: { request: { args: agentChannelCommandSchema, result: agentChannelResponseSchema } },
+  calls: {
+    request: {
+      args: z.union([
+        agentChannelCommandSchema,
+        z.strictObject({
+          type: z.literal('revision'),
+          request: jsonValueSchema,
+        }),
+      ]),
+      result: agentChannelResponseSchema,
+    },
+  },
   notifies: {},
   listens: {
     events: { args: z.null(), event: agentChannelEventSchema },
     liveEvents: { args: z.null(), event: agentChannelLiveEventSchema },
+    revisionEvents: { args: z.null(), event: agentChannelRevisionEventSchema },
   },
 };
 
-/** Narrow a validated command into the admission request the host core takes. @public */
+/**
+ * Narrow a validated command into the admission request the host core takes.
+ *
+ * @param config - Optional client admission settings.
+ * @param fallback - Host-owned defaults for omitted settings.
+ * @returns The normalized admission configuration.
+ * @public
+ */
 export const admissionConfigFor = (
   config: AgentChannelAdmissionConfig | undefined,
-  fallback: { readonly systemPrompt: string; readonly model?: TauAgentAdmissionConfig['model'] },
+  fallback: {
+    readonly systemPrompt: string;
+    readonly model?: TauAgentAdmissionConfig['model'];
+  },
 ): TauAgentAdmissionConfig => ({
   systemPrompt: config?.systemPrompt ?? fallback.systemPrompt,
   ...(config?.systemPromptBlocks ? { systemPromptBlocks: config.systemPromptBlocks } : {}),

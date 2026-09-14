@@ -3,7 +3,7 @@ title: 'Release Policy'
 description: 'Versioning, building, and publishing strategy for @taucad/* npm packages: Nx Release, version plans, tsdown, OIDC.'
 status: active
 created: '2026-02-27'
-updated: '2026-08-24'
+updated: '2026-09-13'
 related:
   - docs/policy/version-policy.md
   - docs/policy/public-surface-policy.md
@@ -20,21 +20,22 @@ Nx Release with version plans provides native monorepo integration and decouples
 
 ## Packages in Scope
 
-| Package                   | Description                                             |
-| ------------------------- | ------------------------------------------------------- |
-| `@taucad/runtime`         | Multi-kernel CAD runtime for browser and Node.js        |
-| `@taucad/runtime-testing` | Runtime harnesses, mocks, and geometry assertions       |
-| `@taucad/cli`             | Headless CAD export CLI                                 |
-| `@taucad/react`           | React bindings for the runtime                          |
-| `geospec`                 | GeoSpec authoring contract and CLI-facing specification |
-| `@taucad/geospec-engine`  | Fair-source GeoSpec execution/proof engine and CLI      |
-| `@taucad/openrscad`       | OpenRSCAD runtime plugin                                |
-| `packages/plugins/*`      | Publishable runtime capability toolkits                 |
-| `packages/core/*`         | Publishable shared implementation packages              |
+| Package                   | Description                                               |
+| ------------------------- | --------------------------------------------------------- |
+| `@taucad/runtime`         | Multi-kernel CAD runtime for browser and Node.js          |
+| `@taucad/runtime-testing` | Runtime harnesses, mocks, and geometry assertions         |
+| `@taucad/units`           | Portable unit parsing, conversion, and quantity semantics |
+| `@taucad/cli`             | Headless CAD export CLI                                   |
+| `@taucad/react`           | React bindings for the runtime                            |
+| `geospec`                 | GeoSpec authoring contract and CLI-facing specification   |
+| `@taucad/geospec-engine`  | Fair-source GeoSpec execution/proof engine and CLI        |
+| `@taucad/openrscad`       | OpenRSCAD runtime plugin                                  |
+| `packages/plugins/*`      | Publishable runtime capability toolkits                   |
+| `packages/core/*`         | Publishable shared implementation packages                |
 
-The following internal libraries remain in the fixed Nx version group but are not published independently: `@taucad/events`, `@taucad/filesystem`, `@taucad/fs-bridge`, `@taucad/json-schema`, `@taucad/memory`, `@taucad/rpc`, `@taucad/types`, `@taucad/units`, and `@taucad/utils`. Runtime bundles all nine. The former `@taucad/vm` library is no longer one of them: its sources live inside `@taucad/esbuild`, which owns and publishes them directly. Public plugin and core packages remain external dependencies and publish in the same fixed train.
+The following internal libraries remain in the fixed Nx version group but are not published independently: `@taucad/events`, `@taucad/filesystem`, `@taucad/fs-bridge`, `@taucad/json-schema`, `@taucad/memory`, `@taucad/rpc`, `@taucad/types`, and `@taucad/utils`. Runtime bundles all eight. The former `@taucad/vm` library is no longer one of them: its sources live inside `@taucad/esbuild`, which owns and publishes them directly. Public `@taucad/units`, plugin, and core packages remain external dependencies and publish in the same fixed train.
 
-`@taucad/runtime/types` is the public owner for runtime contract types. JSON Schema inference and units remain implementation libraries with no public runtime veneer or subpath.
+`@taucad/runtime/types` is the public owner for runtime contract types. JSON Schema inference remains an implementation library with no public runtime veneer or subpath. `@taucad/units` owns the portable public units API.
 
 `@taucad/fs-client` and `@taucad/telemetry` are private and outside the release group. Telemetry is Tau application infrastructure; its contracts live in `libs/telemetry`, its observability middleware lives in the UI, and it is neither bundled into runtime nor published.
 
@@ -44,7 +45,7 @@ The following internal libraries remain in the fixed Nx version group but are no
 
 All packages in the release group share a single version number. When any member changes, Nx aligns the group to the same version. This includes the versioned-but-not-published bundled libraries so their changes cannot ship without a corresponding runtime version.
 
-**Rationale**: The packages are tightly coupled, and `@taucad/runtime` bundles nine private implementation libraries. Independent versioning would create a combinatorial compatibility matrix that is difficult to test and communicate.
+**Rationale**: The packages are tightly coupled, and `@taucad/runtime` bundles eight private implementation libraries. Independent versioning would create a combinatorial compatibility matrix that is difficult to test and communicate.
 
 ### Semantic Versioning
 
@@ -201,8 +202,8 @@ This section specifies the operator-owned release procedure. It does not authori
 
 The closeout Decision Register has settled the former C1/C5/C6 and OQ2/OQ4/OQ7 branches:
 
-1. Runtime bundles exactly nine private implementation libraries: events, filesystem, fs-bridge, JSON Schema, memory, RPC, types, units, and utils. None publishes independently.
-2. `@taucad/runtime/types` is the public runtime-contract type surface. JSON Schema inference and units have no public veneer or runtime subpath.
+1. Runtime bundles exactly eight private implementation libraries: events, filesystem, fs-bridge, JSON Schema, memory, RPC, types, and utils. None publishes independently; `@taucad/units` publishes separately.
+2. `@taucad/runtime/types` is the public runtime-contract type surface. JSON Schema inference has no public veneer or runtime subpath; `@taucad/units` owns portable unit parsing, conversion, and quantity semantics.
 3. Concrete backend dependencies are owned by their plugin packages; runtime does not depend on them.
 4. `@taucad/geospec-engine` publishes after runtime and `geospec`.
 5. `nanoraster@0.2.0` and its three platform packages replace the deleted `@taucad/render` package.
@@ -245,7 +246,6 @@ npm deprecate '@taucad/memory@0.1.0-beta.0' 'Bundled into @taucad/runtime.'
 npm deprecate '@taucad/rpc@0.1.0-beta.0' 'Bundled into @taucad/runtime.'
 npm deprecate '@taucad/types@0.1.0-beta.0' 'Use @taucad/runtime/types.'
 npm deprecate '@taucad/json-schema@0.1.0-beta.0' 'Bundled into @taucad/runtime.'
-npm deprecate '@taucad/units@0.1.0-beta.0' 'Bundled into @taucad/runtime.'
 npm deprecate '@taucad/utils@0.1.0-beta.0' 'Bundled into @taucad/runtime.'
 npm deprecate '@taucad/fs-client@0.1.0-beta.0' 'Use @taucad/runtime/filesystem.'
 npm deprecate '@taucad/telemetry@0.1.0-beta.0' 'Internal Tau application package; no public replacement.'

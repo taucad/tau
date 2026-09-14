@@ -33,12 +33,13 @@ import { staticImportMetaUrlRule } from './rules/static-import-meta-url.js';
 import { requireUsingOnDisposableRule } from './rules/require-using-on-disposable.js';
 import { noImplInIndexRule } from './rules/no-impl-in-index.js';
 import { pluginCapabilityFilenameRule } from './rules/plugin-capability-filename.js';
+import { noAuthoredPointerCursorRule } from './rules/no-authored-pointer-cursor.js';
 
 /** @type {Plugin} */
 const plugin = {
   meta: {
     name: 'tau-lint',
-    version: '1.19.0',
+    version: '1.20.0',
   },
   rules: {
     'no-abusive-eslint-disable': noAbusiveEslintDisableRule,
@@ -67,6 +68,7 @@ const plugin = {
     'require-using-on-disposable': requireUsingOnDisposableRule,
     'no-impl-in-index': noImplInIndexRule,
     'plugin-capability-filename': pluginCapabilityFilenameRule,
+    'no-authored-pointer-cursor': noAuthoredPointerCursorRule,
   },
 };
 

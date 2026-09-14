@@ -3,7 +3,7 @@ title: 'npm Publishing Policy'
 description: 'Per-package rules for preparing @taucad/* libraries for npm publication: tsdown shape, dependency hygiene, exports map discipline, validation gates, README requirements.'
 status: active
 created: '2026-05-22'
-updated: '2026-09-05'
+updated: '2026-09-13'
 related:
   - docs/policy/compatibility-policy.md
   - docs/policy/release-policy.md
@@ -199,7 +199,7 @@ Use a single regex per package that names every private workspace dep explicitly
 CORRECT:
 
 ```typescript
-const TAU_WORKSPACE_BUNDLE = /^@taucad\/(events|filesystem|fs-bridge|json-schema|memory|rpc|types|units|utils)(\/|$)/;
+const TAU_WORKSPACE_BUNDLE = /^@taucad\/(events|filesystem|fs-bridge|json-schema|memory|rpc|types|utils)(\/|$)/;
 
 export default defineConfig({
   // ...
@@ -209,9 +209,9 @@ export default defineConfig({
 });
 ```
 
-The runtime bundle list is exactly events, filesystem, fs-bridge, JSON Schema, memory, RPC, types, units, and utils. Concrete plugin and public core packages stay external.
+The runtime bundle list is exactly events, filesystem, fs-bridge, JSON Schema, memory, RPC, types, and utils. Public `@taucad/units`, concrete plugin, and public core packages stay external.
 
-Generic jobs and configuration are internal runtime modules with focused public runtime subpaths, not separate jobs/configuration packages. Reuse the existing single runtime bundle owner for their private filesystem/path/units dependencies; do not introduce a dependency back-edge, duplicate private bundle or new foundation publication merely to preserve the superseded separate-package layout. Base configuration imports remain independent of the explicit Zod authoring entry. Check packed JavaScript and declarations from both entries; source aliases are not publication proof. Independently published consumers outside this consolidation still require their own valid dependency disposition.
+Generic jobs and configuration are internal runtime modules with focused public runtime subpaths, not separate jobs/configuration packages. Reuse the existing single runtime bundle owner for their private filesystem/path dependencies and consume units through public `@taucad/units`; do not introduce a dependency back-edge, duplicate private bundle, or another foundation package merely to preserve the superseded separate-package layout. Base configuration imports remain independent of the explicit Zod authoring entry. Check packed JavaScript and declarations from both entries; source aliases are not publication proof. Independently published consumers outside this consolidation still require their own valid dependency disposition.
 
 Every bundled private workspace library has exactly one published owner at any time — the pkgcheck bundle-ownership gate enforces this. When a private helper serves multiple published packages after the plugin split, either its shared logic becomes a published core package the plugins consume, or the private library is dissolved into its consumers. Never bundle the same private library into two published owners. `@taucad/converter` takes the dissolution path: it is removed entirely (per-backend import kernels in plugin packages, shared glTF machinery in `@taucad/geometry-core`), so no package bundles it — see `docs/research/runtime-converter-dissolution-blueprint.md`.
 

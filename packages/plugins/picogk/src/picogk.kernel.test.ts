@@ -230,7 +230,7 @@ describe('PicoGK kernel', () => {
     });
     await expect(definition.getParameters({ entryPath: 'main.cs' }, runtime, value)).resolves.toMatchObject({
       success: true,
-      data: { defaultParameters: {} },
+      data: { defaults: {} },
     });
 
     value.session.request.mockResolvedValueOnce(buildResult());

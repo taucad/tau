@@ -19,6 +19,7 @@ import type {
   GeoSpecConnectedComponentsExpectation,
   GeoSpecMassExpectation,
   GeoSpecMeshIntegrityExpectation,
+  GeoSpecNumericExpectation,
   GeoSpecSurfaceAreaExpectation,
 } from '#runner/types.js';
 import {
@@ -208,8 +209,47 @@ export const toHaveCenterOfMass: GeoSpecMatcherImplementation = (invocation) => 
       ];
 };
 
+const boundingBoxFailures = (
+  measured: readonly number[],
+  expected: NonNullable<GeoSpecBoundingBoxExpectation['min']>,
+  tolerance: number,
+): Array<{ axis: string; expected: GeoSpecNumericExpectation; actual: number }> => {
+  const failures: Array<{ axis: string; expected: GeoSpecNumericExpectation; actual: number }> = [];
+  const axes = ['x', 'y', 'z'] as const;
+  for (const [index, axis] of axes.entries()) {
+    const declared = 'length' in expected ? expected[index] : expected[axis];
+    if (declared === undefined) {
+      continue;
+    }
+    const actual = measured[index] ?? Number.NaN;
+    /* oxlint-disable typescript/no-unnecessary-condition -- JavaScript specs can supply null despite static declarations. */
+    const valid =
+      typeof declared === 'number'
+        ? Number.isFinite(declared)
+        : declared !== null &&
+          Object.keys(declared).length > 0 &&
+          Object.entries(declared).every(
+            ([key, value]) =>
+              ['value', 'greaterThan', 'greaterThanOrEqual', 'lessThan', 'lessThanOrEqual'].includes(key) &&
+              Number.isFinite(value),
+          );
+    /* oxlint-enable typescript/no-unnecessary-condition */
+    if (
+      !valid ||
+      !Number.isFinite(actual) ||
+      !Number.isFinite(tolerance) ||
+      tolerance < 0 ||
+      !numericHolds(actual, declared, tolerance)
+    ) {
+      failures.push({ axis, expected: declared, actual });
+    }
+  }
+  return failures;
+};
+
 /**
- * `expectGeo(...).toHaveBoundingBox(...)`.
+ * `expectGeo(...).toHaveBoundingBox(...)`. Range comparisons are inclusive or
+ * strict as declared; equality tolerance never expands a containment boundary.
  *
  * @public
  */
@@ -235,13 +275,17 @@ export const toHaveBoundingBox: GeoSpecMatcherImplementation = (invocation) => {
   const max = useBrep ? brep.max : ([0, 1, 2].map((axis) => center[axis]! + size[axis]! / 2) as unknown as Vec3);
   const tolerance = expectation.tolerance ?? defaultLinearTolerance;
   const failures = [
-    ...(expectation.min ? pointFailures(min, expectation.min, tolerance).map((f) => ({ ...f, field: 'min' })) : []),
-    ...(expectation.max ? pointFailures(max, expectation.max, tolerance).map((f) => ({ ...f, field: 'max' })) : []),
+    ...(expectation.min
+      ? boundingBoxFailures(min, expectation.min, tolerance).map((f) => ({ ...f, field: 'min' }))
+      : []),
+    ...(expectation.max
+      ? boundingBoxFailures(max, expectation.max, tolerance).map((f) => ({ ...f, field: 'max' }))
+      : []),
     ...(expectation.size === undefined
       ? []
-      : pointFailures(size, expectation.size, tolerance).map((f) => ({ ...f, field: 'size' }))),
+      : boundingBoxFailures(size, expectation.size, tolerance).map((f) => ({ ...f, field: 'size' }))),
     ...(expectation.center
-      ? pointFailures(center, expectation.center, tolerance).map((f) => ({ ...f, field: 'center' }))
+      ? boundingBoxFailures(center, expectation.center, tolerance).map((f) => ({ ...f, field: 'center' }))
       : []),
   ];
   return failures.length === 0
@@ -250,7 +294,8 @@ export const toHaveBoundingBox: GeoSpecMatcherImplementation = (invocation) => {
         matcherDiagnostic({
           code: 'GEOSPEC_BOUNDING_BOX_MISMATCH',
           message: `Bounding box is off the declared bounds on ${failures.map((failure) => `${failure.field}.${failure.axis}`).join(', ')} (tolerance ${tolerance}).`,
-          suggestion: 'Correct the model dimensions, or widen the declared bounding-box tolerance.',
+          suggestion:
+            'Correct the model dimensions or placement to satisfy the declared bounds. Equality tolerance does not relax range limits.',
           spatial: { min: [...min] as Vec3, max: [...max] as Vec3, center: [...center] as Vec3 },
           details: {
             matcher: 'toHaveBoundingBox',

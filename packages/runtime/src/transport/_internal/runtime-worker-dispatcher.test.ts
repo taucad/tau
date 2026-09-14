@@ -75,6 +75,9 @@ function createMockWorker(overrides?: Partial<KernelWorker>): KernelWorker {
     evaluateModel: vi
       .fn<() => Promise<{ success: true; data: typeof testGeometry; issues: never[] }>>()
       .mockResolvedValue({ success: true, data: testGeometry, issues: [] }),
+    getParameters: vi
+      .fn<() => Promise<{ success: false; issues: never[] }>>()
+      .mockResolvedValue({ success: false, issues: [] }),
     transcode: vi
       .fn<() => Promise<{ success: true; data: unknown[] }>>()
       .mockResolvedValue({ success: true, data: [] }),
@@ -141,6 +144,29 @@ describe('createWorkerDispatcher', () => {
       const result = await fixture.client.call('initialize', {});
 
       expect(result).toEqual({ capabilities: manifest });
+    });
+
+    it('forwards request-scoped parameter resolution, staging, mode, and abort signal', async () => {
+      const getParameters = vi.fn<KernelWorker['getParameters']>();
+      getParameters.mockResolvedValue({ success: false, issues: [] });
+      const worker = createMockWorker({ getParameters });
+      fixture = await buildFixture(worker);
+      const stage = { 'main.ts': new Uint8Array([1]) };
+
+      await expect(
+        fixture.client.call('resolveParameters', {
+          stage,
+          file: { path: '', filename: 'main.ts' },
+          resolution: { mode: 'declared-only' },
+        }),
+      ).resolves.toEqual({ success: false, issues: [] });
+      expect(getParameters).toHaveBeenCalledOnce();
+      const [file, resolution, operation] = getParameters.mock.calls[0]!;
+      expect(file).toEqual({ path: '', filename: 'main.ts' });
+      expect(resolution).toEqual({ mode: 'declared-only' });
+      expect(operation?.stage).toStrictEqual(stage);
+      expect(operation?.stage?.['main.ts']).toStrictEqual(new Uint8Array([1]));
+      expect(operation?.signal).toBeInstanceOf(AbortSignal);
     });
 
     it('registers a host-minted compute authority before worker initialization', async () => {

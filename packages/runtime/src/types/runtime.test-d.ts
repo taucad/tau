@@ -14,6 +14,7 @@ import type * as RuntimeTypes from '#types/runtime.types.js';
 import type { CapabilitiesManifest, ExportRoute, GetParametersResult, RenderCapability } from '#types/runtime.types.js';
 import type { KernelPlugin, MiddlewarePlugin, TranscoderPlugin } from '#plugins/plugin-types.js';
 import type { RuntimeContentInput } from '#types/runtime-content.types.js';
+import type { JsonStructureSchema } from '@taucad/runtime/parameter';
 
 // =============================================================================
 // Wide-default (on-wire) shape — preserved for the worker-emitted manifest
@@ -75,10 +76,11 @@ describe('RenderCapability shape (wide default)', () => {
 });
 
 describe('GetParametersResult target shape', () => {
-  it('should expose jsonSchema as JSONSchema7 on success', () => {
+  it('should expose the native JSON Structure schema and effective bindings on success', () => {
     type Success = Extract<GetParametersResult, { success: true }>;
 
-    expectTypeOf<Success['data']['jsonSchema']>().toEqualTypeOf<JSONSchema7>();
+    expectTypeOf<Success['data']['schema']>().toEqualTypeOf<JsonStructureSchema>();
+    expectTypeOf<Success['data']['profile']>().toEqualTypeOf<'tau-json-structure-units-03-v1'>();
   });
 });
 

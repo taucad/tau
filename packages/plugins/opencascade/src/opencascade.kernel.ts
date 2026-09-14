@@ -25,6 +25,7 @@ import {
   convertRawIssuesToKernelIssues,
   createKernelError,
   createKernelSuccess,
+  createKernelParameterDeclaration,
   RenderArtifactFinalizationError,
   finalizeRenderOutput,
 } from '@taucad/runtime/kernel';
@@ -675,7 +676,12 @@ export const opencascadeKernel = defineKernel({
       const defaultParameters = extractDefaultParameters(executeResult.value);
       const jsonSchema = await jsonSchemaFromJson(defaultParameters);
 
-      return createKernelSuccess({ defaultParameters, jsonSchema });
+      return createKernelSuccess(
+        createKernelParameterDeclaration(defaultParameters, jsonSchema, {
+          id: 'urn:taucad:opencascade:parameters',
+          name: 'OpenCascadeParameters',
+        }),
+      );
     } catch (error) {
       const issue = formatOcRuntimeError(error, context.oc, { bundleSourceMap, entryUrl });
       return createKernelError([issue]);

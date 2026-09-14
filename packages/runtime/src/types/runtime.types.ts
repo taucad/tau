@@ -11,6 +11,7 @@
 import type { backendProviders, kernelProviders } from '@taucad/types/constants';
 import type { ExportFidelity, ExportFile, Geometry, GeometryResponse } from '@taucad/types';
 import type { JSONSchema7 } from '@taucad/json-schema';
+import type { ParameterDeclaration, ParameterManifest } from '#parameter/manifest.js';
 import type {
   CollectFormatMap,
   CollectKernelIds,
@@ -284,10 +285,10 @@ export type HashedGeometryResult = KernelResult<Geometry>;
  * Outcome of extracting customizer parameters from a CAD script, used to render the parameter editor UI.
  * @public
  */
-export type GetParametersResult = KernelResult<{
-  defaultParameters: Record<string, unknown>;
-  jsonSchema: JSONSchema7;
-}>;
+export type GetParameterDeclarationsResult = KernelResult<ParameterDeclaration>;
+
+/** Admitted effective parameter manifest returned after the complete middleware chain. @public */
+export type GetParametersResult = KernelResult<ParameterManifest>;
 
 /**
  * Outcome of inferring a human-readable name from a CAD script, used as the default project title.

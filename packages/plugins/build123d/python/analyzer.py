@@ -14,9 +14,10 @@ MAX_AST_NODES = 50_000
 MAX_AST_DEPTH = 100
 MAX_COLLECTION_ITEMS = 1_000
 MAX_STRING_LENGTH = 65_536
+MAX_SAFE_INTEGER = 2**53 - 1
 
 SCALAR_TYPES = {"bool": bool, "int": int, "float": float, "str": str}
-HINT_KEYS = {
+EXECUTION_HINT_KEYS = {
     "title",
     "description",
     "minimum",
@@ -30,6 +31,28 @@ HINT_KEYS = {
     "enum",
     "examples",
 }
+STANDARD_UNIT_HINT_KEYS = {"unit", "ucumUnit", "symbol", "symbols"}
+SCHEMA_HINT_KEYS = EXECUTION_HINT_KEYS | STANDARD_UNIT_HINT_KEYS
+SEMANTIC_HINT_KEYS = {"quantityKind", "space", "reference"}
+HINT_KEYS = SCHEMA_HINT_KEYS | SEMANTIC_HINT_KEYS
+BIPM_UNIT_TO_UCUM = {
+    "m": "m",
+    "mm": "mm",
+    "cm": "cm",
+    "km": "km",
+    "s": "s",
+    "kg": "kg",
+    "K": "K",
+    "A": "A",
+    "mol": "mol",
+    "cd": "cd",
+    "rad": "rad",
+    "°": "deg",
+    "°C": "Cel",
+}
+UCUM_CODE = re.compile(r"^[!-~]+$")
+QUDT_KIND = re.compile(r"^http://qudt\.org/vocab/quantitykind/[A-Za-z][A-Za-z0-9]*$")
+LANGUAGE_TAG = re.compile(r"^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$")
 
 
 @dataclass
@@ -158,7 +181,64 @@ def _matches_type(value: Any, type_name: str) -> bool:
     return type(value) is expected
 
 
+def _validate_numeric_literal(name: str, key: str, value: Any) -> None:
+    if type(value) is int and not -MAX_SAFE_INTEGER <= value <= MAX_SAFE_INTEGER:
+        raise AnalysisIssue(f"Parameter hint '{name}.{key}' exceeds the safe integer range", "PYTHON_PARAMETERS")
+    if type(value) is float and not math.isfinite(value):
+        raise AnalysisIssue(f"Parameter hint '{name}.{key}' must be finite", "PYTHON_PARAMETERS")
+
+
+def _validate_unit_hint(name: str, field: dict[str, Any], hint: dict[str, Any]) -> None:
+    declared = STANDARD_UNIT_HINT_KEYS.intersection(hint)
+    semantic = SEMANTIC_HINT_KEYS.intersection(hint)
+    if (declared or semantic) and field["type"] not in {"integer", "number"}:
+        raise AnalysisIssue(f"Parameter hint '{name}' unit declarations require a numeric parameter", "PYTHON_PARAMETERS")
+
+    unit = hint.get("unit")
+    ucum_unit = hint.get("ucumUnit")
+    if unit is not None and (not isinstance(unit, str) or unit not in BIPM_UNIT_TO_UCUM):
+        raise AnalysisIssue(f"Parameter hint '{name}.unit' requires a reviewed unit symbol", "PYTHON_PARAMETERS")
+    if ucum_unit is not None and (
+        not isinstance(ucum_unit, str) or not ucum_unit or UCUM_CODE.fullmatch(ucum_unit) is None
+    ):
+        raise AnalysisIssue(f"Parameter hint '{name}.ucumUnit' requires a UCUM code", "PYTHON_PARAMETERS")
+    if unit is not None and ucum_unit is not None and BIPM_UNIT_TO_UCUM[unit] != ucum_unit:
+        raise AnalysisIssue(f"Parameter hint '{name}' unit and ucumUnit conflict", "PYTHON_PARAMETERS")
+    if ("symbol" in hint or "symbols" in hint or semantic) and unit is None and ucum_unit is None:
+        raise AnalysisIssue(f"Parameter hint '{name}' semantic declarations require a unit", "PYTHON_PARAMETERS")
+
+    if "symbol" in hint and (not isinstance(hint["symbol"], str) or not hint["symbol"]):
+        raise AnalysisIssue(f"Parameter hint '{name}.symbol' must be a non-empty string", "PYTHON_PARAMETERS")
+    if "symbols" in hint:
+        symbols = hint["symbols"]
+        if not isinstance(symbols, dict) or any(
+            (key != "default" and (not key.startswith("lang:") or LANGUAGE_TAG.fullmatch(key[5:]) is None))
+            or not isinstance(value, str)
+            or not value
+            for key, value in symbols.items()
+        ):
+            raise AnalysisIssue(f"Parameter hint '{name}.symbols' is invalid", "PYTHON_PARAMETERS")
+
+    quantity_kind = hint.get("quantityKind")
+    if quantity_kind is not None and (
+        not isinstance(quantity_kind, str) or QUDT_KIND.fullmatch(quantity_kind) is None
+    ):
+        raise AnalysisIssue(f"Parameter hint '{name}.quantityKind' is invalid", "PYTHON_PARAMETERS")
+    space = hint.get("space")
+    if space is not None and space not in {"linear", "difference", "point"}:
+        raise AnalysisIssue(f"Parameter hint '{name}.space' is invalid", "PYTHON_PARAMETERS")
+    reference = hint.get("reference")
+    if reference is not None and (not isinstance(reference, str) or not reference):
+        raise AnalysisIssue(f"Parameter hint '{name}.reference' is invalid", "PYTHON_PARAMETERS")
+    if (space == "point") != (reference is not None):
+        raise AnalysisIssue(
+            f"Parameter hint '{name}' point space requires a reference and other spaces forbid one",
+            "PYTHON_PARAMETERS",
+        )
+
+
 def _validate_hint(name: str, field: dict[str, Any], hint: dict[str, Any]) -> None:
+    _validate_unit_hint(name, field, hint)
     type_name = field["type"]
     for key in ("title", "description", "pattern"):
         if key in hint and not isinstance(hint[key], str):
@@ -178,6 +258,7 @@ def _validate_hint(name: str, field: dict[str, Any], hint: dict[str, Any]) -> No
             raise AnalysisIssue(f"Parameter hint '{name}.{key}' requires a finite numeric parameter and value", "PYTHON_PARAMETERS")
         if type_name == "integer" and not isinstance(value, int):
             raise AnalysisIssue(f"Parameter hint '{name}.{key}' must be an integer", "PYTHON_PARAMETERS")
+        _validate_numeric_literal(name, key, value)
         if key == "multipleOf" and value <= 0:
             raise AnalysisIssue(f"Parameter hint '{name}.multipleOf' must be positive", "PYTHON_PARAMETERS")
     for key in ("minLength", "maxLength"):
@@ -192,6 +273,8 @@ def _validate_hint(name: str, field: dict[str, Any], hint: dict[str, Any]) -> No
         scalar_type = {"boolean": "bool", "integer": "int", "number": "float", "string": "str"}[type_name]
         if any(not _matches_type(value, scalar_type) for value in values):
             raise AnalysisIssue(f"Parameter hint '{name}.{key}' values must match the parameter type", "PYTHON_PARAMETERS")
+        for value in values:
+            _validate_numeric_literal(name, key, value)
     candidate = {**field, **hint}
     default = candidate["default"]
     if "enum" in candidate and default not in candidate["enum"]:
@@ -236,7 +319,7 @@ def _metadata(tree: ast.Module) -> dict[str, Any]:
     return value
 
 
-def _parameters(tree: ast.Module, metadata: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+def _parameters(tree: ast.Module, metadata: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     classes = [
         node
         for node in tree.body
@@ -260,6 +343,9 @@ def _parameters(tree: ast.Module, metadata: dict[str, Any]) -> tuple[dict[str, A
         default = _literal(statement.value)
         if not _matches_type(default, type_name):
             raise _issue(statement.value, f"Default for '{statement.target.id}' does not match {type_name}")
+        _validate_numeric_literal(statement.target.id, "default", default)
+        for choice in choices or []:
+            _validate_numeric_literal(statement.target.id, "enum", choice)
         if choices is not None and default not in choices:
             raise _issue(statement.value, f"Default for '{statement.target.id}' is not in its Literal choices")
         field_schema: dict[str, Any] = {
@@ -284,9 +370,37 @@ def _parameters(tree: ast.Module, metadata: dict[str, Any]) -> tuple[dict[str, A
         if unknown_hints:
             raise AnalysisIssue(f"Unsupported hints for '{name}': {', '.join(sorted(unknown_hints))}", "PYTHON_PARAMETERS")
         _validate_hint(name, fields[name], hint)
-        fields[name].update(hint)
+        fields[name].update({key: value for key, value in hint.items() if key in EXECUTION_HINT_KEYS})
 
-    return defaults, {"type": "object", "properties": fields, "additionalProperties": False}
+    native_fields: dict[str, Any] = {}
+    bindings: dict[str, Any] = {}
+    for name, field in fields.items():
+        hint = hints.get(name, {})
+        native_fields[name] = {
+            **field,
+            **{key: hint[key] for key in STANDARD_UNIT_HINT_KEYS if key in hint},
+            "type": {"boolean": "boolean", "integer": "integer", "number": "double", "string": "string"}[
+                field["type"]
+            ],
+        }
+        binding = {key: hint[key] for key in SEMANTIC_HINT_KEYS if key in hint}
+        if binding:
+            bindings[f"/{name}"] = binding
+
+    declaration = {
+        "schema": {
+            "$schema": "https://json-structure.org/meta/extended/v0/#",
+            "$id": "urn:taucad:build123d:parameters",
+            "$uses": ["JSONSchemaUnits"],
+            "name": "Build123dParameters",
+            "type": "object",
+            "properties": native_fields,
+            "additionalProperties": False,
+        },
+        "defaults": defaults,
+        **({"bindings": bindings} if bindings else {}),
+    }
+    return defaults, {"type": "object", "properties": fields, "additionalProperties": False}, declaration
 
 
 def _imports(tree: ast.Module) -> list[ast.Import | ast.ImportFrom]:
@@ -313,11 +427,17 @@ def analyze_source(source: str) -> dict[str, Any]:
 
     tree = _parse(source)
     metadata = _metadata(tree)
-    defaults, schema = _parameters(tree, metadata)
+    defaults, schema, declaration = _parameters(tree, metadata)
     dependencies = metadata.get("dependencies", [])
     if not isinstance(dependencies, list) or any(not isinstance(path, str) for path in dependencies):
         raise AnalysisIssue("__tau__.dependencies must be a list of paths", "PYTHON_DEPENDENCIES")
-    return {"defaultParameters": defaults, "jsonSchema": schema, "dependencies": dependencies, "imports": _imports(tree)}
+    return {
+        "defaultParameters": defaults,
+        "jsonSchema": schema,
+        "declaration": declaration,
+        "dependencies": dependencies,
+        "imports": _imports(tree),
+    }
 
 
 def _canonical_relative(path: str) -> str:
@@ -398,6 +518,7 @@ def analyze_project(workspace: Path, entry_path: str, observed: list[str] | None
     return {
         "defaultParameters": entry_analysis["defaultParameters"],
         "jsonSchema": entry_analysis["jsonSchema"],
+        "declaration": entry_analysis["declaration"],
         "resolved": sorted(resolved),
         "unresolved": sorted(unresolved),
     }

@@ -13,7 +13,7 @@ import type {
   CapabilitiesManifest,
   CreateGeometryResult,
   ExportGeometryResult,
-  GetParametersResult,
+  GetParameterDeclarationsResult,
   HashedGeometryResult,
   KernelIssue,
 } from '#types/runtime.types.js';
@@ -33,6 +33,7 @@ import {
   MockKernelWorker,
   createMockFileSystem,
   createGeometryFile,
+  createParameterDeclaration,
   getTestFileSystem,
   initializeWorkerForTesting,
   seedTestFileSystem,
@@ -342,7 +343,7 @@ describe('KernelWorker lifecycle', () => {
     };
     const builds = vi.fn();
     class FailedParameterWorker extends MockKernelWorker {
-      protected override async onGetParameters(): Promise<GetParametersResult> {
+      protected override async onGetParameters(): Promise<GetParameterDeclarationsResult> {
         return { success: false, issues: [issue] };
       }
       protected override async onCreateGeometry(
@@ -377,17 +378,10 @@ describe('KernelWorker lifecycle', () => {
   it('should replace parameter arrays across direct, interactive, and export merges', async () => {
     const capturedParameters: Array<Record<string, unknown>> = [];
     class ArrayParameterWorker extends MockKernelWorker {
-      protected override async onGetParameters(): Promise<GetParametersResult> {
-        return {
-          success: true,
-          data: {
-            defaultParameters: {
-              sections: { planes: [{ point: [0, 0, 0] }], clipLines: true },
-            },
-            jsonSchema: { type: 'object', properties: {} },
-          },
-          issues: [],
-        };
+      protected override async onGetParameters(): Promise<GetParameterDeclarationsResult> {
+        return createParameterDeclaration({
+          sections: { planes: [{ point: [0, 0, 0] }], clipLines: true },
+        });
       }
 
       protected override async onCreateGeometry(
@@ -419,15 +413,14 @@ describe('KernelWorker lifecycle', () => {
   it('drops stale values that a changed closed parameter schema no longer declares', async () => {
     const capturedParameters: Array<Record<string, unknown>> = [];
     class ClosedParameterWorker extends MockKernelWorker {
-      protected override async onGetParameters(): Promise<GetParametersResult> {
-        return {
-          success: true,
-          data: {
-            defaultParameters: {},
-            jsonSchema: { type: 'object', properties: {}, additionalProperties: false },
+      protected override async onGetParameters(): Promise<GetParameterDeclarationsResult> {
+        return createParameterDeclaration(
+          {},
+          {
+            properties: { accepted: { type: 'string' } },
+            additionalProperties: false,
           },
-          issues: [],
-        };
+        );
       }
 
       protected override async onCreateGeometry(
@@ -463,6 +456,18 @@ describe('KernelWorker lifecycle', () => {
   });
 
   describe('source snapshots', () => {
+    it('rejects pre-aborted request-scoped parameter resolution before reading source', async () => {
+      const filesystem = createMockFileSystem();
+      const worker = createConfiguredWorker({ filesystem });
+      const controller = new AbortController();
+      controller.abort();
+
+      await expect(
+        worker.getParameters(createGeometryFile('main.ts'), { mode: 'declared-only' }, { signal: controller.signal }),
+      ).rejects.toMatchObject({ name: 'AbortError' });
+      expect(filesystem.mocks.readFiles).not.toHaveBeenCalled();
+    });
+
     it('returns the coherent relevant closure with owned bytes without evaluating geometry', async () => {
       const contents = {
         'main.ts': new Uint8Array([1, 2]),
@@ -1766,7 +1771,7 @@ describe('KernelWorker lifecycle', () => {
       protected override async onGetParameters(
         input: GetParametersInput,
         runtime: KernelRuntime,
-      ): Promise<GetParametersResult> {
+      ): Promise<GetParameterDeclarationsResult> {
         this.parameterCalls += 1;
         if (this.failParameters) {
           return { success: false, issues: [{ code: 'RUNTIME', message: 'failed', severity: 'error' }] };

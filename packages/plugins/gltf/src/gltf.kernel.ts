@@ -2,6 +2,7 @@ import { unpartition } from '@gltf-transform/functions';
 import {
   coordinateSystemSchema,
   createKernelError,
+  createKernelParameterDeclaration,
   createKernelSuccess,
   defineKernel,
   finalizeRenderOutput,
@@ -37,10 +38,16 @@ export const gltfKernel = defineKernel({
   },
 
   async getParameters() {
-    return createKernelSuccess({
-      defaultParameters: {},
-      jsonSchema: { type: 'object', properties: {}, additionalProperties: false },
-    });
+    return createKernelSuccess(
+      createKernelParameterDeclaration(
+        {},
+        { type: 'object', properties: {}, additionalProperties: false },
+        {
+          id: 'urn:taucad:gltf:parameters',
+          name: 'GltfParameters',
+        },
+      ),
+    );
   },
 
   async createGeometry({ entryPath }, { filesystem }) {

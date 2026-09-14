@@ -54,9 +54,30 @@ export const build123dResponseSchema = z.object({
   error: z.object({ issues: z.array(build123dIssueSchema).min(1) }).optional(),
 });
 
+const build123dParameterDeclarationSchema = z
+  .object({
+    schema: z.record(z.string(), z.unknown()),
+    defaults: z.record(z.string(), z.unknown()),
+    bindings: z
+      .record(
+        z.string(),
+        z
+          .object({
+            quantityKind: z.string().optional(),
+            space: z.enum(['linear', 'difference', 'point']).optional(),
+            reference: z.string().optional(),
+          })
+          .strict(),
+      )
+      .optional(),
+  })
+  .strict();
+
 export const build123dAnalysisSchema = z.object({
   defaultParameters: z.record(z.string(), z.unknown()),
   jsonSchema: z.record(z.string(), z.unknown()),
+  // Optional only for compatibility with older private-session fixtures; the kernel requires it.
+  declaration: build123dParameterDeclarationSchema.optional(),
   resolved: z.array(z.string()),
   unresolved: z.array(z.string()),
 });

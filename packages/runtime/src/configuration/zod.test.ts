@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createRequire } from 'node:module';
 import { z } from 'zod';
-import { quantityIds } from '@taucad/units/constants';
+import { quantityKinds } from '@taucad/units/quantity';
 import { quantity } from '#configuration/zod.js';
 import { validateJsonSchemaValue } from '#configuration/admission.js';
 
@@ -29,12 +29,21 @@ describe('quantity authoring', () => {
       }
     }
   });
-  it.each(quantityIds)('should annotate the canonical %s quantity in both schema directions', (id) => {
-    const schema = quantity(id).positive().max(10).meta({ title: 'Physical value' });
+  it.each([
+    ['length', 'm', quantityKinds.length],
+    ['speed', 'm/s', quantityKinds.speed],
+    ['plane angle', 'rad', quantityKinds.planeAngle],
+  ] as const)('should annotate canonical %s semantics in both schema directions', (_name, unit, kind) => {
+    const schema = quantity({ unit, quantityKind: kind, space: 'linear' })
+      .positive()
+      .max(10)
+      .meta({ title: 'Physical value' });
     for (const io of ['input', 'output'] as const) {
       expect(z.toJSONSchema(schema, { target: 'draft-07', io })).toMatchObject({
         type: 'number',
-        'x-tau-quantity': id,
+        'x-tau-unit': unit,
+        'x-tau-quantity-kind': kind,
+        'x-tau-space': 'linear',
         title: 'Physical value',
         exclusiveMinimum: 0,
         maximum: 10,
@@ -47,18 +56,18 @@ describe('quantity authoring', () => {
 
   it('should retain annotations through defaults, optional values, null and array wrappers', () => {
     const schema = z.object({
-      length: quantity('length').default(0.001),
-      speed: quantity('speed').optional(),
-      volumes: quantity('volume').nullable().array(),
+      length: quantity({ unit: 'm', quantityKind: quantityKinds.length, space: 'linear' }).default(0.001),
+      speed: quantity({ unit: 'm/s', quantityKind: quantityKinds.speed, space: 'linear' }).optional(),
+      volumes: quantity({ unit: 'm3', quantityKind: quantityKinds.volume, space: 'linear' }).nullable().array(),
     });
     for (const converter of [schema['~standard'].jsonSchema.input, schema['~standard'].jsonSchema.output]) {
       expect(converter({ target: 'draft-07' })).toMatchObject({
         properties: {
-          length: { type: 'number', 'x-tau-quantity': 'length', default: 0.001 },
-          speed: { type: 'number', 'x-tau-quantity': 'speed' },
+          length: { type: 'number', 'x-tau-unit': 'm', default: 0.001 },
+          speed: { type: 'number', 'x-tau-unit': 'm/s' },
           volumes: {
             type: 'array',
-            items: { anyOf: [{ type: 'number', 'x-tau-quantity': 'volume' }, { type: 'null' }] },
+            items: { anyOf: [{ type: 'number', 'x-tau-unit': 'm3' }, { type: 'null' }] },
           },
         },
       });
@@ -68,10 +77,10 @@ describe('quantity authoring', () => {
 
   it('should reject unknown IDs at a JavaScript boundary', () => {
     expect(() => {
-      Reflect.apply(quantity, undefined, ['meters']);
-    }).toThrow('Unknown quantity kind');
+      Reflect.apply(quantity, undefined, [{ unit: 'meters' }]);
+    }).toThrow('Invalid or unsupported UCUM unit');
     expect(() => {
-      Reflect.apply(quantity, undefined, [{ dimension: 'length' }]);
+      Reflect.apply(quantity, undefined, [{ unit: 'm', quantityKind: 'length' }]);
     }).toThrow('Unknown quantity kind');
   });
 });

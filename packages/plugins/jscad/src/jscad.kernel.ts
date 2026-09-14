@@ -22,6 +22,7 @@ import {
   enrichIssueLocation,
   createKernelError,
   createKernelSuccess,
+  createKernelParameterDeclaration,
   createFrameClassifier,
   parseStackTrace,
   resolveSourcePath,
@@ -324,7 +325,12 @@ export const jscadKernel = defineKernel({
         jsonSchema = await jsonSchemaFromJson(defaultParameters);
       }
 
-      return createKernelSuccess({ defaultParameters, jsonSchema });
+      return createKernelSuccess(
+        createKernelParameterDeclaration(defaultParameters, jsonSchema, {
+          id: 'urn:taucad:jscad:parameters',
+          name: 'JscadParameters',
+        }),
+      );
     } catch (error) {
       return createKernelError([
         {

@@ -24,6 +24,23 @@ const kernelOptions = {
     { path: '/glb.py', sha256: 'd'.repeat(64) },
   ],
 };
+const parameterDeclaration = {
+  schema: {
+    $schema: 'https://json-structure.org/meta/extended/v0/#',
+    $id: 'urn:taucad:build123d:parameters',
+    $uses: ['JSONSchemaUnits'],
+    name: 'Build123dParameters',
+    type: 'object',
+    properties: { width: { type: 'double', default: 25.4, ucumUnit: 'mm' } },
+  },
+  defaults: { width: 25.4 },
+  bindings: {
+    '/width': {
+      quantityKind: 'http://qudt.org/vocab/quantitykind/Length',
+      space: 'linear',
+    },
+  },
+};
 
 const createContext = () => ({
   mirror: { sync: vi.fn().mockResolvedValue(['main.py']), cleanup: vi.fn().mockResolvedValue(undefined) },
@@ -103,6 +120,19 @@ describe('Build123d kernel lifecycle errors', () => {
 
   it('returns structured generic and stale-handle failures', async () => {
     const context = createContext();
+    context.session.request.mockResolvedValueOnce({
+      defaultParameters: { width: 25.4 },
+      jsonSchema: { type: 'object' },
+      declaration: parameterDeclaration,
+      resolved: ['main.py'],
+      unresolved: [],
+    });
+    await expect(definition.getParameters({ entryPath: 'main.py' }, runtime, context)).resolves.toEqual({
+      success: true,
+      data: parameterDeclaration,
+      issues: [],
+    });
+
     context.session.request.mockRejectedValueOnce('plain failure');
     const parameters = await definition.getParameters({ entryPath: 'main.py' }, runtime, context);
     expect(parameters).toMatchObject({

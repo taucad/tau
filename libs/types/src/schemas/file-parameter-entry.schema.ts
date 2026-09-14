@@ -6,9 +6,82 @@ export const parametersDirectory = '.tau/parameters';
 
 const parameterGroupNameSchema = z.string().min(1);
 
+const identityTokenSchema = z
+  .string()
+  .min(1)
+  .refine((value) => value.trim().length > 0);
+const parameterClaimFieldSchema = z.enum(['unit', 'quantityKind', 'space', 'reference']);
+const parameterClaimProvenanceSchema = z
+  .object({
+    origin: z.enum(['declared', 'project', 'inferred', 'derived']),
+    producer: identityTokenSchema,
+    sourceRevision: identityTokenSchema,
+    profile: identityTokenSchema.optional(),
+    rule: identityTokenSchema.optional(),
+    evidence: identityTokenSchema.optional(),
+  })
+  .strict()
+  .superRefine((provenance, context) => {
+    if (provenance.origin === 'inferred') {
+      for (const field of ['profile', 'rule', 'evidence'] as const) {
+        if (provenance[field] === undefined) {
+          context.addIssue({ code: 'custom', path: [field], message: `Inferred provenance requires ${field}` });
+        }
+      }
+    }
+    if (provenance.origin === 'project' && provenance.evidence === undefined) {
+      context.addIssue({ code: 'custom', path: ['evidence'], message: 'Project provenance requires evidence' });
+    }
+  });
+
+const persistedParameterBindingSchema = z
+  .object({
+    parameter: z.object({ value: identityTokenSchema, stability: z.enum(['stable', 'revision-scoped']) }).strict(),
+    schema: z.object({ resource: identityTokenSchema, pointer: z.string() }).strict(),
+    unit: identityTokenSchema.optional(),
+    quantityKind: identityTokenSchema.optional(),
+    space: z.enum(['linear', 'difference', 'point']).optional(),
+    reference: identityTokenSchema.optional(),
+    provenance: z.partialRecord(parameterClaimFieldSchema, parameterClaimProvenanceSchema).optional(),
+  })
+  .strict()
+  .superRefine((binding, context) => {
+    for (const field of parameterClaimFieldSchema.options) {
+      if (binding.provenance?.[field] !== undefined && binding[field] === undefined) {
+        context.addIssue({
+          code: 'custom',
+          path: ['provenance', field],
+          message: `Provenance for ${field} requires the corresponding binding value`,
+        });
+      }
+    }
+  });
+
+const parameterRecordIdentitySchema = z
+  .object({
+    sourceRevision: identityTokenSchema,
+    manifestRevision: identityTokenSchema,
+    valueRevision: identityTokenSchema,
+    dependencyRevision: identityTokenSchema,
+  })
+  .strict();
+
+const parameterOperationEvidenceSchema = z
+  .object({
+    requestId: identityTokenSchema,
+    fingerprint: identityTokenSchema,
+    outcome: z.literal('committed'),
+    sourceRevision: identityTokenSchema,
+    manifestRevision: identityTokenSchema,
+    valueRevision: identityTokenSchema,
+    dependencyRevision: identityTokenSchema,
+  })
+  .strict();
+
 const parameterGroupSchema = z
   .object({
     values: z.record(z.string(), z.json()),
+    bindings: z.record(z.string(), persistedParameterBindingSchema).optional(),
   })
   .strict();
 
@@ -18,6 +91,8 @@ export const fileParameterEntrySchema = z
     activeGroup: parameterGroupNameSchema,
     order: z.array(parameterGroupNameSchema).optional(),
     groups: z.record(parameterGroupNameSchema, parameterGroupSchema),
+    identity: parameterRecordIdentitySchema.optional(),
+    lastOperation: parameterOperationEvidenceSchema.optional(),
   })
   .strict()
   .superRefine((entry, context) => {
@@ -38,6 +113,26 @@ export const fileParameterEntrySchema = z
         context.addIssue({ code: 'custom', path: ['order', index], message: 'Ordered parameter group does not exist' });
       }
       orderedGroups.add(groupName);
+    }
+
+    if (entry.lastOperation !== undefined) {
+      if (entry.identity === undefined) {
+        context.addIssue({
+          code: 'custom',
+          path: ['lastOperation'],
+          message: 'Last-operation evidence requires the current record identity',
+        });
+        return;
+      }
+      for (const field of ['sourceRevision', 'manifestRevision', 'valueRevision', 'dependencyRevision'] as const) {
+        if (entry.lastOperation[field] !== entry.identity[field]) {
+          context.addIssue({
+            code: 'custom',
+            path: ['lastOperation', field],
+            message: `Last-operation ${field} must match the current record identity`,
+          });
+        }
+      }
     }
   });
 

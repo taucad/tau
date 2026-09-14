@@ -46,6 +46,7 @@ const allowedMembers: ReadonlySet<string> = new Set([
   'connect',
   'render',
   'evaluate',
+  'resolveParameters',
   'updateParameters',
   'setOptions',
   'setRenderTimeout',

@@ -13,6 +13,8 @@ export type {
   ConfigurationDefinition,
   ConfigurationIssue,
   ConfigurationManifestV1,
+  ConfigurationNativeProjection,
+  ConfigurationNativeProjectionDiagnostic,
   ConfigurationSource,
   RestrictedRjsfUiSchemaV1,
   RestrictedUiNodeV1,

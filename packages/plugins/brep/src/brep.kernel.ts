@@ -3,6 +3,7 @@
 import {
   coordinateSystemSchema,
   createKernelError,
+  createKernelParameterDeclaration,
   createKernelSuccess,
   defineKernel,
   finalizeRenderOutput,
@@ -55,10 +56,16 @@ export const brepKernel = defineKernel({
   },
 
   async getParameters() {
-    return createKernelSuccess({
-      defaultParameters: {},
-      jsonSchema: { type: 'object', properties: {}, additionalProperties: false },
-    });
+    return createKernelSuccess(
+      createKernelParameterDeclaration(
+        {},
+        { type: 'object', properties: {}, additionalProperties: false },
+        {
+          id: 'urn:taucad:brep:parameters',
+          name: 'BrepParameters',
+        },
+      ),
+    );
   },
 
   async createGeometry({ entryPath }, { filesystem }, context: { occt: OcctImportJs }) {

@@ -2,6 +2,7 @@ import {
   assertRootedPath,
   coordinateSystemSchema,
   createKernelError,
+  createKernelParameterDeclaration,
   createKernelSuccess,
   defineKernel,
   finalizeRenderOutput,
@@ -76,10 +77,16 @@ export const assimpKernel = defineKernel({
   },
 
   async getParameters() {
-    return createKernelSuccess({
-      defaultParameters: {},
-      jsonSchema: { type: 'object', properties: {}, additionalProperties: false },
-    });
+    return createKernelSuccess(
+      createKernelParameterDeclaration(
+        {},
+        { type: 'object', properties: {}, additionalProperties: false },
+        {
+          id: 'urn:taucad:assimp:parameters',
+          name: 'AssimpParameters',
+        },
+      ),
+    );
   },
 
   async createGeometry({ entryPath }, { filesystem, fileContentCache, signal }, context: { assimp: Assimp }) {

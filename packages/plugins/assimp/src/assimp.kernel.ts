@@ -50,7 +50,9 @@ const extensions = [
 
 const glbOptionsSchema = coordinateSystemSchema
   .extend(unitSchema.shape)
-  .extend({ coordinateSystem: coordinateSystemSchema.shape.coordinateSystem.default('y-up') })
+  .extend({
+    coordinateSystem: coordinateSystemSchema.shape.coordinateSystem.default('y-up'),
+  })
   .strict();
 
 const fileExtension = (path: string): string => path.slice(path.lastIndexOf('.') + 1).toLowerCase();
@@ -73,7 +75,10 @@ export const assimpKernel = defineKernel({
 
   async getDependencies({ entryPath }, { filesystem }) {
     const inventory = await createImportFileInventory(filesystem, entryPath);
-    return { resolved: [...inventory.resolved], unresolved: [...inventory.unresolved] };
+    return {
+      resolved: [...inventory.resolved],
+      unresolved: [...inventory.unresolved],
+    };
   },
 
   async getParameters() {
@@ -131,13 +136,21 @@ export const assimpKernel = defineKernel({
       sceneNamePolicy: 'clear-generated',
       sceneNameSource: 'external-generated',
     });
-    return finalizeRenderOutput({ artifacts: [{ format: 'gltf', content: glb }], nativeHandle: glb });
+    return finalizeRenderOutput({
+      artifacts: [{ format: 'gltf', content: glb }],
+      nativeHandle: glb,
+    });
   },
 
   async exportGeometry(input) {
     if (input.nativeHandle.length === 0) {
       return createKernelError([
-        { message: 'No geometry available for export.', code: 'RUNTIME', type: 'runtime', severity: 'error' },
+        {
+          message: 'No geometry available for export.',
+          code: 'RUNTIME',
+          type: 'runtime',
+          severity: 'error',
+        },
       ]);
     }
     const bytes = await transformGltfExportBytes(input.nativeHandle, {

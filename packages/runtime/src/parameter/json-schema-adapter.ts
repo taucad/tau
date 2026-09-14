@@ -144,20 +144,19 @@ const createProjection = (
         continue;
       }
       if (schemaMapKeywords.has(key) && isRecord(child)) {
-        projected[key] = Object.fromEntries(
-          Object.entries(child).map(([name, schema]) => [
-            name,
-            visit({
-              value: schema,
-              mode: key === 'properties' ? mode : 'definition',
-              instancePointer:
-                key === 'properties' && mode === 'exact'
-                  ? `${instancePointer}/${escapePointer(name)}`
-                  : instancePointer,
-              emit,
-            }),
-          ]),
-        );
+        const entries = Object.entries(child).map(([name, schema]) => [
+          name,
+          visit({
+            value: schema,
+            mode: key === 'properties' ? mode : 'definition',
+            instancePointer:
+              key === 'properties' && mode === 'exact' ? `${instancePointer}/${escapePointer(name)}` : instancePointer,
+            emit,
+          }),
+        ]);
+        if (entries.length > 0) {
+          projected[key] = Object.fromEntries(entries);
+        }
         continue;
       }
       if (schemaArrayKeywords.has(key) && Array.isArray(child)) {

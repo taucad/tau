@@ -64,7 +64,6 @@ describe('assimpKernel', () => {
           $id: 'urn:taucad:assimp:parameters',
           name: 'AssimpParameters',
           type: 'object',
-          properties: {},
         },
       },
       issues: [],

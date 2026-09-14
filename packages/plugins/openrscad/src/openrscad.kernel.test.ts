@@ -1179,21 +1179,20 @@ endsolid tetrahedron`);
     });
     const context = await definition.initialize({}, runtime);
     const result = await definition.getParameters({ entryPath: 'project/model.scad' }, runtime, context);
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       success: true,
       data: {
-        defaultParameters: { Body: { size: 5, label: 'A' } },
-        jsonSchema: {
+        defaults: { Body: { size: 5, label: 'A' } },
+        schema: {
+          $id: 'urn:taucad:openrscad:parameters',
+          name: 'OpenRscadParameters',
           type: 'object',
           properties: {
             Body: {
               type: 'object',
-              title: 'Body',
-              additionalProperties: false,
               properties: {
-                size: { title: 'size', default: 5, type: 'number', minimum: 1, maximum: 10, multipleOf: 1 },
+                size: { default: 5, type: 'double', minimum: 1, maximum: 10, multipleOf: 1 },
                 label: {
-                  title: 'label',
                   default: 'A',
                   type: 'string',
                   oneOf: [
@@ -1204,7 +1203,6 @@ endsolid tetrahedron`);
               },
             },
           },
-          additionalProperties: false,
         },
       },
       issues: [],

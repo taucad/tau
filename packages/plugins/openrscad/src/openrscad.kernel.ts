@@ -29,7 +29,10 @@ const maxIncludeDepth = 50;
 const useIncludePattern = /^\s*(?:use|include)\s*["<]([^">]+)[">]/gm;
 const importedAssetPattern = /\b(?:import|surface)\s*\(\s*(?:file\s*=\s*)?"([^"]+)"/g;
 type OpenRscadBackend = typeof OpenRscadModule;
-type OpenRscadContext = { backend: OpenRscadBackend; entryPath: string | undefined };
+type OpenRscadContext = {
+  backend: OpenRscadBackend;
+  entryPath: string | undefined;
+};
 
 const renderTessellationSchema = z.object({
   tessellation: z
@@ -73,10 +76,19 @@ const customizerParameterSchema = z.object({
     step: z.unknown().optional(),
     maxLength: z.unknown().optional(),
     length: z.number().optional(),
-    options: z.array(z.object({ value: z.union([z.number(), z.string()]), label: z.string() })).optional(),
+    options: z
+      .array(
+        z.object({
+          value: z.union([z.number(), z.string()]),
+          label: z.string(),
+        }),
+      )
+      .optional(),
   }),
 });
-const customizerOutputSchema = z.object({ params: z.array(customizerParameterSchema).optional() });
+const customizerOutputSchema = z.object({
+  params: z.array(customizerParameterSchema).optional(),
+});
 type CustomizerParameter = z.output<typeof customizerParameterSchema>;
 
 type SourceBundle = {
@@ -270,12 +282,21 @@ const customizerProperty = (parameter: CustomizerParameter): JSONSchema7 => {
     return {
       ...base,
       type: parameter.type === 'number' ? 'number' : 'string',
-      oneOf: (parameter.control.options ?? []).map((option) => ({ const: option.value, title: option.label })),
+      oneOf: (parameter.control.options ?? []).map((option) => ({
+        const: option.value,
+        title: option.label,
+      })),
     };
   }
   if (parameter.type === 'vector') {
     const length = parameter.control.length ?? (Array.isArray(parameter.value) ? parameter.value.length : 0);
-    return { ...base, type: 'array', items: { type: 'number' }, minItems: length, maxItems: length };
+    return {
+      ...base,
+      type: 'array',
+      items: { type: 'number' },
+      minItems: length,
+      maxItems: length,
+    };
   }
   if (parameter.type === 'bool') {
     return { ...base, type: 'boolean' };
@@ -299,7 +320,10 @@ const customizerProperty = (parameter: CustomizerParameter): JSONSchema7 => {
 const parseCustomizer = async (
   source: string,
   extractParameters: OpenRscadBackend['parameters'],
-): Promise<{ defaultParameters: Record<string, unknown>; jsonSchema: JSONSchema7 }> => {
+): Promise<{
+  defaultParameters: Record<string, unknown>;
+  jsonSchema: JSONSchema7;
+}> => {
   const parsedJson: unknown = JSON.parse(await extractParameters(source));
   const parsed = customizerOutputSchema.parse(parsedJson);
   const properties: Record<string, JSONSchema7Definition> = {};
@@ -376,7 +400,12 @@ const collectIssues = (result: ExportShape3DOutput, source: string, entryPath: s
     }
   }
   if (result.error) {
-    add({ code: 'RUNTIME', message: result.error, severity: 'error', type: 'kernel' });
+    add({
+      code: 'RUNTIME',
+      message: result.error,
+      severity: 'error',
+      type: 'kernel',
+    });
   }
   return issues;
 };
@@ -450,7 +479,10 @@ export const createOpenrscadKernel = ({
     createOptionsSchema: openrscadRenderSchema,
     render: { optionsSchema: openrscadRenderSchema, content: ['includeEdges'] },
     exportFormats: {
-      glb: { optionsSchema: openrscadExportSchemas.glb, content: ['includeEdges'] },
+      glb: {
+        optionsSchema: openrscadExportSchemas.glb,
+        content: ['includeEdges'],
+      },
       '3mf': { optionsSchema: openrscadExportSchemas['3mf'] },
     },
 
@@ -474,7 +506,11 @@ export const createOpenrscadKernel = ({
     },
 
     async getDependencies({ entryPath }, { filesystem, logger }) {
-      const bundle = await collectSourceBundle({ entryPath, filesystem, logger });
+      const bundle = await collectSourceBundle({
+        entryPath,
+        filesystem,
+        logger,
+      });
       return { resolved: bundle.resolved, unresolved: bundle.unresolved };
     },
 
@@ -495,8 +531,14 @@ export const createOpenrscadKernel = ({
         await context.backend.clearCache();
         context.entryPath = normalizedEntryPath;
       }
-      const bundle = await collectSourceBundle({ entryPath, filesystem, logger });
-      const span = tracer.startSpan('openrscad.export-3d', { phase: 'computingGeometry' });
+      const bundle = await collectSourceBundle({
+        entryPath,
+        filesystem,
+        logger,
+      });
+      const span = tracer.startSpan('openrscad.export-3d', {
+        phase: 'computingGeometry',
+      });
       let result: ExportShape3DOutput;
       try {
         result = assertExport(
@@ -545,8 +587,14 @@ export const createOpenrscadKernel = ({
 
     async meshGeometry({ nativeHandle, options, content }, { tracer }, context) {
       if (content?.includeEdges !== true) {
-        const geometry: GeometryGltf = { format: 'gltf', content: nativeHandle.previewGlb };
-        return finalizeMeshOutput({ artifacts: [geometry], issues: nativeHandle.issues });
+        const geometry: GeometryGltf = {
+          format: 'gltf',
+          content: nativeHandle.previewGlb,
+        };
+        return finalizeMeshOutput({
+          artifacts: [geometry],
+          issues: nativeHandle.issues,
+        });
       }
       if (nativeHandle.previewGlbWithEdges) {
         return finalizeMeshOutput({
@@ -554,7 +602,9 @@ export const createOpenrscadKernel = ({
           issues: nativeHandle.issues,
         });
       }
-      const span = tracer.startSpan('openrscad.export-3d-edges', { phase: 'serializingGeometry' });
+      const span = tracer.startSpan('openrscad.export-3d-edges', {
+        phase: 'serializingGeometry',
+      });
       let result: ExportShape3DOutput;
       try {
         result = assertExport(
@@ -575,7 +625,10 @@ export const createOpenrscadKernel = ({
         span.end();
       }
       nativeHandle.previewGlbWithEdges = asBuffer(result.bytes);
-      const geometry: GeometryGltf = { format: 'gltf', content: nativeHandle.previewGlbWithEdges };
+      const geometry: GeometryGltf = {
+        format: 'gltf',
+        content: nativeHandle.previewGlbWithEdges,
+      };
       return finalizeMeshOutput({
         artifacts: [geometry],
         issues: collectIssues(result, nativeHandle.source, nativeHandle.entryPath),
@@ -588,7 +641,9 @@ export const createOpenrscadKernel = ({
         format: '3mf' | 'glb',
         exportArtifact: () => Promise<ExportShape3DOutput>,
       ): Promise<ExportShape3DOutput> => {
-        const span = tracer.startSpan(`openrscad.export-${format}`, { phase: 'serializingGeometry' });
+        const span = tracer.startSpan(`openrscad.export-${format}`, {
+          phase: 'serializingGeometry',
+        });
         try {
           return await exportArtifact();
         } finally {

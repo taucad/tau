@@ -83,6 +83,84 @@ const connect = async (url: URL): Promise<Client> => {
 };
 
 describe('Tau MCP Streamable HTTP transport', () => {
+  it('keeps overlapping calls bound to the dispatcher admitted with each request', async () => {
+    const handler = createTauMcpHttpHandler();
+    const labels: string[] = [];
+    const firstStarted = Promise.withResolvers<void>();
+    const releaseFirst = Promise.withResolvers<void>();
+    const server = createServer((request, response) => {
+      const pending = (async (): Promise<void> => {
+        const body = request.method === 'POST' ? await readBody(request) : undefined;
+        const label = String(request.headers['x-dispatch'] ?? 'init');
+        await handler.handle({
+          request,
+          response,
+          body,
+          authorityKey: 'shared-authority',
+          dispatch: async () => {
+            labels.push(label);
+            if (label === 'first') {
+              firstStarted.resolve();
+              await releaseFirst.promise;
+            }
+            return { success: true, status: 'ready' };
+          },
+        });
+      })();
+      pendingRequests.add(pending);
+    });
+    server.on('close', () => {
+      void handler.close();
+    });
+    servers.add(server);
+    await new Promise<void>((resolve) => {
+      server.listen(0, '127.0.0.1', resolve);
+    });
+    const address = server.address() as AddressInfo;
+    const url = new URL(`http://127.0.0.1:${String(address.port)}/v1/mcp`);
+    const initialized = await fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 0,
+        method: 'initialize',
+        params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'test', version: '1' } },
+      }),
+    });
+    const sessionId = initialized.headers.get('mcp-session-id');
+    await initialized.text();
+    expect(sessionId).toBeTypeOf('string');
+    const call = async (id: number, label: string): Promise<Response> =>
+      fetch(url, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          accept: 'application/json, text/event-stream',
+          'mcp-session-id': sessionId ?? '',
+          'x-dispatch': label,
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id,
+          method: 'tools/call',
+          params: { name: 'get_kernel_result', arguments: { targetFile: 'main.ts' } },
+        }),
+      });
+
+    const first = call(1, 'first');
+    await firstStarted.promise;
+    const second = call(2, 'second');
+    await vi.waitFor(() => {
+      expect(labels).toEqual(['first', 'second']);
+    });
+    releaseFirst.resolve();
+    const responses = await Promise.all([first, second]);
+    await Promise.all(responses.map(async (response) => response.text()));
+
+    expect(labels).toEqual(['first', 'second']);
+  });
+
   it('initializes with CAD-loop guidance and effect-correct tool annotations', async () => {
     const calls: TauMcpRpcCall[] = [];
     const dispatch: TauMcpDispatch = async (call) => {

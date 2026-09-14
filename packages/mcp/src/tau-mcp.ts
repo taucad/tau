@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -267,7 +268,7 @@ export const registerTauMcpTools = (server: McpServer, options: { dispatch: TauM
       adapter.call({
         name: toolName.getKernelResult,
         arguments: args,
-        toolCallId: String(extra.requestId),
+        toolCallId: randomUUID(),
         signal: extra.signal,
       }),
   );
@@ -278,7 +279,7 @@ export const registerTauMcpTools = (server: McpServer, options: { dispatch: TauM
       adapter.call({
         name: toolName.testModel,
         arguments: args,
-        toolCallId: String(extra.requestId),
+        toolCallId: randomUUID(),
         signal: extra.signal,
       }),
   );
@@ -289,7 +290,7 @@ export const registerTauMcpTools = (server: McpServer, options: { dispatch: TauM
       adapter.call({
         name: toolName.screenshot,
         arguments: args,
-        toolCallId: String(extra.requestId),
+        toolCallId: randomUUID(),
         signal: extra.signal,
       }),
   );
@@ -300,7 +301,7 @@ export const registerTauMcpTools = (server: McpServer, options: { dispatch: TauM
       adapter.call({
         name: toolName.exportGeometry,
         arguments: args,
-        toolCallId: String(extra.requestId),
+        toolCallId: randomUUID(),
         signal: extra.signal,
       }),
   );
@@ -339,9 +340,9 @@ export const createTauMcpHttpHandler = (): TauMcpHttpHandler => {
     readonly server: McpServer;
     readonly transport: StreamableHTTPServerTransport;
     readonly authorityKey: string;
-    dispatch: TauMcpDispatch;
   };
   const sessions = new Map<string, Session>();
+  const requestDispatch = new AsyncLocalStorage<TauMcpDispatch>();
 
   const reject = (response: ServerResponse, status: number, message: string): void => {
     response
@@ -362,8 +363,9 @@ export const createTauMcpHttpHandler = (): TauMcpHttpHandler => {
         reject(options.response, 403, 'MCP session authority mismatch.');
         return;
       }
-      session.dispatch = options.dispatch;
-      await session.transport.handleRequest(options.request, options.response, options.body);
+      await requestDispatch.run(options.dispatch, async () =>
+        session.transport.handleRequest(options.request, options.response, options.body),
+      );
       return;
     }
 
@@ -382,9 +384,15 @@ export const createTauMcpHttpHandler = (): TauMcpHttpHandler => {
       },
     });
     const server = createTauMcpServer({
-      dispatch: async (call, dispatchOptions) => session.dispatch(call, dispatchOptions),
+      dispatch: async (call, dispatchOptions) => {
+        const dispatch = requestDispatch.getStore();
+        if (!dispatch) {
+          return { errorCode: 'MCP_RUN_INACTIVE', message: 'This MCP request has no active Tau authority.' };
+        }
+        return dispatch(call, dispatchOptions);
+      },
     });
-    const session: Session = { server, transport, authorityKey: options.authorityKey, dispatch: options.dispatch };
+    const session: Session = { server, transport, authorityKey: options.authorityKey };
     // oxlint-disable-next-line unicorn/prefer-add-event-listener -- The SDK transport exposes an onclose callback, not EventTarget.
     transport.onclose = () => {
       const initializedSessionId = transport.sessionId;
@@ -395,7 +403,9 @@ export const createTauMcpHttpHandler = (): TauMcpHttpHandler => {
 
     try {
       await server.connect(transport);
-      await transport.handleRequest(options.request, options.response, options.body);
+      await requestDispatch.run(options.dispatch, async () =>
+        transport.handleRequest(options.request, options.response, options.body),
+      );
     } catch (error) {
       await server.close();
       throw error;

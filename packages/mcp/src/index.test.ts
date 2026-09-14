@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import {
   exportGeometryInputSchema,
   getKernelResultInputSchema,
@@ -6,7 +8,7 @@ import {
   testModelInputSchema,
 } from '@taucad/chat';
 import { rpcName, toolName } from '@taucad/chat/constants';
-import { createTauMcpAdapter, tauMcpToolDefinitions, tauMcpToolNames } from '#tau-mcp.js';
+import { createTauMcpAdapter, createTauMcpServer, tauMcpToolDefinitions, tauMcpToolNames } from '#tau-mcp.js';
 import type { TauMcpDispatch } from '#tau-mcp.js';
 
 describe('@taucad/mcp', () => {
@@ -36,6 +38,31 @@ describe('@taucad/mcp', () => {
     ).resolves.toMatchObject({
       structuredContent: { status: 'ready' },
     });
+  });
+
+  it('assigns independent MCP requests distinct host tool identities', async () => {
+    const ids: string[] = [];
+    await Promise.all(
+      Array.from({ length: 2 }, async () => {
+        const server = createTauMcpServer({
+          dispatch: async (_call, options) => {
+            ids.push(options.toolCallId);
+            return { success: true, status: 'ready' };
+          },
+        });
+        const client = new Client({ name: 'tau-mcp-test', version: '1' });
+        const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+        try {
+          await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+          await client.callTool({ name: toolName.getKernelResult, arguments: { targetFile: 'main.ts' } });
+        } finally {
+          await client.close();
+          await server.close();
+        }
+      }),
+    );
+
+    expect(new Set(ids).size).toBe(2);
   });
 
   it('maps export requests to the canonical RPC and forwards cancellation metadata', async () => {

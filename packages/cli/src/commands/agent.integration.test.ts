@@ -472,7 +472,7 @@ describe('tau agent (scripted command projections)', () => {
     gateway.release();
   }, 180_000);
 
-  it('should resume an external run a daemon restart left hanging, and reach its terminal state', async () => {
+  it('should fail an external run whose terminal result was lost in a daemon restart', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'tau-agent-acp-ws-'));
     const configDirectory = await mkdtemp(join(tmpdir(), 'tau-agent-acp-cfg-'));
     disposers.push(async () => {
@@ -511,8 +511,9 @@ describe('tau agent (scripted command projections)', () => {
      * `attach` recovers one, and `tail` is the command that sends it. */
     const second = await startServe({ workspace, configDirectory, relayUrl, gatewayUrl: gateway.url });
     const tailed = await tau({ args: ['agent', 'tail', 'chat-acp'], origin: second.url });
-    expect(tailed.code).toBe(0);
-    expect(tailed.stdout).toContain('run.lifecycle\tcompleted');
+    expect(tailed.code).toBe(3);
+    expect(tailed.stdout).toContain('run.lifecycle\tfailed');
+    expect(tailed.stdout).toContain('EXTERNAL_AGENT_RECOVERY_UNKNOWN');
     gateway.release();
   }, 180_000);
 

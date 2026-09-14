@@ -17,7 +17,7 @@ import { randomUUID } from 'node:crypto';
 import type { AgentLogEvent } from '@taucad/agent-host';
 import type { AgentChannelClient } from '@taucad/agent-host/channel-client';
 import { Box, Text, render, useApp, useInput, useStdin, useStdout } from 'ink';
-import { createElement, useCallback, useEffect, useState } from 'react';
+import { createElement, useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactElement } from 'react';
 
 // eslint-disable-next-line import-x/no-extraneous-dependencies -- package-private import-map alias, not a package dependency.
@@ -244,6 +244,8 @@ const TauTui = ({ client, origin, chatId, from, agent }: AppProps): ReactElement
   const { stdout, write } = useStdout();
   const { setRawMode } = useStdin();
   const [session, setSession] = useState<Session>(emptySession);
+  const sessionRef = useRef(session);
+  sessionRef.current = session;
   const [draft, setDraft] = useState('');
   const [notice, setNotice] = useState(`Connecting to ${origin}…`);
   const [rows, setRows] = useState(stdout.rows > 0 ? stdout.rows : fallbackRows);
@@ -414,7 +416,7 @@ const TauTui = ({ client, origin, chatId, from, agent }: AppProps): ReactElement
 
   const resolve = useCallback(
     (approved: boolean): void => {
-      const { approval } = session;
+      const { approval } = sessionRef.current;
       if (approval === undefined || client === undefined) {
         return;
       }
@@ -433,13 +435,13 @@ const TauTui = ({ client, origin, chatId, from, agent }: AppProps): ReactElement
         return `${answer.operation}: ${answer.snapshot.state}`;
       });
     },
-    [act, chatId, client, session],
+    [act, chatId, client],
   );
 
   useInput((input, key) => {
     /* A paused run needs an answer before it needs a prompt, so while an
      * approval is pending the letters are the only thing the keyboard does. */
-    if (session.approval !== undefined) {
+    if (sessionRef.current.approval !== undefined) {
       switch (input) {
         case 'y':
         case 'n': {

@@ -22,6 +22,7 @@ import {
   enrichIssueLocation,
   createKernelError,
   createKernelSuccess,
+  createKernelParameterDeclaration,
   createFrameClassifier,
   parseStackTrace,
   resolveSourcePath,
@@ -260,7 +261,12 @@ export const manifoldKernel = defineKernel({
       const defaultParameters = extractDefaultParameters(module);
       const jsonSchema = await jsonSchemaFromJson(defaultParameters);
 
-      return createKernelSuccess({ defaultParameters, jsonSchema });
+      return createKernelSuccess(
+        createKernelParameterDeclaration(defaultParameters, jsonSchema, {
+          id: 'urn:taucad:manifold:parameters',
+          name: 'ManifoldParameters',
+        }),
+      );
     } catch (error) {
       return createKernelError([
         {

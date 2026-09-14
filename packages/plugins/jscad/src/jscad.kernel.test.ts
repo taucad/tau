@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { encode as msgpackEncode, decode as msgpackDecode } from '@msgpack/msgpack';
 import { NodeIO } from '@gltf-transform/core';
 import { KHRMaterialsUnlit } from '@gltf-transform/extensions';
-import type { JSONSchema7 } from '@taucad/runtime/types';
+import type { ParameterManifest } from '@taucad/runtime/parameter';
 import { afterEach, describe, it, expect, beforeAll } from 'vitest';
 import * as jscadModelingImport from '@jscad/modeling';
 import { jscadKernel } from '#jscad.kernel.js';
@@ -53,13 +53,8 @@ afterEach(async () => {
 type JscadSerializedNativeHandleEntry = { type: 'geom2' | 'geom3' | 'path2'; data: Float32Array; name?: string };
 
 /** Helper to extract parameters and assert success. */
-const getParameters = async (
-  files: Record<string, string>,
-  mainFile: string,
-): Promise<{
-  jsonSchema: JSONSchema7;
-  defaultParameters: Record<string, unknown>;
-}> => getTestParameters({ runtime: testRuntime, files, mainFile });
+const getParameters = async (files: Record<string, string>, mainFile: string): Promise<ParameterManifest> =>
+  getTestParameters({ runtime: testRuntime, files, mainFile });
 
 /** Helper to create geometry and return the result. */
 const createGeometry = async (
@@ -180,7 +175,7 @@ describe('JscadWorker', () => {
   describe('getParameters', () => {
     describe('ESM style - defaultParams export', () => {
       it('should extract defaultParams from exported const', async () => {
-        const { jsonSchema, defaultParameters } = await getParameters(
+        const { schema, defaults } = await getParameters(
           {
             'cube.ts': `
               import { primitives } from '@jscad/modeling';
@@ -197,8 +192,8 @@ describe('JscadWorker', () => {
           'cube.ts',
         );
 
-        expect(defaultParameters).toEqual({ size: 20 });
-        expect(jsonSchema).toMatchObject({
+        expect(defaults).toEqual({ size: 20 });
+        expect(schema).toMatchObject({
           type: 'object',
           properties: {
             size: { type: 'integer', default: 20 },
@@ -207,7 +202,7 @@ describe('JscadWorker', () => {
       });
 
       it('should extract multiple parameters', async () => {
-        const { jsonSchema, defaultParameters } = await getParameters(
+        const { schema, defaults } = await getParameters(
           {
             'cylinder.ts': `
               import { primitives } from '@jscad/modeling';
@@ -226,12 +221,12 @@ describe('JscadWorker', () => {
           'cylinder.ts',
         );
 
-        expect(defaultParameters).toEqual({
+        expect(defaults).toEqual({
           height: 20,
           radius: 8,
           segments: 48,
         });
-        expect(jsonSchema).toMatchObject({
+        expect(schema).toMatchObject({
           type: 'object',
           properties: {
             height: { type: 'integer', default: 20 },
@@ -244,7 +239,7 @@ describe('JscadWorker', () => {
 
     describe('CommonJS style - getParameterDefinitions', () => {
       it('should extract parameters from getParameterDefinitions function', async () => {
-        const { jsonSchema, defaultParameters } = await getParameters(
+        const { schema, defaults } = await getParameters(
           {
             'gear.js': `
               const jscad = require('@jscad/modeling');
@@ -265,12 +260,12 @@ describe('JscadWorker', () => {
           'gear.js',
         );
 
-        expect(defaultParameters).toEqual({ numTeeth: 10, thickness: 5 });
-        expect(jsonSchema).toMatchObject({
+        expect(defaults).toEqual({ numTeeth: 10, thickness: 5 });
+        expect(schema).toMatchObject({
           type: 'object',
           properties: {
             numTeeth: { type: 'integer', default: 10, minimum: 5, maximum: 20 },
-            thickness: { type: 'number', default: 5, minimum: 0 },
+            thickness: { type: 'double', default: 5, minimum: 0 },
           },
         });
       });
@@ -278,7 +273,7 @@ describe('JscadWorker', () => {
 
     describe('Edge cases', () => {
       it('should return empty parameters for file without defaultParams', async () => {
-        const { jsonSchema, defaultParameters } = await getParameters(
+        const { schema, defaults } = await getParameters(
           {
             'cube.ts': `
               import { primitives } from '@jscad/modeling';
@@ -291,14 +286,14 @@ describe('JscadWorker', () => {
           'cube.ts',
         );
 
-        expect(defaultParameters).toEqual({});
-        expect(jsonSchema).toMatchObject({
+        expect(defaults).toEqual({});
+        expect(schema).toMatchObject({
           type: 'object',
         });
       });
 
       it('should handle boolean parameters', async () => {
-        const { defaultParameters } = await getParameters(
+        const { defaults } = await getParameters(
           {
             'cube.ts': `
               import { primitives } from '@jscad/modeling';
@@ -315,11 +310,11 @@ describe('JscadWorker', () => {
           'cube.ts',
         );
 
-        expect(defaultParameters).toEqual({ centered: true });
+        expect(defaults).toEqual({ centered: true });
       });
 
       it('should handle string parameters', async () => {
-        const { defaultParameters } = await getParameters(
+        const { defaults } = await getParameters(
           {
             'cube.ts': `
               import { primitives } from '@jscad/modeling';
@@ -336,7 +331,7 @@ describe('JscadWorker', () => {
           'cube.ts',
         );
 
-        expect(defaultParameters).toEqual({ mode: 'normal' });
+        expect(defaults).toEqual({ mode: 'normal' });
       });
     });
   });

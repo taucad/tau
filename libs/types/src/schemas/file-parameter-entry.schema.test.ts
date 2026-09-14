@@ -22,9 +22,58 @@ const validEntry = {
 
 const emptyGroupName = '';
 
+const recordIdentity = {
+  sourceRevision: 'source:1',
+  manifestRevision: 'manifest:1',
+  valueRevision: 'value:1',
+  dependencyRevision: 'dependency:1',
+};
+
+const attributedBinding = {
+  parameter: { value: 'width', stability: 'stable' },
+  schema: { resource: 'urn:test:schema', pointer: '/properties/width' },
+  unit: 'mm',
+  quantityKind: 'length',
+  provenance: {
+    unit: {
+      origin: 'inferred',
+      producer: 'tau-defaults',
+      sourceRevision: 'source:1',
+      profile: 'tau-defaults-v1',
+      rule: 'length-name',
+      evidence: 'width',
+    },
+    quantityKind: {
+      origin: 'project',
+      producer: '.tau/parameters/main.ts.json',
+      sourceRevision: 'source:1',
+      evidence: 'binding:/width',
+    },
+  },
+};
+
 describe('fileParameterEntrySchema', () => {
   it('should parse nested JSON parameter values without loss', () => {
     expect(fileParameterEntrySchema.parse(validEntry)).toEqual(validEntry);
+  });
+
+  it('should atomically retain bindings, complete per-field provenance, identities, and a correlated receipt', () => {
+    const entry = {
+      ...validEntry,
+      groups: {
+        ...validEntry.groups,
+        default: { ...validEntry.groups.default, bindings: { '/width': attributedBinding } },
+      },
+      identity: recordIdentity,
+      lastOperation: {
+        requestId: 'request-1',
+        fingerprint: 'operation-1',
+        outcome: 'committed',
+        ...recordIdentity,
+      },
+    };
+
+    expect(fileParameterEntrySchema.parse(entry)).toEqual(entry);
   });
 
   it.each([
@@ -78,6 +127,66 @@ describe('fileParameterEntrySchema', () => {
     { name: 'an unknown ordered group', order: ['default', 'missing'] },
   ])('should reject $name', ({ order }) => {
     expect(fileParameterEntrySchema.safeParse({ ...validEntry, order }).success).toBe(false);
+  });
+
+  it.each([
+    {
+      name: 'provenance without a binding value',
+      binding: { ...attributedBinding, unit: undefined },
+    },
+    {
+      name: 'incomplete inferred provenance',
+      binding: {
+        ...attributedBinding,
+        provenance: {
+          ...attributedBinding.provenance,
+          unit: { origin: 'inferred', producer: 'rule', sourceRevision: 'source:1' },
+        },
+      },
+    },
+    {
+      name: 'incomplete project provenance',
+      binding: {
+        ...attributedBinding,
+        provenance: {
+          ...attributedBinding.provenance,
+          unit: { origin: 'project', producer: 'project', sourceRevision: 'source:1' },
+        },
+      },
+    },
+  ])('should reject a persisted binding with $name', ({ binding }) => {
+    const entry = {
+      activeGroup: 'default',
+      groups: { default: { values: { width: 10 }, bindings: { '/width': binding } } },
+    };
+
+    expect(fileParameterEntrySchema.safeParse(entry).success).toBe(false);
+  });
+
+  it.each([
+    {
+      name: 'receipt without record identity',
+      entry: {
+        ...validEntry,
+        lastOperation: { requestId: 'request-1', fingerprint: 'operation-1', outcome: 'committed', ...recordIdentity },
+      },
+    },
+    {
+      name: 'receipt for an older value identity',
+      entry: {
+        ...validEntry,
+        identity: recordIdentity,
+        lastOperation: {
+          requestId: 'request-1',
+          fingerprint: 'operation-1',
+          outcome: 'committed',
+          ...recordIdentity,
+          valueRevision: 'value:older',
+        },
+      },
+    },
+  ])('should reject a record with $name', ({ entry }) => {
+    expect(fileParameterEntrySchema.safeParse(entry).success).toBe(false);
   });
 });
 

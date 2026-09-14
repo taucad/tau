@@ -37,6 +37,7 @@ import {
   defineLibraryTracePolicy,
   createKernelError,
   createKernelSuccess,
+  createKernelParameterDeclaration,
   RenderArtifactFinalizationError,
   finalizeMeshOutput,
   finalizeRenderOutput,
@@ -587,7 +588,12 @@ export const replicadKernel = defineKernel({
       const defaultParameters = extractDefaultParameters(executeResult.value);
       const jsonSchema = await jsonSchemaFromJson(defaultParameters);
 
-      return createKernelSuccess({ defaultParameters, jsonSchema });
+      return createKernelSuccess(
+        createKernelParameterDeclaration(defaultParameters, jsonSchema, {
+          id: 'urn:taucad:replicad:parameters',
+          name: 'ReplicadParameters',
+        }),
+      );
     } catch (error) {
       const issue = formatOcRuntimeError(
         error,

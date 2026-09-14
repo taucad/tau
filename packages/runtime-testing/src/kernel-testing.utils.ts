@@ -1,5 +1,6 @@
 import deepmerge from 'deepmerge';
 import {
+  contentDigest,
   createComputeReuseService,
   createMemoryActionStore,
   createMemoryContentStore,
@@ -10,6 +11,8 @@ import type { ActionDigest, ComputeEvaluationInput, ComputeEvaluationResult } fr
 import { createRuntimeClient } from '@taucad/runtime/client';
 import type { RuntimeClient } from '@taucad/runtime/client';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
+import { compileParameterManifest } from '@taucad/runtime/parameter';
+import type { ParameterManifest } from '@taucad/runtime/parameter';
 import type {
   AnyKernelDefinition,
   ComputeGeneration,
@@ -37,7 +40,6 @@ import type {
   HashedGeometryResult,
   GetParametersInput,
   GetParametersResult,
-  JSONSchema7,
   KernelErrorResult,
   KernelIssue,
   KernelResult,
@@ -111,26 +113,24 @@ export const getTestParameters = async <const Runtime extends RuntimeDefinition>
   mainFile,
 }: CreateTestRuntimeClientOptions<Runtime> & {
   readonly mainFile: string;
-}): Promise<{ jsonSchema: JSONSchema7; defaultParameters: Record<string, unknown> }> => {
+}): Promise<ParameterManifest> => {
   const client = createTestRuntimeClient({ runtime, files });
   try {
-    const parameters = new Promise<{ jsonSchema: JSONSchema7; defaultParameters: Record<string, unknown> }>(
-      (resolve, reject) => {
-        const unsubscribeError = client.on('error', (issues) => {
-          unsubscribeParameters();
-          reject(new Error(issues.map((issue) => issue.message).join('\n')));
-        });
-        const unsubscribeParameters = client.on('parametersResolved', (result) => {
-          unsubscribeError();
-          unsubscribeParameters();
-          if (!result.success) {
-            reject(new Error(result.issues.map((issue) => issue.message).join('\n')));
-            return;
-          }
-          resolve(result.data);
-        });
-      },
-    );
+    const parameters = new Promise<ParameterManifest>((resolve, reject) => {
+      const unsubscribeError = client.on('error', (issues) => {
+        unsubscribeParameters();
+        reject(new Error(issues.map((issue) => issue.message).join('\n')));
+      });
+      const unsubscribeParameters = client.on('parametersResolved', (result) => {
+        unsubscribeError();
+        unsubscribeParameters();
+        if (!result.success) {
+          reject(new Error(result.issues.map((issue) => issue.message).join('\n')));
+          return;
+        }
+        resolve(result.data);
+      });
+    });
     const outcome = await client.render({ source: { path: mainFile } });
     if (outcome.superseded) {
       throw new Error('Test parameter render was superseded');
@@ -533,7 +533,27 @@ export const createMockGetParametersHandler = (result?: GetParametersResult): Te
     async (): Promise<GetParametersResult> =>
       result ?? {
         success: true,
-        data: { defaultParameters: {}, jsonSchema: { type: 'object', properties: {} } },
+        data: await compileParameterManifest({
+          declaration: {
+            schema: {
+              $schema: 'https://json-structure.org/meta/extended/v0/#',
+              $id: 'urn:taucad:runtime-testing:parameters',
+              $uses: ['JSONSchemaUnits'],
+              name: 'RuntimeTestingParameters',
+              type: 'object',
+            },
+            defaults: {},
+          },
+          scope: { kind: 'source', authority: 'runtime-testing', root: '', entry: 'test.kcl' },
+          source: {
+            id: 'runtime-testing',
+            version: '1',
+            revision: contentDigest({ value: `sha256:${'0'.repeat(64)}` }),
+            capability: 'json-structure',
+          },
+          dependency: contentDigest({ value: `sha256:${'1'.repeat(64)}` }),
+          middleware: contentDigest({ value: `sha256:${'2'.repeat(64)}` }),
+        }),
         issues: [],
       },
   );

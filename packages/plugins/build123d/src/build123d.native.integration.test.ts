@@ -16,6 +16,7 @@ import {
   validateGlbData,
 } from '@taucad/runtime-testing';
 import { defineRuntime } from '@taucad/runtime/worker';
+import type { ParameterManifest } from '@taucad/runtime/parameter';
 import { describe, expect, it } from 'vitest';
 
 import { build123d } from '#index.js';
@@ -50,23 +51,43 @@ const runtime = defineRuntime({
   ],
 });
 
-const source = `from dataclasses import dataclass
-from build123d import Box, Color
+const modelSource = (metadata: string): string => `from dataclasses import dataclass
+from build123d import Axis, Box, Color
 
 @dataclass(frozen=True)
 class Params:
     width: float = 40.0
     depth: float = 30.0
     height: float = 20.0
+    angle: float = 30.0
 
-__tau__ = {"parameters": {"width": {"minimum": 1.0, "maximum": 200.0}}}
+__tau__ = {"parameters": ${metadata}}
 
 def main(params: Params):
-    result = Box(params.width, params.depth, params.height)
+    result = Box(params.width, params.depth, params.height).rotate(Axis.Z, params.angle)
     result.label = "Housing"
     result.color = Color("royalblue")
     return result
 `;
+const source = modelSource(
+  '{"width": {"minimum": 1.0, "maximum": 200.0}, "angle": {"minimum": -180.0, "maximum": 180.0}}',
+);
+const declaredSource = modelSource(`{
+  "width": {
+    "minimum": 1.0,
+    "maximum": 200.0,
+    "ucumUnit": "mm",
+    "quantityKind": "http://qudt.org/vocab/quantitykind/Length",
+    "space": "linear"
+  },
+  "angle": {
+    "minimum": -180.0,
+    "maximum": 180.0,
+    "ucumUnit": "deg",
+    "quantityKind": "http://qudt.org/vocab/quantitykind/PlaneAngle",
+    "space": "linear"
+  }
+}`);
 const v8Source = readFileSync(
   resolve(workspaceRoot, 'libs/tau-examples/src/kernels/build123d/v8-engine-brep/main.py'),
   'utf8',
@@ -124,31 +145,90 @@ const readTopology = (
 };
 
 describe('Build123d native kernel', () => {
-  it('extracts parameters, renders canonical topology, and exports retained STEP', async () => {
+  it('admits declared units without changing native values or geometry', async () => {
     const previousPath = process.env['PATH'];
     // Only the system directories the sandbox wrapper resolves `which` from: no user or tool PATH.
     process.env['PATH'] = '/usr/bin:/bin';
     const client = createTestRuntimeClient({ runtime, files: { 'main.py': source } });
-    const parameters = new Promise<Record<string, unknown>>((resolve) => {
-      client.on('parametersResolved', (result) => {
-        if (result.success) {
-          resolve(result.data.defaultParameters);
-        }
+    const nextManifest = async (): Promise<ParameterManifest> =>
+      new Promise((resolve) => {
+        client.on('parametersResolved', (result) => {
+          if (result.success) {
+            resolve(result.data);
+          }
+        });
       });
-    });
     try {
-      const rendered = await client.render({ source: { path: 'main.py' }, parameters: { width: 50 } });
+      const baselineParameters = nextManifest();
+      const baseline = await client.render({
+        source: { path: 'main.py' },
+        parameters: { width: 50, angle: 15 },
+      });
+      const baselineManifest = await baselineParameters;
+      expect(baselineManifest.defaults).toEqual({ width: 40, depth: 30, height: 20, angle: 30 });
+      expect(baselineManifest.bindings).toEqual({});
+
+      const declaredParameters = nextManifest();
+      const rendered = await client.render({
+        source: { files: { 'main.py': declaredSource }, entry: 'main.py' },
+        parameters: { width: 50, angle: 15 },
+      });
+      const declared = await declaredParameters;
       expect(rendered.superseded).toBe(false);
       if (rendered.superseded) {
         throw new Error('Native Build123d render was unexpectedly superseded.');
       }
-      expect(await parameters).toEqual({ width: 40, depth: 30, height: 20 });
+      expect(declared.defaults).toEqual({ width: 40, depth: 30, height: 20, angle: 30 });
+      expect(declared.source).toMatchObject({ id: 'build123d', capability: 'json-structure' });
+      expect(declared.bindings).toMatchObject({
+        '/width': {
+          unit: 'mm',
+          quantityKind: 'http://qudt.org/vocab/quantitykind/Length',
+          space: 'linear',
+          constraints: { default: 40, minimum: 1, maximum: 200 },
+        },
+        '/angle': {
+          unit: 'deg',
+          quantityKind: 'http://qudt.org/vocab/quantitykind/PlaneAngle',
+          space: 'linear',
+          constraints: { default: 30, minimum: -180, maximum: 180 },
+        },
+      });
+      expect(Object.values(declared.provenance)).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            field: 'unit',
+            origin: 'declared',
+            producer: 'build123d',
+            sourceRevision: declared.source.revision,
+          }),
+          expect.objectContaining({
+            field: 'quantity-kind',
+            origin: 'declared',
+            producer: 'build123d',
+            sourceRevision: declared.source.revision,
+          }),
+          expect.objectContaining({
+            field: 'space',
+            origin: 'declared',
+            producer: 'build123d',
+            sourceRevision: declared.source.revision,
+          }),
+        ]),
+      );
+
+      expect(baseline.superseded).toBe(false);
+      if (baseline.superseded) {
+        throw new Error('Native Build123d baseline render was unexpectedly superseded.');
+      }
+      assertSuccess(baseline.geometry);
       assertSuccess(rendered.geometry);
       expect(rendered.geometry.data.format).toBe('gltf');
-      if (rendered.geometry.data.format !== 'gltf') {
+      if (baseline.geometry.data.format !== 'gltf' || rendered.geometry.data.format !== 'gltf') {
         throw new Error('Expected GLB geometry');
       }
       const glb = rendered.geometry.data.content;
+      expect(glb).toEqual(baseline.geometry.data.content);
       validateGlbData(glb);
       expect(await getSignedVolumeFromGlb(glb)).toBeCloseTo(30e-6, 10);
       const { json, payload } = readTopology(glb);

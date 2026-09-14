@@ -19,7 +19,13 @@ type Output = { readonly meters: number; readonly profile: string };
 const inputSchema = {
   type: 'object',
   properties: {
-    millimeters: { type: 'number', minimum: 0, 'x-tau-quantity': 'length' },
+    millimeters: {
+      type: 'number',
+      minimum: 0,
+      'x-tau-unit': 'mm',
+      'x-tau-quantity-kind': 'http://qudt.org/vocab/quantitykind/Length',
+      'x-tau-space': 'linear',
+    },
     profile: { type: 'string' },
   },
   required: ['millimeters', 'profile'],
@@ -41,11 +47,14 @@ const schema: StandardSchemaV1<Input, Output> & StandardJSONSchemaV1<Input, Outp
     vendor: 'fixture',
     validate: async (value) => {
       const input = value as Input;
-      return typeof input.millimeters === 'number' && typeof input.profile === 'string'
+      return typeof input.millimeters === 'number' &&
+        input.millimeters >= 0 &&
+        typeof input.profile === 'string' &&
+        Object.keys(input).every((key) => key === 'millimeters' || key === 'profile')
         ? {
             value: { meters: input.millimeters / 1000, profile: input.profile },
           }
-        : { issues: [{ message: 'Invalid input' }] };
+        : { issues: [{ message: 'Invalid input', path: ['extra'] }] };
     },
     jsonSchema: { input: () => inputSchema, output: () => outputSchema },
   },
@@ -98,10 +107,10 @@ describe('configuration admission', () => {
     }).toThrow('CYCLIC_REFERENCE');
     expect(() => {
       admitJsonSchema({ type: 'string', 'x-tau-quantity': 'length' });
-    }).toThrow('INVALID_QUANTITY');
+    }).toThrow('UNSUPPORTED_KEYWORD');
     expect(() => {
       admitJsonSchema({ type: 'number', 'x-tau-quantity': 'not-a-quantity' });
-    }).toThrow('INVALID_QUANTITY');
+    }).toThrow('UNSUPPORTED_KEYWORD');
     expect(() => {
       admitJsonSchema({
         enum: Array.from({ length: 2049 }, (_, index) => index),
@@ -129,13 +138,13 @@ describe('configuration admission', () => {
     expect(() => {
       admitJsonSchema({
         type: ['number', 'string'],
-        'x-tau-quantity': 'length',
+        'x-tau-unit': 'mm',
       });
     }).toThrow('INVALID_QUANTITY');
     expect(() => {
       admitJsonSchema({
         type: ['number', 'null'],
-        'x-tau-quantity': 'length',
+        'x-tau-unit': 'mm',
       });
     }).not.toThrow();
   });
@@ -147,7 +156,11 @@ describe('configuration admission', () => {
       defaults: { millimeters: 0.2, profile: 'balanced' },
     });
     expect(Object.isFrozen(definition.manifest)).toBe(true);
-    expect(Object.isFrozen(definition.manifest.inputSchema)).toBe(true);
+    expect(definition.manifest.parameters.input.status).toBe('usable');
+    if (definition.manifest.parameters.input.status !== 'usable') {
+      throw new Error('expected usable native configuration projection');
+    }
+    expect(Object.isFrozen(definition.manifest.parameters.input.declaration.schema)).toBe(true);
     expect(definition.manifest.source).toEqual({
       id: 'fixture.fff',
       version: '1.0.0',
@@ -183,9 +196,21 @@ describe('configuration admission', () => {
     expect(() =>
       admitConfigurationManifest({
         ...definition.manifest,
-        defaults: { millimeters: -1, profile: 'balanced' },
+        parameters: {
+          ...definition.manifest.parameters,
+          input:
+            definition.manifest.parameters.input.status === 'usable'
+              ? {
+                  ...definition.manifest.parameters.input,
+                  declaration: {
+                    ...definition.manifest.parameters.input.declaration,
+                    defaults: { millimeters: -1, profile: 'balanced' },
+                  },
+                }
+              : definition.manifest.parameters.input,
+        },
       }),
-    ).toThrow('Defaults');
+    ).toThrow('INVALID_SCHEMA');
   });
 
   it('should resolve local references before admitting nested UI paths', () => {
@@ -276,25 +301,43 @@ describe('configuration admission', () => {
     const scalar = defineConfiguration({
       id: 'fixture.quantity.scalar',
       version: '1.0.0',
-      schema: quantity('length').positive(),
+      schema: quantity({
+        unit: 'm',
+        quantityKind: 'http://qudt.org/vocab/quantitykind/Length',
+        space: 'linear',
+      }).positive(),
       ui: { version: 1, rjsf: { 'ui:widget': 'slider' } },
     });
-    expect(scalar.manifest.inputSchema).toMatchObject({
-      type: 'number',
+    expect(scalar.manifest.parameters.input).toMatchObject({ status: 'usable' });
+    if (scalar.manifest.parameters.input.status !== 'usable') {
+      throw new Error('expected usable scalar projection');
+    }
+    expect(scalar.manifest.parameters.input.declaration.schema).toMatchObject({
+      type: 'double',
       exclusiveMinimum: 0,
-      'x-tau-quantity': 'length',
+      ucumUnit: 'm',
     });
-    expect(Reflect.ownKeys(scalar.manifest.inputSchema)).not.toContain('~standard');
+    expect(Reflect.ownKeys(scalar.manifest.parameters.input.declaration.schema)).not.toContain('~standard');
 
     const object = defineConfiguration({
       id: 'fixture.quantity.object',
       version: '1.0.0',
-      schema: z.object({ speed: quantity('speed').nonnegative() }),
+      schema: z.object({
+        speed: quantity({
+          unit: 'm/s',
+          quantityKind: 'http://qudt.org/vocab/quantitykind/Speed',
+          space: 'linear',
+        }).nonnegative(),
+      }),
       ui: { version: 1, rjsf: { speed: { 'ui:widget': 'slider' } } },
     });
-    expect(object.manifest.inputSchema).toMatchObject({
+    expect(object.manifest.parameters.input).toMatchObject({ status: 'usable' });
+    if (object.manifest.parameters.input.status !== 'usable') {
+      throw new Error('expected usable object projection');
+    }
+    expect(object.manifest.parameters.input.declaration.schema).toMatchObject({
       properties: {
-        speed: { type: 'number', minimum: 0, 'x-tau-quantity': 'speed' },
+        speed: { type: 'double', minimum: 0, ucumUnit: 'm/s' },
       },
     });
   });
@@ -323,24 +366,26 @@ describe('configuration admission', () => {
         },
       },
     };
-    expect(() =>
-      defineConfiguration({
-        id: 'fixture.branches',
-        version: '1.0.0',
-        schema: branchSchema,
-        ui: {
-          version: 1,
-          rjsf: {
-            speed: { 'ui:widget': 'slider' },
-            force: { 'ui:widget': 'slider' },
-            label: { 'ui:widget': 'textarea' },
-            acceleration: { 'ui:widget': 'slider' },
-            duration: { 'ui:widget': 'slider' },
-            notes: { 'ui:widget': 'textarea' },
-          },
+    const branchDefinition = defineConfiguration({
+      id: 'fixture.branches',
+      version: '1.0.0',
+      schema: branchSchema,
+      ui: {
+        version: 1,
+        rjsf: {
+          speed: { 'ui:widget': 'slider' },
+          force: { 'ui:widget': 'slider' },
+          label: { 'ui:widget': 'textarea' },
+          acceleration: { 'ui:widget': 'slider' },
+          duration: { 'ui:widget': 'slider' },
+          notes: { 'ui:widget': 'textarea' },
         },
-      }),
-    ).not.toThrow();
+      },
+    });
+    expect(branchDefinition.manifest.parameters.input).toMatchObject({
+      status: 'unsupported',
+      diagnostics: [expect.objectContaining({ code: 'NATIVE_PROJECTION_UNSUPPORTED' })],
+    });
 
     const ambiguousSchema = {
       ...branchInputSchema,
@@ -362,27 +407,90 @@ describe('configuration admission', () => {
     ).toThrow('AMBIGUOUS_UI_SCHEMA');
   });
 
-  it('should admit an if-only conditional discriminator', () => {
+  it('should preserve Standard Schema behavior when native conditional projection is unsupported', async () => {
     const conditionalInputSchema = {
       type: 'object',
       if: { properties: { mode: { type: 'string', enum: ['speed', 'force'] } } },
       // oxlint-disable-next-line unicorn/no-thenable -- `then` is the normative Draft-7 conditional keyword.
       then: { properties: { value: { type: 'number' } } },
     };
-    expect(() =>
-      defineConfiguration({
-        id: 'fixture.if-discriminator',
-        version: '1.0.0',
-        schema: {
-          ...schema,
-          '~standard': {
-            ...schema['~standard'],
-            jsonSchema: { input: () => conditionalInputSchema, output: () => outputSchema },
-          },
+    const conditionalSchema: StandardSchemaV1<{ mode?: string; value?: number }> &
+      StandardJSONSchemaV1<{ mode?: string; value?: number }> = {
+      '~standard': {
+        version: 1,
+        vendor: 'fixture',
+        validate: (value) => {
+          const candidate = value as { mode?: string; value?: number };
+          return candidate.mode === 'strict' && typeof candidate.value !== 'number'
+            ? { issues: [{ message: 'strict mode requires value', path: ['value'] }] }
+            : { value: candidate };
         },
-        ui: { version: 1, rjsf: { mode: { 'ui:widget': 'select' } } },
+        jsonSchema: { input: () => conditionalInputSchema, output: () => conditionalInputSchema },
+      },
+    };
+    const definition = defineConfiguration({
+      id: 'fixture.if-discriminator',
+      version: '1.0.0',
+      schema: conditionalSchema,
+      ui: { version: 1, rjsf: { mode: { 'ui:widget': 'select' } } },
+    });
+    expect(definition.manifest.parameters.input).toMatchObject({
+      status: 'unsupported',
+      diagnostics: [expect.objectContaining({ code: 'NATIVE_PROJECTION_UNSUPPORTED' })],
+    });
+    return expect(
+      validateConfiguration({
+        definition,
+        manifestDigest: await definition.manifestDigest(),
+        formRevision: 1,
+        explicitPointers: ['/mode'],
+        value: { mode: 'strict' },
       }),
-    ).not.toThrow();
+    ).resolves.toMatchObject({
+      type: 'invalid',
+      issues: [expect.objectContaining({ code: 'STANDARD_SCHEMA', pointer: '/value' })],
+    });
+  });
+
+  it('should preserve fully typed conditional constraints in a usable native projection', () => {
+    const conditionalInputSchema = {
+      type: 'object',
+      properties: { mode: { type: 'string' }, value: { type: 'number' } },
+      if: {
+        type: 'object',
+        properties: { mode: { type: 'string', const: 'strict' } },
+      },
+      // oxlint-disable-next-line unicorn/no-thenable -- `then` is the normative Draft-7 conditional keyword.
+      then: {
+        type: 'object',
+        properties: { value: { type: 'number' } },
+        required: ['value'],
+      },
+    };
+    const schema: StandardSchemaV1 & StandardJSONSchemaV1 = {
+      '~standard': {
+        version: 1,
+        vendor: 'fixture',
+        validate: (value: unknown) => ({ value }),
+        jsonSchema: { input: () => conditionalInputSchema, output: () => conditionalInputSchema },
+      },
+    };
+    const definition = defineConfiguration({
+      id: 'fixture.native-conditional',
+      version: '1.0.0',
+      schema,
+      ui: { version: 1, rjsf: {} },
+    });
+    expect(definition.manifest.parameters.input).toMatchObject({
+      status: 'usable',
+      declaration: {
+        schema: {
+          if: { type: 'object', properties: { mode: { type: 'string', const: 'strict' } } },
+          // oxlint-disable-next-line unicorn/no-thenable -- `then` is the normative JSON Structure conditional keyword.
+          then: { type: 'object', properties: { value: { type: 'double' } }, required: ['value'] },
+        },
+      },
+    });
   });
 
   it('should budget nested UI strings and diagnose unknown cosmetic icons', () => {
@@ -466,7 +574,9 @@ describe('authoritative configuration validation', () => {
     });
     expect(invalidInput.type).toBe('invalid');
     if (invalidInput.type === 'invalid') {
-      expect(invalidInput.issues).toContainEqual(expect.objectContaining({ code: 'JSON_SCHEMA', pointer: '/extra' }));
+      expect(invalidInput.issues).toContainEqual(
+        expect.objectContaining({ code: 'STANDARD_SCHEMA', pointer: '/extra' }),
+      );
     }
     await expect(validateConfiguration({ ...request, explicitPointers: ['/missing'] })).rejects.toThrow(
       'ABSENT_POINTER',

@@ -13,6 +13,7 @@ import {
   asBuffer,
   createKernelError,
   createKernelSuccess,
+  createKernelParameterDeclaration,
   defineKernel,
   extractDefaultParameters,
   finalizeRenderOutput,
@@ -180,7 +181,12 @@ export const opencascadeNativeKernel = defineKernel({
     }
 
     const defaultParameters = extractDefaultParameters(executeResult.value);
-    return createKernelSuccess({ defaultParameters, jsonSchema: await jsonSchemaFromJson(defaultParameters) });
+    return createKernelSuccess(
+      createKernelParameterDeclaration(defaultParameters, await jsonSchemaFromJson(defaultParameters), {
+        id: 'urn:taucad:opencascade-native:parameters',
+        name: 'OpenCascadeNativeParameters',
+      }),
+    );
   },
 
   async createGeometry({ entryPath, parameters }, runtime, context) {

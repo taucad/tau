@@ -24,7 +24,7 @@ import type { RuntimeFileLocator } from '#types/runtime-file.types.js';
 import type {
   CreateGeometryResult,
   ExportGeometryResult,
-  GetParametersResult,
+  GetParameterDeclarationsResult,
   HashedGeometryResult,
 } from '#types/runtime.types.js';
 
@@ -238,6 +238,26 @@ const successGeometry = (): CreateGeometryResult => ({
   issues: [],
 });
 
+/** Native empty parameter declaration used by runtime framework fixtures. */
+export const createParameterDeclaration = (
+  defaults: Readonly<Record<string, unknown>> = {},
+  schema: Readonly<Record<string, unknown>> = {},
+): GetParameterDeclarationsResult => ({
+  success: true,
+  data: {
+    schema: {
+      $schema: 'https://json-structure.org/meta/extended/v0/#',
+      $id: 'urn:taucad:test:kernel-parameters',
+      $uses: ['JSONSchemaUnits'],
+      name: 'KernelParameters',
+      type: 'object',
+      ...schema,
+    },
+    defaults,
+  },
+  issues: [],
+});
+
 /** White-box KernelWorker fixture retained only for runtime's own framework tests. */
 export class MockKernelWorker extends KernelWorker {
   public createGeometryCalls = 0;
@@ -312,12 +332,8 @@ export class MockKernelWorker extends KernelWorker {
   protected override async onGetParameters(
     _input: GetParametersInput,
     _runtime: KernelRuntime,
-  ): Promise<GetParametersResult> {
-    return {
-      success: true,
-      data: { defaultParameters: {}, jsonSchema: { type: 'object', properties: {} } },
-      issues: [],
-    };
+  ): Promise<GetParameterDeclarationsResult> {
+    return createParameterDeclaration();
   }
 
   protected override async onCreateGeometry(

@@ -20,7 +20,7 @@ import type {
   CreateGeometryResult,
   MeshGeometryResult,
   ExportGeometryResult,
-  GetParametersResult,
+  GetParameterDeclarationsResult,
   KernelIssue,
 } from '#types/runtime.types.js';
 import type {
@@ -219,7 +219,7 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
   protected override async onGetParameters(
     input: GetParametersInput,
     runtime: KernelRuntime,
-  ): Promise<GetParametersResult> {
+  ): Promise<GetParameterDeclarationsResult> {
     const owner = await this.createRequestOperationOwner(input, 'request', runtime);
     return this.onGetParametersForOwner(owner, input, runtime);
   }
@@ -228,7 +228,7 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     owner: OperationOwner,
     input: GetParametersInput,
     runtime: KernelRuntime,
-  ): Promise<GetParametersResult> {
+  ): Promise<GetParameterDeclarationsResult> {
     const selectionError = this.selectionErrors.get(input.entryPath);
     if (selectionError) {
       return createKernelError([this.createKernelBindingIssue(selectionError)]);
@@ -242,7 +242,17 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
       );
       return {
         success: true,
-        data: { defaultParameters: {}, jsonSchema: {} },
+        data: {
+          schema: {
+            $schema: 'https://json-structure.org/meta/extended/v0/#',
+            $id: 'urn:taucad:parameters:empty',
+            $uses: ['JSONSchemaUnits'],
+            name: 'EmptyParameters',
+            type: 'object',
+            properties: {},
+          },
+          defaults: {},
+        },
         issues: [],
       };
     }

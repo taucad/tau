@@ -16,6 +16,7 @@ import {
   assertRootedPath,
   createKernelError,
   createKernelSuccess,
+  createKernelParameterDeclaration,
   defineKernel,
   finalizeMeshOutput,
   gltfExportConventionSchema,
@@ -479,7 +480,13 @@ export const createOpenrscadKernel = ({
 
     async getParameters({ entryPath }, { filesystem }, context) {
       const source = await filesystem.readFile(entryPath, 'utf8');
-      return createKernelSuccess(await parseCustomizer(source, context.backend.parameters));
+      const { defaultParameters, jsonSchema } = await parseCustomizer(source, context.backend.parameters);
+      return createKernelSuccess(
+        createKernelParameterDeclaration(defaultParameters, jsonSchema, {
+          id: 'urn:taucad:openrscad:parameters',
+          name: 'OpenRscadParameters',
+        }),
+      );
     },
 
     async createGeometry({ entryPath, parameters, options }, { filesystem, logger, tracer }, context) {

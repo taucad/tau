@@ -40,6 +40,7 @@
     "./types": "./src/types/index.ts",
     "./metadata": "./src/utils/package-info.ts",
     "./client": "./src/client/index.ts",
+    "./parameter": "./src/parameter/index.ts",
     "./configuration": "./src/configuration/index.ts",
     "./configuration/zod": "./src/configuration/zod.ts",
     "./job": "./src/jobs/index.ts",
@@ -73,7 +74,10 @@
     "./vite": "./src/vite/index.ts",
     "./nextjs/config": "./src/nextjs/config.ts",
     "./nextjs/browser-node-builtins": "./src/nextjs/browser-node-builtins.ts",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./parameter-set-machine": "./src/parameter-set.machine.ts",
+    "./parameter-input-machine": "./src/parameter-input.machine.ts",
+    "./parameter-client": "./src/parameter-client.ts"
   },
   "publishConfig": {
     "access": "public",
@@ -102,6 +106,11 @@
         "types": "./dist/client/index.d.mts",
         "import": "./dist/client/index.mjs",
         "default": "./dist/client/index.mjs"
+      },
+      "./parameter": {
+        "types": "./dist/parameter/index.d.mts",
+        "import": "./dist/parameter/index.mjs",
+        "default": "./dist/parameter/index.mjs"
       },
       "./configuration": {
         "types": "./dist/configuration/index.d.mts",
@@ -263,7 +272,22 @@
         "import": "./dist/nextjs/browser-node-builtins.mjs",
         "default": "./dist/nextjs/browser-node-builtins.mjs"
       },
-      "./package.json": "./package.json"
+      "./package.json": "./package.json",
+      "./parameter-set-machine": {
+        "types": "./dist/parameter-set.machine.d.mts",
+        "import": "./dist/parameter-set.machine.mjs",
+        "default": "./dist/parameter-set.machine.mjs"
+      },
+      "./parameter-input-machine": {
+        "types": "./dist/parameter-input.machine.d.mts",
+        "import": "./dist/parameter-input.machine.mjs",
+        "default": "./dist/parameter-input.machine.mjs"
+      },
+      "./parameter-client": {
+        "types": "./dist/parameter-client.d.mts",
+        "import": "./dist/parameter-client.mjs",
+        "default": "./dist/parameter-client.mjs"
+      }
     },
     "imports": {}
   },
@@ -273,9 +297,11 @@
   },
   "dependencies": {
     "@cfworker/json-schema": "catalog:",
+    "@json-structure/sdk": "catalog:",
     "@msgpack/msgpack": "catalog:",
     "@standard-schema/spec": "catalog:",
     "@taucad/cache-core": "workspace:*",
+    "@taucad/units": "workspace:*",
     "@types/json-schema": "catalog:",
     "cdn-resolve": "catalog:",
     "deepmerge": "catalog:",
@@ -289,7 +315,8 @@
     "electron": ">=37.0.0",
     "next": ">=15.3.0 <17.0.0",
     "vite": "^7.0.0 || ^8.0.0",
-    "zod": "^4.0.0"
+    "zod": "^4.0.0",
+    "xstate": "^5.0.0"
   },
   "peerDependenciesMeta": {
     "electron": {
@@ -311,12 +338,12 @@
     "@taucad/nx": "workspace:*",
     "@taucad/rpc": "workspace:*",
     "@taucad/types": "workspace:*",
-    "@taucad/units": "workspace:*",
     "@taucad/utils": "workspace:*",
     "@types/ws": "^8.18.1",
     "next": "catalog:next16",
     "vite": "catalog:electron-vite7",
     "vitest": "catalog:",
-    "zod": "catalog:"
+    "zod": "catalog:",
+    "xstate": "catalog:"
   }
 }

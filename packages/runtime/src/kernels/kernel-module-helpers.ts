@@ -13,6 +13,8 @@ import { isKernelIssueCode } from '#types/kernel-issue-codes.js';
 import { isNode, resolveFileUrl } from '#framework/environment.js';
 import { asBuffer } from '@taucad/utils/file';
 import { assertRootedPath } from '@taucad/utils/path';
+import { projectDraft7SchemaToParameterDeclaration } from '#parameter/json-schema-adapter.js';
+import type { ParameterDeclaration } from '#parameter/manifest.js';
 
 /** @public */
 // eslint-disable-next-line @typescript-eslint/naming-convention -- protocol global key mirrors its host name
@@ -185,6 +187,26 @@ export function extractDefaultParameters(module: unknown): Record<string, unknow
   const params = module['defaultParams'] ?? module['defaultParameters'];
   return isRecordObject(params) ? params : {};
 }
+
+/**
+ * Create an admitted native declaration from a kernel producer's Draft-7 schema.
+ * @param defaults - Producer defaults in native coordinates.
+ * @param schema - Producer Draft-7/OGC schema.
+ * @param identity - Caller-owned stable schema identity and name.
+ * @returns An admitted immutable native parameter declaration.
+ * @public
+ */
+export const createKernelParameterDeclaration = (
+  defaults: Readonly<Record<string, unknown>>,
+  schema: Readonly<Record<string, unknown>>,
+  identity: Readonly<{ id: string; name: string }>,
+): ParameterDeclaration =>
+  projectDraft7SchemaToParameterDeclaration({
+    defaults,
+    schema,
+    schemaId: identity.id,
+    schemaName: identity.name,
+  });
 
 /**
  * Validate and return the canonical project-local entry path required by the

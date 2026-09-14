@@ -20,6 +20,7 @@ import {
   defineKernel,
   createKernelError,
   createKernelSuccess,
+  createKernelParameterDeclaration,
   RenderArtifactFinalizationError,
   finalizeRenderOutput,
 } from '@taucad/runtime/kernel';
@@ -273,7 +274,12 @@ export const zooKernel = defineKernel({
       }
 
       const { defaultParameters, jsonSchema } = KclUtilities.convertKclVariablesToJsonSchema(executionResult.variables);
-      return createKernelSuccess({ defaultParameters, jsonSchema });
+      return createKernelSuccess(
+        createKernelParameterDeclaration(defaultParameters, jsonSchema, {
+          id: 'urn:taucad:zoo:parameters',
+          name: 'ZooParameters',
+        }),
+      );
     } catch (error) {
       const kclErrorResult = handleError(error, code, relativeFilePath);
       logKernelIssues(kclErrorResult.issues, logger);

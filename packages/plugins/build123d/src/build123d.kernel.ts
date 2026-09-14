@@ -131,10 +131,10 @@ export const build123dKernel = defineKernel({
         schema: build123dAnalysisSchema,
         signal: runtime.signal,
       });
-      return createKernelSuccess({
-        defaultParameters: analysis.defaultParameters,
-        jsonSchema: analysis.jsonSchema,
-      });
+      if (!analysis.declaration) {
+        throw new Error('Build123d analyzer omitted its parameter declaration.');
+      }
+      return createKernelSuccess(analysis.declaration);
     } catch (error) {
       return createKernelError(issuesFrom(error, entryPath));
     }

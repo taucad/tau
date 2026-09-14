@@ -1,15 +1,13 @@
 import type { StandardJSONSchemaV1, StandardSchemaV1 } from '@standard-schema/spec';
 import { canonicalizeCacheValue, digestContent } from '@taucad/cache-core';
 import type { CacheValue, ContentDigest } from '@taucad/cache-core';
-import {
-  admitJsonSchema,
-  resolveLocalSchema,
-  validateJsonSchemaIssues,
-  validateJsonSchemaValue,
-} from '#configuration/admission.js';
+import { admitJsonSchema, resolveLocalSchema, validateJsonSchemaValue } from '#configuration/admission.js';
 import type { JsonSchema } from '#configuration/admission.js';
 import { assertBoundedJson, cloneBoundedJson } from '#configuration/bounded-json.js';
 import { configurationIconIds } from '#configuration/configuration-icons.generated.js';
+import { projectDraft7SchemaToParameterDeclaration } from '#parameter/json-schema-adapter.js';
+import { admitParameterDeclaration } from '#parameter/manifest.js';
+import type { ParameterDeclaration } from '#parameter/manifest.js';
 
 /** Widgets admitted by configuration manifest version one. @public */
 export type RestrictedUiWidgetV1 = 'color' | 'radio' | 'segmented' | 'select' | 'slider' | 'textarea' | 'toggle';
@@ -34,22 +32,38 @@ export type RestrictedRjsfUiSchemaV1 = Readonly<{
 }>;
 
 /** Serializable configuration manifest version one. @public */
+export type ConfigurationNativeProjectionDiagnostic = Readonly<{
+  code: 'NATIVE_PROJECTION_UNSUPPORTED';
+  reason: string;
+}>;
+
+/** Result of deriving a native parameter declaration from Standard Schema metadata. @public */
+export type ConfigurationNativeProjection =
+  | Readonly<{ status: 'usable'; declaration: ParameterDeclaration }>
+  | Readonly<{
+      status: 'unsupported';
+      defaults: Readonly<Record<string, unknown>>;
+      diagnostics: readonly ConfigurationNativeProjectionDiagnostic[];
+    }>;
+
+/** Serializable configuration manifest version one. @public */
 export type ConfigurationManifestV1 = Readonly<{
   version: 1;
   source: Readonly<{ id: string; version: string }>;
-  dialect: 'draft-07';
-  inputSchema: JsonSchema;
-  outputSchema: JsonSchema;
-  defaults?: unknown;
+  parameters: Readonly<{
+    input: ConfigurationNativeProjection;
+    output: ConfigurationNativeProjection;
+  }>;
+  legacyProjection: Readonly<{
+    dialect: 'draft-07';
+    inputSchema: JsonSchema;
+    outputSchema: JsonSchema;
+  }>;
   ui: RestrictedRjsfUiSchemaV1;
 }>;
 
 /** A non-fatal compatibility diagnostic produced during manifest admission. @public */
-export type ConfigurationAdmissionDiagnostic = Readonly<{
-  code: 'UNSUPPORTED_UI_ICON';
-  pointer: string;
-  id: string;
-}>;
+export type ConfigurationAdmissionDiagnostic = Readonly<{ code: 'UNSUPPORTED_UI_ICON'; pointer: string; id: string }>;
 
 /** An admitted manifest and its frozen cosmetic compatibility diagnostics. @public */
 export type ConfigurationAdmissionResult = Readonly<{
@@ -517,6 +531,62 @@ const issuePointer = (path: StandardSchemaV1.Issue['path']): string =>
     })
     .join('') ?? '';
 
+const createNativeConfigurationDeclaration = (
+  input: Readonly<{
+    schema: JsonSchema;
+    source: Readonly<{ id: string; version: string }>;
+    direction: 'input' | 'output';
+    defaults: Readonly<Record<string, unknown>>;
+  }>,
+): ConfigurationNativeProjection => {
+  const { defaults, direction, schema, source } = input;
+  try {
+    return {
+      status: 'usable',
+      declaration: projectDraft7SchemaToParameterDeclaration({
+        schema,
+        defaults,
+        schemaId: `urn:taucad:configuration:${encodeURIComponent(source.id)}:${encodeURIComponent(source.version)}:${direction}`,
+        schemaName: direction === 'input' ? 'ConfigurationInput' : 'ConfigurationOutput',
+      }),
+    };
+  } catch (error) {
+    return deepFreeze({
+      status: 'unsupported',
+      defaults,
+      diagnostics: [
+        {
+          code: 'NATIVE_PROJECTION_UNSUPPORTED',
+          reason: error instanceof Error ? error.message : String(error),
+        },
+      ],
+    });
+  }
+};
+
+const admitNativeConfigurationProjection = (value: unknown): ConfigurationNativeProjection => {
+  if (!isRecord(value)) {
+    throw new TypeError('INVALID_NATIVE_PROJECTION');
+  }
+  if (value['status'] === 'usable') {
+    assertOnlyKeys(value, new Set(['status', 'declaration']), '/parameters');
+    return { status: 'usable', declaration: admitParameterDeclaration(value['declaration']) };
+  }
+  if (value['status'] !== 'unsupported' || !isRecord(value['defaults']) || !Array.isArray(value['diagnostics'])) {
+    throw new TypeError('INVALID_NATIVE_PROJECTION');
+  }
+  assertOnlyKeys(value, new Set(['status', 'defaults', 'diagnostics']), '/parameters');
+  for (const item of value['diagnostics']) {
+    if (!isRecord(item) || item['code'] !== 'NATIVE_PROJECTION_UNSUPPORTED' || typeof item['reason'] !== 'string') {
+      throw new TypeError('INVALID_NATIVE_PROJECTION');
+    }
+  }
+  return value as ConfigurationNativeProjection;
+};
+
+const projectionDefaults = (projection: ConfigurationNativeProjection): Readonly<Record<string, unknown>> =>
+  projection.status === 'usable' ? projection.declaration.defaults : projection.defaults;
+
 /**
  * Admit an untrusted JSON value as the closed configuration manifest format.
  * @param value - Untrusted manifest candidate.
@@ -528,13 +598,9 @@ export const admitConfigurationManifest = (value: unknown): ConfigurationAdmissi
   if (!isRecord(candidate)) {
     throw new TypeError('INVALID_MANIFEST');
   }
-  assertOnlyKeys(
-    candidate,
-    new Set(['version', 'source', 'dialect', 'inputSchema', 'outputSchema', 'defaults', 'ui']),
-    '',
-  );
-  const { defaults, dialect, inputSchema, outputSchema, source, ui, version } = candidate;
-  if (version !== 1 || dialect !== 'draft-07') {
+  assertOnlyKeys(candidate, new Set(['version', 'source', 'parameters', 'legacyProjection', 'ui']), '');
+  const { parameters, legacyProjection, source, ui, version } = candidate;
+  if (version !== 1) {
     throw new TypeError('UNSUPPORTED_MANIFEST_VERSION');
   }
   if (!isRecord(source)) {
@@ -546,18 +612,51 @@ export const admitConfigurationManifest = (value: unknown): ConfigurationAdmissi
   }
   assertIdentity(source['id'], 'source.id');
   assertIdentity(source['version'], 'source.version');
+  if (!isRecord(parameters) || !isRecord(legacyProjection)) {
+    throw new TypeError('INVALID_MANIFEST_SCHEMA');
+  }
+  assertOnlyKeys(parameters, new Set(['input', 'output']), '/parameters');
+  assertOnlyKeys(legacyProjection, new Set(['dialect', 'inputSchema', 'outputSchema']), '/legacyProjection');
+  if (legacyProjection['dialect'] !== 'draft-07') {
+    throw new TypeError('INVALID_MANIFEST_SCHEMA');
+  }
+  const { inputSchema, outputSchema } = legacyProjection;
   if (!isRecord(inputSchema) || !isRecord(outputSchema)) {
     throw new TypeError('INVALID_MANIFEST_SCHEMA');
   }
+  const input = admitNativeConfigurationProjection(parameters['input']);
+  const output = admitNativeConfigurationProjection(parameters['output']);
   admitJsonSchema(inputSchema);
   admitJsonSchema(outputSchema);
+  const configurationSource = { id: source['id'], version: source['version'] };
+  const expectedInput = createNativeConfigurationDeclaration({
+    schema: inputSchema,
+    source: configurationSource,
+    direction: 'input',
+    defaults: projectionDefaults(input),
+  });
+  const expectedOutput = createNativeConfigurationDeclaration({
+    schema: outputSchema,
+    source: configurationSource,
+    direction: 'output',
+    defaults: {},
+  });
+  if (
+    canonicalizeCacheValue({ value: asCacheValue(input) }) !==
+      canonicalizeCacheValue({ value: asCacheValue(expectedInput) }) ||
+    canonicalizeCacheValue({ value: asCacheValue(output) }) !==
+      canonicalizeCacheValue({ value: asCacheValue(expectedOutput) })
+  ) {
+    throw new TypeError('NATIVE_PROJECTION_MISMATCH');
+  }
   if (!isRecord(ui)) {
     throw new TypeError('INVALID_MANIFEST_UI');
   }
   assertOnlyKeys(ui, new Set(['version', 'rjsf']), '/ui');
   const diagnostics: ConfigurationAdmissionDiagnostic[] = [];
   admitUi(ui as RestrictedRjsfUiSchemaV1, inputSchema, diagnostics);
-  if (defaults !== undefined && !validateJsonSchemaValue(inputSchema, defaults)) {
+  const inputDefaults = projectionDefaults(input);
+  if (Object.keys(inputDefaults).length > 0 && !validateJsonSchemaValue(inputSchema, inputDefaults)) {
     throw new TypeError('Defaults do not satisfy the input schema');
   }
   return deepFreeze({
@@ -588,13 +687,20 @@ export const defineConfiguration = <Schema extends StandardSchemaV1>(
   const inputSchema = materializeConfigurationJsonSchema(capability.input({ target: 'draft-07' }));
   const outputSchema = materializeConfigurationJsonSchema(capability.output({ target: 'draft-07' }));
   const defaults = source.defaults === undefined ? undefined : cloneBoundedJson(source.defaults, configurationLimits);
+  const nativeDefaults = isRecord(defaults) ? defaults : {};
   const admission = admitConfigurationManifest({
     version: 1,
     source: { id: source.id, version: source.version },
-    dialect: 'draft-07',
-    inputSchema,
-    outputSchema,
-    ...(defaults === undefined ? {} : { defaults }),
+    parameters: {
+      input: createNativeConfigurationDeclaration({
+        schema: inputSchema,
+        source,
+        direction: 'input',
+        defaults: nativeDefaults,
+      }),
+      output: createNativeConfigurationDeclaration({ schema: outputSchema, source, direction: 'output', defaults: {} }),
+    },
+    legacyProjection: { dialect: 'draft-07', inputSchema, outputSchema },
     ui: source.ui,
   } satisfies ConfigurationManifestV1);
   const { manifest } = admission;
@@ -635,19 +741,6 @@ export const validateConfiguration = async <Schema extends StandardSchemaV1>(
     throw new TypeError('INVALID_REVISION');
   }
   assertPointers(value, explicitPointers);
-  const inputIssues = validateJsonSchemaIssues(definition.manifest.inputSchema, value);
-  if (inputIssues.length > 0) {
-    return {
-      type: 'invalid',
-      manifestDigest,
-      formRevision,
-      issues: inputIssues.map((issue) => ({
-        code: 'JSON_SCHEMA',
-        message: issue.message,
-        pointer: issue.pointer,
-      })),
-    };
-  }
   const result = await definition.schema['~standard'].validate(value);
   signal?.throwIfAborted();
   if (result.issues) {
@@ -663,9 +756,6 @@ export const validateConfiguration = async <Schema extends StandardSchemaV1>(
     };
   }
   const output = deepFreeze(cloneBoundedJson(result.value, configurationLimits));
-  if (!validateJsonSchemaValue(input.definition.manifest.outputSchema, output)) {
-    throw new TypeError('OUTPUT_INVALID');
-  }
   const effectiveDigest = await digestContent({
     bytes: new TextEncoder().encode(canonicalizeCacheValue({ value: output })),
   });

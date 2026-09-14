@@ -2,6 +2,7 @@ import type { RhinoModule } from 'rhino3dm';
 import {
   coordinateSystemSchema,
   createKernelError,
+  createKernelParameterDeclaration,
   createKernelSuccess,
   defineKernel,
   finalizeRenderOutput,
@@ -50,10 +51,16 @@ export const rhinoKernel = defineKernel({
   },
 
   async getParameters() {
-    return createKernelSuccess({
-      defaultParameters: {},
-      jsonSchema: { type: 'object', properties: {}, additionalProperties: false },
-    });
+    return createKernelSuccess(
+      createKernelParameterDeclaration(
+        {},
+        { type: 'object', properties: {}, additionalProperties: false },
+        {
+          id: 'urn:taucad:rhino:parameters',
+          name: 'RhinoParameters',
+        },
+      ),
+    );
   },
 
   async createGeometry({ entryPath }, { filesystem }, context: { rhino: RhinoModule }) {

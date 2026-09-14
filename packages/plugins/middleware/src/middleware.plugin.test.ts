@@ -34,6 +34,12 @@ describe('@taucad/middleware', () => {
     expect(selected.capabilities.middleware.map(({ id }) => id)).toEqual(['parameterCache', 'geometryCache']);
   });
 
+  it('offers parameter inference as an isolated opt-in preset', () => {
+    const selected = middleware({ preset: 'units' });
+
+    expect(selected.capabilities.middleware.map(({ id }) => id)).toEqual(['parameterUnits']);
+  });
+
   it('keeps native, Python, and Node-only payloads out of browser source', () => {
     const sourceDirectory = dirname(fileURLToPath(import.meta.url));
     const nodeBuiltins = new Set([...builtinModules, ...builtinModules.map((name) => `node:${name}`)]);

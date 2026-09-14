@@ -19,6 +19,7 @@ describe('rewriteDeclarationImports', () => {
       'import type { SharedPool } from "@taucad/memory";',
       "export { joinPath } from '@taucad/utils/path';",
       "type Path = import('@taucad/utils/path').AbsolutePath;",
+      "import type { Quantity } from '@taucad/units/quantity';",
       "// import('@taucad/memory') stays documentation",
     ].join('\n');
 
@@ -27,6 +28,7 @@ describe('rewriteDeclarationImports', () => {
         'import type { SharedPool } from "../memory/src/index.mjs";',
         "export { joinPath } from '../utils/src/path.utils.mjs';",
         "type Path = import('../utils/src/path.utils.mjs').AbsolutePath;",
+        "import type { Quantity } from '@taucad/units/quantity';",
         "// import('@taucad/memory') stays documentation",
       ].join('\n'),
     );
@@ -78,9 +80,16 @@ describe('rewriteDeclarationImports', () => {
     }
 
     expect(directNames.has('@taucad/units')).toBe(false);
-    expect(bundled.map(({ packageName }) => packageName)).toContain('@taucad/units');
+    expect(bundled.map(({ packageName }) => packageName)).not.toContain('@taucad/units');
+    expect(workspaceValue.projects.find(({ manifest }) => manifest?.name === '@taucad/units')).toMatchObject({
+      root: 'packages/units',
+      manifest: { private: false },
+    });
+    expect(runtimeManifest.dependencies).toHaveProperty('@taucad/units', 'workspace:*');
+    expect(runtimeManifest.devDependencies).not.toHaveProperty('@taucad/units');
+    expect(existsSync(resolve(repositoryRoot, 'libs/units'))).toBe(false);
 
-    for (const name of ['types', 'json-schema', 'units']) {
+    for (const name of ['types', 'json-schema']) {
       expect(existsSync(resolve(repositoryRoot, `libs/${name}/dist/node_modules/.pnpm`))).toBe(false);
     }
 

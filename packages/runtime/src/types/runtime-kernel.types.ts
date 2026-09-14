@@ -15,7 +15,8 @@ import { z } from 'zod';
 import type { FileExtension, LogLevel, GeometryResponse, FileStatEntry } from '@taucad/types';
 import type { FileSystemProvider, WatchEvent, WatchRequest } from '@taucad/filesystem';
 import type { KernelComputeCapability } from '#types/runtime-compute.types.js';
-import type { ExportGeometryResult, GetParametersResult, KernelIssue } from '#types/runtime.types.js';
+import type { ExportGeometryResult, GetParameterDeclarationsResult, KernelIssue } from '#types/runtime.types.js';
+import type { ParameterResolutionOptions } from '#parameter/manifest.js';
 import type { RuntimeSpanTracer } from '#types/runtime-tracer.types.js';
 import type { ExecuteResult, KernelBundler } from '#types/runtime-bundler-service.types.js';
 import type { GetDependenciesResult } from '#types/runtime-dependency.types.js';
@@ -191,6 +192,8 @@ export type RuntimeImplementationAsset = {
 export type GetParametersInput = {
   /** Canonical root-relative path of the active entry within the runtime filesystem. */
   entryPath: string;
+  /** Semantic profile inputs that participate in parameter cache identity. */
+  resolution?: ParameterResolutionOptions;
 };
 
 /** Render-route options and positive framework content capabilities. @public */
@@ -489,7 +492,11 @@ export type KernelDefinition<
     context: Context,
   ): Promise<GetDependenciesResult>;
   /** Extract user-facing parameters (and their JSON Schema) from the active file. */
-  getParameters(input: GetParametersInput, runtime: KernelRuntime, context: Context): Promise<GetParametersResult>;
+  getParameters(
+    input: GetParametersInput,
+    runtime: KernelRuntime,
+    context: Context,
+  ): Promise<GetParameterDeclarationsResult>;
   /** Evaluate the active file and produce a native handle for mesh/export, plus optional inline display geometry. */
   createGeometry(
     input: CreateGeometryInput<NoInfer<CreateSchema>>,
@@ -583,7 +590,11 @@ type KernelDefinitionConfig<
       context: Context,
     ): Promise<GetDependenciesResult>;
     /** Extract user-facing parameters (and their JSON Schema) from the active file. */
-    getParameters(input: GetParametersInput, runtime: KernelRuntime, context: Context): Promise<GetParametersResult>;
+    getParameters(
+      input: GetParametersInput,
+      runtime: KernelRuntime,
+      context: Context,
+    ): Promise<GetParameterDeclarationsResult>;
     /** Evaluate the active file and produce a native handle for mesh/export, plus optional inline display geometry. */
     createGeometry(
       input: CreateGeometryInput<CreateSchema>,
@@ -711,7 +722,20 @@ export interface KernelPluginFactory<
  *     return { resolved: [input.entryPath], unresolved: [] };
  *   },
  *   async getParameters(input, runtime, context) {
- *     return { success: true, data: { defaultParameters: {}, jsonSchema: {} }, issues: [] };
+ *     return {
+ *       success: true,
+ *       data: {
+ *         schema: {
+ *           $schema: 'https://json-structure.org/meta/extended/v0/#',
+ *           $id: 'urn:example:parameters',
+ *           $uses: ['JSONSchemaUnits'],
+ *           name: 'Parameters',
+ *           type: 'object',
+ *         },
+ *         defaults: {},
+ *       },
+ *       issues: [],
+ *     };
  *   },
  *   async createGeometry(input, runtime, context) {
  *     const response = await fetch('/geometry', { signal: runtime.signal });

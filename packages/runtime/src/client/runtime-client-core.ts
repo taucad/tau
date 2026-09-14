@@ -70,6 +70,7 @@ import type {
 import type { ContentRequestFor, RuntimeContentInput } from '#types/runtime-content.types.js';
 import type { RuntimeFileLocator } from '#types/runtime-file.types.js';
 import type { RuntimeSourceSnapshotResult } from '#types/runtime-source-snapshot.types.js';
+import type { ParameterResolutionOptions } from '#parameter/manifest.js';
 import { assertRootedPath } from '@taucad/utils/path';
 import type {
   ProgressiveSceneUpdate,
@@ -1060,6 +1061,13 @@ type RuntimeClientProjection<
     input: RuntimeEvaluateInput<Kernels, Middleware, Files>,
   ): Promise<HashedGeometryResult>;
 
+  /** Resolve an admitted parameter manifest without selecting preview state. */
+  resolveParameters<const Files extends RuntimeSourceFiles = RuntimeSourceFiles>(input: {
+    readonly source: RuntimeSource<Files>;
+    readonly resolution?: ParameterResolutionOptions;
+    readonly signal?: AbortSignal;
+  }): Promise<GetParametersResult>;
+
   /** Resolve a retained progressive-scene snapshot without rerunning the kernel. */
   readSceneSnapshot(input: RuntimeReadSceneSnapshotInput): Promise<ReadSceneSnapshotResult>;
 
@@ -1424,6 +1432,7 @@ export function createRuntimeClient(
   const pendingExports = new Set<{ reject: (error: Error) => void }>();
   const pendingTranscodes = new Set<{ reject: (error: Error) => void }>();
   const pendingEvaluations = new Set<{ reject: (error: Error) => void }>();
+  const pendingParameterResolutions = new Set<{ reject: (error: Error) => void }>();
 
   /**
    * Promise-side tracking for {@link RuntimeClient.shutdown} `drain`. Every
@@ -1679,6 +1688,10 @@ export function createRuntimeClient(
       slot.reject(error);
     }
     pendingEvaluations.clear();
+    for (const slot of pendingParameterResolutions) {
+      slot.reject(error);
+    }
+    pendingParameterResolutions.clear();
     workerClient?.terminate();
     workerClient = undefined;
     sceneWorkerUnsubscribe = undefined;
@@ -2065,6 +2078,48 @@ export function createRuntimeClient(
         );
       } finally {
         pendingEvaluations.delete(slot);
+      }
+    },
+
+    async resolveParameters<const Files extends RuntimeSourceFiles = RuntimeSourceFiles>(input: {
+      readonly source: RuntimeSource<Files>;
+      readonly resolution?: ParameterResolutionOptions;
+      readonly signal?: AbortSignal;
+    }): Promise<GetParametersResult> {
+      assertIntentAdmissionOpen();
+      if (!isRecord(input)) {
+        throw new TypeError('RuntimeClient.resolveParameters input must be an object.');
+      }
+      const normalized = normalizeRuntimeSource(input.source);
+      input.signal?.throwIfAborted();
+      const client = await waitForSignal(ensureConnected(), input.signal);
+      assertIntentAdmissionOpen();
+      let rejectResolution: ((error: Error) => void) | undefined;
+      const slot = {
+        reject(error: Error): void {
+          rejectResolution?.(error);
+        },
+      };
+      pendingParameterResolutions.add(slot);
+      try {
+        return await trackInFlight(
+          new Promise<GetParametersResult>((resolve, reject) => {
+            rejectResolution = reject;
+            client
+              .resolveParameters(
+                {
+                  ...(normalized.stage === undefined ? {} : { stage: normalized.stage }),
+                  file: normalized.file,
+                  ...(input.resolution === undefined ? {} : { resolution: input.resolution }),
+                },
+                input.signal,
+              )
+              .then(resolve)
+              .catch(reject);
+          }),
+        );
+      } finally {
+        pendingParameterResolutions.delete(slot);
       }
     },
 
@@ -2477,12 +2532,14 @@ export function createRuntimeClient(
       const priorExports = [...pendingExports];
       const priorTranscodes = [...pendingTranscodes];
       const priorEvaluations = [...pendingEvaluations];
+      const priorParameterResolutions = [...pendingParameterResolutions];
 
       connectionAttempt = undefined;
       pendingRender = undefined;
       pendingExports.clear();
       pendingTranscodes.clear();
       pendingEvaluations.clear();
+      pendingParameterResolutions.clear();
 
       queueMicrotask(() => {
         const error = new RuntimeTerminatedError('explicit');
@@ -2499,6 +2556,9 @@ export function createRuntimeClient(
           slot.reject(error);
         }
         for (const slot of priorEvaluations) {
+          slot.reject(error);
+        }
+        for (const slot of priorParameterResolutions) {
           slot.reject(error);
         }
       });

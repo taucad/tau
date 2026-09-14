@@ -44,7 +44,7 @@ import type { ChannelServer, ChannelServerHandle, MessagePortLike, Port, WithTra
 import { runtimeProtocolSchemas } from '#types/runtime-protocol.schemas.js';
 import type { KernelIssueCode } from '#types/kernel-issue-codes.js';
 import { isKernelIssueCode } from '#types/kernel-issue-codes.js';
-import type { HashedGeometryResult, ExportGeometryResult } from '#types/runtime.types.js';
+import type { HashedGeometryResult, ExportGeometryResult, GetParametersResult } from '#types/runtime.types.js';
 import type { RuntimeSourceSnapshotResult } from '#types/runtime-source-snapshot.types.js';
 import type {
   GeometryTransport,
@@ -617,6 +617,22 @@ export function createWorkerDispatcher(
     }
   };
 
+  const handleResolveParameters: (
+    args: RuntimeProtocol['calls']['resolveParameters']['args'],
+    signal?: AbortSignal,
+  ) => Promise<GetParametersResult> = async (args, signal) => {
+    const { promise: trapPromise, cleanup: cleanupTrap } = createErrorTrap();
+    try {
+      return await Promise.race([
+        worker.getParameters(args.file, args.resolution, { signal, stage: args.stage }),
+        trapPromise,
+      ]);
+    } finally {
+      worker.flushTelemetry();
+      cleanupTrap();
+    }
+  };
+
   const handleTranscode: (
     args: RuntimeProtocol['calls']['transcode']['args'],
     signal?: AbortSignal,
@@ -686,6 +702,12 @@ export function createWorkerDispatcher(
           const transferables: Transferable[] = [];
           const value = toTransportResult(result, encodeGeometry, transferables);
           return { value, transferables } as unknown as CallResult;
+        }
+        case 'resolveParameters': {
+          return (await handleResolveParameters(
+            args as RuntimeProtocol['calls']['resolveParameters']['args'],
+            signal,
+          )) as unknown as CallResult;
         }
         case 'snapshotSource': {
           const result = await handleSourceSnapshot(args as RuntimeProtocol['calls']['snapshotSource']['args'], signal);

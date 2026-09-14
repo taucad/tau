@@ -1,6 +1,12 @@
 import { transformGltfExportBytes } from '@taucad/geometry-core';
 import { createWorkspaceMirror } from '@taucad/native-process-core';
-import { asBuffer, createKernelError, createKernelSuccess, defineKernel } from '@taucad/runtime/kernel';
+import {
+  asBuffer,
+  createKernelError,
+  createKernelParameterDeclaration,
+  createKernelSuccess,
+  defineKernel,
+} from '@taucad/runtime/kernel';
 import type { KernelIssue } from '@taucad/runtime/kernel';
 import { createExportFile } from '@taucad/runtime/types';
 
@@ -106,10 +112,12 @@ export const picogkKernel = defineKernel({
       runtime.logger.debug('PicoGK C# analysis performance', {
         data: { ...analysis.timings, total: performance.now() - started },
       });
-      return createKernelSuccess({
-        defaultParameters: analysis.defaultParameters,
-        jsonSchema: analysis.jsonSchema,
-      });
+      return createKernelSuccess(
+        createKernelParameterDeclaration(analysis.defaultParameters, analysis.jsonSchema, {
+          id: 'urn:taucad:picogk:parameters',
+          name: 'PicoGkParameters',
+        }),
+      );
     } catch (error) {
       return createKernelError(issuesFrom(error, entryPath));
     }

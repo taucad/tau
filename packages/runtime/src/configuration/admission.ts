@@ -1,14 +1,16 @@
 import { Validator } from '@cfworker/json-schema';
 import { canonicalizeCacheValue } from '@taucad/cache-core';
 import type { CacheValue } from '@taucad/cache-core';
-import { quantityIds } from '@taucad/units/constants';
+import { admitUnit } from '@taucad/units/unit';
+import { quantityKinds, quantityReferences } from '@taucad/units/quantity';
 import { assertBoundedJson } from '#configuration/bounded-json.js';
 
 /** Draft-7 schema data admitted by the runtime configuration boundary. @public */
 export type JsonSchema = Readonly<Record<string, unknown>>;
 
 const draft7Uri = 'http://json-schema.org/draft-07/schema#';
-const quantities = new Set<string>(quantityIds);
+const kinds = new Set<string>(Object.values(quantityKinds));
+const references = new Set<string>(Object.values(quantityReferences));
 const primitives = new Set(['array', 'boolean', 'integer', 'null', 'number', 'object', 'string']);
 const allowedKeywords = new Set([
   '$comment',
@@ -52,7 +54,12 @@ const allowedKeywords = new Set([
   'title',
   'type',
   'uniqueItems',
-  'x-tau-quantity',
+  'x-tau-quantity-kind',
+  'x-tau-reference',
+  'x-tau-space',
+  'x-tau-unit',
+  'x-ogc-unit',
+  'x-ogc-unitLang',
 ]);
 const schemaMapKeywords = new Set(['definitions', 'properties']);
 const schemaArrayKeywords = new Set(['allOf', 'anyOf', 'oneOf']);
@@ -186,15 +193,50 @@ const assertKeywordValue = (
   if (key === '$ref' && (typeof value !== 'string' || !value.startsWith('#/definitions/'))) {
     fail('UNSUPPORTED_REFERENCE', pointer, 'only bundled definitions are supported');
   }
-  if (key === 'x-tau-quantity') {
+  if (key === 'x-tau-unit') {
     const schemaType = schema['type'];
     const declared = Array.isArray(schemaType) ? schemaType : [schemaType];
     const legalTypes =
       declared.length > 0 && declared.every((type) => type === 'number' || type === 'integer' || type === 'null');
     const numeric = declared.some((type) => type === 'number' || type === 'integer');
-    if (typeof value !== 'string' || !quantities.has(value) || !legalTypes || !numeric) {
-      fail('INVALID_QUANTITY', pointer, 'quantity must be a registry ID on a numeric or nullable-numeric schema');
+    if (typeof value !== 'string' || admitUnit(value).status !== 'success' || !legalTypes || !numeric) {
+      fail('INVALID_QUANTITY', pointer, 'unit must be admitted UCUM on a numeric or nullable-numeric schema');
     }
+  }
+  if (key === 'x-ogc-unit') {
+    const schemaType = schema['type'];
+    const declared = Array.isArray(schemaType) ? schemaType : [schemaType];
+    const numeric = declared.some((type) => type === 'number' || type === 'integer');
+    const decimalLexical = declared.includes('string') && typeof schema['pattern'] === 'string';
+    if (typeof value !== 'string' || admitUnit(value).status !== 'success' || (!numeric && !decimalLexical)) {
+      fail('INVALID_QUANTITY', pointer, 'OGC unit must be admitted UCUM on numeric or decimal-lexical data');
+    }
+  }
+  if (key === 'x-ogc-unitLang' && value !== 'UCUM') {
+    fail('INVALID_QUANTITY', pointer, 'OGC unit language must be exactly UCUM');
+  }
+  if ((schema['x-ogc-unit'] === undefined) !== (schema['x-ogc-unitLang'] === undefined)) {
+    fail('INVALID_QUANTITY', pointer, 'OGC unit and unit language must be declared together');
+  }
+  if (key === 'x-tau-quantity-kind' && (typeof value !== 'string' || !kinds.has(value))) {
+    fail('INVALID_QUANTITY', pointer, 'quantity kind must use the reviewed exact QUDT URI');
+  }
+  if (key === 'x-tau-space' && !['linear', 'difference', 'point'].includes(value as string)) {
+    fail('INVALID_QUANTITY', pointer, 'space must be linear, difference, or point');
+  }
+  if (key === 'x-tau-reference' && (typeof value !== 'string' || !references.has(value))) {
+    fail('INVALID_QUANTITY', pointer, 'reference is outside the supported profile');
+  }
+  if (
+    (schema['x-tau-quantity-kind'] !== undefined ||
+      schema['x-tau-space'] !== undefined ||
+      schema['x-tau-reference'] !== undefined) &&
+    schema['x-tau-unit'] === undefined
+  ) {
+    fail('INVALID_QUANTITY', pointer, 'semantic quantity fields require an admitted unit');
+  }
+  if ((schema['x-tau-space'] === 'point') !== (schema['x-tau-reference'] !== undefined)) {
+    fail('INVALID_QUANTITY', pointer, 'point space requires a supported reference and other spaces forbid one');
   }
 };
 

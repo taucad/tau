@@ -32,7 +32,7 @@
       "path": "./packages/runtime"
     },
     {
-      "path": "./libs/units"
+      "path": "./packages/units"
     },
     {
       "path": "./apps/libs/billing"

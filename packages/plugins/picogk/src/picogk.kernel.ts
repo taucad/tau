@@ -79,7 +79,11 @@ export const picogkKernel = defineKernel({
       excludedFileSuffixes: ['.dll', '.exe', '.pdb'],
       excludedPaths: ['thumbnail.webp'],
     });
-    const session = new PicogkSession({ ...options, ...mirror, logger: runtime.logger });
+    const session = new PicogkSession({
+      ...options,
+      ...mirror,
+      logger: runtime.logger,
+    });
     return {
       mirror,
       session,
@@ -93,7 +97,10 @@ export const picogkKernel = defineKernel({
   async getDependencies({ entryPath }, runtime, context) {
     try {
       const paths = await context.mirror.sync(runtime.filesystem);
-      return { resolved: paths.filter((path) => !tauSystemArtifacts.has(path)), unresolved: [] };
+      return {
+        resolved: paths.filter((path) => !tauSystemArtifacts.has(path)),
+        unresolved: [],
+      };
     } catch (error) {
       throw new PicogkKernelError(issuesFrom(error, entryPath));
     }
@@ -141,7 +148,9 @@ export const picogkKernel = defineKernel({
         });
       } catch (error) {
         runtime.signal.throwIfAborted();
-        runtime.logger.warn('PicoGK component cache preparation failed.', { data: error });
+        runtime.logger.warn('PicoGK component cache preparation failed.', {
+          data: error,
+        });
       }
       const started = performance.now();
       const result = await context.session.request({
@@ -247,7 +256,9 @@ export const picogkKernel = defineKernel({
           await compute?.publish(result.computePublications ?? []);
         } catch (error) {
           runtime.signal.throwIfAborted();
-          runtime.logger.warn('PicoGK component cache publication failed.', { data: error });
+          runtime.logger.warn('PicoGK component cache publication failed.', {
+            data: error,
+          });
         }
         runtime.logger.debug('PicoGK C# build performance', {
           data: {
@@ -258,7 +269,10 @@ export const picogkKernel = defineKernel({
             total: performance.now() - started,
           },
         });
-        return { geometry: { format: 'gltf', content: glb }, nativeHandle: { glb } };
+        return {
+          geometry: { format: 'gltf', content: glb },
+          nativeHandle: { glb },
+        };
       } finally {
         if (result.recycleAfterResponse) {
           await context.session.recycle();
@@ -272,7 +286,10 @@ export const picogkKernel = defineKernel({
 
   async exportGeometry(input) {
     try {
-      const bytes = await transformGltfExportBytes(input.nativeHandle.glb, { format: 'glb', ...input.options });
+      const bytes = await transformGltfExportBytes(input.nativeHandle.glb, {
+        format: 'glb',
+        ...input.options,
+      });
       return createKernelSuccess([createExportFile('glb', 'model.glb', asBuffer(bytes))]);
     } catch (error) {
       return createKernelError(issuesFrom(error));
@@ -280,7 +297,9 @@ export const picogkKernel = defineKernel({
   },
 
   serializeNativeHandle: ({ nativeHandle }) => new Uint8Array(nativeHandle.glb),
-  deserializeNativeHandle: ({ serializedNativeHandle }) => ({ glb: new Uint8Array(serializedNativeHandle) }),
+  deserializeNativeHandle: ({ serializedNativeHandle }) => ({
+    glb: new Uint8Array(serializedNativeHandle),
+  }),
 
   async cleanup(context) {
     try {

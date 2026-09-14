@@ -32,6 +32,7 @@ import {
 } from '@taucad/revisions/revision-effects';
 import type {
   CheckoutFileSystems,
+  UseCheckoutFileSystem,
   TurnConflictedEvent as SettlementConflicted,
   TurnFailedEvent as SettlementFailed,
   TurnFinalizedEvent as SettlementFinalized,
@@ -49,7 +50,7 @@ import type {
   RevisionRow,
 } from '@taucad/revisions';
 import { GitToolchainError, createNativeGitRevisionPort, resolveGitToolchain } from '@taucad/revisions/node';
-import type { MissingGitTool, TauApiCredential } from '@taucad/revisions/node';
+import type { MissingGitTool, NativeGitCheckoutOptions, TauApiCredential } from '@taucad/revisions/node';
 import { publishPushMilliseconds } from '@taucad/revisions/publish-machine';
 import type {
   PublishDraft,
@@ -143,6 +144,10 @@ export type ProjectRevisionsOptions = {
   readonly port?: RevisionPort | undefined;
   /** Defaults to a `NodeFsProvider` at the live root, or at a linked checkout's own. */
   readonly filesystem?: CheckoutFileSystems | undefined;
+  /** Optional host-owned admission wrapper around checkout tree reads and writes. */
+  readonly useFileSystem?: UseCheckoutFileSystem | undefined;
+  /** Native linked-checkout mutations under the embedding host's writer authority. */
+  readonly checkoutMutation?: NativeGitCheckoutOptions['withMutationAuthority'];
   /** Defaults to the workspace root's directory name. */
   readonly projectId?: string | undefined;
   /**
@@ -320,6 +325,8 @@ export const createProjectRevisionPort = (
     workspaceRoot: string;
     projectId?: string | undefined;
     gitExecutable?: string | undefined;
+    /** Native linked-checkout mutations under the embedding host's writer authority. */
+    checkoutMutation?: NativeGitCheckoutOptions['withMutationAuthority'];
     /**
      * Read before every request to a remote, and only offered to Tau's own API
      * origin (P40). A terminal has no cookie, so this is how `tau publish`
@@ -331,7 +338,11 @@ export const createProjectRevisionPort = (
   const projectId = options.projectId ?? basename(options.workspaceRoot);
   return createNativeGitRevisionPort({
     repositoryPath: options.workspaceRoot,
-    checkouts: { projectId, directory: join(defaultConfigDirectory(), 'checkouts', projectId) },
+    checkouts: {
+      projectId,
+      directory: join(defaultConfigDirectory(), 'checkouts', projectId),
+      ...(options.checkoutMutation === undefined ? {} : { withMutationAuthority: options.checkoutMutation }),
+    },
     ...(options.gitExecutable === undefined ? {} : { gitExecutable: options.gitExecutable }),
     ...(options.tauCredential === undefined ? {} : { tauCredential: options.tauCredential }),
   });
@@ -403,7 +414,13 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
     ...(options.gitLfsExecutable === undefined ? {} : { gitLfsExecutable: options.gitLfsExecutable }),
   };
   const port =
-    options.port ?? createProjectRevisionPort({ workspaceRoot: options.workspaceRoot, projectId, ...toolchain });
+    options.port ??
+    createProjectRevisionPort({
+      workspaceRoot: options.workspaceRoot,
+      projectId,
+      ...toolchain,
+      ...(options.checkoutMutation === undefined ? {} : { checkoutMutation: options.checkoutMutation }),
+    });
   if (options.port === undefined) {
     /* The early named refusal, on every disk host rather than only in the CLI:
      * a machine with no `git` records nothing, and a person who is told that
@@ -508,6 +525,7 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
     filesystem:
       options.filesystem ??
       ((checkout) => new NodeFsProvider(checkout.kind === 'live' ? options.workspaceRoot : checkout.root)),
+    ...(options.useFileSystem === undefined ? {} : { useFileSystem: options.useFileSystem }),
     onPlacement: (placement) => {
       const pending = admissions.get(placement.runId);
       if (placement.status === 'refused') {

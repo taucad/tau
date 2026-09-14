@@ -48,7 +48,7 @@ import { assertRootedPath } from '@taucad/utils/path';
  * follow, and it bundles rather than externalises. `@taucad/runtime` is a peer,
  * and re-exports the same declaration by name, so the emitted `.d.mts` keeps it
  * as an external import. */
-import type { ExportFile } from '@taucad/runtime/types';
+import type { ExportFile, RuntimeFileSystemBase } from '@taucad/runtime/types';
 import type { RuntimeClient } from '@taucad/runtime/client';
 
 import type { ToolRegistry } from '@taucad/agent-host';
@@ -79,6 +79,9 @@ export type HostExportFile = ExportFile;
  * @public
  */
 export type HostRuntimeClient = Pick<RuntimeClient, 'evaluate' | 'export' | 'transcode'>;
+
+/** Filesystem capability the host tool registry consumes. @public */
+export type HostToolFileSystem = Omit<RuntimeFileSystemBase, 'watch'>;
 
 /** One package-owned skill bundle accepted by the host. @public */
 export type HostSystemSkillBundle = {
@@ -193,6 +196,14 @@ export type HostToolRegistryOptions = {
   /** Absolute workspace root every file tool is confined to. */
   readonly workspaceRoot: string;
   /**
+   * Open the host-owned filesystem view for one admitted execution root.
+   *
+   * The embedding host owns root admission and provider lifetime. Defaults to
+   * a standalone {@link NodeFsProvider} for callers that have no shared Node
+   * authority.
+   */
+  readonly filesystem?: ((workspaceRoot: string) => HostToolFileSystem) | undefined;
+  /**
    * Resolves the loopback runtime client backing every geometry tool. A thunk,
    * because the daemon starts its runtime child on first use. Omit it and the
    * geometry tools are not offered rather than offered-and-failing.
@@ -281,7 +292,7 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
      * D1): this provider is the checkout, and what the agent sees over it is
      * the composed view. The skill resolver below reads the disk directly and
      * mutates nothing. */
-    const provider = new NodeFsProvider(workspaceRoot);
+    const provider = options.filesystem?.(workspaceRoot) ?? new NodeFsProvider(workspaceRoot);
     const view = composeView(
       { filesystem: provider },
       { consumer: 'agent', ...(skillOverlay === undefined ? {} : { overlays: [skillOverlay] }) },

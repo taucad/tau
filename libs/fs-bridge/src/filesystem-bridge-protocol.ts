@@ -17,7 +17,15 @@ import type {
 } from '@taucad/filesystem';
 import { pendingProjectCommitInputSchema } from '@taucad/filesystem';
 import type { ComposedView } from '@taucad/filesystem/composed-view';
-import type { ChangeEvent, FileProvenance, FileStat, FileStatEntry, ProjectManifestParseIssue } from '@taucad/types';
+import type {
+  ChangeEvent,
+  CheckedFileWrite,
+  CheckedFileWriteResult,
+  FileProvenance,
+  FileStat,
+  FileStatEntry,
+  ProjectManifestParseIssue,
+} from '@taucad/types';
 import { projectManifestSchema, projectManifestSchemaUrl } from '@taucad/types';
 import { filesystemBackends } from '@taucad/types/constants';
 import type { BridgeProtocolSchemas } from '@taucad/rpc/bridge';
@@ -76,6 +84,7 @@ export type FileSystemBridgeHello =
 type WorkspaceBridgeMethodName =
   | 'readFile'
   | 'writeFile'
+  | 'writeFileChecked'
   | 'appendFile'
   | 'writeFiles'
   | 'mkdir'
@@ -112,8 +121,10 @@ type WorkspaceBridgeMethodName =
 /** Workspace-wide bridge calls, with signatures derived from the authority service. @public */
 export type FileSystemBridgeWorkspaceService = Pick<WorkspaceFileService, WorkspaceBridgeMethodName>;
 
-/** Rooted/runtime bridge calls, with signatures derived from the captured filesystem service. @public */
-export type FileSystemBridgeRuntimeService = FileSystemProvider & Partial<Pick<RootedFileSystem, 'watch'>>;
+/** Rooted/runtime bridge calls, including watch registration that may cross an asynchronous authority boundary. @public */
+export type FileSystemBridgeRuntimeService = FileSystemProvider & {
+  watch?: (request: WatchRequest, handler: (event: WatchEvent) => void) => (() => void) | Promise<() => void>;
+};
 
 type FileSystemBridgeReadFile = {
   (path: string, options: 'utf8' | { readonly encoding: 'utf8'; readonly scope?: WorkspaceScope }): Promise<string>;
@@ -129,10 +140,11 @@ type FileSystemBridgeReadFile = {
  *
  * @public
  */
-export type FileSystemBridgeService = Omit<FileSystemBridgeWorkspaceService, 'readFile'> &
+export type FileSystemBridgeService = Omit<FileSystemBridgeWorkspaceService, 'readFile' | 'writeFileChecked'> &
   Pick<RootedFileSystem, 'rename'> &
   Pick<ComposedView, 'provenance' | 'readdirWithStats'> & {
     readFile: FileSystemBridgeReadFile;
+    writeFileChecked(input: Omit<CheckedFileWrite, 'signal'>): Promise<CheckedFileWriteResult>;
   };
 
 type FileSystemBridgeCallName = keyof FileSystemBridgeService;
@@ -519,6 +531,18 @@ const readFileOptionsSchema = z.union([
   z.looseObject({ encoding: z.literal('utf8').optional(), scope: workspaceScopeSchema.optional() }),
 ]);
 const writePayloadSchema = z.union([z.string(), bytesSchema]);
+const checkedWriteInputSchema: z.ZodType<Omit<CheckedFileWrite, 'signal'>> = z.object({
+  path: z.string(),
+  data: writePayloadSchema,
+  preconditions: z.array(z.object({ path: z.string(), expected: writePayloadSchema.nullable() })),
+});
+const checkedWriteResultSchema: z.ZodType<CheckedFileWriteResult> = z.discriminatedUnion('status', [
+  z.object({ status: z.enum(['applied', 'unchanged']), content: bytesSchema }),
+  z.object({
+    status: z.literal('conflict'),
+    conflicts: z.array(z.object({ path: z.string(), actual: bytesSchema.nullable() })),
+  }),
+]);
 const moveEditSchema = z.looseObject({ source: z.string(), target: z.string() });
 const bulkMoveResultSchema = z.looseObject({
   moved: z.array(z.looseObject({ edit: moveEditSchema, stat: fileStatSchema })),
@@ -556,6 +580,7 @@ const callSchemas = {
     result: z.union([z.string(), bytesSchema]),
   },
   writeFile: { args: z.tuple([z.string(), writePayloadSchema]), result: voidResult },
+  writeFileChecked: { args: z.tuple([checkedWriteInputSchema]), result: checkedWriteResultSchema },
   appendFile: { args: z.tuple([z.string(), writePayloadSchema]), result: voidResult },
   writeFiles: {
     args: z.tuple([z.record(z.string(), z.looseObject({ content: writePayloadSchema }))]),

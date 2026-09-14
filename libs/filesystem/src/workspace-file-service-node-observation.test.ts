@@ -62,7 +62,7 @@ const createNodeService = async (): Promise<{
   });
   cleanups.push(() => {
     service.dispose();
-    stopHost();
+    void stopHost();
     port2.close();
     rmSync(root, { recursive: true, force: true });
   });

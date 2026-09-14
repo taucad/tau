@@ -59,6 +59,7 @@ type AnyAsync = (...args: unknown[]) => Promise<unknown>;
 function makeMutatingFakeHandlers() {
   return {
     writeFile: vi.fn<AnyAsync>().mockResolvedValue(undefined),
+    writeFileChecked: vi.fn<AnyAsync>().mockResolvedValue({ status: 'applied', content: new Uint8Array([1]) }),
     appendFile: vi.fn<AnyAsync>().mockResolvedValue(undefined),
     writeFiles: vi.fn<AnyAsync>().mockResolvedValue(undefined),
     mkdir: vi.fn<AnyAsync>().mockResolvedValue(undefined),
@@ -92,6 +93,14 @@ describe('bindMutationContextForPort', () => {
       await wrapper.writeFile('/x.txt', data);
       expect(handlers.writeFile).toHaveBeenCalledTimes(1);
       expect(handlers.writeFile.mock.calls[0]).toEqual(['/x.txt', data, mutationContext]);
+    });
+
+    it('writeFileChecked(input) lands as service.writeFileChecked(input, context)', async () => {
+      const handlers = makeMutatingFakeHandlers();
+      const wrapper = bindMutationContextForPort(handlers, mutationContext);
+      const input = { path: '/x.txt', data: 'new', preconditions: [{ path: '/x.txt', expected: 'old' }] };
+      await wrapper.writeFileChecked(input);
+      expect(handlers.writeFileChecked.mock.calls[0]).toEqual([input, mutationContext]);
     });
 
     it('appendFile(path, data) lands as service.appendFile(path, data, context)', async () => {

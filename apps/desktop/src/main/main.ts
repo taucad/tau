@@ -8,7 +8,7 @@
  */
 
 import { mkdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { Worker } from 'node:worker_threads';
 
 import {
@@ -63,7 +63,7 @@ import {
   kernelForkEnvAllowlist,
   sanitizeServicesContext,
 } from '#main/project-roots.js';
-import { createServicesBroker, servicesConcerns } from '#main/services-broker.js';
+import { createServicesBroker, rendererServicesConcerns } from '#main/services-broker.js';
 import type { ServicesConcern } from '#main/services-broker.js';
 import { loginShellEnvironment, packagedEsbuildEnvironment, utilityEnvironment } from '#main/utility-environment.js';
 import { createQuickLookController, removeStaleQuickLookSessions } from '#main/quick-look.js';
@@ -186,6 +186,8 @@ const bootstrapElectronApp = async (): Promise<void> => {
    * because `NodeFsProvider` realpath-checks its base. */
   const homeRoot = join(app.getPath('userData'), 'home');
   mkdirSync(homeRoot, { recursive: true });
+  const authorityDirectory = join(app.getPath('userData'), 'filesystem-authority');
+  mkdirSync(authorityDirectory, { recursive: true });
 
   /* Grants outlive the session: the renderer keeps a picked folder's workspace
    * record in IndexedDB and offers it again on the next launch, so a grant main
@@ -249,7 +251,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
 
   let computeWorker: Worker | undefined;
   const computeConnections = new Map<string, ReturnType<typeof connectSqliteComputeStoreWorker>>();
-  let computeProjectRootFor = (executionRoot: string): string => executionRoot;
+  let registeredProjectRootFor = (_executionRoot: string): string | undefined => undefined;
   const invalidateComputeWorker = (worker: Worker): void => {
     if (computeWorker !== worker) {
       return;
@@ -295,7 +297,12 @@ const bootstrapElectronApp = async (): Promise<void> => {
     }),
     forkEnvAllowlist: [...kernelForkEnvAllowlist],
     resolveFork: (context) => {
-      const resolved = baseForkResolver(context);
+      const requestedRoot = context['projectRoot'];
+      const registeredProjectRoot =
+        requestedRoot === undefined ? undefined : registeredProjectRootFor(resolve(requestedRoot));
+      const resolved = baseForkResolver(
+        registeredProjectRoot === undefined ? context : { ...context, projectRoot: registeredProjectRoot },
+      );
       const mode = context['computeMode'] ?? 'memory';
       if (mode !== 'off' && mode !== 'memory' && mode !== 'durable') {
         throw new Error('Desktop shell refused unknown compute mode.');
@@ -303,14 +310,30 @@ const bootstrapElectronApp = async (): Promise<void> => {
       if (context['purpose'] === 'ephemeral' && mode === 'durable') {
         throw new Error('Desktop shell refused durable compute for an ephemeral runtime.');
       }
-      const executionRoot = context['projectRoot'] ?? homeRoot;
-      const computeProjectRoot = roots.canonical(computeProjectRootFor(executionRoot));
+      const executionRoot =
+        registeredProjectRoot === undefined
+          ? (resolved.env?.['TAU_PROJECT_ROOT'] ?? homeRoot)
+          : resolve(requestedRoot ?? homeRoot);
+      const computeProjectRoot = roots.canonical(registeredProjectRoot ?? executionRoot);
       if (!computeProjectRoot) {
         throw new Error('Desktop shell refused unadmitted compute project root.');
       }
       const compute: ComputeBinding =
         mode === 'durable' ? { mode, store: computeConnection(computeProjectRoot).store } : { mode };
-      return { ...resolved, compute };
+      return {
+        ...resolved,
+        ...(registeredProjectRoot === undefined
+          ? {}
+          : {
+              env: { ...resolved.env, TAU_PROJECT_ROOT: executionRoot }, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
+            }),
+        compute,
+        ...(context['purpose'] === 'ephemeral'
+          ? {}
+          : {
+              fileSystemPort: services.connect('runtimeFileSystem', { workspaceRoot: executionRoot }),
+            }),
+      };
     },
     serviceName: 'tau-kernel-host',
     onError(error) {
@@ -348,6 +371,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
     utilityEntry: servicesUtilityEntry,
     env: utilityEnvironment(environment, {
       ...esbuildEnvironment,
+      TAU_DESKTOP_AUTHORITY_DIR: authorityDirectory, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
       TAU_DESKTOP_LOG_DIR: logDirectory, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
     }),
     fork: (entry, args, forkOptions) => utilityProcess.fork(entry, args, forkOptions),
@@ -360,7 +384,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
       log.log(level, event, detail);
     },
   });
-  computeProjectRootFor = (executionRoot) => services.computeProjectRoot(executionRoot) ?? executionRoot;
+  registeredProjectRootFor = (executionRoot) => services.computeProjectRoot(executionRoot);
   const publishRoots = (): void => {
     services.post({ type: 'allowRoots', roots: roots.roots() });
   };
@@ -568,7 +592,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
     /* The renderer names the concern; main validates it against the served set
      * rather than ignoring it, so a future second concern cannot be reached by
      * a stale caller and today's only one cannot be mistyped into silence. */
-    if (!servicesConcerns.includes(concern as ServicesConcern)) {
+    if (!rendererServicesConcerns.includes(concern as ServicesConcern)) {
       log.log('error', 'services.unknown-concern', { concern });
       return;
     }
@@ -730,12 +754,16 @@ const bootstrapElectronApp = async (): Promise<void> => {
          * waits for W13's `awaitSyncSettled` before this process ends. Without
          * this round trip `services.dispose()` killed the utility outright —
          * `ServicesHost.dispose()` is synchronous fire-and-forget — so the last
-         * edits of a quit were recorded by nothing. After the bound the durable
-         * queue is the guarantee (D28) and quit proceeds regardless.
+         * edits of a quit were recorded by nothing. After the bound, quit still
+         * proceeds while the non-success outcome remains visible in the log.
          */
         try {
           const outcome = await services.quiesce(quitQuiesceMilliseconds);
-          log.log('info', 'main.quiesce', { outcome });
+          log.log(
+            outcome.status === 'quiesced' || outcome.status === 'no-utility' ? 'info' : 'error',
+            'main.quiesce',
+            outcome,
+          );
         } catch (error) {
           log.log('error', 'main.shutdown', error);
         }

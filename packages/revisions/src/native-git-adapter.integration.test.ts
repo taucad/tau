@@ -1,10 +1,13 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { createReadStream } from 'node:fs';
-import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
+import { MessageChannel } from 'node:worker_threads';
+import { NodeFsChannel, NodeFsProviderClient } from '@taucad/filesystem/backend';
+import { NodeFsAuthorityHost, serveNodeFsProvider, toNodeFsPort } from '@taucad/filesystem/backend/node';
 import { ImmutableRevisionTree, mergeRevisionTrees, revisionId } from '@taucad/filesystem/revisions';
 import { RevisionAuthority, revisionBranchName } from '#revision-authority.js';
 import type { RevisionId } from '@taucad/filesystem/revisions';
@@ -81,6 +84,94 @@ nativeGitIntegration('native Git adapter integration', () => {
   afterEach(async () => {
     await rm(temporaryRoot, { force: true, recursive: true });
   });
+
+  it('holds the exact worktree target against an admitted writer during removal', async () => {
+    const authorityRoot = join(temporaryRoot, 'authority');
+    await Promise.all([mkdir(authorityRoot), mkdir(worktreeRoot)]);
+    const authority = new NodeFsAuthorityHost({
+      authorityDirectory: () => authorityRoot,
+      authorityIdentity: () => repositoryPath,
+    });
+    const { port1, port2 } = new MessageChannel();
+    const admittedRoots = new Set<string>();
+    const stopServer = serveNodeFsProvider(toNodeFsPort(port1), {
+      authority,
+      allowRoot: (root) => admittedRoots.has(root),
+    });
+    const channel = new NodeFsChannel(toNodeFsPort(port2));
+    const removeEntered = Promise.withResolvers<void>();
+    const allowRemove = Promise.withResolvers<void>();
+    const targets: Array<Readonly<{ operation: 'add' | 'remove'; targetRoot: string; targetPath: string }>> = [];
+    const revisionPort = createNativeGitRevisionPort({
+      repositoryPath,
+      checkouts: {
+        projectId: 'project-1',
+        directory: worktreeRoot,
+        withMutationAuthority: async (target, mutation) =>
+          authority.run({ root: target.parentRoot, paths: [target.targetPath] }, async () => {
+            targets.push(target);
+            if (target.operation === 'remove') {
+              removeEntered.resolve();
+              await allowRemove.promise;
+            }
+            return mutation();
+          }),
+      },
+    });
+
+    try {
+      await revisionPort.init({ author: { name: 'Tau', email: 'tau@example.com' } });
+      const receipt = await revisionPort.writeRevision({
+        parents: [],
+        tree: new ImmutableRevisionTree([['part.ts', 'export const part = 1;\n']]),
+        provenance: { source: 'user', actorId: 'person-1', createdAt },
+        summary: { generated: 'Base' },
+      });
+      const head = revisionId(receipt.commitId);
+      await revisionPort.updateRef({ name: 'main', expectedHead: undefined, head });
+      await revisionPort.setHead('main');
+      await revisionPort.updateRef({ name: 'side', expectedHead: undefined, head });
+      const checkout = await revisionPort.addCheckout!({ branch: 'side' });
+      const canonicalCheckoutRoot = await realpath(checkout.root);
+      admittedRoots.add(checkout.root);
+      const provider = new NodeFsProviderClient(channel, checkout.root);
+      await provider.writeFile('before.txt', 'before\n');
+
+      const removing = revisionPort.removeCheckout!(checkout.id);
+      await removeEntered.promise;
+      let writeSettled = false;
+      let writeFailure: unknown;
+      const racingWrite = async (): Promise<void> => {
+        try {
+          await provider.writeFile('racing.txt', 'racing\n');
+        } catch (error) {
+          writeFailure = error;
+        } finally {
+          writeSettled = true;
+        }
+      };
+      const writing = racingWrite();
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 50);
+      });
+      expect(writeSettled).toBe(false);
+      allowRemove.resolve();
+      await removing;
+      await writing;
+      expect(writeFailure).toBeInstanceOf(Error);
+      expect(targets).toEqual([
+        expect.objectContaining({ operation: 'add', targetPath: checkout.id }),
+        expect.objectContaining({
+          operation: 'remove',
+          targetRoot: canonicalCheckoutRoot,
+          targetPath: checkout.id,
+        }),
+      ]);
+    } finally {
+      channel.close();
+      await stopServer();
+    }
+  }, 60_000);
 
   it('materializes concurrent detached worktrees without cross-workspace writes', async () => {
     const adapter = createNativeGitAdapter({ repositoryPath, worktreeRoot });

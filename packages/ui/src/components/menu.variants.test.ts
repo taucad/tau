@@ -16,6 +16,7 @@ describe('menu variants', () => {
 
     expect(classes).toContain('rounded-sm');
     expect(classes).not.toContain('rounded-md');
+    expect(classes).toEqual(expect.arrayContaining(['hover:bg-menu-highlight', 'hover:text-foreground']));
   });
 
   it('keeps animation opt-in', () => {

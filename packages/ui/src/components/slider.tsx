@@ -32,9 +32,11 @@ const sliderVariants = cva(
           '[&:focus-within_[data-slot=slider-track]]:ring-2',
           '[&:focus-within_[data-slot=slider-track]]:ring-ring',
 
-          // Make the slider track appear clickable,
+          // Give the slider track action cursor and hover affordances,
           // but non-clickable when the slider is disabled.
-          '[&_[data-slot=slider-track]]:cursor-pointer',
+          '[&_[data-slot=slider-track]]:cursor-action',
+          '[&_[data-slot=slider-track]]:hover:ring-2',
+          '[&_[data-slot=slider-track]]:hover:ring-ring',
           '[&_[data-slot=slider-track]]:data-[disabled]:cursor-not-allowed',
           '[&_[data-slot=slider-thumb]]:data-[disabled]:cursor-not-allowed',
 
@@ -105,7 +107,7 @@ function Slider({
         <SliderPrimitive.Thumb
           key={index}
           data-slot='slider-thumb'
-          className='block size-4 shrink-0 cursor-pointer rounded-full border border-primary bg-background shadow-sm ring-ring transition-[box-shadow] hover:ring-2 focus-visible:ring-2 focus-visible:outline-hidden disabled:pointer-events-none disabled:opacity-50'
+          className='block size-4 shrink-0 rounded-full border border-primary bg-background shadow-sm ring-ring transition-[box-shadow] hover:ring-2 focus-visible:ring-2 focus-visible:outline-hidden disabled:pointer-events-none disabled:opacity-50'
         />
       ))}
     </SliderPrimitive.Root>

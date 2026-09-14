@@ -80,11 +80,13 @@ function Command({ className, ...properties }: CommandProps): React.JSX.Element 
 function CommandDialog({
   title = 'Command Palette',
   description = 'Search for a command to run...',
+  contentClassName,
   children,
   ...properties
 }: React.ComponentProps<typeof Dialog> & {
   readonly title?: string;
   readonly description?: string;
+  readonly contentClassName?: string;
 }): React.JSX.Element {
   return (
     <Dialog {...properties}>
@@ -92,7 +94,12 @@ function CommandDialog({
         <DialogTitle>{title}</DialogTitle>
         <DialogDescription>{description}</DialogDescription>
       </DialogHeader>
-      <DialogContent className='overflow-hidden p-0 *:data-[slot=dialog-close]:top-2.5 *:data-[slot=dialog-close]:right-2.5'>
+      <DialogContent
+        className={cn(
+          'overflow-hidden p-0 *:data-[slot=dialog-close]:top-2.5 *:data-[slot=dialog-close]:right-2.5',
+          contentClassName,
+        )}
+      >
         <Command className='[&_[cmdk-group]:not([hidden])_~[cmdk-group]]:pt-0 [&_[cmdk-input-wrapper]_svg]:size-4'>
           {children}
         </Command>

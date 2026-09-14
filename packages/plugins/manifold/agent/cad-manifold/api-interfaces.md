@@ -4,56 +4,56 @@
 
 ManifoldToplevel: export declare interface ManifoldToplevel
 
-CrossSection: typeof CrossSection
+  CrossSection: typeof CrossSection
 
-Manifold: typeof Manifold
+  Manifold: typeof Manifold
 
-Mesh: typeof Mesh
+  Mesh: typeof Mesh
 
-triangulate: typeof triangulate
+  triangulate: typeof triangulate
 
-setMinCircularAngle: typeof setMinCircularAngle
+  setMinCircularAngle: typeof setMinCircularAngle
 
-setMinCircularEdgeLength: typeof setMinCircularEdgeLength
+  setMinCircularEdgeLength: typeof setMinCircularEdgeLength
 
-setCircularSegments: typeof setCircularSegments
+  setCircularSegments: typeof setCircularSegments
 
-getCircularSegments: typeof getCircularSegments
+  getCircularSegments: typeof getCircularSegments
 
-resetToCircularDefaults: typeof resetToCircularDefaults
+  resetToCircularDefaults: typeof resetToCircularDefaults
 
-setup: () => void
+  setup: () => void
 
 MeshOptions: export declare interface MeshOptions
 
-numProp: number
+  numProp: number
 
-vertProperties: Float32Array
+  vertProperties: Float32Array
 
-triVerts: Uint32Array
+  triVerts: Uint32Array
 
-mergeFromVert: Uint32Array
+  mergeFromVert: Uint32Array
 
-mergeToVert: Uint32Array
+  mergeToVert: Uint32Array
 
-runIndex: Uint32Array
+  runIndex: Uint32Array
 
-runOriginalID: Uint32Array
+  runOriginalID: Uint32Array
 
-runTransform: Float32Array
+  runTransform: Float32Array
 
-faceID: Uint32Array
+  faceID: Uint32Array
 
-halfedgeTangent: Float32Array
+  halfedgeTangent: Float32Array
 
-tolerance: number
+  tolerance: number
 
 SealedFloat32Array: export declare interface SealedFloat32Array<N extends number> extends Float32Array
 
-// The length of the array
-length: N
+  // The length of the array
+  length: N
 
 SealedUint32Array: export declare interface SealedUint32Array<N extends number> extends Uint32Array
 
-// The length of the array
-length: N
+  // The length of the array
+  length: N

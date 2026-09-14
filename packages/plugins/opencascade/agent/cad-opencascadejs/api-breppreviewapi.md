@@ -4,10 +4,10 @@
 
 BRepPreviewAPI_MakeBox: declare class BRepPreviewAPI_MakeBox extends BRepPrimAPI_MakeBox
 
-constructor
+  constructor
 
-Build(theRange?: Message_ProgressRange): void;
+  Build(theRange?: Message_ProgressRange): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;

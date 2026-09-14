@@ -4,79 +4,79 @@
 
 BRepBuilderAPI: declare class BRepBuilderAPI
 
-constructor
+  constructor
 
-static Plane(P: Geom_Plane): void;
-static Plane(): Geom_Plane;
-static Plane(P: Geom_Plane): void;
-static Plane(): Geom_Plane;
+  static Plane(P: Geom_Plane): void;
+  static Plane(): Geom_Plane;
+  static Plane(P: Geom_Plane): void;
+  static Plane(): Geom_Plane;
 
-static Precision(P: number): void;
-static Precision(): number;
-static Precision(P: number): void;
-static Precision(): number;
+  static Precision(P: number): void;
+  static Precision(): number;
+  static Precision(P: number): void;
+  static Precision(): number;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepBuilderAPI_BndBoxTreeSelector: declare class BRepBuilderAPI_BndBoxTreeSelector
 
-constructor
+  constructor
 
-Reject(argNo0: Bnd_Box): boolean;
+  Reject(argNo0: Bnd_Box): boolean;
 
-Accept(argNo0: number): boolean;
+  Accept(argNo0: number): boolean;
 
-ClearResList(): void;
+  ClearResList(): void;
 
-SetCurrent(theBox: Bnd_Box): void;
+  SetCurrent(theBox: Bnd_Box): void;
 
-ResInd(): NCollection_List_int;
+  ResInd(): NCollection_List_int;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepBuilderAPI_Collect: declare class BRepBuilderAPI_Collect
 
-constructor
+  constructor
 
-Add(SI: TopoDS_Shape, MKS: BRepBuilderAPI_MakeShape): void;
+  Add(SI: TopoDS_Shape, MKS: BRepBuilderAPI_MakeShape): void;
 
-AddGenerated(S: TopoDS_Shape, Gen: TopoDS_Shape): void;
+  AddGenerated(S: TopoDS_Shape, Gen: TopoDS_Shape): void;
 
-AddModif(S: TopoDS_Shape, Mod: TopoDS_Shape): void;
+  AddModif(S: TopoDS_Shape, Mod: TopoDS_Shape): void;
 
-Filter(SF: TopoDS_Shape): void;
+  Filter(SF: TopoDS_Shape): void;
 
-Modification(): NCollection_DataMap_TopoDS_Shape_NCollection_List_TopoDS_Shape_TopTools_ShapeMapHasher;
+  Modification(): NCollection_DataMap_TopoDS_Shape_NCollection_List_TopoDS_Shape_TopTools_ShapeMapHasher;
 
-Generated(): NCollection_DataMap_TopoDS_Shape_NCollection_List_TopoDS_Shape_TopTools_ShapeMapHasher;
+  Generated(): NCollection_DataMap_TopoDS_Shape_NCollection_List_TopoDS_Shape_TopTools_ShapeMapHasher;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepBuilderAPI_Command: declare class BRepBuilderAPI_Command
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-Check(): void;
+  Check(): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepBuilderAPI_Copy: declare class BRepBuilderAPI_Copy extends BRepBuilderAPI_ModifyShape
 
-constructor
+  constructor
 
-Perform(S: TopoDS_Shape, copyGeom?: boolean, copyMesh?: boolean): void;
+  Perform(S: TopoDS_Shape, copyGeom?: boolean, copyMesh?: boolean): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepBuilderAPI_EdgeError: typeof BRepBuilderAPI_EdgeError[keyof typeof BRepBuilderAPI_EdgeError]
 
@@ -84,553 +84,553 @@ BRepBuilderAPI_FaceError: typeof BRepBuilderAPI_FaceError[keyof typeof BRepBuild
 
 BRepBuilderAPI_FastSewing: declare class BRepBuilderAPI_FastSewing extends Standard_Transient
 
-constructor
+  constructor
 
-Add(theShape: TopoDS_Shape): boolean;
-Add(theSurface: Geom_Surface): boolean;
-Add(theShape: TopoDS_Shape): boolean;
-Add(theSurface: Geom_Surface): boolean;
+  Add(theShape: TopoDS_Shape): boolean;
+  Add(theSurface: Geom_Surface): boolean;
+  Add(theShape: TopoDS_Shape): boolean;
+  Add(theSurface: Geom_Surface): boolean;
 
-Perform(): void;
+  Perform(): void;
 
-SetTolerance(theToler: number): void;
+  SetTolerance(theToler: number): void;
 
-GetTolerance(): number;
+  GetTolerance(): number;
 
-GetResult(): TopoDS_Shape;
+  GetResult(): TopoDS_Shape;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepBuilderAPI_FastSewing_FS_Statuses: typeof BRepBuilderAPI_FastSewing_FS_Statuses[keyof typeof BRepBuilderAPI_FastSewing_FS_Statuses]
 
 BRepBuilderAPI_FindPlane: declare class BRepBuilderAPI_FindPlane
 
-constructor
+  constructor
 
-Init(S: TopoDS_Shape, Tol?: number): void;
+  Init(S: TopoDS_Shape, Tol?: number): void;
 
-Found(): boolean;
+  Found(): boolean;
 
-Plane(): Geom_Plane;
+  Plane(): Geom_Plane;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepBuilderAPI_GTransform: declare class BRepBuilderAPI_GTransform extends BRepBuilderAPI_ModifyShape
 
-constructor
+  constructor
 
-Perform(S: TopoDS_Shape, Copy?: boolean): void;
+  Perform(S: TopoDS_Shape, Copy?: boolean): void;
 
-Modified(S: TopoDS_Shape): NCollection_List_TopoDS_Shape;
+  Modified(S: TopoDS_Shape): NCollection_List_TopoDS_Shape;
 
-ModifiedShape(S: TopoDS_Shape): TopoDS_Shape;
+  ModifiedShape(S: TopoDS_Shape): TopoDS_Shape;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepBuilderAPI_MakeEdge: declare class BRepBuilderAPI_MakeEdge extends BRepBuilderAPI_MakeShape
 
-constructor
+  constructor
 
-Init(C: Geom_Curve): void;
-Init(C: Geom2d_Curve, S: Geom_Surface): void;
-Init(C: Geom_Curve, p1: number, p2: number): void;
-Init(C: Geom_Curve, P1: gp_Pnt, P2: gp_Pnt): void;
-Init(C: Geom_Curve, V1: TopoDS_Vertex, V2: TopoDS_Vertex): void;
-Init(C: Geom2d_Curve, S: Geom_Surface, p1: number, p2: number): void;
-Init(C: Geom2d_Curve, S: Geom_Surface, P1: gp_Pnt, P2: gp_Pnt): void;
-Init(C: Geom2d_Curve, S: Geom_Surface, V1: TopoDS_Vertex, V2: TopoDS_Vertex): void;
-Init(C: Geom_Curve, P1: gp_Pnt, P2: gp_Pnt, p1: number, p2: number): void;
-Init(C: Geom_Curve, V1: TopoDS_Vertex, V2: TopoDS_Vertex, p1: number, p2: number): void;
-Init(C: Geom2d_Curve, S: Geom_Surface, P1: gp_Pnt, P2: gp_Pnt, p1: number, p2: number): void;
-Init(C: Geom2d_Curve, S: Geom_Surface, V1: TopoDS_Vertex, V2: TopoDS_Vertex, p1: number, p2: number): void;
-Init(C: Geom_Curve): void;
-Init(C: Geom2d_Curve, S: Geom_Surface): void;
-Init(C: Geom_Curve, p1: number, p2: number): void;
-Init(C: Geom_Curve, P1: gp_Pnt, P2: gp_Pnt): void;
-Init(C: Geom_Curve, V1: TopoDS_Vertex, V2: TopoDS_Vertex): void;
-Init(C: Geom2d_Curve, S: Geom_Surface, p1: number, p2: number): void;
-Init(C: Geom2d_Curve, S: Geom_Surface, P1: gp_Pnt, P2: gp_Pnt): void;
-Init(C: Geom2d_Curve, S: Geom_Surface, V1: TopoDS_Vertex, V2: TopoDS_Vertex): void;
-Init(C: Geom_Curve, P1: gp_Pnt, P2: gp_Pnt, p1: number, p2: number): void;
-Init(C: Geom_Curve, V1: TopoDS_Vertex, V2: TopoDS_Vertex, p1: number, p2: number): void;
-Init(C: Geom2d_Curve, S: Geom_Surface, P1: gp_Pnt, P2: gp_Pnt, p1: number, p2: number): void;
-Init(C: Geom2d_Curve, S: Geom_Surface, V1: TopoDS_Vertex, V2: TopoDS_Vertex, p1: number, p2: number): void;
-Init(C: Geom_Curve): void;
-Init(C: Geom2d_Curve, S: Geom_Surface): void;
-Init(C: Geom_Curve, p1: number, p2: number): void;
-Init(C: Geom_Curve, P1: gp_Pnt, P2: gp_Pnt): void;
-Init(C: Geom_Curve, V1: TopoDS_Vertex, V2: TopoDS_Vertex): void;
-Init(C: Geom2d_Curve, S: Geom_Surface, p1: number, p2: number): void;
-Init(C: Geom2d_Curve, S: Geom_Surface, P1: gp_Pnt, P2: gp_Pnt): void;
-Init(C: Geom2d_Curve, S: Geom_Surface, V1: TopoDS_Vertex, V2: TopoDS_Vertex): void;
-Init(C: Geom_Curve, P1: gp_Pnt, P2: gp_Pnt, p1: number, p2: number): void;
-Init(C: Geom_Curve, V1: TopoDS_Vertex, V2: TopoDS_Vertex, p1: number, p2: number): void;
-Init(C: Geom2d_Curve, S: Geom_Surface, P1: gp_Pnt, P2: gp_Pnt, p1: number, p2: number): void;
-Init(C: Geom2d_Curve, S: Geom_Surface, V1: TopoDS_Vertex, V2: TopoDS_Vertex, p1: number, p2: number): void;
-Init(C: Geom_Curve): void;
-Init(C: Geom2d_Curve, S: Geom_Surface): void;
-Init(C: Geom_Curve, p1: number, p2: number): void;
-Init(C: Geom_Curve, P1: gp_Pnt, P2: gp_Pnt): void;
-Init(C: Geom_Curve, V1: TopoDS_Vertex, V2: TopoDS_Vertex): void;
-Init(C: Geom2d_Curve, S: Geom_Surface, p1: number, p2: number): void;
-Init(C: Geom2d_Curve, S: Geom_Surface, P1: gp_Pnt, P2: gp_Pnt): void;
-Init(C: Geom2d_Curve, S: Geom_Surface, V1: TopoDS_Vertex, V2: TopoDS_Vertex): void;
-Init(C: Geom_Curve, P1: gp_Pnt, P2: gp_Pnt, p1: number, p2: number): void;
-Init(C: Geom_Curve, V1: TopoDS_Vertex, V2: TopoDS_Vertex, p1: number, p2: number): void;
-Init(C: Geom2d_Curve, S: Geom_Surface, P1: gp_Pnt, P2: gp_Pnt, p1: number, p2: number): void;
-Init(C: Geom2d_Curve, S: Geom_Surface, V1: TopoDS_Vertex, V2: TopoDS_Vertex, p1: number, p2: number): void;
-Init(C: Geom_Curve): void;
-Init(C: Geom2d_Curve, S: Geom_Surface): void;
-Init(C: Geom_Curve, p1: number, p2: number): void;
-Init(C: Geom_Curve, P1: gp_Pnt, P2: gp_Pnt): void;
-Init(C: Geom_Curve, V1: TopoDS_Vertex, V2: TopoDS_Vertex): void;
-Init(C: Geom2d_Curve, S: Geom_Surface, p1: number, p2: number): void;
-Init(C: Geom2d_Curve, S: Geom_Surface, P1: gp_Pnt, P2: gp_Pnt): void;
-Init(C: Geom2d_Curve, S: Geom_Surface, V1: TopoDS_Vertex, V2: TopoDS_Vertex): void;
-Init(C: Geom_Curve, P1: gp_Pnt, P2: gp_Pnt, p1: number, p2: number): void;
-Init(C: Geom_Curve, V1: TopoDS_Vertex, V2: TopoDS_Vertex, p1: number, p2: number): void;
-Init(C: Geom2d_Curve, S: Geom_Surface, P1: gp_Pnt, P2: gp_Pnt, p1: number, p2: number): void;
-Init(C: Geom2d_Curve, S: Geom_Surface, V1: TopoDS_Vertex, V2: TopoDS_Vertex, p1: number, p2: number): void;
-Init(C: Geom_Curve): void;
-Init(C: Geom2d_Curve, S: Geom_Surface): void;
-Init(C: Geom_Curve, p1: number, p2: number): void;
-Init(C: Geom_Curve, P1: gp_Pnt, P2: gp_Pnt): void;
-Init(C: Geom_Curve, V1: TopoDS_Vertex, V2: TopoDS_Vertex): void;
-Init(C: Geom2d_Curve, S: Geom_Surface, p1: number, p2: number): void;
-Init(C: Geom2d_Curve, S: Geom_Surface, P1: gp_Pnt, P2: gp_Pnt): void;
-Init(C: Geom2d_Curve, S: Geom_Surface, V1: TopoDS_Vertex, V2: TopoDS_Vertex): void;
-Init(C: Geom_Curve, P1: gp_Pnt, P2: gp_Pnt, p1: number, p2: number): void;
-Init(C: Geom_Curve, V1: TopoDS_Vertex, V2: TopoDS_Vertex, p1: number, p2: number): void;
-Init(C: Geom2d_Curve, S: Geom_Surface, P1: gp_Pnt, P2: gp_Pnt, p1: number, p2: number): void;
-Init(C: Geom2d_Curve, S: Geom_Surface, V1: TopoDS_Vertex, V2: TopoDS_Vertex, p1: number, p2: number): void;
-Init(C: Geom_Curve): void;
-Init(C: Geom2d_Curve, S: Geom_Surface): void;
-Init(C: Geom_Curve, p1: number, p2: number): void;
-Init(C: Geom_Curve, P1: gp_Pnt, P2: gp_Pnt): void;
-Init(C: Geom_Curve, V1: TopoDS_Vertex, V2: TopoDS_Vertex): void;
-Init(C: Geom2d_Curve, S: Geom_Surface, p1: number, p2: number): void;
-Init(C: Geom2d_Curve, S: Geom_Surface, P1: gp_Pnt, P2: gp_Pnt): void;
-Init(C: Geom2d_Curve, S: Geom_Surface, V1: TopoDS_Vertex, V2: TopoDS_Vertex): void;
-Init(C: Geom_Curve, P1: gp_Pnt, P2: gp_Pnt, p1: number, p2: number): void;
-Init(C: Geom_Curve, V1: TopoDS_Vertex, V2: TopoDS_Vertex, p1: number, p2: number): void;
-Init(C: Geom2d_Curve, S: Geom_Surface, P1: gp_Pnt, P2: gp_Pnt, p1: number, p2: number): void;
-Init(C: Geom2d_Curve, S: Geom_Surface, V1: TopoDS_Vertex, V2: TopoDS_Vertex, p1: number, p2: number): void;
-Init(C: Geom_Curve): void;
-Init(C: Geom2d_Curve, S: Geom_Surface): void;
-Init(C: Geom_Curve, p1: number, p2: number): void;
-Init(C: Geom_Curve, P1: gp_Pnt, P2: gp_Pnt): void;
-Init(C: Geom_Curve, V1: TopoDS_Vertex, V2: TopoDS_Vertex): void;
-Init(C: Geom2d_Curve, S: Geom_Surface, p1: number, p2: number): void;
-Init(C: Geom2d_Curve, S: Geom_Surface, P1: gp_Pnt, P2: gp_Pnt): void;
-Init(C: Geom2d_Curve, S: Geom_Surface, V1: TopoDS_Vertex, V2: TopoDS_Vertex): void;
-Init(C: Geom_Curve, P1: gp_Pnt, P2: gp_Pnt, p1: number, p2: number): void;
-Init(C: Geom_Curve, V1: TopoDS_Vertex, V2: TopoDS_Vertex, p1: number, p2: number): void;
-Init(C: Geom2d_Curve, S: Geom_Surface, P1: gp_Pnt, P2: gp_Pnt, p1: number, p2: number): void;
-Init(C: Geom2d_Curve, S: Geom_Surface, V1: TopoDS_Vertex, V2: TopoDS_Vertex, p1: number, p2: number): void;
-Init(C: Geom_Curve): void;
-Init(C: Geom2d_Curve, S: Geom_Surface): void;
-Init(C: Geom_Curve, p1: number, p2: number): void;
-Init(C: Geom_Curve, P1: gp_Pnt, P2: gp_Pnt): void;
-Init(C: Geom_Curve, V1: TopoDS_Vertex, V2: TopoDS_Vertex): void;
-Init(C: Geom2d_Curve, S: Geom_Surface, p1: number, p2: number): void;
-Init(C: Geom2d_Curve, S: Geom_Surface, P1: gp_Pnt, P2: gp_Pnt): void;
-Init(C: Geom2d_Curve, S: Geom_Surface, V1: TopoDS_Vertex, V2: TopoDS_Vertex): void;
-Init(C: Geom_Curve, P1: gp_Pnt, P2: gp_Pnt, p1: number, p2: number): void;
-Init(C: Geom_Curve, V1: TopoDS_Vertex, V2: TopoDS_Vertex, p1: number, p2: number): void;
-Init(C: Geom2d_Curve, S: Geom_Surface, P1: gp_Pnt, P2: gp_Pnt, p1: number, p2: number): void;
-Init(C: Geom2d_Curve, S: Geom_Surface, V1: TopoDS_Vertex, V2: TopoDS_Vertex, p1: number, p2: number): void;
-Init(C: Geom_Curve): void;
-Init(C: Geom2d_Curve, S: Geom_Surface): void;
-Init(C: Geom_Curve, p1: number, p2: number): void;
-Init(C: Geom_Curve, P1: gp_Pnt, P2: gp_Pnt): void;
-Init(C: Geom_Curve, V1: TopoDS_Vertex, V2: TopoDS_Vertex): void;
-Init(C: Geom2d_Curve, S: Geom_Surface, p1: number, p2: number): void;
-Init(C: Geom2d_Curve, S: Geom_Surface, P1: gp_Pnt, P2: gp_Pnt): void;
-Init(C: Geom2d_Curve, S: Geom_Surface, V1: TopoDS_Vertex, V2: TopoDS_Vertex): void;
-Init(C: Geom_Curve, P1: gp_Pnt, P2: gp_Pnt, p1: number, p2: number): void;
-Init(C: Geom_Curve, V1: TopoDS_Vertex, V2: TopoDS_Vertex, p1: number, p2: number): void;
-Init(C: Geom2d_Curve, S: Geom_Surface, P1: gp_Pnt, P2: gp_Pnt, p1: number, p2: number): void;
-Init(C: Geom2d_Curve, S: Geom_Surface, V1: TopoDS_Vertex, V2: TopoDS_Vertex, p1: number, p2: number): void;
-Init(C: Geom_Curve): void;
-Init(C: Geom2d_Curve, S: Geom_Surface): void;
-Init(C: Geom_Curve, p1: number, p2: number): void;
-Init(C: Geom_Curve, P1: gp_Pnt, P2: gp_Pnt): void;
-Init(C: Geom_Curve, V1: TopoDS_Vertex, V2: TopoDS_Vertex): void;
-Init(C: Geom2d_Curve, S: Geom_Surface, p1: number, p2: number): void;
-Init(C: Geom2d_Curve, S: Geom_Surface, P1: gp_Pnt, P2: gp_Pnt): void;
-Init(C: Geom2d_Curve, S: Geom_Surface, V1: TopoDS_Vertex, V2: TopoDS_Vertex): void;
-Init(C: Geom_Curve, P1: gp_Pnt, P2: gp_Pnt, p1: number, p2: number): void;
-Init(C: Geom_Curve, V1: TopoDS_Vertex, V2: TopoDS_Vertex, p1: number, p2: number): void;
-Init(C: Geom2d_Curve, S: Geom_Surface, P1: gp_Pnt, P2: gp_Pnt, p1: number, p2: number): void;
-Init(C: Geom2d_Curve, S: Geom_Surface, V1: TopoDS_Vertex, V2: TopoDS_Vertex, p1: number, p2: number): void;
-Init(C: Geom_Curve): void;
-Init(C: Geom2d_Curve, S: Geom_Surface): void;
-Init(C: Geom_Curve, p1: number, p2: number): void;
-Init(C: Geom_Curve, P1: gp_Pnt, P2: gp_Pnt): void;
-Init(C: Geom_Curve, V1: TopoDS_Vertex, V2: TopoDS_Vertex): void;
-Init(C: Geom2d_Curve, S: Geom_Surface, p1: number, p2: number): void;
-Init(C: Geom2d_Curve, S: Geom_Surface, P1: gp_Pnt, P2: gp_Pnt): void;
-Init(C: Geom2d_Curve, S: Geom_Surface, V1: TopoDS_Vertex, V2: TopoDS_Vertex): void;
-Init(C: Geom_Curve, P1: gp_Pnt, P2: gp_Pnt, p1: number, p2: number): void;
-Init(C: Geom_Curve, V1: TopoDS_Vertex, V2: TopoDS_Vertex, p1: number, p2: number): void;
-Init(C: Geom2d_Curve, S: Geom_Surface, P1: gp_Pnt, P2: gp_Pnt, p1: number, p2: number): void;
-Init(C: Geom2d_Curve, S: Geom_Surface, V1: TopoDS_Vertex, V2: TopoDS_Vertex, p1: number, p2: number): void;
+  Init(C: Geom_Curve): void;
+  Init(C: Geom2d_Curve, S: Geom_Surface): void;
+  Init(C: Geom_Curve, p1: number, p2: number): void;
+  Init(C: Geom_Curve, P1: gp_Pnt, P2: gp_Pnt): void;
+  Init(C: Geom_Curve, V1: TopoDS_Vertex, V2: TopoDS_Vertex): void;
+  Init(C: Geom2d_Curve, S: Geom_Surface, p1: number, p2: number): void;
+  Init(C: Geom2d_Curve, S: Geom_Surface, P1: gp_Pnt, P2: gp_Pnt): void;
+  Init(C: Geom2d_Curve, S: Geom_Surface, V1: TopoDS_Vertex, V2: TopoDS_Vertex): void;
+  Init(C: Geom_Curve, P1: gp_Pnt, P2: gp_Pnt, p1: number, p2: number): void;
+  Init(C: Geom_Curve, V1: TopoDS_Vertex, V2: TopoDS_Vertex, p1: number, p2: number): void;
+  Init(C: Geom2d_Curve, S: Geom_Surface, P1: gp_Pnt, P2: gp_Pnt, p1: number, p2: number): void;
+  Init(C: Geom2d_Curve, S: Geom_Surface, V1: TopoDS_Vertex, V2: TopoDS_Vertex, p1: number, p2: number): void;
+  Init(C: Geom_Curve): void;
+  Init(C: Geom2d_Curve, S: Geom_Surface): void;
+  Init(C: Geom_Curve, p1: number, p2: number): void;
+  Init(C: Geom_Curve, P1: gp_Pnt, P2: gp_Pnt): void;
+  Init(C: Geom_Curve, V1: TopoDS_Vertex, V2: TopoDS_Vertex): void;
+  Init(C: Geom2d_Curve, S: Geom_Surface, p1: number, p2: number): void;
+  Init(C: Geom2d_Curve, S: Geom_Surface, P1: gp_Pnt, P2: gp_Pnt): void;
+  Init(C: Geom2d_Curve, S: Geom_Surface, V1: TopoDS_Vertex, V2: TopoDS_Vertex): void;
+  Init(C: Geom_Curve, P1: gp_Pnt, P2: gp_Pnt, p1: number, p2: number): void;
+  Init(C: Geom_Curve, V1: TopoDS_Vertex, V2: TopoDS_Vertex, p1: number, p2: number): void;
+  Init(C: Geom2d_Curve, S: Geom_Surface, P1: gp_Pnt, P2: gp_Pnt, p1: number, p2: number): void;
+  Init(C: Geom2d_Curve, S: Geom_Surface, V1: TopoDS_Vertex, V2: TopoDS_Vertex, p1: number, p2: number): void;
+  Init(C: Geom_Curve): void;
+  Init(C: Geom2d_Curve, S: Geom_Surface): void;
+  Init(C: Geom_Curve, p1: number, p2: number): void;
+  Init(C: Geom_Curve, P1: gp_Pnt, P2: gp_Pnt): void;
+  Init(C: Geom_Curve, V1: TopoDS_Vertex, V2: TopoDS_Vertex): void;
+  Init(C: Geom2d_Curve, S: Geom_Surface, p1: number, p2: number): void;
+  Init(C: Geom2d_Curve, S: Geom_Surface, P1: gp_Pnt, P2: gp_Pnt): void;
+  Init(C: Geom2d_Curve, S: Geom_Surface, V1: TopoDS_Vertex, V2: TopoDS_Vertex): void;
+  Init(C: Geom_Curve, P1: gp_Pnt, P2: gp_Pnt, p1: number, p2: number): void;
+  Init(C: Geom_Curve, V1: TopoDS_Vertex, V2: TopoDS_Vertex, p1: number, p2: number): void;
+  Init(C: Geom2d_Curve, S: Geom_Surface, P1: gp_Pnt, P2: gp_Pnt, p1: number, p2: number): void;
+  Init(C: Geom2d_Curve, S: Geom_Surface, V1: TopoDS_Vertex, V2: TopoDS_Vertex, p1: number, p2: number): void;
+  Init(C: Geom_Curve): void;
+  Init(C: Geom2d_Curve, S: Geom_Surface): void;
+  Init(C: Geom_Curve, p1: number, p2: number): void;
+  Init(C: Geom_Curve, P1: gp_Pnt, P2: gp_Pnt): void;
+  Init(C: Geom_Curve, V1: TopoDS_Vertex, V2: TopoDS_Vertex): void;
+  Init(C: Geom2d_Curve, S: Geom_Surface, p1: number, p2: number): void;
+  Init(C: Geom2d_Curve, S: Geom_Surface, P1: gp_Pnt, P2: gp_Pnt): void;
+  Init(C: Geom2d_Curve, S: Geom_Surface, V1: TopoDS_Vertex, V2: TopoDS_Vertex): void;
+  Init(C: Geom_Curve, P1: gp_Pnt, P2: gp_Pnt, p1: number, p2: number): void;
+  Init(C: Geom_Curve, V1: TopoDS_Vertex, V2: TopoDS_Vertex, p1: number, p2: number): void;
+  Init(C: Geom2d_Curve, S: Geom_Surface, P1: gp_Pnt, P2: gp_Pnt, p1: number, p2: number): void;
+  Init(C: Geom2d_Curve, S: Geom_Surface, V1: TopoDS_Vertex, V2: TopoDS_Vertex, p1: number, p2: number): void;
+  Init(C: Geom_Curve): void;
+  Init(C: Geom2d_Curve, S: Geom_Surface): void;
+  Init(C: Geom_Curve, p1: number, p2: number): void;
+  Init(C: Geom_Curve, P1: gp_Pnt, P2: gp_Pnt): void;
+  Init(C: Geom_Curve, V1: TopoDS_Vertex, V2: TopoDS_Vertex): void;
+  Init(C: Geom2d_Curve, S: Geom_Surface, p1: number, p2: number): void;
+  Init(C: Geom2d_Curve, S: Geom_Surface, P1: gp_Pnt, P2: gp_Pnt): void;
+  Init(C: Geom2d_Curve, S: Geom_Surface, V1: TopoDS_Vertex, V2: TopoDS_Vertex): void;
+  Init(C: Geom_Curve, P1: gp_Pnt, P2: gp_Pnt, p1: number, p2: number): void;
+  Init(C: Geom_Curve, V1: TopoDS_Vertex, V2: TopoDS_Vertex, p1: number, p2: number): void;
+  Init(C: Geom2d_Curve, S: Geom_Surface, P1: gp_Pnt, P2: gp_Pnt, p1: number, p2: number): void;
+  Init(C: Geom2d_Curve, S: Geom_Surface, V1: TopoDS_Vertex, V2: TopoDS_Vertex, p1: number, p2: number): void;
+  Init(C: Geom_Curve): void;
+  Init(C: Geom2d_Curve, S: Geom_Surface): void;
+  Init(C: Geom_Curve, p1: number, p2: number): void;
+  Init(C: Geom_Curve, P1: gp_Pnt, P2: gp_Pnt): void;
+  Init(C: Geom_Curve, V1: TopoDS_Vertex, V2: TopoDS_Vertex): void;
+  Init(C: Geom2d_Curve, S: Geom_Surface, p1: number, p2: number): void;
+  Init(C: Geom2d_Curve, S: Geom_Surface, P1: gp_Pnt, P2: gp_Pnt): void;
+  Init(C: Geom2d_Curve, S: Geom_Surface, V1: TopoDS_Vertex, V2: TopoDS_Vertex): void;
+  Init(C: Geom_Curve, P1: gp_Pnt, P2: gp_Pnt, p1: number, p2: number): void;
+  Init(C: Geom_Curve, V1: TopoDS_Vertex, V2: TopoDS_Vertex, p1: number, p2: number): void;
+  Init(C: Geom2d_Curve, S: Geom_Surface, P1: gp_Pnt, P2: gp_Pnt, p1: number, p2: number): void;
+  Init(C: Geom2d_Curve, S: Geom_Surface, V1: TopoDS_Vertex, V2: TopoDS_Vertex, p1: number, p2: number): void;
+  Init(C: Geom_Curve): void;
+  Init(C: Geom2d_Curve, S: Geom_Surface): void;
+  Init(C: Geom_Curve, p1: number, p2: number): void;
+  Init(C: Geom_Curve, P1: gp_Pnt, P2: gp_Pnt): void;
+  Init(C: Geom_Curve, V1: TopoDS_Vertex, V2: TopoDS_Vertex): void;
+  Init(C: Geom2d_Curve, S: Geom_Surface, p1: number, p2: number): void;
+  Init(C: Geom2d_Curve, S: Geom_Surface, P1: gp_Pnt, P2: gp_Pnt): void;
+  Init(C: Geom2d_Curve, S: Geom_Surface, V1: TopoDS_Vertex, V2: TopoDS_Vertex): void;
+  Init(C: Geom_Curve, P1: gp_Pnt, P2: gp_Pnt, p1: number, p2: number): void;
+  Init(C: Geom_Curve, V1: TopoDS_Vertex, V2: TopoDS_Vertex, p1: number, p2: number): void;
+  Init(C: Geom2d_Curve, S: Geom_Surface, P1: gp_Pnt, P2: gp_Pnt, p1: number, p2: number): void;
+  Init(C: Geom2d_Curve, S: Geom_Surface, V1: TopoDS_Vertex, V2: TopoDS_Vertex, p1: number, p2: number): void;
+  Init(C: Geom_Curve): void;
+  Init(C: Geom2d_Curve, S: Geom_Surface): void;
+  Init(C: Geom_Curve, p1: number, p2: number): void;
+  Init(C: Geom_Curve, P1: gp_Pnt, P2: gp_Pnt): void;
+  Init(C: Geom_Curve, V1: TopoDS_Vertex, V2: TopoDS_Vertex): void;
+  Init(C: Geom2d_Curve, S: Geom_Surface, p1: number, p2: number): void;
+  Init(C: Geom2d_Curve, S: Geom_Surface, P1: gp_Pnt, P2: gp_Pnt): void;
+  Init(C: Geom2d_Curve, S: Geom_Surface, V1: TopoDS_Vertex, V2: TopoDS_Vertex): void;
+  Init(C: Geom_Curve, P1: gp_Pnt, P2: gp_Pnt, p1: number, p2: number): void;
+  Init(C: Geom_Curve, V1: TopoDS_Vertex, V2: TopoDS_Vertex, p1: number, p2: number): void;
+  Init(C: Geom2d_Curve, S: Geom_Surface, P1: gp_Pnt, P2: gp_Pnt, p1: number, p2: number): void;
+  Init(C: Geom2d_Curve, S: Geom_Surface, V1: TopoDS_Vertex, V2: TopoDS_Vertex, p1: number, p2: number): void;
+  Init(C: Geom_Curve): void;
+  Init(C: Geom2d_Curve, S: Geom_Surface): void;
+  Init(C: Geom_Curve, p1: number, p2: number): void;
+  Init(C: Geom_Curve, P1: gp_Pnt, P2: gp_Pnt): void;
+  Init(C: Geom_Curve, V1: TopoDS_Vertex, V2: TopoDS_Vertex): void;
+  Init(C: Geom2d_Curve, S: Geom_Surface, p1: number, p2: number): void;
+  Init(C: Geom2d_Curve, S: Geom_Surface, P1: gp_Pnt, P2: gp_Pnt): void;
+  Init(C: Geom2d_Curve, S: Geom_Surface, V1: TopoDS_Vertex, V2: TopoDS_Vertex): void;
+  Init(C: Geom_Curve, P1: gp_Pnt, P2: gp_Pnt, p1: number, p2: number): void;
+  Init(C: Geom_Curve, V1: TopoDS_Vertex, V2: TopoDS_Vertex, p1: number, p2: number): void;
+  Init(C: Geom2d_Curve, S: Geom_Surface, P1: gp_Pnt, P2: gp_Pnt, p1: number, p2: number): void;
+  Init(C: Geom2d_Curve, S: Geom_Surface, V1: TopoDS_Vertex, V2: TopoDS_Vertex, p1: number, p2: number): void;
+  Init(C: Geom_Curve): void;
+  Init(C: Geom2d_Curve, S: Geom_Surface): void;
+  Init(C: Geom_Curve, p1: number, p2: number): void;
+  Init(C: Geom_Curve, P1: gp_Pnt, P2: gp_Pnt): void;
+  Init(C: Geom_Curve, V1: TopoDS_Vertex, V2: TopoDS_Vertex): void;
+  Init(C: Geom2d_Curve, S: Geom_Surface, p1: number, p2: number): void;
+  Init(C: Geom2d_Curve, S: Geom_Surface, P1: gp_Pnt, P2: gp_Pnt): void;
+  Init(C: Geom2d_Curve, S: Geom_Surface, V1: TopoDS_Vertex, V2: TopoDS_Vertex): void;
+  Init(C: Geom_Curve, P1: gp_Pnt, P2: gp_Pnt, p1: number, p2: number): void;
+  Init(C: Geom_Curve, V1: TopoDS_Vertex, V2: TopoDS_Vertex, p1: number, p2: number): void;
+  Init(C: Geom2d_Curve, S: Geom_Surface, P1: gp_Pnt, P2: gp_Pnt, p1: number, p2: number): void;
+  Init(C: Geom2d_Curve, S: Geom_Surface, V1: TopoDS_Vertex, V2: TopoDS_Vertex, p1: number, p2: number): void;
+  Init(C: Geom_Curve): void;
+  Init(C: Geom2d_Curve, S: Geom_Surface): void;
+  Init(C: Geom_Curve, p1: number, p2: number): void;
+  Init(C: Geom_Curve, P1: gp_Pnt, P2: gp_Pnt): void;
+  Init(C: Geom_Curve, V1: TopoDS_Vertex, V2: TopoDS_Vertex): void;
+  Init(C: Geom2d_Curve, S: Geom_Surface, p1: number, p2: number): void;
+  Init(C: Geom2d_Curve, S: Geom_Surface, P1: gp_Pnt, P2: gp_Pnt): void;
+  Init(C: Geom2d_Curve, S: Geom_Surface, V1: TopoDS_Vertex, V2: TopoDS_Vertex): void;
+  Init(C: Geom_Curve, P1: gp_Pnt, P2: gp_Pnt, p1: number, p2: number): void;
+  Init(C: Geom_Curve, V1: TopoDS_Vertex, V2: TopoDS_Vertex, p1: number, p2: number): void;
+  Init(C: Geom2d_Curve, S: Geom_Surface, P1: gp_Pnt, P2: gp_Pnt, p1: number, p2: number): void;
+  Init(C: Geom2d_Curve, S: Geom_Surface, V1: TopoDS_Vertex, V2: TopoDS_Vertex, p1: number, p2: number): void;
+  Init(C: Geom_Curve): void;
+  Init(C: Geom2d_Curve, S: Geom_Surface): void;
+  Init(C: Geom_Curve, p1: number, p2: number): void;
+  Init(C: Geom_Curve, P1: gp_Pnt, P2: gp_Pnt): void;
+  Init(C: Geom_Curve, V1: TopoDS_Vertex, V2: TopoDS_Vertex): void;
+  Init(C: Geom2d_Curve, S: Geom_Surface, p1: number, p2: number): void;
+  Init(C: Geom2d_Curve, S: Geom_Surface, P1: gp_Pnt, P2: gp_Pnt): void;
+  Init(C: Geom2d_Curve, S: Geom_Surface, V1: TopoDS_Vertex, V2: TopoDS_Vertex): void;
+  Init(C: Geom_Curve, P1: gp_Pnt, P2: gp_Pnt, p1: number, p2: number): void;
+  Init(C: Geom_Curve, V1: TopoDS_Vertex, V2: TopoDS_Vertex, p1: number, p2: number): void;
+  Init(C: Geom2d_Curve, S: Geom_Surface, P1: gp_Pnt, P2: gp_Pnt, p1: number, p2: number): void;
+  Init(C: Geom2d_Curve, S: Geom_Surface, V1: TopoDS_Vertex, V2: TopoDS_Vertex, p1: number, p2: number): void;
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-Error(): BRepBuilderAPI_EdgeError;
+  Error(): BRepBuilderAPI_EdgeError;
 
-Edge(): TopoDS_Edge;
+  Edge(): TopoDS_Edge;
 
-Vertex1(): TopoDS_Vertex;
+  Vertex1(): TopoDS_Vertex;
 
-Vertex2(): TopoDS_Vertex;
+  Vertex2(): TopoDS_Vertex;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepBuilderAPI_MakeEdge2d: declare class BRepBuilderAPI_MakeEdge2d extends BRepBuilderAPI_MakeShape
 
-constructor
+  constructor
 
-Init(C: Geom2d_Curve): void;
-Init(C: Geom2d_Curve, p1: number, p2: number): void;
-Init(C: Geom2d_Curve, P1: gp_Pnt2d, P2: gp_Pnt2d): void;
-Init(C: Geom2d_Curve, V1: TopoDS_Vertex, V2: TopoDS_Vertex): void;
-Init(C: Geom2d_Curve, P1: gp_Pnt2d, P2: gp_Pnt2d, p1: number, p2: number): void;
-Init(C: Geom2d_Curve, V1: TopoDS_Vertex, V2: TopoDS_Vertex, p1: number, p2: number): void;
-Init(C: Geom2d_Curve): void;
-Init(C: Geom2d_Curve, p1: number, p2: number): void;
-Init(C: Geom2d_Curve, P1: gp_Pnt2d, P2: gp_Pnt2d): void;
-Init(C: Geom2d_Curve, V1: TopoDS_Vertex, V2: TopoDS_Vertex): void;
-Init(C: Geom2d_Curve, P1: gp_Pnt2d, P2: gp_Pnt2d, p1: number, p2: number): void;
-Init(C: Geom2d_Curve, V1: TopoDS_Vertex, V2: TopoDS_Vertex, p1: number, p2: number): void;
-Init(C: Geom2d_Curve): void;
-Init(C: Geom2d_Curve, p1: number, p2: number): void;
-Init(C: Geom2d_Curve, P1: gp_Pnt2d, P2: gp_Pnt2d): void;
-Init(C: Geom2d_Curve, V1: TopoDS_Vertex, V2: TopoDS_Vertex): void;
-Init(C: Geom2d_Curve, P1: gp_Pnt2d, P2: gp_Pnt2d, p1: number, p2: number): void;
-Init(C: Geom2d_Curve, V1: TopoDS_Vertex, V2: TopoDS_Vertex, p1: number, p2: number): void;
-Init(C: Geom2d_Curve): void;
-Init(C: Geom2d_Curve, p1: number, p2: number): void;
-Init(C: Geom2d_Curve, P1: gp_Pnt2d, P2: gp_Pnt2d): void;
-Init(C: Geom2d_Curve, V1: TopoDS_Vertex, V2: TopoDS_Vertex): void;
-Init(C: Geom2d_Curve, P1: gp_Pnt2d, P2: gp_Pnt2d, p1: number, p2: number): void;
-Init(C: Geom2d_Curve, V1: TopoDS_Vertex, V2: TopoDS_Vertex, p1: number, p2: number): void;
-Init(C: Geom2d_Curve): void;
-Init(C: Geom2d_Curve, p1: number, p2: number): void;
-Init(C: Geom2d_Curve, P1: gp_Pnt2d, P2: gp_Pnt2d): void;
-Init(C: Geom2d_Curve, V1: TopoDS_Vertex, V2: TopoDS_Vertex): void;
-Init(C: Geom2d_Curve, P1: gp_Pnt2d, P2: gp_Pnt2d, p1: number, p2: number): void;
-Init(C: Geom2d_Curve, V1: TopoDS_Vertex, V2: TopoDS_Vertex, p1: number, p2: number): void;
-Init(C: Geom2d_Curve): void;
-Init(C: Geom2d_Curve, p1: number, p2: number): void;
-Init(C: Geom2d_Curve, P1: gp_Pnt2d, P2: gp_Pnt2d): void;
-Init(C: Geom2d_Curve, V1: TopoDS_Vertex, V2: TopoDS_Vertex): void;
-Init(C: Geom2d_Curve, P1: gp_Pnt2d, P2: gp_Pnt2d, p1: number, p2: number): void;
-Init(C: Geom2d_Curve, V1: TopoDS_Vertex, V2: TopoDS_Vertex, p1: number, p2: number): void;
+  Init(C: Geom2d_Curve): void;
+  Init(C: Geom2d_Curve, p1: number, p2: number): void;
+  Init(C: Geom2d_Curve, P1: gp_Pnt2d, P2: gp_Pnt2d): void;
+  Init(C: Geom2d_Curve, V1: TopoDS_Vertex, V2: TopoDS_Vertex): void;
+  Init(C: Geom2d_Curve, P1: gp_Pnt2d, P2: gp_Pnt2d, p1: number, p2: number): void;
+  Init(C: Geom2d_Curve, V1: TopoDS_Vertex, V2: TopoDS_Vertex, p1: number, p2: number): void;
+  Init(C: Geom2d_Curve): void;
+  Init(C: Geom2d_Curve, p1: number, p2: number): void;
+  Init(C: Geom2d_Curve, P1: gp_Pnt2d, P2: gp_Pnt2d): void;
+  Init(C: Geom2d_Curve, V1: TopoDS_Vertex, V2: TopoDS_Vertex): void;
+  Init(C: Geom2d_Curve, P1: gp_Pnt2d, P2: gp_Pnt2d, p1: number, p2: number): void;
+  Init(C: Geom2d_Curve, V1: TopoDS_Vertex, V2: TopoDS_Vertex, p1: number, p2: number): void;
+  Init(C: Geom2d_Curve): void;
+  Init(C: Geom2d_Curve, p1: number, p2: number): void;
+  Init(C: Geom2d_Curve, P1: gp_Pnt2d, P2: gp_Pnt2d): void;
+  Init(C: Geom2d_Curve, V1: TopoDS_Vertex, V2: TopoDS_Vertex): void;
+  Init(C: Geom2d_Curve, P1: gp_Pnt2d, P2: gp_Pnt2d, p1: number, p2: number): void;
+  Init(C: Geom2d_Curve, V1: TopoDS_Vertex, V2: TopoDS_Vertex, p1: number, p2: number): void;
+  Init(C: Geom2d_Curve): void;
+  Init(C: Geom2d_Curve, p1: number, p2: number): void;
+  Init(C: Geom2d_Curve, P1: gp_Pnt2d, P2: gp_Pnt2d): void;
+  Init(C: Geom2d_Curve, V1: TopoDS_Vertex, V2: TopoDS_Vertex): void;
+  Init(C: Geom2d_Curve, P1: gp_Pnt2d, P2: gp_Pnt2d, p1: number, p2: number): void;
+  Init(C: Geom2d_Curve, V1: TopoDS_Vertex, V2: TopoDS_Vertex, p1: number, p2: number): void;
+  Init(C: Geom2d_Curve): void;
+  Init(C: Geom2d_Curve, p1: number, p2: number): void;
+  Init(C: Geom2d_Curve, P1: gp_Pnt2d, P2: gp_Pnt2d): void;
+  Init(C: Geom2d_Curve, V1: TopoDS_Vertex, V2: TopoDS_Vertex): void;
+  Init(C: Geom2d_Curve, P1: gp_Pnt2d, P2: gp_Pnt2d, p1: number, p2: number): void;
+  Init(C: Geom2d_Curve, V1: TopoDS_Vertex, V2: TopoDS_Vertex, p1: number, p2: number): void;
+  Init(C: Geom2d_Curve): void;
+  Init(C: Geom2d_Curve, p1: number, p2: number): void;
+  Init(C: Geom2d_Curve, P1: gp_Pnt2d, P2: gp_Pnt2d): void;
+  Init(C: Geom2d_Curve, V1: TopoDS_Vertex, V2: TopoDS_Vertex): void;
+  Init(C: Geom2d_Curve, P1: gp_Pnt2d, P2: gp_Pnt2d, p1: number, p2: number): void;
+  Init(C: Geom2d_Curve, V1: TopoDS_Vertex, V2: TopoDS_Vertex, p1: number, p2: number): void;
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-Error(): BRepBuilderAPI_EdgeError;
+  Error(): BRepBuilderAPI_EdgeError;
 
-Edge(): TopoDS_Edge;
+  Edge(): TopoDS_Edge;
 
-Vertex1(): TopoDS_Vertex;
+  Vertex1(): TopoDS_Vertex;
 
-Vertex2(): TopoDS_Vertex;
+  Vertex2(): TopoDS_Vertex;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepBuilderAPI_MakeFace: declare class BRepBuilderAPI_MakeFace extends BRepBuilderAPI_MakeShape
 
-constructor
+  constructor
 
-Init(F: TopoDS_Face): void;
-Init(S: Geom_Surface, Bound: boolean, TolDegen: number): void;
-Init(S: Geom_Surface, UMin: number, UMax: number, VMin: number, VMax: number, TolDegen: number): void;
-Init(F: TopoDS_Face): void;
-Init(S: Geom_Surface, Bound: boolean, TolDegen: number): void;
-Init(S: Geom_Surface, UMin: number, UMax: number, VMin: number, VMax: number, TolDegen: number): void;
-Init(F: TopoDS_Face): void;
-Init(S: Geom_Surface, Bound: boolean, TolDegen: number): void;
-Init(S: Geom_Surface, UMin: number, UMax: number, VMin: number, VMax: number, TolDegen: number): void;
+  Init(F: TopoDS_Face): void;
+  Init(S: Geom_Surface, Bound: boolean, TolDegen: number): void;
+  Init(S: Geom_Surface, UMin: number, UMax: number, VMin: number, VMax: number, TolDegen: number): void;
+  Init(F: TopoDS_Face): void;
+  Init(S: Geom_Surface, Bound: boolean, TolDegen: number): void;
+  Init(S: Geom_Surface, UMin: number, UMax: number, VMin: number, VMax: number, TolDegen: number): void;
+  Init(F: TopoDS_Face): void;
+  Init(S: Geom_Surface, Bound: boolean, TolDegen: number): void;
+  Init(S: Geom_Surface, UMin: number, UMax: number, VMin: number, VMax: number, TolDegen: number): void;
 
-Add(W: TopoDS_Wire): void;
+  Add(W: TopoDS_Wire): void;
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-Error(): BRepBuilderAPI_FaceError;
+  Error(): BRepBuilderAPI_FaceError;
 
-Face(): TopoDS_Face;
+  Face(): TopoDS_Face;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepBuilderAPI_MakePolygon: declare class BRepBuilderAPI_MakePolygon extends BRepBuilderAPI_MakeShape
 
-constructor
+  constructor
 
-Add(P: gp_Pnt): void;
-Add(V: TopoDS_Vertex): void;
-Add(P: gp_Pnt): void;
-Add(V: TopoDS_Vertex): void;
+  Add(P: gp_Pnt): void;
+  Add(V: TopoDS_Vertex): void;
+  Add(P: gp_Pnt): void;
+  Add(V: TopoDS_Vertex): void;
 
-Added(): boolean;
+  Added(): boolean;
 
-Close(): void;
+  Close(): void;
 
-FirstVertex(): TopoDS_Vertex;
+  FirstVertex(): TopoDS_Vertex;
 
-LastVertex(): TopoDS_Vertex;
+  LastVertex(): TopoDS_Vertex;
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-Edge(): TopoDS_Edge;
+  Edge(): TopoDS_Edge;
 
-Wire(): TopoDS_Wire;
+  Wire(): TopoDS_Wire;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepBuilderAPI_MakeShape: declare class BRepBuilderAPI_MakeShape extends BRepBuilderAPI_Command
 
-Build(theRange?: Message_ProgressRange): void;
+  Build(theRange?: Message_ProgressRange): void;
 
-Shape(): TopoDS_Shape;
+  Shape(): TopoDS_Shape;
 
-Generated(S: TopoDS_Shape): NCollection_List_TopoDS_Shape;
+  Generated(S: TopoDS_Shape): NCollection_List_TopoDS_Shape;
 
-Modified(S: TopoDS_Shape): NCollection_List_TopoDS_Shape;
+  Modified(S: TopoDS_Shape): NCollection_List_TopoDS_Shape;
 
-IsDeleted(S: TopoDS_Shape): boolean;
+  IsDeleted(S: TopoDS_Shape): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepBuilderAPI_MakeShapeOnMesh: declare class BRepBuilderAPI_MakeShapeOnMesh extends BRepBuilderAPI_MakeShape
 
-constructor
+  constructor
 
-Build(theRange?: Message_ProgressRange): void;
+  Build(theRange?: Message_ProgressRange): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepBuilderAPI_MakeShell: declare class BRepBuilderAPI_MakeShell extends BRepBuilderAPI_MakeShape
 
-constructor
+  constructor
 
-Init(S: Geom_Surface, UMin: number, UMax: number, VMin: number, VMax: number, Segment?: boolean): void;
+  Init(S: Geom_Surface, UMin: number, UMax: number, VMin: number, VMax: number, Segment?: boolean): void;
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-Error(): BRepBuilderAPI_ShellError;
+  Error(): BRepBuilderAPI_ShellError;
 
-Shell(): TopoDS_Shell;
+  Shell(): TopoDS_Shell;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepBuilderAPI_MakeSolid: declare class BRepBuilderAPI_MakeSolid extends BRepBuilderAPI_MakeShape
 
-constructor
+  constructor
 
-Add(S: TopoDS_Shell): void;
+  Add(S: TopoDS_Shell): void;
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-Solid(): TopoDS_Solid;
+  Solid(): TopoDS_Solid;
 
-IsDeleted(S: TopoDS_Shape): boolean;
+  IsDeleted(S: TopoDS_Shape): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepBuilderAPI_MakeVertex: declare class BRepBuilderAPI_MakeVertex extends BRepBuilderAPI_MakeShape
 
-constructor
+  constructor
 
-Vertex(): TopoDS_Vertex;
+  Vertex(): TopoDS_Vertex;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepBuilderAPI_MakeWire: declare class BRepBuilderAPI_MakeWire extends BRepBuilderAPI_MakeShape
 
-constructor
+  constructor
 
-Add(E: TopoDS_Edge): void;
-Add(W: TopoDS_Wire): void;
-Add(L: NCollection_List_TopoDS_Shape): void;
-Add(E: TopoDS_Edge): void;
-Add(W: TopoDS_Wire): void;
-Add(L: NCollection_List_TopoDS_Shape): void;
-Add(E: TopoDS_Edge): void;
-Add(W: TopoDS_Wire): void;
-Add(L: NCollection_List_TopoDS_Shape): void;
+  Add(E: TopoDS_Edge): void;
+  Add(W: TopoDS_Wire): void;
+  Add(L: NCollection_List_TopoDS_Shape): void;
+  Add(E: TopoDS_Edge): void;
+  Add(W: TopoDS_Wire): void;
+  Add(L: NCollection_List_TopoDS_Shape): void;
+  Add(E: TopoDS_Edge): void;
+  Add(W: TopoDS_Wire): void;
+  Add(L: NCollection_List_TopoDS_Shape): void;
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-Error(): BRepBuilderAPI_WireError;
+  Error(): BRepBuilderAPI_WireError;
 
-Wire(): TopoDS_Wire;
+  Wire(): TopoDS_Wire;
 
-Edge(): TopoDS_Edge;
+  Edge(): TopoDS_Edge;
 
-Vertex(): TopoDS_Vertex;
+  Vertex(): TopoDS_Vertex;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepBuilderAPI_ModifyShape: declare class BRepBuilderAPI_ModifyShape extends BRepBuilderAPI_MakeShape
 
-Modified(S: TopoDS_Shape): NCollection_List_TopoDS_Shape;
+  Modified(S: TopoDS_Shape): NCollection_List_TopoDS_Shape;
 
-ModifiedShape(S: TopoDS_Shape): TopoDS_Shape;
+  ModifiedShape(S: TopoDS_Shape): TopoDS_Shape;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepBuilderAPI_NurbsConvert: declare class BRepBuilderAPI_NurbsConvert extends BRepBuilderAPI_ModifyShape
 
-constructor
+  constructor
 
-Perform(S: TopoDS_Shape, Copy?: boolean): void;
+  Perform(S: TopoDS_Shape, Copy?: boolean): void;
 
-Modified(S: TopoDS_Shape): NCollection_List_TopoDS_Shape;
+  Modified(S: TopoDS_Shape): NCollection_List_TopoDS_Shape;
 
-ModifiedShape(S: TopoDS_Shape): TopoDS_Shape;
+  ModifiedShape(S: TopoDS_Shape): TopoDS_Shape;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepBuilderAPI_PipeError: typeof BRepBuilderAPI_PipeError[keyof typeof BRepBuilderAPI_PipeError]
 
 BRepBuilderAPI_Sewing: declare class BRepBuilderAPI_Sewing extends Standard_Transient
 
-constructor
+  constructor
 
-Init(tolerance?: number, option1?: boolean, option2?: boolean, option3?: boolean, option4?: boolean): void;
+  Init(tolerance?: number, option1?: boolean, option2?: boolean, option3?: boolean, option4?: boolean): void;
 
-Load(shape: TopoDS_Shape): void;
+  Load(shape: TopoDS_Shape): void;
 
-Add(shape: TopoDS_Shape): void;
+  Add(shape: TopoDS_Shape): void;
 
-Perform(theProgress?: Message_ProgressRange): void;
+  Perform(theProgress?: Message_ProgressRange): void;
 
-SewedShape(): TopoDS_Shape;
+  SewedShape(): TopoDS_Shape;
 
-SetContext(theContext: BRepTools_ReShape): void;
+  SetContext(theContext: BRepTools_ReShape): void;
 
-GetContext(): BRepTools_ReShape;
+  GetContext(): BRepTools_ReShape;
 
-NbFreeEdges(): number;
+  NbFreeEdges(): number;
 
-FreeEdge(index: number): TopoDS_Edge;
+  FreeEdge(index: number): TopoDS_Edge;
 
-NbMultipleEdges(): number;
+  NbMultipleEdges(): number;
 
-MultipleEdge(index: number): TopoDS_Edge;
+  MultipleEdge(index: number): TopoDS_Edge;
 
-NbContigousEdges(): number;
+  NbContigousEdges(): number;
 
-ContigousEdge(index: number): TopoDS_Edge;
+  ContigousEdge(index: number): TopoDS_Edge;
 
-ContigousEdgeCouple(index: number): NCollection_List_TopoDS_Shape;
+  ContigousEdgeCouple(index: number): NCollection_List_TopoDS_Shape;
 
-IsSectionBound(section: TopoDS_Edge): boolean;
+  IsSectionBound(section: TopoDS_Edge): boolean;
 
-SectionToBoundary(section: TopoDS_Edge): TopoDS_Edge;
+  SectionToBoundary(section: TopoDS_Edge): TopoDS_Edge;
 
-NbDegeneratedShapes(): number;
+  NbDegeneratedShapes(): number;
 
-DegeneratedShape(index: number): TopoDS_Shape;
+  DegeneratedShape(index: number): TopoDS_Shape;
 
-IsDegenerated(shape: TopoDS_Shape): boolean;
+  IsDegenerated(shape: TopoDS_Shape): boolean;
 
-IsModified(shape: TopoDS_Shape): boolean;
+  IsModified(shape: TopoDS_Shape): boolean;
 
-Modified(shape: TopoDS_Shape): TopoDS_Shape;
+  Modified(shape: TopoDS_Shape): TopoDS_Shape;
 
-IsModifiedSubShape(shape: TopoDS_Shape): boolean;
+  IsModifiedSubShape(shape: TopoDS_Shape): boolean;
 
-ModifiedSubShape(shape: TopoDS_Shape): TopoDS_Shape;
+  ModifiedSubShape(shape: TopoDS_Shape): TopoDS_Shape;
 
-Dump(): void;
+  Dump(): void;
 
-NbDeletedFaces(): number;
+  NbDeletedFaces(): number;
 
-DeletedFace(index: number): TopoDS_Face;
+  DeletedFace(index: number): TopoDS_Face;
 
-WhichFace(theEdg: TopoDS_Edge, index?: number): TopoDS_Face;
+  WhichFace(theEdg: TopoDS_Edge, index?: number): TopoDS_Face;
 
-SameParameterMode(): boolean;
+  SameParameterMode(): boolean;
 
-SetSameParameterMode(SameParameterMode: boolean): void;
+  SetSameParameterMode(SameParameterMode: boolean): void;
 
-Tolerance(): number;
+  Tolerance(): number;
 
-SetTolerance(theToler: number): void;
+  SetTolerance(theToler: number): void;
 
-MinTolerance(): number;
+  MinTolerance(): number;
 
-SetMinTolerance(theMinToler: number): void;
+  SetMinTolerance(theMinToler: number): void;
 
-MaxTolerance(): number;
+  MaxTolerance(): number;
 
-SetMaxTolerance(theMaxToler: number): void;
+  SetMaxTolerance(theMaxToler: number): void;
 
-FaceMode(): boolean;
+  FaceMode(): boolean;
 
-SetFaceMode(theFaceMode: boolean): void;
+  SetFaceMode(theFaceMode: boolean): void;
 
-FloatingEdgesMode(): boolean;
+  FloatingEdgesMode(): boolean;
 
-SetFloatingEdgesMode(theFloatingEdgesMode: boolean): void;
+  SetFloatingEdgesMode(theFloatingEdgesMode: boolean): void;
 
-LocalTolerancesMode(): boolean;
+  LocalTolerancesMode(): boolean;
 
-SetLocalTolerancesMode(theLocalTolerancesMode: boolean): void;
+  SetLocalTolerancesMode(theLocalTolerancesMode: boolean): void;
 
-SetNonManifoldMode(theNonManifoldMode: boolean): void;
+  SetNonManifoldMode(theNonManifoldMode: boolean): void;
 
-NonManifoldMode(): boolean;
+  NonManifoldMode(): boolean;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepBuilderAPI_ShapeModification: typeof BRepBuilderAPI_ShapeModification[keyof typeof BRepBuilderAPI_ShapeModification]
 
@@ -638,40 +638,40 @@ BRepBuilderAPI_ShellError: typeof BRepBuilderAPI_ShellError[keyof typeof BRepBui
 
 BRepBuilderAPI_Transform: declare class BRepBuilderAPI_Transform extends BRepBuilderAPI_ModifyShape
 
-constructor
+  constructor
 
-Perform(theShape: TopoDS_Shape, theCopyGeom?: boolean, theCopyMesh?: boolean): void;
+  Perform(theShape: TopoDS_Shape, theCopyGeom?: boolean, theCopyMesh?: boolean): void;
 
-ModifiedShape(S: TopoDS_Shape): TopoDS_Shape;
+  ModifiedShape(S: TopoDS_Shape): TopoDS_Shape;
 
-Modified(S: TopoDS_Shape): NCollection_List_TopoDS_Shape;
+  Modified(S: TopoDS_Shape): NCollection_List_TopoDS_Shape;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepBuilderAPI_TransitionMode: typeof BRepBuilderAPI_TransitionMode[keyof typeof BRepBuilderAPI_TransitionMode]
 
 BRepBuilderAPI_VertexInspector: declare class BRepBuilderAPI_VertexInspector
 
-constructor
+  constructor
 
-static Coord(i: number, thePnt: gp_XYZ): number;
+  static Coord(i: number, thePnt: gp_XYZ): number;
 
-static Shift(thePnt: gp_XYZ, theTol: number): gp_XYZ;
+  static Shift(thePnt: gp_XYZ, theTol: number): gp_XYZ;
 
-Add(thePnt: gp_XYZ): void;
+  Add(thePnt: gp_XYZ): void;
 
-ClearResList(): void;
+  ClearResList(): void;
 
-SetCurrent(theCurPnt: gp_XYZ): void;
+  SetCurrent(theCurPnt: gp_XYZ): void;
 
-ResInd(): NCollection_List_int;
+  ResInd(): NCollection_List_int;
 
-Inspect(theTarget: number): NCollection_CellFilter_Action;
+  Inspect(theTarget: number): NCollection_CellFilter_Action;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepBuilderAPI_WireError: typeof BRepBuilderAPI_WireError[keyof typeof BRepBuilderAPI_WireError]

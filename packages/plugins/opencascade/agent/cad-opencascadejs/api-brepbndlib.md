@@ -4,16 +4,16 @@
 
 BRepBndLib: declare class BRepBndLib
 
-constructor
+  constructor
 
-static Add(S: TopoDS_Shape, B: Bnd_Box, useTriangulation: boolean): void;
+  static Add(S: TopoDS_Shape, B: Bnd_Box, useTriangulation: boolean): void;
 
-static AddClose(S: TopoDS_Shape, B: Bnd_Box): void;
+  static AddClose(S: TopoDS_Shape, B: Bnd_Box): void;
 
-static AddOptimal(S: TopoDS_Shape, B: Bnd_Box, useTriangulation: boolean, useShapeTolerance: boolean): void;
+  static AddOptimal(S: TopoDS_Shape, B: Bnd_Box, useTriangulation: boolean, useShapeTolerance: boolean): void;
 
-static AddOBB(theS: TopoDS_Shape, theOBB: Bnd_OBB, theIsTriangulationUsed: boolean, theIsOptimal: boolean, theIsShapeToleranceUsed: boolean): void;
+  static AddOBB(theS: TopoDS_Shape, theOBB: Bnd_OBB, theIsTriangulationUsed: boolean, theIsOptimal: boolean, theIsShapeToleranceUsed: boolean): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;

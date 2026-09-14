@@ -4,228 +4,228 @@
 
 Convert_CircleToBSplineCurve: declare class Convert_CircleToBSplineCurve extends Convert_ConicToBSplineCurve
 
-constructor
+  constructor
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Convert_CompBezierCurves2dToBSplineCurve2d: declare class Convert_CompBezierCurves2dToBSplineCurve2d
 
-constructor
+  constructor
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Convert_CompBezierCurvesToBSplineCurve: declare class Convert_CompBezierCurvesToBSplineCurve
 
-constructor
+  constructor
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Convert_CompPolynomialToPoles: declare class Convert_CompPolynomialToPoles
 
-constructor
+  constructor
 
-NbPoles(): number;
+  NbPoles(): number;
 
-Poles(): NCollection_Array2_double;
+  Poles(): NCollection_Array2_double;
 
-Degree(): number;
+  Degree(): number;
 
-NbKnots(): number;
+  NbKnots(): number;
 
-Knots(): NCollection_Array1_double;
+  Knots(): NCollection_Array1_double;
 
-Multiplicities(): NCollection_Array1_int;
+  Multiplicities(): NCollection_Array1_int;
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Convert_ConeToBSplineSurface: declare class Convert_ConeToBSplineSurface extends Convert_ElementarySurfaceToBSplineSurface
 
-constructor
+  constructor
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Convert_ConicToBSplineCurve: declare class Convert_ConicToBSplineCurve
 
-Degree(): number;
+  Degree(): number;
 
-NbPoles(): number;
+  NbPoles(): number;
 
-NbKnots(): number;
+  NbKnots(): number;
 
-IsPeriodic(): boolean;
+  IsPeriodic(): boolean;
 
-// DEPRECATED
-Pole(theIndex: number): gp_Pnt2d;
+  // DEPRECATED
+  Pole(theIndex: number): gp_Pnt2d;
 
-// DEPRECATED
-Weight(theIndex: number): number;
+  // DEPRECATED
+  Weight(theIndex: number): number;
 
-// DEPRECATED
-Knot(theIndex: number): number;
+  // DEPRECATED
+  Knot(theIndex: number): number;
 
-// DEPRECATED
-Multiplicity(theIndex: number): number;
+  // DEPRECATED
+  Multiplicity(theIndex: number): number;
 
-Poles(): NCollection_Array1_gp_Pnt2d;
+  Poles(): NCollection_Array1_gp_Pnt2d;
 
-Weights(): NCollection_Array1_double;
+  Weights(): NCollection_Array1_double;
 
-Knots(): NCollection_Array1_double;
+  Knots(): NCollection_Array1_double;
 
-Multiplicities(): NCollection_Array1_int;
+  Multiplicities(): NCollection_Array1_int;
 
-// DEPRECATED
-BuildCosAndSin(theParametrisation: Convert_ParameterisationType, theDegree?: number): { theCosNumerator: NCollection_HArray1_double; theSinNumerator: NCollection_HArray1_double; theDenominator: NCollection_HArray1_double; theDegree: number; theKnots: NCollection_HArray1_double; theMults: NCollection_HArray1_int; [Symbol.dispose](): void };
-BuildCosAndSin(theParametrisation: Convert_ParameterisationType, theUFirst: number, theULast: number, theDegree?: number): { theCosNumerator: NCollection_HArray1_double; theSinNumerator: NCollection_HArray1_double; theDenominator: NCollection_HArray1_double; theDegree: number; theKnots: NCollection_HArray1_double; theMults: NCollection_HArray1_int; [Symbol.dispose](): void };
-BuildCosAndSin(theParametrisation: Convert_ParameterisationType, theDegree?: number): { theCosNumerator: NCollection_HArray1_double; theSinNumerator: NCollection_HArray1_double; theDenominator: NCollection_HArray1_double; theDegree: number; theKnots: NCollection_HArray1_double; theMults: NCollection_HArray1_int; [Symbol.dispose](): void };
-BuildCosAndSin(theParametrisation: Convert_ParameterisationType, theUFirst: number, theULast: number, theDegree?: number): { theCosNumerator: NCollection_HArray1_double; theSinNumerator: NCollection_HArray1_double; theDenominator: NCollection_HArray1_double; theDegree: number; theKnots: NCollection_HArray1_double; theMults: NCollection_HArray1_int; [Symbol.dispose](): void };
+  // DEPRECATED
+  BuildCosAndSin(theParametrisation: Convert_ParameterisationType, theDegree?: number): { theCosNumerator: NCollection_HArray1_double; theSinNumerator: NCollection_HArray1_double; theDenominator: NCollection_HArray1_double; theDegree: number; theKnots: NCollection_HArray1_double; theMults: NCollection_HArray1_int; [Symbol.dispose](): void };
+  BuildCosAndSin(theParametrisation: Convert_ParameterisationType, theUFirst: number, theULast: number, theDegree?: number): { theCosNumerator: NCollection_HArray1_double; theSinNumerator: NCollection_HArray1_double; theDenominator: NCollection_HArray1_double; theDegree: number; theKnots: NCollection_HArray1_double; theMults: NCollection_HArray1_int; [Symbol.dispose](): void };
+  BuildCosAndSin(theParametrisation: Convert_ParameterisationType, theDegree?: number): { theCosNumerator: NCollection_HArray1_double; theSinNumerator: NCollection_HArray1_double; theDenominator: NCollection_HArray1_double; theDegree: number; theKnots: NCollection_HArray1_double; theMults: NCollection_HArray1_int; [Symbol.dispose](): void };
+  BuildCosAndSin(theParametrisation: Convert_ParameterisationType, theUFirst: number, theULast: number, theDegree?: number): { theCosNumerator: NCollection_HArray1_double; theSinNumerator: NCollection_HArray1_double; theDenominator: NCollection_HArray1_double; theDegree: number; theKnots: NCollection_HArray1_double; theMults: NCollection_HArray1_int; [Symbol.dispose](): void };
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Convert_CylinderToBSplineSurface: declare class Convert_CylinderToBSplineSurface extends Convert_ElementarySurfaceToBSplineSurface
 
-constructor
+  constructor
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Convert_ElementarySurfaceToBSplineSurface: declare class Convert_ElementarySurfaceToBSplineSurface
 
-UDegree(): number;
+  UDegree(): number;
 
-VDegree(): number;
+  VDegree(): number;
 
-NbUPoles(): number;
+  NbUPoles(): number;
 
-NbVPoles(): number;
+  NbVPoles(): number;
 
-NbUKnots(): number;
+  NbUKnots(): number;
 
-NbVKnots(): number;
+  NbVKnots(): number;
 
-IsUPeriodic(): boolean;
+  IsUPeriodic(): boolean;
 
-IsVPeriodic(): boolean;
+  IsVPeriodic(): boolean;
 
-// DEPRECATED
-Pole(UIndex: number, VIndex: number): gp_Pnt;
+  // DEPRECATED
+  Pole(UIndex: number, VIndex: number): gp_Pnt;
 
-// DEPRECATED
-Weight(UIndex: number, VIndex: number): number;
+  // DEPRECATED
+  Weight(UIndex: number, VIndex: number): number;
 
-// DEPRECATED
-UKnot(UIndex: number): number;
+  // DEPRECATED
+  UKnot(UIndex: number): number;
 
-// DEPRECATED
-VKnot(VIndex: number): number;
+  // DEPRECATED
+  VKnot(VIndex: number): number;
 
-// DEPRECATED
-UMultiplicity(UIndex: number): number;
+  // DEPRECATED
+  UMultiplicity(UIndex: number): number;
 
-// DEPRECATED
-VMultiplicity(VIndex: number): number;
+  // DEPRECATED
+  VMultiplicity(VIndex: number): number;
 
-Poles(): NCollection_Array2_gp_Pnt;
+  Poles(): NCollection_Array2_gp_Pnt;
 
-Weights(): NCollection_Array2_double;
+  Weights(): NCollection_Array2_double;
 
-UKnots(): NCollection_Array1_double;
+  UKnots(): NCollection_Array1_double;
 
-VKnots(): NCollection_Array1_double;
+  VKnots(): NCollection_Array1_double;
 
-UMultiplicities(): NCollection_Array1_int;
+  UMultiplicities(): NCollection_Array1_int;
 
-VMultiplicities(): NCollection_Array1_int;
+  VMultiplicities(): NCollection_Array1_int;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Convert_EllipseToBSplineCurve: declare class Convert_EllipseToBSplineCurve extends Convert_ConicToBSplineCurve
 
-constructor
+  constructor
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Convert_GridPolynomialToPoles: declare class Convert_GridPolynomialToPoles
 
-constructor
+  constructor
 
-NbUPoles(): number;
+  NbUPoles(): number;
 
-NbVPoles(): number;
+  NbVPoles(): number;
 
-Poles(): NCollection_Array2_gp_Pnt;
+  Poles(): NCollection_Array2_gp_Pnt;
 
-UDegree(): number;
+  UDegree(): number;
 
-VDegree(): number;
+  VDegree(): number;
 
-NbUKnots(): number;
+  NbUKnots(): number;
 
-NbVKnots(): number;
+  NbVKnots(): number;
 
-UKnots(): NCollection_Array1_double;
+  UKnots(): NCollection_Array1_double;
 
-VKnots(): NCollection_Array1_double;
+  VKnots(): NCollection_Array1_double;
 
-UMultiplicities(): NCollection_Array1_int;
+  UMultiplicities(): NCollection_Array1_int;
 
-VMultiplicities(): NCollection_Array1_int;
+  VMultiplicities(): NCollection_Array1_int;
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Convert_HyperbolaToBSplineCurve: declare class Convert_HyperbolaToBSplineCurve extends Convert_ConicToBSplineCurve
 
-constructor
+  constructor
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Convert_ParabolaToBSplineCurve: declare class Convert_ParabolaToBSplineCurve extends Convert_ConicToBSplineCurve
 
-constructor
+  constructor
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Convert_ParameterisationType: typeof Convert_ParameterisationType[keyof typeof Convert_ParameterisationType]
 
 Convert_SphereToBSplineSurface: declare class Convert_SphereToBSplineSurface extends Convert_ElementarySurfaceToBSplineSurface
 
-constructor
+  constructor
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Convert_TorusToBSplineSurface: declare class Convert_TorusToBSplineSurface extends Convert_ElementarySurfaceToBSplineSurface
 
-constructor
+  constructor
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;

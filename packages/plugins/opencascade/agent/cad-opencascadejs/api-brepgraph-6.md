@@ -4,319 +4,319 @@
 
 BRepGraph_CoEdgePolygon2DRepId: declare class BRepGraph_CoEdgePolygon2DRepId
 
-constructor
+  constructor
 
-Index: number
+  Index: number
 
-static Start(): unknown;
+  static Start(): unknown;
 
-static Invalid(): unknown;
+  static Invalid(): unknown;
 
-IsValid(): boolean;
-IsValid(theMaxCount: number): boolean;
-IsValid(): boolean;
-IsValid(theMaxCount: number): boolean;
+  IsValid(): boolean;
+  IsValid(theMaxCount: number): boolean;
+  IsValid(): boolean;
+  IsValid(theMaxCount: number): boolean;
 
-IsRemoved(theGraph: BRepGraph): boolean;
+  IsRemoved(theGraph: BRepGraph): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepGraph_CoEdgePolygonOnTriRepId: declare class BRepGraph_CoEdgePolygonOnTriRepId
 
-constructor
+  constructor
 
-Index: number
+  Index: number
 
-static Start(): unknown;
+  static Start(): unknown;
 
-static Invalid(): unknown;
+  static Invalid(): unknown;
 
-IsValid(): boolean;
-IsValid(theMaxCount: number): boolean;
-IsValid(): boolean;
-IsValid(theMaxCount: number): boolean;
+  IsValid(): boolean;
+  IsValid(theMaxCount: number): boolean;
+  IsValid(): boolean;
+  IsValid(theMaxCount: number): boolean;
 
-IsRemoved(theGraph: BRepGraph): boolean;
+  IsRemoved(theGraph: BRepGraph): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepGraph_EdgeCurve3DRepId: declare class BRepGraph_EdgeCurve3DRepId
 
-constructor
+  constructor
 
-Index: number
+  Index: number
 
-static Start(): unknown;
+  static Start(): unknown;
 
-static Invalid(): unknown;
+  static Invalid(): unknown;
 
-IsValid(): boolean;
-IsValid(theMaxCount: number): boolean;
-IsValid(): boolean;
-IsValid(theMaxCount: number): boolean;
+  IsValid(): boolean;
+  IsValid(theMaxCount: number): boolean;
+  IsValid(): boolean;
+  IsValid(theMaxCount: number): boolean;
 
-IsRemoved(theGraph: BRepGraph): boolean;
+  IsRemoved(theGraph: BRepGraph): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepGraph_EdgePolygon3DRepId: declare class BRepGraph_EdgePolygon3DRepId
 
-constructor
+  constructor
 
-Index: number
+  Index: number
 
-static Start(): unknown;
+  static Start(): unknown;
 
-static Invalid(): unknown;
+  static Invalid(): unknown;
 
-IsValid(): boolean;
-IsValid(theMaxCount: number): boolean;
-IsValid(): boolean;
-IsValid(theMaxCount: number): boolean;
+  IsValid(): boolean;
+  IsValid(theMaxCount: number): boolean;
+  IsValid(): boolean;
+  IsValid(theMaxCount: number): boolean;
 
-IsRemoved(theGraph: BRepGraph): boolean;
+  IsRemoved(theGraph: BRepGraph): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepGraph_FaceSurfaceRepId: declare class BRepGraph_FaceSurfaceRepId
 
-constructor
+  constructor
 
-Index: number
+  Index: number
 
-static Start(): unknown;
+  static Start(): unknown;
 
-static Invalid(): unknown;
+  static Invalid(): unknown;
 
-IsValid(): boolean;
-IsValid(theMaxCount: number): boolean;
-IsValid(): boolean;
-IsValid(theMaxCount: number): boolean;
+  IsValid(): boolean;
+  IsValid(theMaxCount: number): boolean;
+  IsValid(): boolean;
+  IsValid(theMaxCount: number): boolean;
 
-IsRemoved(theGraph: BRepGraph): boolean;
+  IsRemoved(theGraph: BRepGraph): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepGraph_FaceTriangulationRepId: declare class BRepGraph_FaceTriangulationRepId
 
-constructor
+  constructor
 
-Index: number
+  Index: number
 
-static Start(): unknown;
+  static Start(): unknown;
 
-static Invalid(): unknown;
+  static Invalid(): unknown;
 
-IsValid(): boolean;
-IsValid(theMaxCount: number): boolean;
-IsValid(): boolean;
-IsValid(theMaxCount: number): boolean;
+  IsValid(): boolean;
+  IsValid(theMaxCount: number): boolean;
+  IsValid(): boolean;
+  IsValid(theMaxCount: number): boolean;
 
-IsRemoved(theGraph: BRepGraph): boolean;
+  IsRemoved(theGraph: BRepGraph): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepGraph_RepId: declare class BRepGraph_RepId
 
-constructor
+  constructor
 
-RepKind: BRepGraph_RepId_Kind
+  RepKind: BRepGraph_RepId_Kind
 
-Index: number
+  Index: number
 
-static IsValidKind(theKind: BRepGraph_RepId_Kind): boolean;
+  static IsValidKind(theKind: BRepGraph_RepId_Kind): boolean;
 
-IsValid(): boolean;
-IsValid(theMaxCount: number): boolean;
-IsValid(): boolean;
-IsValid(theMaxCount: number): boolean;
+  IsValid(): boolean;
+  IsValid(theMaxCount: number): boolean;
+  IsValid(): boolean;
+  IsValid(theMaxCount: number): boolean;
 
-IsRemoved(theGraph: BRepGraph): boolean;
+  IsRemoved(theGraph: BRepGraph): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepGraph_RepId_Kind: typeof BRepGraph_RepId_Kind[keyof typeof BRepGraph_RepId_Kind]
 
 BRepGraph_ChildExplorer_Config: interface BRepGraph_ChildExplorer_Config
 
-Mode: BRepGraph_ChildExplorer_TraversalMode
+  Mode: BRepGraph_ChildExplorer_TraversalMode
 
-TargetKind: BRepGraph_NodeId_Kind | null | undefined
+  TargetKind: BRepGraph_NodeId_Kind | null | undefined
 
-AvoidKind: BRepGraph_NodeId_Kind | null | undefined
+  AvoidKind: BRepGraph_NodeId_Kind | null | undefined
 
-EmitAvoidKind: boolean
+  EmitAvoidKind: boolean
 
-AccumulateLocation: boolean
+  AccumulateLocation: boolean
 
-AccumulateOrientation: boolean
+  AccumulateOrientation: boolean
 
-StartLoc: TopLoc_Location
+  StartLoc: TopLoc_Location
 
-StartOri: TopAbs_Orientation
+  StartOri: TopAbs_Orientation
 
 BRepGraph_Compact_Result: interface BRepGraph_Compact_Result
 
-NbRemovedVertices: number
+  NbRemovedVertices: number
 
-NbRemovedEdges: number
+  NbRemovedEdges: number
 
-NbRemovedWires: number
+  NbRemovedWires: number
 
-NbRemovedFaces: number
+  NbRemovedFaces: number
 
-NbRemovedShells: number
+  NbRemovedShells: number
 
-NbRemovedSolids: number
+  NbRemovedSolids: number
 
-NbRemovedCompounds: number
+  NbRemovedCompounds: number
 
-NbRemovedCompSolids: number
+  NbRemovedCompSolids: number
 
-NbRemovedSurfaces: number
+  NbRemovedSurfaces: number
 
-NbRemovedCurves: number
+  NbRemovedCurves: number
 
-NbNodesBefore: number
+  NbNodesBefore: number
 
-NbNodesAfter: number
+  NbNodesAfter: number
 
-NbUnmappedActiveDefs: number
+  NbUnmappedActiveDefs: number
 
 BRepGraph_Deduplicate_Options: interface BRepGraph_Deduplicate_Options
 
-AnalyzeOnly: boolean
+  AnalyzeOnly: boolean
 
-HistoryMode: boolean
+  HistoryMode: boolean
 
-MergeEntitiesWhenSafe: boolean
+  MergeEntitiesWhenSafe: boolean
 
-CompTolerance: number
+  CompTolerance: number
 
-HashTolerance: number
+  HashTolerance: number
 
 BRepGraph_Deduplicate_Result: interface BRepGraph_Deduplicate_Result
 
-NbCanonicalSurfaces: number
+  NbCanonicalSurfaces: number
 
-NbCanonicalCurves: number
+  NbCanonicalCurves: number
 
-NbSurfaceRewrites: number
+  NbSurfaceRewrites: number
 
-NbCurveRewrites: number
+  NbCurveRewrites: number
 
-NbNullifiedSurfaces: number
+  NbNullifiedSurfaces: number
 
-NbNullifiedCurves: number
+  NbNullifiedCurves: number
 
-NbHistoryRecords: number
+  NbHistoryRecords: number
 
-IsEntityMergeApplied: boolean
+  IsEntityMergeApplied: boolean
 
-NbMergedVertices: number
+  NbMergedVertices: number
 
-NbMergedEdges: number
+  NbMergedEdges: number
 
-NbMergedWires: number
+  NbMergedWires: number
 
-NbMergedFaces: number
+  NbMergedFaces: number
 
-NbReorderedWires: number
+  NbReorderedWires: number
 
-NbToleranceOrderedWires: number
+  NbToleranceOrderedWires: number
 
-NbPartialOrderedWires: number
+  NbPartialOrderedWires: number
 
-AffectedFaces: BRepGraph_FaceId[]
+  AffectedFaces: BRepGraph_FaceId[]
 
-AffectedEdges: BRepGraph_EdgeId[]
+  AffectedEdges: BRepGraph_EdgeId[]
 
 BRepGraph_EditorView_BoundaryIssue: interface BRepGraph_EditorView_BoundaryIssue
 
-NodeId: BRepGraph_NodeId
+  NodeId: BRepGraph_NodeId
 
-Description: TCollection_AsciiString
+  Description: TCollection_AsciiString
 
 BRepGraph_LayerHistory_Event: interface BRepGraph_LayerHistory_Event
 
-OperationName: TCollection_AsciiString
+  OperationName: TCollection_AsciiString
 
-SequenceNumber: number
+  SequenceNumber: number
 
-RecordKind: BRepGraph_LayerHistory_Kind
+  RecordKind: BRepGraph_LayerHistory_Kind
 
-Mapping: any
+  Mapping: any
 
-UidMapping: any
+  UidMapping: any
 
-ItemUidMapping: any
+  ItemUidMapping: any
 
-ExtraInfo: TCollection_AsciiString
+  ExtraInfo: TCollection_AsciiString
 
 BRepGraph_LayerParametric_AddResult: interface BRepGraph_LayerParametric_AddResult
 
-Instance: number
+  Instance: number
 
-Root: BRepGraph_NodeId
+  Root: BRepGraph_NodeId
 
 BRepGraph_LayerTopoSupplement_Entry: interface BRepGraph_LayerTopoSupplement_Entry
 
-BaseOwner: BRepGraph_NodeId
+  BaseOwner: BRepGraph_NodeId
 
-LocalUid: number
+  LocalUid: number
 
-Kind: BRepGraph_LayerTopoSupplement_AttachmentKind
+  Kind: BRepGraph_LayerTopoSupplement_AttachmentKind
 
-Shape: TopoDS_Shape
+  Shape: TopoDS_Shape
 
 BRepGraph_ParallelPolicy_Workload: interface BRepGraph_ParallelPolicy_Workload
 
-PrimaryItems: number
+  PrimaryItems: number
 
-AuxiliaryItems: number
+  AuxiliaryItems: number
 
-InteractionCount: number
+  InteractionCount: number
 
 BRepGraph_ParentExplorer_Config: interface BRepGraph_ParentExplorer_Config
 
-Mode: BRepGraph_ParentExplorer_TraversalMode
+  Mode: BRepGraph_ParentExplorer_TraversalMode
 
-TargetKind: BRepGraph_NodeId_Kind | null | undefined
+  TargetKind: BRepGraph_NodeId_Kind | null | undefined
 
-AvoidKind: BRepGraph_NodeId_Kind | null | undefined
+  AvoidKind: BRepGraph_NodeId_Kind | null | undefined
 
-EmitAvoidKind: boolean
+  EmitAvoidKind: boolean
 
 BRepGraph_ShapesView_Options: interface BRepGraph_ShapesView_Options
 
-Populate: BRepGraphInc_Populate_Options
+  Populate: BRepGraphInc_Populate_Options
 
-CreateAutoProduct: boolean
+  CreateAutoProduct: boolean
 
-Flatten: boolean
+  Flatten: boolean
 
-Parallel: boolean
+  Parallel: boolean
 
-TrackAddedNodes: boolean
+  TrackAddedNodes: boolean
 
 BRepGraph_Validate_Issue: interface BRepGraph_Validate_Issue
 
-Sev: BRepGraph_Validate_Severity
+  Sev: BRepGraph_Validate_Severity
 
-NodeId: BRepGraph_NodeId
+  NodeId: BRepGraph_NodeId
 
-Description: TCollection_AsciiString
+  Description: TCollection_AsciiString

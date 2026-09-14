@@ -6,95 +6,95 @@ MathOpt_ConjugateGradientFormula: typeof MathOpt_ConjugateGradientFormula[keyof 
 
 MathOpt_FRPRConfig: declare class MathOpt_FRPRConfig extends MathUtils_Config
 
-constructor
+  constructor
 
-Formula: MathOpt_ConjugateGradientFormula
+  Formula: MathOpt_ConjugateGradientFormula
 
-RestartInterval: number
+  RestartInterval: number
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 MathOpt_GlobalConfig: declare class MathOpt_GlobalConfig extends MathUtils_NDimConfig
 
-constructor
+  constructor
 
-Strategy: MathOpt_GlobalStrategy
+  Strategy: MathOpt_GlobalStrategy
 
-NbPopulation: number
+  NbPopulation: number
 
-NbStarts: number
+  NbStarts: number
 
-MutationScale: number
+  MutationScale: number
 
-CrossoverProb: number
+  CrossoverProb: number
 
-Seed: number
+  Seed: number
 
-PolishBudgetPerDim: number
+  PolishBudgetPerDim: number
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 MathOpt_GlobalStrategy: typeof MathOpt_GlobalStrategy[keyof typeof MathOpt_GlobalStrategy]
 
 MathOpt_NewtonConfig: declare class MathOpt_NewtonConfig extends MathUtils_Config
 
-constructor
+  constructor
 
-Regularization: number
+  Regularization: number
 
-UseLineSearch: boolean
+  UseLineSearch: boolean
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 MathOpt_PSOBoundaryMode: typeof MathOpt_PSOBoundaryMode[keyof typeof MathOpt_PSOBoundaryMode]
 
 MathOpt_PSOConfig: declare class MathOpt_PSOConfig extends MathUtils_NDimConfig
 
-constructor
+  constructor
 
-NbParticles: number
+  NbParticles: number
 
-Omega: number
+  Omega: number
 
-PhiPersonal: number
+  PhiPersonal: number
 
-PhiGlobal: number
+  PhiGlobal: number
 
-VelocityClamp: number
+  VelocityClamp: number
 
-Seed: number
+  Seed: number
 
-InitMode: MathOpt_PSOInitMode
+  InitMode: MathOpt_PSOInitMode
 
-BoundaryMode: MathOpt_PSOBoundaryMode
+  BoundaryMode: MathOpt_PSOBoundaryMode
 
-InertiaSchedule: MathOpt_PSOInertiaSchedule
+  InertiaSchedule: MathOpt_PSOInertiaSchedule
 
-OmegaMin: number
+  OmegaMin: number
 
-MinIterations: number
+  MinIterations: number
 
-TargetValue: number | null | undefined
+  TargetValue: number | null | undefined
 
-NoImproveTol: number
+  NoImproveTol: number
 
-NoImproveIters: number
+  NoImproveIters: number
 
-RestartFraction: number
+  RestartFraction: number
 
-MaxRestarts: number
+  MaxRestarts: number
 
-PolishBudgetPerDim: number
+  PolishBudgetPerDim: number
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 MathOpt_PSOInertiaSchedule: typeof MathOpt_PSOInertiaSchedule[keyof typeof MathOpt_PSOInertiaSchedule]
 
@@ -102,74 +102,74 @@ MathOpt_PSOInitMode: typeof MathOpt_PSOInitMode[keyof typeof MathOpt_PSOInitMode
 
 MathOpt_PSOSeedParticle: declare class MathOpt_PSOSeedParticle
 
-constructor
+  constructor
 
-Position: math_VectorBase_double
+  Position: math_VectorBase_double
 
-Value: number | null | undefined
+  Value: number | null | undefined
 
-Velocity: math_VectorBase_double | null | undefined
+  Velocity: math_VectorBase_double | null | undefined
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 MathOpt_PSOStats: declare class MathOpt_PSOStats
 
-constructor
+  constructor
 
-NbFunctionEvals: number
+  NbFunctionEvals: number
 
-NbIterations: number
+  NbIterations: number
 
-NbBoundaryCorrections: number
+  NbBoundaryCorrections: number
 
-NbStagnationEvents: number
+  NbStagnationEvents: number
 
-NbRestarts: number
+  NbRestarts: number
 
-InitialBest: number
+  InitialBest: number
 
-FinalBest: number
+  FinalBest: number
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 MathOpt_UzawaConfig: declare class MathOpt_UzawaConfig
 
-constructor
+  constructor
 
-EpsLix: number
+  EpsLix: number
 
-EpsLic: number
+  EpsLic: number
 
-MaxIterations: number
+  MaxIterations: number
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 MathOpt_UzawaResult: declare class MathOpt_UzawaResult
 
-constructor
+  constructor
 
-Status: MathUtils_Status
+  Status: MathUtils_Status
 
-Solution: math_VectorBase_double | null | undefined
+  Solution: math_VectorBase_double | null | undefined
 
-Dual: math_VectorBase_double | null | undefined
+  Dual: math_VectorBase_double | null | undefined
 
-Error: math_VectorBase_double | null | undefined
+  Error: math_VectorBase_double | null | undefined
 
-InitialError: math_VectorBase_double | null | undefined
+  InitialError: math_VectorBase_double | null | undefined
 
-InverseCTC: math_Matrix | null | undefined
+  InverseCTC: math_Matrix | null | undefined
 
-NbIterations: number
+  NbIterations: number
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;

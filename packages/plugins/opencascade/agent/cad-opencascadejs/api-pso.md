@@ -4,12 +4,12 @@
 
 PSO_Particle: declare class PSO_Particle
 
-constructor
+  constructor
 
-Distance: number
+  Distance: number
 
-BestDistance: number
+  BestDistance: number
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;

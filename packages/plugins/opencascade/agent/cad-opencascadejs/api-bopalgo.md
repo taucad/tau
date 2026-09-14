@@ -4,1036 +4,1036 @@
 
 BOPAlgo_AlertAcquiredSelfIntersection: declare class BOPAlgo_AlertAcquiredSelfIntersection extends TopoDS_AlertWithShape
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BOPAlgo_AlertBOPNotAllowed: declare class BOPAlgo_AlertBOPNotAllowed extends Message_Alert
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BOPAlgo_AlertBOPNotSet: declare class BOPAlgo_AlertBOPNotSet extends Message_Alert
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BOPAlgo_AlertBadPositioning: declare class BOPAlgo_AlertBadPositioning extends TopoDS_AlertWithShape
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BOPAlgo_AlertBuilderFailed: declare class BOPAlgo_AlertBuilderFailed extends Message_Alert
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BOPAlgo_AlertBuildingPCurveFailed: declare class BOPAlgo_AlertBuildingPCurveFailed extends TopoDS_AlertWithShape
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BOPAlgo_AlertEmptyShape: declare class BOPAlgo_AlertEmptyShape extends TopoDS_AlertWithShape
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BOPAlgo_AlertFaceBuilderUnusedEdges: declare class BOPAlgo_AlertFaceBuilderUnusedEdges extends TopoDS_AlertWithShape
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BOPAlgo_AlertIntersectionFailed: declare class BOPAlgo_AlertIntersectionFailed extends Message_Alert
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BOPAlgo_AlertIntersectionOfPairOfShapesFailed: declare class BOPAlgo_AlertIntersectionOfPairOfShapesFailed extends TopoDS_AlertWithShape
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BOPAlgo_AlertMultiDimensionalArguments: declare class BOPAlgo_AlertMultiDimensionalArguments extends Message_Alert
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BOPAlgo_AlertMultipleArguments: declare class BOPAlgo_AlertMultipleArguments extends Message_Alert
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BOPAlgo_AlertNoFacesToRemove: declare class BOPAlgo_AlertNoFacesToRemove extends Message_Alert
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BOPAlgo_AlertNoFiller: declare class BOPAlgo_AlertNoFiller extends Message_Alert
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BOPAlgo_AlertNoPeriodicityRequired: declare class BOPAlgo_AlertNoPeriodicityRequired extends Message_Alert
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BOPAlgo_AlertNotSplittableEdge: declare class BOPAlgo_AlertNotSplittableEdge extends TopoDS_AlertWithShape
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BOPAlgo_AlertNullInputShapes: declare class BOPAlgo_AlertNullInputShapes extends Message_Alert
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BOPAlgo_AlertPostTreatFF: declare class BOPAlgo_AlertPostTreatFF extends Message_Alert
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BOPAlgo_AlertRemovalOfIBForEdgesFailed: declare class BOPAlgo_AlertRemovalOfIBForEdgesFailed extends TopoDS_AlertWithShape
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BOPAlgo_AlertRemovalOfIBForFacesFailed: declare class BOPAlgo_AlertRemovalOfIBForFacesFailed extends TopoDS_AlertWithShape
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BOPAlgo_AlertRemovalOfIBForMDimShapes: declare class BOPAlgo_AlertRemovalOfIBForMDimShapes extends TopoDS_AlertWithShape
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BOPAlgo_AlertRemovalOfIBForSolidsFailed: declare class BOPAlgo_AlertRemovalOfIBForSolidsFailed extends TopoDS_AlertWithShape
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BOPAlgo_AlertRemoveFeaturesFailed: declare class BOPAlgo_AlertRemoveFeaturesFailed extends Message_Alert
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BOPAlgo_AlertSelfInterferingShape: declare class BOPAlgo_AlertSelfInterferingShape extends TopoDS_AlertWithShape
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BOPAlgo_AlertShapeIsNotPeriodic: declare class BOPAlgo_AlertShapeIsNotPeriodic extends TopoDS_AlertWithShape
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BOPAlgo_AlertShellSplitterFailed: declare class BOPAlgo_AlertShellSplitterFailed extends TopoDS_AlertWithShape
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BOPAlgo_AlertSolidBuilderFailed: declare class BOPAlgo_AlertSolidBuilderFailed extends Message_Alert
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BOPAlgo_AlertSolidBuilderUnusedFaces: declare class BOPAlgo_AlertSolidBuilderUnusedFaces extends TopoDS_AlertWithShape
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BOPAlgo_AlertTooFewArguments: declare class BOPAlgo_AlertTooFewArguments extends Message_Alert
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BOPAlgo_AlertTooSmallEdge: declare class BOPAlgo_AlertTooSmallEdge extends TopoDS_AlertWithShape
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BOPAlgo_AlertUnableToGlue: declare class BOPAlgo_AlertUnableToGlue extends TopoDS_AlertWithShape
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BOPAlgo_AlertUnableToMakeClosedEdgeOnFace: declare class BOPAlgo_AlertUnableToMakeClosedEdgeOnFace extends TopoDS_AlertWithShape
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BOPAlgo_AlertUnableToMakeIdentical: declare class BOPAlgo_AlertUnableToMakeIdentical extends TopoDS_AlertWithShape
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BOPAlgo_AlertUnableToMakePeriodic: declare class BOPAlgo_AlertUnableToMakePeriodic extends TopoDS_AlertWithShape
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BOPAlgo_AlertUnableToOrientTheShape: declare class BOPAlgo_AlertUnableToOrientTheShape extends TopoDS_AlertWithShape
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BOPAlgo_AlertUnableToRemoveTheFeature: declare class BOPAlgo_AlertUnableToRemoveTheFeature extends TopoDS_AlertWithShape
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BOPAlgo_AlertUnableToRepeat: declare class BOPAlgo_AlertUnableToRepeat extends TopoDS_AlertWithShape
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BOPAlgo_AlertUnableToTrim: declare class BOPAlgo_AlertUnableToTrim extends TopoDS_AlertWithShape
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BOPAlgo_AlertUnknownShape: declare class BOPAlgo_AlertUnknownShape extends TopoDS_AlertWithShape
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BOPAlgo_AlertUnsupportedType: declare class BOPAlgo_AlertUnsupportedType extends TopoDS_AlertWithShape
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BOPAlgo_AlertUserBreak: declare class BOPAlgo_AlertUserBreak extends Message_Alert
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BOPAlgo_Algo: declare class BOPAlgo_Algo extends BOPAlgo_Options
 
-Perform(theRange?: Message_ProgressRange): void;
+  Perform(theRange?: Message_ProgressRange): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BOPAlgo_PISteps: declare class BOPAlgo_PISteps
 
-constructor
+  constructor
 
-Steps(): NCollection_Array1_double;
+  Steps(): NCollection_Array1_double;
 
-ChangeSteps(): NCollection_Array1_double;
+  ChangeSteps(): NCollection_Array1_double;
 
-SetStep(theOperation: number, theStep: number): void;
+  SetStep(theOperation: number, theStep: number): void;
 
-GetStep(theOperation: number): number;
+  GetStep(theOperation: number): number;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BOPAlgo_ParallelAlgo: declare class BOPAlgo_ParallelAlgo extends BOPAlgo_Algo
 
-Perform(): void;
-Perform(theRange: Message_ProgressRange): void;
-Perform(): void;
-Perform(theRange: Message_ProgressRange): void;
+  Perform(): void;
+  Perform(theRange: Message_ProgressRange): void;
+  Perform(): void;
+  Perform(theRange: Message_ProgressRange): void;
 
-SetProgressRange(theRange: Message_ProgressRange): void;
+  SetProgressRange(theRange: Message_ProgressRange): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BOPAlgo_ArgumentAnalyzer: declare class BOPAlgo_ArgumentAnalyzer extends BOPAlgo_Algo
 
-constructor
+  constructor
 
-SetShape1(TheShape: TopoDS_Shape): void;
+  SetShape1(TheShape: TopoDS_Shape): void;
 
-SetShape2(TheShape: TopoDS_Shape): void;
+  SetShape2(TheShape: TopoDS_Shape): void;
 
-GetShape1(): TopoDS_Shape;
+  GetShape1(): TopoDS_Shape;
 
-GetShape2(): TopoDS_Shape;
+  GetShape2(): TopoDS_Shape;
 
-OperationType(): BOPAlgo_Operation;
+  OperationType(): BOPAlgo_Operation;
 
-StopOnFirstFaulty(): boolean;
+  StopOnFirstFaulty(): boolean;
 
-ArgumentTypeMode(): boolean;
+  ArgumentTypeMode(): boolean;
 
-SelfInterMode(): boolean;
+  SelfInterMode(): boolean;
 
-SmallEdgeMode(): boolean;
+  SmallEdgeMode(): boolean;
 
-RebuildFaceMode(): boolean;
+  RebuildFaceMode(): boolean;
 
-TangentMode(): boolean;
+  TangentMode(): boolean;
 
-MergeVertexMode(): boolean;
+  MergeVertexMode(): boolean;
 
-MergeEdgeMode(): boolean;
+  MergeEdgeMode(): boolean;
 
-ContinuityMode(): boolean;
+  ContinuityMode(): boolean;
 
-CurveOnSurfaceMode(): boolean;
+  CurveOnSurfaceMode(): boolean;
 
-Perform(theRange?: Message_ProgressRange): void;
+  Perform(theRange?: Message_ProgressRange): void;
 
-HasFaulty(): boolean;
+  HasFaulty(): boolean;
 
-GetCheckResult(): NCollection_List_BOPAlgo_CheckResult;
+  GetCheckResult(): NCollection_List_BOPAlgo_CheckResult;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BOPAlgo_BOP: declare class BOPAlgo_BOP extends BOPAlgo_ToolsProvider
 
-constructor
+  constructor
 
-Clear(): void;
+  Clear(): void;
 
-SetOperation(theOperation: BOPAlgo_Operation): void;
+  SetOperation(theOperation: BOPAlgo_Operation): void;
 
-Operation(): BOPAlgo_Operation;
+  Operation(): BOPAlgo_Operation;
 
-Perform(theRange?: Message_ProgressRange): void;
+  Perform(theRange?: Message_ProgressRange): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BOPAlgo_Builder: declare class BOPAlgo_Builder extends BOPAlgo_BuilderShape
 
-constructor
+  constructor
 
-Clear(): void;
+  Clear(): void;
 
-PDS(): BOPDS_DS;
+  PDS(): BOPDS_DS;
 
-Context(): IntTools_Context;
+  Context(): IntTools_Context;
 
-AddArgument(theShape: TopoDS_Shape): void;
+  AddArgument(theShape: TopoDS_Shape): void;
 
-SetArguments(theLS: NCollection_List_TopoDS_Shape): void;
+  SetArguments(theLS: NCollection_List_TopoDS_Shape): void;
 
-Arguments(): NCollection_List_TopoDS_Shape;
+  Arguments(): NCollection_List_TopoDS_Shape;
 
-SetNonDestructive(theFlag: boolean): void;
+  SetNonDestructive(theFlag: boolean): void;
 
-NonDestructive(): boolean;
+  NonDestructive(): boolean;
 
-SetGlue(theGlue: BOPAlgo_GlueEnum): void;
+  SetGlue(theGlue: BOPAlgo_GlueEnum): void;
 
-Glue(): BOPAlgo_GlueEnum;
+  Glue(): BOPAlgo_GlueEnum;
 
-SetCheckInverted(theCheck: boolean): void;
+  SetCheckInverted(theCheck: boolean): void;
 
-CheckInverted(): boolean;
+  CheckInverted(): boolean;
 
-Perform(theRange?: Message_ProgressRange): void;
+  Perform(theRange?: Message_ProgressRange): void;
 
-BuildBOP(theObjects: NCollection_List_TopoDS_Shape, theObjState: TopAbs_State, theTools: NCollection_List_TopoDS_Shape, theToolsState: TopAbs_State, theRange: Message_ProgressRange, theReport: Message_Report): void;
-BuildBOP(theObjects: NCollection_List_TopoDS_Shape, theTools: NCollection_List_TopoDS_Shape, theOperation: BOPAlgo_Operation, theRange: Message_ProgressRange, theReport: Message_Report): void;
-BuildBOP(theObjects: NCollection_List_TopoDS_Shape, theObjState: TopAbs_State, theTools: NCollection_List_TopoDS_Shape, theToolsState: TopAbs_State, theRange: Message_ProgressRange, theReport: Message_Report): void;
-BuildBOP(theObjects: NCollection_List_TopoDS_Shape, theTools: NCollection_List_TopoDS_Shape, theOperation: BOPAlgo_Operation, theRange: Message_ProgressRange, theReport: Message_Report): void;
+  BuildBOP(theObjects: NCollection_List_TopoDS_Shape, theObjState: TopAbs_State, theTools: NCollection_List_TopoDS_Shape, theToolsState: TopAbs_State, theRange: Message_ProgressRange, theReport: Message_Report): void;
+  BuildBOP(theObjects: NCollection_List_TopoDS_Shape, theTools: NCollection_List_TopoDS_Shape, theOperation: BOPAlgo_Operation, theRange: Message_ProgressRange, theReport: Message_Report): void;
+  BuildBOP(theObjects: NCollection_List_TopoDS_Shape, theObjState: TopAbs_State, theTools: NCollection_List_TopoDS_Shape, theToolsState: TopAbs_State, theRange: Message_ProgressRange, theReport: Message_Report): void;
+  BuildBOP(theObjects: NCollection_List_TopoDS_Shape, theTools: NCollection_List_TopoDS_Shape, theOperation: BOPAlgo_Operation, theRange: Message_ProgressRange, theReport: Message_Report): void;
 
-Images(): NCollection_DataMap_TopoDS_Shape_NCollection_List_TopoDS_Shape_TopTools_ShapeMapHasher;
+  Images(): NCollection_DataMap_TopoDS_Shape_NCollection_List_TopoDS_Shape_TopTools_ShapeMapHasher;
 
-Origins(): NCollection_DataMap_TopoDS_Shape_NCollection_List_TopoDS_Shape_TopTools_ShapeMapHasher;
+  Origins(): NCollection_DataMap_TopoDS_Shape_NCollection_List_TopoDS_Shape_TopTools_ShapeMapHasher;
 
-ShapesSD(): NCollection_DataMap_TopoDS_Shape_TopoDS_Shape_TopTools_ShapeMapHasher;
+  ShapesSD(): NCollection_DataMap_TopoDS_Shape_TopoDS_Shape_TopTools_ShapeMapHasher;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BOPAlgo_BuilderArea: declare class BOPAlgo_BuilderArea extends BOPAlgo_Algo
 
-SetContext(theContext: IntTools_Context): void;
+  SetContext(theContext: IntTools_Context): void;
 
-Shapes(): NCollection_List_TopoDS_Shape;
+  Shapes(): NCollection_List_TopoDS_Shape;
 
-SetShapes(theLS: NCollection_List_TopoDS_Shape): void;
+  SetShapes(theLS: NCollection_List_TopoDS_Shape): void;
 
-Loops(): NCollection_List_TopoDS_Shape;
+  Loops(): NCollection_List_TopoDS_Shape;
 
-Areas(): NCollection_List_TopoDS_Shape;
+  Areas(): NCollection_List_TopoDS_Shape;
 
-SetAvoidInternalShapes(theAvoidInternal: boolean): void;
+  SetAvoidInternalShapes(theAvoidInternal: boolean): void;
 
-IsAvoidInternalShapes(): boolean;
+  IsAvoidInternalShapes(): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BOPAlgo_BuilderFace: declare class BOPAlgo_BuilderFace extends BOPAlgo_BuilderArea
 
-constructor
+  constructor
 
-SetFace(theFace: TopoDS_Face): void;
+  SetFace(theFace: TopoDS_Face): void;
 
-Face(): TopoDS_Face;
+  Face(): TopoDS_Face;
 
-Perform(theRange?: Message_ProgressRange): void;
+  Perform(theRange?: Message_ProgressRange): void;
 
-Orientation(): TopAbs_Orientation;
+  Orientation(): TopAbs_Orientation;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BOPAlgo_BuilderShape: declare class BOPAlgo_BuilderShape extends BOPAlgo_Algo
 
-Shape(): TopoDS_Shape;
+  Shape(): TopoDS_Shape;
 
-Modified(theS: TopoDS_Shape): NCollection_List_TopoDS_Shape;
+  Modified(theS: TopoDS_Shape): NCollection_List_TopoDS_Shape;
 
-Generated(theS: TopoDS_Shape): NCollection_List_TopoDS_Shape;
+  Generated(theS: TopoDS_Shape): NCollection_List_TopoDS_Shape;
 
-IsDeleted(theS: TopoDS_Shape): boolean;
+  IsDeleted(theS: TopoDS_Shape): boolean;
 
-HasModified(): boolean;
+  HasModified(): boolean;
 
-HasGenerated(): boolean;
+  HasGenerated(): boolean;
 
-HasDeleted(): boolean;
+  HasDeleted(): boolean;
 
-History(): BRepTools_History;
+  History(): BRepTools_History;
 
-SetToFillHistory(theHistFlag: boolean): void;
+  SetToFillHistory(theHistFlag: boolean): void;
 
-HasHistory(): boolean;
+  HasHistory(): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BOPAlgo_BuilderSolid: declare class BOPAlgo_BuilderSolid extends BOPAlgo_BuilderArea
 
-constructor
+  constructor
 
-Perform(theRange?: Message_ProgressRange): void;
+  Perform(theRange?: Message_ProgressRange): void;
 
-GetBoxesMap(): NCollection_DataMap_TopoDS_Shape_Bnd_Box_TopTools_ShapeMapHasher;
+  GetBoxesMap(): NCollection_DataMap_TopoDS_Shape_Bnd_Box_TopTools_ShapeMapHasher;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BOPAlgo_CellsBuilder: declare class BOPAlgo_CellsBuilder extends BOPAlgo_Builder
 
-constructor
+  constructor
 
-Clear(): void;
+  Clear(): void;
 
-AddToResult(theLSToTake: NCollection_List_TopoDS_Shape, theLSToAvoid: NCollection_List_TopoDS_Shape, theMaterial?: number, theUpdate?: boolean): void;
+  AddToResult(theLSToTake: NCollection_List_TopoDS_Shape, theLSToAvoid: NCollection_List_TopoDS_Shape, theMaterial?: number, theUpdate?: boolean): void;
 
-AddAllToResult(theMaterial?: number, theUpdate?: boolean): void;
+  AddAllToResult(theMaterial?: number, theUpdate?: boolean): void;
 
-RemoveFromResult(theLSToTake: NCollection_List_TopoDS_Shape, theLSToAvoid: NCollection_List_TopoDS_Shape): void;
+  RemoveFromResult(theLSToTake: NCollection_List_TopoDS_Shape, theLSToAvoid: NCollection_List_TopoDS_Shape): void;
 
-RemoveAllFromResult(): void;
+  RemoveAllFromResult(): void;
 
-RemoveInternalBoundaries(): void;
+  RemoveInternalBoundaries(): void;
 
-GetAllParts(): TopoDS_Shape;
+  GetAllParts(): TopoDS_Shape;
 
-MakeContainers(): void;
+  MakeContainers(): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BOPAlgo_CheckResult: declare class BOPAlgo_CheckResult
 
-constructor
+  constructor
 
-SetShape1(TheShape: TopoDS_Shape): void;
+  SetShape1(TheShape: TopoDS_Shape): void;
 
-AddFaultyShape1(TheShape: TopoDS_Shape): void;
+  AddFaultyShape1(TheShape: TopoDS_Shape): void;
 
-SetShape2(TheShape: TopoDS_Shape): void;
+  SetShape2(TheShape: TopoDS_Shape): void;
 
-AddFaultyShape2(TheShape: TopoDS_Shape): void;
+  AddFaultyShape2(TheShape: TopoDS_Shape): void;
 
-GetShape1(): TopoDS_Shape;
+  GetShape1(): TopoDS_Shape;
 
-GetShape2(): TopoDS_Shape;
+  GetShape2(): TopoDS_Shape;
 
-GetFaultyShapes1(): NCollection_List_TopoDS_Shape;
+  GetFaultyShapes1(): NCollection_List_TopoDS_Shape;
 
-GetFaultyShapes2(): NCollection_List_TopoDS_Shape;
+  GetFaultyShapes2(): NCollection_List_TopoDS_Shape;
 
-SetCheckStatus(TheStatus: BOPAlgo_CheckStatus): void;
+  SetCheckStatus(TheStatus: BOPAlgo_CheckStatus): void;
 
-GetCheckStatus(): BOPAlgo_CheckStatus;
+  GetCheckStatus(): BOPAlgo_CheckStatus;
 
-SetMaxDistance1(theDist: number): void;
+  SetMaxDistance1(theDist: number): void;
 
-SetMaxDistance2(theDist: number): void;
+  SetMaxDistance2(theDist: number): void;
 
-SetMaxParameter1(thePar: number): void;
+  SetMaxParameter1(thePar: number): void;
 
-SetMaxParameter2(thePar: number): void;
+  SetMaxParameter2(thePar: number): void;
 
-GetMaxDistance1(): number;
+  GetMaxDistance1(): number;
 
-GetMaxDistance2(): number;
+  GetMaxDistance2(): number;
 
-GetMaxParameter1(): number;
+  GetMaxParameter1(): number;
 
-GetMaxParameter2(): number;
+  GetMaxParameter2(): number;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BOPAlgo_CheckStatus: typeof BOPAlgo_CheckStatus[keyof typeof BOPAlgo_CheckStatus]
 
 BOPAlgo_CheckerSI: declare class BOPAlgo_CheckerSI extends BOPAlgo_Algo
 
-constructor
+  constructor
 
-Perform(theRange?: Message_ProgressRange): void;
+  Perform(theRange?: Message_ProgressRange): void;
 
-SetLevelOfCheck(theLevel: number): void;
+  SetLevelOfCheck(theLevel: number): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BOPAlgo_GlueEnum: typeof BOPAlgo_GlueEnum[keyof typeof BOPAlgo_GlueEnum]
 
 BOPAlgo_MakeConnected: declare class BOPAlgo_MakeConnected extends BOPAlgo_Options
 
-constructor
+  constructor
 
-SetArguments(theArgs: NCollection_List_TopoDS_Shape): void;
+  SetArguments(theArgs: NCollection_List_TopoDS_Shape): void;
 
-AddArgument(theS: TopoDS_Shape): void;
+  AddArgument(theS: TopoDS_Shape): void;
 
-Arguments(): NCollection_List_TopoDS_Shape;
+  Arguments(): NCollection_List_TopoDS_Shape;
 
-Perform(): void;
+  Perform(): void;
 
-MakePeriodic(theParams: BOPAlgo_MakePeriodic_PeriodicityParams): void;
+  MakePeriodic(theParams: BOPAlgo_MakePeriodic_PeriodicityParams): void;
 
-RepeatShape(theDirectionID: number, theTimes: number): void;
+  RepeatShape(theDirectionID: number, theTimes: number): void;
 
-ClearRepetitions(): void;
+  ClearRepetitions(): void;
 
-PeriodicityTool(): BOPAlgo_MakePeriodic;
+  PeriodicityTool(): BOPAlgo_MakePeriodic;
 
-MaterialsOnPositiveSide(theS: TopoDS_Shape): NCollection_List_TopoDS_Shape;
+  MaterialsOnPositiveSide(theS: TopoDS_Shape): NCollection_List_TopoDS_Shape;
 
-MaterialsOnNegativeSide(theS: TopoDS_Shape): NCollection_List_TopoDS_Shape;
+  MaterialsOnNegativeSide(theS: TopoDS_Shape): NCollection_List_TopoDS_Shape;
 
-History(): BRepTools_History;
+  History(): BRepTools_History;
 
-GetModified(theS: TopoDS_Shape): NCollection_List_TopoDS_Shape;
+  GetModified(theS: TopoDS_Shape): NCollection_List_TopoDS_Shape;
 
-GetOrigins(theS: TopoDS_Shape): NCollection_List_TopoDS_Shape;
+  GetOrigins(theS: TopoDS_Shape): NCollection_List_TopoDS_Shape;
 
-Shape(): TopoDS_Shape;
+  Shape(): TopoDS_Shape;
 
-PeriodicShape(): TopoDS_Shape;
+  PeriodicShape(): TopoDS_Shape;
 
-Clear(): void;
+  Clear(): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BOPAlgo_MakePeriodic: declare class BOPAlgo_MakePeriodic extends BOPAlgo_Options
 
-constructor
+  constructor
 
-SetShape(theShape: TopoDS_Shape): void;
+  SetShape(theShape: TopoDS_Shape): void;
 
-SetPeriodicityParameters(theParams: BOPAlgo_MakePeriodic_PeriodicityParams): void;
+  SetPeriodicityParameters(theParams: BOPAlgo_MakePeriodic_PeriodicityParams): void;
 
-PeriodicityParameters(): BOPAlgo_MakePeriodic_PeriodicityParams;
+  PeriodicityParameters(): BOPAlgo_MakePeriodic_PeriodicityParams;
 
-MakePeriodic(theDirectionID: number, theIsPeriodic: boolean, thePeriod?: number): void;
+  MakePeriodic(theDirectionID: number, theIsPeriodic: boolean, thePeriod?: number): void;
 
-IsPeriodic(theDirectionID: number): boolean;
+  IsPeriodic(theDirectionID: number): boolean;
 
-Period(theDirectionID: number): number;
+  Period(theDirectionID: number): number;
 
-MakeXPeriodic(theIsPeriodic: boolean, thePeriod?: number): void;
+  MakeXPeriodic(theIsPeriodic: boolean, thePeriod?: number): void;
 
-IsXPeriodic(): boolean;
+  IsXPeriodic(): boolean;
 
-XPeriod(): number;
+  XPeriod(): number;
 
-MakeYPeriodic(theIsPeriodic: boolean, thePeriod?: number): void;
+  MakeYPeriodic(theIsPeriodic: boolean, thePeriod?: number): void;
 
-IsYPeriodic(): boolean;
+  IsYPeriodic(): boolean;
 
-YPeriod(): number;
+  YPeriod(): number;
 
-MakeZPeriodic(theIsPeriodic: boolean, thePeriod?: number): void;
+  MakeZPeriodic(theIsPeriodic: boolean, thePeriod?: number): void;
 
-IsZPeriodic(): boolean;
+  IsZPeriodic(): boolean;
 
-ZPeriod(): number;
+  ZPeriod(): number;
 
-SetTrimmed(theDirectionID: number, theIsTrimmed: boolean, theFirst?: number): void;
+  SetTrimmed(theDirectionID: number, theIsTrimmed: boolean, theFirst?: number): void;
 
-IsInputTrimmed(theDirectionID: number): boolean;
+  IsInputTrimmed(theDirectionID: number): boolean;
 
-PeriodFirst(theDirectionID: number): number;
+  PeriodFirst(theDirectionID: number): number;
 
-SetXTrimmed(theIsTrimmed: boolean, theFirst?: boolean): void;
+  SetXTrimmed(theIsTrimmed: boolean, theFirst?: boolean): void;
 
-IsInputXTrimmed(): boolean;
+  IsInputXTrimmed(): boolean;
 
-XPeriodFirst(): number;
+  XPeriodFirst(): number;
 
-SetYTrimmed(theIsTrimmed: boolean, theFirst?: boolean): void;
+  SetYTrimmed(theIsTrimmed: boolean, theFirst?: boolean): void;
 
-IsInputYTrimmed(): boolean;
+  IsInputYTrimmed(): boolean;
 
-YPeriodFirst(): number;
+  YPeriodFirst(): number;
 
-SetZTrimmed(theIsTrimmed: boolean, theFirst?: boolean): void;
+  SetZTrimmed(theIsTrimmed: boolean, theFirst?: boolean): void;
 
-IsInputZTrimmed(): boolean;
+  IsInputZTrimmed(): boolean;
 
-ZPeriodFirst(): number;
+  ZPeriodFirst(): number;
 
-Perform(): void;
+  Perform(): void;
 
-RepeatShape(theDirectionID: number, theTimes: number): TopoDS_Shape;
+  RepeatShape(theDirectionID: number, theTimes: number): TopoDS_Shape;
 
-XRepeat(theTimes: number): TopoDS_Shape;
+  XRepeat(theTimes: number): TopoDS_Shape;
 
-YRepeat(theTimes: number): TopoDS_Shape;
+  YRepeat(theTimes: number): TopoDS_Shape;
 
-ZRepeat(theTimes: number): TopoDS_Shape;
+  ZRepeat(theTimes: number): TopoDS_Shape;
 
-RepeatedShape(): TopoDS_Shape;
+  RepeatedShape(): TopoDS_Shape;
 
-ClearRepetitions(): void;
+  ClearRepetitions(): void;
 
-Shape(): TopoDS_Shape;
+  Shape(): TopoDS_Shape;
 
-GetTwins(theS: TopoDS_Shape): NCollection_List_TopoDS_Shape;
+  GetTwins(theS: TopoDS_Shape): NCollection_List_TopoDS_Shape;
 
-History(): BRepTools_History;
+  History(): BRepTools_History;
 
-Clear(): void;
+  Clear(): void;
 
-static ToDirectionID(theDirectionID: number): number;
+  static ToDirectionID(theDirectionID: number): number;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BOPAlgo_MakePeriodic_PeriodicityParams: declare class BOPAlgo_MakePeriodic_PeriodicityParams
 
-constructor
+  constructor
 
-Clear(): void;
+  Clear(): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BOPAlgo_MakerVolume: declare class BOPAlgo_MakerVolume extends BOPAlgo_Builder
 
-constructor
+  constructor
 
-Clear(): void;
+  Clear(): void;
 
-SetIntersect(bIntersect: boolean): void;
+  SetIntersect(bIntersect: boolean): void;
 
-IsIntersect(): boolean;
+  IsIntersect(): boolean;
 
-Box(): TopoDS_Solid;
+  Box(): TopoDS_Solid;
 
-Faces(): NCollection_List_TopoDS_Shape;
+  Faces(): NCollection_List_TopoDS_Shape;
 
-SetAvoidInternalShapes(theAvoidInternal: boolean): void;
+  SetAvoidInternalShapes(theAvoidInternal: boolean): void;
 
-IsAvoidInternalShapes(): boolean;
+  IsAvoidInternalShapes(): boolean;
 
-Perform(theRange?: Message_ProgressRange): void;
+  Perform(theRange?: Message_ProgressRange): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BOPAlgo_Operation: typeof BOPAlgo_Operation[keyof typeof BOPAlgo_Operation]

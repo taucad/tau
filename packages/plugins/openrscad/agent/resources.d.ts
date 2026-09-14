@@ -11,8 +11,8 @@ declare const bundles: readonly {
     readonly url: string;
     readonly byteLength: number;
     readonly lineCount: number;
-    readonly contentKind: 'text';
-    readonly mediaType: 'text/markdown';
+    readonly contentKind: "text";
+    readonly mediaType: "text/markdown";
     readonly sha256: string;
   }[];
 }[];

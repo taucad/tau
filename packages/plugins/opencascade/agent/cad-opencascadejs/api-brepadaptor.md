@@ -4,152 +4,152 @@
 
 BRepAdaptor_CompCurve: declare class BRepAdaptor_CompCurve extends Adaptor3d_Curve
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-ShallowCopy(): Adaptor3d_Curve;
+  ShallowCopy(): Adaptor3d_Curve;
 
-Initialize(W: TopoDS_Wire, KnotByCurvilinearAbcissa: boolean): void;
-Initialize(W: TopoDS_Wire, KnotByCurvilinearAbcissa: boolean, First: number, Last: number, Tol: number): void;
-Initialize(W: TopoDS_Wire, KnotByCurvilinearAbcissa: boolean): void;
-Initialize(W: TopoDS_Wire, KnotByCurvilinearAbcissa: boolean, First: number, Last: number, Tol: number): void;
+  Initialize(W: TopoDS_Wire, KnotByCurvilinearAbcissa: boolean): void;
+  Initialize(W: TopoDS_Wire, KnotByCurvilinearAbcissa: boolean, First: number, Last: number, Tol: number): void;
+  Initialize(W: TopoDS_Wire, KnotByCurvilinearAbcissa: boolean): void;
+  Initialize(W: TopoDS_Wire, KnotByCurvilinearAbcissa: boolean, First: number, Last: number, Tol: number): void;
 
-Wire(): TopoDS_Wire;
+  Wire(): TopoDS_Wire;
 
-Edge(U: number, E: TopoDS_Edge, UonE?: number): { UonE: number };
+  Edge(U: number, E: TopoDS_Edge, UonE?: number): { UonE: number };
 
-FirstParameter(): number;
+  FirstParameter(): number;
 
-LastParameter(): number;
+  LastParameter(): number;
 
-Continuity(): GeomAbs_Shape;
+  Continuity(): GeomAbs_Shape;
 
-NbIntervals(S: GeomAbs_Shape): number;
+  NbIntervals(S: GeomAbs_Shape): number;
 
-Intervals(T: NCollection_Array1_double, S: GeomAbs_Shape): void;
+  Intervals(T: NCollection_Array1_double, S: GeomAbs_Shape): void;
 
-Trim(First: number, Last: number, Tol: number): Adaptor3d_Curve;
+  Trim(First: number, Last: number, Tol: number): Adaptor3d_Curve;
 
-IsClosed(): boolean;
+  IsClosed(): boolean;
 
-IsPeriodic(): boolean;
+  IsPeriodic(): boolean;
 
-Period(): number;
+  Period(): number;
 
-EvalD0(theU: number): gp_Pnt;
+  EvalD0(theU: number): gp_Pnt;
 
-EvalD1(theU: number): Geom_Curve_ResD1;
+  EvalD1(theU: number): Geom_Curve_ResD1;
 
-EvalD2(theU: number): Geom_Curve_ResD2;
+  EvalD2(theU: number): Geom_Curve_ResD2;
 
-EvalD3(theU: number): Geom_Curve_ResD3;
+  EvalD3(theU: number): Geom_Curve_ResD3;
 
-EvalDN(theU: number, theN: number): gp_Vec;
+  EvalDN(theU: number, theN: number): gp_Vec;
 
-Resolution(R3d: number): number;
+  Resolution(R3d: number): number;
 
-GetType(): GeomAbs_CurveType;
+  GetType(): GeomAbs_CurveType;
 
-Line(): gp_Lin;
+  Line(): gp_Lin;
 
-Circle(): gp_Circ;
+  Circle(): gp_Circ;
 
-Ellipse(): gp_Elips;
+  Ellipse(): gp_Elips;
 
-Hyperbola(): gp_Hypr;
+  Hyperbola(): gp_Hypr;
 
-Parabola(): gp_Parab;
+  Parabola(): gp_Parab;
 
-Degree(): number;
+  Degree(): number;
 
-IsRational(): boolean;
+  IsRational(): boolean;
 
-NbPoles(): number;
+  NbPoles(): number;
 
-NbKnots(): number;
+  NbKnots(): number;
 
-Bezier(): Geom_BezierCurve;
+  Bezier(): Geom_BezierCurve;
 
-BSpline(): Geom_BSplineCurve;
+  BSpline(): Geom_BSplineCurve;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepAdaptor_Curve: declare class BRepAdaptor_Curve extends GeomAdaptor_TransformedCurve
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-ShallowCopy(): Adaptor3d_Curve;
+  ShallowCopy(): Adaptor3d_Curve;
 
-Reset(): void;
+  Reset(): void;
 
-Initialize(E: TopoDS_Edge): void;
-Initialize(E: TopoDS_Edge, F: TopoDS_Face): void;
-Initialize(E: TopoDS_Edge): void;
-Initialize(E: TopoDS_Edge, F: TopoDS_Face): void;
+  Initialize(E: TopoDS_Edge): void;
+  Initialize(E: TopoDS_Edge, F: TopoDS_Face): void;
+  Initialize(E: TopoDS_Edge): void;
+  Initialize(E: TopoDS_Edge, F: TopoDS_Face): void;
 
-Edge(): TopoDS_Edge;
+  Edge(): TopoDS_Edge;
 
-Tolerance(): number;
+  Tolerance(): number;
 
-Trim(First: number, Last: number, Tol: number): Adaptor3d_Curve;
+  Trim(First: number, Last: number, Tol: number): Adaptor3d_Curve;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepAdaptor_Curve2d: declare class BRepAdaptor_Curve2d extends Geom2dAdaptor_Curve
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-ShallowCopy(): Adaptor2d_Curve2d;
+  ShallowCopy(): Adaptor2d_Curve2d;
 
-Initialize(E: TopoDS_Edge, F: TopoDS_Face): void;
+  Initialize(E: TopoDS_Edge, F: TopoDS_Face): void;
 
-Edge(): TopoDS_Edge;
+  Edge(): TopoDS_Edge;
 
-Face(): TopoDS_Face;
+  Face(): TopoDS_Face;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepAdaptor_Surface: declare class BRepAdaptor_Surface extends GeomAdaptor_TransformedSurface
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-ShallowCopy(): Adaptor3d_Surface;
+  ShallowCopy(): Adaptor3d_Surface;
 
-Initialize(F: TopoDS_Face, Restriction?: boolean): void;
+  Initialize(F: TopoDS_Face, Restriction?: boolean): void;
 
-Face(): TopoDS_Face;
+  Face(): TopoDS_Face;
 
-Tolerance(): number;
+  Tolerance(): number;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;

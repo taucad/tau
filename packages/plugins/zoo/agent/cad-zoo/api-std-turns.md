@@ -11,7 +11,7 @@ turns::QUARTER_TURN: number(deg)
 // A half turn, 180 degrees or π radians
 turns::HALF_TURN: number(deg)
 
-// Three quarters of a turn, 270 degrees or 1.5\*π radians
+// Three quarters of a turn, 270 degrees or 1.5*π radians
 turns::THREE_QUARTER_TURN: number(deg)
 
 // This module contains a few handy constants for defining turns

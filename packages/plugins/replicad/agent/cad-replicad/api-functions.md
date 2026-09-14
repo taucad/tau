@@ -37,14 +37,14 @@ export declare function drawPolysides(radius: number, sidesCount: number, sagitt
 
 // Creates the `Drawing` of a projection of a shape on a plane
 export declare function drawProjection(shape: AnyShape, projectionCamera?: ProjectionPlane | ProjectionCamera): {
-visible: Drawing;
-hidden: Drawing;
+    visible: Drawing;
+    hidden: Drawing;
 };
 
 // Creates the `Drawing` of a rectangle with (optional) rounded corners
 export declare function drawRoundedRectangle(width: number, height: number, r?: number | {
-rx?: number;
-ry?: number;
+    rx?: number;
+    ry?: number;
 }): Drawing;
 
 // Creates the `Drawing` of a circle as one single curve
@@ -55,15 +55,15 @@ export declare function drawSingleEllipse(majorRadius: number, minorRadius: numb
 
 // Creates the `Drawing` of a text, in a defined font size and a font familiy (which will be the default)
 export declare function drawText(text: string, { startX, startY, fontSize, fontFamily }?: {
-startX?: number | undefined;
-startY?: number | undefined;
-fontSize?: number | undefined;
-fontFamily?: string | undefined;
+    startX?: number | undefined;
+    startY?: number | undefined;
+    fontSize?: number | undefined;
+    fontFamily?: string | undefined;
 }): Drawing;
 
 export declare function exportSTEP(shapes?: ShapeConfig[], { unit, modelUnit }?: {
-unit?: SupportedUnit;
-modelUnit?: SupportedUnit;
+    unit?: SupportedUnit;
+    modelUnit?: SupportedUnit;
 }): Blob;
 
 export declare function genericSweep(wire: Wire, spine: Wire, sweepConfig: GenericSweepConfig, shellMode: true): [Shape3D, Wire, Wire];
@@ -105,13 +105,13 @@ export declare function makePlane(plane?: PlaneName, origin?: Point | number): P
 export declare function makePln(origin: Point, dir: Point): gp_Pln;
 
 export declare function makeProjectedEdges(shape: AnyShape, camera: ProjectionCamera, withHiddenLines?: boolean): {
-visible: Edge[];
-hidden: Edge[];
+    visible: Edge[];
+    hidden: Edge[];
 };
 
 // Welds faces and shells into a single shell and then makes a solid
 export declare function makeSolid(facesOrShells: Array<Face | Shell>): Solid;
-// facesOrShells: An array of faces and shells to be welded
+//   facesOrShells: An array of faces and shells to be welded
 
 // Measure the area of a shape
 export declare function measureArea(shape: Face | Shape3D): number;
@@ -139,21 +139,21 @@ export declare function scale(shape: TopoDS_Shape, center: Point, scale: number)
 
 // Creates the `Sketches` of a text, in a defined font size and a font familiy (which will be the default)
 export declare function sketchText(text: string, textConfig?: {
-startX?: number;
-startY?: number;
-fontSize?: number;
-fontFamily?: "string";
+    startX?: number;
+    startY?: number;
+    fontSize?: number;
+    fontFamily?: "string";
 }, planeConfig?: {
-plane?: PlaneName | Plane;
-origin?: Point | number;
+    plane?: PlaneName | Plane;
+    origin?: Point | number;
 }): Sketches;
 
 // Creates the `Blueprints` of a text, in a defined font size and a font familiy (which will be the default)
 export declare function textBlueprints(text: string, { startX, startY, fontSize, fontFamily }?: {
-startX?: number | undefined;
-startY?: number | undefined;
-fontSize?: number | undefined;
-fontFamily?: string | undefined;
+    startX?: number | undefined;
+    startY?: number | undefined;
+    fontSize?: number | undefined;
+    fontFamily?: string | undefined;
 }): Blueprints;
 
 export declare function translate(shape: TopoDS_Shape, vector: Point): TopoDS_Shape;
@@ -163,8 +163,8 @@ export declare function twistExtrude(wire: Wire, angleDegrees: number, center: P
 
 // Welds faces and shells into a single shell
 export declare function weldShellsAndFaces(facesOrShells: Array<Face | Shell>, ignoreType?: boolean): Shell;
-// facesOrShells: An array of faces and shells to be welded
-// ignoreType: If true, the function will not check if the result is a shell
+//   facesOrShells: An array of faces and shells to be welded
+//   ignoreType: If true, the function will not check if the result is a shell
 
 (face: Face, holes: Wire[]) => Face
 
@@ -176,10 +176,10 @@ export declare function weldShellsAndFaces(facesOrShells: Array<Face | Shell>, i
 
 // Combine a set of finder filters (defined with radius) to pass as a filter function
 <Type, T, R = number>(filters: {
-filter: Finder<Type, T>;
-radius: R;
+    filter: Finder<Type, T>;
+    radius: R;
 }[]) => [(v: Type) => R | null, () => void]
-// filters: An array of objects containing a filter and its radius
+//   filters: An array of objects containing a filter and its radius
 
 (shapeArray: AnyShape[]) => AnyShape
 
@@ -191,20 +191,20 @@ radius: R;
 
 // Creates the `Drawing` of parametric function
 (func: (t: number) => Point2D, { pointsCount, start, stop, closeShape }?: {
-pointsCount?: number | undefined;
-start?: number | undefined;
-stop?: number | undefined;
-closeShape?: boolean | undefined;
+    pointsCount?: number | undefined;
+    start?: number | undefined;
+    stop?: number | undefined;
+    closeShape?: boolean | undefined;
 }, approximationConfig?: BSplineApproximationConfig) => Drawing
 
 // Creates the `Drawing` by interpolating points as a curve
 (points: Point2D[], approximationConfig?: BSplineApproximationConfig, options?: {
-closeShape?: boolean;
+    closeShape?: boolean;
 }) => Drawing
 
 export declare function drawRoundedRectangle(width: number, height: number, r?: number | {
-rx?: number;
-ry?: number;
+    rx?: number;
+    ry?: number;
 }): Drawing;
 
 (first: Shape2D, second: Shape2D) => Blueprint | Blueprints | CompoundBlueprint | null
@@ -294,8 +294,8 @@ ry?: number;
 (face: Face, center?: Point, direction?: Point, angle?: number) => Shape3D
 
 (width: number, height: number, r?: number | {
-rx?: number;
-ry?: number;
+    rx?: number;
+    ry?: number;
 }) => Blueprint
 
 (manifold: ManifoldToplevel) => void
@@ -318,9 +318,9 @@ ry?: number;
 
 // Creates the `Sketch` of parametric function in a specified plane
 (func: (t: number) => Point2D, planeConfig?: PlaneConfig, { pointsCount, start, stop }?: {
-pointsCount?: number | undefined;
-start?: number | undefined;
-stop?: number | undefined;
+    pointsCount?: number | undefined;
+    start?: number | undefined;
+    stop?: number | undefined;
 }, approximationConfig?: BSplineApproximationConfig) => Sketch
 
 // Creates the `Sketch` of an polygon in a defined plane
@@ -331,8 +331,8 @@ stop?: number | undefined;
 
 // Creates the `Sketch` of a rounded rectangle in a defined plane
 (width: number, height: number, r?: number | {
-rx?: number;
-ry?: number;
+    rx?: number;
+    ry?: number;
 }, planeConfig?: PlaneConfig) => Sketch
 
 (wire: Wire, center: Point, normal: Point, support: TopoDS_Shape) => Shape3D

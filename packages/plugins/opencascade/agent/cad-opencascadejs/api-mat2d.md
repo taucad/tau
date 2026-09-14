@@ -4,217 +4,217 @@
 
 MAT2d_BiInt: declare class MAT2d_BiInt
 
-constructor
+  constructor
 
-FirstIndex(): number;
-FirstIndex(I1: number): void;
-FirstIndex(): number;
-FirstIndex(I1: number): void;
+  FirstIndex(): number;
+  FirstIndex(I1: number): void;
+  FirstIndex(): number;
+  FirstIndex(I1: number): void;
 
-SecondIndex(): number;
-SecondIndex(I2: number): void;
-SecondIndex(): number;
-SecondIndex(I2: number): void;
+  SecondIndex(): number;
+  SecondIndex(I2: number): void;
+  SecondIndex(): number;
+  SecondIndex(I2: number): void;
 
-IsEqual(B: MAT2d_BiInt): boolean;
+  IsEqual(B: MAT2d_BiInt): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 MAT2d_Circuit: declare class MAT2d_Circuit extends Standard_Transient
 
-constructor
+  constructor
 
-Perform(aFigure: NCollection_Sequence_NCollection_Sequence_handle_Geom2d_Geometry, IsClosed: NCollection_Sequence_bool, IndRefLine: number, Trigo: boolean): void;
+  Perform(aFigure: NCollection_Sequence_NCollection_Sequence_handle_Geom2d_Geometry, IsClosed: NCollection_Sequence_bool, IndRefLine: number, Trigo: boolean): void;
 
-NumberOfItems(): number;
+  NumberOfItems(): number;
 
-Value(Index: number): Geom2d_Geometry;
+  Value(Index: number): Geom2d_Geometry;
 
-LineLength(IndexLine: number): number;
+  LineLength(IndexLine: number): number;
 
-RefToEqui(IndLine: number, IndCurve: number): NCollection_Sequence_int;
+  RefToEqui(IndLine: number, IndCurve: number): NCollection_Sequence_int;
 
-Connexion(Index: number): MAT2d_Connexion;
+  Connexion(Index: number): MAT2d_Connexion;
 
-ConnexionOn(Index: number): boolean;
+  ConnexionOn(Index: number): boolean;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 MAT2d_Connexion: declare class MAT2d_Connexion extends Standard_Transient
 
-constructor
+  constructor
 
-IndexFirstLine(): number;
-IndexFirstLine(anIndex: number): void;
-IndexFirstLine(): number;
-IndexFirstLine(anIndex: number): void;
+  IndexFirstLine(): number;
+  IndexFirstLine(anIndex: number): void;
+  IndexFirstLine(): number;
+  IndexFirstLine(anIndex: number): void;
 
-IndexSecondLine(): number;
-IndexSecondLine(anIndex: number): void;
-IndexSecondLine(): number;
-IndexSecondLine(anIndex: number): void;
+  IndexSecondLine(): number;
+  IndexSecondLine(anIndex: number): void;
+  IndexSecondLine(): number;
+  IndexSecondLine(anIndex: number): void;
 
-IndexItemOnFirst(): number;
-IndexItemOnFirst(anIndex: number): void;
-IndexItemOnFirst(): number;
-IndexItemOnFirst(anIndex: number): void;
+  IndexItemOnFirst(): number;
+  IndexItemOnFirst(anIndex: number): void;
+  IndexItemOnFirst(): number;
+  IndexItemOnFirst(anIndex: number): void;
 
-IndexItemOnSecond(): number;
-IndexItemOnSecond(anIndex: number): void;
-IndexItemOnSecond(): number;
-IndexItemOnSecond(anIndex: number): void;
+  IndexItemOnSecond(): number;
+  IndexItemOnSecond(anIndex: number): void;
+  IndexItemOnSecond(): number;
+  IndexItemOnSecond(anIndex: number): void;
 
-ParameterOnFirst(): number;
-ParameterOnFirst(aParameter: number): void;
-ParameterOnFirst(): number;
-ParameterOnFirst(aParameter: number): void;
+  ParameterOnFirst(): number;
+  ParameterOnFirst(aParameter: number): void;
+  ParameterOnFirst(): number;
+  ParameterOnFirst(aParameter: number): void;
 
-ParameterOnSecond(): number;
-ParameterOnSecond(aParameter: number): void;
-ParameterOnSecond(): number;
-ParameterOnSecond(aParameter: number): void;
+  ParameterOnSecond(): number;
+  ParameterOnSecond(aParameter: number): void;
+  ParameterOnSecond(): number;
+  ParameterOnSecond(aParameter: number): void;
 
-PointOnFirst(): gp_Pnt2d;
-PointOnFirst(aPoint: gp_Pnt2d): void;
-PointOnFirst(): gp_Pnt2d;
-PointOnFirst(aPoint: gp_Pnt2d): void;
+  PointOnFirst(): gp_Pnt2d;
+  PointOnFirst(aPoint: gp_Pnt2d): void;
+  PointOnFirst(): gp_Pnt2d;
+  PointOnFirst(aPoint: gp_Pnt2d): void;
 
-PointOnSecond(): gp_Pnt2d;
-PointOnSecond(aPoint: gp_Pnt2d): void;
-PointOnSecond(): gp_Pnt2d;
-PointOnSecond(aPoint: gp_Pnt2d): void;
+  PointOnSecond(): gp_Pnt2d;
+  PointOnSecond(aPoint: gp_Pnt2d): void;
+  PointOnSecond(): gp_Pnt2d;
+  PointOnSecond(aPoint: gp_Pnt2d): void;
 
-Distance(): number;
-Distance(aDistance: number): void;
-Distance(): number;
-Distance(aDistance: number): void;
+  Distance(): number;
+  Distance(aDistance: number): void;
+  Distance(): number;
+  Distance(aDistance: number): void;
 
-Reverse(): MAT2d_Connexion;
+  Reverse(): MAT2d_Connexion;
 
-IsAfter(aConnexion: MAT2d_Connexion, aSense: number): boolean;
+  IsAfter(aConnexion: MAT2d_Connexion, aSense: number): boolean;
 
-Dump(Deep?: number, Offset?: number): void;
+  Dump(Deep?: number, Offset?: number): void;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 MAT2d_Mat2d: declare class MAT2d_Mat2d
 
-constructor
+  constructor
 
-CreateMat(aTool: MAT2d_Tool2d): void;
+  CreateMat(aTool: MAT2d_Tool2d): void;
 
-CreateMatOpen(aTool: MAT2d_Tool2d): void;
+  CreateMatOpen(aTool: MAT2d_Tool2d): void;
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-Init(): void;
+  Init(): void;
 
-More(): boolean;
+  More(): boolean;
 
-Next(): void;
+  Next(): void;
 
-Bisector(): MAT_Bisector;
+  Bisector(): MAT_Bisector;
 
-SemiInfinite(): boolean;
+  SemiInfinite(): boolean;
 
-NumberOfBisectors(): number;
+  NumberOfBisectors(): number;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 MAT2d_MiniPath: declare class MAT2d_MiniPath
 
-constructor
+  constructor
 
-Perform(Figure: NCollection_Sequence_NCollection_Sequence_handle_Geom2d_Geometry, IndStart: number, Sense: boolean): void;
+  Perform(Figure: NCollection_Sequence_NCollection_Sequence_handle_Geom2d_Geometry, IndStart: number, Sense: boolean): void;
 
-RunOnConnexions(): void;
+  RunOnConnexions(): void;
 
-Path(): NCollection_Sequence_handle_MAT2d_Connexion;
+  Path(): NCollection_Sequence_handle_MAT2d_Connexion;
 
-IsConnexionsFrom(Index: number): boolean;
+  IsConnexionsFrom(Index: number): boolean;
 
-ConnexionsFrom(Index: number): NCollection_Sequence_handle_MAT2d_Connexion;
+  ConnexionsFrom(Index: number): NCollection_Sequence_handle_MAT2d_Connexion;
 
-IsRoot(Index: number): boolean;
+  IsRoot(Index: number): boolean;
 
-Father(Index: number): MAT2d_Connexion;
+  Father(Index: number): MAT2d_Connexion;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 MAT2d_Tool2d: declare class MAT2d_Tool2d
 
-constructor
+  constructor
 
-Sense(aside: MAT_Side): void;
+  Sense(aside: MAT_Side): void;
 
-SetJoinType(aJoinType: GeomAbs_JoinType): void;
+  SetJoinType(aJoinType: GeomAbs_JoinType): void;
 
-InitItems(aCircuit: MAT2d_Circuit): void;
+  InitItems(aCircuit: MAT2d_Circuit): void;
 
-NumberOfItems(): number;
+  NumberOfItems(): number;
 
-ToleranceOfConfusion(): number;
+  ToleranceOfConfusion(): number;
 
-FirstPoint(anitem: number, dist?: number): { returnValue: number; dist: number };
+  FirstPoint(anitem: number, dist?: number): { returnValue: number; dist: number };
 
-TangentBefore(anitem: number, IsOpenResult: boolean): number;
+  TangentBefore(anitem: number, IsOpenResult: boolean): number;
 
-TangentAfter(anitem: number, IsOpenResult: boolean): number;
+  TangentAfter(anitem: number, IsOpenResult: boolean): number;
 
-Tangent(bisector: number): number;
+  Tangent(bisector: number): number;
 
-CreateBisector(abisector: MAT_Bisector): void;
+  CreateBisector(abisector: MAT_Bisector): void;
 
-TrimBisector(abisector: MAT_Bisector): boolean;
-TrimBisector(abisector: MAT_Bisector, apoint: number): boolean;
-TrimBisector(abisector: MAT_Bisector): boolean;
-TrimBisector(abisector: MAT_Bisector, apoint: number): boolean;
+  TrimBisector(abisector: MAT_Bisector): boolean;
+  TrimBisector(abisector: MAT_Bisector, apoint: number): boolean;
+  TrimBisector(abisector: MAT_Bisector): boolean;
+  TrimBisector(abisector: MAT_Bisector, apoint: number): boolean;
 
-IntersectBisector(bisectorone: MAT_Bisector, bisectortwo: MAT_Bisector, intpnt?: number): { returnValue: number; intpnt: number };
+  IntersectBisector(bisectorone: MAT_Bisector, bisectortwo: MAT_Bisector, intpnt?: number): { returnValue: number; intpnt: number };
 
-Distance(abisector: MAT_Bisector, param1: number, param2: number): number;
+  Distance(abisector: MAT_Bisector, param1: number, param2: number): number;
 
-Dump(bisector: number, erease: number): void;
+  Dump(bisector: number, erease: number): void;
 
-GeomBis(Index: number): Bisector_Bisec;
+  GeomBis(Index: number): Bisector_Bisec;
 
-GeomElt(Index: number): Geom2d_Geometry;
+  GeomElt(Index: number): Geom2d_Geometry;
 
-GeomPnt(Index: number): gp_Pnt2d;
+  GeomPnt(Index: number): gp_Pnt2d;
 
-GeomVec(Index: number): gp_Vec2d;
+  GeomVec(Index: number): gp_Vec2d;
 
-Circuit(): MAT2d_Circuit;
+  Circuit(): MAT2d_Circuit;
 
-BisecFusion(Index1: number, Index2: number): void;
+  BisecFusion(Index1: number, Index2: number): void;
 
-ChangeGeomBis(Index: number): Bisector_Bisec;
+  ChangeGeomBis(Index: number): Bisector_Bisec;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 MAT2d_SequenceOfConnexion: NCollection_Sequence_handle_MAT2d_Connexion
 

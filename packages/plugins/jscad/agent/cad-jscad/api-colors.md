@@ -4,13 +4,13 @@
 
 colors
 
-declare function colorize<T extends Geometry>(color: RGB | RGBA, object: T): T & Colored
-declare function colorize<T extends Geometry>(color: RGB | RGBA, ...objects: RecursiveArray<T>): Array<T & Colored>
-declare function colorize(color: RGB | RGBA, ...objects: RecursiveArray<Geometry>): Array<Geometry & Colored>
+  declare function colorize<T extends Geometry>(color: RGB | RGBA, object: T): T & Colored
+  declare function colorize<T extends Geometry>(color: RGB | RGBA, ...objects: RecursiveArray<T>): Array<T & Colored>
+  declare function colorize(color: RGB | RGBA, ...objects: RecursiveArray<Geometry>): Array<Geometry & Colored>
 
-declare function colorNameToRgb(s: string): RGB
+  declare function colorNameToRgb(s: string): RGB
 
-cssColors
+  cssColors
 
     black: RGB
 
@@ -306,41 +306,41 @@ cssColors
 
     yellowgreen: RGB
 
-declare function hexToRgb(hex: string): RGB | RGBA
+  declare function hexToRgb(hex: string): RGB | RGBA
 
-declare function hslToRgb(hsl: HSL): RGB
-declare function hslToRgb(hsl: HSLA): RGBA
-declare function hslToRgb(...hsl: HSL): RGB
-declare function hslToRgb(...hsl: HSLA): RGBA
+  declare function hslToRgb(hsl:  HSL): RGB
+  declare function hslToRgb(hsl:  HSLA): RGBA
+  declare function hslToRgb(...hsl:  HSL): RGB
+  declare function hslToRgb(...hsl:  HSLA): RGBA
 
-declare function hsvToRgb(hsv: HSV): RGB
-declare function hsvToRgb(hsv: HSVA): RGBA
-declare function hsvToRgb(...hsv: HSV): RGB
-declare function hsvToRgb(...hsv: HSVA): RGBA
+  declare function hsvToRgb(hsv:  HSV): RGB
+  declare function hsvToRgb(hsv:  HSVA): RGBA
+  declare function hsvToRgb(...hsv:  HSV): RGB
+  declare function hsvToRgb(...hsv:  HSVA): RGBA
 
-declare function hueToColorComponent(p: number, q: number, t: number): number
+  declare function hueToColorComponent(p: number, q: number, t: number): number
 
-declare function rgbToHex(rgb: RGB | RGBA): string
-declare function rgbToHex(...rgb: RGB | RGBA): string
+  declare function rgbToHex(rgb: RGB | RGBA): string
+  declare function rgbToHex(...rgb: RGB | RGBA): string
 
-declare function rgbToHsl(rgb: RGB): HSL
-declare function rgbToHsl(rgb: RGBA): HSLA
-declare function rgbToHsl(...rgb: RGB): HSL
-declare function rgbToHsl(...rgb: RGBA): HSLA
+  declare function rgbToHsl(rgb: RGB): HSL
+  declare function rgbToHsl(rgb: RGBA): HSLA
+  declare function rgbToHsl(...rgb: RGB): HSL
+  declare function rgbToHsl(...rgb: RGBA): HSLA
 
-declare function rgbToHsv(rgb: RGB): HSV
-declare function rgbToHsv(rgb: RGBA): HSVA
-declare function rgbToHsv(...rgb: RGB): HSV
-declare function rgbToHsv(...rgb: RGBA): HSVA
+  declare function rgbToHsv(rgb: RGB): HSV
+  declare function rgbToHsv(rgb: RGBA): HSVA
+  declare function rgbToHsv(...rgb: RGB): HSV
+  declare function rgbToHsv(...rgb: RGBA): HSVA
 
-RGB: [number, number, number]
+  RGB: [number, number, number]
 
-RGBA: [number, number, number, number]
+  RGBA: [number, number, number, number]
 
-HSL: [number, number, number]
+  HSL: [number, number, number]
 
-HSLA: [number, number, number, number]
+  HSLA: [number, number, number, number]
 
-HSV: [number, number, number]
+  HSV: [number, number, number]
 
-HSVA: [number, number, number, number]
+  HSVA: [number, number, number, number]

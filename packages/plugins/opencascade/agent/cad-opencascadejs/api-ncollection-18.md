@@ -4,1000 +4,1000 @@
 
 NCollection_FlatDataMap_BRepGraph_ItemId_BRepGraph_ItemId_NCollection_DefaultHasher_BRepGraph_ItemId: declare class NCollection_FlatDataMap_BRepGraph_ItemId_BRepGraph_ItemId_NCollection_DefaultHasher_BRepGraph_ItemId
 
-constructor
+  constructor
 
-Size(): number;
+  Size(): number;
 
-Extent(): number;
+  Extent(): number;
 
-IsEmpty(): boolean;
+  IsEmpty(): boolean;
 
-Capacity(): number;
+  Capacity(): number;
 
-IsBound(theKey: BRepGraph_ItemId): boolean;
+  IsBound(theKey: BRepGraph_ItemId): boolean;
 
-Seek(theKey: BRepGraph_ItemId): BRepGraph_ItemId;
+  Seek(theKey: BRepGraph_ItemId): BRepGraph_ItemId;
 
-ChangeSeek(theKey: BRepGraph_ItemId): BRepGraph_ItemId;
+  ChangeSeek(theKey: BRepGraph_ItemId): BRepGraph_ItemId;
 
-Find(theKey: BRepGraph_ItemId): BRepGraph_ItemId;
+  Find(theKey: BRepGraph_ItemId): BRepGraph_ItemId;
 
-ChangeFind(theKey: BRepGraph_ItemId): BRepGraph_ItemId;
+  ChangeFind(theKey: BRepGraph_ItemId): BRepGraph_ItemId;
 
-Bind(theKey: BRepGraph_ItemId, theItem: BRepGraph_ItemId): boolean;
+  Bind(theKey: BRepGraph_ItemId, theItem: BRepGraph_ItemId): boolean;
 
-TryBind(theKey: BRepGraph_ItemId, theItem: BRepGraph_ItemId): boolean;
+  TryBind(theKey: BRepGraph_ItemId, theItem: BRepGraph_ItemId): boolean;
 
-Bound(theKey: BRepGraph_ItemId, theItem: BRepGraph_ItemId): BRepGraph_ItemId;
+  Bound(theKey: BRepGraph_ItemId, theItem: BRepGraph_ItemId): BRepGraph_ItemId;
 
-TryBound(theKey: BRepGraph_ItemId, theItem: BRepGraph_ItemId): BRepGraph_ItemId;
+  TryBound(theKey: BRepGraph_ItemId, theItem: BRepGraph_ItemId): BRepGraph_ItemId;
 
-UnBind(theKey: BRepGraph_ItemId): boolean;
+  UnBind(theKey: BRepGraph_ItemId): boolean;
 
-Clear(doReleaseMemory?: boolean): void;
+  Clear(doReleaseMemory?: boolean): void;
 
-Exchange(theOther: NCollection_FlatDataMap_BRepGraph_ItemId_BRepGraph_ItemId_NCollection_DefaultHasher_BRepGraph_ItemId): void;
+  Exchange(theOther: NCollection_FlatDataMap_BRepGraph_ItemId_BRepGraph_ItemId_NCollection_DefaultHasher_BRepGraph_ItemId): void;
 
-GetHasher(): unknown;
+  GetHasher(): unknown;
 
-reserve(theN: number): void;
+  reserve(theN: number): void;
 
-Reserve(theN: number): void;
+  Reserve(theN: number): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_AppParCurves_ConstraintCouple: declare class NCollection_HArray1_AppParCurves_ConstraintCouple
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_AppParCurves_ConstraintCouple;
+  Array1(): NCollection_Array1_AppParCurves_ConstraintCouple;
 
-ChangeArray1(): NCollection_Array1_AppParCurves_ConstraintCouple;
+  ChangeArray1(): NCollection_Array1_AppParCurves_ConstraintCouple;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_Bnd_Box: declare class NCollection_HArray1_Bnd_Box
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_Bnd_Box;
+  Array1(): NCollection_Array1_Bnd_Box;
 
-ChangeArray1(): NCollection_Array1_Bnd_Box;
+  ChangeArray1(): NCollection_Array1_Bnd_Box;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_ChFiDS_CircSection: declare class NCollection_HArray1_ChFiDS_CircSection
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_ChFiDS_CircSection;
+  Array1(): NCollection_Array1_ChFiDS_CircSection;
 
-ChangeArray1(): NCollection_Array1_ChFiDS_CircSection;
+  ChangeArray1(): NCollection_Array1_ChFiDS_CircSection;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_HLRAlgo_PolyHidingData: declare class NCollection_HArray1_HLRAlgo_PolyHidingData
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_HLRAlgo_PolyHidingData;
+  Array1(): NCollection_Array1_HLRAlgo_PolyHidingData;
 
-ChangeArray1(): NCollection_Array1_HLRAlgo_PolyHidingData;
+  ChangeArray1(): NCollection_Array1_HLRAlgo_PolyHidingData;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_HLRAlgo_TriangleData: declare class NCollection_HArray1_HLRAlgo_TriangleData
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_HLRAlgo_TriangleData;
+  Array1(): NCollection_Array1_HLRAlgo_TriangleData;
 
-ChangeArray1(): NCollection_Array1_HLRAlgo_TriangleData;
+  ChangeArray1(): NCollection_Array1_HLRAlgo_TriangleData;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_Poly_Triangle: declare class NCollection_HArray1_Poly_Triangle
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_Poly_Triangle;
+  Array1(): NCollection_Array1_Poly_Triangle;
 
-ChangeArray1(): NCollection_Array1_Poly_Triangle;
+  ChangeArray1(): NCollection_Array1_Poly_Triangle;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_StepAP203_ApprovedItem: declare class NCollection_HArray1_StepAP203_ApprovedItem
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_StepAP203_ApprovedItem;
+  Array1(): NCollection_Array1_StepAP203_ApprovedItem;
 
-ChangeArray1(): NCollection_Array1_StepAP203_ApprovedItem;
+  ChangeArray1(): NCollection_Array1_StepAP203_ApprovedItem;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_StepAP203_CertifiedItem: declare class NCollection_HArray1_StepAP203_CertifiedItem
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_StepAP203_CertifiedItem;
+  Array1(): NCollection_Array1_StepAP203_CertifiedItem;
 
-ChangeArray1(): NCollection_Array1_StepAP203_CertifiedItem;
+  ChangeArray1(): NCollection_Array1_StepAP203_CertifiedItem;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_StepAP203_ChangeRequestItem: declare class NCollection_HArray1_StepAP203_ChangeRequestItem
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_StepAP203_ChangeRequestItem;
+  Array1(): NCollection_Array1_StepAP203_ChangeRequestItem;
 
-ChangeArray1(): NCollection_Array1_StepAP203_ChangeRequestItem;
+  ChangeArray1(): NCollection_Array1_StepAP203_ChangeRequestItem;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_StepAP203_ClassifiedItem: declare class NCollection_HArray1_StepAP203_ClassifiedItem
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_StepAP203_ClassifiedItem;
+  Array1(): NCollection_Array1_StepAP203_ClassifiedItem;
 
-ChangeArray1(): NCollection_Array1_StepAP203_ClassifiedItem;
+  ChangeArray1(): NCollection_Array1_StepAP203_ClassifiedItem;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_StepAP203_ContractedItem: declare class NCollection_HArray1_StepAP203_ContractedItem
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_StepAP203_ContractedItem;
+  Array1(): NCollection_Array1_StepAP203_ContractedItem;
 
-ChangeArray1(): NCollection_Array1_StepAP203_ContractedItem;
+  ChangeArray1(): NCollection_Array1_StepAP203_ContractedItem;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_StepAP203_DateTimeItem: declare class NCollection_HArray1_StepAP203_DateTimeItem
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_StepAP203_DateTimeItem;
+  Array1(): NCollection_Array1_StepAP203_DateTimeItem;
 
-ChangeArray1(): NCollection_Array1_StepAP203_DateTimeItem;
+  ChangeArray1(): NCollection_Array1_StepAP203_DateTimeItem;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_StepAP203_PersonOrganizationItem: declare class NCollection_HArray1_StepAP203_PersonOrganizationItem
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_StepAP203_PersonOrganizationItem;
+  Array1(): NCollection_Array1_StepAP203_PersonOrganizationItem;
 
-ChangeArray1(): NCollection_Array1_StepAP203_PersonOrganizationItem;
+  ChangeArray1(): NCollection_Array1_StepAP203_PersonOrganizationItem;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_StepAP203_SpecifiedItem: declare class NCollection_HArray1_StepAP203_SpecifiedItem
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_StepAP203_SpecifiedItem;
+  Array1(): NCollection_Array1_StepAP203_SpecifiedItem;
 
-ChangeArray1(): NCollection_Array1_StepAP203_SpecifiedItem;
+  ChangeArray1(): NCollection_Array1_StepAP203_SpecifiedItem;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_StepAP203_StartRequestItem: declare class NCollection_HArray1_StepAP203_StartRequestItem
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_StepAP203_StartRequestItem;
+  Array1(): NCollection_Array1_StepAP203_StartRequestItem;
 
-ChangeArray1(): NCollection_Array1_StepAP203_StartRequestItem;
+  ChangeArray1(): NCollection_Array1_StepAP203_StartRequestItem;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_StepAP203_WorkItem: declare class NCollection_HArray1_StepAP203_WorkItem
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_StepAP203_WorkItem;
+  Array1(): NCollection_Array1_StepAP203_WorkItem;
 
-ChangeArray1(): NCollection_Array1_StepAP203_WorkItem;
+  ChangeArray1(): NCollection_Array1_StepAP203_WorkItem;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_StepAP214_ApprovalItem: declare class NCollection_HArray1_StepAP214_ApprovalItem
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_StepAP214_ApprovalItem;
+  Array1(): NCollection_Array1_StepAP214_ApprovalItem;
 
-ChangeArray1(): NCollection_Array1_StepAP214_ApprovalItem;
+  ChangeArray1(): NCollection_Array1_StepAP214_ApprovalItem;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_StepAP214_AutoDesignDateAndPersonItem: declare class NCollection_HArray1_StepAP214_AutoDesignDateAndPersonItem
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_StepAP214_AutoDesignDateAndPersonItem;
+  Array1(): NCollection_Array1_StepAP214_AutoDesignDateAndPersonItem;
 
-ChangeArray1(): NCollection_Array1_StepAP214_AutoDesignDateAndPersonItem;
+  ChangeArray1(): NCollection_Array1_StepAP214_AutoDesignDateAndPersonItem;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_StepAP214_AutoDesignDateAndTimeItem: declare class NCollection_HArray1_StepAP214_AutoDesignDateAndTimeItem
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_StepAP214_AutoDesignDateAndTimeItem;
+  Array1(): NCollection_Array1_StepAP214_AutoDesignDateAndTimeItem;
 
-ChangeArray1(): NCollection_Array1_StepAP214_AutoDesignDateAndTimeItem;
+  ChangeArray1(): NCollection_Array1_StepAP214_AutoDesignDateAndTimeItem;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_StepAP214_AutoDesignDatedItem: declare class NCollection_HArray1_StepAP214_AutoDesignDatedItem
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_StepAP214_AutoDesignDatedItem;
+  Array1(): NCollection_Array1_StepAP214_AutoDesignDatedItem;
 
-ChangeArray1(): NCollection_Array1_StepAP214_AutoDesignDatedItem;
+  ChangeArray1(): NCollection_Array1_StepAP214_AutoDesignDatedItem;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_StepAP214_AutoDesignGeneralOrgItem: declare class NCollection_HArray1_StepAP214_AutoDesignGeneralOrgItem
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_StepAP214_AutoDesignGeneralOrgItem;
+  Array1(): NCollection_Array1_StepAP214_AutoDesignGeneralOrgItem;
 
-ChangeArray1(): NCollection_Array1_StepAP214_AutoDesignGeneralOrgItem;
+  ChangeArray1(): NCollection_Array1_StepAP214_AutoDesignGeneralOrgItem;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_StepAP214_AutoDesignGroupedItem: declare class NCollection_HArray1_StepAP214_AutoDesignGroupedItem
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_StepAP214_AutoDesignGroupedItem;
+  Array1(): NCollection_Array1_StepAP214_AutoDesignGroupedItem;
 
-ChangeArray1(): NCollection_Array1_StepAP214_AutoDesignGroupedItem;
+  ChangeArray1(): NCollection_Array1_StepAP214_AutoDesignGroupedItem;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_StepAP214_AutoDesignPresentedItemSelect: declare class NCollection_HArray1_StepAP214_AutoDesignPresentedItemSelect
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_StepAP214_AutoDesignPresentedItemSelect;
+  Array1(): NCollection_Array1_StepAP214_AutoDesignPresentedItemSelect;
 
-ChangeArray1(): NCollection_Array1_StepAP214_AutoDesignPresentedItemSelect;
+  ChangeArray1(): NCollection_Array1_StepAP214_AutoDesignPresentedItemSelect;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_StepAP214_AutoDesignReferencingItem: declare class NCollection_HArray1_StepAP214_AutoDesignReferencingItem
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_StepAP214_AutoDesignReferencingItem;
+  Array1(): NCollection_Array1_StepAP214_AutoDesignReferencingItem;
 
-ChangeArray1(): NCollection_Array1_StepAP214_AutoDesignReferencingItem;
+  ChangeArray1(): NCollection_Array1_StepAP214_AutoDesignReferencingItem;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_StepAP214_DateAndTimeItem: declare class NCollection_HArray1_StepAP214_DateAndTimeItem
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_StepAP214_DateAndTimeItem;
+  Array1(): NCollection_Array1_StepAP214_DateAndTimeItem;
 
-ChangeArray1(): NCollection_Array1_StepAP214_DateAndTimeItem;
+  ChangeArray1(): NCollection_Array1_StepAP214_DateAndTimeItem;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_StepAP214_DateItem: declare class NCollection_HArray1_StepAP214_DateItem
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_StepAP214_DateItem;
+  Array1(): NCollection_Array1_StepAP214_DateItem;
 
-ChangeArray1(): NCollection_Array1_StepAP214_DateItem;
+  ChangeArray1(): NCollection_Array1_StepAP214_DateItem;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_StepAP214_DocumentReferenceItem: declare class NCollection_HArray1_StepAP214_DocumentReferenceItem
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_StepAP214_DocumentReferenceItem;
+  Array1(): NCollection_Array1_StepAP214_DocumentReferenceItem;
 
-ChangeArray1(): NCollection_Array1_StepAP214_DocumentReferenceItem;
+  ChangeArray1(): NCollection_Array1_StepAP214_DocumentReferenceItem;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_StepAP214_ExternalIdentificationItem: declare class NCollection_HArray1_StepAP214_ExternalIdentificationItem
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_StepAP214_ExternalIdentificationItem;
+  Array1(): NCollection_Array1_StepAP214_ExternalIdentificationItem;
 
-ChangeArray1(): NCollection_Array1_StepAP214_ExternalIdentificationItem;
+  ChangeArray1(): NCollection_Array1_StepAP214_ExternalIdentificationItem;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_StepAP214_GroupItem: declare class NCollection_HArray1_StepAP214_GroupItem
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_StepAP214_GroupItem;
+  Array1(): NCollection_Array1_StepAP214_GroupItem;
 
-ChangeArray1(): NCollection_Array1_StepAP214_GroupItem;
+  ChangeArray1(): NCollection_Array1_StepAP214_GroupItem;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_StepAP214_OrganizationItem: declare class NCollection_HArray1_StepAP214_OrganizationItem
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_StepAP214_OrganizationItem;
+  Array1(): NCollection_Array1_StepAP214_OrganizationItem;
 
-ChangeArray1(): NCollection_Array1_StepAP214_OrganizationItem;
+  ChangeArray1(): NCollection_Array1_StepAP214_OrganizationItem;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_StepAP214_PersonAndOrganizationItem: declare class NCollection_HArray1_StepAP214_PersonAndOrganizationItem
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_StepAP214_PersonAndOrganizationItem;
+  Array1(): NCollection_Array1_StepAP214_PersonAndOrganizationItem;
 
-ChangeArray1(): NCollection_Array1_StepAP214_PersonAndOrganizationItem;
+  ChangeArray1(): NCollection_Array1_StepAP214_PersonAndOrganizationItem;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_StepAP214_PresentedItemSelect: declare class NCollection_HArray1_StepAP214_PresentedItemSelect
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_StepAP214_PresentedItemSelect;
+  Array1(): NCollection_Array1_StepAP214_PresentedItemSelect;
 
-ChangeArray1(): NCollection_Array1_StepAP214_PresentedItemSelect;
+  ChangeArray1(): NCollection_Array1_StepAP214_PresentedItemSelect;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_StepAP214_SecurityClassificationItem: declare class NCollection_HArray1_StepAP214_SecurityClassificationItem
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_StepAP214_SecurityClassificationItem;
+  Array1(): NCollection_Array1_StepAP214_SecurityClassificationItem;
 
-ChangeArray1(): NCollection_Array1_StepAP214_SecurityClassificationItem;
+  ChangeArray1(): NCollection_Array1_StepAP214_SecurityClassificationItem;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_StepDimTol_DatumReferenceModifier: declare class NCollection_HArray1_StepDimTol_DatumReferenceModifier
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_StepDimTol_DatumReferenceModifier;
+  Array1(): NCollection_Array1_StepDimTol_DatumReferenceModifier;
 
-ChangeArray1(): NCollection_Array1_StepDimTol_DatumReferenceModifier;
+  ChangeArray1(): NCollection_Array1_StepDimTol_DatumReferenceModifier;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_StepDimTol_DatumSystemOrReference: declare class NCollection_HArray1_StepDimTol_DatumSystemOrReference
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_StepDimTol_DatumSystemOrReference;
+  Array1(): NCollection_Array1_StepDimTol_DatumSystemOrReference;
 
-ChangeArray1(): NCollection_Array1_StepDimTol_DatumSystemOrReference;
+  ChangeArray1(): NCollection_Array1_StepDimTol_DatumSystemOrReference;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_StepDimTol_GeometricToleranceModifier: declare class NCollection_HArray1_StepDimTol_GeometricToleranceModifier
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_StepDimTol_GeometricToleranceModifier;
+  Array1(): NCollection_Array1_StepDimTol_GeometricToleranceModifier;
 
-ChangeArray1(): NCollection_Array1_StepDimTol_GeometricToleranceModifier;
+  ChangeArray1(): NCollection_Array1_StepDimTol_GeometricToleranceModifier;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_StepDimTol_ToleranceZoneTarget: declare class NCollection_HArray1_StepDimTol_ToleranceZoneTarget
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_StepDimTol_ToleranceZoneTarget;
+  Array1(): NCollection_Array1_StepDimTol_ToleranceZoneTarget;
 
-ChangeArray1(): NCollection_Array1_StepDimTol_ToleranceZoneTarget;
+  ChangeArray1(): NCollection_Array1_StepDimTol_ToleranceZoneTarget;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_StepElement_MeasureOrUnspecifiedValue: declare class NCollection_HArray1_StepElement_MeasureOrUnspecifiedValue
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_StepElement_MeasureOrUnspecifiedValue;
+  Array1(): NCollection_Array1_StepElement_MeasureOrUnspecifiedValue;
 
-ChangeArray1(): NCollection_Array1_StepElement_MeasureOrUnspecifiedValue;
+  ChangeArray1(): NCollection_Array1_StepElement_MeasureOrUnspecifiedValue;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_StepFEA_DegreeOfFreedom: declare class NCollection_HArray1_StepFEA_DegreeOfFreedom
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_StepFEA_DegreeOfFreedom;
+  Array1(): NCollection_Array1_StepFEA_DegreeOfFreedom;
 
-ChangeArray1(): NCollection_Array1_StepFEA_DegreeOfFreedom;
+  ChangeArray1(): NCollection_Array1_StepFEA_DegreeOfFreedom;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_StepGeom_PcurveOrSurface: declare class NCollection_HArray1_StepGeom_PcurveOrSurface
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_StepGeom_PcurveOrSurface;
+  Array1(): NCollection_Array1_StepGeom_PcurveOrSurface;
 
-ChangeArray1(): NCollection_Array1_StepGeom_PcurveOrSurface;
+  ChangeArray1(): NCollection_Array1_StepGeom_PcurveOrSurface;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_StepGeom_SurfaceBoundary: declare class NCollection_HArray1_StepGeom_SurfaceBoundary
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_StepGeom_SurfaceBoundary;
+  Array1(): NCollection_Array1_StepGeom_SurfaceBoundary;
 
-ChangeArray1(): NCollection_Array1_StepGeom_SurfaceBoundary;
+  ChangeArray1(): NCollection_Array1_StepGeom_SurfaceBoundary;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_StepGeom_TrimmingSelect: declare class NCollection_HArray1_StepGeom_TrimmingSelect
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_StepGeom_TrimmingSelect;
+  Array1(): NCollection_Array1_StepGeom_TrimmingSelect;
 
-ChangeArray1(): NCollection_Array1_StepGeom_TrimmingSelect;
+  ChangeArray1(): NCollection_Array1_StepGeom_TrimmingSelect;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_StepShape_GeometricSetSelect: declare class NCollection_HArray1_StepShape_GeometricSetSelect
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_StepShape_GeometricSetSelect;
+  Array1(): NCollection_Array1_StepShape_GeometricSetSelect;
 
-ChangeArray1(): NCollection_Array1_StepShape_GeometricSetSelect;
+  ChangeArray1(): NCollection_Array1_StepShape_GeometricSetSelect;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_StepShape_ShapeDimensionRepresentationItem: declare class NCollection_HArray1_StepShape_ShapeDimensionRepresentationItem
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_StepShape_ShapeDimensionRepresentationItem;
+  Array1(): NCollection_Array1_StepShape_ShapeDimensionRepresentationItem;
 
-ChangeArray1(): NCollection_Array1_StepShape_ShapeDimensionRepresentationItem;
+  ChangeArray1(): NCollection_Array1_StepShape_ShapeDimensionRepresentationItem;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_StepShape_Shell: declare class NCollection_HArray1_StepShape_Shell
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_StepShape_Shell;
+  Array1(): NCollection_Array1_StepShape_Shell;
 
-ChangeArray1(): NCollection_Array1_StepShape_Shell;
+  ChangeArray1(): NCollection_Array1_StepShape_Shell;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_StepShape_ValueQualifier: declare class NCollection_HArray1_StepShape_ValueQualifier
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_StepShape_ValueQualifier;
+  Array1(): NCollection_Array1_StepShape_ValueQualifier;
 
-ChangeArray1(): NCollection_Array1_StepShape_ValueQualifier;
+  ChangeArray1(): NCollection_Array1_StepShape_ValueQualifier;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_StepVisual_AnnotationPlaneElement: declare class NCollection_HArray1_StepVisual_AnnotationPlaneElement
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_StepVisual_AnnotationPlaneElement;
+  Array1(): NCollection_Array1_StepVisual_AnnotationPlaneElement;
 
-ChangeArray1(): NCollection_Array1_StepVisual_AnnotationPlaneElement;
+  ChangeArray1(): NCollection_Array1_StepVisual_AnnotationPlaneElement;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_StepVisual_BoxCharacteristicSelect: declare class NCollection_HArray1_StepVisual_BoxCharacteristicSelect
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_StepVisual_BoxCharacteristicSelect;
+  Array1(): NCollection_Array1_StepVisual_BoxCharacteristicSelect;
 
-ChangeArray1(): NCollection_Array1_StepVisual_BoxCharacteristicSelect;
+  ChangeArray1(): NCollection_Array1_StepVisual_BoxCharacteristicSelect;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_StepVisual_CameraModelD3MultiClippingInterectionSelect: declare class NCollection_HArray1_StepVisual_CameraModelD3MultiClippingInterectionSelect
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_StepVisual_CameraModelD3MultiClippingInterectionSelect;
+  Array1(): NCollection_Array1_StepVisual_CameraModelD3MultiClippingInterectionSelect;
 
-ChangeArray1(): NCollection_Array1_StepVisual_CameraModelD3MultiClippingInterectionSelect;
+  ChangeArray1(): NCollection_Array1_StepVisual_CameraModelD3MultiClippingInterectionSelect;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_StepVisual_CameraModelD3MultiClippingUnionSelect: declare class NCollection_HArray1_StepVisual_CameraModelD3MultiClippingUnionSelect
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_StepVisual_CameraModelD3MultiClippingUnionSelect;
+  Array1(): NCollection_Array1_StepVisual_CameraModelD3MultiClippingUnionSelect;
 
-ChangeArray1(): NCollection_Array1_StepVisual_CameraModelD3MultiClippingUnionSelect;
+  ChangeArray1(): NCollection_Array1_StepVisual_CameraModelD3MultiClippingUnionSelect;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_StepVisual_DirectionCountSelect: declare class NCollection_HArray1_StepVisual_DirectionCountSelect
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_StepVisual_DirectionCountSelect;
+  Array1(): NCollection_Array1_StepVisual_DirectionCountSelect;
 
-ChangeArray1(): NCollection_Array1_StepVisual_DirectionCountSelect;
+  ChangeArray1(): NCollection_Array1_StepVisual_DirectionCountSelect;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_StepVisual_DraughtingCalloutElement: declare class NCollection_HArray1_StepVisual_DraughtingCalloutElement
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_StepVisual_DraughtingCalloutElement;
+  Array1(): NCollection_Array1_StepVisual_DraughtingCalloutElement;
 
-ChangeArray1(): NCollection_Array1_StepVisual_DraughtingCalloutElement;
+  ChangeArray1(): NCollection_Array1_StepVisual_DraughtingCalloutElement;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_StepVisual_FillStyleSelect: declare class NCollection_HArray1_StepVisual_FillStyleSelect
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_StepVisual_FillStyleSelect;
+  Array1(): NCollection_Array1_StepVisual_FillStyleSelect;
 
-ChangeArray1(): NCollection_Array1_StepVisual_FillStyleSelect;
+  ChangeArray1(): NCollection_Array1_StepVisual_FillStyleSelect;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;

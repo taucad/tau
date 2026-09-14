@@ -8,7 +8,7 @@ Any
 // Typed approximation of the return of open() in binary mode
 BinaryIO
 
-write(s: Union[bytes, bytearray]) -> int
+  write(s: Union[bytes, bytearray]) -> int
 
 // Abstract base class for generic types
 Generic
@@ -16,20 +16,20 @@ Generic
 // Typed approximation of the return of open() in text mode
 TextIO
 
-buffer: BinaryIO
+  buffer: BinaryIO
 
-encoding: str
+  encoding: str
 
-errors: Optional[str]
+  errors: Optional[str]
 
-line_buffering: bool
+  line_buffering: bool
 
-newlines: Any
+  newlines: Any
 
 // Type variable
 TypeVar
 
-has_default()
+  has_default()
 
 // Cast a value to a type
 cast(typ, val)

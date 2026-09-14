@@ -4,332 +4,332 @@
 
 TFunction_Driver: declare class TFunction_Driver extends Standard_Transient
 
-Init(L: TDF_Label): void;
+  Init(L: TDF_Label): void;
 
-Label(): TDF_Label;
+  Label(): TDF_Label;
 
-Validate(log: TFunction_Logbook): void;
+  Validate(log: TFunction_Logbook): void;
 
-MustExecute(log: TFunction_Logbook): boolean;
+  MustExecute(log: TFunction_Logbook): boolean;
 
-Execute(): { returnValue: number; log: TFunction_Logbook; [Symbol.dispose](): void };
+  Execute(): { returnValue: number; log: TFunction_Logbook; [Symbol.dispose](): void };
 
-Arguments(args: NCollection_List_TDF_Label): void;
+  Arguments(args: NCollection_List_TDF_Label): void;
 
-Results(res: NCollection_List_TDF_Label): void;
+  Results(res: NCollection_List_TDF_Label): void;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 TFunction_DriverTable: declare class TFunction_DriverTable extends Standard_Transient
 
-constructor
+  constructor
 
-static Get(): TFunction_DriverTable;
+  static Get(): TFunction_DriverTable;
 
-AddDriver(guid: Standard_GUID, driver: TFunction_Driver, thread?: number): boolean;
+  AddDriver(guid: Standard_GUID, driver: TFunction_Driver, thread?: number): boolean;
 
-HasDriver(guid: Standard_GUID, thread?: number): boolean;
+  HasDriver(guid: Standard_GUID, thread?: number): boolean;
 
-FindDriver(guid: Standard_GUID, thread: number): { returnValue: boolean; driver: TFunction_Driver; [Symbol.dispose](): void };
+  FindDriver(guid: Standard_GUID, thread: number): { returnValue: boolean; driver: TFunction_Driver; [Symbol.dispose](): void };
 
-RemoveDriver(guid: Standard_GUID, thread?: number): boolean;
+  RemoveDriver(guid: Standard_GUID, thread?: number): boolean;
 
-Clear(): void;
+  Clear(): void;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 TFunction_ExecutionStatus: typeof TFunction_ExecutionStatus[keyof typeof TFunction_ExecutionStatus]
 
 TFunction_Function: declare class TFunction_Function extends TDF_Attribute
 
-constructor
+  constructor
 
-static Set(L: TDF_Label): TFunction_Function;
-static Set(L: TDF_Label, DriverID: Standard_GUID): TFunction_Function;
-static Set(L: TDF_Label): TFunction_Function;
-static Set(L: TDF_Label, DriverID: Standard_GUID): TFunction_Function;
+  static Set(L: TDF_Label): TFunction_Function;
+  static Set(L: TDF_Label, DriverID: Standard_GUID): TFunction_Function;
+  static Set(L: TDF_Label): TFunction_Function;
+  static Set(L: TDF_Label, DriverID: Standard_GUID): TFunction_Function;
 
-static GetID(): Standard_GUID;
+  static GetID(): Standard_GUID;
 
-GetDriverGUID(): Standard_GUID;
+  GetDriverGUID(): Standard_GUID;
 
-SetDriverGUID(guid: Standard_GUID): void;
+  SetDriverGUID(guid: Standard_GUID): void;
 
-Failed(): boolean;
+  Failed(): boolean;
 
-SetFailure(mode?: number): void;
+  SetFailure(mode?: number): void;
 
-GetFailure(): number;
+  GetFailure(): number;
 
-ID(): Standard_GUID;
+  ID(): Standard_GUID;
 
-Restore(anAttribute: TDF_Attribute): void;
+  Restore(anAttribute: TDF_Attribute): void;
 
-Paste(intoAttribute: TDF_Attribute, aRelocationTable: TDF_RelocationTable): void;
+  Paste(intoAttribute: TDF_Attribute, aRelocationTable: TDF_RelocationTable): void;
 
-NewEmpty(): TDF_Attribute;
+  NewEmpty(): TDF_Attribute;
 
-References(aDataSet: TDF_DataSet): void;
+  References(aDataSet: TDF_DataSet): void;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 TFunction_GraphNode: declare class TFunction_GraphNode extends TDF_Attribute
 
-constructor
+  constructor
 
-static Set(L: TDF_Label): TFunction_GraphNode;
+  static Set(L: TDF_Label): TFunction_GraphNode;
 
-static GetID(): Standard_GUID;
+  static GetID(): Standard_GUID;
 
-AddPrevious(funcID: number): boolean;
-AddPrevious(func: TDF_Label): boolean;
-AddPrevious(funcID: number): boolean;
-AddPrevious(func: TDF_Label): boolean;
+  AddPrevious(funcID: number): boolean;
+  AddPrevious(func: TDF_Label): boolean;
+  AddPrevious(funcID: number): boolean;
+  AddPrevious(func: TDF_Label): boolean;
 
-RemovePrevious(funcID: number): boolean;
-RemovePrevious(func: TDF_Label): boolean;
-RemovePrevious(funcID: number): boolean;
-RemovePrevious(func: TDF_Label): boolean;
+  RemovePrevious(funcID: number): boolean;
+  RemovePrevious(func: TDF_Label): boolean;
+  RemovePrevious(funcID: number): boolean;
+  RemovePrevious(func: TDF_Label): boolean;
 
-GetPrevious(): NCollection_Map_int;
+  GetPrevious(): NCollection_Map_int;
 
-RemoveAllPrevious(): void;
+  RemoveAllPrevious(): void;
 
-AddNext(funcID: number): boolean;
-AddNext(func: TDF_Label): boolean;
-AddNext(funcID: number): boolean;
-AddNext(func: TDF_Label): boolean;
+  AddNext(funcID: number): boolean;
+  AddNext(func: TDF_Label): boolean;
+  AddNext(funcID: number): boolean;
+  AddNext(func: TDF_Label): boolean;
 
-RemoveNext(funcID: number): boolean;
-RemoveNext(func: TDF_Label): boolean;
-RemoveNext(funcID: number): boolean;
-RemoveNext(func: TDF_Label): boolean;
+  RemoveNext(funcID: number): boolean;
+  RemoveNext(func: TDF_Label): boolean;
+  RemoveNext(funcID: number): boolean;
+  RemoveNext(func: TDF_Label): boolean;
 
-GetNext(): NCollection_Map_int;
+  GetNext(): NCollection_Map_int;
 
-RemoveAllNext(): void;
+  RemoveAllNext(): void;
 
-GetStatus(): TFunction_ExecutionStatus;
+  GetStatus(): TFunction_ExecutionStatus;
 
-SetStatus(status: TFunction_ExecutionStatus): void;
+  SetStatus(status: TFunction_ExecutionStatus): void;
 
-ID(): Standard_GUID;
+  ID(): Standard_GUID;
 
-Restore(anAttribute: TDF_Attribute): void;
+  Restore(anAttribute: TDF_Attribute): void;
 
-Paste(intoAttribute: TDF_Attribute, aRelocationTable: TDF_RelocationTable): void;
+  Paste(intoAttribute: TDF_Attribute, aRelocationTable: TDF_RelocationTable): void;
 
-NewEmpty(): TDF_Attribute;
+  NewEmpty(): TDF_Attribute;
 
-References(aDataSet: TDF_DataSet): void;
+  References(aDataSet: TDF_DataSet): void;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 TFunction_IFunction: declare class TFunction_IFunction
 
-constructor
+  constructor
 
-static NewFunction(L: TDF_Label, ID: Standard_GUID): boolean;
+  static NewFunction(L: TDF_Label, ID: Standard_GUID): boolean;
 
-static DeleteFunction(L: TDF_Label): boolean;
+  static DeleteFunction(L: TDF_Label): boolean;
 
-static UpdateDependencies(Access: TDF_Label): boolean;
-UpdateDependencies(): boolean;
+  static UpdateDependencies(Access: TDF_Label): boolean;
+  UpdateDependencies(): boolean;
 
-Init(L: TDF_Label): void;
+  Init(L: TDF_Label): void;
 
-Label(): TDF_Label;
+  Label(): TDF_Label;
 
-Arguments(args: NCollection_List_TDF_Label): void;
+  Arguments(args: NCollection_List_TDF_Label): void;
 
-Results(res: NCollection_List_TDF_Label): void;
+  Results(res: NCollection_List_TDF_Label): void;
 
-GetPrevious(prev: NCollection_List_TDF_Label): void;
+  GetPrevious(prev: NCollection_List_TDF_Label): void;
 
-GetNext(prev: NCollection_List_TDF_Label): void;
+  GetNext(prev: NCollection_List_TDF_Label): void;
 
-GetStatus(): TFunction_ExecutionStatus;
+  GetStatus(): TFunction_ExecutionStatus;
 
-SetStatus(status: TFunction_ExecutionStatus): void;
+  SetStatus(status: TFunction_ExecutionStatus): void;
 
-GetAllFunctions(): NCollection_DoubleMap_int_TDF_Label;
+  GetAllFunctions(): NCollection_DoubleMap_int_TDF_Label;
 
-GetLogbook(): TFunction_Logbook;
+  GetLogbook(): TFunction_Logbook;
 
-GetDriver(thread?: number): TFunction_Driver;
+  GetDriver(thread?: number): TFunction_Driver;
 
-GetGraphNode(): TFunction_GraphNode;
+  GetGraphNode(): TFunction_GraphNode;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 TFunction_Iterator: declare class TFunction_Iterator
 
-constructor
+  constructor
 
-Init(Access: TDF_Label): void;
+  Init(Access: TDF_Label): void;
 
-SetUsageOfExecutionStatus(usage: boolean): void;
+  SetUsageOfExecutionStatus(usage: boolean): void;
 
-GetUsageOfExecutionStatus(): boolean;
+  GetUsageOfExecutionStatus(): boolean;
 
-GetMaxNbThreads(): number;
+  GetMaxNbThreads(): number;
 
-Current(): NCollection_List_TDF_Label;
+  Current(): NCollection_List_TDF_Label;
 
-More(): boolean;
+  More(): boolean;
 
-Next(): void;
+  Next(): void;
 
-GetStatus(func: TDF_Label): TFunction_ExecutionStatus;
+  GetStatus(func: TDF_Label): TFunction_ExecutionStatus;
 
-SetStatus(func: TDF_Label, status: TFunction_ExecutionStatus): void;
+  SetStatus(func: TDF_Label, status: TFunction_ExecutionStatus): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 TFunction_Logbook: declare class TFunction_Logbook extends TDF_Attribute
 
-constructor
+  constructor
 
-static Set(Access: TDF_Label): TFunction_Logbook;
+  static Set(Access: TDF_Label): TFunction_Logbook;
 
-static GetID(): Standard_GUID;
+  static GetID(): Standard_GUID;
 
-Clear(): void;
+  Clear(): void;
 
-IsEmpty(): boolean;
+  IsEmpty(): boolean;
 
-SetTouched(L: TDF_Label): void;
+  SetTouched(L: TDF_Label): void;
 
-SetImpacted(L: TDF_Label, WithChildren?: boolean): void;
+  SetImpacted(L: TDF_Label, WithChildren?: boolean): void;
 
-SetValid(L: TDF_Label, WithChildren: boolean): void;
-SetValid(Ls: NCollection_Map_TDF_Label): void;
-SetValid(L: TDF_Label, WithChildren: boolean): void;
-SetValid(Ls: NCollection_Map_TDF_Label): void;
+  SetValid(L: TDF_Label, WithChildren: boolean): void;
+  SetValid(Ls: NCollection_Map_TDF_Label): void;
+  SetValid(L: TDF_Label, WithChildren: boolean): void;
+  SetValid(Ls: NCollection_Map_TDF_Label): void;
 
-IsModified(L: TDF_Label, WithChildren?: boolean): boolean;
+  IsModified(L: TDF_Label, WithChildren?: boolean): boolean;
 
-GetTouched(): NCollection_Map_TDF_Label;
+  GetTouched(): NCollection_Map_TDF_Label;
 
-GetImpacted(): NCollection_Map_TDF_Label;
+  GetImpacted(): NCollection_Map_TDF_Label;
 
-GetValid(): NCollection_Map_TDF_Label;
-GetValid(Ls: NCollection_Map_TDF_Label): void;
-GetValid(): NCollection_Map_TDF_Label;
-GetValid(Ls: NCollection_Map_TDF_Label): void;
+  GetValid(): NCollection_Map_TDF_Label;
+  GetValid(Ls: NCollection_Map_TDF_Label): void;
+  GetValid(): NCollection_Map_TDF_Label;
+  GetValid(Ls: NCollection_Map_TDF_Label): void;
 
-Done(status: boolean): void;
+  Done(status: boolean): void;
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-ID(): Standard_GUID;
+  ID(): Standard_GUID;
 
-Restore(anAttribute: TDF_Attribute): void;
+  Restore(anAttribute: TDF_Attribute): void;
 
-Paste(intoAttribute: TDF_Attribute, aRelocationTable: TDF_RelocationTable): void;
+  Paste(intoAttribute: TDF_Attribute, aRelocationTable: TDF_RelocationTable): void;
 
-NewEmpty(): TDF_Attribute;
+  NewEmpty(): TDF_Attribute;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 TFunction_Scope: declare class TFunction_Scope extends TDF_Attribute
 
-constructor
+  constructor
 
-static Set(Access: TDF_Label): TFunction_Scope;
+  static Set(Access: TDF_Label): TFunction_Scope;
 
-static GetID(): Standard_GUID;
+  static GetID(): Standard_GUID;
 
-AddFunction(L: TDF_Label): boolean;
+  AddFunction(L: TDF_Label): boolean;
 
-RemoveFunction(L: TDF_Label): boolean;
-RemoveFunction(ID: number): boolean;
-RemoveFunction(L: TDF_Label): boolean;
-RemoveFunction(ID: number): boolean;
+  RemoveFunction(L: TDF_Label): boolean;
+  RemoveFunction(ID: number): boolean;
+  RemoveFunction(L: TDF_Label): boolean;
+  RemoveFunction(ID: number): boolean;
 
-RemoveAllFunctions(): void;
+  RemoveAllFunctions(): void;
 
-HasFunction(ID: number): boolean;
-HasFunction(L: TDF_Label): boolean;
-HasFunction(ID: number): boolean;
-HasFunction(L: TDF_Label): boolean;
+  HasFunction(ID: number): boolean;
+  HasFunction(L: TDF_Label): boolean;
+  HasFunction(ID: number): boolean;
+  HasFunction(L: TDF_Label): boolean;
 
-GetFunction(L: TDF_Label): number;
-GetFunction(ID: number): TDF_Label;
-GetFunction(L: TDF_Label): number;
-GetFunction(ID: number): TDF_Label;
+  GetFunction(L: TDF_Label): number;
+  GetFunction(ID: number): TDF_Label;
+  GetFunction(L: TDF_Label): number;
+  GetFunction(ID: number): TDF_Label;
 
-GetLogbook(): TFunction_Logbook;
+  GetLogbook(): TFunction_Logbook;
 
-ID(): Standard_GUID;
+  ID(): Standard_GUID;
 
-Restore(anAttribute: TDF_Attribute): void;
+  Restore(anAttribute: TDF_Attribute): void;
 
-Paste(intoAttribute: TDF_Attribute, aRelocationTable: TDF_RelocationTable): void;
+  Paste(intoAttribute: TDF_Attribute, aRelocationTable: TDF_RelocationTable): void;
 
-NewEmpty(): TDF_Attribute;
+  NewEmpty(): TDF_Attribute;
 
-GetFunctions(): NCollection_DoubleMap_int_TDF_Label;
+  GetFunctions(): NCollection_DoubleMap_int_TDF_Label;
 
-ChangeFunctions(): NCollection_DoubleMap_int_TDF_Label;
+  ChangeFunctions(): NCollection_DoubleMap_int_TDF_Label;
 
-SetFreeID(ID: number): void;
+  SetFreeID(ID: number): void;
 
-GetFreeID(): number;
+  GetFreeID(): number;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 TFunction_Array1OfDataMapOfGUIDDriver: NCollection_Array1_int
 

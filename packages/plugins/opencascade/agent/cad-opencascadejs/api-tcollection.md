@@ -4,10 +4,10 @@
 
 TCollection: declare class TCollection
 
-constructor
+  constructor
 
-static NextPrimeForMap(I: number): number;
+  static NextPrimeForMap(I: number): number;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;

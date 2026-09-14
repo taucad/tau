@@ -4,85 +4,85 @@
 
 RWMesh: declare class RWMesh
 
-constructor
+  constructor
 
-static ReadNameAttribute(theLabel: TDF_Label): TCollection_AsciiString;
+  static ReadNameAttribute(theLabel: TDF_Label): TCollection_AsciiString;
 
-static FormatName(theFormat: RWMesh_NameFormat, theLabel: TDF_Label, theRefLabel: TDF_Label): TCollection_AsciiString;
+  static FormatName(theFormat: RWMesh_NameFormat, theLabel: TDF_Label, theRefLabel: TDF_Label): TCollection_AsciiString;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 RWMesh_CafReader: declare class RWMesh_CafReader extends Standard_Transient
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-Document(): TDocStd_Document;
+  Document(): TDocStd_Document;
 
-SetDocument(theDoc: TDocStd_Document): void;
+  SetDocument(theDoc: TDocStd_Document): void;
 
-RootPrefix(): TCollection_AsciiString;
+  RootPrefix(): TCollection_AsciiString;
 
-SetRootPrefix(theRootPrefix: TCollection_AsciiString): void;
+  SetRootPrefix(theRootPrefix: TCollection_AsciiString): void;
 
-ToFillIncompleteDocument(): boolean;
+  ToFillIncompleteDocument(): boolean;
 
-SetFillIncompleteDocument(theToFillIncomplete: boolean): void;
+  SetFillIncompleteDocument(theToFillIncomplete: boolean): void;
 
-MemoryLimitMiB(): number;
+  MemoryLimitMiB(): number;
 
-SetMemoryLimitMiB(theLimitMiB: number): void;
+  SetMemoryLimitMiB(theLimitMiB: number): void;
 
-CoordinateSystemConverter(): RWMesh_CoordinateSystemConverter;
+  CoordinateSystemConverter(): RWMesh_CoordinateSystemConverter;
 
-SetCoordinateSystemConverter(theConverter: RWMesh_CoordinateSystemConverter): void;
+  SetCoordinateSystemConverter(theConverter: RWMesh_CoordinateSystemConverter): void;
 
-SystemLengthUnit(): number;
+  SystemLengthUnit(): number;
 
-SetSystemLengthUnit(theUnits: number): void;
+  SetSystemLengthUnit(theUnits: number): void;
 
-HasSystemCoordinateSystem(): boolean;
+  HasSystemCoordinateSystem(): boolean;
 
-SystemCoordinateSystem(): gp_Ax3;
+  SystemCoordinateSystem(): gp_Ax3;
 
-SetSystemCoordinateSystem(theCS: gp_Ax3): void;
-SetSystemCoordinateSystem(theCS: RWMesh_CoordinateSystem): void;
-SetSystemCoordinateSystem(theCS: gp_Ax3): void;
-SetSystemCoordinateSystem(theCS: RWMesh_CoordinateSystem): void;
+  SetSystemCoordinateSystem(theCS: gp_Ax3): void;
+  SetSystemCoordinateSystem(theCS: RWMesh_CoordinateSystem): void;
+  SetSystemCoordinateSystem(theCS: gp_Ax3): void;
+  SetSystemCoordinateSystem(theCS: RWMesh_CoordinateSystem): void;
 
-FileLengthUnit(): number;
+  FileLengthUnit(): number;
 
-SetFileLengthUnit(theUnits: number): void;
+  SetFileLengthUnit(theUnits: number): void;
 
-HasFileCoordinateSystem(): boolean;
+  HasFileCoordinateSystem(): boolean;
 
-FileCoordinateSystem(): gp_Ax3;
+  FileCoordinateSystem(): gp_Ax3;
 
-SetFileCoordinateSystem(theCS: gp_Ax3): void;
-SetFileCoordinateSystem(theCS: RWMesh_CoordinateSystem): void;
-SetFileCoordinateSystem(theCS: gp_Ax3): void;
-SetFileCoordinateSystem(theCS: RWMesh_CoordinateSystem): void;
+  SetFileCoordinateSystem(theCS: gp_Ax3): void;
+  SetFileCoordinateSystem(theCS: RWMesh_CoordinateSystem): void;
+  SetFileCoordinateSystem(theCS: gp_Ax3): void;
+  SetFileCoordinateSystem(theCS: RWMesh_CoordinateSystem): void;
 
-Perform(theFile: TCollection_AsciiString, theProgress: Message_ProgressRange): boolean;
+  Perform(theFile: TCollection_AsciiString, theProgress: Message_ProgressRange): boolean;
 
-ExtraStatus(): number;
+  ExtraStatus(): number;
 
-SingleShape(): TopoDS_Shape;
+  SingleShape(): TopoDS_Shape;
 
-ExternalFiles(): NCollection_IndexedMap_TCollection_AsciiString;
+  ExternalFiles(): NCollection_IndexedMap_TCollection_AsciiString;
 
-Metadata(): any;
+  Metadata(): any;
 
-ProbeHeader(theFile: TCollection_AsciiString, theProgress: Message_ProgressRange): boolean;
+  ProbeHeader(theFile: TCollection_AsciiString, theProgress: Message_ProgressRange): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 RWMesh_CafReaderStatusEx: typeof RWMesh_CafReaderStatusEx[keyof typeof RWMesh_CafReaderStatusEx]
 
@@ -90,356 +90,356 @@ RWMesh_CoordinateSystem: typeof RWMesh_CoordinateSystem[keyof typeof RWMesh_Coor
 
 RWMesh_CoordinateSystemConverter: declare class RWMesh_CoordinateSystemConverter
 
-constructor
+  constructor
 
-static StandardCoordinateSystem(theSys: RWMesh_CoordinateSystem): gp_Ax3;
+  static StandardCoordinateSystem(theSys: RWMesh_CoordinateSystem): gp_Ax3;
 
-IsEmpty(): boolean;
+  IsEmpty(): boolean;
 
-InputLengthUnit(): number;
+  InputLengthUnit(): number;
 
-SetInputLengthUnit(theInputScale: number): void;
+  SetInputLengthUnit(theInputScale: number): void;
 
-OutputLengthUnit(): number;
+  OutputLengthUnit(): number;
 
-SetOutputLengthUnit(theOutputScale: number): void;
+  SetOutputLengthUnit(theOutputScale: number): void;
 
-HasInputCoordinateSystem(): boolean;
+  HasInputCoordinateSystem(): boolean;
 
-InputCoordinateSystem(): gp_Ax3;
+  InputCoordinateSystem(): gp_Ax3;
 
-SetInputCoordinateSystem(theSysFrom: gp_Ax3): void;
-SetInputCoordinateSystem(theSysFrom: RWMesh_CoordinateSystem): void;
-SetInputCoordinateSystem(theSysFrom: gp_Ax3): void;
-SetInputCoordinateSystem(theSysFrom: RWMesh_CoordinateSystem): void;
+  SetInputCoordinateSystem(theSysFrom: gp_Ax3): void;
+  SetInputCoordinateSystem(theSysFrom: RWMesh_CoordinateSystem): void;
+  SetInputCoordinateSystem(theSysFrom: gp_Ax3): void;
+  SetInputCoordinateSystem(theSysFrom: RWMesh_CoordinateSystem): void;
 
-HasOutputCoordinateSystem(): boolean;
+  HasOutputCoordinateSystem(): boolean;
 
-OutputCoordinateSystem(): gp_Ax3;
+  OutputCoordinateSystem(): gp_Ax3;
 
-SetOutputCoordinateSystem(theSysTo: gp_Ax3): void;
-SetOutputCoordinateSystem(theSysTo: RWMesh_CoordinateSystem): void;
-SetOutputCoordinateSystem(theSysTo: gp_Ax3): void;
-SetOutputCoordinateSystem(theSysTo: RWMesh_CoordinateSystem): void;
+  SetOutputCoordinateSystem(theSysTo: gp_Ax3): void;
+  SetOutputCoordinateSystem(theSysTo: RWMesh_CoordinateSystem): void;
+  SetOutputCoordinateSystem(theSysTo: gp_Ax3): void;
+  SetOutputCoordinateSystem(theSysTo: RWMesh_CoordinateSystem): void;
 
-Init(theInputSystem: gp_Ax3, theInputLengthUnit: number, theOutputSystem: gp_Ax3, theOutputLengthUnit: number): void;
+  Init(theInputSystem: gp_Ax3, theInputLengthUnit: number, theOutputSystem: gp_Ax3, theOutputLengthUnit: number): void;
 
-TransformTransformation(theTrsf: gp_Trsf): void;
+  TransformTransformation(theTrsf: gp_Trsf): void;
 
-TransformPosition(thePos: gp_XYZ): void;
+  TransformPosition(thePos: gp_XYZ): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 RWMesh_EdgeIterator: declare class RWMesh_EdgeIterator extends RWMesh_ShapeIterator
 
-constructor
+  constructor
 
-More(): boolean;
+  More(): boolean;
 
-Next(): void;
+  Next(): void;
 
-Edge(): TopoDS_Edge;
+  Edge(): TopoDS_Edge;
 
-Shape(): TopoDS_Shape;
+  Shape(): TopoDS_Shape;
 
-Polygon3D(): Poly_Polygon3D;
+  Polygon3D(): Poly_Polygon3D;
 
-IsEmpty(): boolean;
+  IsEmpty(): boolean;
 
-ElemLower(): number;
+  ElemLower(): number;
 
-ElemUpper(): number;
+  ElemUpper(): number;
 
-NbNodes(): number;
+  NbNodes(): number;
 
-NodeLower(): number;
+  NodeLower(): number;
 
-NodeUpper(): number;
+  NodeUpper(): number;
 
-node(theNode: number): gp_Pnt;
+  node(theNode: number): gp_Pnt;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 RWMesh_FaceIterator: declare class RWMesh_FaceIterator extends RWMesh_ShapeIterator
 
-constructor
+  constructor
 
-More(): boolean;
+  More(): boolean;
 
-Next(): void;
+  Next(): void;
 
-Face(): TopoDS_Face;
+  Face(): TopoDS_Face;
 
-Shape(): TopoDS_Shape;
+  Shape(): TopoDS_Shape;
 
-Triangulation(): Poly_Triangulation;
+  Triangulation(): Poly_Triangulation;
 
-IsEmptyMesh(): boolean;
+  IsEmptyMesh(): boolean;
 
-IsEmpty(): boolean;
+  IsEmpty(): boolean;
 
-FaceStyle(): XCAFPrs_Style;
+  FaceStyle(): XCAFPrs_Style;
 
-HasFaceColor(): boolean;
+  HasFaceColor(): boolean;
 
-FaceColor(): Quantity_ColorRGBA;
+  FaceColor(): Quantity_ColorRGBA;
 
-NbTriangles(): number;
+  NbTriangles(): number;
 
-ElemLower(): number;
+  ElemLower(): number;
 
-ElemUpper(): number;
+  ElemUpper(): number;
 
-TriangleOriented(theElemIndex: number): Poly_Triangle;
+  TriangleOriented(theElemIndex: number): Poly_Triangle;
 
-HasNormals(): boolean;
+  HasNormals(): boolean;
 
-HasTexCoords(): boolean;
+  HasTexCoords(): boolean;
 
-NormalTransformed(theNode: number): gp_Dir;
+  NormalTransformed(theNode: number): gp_Dir;
 
-NbNodes(): number;
+  NbNodes(): number;
 
-NodeLower(): number;
+  NodeLower(): number;
 
-NodeUpper(): number;
+  NodeUpper(): number;
 
-NodeTexCoord(theNode: number): gp_Pnt2d;
+  NodeTexCoord(theNode: number): gp_Pnt2d;
 
-node(theNode: number): gp_Pnt;
+  node(theNode: number): gp_Pnt;
 
-normal(theNode: number): gp_Dir;
+  normal(theNode: number): gp_Dir;
 
-triangle(theElemIndex: number): Poly_Triangle;
+  triangle(theElemIndex: number): Poly_Triangle;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 RWMesh_MaterialMap: declare class RWMesh_MaterialMap extends Standard_Transient
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-DefaultStyle(): XCAFPrs_Style;
+  DefaultStyle(): XCAFPrs_Style;
 
-SetDefaultStyle(theStyle: XCAFPrs_Style): void;
+  SetDefaultStyle(theStyle: XCAFPrs_Style): void;
 
-FindMaterial(theStyle: XCAFPrs_Style): TCollection_AsciiString;
+  FindMaterial(theStyle: XCAFPrs_Style): TCollection_AsciiString;
 
-AddMaterial(theStyle: XCAFPrs_Style): TCollection_AsciiString;
+  AddMaterial(theStyle: XCAFPrs_Style): TCollection_AsciiString;
 
-CreateTextureFolder(): boolean;
+  CreateTextureFolder(): boolean;
 
-DefineMaterial(theStyle: XCAFPrs_Style, theKey: TCollection_AsciiString, theName: TCollection_AsciiString): void;
+  DefineMaterial(theStyle: XCAFPrs_Style, theKey: TCollection_AsciiString, theName: TCollection_AsciiString): void;
 
-IsFailed(): boolean;
+  IsFailed(): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 RWMesh_NameFormat: typeof RWMesh_NameFormat[keyof typeof RWMesh_NameFormat]
 
 RWMesh_NodeAttributes: declare class RWMesh_NodeAttributes
 
-constructor
+  constructor
 
-Name: TCollection_AsciiString
+  Name: TCollection_AsciiString
 
-RawName: TCollection_AsciiString
+  RawName: TCollection_AsciiString
 
-NamedData: TDataStd_NamedData
+  NamedData: TDataStd_NamedData
 
-Style: XCAFPrs_Style
+  Style: XCAFPrs_Style
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 RWMesh_ShapeIterator: declare class RWMesh_ShapeIterator
 
-ExploredShape(): TopoDS_Shape;
+  ExploredShape(): TopoDS_Shape;
 
-Shape(): TopoDS_Shape;
+  Shape(): TopoDS_Shape;
 
-More(): boolean;
+  More(): boolean;
 
-Next(): void;
+  Next(): void;
 
-IsEmpty(): boolean;
+  IsEmpty(): boolean;
 
-Style(): XCAFPrs_Style;
+  Style(): XCAFPrs_Style;
 
-HasColor(): boolean;
+  HasColor(): boolean;
 
-Color(): Quantity_ColorRGBA;
+  Color(): Quantity_ColorRGBA;
 
-ElemLower(): number;
+  ElemLower(): number;
 
-ElemUpper(): number;
+  ElemUpper(): number;
 
-NbNodes(): number;
+  NbNodes(): number;
 
-NodeLower(): number;
+  NodeLower(): number;
 
-NodeUpper(): number;
+  NodeUpper(): number;
 
-NodeTransformed(theNode: number): gp_Pnt;
+  NodeTransformed(theNode: number): gp_Pnt;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 RWMesh_TriangulationReader: declare class RWMesh_TriangulationReader extends Standard_Transient
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-FileName(): TCollection_AsciiString;
+  FileName(): TCollection_AsciiString;
 
-SetFileName(theFileName: TCollection_AsciiString): void;
+  SetFileName(theFileName: TCollection_AsciiString): void;
 
-CoordinateSystemConverter(): RWMesh_CoordinateSystemConverter;
+  CoordinateSystemConverter(): RWMesh_CoordinateSystemConverter;
 
-SetCoordinateSystemConverter(theConverter: RWMesh_CoordinateSystemConverter): void;
+  SetCoordinateSystemConverter(theConverter: RWMesh_CoordinateSystemConverter): void;
 
-IsDoublePrecision(): boolean;
+  IsDoublePrecision(): boolean;
 
-SetDoublePrecision(theIsDouble: boolean): void;
+  SetDoublePrecision(theIsDouble: boolean): void;
 
-ToSkipDegenerates(): boolean;
+  ToSkipDegenerates(): boolean;
 
-SetToSkipDegenerates(theToSkip: boolean): void;
+  SetToSkipDegenerates(theToSkip: boolean): void;
 
-ToPrintDebugMessages(): boolean;
+  ToPrintDebugMessages(): boolean;
 
-SetToPrintDebugMessages(theToPrint: boolean): void;
+  SetToPrintDebugMessages(theToPrint: boolean): void;
 
-StartStatistic(): void;
+  StartStatistic(): void;
 
-StopStatistic(): void;
+  StopStatistic(): void;
 
-PrintStatistic(): void;
+  PrintStatistic(): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 RWMesh_TriangulationReader_LoadingStatistic: declare class RWMesh_TriangulationReader_LoadingStatistic
 
-constructor
+  constructor
 
-ExpectedNodesNb: number
+  ExpectedNodesNb: number
 
-LoadedNodesNb: number
+  LoadedNodesNb: number
 
-ExpectedTrianglesNb: number
+  ExpectedTrianglesNb: number
 
-DegeneratedTrianglesNb: number
+  DegeneratedTrianglesNb: number
 
-LoadedTrianglesNb: number
+  LoadedTrianglesNb: number
 
-Reset(): void;
+  Reset(): void;
 
-PrintStatistic(thePrefix?: TCollection_AsciiString): void;
+  PrintStatistic(thePrefix?: TCollection_AsciiString): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 RWMesh_TriangulationSource: declare class RWMesh_TriangulationSource extends Poly_Triangulation
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-Reader(): RWMesh_TriangulationReader;
+  Reader(): RWMesh_TriangulationReader;
 
-SetReader(theReader: RWMesh_TriangulationReader): void;
+  SetReader(theReader: RWMesh_TriangulationReader): void;
 
-DegeneratedTriNb(): number;
+  DegeneratedTriNb(): number;
 
-ChangeDegeneratedTriNb(): number;
+  ChangeDegeneratedTriNb(): number;
 
-HasGeometry(): boolean;
+  HasGeometry(): boolean;
 
-NbEdges(): number;
+  NbEdges(): number;
 
-Edge(theIndex: number): number;
+  Edge(theIndex: number): number;
 
-SetEdge(theIndex: number, theEdge: number): void;
+  SetEdge(theIndex: number, theEdge: number): void;
 
-NbDeferredNodes(): number;
+  NbDeferredNodes(): number;
 
-SetNbDeferredNodes(theNbNodes: number): void;
+  SetNbDeferredNodes(theNbNodes: number): void;
 
-NbDeferredTriangles(): number;
+  NbDeferredTriangles(): number;
 
-SetNbDeferredTriangles(theNbTris: number): void;
+  SetNbDeferredTriangles(theNbTris: number): void;
 
-InternalEdges(): NCollection_Array1_int;
+  InternalEdges(): NCollection_Array1_int;
 
-ResizeEdges(theNbEdges: number, theToCopyOld: boolean): void;
+  ResizeEdges(theNbEdges: number, theToCopyOld: boolean): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 RWMesh_VertexIterator: declare class RWMesh_VertexIterator extends RWMesh_ShapeIterator
 
-constructor
+  constructor
 
-More(): boolean;
+  More(): boolean;
 
-Next(): void;
+  Next(): void;
 
-Vertex(): TopoDS_Vertex;
+  Vertex(): TopoDS_Vertex;
 
-Shape(): TopoDS_Shape;
+  Shape(): TopoDS_Shape;
 
-Point(): gp_Pnt;
+  Point(): gp_Pnt;
 
-IsEmpty(): boolean;
+  IsEmpty(): boolean;
 
-ElemLower(): number;
+  ElemLower(): number;
 
-ElemUpper(): number;
+  ElemUpper(): number;
 
-NbNodes(): number;
+  NbNodes(): number;
 
-NodeLower(): number;
+  NodeLower(): number;
 
-NodeUpper(): number;
+  NodeUpper(): number;
 
-node(argNo0: number): gp_Pnt;
+  node(argNo0: number): gp_Pnt;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 RWMesh_CafReader_CafDocumentTools: interface RWMesh_CafReader_CafDocumentTools
 
-ShapeTool: XCAFDoc_ShapeTool
+  ShapeTool: XCAFDoc_ShapeTool
 
-ColorTool: XCAFDoc_ColorTool
+  ColorTool: XCAFDoc_ColorTool
 
-VisMaterialTool: XCAFDoc_VisMaterialTool
+  VisMaterialTool: XCAFDoc_VisMaterialTool
 
-ComponentMap: NCollection_DataMap_TopoDS_Shape_TDF_Label_TopTools_ShapeMapHasher
+  ComponentMap: NCollection_DataMap_TopoDS_Shape_TDF_Label_TopTools_ShapeMapHasher
 
-OriginalShapeMap: NCollection_DataMap_TopoDS_Shape_TDF_Label_TopTools_ShapeMapHasher
+  OriginalShapeMap: NCollection_DataMap_TopoDS_Shape_TDF_Label_TopTools_ShapeMapHasher

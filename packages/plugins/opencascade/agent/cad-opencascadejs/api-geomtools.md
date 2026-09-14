@@ -4,56 +4,56 @@
 
 GeomTools: declare class GeomTools
 
-constructor
+  constructor
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 GeomTools_Curve2dSet: declare class GeomTools_Curve2dSet
 
-constructor
+  constructor
 
-Clear(): void;
+  Clear(): void;
 
-Add(C: Geom2d_Curve): number;
+  Add(C: Geom2d_Curve): number;
 
-Curve2d(I: number): Geom2d_Curve;
+  Curve2d(I: number): Geom2d_Curve;
 
-Index(C: Geom2d_Curve): number;
+  Index(C: Geom2d_Curve): number;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 GeomTools_CurveSet: declare class GeomTools_CurveSet
 
-constructor
+  constructor
 
-Clear(): void;
+  Clear(): void;
 
-Add(C: Geom_Curve): number;
+  Add(C: Geom_Curve): number;
 
-Curve(I: number): Geom_Curve;
+  Curve(I: number): Geom_Curve;
 
-Index(C: Geom_Curve): number;
+  Index(C: Geom_Curve): number;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 GeomTools_SurfaceSet: declare class GeomTools_SurfaceSet
 
-constructor
+  constructor
 
-Clear(): void;
+  Clear(): void;
 
-Add(S: Geom_Surface): number;
+  Add(S: Geom_Surface): number;
 
-Surface(I: number): Geom_Surface;
+  Surface(I: number): Geom_Surface;
 
-Index(S: Geom_Surface): number;
+  Index(S: Geom_Surface): number;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;

@@ -4,900 +4,900 @@
 
 GeomEval_AHTBezierCurve: declare class GeomEval_AHTBezierCurve extends Geom_BoundedCurve
 
-constructor
+  constructor
 
-Poles(): NCollection_Array1_gp_Pnt;
+  Poles(): NCollection_Array1_gp_Pnt;
 
-Weights(): NCollection_Array1_double;
+  Weights(): NCollection_Array1_double;
 
-AlgDegree(): number;
+  AlgDegree(): number;
 
-Alpha(): number;
+  Alpha(): number;
 
-Beta(): number;
+  Beta(): number;
 
-NbPoles(): number;
+  NbPoles(): number;
 
-IsRational(): boolean;
+  IsRational(): boolean;
 
-StartPoint(): gp_Pnt;
+  StartPoint(): gp_Pnt;
 
-EndPoint(): gp_Pnt;
+  EndPoint(): gp_Pnt;
 
-Reverse(): void;
+  Reverse(): void;
 
-ReversedParameter(U: number): number;
+  ReversedParameter(U: number): number;
 
-FirstParameter(): number;
+  FirstParameter(): number;
 
-LastParameter(): number;
+  LastParameter(): number;
 
-IsClosed(): boolean;
+  IsClosed(): boolean;
 
-IsPeriodic(): boolean;
+  IsPeriodic(): boolean;
 
-Continuity(): GeomAbs_Shape;
+  Continuity(): GeomAbs_Shape;
 
-IsCN(N: number): boolean;
+  IsCN(N: number): boolean;
 
-EvalD0(U: number): gp_Pnt;
+  EvalD0(U: number): gp_Pnt;
 
-EvalD1(U: number): Geom_Curve_ResD1;
+  EvalD1(U: number): Geom_Curve_ResD1;
 
-EvalD2(U: number): Geom_Curve_ResD2;
+  EvalD2(U: number): Geom_Curve_ResD2;
 
-EvalD3(U: number): Geom_Curve_ResD3;
+  EvalD3(U: number): Geom_Curve_ResD3;
 
-EvalDN(U: number, N: number): gp_Vec;
+  EvalDN(U: number, N: number): gp_Vec;
 
-Transform(T: gp_Trsf): void;
+  Transform(T: gp_Trsf): void;
 
-Copy(): Geom_Geometry;
+  Copy(): Geom_Geometry;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 GeomEval_AHTBezierSurface: declare class GeomEval_AHTBezierSurface extends Geom_BoundedSurface
 
-constructor
+  constructor
 
-Poles(): NCollection_Array2_gp_Pnt;
+  Poles(): NCollection_Array2_gp_Pnt;
 
-Weights(): NCollection_Array2_double;
+  Weights(): NCollection_Array2_double;
 
-AlgDegreeU(): number;
+  AlgDegreeU(): number;
 
-AlgDegreeV(): number;
+  AlgDegreeV(): number;
 
-AlphaU(): number;
+  AlphaU(): number;
 
-AlphaV(): number;
+  AlphaV(): number;
 
-BetaU(): number;
+  BetaU(): number;
 
-BetaV(): number;
+  BetaV(): number;
 
-NbPolesU(): number;
+  NbPolesU(): number;
 
-NbPolesV(): number;
+  NbPolesV(): number;
 
-IsURational(): boolean;
+  IsURational(): boolean;
 
-IsVRational(): boolean;
+  IsVRational(): boolean;
 
-UReverse(): void;
+  UReverse(): void;
 
-VReverse(): void;
+  VReverse(): void;
 
-UReversedParameter(U: number): number;
+  UReversedParameter(U: number): number;
 
-VReversedParameter(V: number): number;
+  VReversedParameter(V: number): number;
 
-Bounds(U1: number, U2: number, V1: number, V2: number): { U1: number; U2: number; V1: number; V2: number };
+  Bounds(U1: number, U2: number, V1: number, V2: number): { U1: number; U2: number; V1: number; V2: number };
 
-IsUClosed(): boolean;
+  IsUClosed(): boolean;
 
-IsVClosed(): boolean;
+  IsVClosed(): boolean;
 
-IsUPeriodic(): boolean;
+  IsUPeriodic(): boolean;
 
-IsVPeriodic(): boolean;
+  IsVPeriodic(): boolean;
 
-UIso(U: number): Geom_Curve;
+  UIso(U: number): Geom_Curve;
 
-VIso(V: number): Geom_Curve;
+  VIso(V: number): Geom_Curve;
 
-Continuity(): GeomAbs_Shape;
+  Continuity(): GeomAbs_Shape;
 
-IsCNu(N: number): boolean;
+  IsCNu(N: number): boolean;
 
-IsCNv(N: number): boolean;
+  IsCNv(N: number): boolean;
 
-EvalD0(U: number, V: number): gp_Pnt;
+  EvalD0(U: number, V: number): gp_Pnt;
 
-EvalD1(U: number, V: number): Geom_Surface_ResD1;
+  EvalD1(U: number, V: number): Geom_Surface_ResD1;
 
-EvalD2(U: number, V: number): Geom_Surface_ResD2;
+  EvalD2(U: number, V: number): Geom_Surface_ResD2;
 
-EvalD3(U: number, V: number): Geom_Surface_ResD3;
+  EvalD3(U: number, V: number): Geom_Surface_ResD3;
 
-EvalDN(U: number, V: number, Nu: number, Nv: number): gp_Vec;
+  EvalDN(U: number, V: number, Nu: number, Nv: number): gp_Vec;
 
-Transform(T: gp_Trsf): void;
+  Transform(T: gp_Trsf): void;
 
-Copy(): Geom_Geometry;
+  Copy(): Geom_Geometry;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 GeomEval_CircularHelicoidSurface: declare class GeomEval_CircularHelicoidSurface extends Geom_ElementarySurface
 
-constructor
+  constructor
 
-Pitch(): number;
+  Pitch(): number;
 
-SetPitch(thePitch: number): void;
+  SetPitch(thePitch: number): void;
 
-UReverse(): void;
+  UReverse(): void;
 
-VReverse(): void;
+  VReverse(): void;
 
-UReversedParameter(U: number): number;
+  UReversedParameter(U: number): number;
 
-VReversedParameter(V: number): number;
+  VReversedParameter(V: number): number;
 
-Bounds(U1: number, U2: number, V1: number, V2: number): { U1: number; U2: number; V1: number; V2: number };
+  Bounds(U1: number, U2: number, V1: number, V2: number): { U1: number; U2: number; V1: number; V2: number };
 
-IsUClosed(): boolean;
+  IsUClosed(): boolean;
 
-IsVClosed(): boolean;
+  IsVClosed(): boolean;
 
-IsUPeriodic(): boolean;
+  IsUPeriodic(): boolean;
 
-IsVPeriodic(): boolean;
+  IsVPeriodic(): boolean;
 
-UIso(U: number): Geom_Curve;
+  UIso(U: number): Geom_Curve;
 
-VIso(V: number): Geom_Curve;
+  VIso(V: number): Geom_Curve;
 
-EvalD0(U: number, V: number): gp_Pnt;
+  EvalD0(U: number, V: number): gp_Pnt;
 
-EvalD1(U: number, V: number): Geom_Surface_ResD1;
+  EvalD1(U: number, V: number): Geom_Surface_ResD1;
 
-EvalD2(U: number, V: number): Geom_Surface_ResD2;
+  EvalD2(U: number, V: number): Geom_Surface_ResD2;
 
-EvalD3(U: number, V: number): Geom_Surface_ResD3;
+  EvalD3(U: number, V: number): Geom_Surface_ResD3;
 
-EvalDN(U: number, V: number, Nu: number, Nv: number): gp_Vec;
+  EvalDN(U: number, V: number, Nu: number, Nv: number): gp_Vec;
 
-Transform(T: gp_Trsf): void;
+  Transform(T: gp_Trsf): void;
 
-Copy(): Geom_Geometry;
+  Copy(): Geom_Geometry;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 GeomEval_CircularHelixCurve: declare class GeomEval_CircularHelixCurve extends Geom_Curve
 
-constructor
+  constructor
 
-Position(): gp_Ax2;
+  Position(): gp_Ax2;
 
-Radius(): number;
+  Radius(): number;
 
-Pitch(): number;
+  Pitch(): number;
 
-Reverse(): void;
+  Reverse(): void;
 
-ReversedParameter(U: number): number;
+  ReversedParameter(U: number): number;
 
-FirstParameter(): number;
+  FirstParameter(): number;
 
-LastParameter(): number;
+  LastParameter(): number;
 
-IsClosed(): boolean;
+  IsClosed(): boolean;
 
-IsPeriodic(): boolean;
+  IsPeriodic(): boolean;
 
-Continuity(): GeomAbs_Shape;
+  Continuity(): GeomAbs_Shape;
 
-IsCN(N: number): boolean;
+  IsCN(N: number): boolean;
 
-EvalD0(U: number): gp_Pnt;
+  EvalD0(U: number): gp_Pnt;
 
-EvalD1(U: number): Geom_Curve_ResD1;
+  EvalD1(U: number): Geom_Curve_ResD1;
 
-EvalD2(U: number): Geom_Curve_ResD2;
+  EvalD2(U: number): Geom_Curve_ResD2;
 
-EvalD3(U: number): Geom_Curve_ResD3;
+  EvalD3(U: number): Geom_Curve_ResD3;
 
-EvalDN(U: number, N: number): gp_Vec;
+  EvalDN(U: number, N: number): gp_Vec;
 
-Transform(T: gp_Trsf): void;
+  Transform(T: gp_Trsf): void;
 
-Copy(): Geom_Geometry;
+  Copy(): Geom_Geometry;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 GeomEval_EllipsoidSurface: declare class GeomEval_EllipsoidSurface extends Geom_ElementarySurface
 
-constructor
+  constructor
 
-SemiAxisA(): number;
+  SemiAxisA(): number;
 
-SemiAxisB(): number;
+  SemiAxisB(): number;
 
-SemiAxisC(): number;
+  SemiAxisC(): number;
 
-SetSemiAxisA(theA: number): void;
+  SetSemiAxisA(theA: number): void;
 
-SetSemiAxisB(theB: number): void;
+  SetSemiAxisB(theB: number): void;
 
-SetSemiAxisC(theC: number): void;
+  SetSemiAxisC(theC: number): void;
 
-UReverse(): void;
+  UReverse(): void;
 
-VReverse(): void;
+  VReverse(): void;
 
-UReversedParameter(U: number): number;
+  UReversedParameter(U: number): number;
 
-VReversedParameter(V: number): number;
+  VReversedParameter(V: number): number;
 
-Bounds(U1: number, U2: number, V1: number, V2: number): { U1: number; U2: number; V1: number; V2: number };
+  Bounds(U1: number, U2: number, V1: number, V2: number): { U1: number; U2: number; V1: number; V2: number };
 
-IsUClosed(): boolean;
+  IsUClosed(): boolean;
 
-IsVClosed(): boolean;
+  IsVClosed(): boolean;
 
-IsUPeriodic(): boolean;
+  IsUPeriodic(): boolean;
 
-IsVPeriodic(): boolean;
+  IsVPeriodic(): boolean;
 
-UIso(U: number): Geom_Curve;
+  UIso(U: number): Geom_Curve;
 
-VIso(V: number): Geom_Curve;
+  VIso(V: number): Geom_Curve;
 
-EvalD0(U: number, V: number): gp_Pnt;
+  EvalD0(U: number, V: number): gp_Pnt;
 
-EvalD1(U: number, V: number): Geom_Surface_ResD1;
+  EvalD1(U: number, V: number): Geom_Surface_ResD1;
 
-EvalD2(U: number, V: number): Geom_Surface_ResD2;
+  EvalD2(U: number, V: number): Geom_Surface_ResD2;
 
-EvalD3(U: number, V: number): Geom_Surface_ResD3;
+  EvalD3(U: number, V: number): Geom_Surface_ResD3;
 
-EvalDN(U: number, V: number, Nu: number, Nv: number): gp_Vec;
+  EvalDN(U: number, V: number, Nu: number, Nv: number): gp_Vec;
 
-Transform(T: gp_Trsf): void;
+  Transform(T: gp_Trsf): void;
 
-Copy(): Geom_Geometry;
+  Copy(): Geom_Geometry;
 
-Coefficients(A1?: number, A2?: number, A3?: number, B1?: number, B2?: number, B3?: number, C1?: number, C2?: number, C3?: number, D?: number): { A1: number; A2: number; A3: number; B1: number; B2: number; B3: number; C1: number; C2: number; C3: number; D: number };
+  Coefficients(A1?: number, A2?: number, A3?: number, B1?: number, B2?: number, B3?: number, C1?: number, C2?: number, C3?: number, D?: number): { A1: number; A2: number; A3: number; B1: number; B2: number; B3: number; C1: number; C2: number; C3: number; D: number };
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 GeomEval_HypParaboloidSurface: declare class GeomEval_HypParaboloidSurface extends Geom_ElementarySurface
 
-constructor
+  constructor
 
-SemiAxisA(): number;
+  SemiAxisA(): number;
 
-SemiAxisB(): number;
+  SemiAxisB(): number;
 
-SetSemiAxisA(theA: number): void;
+  SetSemiAxisA(theA: number): void;
 
-SetSemiAxisB(theB: number): void;
+  SetSemiAxisB(theB: number): void;
 
-UReverse(): void;
+  UReverse(): void;
 
-VReverse(): void;
+  VReverse(): void;
 
-UReversedParameter(U: number): number;
+  UReversedParameter(U: number): number;
 
-VReversedParameter(V: number): number;
+  VReversedParameter(V: number): number;
 
-Bounds(U1: number, U2: number, V1: number, V2: number): { U1: number; U2: number; V1: number; V2: number };
+  Bounds(U1: number, U2: number, V1: number, V2: number): { U1: number; U2: number; V1: number; V2: number };
 
-IsUClosed(): boolean;
+  IsUClosed(): boolean;
 
-IsVClosed(): boolean;
+  IsVClosed(): boolean;
 
-IsUPeriodic(): boolean;
+  IsUPeriodic(): boolean;
 
-IsVPeriodic(): boolean;
+  IsVPeriodic(): boolean;
 
-UIso(U: number): Geom_Curve;
+  UIso(U: number): Geom_Curve;
 
-VIso(V: number): Geom_Curve;
+  VIso(V: number): Geom_Curve;
 
-EvalD0(U: number, V: number): gp_Pnt;
+  EvalD0(U: number, V: number): gp_Pnt;
 
-EvalD1(U: number, V: number): Geom_Surface_ResD1;
+  EvalD1(U: number, V: number): Geom_Surface_ResD1;
 
-EvalD2(U: number, V: number): Geom_Surface_ResD2;
+  EvalD2(U: number, V: number): Geom_Surface_ResD2;
 
-EvalD3(U: number, V: number): Geom_Surface_ResD3;
+  EvalD3(U: number, V: number): Geom_Surface_ResD3;
 
-EvalDN(U: number, V: number, Nu: number, Nv: number): gp_Vec;
+  EvalDN(U: number, V: number, Nu: number, Nv: number): gp_Vec;
 
-Transform(T: gp_Trsf): void;
+  Transform(T: gp_Trsf): void;
 
-Copy(): Geom_Geometry;
+  Copy(): Geom_Geometry;
 
-Coefficients(A1?: number, A2?: number, A3?: number, B1?: number, B2?: number, B3?: number, C1?: number, C2?: number, C3?: number, D?: number): { A1: number; A2: number; A3: number; B1: number; B2: number; B3: number; C1: number; C2: number; C3: number; D: number };
+  Coefficients(A1?: number, A2?: number, A3?: number, B1?: number, B2?: number, B3?: number, C1?: number, C2?: number, C3?: number, D?: number): { A1: number; A2: number; A3: number; B1: number; B2: number; B3: number; C1: number; C2: number; C3: number; D: number };
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 GeomEval_HyperboloidSurface: declare class GeomEval_HyperboloidSurface extends Geom_ElementarySurface
 
-constructor
+  constructor
 
-R1(): number;
+  R1(): number;
 
-R2(): number;
+  R2(): number;
 
-Mode(): GeomEval_HyperboloidSurface_SheetMode;
+  Mode(): GeomEval_HyperboloidSurface_SheetMode;
 
-SetR1(theR1: number): void;
+  SetR1(theR1: number): void;
 
-SetR2(theR2: number): void;
+  SetR2(theR2: number): void;
 
-SetMode(theMode: GeomEval_HyperboloidSurface_SheetMode): void;
+  SetMode(theMode: GeomEval_HyperboloidSurface_SheetMode): void;
 
-UReverse(): void;
+  UReverse(): void;
 
-VReverse(): void;
+  VReverse(): void;
 
-UReversedParameter(U: number): number;
+  UReversedParameter(U: number): number;
 
-VReversedParameter(V: number): number;
+  VReversedParameter(V: number): number;
 
-Bounds(U1: number, U2: number, V1: number, V2: number): { U1: number; U2: number; V1: number; V2: number };
+  Bounds(U1: number, U2: number, V1: number, V2: number): { U1: number; U2: number; V1: number; V2: number };
 
-IsUClosed(): boolean;
+  IsUClosed(): boolean;
 
-IsVClosed(): boolean;
+  IsVClosed(): boolean;
 
-IsUPeriodic(): boolean;
+  IsUPeriodic(): boolean;
 
-IsVPeriodic(): boolean;
+  IsVPeriodic(): boolean;
 
-UIso(U: number): Geom_Curve;
+  UIso(U: number): Geom_Curve;
 
-VIso(V: number): Geom_Curve;
+  VIso(V: number): Geom_Curve;
 
-EvalD0(U: number, V: number): gp_Pnt;
+  EvalD0(U: number, V: number): gp_Pnt;
 
-EvalD1(U: number, V: number): Geom_Surface_ResD1;
+  EvalD1(U: number, V: number): Geom_Surface_ResD1;
 
-EvalD2(U: number, V: number): Geom_Surface_ResD2;
+  EvalD2(U: number, V: number): Geom_Surface_ResD2;
 
-EvalD3(U: number, V: number): Geom_Surface_ResD3;
+  EvalD3(U: number, V: number): Geom_Surface_ResD3;
 
-EvalDN(U: number, V: number, Nu: number, Nv: number): gp_Vec;
+  EvalDN(U: number, V: number, Nu: number, Nv: number): gp_Vec;
 
-Transform(T: gp_Trsf): void;
+  Transform(T: gp_Trsf): void;
 
-Copy(): Geom_Geometry;
+  Copy(): Geom_Geometry;
 
-Coefficients(A1?: number, A2?: number, A3?: number, B1?: number, B2?: number, B3?: number, C1?: number, C2?: number, C3?: number, D?: number): { A1: number; A2: number; A3: number; B1: number; B2: number; B3: number; C1: number; C2: number; C3: number; D: number };
+  Coefficients(A1?: number, A2?: number, A3?: number, B1?: number, B2?: number, B3?: number, C1?: number, C2?: number, C3?: number, D?: number): { A1: number; A2: number; A3: number; B1: number; B2: number; B3: number; C1: number; C2: number; C3: number; D: number };
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 GeomEval_HyperboloidSurface_SheetMode: typeof GeomEval_HyperboloidSurface_SheetMode[keyof typeof GeomEval_HyperboloidSurface_SheetMode]
 
 GeomEval_ParaboloidSurface: declare class GeomEval_ParaboloidSurface extends Geom_ElementarySurface
 
-constructor
+  constructor
 
-Focal(): number;
+  Focal(): number;
 
-SetFocal(theFocal: number): void;
+  SetFocal(theFocal: number): void;
 
-UReverse(): void;
+  UReverse(): void;
 
-VReverse(): void;
+  VReverse(): void;
 
-UReversedParameter(U: number): number;
+  UReversedParameter(U: number): number;
 
-VReversedParameter(V: number): number;
+  VReversedParameter(V: number): number;
 
-Bounds(U1: number, U2: number, V1: number, V2: number): { U1: number; U2: number; V1: number; V2: number };
+  Bounds(U1: number, U2: number, V1: number, V2: number): { U1: number; U2: number; V1: number; V2: number };
 
-IsUClosed(): boolean;
+  IsUClosed(): boolean;
 
-IsVClosed(): boolean;
+  IsVClosed(): boolean;
 
-IsUPeriodic(): boolean;
+  IsUPeriodic(): boolean;
 
-IsVPeriodic(): boolean;
+  IsVPeriodic(): boolean;
 
-UIso(U: number): Geom_Curve;
+  UIso(U: number): Geom_Curve;
 
-VIso(V: number): Geom_Curve;
+  VIso(V: number): Geom_Curve;
 
-EvalD0(U: number, V: number): gp_Pnt;
+  EvalD0(U: number, V: number): gp_Pnt;
 
-EvalD1(U: number, V: number): Geom_Surface_ResD1;
+  EvalD1(U: number, V: number): Geom_Surface_ResD1;
 
-EvalD2(U: number, V: number): Geom_Surface_ResD2;
+  EvalD2(U: number, V: number): Geom_Surface_ResD2;
 
-EvalD3(U: number, V: number): Geom_Surface_ResD3;
+  EvalD3(U: number, V: number): Geom_Surface_ResD3;
 
-EvalDN(U: number, V: number, Nu: number, Nv: number): gp_Vec;
+  EvalDN(U: number, V: number, Nu: number, Nv: number): gp_Vec;
 
-Transform(T: gp_Trsf): void;
+  Transform(T: gp_Trsf): void;
 
-Copy(): Geom_Geometry;
+  Copy(): Geom_Geometry;
 
-Coefficients(A1?: number, A2?: number, A3?: number, B1?: number, B2?: number, B3?: number, C1?: number, C2?: number, C3?: number, D?: number): { A1: number; A2: number; A3: number; B1: number; B2: number; B3: number; C1: number; C2: number; C3: number; D: number };
+  Coefficients(A1?: number, A2?: number, A3?: number, B1?: number, B2?: number, B3?: number, C1?: number, C2?: number, C3?: number, D?: number): { A1: number; A2: number; A3: number; B1: number; B2: number; B3: number; C1: number; C2: number; C3: number; D: number };
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 GeomEval_RepCurveDesc_Base: declare class GeomEval_RepCurveDesc_Base extends Standard_Transient
 
-Representation: Geom_Curve
+  Representation: Geom_Curve
 
-GetKind(): GeomEval_RepCurveDesc_Base_Kind;
+  GetKind(): GeomEval_RepCurveDesc_Base_Kind;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 GeomEval_RepCurveDesc_Base_Kind: typeof GeomEval_RepCurveDesc_Base_Kind[keyof typeof GeomEval_RepCurveDesc_Base_Kind]
 
 GeomEval_RepCurveDesc_DerivBounded: declare class GeomEval_RepCurveDesc_DerivBounded extends GeomEval_RepCurveDesc_Base
 
-constructor
+  constructor
 
-MaxDerivOrder: number
+  MaxDerivOrder: number
 
-GetKind(): GeomEval_RepCurveDesc_Base_Kind;
+  GetKind(): GeomEval_RepCurveDesc_Base_Kind;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 GeomEval_RepCurveDesc_Domain1d: declare class GeomEval_RepCurveDesc_Domain1d
 
-constructor
+  constructor
 
-First: number
+  First: number
 
-Last: number
+  Last: number
 
-Contains(theU: number): boolean;
+  Contains(theU: number): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 GeomEval_RepCurveDesc_Full: declare class GeomEval_RepCurveDesc_Full extends GeomEval_RepCurveDesc_Base
 
-constructor
+  constructor
 
-GetKind(): GeomEval_RepCurveDesc_Base_Kind;
+  GetKind(): GeomEval_RepCurveDesc_Base_Kind;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 GeomEval_RepCurveDesc_Map1d: declare class GeomEval_RepCurveDesc_Map1d
 
-constructor
+  constructor
 
-Scale: number
+  Scale: number
 
-Offset: number
+  Offset: number
 
-IsIdentity(): boolean;
+  IsIdentity(): boolean;
 
-IsValid(): boolean;
+  IsValid(): boolean;
 
-Map(theU: number): number;
+  Map(theU: number): number;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 GeomEval_RepCurveDesc_Mapped: declare class GeomEval_RepCurveDesc_Mapped extends GeomEval_RepCurveDesc_Base
 
-constructor
+  constructor
 
-MaxDerivOrder: number
+  MaxDerivOrder: number
 
-Domain: GeomEval_RepCurveDesc_Domain1d | null | undefined
+  Domain: GeomEval_RepCurveDesc_Domain1d | null | undefined
 
-ParamMap: GeomEval_RepCurveDesc_Map1d
+  ParamMap: GeomEval_RepCurveDesc_Map1d
 
-GetKind(): GeomEval_RepCurveDesc_Base_Kind;
+  GetKind(): GeomEval_RepCurveDesc_Base_Kind;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 GeomEval_RepSurfaceDesc_Base: declare class GeomEval_RepSurfaceDesc_Base extends Standard_Transient
 
-Representation: Geom_Surface
+  Representation: Geom_Surface
 
-GetKind(): GeomEval_RepSurfaceDesc_Base_Kind;
+  GetKind(): GeomEval_RepSurfaceDesc_Base_Kind;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 GeomEval_RepSurfaceDesc_Base_Kind: typeof GeomEval_RepSurfaceDesc_Base_Kind[keyof typeof GeomEval_RepSurfaceDesc_Base_Kind]
 
 GeomEval_RepSurfaceDesc_DerivBounded: declare class GeomEval_RepSurfaceDesc_DerivBounded extends GeomEval_RepSurfaceDesc_Base
 
-constructor
+  constructor
 
-MaxDerivOrder: number
+  MaxDerivOrder: number
 
-GetKind(): GeomEval_RepSurfaceDesc_Base_Kind;
+  GetKind(): GeomEval_RepSurfaceDesc_Base_Kind;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 GeomEval_RepSurfaceDesc_Domain2d: declare class GeomEval_RepSurfaceDesc_Domain2d
 
-constructor
+  constructor
 
-UFirst: number
+  UFirst: number
 
-ULast: number
+  ULast: number
 
-VFirst: number
+  VFirst: number
 
-VLast: number
+  VLast: number
 
-Contains(theU: number, theV: number): boolean;
+  Contains(theU: number, theV: number): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 GeomEval_RepSurfaceDesc_Full: declare class GeomEval_RepSurfaceDesc_Full extends GeomEval_RepSurfaceDesc_Base
 
-constructor
+  constructor
 
-GetKind(): GeomEval_RepSurfaceDesc_Base_Kind;
+  GetKind(): GeomEval_RepSurfaceDesc_Base_Kind;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 GeomEval_RepSurfaceDesc_Map2d: declare class GeomEval_RepSurfaceDesc_Map2d
 
-constructor
+  constructor
 
-ScaleU: number
+  ScaleU: number
 
-OffsetU: number
+  OffsetU: number
 
-ScaleV: number
+  ScaleV: number
 
-OffsetV: number
+  OffsetV: number
 
-SwapUV: boolean
+  SwapUV: boolean
 
-IsIdentity(): boolean;
+  IsIdentity(): boolean;
 
-IsValid(): boolean;
+  IsValid(): boolean;
 
-Map(theU: number, theV: number, theURep?: number, theVRep?: number): { theURep: number; theVRep: number };
+  Map(theU: number, theV: number, theURep?: number, theVRep?: number): { theURep: number; theVRep: number };
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 GeomEval_RepSurfaceDesc_Mapped: declare class GeomEval_RepSurfaceDesc_Mapped extends GeomEval_RepSurfaceDesc_Base
 
-constructor
+  constructor
 
-MaxDerivOrder: number
+  MaxDerivOrder: number
 
-Domain: GeomEval_RepSurfaceDesc_Domain2d | null | undefined
+  Domain: GeomEval_RepSurfaceDesc_Domain2d | null | undefined
 
-ParamMap: GeomEval_RepSurfaceDesc_Map2d
+  ParamMap: GeomEval_RepSurfaceDesc_Map2d
 
-GetKind(): GeomEval_RepSurfaceDesc_Base_Kind;
+  GetKind(): GeomEval_RepSurfaceDesc_Base_Kind;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 GeomEval_SineWaveCurve: declare class GeomEval_SineWaveCurve extends Geom_Curve
 
-constructor
+  constructor
 
-Position(): gp_Ax2;
+  Position(): gp_Ax2;
 
-Amplitude(): number;
+  Amplitude(): number;
 
-Omega(): number;
+  Omega(): number;
 
-Phase(): number;
+  Phase(): number;
 
-Reverse(): void;
+  Reverse(): void;
 
-ReversedParameter(U: number): number;
+  ReversedParameter(U: number): number;
 
-FirstParameter(): number;
+  FirstParameter(): number;
 
-LastParameter(): number;
+  LastParameter(): number;
 
-IsClosed(): boolean;
+  IsClosed(): boolean;
 
-IsPeriodic(): boolean;
+  IsPeriodic(): boolean;
 
-Continuity(): GeomAbs_Shape;
+  Continuity(): GeomAbs_Shape;
 
-IsCN(N: number): boolean;
+  IsCN(N: number): boolean;
 
-EvalD0(U: number): gp_Pnt;
+  EvalD0(U: number): gp_Pnt;
 
-EvalD1(U: number): Geom_Curve_ResD1;
+  EvalD1(U: number): Geom_Curve_ResD1;
 
-EvalD2(U: number): Geom_Curve_ResD2;
+  EvalD2(U: number): Geom_Curve_ResD2;
 
-EvalD3(U: number): Geom_Curve_ResD3;
+  EvalD3(U: number): Geom_Curve_ResD3;
 
-EvalDN(U: number, N: number): gp_Vec;
+  EvalDN(U: number, N: number): gp_Vec;
 
-Transform(T: gp_Trsf): void;
+  Transform(T: gp_Trsf): void;
 
-Copy(): Geom_Geometry;
+  Copy(): Geom_Geometry;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 GeomEval_TBezierCurve: declare class GeomEval_TBezierCurve extends Geom_BoundedCurve
 
-constructor
+  constructor
 
-Poles(): NCollection_Array1_gp_Pnt;
+  Poles(): NCollection_Array1_gp_Pnt;
 
-Weights(): NCollection_Array1_double;
+  Weights(): NCollection_Array1_double;
 
-Alpha(): number;
+  Alpha(): number;
 
-NbPoles(): number;
+  NbPoles(): number;
 
-Order(): number;
+  Order(): number;
 
-IsRational(): boolean;
+  IsRational(): boolean;
 
-StartPoint(): gp_Pnt;
+  StartPoint(): gp_Pnt;
 
-EndPoint(): gp_Pnt;
+  EndPoint(): gp_Pnt;
 
-Reverse(): void;
+  Reverse(): void;
 
-ReversedParameter(U: number): number;
+  ReversedParameter(U: number): number;
 
-FirstParameter(): number;
+  FirstParameter(): number;
 
-LastParameter(): number;
+  LastParameter(): number;
 
-IsClosed(): boolean;
+  IsClosed(): boolean;
 
-IsPeriodic(): boolean;
+  IsPeriodic(): boolean;
 
-Continuity(): GeomAbs_Shape;
+  Continuity(): GeomAbs_Shape;
 
-IsCN(N: number): boolean;
+  IsCN(N: number): boolean;
 
-EvalD0(U: number): gp_Pnt;
+  EvalD0(U: number): gp_Pnt;
 
-EvalD1(U: number): Geom_Curve_ResD1;
+  EvalD1(U: number): Geom_Curve_ResD1;
 
-EvalD2(U: number): Geom_Curve_ResD2;
+  EvalD2(U: number): Geom_Curve_ResD2;
 
-EvalD3(U: number): Geom_Curve_ResD3;
+  EvalD3(U: number): Geom_Curve_ResD3;
 
-EvalDN(U: number, N: number): gp_Vec;
+  EvalDN(U: number, N: number): gp_Vec;
 
-Transform(T: gp_Trsf): void;
+  Transform(T: gp_Trsf): void;
 
-Copy(): Geom_Geometry;
+  Copy(): Geom_Geometry;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 GeomEval_TBezierSurface: declare class GeomEval_TBezierSurface extends Geom_BoundedSurface
 
-constructor
+  constructor
 
-Poles(): NCollection_Array2_gp_Pnt;
+  Poles(): NCollection_Array2_gp_Pnt;
 
-Weights(): NCollection_Array2_double;
+  Weights(): NCollection_Array2_double;
 
-AlphaU(): number;
+  AlphaU(): number;
 
-AlphaV(): number;
+  AlphaV(): number;
 
-NbUPoles(): number;
+  NbUPoles(): number;
 
-NbVPoles(): number;
+  NbVPoles(): number;
 
-OrderU(): number;
+  OrderU(): number;
 
-OrderV(): number;
+  OrderV(): number;
 
-IsRational(): boolean;
+  IsRational(): boolean;
 
-UReverse(): void;
+  UReverse(): void;
 
-UReversedParameter(U: number): number;
+  UReversedParameter(U: number): number;
 
-VReverse(): void;
+  VReverse(): void;
 
-VReversedParameter(V: number): number;
+  VReversedParameter(V: number): number;
 
-Bounds(U1: number, U2: number, V1: number, V2: number): { U1: number; U2: number; V1: number; V2: number };
+  Bounds(U1: number, U2: number, V1: number, V2: number): { U1: number; U2: number; V1: number; V2: number };
 
-IsUClosed(): boolean;
+  IsUClosed(): boolean;
 
-IsVClosed(): boolean;
+  IsVClosed(): boolean;
 
-IsUPeriodic(): boolean;
+  IsUPeriodic(): boolean;
 
-IsVPeriodic(): boolean;
+  IsVPeriodic(): boolean;
 
-Continuity(): GeomAbs_Shape;
+  Continuity(): GeomAbs_Shape;
 
-IsCNu(N: number): boolean;
+  IsCNu(N: number): boolean;
 
-IsCNv(N: number): boolean;
+  IsCNv(N: number): boolean;
 
-UIso(U: number): Geom_Curve;
+  UIso(U: number): Geom_Curve;
 
-VIso(V: number): Geom_Curve;
+  VIso(V: number): Geom_Curve;
 
-EvalD0(U: number, V: number): gp_Pnt;
+  EvalD0(U: number, V: number): gp_Pnt;
 
-EvalD1(U: number, V: number): Geom_Surface_ResD1;
+  EvalD1(U: number, V: number): Geom_Surface_ResD1;
 
-EvalD2(U: number, V: number): Geom_Surface_ResD2;
+  EvalD2(U: number, V: number): Geom_Surface_ResD2;
 
-EvalD3(U: number, V: number): Geom_Surface_ResD3;
+  EvalD3(U: number, V: number): Geom_Surface_ResD3;
 
-EvalDN(U: number, V: number, Nu: number, Nv: number): gp_Vec;
+  EvalDN(U: number, V: number, Nu: number, Nv: number): gp_Vec;
 
-Transform(T: gp_Trsf): void;
+  Transform(T: gp_Trsf): void;
 
-Copy(): Geom_Geometry;
+  Copy(): Geom_Geometry;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;

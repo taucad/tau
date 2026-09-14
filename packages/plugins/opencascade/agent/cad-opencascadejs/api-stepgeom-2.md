@@ -4,615 +4,615 @@
 
 StepGeom_BezierCurveAndRationalBSplineCurve: declare class StepGeom_BezierCurveAndRationalBSplineCurve extends StepGeom_BSplineCurve
 
-constructor
+  constructor
 
-Init(aName: TCollection_HAsciiString, aDegree: number, aControlPointsList: NCollection_HArray1_handle_StepGeom_CartesianPoint, aCurveForm: StepGeom_BSplineCurveForm, aClosedCurve: StepData_Logical, aSelfIntersect: StepData_Logical, aBezierCurve: StepGeom_BezierCurve, aRationalBSplineCurve: StepGeom_RationalBSplineCurve): void;
-Init(aName: TCollection_HAsciiString, aDegree: number, aControlPointsList: NCollection_HArray1_handle_StepGeom_CartesianPoint, aCurveForm: StepGeom_BSplineCurveForm, aClosedCurve: StepData_Logical, aSelfIntersect: StepData_Logical, aWeightsData: NCollection_HArray1_double): void;
-Init(aName: TCollection_HAsciiString, aDegree: number, aControlPointsList: NCollection_HArray1_handle_StepGeom_CartesianPoint, aCurveForm: StepGeom_BSplineCurveForm, aClosedCurve: StepData_Logical, aSelfIntersect: StepData_Logical): void;
-Init(aName: TCollection_HAsciiString): void;
-Init(aName: TCollection_HAsciiString, aDegree: number, aControlPointsList: NCollection_HArray1_handle_StepGeom_CartesianPoint, aCurveForm: StepGeom_BSplineCurveForm, aClosedCurve: StepData_Logical, aSelfIntersect: StepData_Logical, aBezierCurve: StepGeom_BezierCurve, aRationalBSplineCurve: StepGeom_RationalBSplineCurve): void;
-Init(aName: TCollection_HAsciiString, aDegree: number, aControlPointsList: NCollection_HArray1_handle_StepGeom_CartesianPoint, aCurveForm: StepGeom_BSplineCurveForm, aClosedCurve: StepData_Logical, aSelfIntersect: StepData_Logical, aWeightsData: NCollection_HArray1_double): void;
-Init(aName: TCollection_HAsciiString, aDegree: number, aControlPointsList: NCollection_HArray1_handle_StepGeom_CartesianPoint, aCurveForm: StepGeom_BSplineCurveForm, aClosedCurve: StepData_Logical, aSelfIntersect: StepData_Logical): void;
-Init(aName: TCollection_HAsciiString): void;
-Init(aName: TCollection_HAsciiString, aDegree: number, aControlPointsList: NCollection_HArray1_handle_StepGeom_CartesianPoint, aCurveForm: StepGeom_BSplineCurveForm, aClosedCurve: StepData_Logical, aSelfIntersect: StepData_Logical, aBezierCurve: StepGeom_BezierCurve, aRationalBSplineCurve: StepGeom_RationalBSplineCurve): void;
-Init(aName: TCollection_HAsciiString, aDegree: number, aControlPointsList: NCollection_HArray1_handle_StepGeom_CartesianPoint, aCurveForm: StepGeom_BSplineCurveForm, aClosedCurve: StepData_Logical, aSelfIntersect: StepData_Logical, aWeightsData: NCollection_HArray1_double): void;
-Init(aName: TCollection_HAsciiString, aDegree: number, aControlPointsList: NCollection_HArray1_handle_StepGeom_CartesianPoint, aCurveForm: StepGeom_BSplineCurveForm, aClosedCurve: StepData_Logical, aSelfIntersect: StepData_Logical): void;
-Init(aName: TCollection_HAsciiString): void;
-Init(aName: TCollection_HAsciiString, aDegree: number, aControlPointsList: NCollection_HArray1_handle_StepGeom_CartesianPoint, aCurveForm: StepGeom_BSplineCurveForm, aClosedCurve: StepData_Logical, aSelfIntersect: StepData_Logical, aBezierCurve: StepGeom_BezierCurve, aRationalBSplineCurve: StepGeom_RationalBSplineCurve): void;
-Init(aName: TCollection_HAsciiString, aDegree: number, aControlPointsList: NCollection_HArray1_handle_StepGeom_CartesianPoint, aCurveForm: StepGeom_BSplineCurveForm, aClosedCurve: StepData_Logical, aSelfIntersect: StepData_Logical, aWeightsData: NCollection_HArray1_double): void;
-Init(aName: TCollection_HAsciiString, aDegree: number, aControlPointsList: NCollection_HArray1_handle_StepGeom_CartesianPoint, aCurveForm: StepGeom_BSplineCurveForm, aClosedCurve: StepData_Logical, aSelfIntersect: StepData_Logical): void;
-Init(aName: TCollection_HAsciiString): void;
+  Init(aName: TCollection_HAsciiString, aDegree: number, aControlPointsList: NCollection_HArray1_handle_StepGeom_CartesianPoint, aCurveForm: StepGeom_BSplineCurveForm, aClosedCurve: StepData_Logical, aSelfIntersect: StepData_Logical, aBezierCurve: StepGeom_BezierCurve, aRationalBSplineCurve: StepGeom_RationalBSplineCurve): void;
+  Init(aName: TCollection_HAsciiString, aDegree: number, aControlPointsList: NCollection_HArray1_handle_StepGeom_CartesianPoint, aCurveForm: StepGeom_BSplineCurveForm, aClosedCurve: StepData_Logical, aSelfIntersect: StepData_Logical, aWeightsData: NCollection_HArray1_double): void;
+  Init(aName: TCollection_HAsciiString, aDegree: number, aControlPointsList: NCollection_HArray1_handle_StepGeom_CartesianPoint, aCurveForm: StepGeom_BSplineCurveForm, aClosedCurve: StepData_Logical, aSelfIntersect: StepData_Logical): void;
+  Init(aName: TCollection_HAsciiString): void;
+  Init(aName: TCollection_HAsciiString, aDegree: number, aControlPointsList: NCollection_HArray1_handle_StepGeom_CartesianPoint, aCurveForm: StepGeom_BSplineCurveForm, aClosedCurve: StepData_Logical, aSelfIntersect: StepData_Logical, aBezierCurve: StepGeom_BezierCurve, aRationalBSplineCurve: StepGeom_RationalBSplineCurve): void;
+  Init(aName: TCollection_HAsciiString, aDegree: number, aControlPointsList: NCollection_HArray1_handle_StepGeom_CartesianPoint, aCurveForm: StepGeom_BSplineCurveForm, aClosedCurve: StepData_Logical, aSelfIntersect: StepData_Logical, aWeightsData: NCollection_HArray1_double): void;
+  Init(aName: TCollection_HAsciiString, aDegree: number, aControlPointsList: NCollection_HArray1_handle_StepGeom_CartesianPoint, aCurveForm: StepGeom_BSplineCurveForm, aClosedCurve: StepData_Logical, aSelfIntersect: StepData_Logical): void;
+  Init(aName: TCollection_HAsciiString): void;
+  Init(aName: TCollection_HAsciiString, aDegree: number, aControlPointsList: NCollection_HArray1_handle_StepGeom_CartesianPoint, aCurveForm: StepGeom_BSplineCurveForm, aClosedCurve: StepData_Logical, aSelfIntersect: StepData_Logical, aBezierCurve: StepGeom_BezierCurve, aRationalBSplineCurve: StepGeom_RationalBSplineCurve): void;
+  Init(aName: TCollection_HAsciiString, aDegree: number, aControlPointsList: NCollection_HArray1_handle_StepGeom_CartesianPoint, aCurveForm: StepGeom_BSplineCurveForm, aClosedCurve: StepData_Logical, aSelfIntersect: StepData_Logical, aWeightsData: NCollection_HArray1_double): void;
+  Init(aName: TCollection_HAsciiString, aDegree: number, aControlPointsList: NCollection_HArray1_handle_StepGeom_CartesianPoint, aCurveForm: StepGeom_BSplineCurveForm, aClosedCurve: StepData_Logical, aSelfIntersect: StepData_Logical): void;
+  Init(aName: TCollection_HAsciiString): void;
+  Init(aName: TCollection_HAsciiString, aDegree: number, aControlPointsList: NCollection_HArray1_handle_StepGeom_CartesianPoint, aCurveForm: StepGeom_BSplineCurveForm, aClosedCurve: StepData_Logical, aSelfIntersect: StepData_Logical, aBezierCurve: StepGeom_BezierCurve, aRationalBSplineCurve: StepGeom_RationalBSplineCurve): void;
+  Init(aName: TCollection_HAsciiString, aDegree: number, aControlPointsList: NCollection_HArray1_handle_StepGeom_CartesianPoint, aCurveForm: StepGeom_BSplineCurveForm, aClosedCurve: StepData_Logical, aSelfIntersect: StepData_Logical, aWeightsData: NCollection_HArray1_double): void;
+  Init(aName: TCollection_HAsciiString, aDegree: number, aControlPointsList: NCollection_HArray1_handle_StepGeom_CartesianPoint, aCurveForm: StepGeom_BSplineCurveForm, aClosedCurve: StepData_Logical, aSelfIntersect: StepData_Logical): void;
+  Init(aName: TCollection_HAsciiString): void;
 
-SetBezierCurve(aBezierCurve: StepGeom_BezierCurve): void;
+  SetBezierCurve(aBezierCurve: StepGeom_BezierCurve): void;
 
-BezierCurve(): StepGeom_BezierCurve;
+  BezierCurve(): StepGeom_BezierCurve;
 
-SetRationalBSplineCurve(aRationalBSplineCurve: StepGeom_RationalBSplineCurve): void;
+  SetRationalBSplineCurve(aRationalBSplineCurve: StepGeom_RationalBSplineCurve): void;
 
-RationalBSplineCurve(): StepGeom_RationalBSplineCurve;
+  RationalBSplineCurve(): StepGeom_RationalBSplineCurve;
 
-SetWeightsData(aWeightsData: NCollection_HArray1_double): void;
+  SetWeightsData(aWeightsData: NCollection_HArray1_double): void;
 
-WeightsData(): NCollection_HArray1_double;
+  WeightsData(): NCollection_HArray1_double;
 
-WeightsDataValue(num: number): number;
+  WeightsDataValue(num: number): number;
 
-NbWeightsData(): number;
+  NbWeightsData(): number;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepGeom_BezierSurface: declare class StepGeom_BezierSurface extends StepGeom_BSplineSurface
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepGeom_BezierSurfaceAndRationalBSplineSurface: declare class StepGeom_BezierSurfaceAndRationalBSplineSurface extends StepGeom_BSplineSurface
 
-constructor
+  constructor
 
-Init(aName: TCollection_HAsciiString, aUDegree: number, aVDegree: number, aControlPointsList: NCollection_HArray2_handle_StepGeom_CartesianPoint, aSurfaceForm: StepGeom_BSplineSurfaceForm, aUClosed: StepData_Logical, aVClosed: StepData_Logical, aSelfIntersect: StepData_Logical, aBezierSurface: StepGeom_BezierSurface, aRationalBSplineSurface: StepGeom_RationalBSplineSurface): void;
-Init(aName: TCollection_HAsciiString, aUDegree: number, aVDegree: number, aControlPointsList: NCollection_HArray2_handle_StepGeom_CartesianPoint, aSurfaceForm: StepGeom_BSplineSurfaceForm, aUClosed: StepData_Logical, aVClosed: StepData_Logical, aSelfIntersect: StepData_Logical, aWeightsData: NCollection_HArray2_double): void;
-Init(aName: TCollection_HAsciiString, aUDegree: number, aVDegree: number, aControlPointsList: NCollection_HArray2_handle_StepGeom_CartesianPoint, aSurfaceForm: StepGeom_BSplineSurfaceForm, aUClosed: StepData_Logical, aVClosed: StepData_Logical, aSelfIntersect: StepData_Logical): void;
-Init(aName: TCollection_HAsciiString): void;
-Init(aName: TCollection_HAsciiString, aUDegree: number, aVDegree: number, aControlPointsList: NCollection_HArray2_handle_StepGeom_CartesianPoint, aSurfaceForm: StepGeom_BSplineSurfaceForm, aUClosed: StepData_Logical, aVClosed: StepData_Logical, aSelfIntersect: StepData_Logical, aBezierSurface: StepGeom_BezierSurface, aRationalBSplineSurface: StepGeom_RationalBSplineSurface): void;
-Init(aName: TCollection_HAsciiString, aUDegree: number, aVDegree: number, aControlPointsList: NCollection_HArray2_handle_StepGeom_CartesianPoint, aSurfaceForm: StepGeom_BSplineSurfaceForm, aUClosed: StepData_Logical, aVClosed: StepData_Logical, aSelfIntersect: StepData_Logical, aWeightsData: NCollection_HArray2_double): void;
-Init(aName: TCollection_HAsciiString, aUDegree: number, aVDegree: number, aControlPointsList: NCollection_HArray2_handle_StepGeom_CartesianPoint, aSurfaceForm: StepGeom_BSplineSurfaceForm, aUClosed: StepData_Logical, aVClosed: StepData_Logical, aSelfIntersect: StepData_Logical): void;
-Init(aName: TCollection_HAsciiString): void;
-Init(aName: TCollection_HAsciiString, aUDegree: number, aVDegree: number, aControlPointsList: NCollection_HArray2_handle_StepGeom_CartesianPoint, aSurfaceForm: StepGeom_BSplineSurfaceForm, aUClosed: StepData_Logical, aVClosed: StepData_Logical, aSelfIntersect: StepData_Logical, aBezierSurface: StepGeom_BezierSurface, aRationalBSplineSurface: StepGeom_RationalBSplineSurface): void;
-Init(aName: TCollection_HAsciiString, aUDegree: number, aVDegree: number, aControlPointsList: NCollection_HArray2_handle_StepGeom_CartesianPoint, aSurfaceForm: StepGeom_BSplineSurfaceForm, aUClosed: StepData_Logical, aVClosed: StepData_Logical, aSelfIntersect: StepData_Logical, aWeightsData: NCollection_HArray2_double): void;
-Init(aName: TCollection_HAsciiString, aUDegree: number, aVDegree: number, aControlPointsList: NCollection_HArray2_handle_StepGeom_CartesianPoint, aSurfaceForm: StepGeom_BSplineSurfaceForm, aUClosed: StepData_Logical, aVClosed: StepData_Logical, aSelfIntersect: StepData_Logical): void;
-Init(aName: TCollection_HAsciiString): void;
-Init(aName: TCollection_HAsciiString, aUDegree: number, aVDegree: number, aControlPointsList: NCollection_HArray2_handle_StepGeom_CartesianPoint, aSurfaceForm: StepGeom_BSplineSurfaceForm, aUClosed: StepData_Logical, aVClosed: StepData_Logical, aSelfIntersect: StepData_Logical, aBezierSurface: StepGeom_BezierSurface, aRationalBSplineSurface: StepGeom_RationalBSplineSurface): void;
-Init(aName: TCollection_HAsciiString, aUDegree: number, aVDegree: number, aControlPointsList: NCollection_HArray2_handle_StepGeom_CartesianPoint, aSurfaceForm: StepGeom_BSplineSurfaceForm, aUClosed: StepData_Logical, aVClosed: StepData_Logical, aSelfIntersect: StepData_Logical, aWeightsData: NCollection_HArray2_double): void;
-Init(aName: TCollection_HAsciiString, aUDegree: number, aVDegree: number, aControlPointsList: NCollection_HArray2_handle_StepGeom_CartesianPoint, aSurfaceForm: StepGeom_BSplineSurfaceForm, aUClosed: StepData_Logical, aVClosed: StepData_Logical, aSelfIntersect: StepData_Logical): void;
-Init(aName: TCollection_HAsciiString): void;
+  Init(aName: TCollection_HAsciiString, aUDegree: number, aVDegree: number, aControlPointsList: NCollection_HArray2_handle_StepGeom_CartesianPoint, aSurfaceForm: StepGeom_BSplineSurfaceForm, aUClosed: StepData_Logical, aVClosed: StepData_Logical, aSelfIntersect: StepData_Logical, aBezierSurface: StepGeom_BezierSurface, aRationalBSplineSurface: StepGeom_RationalBSplineSurface): void;
+  Init(aName: TCollection_HAsciiString, aUDegree: number, aVDegree: number, aControlPointsList: NCollection_HArray2_handle_StepGeom_CartesianPoint, aSurfaceForm: StepGeom_BSplineSurfaceForm, aUClosed: StepData_Logical, aVClosed: StepData_Logical, aSelfIntersect: StepData_Logical, aWeightsData: NCollection_HArray2_double): void;
+  Init(aName: TCollection_HAsciiString, aUDegree: number, aVDegree: number, aControlPointsList: NCollection_HArray2_handle_StepGeom_CartesianPoint, aSurfaceForm: StepGeom_BSplineSurfaceForm, aUClosed: StepData_Logical, aVClosed: StepData_Logical, aSelfIntersect: StepData_Logical): void;
+  Init(aName: TCollection_HAsciiString): void;
+  Init(aName: TCollection_HAsciiString, aUDegree: number, aVDegree: number, aControlPointsList: NCollection_HArray2_handle_StepGeom_CartesianPoint, aSurfaceForm: StepGeom_BSplineSurfaceForm, aUClosed: StepData_Logical, aVClosed: StepData_Logical, aSelfIntersect: StepData_Logical, aBezierSurface: StepGeom_BezierSurface, aRationalBSplineSurface: StepGeom_RationalBSplineSurface): void;
+  Init(aName: TCollection_HAsciiString, aUDegree: number, aVDegree: number, aControlPointsList: NCollection_HArray2_handle_StepGeom_CartesianPoint, aSurfaceForm: StepGeom_BSplineSurfaceForm, aUClosed: StepData_Logical, aVClosed: StepData_Logical, aSelfIntersect: StepData_Logical, aWeightsData: NCollection_HArray2_double): void;
+  Init(aName: TCollection_HAsciiString, aUDegree: number, aVDegree: number, aControlPointsList: NCollection_HArray2_handle_StepGeom_CartesianPoint, aSurfaceForm: StepGeom_BSplineSurfaceForm, aUClosed: StepData_Logical, aVClosed: StepData_Logical, aSelfIntersect: StepData_Logical): void;
+  Init(aName: TCollection_HAsciiString): void;
+  Init(aName: TCollection_HAsciiString, aUDegree: number, aVDegree: number, aControlPointsList: NCollection_HArray2_handle_StepGeom_CartesianPoint, aSurfaceForm: StepGeom_BSplineSurfaceForm, aUClosed: StepData_Logical, aVClosed: StepData_Logical, aSelfIntersect: StepData_Logical, aBezierSurface: StepGeom_BezierSurface, aRationalBSplineSurface: StepGeom_RationalBSplineSurface): void;
+  Init(aName: TCollection_HAsciiString, aUDegree: number, aVDegree: number, aControlPointsList: NCollection_HArray2_handle_StepGeom_CartesianPoint, aSurfaceForm: StepGeom_BSplineSurfaceForm, aUClosed: StepData_Logical, aVClosed: StepData_Logical, aSelfIntersect: StepData_Logical, aWeightsData: NCollection_HArray2_double): void;
+  Init(aName: TCollection_HAsciiString, aUDegree: number, aVDegree: number, aControlPointsList: NCollection_HArray2_handle_StepGeom_CartesianPoint, aSurfaceForm: StepGeom_BSplineSurfaceForm, aUClosed: StepData_Logical, aVClosed: StepData_Logical, aSelfIntersect: StepData_Logical): void;
+  Init(aName: TCollection_HAsciiString): void;
+  Init(aName: TCollection_HAsciiString, aUDegree: number, aVDegree: number, aControlPointsList: NCollection_HArray2_handle_StepGeom_CartesianPoint, aSurfaceForm: StepGeom_BSplineSurfaceForm, aUClosed: StepData_Logical, aVClosed: StepData_Logical, aSelfIntersect: StepData_Logical, aBezierSurface: StepGeom_BezierSurface, aRationalBSplineSurface: StepGeom_RationalBSplineSurface): void;
+  Init(aName: TCollection_HAsciiString, aUDegree: number, aVDegree: number, aControlPointsList: NCollection_HArray2_handle_StepGeom_CartesianPoint, aSurfaceForm: StepGeom_BSplineSurfaceForm, aUClosed: StepData_Logical, aVClosed: StepData_Logical, aSelfIntersect: StepData_Logical, aWeightsData: NCollection_HArray2_double): void;
+  Init(aName: TCollection_HAsciiString, aUDegree: number, aVDegree: number, aControlPointsList: NCollection_HArray2_handle_StepGeom_CartesianPoint, aSurfaceForm: StepGeom_BSplineSurfaceForm, aUClosed: StepData_Logical, aVClosed: StepData_Logical, aSelfIntersect: StepData_Logical): void;
+  Init(aName: TCollection_HAsciiString): void;
 
-SetBezierSurface(aBezierSurface: StepGeom_BezierSurface): void;
+  SetBezierSurface(aBezierSurface: StepGeom_BezierSurface): void;
 
-BezierSurface(): StepGeom_BezierSurface;
+  BezierSurface(): StepGeom_BezierSurface;
 
-SetRationalBSplineSurface(aRationalBSplineSurface: StepGeom_RationalBSplineSurface): void;
+  SetRationalBSplineSurface(aRationalBSplineSurface: StepGeom_RationalBSplineSurface): void;
 
-RationalBSplineSurface(): StepGeom_RationalBSplineSurface;
+  RationalBSplineSurface(): StepGeom_RationalBSplineSurface;
 
-SetWeightsData(aWeightsData: NCollection_HArray2_double): void;
+  SetWeightsData(aWeightsData: NCollection_HArray2_double): void;
 
-WeightsData(): NCollection_HArray2_double;
+  WeightsData(): NCollection_HArray2_double;
 
-WeightsDataValue(num1: number, num2: number): number;
+  WeightsDataValue(num1: number, num2: number): number;
 
-NbWeightsDataI(): number;
+  NbWeightsDataI(): number;
 
-NbWeightsDataJ(): number;
+  NbWeightsDataJ(): number;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepGeom_BoundaryCurve: declare class StepGeom_BoundaryCurve extends StepGeom_CompositeCurveOnSurface
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepGeom_BoundedCurve: declare class StepGeom_BoundedCurve extends StepGeom_Curve
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepGeom_BoundedSurface: declare class StepGeom_BoundedSurface extends StepGeom_Surface
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepGeom_CartesianPoint: declare class StepGeom_CartesianPoint extends StepGeom_Point
 
-constructor
+  constructor
 
-Init(theName: TCollection_HAsciiString, theCoordinates: NCollection_HArray1_double): void;
-Init(aName: TCollection_HAsciiString): void;
-Init(theName: TCollection_HAsciiString, theCoordinates: NCollection_HArray1_double): void;
-Init(aName: TCollection_HAsciiString): void;
+  Init(theName: TCollection_HAsciiString, theCoordinates: NCollection_HArray1_double): void;
+  Init(aName: TCollection_HAsciiString): void;
+  Init(theName: TCollection_HAsciiString, theCoordinates: NCollection_HArray1_double): void;
+  Init(aName: TCollection_HAsciiString): void;
 
-Init2D(theName: TCollection_HAsciiString, theX: number, theY: number): void;
+  Init2D(theName: TCollection_HAsciiString, theX: number, theY: number): void;
 
-Init3D(theName: TCollection_HAsciiString, theX: number, theY: number, theZ: number): void;
+  Init3D(theName: TCollection_HAsciiString, theX: number, theY: number, theZ: number): void;
 
-SetCoordinates(theCoordinates: NCollection_HArray1_double): void;
-SetCoordinates(theCoordinates: [number, number, number]): void;
-SetCoordinates(theCoordinates: NCollection_HArray1_double): void;
-SetCoordinates(theCoordinates: [number, number, number]): void;
+  SetCoordinates(theCoordinates: NCollection_HArray1_double): void;
+  SetCoordinates(theCoordinates: [number, number, number]): void;
+  SetCoordinates(theCoordinates: NCollection_HArray1_double): void;
+  SetCoordinates(theCoordinates: [number, number, number]): void;
 
-Coordinates(): [number, number, number];
+  Coordinates(): [number, number, number];
 
-CoordinatesValue(theInd: number): number;
+  CoordinatesValue(theInd: number): number;
 
-SetNbCoordinates(theSize: number): void;
+  SetNbCoordinates(theSize: number): void;
 
-NbCoordinates(): number;
+  NbCoordinates(): number;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepGeom_CartesianTransformationOperator: declare class StepGeom_CartesianTransformationOperator extends StepGeom_GeometricRepresentationItem
 
-constructor
+  constructor
 
-Init(aName: TCollection_HAsciiString, hasAaxis1: boolean, aAxis1: StepGeom_Direction, hasAaxis2: boolean, aAxis2: StepGeom_Direction, aLocalOrigin: StepGeom_CartesianPoint, hasAscale: boolean, aScale: number): void;
-Init(aName: TCollection_HAsciiString): void;
-Init(aName: TCollection_HAsciiString, hasAaxis1: boolean, aAxis1: StepGeom_Direction, hasAaxis2: boolean, aAxis2: StepGeom_Direction, aLocalOrigin: StepGeom_CartesianPoint, hasAscale: boolean, aScale: number): void;
-Init(aName: TCollection_HAsciiString): void;
+  Init(aName: TCollection_HAsciiString, hasAaxis1: boolean, aAxis1: StepGeom_Direction, hasAaxis2: boolean, aAxis2: StepGeom_Direction, aLocalOrigin: StepGeom_CartesianPoint, hasAscale: boolean, aScale: number): void;
+  Init(aName: TCollection_HAsciiString): void;
+  Init(aName: TCollection_HAsciiString, hasAaxis1: boolean, aAxis1: StepGeom_Direction, hasAaxis2: boolean, aAxis2: StepGeom_Direction, aLocalOrigin: StepGeom_CartesianPoint, hasAscale: boolean, aScale: number): void;
+  Init(aName: TCollection_HAsciiString): void;
 
-SetAxis1(aAxis1: StepGeom_Direction): void;
+  SetAxis1(aAxis1: StepGeom_Direction): void;
 
-UnSetAxis1(): void;
+  UnSetAxis1(): void;
 
-Axis1(): StepGeom_Direction;
+  Axis1(): StepGeom_Direction;
 
-HasAxis1(): boolean;
+  HasAxis1(): boolean;
 
-SetAxis2(aAxis2: StepGeom_Direction): void;
+  SetAxis2(aAxis2: StepGeom_Direction): void;
 
-UnSetAxis2(): void;
+  UnSetAxis2(): void;
 
-Axis2(): StepGeom_Direction;
+  Axis2(): StepGeom_Direction;
 
-HasAxis2(): boolean;
+  HasAxis2(): boolean;
 
-SetLocalOrigin(aLocalOrigin: StepGeom_CartesianPoint): void;
+  SetLocalOrigin(aLocalOrigin: StepGeom_CartesianPoint): void;
 
-LocalOrigin(): StepGeom_CartesianPoint;
+  LocalOrigin(): StepGeom_CartesianPoint;
 
-SetScale(aScale: number): void;
+  SetScale(aScale: number): void;
 
-UnSetScale(): void;
+  UnSetScale(): void;
 
-Scale(): number;
+  Scale(): number;
 
-HasScale(): boolean;
+  HasScale(): boolean;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepGeom_CartesianTransformationOperator2d: declare class StepGeom_CartesianTransformationOperator2d extends StepGeom_CartesianTransformationOperator
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepGeom_CartesianTransformationOperator3d: declare class StepGeom_CartesianTransformationOperator3d extends StepGeom_CartesianTransformationOperator
 
-constructor
+  constructor
 
-Init(aName: TCollection_HAsciiString, hasAaxis1: boolean, aAxis1: StepGeom_Direction, hasAaxis2: boolean, aAxis2: StepGeom_Direction, aLocalOrigin: StepGeom_CartesianPoint, hasAscale: boolean, aScale: number, hasAaxis3: boolean, aAxis3: StepGeom_Direction): void;
-Init(aName: TCollection_HAsciiString, hasAaxis1: boolean, aAxis1: StepGeom_Direction, hasAaxis2: boolean, aAxis2: StepGeom_Direction, aLocalOrigin: StepGeom_CartesianPoint, hasAscale: boolean, aScale: number): void;
-Init(aName: TCollection_HAsciiString): void;
-Init(aName: TCollection_HAsciiString, hasAaxis1: boolean, aAxis1: StepGeom_Direction, hasAaxis2: boolean, aAxis2: StepGeom_Direction, aLocalOrigin: StepGeom_CartesianPoint, hasAscale: boolean, aScale: number, hasAaxis3: boolean, aAxis3: StepGeom_Direction): void;
-Init(aName: TCollection_HAsciiString, hasAaxis1: boolean, aAxis1: StepGeom_Direction, hasAaxis2: boolean, aAxis2: StepGeom_Direction, aLocalOrigin: StepGeom_CartesianPoint, hasAscale: boolean, aScale: number): void;
-Init(aName: TCollection_HAsciiString): void;
-Init(aName: TCollection_HAsciiString, hasAaxis1: boolean, aAxis1: StepGeom_Direction, hasAaxis2: boolean, aAxis2: StepGeom_Direction, aLocalOrigin: StepGeom_CartesianPoint, hasAscale: boolean, aScale: number, hasAaxis3: boolean, aAxis3: StepGeom_Direction): void;
-Init(aName: TCollection_HAsciiString, hasAaxis1: boolean, aAxis1: StepGeom_Direction, hasAaxis2: boolean, aAxis2: StepGeom_Direction, aLocalOrigin: StepGeom_CartesianPoint, hasAscale: boolean, aScale: number): void;
-Init(aName: TCollection_HAsciiString): void;
+  Init(aName: TCollection_HAsciiString, hasAaxis1: boolean, aAxis1: StepGeom_Direction, hasAaxis2: boolean, aAxis2: StepGeom_Direction, aLocalOrigin: StepGeom_CartesianPoint, hasAscale: boolean, aScale: number, hasAaxis3: boolean, aAxis3: StepGeom_Direction): void;
+  Init(aName: TCollection_HAsciiString, hasAaxis1: boolean, aAxis1: StepGeom_Direction, hasAaxis2: boolean, aAxis2: StepGeom_Direction, aLocalOrigin: StepGeom_CartesianPoint, hasAscale: boolean, aScale: number): void;
+  Init(aName: TCollection_HAsciiString): void;
+  Init(aName: TCollection_HAsciiString, hasAaxis1: boolean, aAxis1: StepGeom_Direction, hasAaxis2: boolean, aAxis2: StepGeom_Direction, aLocalOrigin: StepGeom_CartesianPoint, hasAscale: boolean, aScale: number, hasAaxis3: boolean, aAxis3: StepGeom_Direction): void;
+  Init(aName: TCollection_HAsciiString, hasAaxis1: boolean, aAxis1: StepGeom_Direction, hasAaxis2: boolean, aAxis2: StepGeom_Direction, aLocalOrigin: StepGeom_CartesianPoint, hasAscale: boolean, aScale: number): void;
+  Init(aName: TCollection_HAsciiString): void;
+  Init(aName: TCollection_HAsciiString, hasAaxis1: boolean, aAxis1: StepGeom_Direction, hasAaxis2: boolean, aAxis2: StepGeom_Direction, aLocalOrigin: StepGeom_CartesianPoint, hasAscale: boolean, aScale: number, hasAaxis3: boolean, aAxis3: StepGeom_Direction): void;
+  Init(aName: TCollection_HAsciiString, hasAaxis1: boolean, aAxis1: StepGeom_Direction, hasAaxis2: boolean, aAxis2: StepGeom_Direction, aLocalOrigin: StepGeom_CartesianPoint, hasAscale: boolean, aScale: number): void;
+  Init(aName: TCollection_HAsciiString): void;
 
-SetAxis3(aAxis3: StepGeom_Direction): void;
+  SetAxis3(aAxis3: StepGeom_Direction): void;
 
-UnSetAxis3(): void;
+  UnSetAxis3(): void;
 
-Axis3(): StepGeom_Direction;
+  Axis3(): StepGeom_Direction;
 
-HasAxis3(): boolean;
+  HasAxis3(): boolean;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepGeom_Circle: declare class StepGeom_Circle extends StepGeom_Conic
 
-constructor
+  constructor
 
-Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis2Placement, aRadius: number): void;
-Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis2Placement): void;
-Init(aName: TCollection_HAsciiString): void;
-Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis2Placement, aRadius: number): void;
-Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis2Placement): void;
-Init(aName: TCollection_HAsciiString): void;
-Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis2Placement, aRadius: number): void;
-Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis2Placement): void;
-Init(aName: TCollection_HAsciiString): void;
+  Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis2Placement, aRadius: number): void;
+  Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis2Placement): void;
+  Init(aName: TCollection_HAsciiString): void;
+  Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis2Placement, aRadius: number): void;
+  Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis2Placement): void;
+  Init(aName: TCollection_HAsciiString): void;
+  Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis2Placement, aRadius: number): void;
+  Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis2Placement): void;
+  Init(aName: TCollection_HAsciiString): void;
 
-SetRadius(aRadius: number): void;
+  SetRadius(aRadius: number): void;
 
-Radius(): number;
+  Radius(): number;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepGeom_CompositeCurve: declare class StepGeom_CompositeCurve extends StepGeom_BoundedCurve
 
-constructor
+  constructor
 
-Init(aName: TCollection_HAsciiString, aSegments: NCollection_HArray1_handle_StepGeom_CompositeCurveSegment, aSelfIntersect: StepData_Logical): void;
-Init(aName: TCollection_HAsciiString): void;
-Init(aName: TCollection_HAsciiString, aSegments: NCollection_HArray1_handle_StepGeom_CompositeCurveSegment, aSelfIntersect: StepData_Logical): void;
-Init(aName: TCollection_HAsciiString): void;
+  Init(aName: TCollection_HAsciiString, aSegments: NCollection_HArray1_handle_StepGeom_CompositeCurveSegment, aSelfIntersect: StepData_Logical): void;
+  Init(aName: TCollection_HAsciiString): void;
+  Init(aName: TCollection_HAsciiString, aSegments: NCollection_HArray1_handle_StepGeom_CompositeCurveSegment, aSelfIntersect: StepData_Logical): void;
+  Init(aName: TCollection_HAsciiString): void;
 
-SetSegments(aSegments: NCollection_HArray1_handle_StepGeom_CompositeCurveSegment): void;
+  SetSegments(aSegments: NCollection_HArray1_handle_StepGeom_CompositeCurveSegment): void;
 
-Segments(): NCollection_HArray1_handle_StepGeom_CompositeCurveSegment;
+  Segments(): NCollection_HArray1_handle_StepGeom_CompositeCurveSegment;
 
-SegmentsValue(num: number): StepGeom_CompositeCurveSegment;
+  SegmentsValue(num: number): StepGeom_CompositeCurveSegment;
 
-NbSegments(): number;
+  NbSegments(): number;
 
-SetSelfIntersect(aSelfIntersect: StepData_Logical): void;
+  SetSelfIntersect(aSelfIntersect: StepData_Logical): void;
 
-SelfIntersect(): StepData_Logical;
+  SelfIntersect(): StepData_Logical;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepGeom_CompositeCurveOnSurface: declare class StepGeom_CompositeCurveOnSurface extends StepGeom_CompositeCurve
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepGeom_CompositeCurveSegment: declare class StepGeom_CompositeCurveSegment extends Standard_Transient
 
-constructor
+  constructor
 
-Init(aTransition: StepGeom_TransitionCode, aSameSense: boolean, aParentCurve: StepGeom_Curve): void;
+  Init(aTransition: StepGeom_TransitionCode, aSameSense: boolean, aParentCurve: StepGeom_Curve): void;
 
-SetTransition(aTransition: StepGeom_TransitionCode): void;
+  SetTransition(aTransition: StepGeom_TransitionCode): void;
 
-Transition(): StepGeom_TransitionCode;
+  Transition(): StepGeom_TransitionCode;
 
-SetSameSense(aSameSense: boolean): void;
+  SetSameSense(aSameSense: boolean): void;
 
-SameSense(): boolean;
+  SameSense(): boolean;
 
-SetParentCurve(aParentCurve: StepGeom_Curve): void;
+  SetParentCurve(aParentCurve: StepGeom_Curve): void;
 
-ParentCurve(): StepGeom_Curve;
+  ParentCurve(): StepGeom_Curve;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepGeom_Conic: declare class StepGeom_Conic extends StepGeom_Curve
 
-constructor
+  constructor
 
-Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis2Placement): void;
-Init(aName: TCollection_HAsciiString): void;
-Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis2Placement): void;
-Init(aName: TCollection_HAsciiString): void;
+  Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis2Placement): void;
+  Init(aName: TCollection_HAsciiString): void;
+  Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis2Placement): void;
+  Init(aName: TCollection_HAsciiString): void;
 
-SetPosition(aPosition: StepGeom_Axis2Placement): void;
+  SetPosition(aPosition: StepGeom_Axis2Placement): void;
 
-Position(): StepGeom_Axis2Placement;
+  Position(): StepGeom_Axis2Placement;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepGeom_ConicalSurface: declare class StepGeom_ConicalSurface extends StepGeom_ElementarySurface
 
-constructor
+  constructor
 
-Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis2Placement3d, aRadius: number, aSemiAngle: number): void;
-Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis2Placement3d): void;
-Init(aName: TCollection_HAsciiString): void;
-Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis2Placement3d, aRadius: number, aSemiAngle: number): void;
-Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis2Placement3d): void;
-Init(aName: TCollection_HAsciiString): void;
-Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis2Placement3d, aRadius: number, aSemiAngle: number): void;
-Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis2Placement3d): void;
-Init(aName: TCollection_HAsciiString): void;
+  Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis2Placement3d, aRadius: number, aSemiAngle: number): void;
+  Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis2Placement3d): void;
+  Init(aName: TCollection_HAsciiString): void;
+  Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis2Placement3d, aRadius: number, aSemiAngle: number): void;
+  Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis2Placement3d): void;
+  Init(aName: TCollection_HAsciiString): void;
+  Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis2Placement3d, aRadius: number, aSemiAngle: number): void;
+  Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis2Placement3d): void;
+  Init(aName: TCollection_HAsciiString): void;
 
-SetRadius(aRadius: number): void;
+  SetRadius(aRadius: number): void;
 
-Radius(): number;
+  Radius(): number;
 
-SetSemiAngle(aSemiAngle: number): void;
+  SetSemiAngle(aSemiAngle: number): void;
 
-SemiAngle(): number;
+  SemiAngle(): number;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepGeom_Curve: declare class StepGeom_Curve extends StepGeom_GeometricRepresentationItem
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepGeom_CurveBoundedSurface: declare class StepGeom_CurveBoundedSurface extends StepGeom_BoundedSurface
 
-constructor
+  constructor
 
-Init(aRepresentationItem_Name: TCollection_HAsciiString, aBasisSurface: StepGeom_Surface, aBoundaries: NCollection_HArray1_StepGeom_SurfaceBoundary, aImplicitOuter: boolean): void;
-Init(aName: TCollection_HAsciiString): void;
-Init(aRepresentationItem_Name: TCollection_HAsciiString, aBasisSurface: StepGeom_Surface, aBoundaries: NCollection_HArray1_StepGeom_SurfaceBoundary, aImplicitOuter: boolean): void;
-Init(aName: TCollection_HAsciiString): void;
+  Init(aRepresentationItem_Name: TCollection_HAsciiString, aBasisSurface: StepGeom_Surface, aBoundaries: NCollection_HArray1_StepGeom_SurfaceBoundary, aImplicitOuter: boolean): void;
+  Init(aName: TCollection_HAsciiString): void;
+  Init(aRepresentationItem_Name: TCollection_HAsciiString, aBasisSurface: StepGeom_Surface, aBoundaries: NCollection_HArray1_StepGeom_SurfaceBoundary, aImplicitOuter: boolean): void;
+  Init(aName: TCollection_HAsciiString): void;
 
-BasisSurface(): StepGeom_Surface;
+  BasisSurface(): StepGeom_Surface;
 
-SetBasisSurface(BasisSurface: StepGeom_Surface): void;
+  SetBasisSurface(BasisSurface: StepGeom_Surface): void;
 
-Boundaries(): NCollection_HArray1_StepGeom_SurfaceBoundary;
+  Boundaries(): NCollection_HArray1_StepGeom_SurfaceBoundary;
 
-SetBoundaries(Boundaries: NCollection_HArray1_StepGeom_SurfaceBoundary): void;
+  SetBoundaries(Boundaries: NCollection_HArray1_StepGeom_SurfaceBoundary): void;
 
-ImplicitOuter(): boolean;
+  ImplicitOuter(): boolean;
 
-SetImplicitOuter(ImplicitOuter: boolean): void;
+  SetImplicitOuter(ImplicitOuter: boolean): void;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepGeom_CurveOnSurface: declare class StepGeom_CurveOnSurface extends StepData_SelectType
 
-constructor
+  constructor
 
-CaseNum(ent: Standard_Transient): number;
+  CaseNum(ent: Standard_Transient): number;
 
-Pcurve(): StepGeom_Pcurve;
+  Pcurve(): StepGeom_Pcurve;
 
-SurfaceCurve(): StepGeom_SurfaceCurve;
+  SurfaceCurve(): StepGeom_SurfaceCurve;
 
-CompositeCurveOnSurface(): StepGeom_CompositeCurveOnSurface;
+  CompositeCurveOnSurface(): StepGeom_CompositeCurveOnSurface;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepGeom_CurveReplica: declare class StepGeom_CurveReplica extends StepGeom_Curve
 
-constructor
+  constructor
 
-Init(aName: TCollection_HAsciiString, aParentCurve: StepGeom_Curve, aTransformation: StepGeom_CartesianTransformationOperator): void;
-Init(aName: TCollection_HAsciiString): void;
-Init(aName: TCollection_HAsciiString, aParentCurve: StepGeom_Curve, aTransformation: StepGeom_CartesianTransformationOperator): void;
-Init(aName: TCollection_HAsciiString): void;
+  Init(aName: TCollection_HAsciiString, aParentCurve: StepGeom_Curve, aTransformation: StepGeom_CartesianTransformationOperator): void;
+  Init(aName: TCollection_HAsciiString): void;
+  Init(aName: TCollection_HAsciiString, aParentCurve: StepGeom_Curve, aTransformation: StepGeom_CartesianTransformationOperator): void;
+  Init(aName: TCollection_HAsciiString): void;
 
-SetParentCurve(aParentCurve: StepGeom_Curve): void;
+  SetParentCurve(aParentCurve: StepGeom_Curve): void;
 
-ParentCurve(): StepGeom_Curve;
+  ParentCurve(): StepGeom_Curve;
 
-SetTransformation(aTransformation: StepGeom_CartesianTransformationOperator): void;
+  SetTransformation(aTransformation: StepGeom_CartesianTransformationOperator): void;
 
-Transformation(): StepGeom_CartesianTransformationOperator;
+  Transformation(): StepGeom_CartesianTransformationOperator;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepGeom_CylindricalSurface: declare class StepGeom_CylindricalSurface extends StepGeom_ElementarySurface
 
-constructor
+  constructor
 
-Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis2Placement3d, aRadius: number): void;
-Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis2Placement3d): void;
-Init(aName: TCollection_HAsciiString): void;
-Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis2Placement3d, aRadius: number): void;
-Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis2Placement3d): void;
-Init(aName: TCollection_HAsciiString): void;
-Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis2Placement3d, aRadius: number): void;
-Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis2Placement3d): void;
-Init(aName: TCollection_HAsciiString): void;
+  Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis2Placement3d, aRadius: number): void;
+  Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis2Placement3d): void;
+  Init(aName: TCollection_HAsciiString): void;
+  Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis2Placement3d, aRadius: number): void;
+  Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis2Placement3d): void;
+  Init(aName: TCollection_HAsciiString): void;
+  Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis2Placement3d, aRadius: number): void;
+  Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis2Placement3d): void;
+  Init(aName: TCollection_HAsciiString): void;
 
-SetRadius(aRadius: number): void;
+  SetRadius(aRadius: number): void;
 
-Radius(): number;
+  Radius(): number;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepGeom_DegeneratePcurve: declare class StepGeom_DegeneratePcurve extends StepGeom_Point
 
-constructor
+  constructor
 
-Init(aName: TCollection_HAsciiString, aBasisSurface: StepGeom_Surface, aReferenceToCurve: StepRepr_DefinitionalRepresentation): void;
-Init(aName: TCollection_HAsciiString): void;
-Init(aName: TCollection_HAsciiString, aBasisSurface: StepGeom_Surface, aReferenceToCurve: StepRepr_DefinitionalRepresentation): void;
-Init(aName: TCollection_HAsciiString): void;
+  Init(aName: TCollection_HAsciiString, aBasisSurface: StepGeom_Surface, aReferenceToCurve: StepRepr_DefinitionalRepresentation): void;
+  Init(aName: TCollection_HAsciiString): void;
+  Init(aName: TCollection_HAsciiString, aBasisSurface: StepGeom_Surface, aReferenceToCurve: StepRepr_DefinitionalRepresentation): void;
+  Init(aName: TCollection_HAsciiString): void;
 
-SetBasisSurface(aBasisSurface: StepGeom_Surface): void;
+  SetBasisSurface(aBasisSurface: StepGeom_Surface): void;
 
-BasisSurface(): StepGeom_Surface;
+  BasisSurface(): StepGeom_Surface;
 
-SetReferenceToCurve(aReferenceToCurve: StepRepr_DefinitionalRepresentation): void;
+  SetReferenceToCurve(aReferenceToCurve: StepRepr_DefinitionalRepresentation): void;
 
-ReferenceToCurve(): StepRepr_DefinitionalRepresentation;
+  ReferenceToCurve(): StepRepr_DefinitionalRepresentation;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepGeom_DegenerateToroidalSurface: declare class StepGeom_DegenerateToroidalSurface extends StepGeom_ToroidalSurface
 
-constructor
+  constructor
 
-Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis2Placement3d, aMajorRadius: number, aMinorRadius: number, aSelectOuter: boolean): void;
-Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis2Placement3d, aMajorRadius: number, aMinorRadius: number): void;
-Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis2Placement3d): void;
-Init(aName: TCollection_HAsciiString): void;
-Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis2Placement3d, aMajorRadius: number, aMinorRadius: number, aSelectOuter: boolean): void;
-Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis2Placement3d, aMajorRadius: number, aMinorRadius: number): void;
-Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis2Placement3d): void;
-Init(aName: TCollection_HAsciiString): void;
-Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis2Placement3d, aMajorRadius: number, aMinorRadius: number, aSelectOuter: boolean): void;
-Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis2Placement3d, aMajorRadius: number, aMinorRadius: number): void;
-Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis2Placement3d): void;
-Init(aName: TCollection_HAsciiString): void;
-Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis2Placement3d, aMajorRadius: number, aMinorRadius: number, aSelectOuter: boolean): void;
-Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis2Placement3d, aMajorRadius: number, aMinorRadius: number): void;
-Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis2Placement3d): void;
-Init(aName: TCollection_HAsciiString): void;
+  Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis2Placement3d, aMajorRadius: number, aMinorRadius: number, aSelectOuter: boolean): void;
+  Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis2Placement3d, aMajorRadius: number, aMinorRadius: number): void;
+  Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis2Placement3d): void;
+  Init(aName: TCollection_HAsciiString): void;
+  Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis2Placement3d, aMajorRadius: number, aMinorRadius: number, aSelectOuter: boolean): void;
+  Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis2Placement3d, aMajorRadius: number, aMinorRadius: number): void;
+  Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis2Placement3d): void;
+  Init(aName: TCollection_HAsciiString): void;
+  Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis2Placement3d, aMajorRadius: number, aMinorRadius: number, aSelectOuter: boolean): void;
+  Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis2Placement3d, aMajorRadius: number, aMinorRadius: number): void;
+  Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis2Placement3d): void;
+  Init(aName: TCollection_HAsciiString): void;
+  Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis2Placement3d, aMajorRadius: number, aMinorRadius: number, aSelectOuter: boolean): void;
+  Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis2Placement3d, aMajorRadius: number, aMinorRadius: number): void;
+  Init(aName: TCollection_HAsciiString, aPosition: StepGeom_Axis2Placement3d): void;
+  Init(aName: TCollection_HAsciiString): void;
 
-SetSelectOuter(aSelectOuter: boolean): void;
+  SetSelectOuter(aSelectOuter: boolean): void;
 
-SelectOuter(): boolean;
+  SelectOuter(): boolean;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;

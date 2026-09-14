@@ -4,50 +4,50 @@
 
 StdFail_InfiniteSolutions: declare class StdFail_InfiniteSolutions extends Standard_Failure
 
-constructor
+  constructor
 
-ExceptionType(): string;
+  ExceptionType(): string;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StdFail_NotDone: declare class StdFail_NotDone extends Standard_Failure
 
-constructor
+  constructor
 
-ExceptionType(): string;
+  ExceptionType(): string;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StdFail_Undefined: declare class StdFail_Undefined extends Standard_Failure
 
-constructor
+  constructor
 
-ExceptionType(): string;
+  ExceptionType(): string;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StdFail_UndefinedDerivative: declare class StdFail_UndefinedDerivative extends Standard_DomainError
 
-constructor
+  constructor
 
-ExceptionType(): string;
+  ExceptionType(): string;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StdFail_UndefinedValue: declare class StdFail_UndefinedValue extends Standard_DomainError
 
-constructor
+  constructor
 
-ExceptionType(): string;
+  ExceptionType(): string;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;

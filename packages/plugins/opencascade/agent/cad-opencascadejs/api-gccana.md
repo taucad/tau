@@ -4,294 +4,294 @@
 
 GccAna_Circ2d2TanOn: declare class GccAna_Circ2d2TanOn
 
-constructor
+  constructor
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-NbSolutions(): number;
+  NbSolutions(): number;
 
-ThisSolution(Index: number): gp_Circ2d;
+  ThisSolution(Index: number): gp_Circ2d;
 
-WhichQualifier(Index: number, Qualif1?: GccEnt_Position, Qualif2?: GccEnt_Position): { Qualif1: GccEnt_Position; Qualif2: GccEnt_Position };
+  WhichQualifier(Index: number, Qualif1?: GccEnt_Position, Qualif2?: GccEnt_Position): { Qualif1: GccEnt_Position; Qualif2: GccEnt_Position };
 
-Tangency1(Index: number, ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
+  Tangency1(Index: number, ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
 
-Tangency2(Index: number, ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
+  Tangency2(Index: number, ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
 
-CenterOn3(Index: number, ParArg: number, PntArg: gp_Pnt2d): { ParArg: number };
+  CenterOn3(Index: number, ParArg: number, PntArg: gp_Pnt2d): { ParArg: number };
 
-IsTheSame1(Index: number): boolean;
+  IsTheSame1(Index: number): boolean;
 
-IsTheSame2(Index: number): boolean;
+  IsTheSame2(Index: number): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 GccAna_Circ2d2TanRad: declare class GccAna_Circ2d2TanRad
 
-constructor
+  constructor
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-NbSolutions(): number;
+  NbSolutions(): number;
 
-ThisSolution(Index: number): gp_Circ2d;
+  ThisSolution(Index: number): gp_Circ2d;
 
-WhichQualifier(Index: number, Qualif1?: GccEnt_Position, Qualif2?: GccEnt_Position): { Qualif1: GccEnt_Position; Qualif2: GccEnt_Position };
+  WhichQualifier(Index: number, Qualif1?: GccEnt_Position, Qualif2?: GccEnt_Position): { Qualif1: GccEnt_Position; Qualif2: GccEnt_Position };
 
-Tangency1(Index: number, ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
+  Tangency1(Index: number, ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
 
-Tangency2(Index: number, ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
+  Tangency2(Index: number, ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
 
-IsTheSame1(Index: number): boolean;
+  IsTheSame1(Index: number): boolean;
 
-IsTheSame2(Index: number): boolean;
+  IsTheSame2(Index: number): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 GccAna_Circ2d3Tan: declare class GccAna_Circ2d3Tan
 
-constructor
+  constructor
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-NbSolutions(): number;
+  NbSolutions(): number;
 
-ThisSolution(Index: number): gp_Circ2d;
+  ThisSolution(Index: number): gp_Circ2d;
 
-WhichQualifier(Index: number, Qualif1?: GccEnt_Position, Qualif2?: GccEnt_Position, Qualif3?: GccEnt_Position): { Qualif1: GccEnt_Position; Qualif2: GccEnt_Position; Qualif3: GccEnt_Position };
+  WhichQualifier(Index: number, Qualif1?: GccEnt_Position, Qualif2?: GccEnt_Position, Qualif3?: GccEnt_Position): { Qualif1: GccEnt_Position; Qualif2: GccEnt_Position; Qualif3: GccEnt_Position };
 
-Tangency1(Index: number, ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
+  Tangency1(Index: number, ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
 
-Tangency2(Index: number, ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
+  Tangency2(Index: number, ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
 
-Tangency3(Index: number, ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
+  Tangency3(Index: number, ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
 
-IsTheSame1(Index: number): boolean;
+  IsTheSame1(Index: number): boolean;
 
-IsTheSame2(Index: number): boolean;
+  IsTheSame2(Index: number): boolean;
 
-IsTheSame3(Index: number): boolean;
+  IsTheSame3(Index: number): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 GccAna_Circ2dBisec: declare class GccAna_Circ2dBisec
 
-constructor
+  constructor
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-NbSolutions(): number;
+  NbSolutions(): number;
 
-ThisSolution(Index: number): GccInt_Bisec;
+  ThisSolution(Index: number): GccInt_Bisec;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 GccAna_Circ2dTanCen: declare class GccAna_Circ2dTanCen
 
-constructor
+  constructor
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-NbSolutions(): number;
+  NbSolutions(): number;
 
-ThisSolution(Index: number): gp_Circ2d;
+  ThisSolution(Index: number): gp_Circ2d;
 
-WhichQualifier(Index: number, Qualif1?: GccEnt_Position): { Qualif1: GccEnt_Position };
+  WhichQualifier(Index: number, Qualif1?: GccEnt_Position): { Qualif1: GccEnt_Position };
 
-Tangency1(Index: number, ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
+  Tangency1(Index: number, ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
 
-IsTheSame1(Index: number): boolean;
+  IsTheSame1(Index: number): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 GccAna_Circ2dTanOnRad: declare class GccAna_Circ2dTanOnRad
 
-constructor
+  constructor
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-NbSolutions(): number;
+  NbSolutions(): number;
 
-ThisSolution(Index: number): gp_Circ2d;
+  ThisSolution(Index: number): gp_Circ2d;
 
-WhichQualifier(Index: number, Qualif1?: GccEnt_Position): { Qualif1: GccEnt_Position };
+  WhichQualifier(Index: number, Qualif1?: GccEnt_Position): { Qualif1: GccEnt_Position };
 
-Tangency1(Index: number, ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
+  Tangency1(Index: number, ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
 
-CenterOn3(Index: number, ParArg: number, PntSol: gp_Pnt2d): { ParArg: number };
+  CenterOn3(Index: number, ParArg: number, PntSol: gp_Pnt2d): { ParArg: number };
 
-IsTheSame1(Index: number): boolean;
+  IsTheSame1(Index: number): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 GccAna_CircLin2dBisec: declare class GccAna_CircLin2dBisec
 
-constructor
+  constructor
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-NbSolutions(): number;
+  NbSolutions(): number;
 
-ThisSolution(Index: number): GccInt_Bisec;
+  ThisSolution(Index: number): GccInt_Bisec;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 GccAna_CircPnt2dBisec: declare class GccAna_CircPnt2dBisec
 
-constructor
+  constructor
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-NbSolutions(): number;
+  NbSolutions(): number;
 
-ThisSolution(Index: number): GccInt_Bisec;
+  ThisSolution(Index: number): GccInt_Bisec;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 GccAna_Lin2d2Tan: declare class GccAna_Lin2d2Tan
 
-constructor
+  constructor
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-NbSolutions(): number;
+  NbSolutions(): number;
 
-ThisSolution(Index: number): gp_Lin2d;
+  ThisSolution(Index: number): gp_Lin2d;
 
-WhichQualifier(Index: number, Qualif1?: GccEnt_Position, Qualif2?: GccEnt_Position): { Qualif1: GccEnt_Position; Qualif2: GccEnt_Position };
+  WhichQualifier(Index: number, Qualif1?: GccEnt_Position, Qualif2?: GccEnt_Position): { Qualif1: GccEnt_Position; Qualif2: GccEnt_Position };
 
-Tangency1(Index: number, ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
+  Tangency1(Index: number, ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
 
-Tangency2(Index: number, ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
+  Tangency2(Index: number, ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 GccAna_Lin2dBisec: declare class GccAna_Lin2dBisec
 
-constructor
+  constructor
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-NbSolutions(): number;
+  NbSolutions(): number;
 
-ThisSolution(Index: number): gp_Lin2d;
+  ThisSolution(Index: number): gp_Lin2d;
 
-Intersection1(Index: number, ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
+  Intersection1(Index: number, ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
 
-Intersection2(Index: number, ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
+  Intersection2(Index: number, ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 GccAna_Lin2dTanObl: declare class GccAna_Lin2dTanObl
 
-constructor
+  constructor
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-NbSolutions(): number;
+  NbSolutions(): number;
 
-ThisSolution(Index: number): gp_Lin2d;
+  ThisSolution(Index: number): gp_Lin2d;
 
-WhichQualifier(Index: number, Qualif1?: GccEnt_Position): { Qualif1: GccEnt_Position };
+  WhichQualifier(Index: number, Qualif1?: GccEnt_Position): { Qualif1: GccEnt_Position };
 
-Tangency1(Index: number, ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
+  Tangency1(Index: number, ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
 
-Intersection2(Index: number, ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
+  Intersection2(Index: number, ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 GccAna_Lin2dTanPar: declare class GccAna_Lin2dTanPar
 
-constructor
+  constructor
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-NbSolutions(): number;
+  NbSolutions(): number;
 
-ThisSolution(Index: number): gp_Lin2d;
+  ThisSolution(Index: number): gp_Lin2d;
 
-WhichQualifier(Index: number, Qualif1?: GccEnt_Position): { Qualif1: GccEnt_Position };
+  WhichQualifier(Index: number, Qualif1?: GccEnt_Position): { Qualif1: GccEnt_Position };
 
-Tangency1(Index: number, ParSol: number, ParArg: number, Pnt: gp_Pnt2d): { ParSol: number; ParArg: number };
+  Tangency1(Index: number, ParSol: number, ParArg: number, Pnt: gp_Pnt2d): { ParSol: number; ParArg: number };
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 GccAna_Lin2dTanPer: declare class GccAna_Lin2dTanPer
 
-constructor
+  constructor
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-NbSolutions(): number;
+  NbSolutions(): number;
 
-WhichQualifier(Index: number, Qualif1?: GccEnt_Position): { Qualif1: GccEnt_Position };
+  WhichQualifier(Index: number, Qualif1?: GccEnt_Position): { Qualif1: GccEnt_Position };
 
-ThisSolution(Index: number): gp_Lin2d;
+  ThisSolution(Index: number): gp_Lin2d;
 
-Tangency1(Index: number, ParSol: number, ParArg: number, Pnt: gp_Pnt2d): { ParSol: number; ParArg: number };
+  Tangency1(Index: number, ParSol: number, ParArg: number, Pnt: gp_Pnt2d): { ParSol: number; ParArg: number };
 
-Intersection2(Index: number, ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
+  Intersection2(Index: number, ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 GccAna_LinPnt2dBisec: declare class GccAna_LinPnt2dBisec
 
-constructor
+  constructor
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-ThisSolution(): GccInt_Bisec;
+  ThisSolution(): GccInt_Bisec;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 GccAna_NoSolution: declare class GccAna_NoSolution extends Standard_Failure
 
-constructor
+  constructor
 
-ExceptionType(): string;
+  ExceptionType(): string;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 GccAna_Pnt2dBisec: declare class GccAna_Pnt2dBisec
 
-constructor
+  constructor
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-HasSolution(): boolean;
+  HasSolution(): boolean;
 
-ThisSolution(): gp_Lin2d;
+  ThisSolution(): gp_Lin2d;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;

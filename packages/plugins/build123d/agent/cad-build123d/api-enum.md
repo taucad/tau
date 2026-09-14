@@ -11,7 +11,7 @@ IntEnum
 // Instances are replaced with an appropriate value in Enum class suites
 auto
 
-auto(value = \_auto_null)
+  auto(value = _auto_null)
 
 // Class decorator for enumerations ensuring unique member values
 unique(enumeration)

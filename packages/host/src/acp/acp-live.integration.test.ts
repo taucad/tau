@@ -22,7 +22,8 @@ import { afterAll, describe, expect, it } from 'vitest';
 
 import { createNodeAgentLauncher } from '@taucad/agent-host/node-launcher';
 import type { NodeAgentLauncher } from '@taucad/agent-host/node-launcher';
-import type { AgentLogEvent, ProviderMessage } from '@taucad/agent-host';
+import { reduceEventLog } from '@taucad/agent-host';
+import type { AgentChannelLiveEvent, AgentLogEvent, ProviderMessage } from '@taucad/agent-host';
 
 import { createAcpExternalAgentPort } from '#acp/run.js';
 import { discoverAcpAgents } from '#acp/registry.js';
@@ -31,8 +32,8 @@ import type { AcpWireFrame } from '#acp/spawn.js';
 
 const execFileAsync = promisify(execFile);
 
-/** The one prompt: short, deterministic, and cheap on every model. */
-const prompt = 'Reply with the single word pong.';
+/** A bounded prompt that must exercise the adapter's real filesystem tool. */
+const prompt = 'Use your filesystem read tool to read main.scad, then report the cube dimension. You must call a tool.';
 
 /**
  * The adapters this host may actually bill against.
@@ -44,13 +45,24 @@ const prompt = 'Reply with the single word pong.';
  *
  * @returns The resolved adapters, or an empty list when this host is not live.
  */
-const liveAdapters = async (): Promise<readonly AcpAdapter[]> => {
-  if (process.env['TAU_ACP_LIVE'] !== '1') {
-    return [];
+const liveEnabled = process.env['TAU_ACP_LIVE'] === '1';
+const selectedAgentIds = liveEnabled
+  ? (process.env['TAU_ACP_LIVE_AGENTS'] ?? 'codex,claude')
+      .split(',')
+      .map((id) => id.trim())
+      .filter(Boolean)
+  : [];
+
+const liveAdapters = async (): Promise<{
+  readonly adapters: readonly AcpAdapter[];
+  readonly unavailable: readonly string[];
+}> => {
+  if (!liveEnabled) {
+    return { adapters: [], unavailable: [] };
   }
-  const { agents } = await discoverAcpAgents({ resolveFrom: import.meta.url, probeTimeout: 10_000 });
+  const discovery = await discoverAcpAgents({ resolveFrom: import.meta.url, probeTimeout: 10_000 });
   const authenticated = await Promise.all(
-    agents.map(async (adapter) => {
+    discovery.agents.map(async (adapter) => {
       if (adapter.id !== 'codex') {
         return true;
       }
@@ -60,10 +72,21 @@ const liveAdapters = async (): Promise<readonly AcpAdapter[]> => {
       );
     }),
   );
-  return agents.filter((_adapter, index) => authenticated[index] === true);
+  const authenticatedAgents = discovery.agents.filter((_adapter, index) => authenticated[index] === true);
+  const adapters = authenticatedAgents.filter((adapter) => selectedAgentIds.includes(adapter.id));
+  const unavailable = selectedAgentIds.flatMap((id) => {
+    if (adapters.some((adapter) => adapter.id === id)) {
+      return [];
+    }
+    const refusal = discovery.refused.find((candidate) => candidate.id === id);
+    return [`${id}: ${refusal?.code ?? 'CLI_NOT_AUTHENTICATED_OR_UNKNOWN'}`];
+  });
+  return { adapters, unavailable };
 };
 
-const adapters = await liveAdapters();
+const { adapters, unavailable } = await liveAdapters();
+const selectedModel = (agentId: string): string | undefined =>
+  process.env[`TAU_ACP_LIVE_${agentId.toUpperCase()}_MODEL`];
 const roots: string[] = [];
 const closers: Array<() => Promise<void>> = [];
 
@@ -118,8 +141,7 @@ const readLog = async (workspaceRoot: string, chatId: string): Promise<readonly 
     .map((line) => JSON.parse(line) as AgentLogEvent);
 };
 
-const messagesOf = (events: readonly AgentLogEvent[]): readonly ProviderMessage[] =>
-  events.flatMap((event) => (event.type === 'message.appended' ? [event.message] : []));
+const messagesOf = (events: readonly AgentLogEvent[]): readonly ProviderMessage[] => reduceEventLog(events);
 
 const textOf = (message: ProviderMessage): string =>
   typeof message.content === 'string'
@@ -163,7 +185,15 @@ const settled = async (read: () => Promise<readonly AgentLogEvent[]>): Promise<s
   throw new Error(`The run never settled. Log: ${JSON.stringify(await read().catch(() => []))}`);
 };
 
-describe.skipIf(adapters.length < 2)('a live ACP turn', () => {
+describe.skipIf(!liveEnabled)('live ACP selection', () => {
+  it('requires every explicitly selected adapter to be available', () => {
+    expect(selectedAgentIds, 'TAU_ACP_LIVE_AGENTS must select at least one adapter').not.toEqual([]);
+    expect(unavailable, 'selected ACP adapters unavailable').toEqual([]);
+    expect(adapters).toHaveLength(selectedAgentIds.length);
+  });
+});
+
+describe.skipIf(!liveEnabled)('a live ACP turn', () => {
   /* No model is named: V5 deleted the pin's default, so a live turn runs on
    * whatever the user's own CLI has selected — which is exactly what a turn
    * with no picker selection does in production. */
@@ -174,6 +204,15 @@ describe.skipIf(adapters.length < 2)('a live ACP turn', () => {
       const chatId = `chat-live-${agentId}`;
       const runId = `run-live-${agentId}`;
       const started = Date.now();
+      const liveAbort = new AbortController();
+      const live: AgentChannelLiveEvent[] = [];
+      const liveDone = (async () => {
+        for await (const event of launcher.liveEvents(liveAbort.signal)) {
+          if (event.event.runId === runId) {
+            live.push(event);
+          }
+        }
+      })();
 
       const accepted = await launcher.execute({
         type: 'start',
@@ -182,7 +221,11 @@ describe.skipIf(adapters.length < 2)('a live ACP turn', () => {
         runId,
         message: { id: `user-${agentId}`, role: 'user', content: prompt },
         config: {
-          agent: { kind: 'acp', id: agentId },
+          agent: {
+            kind: 'acp',
+            id: agentId,
+            ...(selectedModel(agentId) === undefined ? {} : { model: selectedModel(agentId) }),
+          },
           systemPrompt: '',
           toolChoice: 'auto',
         },
@@ -190,6 +233,8 @@ describe.skipIf(adapters.length < 2)('a live ACP turn', () => {
       expect(accepted).toMatchObject({ type: 'result', operation: 'start' });
 
       const state = await settled(async () => readLog(workspaceRoot, chatId));
+      liveAbort.abort();
+      await liveDone;
       const events = await readLog(workspaceRoot, chatId);
       const messages = messagesOf(events);
       /* The run id, adapter and duration are this target's whole evidence. */
@@ -203,7 +248,7 @@ describe.skipIf(adapters.length < 2)('a live ACP turn', () => {
           .filter((message) => message.role === 'assistant')
           .map((message) => textOf(message))
           .at(-1) ?? '',
-      ).toMatch(/pong/iu);
+      ).toMatch(/10|ten/iu);
 
       /* The shared tool vocabulary, not an external one (N11): whatever the
        * agent chose to run is recorded with a typed top-level `call`. */
@@ -214,6 +259,12 @@ describe.skipIf(adapters.length < 2)('a live ACP turn', () => {
       for (const message of toolMessages) {
         expect(typeof message.call?.toolCallId).toBe('string');
       }
+      expect(toolMessages.some((message) => message.role === 'tool-input')).toBe(true);
+      expect(toolMessages.some((message) => message.role === 'tool-output')).toBe(true);
+      const liveTypes = live.map(({ event }) => event.type);
+      expect(liveTypes).toContain('tool-input-start');
+      expect(liveTypes).toContain('tool-input-end');
+      expect(liveTypes.some((type) => type === 'thinking-delta' || type === 'text-delta')).toBe(true);
 
       /* The selection is durable: a replay reader can say which adapter
        * produced this transcript. */
@@ -240,7 +291,7 @@ const sentFrames = (frames: readonly AcpWireFrame[], method: string): number =>
 /* The one claim source alone cannot settle (r1 risk 1): `codex-acp` calls the
  * same `threadResume` for `session/resume` and `session/load`, which says the
  * transcript survives — but only a real turn can prove the model *uses* it. */
-describe.skipIf(codexAdapter === undefined)('a live ACP chat across two turns', () => {
+describe.skipIf(!liveEnabled || codexAdapter === undefined)('a live ACP chat across two turns', () => {
   it('recalls the first turn on the second, in one session', async () => {
     const { launcher, workspaceRoot, frames } = await startHarness();
     const chatId = 'chat-live-continuity';
@@ -255,7 +306,11 @@ describe.skipIf(codexAdapter === undefined)('a live ACP chat across two turns', 
         runId,
         message: { id: `user-${runId}`, role: 'user', content: text },
         config: {
-          agent: { kind: 'acp', id: agentId },
+          agent: {
+            kind: 'acp',
+            id: agentId,
+            ...(selectedModel(agentId) === undefined ? {} : { model: selectedModel(agentId) }),
+          },
           systemPrompt: '',
           toolChoice: 'auto',
         },

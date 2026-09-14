@@ -3,8 +3,9 @@
 /* eslint-disable @typescript-eslint/explicit-member-accessibility -- mock class constructor omits the `public` keyword to mirror the AI SDK's published shape. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render, renderHook, waitFor } from '@testing-library/react';
+import { StrictMode } from 'react';
 import type { ReactNode } from 'react';
-import type { CadAgentExecution, Chat, MyUIMessage } from '@taucad/chat';
+import type { Chat, MyUIMessage } from '@taucad/chat';
 import { resolveKernel } from '@taucad/types/constants';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 
@@ -43,6 +44,9 @@ const harness = vi.hoisted(() => ({
   selectedModelName: 'Cookie Model',
   setKernel: vi.fn(),
   cookieKernel: 'openscad' as 'openscad' | 'manifold' | 'replicad',
+  homeBytes: undefined as string | undefined,
+  homeReadFile: vi.fn<(path: string, encoding: 'utf8') => Promise<string>>(),
+  homeWriteFile: vi.fn<(path: string, bytes: string) => Promise<void>>(),
 }));
 
 vi.mock('@ai-sdk/react', () => ({
@@ -111,6 +115,8 @@ vi.mock('ai', () => ({
   // oxlint-disable-next-line typescript-eslint/no-extraneous-class -- mock requires a `new`able value
   DefaultChatTransport: class {},
   lastAssistantMessageIsCompleteWithApprovalResponses: vi.fn(),
+  isStaticToolUIPart: () => false,
+  safeValidateUIMessages: async ({ messages }: { messages: MyUIMessage[] }) => ({ success: true, data: messages }),
 }));
 
 vi.mock('#environment.config.js', () => ({
@@ -204,13 +210,26 @@ vi.mock('#hooks/use-kernel.js', () => ({
   }),
 }));
 
-const { ActiveChatProvider, ChatComposerProvider, useActiveChatSession, useChatComposer } =
-  await import('#hooks/active-chat-provider.js');
+vi.mock('#hooks/use-file-manager.js', () => {
+  const client = {
+    readFile: async (path: string, encoding: 'utf8') => harness.homeReadFile(path, encoding),
+    writeFile: async (path: string, bytes: string) => harness.homeWriteFile(path, bytes),
+  };
+  return { useFileManager: () => ({ client }) };
+});
+
+const {
+  ActiveChatProvider,
+  ChatComposerProvider,
+  HomeNewProjectComposerProvider,
+  useActiveChatSession,
+  useChatComposer,
+} = await import('#hooks/active-chat-provider.js');
 const { ChatSessionStoreProvider } = await import('#hooks/chat-session-store-provider.js');
 
 function makeChat(overrides: Partial<Chat> = {}): Chat {
   return {
-    id: 'chat_homepage_main',
+    id: 'chat_default',
     resourceId: 'home',
     name: '',
     messages: [],
@@ -240,6 +259,16 @@ function createComposerWrapper() {
   };
 }
 
+function createHomeWrapper() {
+  return function Wrapper({ children }: { readonly children: ReactNode }) {
+    return (
+      <StrictMode>
+        <HomeNewProjectComposerProvider>{children}</HomeNewProjectComposerProvider>
+      </StrictMode>
+    );
+  };
+}
+
 beforeEach(() => {
   harness.created = [];
   harness.patchChat.mockReset().mockResolvedValue(undefined);
@@ -257,6 +286,16 @@ beforeEach(() => {
   harness.selectedModelName = 'Cookie Model';
   harness.setKernel.mockReset();
   harness.cookieKernel = 'openscad';
+  harness.homeBytes = undefined;
+  harness.homeReadFile.mockReset().mockImplementation(async () => {
+    if (harness.homeBytes === undefined) {
+      throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+    }
+    return harness.homeBytes;
+  });
+  harness.homeWriteFile.mockReset().mockImplementation(async (_path: string, bytes: string) => {
+    harness.homeBytes = bytes;
+  });
   vi.useRealTimers();
 });
 
@@ -484,6 +523,95 @@ describe('ChatComposerProvider', () => {
   });
 });
 
+describe('HomeNewProjectComposerProvider', () => {
+  it('mounts an empty selectable composer without acquiring a chat when the file is absent', async () => {
+    const { result } = renderHook(() => useChatComposer(), { wrapper: createHomeWrapper() });
+    await waitFor(() => {
+      expect(result.current).not.toBeNull();
+    });
+    expect(result.current.draftActorRef.getSnapshot().context.draftText).toBe('');
+    expect(result.current.canSelectExecution).toBe(true);
+    expect(result.current.session).toBeUndefined();
+    expect(harness.getChat).not.toHaveBeenCalled();
+    expect(harness.homeWriteFile).not.toHaveBeenCalled();
+  });
+
+  it('hydrates the draft and ACP execution from the exact Home record', async () => {
+    harness.homeBytes = JSON.stringify({
+      version: 1,
+      draft: { id: 'draft', role: 'user', parts: [{ type: 'text', text: 'restored from Home' }] },
+      execution: { kind: 'acp', hostId: 'origin', agentId: 'codex' },
+    });
+    const { result } = renderHook(() => useChatComposer(), { wrapper: createHomeWrapper() });
+    await waitFor(() => {
+      expect(result.current.draftActorRef.getSnapshot().context.draftText).toBe('restored from Home');
+    });
+    expect(result.current.execution.execution).toEqual({ kind: 'acp', hostId: 'origin', agentId: 'codex' });
+    expect(harness.homeReadFile).toHaveBeenCalledWith('/.tau/composers/new-project.json', 'utf8');
+  });
+
+  it.each([
+    ['invalid bytes', async () => '{'],
+    [
+      'read failure',
+      async () => {
+        throw Object.assign(new Error('offline'), { code: 'EIO' });
+      },
+    ],
+  ])('leaves loading and mounts a usable degraded composer after %s', async (_name, read) => {
+    harness.homeReadFile.mockImplementation(read);
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const { result } = renderHook(() => useChatComposer(), { wrapper: createHomeWrapper() });
+    await waitFor(() => {
+      expect(result.current).not.toBeNull();
+    });
+    expect(result.current.draftActorRef.getSnapshot().context.draftText).toBe('');
+    expect(result.current.status).toBe('ready');
+    expect(harness.toastError).toHaveBeenCalledOnce();
+    consoleError.mockRestore();
+  });
+
+  it('persists edits and awaits a draft-only clear while retaining execution', async () => {
+    harness.homeBytes = JSON.stringify({
+      version: 1,
+      execution: { kind: 'tau', model: 'cookie-model', hostId: 'desktop' },
+    });
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const { result } = renderHook(() => useChatComposer(), { wrapper: createHomeWrapper() });
+    await waitFor(() => {
+      expect(result.current).not.toBeNull();
+    });
+    act(() => {
+      result.current.draftActorRef.send({ type: 'setDraftText', text: 'persist me' });
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+    });
+    await act(async () => result.current.consumeDraft());
+    expect(JSON.parse(harness.homeBytes)).toMatchObject({
+      draft: { parts: [] },
+      execution: { kind: 'tau', model: 'cookie-model', hostId: 'desktop' },
+    });
+  });
+
+  it('clears local draft state and resolves when the durable clear fails', async () => {
+    harness.homeBytes = JSON.stringify({
+      version: 1,
+      draft: { id: 'draft', role: 'user', parts: [{ type: 'text', text: 'already created' }] },
+    });
+    const { result } = renderHook(() => useChatComposer(), { wrapper: createHomeWrapper() });
+    await waitFor(() => {
+      expect(result.current.draftActorRef.getSnapshot().context.draftText).toBe('already created');
+    });
+    harness.homeWriteFile.mockRejectedValueOnce(new Error('disk full'));
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    await act(async () => result.current.consumeDraft());
+    expect(result.current.draftActorRef.getSnapshot().context.draftText).toBe('');
+    expect(harness.toastError).toHaveBeenCalledOnce();
+    consoleError.mockRestore();
+  });
+});
+
 // ===========================================================================
 // ActiveChatProvider — session-backed contract
 // ===========================================================================
@@ -678,10 +806,11 @@ describe('ActiveChatProvider', () => {
     });
 
     it('drops a persisted browser-host placement when the active model changes', async () => {
+      const legacyExecution = { kind: 'tau', model: 'old-model', placement: 'browser-host' } as const;
       harness.getChat.mockResolvedValue(
         makeChat({
           id: 'chat_browser_model',
-          activeExecution: { kind: 'tau', model: 'old-model', placement: 'browser-host' } as CadAgentExecution,
+          activeExecution: legacyExecution,
         }),
       );
 
@@ -784,7 +913,7 @@ describe('ActiveChatProvider', () => {
     }
   });
 
-  it('should persist draft to IndexedDB when chatId is defined', async () => {
+  it('should persist draft to the bound chat store when chatId is defined', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
 
     const { result } = renderHook(() => useActiveChatSession(), {
@@ -830,7 +959,7 @@ describe('ActiveChatProvider', () => {
     });
   });
 
-  it('should load the existing Chat.draft from IndexedDB when a record exists', async () => {
+  it('should load the existing Chat.draft from the chat store when a record exists', async () => {
     harness.getChat.mockResolvedValue(
       makeChat({
         id: 'chat_with_draft',
@@ -851,20 +980,6 @@ describe('ActiveChatProvider', () => {
       const snapshot = result.current.draftActorRef.getSnapshot();
       expect(snapshot.context.draftText).toBe('preserved homepage draft');
     });
-  });
-
-  it('should not throw when no Chat row exists for the given chatId (homepage first-visit)', async () => {
-    harness.getChat.mockResolvedValue(undefined);
-
-    const { result } = renderHook(() => useActiveChatSession(), {
-      wrapper: createSessionWrapper('chat_homepage_main'),
-    });
-
-    await waitFor(() => {
-      expect(harness.getChat).toHaveBeenCalledWith('chat_homepage_main');
-    });
-
-    expect(result.current.draftActorRef.getSnapshot().context.draftText).toBe('');
   });
 
   describe('imageResizeFailed toast subscriber', () => {

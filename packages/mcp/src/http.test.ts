@@ -4,7 +4,7 @@ import type { AddressInfo } from 'node:net';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createTauMcpHttpHandler, tauMcpToolNames } from '#tau-mcp.js';
+import { createTauMcpHttpHandler, tauMcpInstructions, tauMcpToolNames } from '#tau-mcp.js';
 import type { TauMcpDispatch, TauMcpRpcCall } from '#tau-mcp.js';
 
 const rpcName = { getKernelResult: 'get_kernel_result' } as const;
@@ -83,7 +83,7 @@ const connect = async (url: URL): Promise<Client> => {
 };
 
 describe('Tau MCP Streamable HTTP transport', () => {
-  it('lists and calls only the canonical read-only tools over HTTP', async () => {
+  it('initializes with CAD-loop guidance and effect-correct tool annotations', async () => {
     const calls: TauMcpRpcCall[] = [];
     const dispatch: TauMcpDispatch = async (call) => {
       calls.push(call);
@@ -91,9 +91,15 @@ describe('Tau MCP Streamable HTTP transport', () => {
     };
     const client = await connect(await serve(dispatch));
 
+    expect(client.getInstructions()).toBe(tauMcpInstructions);
     const listed = await client.listTools();
     expect(listed.tools.map(({ name }) => name)).toEqual(tauMcpToolNames);
-    expect(listed.tools.every(({ annotations }) => annotations?.readOnlyHint === true)).toBe(true);
+    expect(listed.tools.map(({ name, annotations }) => [name, annotations?.readOnlyHint])).toEqual([
+      ['get_kernel_result', true],
+      ['test_model', true],
+      ['screenshot', true],
+      ['export_geometry', false],
+    ]);
     await expect(
       client.callTool({ name: toolName.getKernelResult, arguments: { targetFile: 'main.ts' } }),
     ).resolves.toMatchObject({ structuredContent: { status: 'ready' } });

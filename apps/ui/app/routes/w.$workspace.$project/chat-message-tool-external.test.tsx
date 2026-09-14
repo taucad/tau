@@ -66,6 +66,24 @@ const partFromLog = async (
   return part!;
 };
 
+const partFromEvents = async (events: readonly AgentLogEvent[]): Promise<DynamicToolUIPart> => {
+  const stream = new ReadableStream<UIMessageChunk>({
+    start(controller) {
+      for (const chunk of events.flatMap((event) => [...projectAgentHostEvent(event)])) {
+        controller.enqueue(chunk);
+      }
+      controller.close();
+    },
+  });
+  let last;
+  for await (const message of readUIMessageStream({ stream })) {
+    last = message;
+  }
+  const part = last?.parts.find((candidate) => candidate.type === 'dynamic-tool');
+  expect(part).toBeDefined();
+  return part!;
+};
+
 const listFilesRows = [
   {
     id: 'm1',
@@ -184,6 +202,59 @@ describe('the external tool-call renderer', () => {
     await user.click(screen.getByRole('button', { name: /main.scad/ }));
     expect(screen.getByText('cube(12);')).toBeVisible();
     expect(screen.queryByText(/Received unknown part/)).not.toBeInTheDocument();
+  });
+
+  it('applies a terminal ACP input replacement through the real AI SDK stream reader', async () => {
+    const part = await partFromEvents([
+      {
+        ...base,
+        type: 'message.appended',
+        message: {
+          id: 'terminal-input',
+          role: 'tool-input',
+          toolCallId: 'call-terminal',
+          toolName: 'shell',
+          call: { toolCallId: 'vendor-terminal', status: 'pending', title: 'Starting shell' },
+          content: { command: 'old' },
+          metadata: externalMetadata,
+        },
+      },
+      {
+        ...base,
+        type: 'message.envelope-replaced',
+        messageId: 'terminal-input',
+        replacement: {
+          id: 'terminal-input',
+          role: 'tool-input',
+          toolCallId: 'call-terminal',
+          toolName: 'shell',
+          call: { toolCallId: 'vendor-terminal', status: 'completed', title: 'Finished shell' },
+          content: { command: 'final' },
+          metadata: externalMetadata,
+        },
+      },
+      {
+        ...base,
+        type: 'message.appended',
+        message: {
+          id: 'terminal-output',
+          role: 'tool-output',
+          toolCallId: 'call-terminal',
+          toolName: 'shell',
+          content: { stdout: 'done' },
+          isError: false,
+          metadata: externalMetadata,
+        },
+      },
+    ]);
+
+    expect(part).toMatchObject({
+      state: 'output-available',
+      input: { command: 'final' },
+      output: { stdout: 'done' },
+      title: 'Finished shell',
+      toolMetadata: { tau: { toolCallId: 'vendor-terminal', status: 'completed' } },
+    });
   });
 
   it("renders an execute call's captured output, never the terminal id it cannot resolve", async () => {

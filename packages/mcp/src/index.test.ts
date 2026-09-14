@@ -10,7 +10,7 @@ import { createTauMcpAdapter, tauMcpToolDefinitions, tauMcpToolNames } from '#ta
 import type { TauMcpDispatch } from '#tau-mcp.js';
 
 describe('@taucad/mcp', () => {
-  it('exports only the four read-only CAD tools with canonical schemas', () => {
+  it('exports only the four CAD tools with canonical schemas', () => {
     expect(tauMcpToolNames).toEqual([
       toolName.getKernelResult,
       toolName.testModel,
@@ -104,5 +104,25 @@ describe('@taucad/mcp', () => {
       isError: true,
       content: [{ type: 'text', text: 'RENDER_TIMEOUT: Renderer did not settle.' }],
     });
+  });
+
+  it('returns screenshot bytes as MCP images without a JSON data-url copy', async () => {
+    const dataUrl = 'data:image/webp;base64,AQID';
+    const adapter = createTauMcpAdapter({
+      dispatch: async () => ({ success: true, images: [{ view: 'isometric', dataUrl }] }),
+    });
+
+    const result = await adapter.call({
+      name: toolName.screenshot,
+      arguments: { mode: 'single', targetFile: 'main.ts' },
+      toolCallId: 'tool-image',
+    });
+
+    expect(result.content).toEqual([
+      { type: 'text', text: 'Captured 1 CAD view: isometric.' },
+      { type: 'image', mimeType: 'image/webp', data: 'AQID' },
+    ]);
+    expect(result.structuredContent).toEqual({ images: [{ view: 'isometric', dataUrl }] });
+    expect(JSON.stringify(result.content)).not.toContain(dataUrl);
   });
 });

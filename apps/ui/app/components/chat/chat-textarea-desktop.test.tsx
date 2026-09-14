@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
+import type { AcpSessionData } from '@taucad/chat';
 import type { ResolvedModel } from '#hooks/use-models.js';
 import { kernelConfigurations } from '@taucad/types/constants';
 import type { KernelConfiguration } from '@taucad/types/constants';
@@ -14,7 +15,8 @@ const mockKernelByConsumer: { current: KernelConfiguration | undefined } = {
 const mockExecutionByConsumer: { current: ChatComposerContextValue['execution']['execution'] } = {
   current: { kind: 'tau', model: 'm' },
 };
-const mockSessionByConsumer: { current: boolean } = { current: false };
+const mockCanSelectExecutionByConsumer: { current: boolean } = { current: false };
+const mockSetActiveExecution = vi.fn();
 
 vi.mock('#hooks/use-chat.js', () => ({
   useChatActions: () => ({ setDraftMode: vi.fn() }),
@@ -33,7 +35,7 @@ const mockUseChatComposer = vi.fn(
     ({
       draftActorRef: { send: vi.fn() },
       model: { modelId: 'm', model: undefined, setActiveModel: vi.fn() },
-      execution: { execution: mockExecutionByConsumer.current, setActiveExecution: vi.fn() },
+      execution: { execution: mockExecutionByConsumer.current, setActiveExecution: mockSetActiveExecution },
       kernel: {
         kernelId: mockKernelByConsumer.current?.id,
         kernel: mockKernelByConsumer.current,
@@ -43,7 +45,8 @@ const mockUseChatComposer = vi.fn(
       agentActivity: 'ready',
       stop: () => undefined,
       contextUsage: undefined,
-      session: mockSessionByConsumer.current ? {} : undefined,
+      session: undefined,
+      canSelectExecution: mockCanSelectExecutionByConsumer.current,
     }) as unknown as ChatComposerContextValue,
 );
 
@@ -159,7 +162,14 @@ vi.mock('@taucad/ui/components/button', () => ({
   ),
 }));
 
-const { ChatTextareaLeftControls } = await import('#components/chat/chat-textarea-desktop.js');
+vi.mock('@taucad/ui/components/popover', () => ({
+  Popover: ({ children }: { readonly children: React.ReactNode }) => <div>{children}</div>,
+  PopoverTrigger: ({ children }: { readonly children: React.ReactNode }) => <div>{children}</div>,
+  PopoverContent: ({ children }: { readonly children: React.ReactNode }) => <div>{children}</div>,
+}));
+
+const { ChatTextareaLeftControls, acpCommandToSlashCommand } =
+  await import('#components/chat/chat-textarea-desktop.js');
 
 const stubModel: ResolvedModel = {
   id: 'm',
@@ -172,7 +182,7 @@ const stubModel: ResolvedModel = {
 const stubFileInput: React.RefObject<HTMLInputElement | null> = { current: null };
 const noop = (): void => undefined;
 
-function renderControls(creationLocationControl?: React.ReactNode) {
+function renderControls(creationLocationControl?: React.ReactNode, acpSessionData?: AcpSessionData) {
   return render(
     <ChatTextareaLeftControls
       selectedModel={stubModel}
@@ -183,6 +193,7 @@ function renderControls(creationLocationControl?: React.ReactNode) {
       fileInputReference={stubFileInput}
       handleFileChange={noop}
       creationLocationControl={creationLocationControl}
+      acpSessionData={acpSessionData}
     />,
   );
 }
@@ -192,7 +203,7 @@ describe('ChatTextareaLeftControls — chat-scoped kernel label', () => {
     vi.clearAllMocks();
     mockKernelByConsumer.current = manifoldKernel;
     mockExecutionByConsumer.current = { kind: 'tau', model: 'm' };
-    mockSessionByConsumer.current = false;
+    mockCanSelectExecutionByConsumer.current = false;
     mockAgentSelectorOffered.current = true;
     mockPlanModeEnabled.current = false;
   });
@@ -223,7 +234,7 @@ describe('ChatTextareaLeftControls — chat-scoped kernel label', () => {
 
   it('names the agent selector and hides the Tau model selector for an external execution', () => {
     mockExecutionByConsumer.current = { kind: 'acp', hostId: 'origin', agentId: 'claude' };
-    mockSessionByConsumer.current = true;
+    mockCanSelectExecutionByConsumer.current = true;
 
     renderControls();
 
@@ -245,7 +256,7 @@ describe('ChatTextareaLeftControls — chat-scoped kernel label', () => {
   /* Q12.2 + Q12.5: the readiness dot is gone from the trigger and readiness
    * reads out of the tooltip, in the model selector's style. */
   it('names the selected agent and its readiness in the agent tooltip', () => {
-    mockSessionByConsumer.current = true;
+    mockCanSelectExecutionByConsumer.current = true;
 
     renderControls();
 
@@ -256,7 +267,7 @@ describe('ChatTextareaLeftControls — chat-scoped kernel label', () => {
 
   /* Q12.6: one agent is not a choice. */
   it('does not render the agent selector when Tau is the only agent', () => {
-    mockSessionByConsumer.current = true;
+    mockCanSelectExecutionByConsumer.current = true;
     mockAgentSelectorOffered.current = false;
 
     renderControls();
@@ -269,7 +280,7 @@ describe('ChatTextareaLeftControls — chat-scoped kernel label', () => {
    * trigger's accessible name. */
   it('collapses the ACP model label below the container breakpoint and keeps its accessible name', () => {
     mockExecutionByConsumer.current = { kind: 'acp', hostId: 'origin', agentId: 'codex' };
-    mockSessionByConsumer.current = true;
+    mockCanSelectExecutionByConsumer.current = true;
 
     renderControls();
 
@@ -279,6 +290,47 @@ describe('ChatTextareaLeftControls — chat-scoped kernel label', () => {
     expect(label.className).toContain('hidden');
     expect(label.className).toContain('@[22rem]:block');
     expect(trigger.className).toContain('@max-[22rem]:w-7');
+  });
+
+  it('renders offered ACP config separately and stores the exact selected value', () => {
+    mockExecutionByConsumer.current = { kind: 'acp', hostId: 'origin', agentId: 'codex' };
+    renderControls(undefined, {
+      type: 'acp-session',
+      id: 'state-1',
+      agentId: 'codex',
+      commands: [],
+      configOptions: [
+        {
+          type: 'select',
+          id: 'model',
+          name: 'Model',
+          category: 'model',
+          currentValue: 'gpt-5.6-sol',
+          options: [{ value: 'gpt-5.6-sol', name: 'GPT-5.6-Sol' }],
+        },
+        {
+          type: 'select',
+          id: 'thought_level',
+          name: 'Thinking',
+          category: 'thought_level',
+          currentValue: 'medium',
+          options: [
+            { value: 'medium', name: 'Medium' },
+            { value: 'high', name: 'High' },
+          ],
+        },
+      ],
+    });
+
+    expect(screen.getByRole('button', { name: 'Agent settings' })).toBeInTheDocument();
+    expect(screen.queryByRole('combobox', { name: 'Model' })).toBeNull();
+    fireEvent.change(screen.getByRole('combobox', { name: 'Thinking' }), { target: { value: 'high' } });
+    expect(mockSetActiveExecution).toHaveBeenCalledWith({
+      kind: 'acp',
+      hostId: 'origin',
+      agentId: 'codex',
+      config: { thought_level: 'high' },
+    });
   });
 
   /* C3-review M2: at the 280 px pane every trigger label is `display:none`, so
@@ -295,7 +347,7 @@ describe('ChatTextareaLeftControls — chat-scoped kernel label', () => {
 
   /* C3-review M1: the agent trigger collapses to 28 px like its four siblings. */
   it('collapses the agent trigger below the container breakpoint', () => {
-    mockSessionByConsumer.current = true;
+    mockCanSelectExecutionByConsumer.current = true;
 
     renderControls();
 
@@ -304,10 +356,27 @@ describe('ChatTextareaLeftControls — chat-scoped kernel label', () => {
 
   /* Q12.7: no chevron on any trigger in the row. */
   it('renders no chevron on any trigger', () => {
-    mockSessionByConsumer.current = true;
+    mockCanSelectExecutionByConsumer.current = true;
 
     const { container } = renderControls();
 
     expect(container.querySelectorAll('svg.lucide-chevron-down')).toHaveLength(0);
+  });
+});
+
+describe('ACP slash commands', () => {
+  it('preserves dollar-prefixed skills and adds the native slash only to ordinary commands', () => {
+    expect(acpCommandToSlashCommand({ name: '$brep-design', description: 'BRep' }, 'codex')).toMatchObject({
+      id: '$brep-design',
+      label: '$brep-design',
+      group: 'Commands',
+      commandText: '$brep-design ',
+      source: 'codex',
+    });
+    expect(acpCommandToSlashCommand({ name: 'compact', description: 'Compact' }, 'codex')).toMatchObject({
+      id: '/compact',
+      label: '/compact',
+      commandText: '/compact ',
+    });
   });
 });

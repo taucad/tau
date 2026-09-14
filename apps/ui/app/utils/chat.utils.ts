@@ -357,6 +357,10 @@ function serializePart(part: MyMessagePart): string {
       return '';
     }
 
+    case 'data-acp-session': {
+      return '';
+    }
+
     case 'dynamic-tool': {
       return serializeDynamicToolPart(part);
     }

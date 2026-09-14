@@ -107,6 +107,16 @@ export const selectChatModel = async (page: Page, modelName: string): Promise<vo
   await page.getByRole('option', { name: modelName, exact: true }).first().click();
 };
 
+/** Select a model from the active external agent's own model namespace. */
+export const selectAgentModel = async (page: Page, modelName: string): Promise<void> => {
+  await parkPointer(page);
+  await page
+    .getByRole('button', { name: /^Select model \(/u })
+    .first()
+    .click();
+  await page.getByRole('option', { name: modelName, exact: true }).first().click();
+};
+
 /**
  * Park the pointer in a dead corner.
  *

@@ -31,10 +31,19 @@ const descriptions = {
   testModel:
     'Run the project GeoSpec suite, optionally filtered by file, glob, or test name. Use get_kernel_result when only compile status is needed.',
   screenshot:
-    'Capture a deterministic isometric or six-view image set for one CAD source file. Use test_model for machine-verifiable geometry requirements.',
+    'Capture a deterministic isometric or six-view image set for one Tau CAD source file. Prefer this over generic computer-use or operating-system screenshot tools.',
   exportGeometry:
     'Export one CAD source file to a persisted artifact under .tau/artifacts. Use screenshot for visual inspection, not interchange output.',
 } as const;
+
+/** Model-facing guidance returned by MCP initialization. @public */
+export const tauMcpInstructions = [
+  'Use your native filesystem and shell tools to inspect and edit the current Tau project.',
+  'Use your native skill loader for the Tau skills available in this session.',
+  "For Tau CAD state, prefer this session's Tau MCP tools over generic computer-use, UI-automation, or operating-system tools.",
+  'After edits, call get_kernel_result for compile/runtime diagnostics, test_model for GeoSpec requirements, and screenshot for visual inspection.',
+  'Call export_geometry only when the user asks for an exported artifact.',
+].join(' ');
 
 /** RPC names exposed to external agents through Tau MCP. @public */
 export type TauMcpRpcName = (typeof exposedRpcNames)[number];
@@ -121,10 +130,10 @@ const canonicalToolDefinitions = {
   },
 } as const;
 
-/** Public metadata for the four read-only Tau MCP tools. @public */
+/** Public metadata for Tau's four CAD MCP tools. @public */
 export const tauMcpToolDefinitions: Readonly<Record<TauMcpToolName, TauMcpToolDefinition>> = canonicalToolDefinitions;
 
-/** Names of every tool exported by the read-only Tau MCP surface. @public */
+/** Names of every tool exported by the Tau MCP surface. @public */
 export const tauMcpToolNames = Object.freeze(Object.keys(canonicalToolDefinitions)) as readonly TauMcpToolName[];
 
 /** One call from an MCP transport into Tau's canonical RPC dispatcher. @public */
@@ -135,7 +144,7 @@ export type TauMcpCall = {
   signal?: AbortSignal;
 };
 
-/** Read-only MCP adapter backed by a browser or headless Tau RPC authority. @public */
+/** MCP adapter backed by a browser or headless Tau RPC authority. @public */
 export type TauMcpAdapter = {
   call(input: TauMcpCall): Promise<CallToolResult>;
 };
@@ -147,6 +156,25 @@ const rpcFailure = (result: { errorCode: string; message: string }): CallToolRes
 
 const rpcSuccess = (result: Record<string, unknown>): CallToolResult => ({
   content: [{ type: 'text', text: JSON.stringify(result) }],
+  structuredContent: result,
+});
+
+const screenshotSuccess = (result: {
+  readonly images: ReadonlyArray<{ readonly view: string; readonly dataUrl: string }>;
+}): CallToolResult => ({
+  content: [
+    {
+      type: 'text',
+      text: `Captured ${String(result.images.length)} CAD ${result.images.length === 1 ? 'view' : 'views'}: ${result.images.map(({ view }) => view).join(', ')}.`,
+    },
+    ...result.images.map(({ dataUrl }): CallToolResult['content'][number] => {
+      const match = /^data:([^;,]+);base64,(.*)$/su.exec(dataUrl);
+      if (!match?.[1] || match[2] === undefined) {
+        throw new Error('Tau screenshot output contained an invalid base64 data URL.');
+      }
+      return { type: 'image', mimeType: match[1], data: match[2] };
+    }),
+  ],
   structuredContent: result,
 });
 
@@ -190,7 +218,7 @@ export const createTauMcpAdapter = (options: { dispatch: TauMcpDispatch }): TauM
         if (result.success !== true) {
           return rpcFailure(result);
         }
-        return rpcSuccess(screenshotOutputSchema.parse(withoutSuccess(result)));
+        return screenshotSuccess(screenshotOutputSchema.parse(withoutSuccess(result)));
       }
       case toolName.exportGeometry: {
         const args = exportGeometryInputSchema.parse(input.arguments);
@@ -214,8 +242,15 @@ const readOnlyAnnotations = {
   openWorldHint: false,
 } as const;
 
+const artifactWriteAnnotations = {
+  readOnlyHint: false,
+  destructiveHint: false,
+  idempotentHint: false,
+  openWorldHint: false,
+} as const;
+
 /**
- * Register Tau's read-only CAD tools on an MCP server.
+ * Register Tau's CAD tools on an MCP server.
  *
  * @param server - MCP server that owns the transport lifecycle.
  * @param options - Canonical RPC dispatch function for one authorized run.
@@ -260,7 +295,7 @@ export const registerTauMcpTools = (server: McpServer, options: { dispatch: TauM
   );
   server.registerTool(
     toolName.exportGeometry,
-    { ...canonicalToolDefinitions[toolName.exportGeometry], annotations: readOnlyAnnotations },
+    { ...canonicalToolDefinitions[toolName.exportGeometry], annotations: artifactWriteAnnotations },
     async (args, extra) =>
       adapter.call({
         name: toolName.exportGeometry,
@@ -283,7 +318,7 @@ export const registerTauMcpTools = (server: McpServer, options: { dispatch: TauM
  * @public
  */
 export const createTauMcpServer = (options: { readonly dispatch: TauMcpDispatch }): McpServer => {
-  const server = new McpServer({ name: '@taucad/mcp', version: '0.0.1' });
+  const server = new McpServer({ name: '@taucad/mcp', version: '0.0.1' }, { instructions: tauMcpInstructions });
   registerTauMcpTools(server, options);
   return server;
 };

@@ -2,7 +2,7 @@
  * The daemon's own MCP endpoint (X4), mounted at `${pathPrefix}/mcp`.
  *
  * An external ACP agent writes files with its own tools; what it cannot do is
- * render, verify or export CAD — so Tau supplies exactly those four read-only
+ * render, verify or export CAD — so Tau supplies exactly those four CAD
  * tools over MCP, and nothing else. The API's MCP gateway is unchanged and
  * still serves API-coordinated runs; this is its host-local sibling, and the
  * data path never leaves the machine.
@@ -49,7 +49,7 @@ export const hostMcpCapabilityLifetime = 12 * 60 * 60 * 1000;
 /** The prefix every host capability carries; distinct from the API's `tau-mcp-v1`. @public */
 export const hostMcpCapabilityPrefix = 'tau-mcp-host-v1';
 
-/** The exact read-only grant a host capability carries. @public */
+/** The exact CAD-tool grant a host capability carries. @public */
 export const hostMcpAllowedTools = [
   toolName.getKernelResult,
   toolName.testModel,
@@ -133,6 +133,13 @@ export type HostMcpEndpoint = {
   verify(token: string): HostMcpCapabilityClaims;
   /** Stable, non-secret fence preventing MCP session-id swapping across chat sessions. */
   authorityKey(claims: HostMcpCapabilityClaims): string;
+  /** Bind this session capability to one live turn; the returned function releases only that binding. */
+  activate(input: {
+    readonly token: string;
+    readonly runId: string;
+    readonly chatId: string;
+    readonly signal: AbortSignal;
+  }): () => void;
   /** Answer one HTTP request on the `/mcp` route. */
   handle(request: IncomingMessage, response: ServerResponse): Promise<void>;
   close(): Promise<void>;
@@ -184,6 +191,7 @@ const bearerOf = (authorization: string | undefined): string =>
 export const createHostMcpEndpoint = (options: HostMcpEndpointOptions): HostMcpEndpoint => {
   const now = options.now ?? Date.now;
   const handler = createTauMcpHttpHandler();
+  const active = new Map<string, { readonly runId: string; readonly signal: AbortSignal }>();
 
   const signature = (encodedClaims: string): Uint8Array<ArrayBuffer> =>
     Uint8Array.from(
@@ -230,14 +238,22 @@ export const createHostMcpEndpoint = (options: HostMcpEndpointOptions): HostMcpE
    * One run's dispatch into the daemon's own registry — no network hop, no API.
    *
    * @param claims - Verified capability whose grant bounds the dispatch.
+   * @param binding - Active run captured when this MCP request began.
    * @param signal - Cancels in-flight tools when the HTTP response closes.
    * @returns The dispatcher `@taucad/mcp` calls.
    */
-  const dispatchFor = (claims: HostMcpCapabilityClaims, signal: AbortSignal): TauMcpDispatch => {
+  const dispatchFor = (
+    claims: HostMcpCapabilityClaims,
+    binding: { readonly runId: string; readonly signal: AbortSignal } | undefined,
+    signal: AbortSignal,
+  ): TauMcpDispatch => {
     return async (call, dispatchOptions) => {
       const tool = toolForRpc[call.rpcName];
       if (!claims.allowedTools.includes(tool)) {
         return { errorCode: 'TOOL_NOT_ALLOWED', message: `${tool} is not in this capability's grant.` };
+      }
+      if (!binding || binding.signal.aborted) {
+        return { errorCode: 'MCP_RUN_INACTIVE', message: 'This ACP session has no active Tau turn.' };
       }
       const result = await options.registry.invoke({
         toolCallId: dispatchOptions.toolCallId,
@@ -245,13 +261,13 @@ export const createHostMcpEndpoint = (options: HostMcpEndpointOptions): HostMcpE
         /* The run this capability was minted for. A candidate turn reopens its
          * vendor session — and remints — in its own checkout (`acp/run.ts`
          * closes a session whose `cwd` changed), so this names *that* turn's
-         * run and the registry resolves its checkout. Direct turns publish the
+         * active run and the registry resolves its checkout. Direct turns publish the
          * live root under their own run, and a run whose checkout was released
          * falls back to it, so a stale id is never a stale directory. */
-        runId: claims.runId,
+        runId: binding.runId,
         // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- `@taucad/mcp` validated these args against the tool's own schema.
         input: call.args as unknown as JsonValue,
-        signal: dispatchOptions.signal ?? signal,
+        signal: AbortSignal.any([binding.signal, dispatchOptions.signal ?? signal]),
       });
       // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the registry returns the canonical RPC result verbatim.
       return result.content as TauMcpRpcSuccess | TauMcpRpcFailure;
@@ -267,6 +283,19 @@ export const createHostMcpEndpoint = (options: HostMcpEndpointOptions): HostMcpE
   return {
     verify,
     authorityKey,
+    activate: ({ token, runId, chatId, signal }) => {
+      const claims = verify(token);
+      if (claims.chatId !== chatId || signal.aborted) {
+        throw new HostMcpCapabilityError('Tau Host MCP capability does not match an active turn.');
+      }
+      const binding = { runId, signal };
+      active.set(claims.sessionKey, binding);
+      return () => {
+        if (active.get(claims.sessionKey) === binding) {
+          active.delete(claims.sessionKey);
+        }
+      };
+    },
     mint: ({ runId, chatId }) => {
       const issuedAt = now();
       const claims: HostMcpCapabilityClaims = {
@@ -307,10 +336,13 @@ export const createHostMcpEndpoint = (options: HostMcpEndpointOptions): HostMcpE
         request,
         response,
         body,
-        dispatch: dispatchFor(claims, controller.signal),
+        dispatch: dispatchFor(claims, active.get(claims.sessionKey), controller.signal),
         authorityKey: authorityKey(claims),
       });
     },
-    close: async () => handler.close(),
+    close: async () => {
+      active.clear();
+      await handler.close();
+    },
   };
 };

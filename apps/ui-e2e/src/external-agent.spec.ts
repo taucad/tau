@@ -216,11 +216,19 @@ describe('external agent (AV-5)', () => {
        * page happened to be listening for. */
       await expect.poll(pausedOnApproval, { timeout: 180_000 }).toBe(true);
       await target.expectVisible(banner, 60_000);
-      await target.expectVisible(banner.getByText('write hello.txt', { exact: true }), 30_000);
+      await target.expectVisible(banner.getByText(/Allow write hello\.txt/u), 30_000);
       /* The options the host recorded, and the copy bounded by SP-4 Result 3 —
        * approving is not a promise that Tau gates each action. */
-      await target.expectVisible(banner.getByText(/Options it offered: Allow · Always allow · Reject/u), 10_000);
-      await target.expectVisible(banner.getByText(/keep working in this chat's tree/u), 10_000);
+      await target.expectVisible(banner.getByRole('button', { name: 'Allow', exact: true }), 10_000);
+      await target.expectVisible(banner.getByRole('button', { name: 'Always allow', exact: true }), 10_000);
+      await target.expectVisible(banner.getByRole('button', { name: 'Reject', exact: true }), 10_000);
+      await target.expectVisible(
+        banner.getByText(
+          "Approving lets Codex keep working in this chat's tree; Tau does not gate each action it takes there.",
+          { exact: true },
+        ),
+        10_000,
+      );
 
       /* Reattach: this tab's memory of the run is gone, so a banner that comes
        * back can only have come from the log the daemon still holds. */
@@ -228,7 +236,7 @@ describe('external agent (AV-5)', () => {
       await ensureChatOpen();
       await target.expectVisible(banner, 120_000);
 
-      await target.click(banner.getByRole('button', { name: 'Approve' }));
+      await target.click(banner.getByRole('button', { name: 'Allow', exact: true }));
 
       const completed = async (): Promise<boolean> => {
         const events = await durableEvents();
@@ -263,7 +271,7 @@ describe('external agent (AV-5)', () => {
      * moved through `paused` and back to `running` around it. */
     expect(
       events.flatMap(({ type, phase, reason }) => (type === 'interrupt.recorded' ? [`${phase}:${reason}`] : [])),
-    ).toEqual(['requested:write hello.txt', 'resolved:approved']);
+    ).toEqual(['requested:Allow write hello.txt with {"path":"hello.txt"}?', 'resolved:approved']);
     expect(events.filter(({ type }) => type === 'run.lifecycle').map(({ state }) => state)).toEqual([
       'admitted',
       'running',

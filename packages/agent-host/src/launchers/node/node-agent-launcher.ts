@@ -572,7 +572,14 @@ export const createNodeAgentLauncher = (options: NodeAgentLauncherOptions): Node
             /* The host routes on this *before* it composes anything, so the Tau
              * fields above are inert for an external turn. */
             ...(external
-              ? { agent: { kind: 'acp', id: external.id, ...(external.model ? { model: external.model } : {}) } }
+              ? {
+                  agent: {
+                    kind: 'acp',
+                    id: external.id,
+                    ...(external.model ? { model: external.model } : {}),
+                    ...(external.config ? { config: external.config } : {}),
+                  },
+                }
               : {}),
           },
         };

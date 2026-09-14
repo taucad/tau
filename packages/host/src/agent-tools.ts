@@ -286,6 +286,7 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
       { filesystem: provider },
       { consumer: 'agent', ...(skillOverlay === undefined ? {} : { overlays: [skillOverlay] }) },
     );
+    const recordView = composeView({ filesystem: provider }, { consumer: 'user' });
     const mutations = new ResourceQueue();
     const { runtimeClient } = options;
 
@@ -394,6 +395,7 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
 
     return createChatToolRegistry({
       fileSystemFor: (signal) => createProviderRpcFileSystem({ provider: view, mutations, signal }),
+      recordFileSystemFor: (signal) => createProviderRpcFileSystem({ provider: recordView, mutations, signal }),
       ...(runtimeClient === undefined ? {} : { kernelClient, graphics, images }),
       ...(geospec === undefined ? {} : { geospec }),
       ...(options.revisions === undefined ? {} : { revisions: options.revisions }),

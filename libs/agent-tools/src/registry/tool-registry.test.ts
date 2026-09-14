@@ -198,6 +198,33 @@ describe('createChatToolRegistry invocation', () => {
     });
   });
 
+  it('persists export artifacts through the invocation record filesystem only', async () => {
+    const agentWrite = vi.fn<RpcFileSystem['writeBinaryFile']>(async () => {
+      throw Object.assign(new Error('Agent records are read-only.'), { code: 'EROFS' });
+    });
+    const recordWrite = vi.fn<RpcFileSystem['writeBinaryFile']>(async () => undefined);
+    const exportGeometry = vi.fn<RpcGraphicsClient['exportGeometry']>(async () => ({
+      success: true,
+      files: [{ name: 'model.stl', mimeType: 'model/stl', bytes: new Uint8Array([1]) }],
+    }));
+    const registry = build({
+      fileSystemFor: () => ({ ...emptyFileSystem(), writeBinaryFile: agentWrite }),
+      recordFileSystemFor: () => ({ ...emptyFileSystem(), writeBinaryFile: recordWrite }),
+      graphics: { exportGeometry },
+    });
+
+    const result = await invoke(registry, 'export_geometry', {
+      input: { targetFile: 'main.ts', format: 'stl' },
+    });
+
+    expect(result).toMatchObject({ isError: false, content: { success: true } });
+    expect(recordWrite).toHaveBeenCalledExactlyOnceWith(
+      '.tau/artifacts/call-1__main.ts-stl/model.stl',
+      new Uint8Array([1]),
+    );
+    expect(agentWrite).not.toHaveBeenCalled();
+  });
+
   it('throws the abort reason when the signal is already aborted', async () => {
     const controller = new AbortController();
     controller.abort(new Error('cancelled by operator'));

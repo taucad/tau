@@ -196,6 +196,16 @@ describe('createHostToolRegistry', () => {
     const nearMiss = await invoke(registry, 'create_file', { targetFile: '.tau/chats-notes.md', content: 'ok\n' });
     expect(nearMiss.isError).toBe(true);
 
+    const recordWrites = await Promise.all(
+      ['.tau/artifacts/forged.stl', '.tau/tool-results/forged.json', '.tau/offloaded-tool-results/forged.json'].map(
+        async (targetFile) => invoke(registry, 'create_file', { targetFile, content: 'forged\n' }),
+      ),
+    );
+    for (const recordWrite of recordWrites) {
+      expect(recordWrite.isError).toBe(true);
+      expect(JSON.stringify(recordWrite.content)).toContain('PERMISSION_DENIED');
+    }
+
     /* The authored `.tau` controls keep their own rows, so the agent still
      * writes the file it is asked to keep. */
     const authored = await invoke(registry, 'create_file', { targetFile: '.tau/AGENTS.md', content: 'ok\n' });

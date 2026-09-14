@@ -28,7 +28,7 @@ import type { IpcMainInvokeEvent } from 'electron';
 import { installElectronRuntimeHeaders, registerElectronRuntimeMain } from '@taucad/runtime/electron/main';
 import { connectSqliteComputeStoreWorker } from '@taucad/runtime/node';
 import type { ComputeBinding } from '@taucad/runtime/types';
-import { discoverAcpAgents, externalAgentDescriptors } from '@taucad/host';
+import { defaultConfigDirectory, discoverAcpAgents, externalAgentDescriptors } from '@taucad/host';
 
 import kernelUtilityEntry from '#tau/kernel-host?modulePath';
 import servicesUtilityEntry from '#tau/services-host?modulePath';
@@ -344,10 +344,12 @@ const bootstrapElectronApp = async (): Promise<void> => {
     return computeConnection(root).control.collect({ budget: budget as number, ...(cursor ? { cursor } : {}) });
   });
 
+  const tauConfigDirectory = defaultConfigDirectory();
   const services = createServicesBroker({
     utilityEntry: servicesUtilityEntry,
     env: utilityEnvironment(environment, {
       ...esbuildEnvironment,
+      TAU_CONFIG_DIR: tauConfigDirectory, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
       TAU_DESKTOP_LOG_DIR: logDirectory, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
     }),
     fork: (entry, args, forkOptions) => utilityProcess.fork(entry, args, forkOptions),

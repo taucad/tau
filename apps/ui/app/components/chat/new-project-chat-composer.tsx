@@ -6,7 +6,6 @@ import { KernelSelector } from '#components/chat/kernel-selector.js';
 import { WorkspaceSelector } from '#components/filesystem/workspace-selector.js';
 import { toast } from '#components/ui/sonner.js';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
-import { useDraftActions } from '#hooks/use-chat.js';
 import { useKernel } from '#hooks/use-kernel.js';
 import { useProjectCreationLocation } from '#hooks/use-project-creation-location.js';
 import { useProjectCreationLocationError } from '#hooks/use-project-creation-location-error.js';
@@ -31,9 +30,8 @@ export function NewProjectChatComposer({
   const textareaRef = useRef<ChatTextareaHandle>(null);
   const {
     execution: { execution },
-    draftActorRef,
+    consumeDraft,
   } = useChatComposer();
-  const { clearDraft } = useDraftActions();
 
   const finishLocationSelection = useCallback((): void => {
     textareaRef.current?.closeOptions?.();
@@ -88,9 +86,8 @@ export function NewProjectChatComposer({
           },
           location: location.value,
         });
+        await consumeDraft();
         await navigate(projectUrl(created.slugs));
-        clearDraft();
-        draftActorRef.send({ type: 'flushNow' });
       } catch (error) {
         if (presentLocationError(error)) {
           if (location.hasWebAccessCapability) {
@@ -102,7 +99,7 @@ export function NewProjectChatComposer({
         toast.error('Failed to create project');
       }
     },
-    [clearDraft, draftActorRef, execution, kernel, location, navigate, presentLocationError, projectManager],
+    [consumeDraft, execution, kernel, location, navigate, presentLocationError, projectManager],
   );
 
   return (

@@ -3,7 +3,7 @@ import { kernelConfigurations } from '@taucad/types/constants';
 import { parseSkillFrontmatter } from '#hooks/use-context-payload.utils.js';
 import { createModelSkillMarkdown } from '#lib/create-model-skill.js';
 import { createSkillResolver } from '#lib/skill-resolver.js';
-import { builtInSystemSkills } from '#lib/system-skills-catalog.js';
+import { systemSkillsCatalog } from '#lib/system-skills-catalog.js';
 
 const progressiveDisclosureSkillNames = [
   'create-model',
@@ -18,12 +18,12 @@ const progressiveDisclosureSkillNames = [
   'geospec-authoring',
 ] as const;
 
-describe('builtInSystemSkills', () => {
+describe('systemSkillsCatalog', () => {
   it('should include a valid create-skill system skill', () => {
-    const createSkill = builtInSystemSkills.find((skill) => skill.slug === 'create-skill');
+    const createSkill = systemSkillsCatalog.find((skill) => skill.slug === 'create-skill');
 
     if (!createSkill) {
-      throw new Error('Expected built-in create-skill to be registered');
+      throw new Error('Expected system create-skill to be registered');
     }
 
     expect(createSkill.skillMarkdown).toContain('name: create-skill');
@@ -60,7 +60,7 @@ describe('builtInSystemSkills', () => {
 
     const results = await Promise.all(
       progressiveDisclosureSkillNames.map(async (skillName) => ({
-        catalogEntry: builtInSystemSkills.find((skill) => skill.slug === skillName),
+        catalogEntry: systemSkillsCatalog.find((skill) => skill.slug === skillName),
         resolved: await resolver.resolveSkill(skillName),
       })),
     );
@@ -79,7 +79,7 @@ describe('builtInSystemSkills', () => {
 
   it('keeps configured kernels, cad-* catalog slugs, and create-model rows set-equal', () => {
     const configured = kernelConfigurations.map(({ id }) => id).toSorted();
-    const catalog = builtInSystemSkills
+    const catalog = systemSkillsCatalog
       .flatMap(({ slug }) => (slug.startsWith('cad-') ? [slug.slice('cad-'.length)] : []))
       .toSorted();
     const createModelRows = [...createModelSkillMarkdown.matchAll(/^\| `cad-([^`]+)` \|/gmu)]
@@ -92,7 +92,7 @@ describe('builtInSystemSkills', () => {
   });
 
   it('preserves JSCAD multi-shape output as one flat array of named geometries', () => {
-    const jscad = builtInSystemSkills.find(({ slug }) => slug === 'cad-jscad');
+    const jscad = systemSkillsCatalog.find(({ slug }) => slug === 'cad-jscad');
     expect(jscad?.skillMarkdown).toContain('one flat array of named geometries');
   });
 

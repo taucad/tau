@@ -10,6 +10,7 @@ import type { ComputeBinding } from '@taucad/runtime/types';
 import type { HostDaemonAgentOptions, HostDaemonEvent } from '@taucad/host';
 import { calculixSolverVersion, createDirectorySolverInputMaterializer } from '@taucad/jobs-solvers';
 import type { OpenFoamSolverVersion } from '@taucad/jobs-solvers';
+import { systemSkillBundles } from '@taucad/skills/resources';
 import { defineCommand } from 'citty';
 import { consola } from 'consola';
 
@@ -424,6 +425,7 @@ export const serveCommand = defineCommand({
         args: childArguments({ plugin: args.plugin, config: args.config }),
       },
       maxSessions,
+      systemSkillBundles,
       ...(jobWorker ? { jobWorker } : {}),
       ...(configuredAgent ? { agent: configuredAgent } : {}),
       onEvent: reportEvent,

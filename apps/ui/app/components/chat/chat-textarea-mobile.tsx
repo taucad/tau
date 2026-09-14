@@ -176,7 +176,7 @@ export const ChatTextareaMobile = memo(function ({
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const {
     execution: { execution },
-    session,
+    canSelectExecution,
   } = useChatComposer();
 
   useEffect(() => {
@@ -260,7 +260,7 @@ export const ChatTextareaMobile = memo(function ({
               <CommandList className='max-h-none'>
                 {/* Settings Group */}
                 <CommandGroup heading='Settings'>
-                  {session ? (
+                  {canSelectExecution ? (
                     <ChatExecutionSelector
                       isNested
                       data-chat-textarea-focustrap={focusTrapAttribute}

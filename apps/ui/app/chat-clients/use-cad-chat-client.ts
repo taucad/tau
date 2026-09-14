@@ -309,10 +309,15 @@ const hostAdmission = (input: {
   readonly trigger: BrowserHostTrigger;
 }): ((runId: string) => BrowserHostAdmission) | undefined => {
   if (input.agent.execution.kind === 'acp') {
-    const { agentId, model } = input.agent.execution;
+    const { agentId, model, config } = input.agent.execution;
     return () => ({
       ...input.trigger,
-      agent: { kind: 'acp', id: agentId, ...(model === undefined ? {} : { model }) },
+      agent: {
+        kind: 'acp',
+        id: agentId,
+        ...(model === undefined ? {} : { model }),
+        ...(config === undefined ? {} : { config }),
+      },
       /* The agent brings its own model, tools and login (X6), so none of the
        * Tau admission travels — but the CAD knowledge does. Composed by the
        * same helper a Tau turn uses, minus the model facts an external run has

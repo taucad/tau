@@ -26,6 +26,8 @@
  * | `late-auth` | drives the same elicitation *after* the prompt response, i.e. between turns |
  * | `abandon` | asks for permission and exits without answering it, leaving the request outstanding on the host |
  * | `tools` | emits a Codex-style `read`/`execute`/`think`/`fetch`/`edit` tool sequence with locations, diff and terminal content, each `pending → in_progress → completed` |
+ * | `clear-title` | clears the write call title on its terminal update, exercising ACP presence semantics |
+ * | `skills` / `skill-names` | reports complete native skill files, or only their names for packaged-host checks |
  *
  * Anything that has to be decided *before* a prompt exists is steered by
  * `TAU_FAKE_AGENT_MODE`, which a test's own `AcpAdapter` literal supplies
@@ -48,7 +50,7 @@
 
 import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
-import { writeFile } from 'node:fs/promises';
+import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -68,10 +70,12 @@ type McpServerEntry = { readonly name?: string; readonly url?: string; readonly 
 type SessionState = {
   readonly cwd: string;
   readonly mcpServers: readonly McpServerEntry[];
+  readonly additionalDirectories: readonly string[];
   /** Every prompt this session has answered, oldest first. */
   readonly prompts: string[];
   /** Model id the client last selected through `session/set_config_option`. */
   model: string;
+  config: Record<string, string | boolean>;
   /**
    * Ended by `session/close`. The record survives so `session/resume` and
    * `session/load` restore it — what both real adapters do (V2: eviction is
@@ -219,6 +223,7 @@ const toolCall = async (
     readonly name?: string;
     readonly rawInput?: unknown;
     readonly locations?: readonly unknown[];
+    readonly _meta?: Readonly<Record<string, unknown>>;
   },
 ): Promise<void> => update(sessionId, { sessionUpdate: 'tool_call', status: 'pending', kind: 'edit', ...call });
 
@@ -237,6 +242,7 @@ const promptText = (blocks: readonly unknown[]): string =>
     .map((block) =>
       typeof block === 'object' && block !== null && 'text' in block ? String((block as { text: unknown }).text) : '',
     )
+    .filter((text) => text !== '')
     .join(' ');
 
 /**
@@ -265,7 +271,7 @@ const configOptionsOf = (session: SessionState): readonly unknown[] => {
       name: 'Mode',
       category: 'mode',
       type: 'select',
-      currentValue: 'default',
+      currentValue: String(session.config['mode']),
       options: [
         { value: 'default', name: 'Default' },
         { value: 'plan', name: 'Plan' },
@@ -276,14 +282,20 @@ const configOptionsOf = (session: SessionState): readonly unknown[] => {
       name: 'Thinking',
       category: 'thought_level',
       type: 'select',
-      currentValue: 'medium',
+      currentValue: String(session.config['thought_level']),
       options: [
         { value: 'low', name: 'Low' },
         { value: 'medium', name: 'Medium' },
         { value: 'high', name: 'High' },
       ],
     },
-    { id: 'web_search', name: 'Web search', category: 'model_config', type: 'boolean', currentValue: false },
+    {
+      id: 'web_search',
+      name: 'Web search',
+      category: 'model_config',
+      type: 'boolean',
+      currentValue: Boolean(session.config['web_search']),
+    },
   ];
 };
 
@@ -293,7 +305,15 @@ const callTauMcp = async (sessionId: string, servers: readonly McpServerEntry[])
     await textChunk(sessionId, 'mcp: no tau server was configured for this session');
     return;
   }
-  await toolCall(sessionId, { toolCallId: 'mcp-1', title: 'test_model' });
+  await toolCall(sessionId, {
+    toolCallId: 'mcp-1',
+    title: 'mcp.tau.test_model',
+    rawInput: { server: 'tau', tool: 'test_model', arguments: {} },
+    _meta: {
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- MCP metadata retains its wire name.
+      is_mcp_tool_call: true,
+    },
+  });
   try {
     const headers = Object.fromEntries(
       (tau.headers ?? []).flatMap((header) =>
@@ -307,7 +327,7 @@ const callTauMcp = async (sessionId: string, servers: readonly McpServerEntry[])
     await toolCallUpdate(sessionId, {
       toolCallId: 'mcp-1',
       status: result.isError === true ? 'failed' : 'completed',
-      rawOutput: result,
+      rawOutput: { result, error: null },
     });
   } catch (error) {
     await toolCallUpdate(sessionId, {
@@ -351,6 +371,49 @@ const emitPresentationUpdates = async (sessionId: string): Promise<void> => {
   });
   await update(sessionId, { sessionUpdate: 'current_mode_update', currentModeId: 'default' });
   await update(sessionId, { sessionUpdate: 'session_info_update', title: 'Fixture session' });
+};
+
+const reportNativeSkills = async (sessionId: string, session: SessionState, namesOnly: boolean): Promise<void> => {
+  if (namesOnly) {
+    const namesByRoot = await Promise.all(
+      session.additionalDirectories.map(async (root) => {
+        const paths = await readdir(join(root, '.agents', 'skills'), { recursive: true });
+        return paths.filter((path) => path.endsWith('/SKILL.md')).map((path) => path.slice(0, -'/SKILL.md'.length));
+      }),
+    );
+    const names = namesByRoot.flat();
+    await update(sessionId, {
+      sessionUpdate: 'available_commands_update',
+      availableCommands: names.map((name) => ({ name: `$${name}`, description: 'Native skill' })),
+    });
+    await textChunk(sessionId, `native-skill-names: ${JSON.stringify(names)}`);
+    return;
+  }
+  const skills = await Promise.all(
+    session.additionalDirectories.map(async (root) => {
+      const skillRoot = join(root, '.agents', 'skills');
+      const paths = await readdir(skillRoot, { recursive: true });
+      const files = await Promise.all(
+        paths.toSorted().map(async (path) => {
+          try {
+            return [path, await readFile(join(skillRoot, path), 'utf8')] as const;
+          } catch {
+            return undefined;
+          }
+        }),
+      );
+      return { root, files: Object.fromEntries(files.filter((file) => file !== undefined)) };
+    }),
+  );
+  await update(sessionId, {
+    sessionUpdate: 'available_commands_update',
+    availableCommands: skills.flatMap(({ files }) =>
+      Object.keys(files)
+        .filter((path) => path.endsWith('/SKILL.md'))
+        .map((path) => ({ name: `$${path.slice(0, -'/SKILL.md'.length)}`, description: 'Native skill' })),
+    ),
+  });
+  await textChunk(sessionId, `native-skills: ${JSON.stringify(skills)}`);
 };
 
 /**
@@ -487,6 +550,7 @@ const writeGatedFile = async (sessionId: string, session: SessionState, text: st
   await writeFile(join(session.cwd, 'hello.txt'), text, 'utf8');
   await toolCallUpdate(sessionId, {
     toolCallId: 'write-1',
+    ...(text.includes('clear-title') ? { title: '' } : {}),
     status: 'completed',
     /* Echoed on success too, so a named option is provable either way. */
     rawOutput: { path: 'hello.txt', bytes: Buffer.byteLength(text), optionId: outcome.optionId },
@@ -529,6 +593,9 @@ const runPrompt = async (sessionId: string, blocks: readonly unknown[]): Promise
   }
   if (text.includes('updates')) {
     await emitPresentationUpdates(sessionId);
+  }
+  if (text.includes('skills') || text.includes('skill-names')) {
+    await reportNativeSkills(sessionId, session, text.includes('skill-names'));
   }
   if (text.includes('switch')) {
     session.model = models.find((candidate) => candidate !== session.model) ?? session.model;
@@ -596,8 +663,17 @@ const openSession = (sessionId: string, params: Record<string, unknown>): Sessio
     cwd: asString(params['cwd'], process.cwd()),
     // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the session MCP server list is fixed by ACP.
     mcpServers: (params['mcpServers'] ?? []) as readonly McpServerEntry[],
+    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the additional-directory list is fixed by ACP.
+    additionalDirectories: (params['additionalDirectories'] ?? []) as readonly string[],
     prompts: [],
     model: models[0] ?? '',
+    config: {
+      mode: 'default',
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- ACP configuration retains its wire id.
+      thought_level: 'medium',
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- ACP configuration retains its wire id.
+      web_search: false,
+    },
   };
   sessions.set(sessionId, session);
   cancelled.delete(sessionId);
@@ -614,10 +690,10 @@ const initializeResult = (): Record<string, unknown> => ({
   protocolVersion: mode === 'protocol-2' ? 2 : 1,
   agentCapabilities: {
     loadSession: true,
-    sessionCapabilities: { resume: {}, close: {} },
+    sessionCapabilities: { resume: {}, close: {}, additionalDirectories: {} },
     /* Both real pins advertise `image` too; the fixture withholds it unless the
      * `images` mode names it, so the refusal path has something to refuse. */
-    promptCapabilities: { image: mode === 'images', embeddedContext: true },
+    promptCapabilities: { image: mode === 'images', embeddedContext: mode !== 'text-only' },
   },
   authMethods:
     mode === 'auth-required'
@@ -724,8 +800,15 @@ const handle = async (message: JsonRpcMessage): Promise<void> => {
         fail(-32_602, 'Unknown session');
         return;
       }
-      if (asString(params['configId']) === 'model') {
+      const configId = asString(params['configId']);
+      if (configId === 'model') {
         session.model = asString(params['value'], session.model);
+        saveSessions();
+      } else if (
+        configId in session.config &&
+        (typeof params['value'] === 'string' || typeof params['value'] === 'boolean')
+      ) {
+        session.config[configId] = params['value'];
         saveSessions();
       }
       reply({ configOptions: configOptionsOf(session) });

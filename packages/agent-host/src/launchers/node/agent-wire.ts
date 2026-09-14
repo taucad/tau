@@ -210,6 +210,8 @@ export const agentChannelRunKindSchema = z.strictObject({
   id: nonEmptyString,
   /** Adapter-specific model id; absent takes whatever the adapter defaults to. */
   model: nonEmptyString.max(128).optional(),
+  /** Exact ACP session configuration ids and values. */
+  config: z.record(nonEmptyString, z.union([z.string(), z.boolean()])).optional(),
 });
 
 /** Per-admission model, prompt, tool and client context accepted over the wire. @public */

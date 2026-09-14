@@ -469,6 +469,42 @@ describe('ChatMessage source part rendering', () => {
   });
 });
 
+describe('ChatMessage ACP session state', () => {
+  it('renders the current ACP plan as one read-only plan surface', () => {
+    const message: MyUIMessage = {
+      id: 'msg-acp-plan',
+      role: 'assistant',
+      parts: [
+        {
+          type: 'data-acp-session',
+          data: {
+            type: 'acp-session',
+            id: 'state-1',
+            agentId: 'codex',
+            commands: [],
+            configOptions: [],
+            plan: {
+              type: 'items',
+              entries: [
+                { content: 'Inspect the model', priority: 'high', status: 'completed' },
+                { content: 'Validate the kernel', priority: 'medium', status: 'in_progress' },
+              ],
+            },
+          },
+        },
+      ],
+    };
+    setMessages([message]);
+
+    render(<ChatMessage messageId='msg-acp-plan' />);
+
+    expect(screen.getByRole('region', { name: 'Agent plan' })).toHaveTextContent('Inspect the model');
+    expect(screen.getByRole('region', { name: 'Agent plan' })).toHaveTextContent('Validate the kernel');
+    expect(screen.getAllByRole('checkbox')).toHaveLength(2);
+    expect(screen.getAllByRole('checkbox')[0]).toBeChecked();
+  });
+});
+
 describe('ChatMessage slash command rendering', () => {
   const longMessageWith = (line: string): string =>
     [line, ...Array.from({ length: 10 }, (_, index) => `filler line ${index}`)].join('\n');

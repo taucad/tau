@@ -12,7 +12,7 @@ import { createServer } from 'node:http';
 import { connect } from 'node:net';
 import type { Server } from 'node:http';
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { randomBytes, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -23,7 +23,13 @@ import type { Client, SessionConfigOption, SessionUpdate, StopReason } from '@ag
 
 import { createNodeAgentLauncher } from '@taucad/agent-host/node-launcher';
 import type { NodeAgentLauncher } from '@taucad/agent-host/node-launcher';
-import type { AgentChannelAdmissionConfig, AgentLogEvent, ProviderMessage, ToolRegistry } from '@taucad/agent-host';
+import type {
+  AgentChannelAdmissionConfig,
+  AgentLogEvent,
+  JsonObject,
+  ProviderMessage,
+  ToolRegistry,
+} from '@taucad/agent-host';
 
 import { createIsomorphicGitRevisionPort } from '@taucad/revisions';
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
@@ -40,6 +46,7 @@ import { startAgentServer } from '#agent-server.js';
 import type { AgentServerHandle } from '#agent-server.js';
 import { createHostMcpEndpoint } from '#mcp-server.js';
 import type { AcpAdapter } from '#acp/registry.js';
+import type { HostSystemSkillBundle } from '#agent-tools.js';
 
 /* The model is not decoration: the `codex` pin carries one (`registry.ts`), an
  * adapter override spreads the whole pin, and a fixture that offered no
@@ -139,6 +146,7 @@ const startHarness = async (
     readonly mcp?: { readonly expiresAt?: () => string; readonly url?: string };
     /** Wrap the launcher the way a daemon does, so external turns are recorded (V19). */
     readonly revisions?: boolean;
+    readonly systemSkillBundles?: readonly HostSystemSkillBundle[];
   } = {},
 ): Promise<Harness> => {
   const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-acp-run-'));
@@ -182,9 +190,11 @@ const startHarness = async (
           const minted = mcp.mint(input);
           return options.mcp?.expiresAt ? { ...minted, expiresAt: options.mcp.expiresAt() } : minted;
         },
+        activate: (input) => mcp.activate(input),
       },
       onFrame: (frame) => frames.push(frame),
       ...(options.idleTimeout === undefined ? {} : { idleTimeout: options.idleTimeout }),
+      ...(options.systemSkillBundles === undefined ? {} : { systemSkillBundles: options.systemSkillBundles }),
     }),
   });
   const launcher = options.revisions
@@ -320,6 +330,75 @@ const until = async (
 };
 
 describe('the external agent run kind', () => {
+  it('publishes complete system skill bundles through ACP additional directories', async () => {
+    const sourceRoot = await mkdtemp(join(tmpdir(), 'tau-acp-skill-source-'));
+    roots.push(sourceRoot);
+    const files = [
+      ['SKILL.md', '---\nname: fixture-skill\ndescription: Fixture skill\n---\nRead references/guide.md.\n'],
+      ['references/guide.md', '# Guide\nUse the native loader.\n'],
+    ] as const;
+    await Promise.all(
+      files.map(async ([path, body]) => {
+        await mkdir(join(sourceRoot, path, '..'), { recursive: true });
+        await writeFile(join(sourceRoot, path), body, 'utf8');
+      }),
+    );
+    const bundle: HostSystemSkillBundle = {
+      slug: 'fixture-skill',
+      name: 'fixture-skill',
+      description: 'Fixture skill',
+      version: '1.0.0',
+      whenToUse: 'Fixture tests',
+      body: files[0][1],
+      fingerprint: 'fixture',
+      files: files.map(([path, body]) => ({
+        path,
+        url: new URL(path, `file://${sourceRoot}/`).href,
+        byteLength: Buffer.byteLength(body),
+        lineCount: body.split('\n').length - 1,
+        contentKind: 'text',
+        mediaType: 'text/markdown',
+        sha256: createHash('sha256').update(body).digest('hex'),
+      })),
+    };
+    const harness = await startHarness({ systemSkillBundles: [bundle] });
+
+    await runTurn(harness, { chatId: 'chat-skills', runId: 'run-skills', text: 'inspect skills noask' });
+
+    const assistant = messagesOf(await readLog(harness.workspaceRoot, 'chat-skills'))
+      .filter((message) => message.role === 'assistant')
+      .map((message) => textOfMessage(message))
+      .join('');
+    const marker = 'native-skills: ';
+    const published = JSON.parse(assistant.slice(assistant.indexOf(marker) + marker.length)) as Array<{
+      readonly files: Readonly<Record<string, string>>;
+    }>;
+    expect(published[0]?.files).toEqual({
+      'fixture-skill/SKILL.md': files[0][1],
+      'fixture-skill/references/guide.md': files[1][1],
+    });
+    const opened = harness.frames.find(
+      (frame) => frame.direction === 'client->agent' && frame.frame.includes('"method":"session/new"'),
+    );
+    expect(opened?.frame).toContain('additionalDirectories');
+    expect(opened?.frame).not.toContain(sourceRoot);
+
+    const overridden = await startHarness({ systemSkillBundles: [bundle] });
+    const overrideRoot = join(overridden.workspaceRoot, '.agents', 'skills', bundle.slug);
+    await mkdir(overrideRoot, { recursive: true });
+    await writeFile(join(overrideRoot, 'SKILL.md'), '# Workspace override\n', 'utf8');
+    await runTurn(overridden, {
+      chatId: 'chat-skill-override',
+      runId: 'run-skill-override',
+      text: 'inspect skills noask',
+    });
+    const overrideOpen = overridden.frames.find(
+      (frame) => frame.direction === 'client->agent' && frame.frame.includes('"method":"session/new"'),
+    );
+    expect(overrideOpen?.frame).toContain('"additionalDirectories":[]');
+    await expect(readFile(join(overrideRoot, 'SKILL.md'), 'utf8')).resolves.toBe('# Workspace override\n');
+  }, 90_000);
+
   it('projects a turn, confines it to a branch, calls Tau MCP, and never touches the API', async () => {
     const { launcher, workspaceRoot, api } = await startHarness();
     const chatId = 'chat-external-1';
@@ -372,13 +451,14 @@ describe('the external agent run kind', () => {
       const events = await readLog(workspaceRoot, chatId);
       const messages = messagesOf(events);
 
-      /* Thin projection: assistant text, then the agent's own tool call and
-       * result. The trailing assistant row carries no text at all — this turn
+      /* Thin projection: current ACP session state, assistant text, then the
+       * agent's own tool call and result. The trailing assistant row carries no text at all — this turn
        * ended on a tool call, so the vendor's own usage report has no open
        * block to ride and gets a carrier of its own (V6). It joins the run's
        * single UI message as a usage part, not as an empty bubble. */
       expect(messages.map((message) => message.role)).toEqual([
         'user',
+        'assistant',
         'assistant',
         'tool-input',
         'tool-output',
@@ -399,7 +479,8 @@ describe('the external agent run kind', () => {
       await expect(readdir(join(workspaceRoot, '.tau'))).resolves.not.toContain('workspaces');
       /* The `cwd` fence is still the fence: it is the session's directory that
        * bounds the client filesystem methods, and that is now the root. */
-      expect(JSON.parse(textOfMessage(messages[1]) || '{}')).toMatchObject({ cwd: workspaceRoot });
+      const contextMessage = messages.find((message) => textOfMessage(message).includes('"cwd"'));
+      expect(JSON.parse(contextMessage ? textOfMessage(contextMessage) : '{}')).toMatchObject({ cwd: workspaceRoot });
 
       // GeoSpec evidence came back through the host-local MCP endpoint.
       const evidence = messages.findLast(
@@ -484,6 +565,17 @@ describe('the external agent run kind', () => {
     const resolved = events.findLast((event) => event.type === 'interrupt.recorded' && event.phase === 'resolved');
     expect(JSON.stringify(resolved)).toContain('"optionId":"allow"');
   }, 90_000);
+
+  it('honours an explicitly empty field in a later ACP tool update', async () => {
+    const harness = await startHarness();
+
+    await runTurn(harness, { chatId: 'chat-empty-title', runId: 'run-empty-title', text: 'clear-title noask' });
+
+    const output = messagesOf(await readLog(harness.workspaceRoot, 'chat-empty-title')).findLast(
+      (message) => message.role === 'tool-output',
+    );
+    expect(output).toMatchObject({ call: { toolCallId: 'write-1', title: '' } });
+  }, 30_000);
 
   it('cancels a turn through the run signal and records it, leaving the session up', async () => {
     const harness = await startHarness();
@@ -807,6 +899,7 @@ const stubTurn = (appended: unknown[] = []): AcpPromptTurn => ({
     appended.push(...events);
   },
   approve: async () => ({ interruptId: 'stub', outcome: 'approved' }),
+  publishLive: async () => undefined,
   signal: new AbortController().signal,
 });
 
@@ -1098,6 +1191,50 @@ describe('one ACP session per chat', () => {
     await session.close();
   }, 30_000);
 
+  it('applies offered ACP configuration once and retains the resulting session state', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'tau-acp-config-'));
+    roots.push(cwd);
+    const frames: AcpWireFrame[] = [];
+    const session = await openAcpSession({
+      adapter: fakeAgent,
+      cwd,
+      createId: () => randomUUID(),
+      onFrame: (frame) => frames.push(frame),
+    });
+
+    await session.prompt('first noask', stubTurn(), undefined, {
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- ACP configuration retains its wire id.
+      thought_level: 'high',
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- ACP configuration retains its wire id.
+      web_search: true,
+    });
+    expect(sent(frames, 'session/set_config_option')).toBe(2);
+    expect(
+      frames.some(
+        ({ direction, frame }) =>
+          direction === 'client->agent' &&
+          frame.includes('"method":"session/set_config_option"') &&
+          frame.includes('"configId":"web_search"') &&
+          frame.includes('"type":"boolean"'),
+      ),
+    ).toBe(true);
+    expect(session.configOptions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'thought_level', currentValue: 'high' }),
+        expect.objectContaining({ id: 'web_search', currentValue: true }),
+      ]),
+    );
+
+    await session.prompt('second noask', stubTurn(), undefined, {
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- ACP configuration retains its wire id.
+      thought_level: 'high',
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- ACP configuration retains its wire id.
+      web_search: true,
+    });
+    expect(sent(frames, 'session/set_config_option')).toBe(2);
+    await session.close();
+  }, 30_000);
+
   it('declines an elicitation that arrives between turns, and records it against nothing', async () => {
     const cwd = await mkdtemp(join(tmpdir(), 'tau-acp-late-login-'));
     roots.push(cwd);
@@ -1162,7 +1299,11 @@ describe('one ACP session per chat', () => {
     expect(JSON.stringify(messagesOf(events))).toContain('transcript: first noask | second noask');
     /* The session id is durable on the chat's own record, which is what a cold
      * start reads back (VSC3); `remember` records it by replacing the envelope. */
-    const remembered = events.findLast((event) => event.type === 'message.envelope-replaced');
+    const remembered = events.findLast(
+      (event) =>
+        event.type === 'message.envelope-replaced' &&
+        event.replacement.metadata?.tauInternal?.['acpSessionId'] !== undefined,
+    );
     expect(remembered).toMatchObject({
       /* oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- `expect.stringMatching` is typed `any` by vitest. */
       replacement: { metadata: { tauInternal: { acpSessionId: expect.stringMatching(/^fake-session-\d+-/u) } } },
@@ -1182,10 +1323,10 @@ describe('one ACP session per chat', () => {
     expect(sent(harness.frames, 'session/resume')).toBe(1);
     expect(sent(harness.frames, 'session/new')).toBe(1);
     const messages = messagesOf(await readLog(harness.workspaceRoot, chatId));
-    /* Exactly turn two's own five messages — its text, the tool pair and the
-     * usage carrier the turn's trailing tool call leaves it with (V6) — and
+    /* Exactly turn two's own six messages — current ACP state, its text, the
+     * tool pair and the usage carrier the turn's trailing tool call leaves it with (V6) — and
      * nothing the agent replayed was appended. */
-    expect(messages.length - before).toBe(5);
+    expect(messages.length - before).toBe(6);
     expect(JSON.stringify(messages)).not.toContain('replay:');
     /* The transcript itself is asserted on the *live* path above: this fixture
      * forgets a session on `session/close`, so a resume after eviction gets an
@@ -1325,6 +1466,51 @@ child.stdout.on('data', (chunk) => {
 };
 
 describe('restoring a session a cold start lost', () => {
+  it('retains the cumulative usage baseline when a new port restores the session', async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-acp-restored-usage-'));
+    roots.push(workspaceRoot);
+    let remembered: JsonObject = {};
+    const run = async (
+      port: ReturnType<typeof createAcpExternalAgentPort>,
+      runId: string,
+    ): Promise<AgentLogEvent[]> => {
+      const appended: AgentLogEvent[] = [];
+      await port.run({
+        agentId: 'codex',
+        agent: { kind: 'acp', id: 'codex' },
+        chatId: 'chat-restored-usage',
+        runId,
+        message: { id: `user-${runId}`, role: 'user', content: 'noask' },
+        state: remembered,
+        history: [],
+        signal: new AbortController().signal,
+        // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the log fills base fields; this test records event bodies.
+        append: async (events) => {
+          appended.push(...(events as readonly AgentLogEvent[]));
+        },
+        remember: async (state) => {
+          remembered = { ...remembered, ...state };
+        },
+        approve: async () => ({ interruptId: 'stub', outcome: 'approved' }),
+      });
+      return appended;
+    };
+
+    const first = createAcpExternalAgentPort({ agents: [fakeAgent], workspaceRoot });
+    await run(first, 'run-1');
+    await first.closeChat?.('chat-restored-usage');
+    const restored = createAcpExternalAgentPort({ agents: [fakeAgent], workspaceRoot });
+    const events = await run(restored, 'run-2');
+    await restored.closeChat?.('chat-restored-usage');
+
+    const usage = events.flatMap((event) =>
+      event.type === 'message.appended' && event.message.role === 'assistant' && event.message.metadata?.usage
+        ? [event.message.metadata.usage]
+        : [],
+    );
+    expect(usage.at(-1)).toMatchObject({ input: 1200, output: 300, totalTokens: 1500 });
+  }, 30_000);
+
   it('falls back to session/load, and appends nothing it replays', async () => {
     const adapter = await withoutCapabilities({ resume: true });
     const cwd = await mkdtemp(join(tmpdir(), 'tau-acp-load-'));
@@ -1495,11 +1681,14 @@ describe('authentication, initialize and prompt content', () => {
     expect(sent(harness.frames, 'session/prompt')).toBe(0);
   }, 30_000);
 
-  it('carries the CAD context as embedded resources on the first prompt only, and writes no file', async () => {
+  it('sends shared ACP guidance once and current CAD context on every prompt, and writes no file', async () => {
     const harness = await startHarness();
     const config = {
       systemPrompt: 'You are Tau. The kernel is OpenSCAD.',
-      contextPayload: { skills: [{ name: 'brep-design', description: 'Design manufacture-ready parts.' }] },
+      contextPayload: {
+        skills: [{ name: 'brep-design', description: 'Design manufacture-ready parts.' }],
+        memory: { '.tau/AGENTS.md': 'Keep all dimensions in millimetres.' },
+      },
       snapshot: { files: ['main.scad'] },
     };
 
@@ -1507,18 +1696,44 @@ describe('authentication, initialize and prompt content', () => {
     await runTurn(harness, { chatId: 'chat-context', runId: 'run-context-2', text: 'second noask', config });
 
     const [first, second] = promptFrames(harness.frames);
-    expect(first).toContain('tau://system-prompt');
-    expect(first).toContain('The kernel is OpenSCAD.');
+    expect(first).toContain('tau://agent-guidance');
+    expect(first).toContain('native skill loader');
+    expect(first).not.toContain('tau://system-prompt');
+    expect(first).not.toContain('The kernel is OpenSCAD.');
     expect(first).toContain('tau://skills');
+    expect(first).toContain('tau://memory');
+    expect(first).toContain('Keep all dimensions in millimetres.');
     expect(first).toContain('tau://snapshot');
-    /* EQ8/V12: the agent keeps its own conversation, so the briefing is sent
-     * once per vendor session and never again. */
-    expect(second).not.toContain('tau://');
+    /* Stable guidance is session-scoped; current project facts accompany each
+     * turn so a native→ACP switch cannot leave the vendor on an old snapshot. */
+    expect(second).not.toContain('tau://agent-guidance');
+    expect(second).toContain('tau://skills');
+    expect(second).toContain('tau://memory');
+    expect(second).toContain('tau://snapshot');
     expect(second).toContain('second noask');
     /* V12 supersedes the `AGENTS.md` rung: in direct mode the cwd is the user's
      * own project, and Tau writes no control file into it. */
     await expect(readdir(harness.workspaceRoot)).resolves.not.toContain('AGENTS.md');
   }, 60_000);
+
+  it('falls textual Tau context back to ordinary ACP text when embedded context is unsupported', async () => {
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variables keep their wire names
+    const textOnly: AcpAdapter = { ...fakeAgent, spawnEnv: { TAU_FAKE_AGENT_MODE: 'text-only' } };
+    const harness = await startHarness({ agents: [textOnly] });
+
+    await runTurn(harness, {
+      chatId: 'chat-text-context',
+      runId: 'run-text-context',
+      text: 'noask',
+      config: { contextPayload: { memory: { '.tau/AGENTS.md': 'Prefer symmetric parts.' } } },
+    });
+
+    const [prompt] = promptFrames(harness.frames);
+    expect(prompt).not.toContain('"type":"resource"');
+    expect(prompt).toContain('tau://agent-guidance');
+    expect(prompt).toContain('tau://memory');
+    expect(prompt).toContain('Prefer symmetric parts.');
+  }, 30_000);
 
   it('refuses an image an agent cannot read, and sends one it can', async () => {
     const cwd = await mkdtemp(join(tmpdir(), 'tau-acp-image-'));
@@ -1568,6 +1783,38 @@ describe('authentication, initialize and prompt content', () => {
     await sighted.closeChat?.('chat-image');
 
     expect(promptFrames(frames).at(-1)).toContain('iVBORw0KGgo=');
+  }, 60_000);
+
+  it('validates every media block instead of accepting a supported first block', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'tau-acp-mixed-media-'));
+    roots.push(cwd);
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variables keep their wire names
+    const seeing: AcpAdapter = { ...fakeAgent, spawnEnv: { TAU_FAKE_AGENT_MODE: 'images' } };
+    const port = createAcpExternalAgentPort({ agents: [seeing], workspaceRoot: cwd });
+
+    await expect(
+      port.run({
+        agentId: seeing.id,
+        agent: { kind: 'acp', id: seeing.id },
+        chatId: 'chat-mixed-media',
+        runId: 'run-mixed-media',
+        message: {
+          id: 'user-mixed-media',
+          role: 'user',
+          content: [
+            { type: 'image', mimeType: 'image/png', data: 'iVBORw0KGgo=' },
+            { type: 'audio', mimeType: 'audio/wav', data: 'UklGRg==' },
+            { type: 'text', text: 'noask' },
+          ],
+        },
+        history: [],
+        signal: new AbortController().signal,
+        append: async () => undefined,
+        remember: async () => undefined,
+        approve: async () => ({ interruptId: 'stub', outcome: 'approved' }),
+      }),
+    ).rejects.toMatchObject({ code: 'EXTERNAL_AGENT_CONTENT_UNSUPPORTED' });
+    await port.closeChat?.('chat-mixed-media');
   }, 60_000);
 });
 

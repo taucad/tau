@@ -87,6 +87,8 @@ export type ChatToolRegistryOptions = {
    * Always required: the file tools are the floor of every host.
    */
   readonly fileSystemFor: (signal: AbortSignal) => RpcFileSystem;
+  /** Host-owned record writer used only to persist `export_geometry` artifacts. */
+  readonly recordFileSystemFor?: ((signal: AbortSignal) => RpcFileSystem) | undefined;
   /** Backs `get_kernel_result`. */
   readonly kernelClient?: RpcRuntimeClient | undefined;
   /** Backs `export_geometry`. */
@@ -164,8 +166,12 @@ export const createChatToolRegistry = (options: ChatToolRegistryOptions): ToolRe
         };
       }
       try {
+        const fileSystemFor =
+          mapped.rpc === rpcName.exportGeometry && options.recordFileSystemFor !== undefined
+            ? options.recordFileSystemFor
+            : options.fileSystemFor;
         const dispatcher = createRpcDispatcher({
-          fileSystem: options.fileSystemFor(invocation.signal),
+          fileSystem: fileSystemFor(invocation.signal),
           kernelClient: options.kernelClient ?? unattachedKernelClient,
           ...(options.graphics === undefined ? {} : { graphics: options.graphics }),
           ...(options.images === undefined ? {} : { images: options.images }),

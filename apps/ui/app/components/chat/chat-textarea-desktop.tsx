@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef } from 'react';
-import { Bot, Brain, Paperclip, Wrench, AtSign } from 'lucide-react';
-import type { Chat, ToolSelection } from '@taucad/chat';
+import { Bot, Brain, Paperclip, Wrench, AtSign, SlidersHorizontal } from 'lucide-react';
+import type { AcpSessionData, Chat, ToolSelection } from '@taucad/chat';
 import type { FileEntry } from '@taucad/types';
 import type { FileTreeService } from '@taucad/fs-client/file-tree-service';
 import { ChatModelSelector, openModelSelectorKeyCombination } from '#components/chat/chat-model-selector.js';
@@ -18,6 +18,7 @@ import { ChatAgentSelector, toggleModeKeyCombination } from '#components/chat/ch
 import { Button } from '@taucad/ui/components/button';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
+import { Popover, PopoverContent, PopoverTrigger } from '@taucad/ui/components/popover';
 import { SvgIcon } from '#components/icons/svg-icon.js';
 import { formatKeyCombination } from '#utils/keys.utils.js';
 import { cn } from '@taucad/ui/utils/cn';
@@ -35,7 +36,7 @@ import type { ResolvedModel } from '#hooks/use-models.js';
 import { useFeature } from '#flags/use-feature.js';
 import { ChatEditor } from '#components/chat/tiptap/chat-editor.js';
 import { useChatEditor, buildEditorContentJson } from '#components/chat/tiptap/use-chat-editor.js';
-import type { ContextSuggestionItem } from '#components/chat/tiptap/suggestion-types.js';
+import type { ContextSuggestionItem, SlashCommandItem } from '#components/chat/tiptap/suggestion-types.js';
 import type { ClipboardPasteEvent } from '#components/chat/chat-paste-handler.js';
 import { createScreenshotContextHandler } from '#components/chat/screenshot-actions.utils.js';
 import { buildPastedContent } from '#utils/at-reference.utils.js';
@@ -72,6 +73,8 @@ type ChatTextareaDesktopProperties = {
   readonly chats: Chat[];
   readonly actionItems?: ContextSuggestionItem[];
   readonly setDraftText: (text: string) => void;
+  readonly acpAgentId?: string;
+  readonly acpSessionData?: AcpSessionData;
 
   // Refs
   // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- React ref object
@@ -99,6 +102,24 @@ type ChatTextareaDesktopProperties = {
   readonly handleTextareaBlur: () => void;
   readonly removeImage: (index: number) => void;
   readonly setDraftToolChoice: (choice: ToolSelection) => void;
+};
+
+/** Map one ACP command to the existing slash menu without changing its native invocation. @public */
+export const acpCommandToSlashCommand = (
+  command: AcpSessionData['commands'][number],
+  agentId: string,
+): SlashCommandItem => {
+  const invocation = command.name.startsWith('$') || command.name.startsWith('/') ? command.name : `/${command.name}`;
+  return {
+    id: invocation,
+    label: invocation,
+    title: command.name,
+    description: command.description,
+    ...(command.input === undefined ? {} : { fullDescription: command.input.hint }),
+    group: 'Commands',
+    source: agentId,
+    commandText: `${invocation} `,
+  };
 };
 
 /**
@@ -137,6 +158,8 @@ export const ChatTextareaDesktop = memo(function ({
   chats,
   actionItems,
   setDraftText,
+  acpAgentId,
+  acpSessionData,
 
   // Refs
   fileInputReference,
@@ -162,11 +185,19 @@ export const ChatTextareaDesktop = memo(function ({
   setDraftToolChoice,
 }: ChatTextareaDesktopProperties): React.JSX.Element {
   const skillsCatalog = useSkillsCatalog();
+
+  const commands = acpSessionData?.commands;
   const slashCommandItems = useMemo(
-    () => skillsCatalog.map((skillMetadata) => skillMetadataToSlashCommand(skillMetadata)),
-    [skillsCatalog],
+    () =>
+      acpAgentId === undefined
+        ? skillsCatalog.map((skillMetadata) => skillMetadataToSlashCommand(skillMetadata))
+        : (commands ?? []).map((command) => acpCommandToSlashCommand(command, acpAgentId)),
+    [acpAgentId, commands, skillsCatalog],
   );
-  const knownSkillIds = useMemo(() => new Set(slashCommandItems.map((s) => s.id)), [slashCommandItems]);
+  const knownSkillIds = useMemo(
+    () => new Set(slashCommandItems.filter((item) => item.group !== 'Commands').map((item) => item.id)),
+    [slashCommandItems],
+  );
 
   const handleEditorUpdate = useCallback(
     (content: { text: string }) => {
@@ -362,6 +393,7 @@ export const ChatTextareaDesktop = memo(function ({
           fileInputReference={fileInputReference}
           handleFileChange={handleFileChange}
           creationLocationControl={creationLocationControl}
+          acpSessionData={acpSessionData}
         />
 
         {/* Bottom-right controls */}
@@ -402,6 +434,7 @@ export const ChatTextareaLeftControls = memo(function ({
   fileInputReference,
   handleFileChange,
   creationLocationControl,
+  acpSessionData,
 }: {
   readonly selectedModel: ResolvedModel;
   readonly enableKernelSelector: boolean;
@@ -412,6 +445,7 @@ export const ChatTextareaLeftControls = memo(function ({
   readonly fileInputReference: React.RefObject<HTMLInputElement | null>;
   readonly handleFileChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
   readonly creationLocationControl?: React.ReactNode;
+  readonly acpSessionData?: AcpSessionData;
 }): React.JSX.Element {
   // Chat-scoped resolver — falls back to cookie kernel when no chat-local
   // selection exists. Display label follows the chat's active kernel so
@@ -420,7 +454,7 @@ export const ChatTextareaLeftControls = memo(function ({
     kernel: { kernel: selectedKernel },
     execution: { execution },
     agentActivity,
-    session,
+    canSelectExecution,
   } = useChatComposer();
   const { isOffered: isAgentSelectorOffered, label: selectedAgentLabel } = useChatAgentSelection();
   const { selectedModel: selectedAgentModel } = useChatAgentModel();
@@ -430,7 +464,7 @@ export const ChatTextareaLeftControls = memo(function ({
       <ChatTextareaModeControl />
       {/* S23: present at one branch, because it is where the second is made. */}
       <ChatBranchPicker />
-      {session && isAgentSelectorOffered ? (
+      {canSelectExecution && isAgentSelectorOffered ? (
         <Tooltip>
           <ChatExecutionSelector
             data-chat-textarea-focustrap
@@ -520,6 +554,7 @@ export const ChatTextareaLeftControls = memo(function ({
           <TooltipContent>Select model ({selectedAgentModel.name})</TooltipContent>
         </Tooltip>
       )}
+      {execution.kind === 'acp' ? <ChatAgentConfigControls sessionData={acpSessionData} /> : null}
       {creationLocationControl}
       {/* Available and reserved credits (P5/P6). Tau execution only — an
        * external agent's turns are not funded by this balance. Kept after the
@@ -613,6 +648,80 @@ export const ChatTextareaLeftControls = memo(function ({
     </div>
   );
 });
+
+function ChatAgentConfigControls({
+  sessionData,
+}: {
+  readonly sessionData?: AcpSessionData;
+}): React.JSX.Element | undefined {
+  const {
+    execution: { execution, setActiveExecution },
+  } = useChatComposer();
+  if (execution.kind !== 'acp') {
+    return undefined;
+  }
+  const options = sessionData?.configOptions.filter((option) => option.category !== 'model') ?? [];
+  if (options.length === 0) {
+    return undefined;
+  }
+  const select = (id: string, value: string | boolean): void => {
+    setActiveExecution({ ...execution, config: { ...execution.config, [id]: value } });
+  };
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button
+          type='button'
+          variant='outline'
+          size='sm'
+          aria-label='Agent settings'
+          className='h-7 w-7 rounded-full text-muted-foreground hover:text-foreground'
+        >
+          <SlidersHorizontal className='size-4' aria-hidden='true' />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align='start' className='w-72 space-y-3 p-3'>
+        <h3 className='text-sm font-medium'>Agent settings</h3>
+        {options.map((option) => {
+          const current = execution.config?.[option.id] ?? option.currentValue;
+          return option.type === 'select' ? (
+            <label key={option.id} className='flex flex-col gap-1 text-xs'>
+              <span>{option.name}</span>
+              <select
+                aria-label={option.name}
+                className='h-8 rounded-md border bg-background px-2'
+                value={String(current)}
+                onChange={(event) => {
+                  select(option.id, event.currentTarget.value);
+                }}
+              >
+                {option.options
+                  .flatMap((entry) => ('options' in entry ? entry.options : [entry]))
+                  .map((value) => (
+                    <option key={value.value} value={value.value}>
+                      {value.name}
+                    </option>
+                  ))}
+              </select>
+            </label>
+          ) : (
+            <label key={option.id} className='flex items-center justify-between gap-3 text-xs'>
+              <span>{option.name}</span>
+              <input
+                type='checkbox'
+                aria-label={option.name}
+                checked={Boolean(current)}
+                onChange={(event) => {
+                  select(option.id, event.currentTarget.checked);
+                }}
+              />
+            </label>
+          );
+        })}
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 /**
  * Memo'd right control bar containing @-mention, upload, and submit buttons.

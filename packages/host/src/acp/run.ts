@@ -19,16 +19,24 @@
  * a chat asks for it, a revision checkout rather than the authority root.
  */
 
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { lstat, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 
-import type { ContentBlock, McpServer } from '@agentclientprotocol/sdk';
+import type { ContentBlock, McpServer, Usage as AcpUsage } from '@agentclientprotocol/sdk';
 
 import type { ExternalAgentPort, ExternalAgentTurn, JsonObject, JsonValue } from '@taucad/agent-host';
+import { createSkillBundleRegistry } from '@taucad/agent-tools/registry';
+import { tauMcpInstructions } from '@taucad/mcp';
+import { getErrno } from '@taucad/utils/error';
+import { isRecord } from '@taucad/utils/schema';
 
 import { openAcpSession } from '#acp/session.js';
 import type { AcpSession } from '#acp/session.js';
 import type { AcpWireFrame } from '#acp/spawn.js';
 import type { AcpAdapter } from '#acp/registry.js';
+import type { HostSystemSkillBundle } from '#agent-tools.js';
 
 /**
  * Open with the turn's own cancellation in force.
@@ -119,6 +127,8 @@ export type AcpExternalAgentPortOptions = {
   readonly agents: readonly AcpAdapter[];
   /** Absolute workspace root; the agent's `cwd` in direct mode. */
   readonly workspaceRoot: string;
+  /** Package-owned skills published to the adapter's native skill loader. */
+  readonly systemSkillBundles?: readonly HostSystemSkillBundle[] | undefined;
   /**
    * Host-local MCP endpoint (X4). Present, every session is offered the `tau`
    * server with a capability minted for *that chat session*; absent, the agent
@@ -132,6 +142,12 @@ export type AcpExternalAgentPortOptions = {
           /** ISO instant after which the endpoint rejects the token. */
           readonly expiresAt: string;
         };
+        activate(input: {
+          readonly token: string;
+          readonly runId: string;
+          readonly chatId: string;
+          readonly signal: AbortSignal;
+        }): () => void;
       }
     | undefined;
   readonly onFrame?: ((frame: AcpWireFrame) => void) | undefined;
@@ -160,7 +176,67 @@ type LiveSession = {
   busy: boolean;
   /** Epoch milliseconds when the session's MCP capability expires; absent without MCP. */
   readonly capabilityExpiresAt?: number | undefined;
+  readonly capabilityToken?: string | undefined;
+  readonly skillPublication?: { readonly close: () => Promise<void> } | undefined;
   timer?: NodeJS.Timeout | undefined;
+};
+
+const publishSystemSkills = async (
+  bundles: readonly HostSystemSkillBundle[] | undefined,
+  cwd: string,
+  signal: AbortSignal,
+): Promise<{ readonly root: string; readonly close: () => Promise<void> } | undefined> => {
+  if (!bundles || bundles.length === 0) {
+    return undefined;
+  }
+  const registry = createSkillBundleRegistry(bundles);
+  const published: HostSystemSkillBundle[] = [];
+  for (const bundle of registry.bundles) {
+    signal.throwIfAborted();
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- workspace precedence is decided once per complete skill.
+      await lstat(join(cwd, '.agents', 'skills', bundle.slug));
+    } catch (error) {
+      if (getErrno(error) !== 'ENOENT') {
+        throw error;
+      }
+      published.push(bundle);
+    }
+  }
+  if (published.length === 0) {
+    return undefined;
+  }
+  const root = await mkdtemp(join(tmpdir(), 'tau-acp-skills-'));
+  const agentsRoot = join(root, '.agents');
+  const staging = join(agentsRoot, `.skills-${randomUUID()}`);
+  const close = async (): Promise<void> => rm(root, { recursive: true, force: true });
+  try {
+    for (const bundle of published) {
+      for (const resource of bundle.files) {
+        signal.throwIfAborted();
+        // oxlint-disable-next-line no-await-in-loop -- resources must be verified and published in their manifest order.
+        const bytes = await readFile(new URL(resource.url), { signal });
+        const fingerprint = createHash('sha256').update(bytes).digest('hex');
+        if (bytes.byteLength !== resource.byteLength || fingerprint !== resource.sha256) {
+          throw new Error(`System skill resource changed after generation: ${bundle.slug}/${resource.path}`);
+        }
+        if (resource.path === 'SKILL.md' && bytes.toString('utf8') !== bundle.body) {
+          throw new Error(`System skill body does not match SKILL.md: ${bundle.slug}`);
+        }
+        const target = join(staging, bundle.slug, resource.path);
+        // oxlint-disable-next-line no-await-in-loop -- each verified resource needs its parent before its atomic publication.
+        await mkdir(dirname(target), { recursive: true });
+        // oxlint-disable-next-line no-await-in-loop -- resources must be complete before the directory becomes visible.
+        await writeFile(target, bytes, { signal });
+      }
+    }
+    await mkdir(agentsRoot, { recursive: true });
+    await rename(staging, join(agentsRoot, 'skills'));
+    return { root, close };
+  } catch (error) {
+    await close();
+    throw error;
+  }
 };
 
 const record = (value: unknown): Record<string, JsonValue> | undefined =>
@@ -188,6 +264,9 @@ const contentBlockOf = (block: unknown): ContentBlock | undefined => {
   }
   if (fields?.['type'] === 'image' && typeof fields['data'] === 'string' && typeof fields['mimeType'] === 'string') {
     return { type: 'image', data: fields['data'], mimeType: fields['mimeType'] };
+  }
+  if (fields?.['type'] === 'audio' && typeof fields['data'] === 'string' && typeof fields['mimeType'] === 'string') {
+    return { type: 'audio', data: fields['data'], mimeType: fields['mimeType'] };
   }
   if (fields?.['type'] === 'resource_link' && typeof fields['uri'] === 'string') {
     return {
@@ -219,22 +298,24 @@ const contextBlock = (uri: string, mimeType: string, text: string): ContentBlock
  * *is* the user's project, so writing an `AGENTS.md` there would put a Tau
  * control file in the authored tree (filesystem policy Rule 16) and capture it
  * into every revision. The same bytes ride the prompt instead, on the session's
- * first turn only — the agent keeps its own conversation, so repeating them
- * every turn would pay for the same context again and again (EQ8).
+ * first turn only. Current project facts still ride every turn so a session
+ * resumed after another agent's edit cannot keep stale context (EQ8).
  *
  * This content is transmitted to the vendor, exactly like the tree the agent
  * already reads.
  *
  * @param config - The admission config the client sent for this turn.
+ * @param first - Whether this is the first prompt on the vendor session.
  * @returns The resource blocks, or none when the client sent no context.
  */
-const cadContextBlocks = (config: ExternalAgentTurn['config']): readonly ContentBlock[] => {
+const cadContextBlocks = (config: ExternalAgentTurn['config'], first: boolean): readonly ContentBlock[] => {
   if (!config) {
     return [];
   }
   const skills = config.clientContext?.skills ?? [];
+  const memory = config.clientContext?.memory ?? {};
   return [
-    ...(config.systemPrompt === '' ? [] : [contextBlock('tau://system-prompt', 'text/markdown', config.systemPrompt)]),
+    ...(first ? [contextBlock('tau://agent-guidance', 'text/markdown', tauMcpInstructions)] : []),
     ...(skills.length === 0
       ? []
       : [
@@ -244,6 +325,9 @@ const cadContextBlocks = (config: ExternalAgentTurn['config']): readonly Content
             skills.map((skill) => `- ${skill.name}: ${skill.description}`).join('\n'),
           ),
         ]),
+    ...(Object.keys(memory).length === 0
+      ? []
+      : [contextBlock('tau://memory', 'application/json', JSON.stringify(memory))]),
     ...(config.snapshot === undefined
       ? []
       : [contextBlock('tau://snapshot', 'application/json', JSON.stringify(config.snapshot))]),
@@ -268,13 +352,49 @@ const promptBlocksOf = (turn: ExternalAgentTurn, first: boolean): readonly Conte
   if (blocks.length === 0) {
     return undefined;
   }
-  return first ? [...cadContextBlocks(turn.config), ...blocks] : blocks;
+  return [...cadContextBlocks(turn.config, first), ...blocks];
 };
 
 const stringField = (state: JsonObject | undefined, name: string): string | undefined => {
   const value = state?.[name];
   return typeof value === 'string' ? value : undefined;
 };
+
+const usageNumber = (value: unknown): number | undefined =>
+  typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined;
+
+const usageField = (state: JsonObject | undefined): AcpUsage | undefined => {
+  const value = state?.['acpPriorUsage'];
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const totalTokens = usageNumber(value['totalTokens']);
+  const inputTokens = usageNumber(value['inputTokens']);
+  const outputTokens = usageNumber(value['outputTokens']);
+  const thoughtTokens = usageNumber(value['thoughtTokens']);
+  const cachedReadTokens = usageNumber(value['cachedReadTokens']);
+  const cachedWriteTokens = usageNumber(value['cachedWriteTokens']);
+  if (totalTokens === undefined || inputTokens === undefined || outputTokens === undefined) {
+    return undefined;
+  }
+  return {
+    totalTokens,
+    inputTokens,
+    outputTokens,
+    ...(thoughtTokens === undefined ? {} : { thoughtTokens }),
+    ...(cachedReadTokens === undefined ? {} : { cachedReadTokens }),
+    ...(cachedWriteTokens === undefined ? {} : { cachedWriteTokens }),
+  };
+};
+
+const usageState = (usage: AcpUsage): JsonObject => ({
+  totalTokens: usage.totalTokens,
+  inputTokens: usage.inputTokens,
+  outputTokens: usage.outputTokens,
+  ...(typeof usage.thoughtTokens === 'number' ? { thoughtTokens: usage.thoughtTokens } : {}),
+  ...(typeof usage.cachedReadTokens === 'number' ? { cachedReadTokens: usage.cachedReadTokens } : {}),
+  ...(typeof usage.cachedWriteTokens === 'number' ? { cachedWriteTokens: usage.cachedWriteTokens } : {}),
+});
 
 /**
  * Build the external-agent port over a set of resolved ACP adapters.
@@ -308,7 +428,11 @@ export const createAcpExternalAgentPort = (options: AcpExternalAgentPortOptions)
     }
     live.delete(key);
     clearTimeout(entry.timer);
-    await entry.session.close();
+    try {
+      await entry.session.close();
+    } finally {
+      await entry.skillPublication?.close();
+    }
   };
 
   /**
@@ -387,17 +511,26 @@ export const createAcpExternalAgentPort = (options: AcpExternalAgentPortOptions)
      * Claude tears a session down when that list changes (V7). */
     const capability = options.mcp?.mint({ runId: turn.runId, chatId: turn.chatId });
     const mcpServers = tauMcpServers(capability);
-    const session = await abortableOpen(
-      openAcpSession({
-        adapter: input.adapter,
-        cwd,
-        mcpServers,
-        createId,
-        ...(acpSessionId === undefined ? {} : { acpSessionId }),
-        ...(options.onFrame ? { onFrame: options.onFrame } : {}),
-      }),
-      turn.signal,
-    );
+    const skillPublication = await publishSystemSkills(options.systemSkillBundles, cwd, turn.signal);
+    let session: AcpSession;
+    try {
+      session = await abortableOpen(
+        openAcpSession({
+          adapter: input.adapter,
+          cwd,
+          mcpServers,
+          ...(skillPublication === undefined ? {} : { additionalDirectories: [skillPublication.root] }),
+          createId,
+          ...(acpSessionId === undefined ? {} : { acpSessionId }),
+          ...(acpSessionId === undefined ? {} : { priorUsage: usageField(turn.state) }),
+          ...(options.onFrame ? { onFrame: options.onFrame } : {}),
+        }),
+        turn.signal,
+      );
+    } catch (error) {
+      await skillPublication?.close();
+      throw error;
+    }
     /* Busy from the first instant: the awaits below would otherwise let a
      * concurrent chat's eviction close this session before its own first
      * prompt (review 2-review S7). `run` clears it. */
@@ -407,6 +540,8 @@ export const createAcpExternalAgentPort = (options: AcpExternalAgentPortOptions)
       cwd,
       busy: true,
       capabilityExpiresAt: capability === undefined ? undefined : Date.parse(capability.expiresAt),
+      capabilityToken: capability?.token,
+      skillPublication,
     };
     live.set(input.key, entry);
     try {
@@ -509,6 +644,15 @@ export const createAcpExternalAgentPort = (options: AcpExternalAgentPortOptions)
       }
       entry ??= await start({ key, turn, model, adapter, cwd, mode: checkout?.mode });
       entry.busy = true;
+      const releaseMcp =
+        options.mcp && entry.capabilityToken
+          ? options.mcp.activate({
+              token: entry.capabilityToken,
+              runId: turn.runId,
+              chatId: turn.chatId,
+              signal: turn.signal,
+            })
+          : undefined;
       try {
         /* The vendor session Tau is about to prompt is not the one this chat's
          * record remembers: it is new (or a lost one was replaced), so it has
@@ -519,12 +663,26 @@ export const createAcpExternalAgentPort = (options: AcpExternalAgentPortOptions)
            * whole job, and prompting again would ask the agent twice. */
           return;
         }
-        const outcome = await entry.session.prompt(prompt, turn, model);
+        const selectedConfig = isRecord(turn.agent['config'])
+          ? turn.agent['config']
+          : isRecord(turn.state?.['config'])
+            ? turn.state['config']
+            : undefined;
+        const configuration = selectedConfig
+          ? Object.fromEntries(
+              Object.entries(selectedConfig).filter(
+                (entry): entry is [string, string | boolean] =>
+                  typeof entry[1] === 'string' || typeof entry[1] === 'boolean',
+              ),
+            )
+          : undefined;
+        const outcome = await entry.session.prompt(prompt, turn, model, configuration);
         /* What the agent changed about its own session, written back to the
          * chat's record so the next turn — and the selector above it — start
          * from what actually ran rather than from what was last asked for
          * (V6/VSC3). One `remember`, because each is an append. */
         const moved = {
+          ...(outcome.usage === undefined ? {} : { acpPriorUsage: usageState(outcome.usage) }),
           ...(outcome.model === undefined || outcome.model === model ? {} : { model: outcome.model }),
           ...(outcome.title === undefined ? {} : { title: outcome.title }),
         };
@@ -533,6 +691,7 @@ export const createAcpExternalAgentPort = (options: AcpExternalAgentPortOptions)
         }
         return { stopReason: outcome.stopReason };
       } finally {
+        releaseMcp?.();
         entry.busy = false;
         touch(key);
       }

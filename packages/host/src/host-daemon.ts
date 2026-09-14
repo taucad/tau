@@ -613,6 +613,7 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
               agents: discovery.agents,
               workspaceRoot: agent.workspaceRoot,
               checkouts,
+              ...(options.systemSkillBundles === undefined ? {} : { systemSkillBundles: options.systemSkillBundles }),
               /* The MCP url is only known once the server is listening, so it is
                * resolved per run rather than captured here. */
               ...(mcp
@@ -622,6 +623,7 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
                         return agentServer ? new URL('mcp', agentServer.url()).href : '';
                       },
                       mint: (input) => mcp.mint(input),
+                      activate: (input) => mcp.activate(input),
                     },
                   }
                 : {}),
@@ -633,6 +635,7 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
     const externalAgents = externalAgentDescriptors(discovery);
     const server = startAgentServer({
       launcher,
+      revisions: revisions.channel,
       token: agent.token,
       workspaceRoot: agent.workspaceRoot,
       ...(agent.label ? { label: agent.label } : {}),

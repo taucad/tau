@@ -139,6 +139,13 @@ describe('the mounted /mcp route', () => {
     expect(unauthorized.status).toBe(401);
 
     const capability = endpoint.mint({ runId: 'run-1', chatId: 'chat-1' });
+    const turn = new AbortController();
+    const release = endpoint.activate({
+      token: capability.token,
+      runId: 'run-1',
+      chatId: 'chat-1',
+      signal: turn.signal,
+    });
     const client = await connectMcpOverFetch({
       url,
       headers: { authorization: `Bearer ${capability.token}` },
@@ -152,6 +159,44 @@ describe('the mounted /mcp route', () => {
     /* The run the capability was minted for rides the invocation, so a candidate
      * turn's Tau tools resolve that run's checkout rather than the live root. */
     expect(invocations[0]?.runId).toBe('run-1');
+    turn.abort();
+    expect(invocations[0]?.signal.aborted).toBe(true);
+    release();
+
+    const idle = await client.callTool('test_model', {});
+    expect(idle.isError).toBe(true);
+    expect(JSON.stringify(idle)).toContain('MCP_RUN_INACTIVE');
+    expect(invocations).toHaveLength(1);
+  }, 30_000);
+
+  it('captures the active run for each call made through one long-lived MCP session', async () => {
+    endpoint = createHostMcpEndpoint({ secret, registry });
+    server = startAgentServer({
+      launcher: stubLauncher(),
+      token,
+      workspaceRoot: '/tmp/tau-mcp-test',
+      mcp: endpoint,
+    });
+    await server.ready;
+    const capability = endpoint.mint({ runId: 'run-opened', chatId: 'chat-1' });
+    const client = await connectMcpOverFetch({
+      url: new URL('mcp', server.url()).href,
+      headers: { authorization: `Bearer ${capability.token}` },
+    });
+
+    for (const runId of ['run-1', 'run-2']) {
+      const release = endpoint.activate({
+        token: capability.token,
+        runId,
+        chatId: 'chat-1',
+        signal: new AbortController().signal,
+      });
+      // oxlint-disable-next-line no-await-in-loop -- the release between calls is the contract under test.
+      await client.callTool('test_model', {});
+      release();
+    }
+
+    expect(invocations.map((invocation) => invocation.runId)).toEqual(['run-1', 'run-2']);
   }, 30_000);
 
   it('refuses a capability minted for another chat on this session', async () => {

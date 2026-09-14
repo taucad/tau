@@ -383,6 +383,10 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
     /* The socket binds a tick after the connection is served, exactly as the
      * daemon's own URL resolves per run rather than at wiring time. */
     await expect.poll(() => wired!.mcp?.url ?? '').toMatch(/^http:\/\/127\.0\.0\.1:\d+\/mcp\//u);
+    const [skillBundle] = wired!.systemSkillBundles ?? [];
+    expect(typeof skillBundle?.slug).toBe('string');
+    expect(skillBundle?.files.some(({ path }) => path === 'SKILL.md')).toBe(true);
+    expect(wired!.mcp?.activate).toEqual(expect.any(Function));
     /* A capability, not the channel token (VI4): a distinct prefix, a distinct
      * secret, and a grant of the four read-only tools. */
     expect(wired!.mcp?.mint({ runId: 'run-1', chatId: 'chat-1' }).token).toMatch(/^tau-mcp-host-v1\./u);

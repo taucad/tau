@@ -154,6 +154,48 @@ function TextWithAtReferences({
   );
 }
 
+function ChatMessageAcpPlan({
+  data,
+}: {
+  readonly data: Extract<MyMessagePart, { type: 'data-acp-session' }>['data'];
+}): React.JSX.Element | undefined {
+  const { plan } = data;
+  if (!plan) {
+    return undefined;
+  }
+  return (
+    <section aria-label='Agent plan' className='rounded-lg border bg-background p-3 text-sm'>
+      <h3 className='font-medium'>Plan</h3>
+      {plan.type === 'items' ? (
+        <ul className='mt-2 flex flex-col gap-1.5'>
+          {plan.entries.map((entry, index) => (
+            <li
+              key={`${entry.content}-${String(index)}`}
+              className='flex items-start gap-2 text-xs text-muted-foreground'
+            >
+              <input
+                type='checkbox'
+                checked={entry.status === 'completed'}
+                readOnly
+                tabIndex={-1}
+                aria-label={entry.content}
+                className='mt-0.5 size-3.5 shrink-0 rounded-sm'
+              />
+              <span className='min-w-0 flex-1 wrap-break-word'>{entry.content}</span>
+            </li>
+          ))}
+        </ul>
+      ) : plan.type === 'markdown' ? (
+        <div className='mt-2 text-xs whitespace-pre-wrap text-muted-foreground'>{plan.content}</div>
+      ) : (
+        <a className='mt-2 block truncate text-xs text-primary underline underline-offset-2' href={plan.uri}>
+          {plan.uri}
+        </a>
+      )}
+    </section>
+  );
+}
+
 type PartRenderContext = {
   readonly messageId: string;
   readonly lastMeaningfulIndex: number;
@@ -191,6 +233,10 @@ function renderAssistantPart(
     case 'data-usage':
     case 'data-context-usage': {
       return undefined;
+    }
+
+    case 'data-acp-session': {
+      return <ChatMessageAcpPlan key={`${messageId}-acp-plan-${index}`} data={part.data} />;
     }
 
     case 'dynamic-tool': {

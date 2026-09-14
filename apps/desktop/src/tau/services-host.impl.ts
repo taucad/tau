@@ -248,6 +248,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
       },
       /* A pass-through, not a re-shaping: the claim is `mcp-server.ts`'s. */
       mint: (input) => endpoint.mint(input),
+      activate: (input) => endpoint.activate(input),
     };
   };
 
@@ -507,6 +508,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
                     agents: agentHostConfig.externalAgents,
                     workspaceRoot,
                     checkouts,
+                    systemSkillBundles,
                     mcp: mountMcp(toolRegistry),
                   }),
                 }

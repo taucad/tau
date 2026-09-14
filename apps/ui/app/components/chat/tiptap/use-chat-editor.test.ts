@@ -83,6 +83,37 @@ describe('useChatEditor', () => {
     });
   });
 
+  it('should insert an ACP command verbatim without executing it or creating a skill chip', async () => {
+    const onSlashCommand = vi.fn();
+    const command = {
+      id: '$brep-design',
+      label: '$brep-design',
+      description: 'Design native BRep geometry',
+      group: 'Commands',
+      commandText: '$brep-design ',
+    } as const;
+    const { result } = renderHook(() =>
+      useChatEditor(createDefaultOptions({ slashCommandItems: [command], onSlashCommand })),
+    );
+
+    await waitFor(() => {
+      expect(result.current.editor).not.toBeNull();
+    });
+    act(() => {
+      result.current.editor!.commands.focus();
+      result.current.editor!.commands.insertContent('/');
+    });
+    await waitFor(() => {
+      expect(result.current.slashCommandState?.items).toContainEqual(command);
+    });
+    act(() => {
+      result.current.slashCommandState!.command(command);
+    });
+
+    expect(extractContent(result.current.editor!)).toEqual({ text: '$brep-design', contextChips: [] });
+    expect(onSlashCommand).toHaveBeenCalledWith(command);
+  });
+
   describe('editor initialization', () => {
     it('should create a non-null editor', async () => {
       const { result } = renderHook(() => useChatEditor(createDefaultOptions()));

@@ -41,6 +41,7 @@ export const chatRecordSchema = z
     name: z.string(),
     createdAt: timestamp,
     updatedAt: timestamp,
+    checkoutId: z.string().min(1).optional(),
     recencyAt: timestamp.optional(),
     deletedAt: timestamp.optional(),
   })

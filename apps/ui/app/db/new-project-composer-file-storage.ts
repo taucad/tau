@@ -42,6 +42,12 @@ const invalid = (error: unknown): NewProjectComposerReadResult => ({
   error: error instanceof Error ? error : new Error(String(error)),
 });
 
+/** The draft machine persists a cleared composer as a user message with no parts; that means "no draft". */
+const isClearedDraft = (draft: unknown): boolean => {
+  const candidate = draft as { role?: unknown; parts?: unknown } | undefined;
+  return candidate?.role === 'user' && Array.isArray(candidate.parts) && candidate.parts.length === 0;
+};
+
 const parseRecord = async (text: string): Promise<NewProjectComposerReadResult> => {
   let json: unknown;
   try {
@@ -54,7 +60,8 @@ const parseRecord = async (text: string): Promise<NewProjectComposerReadResult> 
   if (!envelope.success) {
     return invalid(envelope.error);
   }
-  if (envelope.data.draft === undefined) {
+  // Records written before cleared drafts were omitted still carry `parts: []`.
+  if (envelope.data.draft === undefined || isClearedDraft(envelope.data.draft)) {
     return {
       status: 'valid',
       record: {
@@ -94,16 +101,18 @@ export function createNewProjectComposerFileStore(client: NewProjectComposerClie
     }
   };
 
-  const patch = async (field: Pick<NewProjectComposerRecord, 'draft'> | Pick<NewProjectComposerRecord, 'execution'>) =>
+  const patch = async (update: (record: NewProjectComposerRecord) => NewProjectComposerRecord): Promise<void> =>
     mutex.run(newProjectComposerFilePath, async () => {
       const current = await read();
       const record: NewProjectComposerRecord = current.status === 'valid' ? current.record : { version: 1 };
-      await client.writeFile(newProjectComposerFilePath, serializeRecord({ ...record, ...field }));
+      await client.writeFile(newProjectComposerFilePath, serializeRecord(update(record)));
     });
 
   return {
     read,
-    patchDraft: async (draft) => patch({ draft }),
-    patchExecution: async (execution) => patch({ execution }),
+    // An empty draft closes out the draft field so the record stays readable and keeps its execution.
+    patchDraft: async (draft) =>
+      patch(({ draft: _previous, ...record }) => (draft.parts.length === 0 ? record : { ...record, draft })),
+    patchExecution: async (execution) => patch((record) => ({ ...record, execution })),
   };
 }

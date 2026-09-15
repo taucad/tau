@@ -588,8 +588,8 @@ describe('HomeNewProjectComposerProvider', () => {
       await vi.advanceTimersByTimeAsync(250);
     });
     await act(async () => result.current.consumeDraft());
-    expect(JSON.parse(harness.homeBytes)).toMatchObject({
-      draft: { parts: [] },
+    expect(JSON.parse(harness.homeBytes)).toEqual({
+      version: 1,
       execution: { kind: 'tau', model: 'cookie-model', hostId: 'desktop' },
     });
   });

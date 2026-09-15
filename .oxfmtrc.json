@@ -22,6 +22,7 @@
     "/tarballs/**",
     "/experiments/**",
     "/packages/runtime/occt-reports/**",
+    "/packages/plugins/opencascade/agent/cad-opencascadejs/api-opencascadeinstance.md",
     "/libs/converter/src/assets/**",
     "**/generated/**",
     "**/assets/**",

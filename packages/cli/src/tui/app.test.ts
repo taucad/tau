@@ -13,7 +13,7 @@
 
 import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import type { Server as HttpServer } from 'node:http';
 import { tmpdir } from 'node:os';
@@ -22,7 +22,7 @@ import { PassThrough } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 
 import { createAgentChannelClient } from '@taucad/agent-host/channel-client';
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { WebSocket, WebSocketServer } from 'ws';
 
 import { runTui } from '#tui/app.js';
@@ -584,6 +584,57 @@ describe('tau tui', () => {
     await settle();
     terminal.stdin.write('q');
     await expect(finished).resolves.toBeUndefined();
+  }, 120_000);
+
+  it('shows an interrupted ACP outcome as unknown on reattach without repeating the turn', async () => {
+    const chatId = 'chat-tui-acp-recovery';
+    const directory = join(workspace, '.tau', 'chats', chatId);
+    await mkdir(directory, { recursive: true });
+    const base = {
+      version: 1,
+      leaderEpoch: 'epoch-before-restart',
+      recordedAt: new Date(0).toISOString(),
+      runId: 'run-tui-acp-recovery',
+    };
+    // The same interrupted durable tail used by the host's recovery gate.
+    await writeFile(
+      join(directory, 'events.jsonl'),
+      [
+        {
+          ...base,
+          sequence: 0,
+          type: 'message.appended',
+          message: {
+            id: 'user-recovery',
+            role: 'user',
+            content: 'do not repeat this turn',
+            metadata: {
+              tauInternal: { kind: 'external-agent', agentId: 'codex', acpSessionId: 'fake-session-1' },
+            },
+          },
+        },
+        { ...base, sequence: 1, type: 'run.lifecycle', state: 'admitted', storageDurability: 'exclusive-append' },
+        { ...base, sequence: 2, type: 'run.lifecycle', state: 'running' },
+      ]
+        .map((event) => JSON.stringify(event))
+        .join('\n'),
+    );
+
+    const errors = vi.spyOn(console, 'error');
+    try {
+      const { terminal, finished } = mount(chatId, { id: 'codex' });
+      await untilPainted(terminal, /EXTERNAL_AGENT_RECOVERY_UNKNOWN/u);
+      await untilPainted(terminal, /run failed/u);
+      const log = await chatLog(chatId);
+      expect(log.match(/"role":"user"/gu)).toHaveLength(1);
+      expect(log).not.toContain('"role":"tool-input"');
+      expect(log).not.toContain('"state":"completed"');
+      expect(errors.mock.calls.filter(([message]) => String(message).includes('same key'))).toHaveLength(0);
+      terminal.stdin.write('q');
+      await expect(finished).resolves.toBeUndefined();
+    } finally {
+      errors.mockRestore();
+    }
   }, 120_000);
 
   it('should render a typed external-agent refusal with the code the host returned', async () => {

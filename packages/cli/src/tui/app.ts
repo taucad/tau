@@ -66,7 +66,7 @@ type Approval = {
   readonly options: readonly ApprovalOption[];
 };
 
-/** One rendered transcript row, keyed by the sequence that produced it. */
+/** One rendered transcript row, keyed by its durable epoch and sequence. */
 type Row = { readonly key: string; readonly text: string };
 
 /** Everything the view derives from the durable log. */
@@ -134,7 +134,13 @@ const approvalOptions = (payload: unknown): readonly ApprovalOption[] => {
 const applyEvent = (session: Session, event: AgentLogEvent): Session => {
   /* `eventLine` already collapses and sanitizes the untrusted half; tabs are
    * the plain-output separator and would measure wrong in a laid-out cell. */
-  const rows = [...session.rows, { key: String(event.sequence), text: eventLine(event).replaceAll('\t', '  ') }];
+  const rows = [
+    ...session.rows,
+    {
+      key: `${event.leaderEpoch}:${String(event.sequence)}`,
+      text: eventLine(event).replaceAll('\t', '  '),
+    },
+  ];
   /* Who ran a turn and how it was refused are facts of *that* run: a chat whose
    * next turn is an ordinary Tau one must not inherit the last agent, or the
    * keyboard would go on refusing to steer a run that steers perfectly well. */

@@ -403,7 +403,7 @@ const TauTui = ({ client, origin, chatId, from, agent }: AppProps): ReactElement
   }, [act, agent, chatId, client, draft, session.agent, session.runId, session.state]);
 
   const cancel = useCallback((): void => {
-    const { runId } = session;
+    const { runId } = sessionRef.current;
     if (runId === undefined || client === undefined) {
       setNotice('No run has started in this chat yet.');
       return;
@@ -412,7 +412,7 @@ const TauTui = ({ client, origin, chatId, from, agent }: AppProps): ReactElement
       const answer = expectResult(await client.execute({ type: 'cancel', chatId, runId }));
       return `${answer.operation}: ${answer.snapshot.state}`;
     });
-  }, [act, chatId, client, session]);
+  }, [act, chatId, client]);
 
   const resolve = useCallback(
     (approved: boolean): void => {

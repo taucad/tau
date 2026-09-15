@@ -624,6 +624,11 @@ const runPrompt = async (sessionId: string, blocks: readonly unknown[]): Promise
     }
     return cancelled.has(sessionId) ? 'cancelled' : 'end_turn';
   }
+  if (text.includes('fs-inflight')) {
+    void request('fs/write_text_file', { sessionId, path: 'admitted.txt', content: 'admitted write' });
+    await pause(250);
+    return 'end_turn';
+  }
   if (text.includes('login')) {
     /* `unsafe` makes the agent name a scheme no browser should follow, which is
      * the one thing the client has to drop before any surface renders it. */
@@ -754,7 +759,7 @@ const promptResult = async (sessionId: string, blocks: readonly unknown[]): Prom
     })();
   }
   if (promptText(blocks).includes('late-state')) {
-    // async-iife: fixture -- this deliberately arrives after the prompt response.
+    // async-iife: bootstrap -- fixture notification deliberately arrives after the prompt response.
     void (async () => {
       await pause(250);
       await update(sessionId, {

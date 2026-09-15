@@ -71,6 +71,66 @@ afterEach(async () => {
 });
 
 describe('createHostMcpEndpoint capability', () => {
+  it.each([
+    { name: 'get_kernel_result', input: { targetFile: 'main.scad' } },
+    { name: 'test_model', input: {} },
+    { name: 'screenshot', input: { targetFile: 'main.scad', mode: 'single' } },
+    { name: 'export_geometry', input: { targetFile: 'main.scad', format: 'glb' } },
+  ])('does not release admitted $name work until it settles', async ({ name, input }) => {
+    const entered = Promise.withResolvers<void>();
+    const unblock = Promise.withResolvers<void>();
+    const order: string[] = [];
+    endpoint = createHostMcpEndpoint({
+      secret,
+      registry: {
+        list: () => [],
+        invoke: async (input) => {
+          entered.resolve();
+          await unblock.promise;
+          order.push('work');
+          return registry.invoke(input);
+        },
+      },
+    });
+    server = startAgentServer({ launcher: stubLauncher(), token, workspaceRoot: '/tmp/tau-mcp-test', mcp: endpoint });
+    await server.ready;
+    const capability = endpoint.mint({ runId: 'candidate', chatId: 'chat-1' });
+    const release = endpoint.activate({
+      token: capability.token,
+      runId: 'candidate',
+      chatId: 'chat-1',
+      signal: new AbortController().signal,
+    });
+    const client = await connectMcpOverFetch({
+      url: new URL('mcp', server.url()).href,
+      headers: { authorization: `Bearer ${capability.token}` },
+    });
+    const call = client.callTool(name, input);
+    await entered.promise;
+    const releasing = (async () => {
+      // oxlint-disable-next-line no-await-in-loop -- a turn must settle before the next binding.
+      await release();
+      order.push('release');
+    })();
+    try {
+      expect(release()).toBeInstanceOf(Promise);
+      expect(() =>
+        endpoint!.activate({
+          token: capability.token,
+          runId: 'candidate',
+          chatId: 'chat-1',
+          signal: new AbortController().signal,
+        }),
+      ).toThrow();
+      expect(order).toEqual([]);
+    } finally {
+      unblock.resolve();
+      await call;
+      await releasing;
+    }
+    expect(order).toEqual(['work', 'release']);
+  });
+
   it('verifies its own capability and refuses tampered, expired and foreign ones', () => {
     let clock = 1_000_000;
     const mcp = createHostMcpEndpoint({ secret, registry, now: () => clock });
@@ -181,7 +241,7 @@ describe('the mounted /mcp route', () => {
       });
       slow.write(' ');
       await admitted;
-      releaseFirst();
+      await releaseFirst();
       const releaseSecond = endpoint.activate({
         token: capability.token,
         runId: 'run-2',
@@ -199,7 +259,7 @@ describe('the mounted /mcp route', () => {
       const reply = await response;
       reply.resume();
       await once(reply, 'end');
-      releaseSecond();
+      await releaseSecond();
 
       expect(runIds).not.toContain('run-2');
     } finally {
@@ -257,7 +317,7 @@ describe('the mounted /mcp route', () => {
     expect(invocations[0]?.runId).toBe('run-1');
     turn.abort();
     expect(invocations[0]?.signal.aborted).toBe(true);
-    release();
+    await release();
 
     const idle = await client.callTool('test_model', {});
     expect(idle.isError).toBe(true);
@@ -289,7 +349,8 @@ describe('the mounted /mcp route', () => {
       });
       // oxlint-disable-next-line no-await-in-loop -- the release between calls is the contract under test.
       await client.callTool('test_model', {});
-      release();
+      // oxlint-disable-next-line no-await-in-loop -- finish this turn before rebinding the shared MCP session.
+      await release();
     }
 
     expect(invocations.map((invocation) => invocation.runId)).toEqual(['run-1', 'run-2']);

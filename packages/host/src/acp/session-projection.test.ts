@@ -37,6 +37,105 @@ const stubTurn = (appended: ExternalAgentLogEvent[] = []): AcpPromptTurn => ({
   signal: new AbortController().signal,
 });
 
+it('should finalize named text exactly once after its durable append fails', async () => {
+  const appended: ExternalAgentLogEvent[] = [];
+  let failures = 0;
+  const projection = createTurnProjection({
+    agentId: 'codex',
+    createId: randomUUID,
+    turn: {
+      ...stubTurn(appended),
+      append: async (events) => {
+        if (
+          failures < 2 &&
+          events.some((event) => event.type === 'message.appended' && event.message.metadata?.usage)
+        ) {
+          failures++;
+          throw new Error('transient text append');
+        }
+        appended.push(...events);
+      },
+    },
+  });
+  projection.update({
+    sessionUpdate: 'agent_message_chunk',
+    messageId: 'stable',
+    content: { type: 'text', text: 'answer' },
+  });
+  projection.report({ usage: { inputTokens: 100, outputTokens: 50, totalTokens: 150 } });
+  await expect(projection.flush()).rejects.toThrow('transient text append');
+  await projection.flush();
+  await projection.flush();
+  expect(
+    appended.flatMap((event) =>
+      event.type === 'message.appended' && event.message.metadata?.usage
+        ? [event.message.metadata.usage.totalTokens]
+        : [],
+    ),
+  ).toEqual([150]);
+  expect(appended.filter((event) => event.type === 'message.appended')).toHaveLength(1);
+});
+
+it.each([0, 1, 2, 3, 4, 5, 6])(
+  'should recover durable row %s without replaying a completed projection or earlier row',
+  async (failedRow) => {
+    const appended: ExternalAgentLogEvent[] = [];
+    let attempt = 0;
+    const projection = createTurnProjection({
+      createId: randomUUID,
+      agentId: 'codex',
+      turn: {
+        ...stubTurn(appended),
+        append: async (events) => {
+          if (attempt++ === failedRow) {
+            throw new Error('transient ordered write');
+          }
+          appended.push(...events);
+        },
+      },
+    });
+    projection.update({
+      sessionUpdate: 'agent_message_chunk',
+      messageId: 'before',
+      content: { type: 'text', text: 'before' },
+    });
+    projection.update({
+      sessionUpdate: 'tool_call',
+      toolCallId: 'read',
+      title: 'Read file',
+      kind: 'read',
+      status: 'completed',
+      rawOutput: { result: 'source' },
+    });
+    projection.update({
+      sessionUpdate: 'agent_message_chunk',
+      messageId: 'after',
+      content: { type: 'text', text: 'after' },
+    });
+    projection.report({ usage: { inputTokens: 100, outputTokens: 50, totalTokens: 150 } });
+    await projection.flush();
+    await projection.flush();
+    const messages = reduceEventLog(
+      appended.map(
+        (event, sequence) =>
+          ({
+            ...event,
+            version: 1,
+            leaderEpoch: 'test',
+            sequence,
+            recordedAt: new Date(0).toISOString(),
+            runId: 'run',
+          }) satisfies AgentLogEvent,
+      ),
+    );
+    expect(messages.map((message) => message.role)).toEqual(['assistant', 'tool-input', 'tool-output', 'assistant']);
+    expect(JSON.stringify(messages)).toContain('after');
+    expect(
+      messages.flatMap((message) => (message.metadata?.usage ? [message.metadata.usage.totalTokens] : [])),
+    ).toEqual([150]);
+  },
+);
+
 // oxlint-disable-next-line eslint/max-params -- Keeps table-driven projection cases terse without a fixture-options wrapper.
 const projectEvents = async (
   updates: readonly SessionUpdate[],
@@ -96,7 +195,7 @@ const project = async (
             sequence,
             recordedAt: new Date(0).toISOString(),
             runId: 'run-1',
-          }) as AgentLogEvent,
+          }) satisfies AgentLogEvent,
       ),
     ),
   ];
@@ -590,6 +689,36 @@ describe('the ACP turn projection', () => {
     expect(messages[1]?.content).toEqual([{ type: 'text', text: 'Done.' }]);
   });
 
+  it('keeps named reasoning open across text and tool activity', async () => {
+    const { live } = await projectEvents([
+      { sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: 'Inspecting.' }, messageId: 'm1' },
+      { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'I will check it.' }, messageId: 'm2' },
+      listFilesCall,
+      {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'list-1',
+        status: 'in_progress',
+        rawOutput: { formatted_output: 'main.scad' },
+      },
+      listFilesResult,
+      { sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: 'Done.' }, messageId: 'm1' },
+    ]);
+
+    expect(live.map((event) => event['type'])).toEqual([
+      'thinking-start',
+      'thinking-delta',
+      'text-start',
+      'text-delta',
+      'tool-output-update',
+      'thinking-delta',
+      'text-end',
+      'thinking-end',
+    ]);
+    expect(
+      new Set(live.filter((event) => event['type'] === 'thinking-start').map((event) => event['messageId'])).size,
+    ).toBe(1);
+  });
+
   it('preserves rich ACP assistant content instead of flattening it into text', async () => {
     const messages = await project([
       {
@@ -738,9 +867,13 @@ describe('the ACP turn projection', () => {
     });
   });
 
-  it('stores one equivalent screenshot payload after provisional rendering while retaining distinct content', async () => {
+  it.each([false, true])('stores media once and preserves a distinct preview (distinct: %s)', async (distinct) => {
     const payload = 'YXVkaXQtc2NyZWVuc2hvdC1ieXRlcw==';
-    const provisional = { mimeType: 'image/png', data: payload, type: 'image' } as const;
+    const provisional = {
+      mimeType: 'image/png',
+      data: distinct ? 'distinct_preview' : payload,
+      type: 'image',
+    } as const;
     const { appended } = await projectEvents(
       [
         {
@@ -785,8 +918,46 @@ describe('the ACP turn projection', () => {
     const serialized = JSON.stringify(appended);
 
     expect(serialized.split(payload)).toHaveLength(2);
+    if (distinct) {
+      expect(serialized.split('distinct_preview')).toHaveLength(2);
+    }
     expect(serialized).toContain('distinct progress note');
     expect(serialized).toContain('distinct terminal note');
+  });
+
+  it.each(['interrupted', 'invalid-result'] as const)('retains preview media after %s', async (outcome) => {
+    const image = { type: 'content', content: { type: 'image', mimeType: 'image/png', data: 'cHJldmlldw==' } } as const;
+    const messages = await project(
+      [
+        {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'image',
+          title: 'Screenshot',
+          kind: 'execute',
+          status: 'in_progress',
+          rawInput: { server: 'tau', tool: 'screenshot', arguments: { targetFile: 'main.ts', mode: 'single' } },
+          _meta: { is_mcp_tool_call: true },
+          content: [image],
+        },
+        ...(outcome === 'invalid-result'
+          ? [
+              {
+                sessionUpdate: 'tool_call_update',
+                toolCallId: 'image',
+                status: 'completed',
+                rawOutput: { result: { content: [image.content], structuredContent: { images: [] } } },
+              } as const,
+            ]
+          : []),
+      ],
+      'codex',
+      undefined,
+      'tau',
+    );
+    expect(messages.find((message) => message.role === 'tool-input')?.call?.content).toContainEqual(image);
+    expect(messages.filter((message) => message.role === 'tool-output')).toHaveLength(
+      outcome === 'interrupted' ? 0 : 1,
+    );
   });
 
   it('keeps one live segment when a stable message id resumes after a boundary', async () => {
@@ -798,6 +969,54 @@ describe('the ACP turn projection', () => {
     const types = live.filter((event) => event['messageId'] === 'id-1').map((event) => event['type']);
 
     expect(types).toEqual(['text-start', 'text-delta', 'text-delta', 'text-end']);
+  });
+
+  it('keeps interleaved stable text ids as two resumable UI parts', async () => {
+    const { live } = await projectEvents([
+      { sessionUpdate: 'agent_message_chunk', messageId: 'first', content: { type: 'text', text: 'Before ' } },
+      { sessionUpdate: 'agent_message_chunk', messageId: 'second', content: { type: 'text', text: 'aside' } },
+      { sessionUpdate: 'agent_message_chunk', messageId: 'first', content: { type: 'text', text: 'after' } },
+    ]);
+
+    expect(live.map((event) => [event['messageId'], event['type']])).toEqual([
+      ['id-1', 'text-start'],
+      ['id-1', 'text-delta'],
+      ['id-2', 'text-start'],
+      ['id-2', 'text-delta'],
+      ['id-1', 'text-delta'],
+      ['id-2', 'text-end'],
+      ['id-1', 'text-end'],
+    ]);
+  });
+
+  it('retains interleaved reasoning identities across a tool call until the turn ends', async () => {
+    const { live } = await projectEvents([
+      { sessionUpdate: 'agent_thought_chunk', messageId: 'first', content: { type: 'text', text: 'Inspect ' } },
+      { sessionUpdate: 'agent_thought_chunk', messageId: 'second', content: { type: 'text', text: 'compare' } },
+      { sessionUpdate: 'agent_thought_chunk', messageId: 'first', content: { type: 'text', text: 'source' } },
+      {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'inspect',
+        title: 'Inspect source',
+        status: 'completed',
+        rawInput: { path: 'main.py' },
+        rawOutput: { formatted_output: 'source', exit_code: 0 },
+      },
+    ]);
+
+    expect(
+      live
+        .filter((event) => typeof event['type'] === 'string' && event['type'].startsWith('thinking-'))
+        .map((event) => [event['messageId'], event['type']]),
+    ).toEqual([
+      ['id-1', 'thinking-start'],
+      ['id-1', 'thinking-delta'],
+      ['id-2', 'thinking-start'],
+      ['id-2', 'thinking-delta'],
+      ['id-1', 'thinking-delta'],
+      ['id-2', 'thinking-end'],
+      ['id-1', 'thinking-end'],
+    ]);
   });
 
   it('replaces one durable ACP session record as plans and commands change', async () => {

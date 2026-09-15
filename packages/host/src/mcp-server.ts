@@ -133,13 +133,13 @@ export type HostMcpEndpoint = {
   verify(token: string): HostMcpCapabilityClaims;
   /** Stable, non-secret fence preventing MCP session-id swapping across chat sessions. */
   authorityKey(claims: HostMcpCapabilityClaims): string;
-  /** Bind this session capability to one live turn; the returned function releases only that binding. */
+  /** Bind a live turn; release rejects new work, cancels and drains admitted work before resolving. */
   activate(input: {
     readonly token: string;
     readonly runId: string;
     readonly chatId: string;
     readonly signal: AbortSignal;
-  }): () => void;
+  }): () => Promise<void>;
   /** Answer one HTTP request on the `/mcp` route. */
   handle(request: IncomingMessage, response: ServerResponse): Promise<void>;
   close(): Promise<void>;
@@ -191,7 +191,13 @@ const bearerOf = (authorization: string | undefined): string =>
 export const createHostMcpEndpoint = (options: HostMcpEndpointOptions): HostMcpEndpoint => {
   const now = options.now ?? Date.now;
   const handler = createTauMcpHttpHandler();
-  const active = new Map<string, { readonly runId: string; readonly signal: AbortSignal; abort(): void }>();
+  type Binding = {
+    readonly runId: string;
+    readonly signal: AbortSignal;
+    readonly pending: Set<Promise<unknown>>;
+    abort(): void;
+  };
+  const active = new Map<string, Binding>();
 
   const signature = (encodedClaims: string): Uint8Array<ArrayBuffer> =>
     Uint8Array.from(
@@ -244,7 +250,7 @@ export const createHostMcpEndpoint = (options: HostMcpEndpointOptions): HostMcpE
    */
   const dispatchFor = (
     claims: HostMcpCapabilityClaims,
-    binding: { readonly runId: string; readonly signal: AbortSignal } | undefined,
+    binding: Binding | undefined,
     signal: AbortSignal,
   ): TauMcpDispatch => {
     return async (call, dispatchOptions) => {
@@ -255,7 +261,7 @@ export const createHostMcpEndpoint = (options: HostMcpEndpointOptions): HostMcpE
       if (!binding || binding.signal.aborted) {
         return { errorCode: 'MCP_RUN_INACTIVE', message: 'This ACP session has no active Tau turn.' };
       }
-      const result = await options.registry.invoke({
+      const pending = options.registry.invoke({
         toolCallId: dispatchOptions.toolCallId,
         toolName: tool,
         /* The run this capability was minted for. A candidate turn reopens its
@@ -273,8 +279,14 @@ export const createHostMcpEndpoint = (options: HostMcpEndpointOptions): HostMcpE
           ),
         ),
       });
-      // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the registry returns the canonical RPC result verbatim.
-      return result.content as TauMcpRpcSuccess | TauMcpRpcFailure;
+      binding.pending.add(pending);
+      try {
+        const result = await pending;
+        // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the registry returns the canonical RPC result verbatim.
+        return result.content as TauMcpRpcSuccess | TauMcpRpcFailure;
+      } finally {
+        binding.pending.delete(pending);
+      }
     };
   };
 
@@ -292,20 +304,25 @@ export const createHostMcpEndpoint = (options: HostMcpEndpointOptions): HostMcpE
       if (claims.chatId !== chatId || signal.aborted) {
         throw new HostMcpCapabilityError('Tau Host MCP capability does not match an active turn.');
       }
+      if (active.has(claims.sessionKey)) {
+        throw new HostMcpCapabilityError('The prior Tau MCP turn has not settled.');
+      }
       const bindingLifetime = new AbortController();
       const binding = {
         runId,
+        pending: new Set<Promise<unknown>>(),
         signal: AbortSignal.any([signal, bindingLifetime.signal]),
         abort: (): void => {
           bindingLifetime.abort();
         },
       };
       active.set(claims.sessionKey, binding);
-      return () => {
+      return async () => {
+        binding.abort();
+        await Promise.allSettled(binding.pending);
         if (active.get(claims.sessionKey) === binding) {
           active.delete(claims.sessionKey);
         }
-        binding.abort();
       };
     },
     mint: ({ runId, chatId }) => {
@@ -357,6 +374,7 @@ export const createHostMcpEndpoint = (options: HostMcpEndpointOptions): HostMcpE
       for (const binding of active.values()) {
         binding.abort();
       }
+      await Promise.allSettled([...active.values()].flatMap((binding) => [...binding.pending]));
       active.clear();
       await handler.close();
     },

@@ -56,6 +56,8 @@ let disputeReturned = false;
 let disputeCreated = 1;
 let listCashSources = false;
 let invalidBalance = false;
+// Settlement currency of the balance transactions; a NZ account presenting in USD settles in NZD.
+let settlementCurrency = 'usd';
 let failPaymentIntentRead = false;
 let lostPaymentIntentId = '';
 
@@ -192,7 +194,7 @@ const server = createServer((request, response) => {
       object: 'balance_transaction',
       type: 'charge',
       source: value.chargeId,
-      currency: 'usd',
+      currency: settlementCurrency,
       amount: 500,
       fee: 30,
       net: invalidBalance ? 400 : 470,
@@ -1382,6 +1384,8 @@ describe('cash disposition foundation', () => {
     serveDispute = false;
     listCashSources = true;
     invalidBalance = false;
+    // The balance transactions settle in NZD while the scan covers USD presentment; that is not a mismatch.
+    settlementCurrency = 'nzd';
     const lostPaymentIntent = `pi_lost_${randomUUID()}`;
     lostPaymentIntentId = lostPaymentIntent;
     const stripe = createBillingStripeClient({ secretKey: 'sk_test_cash_lost', fixtureUrl: stripeOrigin });
@@ -1405,6 +1409,7 @@ describe('cash disposition foundation', () => {
       .where(eq(schema.billingFinancialCase.environment, 'development'));
     lostPaymentIntentId = '';
     listCashSources = false;
+    settlementCurrency = 'usd';
     expect(cases).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ kind: 'missing_local_payment', sourceId: lostPaymentIntent, state: 'open' }),

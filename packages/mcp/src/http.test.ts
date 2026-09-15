@@ -170,6 +170,7 @@ describe('Tau MCP Streamable HTTP transport', () => {
     const client = await connect(await serve(dispatch));
 
     expect(client.getInstructions()).toBe(tauMcpInstructions);
+    expect(client.getInstructions()).toContain('Before editing geometry, create or update executable GeoSpec tests');
     const listed = await client.listTools();
     expect(listed.tools.map(({ name }) => name)).toEqual(tauMcpToolNames);
     expect(listed.tools.map(({ name, annotations }) => [name, annotations?.readOnlyHint])).toEqual([

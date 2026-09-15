@@ -208,7 +208,7 @@ const bodyText = (facts: AcpFacts, output: unknown): string => {
 const exitCodeOf = (output: unknown): number | undefined =>
   isRecord(output) && typeof output['exit_code'] === 'number' ? output['exit_code'] : undefined;
 
-const isPreliminary = (part: DynamicToolUIPart): boolean => isRecord(part) && part['preliminary'] === true;
+const isPreliminary = (part: DynamicToolUIPart): boolean => 'preliminary' in part && part.preliminary === true;
 
 const cardStatus = (part: DynamicToolUIPart): 'loading' | 'ready' | 'error' =>
   part.state === 'input-streaming' || part.state === 'input-available' || isPreliminary(part)

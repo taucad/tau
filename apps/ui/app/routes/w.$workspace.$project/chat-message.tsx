@@ -236,7 +236,9 @@ function renderAssistantPart(
 
   switch (part.type) {
     case 'text': {
-      return <ChatMessageText key={`${messageId}-message-part-${index}`} part={part} />;
+      return (
+        <ChatMessageText key={`${messageId}-message-part-${index}`} part={part} isMessageActive={isMessageActive} />
+      );
     }
 
     case 'reasoning': {
@@ -270,7 +272,7 @@ function renderAssistantPart(
       }
       const tau = isRecord(part.toolMetadata?.['tau']) ? part.toolMetadata['tau'] : undefined;
       const nativeName = typeof tau?.['nativeName'] === 'string' ? tau['nativeName'] : undefined;
-      if (!isRecord(part) || part['preliminary'] !== true) {
+      if (!('preliminary' in part) || part.preliminary !== true) {
         switch (nativeName) {
           case 'get_kernel_result': {
             return (

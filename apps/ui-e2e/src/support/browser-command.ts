@@ -376,8 +376,8 @@ const writeScriptedTurn = async (options: {
   readonly writeEvent: (event: string, data: unknown) => void;
 }): Promise<void> => {
   const { currentRequest, session, turn, writeEvent } = options;
-  const pause = async (): Promise<void> => {
-    if (!turn.gated) {
+  const pause = async (required = turn.gated === true): Promise<void> => {
+    if (!required) {
       return;
     }
     const gate = Promise.withResolvers<void>();
@@ -401,17 +401,23 @@ const writeScriptedTurn = async (options: {
       usage: { input_tokens: turn.usage.inputTokens, output_tokens: 0 },
     },
   });
-  if (turn.reasoning !== undefined) {
+  const reasoningChunks = turn.reasoningChunks ?? (turn.reasoning === undefined ? [] : [turn.reasoning]);
+  if (reasoningChunks.length > 0) {
     writeEvent('content_block_start', {
       type: 'content_block_start',
       index,
       content_block: { type: 'thinking', thinking: '' },
     });
-    writeEvent('content_block_delta', {
-      type: 'content_block_delta',
-      index,
-      delta: { type: 'thinking_delta', thinking: turn.reasoning },
-    });
+    for (const reasoning of reasoningChunks) {
+      writeEvent('content_block_delta', {
+        type: 'content_block_delta',
+        index,
+        delta: { type: 'thinking_delta', thinking: reasoning },
+      });
+      if (turn.gateChunks) {
+        await pause(true);
+      }
+    }
     writeEvent('content_block_delta', {
       type: 'content_block_delta',
       index,
@@ -423,7 +429,8 @@ const writeScriptedTurn = async (options: {
     writeEvent('content_block_stop', { type: 'content_block_stop', index });
     index += 1;
   }
-  if (turn.text === undefined) {
+  const textChunks = turn.textChunks ?? (turn.text === undefined ? [] : [turn.text]);
+  if (textChunks.length === 0) {
     await pause();
   } else {
     writeEvent('content_block_start', {
@@ -431,11 +438,16 @@ const writeScriptedTurn = async (options: {
       index,
       content_block: { type: 'text', text: '' },
     });
-    writeEvent('content_block_delta', {
-      type: 'content_block_delta',
-      index,
-      delta: { type: 'text_delta', text: turn.text },
-    });
+    for (const text of textChunks) {
+      writeEvent('content_block_delta', {
+        type: 'content_block_delta',
+        index,
+        delta: { type: 'text_delta', text },
+      });
+      if (turn.gateChunks) {
+        await pause(true);
+      }
+    }
     await pause();
     writeEvent('content_block_stop', { type: 'content_block_stop', index });
     index += 1;
@@ -1095,6 +1107,12 @@ export const uiEmulateContrast: BrowserCommand<[contrast: 'more' | 'no-preferenc
   await pageFor(sessionFor(commandContext), surface).emulateMedia({ contrast });
 };
 
+export const uiEmulateReducedMotion: BrowserCommand<
+  [reducedMotion: 'no-preference' | 'reduce', surface?: TargetSurface]
+> = async (commandContext, reducedMotion, surface) => {
+  await pageFor(sessionFor(commandContext), surface).emulateMedia({ reducedMotion });
+};
+
 export const uiEmulateForcedColors: BrowserCommand<[forcedColors: 'active' | 'none', surface?: TargetSurface]> = async (
   commandContext,
   forcedColors,
@@ -1502,6 +1520,7 @@ export const uiBrowserCommands = {
   uiEmulateColorScheme,
   uiEmulateContrast,
   uiEmulateForcedColors,
+  uiEmulateReducedMotion,
   uiEvaluateTarget,
   uiEvaluateTargetLocator,
   uiFillTarget,

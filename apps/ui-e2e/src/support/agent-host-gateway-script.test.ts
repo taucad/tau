@@ -26,7 +26,13 @@ describe.each([
 
   it('gives every turn something to emit and ends on a turn that stops the loop', () => {
     for (const turn of script) {
-      expect((turn.toolCalls?.length ?? 0) > 0 || turn.text !== undefined).toBe(true);
+      expect(
+        (turn.toolCalls?.length ?? 0) > 0 ||
+          turn.text !== undefined ||
+          (turn.textChunks?.length ?? 0) > 0 ||
+          turn.reasoning !== undefined ||
+          (turn.reasoningChunks?.length ?? 0) > 0,
+      ).toBe(true);
     }
     expect(script.at(-1)?.toolCalls).toBeUndefined();
   });

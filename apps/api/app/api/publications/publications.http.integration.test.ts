@@ -459,6 +459,7 @@ describe('Publications HTTP integration', () => {
       project: { id: 'proj_share', name: 'Tray', description: null },
       currentPublication: {
         id: 'pub_share',
+        tag: 'v1',
         title: 'Shared tray',
         description: null,
         visibility: 'private',
@@ -488,10 +489,11 @@ describe('Publications HTTP integration', () => {
 
     expect(response.status).toBe(200);
     const body = (await response.json()) as {
-      currentPublication: { access: { grants: Array<{ id: string; extraLeak?: string }> } };
+      currentPublication: { tag: string; access: { grants: Array<{ id: string; extraLeak?: string }> } };
       extraLeak?: string;
     };
     expect(body.currentPublication.access.grants).toHaveLength(1);
+    expect(body.currentPublication.tag).toBe('v1');
     expect(body.currentPublication.access.grants[0]?.extraLeak).toBeUndefined();
     expect(body.extraLeak).toBeUndefined();
     expect(publicationService.getProjectShareEnvelope).toHaveBeenCalledWith({

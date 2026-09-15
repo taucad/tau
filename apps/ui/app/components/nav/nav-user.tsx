@@ -1,16 +1,4 @@
-import { useEntitlements } from '@taucad/billing/hooks/use-entitlements';
-import {
-  BookOpen,
-  Bug,
-  CircleHelp,
-  CreditCard,
-  Files,
-  FileText,
-  Settings,
-  Shield,
-  Sparkles,
-  WifiOff,
-} from 'lucide-react';
+import { BookOpen, Bug, CircleHelp, Files, FileText, Settings, Shield, WifiOff } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
 import {
   DropdownMenu,
@@ -23,11 +11,11 @@ import {
 import { ClientOnly } from '#components/ui/utils/client-only.js';
 import { openSettingsDialog } from '#hooks/use-settings-dialog.js';
 import { UserButton } from '#components/auth/user/user-button.js';
-import { ProBadge } from '#components/tier-badge.js';
 import { useNetworkConnectivity } from '#hooks/use-network-connectivity.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { metaConfig } from '#constants/meta.constants.js';
 import { SvgIcon } from '#components/icons/svg-icon.js';
+import { NavBillingItem } from '#cloud/nav-billing.js';
 
 /**
  * Nav user button: delegates avatar, sign-in/up/out chrome to the registry
@@ -39,21 +27,6 @@ import { SvgIcon } from '#components/icons/svg-icon.js';
  */
 export function NavUser(): React.JSX.Element {
   const isOnline = useNetworkConnectivity();
-  const { tier } = useEntitlements();
-
-  const upgradeItem = (
-    <DropdownMenuItem
-      key='upgrade'
-      onSelect={() => {
-        openSettingsDialog('billing');
-      }}
-    >
-      <Sparkles />
-      Upgrade to Pro
-      <ProBadge className='ml-auto' />
-    </DropdownMenuItem>
-  );
-
   const helpItems = [
     <DropdownMenuItem key='documentation' asChild>
       <a href='https://docs.tau.new' target='_blank' rel='noopener noreferrer'>
@@ -114,19 +87,7 @@ export function NavUser(): React.JSX.Element {
                       Offline — online features unavailable
                     </DropdownMenuItem>,
                   ]),
-              tier === 'free' ? (
-                upgradeItem
-              ) : (
-                <DropdownMenuItem
-                  key='billing'
-                  onSelect={() => {
-                    openSettingsDialog('billing');
-                  }}
-                >
-                  <CreditCard />
-                  Billing
-                </DropdownMenuItem>
-              ),
+              <NavBillingItem key='billing' />,
               { label: 'Files', href: '/files', icon: <Files /> },
               <DropdownMenuItem
                 key='settings'

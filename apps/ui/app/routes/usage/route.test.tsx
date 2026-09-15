@@ -2,7 +2,6 @@ import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-// eslint-disable-next-line @nx/enforce-module-boundaries -- this first-party usage surface owns the direct billing client contract
 import { wireUsageSnapshotSchema } from '@taucad/billing';
 import UsagePage from '#routes/usage/route.js';
 
@@ -10,12 +9,14 @@ const useUsageSnapshot = vi.hoisted(() => vi.fn());
 const useCredits = vi.hoisted(() => vi.fn());
 const useOpenHolds = vi.hoisted(() => vi.fn());
 const useSavedUsage = vi.hoisted(() => vi.fn());
+const useBillingRevisionMinimum = vi.hoisted(() => vi.fn());
 const usePersistSavedUsage = vi.hoisted(() => vi.fn());
 vi.mock('@taucad/billing/hooks/use-usage-snapshot', () => ({ useUsageSnapshot }));
 vi.mock('@taucad/billing/hooks/use-credits', () => ({ useCredits }));
 vi.mock('@taucad/billing/hooks/use-open-holds', () => ({ useOpenHolds }));
 vi.mock('#db/billing-snapshot-store.js', () => ({
   canonicalUsageQueryKey: () => 'key',
+  useBillingRevisionMinimum,
   useSavedUsage,
   usePersistSavedUsage,
 }));
@@ -160,6 +161,7 @@ beforeEach(() => {
   useCredits.mockReturnValue(balance);
   useOpenHolds.mockReturnValue({ environment: 'development', ownerId: 'user', holds: [] });
   useUsageSnapshot.mockReturnValue({ status: 'ready', snapshot, retry: vi.fn() });
+  useBillingRevisionMinimum.mockReturnValue(undefined);
   useSavedUsage.mockReturnValue(undefined);
   usePersistSavedUsage.mockReturnValue('saved');
 });
@@ -233,6 +235,19 @@ describe('UsagePage', () => {
 
     expect(screen.queryByTestId('credits-used')).not.toBeInTheDocument();
     expect(screen.getByText('No saved usage for this view')).toBeInTheDocument();
+  });
+
+  it('uses the durable receipt revision and distinguishes an uncached offline profile from sign-out', () => {
+    const minimum = { environment: 'development', ownerId: 'user', subjectId: 'account', revision: '8' };
+    useBillingRevisionMinimum.mockReturnValue(minimum);
+    useUsageSnapshot.mockReturnValue({ status: 'signed-out', retry: vi.fn() });
+
+    renderPage();
+
+    expect(useUsageSnapshot).toHaveBeenCalledWith(expect.any(Object), { minimum, saved: undefined });
+    expect(useCredits).toHaveBeenCalledWith(minimum);
+    expect(screen.getByText('No saved usage for this view')).toBeInTheDocument();
+    expect(screen.queryByText('Sign in to see your Tau usage.')).not.toBeInTheDocument();
   });
 
   // ── Saved snapshots (C10-U4) ─────────────────────────────────────────────

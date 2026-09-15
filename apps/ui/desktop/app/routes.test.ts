@@ -14,5 +14,6 @@ describe('desktop route manifest', () => {
     expect(manifest).toContain('auth.$');
     expect(manifest).toContain('home-surface.desktop.tsx');
     expect(manifest).not.toContain('"file":"../../app/routes/_index/route.tsx"');
+    expect(manifest).not.toContain('../../app/routes/usage/');
   });
 });

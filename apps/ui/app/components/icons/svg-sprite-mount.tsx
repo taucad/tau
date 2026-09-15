@@ -1,4 +1,5 @@
 import sprite from '#components/icons/generated/sprite.svg?raw';
+import paymentSprite from '#components/icons/generated/payment-sprite.svg?raw';
 
 /**
  * Inlines the generated SVG icon sprite once at the app shell so every
@@ -16,7 +17,7 @@ export function SvgSpriteMount(): React.JSX.Element {
       aria-hidden
       style={{ position: 'absolute', width: 0, height: 0, overflow: 'hidden' }}
       // oxlint-disable-next-line react/no-danger -- trusted build-generated sprite asset
-      dangerouslySetInnerHTML={{ __html: sprite }}
+      dangerouslySetInnerHTML={{ __html: `${sprite}${paymentSprite}` }}
     />
   );
 }

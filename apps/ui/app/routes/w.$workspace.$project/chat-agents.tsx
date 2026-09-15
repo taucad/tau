@@ -18,6 +18,7 @@ import type { AgentProjection, AgentProjectionMetadata, AgentProjectionState } f
 import { SvgIcon } from '#components/icons/svg-icon.js';
 import { Badge } from '@taucad/ui/components/badge';
 import { Button } from '@taucad/ui/components/button';
+import { tauCloudEnabled } from '#cloud/cloud-enabled.js';
 import { PanelEmptyState } from '#components/ui/panel-empty-state.js';
 import {
   FloatingPanel,
@@ -297,7 +298,9 @@ const AgentRowContent = ({ agent }: { readonly agent: AgentProjection }): React.
                 {agent.pendingApprovalCount > 1 ? ` · ${agent.pendingApprovalCount}` : null}
               </span>
             ) : null}
-            {agent.operationIds.length > 0 ? <AgentCredits operationIds={agent.operationIds} /> : null}
+            {tauCloudEnabled && agent.operationIds.length > 0 ? (
+              <AgentCredits operationIds={agent.operationIds} />
+            ) : null}
           </div>
         </div>
       </div>

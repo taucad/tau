@@ -34,7 +34,7 @@ type DesktopShell = {
   readonly quit?: {
     isReady(): boolean;
     onAsk(handler: () => void): () => void;
-    reportQuiesced(): void;
+    reportQuiesced(forced: boolean): void;
   };
   readonly dialog: DesktopBridge['dialog'];
   readonly openFiles: DesktopBridge['openFiles'];
@@ -81,11 +81,11 @@ export const onDesktopQuitRequested = (handler: () => void): (() => void) => {
 };
 
 /** Tell main every session has closed, or that the person cut it short. @public */
-export const reportDesktopQuiesced = (): void => {
+export const reportDesktopQuiesced = (forced: boolean): void => {
   if (!isDesktopBuildTarget()) {
     return;
   }
-  (globalThis as { tau?: DesktopShell }).tau?.quit?.reportQuiesced();
+  (globalThis as { tau?: DesktopShell }).tau?.quit?.reportQuiesced(forced);
 };
 
 /**

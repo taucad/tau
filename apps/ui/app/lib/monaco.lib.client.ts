@@ -59,7 +59,7 @@ registry.addContribution(jsContribution);
 // Guard to ensure configureMonaco runs only once. shikiToMonaco monkey-patches
 // monaco.editor.create and monaco.editor.setTheme, creating chained wrappers
 // on repeated calls. This flag prevents that during HMR or multiple call sites.
-let isConfigured = false;
+let configuration: Promise<void> | undefined;
 
 /**
  * Configure the Monaco editor.
@@ -69,12 +69,14 @@ let isConfigured = false;
  */
 export const configureMonaco = async (): Promise<void> => {
   // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- can be undefined in SSR
-  if (isConfigured || globalThis.self === undefined) {
+  if (globalThis.self === undefined) {
     return;
   }
+  configuration ??= initializeMonaco();
+  return configuration;
+};
 
-  isConfigured = true;
-
+const initializeMonaco = async (): Promise<void> => {
   // Prime Geist Mono before Monaco's first DomCharWidthReader pass.
   //
   // Monaco caches char-width measurements as "trusted" on the first read

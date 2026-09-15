@@ -1,6 +1,5 @@
 import { Bot, Coins, Lock, Wallet } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@taucad/ui/components/card';
-// eslint-disable-next-line @nx/enforce-module-boundaries -- this first-party usage surface owns the direct billing client contract
 import { formatCreditAtoms, formatCreditAtomsDisplay } from '@taucad/billing';
 import type { WireBalanceExplanation, WireUsageSnapshot } from '@taucad/billing';
 

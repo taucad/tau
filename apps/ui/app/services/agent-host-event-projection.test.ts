@@ -25,6 +25,68 @@ const base = {
   runId: 'run-1',
 } as const;
 
+it('should keep external reasoning open across an interleaved tool result', async () => {
+  const blocks = new Map();
+  const live = { chatId: 'chat', runId: base.runId, messageId: 'thought', contentIndex: 0 };
+  const chunks: UIMessageChunk[] = [
+    ...projectAgentHostLiveEvent({ ...live, type: 'thinking-start' }, blocks),
+    ...projectAgentHostLiveEvent({ ...live, type: 'thinking-delta', delta: 'checking' }, blocks),
+    ...projectAgentHostEvent(
+      {
+        ...base,
+        type: 'message.appended',
+        message: {
+          id: 'input',
+          role: 'tool-input',
+          toolCallId: 'call',
+          toolName: 'read',
+          content: {},
+          metadata: { tauInternal: { origin: 'external' } },
+        },
+      },
+      blocks,
+    ),
+    ...projectAgentHostEvent(
+      {
+        ...base,
+        type: 'message.appended',
+        message: {
+          id: 'output',
+          role: 'tool-output',
+          toolCallId: 'call',
+          toolName: 'read',
+          isError: false,
+          content: 'done',
+          metadata: { tauInternal: { origin: 'external' } },
+        },
+      },
+      blocks,
+    ),
+    ...projectAgentHostLiveEvent({ ...live, type: 'thinking-delta', delta: ' complete' }, blocks),
+    ...projectAgentHostLiveEvent({ ...live, type: 'thinking-end', content: 'checking complete' }, blocks),
+  ];
+  const errors: unknown[] = [];
+  let parts: MyUIMessage['parts'] = [];
+  const stream = new ReadableStream<UIMessageChunk>({
+    start(controller) {
+      for (const chunk of chunks) {
+        controller.enqueue(chunk);
+      }
+      controller.close();
+    },
+  });
+  for await (const message of readUIMessageStream<MyUIMessage>({
+    stream,
+    onError: (error) => {
+      errors.push(error);
+    },
+  })) {
+    parts = message.parts;
+  }
+  expect(errors).toEqual([]);
+  expect(parts.filter((part) => part.type === 'reasoning').map((part) => part.text)).toEqual(['checking complete']);
+});
+
 describe('projectAgentHostEvent', () => {
   it('reconstructs the durable user turn from append and history-commit events', () => {
     const message = {
@@ -1042,7 +1104,7 @@ describe('external tool-call chunks', () => {
     expect(chunk).toMatchObject({ toolMetadata: { tau: { kind: 'read', nativeName: 'list_directory' } } });
   });
 
-  it('keeps a normalized external Tau MCP call on one dynamic SDK identity', () => {
+  it('keeps a normalized external Tau MCP call on one dynamic SDK identity', async () => {
     const metadata = {
       tauInternal: { kind: 'external-tool', origin: 'external', agentId: 'codex', presentation: 'tau-mcp' },
     } as const;
@@ -1051,7 +1113,12 @@ describe('external tool-call chunks', () => {
       role: 'tool-input',
       toolCallId: 'call-mcp',
       toolName: 'screenshot',
-      call: { toolCallId: 'vendor-call', kind: 'execute', nativeName: 'screenshot' },
+      call: {
+        toolCallId: 'vendor-call',
+        kind: 'execute',
+        nativeName: 'screenshot',
+        content: [{ type: 'content', content: { type: 'image', mimeType: 'image/png', data: 'cHJldmlldw==' } }],
+      },
       content: { targetFile: 'main.ts', mode: 'single' },
       metadata,
     });
@@ -1062,14 +1129,37 @@ describe('external tool-call chunks', () => {
       toolName: 'screenshot',
       content: { images: [{ view: 'isometric', dataUrl: 'data:image/webp;base64,AQ==' }] },
       isError: false,
+      call: { toolCallId: 'vendor-call', kind: 'execute', nativeName: 'screenshot' },
       metadata,
     });
 
     expect(input).toMatchObject({ type: 'tool-input-available', toolName: 'screenshot' });
     expect(input).toHaveProperty('dynamic', true);
-    expect(input).toMatchObject({ toolMetadata: { tau: { origin: 'external', agentId: 'codex' } } });
+    expect(input).toMatchObject({
+      toolMetadata: { tau: { origin: 'external', agentId: 'codex', presentation: 'tau-mcp' } },
+    });
     expect(output).toMatchObject({ type: 'tool-output-available', output: { images: [{ view: 'isometric' }] } });
     expect(output).toHaveProperty('dynamic', true);
+    let parts: MyUIMessage['parts'] = [];
+    const stream = new ReadableStream<UIMessageChunk>({
+      start(controller) {
+        controller.enqueue(input);
+        controller.enqueue(output);
+        controller.close();
+      },
+    });
+    for await (const message of readUIMessageStream<MyUIMessage>({ stream })) {
+      parts = message.parts;
+    }
+    expect(parts.find((part) => part.type === 'dynamic-tool')).toMatchObject({
+      type: 'dynamic-tool',
+      state: 'output-available',
+      toolMetadata: {
+        tau: {
+          content: [{ type: 'content', content: { type: 'image', mimeType: 'image/png', data: 'cHJldmlldw==' } }],
+        },
+      },
+    });
   });
 });
 

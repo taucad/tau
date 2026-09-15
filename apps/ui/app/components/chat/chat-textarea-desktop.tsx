@@ -560,7 +560,13 @@ export const ChatTextareaLeftControls = memo(function ({
           <TooltipContent>Select model ({selectedAgentModel.name})</TooltipContent>
         </Tooltip>
       )}
-      {execution.kind === 'acp' ? <ChatAgentConfigControls sessionData={acpSessionData} status={status} /> : null}
+      {execution.kind === 'acp' ? (
+        <ChatAgentConfigControls
+          key={JSON.stringify([execution.hostId, execution.agentId])}
+          sessionData={acpSessionData}
+          status={status}
+        />
+      ) : null}
       {creationLocationControl}
       {/* Available and reserved credits (P5/P6). Tau execution only — an
        * external agent's turns are not funded by this balance. Kept after the
@@ -677,9 +683,11 @@ function ChatAgentConfigControls({
     const started = previousStatus.current === 'ready' && status !== 'ready';
     const settled = previousStatus.current !== 'ready' && status === 'ready';
     const sessionUpdated = previousSession.current !== sessionData;
+    const sessionReplaced =
+      previousSession.current?.sessionId !== undefined && previousSession.current.sessionId !== sessionData?.sessionId;
     previousStatus.current = status;
     previousSession.current = sessionData;
-    if (started) {
+    if (started && !sessionReplaced) {
       setPending((current) => ({ ...current, submitted: current.values }));
       return;
     }
@@ -688,10 +696,11 @@ function ChatAgentConfigControls({
     }
     const retained = Object.fromEntries(
       Object.entries(pending.values).filter(
-        ([id, value]) => !Object.hasOwn(pending.submitted, id) || pending.submitted[id] !== value,
+        ([id, value]) =>
+          !sessionReplaced && (!settled || !Object.hasOwn(pending.submitted, id) || pending.submitted[id] !== value),
       ),
     );
-    setPending({ confirmed, values: retained, submitted: {} });
+    setPending({ confirmed, values: retained, submitted: settled || sessionReplaced ? {} : pending.submitted });
     if (sessionData?.agentId === execution.agentId) {
       const actual = Object.fromEntries(
         sessionData.configOptions.flatMap((option) =>

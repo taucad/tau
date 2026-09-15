@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-// eslint-disable-next-line @nx/enforce-module-boundaries -- this first-party settings component owns the direct billing wire
 import { formatCreditAtoms } from '@taucad/billing';
 import type { WireAutoReloadConsent, WirePaymentAction } from '@taucad/billing';
 import { Button } from '@taucad/ui/components/button';

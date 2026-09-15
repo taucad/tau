@@ -25,7 +25,7 @@ import { ReservedTable } from '#routes/usage/reserved-table.js';
 import { UsageSummaryCards } from '#routes/usage/usage-summary-cards.js';
 import { UsageTable } from '#routes/usage/usage-table.js';
 import { usageActivityKinds, usageFilterOptions, useUsageFilters } from '#routes/usage/use-usage-filters.js';
-import { usePersistSavedUsage, useSavedUsage } from '#db/billing-snapshot-store.js';
+import { useBillingRevisionMinimum, usePersistSavedUsage, useSavedUsage } from '#db/billing-snapshot-store.js';
 import type { SavedUsageOutcome } from '#db/billing-snapshot-store.js';
 import type { Handle } from '#types/matches.types.js';
 
@@ -163,10 +163,13 @@ function FilterMenu<Value extends string>({
 export default function UsagePage(): React.JSX.Element {
   const { filters, query, setDateRange, toggleModel, toggleActivity, toggleProject, clearFilters, hasActiveFilters } =
     useUsageFilters();
+  const minimum = useBillingRevisionMinimum();
   const saved = useSavedUsage(query);
-  const usage = useUsageSnapshot(query, { saved: saved?.snapshot });
+  const result = useUsageSnapshot(query, { minimum, saved: saved?.snapshot });
+  const usage: UsageSnapshotResult =
+    result.status === 'signed-out' && minimum !== undefined ? { status: 'unavailable', retry: result.retry } : result;
   const saveOutcome = usePersistSavedUsage(query, usage);
-  const balance = useCredits();
+  const balance = useCredits(minimum);
   const [openEventId, setOpenEventId] = useState<string>();
   const snapshot = 'snapshot' in usage ? usage.snapshot : undefined;
   const options = usageFilterOptions(snapshot, filters);

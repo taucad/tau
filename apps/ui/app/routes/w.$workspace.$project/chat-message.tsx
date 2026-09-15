@@ -272,7 +272,7 @@ function renderAssistantPart(
       }
       const tau = isRecord(part.toolMetadata?.['tau']) ? part.toolMetadata['tau'] : undefined;
       const nativeName = typeof tau?.['nativeName'] === 'string' ? tau['nativeName'] : undefined;
-      if (!('preliminary' in part) || part.preliminary !== true) {
+      if (tau?.['presentation'] === 'tau-mcp' && Reflect.get(part, 'preliminary') !== true) {
         switch (nativeName) {
           case 'get_kernel_result': {
             return (

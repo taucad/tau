@@ -10,7 +10,7 @@ import {
   openSettingsDialog,
 } from '#hooks/use-settings-dialog.js';
 import type { SettingsSection } from '#hooks/use-settings-dialog.js';
-import { BillingSettings } from '#components/settings/billing-settings.js';
+import { CloudBillingSettings } from '#cloud/settings-billing.js';
 import { FileSystemSettings } from '#components/settings/filesystem-settings.js';
 import { GeneralSettings } from '#components/settings/general-settings.js';
 import { ExperimentalSettings } from '#components/settings/experimental-settings.js';
@@ -61,7 +61,7 @@ function SettingsContent({ section }: { readonly section: SettingsSection }): Re
     case 'billing': {
       return (
         <SettingsAuthGate>
-          <BillingSettings />
+          <CloudBillingSettings />
         </SettingsAuthGate>
       );
     }
@@ -234,7 +234,7 @@ function SettingsSurface({ activeSection }: { readonly activeSection: SettingsSe
                 </p>
                 {resultCount === 0 ? (
                   <p className='px-2 text-sm text-muted-foreground'>
-                    Try a setting name or a word like theme, credits, or storage.
+                    Try a setting name or a word like theme, models, or storage.
                   </p>
                 ) : null}
                 {results.map(({ section, entries }) => (

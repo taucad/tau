@@ -30,6 +30,7 @@
 
 import type { MyMessagePart } from '@taucad/chat';
 import { fileUnchangedMarker } from '@taucad/chat/constants';
+import { isRecord } from '@taucad/utils/schema';
 import { agentApprovalToolName } from '#services/agent-host-event-projection.js';
 
 // ── Categories ───────────────────────────────────────────────────────────────
@@ -110,6 +111,15 @@ export const externalToolKind = (part: MyMessagePart): string | undefined => {
   return typeof kind === 'string' ? kind : undefined;
 };
 
+/** Host-qualified Tau MCP identity carried on an external dynamic part. */
+const tauMcpToolName = (part: MyMessagePart): string | undefined => {
+  if (part.type !== 'dynamic-tool') {
+    return undefined;
+  }
+  const tau = isRecord(part.toolMetadata?.['tau']) ? part.toolMetadata['tau'] : undefined;
+  return tau?.['presentation'] === 'tau-mcp' && typeof tau['nativeName'] === 'string' ? tau['nativeName'] : undefined;
+};
+
 /**
  * Maps a message part to its activity category.
  *
@@ -125,6 +135,9 @@ export const classifyActivityPart = (part: MyMessagePart): ActivityCategory => {
   if (part.type === 'dynamic-tool') {
     if (part.toolName === agentApprovalToolName) {
       return 'skip';
+    }
+    if (tauMcpToolName(part) === 'export_geometry') {
+      return 'write';
     }
     return externalToolKind(part) === 'think' ? 'reasoning' : 'research';
   }
@@ -239,6 +252,22 @@ const generateResearchSummary = (parts: readonly MyMessagePart[]): SummaryParts 
   let calls = 0;
   for (const part of parts) {
     if (part.type === 'dynamic-tool') {
+      const nativeName = tauMcpToolName(part);
+      const output = part.state === 'output-available' && isRecord(part.output) ? part.output : undefined;
+      if (nativeName === 'get_kernel_result') {
+        renders++;
+        continue;
+      }
+      if (nativeName === 'screenshot') {
+        images += output === undefined ? 1 : Array.isArray(output['images']) ? output['images'].length : 0;
+        continue;
+      }
+      if (nativeName === 'test_model') {
+        tests +=
+          (Array.isArray(output?.['passes']) ? output['passes'].length : 0) +
+          (Array.isArray(output?.['failures']) ? output['failures'].length : 0);
+        continue;
+      }
       switch (externalToolKind(part)) {
         case 'read': {
           files++;

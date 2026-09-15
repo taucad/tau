@@ -8,7 +8,7 @@ import { authClient } from '#lib/auth-client.js';
 import { ENV } from '#environment.config.js';
 import { apiKeyPlugin } from '#utils/api-key-plugin.js';
 import { magicLinkPlugin } from '#utils/magic-link-plugin.js';
-import { useOptionalFinancialSession } from '#providers/financial-session-provider.js';
+import { useCloudFinancialPurge } from '#cloud/financial-purge.js';
 import { useResolvedAuth } from '#hooks/use-resolved-auth.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 
@@ -171,7 +171,7 @@ export function DesktopAuthBridge(): undefined {
   // when no client is in scope, and this component is deliberately mountable
   // on either side of the provider.
   const queryClient = useContext(QueryClientContext);
-  const financialSession = useOptionalFinancialSession();
+  const purgeFinancial = useCloudFinancialPurge();
 
   useEffect(() => {
     if (!isDesktopTarget()) {
@@ -186,10 +186,10 @@ export function DesktopAuthBridge(): undefined {
     }
 
     return bridge.onAuthChanged(() => {
-      financialSession?.purge('owner_changed');
+      purgeFinancial?.('owner_changed');
       void queryClient?.invalidateQueries({ queryKey: authQueryKeyPrefix });
     });
-  }, [financialSession, queryClient]);
+  }, [purgeFinancial, queryClient]);
 }
 
 /**
@@ -202,14 +202,14 @@ export function DesktopAuthBridge(): undefined {
  * @returns Nothing — this component renders no markup.
  */
 export function AnonymousSessionPurge(): undefined {
-  const financialSession = useOptionalFinancialSession();
+  const purgeFinancial = useCloudFinancialPurge();
   const resolved = useResolvedAuth();
 
   useEffect(() => {
     if (resolved === 'anonymous') {
-      financialSession?.purge('logout');
+      purgeFinancial?.('logout');
     }
-  }, [financialSession, resolved]);
+  }, [purgeFinancial, resolved]);
 }
 
 export function AuthConfigProvider({ children }: { readonly children: React.ReactNode }): React.JSX.Element {

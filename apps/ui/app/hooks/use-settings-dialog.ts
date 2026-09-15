@@ -2,6 +2,7 @@ import { useSearchParams } from 'react-router';
 import type { SetURLSearchParams } from 'react-router';
 import { useEffect } from 'react';
 import { z } from 'zod';
+import { tauCloudEnabled } from '#cloud/cloud-enabled.js';
 
 const settingsSectionSchema = z.enum([
   'general',
@@ -116,6 +117,6 @@ export function useSettingsDialog(): SettingsDialogState {
   }
 
   const parsed = settingsSectionSchema.safeParse(rawSection);
-  const section = parsed.success ? parsed.data : defaultSection;
+  const section = parsed.success && (tauCloudEnabled || parsed.data !== 'billing') ? parsed.data : defaultSection;
   return { isOpen: true, section };
 }

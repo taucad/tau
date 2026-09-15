@@ -12,9 +12,8 @@ import { RadioGroup, RadioGroupItem } from '@taucad/ui/components/radio-group';
 import { WorkspaceSelector } from '#components/filesystem/workspace-selector.js';
 
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@taucad/ui/components/accordion';
-import { getKernelRequiredTier } from '@taucad/billing';
 import { getKernelOption } from '#utils/kernel.utils.js';
-import { KernelTierBadge, TierBadge } from '#components/tier-badge.js';
+import { KernelCommercialBadge } from '#cloud/kernel-commerce.js';
 import { toast } from '#components/ui/sonner.js';
 import { encodeTextFile } from '#utils/filesystem.utils.js';
 import type { Handle } from '#types/matches.types.js';
@@ -47,7 +46,7 @@ function KernelDetailsContent({ kernelId }: { readonly kernelId: KernelProvider 
   const selectedOption = getKernelOption(kernelId);
   return (
     <div className='space-y-4'>
-      <TierBadge tier={getKernelRequiredTier(kernelId)} />
+      <KernelCommercialBadge kernelId={kernelId} />
       <p className='text-sm leading-relaxed text-muted-foreground'>{selectedOption.longDescription}</p>
 
       <div className='space-y-3'>
@@ -291,7 +290,7 @@ export default function ProjectsNew(): React.JSX.Element {
                                 <div className='flex w-full items-start justify-between gap-2'>
                                   <span className='flex items-center gap-1.5 text-sm font-medium'>
                                     {option.name}
-                                    <KernelTierBadge kernelId={option.id} />
+                                    <KernelCommercialBadge kernelId={option.id} />
                                   </span>
                                   <span className='font-mono text-xs text-muted-foreground/70'>
                                     {option.backendProvider}
@@ -343,7 +342,7 @@ export default function ProjectsNew(): React.JSX.Element {
                           <div className='flex w-full items-start justify-between gap-2'>
                             <span className='flex items-center gap-1.5 text-sm font-medium'>
                               {option.name}
-                              <KernelTierBadge kernelId={option.id} />
+                              <KernelCommercialBadge kernelId={option.id} />
                             </span>
                             <span className='font-mono text-xs text-muted-foreground/70'>{option.backendProvider}</span>
                           </div>

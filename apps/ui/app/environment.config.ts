@@ -4,6 +4,8 @@
  * Uses Zod for validation
  */
 import { z } from 'zod';
+import { cloudClientEnvironmentKeys, cloudEnvironmentShape } from '#cloud/environment-billing.js';
+import type { CloudBillingEnvironment } from '#cloud/environment-billing.types.js';
 
 type RawEnvironment = Record<string, string | undefined>;
 
@@ -51,7 +53,7 @@ const environmentSchema = z.preprocess(
   z.object({
     /* eslint-disable @typescript-eslint/naming-convention -- environment variables are not camelCase */
     TAU_API_URL: z.url(),
-    TAU_BILLING_ENVIRONMENT: z.enum(['development', 'staging', 'prod-us', 'prod-eu']).optional(),
+    ...cloudEnvironmentShape,
     TAU_WEBSOCKET_URL: z.url().describe('WebSocket URL for the API (e.g., wss://api.tau.new or ws://localhost:4001)'),
     TAU_FRONTEND_URL: z.url(),
     /**
@@ -95,7 +97,7 @@ const environmentSchema = z.preprocess(
   }),
 );
 
-export type Environment = z.infer<typeof environmentSchema>;
+export type Environment = z.infer<typeof environmentSchema> & CloudBillingEnvironment;
 
 const parseEnvironment = (rawEnvironment: RawEnvironment): Environment => {
   const result = environmentSchema.safeParse(rawEnvironment);
@@ -118,9 +120,8 @@ export const getEnvironment = async (): Promise<Environment> => parseEnvironment
  * keys, feature flags). Everything else stays server-only and is read through
  * `getEnvironment()`.
  */
-const clientEnvironmentKeys = [
+const baseClientEnvironmentKeys = [
   'TAU_API_URL',
-  'TAU_BILLING_ENVIRONMENT',
   'TAU_WEBSOCKET_URL',
   'TAU_FRONTEND_URL',
   'TAU_DEBUG',
@@ -131,19 +132,23 @@ const clientEnvironmentKeys = [
   'POSTHOG_ASSET_HOST',
   'POSTHOG_CLIENT_KEY',
 ] as const satisfies ReadonlyArray<keyof Environment>;
+const clientEnvironmentKeys = [...baseClientEnvironmentKeys, ...cloudClientEnvironmentKeys] as const;
 
-export type ClientEnvironment = Pick<Environment, (typeof clientEnvironmentKeys)[number]>;
+export type ClientEnvironment = Pick<
+  Environment,
+  (typeof baseClientEnvironmentKeys)[number] | keyof CloudBillingEnvironment
+>;
 
-const selectClientEnvironment = (environment: Environment): ClientEnvironment => {
+const selectClientEnvironment = (environment: Environment): Partial<ClientEnvironment> => {
   // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- fromEntries cannot retain tuple-key completeness.
-  return Object.fromEntries(clientEnvironmentKeys.map((key) => [key, environment[key]])) as ClientEnvironment;
+  return Object.fromEntries(clientEnvironmentKeys.map((key) => [key, environment[key]])) as Partial<ClientEnvironment>;
 };
 
 /**
  * The allowlisted subset safe to inject into the document. Use this — never
  * `getEnvironment()` — for anything that reaches a loader's return value.
  */
-export const getClientEnvironment = async (): Promise<ClientEnvironment> =>
+export const getClientEnvironment = async (): Promise<Partial<ClientEnvironment>> =>
   selectClientEnvironment(await getEnvironment());
 
 /**

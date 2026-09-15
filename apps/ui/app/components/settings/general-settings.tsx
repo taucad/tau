@@ -3,7 +3,7 @@ import { Link } from 'react-router';
 import { AlertCircle, Check, ChevronDown, Circle, Contrast, Laptop, Moon, ShieldCheck, Sun } from 'lucide-react';
 import { Loader } from '#components/ui/loader.js';
 import { usePrivacyPreferences } from '#hooks/use-privacy-preferences.js';
-import { useEntitlements } from '@taucad/billing/hooks/use-entitlements';
+import { useCommercialFeatures } from '#cloud/commercial-features.js';
 import { Theme, useTheme, themeOptions } from '#hooks/use-theme.js';
 import type { ThemeWithSystem } from '#hooks/use-theme.js';
 import { useColor } from '#hooks/use-color.js';
@@ -65,8 +65,7 @@ export function GeneralSettings(): React.JSX.Element {
   const { preferences, isLoading, error, updatePreferences, isUpdating } = usePrivacyPreferences();
   // T15/AD15: paid tiers carry a contractual no-train guarantee — the
   // projection forces `trainingConsent: false`, so no toggle is rendered.
-  const { tier } = useEntitlements();
-  const hasNoTrainGuarantee = tier !== 'free';
+  const { hasNoTrainGuarantee } = useCommercialFeatures();
   const { themeWithSystem, setTheme, currentOption } = useTheme();
   const { hue, setHue, resetHue } = useColor();
   const [areCodeInlayHintsEnabled, setCodeInlayHintsEnabled] = useCookie(cookieName.codeInlayHints, false);

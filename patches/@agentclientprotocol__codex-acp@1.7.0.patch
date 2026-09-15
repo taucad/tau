@@ -1,5 +1,5 @@
 diff --git a/dist/index.js b/dist/index.js
-index 3e8bb8292a5441cf1e9be1b68965a1ddbfc62fda..3bd51a08c65fc61c8b55278f7f6fa625737f8117 100755
+index 3e8bb8292a5441cf1e9be1b68965a1ddbfc62fda..bf772a4f475b2bbd3da91844a45486edc997629c 100755
 --- a/dist/index.js
 +++ b/dist/index.js
 @@ -28255,7 +28255,7 @@ var CodexAcpClient = class {
@@ -29,3 +29,20 @@ index 3e8bb8292a5441cf1e9be1b68965a1ddbfc62fda..3bd51a08c65fc61c8b55278f7f6fa625
        summary: disableSummary ? "none" : "auto",
        effort,
        model: modelId.model,
+@@ -29769,6 +29769,7 @@ var CodexCommands = class {
+     }
+     for (const entry of skillsEntries) {
+       for (const skill of entry.skills) {
++        if (!skill.enabled) continue;
+         const name = `$${skill.name}`;
+         if (commands.has(name)) continue;
+         const description = skill.shortDescription ?? skill.description ?? skill.name;
+@@ -29933,7 +29934,7 @@ var CodexCommands = class {
+       }
+       case "skills": {
+         const response = await this.runWithProcessCheck(() => this.codexAcpClient.listSkills(this.createSkillsListParams(sessionState)));
+-        const skills = (response?.data ?? []).flatMap((entry) => entry.skills);
++        const skills = (response?.data ?? []).flatMap((entry) => entry.skills).filter((skill) => skill.enabled);
+         const lines = skills.map((skill) => {
+           const description = skill.shortDescription ?? skill.description ?? "";
+           return description ? `- ${skill.name}: ${description}` : `- ${skill.name}`;

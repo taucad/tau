@@ -13,6 +13,7 @@
   "ignorePatterns": [
     "**/dist/**",
     "/out",
+    "**/out/**",
     "/.nx/cache",
     "/.nx/workspace-data",
     ".cursor/plans/**",

@@ -181,6 +181,18 @@ export type GatewayModelTransportOptions = {
       }
     | undefined;
   readonly fetch?: typeof globalThis.fetch | undefined;
+  /** Optional funded-operation protocol supplied only by a managed Cloud composition. */
+  readonly fundedOperations?: GatewayFundedOperationProtocol | undefined;
+};
+
+/** Managed Cloud operation binding kept outside the provider transport's self-host graph. @public */
+export type GatewayFundedOperationProtocol = {
+  /** Whether the selected provider uses Tau-funded operation accounting. */
+  usesBillingAttempt(providerKind: ModelProviderKind | undefined): boolean;
+  /** Recover an ambiguous attempt without dispatching it again. */
+  lookupAttempt(attemptId: string, signal: AbortSignal): Promise<ModelInvocationBinding | undefined>;
+  /** Require and validate the operation identity on an accepted gateway response. */
+  bindResponse(response: Response): ModelInvocationBinding;
 };
 
 type WireRecord = Record<string, unknown>;
@@ -265,7 +277,7 @@ const flattenedGatewayError = (payload: WireRecord, status: number): GatewayMode
   });
 };
 
-const responseError = async (response: Response): Promise<GatewayModelTransportError> => {
+export const gatewayResponseError = async (response: Response): Promise<GatewayModelTransportError> => {
   let payload: unknown;
   try {
     payload = await response.json();
@@ -372,6 +384,7 @@ const authenticatedFetch =
     readonly state: GatewayFetchState;
     readonly providerKind: ModelProviderKind;
     readonly attemptId: string;
+    readonly fundedOperations?: GatewayFundedOperationProtocol | undefined;
     readonly onInvocationBound?: ModelStreamRequest['onInvocationBound'];
     readonly systemPromptBlocks?: readonly ModelSystemPromptBlock[] | undefined;
   }): typeof globalThis.fetch =>
@@ -416,22 +429,14 @@ const authenticatedFetch =
         headers,
       });
       if (!response.ok) {
-        const failure = await responseError(response);
+        const failure = await gatewayResponseError(response);
         options.state.failure = failure;
         throw failure;
       }
-      const operationId = response.headers.get('x-tau-operation-id');
-      if (!operationId || operationId.length > 128 || !/^[\u0021-\u007E]+$/u.test(operationId)) {
-        const failure = new GatewayModelTransportError({
-          code: 'MALFORMED_RESPONSE',
-          message: 'Tau model gateway did not return a valid operation identity.',
-          status: response.status,
-        });
-        options.state.failure = failure;
-        throw failure;
+      if (options.fundedOperations) {
+        options.state.binding = options.fundedOperations.bindResponse(response);
+        await options.onInvocationBound?.(options.state.binding);
       }
-      options.state.binding = { operationId, status: 'pending' };
-      await options.onInvocationBound?.(options.state.binding);
       const contentType = response.headers.get('content-type')?.split(';', 1)[0]?.trim().toLowerCase();
       if (contentType !== 'text/event-stream' || !response.body) {
         const failure = new GatewayModelTransportError({
@@ -671,54 +676,12 @@ const streamPiEvents = async function* (options: {
  * @public
  */
 export const createGatewayModelTransport = (options: GatewayModelTransportOptions): ModelTransport => ({
-  usesBillingAttempt: isGatewayProviderKind,
-  async lookupAttempt(attemptId, signal) {
-    if (!attemptId || attemptId.length > 128 || !/^[\u0021-\u007E]+$/u.test(attemptId)) {
-      throw new GatewayModelTransportError({
-        code: 'INVALID_REQUEST',
-        message: 'Invalid Tau invocation attempt identity.',
-      });
-    }
-    const headers = new Headers();
-    const token = await options.auth?.();
-    if (token !== undefined) {
-      headers.set('authorization', `Bearer ${token}`);
-    }
-    const response = await (options.fetch ?? globalThis.fetch.bind(globalThis))(
-      new URL(
-        `v1/billing/attempts/gateway/${encodeURIComponent(attemptId)}`,
-        options.baseUrl.endsWith('/') ? options.baseUrl : `${options.baseUrl}/`,
-      ),
-      { credentials: 'include', headers, signal },
-    );
-    if (!response.ok) {
-      throw await responseError(response);
-    }
-    const payload: unknown = await response.json();
-    if (!zodUtility.isObject(payload)) {
-      throw new GatewayModelTransportError({
-        code: 'MALFORMED_RESPONSE',
-        message: 'Tau attempt lookup returned invalid JSON.',
-      });
-    }
-    if (payload['state'] === 'not_found') {
-      return undefined;
-    }
-    const operationId = readString(payload, 'operationId');
-    const state = readString(payload, 'state');
-    if (
-      !operationId ||
-      operationId.length > 128 ||
-      !/^[\u0021-\u007E]+$/u.test(operationId) ||
-      !['pending', 'terminal', 'unavailable'].includes(state ?? '')
-    ) {
-      throw new GatewayModelTransportError({
-        code: 'MALFORMED_RESPONSE',
-        message: 'Tau attempt lookup returned an invalid operation envelope.',
-      });
-    }
-    return { operationId, status: state as ModelInvocationBinding['status'] };
-  },
+  ...(options.fundedOperations
+    ? {
+        usesBillingAttempt: options.fundedOperations.usesBillingAttempt,
+        lookupAttempt: options.fundedOperations.lookupAttempt,
+      }
+    : {}),
   async *stream(request) {
     if (!request.attemptId || request.attemptId.length > 128 || !/^[\u0021-\u007E]+$/u.test(request.attemptId)) {
       throw new GatewayModelTransportError({
@@ -757,7 +720,10 @@ export const createGatewayModelTransport = (options: GatewayModelTransportOption
         state,
         providerKind: request.providerKind!,
         attemptId: request.attemptId,
-        onInvocationBound: request.onInvocationBound,
+        fundedOperations: options.fundedOperations,
+        ...(options.fundedOperations && request.onInvocationBound
+          ? { onInvocationBound: request.onInvocationBound }
+          : {}),
         systemPromptBlocks: request.systemPromptBlocks,
       }),
       maxRetries: 0,

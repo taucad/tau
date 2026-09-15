@@ -40,6 +40,7 @@ import type {
   InterruptApprovalPort,
   InterruptRequest,
   InterruptResolution,
+  ModelTransport,
   ToolRegistry,
 } from '#waist/ports.js';
 import type { AgentSessionModel, CreateAgentSessionOptions } from '#harness/session.js';
@@ -230,6 +231,8 @@ export type NodeAgentLauncherOptions = {
   readonly systemPromptBlocks?: CreateAgentSessionOptions['systemPromptBlocks'];
   readonly createId?: (() => string) | undefined;
   readonly fetch?: typeof globalThis.fetch | undefined;
+  /** Optional host-composed transport; omitted self-host launchers use the ordinary gateway transport. */
+  readonly modelTransport?: ModelTransport | undefined;
   /**
    * External agents (W4-ACP). Omit and a `start` naming one is refused; the
    * daemon's own runs are unaffected either way.
@@ -364,12 +367,14 @@ export const createNodeAgentLauncher = (options: NodeAgentLauncherOptions): Node
     systemPrompt: options.systemPrompt,
     ...(options.systemPromptBlocks ? { systemPromptBlocks: options.systemPromptBlocks } : {}),
     ...(options.model ? { model: options.model } : {}),
-    modelTransport: createGatewayModelTransport({
-      baseUrl: options.gatewayBaseUrl,
-      ...(options.model ? { model: options.model } : {}),
-      ...(options.auth ? { auth: options.auth } : {}),
-      ...(options.fetch ? { fetch: options.fetch } : {}),
-    }),
+    modelTransport:
+      options.modelTransport ??
+      createGatewayModelTransport({
+        baseUrl: options.gatewayBaseUrl,
+        ...(options.model ? { model: options.model } : {}),
+        ...(options.auth ? { auth: options.auth } : {}),
+        ...(options.fetch ? { fetch: options.fetch } : {}),
+      }),
     toolRegistry: options.toolRegistry,
     openEventLog,
     interruptPort,

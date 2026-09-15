@@ -35,7 +35,7 @@ import type { DraftImageOptions } from '#hooks/use-chat.js';
 import type { ResolvedModel } from '#hooks/use-models.js';
 import { useFeature } from '#flags/use-feature.js';
 import { ChatEditor } from '#components/chat/tiptap/chat-editor.js';
-import { useChatEditor, buildEditorContentJson } from '#components/chat/tiptap/use-chat-editor.js';
+import { buildEditorContentJson, extractContent, useChatEditor } from '#components/chat/tiptap/use-chat-editor.js';
 import type { ContextSuggestionItem, SlashCommandItem } from '#components/chat/tiptap/suggestion-types.js';
 import type { ClipboardPasteEvent } from '#components/chat/chat-paste-handler.js';
 import { createScreenshotContextHandler } from '#components/chat/screenshot-actions.utils.js';
@@ -235,13 +235,16 @@ export const ChatTextareaDesktop = memo(function ({
     if (!editor) {
       return;
     }
-    if (inputText === '' && !editor.isEmpty) {
+    const currentText = extractContent(editor).text;
+    if (inputText === currentText) {
+      return;
+    }
+    if (inputText === '') {
       editor.commands.clearContent(false);
-    } else if (inputText !== '' && editor.isEmpty) {
+    } else {
       const lazyTree: Map<string, FileEntry> = treeService?.getTreeSnapshot() ?? new Map<string, FileEntry>();
       const segments = buildPastedContent(inputText, { fileTree: lazyTree, chats, knownSkills: knownSkillIds });
-      const json = buildEditorContentJson(segments);
-      editor.commands.setContent(json ?? inputText, { emitUpdate: false });
+      editor.commands.setContent(buildEditorContentJson(segments), { emitUpdate: false });
     }
   }, [inputText, editor, treeService, chats, knownSkillIds]);
 

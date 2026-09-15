@@ -676,6 +676,7 @@ describe('PublicationsService.getProjectShareEnvelope', () => {
         [
           {
             id: 'pub_current',
+            tag: 'v1',
             title: 'Shared tray',
             description: 'Shared description',
             visibility: 'private',
@@ -702,6 +703,7 @@ describe('PublicationsService.getProjectShareEnvelope', () => {
       project: { id: 'proj_1', name: 'Tray', description: 'A tray' },
       currentPublication: {
         id: 'pub_current',
+        tag: 'v1',
         title: 'Shared tray',
         description: 'Shared description',
         visibility: 'private',

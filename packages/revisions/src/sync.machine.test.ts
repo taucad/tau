@@ -566,6 +566,58 @@ describe('syncMachine', () => {
     }
   });
 
+  it('integrates history while failed record projections stay durable and retryable', async () => {
+    const harness = start();
+    await settleWhenRunning(harness.effects, 'fetch', {
+      output: {
+        leases: { [mainRef]: 'remote-head' },
+        integration: 'fastForward',
+        records: [
+          { name: chatRef, status: 'updated', head: 'chat-2' },
+          { name: 'refs/tau/chats/broken', status: 'rejected', head: 'broken-2', reason: 'invalid chat' },
+          { name: 'refs/tau/evidence/exports', status: 'rejected', head: 'exports-2', reason: 'disk full' },
+        ],
+      } satisfies SyncFetchActorOutput,
+    });
+    await settleWhenRunning(harness.effects, 'fastForward', {
+      output: { checkoutId: 'live', revisionId: 'remote-head', treeId: 'remote-tree' },
+    });
+    await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().matches('queued')).toBe(true);
+    });
+    expect(harness.parent.events).toContainEqual({
+      type: 'checkoutChanged',
+      checkoutId: 'live',
+      revisionId: 'remote-head',
+      treeId: 'remote-tree',
+      branch: 'main',
+    });
+    expect(harness.actor.getSnapshot().context.pending).toEqual([
+      expect.objectContaining({ ref: 'refs/tau/chats/broken', operation: 'projection', reason: 'invalid chat' }),
+      expect.objectContaining({ ref: 'refs/tau/evidence/exports', operation: 'projection', reason: 'disk full' }),
+    ]);
+
+    harness.clock.advance(5000);
+    await settleWhenRunning(harness.effects, 'fetch', {
+      output: {
+        leases: { [mainRef]: 'remote-head' },
+        integration: 'upToDate',
+        records: [
+          { name: 'refs/tau/chats/broken', status: 'upToDate', head: 'broken-2' },
+          { name: 'refs/tau/evidence/exports', status: 'upToDate', head: 'exports-2' },
+        ],
+      } satisfies SyncFetchActorOutput,
+    });
+    await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().matches('backedUp')).toBe(true);
+    });
+    expect(harness.actor.getSnapshot().context.pending).toEqual([]);
+
+    harness.stop();
+  });
+
   it('row 23: syncNow { pushId } is answered by exactly one correlated pushSettled', async () => {
     const harness = start();
     await openCleanly(harness);

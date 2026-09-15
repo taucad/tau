@@ -11,12 +11,12 @@
  * cut against an engine-recorded head, so the two have to be the same id.
  */
 
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createActor } from 'xstate';
+import { createActor, createMachine } from 'xstate';
 
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
 import { ImmutableRevisionTree, revisionId } from '@taucad/filesystem/revisions';
@@ -86,6 +86,23 @@ const fixture = async (
   const root = native?.root ?? (await mkdtemp(join(tmpdir(), 'tau-revision-effects-')));
   roots.push(root);
   const filesystem = new NodeFsProvider(native?.liveRoot ?? root);
+  const linkedRoot =
+    native === undefined ? await mkdtemp(join(tmpdir(), 'tau-revision-effects-checkouts-')) : undefined;
+  if (linkedRoot !== undefined) {
+    roots.push(linkedRoot);
+  }
+  const linkedFilesystems = new Map<string, RootedFileSystem>();
+  const linkedFilesystem = async (id: string): Promise<RootedFileSystem> => {
+    const existing = linkedFilesystems.get(id);
+    if (existing !== undefined) {
+      return existing;
+    }
+    const checkoutRoot = join(linkedRoot ?? '', id);
+    await mkdir(checkoutRoot, { recursive: true });
+    const created = new NodeFsProvider(checkoutRoot);
+    linkedFilesystems.set(id, created);
+    return created;
+  };
   for (const [path, content] of Object.entries(files)) {
     // oxlint-disable-next-line no-await-in-loop -- a handful of fixture files, written in order.
     await filesystem.writeFile(path, content);
@@ -94,13 +111,20 @@ const fixture = async (
     native?.port ??
     createIsomorphicGitRevisionPort({
       filesystem,
-      checkouts: { projectId: 'project-1', root: () => filesystem },
+      checkouts: { projectId: 'project-1', root: linkedFilesystem },
     });
   const actors = createRevisionActors({
     port,
     projectId: 'project-1',
     authorityEpoch: 'epoch-1',
-    filesystem: (checkout) => wrap(native === undefined ? filesystem : new NodeFsProvider(checkout.root)),
+    filesystem: async (checkout) =>
+      wrap(
+        native === undefined
+          ? checkout.kind === 'live'
+            ? filesystem
+            : await linkedFilesystem(checkout.id)
+          : new NodeFsProvider(checkout.root),
+      ),
     ...extra,
   });
   return { root, filesystem, port, actors };
@@ -353,9 +377,7 @@ describe('settling a turn', () => {
     const swallowed = new Set(['notes.md']);
     const { port, actors, filesystem } = await fixture({ 'main.ts': 'export const size = 1;\n' }, (real) =>
       Object.assign(Object.create(real) as RootedFileSystem, {
-        writeFile: async (path: string, content: Parameters<RootedFileSystem['writeFile']>[1]) =>
-          swallowed.has(path) ? undefined : real.writeFile(path, content),
-        unlink: async (path: string) => (swallowed.has(path) ? undefined : real.unlink(path)),
+        rename: async (from: string, to: string) => (swallowed.has(to) ? undefined : real.rename(from, to)),
       }),
     );
     await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
@@ -759,7 +781,7 @@ for (const actorSet of actorSets) {
       let failWrite = true;
       const wrapped = Object.assign(Object.create(context.filesystem) as RootedFileSystem, {
         writeFile: async (path: string, content: Parameters<RootedFileSystem['writeFile']>[1]) => {
-          if (path === 'main.ts' && failWrite) {
+          if (path.includes('.main.ts.') && path.endsWith('.tmp') && failWrite) {
             failWrite = false;
             throw new Error('injected write failure');
           }
@@ -876,8 +898,126 @@ for (const actorSet of actorSets) {
       expect(await context.filesystem.readFile('main.ts', 'utf8')).toBe('base\n');
       expect(await context.port.readRef('main')).toBe(context.base);
     }, 30_000);
+
+    it('preserves a write that lands during replacement and rejects the stale fast-forward', async () => {
+      const context = await synchronized();
+      let injected = false;
+      const wrapped = Object.assign(Object.create(context.filesystem) as RootedFileSystem, {
+        rename: async (from: string, to: string) => {
+          if (from === 'main.ts' && to.includes('.main.ts.') && !injected) {
+            injected = true;
+            await context.filesystem.writeFile('main.ts', 'user edit after validation\n');
+          }
+          return context.filesystem.rename(from, to);
+        },
+      });
+      const actors = createRevisionActors({
+        port: context.port,
+        projectId: 'project-1',
+        authorityEpoch: 'epoch-1',
+        filesystem: () => wrapped,
+      });
+
+      await expect(run(actors.sync.fastForward, { remote: 'tau', branch: 'main' })).rejects.toMatchObject({
+        code: 'CHECKOUT_CONFLICT',
+      });
+      expect(injected).toBe(true);
+      expect(await context.filesystem.readFile('main.ts', 'utf8')).toBe('user edit after validation\n');
+      expect(await context.port.readRef('main')).toBe(context.base);
+    }, 30_000);
+
+    it('revalidates the current branch before applying a fetched fast-forward', async () => {
+      const context = await synchronized();
+      const localTree = new ImmutableRevisionTree(
+        context.baseTree
+          .entries()
+          .map((entry) => [entry.path, entry.path === 'main.ts' ? 'new local revision\n' : entry.content, entry.mode]),
+      );
+      const local = await context.port.writeRevision({
+        parents: [context.base],
+        tree: localTree,
+        provenance: { source: 'user', actorId: 'ada', createdAt: Date.UTC(2026, 8, 13, 3) },
+        summary: { generated: 'New local revision' },
+      });
+      await context.filesystem.writeFile('main.ts', 'new local revision\n');
+      await context.port.updateRef({ name: 'main', expectedHead: context.base, head: revisionId(local.commitId) });
+
+      await expect(run(context.actors.sync.fastForward, { remote: 'tau', branch: 'main' })).rejects.toMatchObject({
+        code: 'CHECKOUT_CONFLICT',
+      });
+      expect(await context.port.readRef('main')).toBe(local.commitId);
+      expect(await context.filesystem.readFile('main.ts', 'utf8')).toBe('new local revision\n');
+    }, 30_000);
+
+    it('does not advance a branch that another checkout has open', async () => {
+      const context = await synchronized();
+      const feature = await context.port.addCheckout?.({ branch: 'feature', from: context.base });
+      expect(feature).toMatchObject({ kind: 'linked', branch: 'feature' });
+      await context.port.updateRef({ name: 'refs/remotes/tau/feature', expectedHead: undefined, head: context.base });
+      const wrappedPort: RevisionPort = {
+        ...context.port,
+        listRemoteRefs: async () => [
+          { name: 'refs/heads/main', head: context.base },
+          { name: 'refs/heads/feature', head: context.remote },
+        ],
+        fetch: async () => {
+          await context.port.updateRef({
+            name: 'refs/remotes/tau/feature',
+            expectedHead: context.base,
+            head: context.remote,
+          });
+          return { refs: [{ name: 'refs/remotes/tau/feature', head: context.remote }] };
+        },
+      };
+      const actors = createRevisionActors({
+        port: wrappedPort,
+        projectId: 'project-1',
+        authorityEpoch: 'epoch-1',
+        filesystem: () => context.filesystem,
+      });
+
+      await run(actors.sync.fetch, { remote: 'tau', branch: 'main', deadlineMilliseconds: 10_000 });
+      expect(await context.port.readRef('feature')).toBe(context.base);
+    }, 30_000);
   });
 }
+
+describe('checkout fence cancellation', () => {
+  it('keeps a later waiter behind the active owner when the middle waiter stops', async () => {
+    const { actors } = await fixture();
+    const { fence } = actors.checkout;
+    if (fence === undefined) {
+      throw new Error('The checkout fence actor is required.');
+    }
+    const owner = (onGranted: () => void) =>
+      createActor(
+        createMachine({
+          invoke: { src: fence, input: { checkoutId: 'live' } },
+          on: { fenceGranted: { actions: onGranted } },
+        }),
+      );
+    const firstGranted = Promise.withResolvers<void>();
+    let thirdGranted = false;
+    const first = owner(firstGranted.resolve);
+    const second = owner(() => undefined);
+    const third = owner(() => {
+      thirdGranted = true;
+    });
+    first.start();
+    await firstGranted.promise;
+    second.start();
+    second.stop();
+    third.start();
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 0);
+    });
+    expect(thirdGranted).toBe(false);
+    first.stop();
+    await expect.poll(() => thirdGranted).toBe(true);
+    third.stop();
+    await actors.settled();
+  });
+});
 
 describe('independent sync record failures', () => {
   it('pushes history and a second chat when the first chat cannot be prepared', async () => {
@@ -947,6 +1087,134 @@ describe('independent sync record failures', () => {
       }),
     );
     expect(result.refs).toContainEqual(expect.objectContaining({ name: 'refs/tau/chats/chat-two', status: 'updated' }));
+  }, 30_000);
+
+  it('drains a delayed valid projection before reporting a sibling record failure', async () => {
+    const delayed = Promise.withResolvers<void>();
+    const started = Promise.withResolvers<void>();
+    const context = await fixture({ 'tau.json': '{"syncChats":true}\n' });
+    const projecting = Object.assign(Object.create(context.filesystem) as RootedFileSystem, {
+      writeFile: async (path: string, content: Parameters<RootedFileSystem['writeFile']>[1]) => {
+        if (path.endsWith('/broken/chat.json')) {
+          throw new Error('broken chat cannot be written');
+        }
+        if (path.endsWith('/valid/events/device-a.jsonl')) {
+          started.resolve();
+          await delayed.promise;
+        }
+        return context.filesystem.writeFile(path, content);
+      },
+    });
+    await context.port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const record = async (id: string, tree: ImmutableRevisionTree) => {
+      const receipt = await context.port.writeRevision({
+        parents: [],
+        tree,
+        provenance: { source: 'user', actorId: 'device-a', createdAt: 1 },
+        summary: { generated: `Chat ${id}` },
+      });
+      return { name: `refs/remotes/tau/tau/chats/${id}`, head: revisionId(receipt.commitId) };
+    };
+    const references = await Promise.all([
+      record('broken', new ImmutableRevisionTree([['chat.json', '{"name":"Broken"}']])),
+      record('valid', new ImmutableRevisionTree([['events/device-a.jsonl', '{"sequence":0}\n']])),
+    ]);
+    const remote: RevisionPort = {
+      ...context.port,
+      listRemoteRefs: async () =>
+        references.map((ref) => ({ name: ref.name.replace('refs/remotes/tau/', 'refs/'), head: ref.head })),
+      fetch: async () => ({ refs: references }),
+    };
+    const actors = createRevisionActors({
+      port: remote,
+      projectId: 'project-1',
+      authorityEpoch: 'epoch-1',
+      filesystem: () => projecting,
+      deviceId: () => 'device-b',
+    });
+
+    let settled = false;
+    const fetching = (async () => {
+      const result = await run<Readonly<{ records?: ReadonlyArray<Readonly<{ name: string; status: string }>> }>>(
+        actors.sync.fetch,
+        { remote: 'tau', branch: 'main', deadlineMilliseconds: 10_000 },
+      );
+      settled = true;
+      return result;
+    })();
+    await started.promise;
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    delayed.resolve();
+    const result = await fetching;
+    expect(result.records).toEqual([
+      expect.objectContaining({ name: 'refs/tau/chats/broken', status: 'rejected' }),
+      expect.objectContaining({ name: 'refs/tau/chats/valid', status: 'updated' }),
+    ]);
+    expect(await context.filesystem.readFile('.tau/chats/valid/events/device-a.jsonl', 'utf8')).toBe(
+      '{"sequence":0}\n',
+    );
+  }, 30_000);
+
+  it('retains a differing local export before adopting and re-offering the fetched value', async () => {
+    const context = await fixture({
+      'tau.json': '{"syncLargeExports":true}\n',
+      'exports/shared.step': 'old local output\n',
+      'exports/local.step': 'local only\n',
+    });
+    await context.port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const receipt = await context.port.writeRevision({
+      parents: [],
+      tree: new ImmutableRevisionTree([
+        ['exports/shared.step', 'new remote output\n'],
+        ['exports/remote.step', 'remote only\n'],
+      ]),
+      provenance: { source: 'user', actorId: 'device-a', createdAt: 1 },
+      summary: { generated: 'Remote exports' },
+    });
+    const head = revisionId(receipt.commitId);
+    const fetchedRef = { name: 'refs/remotes/tau/tau/evidence/exports', head };
+    let offered: ImmutableRevisionTree | undefined;
+    let offeredParents: readonly string[] | undefined;
+    const remote: RevisionPort = {
+      ...context.port,
+      listRemoteRefs: async () => [{ name: 'refs/tau/evidence/exports', head }],
+      fetch: async () => ({ refs: [fetchedRef] }),
+      push: async (input) => ({
+        refs: await Promise.all(
+          input.refs.map(async (ref) => {
+            const localHead = await context.port.readRef(ref.name);
+            offered = localHead === undefined ? undefined : await context.port.readTree(localHead);
+            const revision = localHead === undefined ? undefined : await context.port.readRevision(localHead);
+            offeredParents = revision?.parents;
+            return { name: ref.name, status: 'updated', head: localHead };
+          }),
+        ),
+      }),
+    };
+    const actors = createRevisionActors({
+      port: remote,
+      projectId: 'project-1',
+      authorityEpoch: 'epoch-1',
+      filesystem: () => context.filesystem,
+    });
+
+    await run(actors.sync.fetch, { remote: 'tau', branch: 'main', deadlineMilliseconds: 10_000 });
+    expect(await context.filesystem.readFile('exports/shared.step', 'utf8')).toBe('new remote output\n');
+    expect(await context.filesystem.readFile('exports/local.step', 'utf8')).toBe('local only\n');
+    expect(await context.filesystem.readFile('exports/remote.step', 'utf8')).toBe('remote only\n');
+    const conflicts = await context.filesystem.readdir('.tau/artifacts/sync-conflicts');
+    expect(conflicts).toHaveLength(1);
+    expect(await context.filesystem.readFile(`.tau/artifacts/sync-conflicts/${conflicts[0]}`, 'utf8')).toBe(
+      'old local output\n',
+    );
+
+    await run(actors.sync.push, { remote: 'tau', branch: 'main', leases: { 'refs/tau/evidence/exports': head } });
+    expect(new TextDecoder().decode(offered?.get('exports/shared.step'))).toBe('new remote output\n');
+    expect(new TextDecoder().decode(offered?.get('exports/local.step'))).toBe('local only\n');
+    expect(new TextDecoder().decode(offered?.get('exports/remote.step'))).toBe('remote only\n');
+    expect(offered?.entries().some((entry) => entry.path.startsWith('.tau/artifacts/sync-conflicts/'))).toBe(true);
+    expect(offeredParents).toContain(head);
   }, 30_000);
 });
 
@@ -1081,6 +1349,36 @@ for (const actorSet of actorSets) {
       expect(record?.provenance.source).toBe('merge');
       expect(new TextDecoder().decode(await filesystem.readFile('a.txt'))).toBe('theirs\n');
       expect(new TextDecoder().decode(await filesystem.readFile('b.txt'))).toBe('theirs only\n');
+    }, 30_000);
+
+    it('restores the target checkout when publishing the merge loses its lease', async () => {
+      const context = await twoLines({ ours: 'base\n', theirs: 'theirs\n', extra: { 'b.txt': 'theirs only\n' } });
+      const refusingPort: RevisionPort = {
+        ...context.port,
+        updateRef: async (input) =>
+          input.name === 'main'
+            ? {
+                status: 'conflicted',
+                name: input.name,
+                expectedHead: input.expectedHead,
+                actualHead: revisionId(context.ours),
+                proposedHead: input.head,
+              }
+            : context.port.updateRef(input),
+      };
+      const actors = createRevisionActors({
+        port: refusingPort,
+        projectId: 'project-1',
+        authorityEpoch: 'epoch-1',
+        filesystem: () => context.filesystem,
+      });
+
+      await expect(
+        run(actors.branch.merge, { projectId: 'project-1', branch: 'feature', into: 'main' }),
+      ).rejects.toThrow(/moved while the merge was running/u);
+      expect(await context.port.readRef('main')).toBe(context.ours);
+      expect(await context.filesystem.readFile('a.txt', 'utf8')).toBe('base\n');
+      expect(await context.filesystem.exists('b.txt')).toBe(false);
     }, 30_000);
 
     it('refuses to overwrite work no revision holds', async () => {

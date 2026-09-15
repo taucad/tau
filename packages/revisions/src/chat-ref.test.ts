@@ -264,6 +264,101 @@ describe.each([
     ).toEqual([]);
   });
 
+  it.runIf(enabled)('never truncates a compatible foreign segment and rejects divergent bytes', async () => {
+    const id = `append_${_engine}`;
+    const old = await harness.port.writeRevision({
+      parents: [],
+      tree: new ImmutableRevisionTree([['events/device-a.jsonl', '{"leaderEpoch":"a","sequence":0}\n']]),
+      provenance: { source: 'user', actorId, createdAt: now },
+      summary: { generated: 'Old segment' },
+    });
+    const oldHead = revisionId(old.commitId);
+    const longer = await harness.port.writeRevision({
+      parents: [oldHead],
+      tree: new ImmutableRevisionTree([
+        ['events/device-a.jsonl', '{"leaderEpoch":"a","sequence":0}\n{"leaderEpoch":"a","sequence":1}\n'],
+      ]),
+      provenance: { source: 'user', actorId, createdAt: now + 1 },
+      summary: { generated: 'Longer segment' },
+    });
+    const longerHead = revisionId(longer.commitId);
+    const target = await createMemoryProvider();
+
+    await projectChats({
+      port: harness.port,
+      filesystem: target,
+      deviceId: 'device-c',
+      refs: [{ name: chatRefName(id), head: longerHead }],
+    });
+    await projectChats({
+      port: harness.port,
+      filesystem: target,
+      deviceId: 'device-c',
+      refs: [{ name: chatRefName(id), head: oldHead }],
+    });
+    expect(await readChatFile(target, 'events/device-a.jsonl', id)).toBe(
+      '{"leaderEpoch":"a","sequence":0}\n{"leaderEpoch":"a","sequence":1}\n',
+    );
+
+    const divergent = await harness.port.writeRevision({
+      parents: [oldHead],
+      tree: new ImmutableRevisionTree([
+        ['events/device-a.jsonl', '{"leaderEpoch":"a","sequence":0}\n{"different":true}\n'],
+      ]),
+      provenance: { source: 'user', actorId, createdAt: now + 2 },
+      summary: { generated: 'Divergent segment' },
+    });
+    await expect(
+      projectChats({
+        port: harness.port,
+        filesystem: target,
+        deviceId: 'device-c',
+        refs: [{ name: chatRefName(id), head: revisionId(divergent.commitId) }],
+      }),
+    ).rejects.toMatchObject({ code: 'CHECKOUT_CONFLICT' });
+    expect(await readChatFile(target, 'events/device-a.jsonl', id)).toBe(
+      '{"leaderEpoch":"a","sequence":0}\n{"leaderEpoch":"a","sequence":1}\n',
+    );
+  });
+
+  it.runIf(enabled)('applies remote-only metadata changes and preserves conflicting local edits', async () => {
+    const id = `metadata_${_engine}`;
+    const first = await harness.port.writeRevision({
+      parents: [],
+      tree: new ImmutableRevisionTree([['chat.json', '{"name":"First"}']]),
+      provenance: { source: 'user', actorId, createdAt: now },
+      summary: { generated: 'First metadata' },
+    });
+    const firstHead = revisionId(first.commitId);
+    const renamed = await harness.port.writeRevision({
+      parents: [firstHead],
+      tree: new ImmutableRevisionTree([['chat.json', '{"name":"Renamed remotely"}']]),
+      provenance: { source: 'user', actorId, createdAt: now + 1 },
+      summary: { generated: 'Renamed metadata' },
+    });
+    const target = await createMemoryProvider();
+    for (const head of [firstHead, revisionId(renamed.commitId)]) {
+      await projectChats({
+        port: harness.port,
+        filesystem: target,
+        deviceId: 'device-c',
+        refs: [{ name: chatRefName(id), head }],
+      });
+    }
+    expect(await readChatFile(target, 'chat.json', id)).toBe('{"name":"Renamed remotely"}');
+
+    await target.writeFile(`${chatRecordsPath(id)}/chat.json`, '{"name":"Local edit"}');
+    await expect(
+      projectChats({
+        port: harness.port,
+        filesystem: target,
+        deviceId: 'device-c',
+        refs: [{ name: chatRefName(id), head: firstHead }],
+      }),
+    ).rejects.toMatchObject({ code: 'CHECKOUT_CONFLICT' });
+    expect(await readChatFile(target, 'chat.json', id)).toBe('{"name":"Local edit"}');
+  });
+
   it.runIf(enabled)('never projects this device back over its own segment', async () => {
     const head = await harness.port.readRef(chatRefName(chatId));
     const target = await createMemoryProvider();
@@ -328,7 +423,7 @@ describe.each([
         {
           'chat.json': '{"name":"local edit"}',
           'events.jsonl': 'mine\n',
-          'events/other.jsonl': 'new remote segment\n',
+          'events/other.jsonl': 'old remote segment\nnew remote event\n',
         },
         staleChat,
       );
@@ -343,19 +438,23 @@ describe.each([
         now,
       });
       expect(written.status).toBe('updated');
-      expect(await readChatFile(harness.checkout, 'events/other.jsonl', staleChat)).toBe('new remote segment\n');
+      expect(await readChatFile(harness.checkout, 'events/other.jsonl', staleChat)).toBe(
+        'old remote segment\nnew remote event\n',
+      );
       const union = await harness.port.readTree(written.head!);
-      expect(decoder.decode(union?.get('events/other.jsonl'))).toBe('new remote segment\n');
+      expect(decoder.decode(union?.get('events/other.jsonl'))).toBe('old remote segment\nnew remote event\n');
       expect(decoder.decode(union?.get('chat.json'))).toBe('{"name":"local edit"}');
 
       const projected = await createMemoryProvider();
       await projected.writeFile(`${chatRecordsPath(staleChat)}/chat.json`, '{"name":"pending local edit"}');
-      await projectChats({
-        port: harness.port,
-        filesystem: projected,
-        deviceId: 'third',
-        refs: [{ name: chatRefName(staleChat), head: written.head! }],
-      });
+      await expect(
+        projectChats({
+          port: harness.port,
+          filesystem: projected,
+          deviceId: 'third',
+          refs: [{ name: chatRefName(staleChat), head: written.head! }],
+        }),
+      ).rejects.toMatchObject({ code: 'CHECKOUT_CONFLICT' });
       expect(await readChatFile(projected, 'chat.json', staleChat)).toBe('{"name":"pending local edit"}');
     },
   );
@@ -415,7 +514,9 @@ describe.each([
       writeRevision: async (revisionInput) => {
         if (!interleaved) {
           interleaved = true;
-          await writeChatFiles(harness.checkout, { 'events.jsonl': 'the other writer won\n' });
+          await writeChatFiles(harness.checkout, {
+            'events.jsonl': '{"leaderEpoch":"e1","sequence":0}\n{"s":1}\nthe other writer won\n',
+          });
           await write('device-a');
         }
         return harness.port.writeRevision(revisionInput);

@@ -11,6 +11,9 @@ export const assertMaterializableRevisionTree = (tree: ImmutableRevisionTree): v
       throw new RevisionPortError('UNSUPPORTED_OPERATION', `Tracked path is reserved by Tau: ${path}`);
     }
     const portable = path.normalize('NFC').toLowerCase();
+    if (!classify(portable).versioned) {
+      throw new RevisionPortError('UNSUPPORTED_OPERATION', `Tracked path aliases a path reserved by Tau: ${path}`);
+    }
     const collision = portablePaths.get(portable);
     if (collision !== undefined && collision !== path) {
       throw new RevisionPortError(
@@ -19,5 +22,16 @@ export const assertMaterializableRevisionTree = (tree: ImmutableRevisionTree): v
       );
     }
     portablePaths.set(portable, path);
+  }
+  for (const [portable, path] of portablePaths) {
+    for (let index = portable.indexOf('/'); index !== -1; index = portable.indexOf('/', index + 1)) {
+      const collision = portablePaths.get(portable.slice(0, index));
+      if (collision !== undefined) {
+        throw new RevisionPortError(
+          'UNSUPPORTED_OPERATION',
+          `Tracked paths collide as a file and directory on a supported filesystem: ${collision}, ${path}`,
+        );
+      }
+    }
   }
 };

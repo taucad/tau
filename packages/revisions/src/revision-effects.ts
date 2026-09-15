@@ -26,13 +26,14 @@
 import { captureRevisionTree } from '@taucad/filesystem';
 import type { RootedFileSystem } from '@taucad/filesystem';
 import { classify } from '@taucad/filesystem/path-registry';
+import { randomUuid } from '@taucad/utils/id';
 import {
   ImmutableRevisionTree,
   mergeRevisionTrees,
   renderConflictMarkers,
   revisionId,
 } from '@taucad/filesystem/revisions';
-import type { RevisionFileMode, RevisionTreeInput } from '@taucad/filesystem/revisions';
+import type { RevisionFileMode, RevisionId, RevisionTreeInput } from '@taucad/filesystem/revisions';
 import { conflictLabels, materializeConflict, readConflictTerms } from '#revision-conflict.js';
 import type { RevisionConflictTerms } from '#revision-conflict.js';
 import { integrationOf, mergeBaseHeads, mergeBaseOf } from '#revision-log-order.js';
@@ -792,9 +793,6 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       granted,
       release: () => {
         unlock();
-        if (fences.get(checkoutId) === queued) {
-          fences.delete(checkoutId);
-        }
       },
     };
   };
@@ -965,6 +963,36 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   const equalBytes = (left: Uint8Array<ArrayBuffer>, right: Uint8Array<ArrayBuffer>): boolean =>
     left.byteLength === right.byteLength && left.every((value, index) => value === right[index]);
 
+  const equalEntry = (
+    left: Readonly<{ content: Uint8Array<ArrayBuffer>; mode: RevisionFileMode }> | undefined,
+    right: Readonly<{ content: Uint8Array<ArrayBuffer>; mode: RevisionFileMode }> | undefined,
+  ): boolean =>
+    left === undefined ? right === undefined : right?.mode === left.mode && equalBytes(left.content, right.content);
+
+  const entryOf = async (
+    live: RootedFileSystem,
+    path: string,
+  ): Promise<Readonly<{ content: Uint8Array<ArrayBuffer>; mode: RevisionFileMode }> | undefined> => {
+    try {
+      const content = await live.readFile(path);
+      const mode = (await live.getFileMode?.(path)) ?? '100644';
+      return { content, mode };
+    } catch (error) {
+      const code = typeof error === 'object' && error !== null ? (error as NodeJS.ErrnoException).code : undefined;
+      if (code === 'ENOENT' || code === 'ENOTDIR') {
+        return undefined;
+      }
+      throw error;
+    }
+  };
+
+  const temporarySibling = (path: string): string => {
+    const separator = path.lastIndexOf('/');
+    const directory = separator === -1 ? '' : path.slice(0, separator + 1);
+    const name = path.slice(separator + 1);
+    return `${directory}.${name}.0.${randomUuid()}.tmp`;
+  };
+
   /**
    * Write one tree over a checkout and verify exactly what it applied.
    *
@@ -1001,25 +1029,79 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     try {
       for (const path of removedPaths) {
         signal?.throwIfAborted();
+        const expected = liveFiles.get(path);
+        const backup = temporarySibling(path);
         // oxlint-disable-next-line no-await-in-loop -- ordered application keeps retries deterministic.
-        await live.unlink(path);
+        await live.rename(path, backup);
+        // oxlint-disable-next-line no-await-in-loop -- the moved bytes prove what the rename removed.
+        const moved = await entryOf(live, backup);
+        if (!equalEntry(moved, expected)) {
+          // oxlint-disable-next-line no-await-in-loop -- recovery belongs to this ordered mutation.
+          if (!(await live.exists(path))) {
+            // oxlint-disable-next-line no-await-in-loop -- restore the concurrent winner before refusing the operation.
+            await live.rename(backup, path);
+          }
+          throw new RevisionPortError('CHECKOUT_CONFLICT', `${path} changed while these files were being updated.`);
+        }
+        // oxlint-disable-next-line no-await-in-loop -- the revision retains the removed bytes; the temporary copy is no longer needed.
+        await live.unlink(backup);
       }
       for (const [path, entry] of changedFiles) {
         signal?.throwIfAborted();
         const current = liveFiles.get(path);
-        if (current === undefined || !equalBytes(current.content, entry.content)) {
-          // oxlint-disable-next-line no-await-in-loop -- ordered application keeps retries deterministic.
-          await live.writeFile(path, entry.content);
-        }
-        if (live.setFileMode !== undefined) {
-          try {
-            // oxlint-disable-next-line no-await-in-loop -- mode belongs to the preceding file write.
-            await live.setFileMode(path, entry.mode);
-          } catch (error) {
+        const staged = temporarySibling(path);
+        const backup = current === undefined ? undefined : temporarySibling(path);
+        try {
+          // oxlint-disable-next-line no-await-in-loop -- stage bytes before touching the admitted path.
+          await live.writeFile(staged, entry.content);
+          if (live.setFileMode !== undefined) {
+            // oxlint-disable-next-line no-await-in-loop -- mode belongs to the staged file.
+            await live.setFileMode(staged, entry.mode);
+          }
+          if (backup !== undefined) {
+            // oxlint-disable-next-line no-await-in-loop -- moving first lets us verify the exact bytes being replaced.
+            await live.rename(path, backup);
+            // oxlint-disable-next-line no-await-in-loop -- the moved bytes are the replacement precondition.
+            const moved = await entryOf(live, backup);
+            if (!equalEntry(moved, current)) {
+              // oxlint-disable-next-line no-await-in-loop -- recovery belongs to this ordered mutation.
+              if (!(await live.exists(path))) {
+                // oxlint-disable-next-line no-await-in-loop -- put the concurrent winner back before refusing.
+                await live.rename(backup, path);
+              }
+              throw new RevisionPortError('CHECKOUT_CONFLICT', `${path} changed while these files were being updated.`);
+            }
+            // oxlint-disable-next-line no-await-in-loop -- this is the new-file compare step.
+          } else if (await live.exists(path)) {
+            throw new RevisionPortError(
+              'CHECKOUT_CONFLICT',
+              `${path} was created while these files were being updated.`,
+            );
+          }
+          // oxlint-disable-next-line no-await-in-loop -- the target must still be absent immediately before publication.
+          if (await live.exists(path)) {
+            throw new RevisionPortError('CHECKOUT_CONFLICT', `${path} changed while these files were being updated.`);
+          }
+          // oxlint-disable-next-line no-await-in-loop -- one atomic rename publishes the already-written file.
+          await live.rename(staged, path);
+          if (backup !== undefined) {
+            // oxlint-disable-next-line no-await-in-loop -- the recorded revision retains the prior bytes.
+            await live.unlink(backup);
+          }
+        } finally {
+          // oxlint-disable-next-line no-await-in-loop -- failed staging must not leak provider bookkeeping.
+          await live.unlink(staged).catch((error: unknown) => {
             if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
               throw error;
             }
-            // Verification below reports the swallowed/missing write in project terms.
+          });
+          if (backup !== undefined) {
+            // oxlint-disable-next-line no-await-in-loop -- a completed replacement already removed this path.
+            await live.unlink(backup).catch((error: unknown) => {
+              if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+                throw error;
+              }
+            });
           }
         }
       }
@@ -1051,6 +1133,76 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     }
   };
 
+  const recoveryTree = (
+    before: ImmutableRevisionTree,
+    target: ImmutableRevisionTree,
+    current: ImmutableRevisionTree,
+  ): ImmutableRevisionTree => {
+    const beforeFiles = new Map(before.entries().map((entry) => [entry.path, entry]));
+    const targetFiles = new Map(target.entries().map((entry) => [entry.path, entry]));
+    const currentFiles = new Map(current.entries().map((entry) => [entry.path, entry]));
+    const affected = new Set([...beforeFiles.keys(), ...targetFiles.keys()]);
+    for (const path of affected) {
+      const beforeEntry = beforeFiles.get(path);
+      const targetEntry = targetFiles.get(path);
+      if (equalEntry(beforeEntry, targetEntry) || !equalEntry(currentFiles.get(path), targetEntry)) {
+        continue;
+      }
+      if (beforeEntry === undefined) {
+        currentFiles.delete(path);
+      } else {
+        currentFiles.set(path, beforeEntry);
+      }
+    }
+    return new ImmutableRevisionTree(
+      [...currentFiles.values()].map((entry) => [entry.path, entry.content, entry.mode] as RevisionTreeInput),
+    );
+  };
+
+  /** Apply bytes and their graph update as one checkout-owned recoverable operation. */
+  const materializeTree = async <Result = void>(
+    place: Checkout,
+    target: ImmutableRevisionTree,
+    materialization: Readonly<{
+      signal?: AbortSignal;
+      validate?: (before: ImmutableRevisionTree) => Promise<void>;
+      publish?: () => Promise<Result>;
+    }> = {},
+  ): Promise<Readonly<{ paths: readonly string[]; result: Result | undefined }>> =>
+    withCheckoutFence(place.id, async () => {
+      const before = await capture(place);
+      await materialization.validate?.(before);
+      try {
+        const paths = await applyTree(place, target, { from: before, signal: materialization.signal });
+        materialization.signal?.throwIfAborted();
+        const applied = await capture(place, target);
+        const appliedFiles = new Map(applied.entries().map((entry) => [entry.path, entry]));
+        const targetFiles = new Map(target.entries().map((entry) => [entry.path, entry]));
+        if (paths.some((path) => !equalEntry(appliedFiles.get(path), targetFiles.get(path)))) {
+          throw new RevisionPortError('CHECKOUT_CONFLICT', 'These files changed while the revision was being applied.');
+        }
+        return { paths, result: await materialization.publish?.() };
+      } catch (error) {
+        try {
+          const current = await capture(place, before);
+          const recovery = recoveryTree(before, target, current);
+          if (
+            revisionTreeId(await recordedTree(current), await formatOf()) !==
+            revisionTreeId(await recordedTree(recovery), await formatOf())
+          ) {
+            await applyTree(place, recovery, { from: current });
+          }
+        } catch (recoveryError) {
+          const reason = error instanceof Error ? error.message : String(error);
+          throw new AggregateError(
+            [error, recoveryError],
+            `${reason} The prior files could not be restored completely.`,
+          );
+        }
+        throw error;
+      }
+    });
+
   /**
    * Where this device records what the remote has not acknowledged.
    *
@@ -1064,7 +1216,10 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     typeof value === 'object' &&
     value !== null &&
     typeof (value as { ref?: unknown }).ref === 'string' &&
-    typeof (value as { reason?: unknown }).reason === 'string';
+    typeof (value as { reason?: unknown }).reason === 'string' &&
+    ((value as { operation?: unknown }).operation === undefined ||
+      (value as { operation?: unknown }).operation === 'push' ||
+      (value as { operation?: unknown }).operation === 'projection');
 
   /*
    * Read leniently: a half-written or foreign record holds nothing, and an
@@ -1191,7 +1346,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   };
 
   /** Record generated evidence on its own ref; authored history stays clean. */
-  const recordEvidence = async (enabled: boolean): Promise<readonly SyncRefOutcome[]> => {
+  const recordEvidence = async (enabled: boolean, remoteHead?: string): Promise<readonly SyncRefOutcome[]> => {
     if (!enabled) {
       return [];
     }
@@ -1203,11 +1358,15 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         return [];
       }
       const currentTreeId = await treeIdOf(current);
-      if (currentTreeId === revisionTreeId(await recordedTree(tree), await formatOf())) {
+      if (
+        currentTreeId === revisionTreeId(await recordedTree(tree), await formatOf()) &&
+        (remoteHead === undefined || current === remoteHead)
+      ) {
         return [{ name: evidenceRefName, status: 'upToDate', head: current }];
       }
+      const parents = [...new Set([current, remoteHead].filter((head): head is string => head !== undefined))];
       const receipt = await port.writeRevision({
-        parents: current === undefined ? [] : [revisionId(current)],
+        parents: parents.map((head) => revisionId(head)),
         tree,
         provenance: provenanceOf('save', [], undefined),
         summary: Object.freeze({ generated: 'Backed up generated exports' }),
@@ -1234,7 +1393,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     }
   };
 
-  /** Restore only absent generated evidence; never overwrite this device's output. */
+  /** Restore generated evidence, retaining a differing local value before replacement. */
   const projectEvidence = async (
     references: ReadonlyArray<Readonly<{ name: string; head: string }>>,
     signal: AbortSignal,
@@ -1264,14 +1423,42 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     const records = await recordsFileSystem();
     for (const entry of tree.entries()) {
       signal.throwIfAborted();
-      // oxlint-disable-next-line no-await-in-loop -- each absent record is restored once.
-      if (!(await records.exists(entry.path))) {
-        // oxlint-disable-next-line no-await-in-loop -- ordered writes keep projection deterministic.
-        await records.writeFile(entry.path, entry.content);
-        if (records.setFileMode !== undefined) {
-          // oxlint-disable-next-line no-await-in-loop -- mode belongs to the preceding write.
-          await records.setFileMode(entry.path, entry.mode);
+      // oxlint-disable-next-line no-await-in-loop -- each record is reconciled before the next.
+      const current = await entryOf(records, entry.path);
+      if (equalEntry(current, entry)) {
+        continue;
+      }
+      if (current !== undefined) {
+        const conflictBase = `.tau/artifacts/sync-conflicts/${encodeURIComponent(entry.path)}.${ref.head.slice(0, 12)}`;
+        let conflictPath: string | undefined;
+        let attempt = 0;
+        let retained: Awaited<ReturnType<typeof entryOf>>;
+        while (conflictPath === undefined) {
+          const candidate = attempt === 0 ? conflictBase : `${conflictBase}.${attempt}`;
+          // oxlint-disable-next-line no-await-in-loop -- finds a non-colliding retention path.
+          retained = tree.has(candidate) ? undefined : await entryOf(records, candidate);
+          if (!tree.has(candidate) && (retained === undefined || equalEntry(retained, current))) {
+            conflictPath = candidate;
+          } else {
+            attempt += 1;
+          }
         }
+        if (retained === undefined) {
+          signal.throwIfAborted();
+          // oxlint-disable-next-line no-await-in-loop -- preserve-before-replace is ordered deliberately.
+          await records.writeFile(conflictPath, current.content);
+          if (records.setFileMode !== undefined) {
+            // oxlint-disable-next-line no-await-in-loop -- mode belongs to the preceding write.
+            await records.setFileMode(conflictPath, current.mode);
+          }
+        }
+      }
+      signal.throwIfAborted();
+      // oxlint-disable-next-line no-await-in-loop -- replacement follows successful retention.
+      await records.writeFile(entry.path, entry.content);
+      if (records.setFileMode !== undefined) {
+        // oxlint-disable-next-line no-await-in-loop -- mode belongs to the preceding write.
+        await records.setFileMode(entry.path, entry.mode);
       }
     }
   };
@@ -1703,6 +1890,15 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         'The files you have open have changes that are not in a revision yet. Save a revision before merging.',
       );
     }
+    const validateTarget = async (current: ImmutableRevisionTree): Promise<void> => {
+      const currentTreeId = revisionTreeId(await recordedTree(current), await formatOf());
+      if (currentTreeId !== headTreeId) {
+        throw new RevisionPortError(
+          'CHECKOUT_CONFLICT',
+          'The files you have open changed while the merge was being prepared. Save a revision and try again.',
+        );
+      }
+    };
 
     const base =
       ours === undefined
@@ -1716,8 +1912,10 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       if (fastForward === undefined) {
         throw new RevisionPortError('UNKNOWN_REVISION', `The store holds no tree for ${sourceLabel}.`);
       }
-      await applyTree(target, fastForward, { from: live });
-      await publishMerge(input.into, ours, theirs);
+      await materializeTree(target, fastForward, {
+        validate: validateTarget,
+        publish: async () => publishMerge(input.into, ours, theirs),
+      });
       return { status: 'merged', revisionId: theirs };
     }
 
@@ -1763,8 +1961,10 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       provenance: provenanceOf('merge', [], undefined),
       summary: Object.freeze({ generated: `Merged ${sourceLabel} into ${input.into}` }),
     });
-    await applyTree(target, merged.tree, { from: live });
-    await publishMerge(input.into, ours, revisionId(receipt.commitId));
+    await materializeTree(target, merged.tree, {
+      validate: validateTarget,
+      publish: async () => publishMerge(input.into, ours, revisionId(receipt.commitId)),
+    });
     return { status: 'merged', revisionId: receipt.commitId };
   };
 
@@ -1920,29 +2120,30 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       }),
 
       writeLease: fromAuthorityPromise<Readonly<{ leaseIds: readonly string[] }>, TurnWriteLeaseActorInput>(
-        async ({ input }) => {
-          const records = await recordsFileSystem();
-          const lease: TurnLease = Object.freeze({
-            runId: input.runId,
-            turnId: input.turnId,
-            chatId: input.chatId,
-            checkoutId: input.checkoutId,
-            ...(input.baseRevisionId === undefined ? {} : { baseRevisionId: input.baseRevisionId }),
-            authorityEpoch,
-            startedAt: now(),
-          });
-          await records.writeFile(leasePathOf(input.runId), `${JSON.stringify(lease, undefined, 2)}\n`);
-          /* Every lease on this checkout, this turn's included and first: the
-           * provenance set (AC9), never a retirement list. The order carries
-           * the attribution — `provenanceOf` records the head of the set as the
-           * run that minted, and a directory read has no order of its own. */
-          const leases = await readLeases();
-          const held = leases
-            .filter((lease) => lease.checkoutId === input.checkoutId)
-            .map((lease) => lease.runId)
-            .filter((runId) => runId !== input.runId);
-          return { leaseIds: [input.runId, ...held] };
-        },
+        async ({ input }) =>
+          withCheckoutFence(input.checkoutId, async () => {
+            const records = await recordsFileSystem();
+            const lease: TurnLease = Object.freeze({
+              runId: input.runId,
+              turnId: input.turnId,
+              chatId: input.chatId,
+              checkoutId: input.checkoutId,
+              ...(input.baseRevisionId === undefined ? {} : { baseRevisionId: input.baseRevisionId }),
+              authorityEpoch,
+              startedAt: now(),
+            });
+            await records.writeFile(leasePathOf(input.runId), `${JSON.stringify(lease, undefined, 2)}\n`);
+            /* Every lease on this checkout, this turn's included and first: the
+             * provenance set (AC9), never a retirement list. The order carries
+             * the attribution — `provenanceOf` records the head of the set as the
+             * run that minted, and a directory read has no order of its own. */
+            const leases = await readLeases();
+            const held = leases
+              .filter((lease) => lease.checkoutId === input.checkoutId)
+              .map((lease) => lease.runId)
+              .filter((runId) => runId !== input.runId);
+            return { leaseIds: [input.runId, ...held] };
+          }),
       ),
 
       retireLease: fromAuthorityPromise<void, TurnRetireLeaseActorInput>(async ({ input }) => {
@@ -1974,7 +2175,16 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         if (merged.status === 'conflicted') {
           return { status: 'conflicted' };
         }
-        await applyTree(place, merged.tree, { from: live });
+        await materializeTree(place, merged.tree, {
+          validate: async (current) => {
+            if (
+              revisionTreeId(await recordedTree(current), await formatOf()) !==
+              revisionTreeId(await recordedTree(live), await formatOf())
+            ) {
+              throw new RevisionPortError('CHECKOUT_CONFLICT', 'These files changed while the turn was settling.');
+            }
+          },
+        });
         return { status: 'recorded' };
       }),
 
@@ -2031,14 +2241,13 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
             throw new RevisionPortError('ENGINE_FAILED', 'The restore plan is no longer held.');
           }
           const place = await placeOf(plan.checkoutId);
-          await applyTree(place, plan.tree, { from: await capture(place) });
           /* The checkout tracks the restored revision's branch, or nothing when
            * no branch names it — detached (A2). */
           const references = await port.listRefs();
           const branch = references.find((reference) => reference.head === plan.revisionId)?.name;
-          if (branch !== undefined && place.kind === 'live') {
-            await port.setHead(branch);
-          }
+          await materializeTree(place, plan.tree, {
+            publish: branch !== undefined && place.kind === 'live' ? async () => port.setHead(branch) : undefined,
+          });
           const treeId = await treeIdOf(plan.revisionId);
           return { revisionId: plan.revisionId, treeId: treeId ?? '', branch };
         },
@@ -2165,10 +2374,9 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         if (tree === undefined) {
           throw new RevisionPortError('UNKNOWN_REVISION', `The store holds no tree for ${input.branch}.`);
         }
-        await applyTree(place, tree, { from: await capture(place) });
-        if (place.kind === 'live') {
-          await port.setHead(input.branch);
-        }
+        await materializeTree(place, tree, {
+          publish: place.kind === 'live' ? async () => port.setHead(input.branch) : undefined,
+        });
         return {
           checkoutId: place.id,
           revisionId: head,
@@ -2363,14 +2571,18 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         });
         const branch = await branchNaming(input.revisionId);
         if (branch !== undefined) {
-          await publishMerge(branch, input.revisionId, receipt.commitId);
           const places = await listPlaces();
           const place = places.find((candidate) => candidate.branch === branch);
-          if (place !== undefined) {
+          if (place === undefined) {
+            await publishMerge(branch, input.revisionId, receipt.commitId);
+          } else {
             const tree = await port.readTree(revisionId(receipt.commitId));
-            if (tree !== undefined) {
-              await applyTree(place, tree, { from: await capture(place) });
+            if (tree === undefined) {
+              throw new RevisionPortError('UNKNOWN_REVISION', `The store holds no tree for ${receipt.commitId}.`);
             }
+            await materializeTree(place, tree, {
+              publish: async () => publishMerge(branch, input.revisionId, receipt.commitId),
+            });
           }
         }
         resolutions.delete(input.revisionId);
@@ -2659,7 +2871,10 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         await ensureStore();
         signal.throwIfAborted();
         const [syncChats, syncLargeExports] = await Promise.all([chatsAreSynced(), largeExportsAreSynced()]);
-        const preparedRecords = [...(await recordChats(syncChats)), ...(await recordEvidence(syncLargeExports))];
+        const preparedRecords = [
+          ...(await recordChats(syncChats)),
+          ...(await recordEvidence(syncLargeExports, input.leases[evidenceRefName])),
+        ];
         signal.throwIfAborted();
         const failedPreparation = new Set(
           preparedRecords.filter((entry) => entry.status === 'rejected').map((entry) => entry.name),
@@ -2854,7 +3069,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           places.flatMap((place) => (place.branch === undefined ? [] : [`refs/heads/${place.branch}`])),
         );
         for (const [branch, head] of advertisedBranches) {
-          if (branch === activeBranch) {
+          if (branch === activeBranch || checkedOut.has(branch)) {
             continue;
           }
           const local = localByName.get(branch);
@@ -2888,28 +3103,62 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           // oxlint-disable-next-line no-await-in-loop -- paired cleanup for the same remote branch.
           await port.updateRef({ name: tracking, expectedHead: revisionId(prior) });
         }
-        for (const [branch, head] of advertisedBranches) {
-          if (!localByName.has(branch)) {
-            localByName.set(branch, head);
-          }
-        }
         const branches = [...localByName]
           .filter(([name]) => !isHostLocalRef(name))
           .map(([name, head]) => ({ name: name.slice('refs/heads/'.length), head }));
         const context = await chatContext();
+        const recordTasks: Array<Promise<SyncRefOutcome>> = [];
         if (context !== undefined && syncChats) {
-          await Promise.all(
-            fetched.refs.map(async (ref) => {
-              const projected = await projectChats({ ...context, refs: [ref], signal });
-              if (projected.length > 0) {
-                options.onChatsProjected?.(projected);
+          for (const ref of fetched.refs) {
+            const chatId = chatIdOfRef(ref.name);
+            if (chatId === undefined) {
+              continue;
+            }
+            recordTasks.push(
+              (async (): Promise<SyncRefOutcome> => {
+                try {
+                  const projected = await projectChats({ ...context, refs: [ref], signal });
+                  if (projected.length > 0) {
+                    options.onChatsProjected?.(projected);
+                  }
+                  return {
+                    name: chatRefName(chatId),
+                    status: projected.length > 0 ? 'updated' : 'upToDate',
+                    head: ref.head,
+                  };
+                } catch (error) {
+                  return {
+                    name: chatRefName(chatId),
+                    status: 'rejected',
+                    head: ref.head,
+                    reason: error instanceof Error ? error.message : 'This chat could not be restored.',
+                  };
+                }
+              })(),
+            );
+          }
+        }
+        const fetchedEvidence = fetched.refs.find(
+          (ref) => ref.name === evidenceRefName || ref.name.endsWith('/tau/evidence/exports'),
+        );
+        if (syncLargeExports && fetchedEvidence !== undefined) {
+          recordTasks.push(
+            (async (): Promise<SyncRefOutcome> => {
+              try {
+                await projectEvidence([fetchedEvidence], signal);
+                return { name: evidenceRefName, status: 'upToDate', head: fetchedEvidence.head };
+              } catch (error) {
+                return {
+                  name: evidenceRefName,
+                  status: 'rejected',
+                  head: fetchedEvidence.head,
+                  reason: error instanceof Error ? error.message : 'Generated exports could not be restored.',
+                };
               }
-            }),
+            })(),
           );
         }
-        if (syncLargeExports) {
-          await projectEvidence(fetched.refs, signal);
-        }
+        const records = await Promise.all(recordTasks);
         /* The lease is keyed by the ref this host would *offer*, not by the
          * remote-tracking ref it landed in (P18). */
         const leases = Object.fromEntries(advertised.map((entry) => [entry.name, String(entry.head)]));
@@ -2938,7 +3187,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           const walk = await port.log({ heads: [remoteHead, localHead], limit: divergenceWalkLimit });
           return integrationOf(walk, localHead, remoteHead);
         })();
-        return { leases, integration, branches };
+        return { leases, integration, branches, records };
       }),
 
       /** A clean checkout takes the remote head; nothing is composed (A2). */
@@ -2962,42 +3211,48 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
             }
             return undefined;
           }
-          return withCheckoutFence(place.id, async () => {
-            const branch = `refs/heads/${input.branch}`;
-            const expected = await port.readRef(branch);
-            const target = await port.readTree(head);
-            signal.throwIfAborted();
-            if (target === undefined) {
-              throw new RevisionPortError('UNKNOWN_REVISION', `The store holds no tree for ${head}.`);
-            }
-            const before = await capture(place);
-            signal.throwIfAborted();
-            const expectedTreeId = await treeIdOf(expected);
-            const beforeTreeId = revisionTreeId(await recordedTree(before), await formatOf());
-            const pristineTreeId = revisionTreeId(generatedSetupTree, await formatOf());
-            const dirty =
-              expectedTreeId === undefined ? beforeTreeId !== pristineTreeId : expectedTreeId !== beforeTreeId;
-            const leases = await readLeases();
-            const leased = leases.some((lease) => lease.checkoutId === place.id);
-            signal.throwIfAborted();
-            if (dirty || leased) {
-              throw new RevisionPortError(
-                'CHECKOUT_CONFLICT',
-                leased
-                  ? 'These files are being changed by an active run. Synchronization will retry after it settles.'
-                  : 'These files have changes that are not in a revision yet. Save them before synchronizing.',
-              );
-            }
-
-            const restore = async (): Promise<void> => {
-              await applyTree(place, before, { from: await capture(place, before) });
-            };
-            try {
-              await applyTree(place, target, { from: before, signal });
+          const branch = `refs/heads/${input.branch}`;
+          const target = await port.readTree(head);
+          signal.throwIfAborted();
+          if (target === undefined) {
+            throw new RevisionPortError('UNKNOWN_REVISION', `The store holds no tree for ${head}.`);
+          }
+          let expected: RevisionId | undefined;
+          await materializeTree(place, target, {
+            signal,
+            validate: async (before) => {
+              expected = await port.readRef(branch);
+              if (expected !== undefined && expected !== head) {
+                const walk = await port.log({ heads: [head, expected], limit: divergenceWalkLimit });
+                if (integrationOf(walk, expected, head) !== 'fastForward') {
+                  throw new RevisionPortError(
+                    'CHECKOUT_CONFLICT',
+                    `${input.branch} changed after synchronization checked it. Fetch and compose the newer work first.`,
+                  );
+                }
+              }
+              signal.throwIfAborted();
+              const expectedTreeId = await treeIdOf(expected);
+              const beforeTreeId = revisionTreeId(await recordedTree(before), await formatOf());
+              const pristineTreeId = revisionTreeId(generatedSetupTree, await formatOf());
+              const dirty =
+                expectedTreeId === undefined ? beforeTreeId !== pristineTreeId : expectedTreeId !== beforeTreeId;
+              const leases = await readLeases();
+              const leased = leases.some((lease) => lease.checkoutId === place.id);
+              signal.throwIfAborted();
+              if (dirty || leased) {
+                throw new RevisionPortError(
+                  'CHECKOUT_CONFLICT',
+                  leased
+                    ? 'These files are being changed by an active run. Synchronization will retry after it settles.'
+                    : 'These files have changes that are not in a revision yet. Save them before synchronizing.',
+                );
+              }
+            },
+            publish: async () => {
               signal.throwIfAborted();
               const currentLeases = await readLeases();
               if (currentLeases.some((lease) => lease.checkoutId === place.id)) {
-                await restore();
                 throw new RevisionPortError(
                   'CHECKOUT_CONFLICT',
                   'A run started changing these files while synchronization was applying. It will retry after the run settles.',
@@ -3005,23 +3260,15 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
               }
               const updated = await port.updateRef({ name: branch, expectedHead: expected, head });
               if (updated.status !== 'updated') {
-                await restore();
                 throw new RevisionPortError('CHECKOUT_CONFLICT', `${input.branch} moved while synchronizing.`);
               }
-            } catch (error) {
-              const current = await capture(place, before);
-              const currentTreeId = revisionTreeId(await recordedTree(current), await formatOf());
-              if (currentTreeId !== beforeTreeId && (await port.readRef(branch)) === expected) {
-                await restore();
-              }
-              throw error;
-            }
-            const treeId = await treeIdOf(head);
-            if (treeId === undefined) {
-              throw new RevisionPortError('UNKNOWN_REVISION', `No recorded tree for ${head}.`);
-            }
-            return { checkoutId: place.id, revisionId: head, treeId };
+            },
           });
+          const treeId = await treeIdOf(head);
+          if (treeId === undefined) {
+            throw new RevisionPortError('UNKNOWN_REVISION', `No recorded tree for ${head}.`);
+          }
+          return { checkoutId: place.id, revisionId: head, treeId };
         },
       ),
 
@@ -3137,7 +3384,7 @@ export const createProjectRevisionsActor = (
 export const syncQuiesceMilliseconds = 5000;
 
 /* What the scheduler looks like when it owes this host nothing more. */
-const settledSyncStates = new Set<SyncFacet['state']>(['noRemote', 'backedUp', 'queued', 'conflicted', 'failed']);
+const settledSyncStates = new Set<SyncFacet['state']>(['noRemote', 'backedUp', 'queued', 'conflicted']);
 
 /**
  * Wait for the scheduler to finish pushing or to record what it could not push.
@@ -3148,34 +3395,48 @@ const settledSyncStates = new Set<SyncFacet['state']>(['noRemote', 'backedUp', '
  * record?* — and two implementations of it would be two bounds to keep in step
  * (W13 review 2 R2, P33).
  *
- * Bounded, and the bound is not a failure: after it the queue on disk is the
- * guarantee. W6-a3's rule applies to the states *before* a push as much as to
- * the push itself — `checking` and `pending` are both "not yet", so both are
- * waited on inside the bound.
+ * The bound is a failure unless the machine reached a state that proves either
+ * remote persistence or a durable local retry record. `checking` and `pending`
+ * are both "not yet", so both remain inside the wait.
  *
  * @param actor - The project's running revision root.
  * @param timeoutMilliseconds - How long to wait. Defaults to {@link syncQuiesceMilliseconds}.
- * @returns Nothing; the outcome is the push, or the record of its absence.
+ * @returns Once the push or its durable retry record is confirmed.
  * @public
  */
 export const awaitSyncSettled = async (
   actor: ProjectRevisionsActor,
   timeoutMilliseconds: number = syncQuiesceMilliseconds,
 ): Promise<void> => {
-  const isSettled = (): boolean =>
-    actor.getSnapshot().status !== 'active' ||
-    settledSyncStates.has(selectRevisionStatus(actor.getSnapshot()).sync.state);
-  if (isSettled()) {
+  const inspect = (): 'settled' | 'waiting' | Error => {
+    const snapshot = actor.getSnapshot();
+    const sync = selectRevisionStatus(snapshot).sync;
+    if (snapshot.status !== 'active') {
+      return new Error('Revision backup stopped before it settled.');
+    }
+    if (sync.state === 'failed') {
+      return new Error(sync.error ?? 'Revision backup failed before its retry could be recorded.');
+    }
+    return settledSyncStates.has(sync.state) ? 'settled' : 'waiting';
+  };
+  const initial = inspect();
+  if (initial instanceof Error) {
+    throw initial;
+  }
+  if (initial === 'settled') {
     return;
   }
   const quiesced = Promise.withResolvers<void>();
   const subscription = actor.subscribe(() => {
-    if (isSettled()) {
+    const outcome = inspect();
+    if (outcome instanceof Error) {
+      quiesced.reject(outcome);
+    } else if (outcome === 'settled') {
       quiesced.resolve();
     }
   });
   const bound = setTimeout(() => {
-    quiesced.resolve();
+    quiesced.reject(new Error('Revision backup did not settle before the close deadline.'));
   }, timeoutMilliseconds);
   try {
     await quiesced.promise;

@@ -249,13 +249,53 @@ const unionTree = (base: ImmutableRevisionTree | undefined, local: ChatTreeEntri
     files.set(entry.path, [entry.path, entry.content, entry.mode]);
   }
   for (const [path, content] of local) {
-    files.set(path, [path, content]);
+    const previous = files.get(path)?.[1];
+    const bytes =
+      previous instanceof Uint8Array && path.startsWith('events/') ? appendUnion(previous, content, path) : content;
+    files.set(path, [path, bytes]);
   }
   return new ImmutableRevisionTree(files.values());
 };
 
 const sameBytes = (left: Uint8Array<ArrayBuffer>, right: Uint8Array<ArrayBuffer>): boolean =>
   left.byteLength === right.byteLength && left.every((byte, index) => byte === right[index]);
+
+const startsWithBytes = (value: Uint8Array<ArrayBuffer>, prefix: Uint8Array<ArrayBuffer>): boolean =>
+  value.byteLength >= prefix.byteLength && prefix.every((byte, index) => value[index] === byte);
+
+const appendUnion = (
+  left: Uint8Array<ArrayBuffer>,
+  right: Uint8Array<ArrayBuffer>,
+  path: string,
+): Uint8Array<ArrayBuffer> => {
+  if (startsWithBytes(left, right)) {
+    return left;
+  }
+  if (startsWithBytes(right, left)) {
+    return right;
+  }
+  throw new RevisionPortError(
+    'CHECKOUT_CONFLICT',
+    `Chat segment ${path} diverged on two devices. Keep both records and retry the chat sync.`,
+  );
+};
+
+const reconcileMetadata = (
+  local: Uint8Array<ArrayBuffer> | undefined,
+  base: Uint8Array<ArrayBuffer> | undefined,
+  incoming: Uint8Array<ArrayBuffer> | undefined,
+): Uint8Array<ArrayBuffer> | undefined => {
+  if (local === undefined || (base !== undefined && sameBytes(local, base))) {
+    return incoming;
+  }
+  if (incoming === undefined || sameBytes(local, incoming) || (base !== undefined && sameBytes(incoming, base))) {
+    return local;
+  }
+  throw new RevisionPortError(
+    'CHECKOUT_CONFLICT',
+    'This chat’s details changed on two devices. Keep the local details or the incoming details, then retry.',
+  );
+};
 
 const sameTree = (left: ImmutableRevisionTree, right: ImmutableRevisionTree | undefined): boolean => {
   if (right === undefined || left.size !== right.size) {
@@ -304,20 +344,28 @@ const writeEntries = async (
   }>,
 ): Promise<boolean> => {
   const { filesystem, directory, entries, signal } = options;
-  const written = await Promise.all(
+  const writes = await Promise.allSettled(
     entries.map(async (entry) => {
       signal?.throwIfAborted();
       const target = `${directory}/${entry.path}`;
       const current = await readFileOrUndefined(filesystem, target);
-      if (current !== undefined && sameBytes(current, entry.content)) {
+      const content =
+        current !== undefined && entry.path.startsWith('events/')
+          ? appendUnion(current, entry.content, entry.path)
+          : entry.content;
+      if (current !== undefined && sameBytes(current, content)) {
         return false;
       }
       signal?.throwIfAborted();
-      await filesystem.writeFile(target, entry.content);
+      await filesystem.writeFile(target, content);
       return true;
     }),
   );
-  return written.includes(true);
+  const rejected = writes.find((result) => result.status === 'rejected');
+  if (rejected !== undefined) {
+    throw rejected.reason instanceof Error ? rejected.reason : new Error(String(rejected.reason));
+  }
+  return writes.filter((result) => result.status === 'fulfilled').some((result) => result.value);
 };
 
 const chatProvenance = (input: WriteChatRefInput, now: number): RevisionProvenance =>
@@ -469,7 +517,7 @@ export const replayChatSegment = async (input: ReplayChatSegmentInput): Promise<
  * @public
  */
 export const projectChats = async (input: ProjectChatsInput): Promise<readonly string[]> => {
-  const projected = await Promise.all(
+  const projected = await Promise.allSettled(
     input.refs.map(async (ref) => {
       const chatId = chatIdOfRef(ref.name);
       if (chatId === undefined) {
@@ -483,23 +531,36 @@ export const projectChats = async (input: ProjectChatsInput): Promise<readonly s
       input.signal?.throwIfAborted();
       const directory = chatRecordsPath(chatId);
       const localRecord = await readFileOrUndefined(input.filesystem, `${directory}/${chatRecordFileName}`);
+      const revision = await input.port.readRevision(ref.head);
+      const base = revision?.parents[0] === undefined ? undefined : await input.port.readTree(revision.parents[0]);
+      const incomingRecord = tree.get(chatRecordFileName);
+      const metadata = reconcileMetadata(localRecord, base?.get(chatRecordFileName), incomingRecord);
       const changed = await writeEntries({
         filesystem: input.filesystem,
         directory,
-        entries: tree
-          .entries()
-          .filter(
-            (entry) =>
-              entry.path !== chatSegmentPath(input.deviceId) &&
-              entry.path !== chatLogFileName &&
-              (entry.path !== chatRecordFileName || localRecord === undefined),
-          ),
+        entries: [
+          ...tree
+            .entries()
+            .filter(
+              (entry) =>
+                entry.path !== chatSegmentPath(input.deviceId) &&
+                entry.path !== chatLogFileName &&
+                entry.path !== chatRecordFileName,
+            ),
+          ...(metadata === undefined ? [] : [{ path: chatRecordFileName, content: metadata }]),
+        ],
         signal: input.signal,
       });
       return changed ? chatId : undefined;
     }),
   );
-  return Object.freeze(projected.filter((chatId) => chatId !== undefined));
+  const rejected = projected.find((result) => result.status === 'rejected');
+  if (rejected !== undefined) {
+    throw rejected.reason instanceof Error ? rejected.reason : new Error(String(rejected.reason));
+  }
+  return Object.freeze(
+    projected.flatMap((result) => (result.status === 'fulfilled' && result.value !== undefined ? [result.value] : [])),
+  );
 };
 
 /**

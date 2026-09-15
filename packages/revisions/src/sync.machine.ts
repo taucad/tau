@@ -55,6 +55,8 @@ export type SyncRefOutcome = Readonly<{
  */
 export type SyncQueueEntry = Readonly<{
   ref: string;
+  /** The retry this entry represents. Missing means a push from an older record. */
+  operation?: 'push' | 'projection';
   /**
    * The local head the remote has not taken, when this host knows it.
    *
@@ -154,6 +156,8 @@ export type SyncMachineContext = Readonly<{
    * closed within a second of opening would drop its own close flush.
    */
   pendingMint: boolean;
+  /** A fetch completed record projections whose durable retry slice must be written. */
+  recordQueueDirty: boolean;
   /** Where a divergence landed, when one did (A22). */
   conflictRef: string | undefined;
   error: string | undefined;
@@ -290,6 +294,8 @@ export type SyncFetchActorOutput = Readonly<{
   integration: 'upToDate' | 'fastForward' | 'diverged';
   /** Local branch refs after remote branch reconciliation, including ref-only branches. */
   branches?: ReadonlyArray<Readonly<{ name: string; head: string }>>;
+  /** Independent record projections attempted after the fetch. */
+  records?: readonly SyncRefOutcome[];
 }>;
 
 /** What applying the fetched head is asked for. @public */
@@ -345,10 +351,12 @@ const historyRefOf = (branch: string): string => `refs/heads/${branch}`;
  * @returns The narrowed ref list, or `undefined` when nothing is owed.
  */
 const narrowedOffer = (context: SyncMachineContext): readonly string[] | undefined =>
-  context.pending.length > 0 &&
+  context.pending.some((entry) => entry.operation !== 'projection') &&
   context.failure !== 'none' &&
-  context.pending.every((entry) => entry.ref !== historyRefOf(context.branch))
-    ? context.pending.map((entry) => entry.ref)
+  context.pending
+    .filter((entry) => entry.operation !== 'projection')
+    .every((entry) => entry.ref !== historyRefOf(context.branch))
+    ? context.pending.filter((entry) => entry.operation !== 'projection').map((entry) => entry.ref)
     : undefined;
 
 /**
@@ -404,7 +412,7 @@ const nextPending = (
 ): readonly SyncQueueEntry[] => {
   const { pending, outcomes, leases, now } = input;
   const offered = new Map(outcomes.map((entry) => [entry.name, entry]));
-  const kept = pending.filter((entry) => !offered.has(entry.ref));
+  const kept = pending.filter((entry) => entry.operation === 'projection' || !offered.has(entry.ref));
   const refused = outcomes.flatMap((entry): readonly SyncQueueEntry[] =>
     entry.status === 'rejected'
       ? [
@@ -420,6 +428,29 @@ const nextPending = (
   );
   return [...kept, ...refused];
 };
+
+/** Replace the projection-retry slice after one complete fetch cycle. */
+const nextProjectionPending = (
+  pending: readonly SyncQueueEntry[],
+  outcomes: readonly SyncRefOutcome[],
+  now: number,
+): readonly SyncQueueEntry[] => [
+  ...pending.filter((entry) => entry.operation !== 'projection'),
+  ...outcomes.flatMap((entry): readonly SyncQueueEntry[] =>
+    entry.status === 'rejected'
+      ? [
+          {
+            ref: entry.name,
+            operation: 'projection',
+            ...(entry.head === undefined ? {} : { head: entry.head }),
+            expected: undefined,
+            reason: entry.reason ?? 'This record could not be restored.',
+            recordedAt: now,
+          },
+        ]
+      : [],
+  ),
+];
 
 /**
  * Headless continuous sync for one project.
@@ -479,7 +510,8 @@ export const syncMachine = setup({
   },
   guards: {
     hasRemote: ({ context }) => context.remote !== undefined,
-    hasPending: ({ context }) => context.pending.length > 0,
+    hasPushPending: ({ context }) => context.pending.some((entry) => entry.operation !== 'projection'),
+    hasRecordResults: ({ context }) => context.recordQueueDirty,
     isOnline: ({ context }) => context.online,
     /* `close` and `hidden` are the last moment an `await` means anything, so
      * they skip the window the other triggers coalesce in (D28, S41). */
@@ -521,6 +553,22 @@ export const syncMachine = setup({
         }
       },
     ),
+    rememberFetch: enqueueActions(({ context, enqueue }, output: SyncFetchActorOutput) => {
+      const { records } = output;
+      const pending =
+        records === undefined ? context.pending : nextProjectionPending(context.pending, records, Date.now());
+      const projectionFailure = pending.find((entry) => entry.operation === 'projection');
+      enqueue.assign({
+        leases: output.leases,
+        pending,
+        recordQueueDirty: records !== undefined,
+        failure: projectionFailure === undefined ? (pending.length === 0 ? 'none' : context.failure) : 'retry',
+        error: pending.length === 0 ? undefined : (projectionFailure?.reason ?? context.error),
+      });
+      if (context.parentRef !== undefined && output.branches !== undefined) {
+        enqueue.sendTo(context.parentRef, { type: 'branchesFetched', branches: output.branches });
+      }
+    }),
   },
 }).createMachine({
   id: 'sync',
@@ -538,6 +586,7 @@ export const syncMachine = setup({
     withinPullWindow: false,
     localHead: undefined,
     pendingMint: false,
+    recordQueueDirty: false,
     conflictRef: undefined,
     error: undefined,
     debounceMilliseconds: input.debounceMilliseconds ?? defaultDebounceMilliseconds,
@@ -573,6 +622,7 @@ export const syncMachine = setup({
         failure: 'none',
         error: undefined,
         conflictRef: undefined,
+        recordQueueDirty: false,
       }),
     },
     /*
@@ -685,7 +735,7 @@ export const syncMachine = setup({
      */
     opening: {
       always: [{ guard: ({ context }) => !context.online, target: 'queued' }],
-      entry: assign({ withinPullWindow: true }),
+      entry: assign({ withinPullWindow: true, recordQueueDirty: false }),
       exit: assign({ withinPullWindow: false }),
       after: {
         pullRenderWindow: { actions: assign({ withinPullWindow: false }) },
@@ -708,25 +758,16 @@ export const syncMachine = setup({
               {
                 guard: ({ event }) => event.output.integration === 'fastForward',
                 target: 'fastForwarding',
-                actions: [
-                  assign({ leases: ({ event }) => event.output.leases }),
-                  { type: 'reportBranches', params: ({ event }) => event.output.branches },
-                ],
+                actions: { type: 'rememberFetch', params: ({ event }) => event.output },
               },
               {
                 guard: ({ event }) => event.output.integration === 'diverged',
                 target: 'merging',
-                actions: [
-                  assign({ leases: ({ event }) => event.output.leases }),
-                  { type: 'reportBranches', params: ({ event }) => event.output.branches },
-                ],
+                actions: { type: 'rememberFetch', params: ({ event }) => event.output },
               },
               {
                 target: 'done',
-                actions: [
-                  assign({ leases: ({ event }) => event.output.leases }),
-                  { type: 'reportBranches', params: ({ event }) => event.output.branches },
-                ],
+                actions: { type: 'rememberFetch', params: ({ event }) => event.output },
               },
             ],
             onError: {
@@ -787,10 +828,13 @@ export const syncMachine = setup({
       },
       onDone: [
         /* The queue first, before anything else this open does (D28). */
-        { guard: 'hasPending', target: 'pushing' },
+        { guard: 'hasPushPending', target: 'pushing' },
         /* Then anything minted while the pull was running — including a `close`
          * cut on a project opened and shut inside one window. */
         { guard: ({ context }) => context.pendingMint, target: 'pushing' },
+        /* Record failures are durable work of their own; writing their queue
+         * cannot block the history integration that just completed. */
+        { guard: 'hasRecordResults', target: 'recording' },
         { target: 'backedUp' },
       ],
     },

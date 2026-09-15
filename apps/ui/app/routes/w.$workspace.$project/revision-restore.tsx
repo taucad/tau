@@ -22,6 +22,14 @@ const branchVerbTitle: Readonly<Record<BranchOperation, string>> = {
   rename: 'Rename to',
 };
 
+const branchVerbAction: Readonly<Record<BranchOperation, string>> = {
+  switch: 'Switch branch',
+  merge: 'Merge branch',
+  discard: 'Discard branch changes',
+  create: 'Create branch',
+  rename: 'Rename branch',
+};
+
 /** What a settled branch verb says. Document words only (A18, I12). */
 const branchSettledCopy: Readonly<Record<BranchOperation, (branch: string) => string>> = {
   switch: (branch) => `Switched to ${branch}`,
@@ -74,6 +82,10 @@ export function RevisionRestore(): React.JSX.Element {
         toast.error(revisionFailureTitle[entry.subject], { description: entry.message });
         return;
       }
+      if (entry.type === 'nothingToSave') {
+        toast.info('Nothing to save');
+        return;
+      }
       /* D10 answers *Switch* with a refusal, in the guard's own document words
        * — a verb that quietly does nothing is what "no outcome is silent"
        * forbids (A25, I12; review R3). */
@@ -102,7 +114,7 @@ export function RevisionRestore(): React.JSX.Element {
       if (entry.type === 'mergeConflicted') {
         analytics.capture('revision_merge_conflicted', { pathCount: entry.paths.length });
         toast.warning(`${entry.branch} needs your attention`, {
-          description: `${String(entry.paths.length)} file(s) changed on both lines. ${entry.into} is untouched until you choose.`,
+          description: `${String(entry.paths.length)} ${entry.paths.length === 1 ? 'file changed' : 'files changed'} on both lines. ${entry.into} is untouched until you choose.`,
         });
         return;
       }
@@ -113,7 +125,7 @@ export function RevisionRestore(): React.JSX.Element {
       toast.success(`Restored to Revision ${String(entry.revisionNumber)}`, {
         description:
           entry.unrecoverable.length > 0
-            ? `${String(entry.unrecoverable.length)} file(s) could not be recovered (recorded before content capture).`
+            ? `${String(entry.unrecoverable.length)} ${entry.unrecoverable.length === 1 ? 'file could' : 'files could'} not be recovered (recorded before content capture).`
             : undefined,
         action: { label: 'Undo', onClick: commands.undo },
       });
@@ -134,15 +146,21 @@ export function RevisionRestore(): React.JSX.Element {
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Restore this revision?</AlertDialogTitle>
+            <AlertDialogTitle>
+              {restore?.revisionNumber === undefined
+                ? 'Restore this revision?'
+                : `Restore Revision ${String(restore.revisionNumber)}?`}
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              {deleteCount > 0 ? `This deletes ${String(deleteCount)} file(s) created since. ` : ''}
+              {deleteCount > 0
+                ? `This deletes ${String(deleteCount)} ${deleteCount === 1 ? 'file' : 'files'} created since. `
+                : ''}
               {restore?.dirty === true ? 'Unsaved editor changes will be overwritten. ' : ''}
               You can undo this restore.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <Button variant='outline' onClick={commands.cancel}>
+            <Button autoFocus variant='outline' onClick={commands.cancel}>
               Cancel
             </Button>
             <Button onClick={commands.confirm}>Restore</Button>
@@ -173,10 +191,10 @@ export function RevisionRestore(): React.JSX.Element {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <Button variant='outline' onClick={commands.cancelBranch}>
+            <Button autoFocus variant='outline' onClick={commands.cancelBranch}>
               Cancel
             </Button>
-            <Button onClick={commands.confirmBranch}>Continue</Button>
+            <Button onClick={commands.confirmBranch}>{branchVerbAction[branchVerb?.operation ?? 'switch']}</Button>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

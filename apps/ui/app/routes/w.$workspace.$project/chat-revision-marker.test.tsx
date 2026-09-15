@@ -7,6 +7,10 @@ import { useRestoreToPoint } from '#hooks/use-restore-to-point.js';
 
 vi.mock('#hooks/use-revisions.js', () => ({ useRevisions: vi.fn(), useRevisionChanges: vi.fn() }));
 vi.mock('#hooks/use-restore-to-point.js', () => ({ useRestoreToPoint: vi.fn() }));
+vi.mock('#hooks/use-revision-status.js', async () => {
+  const harness = await import('#hooks/use-revision-status.test-harness.js');
+  return harness.revisionStatusMock();
+});
 
 const revision = (over: Partial<RevisionCard> = {}): RevisionCard => ({
   revisionId: 'rev-2',
@@ -16,6 +20,7 @@ const revision = (over: Partial<RevisionCard> = {}): RevisionCard => ({
   actor: 'tau-browser-agent-host',
   turnId: 'u1',
   conflicted: false,
+  trigger: 'turn',
   ...over,
 });
 
@@ -67,11 +72,11 @@ describe('ChatRevisionMarker', () => {
     expect(screen.queryByRole('button', { name: /Restore/ })).toBeNull();
   });
 
-  it('T-CRM-MODIFIED: the head revision reads Modified with a Discard button when the checkout is dirty', () => {
+  it('T-CRM-MODIFIED: leaves dirty state to the single Where-you-are surface', () => {
     setRevisions({ byTurnId: new Map([['u1', revision()]]), headRevisionId: 'rev-2', isDirty: true });
     render(<ChatRevisionMarker userMessageId='u1' />);
-    expect(screen.getByText('Modified')).not.toBeNull();
-    expect(screen.getByRole('button', { name: /Discard changes/ })).not.toBeNull();
+    expect(screen.queryByText('Modified')).toBeNull();
+    expect(screen.queryByRole('button', { name: /Discard changes/ })).toBeNull();
   });
 
   it('T-CRM-RESTORE: restoring names this card’s own revision id, never a transcript node', () => {

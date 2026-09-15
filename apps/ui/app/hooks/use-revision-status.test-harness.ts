@@ -56,6 +56,7 @@ export const revisionStatusHarness = {
   rowsByBranch: new Map<string, readonly RevisionRow[]>(),
   diff: [] as readonly RevisionDiffEntry[],
   comparison: emptyComparison(),
+  comparisonError: undefined as Error | undefined,
   toasts: new Set<(toast: RevisionToast) => void>(),
   commands: {
     restore: vi.fn<(revisionId: string) => void>(),
@@ -79,6 +80,10 @@ export const revisionStatusHarness = {
     followChat: vi.fn<(chatId: string) => void>(),
     pinTo: vi.fn<(checkoutId: string) => void>(),
     connectRemote: vi.fn<(kind: 'none' | 'tau' | 'git', url?: string) => void>(),
+    syncNow: vi.fn(),
+    saveRevision: vi.fn<(trigger?: 'save' | 'hidden' | 'close') => void>(),
+    tag: vi.fn(),
+    deleteTag: vi.fn(),
     publishProject: vi.fn<(tag?: string) => void>(),
     confirmPublish: vi.fn(),
     cancelPublish: vi.fn(),
@@ -93,6 +98,7 @@ export const revisionStatusHarness = {
     this.rowsByBranch.clear();
     this.diff = [];
     this.comparison = emptyComparison();
+    this.comparisonError = undefined;
     this.toasts.clear();
     for (const command of Object.values(this.commands)) {
       command.mockClear();
@@ -121,7 +127,10 @@ export const revisionStatusMock = (): Record<string, unknown> => ({
       (request?.branch === undefined ? undefined : revisionStatusHarness.rowsByBranch.get(request.branch)) ??
       revisionStatusHarness.rows,
     diff: async () => revisionStatusHarness.diff,
-    compare: async () => revisionStatusHarness.comparison,
+    compare: async () => {
+      if (revisionStatusHarness.comparisonError !== undefined) throw revisionStatusHarness.comparisonError;
+      return revisionStatusHarness.comparison;
+    },
     send: () => undefined,
     open: () => undefined,
     close: () => undefined,

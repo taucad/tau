@@ -326,6 +326,8 @@ describe('the page client of the worker revision root', () => {
     client.send({ command: 'createBranch', name: 'isolated-run' });
     await expect.poll(() => execute.mock.calls.length).toBe(3);
     await expect(client.log({ limit: 8 })).resolves.toEqual([{ id: 'revision-1', revisionNumber: 1 }]);
+    client.send({ command: 'adoptHostFinalized', checkoutId: 'live', revisionId: 'revision-1', treeId: 'tree-1' });
+    await settle();
     expect(seen).toEqual([
       { type: 'revision', request: { command: 'status' } },
       { type: 'revision', request: { command: 'open' } },

@@ -55,8 +55,8 @@ export const registerProjectAgentHost = async (
       if (released) {
         return;
       }
-      released = true;
       await bridge.agentHost.release(workspaceRoot, projectId, attachmentId);
+      released = true;
     },
   };
 };

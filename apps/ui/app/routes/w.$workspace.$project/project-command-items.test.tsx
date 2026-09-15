@@ -3,6 +3,7 @@ import type { UIMatch } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ExportFile } from '@taucad/types';
 import type { CommandPaletteItem } from '#components/layout/command-palette.js';
+import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
 
 let registeredItems: CommandPaletteItem[] = [];
 let isTauDebugEnabled = false;
@@ -15,6 +16,7 @@ const captureCadImages = vi.fn<(options: unknown) => Promise<ExportFile[]>>();
 const downloadBlob = vi.fn<(blob: Blob, filename: string) => void>();
 const runtimeFileSystem = {};
 const imageService = { export: vi.fn() };
+const saveRequest = vi.fn(async () => undefined);
 
 const cadActor = {
   getSnapshot: () => ({ context: { geometry: geometryFormat ? { format: geometryFormat } : undefined } }),
@@ -109,6 +111,9 @@ vi.mock('#hooks/use-revision-status.js', async () => {
 vi.mock('#hooks/use-revisions.js', () => ({
   useRevisions: () => ({ canReturnToLatest: false, revisions: [], headRevisionId: undefined, isDirty: false }),
 }));
+vi.mock('#routes/w.$workspace.$project/revision-save-shortcut.js', () => ({
+  useSaveRevisionRequest: () => saveRequest,
+}));
 
 vi.mock('#hooks/use-thumbnail-generator.js', () => ({
   useThumbnailGenerator: () => ({ regenerate: vi.fn() }),
@@ -154,6 +159,8 @@ describe('ProjectCommandPaletteItems', () => {
     openPanel.mockClear();
     captureCadImages.mockReset();
     downloadBlob.mockReset();
+    saveRequest.mockReset();
+    revisionStatusHarness.reset();
   });
 
   it('should defer command registration until project context exists', () => {
@@ -196,6 +203,16 @@ describe('ProjectCommandPaletteItems', () => {
       expect(openPanel).toHaveBeenLastCalledWith(panelId);
     }
     expect(openPanel).toHaveBeenCalledTimes(expectedPanels.size);
+  });
+
+  it('routes backup choices through Revisions and uses the shared save request', () => {
+    render(<ProjectCommandPaletteItems match={match} />);
+
+    registeredItems.find((item) => item.id === 'connect-tau-cloud')?.action?.();
+    expect(openPanel).toHaveBeenLastCalledWith('revisions');
+    registeredItems.find((item) => item.id === 'save-revision')?.action?.();
+    expect(saveRequest).toHaveBeenCalledOnce();
+    expect(registeredItems.find((item) => item.id === 'sync-now')?.visible).toBe(false);
   });
 
   it('keeps Kernel hidden unless tauDebug is enabled', () => {

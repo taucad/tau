@@ -21,6 +21,7 @@ import {
   createProjectRevisionsActor,
   describeTurnRelease,
   describeTurnSettlement,
+  syncQuiesceMilliseconds,
 } from '@taucad/revisions/revision-effects';
 import type { TurnConflictedEvent, TurnFailedEvent, TurnFinalizedEvent } from '@taucad/revisions/revision-effects';
 import { selectRevisionStatus } from '@taucad/revisions/project-revisions-machine';
@@ -263,6 +264,7 @@ export type RevisionFileComparison = Readonly<{ original: string; modified: stri
  */
 export type RevisionToast =
   | Readonly<{ type: 'restored'; revisionNumber: number; unrecoverable: readonly string[] }>
+  | Readonly<{ type: 'nothingToSave' }>
   | Readonly<{ type: 'branch'; operation: BranchOperation; branch: string }>
   /** A *Switch* the D10 guard would not make, in the words it gave (review R3). */
   | Readonly<{ type: 'refused'; branch: string; reason: string }>
@@ -882,6 +884,11 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
     }
     toasts.emit({ type: 'error', subject: 'save', message: failure.reason });
   });
+  actor.on('nothingToSave', (event) => {
+    if (event.trigger === 'save') {
+      toasts.emit({ type: 'nothingToSave' });
+    }
+  });
   actor.on('switchRefused', (refusal) => {
     toasts.emit({ type: 'refused', branch: refusal.branch, reason: refusal.reason });
   });
@@ -1254,6 +1261,40 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
        * is pushed, or recorded as unsent" true; after the bound the durable
        * queue is the guarantee and the next open retries it (D28).
        */
+      const checkoutId = selectRevisionStatus(actor.getSnapshot()).checkoutId;
+      if (checkoutId === undefined) {
+        throw new Error('The project checkout was not ready before close.');
+      }
+      const closeCut = Promise.withResolvers<void>();
+      const subscriptions = [
+        actor.on('revisionMinted', (event) => {
+          if (event.checkoutId === checkoutId && event.trigger === 'close') {
+            closeCut.resolve();
+          }
+        }),
+        actor.on('nothingToSave', (event) => {
+          if (event.checkoutId === checkoutId && event.trigger === 'close') {
+            closeCut.resolve();
+          }
+        }),
+        actor.on('cutFailed', (event) => {
+          if (event.checkoutId === checkoutId && event.trigger === 'close') {
+            closeCut.reject(new Error(event.reason));
+          }
+        }),
+      ];
+      const bound = setTimeout(() => {
+        closeCut.reject(new Error('The close revision was not recorded before the deadline.'));
+      }, syncQuiesceMilliseconds);
+      try {
+        actor.send({ type: 'cut', trigger: 'close', checkoutId, leaseIds: [] });
+        await closeCut.promise;
+      } finally {
+        clearTimeout(bound);
+        for (const subscription of subscriptions) {
+          subscription.unsubscribe();
+        }
+      }
       await awaitSyncSettled(actor);
       /* The fourth way a turn ends without its lease, in the same frame and
        * with the same code as the other three — a client cannot act on a
@@ -1573,11 +1614,11 @@ export const createWorkerRevisionRegistry = (options: WorkerRevisionRegistryOpti
     if (entry === undefined) {
       return;
     }
+    const tree = await entry.revisions;
+    await tree.release();
     projects.delete(projectId);
     entry.stopObserving();
     entry.unsubscribe();
-    const tree = await entry.revisions;
-    await tree.release();
     options.released?.(projectId);
   };
 
@@ -1598,9 +1639,21 @@ export const createWorkerRevisionRegistry = (options: WorkerRevisionRegistryOpti
         void (async (): Promise<void> => {
           const tree = await entry.revisions;
           if (data.command === 'close') {
-            entry.ports.delete(port);
-            if (entry.ports.size === 0) {
-              await closeProject(projectId);
+            try {
+              if (entry.ports.size === 1 && entry.ports.has(port)) {
+                await closeProject(projectId);
+              } else {
+                entry.ports.delete(port);
+              }
+            } catch (error) {
+              if (data.id !== undefined) {
+                port.postMessage({
+                  type: 'error',
+                  id: data.id,
+                  message: error instanceof Error ? error.message : String(error),
+                } satisfies WorkerRevisionResponse);
+              }
+              return;
             }
             /* The port outlives the release when the caller correlated its
              * close: `project-session.closing` waits for this frame, and a

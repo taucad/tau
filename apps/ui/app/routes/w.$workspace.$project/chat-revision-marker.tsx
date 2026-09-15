@@ -1,6 +1,7 @@
 import { RevisionMarker } from '#routes/w.$workspace.$project/revision-marker.js';
 import { useRevisionChanges, useRevisions } from '#hooks/use-revisions.js';
 import { useRestoreToPoint } from '#hooks/use-restore-to-point.js';
+import { useRevisionCommands } from '#hooks/use-revision-status.js';
 
 /**
  * Binds a turn's `RevisionMarker` to the host-attested graph.
@@ -23,8 +24,9 @@ export function ChatRevisionMarker({
 }: {
   readonly userMessageId: string;
 }): React.JSX.Element | undefined {
-  const { byTurnId, headRevisionId, isDirty } = useRevisions();
+  const { byTurnId, headRevisionId } = useRevisions();
   const { restore, isBusy } = useRestoreToPoint();
+  const commands = useRevisionCommands();
   const revision = byTurnId.get(userMessageId);
   const changes = useRevisionChanges(revision);
 
@@ -42,10 +44,14 @@ export function ChatRevisionMarker({
       revision={revision}
       changes={changes}
       isActive={isActive}
-      isModified={isActive && isDirty}
+      isModified={false}
       isBusy={isBusy}
       onRestore={restoreThis}
       onDiscard={restoreThis}
+      onTag={async (name) => {
+        await commands.tag({ name, revisionId: revision.revisionId });
+      }}
+      onDeleteTag={commands.deleteTag}
     />
   );
 }

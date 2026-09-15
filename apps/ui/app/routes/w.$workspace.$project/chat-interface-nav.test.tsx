@@ -6,4 +6,8 @@ describe('mobile editor navigation', () => {
     expect(chatTabs.map(({ id }) => id)).toContain('share');
     expect(chatTabs.find(({ id }) => id === 'share')?.label).toBe('Share');
   });
+
+  it('exposes revision history on narrow screens', () => {
+    expect(chatTabs.find(({ id }) => id === 'revisions')?.label).toBe('History');
+  });
 });

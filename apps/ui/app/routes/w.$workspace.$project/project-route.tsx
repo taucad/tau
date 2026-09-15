@@ -2,14 +2,12 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState } f
 import { useLocation, useMatch, useNavigate } from 'react-router';
 import { useSelector } from '@xstate/react';
 import { waitFor } from 'xstate';
-import { toast } from 'sonner';
 import { ChatInterface } from '#routes/w.$workspace.$project/chat-interface.js';
 import { ProjectProvider, useProject } from '#hooks/use-project.js';
 import type { Handle } from '#types/matches.types.js';
 import { ProjectChatRunSettlement } from '#routes/w.$workspace.$project/project-chat-run-settlement.js';
 import { ProjectWorkspaceProvider } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { ProjectShareRouteIntent } from '#routes/w.$workspace.$project/project-share-action.js';
-import { useKeybinding } from '#hooks/use-keyboard.js';
 import { ProjectCommandPaletteItems } from '#routes/w.$workspace.$project/project-command-items.js';
 import { HomeFileManagerProvider, SharedWorkerGate, useFileManager } from '#hooks/use-file-manager.js';
 import { MonacoModelServiceProvider } from '#hooks/use-monaco-model-service.js';
@@ -883,16 +881,6 @@ export const projectRouteHandle: Omit<Handle, 'providers'> = {
 // `ChatSessionStore` (settlement is per-session, not per-route — see
 // `apps/ui/app/routes/w.$workspace.$project/project-chat-run-settlement.tsx`).
 function Chat(): React.JSX.Element {
-  useKeybinding(
-    {
-      key: 's',
-      modKey: true,
-    },
-    () => {
-      toast.success('Your project is saved automatically');
-    },
-  );
-
   return <ChatInterface />;
 }
 

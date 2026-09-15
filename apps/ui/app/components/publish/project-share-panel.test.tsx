@@ -118,6 +118,7 @@ const publishedEnvelope = {
   project: { id: 'proj_ui', name: 'Demo', description: 'a beautiful model' },
   currentPublication: {
     id: 'pub_ui',
+    tag: 'v1',
     title: 'Demo',
     description: 'a beautiful model',
     visibility: 'private',
@@ -596,6 +597,18 @@ describe('ProjectSharePanel', () => {
     expect(screen.getByText('General access')).toBeInTheDocument();
     expect(screen.getByRole('combobox', { name: /general access/i })).toHaveTextContent('Private');
     expect(screen.queryByRole('radio', { name: /private/i })).not.toBeInTheDocument();
+  });
+
+  it('republishes the exact named version and makes another version explicit', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(mockJsonResponse(publishedEnvelope));
+    renderPanel(<ProjectSharePanel projectId='proj_ui' projectName='Demo' entryPath='main.ts' />);
+
+    expect(await screen.findByText('Version v1')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Republish this version' }));
+    expect(revisionStatusHarness.commands.publishProject).toHaveBeenCalledWith('v1');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Publish another version' }));
+    expect(screen.getByRole('combobox', { name: /version name/i })).toBeInTheDocument();
   });
 
   it('switches private publications to public without removing listed grants', async () => {

@@ -63,7 +63,11 @@ const liveAdapters = async (): Promise<{
   if (!liveEnabled) {
     return { adapters: [], unavailable: [] };
   }
-  const discovery = await discoverAcpAgents({ resolveFrom: import.meta.url, probeTimeout: 10_000 });
+  const discovery = await discoverAcpAgents({
+    // Qualification may run this suite under packaged Electron against its own adapter closure.
+    resolveFrom: process.env['TAU_ACP_LIVE_RESOLVE_FROM'] ?? import.meta.url,
+    probeTimeout: 10_000,
+  });
   const authenticated = await Promise.all(
     discovery.agents.map(async (adapter) => {
       if (adapter.id !== 'codex') {

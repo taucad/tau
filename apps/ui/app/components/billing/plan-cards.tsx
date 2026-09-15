@@ -2,7 +2,6 @@ import { useRef, useState } from 'react';
 import { Check, Sparkles } from 'lucide-react';
 import { Link } from 'react-router';
 import type { BillingTier, PlanCatalogEntry } from '@taucad/billing';
-// eslint-disable-next-line @nx/enforce-module-boundaries -- this first-party plan surface owns the direct billing client contract
 import { tauPlanCatalog } from '@taucad/billing';
 import { useBillingSession } from '@taucad/billing/hooks/billing-session';
 import {

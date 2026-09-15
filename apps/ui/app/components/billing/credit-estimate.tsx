@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { Coins } from 'lucide-react';
-// eslint-disable-next-line @nx/enforce-module-boundaries -- this first-party chat surface owns the direct billing client contract
 import { formatCreditAtomsDisplay } from '@taucad/billing';
 import { useCredits } from '@taucad/billing/hooks/use-credits';
 import { useEntitlements } from '@taucad/billing/hooks/use-entitlements';

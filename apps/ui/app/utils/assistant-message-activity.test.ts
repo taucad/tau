@@ -121,6 +121,16 @@ const testModelPartWithCounts = (passes: number, failures: number): Part =>
     },
   }) as unknown as Part;
 
+const tauMcpPart = (nativeName: string, output: unknown): Part => ({
+  type: 'dynamic-tool',
+  toolCallId: `tau-mcp-${nativeName}`,
+  toolName: nativeName,
+  state: 'output-available',
+  input: { targetFile: 'main.scad' },
+  output,
+  toolMetadata: { tau: { nativeName, presentation: 'tau-mcp' } },
+});
+
 const expectAggregated = (group: ActivityGroup) => {
   expect(group.kind).toBe('aggregated');
   if (group.kind !== 'aggregated') {
@@ -227,6 +237,17 @@ describe('classifyActivityPart', () => {
     expect(classifyActivityPart(kernelResultPart())).toBe('research');
     expect(classifyActivityPart(screenshotPart())).toBe('research');
     expect(classifyActivityPart(testModelPart())).toBe('research');
+  });
+
+  it('gives qualified external Tau MCP calls the native activity summary', () => {
+    const parts: Parts = [
+      tauMcpPart('get_kernel_result', { status: 'ready' }),
+      tauMcpPart('screenshot', { images: [{ view: 'isometric', dataUrl: 'data:image/webp;base64,AQ==' }] }),
+      tauMcpPart('test_model', { passes: [{ id: 'pass' }], failures: [] }),
+    ];
+
+    expect(expectAggregated(groupAssistantParts(parts)[0]!).summary).toBe('Explored 1 render, 1 screenshot, 1 test');
+    expect(classifyActivityPart(tauMcpPart('export_geometry', {}))).toBe('write');
   });
 });
 

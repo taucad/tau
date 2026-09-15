@@ -321,10 +321,16 @@ describe('window.ENV host contract', () => {
       // eslint-disable-next-line @typescript-eslint/naming-convention -- browser injection contract is named window.ENV.
       value: { ENV: injectedEnvironment },
     });
-    const processEnvironmentRead = vi.fn(() => originalEnvironment);
+    const processEnvironmentRead = vi.fn();
     Object.defineProperty(process, 'env', {
       configurable: true,
-      get: processEnvironmentRead,
+      get: () => {
+        // Node 26's ESM loader reads process.env twice while resolving a dynamic import.
+        if (!new Error('trace process.env access').stack?.includes('node:internal/modules/esm/loader')) {
+          processEnvironmentRead();
+        }
+        return originalEnvironment;
+      },
     });
     vi.resetModules();
 

@@ -1,4 +1,7 @@
 import type { Config } from '@react-router/dev/config';
+import { resolveTauCloudBuildEnabled } from './build-environment';
+
+const tauCloudEnabled = resolveTauCloudBuildEnabled(process.env['TAU_CLOUD_ENABLED']);
 
 /**
  * Concurrency for parallel prerender requests. React Router defaults to 1
@@ -35,6 +38,9 @@ export default {
    * index fallback.
    */
   async buildEnd({ reactRouterConfig }) {
+    if (!tauCloudEnabled) {
+      return;
+    }
     const { generateOfflineShell } = await import('./scripts/generate-offline-shell');
     const { listOfflineShellPaths } = await import('./app/lib/static-paths');
     await generateOfflineShell({
@@ -46,7 +52,7 @@ export default {
   prerender: {
     async paths() {
       const { listStaticPrerenderPaths } = await import('./app/lib/static-paths');
-      return listStaticPrerenderPaths();
+      return listStaticPrerenderPaths().filter((path) => tauCloudEnabled || path !== '/usage');
     },
     // eslint-disable-next-line @typescript-eslint/naming-convention -- React Router config field is `unstable_concurrency` (snake_case in upstream API).
     unstable_concurrency: prerenderConcurrency,

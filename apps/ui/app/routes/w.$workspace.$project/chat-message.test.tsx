@@ -512,7 +512,9 @@ describe('ChatMessage external Tau MCP porcelain', () => {
           state: 'output-available',
           input: { targetFile: 'main.ts' },
           output: { status: 'ready' },
-          toolMetadata: { tau: { origin: 'external', nativeName: 'get_kernel_result' } },
+          toolMetadata: {
+            tau: { origin: 'external', nativeName: 'get_kernel_result', presentation: 'tau-mcp' },
+          },
         },
       ],
     };
@@ -522,6 +524,29 @@ describe('ChatMessage external Tau MCP porcelain', () => {
 
     expect(screen.getByTestId('tool-get-kernel-result')).toBeInTheDocument();
     expect(screen.queryByTestId('tool-unknown')).toBeNull();
+  });
+
+  it('does not grant native porcelain to an unqualified same-name call', () => {
+    const message: MyUIMessage = {
+      id: 'msg-foreign-kernel',
+      role: 'assistant',
+      parts: [
+        {
+          type: 'dynamic-tool',
+          toolCallId: 'call-foreign-kernel',
+          toolName: 'get_kernel_result',
+          state: 'output-available',
+          input: { targetFile: 'main.ts' },
+          output: { status: 'ready' },
+          toolMetadata: { tau: { origin: 'external', nativeName: 'get_kernel_result' } },
+        },
+      ],
+    };
+    setMessages([message]);
+
+    render(<ChatMessage messageId={message.id} />);
+
+    expect(screen.queryByTestId('tool-get-kernel-result')).toBeNull();
   });
 });
 

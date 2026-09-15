@@ -2,13 +2,11 @@ import type { ComponentType, ReactNode } from 'react';
 import { Links, Meta, Scripts, ScrollRestoration, useRouteLoaderData } from 'react-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { authQueryKeys } from '@better-auth-ui/core';
-import { useSession } from '@better-auth-ui/react';
 import { useEffect, useMemo } from 'react';
 import { toast } from 'sonner';
 import { PreventFlashOnWrongTheme, Theme, ThemeProvider, useTheme } from '#hooks/use-theme.js';
 import type { ThemeWithSystem } from '#hooks/use-theme.js';
 import type { ClientEnvironment } from '#environment.config.js';
-import { ENV } from '#environment.config.js';
 import { buildClientEnvScript } from '#lib/client-env-script.js';
 import { Page } from '#components/layout/page.js';
 import { useCookie } from '#hooks/use-cookie.js';
@@ -19,7 +17,6 @@ import { ColorProvider, useColor } from '#hooks/use-color.js';
 import { useFavicon } from '#hooks/use-favicon.js';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { ErrorPage } from '#components/error-page.js';
-import { AuthConfigProvider } from '#providers/auth-provider.js';
 import { ProjectManagerProvider } from '#hooks/use-project-manager.js';
 import { HomeFileManagerProvider } from '#hooks/use-file-manager.js';
 import { KeyboardProvider } from '#hooks/use-keyboard.js';
@@ -31,16 +28,9 @@ import { ProjectSessionsHost } from '#routes/w.$workspace.$project/project-route
 import { GlobalChatFlushGuard } from '#components/global-chat-flush-guard.js';
 import { SvgSpriteMount } from '#components/icons/svg-sprite-mount.js';
 import { HeadlessImageProvider } from '#providers/headless-image-provider.js';
-import { authClient } from '#lib/auth-client.js';
-import { BillingSessionProvider, useBillingSession } from '@taucad/billing/hooks/billing-session';
-// eslint-disable-next-line @nx/enforce-module-boundaries -- root composes the first-party billing session and return contract
-import { formatCreditAtoms } from '@taucad/billing';
-import { followPaymentRedirect, getPaymentAction, recoverPaymentAction } from '#lib/billing-payment-client.js';
-import {
-  FinancialSessionProvider,
-  FinancialSessionScope,
-  useFinancialSession,
-} from '#providers/financial-session-provider.js';
+import { CloudRootBoundary, useCloudPaymentActionReturn } from '#cloud/root-billing.js';
+
+export { useCloudPaymentActionReturn as usePaymentActionReturn };
 
 export type RootLoaderData = {
   readonly env: ClientEnvironment;
@@ -179,55 +169,30 @@ export function RootLayout({
    */
   return (
     <QueryClientProvider client={queryClient}>
-      <FinancialSessionProvider>
-        <AuthConfigProvider>
-          <BillingSessionBridge>
-            {AnalyticsBoundary ? (
-              <AnalyticsBoundary>
-                <ThemeProvider specifiedTheme={ssrTheme} themeAction='/action/set-theme'>
-                  <ColorProvider>
-                    <LayoutDocument env={data?.env ?? {}} ssrTheme={ssrTheme} documentChrome={documentChrome}>
-                      {application}
-                    </LayoutDocument>
-                  </ColorProvider>
-                </ThemeProvider>
-              </AnalyticsBoundary>
-            ) : (
-              <ThemeProvider specifiedTheme={ssrTheme} themeAction='/action/set-theme'>
-                <ColorProvider>
-                  <LayoutDocument env={data?.env ?? {}} ssrTheme={ssrTheme} documentChrome={documentChrome}>
-                    {application}
-                  </LayoutDocument>
-                </ColorProvider>
-              </ThemeProvider>
-            )}
-          </BillingSessionBridge>
-        </AuthConfigProvider>
-      </FinancialSessionProvider>
+      <CloudRootBoundary>
+        {AnalyticsBoundary ? (
+          <AnalyticsBoundary>
+            <ThemeProvider specifiedTheme={ssrTheme} themeAction='/action/set-theme'>
+              <ColorProvider>
+                <LayoutDocument env={data?.env ?? {}} ssrTheme={ssrTheme} documentChrome={documentChrome}>
+                  {application}
+                </LayoutDocument>
+              </ColorProvider>
+            </ThemeProvider>
+          </AnalyticsBoundary>
+        ) : (
+          <ThemeProvider specifiedTheme={ssrTheme} themeAction='/action/set-theme'>
+            <ColorProvider>
+              <LayoutDocument env={data?.env ?? {}} ssrTheme={ssrTheme} documentChrome={documentChrome}>
+                {application}
+              </LayoutDocument>
+            </ColorProvider>
+          </ThemeProvider>
+        )}
+      </CloudRootBoundary>
     </QueryClientProvider>
   );
 }
-
-const BillingSessionBridge = ({ children }: { readonly children: ReactNode }): React.JSX.Element => {
-  const { data: session } = useSession(authClient);
-  const identity =
-    ENV.TAU_BILLING_ENVIRONMENT === undefined || session?.user.id === undefined
-      ? undefined
-      : { apiBaseUrl: ENV.TAU_API_URL, environment: ENV.TAU_BILLING_ENVIRONMENT, ownerId: session.user.id };
-  return (
-    <FinancialSessionScope identity={identity}>
-      <BillingSessionProvider
-        value={{
-          apiBaseUrl: ENV.TAU_API_URL,
-          environment: ENV.TAU_BILLING_ENVIRONMENT,
-          userId: session?.user.id,
-        }}
-      >
-        {children}
-      </BillingSessionProvider>
-    </FinancialSessionScope>
-  );
-};
 
 function LayoutDocument({
   children,
@@ -291,7 +256,7 @@ function LayoutDocument({
 }
 
 export function ProductApp(): React.JSX.Element {
-  usePaymentActionReturn();
+  useCloudPaymentActionReturn();
   const data = useRouteLoaderData<RootLoaderData>('root');
   const page = <Page />;
   return data?.env.TAU_DEBUG && data.pathname === '/__e2e/remote-host' ? (
@@ -300,105 +265,6 @@ export function ProductApp(): React.JSX.Element {
     <ProjectSessionsHost>{page}</ProjectSessionsHost>
   );
 }
-
-export const usePaymentActionReturn = (): void => {
-  const { apiBaseUrl, environment, userId } = useBillingSession();
-  const financialSession = useFinancialSession();
-  useEffect(() => {
-    if (apiBaseUrl === undefined || environment === undefined || userId === undefined) {
-      return;
-    }
-    const binding = { apiBaseUrl, environment, ownerId: userId, financialSession: financialSession.capture() };
-    let active = true;
-    const url = new URL(globalThis.location.href);
-    const actionId = url.searchParams.get('payment_action');
-    if (actionId === null || !/^[A-Za-z0-9._:-]{1,128}$/u.test(actionId)) {
-      return;
-    }
-    const inspectReturn = async (): Promise<void> => {
-      try {
-        const action = await getPaymentAction(binding, actionId);
-        if (!active) {
-          return;
-        }
-        url.searchParams.delete('payment_action');
-        globalThis.history.replaceState(globalThis.history.state, '', url);
-        switch (action.state) {
-          case 'fulfilled': {
-            if (!action.receipt) {
-              return;
-            }
-            toast.success(`${formatCreditAtoms(BigInt(action.receipt.grantedCreditAtoms))} credits added.`);
-            break;
-          }
-          case 'funds_received': {
-            toast('Payment received. Credits are still being added.');
-            break;
-          }
-          case 'processing': {
-            toast('Payment is still processing.');
-            break;
-          }
-          case 'redirect_required': {
-            toast.warning('Checkout is ready to continue.', {
-              action: {
-                label: 'Resume Checkout',
-                onClick: () => {
-                  if (active && binding.financialSession.isCurrent()) {
-                    followPaymentRedirect(action);
-                  }
-                },
-              },
-            });
-            break;
-          }
-          case 'attention_required': {
-            if (action.attention?.action === 'continue_hosted') {
-              toast.warning('Your payment needs attention.', {
-                action: {
-                  label: 'Continue in Checkout',
-                  onClick: async () => {
-                    if (!active || !binding.financialSession.isCurrent()) {
-                      return;
-                    }
-                    const recovered = await recoverPaymentAction(
-                      { ...binding, subjectId: action.subjectId },
-                      action.actionId,
-                    );
-                    // oxlint-disable-next-line typescript/no-unnecessary-condition -- cleanup can flip active while recovery is pending
-                    if (active && binding.financialSession.isCurrent()) {
-                      followPaymentRedirect(recovered);
-                    }
-                  },
-                },
-              });
-            } else {
-              toast.warning('Your payment needs attention. Reopen billing to continue.');
-            }
-            break;
-          }
-          case 'failed':
-          case 'canceled': {
-            toast.warning('Payment was not completed.');
-            break;
-          }
-          default: {
-            break;
-          }
-        }
-      } catch {
-        if (active) {
-          toast.warning('Could not check the returned payment.');
-        }
-      }
-    };
-    // async-iife: bootstrap
-    void inspectReturn();
-    return () => {
-      active = false;
-    };
-  }, [apiBaseUrl, environment, financialSession, userId]);
-};
 
 export function RootErrorBoundary(): React.JSX.Element {
   return <ErrorPage />;

@@ -2,7 +2,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-// eslint-disable-next-line @nx/enforce-module-boundaries -- this first-party billing surface owns the direct billing client contract
 import { entitlementsFromTier } from '@taucad/billing';
 import type { WireBalanceExplanation, WireModelEstimates } from '@taucad/billing';
 import { openSettingsDialog } from '#hooks/use-settings-dialog.js';

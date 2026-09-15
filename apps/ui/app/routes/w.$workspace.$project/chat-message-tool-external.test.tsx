@@ -165,6 +165,16 @@ describe('the external tool-call renderer', () => {
     expect(screen.queryByText(/Received unknown part/)).not.toBeInTheDocument();
   });
 
+  it('should not repeat the tool-kind verb when Codex includes it in the title', async () => {
+    const part = await partFromLog(
+      listFilesRows.map((row) => ({ ...row, call: { ...row.call, title: "Read file '/workspace/main.py'" } })),
+    );
+
+    renderExternal(part);
+    expect(screen.getByRole('button', { name: "Read file '/workspace/main.py'" })).toBeVisible();
+    expect(screen.queryByRole('button', { name: /Read Read/u })).not.toBeInTheDocument();
+  });
+
   it('renders an edit call as a file diff, from a refinement the agent only sent once', async () => {
     const user = userEvent.setup();
     const diff = [{ type: 'diff', path: 'main.scad', oldText: 'cube(10);\n', newText: 'cube(12);\n' }];
@@ -340,7 +350,7 @@ describe('the external tool-call renderer', () => {
       },
     ]);
     renderExternal(located);
-    await user.click(screen.getByRole('button', { name: /Read file/ }));
+    await user.click(screen.getByRole('button', { name: 'Reading file' }));
     /* The link still navigates to the path the agent named; only what is read
      * out is stripped, so a reordered name cannot stand in for another file. */
     expect(document.body.textContent).not.toMatch(/[\u202A-\u202E\u2066-\u2069]/u);

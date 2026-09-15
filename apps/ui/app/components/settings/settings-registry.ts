@@ -2,6 +2,7 @@ import { Bot, BrainCircuit, Cpu, CreditCard, FlaskConical, HardDrive, Lock, Sett
 import type { LucideIcon } from 'lucide-react';
 import type { SettingsSection } from '#hooks/use-settings-dialog.js';
 import { featureFlagNames, flagRegistry } from '#flags/flag.constants.js';
+import { tauCloudEnabled } from '#cloud/cloud-enabled.js';
 
 export type SettingDefinition = {
   readonly id: string;
@@ -235,7 +236,15 @@ const settingsCatalog = [
 ] as const satisfies readonly SettingsSectionDefinition[];
 
 export type SettingId = (typeof settingsCatalog)[number]['entries'][number]['id'];
-export const settingsSections: readonly SettingsSectionDefinition[] = settingsCatalog;
+export const settingsSections: readonly SettingsSectionDefinition[] = tauCloudEnabled
+  ? settingsCatalog
+  : settingsCatalog
+      .filter((section) => section.id !== 'billing')
+      .map((section) =>
+        section.id === 'agents'
+          ? { ...section, entries: section.entries.filter((entry) => entry.id !== 'show-credits') }
+          : section,
+      );
 
 function normalizeSearch(value: string): string {
   return value

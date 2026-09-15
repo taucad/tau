@@ -9,6 +9,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { ReactElement } from 'react';
 import type { ShareProjectSnapshot } from '@taucad/share/snapshot';
 import type { RevisionTag } from '@taucad/revisions';
+import { entitlementsFromTier } from '@taucad/billing';
 import { ProjectSharePanel, nextVersionName } from '#components/publish/project-share-panel.js';
 import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
 import type * as useEntitlementsModule from '@taucad/billing/hooks/use-entitlements';
@@ -163,8 +164,7 @@ const renderPanel = (ui: ReactElement, initialEntries?: string[]): ReturnType<ty
   );
 
 describe('ProjectSharePanel', () => {
-  beforeEach(async () => {
-    const { entitlementsFromTier } = await import('@taucad/billing');
+  beforeEach(() => {
     useEntitlementsMock.mockReturnValue(entitlementsFromTier('pro'));
     revisionStatusHarness.reset();
     openSettingsDialogMock.mockClear();
@@ -734,8 +734,7 @@ describe('nextVersionName', () => {
 });
 
 describe('ProjectSharePanel free-tier visibility gate (T5)', () => {
-  beforeEach(async () => {
-    const { entitlementsFromTier } = await import('@taucad/billing');
+  beforeEach(() => {
     useEntitlementsMock.mockReturnValue(entitlementsFromTier('free'));
     globalThis.fetch = vi.fn().mockResolvedValue(mockJsonResponse(unpublishedEnvelope));
   });

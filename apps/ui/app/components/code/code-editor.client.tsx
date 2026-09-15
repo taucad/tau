@@ -1,6 +1,6 @@
 import { Editor } from '@monaco-editor/react';
 import type { EditorProps } from '@monaco-editor/react';
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef } from 'react';
 import type { CompletionRegistration } from 'monacopilot';
 import type * as Monaco from 'monaco-editor';
 import { cn } from '@taucad/ui/utils/cn';
@@ -107,7 +107,12 @@ const monacoOverlayRestoreStyles = [
   '[&_.parameter-hints-widget_:is(h1,h2,h3,h4)]:[margin-block:0.5rem_0.25rem]',
 ] as const;
 
-await configureMonaco();
+// Initialization may import a chunk that contains this module. Defer it until
+// render so that chunk evaluation can finish before Monaco's async work starts.
+const ConfiguredEditor = lazy(async () => {
+  await configureMonaco();
+  return { default: Editor };
+});
 
 export function CodeEditor({ className, options: optionsFromProps, ...rest }: CodeEditorProperties): React.JSX.Element {
   const { theme, isHighContrast } = useTheme();
@@ -289,17 +294,30 @@ export function CodeEditor({ className, options: optionsFromProps, ...rest }: Co
   );
 
   return (
-    <Editor
-      keepCurrentModel
-      className={classNames}
-      theme={monacoTheme}
-      wrapperProps={{
-        className: 'editor-container',
-        style: { height: '100%' },
-      }}
-      options={options}
-      onMount={handleMount}
-      {...rest}
-    />
+    <Suspense
+      fallback={
+        <div
+          role='status'
+          aria-label='Loading editor'
+          aria-busy='true'
+          className='flex size-full items-center justify-center'
+        >
+          {rest.loading ?? 'Loading editor…'}
+        </div>
+      }
+    >
+      <ConfiguredEditor
+        keepCurrentModel
+        className={classNames}
+        theme={monacoTheme}
+        wrapperProps={{
+          className: 'editor-container',
+          style: { height: '100%' },
+        }}
+        options={options}
+        onMount={handleMount}
+        {...rest}
+      />
+    </Suspense>
   );
 }

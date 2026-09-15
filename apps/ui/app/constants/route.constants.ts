@@ -1,8 +1,8 @@
-import { ChartColumn, Hammer, Import, Plug, Shuffle, UsersRound } from 'lucide-react';
+import { Hammer, Import, Plug, Shuffle, UsersRound } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { FeatureFlagName } from '#flags/flag.constants.js';
 
-type NavRoute = {
+export type NavRoute = {
   title: string;
   url: string;
   icon: LucideIcon;
@@ -59,11 +59,6 @@ export const navRoutes: {
       url: '/plugins',
       icon: Plug,
       featureFlag: 'pluginsStore',
-    },
-    {
-      title: 'Usage',
-      url: '/usage',
-      icon: ChartColumn,
     },
   ],
 };

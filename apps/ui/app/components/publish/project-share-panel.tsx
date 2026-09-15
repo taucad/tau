@@ -22,9 +22,7 @@ import { PublicationAccessPanel } from '#components/publish/publication-access-p
 import type { PublicationAccessGrant } from '#components/publish/publication-access-panel.js';
 import { ENV } from '#environment.config.js';
 import { cn } from '@taucad/ui/utils/cn';
-import { useEntitlements } from '@taucad/billing/hooks/use-entitlements';
-import { openSettingsDialog } from '#hooks/use-settings-dialog.js';
-import { ProBadge } from '#components/tier-badge.js';
+import { CommercialUpgradeLabel, useCommercialFeatures } from '#cloud/commercial-features.js';
 import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
 import {
   connectGithubGist,
@@ -682,8 +680,7 @@ function ProjectSharePanelBody(properties: ProjectSharePanelProps): React.JSX.El
   const [loadingEnvelope, setLoadingEnvelope] = useState(false);
   const [envelopeError, setEnvelopeError] = useState<string | undefined>();
   const [visibility, setVisibility] = useState<PublishVisibility>('private');
-  const entitlements = useEntitlements();
-  const { canCreatePrivateShares } = entitlements;
+  const { canCreatePrivateShares, requestUpgrade } = useCommercialFeatures();
   // Free tier publishes public-only (T4/T5/AD11); derived so an async
   // entitlements load never strands a locked selection in form state.
   const effectiveVisibility: PublishVisibility = canCreatePrivateShares ? visibility : 'public';
@@ -843,7 +840,7 @@ function ProjectSharePanelBody(properties: ProjectSharePanelProps): React.JSX.El
     // Switching TO private is Pro-gated (T4/T5); the server 403s anyway — route
     // the user to the upgrade surface instead of a failing request.
     if (nextVisibility === 'private' && !canCreatePrivateShares) {
-      openSettingsDialog('billing');
+      requestUpgrade();
       return;
     }
 
@@ -1089,11 +1086,10 @@ function ProjectSharePanelBody(properties: ProjectSharePanelProps): React.JSX.El
                     type='button'
                     className='inline-flex items-center gap-1 text-xs text-muted-foreground underline-offset-2 hover:underline'
                     onClick={() => {
-                      openSettingsDialog('billing');
+                      requestUpgrade();
                     }}
                   >
-                    <ProBadge />
-                    Upgrade
+                    <CommercialUpgradeLabel />
                   </button>
                 )}
               </div>

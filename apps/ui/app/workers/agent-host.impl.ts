@@ -14,7 +14,7 @@ import type { FileStat } from '@taucad/types';
 import { randomUuid } from '@taucad/utils/id';
 import { assertRootedPath } from '@taucad/utils/path';
 import { z } from 'zod';
-import { createGatewayModelTransport, createTauAgentHost } from '@taucad/agent-host';
+import { createTauAgentHost } from '@taucad/agent-host';
 import type {
   AgentLiveEvent,
   AgentLogEvent,
@@ -27,6 +27,7 @@ import type {
   TauAgentHost,
 } from '@taucad/agent-host';
 import { createOpfsEventLog, createProviderEventLog } from '@taucad/agent-host/browser';
+import { createConfiguredGatewayModelTransport } from '#cloud/gateway-model-transport.js';
 import { createDefaultKernelOptions } from '#constants/kernel-worker.constants.js';
 import { createSkillResolver } from '#lib/skill-resolver.js';
 import type { SkillResolver } from '#lib/skill-resolver.js';
@@ -1414,7 +1415,7 @@ const initialize = async (request: AgentHostWorkerInitializeRequest, sessionId: 
     systemPrompt: request.systemPrompt,
     systemPromptBlocks: request.systemPromptBlocks,
     model: request.model,
-    modelTransport: createGatewayModelTransport({
+    modelTransport: createConfiguredGatewayModelTransport({
       baseUrl: request.gatewayBaseUrl,
       model: request.model,
     }),

@@ -128,7 +128,7 @@ function CompositeFieldTemplate({
     >
       <div
         data-slot='parameter-group-header'
-        className='group/parameter-group-header flex items-center rounded-md transition-colors duration-150 hover:bg-accent motion-reduce:transition-none'
+        className='group/parameter-group-header flex items-center rounded-md transition-colors duration-150 group-data-[state=open]/parameter-group:rounded-b-none hover:bg-accent motion-reduce:transition-none'
       >
         <CollapsibleTrigger
           className='group/collapsible flex min-h-8 min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1 text-left transition-colors duration-150 hover:bg-transparent focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset data-[state=open]:rounded-b-none motion-reduce:transition-none'
@@ -421,7 +421,7 @@ function ObjectFieldTemplate(
     >
       <div
         data-slot='parameter-group-header'
-        className='group/parameter-group-header flex items-center rounded-md transition-colors duration-150 hover:bg-accent motion-reduce:transition-none'
+        className='group/parameter-group-header flex items-center rounded-md transition-colors duration-150 group-data-[state=open]/parameter-group:rounded-b-none hover:bg-accent motion-reduce:transition-none'
       >
         <CollapsibleTrigger
           className='group/collapsible flex min-h-8 min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1 text-left transition-colors duration-150 hover:bg-transparent focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset data-[state=open]:rounded-b-none motion-reduce:transition-none'

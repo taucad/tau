@@ -288,7 +288,13 @@ const assistantChunks = (
     // Tool-call blocks are projected from their explicit tool-input log row.
   }
   chunks.push(...usageChunks(message));
-  if (!streamCheckpoint && !hasToolCall && chunks.some((chunk) => chunk.type !== 'data-acp-session')) {
+  // ACP message identities span tool calls; it does not report model step boundaries.
+  if (
+    message.metadata?.tauInternal?.['origin'] !== 'external' &&
+    !streamCheckpoint &&
+    !hasToolCall &&
+    chunks.some((chunk) => chunk.type !== 'data-acp-session')
+  ) {
     chunks.push({ type: 'finish-step' });
   }
   return chunks;
@@ -320,6 +326,7 @@ const toolChunkFacts = (
   const external = tauInternal?.['origin'] === 'external';
   const { call } = message;
   const agentId = tauInternal?.['agentId'];
+  const presentation = tauInternal?.['presentation'];
   /* The SDK carries a part's `toolMetadata` from the *input* chunk and reuses it
    * for the result. Omit transient status, but retain a terminal replacement so
    * the real SDK consumer sees the final ACP facts.
@@ -332,6 +339,7 @@ const toolChunkFacts = (
     ...(call?.status === 'completed' || call?.status === 'failed' ? { status: call.status } : {}),
     ...(external ? { origin: 'external' } : {}),
     ...(typeof agentId === 'string' ? { agentId } : {}),
+    ...(presentation === 'tau-mcp' ? { presentation } : {}),
   };
   const tau = durable as ToolChunkMetadata;
   return {
@@ -374,7 +382,7 @@ const messageChunks = (
             ...facts,
           }
         : { type: 'tool-output-available', toolCallId: message.toolCallId, output: message.content, ...facts };
-      return [output, { type: 'finish-step' }, { type: 'start-step' }];
+      return facts.dynamic ? [output] : [output, { type: 'finish-step' }, { type: 'start-step' }];
     }
   }
 };

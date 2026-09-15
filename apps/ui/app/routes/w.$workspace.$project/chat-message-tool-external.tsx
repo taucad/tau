@@ -208,7 +208,7 @@ const bodyText = (facts: AcpFacts, output: unknown): string => {
 const exitCodeOf = (output: unknown): number | undefined =>
   isRecord(output) && typeof output['exit_code'] === 'number' ? output['exit_code'] : undefined;
 
-const isPreliminary = (part: DynamicToolUIPart): boolean => 'preliminary' in part && part.preliminary === true;
+const isPreliminary = (part: DynamicToolUIPart): boolean => Reflect.get(part, 'preliminary') === true;
 
 const cardStatus = (part: DynamicToolUIPart): 'loading' | 'ready' | 'error' =>
   part.state === 'input-streaming' || part.state === 'input-available' || isPreliminary(part)
@@ -235,6 +235,14 @@ export function ChatMessageToolExternal({ part }: { readonly part: DynamicToolUI
   if (part.state === 'output-error') {
     return <ChatToolError errorText={sanitizeAgentText(part.errorText, 400)} icon={icon} noun={label} />;
   }
+
+  const displayVerb = isLoading ? activeVerb : verb;
+  const lowerLabel = label.toLowerCase();
+  const repeatedVerb = [verb, activeVerb].find((candidate) => {
+    const lowerCandidate = candidate.toLowerCase();
+    return lowerLabel === lowerCandidate || lowerLabel.startsWith(`${lowerCandidate} `);
+  });
+  const detail = repeatedVerb === undefined ? label : label.slice(repeatedVerb.length).trimStart();
 
   const diffs = diffBlocks(facts.content);
   if (body === 'diff' && diffs.length > 0) {
@@ -264,8 +272,8 @@ export function ChatMessageToolExternal({ part }: { readonly part: DynamicToolUI
     <ChatToolCardHeader>
       <ChatToolCardIcon icon={icon} {...(exitCode !== undefined && exitCode !== 0 ? { tone: 'destructive' } : {})} />
       <ChatToolCardTitle>
-        <ChatToolLabel verb={isLoading ? activeVerb : verb}>
-          <ChatToolDescription className={body === 'command' ? 'font-mono' : undefined}>{label}</ChatToolDescription>
+        <ChatToolLabel verb={displayVerb}>
+          <ChatToolDescription className={body === 'command' ? 'font-mono' : undefined}>{detail}</ChatToolDescription>
         </ChatToolLabel>
       </ChatToolCardTitle>
     </ChatToolCardHeader>

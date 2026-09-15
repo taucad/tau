@@ -28,7 +28,6 @@
 
 /* oxlint-disable tau-lint/no-direct-indexeddb -- Dedicated billing-snapshot database; see the store-selection note above. */
 import { useEffect, useMemo, useState } from 'react';
-// eslint-disable-next-line @nx/enforce-module-boundaries -- this first-party billing persistence owns the direct wire contract
 import { wireUsageSnapshotSchema } from '@taucad/billing';
 import type { WireUsageSnapshot } from '@taucad/billing';
 import { useBillingSession } from '@taucad/billing/hooks/billing-session';
@@ -78,9 +77,19 @@ const outsideAllowedScope = (snapshot: WireUsageSnapshot): boolean =>
 export type BillingProfile = {
   readonly schemaVersion: typeof schemaVersion;
   readonly environment: string;
+  readonly ownerId?: string;
   readonly subjectId: string;
+  readonly minimumRevision?: string;
   readonly displayLabel?: string;
   readonly selectedAt: string;
+};
+
+/** Highest authoritative account revision this device has observed. */
+export type BillingRevisionMinimum = {
+  readonly environment: string;
+  readonly ownerId: string;
+  readonly subjectId: string;
+  readonly revision: string;
 };
 
 /** A validated saved snapshot with the account label to show beside it. */
@@ -109,6 +118,20 @@ type ProfileRecord = BillingProfile & { readonly id: typeof profileId };
 export type SavedUsageScope = {
   readonly environment: string;
   readonly ownerId: string;
+};
+
+const revisionChangedEvent = `${metaConfig.databasePrefix}billing-revision-changed`;
+
+const maximumRevision = (left: string | undefined, right: string): string =>
+  left !== undefined && /^\d+$/u.test(left) && BigInt(left) > BigInt(right) ? left : right;
+
+const announceRevisionChange = (): void => {
+  globalThis.dispatchEvent(new Event(revisionChangedEvent));
+  if (typeof BroadcastChannel !== 'undefined') {
+    const channel = new BroadcastChannel(revisionChangedEvent);
+    channel.postMessage(null);
+    channel.close();
+  }
 };
 
 /**
@@ -237,6 +260,9 @@ export const readSavedUsage = async (
       if (session.environment !== undefined && session.environment !== profile.environment) {
         return undefined;
       }
+      if (session.ownerId !== undefined && profile.ownerId !== undefined && session.ownerId !== profile.ownerId) {
+        return undefined;
+      }
       const candidate = records.find(
         (record) =>
           record.queryKey === queryKey &&
@@ -262,7 +288,11 @@ export const readSavedUsage = async (
       ) {
         return undefined;
       }
-      if (minRevision !== undefined && BigInt(snapshot.snapshotRevision) < BigInt(minRevision)) {
+      const requiredRevision =
+        profile.ownerId === snapshot.ownerId && profile.minimumRevision !== undefined
+          ? maximumRevision(minRevision, profile.minimumRevision)
+          : minRevision;
+      if (requiredRevision !== undefined && BigInt(snapshot.snapshotRevision) < BigInt(requiredRevision)) {
         return undefined;
       }
       return { snapshot, label: profile.displayLabel ?? profile.subjectId };
@@ -270,6 +300,86 @@ export const readSavedUsage = async (
       db.close();
     }
   });
+
+/** Reads the durable receipt/purchase freshness fence for the selected account. */
+export const readBillingRevisionMinimum = async (
+  session: { readonly environment?: string; readonly ownerId?: string } = {},
+): Promise<BillingRevisionMinimum | undefined> =>
+  mutex.run(storeLock, async () => {
+    const db = await openDatabase();
+    if (db === undefined) {
+      return undefined;
+    }
+    try {
+      const { profile } = await readAll(db);
+      if (
+        profile?.ownerId === undefined ||
+        profile.minimumRevision === undefined ||
+        !/^\d+$/u.test(profile.minimumRevision) ||
+        (session.environment !== undefined && session.environment !== profile.environment) ||
+        (session.ownerId !== undefined && session.ownerId !== profile.ownerId)
+      ) {
+        return undefined;
+      }
+      return {
+        environment: profile.environment,
+        ownerId: profile.ownerId,
+        subjectId: profile.subjectId,
+        revision: profile.minimumRevision,
+      };
+    } finally {
+      db.close();
+    }
+  });
+
+/** Persists an owned receipt or purchase revision before consumers accept older snapshots. */
+export const recordBillingRevisionMinimum = async (minimum: BillingRevisionMinimum): Promise<void> => {
+  const generation = purgeGeneration;
+  const changed = await mutex.run(storeLock, async () => {
+    if (
+      generation !== purgeGeneration ||
+      (allowedScope !== undefined &&
+        (allowedScope.environment !== minimum.environment || allowedScope.ownerId !== minimum.ownerId))
+    ) {
+      return false;
+    }
+    const db = await openDatabase();
+    if (db === undefined) {
+      return false;
+    }
+    try {
+      const { profile } = await readAll(db);
+      const sameOwner =
+        profile?.environment === minimum.environment &&
+        profile.ownerId === minimum.ownerId &&
+        profile.subjectId === minimum.subjectId;
+      const revision = maximumRevision(sameOwner ? profile.minimumRevision : undefined, minimum.revision);
+      if (sameOwner && revision === profile.minimumRevision) {
+        return false;
+      }
+      const transaction = db.transaction(profileStoreName, 'readwrite');
+      transaction.objectStore(profileStoreName).put({
+        id: profileId,
+        schemaVersion,
+        environment: minimum.environment,
+        ownerId: minimum.ownerId,
+        subjectId: minimum.subjectId,
+        minimumRevision: revision,
+        ...(sameOwner && profile.displayLabel !== undefined ? { displayLabel: profile.displayLabel } : {}),
+        selectedAt: sameOwner ? profile.selectedAt : new Date().toISOString(),
+      } satisfies ProfileRecord);
+      await awaitTransaction(transaction);
+      return true;
+    } catch {
+      return false;
+    } finally {
+      db.close();
+    }
+  });
+  if (changed) {
+    announceRevisionChange();
+  }
+};
 
 /**
  * Replaces the saved snapshot for one canonical query and selects its profile.
@@ -294,6 +404,12 @@ export const writeSavedUsage = async (
       return 'unavailable';
     }
     try {
+      const { profile: previousProfile } = await readAll(db);
+      const sameOwner =
+        previousProfile?.environment === snapshot.environment &&
+        previousProfile.ownerId === snapshot.ownerId &&
+        previousProfile.subjectId === snapshot.subjectId;
+      const profileLabel = displayLabel ?? (sameOwner ? previousProfile.displayLabel : undefined);
       const record: SnapshotRecord = {
         key: recordKey(snapshot, queryKey),
         environment: snapshot.environment,
@@ -308,8 +424,13 @@ export const writeSavedUsage = async (
         id: profileId,
         schemaVersion,
         environment: snapshot.environment,
+        ownerId: snapshot.ownerId,
         subjectId: snapshot.subjectId,
-        ...(displayLabel === undefined ? {} : { displayLabel }),
+        minimumRevision: maximumRevision(
+          sameOwner ? previousProfile.minimumRevision : undefined,
+          snapshot.snapshotRevision,
+        ),
+        ...(profileLabel === undefined ? {} : { displayLabel: profileLabel }),
         selectedAt: new Date().toISOString(),
       };
       const write = db.transaction([snapshotStoreName, profileStoreName], 'readwrite');
@@ -374,6 +495,7 @@ export const purgeSavedUsage = async (keep?: SavedUsageScope): Promise<void> => 
       );
       const keepProfile =
         profile !== undefined &&
+        profile.ownerId === keep?.ownerId &&
         survivors.some(
           (record) => record.environment === profile.environment && record.subjectId === profile.subjectId,
         );
@@ -422,6 +544,36 @@ export function useSavedUsage(query: UsageSnapshotQuery): SavedUsage | undefined
   }, [environment, queryKey, userId]);
 
   return saved;
+}
+
+/** React view of the durable account-revision fence, refreshed across tabs. */
+export function useBillingRevisionMinimum(): BillingRevisionMinimum | undefined {
+  const { environment, userId } = useBillingSession();
+  const [minimum, setMinimum] = useState<BillingRevisionMinimum | undefined>(undefined);
+
+  useEffect(() => {
+    const cancelled = new AbortController();
+    const refresh = async (): Promise<void> => {
+      const next = await readBillingRevisionMinimum({ environment, ownerId: userId });
+      if (!cancelled.signal.aborted) {
+        setMinimum(next);
+      }
+    };
+    const refreshFromEvent = (): void => {
+      void refresh();
+    };
+    refreshFromEvent();
+    globalThis.addEventListener(revisionChangedEvent, refreshFromEvent);
+    const channel = typeof BroadcastChannel === 'undefined' ? undefined : new BroadcastChannel(revisionChangedEvent);
+    channel?.addEventListener('message', refreshFromEvent);
+    return () => {
+      cancelled.abort();
+      globalThis.removeEventListener(revisionChangedEvent, refreshFromEvent);
+      channel?.close();
+    };
+  }, [environment, userId]);
+
+  return minimum;
 }
 
 /**

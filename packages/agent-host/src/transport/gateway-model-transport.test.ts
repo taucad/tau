@@ -11,6 +11,7 @@ import {
   createGatewayModelTransport as createGatewayModelTransportWithModel,
 } from '#transport/gateway-model-transport.js';
 import type { GatewayModelTransportOptions } from '#transport/gateway-model-transport.js';
+import { createTauCloudGatewayModelTransport } from '#transport/tau-cloud-gateway-model-transport.js';
 import { authoritativeGatewayWireFixtures } from '#transport/gateway-wire.fixture.js';
 
 const request = (overrides: Partial<ModelStreamRequest> = {}): ModelStreamRequest => ({
@@ -72,7 +73,7 @@ const usage = (
 });
 
 const createGatewayModelTransport = (options: Omit<GatewayModelTransportOptions, 'model'>) =>
-  createGatewayModelTransportWithModel({
+  createTauCloudGatewayModelTransport({
     ...options,
     model: { contextWindow: 200_000, maxTokens: 8192 },
   });
@@ -186,6 +187,20 @@ const heldAnthropicResponse = () => {
 };
 
 describe('createGatewayModelTransport', () => {
+  it('uses no financial recovery or operation binding when cloud mode is off', async () => {
+    const response = fixtureResponse();
+    response.headers.delete('x-tau-operation-id');
+    const transport = createGatewayModelTransportWithModel({
+      baseUrl: 'https://gateway.example',
+      fetch: vi.fn(async () => response),
+      model: { contextWindow: 200_000, maxTokens: 8192 },
+    });
+
+    await expect(collect(transport.stream(request()))).resolves.not.toHaveLength(0);
+    expect(transport.usesBillingAttempt).toBeUndefined();
+    expect(transport.lookupAttempt).toBeUndefined();
+  });
+
   it('emits tool identity before held argument generation completes', async () => {
     const held = heldAnthropicResponse();
     const transport = createGatewayModelTransport({

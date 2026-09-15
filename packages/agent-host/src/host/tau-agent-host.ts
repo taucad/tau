@@ -115,8 +115,6 @@ export type ExternalAgentTurn = {
   readonly signal: AbortSignal;
   /** Publish one non-durable text/reasoning delta before its durable envelope settles. */
   readonly publishLive?: ((event: AgentLiveEventPayload) => Promise<void>) | undefined;
-  /** Append durable events; each publishes on the host's event stream. */
-  append(events: readonly ExternalAgentLogEvent[]): Promise<void>;
   /**
    * Append replaceable session state after this turn settles.
    *
@@ -126,6 +124,8 @@ export type ExternalAgentTurn = {
    * prompt, such as commands, plans and configuration.
    */
   readonly appendSession?: ((events: readonly ExternalAgentLogEvent[]) => Promise<void>) | undefined;
+  /** Append durable events; each publishes on the host's event stream. */
+  append(events: readonly ExternalAgentLogEvent[]): Promise<void>;
   /** Persist state that must survive a restart. Merges into what is there. */
   remember(state: JsonObject): Promise<void>;
   /**

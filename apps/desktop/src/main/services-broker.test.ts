@@ -414,13 +414,13 @@ describe('createServicesBroker — the quit hold (W19, D31)', () => {
     }
   });
 
-  it('answers at once when a utility that died mid-quiesce has nothing left to settle', async () => {
+  it('reports failure when a utility dies before acknowledging quiescence', async () => {
     const { broker, spawns } = brokerHarness();
     broker.connect('nodeFs');
     const quiescing = broker.quiesce(5000);
     spawns[0]!.exit();
 
-    await expect(quiescing).resolves.toBe('quiesced');
+    await expect(quiescing).resolves.toBe('failed');
   });
 
   it('has nothing to ask when no utility was ever forked', async () => {

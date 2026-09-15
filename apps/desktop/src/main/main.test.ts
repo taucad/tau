@@ -21,7 +21,7 @@ const state = vi.hoisted(() => ({
   servicesDispose: vi.fn(async () => undefined),
   /* The quit hold's two halves, in the order main runs them (R9, D31). */
   shutdownOrder: [] as string[],
-  servicesQuiesce: vi.fn(async (): Promise<'quiesced'> => 'quiesced'),
+  servicesQuiesce: vi.fn(async (): Promise<'quiesced' | 'failed' | 'timeout' | 'no-utility'> => 'quiesced'),
   ipcListeners: new Map<string, Array<(...args: unknown[]) => unknown>>(),
   sentToRenderer: [] as string[],
   /* A renderer that closes its sessions at once, which is what every case but
@@ -70,7 +70,7 @@ const fakeWindow = {
       if (channel === 'tau:quit:ask' && state.autoQuiesce) {
         queueMicrotask(() => {
           for (const listener of state.ipcListeners.get('tau:quit:quiesced') ?? []) {
-            listener();
+            listener(undefined, false);
           }
         });
       }
@@ -224,6 +224,7 @@ afterEach(async () => {
   state.resolveFork = undefined;
   // Each case bootstraps main afresh; the cached module would otherwise register nothing.
   vi.resetModules();
+  vi.unstubAllGlobals();
   for (const listener of process.listeners('uncaughtException')) {
     if (!originalUncaught.has(listener)) {
       process.removeListener('uncaughtException', listener);
@@ -244,6 +245,7 @@ describe('desktop main compute owner', () => {
   const bootMilliseconds = 30_000;
 
   const bootstrap = async (): Promise<string> => {
+    vi.stubGlobal('tauCloudBuildEnabled', false);
     state.userData = await mkdtemp(join(tmpdir(), 'tau-main-owner-'));
     await import('#main/main.js');
     await vi.waitFor(() => {
@@ -319,7 +321,7 @@ describe('desktop main compute owner', () => {
   );
 
   it(
-    'holds quit for the renderer and the utility, in that order, and disposes anyway (R9, D31)',
+    'holds quit for the renderer and the utility, in that order (R9, D31)',
     async () => {
       await bootstrap();
       const order: string[] = [];
@@ -341,7 +343,7 @@ describe('desktop main compute owner', () => {
       });
       expect(order).toEqual([]);
       for (const listener of state.ipcListeners.get(quitChannels.quiesced) ?? []) {
-        listener();
+        listener(undefined, false);
       }
 
       await vi.waitFor(() => {

@@ -16,7 +16,7 @@ import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { FastifyAdapter } from '@nestjs/platform-fastify';
 import cookie from '@fastify/cookie';
 import { ZodSerializerInterceptor, ZodValidationPipe } from 'nestjs-zod';
-import { idPrefix, publicationApiCode, publicationViewCookieName } from '@taucad/types/constants';
+import { idPrefix, publicationApiCode } from '@taucad/types/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { ProjectShareController } from '#api/publications/project-share.controller.js';
 import { PublicationsController } from '#api/publications/publications.controller.js';
@@ -585,7 +585,7 @@ describe('Publications HTTP integration', () => {
     expect(publicationService.updateVisibility).not.toHaveBeenCalled();
   });
 
-  it('PATCH /v1/publications/:id/views issues anonymous tau_view_id cookie and returns 204', async () => {
+  it('PATCH /v1/publications/:id/views records an anonymous view without issuing a cookie', async () => {
     publicationService.recordView.mockResolvedValue(undefined);
 
     const response = await fetch(`${baseUrl}/v1/publications/pub_view/views`, {
@@ -593,9 +593,7 @@ describe('Publications HTTP integration', () => {
     });
 
     expect(response.status).toBe(204);
-    const setCookie = response.headers.get('set-cookie');
-    expect(setCookie).not.toBeNull();
-    expect(setCookie).toContain(`${publicationViewCookieName}=`);
+    expect(response.headers.get('set-cookie')).toBeNull();
     expect(publicationService.recordView).toHaveBeenCalledTimes(1);
 
     const recordViewCall = publicationService.recordView.mock.calls[0]?.[0] as {

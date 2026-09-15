@@ -80,6 +80,33 @@ const toolResultSchema = z
 const googleToolCallExtraContentSchema = z
   .object({ google: z.object({ thought_signature: boundedString }).strict() })
   .strict();
+const anthropicThinkingConfigSchema = z.union([
+  z.object({ type: z.literal('adaptive'), display: z.enum(['summarized', 'omitted']).optional() }).strict(),
+  z
+    .object({
+      type: z.literal('enabled'),
+      budget_tokens: z.number().int().positive(),
+      display: z.enum(['summarized', 'omitted']).optional(),
+    })
+    .strict(),
+]);
+const anthropicOutputConfigSchema = z.object({ effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']) }).strict();
+const googleReasoningConfigSchema = z
+  .object({
+    google: z
+      .object({
+        thinking_config: z
+          .object({
+            include_thoughts: z.literal(true),
+            thinking_level: z.enum(['LOW', 'MEDIUM', 'HIGH']),
+          })
+          .strict(),
+        thought_tag_marker: z.literal('think'),
+        stream_function_call_arguments: z.literal(true),
+      })
+      .strict(),
+  })
+  .strict();
 const contentSchema = z.union([
   boundedString,
   z
@@ -214,10 +241,9 @@ export const billableModelRequestSchema = z
       })
       .strict()
       .optional(),
-    thinking: z
-      .object({ type: z.literal('adaptive') })
-      .strict()
-      .optional(),
+    thinking: anthropicThinkingConfigSchema.optional(),
+    output_config: anthropicOutputConfigSchema.optional(),
+    extra_body: googleReasoningConfigSchema.optional(),
     tool_choice: z
       .union([
         z.enum(['auto', 'none', 'required']),
@@ -383,10 +409,8 @@ const anthropicWireSchema = z
     max_tokens: z.number(),
     stream: z.literal(true),
     system: z.union([boundedString, z.array(textSchema).max(512)]).optional(),
-    thinking: z
-      .object({ type: z.literal('adaptive') })
-      .strict()
-      .optional(),
+    thinking: anthropicThinkingConfigSchema.optional(),
+    output_config: anthropicOutputConfigSchema.optional(),
     tools: z
       .array(
         z
@@ -448,6 +472,7 @@ const completionsWireSchema = z
     store: z.literal(false).optional(),
     max_completion_tokens: z.number().optional(),
     max_tokens: z.number().optional(),
+    extra_body: googleReasoningConfigSchema.optional(),
     tools: z
       .array(
         z
@@ -527,6 +552,7 @@ const boundedElementTypes = new Set([
   'any',
   'auto',
   'ephemeral',
+  'enabled',
   'function',
   'function_call',
   'function_call_output',

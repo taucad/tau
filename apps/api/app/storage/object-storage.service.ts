@@ -2,11 +2,13 @@ import type { Readable } from 'node:stream';
 import {
   AbortMultipartUploadCommand,
   CompleteMultipartUploadCommand,
+  CopyObjectCommand,
   CreateMultipartUploadCommand,
   DeleteObjectCommand,
   GetObjectCommand,
   HeadBucketCommand,
   HeadObjectCommand,
+  ListObjectsV2Command,
   PutObjectCommand,
   S3Client,
   UploadPartCommand,
@@ -79,6 +81,15 @@ export type ObjectStorageServiceContract = {
     contentType: string;
     tier?: StorageTier;
   }): Promise<string>;
+  uploadPart?(args: {
+    namespace: StorageNamespace;
+    key: string;
+    uploadId: string;
+    partNumber: number;
+    body: Uint8Array<ArrayBuffer>;
+    checksumSha256: string;
+    tier?: StorageTier;
+  }): Promise<{ etag: string; checksumSha256: string }>;
   presignUploadPart(args: {
     namespace: StorageNamespace;
     key: string;
@@ -101,6 +112,17 @@ export type ObjectStorageServiceContract = {
     uploadId: string;
     tier?: StorageTier;
   }): Promise<void>;
+  copyBlob?(args: {
+    namespace: StorageNamespace;
+    sourceKey: string;
+    destinationKey: string;
+    tier?: StorageTier;
+  }): Promise<void>;
+  listBlobs?(args: {
+    namespace: StorageNamespace;
+    keyPrefix: string;
+    tier?: StorageTier;
+  }): Promise<ReadonlyArray<{ key: string; size: number; lastModified: Date | undefined }>>;
   publicUrl(args: { namespace: StorageNamespace; key: string }): string;
   headProbeObject(): Promise<
     | {
@@ -347,6 +369,32 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
     );
   }
 
+  public async uploadPart(args: {
+    namespace: StorageNamespace;
+    key: string;
+    uploadId: string;
+    partNumber: number;
+    body: Uint8Array<ArrayBuffer>;
+    checksumSha256: string;
+    tier?: StorageTier;
+  }): Promise<{ etag: string; checksumSha256: string }> {
+    const { resolvedKey } = this.resolveKey(args.namespace, args.key);
+    const response = await this.client.send(
+      new UploadPartCommand({
+        Bucket: this.resolveBucket(args.tier),
+        Key: resolvedKey,
+        UploadId: args.uploadId,
+        PartNumber: args.partNumber,
+        Body: args.body,
+        ChecksumSHA256: args.checksumSha256,
+      }),
+    );
+    return {
+      etag: response.ETag?.replaceAll('"', '') ?? '',
+      checksumSha256: response.ChecksumSHA256 ?? args.checksumSha256,
+    };
+  }
+
   public async completeMultipartUpload(args: {
     namespace: StorageNamespace;
     key: string;
@@ -385,6 +433,52 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
         UploadId: args.uploadId,
       }),
     );
+  }
+
+  public async copyBlob(args: {
+    namespace: StorageNamespace;
+    sourceKey: string;
+    destinationKey: string;
+    tier?: StorageTier;
+  }): Promise<void> {
+    const bucket = this.resolveBucket(args.tier);
+    const source = this.resolveKey(args.namespace, args.sourceKey).resolvedKey;
+    const destination = this.resolveKey(args.namespace, args.destinationKey).resolvedKey;
+    await this.client.send(
+      new CopyObjectCommand({ Bucket: bucket, Key: destination, CopySource: `${bucket}/${source}` }),
+    );
+  }
+
+  public async listBlobs(args: {
+    namespace: StorageNamespace;
+    keyPrefix: string;
+    tier?: StorageTier;
+  }): Promise<ReadonlyArray<{ key: string; size: number; lastModified: Date | undefined }>> {
+    const prefix = this.resolveKey(args.namespace, args.keyPrefix).resolvedKey;
+    const namespacePrefix = STORAGE_NAMESPACE_PREFIXES[args.namespace];
+    const objects: Array<{ key: string; size: number; lastModified: Date | undefined }> = [];
+    let continuationToken: string | undefined;
+    do {
+      // oxlint-disable-next-line no-await-in-loop -- S3 pagination is sequential by token.
+      const response = await this.client.send(
+        new ListObjectsV2Command({
+          Bucket: this.resolveBucket(args.tier),
+          Prefix: prefix,
+          ...(continuationToken === undefined ? {} : { ContinuationToken: continuationToken }),
+        }),
+      );
+      for (const object of response.Contents ?? []) {
+        if (object.Key !== undefined) {
+          objects.push({
+            key: object.Key.slice(namespacePrefix.length),
+            size: Number(object.Size ?? 0),
+            lastModified: object.LastModified,
+          });
+        }
+      }
+      continuationToken = response.IsTruncated === true ? response.NextContinuationToken : undefined;
+    } while (continuationToken !== undefined);
+    return objects;
   }
 
   public publicUrl(args: { namespace: StorageNamespace; key: string }): string {

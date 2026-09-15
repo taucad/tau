@@ -5,6 +5,7 @@ import {
   Body,
   Controller,
   Get,
+  HttpCode,
   NotFoundException,
   Param,
   Post,
@@ -101,6 +102,7 @@ export class GitController {
 
   // eslint-disable-next-line max-params-no-constructor/max-params-no-constructor -- NestJS parameter decorators bind independent request facets; bundling them would obscure the route contract
   @Post(':repo/git-upload-pack')
+  @HttpCode(200)
   public async uploadPack(
     @Param('repo') repository: string,
     @User('id') userId: string,
@@ -118,6 +120,7 @@ export class GitController {
 
   // eslint-disable-next-line max-params-no-constructor/max-params-no-constructor -- NestJS parameter decorators bind independent request facets; bundling them would obscure the route contract
   @Post(':repo/git-receive-pack')
+  @HttpCode(200)
   public async receivePack(
     @Param('repo') repository: string,
     @User('id') userId: string,
@@ -177,7 +180,7 @@ export class GitController {
     const access = await this.repositories.authorize({
       projectId,
       userId,
-      mode: 'write',
+      mode: 'finalize',
     });
     const stored = await this.lfs.verify({
       access,
@@ -254,13 +257,17 @@ export class GitController {
     });
 
     applyHeaders(args.reply, noCacheHeaders);
-    // The child outlives neither the response nor a client that walks away: a
-    // `git upload-pack` whose reader disappears would otherwise block forever
-    // on a full stdout pipe.
+    // The child outlives neither an incomplete response nor a client that walks
+    // away: an upload-pack whose reader disappears would otherwise block on a
+    // full stdout pipe. A completed response lets the child finish its hooks.
     const abort = new AbortController();
     args.reply.raw.once('close', () => {
-      abort.abort();
+      if (!args.reply.raw.writableFinished) {
+        abort.abort();
+      }
     });
+    const admission = write ? await this.repositories.admitGitPush(access) : undefined;
+    const remainingBytes = admission?.remainingBytes ?? access.remainingBytes;
     const output = this.repositories.serve({
       abort: abort.signal,
       repositoryPath: access.repositoryPath,
@@ -273,13 +280,14 @@ export class GitController {
             // through this admission check, and refuses one whose quarantined
             // objects do not fit in what is left of the plan (D17).
             TAU_GIT_PUSH_ADMITTED: '1',
-            TAU_GIT_QUOTA_REMAINING_BYTES: String(access.remainingBytes),
+            TAU_GIT_QUOTA_REMAINING_BYTES: String(remainingBytes),
           }
         : undefined,
       ...(write
         ? {
             accountFor: projectId,
-            maximumInputBytes: access.remainingBytes + quotaOverrunSlackBytes,
+            maximumInputBytes: remainingBytes + quotaOverrunSlackBytes,
+            releaseStorageAdmission: admission?.release,
           }
         : {}),
     });

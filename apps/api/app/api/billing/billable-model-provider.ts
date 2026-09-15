@@ -11,7 +11,7 @@ const providerTargets = {
   openai: { key: 'OPENAI_API_KEY', url: 'https://api.openai.com/v1/responses' },
   together: { key: 'TOGETHER_API_KEY', url: 'https://api.together.ai/v1/chat/completions' },
   morph: { key: 'MORPH_API_KEY', url: 'https://api.morphllm.com/v1/chat/completions' },
-  xai: { key: 'XAI_API_KEY', url: 'https://api.x.ai/v1/chat/completions' },
+  xai: { key: 'XAI_API_KEY', url: 'https://api.x.ai/v1/responses' },
   vertexai: { key: 'GOOGLE_VERTEX_AI_CREDENTIALS', url: 'https://aiplatform.googleapis.com' },
 } as const;
 
@@ -135,7 +135,11 @@ export const createBillableModelProviderAdapters = (
         return [];
       }
       const adapter = withBillableEvidenceCollector(
-        provider === 'anthropic' ? 'anthropic' : provider === 'openai' ? 'openai-responses' : 'openai-completions',
+        provider === 'anthropic'
+          ? 'anthropic'
+          : provider === 'openai' || provider === 'xai'
+            ? 'openai-responses'
+            : 'openai-completions',
         {
           executeOnce: async ({ qualification, signal }) => {
             const request = qualification.normalizedRequest;
@@ -146,11 +150,18 @@ export const createBillableModelProviderAdapters = (
             const url = credentials
               ? `${target.url}/v1/projects/${encodeURIComponent(credentials.projectId)}/locations/global/endpoints/openapi/chat/completions`
               : target.url;
+            let { body } = request;
+            if (credentials && body !== null && typeof body === 'object' && !Array.isArray(body)) {
+              const vertexRequest = body as Record<string, unknown>;
+              if (typeof vertexRequest['model'] === 'string' && !vertexRequest['model'].startsWith('google/')) {
+                body = { ...vertexRequest, model: `google/${vertexRequest['model']}` };
+              }
+            }
             return fetchOnce(url, {
               method: 'POST',
               redirect: 'error',
               signal,
-              body: JSON.stringify(request.body),
+              body: JSON.stringify(body),
               headers:
                 provider === 'anthropic'
                   ? { 'content-type': 'application/json', 'x-api-key': accessToken, ...request.headers }

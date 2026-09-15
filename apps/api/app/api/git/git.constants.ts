@@ -38,6 +38,37 @@ export const storageLimitBytesByTier: Readonly<Record<BillingTier, number>> = {
 };
 
 /**
+ * How many projects one account may register on the Tau Hosted Remote (P51,
+ * review R5).
+ *
+ * Before P51, a bare repository could only be created by a publish, which costs
+ * a push and a materialization. `PUT /v1/projects/:projectId` makes creation
+ * reachable by any signed-in account, so it needs a ceiling: each registration
+ * is a row plus `git init --bare`, `update-server-info` and a hook install on
+ * the volume.
+ *
+ * One flat number rather than a per-tier table: the plan already bounds what a
+ * project may *hold* (`storageLimitBytesByTier`), and a second per-tier
+ * dimension would be a product decision nobody has made. It is a constant rather
+ * than an operator environment value for the same reason `storageLimitBytesByTier`
+ * is — none of the Hosted Remote's plan numbers is env-tunable today, and one
+ * that is would be the odd one out. Moving it is a one-line change when an
+ * operator first needs to.
+ */
+export const registeredProjectLimitPerOwner = 200;
+
+/**
+ * Daily ceiling on `PUT /v1/projects/:projectId` calls per account.
+ *
+ * Separate from the cap above because the route is idempotent: a caller who is
+ * already at the cap can still re-register projects it owns, and each of those
+ * calls reconciles hooks on the volume. Set well above any human's day — a
+ * person connecting every one of their projects twice over is still inside it —
+ * so it only ever catches a script.
+ */
+export const projectRegistrationsPerOwnerPerDay = 1000;
+
+/**
  * Where one large object lives in the private bucket. Same `oid` layout
  * git-lfs itself uses (`packages/revisions/src/lfs.ts#lfsObjectPath`), under a
  * per-project prefix so quota accounting and deletion are per repository. The
@@ -128,6 +159,10 @@ fi
 status=0
 while read -r _old _new ref; do
   case "$ref" in
+    refs/heads/sync|refs/heads/sync/?*|refs/remotes|refs/remotes/?*|refs/tau/owners|refs/tau/owners/?*|refs/tau/workspaces|refs/tau/workspaces/?*|refs/tau/revisions|refs/tau/revisions/?*|refs/tau/transactions|refs/tau/transactions/?*|refs/tau/head|refs/tau/head/?*|refs/tau/retention|refs/tau/retention/?*)
+      echo "Tau: refused $ref — host-local refs never leave a host." >&2
+      status=1
+      ;;
     ${pushableRefPrefixes.map((prefix) => `${prefix}?*`).join('|')}) ;;
     *)
       echo "Tau: refused $ref — host-local refs never leave a host." >&2

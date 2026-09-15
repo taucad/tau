@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { PassThrough, Readable } from 'node:stream';
@@ -101,6 +101,27 @@ describe('GitRepositoryService.serve', () => {
 
     expect(spawnOne).toThrow(/retry shortly/u);
   });
+
+  it('holds one owner-wide admission across receive-pack and refuses a racing LFS reservation', async () => {
+    const service = createService();
+    vi.spyOn(service, 'readOwnerUsage').mockResolvedValue({ storageBytes: 10, lfsBytes: 20 });
+    const access = {
+      projectId: 'proj_1',
+      ownerId: 'owner_1',
+      repositoryPath: '/tmp/tau-git-root/proj_1.git',
+      remainingBytes: 70,
+      storageLimitBytes: 100,
+    };
+    const admission = await service.admitGitPush(access);
+    expect(admission.remainingBytes).toBe(70);
+    await expect(service.reserveLfsObjects({ access, objects: [] })).rejects.toMatchObject({
+      response: { code: 'GIT_STORAGE_BUSY' },
+    });
+    admission.release();
+    const reopened = await service.admitGitPush(access);
+    expect(reopened.remainingBytes).toBe(70);
+    reopened.release();
+  });
 });
 
 /*
@@ -157,5 +178,108 @@ describe('GitRepositoryService.ensureRepository', () => {
 
     expect(() => service.repositoryPath('../../tmp/evil')).toThrow();
     expect(service.repositoryPath('proj_1')).toBe(path.join(root, 'proj_1.git'));
+  });
+});
+
+/**
+ * Storage accounting must never fail open (review R4).
+ *
+ * `storage_bytes` is what both plan guards subtract from the allowance
+ * (`authorize`'s `remainingBytes`, which becomes `receive.maxInputSize` and the
+ * `pre-receive` budget), so every way of writing a number that is *lower* than
+ * the truth hands the project headroom it has not paid for.
+ */
+describe('GitRepositoryService storage accounting', () => {
+  let root: string;
+  /** Every `storage_bytes` the service wrote, in order. */
+  let written: number[];
+
+  const accountingService = (): InstanceType<typeof GitRepositoryService> =>
+    new GitRepositoryService(
+      { get: (key: string): unknown => (key === 'TAU_GIT_ROOT' ? root : '') } as unknown as ConfigService<
+        Environment,
+        true
+      >,
+      {
+        database: {
+          insert: () => ({
+            values: (values: { storageBytes?: number }) => ({
+              onConflictDoUpdate: async (update: { set: Record<string, unknown> }): Promise<void> => {
+                const next = update.set['storageBytes'] ?? values.storageBytes;
+                if (typeof next === 'number') {
+                  written.push(next);
+                }
+              },
+            }),
+          }),
+        },
+      } as unknown as DatabaseService,
+      {} as unknown as BillingService,
+      {} as unknown as ObjectStorageService,
+    );
+
+  /** One `receive-pack` request with `body` as its whole payload. */
+  const push = async (service: InstanceType<typeof GitRepositoryService>, body: string): Promise<void> => {
+    const child = fakeChild();
+    spawnMock.mockImplementationOnce(() => child);
+    service.serve({
+      repositoryPath: path.join(root, 'proj_1.git'),
+      service: 'git-receive-pack',
+      body: Readable.from([Buffer.from(body, 'utf8')]),
+      gzipped: false,
+      accountFor: 'proj_1',
+      maximumInputBytes: 1024,
+    });
+    /* The body is piped before the child closes, exactly as a real request. */
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 10);
+    });
+    child.emit('close', 0);
+    await service.settled();
+  };
+
+  beforeEach(() => {
+    root = mkdtempSync(path.join(tmpdir(), 'tau-git-accounting-'));
+    written = [];
+    spawnMock.mockReset();
+    spawnMock.mockImplementation(() => fakeChild());
+  });
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('leaves the row untouched when the repository cannot be walked', async () => {
+    const service = accountingService();
+    /* No repository on the volume: the walk fails rather than answering 0. */
+    await expect(service.measureRepository(path.join(root, 'missing.git'))).rejects.toThrow();
+
+    await push(service, '0000rest-of-a-pack');
+    expect(written).toStrictEqual([]);
+  });
+
+  it('does not account for the flush-only request that authenticates a chunked push', async () => {
+    mkdirSync(path.join(root, 'proj_1.git'), { recursive: true });
+    writeFileSync(path.join(root, 'proj_1.git', 'HEAD'), 'ref: refs/heads/main\n');
+    const service = accountingService();
+
+    await push(service, '0000');
+    expect(written).toStrictEqual([]);
+  });
+
+  it('records what the request that carried a pack measured, once', async () => {
+    const repository = path.join(root, 'proj_1.git');
+    mkdirSync(path.join(repository, 'objects'), { recursive: true });
+    writeFileSync(path.join(repository, 'HEAD'), 'ref: refs/heads/main\n');
+    const service = accountingService();
+
+    await push(service, '0000');
+    writeFileSync(path.join(repository, 'objects', 'pack-1'), Buffer.alloc(4096));
+    await push(service, '0000the commands and the pack');
+
+    /* One write, and it is the one the pack's own walk made: the probe never
+       ran a walk at all, so it cannot race it or overwrite it. */
+    expect(written).toHaveLength(1);
+    expect(written[0]).toBeGreaterThanOrEqual(4096);
   });
 });

@@ -34,6 +34,30 @@ describe('createBillableModelEvidenceCollector', () => {
     });
   });
 
+  it('settles xAI Responses reasoning usage without adding it twice to output', () => {
+    const collector = createBillableModelEvidenceCollector(
+      'openai-responses',
+      new Set(['uncached_input', 'cache_read', 'output']),
+      'xai',
+    );
+    collector.accept(
+      bytes(
+        'event: response.completed\ndata: {"type":"response.completed","response":{"id":"xai-response","status":"completed","usage":{"input_tokens":11,"output_tokens":7,"input_tokens_details":{"cached_tokens":3},"output_tokens_details":{"reasoning_tokens":5}}}}\n\n',
+      ),
+    );
+
+    expect(collector.complete()).toMatchObject({
+      kind: 'final_usage',
+      reasoningTokens: 5n,
+      meterItems: [
+        { dimension: 'uncached_input', quantity: 8n },
+        { dimension: 'cache_read', quantity: 3n },
+        { dimension: 'output', quantity: 7n },
+      ],
+      normalizationEvidence: { providerRequestId: 'xai-response' },
+    });
+  });
+
   it('should preserve absent required usage as unknown rather than zero', () => {
     const collector = createBillableModelEvidenceCollector(
       'openai-responses',

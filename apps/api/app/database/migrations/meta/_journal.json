@@ -246,6 +246,20 @@
       "when": 1789249057643,
       "tag": "0035_bored_warstar",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1789363001019,
+      "tag": "0036_wealthy_forgotten_one",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1789423714194,
+      "tag": "0037_tough_talkback",
+      "breakpoints": true
     }
   ]
 }

@@ -19,5 +19,9 @@ import { ViewerIdentityService } from '#api/publications/viewer-identity.service
   imports: [DatabaseModule, EmailModule, BillingModule, GitModule],
   controllers: [PublicationsController, ProjectShareController],
   providers: [PublicationsService, PublicationRateLimiterService, ViewerIdentityService, ViewerIdentityInterceptor],
+  /* The API's only daily-budget rate limiter. `ProjectsModule` consumes it for
+     `PUT /v1/projects/:projectId` (review R5) rather than re-implementing the
+     Redis bucket; nothing of publications' own state leaves with it. */
+  exports: [PublicationRateLimiterService],
 })
 export class PublicationsModule {}

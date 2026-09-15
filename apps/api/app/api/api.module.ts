@@ -9,6 +9,7 @@ import { LlmModule } from '#api/llm/llm.module.js';
 import { KernelsModule } from '#api/kernels/kernels.module.js';
 import { ModelModule } from '#api/models/model.module.js';
 import { PrivacyModule } from '#api/privacy/privacy.module.js';
+import { ProjectsModule } from '#api/projects/projects.module.js';
 import { ProviderModule } from '#api/providers/provider.module.js';
 import { TestApiModule } from '#api/test-api/test-api.module.js';
 import { TelemetryIngestModule } from '#api/telemetry/telemetry.module.js';
@@ -17,6 +18,7 @@ import { PublicationsModule } from '#api/publications/publications.module.js';
 import { DurableEventsModule } from '#api/durable-events/durable-events.module.js';
 import { JobsModule } from '#api/jobs/jobs.module.js';
 import { RepositoriesModule } from '#api/repositories/repositories.module.js';
+import { GithubModule } from '#api/github/github.module.js';
 
 @Module({
   imports: [
@@ -30,12 +32,14 @@ import { RepositoriesModule } from '#api/repositories/repositories.module.js';
     CodeCompletionModule,
     DurableEventsModule,
     GitModule,
+    GithubModule,
     HealthModule,
     JobsModule,
     KernelsModule,
     LlmModule,
     ModelModule,
     PrivacyModule,
+    ProjectsModule,
     ProviderModule,
     PublicationsModule,
     RepositoriesModule,

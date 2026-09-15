@@ -1,7 +1,7 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, open, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { ConfigService } from '@nestjs/config';
 import type { Environment } from '#config/environment.config.js';
 import type { ObjectStorageService } from '#storage/object-storage.service.js';
@@ -9,18 +9,24 @@ import type { DatabaseService } from '#database/database.service.js';
 import type { BillingService } from '#api/billing/billing.service.js';
 import { GitBackupService } from '#api/git/git-backup.service.js';
 import { GitRepositoryService } from '#api/git/git.service.js';
+import { gitLfsObjectKey } from '#api/git/git.constants.js';
 
 describe('GitBackupService', () => {
   let gitRoot: string;
   let workspace: string;
   let repositories: GitRepositoryService;
   let backups: GitBackupService;
+  let objectStorage: ObjectStorageService;
+  let configService: ConfigService<Environment, true>;
   const stored = new Map<string, Uint8Array<ArrayBuffer>>();
+  const storedSizes = new Map<string, number>();
+  const multipartKeys = new Map<string, string>();
+  const multipartParts = new Map<string, number[]>();
 
   beforeAll(async () => {
     gitRoot = await mkdtemp(path.join(tmpdir(), 'tau-git-backup-root-'));
     workspace = await mkdtemp(path.join(tmpdir(), 'tau-git-backup-work-'));
-    const configService = {
+    configService = {
       get: (key: string): unknown => (key === 'TAU_GIT_ROOT' ? gitRoot : 24),
     } as unknown as ConfigService<Environment, true>;
     repositories = new GitRepositoryService(
@@ -29,23 +35,70 @@ describe('GitBackupService', () => {
       {} as unknown as BillingService,
       {} as unknown as ObjectStorageService,
     );
-    backups = new GitBackupService(configService, repositories, {
+    vi.spyOn(repositories, 'listLfsObjects').mockResolvedValue([]);
+    objectStorage = {
       putBlob: async (args: { key: string; body: Uint8Array<ArrayBuffer> }) => {
         stored.set(args.key, args.body);
+        storedSizes.set(args.key, args.body.byteLength);
         return { etag: '"x"', alreadyExisted: false };
       },
       headBlob: async (args: { key: string }) => {
         const body = stored.get(args.key);
-        return body === undefined
+        const size = body?.byteLength ?? storedSizes.get(args.key);
+        return size === undefined
           ? undefined
           : {
               contentType: 'application/x-git-bundle',
-              size: body.byteLength,
+              size,
               etag: '"x"',
               cacheControl: '',
             };
       },
-    } as unknown as ObjectStorageService);
+      deleteBlob: async (args: { key: string }) => {
+        stored.delete(args.key);
+        storedSizes.delete(args.key);
+      },
+      copyBlob: async (args: { sourceKey: string; destinationKey: string }) => {
+        const source = stored.get(args.sourceKey);
+        if (source !== undefined) {
+          stored.set(args.destinationKey, source);
+        }
+        const size = storedSizes.get(args.sourceKey);
+        if (size !== undefined) {
+          storedSizes.set(args.destinationKey, size);
+        }
+      },
+      listBlobs: async () => [],
+      createMultipartUpload: async (args: { key: string }) => {
+        const uploadId = `upload-${String(multipartKeys.size + 1)}`;
+        multipartKeys.set(uploadId, args.key);
+        multipartParts.set(uploadId, []);
+        return uploadId;
+      },
+      uploadPart: async (args: {
+        uploadId: string;
+        partNumber: number;
+        body: Uint8Array<ArrayBuffer>;
+        checksumSha256: string;
+      }) => {
+        multipartParts.get(args.uploadId)?.push(args.body.byteLength);
+        return { etag: `part-${String(args.partNumber)}`, checksumSha256: args.checksumSha256 };
+      },
+      completeMultipartUpload: async (args: { uploadId: string }) => {
+        const key = multipartKeys.get(args.uploadId);
+        if (key !== undefined) {
+          storedSizes.set(
+            key,
+            (multipartParts.get(args.uploadId) ?? []).reduce((total, size) => total + size, 0),
+          );
+        }
+      },
+      abortMultipartUpload: async (args: { uploadId: string }) => {
+        multipartKeys.delete(args.uploadId);
+        multipartParts.delete(args.uploadId);
+      },
+    } as unknown as ObjectStorageService;
+    backups = new GitBackupService(configService, repositories, objectStorage);
   });
 
   afterAll(async () => {
@@ -125,5 +178,191 @@ describe('GitBackupService', () => {
     expect(sourceReferences.trim()).not.toBe('');
     expect(restoredReferences.trim()).toBe(sourceReferences.trim());
     expect(await readFile(path.join(restored, 'part.ts'), 'utf8')).toBe('export const depth = 4;\n');
+  });
+
+  it('creates server-local retention roots for revision ids embedded in chat records', async () => {
+    const clone = path.join(workspace, 'clone');
+    const main = Buffer.from(await repositories.run(['rev-parse', 'HEAD'], clone))
+      .toString('utf8')
+      .trim();
+    await writeFile(path.join(clone, 'chat.json'), JSON.stringify({ revisionId: main }));
+    await repositories.run(['add', 'chat.json'], clone);
+    await repositories.run(
+      ['-c', 'user.email=test@tau.new', '-c', 'user.name=Tau Test', 'commit', '-m', 'chat record'],
+      clone,
+    );
+    await repositories.run(
+      [
+        'push',
+        '--receive-pack=env TAU_GIT_PUSH_ADMITTED=1 git-receive-pack',
+        'origin',
+        'HEAD:refs/tau/chats/chat-retention',
+      ],
+      clone,
+    );
+
+    await repositories.reachableLfsOids('proj_backup');
+    const retained = Buffer.from(
+      await repositories.run(
+        ['rev-parse', `refs/tau/retention/records/${main}`],
+        repositories.repositoryPath('proj_backup'),
+      ),
+    )
+      .toString('utf8')
+      .trim();
+    expect(retained).toBe(main);
+  });
+
+  it('streams a bundle larger than the removed 256 MiB cap through bounded multipart parts', async () => {
+    const bytes = 256 * 1024 * 1024 + 1;
+    const fakeRepositories = {
+      repositoryPath: () => workspace,
+      reachableLfsOids: async () => new Set<string>(),
+      listLfsObjects: async () => [],
+      run: async (args: readonly string[]) => {
+        const bundlePath = args[2];
+        if (args[0] === 'bundle' && bundlePath !== undefined) {
+          const handle = await open(bundlePath, 'w');
+          await handle.truncate(bytes);
+          await handle.close();
+        }
+        return new Uint8Array();
+      },
+    } as unknown as GitRepositoryService;
+    const service = new GitBackupService(configService, fakeRepositories, objectStorage);
+
+    await expect(service.snapshot('proj_above_cap')).resolves.toBe(true);
+    const finalKey = [...storedSizes.keys()].find((key) => key.startsWith('git-backups/proj_above_cap/'));
+    expect(finalKey).toMatch(/\.bundle$/u);
+    expect(storedSizes.get(finalKey ?? '')).toBe(bytes);
+    expect([...multipartParts.values()].some((parts) => parts.reduce((total, size) => total + size, 0) === bytes)).toBe(
+      true,
+    );
+  }, 30_000);
+
+  it('aborts an interrupted multipart snapshot and retries the same daily key', async () => {
+    const bytes = 33 * 1024 * 1024;
+    const fakeRepositories = {
+      repositoryPath: () => workspace,
+      reachableLfsOids: async () => new Set<string>(),
+      listLfsObjects: async () => [],
+      run: async (args: readonly string[]) => {
+        const bundlePath = args[2];
+        if (args[0] === 'bundle' && bundlePath !== undefined) {
+          const handle = await open(bundlePath, 'w');
+          await handle.truncate(bytes);
+          await handle.close();
+        }
+        return new Uint8Array();
+      },
+    } as unknown as GitRepositoryService;
+    const uploadPart = objectStorage.uploadPart.bind(objectStorage);
+    const abortMultipartUpload = objectStorage.abortMultipartUpload.bind(objectStorage);
+    let fail = true;
+    let aborted = 0;
+    const uploadPartSpy = vi
+      .spyOn(objectStorage, 'uploadPart')
+      .mockImplementation(async (args: Parameters<ObjectStorageService['uploadPart']>[0]) => {
+        if (fail) {
+          fail = false;
+          throw new Error('interrupted upload');
+        }
+        return uploadPart(args);
+      });
+    const abortSpy = vi
+      .spyOn(objectStorage, 'abortMultipartUpload')
+      .mockImplementation(async (args: Parameters<ObjectStorageService['abortMultipartUpload']>[0]) => {
+        aborted += 1;
+        await abortMultipartUpload(args);
+      });
+    const service = new GitBackupService(configService, fakeRepositories, objectStorage);
+
+    try {
+      await expect(service.snapshot('proj_retry')).rejects.toThrow('interrupted upload');
+      expect(aborted).toBe(1);
+      await expect(service.snapshot('proj_retry')).resolves.toBe(true);
+    } finally {
+      uploadPartSpy.mockRestore();
+      abortSpy.mockRestore();
+    }
+  }, 30_000);
+
+  it('copies finalized LFS bytes beside the bundle before publishing the daily marker', async () => {
+    const oid = 'a'.repeat(64);
+    const sourceKey = gitLfsObjectKey('proj_lfs', oid);
+    const payload = new TextEncoder().encode('large object bytes');
+    stored.set(sourceKey, payload);
+    storedSizes.set(sourceKey, payload.byteLength);
+    const fakeRepositories = {
+      repositoryPath: () => workspace,
+      reachableLfsOids: async () => new Set([oid]),
+      listLfsObjects: async () => [
+        {
+          projectId: 'proj_lfs',
+          oid,
+          size: payload.byteLength,
+          finalized: true,
+          createdAt: new Date(),
+          finalizedAt: new Date(),
+        },
+      ],
+      run: async (args: readonly string[]) => {
+        const bundlePath = args[2];
+        if (args[0] === 'bundle' && bundlePath !== undefined) {
+          await writeFile(bundlePath, 'git bundle fixture');
+        }
+        return new Uint8Array();
+      },
+    } as unknown as GitRepositoryService;
+    const service = new GitBackupService(configService, fakeRepositories, objectStorage);
+
+    await expect(service.snapshot('proj_lfs')).resolves.toBe(true);
+    const copied = [...stored.entries()].find(
+      ([key]) => key.startsWith('git-backups/proj_lfs/') && key.endsWith(`/lfs/${oid}`),
+    );
+    expect(copied?.[1]).toStrictEqual(payload);
+  });
+
+  it('retains reachable and in-flight LFS objects while collecting only expired proof', async () => {
+    const now = new Date('2026-09-15T00:00:00.000Z');
+    const old = new Date('2026-07-01T00:00:00.000Z');
+    const fresh = new Date('2026-09-14T23:30:00.000Z');
+    const records = [
+      { projectId: 'proj_gc', oid: '1'.repeat(64), size: 1, finalized: false, createdAt: old, finalizedAt: undefined },
+      {
+        projectId: 'proj_gc',
+        oid: '2'.repeat(64),
+        size: 2,
+        finalized: false,
+        createdAt: fresh,
+        finalizedAt: undefined,
+      },
+      { projectId: 'proj_gc', oid: '3'.repeat(64), size: 3, finalized: true, createdAt: old, finalizedAt: old },
+      { projectId: 'proj_gc', oid: '4'.repeat(64), size: 4, finalized: true, createdAt: old, finalizedAt: old },
+    ] as const;
+    const retired: string[] = [];
+    const fakeRepositories = {
+      reachableLfsOids: async () => new Set(['3'.repeat(64)]),
+      listLfsObjects: async () => records,
+      retireLfsObject: async (record: { oid: string }) => {
+        retired.push(record.oid);
+        return true;
+      },
+      retireOrphanLfsObject: async (_projectId: string, oid: string) => {
+        retired.push(oid);
+        return true;
+      },
+    } as unknown as GitRepositoryService;
+    const orphan = '5'.repeat(64);
+    const storage = {
+      listBlobs: async () => [
+        { key: `git-lfs/proj_gc/${orphan}`, size: 5, lastModified: old },
+        { key: `git-lfs/proj_gc/${'6'.repeat(64)}`, size: 6, lastModified: fresh },
+      ],
+    } as unknown as ObjectStorageService;
+    const service = new GitBackupService(configService, fakeRepositories, storage);
+
+    await expect(service.collectLfs('proj_gc', now)).resolves.toBe(3);
+    expect(retired).toEqual(['1'.repeat(64), '4'.repeat(64), orphan]);
   });
 });

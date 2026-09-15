@@ -323,6 +323,45 @@ describe('billable model request contract', () => {
     ).toBe(true);
   });
 
+  it('admits only the catalog-owned Anthropic and Gemini reasoning controls', () => {
+    const anthropic = {
+      model: 'claude-sonnet-5',
+      messages: [{ role: 'user', content: 'fixture' }],
+      max_tokens: 64,
+      stream: true,
+      thinking: { type: 'adaptive', display: 'summarized' },
+      output_config: { effort: 'high' },
+    };
+    const gemini = {
+      model: 'gemini-3.7-flash',
+      messages: [{ role: 'user', content: 'fixture' }],
+      max_completion_tokens: 64,
+      stream: true,
+      extra_body: {
+        google: {
+          thinking_config: { include_thoughts: true, thinking_level: 'MEDIUM' },
+          thought_tag_marker: 'think',
+          stream_function_call_arguments: true,
+        },
+      },
+    };
+
+    expect(safeParseBillableModelRequest(anthropic, 'anthropic').success).toBe(true);
+    expect(
+      safeParseBillableModelRequest(
+        { ...anthropic, thinking: { type: 'enabled', budget_tokens: 1024, display: 'summarized' } },
+        'anthropic',
+      ).success,
+    ).toBe(true);
+    expect(safeParseBillableModelRequest(gemini, 'openai-completions').success).toBe(true);
+    expect(
+      safeParseBillableModelRequest(
+        { ...gemini, extra_body: { ...gemini.extra_body, arbitrary_passthrough: true } },
+        'openai-completions',
+      ).success,
+    ).toBe(false);
+  });
+
   it('rejects Anthropic cache metadata inside Completions content', () => {
     expect(
       safeParseBillableModelRequest(

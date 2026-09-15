@@ -1,12 +1,14 @@
 /* oxlint-disable new-cap, typescript/consistent-type-imports -- NestJS decorators are factories and constructor injection needs the runtime class */
 /* eslint-disable @typescript-eslint/naming-convention -- decorators are not constructors; git-lfs wire fields are snake_case */
 import { spawn } from 'node:child_process';
+import { createHash, randomFillSync } from 'node:crypto';
 import { createServer } from 'node:http';
 import type { Server } from 'node:http';
 import { mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { Readable } from 'node:stream';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { Injectable, Module, VersioningType } from '@nestjs/common';
 import type { CanActivate, ExecutionContext, MiddlewareConsumer, NestModule, OnModuleInit } from '@nestjs/common';
 import { APP_FILTER, APP_PIPE, HttpAdapterHost } from '@nestjs/core';
@@ -17,7 +19,9 @@ import { FastifyAdapter } from '@nestjs/platform-fastify';
 import type { FastifyInstance } from 'fastify';
 import { ZodValidationPipe } from 'nestjs-zod';
 import { AuthGuard } from '#auth/auth.guard.js';
+import { corsBaseConfiguration } from '#constants/cors.constant.js';
 import { DatabaseService } from '#database/database.service.js';
+import { RedisService } from '#redis/redis.service.js';
 import { HttpExceptionFilter } from '#filters/http-exception.filter.js';
 import { ObjectStorageService } from '#storage/object-storage.service.js';
 import { BillingService } from '#api/billing/billing.service.js';
@@ -92,6 +96,7 @@ class GitTestAuthGuard implements CanActivate {
 
 /** The bytes a presigned PUT stored, keyed by object-store key. */
 const objectStore = new Map<string, Uint8Array<ArrayBuffer>>();
+const lfsRows = new Map<string, { size: number; finalized: boolean }>();
 
 const createObjectStoreServer = async (): Promise<{
   server: Server;
@@ -192,6 +197,18 @@ describe('Tau Hosted Remote (git server) over HTTP', () => {
               cacheControl: '',
             };
       },
+      getBlob: async (args: { key: string }) => {
+        const stored = objectStore.get(args.key);
+        if (stored === undefined) {
+          throw new Error('Object missing');
+        }
+        return {
+          body: Readable.from([stored]),
+          contentType: 'application/octet-stream',
+          etag: 'x',
+          contentLength: stored.byteLength,
+        };
+      },
       presignPut: async (args: { key: string }) => `${storeOrigin}/${encodeURIComponent(args.key)}`,
       presignGet: async (args: { key: string }) => `${storeOrigin}/${encodeURIComponent(args.key)}`,
       putBlob: async (args: { key: string; body: Uint8Array<ArrayBuffer> }) => {
@@ -205,6 +222,10 @@ describe('Tau Hosted Remote (git server) over HTTP', () => {
       providers: [
         GitRepositoryService,
         GitLfsService,
+        {
+          provide: RedisService,
+          useValue: { client: { get: async () => undefined, set: async () => 'OK' } },
+        },
         { provide: DatabaseService, useValue: databaseStub },
         { provide: ObjectStorageService, useValue: objectStorageStub },
         {
@@ -246,10 +267,60 @@ describe('Tau Hosted Remote (git server) over HTTP', () => {
       .compile();
 
     app = moduleRef.createNestApplication<NestFastifyApplication>(new FastifyAdapter({ bodyLimit: 256 * 1024 * 1024 }));
+    /* The deployed allow-list, so a browser preflight is answered here exactly
+       as `main.ts` answers it (W18 DEF-5). Only the origin predicate differs. */
+    app.enableCors({ ...corsBaseConfiguration, origin: true });
     app.enableVersioning({ type: VersioningType.URI });
     await app.init();
     await app.getHttpAdapter().getInstance().ready();
     await app.listen(0);
+
+    const repositories = app.get(GitRepositoryService);
+    vi.spyOn(repositories, 'readOwnerUsage').mockImplementation(async () => ({
+      storageBytes: state.storageBytes,
+      lfsBytes: state.lfsBytes,
+    }));
+    vi.spyOn(repositories, 'readLfsObjects').mockImplementation(async (_project, oids) =>
+      oids.flatMap((oid) => {
+        const row = lfsRows.get(oid);
+        return row === undefined ? [] : [{ oid, size: row.size, finalized: row.finalized }];
+      }),
+    );
+    vi.spyOn(repositories, 'reserveLfsObjects').mockImplementation(async ({ access, objects }) => {
+      const novel = objects.filter((object) => !lfsRows.has(object.oid));
+      const incoming = novel.reduce((total, object) => total + object.size, 0);
+      const remainingBytes = Math.max(0, access.storageLimitBytes - state.storageBytes - state.lfsBytes);
+      if (incoming > remainingBytes) {
+        return {
+          status: 'quota',
+          shortfallBytes: incoming - remainingBytes,
+          remainingBytes,
+          files: novel,
+        };
+      }
+      for (const object of novel) {
+        lfsRows.set(object.oid, { size: object.size, finalized: false });
+        state.lfsBytes += object.size;
+      }
+      return {
+        status: 'reserved',
+        objects: objects.map((object) => ({
+          ...object,
+          finalized: lfsRows.get(object.oid)?.finalized ?? false,
+        })),
+      };
+    });
+    vi.spyOn(repositories, 'finalizeLfsObject').mockImplementation(async ({ oid, size }) => {
+      const row = lfsRows.get(oid);
+      if (row === undefined || row.size !== size) {
+        return 'unreserved';
+      }
+      if (row.finalized) {
+        return 'already-finalized';
+      }
+      row.finalized = true;
+      return 'finalized';
+    });
 
     const address = app.getHttpServer().address();
     const port = typeof address === 'string' || address === null ? 0 : address.port;
@@ -278,8 +349,15 @@ describe('Tau Hosted Remote (git server) over HTTP', () => {
       const outcome = await runGit(['commit', '-m', 'first revision'], clone);
       expect(outcome.code, outcome.stderr).toBe(0);
     }
+    state.storageBytes = 0;
     const pushed = await runGit(['push', 'origin', 'HEAD:refs/heads/main'], clone);
     expect(pushed.code, pushed.stderr).toBe(0);
+    await expect
+      .poll(() => state.storageBytes, {
+        message: 'a completed receive-pack response must retain its post-push accounting work',
+        timeout: 10_000,
+      })
+      .toBeGreaterThan(0);
 
     const second = path.join(workspace, 'second');
     const secondClone = await runGit(['clone', remoteUrl, second], workspace);
@@ -298,6 +376,48 @@ describe('Tau Hosted Remote (git server) over HTTP', () => {
     const body = await response.text();
     expect(body.startsWith('001e# service=git-upload-pack\n0000')).toBe(true);
     expect(body).toContain('refs/heads/main');
+  });
+
+  it.each(['git-upload-pack', 'git-receive-pack'] as const)(
+    'should answer a %s POST with the smart-HTTP result status and media type',
+    async (service) => {
+      const response = await fetch(`${baseUrl}/v1/git/${projectId}.git/${service}`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${ownerToken}`,
+          'content-type': `application/x-${service}-request`,
+        },
+        body: '0000',
+      });
+      await response.arrayBuffer();
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get('content-type')?.split(';', 1)[0]).toBe(`application/x-${service}-result`);
+    },
+  );
+
+  /**
+   * W18 DEF-5, pinned on the wire rather than on the constant: a real preflight
+   * for the header `isomorphic-git` sends. Until `git-protocol` was allowed, the
+   * `204` below carried every other name and Chromium dropped the `GET` that
+   * follows without surfacing anything to the page.
+   */
+  it('answers a browser git client’s preflight with every header it sends', async () => {
+    const response = await fetch(`${baseUrl}/v1/git/${projectId}.git/info/refs?service=git-upload-pack`, {
+      method: 'OPTIONS',
+      headers: {
+        origin: 'https://tau.new',
+        'access-control-request-method': 'GET',
+        'access-control-request-headers': 'git-protocol',
+      },
+    });
+    expect(response.status).toBeLessThan(300);
+    const allowed = (response.headers.get('access-control-allow-headers') ?? '')
+      .split(',')
+      .map((name) => name.trim().toLowerCase());
+    expect(allowed).toEqual(
+      expect.arrayContaining(['git-protocol', 'content-type', 'authorization', 'x-tau-proxy-authorization']),
+    );
   });
 
   it('challenges an unauthenticated git client with Basic so stock git asks for credentials', async () => {
@@ -342,6 +462,27 @@ describe('Tau Hosted Remote (git server) over HTTP', () => {
     expect(advertised).not.toContain('refs/tau/owners/owner_1');
   });
 
+  it('rejects a mixed stock push without accepting its ordinary branch', async () => {
+    const clone = path.join(workspace, 'clone');
+    await writeFile(path.join(clone, 'part.ts'), 'export const width = 13;\n', 'utf8');
+    {
+      const outcome = await runGit(['commit', '-am', 'mixed push probe'], clone);
+      expect(outcome.code, outcome.stderr).toBe(0);
+    }
+    {
+      const outcome = await runGit(['update-ref', 'refs/heads/sync/tau/main', 'HEAD'], clone);
+      expect(outcome.code, outcome.stderr).toBe(0);
+    }
+    const pushed = await runGit(['push', 'origin', 'HEAD:refs/heads/atomic-probe', 'refs/heads/sync/tau/main'], clone);
+    expect(pushed.code).not.toBe(0);
+    expect(pushed.stderr).toContain('refs/heads/sync/tau/main');
+
+    const advertised = await fetch(`${baseUrl}/v1/git/${projectId}.git/info/refs?service=git-upload-pack`, {
+      headers: { Authorization: `Bearer ${ownerToken}` },
+    }).then(async (response) => response.text());
+    expect(advertised).not.toContain('refs/heads/atomic-probe');
+  });
+
   it('serves the read-only dumb-HTTP layout kept current by update-server-info', async () => {
     const head = await fetch(`${baseUrl}/v1/git/${projectId}.git/HEAD`, {
       headers: { Authorization: `Bearer ${ownerToken}` },
@@ -383,7 +524,8 @@ describe('Tau Hosted Remote (git server) over HTTP', () => {
 
   // Red pin (d).
   it('hands out an LFS upload action at the git-lfs oid path and verifies the stored object', async () => {
-    const oid = 'a'.repeat(64);
+    const bytes = Buffer.from('hello world\n');
+    const oid = createHash('sha256').update(bytes).digest('hex');
     const response = await fetch(`${baseUrl}/v1/git/${projectId}.git/info/lfs/objects/batch`, {
       method: 'POST',
       headers: {
@@ -407,10 +549,12 @@ describe('Tau Hosted Remote (git server) over HTTP', () => {
     expect(body.transfer).toBe('basic');
     const action = body.objects[0]?.actions?.upload;
     expect(action?.href).toContain(encodeURIComponent(gitLfsObjectKey(projectId, oid)));
-    expect(gitLfsObjectKey(projectId, oid)).toBe(`git-lfs/${projectId}/lfs/objects/aa/aa/${oid}`);
+    expect(gitLfsObjectKey(projectId, oid)).toBe(
+      `git-lfs/${projectId}/lfs/objects/${oid.slice(0, 2)}/${oid.slice(2, 4)}/${oid}`,
+    );
     expect(body.objects[0]?.actions?.verify?.href).toContain('/info/lfs/objects/verify');
 
-    await fetch(action?.href ?? '', { method: 'PUT', body: 'hello world\n' });
+    await fetch(action?.href ?? '', { method: 'PUT', body: bytes });
     const verified = await fetch(`${baseUrl}/v1/git/${projectId}.git/info/lfs/objects/verify`, {
       method: 'POST',
       headers: {
@@ -421,7 +565,18 @@ describe('Tau Hosted Remote (git server) over HTTP', () => {
     });
     expect(verified.status).toBe(200);
     expect(state.lfsBytes).toBe(12);
+    const verifiedAgain = await fetch(`${baseUrl}/v1/git/${projectId}.git/info/lfs/objects/verify`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${ownerToken}`,
+        'content-type': 'application/vnd.git-lfs+json',
+      },
+      body: JSON.stringify({ oid, size: 12 }),
+    });
+    expect(verifiedAgain.status).toBe(200);
+    expect(state.lfsBytes).toBe(12);
     state.lfsBytes = 0;
+    lfsRows.delete(oid);
     objectStore.delete(gitLfsObjectKey(projectId, oid));
   });
 
@@ -473,6 +628,55 @@ describe('Tau Hosted Remote (git server) over HTTP', () => {
     }).then(async (response) => response.text());
     expect(advertised).not.toContain('quota-probe');
   });
+
+  /**
+   * W18 DEF-4, root-caused here rather than at `receive.maxInputSize`.
+   *
+   * The pack is larger than the plan headroom but smaller than
+   * `quotaOverrunSlackBytes`, so git's own input ceiling deliberately does not
+   * fire and the `pre-receive` backstop is what has to refuse it — over a
+   * *chunked* push, which is the shape DEF-4 was reported against: git
+   * authenticates such a push with an empty `git-receive-pack` POST first, and
+   * this row runs the whole two-request exchange.
+   *
+   * The spent allowance is seeded as **LFS** bytes on purpose. `storage_bytes`
+   * is the repository as the server last measured it, so the accounting that
+   * follows the empty probe POST overwrites any figure a fixture puts there —
+   * which is the whole of what DEF-4 observed (see the lane report).
+   */
+  it('refuses a chunked push that does not fit in what is left of the plan', async () => {
+    const clone = path.join(workspace, 'over-plan');
+    {
+      const outcome = await runGit(['clone', remoteUrl, clone], workspace);
+      expect(outcome.code, outcome.stderr).toBe(0);
+    }
+    const noise = Buffer.alloc(8 * 1024 * 1024);
+    randomFillSync(noise);
+    await writeFile(path.join(clone, 'noise.bin'), noise);
+    {
+      const outcome = await runGit(['add', '.'], clone);
+      expect(outcome.code, outcome.stderr).toBe(0);
+    }
+    {
+      const outcome = await runGit(['commit', '-m', 'over plan'], clone);
+      expect(outcome.code, outcome.stderr).toBe(0);
+    }
+
+    state.lfsBytes = 10 * 1024 ** 3 - 4 * 1024 * 1024;
+    const pushed = await runGit(['push', 'origin', 'HEAD:refs/heads/over-plan'], clone);
+    state.lfsBytes = 0;
+
+    expect(pushed.code, `push stderr: ${pushed.stderr}`).not.toBe(0);
+    /* The hook's own sentence, not a family of refusals (review R3): git's
+       `pack exceeds maximum allowed size` and `authorize`'s `Storage quota
+       reached` would both satisfy a looser match, and either would mean the
+       backstop had rotted behind a green row. */
+    expect(pushed.stderr).toContain('Tau: storage quota exceeded');
+    const advertised = await fetch(`${baseUrl}/v1/git/${projectId}.git/info/refs?service=git-upload-pack`, {
+      headers: { Authorization: `Bearer ${ownerToken}` },
+    }).then(async (response) => response.text());
+    expect(advertised).not.toContain('over-plan');
+  }, 120_000);
 
   it('round-trips a large object through stock git-lfs', async () => {
     const clone = path.join(workspace, 'lfs-clone');

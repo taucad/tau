@@ -85,14 +85,22 @@ const environmentSchemaBase = z.object({
   // Authentication
   AUTH_SECRET: z.string(),
   /**
-   * Secret for signing the first-party `tau_view_id` cookie and related publication view dedup. Must be
-   * at least 32 characters.
+   * HMAC secret for short-lived anonymous publication view dedup. Must be at least 32 characters.
    */
   TAU_VIEW_COOKIE_SECRET: z.string().min(32),
   AUTH_URL: z.string(),
   GITHUB_CLIENT_ID: z.string(),
   GITHUB_CLIENT_SECRET: z.string(),
   GITHUB_API_TOKEN: z.string().optional(),
+  GITHUB_REPOSITORY_APP_CLIENT_ID: z.string().optional(),
+  GITHUB_REPOSITORY_APP_CLIENT_SECRET: z.string().optional(),
+  GITHUB_REPOSITORY_APP_SLUG: z.string().optional(),
+  GITHUB_REPOSITORY_APP_CALLBACK_URL: z.url().optional(),
+  GITHUB_REPOSITORY_CONNECTION_KEY: z
+    .string()
+    .regex(/^[A-Za-z0-9_-]{43}$/u, 'must be an unpadded base64url-encoded 32-byte key')
+    .optional(),
+  GITHUB_REPOSITORY_CONNECTION_KEY_VERSION: z.coerce.number().int().positive().default(1),
   GOOGLE_CLIENT_ID: z.string().optional(),
   GOOGLE_CLIENT_SECRET: z.string().optional(),
 
@@ -216,6 +224,16 @@ const environmentSchemaBase = z.object({
     .string()
     .default('.tau-git')
     .describe('Directory holding one bare repository per project (<TAU_GIT_ROOT>/<projectId>.git)'),
+  /*
+   * Ruling P50 (W18 DEF-3). Charter AC18 drives *Connect Git remote* at a local
+   * `git http-backend`, which every SSRF guard on both legs refuses by design.
+   * This relaxes the refusal for a developer or an end-to-end run and is
+   * refused outright in production below; the default keeps refusing.
+   */
+  TAU_GIT_REMOTE_ALLOW_PRIVATE: z
+    .enum(['0', '1'])
+    .default('0')
+    .describe('Dev/e2e only: let the git proxy reach private, loopback and http:// remotes'),
   TAU_GIT_BACKUP_INTERVAL_HOURS: z.coerce
     .number()
     .min(1)
@@ -241,8 +259,42 @@ export const environmentSchema = environmentSchemaBase.superRefine((data, contex
     });
   }
 
+  const githubRepositoryKeys = [
+    'GITHUB_REPOSITORY_APP_CLIENT_ID',
+    'GITHUB_REPOSITORY_APP_CLIENT_SECRET',
+    'GITHUB_REPOSITORY_APP_SLUG',
+    'GITHUB_REPOSITORY_APP_CALLBACK_URL',
+    'GITHUB_REPOSITORY_CONNECTION_KEY',
+  ] as const;
+  const configuredGithubRepositoryKeys = githubRepositoryKeys.filter((key) => data[key] !== undefined);
+  if (
+    configuredGithubRepositoryKeys.length > 0 &&
+    configuredGithubRepositoryKeys.length < githubRepositoryKeys.length
+  ) {
+    for (const key of githubRepositoryKeys) {
+      if (data[key] === undefined) {
+        context.addIssue({
+          code: 'custom',
+          message: `${key} is required when GitHub repository access is configured`,
+          path: [key],
+        });
+      }
+    }
+  }
+
   if (data.NODE_ENV !== 'production') {
     return;
+  }
+
+  // P50 is a development posture, never a deployment one: a production API that
+  // could be asked to reach a private address is an SSRF hole into the network
+  // it runs in.
+  if (data.TAU_GIT_REMOTE_ALLOW_PRIVATE === '1') {
+    context.addIssue({
+      code: 'custom',
+      message: 'TAU_GIT_REMOTE_ALLOW_PRIVATE must not be set in production',
+      path: ['TAU_GIT_REMOTE_ALLOW_PRIVATE'],
+    });
   }
 
   try {
@@ -355,6 +407,11 @@ export const environmentSchema = environmentSchemaBase.superRefine((data, contex
         message: `${key} is required in production`,
         path: [key],
       });
+    }
+  }
+  for (const key of githubRepositoryKeys) {
+    if (!data[key]) {
+      context.addIssue({ code: 'custom', message: `${key} is required in production`, path: [key] });
     }
   }
 });

@@ -19,14 +19,16 @@ import {
 const admittedEnvironment: Readonly<Record<string, string>> = { TAU_GIT_PUSH_ADMITTED: '1' };
 
 const runHook = async (
-  ref: string,
+  ref: string | readonly string[],
   environment: Readonly<Record<string, string>> = admittedEnvironment,
 ): Promise<{ code: number | undefined; stderr: string }> =>
   new Promise((resolve) => {
     const child = spawn('sh', [hookPath], { env: environment as NodeJS.ProcessEnv });
     const stderr: Array<Uint8Array<ArrayBuffer>> = [];
     child.stderr.on('data', (chunk: Uint8Array<ArrayBuffer>) => stderr.push(chunk));
-    child.stdin.end(`${'0'.repeat(40)} ${'1'.repeat(40)} ${ref}\n`);
+    child.stdin.end(
+      (typeof ref === 'string' ? [ref] : ref).map((name) => `${'0'.repeat(40)} ${'1'.repeat(40)} ${name}\n`).join(''),
+    );
     child.on('close', (code) => {
       resolve({ code: code ?? undefined, stderr: Buffer.concat(stderr).toString('utf8') });
     });
@@ -65,9 +67,10 @@ describe('Tau Hosted Remote constants', () => {
       'refs/tau/workspaces/w1',
       'refs/tau/revisions/r1',
       'refs/tau/transactions/t1',
+      'refs/tau/retention/records/r1',
       'refs/tau/head',
       'refs/remotes/origin/main',
-      'sync/tau/main',
+      'refs/heads/sync/tau/main',
       'refs/heads/',
     ]) {
       // oxlint-disable-next-line no-await-in-loop -- one hook run per ref, by design
@@ -81,6 +84,12 @@ describe('Tau Hosted Remote constants', () => {
     const refused = await runHook('refs/heads/main', {});
     expect(refused.code).toBe(1);
     expect(refused.stderr).toContain('only through the Tau API');
+  });
+
+  it('rejects a mixed push atomically when one ref is host-local', async () => {
+    const refused = await runHook(['refs/heads/main', 'refs/heads/sync/tau/main']);
+    expect(refused.code).toBe(1);
+    expect(refused.stderr).toContain('refs/heads/sync/tau/main');
   });
 
   it('installs the same allow-list into the pre-receive hook', () => {

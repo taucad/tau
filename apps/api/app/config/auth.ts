@@ -67,6 +67,9 @@ export const staticAuthConfig = {
     window: 10,
     max: 100,
     storage: 'memory',
+    customRules: {
+      '/get-session': { window: 10, max: 20 },
+    },
   },
   advanced: {
     cookiePrefix: 'tau',

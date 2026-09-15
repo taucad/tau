@@ -23,6 +23,7 @@ import { readFile } from 'node:fs/promises';
 import { hostname, userInfo } from 'node:os';
 import { basename, join, sep } from 'node:path';
 import { z } from 'zod';
+import { chatRecordSchema } from '@taucad/chat';
 
 import { jsonValueSchema } from '@taucad/agent-host';
 import type { AgentChannelRevisionEvent, JsonValue } from '@taucad/agent-host';
@@ -44,6 +45,7 @@ import type {
 import {
   generatedGitattributesPath,
   generatedIgnorePath,
+  readChatRecord,
   readRevisionDiff,
   readRevisionLog,
   readRevisionPlace,
@@ -53,12 +55,14 @@ import { selectRevisionStatus } from '@taucad/revisions/project-revisions-machin
 import type { RevisionStatusProjection } from '@taucad/revisions/project-revisions-machine';
 import type {
   RevisionActor,
+  CreateRevisionTagInput,
   RevisionDiffEntry,
   RevisionEngineDescriptor,
   RevisionLogRequest,
   RevisionPlace,
   RevisionPort,
   RevisionRow,
+  RevisionTag,
 } from '@taucad/revisions';
 import { GitToolchainError, createNativeGitRevisionPort, resolveGitToolchain } from '@taucad/revisions/node';
 import type { MissingGitTool, NativeGitRemoteCredential, TauApiCredential } from '@taucad/revisions/node';
@@ -999,7 +1003,7 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
     const checkoutId = await waitForLiveCheckout();
     const { checkouts, turnRefs } = actor.getSnapshot().context;
     if (checkoutId === undefined) {
-      return;
+      throw new Error('The project checkout was not ready before the close deadline.');
     }
     /*
      * A turn holding this checkout is already recording these bytes.
@@ -1016,15 +1020,25 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
       return;
     }
     const settledCut = Promise.withResolvers<void>();
-    const subscriptions = (['revisionMinted', 'nothingToSave', 'cutFailed'] as const).map((type) =>
-      actor.on(type, (event) => {
+    const subscriptions = [
+      actor.on('revisionMinted', (event) => {
         if (event.checkoutId === checkoutId && event.trigger === 'close') {
           settledCut.resolve();
         }
       }),
-    );
+      actor.on('nothingToSave', (event) => {
+        if (event.checkoutId === checkoutId && event.trigger === 'close') {
+          settledCut.resolve();
+        }
+      }),
+      actor.on('cutFailed', (event) => {
+        if (event.checkoutId === checkoutId && event.trigger === 'close') {
+          settledCut.reject(new Error(event.reason));
+        }
+      }),
+    ];
     const bound = setTimeout(() => {
-      settledCut.resolve();
+      settledCut.reject(new Error('The close revision was not recorded before the deadline.'));
     }, closeFlushMilliseconds).unref();
     try {
       actor.send({ type: 'cut', trigger: 'close', checkoutId, leaseIds: [] });
@@ -1470,8 +1484,22 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
           if (command.type !== 'start' || turns.has(command.runId)) {
             return launcher.execute(command);
           }
+          const filesystem = await filesystems({
+            id: actor.getSnapshot().context.liveCheckoutId ?? 'live',
+            projectId,
+            root: options.workspaceRoot,
+            kind: 'live',
+            branch: undefined,
+            baseRevisionId: undefined,
+          });
+          const bytes = await readChatRecord(filesystem, command.chatId);
+          const chat = bytes === undefined ? undefined : chatRecordSchema.parse(JSON.parse(bytes));
+          if (chat !== undefined && chat.id !== command.chatId) {
+            throw new Error('The chat record does not match the admitted chat.');
+          }
           const snapshot = actor.getSnapshot().context;
-          const checkoutId = snapshot.chatCheckouts[command.chatId] ?? snapshot.selectedCheckoutId;
+          // The durable picker selection outranks a previous turn's cached placement.
+          const checkoutId = chat?.checkoutId ?? snapshot.chatCheckouts[command.chatId] ?? snapshot.selectedCheckoutId;
           await admit({
             runId: command.runId,
             chatId: command.chatId,
@@ -1697,6 +1725,10 @@ export type ProjectRevisionVerbs = {
   switchTo(branch: string, options?: Readonly<{ confirm?: boolean }>): Promise<RevisionSwitchOutcome>;
   /** Remove one branch's linked checkout, refusing while it holds unsaved work. */
   discard(branch: string): Promise<RevisionDiscardOutcome>;
+  /** Name or re-point one immutable revision. */
+  tag(input: Omit<CreateRevisionTagInput, 'revisionId'> & { readonly revisionId: string }): Promise<RevisionTag>;
+  /** Remove one revision name. */
+  deleteTag(name: string): Promise<void>;
   /** Name this branch's head and publish it: one gesture, the dialog's machine. */
   publish(draft: PublishDraft): Promise<RevisionPublishOutcome>;
   /**
@@ -2132,6 +2164,8 @@ export const openProjectRevisions = (
     describe: async () => readRevisionPlace(port),
     switchTo,
     discard,
+    tag: async (input) => port.tag({ ...input, revisionId: revisionId(input.revisionId) }),
+    deleteTag: async (name) => port.deleteTag(name),
     publish,
     openFromRemote,
     close: async () => {

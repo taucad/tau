@@ -2,6 +2,7 @@ import { describe, expect, test } from 'vitest';
 import { page as selectors, server } from 'vitest/browser';
 import * as target from '#support/external-target.js';
 import { readOpfsTree, readProjectStorageState, readProjectTree } from '#support/project-storage-state.js';
+import type { GatewayScriptTurn } from '#support/agent-host-gateway-script.js';
 
 type TestBackend = 'indexeddb' | 'opfs' | 'webaccess';
 /**
@@ -78,13 +79,13 @@ const requireOpfsSession = async (
   skip(failure !== undefined, `This browser session has no origin-private filesystem (${failure}).`);
 };
 
-const prepareBrowserHost = async (backend: ActiveBackend): Promise<void> => {
+const prepareBrowserHost = async (backend: ActiveBackend, script?: readonly GatewayScriptTurn[]): Promise<void> => {
   await target.addInitScript((selectedBackend) => {
     if (selectedBackend === 'indexeddb') {
       Object.defineProperty(navigator.storage, 'getDirectory', { configurable: true, value: undefined });
     }
   }, backend);
-  await target.installAgentHostGatewayFixture();
+  await target.installAgentHostGatewayFixture(script);
   await target.setViewport({ width: 1440, height: 900 });
   await openSeededProject(backend);
   // No flag and no placement pick: the browser host IS the Tau placement.
@@ -236,6 +237,153 @@ const assertPublication = (tree: Readonly<Record<string, string>>): void => {
   expect(settled?.revisionId).toBeDefined();
   expect(settled?.changedPaths).toContain('browser-host-proof.txt');
 };
+
+const streamingFadeScript: readonly GatewayScriptTurn[] = [
+  {
+    reasoningChunks: ['Inspecting', ' the model.'],
+    textChunks: ['The response', ' is smooth', ' and ready.'],
+    gateChunks: true,
+    usage: { inputTokens: 10, outputTokens: 8 },
+  },
+];
+
+const readFadeStyle = async (text: string) =>
+  target.evaluate((expected) => {
+    const element = [...document.querySelectorAll<HTMLElement>('[data-chat-streaming-fade]')].find(
+      (candidate) => candidate.textContent === expected,
+    );
+    if (!element) {
+      return undefined;
+    }
+    const style = getComputedStyle(element);
+    return {
+      animationDelay: style.animationDelay,
+      animationDuration: style.animationDuration,
+      animationName: style.animationName,
+      display: style.display,
+      transform: style.transform,
+    };
+  }, text);
+
+const sampleFade = async (text: string) =>
+  target.evaluate((expected) => {
+    const element = [...document.querySelectorAll<HTMLElement>('[data-chat-streaming-fade]')].find(
+      (candidate) => candidate.textContent === expected,
+    );
+    const animation = element?.getAnimations()[0];
+    if (!element || !animation) {
+      return undefined;
+    }
+    animation.pause();
+    const sampleAt = (milliseconds: number) => {
+      animation.currentTime = milliseconds;
+      const bounds = element.getBoundingClientRect();
+      return {
+        height: bounds.height,
+        opacity: Number.parseFloat(getComputedStyle(element).opacity),
+        width: bounds.width,
+        x: bounds.x,
+        y: bounds.y,
+      };
+    };
+    const result = {
+      end: sampleAt(150),
+      middle: sampleAt(75),
+      start: sampleAt(0),
+      wrapperCount: document.querySelectorAll('[data-chat-streaming-fade]').length,
+    };
+    animation.currentTime = 75;
+    element.style.opacity = String(result.middle.opacity);
+    animation.cancel();
+    return result;
+  }, text);
+
+// Playwright WebKit buffers the intercepted open SSE response until it closes,
+// so the first gated delta never reaches Tau. Chromium and Firefox exercise the
+// real open-stream path; WebKit remains covered by the shared renderer/CSS.
+const streamingFadeTest = server.browser === 'webkit' ? test.skip : test;
+
+streamingFadeTest('fades live reasoning and prose chunks without retaining wrappers', async () => {
+  await prepareBrowserHost('indexeddb', streamingFadeScript);
+  await target.type(composer, 'Show the streaming fade.');
+  await target.click(selectors.getByCss('button:has(svg.lucide-arrow-up)').last());
+
+  await target.expectVisible(selectors.getByText('Inspecting', { exact: true }), 120_000);
+  expect(await readFadeStyle('Inspecting')).toBeUndefined();
+
+  await target.releaseAgentHostGatewayFixture();
+  await expect
+    .poll(async () => readFadeStyle(' the model.'), { timeout: 30_000 })
+    .toMatchObject({
+      animationDelay: '0s',
+      animationDuration: '0.15s',
+      animationName: 'chat-streaming-fade',
+      display: 'inline',
+      transform: 'none',
+    });
+  const fadeSample = await sampleFade(' the model.');
+  expect(fadeSample?.start.opacity).toBe(0);
+  expect(fadeSample?.middle.opacity).toBeGreaterThan(0);
+  expect(fadeSample?.middle.opacity).toBeLessThan(1);
+  expect(fadeSample?.end.opacity).toBe(1);
+  expect(fadeSample?.start).toMatchObject({
+    height: fadeSample?.middle.height,
+    width: fadeSample?.middle.width,
+    x: fadeSample?.middle.x,
+    y: fadeSample?.middle.y,
+  });
+  expect(fadeSample?.end).toMatchObject({
+    height: fadeSample?.middle.height,
+    width: fadeSample?.middle.width,
+    x: fadeSample?.middle.x,
+    y: fadeSample?.middle.y,
+  });
+  expect(fadeSample?.wrapperCount).toBe(1);
+  await target.screenshot(selectors.getByCss('body'), 'chat-streaming-fade-reasoning-midpoint.png');
+
+  await target.releaseAgentHostGatewayFixture();
+  await target.expectVisible(selectors.getByText('The response', { exact: true }), 30_000);
+  expect(await readFadeStyle('The response')).toBeUndefined();
+
+  await target.releaseAgentHostGatewayFixture();
+  await expect
+    .poll(async () => readFadeStyle(' is smooth'), { timeout: 30_000 })
+    .toMatchObject({
+      animationDelay: '0s',
+      animationDuration: '0.15s',
+      animationName: 'chat-streaming-fade',
+      display: 'inline',
+      transform: 'none',
+    });
+  const proseFadeSample = await sampleFade(' is smooth');
+  expect(proseFadeSample?.start.opacity).toBe(0);
+  expect(proseFadeSample?.middle.opacity).toBeGreaterThan(0);
+  expect(proseFadeSample?.middle.opacity).toBeLessThan(1);
+  expect(proseFadeSample?.end.opacity).toBe(1);
+  expect(proseFadeSample?.wrapperCount).toBe(1);
+  await target.screenshot(selectors.getByCss('body'), 'chat-streaming-fade-prose-midpoint.png');
+
+  await target.emulateReducedMotion('reduce');
+  await target.releaseAgentHostGatewayFixture();
+  await expect
+    .poll(async () => readFadeStyle(' and ready.'), { timeout: 30_000 })
+    .toMatchObject({
+      animationDelay: '0s',
+      animationName: 'chat-streaming-fade',
+      display: 'inline',
+      transform: 'none',
+    });
+  const reducedMotionStyle = await readFadeStyle(' and ready.');
+  expect(Number.parseFloat(reducedMotionStyle?.animationDuration ?? '1')).toBeLessThanOrEqual(0.00001);
+
+  await target.releaseAgentHostGatewayFixture();
+  await target.expectVisible(selectors.getByText('The response is smooth and ready.', { exact: true }), 30_000);
+  await expect
+    .poll(async () => target.evaluate(() => document.querySelectorAll('[data-chat-streaming-fade]').length), {
+      timeout: 30_000,
+    })
+    .toBe(0);
+});
 
 describe.each([
   { backend: 'opfs', durability: 'exclusive-append' },

@@ -1,6 +1,6 @@
 import { Link as LinkIcon } from 'lucide-react';
 import type { ComponentProps } from 'react';
-import type { StreamdownProps } from 'streamdown';
+import type { Components } from 'streamdown';
 import { cn } from '@taucad/ui/utils/cn';
 import { extractTextFromChildren } from '#utils/react.utils.js';
 
@@ -57,6 +57,7 @@ export function createHeaderAnchor(
  * Each header gets an auto-generated ID based on its text content,
  * and displays a link icon on hover for easy sharing.
  */
+// oxlint-disable-next-line typescript/consistent-type-assertions -- Streamdown v2's string index signature conflicts with React Three Fiber's global JSX elements.
 export const markdownHeaderAnchorComponents = {
   h1: createHeaderAnchor('h1', 'text-3xl font-bold'),
   h2: createHeaderAnchor('h2', 'text-2xl font-semibold'),
@@ -64,4 +65,4 @@ export const markdownHeaderAnchorComponents = {
   h4: createHeaderAnchor('h4', 'text-lg font-semibold'),
   h5: createHeaderAnchor('h5', 'text-base font-semibold'),
   h6: createHeaderAnchor('h6', 'text-sm font-medium'),
-} as const satisfies StreamdownProps['components'];
+} as Components;

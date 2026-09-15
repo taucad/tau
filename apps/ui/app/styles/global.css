@@ -5,6 +5,7 @@
 
 @import 'tw-animate-css';
 @import '@taucad/ui/styles/tokens.css';
+@import 'streamdown/styles.css';
 
 /*
  * Keep source discovery explicit. The web and desktop Vite roots differ, and
@@ -15,6 +16,9 @@
 @source '..';
 @source '../components/auth';
 @source '../../../../node_modules/streamdown/dist';
+@source '../../../../node_modules/@streamdown/code/dist';
+@source '../../../../node_modules/@streamdown/math/dist';
+@source '../../../../node_modules/@streamdown/mermaid/dist';
 @source '../../../../packages/ui/src';
 
 /*
@@ -137,6 +141,8 @@
 /* Typography is provided by fumadocs-ui/css/preset.css (forked @tailwindcss/typography with fd-* color support) */
 
 :root {
+  --chat-streaming-fade-duration: 150ms;
+  --chat-streaming-fade-easing: cubic-bezier(0.37, 0.55, 0.86, 0.88);
   --scrollbar-thumb: var(--border);
   --scrollbar-track: transparent;
   --scrollbar-thickness: 9px;
@@ -151,6 +157,28 @@
   --diagram-note: oklch(0.96 0.012 calc(var(--hue-primary) + 60deg));
   --diagram-note-border: oklch(0.78 0.04 calc(var(--hue-primary) + 60deg));
   --diagram-accent: var(--muted-foreground);
+}
+
+@keyframes chat-streaming-fade {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+[data-chat-streaming-fade] {
+  animation: chat-streaming-fade var(--chat-streaming-fade-duration) var(--chat-streaming-fade-easing) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-chat-streaming-fade] {
+    animation-delay: 0ms;
+    animation-duration: 0.01ms;
+    opacity: 1;
+  }
 }
 
 .dark,

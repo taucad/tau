@@ -104,7 +104,11 @@ export const createUiSourceAliasPlugin = (options: UiSourceAliasPluginOptions = 
       viteRoot = config.root;
     },
     resolveId(source, importer) {
-      if (source === 'shiki' && importer?.includes('/streamdown/') && importer.includes('/code-block-')) {
+      if (
+        source === 'shiki' &&
+        (importer?.includes('/@streamdown/code/') === true ||
+          (importer?.includes('/streamdown/') === true && importer.includes('/code-block-')))
+      ) {
         return streamdownShikiFacade;
       }
       if (!source.startsWith('#')) {

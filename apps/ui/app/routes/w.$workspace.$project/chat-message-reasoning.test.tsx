@@ -15,12 +15,18 @@ vi.mock('#components/markdown/markdown-viewer-chat.js', () => ({
   MarkdownViewerChat({
     children,
     isStreaming,
+    isStreamingFade,
   }: {
     readonly children: string;
     readonly isStreaming?: boolean;
+    readonly isStreamingFade?: boolean;
   }): React.JSX.Element {
     return (
-      <div data-testid='markdown-content' data-streaming={isStreaming ? 'true' : 'false'}>
+      <div
+        data-testid='markdown-content'
+        data-streaming={isStreaming ? 'true' : 'false'}
+        data-streaming-fade={isStreamingFade ? 'true' : 'false'}
+      >
         {children}
       </div>
     );
@@ -1020,6 +1026,22 @@ describe('ChatMessageReasoning', () => {
 
       const markdown = screen.getByTestId('markdown-content');
       expect(markdown.dataset['streaming']).toBe('false');
+      expect(markdown.dataset['streamingFade']).toBe('false');
+    });
+
+    it('enables fade only while the active reasoning part has no final duration', () => {
+      const view = renderReasoning({ part: createReasoningPart('live reasoning') });
+      expect(screen.getByTestId('markdown-content').dataset['streamingFade']).toBe('true');
+
+      view.rerender({
+        part: createReasoningPartWithTiming({
+          text: 'finished reasoning',
+          state: 'done',
+          reasoningStartedAtMs: 1000,
+          reasoningEndedAtMs: 2000,
+        }),
+      });
+      expect(screen.getByTestId('markdown-content').dataset['streamingFade']).toBe('false');
     });
   });
 });

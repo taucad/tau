@@ -20,6 +20,9 @@ release_command = 'node /app/dist/billing-command.js migrate --environment prod-
 app = 'node /app/dist/main.js'
 # One worker opens at most one PostgreSQL connection (billing-command postgres max: 1).
 billing-recovery = 'node /app/dist/billing-command.js recover-llm-worker --environment prod-us --limit 100 --poll-milliseconds 5000'
+# One Stripe/DB worker fulfils webhook-queued payment sources every five seconds and runs
+# the independent journal sweep every fifteen minutes. Without it paid purchases are never credited.
+billing-operations = 'node /app/dist/billing-command.js billing-operations-worker --environment prod-us --limit 100 --poll-milliseconds 5000'
 
 [env]
 NODE_ENV = 'production'
@@ -80,7 +83,7 @@ timeout = "2s"
 [[metrics]]
 port = 9464
 path = "/metrics"
-processes = ['app', 'billing-recovery']
+processes = ['app', 'billing-recovery', 'billing-operations']
 
 [[vm]]
 memory = '2gb'
@@ -93,3 +96,9 @@ memory = '256mb'
 cpu_kind = 'shared'
 cpus = 1
 processes = ['billing-recovery']
+
+[[vm]]
+memory = '256mb'
+cpu_kind = 'shared'
+cpus = 1
+processes = ['billing-operations']

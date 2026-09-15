@@ -2,7 +2,12 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
-import { getKernelResultOutputSchema, screenshotOutputSchema, testModelOutputSchema } from '@taucad/chat';
+import {
+  getKernelResultOutputSchema,
+  rpcSchemasRegistry,
+  screenshotOutputSchema,
+  testModelOutputSchema,
+} from '@taucad/chat';
 import { afterEach, expect, test } from 'vitest';
 import type { Locator, Page } from 'playwright';
 import { authenticatePackagedDesktop, launchDesktopApp } from '#support/desktop-app.js';
@@ -228,10 +233,11 @@ it('conformance other volume and envelope', async () => {
 });\n`;
       writeFileSync(join(projectRoot, 'main.scad'), controlledSource);
       writeFileSync(join(projectRoot, 'conformance.geospec.ts'), spec);
+      const completionLine = `ACP verification ${dimensions.join('x')} complete.`;
       // oxlint-disable-next-line no-await-in-loop -- each turn measures the source version just written.
       await sendPrompt(
         page,
-        'Do not edit any file. Use Tau get_kernel_result and one isometric screenshot for EACH of main.scad and other.scad, then run test_model with files ["conformance.geospec.ts"]. Report the observed results.',
+        `Do not edit any file. Use Tau get_kernel_result and one isometric screenshot for EACH of main.scad and other.scad, then run test_model with files ["conformance.geospec.ts"]. Report the observed results. End with this plain paragraph exactly once: ${completionLine}`,
       );
       // oxlint-disable-next-line no-await-in-loop -- await this exact subsequent run, not an older completed run.
       await expect
@@ -248,6 +254,8 @@ it('conformance other volume and envelope', async () => {
         .not.toBe(priorRun);
       const current = readLog(eventsPathNow());
       const currentRun = latestCompletedRun(current);
+      // oxlint-disable-next-line no-await-in-loop -- check this run's actual rendered text, not only its correct durable log.
+      await expectCount(page.getByRole('article').last().getByText(completionLine, { exact: true }), 1);
       const captures = ['main.scad', 'other.scad'].map((targetFile) => {
         expect(
           getKernelResultOutputSchema.parse(
@@ -379,9 +387,14 @@ test.skipIf(!codexAvailable || turbojetSourcePath === undefined)(
       );
       expect(modelTest.total).toBeGreaterThan(0);
       expect(modelTest.passed).toBe(modelTest.total);
-      const capture = screenshotOutputSchema.parse(
-        toolResult(events, { runId, toolName: 'screenshot', targetFile: 'main.py' }),
-      );
+      const captureResult = toolResult(events, { runId, toolName: 'screenshot', targetFile: 'main.py' });
+      // Native tools retain the RPC envelope; MCP exposes the tool output itself.
+      const capture = nativeTurbojet
+        ? rpcSchemasRegistry.capture_images.resultSchema.parse(captureResult)
+        : screenshotOutputSchema.parse(captureResult);
+      if (!('images' in capture)) {
+        throw new Error('The native Turbojet capture failed.');
+      }
       const image = capture.images[0];
       if (image === undefined) {
         throw new Error('The repaired Turbojet capture returned no image.');
@@ -425,13 +438,19 @@ test.skipIf(!codexAvailable || turbojetSourcePath === undefined)(
       expect(pixels.opaque).toBeGreaterThan(1000);
       expect(pixels.colors).toBeGreaterThan(8);
       expect(pixels.luminanceRange).toBeGreaterThan(24);
+      // Completion precedes revision settlement; wait for this run, not the seed's revision.
+      await expect.poll(() => finalizedRevisions(eventsPath).at(-1)?.runIds, { timeout: 60_000 }).toContain(runId);
       expect(finalizedRevisions(eventsPath).at(-1)?.changedPaths).toContain('main.py');
-      expect(finalizedRevisions(eventsPath).at(-1)?.runIds).toContain(runId);
 
-      const activity = page.getByRole('button', { name: /Explored .*?(?:render|screenshot|test)/u }).last();
+      const activity = page.getByRole('button', { name: /Explored .*screenshot/u }).last();
       await expectVisible(activity, 60_000);
       await activity.click();
-      await expectVisible(page.getByRole('button', { name: /Captured 1 screenshot of main\.py/u }), 60_000);
+      await expectVisible(
+        page.getByRole('button', {
+          name: `Captured ${String(capture.images.length)} screenshot${capture.images.length === 1 ? '' : 's'} of main.py`,
+        }),
+        60_000,
+      );
       await expectCount(page.getByText(/Received unknown part tool-/u), 0);
       await session.capture(nativeTurbojet ? 'native-turbojet-repaired' : 'acp-turbojet-repaired');
       console.info(

@@ -29,6 +29,7 @@
     "zod": "catalog:"
   },
   "devDependencies": {
+    "@taucad/agent-tools": "workspace:*",
     "@taucad/geospec-engine": "workspace:*",
     "@taucad/runtime": "workspace:*",
     "@taucad/vite": "workspace:*",

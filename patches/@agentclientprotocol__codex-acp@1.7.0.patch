@@ -1,0 +1,31 @@
+diff --git a/dist/index.js b/dist/index.js
+index 3e8bb8292a5441cf1e9be1b68965a1ddbfc62fda..3bd51a08c65fc61c8b55278f7f6fa625737f8117 100755
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -28255,7 +28255,7 @@ var CodexAcpClient = class {
+     return this.codexClient.getMcpServerStartupVersion();
+   }
+   async createSessionConfig(projectPath, additionalDirectories, mcpServers) {
+-    const sessionRoots = [projectPath, ...additionalDirectories];
++    const sessionRoots = [projectPath];
+     const activeProvider = this.gatewayConfig ? {
+       apiType: gatewayApiTypeFromConfig(this.gatewayConfig),
+       baseUrl: this.gatewayConfig.config.base_url
+@@ -28273,7 +28273,7 @@ var CodexAcpClient = class {
+         trust_level: "trusted"
+       }]))
+     };
+-    const configWithWorkspaceRoots = mergeSandboxWorkspaceWriteRoots(mergedConfig, additionalDirectories);
++    const configWithWorkspaceRoots = mergedConfig;
+     if (mcpServers.length === 0) {
+       return configWithWorkspaceRoots;
+     }
+@@ -28421,7 +28421,7 @@ var CodexAcpClient = class {
+       input,
+       approvalPolicy: agentMode.approvalPolicy,
+       approvalsReviewer: agentMode.approvalsReviewer,
+-      sandboxPolicy: addAdditionalDirectoriesToSandboxPolicy(agentMode.sandboxPolicy, additionalDirectories),
++      sandboxPolicy: agentMode.sandboxPolicy,
+       summary: disableSummary ? "none" : "auto",
+       effort,
+       model: modelId.model,

@@ -54,9 +54,6 @@ catalogs:
     '@fastify/cookie':
       specifier: ^11.0.2
       version: 11.0.2
-    '@fastify/multipart':
-      specifier: ^10.0.0
-      version: 10.0.0
     '@fastify/otel':
       specifier: ^0.17.1
       version: 0.17.1
@@ -366,6 +363,9 @@ catalogs:
     bowser:
       specifier: ^2.14.1
       version: 2.14.1
+    buffer:
+      specifier: 6.0.3
+      version: 6.0.3
     cdn-resolve:
       specifier: ^2.1.2
       version: 2.1.2
@@ -768,8 +768,9 @@ overrides:
   vitest: 4.1.11
 
 patchedDependencies:
+  '@agentclientprotocol/codex-acp@1.7.0': f0adb3089a276921833da2046856051ecec59f43076f5a14c4434bc01b5efaaa
   '@ai-sdk/langchain@2.0.181': 4db10f07aa138655b17d3bcb1e56ae99b2584a8f8dd1241aeca7f30b4937fa1d
-  '@earendil-works/pi-ai@0.84.4': 37c85de237194f22e924bd762ee21cbb4a957ccb816dcba8ae31af32cdda325b
+  '@earendil-works/pi-ai@0.84.4': dd55914697dc49afdfe797aec6cccdbe322039df0d00752178219a2c18ead6ba
   '@kittycad/lib@2.0.48': 8d1f46d38811b73bcc38ba26f4eba9f1d9e32be6bd271ba35c1c6365f6fe04a9
   '@taulabs/replicad@0.23.4-beta.2': 4d55bfdc8696f36ff5efc30607071d0337d46d49c57920c275b9dd15aa4ef07b
   vite-plugin-mkcert@2.0.0: 03b480d5b58a772a5b8d09aa61601839139c389c323e1d4fe6e70d399a4a2128
@@ -1782,9 +1783,6 @@ importers:
       '@aws-sdk/s3-request-presigner':
         specifier: 'catalog:'
         version: 3.1073.0
-      '@fastify/multipart':
-        specifier: 'catalog:'
-        version: 10.0.0
       '@hatchet-dev/typescript-sdk':
         specifier: 'catalog:'
         version: 1.29.2(@anthropic-ai/claude-agent-sdk@0.3.232(@anthropic-ai/sdk@0.103.0(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)))(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)))(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)))(@grpc/grpc-js@1.14.4)(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)))(@opentelemetry/api@1.9.1)(@opentelemetry/core@2.8.0(@opentelemetry/api@1.9.1))(@opentelemetry/instrumentation@0.57.2(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.8.0(@opentelemetry/api@1.9.1))(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315))
@@ -1860,7 +1858,7 @@ importers:
         version: 0.70.0(@anthropic-ai/sdk@0.103.0(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)))(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)))
       '@agentclientprotocol/codex-acp':
         specifier: 'catalog:'
-        version: 1.7.0
+        version: 1.7.0(patch_hash=f0adb3089a276921833da2046856051ecec59f43076f5a14c4434bc01b5efaaa)
       '@anthropic-ai/sandbox-runtime':
         specifier: 'catalog:'
         version: 0.0.75
@@ -3066,7 +3064,7 @@ importers:
         version: 0.84.4(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)))(ws@8.21.3)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315))
       '@earendil-works/pi-ai':
         specifier: 0.84.4
-        version: 0.84.4(patch_hash=37c85de237194f22e924bd762ee21cbb4a957ccb816dcba8ae31af32cdda325b)(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)))(ws@8.21.3)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315))
+        version: 0.84.4(patch_hash=dd55914697dc49afdfe797aec6cccdbe322039df0d00752178219a2c18ead6ba)(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)))(ws@8.21.3)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315))
       '@taucad/rpc':
         specifier: workspace:*
         version: link:../../libs/rpc
@@ -3094,7 +3092,7 @@ importers:
         version: 0.70.0(@anthropic-ai/sdk@0.103.0(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)))(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)))
       '@agentclientprotocol/codex-acp':
         specifier: 'catalog:'
-        version: 1.7.0
+        version: 1.7.0(patch_hash=f0adb3089a276921833da2046856051ecec59f43076f5a14c4434bc01b5efaaa)
       '@taucad/agent-host':
         specifier: workspace:*
         version: link:../agent-host
@@ -3146,6 +3144,9 @@ importers:
       '@taucad/runtime':
         specifier: workspace:*
         version: link:../runtime
+      '@taucad/skills':
+        specifier: workspace:*
+        version: link:../skills
       citty:
         specifier: 'catalog:'
         version: 0.2.2
@@ -3979,6 +3980,9 @@ importers:
       '@taucad/filesystem':
         specifier: workspace:*
         version: link:../../libs/filesystem
+      buffer:
+        specifier: 'catalog:'
+        version: 6.0.3
       isomorphic-git:
         specifier: 'catalog:'
         version: 1.38.5
@@ -7126,9 +7130,6 @@ packages:
   '@fastify/cors@11.2.0':
     resolution: {integrity: sha512-LbLHBuSAdGdSFZYTLVA3+Ch2t+sA6nq3Ejc6XLAKiQ6ViS2qFnvicpj0htsx03FyYeLs04HfRNBsz/a8SvbcUw==}
 
-  '@fastify/deepmerge@3.2.1':
-    resolution: {integrity: sha512-N5Oqvltoa2r9z1tbx4xjky0oRR60v+T47Ic4J1ukoVQcptLOrIdRnCSdTGmOmajZuHVKlTnfcmrjyqsGEW1ztA==}
-
   '@fastify/error@4.2.0':
     resolution: {integrity: sha512-RSo3sVDXfHskiBZKBPRgnQTtIqpi/7zhJOEmAxCiBcM7d0uwdGdxLlsCaLzGs8v8NnxIRlfG0N51p5yFaOentQ==}
 
@@ -7146,9 +7147,6 @@ packages:
 
   '@fastify/merge-json-schemas@0.2.1':
     resolution: {integrity: sha512-OA3KGBCy6KtIvLf8DINC5880o5iBlDX4SxzLQS8HorJAbqluzLRn80UXU0bxZn7UOFhFgpRJDasfwn9nG4FG4A==}
-
-  '@fastify/multipart@10.0.0':
-    resolution: {integrity: sha512-pUx3Z1QStY7E7kwvDTIvB6P+rF5lzP+iqPgZyJyG3yBJVPvQaZxzDHYbQD89rbY0ciXrMOyGi8ezHDVexLvJDA==}
 
   '@fastify/otel@0.17.1':
     resolution: {integrity: sha512-K4wyxfUZx2ux5o+b6BtTqouYFVILohLZmSbA2tKUueJstNcBnoGPVhllCaOvbQ3ZrXdUxUC/fyrSWSCqHhdOPg==}
@@ -26760,7 +26758,7 @@ snapshots:
       - '@anthropic-ai/sdk'
       - '@modelcontextprotocol/sdk'
 
-  '@agentclientprotocol/codex-acp@1.7.0':
+  '@agentclientprotocol/codex-acp@1.7.0(patch_hash=f0adb3089a276921833da2046856051ecec59f43076f5a14c4434bc01b5efaaa)':
     dependencies:
       '@agentclientprotocol/sdk': 1.4.0(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315))
       '@openai/codex': 0.148.0
@@ -28491,7 +28489,7 @@ snapshots:
 
   '@earendil-works/pi-agent-core@0.84.4(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)))(ws@8.21.3)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315))':
     dependencies:
-      '@earendil-works/pi-ai': 0.84.4(patch_hash=37c85de237194f22e924bd762ee21cbb4a957ccb816dcba8ae31af32cdda325b)(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)))(ws@8.21.3)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315))
+      '@earendil-works/pi-ai': 0.84.4(patch_hash=dd55914697dc49afdfe797aec6cccdbe322039df0d00752178219a2c18ead6ba)(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)))(ws@8.21.3)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315))
       '@earendil-works/pi-telemetry': 0.84.4
       diff: 8.0.4
       ignore: 7.0.5
@@ -28505,7 +28503,7 @@ snapshots:
       - ws
       - zod
 
-  '@earendil-works/pi-ai@0.84.4(patch_hash=37c85de237194f22e924bd762ee21cbb4a957ccb816dcba8ae31af32cdda325b)(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)))(ws@8.21.3)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315))':
+  '@earendil-works/pi-ai@0.84.4(patch_hash=dd55914697dc49afdfe797aec6cccdbe322039df0d00752178219a2c18ead6ba)(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)))(ws@8.21.3)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315))':
     dependencies:
       '@anthropic-ai/sdk': 0.91.1(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315))
       '@aws-sdk/client-bedrock-runtime': 3.1048.0
@@ -29459,8 +29457,6 @@ snapshots:
       fastify-plugin: 5.1.0
       toad-cache: 3.7.1
 
-  '@fastify/deepmerge@3.2.1': {}
-
   '@fastify/error@4.2.0': {}
 
   '@fastify/fast-json-stringify-compiler@5.0.3':
@@ -29482,14 +29478,6 @@ snapshots:
   '@fastify/merge-json-schemas@0.2.1':
     dependencies:
       dequal: 2.0.3
-
-  '@fastify/multipart@10.0.0':
-    dependencies:
-      '@fastify/busboy': 3.2.0
-      '@fastify/deepmerge': 3.2.1
-      '@fastify/error': 4.2.0
-      fastify-plugin: 5.1.0
-      secure-json-parse: 4.1.0
 
   '@fastify/otel@0.17.1(@opentelemetry/api@1.9.1)(supports-color@10.2.2)':
     dependencies:

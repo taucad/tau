@@ -29,8 +29,7 @@ const sliderVariants = cva(
 
           // Then, apply the focus styles to the slider track instead
           '[&_[data-slot=slider-track]]:transition-[box-shadow]',
-          '[&:focus-within_[data-slot=slider-track]]:ring-2',
-          '[&:focus-within_[data-slot=slider-track]]:ring-ring',
+          '[&:focus-within_[data-slot=slider-track]]:focus-outline',
 
           // Give the slider track action cursor and hover affordances,
           // but non-clickable when the slider is disabled.
@@ -107,7 +106,7 @@ function Slider({
         <SliderPrimitive.Thumb
           key={index}
           data-slot='slider-thumb'
-          className='block size-4 shrink-0 rounded-full border border-primary bg-background shadow-sm ring-ring transition-[box-shadow] hover:ring-2 focus-visible:ring-2 focus-visible:outline-hidden disabled:pointer-events-none disabled:opacity-50'
+          className='block size-4 shrink-0 rounded-full border border-primary bg-background shadow-sm ring-ring transition-[box-shadow] hover:ring-2 focus-visible:focus-outline disabled:pointer-events-none disabled:opacity-50'
         />
       ))}
     </SliderPrimitive.Root>

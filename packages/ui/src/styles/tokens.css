@@ -66,6 +66,17 @@
   --verified: oklch(var(--l-medium) 0.25 var(--hue-verified));
   --input: oklch(var(--l-subtle) 0 none);
   --ring: oklch(var(--l-medium) 0.08 var(--hue-primary));
+
+  /* Focus-indicator geometry. These four values and the `focus-outline` utilities below are the
+     single entry point for every keyboard focus indicator in every Tau surface: change them here
+     and every control that composes `focus-outline` follows. Do not restate the geometry in a
+     component. Inset by default so the indicator has no layout footprint and is never clipped by
+     an `overflow-hidden` ancestor; `focus-outline-outside` exists only for controls too thin to
+     host an inset outline. */
+  --focus-outline-color: var(--ring);
+  --focus-outline-width: 2px;
+  --focus-outline-offset: calc(-1 * var(--focus-outline-width));
+  --focus-outline-offset-outside: var(--focus-outline-width);
   --popover: oklch(var(--l-base) 0 none);
   --popover-foreground: oklch(var(--l-deepest) 0 none);
   --menu-ring: color-mix(in oklch, black 10%, var(--popover));
@@ -350,6 +361,16 @@
 
 @utility cursor-action {
   cursor: var(--cursor-action);
+}
+
+@utility focus-outline {
+  outline: var(--focus-outline-width) solid var(--focus-outline-color);
+  outline-offset: var(--focus-outline-offset);
+}
+
+@utility focus-outline-outside {
+  outline: var(--focus-outline-width) solid var(--focus-outline-color);
+  outline-offset: var(--focus-outline-offset-outside);
 }
 
 @layer base {

@@ -5,7 +5,7 @@ import type { VariantProps } from 'class-variance-authority';
 import { cn } from '#utils/cn.js';
 
 const switchVariants = cva(
-  'peer data-[state=checked]:bg-primary inline-flex shrink-0 items-center rounded-full border border-transparent shadow-xs outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50',
+  'peer data-[state=checked]:bg-primary inline-flex shrink-0 items-center rounded-full border border-transparent shadow-xs outline-none focus-visible:focus-outline disabled:cursor-not-allowed disabled:opacity-50',
   {
     variants: {
       size: {
@@ -27,7 +27,7 @@ const switchVariants = cva(
 );
 
 const thumbVariants = cva(
-  'bg-background dark:data-[state=checked]:bg-background pointer-events-none block rounded-full ring-0 transition-transform data-[state=checked]:translate-x-[calc(50%+2px)] data-[state=unchecked]:translate-x-0',
+  'bg-background dark:data-[state=checked]:bg-background pointer-events-none block rounded-full transition-transform data-[state=checked]:translate-x-[calc(50%+2px)] data-[state=unchecked]:translate-x-0',
   {
     variants: {
       size: {

@@ -7,6 +7,12 @@
 @source '../../content/docs/**/*.{json,mdx}';
 @source '../../../../packages/ui/src/**/*.{ts,tsx}';
 
+@layer base {
+  .interactive-diagram :where(.react-flow__pane.selection, .react-flow__edge.selectable, .react-flow__node.selectable) {
+    cursor: var(--cursor-action) !important;
+  }
+}
+
 /* Fumadocs registers its own palette. Re-register its utilities against Tau's
    semantic tokens after the package token reset. */
 @theme inline {

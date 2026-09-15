@@ -51,6 +51,18 @@ export const paymentOfferSnapshotSchema = z
       return;
     }
     if (
+      ![
+        offer.principalMinor,
+        offer.taxMinor,
+        offer.grossMinor,
+        offer.maximumGrossMinor,
+        offer.creditAtoms,
+        ...(offer.ceilingCreditAtoms === null ? [] : [offer.ceilingCreditAtoms]),
+      ].every((value) => unsignedIntegerStringSchema.safeParse(value).success)
+    ) {
+      return;
+    }
+    if (
       BigInt(offer.principalMinor) + BigInt(offer.taxMinor) !== BigInt(offer.grossMinor) ||
       BigInt(offer.grossMinor) > BigInt(offer.maximumGrossMinor) ||
       BigInt(offer.creditAtoms) === 0n ||

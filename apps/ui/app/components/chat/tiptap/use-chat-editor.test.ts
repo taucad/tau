@@ -110,7 +110,7 @@ describe('useChatEditor', () => {
       result.current.slashCommandState!.command(command);
     });
 
-    expect(extractContent(result.current.editor!)).toEqual({ text: '$brep-design', contextChips: [] });
+    expect(extractContent(result.current.editor!)).toEqual({ text: '$brep-design ', contextChips: [] });
     expect(onSlashCommand).toHaveBeenCalledWith(command);
   });
 
@@ -464,9 +464,15 @@ describe('useChatEditor — image paste delegation', () => {
 });
 
 describe('buildEditorContentJson', () => {
-  it('should return undefined when segments contain no chips', () => {
-    const segments: PastedContentSegment[] = [{ type: 'text', value: 'Hello world' }];
-    expect(buildEditorContentJson(segments)).toBeUndefined();
+  it('should preserve literal markup, entities, whitespace, and newlines as text nodes', () => {
+    const segments: PastedContentSegment[] = [{ type: 'text', value: '  Keep <b>literal</b> &amp; text\nnext  ' }];
+    expect(buildEditorContentJson(segments)).toEqual({
+      type: 'doc',
+      content: [
+        { type: 'paragraph', content: [{ type: 'text', text: '  Keep <b>literal</b> &amp; text' }] },
+        { type: 'paragraph', content: [{ type: 'text', text: 'next  ' }] },
+      ],
+    });
   });
 
   it('should produce a doc with contextChip nodes for chip segments', () => {
@@ -475,7 +481,6 @@ describe('buildEditorContentJson', () => {
       { type: 'chip', id: 'main.ts', label: 'main.ts', chipType: 'file', path: 'main.ts' },
     ];
     const result = buildEditorContentJson(segments);
-    expect(result).toBeDefined();
     expect(result).toEqual({
       type: 'doc',
       content: [
@@ -544,7 +549,7 @@ describe('buildEditorContentJson', () => {
     });
 
     act(() => {
-      hookResult.current.editor!.commands.setContent(result!);
+      hookResult.current.editor!.commands.setContent(result);
     });
 
     const content = extractContent(hookResult.current.editor!);
@@ -566,9 +571,7 @@ describe('buildEditorContentJson', () => {
       { type: 'chip', id: 'main.scad', label: 'main.scad', chipType: 'file', path: 'main.scad' },
     ];
     const result = buildEditorContentJson(segments);
-    expect(result).toBeDefined();
-
-    const paragraph = result!.content?.[0];
+    const paragraph = result.content?.[0];
     expect(paragraph?.content).toHaveLength(3);
 
     const first = paragraph?.content?.[0];
@@ -583,7 +586,10 @@ describe('buildEditorContentJson', () => {
   it('should split text at newlines into separate paragraphs', () => {
     const segments: PastedContentSegment[] = [{ type: 'text', value: 'Line one\nLine two' }];
     const result = buildEditorContentJson(segments);
-    expect(result).toBeUndefined();
+    expect(result.content).toEqual([
+      { type: 'paragraph', content: [{ type: 'text', text: 'Line one' }] },
+      { type: 'paragraph', content: [{ type: 'text', text: 'Line two' }] },
+    ]);
   });
 
   it('should split text and chips across newline boundaries into paragraphs', () => {
@@ -593,10 +599,9 @@ describe('buildEditorContentJson', () => {
       { type: 'chip', id: 'b.ts', label: 'b.ts', chipType: 'file', path: 'b.ts' },
     ];
     const result = buildEditorContentJson(segments);
-    expect(result).toBeDefined();
-    expect(result!.content).toHaveLength(2);
-    expect(result!.content?.[0]?.content?.[0]?.type).toBe('contextChip');
-    expect(result!.content?.[1]?.content?.[0]?.type).toBe('contextChip');
+    expect(result.content).toHaveLength(2);
+    expect(result.content?.[0]?.content?.[0]?.type).toBe('contextChip');
+    expect(result.content?.[1]?.content?.[0]?.type).toBe('contextChip');
   });
 });
 
@@ -620,10 +625,8 @@ describe('draft content restoration with chip rehydration', () => {
     const segments = buildPastedContent(draftText, { fileTree, chats: [] });
     const json = buildEditorContentJson(segments);
 
-    expect(json).toBeDefined();
-
     act(() => {
-      editor.commands.setContent(json!);
+      editor.commands.setContent(json);
     });
 
     const content = extractContent(editor);
@@ -649,10 +652,8 @@ describe('draft content restoration with chip rehydration', () => {
     const segments = buildPastedContent(draftText, { fileTree, chats: [] });
     const json = buildEditorContentJson(segments);
 
-    expect(json).toBeDefined();
-
     act(() => {
-      editor.commands.setContent(json!);
+      editor.commands.setContent(json);
     });
 
     const content = extractContent(editor);
@@ -677,10 +678,14 @@ describe('draft content restoration with chip rehydration', () => {
     const segments = buildPastedContent(draftText, { fileTree, chats: [] });
     const json = buildEditorContentJson(segments);
 
-    expect(json).toBeUndefined();
+    expect(json.content?.[0]?.content).toEqual([
+      { type: 'text', text: 'Check ' },
+      { type: 'text', text: '@nonexistent.ts' },
+      { type: 'text', text: ' for details' },
+    ]);
 
     act(() => {
-      editor.commands.setContent(draftText);
+      editor.commands.setContent(json);
     });
 
     const content = extractContent(editor);
@@ -694,8 +699,6 @@ describe('draft content restoration with chip rehydration', () => {
     const segments = buildPastedContent(draftText, { fileTree: new Map(), chats: [], knownSkills });
     const json = buildEditorContentJson(segments);
 
-    expect(json).toBeDefined();
-
     const { result } = renderHook(() => useChatEditor(createDefaultOptions()));
 
     await waitFor(() => {
@@ -705,7 +708,7 @@ describe('draft content restoration with chip rehydration', () => {
     const editor = result.current.editor!;
 
     act(() => {
-      editor.commands.setContent(json!);
+      editor.commands.setContent(json);
     });
 
     const content = extractContent(editor);
@@ -721,8 +724,6 @@ describe('draft content restoration with chip rehydration', () => {
     const draftText = '/woodworking make this joinery manufacturable';
     const segments = buildPastedContent(draftText, { fileTree: new Map(), chats: [], knownSkills });
     const json = buildEditorContentJson(segments);
-
-    expect(json).toBeDefined();
 
     const { result } = renderHook(() =>
       useChatEditor(
@@ -748,7 +749,7 @@ describe('draft content restoration with chip rehydration', () => {
     const editor = result.current.editor!;
 
     act(() => {
-      editor.commands.setContent(json!);
+      editor.commands.setContent(json);
     });
 
     const content = extractContent(editor);
@@ -815,7 +816,6 @@ describe('draft content restoration with chip rehydration', () => {
     const segments: PastedContentSegment[] = [{ type: 'chip', id: 'repos', label: '/repos', chipType: 'skill' }];
     const result = buildEditorContentJson(segments);
 
-    expect(result).toBeDefined();
     expect(result).toEqual({
       type: 'doc',
       content: [
@@ -839,8 +839,6 @@ describe('draft content restoration with chip rehydration', () => {
     const segments = buildPastedContent(draftText, { fileTree, chats: [], knownSkills });
     const json = buildEditorContentJson(segments);
 
-    expect(json).toBeDefined();
-
     const { result } = renderHook(() =>
       useChatEditor(createDefaultOptions({ treeService: createMockTreeService(fileTree) })),
     );
@@ -852,7 +850,7 @@ describe('draft content restoration with chip rehydration', () => {
     const editor = result.current.editor!;
 
     act(() => {
-      editor.commands.setContent(json!);
+      editor.commands.setContent(json);
     });
 
     const content = extractContent(editor);

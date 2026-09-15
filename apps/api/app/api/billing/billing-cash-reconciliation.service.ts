@@ -325,13 +325,15 @@ export class BillingCashReconciliationService {
       .limit(1001);
     const facts = rows.slice(0, 1000).map((row) => row.fact);
     for (const fact of facts) {
+      // The scan currency scopes the presentment streams; a balance transaction carries the account's
+      // settlement currency, which differs whenever the account settles outside its presentment currency.
+      // Only the gross/fee/net identity is currency-independent, so only that is asserted here.
       if (
         fact.sourceType === 'balance_transaction' &&
         (fact.amountMinor === null ||
           fact.feeMinor === null ||
           fact.netMinor === null ||
-          fact.amountMinor - fact.feeMinor !== fact.netMinor ||
-          fact.currency !== claim.currency)
+          fact.amountMinor - fact.feeMinor !== fact.netMinor)
       ) {
         await this.openCase(claim, 'gross_fee_net_mismatch', fact.sourceId, undefined, {
           factId: fact.id,

@@ -137,6 +137,17 @@ export const setup = async (): Promise<() => void> => {
    * completed-artifact tier: its isolated API has no billing environment, and
    * `environmentSchema` refuses this name without `BILLING_ENVIRONMENT=development`. */
   if (!desktopE2ECompletedArtifact) {
+    environment['TAU_CLOUD_ENABLED'] = 'true';
+    environment['BILLING_ENVIRONMENT'] = 'development';
+    environment['BILLING_USAGE_CURSOR_SECRET'] = 'desktop-e2e-usage-cursor-secret-min-32-chars';
+    environment['BILLING_REQUEST_DIGEST_SECRET'] = 'desktop-e2e-request-digest-secret-min-32-chars';
+    environment['STRIPE_SECRET_KEY'] = 'sk_test_desktop_e2e';
+    environment['STRIPE_READ_SECRET_KEY'] = 'rk_test_desktop_e2e';
+    environment['STRIPE_ACCOUNT_ID'] = 'acct_desktop_e2e';
+    environment['STRIPE_LIVEMODE'] = 'false';
+    environment['STRIPE_WEBHOOK_SECRET'] = 'whsec_desktop_e2e';
+    environment['STRIPE_PRICE_ID_PRO_MONTHLY'] = 'price_desktop_e2e';
+    environment['STRIPE_PRODUCT_ID_CREDIT_PACK'] = 'prod_desktop_e2e';
     environment['TAU_LLM_PROVIDER_UPSTREAM_URL'] = desktopE2EProviderStubUrl;
     environment['ANTHROPIC_API_KEY'] = desktopE2EProviderStubKey;
   }

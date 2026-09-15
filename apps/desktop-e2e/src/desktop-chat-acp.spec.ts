@@ -1,12 +1,13 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { getKernelResultOutputSchema, screenshotOutputSchema, testModelOutputSchema } from '@taucad/chat';
 import { afterEach, expect, test } from 'vitest';
 import type { Locator, Page } from 'playwright';
-import { launchDesktopApp } from '#support/desktop-app.js';
+import { authenticatePackagedDesktop, launchDesktopApp } from '#support/desktop-app.js';
 import type { DesktopSession } from '#support/desktop-app.js';
+import { durableMessages, latestCompletedRun, toolResult } from '#support/acp-evidence.js';
 import { gatewayFixtureFinalText, gatewayFixtureModelName, installGatewayFixture } from '#support/gateway-fixture.js';
 import type { GatewayFixture } from '#support/gateway-fixture.js';
 import { deleteTauTestUser, seedTauTestUser, tauTestAccount } from '#support/tau-account.js';
@@ -50,51 +51,13 @@ const seedPrompt = 'Create a cube with a centered cylindrical cutout and verify 
 const externalPrompt = 'Reply with the single word pong.';
 const cadInspectionPrompt =
   'Create a simple 20 mm cube in main.scad. Do not export anything. Check your work and briefly report the result.';
+const packaged = process.env['TAU_E2E_ACP_PACKAGED'] === 'true';
+const turbojetSourcePath = process.env['TAU_E2E_ACP_TURBOJET_SOURCE'];
+const nativeTurbojet = process.env['TAU_E2E_TURBOJET_NATIVE'] === 'true';
 
-type DurableMessage = {
-  readonly id: string;
-  readonly role: string;
-  readonly toolName?: string;
-  readonly content?: unknown;
-  readonly isError?: boolean;
-};
-
-const durableMessages = (events: string): readonly DurableMessage[] => {
-  const messages: DurableMessage[] = [];
-  for (const line of events.split('\n')) {
-    if (line.trim().length === 0) {
-      continue;
-    }
-    const event = JSON.parse(line) as {
-      readonly type?: string;
-      readonly message?: DurableMessage;
-      readonly messageId?: string;
-      readonly replacement?: DurableMessage;
-    };
-    if (event.type === 'message.appended' && event.message) {
-      messages.push(event.message);
-    }
-    if (event.type === 'message.envelope-replaced' && event.replacement) {
-      const index = messages.findIndex((message) => message.id === event.messageId);
-      if (index !== -1) {
-        messages[index] = event.replacement;
-      }
-    }
-  }
-  return messages;
-};
-
-const toolResult = (events: string, toolName: string): unknown => {
-  const result = durableMessages(events).findLast(
-    (message) => message.role === 'tool-output' && message.toolName === toolName,
-  );
-  expect(result, `${toolName} did not produce a durable result`).toBeDefined();
-  if (result?.role !== 'tool-output') {
-    throw new Error(`${toolName} did not produce a durable result`);
-  }
-  expect(result.isError, `${toolName} failed`).toBe(false);
-  return result.content;
-};
+if (turbojetSourcePath !== undefined && !existsSync(turbojetSourcePath)) {
+  throw new Error(`Requested Turbojet fixture does not exist: ${turbojetSourcePath}`);
+}
 
 /**
  * Whether this machine can answer a Codex turn at all.
@@ -134,7 +97,10 @@ test.skipIf(!codexAvailable)('uses native Tau skills and tools through the Codex
   const account = tauTestAccount('acp');
   seededEmail = account.email;
   const token = await seedTauTestUser(account);
-  session = await launchDesktopApp({ token });
+  session = await launchDesktopApp({ token, packaged });
+  if (packaged) {
+    await authenticatePackagedDesktop(session, token);
+  }
   const { page } = session;
   fixture = await installGatewayFixture(page);
 
@@ -185,6 +151,7 @@ test.skipIf(!codexAvailable)('uses native Tau skills and tools through the Codex
      * prompt names neither skill, tool nor verification action, so these are
      * adoption assertions, not a coached transport probe. */
     const events = readLog(eventsPathNow());
+    const runId = latestCompletedRun(events);
     expect(events).toMatch(/cad-openscad\/SKILL\.md/u);
     const messages = durableMessages(events);
     for (const toolName of ['get_kernel_result', 'screenshot']) {
@@ -192,22 +159,38 @@ test.skipIf(!codexAvailable)('uses native Tau skills and tools through the Codex
         messages.findLast((message) => message.role === 'tool-input' && message.toolName === toolName)?.content,
       ).toMatchObject({ targetFile: 'main.scad' });
     }
-    expect(getKernelResultOutputSchema.parse(toolResult(events, 'get_kernel_result'))).toMatchObject({
+    expect(
+      getKernelResultOutputSchema.parse(
+        toolResult(events, { runId, toolName: 'get_kernel_result', targetFile: 'main.scad' }),
+      ),
+    ).toMatchObject({
       status: 'ready',
       kernelIssues: [],
     });
-    const modelTest = testModelOutputSchema.parse(toolResult(events, 'test_model'));
+    const modelTest = testModelOutputSchema.parse(
+      toolResult(events, { runId, toolName: 'test_model', targetFile: 'main.geospec.ts' }),
+    );
     expect(modelTest.total).toBeGreaterThan(0);
     expect(modelTest.passed).toBe(modelTest.total);
-    const capture = screenshotOutputSchema.parse(toolResult(events, 'screenshot'));
+    const capture = screenshotOutputSchema.parse(
+      toolResult(events, { runId, toolName: 'screenshot', targetFile: 'main.scad' }),
+    );
     expect(capture.images.every((image) => image.dataUrl.startsWith('data:image/'))).toBe(true);
     await expect
       .poll(() => finalizedRevisions(eventsPathNow()).at(-1)?.changedPaths.includes('main.scad'), { timeout: 60_000 })
       .toBe(true);
     const cadActivityGroups = await page.getByRole('button', { name: /Explored .*?(?:render|screenshot|test)/u }).all();
     expect(cadActivityGroups.length).toBeGreaterThan(0);
-    await Promise.all(cadActivityGroups.map(async (group) => group.click()));
-    await expectVisible(page.getByText('Tested 1 requirement', { exact: true }), 60_000);
+    for (const group of cadActivityGroups) {
+      // oxlint-disable-next-line no-await-in-loop -- each disclosure state must settle before the next React update.
+      await group.click();
+    }
+    await expectVisible(
+      page.getByText(`Tested ${String(modelTest.total)} requirement${modelTest.total === 1 ? '' : 's'}`, {
+        exact: true,
+      }),
+      60_000,
+    );
     await expectVisible(page.getByRole('button', { name: /Captured 1 screenshot of main\.scad/u }), 60_000);
     await expectCount(page.getByText(/Received unknown part tool-/u), 0);
 
@@ -217,12 +200,250 @@ test.skipIf(!codexAvailable)('uses native Tau skills and tools through the Codex
     expect(events).toMatch(/"kind":"external-agent"/u);
     expect(events).toMatch(/"agentId":"codex"/u);
 
+    // A colorful capture alone can be stale. Hold the geometry specification
+    // fixed while distinguishing two targets and then editing only one target.
+    const projectRoot = dirname(dirname(dirname(dirname(eventsPathNow()))));
+    const otherSource = 'cube([8, 8, 40], center=true);\n';
+    writeFileSync(join(projectRoot, 'other.scad'), otherSource);
+    let previousCapture: string | undefined;
+    let previousRun = runId;
+    for (const dimensions of [
+      [20, 20, 20],
+      [40, 10, 10],
+    ] as const) {
+      const priorRun = previousRun;
+      const controlledSource = `cube([${dimensions.join(', ')}], center=true);\n`;
+      const volume = dimensions[0] * dimensions[1] * dimensions[2];
+      const spec = `import { it, expectGeo } from 'geospec';
+import { loadModel } from 'geospec/model';
+it('conformance main volume and envelope', async () => {
+  const model = await loadModel({ file: 'main.scad', format: 'glb' });
+  expectGeo(model).toHaveVolume({ value: ${String(volume)}, tolerance: 0.01 });
+  expectGeo(model).toHaveBoundingBox({ size: { x: ${String(dimensions[0])}, y: ${String(dimensions[1])}, z: ${String(dimensions[2])} }, tolerance: 0.01 });
+});
+it('conformance other volume and envelope', async () => {
+  const model = await loadModel({ file: 'other.scad', format: 'glb' });
+  expectGeo(model).toHaveVolume({ value: 2560, tolerance: 0.01 });
+  expectGeo(model).toHaveBoundingBox({ size: { x: 8, y: 8, z: 40 }, tolerance: 0.01 });
+});\n`;
+      writeFileSync(join(projectRoot, 'main.scad'), controlledSource);
+      writeFileSync(join(projectRoot, 'conformance.geospec.ts'), spec);
+      // oxlint-disable-next-line no-await-in-loop -- each turn measures the source version just written.
+      await sendPrompt(
+        page,
+        'Do not edit any file. Use Tau get_kernel_result and one isometric screenshot for EACH of main.scad and other.scad, then run test_model with files ["conformance.geospec.ts"]. Report the observed results.',
+      );
+      // oxlint-disable-next-line no-await-in-loop -- await this exact subsequent run, not an older completed run.
+      await expect
+        .poll(
+          () => {
+            try {
+              return latestCompletedRun(readLog(eventsPathNow()));
+            } catch {
+              return priorRun;
+            }
+          },
+          { timeout: 300_000 },
+        )
+        .not.toBe(priorRun);
+      const current = readLog(eventsPathNow());
+      const currentRun = latestCompletedRun(current);
+      const captures = ['main.scad', 'other.scad'].map((targetFile) => {
+        expect(
+          getKernelResultOutputSchema.parse(
+            toolResult(current, { runId: currentRun, toolName: 'get_kernel_result', targetFile }),
+          ),
+        ).toMatchObject({ status: 'ready', kernelIssues: [] });
+        const tests = testModelOutputSchema.parse(
+          toolResult(current, { runId: currentRun, toolName: 'test_model', targetFile: 'conformance.geospec.ts' }),
+        );
+        expect(tests).toMatchObject({ passed: 2, total: 2, failures: [] });
+        return screenshotOutputSchema.parse(
+          toolResult(current, { runId: currentRun, toolName: 'screenshot', targetFile }),
+        ).images[0]!.dataUrl;
+      });
+      expect(captures[0]).not.toBe(captures[1]);
+      if (previousCapture !== undefined) {
+        expect(captures[0]).not.toBe(previousCapture);
+      }
+      expect(readFileSync(join(projectRoot, 'main.scad'), 'utf8')).toBe(controlledSource);
+      expect(readFileSync(join(projectRoot, 'other.scad'), 'utf8')).toBe(otherSource);
+      expect(readFileSync(join(projectRoot, 'conformance.geospec.ts'), 'utf8')).toBe(spec);
+      // oxlint-disable-next-line no-await-in-loop -- finalization is asynchronous relative to the terminal log row.
+      await expect
+        .poll(() => finalizedRevisions(eventsPathNow()).at(-1)?.runIds, { timeout: 60_000 })
+        .toContain(currentRun);
+      // A read-only turn mints no revision: admission has already saved the
+      // controlled edit as its base. Verify that immutable head instead.
+      const revision = execFileSync('git', ['-C', projectRoot, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+      expect(execFileSync('git', ['-C', projectRoot, 'show', `${revision}:main.scad`], { encoding: 'utf8' })).toBe(
+        controlledSource,
+      );
+      previousCapture = captures[0];
+      previousRun = currentRun;
+    }
+    await expectCount(page.getByText(/Received (?:unknown part|reasoning-)/u), 0);
+    await session.capture('acp-current-targets');
+
     console.info(`[desktop-e2e] acp chat=${chatId} rows=${rows.length}`);
   } catch (error) {
     await session.capture('acp-failure');
     throw error;
   }
 });
+
+test.skipIf(!codexAvailable || turbojetSourcePath === undefined)(
+  'repairs the copied Turbojet Bézier failure through native Tau tools',
+  async () => {
+    const account = tauTestAccount('acp-turbojet');
+    seededEmail = account.email;
+    const token = await seedTauTestUser(account);
+    session = await launchDesktopApp({ token, packaged });
+    if (packaged) {
+      await authenticatePackagedDesktop(session, token);
+    }
+    const { page } = session;
+    fixture = await installGatewayFixture(page);
+
+    try {
+      await expectVisible(page.locator('[aria-label="Ask Tau to build anything..."]'), 120_000);
+      await expectSignedIn(page);
+      await selectKernel(page, 'Build123d');
+      await connectPickedFolder(session);
+      if (nativeTurbojet) {
+        await selectChatModel(page, 'GPT-5.6 Luna');
+      } else {
+        const rows = await openExecutionPicker(page);
+        expect(rows.join('\n')).toMatch(/Codex\s*Runs with your local Codex login/u);
+        await page
+          .getByRole('option', { name: /^Codex/u })
+          .first()
+          .click();
+        await selectAgentModel(page, 'GPT-5.6-Sol');
+      }
+
+      const slug = await submitPrompt(page, externalPrompt);
+      const sourcePath = await waitForProjectOnDisk(session.pickedDirectory, slug, { extension: '.py' });
+      await expect.poll(() => new URL(page.url()).searchParams.get('chat'), { timeout: 120_000 }).toBeTruthy();
+      const chatId = activeChatId(page);
+      const eventsPath = join(dirname(sourcePath), '.tau/chats', chatId, 'events.jsonl');
+      await expect.poll(() => readLog(eventsPath), { timeout: 300_000 }).toMatch(/"state":"completed"/u);
+
+      if (turbojetSourcePath === undefined) {
+        throw new Error('TAU_E2E_ACP_TURBOJET_SOURCE was removed after test selection.');
+      }
+      const source = readFileSync(turbojetSourcePath, 'utf8');
+      const brokenSource = source
+        .split('\n')
+        .map((line) =>
+          line.includes('Edge.make_bezier(')
+            ? `${line.replace('Edge.make_bezier(', 'Edge.make_bezier([').slice(0, -1)}])`
+            : line,
+        )
+        .join('\n');
+      expect(brokenSource.match(/Edge\.make_bezier\(\[/gu)).toHaveLength(2);
+      writeFileSync(sourcePath, brokenSource, 'utf8');
+      await expectVisible(page.getByText(/At least two control points must be provided/u), 120_000);
+
+      const completedBefore = (readLog(eventsPath).match(/"state":"completed"/gu) ?? []).length;
+      await sendPrompt(
+        page,
+        'Repair the current Build123d turbojet model failure without changing its design. Make only the necessary argument-list correction in main.py; preserve every other source statement. Put any GeoSpec checks in main.geospec.ts. Check the repaired geometry and capture the result.',
+      );
+      await expect
+        .poll(() => (readLog(eventsPath).match(/"state":"completed"/gu) ?? []).length, { timeout: 600_000 })
+        .toBe(completedBefore + 1);
+
+      const events = readLog(eventsPath);
+      const runId = latestCompletedRun(events);
+      expect(events).toMatch(/cad-build123d/u);
+      expect(readFileSync(sourcePath, 'utf8')).not.toMatch(/Edge\.make_bezier\(\[/u);
+      // The requested surgical repair must recover the controlled assembly, not replace
+      // it with an unrelated shape that also compiles and produces colourful pixels.
+      // Both removing the list wrapper and unpacking that exact list restore
+      // the same variadic control points. No other assembly edits are allowed.
+      const expectedRepairs = [source, brokenSource.replaceAll('Edge.make_bezier([', 'Edge.make_bezier(*[')];
+      expect(expectedRepairs.map((repair) => repair.replaceAll(/\s/gu, ''))).toContain(
+        readFileSync(sourcePath, 'utf8').replaceAll(/\s/gu, ''),
+      );
+      expect(
+        getKernelResultOutputSchema.parse(
+          toolResult(events, { runId, toolName: 'get_kernel_result', targetFile: 'main.py' }),
+        ),
+      ).toMatchObject({
+        status: 'ready',
+        kernelIssues: [],
+      });
+      const modelTest = testModelOutputSchema.parse(
+        toolResult(events, { runId, toolName: 'test_model', targetFile: 'main.geospec.ts' }),
+      );
+      expect(modelTest.total).toBeGreaterThan(0);
+      expect(modelTest.passed).toBe(modelTest.total);
+      const capture = screenshotOutputSchema.parse(
+        toolResult(events, { runId, toolName: 'screenshot', targetFile: 'main.py' }),
+      );
+      const image = capture.images[0];
+      if (image === undefined) {
+        throw new Error('The repaired Turbojet capture returned no image.');
+      }
+      const pixels = await page.evaluate(async (dataUrl) => {
+        const response = await fetch(dataUrl);
+        const blob = await response.blob();
+        const bitmap = await createImageBitmap(blob);
+        const { height, width } = bitmap;
+        const canvas = new OffscreenCanvas(64, 64);
+        const context = canvas.getContext('2d');
+        if (context === null) {
+          throw new Error('2D canvas context unavailable while validating the ACP capture.');
+        }
+        context.drawImage(bitmap, 0, 0, 64, 64);
+        bitmap.close();
+        const rgba = context.getImageData(0, 0, 64, 64).data;
+        const colors = new Set<string>();
+        let minimum = 255;
+        let maximum = 0;
+        let opaque = 0;
+        for (let index = 0; index < rgba.length; index += 4) {
+          if (rgba[index + 3]! === 0) {
+            continue;
+          }
+          opaque += 1;
+          const red = rgba[index]!;
+          const green = rgba[index + 1]!;
+          const blue = rgba[index + 2]!;
+          const luminance = (red + green + blue) / 3;
+          minimum = Math.min(minimum, luminance);
+          maximum = Math.max(maximum, luminance);
+          colors.add(
+            `${String(Math.floor(red / 16))}:${String(Math.floor(green / 16))}:${String(Math.floor(blue / 16))}`,
+          );
+        }
+        return { colors: colors.size, height, luminanceRange: maximum - minimum, opaque, width };
+      }, image.dataUrl);
+      expect(pixels.width).toBeGreaterThan(100);
+      expect(pixels.height).toBeGreaterThan(100);
+      expect(pixels.opaque).toBeGreaterThan(1000);
+      expect(pixels.colors).toBeGreaterThan(8);
+      expect(pixels.luminanceRange).toBeGreaterThan(24);
+      expect(finalizedRevisions(eventsPath).at(-1)?.changedPaths).toContain('main.py');
+      expect(finalizedRevisions(eventsPath).at(-1)?.runIds).toContain(runId);
+
+      const activity = page.getByRole('button', { name: /Explored .*?(?:render|screenshot|test)/u }).last();
+      await expectVisible(activity, 60_000);
+      await activity.click();
+      await expectVisible(page.getByRole('button', { name: /Captured 1 screenshot of main\.py/u }), 60_000);
+      await expectCount(page.getByText(/Received unknown part tool-/u), 0);
+      await session.capture(nativeTurbojet ? 'native-turbojet-repaired' : 'acp-turbojet-repaired');
+      console.info(
+        `[desktop-e2e] turbojet native=${String(nativeTurbojet)} chat=${chatId} pixels=${JSON.stringify(pixels)}`,
+      );
+    } catch (error) {
+      await session.capture('acp-turbojet-failure');
+      throw error;
+    }
+  },
+  900_000,
+);
 
 /**
  * The operator's actual flow, and the one turn the spec above cannot reach:
@@ -242,7 +463,10 @@ test.skipIf(!codexAvailable)(
     const account = tauTestAccount('acp-seeded');
     seededEmail = account.email;
     const token = await seedTauTestUser(account);
-    session = await launchDesktopApp({ token });
+    session = await launchDesktopApp({ token, packaged });
+    if (packaged) {
+      await authenticatePackagedDesktop(session, token);
+    }
     const { page } = session;
     /* Only the project-name turn reaches the gateway on this leg; the CAD turn
      * is external and never does. The fixture is still what funds that name. */
@@ -386,7 +610,10 @@ test.skipIf(!codexAvailable)(
     const account = tauTestAccount('acp-rev');
     seededEmail = account.email;
     const token = await seedTauTestUser(account);
-    session = await launchDesktopApp({ token });
+    session = await launchDesktopApp({ token, packaged });
+    if (packaged) {
+      await authenticatePackagedDesktop(session, token);
+    }
     const { page } = session;
     /* The shell opens at 1440×900 (`apps/desktop/src/main/main.ts`), and at that
      * width the project route's composer is narrow enough that its right-hand
@@ -568,7 +795,7 @@ test.skipIf(!codexAvailable)(
 
       /* 6. Re-root between the live and linked checkouts without copying either
        * tree over the other. */
-      await branchRow(page, 'main').getByRole('button', { name: 'Switch', exact: true }).click();
+      // Selecting a chat checkout does not move the independently browsed workbench.
       await expectCurrentBranch(page, 'main');
       await expectVisible(
         page.getByRole('button', { name: `Restore to Revision ${String(candidateRevisionNumber)}`, exact: true }),
@@ -576,14 +803,16 @@ test.skipIf(!codexAvailable)(
       );
       expect(liveSource()).toBe(seededSource);
 
-      await branchRow(page, candidateBranch).getByRole('button', { name: 'Switch', exact: true }).click();
+      await branchRow(page, candidateBranch)
+        .getByRole('button', { name: `Switch to ${candidateBranch}`, exact: true })
+        .click();
       await expectCurrentBranch(page, candidateBranch);
       expect(liveSource()).toBe(seededSource);
       expect(candidateSource).toContain(candidateMarker);
       await session.capture('rev-branches-after-switch');
 
       /* Back onto the trunk, the same verb in the other direction. */
-      await branchRow(page, 'main').getByRole('button', { name: 'Switch', exact: true }).click();
+      await branchRow(page, 'main').getByRole('button', { name: 'Switch to main', exact: true }).click();
       await expect.poll(liveSource, { timeout: 120_000 }).toBe(seededSource);
       await expectCurrentBranch(page, 'main');
 
@@ -591,8 +820,9 @@ test.skipIf(!codexAvailable)(
       const revisionStatusButton = page.getByRole('button', { name: /^Open Revisions\./u }).first();
       const beforeMerge = await revisionStatusButton.getAttribute('aria-label');
       await branchRow(page, candidateBranch)
-        .getByRole('button', { name: /^Merge into /u })
+        .getByRole('button', { name: `Actions for ${candidateBranch}`, exact: true })
         .click();
+      await page.getByRole('menuitem', { name: `Merge ${candidateBranch} into main`, exact: true }).click();
       await expectVisible(page.getByText(`Merged ${candidateBranch}`, { exact: true }), 120_000);
       await expect
         .poll(async () => revisionStatusButton.getAttribute('aria-label'), { timeout: 120_000 })
@@ -605,9 +835,17 @@ test.skipIf(!codexAvailable)(
 
       /* Discard the candidate's checkout and ref. The revisions it reached
        * stay in the store; only the independent branch and worktree go. */
-      await branchRow(page, candidateBranch).getByRole('button', { name: 'Discard', exact: true }).click();
+      await branchRow(page, candidateBranch)
+        .getByRole('button', { name: `Actions for ${candidateBranch}`, exact: true })
+        .click();
+      await page.getByRole('menuitem', { name: `Discard branch changes from ${candidateBranch}`, exact: true }).click();
       await expectCount(branchRow(page, candidateBranch), 0, 60_000);
       await session.capture('rev-branches-after-discard');
+
+      // Discard does not silently transfer a chat's write authority to main.
+      await page.getByRole('button', { name: 'Branch unavailable. Choose a branch.' }).click();
+      await page.getByRole('option', { name: 'main', exact: true }).click();
+      await expectVisible(page.getByRole('button', { name: 'Work in main. Choose a branch.' }), 30_000);
 
       /* Switch the same chat back to Tau after the ACP turn. The provider
        * fixture proves the next turn used Tau's gateway, while the durable

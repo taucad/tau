@@ -20,6 +20,9 @@ release_command = 'node /app/dist/billing-command.js migrate --environment stagi
 app = 'node /app/dist/main.js'
 # One worker opens at most one PostgreSQL connection (billing-command postgres max: 1).
 billing-recovery = 'node /app/dist/billing-command.js recover-llm-worker --environment staging --limit 100 --poll-milliseconds 5000'
+# One read-only Stripe/DB worker recovers payment sources every minute and runs
+# the independent journal sweep every fifteenth poll.
+billing-operations = 'node /app/dist/billing-command.js billing-operations-worker --environment staging --limit 100 --poll-milliseconds 60000'
 
 [env]
 NODE_ENV = 'production'
@@ -39,6 +42,13 @@ LOG_SERVICE = 'fly'
 LOG_LEVEL = 'info'
 OTEL_METRICS_PORT = '9464'
 OTEL_EXPORTER_OTLP_COMPRESSION = 'gzip'
+DATABASE_POOL_MAX = '10'
+DATABASE_CONNECT_TIMEOUT_SECONDS = '10'
+DATABASE_IDLE_TIMEOUT_SECONDS = '60'
+DATABASE_STATEMENT_TIMEOUT_MS = '15000'
+DATABASE_LOCK_TIMEOUT_MS = '5000'
+DATABASE_IDLE_IN_TRANSACTION_TIMEOUT_MS = '15000'
+DATABASE_RUNTIME_ROLE = 'tau_api_runtime'
 # Additional CORS origins for the Netlify-hosted UI:
 #   - https://deploy-preview-*--taucad.netlify.app : per-PR Netlify deploy previews
 #   - https://taucad.netlify.app                   : Netlify default domain for the `taucad` site
@@ -79,7 +89,7 @@ timeout = "2s"
 [[metrics]]
 port = 9464
 path = "/metrics"
-processes = ['app', 'billing-recovery']
+processes = ['app', 'billing-recovery', 'billing-operations']
 
 [[vm]]
 memory = '1gb'
@@ -92,3 +102,9 @@ memory = '256mb'
 cpu_kind = 'shared'
 cpus = 1
 processes = ['billing-recovery']
+
+[[vm]]
+memory = '256mb'
+cpu_kind = 'shared'
+cpus = 1
+processes = ['billing-operations']

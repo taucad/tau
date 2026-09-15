@@ -116,6 +116,17 @@
       },
       "dependsOn": ["build:billing-command"]
     },
+    "test:billing-stripe": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "metadata": {
+        "description": "Mandatory real Stripe test-mode acceptance. Requires separate restricted create/read/refund keys and Stripe CLI; never skips when invoked."
+      },
+      "options": {
+        "command": "test -n \"$STRIPE_SECRET_KEY\" && test -n \"$STRIPE_READ_SECRET_KEY\" && test -n \"$STRIPE_REFUND_SECRET_KEY\" && test -n \"$STRIPE_ACCOUNT_ID\" && BILLING_STRIPE_ACCEPTANCE=true vitest run --config vitest.integration.config.ts app/testing/billing-stripe.acceptance.test.ts",
+        "cwd": "{projectRoot}"
+      }
+    },
     "generate:billing-policy:development": {
       "executor": "nx:run-commands",
       "cache": false,
@@ -161,6 +172,18 @@
         "cwd": "{workspaceRoot}",
         "env": {
           "OTEL_METRICS_PORT": "9465"
+        }
+      }
+    },
+    "billing-operations": {
+      "executor": "nx:run-commands",
+      "continuous": true,
+      "dependsOn": ["build:billing-command"],
+      "options": {
+        "command": "node --env-file-if-exists=apps/api/.env apps/api/dist/billing-command.js billing-operations-worker --environment development --limit 100 --poll-milliseconds 60000",
+        "cwd": "{workspaceRoot}",
+        "env": {
+          "OTEL_METRICS_PORT": "9466"
         }
       }
     },

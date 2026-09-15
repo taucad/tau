@@ -21,13 +21,16 @@ import { MetricsService } from '#telemetry/metrics.js';
 
 /** Protected billing entry in the API image; no HTTP server, dotenv or provider initialization. */
 async function main(): Promise<void> {
+  const args = process.argv.slice(2);
+  if (String(process.env.TAU_CLOUD_ENABLED) !== 'true') {
+    throw new Error('billing-command requires TAU_CLOUD_ENABLED=true');
+  }
   registerBillableModelMeterContracts();
   const databaseUrl = process.env['BILLING_DATABASE_URL'];
   const environment = process.env.BILLING_ENVIRONMENT;
   if (!databaseUrl || !environment) {
     throw new Error('BILLING_DATABASE_URL and BILLING_ENVIRONMENT are required');
   }
-  const args = process.argv.slice(2);
   const flags = args.filter((argument) => argument.startsWith('--')).map((argument) => argument.split('=')[0]);
   if (new Set(flags).size !== flags.length) {
     throw new Error('Duplicate command options are not permitted');
@@ -43,6 +46,7 @@ async function main(): Promise<void> {
   const runtimeRoles: Record<string, string> = {
     lifecycle: 'tau_billing_runtime',
     'recover-payments': 'tau_billing_runtime',
+    'billing-operations-worker': 'tau_billing_runtime',
     'recover-llm': 'tau_billing_runtime',
     'recover-llm-worker': 'tau_billing_runtime',
     'reconcile-journal': 'tau_billing_runtime',
@@ -362,6 +366,138 @@ async function main(): Promise<void> {
             try {
               // oxlint-disable-next-line no-await-in-loop -- the continuous worker deliberately sleeps between polls
               await wait(backoff, undefined, { signal: shutdown.signal });
+            } catch {
+              break;
+            }
+          }
+        } finally {
+          process.removeListener('SIGINT', stop);
+          process.removeListener('SIGTERM', stop);
+          await sdk.shutdown();
+        }
+        break;
+      }
+      case 'billing-operations-worker': {
+        if (
+          args.length !== 7 ||
+          args[1] !== '--environment' ||
+          args[3] !== '--limit' ||
+          !/^[1-9][0-9]{0,2}$/u.test(args[4]!) ||
+          Number(args[4]) > 100 ||
+          args[5] !== '--poll-milliseconds' ||
+          !/^[1-9][0-9]{3,5}$/u.test(args[6]!) ||
+          Number(args[6]) > 300_000
+        ) {
+          throw new Error(
+            'Usage: billing-operations-worker --environment ENVIRONMENT --limit 1..100 --poll-milliseconds 1000..300000',
+          );
+        }
+        const secretKey = process.env.STRIPE_READ_SECRET_KEY;
+        const stripeAccountId = process.env.STRIPE_ACCOUNT_ID;
+        const livemode = String(process.env.STRIPE_LIVEMODE);
+        if (!secretKey || !stripeAccountId || (livemode !== 'true' && livemode !== 'false')) {
+          throw new Error('Read-only Stripe source key, account and explicit mode are required');
+        }
+        const limit = Number(args[4]);
+        const pollMilliseconds = Number(args[6]);
+        const billingEnvironment = financialEnvironmentSchema.parse(environment);
+        const sourceStripe = createBillingStripeClient({
+          secretKey,
+          fixtureUrl: process.env['BILLING_STRIPE_FIXTURE_URL'],
+        });
+        const database = { database: drizzle(client, { schema }) };
+        const policy = new BillingPolicyService(database);
+        const ledger = new CreditLedgerService(database, policy);
+        const cash = new BillingCashService(database, sourceStripe, sourceStripe, ledger, {
+          environment: billingEnvironment,
+          stripeAccountId,
+          livemode: livemode === 'true',
+        });
+        const payments = new BillingPaymentsService(
+          database,
+          sourceStripe,
+          sourceStripe,
+          {
+            environment: billingEnvironment,
+            stripeAccountId,
+            livemode: livemode === 'true',
+            uiOrigin: 'https://unused.invalid',
+            webhookSecret: '',
+            collection: null,
+          },
+          policy,
+          ledger,
+          cash,
+        );
+        const { sdk } = await import('#telemetry/otel.js');
+        const journal = new BillingJournalReconciliationService(database, new MetricsService(), {
+          environment: billingEnvironment,
+          stripeAccountId,
+          livemode: livemode === 'true',
+        });
+        const shutdown = new AbortController();
+        const stop = (): void => {
+          shutdown.abort();
+        };
+        process.once('SIGINT', stop);
+        process.once('SIGTERM', stop);
+        let poll = 0;
+        try {
+          while (!shutdown.signal.aborted) {
+            const startedAt = Date.now();
+            try {
+              // oxlint-disable-next-line no-await-in-loop -- one worker serializes provider recovery on one DB connection
+              const recovered = await payments.recoverPayments({ environment: billingEnvironment, limit });
+              console.log(
+                JSON.stringify({
+                  event: 'billing.payment_recovery_batch',
+                  environment,
+                  processed: recovered.processed.length,
+                  pending: recovered.pending.length,
+                  failed: recovered.failed.length,
+                  durationMilliseconds: Date.now() - startedAt,
+                }),
+              );
+            } catch (error) {
+              console.error(
+                JSON.stringify({
+                  event: 'billing.payment_recovery_batch',
+                  environment,
+                  outcome: 'failed',
+                  failureKind: error instanceof Error ? error.name : 'UnknownError',
+                  durationMilliseconds: Date.now() - startedAt,
+                }),
+              );
+            }
+            if (poll % 15 === 0) {
+              const reconciliationStartedAt = Date.now();
+              try {
+                // oxlint-disable-next-line no-await-in-loop -- the independent sweep runs every fifteenth recovery poll
+                const report = await journal.runSweep({ batchLimit: 200 });
+                console.log(
+                  JSON.stringify({
+                    event: 'billing.journal_reconciliation',
+                    environment,
+                    ...report,
+                    durationMilliseconds: Date.now() - reconciliationStartedAt,
+                  }),
+                );
+              } catch (error) {
+                console.error(
+                  JSON.stringify({
+                    event: 'billing.journal_reconciliation',
+                    environment,
+                    outcome: 'failed',
+                    failureKind: error instanceof Error ? error.name : 'UnknownError',
+                    durationMilliseconds: Date.now() - reconciliationStartedAt,
+                  }),
+                );
+              }
+            }
+            poll += 1;
+            try {
+              // oxlint-disable-next-line no-await-in-loop -- the continuous worker deliberately sleeps between polls
+              await wait(pollMilliseconds, undefined, { signal: shutdown.signal });
             } catch {
               break;
             }

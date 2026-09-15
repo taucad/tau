@@ -260,6 +260,20 @@
       "when": 1789423714194,
       "tag": "0037_tough_talkback",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1789433784305,
+      "tag": "0038_outgoing_cloak",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1789435673694,
+      "tag": "0039_pink_jane_foster",
+      "breakpoints": true
     }
   ]
 }

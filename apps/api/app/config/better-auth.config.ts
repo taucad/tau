@@ -52,7 +52,7 @@ type BetterAuthConfigOptions = {
   databaseService: DatabaseService;
   configService: ConfigService<Environment, true>;
   emailService: EmailService;
-  closure: Pick<BillingAccountClosureService, 'prepareForAuthDeletion'>;
+  closure?: Pick<BillingAccountClosureService, 'prepareForAuthDeletion'> | undefined;
 };
 
 /**
@@ -113,9 +113,13 @@ export function getBetterAuthConfig(options: BetterAuthConfigOptions): BetterAut
     user: {
       deleteUser: {
         enabled: true,
-        beforeDelete: async (user, request) => {
-          await options.closure.prepareForAuthDeletion({ authUserId: user.id, request });
-        },
+        ...(options.closure
+          ? {
+              beforeDelete: async (user, request) => {
+                await options.closure?.prepareForAuthDeletion({ authUserId: user.id, request });
+              },
+            }
+          : {}),
       },
     },
 

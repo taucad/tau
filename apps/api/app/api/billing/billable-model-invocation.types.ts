@@ -1,5 +1,4 @@
 import type { InputCountCapability } from '#api/billing/billable-model-input-count.js';
-import type { FinancialActivityKind } from '@taucad/billing';
 import type {
   BillingEnvironment,
   MeterQuantity,
@@ -8,26 +7,20 @@ import type {
   JointInputMaximum,
   InputCountEvidence,
 } from '#api/billing/credit-ledger.types.js';
+import type {
+  ModelInvocationIntent,
+  ModelInvocationResult,
+  ModelInvocationSurface,
+  ModelProviderWire,
+} from '#api/llm/model-invocation.types.js';
 
 export const billableModelQualificationResolverKey = Symbol('billableModelQualificationResolver');
 
-export type BillableInvocationSurface = 'gateway' | 'project_name' | 'commit_name' | 'code_completion';
-export type BillableProviderWire = 'anthropic' | 'openai-completions' | 'openai-responses';
+export type BillableInvocationSurface = ModelInvocationSurface;
+export type BillableProviderWire = ModelProviderWire;
 
-export type BillableInvocationIntent = {
+export type BillableInvocationIntent = ModelInvocationIntent & {
   environment: BillingEnvironment;
-  authUserId: string;
-  surface: BillableInvocationSurface;
-  attempt: { version: 1; key: string };
-  providerWire: BillableProviderWire;
-  body: unknown;
-  priceHeaders: Readonly<Record<string, string>>;
-  activity: FinancialActivityKind;
-  projectHint?: string;
-  chatHint?: string;
-  signal: AbortSignal;
-  /** Runs synchronously once the immutable operation identity is committed or found. */
-  onAdmitted?(operationId: string): void;
 };
 
 export type InvocationMetadata = {
@@ -124,4 +117,4 @@ export type BillableInvocationResult =
       response: Response;
       completion: Promise<void>;
     }
-  | { state: 'pending' | 'terminal'; operationId: string };
+  | Extract<ModelInvocationResult, { state: 'pending' | 'terminal' }>;

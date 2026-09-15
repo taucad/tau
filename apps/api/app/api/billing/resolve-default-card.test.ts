@@ -4,6 +4,8 @@ import type Stripe from 'stripe';
 import { resolveDefaultCard } from '#api/billing/resolve-default-card.js';
 
 const createStripe = (): ReturnType<typeof mockDeep<Stripe>> => mockDeep<Stripe>();
+type CustomerResponse = Awaited<ReturnType<Stripe['customers']['retrieve']>>;
+type PaymentMethodListResponse = Awaited<ReturnType<Stripe['paymentMethods']['list']>>;
 
 describe('resolveDefaultCard', () => {
   it('should return the invoice-settings default card when one is set', async () => {
@@ -11,7 +13,7 @@ describe('resolveDefaultCard', () => {
     stripe.customers.retrieve.mockResolvedValue({
       // eslint-disable-next-line @typescript-eslint/naming-convention -- Stripe API field
       invoice_settings: { default_payment_method: { id: 'pm_default', card: { brand: 'visa', last4: '4242' } } },
-    } as never);
+    } as unknown as CustomerResponse);
 
     await expect(resolveDefaultCard(stripe, 'cus_1')).resolves.toStrictEqual({
       id: 'pm_default',
@@ -25,10 +27,10 @@ describe('resolveDefaultCard', () => {
   it('should fall back to the most-recent card when no default is set', async () => {
     const stripe = createStripe();
     // eslint-disable-next-line @typescript-eslint/naming-convention -- Stripe API field
-    stripe.customers.retrieve.mockResolvedValue({ invoice_settings: {} } as never);
+    stripe.customers.retrieve.mockResolvedValue({ invoice_settings: {} } as unknown as CustomerResponse);
     stripe.paymentMethods.list.mockResolvedValue({
       data: [{ id: 'pm_recent', card: { brand: 'mastercard', last4: '5555' } }],
-    } as never);
+    } as unknown as PaymentMethodListResponse);
 
     await expect(resolveDefaultCard(stripe, 'cus_1')).resolves.toStrictEqual({
       id: 'pm_recent',
@@ -40,15 +42,15 @@ describe('resolveDefaultCard', () => {
   it('should return undefined when the customer has no card on file', async () => {
     const stripe = createStripe();
     // eslint-disable-next-line @typescript-eslint/naming-convention -- Stripe API field
-    stripe.customers.retrieve.mockResolvedValue({ invoice_settings: {} } as never);
-    stripe.paymentMethods.list.mockResolvedValue({ data: [] } as never);
+    stripe.customers.retrieve.mockResolvedValue({ invoice_settings: {} } as unknown as CustomerResponse);
+    stripe.paymentMethods.list.mockResolvedValue({ data: [] } as unknown as PaymentMethodListResponse);
 
     await expect(resolveDefaultCard(stripe, 'cus_1')).resolves.toBeUndefined();
   });
 
   it('should return undefined for a deleted customer', async () => {
     const stripe = createStripe();
-    stripe.customers.retrieve.mockResolvedValue({ deleted: true } as never);
+    stripe.customers.retrieve.mockResolvedValue({ deleted: true } as unknown as CustomerResponse);
 
     await expect(resolveDefaultCard(stripe, 'cus_1')).resolves.toBeUndefined();
     expect(stripe.paymentMethods.list).not.toHaveBeenCalled();

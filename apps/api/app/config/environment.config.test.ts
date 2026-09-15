@@ -15,6 +15,105 @@ const withRequiredCookieSecret = (env: NodeJS.ProcessEnv): Record<string, unknow
 };
 
 describe('environmentSchema', () => {
+  it.each([
+    [undefined, false],
+    ['false', false],
+    ['true', true],
+  ])('parses TAU_CLOUD_ENABLED=%s strictly', (value, expected) => {
+    const environment = Object.fromEntries(
+      Object.entries(withRequiredCookieSecret(process.env)).filter(([key]) => key !== 'TAU_CLOUD_ENABLED'),
+    );
+    const result = environmentSchema.safeParse({
+      ...environment,
+      TAU_CLOUD_ENABLED: value,
+      BILLING_ENVIRONMENT: 'development',
+      BILLING_USAGE_CURSOR_SECRET: 'test-usage-cursor-secret-min-32-chars',
+      BILLING_REQUEST_DIGEST_SECRET: 'test-request-digest-secret-min-32-chars',
+      STRIPE_SECRET_KEY: 'sk_test_cloud_flag',
+      STRIPE_READ_SECRET_KEY: 'rk_test_cloud_flag',
+      STRIPE_ACCOUNT_ID: 'acct_cloud_flag',
+      STRIPE_LIVEMODE: 'false',
+      STRIPE_WEBHOOK_SECRET: 'whsec_cloud_flag',
+      STRIPE_PRICE_ID_PRO_MONTHLY: 'price_cloud_flag',
+      STRIPE_PRODUCT_ID_CREDIT_PACK: 'prod_cloud_flag',
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.TAU_CLOUD_ENABLED).toBe(expected);
+    }
+  });
+
+  it('rejects non-canonical TAU_CLOUD_ENABLED values', () => {
+    const result = environmentSchema.safeParse({
+      ...withRequiredCookieSecret(process.env),
+      TAU_CLOUD_ENABLED: '1',
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.some((issue) => issue.path.join('.') === 'TAU_CLOUD_ENABLED')).toBe(true);
+    }
+  });
+
+  it('requires the complete financial configuration whenever Tau Cloud is enabled', () => {
+    const result = environmentSchema.safeParse({
+      ...withRequiredCookieSecret(process.env),
+      NODE_ENV: 'development',
+      TAU_CLOUD_ENABLED: 'true',
+      BILLING_ENVIRONMENT: undefined,
+      STRIPE_SECRET_KEY: '',
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.map((issue) => issue.path.join('.'))).toEqual(
+        expect.arrayContaining(['BILLING_ENVIRONMENT', 'STRIPE_SECRET_KEY']),
+      );
+    }
+  });
+
+  it('rejects Stripe credentials whose prefixes contradict the declared mode', () => {
+    const result = environmentSchema.safeParse({
+      ...withRequiredCookieSecret(process.env),
+      TAU_CLOUD_ENABLED: 'true',
+      BILLING_ENVIRONMENT: 'staging',
+      BILLING_USAGE_CURSOR_SECRET: 'test-usage-cursor-secret-min-32-chars',
+      BILLING_REQUEST_DIGEST_SECRET: 'test-request-digest-secret-min-32-chars',
+      STRIPE_SECRET_KEY: 'sk_live_wrong_mode',
+      STRIPE_READ_SECRET_KEY: 'rk_test_read',
+      STRIPE_ACCOUNT_ID: 'acct_test',
+      STRIPE_LIVEMODE: 'false',
+      STRIPE_WEBHOOK_SECRET: 'whsec_test',
+      STRIPE_PRICE_ID_PRO_MONTHLY: 'price_test',
+      STRIPE_PRODUCT_ID_CREDIT_PACK: 'prod_test',
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.some((issue) => issue.path[0] === 'STRIPE_SECRET_KEY')).toBe(true);
+    }
+  });
+
+  it('accepts a test-mode restricted create key while retaining a separate restricted read key', () => {
+    const result = environmentSchema.safeParse({
+      ...withRequiredCookieSecret(process.env),
+      TAU_CLOUD_ENABLED: 'true',
+      BILLING_ENVIRONMENT: 'staging',
+      BILLING_USAGE_CURSOR_SECRET: 'test-usage-cursor-secret-min-32-chars',
+      BILLING_REQUEST_DIGEST_SECRET: 'test-request-digest-secret-min-32-chars',
+      STRIPE_SECRET_KEY: 'rk_test_create_scope',
+      STRIPE_READ_SECRET_KEY: 'rk_test_read_scope',
+      STRIPE_ACCOUNT_ID: 'acct_test',
+      STRIPE_LIVEMODE: 'false',
+      STRIPE_WEBHOOK_SECRET: 'whsec_test',
+      STRIPE_PRICE_ID_PRO_MONTHLY: 'price_test',
+      STRIPE_PRODUCT_ID_CREDIT_PACK: 'prod_test',
+    });
+
+    expect(result.success).toBe(true);
+  });
+
   it('should parse merged process env including TAU_S3_* defaults in development', () => {
     const merged = environmentSchema.safeParse(withRequiredCookieSecret(process.env));
     expect(merged.success).toBe(true);
@@ -282,6 +381,7 @@ describe('environmentSchema', () => {
       const result = environmentSchema.safeParse({
         ...withRequiredCookieSecret(process.env),
         NODE_ENV: 'production',
+        TAU_CLOUD_ENABLED: 'true',
         STRIPE_READ_SECRET_KEY: 'rk_test_read',
         STRIPE_ACCOUNT_ID: 'acct_test',
         STRIPE_LIVEMODE: 'false',

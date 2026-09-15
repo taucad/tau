@@ -208,8 +208,14 @@ const providerUpstreamFetch =
               environment.success && accountId && livemode !== undefined
                 ? config.get('STRIPE_WEBHOOK_SECRET', { infer: true })
                 : '',
-            // Complete lifecycle and operational qualification must precede a separate enablement change.
-            collection: null,
+            collection:
+              environment.success && accountId && livemode === false
+                ? {
+                    kind: 'stripe_test',
+                    monthlyPriceId: config.get('STRIPE_PRICE_ID_PRO_MONTHLY', { infer: true }),
+                    topupProductId: config.get('STRIPE_PRODUCT_ID_CREDIT_PACK', { infer: true }),
+                  }
+                : null,
           },
           policy,
           ledger,

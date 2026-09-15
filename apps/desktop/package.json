@@ -26,6 +26,7 @@
     "@taucad/converter": "workspace:*",
     "@taucad/esbuild": "workspace:*",
     "@taucad/filesystem": "workspace:*",
+    "@taucad/geospec-engine": "workspace:*",
     "@taucad/gltf": "workspace:*",
     "@taucad/host": "workspace:*",
     "@taucad/image": "workspace:*",

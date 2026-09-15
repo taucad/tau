@@ -7,8 +7,35 @@
  * Exit codes: n/a (library module).
  */
 
-import { cp, readFile, realpath } from 'node:fs/promises';
+import { cp, mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
 import { basename, dirname, resolve } from 'node:path';
+
+/**
+ * Stage GeoSpec's runtime-loaded native subpath; the engine itself is bundled.
+ * The generated factory, glue and WASM must stay adjacent, without shipping
+ * the native build tree or duplicating the bundled engine's dependencies.
+ * @param source - Installed GeoSpec engine package root.
+ * @param modulesRoot - Packaged app's node_modules directory.
+ */
+export const copyGeoSpecNative = async (source: string, modulesRoot: string): Promise<void> => {
+  const manifest = JSON.parse(await readFile(resolve(source, 'package.json'), 'utf8')) as {
+    readonly name: string;
+    readonly version: string;
+  };
+  const target = resolve(modulesRoot, manifest.name);
+  await mkdir(target, { recursive: true });
+  await cp(resolve(source, 'native/opencascade/dist'), resolve(target, 'native'), { recursive: true });
+  await cp(resolve(source, 'LICENSE'), resolve(target, 'LICENSE'));
+  await writeFile(
+    resolve(target, 'package.json'),
+    JSON.stringify({
+      name: manifest.name,
+      version: manifest.version,
+      type: 'module',
+      exports: { './native/opencascade/single': './native/init.js' },
+    }),
+  );
+};
 
 /** `<name>@<version>` for one package directory. */
 const packageIdentity = async (directory: string): Promise<string> => {

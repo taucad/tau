@@ -30,8 +30,8 @@ export const appIconThemeChannel = 'tau:app-icon-theme';
  *
  * `ask` is main telling the page to run every session's closing; `quiesced` is
  * the page saying it is done — by finishing, or because the person pressed
- * *Quit anyway*. Main waits for it, under a bound, before it quiesces the
- * services utility.
+ * *Quit anyway*. The accompanying boolean lets main distinguish a completed
+ * close from that explicit bypass before it quiesces the services utility.
  */
 export const quitChannels = {
   ask: 'tau:quit:ask',

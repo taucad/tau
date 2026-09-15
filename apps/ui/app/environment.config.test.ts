@@ -280,6 +280,7 @@ describe('getClientEnvironment', () => {
       'TAU_BILLING_ENVIRONMENT',
       'TAU_DEBUG',
       'TAU_FRONTEND_URL',
+      'TAU_GIT_REMOTE_ALLOW_PRIVATE',
       'TAU_WEBSOCKET_URL',
     ]);
   });
@@ -306,6 +307,7 @@ describe('window.ENV host contract', () => {
       TAU_WEBSOCKET_URL: 'wss://socket.host.test',
       TAU_FRONTEND_URL: 'https://host.test',
       TAU_DEBUG: true,
+      TAU_GIT_REMOTE_ALLOW_PRIVATE: false,
       TAU_BILLING_ENVIRONMENT: 'staging',
       NODE_ENV: 'production',
       POSTHOG_API_HOST: 'https://events.host.test',

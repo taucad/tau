@@ -27,7 +27,11 @@ const extractHostname = (host: string): string => {
   return host;
 };
 
-const posthogProxy = async (request: Request): Promise<Response> => {
+export const posthogProxy = async (request: Request): Promise<Response> => {
+  if (request.headers.get('Sec-GPC') === '1') {
+    return new Response(null, { status: 204 });
+  }
+
   const environment = await getEnvironment();
   const url = new URL(request.url);
   const rawHost = url.pathname.startsWith('/api/ph/static/')
@@ -43,21 +47,39 @@ const posthogProxy = async (request: Request): Promise<Response> => {
   // Remove the expected `/api/ph` prefix to forward to PostHog's root path
   newUrl.pathname = newUrl.pathname.replace(/^\/api\/ph/, '');
 
-  const headers = new Headers(request.headers);
-  headers.set('host', hostname);
-  headers.delete('accept-encoding');
+  const headers = new Headers();
+  for (const name of ['accept', 'content-type']) {
+    const value = request.headers.get(name);
+    if (value !== null) {
+      headers.set(name, value);
+    }
+  }
 
   const response = await fetch(newUrl, {
     method: request.method,
     headers,
-    body: request.body,
+    body: request.method === 'GET' || request.method === 'HEAD' ? null : request.body,
     // @ts-expect-error - duplex is required for streaming request bodies
     duplex: 'half',
   });
 
   const responseHeaders = new Headers(response.headers);
-  responseHeaders.delete('content-encoding');
-  responseHeaders.delete('content-length');
+  for (const name of [
+    'connection',
+    'content-encoding',
+    'content-length',
+    'keep-alive',
+    'proxy-authenticate',
+    'proxy-authorization',
+    'set-cookie',
+    'set-cookie2',
+    'te',
+    'trailer',
+    'transfer-encoding',
+    'upgrade',
+  ]) {
+    responseHeaders.delete(name);
+  }
 
   // Null body statuses (204, 205, 304) cannot have a response body per HTTP spec
   const nullBodyStatuses = [204, 205, 304];

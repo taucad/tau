@@ -51,6 +51,10 @@
     "syncChats": {
       "description": "Whether this project's chats sync with its remotes. Absent means on; false keeps the project files-only, and no refs/tau/chats/* is written for it.",
       "type": "boolean"
+    },
+    "syncLargeExports": {
+      "description": "Whether generated exports and evidence sync on refs/tau/evidence/exports. Absent means off.",
+      "type": "boolean"
     }
   },
   "required": ["$schema", "id", "name", "description", "tags", "assets"],

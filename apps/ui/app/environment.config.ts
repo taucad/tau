@@ -66,6 +66,21 @@ const environmentSchema = z.preprocess(
       .optional()
       .transform((value) => (value === undefined ? false : /^(1|true)$/i.test(value)))
       .describe('Enable in-app debug surfaces (debug panel, inspectors). Default false.'),
+    /**
+     * Let *Connect* accept a private or loopback `http://` git address (P50).
+     *
+     * A test posture, and only for the two rules a local git http-backend
+     * breaks: a credential in the address and a non-git path stay refused. The
+     * API reads a value of the same name for its own half of the proxy rule —
+     * each host passes what its own deployment allows, and nothing about the
+     * posture travels over the wire. Accepts `'1'`/`'true'`; anything else is
+     * `false`.
+     */
+    TAU_GIT_REMOTE_ALLOW_PRIVATE: z
+      .string()
+      .optional()
+      .transform((value) => (value === undefined ? false : /^(1|true)$/i.test(value)))
+      .describe('Accept private/loopback http git remotes in Connect. Default false.'),
     NODE_ENV: z.enum(['development', 'production', 'test']),
 
     // PostHog Analytics
@@ -109,6 +124,7 @@ const clientEnvironmentKeys = [
   'TAU_WEBSOCKET_URL',
   'TAU_FRONTEND_URL',
   'TAU_DEBUG',
+  'TAU_GIT_REMOTE_ALLOW_PRIVATE',
   'NODE_ENV',
   'POSTHOG_API_HOST',
   'POSTHOG_UI_HOST',

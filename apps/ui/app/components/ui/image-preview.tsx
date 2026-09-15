@@ -113,6 +113,7 @@ function ImagePreviewTrigger({ children }: ImagePreviewTriggerProps): React.JSX.
     <div
       role='button'
       tabIndex={0}
+      className='group/image-preview rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring'
       onMouseDown={(event) => {
         // Prevent blur events from firing on parent elements (e.g., textarea losing focus)
         event.preventDefault();
@@ -142,7 +143,15 @@ type ImagePreviewImageProps = {
 function ImagePreviewImage({ className }: ImagePreviewImageProps): React.JSX.Element {
   const { src, alt, onError } = useImagePreviewContext();
 
-  return <img src={src} alt={alt} className={cn('cursor-pointer', className)} loading='lazy' onError={onError} />;
+  return (
+    <img
+      src={src}
+      alt={alt}
+      className={cn('transition-opacity group-hover/image-preview:opacity-80', className)}
+      loading='lazy'
+      onError={onError}
+    />
+  );
 }
 
 export { ImagePreview, ImagePreviewTrigger, ImagePreviewImage };

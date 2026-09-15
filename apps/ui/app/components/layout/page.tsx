@@ -17,8 +17,7 @@ import { SidebarInset, SidebarProvider, SidebarTrigger, useSidebar } from '#comp
 import { useTypedMatches } from '#hooks/use-typed-matches.js';
 import { cn } from '@taucad/ui/utils/cn';
 import { Compose } from '#components/ui/utils/compose.js';
-import { PageFooter } from '#components/layout/page-footer.js';
-import { CookieConsent } from '#components/cookie-consent.js';
+import { RouteFooter } from '#components/layout/route-footer.js';
 import { SettingsDialog } from '#components/settings/settings-dialog.js';
 import { useResolvedAuth } from '#hooks/use-resolved-auth.js';
 import { useFeatureFlags } from '#flags/use-feature.js';
@@ -59,7 +58,7 @@ function SectionContent({ error, enablePageFooter }: SectionContentProps): React
     return (
       <div className='flex min-h-full flex-col overflow-clip'>
         <div className='flex flex-1 flex-col'>{content}</div>
-        <PageFooter />
+        <RouteFooter />
       </div>
     );
   }
@@ -168,7 +167,6 @@ const ApplicationShell = ({
           {children}
         </Allotment.Pane>
       </Allotment>
-      <CookieConsent />
       <SettingsDialog />
     </div>
   );

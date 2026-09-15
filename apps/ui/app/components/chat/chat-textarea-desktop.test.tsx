@@ -182,8 +182,12 @@ const stubModel: ResolvedModel = {
 const stubFileInput: React.RefObject<HTMLInputElement | null> = { current: null };
 const noop = (): void => undefined;
 
-function renderControls(creationLocationControl?: React.ReactNode, acpSessionData?: AcpSessionData) {
-  return render(
+function controls(
+  creationLocationControl?: React.ReactNode,
+  acpSessionData?: AcpSessionData,
+  status = 'ready',
+): React.JSX.Element {
+  return (
     <ChatTextareaLeftControls
       selectedModel={stubModel}
       enableKernelSelector
@@ -194,8 +198,13 @@ function renderControls(creationLocationControl?: React.ReactNode, acpSessionDat
       handleFileChange={noop}
       creationLocationControl={creationLocationControl}
       acpSessionData={acpSessionData}
-    />,
+      status={status}
+    />
   );
+}
+
+function renderControls(creationLocationControl?: React.ReactNode, acpSessionData?: AcpSessionData, status = 'ready') {
+  return render(controls(creationLocationControl, acpSessionData, status));
 }
 
 describe('ChatTextareaLeftControls — chat-scoped kernel label', () => {
@@ -315,8 +324,14 @@ describe('ChatTextareaLeftControls — chat-scoped kernel label', () => {
           category: 'thought_level',
           currentValue: 'medium',
           options: [
-            { value: 'medium', name: 'Medium' },
-            { value: 'high', name: 'High' },
+            {
+              group: 'effort',
+              name: 'Effort',
+              options: [
+                { value: 'medium', name: 'Medium' },
+                { value: 'high', name: 'High' },
+              ],
+            },
           ],
         },
       ],
@@ -324,12 +339,112 @@ describe('ChatTextareaLeftControls — chat-scoped kernel label', () => {
 
     expect(screen.getByRole('button', { name: 'Agent settings' })).toBeInTheDocument();
     expect(screen.queryByRole('combobox', { name: 'Model' })).toBeNull();
+    expect(screen.getByRole('group', { name: 'Effort' })).toBeInTheDocument();
     fireEvent.change(screen.getByRole('combobox', { name: 'Thinking' }), { target: { value: 'high' } });
     expect(mockSetActiveExecution).toHaveBeenCalledWith({
       kind: 'acp',
       hostId: 'origin',
       agentId: 'codex',
-      config: { thought_level: 'high' },
+      config: { ['thought_level']: 'high' },
+    });
+  });
+
+  it('shows the agent-confirmed config value instead of a stale requested value', () => {
+    mockExecutionByConsumer.current = {
+      kind: 'acp',
+      hostId: 'origin',
+      agentId: 'codex',
+      config: { ['thought_level']: 'high' },
+    };
+    renderControls(undefined, {
+      type: 'acp-session',
+      id: 'state-confirmed',
+      agentId: 'codex',
+      commands: [],
+      configOptions: [
+        {
+          type: 'select',
+          id: 'thought_level',
+          name: 'Thinking',
+          currentValue: 'medium',
+          options: [
+            { value: 'medium', name: 'Medium' },
+            { value: 'high', name: 'High' },
+          ],
+        },
+      ],
+    });
+
+    expect(screen.getByRole('combobox', { name: 'Thinking' })).toHaveValue('medium');
+  });
+
+  it('clears a rejected request even when the confirmed value is unchanged', () => {
+    mockExecutionByConsumer.current = { kind: 'acp', hostId: 'origin', agentId: 'codex' };
+    const confirmed: AcpSessionData = {
+      type: 'acp-session',
+      id: 'state-config',
+      agentId: 'codex',
+      commands: [],
+      configOptions: [
+        {
+          type: 'select',
+          id: 'thought_level',
+          name: 'Thinking',
+          currentValue: 'medium',
+          options: [
+            { value: 'medium', name: 'Medium' },
+            { value: 'high', name: 'High' },
+          ],
+        },
+      ],
+    };
+    const view = renderControls(undefined, confirmed);
+    fireEvent.change(screen.getByRole('combobox', { name: 'Thinking' }), { target: { value: 'high' } });
+    view.rerender(controls(undefined, confirmed, 'submitted'));
+    view.rerender(controls(undefined, { ...confirmed }, 'ready'));
+
+    expect(screen.getByRole('combobox', { name: 'Thinking' })).toHaveValue('medium');
+    expect(mockSetActiveExecution).toHaveBeenLastCalledWith({
+      kind: 'acp',
+      hostId: 'origin',
+      agentId: 'codex',
+      config: { ['thought_level']: 'medium' },
+    });
+  });
+
+  it('retains an option edited after the submitted snapshot', () => {
+    mockExecutionByConsumer.current = { kind: 'acp', hostId: 'origin', agentId: 'codex' };
+    const confirmed: AcpSessionData = {
+      type: 'acp-session',
+      id: 'state-config-late',
+      agentId: 'codex',
+      commands: [],
+      configOptions: [
+        {
+          type: 'select',
+          id: 'thought_level',
+          name: 'Thinking',
+          currentValue: 'medium',
+          options: [
+            { value: 'medium', name: 'Medium' },
+            { value: 'high', name: 'High' },
+            { value: 'max', name: 'Max' },
+          ],
+        },
+      ],
+    };
+    const view = renderControls(undefined, confirmed);
+    fireEvent.change(screen.getByRole('combobox', { name: 'Thinking' }), { target: { value: 'high' } });
+    view.rerender(controls(undefined, confirmed, 'submitted'));
+    fireEvent.change(screen.getByRole('combobox', { name: 'Thinking' }), { target: { value: 'max' } });
+    view.rerender(controls(undefined, { ...confirmed }, 'ready'));
+
+    expect(screen.getByRole('combobox', { name: 'Thinking' })).toHaveValue('max');
+    expect(mockSetActiveExecution).toHaveBeenLastCalledWith({
+      kind: 'acp',
+      hostId: 'origin',
+      agentId: 'codex',
+      config: { ['thought_level']: 'max' },
     });
   });
 

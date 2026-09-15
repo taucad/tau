@@ -62,7 +62,7 @@ export const ChatTextareaImageStrip = memo(function ({
                 type='button'
                 aria-label={`Open uploaded image ${index + 1}`}
                 className={cn(
-                  'cursor-pointer overflow-hidden rounded-md border bg-background hover:bg-accent',
+                  'overflow-hidden rounded-md border bg-background hover:bg-accent',
                   'outline-none focus-visible:ring-2 focus-visible:ring-ring',
                   thumbnailSize[size],
                 )}

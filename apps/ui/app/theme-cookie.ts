@@ -6,11 +6,8 @@ import type { ThemeWithSystem } from '#hooks/use-theme.js';
 /**
  * Theme preference cookie, reading half.
  *
- * Isomorphic on purpose: `root.tsx` is the shared route module for both the
- * web (SSR) and desktop (SPA) builds, so anything it imports must stay out of
- * `*.server` files — React Router refuses to resolve a server-only module from
- * a client graph, and the desktop root re-exports `root.tsx` rather than being
- * a route module React Router could strip the loader from.
+ * Isomorphic because the web root loader imports it while the client also
+ * shares its schema. The desktop root has no loader and does not import this.
  *
  * `createCookie` is framework core with no server-only dependency; the
  * `Set-Cookie` half of the flow stays in `theme-cookie.server.ts`.

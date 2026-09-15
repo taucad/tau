@@ -219,7 +219,7 @@ function Folder({
           className,
           {
             'before:bg-muted': isSelect && isSelectable,
-            'cursor-pointer': isSelectable,
+            'cursor-action': isSelectable,
             'cursor-not-allowed opacity-50': !isSelectable,
           },
         )}
@@ -291,7 +291,7 @@ function File({
         {
           'before:bg-muted': isSelected && isSelectable,
         },
-        isSelectable ? 'cursor-pointer' : 'cursor-not-allowed opacity-50',
+        isSelectable ? 'cursor-action' : 'cursor-not-allowed opacity-50',
         direction === 'rtl' ? 'rtl' : 'ltr',
         className,
       )}

@@ -50,7 +50,6 @@ export function FovControl({ className, isCompact = false }: FovControlProps): R
               className: cn(
                 'group relative gap-0 overflow-hidden p-0 transition-[box-shadow] duration-300',
                 'flex items-center',
-                'hover:cursor-pointer',
                 'has-[[data-slot=slider-thumb]:focus-visible]:ring-2',
                 'has-[[data-slot=slider-thumb]:focus-visible]:ring-ring',
                 className,

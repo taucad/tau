@@ -34,7 +34,10 @@ const nextProjectId = (): string => `proj_${String(projectSequence++).padStart(2
  * a provider speaks rooted ones, which is the one translation the real client
  * does for us — so the fixture does it here and nothing else is faked.
  */
-const createStoreWithFiles = (): { store: ChatStorage; write: (path: string, content: string) => Promise<void> } => {
+const createStoreWithFiles = (): {
+  store: ReturnType<typeof createChatFileStore>;
+  write: (path: string, content: string) => Promise<void>;
+} => {
   let filesystem: FileSystemProvider | undefined;
   const provider = async (): Promise<FileSystemProvider> => {
     filesystem ??= await createMemoryProvider();
@@ -881,6 +884,24 @@ describe('chat file store — the transcript the log implies', () => {
     );
 
     expect(texts(await store.getChat(chatId))).toEqual(['From here', 'From there']);
+  });
+
+  it("refreshes a cached transcript when another device's segment changes", async () => {
+    const { store, write } = createStoreWithFiles();
+    await write(`/projects/${projectId}/.tau/chats/${chatId}/chat.json`, record);
+    await write(
+      `/projects/${projectId}/.tau/chats/${chatId}/events/device-b.jsonl`,
+      logLine({ sequence: 0, role: 'user', text: 'Before sync', epoch: 'epoch-two' }),
+    );
+    expect(texts(await store.getChat(chatId))).toEqual(['Before sync']);
+
+    await write(
+      `/projects/${projectId}/.tau/chats/${chatId}/events/device-b.jsonl`,
+      `${logLine({ sequence: 0, role: 'user', text: 'Before sync', epoch: 'epoch-two' })}${logLine({ sequence: 1, role: 'assistant', text: 'After sync', epoch: 'epoch-two' })}`,
+    );
+    store.invalidateLog(chatId);
+
+    expect(texts(await store.getChat(chatId))).toEqual(['Before sync', 'After sync']);
   });
 
   /* A record that has not landed yet is a real runtime state, not a migration

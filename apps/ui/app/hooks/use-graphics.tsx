@@ -57,12 +57,12 @@ const useCameraRegistryVersion = (): number =>
 
 /** Returns a registry query whose identity changes with camera registration. */
 export const useGraphicsCameraRigQuery = (): ((graphicsRef: GraphicsActorRef | undefined) => boolean) => {
-  // The compiler erased a version-only consumer dependency in B9. Keep this
-  // imperative adapter uncompiled so each registry version returns a new query.
-  'use no memo';
-
   const version = useCameraRegistryVersion();
-  return useMemo(() => (graphicsRef: GraphicsActorRef | undefined) => hasGraphicsCameraRig(graphicsRef), [version]);
+  return useMemo(
+    () => (graphicsRef: GraphicsActorRef | undefined) =>
+      version === getGraphicsCameraRegistryVersion() && hasGraphicsCameraRig(graphicsRef),
+    [version],
+  );
 };
 
 const initialDirection = [Math.sqrt(3 / 8), -Math.sqrt(3 / 8), 0.5] as const;

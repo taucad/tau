@@ -1,3 +1,4 @@
+import { SettingsItem, SettingsSectionCard } from '#components/settings/settings-item.js';
 import { Link } from 'react-router';
 import { AlertCircle, Check, ChevronDown, Circle, Contrast, Laptop, Moon, ShieldCheck, Sun } from 'lucide-react';
 import { Loader } from '#components/ui/loader.js';
@@ -8,7 +9,7 @@ import type { ThemeWithSystem } from '#hooks/use-theme.js';
 import { useColor } from '#hooks/use-color.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
-import { Card, CardContent, CardHeader, CardTitle } from '@taucad/ui/components/card';
+import { CardContent, CardHeader, CardTitle } from '@taucad/ui/components/card';
 import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
 import { ColorPicker } from '#components/ui/color-picker.js';
 import { Button } from '@taucad/ui/components/button';
@@ -69,6 +70,7 @@ export function GeneralSettings(): React.JSX.Element {
   const { themeWithSystem, setTheme, currentOption } = useTheme();
   const { hue, setHue, resetHue } = useColor();
   const [areCodeInlayHintsEnabled, setCodeInlayHintsEnabled] = useCookie(cookieName.codeInlayHints, false);
+  const [usePointerCursors, setUsePointerCursors] = useCookie(cookieName.pointerCursors, false);
 
   const currentModeId = preferences?.allowsAiTraining ? 'share' : 'private';
   const currentMode = privacyModes.find((mode) => mode.id === currentModeId) ?? privacyModes[0]!;
@@ -85,173 +87,201 @@ export function GeneralSettings(): React.JSX.Element {
   return (
     <div className='flex flex-col gap-6 pb-6'>
       {/* Appearance Section */}
-      <Card>
+      <SettingsSectionCard>
         <CardHeader>
           <CardTitle>Appearance</CardTitle>
         </CardHeader>
         <CardContent className='flex flex-col gap-4'>
           {/* Theme Selector */}
-          <div className='flex items-center justify-between gap-4'>
-            <div className='flex flex-col gap-1'>
-              <span className='font-medium'>Theme</span>
-              <span className='text-sm text-muted-foreground'>Select your preferred color scheme</span>
-            </div>
-            <ComboBoxResponsive
-              title='Theme'
-              description='Select your preferred color scheme'
-              groupedItems={[{ name: 'Theme', items: themeOptions }]}
-              getValue={(item) => String(item.id)}
-              value={currentOption}
-              isSearchEnabled={false}
-              renderLabel={(item, selectedItem) => (
-                <span className='flex w-full items-center justify-between gap-4'>
-                  <div className='flex items-center gap-2'>
-                    {getThemeIcon(item.id)}
-                    <div className='flex flex-col gap-0.5'>
-                      <span className='font-medium'>{item.name}</span>
-                      <span className='text-xs text-muted-foreground'>{item.description}</span>
-                    </div>
-                  </div>
-                  {selectedItem?.id === item.id ? <Check className='size-4 shrink-0' /> : null}
-                </span>
-              )}
-              onSelect={handleThemeChange}
-            >
-              <Button variant='outline' className='w-[160px] justify-between'>
-                <span className='flex items-center gap-2'>
-                  {getThemeIcon(themeWithSystem)}
-                  <span className='truncate'>{currentOption.name}</span>
-                </span>
-                <ChevronDown className='size-4 shrink-0 opacity-50' />
-              </Button>
-            </ComboBoxResponsive>
-          </div>
-
-          {/* Code Inlay Hints */}
-          <div className='flex items-center justify-between gap-4'>
-            <div className='flex flex-col gap-1'>
-              <span className='font-medium'>Code Inlay Hints</span>
-              <span className='text-sm text-muted-foreground'>Show inline parameter names in code editors</span>
-            </div>
-            <Switch checked={areCodeInlayHintsEnabled} onCheckedChange={setCodeInlayHintsEnabled} />
-          </div>
-
-          {/* Color Picker */}
-          <div className='flex items-center justify-between gap-4'>
-            <div className='flex flex-col gap-1'>
-              <span className='font-medium'>Accent Color</span>
-              <span className='text-sm text-muted-foreground'>Customize the primary accent color</span>
-            </div>
-            <ColorPicker
-              hasTooltip={false}
-              value={{ h: hue, s: 100, l: 75 }}
-              onReset={resetHue}
-              onChange={(value) => {
-                setHue(value.h);
-              }}
-            >
-              <Button variant='outline' className='w-[160px] justify-between'>
-                <span className='flex items-center gap-2'>
-                  <span className='size-4 shrink-0 rounded-full bg-primary' />
-                  <span className='truncate'>Hue: {hue}°</span>
-                </span>
-                <ChevronDown className='size-4 shrink-0 opacity-50' />
-              </Button>
-            </ColorPicker>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Privacy Section */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Privacy</CardTitle>
-        </CardHeader>
-        <CardContent className='flex flex-col gap-4'>
-          {isLoading ? (
-            <div className='flex items-center justify-center py-4'>
-              <Loader className='size-5 text-muted-foreground' />
-            </div>
-          ) : error ? (
-            <div className='flex items-center gap-2 text-sm text-muted-foreground'>
-              <AlertCircle className='size-4 shrink-0' />
-              <span>Unable to load privacy preferences. Check your connection and refresh.</span>
-            </div>
-          ) : hasNoTrainGuarantee ? (
-            <div className='flex flex-col gap-1'>
-              <div className='flex items-center gap-2 font-medium'>
-                <ShieldCheck className='size-4 text-primary' />
-                No-train guarantee
-              </div>
-              <p className='text-sm text-muted-foreground'>
-                Your plan never trains on your data — prompts and designs are excluded from AI training as part of your
-                subscription.{' '}
-                <Link to='/legal/privacy#9.2.1' className='underline hover:text-foreground'>
-                  Learn more
-                </Link>
-              </p>
-            </div>
-          ) : (
-            <div className='flex items-center justify-between gap-4'>
+          <SettingsItem settingId='theme'>
+            <div className='flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center'>
               <div className='flex flex-col gap-1'>
-                <div className='flex items-center gap-2 font-medium'>
-                  {currentModeId === 'share' ? (
-                    <>
-                      <Check className='size-4 text-primary' />
-                      Data Sharing Enabled
-                    </>
-                  ) : (
-                    <>
-                      <ShieldCheck className='size-4 text-primary' />
-                      Privacy Mode Enabled
-                    </>
-                  )}
-                </div>
-                <p className='text-sm text-muted-foreground'>
-                  {currentModeId === 'share' ? (
-                    <>
-                      Your prompts and generated designs will be stored and used to improve our AI features.{' '}
-                      <Link to='/legal/privacy#9.2.1' className='underline hover:text-foreground'>
-                        Learn more
-                      </Link>
-                    </>
-                  ) : (
-                    <>
-                      No training. Your data is not used to improve AI features.{' '}
-                      <Link to='/legal/privacy#9.2.1' className='underline hover:text-foreground'>
-                        Learn more
-                      </Link>
-                    </>
-                  )}
-                </p>
+                <span className='font-medium'>Theme</span>
+                <span className='text-sm text-muted-foreground'>Select your preferred color scheme</span>
               </div>
               <ComboBoxResponsive
-                title='Privacy Mode'
-                description='Select how your data is used'
-                groupedItems={[{ name: 'Privacy Settings', items: privacyModes }]}
-                getValue={(item) => item.id}
-                value={currentMode}
+                title='Theme'
+                description='Select your preferred color scheme'
+                groupedItems={[{ name: 'Theme', items: themeOptions }]}
+                getValue={(item) => String(item.id)}
+                value={currentOption}
                 isSearchEnabled={false}
                 renderLabel={(item, selectedItem) => (
                   <span className='flex w-full items-center justify-between gap-4'>
-                    <div className='flex flex-col gap-0.5'>
-                      <span className='font-medium'>{item.name}</span>
-                      <span className='text-xs text-muted-foreground'>{item.description}</span>
+                    <div className='flex items-center gap-2'>
+                      {getThemeIcon(item.id)}
+                      <div className='flex flex-col gap-0.5'>
+                        <span className='font-medium'>{item.name}</span>
+                        <span className='text-xs text-muted-foreground'>{item.description}</span>
+                      </div>
                     </div>
                     {selectedItem?.id === item.id ? <Check className='size-4 shrink-0' /> : null}
                   </span>
                 )}
-                onSelect={handlePrivacyModeChange}
+                onSelect={handleThemeChange}
               >
-                <Button variant='outline' disabled={isUpdating} className='w-[160px] justify-between'>
-                  <span className='truncate'>{currentMode.name}</span>
+                <Button variant='outline' className='w-[160px] justify-between'>
+                  <span className='flex items-center gap-2'>
+                    {getThemeIcon(themeWithSystem)}
+                    <span className='truncate'>{currentOption.name}</span>
+                  </span>
                   <ChevronDown className='size-4 shrink-0 opacity-50' />
                 </Button>
               </ComboBoxResponsive>
             </div>
-          )}
+          </SettingsItem>
+
+          {/* Code Inlay Hints */}
+          <SettingsItem settingId='code-inlay-hints'>
+            <div className='flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center'>
+              <div className='flex flex-col gap-1'>
+                <span className='font-medium'>Code Inlay Hints</span>
+                <span className='text-sm text-muted-foreground'>Show inline parameter names in code editors</span>
+              </div>
+              <Switch
+                aria-label='Code Inlay Hints'
+                checked={areCodeInlayHintsEnabled}
+                onCheckedChange={setCodeInlayHintsEnabled}
+              />
+            </div>
+          </SettingsItem>
+
+          <SettingsItem settingId='pointer-cursors'>
+            <div className='flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center'>
+              <div className='flex flex-col gap-1'>
+                <span className='font-medium'>Use pointer cursors</span>
+                <span className='text-sm text-muted-foreground'>
+                  Change the cursor to a pointer when hovering over interactive elements
+                </span>
+              </div>
+              <Switch
+                aria-label='Use pointer cursors'
+                checked={usePointerCursors}
+                onCheckedChange={setUsePointerCursors}
+              />
+            </div>
+          </SettingsItem>
+
+          {/* Color Picker */}
+          <SettingsItem settingId='accent-color'>
+            <div className='flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center'>
+              <div className='flex flex-col gap-1'>
+                <span className='font-medium'>Accent Color</span>
+                <span className='text-sm text-muted-foreground'>Customize the primary accent color</span>
+              </div>
+              <ColorPicker
+                hasTooltip={false}
+                value={{ h: hue, s: 100, l: 75 }}
+                onReset={resetHue}
+                onChange={(value) => {
+                  setHue(value.h);
+                }}
+              >
+                <Button variant='outline' className='w-[160px] justify-between'>
+                  <span className='flex items-center gap-2'>
+                    <span className='size-4 shrink-0 rounded-full bg-primary' />
+                    <span className='truncate'>Hue: {hue}°</span>
+                  </span>
+                  <ChevronDown className='size-4 shrink-0 opacity-50' />
+                </Button>
+              </ColorPicker>
+            </div>
+          </SettingsItem>
         </CardContent>
-      </Card>
+      </SettingsSectionCard>
+
+      {/* Privacy Section */}
+      <SettingsItem settingId='privacy'>
+        <SettingsSectionCard>
+          <CardHeader>
+            <CardTitle>Privacy</CardTitle>
+          </CardHeader>
+          <CardContent className='flex flex-col gap-4'>
+            {isLoading ? (
+              <div className='flex items-center justify-center py-4'>
+                <Loader className='size-5 text-muted-foreground' />
+              </div>
+            ) : error ? (
+              <div className='flex items-center gap-2 text-sm text-muted-foreground'>
+                <AlertCircle className='size-4 shrink-0' />
+                <span>Unable to load privacy preferences. Check your connection and refresh.</span>
+              </div>
+            ) : hasNoTrainGuarantee ? (
+              <div className='flex flex-col gap-1'>
+                <div className='flex items-center gap-2 font-medium'>
+                  <ShieldCheck className='size-4 text-primary' />
+                  No-train guarantee
+                </div>
+                <p className='text-sm text-muted-foreground'>
+                  Your plan never trains on your data — prompts and designs are excluded from AI training as part of
+                  your subscription.{' '}
+                  <Link to='/legal/privacy#9.2.1' className='underline hover:text-foreground'>
+                    Learn more
+                  </Link>
+                </p>
+              </div>
+            ) : (
+              <div className='flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center'>
+                <div className='flex flex-col gap-1'>
+                  <div className='flex items-center gap-2 font-medium'>
+                    {currentModeId === 'share' ? (
+                      <>
+                        <Check className='size-4 text-primary' />
+                        Data Sharing Enabled
+                      </>
+                    ) : (
+                      <>
+                        <ShieldCheck className='size-4 text-primary' />
+                        Privacy Mode Enabled
+                      </>
+                    )}
+                  </div>
+                  <p className='text-sm text-muted-foreground'>
+                    {currentModeId === 'share' ? (
+                      <>
+                        Your prompts and generated designs will be stored and used to improve our AI features.{' '}
+                        <Link to='/legal/privacy#9.2.1' className='underline hover:text-foreground'>
+                          Learn more
+                        </Link>
+                      </>
+                    ) : (
+                      <>
+                        No training. Your data is not used to improve AI features.{' '}
+                        <Link to='/legal/privacy#9.2.1' className='underline hover:text-foreground'>
+                          Learn more
+                        </Link>
+                      </>
+                    )}
+                  </p>
+                </div>
+                <ComboBoxResponsive
+                  title='Privacy Mode'
+                  description='Select how your data is used'
+                  groupedItems={[{ name: 'Privacy Settings', items: privacyModes }]}
+                  getValue={(item) => item.id}
+                  value={currentMode}
+                  isSearchEnabled={false}
+                  renderLabel={(item, selectedItem) => (
+                    <span className='flex w-full items-center justify-between gap-4'>
+                      <div className='flex flex-col gap-0.5'>
+                        <span className='font-medium'>{item.name}</span>
+                        <span className='text-xs text-muted-foreground'>{item.description}</span>
+                      </div>
+                      {selectedItem?.id === item.id ? <Check className='size-4 shrink-0' /> : null}
+                    </span>
+                  )}
+                  onSelect={handlePrivacyModeChange}
+                >
+                  <Button variant='outline' disabled={isUpdating} className='w-[160px] justify-between'>
+                    <span className='truncate'>{currentMode.name}</span>
+                    <ChevronDown className='size-4 shrink-0 opacity-50' />
+                  </Button>
+                </ComboBoxResponsive>
+              </div>
+            )}
+          </CardContent>
+        </SettingsSectionCard>
+      </SettingsItem>
     </div>
   );
 }

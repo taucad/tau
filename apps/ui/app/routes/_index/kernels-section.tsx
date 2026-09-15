@@ -22,7 +22,7 @@ export function KernelsSection(): React.JSX.Element {
             {availableKernelConfigurations().map((kernel) => (
               <HoverCard key={kernel.id} openDelay={200} closeDelay={100}>
                 <HoverCardTrigger asChild>
-                  <div className='group cursor-pointer rounded-xl border bg-background p-5 transition-all hover:border-primary/50 hover:shadow-md'>
+                  <div className='group rounded-xl border bg-background p-5 transition-all hover:border-primary/50 hover:shadow-md'>
                     <div className='mb-3 flex items-center gap-3'>
                       <div className='flex size-10 items-center justify-center rounded-lg bg-primary/10'>
                         <SvgIcon id={kernel.id} className='size-5' />

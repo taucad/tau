@@ -208,7 +208,7 @@ function ExportSelectorBody({
   const kernelClient = useSelector(selectedActor, (state) => state?.context.kernelClient);
 
   const availableFormats = useMemo(
-    () => deriveAvailableFormats(kernelClient, activeKernelId),
+    () => (capabilities === undefined ? [] : deriveAvailableFormats(kernelClient, activeKernelId)),
     [kernelClient, activeKernelId, capabilities],
   );
 

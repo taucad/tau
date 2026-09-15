@@ -1,10 +1,10 @@
 import { useMemo, useState } from 'react';
 import type { Model } from '#hooks/use-models.js';
 import { Button } from '@taucad/ui/components/button';
-import { Input } from '@taucad/ui/components/input';
 import { Switch } from '@taucad/ui/components/switch';
 import { SvgIcon } from '#components/icons/svg-icon.js';
 import { useModels } from '#hooks/use-models.js';
+import { SearchInput } from '#components/search-input.js';
 
 export function ModelSettings(): React.JSX.Element {
   const { data = [], recommendedModels, isAvailable, setAvailable } = useModels();
@@ -25,46 +25,49 @@ export function ModelSettings(): React.JSX.Element {
 
   return (
     <div className='flex flex-col gap-4 pb-6'>
-      <Input
+      <SearchInput
+        aria-label='Search models'
         value={search}
+        variant='transparent'
+        onClear={() => {
+          setSearch('');
+        }}
         onChange={(event) => {
           setSearch(event.target.value);
         }}
         placeholder='Search models...'
       />
 
-      <p className='text-sm text-muted-foreground'>
-        Choose which models appear in the chat model picker. Disabled models stay configured and can be re-enabled
-        anytime.
-      </p>
-
-      <div className='flex flex-col gap-0.5 rounded-md border p-1'>
-        {visibleModels.map((model) => {
-          const checked = isAvailable(model);
-          return (
-            <button
-              key={model.id}
-              type='button'
-              onClick={() => {
-                setAvailable(model, !checked);
-              }}
-              className='flex w-full items-center justify-between gap-3 rounded-sm px-2.5 py-2 text-left transition-colors hover:bg-menu-highlight focus-visible:bg-menu-highlight focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none'
-            >
-              <div className='flex min-w-0 items-center gap-2.5'>
-                <SvgIcon id={model.details.family} className='size-4 shrink-0' />
-                <div className='flex min-w-0 flex-col'>
-                  <span className='truncate text-sm'>{model.name}</span>
-                  {model.description ? (
-                    <span className='text-xs leading-snug font-medium text-muted-foreground/80'>
-                      {model.description}
-                    </span>
-                  ) : null}
+      <div className='flex flex-col gap-2'>
+        <h2>Available models</h2>
+        <div className='flex flex-col gap-0.5 rounded-xl border p-1'>
+          {visibleModels.map((model) => {
+            const checked = isAvailable(model);
+            return (
+              <button
+                key={model.id}
+                type='button'
+                onClick={() => {
+                  setAvailable(model, !checked);
+                }}
+                className='flex w-full items-center justify-between gap-3 rounded-sm px-2.5 py-2 text-left transition-colors hover:bg-menu-highlight focus-visible:bg-menu-highlight focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none'
+              >
+                <div className='flex min-w-0 items-center gap-2.5'>
+                  <SvgIcon id={model.details.family} className='size-4 shrink-0' />
+                  <div className='flex min-w-0 flex-col'>
+                    <span className='truncate text-sm'>{model.name}</span>
+                    {model.description ? (
+                      <span className='text-xs leading-snug font-medium text-muted-foreground/80'>
+                        {model.description}
+                      </span>
+                    ) : null}
+                  </div>
                 </div>
-              </div>
-              <Switch className='pointer-events-none shrink-0' tabIndex={-1} checked={checked} />
-            </button>
-          );
-        })}
+                <Switch className='pointer-events-none shrink-0' tabIndex={-1} checked={checked} />
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {visibleModels.length === 0 ? (

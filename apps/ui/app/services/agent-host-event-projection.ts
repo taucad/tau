@@ -4,7 +4,7 @@ import type { AgentLiveEvent, AgentLogEvent, ProviderMessageMetadata } from '@ta
 import type { AcpSessionData, BillingInvocationStatus, MyUIMessage } from '@taucad/chat';
 import { acpSessionDataSchema, billingInvocationStatusSchema } from '@taucad/chat';
 import { errorCategoryTitles, httpStatusToCategory } from '@taucad/chat/utils';
-import type { TurnFinalizedEvent } from '@taucad/revisions/revision-effects';
+import type { TurnConflictedEvent, TurnFailedEvent, TurnFinalizedEvent } from '@taucad/revisions/revision-effects';
 import { isRecord } from '@taucad/utils/schema';
 
 type ProviderMessage = Extract<AgentLogEvent, { readonly type: 'message.appended' }>['message'];
@@ -302,9 +302,11 @@ type ToolChunkMetadata = NonNullable<Extract<UIMessageChunk, { type: 'tool-input
 /**
  * The emitter's own tool-call facts, in the shape the AI SDK carries them.
  *
- * ACP is the boundary vocabulary (V3): an unknown external call becomes a
- * `dynamic-tool` part. A host-normalized Tau MCP call deliberately stays
- * static so it reuses the existing CAD renderer. `call` rides along as the part's `toolMetadata`
+ * ACP is the boundary vocabulary (V3): every external call becomes a
+ * `dynamic-tool` part, including a host-normalized Tau MCP call. This keeps one
+ * SDK part when a native identity arrives after the sparse initial call; the
+ * renderer applies the qualified native porcelain without changing identity.
+ * `call` rides along as the part's `toolMetadata`
  * under one `tau` namespace — Tau's own dispatch records the same field, so a
  * renderer reads one shape for both emitters.
  *
@@ -316,7 +318,6 @@ const toolChunkFacts = (
 ): { dynamic?: true; title?: string; toolMetadata?: ToolChunkMetadata } => {
   const tauInternal = isRecord(message.metadata?.tauInternal) ? message.metadata.tauInternal : undefined;
   const external = tauInternal?.['origin'] === 'external';
-  const dynamic = external && tauInternal['presentation'] !== 'tau-mcp';
   const { call } = message;
   const agentId = tauInternal?.['agentId'];
   /* The SDK carries a part's `toolMetadata` from the *input* chunk and reuses it
@@ -334,7 +335,7 @@ const toolChunkFacts = (
   };
   const tau = durable as ToolChunkMetadata;
   return {
-    ...(dynamic ? { dynamic: true } : {}),
+    ...(external ? { dynamic: true } : {}),
     ...(call?.title === undefined ? {} : { title: call.title }),
     ...(Object.keys(tau).length === 0 ? {} : { toolMetadata: { tau } }),
   };
@@ -429,8 +430,11 @@ export const projectAgentHostUserMessage = (message: UserProviderMessage, record
   };
 };
 
+/** One host-attested turn outcome. @public */
+export type ProjectedTurnSettlement = TurnConflictedEvent | TurnFailedEvent | TurnFinalizedEvent;
+
 /**
- * Read back the turn settlement a *host* attested (S9, A4).
+ * Read back the turn settlement a *host* attested.
  *
  * One schema on every host: the browser's revision root emits exactly this
  * shape from the same `turn.machine`, and a Node host writes it into the chat's
@@ -442,9 +446,10 @@ export const projectAgentHostUserMessage = (message: UserProviderMessage, record
  * @returns The settlement, or `undefined` for every other record.
  * @public
  */
-export const projectTurnFinalized = (event: AgentLogEvent): TurnFinalizedEvent | undefined =>
-  event.type === 'turn.finalized'
-    ? {
+export const projectTurnSettlement = (event: AgentLogEvent): ProjectedTurnSettlement | undefined => {
+  switch (event.type) {
+    case 'turn.finalized': {
+      return {
         type: 'turn.finalized',
         turnId: event.turnId,
         runId: event.runId,
@@ -457,8 +462,38 @@ export const projectTurnFinalized = (event: AgentLogEvent): TurnFinalizedEvent |
         ...(event.treeId === undefined ? {} : { treeId: event.treeId }),
         trigger: 'turn',
         runIds: event.runIds,
-      }
-    : undefined;
+      };
+    }
+    case 'turn.conflicted': {
+      return {
+        type: 'turn.conflicted',
+        turnId: event.turnId,
+        runId: event.runId,
+        chatId: event.chatId,
+        checkoutId: event.checkoutId,
+      };
+    }
+    case 'turn.failed': {
+      return {
+        type: 'turn.failed',
+        turnId: event.turnId,
+        runId: event.runId,
+        chatId: event.chatId,
+        checkoutId: event.checkoutId,
+        reason: event.reason,
+      };
+    }
+    default: {
+      return undefined;
+    }
+  }
+};
+
+/** Read the finalized member used by revision cards. @public */
+export const projectTurnFinalized = (event: AgentLogEvent): TurnFinalizedEvent | undefined => {
+  const settlement = projectTurnSettlement(event);
+  return settlement?.type === 'turn.finalized' ? settlement : undefined;
+};
 
 /** Extract the durable user turn carried by either canonical commit event. */
 export const projectAgentHostUserTurn = (event: AgentLogEvent): MyUIMessage | undefined => {
@@ -500,7 +535,12 @@ export const projectAgentHostLiveEvent = (
             toolCallId: event.toolCallId,
             errorText: errorText(event.output, `${event.toolName} failed`),
           }
-        : { type: 'tool-output-available', toolCallId: event.toolCallId, output: event.output },
+        : {
+            type: 'tool-output-available',
+            toolCallId: event.toolCallId,
+            output: event.output,
+            preliminary: true,
+          },
     ];
   }
   const key = blockKey(event.runId, event.messageId, event.contentIndex);

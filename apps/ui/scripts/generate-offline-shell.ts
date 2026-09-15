@@ -88,6 +88,7 @@ export const collectOfflineShellAssets = (
   documentPaths: readonly string[],
   build: ClientBuildView,
 ): readonly string[] => {
+  const localOrigin = 'https://tau.invalid';
   const fileToKey = new Map(Object.entries(build.manifest).map(([key, chunk]) => [`/${chunk.file}`, key]));
   const pending: string[] = [];
   for (const documentPath of documentPaths) {
@@ -96,8 +97,16 @@ export const collectOfflineShellAssets = (
 
   const collected = new Set<string>();
   while (pending.length > 0) {
-    const reference = pending.pop();
-    if (reference === undefined || collected.has(reference)) {
+    const queuedReference = pending.pop();
+    if (queuedReference === undefined) {
+      continue;
+    }
+    const parsedReference = new URL(queuedReference, localOrigin);
+    if (parsedReference.origin !== localOrigin) {
+      continue;
+    }
+    const reference = parsedReference.pathname;
+    if (isExcluded(reference) || collected.has(reference)) {
       continue;
     }
     collected.add(reference);
@@ -122,7 +131,7 @@ export const collectOfflineShellAssets = (
  */
 const expandChunk = (reference: string, manifestKey: string | undefined, build: ClientBuildView): readonly string[] => {
   if (manifestKey === undefined) {
-    if (reference.startsWith('/assets/')) {
+    if (reference.startsWith('/assets/') && reference.endsWith('.js')) {
       throw new Error(`Offline shell allowlist references a hashed asset absent from the build manifest: ${reference}`);
     }
     return [];

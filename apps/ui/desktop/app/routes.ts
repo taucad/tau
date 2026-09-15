@@ -17,7 +17,7 @@ import type { RouteConfigEntry } from '@react-router/dev/routes';
  * excluded file drags that file's server code into the client graph, which is
  * why `webManifestLinks` moved to `app/lib/web-manifest.ts`.
  */
-export default flatRoutes({
+const routes: RouteConfigEntry[] = await flatRoutes({
   rootDirectory: '../../app/routes',
   ignoredRouteFiles: [
     // Co-located route tests would otherwise become live routes (and generate
@@ -39,6 +39,8 @@ export default flatRoutes({
     '../../app/routes/health.ready.ts',
     '../../app/routes/health.startup.ts',
     '../../app/routes/i.$/**',
+    '../../app/routes/legal/**',
+    '../../app/routes/legal.*/**',
     '../../app/routes/manifest[[].webmanifest[]].ts',
     '../../app/routes/robots[[].[]]txt/**',
     '../../app/routes/sitemap[[].[]]xml/**',
@@ -52,5 +54,10 @@ export default flatRoutes({
     // Browser-only e2e fixtures, all with server loaders.
     '../../app/routes/[[]__e2e[]].*/**',
   ],
-  // oxlint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- explicit module boundary required here.
-}) as Promise<RouteConfigEntry[]>;
+});
+
+export default routes.map((entry) =>
+  entry.id === '../../app/routes/_index'
+    ? { ...entry, file: '../../app/routes/_index/home-surface.desktop.tsx' }
+    : entry,
+);

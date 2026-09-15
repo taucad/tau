@@ -107,7 +107,7 @@ export function RevisionConflictChat(): undefined {
         }
       })();
     });
-  }, [bindConflict, client, createChat, projectId, setFocusedChatId]);
+  }, [bindConflict, client, createChat, setFocusedChatId]);
 
   return undefined;
 }

@@ -154,6 +154,99 @@ describe('useRevisions', () => {
     });
   });
 
+  it("keeps a settled turn's branch metadata when another branch is selected", async () => {
+    settlements.push({
+      type: 'turn.finalized',
+      turnId: 'u3',
+      runId: 'run-3',
+      chatId: 'chat-1',
+      projectId: 'p',
+      checkoutId: 'candidate-1',
+      revisionId: 'rev-3',
+      branch: 'isolated-run',
+      changedPaths: ['main.scad'],
+      trigger: 'turn',
+      runIds: ['run-3'],
+    });
+    const candidate = row({
+      revisionId: 'rev-3',
+      revisionNumber: 3,
+      turnId: 'u3',
+      createdAt: 1_788_307_200_000,
+      summary: 'Agent turn u3',
+    });
+    revisionStatusHarness.rowsByBranch.set('isolated-run', [candidate]);
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      branch: 'main',
+      branches: [
+        { name: 'main', head: 'rev-2', checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: [] },
+        {
+          name: 'isolated-run',
+          head: 'rev-3',
+          checkoutId: 'candidate-1',
+          checkoutRoot: '/checkouts/candidate-1',
+          leaseChatIds: ['chat-1'],
+        },
+      ],
+    };
+
+    const { result } = renderHook(() => useRevisions(), { wrapper });
+
+    await waitFor(() => {
+      expect(result.current.byTurnId.get('u3')).toMatchObject({
+        revisionId: 'rev-3',
+        n: 3,
+        createdAt: 1_788_307_200_000,
+        summary: 'Agent turn u3',
+      });
+    });
+  });
+
+  it('refreshes a settled branch whose cached facet head predates the settlement', async () => {
+    settlements.push({
+      type: 'turn.finalized',
+      turnId: 'u3',
+      runId: 'run-3',
+      chatId: 'chat-1',
+      projectId: 'p',
+      checkoutId: 'candidate-1',
+      revisionId: 'rev-3',
+      branch: 'isolated-run',
+      changedPaths: ['main.scad'],
+      trigger: 'turn',
+      runIds: ['run-3'],
+    });
+    revisionStatusHarness.rowsByBranch.set('isolated-run', [
+      row({ revisionId: 'rev-3', revisionNumber: 3, turnId: 'u3' }),
+    ]);
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      branch: 'main',
+      branches: [
+        { name: 'main', head: 'rev-2', checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: [] },
+        {
+          name: 'isolated-run',
+          head: 'rev-1',
+          checkoutId: 'candidate-1',
+          checkoutRoot: '/checkouts/candidate-1',
+          leaseChatIds: ['chat-1'],
+        },
+      ],
+    };
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    queryClient.setQueryData(['revision-log', 'p', 'isolated-run', 'rev-1'], []);
+    const cachedWrapper = ({ children }: { readonly children: ReactNode }): React.JSX.Element => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    );
+
+    const { result } = renderHook(() => useRevisions(), { wrapper: cachedWrapper });
+
+    await waitFor(() => {
+      expect(result.current.byTurnId.get('u3')?.n).toBe(3);
+    });
+  });
+
   it('reads nothing at all until the root has answered with a branch', () => {
     const { result } = renderHook(() => useRevisions(), { wrapper });
     revisionStatusHarness.status = { ...revisionStatusHarness.status, branch: undefined };

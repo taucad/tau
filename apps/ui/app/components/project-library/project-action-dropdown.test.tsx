@@ -1,11 +1,18 @@
 // @vitest-environment jsdom
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { projectToManifest } from '@taucad/types';
 import { ProjectActionDropdown } from '#components/project-library/project-action-dropdown.js';
 import type { ProjectActions } from '#components/project-library/project-library.js';
 import type { ProjectListItem } from '#types/project.types.js';
+
+let rowRuns = 0;
+vi.mock('#hooks/use-sidebar-status.js', () => ({
+  pluralize: (count: number, noun: string) => `${String(count)} ${noun}${count === 1 ? '' : 's'}`,
+  useProjectSidebarRow: (projectId: string) => ({ projectId, runs: rowRuns }),
+  useSidebarCommands: () => ({ closeProject: vi.fn() }),
+}));
 
 const project = {
   ...projectToManifest({
@@ -32,6 +39,10 @@ const createActions = (): ProjectActions => ({
 });
 
 describe('ProjectActionDropdown', () => {
+  beforeEach(() => {
+    rowRuns = 0;
+  });
+
   it('offers recoverable trash for an active project', async () => {
     const user = userEvent.setup();
     const actions = createActions();
@@ -44,6 +55,22 @@ describe('ProjectActionDropdown', () => {
 
     await user.click(screen.getByRole('menuitem', { name: 'Move to Trash' }));
     expect(actions.handleDelete).toHaveBeenCalledWith(project);
+  });
+
+  it('asks before trashing a project whose agents are running', async () => {
+    rowRuns = 2;
+    const user = userEvent.setup();
+    const actions = createActions();
+    render(<ProjectActionDropdown project={project} actions={actions} />);
+
+    await user.click(screen.getByRole('button', { name: 'Actions for Readable Project' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Move to Trash' }));
+
+    expect(actions.handleDelete).not.toHaveBeenCalled();
+    expect(screen.getByRole('heading', { name: 'Stop 2 agents and close Readable Project?' })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Stop and close' }));
+    expect(actions.handleDelete).toHaveBeenCalledExactlyOnceWith(project);
   });
 
   it('offers restore and permanent deletion only for a trashed project', async () => {

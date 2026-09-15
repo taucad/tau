@@ -95,7 +95,13 @@ function FourLineViewport({ children }: FourLineViewportProps): React.JSX.Elemen
   // on expand and restored immediately on collapse without waiting for the
   // next ResizeObserver tick.
   useEffect(() => {
-    measureOverflow();
+    if (isExpanded) {
+      return;
+    }
+    const frame = requestAnimationFrame(measureOverflow);
+    return () => {
+      cancelAnimationFrame(frame);
+    };
   }, [isExpanded, measureOverflow]);
 
   const showChevron = hasOverflow || isExpanded;
@@ -121,7 +127,7 @@ function FourLineViewport({ children }: FourLineViewportProps): React.JSX.Elemen
           onClick={() => {
             setIsExpanded((previous) => !previous);
           }}
-          className='group/chevron-trigger absolute inset-x-0 bottom-0 flex h-5 w-full cursor-pointer items-center justify-center outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset'
+          className='group/chevron-trigger absolute inset-x-0 bottom-0 flex h-5 w-full items-center justify-center outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset'
         >
           <span
             className={cn(

@@ -1,16 +1,18 @@
 import { useState } from 'react';
+import { useLocation } from 'react-router';
 import { AlertTriangle, Cloud, CloudOff, GitBranch } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
-import { Checkbox } from '@taucad/ui/components/checkbox';
 import { Input } from '@taucad/ui/components/input';
 import { Label } from '@taucad/ui/components/label';
 import { RadioGroup, RadioGroupItem } from '@taucad/ui/components/radio-group';
 import { cn } from '@taucad/ui/utils/cn';
-import { gitRemoteUrlProblem, isGithubRemoteUrl } from '@taucad/revisions';
+import { gitRemoteUrlProblem } from '@taucad/revisions';
 import type { RemoteFacet, SyncFacet } from '@taucad/revisions';
-import { authorizeGithubRemote } from '#lib/share-providers.js';
-import type { GithubRemoteVisibility } from '#lib/share-providers.js';
+import { GithubRepositoryPicker } from '#components/github/github-repository-picker.js';
+import type { GithubRepositorySelection } from '#components/github/github-repository-picker.js';
+import { githubConnections } from '#lib/github-connections.js';
 import { formatBytes } from '#lib/format-bytes.js';
+import { ENV } from '#environment.config.js';
 import { Spinner } from '#components/ui/spinner.js';
 
 /** Which remote a person can pick. @public */
@@ -30,10 +32,18 @@ export type RevisionSyncRegionProps = {
   readonly onConnect: (
     kind: RemoteChoice,
     url?: string,
-    options?: Readonly<{ visibility?: GithubRemoteVisibility }>,
+    options?: Readonly<{
+      authorization?: string;
+      provider?: 'github';
+      repositoryId?: string;
+      connectionId?: string;
+      generation?: number;
+      fetchOnly?: boolean;
+    }>,
   ) => void | Promise<void>;
   readonly onDisconnect: () => void;
   readonly onCancel: () => void;
+  readonly onSync: () => void;
   readonly className?: string;
 };
 
@@ -60,7 +70,9 @@ const syncCopy = (sync: SyncFacet): string | undefined => {
       return 'Backed up';
     }
     case 'pending': {
-      return sync.pendingCount > 0 ? `Backing up… ${String(sync.pendingCount)}` : 'Backing up…';
+      return sync.pendingCount > 0
+        ? `Backing up… ${String(sync.pendingCount)} revision${sync.pendingCount === 1 ? '' : 's'}`
+        : 'Backing up…';
     }
     case 'conflicted': {
       return 'Needs resolution';
@@ -69,7 +81,9 @@ const syncCopy = (sync: SyncFacet): string | undefined => {
       /* `queued` and `failed` read the same to a person: their work is not on
        * the server. What differs is whether this device will retry by itself,
        * which the offline line below says. */
-      return sync.pendingCount > 0 ? `Not backed up · ${String(sync.pendingCount)}` : 'Not backed up';
+      return sync.pendingCount > 0
+        ? `Not backed up · ${String(sync.pendingCount)} revision${sync.pendingCount === 1 ? '' : 's'}`
+        : 'Not backed up';
     }
   }
 };
@@ -88,18 +102,10 @@ const connectingCopy = (remote: RemoteFacet): string =>
  * it names the authority rather than the mechanism: a person deciding whether
  * to grant `repo` is deciding whether Tau may read their private repositories.
  *
- * @param url - The address typed so far.
- * @param visibility - Whether the person said the repository is private.
  * @returns The sentence to show under the field.
  */
-const authoritySentence = (url: string, visibility: GithubRemoteVisibility): string => {
-  if (!isGithubRemoteUrl(url)) {
-    return 'Tau can sign in to GitHub only, so another host has to allow access without one.';
-  }
-  return visibility === 'private'
-    ? 'GitHub will ask you to let Tau read and write your repositories, including private ones.'
-    : 'GitHub will ask you to let Tau read and write your public repositories.';
-};
+const authoritySentence = (): string =>
+  'Advanced HTTPS remotes are anonymous. Use the GitHub picker above for private or writable repositories.';
 
 /**
  * The *Git remote* half of the choice: an address, a visibility, and what
@@ -114,18 +120,17 @@ const authoritySentence = (url: string, visibility: GithubRemoteVisibility): str
  */
 function GitRemoteForm({
   url,
-  visibility,
   onUrlChange,
-  onVisibilityChange,
   onConnect,
 }: {
   readonly url: string;
-  readonly visibility: GithubRemoteVisibility;
   readonly onUrlChange: (url: string) => void;
-  readonly onVisibilityChange: (visibility: GithubRemoteVisibility) => void;
   readonly onConnect: () => void;
 }): React.JSX.Element {
-  const problem = url === '' ? undefined : gitRemoteUrlProblem(url);
+  /* P50: what this deployment allows, read from the page's own environment —
+   * the server never tells the page to relax a client-side guard. */
+  const allowPrivate = ENV.TAU_GIT_REMOTE_ALLOW_PRIVATE;
+  const problem = url === '' ? undefined : gitRemoteUrlProblem(url, { allowPrivate });
   return (
     <div className='flex flex-col gap-2'>
       <Label htmlFor='remote-git-url' className='text-sm font-normal'>
@@ -143,20 +148,8 @@ function GitRemoteForm({
           onUrlChange(event.target.value);
         }}
       />
-      <div className='flex items-center gap-2'>
-        <Checkbox
-          id='remote-git-private'
-          checked={visibility === 'private'}
-          onCheckedChange={(checked) => {
-            onVisibilityChange(checked === true ? 'private' : 'public');
-          }}
-        />
-        <Label htmlFor='remote-git-private' className='font-normal'>
-          This repository is private
-        </Label>
-      </div>
       <p id='remote-git-authority' className='text-xs text-muted-foreground'>
-        {authoritySentence(url, visibility)}
+        {authoritySentence()}
       </p>
       {/*
         Large objects do not cross this wire, and the port refuses the push by
@@ -165,7 +158,7 @@ function GitRemoteForm({
         at the first push.
       */}
       <p className='text-xs text-muted-foreground'>
-        Files over 1 MB stay on this device: Tau transfers large files to Tau Cloud only.
+        GitHub repositories selected above use their Git LFS storage. Other hosts may reject large files.
       </p>
       {problem === undefined ? undefined : (
         <p role='alert' className='text-sm text-destructive'>
@@ -202,8 +195,10 @@ export function RevisionSyncRegion({
   onConnect,
   onDisconnect,
   onCancel,
+  onSync,
   className,
 }: RevisionSyncRegionProps): React.JSX.Element {
+  const location = useLocation();
   const busy = remote.phase === 'connecting' || remote.phase === 'disconnecting';
   /* The radio is a *choice*, and picking *Git remote* asks a question rather
    * than connecting: there is no remote until an address has been typed. Until
@@ -212,36 +207,53 @@ export function RevisionSyncRegion({
   const [picked, setChoice] = useState<RemoteChoice | undefined>(undefined);
   const choice = picked ?? remote.kind;
   const [url, setUrl] = useState(remote.kind === 'git' ? (remote.url ?? '') : '');
-  const [visibility, setVisibility] = useState<GithubRemoteVisibility>('public');
   const [confirmingDisconnect, setConfirmingDisconnect] = useState(false);
+  const [changingGithub, setChangingGithub] = useState(false);
   const syncState = syncCopy(sync);
-  const [consentError, setConsentError] = useState<string | undefined>(undefined);
+  const [connectionError, setConnectionError] = useState<string | undefined>(undefined);
   const percentage =
     remote.storage === undefined || remote.storage.quota <= 0
       ? 0
       : Math.min((remote.storage.used / remote.storage.quota) * 100, 100);
 
-  /**
-   * Connect, or grant the credential again — the same two steps either way.
-   *
-   * @param reconnect - Ask GitHub again for a scope the session already records.
-   */
-  const connectGitRemote = async (reconnect: boolean): Promise<void> => {
-    const target = reconnect ? (remote.url ?? url) : url;
-    setConsentError(undefined);
-    /* Opened inside the click, before the first `await`, or the browser
-     * refuses it. Only GitHub needs one. */
-    const consent = isGithubRemoteUrl(target)
-      ? (globalThis.open('', 'tau-github-consent', 'width=720,height=820') ?? undefined)
-      : undefined;
+  /** Connect the advanced HTTPS remote. */
+  const connectGitRemote = async (): Promise<void> => {
+    setConnectionError(undefined);
     try {
-      if (isGithubRemoteUrl(target)) {
-        await authorizeGithubRemote({ visibility, consent, reconnect });
-      }
-      await onConnect('git', target, { visibility });
+      await onConnect('git', url);
     } catch (error) {
-      consent?.close();
-      setConsentError(error instanceof Error ? error.message : 'GitHub permission was not granted.');
+      setConnectionError(error instanceof Error ? error.message : 'The Git remote could not be connected.');
+    }
+  };
+
+  const connectGithub = async (selection: GithubRepositorySelection): Promise<void> => {
+    setConnectionError(undefined);
+    try {
+      const token = await githubConnections.token(selection.connection.id);
+      const authorization = `Basic ${globalThis.btoa(`x-access-token:${token.accessToken}`)}`;
+      await onConnect('git', selection.repository.cloneUrl, {
+        authorization,
+        provider: 'github',
+        repositoryId: String(selection.repository.id),
+        connectionId: selection.connection.id,
+        generation: token.generation,
+        fetchOnly: selection.repository.access !== 'write',
+      });
+      setChangingGithub(false);
+    } catch (error) {
+      setConnectionError(error instanceof Error ? error.message : 'GitHub could not be connected.');
+    }
+  };
+
+  const selectRemote = async (value: string): Promise<void> => {
+    const next = value as RemoteChoice;
+    setChoice(next);
+    if (next !== 'git') {
+      try {
+        await onConnect(next);
+      } catch (error) {
+        setConnectionError(error instanceof Error ? error.message : 'The remote could not be connected.');
+      }
     }
   };
 
@@ -255,14 +267,7 @@ export function RevisionSyncRegion({
         aria-label='Where this project syncs'
         value={choice}
         disabled={busy}
-        onValueChange={(value) => {
-          const next = value as RemoteChoice;
-          setChoice(next);
-          /* *Git remote* opens the form; the other two are the whole answer. */
-          if (next !== 'git') {
-            void onConnect(next);
-          }
-        }}
+        onValueChange={selectRemote}
         className='gap-2'
       >
         <div className='flex items-center gap-2'>
@@ -294,16 +299,32 @@ export function RevisionSyncRegion({
         </p>
       )}
 
-      {choice === 'git' && remote.phase !== 'connected' && !busy ? (
-        <GitRemoteForm
-          url={url}
-          visibility={visibility}
-          onUrlChange={setUrl}
-          onVisibilityChange={setVisibility}
-          onConnect={() => {
-            void connectGitRemote(false);
-          }}
-        />
+      {choice === 'git' && (remote.phase !== 'connected' || changingGithub) && !busy ? (
+        <div className='flex flex-col gap-4'>
+          <GithubRepositoryPicker
+            actionLabel='Connect repository'
+            returnTo={location.pathname}
+            onSelect={connectGithub}
+          />
+          <details>
+            <summary className='text-sm text-muted-foreground'>Advanced HTTPS remote</summary>
+            <div className='mt-3'>
+              <GitRemoteForm url={url} onUrlChange={setUrl} onConnect={connectGitRemote} />
+            </div>
+          </details>
+          {changingGithub ? (
+            <Button
+              variant='ghost'
+              size='sm'
+              className='self-start'
+              onClick={() => {
+                setChangingGithub(false);
+              }}
+            >
+              Keep current repository
+            </Button>
+          ) : undefined}
+        </div>
       ) : undefined}
 
       {busy ? (
@@ -341,17 +362,51 @@ export function RevisionSyncRegion({
 
       {remote.phase === 'connected' && remote.url !== undefined ? (
         <div className='flex items-center justify-between gap-2'>
-          <span className='truncate font-mono text-xs text-muted-foreground'>{remote.url}</span>
+          <span className='min-w-0'>
+            {remote.provider === 'github' ? (
+              <span className='block text-xs font-medium'>GitHub repository</span>
+            ) : undefined}
+            <span className='block truncate font-mono text-xs text-muted-foreground'>{remote.url}</span>
+            {remote.fetchOnly ? (
+              <span className='block text-xs text-muted-foreground'>Read-only link · Tau will not push</span>
+            ) : undefined}
+          </span>
           {confirmingDisconnect ? undefined : (
-            <Button
-              variant='ghost'
-              size='sm'
-              onClick={() => {
-                setConfirmingDisconnect(true);
-              }}
-            >
-              Disconnect
-            </Button>
+            <span className='flex shrink-0 items-center gap-1'>
+              {remote.fetchOnly ? undefined : (
+                <Button variant='outline' size='sm' disabled={busy} onClick={onSync}>
+                  Sync now
+                </Button>
+              )}
+              {remote.provider === 'github' ? (
+                <>
+                  <Button
+                    variant='outline'
+                    size='sm'
+                    onClick={() => {
+                      setChoice('git');
+                      setChangingGithub(true);
+                    }}
+                  >
+                    Change repository or account
+                  </Button>
+                  <Button asChild variant='ghost' size='sm'>
+                    <a href={remote.url.replace(/\.git$/u, '')} target='_blank' rel='noreferrer'>
+                      Open GitHub
+                    </a>
+                  </Button>
+                </>
+              ) : undefined}
+              <Button
+                variant='ghost'
+                size='sm'
+                onClick={() => {
+                  setConfirmingDisconnect(true);
+                }}
+              >
+                Disconnect
+              </Button>
+            </span>
           )}
         </div>
       ) : undefined}
@@ -403,7 +458,7 @@ export function RevisionSyncRegion({
             size='sm'
             className='self-start'
             onClick={() => {
-              void connectGitRemote(true);
+              setChoice('git');
             }}
           >
             Reconnect GitHub
@@ -411,10 +466,10 @@ export function RevisionSyncRegion({
         </div>
       ) : undefined}
 
-      {consentError === undefined ? undefined : (
+      {connectionError === undefined ? undefined : (
         <p role='alert' className='flex items-center gap-2 text-sm'>
           <AlertTriangle aria-hidden className='size-4 shrink-0 text-destructive' />
-          <span>{consentError}</span>
+          <span>{connectionError}</span>
         </p>
       )}
 

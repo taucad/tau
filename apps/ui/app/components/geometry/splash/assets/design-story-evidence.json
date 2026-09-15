@@ -1,0 +1,167 @@
+{
+  "version": 1,
+  "sourceDigest": "33af5e4e460953b05838899264de72667e1c6204c96b0bdb1a2a25f4a00ede32",
+  "specDigest": "049b2b016a8f298306cef2ceb97d50c9a15a5ef10ba32c02d04fdb0401521b05",
+  "unit": "mm",
+  "usableBed": 236,
+  "variants": [
+    {
+      "module": 3.5,
+      "filename": "planetary-oversized.glb",
+      "geometryDigest": "5bffbd503141d008ecdb87aa2c28d800d80888cdcfa6b345860b7a46b141879f",
+      "bytes": 2827280,
+      "pointsFilename": "planetary-oversized.points.json",
+      "pointsDigest": "aaff6aa693f7276119e639690c68c147dedb689fb711cdc79957175138916dd7",
+      "exportDuration": 123.50612499999988,
+      "fits": false,
+      "diameter": 252,
+      "tests": [
+        {
+          "name": "fits the declared printer envelope",
+          "status": "failed",
+          "codes": [
+            "GEOSPEC_BOUNDING_BOX_MISMATCH"
+          ]
+        },
+        {
+          "name": "housing is one closed solid",
+          "status": "passed",
+          "codes": []
+        },
+        {
+          "name": "ring is one closed solid",
+          "status": "passed",
+          "codes": []
+        },
+        {
+          "name": "sun is one closed solid",
+          "status": "passed",
+          "codes": []
+        },
+        {
+          "name": "planet is one closed solid",
+          "status": "passed",
+          "codes": []
+        },
+        {
+          "name": "carrier is one closed solid",
+          "status": "passed",
+          "codes": []
+        },
+        {
+          "name": "cover is one closed solid",
+          "status": "passed",
+          "codes": []
+        },
+        {
+          "name": "bolt is one closed solid",
+          "status": "passed",
+          "codes": []
+        },
+        {
+          "name": "has no interference at input angle 0",
+          "status": "passed",
+          "codes": []
+        },
+        {
+          "name": "has no interference at input angle 5",
+          "status": "passed",
+          "codes": []
+        },
+        {
+          "name": "has no interference at input angle 10",
+          "status": "passed",
+          "codes": []
+        },
+        {
+          "name": "has no interference at input angle 15",
+          "status": "passed",
+          "codes": []
+        },
+        {
+          "name": "has no interference at input angle 20",
+          "status": "passed",
+          "codes": []
+        }
+      ]
+    },
+    {
+      "module": 3,
+      "filename": "planetary.glb",
+      "geometryDigest": "68a30867ca9c12e9d6a8f4fe481d86bbd8e212fc01dd6ea1bcb1f8d57ef806da",
+      "bytes": 2806748,
+      "pointsFilename": "planetary.points.json",
+      "pointsDigest": "821e7f8ac1a197c0239fb638d1420627e21ea31058defa536b94335d0d3b55e1",
+      "exportDuration": 682.6699169999993,
+      "fits": true,
+      "diameter": 220,
+      "tests": [
+        {
+          "name": "fits the declared printer envelope",
+          "status": "passed",
+          "codes": []
+        },
+        {
+          "name": "housing is one closed solid",
+          "status": "passed",
+          "codes": []
+        },
+        {
+          "name": "ring is one closed solid",
+          "status": "passed",
+          "codes": []
+        },
+        {
+          "name": "sun is one closed solid",
+          "status": "passed",
+          "codes": []
+        },
+        {
+          "name": "planet is one closed solid",
+          "status": "passed",
+          "codes": []
+        },
+        {
+          "name": "carrier is one closed solid",
+          "status": "passed",
+          "codes": []
+        },
+        {
+          "name": "cover is one closed solid",
+          "status": "passed",
+          "codes": []
+        },
+        {
+          "name": "bolt is one closed solid",
+          "status": "passed",
+          "codes": []
+        },
+        {
+          "name": "has no interference at input angle 0",
+          "status": "passed",
+          "codes": []
+        },
+        {
+          "name": "has no interference at input angle 5",
+          "status": "passed",
+          "codes": []
+        },
+        {
+          "name": "has no interference at input angle 10",
+          "status": "passed",
+          "codes": []
+        },
+        {
+          "name": "has no interference at input angle 15",
+          "status": "passed",
+          "codes": []
+        },
+        {
+          "name": "has no interference at input angle 20",
+          "status": "passed",
+          "codes": []
+        }
+      ]
+    }
+  ]
+}

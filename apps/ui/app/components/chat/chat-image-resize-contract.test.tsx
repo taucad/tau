@@ -97,7 +97,7 @@ afterEach(() => {
 const provideRealResize = () => draftMachine.provide({ actors: { resizeImageActor } });
 
 const startActor = () => {
-  const actor = createActor(provideRealResize(), { input: { chatId: 'contract' } });
+  const actor = createActor(provideRealResize(), { input: {} });
   actor.start();
   return actor;
 };

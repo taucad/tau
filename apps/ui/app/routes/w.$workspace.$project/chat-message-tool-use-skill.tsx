@@ -33,7 +33,7 @@ function LoadingSkillRow({ skillName }: { readonly skillName: string }): React.J
 }
 
 /**
- * The bytes the tool read are the built-in bundle's, so the row links with that
+ * The bytes the tool read are the system skill bundle's, so the row links with that
  * provenance: the click opens the read-only tab and reveals the composed row,
  * and the catalog — not this component — owns the word on the badge.
  *
@@ -42,7 +42,7 @@ function LoadingSkillRow({ skillName }: { readonly skillName: string }): React.J
  * (a1 review R2); it names the bundle the pane serves today, which the notice
  * below is what flags when the chat read an older one.
  */
-const builtInSkillProvenance = (skillName: string): FileProvenance => {
+const systemSkillProvenance = (skillName: string): FileProvenance => {
   const bundle = systemSkillBundles.find((candidate) => candidate.slug === skillName);
   return {
     source: 'system-skills',
@@ -72,9 +72,9 @@ function ReadSkillRow({
   readonly source: string;
   readonly fingerprint?: string;
 }): React.JSX.Element {
-  const isBuiltIn = source === 'system';
+  const isSystem = source === 'system';
   const label = skillPath ? (
-    <FileLink path={skillPath} provenance={isBuiltIn ? builtInSkillProvenance(skillName) : undefined}>
+    <FileLink path={skillPath} provenance={isSystem ? systemSkillProvenance(skillName) : undefined}>
       {skillName}
     </FileLink>
   ) : (
@@ -90,12 +90,12 @@ function ReadSkillRow({
             <ChatToolDescription>
               {label}
               {' skill'}
-              {isBuiltIn && (
+              {isSystem && (
                 <Badge variant='secondary' className='ml-1.5 px-1.5 py-0 font-normal'>
-                  Built-in
+                  system
                 </Badge>
               )}
-              {isBuiltIn && hasBundleChanged(skillName, fingerprint) && (
+              {isSystem && hasBundleChanged(skillName, fingerprint) && (
                 <span className='ml-1.5 text-muted-foreground'>This bundle changed since the chat read it</span>
               )}
             </ChatToolDescription>

@@ -16,8 +16,10 @@ const mockSetHue = vi.fn();
 const mockResetHue = vi.fn();
 const mockUpdatePreferences = vi.fn();
 const mockSetCodeInlayHints = vi.fn();
+const mockSetPointerCursors = vi.fn();
 
 let mockCodeInlayHintsValue: boolean;
+let mockPointerCursorsValue: boolean;
 
 vi.mock('react-router', () => ({
   Link: ({ children, className, to }: { children: ReactNode; className?: string; to: string }): ReactElement => (
@@ -98,8 +100,13 @@ vi.mock('#hooks/use-color.js', () => ({
 
 vi.mock('#hooks/use-cookie.js', () => ({
   useCookie: (name: string, defaultValue: boolean) => {
-    const value = name === 'code-inlay-hints' ? mockCodeInlayHintsValue : defaultValue;
-    return [value, name === 'code-inlay-hints' ? mockSetCodeInlayHints : vi.fn()];
+    if (name === 'code-inlay-hints') {
+      return [mockCodeInlayHintsValue, mockSetCodeInlayHints];
+    }
+    if (name === 'pointer-cursors') {
+      return [mockPointerCursorsValue, mockSetPointerCursors];
+    }
+    return [defaultValue, vi.fn()];
   },
 }));
 
@@ -145,6 +152,7 @@ describe('GeneralSettings', () => {
     vi.clearAllMocks();
     useEntitlementsMock.mockReturnValue(entitlementsFromTier('free'));
     mockCodeInlayHintsValue = false;
+    mockPointerCursorsValue = false;
   });
 
   it('replaces the consent toggle with the no-train guarantee on paid tiers (T15/AD15)', () => {
@@ -170,14 +178,14 @@ describe('GeneralSettings', () => {
 
     expect(screen.getByText('Code Inlay Hints')).toBeInTheDocument();
     expect(screen.getByText('Show inline parameter names in code editors')).toBeInTheDocument();
-    expect(screen.getByRole('switch')).toHaveAttribute('data-state', 'unchecked');
+    expect(screen.getByRole('switch', { name: 'Code Inlay Hints' })).toHaveAttribute('data-state', 'unchecked');
   });
 
   it('should persist code inlay hints when toggled', async () => {
     render(<GeneralSettings />);
     const user = userEvent.setup();
 
-    await user.click(screen.getByRole('switch'));
+    await user.click(screen.getByRole('switch', { name: 'Code Inlay Hints' }));
 
     expect(mockSetCodeInlayHints).toHaveBeenCalledWith(true);
   });
@@ -187,7 +195,26 @@ describe('GeneralSettings', () => {
 
     render(<GeneralSettings />);
 
-    expect(screen.getByRole('switch')).toHaveAttribute('data-state', 'checked');
+    expect(screen.getByRole('switch', { name: 'Code Inlay Hints' })).toHaveAttribute('data-state', 'checked');
+  });
+
+  it('should render pointer cursors disabled by default', () => {
+    render(<GeneralSettings />);
+
+    expect(screen.getByText('Use pointer cursors')).toBeInTheDocument();
+    expect(
+      screen.getByText('Change the cursor to a pointer when hovering over interactive elements'),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('switch', { name: 'Use pointer cursors' })).toHaveAttribute('data-state', 'unchecked');
+  });
+
+  it('should persist the pointer cursor preference when toggled', async () => {
+    render(<GeneralSettings />);
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole('switch', { name: 'Use pointer cursors' }));
+
+    expect(mockSetPointerCursors).toHaveBeenCalledWith(true);
   });
 
   it('should expose and select the High Contrast theme', async () => {

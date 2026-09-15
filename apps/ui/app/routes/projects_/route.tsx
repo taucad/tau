@@ -6,6 +6,7 @@
 import { Link, Outlet, useLocation } from 'react-router';
 import { Button } from '@taucad/ui/components/button';
 import { ProjectLibrary } from '#components/project-library/project-library.js';
+import { CloudProjects } from '#routes/projects_/cloud-projects.js';
 import type { Handle } from '#types/matches.types.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
@@ -32,5 +33,15 @@ export const handle: Handle = {
 
 export default function Projects(): React.JSX.Element {
   const location = useLocation();
-  return location.pathname === '/projects' ? <ProjectLibrary /> : <Outlet />;
+  if (location.pathname !== '/projects') {
+    return <Outlet />;
+  }
+  return (
+    <>
+      <ProjectLibrary />
+      {/* Below the library, because it is what this device does *not* have
+          (W18 DEF-2): the projects this account backed up from somewhere else. */}
+      <CloudProjects />
+    </>
+  );
 }

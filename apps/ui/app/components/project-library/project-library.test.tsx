@@ -32,6 +32,7 @@ const createUseProjectsResult = () => ({
   conflicts: [] as ProjectDiscoveryConflict[],
   recoveries: [] as PendingProjectRecovery[],
   workspaceBindingRepairs: [] as WorkspaceBindingRepairGroup[],
+  isLoading: false,
   error: undefined as Error | undefined,
   retry: vi.fn(),
   deleteProject: vi.fn(async () => true),
@@ -63,9 +64,14 @@ vi.mock('#hooks/use-project-manager.js', () => ({
   }),
 }));
 
-const { mockToastSuccess, mockToastError } = vi.hoisted(() => ({
+const { mockCloseProject, mockToastSuccess, mockToastError } = vi.hoisted(() => ({
+  mockCloseProject: vi.fn(),
   mockToastSuccess: vi.fn(),
   mockToastError: vi.fn(),
+}));
+
+vi.mock('#hooks/use-sidebar-status.js', () => ({
+  useSidebarCommands: () => ({ closeProject: mockCloseProject }),
 }));
 vi.mock('#components/ui/sonner.js', () => ({
   toast: { success: mockToastSuccess, error: mockToastError },
@@ -354,6 +360,21 @@ describe('ProjectLibrary', () => {
     );
 
     expect(screen.getByTestId('new-project-chat-composer')).toBeInTheDocument();
+  });
+
+  it('shows the project skeleton instead of the empty state while the listing is loading', () => {
+    mockUseProjectsResult = { ...createUseProjectsResult(), projects: [], isLoading: true };
+
+    render(
+      <MemoryRouter>
+        <TooltipProvider>
+          <ProjectLibrary />
+        </TooltipProvider>
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole('status', { name: 'Loading projects' })).toHaveAttribute('aria-busy', 'true');
+    expect(screen.queryByText('No projects yet')).not.toBeInTheDocument();
   });
 
   it('names the directory a failed recovery is stuck on and offers to discard it', async () => {

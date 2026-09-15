@@ -31,7 +31,7 @@ describe('DeferredSessionRecording', () => {
     );
     vi.stubGlobal('cancelIdleCallback', vi.fn());
 
-    const { DeferredSessionRecording } = await import('#hooks/use-analytics.js');
+    const { DeferredSessionRecording } = await import('#providers/web-analytics-provider.js');
     render(<DeferredSessionRecording />);
 
     expect(mockStartSessionRecording).not.toHaveBeenCalled();
@@ -45,7 +45,7 @@ describe('DeferredSessionRecording', () => {
   });
 
   it('should use setTimeout fallback when requestIdleCallback is unavailable', async () => {
-    const { DeferredSessionRecording } = await import('#hooks/use-analytics.js');
+    const { DeferredSessionRecording } = await import('#providers/web-analytics-provider.js');
     render(<DeferredSessionRecording />);
 
     expect(mockStartSessionRecording).not.toHaveBeenCalled();

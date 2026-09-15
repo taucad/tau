@@ -40,8 +40,8 @@ const harness = (options?: { readonly budget?: number; readonly closeNever?: boo
 
   const projectSession = projectSessionMachine.provide({
     actors: {
-      awaitPull: fromSafeAsync<void, { projectId: string }>(async () => undefined),
       cancelRuns: fromSafeAsync<void, { projectId: string; runs: readonly string[] }>(async () => undefined),
+      flushProducers: fromSafeAsync<void, { projectId: string }>(async () => undefined),
       flushSync: fromSafeAsync<void, { projectId: string; boundMilliseconds: number }>(async () => {
         if (options?.closeNever === true) {
           await new Promise<void>(() => {
@@ -50,9 +50,9 @@ const harness = (options?: { readonly budget?: number; readonly closeNever?: boo
         }
       }),
       releaseLeases: fromSafeAsync<void, { projectId: string }>(async () => undefined),
+      releaseAgentHost: fromSafeAsync<void, { projectId: string }>(async () => undefined),
       fileManager: readyChild('views'),
       project: readyChild('runtime'),
-      editor: readyChild('runtime'),
       agentHost: readyChild('agentHost'),
       compute: computeChild,
     },
@@ -142,8 +142,8 @@ describe('sessionsMachine', async () => {
     actor.stop();
   });
 
-  it('refuses the ninth open and names the least recently touched idle project (pin b)', async () => {
-    const { actor, emitted, started } = harness();
+  it('closes the least recently touched idle project for a ninth open (pin b, P47)', async () => {
+    const { actor, emitted, started, stopped } = harness();
     for (let index = 0; index < browserLiveProjectBudget; index += 1) {
       await openIdle(actor, `proj${index}`);
     }
@@ -153,22 +153,54 @@ describe('sessionsMachine', async () => {
     }
 
     actor.send({ type: 'open', projectId: 'projNinth' });
+    await settle();
+
+    /* Room is made, not refused: the ninth opens and the row it replaced says
+     * why (`Closed · memory budget · reopen any time`). */
+    expect(emitted.find((event) => event.type === 'budgetRefused')).toBeUndefined();
+    expect(stopped).toEqual(['proj0']);
+    expect(started).toContain('projNinth');
+    expect(actor.getSnapshot().context.closed['proj0']?.reason).toBe('budget');
+    expect(Object.keys(actor.getSnapshot().context.refs)).toHaveLength(browserLiveProjectBudget);
+    actor.stop();
+  });
+
+  it('refuses a ninth open when nothing is idle, naming the candidates (pin b2, I28)', async () => {
+    const { actor, emitted, started } = harness();
+    for (let index = 0; index < browserLiveProjectBudget; index += 1) {
+      const projectId = `proj${index}`;
+      actor.send({ type: 'open', projectId });
+      await settle();
+      report(actor, projectId, { runs: 1 });
+    }
+
+    actor.send({ type: 'open', projectId: 'projNinth' });
 
     const refusal = emitted.find((event) => event.type === 'budgetRefused');
-    expect(refusal).toEqual({
-      type: 'budgetRefused',
-      projectId: 'projNinth',
-      suggestions: ['proj0', 'proj1', 'proj2', 'proj3', 'proj4', 'proj5', 'proj6', 'proj7'],
-    });
+    expect(refusal?.projectId).toBe('projNinth');
+    expect(refusal?.suggestions).toHaveLength(browserLiveProjectBudget);
     expect(started).not.toContain('projNinth');
+    actor.stop();
+  });
 
-    actor.send({ type: 'close', projectId: 'proj0', reason: 'user' });
+  it('offers the idle window again once the refusal is gone (R6)', async () => {
+    const { actor, stopped } = harness();
+    actor.send({ type: 'open', projectId: 'projA' });
     await settle();
-    actor.send({ type: 'open', projectId: 'projNinth' });
-    await settle();
+    report(actor, 'projA', { runs: 1 });
 
-    expect(started).toContain('projNinth');
-    expect(Object.keys(actor.getSnapshot().context.refs)).toHaveLength(browserLiveProjectBudget);
+    actor.send({ type: 'idleExpired', projectId: 'projA' });
+    expect(actor.getSnapshot().context.refusals['projA']).toBe('running');
+    expect(stopped).toEqual([]);
+
+    /* The run settled: the reason is gone and the row stops saying it. */
+    report(actor, 'projA');
+    expect(actor.getSnapshot().context.refusals['projA']).toBeUndefined();
+
+    actor.send({ type: 'idleExpired', projectId: 'projA' });
+    await settle();
+    expect(stopped).toEqual(['projA']);
+    expect(actor.getSnapshot().context.closed['projA']?.reason).toBe('idle');
     actor.stop();
   });
 
@@ -289,16 +321,6 @@ describe('sessionsMachine', async () => {
     actor.send({ type: 'quit' });
 
     expect(actor.getSnapshot().matches('quiesced')).toBe(true);
-    actor.stop();
-  });
-
-  it('hands a new compute placement to every live session', async () => {
-    const { actor } = harness();
-    await openIdle(actor, 'projA');
-
-    actor.send({ type: 'kernelSelectionChanged', kernelKey: 'remote:3' });
-
-    expect(actor.getSnapshot().context.kernelKey).toBe('remote:3');
     actor.stop();
   });
 

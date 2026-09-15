@@ -31,6 +31,20 @@ const branchSettledCopy: Readonly<Record<BranchOperation, (branch: string) => st
   rename: (branch) => `Renamed to ${branch}`,
 };
 
+/** What a failure on the tree's one error channel is called. Document words only (A18, I12). */
+const revisionFailureTitle: Readonly<Record<'restore' | 'branch' | 'save', string>> = {
+  restore: 'Restore failed',
+  branch: 'That branch change did not go through',
+  save: 'That change could not be saved',
+};
+
+/** The analytics name each of those failures is counted under. */
+const revisionFailureEvent: Readonly<Record<'restore' | 'branch' | 'save', string>> = {
+  restore: 'revision_restore_failed',
+  branch: 'revision_branch_failed',
+  save: 'revision_save_failed',
+};
+
 /**
  * The one surface a restore needs a person for (S19, PC9).
  *
@@ -52,9 +66,12 @@ export function RevisionRestore(): React.JSX.Element {
       return undefined;
     }
     return client.subscribeToasts((entry) => {
+      /* The restore child, the branch child and a failed ambient cut all raise
+       * `error` on this one channel; the frame names its subject so the title
+       * can (W14 R2, W18 DEF-7). */
       if (entry.type === 'error') {
-        analytics.capture('revision_restore_failed', { message: entry.message });
-        toast.error('Restore failed', { description: entry.message });
+        analytics.capture(revisionFailureEvent[entry.subject], { message: entry.message });
+        toast.error(revisionFailureTitle[entry.subject], { description: entry.message });
         return;
       }
       /* D10 answers *Switch* with a refusal, in the guard's own document words

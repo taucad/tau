@@ -1,6 +1,5 @@
-import { BookOpen, ChartColumn, Files, Hammer, Import, Plug, Settings, Shuffle, UsersRound } from 'lucide-react';
+import { ChartColumn, Hammer, Import, Plug, Shuffle, UsersRound } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import { openSettingsDialog } from '#hooks/use-settings-dialog.js';
 import type { FeatureFlagName } from '#flags/flag.constants.js';
 
 type NavRoute = {
@@ -14,7 +13,6 @@ type NavRoute = {
 
 export const navRoutes: {
   navMain: NavRoute[];
-  navSecondary: NavRoute[];
 } = {
   navMain: [
     {
@@ -66,26 +64,6 @@ export const navRoutes: {
       title: 'Usage',
       url: '/usage',
       icon: ChartColumn,
-    },
-  ],
-  navSecondary: [
-    {
-      title: 'Files',
-      url: '/files',
-      icon: Files,
-    },
-    {
-      title: 'Documentation',
-      url: 'https://docs.tau.new',
-      icon: BookOpen,
-    },
-    {
-      title: 'Settings',
-      url: '/settings',
-      icon: Settings,
-      action(): void {
-        openSettingsDialog();
-      },
     },
   ],
 };

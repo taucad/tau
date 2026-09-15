@@ -477,7 +477,7 @@ describe('dockviewStyleOverrides', () => {
       '[&_:is(.dv-left-actions-container,.dv-right-actions-container,.dv-pre-actions-container)_button]:!bg-transparent',
     );
     expect(dockviewStyleOverrides).toContain(
-      '[&_:is(.dv-left-actions-container,.dv-right-actions-container,.dv-pre-actions-container)_button:hover]:!bg-muted-foreground/15',
+      '[&_:is(.dv-left-actions-container,.dv-right-actions-container,.dv-pre-actions-container)_button:hover]:!bg-nested-action-hover',
     );
   });
 
@@ -524,7 +524,9 @@ describe('dockviewStyleOverrides', () => {
     expect(dockviewStyleOverrides).toContain(
       '[&_.dv-tab.dv-active-tab_.dv-default-tab_.dv-default-tab-action:not(:hover)]:!bg-accent',
     );
-    expect(dockviewStyleOverrides).toContain('[&_.dv-tab_.dv-default-tab_.dv-default-tab-action:hover]:!bg-input');
+    expect(dockviewStyleOverrides).toContain(
+      '[&_.dv-tab_.dv-default-tab_.dv-default-tab-action:hover]:!bg-nested-action-hover',
+    );
   });
 
   it('shows short dividers only between adjacent inactive tabs', () => {

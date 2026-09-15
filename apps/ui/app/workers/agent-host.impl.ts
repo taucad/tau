@@ -779,6 +779,14 @@ const executeCommand = async (
         snapshot: await acknowledgeRun(active, command.chatId, active.host.resume(command.chatId)),
       };
     }
+    case 'record-settlement': {
+      await active.host.recordSettlement({
+        chatId: command.chatId,
+        runId: command.event.runId,
+        event: command.event,
+      });
+      break;
+    }
     case 'steer': {
       await active.host.steer({
         runId: command.runId,
@@ -1378,9 +1386,12 @@ const initialize = async (request: AgentHostWorkerInitializeRequest, sessionId: 
     { filesystem: workspaceProvider },
     { consumer: 'agent', overlays: [systemSkillsOverlay()] },
   );
+  const recordView = composeView({ filesystem: workspaceProvider }, { consumer: 'user' });
   const toolRegistry = createChatToolRegistry({
     fileSystemFor: (signal) =>
       createProviderRpcFileSystem({ provider: agentView, mutations: fileSystemMutations, signal }),
+    recordFileSystemFor: (signal) =>
+      createProviderRpcFileSystem({ provider: recordView, mutations: fileSystemMutations, signal }),
     skillResolver,
     ...runtimeRpc,
     geospec: geoSpecClient,

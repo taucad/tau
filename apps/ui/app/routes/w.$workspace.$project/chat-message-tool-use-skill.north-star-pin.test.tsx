@@ -3,7 +3,7 @@
  * Red pin for the workspace-filesystem north star, wave W0 — **green in W4**.
  *
  * The pin reproduced the click that rendered "File not found": a skill row
- * linked a built-in bundle path that only the agent's overlay could serve, and
+ * linked a system skill bundle path that only the agent's overlay could serve, and
  * dispatched it as an ordinary writable project file.
  *
  * W2 made the bytes resolvable through the composed view
@@ -52,6 +52,7 @@ vi.mock('#hooks/use-file-tree.js', () => ({
   useFileTreeEntry: () => undefined,
 }));
 vi.mock('#hooks/use-keyboard.js', () => ({ useKeybinding: () => ({ formattedKeyCombination: 'Enter' }) }));
+vi.mock('#hooks/use-revision-status.js', () => ({ useRevisionStatus: () => undefined }));
 vi.mock('#hooks/use-file-manager.js', () => ({
   useFileManager: () => ({
     contentService: undefined,
@@ -139,8 +140,8 @@ beforeEach(() => {
   ]);
 });
 
-describe('built-in skill row links (north star W0, green in W4)', () => {
-  it('opens a built-in skill bundle file as a read-only entry and reveals it', async () => {
+describe('system skill row links (north star W0, green in W4)', () => {
+  it('opens a system skill bundle file as a read-only entry and reveals it', async () => {
     render(<ChatMessageToolUseSkill part={readSkillPart()} />);
 
     await userEvent.click(screen.getByRole('button', { name: bundle.slug }));
@@ -163,9 +164,9 @@ describe('built-in skill row links (north star W0, green in W4)', () => {
     await userEvent.click(screen.getByRole('treeitem', { name: bundle.slug }));
 
     const bundleRoot = screen.getByRole('treeitem', { name: bundle.slug });
-    expect(within(bundleRoot).getByText('Built-in')).toBeInTheDocument();
+    expect(within(bundleRoot).getByText('system')).toBeInTheDocument();
 
     const fileRow = screen.getByRole('treeitem', { name: skillPath.split('/').pop()! });
-    expect(fileRow).toHaveAccessibleDescription('Built-in skill · read-only');
+    expect(fileRow).toHaveAccessibleDescription('system skill · read-only');
   });
 });

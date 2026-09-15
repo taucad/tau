@@ -254,7 +254,7 @@ function SpanDetails({
 
       {(spanId ?? parentSpanId) ? (
         <details className='mt-2 text-muted-foreground'>
-          <summary className='cursor-pointer rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring'>
+          <summary className='rounded-sm transition-colors outline-none hover:bg-accent/50 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring'>
             Technical IDs
           </summary>
           <dl className='mt-1 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 font-mono'>

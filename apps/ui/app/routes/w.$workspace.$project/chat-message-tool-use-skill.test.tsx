@@ -45,7 +45,7 @@ describe('ChatMessageToolUseSkill', () => {
   });
 
   it.each([
-    { source: 'system', skillPath: undefined, suffix: 'Built-in' },
+    { source: 'system', skillPath: undefined, suffix: 'system' },
     { source: 'user', skillPath: '.agents/skills/woodworking/SKILL.md', suffix: '' },
     { source: 'tau-store', skillPath: undefined, suffix: '' },
     { source: 'legacy-source', skillPath: undefined, suffix: '' },

@@ -83,6 +83,7 @@ const desktopSourceOverrides = new Map([
   ['#runtime/demo-client-options.js', '#runtime/demo-client-options.desktop.js'],
   ['#services/headless-image-backend.js', '#services/headless-image-backend.desktop.js'],
   ['#services/browser-agent-worker.js', '#services/browser-agent-worker.desktop.js'],
+  ['#components/layout/route-footer.js', '#components/layout/route-footer.desktop.js'],
 ]);
 
 const normalizeProvenancePath = (moduleId: string): string => {

@@ -1,7 +1,8 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ReactNode } from 'react';
 import type { useProjects } from '#hooks/use-projects.js';
+import type * as SidebarStatusModule from '#hooks/use-sidebar-status.js';
 
 const mockUseProjects = vi.fn();
 const mockCreateChat = vi.fn();
@@ -92,7 +93,7 @@ vi.mock('@taucad/ui/components/tooltip', () => ({
   TooltipTrigger: ({ children }: { readonly children: ReactNode }) => <span>{children}</span>,
   TooltipContent: ({ children }: { readonly children: ReactNode }) => <span>{children}</span>,
 }));
-type DropdownMenuItemMockProps = Pick<React.ButtonHTMLAttributes<HTMLButtonElement>, 'disabled'> & {
+type DropdownMenuItemMockProps = Pick<React.ButtonHTMLAttributes<HTMLButtonElement>, 'aria-label' | 'disabled'> & {
   readonly children: ReactNode;
   readonly onSelect?: () => void;
 };
@@ -101,8 +102,8 @@ vi.mock('@taucad/ui/components/dropdown-menu', () => ({
   DropdownMenuTrigger: ({ children }: { readonly children: ReactNode }) => <span>{children}</span>,
   DropdownMenuContent: ({ children }: { readonly children: ReactNode }) => <div>{children}</div>,
   DropdownMenuSeparator: () => <hr />,
-  DropdownMenuItem: ({ children, disabled: isDisabled, onSelect }: DropdownMenuItemMockProps) => (
-    <button type='button' disabled={isDisabled} onClick={onSelect}>
+  DropdownMenuItem: ({ children, disabled: isDisabled, onSelect, ...properties }: DropdownMenuItemMockProps) => (
+    <button type='button' disabled={isDisabled} onClick={onSelect} {...properties}>
       {children}
     </button>
   ),
@@ -113,6 +114,53 @@ vi.mock('#components/inline-text-editor.js', () => ({
   ),
 }));
 vi.mock('#components/ui/sonner.js', () => ({ toast: { success: vi.fn() } }));
+vi.mock('@taucad/ui/components/alert-dialog', () => ({
+  AlertDialog: ({ children, ...properties }: { readonly children: ReactNode } & Record<string, unknown>) =>
+    properties['open'] === false ? null : <div role='dialog'>{children}</div>,
+  AlertDialogContent: ({ children }: { readonly children: ReactNode }) => <div>{children}</div>,
+  AlertDialogHeader: ({ children }: { readonly children: ReactNode }) => <div>{children}</div>,
+  AlertDialogTitle: ({ children }: { readonly children: ReactNode }) => <h3>{children}</h3>,
+  AlertDialogDescription: ({ children }: { readonly children: ReactNode }) => <p>{children}</p>,
+  AlertDialogFooter: ({ children }: { readonly children: ReactNode }) => <div>{children}</div>,
+  AlertDialogCancel: ({ children }: { readonly children: ReactNode }) => <button type='button'>{children}</button>,
+  AlertDialogAction: ({ children, ...properties }: { readonly children: ReactNode } & Record<string, unknown>) => (
+    <button type='button' onClick={properties['onClick'] as () => void}>
+      {children}
+    </button>
+  ),
+}));
+
+/* The registry and the selectors are W19's and this lane's own; these suites are
+ * about the wiring, so the rows are handed in and the pins drive them. */
+const mockRow = vi.fn();
+const mockLiveNow = vi.fn();
+const mockCloseProject = vi.fn();
+let liveProjectIds: readonly string[] = [];
+vi.mock('#hooks/use-sessions.js', () => ({
+  useLiveProjectIds: () => liveProjectIds,
+  useSessions: () => ({ on: () => ({ unsubscribe: () => undefined }) }),
+}));
+vi.mock('#hooks/use-sidebar-status.js', async (importOriginal) => {
+  const original = await importOriginal<typeof SidebarStatusModule>();
+  return {
+    ...original,
+    useProjectSidebarRow: (projectId: string) => mockRow(projectId) as unknown,
+    useLiveNow: () => mockLiveNow() as unknown,
+    useSidebarCommands: () => ({ closeProject: mockCloseProject, closeChat: vi.fn(), openProject: vi.fn() }),
+  };
+});
+
+const closedRow = (projectId: string): Record<string, unknown> => ({
+  projectId,
+  glyph: 'none',
+  attention: 0,
+  detail: undefined,
+  branch: undefined,
+  dirty: false,
+  sync: undefined,
+  pending: 0,
+  runs: 0,
+});
 
 const firstProject = {
   id: 'proj_one',
@@ -152,6 +200,9 @@ describe('ProjectNavigation', () => {
     mockIsProjectExpanded.mockImplementation((_projectId: string, active: boolean) => active);
     mockSetProjectDisclosure.mockResolvedValue(undefined);
     mockNavigate.mockResolvedValue(undefined);
+    liveProjectIds = [];
+    mockRow.mockImplementation((projectId: string) => closedRow(projectId));
+    mockLiveNow.mockReturnValue({ projects: 0, agents: 0, attention: 0, idleProjectIds: [] });
   });
 
   it('renders one Projects group with every project in deterministic activity order', () => {
@@ -213,7 +264,9 @@ describe('ProjectNavigation', () => {
     mockCreateChat.mockResolvedValue({ id: 'chat/two' });
     render(<ProjectNavigation />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'New chat in Two' }));
+    const newChatButton = screen.getByRole('button', { name: 'New chat in Two' });
+    expect(newChatButton.querySelector('svg')).toHaveClass('lucide-square-pen');
+    fireEvent.click(newChatButton);
     await vi.waitFor(() => {
       expect(mockCreateChat).toHaveBeenCalledWith('proj_two', { name: 'New chat', messages: [] });
       expect(mockNavigate).toHaveBeenCalledWith('/w/home/Two%20space?chat=chat%2Ftwo', {
@@ -250,5 +303,105 @@ describe('ProjectNavigation', () => {
     render(<ProjectNavigation />);
 
     expect(screen.getByRole('button', { name: 'Share project' })).toBeDisabled();
+  });
+
+  it('writes the Live now header and closes exactly the idle projects', () => {
+    liveProjectIds = ['proj_one', 'proj_two'];
+    mockLiveNow.mockReturnValue({ projects: 2, agents: 3, attention: 1, idleProjectIds: ['proj_two'] });
+    render(<ProjectNavigation />);
+
+    expect(screen.getByText('Live now')).toBeInTheDocument();
+    expect(screen.getByText('2 projects · 3 agents · 1 needs you')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Close all idle' }));
+    expect(mockCloseProject).toHaveBeenCalledExactlyOnceWith('proj_two');
+  });
+
+  /* The row gap: the header counted a live project while the list said there
+   * were none. The listing's own worker window is fixed at its owner (P67);
+   * this is the sidebar's half — it never contradicts itself, whatever the
+   * listing says. */
+  it('never says there are no projects while it is counting a live one', () => {
+    liveProjectIds = ['proj_live'];
+    mockLiveNow.mockReturnValue({ projects: 1, agents: 0, attention: 0, idleProjectIds: [] });
+    mockUseProjects.mockReturnValue({ ...projectsResult, projects: [] });
+
+    render(<ProjectNavigation />);
+
+    expect(screen.queryByText('No projects yet')).not.toBeInTheDocument();
+    expect(screen.getByText('Live now')).toBeInTheDocument();
+    expect(screen.getByText('1 project')).toBeInTheDocument();
+    expect(screen.queryAllByRole('link')).toHaveLength(0);
+  });
+
+  it('hides the Live now header while nothing is live', () => {
+    render(<ProjectNavigation />);
+    expect(screen.queryByText('Live now')).not.toBeInTheDocument();
+  });
+
+  /* Pin (f): the dialog is the question, and it is asked only when there is
+   * something to interrupt (I24). */
+  it('closes an idle project outright and asks before stopping running agents', () => {
+    liveProjectIds = ['proj_one', 'proj_two'];
+    mockRow.mockImplementation((projectId: string) => ({
+      ...closedRow(projectId),
+      glyph: projectId === 'proj_one' ? 'idle' : 'busy',
+      runs: projectId === 'proj_one' ? 0 : 2,
+    }));
+    render(<ProjectNavigation />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close One' }));
+    expect(mockCloseProject).toHaveBeenCalledExactlyOnceWith('proj_one');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close Two' }));
+    expect(screen.getByRole('heading', { name: 'Stop 2 agents and close Two?' })).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Their work so far is saved as revisions. Unpushed changes are backed up first. You can reopen the project any time.',
+      ),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Stop and close' }));
+    expect(mockCloseProject).toHaveBeenLastCalledWith('proj_two');
+  });
+
+  it('asks before trashing a project whose agents are running', async () => {
+    mockRow.mockImplementation((projectId: string) => ({
+      ...closedRow(projectId),
+      glyph: projectId === 'proj_two' ? 'busy' : 'none',
+      runs: projectId === 'proj_two' ? 2 : 0,
+    }));
+    render(<ProjectNavigation />);
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Delete' })[0]!);
+
+    expect(projectsResult.deleteProject).not.toHaveBeenCalled();
+    expect(screen.getByRole('heading', { name: 'Stop 2 agents and close Two?' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Stop and close' }));
+    await waitFor(() => {
+      expect(mockCloseProject).toHaveBeenLastCalledWith('proj_two');
+      expect(projectsResult.deleteProject).toHaveBeenCalledExactlyOnceWith('proj_two');
+    });
+  });
+
+  it('offers no Close on a project that is already closed', () => {
+    render(<ProjectNavigation />);
+    expect(screen.queryByRole('button', { name: 'Close One' })).not.toBeInTheDocument();
+  });
+
+  it('names a policy close under the project it closed', () => {
+    mockRow.mockImplementation((projectId: string) => ({
+      ...closedRow(projectId),
+      detail: projectId === 'proj_one' ? 'Closed to save memory · 30 min idle' : undefined,
+    }));
+    render(<ProjectNavigation />);
+    expect(screen.getByText('Closed to save memory · 30 min idle')).toBeInTheDocument();
+  });
+
+  it('folds what is no longer live under Earlier', () => {
+    liveProjectIds = ['proj_two'];
+    render(<ProjectNavigation />);
+    expect(screen.getByText('Earlier')).toBeInTheDocument();
+    expect(screen.getAllByRole('link').map((link) => link.textContent)).toEqual(['Two', 'One']);
   });
 });

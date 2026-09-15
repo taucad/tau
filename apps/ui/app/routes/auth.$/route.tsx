@@ -1,4 +1,3 @@
-import { lazy } from 'react';
 import { Link, useParams } from 'react-router';
 import { Auth } from '#components/auth/auth.js';
 import { AuthEmailDraftProvider } from '#components/auth/auth-email-draft.js';
@@ -7,17 +6,12 @@ import { VerifyEmail } from '#components/auth/verify-email.js';
 import { TauWordmark } from '#components/icons/tau-wordmark.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import type { Handle } from '#types/matches.types.js';
-import { ClientOnly } from '#components/ui/utils/client-only.js';
+import { DesignStory } from '#components/geometry/splash/design-story.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import type { DesktopAuthAction } from '#providers/auth-provider.js';
 import { useShellAuthHandoff } from '#providers/auth-provider.js';
 import { Button } from '@taucad/ui/components/button';
 import { cn } from '@taucad/ui/utils/cn';
-
-const AuthSplashbackLazy = lazy(async () => {
-  const m = await import('#components/geometry/splash/auth-splashback.js');
-  return { default: m.AuthSplashback };
-});
 
 export const handle: Handle = {
   enablePageWrapper: false,
@@ -94,9 +88,7 @@ export default function AuthPage(): React.JSX.Element {
           </div>
         </div>
         <div className='relative hidden lg:block'>
-          <ClientOnly>
-            <AuthSplashbackLazy />
-          </ClientOnly>
+          <DesignStory />
         </div>
       </div>
     </AuthEmailDraftProvider>

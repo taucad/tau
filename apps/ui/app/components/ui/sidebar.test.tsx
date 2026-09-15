@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter } from 'react-router';
+import { MemoryRouter, useNavigate } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { KeyboardProvider } from '#hooks/use-keyboard.js';
@@ -18,6 +18,20 @@ vi.mock('#hooks/use-cookie.js', async () => {
 
 const { SidebarProvider, SidebarTrigger } = await import('#components/ui/sidebar.js');
 
+const Navigate = () => {
+  const navigate = useNavigate();
+  return (
+    <button
+      type='button'
+      onClick={() => {
+        void navigate('/next');
+      }}
+    >
+      Navigate
+    </button>
+  );
+};
+
 const renderTrigger = (onSidebarResize = vi.fn()) =>
   render(
     <MemoryRouter>
@@ -26,6 +40,7 @@ const renderTrigger = (onSidebarResize = vi.fn()) =>
           <SidebarProvider>
             <div id='app-sidebar'>Sidebar</div>
             <SidebarTrigger onSidebarResize={onSidebarResize} />
+            <Navigate />
           </SidebarProvider>
         </TooltipProvider>
       </KeyboardProvider>
@@ -89,5 +104,8 @@ describe('SidebarTrigger', () => {
 
     await user.click(trigger);
     expect(trigger).toHaveAttribute('aria-expanded', 'true');
+
+    await user.click(screen.getByRole('button', { name: 'Navigate' }));
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
   });
 });

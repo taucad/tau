@@ -1,71 +1,21 @@
-import { useSyncExternalStore, useMemo } from 'react';
+import { useMemo, useSyncExternalStore } from 'react';
 import * as Cookies from 'es-cookie';
-import { useRouteLoaderData } from 'react-router';
 import { Topic } from '@taucad/events';
-import type { loader } from '#root.js';
 import { metaConfig } from '#constants/meta.constants.js';
 import { isFunction } from '#utils/function.utils.js';
-import { isDesktopTarget } from '#lib/build-target.js';
-import { cookieName as cookieNames } from '#constants/cookie.constants.js';
 import type { CookieName } from '#constants/cookie.constants.js';
 
 type Listener = () => void;
 
-/** Prefixed names of every UI preference this hook can read (B5 R2 allowlist). */
-const preferenceCookieNames: ReadonlySet<string> = new Set(
-  Object.values(cookieNames).map((name) => `${metaConfig.cookiePrefix}${name}`),
-);
-
-/** Named UI preferences projected from a request `Cookie` header. */
-export type PreferenceCookies = Readonly<Record<string, string>>;
-
-/**
- * Project a request `Cookie` header down to the named UI preferences the SSR
- * render needs.
- *
- * The root loader used to serialise the whole header into page source and
- * loader data, which put every cookie the origin receives — session and
- * authentication material included — into a document that B5 R3 then caches.
- * Only the names declared in `cookie.constants.ts` survive this projection, so
- * a prerendered or cached document can never carry account material.
- *
- * @param header - Raw `Cookie` request header, or `undefined` when absent.
- * @returns Allowlisted cookie values keyed by their prefixed cookie name.
- */
-export const readPreferenceCookies = (header: string | undefined): PreferenceCookies => {
-  const projected: Record<string, string> = {};
-  for (const [name, value] of Object.entries(Cookies.parse(header ?? ''))) {
-    if (preferenceCookieNames.has(name)) {
-      projected[name] = value;
-    }
-  }
-  return projected;
-};
-
-/**
- * `app://` is not a cookieable scheme: Chromium drops every write with
- * `EXCLUDE_NONCOOKIEABLE_SCHEME`, so on desktop nothing this hook stores ever
- * survives a reload. The desktop build keeps the same names and the same JSON
- * in `localStorage` instead — same API, same cache, storage swapped.
- */
-
 const readRaw = (name: string): string | undefined => {
-  if (!isDesktopTarget()) {
-    return Cookies.get(name);
-  }
   try {
     return globalThis.localStorage.getItem(name) ?? undefined;
   } catch {
-    // No localStorage during the SPA index.html prerender, or when blocked.
     return undefined;
   }
 };
 
 const writeRaw = (name: string, value: string): void => {
-  if (!isDesktopTarget()) {
-    Cookies.set(name, value);
-    return;
-  }
   try {
     globalThis.localStorage.setItem(name, value);
   } catch {
@@ -74,10 +24,6 @@ const writeRaw = (name: string, value: string): void => {
 };
 
 const removeRaw = (name: string): void => {
-  if (!isDesktopTarget()) {
-    Cookies.remove(name);
-    return;
-  }
   try {
     globalThis.localStorage.removeItem(name);
   } catch {
@@ -85,118 +31,96 @@ const removeRaw = (name: string): void => {
   }
 };
 
-const cookieStore = () => {
+const preferenceStore = () => {
   const cache = new Map<string, unknown>();
   const listenerTopics = new Map<string, Topic<void>>();
 
-  const subscribe = (cookieName: string, listener: Listener) => {
-    const topic = listenerTopics.get(cookieName) ?? new Topic<void>({ name: `cookie:${cookieName}` });
-    listenerTopics.set(cookieName, topic);
+  const subscribe = (name: string, listener: Listener) => {
+    const topic = listenerTopics.get(name) ?? new Topic<void>({ name: `preference:${name}` });
+    listenerTopics.set(name, topic);
     const unsubscribe = topic.subscribe(listener);
     return () => {
       unsubscribe();
       if (topic.size === 0) {
-        listenerTopics.delete(cookieName);
+        listenerTopics.delete(name);
       }
     };
   };
 
-  const notify = (cookieName: string) => {
-    listenerTopics.get(cookieName)?.emit();
+  const notify = (name: string) => {
+    listenerTopics.get(name)?.emit();
   };
 
-  const get = <T>(cookieName: string): T | undefined => {
-    const value = cache.get(cookieName);
-    if (value) {
-      return value as T;
+  const get = <T>(name: string): T | undefined => {
+    if (cache.has(name)) {
+      return cache.get(name) as T;
     }
 
-    const cookieValue = readRaw(cookieName);
-    if (!cookieValue) {
-      return;
+    const storedValue = readRaw(name);
+    const legacyCookie = storedValue === undefined ? Cookies.get(name) : undefined;
+    const rawValue = storedValue ?? legacyCookie;
+    if (rawValue === undefined) {
+      return undefined;
     }
 
-    const cachedValue = JSON.parse(cookieValue) as T;
-    cache.set(cookieName, cachedValue);
-    return cachedValue;
+    try {
+      const value = JSON.parse(rawValue) as T;
+      cache.set(name, value);
+      if (legacyCookie !== undefined) {
+        writeRaw(name, rawValue);
+        Cookies.remove(name);
+      }
+      return value;
+    } catch {
+      removeRaw(name);
+      Cookies.remove(name);
+      return undefined;
+    }
   };
 
-  const update = <T>(cookieName: string, v: T) => {
-    cache.set(cookieName, v);
-    writeRaw(cookieName, JSON.stringify(v));
-    notify(cookieName);
+  const update = <T>(name: string, value: T) => {
+    cache.set(name, value);
+    writeRaw(name, JSON.stringify(value));
+    Cookies.remove(name);
+    notify(name);
   };
 
-  const remove = (cookieName: string) => {
-    cache.delete(cookieName);
-    removeRaw(cookieName);
-    notify(cookieName);
+  const remove = (name: string) => {
+    cache.delete(name);
+    removeRaw(name);
+    Cookies.remove(name);
+    notify(name);
   };
 
-  return {
-    subscribe,
-    get,
-    update,
-    remove,
-  };
+  return { get, remove, subscribe, update };
 };
 
-export const store = cookieStore();
+export const store = preferenceStore();
 
 /**
- * A hook to get and set a cookie.
- *
- * The cookie must be serializable with `JSON.stringify`
- * and deserializable with `JSON.parse`.
- *
- * @param name - The name of the cookie.
- * @param defaultValue - The default value of the cookie.
- * @returns The value of the cookie.
+ * Legacy-named UI preference hook. Ordinary preferences use localStorage on
+ * both hosts; an old web cookie is migrated once when first read.
  */
 // oxlint-disable-next-line @typescript-eslint/explicit-module-boundary-types -- infer type for hooks
 export const useCookie = <T>(name: CookieName, defaultValue: T) => {
-  const cookieName = `${metaConfig.cookiePrefix}${name}`;
-  // Get the latest cookie value from route data on each render
-  const data = useRouteLoaderData<typeof loader>('root');
-
+  const storageName = `${metaConfig.cookiePrefix}${name}`;
   const [selector, update, remove] = useMemo(
     () => [
-      (): T => {
-        // On client, use the store's already parsed value
-        // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- can be undefined on server
-        if (globalThis.document !== undefined) {
-          const cookieValue = store.get<T>(cookieName);
-          if (cookieValue === undefined) {
-            // If the cookie value is undefined, return the default value
-            return defaultValue;
-          }
-
-          return cookieValue;
-        }
-
-        // On server, read the allowlisted preference projected by the root loader
-        const serverCookie = data?.cookies[cookieName];
-        if (serverCookie === undefined) {
-          // If the cookie value is undefined, return the default value
-          return defaultValue;
-        }
-
-        // We need to parse the cookie from the server as stringification occurs when setting cookie.
-        return JSON.parse(serverCookie) as T;
-      },
+      (): T => store.get<T>(storageName) ?? defaultValue,
       (valueOrFunction: T | ((previous: T) => T)) => {
-        const currentValue = selector();
-        const updateValue: T = isFunction(valueOrFunction) ? valueOrFunction(currentValue) : valueOrFunction;
-        store.update<T>(cookieName, updateValue);
+        const value = isFunction(valueOrFunction) ? valueOrFunction(selector()) : valueOrFunction;
+        store.update(storageName, value);
       },
       () => {
-        store.remove(cookieName);
+        store.remove(storageName);
       },
     ],
-    [cookieName, data?.cookies, defaultValue],
+    [defaultValue, storageName],
   );
-
-  const value = useSyncExternalStore((listener) => store.subscribe(cookieName, listener), selector, selector);
-
+  const value = useSyncExternalStore(
+    (listener) => store.subscribe(storageName, listener),
+    selector,
+    () => defaultValue,
+  );
   return [value, update, remove] as const;
 };

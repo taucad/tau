@@ -39,7 +39,6 @@ type ImageQueueEntry = {
 
 // Context for draft state
 export type DraftMachineContext = {
-  chatId?: string;
   // Main draft state
   draftText: string;
   draftImages: string[];
@@ -65,11 +64,11 @@ export type DraftEmittedEvents = {
 };
 
 export type DraftMachineInput = {
-  chatId?: string;
+  initialDraft?: MyUIMessage;
 };
 
 // Helper to build draft message from text and images
-function buildDraftMessage(text: string, images: string[]): MyUIMessage {
+export function buildDraftMessage(text: string, images: string[]): MyUIMessage {
   const parts: MyUIMessage['parts'] = [];
 
   if (text.trim().length > 0) {
@@ -114,7 +113,6 @@ export function createEmptyDraftMessage(): MyUIMessage {
 // Events
 type DraftMachineEvents =
   | { type: 'initializeFromChat'; chat: Chat }
-  | { type: 'setChatId'; chatId: string }
   | { type: 'setDraftText'; text: string }
   | { type: 'addDraftImage'; image: string; preserveOriginal?: boolean }
   | { type: 'removeDraftImage'; index: number }
@@ -141,17 +139,15 @@ type DraftMachineEvents =
   | { type: 'imageResized'; resized: string };
 
 // Placeholder actors - actual implementations provided via machine.provide()
-const persistDraftActor = fromSafeAsync<void, { chatId: string; draft: MyUIMessage }>(async () => {
+const persistDraftActor = fromSafeAsync<void, { draft: MyUIMessage }>(async () => {
   throw new Error('persistDraftActor not provided');
 });
 
-const persistEditDraftActor = fromSafeAsync<void, { chatId: string; messageId: string; draft: MyUIMessage }>(
-  async () => {
-    throw new Error('persistEditDraftActor not provided');
-  },
-);
+const persistEditDraftActor = fromSafeAsync<void, { messageId: string; draft: MyUIMessage }>(async () => {
+  throw new Error('persistEditDraftActor not provided');
+});
 
-const clearMessageEditActor = fromSafeAsync<void, { chatId: string; messageId: string }>(async () => {
+const clearMessageEditActor = fromSafeAsync<void, { messageId: string }>(async () => {
   throw new Error('clearMessageEditActor not provided');
 });
 
@@ -187,8 +183,6 @@ export const draftMachine = setup({
     resizeImageActor,
   },
   guards: {
-    isValidChatId: ({ context }) => Boolean(context.chatId?.startsWith('chat_')),
-    canPersist: ({ context }) => Boolean(context.chatId?.startsWith('chat_')),
     draftTextChanged: ({ context, event }) => event.type === 'setDraftText' && event.text !== context.draftText,
     editDraftTextChanged: ({ context, event }) =>
       event.type === 'setEditDraftText' && event.text !== context.editDraftText,
@@ -200,10 +194,12 @@ export const draftMachine = setup({
 }).createMachine({
   id: 'draft',
   context({ input }) {
+    const { initialDraft } = input;
+    const textPart = initialDraft?.parts.find((part) => part.type === 'text');
+    const imageParts = initialDraft?.parts.filter((part) => part.type === 'file') ?? [];
     return {
-      chatId: input.chatId,
-      draftText: '',
-      draftImages: [],
+      draftText: textPart?.text ?? '',
+      draftImages: imageParts.map((part) => part.url),
       draftToolChoice: 'auto',
       draftMode: 'agent' as ChatMode,
       messageEdits: {},
@@ -220,7 +216,7 @@ export const draftMachine = setup({
       on: {
         initializeFromChat: {
           actions: assign(({ event }) => {
-            const { id: chatId, draft, messageEdits } = event.chat;
+            const { draft, messageEdits } = event.chat;
 
             // Handle undefined/null draft
             const draftMessage = draft ?? createEmptyDraftMessage();
@@ -233,7 +229,6 @@ export const draftMachine = setup({
             const edits = messageEdits ?? {};
 
             return {
-              chatId,
               draftText,
               draftImages,
               messageEdits: edits,
@@ -242,11 +237,6 @@ export const draftMachine = setup({
               editDraftText: '',
               editDraftImages: [],
             };
-          }),
-        },
-        setChatId: {
-          actions: assign({
-            chatId: ({ event }) => event.chatId,
           }),
         },
         setDraftText: {
@@ -444,21 +434,12 @@ export const draftMachine = setup({
             // Handle draft clearing with immediate persistence
             clearDraft: {
               target: 'persisting',
-              guard: 'canPersist',
             },
           },
         },
         pending: {
           after: {
-            saveDebounce: [
-              {
-                guard: 'canPersist',
-                target: 'persisting',
-              },
-              {
-                target: 'idle',
-              },
-            ],
+            saveDebounce: 'persisting',
           },
           on: {
             setDraftText: {
@@ -477,12 +458,10 @@ export const draftMachine = setup({
             // Immediately bypass debounce and persist
             flushNow: {
               target: 'persisting',
-              guard: 'canPersist',
             },
             // Bypass debounce — persist the (now-empty) draft immediately
             clearDraft: {
               target: 'persisting',
-              guard: 'canPersist',
             },
           },
         },
@@ -490,7 +469,6 @@ export const draftMachine = setup({
           invoke: {
             src: 'persistDraftActor',
             input: ({ context }) => ({
-              chatId: context.chatId!,
               draft: buildDraftMessage(context.draftText, context.draftImages),
             }),
             onDone: 'idle',
@@ -530,15 +508,7 @@ export const draftMachine = setup({
         },
         pending: {
           after: {
-            saveDebounce: [
-              {
-                guard: 'canPersist',
-                target: 'persisting',
-              },
-              {
-                target: 'idle',
-              },
-            ],
+            saveDebounce: 'persisting',
           },
           on: {
             setEditDraftText: {
@@ -557,7 +527,6 @@ export const draftMachine = setup({
             // Immediately bypass debounce and persist
             flushNow: {
               target: 'persisting',
-              guard: 'canPersist',
             },
           },
         },
@@ -565,7 +534,6 @@ export const draftMachine = setup({
           invoke: {
             src: 'persistEditDraftActor',
             input: ({ context }) => ({
-              chatId: context.chatId!,
               messageId: context.activeEditMessageId!,
               draft: buildDraftMessage(context.editDraftText, context.editDraftImages),
             }),
@@ -644,21 +612,19 @@ export const draftMachine = setup({
           on: {
             clearMessageEdit: {
               target: 'clearing',
-              guard: 'canPersist',
             },
           },
         },
         clearing: {
           invoke: {
             src: 'clearMessageEditActor',
-            input({ context, event }) {
+            input({ event }) {
               const { messageId } = event as {
                 type: 'clearMessageEdit';
                 messageId: string;
               };
 
               return {
-                chatId: context.chatId!,
                 messageId,
               };
             },

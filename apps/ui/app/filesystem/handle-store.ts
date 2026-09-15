@@ -1538,19 +1538,25 @@ export async function getProjectRootConfigs(
       .filter((entry): entry is WorkspaceEntry => entry !== undefined)
       .map((entry) => [entry.workspace.workspaceId, entry] as const),
   );
+  const homeBackend = await getHomeStorageBackend();
+  const homeRoot: StorageRootConfig =
+    homeBackend === 'node' ? { backend: 'node', path: nodeHomeRoot() } : { backend: homeBackend };
+  const homeNodePath = homeRoot.backend === 'node' ? homeRoot.path : undefined;
   const projects: ProjectRootConfig[] = configs
     .filter((config) => config.backend !== 'webaccess' || connected.has(config.workspaceId))
     // A node row naming a root no longer registered is unreachable, exactly as a
     // webaccess row whose workspace is gone: publishing it would route a project
     // at a directory nothing scans.
-    .filter((config) => config.backend !== 'node' || config.path === undefined || nodeRoots.has(config.path))
+    .filter(
+      (config) =>
+        config.backend !== 'node' ||
+        config.path === undefined ||
+        config.path === homeNodePath ||
+        nodeRoots.has(config.path),
+    )
     .map((config) => (config.backend === 'node' ? { ...config, path: config.path ?? nodeHomeRoot() } : config));
-  const homeBackend = await getHomeStorageBackend();
-  const homeRoot: StorageRootConfig =
-    homeBackend === 'node' ? { backend: 'node', path: nodeHomeRoot() } : { backend: homeBackend };
   // Nothing stops the dialog from picking `userData/home` itself; both roots
   // would carry the same storage-root key, so Home wins and the duplicate goes.
-  const homeNodePath = homeRoot.backend === 'node' ? homeRoot.path : undefined;
   const roots: StorageRootConfig[] = [
     homeRoot,
     ...[...nodeRoots.keys()]

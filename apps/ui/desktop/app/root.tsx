@@ -1,19 +1,34 @@
-/**
- * Desktop root route.
- *
- * Re-exports the shared root's document/app shell and deliberately exports
- * **no** `loader`. Two reasons:
- *
- * 1. SPA mode grandfathers a root loader, but a build-time-baked `window.ENV`
- *    would clobber the environment the Electron preload injects before app
- *    module evaluation (blueprint risk P-R2). With no loader here, the shared
- *    `Layout` renders `buildClientEnvScript({})` and the preload's values win.
- * 2. The shared loader reads a request cookie, which has no meaning in an
- *    `app://tau` document with no server.
- *
- * `useRouteLoaderData('root')` in the shared `Layout` returns `undefined` here,
- * which the shared code already handles (theme falls through to the
- * localStorage/system path in `use-theme.tsx`).
- */
-// oxlint-disable-next-line no-barrel-files/no-barrel-files -- re-exporting the shared root IS this module's whole job.
-export { Layout, links, meta, handle, ErrorBoundary, default } from '#root.js';
+import type { LinksFunction, MetaFunction } from 'react-router';
+import type { ReactNode } from 'react';
+import { metaConfig } from '#constants/meta.constants.js';
+import { globalStylesLinks } from '#styles/global.styles.js';
+import { ProductApp, RootErrorBoundary, RootLayout } from '#root-layout.js';
+import { RootCommandPaletteItems } from '#root-command-items.js';
+import type { Handle } from '#types/matches.types.js';
+
+export const handle: Handle = {
+  commandPalette(match) {
+    return <RootCommandPaletteItems match={match} />;
+  },
+};
+
+export const links: LinksFunction = () => globalStylesLinks;
+
+export const meta: MetaFunction = () => [
+  { title: metaConfig.name },
+  { name: 'description', content: metaConfig.description },
+  { rel: 'icon', href: '/favicon.ico', sizes: 'any' },
+  { rel: 'icon', href: '/favicon.svg', type: 'image/svg+xml' },
+];
+
+export function Layout({ children }: { readonly children: ReactNode }): React.JSX.Element {
+  return <RootLayout>{children}</RootLayout>;
+}
+
+export default function App(): React.JSX.Element {
+  return <ProductApp />;
+}
+
+export function ErrorBoundary(): React.JSX.Element {
+  return <RootErrorBoundary />;
+}

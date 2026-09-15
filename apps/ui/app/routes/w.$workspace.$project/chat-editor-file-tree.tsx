@@ -351,7 +351,7 @@ function addDeletedDescendantPaths(options: {
 }
 
 type ChatEditorFileTreeProps = {
-  readonly actionsContainer?: Element | DocumentFragment | null;
+  readonly actionsContainer?: Element | DocumentFragment;
   readonly closeButton?: React.ReactNode;
   readonly showTitle?: boolean;
   readonly borderless?: boolean;
@@ -434,10 +434,10 @@ export const ChatEditorFileTree = memo(function ({
     (path: string, fileReadOnly?: boolean) => {
       const shouldReadOnly = readOnly || fileReadOnly;
       if (onOpenFile) {
-        onOpenFile(path, shouldReadOnly || undefined);
+        onOpenFile(path, shouldReadOnly ? true : undefined);
         return;
       }
-      editorRef.send({ type: 'openFile', path, source: 'user', readOnly: shouldReadOnly || undefined });
+      editorRef.send({ type: 'openFile', path, source: 'user', readOnly: shouldReadOnly ? true : undefined });
     },
     [editorRef, onOpenFile, readOnly],
   );
@@ -1041,9 +1041,10 @@ export const ChatEditorFileTree = memo(function ({
 
   // Rebuild tree when file data changes
   useEffect(() => {
+    tree.setConfig((current) => ({ ...current, dataLoader }));
     tree.rebuildTree();
     // oxlint-disable-next-line react-hooks/exhaustive-deps -- tree object is not stable, only rebuild when fileTree changes
-  }, [fileTree]);
+  }, [dataLoader]);
 
   useEffect(() => {
     focusedItemRef.current = focusedItem;
@@ -1407,7 +1408,7 @@ export const ChatEditorFileTree = memo(function ({
   }, []);
 
   /**
-   * Place a whole built-in bundle into the project so the project owns it
+   * Place a whole system skill bundle into the project so the project owns it
    * (V8, ruling P11): the one write allowed under a read-only overlay, and the
    * client — not this menu — keeps it whole.
    */
@@ -1419,7 +1420,7 @@ export const ChatEditorFileTree = memo(function ({
       };
       toast.promise(copyToProject(), {
         loading: 'Copying to project…',
-        success: 'Copied to project. Your version replaces the built-in one.',
+        success: 'Copied to project. Your version replaces the system skill.',
         error: (error: unknown) => `Copy failed: ${error instanceof Error ? error.message : String(error)}`,
       });
     },
@@ -1939,7 +1940,7 @@ export const ChatEditorFileTree = memo(function ({
                             <TreeItem
                               item={item}
                               presentation={presentationFor(itemId)}
-                              readOnly={readOnly}
+                              isReadOnly={readOnly}
                               isActive={activeFilePath === itemId}
                               isOpen={openFiles.some((f) => f.path === itemId)}
                               searchQuery={tree.getState().search ?? ''}
@@ -2038,7 +2039,7 @@ export const ChatEditorFileTree = memo(function ({
 type TreeItemProps = {
   readonly item: ItemInstance<TreeItemData>;
   readonly presentation: RowPresentation;
-  readonly readOnly?: boolean;
+  readonly isReadOnly?: boolean;
   readonly isActive: boolean;
   readonly isOpen: boolean;
   readonly searchQuery: string;
@@ -2060,7 +2061,7 @@ type TreeItemProps = {
 function TreeItem({
   item,
   presentation,
-  readOnly: parentReadOnly = false,
+  isReadOnly: parentReadOnly = false,
   isActive,
   isOpen,
   searchQuery,
@@ -2163,7 +2164,7 @@ function TreeItem({
           data-file-tree-kind={isFolder ? 'directory' : 'file'}
           {...(description ? { 'aria-describedby': descriptionId, title: description } : {})}
           className={cn(
-            'group/file relative flex h-7 w-full cursor-pointer items-center justify-between rounded-md py-1 pr-1 pl-2 text-sm text-sidebar-foreground transition-colors',
+            'group/file relative flex h-7 w-full items-center justify-between rounded-md py-1 pr-1 pl-2 text-sm text-sidebar-foreground transition-colors',
             !isActive && 'hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground',
             isActive && !isSelected && 'bg-sidebar-accent',
             isSelected && 'bg-sidebar-accent/70 text-sidebar-accent-foreground',
@@ -2261,7 +2262,7 @@ function TreeItem({
               <HighlightText text={item.getItemName()} searchTerm={searchQuery} />
             </span>
             {presentation.isSubtreeRoot && presentation.badge ? (
-              <Badge variant='secondary' className='shrink-0 px-1.5 py-0 font-normal'>
+              <Badge variant='secondary' className='ml-auto shrink-0 px-1.5 py-0 font-normal'>
                 {presentation.badge}
               </Badge>
             ) : null}

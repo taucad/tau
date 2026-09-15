@@ -206,7 +206,7 @@ export function TagsValue({
           type='button'
           data-tag-remove
           aria-label={`Remove ${children}`}
-          className='size-auto cursor-pointer rounded-full outline-none hover:bg-primary-foreground/30 focus-visible:ring-2 focus-visible:ring-ring'
+          className='size-auto rounded-full outline-none hover:bg-primary-foreground/30 focus-visible:ring-2 focus-visible:ring-ring'
           onClick={handleRemove}
           onPointerDown={handlePointerDown}
         >

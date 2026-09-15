@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Bot, Brain, Paperclip, Wrench, AtSign, SlidersHorizontal } from 'lucide-react';
 import type { AcpSessionData, Chat, ToolSelection } from '@taucad/chat';
 import type { FileEntry } from '@taucad/types';
@@ -115,7 +115,7 @@ export const acpCommandToSlashCommand = (
     label: invocation,
     title: command.name,
     description: command.description,
-    ...(command.input === undefined ? {} : { fullDescription: command.input.hint }),
+    ...(command.input === null || command.input === undefined ? {} : { fullDescription: command.input.hint }),
     group: 'Commands',
     source: agentId,
     commandText: `${invocation} `,
@@ -394,6 +394,7 @@ export const ChatTextareaDesktop = memo(function ({
           handleFileChange={handleFileChange}
           creationLocationControl={creationLocationControl}
           acpSessionData={acpSessionData}
+          status={status}
         />
 
         {/* Bottom-right controls */}
@@ -435,6 +436,7 @@ export const ChatTextareaLeftControls = memo(function ({
   handleFileChange,
   creationLocationControl,
   acpSessionData,
+  status,
 }: {
   readonly selectedModel: ResolvedModel;
   readonly enableKernelSelector: boolean;
@@ -446,6 +448,7 @@ export const ChatTextareaLeftControls = memo(function ({
   readonly handleFileChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
   readonly creationLocationControl?: React.ReactNode;
   readonly acpSessionData?: AcpSessionData;
+  readonly status: string;
 }): React.JSX.Element {
   // Chat-scoped resolver — falls back to cookie kernel when no chat-local
   // selection exists. Display label follows the chat's active kernel so
@@ -479,7 +482,7 @@ export const ChatTextareaLeftControls = memo(function ({
                   size='sm'
                   aria-label={`Select agent: ${label}`}
                   aria-description={`Agent status: ${formatChatAgentActivity(activity)}`}
-                  className='h-7 cursor-pointer! rounded-full text-muted-foreground hover:text-foreground @max-[22rem]:w-7'
+                  className='h-7 rounded-full text-muted-foreground hover:text-foreground @max-[22rem]:w-7'
                 >
                   <span className='hidden max-w-24 truncate text-xs @[22rem]:block'>{label}</span>
                   <Bot className='size-4 @[22rem]:hidden' aria-hidden='true' />
@@ -507,7 +510,7 @@ export const ChatTextareaLeftControls = memo(function ({
                 <Button
                   variant='outline'
                   size='sm'
-                  className='h-7 cursor-pointer! rounded-full text-muted-foreground hover:text-foreground @max-[22rem]:w-7 @xs:max-w-fit @[22rem]:pr-2'
+                  className='h-7 rounded-full text-muted-foreground hover:text-foreground @max-[22rem]:w-7 @xs:max-w-fit @[22rem]:pr-2'
                 >
                   <span className='hidden truncate text-xs @[22rem]:block'>{selectedModel.name}</span>
                   <SvgIcon id={selectedModel.family} className='size-4 shrink-0 grayscale' />
@@ -540,7 +543,7 @@ export const ChatTextareaLeftControls = memo(function ({
                   /* Collapsed to an icon below the breakpoint like every other
                    * trigger in the row, so the name has to come from here. */
                   aria-label={`Select model (${selectedModel.name})`}
-                  className='h-7 cursor-pointer! rounded-full text-muted-foreground hover:text-foreground @max-[22rem]:w-7 @xs:max-w-fit @[22rem]:pr-2'
+                  className='h-7 rounded-full text-muted-foreground hover:text-foreground @max-[22rem]:w-7 @xs:max-w-fit @[22rem]:pr-2'
                 >
                   <span className='hidden max-w-24 truncate text-xs @[22rem]:block'>{selectedModel.name}</span>
                   {/* ponytail: the agent's model namespace carries no family, so
@@ -554,7 +557,7 @@ export const ChatTextareaLeftControls = memo(function ({
           <TooltipContent>Select model ({selectedAgentModel.name})</TooltipContent>
         </Tooltip>
       )}
-      {execution.kind === 'acp' ? <ChatAgentConfigControls sessionData={acpSessionData} /> : null}
+      {execution.kind === 'acp' ? <ChatAgentConfigControls sessionData={acpSessionData} status={status} /> : null}
       {creationLocationControl}
       {/* Available and reserved credits (P5/P6). Tau execution only — an
        * external agent's turns are not funded by this balance. Kept after the
@@ -576,7 +579,7 @@ export const ChatTextareaLeftControls = memo(function ({
                   variant='outline'
                   size='sm'
                   aria-label={`Select kernel (${selectedKernel.name})`}
-                  className='h-7 cursor-pointer! rounded-full text-muted-foreground hover:text-foreground @max-[22rem]:w-7 @xs:max-w-fit @[22rem]:pr-2'
+                  className='h-7 rounded-full text-muted-foreground hover:text-foreground @max-[22rem]:w-7 @xs:max-w-fit @[22rem]:pr-2'
                 >
                   <span className='hidden items-center gap-1.5 truncate text-xs @[22rem]:inline-flex'>
                     {selectedKernel.name}
@@ -651,12 +654,56 @@ export const ChatTextareaLeftControls = memo(function ({
 
 function ChatAgentConfigControls({
   sessionData,
+  status,
 }: {
   readonly sessionData?: AcpSessionData;
+  readonly status: string;
 }): React.JSX.Element | undefined {
   const {
     execution: { execution, setActiveExecution },
   } = useChatComposer();
+  const confirmed = JSON.stringify(sessionData?.configOptions.map((option) => [option.id, option.currentValue]) ?? []);
+  const [pending, setPending] = useState<{
+    readonly confirmed: string;
+    readonly values: Readonly<Record<string, string | boolean>>;
+    readonly submitted: Readonly<Record<string, string | boolean>>;
+  }>({ confirmed, values: {}, submitted: {} });
+  const previousStatus = useRef(status);
+  const previousSession = useRef<AcpSessionData | undefined>(undefined);
+  useEffect(() => {
+    const started = previousStatus.current === 'ready' && status !== 'ready';
+    const settled = previousStatus.current !== 'ready' && status === 'ready';
+    const sessionUpdated = previousSession.current !== sessionData;
+    previousStatus.current = status;
+    previousSession.current = sessionData;
+    if (started) {
+      setPending((current) => ({ ...current, submitted: current.values }));
+      return;
+    }
+    if ((!settled && !sessionUpdated) || execution.kind !== 'acp') {
+      return;
+    }
+    const retained = Object.fromEntries(
+      Object.entries(pending.values).filter(
+        ([id, value]) => !Object.hasOwn(pending.submitted, id) || pending.submitted[id] !== value,
+      ),
+    );
+    setPending({ confirmed, values: retained, submitted: {} });
+    if (sessionData?.agentId === execution.agentId) {
+      const actual = Object.fromEntries(
+        sessionData.configOptions.flatMap((option) =>
+          option.category !== 'model' &&
+          (typeof option.currentValue === 'string' || typeof option.currentValue === 'boolean')
+            ? [[option.id, option.currentValue]]
+            : [],
+        ),
+      );
+      const { config: _config, ...selection } = execution;
+      const config = { ...actual, ...retained };
+      setActiveExecution({ ...selection, ...(Object.keys(config).length === 0 ? {} : { config }) });
+    }
+  }, [confirmed, execution, pending, sessionData, setActiveExecution, status]);
+  const pendingValues = pending.confirmed === confirmed ? pending.values : {};
   if (execution.kind !== 'acp') {
     return undefined;
   }
@@ -665,6 +712,11 @@ function ChatAgentConfigControls({
     return undefined;
   }
   const select = (id: string, value: string | boolean): void => {
+    setPending((current) => ({
+      ...current,
+      confirmed,
+      values: { ...(current.confirmed === confirmed ? current.values : {}), [id]: value },
+    }));
     setActiveExecution({ ...execution, config: { ...execution.config, [id]: value } });
   };
   return (
@@ -683,7 +735,7 @@ function ChatAgentConfigControls({
       <PopoverContent align='start' className='w-72 space-y-3 p-3'>
         <h3 className='text-sm font-medium'>Agent settings</h3>
         {options.map((option) => {
-          const current = execution.config?.[option.id] ?? option.currentValue;
+          const current = pendingValues[option.id] ?? option.currentValue;
           return option.type === 'select' ? (
             <label key={option.id} className='flex flex-col gap-1 text-xs'>
               <span>{option.name}</span>
@@ -695,13 +747,21 @@ function ChatAgentConfigControls({
                   select(option.id, event.currentTarget.value);
                 }}
               >
-                {option.options
-                  .flatMap((entry) => ('options' in entry ? entry.options : [entry]))
-                  .map((value) => (
-                    <option key={value.value} value={value.value}>
-                      {value.name}
+                {option.options.map((entry) =>
+                  'options' in entry ? (
+                    <optgroup key={entry.group} label={entry.name}>
+                      {entry.options.map((value) => (
+                        <option key={value.value} value={value.value}>
+                          {value.name}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ) : (
+                    <option key={entry.value} value={entry.value}>
+                      {entry.name}
                     </option>
-                  ))}
+                  ),
+                )}
               </select>
             </label>
           ) : (
@@ -833,7 +893,7 @@ function ChatTextareaModeControl(): React.JSX.Element | undefined {
               size='sm'
               aria-label={`Select mode (${currentConfig.label})`}
               className={cn(
-                'h-7 cursor-pointer! rounded-full text-muted-foreground hover:text-foreground @max-[22rem]:w-7 @xs:max-w-fit @[22rem]:pr-2',
+                'h-7 rounded-full text-muted-foreground hover:text-foreground @max-[22rem]:w-7 @xs:max-w-fit @[22rem]:pr-2',
                 currentConfig.activeClass,
               )}
             >

@@ -1,5 +1,7 @@
 // @vitest-environment jsdom
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
+import { isValidElement } from 'react';
+import type { ReactElement, ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { NavUser } from '#components/nav/nav-user.js';
 import { metaConfig } from '#constants/meta.constants.js';
@@ -17,12 +19,20 @@ vi.mock('#components/auth/user/user-button.js', () => ({
     size,
     side,
   }: {
-    readonly links?: React.ReactNode[];
+    readonly links?: Array<{ readonly href: string; readonly label: ReactNode } | ReactElement>;
     readonly size?: string;
     readonly side?: string;
   }) => (
     <div data-testid='user-button' data-size={size} data-side={side}>
-      {links}
+      {links?.map((link) =>
+        isValidElement(link) ? (
+          link
+        ) : (
+          <a key={link.href} href={link.href}>
+            {link.label}
+          </a>
+        ),
+      )}
     </div>
   ),
 }));
@@ -63,11 +73,13 @@ describe('NavUser', () => {
     useEntitlementsMock.mockReturnValue({ tier: 'free' });
   });
 
-  it('shows upgrade and settings to free users', () => {
+  it('shows product navigation, upgrade, and settings to free users', () => {
     render(<NavUser />);
 
     expect(screen.getByText('Upgrade to Pro')).toBeDefined();
     expect(screen.queryByText('Billing')).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Files' })).toHaveAttribute('href', '/files');
+    expect(within(screen.getByTestId('user-button')).queryByRole('link', { name: 'Documentation' })).toBeNull();
     expect(screen.getByText('Settings')).toBeInTheDocument();
     expect(screen.getByTestId('user-button')).toHaveAttribute('data-size', 'sm');
     expect(screen.getByTestId('user-button')).toHaveAttribute('data-side', 'top');
@@ -87,6 +99,9 @@ describe('NavUser', () => {
     render(<NavUser />);
 
     expect(screen.getByRole('button', { name: 'Help' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Documentation' })).toHaveAttribute('href', 'https://docs.tau.new');
+    expect(screen.getByRole('link', { name: 'Privacy' })).toHaveAttribute('href', 'https://tau.new/legal/privacy');
+    expect(screen.getByRole('link', { name: 'Terms' })).toHaveAttribute('href', 'https://tau.new/legal/terms');
     expect(screen.getByText('Report a bug')).toBeInTheDocument();
     expect(screen.getByText('GitHub')).toBeInTheDocument();
     expect(screen.getByText('Community Discord')).toBeInTheDocument();

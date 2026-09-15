@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Button } from '@taucad/ui/components/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@taucad/ui/components/card';
+import { CardContent, CardHeader, CardTitle } from '@taucad/ui/components/card';
+import { SettingsSectionCard } from '#components/settings/settings-item.js';
 import { setComputeReuseMode, useComputeReuseMode } from '#lib/compute-reuse-preference.js';
 import type { ComputeReuseMode } from '#lib/compute-reuse-preference.js';
 import { useProject } from '#hooks/use-project.js';
@@ -76,10 +77,9 @@ export function ComputeReuseSettings(): React.JSX.Element {
     }
   };
   return (
-    <Card aria-labelledby='compute-reuse-title'>
+    <SettingsSectionCard aria-labelledby='compute-reuse-title'>
       <CardHeader>
         <CardTitle id='compute-reuse-title'>Compute reuse</CardTitle>
-        <CardDescription>Choose how local CAD work reuses expensive results.</CardDescription>
       </CardHeader>
       <CardContent className='flex flex-col gap-4'>
         <fieldset className='grid gap-2 lg:grid-cols-3'>
@@ -87,7 +87,7 @@ export function ComputeReuseSettings(): React.JSX.Element {
           {modes.map((mode) => (
             <label
               key={mode.value}
-              className='flex cursor-pointer items-start gap-3 rounded-md border p-3 has-checked:border-primary'
+              className='flex cursor-action items-start gap-3 rounded-md border p-3 transition-colors hover:border-primary/50 hover:bg-accent/50 has-checked:border-primary'
             >
               <input
                 className='mt-1 accent-primary'
@@ -148,6 +148,6 @@ export function ComputeReuseSettings(): React.JSX.Element {
           ) : null}
         </div>
       </CardContent>
-    </Card>
+    </SettingsSectionCard>
   );
 }

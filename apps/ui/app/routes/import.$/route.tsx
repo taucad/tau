@@ -22,7 +22,12 @@ import { BranchSelector } from '#routes/import.$/branch-selector.js';
 import { FileSelector, createStaticDataSource } from '#components/files/file-selector.js';
 import { SuggestedClones } from '#routes/import.$/suggested-clones.js';
 import { UploadCard } from '#routes/import.$/upload-card.js';
-import { describeGitHubImport, resolveGitHubImportTarget } from '#routes/import.$/import.utils.js';
+import {
+  describeGitHubImport,
+  resolveGitHubImportTarget,
+  supportedKernelExtensions,
+  findMainFile,
+} from '#routes/import.$/import.utils.js';
 import type { GitHubRepoInfo } from '#routes/import.$/import.utils.js';
 import { ImportErrorView } from '#routes/import.$/import-error-view.js';
 import { ImportProcessingView } from '#routes/import.$/import-processing-view.js';
@@ -33,12 +38,29 @@ import { createImportedProjectFiles } from '#utils/file-reader.utils.js';
 import { projectUrl } from '#utils/project-url.utils.js';
 import { useProjectSlugs } from '#hooks/use-project-slug-route.js';
 import { desktopBridge } from '#filesystem/desktop-bridge.js';
+import { parseProjectManifestBytes, projectToManifest, serializeProjectManifest } from '@taucad/types';
+import { largeObjectThresholdBytes } from '@taucad/revisions';
+import { idPrefix } from '@taucad/types/constants';
+import { generatePrefixedId } from '@taucad/utils/id';
+import { GithubRepositoryPicker } from '#components/github/github-repository-picker.js';
+import type { GithubRepositorySelection } from '#components/github/github-repository-picker.js';
+import { prepareLinkedGithubImport } from '#lib/github-linked-import.js';
+import { githubProjectBinding } from '#lib/github-project-binding.js';
 
 export const handle: Handle = {
   enableOverflowY: true,
 };
 
 const readSplatPath = (params: Record<string, string | undefined>): string => params['*'] ?? '';
+
+const linkedSetupBranch = (repositoryName: string): string => {
+  const slug = repositoryName
+    .normalize('NFKC')
+    .replaceAll(/[^\p{L}\p{N}._-]+/gu, '-')
+    .replaceAll(/^[.-]+|[.-]+$/gu, '')
+    .slice(0, 220);
+  return `tau/${slug || 'project'}`;
+};
 
 /**
  * Derived from the URL, never from loader data: a `clientLoader` route has no
@@ -86,6 +108,13 @@ export default function ImportRoute(): React.JSX.Element {
   const navigate = useNavigate();
   const projectManager = useProjectManager();
   const presentLocationError = useProjectCreationLocationError();
+  const [linkedSelection, setLinkedSelection] = useState<GithubRepositorySelection>();
+  const [linkedMainFile, setLinkedMainFile] = useState('');
+  const [linkedTargetBranch, setLinkedTargetBranch] = useState('');
+  const [linkedBusy, setLinkedBusy] = useState(false);
+  const [linkedError, setLinkedError] = useState<string>();
+  const [linkedReviewBlocked, setLinkedReviewBlocked] = useState(false);
+  const [linkedSyncChats, setLinkedSyncChats] = useState(true);
 
   // Track active import mode
   const [activeMode, setActiveMode] = useState<ImportMode | undefined>(undefined);
@@ -190,6 +219,26 @@ export default function ImportRoute(): React.JSX.Element {
   const selectedBranch = useSelector(gitHubActorRef, (snapshot) => snapshot.context.selectedBranch);
   const repoFiles = useSelector(gitHubActorRef, (snapshot) => snapshot.context.repoFiles);
   const repoFilesDataSource = useMemo(() => createStaticDataSource(repoFiles), [repoFiles]);
+  const linkedFilesDataSource = useMemo(
+    () =>
+      createStaticDataSource(
+        linkedSelection?.files
+          .filter(({ path }) => supportedKernelExtensions.some((extension) => path.endsWith(extension)))
+          .map(({ path, size }) => ({ path, size })) ?? [],
+      ),
+    [linkedSelection],
+  );
+  const linkedMainFileSupported = supportedKernelExtensions.some((extension) => linkedMainFile.endsWith(extension));
+  const linkedManifest = useMemo(
+    () => (linkedSelection?.manifest === undefined ? undefined : parseProjectManifestBytes(linkedSelection.manifest)),
+    [linkedSelection],
+  );
+  const linkedNeedsSetup =
+    linkedSelection !== undefined &&
+    (linkedSelection.branch.head === undefined ||
+      linkedManifest?.success !== true ||
+      linkedManifest.data.assets.main.entryPath !== linkedMainFile ||
+      (linkedManifest.data.syncChats !== false) !== linkedSyncChats);
   const isLoadingFiles = useSelector(gitHubActorRef, (snapshot) => snapshot.context.isLoadingFiles);
   const fetchErrors = useSelector(gitHubActorRef, (snapshot) => snapshot.context.fetchErrors);
   const hasMoreBranches = useSelector(gitHubActorRef, (snapshot) => snapshot.context.hasMoreBranches);
@@ -209,26 +258,37 @@ export default function ImportRoute(): React.JSX.Element {
   const location = useLocation();
 
   useEffect(() => {
-    if (!new URLSearchParams(location.search).has('desktop-open')) return;
+    if (!new URLSearchParams(location.search).has('desktop-open')) {
+      return;
+    }
     let active = true;
-    void desktopBridge()
-      ?.openFiles.consume()
-      .then((opened) => {
-        if (!active || opened.length === 0) return;
+    const consumeDesktopFiles = async (): Promise<void> => {
+      try {
+        const bridge = desktopBridge();
+        if (bridge === undefined) {
+          return;
+        }
+        const opened = await bridge.openFiles.consume();
+        if (!active || opened.length === 0) {
+          return;
+        }
         setActiveMode('disk');
         diskActorRef.send({
           type: 'processFiles',
           files: opened.map((file) => new File([file.bytes], file.name)),
         });
-        void navigate('/import', { replace: true });
-      })
-      .catch((error: unknown) => {
-        if (active)
+        await navigate('/import', { replace: true });
+      } catch (error) {
+        if (active) {
           diskActorRef.send({
             type: 'externalError',
             error: error instanceof Error ? error : new Error(String(error)),
           });
-      });
+        }
+      }
+    };
+    // async-iife: bootstrap -- the desktop handoff is scoped to this route lifetime.
+    void consumeDesktopFiles();
     return () => {
       active = false;
     };
@@ -259,7 +319,7 @@ export default function ImportRoute(): React.JSX.Element {
       ref,
       mainFile,
     });
-  }, [location.pathname, location.search, owner, repo, ref, mainFile, gitHubActorRef]);
+  }, [owner, repo, ref, mainFile, gitHubActorRef]);
 
   // Listen to machine's URL events and update browser URL
   useEffect(() => {
@@ -366,6 +426,105 @@ export default function ImportRoute(): React.JSX.Element {
     },
     [diskActorRef],
   );
+
+  const reviewLinkedRepository = useCallback((selection: GithubRepositorySelection): void => {
+    const manifest = selection.manifest === undefined ? undefined : parseProjectManifestBytes(selection.manifest);
+    const paths = selection.files.map((file) => file.path);
+    const supportedPaths = paths.filter((path) =>
+      supportedKernelExtensions.some((extension) => path.endsWith(extension)),
+    );
+    const manifestMain = manifest?.success === true ? manifest.data.assets.main.entryPath : undefined;
+    const unsupportedLargeBlob = selection.files.find((file) => file.size >= largeObjectThresholdBytes);
+    setLinkedSelection(selection);
+    setLinkedMainFile(
+      manifestMain !== undefined && supportedPaths.includes(manifestMain)
+        ? manifestMain
+        : (findMainFile(supportedPaths) ?? (paths.length === 0 ? 'main.scad' : '')),
+    );
+    setLinkedTargetBranch(
+      manifest?.success === true ? selection.branch.name : linkedSetupBranch(selection.repository.name),
+    );
+    setLinkedSyncChats(manifest?.success === true ? manifest.data.syncChats !== false : true);
+    setLinkedReviewBlocked(manifest?.success === false || unsupportedLargeBlob !== undefined);
+    setLinkedError(
+      manifest?.success === false
+        ? 'This repository has an invalid tau.json. Fix or remove it before importing as a linked project.'
+        : unsupportedLargeBlob === undefined
+          ? undefined
+          : `${unsupportedLargeBlob.path} is a large ordinary Git blob. Track it with Git LFS in GitHub before importing so Tau can preserve repository identity.`,
+    );
+  }, []);
+
+  const importLinkedRepository = useCallback(async (): Promise<void> => {
+    if (linkedSelection === undefined || linkedMainFile === '' || linkedTargetBranch === '') {
+      return;
+    }
+    setLinkedBusy(true);
+    setLinkedError(undefined);
+    try {
+      const parsed =
+        linkedSelection.manifest === undefined ? undefined : parseProjectManifestBytes(linkedSelection.manifest);
+      const imported = parsed?.success === true ? parsed.data : undefined;
+      const projectId = imported?.id ?? generatePrefixedId(idPrefix.project);
+      const projectData =
+        imported === undefined
+          ? {
+              name: linkedSelection.repository.fullName,
+              description:
+                linkedSelection.repository.description ?? `Imported from ${linkedSelection.repository.htmlUrl}`,
+              tags: [],
+              assets: { main: { entryPath: linkedMainFile } },
+              ...(linkedSyncChats ? {} : { syncChats: false }),
+            }
+          : {
+              name: imported.name,
+              description: imported.description,
+              tags: imported.tags,
+              assets: { ...imported.assets, main: { ...imported.assets.main, entryPath: linkedMainFile } },
+              ...(linkedSyncChats ? {} : { syncChats: false }),
+              ...(imported.syncLargeExports === undefined ? {} : { syncLargeExports: imported.syncLargeExports }),
+            };
+      const preserveManifest =
+        parsed?.success === true &&
+        parsed.data.assets.main.entryPath === linkedMainFile &&
+        (parsed.data.syncChats !== false) === linkedSyncChats;
+      const prepared = await prepareLinkedGithubImport({
+        selection: linkedSelection,
+        targetBranch: linkedTargetBranch,
+        manifest:
+          preserveManifest && linkedSelection.manifest !== undefined
+            ? linkedSelection.manifest
+            : serializeProjectManifest(projectToManifest({ ...projectData, id: projectId })),
+        mainFile: linkedMainFile,
+      });
+      const created = await projectManager.createProject({
+        id: projectId,
+        project: projectData,
+        files: prepared.files,
+        chat: false,
+      });
+      githubProjectBinding.set(created.id, {
+        connectionId: linkedSelection.connection.id,
+        repositoryId: linkedSelection.repository.id,
+        repositoryUrl: linkedSelection.repository.cloneUrl,
+        generation: prepared.generation,
+      });
+      void navigate(projectUrl(created.slugs));
+    } catch (error) {
+      presentLocationError(error);
+      setLinkedError(error instanceof Error ? error.message : 'The linked project could not be imported.');
+    } finally {
+      setLinkedBusy(false);
+    }
+  }, [
+    linkedMainFile,
+    linkedSelection,
+    linkedSyncChats,
+    linkedTargetBranch,
+    navigate,
+    presentLocationError,
+    projectManager,
+  ]);
 
   // Determine if disk import is active
   const isDiskActive =
@@ -661,7 +820,18 @@ export default function ImportRoute(): React.JSX.Element {
                       </div>
                     </div>
 
+                    <GithubRepositoryPicker actionLabel='Review import' onSelect={reviewLinkedRepository} />
+
+                    <div className='flex items-center gap-3 py-2 text-xs text-muted-foreground' aria-hidden>
+                      <span className='h-px flex-1 bg-border' />
+                      <span>or import a public copy — no Git history or sync</span>
+                      <span className='h-px flex-1 bg-border' />
+                    </div>
+
                     <div className='group relative'>
+                      <label htmlFor='repo-url' className='sr-only'>
+                        Public GitHub repository URL
+                      </label>
                       <Input
                         id='repo-url'
                         type='url'
@@ -699,6 +869,118 @@ export default function ImportRoute(): React.JSX.Element {
                     onZipSelected={handleZipSelected}
                   />
                 </div>
+
+                {linkedSelection === undefined ? undefined : (
+                  <section
+                    aria-labelledby='linked-import-review'
+                    className='space-y-4 rounded-lg border bg-sidebar p-6'
+                  >
+                    <div>
+                      <h2 id='linked-import-review' className='font-medium'>
+                        Review linked import
+                      </h2>
+                      <p className='text-sm text-muted-foreground'>
+                        {linkedSelection.repository.fullName} at {linkedSelection.branch.name} ·{' '}
+                        {linkedSelection.repository.access === 'write' ? 'future revisions can push' : 'read-only'}
+                      </p>
+                    </div>
+                    <div className='grid grid-cols-1 gap-4 md:grid-cols-2'>
+                      <div className='space-y-2'>
+                        <label className='text-sm font-medium'>Main file</label>
+                        {linkedSelection.files.length === 0 ? (
+                          <Input
+                            aria-label='New main file'
+                            value={linkedMainFile}
+                            onChange={(event) => {
+                              setLinkedMainFile(event.target.value);
+                            }}
+                          />
+                        ) : (
+                          <FileSelector
+                            dataSource={linkedFilesDataSource}
+                            selectedFile={linkedMainFile}
+                            onSelect={setLinkedMainFile}
+                          />
+                        )}
+                      </div>
+                      <div className='space-y-2'>
+                        <label htmlFor='linked-target-branch' className='text-sm font-medium'>
+                          Local and sync branch
+                        </label>
+                        <Input
+                          id='linked-target-branch'
+                          value={linkedTargetBranch}
+                          onChange={(event) => {
+                            setLinkedTargetBranch(event.target.value);
+                          }}
+                        />
+                      </div>
+                    </div>
+                    <p className='text-xs text-muted-foreground'>
+                      Tau will preserve the selected branch’s commits, tracked files, executable modes, and Git remote.
+                      {linkedSelection.repository.access === 'write'
+                        ? ' Future revisions sync automatically.'
+                        : ' This repository is linked read-only; local revisions remain available.'}
+                    </p>
+                    <div className='rounded-md border p-3 text-xs text-muted-foreground'>
+                      <p>
+                        {linkedNeedsSetup ? (
+                          <>
+                            Setup change: add or update <span className='font-mono'>tau.json</span>
+                            {linkedSelection.files.length === 0 ? ` and create ${linkedMainFile}` : ''}.
+                          </>
+                        ) : (
+                          'Setup change: none; the local branch will point at the selected GitHub commit.'
+                        )}
+                      </p>
+                      <p>Commit author: {linkedSelection.connection.login} using GitHub’s no-reply address.</p>
+                      <p>Repository visibility: {linkedSelection.repository.visibility}.</p>
+                    </div>
+                    <label className='flex items-center gap-2 text-sm'>
+                      <input
+                        type='checkbox'
+                        checked={linkedSyncChats}
+                        onChange={(event) => {
+                          setLinkedSyncChats(event.target.checked);
+                        }}
+                      />
+                      Sync project chats with this repository
+                    </label>
+                    {linkedMainFileSupported ? undefined : (
+                      <p role='alert' className='text-sm text-destructive'>
+                        Choose a supported CAD source file as the project’s main file.
+                      </p>
+                    )}
+                    {linkedError === undefined ? undefined : (
+                      <p role='alert' className='text-sm text-destructive'>
+                        {linkedError}
+                      </p>
+                    )}
+                    <div className='flex gap-2'>
+                      <Button
+                        disabled={
+                          linkedBusy ||
+                          linkedReviewBlocked ||
+                          !linkedMainFileSupported ||
+                          linkedMainFile === '' ||
+                          linkedTargetBranch === ''
+                        }
+                        onClick={importLinkedRepository}
+                      >
+                        {linkedBusy ? 'Importing and linking…' : 'Import and link'}
+                      </Button>
+                      <Button
+                        variant='ghost'
+                        disabled={linkedBusy}
+                        onClick={() => {
+                          setLinkedSelection(undefined);
+                        }}
+                      >
+                        Cancel
+                      </Button>
+                    </div>
+                  </section>
+                )}
 
                 <SuggestedClones
                   onSelect={(repository) => {

@@ -25,7 +25,7 @@ export function KernelsBand(): React.JSX.Element {
           {availableKernelConfigurations().map((kernel) => (
             <HoverCard key={kernel.id} openDelay={200} closeDelay={100}>
               <HoverCardTrigger asChild>
-                <div className='group flex cursor-pointer items-center gap-3 rounded-xl border bg-background p-4 transition-all hover:border-primary/50 hover:shadow-md'>
+                <div className='group flex items-center gap-3 rounded-xl border bg-background p-4 transition-all hover:border-primary/50 hover:shadow-md'>
                   <div className='flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary/10'>
                     <SvgIcon id={kernel.id} className='size-5' />
                   </div>

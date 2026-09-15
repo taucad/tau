@@ -12,15 +12,17 @@
  * path count (F9).
  */
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createIsomorphicGitRevisionPort } from '@taucad/revisions';
 import { ChangeEventBus, MountTable, ProviderRegistry, ResourceQueue, WorkspaceFileService } from '@taucad/filesystem';
 import { MemoryProvider } from '@taucad/filesystem/backend';
 import {
   createCheckoutRoutes,
   createWorkerRevisionRegistry,
+  sameRevisionStatus,
   versionedChangePaths,
 } from '#machines/file-manager.worker.revisions.js';
+import type { RevisionStatusProjection } from '@taucad/revisions/project-revisions-machine';
 import type {
   WorkerProjectRevisions,
   WorkerRevisionRequest,
@@ -156,6 +158,69 @@ const harness = (projectIds: readonly string[]): Harness => {
   return entry;
 };
 
+describe('the projection comparator (P52, W18 DEF-6)', () => {
+  /*
+   * The defect is the comparator, not the transport: connecting a real remote
+   * needs a git server this jsdom suite has none of, so the pin drives the one
+   * pure function the subscription gates on. What it proves is exactly what
+   * broke — a projection whose *only* moved field is a `remote.*` one is not
+   * "the same", so the page is told.
+   */
+  const base = (): RevisionStatusProjection => ({
+    projectId: 'proj_1',
+    checkoutId: 'checkout-1',
+    checkoutRoot: '/projects/proj_1',
+    branch: 'main',
+    projectDirty: false,
+    dirty: false,
+    minting: false,
+    headRevisionId: 'rev-1',
+    follow: 'chat',
+    attention: 0,
+    restore: { asking: false, busy: false, removedPathCount: 0, dirty: false, revisionNumber: undefined },
+    remote: {
+      kind: 'none',
+      url: undefined,
+      phase: 'none',
+      storage: undefined,
+      overQuota: [],
+      error: undefined,
+      fetchOnly: false,
+      provider: undefined,
+      repositoryId: undefined,
+    } as const,
+    publish: { phase: 'idle', tags: [], publicationId: undefined, shareUrl: undefined, error: undefined } as const,
+    sync: { state: 'noRemote', pendingCount: 0, online: true, conflictRef: undefined, error: undefined } as const,
+    branches: [],
+    branchVerb: { busy: false, asking: false, operation: undefined, branch: undefined, question: undefined },
+    conflicts: [],
+  });
+
+  it('repaints the Sync region when the remote connects and nothing else moves', () => {
+    const connected = { ...base(), remote: { ...base().remote, kind: 'tau', phase: 'connected' } as const };
+
+    expect(sameRevisionStatus(base(), base())).toBe(true);
+    expect(sameRevisionStatus(base(), connected)).toBe(false);
+  });
+
+  it.each([
+    ['phase', { phase: 'connecting' } as const],
+    ['url', { url: 'https://example.test/repo.git' }],
+    ['storage', { storage: { used: 1, quota: 2 } }],
+    ['overQuota', { overQuota: ['big.stl'] }],
+    ['error', { error: 'refused' }],
+  ])('repaints when remote.%s moves on its own', (_field, patch) => {
+    expect(sameRevisionStatus(base(), { ...base(), remote: { ...base().remote, ...patch } })).toBe(false);
+  });
+
+  it('repaints when the restore confirmation or the publish dialog moves on its own', () => {
+    expect(sameRevisionStatus(base(), { ...base(), restore: { ...base().restore, asking: true } })).toBe(false);
+    expect(sameRevisionStatus(base(), { ...base(), publish: { ...base().publish, phase: 'choosingVersion' } })).toBe(
+      false,
+    );
+  });
+});
+
 describe('the file-manager worker revision root (north star S48 jsdom 1–4)', () => {
   it('should start one root per opened project and stop its actor when the last port closes', async () => {
     const fixture = harness(['alpha', 'beta']);
@@ -277,6 +342,29 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     const checkout = fixture.service.createRootedFileSystem(created?.checkoutRoot ?? '');
     expect(await checkout.readFile('main.scad', 'utf8')).toBe('cube(10);');
     expect(await project.exists(`.tau/checkouts/alpha/${created?.checkoutId ?? ''}/main.scad`)).toBe(true);
+  });
+
+  it('should adopt a daemon revision into the worker projection', async () => {
+    const fixture = harness(['alpha']);
+    const project = fixture.service.createRootedFileSystem('/projects/alpha');
+    await project.writeFile('main.scad', 'cube(10);');
+    const alpha = await fixture.open('alpha');
+
+    alpha.send({
+      command: 'adoptHostFinalized',
+      checkoutId: 'live',
+      revisionId: 'rev-daemon',
+      treeId: 'tree-daemon',
+      branch: 'main',
+    });
+    await alpha.settle();
+
+    const root = await fixture.root('alpha');
+    expect(root.status()).toMatchObject({
+      checkoutId: 'live',
+      headRevisionId: 'rev-daemon',
+      branch: 'main',
+    });
   });
 
   it('should restore a recorded revision through the port commands', async () => {
@@ -447,6 +535,85 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     ).toEqual([]);
   });
 
-  it.todo('should reconcile a checkout that a sync pull moved — sync.machine arrives with W13');
-  it.todo('should scope the root to a project session — project-session identity arrives with W19');
+  it('should register the project on Tau Cloud before it asks the remote for anything (P54, W18 DEF-1)', async () => {
+    const fixture = harness(['alpha']);
+    await fixture.service
+      .createRootedFileSystem('/projects/alpha')
+      .writeFile('tau.json', JSON.stringify({ name: 'Alpha project' }));
+    const alpha = await fixture.open('alpha');
+    const requests: Array<{
+      method: string;
+      url: string;
+      credentials: string | undefined;
+      body: BodyInit | undefined;
+    }> = [];
+    const original = globalThis.fetch;
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      requests.push({
+        method: init?.method ?? 'GET',
+        url: input instanceof Request ? input.url : input.toString(),
+        credentials: init?.credentials,
+        body: init?.body ?? undefined,
+      });
+      /* The registration answers; whatever the advertisement then does is the
+       * remote's business, not this pin's. */
+      return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } });
+    }) as unknown as typeof globalThis.fetch;
+
+    try {
+      /* The origin reaches the worker the way the page sends it (I8). */
+      alpha.send({ command: 'remoteCredential', apiBaseUrl: 'https://api.test' });
+      alpha.send({ command: 'connectRemote', kind: 'tau' });
+      await alpha.settle();
+
+      /* First, and only once: a retried *Connect* is one request because the
+       * API's insert is `onConflictDoNothing` (P51). */
+      expect(requests[0]).toEqual({
+        method: 'PUT',
+        url: 'https://api.test/v1/projects/alpha',
+        credentials: 'include',
+        body: JSON.stringify({ name: 'Alpha project' }),
+      });
+      /* Before the initial sync: an advertisement asked first answers 404,
+       * because nothing has written the row the git server authorizes against. */
+      const advertisement = requests.findIndex((request) => request.url.includes('/v1/git/alpha.git'));
+      expect(advertisement === -1 || advertisement > 0).toBe(true);
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  it('should answer an admission whose turn ended before its lease, with the turn’s own reason (W19-b)', async () => {
+    const fixture = harness(['alpha']);
+    const project = fixture.service.createRootedFileSystem('/projects/alpha');
+    await project.writeFile('main.scad', 'cube(10);');
+    const alpha = await fixture.open('alpha');
+
+    /*
+     * Only `prepare` used to refuse an admission, so a turn that ended any
+     * other way before its lease — a base cut the checkout could not settle
+     * (the browser's `Buffer is not defined`), a lease it could not write, or
+     * this abandonment — left the caller waiting out the whole 30 s bound and
+     * then hearing "it was never leased", which names nothing (I12).
+     */
+    const placed = new Promise<WorkerRevisionResponse>((resolve) => {
+      alpha.port.addEventListener('message', ({ data }: MessageEvent<WorkerRevisionResponse>) => {
+        if ((data.type === 'result' || data.type === 'error') && data.id === 99) {
+          resolve(data);
+        }
+      });
+    });
+    alpha.send({ command: 'admitTurn', id: 99, turnId: 'turn-1', chatId: 'chat-1', runId: 'run-1' });
+    alpha.send({ command: 'turnAbandoned', turnId: 'turn-1' });
+
+    const answer = await placed;
+    expect(answer.type).toBe('error');
+    if (answer.type !== 'error') {
+      throw new Error('the admission must be refused, not placed');
+    }
+    expect(answer.code).toBe('REVISION_PREPARE_FAILED');
+    expect(answer.message).toBe(
+      'This project could not open a revision for the turn: The turn ended before it recorded a revision.',
+    );
+  });
 });

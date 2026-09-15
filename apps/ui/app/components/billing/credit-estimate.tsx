@@ -105,7 +105,7 @@ export function CreditBalanceChip({ className }: { readonly className?: string }
       <Button
         variant='outline'
         size='sm'
-        className={cn('h-7 cursor-pointer! rounded-full text-muted-foreground hover:text-foreground', className)}
+        className={cn('h-7 rounded-full text-muted-foreground hover:text-foreground', className)}
         aria-label={`Credits: ${availableLabel} available, ${reservedLabel} reserved. Add credits.`}
         onClick={() => {
           if (entitlements.hasPaymentMethod) {

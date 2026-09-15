@@ -200,7 +200,7 @@ export function useKernelDiagnostics(options: UseKernelDiagnosticsOptions): UseK
     }
 
     previousFilesRef.current = currentFiles;
-  }, [monaco, markerService, kernelIssues, cadActor]);
+  }, [monaco, markerService, kernelIssues]);
 
   // Monaco-to-Kernel: forward TS error markers to CAD actor
   const handleValidate = useCallback(() => {

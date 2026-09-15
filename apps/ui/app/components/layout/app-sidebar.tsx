@@ -75,9 +75,6 @@ export function AppSidebar({ ...properties }: React.ComponentProps<typeof Sideba
             <NavMain items={navMainItems} groupLabel='Platform' />
           </div>
         </div>
-        <div className='sticky bottom-0 z-10'>
-          <NavMain items={navRoutes.navSecondary} />
-        </div>
       </SidebarContent>
       <SidebarFooter className='border-t p-1'>
         <NavUser />

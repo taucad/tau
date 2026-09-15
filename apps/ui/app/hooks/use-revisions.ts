@@ -15,7 +15,7 @@
  */
 
 import { useMemo, useSyncExternalStore } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQueries, useQuery } from '@tanstack/react-query';
 import type { RevisionDiffEntry, RevisionRow } from '@taucad/revisions';
 import { useProject } from '#hooks/use-project.js';
 import { useRevisionClient, useRevisionStatus } from '#hooks/use-revision-status.js';
@@ -85,22 +85,27 @@ const cardOf = (row: RevisionRow): RevisionCard => ({
 });
 
 /** Host-attested settlements this tab holds for the project on screen. */
-const useHostFinalizedTurns = (projectId: string): readonly RevisionCard[] => {
+type FinalizedRevision = Readonly<{ branch: string | undefined; card: RevisionCard }>;
+
+const useHostFinalizedTurns = (projectId: string): readonly FinalizedRevision[] => {
   const settlements = useSyncExternalStore(subscribeHostFinalizedTurns, getHostFinalizedTurns, getHostFinalizedTurns);
   return useMemo(
     () =>
-      settlements.flatMap((settlement): RevisionCard[] =>
+      settlements.flatMap((settlement): FinalizedRevision[] =>
         settlement.projectId === projectId && settlement.revisionId !== undefined
           ? [
               {
-                revisionId: settlement.revisionId,
-                n: undefined,
-                createdAt: 0,
-                summary: '',
-                actor: '',
-                turnId: settlement.turnId,
-                conflicted: false,
-                changedPaths: settlement.changedPaths,
+                branch: settlement.branch,
+                card: {
+                  revisionId: settlement.revisionId,
+                  n: undefined,
+                  createdAt: 0,
+                  summary: '',
+                  actor: '',
+                  turnId: settlement.turnId,
+                  conflicted: false,
+                  changedPaths: settlement.changedPaths,
+                },
               },
             ]
           : [],
@@ -126,6 +131,16 @@ export function useRevisions(): RevisionsView {
   const branch = status?.branch;
   const headRevisionId = status?.headRevisionId;
   const finalized = useHostFinalizedTurns(projectId);
+  const finalizedBranchHeads = useMemo(
+    () => [
+      ...new Map(
+        finalized.flatMap((entry) =>
+          entry.branch && entry.branch !== branch ? [[entry.branch, entry.card.revisionId] as const] : [],
+        ),
+      ),
+    ],
+    [branch, finalized],
+  );
 
   const { data: rows, isPending } = useQuery({
     queryKey: ['revision-log', projectId, branch ?? '', headRevisionId ?? ''],
@@ -134,6 +149,14 @@ export function useRevisions(): RevisionsView {
     /* The graph is append-only and the key carries the head, so a cached answer
      * for a head that has not moved is exact rather than merely fresh. */
     staleTime: Number.POSITIVE_INFINITY,
+  });
+  const settledBranchRows = useQueries({
+    queries: finalizedBranchHeads.map(([settledBranch, finalizedRevisionId]) => ({
+      queryKey: ['revision-log', projectId, settledBranch, finalizedRevisionId],
+      enabled: client !== undefined,
+      queryFn: async () => client?.log({ branch: settledBranch }) ?? [],
+      staleTime: Number.POSITIVE_INFINITY,
+    })),
   });
 
   return useMemo(() => {
@@ -145,12 +168,18 @@ export function useRevisions(): RevisionsView {
     /* The graph first, then the settlements it does not name: a turn a remote
      * host recorded has no row here, and a turn this graph holds is the better
      * card because it carries its own number. */
-    for (const card of finalized) {
+    for (const { card } of finalized) {
       if (card.turnId !== undefined) {
         byTurnId.set(card.turnId, card);
       }
     }
     for (const card of revisions) {
+      if (card.turnId !== undefined) {
+        byTurnId.set(card.turnId, card);
+      }
+    }
+    for (const row of settledBranchRows.flatMap((query) => query.data ?? [])) {
+      const card = cardOf(row);
       if (card.turnId !== undefined) {
         byTurnId.set(card.turnId, card);
       }
@@ -163,9 +192,9 @@ export function useRevisions(): RevisionsView {
       isDirty: status?.dirty ?? false,
       canReturnToLatest:
         headRevisionId !== undefined && revisions.length > 0 && revisions[0]?.revisionId !== headRevisionId,
-      isLoading: isPending,
+      isLoading: isPending || settledBranchRows.some((query) => query.isPending),
     };
-  }, [branch, client, finalized, headRevisionId, isPending, rows, status?.dirty]);
+  }, [branch, client, finalized, headRevisionId, isPending, rows, settledBranchRows, status?.dirty]);
 }
 
 /**

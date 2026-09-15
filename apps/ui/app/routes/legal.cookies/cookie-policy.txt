@@ -1,85 +1,52 @@
-# Cookie Policy
+# Storage and Cookie Policy
 
-*Effective date: December 29, 2025*
+*Effective date: September 14, 2026*
 
-This Cookie Policy explains how TauCAD Limited ("we," "us," or "our") uses cookies and similar technologies when you use our Service. This policy should be read together with our [Privacy Policy](/legal/privacy).
+This notice explains how TauCAD Limited ("Tau", "we", "us", or "our") uses cookies and browser storage when you use Tau. Read it with our [Privacy Policy](/legal/privacy).
 
-This Cookie Policy complies with the EU ePrivacy Directive (2002/58/EC as amended by 2009/136/EC), the UK Privacy and Electronic Communications Regulations (PECR), and other applicable cookie laws.
+## Web and Desktop
 
-## What Are Cookies
+The Tau website and Tau desktop app use different storage:
 
-Cookies are small text files stored on your device. Similar technologies like localStorage are also used to store information locally in your browser.
+- **Web:** uses necessary authentication, theme, and consent cookies. Optional PostHog analytics storage starts only after you accept analytics.
+- **Desktop:** does not initialize PostHog, set analytics cookies, or show a cookie-consent form. Product preferences and project data are stored locally on your device. Privacy and Terms links open this website in your system browser. Operational security and service logs may still process network information when you use online features.
 
-## Cookies We Use
+## Necessary Web Cookies
 
-We distinguish between two types of cookies:
+| Purpose | Storage | Retention |
+|---|---|---|
+| Authentication and account security | Secure, HttpOnly, SameSite=Lax session cookie | Up to 7 days under the current session configuration |
+| Server-rendered theme and flash prevention | Secure on HTTPS, HttpOnly, SameSite=Lax theme cookie | Browser session |
+| Analytics consent decision | Versioned SameSite=Lax cookie containing accepted or declined only | Up to 365 days |
 
-- **Essential**: Strictly necessary for basic functionality. Cannot be disabled.
-- **Analytics** (Optional): With your consent, used to understand how you use the Service.
+The consent cookie records your decision so Tau can enforce it. If it is absent, expired, malformed, or belongs to an obsolete policy version, Tau asks again before analytics starts.
 
-### Essential Cookies
+## Functional Local Storage
 
-| Category | Purpose | Retention |
-|----------|---------|-----------|
-| **Theme** | Remember your preferred color theme and accent color | Persistent |
-| **Layout** | Store panel sizes, sidebar states, and UI preferences | Persistent |
-| **CAD Settings** | Remember CAD kernel, measurement units, and file preview settings | Persistent |
-| **Chat Preferences** | Store AI model selection, web search preferences, and interface settings | Persistent |
-| **View Settings** | Remember camera field of view, view configuration, and section view settings | Persistent |
-| **Console Settings** | Store log level and display configuration | Persistent |
-| **Converter Settings** | Remember output formats and download preferences | Persistent |
-| **Cookie Consent** | Remember your cookie consent choice | 1 year |
+Tau stores interface choices such as sidebar state, CAD kernel, model selection, editor options, converter options, and display preferences in `localStorage`. These values remain until you reset the preference or clear site/app data. Known legacy preference cookies are moved to local storage and deleted when first read.
 
-These cookies are stored locally in your browser and are not transmitted to external services. "Persistent" cookies remain until you clear your browser data or reset preferences.
+Projects and other user-created local product data may use IndexedDB or the Origin Private File System in the web app and device-local storage in the desktop app. This storage performs the CAD functions you request; it is not PostHog analytics. It remains until you delete the data, clear the relevant site/app storage, or uninstall the app, subject to platform behaviour.
 
-### Analytics Cookies (Optional)
+## Optional Web Analytics
 
-With your consent, we use PostHog to understand how users interact with our service.
+After you accept, Tau uses PostHog Cloud for product analytics. The approved web configuration can collect page views and navigation, browser/device information, interaction and feature-use events, authenticated account identity and profile fields, error events, and session replay. PostHog uses first-party cookie and local-storage persistence in this accepted state. Tau does not initialize PostHog or send analytics while your choice is unknown, declined, withdrawn, or overridden by Global Privacy Control.
 
-**Retention:** 12 months from collection.
-**Data Location:** United States.
+PostHog is a recipient of this analytics data. See the [PostHog Privacy Policy](https://posthog.com/privacy). The web client does not set PostHog’s server-side record-retention period; contact [privacy@tau.new](mailto:privacy@tau.new) for the current configured retention and deletion schedule.
 
-**What PostHog collects:** Page views, navigation patterns, device and browser information, interaction patterns, feature usage statistics.
+## Your Choice and Global Privacy Control
 
-**What PostHog does NOT do:** Use third-party cookies, track you across websites, share data with advertising networks, sell your data.
+On your first eligible web visit with no valid decision, Tau shows a consent form before analytics starts. Accept and Decline apply only to optional analytics. Choose **Manage** in the form, or **Cookies** in the website footer, to review or change the choice.
 
-For more information, see the [PostHog Privacy Policy](https://posthog.com/privacy).
+Withdrawing consent stops capture and session replay, resets the analytics identity, and asks the PostHog SDK to clear its analytics persistence. It does not delete functional project data or account cookies needed for a signed-in session.
 
-## Global Privacy Control (GPC)
+Tau treats an active Global Privacy Control signal as a hard analytics decline. It prevents acceptance while the signal is active and suppresses the consent prompt. See [Global Privacy Control](https://globalprivacycontrol.org).
 
-We honor the Global Privacy Control (GPC) signal. If your browser sends a GPC signal:
+## Browser Controls
 
-- Analytics cookies (PostHog) will not be loaded
-- Your preference is respected immediately without displaying a consent prompt for analytics
-- Essential cookies will still function as necessary for the Service
+Your browser can inspect, block, or delete cookies and site storage. Blocking necessary storage may prevent sign-in, saved preferences, or local projects from working. Clearing the consent cookie makes Tau ask for an analytics decision again before capture.
 
-For more information about GPC, visit [globalprivacycontrol.org](https://globalprivacycontrol.org).
+## Changes and Contact
 
-## Managing Your Cookie Preferences
+We may update this notice when our storage or analytics purposes change. A materially changed consent purpose may require a new decision.
 
-When you first visit Tau, you will see a cookie consent banner where you can:
-
-- **Accept**: Enable both essential and analytics cookies
-- **Decline**: Enable only essential cookies (analytics disabled)
-- **Manage**: Customize your choices
-
-You can change your preferences at any time:
-
-1. Click the Cookies button in the footer to reopen preferences
-2. Visit [Cookie Settings](/legal/cookies#preferences)
-3. Use your browser's cookie controls
-4. Clear site data for tau.new to reset all preferences
-
-When you withdraw consent for analytics, we stop collecting new data immediately.
-
-## Browser Cookie Controls
-
-Most web browsers allow you to view, delete, or block cookies through their settings. Refer to your browser's help documentation for instructions.
-
-## Changes to This Policy
-
-We may update this Cookie Policy from time to time. We will notify you of changes by posting the new policy on this page.
-
-## Contact Us
-
-If you have questions about this Cookie Policy, contact us at [privacy@tau.new](mailto:privacy@tau.new).
+Questions or privacy requests: [privacy@tau.new](mailto:privacy@tau.new).

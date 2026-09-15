@@ -1,19 +1,13 @@
 /**
  * `Mod+S` anywhere in the workbench: record what is on disk (S30, AC12).
  *
- * Buffers first, then the ask: `editorRef.flushNow`, `projectRef.flushNow`, then
- * the cut. The two flushes *start* the pending writes rather than waiting them
- * out — the editor's own write settles in its `storing` region — so this is a
- * best-effort ordering, not a guarantee that the last keystroke is on disk when
- * the tree is hashed. It does not need to be: the checkout's I5 gate means a
- * save on an unchanged tree costs one tree hash and records nothing, and a
- * keystroke that lands just after is recorded by the idle window five minutes
- * later. (A person who wants the guarantee has the stronger form already:
- * `project-route.tsx` awaits `{ ready: { storing: 'idle' } }` before it lets a
- * project go.)
+ * Buffers first, then the ask: `editorRef.flushNow`, `projectRef.flushNow`, wait
+ * for both stores to become idle, then cut the tree. The wait is bounded so a
+ * stuck producer cannot disable the explicit save gesture forever.
  */
 
 import type { ReactNode } from 'react';
+import { waitFor } from 'xstate';
 import { useKeybinding } from '#hooks/use-keyboard.js';
 import { useProject } from '#hooks/use-project.js';
 import { useRevisionCommands } from '#hooks/use-revision-status.js';
@@ -25,26 +19,41 @@ export const saveRevisionKeyCombination = {
   modKey: true,
 } as const satisfies KeyCombination;
 
+const saveFlushTimeoutMilliseconds = 10_000;
+
 /**
  * Register the save shortcut for the project this subtree is rooted at.
  *
+ * Every live project keeps its subtree mounted (V21), so every one of them
+ * registers this global gesture; the registry fires the first registration and
+ * consumes the event. Only the project the person is looking at may answer
+ * `Mod+S`, so a retained, unfocused project disables its binding (P73).
+ *
+ * @param props - `isFocused`: whether this project is the one the person is looking at.
  * @returns Nothing rendered.
  */
-export function RevisionSaveShortcut(): ReactNode {
+export function RevisionSaveShortcut({ isFocused = true }: { readonly isFocused?: boolean }): ReactNode {
   const { projectRef, editorRef } = useProject();
   const { saveRevision } = useRevisionCommands();
 
-  /* `ignoreInputs` because a save is exactly what someone means while they are
-   * typing in the editor, and `scope: 'global'` because it means the same thing
-   * with a dialog open. */
+  /* A save is exactly what someone means while typing in the editor, and
+   * `scope: 'global'` means the same thing with a dialog open. */
   useKeybinding(
     saveRevisionKeyCombination,
-    () => {
+    async () => {
       editorRef.send({ type: 'flushNow' });
       projectRef.send({ type: 'flushNow' });
+      await Promise.allSettled([
+        waitFor(editorRef, (state) => state.matches({ ready: { storing: 'idle' } }), {
+          timeout: saveFlushTimeoutMilliseconds,
+        }),
+        waitFor(projectRef, (state) => state.matches({ ready: { storing: 'idle' } }), {
+          timeout: saveFlushTimeoutMilliseconds,
+        }),
+      ]);
       saveRevision('save');
     },
-    { ignoreInputs: true, scope: 'global' },
+    { enabled: isFocused, scope: 'global' },
   );
 
   return null;

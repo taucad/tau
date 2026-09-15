@@ -332,6 +332,7 @@ export function RevisionsPanelBody(): React.JSX.Element {
             onConnect={commands.connectRemote}
             onDisconnect={commands.disconnectRemote}
             onCancel={commands.cancelRemote}
+            onSync={commands.syncNow}
           />
         ) : (
           <Button

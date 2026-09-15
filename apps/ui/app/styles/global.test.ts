@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 
 const tokenStyles = readFileSync(join(process.cwd(), '../../packages/ui/src/styles/tokens.css'), 'utf8');
 const appStyles = readFileSync(join(process.cwd(), 'app/styles/global.css'), 'utf8');
+const appStyleLinks = readFileSync(join(process.cwd(), 'app/styles/global.styles.ts'), 'utf8');
 const globalStyles = `${tokenStyles}\n${appStyles}`;
 
 const structuralTokens = [
@@ -152,6 +153,7 @@ const parseToken = (name: TokenName, tokens: TokenMap) => {
 describe('global structural color tokens', () => {
   it('uses the neutral Codex-matched light sidebar surface', () => {
     expect(resolveToken('--sidebar-background', lightTokens)).toBe('oklch(0.99 0 none)');
+    expect(resolveToken('--sidebar-foreground', lightTokens)).toBe('oklch(0.43 0 none)');
   });
 
   it.each([
@@ -259,6 +261,44 @@ describe('global focus ring token', () => {
         ).toBeGreaterThanOrEqual(3);
       }
     }
+  });
+});
+
+describe('action cursor contract', () => {
+  it('defaults actions to the platform cursor and exposes one opt-in utility', () => {
+    expect(lightTokens).toMatchObject({ '--cursor-action': 'default' });
+
+    const enabled = readRuleStyle(tokenStyles.indexOf(":root[data-pointer-cursors='true']"), tokenStyles);
+    const utility = readRuleStyle(tokenStyles.indexOf('@utility cursor-action'), tokenStyles);
+
+    expect(enabled.getPropertyValue('--cursor-action').trim()).toBe('pointer');
+    expect(utility.cursor).toBe('var(--cursor-action)');
+  });
+
+  it('applies the preference to enabled actions and scoped sidebar navigation', () => {
+    expect(tokenStyles).toContain("[role='button']");
+    expect(tokenStyles).toContain("[role='menuitem']");
+    expect(tokenStyles).toContain("[role='switch']");
+    expect(tokenStyles).toContain(':not(:any-link)');
+    expect(tokenStyles).toContain(":not([aria-disabled='true'])");
+    expect(tokenStyles).toContain(":not([data-disabled='true'])");
+    expect(tokenStyles).toContain("[data-slot='sidebar'] :any-link");
+    expect(tokenStyles).toContain('cursor: var(--cursor-action);');
+  });
+
+  it('blocks dependency pointer utilities and adapts vendor actions to the shared token', () => {
+    const legacyUtility = ['cursor', 'pointer'].join('-');
+    expect(tokenStyles).toContain(`@source not inline('${legacyUtility}');`);
+    expect(tokenStyles).toContain("svg[id^='mermaid-'] .clickable");
+    expect(appStyles).not.toContain("@import 'dockview-react/dist/styles/dockview.css'");
+    expect(appStyleLinks.indexOf('href: dockviewStylesUrl')).toBeLessThan(
+      appStyleLinks.indexOf('href: globalStylesUrl'),
+    );
+    expect(appStyles).toContain('.dockview-theme-tau');
+    expect(appStyles).toContain('cursor: var(--cursor-action) !important;');
+    expect(appStyles).toContain('.monaco-menu-option');
+    expect(appStyles).toContain('[data-sonner-toast] [data-button]');
+    expect(appStyles).toContain('#profiler-toggle');
   });
 });
 

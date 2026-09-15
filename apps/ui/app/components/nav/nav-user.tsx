@@ -1,5 +1,16 @@
 import { useEntitlements } from '@taucad/billing/hooks/use-entitlements';
-import { Bug, CircleHelp, CreditCard, Settings, Sparkles, WifiOff } from 'lucide-react';
+import {
+  BookOpen,
+  Bug,
+  CircleHelp,
+  CreditCard,
+  Files,
+  FileText,
+  Settings,
+  Shield,
+  Sparkles,
+  WifiOff,
+} from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
 import {
   DropdownMenu,
@@ -33,7 +44,6 @@ export function NavUser(): React.JSX.Element {
   const upgradeItem = (
     <DropdownMenuItem
       key='upgrade'
-      className='cursor-pointer'
       onSelect={() => {
         openSettingsDialog('billing');
       }}
@@ -45,6 +55,24 @@ export function NavUser(): React.JSX.Element {
   );
 
   const helpItems = [
+    <DropdownMenuItem key='documentation' asChild>
+      <a href='https://docs.tau.new' target='_blank' rel='noopener noreferrer'>
+        <BookOpen />
+        Documentation
+      </a>
+    </DropdownMenuItem>,
+    <DropdownMenuItem key='privacy' asChild>
+      <a href='https://tau.new/legal/privacy' target='_blank' rel='noopener noreferrer'>
+        <Shield />
+        Privacy
+      </a>
+    </DropdownMenuItem>,
+    <DropdownMenuItem key='terms' asChild>
+      <a href='https://tau.new/legal/terms' target='_blank' rel='noopener noreferrer'>
+        <FileText />
+        Terms
+      </a>
+    </DropdownMenuItem>,
     <DropdownMenuItem key='bug' asChild>
       <a href={`${metaConfig.githubUrl}/issues/new?labels=bug`} target='_blank' rel='noopener noreferrer'>
         <Bug />
@@ -91,7 +119,6 @@ export function NavUser(): React.JSX.Element {
               ) : (
                 <DropdownMenuItem
                   key='billing'
-                  className='cursor-pointer'
                   onSelect={() => {
                     openSettingsDialog('billing');
                   }}
@@ -100,9 +127,9 @@ export function NavUser(): React.JSX.Element {
                   Billing
                 </DropdownMenuItem>
               ),
+              { label: 'Files', href: '/files', icon: <Files /> },
               <DropdownMenuItem
                 key='settings'
-                className='cursor-pointer'
                 onSelect={() => {
                   openSettingsDialog('general');
                 }}

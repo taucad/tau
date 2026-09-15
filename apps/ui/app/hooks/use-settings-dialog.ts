@@ -8,7 +8,6 @@ const settingsSectionSchema = z.enum([
   'filesystem',
   'account',
   'security',
-  'api-keys',
   'billing',
   'compute',
   'models',

@@ -19,13 +19,24 @@ const emptyStatus = (): RevisionStatusProjection => ({
   checkoutId: 'live',
   checkoutRoot: '/projects/p',
   branch: 'main',
+  projectDirty: false,
   dirty: false,
   minting: false,
   headRevisionId: undefined,
   follow: 'chat',
   attention: 0,
   restore: { asking: false, busy: false, removedPathCount: 0, dirty: false, revisionNumber: undefined },
-  remote: { kind: 'none', url: undefined, phase: 'none', storage: undefined, overQuota: [], error: undefined },
+  remote: {
+    kind: 'none',
+    url: undefined,
+    phase: 'none',
+    storage: undefined,
+    overQuota: [],
+    error: undefined,
+    fetchOnly: false,
+    provider: undefined,
+    repositoryId: undefined,
+  },
   branches: [{ name: 'main', head: undefined, checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: [] }],
   branchVerb: { busy: false, asking: false, operation: undefined, branch: undefined, question: undefined },
   publish: { phase: 'idle', tags: [], publicationId: undefined, shareUrl: undefined, error: undefined },
@@ -42,6 +53,7 @@ export const revisionStatusHarness = {
    * render as nothing rather than as an empty project. */
   connected: true,
   rows: [] as readonly RevisionRow[],
+  rowsByBranch: new Map<string, readonly RevisionRow[]>(),
   diff: [] as readonly RevisionDiffEntry[],
   comparison: emptyComparison(),
   toasts: new Set<(toast: RevisionToast) => void>(),
@@ -78,6 +90,7 @@ export const revisionStatusHarness = {
     this.status = emptyStatus();
     this.connected = true;
     this.rows = [];
+    this.rowsByBranch.clear();
     this.diff = [];
     this.comparison = emptyComparison();
     this.toasts.clear();
@@ -104,7 +117,9 @@ export const revisionStatusMock = (): Record<string, unknown> => ({
       return () => revisionStatusHarness.toasts.delete(listener);
     },
     admitTurn: async () => ({ checkoutId: 'live', root: '/projects/p', baseRevisionId: '' }),
-    log: async () => revisionStatusHarness.rows,
+    log: async (request?: { readonly branch?: string }) =>
+      (request?.branch === undefined ? undefined : revisionStatusHarness.rowsByBranch.get(request.branch)) ??
+      revisionStatusHarness.rows,
     diff: async () => revisionStatusHarness.diff,
     compare: async () => revisionStatusHarness.comparison,
     send: () => undefined,

@@ -35,16 +35,39 @@ const installShellGlobal = (options: { foreign?: boolean } = {}) => {
     );
   });
   const selectDirectory = vi.fn(async () => '/Users/tester/Projects');
+  const retainAgentHost = vi.fn(async () => undefined);
+  const releaseAgentHost = vi.fn(async () => undefined);
   const setAppIconTheme = vi.fn();
+  let quitHandler: (() => void) | undefined;
+  const onQuitAsk = vi.fn((handler: () => void) => {
+    quitHandler = handler;
+    return () => {
+      if (quitHandler === handler) {
+        quitHandler = undefined;
+      }
+    };
+  });
+  const isQuitReady = (): boolean => quitHandler !== undefined;
   vi.stubEnv('TAU_TARGET', 'desktop');
   vi.stubGlobal('tau', {
     relayTag,
     requestServicesPort,
+    agentHost: { retain: retainAgentHost, release: releaseAgentHost },
     nodeFs: { homeRoot },
     appIcon: { setTheme: setAppIconTheme },
+    quit: { isReady: isQuitReady, onAsk: onQuitAsk, reportQuiesced: vi.fn() },
     dialog: { selectDirectory },
   });
-  return { port, requestServicesPort, selectDirectory, setAppIconTheme };
+  return {
+    port,
+    requestServicesPort,
+    retainAgentHost,
+    releaseAgentHost,
+    selectDirectory,
+    setAppIconTheme,
+    isQuitReady,
+    onQuitAsk,
+  };
 };
 
 /** Fresh module graph per case: the build-target flag is read once at module scope. */
@@ -88,6 +111,19 @@ describe('desktopBridge', () => {
     expect(setAppIconTheme).toHaveBeenCalledExactlyOnceWith('dark');
   });
 
+  it('should install and remove the renderer quit subscription through the preload surface', async () => {
+    const { isQuitReady, onQuitAsk } = installShellGlobal();
+    const { onDesktopQuitRequested } = await loadBridge();
+
+    expect(isQuitReady()).toBe(false);
+    const unsubscribe = onDesktopQuitRequested(vi.fn());
+    expect(onQuitAsk).toHaveBeenCalledOnce();
+    expect(isQuitReady()).toBe(true);
+
+    unsubscribe();
+    expect(isQuitReady()).toBe(false);
+  });
+
   it('connects by listening for the relay before asking for the port', async () => {
     const { port, requestServicesPort } = installShellGlobal();
     const { desktopBridge } = await loadBridge();
@@ -107,11 +143,26 @@ describe('desktopBridge', () => {
     /* Ruling C3's launcher 2: the far end is `serveAgentChannel(port, launcher)`
      * in the services utility, and the root is what main checks before minting
      * anything. Same listener-before-request order as `nodeFs`. */
-    await expect(desktopBridge()?.agentHost.connect('/Users/tester/Projects/widget', 'durable')).resolves.toBe(port);
+    await expect(
+      desktopBridge()?.agentHost.connect('/Users/tester/Projects/widget', 'proj_widget', 'durable'),
+    ).resolves.toBe(port);
     expect(requestServicesPort).toHaveBeenCalledExactlyOnceWith(expect.any(String), 'agentHost', {
       workspaceRoot: '/Users/tester/Projects/widget',
+      projectId: 'proj_widget',
       computeMode: 'durable',
     });
+  });
+
+  it('forwards project-session retain and release to the preload surface', async () => {
+    const { retainAgentHost, releaseAgentHost } = installShellGlobal();
+    const { desktopBridge } = await loadBridge();
+    const agentHost = desktopBridge()?.agentHost;
+
+    await agentHost?.retain('/projects/widget', 'project-widget', 'window-1');
+    await agentHost?.release('/projects/widget', 'project-widget', 'window-1');
+
+    expect(retainAgentHost).toHaveBeenCalledExactlyOnceWith('/projects/widget', 'project-widget', 'window-1');
+    expect(releaseAgentHost).toHaveBeenCalledExactlyOnceWith('/projects/widget', 'project-widget', 'window-1');
   });
 
   it('gives each connect its own request id', async () => {
@@ -119,7 +170,10 @@ describe('desktopBridge', () => {
     const { desktopBridge } = await loadBridge();
     const bridge = desktopBridge();
 
-    await Promise.all([bridge?.nodeFs.connect(), bridge?.agentHost.connect('/Users/tester/Projects/widget', 'off')]);
+    await Promise.all([
+      bridge?.nodeFs.connect(),
+      bridge?.agentHost.connect('/Users/tester/Projects/widget', 'proj_widget', 'off'),
+    ]);
 
     const [first] = requestServicesPort.mock.calls[0] as [string, string];
     const [second] = requestServicesPort.mock.calls[1] as [string, string];

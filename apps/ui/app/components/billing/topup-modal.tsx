@@ -135,13 +135,14 @@ export function TopupModal({ isOpen, onOpenChange, defaultAmountCents = 2500 }: 
         }
       }
     },
-    [generationValue, userId],
+    [generationValue],
   );
 
   useEffect(() => {
-    if (!isOpen || binding === undefined) {
+    if (!isOpen || !apiBaseUrl || !environment || !userId) {
       return;
     }
+    const currentBinding = { apiBaseUrl, environment, ownerId: userId };
     let active = true;
     // oxlint-disable-next-line react/set-state-in-effect -- hide the prior identity's financial state before the owned GET
     setAction(undefined);
@@ -151,7 +152,7 @@ export function TopupModal({ isOpen, onOpenChange, defaultAmountCents = 2500 }: 
     // async-iife: bootstrap
     void (async () => {
       try {
-        const items = await getUnresolvedPaymentActions(binding, 'manual_topup');
+        const items = await getUnresolvedPaymentActions(currentBinding, 'manual_topup');
         // oxlint-disable-next-line typescript/no-unnecessary-condition -- cleanup can flip active while the GET is pending
         if (active) {
           const owned = items[0];

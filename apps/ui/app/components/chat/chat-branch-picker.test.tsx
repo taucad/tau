@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
@@ -46,6 +46,7 @@ const twoBranches = [
 ];
 
 beforeEach(() => {
+  globalThis.HTMLElement.prototype.scrollIntoView = vi.fn();
   revisionStatusHarness.reset();
   activeChatId = 'chat-1';
   project = { projectId: 'p' };
@@ -62,6 +63,46 @@ describe('ChatBranchPicker', () => {
     await user.click(screen.getByRole('button', { name: 'Create' }));
 
     expect(revisionStatusHarness.commands.createBranch).toHaveBeenCalledWith('bracket-fillet');
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: 'New branch' })).not.toBeInTheDocument();
+    });
+  });
+
+  it('works in the branch it creates once the branch verb settles', async () => {
+    const user = userEvent.setup();
+    const view = render(<ChatBranchPicker />, { wrapper });
+    await user.click(screen.getByRole('button', { name: 'Work in main. Choose a branch.' }));
+    await user.click(screen.getByRole('button', { name: 'New branch' }));
+    await user.type(screen.getByRole('textbox', { name: 'Name for the new branch' }), 'bracket-fillet');
+    await user.click(screen.getByRole('button', { name: 'Create' }));
+
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      branchVerb: {
+        busy: true,
+        asking: false,
+        operation: 'create',
+        branch: 'bracket-fillet',
+        question: undefined,
+      },
+    };
+    view.rerender(<ChatBranchPicker />);
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      branchVerb: {
+        busy: false,
+        asking: false,
+        operation: undefined,
+        branch: undefined,
+        question: undefined,
+      },
+      branches: [twoBranches[0]!, { ...twoBranches[1]!, leaseChatIds: [] }],
+    };
+    view.rerender(<ChatBranchPicker />);
+
+    await waitFor(() => {
+      expect(revisionStatusHarness.commands.switchTo).toHaveBeenCalledWith('bracket-fillet');
+    });
   });
 
   it('names the branch this chat works in, and switches to the one a person picks', async () => {
@@ -70,7 +111,8 @@ describe('ChatBranchPicker', () => {
 
     render(<ChatBranchPicker />, { wrapper });
     await user.click(screen.getByRole('button', { name: 'Work in bracket-fillet. Choose a branch.' }));
-    await user.click(screen.getByRole('button', { name: 'Work in main' }));
+    await user.type(screen.getByPlaceholderText('Search branches...'), 'main');
+    await user.click(screen.getByRole('option', { name: 'main' }));
 
     expect(revisionStatusHarness.commands.switchTo).toHaveBeenCalledWith('main');
   });

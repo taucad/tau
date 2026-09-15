@@ -222,6 +222,9 @@ export type AgentHostClient = {
     }
   >;
   tail(input: { readonly chatId: string; readonly cursor: number; readonly limit: number }): Promise<EventLogBatch>;
+  recordSettlement?(
+    event: Extract<AgentHostWorkerCommandInput, { readonly type: 'record-settlement' }>['event'],
+  ): Promise<void>;
   subscribe(listener: (chatId: string, event: AgentLogEvent) => void): () => void;
   subscribeLive?(listener: (chatId: string, event: AgentLiveEvent) => void): () => void;
   close(): Promise<void>;
@@ -264,6 +267,8 @@ export type AgentHostClientCoreOptions = {
   readonly commandTimeout?: number | undefined;
   readonly runIdleTimeout?: number | undefined;
   readonly closeTimeout?: number | undefined;
+  /** Browser revision roots append their settlement through this client's log writer. */
+  readonly recordSettlements?: boolean | undefined;
 };
 
 /**
@@ -545,6 +550,13 @@ export const createAgentHostClient = (
       command({ type: 'resolve-interrupt', chatId, runId, ...resolution }),
     attach,
     tail,
+    ...(options.recordSettlements
+      ? {
+          recordSettlement: async (event: Parameters<NonNullable<AgentHostClient['recordSettlement']>>[0]) => {
+            await command({ type: 'record-settlement', chatId: event.chatId, event });
+          },
+        }
+      : {}),
     subscribe: (listener) =>
       subscribe('events', (response) => {
         listener(response.chatId, response.event);
@@ -789,4 +801,4 @@ const createAgentHostWorkerTransport = (options: AgentHostClientOptions): AgentH
  * @public
  */
 export const createBrowserAgentHostClient = (options: AgentHostClientOptions): AgentHostClient =>
-  createAgentHostClient(createAgentHostWorkerTransport(options), options);
+  createAgentHostClient(createAgentHostWorkerTransport(options), { ...options, recordSettlements: true });

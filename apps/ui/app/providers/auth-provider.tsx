@@ -10,6 +10,7 @@ import { apiKeyPlugin } from '#utils/api-key-plugin.js';
 import { magicLinkPlugin } from '#utils/magic-link-plugin.js';
 import { useOptionalFinancialSession } from '#providers/financial-session-provider.js';
 import { useResolvedAuth } from '#hooks/use-resolved-auth.js';
+import { isDesktopTarget } from '#lib/build-target.js';
 
 /**
  * The auth surface Electron's preload exposes to the renderer (batch A, item
@@ -65,7 +66,7 @@ const desktopBridgedAuthPaths = new Map<string, DesktopAuthAction>([
  * @returns The bridge method name, or `undefined` to route in-app as usual.
  */
 export function desktopAuthAction(to: string): DesktopAuthAction | undefined {
-  if (import.meta.env.TAU_TARGET !== 'desktop') {
+  if (!isDesktopTarget()) {
     return undefined;
   }
 
@@ -154,23 +155,14 @@ export function AuthConfigLink({
 }
 
 /**
- * Keeps the renderer's two independent session caches honest when Electron
- * main changes the credential out from under them.
+ * Refreshes the renderer's shared session query when Electron main changes
+ * the credential out from under it.
  *
- * There are genuinely two: the TanStack Query cache behind
- * `@better-auth-ui/react`'s `useSession` (`['auth', 'getSession']`), which
- * every signed-in surface reads, and better-auth's own nanostore behind
- * `authClient.useSession()`. Neither observes the other.
- *
- * Mount this anywhere inside the app's `QueryClientProvider`; it is also
- * mounted by `AuthConfigProvider` below, which `root.tsx` currently renders
- * *above* that provider — there the nanostore half still fires and the query
- * half no-ops.
+ * Every signed-in surface, including billing, reads the TanStack Query cache
+ * behind `@better-auth-ui/react`'s `useSession` (`['auth', 'getSession']`).
  *
  * ponytail: reading the context instead of a mount-order contract keeps this
- * position-independent. Nesting `QueryClientProvider` outside
- * `AuthConfigProvider` in `root.tsx` is the one-line upgrade that makes the
- * single mount here sufficient.
+ * position-independent for focused tests; the app root supplies the client.
  *
  * @returns Nothing — this component renders no markup.
  */
@@ -182,7 +174,7 @@ export function DesktopAuthBridge(): undefined {
   const financialSession = useOptionalFinancialSession();
 
   useEffect(() => {
-    if (import.meta.env.TAU_TARGET !== 'desktop') {
+    if (!isDesktopTarget()) {
       return;
     }
 
@@ -196,7 +188,6 @@ export function DesktopAuthBridge(): undefined {
     return bridge.onAuthChanged(() => {
       financialSession?.purge('owner_changed');
       void queryClient?.invalidateQueries({ queryKey: authQueryKeyPrefix });
-      authClient.$store.notify('$sessionSignal');
     });
   }, [financialSession, queryClient]);
 }

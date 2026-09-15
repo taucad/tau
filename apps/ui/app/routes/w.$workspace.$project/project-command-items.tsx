@@ -36,7 +36,12 @@ import { captureCadImages } from '#services/headless-capture.js';
 import { useGraphicsCameraRigQuery } from '#hooks/use-graphics.js';
 import { getGraphicsCameraState } from '#services/graphics-camera-registry.js';
 
-export function ProjectCommandPaletteItems({ match }: { readonly match: UIMatch }): undefined {
+export function ProjectCommandPaletteItems({ match }: { readonly match: UIMatch }): React.JSX.Element | undefined {
+  const project = useProject({ enableNoContext: true });
+  return project === undefined ? undefined : <ProjectCommandPaletteItemsReady match={match} />;
+}
+
+function ProjectCommandPaletteItemsReady({ match }: { readonly match: UIMatch }): undefined {
   const { projectRef, geometryUnits, mainEntryPath } = useProject();
   const { openPanel } = useProjectWorkspace();
   const isTauDebugEnabled = useFeature('tauDebug');

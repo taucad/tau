@@ -5,6 +5,14 @@
   "projectType": "application",
   "tags": ["scope:ui", "type:app", "layer:feature"],
   "targets": {
+    "bake-design-story": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "node --import @oxc-node/core/register scripts/bake-design-story.mts"
+      }
+    },
     "build": {
       "dependsOn": ["copy-assets", "^copy-assets"],
       "outputs": ["{projectRoot}/build"],

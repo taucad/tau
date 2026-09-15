@@ -3,7 +3,8 @@ import { Cpu, RefreshCw, Trash2 } from 'lucide-react';
 import { useSearchParams } from 'react-router';
 
 import { Button } from '@taucad/ui/components/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@taucad/ui/components/card';
+import { CardContent, CardHeader, CardTitle } from '@taucad/ui/components/card';
+import { SettingsSectionCard } from '#components/settings/settings-item.js';
 import { approveRemoteHostPairing, listRemoteHosts, revokeRemoteHost } from '#lib/remote-host-client.js';
 import type { RemoteHostDevice } from '#lib/remote-host-client.js';
 import {
@@ -79,12 +80,9 @@ export function RemoteComputeSettings(): React.JSX.Element {
   };
 
   return (
-    <Card aria-labelledby='remote-compute-title'>
+    <SettingsSectionCard aria-labelledby='remote-compute-title'>
       <CardHeader>
         <CardTitle id='remote-compute-title'>Tau Host</CardTitle>
-        <CardDescription>
-          Run CAD kernels on a paired Tau Host while this browser remains the project filesystem authority.
-        </CardDescription>
       </CardHeader>
       <CardContent className='flex flex-col gap-4'>
         {pairingCode ? (
@@ -169,6 +167,6 @@ export function RemoteComputeSettings(): React.JSX.Element {
           </Button>
         </div>
       </CardContent>
-    </Card>
+    </SettingsSectionCard>
   );
 }

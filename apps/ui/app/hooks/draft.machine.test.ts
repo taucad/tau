@@ -6,9 +6,9 @@ import type { ChatMode } from '@taucad/chat/constants';
 import { draftMachine } from '#hooks/draft.machine.js';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 
-type PersistDraftInput = { chatId: string; draft: MyUIMessage };
+type PersistDraftInput = { draft: MyUIMessage };
 
-function createTestActor(options?: { chatId?: string; resize?: (image: string) => Promise<string> }) {
+function createTestActor(options?: { initialDraft?: MyUIMessage; resize?: (image: string) => Promise<string> }) {
   const machine = draftMachine.provide({
     actors: {
       // oxlint-disable-next-line no-empty-function -- mock stub
@@ -29,11 +29,11 @@ function createTestActor(options?: { chatId?: string; resize?: (image: string) =
   });
 
   return createActor(machine, {
-    input: { chatId: options?.chatId },
+    input: { initialDraft: options?.initialDraft },
   });
 }
 
-function createTestActorWithPersistCapture(options: { chatId: string; onPersist: (input: PersistDraftInput) => void }) {
+function createTestActorWithPersistCapture(options: { onPersist: (input: PersistDraftInput) => void }) {
   const machine = draftMachine.provide({
     actors: {
       persistDraftActor: fromSafeAsync(async ({ input }: { input: PersistDraftInput }) => {
@@ -50,13 +50,10 @@ function createTestActorWithPersistCapture(options: { chatId: string; onPersist:
     },
   });
 
-  return createActor(machine, {
-    input: { chatId: options.chatId },
-  });
+  return createActor(machine, { input: {} });
 }
 
 function createTestActorWithDeferredPersist(options: {
-  chatId: string;
   onPersist: (input: PersistDraftInput, resolve: () => void) => void;
 }) {
   const machine = draftMachine.provide({
@@ -77,9 +74,7 @@ function createTestActorWithDeferredPersist(options: {
     },
   });
 
-  return createActor(machine, {
-    input: { chatId: options.chatId },
-  });
+  return createActor(machine, { input: {} });
 }
 
 describe('draftMachine', () => {
@@ -105,6 +100,26 @@ describe('draftMachine', () => {
       expect(context.editDraftImages).toEqual([]);
       actor.stop();
     });
+
+    it('hydrates a draft without a synthetic persistence id', () => {
+      const actor = createTestActor({
+        initialDraft: {
+          id: 'draft',
+          role: 'user',
+          parts: [
+            { type: 'text', text: 'restored prompt' },
+            { type: 'file', url: 'data:image/png;base64,AAA', mediaType: 'image/png' },
+          ],
+        },
+      });
+      actor.start();
+      expect(actor.getSnapshot().context).toMatchObject({
+        draftText: 'restored prompt',
+        draftImages: ['data:image/png;base64,AAA'],
+      });
+      expect(actor.getSnapshot().context).not.toHaveProperty('chatId');
+      actor.stop();
+    });
   });
 
   // ===========================================================================
@@ -122,7 +137,6 @@ describe('draftMachine', () => {
     it('should load a draft from a message transiently without invoking persistence', async () => {
       const persistInputs: PersistDraftInput[] = [];
       const actor = createTestActorWithPersistCapture({
-        chatId: 'chat_abc',
         onPersist(input) {
           persistInputs.push(input);
         },
@@ -219,7 +233,7 @@ describe('draftMachine', () => {
     });
 
     it('should keep unchanged draft text idle', () => {
-      const actor = createTestActor({ chatId: 'chat_abc' });
+      const actor = createTestActor();
       actor.start();
 
       actor.send({ type: 'setDraftText', text: '' });
@@ -228,34 +242,16 @@ describe('draftMachine', () => {
       actor.stop();
     });
 
-    it('should persist after debounce (200ms) when chatId is valid', async () => {
+    it('should persist after debounce without a target identifier', async () => {
       vi.useFakeTimers();
       try {
-        const actor = createTestActor({ chatId: 'chat_abc' });
+        const actor = createTestActor();
         actor.start();
         actor.send({ type: 'setDraftText', text: 'save me' });
         expect(actor.getSnapshot().matches({ inputSaving: 'pending' })).toBe(true);
 
         await vi.advanceTimersByTimeAsync(200);
         await waitFor(actor, (s) => s.matches({ inputSaving: 'idle' }));
-        expect(actor.getSnapshot().matches({ inputSaving: 'idle' })).toBe(true);
-        actor.stop();
-      } finally {
-        vi.useRealTimers();
-      }
-    });
-
-    it('should NOT persist when chatId is invalid (no chat_ prefix)', async () => {
-      vi.useFakeTimers();
-      try {
-        const actor = createTestActor({ chatId: 'invalid-id' });
-        actor.start();
-        actor.send({ type: 'setDraftText', text: 'no save' });
-        expect(actor.getSnapshot().matches({ inputSaving: 'pending' })).toBe(true);
-
-        await vi.advanceTimersByTimeAsync(200);
-
-        // Guard fails so it falls back to idle without persisting
         expect(actor.getSnapshot().matches({ inputSaving: 'idle' })).toBe(true);
         actor.stop();
       } finally {
@@ -269,9 +265,8 @@ describe('draftMachine', () => {
   // ===========================================================================
   describe('clearDraft persistence', () => {
     it('should persist empty draft when clearDraft fires during idle state', async () => {
-      const persistInputs: Array<{ chatId: string; draft: MyUIMessage }> = [];
+      const persistInputs: PersistDraftInput[] = [];
       const actor = createTestActorWithPersistCapture({
-        chatId: 'chat_abc',
         onPersist(input) {
           persistInputs.push(input);
         },
@@ -301,9 +296,8 @@ describe('draftMachine', () => {
     });
 
     it('should persist empty draft when clearDraft fires during pending state', async () => {
-      const persistInputs: Array<{ chatId: string; draft: MyUIMessage }> = [];
+      const persistInputs: PersistDraftInput[] = [];
       const actor = createTestActorWithPersistCapture({
-        chatId: 'chat_abc',
         onPersist(input) {
           persistInputs.push(input);
         },
@@ -331,11 +325,10 @@ describe('draftMachine', () => {
     });
 
     it('should re-persist empty draft when clearDraft fires during persisting state', async () => {
-      const persistInputs: Array<{ chatId: string; draft: MyUIMessage }> = [];
+      const persistInputs: PersistDraftInput[] = [];
       let resolveCurrentPersist: (() => void) | undefined;
 
       const actor = createTestActorWithDeferredPersist({
-        chatId: 'chat_abc',
         onPersist(input, resolve) {
           persistInputs.push(input);
           resolveCurrentPersist = resolve;
@@ -628,7 +621,6 @@ describe('draftMachine', () => {
           new Promise<string>(() => {
             // Never resolves — keeps the in-flight resize pending so we can assert clear behavior.
           }),
-        chatId: 'chat_abc',
       });
       actor.start();
       actor.send({ type: 'addDraftImage', image: 'A' });

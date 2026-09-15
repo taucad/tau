@@ -270,6 +270,7 @@ function ItemList<T>({
   readonly onLoadMore?: () => void;
 }) {
   const [search, setSearch] = React.useState('');
+  const lastSearchLoad = React.useRef('');
 
   type FlatItem =
     | { type: 'item'; item: T; groupName: string; value: string; keywords: readonly string[] }
@@ -322,6 +323,25 @@ function ItemList<T>({
             entry.keywords.some((keyword) => keyword.toLowerCase().includes(searchLower)))),
     );
   }, [flattenedItems, search, withVirtualization]);
+
+  React.useEffect(() => {
+    const key = `${search}\0${String(flattenedItems.length)}`;
+    if (
+      withVirtualization &&
+      search !== '' &&
+      filteredItems.length === 0 &&
+      onLoadMore !== undefined &&
+      !isLoadingMore &&
+      lastSearchLoad.current !== key
+    ) {
+      lastSearchLoad.current = key;
+      const searchLoadTimeout = globalThis.setTimeout(onLoadMore, 150);
+      return () => {
+        globalThis.clearTimeout(searchLoadTimeout);
+      };
+    }
+    return undefined;
+  }, [filteredItems.length, flattenedItems.length, isLoadingMore, onLoadMore, search, withVirtualization]);
 
   // Render individual item or group header
   const renderItem = React.useCallback(

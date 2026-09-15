@@ -292,6 +292,16 @@ export const ChatHistory = memo(function (props: {
         </AtReferenceProvider>
         <ScrollDownButton hasContent={messageIds.length > 0} isVisible={!atBottom} onScrollToBottom={scrollToBottom} />
 
+        {/*
+          A refusal on an empty chat has to land somewhere (I12, W19-b).
+
+          `ChatError` rides the last `TurnGroup`, and a submit that fails before
+          the user message is appended — the durable workspace refusing the
+          turn — leaves no group for it to ride. The person then saw nothing at
+          all: their text still in the composer, no row, no banner. One banner
+          at a time: while there are turns, the group above owns it.
+        */}
+        {groups.length === 0 ? <ChatError className='mx-4 mb-1 shrink-0' /> : null}
         {/* Chat input area */}
         <div className='relative mx-auto mb-2 w-[calc(100%_-_1rem)] max-w-xl shrink-0'>
           <ChatTextarea ref={chatTextareaRef} mode='main' enableAutoFocus={false} onSubmit={onSubmit} />

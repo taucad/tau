@@ -177,7 +177,7 @@ function StackTraceSection({
         {hasInternalFrames ? (
           <button
             type='button'
-            className='mt-1 cursor-pointer font-mono text-[0.625rem] text-muted-foreground/60 transition-colors hover:text-muted-foreground'
+            className='mt-1 font-mono text-[0.625rem] text-muted-foreground/60 transition-colors hover:text-muted-foreground'
             onClick={() => {
               setShowInternal(!showInternal);
             }}

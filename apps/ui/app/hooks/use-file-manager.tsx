@@ -626,7 +626,13 @@ export function FileManagerProvider({
   );
 
   const runtimeFileSystem = useMemo(
-    () => fromFileSystemBridge(() => openRootedFileSystemBridge(rootDirectory)),
+    () =>
+      fromFileSystemBridge(() => {
+        if (contentService === undefined) {
+          throw new FileManagerNotReadyError('proxy-timeout');
+        }
+        return openRootedFileSystemBridge(rootDirectory);
+      }),
     // A successful service initialization is the host's existing binding
     // identity. Rotating the opaque filesystem here makes every owner keyed
     // by RuntimeFileSystem identity capture the replacement mount instead of

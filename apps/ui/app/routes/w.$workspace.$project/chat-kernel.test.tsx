@@ -4,12 +4,16 @@ import type { ActorRefFrom } from 'xstate';
 import type { cadMachine } from '#machines/cad.machine.js';
 
 const mockCadRef = {
+  id: 'cad:main.ts',
+  sessionId: 'cad-session-1',
   getSnapshot: vi.fn(() => ({ context: { renderPhase: undefined, telemetryEntries: [] } })),
   subscribe: vi.fn(() => ({ unsubscribe: vi.fn() })),
   on: vi.fn(() => ({ unsubscribe: vi.fn() })),
 } as unknown as ActorRefFrom<typeof cadMachine>;
 
 const mockCadRef2 = {
+  id: 'cad:main.ts',
+  sessionId: 'cad-session-2',
   getSnapshot: vi.fn(() => ({ context: { renderPhase: undefined, telemetryEntries: [] } })),
   subscribe: vi.fn(() => ({ unsubscribe: vi.fn() })),
   on: vi.fn(() => ({ unsubscribe: vi.fn() })),
@@ -100,14 +104,25 @@ vi.mock('#components/ui/floating-panel.js', () => ({
   FloatingPanelClose: () => <button type='button'>Close</button>,
 }));
 
-vi.mock('#routes/w.$workspace.$project/chat-kernel-timing.js', () => ({
-  GeometryUnitTiming: ({ query, cadRef }: { query: string; cadRef: unknown }) => (
-    <div data-testid='cu-timing' data-query={query} data-cad={cadRef === mockCadRef2 ? 'second' : 'first'}>
-      Timing
-    </div>
-  ),
-  GeometryUnitSummary: () => <span>Summary</span>,
-}));
+vi.mock('#routes/w.$workspace.$project/chat-kernel-timing.js', async () => {
+  const React = await import('react');
+  return {
+    GeometryUnitTiming: ({ query, cadRef }: { query: string; cadRef: unknown }) => {
+      const [mountedCadRef] = React.useState(cadRef);
+      return (
+        <div
+          data-testid='cu-timing'
+          data-query={query}
+          data-cad={cadRef === mockCadRef2 ? 'second' : 'first'}
+          data-mounted-cad={mountedCadRef === mockCadRef2 ? 'second' : 'first'}
+        >
+          Timing
+        </div>
+      );
+    },
+    GeometryUnitSummary: () => <span>Summary</span>,
+  };
+});
 
 vi.mock('#routes/w.$workspace.$project/use-chat-interface-state.js', () => ({
   usePaneviewPersistence: () => ({ savedState: {}, connectApi: vi.fn() }),
@@ -167,7 +182,7 @@ describe('ChatKernel', () => {
     expect(paneviewMountCount).toBe(1);
   });
 
-  it('updates the actor for an existing path without remounting Paneview', async () => {
+  it('remounts timing state for a recreated same-id actor without remounting Paneview', async () => {
     mockGeometryUnits.set('main.ts', mockCadRef);
     const { ChatKernel } = await import('./chat-kernel.js');
     const view = render(<ChatKernel isExpanded setIsExpanded={vi.fn()} />);
@@ -176,6 +191,7 @@ describe('ChatKernel', () => {
     mockGeometryUnits = new Map([['main.ts', mockCadRef2]]);
     view.rerender(<ChatKernel isExpanded setIsExpanded={vi.fn()} />);
     expect(screen.getByTestId('cu-timing')).toHaveAttribute('data-cad', 'second');
+    expect(screen.getByTestId('cu-timing')).toHaveAttribute('data-mounted-cad', 'second');
     expect(paneviewMountCount).toBe(1);
   });
 });

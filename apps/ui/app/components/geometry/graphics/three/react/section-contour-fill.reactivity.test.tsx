@@ -3,18 +3,18 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { createSectionViewSafeSnapshotStore } from '#components/geometry/graphics/three/utils/section-view-safe-snapshot.js';
 
 const hoistedMocks = vi.hoisted(() => {
-  let revision = 0;
+  let unitState = { selectedComponentIds: [] as readonly string[] };
   const invalidate = vi.fn();
   const modelInteractionRef = {
     getSnapshot: vi.fn(() => ({ context: {} })),
   };
 
   return {
-    getRevision: () => revision,
+    getUnitState: () => unitState,
     invalidate,
     modelInteractionRef,
-    setRevision: (nextRevision: number) => {
-      revision = nextRevision;
+    setUnitState: (selectedComponentIds: readonly string[]) => {
+      unitState = { selectedComponentIds };
     },
   };
 });
@@ -38,9 +38,9 @@ vi.mock('#components/geometry/graphics/three/three-graphics-backend-context.js',
 }));
 
 vi.mock('#hooks/use-graphics.js', () => ({
-  useGraphicsSelector: () => 'file:src/main.ts',
+  useGraphicsSelector: () => 'unit:main',
   useModelInteractionRef: () => hoistedMocks.modelInteractionRef,
-  useModelInteractionSelector: () => hoistedMocks.getRevision(),
+  useModelInteractionSelector: () => hoistedMocks.getUnitState(),
 }));
 
 vi.mock('#hooks/use-theme.js', () => ({
@@ -54,10 +54,10 @@ vi.mock('#hooks/use-theme.js', () => ({
 describe('SectionContourFills reactivity', () => {
   beforeEach(() => {
     hoistedMocks.invalidate.mockClear();
-    hoistedMocks.setRevision(0);
+    hoistedMocks.setUnitState([]);
   });
 
-  it('invalidates demand rendering when model interaction revision changes while enabled', async () => {
+  it('invalidates demand rendering when the active unit interaction changes while enabled', async () => {
     const { SectionContourFills } = await import('#components/geometry/graphics/three/react/section-contour-fill.js');
     const { Plane, Vector3 } = await import('three');
     const innerRef = { current: null };
@@ -77,7 +77,7 @@ describe('SectionContourFills reactivity', () => {
 
     expect(hoistedMocks.invalidate).toHaveBeenCalledTimes(1);
 
-    hoistedMocks.setRevision(1);
+    hoistedMocks.setUnitState(['component:a']);
     rerender(
       <SectionContourFills
         enabled
@@ -92,7 +92,7 @@ describe('SectionContourFills reactivity', () => {
     expect(hoistedMocks.invalidate).toHaveBeenCalledTimes(2);
   });
 
-  it('does not invalidate for model interaction revision changes while disabled', async () => {
+  it('does not invalidate for active unit interaction changes while disabled', async () => {
     const { SectionContourFills } = await import('#components/geometry/graphics/three/react/section-contour-fill.js');
     const { Plane, Vector3 } = await import('three');
     const innerRef = { current: null };
@@ -112,7 +112,7 @@ describe('SectionContourFills reactivity', () => {
 
     expect(hoistedMocks.invalidate).not.toHaveBeenCalled();
 
-    hoistedMocks.setRevision(1);
+    hoistedMocks.setUnitState(['component:a']);
     rerender(
       <SectionContourFills
         enabled={false}
@@ -125,5 +125,28 @@ describe('SectionContourFills reactivity', () => {
     );
 
     expect(hoistedMocks.invalidate).not.toHaveBeenCalled();
+  });
+
+  it('invalidates demand rendering when re-enabled with unchanged inputs', async () => {
+    const { SectionContourFills } = await import('#components/geometry/graphics/three/react/section-contour-fill.js');
+    const { Plane, Vector3 } = await import('three');
+    const innerRef = { current: null };
+    const snapshotRef = { current: createSectionViewSafeSnapshotStore() };
+    const plane = new Plane(new Vector3(0, 0, 1), 0);
+    const properties = {
+      innerRef,
+      plane,
+      snapshotRef,
+      stripeFrequency: 2,
+      stripeWidth: 0.2,
+    };
+
+    const { rerender } = render(<SectionContourFills enabled {...properties} />);
+    expect(hoistedMocks.invalidate).toHaveBeenCalledTimes(1);
+
+    rerender(<SectionContourFills enabled={false} {...properties} />);
+    rerender(<SectionContourFills enabled {...properties} />);
+
+    expect(hoistedMocks.invalidate).toHaveBeenCalledTimes(2);
   });
 });

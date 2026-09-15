@@ -208,8 +208,14 @@ const bodyText = (facts: AcpFacts, output: unknown): string => {
 const exitCodeOf = (output: unknown): number | undefined =>
   isRecord(output) && typeof output['exit_code'] === 'number' ? output['exit_code'] : undefined;
 
-const cardStatus = (state: DynamicToolUIPart['state']): 'loading' | 'ready' | 'error' =>
-  state === 'input-streaming' || state === 'input-available' ? 'loading' : state === 'output-error' ? 'error' : 'ready';
+const isPreliminary = (part: DynamicToolUIPart): boolean => isRecord(part) && part['preliminary'] === true;
+
+const cardStatus = (part: DynamicToolUIPart): 'loading' | 'ready' | 'error' =>
+  part.state === 'input-streaming' || part.state === 'input-available' || isPreliminary(part)
+    ? 'loading'
+    : part.state === 'output-error'
+      ? 'error'
+      : 'ready';
 
 /**
  * One external agent's tool call, rendered from the ACP facts it sent.
@@ -222,7 +228,7 @@ export function ChatMessageToolExternal({ part }: { readonly part: DynamicToolUI
   const output = part.state === 'output-available' ? part.output : undefined;
   const facts = factsOf(part, output);
   const { icon, verb, activeVerb, body } = externalToolPresentation(facts.kind);
-  const status = cardStatus(part.state);
+  const status = cardStatus(part);
   const isLoading = status === 'loading';
   const label = sanitizeAgentText(facts.title ?? facts.nativeName ?? part.toolName);
 

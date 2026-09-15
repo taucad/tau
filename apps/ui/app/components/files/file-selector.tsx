@@ -268,7 +268,7 @@ function BreadcrumbNav({
 
   // Auto-scroll to show the current (last) breadcrumb when path changes
   useEffect(() => {
-    if (currentCrumbRef.current && scrollContainerRef.current) {
+    if (currentPath === crumbs.at(-1)?.path && currentCrumbRef.current && scrollContainerRef.current) {
       currentCrumbRef.current.scrollIntoView({ behavior: 'instant', inline: 'end', block: 'nearest' });
     }
   }, [currentPath]);
@@ -707,7 +707,7 @@ export function FileSelector({
         ) : selectedFile ? (
           <FileExtensionIcon filename={selectedFile} className='size-4 shrink-0' />
         ) : undefined}
-        <span className={cn('truncate', !selectedFile && 'text-muted-foreground')}>
+        <span className={cn('truncate', !selectedFile && 'font-normal text-muted-foreground')}>
           {selectedFileName ?? placeholder}
         </span>
       </div>

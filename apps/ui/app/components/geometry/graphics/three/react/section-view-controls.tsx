@@ -35,10 +35,6 @@ const sectionControlCoreColor = '#ffffff';
 const sectionSelectorBorderWidth = 0.06;
 const sectionSelectorLabelSurfaceGap = 0.004;
 
-const setCanvasCursor = (element: HTMLElement, cursor: string): void => {
-  element.style.cursor = cursor;
-};
-
 export type PlaneId = 'xy' | 'xz' | 'yz';
 export type PlaneSelectorId = 'xy' | 'xz' | 'yz' | 'yx' | 'zx' | 'zy';
 export type UpDirection = 'x' | 'y' | 'z';
@@ -282,6 +278,13 @@ function PlaneSelector({
     [anchor, position],
   );
 
+  React.useEffect(
+    () => () => {
+      gl.domElement.classList.remove('cursor-action');
+    },
+    [gl.domElement],
+  );
+
   // Keep the selector a constant screen size and screen offset by updating each frame
   useFrame(() => {
     const currentGroup = groupRef.current;
@@ -337,14 +340,14 @@ function PlaneSelector({
   const handlePointerOver = (event: ThreeEvent<PointerEvent>): void => {
     event.stopPropagation();
     setIsHovered(true);
-    setCanvasCursor(gl.domElement, 'pointer');
+    gl.domElement.classList.add('cursor-action');
     onHover(planeId);
   };
 
   const handlePointerOut = (event: ThreeEvent<PointerEvent>): void => {
     event.stopPropagation();
     setIsHovered(false);
-    setCanvasCursor(gl.domElement, 'auto');
+    gl.domElement.classList.remove('cursor-action');
     onHover(undefined);
   };
 
@@ -557,6 +560,7 @@ export function SectionViewControls({
   const rotationRef = useRef<THREE.Euler>(new THREE.Euler(0, 0, 0));
   // Keep an optional render-local anchor so the gizmo doesn't "jump" after rotations.
   const anchorPositionRef = useRef<THREE.Vector3 | undefined>(undefined);
+  const controlledTransformRef = useRef({ selectedPlaneId, rotation, renderPivot });
   const matcapTexture = useMemo(() => matcapMaterial(), []);
   // Track whether the user is actively dragging translate/rotate so we don't override the position mid-drag
   const isTranslatingRef = useRef<boolean>(false);
@@ -632,7 +636,16 @@ export function SectionViewControls({
   // (not by dragging), clear any anchor so the gizmo snaps to the computed
   // position in the next frame.
   React.useEffect(() => {
-    if (isTranslatingRef.current || isRotatingRef.current) {
+    const previous = controlledTransformRef.current;
+    controlledTransformRef.current = { selectedPlaneId, rotation, renderPivot };
+    if (
+      selectedPlaneId === undefined ||
+      isTranslatingRef.current ||
+      isRotatingRef.current ||
+      (previous.selectedPlaneId === selectedPlaneId &&
+        previous.rotation === rotation &&
+        previous.renderPivot === renderPivot)
+    ) {
       return;
     }
 
@@ -669,8 +682,12 @@ export function SectionViewControls({
     return undefined;
   }, [endActiveTransformDrag, isActive]);
 
+  const dragPlaneIdRef = React.useRef(selectedPlaneId);
   React.useEffect(() => {
-    endActiveTransformDrag();
+    if (dragPlaneIdRef.current !== selectedPlaneId) {
+      dragPlaneIdRef.current = selectedPlaneId;
+      endActiveTransformDrag();
+    }
   }, [endActiveTransformDrag, selectedPlaneId]);
 
   React.useEffect(
@@ -699,8 +716,13 @@ export function SectionViewControls({
   }, []);
   const highlightedTransformAxis = hoveredTransformAxis?.axis;
 
+  const hoverScopeRef = React.useRef({ isActive, selectedPlaneId });
   React.useEffect(() => {
-    clearHoveredTransformAxis(setHoveredTransformAxisState);
+    const previous = hoverScopeRef.current;
+    if (previous.isActive !== isActive || previous.selectedPlaneId !== selectedPlaneId) {
+      hoverScopeRef.current = { isActive, selectedPlaneId };
+      clearHoveredTransformAxis(setHoveredTransformAxisState);
+    }
   }, [isActive, selectedPlaneId]);
 
   if (!isActive) {

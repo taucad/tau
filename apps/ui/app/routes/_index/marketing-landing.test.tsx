@@ -40,6 +40,12 @@ function renderLanding(): HTMLElement {
 }
 
 describe('MarketingLanding', () => {
+  it('should keep its navigation clickable inside the desktop drag band', () => {
+    renderLanding();
+
+    expect(screen.getByRole('banner')).toHaveClass('[app-region:no-drag]');
+  });
+
   it('should render the verification-led hero headline and primary composer CTA', () => {
     renderLanding();
 
@@ -54,10 +60,11 @@ describe('MarketingLanding', () => {
     expect(screen.getByText('Verify')).toBeInTheDocument();
   });
 
-  it('should never brand verification as "GeoSpec" on the marketing page (OQ1)', () => {
+  it('should explain printer-bed checks with GeoSpec as a subordinate label', () => {
     const container = renderLanding();
 
-    expect(container.textContent).not.toMatch(/geospec/i);
+    expect(container.textContent).toContain('Check the printer-bed fit with GeoSpec');
+    expect(container.textContent).toContain('Print workflow preview');
   });
 
   it('should render the pricing section with all three plan cards (T7/U6)', () => {

@@ -21,7 +21,7 @@ export const FileTreePanelBody = memo(function ({
   shouldHandleReveal,
   readOnly = false,
 }: {
-  readonly actionsContainer?: Element | DocumentFragment | null;
+  readonly actionsContainer?: Element | DocumentFragment;
   readonly className?: string;
   readonly isOpen?: boolean;
   readonly onOpenChange?: (open: boolean) => void;

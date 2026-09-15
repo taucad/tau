@@ -3,7 +3,8 @@ import { useEffect, useState } from 'react';
 import { formatCreditAtoms } from '@taucad/billing';
 import type { WireAutoReloadConsent, WirePaymentAction } from '@taucad/billing';
 import { Button } from '@taucad/ui/components/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@taucad/ui/components/card';
+import { CardContent, CardHeader, CardTitle } from '@taucad/ui/components/card';
+import { SettingsSectionCard } from '#components/settings/settings-item.js';
 import {
   confirmPaymentAction,
   createPaymentRequestId,
@@ -34,11 +35,17 @@ export function AutoReloadSettings({
     if (!binding) {
       return;
     }
+    const currentBinding = {
+      apiBaseUrl: binding.apiBaseUrl,
+      environment: binding.environment,
+      ownerId: binding.ownerId,
+      subjectId: binding.subjectId,
+    };
     const token = financial.capture();
     // async-iife: bootstrap
     void (async () => {
       try {
-        const value = await getReloadConsent({ ...binding, financialSession: token });
+        const value = await getReloadConsent({ ...currentBinding, financialSession: token });
         if (token.isCurrent()) {
           setConsent(value);
           setAction(value?.setupAction ?? undefined);
@@ -80,7 +87,7 @@ export function AutoReloadSettings({
   };
 
   return (
-    <Card>
+    <SettingsSectionCard>
       <CardHeader>
         <CardTitle className='text-base'>Automatic reload</CardTitle>
       </CardHeader>
@@ -206,7 +213,7 @@ export function AutoReloadSettings({
         ) : undefined}
         {error ? <p className='text-warning'>{error}</p> : undefined}
       </CardContent>
-    </Card>
+    </SettingsSectionCard>
   );
 }
 /* oxlint-enable no-void, unicorn/no-negated-condition */

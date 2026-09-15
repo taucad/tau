@@ -286,7 +286,7 @@ const JobCard = ({
 
       {job.activity.length > 0 ? (
         <details className='mt-3 border-t border-border/70 pt-2 text-xs'>
-          <summary className='cursor-pointer text-muted-foreground select-none'>
+          <summary className='rounded-sm text-muted-foreground transition-colors select-none hover:bg-accent/50 hover:text-foreground'>
             Recent activity · {job.activity.length}
           </summary>
           <ol aria-label='Recent job activity' className='mt-2 flex list-none flex-col gap-1.5'>
@@ -475,7 +475,9 @@ const ArtifactManifestEntry = ({
         </p>
       ) : null}
       <details className='mt-1.5 text-muted-foreground'>
-        <summary className='cursor-pointer select-none'>Provenance</summary>
+        <summary className='rounded-sm transition-colors select-none hover:bg-accent/50 hover:text-foreground'>
+          Provenance
+        </summary>
         <dl className='mt-1 grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 font-mono text-[10px]'>
           <dt>Provider</dt>
           <dd className='min-w-0 break-all'>

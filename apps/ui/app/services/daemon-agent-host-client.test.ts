@@ -5,6 +5,7 @@ import type {
   AgentChannelCommand,
   AgentChannelEvent,
   AgentChannelLiveEvent,
+  AgentChannelRevisionEvent,
   AgentChannelResponse,
   HostRunSnapshot,
 } from '@taucad/agent-host';
@@ -119,6 +120,7 @@ const fakeChannel = (options: { readonly hold?: Promise<void> } = {}): FakeChann
     },
     events: (signal) => stream<AgentChannelEvent>(eventSinks, signal),
     liveEvents: (signal) => stream<AgentChannelLiveEvent>(new Set(), signal),
+    revisionEvents: (signal) => stream<AgentChannelRevisionEvent>(new Set(), signal),
     onClose: (handler) => {
       closeHandlers.add(handler);
       return () => closeHandlers.delete(handler);

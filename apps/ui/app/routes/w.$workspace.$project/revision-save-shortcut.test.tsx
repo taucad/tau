@@ -7,28 +7,40 @@
  * disk before it does.
  */
 
-import { render } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
+import { useState } from 'react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const sent: string[] = [];
+/* Each rendered shortcut is one live project; the id says whose flush ran. */
+let nextProjectId = 0;
 const saveRevision = vi.fn<(trigger?: 'save' | 'hidden' | 'close') => void>(() => {
   sent.push('saveRevision');
 });
+const waitForStore = vi.fn(async () => undefined);
+
+vi.mock('xstate', () => ({ waitFor: waitForStore }));
 
 vi.mock('#hooks/use-project.js', () => ({
-  useProject: () => ({
-    projectRef: {
-      send: (event: { type: string }) => {
-        sent.push(`project:${event.type}`);
+  useProject: () => {
+    const [projectId] = useState(() => {
+      nextProjectId += 1;
+      return nextProjectId;
+    });
+    return {
+      projectRef: {
+        send: (event: { type: string }) => {
+          sent.push(`project:${String(projectId)}:${event.type}`);
+        },
       },
-    },
-    editorRef: {
-      send: (event: { type: string }) => {
-        sent.push(`editor:${event.type}`);
+      editorRef: {
+        send: (event: { type: string }) => {
+          sent.push(`editor:${event.type}`);
+        },
       },
-    },
-  }),
+    };
+  },
 }));
 vi.mock('#hooks/use-revision-status.js', () => ({
   useRevisionCommands: () => ({ saveRevision }),
@@ -43,6 +55,7 @@ const { RevisionSaveShortcut } = await import('#routes/w.$workspace.$project/rev
 
 beforeEach(() => {
   sent.length = 0;
+  nextProjectId = 0;
   saveRevision.mockClear();
 });
 
@@ -56,7 +69,40 @@ describe('the workbench save shortcut', () => {
 
     await userEvent.keyboard('{Control>}s{/Control}');
 
-    expect(sent).toStrictEqual(['editor:flushNow', 'project:flushNow', 'saveRevision']);
+    expect(sent).toStrictEqual(['editor:flushNow', 'project:1:flushNow', 'saveRevision']);
+    expect(saveRevision).toHaveBeenCalledWith('save');
+  });
+
+  it('lets only the focused project answer while other live projects stay mounted (P73)', async () => {
+    render(
+      <KeyboardProvider>
+        <RevisionSaveShortcut isFocused={false} />
+        <RevisionSaveShortcut />
+      </KeyboardProvider>,
+    );
+
+    await userEvent.keyboard('{Control>}s{/Control}');
+
+    expect(sent).toStrictEqual(['editor:flushNow', 'project:2:flushNow', 'saveRevision']);
+    expect(saveRevision).toHaveBeenCalledTimes(1);
+  });
+
+  it('answers while focus is in an editable surface', async () => {
+    render(
+      <KeyboardProvider>
+        <input
+          aria-label='Editor'
+          onKeyDown={(event) => {
+            event.stopPropagation();
+          }}
+        />
+        <RevisionSaveShortcut />
+      </KeyboardProvider>,
+    );
+
+    await userEvent.click(screen.getByRole('textbox', { name: 'Editor' }));
+    await userEvent.keyboard('{Control>}s{/Control}');
+
     expect(saveRevision).toHaveBeenCalledWith('save');
   });
 

@@ -575,7 +575,7 @@ describe('FileManagerProvider — client + workspace facades', () => {
    * `NOT_FOUND` where the row is really read-only, and a move onto a bundle
    * silently shadows the whole unit (V8).
    */
-  it('refuses a Files-pane delete of a built-in skill file as read-only, without asking the authority', async () => {
+  it('refuses a Files-pane delete of a system skill file as read-only, without asking the authority', async () => {
     const { result } = renderProvider();
 
     await expect(result.current.client.canDelete('/projects/root/.agents/skills/demo/SKILL.md')).resolves.toMatchObject(
@@ -584,7 +584,7 @@ describe('FileManagerProvider — client + workspace facades', () => {
     expect(mockProxyCanDelete).not.toHaveBeenCalled();
   });
 
-  it('refuses a Files-pane move of a project file onto a built-in skill path', async () => {
+  it('refuses a Files-pane move of a project file onto a system skill path', async () => {
     const { result } = renderProvider();
 
     await expect(

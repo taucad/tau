@@ -9,6 +9,7 @@ let isTauDebugEnabled = false;
 let geometryFormat: 'gltf' | 'svg' | undefined;
 let cameraState: Record<string, unknown> | undefined;
 let cameraRegistryVersion = 0;
+let hasProjectContext = true;
 const openPanel = vi.fn();
 const captureCadImages = vi.fn<(options: unknown) => Promise<ExportFile[]>>();
 const downloadBlob = vi.fn<(blob: Blob, filename: string) => void>();
@@ -30,17 +31,25 @@ vi.mock('@xstate/react', () => ({
 }));
 
 vi.mock('#hooks/use-project.js', () => ({
-  useProject: () => ({
-    geometryUnits: new Map([['main.ts', cadActor]]),
-    mainEntryPath: 'main.ts',
-    projectRef: {
-      getSnapshot: () => ({
-        context: {
-          project: { id: 'test-project', name: 'test-project' },
-        },
-      }),
-    },
-  }),
+  useProject: (options?: { readonly enableNoContext?: boolean }) => {
+    if (!hasProjectContext) {
+      if (options?.enableNoContext) {
+        return undefined;
+      }
+      throw new Error('useProject must be used within a ProjectProvider');
+    }
+    return {
+      geometryUnits: new Map([['main.ts', cadActor]]),
+      mainEntryPath: 'main.ts',
+      projectRef: {
+        getSnapshot: () => ({
+          context: {
+            project: { id: 'test-project', name: 'test-project' },
+          },
+        }),
+      },
+    };
+  },
   useMainGraphics: () => graphicsActor,
 }));
 
@@ -141,9 +150,20 @@ describe('ProjectCommandPaletteItems', () => {
     geometryFormat = undefined;
     cameraState = undefined;
     cameraRegistryVersion = 0;
+    hasProjectContext = true;
     openPanel.mockClear();
     captureCadImages.mockReset();
     downloadBlob.mockReset();
+  });
+
+  it('should defer command registration until project context exists', () => {
+    hasProjectContext = false;
+    const view = render(<ProjectCommandPaletteItems match={match} />);
+    expect(registeredItems).toEqual([]);
+
+    hasProjectContext = true;
+    view.rerender(<ProjectCommandPaletteItems match={match} />);
+    expect(registeredItems.find((item) => item.id === 'share-project')).toBeDefined();
   });
 
   it('keeps Export navigation available while geometry is pending', () => {

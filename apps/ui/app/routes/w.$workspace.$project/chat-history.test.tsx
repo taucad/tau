@@ -350,6 +350,18 @@ describe('ChatHistory — turn group rendering', () => {
     expect(screen.getByTestId('virtuoso').querySelectorAll('[data-testid="chat-error-adornment"]')).toHaveLength(1);
   });
 
+  it('keeps the error adornment reachable on a chat with no turns yet (W19-b)', () => {
+    /* The first turn of a fresh project is refused by the durable workspace
+     * before any user message exists, so the banner that rides the last turn
+     * group has no group to ride and the person saw nothing at all (I12). */
+    setMockMessages([]);
+
+    render(<ChatHistory />);
+
+    expect(screen.queryAllByTestId('chat-error-adornment')).toHaveLength(1);
+    expect(screen.getByTestId('virtuoso').querySelectorAll('[data-testid="chat-error-adornment"]')).toHaveLength(0);
+  });
+
   it('should pass the correct totalCount to Virtuoso (one per turn group)', () => {
     setMockMessages([
       message('a0', 'assistant'),

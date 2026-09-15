@@ -127,7 +127,7 @@ export function PaneviewHeader({
           aria-expanded={expanded}
           aria-label={title === undefined ? 'Toggle panel' : undefined}
           draggable
-          className='flex h-full min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-lg px-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset'
+          className='flex h-full min-w-0 flex-1 items-center gap-2 rounded-lg px-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset'
           onClick={handleClick}
         >
           <ChevronDown

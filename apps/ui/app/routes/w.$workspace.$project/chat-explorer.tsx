@@ -390,7 +390,7 @@ function LiveComponentTree({
       (candidate) => candidate.dataset['modelComponentId'] === params.revealTarget?.componentId,
     );
     row?.scrollIntoView({ block: 'center' });
-  }, [params.query, params.revealTarget, unitId]);
+  }, [params.revealTarget, unitId]);
 
   if (!manifest || !root || childCount === 0) {
     return <ModelPaneviewPanelSurface />;
@@ -721,7 +721,7 @@ export function ComponentRow({
           data-model-component-unit-id={unitId}
           data-model-component-id={node.id}
           className={cn(
-            'group/part relative flex h-7 w-full cursor-pointer items-center justify-between rounded-md py-1 pr-1 pl-2 text-sm leading-5 transition-colors',
+            'group/part relative flex h-7 w-full items-center justify-between rounded-md py-1 pr-1 pl-2 text-sm leading-5 transition-colors',
             'focus-within:bg-sidebar-accent/50 focus-within:text-sidebar-accent-foreground',
             isSelected ? 'bg-primary/10 text-primary' : 'text-sidebar-foreground',
             !isSelected && isFocused

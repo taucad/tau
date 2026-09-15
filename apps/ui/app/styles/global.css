@@ -17,6 +17,123 @@
 @source '../../../../node_modules/streamdown/dist';
 @source '../../../../packages/ui/src';
 
+/*
+ * Vendor cursor adapters. Dockview and lazy runtime styles are unlayered, so
+ * these declarations need `!important`. All action cursors still resolve
+ * through the one shared preference token.
+ */
+@layer base {
+  .dockview-theme-tau
+    :where(
+      .dv-default-tab-action,
+      .dv-tabs-overflow-dropdown-default,
+      .dv-tab,
+      .dv-pinned-tab,
+      .dv-tab-group-chip,
+      .dv-tabs-overflow-group-header,
+      .dv-edge-peek-pin,
+      .dv-edge-peek-close,
+      .dv-default-header,
+      .dv-pane-header.dv-pane-draggable,
+      .dv-context-menu-item:not(.dv-context-menu-item--disabled),
+      .dv-context-menu-color-swatch
+    ) {
+    cursor: var(--cursor-action) !important;
+  }
+
+  .dockview-theme-tau :where(.dv-pinned-tab, .dv-default-header, .dv-pane-header.dv-pane-draggable):hover {
+    background-color: var(--dv-icon-hover-background-color);
+  }
+
+  .dockview-theme-tau .dv-tab-group-chip:hover {
+    filter: brightness(1.08);
+  }
+
+  :where(
+    .monaco-scrollable-element > .scrollbar > .scra,
+    .mtkoverflow,
+    .monaco-select-box,
+    .monaco-list.mouse-support .monaco-list-row,
+    .monaco-select-box-dropdown-container .monaco-list-row,
+    .monaco-action-bar .action-item,
+    .monaco-component.diff-review .revertButton,
+    .monaco-dropdown > .dropdown-label,
+    .monaco-editor .diff-hidden-lines .breadcrumb-item,
+    .monaco-editor .fold-unchanged,
+    .monaco-editor .arrow-revert-change,
+    .monaco-editor .lightbulb-glyph,
+    .monaco-text-button,
+    .monaco-button-dropdown,
+    .action-widget .monaco-list-row,
+    .monaco-editor .lightBulbWidget,
+    .monaco-editor .glyph-margin-widgets .cgmr,
+    .monaco-hover .action-container,
+    .monaco-hover a:not([href]),
+    .monaco-custom-toggle,
+    .monaco-editor .find-widget .button,
+    .colorpicker-color-decoration,
+    .colorpicker-header .picked-color,
+    .colorpicker-header .original-color,
+    .colorpicker-header .close-button,
+    .colorpicker-body .insert-button,
+    .monaco-editor .peekview-title.clickable,
+    .monaco-tree-sticky-row,
+    .monaco-editor .marker-widget .filename,
+    .monaco-editor .verbosity-actions-inner .codicon,
+    .monaco-editor .hover-copy-button,
+    .monaco-editor .margin-view-overlays [class*='codicon-folding-'],
+    .monaco-editor .inline-folded,
+    .monaco-editor .suggest-widget .monaco-list-row,
+    .monaco-editor .suggest-details .codicon-close,
+    .monaco-editor .suggest-widget .readMore,
+    .monaco-editor .suggest-preview-additional-widget .button,
+    .monaco-editor .ghost-text-decoration.clickable,
+    .monaco-editor .ghost-text-decoration-preview.clickable,
+    .monaco-editor .suggest-preview-text.clickable .ghost-text,
+    .monaco-editor .sticky-line-content,
+    .monaco-editor .inlineCompletions-char-insert,
+    .monaco-menu-option,
+    .monaco-editor .goto-definition-link,
+    .monaco-editor .detected-link-active,
+    .monaco-editor .parameter-hints-widget .button,
+    .monaco-editor .rename-suggestions-button,
+    .monaco-component.multiDiffEditor .collapse-button
+  ):not(:any-link) {
+    cursor: var(--cursor-action) !important;
+  }
+
+  :where([data-sonner-toast] [data-button], [data-sonner-toast] [data-close-button]) {
+    cursor: var(--cursor-action) !important;
+  }
+
+  :where(
+    #profiler-toggle,
+    .builtin-tab-btn,
+    .mini-panel-content .list-item.actionable,
+    #floating-btn,
+    #maximize-btn,
+    #hide-panel-btn,
+    .list-item-row.collapsible,
+    .list-item-row.actionable,
+    .console-copy-button,
+    .param-control button,
+    .custom-checkbox,
+    .detached-reattach-btn,
+    .panel-action-btn
+  ):not(:any-link) {
+    cursor: var(--cursor-action) !important;
+  }
+
+  .param-control input[type='range']::-webkit-slider-thumb,
+  .param-control input[type='range']::-moz-range-thumb {
+    cursor: var(--cursor-action) !important;
+  }
+
+  :where(#profiler-panel, .detached-tab-content) .custom-checkbox:hover .checkmark {
+    background-color: color-mix(in srgb, var(--accent-color) 15%, transparent);
+  }
+}
+
 /* Typography is provided by fumadocs-ui/css/preset.css (forked @tailwindcss/typography with fd-* color support) */
 
 :root {

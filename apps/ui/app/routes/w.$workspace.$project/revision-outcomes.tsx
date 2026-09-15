@@ -1,4 +1,5 @@
-import { useEffect, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useSyncExternalStore } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { Topic } from '@taucad/events';
 import { toast } from '#components/ui/sonner.js';
 import { useProject } from '#hooks/use-project.js';
@@ -40,7 +41,7 @@ export const useLatestTurnOutcome = (): TurnOutcomeNotice | undefined =>
   );
 
 const noticeOf = (event: WorkerRevisionEvent): TurnOutcomeNotice | undefined => {
-  if (event.type === 'turn.finalized') {
+  if (event.type === 'turn.finalized' || event.type === 'chats.projected') {
     return undefined;
   }
   return {
@@ -67,12 +68,17 @@ const noticeOf = (event: WorkerRevisionEvent): TurnOutcomeNotice | undefined => 
 export function RevisionOutcomes(): undefined {
   const client = useRevisionClient();
   const { projectId } = useProject();
+  const queryClient = useQueryClient();
+  const currentProjectIdRef = useRef<string | undefined>(undefined);
 
   /* The store is the document's, not the project's: a notice left behind by the
    * project a person just closed would render over the next one they open
    * (review R13). */
   useEffect(() => {
-    clearTurnOutcome();
+    if (currentProjectIdRef.current !== projectId) {
+      currentProjectIdRef.current = projectId;
+      clearTurnOutcome();
+    }
     return () => {
       clearTurnOutcome();
     };
@@ -83,6 +89,17 @@ export function RevisionOutcomes(): undefined {
       return undefined;
     }
     return client.subscribeEvents((event) => {
+      if (event.type === 'chats.projected') {
+        if (event.projectId !== projectId) {
+          return;
+        }
+        void queryClient.invalidateQueries({ queryKey: ['chats', projectId] });
+        void queryClient.invalidateQueries({ queryKey: ['all-chats'] });
+        for (const chatId of event.chatIds) {
+          void queryClient.invalidateQueries({ queryKey: ['chat', chatId] });
+        }
+        return;
+      }
       const notice = noticeOf(event);
       if (notice === undefined) {
         return;
@@ -97,7 +114,7 @@ export function RevisionOutcomes(): undefined {
       }
       toast.error('Nothing was saved for that change', { description: notice.reason });
     });
-  }, [client]);
+  }, [client, projectId, queryClient]);
 
   return undefined;
 }

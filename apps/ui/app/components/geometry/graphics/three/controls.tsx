@@ -160,7 +160,7 @@ export const Controls = React.memo(function ({
         onTransformDragMove={handleSectionTransformDragMove}
         onTransformDragEnd={handleSectionTransformDragEnd}
       />
-      {enableGizmo ? <ViewportGizmoCube container={gizmoContainer} dependencies={[upDirection]} /> : null}
+      {enableGizmo ? <ViewportGizmoCube container={gizmoContainer} /> : null}
     </>
   );
 });

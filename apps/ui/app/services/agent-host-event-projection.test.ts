@@ -208,7 +208,7 @@ describe('projectAgentHostEvent', () => {
         toolName: 'read_file',
         input: { targetFile: 'main.ts' },
       },
-      { type: 'tool-output-available', toolCallId: 'call-live', output: { progress: 0.5 } },
+      { type: 'tool-output-available', toolCallId: 'call-live', output: { progress: 0.5 }, preliminary: true },
     ]);
   });
 
@@ -1042,7 +1042,7 @@ describe('external tool-call chunks', () => {
     expect(chunk).toMatchObject({ toolMetadata: { tau: { kind: 'read', nativeName: 'list_directory' } } });
   });
 
-  it('renders a normalized external Tau MCP call through the native static tool part', () => {
+  it('keeps a normalized external Tau MCP call on one dynamic SDK identity', () => {
     const metadata = {
       tauInternal: { kind: 'external-tool', origin: 'external', agentId: 'codex', presentation: 'tau-mcp' },
     } as const;
@@ -1066,10 +1066,10 @@ describe('external tool-call chunks', () => {
     });
 
     expect(input).toMatchObject({ type: 'tool-input-available', toolName: 'screenshot' });
-    expect(input).not.toHaveProperty('dynamic');
+    expect(input).toHaveProperty('dynamic', true);
     expect(input).toMatchObject({ toolMetadata: { tau: { origin: 'external', agentId: 'codex' } } });
     expect(output).toMatchObject({ type: 'tool-output-available', output: { images: [{ view: 'isometric' }] } });
-    expect(output).not.toHaveProperty('dynamic');
+    expect(output).toHaveProperty('dynamic', true);
   });
 });
 

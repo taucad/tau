@@ -108,7 +108,36 @@ const agentStateRows: ReadonlyArray<{
     ],
     run: 'running.reconnecting',
   },
-  { signal: 'run.lifecycle: completed', events: [{ type: 'runLifecycle', phase: 'completed' }], run: 'done' },
+  { signal: 'run.lifecycle: completed', events: [{ type: 'runLifecycle', phase: 'completed' }], run: 'finishing' },
+  {
+    signal: 'turn.finalized after run.lifecycle: completed',
+    events: [
+      { type: 'runLifecycle', phase: 'completed', runId: 'run-1' },
+      { type: 'turnFinalizedObserved', runId: 'run-1', turnId: 'turn-1', branch: 'main' },
+    ],
+    run: 'done',
+  },
+  {
+    signal: 'turn.failed after run.lifecycle: completed',
+    events: [
+      { type: 'runLifecycle', phase: 'completed', runId: 'run-1' },
+      {
+        type: 'turnFailedObserved',
+        runId: 'run-1',
+        turnId: 'turn-1',
+        reason: 'revision cut failed',
+      },
+    ],
+    run: 'failed',
+  },
+  {
+    signal: 'turn.conflicted after run.lifecycle: completed',
+    events: [
+      { type: 'runLifecycle', phase: 'completed', runId: 'run-1' },
+      { type: 'turnConflictedObserved', runId: 'run-1', turnId: 'turn-1' },
+    ],
+    run: 'failed',
+  },
   {
     signal: 'run.lifecycle: failed',
     events: [{ type: 'runLifecycle', phase: 'failed', reason: 'Gateway refused' }],
@@ -171,9 +200,12 @@ describe('chatSessionMachine', () => {
         { type: 'runLifecycle', phase: 'admitted' },
         { type: 'runLifecycle', phase: 'running' },
         { type: 'runLifecycle', phase: 'paused' },
-        { type: 'runLifecycle', phase: 'completed' },
+        { type: 'runLifecycle', phase: 'completed', runId: 'run-1' },
         { type: 'runLifecycle', phase: 'failed' },
         { type: 'runLifecycle', phase: 'cancelled' },
+        { type: 'turnFinalizedObserved', runId: 'run-1', turnId: 'turn-1', branch: 'main' },
+        { type: 'turnFailedObserved', runId: 'run-1', turnId: 'turn-1', reason: 'revision cut failed' },
+        { type: 'turnConflictedObserved', runId: 'run-1', turnId: 'turn-1' },
         { type: 'requestLifecycle', phase: 'retrying' },
         { type: 'requestLifecycle', phase: 'stopping' },
         { type: 'toolParts', inFlight: 1, approvals: 0 },
@@ -193,6 +225,7 @@ describe('chatSessionMachine', () => {
       [
         'done',
         'failed',
+        'finishing',
         'idle',
         'queued',
         'running.generating',
@@ -265,7 +298,7 @@ describe('chatSessionMachine', () => {
     actor.stop();
   });
 
-  it('tells its project session when the chat is closed, and stops the run', () => {
+  it('reads Stopped when the chat is closed, and asks its project session for nothing (P63)', () => {
     const parent = recordingParent();
     const actor = start(parent.ref);
     actor.send({ type: 'runLifecycle', phase: 'running' });
@@ -273,7 +306,11 @@ describe('chatSessionMachine', () => {
 
     actor.send({ type: 'close' });
 
-    expect(parent.received).toContainEqual({ type: 'chatClosed', chatId: 'chat-1' });
+    /* A person's Close is not a teardown: the store cancels the run and the
+     * row keeps reading `Stopped`, so the actor stays alive and `chatClosed`
+     * has exactly one sender — the store's own teardown. */
+    expect(parent.received).not.toContainEqual({ type: 'chatClosed', chatId: 'chat-1' });
+    expect(actor.getSnapshot().status).toBe('active');
     expect(runState(actor)).toBe('stopped');
     expect(actor.getSnapshot().context.pendingApprovalCount).toBe(0);
     actor.stop();

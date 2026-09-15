@@ -70,7 +70,7 @@ const useTabsOverflow = ({
       }
       frame = requestAnimationFrame(() => {
         frame = undefined;
-        setIsOverflowing(tabs.scrollWidth > tabs.clientWidth + 1);
+        setIsOverflowing(panelCount > 0 && tabs.scrollWidth > tabs.clientWidth + 1);
       });
     };
 

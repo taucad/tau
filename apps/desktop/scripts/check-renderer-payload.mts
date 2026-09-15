@@ -153,6 +153,24 @@ export const isRendererExecutionModule = (moduleId: string): boolean => {
   );
 };
 
+/** Web document, marketing, consent and analytics modules forbidden in Electron. */
+export const isForbiddenDesktopSurfaceModule = (moduleId: string): boolean => {
+  const path = moduleId.replaceAll('\\', '/');
+  return (
+    /apps\/ui\/app\/root\.tsx(?:\?|$)/u.test(path) ||
+    /apps\/ui\/app\/components\/(?:build-skew-banner|cookie-consent|layout\/(?:page-footer|route-footer))\.tsx(?:\?|$)/u.test(
+      path,
+    ) ||
+    /apps\/ui\/app\/(?:hooks\/use-cookie-consent|lib\/posthog\.lib|providers\/web-analytics-provider)\.tsx?(?:\?|$)/u.test(
+      path,
+    ) ||
+    /apps\/ui\/app\/(?:offline\/|routes\/legal(?:\.|\/)|routes\/_index\/(?:route|legacy-landing|marketing-landing)\.tsx(?:\?|$))/u.test(
+      path,
+    ) ||
+    /(?:node_modules\/|\.pnpm\/)(?:[^/]+\/node_modules\/)?(?:posthog-js|rrweb)(?:\/|$)/u.test(path)
+  );
+};
+
 const payloadGroup = (scope: PayloadScope, path: string): string => {
   if (scope === 'asar') {
     return 'asar-logical';
@@ -343,6 +361,14 @@ export const inspectDesktopPayload = async (options: {
     if (scope !== 'renderer' && rendererPath === path) {
       return;
     }
+    if (rendererPath === 'index.html') {
+      const html = Buffer.from(content).toString();
+      for (const marker of ['manifest.webmanifest', 'apple-mobile-web-app', 'application/ld+json']) {
+        if (html.includes(marker)) {
+          inventory.violations.push(`Web-only metadata in desktop HTML: ${marker}`);
+        }
+      }
+    }
     if (kind === 'wasm' && !allowedWasm.test(rendererPath.split('/').at(-1) ?? '')) {
       inventory.violations.push(`Renderer WASM is not editor/viewer-owned: ${rendererPath}`);
     }
@@ -483,6 +509,9 @@ export const inspectDesktopPayload = async (options: {
   for (const chunk of inventory.chunks) {
     for (const moduleId of chunk.moduleIds.filter(isRendererExecutionModule)) {
       inventory.violations.push(`Renderer execution module in ${chunk.fileName}: ${moduleId}`);
+    }
+    for (const moduleId of chunk.moduleIds.filter(isForbiddenDesktopSurfaceModule)) {
+      inventory.violations.push(`Forbidden web surface in ${chunk.fileName}: ${moduleId}`);
     }
   }
   if (inventory.graphManifests.length === 0) {

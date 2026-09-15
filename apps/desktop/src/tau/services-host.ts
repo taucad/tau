@@ -79,6 +79,12 @@ const host = createServicesHost({
   quiesced: () => {
     parentPort.postMessage({ type: 'quiesced' });
   },
+  agentHostReleased: (requestId, error) => {
+    parentPort.postMessage({
+      type: error === undefined ? 'agent-host-released' : 'agent-host-release-failed',
+      requestId,
+    });
+  },
   ...(diagnostics === undefined
     ? {}
     : {

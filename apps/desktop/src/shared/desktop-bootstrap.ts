@@ -16,8 +16,27 @@ export const bootstrapArgumentPrefix = '--tau-bootstrap=';
 /** Relay tag shared by main's `ipcMain` channel and the page-side listener. */
 export const servicesPortRelayTag = 'tau:services-port';
 
+/** Project-session ownership calls for launcher 2. */
+export const agentHostSessionChannels = {
+  retain: 'tau:agent-host:retain',
+  release: 'tau:agent-host:release',
+} as const;
+
 /** Theme notification shared by main and preload for the native app icon. */
 export const appIconThemeChannel = 'tau:app-icon-theme';
+
+/**
+ * The renderer's half of the quit hold (D31, P49).
+ *
+ * `ask` is main telling the page to run every session's closing; `quiesced` is
+ * the page saying it is done — by finishing, or because the person pressed
+ * *Quit anyway*. Main waits for it, under a bound, before it quiesces the
+ * services utility.
+ */
+export const quitChannels = {
+  ask: 'tau:quit:ask',
+  quiesced: 'tau:quit:quiesced',
+} as const;
 
 /** IPC methods for bounded compute-store authority controls. */
 export const computeControlChannels = {

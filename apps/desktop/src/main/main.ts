@@ -71,6 +71,8 @@ import type { QuickLookController } from '#main/quick-look.js';
 import { createOpenFileQueue } from '#main/open-files.js';
 import {
   appIconThemeChannel,
+  agentHostSessionChannels,
+  quitChannels,
   bootstrapArgumentPrefix,
   desktopNativeKernelIds,
   computeControlChannels,
@@ -126,6 +128,48 @@ enqueueOpenFiles(process.argv.slice(1));
  * open: after it the durable queue is the guarantee (D28).
  */
 const quitQuiesceMilliseconds = 20_000;
+
+/**
+ * How long quit waits for the renderer's sessions registry (D31, P49).
+ *
+ * The page runs every live project's `closing` — cancel, sync flush, lease
+ * release — and answers `quiesced`. The person can cut it short with *Quit
+ * anyway*; this bound cuts it short when nobody is looking.
+ */
+const quitRendererMilliseconds = 20_000;
+
+/**
+ * Ask every window's sessions registry to close its projects, and wait.
+ *
+ * Resolves on the first `quiesced` (the registry's own emit, or *Quit
+ * anyway*), at the bound, or at once when there is no window to ask.
+ *
+ * @param boundMilliseconds - How long to wait before proceeding regardless.
+ * @returns What ended the wait.
+ */
+const askRendererToQuiesce = async (boundMilliseconds: number): Promise<'quiesced' | 'timeout' | 'no-window'> => {
+  const windows = BrowserWindow.getAllWindows().filter((window) => !window.isDestroyed());
+  if (windows.length === 0) {
+    return 'no-window';
+  }
+  return new Promise<'quiesced' | 'timeout' | 'no-window'>((resolve) => {
+    const settle = (outcome: 'quiesced' | 'timeout'): void => {
+      clearTimeout(timer);
+      ipcMain.off(quitChannels.quiesced, onQuiesced);
+      resolve(outcome);
+    };
+    const onQuiesced = (): void => {
+      settle('quiesced');
+    };
+    const timer = setTimeout(() => {
+      settle('timeout');
+    }, boundMilliseconds);
+    ipcMain.on(quitChannels.quiesced, onQuiesced);
+    for (const window of windows) {
+      window.webContents.send(quitChannels.ask);
+    }
+  });
+};
 
 const ownsSingleInstanceLock = app.requestSingleInstanceLock();
 app.on('second-instance', (_event, argv) => {
@@ -233,17 +277,26 @@ const bootstrapElectronApp = async (): Promise<void> => {
   /* Injection covers the API origin and, separately, the WebSocket origin —
    * `ws://localhost:4001` is not `http://localhost:4000`, and the chat RPC and
    * agent sockets are exactly the traffic a browser cannot decorate itself. */
-  const allowedOrigins = [originOf(environment['TAU_API_URL']), originOf(environment['TAU_WEBSOCKET_URL'])].filter(
-    (origin): origin is string => origin !== undefined,
-  );
+  const authenticatedOrigins = [
+    originOf(environment['TAU_API_URL']),
+    originOf(environment['TAU_WEBSOCKET_URL']),
+  ].filter((origin): origin is string => origin !== undefined);
   installTauHeaderInjection(session.defaultSession.webRequest, {
-    allowedOrigins,
+    allowedOrigins: authenticatedOrigins,
     token: () => auth.token(),
     clientHeader: `tau-desktop/${app.getVersion()}`,
   });
 
   if (!isDevelopment) {
-    registerAppProtocol({ clientRoot, protocol, net, contentSecurityPolicy: contentSecurityPolicy(allowedOrigins) });
+    const storageOrigin = originOf(environment['TAU_S3_ENDPOINT']);
+    registerAppProtocol({
+      clientRoot,
+      protocol,
+      net,
+      contentSecurityPolicy: contentSecurityPolicy(
+        storageOrigin === undefined ? authenticatedOrigins : [...authenticatedOrigins, storageOrigin],
+      ),
+    });
     log.log('info', 'main.app-protocol-registered', { clientRoot });
   }
 
@@ -281,7 +334,14 @@ const bootstrapElectronApp = async (): Promise<void> => {
     }
     return connection;
   };
-  const baseForkResolver = createKernelForkResolver({ registry: roots, defaultRoot: homeRoot });
+  const baseForkResolver = createKernelForkResolver({
+    registry: roots,
+    defaultRoot: homeRoot,
+    isTrustedRoot: (executionRoot) => {
+      const projectRoot = computeProjectRootFor(executionRoot);
+      return projectRoot !== executionRoot && roots.isTrusted(projectRoot);
+    },
+  });
   const runtimeMain = registerElectronRuntimeMain({
     utilityEntry: kernelUtilityEntry,
     /* The kernel utility appends its engine-identity record (N5/N6) to the same
@@ -361,6 +421,31 @@ const bootstrapElectronApp = async (): Promise<void> => {
     log: (level, event, detail) => {
       log.log(level, event, detail);
     },
+  });
+  const agentHostSessionInput = (
+    event: IpcMainInvokeEvent,
+    payload: unknown,
+  ): Readonly<{ workspaceRoot: string; projectId: string; attachmentId: string }> => {
+    const { workspaceRoot, projectId, attachmentId } = (payload ?? {}) as Record<string, unknown>;
+    if (
+      !trusted(event.senderFrame) ||
+      typeof workspaceRoot !== 'string' ||
+      !roots.isTrusted(workspaceRoot) ||
+      typeof projectId !== 'string' ||
+      projectId === '' ||
+      typeof attachmentId !== 'string' ||
+      attachmentId === '' ||
+      attachmentId.length > 256
+    ) {
+      throw new Error('Desktop shell refused invalid agent-host session ownership.');
+    }
+    return { workspaceRoot, projectId, attachmentId };
+  };
+  ipcMain.handle(agentHostSessionChannels.retain, async (event, payload) => {
+    services.retainAgentHost(agentHostSessionInput(event, payload));
+  });
+  ipcMain.handle(agentHostSessionChannels.release, async (event, payload) => {
+    await services.releaseAgentHost(agentHostSessionInput(event, payload), quitQuiesceMilliseconds);
   });
   computeProjectRootFor = (executionRoot) => services.computeProjectRoot(executionRoot) ?? executionRoot;
   const publishRoots = (): void => {
@@ -735,6 +820,18 @@ const bootstrapElectronApp = async (): Promise<void> => {
          * edits of a quit were recorded by nothing. After the bound the durable
          * queue is the guarantee (D28) and quit proceeds regardless.
          */
+        /*
+         * The renderer's half first (P49): the browser-side registry owns the
+         * file manager, compute admission and every `chat-session`, and only
+         * it can cancel runs and release the leases its turns took. It shows
+         * the *Backing up…* overlay while it does, with *Quit anyway*.
+         */
+        try {
+          const rendererOutcome = await askRendererToQuiesce(quitRendererMilliseconds);
+          log.log('info', 'main.renderer-quiesce', { outcome: rendererOutcome });
+        } catch (error) {
+          log.log('error', 'main.shutdown', error);
+        }
         try {
           const outcome = await services.quiesce(quitQuiesceMilliseconds);
           log.log('info', 'main.quiesce', { outcome });

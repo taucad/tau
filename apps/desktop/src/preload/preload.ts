@@ -25,6 +25,8 @@ import { exposeElectronRuntime, relayElectronPorts } from '@taucad/runtime/elect
 
 import {
   appIconThemeChannel,
+  agentHostSessionChannels,
+  quitChannels,
   computeControlChannels,
   readBootstrap,
   servicesPortRelayTag,
@@ -40,6 +42,16 @@ import type {
 import quickLookManifest from '#macos/quick-look-formats.json' with { type: 'json' };
 
 const bootstrap = readBootstrap(process.argv);
+
+let pendingQuitAsk = false;
+let quitAskHandler: (() => void) | undefined;
+ipcRenderer.on(quitChannels.ask, () => {
+  if (quitAskHandler === undefined) {
+    pendingQuitAsk = true;
+    return;
+  }
+  quitAskHandler();
+});
 
 exposeElectronRuntime();
 relayElectronPorts(servicesPortRelayTag);
@@ -71,6 +83,14 @@ contextBridge.exposeInMainWorld('tau', {
   requestServicesPort: (requestId: string, concern: string, context?: Readonly<Record<string, string>>): void => {
     ipcRenderer.send(servicesPortRelayTag, { requestId, concern, context });
   },
+  agentHost: {
+    retain: async (workspaceRoot: string, projectId: string, attachmentId: string): Promise<void> => {
+      await ipcRenderer.invoke(agentHostSessionChannels.retain, { workspaceRoot, projectId, attachmentId });
+    },
+    release: async (workspaceRoot: string, projectId: string, attachmentId: string): Promise<void> => {
+      await ipcRenderer.invoke(agentHostSessionChannels.release, { workspaceRoot, projectId, attachmentId });
+    },
+  },
   nodeFs: { homeRoot: bootstrap.homeRoot },
   runtimeKernelIds: bootstrap.runtimeKernelIds,
   externalAgents: bootstrap.externalAgents,
@@ -85,6 +105,24 @@ contextBridge.exposeInMainWorld('tau', {
   appIcon: {
     setTheme: (theme: AppIconTheme): void => {
       ipcRenderer.send(appIconThemeChannel, theme);
+    },
+  },
+  quit: {
+    isReady: (): boolean => quitAskHandler !== undefined,
+    onAsk: (handler: () => void): (() => void) => {
+      quitAskHandler = handler;
+      if (pendingQuitAsk) {
+        pendingQuitAsk = false;
+        handler();
+      }
+      return () => {
+        if (quitAskHandler === handler) {
+          quitAskHandler = undefined;
+        }
+      };
+    },
+    reportQuiesced: (): void => {
+      ipcRenderer.send(quitChannels.quiesced);
     },
   },
   dialog: {

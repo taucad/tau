@@ -29,7 +29,7 @@ const fixture = async () => {
   await writeFile(join(renderer, 'renamed.js'), 'export {};');
   await writeFile(
     join(renderer, 'tau-module-graph-123.json'),
-    JSON.stringify({ chunks: [{ fileName: 'renamed.js', moduleIds: ['apps/ui/app/root.tsx'] }] }),
+    JSON.stringify({ chunks: [{ fileName: 'renamed.js', moduleIds: ['apps/ui/app/root-layout.tsx'] }] }),
   );
   return { root, renderer, host };
 };
@@ -42,7 +42,7 @@ describe('Desktop renderer ownership', () => {
     await writeFile(
       join(paths.renderer, 'tau-module-graph-123.json'),
       JSON.stringify({
-        chunks: [{ fileName: 'renamed.js', moduleIds: ['apps/ui/app/root.tsx'] }],
+        chunks: [{ fileName: 'renamed.js', moduleIds: ['apps/ui/app/root-layout.tsx'] }],
         assets: [asset('clipper2z-123.wasm', wasm)],
       }),
     );
@@ -58,7 +58,7 @@ describe('Desktop renderer ownership', () => {
     const paths = await fixture();
     const wasm = Uint8Array.from(await readFile(clipperSource));
     const graph = {
-      chunks: [{ fileName: 'renamed.js', moduleIds: ['apps/ui/app/root.tsx'] }],
+      chunks: [{ fileName: 'renamed.js', moduleIds: ['apps/ui/app/root-layout.tsx'] }],
       assets: [asset('clipper2z.wasm', wasm)],
     };
     await writeFile(join(paths.renderer, 'clipper2z.wasm'), wasm);
@@ -151,7 +151,7 @@ describe('Desktop renderer ownership', () => {
       JSON.stringify({
         chunks: [
           { fileName: 'missing.js', moduleIds: [] },
-          { fileName: 'missing.js', moduleIds: ['apps/ui/app/root.tsx'] },
+          { fileName: 'missing.js', moduleIds: ['apps/ui/app/root-layout.tsx'] },
         ],
       }),
     );
@@ -176,7 +176,7 @@ describe('Desktop renderer ownership', () => {
         join(paths.renderer, 'tau-module-graph-123.json'),
         JSON.stringify({
           chunks: [
-            { fileName: 'renamed.js', moduleIds: ['apps/ui/app/root.tsx'] },
+            { fileName: 'renamed.js', moduleIds: ['apps/ui/app/root-layout.tsx'] },
             { fileName: 'forward.js', moduleIds: [], imports: ['renamed.js'], forwardingOnly: true },
             { fileName: 'empty-css.js', moduleIds: [], imports: [], forwardingOnly: true },
           ],
@@ -195,7 +195,7 @@ describe('Desktop renderer ownership', () => {
       join(paths.renderer, 'tau-module-graph-123.json'),
       JSON.stringify({
         chunks: [
-          { fileName: 'renamed.js', moduleIds: ['apps/ui/app/root.tsx'] },
+          { fileName: 'renamed.js', moduleIds: ['apps/ui/app/root-layout.tsx'] },
           { fileName: 'forward.js', moduleIds: [], imports: ['missing.js'], forwardingOnly: true },
           { fileName: 'empty-css.js', moduleIds: [], imports: [], forwardingOnly: true },
         ],
@@ -239,6 +239,40 @@ describe('Desktop renderer ownership', () => {
     );
   });
 
+  it('should reject web-only consent, marketing, legal, and analytics modules', async () => {
+    const paths = await fixture();
+    await writeFile(
+      join(paths.renderer, 'tau-module-graph-123.json'),
+      JSON.stringify({
+        chunks: [
+          {
+            fileName: 'renamed.js',
+            moduleIds: [
+              'apps/ui/app/components/cookie-consent.tsx',
+              'apps/ui/app/routes/_index/route.tsx',
+              'apps/ui/app/routes/_index/marketing-landing.tsx',
+              'apps/ui/app/routes/legal.cookies/route.tsx',
+              'apps/ui/app/offline/offline-shell.tsx',
+              'node_modules/posthog-js/dist/module.js',
+            ],
+          },
+        ],
+      }),
+    );
+
+    const report = await inspectDesktopPayload(paths);
+    expect(report.violations.filter((violation) => violation.startsWith('Forbidden web surface'))).toHaveLength(6);
+  });
+
+  it('should reject web-only metadata from desktop HTML', async () => {
+    const paths = await fixture();
+    await writeFile(join(paths.renderer, 'index.html'), '<link rel="manifest" href="/manifest.webmanifest">');
+
+    const report = await inspectDesktopPayload(paths);
+
+    expect(report.violations).toContain('Web-only metadata in desktop HTML: manifest.webmanifest');
+  });
+
   it('should detect disguised retained WASM and FAT64 binaries', async () => {
     const paths = await fixture();
     const wasm = Uint8Array.from(await readFile(clipperSource));
@@ -279,7 +313,7 @@ describe('Desktop renderer ownership', () => {
     const asarSource = join(paths.root, 'empty-asar');
     const wasm = Uint8Array.from(await readFile(clipperSource));
     const graph = JSON.stringify({
-      chunks: [{ fileName: 'renamed.js', moduleIds: ['apps/ui/app/root.tsx'] }],
+      chunks: [{ fileName: 'renamed.js', moduleIds: ['apps/ui/app/root-layout.tsx'] }],
       assets: [asset('clipper2z.wasm', wasm)],
     });
     await Promise.all([

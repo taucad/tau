@@ -6,7 +6,7 @@ import type { Worker as NodeWorker } from 'node:worker_threads';
 import type * as WorkerThreads from 'node:worker_threads';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { computeControlChannels } from '#shared/desktop-bootstrap.js';
+import { computeControlChannels, quitChannels } from '#shared/desktop-bootstrap.js';
 
 const originalTitle = process.title;
 const originalUncaught = new Set(process.listeners('uncaughtException'));
@@ -19,6 +19,14 @@ const state = vi.hoisted(() => ({
   workers: [] as NodeWorker[],
   userData: '',
   servicesDispose: vi.fn(async () => undefined),
+  /* The quit hold's two halves, in the order main runs them (R9, D31). */
+  shutdownOrder: [] as string[],
+  servicesQuiesce: vi.fn(async (): Promise<'quiesced'> => 'quiesced'),
+  ipcListeners: new Map<string, Array<(...args: unknown[]) => unknown>>(),
+  sentToRenderer: [] as string[],
+  /* A renderer that closes its sessions at once, which is what every case but
+   * the ordering pin is about. */
+  autoQuiesce: true,
   log: vi.fn(),
 }));
 
@@ -57,6 +65,16 @@ const fakeWindow = {
   webContents: {
     id: 1,
     getURL: vi.fn(() => 'app://tau/'),
+    send: vi.fn((channel: string) => {
+      state.sentToRenderer.push(channel);
+      if (channel === 'tau:quit:ask' && state.autoQuiesce) {
+        queueMicrotask(() => {
+          for (const listener of state.ipcListeners.get('tau:quit:quiesced') ?? []) {
+            listener();
+          }
+        });
+      }
+    }),
     isDestroyed: vi.fn(() => false),
     on: vi.fn(),
     setWindowOpenHandler: vi.fn(),
@@ -83,8 +101,15 @@ vi.mock('electron', () => ({
   dialog: { showOpenDialog: vi.fn(), showMessageBox: vi.fn() },
   ipcMain: {
     handle: vi.fn((channel: string, handler: (...args: unknown[]) => unknown) => state.handlers.set(channel, handler)),
-    on: vi.fn(),
-    off: vi.fn(),
+    on: vi.fn((channel: string, handler: (...args: unknown[]) => unknown) => {
+      state.ipcListeners.set(channel, [...(state.ipcListeners.get(channel) ?? []), handler]);
+    }),
+    off: vi.fn((channel: string, handler: (...args: unknown[]) => unknown) => {
+      state.ipcListeners.set(
+        channel,
+        (state.ipcListeners.get(channel) ?? []).filter((entry) => entry !== handler),
+      );
+    }),
   },
   MessageChannelMain: vi.fn(() => ({ port1: {}, port2: {} })),
   net: { fetch: vi.fn() },
@@ -109,6 +134,7 @@ vi.mock('@taucad/runtime/electron/main', () => ({
   }),
 }));
 vi.mock('@taucad/host', () => ({
+  defaultConfigDirectory: vi.fn(() => join(state.userData, 'config')),
   discoverAcpAgents: vi.fn(async () => ({ agents: [], refused: [] })),
   externalAgentDescriptors: vi.fn(() => []),
 }));
@@ -162,6 +188,7 @@ vi.mock('#main/services-broker.js', () => ({
   createServicesBroker: vi.fn(() => ({
     post: vi.fn(),
     connect: vi.fn(),
+    quiesce: state.servicesQuiesce,
     dispose: state.servicesDispose,
     computeProjectRoot: (root: string) =>
       root.includes('/.tau/checkouts/') ? root.slice(0, root.indexOf('/.tau/checkouts/')) : undefined,
@@ -191,6 +218,9 @@ afterEach(async () => {
   }
   state.appListeners.clear();
   state.handlers.clear();
+  state.ipcListeners.clear();
+  state.sentToRenderer.length = 0;
+  state.autoQuiesce = true;
   state.resolveFork = undefined;
   // Each case bootstraps main afresh; the cached module would otherwise register nothing.
   vi.resetModules();
@@ -209,6 +239,10 @@ afterEach(async () => {
 });
 
 describe('desktop main compute owner', () => {
+  /* Every case here evaluates the whole main module, which alone is seconds on
+   * a loaded machine — the 5 s default is a load flake, not a budget. */
+  const bootMilliseconds = 30_000;
+
   const bootstrap = async (): Promise<string> => {
     state.userData = await mkdtemp(join(tmpdir(), 'tau-main-owner-'));
     await import('#main/main.js');
@@ -219,60 +253,106 @@ describe('desktop main compute owner', () => {
     return resolve(join(state.userData, 'home', 'project'));
   };
 
-  it('invalidates a worker immediately on error and restarts through the owner resolver', async () => {
-    const projectRoot = await bootstrap();
-    state.resolveFork!({ projectRoot, computeMode: 'durable' });
-    const first = state.workers[0]!;
+  it(
+    'invalidates a worker immediately on error and restarts through the owner resolver',
+    async () => {
+      const projectRoot = await bootstrap();
+      state.resolveFork!({ projectRoot, computeMode: 'durable' });
+      const first = state.workers[0]!;
 
-    first.emit('error', new Error('fixture worker error'));
-    const recovered = state.resolveFork!({ projectRoot, computeMode: 'durable' });
+      first.emit('error', new Error('fixture worker error'));
+      const recovered = state.resolveFork!({ projectRoot, computeMode: 'durable' });
 
-    expect(recovered.compute).toMatchObject({ mode: 'durable' });
-    expect(state.workers).toHaveLength(2);
-  });
+      expect(recovered.compute).toMatchObject({ mode: 'durable' });
+      expect(state.workers).toHaveLength(2);
+    },
+    bootMilliseconds,
+  );
 
-  it('allocates lazily, reuses original identity, invalidates on error, restarts, and awaits quit', async () => {
-    const projectRoot = await bootstrap();
-    const off = state.resolveFork!({ projectRoot, computeMode: 'off' });
-    expect(off.compute).toEqual({ mode: 'off' });
-    expect(state.workers).toHaveLength(0);
-    expect(() => state.resolveFork!({ purpose: 'ephemeral', computeMode: 'durable' })).toThrow(/durable.*ephemeral/u);
-    expect(state.workers).toHaveLength(0);
+  it(
+    'allocates lazily, reuses original identity, invalidates on error, restarts, and awaits quit',
+    async () => {
+      const projectRoot = await bootstrap();
+      const off = state.resolveFork!({ projectRoot, computeMode: 'off' });
+      expect(off.compute).toEqual({ mode: 'off' });
+      expect(state.workers).toHaveLength(0);
+      expect(() => state.resolveFork!({ purpose: 'ephemeral', computeMode: 'durable' })).toThrow(/durable.*ephemeral/u);
+      expect(state.workers).toHaveLength(0);
 
-    const direct = state.resolveFork!({ projectRoot: `${projectRoot}/.`, computeMode: 'durable' });
-    const candidate = state.resolveFork!({
-      projectRoot: join(projectRoot, '.tau/checkouts/run'),
-      computeMode: 'durable',
-    });
-    expect((candidate.compute as { store: unknown }).store).toBe((direct.compute as { store: unknown }).store);
-    expect(state.workers).toHaveLength(1);
+      const direct = state.resolveFork!({ projectRoot: `${projectRoot}/.`, computeMode: 'durable' });
+      const candidate = state.resolveFork!({
+        projectRoot: join(projectRoot, '.tau/checkouts/run'),
+        computeMode: 'durable',
+      });
+      expect((candidate.compute as { store: unknown }).store).toBe((direct.compute as { store: unknown }).store);
+      expect(state.workers).toHaveLength(1);
 
-    const inspect = state.handlers.get(computeControlChannels.inspect)!;
-    const event = { senderFrame: { url: 'app://tau/' } };
-    const before = (await inspect(event, projectRoot)) as { generation: number };
+      const inspect = state.handlers.get(computeControlChannels.inspect)!;
+      const event = { senderFrame: { url: 'app://tau/' } };
+      const before = (await inspect(event, projectRoot)) as { generation: number };
 
-    const first = state.workers[0]!;
-    first.emit('error', new Error('fixture worker error'));
-    const recovered = state.resolveFork!({ projectRoot, computeMode: 'durable' });
-    expect(recovered.compute).toMatchObject({ mode: 'durable' });
-    expect(state.workers).toHaveLength(2);
-    await first.terminate();
-    const after = (await inspect(event, `${projectRoot}/.`)) as { generation: number };
-    expect(after.generation).toBe(before.generation);
+      const first = state.workers[0]!;
+      first.emit('error', new Error('fixture worker error'));
+      const recovered = state.resolveFork!({ projectRoot, computeMode: 'durable' });
+      expect(recovered.compute).toMatchObject({ mode: 'durable' });
+      expect(state.workers).toHaveLength(2);
+      await first.terminate();
+      const after = (await inspect(event, `${projectRoot}/.`)) as { generation: number };
+      expect(after.generation).toBe(before.generation);
 
-    const quit = state.appListeners.get('before-quit')!.at(-1)!;
-    state.servicesDispose.mockRejectedValueOnce(new Error('services close failed'));
-    const firstPreventDefault = vi.fn();
-    const secondPreventDefault = vi.fn();
-    quit({ preventDefault: firstPreventDefault });
-    quit({ preventDefault: secondPreventDefault });
-    expect(firstPreventDefault).toHaveBeenCalledOnce();
-    expect(secondPreventDefault).toHaveBeenCalledOnce();
-    expect(app.quit).not.toHaveBeenCalled();
-    await vi.waitFor(() => {
-      expect(app.quit).toHaveBeenCalledOnce();
-    });
-    expect(state.log).toHaveBeenCalledWith('error', 'main.shutdown', expect.any(Error));
-    expect(state.workers[1]!.threadId).toBe(-1);
-  });
+      const quit = state.appListeners.get('before-quit')!.at(-1)!;
+      state.servicesDispose.mockRejectedValueOnce(new Error('services close failed'));
+      const firstPreventDefault = vi.fn();
+      const secondPreventDefault = vi.fn();
+      quit({ preventDefault: firstPreventDefault });
+      quit({ preventDefault: secondPreventDefault });
+      expect(firstPreventDefault).toHaveBeenCalledOnce();
+      expect(secondPreventDefault).toHaveBeenCalledOnce();
+      expect(app.quit).not.toHaveBeenCalled();
+      await vi.waitFor(() => {
+        expect(app.quit).toHaveBeenCalledOnce();
+      });
+      expect(state.log).toHaveBeenCalledWith('error', 'main.shutdown', expect.any(Error));
+      expect(state.workers[1]!.threadId).toBe(-1);
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'holds quit for the renderer and the utility, in that order, and disposes anyway (R9, D31)',
+    async () => {
+      await bootstrap();
+      const order: string[] = [];
+      state.autoQuiesce = false;
+      state.servicesQuiesce.mockImplementation(async (): Promise<'quiesced'> => {
+        order.push('quiesce');
+        return 'quiesced';
+      });
+      state.servicesDispose.mockImplementation(async () => {
+        order.push('dispose');
+      });
+
+      const quit = state.appListeners.get('before-quit')!.at(-1)!;
+      quit({ preventDefault: vi.fn() });
+
+      /* The page is asked first, and answers through its own channel. */
+      await vi.waitFor(() => {
+        expect(state.sentToRenderer).toContain(quitChannels.ask);
+      });
+      expect(order).toEqual([]);
+      for (const listener of state.ipcListeners.get(quitChannels.quiesced) ?? []) {
+        listener();
+      }
+
+      await vi.waitFor(() => {
+        expect(order).toContain('dispose');
+      });
+      /* The utility's quiesce resolves before anything is killed; a failure in
+       * it never skips the dispose that follows. */
+      expect(order.indexOf('quiesce')).toBeGreaterThanOrEqual(0);
+      expect(order.indexOf('quiesce')).toBeLessThan(order.indexOf('dispose'));
+      expect(state.log).toHaveBeenCalledWith('info', 'main.renderer-quiesce', { outcome: 'quiesced' });
+    },
+    bootMilliseconds,
+  );
 });

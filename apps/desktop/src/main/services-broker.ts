@@ -9,7 +9,7 @@
  */
 
 import { realpathSync } from 'node:fs';
-import { resolve, sep } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 import type { MessageChannelMain, MessagePortMain, UtilityProcess } from 'electron';
 
@@ -63,6 +63,13 @@ export type ServicesBroker = {
    * second connection, never a re-configuration of the first.
    */
   connect(concern: ServicesConcern, context?: Readonly<Record<string, string>>): MessagePortMain;
+  /** Retain launcher 2 for one renderer project session. */
+  retainAgentHost(input: Readonly<{ workspaceRoot: string; projectId: string; attachmentId: string }>): void;
+  /** Release one hold and await shutdown when it was the last. */
+  releaseAgentHost(
+    input: Readonly<{ workspaceRoot: string; projectId: string; attachmentId: string }>,
+    boundMilliseconds: number,
+  ): Promise<void>;
   /** Send a control frame (root admission, credential updates) to the utility. */
   post(message: unknown): void;
   /** Original project identity retained for an admitted execution root. */
@@ -99,6 +106,7 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
    * accumulates. */
   const controlFrames = new Map<string, unknown>();
   const runtimeContexts = new Map<string, Readonly<Record<string, string>>>();
+  const projectIds = new Map<string, string>();
   /* Turn checkouts the utility registered, kept apart from the project contexts
    * `connect()` owns: a candidate turn's kernel and GeoSpec tools must reach the
    * tree its file tools write, and that tree lives only for the turn (V19). The
@@ -106,8 +114,15 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
   const checkoutContexts = new Set<string>();
   const runtimeLeases = new Map<string, ReturnType<ServicesBrokerOptions['connectRuntime']>>();
   const runtimeLeaseClosures = new Map<string, Promise<void>>();
+  const projectAttachments = new Map<string, Set<string>>();
+  const releaseWaiters = new Map<string, ReturnType<typeof Promise.withResolvers<void>>>();
+  let releaseRequest = 0;
   let utility: UtilityProcess | undefined;
 
+  const isStrictDescendant = (parent: string, candidate: string): boolean => {
+    const child = relative(parent, candidate);
+    return child !== '' && child !== '..' && !child.startsWith(`..${sep}`) && !isAbsolute(child);
+  };
   const canonicalRoot = (root: string): string => {
     const absolute = resolve(root);
     try {
@@ -144,10 +159,10 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
    *
    * A candidate turn's kernel and GeoSpec tools must reach the tree its file
    * tools write, and that tree lives only for the turn (V19). The grant is
-   * still main's: a checkout is admissible only strictly inside a project the
-   * user already granted, and only a checkout registered here is releasable —
-   * a release naming the project would silently disarm every later runtime
-   * request for it.
+   * still main's: a checkout is admissible only inside Tau's configured
+   * per-project checkout directory, and only a checkout registered here is
+   * releasable — a release naming the project would silently disarm every later
+   * runtime request for it.
    *
    * @param type - The frame's type, register or release.
    * @param frame - The frame the utility sent.
@@ -165,14 +180,20 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
       }
       return;
     }
+    const projectContext = runtimeContexts.get(canonicalProjectRoot);
+    const projectId = projectIds.get(canonicalProjectRoot);
+    const projectCheckouts =
+      projectId === undefined
+        ? canonicalProjectRoot
+        : resolve(join(dirname(canonicalProjectRoot), '.tau', 'checkouts', projectId));
     if (
-      !runtimeContexts.has(canonicalProjectRoot) ||
-      !canonicalWorkspaceRoot.startsWith(canonicalProjectRoot.replace(/[\\/]+$/u, '') + sep)
+      projectContext === undefined ||
+      projectId === undefined ||
+      !isStrictDescendant(projectCheckouts, canonicalWorkspaceRoot)
     ) {
       log('warn', 'services.runtime-context-refused', { workspaceRoot });
       return;
     }
-    const projectContext = runtimeContexts.get(canonicalProjectRoot)!;
     runtimeContexts.set(canonicalWorkspaceRoot, { ...projectContext, projectRoot: canonicalWorkspaceRoot });
     checkoutContexts.add(canonicalWorkspaceRoot);
   };
@@ -185,8 +206,20 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
       return;
     }
     const { requestId, type, workspaceRoot } = frame as Record<string, unknown>;
+    if ((type === 'agent-host-released' || type === 'agent-host-release-failed') && typeof requestId === 'string') {
+      const pending = releaseWaiters.get(requestId);
+      if (pending !== undefined) {
+        releaseWaiters.delete(requestId);
+        if (type === 'agent-host-released') {
+          pending.resolve();
+        } else {
+          pending.reject(new Error('The desktop agent host could not release this project.'));
+        }
+      }
+      return;
+    }
     if (type === 'quiesced') {
-      for (const resolveWaiter of [...quiesceWaiters]) {
+      for (const resolveWaiter of quiesceWaiters) {
         resolveWaiter();
       }
       quiesceWaiters.clear();
@@ -258,6 +291,10 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
         utility = undefined;
         releaseRuntimeLeases();
         forgetCheckoutContexts();
+        for (const pending of releaseWaiters.values()) {
+          pending.reject(new Error('The desktop services host exited while releasing a project.'));
+        }
+        releaseWaiters.clear();
       }
     });
     spawned.on('message', (message: unknown) => {
@@ -284,6 +321,9 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
     connect(concern, context) {
       if (concern === 'agentHost' && context?.['workspaceRoot']) {
         const projectRoot = canonicalRoot(context['workspaceRoot']);
+        if (context['projectId'] !== undefined) {
+          projectIds.set(projectRoot, context['projectId']);
+        }
         runtimeContexts.set(projectRoot, {
           projectRoot,
           computeProjectRoot: projectRoot,
@@ -297,6 +337,57 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
       ]);
       log('info', 'services.concern-connected', { concern });
       return channel.port1;
+    },
+    retainAgentHost(input) {
+      const root = canonicalRoot(input.workspaceRoot);
+      const attachments = projectAttachments.get(root) ?? new Set<string>();
+      attachments.add(input.attachmentId);
+      projectAttachments.set(root, attachments);
+      projectIds.set(root, input.projectId);
+    },
+    async releaseAgentHost(input, boundMilliseconds) {
+      const root = canonicalRoot(input.workspaceRoot);
+      const attachments = projectAttachments.get(root);
+      if (attachments === undefined || !attachments.delete(input.attachmentId)) {
+        return;
+      }
+      if (attachments.size > 0) {
+        return;
+      }
+      projectAttachments.delete(root);
+      const spawned = utility;
+      if (spawned === undefined) {
+        runtimeContexts.delete(root);
+        projectIds.delete(root);
+        return;
+      }
+      releaseRequest += 1;
+      const requestId = `agent-host-release-${String(releaseRequest)}`;
+      const pending = Promise.withResolvers<void>();
+      releaseWaiters.set(requestId, pending);
+      spawned.postMessage({
+        type: 'agent-host-release',
+        requestId,
+        workspaceRoot: root,
+        projectId: input.projectId,
+      });
+      let releaseTimeout: ReturnType<typeof setTimeout> | undefined;
+      const deadline = new Promise<never>((_resolve, reject) => {
+        releaseTimeout = setTimeout(() => {
+          reject(new Error('The desktop agent host release timed out.'));
+        }, boundMilliseconds);
+        releaseTimeout.unref();
+      });
+      try {
+        await Promise.race([pending.promise, deadline]);
+        runtimeContexts.delete(root);
+        projectIds.delete(root);
+      } finally {
+        if (releaseTimeout !== undefined) {
+          clearTimeout(releaseTimeout);
+        }
+        releaseWaiters.delete(requestId);
+      }
     },
     post(message) {
       const { type } = message as { type?: unknown };
@@ -315,7 +406,9 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
         return 'no-utility';
       }
       const settled = Promise.withResolvers<'quiesced'>();
-      const resolveWaiter = (): void => settled.resolve('quiesced');
+      const resolveWaiter = (): void => {
+        settled.resolve('quiesced');
+      };
       quiesceWaiters.add(resolveWaiter);
       /* A utility that dies mid-quiesce has nothing left to settle. */
       spawned.on('exit', resolveWaiter);
@@ -326,8 +419,10 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
         return 'no-utility';
       }
       let bound: ReturnType<typeof setTimeout> | undefined;
-      const cut = new Promise<'timeout'>((resolveCut) => {
-        bound = setTimeout(() => resolveCut('timeout'), boundMilliseconds);
+      const cut = new Promise<'timeout'>((resolve) => {
+        bound = setTimeout(() => {
+          resolve('timeout');
+        }, boundMilliseconds);
         bound.unref();
       });
       try {
@@ -343,6 +438,11 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
       const closures = [...runtimeLeaseClosures.values()];
       releaseRuntimeLeases();
       forgetCheckoutContexts();
+      projectAttachments.clear();
+      for (const pending of releaseWaiters.values()) {
+        pending.reject(new Error('The desktop services broker was disposed.'));
+      }
+      releaseWaiters.clear();
       utility?.kill();
       utility = undefined;
       await Promise.allSettled(closures);

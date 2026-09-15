@@ -25,7 +25,7 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { createServer } from 'node:http';
 import type { Server } from 'node:http';
-import { isAbsolute, resolve, sep } from 'node:path';
+import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
 
 import { serveNodeFsProvider, toNodeFsPort } from '@taucad/filesystem/backend/node';
 import type { EmitterPort } from '@taucad/filesystem/backend/node';
@@ -37,7 +37,7 @@ import {
   createProjectRevisions,
   hostRevisionActor,
 } from '@taucad/host';
-import type { AcpAdapter, HostMcpEndpoint, TurnCheckout } from '@taucad/host';
+import type { AcpAdapter, HostMcpEndpoint, ProjectRevisions, TurnCheckout } from '@taucad/host';
 import { createHostGeoSpecRunner, createHostToolRegistry } from '@taucad/host/agent-tools';
 import type { HostGeoSpecRuntimeClient } from '@taucad/host/agent-tools';
 import { createRuntimeClient } from '@taucad/runtime/client';
@@ -68,7 +68,10 @@ type McpBinding = NonNullable<Parameters<typeof createAcpExternalAgentPort>[0]['
 export type UtilityPort = EmitterPort & { start(): void; close(): void };
 
 /** One `process.parentPort` message, structurally typed. */
-export type UtilityMessage = { readonly data: unknown; readonly ports: readonly UtilityPort[] };
+export type UtilityMessage = {
+  readonly data: unknown;
+  readonly ports: readonly UtilityPort[];
+};
 
 /** Configuration main sends for launcher 2, minus the per-connection root. */
 export type AgentHostConfig = {
@@ -124,6 +127,8 @@ export type ServicesHostOptions = {
    * Main now asks first and waits, bounded, for this reply.
    */
   readonly quiesced?: () => void;
+  /** Reply to main once one project launcher has fully stopped. */
+  readonly agentHostReleased?: (requestId: string, error?: string) => void;
   /** Tell main this project can record nothing, so a person is told (W5). */
   readonly onRevisionsUnavailable?: (
     workspaceRoot: string,
@@ -165,8 +170,15 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
       // oxlint-disable-next-line no-console -- forwarded to userData/logs through main's stdio
       console.log(`[services] ${event}${detail === undefined ? '' : ` ${JSON.stringify(detail)}`}`);
     });
-  const { gitExecutable, gitLfsExecutable, onRevisionsUnavailable, quiesced, requestRuntimePort, runtimeContext } =
-    options;
+  const {
+    agentHostReleased,
+    gitExecutable,
+    gitLfsExecutable,
+    onRevisionsUnavailable,
+    quiesced,
+    requestRuntimePort,
+    runtimeContext,
+  } = options;
   const serve = options.serve ?? serveNodeFsProvider;
 
   const trustedRoots = new Set<string>();
@@ -174,6 +186,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
    * it: a run keeps executing with zero clients attached, which is the whole
    * point of the portable host. */
   const launchers = new Map<string, NodeAgentLauncher>();
+  const revisionRoots = new Map<string, ProjectRevisions>();
   type DesktopRuntime = ReturnType<typeof createDesktopRuntime>;
   type DesktopClient = ReturnType<typeof createRuntimeClient<DesktopRuntime>>;
   const runtimeClients = new Map<string, Promise<DesktopClient>>();
@@ -188,6 +201,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
    * root beneath it, each on its own route, because the tool registry it
    * dispatches into is per root and one desktop app opens many projects. */
   const mcpEndpoints = new Map<string, HostMcpEndpoint>();
+  const mcpRoutes = new Map<string, string>();
   let mcpServer: Server | undefined;
   let mcpOrigin = '';
 
@@ -208,7 +222,9 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
         try {
           await endpoint.handle(request, response);
         } catch (error) {
-          log('mcp.failed', { message: error instanceof Error ? error.message : String(error) });
+          log('mcp.failed', {
+            message: error instanceof Error ? error.message : String(error),
+          });
           if (!response.headersSent) {
             response.writeHead(500, { 'content-type': 'application/json' });
           }
@@ -228,16 +244,24 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
   /**
    * Mount one workspace's endpoint on that listener.
    *
+   * @param workspaceRoot - The project root whose launcher owns the endpoint.
    * @param registry - The launcher's own tool registry; the endpoint dispatches into it.
    * @returns The URL and minter each external session is offered.
    */
-  const mountMcp = (registry: Parameters<typeof createHostMcpEndpoint>[0]['registry']): McpBinding => {
+  const mountMcp = (
+    workspaceRoot: string,
+    registry: Parameters<typeof createHostMcpEndpoint>[0]['registry'],
+  ): McpBinding => {
     listenForMcp();
     /* Deliberately not the agent channel token (VI4): this secret signs a
      * capability that travels into a vendor adapter's process. */
-    const endpoint = createHostMcpEndpoint({ secret: randomBytes(32).toString('base64url'), registry });
+    const endpoint = createHostMcpEndpoint({
+      secret: randomBytes(32).toString('base64url'),
+      registry,
+    });
     const route = `/mcp/${randomUUID()}`;
     mcpEndpoints.set(route, endpoint);
+    mcpRoutes.set(workspaceRoot, route);
     return {
       /* The port is known only once the socket is bound, so the URL is read per
        * run rather than captured here — the daemon resolves its own the same
@@ -263,6 +287,31 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     return [...trustedRoots].some((trusted) => candidate === trusted || candidate.startsWith(trusted + sep));
   };
 
+  /** Stop one project's launcher and every utility resource rooted beneath it. */
+  const releaseAgentHost = async (workspaceRoot: string, projectId: string): Promise<void> => {
+    const launcher = launchers.get(workspaceRoot);
+    launchers.delete(workspaceRoot);
+    revisionRoots.delete(workspaceRoot);
+    if (launcher !== undefined) {
+      await launcher.close();
+    }
+    const checkoutsRoot = resolve(join(dirname(workspaceRoot), '.tau', 'checkouts', projectId));
+    for (const [root, client] of connectedRuntimeClients) {
+      if (root === workspaceRoot || root === checkoutsRoot || root.startsWith(`${checkoutsRoot}${sep}`)) {
+        client.terminate();
+        connectedRuntimeClients.delete(root);
+        runtimeClients.delete(root);
+      }
+    }
+    const route = mcpRoutes.get(workspaceRoot);
+    if (route !== undefined) {
+      mcpRoutes.delete(workspaceRoot);
+      const endpoint = mcpEndpoints.get(route);
+      mcpEndpoints.delete(route);
+      await endpoint?.close();
+    }
+  };
+
   const handleControlFrame = (frame: Record<string, unknown>): void => {
     switch (frame['type']) {
       case 'allowRoots': {
@@ -285,13 +334,15 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
          * `awaitSyncSettled`), and only then does main let the process die.
          * Main owns the bound; this end never cuts its own wait short. */
         // async-iife: bootstrap -- a control frame has no caller to return to.
-        void quiesce().then(
-          () => quiesced?.(),
-          (error: unknown) => {
+        void (async () => {
+          try {
+            await quiesce();
+          } catch (error) {
             log('quiesce-failed', error instanceof Error ? error.message : String(error));
+          } finally {
             quiesced?.();
-          },
-        );
+          }
+        })();
         return;
       }
       case 'agentHost': {
@@ -308,6 +359,22 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
            * renderer draws its rows from a different copy of this answer. */
           externalAgents: (agentHostConfig.externalAgents ?? []).map((adapter) => adapter.id),
         });
+        return;
+      }
+      case 'agent-host-release': {
+        const { requestId, workspaceRoot: root, projectId } = frame;
+        if (typeof requestId !== 'string' || typeof root !== 'string' || typeof projectId !== 'string') {
+          return;
+        }
+        // async-iife: bootstrap -- a control frame has no caller to await project release.
+        void (async () => {
+          try {
+            await releaseAgentHost(resolve(root), projectId);
+            agentHostReleased?.(requestId);
+          } catch (error) {
+            agentHostReleased?.(requestId, error instanceof Error ? error.message : String(error));
+          }
+        })();
         return;
       }
       default: {
@@ -337,6 +404,12 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
       port.close();
       return;
     }
+    const projectId = context?.['projectId'];
+    if (typeof projectId !== 'string' || projectId === '') {
+      log('agent-host.invalid-project-id', { projectId });
+      port.close();
+      return;
+    }
     const workspaceRoot = resolve(requested);
     /**
      * One runtime client per tree, project or turn checkout.
@@ -357,7 +430,10 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
         const runtimeLease = await requestRuntimePort(root);
         const runtimePort = runtimeLease.port;
         const client = createRuntimeClient<DesktopRuntime>({
-          transport: electronUtilityMainTransport({ port: runtimePort, release: runtimeLease.release }),
+          transport: electronUtilityMainTransport({
+            port: runtimePort,
+            release: runtimeLease.release,
+          }),
           config: {
             tauApiUrl: agentHostConfig!.tauApiUrl,
             tauWebSocketUrl: agentHostConfig!.tauWebSocketUrl,
@@ -425,6 +501,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
       }
     })();
     const existing = launchers.get(workspaceRoot);
+    let projectRevisions = revisionRoots.get(workspaceRoot);
     /* Only when this window is actually creating a launcher: a reconnect to a
      * project this host already serves must not start a second revision tree
      * over the same directory. */
@@ -438,6 +515,11 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
          * left behind are retired by the registry's own open sweep (F13). */
         const revisions = createProjectRevisions({
           workspaceRoot,
+          projectId,
+          /* Desktop projects are immediate children of their connected
+           * workspace. Keep linked worktrees in that workspace's private area,
+           * which is the physical location `/checkouts/<id>` already mounts. */
+          checkoutsDirectory: join(dirname(workspaceRoot), '.tau', 'checkouts', projectId),
           checkouts,
           ...(gitExecutable === undefined ? {} : { gitExecutable }),
           ...(gitLfsExecutable === undefined ? {} : { gitLfsExecutable }),
@@ -445,6 +527,16 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
            * session is W13's to pass here; until it does, the identity the
            * person already keeps on this machine is the truthful answer. */
           actor: hostRevisionActor(),
+          apiBaseUrl: agentHostConfig.tauApiUrl,
+          tauCredential: () => {
+            const token = authToken;
+            return token === undefined
+              ? undefined
+              : {
+                  apiBaseUrl: agentHostConfig!.tauApiUrl,
+                  authorization: `Bearer ${token}`,
+                };
+          },
           events: (event) => {
             /* Reported, never fatal: the run is already durable in its own log,
              * and a window that stopped serving over a settlement failure would
@@ -466,9 +558,14 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
               onRevisionsUnavailable?.(workspaceRoot, event);
               return;
             }
-            log('agent-host.revision-not-recorded', { workspaceRoot, event: event.type });
+            log('agent-host.revision-not-recorded', {
+              workspaceRoot,
+              event: event.type,
+            });
           },
         });
+        projectRevisions = revisions;
+        revisionRoots.set(workspaceRoot, revisions);
         const toolRegistry = createHostToolRegistry({
           workspaceRoot,
           checkouts,
@@ -509,7 +606,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
                     workspaceRoot,
                     checkouts,
                     systemSkillBundles,
-                    mcp: mountMcp(toolRegistry),
+                    mcp: mountMcp(workspaceRoot, toolRegistry),
                   }),
                 }
               : {}),
@@ -517,11 +614,19 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
         );
       })();
     launchers.set(workspaceRoot, launcher);
+    if (projectRevisions === undefined) {
+      log('agent-host.revisions-unavailable', { workspaceRoot });
+      port.close();
+      return;
+    }
     /* The handle owns only this connection — disposing it would end this
      * client's streams and nothing else. It needs no explicit teardown here:
      * `@taucad/rpc` reports the port's death and closes the channel itself, and
      * always-on lives in the launcher, which deliberately survives. */
-    serveAgentChannel(port, launcher, { sessionKey: agentSessionKey });
+    serveAgentChannel(port, launcher, {
+      sessionKey: agentSessionKey,
+      revisions: projectRevisions.channel,
+    });
     log('agent-host-served', { workspaceRoot, reused: existing !== undefined });
   };
 
@@ -538,6 +643,8 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
   const quiesce = async (): Promise<void> => {
     const closing = [...launchers.values()].map(async (launcher) => launcher.close());
     launchers.clear();
+    revisionRoots.clear();
+    mcpRoutes.clear();
     await Promise.allSettled(closing);
     log('quiesced', { projects: closing.length });
   };
@@ -556,10 +663,12 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
         void launcher.close();
       }
       launchers.clear();
+      revisionRoots.clear();
       for (const endpoint of mcpEndpoints.values()) {
         void endpoint.close();
       }
       mcpEndpoints.clear();
+      mcpRoutes.clear();
       mcpServer?.close();
       mcpServer = undefined;
       mcpOrigin = '';

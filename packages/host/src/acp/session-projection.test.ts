@@ -254,8 +254,8 @@ describe('the ACP turn projection', () => {
 
     expect(live).toEqual([
       { type: 'text-start', messageId: 'id-1', contentIndex: 0 },
-      { type: 'text-delta', messageId: 'id-1', contentIndex: 0, delta: 'hel' },
-      { type: 'text-delta', messageId: 'id-1', contentIndex: 0, delta: 'lo' },
+      { type: 'text-delta', messageId: 'id-1', contentIndex: 0, delta: 'hel', offset: 0 },
+      { type: 'text-delta', messageId: 'id-1', contentIndex: 0, delta: 'lo', offset: 3 },
       { type: 'text-end', messageId: 'id-1', contentIndex: 0, content: 'hello' },
     ]);
     expect(appended).toHaveLength(1);

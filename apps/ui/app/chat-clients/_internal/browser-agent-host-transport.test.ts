@@ -1260,6 +1260,96 @@ describe('BrowserPlacementChatTransport', () => {
     unregister();
   });
 
+  it.each(['completed', 'running'] as const)(
+    'replays a %s attach snapshot before concurrent frames',
+    async (snapshotState) => {
+      installBrowserGlobals();
+      const chatId = 'chat-attach-race';
+      const runId = 'run-attach-race';
+      let liveListener: Parameters<NonNullable<AgentHostClient['subscribeLive']>>[0] | undefined;
+      let durableListener: Parameters<AgentHostClient['subscribe']>[0] | undefined;
+      const base = { version: 1, leaderEpoch: 'leader', recordedAt: '2026-09-01T00:00:00.000Z', runId } as const;
+      const events: AgentLogEvent[] = [
+        { ...base, sequence: 0, type: 'run.lifecycle', state: 'admitted' },
+        ...['Earlier', 'Later'].map(
+          (text, index): AgentLogEvent => ({
+            ...base,
+            sequence: index + 1,
+            type: 'message.appended',
+            message: {
+              id: text,
+              role: 'assistant',
+              content: text,
+              metadata: { tauInternal: { kind: 'external-tool', origin: 'external', streamState: 'final' } },
+            },
+          }),
+        ),
+        { ...base, sequence: 3, type: 'run.lifecycle', state: 'completed' },
+      ];
+      const client = clientFor(chatId, runId, {
+        subscribe: (listener) => {
+          durableListener = listener;
+          return () => {
+            durableListener = undefined;
+          };
+        },
+        subscribeLive: (listener) => {
+          liveListener = listener;
+          return () => {
+            liveListener = undefined;
+          };
+        },
+        attach: async () => {
+          liveListener?.(chatId, {
+            type: 'text-delta',
+            chatId,
+            runId,
+            messageId: 'Later',
+            contentIndex: 0,
+            delta: 'Later',
+            offset: 0,
+          });
+          if (snapshotState === 'running') {
+            durableListener?.(chatId, events[3]!);
+          }
+          const attachedEvents = snapshotState === 'running' ? events.slice(0, 3) : events;
+          return {
+            cursor: 0,
+            nextCursor: attachedEvents.length,
+            endCursor: attachedEvents.length,
+            events: attachedEvents,
+            snapshot: { ...snapshot(chatId, runId), state: snapshotState },
+          };
+        },
+      });
+      const unregister = registerAgentHost(chatId, {
+        projectStorage: async () => ({ projectId: 'project-race', backend: 'opfs', providerBasePath: 'project-race' }),
+        createClient: async () => client,
+        markRunId: async () => undefined,
+      });
+      try {
+        const transport = new BrowserPlacementChatTransport();
+        transport.bindRun(chatId, runId);
+        const stream = await transport.reconnectToStream({ chatId });
+        const chunks: UIMessageChunk[] = [];
+        await stream!.pipeTo(
+          new WritableStream({
+            write(chunk) {
+              chunks.push(chunk);
+            },
+          }),
+        );
+        expect(chunks.filter((chunk) => chunk.type === 'text-delta').map((chunk) => chunk.delta)).toEqual([
+          'Earlier',
+          'Later',
+        ]);
+        expect(getBrowserAgentHostRun(chatId)?.state).toBe('completed');
+      } finally {
+        unregister();
+      }
+    },
+  );
+
   it('projects a real live partial before start settles and closes it without durable replay', async () => {
     installBrowserGlobals();
     const chatId = 'chat-live';

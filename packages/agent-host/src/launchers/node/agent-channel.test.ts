@@ -79,6 +79,27 @@ const client = (port: Parameters<typeof createChannelClient>[0]['port']): Channe
   });
 
 describe('serveAgentChannel', () => {
+  it('should preserve live text offsets and reject invalid checkpoint coordinates', () => {
+    const frame = {
+      chatId: 'chat-1',
+      event: {
+        type: 'text-delta',
+        chatId: 'chat-1',
+        runId: 'run-1',
+        messageId: 'message-1',
+        contentIndex: 0,
+        delta: 'tail',
+        offset: 5,
+      },
+    } as const;
+    expect(agentChannelLiveEventSchema.parse(frame)).toEqual(frame);
+    for (const offset of [-1, 0.5, '5']) {
+      expect(agentChannelLiveEventSchema.safeParse({ ...frame, event: { ...frame.event, offset } }).success).toBe(
+        false,
+      );
+    }
+  });
+
   it('validates the complete live tool-input lifecycle for every channel transport', () => {
     const base = {
       chatId: 'chat-1',

@@ -42,7 +42,7 @@ const blockKey = (runId: string, messageId: string, contentIndex: number): strin
 const blockId = (type: 'text' | 'thinking', messageId: string, contentIndex: number): string =>
   `${messageId}:${type}:${String(contentIndex)}`;
 
-/** Active model blocks retained until their durable assistant message arrives. */
+/** Run-scoped blocks, including closed identities to fence late live frames. */
 export type AgentHostLiveBlocks = Map<
   string,
   { readonly type: 'text' | 'thinking'; content: string; closed: boolean; startedAtMs?: number | undefined }
@@ -157,19 +157,20 @@ const assistantChunks = (
           if (suffix) {
             chunks.push({ type: 'text-delta', id, delta: suffix });
           }
-          streamed.content = value['text'];
+          if (value['text'].startsWith(streamed.content)) {
+            streamed.content = value['text'];
+          }
           if (!streamCheckpoint) {
             chunks.push({ type: 'text-end', id });
           }
         }
         if (!streamCheckpoint) {
-          streamedBlocks?.delete(key);
+          streamed.closed = true;
         }
       } else {
         chunks.push({ type: 'text-start', id }, { type: 'text-delta', id, delta: value['text'] });
-        if (streamCheckpoint && streamedBlocks) {
-          streamedBlocks.set(key, { type: 'text', content: value['text'], closed: false });
-        } else {
+        streamedBlocks?.set(key, { type: 'text', content: value['text'], closed: !streamCheckpoint });
+        if (!streamCheckpoint || !streamedBlocks) {
           chunks.push({ type: 'text-end', id });
         }
       }
@@ -188,7 +189,9 @@ const assistantChunks = (
           if (suffix) {
             chunks.push({ type: 'reasoning-delta', id, delta: suffix });
           }
-          streamed.content = value['thinking'];
+          if (value['thinking'].startsWith(streamed.content)) {
+            streamed.content = value['thinking'];
+          }
           if (!streamCheckpoint) {
             chunks.push({
               type: 'reasoning-end',
@@ -207,7 +210,7 @@ const assistantChunks = (
           }
         }
         if (!streamCheckpoint) {
-          streamedBlocks?.delete(key);
+          streamed.closed = true;
         }
       } else {
         chunks.push(
@@ -220,14 +223,15 @@ const assistantChunks = (
           },
           { type: 'reasoning-delta', id, delta: value['thinking'] },
         );
-        if (streamCheckpoint && streamedBlocks) {
+        if (streamedBlocks) {
           streamedBlocks.set(key, {
             type: 'thinking',
             content: value['thinking'],
-            closed: false,
+            closed: !streamCheckpoint,
             ...(timing === undefined ? {} : { startedAtMs: timing.startedAt }),
           });
-        } else {
+        }
+        if (!streamCheckpoint || !streamedBlocks) {
           chunks.push({
             type: 'reasoning-end',
             id,
@@ -555,6 +559,9 @@ export const projectAgentHostLiveEvent = (
   const type = event.type.startsWith('text-') ? 'text' : 'thinking';
   const id = blockId(type, event.messageId, event.contentIndex);
   const current = streamedBlocks.get(key);
+  if (current?.closed) {
+    return [];
+  }
   if (event.type === 'text-start' || event.type === 'thinking-start') {
     if (current) {
       return [];
@@ -578,9 +585,16 @@ export const projectAgentHostLiveEvent = (
   const start: UIMessageChunk[] = current ? [] : [{ type: type === 'text' ? 'text-start' : 'reasoning-start', id }];
   const block = current ?? { type, content: '', closed: false };
   if (event.type === 'text-delta' || event.type === 'thinking-delta') {
-    block.content += event.delta;
+    // Durable checkpoints and live deltas travel on independent subscriptions.
+    // A missing prefix is recovered by the next checkpoint/end, never guessed.
+    const offset = event.offset ?? block.content.length;
+    if (offset > block.content.length) {
+      return [];
+    }
+    const delta = event.delta.slice(block.content.length - offset);
+    block.content += delta;
     streamedBlocks.set(key, block);
-    return [...start, { type: type === 'text' ? 'text-delta' : 'reasoning-delta', id, delta: event.delta }];
+    return delta ? [...start, { type: type === 'text' ? 'text-delta' : 'reasoning-delta', id, delta }] : start;
   }
   const { content } = event;
   const suffix = content.startsWith(block.content) ? content.slice(block.content.length) : '';

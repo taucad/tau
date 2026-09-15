@@ -1288,6 +1288,7 @@ export const createTurnProjection = (options: {
           messageId: block.durableId,
           contentIndex: 0,
           delta,
+          offset: block.text.length - delta.length,
         });
         if (idleFlush) {
           clearTimeout(idleFlush);

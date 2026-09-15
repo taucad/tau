@@ -546,6 +546,7 @@ const createHostStream = <Message extends UIMessage>(input: {
     let projection = Promise.resolve();
     const seen = new Set<string>();
     const streamedBlocks = new Map();
+    let attaching: Array<AgentLogEvent | AgentLiveEvent> | undefined = [];
     const terminalEvent = Promise.withResolvers<void>();
     const turnSettlement = Promise.withResolvers<void>();
     const publishRun = (): void => {
@@ -633,6 +634,13 @@ const createHostStream = <Message extends UIMessage>(input: {
       projection = enqueueAfter(projection, event);
       void reportProjectionFailure(projection);
     };
+    const queueSubscribedEvent = (event: AgentLogEvent | AgentLiveEvent): void => {
+      if (attaching === undefined) {
+        queueEvent(event);
+      } else {
+        attaching.push(event);
+      }
+    };
     /**
      * Page the log to its end, writing nothing.
      *
@@ -676,6 +684,7 @@ const createHostStream = <Message extends UIMessage>(input: {
       return true;
     };
     const replay = async (hostClient: AgentHostClient): Promise<boolean> => {
+      attaching ??= [];
       const batch = await hostClient.attach({ chatId: input.chatId, cursor, limit: agentHostTailBatchLimit });
       // The log's own snapshot names the run this chat ends on — the only source
       // for a reattach whose in-memory binding a reload dropped. The host answers
@@ -694,7 +703,15 @@ const createHostStream = <Message extends UIMessage>(input: {
         queueEvent(event);
       }
       await projection;
-      return reconcileSnapshot(batch.snapshot);
+      const reconciled = reconcileSnapshot(batch.snapshot);
+      // Snapshot first; coordinate-aware blocks and durable IDs discard overlap.
+      const received = attaching;
+      attaching = undefined;
+      for (const event of received) {
+        queueEvent(event);
+      }
+      await projection;
+      return reconciled;
     };
     try {
       await priorSettlement;
@@ -715,12 +732,12 @@ const createHostStream = <Message extends UIMessage>(input: {
       }
       unsubscribe = client.subscribe((chatId, event) => {
         if (chatId === input.chatId) {
-          queueEvent(event);
+          queueSubscribedEvent(event);
         }
       });
       unsubscribeLive = client.subscribeLive?.((chatId, event) => {
         if (chatId === input.chatId) {
-          queueEvent(event);
+          queueSubscribedEvent(event);
         }
       });
       /* Browser turns settle on the project's revision root, while daemon

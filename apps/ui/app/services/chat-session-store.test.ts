@@ -988,6 +988,31 @@ describe('ChatSessionStore', () => {
     expect(deps.touchChatRecency).toHaveBeenCalledWith('chat_activity', 123);
   });
 
+  it('updates the active dynamic tool name when counts stay unchanged', () => {
+    const store = createStore();
+    const session = store.acquire('chat_tool_name');
+    const fake = harness.created.find((entry) => entry.id === 'chat_tool_name')!;
+    const actor = createActor(chatSessionMachine, {
+      input: { chatId: 'chat_tool_name', projectId: 'project_1' },
+    }).start();
+    session.stateActorRef = actor;
+    const activeToolMessage = (toolName: string): MyUIMessage => ({
+      id: 'assistant_1',
+      role: 'assistant',
+      parts: [{ type: 'dynamic-tool', toolName, toolCallId: 'tool_1', state: 'input-streaming', input: {} }],
+    });
+
+    fake.messages = [activeToolMessage('search')];
+    fake.emitMessagesChange();
+    expect(actor.getSnapshot().context.toolName).toBe('search');
+
+    fake.messages = [activeToolMessage('edit_file')];
+    fake.emitMessagesChange();
+    expect(actor.getSnapshot().context.toolName).toBe('edit_file');
+
+    actor.stop();
+  });
+
   describe('unread lifecycle', () => {
     it('marks unattended terminal success and error, but not abort or disconnect', () => {
       const store = new ChatSessionStore();

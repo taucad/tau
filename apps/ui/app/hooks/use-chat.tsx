@@ -40,7 +40,7 @@
 
 import type { Chat as AiSdkChat } from '@ai-sdk/react';
 import { useSelector } from '@xstate/react';
-import { useCallback, useMemo, useSyncExternalStore } from 'react';
+import { useCallback, useMemo, useRef, useSyncExternalStore } from 'react';
 import type { CadAgentExecution, MyUIMessage } from '@taucad/chat';
 import type { ChatError } from '@taucad/types';
 import type { KernelId } from '@taucad/types/constants';
@@ -62,6 +62,13 @@ const emptyMessageOrder: readonly string[] = Object.freeze([]);
 const emptyMessagesById: ReadonlyMap<string, MyUIMessage> = new Map();
 
 const messagesByIdCache = new WeakMap<readonly MyUIMessage[], Map<string, MyUIMessage>>();
+const messageOrderCache = new WeakMap<
+  ChatInstance,
+  {
+    readonly length: number;
+    readonly order: readonly string[];
+  }
+>();
 
 function getMessagesById(messages: readonly MyUIMessage[]): ReadonlyMap<string, MyUIMessage> {
   if (messages === emptyMessages) {
@@ -76,6 +83,23 @@ function getMessagesById(messages: readonly MyUIMessage[]): ReadonlyMap<string, 
     messagesByIdCache.set(messages, cached);
   }
   return cached;
+}
+
+function getMessageOrder(chat: ChatInstance | undefined, messages: readonly MyUIMessage[]): readonly string[] {
+  if (!chat || messages.length === 0) {
+    return emptyMessageOrder;
+  }
+  const cached = messageOrderCache.get(chat);
+  if (
+    cached &&
+    cached.length === messages.length &&
+    messages.every((message, index) => cached.order[index] === message.id)
+  ) {
+    return cached.order;
+  }
+  const order = messages.map((message) => message.id);
+  messageOrderCache.set(chat, { length: messages.length, order });
+  return order;
 }
 
 // ---------------------------------------------------------------------------
@@ -114,17 +138,11 @@ export type ChatContextValue = {
 type SessionSnapshotFields = {
   chat: ChatInstance | undefined;
   persistenceActorRef: ActorRefFrom<typeof chatPersistenceMachine> | undefined;
-  messages: readonly MyUIMessage[];
-  status: ChatInstance['status'];
-  error: Error | undefined;
 };
 
 const emptySessionSnapshot: SessionSnapshotFields = {
   chat: undefined,
   persistenceActorRef: undefined,
-  messages: emptyMessages,
-  status: 'ready',
-  error: undefined,
 };
 
 function selectSessionSnapshot(session: ChatSession | undefined): SessionSnapshotFields {
@@ -134,9 +152,6 @@ function selectSessionSnapshot(session: ChatSession | undefined): SessionSnapsho
   return {
     chat: session.chat,
     persistenceActorRef: session.persistenceActorRef,
-    messages: session.chat.messages,
-    status: session.chat.status,
-    error: session.chat.error,
   };
 }
 
@@ -192,69 +207,31 @@ export type CombinedChatState = {
   editDraftImages: string[];
 };
 
-type PersistenceSliceFields = {
-  persistedError: ChatError | undefined;
-  activeExecution: CadAgentExecution | undefined;
-  activeKernel: KernelId | undefined;
-};
-
-const emptyPersistenceSlice: PersistenceSliceFields = {
-  persistedError: undefined,
-  activeExecution: undefined,
-  activeKernel: undefined,
-};
-
-const persistenceSliceCache = new WeakMap<
-  ActorRefFrom<typeof chatPersistenceMachine>,
-  { context: unknown; slice: PersistenceSliceFields }
->();
-
-/**
- * Subscribe to a possibly-undefined persistence actor's chat-scoped fields
- * (`persistedError`, `activeExecution`, `activeKernel`) without violating the
- * rules of hooks when the actor is not yet present. Slices are cached per
- * actor + context reference so `useSyncExternalStore` returns the same
- * object reference across notifications that did not change the slice.
- */
-function usePersistenceSlice(
-  persistenceActorRef: ActorRefFrom<typeof chatPersistenceMachine> | undefined,
-): PersistenceSliceFields {
-  const subscribe = useCallback(
-    (callback: () => void) => {
-      if (!persistenceActorRef) {
-        return () => undefined;
-      }
-      const sub = persistenceActorRef.subscribe(callback);
-      return () => {
-        sub.unsubscribe();
-      };
-    },
-    [persistenceActorRef],
-  );
-  const getSnapshot = useCallback((): PersistenceSliceFields => {
-    if (!persistenceActorRef) {
-      return emptyPersistenceSlice;
-    }
-    const { context } = persistenceActorRef.getSnapshot();
-    const cached = persistenceSliceCache.get(persistenceActorRef);
-    if (
-      cached &&
-      cached.context === context &&
-      cached.slice.persistedError === context.persistedError &&
-      cached.slice.activeExecution === context.activeExecution &&
-      cached.slice.activeKernel === context.activeKernel
-    ) {
-      return cached.slice;
-    }
-    const slice: PersistenceSliceFields = {
-      persistedError: context.persistedError,
-      activeExecution: context.activeExecution,
-      activeKernel: context.activeKernel,
-    };
-    persistenceSliceCache.set(persistenceActorRef, { context, slice });
-    return slice;
-  }, [persistenceActorRef]);
-  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+function shallowEqual<T>(a: T, b: T): boolean {
+  if (Object.is(a, b)) {
+    return true;
+  }
+  if (a === null || b === null || typeof a !== 'object' || typeof b !== 'object') {
+    return false;
+  }
+  if (Array.isArray(a) || Array.isArray(b)) {
+    return (
+      Array.isArray(a) &&
+      Array.isArray(b) &&
+      a.length === b.length &&
+      a.every((value, index) => Object.is(value, b[index]))
+    );
+  }
+  if (Object.getPrototypeOf(a) !== Object.prototype || Object.getPrototypeOf(b) !== Object.prototype) {
+    return false;
+  }
+  const aRecord = a as Record<string, unknown>;
+  const bRecord = b as Record<string, unknown>;
+  const aKeys = Object.keys(aRecord);
+  if (aKeys.length !== Object.keys(bRecord).length) {
+    return false;
+  }
+  return aKeys.every((key) => Object.is(aRecord[key], bRecord[key]));
 }
 
 /**
@@ -263,37 +240,47 @@ function usePersistenceSlice(
  * Session-required — composer-only subtrees should call
  * {@link useDraftSelector} instead.
  *
- * Selectors run on every notification — the `messagesById` and
- * `messageOrder` derivations are memoised on the message array reference
- * so equivalent reads are O(1).
+ * The combined external-store subscription caches the selected value, so a
+ * token update only re-renders consumers whose selected data changed.
  */
 export function useChatSelector<T>(selector: (state: CombinedChatState) => T, chatId?: string): T {
-  const { chat, persistenceActorRef, draftActorRef } = useChatContext(chatId);
-  const draftContext = useSelector(draftActorRef, (state) => state.context);
-  const persistenceSlice = usePersistenceSlice(persistenceActorRef);
+  const { activeChatId, persistenceActorRef, draftActorRef } = useChatContext(chatId);
+  const store = useChatSessionStore();
+  const cacheRef = useRef<{ readonly value: T } | undefined>(undefined);
 
-  const messages = chat?.messages ?? emptyMessages;
-  const status = chat?.status ?? 'ready';
-  const error = chat?.error;
-  const isLoading = status === 'streaming';
-
-  const messagesById = getMessagesById(messages);
-  const messageOrder = useMemo<readonly string[]>(
-    () => (messages === emptyMessages ? emptyMessageOrder : messages.map((m) => m.id)),
-    [messages],
+  const subscribe = useCallback(
+    (listener: () => void) => {
+      const unsubscribeChat = store.subscribeChat(activeChatId, listener);
+      const draftSubscription = draftActorRef.subscribe(listener);
+      const persistenceSubscription = persistenceActorRef?.subscribe(listener);
+      return () => {
+        unsubscribeChat();
+        draftSubscription.unsubscribe();
+        persistenceSubscription?.unsubscribe();
+      };
+    },
+    [activeChatId, draftActorRef, persistenceActorRef, store],
   );
-
-  const combinedState = useMemo<CombinedChatState>(
-    () => ({
+  const getSnapshot = useCallback((): T => {
+    const chat = store.get(activeChatId)?.chat;
+    const messages = chat?.messages ?? emptyMessages;
+    const status = chat?.status ?? 'ready';
+    const draftContext = draftActorRef.getSnapshot().context;
+    const persistenceContext = persistenceActorRef?.getSnapshot().context;
+    const state: CombinedChatState = {
       messages,
-      messagesById,
-      messageOrder,
+      get messagesById() {
+        return getMessagesById(messages);
+      },
+      get messageOrder() {
+        return getMessageOrder(chat, messages);
+      },
       status,
-      error,
-      persistedError: persistenceSlice.persistedError,
-      isLoading,
-      activeExecution: persistenceSlice.activeExecution,
-      activeKernel: persistenceSlice.activeKernel,
+      error: chat?.error,
+      persistedError: persistenceContext?.persistedError,
+      isLoading: status === 'streaming',
+      activeExecution: persistenceContext?.activeExecution,
+      activeKernel: persistenceContext?.activeKernel,
       draftText: draftContext.draftText,
       draftImages: draftContext.draftImages,
       draftToolChoice: draftContext.draftToolChoice,
@@ -303,11 +290,17 @@ export function useChatSelector<T>(selector: (state: CombinedChatState) => T, ch
       activeEditMessageId: draftContext.activeEditMessageId,
       editDraftText: draftContext.editDraftText,
       editDraftImages: draftContext.editDraftImages,
-    }),
-    [messages, messagesById, messageOrder, status, error, persistenceSlice, isLoading, draftContext],
-  );
+    };
+    const next = selector(state);
+    const cached = cacheRef.current;
+    if (cached && shallowEqual(cached.value, next)) {
+      return cached.value;
+    }
+    cacheRef.current = { value: next };
+    return next;
+  }, [activeChatId, draftActorRef, persistenceActorRef, selector, store]);
 
-  return selector(combinedState);
+  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }
 
 /**

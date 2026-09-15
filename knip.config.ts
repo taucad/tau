@@ -7,7 +7,10 @@ const config: KnipConfig = {
   // fields into `dist/`, so a built tree reports every emitted file and export
   // as unused (~970 phantom issues locally). CI checks out fresh and never
   // builds before the knip job, so this only ever bit local runs.
-  ignore: ['**/dist/**', '**/build/**'],
+  // `src/generated/**` holds committed Nx target outputs (325 files under
+  // libs/api-extractor alone). Like `dist/`, they are emitted, not authored, so
+  // every one reports as an unused file. `.oxfmtrc.json` already skips them.
+  ignore: ['**/dist/**', '**/build/**', '**/generated/**'],
 
   rules: {
     optionalPeerDependencies: 'off',
@@ -54,9 +57,25 @@ const config: KnipConfig = {
     '.': {
       // The workspace-root scripts Nx targets and build configs run; `pkgcheck.ts`
       // is the only consumer of `@taucad/nx`, `madge`, and `@types/madge`.
-      entry: ['tools/*.ts'],
+      // `apps/*-e2e` (all but runtime-e2e) carry no package.json, so they are not
+      // pnpm workspaces and their files land in this root workspace. Without the
+      // runner's entry points every spec, setup and helper reports unused, along
+      // with everything they export (~128 files, ~72 exports).
+      entry: [
+        'tools/*.ts',
+        'apps/*-e2e/**/*.spec.{ts,tsx,mts}',
+        'apps/*-e2e/**/*.config.{ts,mts}',
+        'apps/*-e2e/global-setup.ts',
+      ],
       project: ['**/*.{ts,tsx,mts}'],
-      ignore: ['.agents/skills/create-repo/templates/**', 'tarballs/**', 'tools/eslint-fixtures/**'],
+      ignore: [
+        // `.claude/skills` is a discovery alias for `.agents/skills`; scanning
+        // through it re-reports the same tree at a path no ignore rule matches.
+        '.claude/skills/**',
+        '.agents/skills/create-repo/templates/**',
+        'tarballs/**',
+        'tools/eslint-fixtures/**',
+      ],
       ignoreDependencies: [
         'replicad-opencascadejs',
         'libcascade',

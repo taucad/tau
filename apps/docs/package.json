@@ -4,6 +4,7 @@
   "description": "Tau documentation site",
   "type": "module",
   "private": true,
+  "license": "Apache-2.0",
   "dependencies": {
     "@react-router/node": "catalog:",
     "@taucad/esbuild": "workspace:*",

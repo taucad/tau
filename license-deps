@@ -19,7 +19,7 @@ distributions** that include them:
 
 By using Tau, you agree to comply with the license terms of all included dependencies.
 
-*Generated on 2026-08-25*
+*Generated on 2026-09-12*
 
 ## Summary
 
@@ -30,7 +30,7 @@ By using Tau, you agree to comply with the license terms of all included depende
 | (MIT OR CC0-1.0) | 1 |
 | BSD-3-Clause | 1 |
 | ISC | 2 |
-| MIT | 17 |
+| MIT | 20 |
 
 ## (MIT OR GPL-3.0-or-later)
 
@@ -59,6 +59,8 @@ By using Tau, you agree to comply with the license terms of all included depende
 
 ## MIT
 
+- **@cfworker/json-schema** v4.1.1 — [Repository](https://github.com/cfworker/cfworker)
+- **@standard-schema/spec** v1.1.0 — [Repository](https://github.com/standard-schema/standard-schema)
 - **@types/json-schema** v7.0.15 — [Repository](https://github.com/DefinitelyTyped/DefinitelyTyped)
 - **cdn-resolve** v2.1.2 — [Repository](https://github.com/luxass/cdn-resolve)
 - **core-util-is** v1.0.3 — [Repository](https://github.com/isaacs/core-util-is)
@@ -76,6 +78,7 @@ By using Tau, you agree to comply with the license terms of all included depende
 - **strip-literal** v3.1.0 — [Repository](https://github.com/antfu/strip-literal)
 - **util-deprecate** v1.0.2 — [Repository](https://github.com/TooTallNate/util-deprecate)
 - **ws** v8.21.2 — [Repository](https://github.com/websockets/ws)
+- **zod** v4.4.3 — [Repository](https://github.com/colinhacks/zod)
 
 ---
 

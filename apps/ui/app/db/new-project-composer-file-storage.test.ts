@@ -99,11 +99,23 @@ describe('new-project composer file store', () => {
     );
   });
 
-  it('stores an empty draft as a normal composer record', async () => {
+  it('closes out a cleared draft while preserving the execution', async () => {
     const client = memoryClient();
-    await createNewProjectComposerFileStore(client).patchDraft({ ...draft(''), parts: [] });
-    expect(JSON.parse(client.bytes() ?? '')).toEqual({ version: 1, draft: { ...draft(''), parts: [] } });
+    const store = createNewProjectComposerFileStore(client);
+    await store.patchExecution(tau);
+    await store.patchDraft(draft('split clamp'));
+    await store.patchDraft({ ...draft(''), parts: [] });
+    expect(JSON.parse(client.bytes() ?? '')).toEqual({ version: 1, execution: tau });
+    await expect(store.read()).resolves.toEqual({ status: 'valid', record: { version: 1, execution: tau } });
     expect(client.writeFile.mock.calls.flat().join(' ')).not.toMatch(/\/projects\/|\.tau\/chats/);
+  });
+
+  it('reads a previously persisted cleared draft as no draft', async () => {
+    const bytes = JSON.stringify({ version: 1, draft: { ...draft(''), parts: [] }, execution: acp });
+    await expect(createNewProjectComposerFileStore(memoryClient(bytes)).read()).resolves.toEqual({
+      status: 'valid',
+      record: { version: 1, execution: acp },
+    });
   });
 
   it('propagates read I/O failures and does not overwrite them', async () => {
